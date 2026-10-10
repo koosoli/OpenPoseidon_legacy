@@ -98,7 +98,8 @@ struct Source
 
 struct Config
 {
-    std::string imageryId = "none", imageryUrl, imageryKey;
+    // Esri World Imagery needs no key, so whole-world mode streams real imagery out of the box.
+    std::string imageryId = "esri", imageryUrl, imageryKey;
     int imageryMaxZoom = 0;
     std::string elevationId = "terrarium", elevationUrl, elevationFormat, elevationKey;
     std::string contentId = "none", contentUrl = "https://overpass-api.de/api/interpreter";
@@ -122,6 +123,7 @@ inline std::filesystem::path ConfigPath(const std::filesystem::path& cache)
 inline Config Load(const std::filesystem::path& cache)
 {
     Config c;
+    bool versioned = false;
     if (std::ifstream file(ConfigPath(cache)); file)
     {
         std::string line;
@@ -134,7 +136,8 @@ inline Config Load(const std::filesystem::path& cache)
             if (eq == std::string::npos)
                 continue;
             const std::string name = Trim(line.substr(0, eq)), value = Trim(line.substr(eq + 1));
-            if (name == "imagery") c.imageryId = value;
+            if (name == "version") versioned = true;
+            else if (name == "imagery") c.imageryId = value;
             else if (name == "imagery_url") c.imageryUrl = value;
             else if (name == "imagery_key") c.imageryKey = value;
             else if (name == "imagery_max_zoom") c.imageryMaxZoom = std::atoi(value.c_str());
@@ -146,6 +149,9 @@ inline Config Load(const std::filesystem::path& cache)
             else if (name == "content_url" && !value.empty()) c.contentUrl = value;
         }
     }
+    // Files written before version 2 saved the old default ("none") without anyone choosing it.
+    if (!versioned && c.imageryId == "none")
+        c.imageryId = "esri";
     const auto env = [](const char* name, std::string& target)
     {
         if (const char* v = std::getenv(name); v && *v)
@@ -176,6 +182,7 @@ inline bool Save(const std::filesystem::path& cache, const Config& c)
     if (!file)
         return false;
     file << "# OpenPoseidon whole-world providers (written by the main menu; see EarthProviders.hpp)\n"
+         << "version = 2\n"
          << "imagery = " << c.imageryId << "\n"
          << "imagery_url = " << c.imageryUrl << "\n"
          << "imagery_key = " << c.imageryKey << "\n";
