@@ -1,5 +1,6 @@
 
 #include <Poseidon/Core/Config/EngineConfig.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Core/Version.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
@@ -1235,7 +1236,7 @@ GameValue ObjAddWeapon(const GameState* state, GameValuePar oper1, GameValuePar 
     {
         return NOTHING;
     }
-    GameStringType weapon = oper2;
+    GameStringType weapon = Poseidon::Arma1Compat::ResolveWeaponClass(oper2); // identity unless --arma1
     ai->AddWeapon(weapon);
     ai->AutoReloadAll();
     return NOTHING;
@@ -1271,7 +1272,7 @@ GameValue ObjAddMagazine(const GameState* state, GameValuePar oper1, GameValuePa
     {
         return NOTHING;
     }
-    GameStringType magazine = oper2;
+    GameStringType magazine = Poseidon::Arma1Compat::ResolveMagazineClass(oper2); // identity unless --arma1
     ai->AddMagazine(magazine);
     ai->AutoReloadAll();
     return NOTHING;

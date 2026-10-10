@@ -170,6 +170,10 @@ class AppConfig
         _mapArchivePaths = roots.c_str();
         _localMapWorldId = worldId;
     }
+    /// --arma1: an installed Arma 1 (ArmA Gold) folder whose archives are mounted read-only.
+    const std::string& GetArma1Root() const { return _arma1Root; }
+    /// --arma1-mission: mission folder inside the mounted Arma 1 campaign/mission archives.
+    const std::string& GetArma1Mission() const { return _arma1Mission; }
     uint32_t GetWaitForParent() const { return _waitForParent; }
     const std::string& GetReforgerWorld() const { return _reforgerWorld; }
 
@@ -499,6 +503,8 @@ class AppConfig
     RString _addonArchivePaths;
     RString _mapArchivePaths;
     std::string _localMapWorldId;
+    std::string _arma1Root;
+    std::string _arma1Mission;
     uint32_t _waitForParent = 0;
     std::string _reforgerWorld;
     RString _modsDir;     // resolved --mods-dir base ("" if unset)

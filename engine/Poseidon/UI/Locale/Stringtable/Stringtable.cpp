@@ -280,9 +280,41 @@ static void MergeSurplusLegacyCsvCells(std::vector<std::string>& row, int expect
 
 void StringTableDynamic::Load(const char* filename, std::set<std::string>& appliedInBatch)
 {
-    QIFStreamB f;
-    f.AutoOpen(filename);
+    QIFStreamB file;
+    file.AutoOpen(filename);
     bool fileIsUtf8 = HasUtf8CsvSuffix(filename);
+    // Arma 1 stringtables are UTF-16 with a BOM: decode them to UTF-8 in memory.
+    std::string utf16Decoded;
+    QIStream memory;
+    QIStream* stream = &file;
+    {
+        const int b0 = file.get();
+        const int b1 = file.get();
+        if (!file.fail() && ((b0 == 0xFF && b1 == 0xFE) || (b0 == 0xFE && b1 == 0xFF)))
+        {
+            std::string raw;
+            raw.push_back(static_cast<char>(b0));
+            raw.push_back(static_cast<char>(b1));
+            while (true)
+            {
+                const int c = file.get();
+                if (file.eof() || file.fail() || c < 0)
+                    break;
+                raw.push_back(static_cast<char>(c));
+            }
+            if (Poseidon::DecodeUtf16BomToUtf8(raw.data(), raw.size(), utf16Decoded))
+            {
+                memory.init(utf16Decoded.data(), static_cast<int>(utf16Decoded.size()));
+                stream = &memory;
+                fileIsUtf8 = true;
+            }
+        }
+        else
+        {
+            file.seekg(0, QIOS::beg);
+        }
+    }
+    QIStream& f = *stream;
     int column = -1;
     int englishColumn = -1;
     int headerColumns = 0;

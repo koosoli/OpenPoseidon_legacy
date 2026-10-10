@@ -604,3 +604,337 @@ GameValue ScriptGoto(const GameState* state, GameValuePar oper1)
     }
     return NOTHING;
 }
+
+// ---------------------------------------------------------------------------
+// Scheduled SQF for Arma 1 content: spawn / execVM / terminate / scriptDone.
+// ---------------------------------------------------------------------------
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <map>
+#include <string>
+#include <vector>
+
+namespace Poseidon
+{
+namespace
+{
+std::map<int, LLink<Script>>& ScriptHandles()
+{
+    static std::map<int, LLink<Script>> handles;
+    return handles;
+}
+
+int NextScriptHandle()
+{
+    static int next = 0;
+    // Drop finished/destroyed scripts so the table stays small.
+    auto& handles = ScriptHandles();
+    for (auto it = handles.begin(); it != handles.end();)
+    {
+        if (!it->second || it->second->IsTerminated())
+            it = handles.erase(it);
+        else
+            ++it;
+    }
+    return ++next;
+}
+
+// Removes // and /* */ comments outside string literals.
+std::string StripSqfComments(const std::string& code)
+{
+    std::string out;
+    out.reserve(code.size());
+    char quote = 0;
+    for (size_t i = 0; i < code.size(); i++)
+    {
+        const char c = code[i];
+        if (quote)
+        {
+            out.push_back(c);
+            if (c == quote)
+                quote = 0;
+            continue;
+        }
+        if (c == '"' || c == '\'')
+        {
+            quote = c;
+            out.push_back(c);
+            continue;
+        }
+        if (c == '/' && i + 1 < code.size() && code[i + 1] == '/')
+        {
+            while (i < code.size() && code[i] != '\n')
+                i++;
+            out.push_back('\n');
+            continue;
+        }
+        if (c == '/' && i + 1 < code.size() && code[i + 1] == '*')
+        {
+            i += 2;
+            while (i + 1 < code.size() && !(code[i] == '*' && code[i + 1] == '/'))
+                i++;
+            i++;
+            out.push_back(' ');
+            continue;
+        }
+        out.push_back(c);
+    }
+    return out;
+}
+
+// Splits SQF into top-level statements (';' outside strings and brackets).
+std::vector<std::string> SplitSqfStatements(const std::string& code)
+{
+    std::vector<std::string> statements;
+    std::string current;
+    int depth = 0;
+    char quote = 0;
+    for (const char c : code)
+    {
+        if (quote)
+        {
+            current.push_back(c);
+            if (c == quote)
+                quote = 0;
+            continue;
+        }
+        if (c == '"' || c == '\'')
+            quote = c;
+        else if (c == '{' || c == '[' || c == '(')
+            depth++;
+        else if ((c == '}' || c == ']' || c == ')') && depth > 0)
+            depth--;
+        else if ((c == ';' || c == ',') && depth == 0)
+        {
+            statements.push_back(current);
+            current.clear();
+            continue;
+        }
+        current.push_back(c);
+    }
+    statements.push_back(current);
+    std::vector<std::string> trimmed;
+    for (std::string& s : statements)
+    {
+        size_t b = 0, e = s.size();
+        while (b < e && isspace(static_cast<unsigned char>(s[b])))
+            b++;
+        while (e > b && isspace(static_cast<unsigned char>(s[e - 1])))
+            e--;
+        if (e > b)
+            trimmed.push_back(s.substr(b, e - b));
+    }
+    return trimmed;
+}
+
+bool StartsWithWord(const std::string& s, const char* word, std::string& rest)
+{
+    const size_t n = strlen(word);
+    if (s.size() <= n || _strnicmp(s.c_str(), word, n) != 0)
+        return false;
+    const char next = s[n];
+    if (isalnum(static_cast<unsigned char>(next)) || next == '_')
+        return false;
+    size_t b = n;
+    while (b < s.size() && isspace(static_cast<unsigned char>(s[b])))
+        b++;
+    rest = s.substr(b);
+    return true;
+}
+
+// "{ body }" -> "body" when the braces enclose the whole text.
+bool UnwrapBraces(const std::string& s, std::string& body)
+{
+    if (s.size() < 2 || s.front() != '{' || s.back() != '}')
+        return false;
+    int depth = 0;
+    char quote = 0;
+    for (size_t i = 0; i < s.size(); i++)
+    {
+        const char c = s[i];
+        if (quote)
+        {
+            if (c == quote)
+                quote = 0;
+            continue;
+        }
+        if (c == '"' || c == '\'')
+            quote = c;
+        else if (c == '{')
+            depth++;
+        else if (c == '}' && --depth == 0 && i + 1 != s.size())
+            return false;
+    }
+    body = s.substr(1, s.size() - 2);
+    return true;
+}
+} // namespace
+
+Script* Script::FindByHandle(int handle)
+{
+    const auto found = ScriptHandles().find(handle);
+    return found == ScriptHandles().end() ? nullptr : found->second.GetLink();
+}
+
+Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument)
+{
+    Script* script = new Script();
+    script->_argument = argument;
+    script->_maxLinesAtOnce = 100;
+    script->_name = name;
+    script->_handle = NextScriptHandle();
+    ScriptHandles()[script->_handle] = script;
+
+    static RString empty("");
+    const auto addLine = [script](RString waitUntil, RString suspendUntil, RString statement)
+    {
+        const int i = script->_lines.Add();
+        script->_lines[i].waitUntil = waitUntil;
+        script->_lines[i].suspendUntil = suspendUntil;
+        script->_lines[i].condition = empty;
+        script->_lines[i].statement = statement;
+    };
+
+    for (const std::string& statement : SplitSqfStatements(StripSqfComments(code.Data())))
+    {
+        std::string rest;
+        std::string body;
+        if (StartsWithWord(statement, "waitUntil", rest) && UnwrapBraces(rest, body))
+        {
+            // A multi-statement condition evaluates as code; its value is the last statement's.
+            const std::vector<std::string> parts = SplitSqfStatements(body);
+            const std::string condition = parts.size() <= 1 ? body : "call {" + body + "}";
+            addLine(RString(condition.c_str()), empty, empty);
+        }
+        else if (StartsWithWord(statement, "sleep", rest))
+        {
+            const std::string wait = "__waituntil = _time+(" + rest + ")";
+            addLine(empty, empty, RString(wait.c_str()));
+            addLine(empty, RString("__waituntil"), empty);
+        }
+        else
+        {
+            addLine(empty, empty, RString(statement.c_str()));
+        }
+    }
+    return script;
+}
+
+} // namespace Poseidon
+
+GameValue ScriptSpawn(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    using namespace Poseidon;
+    Script* script = Script::CreateFromCode("spawn", oper2, oper1);
+    GWorld->AddScript(script);
+    return GameValue(static_cast<float>(script->GetHandle()));
+}
+
+GameValue ScriptExecVM(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    using namespace Poseidon;
+    RString name = oper2;
+    QIFStreamB in;
+    std::string code;
+    if (OpenScript(in, name))
+    {
+        while (true)
+        {
+            const int c = in.get();
+            if (in.eof() || in.fail() || c < 0)
+                break;
+            code.push_back(static_cast<char>(c));
+        }
+    }
+    else
+    {
+        LOG_WARN(Script, "execVM: script '{}' not found", (const char*)name);
+    }
+    // Preprocessor directives are not expanded here; report them instead of guessing.
+    if (code.find("#include") != std::string::npos || code.find("#define") != std::string::npos)
+        LOG_WARN(Script, "execVM '{}': preprocessor directives are not supported and were ignored",
+                 (const char*)name);
+    std::string filtered;
+    size_t pos = 0;
+    while (pos < code.size())
+    {
+        size_t end = code.find('\n', pos);
+        if (end == std::string::npos)
+            end = code.size();
+        std::string line = code.substr(pos, end - pos);
+        size_t b = 0;
+        while (b < line.size() && isspace(static_cast<unsigned char>(line[b])))
+            b++;
+        if (b >= line.size() || line[b] != '#')
+            filtered += line + "\n";
+        pos = end + 1;
+    }
+    Script* script = Script::CreateFromCode(name, RString(filtered.c_str()), oper1);
+    GWorld->AddScript(script);
+    return GameValue(static_cast<float>(script->GetHandle()));
+}
+
+GameValue ScriptTerminate(const GameState* state, GameValuePar oper1)
+{
+    using namespace Poseidon;
+    if (Script* script = Script::FindByHandle(static_cast<int>(static_cast<float>(oper1))))
+        script->Exit();
+    return GameValue();
+}
+
+GameValue ScriptIsDone(const GameState* state, GameValuePar oper1)
+{
+    using namespace Poseidon;
+    Script* script = Script::FindByHandle(static_cast<int>(static_cast<float>(oper1)));
+    return GameValue(!script || script->IsTerminated());
+}
+
+GameValue ScriptWaitUntilUnscheduled(const GameState* state, GameValuePar oper1)
+{
+    using namespace Poseidon;
+    static bool reported = false;
+    if (!reported)
+    {
+        reported = true;
+        LOG_WARN(Script, "waitUntil outside the top level of spawned code cannot suspend; evaluated once: {}",
+                 (const char*)RString(oper1));
+    }
+    return GameValue(GWorld->GetGameState()->EvaluateBool(RString(oper1)));
+}
+
+GameValue ScriptSleepUnscheduled(const GameState* state, GameValuePar oper1)
+{
+    static bool reported = false;
+    if (!reported)
+    {
+        reported = true;
+        LOG_WARN(Script, "sleep outside the top level of spawned code cannot suspend; ignored");
+    }
+    return GameValue();
+}
+
+GameValue PreloadCameraReady(const GameState* state, GameValuePar oper1)
+{
+    // Streaming loads the scene around the camera on demand; nothing to wait for.
+    return GameValue(true);
+}
+
+GameValue PreloadObjectReady(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return GameValue(true);
+}
+
+GameValue CampaignKeyActive(const GameState* state, GameValuePar oper1)
+{
+    return GameValue(Poseidon::Arma1Compat::IsKeyActive((const char*)RString(oper1)));
+}
+
+GameValue CampaignKeyActivate(const GameState* state, GameValuePar oper1)
+{
+    Poseidon::Arma1Compat::ActivateKey((const char*)RString(oper1));
+    return GameValue();
+}
+
+GameValue ScriptExecVMUnary(const GameState* state, GameValuePar oper1)
+{
+    return ScriptExecVM(state, GameValue(), oper1);
+}

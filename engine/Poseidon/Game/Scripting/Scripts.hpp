@@ -47,12 +47,21 @@ protected:
 	float _suspendedUntil;
 	int _maxLinesAtOnce;
 	RString _name;
+	int _handle = 0;
 
 public:
 	Script();
 	Script(RString name, GameValuePar argument, int maxLines=-1);
 	Script(const AutoArray<RString> &lines, GameValuePar argument, int maxLines=-1);
 	~Script() override;
+
+	// Scheduled SQF (spawn / execVM): `code` is split into its top-level statements;
+	// a top-level `waitUntil {..}` or `sleep n` suspends the script exactly like SQS
+	// '@' and '~'. Suspension nested inside other statements is not available and is
+	// reported once. Returns a script with a fresh handle (see GetHandle).
+	static Script *CreateFromCode(RString name, RString code, GameValuePar argument);
+	int GetHandle() const {return _handle;}
+	static Script *FindByHandle(int handle);
 
 	RString GetDebugName() const {return _name;}
 	void SetName(RString name) {_name=name;}
