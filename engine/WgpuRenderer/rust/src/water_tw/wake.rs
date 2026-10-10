@@ -69,6 +69,11 @@ pub struct WakeBoat {
     pub half_beam: f32,
     pub half_len: f32,
     pub draft: f32,
+    /// m the hull sits deeper (+) or shallower than its design draft in the water around it right
+    /// now: the hull heaving against the waves pumps the surface and rings it (owner: a bobbing boat
+    /// and a swimmer treading water made no ripples). Mean of the six contact heights less the
+    /// design waterline (lanes 3 and 6-7).
+    pub heave: f32,
 }
 
 impl WakeBoat {
@@ -88,6 +93,16 @@ impl WakeBoat {
                 continue;
             }
             let half_len = c[1].clamp(1.0, 45.0);
+            let d = p.tidewater_wake[i * 8 + 3];
+            let h0 = p.tidewater_wake[i * 8 + 6];
+            let h1 = p.tidewater_wake[i * 8 + 7];
+            let contacts = [h0[0], h0[1], h0[2], h0[3], h1[0], h1[1]];
+            let heave = if d[0].is_finite() && contacts.iter().all(|v| v.is_finite()) && d[0] != 0.0 {
+                let mean = contacts.iter().sum::<f32>() / 6.0;
+                (mean - d[0]).clamp(-0.6 * c[2].abs().max(0.15), 0.6 * c[2].abs().max(0.15))
+            } else {
+                0.0
+            };
             *o = Some(WakeBoat {
                 id: b[3] as u32,
                 pos: [a[0], a[1]],
@@ -100,6 +115,7 @@ impl WakeBoat {
                 half_beam: c[0].clamp(0.4, 12.0).min(0.42 * half_len),
                 half_len,
                 draft: c[2].clamp(0.15, 5.0),
+                heave,
             });
         }
         out
@@ -745,7 +761,8 @@ impl Slot {
         let plane_trim = smooth(froude, 0.34, 1.13);
         let plane = smooth(froude, 0.23, 1.02);
         let size = (draft / 0.35).clamp(0.5, 3.0);
-        let trim = [-0.08 * plane_trim * size, 0.0, -0.035 * plane_trim * (4.0 / half_len).min(1.0)];
+        let heave = b.map_or(0.0, |b| b.heave);
+        let trim = [-0.08 * plane_trim * size + heave, 0.0, -0.035 * plane_trim * (4.0 / half_len).min(1.0)];
         let throttle = b.map_or(0.0, |b| if b.driven { b.throttle.abs() } else { 0.0 });
         let present = if b.is_some() { 1.0 } else { 0.0 };
         let (x1, z0, z1) = hull_box(self.dims);

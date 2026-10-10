@@ -47,6 +47,11 @@ float WaterAt(float x, float z)
 }
 } // namespace
 
+float ShipDesignDraft(float length)
+{
+    return std::clamp(0.06f * length, 0.3f, 2.5f);
+}
+
 bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
 {
     if (!GLandscape || !GetShape() || deltaT <= 0)
@@ -68,7 +73,11 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
     static_assert(Along * Across == TwSamples, "sample count");
     const float halfX = std::min(comModel.X() - lo.X(), hi.X() - comModel.X()) * 0.79f;
     const float halfZ = std::min(comModel.Z() - lo.Z(), hi.Z() - comModel.Z()) * 0.9f;
-    const float sampleArea = (2.0f * halfX) * (2.0f * halfZ) * 0.75f / float(TwSamples);
+    // Patch area from the draft a real hull of this length floats at (~6 % of its length: the PBR's
+    // 0.57 m), not from the bounding box: OFP models carry no displacement, and a box-derived waterplane
+    // floated the PBR on 0.3 m, perched on the water (owner: "flies around").
+    const float designDraft = ShipDesignDraft(length);
+    const float sampleArea = m / (Rho * designDraft) / float(TwSamples);
     Vector3 sample[TwSamples];
     for (int a = 0; a < Along; ++a)
         for (int c = 0; c < Across; ++c)

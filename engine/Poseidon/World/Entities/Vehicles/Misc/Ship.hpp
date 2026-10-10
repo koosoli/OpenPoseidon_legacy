@@ -42,6 +42,10 @@ class ShipType: public TransportType
 	void InitShape() override;
 };
 
+// The draft a hull of this length floats at in the Tidewater boat model (ShipTidewater.cpp); the wake
+// simulation uses the same.
+float ShipDesignDraft(float length);
+
 class Ship: public Transport
 {
 	typedef Transport base;
