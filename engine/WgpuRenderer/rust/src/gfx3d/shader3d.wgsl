@@ -969,7 +969,15 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             n = detail.normal;
             reflectance = detail.reflectance;
         }
-        let daylight = max(dot(n, -frame.sun_dir_world.xyz), 0.0);
+        // Sun height at THIS point of the globe (radial up from the planet centre, which sits a
+        // radius below the origin anchor), not at the camera: the terminator is a twilight band,
+        // not a knife edge, and the night side must not keep the camera's daytime sky light.
+        let earth_centre = vec3<f32>(6400.0, -6378137.0, 6400.0);
+        let radial_up = normalize(in.world_pos + frame.cam_pos.xyz - earth_centre);
+        let sun_height = dot(radial_up, -frame.sun_dir_world.xyz);
+        let twilight = smoothstep(-0.12, 0.05, sun_height);     // sky light: gone ~7 degrees below
+        let sun_reach = smoothstep(-0.015, 0.06, sun_height);   // direct sun thins out through the air
+        let daylight = max(dot(n, -frame.sun_dir_world.xyz), 0.0) * sun_reach;
         var ambient_occlusion = 1.0;
         var sun_occlusion = 1.0;
         if (ground_detail && distance < 400.0) {
@@ -979,13 +987,13 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             ambient_occlusion = mix(1.0,gtao_ao(in.clip.xy),receiver);
             sun_occlusion = 1.0 - receiver * shadow_strength(in.world_pos, n, 1.0, dwx, dwy);
         }
-        var light = material.sun_ambient.rgb * ambient_occlusion + material.sun_diffuse.rgb * daylight * sun_occlusion;
+        var light = material.sun_ambient.rgb * ambient_occlusion * twilight + material.sun_diffuse.rgb * daylight * sun_occlusion;
         if (frame.sun_diffuse.w > 0.5 && (packed >> 3u) != 0u) {
             // The producer's material light is legacy-scaled. Match the rest
             // of the physical scene using this frame's sun and directional sky,
             // without finite-map receivers or an artificial night-time floor.
             // Slot zero keeps the producer's legacy plain-fallback tint.
-            light = sky_irradiance(n) * frame.sun_ambient.w * ambient_occlusion + frame.sun_diffuse.rgb * daylight * sun_occlusion;
+            light = sky_irradiance(n) * frame.sun_ambient.w * ambient_occlusion * twilight + frame.sun_diffuse.rgb * daylight * sun_occlusion;
         }
         return vec4<f32>(srgb_to_linear(albedo) * reflectance * light, 1.0);
     }
