@@ -73,6 +73,7 @@ add_library(WgpuRenderer STATIC
     EarthWorldgen.cpp
     EarthSurfaceStream.cpp
     EarthImageryTiles.cpp
+    FishSchools.cpp
     TerrainWgpuEnfusionClutter.cpp
     TerrainWgpuEnfusionSurface.cpp
     WaterWgpu.cpp

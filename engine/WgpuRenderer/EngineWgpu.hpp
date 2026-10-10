@@ -564,6 +564,9 @@ class EngineWgpu : public EngineDummy
     void SubmitTerrain(std::span<const WgrTerrainNode> nodes);
     // Global imagery wraps longitude only; local atlas callers clamp both axes (3).
     void SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture = 0, uint32_t sampler = 2, bool groundDetail = false, bool nearAtlas = false);
+    // A renderer-generated mesh drawn as an ordinary lit, opaque, double-sided world object (fish, wildlife):
+    // `world` is the absolute column-major model matrix (rotation x scale, translation in world metres).
+    void SubmitDynamicMesh(WgrMesh mesh, uint32_t indexCount, const float world[16], WgrTexture texture, uint32_t sampler = 0);
 
     // GPU water renderer (active unless WGR_GPU_WATER=0; null keeps legacy water).
     IWaterRenderer* GetWaterRenderer() override;

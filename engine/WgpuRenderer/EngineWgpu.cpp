@@ -7523,6 +7523,34 @@ void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTextur
     _cmds.push_back(WgrCmd{WGR_CMD_DRAW_3D,U32(_draws3d.size()-1)});
 }
 
+void EngineWgpu::SubmitDynamicMesh(WgrMesh mesh, uint32_t indexCount, const float world[16], WgrTexture texture, uint32_t sampler)
+{
+    if (!_renderer || !mesh || !indexCount) return;
+    EnsureCamera();
+    const auto& camera = _cameras[_currentCamera];
+    WgrDraw3D d{};
+    d.mesh = mesh;
+    d.index_count = indexCount;
+    d.camera = _currentCamera;
+    d.palette_slot = WGR_NO_PALETTE;
+    d.depth = WGR_DEPTH_TEST_WRITE;
+    d.blend = WGR_BLEND_OPAQUE;
+    d.flags = WGR_DRAW3D_DOUBLE_SIDED;
+    d.texture_id = texture;
+    d.sampler = sampler;
+    for (int i = 0; i < 16; ++i) d.world.m[i] = world[i];
+    d.world.m[12] -= camera.pos[0];
+    d.world.m[13] -= camera.pos[1];
+    d.world.m[14] -= camera.pos[2];
+    const auto& light = render::frame::GPresentationSnapshot();
+    const Color ambient = light.hasMainLight ? light.sunAmbient : HWhite;
+    const Color diffuse = light.hasMainLight ? light.sunDiffuse : HWhite;
+    d.mat_sun_ambient = {ambient.R(), ambient.G(), ambient.B(), 0};
+    d.mat_sun_diffuse = {diffuse.R(), diffuse.G(), diffuse.B(), 0};
+    _draws3d.push_back(d);
+    _cmds.push_back(WgrCmd{WGR_CMD_DRAW_3D, U32(_draws3d.size() - 1)});
+}
+
 IWaterRenderer* EngineWgpu::GetWaterRenderer()
 {
     return _water.get();

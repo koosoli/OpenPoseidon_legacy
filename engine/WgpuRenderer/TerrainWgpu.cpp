@@ -1,4 +1,5 @@
 #include "TerrainWgpu.hpp"
+#include "FishSchools.hpp"
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/SnowShelter.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
@@ -4103,6 +4104,13 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     // SubmitGrass is frame-deduplicated by EngineWgpu; SetGrassParams below is an
     // additional legacy signal, not the only activation path.
     _engine.SubmitGrass();
+    // Tidewater wildlife, stage 1: fish in the seas around the camera (WGR_FISH=0 turns them off).
+    if (camera)
+    {
+        if (!_fish)
+            _fish = std::make_unique<FishSchools>(_engine, _renderer);
+        _fish->Update(camera->Position(), Glob.time.toFloat());
+    }
 }
 
 } // namespace Poseidon

@@ -150,6 +150,7 @@ class TerrainWgpu : public ITerrainRenderer
     uint32_t _earthNearIndices=0;
     WgrTexture _earthSurfaceTexture=0;
     WgrTexture _earthFarTexture=0;
+    std::unique_ptr<class FishSchools> _fish;
     WgrMesh _earthBuildingMesh=0;
     WgrTexture _earthBuildingTexture=0; // wall/roof colour palette (EarthBuildingStream::Palette)
     uint32_t _earthBuildingIndices=0;
