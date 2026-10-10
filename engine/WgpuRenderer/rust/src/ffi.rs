@@ -2159,6 +2159,37 @@ pub unsafe extern "C" fn wgr_set_fire_sources(
     }));
 }
 
+/// MUD-001: this frame's mud sprays (wheels and boots in wet soft ground); see mud/mod.rs.
+///
+/// # Safety
+/// `renderer` must be live; `emitters` must hold `count` elements (or be null with 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_mud_emitters(
+    renderer: *mut WgrRenderer,
+    emitters: *const crate::mud::MudEmitter,
+    count: u32,
+) {
+    if renderer.is_null() || emitters.is_null() || count == 0 {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let slice = unsafe { std::slice::from_raw_parts(emitters, count as usize) };
+        unsafe { &mut *renderer }.set_mud_emitters(slice);
+    }));
+}
+
+/// MUD-001: blobs emitted since start (0 on a null renderer).
+///
+/// # Safety
+/// `renderer` must be live or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_get_mud_emitted(renderer: *mut WgrRenderer) -> u64 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| unsafe { &*renderer }.mud.emitted())).unwrap_or(0)
+}
+
 /// FIRE-001: boxes in use (low 32) and solver steps taken (high 32). Zero on a null renderer.
 ///
 /// # Safety

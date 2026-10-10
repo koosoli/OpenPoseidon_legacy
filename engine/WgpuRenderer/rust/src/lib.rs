@@ -22,6 +22,7 @@ mod demand_view_snapshot;
 mod planar_mips;
 mod shaders;
 mod fire;
+mod mud;
 mod smoke_volume;
 mod soft_particles;
 mod sky;
@@ -953,6 +954,8 @@ pub struct Renderer {
     pub(crate) smoke_volume: smoke_volume::SmokeVolume,
     // FIRE-001: volumetric fire (fire/mod.rs)
     pub(crate) fire: fire::FireSystem,
+    // MUD-001: thrown mud as a viscous particle fluid (mud/mod.rs)
+    pub(crate) mud: mud::MudSystem,
     smoke_sun_dir: [f32; 3],
     smoke_sun_radiance: [f32; 3],
     smoke_ambient: [f32; 3],
@@ -1912,6 +1915,7 @@ impl Renderer {
         // recorded until the mode is switched off Legacy.
         let smoke_volume = smoke_volume::SmokeVolume::new(&device, color_format, sample_count);
         let fire = fire::FireSystem::new(&device, &queue, color_format, sample_count);
+        let mud = mud::MudSystem::new(&device, color_format, sample_count);
         let planar_mips = PlanarMips::new(&device, HDR_FORMAT);
         let exposure = hdr_enabled.then(|| Exposure::new(&device, &queue));
         // The sky targets the scene color format (HDR target or swapchain), matching
@@ -2124,6 +2128,7 @@ impl Renderer {
             cam_underground: 0.0,
             smoke_volume,
             fire,
+            mud,
             smoke_sun_dir: [0.0, 1.0, 0.0],
             smoke_sun_radiance: [1.0, 1.0, 1.0],
             smoke_ambient: [0.2, 0.2, 0.24],
@@ -3066,6 +3071,10 @@ impl Renderer {
         self.smoke_sun_dir = [p.sun_dir[0], p.sun_dir[1], p.sun_dir[2]];
         self.smoke_sun_radiance = [p.sun_radiance[0], p.sun_radiance[1], p.sun_radiance[2]];
         self.smoke_ambient = [p.ambient[0], p.ambient[1], p.ambient[2]];
+    }
+
+    fn set_mud_emitters(&mut self, emitters: &[mud::MudEmitter]) {
+        self.mud.set_emitters(emitters);
     }
 
     fn set_fire_sources(&mut self, sources: &[fire::FireSource]) {
@@ -6311,6 +6320,39 @@ impl Renderer {
                         self.smoke_sun_dir,
                         self.smoke_sun_radiance,
                         self.smoke_ambient,
+                    );
+                }
+            }
+
+            // MUD-001: thrown mud, at the same slot (opaque blobs tested against the scene depth)
+            if start == 0 && !resolved && self.mud.active() {
+                self.ensure_far_depth_resolve(&mut encoder);
+                if let (Some(depth_view), Some(frame)) = (
+                    self.gfx3d.water_depth_view().cloned(),
+                    self.godrays_frame,
+                ) {
+                    let (rw, rh) = self.render_size();
+                    let cam = [frame.cam_pos[0], frame.cam_pos[1], frame.cam_pos[2]];
+                    let m = frame.inv_view_proj;
+                    let mut ivp = [0.0f32; 16];
+                    for c in 0..4 {
+                        for r in 0..4 {
+                            ivp[c * 4 + r] = m[c][r];
+                        }
+                    }
+                    self.mud.record(
+                        &self.device,
+                        &self.queue,
+                        &mut encoder,
+                        &target,
+                        &depth_view,
+                        (rw, rh),
+                        cam,
+                        ivp,
+                        self.smoke_sun_dir,
+                        self.smoke_sun_radiance,
+                        self.smoke_ambient,
+                        &self.terrain,
                     );
                 }
             }

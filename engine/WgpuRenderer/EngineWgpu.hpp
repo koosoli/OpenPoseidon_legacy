@@ -1319,6 +1319,9 @@ class EngineWgpu : public EngineDummy
         // FIRE-001: this frame's fires for the volumetric fire
         std::vector<WgrFireSource> fireSources;
         bool fireDirty = false;
+        // MUD-001: this frame's mud sprays (accumulated if a frame is skipped)
+        std::vector<WgrMudEmitter> mudEmitters;
+        bool mudDirty = false;
         float smokeStrength = 0.0f;
         bool smokeDirty = false;
         float cloudShadowStrength = 0.0f, starIntensity = 0.0f, lensFlare = 0.0f;

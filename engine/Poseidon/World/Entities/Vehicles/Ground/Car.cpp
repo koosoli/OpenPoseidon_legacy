@@ -12,6 +12,7 @@
 #include <Poseidon/World/Entities/Vehicles/Ground/Car.hpp>
 #include <Poseidon/World/Entities/Vehicles/Ground/TrackedWaterResponse.hpp>
 #include <Poseidon/World/Weather/MudContact.hpp>
+#include <Poseidon/World/Effects/MudSpray.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/Game/OperMap.hpp>
 #include <Poseidon/Network/Network.hpp>
@@ -1622,6 +1623,26 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
             continue;
         }
         const Vector3& point = mudContact[wheel];
+        // MUD-001: a wheel turning in wet soft ground throws mud back and up off its tread (the
+        // renderer's particle mud); more the faster it turns and the wetter the ground
+        if (MudSprayEnabled())
+        {
+            const Vector3 v = Speed();
+            const float ground = std::min(v.SizeXZ(), 15.0f);
+            if (ground > 1.0f)
+            {
+                const Vector3 fwd = Direction();
+                const float sign = v * fwd >= 0.0f ? 1.0f : -1.0f;
+                MudSprayReport spray;
+                spray.pos = point + VUp * 0.05f;
+                spray.vel = v * 0.35f - fwd * (sign * ground * 0.45f) + VUp * (1.2f + 0.2f * ground);
+                spray.count = ground * 22.0f * deltaT * GMud().Wetness();
+                spray.velSpread = 0.8f + 0.08f * ground;
+                spray.size = 0.03f;
+                spray.posSpread = 0.12f;
+                ReportMudSpray(spray);
+            }
+        }
         _mudWheels[wheel].Update(point.X(), point.Y(), point.Z(),
             true,
             [&](float x, float y, float z) {

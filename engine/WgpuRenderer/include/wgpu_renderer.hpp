@@ -3128,6 +3128,22 @@ WGR_API void wgr_set_fire_sources(WgrRenderer* renderer, const WgrFireSource* so
 /* Boxes in use (low 32) and solver steps taken (high 32). */
 WGR_API uint64_t wgr_get_fire_stats(const WgrRenderer* renderer);
 
+/* MUD-001: thrown mud as a viscous particle fluid (mud/mod.rs). One record per spray this frame
+   (a wheel turning in wet soft ground, a boot in it): where, how many blobs, the launch velocity
+   and its spread, the blob size. Accumulated until the next frame records. */
+typedef struct WgrMudEmitter
+{
+    float pos_count[4];  /* where (world, m), w: how many blobs this frame */
+    float vel_spread[4]; /* launch velocity (m/s), w: its spread (m/s) */
+    float size[4];       /* x: drawn blob radius (m), y: positional spread (m) */
+} WgrMudEmitter;
+#ifdef __cplusplus
+static_assert(sizeof(WgrMudEmitter) == 48, "WgrMudEmitter ABI mismatch (mud/mod.rs MudEmitter)");
+#endif
+WGR_API void wgr_set_mud_emitters(WgrRenderer* renderer, const WgrMudEmitter* emitters, uint32_t count);
+/* Blobs emitted since start. */
+WGR_API uint64_t wgr_get_mud_emitted(WgrRenderer* renderer);
+
 WGR_API void wgr_set_temporal_tuning(WgrRenderer* renderer, const WgrTemporalTuning* tuning);
 WGR_API void wgr_get_temporal_info(WgrRenderer* renderer, WgrTemporalInfo* info);
 

@@ -33,6 +33,7 @@
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Effects/SmokeSystem.hpp>
 #include <Poseidon/World/Effects/FireVolumes.hpp>
+#include <Poseidon/World/Effects/MudSpray.hpp>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp>
 #include <Poseidon/World/Weather/AirflowField.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
@@ -380,6 +381,33 @@ void DrawSpawnSection()
         ImGui::TextDisabled("%d spawned burning; the renderer draws the nearest %d fires within %.0f m%s",
                             TimedFireVolumeCount(), MaxDrawnFireVolumes, FireVolumeRange,
                             FireVolumesEnabled() ? "" : " (OFF: WGR_FIRE=0)");
+    }
+
+    // MUD-001: the particle mud (wgpu mud/mod.rs); wheels and boots throw it in wet soft ground
+    ImGui::SeparatorText("Mud");
+    {
+        ImGui::BeginDisabled(!havePosition || !MudSprayEnabled());
+        if (Dev::Button("Mud splash", ImVec2(110, 0)))
+        {
+            const float ground = GSmokeWorldQuery().FloorHeightBelow(position + Vector3(0, 0.3f, 0));
+            MudSprayReport splash;
+            splash.pos = Vector3(position.X(), ground + 0.1f, position.Z());
+            splash.vel = VUp * 3.5f;
+            splash.count = 900.0f;
+            splash.velSpread = 2.6f;
+            splash.size = 0.035f;
+            splash.posSpread = 0.3f;
+            ReportMudSpray(splash);
+        }
+        ImGui::EndDisabled();
+        if (Dev::PanelItemHovered())
+        {
+            ImGui::SetTooltip("A shell landing in mud: 900 blobs thrown up at the spawn point.");
+        }
+        Dev::PanelSameLine();
+        Dev::Checkbox("Fountain 6 m ahead", &MudFountain());
+        ImGui::TextDisabled("Wheels and boots throw mud once rain has wet the ground%s",
+                            MudSprayEnabled() ? "" : " (OFF: WGR_MUD=0)");
     }
 
     ImGui::BeginDisabled(!havePosition);

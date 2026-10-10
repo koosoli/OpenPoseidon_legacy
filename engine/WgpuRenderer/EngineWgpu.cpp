@@ -110,6 +110,7 @@
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/World/Effects/SmokeSystem.hpp>                // the one wind authority (grass sway, cloud drift)
 #include <Poseidon/World/Effects/FireVolumes.hpp>                // FIRE-001
+#include <Poseidon/World/Effects/MudSpray.hpp>                   // MUD-001
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
 #include <Poseidon/Graphics/Shared/ScreenshotWriter.hpp>
 #include <Poseidon/Graphics/Textures/ProceduralTexture.hpp>
@@ -3160,6 +3161,19 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
     {
         wgr_grass_set_card_spacing(_renderer, p.grassCardSpacing);
         p.grassSpacingDirty = false;
+    }
+    if (p.mudDirty)
+    {
+        wgr_set_mud_emitters(_renderer, p.mudEmitters.data(), static_cast<uint32_t>(p.mudEmitters.size()));
+        static auto nextMudLog = std::chrono::steady_clock::now();
+        if (std::chrono::steady_clock::now() >= nextMudLog)
+        {
+            nextMudLog = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            LOG_INFO(Graphics, "Mud: {} spray(s) this frame, {} blobs thrown so far", p.mudEmitters.size(),
+                     wgr_get_mud_emitted(_renderer));
+        }
+        p.mudEmitters.clear();
+        p.mudDirty = false;
     }
     if (p.fireDirty)
     {
@@ -20652,6 +20666,37 @@ void EngineWgpu::PushRenderParams()
             else
             {
                 _pendingSet.smokeVolumeBlobs.clear();
+            }
+            // MUD-001: the mud thrown since the last frame (wheels and boots in wet ground)
+            {
+                if (MudFountain() && MudSprayEnabled())
+                {
+                    if (const Camera* cam = GScene ? GScene->GetCamera() : nullptr)
+                    {
+                        const Vector3 ahead = cam->Position() + Vector3(cam->Direction().X(), 0, cam->Direction().Z()).Normalized() * 6.0f;
+                        const float ground = GLandscape ? GLandscape->SurfaceY(ahead.X(), ahead.Z()) : ahead.Y();
+                        MudSprayReport fountain;
+                        fountain.pos = Vector3(ahead.X(), ground + 0.1f, ahead.Z());
+                        fountain.vel = VUp * 4.5f;
+                        fountain.count = 14.0f;
+                        fountain.velSpread = 1.2f;
+                        fountain.size = 0.032f;
+                        fountain.posSpread = 0.08f;
+                        ReportMudSpray(fountain);
+                    }
+                }
+                static std::vector<MudSprayReport> sprays;
+                TakeMudSprays(sprays);
+                for (const MudSprayReport& s : sprays)
+                {
+                    if (_pendingSet.mudEmitters.size() >= 64)
+                        break;
+                    _pendingSet.mudEmitters.push_back(WgrMudEmitter{{s.pos.X(), s.pos.Y(), s.pos.Z(), s.count},
+                                                                    {s.vel.X(), s.vel.Y(), s.vel.Z(), s.velSpread},
+                                                                    {s.size, s.posSpread, 0.0f, 0.0f}});
+                }
+                if (!sprays.empty())
+                    _pendingSet.mudDirty = true;
             }
             // FIRE-001: the fires burning this frame (fireplaces, wrecks) for the volumetric fire
             {

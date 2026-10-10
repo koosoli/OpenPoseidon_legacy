@@ -174,6 +174,17 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### Particle Fluids (dgreenheck/threejs-particle-fluids)
+
+The particle mud (`engine/WgpuRenderer/rust/src/mud/`, MUD-001) is a clean-room position-based
+fluid written from the published methods (Macklin and Mueller, *Position Based Fluids*, 2013;
+XPBD compliance; an implicit, Jacobi-solved viscosity), following the approach and loop
+structure of [threejs-particle-fluids](https://github.com/dgreenheck/threejs-particle-fluids):
+substeps with two constraint iterations, the one-sided density constraint C = rho/rho0 - 1, and
+implicit viscosity in place of explicit XSPH (its `ViscositySolver`: x' = (b + rate sum w x) /
+(1 + rate sum w), rate = nu dt 10 / h^2, honey near nu = 20). No source or asset of it is copied.
+MIT License, Copyright (c) 2026 Daniel Greenheck (the full text is under Fire Pro below).
+
 ### Fire Pro (dgreenheck/threejs-fire-pro)
 
 The volumetric fire (`engine/WgpuRenderer/rust/src/fire/`, FIRE-001) ports the solver and
