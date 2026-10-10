@@ -19282,6 +19282,17 @@ void EngineWgpu::UpdateAutoTonemap()
     _tonemap.bloomIntensity = bi;
     _tonemap.bloomThreshold = bt;
     _tonemap.bloomKnee = bk;
+    // Whole world from space: the noon grade is tuned for ground scenes, where haze and sky share the
+    // frame; a fully sunlit globe on black space under it saturated, flattening the terminator into a
+    // hard line. Ease the exposure down between 30 and 100 km altitude.
+    if (EarthStreaming::Enabled())
+    {
+        const Vector3 cam = render::frame::GPresentationSnapshot().cameraPos;
+        const double ox = double(cam.X()) - 6400.0, oz = double(cam.Z()) - 6400.0, oy = double(cam.Y()) + 6378137.0;
+        const double altitude = std::sqrt(ox * ox + oy * oy + oz * oz) - 6378137.0;
+        const float space = float(std::clamp((altitude - 30000.0) / 70000.0, 0.0, 1.0));
+        _tonemap.exposure *= 1.0f - 0.6f * space;
+    }
     // The push happens in NextFrame after UpdateAutoSky (PushRenderParams).
 }
 

@@ -996,7 +996,14 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             // of the physical scene using this frame's sun and directional sky,
             // without finite-map receivers or an artificial night-time floor.
             // Slot zero keeps the producer's legacy plain-fallback tint.
-            light = sky_irradiance(n) * frame.sun_ambient.w * ambient_occlusion * twilight + frame.sun_diffuse.rgb * daylight * sun_occlusion;
+            // The sky irradiance is the camera's sky; from space that is not the light reaching the
+            // ground and it flattened the whole lit hemisphere. There, skylight is a small fraction of
+            // the sun, so the disc darkens toward the terminator as it does in orbital photographs.
+            let cam_altitude = length(frame.cam_pos.xyz - earth_centre) - 6378137.0;
+            let space = smoothstep(30000.0, 100000.0, cam_altitude);
+            let sky_light = mix(sky_irradiance(n) * frame.sun_ambient.w,
+                                frame.sun_diffuse.rgb * 0.05 * clamp(sun_height * 2.0 + 0.2, 0.0, 1.0), space);
+            light = sky_light * ambient_occlusion * twilight + frame.sun_diffuse.rgb * daylight * sun_occlusion;
         }
         return vec4<f32>(srgb_to_linear(albedo) * reflectance * light, 1.0);
     }
