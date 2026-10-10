@@ -632,6 +632,7 @@ class Explosion: public Vehicle
 	Ref<LightPoint> _light;
 	float _minLightTime;
 	OLink<Vehicle> _owner; // who owned the shot
+	bool _fireVolumeSpawned = false; // FIRE-001: the volumetric burst, once
 
 	public:
 	Explosion

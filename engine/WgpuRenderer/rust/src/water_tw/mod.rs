@@ -45,7 +45,7 @@ mod shore_sim;
 pub mod spray;
 mod underwater;
 mod caustics;
-mod textures;
+pub(crate) mod textures;
 mod wake;
 mod rotor_wash;
 

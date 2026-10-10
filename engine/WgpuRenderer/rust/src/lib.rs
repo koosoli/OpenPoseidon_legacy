@@ -21,6 +21,7 @@ mod scene_depth;
 mod demand_view_snapshot;
 mod planar_mips;
 mod shaders;
+mod fire;
 mod smoke_volume;
 mod soft_particles;
 mod sky;
@@ -950,6 +951,8 @@ pub struct Renderer {
     // SMK-038: the volumetric smoke field. Inert (and allocation-free beyond its pipelines)
     // until the Smoke tab selects it.
     pub(crate) smoke_volume: smoke_volume::SmokeVolume,
+    // FIRE-001: volumetric fire (fire/mod.rs)
+    pub(crate) fire: fire::FireSystem,
     smoke_sun_dir: [f32; 3],
     smoke_sun_radiance: [f32; 3],
     smoke_ambient: [f32; 3],
@@ -1908,6 +1911,7 @@ impl Renderer {
         // SMK-038: same -- pipelines and the froxel texture, but no march target and no work
         // recorded until the mode is switched off Legacy.
         let smoke_volume = smoke_volume::SmokeVolume::new(&device, color_format, sample_count);
+        let fire = fire::FireSystem::new(&device, &queue, color_format, sample_count);
         let planar_mips = PlanarMips::new(&device, HDR_FORMAT);
         let exposure = hdr_enabled.then(|| Exposure::new(&device, &queue));
         // The sky targets the scene color format (HDR target or swapchain), matching
@@ -2119,6 +2123,7 @@ impl Renderer {
             godrays_frame: None,
             cam_underground: 0.0,
             smoke_volume,
+            fire,
             smoke_sun_dir: [0.0, 1.0, 0.0],
             smoke_sun_radiance: [1.0, 1.0, 1.0],
             smoke_ambient: [0.2, 0.2, 0.24],
@@ -2584,6 +2589,10 @@ impl Renderer {
                     ) {
                         let off = (slot as u64 * self.gfx3d.camera_stride()) as u32;
                         self.water.draw_reactive(encoder, mask, cam, off);
+                    }
+                    // FIRE-001: the fire has none either
+                    if let Some(mask) = self.temporal.history_control_view() {
+                        self.fire.draw_mask(encoder, mask);
                     }
                 }
                 // REN-TEMP-001H: moving rigid objects overwrite their camera-only
@@ -3057,6 +3066,10 @@ impl Renderer {
         self.smoke_sun_dir = [p.sun_dir[0], p.sun_dir[1], p.sun_dir[2]];
         self.smoke_sun_radiance = [p.sun_radiance[0], p.sun_radiance[1], p.sun_radiance[2]];
         self.smoke_ambient = [p.ambient[0], p.ambient[1], p.ambient[2]];
+    }
+
+    fn set_fire_sources(&mut self, sources: &[fire::FireSource]) {
+        self.fire.set_sources(sources);
     }
 
     fn set_smoke_volume_blobs(&mut self, blobs: &[smoke_volume::SmokeBlob]) {
@@ -6254,6 +6267,39 @@ impl Renderer {
                         }
                     }
                     self.smoke_volume.record(
+                        &self.device,
+                        &self.queue,
+                        &mut encoder,
+                        &target,
+                        &depth_view,
+                        (rw, rh),
+                        cam,
+                        ivp,
+                        self.smoke_sun_dir,
+                        self.smoke_sun_radiance,
+                        self.smoke_ambient,
+                    );
+                }
+            }
+
+            // FIRE-001: the fire volumes, at the smoke's slot and for the smoke's reasons (the
+            // march stops at the scene depth; the transparents after it would be painted over).
+            if start == 0 && !resolved && self.fire.active() {
+                self.ensure_far_depth_resolve(&mut encoder);
+                if let (Some(depth_view), Some(frame)) = (
+                    self.gfx3d.water_depth_view().cloned(),
+                    self.godrays_frame,
+                ) {
+                    let (rw, rh) = self.render_size();
+                    let cam = [frame.cam_pos[0], frame.cam_pos[1], frame.cam_pos[2]];
+                    let m = frame.inv_view_proj;
+                    let mut ivp = [0.0f32; 16];
+                    for c in 0..4 {
+                        for r in 0..4 {
+                            ivp[c * 4 + r] = m[c][r];
+                        }
+                    }
+                    self.fire.record(
                         &self.device,
                         &self.queue,
                         &mut encoder,

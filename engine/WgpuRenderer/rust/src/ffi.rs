@@ -2135,6 +2135,46 @@ pub unsafe extern "C" fn wgr_set_smoke_volume_blobs(
     }));
 }
 
+/// FIRE-001: this frame's fires (`WgrFireSource`, 48 bytes each; fire/mod.rs). Null-safe; an
+/// empty list lets the boxes fade out.
+///
+/// # Safety
+/// `sources` must point at `count` valid records, or be null with `count == 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_fire_sources(
+    renderer: *mut WgrRenderer,
+    sources: *const crate::fire::FireSource,
+    count: u32,
+) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let slice: &[crate::fire::FireSource] = if sources.is_null() || count == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(sources, count as usize) }
+        };
+        unsafe { &mut *renderer }.set_fire_sources(slice);
+    }));
+}
+
+/// FIRE-001: boxes in use (low 32) and solver steps taken (high 32). Zero on a null renderer.
+///
+/// # Safety
+/// `renderer` must be null or a live renderer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_get_fire_stats(renderer: *const WgrRenderer) -> u64 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &*renderer };
+        (r.fire.grid_count() as u64) | (r.fire.steps << 32)
+    }))
+    .unwrap_or(0)
+}
+
 /// Accepted particle count (low 32) and frames marched (high 32). Zero on a null renderer.
 ///
 /// # Safety

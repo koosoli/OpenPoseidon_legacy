@@ -3100,6 +3100,25 @@ WGR_API void wgr_set_smoke_volume_blobs(WgrRenderer* renderer, const WgrSmokeSha
    "switched on and marching" -- the distinction a screenshot cannot make. */
 WGR_API uint64_t wgr_get_smoke_volume_stats(const WgrRenderer* renderer);
 
+/* FIRE-001: volumetric fire (fire/mod.rs). One record per burning fire, every frame: the base of
+   the flames on the ground and the radius of the bed; intensity 0..1, smokiness 0..1, a stable key
+   (a u32's bit pattern in a float) and the kind (0 fireplace, 1 wreck); the wind (m/s). The nearest
+   four within 300 m are simulated and drawn; a fire no longer reported fades out. */
+typedef struct WgrFireSource
+{
+    float pos_radius[4];
+    float params[4];
+    float wind[4];     /* wind (m/s), w: box width (m) */
+    float floor[100];  /* the box's 10 x 10 columns (row-major, +x then +z): open from floor ... */
+    float ceiling[100];/* ... to ceiling (world y); ceiling < floor: a solid column (a wall) */
+} WgrFireSource;
+#ifdef __cplusplus
+static_assert(sizeof(WgrFireSource) == 848, "WgrFireSource ABI mismatch (fire/mod.rs FireSource)");
+#endif
+WGR_API void wgr_set_fire_sources(WgrRenderer* renderer, const WgrFireSource* sources, uint32_t count);
+/* Boxes in use (low 32) and solver steps taken (high 32). */
+WGR_API uint64_t wgr_get_fire_stats(const WgrRenderer* renderer);
+
 WGR_API void wgr_set_temporal_tuning(WgrRenderer* renderer, const WgrTemporalTuning* tuning);
 WGR_API void wgr_get_temporal_info(WgrRenderer* renderer, WgrTemporalInfo* info);
 

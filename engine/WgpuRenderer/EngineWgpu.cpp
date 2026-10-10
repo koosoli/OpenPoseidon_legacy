@@ -109,6 +109,7 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>                // GLandscape->SurfaceY (GPU-driven conform bcSurfaceY)
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/World/Effects/SmokeSystem.hpp>                // the one wind authority (grass sway, cloud drift)
+#include <Poseidon/World/Effects/FireVolumes.hpp>                // FIRE-001
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
 #include <Poseidon/Graphics/Shared/ScreenshotWriter.hpp>
 #include <Poseidon/Graphics/Textures/ProceduralTexture.hpp>
@@ -3158,6 +3159,22 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
     {
         wgr_grass_set_card_spacing(_renderer, p.grassCardSpacing);
         p.grassSpacingDirty = false;
+    }
+    if (p.fireDirty)
+    {
+        wgr_set_fire_sources(_renderer, p.fireSources.empty() ? nullptr : p.fireSources.data(),
+                             static_cast<uint32_t>(p.fireSources.size()));
+        p.fireDirty = false;
+        static auto nextLog = std::chrono::steady_clock::now();
+        if (!p.fireSources.empty() && std::chrono::steady_clock::now() >= nextLog)
+        {
+            nextLog = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            const uint64_t stats = wgr_get_fire_stats(_renderer);
+            LOG_INFO(Graphics, "Fire: {} reported, {} boxes, {} solver steps; first at {:.1f} {:.1f} {:.1f} r {:.2f} i {:.2f}",
+                     p.fireSources.size(), stats & 0xffffffffu, stats >> 32, p.fireSources[0].pos_radius[0],
+                     p.fireSources[0].pos_radius[1], p.fireSources[0].pos_radius[2], p.fireSources[0].pos_radius[3],
+                     p.fireSources[0].params[0]);
+        }
     }
     if (p.smokeVolumeDirty)
     {
@@ -20632,6 +20649,27 @@ void EngineWgpu::PushRenderParams()
             else
             {
                 _pendingSet.smokeVolumeBlobs.clear();
+            }
+            // FIRE-001: the fires burning this frame (fireplaces, wrecks) for the volumetric fire
+            {
+                static std::vector<FireVolumeReport> fires;
+                const Camera* cam = GScene ? GScene->GetCamera() : nullptr;
+                CollectFireVolumes(fires, cam ? cam->Position() : VZero);
+                const Vector3 wind = GLandscape ? GLandscape->GetWind() : VZero;
+                _pendingSet.fireSources.resize(fires.size());
+                for (std::size_t i = 0; i < fires.size(); ++i)
+                {
+                    const FireVolumeReport& f = fires[i];
+                    float key;
+                    std::memcpy(&key, &f.key, sizeof key);
+                    WgrFireSource& w = _pendingSet.fireSources[i];
+                    w = WgrFireSource{{f.base.X(), f.base.Y(), f.base.Z(), f.radius},
+                                      {f.intensity, f.smoke, key, static_cast<float>(f.kind)},
+                                      {wind.X(), wind.Y(), wind.Z(), f.boxWidth}};
+                    std::memcpy(w.floor, f.floor, sizeof w.floor);
+                    std::memcpy(w.ceiling, f.ceiling, sizeof w.ceiling);
+                }
+                _pendingSet.fireDirty = true;
             }
             // The sun the smoke is lit by is the one SMK-035 already shades the billboards
             // with, so the two systems cannot disagree about the time of day.

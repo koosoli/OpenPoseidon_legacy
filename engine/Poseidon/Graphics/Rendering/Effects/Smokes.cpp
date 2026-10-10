@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp> // SMK-030: room lookup + contained step
+#include <Poseidon/World/Effects/FireVolumes.hpp> // FIRE-001
 #include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
 #include <Poseidon/Graphics/Rendering/Effects/SmokeVolumetric.hpp> // SMK-038 system selector
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -317,6 +318,14 @@ void SmokeSourceVehicle::SimulateExplosion()
         }
         if (type.hit > 50)
         {
+            // FIRE-001: the fuel goes up as a fireball, then the wreck burns (Simulate)
+            if (Object* wreck = GetObject())
+            {
+                const Vector3 p = wreck->Position();
+                const float ground = GLandscape ? GLandscape->SurfaceY(p.X(), p.Z()) : p.Y();
+                SpawnFireVolume(Vector3(p.X(), ground, p.Z()), std::clamp(wreck->GetRadius() * 0.5f, 1.2f, 3.5f),
+                                0.75f, 2.5f, FireKindExplosion);
+            }
             // change fire and darkFire parameters based on type.hit value
             float fireSize = type.hit * 0.001;
             float fireTime = type.hit * 0.002;
@@ -356,6 +365,16 @@ void SmokeSourceVehicle::Simulate(float deltaT, SimulationImportance prec)
     if (SmokeSource::Simulate(Position(), Speed(), deltaT, prec))
     {
         canDelete = true;
+    }
+    // FIRE-001: a wreck burns while it smokes: a bed the size of the hull on the ground under
+    // it, its strength the smoke's own fade in and out
+    if (Object* wreck = GetObject(); wreck && _inOutDensity > 0.02f)
+    {
+        const Vector3 p = wreck->Position();
+        const float ground = GLandscape ? GLandscape->SurfaceY(p.X(), p.Z()) : p.Y();
+        const float radius = std::clamp(wreck->GetRadius() * 0.35f, 0.6f, 2.2f);
+        ReportFireVolume(this, Vector3(p.X(), std::max(ground, Position().Y() - 1.2f), p.Z()), radius,
+                         _inOutDensity, 0.5f, FireKindWreck);
     }
     if (_fire.Active() || _darkFire.Active())
     {
@@ -2304,6 +2323,21 @@ Explosion::~Explosion() = default;
 void Explosion::Simulate(float deltaT, SimulationImportance prec)
 {
     _minLightTime -= deltaT;
+    // FIRE-001: a big blast (a shell, a rocket: size 0.5 .. 1) also gets a short volumetric
+    // fireball on the ground under it. Grenades and small charges (size 0.25 .. 0.5) do not:
+    // they flash and throw dust, they do not burn.
+    if (!_fireVolumeSpawned && FireVolumesEnabled())
+    {
+        _fireVolumeSpawned = true;
+        if (_exSize >= 0.5f)
+        {
+            const Vector3 p = Position();
+            const float ground = GLandscape ? GLandscape->SurfaceY(p.X(), p.Z()) : p.Y();
+            const float size = std::min(_exSize, 1.0f);
+            SpawnFireVolume(Vector3(p.X(), std::max(ground, p.Y() - 1.5f), p.Z()), 0.6f + 1.8f * size, 0.6f,
+                            0.6f + 0.8f * size, FireKindExplosion);
+        }
+    }
 
     if (prec > SimulateInvisibleNear)
     {

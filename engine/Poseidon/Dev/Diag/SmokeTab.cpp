@@ -32,6 +32,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Effects/SmokeSystem.hpp>
+#include <Poseidon/World/Effects/FireVolumes.hpp>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp>
 #include <Poseidon/World/Weather/AirflowField.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
@@ -335,6 +336,50 @@ void DrawSpawnSection()
     {
         ImGui::SetTooltip("Wide, hot, roaring. Also try 'Spawn ring of fires' below to cover an\n"
                           "area - a burning building is many fires, not one big one.");
+    }
+
+    // FIRE-001: the volumetric fire (Fire Pro's solver, wgpu fire/mod.rs)
+    ImGui::SeparatorText("Volumetric fire");
+    {
+        static float fireRadius = 0.8f;
+        static float fireSmoke = 0.3f;
+        static float fireDuration = 60.0f;
+        ImGui::SetNextItemWidth(120.0f);
+        Dev::SliderFloat("Bed radius (m)", &fireRadius, 0.2f, 4.0f, "%.2f");
+        Dev::PanelSameLine();
+        ImGui::SetNextItemWidth(120.0f);
+        Dev::SliderFloat("Smoke##vfire", &fireSmoke, 0.0f, 1.0f, "%.2f");
+        ImGui::SetNextItemWidth(120.0f);
+        ImGui::InputFloat("Burn time (s)##vfire", &fireDuration, 0.0f, 0.0f, "%.0f");
+        Dev::PanelSameLine();
+        ImGui::TextDisabled("(negative = until extinguished)");
+        ImGui::BeginDisabled(!havePosition || !FireVolumesEnabled());
+        if (Dev::Button("Spawn volumetric fire", ImVec2(180, 0)))
+        {
+            const float ground = GSmokeWorldQuery().FloorHeightBelow(position + Vector3(0, 0.3f, 0));
+            SpawnFireVolume(Vector3(position.X(), ground, position.Z()), fireRadius, fireSmoke, fireDuration,
+                            fireRadius > 1.2f ? FireKindWreck : FireKindBed);
+        }
+        Dev::PanelSameLine();
+        if (Dev::Button("Fire burst", ImVec2(110, 0)))
+        {
+            const float ground = GSmokeWorldQuery().FloorHeightBelow(position + Vector3(0, 0.3f, 0));
+            SpawnFireVolume(Vector3(position.X(), ground, position.Z()), std::max(fireRadius, 1.0f) * 1.6f, 0.65f,
+                            2.5f, FireKindExplosion);
+        }
+        ImGui::EndDisabled();
+        if (Dev::PanelItemHovered())
+        {
+            ImGui::SetTooltip("The burst every fiery explosion now makes, at the spawn point.");
+        }
+        Dev::PanelSameLine();
+        if (Dev::Button("Extinguish##vfire"))
+        {
+            ExtinguishFireVolumes();
+        }
+        ImGui::TextDisabled("%d spawned burning; the renderer draws the nearest %d fires within %.0f m%s",
+                            TimedFireVolumeCount(), MaxDrawnFireVolumes, FireVolumeRange,
+                            FireVolumesEnabled() ? "" : " (OFF: WGR_FIRE=0)");
     }
 
     ImGui::BeginDisabled(!havePosition);

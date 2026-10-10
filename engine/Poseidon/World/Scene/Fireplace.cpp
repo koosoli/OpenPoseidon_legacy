@@ -1,5 +1,8 @@
 #include <Poseidon/World/Scene/Fireplace.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/World/Effects/FireVolumes.hpp>
+#include <Poseidon/World/Effects/SmokeWorldQuery.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/Game/UiActions.hpp>
@@ -46,6 +49,13 @@ void Fireplace::Simulate(float deltaT, SimulationImportance prec)
             position = _light->Transform().Position();
         }
         _smoke.Simulate(position, Speed(), deltaT, prec);
+        // FIRE-001: the bed on the ground under the fireplace, for the volumetric fire
+        {
+            // the floor it stands on: terrain, or the storey of the house it is in
+            const Vector3 p = Position();
+            const float ground = GSmokeWorldQuery().FloorHeightBelow(p + Vector3(0, 0.5f, 0));
+            ReportFireVolume(this, Vector3(p.X(), ground, p.Z()), 0.55f, 1.0f, 0.12f, FireKindBed);
+        }
         if (_sound)
         {
             _sound->Pause(false);

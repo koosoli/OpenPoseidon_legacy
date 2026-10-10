@@ -137,6 +137,8 @@ models, textures, cloud noise files) is used.
 | `water_tw/caustics.rs`, `water_tw/tw_caustics_splat.wgsl`, `water_tw/tw_caustics.wgsl` | `src/ocean/Caustics.js` (`CausticLayer`, `_causticsSample`) |
 | `water_tw/wake.rs`, `water_tw/tw_wake_kernel.wgsl`, `water_tw/tw_wake.wgsl` | `src/ocean/WakeSim.js` |
 | `water_tw/boat_spray.rs` (with the boat bodies and CPU-emitted tail in `spray.rs` / `tw_spray_update.wgsl`) | `src/player/BoatSpray.js` — its contact model is noted in the source as being "after threejs-water-pro", a product by the same author; it is used here under Tidewater's MIT grant on the repository owner's decision |
+| `FishSchools.cpp`, `FishSpeciesTable.inc` (wgpu renderer, the fish around the camera) | `src/world/fish/FishSpecies.js` (the species anatomy, generated into the table), `src/world/Fish.js` (behaviour rows, boids, flight from the swimmer) |
+| `engine/Poseidon/World/Entities/Vehicles/Misc/ShipTidewater.cpp` (the small-boat float and drive model) | `src/player/BoatController.js` |
 
 Written for OpenPoseidon, with no Tidewater counterpart (not ported; listed so the table above
 reads as complete): `water_tw/impacts.rs` and `water_tw/tw_impact.wgsl` (shells and bullets on
@@ -148,6 +150,43 @@ backend plumbing in `water_tw/mod.rs` / `water_backend.rs`.
 MIT License
 
 Copyright (c) 2026 DRG Software Solutions LLC
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Fire Pro (dgreenheck/threejs-fire-pro)
+
+The volumetric fire (`engine/WgpuRenderer/rust/src/fire/`, FIRE-001) ports the solver and
+renderer of [Fire Pro](https://github.com/dgreenheck/threejs-fire-pro) @ `c284f0b1` to wgpu,
+on dense per-fire grids instead of its sparse bricks (see the shader headers for the details).
+No Fire Pro asset (editor scenes, models, fonts, textures) is used.
+
+| OpenPoseidon file | Ported from (Fire Pro @ c284f0b1) |
+| --- | --- |
+| `fire/fire_sim.wgsl` | `src/engine/shaders/fluid-advection.wgsl`, `fluid-scalar-transport.wgsl`, `fluid-field-evolution.wgsl`, `flame-common.wgsl`, `fluid-forces.wgsl`, `fluid-sources.wgsl`, `force-fields.wgsl`, `curl-noise.wgsl`, `solids.wgsl`, `pressure.wgsl` (the projection; Jacobi instead of its multigrid) |
+| `fire/fire_march.wgsl` | `src/engine/shaders/volume-march.wgsl`, `fire-emission.wgsl` |
+| `fire/mod.rs` (`blackbody_table`, the flame and preset numbers) | `src/engine/blackbody.ts`, `src/engine/flame.ts`, `editor/presets/campfire.json`, `src/library/options.ts` |
+
+```
+MIT License
+
+Copyright (c) 2026 Daniel Greenheck
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

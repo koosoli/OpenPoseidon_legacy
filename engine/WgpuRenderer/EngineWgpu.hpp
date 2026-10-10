@@ -1308,6 +1308,9 @@ class EngineWgpu : public EngineDummy
         std::vector<WgrSmokeShadowBlob> smokeVolumeBlobs;
         WgrSmokeVolumeParams smokeVolume{};
         bool smokeVolumeDirty = false;
+        // FIRE-001: this frame's fires for the volumetric fire
+        std::vector<WgrFireSource> fireSources;
+        bool fireDirty = false;
         float smokeStrength = 0.0f;
         bool smokeDirty = false;
         float cloudShadowStrength = 0.0f, starIntensity = 0.0f, lensFlare = 0.0f;
