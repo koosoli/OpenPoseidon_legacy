@@ -403,7 +403,8 @@ bool BuildPlannerMap(const std::filesystem::path& cache, double south, double we
         message = "No imagery for this area (offline, or the provider refused).";
         return false;
     }
-    std::vector<uint8_t> rgb(size_t(size) * size * 3);
+    // RGBA: a tile that did not arrive stays transparent, so the coarser image under it shows through.
+    std::vector<uint8_t> rgb(size_t(size) * size * 4);
     unsigned missing = 0;
     for (int y = 0; y < size; ++y)
         for (int x = 0; x < size; ++x)
@@ -411,16 +412,17 @@ bool BuildPlannerMap(const std::filesystem::path& cache, double south, double we
             const int sx = std::min(mosaic.width - 1, x * mosaic.width / size);
             const int sy = std::min(mosaic.height - 1, y * mosaic.height / size);
             const uint8_t* p = &mosaic.pixels[(size_t(sy) * mosaic.width + sx) * 4];
-            uint8_t* q = &rgb[(size_t(y) * size + x) * 3];
+            uint8_t* q = &rgb[(size_t(y) * size + x) * 4];
             const bool present = p[3] != 0;
             missing += present ? 0 : 1;
-            q[0] = present ? p[0] : 40;
-            q[1] = present ? p[1] : 44;
-            q[2] = present ? p[2] : 52;
+            q[0] = p[0];
+            q[1] = p[1];
+            q[2] = p[2];
+            q[3] = present ? 255 : 0;
         }
     std::error_code ec;
     std::filesystem::create_directories(out.parent_path(), ec);
-    if (!stbi_write_png(out.string().c_str(), size, size, 3, rgb.data(), size * 3))
+    if (!stbi_write_png(out.string().c_str(), size, size, 4, rgb.data(), size * 4))
     {
         message = "Cannot write the planner map to " + out.string();
         return false;

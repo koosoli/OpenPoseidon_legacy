@@ -37,6 +37,10 @@
 
 #include <Poseidon/Foundation/Strings/Bstring.hpp>
 #include <filesystem>
+#include <Poseidon/UI/WholeWorldDisplay.hpp>
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
+#include <Poseidon/World/Terrain/EarthFrame.hpp>
+#include <cstdlib>
 
 // Defined at global scope in AI/ArcadeTemplate.cpp.
 void SelectLeader(ArcadeGroupInfo& gInfo);
@@ -2563,6 +2567,33 @@ void CStaticMapArcade::OnLButtonDblClick(float x, float y)
     ClearAnimation();
     _moveKey = 0;
     _mouseKey = 0;
+
+    // Whole World world map: a double-click outside the mission square moves the mission area there. The
+    // mission is saved (units keep their place relative to the area) and the editor restarts at that spot.
+    if (EarthStreaming::Enabled())
+    {
+        const Point3 world = ScreenToWorld(DrawCoord(x, y));
+        const float size = LandGrid * LandRange;
+        if (world.X() < 0 || world.X() > size || world.Z() < 0 || world.Z() > size)
+        {
+            const char* latText = std::getenv("POSEIDON_EARTH_LATITUDE");
+            const char* lonText = std::getenv("POSEIDON_EARTH_LONGITUDE");
+            const double lat0 = latText ? std::atof(latText) : 0.0, lon0 = lonText ? std::atof(lonText) : 0.0;
+            const double lat = std::clamp(lat0 + (world.Z() - Earth::Anchor) / Earth::Radius * 180.0 / Earth::Pi, -84.0, 84.0);
+            const double lon = Earth::WrapLongitude(
+                lon0 + (world.X() - Earth::Anchor) / (Earth::Radius * std::max(0.05, std::cos(lat0 * Earth::Pi / 180.0))) *
+                           180.0 / Earth::Pi);
+            auto* editor = dynamic_cast<DisplayArcadeMap*>(_parent);
+            std::string error;
+            if (editor && !editor->SaveMissionTo(WholeWorldEditorMission().c_str()))
+                error = "The mission could not be saved before moving.";
+            if (error.empty() && !RelaunchWholeWorldEditor(lat, lon, error))
+                LOG_ERROR(Core, "Whole World editor move: {}", error);
+            if (!error.empty())
+                _parent->CreateMsgBox(MB_BUTTON_OK, RString(error.c_str()));
+            return;
+        }
+    }
 
     SignInfo info = FindSign(x, y);
 

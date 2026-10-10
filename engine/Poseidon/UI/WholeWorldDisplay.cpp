@@ -501,4 +501,72 @@ Display* CreateWholeWorldDisplay(ControlsContainer* parent)
 {
     return new WholeWorldDisplay(parent);
 }
+
+std::string WholeWorldEditorMission()
+{
+    const char* cache = std::getenv("POSEIDON_EARTH_CACHE");
+    const auto base = cache && *cache ? std::filesystem::u8path(cache) : WorldStreamCache();
+    return Utf8(base / "fixture" / "earth-preview.abel" / "mission.sqm");
+}
+
+bool RelaunchWholeWorldEditor(double latitude, double longitude, std::string& error)
+{
+#ifdef _WIN32
+    const char* cacheText = std::getenv("POSEIDON_EARTH_CACHE");
+    const auto cache = cacheText && *cacheText ? std::filesystem::u8path(cacheText) : WorldStreamCache();
+    const auto fixture = cache / "fixture";
+    wchar_t exePath[32768]{};
+    if (!GetModuleFileNameW(nullptr, exePath, 32768))
+    {
+        error = "Cannot locate the engine executable.";
+        return false;
+    }
+    char lat[64], lon[64];
+    std::snprintf(lat, sizeof(lat), "%.6f", latitude);
+    std::snprintf(lon, sizeof(lon), "%.6f", longitude);
+    std::vector<std::string> args = {Utf8(std::filesystem::path(exePath)), "--render=wgpu", "--wait-for-parent",
+                                     std::to_string(GetCurrentProcessId()), "--test-mission",
+                                     Utf8(fixture / "earth-preview.abel"), "--test-world",
+                                     Utf8(fixture / "earth-preview.wrp"), "--test-world-hour", "12", "--vd", "20000",
+                                     "--log-file", Utf8(cache / "earth-preview.log"), "--test-editor"};
+    if (GEngine)
+    {
+        const WindowMode mode = GEngine->GetCurrentWindowMode();
+        args.insert(args.end(), {"--display-mode", mode == WindowMode::Windowed ? "windowed" :
+                                 mode == WindowMode::Borderless ? "borderless" : "exclusive",
+                                 "--width", std::to_string(GEngine->Width()), "--height", std::to_string(GEngine->Height())});
+    }
+    if (Foundation::AppConfig::Instance().DevMode())
+        args.push_back("--dev");
+    std::vector<const char*> argv;
+    for (const auto& arg : args)
+        argv.push_back(arg.c_str());
+    argv.push_back(nullptr);
+    // Everything else (providers, content, cache) carries over from this whole-world process.
+    SDL_Environment* environment = SDL_CreateEnvironment(true);
+    const SDL_PropertiesID properties = SDL_CreateProperties();
+    bool configured = environment && properties &&
+                      SDL_SetEnvironmentVariable(environment, "POSEIDON_EARTH_LATITUDE", lat, true) &&
+                      SDL_SetEnvironmentVariable(environment, "POSEIDON_EARTH_LONGITUDE", lon, true);
+    configured = configured && SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data()) &&
+                 SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, environment);
+    SDL_Process* process = configured ? SDL_CreateProcessWithProperties(properties) : nullptr;
+    if (!process)
+        error = std::string("Cannot restart whole-world mode: ") + SDL_GetError();
+    if (properties)
+        SDL_DestroyProperties(properties);
+    if (environment)
+        SDL_DestroyEnvironment(environment);
+    if (!process)
+        return false;
+    SDL_DestroyProcess(process);
+    Application::Instance().m_validateQuit = true;
+    Application::Instance().m_closeRequest = true;
+    return true;
+#else
+    (void)latitude, (void)longitude;
+    error = "Whole-world restart is currently available on Windows.";
+    return false;
+#endif
+}
 } // namespace Poseidon

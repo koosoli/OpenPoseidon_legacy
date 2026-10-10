@@ -748,6 +748,8 @@ public:
 
 	void ShowButtons();
 	void CycleControllerMode(int delta);
+	// Whole World: save the mission being edited (the world map moves the mission area by restarting).
+	bool SaveMissionTo(const char *filename) { return SaveTemplates(filename); }
 
 protected:
 	LSError SerializeAll(ParamArchive &ar, bool merge = false);
