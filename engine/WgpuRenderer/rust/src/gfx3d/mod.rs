@@ -518,7 +518,9 @@ pub(crate) fn draw_replays_before_rays(d: &WgrDraw3D, cutout_only: bool) -> bool
 }
 
 /// Solid colour submitted after the sea still belongs in front of its transparent pass.
-/// Cutouts keep their authored order because their coverage needs separate handling.
+/// Prepassed cutouts too: their depth is already in the buffer, so drawn after the sea they painted
+/// over it -- a swimmer's alpha-tested uniform showed whole and dry 1.4 m under the surface, with no
+/// waterline (owner, 2026-10-10). Before the sea, the water covers what is under it.
 /// Ground-conformed road decals also belong here: replaying their alpha colour after
 /// clouds would paint roads over an opaque cloud bank. Their receiver is the terrain
 /// already in depth; moving colour needs neither an alpha depth write nor another pass.
@@ -530,7 +532,7 @@ pub(crate) fn draw_replays_before_water(d: &WgrDraw3D) -> bool {
         && d.conform2[2] == 2.0
         && matches!(d.depth, WgrDepthMode::Test | WgrDepthMode::TestWrite)
         && matches!(d.blend, WgrBlend::Alpha | WgrBlend::Opaque);
-    (draw_replays_before_rays(d, false) && d.alpha_ref <= 0.0) || ground_decal
+    draw_replays_before_rays(d, false) || ground_decal
 }
 
 #[test]
@@ -597,7 +599,7 @@ fn water_replay_moves_only_solid_prepassed_world_geometry() {
     d.palette_slot = NO_PALETTE;
     assert!(draw_replays_before_water(&d));
     d.alpha_ref = 0.5;
-    assert!(!draw_replays_before_water(&d));
+    assert!(draw_replays_before_water(&d), "a prepassed cutout (a swimmer's uniform) belongs under the sea");
     d.alpha_ref = 0.0;
     d.blend = WgrBlend::Alpha;
     assert!(!draw_replays_before_water(&d));

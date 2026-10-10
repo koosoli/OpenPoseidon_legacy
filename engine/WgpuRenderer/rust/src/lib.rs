@@ -5691,9 +5691,20 @@ impl Renderer {
                     let mut cutout = 0;
                     let mut alpha = 0;
                     let mut other = 0;
+                    let mut skinned = [0u32; 4]; // opaque, cutout, alpha, other with a bone palette
                     for op in ops_post_water {
                         if let Plan3dOp::Draw3D { draw, .. } = op {
                             if let Some(d) = draws3d.get(*draw as usize) {
+                                if d.palette_slot != crate::ffi::NO_PALETTE {
+                                    let k = if d.blend == ffi::WgrBlend::Opaque && d.depth == ffi::WgrDepthMode::TestWrite {
+                                        if d.alpha_ref > 0.0 { 1 } else { 0 }
+                                    } else if d.blend == ffi::WgrBlend::Alpha { 2 } else { 3 };
+                                    skinned[k] += 1;
+                                    if k != 0 {
+                                        eprintln!("[wgr] late skinned draw: blend={:?} depth={:?} alpha_ref={} prepassed={} flags={:#x}",
+                                            d.blend, d.depth, d.alpha_ref, crate::gfx3d::draw_is_prepassed(d), d.flags);
+                                    }
+                                }
                                 if d.blend == ffi::WgrBlend::Opaque && d.depth == ffi::WgrDepthMode::TestWrite {
                                     if d.alpha_ref > 0.0 { cutout += 1; } else { opaque += 1; }
                                 } else if d.blend == ffi::WgrBlend::Alpha {
@@ -5702,7 +5713,7 @@ impl Renderer {
                             }
                         }
                     }
-                    eprintln!("[wgr] late objects: opaque={opaque} cutout={cutout} alpha={alpha} other={other}");
+                    eprintln!("[wgr] late objects: opaque={opaque} cutout={cutout} alpha={alpha} other={other} | skinned opaque/cutout/alpha/other={:?}", skinned);
                 }
             }
             // Draw2D is replayed by the dedicated 2D sub-pass further down (this
