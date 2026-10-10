@@ -1486,7 +1486,10 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     // layers and the valley search to that (env profiles below still override).
     if (EarthStreaming::Enabled())
     {
-        _sky.fogTerrainFollow = 0.7f; // partly settles into low ground instead of hugging every slope
+        // Fully terrain-relative: with 0.7 the layer was measured from 0.7 x the ground height, so on an
+        // 800 m valley floor the ground already stood 240 m above the layer top -- no fog above ~670 m.
+        // Pooling in valleys comes from the valley term, not from partial following.
+        _sky.fogTerrainFollow = 1.0f;
         _sky.fogTerrainReference = 0.0f;
         _sky.fogValleyStrength = 1.5f;
         _sky.fogValleyRadius = 1000.0f;
