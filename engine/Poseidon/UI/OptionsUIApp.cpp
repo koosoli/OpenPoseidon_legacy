@@ -225,16 +225,23 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
         logo->Add("text", RString("\\assets\\ui\\openposeidon_logo.paa"));
         // Keep branding within the menu's visible area, below the intro's
         // cinema border and clear of the right-hand menu entries.
-        logo->Add("x", 0.07f);
+        // UI coordinates are fractions of the screen's width and height, so a fixed w/h stretches the
+        // picture on any screen that is not 16:9. Keep the logo's own 1230x1278 proportions at the
+        // real aspect, centred in the box it always had.
+        constexpr float LogoAspect = 1230.0f / 1278.0f, BoxX = 0.07f, BoxW = 0.20f, LogoH = 0.36f;
+        const float screenAspect =
+            GEngine && GEngine->Height() > 0 ? float(GEngine->Width()) / float(GEngine->Height()) : 16.0f / 9.0f;
+        const float logoW = LogoAspect * LogoH / std::max(0.5f, screenAspect);
+        logo->Add("x", BoxX + (BoxW - logoW) * 0.5f);
         logo->Add("y", 0.25f);
-        logo->Add("w", 0.20f);
-        logo->Add("h", 0.36f);
+        logo->Add("w", logoW);
+        logo->Add("h", LogoH);
         ParamEntry* background = logo->AddArray("colorBackground");
         for (int channel = 0; channel < 4; ++channel)
             background->AddValue(0.0f);
         ParamEntry* foreground = logo->AddArray("colorText");
         for (int channel = 0; channel < 4; ++channel)
-            foreground->AddValue(1.0f);
+            foreground->AddValue(channel < 3 ? 1.0f : 0.75f); // a little transparent over the scene
         LoadControl(*logo);
     }
     //	LoadHeader();
