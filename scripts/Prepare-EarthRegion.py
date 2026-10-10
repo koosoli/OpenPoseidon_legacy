@@ -97,7 +97,7 @@ def fetch(url, target, attempts=4):
     for attempt in range(attempts):
         try:
             request = urllib.request.Request(url, headers={"User-Agent": AGENT})
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=10 if "overpass" not in url else 40) as response:
                 body = response.read()
             if not body:
                 raise IOError("empty")
@@ -114,7 +114,7 @@ def fetch(url, target, attempts=4):
     return "failed"
 
 
-def run_tiles(label, jobs, workers=8):
+def run_tiles(label, jobs, workers=16):
     counts = {"cached": 0, "new": 0, "refused": 0, "failed": 0}
     with concurrent.futures.ThreadPoolExecutor(workers) as pool:
         for i, result in enumerate(pool.map(lambda job: fetch(*job), jobs), 1):
