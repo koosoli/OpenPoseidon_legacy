@@ -267,11 +267,18 @@ float CameraVehicle::CamEffectFOV() const
         Vector3 norm = _lastTgtPos - Position();
         Vector3 dir = norm.Normalized();
 
-        // Earth free-flight transports its whole orientation between ENU
-        // frames. Rebuilding against local world-up here would discard that
-        // transported roll on the next camera-effect update after a rebase.
-        const Vector3 up = GetManual() && _altitudeSpeedScaling && EarthStreaming::Enabled()
-            ? Orientation().DirectionUp() : VUp;
+        // Earth free-flight levels against the physical radial up at the camera, not the frame's
+        // world-up (wrong away from the origin on a curved Earth) and not its own previous up:
+        // re-using its own up let every look-around while pitched, and every rebase, leave a little
+        // roll that nothing removed, so the horizon drifted tilted. Straight up/down keeps its own up.
+        Vector3 up = VUp;
+        if (GetManual() && _altitudeSpeedScaling && EarthStreaming::Enabled())
+        {
+            const auto radial = EarthStreaming::FlightUp({Position()[0], Position()[1], Position()[2]});
+            up = Vector3(float(radial.x), float(radial.y), float(radial.z));
+            if (std::abs(dir.DotProduct(up)) > 0.999f)
+                up = Orientation().DirectionUp();
+        }
         const_cast<CameraVehicle*>(this)->SetDirectionAndUp(dir, up);
 
         float invDist = (_lastTgtPos - Position()).InvSize();
