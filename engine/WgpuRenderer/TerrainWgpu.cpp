@@ -3378,22 +3378,82 @@ void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p,bool loc
             v.uv=geographicUv(v.pos.x,v.pos.z);
         }
     }
+    const auto point = [&](int x,int z) {return EarthNearPoint(p,x,z);};
     std::vector<uint32_t> indices;
     indices.reserve(((n-1)*(n-1) + 256*256 + 4*256)*6);
+    constexpr int inBegin = Earth::HorizonInnerBegin, inEnd = Earth::HorizonInnerEnd;
+    // A quad sharing an edge with the near square: that edge carries 4 near grid steps (T-junctions).
+    const auto borderSide = [&](int x, int z) -> int
+    {
+        const bool alongX = x >= inBegin && x < inEnd, alongZ = z >= inBegin && z < inEnd;
+        if (alongX && z == inBegin - 1) return 0; // edge on row inBegin
+        if (alongX && z == inEnd) return 1;       // edge on row inEnd
+        if (alongZ && x == inBegin - 1) return 2; // edge on column inBegin
+        if (alongZ && x == inEnd) return 3;       // edge on column inEnd
+        return -1;
+    };
+    std::vector<std::array<int, 2>> stitched;
     for (int z = 0; z < n-1; ++z)
     {
         for (int x = 0; x < n-1; ++x)
         {
             // Leave exactly the near terrain's rectangle open. Both regions
             // are published together and share the selected near-source heights.
-            if (x >= Earth::HorizonInnerBegin && x < Earth::HorizonInnerEnd &&
-                z >= Earth::HorizonInnerBegin && z < Earth::HorizonInnerEnd) continue;
+            if (x >= inBegin && x < inEnd && z >= inBegin && z < inEnd) continue;
             const uint32_t a = z*n+x, b = a+1, c = a+n, d = c+1;
             if (!p.horizonValid[a] || !p.horizonValid[b] || !p.horizonValid[c] || !p.horizonValid[d]) continue;
+            if (borderSide(x, z) >= 0) { stitched.push_back({x, z}); continue; }
             indices.insert(indices.end(),{a,c,b,b,c,d});
         }
     }
-    const auto point = [&](int x,int z) {return EarthNearPoint(p,x,z);};
+    // Stitch the near square's border: each border quad becomes a fan from its two outer vertices to the
+    // 5 near-edge points of its inner side, so both meshes meet exactly. The old 300 m skirts hid the
+    // T-junction gaps instead, and showed as walls wherever the ground beyond the edge was lower.
+    const auto windingSign = [&](uint32_t i0, uint32_t i1, uint32_t i2)
+    {
+        const auto& p0 = vertices[i0].pos; const auto& p1 = vertices[i1].pos; const auto& p2 = vertices[i2].pos;
+        return (p1.x - p0.x) * (p2.z - p0.z) - (p1.z - p0.z) * (p2.x - p0.x);
+    };
+    float reference = 0.0f; // the winding the regular quads use (a,c,b)
+    for (size_t i = 0; i + 2 < indices.size() && reference == 0.0f; i += 6)
+        reference = windingSign(indices[i], indices[i+1], indices[i+2]);
+    const auto addTriangle = [&](uint32_t i0, uint32_t i1, uint32_t i2)
+    {
+        const float sign = windingSign(i0, i1, i2);
+        if (sign == 0.0f) return;
+        if ((sign > 0.0f) == (reference > 0.0f)) indices.insert(indices.end(), {i0, i1, i2});
+        else indices.insert(indices.end(), {i0, i2, i1});
+    };
+    for (const auto& q : stitched)
+    {
+        const int x = q[0], z = q[1], side = borderSide(x, z);
+        // Outer pair (o0 .. o1) and the inner edge's horizon indices in the same order along the edge.
+        uint32_t o0, o1;
+        int along0;
+        bool rowEdge;
+        int fixed;
+        switch (side)
+        {
+            case 0: o0 = z*n+x; o1 = z*n+x+1; along0 = x; rowEdge = true; fixed = 0; break;
+            case 1: o0 = (z+1)*n+x; o1 = (z+1)*n+x+1; along0 = x; rowEdge = true; fixed = 256; break;
+            case 2: o0 = z*n+x; o1 = (z+1)*n+x; along0 = z; rowEdge = false; fixed = 0; break;
+            default: o0 = z*n+x+1; o1 = (z+1)*n+x+1; along0 = z; rowEdge = false; fixed = 256; break;
+        }
+        uint32_t edge[5];
+        for (int k = 0; k < 5; ++k)
+        {
+            const int along = (along0 - inBegin) * 4 + k;
+            auto v = rowEdge ? point(along, fixed) : point(fixed, along);
+            if (localUv) v.uv = geographicUv(v.pos.x, v.pos.z);
+            edge[k] = uint32_t(vertices.size());
+            vertices.push_back(v);
+        }
+        addTriangle(o0, edge[0], edge[1]);
+        addTriangle(o0, edge[1], edge[2]);
+        addTriangle(o0, edge[2], o1);
+        addTriangle(o1, edge[2], edge[3]);
+        addTriangle(o1, edge[3], edge[4]);
+    }
     // The near mesh shares the far mesh's imagery and Earth material route.
     // Its 257² vertices are bounded at either resolution; no finite CWA ground
     // tile/cave material is drawn underneath the geographic terrain preview.
@@ -3408,22 +3468,6 @@ void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p,bool loc
                 const uint32_t a=nearBase+z*Earth::GridSamples+x, b=a+1, c=a+Earth::GridSamples, d=c+1;
                 indices.insert(indices.end(),{a,c,b,b,c,d});
             }
-    }
-    // Vertical edge skirts close the fine-grid/coarse-boundary T junctions;
-    // they do not cover or move either region's top surface.
-    auto skirt = [&](int x0,int z0,int x1,int z1) {
-        const uint32_t a = uint32_t(vertices.size());
-        auto first = point(x0,z0), second = point(x1,z1);
-        if(localUv){first.uv=geographicUv(first.pos.x,first.pos.z);second.uv=geographicUv(second.pos.x,second.pos.z);}
-        vertices.push_back(first); vertices.push_back(second);
-        first.pos.y -= 300.0f; second.pos.y -= 300.0f;
-        vertices.push_back(first); vertices.push_back(second);
-        indices.insert(indices.end(),{a,a+2,a+1,a+1,a+2,a+3});
-    };
-    for (int i=0;i<256;++i)
-    {
-        skirt(i,0,i+1,0); skirt(i,256,i+1,256);
-        skirt(0,i,0,i+1); skirt(256,i,256,i+1);
     }
     const WgrMesh replacement = wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(vertices),WgrSlice<uint32_t>(indices));
     if (!replacement) throw std::runtime_error("Earth horizon mesh allocation failed");
@@ -3478,6 +3522,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         _earthStream->Relocate(origin);
         UploadEarthGlobe(origin.latitude,origin.longitude);
         _earthPatch.reset();
+        _earthPendingPatch.reset();
         if(_earthSurface)_earthSurface->Relocate();
         if(_earthSurfaceTexture){EngineWgpu::AcquireProducerWindow("Earth surface relocate");wgr_texture_destroy(_renderer,_earthSurfaceTexture);_earthSurfaceTexture=0;}
         if(_earthFarTexture){EngineWgpu::AcquireProducerWindow("Earth far surface relocate");wgr_texture_destroy(_renderer,_earthFarTexture);_earthFarTexture=0;}
@@ -3497,10 +3542,11 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
     // that covers less than one pixel at this distance.
     if (camera.Position().Y()>500000.0f) return;
     _earthStream->Request(camera.Position().X(), camera.Position().Z(),camera.Position().Y(),origin);
-    if (auto patch = _earthStream->TakeReady())
+    // Installs a patch as the drawn terrain (mesh, heightmap). Without an atlas for it yet, the draw
+    // falls back to the globe image until one arrives.
+    const auto applyPatch = [&](std::unique_ptr<EarthTerrainStream::Patch> next, bool keepTextures)
     {
-        if (patch->originRevision!=origin.revision) return;
-        _earthPatch = std::move(patch);
+        _earthPatch = std::move(next);
         const auto& p = *_earthPatch;
         _params.world_origin = {p.x, p.z};
         _params.terrain_grid = p.gridMetres;
@@ -3511,11 +3557,12 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         _params.enfusion_ground = 0;
         EngineWgpu::AcquireProducerWindow("Earth terrain patch");
         UploadEarthHorizon(p);
-        if(_earthSurfaceTexture){wgr_texture_destroy(_renderer,_earthSurfaceTexture);_earthSurfaceTexture=0;}
-        if(_earthFarTexture){wgr_texture_destroy(_renderer,_earthFarTexture);_earthFarTexture=0;}
-
+        if(!keepTextures)
+        {
+            if(_earthSurfaceTexture){wgr_texture_destroy(_renderer,_earthSurfaceTexture);_earthSurfaceTexture=0;}
+            if(_earthFarTexture){wgr_texture_destroy(_renderer,_earthFarTexture);_earthFarTexture=0;}
+        }
         wgr_terrain_set_heightmap(_renderer, p.heights.data(), &_params);
-        EarthStreaming::Locations().PublishGround({p.x,p.z,p.gridMetres,Earth::GridSamples,p.originRevision,p.generation,p.heights});
         const auto extrema = std::minmax_element(p.heights.begin(),p.heights.end());
         LOG_INFO(Graphics, "Earth terrain patch {}: origin [{},{}], centre [{},{}], height {}..{}m, downloads {}, disk hits {}, worker {}s, geographic origin [{},{}], revision {}",
             p.generation,p.x,p.z,p.latitude,p.longitude,*extrema.first,*extrema.second,p.downloads,p.cacheHits,p.seconds,
@@ -3524,7 +3571,28 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             p.horizonRadius/1000.0f,p.horizonZoom,(_earthHorizonIndices+_earthNearIndices)/3);
         LOG_INFO(Graphics, "Earth near detail: grid {}m, source zoom {}, window {}km, recenter {}m",
             p.gridMetres,p.sourceZoom,p.gridMetres*256.0f/1000.0f,Earth::NearRecenter(p.gridMetres));
+    };
+    if (auto patch = _earthStream->TakeReady())
+    {
+        if (patch->originRevision!=origin.revision) return;
+        // Gameplay gets the new ground at once; the picture may lag it by a moment.
+        const auto& p = *patch;
+        EarthStreaming::Locations().PublishGround({p.x,p.z,p.gridMetres,Earth::GridSamples,p.originRevision,p.generation,p.heights});
+        // While textured terrain is showing, keep drawing it until the new patch's imagery is ready:
+        // swapping first dropped the ground to the bare globe image on every altitude band change.
+        if(_earthSurface && _earthSurfaceTexture && _earthPatch)
+        {
+            _earthPendingPatch = std::move(patch);
+            _earthPendingAt = std::chrono::steady_clock::now();
+        }
+        else
+        {
+            _earthPendingPatch.reset();
+            applyPatch(std::move(patch), false);
+        }
     }
+    if (_earthPendingPatch && std::chrono::steady_clock::now() - _earthPendingAt > std::chrono::seconds(12))
+        applyPatch(std::move(_earthPendingPatch), false); // imagery is not coming; show the geometry
     if (!_earthPatch) return;
     if(_earthWorldgen && _earthWorldgenGeneration!=_earthPatch->generation)
     {
@@ -3536,8 +3604,9 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
     _engine.QueueTerrainParams(_params);
     if(_earthSurface)
     {
-        _earthSurface->Request(*_earthPatch);
-        if(auto atlas=_earthSurface->TakeReady();atlas && atlas->window.revision==origin.revision && atlas->window.generation==_earthPatch->generation)
+        const EarthTerrainStream::Patch& wanted = _earthPendingPatch ? *_earthPendingPatch : *_earthPatch;
+        _earthSurface->Request(wanted);
+        if(auto atlas=_earthSurface->TakeReady();atlas && atlas->window.revision==origin.revision && atlas->window.generation==wanted.generation)
         {
             if(atlas->error.empty() && atlas->cellPresent)
             {
@@ -3548,6 +3617,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                 const auto farTexture=wgr_texture_create(_renderer,atlas->farSize,atlas->farSize,WGR_TEXTURE_RGBA8,1,
                     WGR_TEXTURE_GEN_MIPS,atlas->farPixels.data(),uint32_t(atlas->farPixels.size()));
                 if(!farTexture){wgr_texture_destroy(_renderer,texture);throw std::runtime_error("Earth far surface atlas allocation failed");}
+                // The pending patch and its imagery go in together.
+                if(_earthPendingPatch) applyPatch(std::move(_earthPendingPatch), true);
                 UploadEarthHorizon(*_earthPatch,true);
                 if(_earthSurfaceTexture)wgr_texture_destroy(_renderer,_earthSurfaceTexture);
                 _earthSurfaceTexture=texture;
@@ -3556,8 +3627,12 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                 LOG_INFO(Graphics,"Earth local surface: near 2048 / far {} (warped) atlases, generation {}, revision {}; {}",
                     atlas->farSize,atlas->window.generation,atlas->window.revision,atlas->sources);
             }
-            else LOG_INFO(Graphics,"Earth local surface: NASA fallback, generation {}, revision {}, {}",
-                atlas->window.generation,atlas->window.revision,atlas->error.empty()?"outside prepared Luxembourg cell":atlas->error);
+            else
+            {
+                if(_earthPendingPatch) applyPatch(std::move(_earthPendingPatch), false);
+                LOG_INFO(Graphics,"Earth local surface: NASA fallback, generation {}, revision {}, {}",
+                    atlas->window.generation,atlas->window.revision,atlas->error.empty()?"outside prepared Luxembourg cell":atlas->error);
+            }
         }
     }
     _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices,_earthFarTexture?_earthFarTexture:_earthGlobeTexture,_earthFarTexture?3:2,true);

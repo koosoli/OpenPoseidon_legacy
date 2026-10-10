@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 
 #include <Poseidon/Graphics/Core/ITerrainRenderer.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
@@ -130,6 +131,9 @@ class TerrainWgpu : public ITerrainRenderer
     std::unique_ptr<EarthTerrainStream::Patch> _earthPatch;
     std::unique_ptr<EarthBuildingStream> _earthBuildings;
     std::unique_ptr<EarthSurfaceStream> _earthSurface;
+    // A newer patch held back until its imagery is ready (or 12 s pass), so the textured ground stays up.
+    std::unique_ptr<EarthTerrainStream::Patch> _earthPendingPatch;
+    std::chrono::steady_clock::time_point _earthPendingAt{};
     std::string _earthImageryPath; // globe/overview image: POSEIDON_EARTH_IMAGERY or the provider overview
     std::unique_ptr<EarthFeatureStream> _earthFeatures;
     std::unique_ptr<EarthWorldgen> _earthWorldgen;
