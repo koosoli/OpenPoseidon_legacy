@@ -509,6 +509,10 @@ pub struct Grass {
     geography: wgpu::Texture,
     geography_view: wgpu::TextureView,
     terrain_generation: u64,
+    // Whole World: the streamed near patch the grass stands on instead of the native island (an empty
+    // placeholder in that mode), with its own geography; see set_earth_ground.
+    earth: Option<EarthGround>,
+    earth_gen: u64,
     // Sinkhole W1: the placement's own copy of the terrain hole edges, refreshed when the terrain's changes.
     holes: wgpu::Buffer,
     holes_gen: u64,
@@ -1564,6 +1568,8 @@ impl Grass {
             geography,
             geography_view,
             terrain_generation: u64::MAX,
+            earth: None,
+            earth_gen: 0,
             holes,
             holes_gen: 0,
             have_heightmap: false,
@@ -1895,6 +1901,8 @@ impl Grass {
         self.geography_view = self
             .geography
             .create_view(&wgpu::TextureViewDescriptor::default());
+        // the next prepare_terrain binds whichever ground is current
+        self.terrain_generation = u64::MAX;
         self.terrain_bind = make_terrain_bind(
             device,
             &self.terrain_layout,
@@ -1903,6 +1911,76 @@ impl Grass {
             &self.geography_view,
             &self.holes,
         );
+    }
+
+    /// Whole World: the grass stands on the streamed near patch -- `hm_n` x `hm_n` heights `grid` metres
+    /// apart from `origin` (frame x, z) -- with its own geography, `geo_n` x `geo_n` words `geo_cell`
+    /// metres apart over the same origin (bit 31: grass grows here; the engine derives it from the
+    /// satellite imagery). Replaces the native island's ground until clear_earth_ground.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_earth_ground(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        origin: [f32; 2],
+        grid: f32,
+        hm_n: u32,
+        heights: &[f32],
+        geo_cell: f32,
+        geo_n: u32,
+        geography: &[u32],
+        sea_level: f32,
+    ) {
+        if hm_n < 2 || geo_n == 0 || heights.len() < (hm_n * hm_n) as usize || geography.len() < (geo_n * geo_n) as usize {
+            return;
+        }
+        let heightmap = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("wgr_grass_earth_heightmap"),
+            size: wgpu::Extent3d { width: hm_n, height: hm_n, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: &heightmap, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            bytemuck::cast_slice(&heights[..(hm_n * hm_n) as usize]),
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(hm_n * 4), rows_per_image: Some(hm_n) },
+            wgpu::Extent3d { width: hm_n, height: hm_n, depth_or_array_layers: 1 },
+        );
+        let geo = make_geography_texture(device, geo_n, geo_n);
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: &geo, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            bytemuck::cast_slice(&geography[..(geo_n * geo_n) as usize]),
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(geo_n * 4), rows_per_image: Some(geo_n) },
+            wgpu::Extent3d { width: geo_n, height: geo_n, depth_or_array_layers: 1 },
+        );
+        self.earth_gen += 1;
+        self.pending_log.push(format!(
+            "Wgpu grass: Earth ground {hm_n}x{hm_n} heights from ({:.0}, {:.0}) every {grid:.2} m, geography {geo_n}x{geo_n} every {geo_cell:.2} m (gen {})",
+            origin[0], origin[1], self.earth_gen
+        ));
+        self.earth = Some(EarthGround {
+            heightmap_view: heightmap.create_view(&wgpu::TextureViewDescriptor::default()),
+            _heightmap: heightmap,
+            geography_view: geo.create_view(&wgpu::TextureViewDescriptor::default()),
+            _geography: geo,
+            origin,
+            grid,
+            hm_n,
+            geo_cell,
+            geo_n,
+            sea_level,
+        });
+    }
+
+    /// Back to the native island's ground (leaving Whole World, or relocating before the next patch).
+    pub fn clear_earth_ground(&mut self) {
+        if self.earth.take().is_some() {
+            self.terrain_generation = u64::MAX;
+        }
     }
 
     pub fn set_params(&mut self, queue: &wgpu::Queue, params: WgrGrassParams) {
@@ -2214,7 +2292,17 @@ impl Grass {
         queue: &wgpu::Queue,
         terrain: &Terrain,
     ) {
-        let params = terrain.params();
+        let mut params = terrain.params();
+        if let Some(e) = &self.earth {
+            // the Earth patch's frame: same time, wind, snowline and sea, its own grid
+            params.world_origin = glam::Vec2::new(e.origin[0], e.origin[1]);
+            params.terrain_grid = e.grid;
+            params.hm_width = e.hm_n;
+            params.hm_height = e.hm_n;
+            params.land_grid = e.geo_cell;
+            params.land_range = e.geo_n;
+            params.sea_level = e.sea_level;
+        }
         let (advection, flutter) = self.wind_phase.advance(params.time,
             self.last_params.wind_strength, self.last_params.wind_direction, self.last_params.wind_scroll);
         self.last_params.wind_advection = advection;
@@ -2226,16 +2314,28 @@ impl Grass {
             self.holes_gen = terrain.holes_gen();
             queue.write_buffer(&self.holes, 0, bytemuck::cast_slice(terrain.holes_data()));
         }
-        self.have_heightmap = terrain.has_heightmap();
-        if self.terrain_generation != terrain.heightmap_gen() {
-            self.terrain_generation = terrain.heightmap_gen();
-            self.heightmap_view = terrain.heightmap_view();
+        self.have_heightmap = terrain.has_heightmap() || self.earth.is_some();
+        // the Earth ground's generations live in the top half so they never meet the terrain's
+        let wanted = if self.earth.is_some() { (1u64 << 63) | self.earth_gen } else { terrain.heightmap_gen() };
+        if self.terrain_generation != wanted {
+            if self.earth.is_some() {
+                self.pending_log.push(format!(
+                    "Wgpu grass: placing on the Earth ground (enabled {}, heightmap {})", self.enabled, self.have_heightmap));
+            }
+            self.terrain_generation = wanted;
+            let (heightmap, geography) = match &self.earth {
+                Some(e) => (e.heightmap_view.clone(), e.geography_view.clone()),
+                None => {
+                    self.heightmap_view = terrain.heightmap_view();
+                    (self.heightmap_view.clone(), self.geography_view.clone())
+                }
+            };
             self.terrain_bind = make_terrain_bind(
                 device,
                 &self.terrain_layout,
                 &self.terrain_params,
-                &self.heightmap_view,
-                &self.geography_view,
+                &heightmap,
+                &geography,
                 &self.holes,
             );
         }
@@ -2722,6 +2822,20 @@ fn default_layer_bounds() -> [f32; 128] {
         out[layer * 4 + 3] = 1.0;
     }
     out
+}
+
+/// Whole World's ground for the grass (set_earth_ground).
+struct EarthGround {
+    _heightmap: wgpu::Texture,
+    heightmap_view: wgpu::TextureView,
+    _geography: wgpu::Texture,
+    geography_view: wgpu::TextureView,
+    origin: [f32; 2],
+    grid: f32,
+    hm_n: u32,
+    geo_cell: f32,
+    geo_n: u32,
+    sea_level: f32,
 }
 
 fn make_geography_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {

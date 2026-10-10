@@ -466,6 +466,62 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
 // Mediterranean), at its natural size give or take 15%. False (and nothing placed) when the models
 // are unavailable -- Demo data, the GPU-driven path off, WGR_EARTH_TREE_MODELS=0 -- and the coarse
 // batch with the procedural detail tier carries the trees instead.
+// what UploadEarthGrass reads of a surface atlas (kept out of the header)
+struct EarthSurfaceStreamAtlasRef
+{
+    const EarthSurfaceStream::Window& window;
+    const std::vector<uint8_t>& pixels;
+};
+
+// Whole World grass. The grass stands on the near patch (its heights, its grid) and grows where the
+// satellite atlas shows meadow: green dominant and neither the dark green of a forest canopy nor the
+// grey of road, roof and rock, the blue of water or the white of snow; dry grass and stubble (yellow
+// green) count too. Read per 3 m cell from the near atlas through its own chart (NearUv), so the mask
+// lies exactly under the imagery the ground is drawn with. WGR_EARTH_GRASS=0 keeps the earth bare.
+bool TerrainWgpu::UploadEarthGrass(const EarthTerrainStream::Patch& patch, const EarthSurfaceStreamAtlasRef& atlas)
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_EARTH_GRASS");
+        return !(v && v[0] == '0');
+    }();
+    constexpr uint32_t HmN = 257, GeoN = 512;
+    const int size = EarthSurfaceStream::AtlasSize;
+    if (!enabled || patch.heights.size() != size_t(HmN) * HmN || atlas.pixels.size() != size_t(size) * size * 4 ||
+        !(patch.gridMetres > 0))
+        return false;
+    const float span = patch.gridMetres * float(HmN - 1), cell = span / float(GeoN);
+    std::vector<uint32_t> geography(size_t(GeoN) * GeoN, 0);
+    size_t grass = 0;
+    for (uint32_t j = 0; j < GeoN; ++j)
+        for (uint32_t i = 0; i < GeoN; ++i)
+        {
+            const double x = patch.x + (i + 0.5) * cell, z = patch.z + (j + 0.5) * cell;
+            const auto uv = EarthSurfaceStream::NearUv(EarthSurfaceStream::LocalUv(atlas.window, x, z));
+            if (!(uv.x >= 0 && uv.x < 1 && uv.y >= 0 && uv.y < 1))
+                continue;
+            const size_t k = (size_t(uv.y * size) * size + size_t(uv.x * size)) * 4;
+            const float r = atlas.pixels[k] / 255.0f, g = atlas.pixels[k + 1] / 255.0f, b = atlas.pixels[k + 2] / 255.0f;
+            const float lum = 0.299f * r + 0.587f * g + 0.114f * b;
+            const bool meadow = g >= r * 0.95f && g >= b * 1.12f && lum > 0.16f && lum < 0.75f;
+            const bool dry = r >= g && g >= b * 1.15f && r - g < 0.12f && lum > 0.28f && lum < 0.75f;
+            // diagnostic: WGR_EARTH_GRASS_ALL=1 grows grass on every cell, to tell the mask from the placement
+            static const bool all = std::getenv("WGR_EARTH_GRASS_ALL") != nullptr;
+            if (meadow || dry || all)
+            {
+                geography[size_t(j) * GeoN + i] = 0x80000000u;
+                ++grass;
+            }
+        }
+    EngineWgpu::AcquireProducerWindow("Earth grass ground");
+    wgr_grass_set_earth_ground(_renderer, patch.x, patch.z, patch.gridMetres, HmN, patch.heights.data(), cell, GeoN,
+                               geography.data(), 0.0f);
+    const auto [lo, hi] = std::minmax_element(patch.heights.begin(), patch.heights.end());
+    LOG_INFO(Graphics, "Earth grass: {:.0f}% of the near patch ({:.1f} km from {:.0f}, {:.0f}; {:.1f} m cells; ground {:.0f}..{:.0f} m) reads as meadow in the imagery",
+             100.0 * double(grass) / double(geography.size()), span / 1000.0f, patch.x, patch.z, cell, *lo, *hi);
+    return true;
+}
+
 bool TerrainWgpu::PlaceEarthTreeModels(const std::vector<EarthFeatureStream::TreeInstance>& trees)
 {
     _engine.ClearEarthTreeObjects();
@@ -3588,6 +3644,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         _engine.ClearEarthWorldgenObjects();
         if(_earthTreeDetail)_earthTreeDetail->Clear();
         _engine.ClearEarthTreeObjects();_earthTreeModels=false;
+        if(_earthGrass){EngineWgpu::AcquireProducerWindow("Earth grass relocate");wgr_grass_clear_earth_ground(_renderer);_earthGrass=false;}
         for(size_t i=0;i<_earthFeatureMeshes.size();++i)if(_earthFeatureMeshes[i]){EngineWgpu::AcquireProducerWindow("Earth features relocate");wgr_mesh_destroy(_renderer,_earthFeatureMeshes[i]);_earthFeatureMeshes[i]=0;_earthFeatureIndices[i]=0;}
 
         if(_earthBuildings)_earthBuildings->Relocate();
@@ -3714,6 +3771,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                 UploadEarthHorizon(*_earthPatch,true);
                 if(_earthSurfaceTexture)wgr_texture_destroy(_renderer,_earthSurfaceTexture);
                 _earthSurfaceTexture=texture;
+                _earthGrass=UploadEarthGrass(*_earthPatch,EarthSurfaceStreamAtlasRef{atlas->window,atlas->pixels});
                 if(_earthFarTexture)wgr_texture_destroy(_renderer,_earthFarTexture);
                 _earthFarTexture=farTexture;
                 LOG_INFO(Graphics,"Earth local surface: near 2048 / far {} (warped) atlases, generation {}, revision {}; {}",
@@ -3916,6 +3974,20 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         if (camera)
         {
             DrawEarthTerrain(scene,*camera,land);
+            // grass on the near patch where the imagery shows meadow (UploadEarthGrass)
+            if (_earthGrass && camera->Position().Y() < 6000.0f)
+            {
+                _engine.SubmitGrass();
+                static float nextLog = 0;
+                Engine::GrassStatsOut stats;
+                if (Glob.time.toFloat() >= nextLog && _engine.GetGrassStats(stats))
+                {
+                    nextLog = Glob.time.toFloat() + 30.0f;
+                    LOG_INFO(Graphics, "Earth grass placed: near {} mid {} far {} (camera {:.0f}, {:.0f}, {:.0f})",
+                             stats.nearInstances, stats.midInstances, stats.farInstances, camera->Position().X(),
+                             camera->Position().Y(), camera->Position().Z());
+                }
+            }
             // Tidewater wildlife in whole-world mode (WildlifeWorld.hpp answers its sea and ground)
             if (!_fish)
                 _fish = std::make_unique<FishSchools>(_engine, _renderer);

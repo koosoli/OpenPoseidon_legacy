@@ -2842,6 +2842,13 @@ extern "C"
     /* Upload one GeographyInfo::packed value per land cell. Grass uses the
      * existing authoritative water/road/forest/obstacle classification before
      * attempting any optional artist-authored exclusion masks. */
+    /* Whole World: the grass stands on the streamed near patch (hm_n x hm_n heights, `grid` m apart from
+     * frame (origin_x, origin_z)) with its own geography (geo_n x geo_n words, `geo_cell` m apart, bit 31 =
+     * grass), instead of the native island, until wgr_grass_clear_earth_ground. */
+    WGR_API void wgr_grass_set_earth_ground(WgrRenderer* renderer, float origin_x, float origin_z, float grid, uint32_t hm_n,
+                                            const float* heights, float geo_cell, uint32_t geo_n, const uint32_t* geography,
+                                            float sea_level);
+    WGR_API void wgr_grass_clear_earth_ground(WgrRenderer* renderer);
     WGR_API void wgr_grass_set_geography(WgrRenderer* renderer, uint32_t width, uint32_t height,
                                          const uint32_t* geography);
     WGR_API void wgr_grass_set_params(WgrRenderer* renderer, const WgrGrassParams* params);

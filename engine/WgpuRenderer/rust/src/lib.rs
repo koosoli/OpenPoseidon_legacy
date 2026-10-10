@@ -7215,6 +7215,16 @@ impl Renderer {
             .set_geography(&self.device, &self.queue, width, height, values);
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn grass_set_earth_ground(&mut self, origin: [f32; 2], grid: f32, hm_n: u32, heights: &[f32], geo_cell: f32, geo_n: u32,
+                              geography: &[u32], sea_level: f32) {
+        self.grass.set_earth_ground(&self.device, &self.queue, origin, grid, hm_n, heights, geo_cell, geo_n, geography, sea_level);
+    }
+
+    fn grass_clear_earth_ground(&mut self) {
+        self.grass.clear_earth_ground();
+    }
+
     // GRS-E — the game's decoded grass-tuft PAA for the mid LOD's crossed cards.
     fn grass_set_tuft(&mut self, width: u32, height: u32, rgba: &[u8]) {
         self.grass

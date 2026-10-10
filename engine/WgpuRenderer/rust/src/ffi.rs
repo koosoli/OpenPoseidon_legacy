@@ -3491,6 +3491,51 @@ pub unsafe extern "C" fn wgr_grass_set_geography(
     }));
 }
 
+/// Whole World: the grass stands on the streamed near patch (`hm_n` x `hm_n` heights, `grid` m apart
+/// from frame (origin_x, origin_z)) with its own geography (`geo_n` x `geo_n` words, `geo_cell` m apart,
+/// bit 31 = grass), instead of the native island, until wgr_grass_clear_earth_ground.
+///
+/// # Safety
+/// `renderer` must be live; `heights` must hold `hm_n * hm_n` floats and `geography` `geo_n * geo_n` words.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_earth_ground(
+    renderer: *mut WgrRenderer,
+    origin_x: f32,
+    origin_z: f32,
+    grid: f32,
+    hm_n: u32,
+    heights: *const f32,
+    geo_cell: f32,
+    geo_n: u32,
+    geography: *const u32,
+    sea_level: f32,
+) {
+    if renderer.is_null() || heights.is_null() || geography.is_null() || hm_n < 2 || geo_n == 0 {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let heights = unsafe { std::slice::from_raw_parts(heights, (hm_n * hm_n) as usize) };
+        let geography = unsafe { std::slice::from_raw_parts(geography, (geo_n * geo_n) as usize) };
+        renderer.grass_set_earth_ground([origin_x, origin_z], grid, hm_n, heights, geo_cell, geo_n, geography, sea_level);
+    }));
+}
+
+/// Back to the native island's ground for the grass.
+///
+/// # Safety
+/// `renderer` must be live or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_clear_earth_ground(renderer: *mut WgrRenderer) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        renderer.grass_clear_earth_ground();
+    }));
+}
+
 /// GRS-E — upload the photographed grass-tuft texture for the mid LOD's crossed
 /// cards. `rgba` is `width * height` RGBA8 texels.
 ///
