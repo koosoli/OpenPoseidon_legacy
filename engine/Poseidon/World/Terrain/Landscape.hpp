@@ -576,6 +576,12 @@ class Landscape : public SerializeClass
     // the native loader only; empty (Size 0) on every other world, which is what keeps
     // the clutter-clearing inert there. Cleared in Init() like _enfusionSurfaces.
     std::vector<uint8_t> _enfusionRoadCells;
+    // RFG-PBR: the native surface map at a few metres a texel (row-major, z * edge + x; the palette
+    // index of _enfusionSurfaces), down from the 1 m TMAT masks. The land cell's single index is
+    // one 1 m sample at its centre -- a 12.5 m staircase along every field edge; the terrain
+    // shader blends this map instead. Empty on every world the native loader did not build.
+    std::vector<uint8_t> _enfusionSurfaceMap;
+    int _enfusionSurfaceEdge = 0;
     // Dev switch (Grass > "Clutter cleared under Enfusion roads"): whether the bake
     // honours _enfusionRoadCells. A process-wide flag rather than a GrassSettings field
     // because the mask is a WORLD fact that lives here; the terrain re-bakes when it moves.
@@ -1208,6 +1214,12 @@ class Landscape : public SerializeClass
     // The Enfusion surface `.emat` this palette entry was bound from, or "" -- and 0 on
     // every world that is not a natively loaded Reforger one. See _enfusionSurfaces.
     int GetEnfusionSurfaceCount() const { return _enfusionSurfaces.Size(); }
+    // The native surface map (see _enfusionSurfaceMap): its texels and edge, or edge 0.
+    const std::vector<uint8_t>& GetEnfusionSurfaceMap(int& edge) const
+    {
+        edge = _enfusionSurfaceEdge;
+        return _enfusionSurfaceMap;
+    }
     const char* GetEnfusionSurface(int id) const
     {
         return id >= 0 && id < _enfusionSurfaces.Size() ? (const char*)_enfusionSurfaces[id] : "";

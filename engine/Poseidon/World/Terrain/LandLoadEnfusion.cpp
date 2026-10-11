@@ -1904,6 +1904,33 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
         }
     }
 
+    // RFG-PBR: the surface map the terrain shader blends, point-sampled at texel centres out of the
+    // 1 m masks onto a 4096 grid (3.1 m on Everon; 16 MB on the GPU as R8). The land cell keeps its
+    // single index above for everything that wants one (clutter, AI, the rain medium).
+    _enfusionSurfaceMap.clear();
+    _enfusionSurfaceEdge = 0;
+    if (terrain.materialEdge > 0)
+    {
+        const int edge = static_cast<int>(std::min<uint32_t>(terrain.materialEdge, 4096));
+        _enfusionSurfaceMap.assign(static_cast<size_t>(edge) * edge, 0);
+        for (int z = 0; z < edge; ++z)
+        {
+            const uint32_t mz = std::min<uint32_t>(
+                terrain.materialEdge - 1,
+                static_cast<uint32_t>((z + 0.5) * terrain.materialEdge / edge));
+            for (int x = 0; x < edge; ++x)
+            {
+                const uint32_t mx = std::min<uint32_t>(
+                    terrain.materialEdge - 1,
+                    static_cast<uint32_t>((x + 0.5) * terrain.materialEdge / edge));
+                const uint8_t sample = terrain.materials[static_cast<size_t>(mz) * terrain.materialEdge + mx];
+                _enfusionSurfaceMap[static_cast<size_t>(z) * edge + x] =
+                    sample != 0xFF && sample < d.materials.size() ? sample : 0;
+            }
+        }
+        _enfusionSurfaceEdge = edge;
+    }
+
     // The palette itself. The names resolve to nothing yet -- they are `.emat` paths
     // INSIDE the archives, and the engine's file layer cannot open a `.pak` -- so the
     // ground still draws in the fallback. What is right now is the INDEX per cell,

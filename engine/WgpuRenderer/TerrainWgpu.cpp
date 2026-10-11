@@ -1183,6 +1183,27 @@ void TerrainWgpu::UploadIndexMap(const Landscape& land)
     }
     EngineWgpu::AcquireProducerWindow("terrain index map");
     wgr_terrain_set_index_map(_renderer, static_cast<uint32_t>(n), static_cast<uint32_t>(n), indices.data());
+    // RFG-PBR: a native Reforger world's fine surface map for the blend (see terrain.wgsl
+    // surface_grid); WGR_TERRAIN_SURFACE_MAP=0 keeps the land-cell index.
+    {
+        static const bool enabled = []
+        {
+            const char* v = std::getenv("WGR_TERRAIN_SURFACE_MAP");
+            return !(v && v[0] == '0');
+        }();
+        int edge = 0;
+        const std::vector<uint8_t>& map = land.GetEnfusionSurfaceMap(edge);
+        _surfaceGrid = 0.0f;
+        if (enabled && edge > 0 && map.size() == static_cast<size_t>(edge) * edge)
+        {
+            wgr_terrain_set_surface_map(_renderer, static_cast<uint32_t>(edge), map.data());
+            _surfaceGrid = land.GetLandGrid() * static_cast<float>(n) / static_cast<float>(edge);
+            LOG_INFO(Graphics, "Wgpu terrain surface map: {}x{} native surface texels at {:.2f} m (land cells {:.2f} m)",
+                     edge, edge, _surfaceGrid, land.GetLandGrid());
+        }
+        else
+            wgr_terrain_set_surface_map(_renderer, 0, nullptr);
+    }
 }
 
 static bool StartsWithNoCase(const char* text, const char* prefix)
@@ -4130,6 +4151,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     // checkbox is a live A/B with no re-upload. It reaches the shader as 0 on every
     // world whose materials do not set `enfusion`, so it is inert there by data.
     _params.enfusion_ground = _enfusionGroundEnabled ? 1.0f : 0.0f;
+    _params._pad4 = _surfaceGrid; // RFG-PBR: terrain.wgsl surface_grid
     // Alpine snowline (dev weather tab): permanent cover above a height, pushed
     // per frame like the wet band so the slider is live. Off = -1.
     _params.snowline_height =

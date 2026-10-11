@@ -362,6 +362,8 @@ pub struct Terrain {
     pad_view: wgpu::TextureView,
     partially_bound: bool,
     index_map: wgpu::Texture,
+    // RFG-PBR: a native world's fine surface map (palette index per texel); 1x1 elsewhere
+    surface_map: wgpu::Texture,
     detail_view: wgpu::TextureView,
     jitter_map: wgpu::Texture,
     materials: wgpu::Buffer,
@@ -584,6 +586,17 @@ impl Terrain {
                         min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<
                             WgrTerrainMaterial,
                         >() as u64),
+                    },
+                    count: None,
+                },
+                // RFG-PBR: a native world's fine surface map (set_surface_map); 1x1 elsewhere
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
                     count: None,
                 },
@@ -838,6 +851,7 @@ impl Terrain {
             anisotropy_clamp: 16,
             ..Default::default()
         });
+        let surface_map = create_surface_map(device, 1);
         let group2_bind = make_group2(
             device,
             &group2_layout,
@@ -850,6 +864,7 @@ impl Terrain {
             &materials,
             &ground_sampler,
             &ground_clamp_sampler,
+            &surface_map,
         );
 
         let (grid_vbuf, grid_ibuf, grid_index_count) = build_grid(device);
@@ -1139,6 +1154,7 @@ impl Terrain {
             pad_view: white_view,
             partially_bound,
             index_map,
+            surface_map,
             detail_view,
             jitter_map,
             materials,
@@ -1705,6 +1721,26 @@ impl Terrain {
         self.rebuild_group2(device);
     }
 
+    /// RFG-PBR: a native Reforger world's surface map, `edge` x `edge` palette indices (u8) over the
+    /// whole land; the terrain shader blends it instead of the one-sample-per-land-cell index when
+    /// the params' `surface_grid` (metres per texel) is above zero. Empty data clears it.
+    pub fn set_surface_map(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, edge: u32, data: &[u8]) {
+        if edge == 0 || edge > self.max_dim || data.len() < (edge as usize) * (edge as usize) {
+            self.surface_map = create_surface_map(device, 1);
+            self.rebuild_group2(device);
+            return;
+        }
+        let map = create_surface_map(device, edge);
+        queue.write_texture(
+            texel_copy(&map),
+            &data[..(edge as usize) * (edge as usize)],
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(edge), rows_per_image: Some(edge) },
+            wgpu::Extent3d { width: edge, height: edge, depth_or_array_layers: 1 },
+        );
+        self.surface_map = map;
+        self.rebuild_group2(device);
+    }
+
     pub fn set_materials(
         &mut self,
         device: &wgpu::Device,
@@ -1778,6 +1814,7 @@ impl Terrain {
             &self.materials,
             &self.ground_sampler,
             &self.ground_clamp_sampler,
+            &self.surface_map,
         );
     }
 
@@ -2025,6 +2062,19 @@ fn make_sweep_bind(
     })
 }
 
+fn create_surface_map(device: &wgpu::Device, edge: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("wgr_terrain_surface_map"),
+        size: wgpu::Extent3d { width: edge, height: edge, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R8Uint,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
+}
+
 fn create_index_map(device: &wgpu::Device, w: u32, h: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("wgr_terrain_index_map"),
@@ -2073,6 +2123,7 @@ fn make_group2(
     materials: &wgpu::Buffer,
     sampler: &wgpu::Sampler,
     clamp_sampler: &wgpu::Sampler,
+    surface_map: &wgpu::Texture,
 ) -> wgpu::BindGroup {
     // Without PARTIALLY_BOUND_BINDING_ARRAY every declared slot must be bound,
     // so pad the tail; the shader never indexes past the real layer count.
@@ -2082,6 +2133,7 @@ fn make_group2(
     }
     let index_view = index_map.create_view(&wgpu::TextureViewDescriptor::default());
     let jitter_view = jitter_map.create_view(&wgpu::TextureViewDescriptor::default());
+    let surface_view = surface_map.create_view(&wgpu::TextureViewDescriptor::default());
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("wgr_terrain_group2_bind"),
         layout,
@@ -2113,6 +2165,10 @@ fn make_group2(
             wgpu::BindGroupEntry {
                 binding: 6,
                 resource: materials.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::TextureView(&surface_view),
             },
         ],
     })

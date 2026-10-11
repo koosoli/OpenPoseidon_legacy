@@ -2736,6 +2736,10 @@ extern "C"
      * Bit 15 marks a clamped transition tile: its texture maps exactly once onto
      * the cell with edges extended (GL33's ClampU|ClampV) instead of tiling.
      * `indices` is width*height uint16s. */
+    /* RFG-PBR: a native Reforger world's surface map, edge x edge palette indices (one byte each),
+     * blended by the terrain shader when WgrTerrainParams::_pad4 (the surface grid, metres per
+     * texel) is above zero. edge 0 clears it. */
+    WGR_API void wgr_terrain_set_surface_map(WgrRenderer* renderer, uint32_t edge, const uint8_t* data);
     WGR_API void wgr_terrain_set_index_map(WgrRenderer* renderer, uint32_t width, uint32_t height,
                                            const uint16_t* indices);
 

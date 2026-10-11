@@ -7242,6 +7242,10 @@ impl Renderer {
         self.terrain.set_ground_layers(&self.device, views);
     }
 
+    fn terrain_set_surface_map(&mut self, edge: u32, data: &[u8]) {
+        self.terrain.set_surface_map(&self.device, &self.queue, edge, data);
+    }
+
     fn terrain_set_index_map(&mut self, width: u32, height: u32, indices: &[u16]) {
         self.terrain
             .set_index_map(&self.device, &self.queue, width, height, indices);

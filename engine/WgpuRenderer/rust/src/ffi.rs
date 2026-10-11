@@ -3456,6 +3456,27 @@ pub unsafe extern "C" fn wgr_terrain_set_ground_layers(
     }));
 }
 
+/// RFG-PBR: a native Reforger world's surface map, `edge` x `edge` palette indices (one byte each),
+/// for the terrain shader's blend (see terrain::set_surface_map). `edge` 0 clears it.
+///
+/// # Safety
+/// `renderer` must be live; `data` must hold `edge * edge` bytes (or be null with edge 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_surface_map(renderer: *mut WgrRenderer, edge: u32, data: *const u8) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        if data.is_null() || edge == 0 {
+            renderer.terrain_set_surface_map(0, &[]);
+            return;
+        }
+        let slice = unsafe { std::slice::from_raw_parts(data, (edge as usize) * (edge as usize)) };
+        renderer.terrain_set_surface_map(edge, slice);
+    }));
+}
+
 /// Upload the per-land-cell texture index map (R16Uint). See wgpu_renderer.hpp.
 ///
 /// # Safety

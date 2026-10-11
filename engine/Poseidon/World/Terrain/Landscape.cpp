@@ -73,6 +73,8 @@ void Landscape::Init()
     // Reforger one would otherwise inherit its surface names and grow Everon's clutter
     // on Malden. The native loader refills this immediately after calling Init().
     _enfusionSurfaces.Resize(0);
+    _enfusionSurfaceMap.clear();
+    _enfusionSurfaceEdge = 0;
     _enfusionRoadCells.clear(); // same hazard: Everon's roads would clear Malden's clutter
     const ParamEntry& sky = Remaster >> "CfgLandscapeSky";
     RStringB skyName = sky >> "sky" >> "model";

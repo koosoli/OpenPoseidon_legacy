@@ -48,7 +48,8 @@ struct TerrainParams {
     rain_wetness: f32, // cosmetic rain history [0,1], former padding at offset 72
     rain_strength: f32, // effective liquid rain, former padding at offset 76
     _pad3: f32,
-    _pad4: f32,
+    // RFG-PBR: metres per texel of the native surface map (surface_map); 0 = the land-cell index
+    surface_grid: f32,
 };
 
 // Must match GRID_N in terrain/mod.rs.
@@ -176,6 +177,8 @@ fn terrain_snow_normal(xz: vec2<f32>, world_y: f32, geometric: vec3<f32>,
 @group(2) @binding(5) var jitter_map: texture_2d<f32>;
 #import terrain_material::{TerrainUv, TerrainMaterial, TERRAIN_SURFACE_SLOTS}
 @group(2) @binding(6) var<storage, read> terrain_materials: array<TerrainMaterial>;
+// RFG-PBR: a native Reforger world's surface map (palette index per texel; see surface_grid)
+@group(2) @binding(7) var surface_map: texture_2d<u32>;
 
 // TW-WATER W3b — Tidewater Native's wet sand (bind group 3, see shore_wet.rs). In Tidewater mode
 // the coast's wetness comes from the shore simulation's wet channel, and the foam the draining
@@ -414,6 +417,11 @@ fn sample_mud_normal(world_xz: vec2<f32>, step: f32, footprint: f32) -> vec3<f32
 // instead of tiling).
 const CELL_LAYER_MASK: u32 = 0x7fffu;
 const CELL_CLAMPED: u32 = 0x8000u;
+
+fn surface_entry(texel: vec2<i32>) -> u32 {
+    let dim = vec2<i32>(textureDimensions(surface_map));
+    return textureLoad(surface_map, clamp(texel, vec2<i32>(0), dim - vec2<i32>(1)), 0).x;
+}
 
 fn cell_entry(cell: vec2<i32>) -> u32 {
     let cx = clamp(cell.x, 0, i32(tp.land_range) - 1);
@@ -1194,17 +1202,34 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let dwy_tex = dwy * gscale;
     let cc = cell_pos - vec2<f32>(0.5);
     let base = floor(cc);
-    let f = cc - base;
+    var f = cc - base;
     let bi = vec2<i32>(i32(base.x), i32(base.y));
-    let e00 = cell_entry(bi + vec2<i32>(0, 0));
-    let e10 = cell_entry(bi + vec2<i32>(1, 0));
-    let e01 = cell_entry(bi + vec2<i32>(0, 1));
-    let e11 = cell_entry(bi + vec2<i32>(1, 1));
+    var e00 = cell_entry(bi + vec2<i32>(0, 0));
+    var e10 = cell_entry(bi + vec2<i32>(1, 0));
+    var e01 = cell_entry(bi + vec2<i32>(0, 1));
+    var e11 = cell_entry(bi + vec2<i32>(1, 1));
+    var bw = clamp(blend_width, 0.001, 0.5);
+    // RFG-PBR: on a native Reforger world the four entries come from the fine surface map (a few
+    // metres a texel, from the 1 m authored masks) instead of the land cells, whose single index is
+    // one 1 m sample at a 12.5 m cell's centre -- the staircase along every field edge. A full,
+    // smoothstepped bilinear blend over each texel turns the 3 m steps into soft edges. Native
+    // surfaces tile in world space, so the land-cell `base` stays the cell argument below (it only
+    // positions clamped transition tiles, which these never are).
+    if (tp.surface_grid > 0.0) {
+        let sp = (in.world_xz - tp.world_origin) / tp.surface_grid - vec2<f32>(0.5);
+        let sb = floor(sp);
+        f = sp - sb;
+        let si = vec2<i32>(sb);
+        e00 = surface_entry(si);
+        e10 = surface_entry(si + vec2<i32>(1, 0));
+        e01 = surface_entry(si + vec2<i32>(0, 1));
+        e11 = surface_entry(si + vec2<i32>(1, 1));
+        bw = 0.5;
+    }
 
     // Sharpen the fraction so the cross-fade concentrates in a band around the
     // cell boundary (f = 0.5) rather than ramping across the whole cell. Endpoints
     // stay 0/1, so neighbouring samples remain seamless.
-    let bw = clamp(blend_width, 0.001, 0.5);
     let fx = smoothstep(0.5 - bw, 0.5 + bw, f.x);
     let fy = smoothstep(0.5 - bw, 0.5 + bw, f.y);
     let w00 = (1.0 - fx) * (1.0 - fy);
