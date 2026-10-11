@@ -2136,9 +2136,7 @@ void GameApplication::RunMainLoop()
                         const float fov = std::strtof(fovEnv, nullptr);
                         if (fov > 0.05f && fov < 3.0f)
                         {
-                            camera->SetFOVRange(fov, fov);
-                            camera->SetFOV(fov);
-                            camera->Commit(0.0f);
+                            camera->SetManualFov(fov);
                             LOG_INFO(Core, "--test-world-freefly: fov {} (POSEIDON_FREEFLY_FOV)", fov);
                         }
                     }

@@ -117,6 +117,8 @@ class CameraVehicle : public CameraHolder
     ~CameraVehicle() override;
 
     void ResetTargets();
+    //! A manual camera's own fov (what keypad zoom drives), set directly.
+    void SetManualFov(float fov) { _lastFov = _minFov = _maxFov = fov; }
     // Debug free-fly can opt into Game Master-style speed scaling.
     void SetAltitudeSpeedScaling(bool enabled) { _altitudeSpeedScaling = enabled; }
     void SetMouseLookRequiresRightButton(bool enabled) { _mouseLookRequiresRightButton = enabled; }
