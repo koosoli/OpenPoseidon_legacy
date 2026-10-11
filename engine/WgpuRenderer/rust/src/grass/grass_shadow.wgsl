@@ -98,7 +98,11 @@ fn clump_noise(world_xz: vec2<f32>, frequency: f32, salt: u32) -> f32 {
 // Mirrors grass.wgsl. A blade tapered by the LOD dissolve must cast the shadow
 // of the size actually drawn, or the join reappears in the shadow map.
 fn lod_height_scale(packed_z: u32) -> f32 {
-    return mix(0.45, 1.0, unpack2x16unorm(packed_z).x);
+    // x = ring fade (floored at 0.45: the dissolve already removes clumps), y = how far into a
+    // meadow margin the clump stands (grass_edge_presence, stored inverted so 0 = full height):
+    // margin blades come down to a quarter, which is what makes the edge read as a fade.
+    let f = unpack2x16unorm(packed_z);
+    return mix(0.45, 1.0, f.x) * (1.0 - 0.75 * f.y);
 }
 
 fn native_blade_height_scale() -> f32 {

@@ -509,11 +509,19 @@ fn pack_lod_fade(fade: f32) -> u32 {
     return pack2x16unorm(vec2<f32>(clamp(fade, 0.0, 1.0), 0.0));
 }
 
+fn pack_lod_fade_edge(fade: f32, presence: f32) -> u32 {
+    return pack2x16unorm(vec2<f32>(clamp(fade, 0.0, 1.0), 1.0 - clamp(presence, 0.0, 1.0)));
+}
+
 // Height multiplier from the cached fade. It deliberately stops at 0.45 rather
 // than 0: the dissolve removes the clump, so shrinking it to nothing as well
 // would thin the join twice over.
 fn lod_height_scale(packed_z: u32) -> f32 {
-    return mix(0.45, 1.0, unpack2x16unorm(packed_z).x);
+    // x = ring fade (floored at 0.45: the dissolve already removes clumps), y = how far into a
+    // meadow margin the clump stands (grass_edge_presence, stored inverted so 0 = full height):
+    // margin blades come down to a quarter, which is what makes the edge read as a fade.
+    let f = unpack2x16unorm(packed_z);
+    return mix(0.45, 1.0, f.x) * (1.0 - 0.75 * f.y);
 }
 
 // Which photographed atlas layer a clump uses. Layer 0 is the primary clump and
@@ -664,16 +672,17 @@ fn grass_edge_presence(world_xz: vec2<f32>, own_geo: u32) -> f32 {
     let sum = w00 + w10 + w01 + w11;
     if (sum >= 3.999) { return 1.0; }
     if (sum <= 0.001) { return 0.0; }
-    let s = f * f * (vec2<f32>(3.0) - 2.0 * f);
-    let b = mix(mix(w00, w10, s.x), mix(w01, w11, s.x), s.y);
+    // Linear, not smoothstepped: a smoothstep is steepest exactly on the cell boundary, which
+    // squeezed the whole margin into a few metres there.
+    let b = mix(mix(w00, w10, f.x), mix(w01, w11, f.x), f.y);
     // Two octaves of value noise, ~0.6 and ~0.17 of a cell, scaled to the cell so a coarse world and a fine
     // one get the same proportion of wander.
     let cell_m = max(terrain.land_grid, 1.0);
     let n = clump_noise(world_xz, 1.7 / cell_m, 0x5e3a91c7u) * 0.6 +
             clump_noise(world_xz, 6.0 / cell_m, 0x2b7d40e5u) * 0.4;
-    // The threshold sits above 0.5, so the margin falls mostly inside the grass cell rather than
-    // spilling onto the neighbouring ground; the noise amplitude is what keeps it off a straight line.
-    return smoothstep(0.40, 0.90, b + (n - 0.5) * 0.55);
+    // Full meadow only near the middle of a grass cell; the margin runs from there to a little
+    // past the boundary (blocked cells stay 0 regardless). The noise keeps it off a straight line.
+    return smoothstep(0.30, 0.95, b + (n - 0.5) * 0.45);
 #endif
 }
 
@@ -1107,7 +1116,7 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Blocked cells (roads, buildings, water) stay bare; meadow margins thin out instead of
     // ending on the cell's square edge (grass_edge_presence).
     let presence = grass_edge_presence(world_xz, geo);
-    if (presence <= 0.0 || hash_cell01(cell_id, 0x6d2b79f5u) >= presence) { return; }
+    if (presence <= 0.0 || hash_cell01(cell_id, 0x6d2b79f5u) >= presence * presence) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
     // Cards only: the card coverage (map's own where authored, else card_look.x).
     if (cards_on_near() && card_thinned(cell_id, geo)) { return; }
@@ -1130,7 +1139,7 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     instances[out_index].pos_seed = vec4<f32>(world_xz.x, y, world_xz.y, seed);
     var packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz), geo);
     // The margin is shorter as well as sparser.
-    packed.z = pack_lod_fade(min(near_fade, presence));
+    packed.z = pack_lod_fade_edge(near_fade, presence);
     instances[out_index].packed = packed;
 }
 
@@ -1178,7 +1187,7 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     let geocell = clamp(vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid)), vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
     let geo = textureLoad(geography, geocell, 0).x;
     let presence = grass_edge_presence(world_xz, geo);
-    if (presence <= 0.0 || hash_cell01(cell_id, 0x6d2b79f5u) >= presence) { return; }
+    if (presence <= 0.0 || hash_cell01(cell_id, 0x6d2b79f5u) >= presence * presence) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
     // Cards only: the card coverage (map's own where authored, else card_look.x).
     if (cards_on_mid() && card_thinned(cell_id, geo)) { return; }
@@ -1195,7 +1204,7 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     instances[out_index].pos_seed = vec4<f32>(world_xz.x, y, world_xz.y, seed);
     var packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz), geo);
-    packed.z = pack_lod_fade(min(mid_fade, presence));
+    packed.z = pack_lod_fade_edge(mid_fade, presence);
     packed.w |= 1u << 11u;
     instances[out_index].packed = packed;
 }
@@ -1264,7 +1273,7 @@ fn cs_place_far(@builtin(global_invocation_id) gid: vec3<u32>) {
     let geocell = clamp(vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid)), vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
     let geo = textureLoad(geography, geocell, 0).x;
     let presence = grass_edge_presence(world_xz, geo);
-    if (presence <= 0.0 || hash_cell01(cell_id, 0x6d2b79f5u) >= presence) { return; }
+    if (presence <= 0.0 || hash_cell01(cell_id, 0x6d2b79f5u) >= presence * presence) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
     let y = sample_height(world_xz);
     if (in_terrain_hole(vec3<f32>(world_xz.x, y, world_xz.y))) { return; } // preserve ground above a bounded cave mouth
