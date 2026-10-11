@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/AI/Path/PathPlanner.hpp>
@@ -587,6 +588,23 @@ LSError AIPathPlanner::Serialize(ParamArchive& ar)
     return LSOK;
 }
 
+// POSEIDON_STRAT_DIAG=1: say why a strategic plan failed (the LOG_STRAT /
+// LOG_POSITION_PROBL lines are compiled out). Rate-limited; off by default.
+static bool StratDiag()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("POSEIDON_STRAT_DIAG");
+        return v && *v && *v != '0';
+    }();
+    return on;
+}
+static bool StratDiagBudget()
+{
+    static int left = 200;
+    return left-- > 0;
+}
+
 bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh, Vector3Par ptStart, Vector3Par ptEnd)
 {
     if (!veh)
@@ -654,6 +672,9 @@ bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh,
         }
         if (GetFieldCost(xs, zs) >= GET_UNACCESSIBLE)
         {
+            if (StratDiag() && StratDiagBudget())
+                LOG_INFO(AI, "STRAT {}: start cell {},{} unaccessible (cost {:.1f})",
+                         (const char*)_vehicle->GetDebugName(), xs, zs, GetFieldCost(xs, zs));
 #if LOG_POSITION_PROBL
             LOG_DEBUG(AI, "Problem: {}, starting point {:.0f}, {:.0f} unaccessible",
                       (const char*)_vehicle->GetDebugName(), xs * LandGrid + 0.5 * LandGrid,
@@ -675,6 +696,9 @@ bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh,
         }
         if (GetFieldCost(xe, ze) >= GET_UNACCESSIBLE)
         {
+            if (StratDiag() && StratDiagBudget())
+                LOG_INFO(AI, "STRAT {}: end cell {},{} unaccessible (cost {:.1f})",
+                         (const char*)_vehicle->GetDebugName(), xe, ze, GetFieldCost(xe, ze));
 #if LOG_POSITION_PROBL
             LOG_DEBUG(AI, "Problem: {}, end point {:.0f}, {:.0f} unaccessible", (const char*)_vehicle->GetDebugName(),
                       xe * LandGrid + 0.5 * LandGrid, ze * LandGrid + 0.5 * LandGrid);
@@ -699,6 +723,10 @@ bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh,
         }
 
         _heuristic = CalculateHeuristic(xs, zs, xe, ze);
+        if (StratDiag() && StratDiagBudget())
+            LOG_INFO(AI, "STRAT {}: search {},{} -> {},{} (grid {} m, range {}) cost start {:.2f} end {:.2f} heur {:.3f}",
+                     (const char*)_vehicle->GetDebugName(), xs, zs, xe, ze, LandGrid, LandRange,
+                     GetFieldCost(xs, zs), GetFieldCost(xe, ze), _heuristic);
 #if USE_NEW_ASTAR
         ASSField start(xs, zs);
         ASSField end(xe, ze);
@@ -788,6 +816,9 @@ bool AIPathPlanner::ProcessSearching()
                       (const char*)_vehicle->GetDebugName(), depth, last->_g, _iterTotal, 1e-6 * _timeTotal);
 #endif
 
+            if (StratDiag() && StratDiagBudget())
+                LOG_INFO(AI, "STRAT {}: path found, {} fields, cost {:.0f}, {} steps",
+                         (const char*)_vehicle->GetDebugName(), depth, last->_g, _iterTotal);
             CalculatePlanPositions();
 
             _algorithm = nullptr;
@@ -795,6 +826,8 @@ bool AIPathPlanner::ProcessSearching()
         }
         else
         {
+            if (StratDiag() && StratDiagBudget())
+                LOG_INFO(AI, "STRAT {}: no path (in {} steps)", (const char*)_vehicle->GetDebugName(), _iterTotal);
 #if LOG_STRAT
             LOG_DEBUG(AI, "Strategic path not found: {} (in {} steps, time {:.3f})",
                       (const char*)_vehicle->GetDebugName(), _iterTotal, 1e-6 * _timeTotal);
@@ -805,6 +838,8 @@ bool AIPathPlanner::ProcessSearching()
     }
     else if (_iterTotal >= MAX_ITER)
     {
+        if (StratDiag() && StratDiagBudget())
+            LOG_INFO(AI, "STRAT {}: iteration limit {} reached", (const char*)_vehicle->GetDebugName(), _iterTotal);
 #if LOG_STRAT
         LOG_DEBUG(AI, "Strategic path not found - iterations limit reached: {} (in {} steps, time {:.3f})",
                   (const char*)_vehicle->GetDebugName(), _iterTotal, 1e-6 * _timeTotal);

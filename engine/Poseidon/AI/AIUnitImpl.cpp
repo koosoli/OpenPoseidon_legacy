@@ -1963,6 +1963,19 @@ bool AIUnit::CreateOperativePath()
         if (!CreatePath(Position(), _expPosition))
         {
             LOG_DEBUG(AI, "{}: path not found - iteration {}", (const char*)GetDebugName(), _iter);
+            {
+                // POSEIDON_STRAT_DIAG=1 (see PathPlanner.cpp): the operative half of "can't get there".
+                static const bool diag = []
+                {
+                    const char* v = std::getenv("POSEIDON_STRAT_DIAG");
+                    return v && *v && *v != '0';
+                }();
+                static int budget = 200;
+                if (diag && budget-- > 0)
+                    LOG_INFO(AI, "OPER {}: no operative path {:.0f},{:.0f} -> {:.0f},{:.0f} (iteration {})",
+                             (const char*)GetDebugName(), Position().X(), Position().Z(), _expPosition.X(),
+                             _expPosition.Z(), _iter);
+            }
             if (++_iter > 2)
             {
                 LOG_DEBUG(AI, "  fail command");
