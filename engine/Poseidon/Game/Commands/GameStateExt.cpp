@@ -34,6 +34,7 @@
 
 #include <ctype.h>
 #include <time.h>
+#include <vector>
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
@@ -978,6 +979,97 @@ static GameValue A1IsKindOf(const GameState* state, GameValuePar oper1, GameValu
     return GameValue(false);
 }
 
+// switch (v) do { case a: {..}; case b; case c: {..}; default {..}; }
+// switch/case yield tagged arrays; "do" runs the body with the switch active, ":" runs the
+// first matching case (a case without code falls through to the next one with code).
+namespace
+{
+struct A1Switch
+{
+    GameValue value;
+    bool matched = false; // a case matched, waiting for its code
+    bool done = false;
+    RString defaultCode;
+    GameValue result;
+};
+thread_local std::vector<A1Switch*> gSwitches;
+
+GameValue Tagged(const char* tag, GameValuePar v)
+{
+    GameArrayType a;
+    a.Add(GameValue(RString(tag)));
+    a.Add(v);
+    return GameValue(a);
+}
+
+bool IsTagged(GameValuePar v, const char* tag)
+{
+    if (v.GetType() != GameArray)
+        return false;
+    const GameArrayType& a = v;
+    return a.Size() == 2 && a[0].GetType() == GameString && strcmp(RString(a[0]), tag) == 0;
+}
+
+bool SwitchEqual(GameValuePar a, GameValuePar b)
+{
+    if (a.GetType() != b.GetType())
+        return false;
+    if (a.GetType() == GameScalar)
+        return (float)a == (float)b;
+    if (a.GetType() == GameString)
+        return strcmp(RString(a), RString(b)) == 0;
+    if (a.GetType() == GameBool)
+        return (bool)a == (bool)b;
+    return a.GetText() == b.GetText();
+}
+} // namespace
+
+static GameValue A1Switch_(const GameState*, GameValuePar oper1)
+{
+    return Tagged("__a1switch", oper1);
+}
+
+static GameValue A1Case(const GameState*, GameValuePar oper1)
+{
+    if (!gSwitches.empty() && !gSwitches.back()->done && SwitchEqual(gSwitches.back()->value, oper1))
+        gSwitches.back()->matched = true; // "case x;" alone falls through to the next code
+    return Tagged("__a1case", oper1);
+}
+
+static GameValue A1Default(const GameState*, GameValuePar oper1)
+{
+    if (!gSwitches.empty())
+        gSwitches.back()->defaultCode = RString(oper1);
+    return NOTHING;
+}
+
+static GameValue A1CaseCode(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    if (gSwitches.empty() || !IsTagged(oper1, "__a1case"))
+        return NOTHING;
+    A1Switch& sw = *gSwitches.back();
+    if (sw.done || !sw.matched)
+        return NOTHING;
+    sw.done = true;
+    sw.result = state->EvaluateMultiple(RString(oper2));
+    return NOTHING;
+}
+
+static GameValue A1SwitchDo(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    if (!IsTagged(oper1, "__a1switch"))
+        return NOTHING;
+    A1Switch sw;
+    const GameArrayType& a = oper1;
+    sw.value = a[1];
+    gSwitches.push_back(&sw);
+    const_cast<GameState*>(state)->Execute(RString(oper2));
+    gSwitches.pop_back();
+    if (!sw.done && sw.defaultCode.GetLength() > 0)
+        sw.result = state->EvaluateMultiple(sw.defaultCode);
+    return sw.result;
+}
+
 // compile: code is a string here, so compiling is the identity
 static GameValue A1Compile(const GameState*, GameValuePar oper1)
 {
@@ -1157,6 +1249,9 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameBool, "preloadSound", A1PreloadSound, GameString),
         GameFunction(GameString, "str", A1Str, GameVoid),
         GameFunction(GameString, "compile", A1Compile, GameString),
+        GameFunction(GameArray, "switch", A1Switch_, GameVoid),
+        GameFunction(GameArray, "case", A1Case, GameVoid),
+        GameFunction(GameNothing, "default", A1Default, GameString),
         GameFunction(GameNothing, "hideBody", A1Ignored, GameObject),
         GameFunction(GameNothing, "setAperture", A1Ignored, GameScalar),
         GameFunction(GameNothing, "enableTeamSwitch", A1Ignored, GameBool),
@@ -1482,6 +1577,8 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameScalar, "distance", function, A1Distance, GameObject, GameArray),
         GameOperator(GameNothing, "moveInTurret", function, A1MoveInTurret, GameObject, GameArray),
         GameOperator(GameBool, "isKindOf", function, A1IsKindOf, GameObject, GameString),
+        GameOperator(GameVoid, "do", function, A1SwitchDo, GameArray, GameString),
+        GameOperator(GameNothing, ":", function, A1CaseCode, GameArray, GameString),
         GameOperator(GameNothing, "assignTeam", function, A1IgnoredBinary, GameObject, GameString),
         GameOperator(GameNothing, "setPos", function, ObjSetPos, GameObject, GameArray),
         GameOperator(GameNothing, "setPosASL", function, ObjSetPosASL, GameObject, GameArray),
