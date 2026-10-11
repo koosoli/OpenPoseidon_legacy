@@ -1857,6 +1857,11 @@ void ParamClass::Parse(QIStream& in, ParamFile* file)
                 bool quot;
                 GetWord(word, sizeof(word), in, ";\n\r", &quot);
                 c = in.get();
+                // a macro value with trailing blanks: `text = "x" ;`
+                while (c == ' ' || c == '\t')
+                {
+                    c = in.get();
+                }
                 if (c != ';' && c != '\n' && c != '\r')
                 {
                     ErrorMessage("'%s': '%c' encountered instead of ';'", (const char*)GetContext(valueName), c);

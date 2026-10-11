@@ -8,6 +8,8 @@
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 
+#include <string>
+
 namespace Poseidon
 {
 // EvaluatorFunctions implementation backed by the game state. The *Internal
@@ -120,7 +122,21 @@ float GameStateEvaluatorFunctions::EvaluateFloatInternal(const char* expr)
 
 RString GameStateEvaluatorFunctions::EvaluateStringInternal(const char* expr)
 {
-    return GGameState.Evaluate(expr).GetText();
+    // Shipped Arma 1 configs contain __EVAL((a + 1)) * b) -- one ')' too many, which Arma
+    // 1 tolerated. Drop surplus closing parentheses from the end before evaluating.
+    std::string text = expr ? expr : "";
+    int depth = 0;
+    for (const char c : text)
+        depth += c == '(' ? 1 : c == ')' ? -1 : 0;
+    while (depth < 0 && !text.empty())
+    {
+        const size_t last = text.find_last_of(')');
+        if (last == std::string::npos)
+            break;
+        text.erase(last, 1);
+        depth++;
+    }
+    return GGameState.Evaluate(text.c_str()).GetText();
 }
 
 void GameStateEvaluatorFunctions::ExecuteInternal(const char* expr)
