@@ -1795,6 +1795,15 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let sheen = frame.sun_diffuse.rgb * vec3<f32>(0.85, 1.0, 0.75) * sheen_amount *
         (1.0 - max(terrain_shadow, self_shadow.x)) * cloud_lit;
     let lit = albedo * (ambient + direct + subsurface) + sheen;
+#ifdef GRASS_DEBUG_ALBEDO
+    return vec4<f32>(albedo, 1.0);
+#endif
+#ifdef GRASS_DEBUG_DIRECT
+    return vec4<f32>(direct * 0.25, 1.0);
+#endif
+#ifdef GRASS_DEBUG_AMBIENT
+    return vec4<f32>(ambient, 1.0);
+#endif
     let fogged = apply_fog(lit, in.world_rel);
     return vec4<f32>(select(lit, fogged, grass.render_flags.y >= 0.5), 1.0);
 }
@@ -2080,6 +2089,15 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     let sheen = frame.sun_diffuse.rgb * vec3<f32>(0.85, 1.0, 0.75) * sheen_amount *
         (1.0 - max(terrain_shadow, clump_shadow)) * cloud_lit;
     let lit = albedo * (ambient + direct) + sheen;
+#ifdef GRASS_DEBUG_ALBEDO
+    return albedo;
+#endif
+#ifdef GRASS_DEBUG_DIRECT
+    return direct * 0.25;
+#endif
+#ifdef GRASS_DEBUG_AMBIENT
+    return ambient;
+#endif
     let fogged = apply_fog(lit, in.world_rel);
     return select(lit, fogged, grass.render_flags.y >= 0.5);
 }

@@ -108,6 +108,14 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
     if std::env::var("WGR_NATIVE_GROUND_AO").as_deref() == Ok("0") {
         defs.insert("DISABLE_NATIVE_GROUND_AO".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
+    // Grass shading terms as colour, to split "the texture is dark" from "the light is":
+    // WGR_GRASS_DEBUG_VIEW=albedo|direct|ambient (cards and blades).
+    match std::env::var("WGR_GRASS_DEBUG_VIEW").as_deref() {
+        Ok("albedo") => { defs.insert("GRASS_DEBUG_ALBEDO".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        Ok("direct") => { defs.insert("GRASS_DEBUG_DIRECT".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        Ok("ambient") => { defs.insert("GRASS_DEBUG_AMBIENT".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        _ => {}
+    }
     if std::env::var("WGR_COALESCED_PCF").as_deref() == Ok("1") {
         defs.insert("COALESCED_PCF".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
