@@ -119,7 +119,7 @@ class Island
     bool LoadRaw(const std::string& file, std::string& error);
     void Adopt(int cells, std::vector<float>&& heights, std::vector<uint16_t>&& texIndices,
                std::vector<std::string>&& textureTable, std::vector<Object>&& objs, const std::string& file,
-               const std::string& format);
+               const std::string& format, float cellSize = 50.0f);
     // Always 4WVR.  An existing file is kept beside it as <name>.bak first.
     bool Save(const std::string& file, std::string& error);
 

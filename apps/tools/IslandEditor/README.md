@@ -26,6 +26,35 @@ Ground textures and model names are read straight from the game's archives
 **Info > Choose game folder**; an island opened from a game's `Worlds` folder
 sets it by itself.
 
+## Arma and DayZ worlds (Open Poseidon)
+
+Besides the OFP formats, this build opens the later binarized worlds, read with the engine's own reader
+(`Asset/Formats/World/Oprw25.hpp`):
+
+| World | OPRW | Tried on |
+| --- | --- | --- |
+| Arma (Armed Assault) | 18, 20 | Sahrani Lite |
+| Arma 2, Operation Arrowhead | 24 | Utes, Chernarus (1,055,157 objects), Takistan |
+| Arma 3 | 25 | read by the same code; no Arma 3 world was at hand to try |
+| DayZ | 29 | ChernarusPlus, land only (see below) |
+
+Take the `.wrp` out of its `.pbo` first (`PoseidonTools pbo extract`). Opening one is a conversion, because these
+worlds are not built as an OFP island is:
+
+* **Land.** The elevations come from the world's fine terrain grid. The editor holds at most 1024 points a side,
+  so a 2048 grid is taken at every second point and the cell grows to match (Chernarus: 7.5 m becomes 15 m).
+  Elevations beyond the 4WVR format's 1474 m are cut, and the status line says how many.
+* **Ground.** These worlds have no ground texture per cell (their ground is satellite and mask layers), so the
+  island starts untextured: use Paint or Auto paint with an OFP texture set.
+* **Objects** come as they stand, with their own model paths. With the game folder set to that game's folder
+  (`--game "...\Arma 2"`), their real models are drawn.
+* **Saving** writes 4WVR under a name of its own, `<world>_4wvr.wrp`, never over the world it was read from.
+  4WVR has no cell size, so an island that is not 50 m a cell keeps it in `<file>.cell` beside it, which the
+  editor reads back. The game needs the same figure as `landGrid` in the island's `CfgWorlds` class.
+* **Too many objects.** The objects are held in one block and the engine's allocator gives out at most 256 MiB
+  in one piece, about 2.7 million objects. A world with more (DayZ's ChernarusPlus has 2.97 million) opens with
+  its land only, and the status line says so.
+
 ## Working with it
 
 | | |

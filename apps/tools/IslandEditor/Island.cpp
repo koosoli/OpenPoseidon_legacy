@@ -150,10 +150,10 @@ void Island::New(int cells, float baseHeight, const std::string& groundTexture)
 
 void Island::Adopt(int cells, std::vector<float>&& heights, std::vector<uint16_t>&& texIndices,
                    std::vector<std::string>&& textureTable, std::vector<Object>&& objs, const std::string& file,
-                   const std::string& format)
+                   const std::string& format, float cellSize)
 {
     size = cells;
-    cell = 50.0f;
+    cell = cellSize; // 50 m for the OFP formats; an Arma / DayZ world brings its own (GameData::LoadIsland)
     height = std::move(heights);
     tex = std::move(texIndices);
     textures = std::move(textureTable);
@@ -252,7 +252,16 @@ bool Island::LoadRaw(const std::string& file, std::string& error)
         }
         objs.push_back(std::move(o));
     }
-    Adopt(xr, std::move(h), std::move(ti), std::move(table), std::move(objs), file, v4 ? "4WVR" : "3WVR");
+    // 4WVR has no cell size: the game takes it from CfgWorlds (landGrid, 50 m in OFP). An island that is not 50 m
+    // a cell -- one converted from an Arma or DayZ world -- keeps it in <file>.cell beside it (see Save).
+    float cellSize = 50.0f;
+    {
+        std::ifstream side(file + ".cell");
+        float value = 0;
+        if (side >> value && value >= 1.0f && value <= 200.0f)
+            cellSize = value;
+    }
+    Adopt(xr, std::move(h), std::move(ti), std::move(table), std::move(objs), file, v4 ? "4WVR" : "3WVR", cellSize);
     return true;
 }
 
@@ -314,6 +323,15 @@ bool Island::Save(const std::string& file, std::string& error)
         }
     }
     std::error_code ec;
+    // the cell size beside the island when it is not OFP's 50 m (LoadRaw reads it back; the game needs the same
+    // figure as landGrid in the island's CfgWorlds class)
+    if (std::fabs(cell - 50.0f) > 1e-3f)
+    {
+        std::ofstream side(file + ".cell", std::ios::trunc);
+        side << cell << std::endl;
+    }
+    else
+        fs::remove(file + ".cell", ec);
     if (fs::exists(file, ec))
     {
         fs::copy_file(file, file + ".bak", fs::copy_options::overwrite_existing, ec);

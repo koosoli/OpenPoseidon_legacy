@@ -13,6 +13,7 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <Poseidon/World/Terrain/WrpReader.hpp>
+#include <Poseidon/Asset/Formats/World/Oprw25.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -667,6 +668,109 @@ const ModelShape& GameData::Model(const std::string& name) const
     return out;
 }
 
+// The later OPRW containers: Arma (revisions 18 / 20), Arma 2 and Operation Arrowhead (24), Arma 3 (25) and DayZ (29),
+// read by the engine's own reader (Asset/Formats/World/Oprw25.hpp). Returns false with `error` empty when the file
+// is one of the OFP revisions (2 / 3), which the caller reads as before.
+//
+// Those worlds are not built as an OFP island is, so this is a conversion:
+//   * elevations come from the world's fine terrain grid (a point per 4 to 10 m). The editor holds at most 1024
+//     points a side, so a finer grid is sampled at every 2nd / 4th point and the cell grows to match;
+//   * there is no ground texture per cell (the ground is satellite and mask layers): the cells start untextured,
+//     for the paint and auto paint tools;
+//   * the objects come as they stand, with their own model paths.
+// Saved, it is a 4WVR island of that cell size (CfgWorlds >> landGrid), elevations within the format's 1474 m.
+static bool LoadModernIsland(const std::string& file, Island& out, std::string& error)
+{
+    using namespace Poseidon;
+    namespace W = Poseidon::Asset::Formats::World;
+    int32_t revision = 0;
+    {
+        std::ifstream f(file, std::ios::binary);
+        f.seekg(4);
+        f.read(reinterpret_cast<char*>(&revision), 4);
+    }
+    if (!W::IsOprwModernRevision(revision))
+        return false;
+    W::Oprw25World world;
+    try
+    {
+        QIFStream f;
+        f.open(file.c_str());
+        Poseidon::Asset::Formats::BinaryReader reader(f);
+        world = W::ReadOprwModern(reader);
+    }
+    catch (const std::exception& e)
+    {
+        error = e.what();
+        return false;
+    }
+    const W::Oprw25Header& h = world.header;
+    const int source = h.terrainRangeX;
+    if (source != h.terrainRangeY || source < 16 || (source & (source - 1)) != 0 ||
+        world.elevation.size() < static_cast<size_t>(source) * source)
+    {
+        error = "unsupported terrain grid " + std::to_string(h.terrainRangeX) + " x " + std::to_string(h.terrainRangeY);
+        return false;
+    }
+    int step = 1;
+    while (source / step > 1024)
+        step *= 2;
+    const int n = source / step;
+    const float cellSize = h.TerrainCellSize() * static_cast<float>(step);
+    std::vector<float> heights(static_cast<size_t>(n) * n);
+    int clamped = 0;
+    for (int z = 0; z < n; z++)
+        for (int x = 0; x < n; x++)
+        {
+            float y = world.ElevationAt(x * step, z * step);
+            if (y > kMaxHeight || y < kMinHeight)
+                clamped++;
+            heights[static_cast<size_t>(z) * n + x] = std::clamp(y, kMinHeight, kMaxHeight);
+        }
+    // The objects are held in one block, and the engine's allocator (which this program links) gives out at most
+    // 256 MiB in one piece: about 2.7 million objects. DayZ's ChernarusPlus has 2.97 million. Such a world opens
+    // with its land only, and says so, rather than not at all.
+    constexpr size_t kMaxObjectBytes = 240u * 1024u * 1024u;
+    const bool tooMany = world.objects.size() > kMaxObjectBytes / sizeof(Object);
+    std::vector<Object> objects;
+    if (!tooMany)
+        objects.reserve(world.objects.size());
+    for (const W::Oprw25Object& src : world.objects)
+    {
+        if (tooMany)
+            break;
+        if (src.modelIndex < 0 || static_cast<size_t>(src.modelIndex) >= world.models.size())
+            continue;
+        Object o;
+        o.id = src.objectId;
+        o.model = world.models[static_cast<size_t>(src.modelIndex)];
+        if (o.model.empty())
+            continue;
+        const auto* r = src.transform.rows; // aside, up, direction, position
+        const float m[12] = {r[0].x, r[0].y, r[0].z, r[1].x, r[1].y, r[1].z, r[2].x, r[2].y, r[2].z, r[3].x, r[3].y, r[3].z};
+        std::memcpy(o.m, m, sizeof(m));
+        objects.push_back(std::move(o));
+    }
+    const char* game = revision <= 20 ? "Arma" : revision == 24 ? "Arma 2" : revision == 25 ? "Arma 3" : "DayZ";
+    char format[200];
+    snprintf(format, sizeof(format), "OPRW v%d (%s): %d points of %.2f m%s%s", revision, game, source, h.TerrainCellSize(),
+             step > 1 ? (", every " + std::to_string(step) + (step == 2 ? "nd" : "th") + " kept").c_str() : "",
+             clamped ? (", " + std::to_string(clamped) + " elevations beyond 1474 m cut").c_str() : "");
+    std::string note = format;
+    if (tooMany)
+        note += "; LAND ONLY: its " + std::to_string(world.objects.size()) + " objects are more than the editor can hold";
+    out.Adopt(n, std::move(heights), std::vector<uint16_t>(), std::vector<std::string>(kMaxTextures), std::move(objects), file,
+              note, cellSize);
+    // saving writes 4WVR: under a name of its own, never over the Arma / DayZ world it was read from
+    {
+        std::filesystem::path target(file);
+        target.replace_filename(target.stem().string() + "_4wvr.wrp");
+        out.path = target.string();
+        out.modified = true;
+    }
+    return true;
+}
+
 bool GameData::LoadIsland(const std::string& file, Island& out, std::string& error)
 {
     using namespace Poseidon;
@@ -682,6 +786,10 @@ bool GameData::LoadIsland(const std::string& file, Island& out, std::string& err
     }
     if (std::memcmp(magic, "OPRW", 4) != 0)
         return out.LoadRaw(file, error);
+    if (LoadModernIsland(file, out, error))
+        return true;
+    if (!error.empty())
+        return false;
 
     WrpReader reader;
     if (!reader.Load(file.c_str()))

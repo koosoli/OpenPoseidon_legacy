@@ -486,7 +486,7 @@ struct App
 
     void UpdateTitle()
     {
-        std::string t = "Open Poseidon Island Editor";
+        std::string t = "Open Poseidon Engine - Island Editor";
         if (is.size > 0)
             t += " - " + (is.path.empty() ? std::string("new island") : fs::path(is.path).filename().string()) +
                  (is.modified ? " *" : "");
@@ -2734,6 +2734,20 @@ void App::Interface(int width, int height)
                 openAbout = true;
             ImGui::EndMenu();
         }
+        // the name at the top of the window, centred in the menu bar (owner, 2026-10-11)
+        {
+            const char* brand = "OPEN POSEIDON ENGINE";
+            const char* tool = "  -  Island Editor";
+            const float wide = ImGui::CalcTextSize(brand).x + ImGui::CalcTextSize(tool).x;
+            const float x = (ImGui::GetWindowSize().x - wide) * 0.5f;
+            if (x > ImGui::GetCursorPosX() + S(24))
+            {
+                ImGui::SetCursorPosX(x);
+                ImGui::TextColored(kAccentHover, "%s", brand);
+                ImGui::SameLine(0, 0);
+                ImGui::TextUnformatted(tool);
+            }
+        }
         top = ImGui::GetWindowSize().y;
         ImGui::EndMainMenuBar();
     }
@@ -2960,6 +2974,9 @@ int SelfTest(const std::string& file)
     Island b;
     check(GameData::LoadIsland(tmp, b, error), "load what was saved");
     check(b.size == a.size && b.objects.size() == a.objects.size(), "same size and object count");
+    // an Arma / DayZ world is not 50 m a cell; 4WVR cannot say so, the .cell file beside it does
+    printf("     cells of %.2f m, %.2f m after the reload\n", a.cell, b.cell);
+    check(std::fabs(b.cell - a.cell) < 1e-3f, "same cell size");
     float worstH = 0, worstY = 0;
     for (size_t i = 0; i < a.height.size() && i < b.height.size(); i++)
         worstH = std::max(worstH, std::fabs(a.height[i] - b.height[i]));
@@ -4233,7 +4250,7 @@ int main(int argc, char* argv[])
         return 1;
     }
     // a picture is taken without the window ever showing: nothing pops up over what else is running
-    SDL_Window* window = SDL_CreateWindow("Open Poseidon Island Editor", 1600, 900,
+    SDL_Window* window = SDL_CreateWindow("Open Poseidon Engine - Island Editor", 1600, 900,
                                           SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | (shot.empty() && !checkModels ? 0 : SDL_WINDOW_HIDDEN));
     if (!window)
     {
