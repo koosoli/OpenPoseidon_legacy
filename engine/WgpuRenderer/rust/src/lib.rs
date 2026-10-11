@@ -7265,6 +7265,10 @@ impl Renderer {
         self.grass.set_satellite(&self.device, &self.queue, view);
     }
 
+    fn grass_set_layer_pick(&mut self, weights: &[f32], far: &[f32]) {
+        self.grass.set_layer_pick(&self.queue, weights, far);
+    }
+
     fn grass_set_geography(&mut self, width: u32, height: u32, values: &[u32]) {
         self.grass
             .set_geography(&self.device, &self.queue, width, height, values);

@@ -397,6 +397,10 @@ class TerrainWgpu : public ITerrainRenderer
     // UploadGrassTuft. Empty on every OFP world, which keeps the loose cards.
     std::vector<uint8_t> _clutterAtlas;
     uint32_t _clutterAtlasLayers = 0;
+    //! Per clutter-atlas layer: the map's selection weight and max draw distance fraction (see
+    //! wgr_grass_set_layer_pick). All 0 = uniform pick, no limit -- every map that gives none.
+    float _clutterLayerWeight[32] = {};
+    float _clutterLayerFar[32] = {};
 
     // Terrain params UBO mirror. The static fields (grid/dims/range) are set at upload; the
     // coast wet-band fields (sea_level/time/swash/wet_*) are refreshed and pushed every frame.

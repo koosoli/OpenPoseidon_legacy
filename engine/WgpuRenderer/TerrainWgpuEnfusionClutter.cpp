@@ -358,6 +358,7 @@ struct NativePlant
     std::string model;   //!< the .xob it names
     float occurrence = 1.0f;
     float density = 1.0f;
+    float maxDraw = 1.0f; //!< MaxDrawDistance: fraction of the clutter range the plant is drawn to
 };
 
 //! Walks a ClutterSet (and the sets it inherits) down to the collections, and the
@@ -415,6 +416,7 @@ void CollectPlants(const EnfusionMount& mount, const std::string& setPath, std::
             plant.model = *model;
             plant.occurrence = definition->Number("Occurrence", 100.0f);
             plant.density = plantConf.Number("Density", 1.0f);
+            plant.maxDraw = plantConf.Number("MaxDrawDistance", 1.0f);
             const auto existing =
                 std::find_if(out.begin(), out.end(),
                              [&](const NativePlant& have) { return LowerCopy(have.conf) == LowerCopy(plant.conf); });
@@ -560,6 +562,8 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
     const int paletteSize = land.GetEnfusionSurfaceCount();
     if (paletteSize <= 0)
     {
+        std::fill(std::begin(_clutterLayerWeight), std::end(_clutterLayerWeight), 0.0f);
+        std::fill(std::begin(_clutterLayerFar), std::end(_clutterLayerFar), 0.0f);
         return false; // every non-native world takes this exit before touching anything
     }
     // Recorded before any of the early exits below: SetEnfusionClutterEnabled compares
@@ -604,6 +608,8 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
         constexpr size_t LayerBytes = static_cast<size_t>(GrassGeo::AtlasSize) * GrassGeo::AtlasSize * 4u;
         std::vector<uint8_t> atlas(LayerBytes * GrassGeo::AtlasLayers, 0u);
         layerCount = 1; // layer 0 stays the loose primary card, filled by UploadGrassTuft
+        std::fill(std::begin(_clutterLayerWeight), std::end(_clutterLayerWeight), 0.0f);
+        std::fill(std::begin(_clutterLayerFar), std::end(_clutterLayerFar), 0.0f);
 
         // One decode per MODEL, not per surface: `c_Arrhenatherum_elatius_01` is named
         // by five of Everon's collections and is 2048 square before the crop.
@@ -721,6 +727,10 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
                     layerOfModel.emplace(modelKey, layerCount);
                 }
                 weight += plant.occurrence * 0.01f * std::max(plant.density, 0.01f);
+                // The map's own frequency for this plant within the run (collection Occurrence x
+                // plant Density) and how far it is drawn (MaxDrawDistance), per atlas layer.
+                _clutterLayerWeight[layerCount] = plant.occurrence * std::max(plant.density, 0.0f);
+                _clutterLayerFar[layerCount] = std::clamp(plant.maxDraw, 0.0f, 1.0f);
                 runModels[static_cast<size_t>(i)].insert(modelKey);
                 ++layerCount;
                 ++count;

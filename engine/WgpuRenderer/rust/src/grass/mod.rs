@@ -380,6 +380,13 @@ struct GrassParams {
     // Eight source-opacity-weighted linear means of blade_tex, not tuft_tex.
     // Renderer-private; w=0 leaves empty/unavailable layers on the sampled path.
     blade_layer_means: [f32; 32],
+    // Per card layer: weight, max-distance fraction, 0, 0 (grass.wgsl layer_pick).
+    layer_pick: [f32; 128],
+}
+
+/// Neutral card-layer pick: uniform weights (0 = "the map gave none") and no distance limit.
+fn default_layer_pick() -> [f32; 128] {
+    [0.0; 128]
 }
 
 /// Owner's fallback for photo-card coverage where the map's own clutter density
@@ -603,6 +610,8 @@ pub struct Grass {
     tuft_bounds: [f32; 128],
     // Mean covered colour per layer, the contrast pivot.
     tuft_means: [f32; 128],
+    // Per card layer pick weights / max-distance fractions (set_layer_pick).
+    layer_pick: [f32; 128],
     // Last pushed params, so set_tuft can re-publish them with the tuft flag set
     // without waiting for the Grass tab to touch a slider.
     last_params: GrassParams,
@@ -840,6 +849,7 @@ impl Grass {
             wind_advection: [0.0; 4],
             wind_flutter: [0.0, 0.0, 1.0, 0.0],
             blade_layer_means: [0.0; 32],
+            layer_pick: default_layer_pick(),
         };
         queue.write_buffer(&grass_params, 0, bytemuck::bytes_of(&params));
 
@@ -1657,6 +1667,7 @@ impl Grass {
             mid_grid_dim: 512,
             tuft_bounds: default_layer_bounds(),
             tuft_means: default_layer_means(),
+            layer_pick: default_layer_pick(),
             last_params: params,
             wind_phase: wind::WindPhase::default(),
             card_spacing,
@@ -1890,6 +1901,23 @@ impl Grass {
         self.satellite_view = view.unwrap_or_else(|| create_satellite_placeholder(device, queue));
         // the next prepare_terrain rebuilds the terrain bind with it
         self.terrain_generation = u64::MAX;
+    }
+
+    /// Per photo-card layer selection weight (within its surface's run) and max draw distance as
+    /// a fraction of the card ring's reach. Empty slices restore the neutral pick (uniform, no
+    /// limit). Takes effect with the next params upload.
+    pub fn set_layer_pick(&mut self, queue: &wgpu::Queue, weights: &[f32], far: &[f32]) {
+        self.layer_pick = default_layer_pick();
+        for (i, w) in weights.iter().take(32).enumerate() {
+            self.layer_pick[i * 4] = if w.is_finite() { w.max(0.0) } else { 0.0 };
+        }
+        for (i, f) in far.iter().take(32).enumerate() {
+            self.layer_pick[i * 4 + 1] = if f.is_finite() { f.clamp(0.0, 1.0) } else { 0.0 };
+        }
+        // Patch just this block of the live uniform; the next set_params carries it too.
+        self.last_params.layer_pick = self.layer_pick;
+        queue.write_buffer(&self.grass_params, std::mem::offset_of!(GrassParams, layer_pick) as u64,
+                           bytemuck::cast_slice(&self.layer_pick));
     }
 
     pub fn set_geography(
@@ -2259,6 +2287,7 @@ impl Grass {
             wind_advection: self.last_params.wind_advection,
             wind_flutter: self.last_params.wind_flutter,
             blade_layer_means: self.last_params.blade_layer_means,
+            layer_pick: self.layer_pick,
         };
         self.near_grid_dim = near_grid_dim;
         self.mid_grid_dim = mid_grid_dim;

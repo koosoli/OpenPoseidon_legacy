@@ -44,6 +44,10 @@ struct GrassParams {
     wind_advection: vec4<f32>,
     wind_flutter: vec4<f32>,
     blade_layer_means: array<vec4<f32>, 8>,
+    // Per photo-card layer: x = selection weight within its surface's run (0 everywhere =
+    // uniform), y = max draw distance as a fraction of the card ring's reach. Renderer-owned,
+    // set by wgr_grass_set_layer_pick from the map's own clutter definitions.
+    layer_pick: array<vec4<f32>, 32>,
 };
 // Must mirror grass.wgsl's 32-byte layout exactly: both shaders bind the same
 // instance buffer through the shared `data_layout`.

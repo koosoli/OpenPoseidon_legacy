@@ -104,6 +104,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <thread>
 #include <cstdint>
 #include <cstdlib>
 #include <string>
@@ -435,58 +436,90 @@ Ref<Texture> TerrainWgpu::BuildEnfusionSatmap(const Landscape& land)
     int pages = 0, missing = 0, failed = 0;
     double sum[3] = {0.0, 0.0, 0.0};
     size_t opaque = 0;
-    std::vector<uint8_t> bytes, page;
-    for (int index = 0; index < tiles * tiles; ++index)
+    // Pages decode in parallel: each writes its own block of the composite, and the archive reader
+    // is already safe across threads (the object stream's workers use it). 2,500 BC7 pages took
+    // 2.7 s on one core.
+    struct PageStats
     {
-        const std::string path = prefix + std::to_string(index) + "_supertexture.edds";
-        if (!mount.Read(path, bytes) || !IsEddsBuffer(bytes.data(), bytes.size()))
+        int pages = 0, missing = 0, failed = 0;
+        double sum[3] = {0.0, 0.0, 0.0};
+        size_t opaque = 0;
+    };
+    const unsigned workers = std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
+    std::vector<PageStats> stats(workers);
+    const auto decodeRange = [&](unsigned worker)
+    {
+        PageStats& st = stats[worker];
+        std::vector<uint8_t> bytes, page;
+        for (int index = static_cast<int>(worker); index < tiles * tiles; index += static_cast<int>(workers))
         {
-            ++missing;
-            continue;
-        }
-        const EddsImage image = ReadEddsBuffer(bytes.data(), bytes.size());
-        const DDSMipLevel* chosen = nullptr;
-        for (const auto& mip : image.mipmaps)
-            if (mip.width == kPageEdge && mip.height == kPageEdge && !mip.data.empty())
+            const std::string path = prefix + std::to_string(index) + "_supertexture.edds";
+            if (!mount.Read(path, bytes) || !IsEddsBuffer(bytes.data(), bytes.size()))
             {
-                chosen = &mip;
-                break;
+                ++st.missing;
+                continue;
             }
-        if (!image.valid() || chosen == nullptr)
-        {
-            ++failed;
-            continue;
-        }
-        page.assign(static_cast<size_t>(kPageEdge) * kPageEdge * 4, 0);
-        if (!ConvertPixels(chosen->data.data(), page.data(), kPageEdge, kPageEdge, image.format,
-                           PixelFormat::RGBA8888))
-        {
-            ++failed;
-            continue;
-        }
-        if (image.format == PixelFormat::ARGB8888)
-            for (size_t i = 0; i + 2 < page.size(); i += 4)
-                std::swap(page[i], page[i + 2]);
-        // Row-major over the tile grid, rows running with world z -- the `.ttile` order.
-        const int originX = (index % tiles) * kPageEdge;
-        const int originZ = (index / tiles) * kPageEdge;
-        for (int z = 0; z < kPageEdge; ++z)
-        {
-            std::copy_n(page.data() + static_cast<size_t>(z) * kPageEdge * 4, kPageEdge * 4,
-                        rgba.data() + (static_cast<size_t>(originZ + z) * edge + originX) * 4);
-            for (int x = 0; x < kPageEdge; ++x)
-            {
-                const uint8_t* t = page.data() + (static_cast<size_t>(z) * kPageEdge + x) * 4;
-                if (t[3] > 127)
+            const EddsImage image = ReadEddsBuffer(bytes.data(), bytes.size());
+            const DDSMipLevel* chosen = nullptr;
+            for (const auto& mip : image.mipmaps)
+                if (mip.width == kPageEdge && mip.height == kPageEdge && !mip.data.empty())
                 {
-                    sum[0] += t[0];
-                    sum[1] += t[1];
-                    sum[2] += t[2];
-                    ++opaque;
+                    chosen = &mip;
+                    break;
+                }
+            if (!image.valid() || chosen == nullptr)
+            {
+                ++st.failed;
+                continue;
+            }
+            page.assign(static_cast<size_t>(kPageEdge) * kPageEdge * 4, 0);
+            if (!ConvertPixels(chosen->data.data(), page.data(), kPageEdge, kPageEdge, image.format,
+                               PixelFormat::RGBA8888))
+            {
+                ++st.failed;
+                continue;
+            }
+            if (image.format == PixelFormat::ARGB8888)
+                for (size_t i = 0; i + 2 < page.size(); i += 4)
+                    std::swap(page[i], page[i + 2]);
+            // Row-major over the tile grid, rows running with world z -- the `.ttile` order.
+            const int originX = (index % tiles) * kPageEdge;
+            const int originZ = (index / tiles) * kPageEdge;
+            for (int z = 0; z < kPageEdge; ++z)
+            {
+                std::copy_n(page.data() + static_cast<size_t>(z) * kPageEdge * 4, kPageEdge * 4,
+                            rgba.data() + (static_cast<size_t>(originZ + z) * edge + originX) * 4);
+                for (int x = 0; x < kPageEdge; ++x)
+                {
+                    const uint8_t* t = page.data() + (static_cast<size_t>(z) * kPageEdge + x) * 4;
+                    if (t[3] > 127)
+                    {
+                        st.sum[0] += t[0];
+                        st.sum[1] += t[1];
+                        st.sum[2] += t[2];
+                        ++st.opaque;
+                    }
                 }
             }
+            ++st.pages;
         }
-        ++pages;
+    };
+    {
+        std::vector<std::thread> pool;
+        for (unsigned w = 1; w < workers; ++w)
+            pool.emplace_back(decodeRange, w);
+        decodeRange(0);
+        for (std::thread& t : pool)
+            t.join();
+    }
+    for (const PageStats& st : stats)
+    {
+        pages += st.pages;
+        missing += st.missing;
+        failed += st.failed;
+        opaque += st.opaque;
+        for (int c = 0; c < 3; ++c)
+            sum[c] += st.sum[c];
     }
     if (pages == 0)
     {

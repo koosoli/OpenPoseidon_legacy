@@ -130,6 +130,10 @@ struct GrassParams {
     wind_flutter: vec4<f32>,
     // Separate blade_tex means, linear and source-opacity weighted; w=0 invalid.
     blade_layer_means: array<vec4<f32>, 8>,
+    // Per photo-card layer: x = selection weight within its surface's run (0 everywhere =
+    // uniform), y = max draw distance as a fraction of the card ring's reach. Renderer-owned,
+    // set by wgr_grass_set_layer_pick from the map's own clutter definitions.
+    layer_pick: array<vec4<f32>, 32>,
 };
 
 // 32 bytes. `pos_seed` stays f32 for world precision; everything the compute
@@ -564,7 +568,24 @@ fn pick_photo_layer_run(patch_cell: vec2<f32>, run: vec2<u32>) -> u32 {
         if (hash11(patch_cell + vec2<f32>(19.0, 71.0)) >= photo_variety_mix()) {
             return min(run.x, 31u);
         }
-        let pick = u32(hash11(patch_cell + vec2<f32>(43.0, 11.0)) * f32(run.y));
+        // Weighted by the map's own per-plant frequency when it gives one (Reforger: collection
+        // Occurrence x plant Density; layer_pick.x). Uniform when every weight in the run is 0.
+        let h = hash11(patch_cell + vec2<f32>(43.0, 11.0));
+        var total = 0.0;
+        for (var i = 0u; i < run.y; i++) {
+            total += max(grass.layer_pick[min(run.x + i, 31u)].x, 0.0);
+        }
+        if (total > 0.0) {
+            var acc = 0.0;
+            for (var i = 0u; i < run.y; i++) {
+                acc += max(grass.layer_pick[min(run.x + i, 31u)].x, 0.0) / total;
+                if (h < acc) {
+                    return min(run.x + i, 31u);
+                }
+            }
+            return min(run.x + run.y - 1u, 31u);
+        }
+        let pick = u32(h * f32(run.y));
         return min(run.x + min(pick, run.y - 1u), 31u);
     }
     // Otherwise the legacy global mix: every OFP world, and any Arma surface
@@ -1409,8 +1430,13 @@ fn vs_grass_mid_tuft(@builtin(vertex_index) vertex_index: u32, @builtin(instance
     let family = u32(seed * 4.0);
     let family_height = select(select(select(0.78, 1.00, family == 1u), 1.24, family == 2u), 0.62, family == 3u);
     let family_width = select(select(select(0.72, 1.00, family == 1u), 1.20, family == 2u), 1.38, family == 3u);
+    // A plant's own max draw distance (layer_pick.y, a fraction of the card ring's reach): it
+    // shrinks away over the last 15% of its range instead of being drawn to the ring's edge.
+    let pick_far = grass.layer_pick[layer].y;
+    let layer_reach = select(1.0e9, pick_far * mid_ring_end(), pick_far > 0.0);
+    let layer_fade = 1.0 - smoothstep(0.85, 1.0, length(inst.xz - frame.cam_pos.xz) / max(layer_reach, 1.0));
     let height = mix(0.34, 0.78, height_seed) * grass.blade_height * 1.7 * family_height *
-        lod_height_scale(inst_packed.z) * photo_card_scale();
+        lod_height_scale(inst_packed.z) * photo_card_scale() * layer_fade;
     let half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0)) * family_width *
         mid_coverage_width_scale(inst_packed.w);
 

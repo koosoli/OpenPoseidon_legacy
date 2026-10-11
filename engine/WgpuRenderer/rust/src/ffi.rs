@@ -3560,6 +3560,26 @@ pub unsafe extern "C" fn wgr_grass_set_satellite(renderer: *mut WgrRenderer, han
     }));
 }
 
+/// Per photo-card layer: selection weight within its surface's run (0 for all = uniform) and max
+/// draw distance as a fraction of the card ring's reach (0 = no limit). `count` <= 32; a null or
+/// zero-count call restores the neutral pick.
+///
+/// # Safety
+/// `renderer` must be live; `weights` and `far` must hold `count` floats each (or be null).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_layer_pick(renderer: *mut WgrRenderer, weights: *const f32, far: *const f32, count: u32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let n = count.min(32) as usize;
+        let w = if weights.is_null() || n == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(weights, n) } };
+        let f = if far.is_null() || n == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(far, n) } };
+        renderer.grass_set_layer_pick(w, f);
+    }));
+}
+
 /// Upload per-land-cell geography flags for GPU grass placement.  The values are
 /// `GeographyInfo::packed`, one `u32` for every landscape cell.
 ///

@@ -3128,6 +3128,7 @@ void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
         _grassPhotoFamilies.emplace_back("map clutter (per surface)");
         EngineWgpu::AcquireProducerWindow("grass tufts");
         wgr_grass_set_tufts(_renderer, GrassAtlasSize, GrassAtlasSize, GrassAtlasLayers, _clutterAtlas.data());
+        wgr_grass_set_layer_pick(_renderer, _clutterLayerWeight, _clutterLayerFar, 32);
         _grassTuftWorld = worldKey;
         LOG_INFO(Graphics, "Wgpu grass: uploaded the map's clutter atlas ({} of {} layers used, {}x{}, {:.1f} MB)",
                  _clutterAtlasLayers, GrassAtlasLayers, GrassAtlasSize, GrassAtlasSize,
@@ -3208,6 +3209,7 @@ void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
         }
         EngineWgpu::AcquireProducerWindow("grass tufts");
         wgr_grass_set_tufts(_renderer, TargetSize, TargetSize, MaxPhotoGrassFamilies + 1u, layers.data());
+        wgr_grass_set_layer_pick(_renderer, nullptr, nullptr, 0);
         _grassTuftWorld = worldKey;
         LOG_INFO(Graphics, "Wgpu grass: {} photographed clump families discovered ({} atlas layers)", named,
                  MaxPhotoGrassFamilies + 1u);

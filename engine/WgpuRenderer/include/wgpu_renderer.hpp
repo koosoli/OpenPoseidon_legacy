@@ -2859,6 +2859,9 @@ extern "C"
     /* RFG-PBR: the native world's satellite (bank texture handle, one image over the whole land)
      * that the procedural blades lean towards; 0 clears it. */
     WGR_API void wgr_grass_set_satellite(WgrRenderer* renderer, uint64_t handle);
+    /* Per photo-card layer selection weight within its surface's run (all 0 = uniform) and max draw
+     * distance as a fraction of the card ring's reach (0 = no limit); count <= 32, null resets. */
+    WGR_API void wgr_grass_set_layer_pick(WgrRenderer* renderer, const float* weights, const float* far, uint32_t count);
     WGR_API void wgr_grass_set_geography(WgrRenderer* renderer, uint32_t width, uint32_t height,
                                          const uint32_t* geography);
     WGR_API void wgr_grass_set_params(WgrRenderer* renderer, const WgrGrassParams* params);
