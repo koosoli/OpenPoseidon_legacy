@@ -216,19 +216,30 @@ namespace
 {
 thread_local const ParamClass* gLastMissClass = nullptr;
 thread_local char gLastMissName[64] = {};
+thread_local char gLastMissTail[256] = {};
 
 void NoteMiss(const ParamClass* cls, const char* name)
 {
+    // A lookup on the error entry continues the previous miss ("CfgWeapons/X" then
+    // "muzzles" reads "CfgWeapons.X/muzzles"). Kept cheap: the context is built only
+    // when an error is reported.
+    if (cls == &GetParamEntryError())
+    {
+        const size_t used = ::strlen(gLastMissTail);
+        snprintf(gLastMissTail + used, sizeof(gLastMissTail) - used, "/%s", name ? name : "");
+        return;
+    }
     gLastMissClass = cls;
     ::strncpy(gLastMissName, name ? name : "", sizeof(gLastMissName) - 1);
     gLastMissName[sizeof(gLastMissName) - 1] = 0;
+    gLastMissTail[0] = 0;
 }
 
 RString LastMissContext()
 {
     if (!gLastMissClass)
         return RString("?");
-    return gLastMissClass->GetContext(gLastMissName);
+    return gLastMissClass->GetContext(gLastMissName) + RString(gLastMissTail);
 }
 } // namespace
 

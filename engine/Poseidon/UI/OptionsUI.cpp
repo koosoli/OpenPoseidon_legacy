@@ -1457,7 +1457,11 @@ GameValue PoolAddWeapon(const GameState* state, GameValuePar oper1)
         return GameValue();
     }
 
-    RString name = array[0];
+    RString name = Arma1Compat::ResolveWeaponClass(RString(array[0])); // identity unless --arma1
+    if (!(Pars >> "CfgWeapons").FindEntry(name))
+    {
+        return GameValue();
+    }
     int count = toInt((float)array[1]);
 
     int i = GetGCampaignHistory().battles.Size() - 1;
@@ -1485,7 +1489,11 @@ GameValue PoolAddMagazine(const GameState* state, GameValuePar oper1)
         return GameValue();
     }
 
-    RString name = array[0];
+    RString name = Arma1Compat::ResolveMagazineClass(RString(array[0])); // identity unless --arma1
+    if (!(Pars >> "CfgWeapons").FindEntry(name))
+    {
+        return GameValue();
+    }
     int count = toInt((float)array[1]);
 
     int i = GetGCampaignHistory().battles.Size() - 1;

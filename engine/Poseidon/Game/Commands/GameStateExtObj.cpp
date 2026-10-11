@@ -381,7 +381,11 @@ GameValue ObjAddWeaponCargo(const GameState* state, GameValuePar oper1, GameValu
         return NOTHING;
     }
 
-    RString name = array[0];
+    RString name = Poseidon::Arma1Compat::ResolveWeaponClass(RString(array[0])); // identity unless --arma1
+    if (!(Pars >> "CfgWeapons").FindEntry(name))
+    {
+        return NOTHING; // unknown weapon: a cargo entry is not worth failing the mission over
+    }
     Ref<WeaponType> weapon = WeaponTypes.New(name);
     if (!weapon)
     {
@@ -420,7 +424,11 @@ GameValue ObjAddMagazineCargo(const GameState* state, GameValuePar oper1, GameVa
         return NOTHING;
     }
 
-    RString name = array[0];
+    RString name = Poseidon::Arma1Compat::ResolveMagazineClass(RString(array[0])); // identity unless --arma1
+    if (!(Pars >> "CfgWeapons").FindEntry(name))
+    {
+        return NOTHING;
+    }
     Ref<MagazineType> magazine = MagazineTypes.New(name);
     if (!magazine)
     {
