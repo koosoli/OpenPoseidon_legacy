@@ -1504,9 +1504,15 @@ fn fs_gpu_body(in: VsOut
         pbr_metal = scaled.y;
         m.native_ao = scaled.z;
         m.spec_power = clamp(2.0 / (roughness * roughness) - 2.0, 1.0, 256.0);
-        let reflected_f0 = mix(vec3<f32>(0.22), base.rgb, pbr_metal);
-        m.specular = frame.sun_diffuse.rgb * reflected_f0;
-        m.local_specular = reflected_f0;
+        // A dielectric reflects 4% at normal incidence, a metal its base colour. The highlight is the
+        // ENERGY-NORMALISED Blinn-Phong lobe, (n + 8) / (8 pi): shade() applies a bare N.H^n, and
+        // with the old F0 of 0.22 a rough surface (n near 1) took a fifth of the sunlight as a flat
+        // sheen over its whole face -- Everon's shingle roofs came out cream. Normalised, a rough
+        // surface keeps a faint broad sheen and a smooth one a bright tight highlight.
+        let reflected_f0 = mix(vec3<f32>(0.04), base.rgb, pbr_metal);
+        let lobe = (m.spec_power + 8.0) / (8.0 * 3.14159265);
+        m.specular = frame.sun_diffuse.rgb * reflected_f0 * lobe;
+        m.local_specular = reflected_f0 * lobe;
         m.spec_mask = 1.0;
         pbr_diffuse_scale = pow(1.0 - pbr_metal, 0.4545);
     }
