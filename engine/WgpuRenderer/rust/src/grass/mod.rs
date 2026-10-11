@@ -518,6 +518,9 @@ pub struct Grass {
     geography_view: wgpu::TextureView,
     // RFG-PBR: the native world's satellite (set_satellite) or the 1x1 placeholder.
     satellite_view: wgpu::TextureView,
+    // RFG-107: the native world's road segments per land cell (set_road_cells), or the
+    // 16-byte placeholder whose header says "no roads".
+    road_cells: wgpu::Buffer,
     terrain_generation: u64,
     // Whole World: the streamed near patch the grass stands on instead of the native island (an empty
     // placeholder in that mode), with its own geography; see set_earth_ground.
@@ -971,9 +974,21 @@ impl Grass {
                     },
                     count: None,
                 },
+                // RFG-107: road segments per land cell, read by the placement passes.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(16),
+                    },
+                    count: None,
+                },
             ],
         });
         let satellite_view = create_satellite_placeholder(device, queue);
+        let road_cells = create_road_cells_buffer(device, &[]);
         let holes = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_grass_terrain_holes"),
             size: crate::terrain::TERRAIN_HOLES_BYTES,
@@ -1192,6 +1207,7 @@ impl Grass {
             &geography_view,
             &holes,
             &satellite_view,
+            &road_cells,
         );
         let data_bind = make_data_bind(
             device,
@@ -1595,6 +1611,7 @@ impl Grass {
             geography,
             geography_view,
             satellite_view,
+            road_cells,
             terrain_generation: u64::MAX,
             earth: None,
             earth_gen: 0,
@@ -1903,11 +1920,24 @@ impl Grass {
         self.terrain_generation = u64::MAX;
     }
 
+    /// RFG-107: the native world's road segments per land cell (see `road_edge_distance` in
+    /// grass.wgsl for the layout); empty restores "no roads". Rebinds group 1.
+    pub fn set_road_cells(&mut self, device: &wgpu::Device, data: &[u32]) {
+        self.road_cells = create_road_cells_buffer(device, data);
+        self.terrain_generation = u64::MAX;
+    }
+
     /// Per photo-card layer selection weight (within its surface's run) and max draw distance as
     /// a fraction of the card ring's reach. Empty slices restore the neutral pick (uniform, no
     /// limit). Takes effect with the next params upload.
     pub fn set_layer_pick(&mut self, queue: &wgpu::Queue, weights: &[f32], far: &[f32]) {
+        // .z/.w (RFG-108 layer size) belong to set_layer_size and survive a new pick.
+        let sizes: Vec<(f32, f32)> = (0..32).map(|i| (self.layer_pick[i * 4 + 2], self.layer_pick[i * 4 + 3])).collect();
         self.layer_pick = default_layer_pick();
+        for (i, (z, w)) in sizes.into_iter().enumerate() {
+            self.layer_pick[i * 4 + 2] = z;
+            self.layer_pick[i * 4 + 3] = w;
+        }
         for (i, w) in weights.iter().take(32).enumerate() {
             self.layer_pick[i * 4] = if w.is_finite() { w.max(0.0) } else { 0.0 };
         }
@@ -1915,6 +1945,20 @@ impl Grass {
             self.layer_pick[i * 4 + 1] = if f.is_finite() { f.clamp(0.0, 1.0) } else { 0.0 };
         }
         // Patch just this block of the live uniform; the next set_params carries it too.
+        self.last_params.layer_pick = self.layer_pick;
+        queue.write_buffer(&self.grass_params, std::mem::offset_of!(GrassParams, layer_pick) as u64,
+                           bytemuck::cast_slice(&self.layer_pick));
+    }
+
+    /// RFG-108: per layer, the world size of a plant rasterised from its own model (layer_pick.z,
+    /// 0 = stock card sizing) and its per-instance size spread (.w). Empty slices reset both.
+    pub fn set_layer_size(&mut self, queue: &wgpu::Queue, sizes: &[f32], spreads: &[f32]) {
+        for i in 0..32 {
+            let size = sizes.get(i).copied().unwrap_or(0.0);
+            let spread = spreads.get(i).copied().unwrap_or(0.0);
+            self.layer_pick[i * 4 + 2] = if size.is_finite() { size.clamp(0.0, 20.0) } else { 0.0 };
+            self.layer_pick[i * 4 + 3] = if spread.is_finite() { spread.clamp(0.0, 0.9) } else { 0.0 };
+        }
         self.last_params.layer_pick = self.layer_pick;
         queue.write_buffer(&self.grass_params, std::mem::offset_of!(GrassParams, layer_pick) as u64,
                            bytemuck::cast_slice(&self.layer_pick));
@@ -1965,6 +2009,7 @@ impl Grass {
             &self.geography_view,
             &self.holes,
             &self.satellite_view,
+            &self.road_cells,
         );
     }
 
@@ -2395,6 +2440,7 @@ impl Grass {
                 &geography,
                 &self.holes,
                 &self.satellite_view,
+                &self.road_cells,
             );
         }
     }
@@ -2814,14 +2860,24 @@ impl Grass {
         } else {
             &self.shadow_pipeline
         };
-        pass.set_pipeline(near_shadow_pipeline);
+        // RFG-108: a native world's near ring is the PlantMat's 10 cm procedural blades, and
+        // their cascade shadows stamped a sharp dark comma beside every blade -- ink marks
+        // all over the meadow that Reforger's own ground cover does not have. The plants
+        // (the card ring below) still cast. WGR_NATIVE_BLADE_SHADOW=1 restores them.
+        static NATIVE_BLADE_SHADOW: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let native_blades = self.last_raw_params.near_blades_only != 0.0 && !self.near_draws_cards();
+        let skip_near = native_blades &&
+            !*NATIVE_BLADE_SHADOW.get_or_init(|| std::env::var("WGR_NATIVE_BLADE_SHADOW").as_deref() == Ok("1"));
         pass.set_bind_group(0, shadow_bind, &[shadow_offset]);
         pass.set_bind_group(1, &self.terrain_bind, &[]);
-        pass.set_bind_group(2, &self.data_bind, &[]);
-        // The stride's own table and args (reset_indirect); identical to the colour
-        // draw's at stride 1 and on the card path.
-        pass.set_index_buffer(self.shadow_index.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed_indirect(&self.shadow_indirect, 0);
+        if !skip_near {
+            pass.set_pipeline(near_shadow_pipeline);
+            pass.set_bind_group(2, &self.data_bind, &[]);
+            // The stride's own table and args (reset_indirect); identical to the colour
+            // draw's at stride 1 and on the card path.
+            pass.set_index_buffer(self.shadow_index.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed_indirect(&self.shadow_indirect, 0);
+        }
         if self.tuft_enabled {
             pass.set_pipeline(&self.tuft_shadow_pipeline);
             pass.set_bind_group(2, &self.mid_data_bind, &[]);
@@ -2921,6 +2977,7 @@ fn make_terrain_bind(
     geography: &wgpu::TextureView,
     holes: &wgpu::Buffer,
     satellite: &wgpu::TextureView,
+    road_cells: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("wgr_grass_terrain_bind"),
@@ -2946,7 +3003,26 @@ fn make_terrain_bind(
                 binding: 4,
                 resource: wgpu::BindingResource::TextureView(satellite),
             },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: road_cells.as_entire_binding(),
+            },
         ],
+    })
+}
+
+/// RFG-107: the road-cell buffer (layout in grass.wgsl, `road_edge_distance`). Empty data gives
+/// the 16-byte placeholder whose header (range 0) means "no roads".
+fn create_road_cells_buffer(device: &wgpu::Device, data: &[u32]) -> wgpu::Buffer {
+    use wgpu::util::DeviceExt;
+    let mut words: Vec<u32> = data.to_vec();
+    if words.len() < 4 {
+        words = vec![0; 4];
+    }
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("wgr_grass_road_cells"),
+        contents: bytemuck::cast_slice(&words),
+        usage: wgpu::BufferUsages::STORAGE,
     })
 }
 

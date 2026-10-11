@@ -115,6 +115,13 @@ fn native_blade_height_scale() -> f32 {
 // Mirrors photo_layer_bounds in grass.wgsl. The shadow card must be trimmed the
 // same way as the colour card, or the cascade would carry a silhouette larger
 // than the one drawn.
+// Mirrors plant_card_size in grass.wgsl (RFG-108).
+fn plant_card_size(layer: u32, xz: vec2<f32>) -> f32 {
+    let pick = grass.layer_pick[min(layer, 31u)];
+    if (pick.z <= 0.0) { return 0.0; }
+    return pick.z * (1.0 + pick.w * (hash11(xz + 13.0) * 2.0 - 1.0));
+}
+
 fn photo_layer_bounds(layer: u32) -> vec4<f32> {
     let b = grass.layer_bounds[min(layer, 31u)];
     if (b.y - b.x < 0.02 || b.w - b.z < 0.02) { return vec4<f32>(0.0, 1.0, 0.0, 1.0); }
@@ -140,10 +147,28 @@ fn pick_photo_layer_run(patch_cell: vec2<f32>, run: vec2<u32>) -> u32 {
     if (run.y > 0u) {
         // Mirrors grass.wgsl: patches outside the variety mix keep the run's
         // first class (single variety), so the shadow matches the colour card.
-        if (hash11(patch_cell + vec2<f32>(19.0, 71.0)) >= clamp(grass.renderer.z, 0.0, 1.0)) {
+        let mix_amount = select(clamp(grass.renderer.z, 0.0, 1.0), 1.0, grass.native2.w > 0.5);
+        if (hash11(patch_cell + vec2<f32>(19.0, 71.0)) >= mix_amount) {
             return min(run.x, 31u);
         }
-        let pick = u32(hash11(patch_cell + vec2<f32>(43.0, 11.0)) * f32(run.y));
+        // The same weighted pick as the colour card (layer_pick.x), so a plant's shadow is
+        // the plant's -- the cards differ in size since RFG-108.
+        let h = hash11(patch_cell + vec2<f32>(43.0, 11.0));
+        var total = 0.0;
+        for (var i = 0u; i < run.y; i++) {
+            total += max(grass.layer_pick[min(run.x + i, 31u)].x, 0.0);
+        }
+        if (total > 0.0) {
+            var acc = 0.0;
+            for (var i = 0u; i < run.y; i++) {
+                acc += max(grass.layer_pick[min(run.x + i, 31u)].x, 0.0) / total;
+                if (h < acc) {
+                    return min(run.x + i, 31u);
+                }
+            }
+            return min(run.x + run.y - 1u, 31u);
+        }
+        let pick = u32(h * f32(run.y));
         return min(run.x + min(pick, run.y - 1u), 31u);
     }
     return pick_photo_layer(patch_cell);
@@ -356,9 +381,14 @@ fn vs_grass_tuft_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(insta
     let family_width = select(select(select(0.72, 1.00, family == 1u), 1.20, family == 2u), 1.38, family == 3u);
     // Mirrors photo_card_scale() in grass.wgsl (card_look.z, 0 = stock).
     let card_scale = select(clamp(grass.card_look.z, 0.25, 2.0), 1.0, grass.card_look.z <= 0.0);
-    let height = mix(0.34, 0.78, height_seed) * grass.blade_height * 1.7 * family_height *
+    var height = mix(0.34, 0.78, height_seed) * grass.blade_height * 1.7 * family_height *
         lod_height_scale(inst_packed.z) * card_scale;
-    let half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0)) * family_width;
+    var half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0)) * family_width;
+    let plant_size = plant_card_size(layer, inst.xz);
+    if (plant_size > 0.0) {
+        height = plant_size * lod_height_scale(inst_packed.z);
+        half_width = height * 0.5;
+    }
     let crush_dir = unpack2x16snorm(inst_packed.x);
     let crush_data = unpack2x16unorm(inst_packed.y);
     let crush = crush_data.x;
@@ -385,7 +415,7 @@ fn vs_grass_tuft_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(insta
     let lateral = axis * (u - 0.5) * 2.0 * half_width;
     let world = inst.xyz + lateral + vec3<f32>(0.0, crushed_height * vh, 0.0) + lean;
     let mirror = hash11(inst.xz + 5.0) < 0.5;
-    let slice = mix(0.0, 0.18, hash11(inst.xz + 41.0)) * (bounds.y - bounds.x);
+    let slice = select(mix(0.0, 0.18, hash11(inst.xz + 41.0)), 0.0, plant_size > 0.0) * (bounds.y - bounds.x);
     var uu = clamp(mix(bounds.x + slice, bounds.y - slice, quad_u), bounds.x, bounds.y);
     if (mirror) { uu = bounds.x + bounds.y - uu; }
     var out: TuftShadowOut;

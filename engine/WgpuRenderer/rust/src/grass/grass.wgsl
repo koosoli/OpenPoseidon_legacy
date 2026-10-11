@@ -164,6 +164,16 @@ struct WindField {
 // RFG-PBR: a native world's satellite over the whole land (sRGB-encoded, alpha 0 where it has no
 // say); a 1x1 placeholder elsewhere. Read by grass_ground_colour.
 @group(1) @binding(4) var grass_satellite: texture_2d<f32>;
+// RFG-107/109: what a native world's grass keeps out of, per land cell
+// (TerrainWgpu::UploadGrassRoadCells):
+//   [0]           land range n (0 = nothing; also ignored when it is not this ground's range)
+//   [1]           word offset of the shape table
+//   [2 .. 2+n*n]  per cell: (word offset of its index list << 8) | shape count
+//   index lists   u32 shape numbers
+//   shape table   6 words per shape (f32 bits, world metres):
+//                   road:   ax, az, bx, bz, half width, -1
+//                   object: centre x, z, unit axis x, z, half extent along, across
+@group(1) @binding(5) var<storage, read> road_cells: array<u32>;
 
 // Sinkhole W1 (port of Malprave terrainHole2 to wgpu): terrain holes -- world X/Z convex areas a hole-cutting
 // object (memory-LOD `terrain_hole*` selection + roadway LOD) has cut out of the ground. Written by
@@ -537,6 +547,15 @@ fn photo_layer_bounds(layer: u32) -> vec4<f32> {
     return b;
 }
 
+// RFG-108: a layer holding a plant rasterised from its own model carries the world size of its
+// full square in layer_pick.z (base on the bottom edge) and its MinScale..MaxScale spread in .w.
+// 0 = a stock photo/sheet card, sized the old way. Mirrored in grass_shadow.wgsl.
+fn plant_card_size(layer: u32, xz: vec2<f32>) -> f32 {
+    let pick = grass.layer_pick[min(layer, 31u)];
+    if (pick.z <= 0.0) { return 0.0; }
+    return pick.z * (1.0 + pick.w * (hash11(xz + 13.0) * 2.0 - 1.0));
+}
+
 fn photo_layer_weight(index: u32) -> f32 {
     return max(grass.layer_weights[index / 4u][index % 4u], 0.0);
 }
@@ -564,6 +583,10 @@ fn instance_layer_run(packed_w: u32) -> vec2<u32> {
 // global-mix path, so on every map that declares its own clutter runs (Takistan,
 // Stratis) the slider did nothing at all.
 fn photo_variety_mix() -> f32 {
+    // RFG-108: a native world's cards are its own plants at its own per-plant frequencies; the
+    // single-variety default (0) was a cure for A3 photo plates and leaves a Reforger meadow one
+    // species of dry grass.
+    if (grass.native2.w > 0.5) { return 1.0; }
     return clamp(grass.renderer.z, 0.0, 1.0);
 }
 
@@ -639,7 +662,9 @@ fn geo_clutter_coverage(geo: u32) -> f32 {
 // A geography cell grass may never enter: water, road, track, hard objects (buildings), and the
 // forest flags unless the diagnostic override relaxes them. Never faded into, never spilled onto.
 fn grass_cell_blocked(geo: u32) -> bool {
-    return (geo & GEO_EXCLUDE_HARD) != 0u ||
+    // RFG-109: hard-object bits (10-11) are the footprints' job where this ground has them.
+    let hard = select(GEO_EXCLUDE_HARD, GEO_EXCLUDE_HARD & ~0x00000c00u, grass_has_exclusion_shapes());
+    return (geo & hard) != 0u ||
         (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u);
 }
 
@@ -684,6 +709,52 @@ fn grass_edge_presence(world_xz: vec2<f32>, own_geo: u32) -> f32 {
     // past the boundary (blocked cells stay 0 regardless). The noise keeps it off a straight line.
     return smoothstep(0.30, 0.95, b + (n - 0.5) * 0.45);
 #endif
+}
+
+// RFG-109: true when this ground has the per-cell shapes. The geography's hard-object bits
+// then stop blocking whole cells: on a native world they mark every 12.5 m cell holding a
+// fence post or a boulder, and the footprints below keep blades out of the objects themselves.
+fn grass_has_exclusion_shapes() -> bool {
+    let n = road_cells[0];
+    return n != 0u && n == terrain.land_range;
+}
+
+// RFG-107/109: how much grass `world_xz` keeps next to roads and hard objects, 0..1: 0 on a
+// road or inside a footprint, 1 from ~1.6 m past a road's edge and ~0.6 m past a footprint's.
+// The noise keeps the verge off a ruled line. Multiplies the meadow-edge presence, so the
+// margin is sparser AND shorter.
+fn grass_exclusion_presence(world_xz: vec2<f32>) -> f32 {
+    if (!grass_has_exclusion_shapes()) { return 1.0; }
+    let n = road_cells[0];
+    let cell = vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid));
+    if (any(cell < vec2<i32>(0)) || any(cell >= vec2<i32>(i32(n)))) { return 1.0; }
+    let entry = road_cells[2u + u32(cell.y) * n + u32(cell.x)];
+    let count = entry & 0xffu;
+    if (count == 0u) { return 1.0; }
+    let first = entry >> 8u;
+    let table = road_cells[1];
+    var road_d = 1e9;
+    var obj_d = 1e9;
+    for (var i = 0u; i < count; i = i + 1u) {
+        let w = table + road_cells[first + i] * 6u;
+        let a = vec2<f32>(bitcast<f32>(road_cells[w]), bitcast<f32>(road_cells[w + 1u]));
+        let b = vec2<f32>(bitcast<f32>(road_cells[w + 2u]), bitcast<f32>(road_cells[w + 3u]));
+        let e = bitcast<f32>(road_cells[w + 4u]);
+        let f = bitcast<f32>(road_cells[w + 5u]);
+        if (f < 0.0) {
+            let ab = b - a;
+            let t = clamp(dot(world_xz - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+            road_d = min(road_d, length(world_xz - (a + ab * t)) - e);
+        } else {
+            // b is the box's unit axis; e and f its half extents along and across it.
+            let d = world_xz - a;
+            let q = abs(vec2<f32>(dot(d, b), dot(d, vec2<f32>(-b.y, b.x)))) - vec2<f32>(e, f);
+            obj_d = min(obj_d, length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0));
+        }
+    }
+    if (road_d > 3.0 && obj_d > 1.5) { return 1.0; }
+    let jitter = clump_noise(world_xz, 0.45, 0x7b3e19a5u) - 0.5;
+    return smoothstep(0.05, 1.6, road_d + jitter * 0.6) * smoothstep(0.0, 0.6, obj_d + jitter * 0.3);
 }
 
 // Stable thinning by the authored coverage. Keyed on a salt of its own rather
@@ -1115,7 +1186,7 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     // despite the surface being valid grass terrain.
     // Blocked cells (roads, buildings, water) stay bare; meadow margins thin out instead of
     // ending on the cell's square edge (grass_edge_presence).
-    let presence = grass_edge_presence(world_xz, geo);
+    let presence = grass_edge_presence(world_xz, geo) * grass_exclusion_presence(world_xz);
     if (presence <= 0.0 || hash_cell01(cell_id, 0x6d2b79f5u) >= presence * presence) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
     // Cards only: the card coverage (map's own where authored, else card_look.x).
@@ -1186,7 +1257,7 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (any(world_xz < terrain.world_origin) || any(world_xz >= map_max)) { return; }
     let geocell = clamp(vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid)), vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
     let geo = textureLoad(geography, geocell, 0).x;
-    let presence = grass_edge_presence(world_xz, geo);
+    let presence = grass_edge_presence(world_xz, geo) * grass_exclusion_presence(world_xz);
     if (presence <= 0.0 || hash_cell01(cell_id, 0x6d2b79f5u) >= presence * presence) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
     // Cards only: the card coverage (map's own where authored, else card_look.x).
@@ -1272,7 +1343,7 @@ fn cs_place_far(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (any(world_xz < terrain.world_origin) || any(world_xz >= map_max)) { return; }
     let geocell = clamp(vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid)), vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
     let geo = textureLoad(geography, geocell, 0).x;
-    let presence = grass_edge_presence(world_xz, geo);
+    let presence = grass_edge_presence(world_xz, geo) * grass_exclusion_presence(world_xz);
     if (presence <= 0.0 || hash_cell01(cell_id, 0x6d2b79f5u) >= presence * presence) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
     let y = sample_height(world_xz);
@@ -1500,10 +1571,16 @@ fn vs_grass_mid_tuft(@builtin(vertex_index) vertex_index: u32, @builtin(instance
     let pick_far = grass.layer_pick[layer].y;
     let layer_reach = select(1.0e9, pick_far * mid_ring_end(), pick_far > 0.0);
     let layer_fade = 1.0 - smoothstep(0.85, 1.0, length(inst.xz - frame.cam_pos.xz) / max(layer_reach, 1.0));
-    let height = mix(0.34, 0.78, height_seed) * grass.blade_height * 1.7 * family_height *
+    var height = mix(0.34, 0.78, height_seed) * grass.blade_height * 1.7 * family_height *
         lod_height_scale(inst_packed.z) * photo_card_scale() * layer_fade;
-    let half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0)) * family_width *
+    var half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0)) * family_width *
         mid_coverage_width_scale(inst_packed.w);
+    let plant_size = plant_card_size(layer, inst.xz);
+    if (plant_size > 0.0) {
+        // The plant's own size and proportions: the square is as wide as it is tall.
+        height = plant_size * lod_height_scale(inst_packed.z) * layer_fade;
+        half_width = height * 0.5;
+    }
 
     let crush_dir = unpack2x16snorm(inst_packed.x);
     let crush_data = unpack2x16unorm(inst_packed.y);
@@ -1553,7 +1630,8 @@ fn vs_grass_mid_tuft(@builtin(vertex_index) vertex_index: u32, @builtin(instance
     // The slice inset works within the trimmed box, not the raw image, so a
     // trimmed card still samples the same content it did untrimmed.
     let mirror = hash11(inst.xz + 5.0) < 0.5;
-    let slice = mix(0.0, 0.18, hash11(inst.xz + 41.0)) * (bounds.y - bounds.x);
+    // A rasterised plant is not sliced: the slice would stretch it off its true width.
+    let slice = select(mix(0.0, 0.18, hash11(inst.xz + 41.0)), 0.0, plant_size > 0.0) * (bounds.y - bounds.x);
     var uu = clamp(mix(bounds.x + slice, bounds.y - slice, quad_u), bounds.x, bounds.y);
     if (mirror) { uu = bounds.x + bounds.y - uu; }
     out.blade_uv = vec4<f32>(uu, img_v, f32(layer), 1.0);
@@ -2192,8 +2270,15 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     // Light does not reach the base of a clump. Occluding it there gives the
     // card a bottom, which is most of why an unoccluded plate floats.
     let root_ao = mix(1.0 - clamp(grass.photo.w, 0.0, 1.0), 1.0, smoothstep(0.0, 0.55, in.height_t));
-    let albedo = grass.tint_photo.rgb *
+    var albedo = grass.tint_photo.rgb *
         grass_saturation(dry_patch(shaped * variation * gust_highlight * root_ao, world.xz, in.height_t));
+    // RFG-108: a native card is the plant's own authored albedo, rasterised from its model.
+    // The chain above is A3 plate calibration -- saturation 0.62, contrast 1.35 about the
+    // plate mean, straw dry patches, the field tint -- and turned Everon's nettles and
+    // thistles grey-white. Only the base occlusion and the per-plant variation stay.
+    if (native_card) {
+        albedo = tex.rgb * variation * root_ao;
+    }
     // Photo cards are crossed billboards, so the base normal stays upright:
     // lighting the card's own facing made one clump brighten or darken as the
     // camera orbited it. The photograph's luma gradient then perturbs that

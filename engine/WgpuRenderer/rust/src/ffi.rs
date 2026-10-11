@@ -3560,6 +3560,48 @@ pub unsafe extern "C" fn wgr_grass_set_satellite(renderer: *mut WgrRenderer, han
     }));
 }
 
+/// RFG-108: per photo-card layer, the world size of a rasterised plant's full square (0 = stock
+/// sizing) and its per-instance size spread; null or zero `count` resets.
+///
+/// # Safety
+/// `renderer` must be live; `sizes` and `spreads` must be null or point to `count` floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_layer_size(renderer: *mut WgrRenderer, sizes: *const f32, spreads: *const f32,
+                                                  count: u32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let n = count.min(32) as usize;
+        let sizes: &[f32] = if sizes.is_null() || n == 0 { &[] } else { unsafe { std::slice::from_raw_parts(sizes, n) } };
+        let spreads: &[f32] =
+            if spreads.is_null() || n == 0 { &[] } else { unsafe { std::slice::from_raw_parts(spreads, n) } };
+        renderer.grass_set_layer_size(sizes, spreads);
+    }));
+}
+
+/// RFG-107: the native world's road segments per land cell, for the grass placement (layout in
+/// grass.wgsl, `road_edge_distance`); null or zero `count` clears them.
+///
+/// # Safety
+/// `renderer` must be live; `data` must be null or point to `count` readable words.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_road_cells(renderer: *mut WgrRenderer, data: *const u32, count: u32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let words: &[u32] = if data.is_null() || count == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(data, count as usize) }
+        };
+        renderer.grass_set_road_cells(words);
+    }));
+}
+
 /// Per photo-card layer: selection weight within its surface's run (0 for all = uniform) and max
 /// draw distance as a fraction of the card ring's reach (0 = no limit). `count` <= 32; a null or
 /// zero-count call restores the neutral pick.

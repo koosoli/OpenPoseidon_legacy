@@ -52,6 +52,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <initializer_list>
+#include <memory>
 #include <cctype>
 #include <chrono>
 #include <cstdio>
@@ -359,6 +360,8 @@ struct NativePlant
     float occurrence = 1.0f;
     float density = 1.0f;
     float maxDraw = 1.0f; //!< MaxDrawDistance: fraction of the clutter range the plant is drawn to
+    float minScale = 1.0f; //!< MinScale / MaxScale: the per-instance size range (RFG-108)
+    float maxScale = 1.0f;
 };
 
 //! Walks a ClutterSet (and the sets it inherits) down to the collections, and the
@@ -417,6 +420,8 @@ void CollectPlants(const EnfusionMount& mount, const std::string& setPath, std::
             plant.occurrence = definition->Number("Occurrence", 100.0f);
             plant.density = plantConf.Number("Density", 1.0f);
             plant.maxDraw = plantConf.Number("MaxDrawDistance", 1.0f);
+            plant.minScale = plantConf.Number("MinScale", 1.0f);
+            plant.maxScale = std::max(plant.minScale, plantConf.Number("MaxScale", plant.minScale));
             const auto existing =
                 std::find_if(out.begin(), out.end(),
                              [&](const NativePlant& have) { return LowerCopy(have.conf) == LowerCopy(plant.conf); });
@@ -551,7 +556,453 @@ bool ComposeCard(const EnfusionMount& mount, const std::string& colourPath, cons
     // absent one; refuse it so the surface falls back to layer 0 instead.
     return opaque > 64;
 }
+
+// ---------------------------------------------------------------------------
+// RFG-108: the plant itself, not its texture sheet
+// ---------------------------------------------------------------------------
+//
+// ComposeCard puts a plant's whole colour/opacity SHEET on the card -- and a clutter
+// texture is a sheet: a dozen loose leaves, stems and flower heads laid out for the
+// model's UVs to pick from (dump them with POSEIDON_ENFUSION_BLADES_DUMP). Drawn as
+// one card that is a scatter of disconnected parts, about the size of the stock
+// photo tuft rather than of the plant -- the pale specks over Everon's meadows.
+//
+// Instead the plant's finest `.xob` LOD is rasterised, textured through its own
+// materials, into the layer: a real silhouette. The view looks 20 degrees down, so
+// a ground rosette (plantain, clover) keeps a third of its spread rather than
+// vanishing edge-on; upright grass loses 6% of its height to it. 2x2 supersampled,
+// alpha-tested per sample, then the colour is pushed into the transparent texels so
+// the mip chain does not average the plant towards whatever the empty texels held.
+// `sizeMetres` is the world size of the layer's full square, base at the bottom edge.
+struct ImpostorTexture
+{
+    int w = 0, h = 0;
+    std::vector<uint8_t> colour; // RGBA
+    int ow = 0, oh = 0;
+    std::vector<uint8_t> opacity; // RGBA, coverage = max(rgb); empty = opaque
+};
+
+bool ComposeImpostor(const EnfusionMount& mount, const std::string& modelPath, uint8_t* layer, float& sizeMetres,
+                     std::unordered_map<std::string, std::shared_ptr<ImpostorTexture>>& cache)
+{
+    namespace Xob = Poseidon::Asset::Formats::Enfusion;
+    namespace Mat = Poseidon::Asset::Material;
+    std::vector<uint8_t> bytes;
+    if (!mount.Read(modelPath, bytes) || bytes.empty())
+        return false;
+    const Xob::XobModel model = Xob::ReadXobModel(bytes.data(), bytes.size(), true);
+    if (!model.valid() || model.lods.empty() || model.lods[0].parts.empty())
+        return false;
+    const Xob::XobLod& lod = model.lods[0];
+
+    // One textured material per part, resolved once per path across the whole bake.
+    auto textureFor = [&](uint16_t materialIndex) -> std::shared_ptr<ImpostorTexture>
+    {
+        if (materialIndex >= model.materials.size() || model.materials[materialIndex].path.empty())
+            return nullptr;
+        const std::string& path = model.materials[materialIndex].path;
+        if (const auto hit = cache.find(path); hit != cache.end())
+            return hit->second;
+        std::shared_ptr<ImpostorTexture> result;
+        std::vector<uint8_t> ematBytes;
+        if (mount.Read(path, ematBytes))
+        {
+            Mat::EmatMaterial parsed = Mat::ParseEmat(
+                std::string_view(reinterpret_cast<const char*>(ematBytes.data()), ematBytes.size()));
+            if (parsed.valid())
+            {
+                Mat::ResolveEmatInheritance(parsed,
+                                            [&mount](const std::string& parentPath, std::string& text)
+                                            {
+                                                std::vector<uint8_t> parentBytes;
+                                                if (!mount.Read(parentPath, parentBytes))
+                                                    return false;
+                                                text.assign(reinterpret_cast<const char*>(parentBytes.data()),
+                                                            parentBytes.size());
+                                                return true;
+                                            });
+                std::string colour = parsed.TextureOf("BCRMap");
+                if (colour.empty())
+                    colour = parsed.TextureOf("AlbedoMap");
+                auto texture = std::make_shared<ImpostorTexture>();
+                if (!colour.empty() && DecodeEdds(mount, colour, 1024, texture->w, texture->h, texture->colour))
+                {
+                    const std::string opacity = parsed.TextureOf("OpacityMap");
+                    if (!opacity.empty() &&
+                        !DecodeEdds(mount, opacity, 1024, texture->ow, texture->oh, texture->opacity))
+                        texture->opacity.clear();
+                    result = texture;
+                }
+            }
+        }
+        cache.emplace(path, result);
+        return result;
+    };
+
+    constexpr float Tilt = 0.349066f; // 20 degrees
+    const float cosT = std::cos(Tilt), sinT = std::sin(Tilt);
+    // Screen y: up, plus a little of depth (further is higher when looking down).
+    auto screenY = [&](const Xob::XobVec3& p) { return p.y * cosT + p.z * sinT; };
+    float bottom = 0.0f, top = 0.0f, halfWidth = 0.0f;
+    size_t triangles = 0;
+    for (const Xob::XobPart& part : lod.parts)
+    {
+        for (const Xob::XobVec3& p : part.positions)
+        {
+            bottom = std::min(bottom, screenY(p));
+            top = std::max(top, screenY(p));
+            halfWidth = std::max(halfWidth, std::abs(p.x));
+        }
+        triangles += part.indices.size() / 3;
+    }
+    const float size = std::max(top - bottom, 2.0f * halfWidth) * 1.02f;
+    if (triangles == 0 || !(size > 0.01f) || size > 20.0f)
+        return false;
+
+    constexpr int Super = 2;
+    constexpr int R = GrassGeo::AtlasSize * Super;
+    std::vector<float> depth(static_cast<size_t>(R) * R, 1e30f);
+    std::vector<uint8_t> hiColour(static_cast<size_t>(R) * R * 3, 0);
+    std::vector<uint8_t> hiCover(static_cast<size_t>(R) * R, 0);
+    auto toPixel = [&](const Xob::XobVec3& p, float& px, float& py)
+    {
+        px = (p.x / size + 0.5f) * static_cast<float>(R);
+        py = (1.0f - (screenY(p) - bottom) / size) * static_cast<float>(R);
+    };
+    auto sample = [](const std::vector<uint8_t>& rgba, int w, int h, float u, float v, int c)
+    {
+        u -= std::floor(u);
+        v -= std::floor(v);
+        const int x = std::min(w - 1, static_cast<int>(u * static_cast<float>(w)));
+        const int y = std::min(h - 1, static_cast<int>(v * static_cast<float>(h)));
+        return rgba[(static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 4u +
+                    static_cast<size_t>(c)];
+    };
+
+    for (const Xob::XobPart& part : lod.parts)
+    {
+        const std::shared_ptr<ImpostorTexture> texture = textureFor(part.materialIndex);
+        if (!texture)
+            continue;
+        const bool renderUv = !part.renderUvSets.empty() && part.renderIndices.size() == part.indices.size() &&
+                              part.renderUvSets[0].size() == part.renderSource.size();
+        if (!renderUv && (part.uvSets.empty() || part.uvSets[0].size() != part.positions.size()))
+            continue;
+        for (size_t t = 0; t + 2 < part.indices.size(); t += 3)
+        {
+            float x[3], y[3], z[3], u[3], v[3];
+            for (int c = 0; c < 3; ++c)
+            {
+                size_t position = part.indices[t + c];
+                Xob::XobVec2 uv;
+                if (renderUv)
+                {
+                    const size_t render = part.renderIndices[t + c];
+                    position = part.renderSource[render];
+                    uv = part.renderUvSets[0][render];
+                }
+                else
+                {
+                    uv = part.uvSets[0][position];
+                }
+                const Xob::XobVec3& p = part.positions[position];
+                toPixel(p, x[c], y[c]);
+                z[c] = p.z * cosT - p.y * sinT; // distance along the view: smaller is nearer
+                u[c] = uv.u;
+                v[c] = uv.v;
+            }
+            const float area = (x[1] - x[0]) * (y[2] - y[0]) - (x[2] - x[0]) * (y[1] - y[0]);
+            if (std::abs(area) < 1e-6f)
+                continue;
+            const int x0 = std::max(0, static_cast<int>(std::floor(std::min({x[0], x[1], x[2]}))));
+            const int x1 = std::min(R - 1, static_cast<int>(std::ceil(std::max({x[0], x[1], x[2]}))));
+            const int y0 = std::max(0, static_cast<int>(std::floor(std::min({y[0], y[1], y[2]}))));
+            const int y1 = std::min(R - 1, static_cast<int>(std::ceil(std::max({y[0], y[1], y[2]}))));
+            const float invArea = 1.0f / area;
+            for (int py = y0; py <= y1; ++py)
+                for (int px = x0; px <= x1; ++px)
+                {
+                    const float sx = static_cast<float>(px) + 0.5f, sy = static_cast<float>(py) + 0.5f;
+                    // Barycentrics, either winding: leaves are two-sided.
+                    const float b0 = ((x[1] - sx) * (y[2] - sy) - (x[2] - sx) * (y[1] - sy)) * invArea;
+                    const float b1 = ((x[2] - sx) * (y[0] - sy) - (x[0] - sx) * (y[2] - sy)) * invArea;
+                    const float b2 = 1.0f - b0 - b1;
+                    if (b0 < 0.0f || b1 < 0.0f || b2 < 0.0f)
+                        continue;
+                    const size_t index = static_cast<size_t>(py) * R + static_cast<size_t>(px);
+                    const float d = b0 * z[0] + b1 * z[1] + b2 * z[2];
+                    if (d >= depth[index])
+                        continue;
+                    const float tu = b0 * u[0] + b1 * u[1] + b2 * u[2];
+                    const float tv = b0 * v[0] + b1 * v[1] + b2 * v[2];
+                    if (!texture->opacity.empty())
+                    {
+                        const int coverage = std::max({sample(texture->opacity, texture->ow, texture->oh, tu, tv, 0),
+                                                       sample(texture->opacity, texture->ow, texture->oh, tu, tv, 1),
+                                                       sample(texture->opacity, texture->ow, texture->oh, tu, tv, 2)});
+                        if (coverage < 128)
+                            continue;
+                    }
+                    depth[index] = d;
+                    hiCover[index] = 1;
+                    for (int c = 0; c < 3; ++c)
+                        hiColour[index * 3 + c] = sample(texture->colour, texture->w, texture->h, tu, tv, c);
+                }
+        }
+    }
+
+    // Down to the layer: coverage = the fraction of samples hit, colour = their mean.
+    constexpr int N = GrassGeo::AtlasSize;
+    size_t opaque = 0;
+    double sum[3] = {0.0, 0.0, 0.0};
+    for (int y = 0; y < N; ++y)
+        for (int x = 0; x < N; ++x)
+        {
+            int hits = 0, rgb[3] = {0, 0, 0};
+            for (int sy = 0; sy < Super; ++sy)
+                for (int sx = 0; sx < Super; ++sx)
+                {
+                    const size_t index = static_cast<size_t>(y * Super + sy) * R + static_cast<size_t>(x * Super + sx);
+                    if (!hiCover[index])
+                        continue;
+                    ++hits;
+                    for (int c = 0; c < 3; ++c)
+                        rgb[c] += hiColour[index * 3 + c];
+                }
+            uint8_t* out = layer + (static_cast<size_t>(y) * N + static_cast<size_t>(x)) * 4u;
+            out[3] = static_cast<uint8_t>(hits * 255 / (Super * Super));
+            for (int c = 0; c < 3; ++c)
+                out[c] = hits ? static_cast<uint8_t>(rgb[c] / hits) : 0;
+            if (hits)
+            {
+                ++opaque;
+                for (int c = 0; c < 3; ++c)
+                    sum[c] += out[c];
+            }
+        }
+    if (opaque <= 64)
+        return false;
+    // Colour into the empty texels: a few rings of neighbour averaging, then the plant's
+    // mean for the rest, so no mip level blends towards black (or white) around a leaf.
+    std::vector<uint8_t> known(static_cast<size_t>(N) * N);
+    for (size_t i = 0; i < known.size(); ++i)
+        known[i] = layer[i * 4 + 3] != 0;
+    for (int pass = 0; pass < 6; ++pass)
+    {
+        std::vector<uint8_t> next = known;
+        for (int y = 0; y < N; ++y)
+            for (int x = 0; x < N; ++x)
+            {
+                const size_t index = static_cast<size_t>(y) * N + static_cast<size_t>(x);
+                if (known[index])
+                    continue;
+                int count = 0, rgb[3] = {0, 0, 0};
+                for (int dy = -1; dy <= 1; ++dy)
+                    for (int dx = -1; dx <= 1; ++dx)
+                    {
+                        const int nx = x + dx, ny = y + dy;
+                        if (nx < 0 || ny < 0 || nx >= N || ny >= N)
+                            continue;
+                        const size_t n = static_cast<size_t>(ny) * N + static_cast<size_t>(nx);
+                        if (!known[n])
+                            continue;
+                        ++count;
+                        for (int c = 0; c < 3; ++c)
+                            rgb[c] += layer[n * 4 + c];
+                    }
+                if (count == 0)
+                    continue;
+                for (int c = 0; c < 3; ++c)
+                    layer[index * 4 + c] = static_cast<uint8_t>(rgb[c] / count);
+                next[index] = 1;
+            }
+        known.swap(next);
+    }
+    for (size_t i = 0; i < known.size(); ++i)
+        if (!known[i])
+            for (int c = 0; c < 3; ++c)
+                layer[i * 4 + c] = static_cast<uint8_t>(sum[c] / static_cast<double>(opaque));
+    sizeMetres = size;
+    return true;
+}
 } // namespace
+
+// ---------------------------------------------------------------------------
+// RFG-107 / RFG-109: what grass keeps out of, per land cell
+// ---------------------------------------------------------------------------
+//
+// Two whole-cell exclusions used to keep grass off roads and out of buildings: the
+// bake dropped every 12.5 m land cell a road ribbon (plus a 1 m verge) touched, and
+// the shader dropped every cell the AI geography counted a hard object in. A 6 m track
+// cleared a 25 m strip of meadow; and since RFG-101 streams every native object into
+// that geography, a fence post or a boulder emptied its cell too -- measured at Morton
+// as bare ground from the fence to the middle of the frame, on cells the probe showed
+// were Grass_03, selected, full coverage.
+//
+// Instead each cell lists the SHAPES near it and the placement shader measures the
+// distance to the nearest one's edge: road centreline segments as capsules of the
+// ribbon's half width, hard objects as their oriented footprint boxes.
+//
+// Buffer layout (u32 words), mirrored by `grass_exclusion_presence` in grass.wgsl:
+//   [0]           land range n (0 = nothing; the shader then keeps the cell bits)
+//   [1]           word offset of the shape table
+//   [2 .. 2+n*n]  per cell: (word offset of its index list << 8) | shape count
+//   index lists   u32 shape numbers, contiguous per cell
+//   shape table   6 words per shape (f32 bits):
+//                   road:   ax, az, bx, bz, half width, -1
+//                   object: centre x, z, unit axis x, z, half extent along, across
+// Indices rather than a copy of each shape per cell: the first cut copied, and the
+// rebuild every time objects streamed in cost 25-86 ms on the main thread.
+namespace
+{
+// Blades fade in over ~1.6 m past a road edge and ~0.6 m past a footprint, with up to
+// 0.3 m of noise; a cell further than this from a shape needs no record of it.
+constexpr float GrassRoadReach = 2.5f;
+constexpr float GrassFootprintReach = 1.2f;
+} // namespace
+
+bool TerrainWgpu::UploadGrassRoadCells(const Landscape& land)
+{
+    const std::vector<float>& segments = land.GetEnfusionRoadSegments();
+    const std::vector<float>& footprints = land.GetGrassFootprints();
+    // Native worlds only: the roads are what say this is a world whose geography cells
+    // must not block grass wholesale.
+    const bool want = !segments.empty() && land.GetLandRange() > 0;
+    const bool roads = want && Landscape::EnfusionRoadClutterClear();
+    const int n = land.GetLandRange();
+    const size_t roadKey = roads ? segments.size() : 0;
+    if (_grassRoadLand != &land || _grassRoadSegments != roadKey || !want ||
+        _grassShapeCells.size() != static_cast<size_t>(n) * static_cast<size_t>(n))
+    {
+        // A new world, the road switch moved, or nothing to do: start the bins again.
+        const bool hadAny = _grassRoadUploaded || _grassRoadLand != &land;
+        _grassRoadLand = &land;
+        _grassRoadSegments = roadKey;
+        _grassShapeCells.assign(want ? static_cast<size_t>(n) * static_cast<size_t>(n) : 0, {});
+        _grassShapes.clear();
+        _grassRoadsBinned = false;
+        _grassFootprintsBinned = 0;
+        _grassRoadUploaded = false;
+        if (!want)
+        {
+            if (hadAny)
+                wgr_grass_set_road_cells(_renderer, nullptr, 0);
+            return false;
+        }
+    }
+    else if (_grassFootprintsBinned * 6 == footprints.size() && _grassRoadUploaded)
+    {
+        return roads; // nothing new since the last upload
+    }
+
+    const auto started = std::chrono::steady_clock::now();
+    const float grid = land.GetLandGrid();
+    const float halfDiagonal = grid * 0.7072f;
+    // Bins shape `index` into every cell whose centre is within half a diagonal of the
+    // shape's reach, by the shape's own distance (which already subtracts the reach).
+    auto bin = [&](uint32_t index, float minX, float maxX, float minZ, float maxZ, auto&& distance)
+    {
+        const int x0 = std::max(0, static_cast<int>(std::floor(minX / grid)));
+        const int x1 = std::min(n - 1, static_cast<int>(std::floor(maxX / grid)));
+        const int z0 = std::max(0, static_cast<int>(std::floor(minZ / grid)));
+        const int z1 = std::min(n - 1, static_cast<int>(std::floor(maxZ / grid)));
+        for (int cz = z0; cz <= z1; ++cz)
+            for (int cx = x0; cx <= x1; ++cx)
+            {
+                const float px = (static_cast<float>(cx) + 0.5f) * grid;
+                const float pz = (static_cast<float>(cz) + 0.5f) * grid;
+                if (distance(px, pz) > halfDiagonal)
+                    continue;
+                _grassShapeCells[static_cast<size_t>(cz) * static_cast<size_t>(n) + static_cast<size_t>(cx)]
+                    .push_back(index);
+            }
+    };
+
+    if (!_grassRoadsBinned && roads)
+    {
+        for (size_t s = 0; s + 5 <= segments.size(); s += 5)
+        {
+            const float* g = &segments[s];
+            const uint32_t index = static_cast<uint32_t>(_grassShapes.size() / 6);
+            _grassShapes.insert(_grassShapes.end(), {g[0], g[1], g[2], g[3], g[4], -1.0f});
+            const float reach = g[4] + GrassRoadReach;
+            const float abx = g[2] - g[0], abz = g[3] - g[1];
+            const float ab2 = std::max(abx * abx + abz * abz, 1e-6f);
+            bin(index, std::min(g[0], g[2]) - reach - halfDiagonal, std::max(g[0], g[2]) + reach + halfDiagonal,
+                std::min(g[1], g[3]) - reach - halfDiagonal, std::max(g[1], g[3]) + reach + halfDiagonal,
+                [&](float px, float pz)
+                {
+                    const float t = std::clamp(((px - g[0]) * abx + (pz - g[1]) * abz) / ab2, 0.0f, 1.0f);
+                    const float dx = px - (g[0] + abx * t), dz = pz - (g[1] + abz * t);
+                    return std::sqrt(dx * dx + dz * dz) - reach;
+                });
+        }
+    }
+    _grassRoadsBinned = true;
+    const size_t total = footprints.size() / 6;
+    const size_t newFootprints = total - _grassFootprintsBinned;
+    for (size_t f = _grassFootprintsBinned; f < total; ++f)
+    {
+        const float* g = &footprints[f * 6];
+        const uint32_t index = static_cast<uint32_t>(_grassShapes.size() / 6);
+        _grassShapes.insert(_grassShapes.end(), g, g + 6);
+        const float radius = std::sqrt(g[4] * g[4] + g[5] * g[5]) + GrassFootprintReach;
+        bin(index, g[0] - radius - halfDiagonal, g[0] + radius + halfDiagonal, g[1] - radius - halfDiagonal,
+            g[1] + radius + halfDiagonal,
+            [&](float px, float pz)
+            {
+                const float dx = px - g[0], dz = pz - g[1];
+                const float along = std::abs(dx * g[2] + dz * g[3]) - g[4];
+                const float across = std::abs(-dx * g[3] + dz * g[2]) - g[5];
+                const float ox = std::max(along, 0.0f), oz = std::max(across, 0.0f);
+                return std::sqrt(ox * ox + oz * oz) + std::min(std::max(along, across), 0.0f) -
+                       GrassFootprintReach;
+            });
+    }
+    _grassFootprintsBinned = total;
+
+    // Flatten.
+    const size_t header = 2 + static_cast<size_t>(n) * static_cast<size_t>(n);
+    size_t listedTotal = 0;
+    for (const std::vector<uint32_t>& list : _grassShapeCells)
+        listedTotal += std::min<size_t>(list.size(), 255);
+    std::vector<uint32_t> words(header + listedTotal + _grassShapes.size(), 0u);
+    words[0] = static_cast<uint32_t>(n);
+    size_t capped = 0, cells = 0, maxList = 0, listed = 0;
+    size_t cursor = header;
+    for (size_t cell = 0; cell < _grassShapeCells.size(); ++cell)
+    {
+        const std::vector<uint32_t>& list = _grassShapeCells[cell];
+        if (list.empty())
+            continue;
+        const size_t count = std::min<size_t>(list.size(), 255);
+        capped += list.size() - count;
+        if (cursor >= (1u << 24))
+        {
+            capped += count;
+            continue;
+        }
+        std::memcpy(&words[cursor], list.data(), count * sizeof(uint32_t));
+        words[2 + cell] = (static_cast<uint32_t>(cursor) << 8) | static_cast<uint32_t>(count);
+        cursor += count;
+        ++cells;
+        listed += count;
+        maxList = std::max(maxList, count);
+    }
+    words[1] = static_cast<uint32_t>(cursor);
+    words.resize(cursor + _grassShapes.size());
+    std::memcpy(&words[cursor], _grassShapes.data(), _grassShapes.size() * sizeof(float));
+    wgr_grass_set_road_cells(_renderer, words.data(), static_cast<uint32_t>(words.size()));
+    _grassRoadUploaded = true;
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+    LOG_INFO(Graphics,
+             "Wgpu grass exclusions: {} road segments + {} object footprints (+{} new) over {} land cells "
+             "({} listed, longest {}, {} dropped at caps), {:.1f} MB, {:.0f} ms -- blades stop at the edge, the "
+             "cells keep growing",
+             roadKey / 5, total, newFootprints, cells, listed, maxList, capped,
+             static_cast<double>(words.size()) * 4.0 / (1024.0 * 1024.0), ms);
+    return roads;
+}
 
 // ---------------------------------------------------------------------------
 // The bake
@@ -560,6 +1011,8 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
                                     bool reuseDefinitions)
 {
     const int paletteSize = land.GetEnfusionSurfaceCount();
+    // RFG-107: before every exit, so a world without roads clears the previous world's.
+    const bool roadEdges = UploadGrassRoadCells(land);
     if (paletteSize <= 0)
     {
         std::fill(std::begin(_clutterLayerWeight), std::end(_clutterLayerWeight), 0.0f);
@@ -610,6 +1063,16 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
         layerCount = 1; // layer 0 stays the loose primary card, filled by UploadGrassTuft
         std::fill(std::begin(_clutterLayerWeight), std::end(_clutterLayerWeight), 0.0f);
         std::fill(std::begin(_clutterLayerFar), std::end(_clutterLayerFar), 0.0f);
+        std::fill(std::begin(_clutterLayerSize), std::end(_clutterLayerSize), 0.0f);
+        for (auto& scale : _clutterLayerScale)
+        {
+            scale[0] = 1.0f;
+            scale[1] = 0.0f;
+        }
+        const char* impostorEnv = std::getenv("WGR_CLUTTER_IMPOSTOR");
+        const bool impostors = !(impostorEnv && impostorEnv[0] == '0');
+        std::unordered_map<std::string, std::shared_ptr<ImpostorTexture>> impostorTextures;
+        int plantsImpostor = 0;
 
         // One decode per MODEL, not per surface: `c_Arrhenatherum_elatius_01` is named
         // by five of Everon's collections and is 2048 square before the crop.
@@ -709,22 +1172,45 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
                     // copied into this surface's run rather than pointed at.
                     std::memcpy(atlas.data() + static_cast<size_t>(layerCount) * LayerBytes,
                                 atlas.data() + static_cast<size_t>(cached->second) * LayerBytes, LayerBytes);
+                    _clutterLayerSize[layerCount] = _clutterLayerSize[cached->second];
                 }
                 else
                 {
-                    std::string colourPath, opacityPath;
-                    if (!PlantTextures(mount, plant.model, colourPath, opacityPath))
+                    // RFG-108: the plant's own geometry first; its texture sheet only when
+                    // the model cannot be rasterised (or WGR_CLUTTER_IMPOSTOR=0).
+                    float impostorSize = 0.0f;
+                    if (impostors &&
+                        ComposeImpostor(mount, plant.model, atlas.data() + static_cast<size_t>(layerCount) * LayerBytes,
+                                        impostorSize, impostorTextures))
                     {
-                        ++plantsMissingTexture;
-                        continue;
+                        ++plantsImpostor;
+                        _clutterLayerSize[layerCount] = impostorSize;
                     }
-                    if (!ComposeCard(mount, colourPath, opacityPath,
-                                     atlas.data() + static_cast<size_t>(layerCount) * LayerBytes))
+                    else
                     {
-                        ++plantsMissingTexture;
-                        continue;
+                        std::string colourPath, opacityPath;
+                        if (!PlantTextures(mount, plant.model, colourPath, opacityPath))
+                        {
+                            ++plantsMissingTexture;
+                            continue;
+                        }
+                        if (!ComposeCard(mount, colourPath, opacityPath,
+                                         atlas.data() + static_cast<size_t>(layerCount) * LayerBytes))
+                        {
+                            ++plantsMissingTexture;
+                            continue;
+                        }
+                        _clutterLayerSize[layerCount] = 0.0f;
                     }
                     layerOfModel.emplace(modelKey, layerCount);
+                }
+                // The plant's MinScale..MaxScale: the layer's mean size, and the half spread
+                // relative to it, which the card shader jitters per instance.
+                {
+                    const float mid = 0.5f * (plant.minScale + plant.maxScale);
+                    _clutterLayerScale[layerCount][0] = mid > 0.0f ? mid : 1.0f;
+                    _clutterLayerScale[layerCount][1] =
+                        mid > 0.0f ? std::clamp(0.5f * (plant.maxScale - plant.minScale) / mid, 0.0f, 0.9f) : 0.0f;
                 }
                 weight += plant.occurrence * 0.01f * std::max(plant.density, 0.01f);
                 // The map's own frequency for this plant within the run (collection Occurrence x
@@ -791,10 +1277,11 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
         LOG_INFO(
             Graphics,
             "Wgpu grass Enfusion clutter: {} of {} palette surfaces name a ClutterConfig, {} grew a run over {} of {} "
-            "atlas layers ({} plants had no colour+coverage pair, {} dropped at the {}-per-surface / {}-layer caps) "
-            "[{}]",
-            surfacesWithSet, paletteSize, surfacesWithClutter, layerCount, GrassGeo::AtlasLayers, plantsMissingTexture,
-            plantsDropped, MaxPlantsPerSurface, GrassGeo::AtlasLayers, report.empty() ? "none" : report);
+            "atlas layers ({} plants rasterised from their own model, {} had no colour+coverage pair, {} dropped at "
+            "the {}-per-surface / {}-layer caps) [{}]",
+            surfacesWithSet, paletteSize, surfacesWithClutter, layerCount, GrassGeo::AtlasLayers, plantsImpostor,
+            plantsMissingTexture, plantsDropped, MaxPlantsPerSurface, GrassGeo::AtlasLayers,
+            report.empty() ? "none" : report);
 
         if (surfacesWithClutter == 0 || layerCount <= 1 || maxWeight <= 0.0f)
         {
@@ -858,7 +1345,9 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
     // 6-8 m road goes with it -- the honest first cut at this grid. The finer answers
     // are a sub-cell mask (a bit per 12.5/4 m quadrant in the geography word) or a
     // distance-to-road test in the clutter placement shader; neither is built here.
-    const bool clearRoads = _enfusionRoadClearBaked && land.HasEnfusionRoadCells();
+    // RFG-107: when the grass has the segments themselves (roadEdges), the cell stays and the
+    // placement stops each blade at the ribbon's edge instead.
+    const bool clearRoads = _enfusionRoadClearBaked && land.HasEnfusionRoadCells() && !roadEdges;
     size_t roadCleared = 0;
     for (int z = 0; z < n; ++z)
     {
@@ -902,6 +1391,40 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
         }
     }
 
+    // POSEIDON_SURFACE_PROBE="x:z,x:z,...": what the bake decided at those world points --
+    // the question "is this bare patch a surface, a selection or a mask?" in one log line each.
+    if (const char* probe = std::getenv("POSEIDON_SURFACE_PROBE"); probe != nullptr && *probe != '\0')
+    {
+        const float grid = land.GetLandGrid();
+        for (const char* p = probe; p && *p;)
+        {
+            float px = 0.0f, pz = 0.0f;
+            if (std::sscanf(p, "%f:%f", &px, &pz) == 2)
+            {
+                const int x = static_cast<int>(std::floor(px / grid)), z = static_cast<int>(std::floor(pz / grid));
+                if (x >= 0 && z >= 0 && x < n && z < n)
+                {
+                    const int material = land.GetTexture(z, x);
+                    const uint32_t word = geography[static_cast<size_t>(z) * static_cast<size_t>(n) + static_cast<size_t>(x)];
+                    const bool valid = material >= 0 && material < paletteSize;
+                    LOG_INFO(Graphics,
+                             "Surface probe {:.1f},{:.1f}: cell {},{} surface {} '{}' run @{} x{} w{:.2f} selected={} "
+                             "road={} geo=0x{:08x}",
+                             px, pz, x, z, material, valid ? land.GetEnfusionSurface(material) : "",
+                             valid ? runs[static_cast<size_t>(material)].layerFirst : 0,
+                             valid ? runs[static_cast<size_t>(material)].layerCount : 0,
+                             valid ? runs[static_cast<size_t>(material)].weight : 0.0f,
+                             valid && material < static_cast<int>(_grassSurfaceEnabled.size()) &&
+                                 _grassSurfaceEnabled[static_cast<size_t>(material)],
+                             land.GetEnfusionRoadCell(z, x), word);
+                }
+            }
+            p = std::strchr(p, ',');
+            if (p)
+                ++p;
+        }
+    }
+
     // The dev panel's per-surface list: only surfaces that actually grow something
     // are selectable, the same rule the Arma path uses. Re-derived on a world change
     // only, so a live toggle is not undone by the next re-upload.
@@ -917,7 +1440,9 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
              "({}), peak surface weight {:.2f}, {} atlas layers, {:.0f} ms, definitions={}",
              grownCells, static_cast<size_t>(n) * static_cast<size_t>(n),
              100.0 * static_cast<double>(grownCells) / static_cast<double>(static_cast<size_t>(n) * n), roadCleared,
-             clearRoads ? "road clearing ON" : (land.HasEnfusionRoadCells() ? "road clearing OFF" : "no road mask"),
+             clearRoads ? "road clearing ON"
+                        : (roadEdges ? "road edges per blade"
+                                     : (land.HasEnfusionRoadCells() ? "road clearing OFF" : "no road mask")),
              maxWeight, layerCount, ms, reused ? "reused" : "rebuilt");
     if (verify)
     {

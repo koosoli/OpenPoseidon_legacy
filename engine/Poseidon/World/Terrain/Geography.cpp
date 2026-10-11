@@ -112,6 +112,30 @@ void Landscape::EnableGeographyAccumulation()
     _geoAccumEnabled = true;
 }
 
+void Landscape::AddGrassFootprint(const Object* obj, const LODShape* shape)
+{
+    // The model's bounding box at ground level, through the object's own transform (so a
+    // rotated or scaled house gets a rotated, scaled box).
+    const Vector3 lo = shape->Min(), hi = shape->Max();
+    const Vector3 c00 = obj->PositionModelToWorld(Vector3(lo.X(), 0.0f, lo.Z()));
+    const Vector3 c10 = obj->PositionModelToWorld(Vector3(hi.X(), 0.0f, lo.Z()));
+    const Vector3 c01 = obj->PositionModelToWorld(Vector3(lo.X(), 0.0f, hi.Z()));
+    const Vector3 centre = obj->PositionModelToWorld(Vector3(0.5f * (lo.X() + hi.X()), 0.0f, 0.5f * (lo.Z() + hi.Z())));
+    float ux = c10.X() - c00.X(), uz = c10.Z() - c00.Z();
+    float vx = c01.X() - c00.X(), vz = c01.Z() - c00.Z();
+    const float lu = std::sqrt(ux * ux + uz * uz), lv = std::sqrt(vx * vx + vz * vz);
+    if (!(lu > 0.01f) || !(lv > 0.01f) || lu > 400.0f || lv > 400.0f)
+        return;
+    // One record per placement: a streamed object that leaves and returns is the same box.
+    const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(std::lround(centre.X() * 4.0f))) << 40) ^
+                         (static_cast<uint64_t>(static_cast<uint32_t>(std::lround(centre.Z() * 4.0f))) << 16) ^
+                         static_cast<uint64_t>(reinterpret_cast<uintptr_t>(shape) & 0xffffu);
+    if (!_grassFootprintKeys.insert(key).second)
+        return;
+    _grassFootprints.insert(_grassFootprints.end(),
+                            {centre.X(), centre.Z(), ux / lu, uz / lu, 0.5f * lu, 0.5f * lv});
+}
+
 void Landscape::AccumulateGeographyForObject(Object* obj)
 {
     if (!_geoAccumEnabled || !obj || obj->GetType() != Primary)
@@ -158,6 +182,8 @@ void Landscape::AccumulateGeographyForObject(Object* obj)
     if (hardWeight == 0 && dyn_cast<ForestPlain>(obj) == nullptr && obj->GetDestructType() == DestructTree &&
         shape->Name() && std::strstr(shape->Name(), ".xob") && !std::strstr(shape->Name(), "vegetation/"))
         hardWeight = 1;
+    if (hardWeight > 0)
+        AddGrassFootprint(obj, shape);
     const float objRad = floatMax(shape->Max()[0], shape->Max()[2]);
     const Vector3 objCenter = obj->PositionModelToWorld(shape->GeometryCenter());
     const float xMaxObj = objCenter.X() + objRad, xMinObj = objCenter.X() - objRad;

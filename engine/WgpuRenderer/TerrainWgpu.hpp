@@ -239,6 +239,19 @@ class TerrainWgpu : public ITerrainRenderer
     // TerrainWgpuEnfusionClutter.cpp.
     bool BakeEnfusionClutter(const Landscape& land, std::vector<uint32_t>& geography, bool refreshSelection,
                             bool reuseDefinitions);
+    // RFG-107/109: hands the grass placement the native road segments and hard-object
+    // footprints per land cell, so blades stop at a ribbon's or a building's edge rather
+    // than at the 12.5 m cell. Incremental: only footprints streamed in since the last call
+    // are binned. Returns true when the grass has the roads (the bake then leaves road cells
+    // growing). Implemented in TerrainWgpuEnfusionClutter.cpp.
+    bool UploadGrassRoadCells(const Landscape& land);
+    const Landscape* _grassRoadLand = nullptr;
+    size_t _grassRoadSegments = 0;
+    bool _grassRoadUploaded = false;
+    std::vector<std::vector<uint32_t>> _grassShapeCells; // RFG-109: shape indices per land cell
+    std::vector<float> _grassShapes;                     // 6 floats per shape (see the .cpp)
+    size_t _grassFootprintsBinned = 0;
+    bool _grassRoadsBinned = false;
     // RFG-065: reads each palette entry's `.emat` and builds the mipped detail/middle
     // ground textures it names. Cached per world; returns false and leaves the table
     // empty on every world that is not a natively loaded Reforger one. Implemented in
@@ -401,6 +414,11 @@ class TerrainWgpu : public ITerrainRenderer
     //! wgr_grass_set_layer_pick). All 0 = uniform pick, no limit -- every map that gives none.
     float _clutterLayerWeight[32] = {};
     float _clutterLayerFar[32] = {};
+    //! RFG-108: world size (m) of a layer's full square when it holds a rasterised plant
+    //! (0 = a texture-sheet card, stock sizing), and the plant's MinScale..MaxScale as
+    //! {mean, half spread / mean}. Sent with wgr_grass_set_layer_size.
+    float _clutterLayerSize[32] = {};
+    float _clutterLayerScale[32][2] = {};
 
     // Terrain params UBO mirror. The static fields (grid/dims/range) are set at upload; the
     // coast wet-band fields (sea_level/time/swash/wet_*) are refreshed and pushed every frame.

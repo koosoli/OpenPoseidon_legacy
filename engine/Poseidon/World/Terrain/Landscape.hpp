@@ -576,6 +576,12 @@ class Landscape : public SerializeClass
     // the native loader only; empty (Size 0) on every other world, which is what keeps
     // the clutter-clearing inert there. Cleared in Init() like _enfusionSurfaces.
     std::vector<uint8_t> _enfusionRoadCells;
+    // RFG-107: the same ribbons as segments, five floats each (world ax, az, bx, bz, half
+    // width), so the grass can stop at the ribbon's EDGE instead of at the 12.5 m cell
+    // around it. Filled and cleared with _enfusionRoadCells.
+    std::vector<float> _enfusionRoadSegments;
+    std::vector<float> _grassFootprints;           // RFG-109, see GetGrassFootprints
+    std::unordered_set<uint64_t> _grassFootprintKeys;
     // RFG-PBR: the native surface map at a few metres a texel (row-major, z * edge + x; the palette
     // index of _enfusionSurfaces), down from the 1 m TMAT masks. The land cell's single index is
     // one 1 m sample at its centre -- a 12.5 m staircase along every field edge; the terrain
@@ -1141,6 +1147,14 @@ class Landscape : public SerializeClass
     // it -- a house that streamed out is still a house).
     void EnableGeographyAccumulation();
     void AccumulateGeographyForObject(Object* obj);
+    // RFG-109: the ground footprint of every object the accumulation counts as hard, six
+    // floats each: centre x, z; unit axis ux, uz; half extent along that axis and along its
+    // perpendicular. Append-only while the world streams (an object streamed back in is not
+    // added twice). The grass keeps its blades out of these boxes instead of out of the whole
+    // 12.5 m land cell the AI geography marks -- which on a native world is every cell with a
+    // fence post or a rock in it.
+    const std::vector<float>& GetGrassFootprints() const { return _grassFootprints; }
+    void AddGrassFootprint(const Object* obj, const LODShape* shape);
     bool _geoAccumEnabled = false;
     // Bumped whenever accumulation changed a cell; the terrain renderer re-uploads its
     // geography texture when it sees a new value (throttled there).
@@ -1240,6 +1254,9 @@ class Landscape : public SerializeClass
         const size_t cell = static_cast<size_t>(z) * static_cast<size_t>(_landRange) + static_cast<size_t>(x);
         return cell < _enfusionRoadCells.size() && _enfusionRoadCells[cell] != 0;
     }
+    // RFG-107: (ax, az, bx, bz, halfWidth) per centreline segment, world metres; empty on
+    // every world the native loader did not build.
+    const std::vector<float>& GetEnfusionRoadSegments() const { return _enfusionRoadSegments; }
     static bool EnfusionRoadClutterClear() { return s_enfusionRoadClutterClear; }
     static void SetEnfusionRoadClutterClear(bool clear) { s_enfusionRoadClutterClear = clear; }
 

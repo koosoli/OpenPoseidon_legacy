@@ -2802,6 +2802,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                 // `cs_clutter_prepare$HOLES` permutation in the corpus). One byte per
                 // cell, marked below as each ribbon is built.
                 _enfusionRoadCells.assign(static_cast<size_t>(_landRange) * static_cast<size_t>(_landRange), 0);
+                _enfusionRoadSegments.clear();
                 size_t roadCells = 0;
                 for (size_t r = 0; r < roads.size(); ++r)
                 {
@@ -2940,6 +2941,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                             const float bx = road.origin[0] + road.points[(i + 1) * 3 + 0];
                             const float bz = road.origin[2] + road.points[(i + 1) * 3 + 2];
                             const float length = std::sqrt((bx - ax) * (bx - ax) + (bz - az) * (bz - az));
+                            _enfusionRoadSegments.insert(_enfusionRoadSegments.end(),
+                                                         {ax, az, bx, bz, reach - 1.0f});
                             const int sub = std::max(1, static_cast<int>(std::ceil(length / 2.0f)));
                             for (int k = 0; k <= sub; ++k)
                             {

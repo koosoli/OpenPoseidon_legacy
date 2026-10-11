@@ -7268,6 +7268,14 @@ impl Renderer {
         self.grass.set_satellite(&self.device, &self.queue, view);
     }
 
+    fn grass_set_layer_size(&mut self, sizes: &[f32], spreads: &[f32]) {
+        self.grass.set_layer_size(&self.queue, sizes, spreads);
+    }
+
+    fn grass_set_road_cells(&mut self, data: &[u32]) {
+        self.grass.set_road_cells(&self.device, data);
+    }
+
     fn grass_set_layer_pick(&mut self, weights: &[f32], far: &[f32]) {
         self.grass.set_layer_pick(&self.queue, weights, far);
     }
