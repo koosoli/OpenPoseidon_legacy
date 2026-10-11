@@ -43,25 +43,54 @@ std::vector<std::string>& MissionBankPrefixes()
     return prefixes;
 }
 
-const fs::path& RootPath()
+// File names (lower case, no extension) of every archive mounted from the Arma 1 folders. An Arma 1
+// add-on's CfgPatches class is named after its archive (sara.pbo -> "sara"), so a mission's
+// addOns[] entry with one of these names is provided by the mount even outside the CA* family.
+std::set<std::string>& MountedArchiveNames()
 {
-    static fs::path root;
+    static std::set<std::string> names;
+    return names;
+}
+
+bool HasPbos(const fs::path& folder)
+{
+    std::error_code ec;
+    for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
+        if (it->is_regular_file(ec) && Lower(it->path().extension().string()) == ".pbo")
+            return true;
+    return false;
+}
+
+// --arma1 names one Arma 1 folder, or several separated by ';'. A retail install keeps its
+// archives in AddOns\ and Campaigns\; Bohemia's licensed data packages (ALDP_A1_PBOs_*) split the
+// same archives over several folders with the add-on PBOs at each folder's top level. Both work.
+const std::vector<fs::path>& Roots()
+{
+    static std::vector<fs::path> roots;
     static bool resolved = false;
     if (!resolved)
     {
         resolved = true;
         const std::string& configured = Foundation::AppConfig::Instance().GetArma1Root();
-        if (!configured.empty())
+        size_t start = 0;
+        while (start <= configured.size() && !configured.empty())
         {
+            const size_t end = std::min(configured.find(';', start), configured.size());
+            const std::string item = configured.substr(start, end - start);
+            start = end + 1;
+            if (item.empty())
+                continue;
             std::error_code ec;
-            fs::path candidate = fs::absolute(fs::path(configured), ec);
-            if (!ec && fs::is_directory(candidate / "AddOns", ec))
-                root = candidate;
+            const fs::path candidate = fs::absolute(fs::path(item), ec);
+            if (!ec && (fs::is_directory(candidate / "AddOns", ec) || fs::is_directory(candidate / "Campaigns", ec) ||
+                        fs::is_directory(candidate / "Missions", ec) || HasPbos(candidate)))
+                roots.push_back(candidate);
             else
-                LOG_ERROR(Mission, "--arma1 '{}' is not an Arma 1 folder (no AddOns subfolder)", configured);
+                LOG_ERROR(Mission, "--arma1 '{}' holds no Arma 1 archives (AddOns, Campaigns, Missions or PBOs)",
+                          item);
         }
     }
-    return root;
+    return roots;
 }
 
 void MountFolder(const fs::path& folder, bool missionBanks)
@@ -70,24 +99,39 @@ void MountFolder(const fs::path& folder, bool missionBanks)
     if (!fs::is_directory(folder, ec))
         return;
     std::vector<fs::path> pbos;
-    for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
+    // Mission folders keep loose groups one level down (Missions\tutorial\t01_...sara.pbo).
+    for (fs::recursive_directory_iterator it(folder, fs::directory_options::skip_permission_denied, ec), end;
+         !ec && it != end; it.increment(ec))
     {
+        if (it.depth() >= (missionBanks ? 1 : 0))
+            it.disable_recursion_pending();
         if (it->is_regular_file(ec) && Lower(it->path().extension().string()) == ".pbo")
             pbos.push_back(it->path());
     }
     std::sort(pbos.begin(), pbos.end());
-    const std::string dir = folder.string() + "\\";
     for (const fs::path& pbo : pbos)
     {
+        const std::string dir = pbo.parent_path().string() + "\\";
         const int before = GFileBanks.Size();
         // emptyPrefix: the archive's declared prefix (ca\sara, campaigns\ca, ...) wins.
         // No config callback: Arma 1 configs are never parsed into the CWA config.
         GFileBanks.Load(dir.c_str(), "", pbo.stem().string().c_str(), true);
         if (GFileBanks.Size() > before)
         {
+            MountedArchiveNames().insert(Lower(pbo.stem().string()));
             std::string prefix = (const char*)GFileBanks[GFileBanks.Size() - 1].GetPrefix();
             while (!prefix.empty() && (prefix.back() == '\\' || prefix.back() == '/'))
                 prefix.pop_back();
+            // A single-mission archive (Missions\m02minerconvoy.sara.pbo) may declare a bare prefix
+            // ("M02MinerConvoy"). The terrain is the mission folder's extension, so mount it under
+            // its file name as Arma 1 did; otherwise the mission loads with no world.
+            const std::string stem = pbo.stem().string();
+            if (missionBanks && prefix.find_first_of("\\/.") == std::string::npos &&
+                fs::path(stem).has_extension())
+            {
+                GFileBanks.Set(GFileBanks.Size() - 1).SetPrefix(RString((stem + "\\").c_str()));
+                prefix = stem;
+            }
             if (missionBanks || Lower(prefix).find("missions") != std::string::npos)
                 MissionBankPrefixes().push_back(prefix);
         }
@@ -293,7 +337,7 @@ std::set<std::string>& Keys()
 
 bool Active()
 {
-    return !RootPath().empty();
+    return !Roots().empty();
 }
 
 void MountArchives()
@@ -301,14 +345,18 @@ void MountArchives()
     if (!Active())
         return;
     MissionBankPrefixes().clear();
-    const fs::path& root = RootPath();
-    MountFolder(root / "AddOns", false);
-    MountFolder(root / "DBE1" / "AddOns", false);
-    MountFolder(root / "Campaigns", true);
-    MountFolder(root / "DBE1" / "Campaigns", true);
-    MountFolder(root / "Missions", true);
-    LOG_INFO(Mission, "Arma 1: mounted {} read-only from {} ({} mission archives)",
-             "AddOns/Campaigns", root.string(), MissionBankPrefixes().size());
+    MountedArchiveNames().clear();
+    for (const fs::path& root : Roots())
+    {
+        MountFolder(root, false); // a data package's add-on PBOs lie at its top level
+        MountFolder(root / "AddOns", false);
+        MountFolder(root / "DBE1" / "AddOns", false);
+        MountFolder(root / "Campaigns", true);
+        MountFolder(root / "DBE1" / "Campaigns", true);
+        MountFolder(root / "Missions", true);
+        LOG_INFO(Mission, "Arma 1: mounted read-only from {} ({} mission archives so far)", root.string(),
+                 MissionBankPrefixes().size());
+    }
 }
 
 void RegisterWorldClasses()
@@ -399,7 +447,8 @@ void FilterMissionAddons(FindArrayRStringCI& addOns)
         const std::string name = Lower(addOns[i].Data());
         const bool known = patches && patches->FindEntry(addOns[i]);
         // Arma 1 content patches are CA*, the expansion DBE1 and Warfare.
-        if (!known && (name.rfind("ca", 0) == 0 || name.rfind("dbe1", 0) == 0 || name == "warfare"))
+        if (!known && (name.rfind("ca", 0) == 0 || name.rfind("dbe1", 0) == 0 || name == "warfare" ||
+                       MountedArchiveNames().count(name) > 0))
         {
             LOG_INFO(Mission, "Arma 1: addon '{}' is provided by the mounted Arma 1 archives", addOns[i].Data());
             addOns.DeleteAt(i);
@@ -441,9 +490,9 @@ std::string ResolveMissionFile(const std::string& spec, std::string& error)
         mission.resize(mission.size() - 12);
 
     std::vector<std::string> candidates;
-    // A full virtual path ("campaigns\ca\missions\m09convoyattack.sara") is used as is.
-    if (mission.find('\\') != std::string::npos)
-        candidates.push_back(mission);
+    // A full virtual path ("campaigns\ca\missions\m09convoyattack.sara") is used as is -- and so is a
+    // bare name, which is the whole prefix of a single-mission archive (Missions\m09convoyattack.sara.pbo).
+    candidates.push_back(mission);
     for (const std::string& prefix : MissionBankPrefixes())
     {
         candidates.push_back(prefix + "\\missions\\" + mission);

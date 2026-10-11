@@ -8,8 +8,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <set>
 #include <stdexcept>
+#include <tuple>
 
 namespace Poseidon
 {
@@ -69,7 +71,7 @@ std::string ReadString(std::istream& f)
     throw std::runtime_error("oversize archive string");
 }
 void ScanPbo(const fs::path& path, const std::string& game, const std::vector<std::string>& roots,
-             LocalMapsCatalog& result)
+             const std::string& missionRoot, LocalMapsCatalog& result)
 {
     struct Entry
     {
@@ -80,6 +82,7 @@ void ScanPbo(const fs::path& path, const std::string& game, const std::vector<st
     std::ifstream f(path, std::ios::binary);
     std::string prefix = path.stem().string();
     std::vector<Entry> worlds;
+    std::vector<std::string> missionFolders;
     uint64_t payload = 0;
     for (size_t count = 0; count < 100000; ++count)
     {
@@ -108,6 +111,14 @@ void ScanPbo(const fs::path& path, const std::string& game, const std::vector<st
         if (name.find("..") == std::string::npos && name.find(':') == std::string::npos &&
             Lower(fs::path(name).extension().string()) == ".wrp")
             worlds.push_back({name, method, size, payload});
+        if (name.find("..") == std::string::npos && name.find(':') == std::string::npos)
+        {
+            const std::string lower = Lower(name);
+            if (lower == "mission.sqm")
+                missionFolders.emplace_back(); // the archive itself is the mission folder
+            else if (lower.size() > 12 && lower.ends_with("\\mission.sqm"))
+                missionFolders.push_back(name.substr(0, name.size() - 12));
+        }
         payload += size;
         if (count == 99999)
             throw std::runtime_error("too many archive entries");
@@ -134,36 +145,84 @@ void ScanPbo(const fs::path& path, const std::string& game, const std::vector<st
         }
         result.maps.push_back(std::move(map));
     }
+    // Multiplayer missions need a session; the browser starts single-player only.
+    // Editor templates are not missions either.
+    const std::string parentDir = Lower(path.parent_path().filename().string());
+    if (parentDir == "mpmissions" || parentDir == "templates" || parentDir == "mptemplates")
+        return;
+    // Only what a player starts: campaign and mission archives (Campaigns\, Missions\ and its
+    // subfolders, an addon's missions bank). Add-ons also carry cutscenes and the main-menu
+    // backgrounds as mission folders (ca\desert\data\scenes\intro.intro); those are not listed.
+    const std::string grandDir = Lower(path.parent_path().parent_path().filename().string());
+    const bool missionArchive = parentDir == "campaigns" || parentDir == "missions" || grandDir == "campaigns" ||
+                                grandDir == "missions" || Lower(prefix).find("missions") != std::string::npos;
+    for (const std::string& folder : missionFolders)
+    {
+        if (!missionArchive && Lower(folder).find("missions") == std::string::npos)
+            continue;
+        LocalMission mission;
+        mission.game = game;
+        // Arma1Compat mounts a single-mission archive with a bare declared prefix under its file name.
+        const bool bareSingle = folder.empty() && prefix.find_first_of("\\/.") == std::string::npos &&
+                                path.stem().has_extension();
+        mission.virtualPath = bareSingle ? path.stem().string() : folder.empty() ? prefix : prefix + "\\" + folder;
+        // A single-mission archive (Missions\m02minerconvoy.sara.pbo) may declare a prefix without
+        // the terrain extension ("M02MinerConvoy"); its file name always carries it.
+        mission.name = folder.empty() ? path.stem().string() : fs::path(folder).filename().string();
+        mission.world = Lower(fs::path(mission.name).extension().string());
+        if (!mission.world.empty())
+            mission.world.erase(0, 1);
+        // The campaign (campaigns\ca\missions\x -> "ca"), the folder a single-mission archive lies
+        // in ("Missions", "tutorial"), or else the archive the missions ship in.
+        mission.collection = Lower(prefix).starts_with("campaigns\\") ? prefix.substr(10)
+                             : folder.empty()                         ? path.parent_path().filename().string()
+                                                                      : path.stem().string();
+        mission.installRoot = missionRoot;
+        mission.supported = LocalMissionSupported(game, mission.world, mission.reason);
+        result.missions.push_back(std::move(mission));
+    }
 }
-void ScanInstall(const fs::path& install, const std::string& game, LocalMapsCatalog& result)
+// One game's content, possibly split over several folders (a licensed data package ships one
+// game as several ALDP_* parts): maps see every part's archive folders as dependencies, and a
+// mission is started with all parts mounted (missionRoot = the parts joined with ';').
+void ScanInstall(const std::vector<fs::path>& installs, const std::string& game, LocalMapsCatalog& result)
 {
     std::error_code ec;
-    if (!fs::is_directory(install, ec))
+    if (installs.empty())
         return;
+    const fs::path& install = installs.front();
+    std::string missionRoot;
     std::vector<fs::path> pbos, paks;
     std::set<std::string> rootSet;
-    for (fs::recursive_directory_iterator it(install, fs::directory_options::skip_permission_denied, ec), end;
-         !ec && it != end; it.increment(ec))
+    for (const fs::path& part : installs)
     {
-        if (it.depth() >= 4)
-            it.disable_recursion_pending();
-        if (!it->is_regular_file(ec))
+        if (!fs::is_directory(part, ec))
             continue;
-        const auto extension = Lower(it->path().extension().string());
-        if (extension == ".pbo")
+        missionRoot += (missionRoot.empty() ? "" : ";") + part.string();
+        for (fs::recursive_directory_iterator it(part, fs::directory_options::skip_permission_denied, ec), end;
+             !ec && it != end; it.increment(ec))
         {
-            pbos.push_back(it->path());
-            rootSet.insert(it->path().parent_path().string());
+            if (it.depth() >= 4)
+                it.disable_recursion_pending();
+            if (!it->is_regular_file(ec))
+                continue;
+            const auto extension = Lower(it->path().extension().string());
+            if (extension == ".pbo")
+            {
+                pbos.push_back(it->path());
+                rootSet.insert(it->path().parent_path().string());
+            }
+            if (extension == ".pak")
+                paks.push_back(it->path());
         }
-        if (extension == ".pak")
-            paks.push_back(it->path());
+        ec.clear();
     }
     const std::vector<std::string> roots(rootSet.begin(), rootSet.end());
     for (const auto& pbo : pbos)
     {
         try
         {
-            ScanPbo(pbo, game, roots, result);
+            ScanPbo(pbo, game, roots, missionRoot, result);
         }
         catch (const std::exception& e)
         {
@@ -206,14 +265,102 @@ void ScanInstall(const fs::path& install, const std::string& game, LocalMapsCata
     }
 }
 } // namespace
+bool LocalMissionSupported(const std::string& game, const std::string& world, std::string& reason)
+{
+    reason.clear();
+    if (game != "Arma 1")
+    {
+        reason = "only Arma 1 missions are playable so far";
+        return false;
+    }
+    // The terrains Arma1Compat::RegisterWorldClasses generates a CfgWorlds class for.
+    static const std::set<std::string> worlds = {"sara", "saralite", "sara_dbe1", "porto"};
+    if (worlds.contains(Lower(world)))
+        return true;
+    reason = world.empty() ? "no terrain named" : "terrain '" + world + "' is not registered yet";
+    return false;
+}
 bool LocalMapRevisionSupported(int revision)
 {
     return revision == 18 || revision == 20 || revision == 24 || revision == 25 || revision == 29;
 }
+// The game a folder holds, by its executable, so a copy outside Steam (or a folder typed into the
+// browser) is labelled -- and its missions judged -- like the Steam install would be.
+std::string DetectLocalGame(const std::string& folder, const std::string& fallback)
+{
+    struct Exe
+    {
+        const char* file;
+        const char* game;
+    };
+    static constexpr Exe exes[] = {{"arma.exe", "Arma 1"},  {"arma2.exe", "Arma 2"},     {"arma2oa.exe", "Arma 2 OA"},
+                                   {"arma3.exe", "Arma 3"}, {"arma3_x64.exe", "Arma 3"}, {"dayz_x64.exe", "DayZ"}};
+    std::error_code ec;
+    for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
+    {
+        const std::string name = Lower(it->path().filename().string());
+        for (const Exe& exe : exes)
+            if (name == exe.file)
+                return exe.game;
+    }
+    return fallback;
+}
+namespace
+{
+// A folder the user points the browser at. Bohemia's licensed data packages
+// (bohemia.net/en/licenses/licensed-data-packages) ship each game as several
+// ALDP_<game>_PBOs_<licence>[_partN] folders with the archives one level down; each game's parts
+// are scanned as ONE install. Anything else is one install, labelled by its executable.
+void ScanFolder(const fs::path& folder, LocalMapsCatalog& result)
+{
+    struct Family
+    {
+        const char* prefix;
+        const char* game;
+    };
+    static constexpr Family families[] = {
+        {"aldp_a1_", "Arma 1"}, {"aldp_a2oadlc_", "Arma 2 OA"}, {"aldp_a2oa_", "Arma 2 OA"}, {"aldp_a2_", "Arma 2"}};
+    std::map<std::string, std::vector<fs::path>> parts;
+    std::error_code ec;
+    for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
+    {
+        if (!it->is_directory(ec))
+            continue;
+        const std::string name = Lower(it->path().filename().string());
+        for (const Family& family : families)
+        {
+            if (!name.starts_with(family.prefix))
+                continue;
+            std::vector<fs::path> inner;
+            std::error_code innerEc;
+            for (fs::directory_iterator sub(it->path(), innerEc), subEnd; !innerEc && sub != subEnd;
+                 sub.increment(innerEc))
+                if (sub->is_directory(innerEc))
+                    inner.push_back(sub->path());
+            auto& list = parts[family.game];
+            if (inner.empty())
+                list.push_back(it->path());
+            else
+                list.insert(list.end(), inner.begin(), inner.end());
+            break;
+        }
+    }
+    if (parts.empty())
+    {
+        ScanInstall({folder}, DetectLocalGame(folder.string(), "Local folder"), result);
+        return;
+    }
+    for (auto& [game, dirs] : parts)
+    {
+        std::sort(dirs.begin(), dirs.end());
+        ScanInstall(dirs, game, result);
+    }
+}
+} // namespace
 LocalMapsCatalog ScanLocalMapsFolder(const std::string& folder)
 {
     LocalMapsCatalog result;
-    ScanInstall(fs::path(folder), "Local folder", result);
+    ScanFolder(fs::path(folder), result);
     return result;
 }
 std::vector<std::string> ParseSteamLibraryPaths(const std::string& vdf)
@@ -243,7 +390,9 @@ LocalMapsCatalog ScanLocalMaps(const std::string& extraFolder)
         const char* id;
         const char* name;
     };
-    constexpr Game games[] = {{"33910", "Arma 1"},  {"33900", "Arma 2"}, {"33930", "Arma 2 OA"},
+    // Arma: Gold Edition is Steam app 65780 (store.steampowered.com/app/65780); 33910 was listed as
+    // Arma 1 here and never matched an Arma 1 install.
+    constexpr Game games[] = {{"65780", "Arma 1"},  {"33900", "Arma 2"}, {"33930", "Arma 2 OA"},
                               {"107410", "Arma 3"}, {"221100", "DayZ"},  {"1874880", "Arma Reforger"}};
     for (size_t i = 0; i < libraries.size() && i < 64; ++i)
     {
@@ -263,15 +412,22 @@ LocalMapsCatalog ScanLocalMaps(const std::string& extraFolder)
                     continue;
                 const auto install = fs::weakly_canonical(steamapps / "common" / tokens[n + 1], ec);
                 if (!ec && installs.insert(Lower(install.string())).second)
-                    ScanInstall(install, game.name, result);
+                    ScanInstall({install}, game.name, result);
                 break;
             }
         }
     }
     if (!extraFolder.empty())
-        ScanInstall(fs::path(extraFolder), "Local folder", result);
+        ScanFolder(fs::path(extraFolder), result);
     std::sort(result.maps.begin(), result.maps.end(),
               [](const auto& a, const auto& b) { return a.game + a.name < b.game + b.name; });
+    // Playable first, then by game, collection and name.
+    std::sort(result.missions.begin(), result.missions.end(),
+              [](const auto& a, const auto& b)
+              {
+                  return std::tuple(!a.supported, a.game, Lower(a.collection), Lower(a.name)) <
+                         std::tuple(!b.supported, b.game, Lower(b.collection), Lower(b.name));
+              });
     return result;
 }
 } // namespace Poseidon

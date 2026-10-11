@@ -5,6 +5,9 @@
 #include <filesystem>
 #include <fstream>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 TEST_CASE("Steam library discovery accepts old and current metadata", "[local-maps]")
 {
@@ -91,4 +94,96 @@ TEST_CASE("Local map preview finds loaded land with a bounded search", "[local-m
     REQUIRE(island.x == 300.0f);
     REQUIRE(island.z == 800.0f);
     REQUIRE(island.height == 150.0f);
+}
+
+TEST_CASE("Local mission scan finds campaign missions and marks the playable ones", "[local-maps]")
+{
+    namespace fs = std::filesystem;
+    const auto root = fs::temp_directory_path() /
+                      ("op-mission-catalog-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(root / "Campaigns");
+    fs::create_directories(root / "MPMissions");
+    struct Cleanup
+    {
+        fs::path path;
+        ~Cleanup()
+        {
+            std::error_code ec;
+            fs::remove_all(path, ec);
+        }
+    } cleanup{root};
+    // A PBO with a "prefix" header and two zero-length mission.sqm entries.
+    auto write = [&](const fs::path& path)
+    {
+        std::ofstream f(path, std::ios::binary);
+        const auto u32 = [&](uint32_t v)
+        {
+            for (int i = 0; i < 4; ++i)
+                f.put(static_cast<char>(v >> (8 * i)));
+        };
+        f.put(0);
+        u32(0x56657273);
+        for (int i = 0; i < 4; ++i)
+            u32(0);
+        const char header[] = "prefix\0campaigns\\ca\0";
+        f.write(header, sizeof(header)); // includes the terminating empty key
+        for (const char* name : {"missions\\m09convoyattack.sara\\mission.sqm", "missions\\m99test.intro\\mission.sqm"})
+        {
+            f.write(name, static_cast<std::streamsize>(std::strlen(name) + 1));
+            for (int i = 0; i < 5; ++i)
+                u32(0);
+        }
+        f.put(0);
+        for (int i = 0; i < 5; ++i)
+            u32(0);
+    };
+    write(root / "Campaigns" / "ca.pbo");
+    write(root / "MPMissions" / "mp.pbo"); // multiplayer: never listed
+    const auto catalog = Poseidon::ScanLocalMapsFolder(root.string());
+    REQUIRE(catalog.diagnostics.empty());
+    REQUIRE(catalog.missions.size() == 2);
+    for (const auto& mission : catalog.missions)
+    {
+        REQUIRE(mission.collection == "ca");
+        REQUIRE(mission.installRoot == root.string());
+        REQUIRE(mission.virtualPath == "campaigns\\ca\\missions\\" + mission.name);
+        // A local folder is not an Arma 1 install, so nothing it holds is playable.
+        REQUIRE_FALSE(mission.supported);
+    }
+    // With Arma 1's executable beside it the same folder is an Arma 1 install: the Sahrani
+    // mission becomes playable, the one on an unregistered terrain does not.
+    std::ofstream(root / "ArmA.exe") << "";
+    REQUIRE(Poseidon::DetectLocalGame(root.string(), "Local folder") == "Arma 1");
+    const auto arma1 = Poseidon::ScanLocalMapsFolder(root.string());
+    REQUIRE(arma1.missions.size() == 2);
+    REQUIRE(arma1.missions[0].supported); // playable first
+    REQUIRE(arma1.missions[0].name == "m09convoyattack.sara");
+    REQUIRE(arma1.missions[0].game == "Arma 1");
+    REQUIRE_FALSE(arma1.missions[1].supported);
+    std::string reason;
+    REQUIRE(Poseidon::LocalMissionSupported("Arma 1", "sara", reason));
+    REQUIRE(reason.empty());
+    REQUIRE(Poseidon::LocalMissionSupported("Arma 1", "Sara_DBE1", reason));
+    REQUIRE_FALSE(Poseidon::LocalMissionSupported("Arma 1", "intro", reason));
+    REQUIRE_FALSE(reason.empty());
+    REQUIRE_FALSE(Poseidon::LocalMissionSupported("Arma 3", "altis", reason));
+}
+
+// Manual probe, hidden from normal runs: OP_CONTENT_SCAN=<folder> PoseidonTests "[.content-probe]"
+// lists what the ARMA CONTENT browser would show for that folder.
+TEST_CASE("Content scan probe", "[.content-probe]")
+{
+    const char* folder = std::getenv("OP_CONTENT_SCAN");
+    if (!folder)
+        return;
+    const auto catalog = Poseidon::ScanLocalMapsFolder(folder);
+    for (const auto& map : catalog.maps)
+        std::printf("MAP %s | %s | rev %d | %s\n", map.game.c_str(), map.name.c_str(), map.revision,
+                    map.supported ? "supported" : "unsupported");
+    for (const auto& mission : catalog.missions)
+        std::printf("MISSION %s | %s | %s | %s | %s\n", mission.game.c_str(), mission.collection.c_str(),
+                    mission.name.c_str(), mission.supported ? "playable" : mission.reason.c_str(),
+                    mission.virtualPath.c_str());
+    for (const auto& line : catalog.diagnostics)
+        std::printf("DIAG %s\n", line.c_str());
 }

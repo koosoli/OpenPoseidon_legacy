@@ -354,7 +354,7 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
         }
     };
     static ParamFile mapButtonResource, worldButtonResource;
-    injectEntry(mapButtonResource, "LocalMapsButton", LocalMapsMenuId, "LOCAL MAPS");
+    injectEntry(mapButtonResource, "LocalMapsButton", LocalMapsMenuId, "ARMA CONTENT");
     injectEntry(worldButtonResource, "WholeWorldButton", WholeWorldMenuId, "WHOLE WORLD");
 
     // Guard every control lookup: when the RscDisplayMain class is absent or

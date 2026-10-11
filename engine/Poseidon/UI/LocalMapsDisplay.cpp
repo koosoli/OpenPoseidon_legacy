@@ -13,6 +13,7 @@
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -26,7 +27,8 @@ namespace Poseidon
 namespace
 {
 constexpr int ListId = 62001, FolderId = 62002, ScanId = 62003, OpenId = 62004, StatusId = 62005, BackId = 62006,
-              MapsId = 62008, VehiclesId = 62009;
+              MapsId = 62008, VehiclesId = 62009, MissionsId = 62011;
+enum class BrowserMode { Maps, Vehicles, Missions };
 class LocalBrowserButton : public CButton
 {
   public:
@@ -45,7 +47,7 @@ class LocalMapsDisplay : public Display
     std::future<LocalMapsCatalog> _scan;
     LocalMapsCatalog _catalog;
     std::vector<LocalVehicle> _vehicles;
-    bool _vehicleMode = false;
+    BrowserMode _mode = BrowserMode::Maps;
     void AddControl(const char* base, const char* name, int id, const char* text, float x, float y, float w, float h)
     {
         const ParamEntry* inherited = Res.FindEntry(base);
@@ -82,6 +84,10 @@ class LocalMapsDisplay : public Display
         cls->SetBase(inherited->GetClassInterface());
         LoadControl(*cls);
     }
+    static std::filesystem::path FolderMemory()
+    {
+        return std::filesystem::path(Foundation::GamePaths::Instance().UserDir()) / "ArmaContentFolder.txt";
+    }
     void Status(const std::string& text)
     {
         if (auto* ctrl = dynamic_cast<CStatic*>(GetCtrl(StatusId)))
@@ -94,6 +100,9 @@ class LocalMapsDisplay : public Display
         std::string folder;
         if (auto* edit = dynamic_cast<CEdit*>(GetCtrl(FolderId)))
             folder = edit->GetText().Data();
+        // Remembered for the next visit (a data package or a non-Steam install lives outside Steam).
+        if (Foundation::GamePaths::Instance().IsInitialized())
+            std::ofstream(FolderMemory(), std::ios::trunc) << folder;
         Status("Searching installed Steam games... (archive directories only)");
         _scan = std::async(std::launch::async, [folder] { return ScanLocalMaps(folder); });
     }
@@ -101,13 +110,22 @@ class LocalMapsDisplay : public Display
     {
         auto* list = dynamic_cast<CListBox*>(GetCtrl(ListId));
         const int index = list ? list->GetCurSel() : -1;
-        if (index < 0 || index >= static_cast<int>(_vehicleMode ? _vehicles.size() : _catalog.maps.size()))
+        const size_t count = _mode == BrowserMode::Vehicles   ? _vehicles.size()
+                             : _mode == BrowserMode::Missions ? _catalog.missions.size()
+                                                              : _catalog.maps.size();
+        if (index < 0 || index >= static_cast<int>(count))
             return;
-        const LocalMap* map = _vehicleMode ? nullptr : &_catalog.maps[index];
-        const LocalVehicle* vehicle = _vehicleMode ? &_vehicles[index] : nullptr;
+        const LocalMap* map = _mode == BrowserMode::Maps ? &_catalog.maps[index] : nullptr;
+        const LocalVehicle* vehicle = _mode == BrowserMode::Vehicles ? &_vehicles[index] : nullptr;
+        const LocalMission* localMission = _mode == BrowserMode::Missions ? &_catalog.missions[index] : nullptr;
         if ((map && !map->supported) || (vehicle && !vehicle->ready))
         {
             Status("This selected content is not supported or its local bridge is incomplete.");
+            return;
+        }
+        if (localMission && !localMission->supported)
+        {
+            Status("This mission is not playable yet: " + localMission->reason + ".");
             return;
         }
         if (map)
@@ -121,21 +139,28 @@ class LocalMapsDisplay : public Display
         // No shell command or foreign configuration is executed; source archives stay read-only.
         std::error_code ec;
         const auto mission = std::filesystem::path(Foundation::GamePaths::Instance().CacheDir()) /
-                             (_vehicleMode ? "LocalVehicleBrowser.Eden" : "LocalMapBrowser.Eden");
+                             (vehicle ? "LocalVehicleBrowser.Eden" : "LocalMapBrowser.Eden");
         std::filesystem::create_directories(mission, ec);
-        std::ofstream sqm(mission / "mission.sqm");
-        if (vehicle)
-            sqm << MakeLocalVehicleMission(*vehicle);
-        else
-            sqm << "version=11; class Mission { randomSeed=1; class Intel { resistanceWest=0; resistanceEast=1; "
-                   "startWeather=0.25; startFog=0; year=1985; month=6; day=21; hour=12; minute=0; }; "
-                   "class Groups { items=1; class Item0 { side=\"WEST\"; class Vehicles { items=1; "
-                   "class Item0 { position[]={1000,0,1000}; azimut=0; id=0; side=\"WEST\"; vehicle=\"SoldierWB\"; "
-                   "player=\"PLAYER COMMANDER\"; skill=0.6; }; }; }; }; };";
-        sqm.close();
-        if (ec || !sqm)
+        // A found mission is played from its own archive (--arma1-mission); only maps and vehicles
+        // get a generated preview mission.
+        if (!localMission)
         {
-            Status("Cannot write the local map preview mission.");
+            std::ofstream sqm(mission / "mission.sqm");
+            if (vehicle)
+                sqm << MakeLocalVehicleMission(*vehicle);
+            else
+                sqm << "version=11; class Mission { randomSeed=1; class Intel { resistanceWest=0; resistanceEast=1; "
+                       "startWeather=0.25; startFog=0; year=1985; month=6; day=21; hour=12; minute=0; }; "
+                       "class Groups { items=1; class Item0 { side=\"WEST\"; class Vehicles { items=1; "
+                       "class Item0 { position[]={1000,0,1000}; azimut=0; id=0; side=\"WEST\"; vehicle=\"SoldierWB\"; "
+                       "player=\"PLAYER COMMANDER\"; skill=0.6; }; }; }; }; };";
+            sqm.close();
+            if (!sqm)
+                ec = std::make_error_code(std::errc::io_error);
+        }
+        if (ec)
+        {
+            Status("Cannot write the local preview mission.");
             return;
         }
         wchar_t exePath[32768]{};
@@ -157,9 +182,13 @@ class LocalMapsDisplay : public Display
         std::vector<std::string> args = {std::string(executable.begin(), executable.end()),
                                          "--render=" + Foundation::AppConfig::Instance().GetRenderBackend(),
                                          "--wait-for-parent",
-                                         std::to_string(GetCurrentProcessId()),
-                                         "--test-mission",
-                                         mission.string()};
+                                         std::to_string(GetCurrentProcessId())};
+        if (localMission)
+            // The game's own archives are mounted read-only; nothing is extracted (Arma1Compat).
+            args.insert(args.end(), {"--arma1", localMission->installRoot, "--arma1-mission",
+                                     localMission->virtualPath});
+        else
+            args.insert(args.end(), {"--test-mission", mission.string()});
         if (GEngine)
         {
             const WindowMode mode = GEngine->GetCurrentWindowMode();
@@ -266,9 +295,10 @@ class LocalMapsDisplay : public Display
     {
         _idd = LocalMapsMenuId;
         AddControl("RscText", "Panel", 62010, "", 0.04f, 0.13f, 0.92f, 0.72f);
-        AddControl("RscText", "Title", 62007, "LOCAL CONTENT", 0.06f, 0.15f, 0.40f, 0.05f);
-        AddControl("RscButton", "MapsTab", MapsId, "Maps", 0.51f, 0.15f, 0.20f, 0.05f);
-        AddControl("RscButton", "VehiclesTab", VehiclesId, "Vehicles", 0.73f, 0.15f, 0.21f, 0.05f);
+        AddControl("RscText", "Title", 62007, "ARMA CONTENT", 0.06f, 0.15f, 0.30f, 0.05f);
+        AddControl("RscButton", "MapsTab", MapsId, "Maps", 0.38f, 0.15f, 0.18f, 0.05f);
+        AddControl("RscButton", "VehiclesTab", VehiclesId, "Vehicles", 0.57f, 0.15f, 0.18f, 0.05f);
+        AddControl("RscButton", "MissionsTab", MissionsId, "Missions", 0.76f, 0.15f, 0.18f, 0.05f);
         AddControl("RscEdit", "Folder", FolderId, "", 0.06f, 0.22f, 0.65f, 0.05f);
         AddControl("RscButton", "Scan", ScanId, "Search / refresh", 0.73f, 0.22f, 0.21f, 0.05f);
         AddControl("RscListBox", "Maps", ListId, "", 0.06f, 0.29f, 0.88f, 0.38f);
@@ -276,6 +306,13 @@ class LocalMapsDisplay : public Display
         AddControl("RscButton", "Open", OpenId, "Open selected", 0.06f, 0.78f, 0.35f, 0.05f);
         AddControl("RscButton", "Back", BackId, "Back", 0.74f, 0.78f, 0.20f, 0.05f);
         _vehicles = ScanLocalVehicles(std::filesystem::current_path());
+        if (Foundation::GamePaths::Instance().IsInitialized())
+        {
+            std::string remembered;
+            std::getline(std::ifstream(FolderMemory()), remembered);
+            if (auto* edit = dynamic_cast<CEdit*>(GetCtrl(FolderId)); edit && !remembered.empty())
+                edit->SetText(remembered.c_str());
+        }
         Scan();
     }
     Control* OnCreateCtrl(int type, int idc, const ParamEntry& cls) override
@@ -289,9 +326,16 @@ class LocalMapsDisplay : public Display
         if (auto* list = dynamic_cast<CListBox*>(GetCtrl(ListId)))
         {
             list->RemoveAll();
-            if (_vehicleMode)
+            if (_mode == BrowserMode::Vehicles)
                 for (const auto& vehicle : _vehicles)
                     list->AddString((vehicle.label + (vehicle.ready ? " (local bridge)" : " (incomplete)")).c_str());
+            else if (_mode == BrowserMode::Missions)
+                for (const auto& mission : _catalog.missions)
+                {
+                    const auto label = mission.game + " | " + mission.collection + " | " + mission.name +
+                                       (mission.supported ? " (playable)" : " (" + mission.reason + ")");
+                    list->AddString(label.c_str());
+                }
             else
                 for (const auto& map : _catalog.maps)
                 {
@@ -303,11 +347,21 @@ class LocalMapsDisplay : public Display
                 }
             list->SetCurSel(0);
         }
-        Status(_vehicleMode ? "Local vehicle bridges use inherited OFP physics; original animations/features may "
-                              "differ. Open restarts engine."
-                            : std::to_string(_catalog.maps.size()) +
-                                  " maps found. Open in the OFP mission editor in this window. Current format support; "
-                                  "place OFP units and use Preview to play.");
+        if (_mode == BrowserMode::Vehicles)
+            Status("Local vehicle bridges use inherited OFP physics; original animations/features may differ. Open "
+                   "restarts engine.");
+        else if (_mode == BrowserMode::Missions)
+        {
+            const auto playable = std::count_if(_catalog.missions.begin(), _catalog.missions.end(),
+                                                [](const LocalMission& m) { return m.supported; });
+            Status(std::to_string(_catalog.missions.size()) + " missions found, " + std::to_string(playable) +
+                   " playable. Played from the game's own archives (nothing is copied); units and vehicles the "
+                   "engine lacks are stood in for by OFP ones. Open restarts engine.");
+        }
+        else
+            Status(std::to_string(_catalog.maps.size()) +
+                   " maps found. Open in the OFP mission editor in this window. Current format support; "
+                   "place OFP units and use Preview to play.");
     }
     void OnButtonClicked(int idc) override
     {
@@ -317,9 +371,11 @@ class LocalMapsDisplay : public Display
             Scan();
         else if (idc == OpenId)
             Open();
-        else if (idc == MapsId || idc == VehiclesId)
+        else if (idc == MapsId || idc == VehiclesId || idc == MissionsId)
         {
-            _vehicleMode = idc == VehiclesId;
+            _mode = idc == VehiclesId   ? BrowserMode::Vehicles
+                    : idc == MissionsId ? BrowserMode::Missions
+                                        : BrowserMode::Maps;
             Fill();
         }
         else

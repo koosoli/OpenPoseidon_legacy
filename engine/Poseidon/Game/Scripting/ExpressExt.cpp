@@ -2,6 +2,7 @@
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 
 #include <Poseidon/Core/BuildInfo.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
@@ -158,7 +159,10 @@ void GameStateStringtableInfoFunctions::DisplayErrorMessage(const char* position
         return;
     }
 #endif
-    if (AutoTest)
+    // An Arma 1 mission is started through the autotest path (--arma1-mission) but is played, not
+    // tested: the original's scripts use names and idioms this engine rejects, and one such line
+    // must not end the mission. It is reported like any other script error below.
+    if (AutoTest && !Poseidon::Arma1Compat::Active())
     {
         // Test mode: surface every SQF/SQS error as a hard failure so the
         // test reports it instead of silently timing out.  Logging at

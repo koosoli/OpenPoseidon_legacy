@@ -381,7 +381,14 @@ GameValue ObjAddWeaponCargo(const GameState* state, GameValuePar oper1, GameValu
         return NOTHING;
     }
 
-    RString name = array[0];
+    // Cargo of an Arma 1 mission names Arma 1 weapons: map them like addWeapon does, and skip a class
+    // the config does not define -- constructing a type for it latches a config error that fails the
+    // whole mission start (Arma 1's M02MinerConvoy fills its truck this way).
+    RString name = Poseidon::Arma1Compat::ResolveWeaponClass(array[0]); // identity unless --arma1
+    if (const ParamEntry* weapons = Pars.FindEntry("CfgWeapons"); !weapons || !weapons->FindEntry(name))
+    {
+        return NOTHING;
+    }
     Ref<WeaponType> weapon = WeaponTypes.New(name);
     if (!weapon)
     {
@@ -420,7 +427,11 @@ GameValue ObjAddMagazineCargo(const GameState* state, GameValuePar oper1, GameVa
         return NOTHING;
     }
 
-    RString name = array[0];
+    RString name = Poseidon::Arma1Compat::ResolveMagazineClass(array[0]); // as addWeaponCargo above
+    if (const ParamEntry* weapons = Pars.FindEntry("CfgWeapons"); !weapons || !weapons->FindEntry(name))
+    {
+        return NOTHING;
+    }
     Ref<MagazineType> magazine = MagazineTypes.New(name);
     if (!magazine)
     {
