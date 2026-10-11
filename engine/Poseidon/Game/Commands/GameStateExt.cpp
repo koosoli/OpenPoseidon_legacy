@@ -1128,6 +1128,14 @@ static GameValue A1HintC(const GameState* state, GameValuePar oper1, GameValuePa
     return ShowHintC(state, GameValue(text));
 }
 
+// isPlayer unit: in single player, the player's unit
+static GameValue A1IsPlayer(const GameState* state, GameValuePar oper1)
+{
+    Object* obj = GetObject(oper1);
+    Object* player = GetObject(Player(state));
+    return GameValue(obj != nullptr && obj == player);
+}
+
 // compile: code is a string here, so compiling is the identity
 static GameValue A1Compile(const GameState*, GameValuePar oper1)
 {
@@ -1307,6 +1315,7 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameBool, "preloadSound", A1PreloadSound, GameString),
         GameFunction(GameString, "str", A1Str, GameVoid),
         GameFunction(GameString, "compile", A1Compile, GameString),
+        GameFunction(GameBool, "isPlayer", A1IsPlayer, GameObject),
         GameFunction(GameArray, "switch", A1Switch_, GameVoid),
         GameFunction(GameArray, "for", A1ForArray, GameArray),
         GameFunction(GameArray, "case", A1Case, GameVoid),
