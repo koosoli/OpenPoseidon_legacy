@@ -2128,6 +2128,20 @@ void GameApplication::RunMainLoop()
                     camera->SetManual(true);
                     camera->SetAltitudeSpeedScaling(true);
                     camera->SetMouseLookRequiresRightButton(true);
+                    // POSEIDON_FREEFLY_FOV: the camera's fov in the engine's own unit (the
+                    // `camSetFov` value; 0.7 default), so a capture can match a reference
+                    // frame taken through another game's camera.
+                    if (const char* fovEnv = std::getenv("POSEIDON_FREEFLY_FOV"); fovEnv != nullptr && *fovEnv != 0)
+                    {
+                        const float fov = std::strtof(fovEnv, nullptr);
+                        if (fov > 0.05f && fov < 3.0f)
+                        {
+                            camera->SetFOVRange(fov, fov);
+                            camera->SetFOV(fov);
+                            camera->Commit(0.0f);
+                            LOG_INFO(Core, "--test-world-freefly: fov {} (POSEIDON_FREEFLY_FOV)", fov);
+                        }
+                    }
                     camera->SetCrossHairs(false);
                     camera->ResetTargets();
                     GWorld->AddAnimal(camera);
