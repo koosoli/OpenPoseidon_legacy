@@ -1055,8 +1055,39 @@ static GameValue A1CaseCode(const GameState* state, GameValuePar oper1, GameValu
     return NOTHING;
 }
 
+// for [{init}, {condition}, {step}] do {body}
+static GameValue A1ForArray(const GameState*, GameValuePar oper1)
+{
+    return Tagged("__a1for", oper1);
+}
+
+static GameValue A1ForArrayDo(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& tag = oper1;
+    const GameArrayType& parts = tag[1];
+    if (parts.Size() != 3 || parts[0].GetType() != GameString || parts[1].GetType() != GameString ||
+        parts[2].GetType() != GameString)
+    {
+        state->SetError(EvalDim, parts.Size(), 3);
+        return NOTHING;
+    }
+    GameState* gs = const_cast<GameState*>(state);
+    gs->Execute(RString(parts[0]));
+    for (int i = 0; i < 100000 && !GameState::s_abortLoops; i++)
+    {
+        const GameValue test = state->EvaluateMultiple(RString(parts[1]));
+        if (!(test.GetType() & GameBool) || !(bool)test)
+            break;
+        gs->Execute(RString(oper2));
+        gs->Execute(RString(parts[2]));
+    }
+    return NOTHING;
+}
+
 static GameValue A1SwitchDo(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
+    if (IsTagged(oper1, "__a1for"))
+        return A1ForArrayDo(state, oper1, oper2);
     if (!IsTagged(oper1, "__a1switch"))
         return NOTHING;
     A1Switch sw;
@@ -1276,6 +1307,7 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameString, "str", A1Str, GameVoid),
         GameFunction(GameString, "compile", A1Compile, GameString),
         GameFunction(GameArray, "switch", A1Switch_, GameVoid),
+        GameFunction(GameArray, "for", A1ForArray, GameArray),
         GameFunction(GameArray, "case", A1Case, GameVoid),
         GameFunction(GameNothing, "default", A1Default, GameString),
         GameFunction(GameNothing, "hideBody", A1Ignored, GameObject),
