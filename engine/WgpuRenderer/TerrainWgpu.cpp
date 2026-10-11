@@ -995,7 +995,12 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
                 if (enf->middle != nullptr)
                     material.middle = bindLayer(enf->middle, false);
                 if (enf->normal != nullptr)
+                {
                     material.tile_normal = bindLayer(enf->normal, false);
+                    // RFG-110: an otherwise unused lane on native worlds (terrain.wgsl reads it
+                    // only in the native branch, only with a tile_normal bound).
+                    material.satellite_uv.v[3] = enf->parallax;
+                }
                 // RFG-PBR: the composited supertexture (terrain.wgsl, native branch). _pad0 = 2 marks
                 // it; satellite_uv.u carries 1/extent and the material's SatMapBlend.
                 if (_enfusionSatmap && _enfusionSatmapExtent > 0.0f)

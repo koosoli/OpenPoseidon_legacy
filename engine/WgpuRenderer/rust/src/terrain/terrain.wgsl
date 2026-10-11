@@ -769,7 +769,23 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
         let wxz = vec2<f32>(world_pos.x, world_pos.z);
         let duv = vec2<f32>(world_dwx.x, world_dwx.z);
         let dvv = vec2<f32>(world_dwy.x, world_dwy.z);
-        let d_uv = wxz * material.detail_scale;
+        var d_uv = wxz * material.detail_scale;
+        // RFG-110: `ParallaxScale` (satellite_uv.v.w; 37 of 51 surfaces author one, Grass_03
+        // 0.04) over the NHO's height channel -- Bohemia's texture table: NHO = normal X, normal
+        // -Y, HEIGHT, AO; "Height: used for parallax ... of decal or terrain surface". The same
+        // single-step offset as the legacy `_nopx` path, in detail-UV units, fading out with
+        // distance where a texel is smaller than the offset anyway.
+        let parallax_scale = select(0.0, material.satellite_uv.v.w, material.tile_normal != 0u);
+        if (parallax_scale > 0.0 && tp.enfusion_ground > 0.0) {
+            let near = 1.0 - smoothstep(10.0, 45.0, length(view_pos));
+            if (near > 0.0) {
+                let h = textureSampleGrad(ground[material.tile_normal], ground_samp, d_uv,
+                                          duv * material.detail_scale, dvv * material.detail_scale).b;
+                let to_eye = normalize(-view_pos);
+                let offset = (h - 0.5) * parallax_scale * near * to_eye.xz / max(to_eye.y, 0.25);
+                d_uv = d_uv + clamp(offset, vec2<f32>(-parallax_scale), vec2<f32>(parallax_scale));
+            }
+        }
         var rgb = textureSampleGrad(ground[material.legacy], ground_samp, d_uv,
                                     duv * material.detail_scale, dvv * material.detail_scale).rgb;
         var normal_ts = vec3<f32>(0.0, 0.0, 1.0);

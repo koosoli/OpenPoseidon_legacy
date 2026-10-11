@@ -135,6 +135,60 @@ Ref<Texture> LoadMippedGroundTexture(const EnfusionMount& mount, const std::stri
     const EddsImage image = ReadEddsBuffer(bytes.data(), bytes.size());
     if (!image.valid() || image.mipmaps.empty())
         return {};
+    auto* bank = dynamic_cast<TextureBankWgpu*>(GEngine != nullptr ? GEngine->TextBank() : nullptr);
+    if (bank == nullptr)
+        return {};
+    // RFG-110: the authored maps are 2048^2 BC7 (detail BCR + NHO, 12 mips) and 1024^2
+    // (middle), and they went in decoded to RGBA and shrunk to 512 / 256 -- 16x fewer texels
+    // than Bohemia authored, which is the blur on the ground at your feet. Their own blocks go
+    // up untouched instead: no decode, no re-encode, a quarter of the RGBA bytes per texel.
+    // BC7 is created Unorm like the RGBA path (an sRGB alias exists for colour consumers that
+    // ask), so the shader reads exactly the same values. `nativeMaxEdge` caps the top level
+    // (WGR_ENFUSION_GROUND_MAX_EDGE); WGR_ENFUSION_GROUND_NATIVE=0 restores the RGBA path.
+    static const bool native = []
+    {
+        const char* env = std::getenv("WGR_ENFUSION_GROUND_NATIVE");
+        return env == nullptr || env[0] != '0';
+    }();
+    static const int nativeCap = []
+    {
+        const char* env = std::getenv("WGR_ENFUSION_GROUND_MAX_EDGE");
+        const int v = env ? std::atoi(env) : 0;
+        return v >= 64 ? v : 4096;
+    }();
+    if (native && image.format == PixelFormat::BC7)
+    {
+        const int cap = std::min(nativeCap, maxEdge * 4);
+        size_t first = 0;
+        while (first + 1 < image.mipmaps.size() &&
+               (image.mipmaps[first].width > cap || image.mipmaps[first].height > cap))
+            ++first;
+        std::vector<uint8_t> chain;
+        uint32_t levels = 0;
+        bool ok = true;
+        for (size_t i = first; i < image.mipmaps.size(); ++i)
+        {
+            const auto& m = image.mipmaps[i];
+            const size_t blocks = static_cast<size_t>(std::max(1, (m.width + 3) / 4)) *
+                                  static_cast<size_t>(std::max(1, (m.height + 3) / 4));
+            if (m.data.size() < blocks * 16)
+            {
+                ok = levels > 0; // a short tail level ends the chain; a short top level fails it
+                break;
+            }
+            chain.insert(chain.end(), m.data.begin(), m.data.begin() + static_cast<ptrdiff_t>(blocks * 16));
+            ++levels;
+        }
+        const auto& top = image.mipmaps[first];
+        if (ok && levels > 0 && chain.size() <= 0xffffffffull)
+        {
+            Ref<Texture> texture = bank->CreateCompressed(top.width, top.height, WGR_TEXTURE_BC7, levels, chain.data(),
+                                                          static_cast<uint32_t>(chain.size()),
+                                                          static_cast<int>(AlphaStats::Opaque));
+            if (texture)
+                return texture;
+        }
+    }
     size_t level = 0;
     for (size_t i = 0; i < image.mipmaps.size(); ++i)
     {
@@ -159,9 +213,6 @@ Ref<Texture> LoadMippedGroundTexture(const EnfusionMount& mount, const std::stri
     // notes). The ground shader samples `.rgb` only, but the alpha class decides whether
     // a texture is treated as a cutout elsewhere, so it is pinned opaque rather than left
     // to a pixel scan that would read the roughness map as holes.
-    auto* bank = dynamic_cast<TextureBankWgpu*>(GEngine != nullptr ? GEngine->TextBank() : nullptr);
-    if (bank == nullptr)
-        return {};
     Ref<Texture> texture = bank->CreateDynamic(mip.width, mip.height, rgba.data(),
                                                static_cast<uint32_t>(rgba.size()), /*mipmap=*/true,
                                                static_cast<int>(AlphaStats::Opaque));
@@ -303,6 +354,18 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
             if (out.normal != nullptr)
                 ++normalBound;
         }
+        // RFG-110: the NHO's blue is HEIGHT (Bohemia's texture table), which ParallaxScale
+        // displaces by. WGR_ENFUSION_PARALLAX=0 leaves it off.
+        {
+            static const bool parallaxOn = []
+            {
+                const char* env = std::getenv("WGR_ENFUSION_PARALLAX");
+                return env == nullptr || env[0] != '0';
+            }();
+            float parallaxScale = 0.0f;
+            if (parallaxOn && out.normal != nullptr && material.FloatOf("ParallaxScale", parallaxScale))
+                out.parallax = std::clamp(parallaxScale, 0.0f, 0.2f);
+        }
         ++bound;
 
         float middleScale = 0.0f;
@@ -360,7 +423,7 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
              "bound {} detail + {} middle over {} distinct images; {} MiddleColor declared, {} MiddleColor applied{}",
              emats, layerCount, bcr, nho, middle, scaled, satmap, bound, middleBound, _enfusionGroundTextures.size(),
              middleColour, middleColourApplied, tintOn ? "" : " (POSEIDON_ENFUSION_MIDDLE_COLOR=0)");
-    LOG_INFO(Graphics, "Wgpu Enfusion ground normals: {} of {} NHO sources bound (RG, 512px max; enabled={})",
+    LOG_INFO(Graphics, "Wgpu Enfusion ground normals: {} of {} NHO sources bound (RG, native BC7 up to 2048 px unless WGR_ENFUSION_GROUND_NATIVE=0; enabled={})",
              normalBound, nho, normalsOn);
     return bound > 0;
 }

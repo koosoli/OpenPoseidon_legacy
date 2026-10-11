@@ -379,6 +379,7 @@ class TerrainWgpu : public ITerrainRenderer
         //! different MiddleColors.
         float middleColor[3] = {1.0f, 1.0f, 1.0f};
         float satBlend = 0.0f; //!< SatMapBlend, 0..1: the supertexture's share past DetailMaxDistance
+        float parallax = 0.0f; //!< RFG-110: ParallaxScale over the NHO height (B), detail-UV units
     };
     std::vector<EnfusionGroundMaterial> _enfusionGround;
     //! RFG-PBR: the world's supertexture pages composited into one image (see
