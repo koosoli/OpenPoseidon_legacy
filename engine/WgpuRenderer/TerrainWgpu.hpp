@@ -1,6 +1,7 @@
 #pragma once
 #include <chrono>
 
+#include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Core/ITerrainRenderer.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/World/Terrain/TerrainCdlod.hpp>
