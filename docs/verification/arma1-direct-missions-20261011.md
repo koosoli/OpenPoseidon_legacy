@@ -66,12 +66,34 @@ mounted, `Sara` world class registered, `AH1W` represented by `Cobra`, mission p
 7 groups / 21 markers, Sahrani loaded in 1.7 s, `InitVehicles ok=1`. The owner played it for
 about seven minutes; normal shutdown (exit code 0), no script or mission errors in the log.
 
+## All-missions run, 2026-10-11 22:32 (binary 2241051, stamped in the game folder)
+
+131 missions (campaigns ca/ra/Merc, armory, `Missions\*`, `MPMissions\*`), each started with
+`--arma1-mission <m> --arma1-test-seconds 25`, one screenshot at 20 s. "Entered" = the
+mission booted and the runtime ran; "clean" = no script error until the test ended.
+
+| binary | entered | clean (exit 0) | not booted |
+|---|---|---|---|
+| 550a359 (baseline) | 17 | – | 114 |
+| 2241051 | 91 | 74 | 40 |
+
+Fixed between the two: crashes in `Building`/`AILocker`/`OperField` (generated `A1x_`
+classes inherited scope 0 from abstract CWA bases, so the type was no `BuildingType`);
+groups above 12 crew seats (now split); unknown addons refusing the mission; binarised
+`mission.sqm`; ~40 missing A1 script commands; Arma 1 `CfgSounds`; the strategic map
+dialogs (`findDisplay`/`displayCtrl`/binary `ctrl*`).
+
+Fixed after that run (f498083, not yet measured): Arma 1 weapon/magazine names in cargo,
+pool and `addWeapon`/`addMagazine` (the remaining `Size: missing entry 'muzzles'/'modes'`
+refusals), `init.sqf` scheduled like Arma 1 (comments, sleep), `switch/case/default`,
+`isKindOf`, `compile`, `preprocessFileLineNumbers`, `distance` with positions,
+`moveInTurret`, `createUnit` on a group, `str`, `date`, multiplayer missions started alone
+play their first playable unit.
+
 ## Known gaps (honest list)
 
-- Arma 1 radio/sound classes defined only in Arma 1's global config (e.g. M09's
-  `sideRadio "M09r0x"`, trigger sound `HedgeSparrow`) are not available.
-- The mission starts directly (autotest path), without the briefing screen; the briefing
-  is reachable from the in-game map/notebook.
-- No Arma 1 models for units or vehicles yet (owner's choice for this slice: CWA
-  counterparts first). Terrain objects (buildings, trees, roads) are Arma 1's own.
-- Campaign flow (`class Campaign`, progression between missions) is not implemented.
+- Strategic-map texts (structured text controls) are empty; buttons work.
+- `09tsunami`: `[] spawn {waitUntil {preloadCamera ..}}` in init.sqs still reports a general
+  expression error (diagnostics added in 41e21a4 will name the operator).
+- Missions needing third-party addons (`un-impossible_mission.cain`: `BBB006`) cannot run.
+- No fading for `ctrlSetFade` (shown/hidden on commit), no team switch, no aperture.
