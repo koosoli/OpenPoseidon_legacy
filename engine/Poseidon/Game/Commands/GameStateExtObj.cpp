@@ -382,7 +382,7 @@ GameValue ObjAddWeaponCargo(const GameState* state, GameValuePar oper1, GameValu
     }
 
     RString name = Poseidon::Arma1Compat::ResolveWeaponClass(RString(array[0])); // identity unless --arma1
-    if (!(Pars >> "CfgWeapons").FindEntry(name))
+    if (Poseidon::Arma1Compat::Active() && !(Pars >> "CfgWeapons").FindEntry(name))
     {
         return NOTHING; // unknown weapon: a cargo entry is not worth failing the mission over
     }
@@ -425,7 +425,7 @@ GameValue ObjAddMagazineCargo(const GameState* state, GameValuePar oper1, GameVa
     }
 
     RString name = Poseidon::Arma1Compat::ResolveMagazineClass(RString(array[0])); // identity unless --arma1
-    if (!(Pars >> "CfgWeapons").FindEntry(name))
+    if (Poseidon::Arma1Compat::Active() && !(Pars >> "CfgWeapons").FindEntry(name))
     {
         return NOTHING;
     }
@@ -1245,6 +1245,10 @@ GameValue ObjAddWeapon(const GameState* state, GameValuePar oper1, GameValuePar 
         return NOTHING;
     }
     GameStringType weapon = Poseidon::Arma1Compat::ResolveWeaponClass(oper2); // identity unless --arma1
+    if (Poseidon::Arma1Compat::Active() && !(Pars >> "CfgWeapons").FindEntry(weapon))
+    {
+        return NOTHING; // unknown weapon (another game's class): its config reads would fail the mission
+    }
     ai->AddWeapon(weapon);
     ai->AutoReloadAll();
     return NOTHING;
@@ -1281,6 +1285,10 @@ GameValue ObjAddMagazine(const GameState* state, GameValuePar oper1, GameValuePa
         return NOTHING;
     }
     GameStringType magazine = Poseidon::Arma1Compat::ResolveMagazineClass(oper2); // identity unless --arma1
+    if (Poseidon::Arma1Compat::Active() && !(Pars >> "CfgWeapons").FindEntry(magazine))
+    {
+        return NOTHING;
+    }
     ai->AddMagazine(magazine);
     ai->AutoReloadAll();
     return NOTHING;

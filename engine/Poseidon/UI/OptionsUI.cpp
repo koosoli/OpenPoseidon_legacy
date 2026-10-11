@@ -1458,7 +1458,7 @@ GameValue PoolAddWeapon(const GameState* state, GameValuePar oper1)
     }
 
     RString name = Arma1Compat::ResolveWeaponClass(RString(array[0])); // identity unless --arma1
-    if (!(Pars >> "CfgWeapons").FindEntry(name))
+    if (Arma1Compat::Active() && !(Pars >> "CfgWeapons").FindEntry(name))
     {
         return GameValue();
     }
@@ -1490,7 +1490,7 @@ GameValue PoolAddMagazine(const GameState* state, GameValuePar oper1)
     }
 
     RString name = Arma1Compat::ResolveMagazineClass(RString(array[0])); // identity unless --arma1
-    if (!(Pars >> "CfgWeapons").FindEntry(name))
+    if (Arma1Compat::Active() && !(Pars >> "CfgWeapons").FindEntry(name))
     {
         return GameValue();
     }

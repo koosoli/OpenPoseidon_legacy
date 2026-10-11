@@ -257,7 +257,7 @@ const std::map<std::string, std::vector<const char*>>& MagazineAliases()
         {"stinger", {"Stinger"}},           {"strela", {"Strela"}},
         {"pg7v", {"RPGLauncher"}},          {"pg7vr", {"RPGLauncher"}},
         {"handgrenade", {"HandGrenade"}},   {"handgrenade_west", {"HandGrenade"}},
-        {"handgrenade_east", {"HandGrenade"}}, {"smokeshell", {"SmokeShell"}},
+        {"handgrenade_east", {"HandGrenade"}}, {"handgrenadetimed", {"HandGrenade"}}, {"smokeshell", {"SmokeShell"}},
         {"smokeshellred", {"SmokeShellRed", "SmokeShell"}},
         {"smokeshellgreen", {"SmokeShellGreen", "SmokeShell"}},
         {"1rnd_he_m203", {"GrenadeLauncher"}}, {"1rnd_he_gp25", {"GrenadeLauncher"}},
