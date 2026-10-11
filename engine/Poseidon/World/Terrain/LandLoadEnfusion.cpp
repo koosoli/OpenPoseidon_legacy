@@ -1936,6 +1936,28 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
         }
         _enfusionSurfaceEdge = edge;
     }
+    // POSEIDON_ENFUSION_PROBE="x,z;x,z": the authored surface at those world points, from the
+    // 1 m masks -- to name the ground in a capture before reasoning about how it renders.
+    if (const char* probe = std::getenv("POSEIDON_ENFUSION_PROBE"); probe != nullptr && terrain.materialEdge > 0)
+    {
+        const float metresPerTexel = extent / static_cast<float>(terrain.materialEdge);
+        for (const char* p = probe; *p != 0;)
+        {
+            char* end = nullptr;
+            const float px = std::strtof(p, &end);
+            if (end == p || *end != ',')
+                break;
+            const float pz = std::strtof(end + 1, &end);
+            const uint32_t mx = std::min<uint32_t>(terrain.materialEdge - 1, static_cast<uint32_t>(std::max(px, 0.0f) / metresPerTexel));
+            const uint32_t mz = std::min<uint32_t>(terrain.materialEdge - 1, static_cast<uint32_t>(std::max(pz, 0.0f) / metresPerTexel));
+            const uint8_t m = terrain.materials[static_cast<size_t>(mz) * terrain.materialEdge + mx];
+            LOG_INFO(World, "Enfusion probe [{:.0f} {:.0f}]: surface {} {}", px, pz, m,
+                     m < d.materials.size() ? d.materials[m] : std::string("(none)"));
+            p = (*end == ';') ? end + 1 : end;
+            if (*end == 0)
+                break;
+        }
+    }
     _enfusionTilePrefix = terrain.tilePrefix;
     _enfusionTilesX = static_cast<int>(terrain.tilesX);
 
