@@ -1365,6 +1365,7 @@ static const GameFunction* GetExtUnary(int& count)
 
         GameFunction(GameString, "loadFile", StringLoad, GameString),
         GameFunction(GameString, "preprocessFile", StringPreprocess, GameString),
+        GameFunction(GameString, "preprocessFileLineNumbers", StringPreprocess, GameString),
 
         GameFunction(GameScalar, "playersNumber", PlayersNumber, GameSide),
 
