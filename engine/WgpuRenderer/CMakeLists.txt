@@ -55,6 +55,10 @@ corrosion_import_crate(
     PROFILE ${_wgr_cargo_profile}
     ${_wgr_cargo_features}
 )
+# POSEIDON_CPU_LEVEL (top-level CMakeLists.txt): the renderer follows the C++ instruction level.
+if(POSEIDON_CPU_LEVEL STREQUAL "x86-64-v3")
+    corrosion_add_target_rustflags(wgpu_renderer -Ctarget-cpu=x86-64-v3)
+endif()
 
 add_library(WgpuRenderer STATIC
     EngineWgpu.cpp

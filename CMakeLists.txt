@@ -82,6 +82,23 @@ if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     add_compile_options(-fmacro-prefix-map=${CMAKE_SOURCE_DIR}/=)
 endif()
 
+# CPU instruction level. `baseline` is plain x86-64 (SSE2) and runs on every 64-bit CPU.
+# `x86-64-v3` adds AVX2, FMA, BMI1/2, F16C, LZCNT and MOVBE (Intel Haswell 2013+, AMD Excavator
+# 2015 / Zen 2017+); a binary built with it does not start on older CPUs. Applies to the C++ code
+# and the Rust renderer (engine/WgpuRenderer/CMakeLists.txt).
+set(POSEIDON_CPU_LEVEL "baseline" CACHE STRING "CPU instruction level: baseline | x86-64-v3")
+set_property(CACHE POSEIDON_CPU_LEVEL PROPERTY STRINGS baseline x86-64-v3)
+if(POSEIDON_CPU_LEVEL STREQUAL "x86-64-v3")
+    if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        add_compile_options(/clang:-march=x86-64-v3)
+    else()
+        add_compile_options(-march=x86-64-v3)
+    endif()
+    message(STATUS "POSEIDON_CPU_LEVEL=x86-64-v3 (AVX2/FMA/BMI2): binaries require a 2013+ Intel / 2015+ AMD CPU")
+elseif(NOT POSEIDON_CPU_LEVEL STREQUAL "baseline")
+    message(FATAL_ERROR "POSEIDON_CPU_LEVEL must be baseline or x86-64-v3, not '${POSEIDON_CPU_LEVEL}'")
+endif()
+
 if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     add_compile_options($<$<CONFIG:Release>:/Zi>)
     add_link_options($<$<CONFIG:Release>:/DEBUG>)
