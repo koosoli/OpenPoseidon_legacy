@@ -309,7 +309,17 @@ class Reader
             EbinPlacement placement;
             placement.className = decl.name.empty() ? inherited.name : decl.name;
             const bool isRoad = IsRoadSplineClass(placement.className);
-            placement.prefabGuid = decl.Prefab().empty() ? inherited.Prefab() : decl.Prefab();
+            // RFG-120: only an ANONYMOUS block (a `$grp` instance) takes the enclosing
+            // declaration's prefab. A NAMED child with no prefab of its own --
+            // `GenericEntity { ID "5622A975337C5640" coords 0 0 -0.443 }` inside a placed
+            // villa -- is an override of one of the PREFAB's own children, addressed by ID.
+            // Inheriting the parent's prefab drew the whole villa again, nudged by the
+            // override's offset: the doubled stair railings at 5009/3962, and 5,643 such
+            // duplicate buildings across Everon.
+            if (!decl.Prefab().empty())
+                placement.prefabGuid = decl.Prefab();
+            else if (decl.name.empty() || !EbinPrefabChildOverridesSkipped())
+                placement.prefabGuid = inherited.Prefab();
 
             // A nested entity's transform is LOCAL to the entity that contains it,
             // so the enclosing one is captured BY VALUE here and composed onto the

@@ -257,7 +257,10 @@ static bool FaceTextureIsEnfusionComposite(const ShapeSection& section)
     // The material's Stage0 is the RAW `_BCR.edds` -- untinted as well as uncovered -- so
     // letting it win here throws away the layer colour at the same moment it throws away
     // the coverage.
-    return name != nullptr && std::strncmp(Poseidon::Enfusion::SkipLayerTint(name), "enfa|", 5) == 0;
+    // RFG-119: an `enfk|` constant-coverage glass pane is the same statement -- its alpha is the
+    // material's AlphaMul, and the raw Stage0 BCR would put the roughness-alpha opaque pane back.
+    const char* inner = name != nullptr ? Poseidon::Enfusion::SkipLayerTint(name) : nullptr;
+    return inner != nullptr && (std::strncmp(inner, "enfa|", 5) == 0 || std::strncmp(inner, "enfk|", 5) == 0);
 }
 
 // PERF-015 A/B lever, and it governs BOTH halves of the per-section classification cost:

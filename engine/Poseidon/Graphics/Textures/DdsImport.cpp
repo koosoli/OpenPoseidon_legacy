@@ -803,6 +803,21 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     if (tinted)
         name = inner;
 
+    // RFG-119: `enfk|<alpha>|<inner>` -- a CONSTANT coverage. Enfusion glass that blends
+    // (`BlendMode AlphaBlend`) with no OpacityMap is as transparent as its `AlphaMul` says:
+    // window_glass is 0.243 over a `_BCR` whose alpha is roughness. Without this the pane drew
+    // solid beige ("the window is not transparent"). Inner loads exactly as before, then alpha
+    // is overwritten; a name with a '|' never takes the BCR-roughness route downstream.
+    float constantAlpha = -1.0f;
+    if (std::strncmp(name, "enfk|", 5) == 0)
+    {
+        if (const char* bar = std::strchr(name + 5, '|'); bar != nullptr && bar[1] != '\0')
+        {
+            constantAlpha = std::clamp(std::strtof(name + 5, nullptr), 0.0f, 1.0f);
+            name = bar + 1;
+        }
+    }
+
     // RFG-039: a flat colour needs no file. Built at 4x4 rather than 1x1 because the
     // mip chain and the pitch arithmetic downstream both assume a real image.
     //
@@ -865,7 +880,7 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
         const char* value = std::getenv("POSEIDON_DDS_TINT_REUSE");
         return value && std::strcmp(value, "1") == 0; // Experimental until byte/performance A/B acceptance.
     }();
-    const bool reusable = reuseTintDecode && tinted && !composite && !IsEnfusionRgNormalName(name);
+    const bool reusable = reuseTintDecode && tinted && !composite && constantAlpha < 0.0f && !IsEnfusionRgNormalName(name);
     const std::string reuseKey = reusable ? "dds-decode|" + std::to_string(options.decodedMaxEdge) + "|" +
                                            render::PreparedTextureStore::Key(name) : "";
     auto& prepared = render::PreparedTextureStore::Instance();
@@ -896,7 +911,8 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     }
     if (!trace.reusedDecode)
     {
-        if (!InitFromMemoryWithOptions(buffer.data(), buffer.size(), name, /*forceDecode=*/composite || tinted, options))
+        if (!InitFromMemoryWithOptions(buffer.data(), buffer.size(), name,
+                                       /*forceDecode=*/composite || tinted || constantAlpha >= 0.0f, options))
             return false;
         if (reusable) prepared.PutDdsDecode(reuseKey, buffer, *this);
     }
@@ -996,6 +1012,17 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
         }
     }
     trace.Mark(trace.merge);
+
+    // RFG-119: the constant coverage (see the `enfk|` strip above), on the decoded levels.
+    if (constantAlpha >= 0.0f && _format == PixelFormat::ARGB8888)
+    {
+        const uint8_t a = static_cast<uint8_t>(constantAlpha * 255.0f + 0.5f);
+        for (DDSMipLevel& level : _levels)
+            for (size_t i = 3; i < level.data.size(); i += 4)
+                level.data[i] = a;
+        _hasAlpha = a < 255;
+        _isTransparent = false;
+    }
 
     // RFG-070: and now the colour. AFTER the coverage merge, so the two orders cannot
     // interact -- the merge only writes alpha and the tint only reads and writes RGB, but

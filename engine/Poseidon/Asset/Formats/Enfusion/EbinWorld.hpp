@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -124,6 +125,19 @@ struct EbinPlacement
 inline bool IsRoadSplineClass(const std::string& className)
 {
     return className == "RoadGeneratorEntity" || className == "RoadEntity";
+}
+
+//! RFG-120: named child blocks with no prefab of their own are overrides of the parent
+//! prefab's children and place nothing. POSEIDON_EBIN_CHILD_OVERRIDES=1 restores the old
+//! inheritance (the parent's prefab drawn again at the override's offset) for an A/B.
+inline bool EbinPrefabChildOverridesSkipped()
+{
+    static const bool skipped = []
+    {
+        const char* env = std::getenv("POSEIDON_EBIN_CHILD_OVERRIDES");
+        return !(env && env[0] == '1');
+    }();
+    return skipped;
 }
 
 struct EbinWorld

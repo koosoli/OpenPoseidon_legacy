@@ -412,6 +412,12 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
         // them one image. A face that names only the colour can never be a cutout,
         // and Enfusion keeps the coverage in its own file.
         std::string name = r.opacity.empty() ? r.colour : "enfa|" + r.opacity + "|" + r.colour;
+        if (r.opacity.empty() && r.constantAlpha >= 0.0f && r.colour.find('|') == std::string::npos)
+        {
+            char head[24];
+            std::snprintf(head, sizeof(head), "enfk|%.3f|", r.constantAlpha);
+            name = head + r.colour;
+        }
         // RFG-070: and wrap the layer colour around whichever of the two that was. The
         // tint is OUTERMOST because the texture source strips it first and then reads the
         // rest exactly as it did before -- which is the only reason a tinted cutout is
@@ -447,6 +453,8 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
         //! material instead of one per section.
         bool tinted = false;
         float tint[3] = {0.0f, 0.0f, 0.0f};
+        //! RFG-119: glass whose whole transparency is `AlphaMul` (>= 0 when it applies).
+        float constantAlpha = -1.0f;
     };
 
     const Resolved& Resolve(const std::string& materialSource) const
@@ -462,6 +470,26 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
             out.colour = ColourTextureOf(material, &kind);
             out.opacity = material.TextureOf("OpacityMap");
             out.decal = material.className == "MatPBRDecal";
+            // RFG-119: 33 corpus materials blend (`BlendMode AlphaBlend`) with no OpacityMap --
+            // window panes, scope lenses -- and their only opacity is `AlphaMul` over a BCR whose
+            // alpha is roughness. Named `enfk|<AlphaMul>|<colour>` so the texture is that
+            // constant coverage. Basic + Glass families only: decals, roads and Multi keep theirs.
+            // POSEIDON_ENFUSION_GLASS_ALPHA=0 draws them opaque again.
+            {
+                static const bool glassAlpha = []
+                {
+                    const char* env = std::getenv("POSEIDON_ENFUSION_GLASS_ALPHA");
+                    return !(env && env[0] == '0');
+                }();
+                float alphaMul = 1.0f;
+                const auto* blend = material.Find("BlendMode");
+                if (glassAlpha && out.opacity.empty() &&
+                    (material.className == "MatPBRBasicGlass" || material.className == "MatPBRBasic") && blend &&
+                    !blend->values.empty() && !blend->values[0].isNumber &&
+                    Poseidon::Asset::Material::EmatMaterial::NameMatches(blend->values[0].text, "AlphaBlend") &&
+                    material.FloatOf("AlphaMul", alphaMul) && std::isfinite(alphaMul) && alphaMul < 1.0f)
+                    out.constantAlpha = std::clamp(alphaMul, 0.02f, 1.0f);
+            }
             // RFG-061: the OTHER invisible family, missing here and present in the
             // converting exporter since MAT-050.
             //
@@ -925,6 +953,8 @@ struct PlacementSummary
     size_t slotBones = 0;      //!< socket bones that matched a slot rule
     size_t slotUnresolved = 0; //!< of those, bones whose part prefab gave no .xob
     size_t slotBuildings = 0;  //!< PLACEMENTS that carry at least one attachment
+    size_t childPrefabs = 0;   //!< RFG-120: distinct prefabs whose transform children became parts
+    size_t childParts = 0;     //!< RFG-120: those parts, per distinct prefab (furniture, props)
     std::string slotFailure;
     std::string firstFailure;
     std::string error;
@@ -1093,6 +1123,8 @@ struct AttachWorkspace
     std::unordered_map<std::string, std::vector<Enf::XobBone>> meshBones; //!< `.xob` -> its bones
     std::unordered_map<std::string, uint32_t> index;                      //!< `.xob` -> attachment mesh slot
     std::vector<size_t> counts;                                           //!< placements per attachment mesh
+    //! RFG-120: `.et` (lower) -> its transform-placed children (ResolvePrefabChildren).
+    std::unordered_map<std::string, std::vector<Poseidon::Asset::Formats::Enfusion::PrefabChild>> children;
 };
 
 const std::vector<Enf::XobBone>& BonesOf(AttachWorkspace& ws, const std::string& xobPath, PlacementSummary& summary)
@@ -1179,6 +1211,67 @@ void CollectAttachments(AttachWorkspace& ws, PlacementSummary& summary, const st
         out.push_back(part);
 
         CollectAttachments(ws, summary, partEt, cached->second, part.offset, part.basis, depth + 1, out);
+    }
+}
+
+/// RFG-120: the parts a prefab places by TRANSFORM -- a house's furniture composition and
+/// the props in it (Enf::ResolvePrefabChildren) -- folded into the same attachment set as
+/// the socket parts, so the streamed and the placed draw paths take them unchanged. Each
+/// child's transform is local to its parent and composed with the signs and order a world
+/// placement uses (RFG-068: angles negated; yaw, then pitch, then roll; then scale). Its own
+/// socket parts and its own children follow. POSEIDON_PREFAB_CHILDREN=0 turns it off.
+void CollectChildParts(AttachWorkspace& ws, PlacementSummary& summary, const std::string& etPath,
+                       const Vector3& offset, const Matrix3& basis, int depth, std::vector<MeshAttachment>& out)
+{
+    static const bool enabled = []
+    {
+        const char* env = std::getenv("POSEIDON_PREFAB_CHILDREN");
+        return !(env && env[0] == '0');
+    }();
+    if (!enabled || depth > 3)
+        return;
+    const std::string key = LowerCopy(etPath);
+    auto known = ws.children.find(key);
+    if (known == ws.children.end())
+        known = ws.children.emplace(key, Enf::ResolvePrefabChildren(*ws.mount, etPath)).first;
+    // Copied: the recursion below inserts into `children`.
+    const std::vector<Enf::PrefabChild> children = known->second;
+    constexpr float toRad = 0.01745329252f;
+    for (const Enf::PrefabChild& child : children)
+    {
+        Matrix3 local(MRotationY, -child.angles[1] * toRad);
+        if (std::fabs(child.angles[0]) > 0.01f)
+            local = local * Matrix3(MRotationX, -child.angles[0] * toRad);
+        if (std::fabs(child.angles[2]) > 0.01f)
+            local = local * Matrix3(MRotationZ, -child.angles[2] * toRad);
+        if (std::isfinite(child.scale) && child.scale > 0.0f && std::fabs(child.scale - 1.0f) > 1e-3f)
+            local = local * Matrix3(MScale, child.scale);
+        const Matrix3 childBasis = basis * local;
+        const Vector3 childOffset = offset + basis * Vector3(child.position[0], child.position[1], child.position[2]);
+
+        const std::string partKey = LowerCopy(child.prefab);
+        auto cached = ws.partToMesh.find(partKey);
+        if (cached == ws.partToMesh.end())
+            cached = ws.partToMesh.emplace(partKey, Enf::ResolvePrefabModel(*ws.mount, child.prefab).xobPath).first;
+        if (!cached->second.empty())
+        {
+            MeshAttachment part;
+            part.basis = childBasis;
+            part.offset = childOffset;
+            auto slot = ws.index.find(cached->second);
+            if (slot == ws.index.end())
+            {
+                slot = ws.index.emplace(cached->second, static_cast<uint32_t>(ws.counts.size())).first;
+                ws.counts.push_back(0);
+            }
+            part.mesh = slot->second;
+            out.push_back(part);
+            ++summary.childParts;
+            // A cabinet's doors, a window's curtains: the child's own socket parts.
+            CollectAttachments(ws, summary, child.prefab, cached->second, childOffset, childBasis, 1, out);
+        }
+        // A composition (BuildingFurniture_base) draws nothing itself; its children do.
+        CollectChildParts(ws, summary, child.prefab, childOffset, childBasis, depth + 1, out);
     }
 }
 
@@ -1445,23 +1538,35 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
             // POSEIDON_PLACEMENT_REGION="x:z:radius": every placement within radius metres of
             // (x, z) (first 300), with its mesh and prefab class -- "what is standing at this
             // reported pose" without guessing a substring first.
-            static const char* region = std::getenv("POSEIDON_PLACEMENT_REGION");
-            static float regionX = 0.0f, regionZ = 0.0f, regionR = -1.0f;
-            static int regionRows = 0;
-            if (region && *region && regionR < 0.0f &&
-                std::sscanf(region, "%f:%f:%f", &regionX, &regionZ, &regionR) != 3)
-                regionR = 0.0f;
-            if (regionR > 0.0f && regionRows < 300)
+            // Several regions separated by ';' (first 600 rows over all of them).
+            static const std::vector<std::array<float, 3>> regions = []
             {
-                const float dx = placement.position[0] - regionX, dz = placement.position[2] - regionZ;
-                if (dx * dx + dz * dz <= regionR * regionR)
+                std::vector<std::array<float, 3>> out;
+                const char* env = std::getenv("POSEIDON_PLACEMENT_REGION");
+                for (const char* p = env; p && *p;)
+                {
+                    std::array<float, 3> r{};
+                    if (std::sscanf(p, "%f:%f:%f", &r[0], &r[1], &r[2]) == 3 && r[2] > 0.0f)
+                        out.push_back(r);
+                    p = std::strchr(p, ';');
+                    if (p)
+                        ++p;
+                }
+                return out;
+            }();
+            static int regionRows = 0;
+            for (size_t ri = 0; ri < regions.size() && regionRows < 600; ++ri)
+            {
+                const float dx = placement.position[0] - regions[ri][0], dz = placement.position[2] - regions[ri][1];
+                if (dx * dx + dz * dz <= regions[ri][2] * regions[ri][2])
                 {
                     ++regionRows;
-                    LOG_INFO(World, "Placement region: '{}' class='{}' pos=[{:.2f} {:.2f} {:.2f}] angles=[{:.1f} {:.1f} "
-                                    "{:.1f}] scale={:.2f} flags={}",
-                             cached->second, placement.className, placement.position[0], placement.position[1],
-                             placement.position[2], placement.angles[0], placement.angles[1], placement.angles[2],
-                             placement.scale, placement.hasFlags ? 1 : 0);
+                    LOG_INFO(World, "Placement region {}: '{}' class='{}' guid={} pos=[{:.2f} {:.2f} {:.2f}] angles=[{:.1f} "
+                                    "{:.1f} {:.1f}] scale={:.2f} flags={}",
+                             ri, cached->second, placement.className, placement.prefabGuid, placement.position[0],
+                             placement.position[1], placement.position[2], placement.angles[0], placement.angles[1],
+                             placement.angles[2], placement.scale, placement.hasFlags ? 1 : 0);
+                    break;
                 }
             }
         }
@@ -1484,6 +1589,10 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
                 AttachSet set;
                 const Matrix3 identity(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
                 CollectAttachments(workspace, out, guidHit->second, cached->second, Vector3(0.0f, 0.0f, 0.0f), identity, 0, set.parts);
+                const size_t beforeChildren = set.parts.size();
+                CollectChildParts(workspace, out, guidHit->second, Vector3(0.0f, 0.0f, 0.0f), identity, 0, set.parts);
+                if (set.parts.size() > beforeChildren)
+                    ++out.childPrefabs;
                 if (!set.parts.empty())
                 {
                     setIndex = static_cast<uint32_t>(attachSets.size());
@@ -2874,6 +2983,10 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                      attachBuilt, attachBuildFailed, attachPlaced, summary.slotBuildings, attachSkipped,
                      summary.slotFailure.empty() ? "" : ("; first slot failure: " + summary.slotFailure),
                      firstAttachFailure.empty() ? "" : ("; first build failure: " + firstAttachFailure));
+            LOG_INFO(World,
+                     "Enfusion native load: RFG-120 prefab children: {} prefabs place {} transform children "
+                     "(furniture, props; per distinct prefab) (POSEIDON_PREFAB_CHILDREN)",
+                     summary.childPrefabs, summary.childParts);
 
             // RFG-027: the road network. One shape per road rather than one shared
             // shape placed many times, because every road is a different length and

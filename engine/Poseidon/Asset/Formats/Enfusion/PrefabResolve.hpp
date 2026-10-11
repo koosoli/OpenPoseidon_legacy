@@ -501,4 +501,168 @@ inline std::string SlotPrefabForBone(const PrefabSlots& slots, const std::string
     return best != nullptr ? best->prefab : std::string();
 }
 
+// RFG-120: the children a prefab places by TRANSFORM rather than on a socket bone.
+//
+// A Reforger house's furniture is not in the world file and not on a bone: the building
+// prefab carries `GenericEntity : ".../Villa_E_2I01_furniture_01.et" { coords 0 0 0 }`, and
+// that composition is in turn 38 entries of `Class : "<prop>.et" { ID coords angles scale }`
+// and `$grp Class : "<prop>.et" { { ID coords ... } { ... } }`, every transform LOCAL to its
+// parent. The slot reader above only follows PivotID / BonePrefix, so every room came out
+// bare. Children that carry a PivotID stay the slot reader's (they hang on a bone).
+struct PrefabChild
+{
+    std::string prefab; //!< the child's `.et`
+    std::string id;     //!< its `ID`, the key a derived prefab overrides it by
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    float angles[3] = {0.0f, 0.0f, 0.0f}; //!< Enfusion order: pitch, yaw, roll (degrees)
+    float scale = 1.0f;
+};
+
+namespace PrefabDetail
+{
+inline bool Floats(const char* data, size_t begin, size_t end, float* out, int count)
+{
+    const std::string text(data + begin, end - begin);
+    const char* p = text.c_str();
+    for (int i = 0; i < count; ++i)
+    {
+        char* next = nullptr;
+        const float v = std::strtof(p, &next);
+        if (next == p)
+            return false;
+        out[i] = v;
+        p = next;
+    }
+    return true;
+}
+} // namespace PrefabDetail
+
+//! One `.et` body's own transform-placed children, in file order.
+inline void FindChildPlacements(const std::vector<uint8_t>& blob, std::vector<PrefabChild>& out)
+{
+    const char* data = reinterpret_cast<const char*>(blob.data());
+    const size_t size = blob.size();
+    struct Frame
+    {
+        int depth = 0;       //!< brace depth of the header line
+        bool group = false;  //!< `$grp`: its anonymous blocks are the instances
+        bool open = false;   //!< a group instance is being read
+        bool pivot = false;  //!< the current entry hangs on a bone: not ours
+        bool nested = false; //!< declared inside another child: its transform is relative to that one
+        PrefabChild entry;
+    };
+    std::vector<Frame> stack;
+    int depth = 0;
+    size_t at = 0;
+    const auto flush = [&](Frame& frame)
+    {
+        // Nested entries are tracked so their PivotID / coords cannot leak onto the outer
+        // entry, but not emitted: the outer child's own `.et` is expanded recursively by the
+        // caller, which is where its children belong.
+        if (!frame.pivot && !frame.nested && !frame.entry.prefab.empty())
+            out.push_back(frame.entry);
+        frame.pivot = false;
+        const std::string prefab = frame.entry.prefab;
+        frame.entry = PrefabChild{};
+        frame.entry.prefab = prefab;
+    };
+    while (at < size)
+    {
+        size_t lineEnd = at;
+        while (lineEnd < size && data[lineEnd] != '\n')
+            ++lineEnd;
+        size_t cursor = at;
+        while (cursor < lineEnd && static_cast<unsigned char>(data[cursor]) <= ' ')
+            ++cursor;
+        size_t trimmedEnd = lineEnd;
+        while (trimmedEnd > cursor && static_cast<unsigned char>(data[trimmedEnd - 1]) <= ' ')
+            --trimmedEnd;
+
+        std::string quoted;
+        if (depth >= 1 && PrefabDetail::ChildHeader(data, cursor, lineEnd, quoted))
+        {
+            Frame frame;
+            frame.depth = depth;
+            frame.group = lineEnd - cursor > 4 && std::memcmp(data + cursor, "$grp", 4) == 0;
+            frame.nested = !stack.empty();
+            frame.entry.prefab = quoted;
+            stack.push_back(frame);
+        }
+        else if (!stack.empty())
+        {
+            Frame& top = stack.back();
+            const bool bareOpen = trimmedEnd == cursor + 1 && data[cursor] == '{';
+            if (top.group && !top.open && bareOpen && depth == top.depth + 1)
+                top.open = true;
+            const int bodyDepth = top.group ? top.depth + 2 : top.depth + 1;
+            const bool ours = (!top.group || top.open) && depth == bodyDepth;
+            if (PrefabDetail::Keyword(data, cursor, lineEnd, "PivotID") && depth >= bodyDepth)
+                top.pivot = true;
+            else if (ours && PrefabDetail::Keyword(data, cursor, lineEnd, "coords"))
+                PrefabDetail::Floats(data, cursor + 6, lineEnd, top.entry.position, 3);
+            else if (ours && PrefabDetail::Keyword(data, cursor, lineEnd, "angles"))
+                PrefabDetail::Floats(data, cursor + 6, lineEnd, top.entry.angles, 3);
+            else if (ours && PrefabDetail::Keyword(data, cursor, lineEnd, "scale"))
+                PrefabDetail::Floats(data, cursor + 5, lineEnd, &top.entry.scale, 1);
+            else if (ours && PrefabDetail::Keyword(data, cursor, lineEnd, "ID"))
+                PrefabDetail::QuotedReference(data, cursor, lineEnd, top.entry.id);
+        }
+
+        depth += PrefabDetail::NetBraces(data, cursor, lineEnd);
+        while (!stack.empty())
+        {
+            Frame& top = stack.back();
+            if (top.group && top.open && depth <= top.depth + 1)
+            {
+                flush(top);
+                top.open = false;
+            }
+            if (depth > top.depth)
+                break;
+            if (!top.group)
+                flush(top);
+            stack.pop_back();
+        }
+        at = lineEnd + 1;
+    }
+}
+
+//! Every transform-placed child a prefab declares or inherits. Child first; an ancestor's
+//! entry with an ID the descendant already declared is the same child, and the descendant's
+//! version wins.
+inline std::vector<PrefabChild> ResolvePrefabChildren(const EnfusionMount& mount, const std::string& etPath,
+                                                      int depthLimit = 8)
+{
+    std::vector<PrefabChild> out;
+    std::string current = etPath;
+    std::vector<std::string> seen;
+    for (int depth = 0; depth <= depthLimit; ++depth)
+    {
+        for (const std::string& before : seen)
+            if (PrefabDetail::LowerCopy(before) == PrefabDetail::LowerCopy(current))
+                return out;
+        seen.push_back(current);
+        std::vector<uint8_t> blob;
+        if (!mount.Read(current, blob))
+            return out;
+        std::vector<PrefabChild> own;
+        FindChildPlacements(blob, own);
+        for (PrefabChild& child : own)
+        {
+            bool known = false;
+            if (!child.id.empty())
+                for (const PrefabChild& have : out)
+                    known = known || have.id == child.id;
+            if (!known)
+                out.push_back(std::move(child));
+        }
+        const auto parsed = Poseidon::Asset::Material::ParseEmat(
+            std::string_view(reinterpret_cast<const char*>(blob.data()), blob.size()));
+        if (parsed.parentPath.empty())
+            return out;
+        current = parsed.parentPath;
+    }
+    return out;
+}
+
 } // namespace Poseidon::Asset::Formats::Enfusion
