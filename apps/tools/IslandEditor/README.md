@@ -1,11 +1,13 @@
 # Island Editor
 
 A standalone editor for the islands (`.wrp`) of Cold War Assault / Operation
-Flashpoint and Open Malprave. It does not need the game running, and it works on
-an unmodified Cold War Assault folder as well as on Open Malprave's.
+Flashpoint, and (to open and convert) of Arma, Arma 2 and DayZ. It does not need the game
+running, and it works on an unmodified Cold War Assault folder.
 
-Built as `PoseidonIslandEditor.exe`; copied to the game folder as
-`Island Editor.exe`.
+It comes from Open Malprave (`EXPORT-NOTES.md` is that export's own description) and is skinned
+and named for Open Poseidon here. Built as `PoseidonIslandEditor.exe` (target
+`PoseidonIslandEditor`, Windows only: it draws with Direct3D 12). Its settings are kept in
+`%APPDATA%\OpenPoseidonIslandEditor\settings.ini`.
 
 ## What it reads and writes
 
@@ -220,7 +222,7 @@ sets another.
 ## Command line
 
 ```
-"Island Editor.exe" [island.wrp] [--game <folder>]
+PoseidonIslandEditor.exe [island.wrp] [--game <folder>]
     --convert out.wrp            save the island as 4WVR and exit (no window)
     --heightmap map.png          start from a height map instead of an island
         [--size N] [--low m] [--high m] [--smooth passes]

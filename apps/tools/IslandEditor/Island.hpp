@@ -52,7 +52,8 @@ template <class T> struct SystemAllocator
     template <class U> SystemAllocator(const SystemAllocator<U>&) {}
     T* allocate(size_t n)
     {
-        void* p = n <= static_cast<size_t>(-1) / sizeof(T) ? std::malloc(n * sizeof(T)) : nullptr;
+        // (malloc(0) may give null without being out of memory: ask for a byte)
+        void* p = n <= static_cast<size_t>(-1) / sizeof(T) ? std::malloc(n ? n * sizeof(T) : 1) : nullptr;
         if (!p)
             throw std::bad_alloc();
         return static_cast<T*>(p);

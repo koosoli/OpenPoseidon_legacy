@@ -36,6 +36,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <limits>
 #include <array>
 #include <cmath>
 #include <cstdarg>
@@ -2992,8 +2993,62 @@ int SelfTest(const std::string& file)
     for (size_t i = 0; i < a.objects.size() && i < b.objects.size(); i++)
         sameModels = sameModels && a.objects[i].model == b.objects[i].model && a.objects[i].id == b.objects[i].id;
     check(b.renumbered == 0, "no repeated object ids in what was saved");
+    {
+        // Repeated ids when the highest is already the largest an id can be (the later worlds' ids are sparse): the
+        // others must get free ids, none twice, none negative.
+        const int top = std::numeric_limits<int>::max();
+        island::ObjectList objs;
+        for (int id : {top, top, 5, 5, 5, 1, 2})
+        {
+            island::Object o;
+            o.id = id;
+            o.model = "data3d\\dum01.p3d";
+            objs.push_back(o);
+        }
+        Island c;
+        c.Adopt(16, std::vector<float>(256, 1.0f), std::vector<uint16_t>(), std::vector<std::string>(kMaxTextures), std::move(objs),
+                "", "test");
+        std::vector<int> ids;
+        for (const island::Object& o : c.objects)
+            ids.push_back(o.id);
+        std::sort(ids.begin(), ids.end());
+        const bool unique = std::adjacent_find(ids.begin(), ids.end()) == ids.end() && !ids.empty() && ids.front() > 0;
+        check(c.renumbered == 3 && unique, "repeated ids at the top of the range get free ones");
+    }
     check(sameNames, "same texture table");
     check(sameModels, "same models and ids");
+    // How the objects sit on the land, in numbers. An object's place is its model's middle, so a tree stands some
+    // metres "above" the ground and no fixed figure fits; what must hold is that the land under each object is its
+    // own: the same measure against the land turned the wrong way round (x and z exchanged) has to be worse.
+    if (!a.objects.empty())
+    {
+        std::vector<float> off, turned;
+        const size_t every = std::max<size_t>(1, a.objects.size() / 200000);
+        size_t longest = 0, tooLong = 0;
+        int highestId = 0;
+        for (size_t i = 0; i < a.objects.size(); i++)
+        {
+            const island::Object& o = a.objects[i];
+            if (i % every == 0 && !o.fixed)
+            {
+                off.push_back(std::fabs(o.above));
+                turned.push_back(std::fabs(o.m[10] - a.SurfaceY(o.Z(), o.X())));
+            }
+            longest = std::max(longest, o.model.size());
+            tooLong += o.model.size() >= static_cast<size_t>(island::kObjectNameLen) ? 1 : 0;
+            highestId = std::max(highestId, o.id);
+        }
+        std::sort(off.begin(), off.end());
+        std::sort(turned.begin(), turned.end());
+        const float median = off.empty() ? 0.0f : off[off.size() / 2];
+        const float medianTurned = turned.empty() ? 0.0f : turned[turned.size() / 2];
+        printf("     objects stand %.2f m from the ground (median); %.2f m from the land turned round; highest id %d; "
+               "longest model name %zu characters\n",
+               median, medianTurned, highestId, longest);
+        if (off.size() >= 1000)
+            check(median < medianTurned, "the land under the objects is the right way round");
+        check(tooLong == 0, "every model name fits the saved format (75 characters)");
+    }
 
     // every tool, then undo back to the start
     const std::vector<float> before = b.height;

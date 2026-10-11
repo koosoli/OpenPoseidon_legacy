@@ -1,5 +1,10 @@
 # Island Editor for Open Poseidon
 
+> **In this tree (2026-10-11).** These are the notes the export came with, kept as written. Since then, here:
+> it builds, links and passes its self-tests (what the notes list as "not checked"); it has Open Poseidon's theme
+> and name, and its settings folder is `OpenPoseidonIslandEditor`; it opens Arma, Arma 2 and DayZ worlds. The
+> optional `LandSave.cpp` patch is not applied. See `README.md` beside this file.
+
 The standalone island (`.wrp`) editor from Open Malprave, packed to drop into Open Poseidon.
 It is a separate program: it does not need the game running and does not change the engine.
 

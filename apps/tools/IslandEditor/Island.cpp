@@ -1,6 +1,7 @@
 #include "Island.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -384,7 +385,24 @@ int Island::UniqueObjectIds()
         const size_t slash = m.find_last_of('\\');
         return m.compare(slash == std::string::npos ? 0 : slash + 1, 3, "les") == 0;
     };
-    int next = maxId + 1, changed = 0;
+    // New ids go after the highest, as the game gives them. Should the highest already be the largest an id can be
+    // (ids are sparse in the later worlds), the free ids from 1 up are used instead: `used` is every id in use, in
+    // order, and `gap` only moves up, so two objects never get the same one.
+    std::vector<int, SystemAllocator<int>> used;
+    used.reserve(order.size());
+    for (int index : order)
+        if (used.empty() || used.back() != objects[index].id)
+            used.push_back(objects[index].id);
+    long long next = static_cast<long long>(maxId) + 1;
+    int gap = 1, changed = 0;
+    auto newId = [&]()
+    {
+        if (next <= std::numeric_limits<int>::max())
+            return static_cast<int>(next++);
+        while (std::binary_search(used.begin(), used.end(), gap))
+            gap++;
+        return gap++;
+    };
     for (size_t first = 0; first < order.size();)
     {
         size_t last = first + 1;
@@ -397,7 +415,7 @@ int Island::UniqueObjectIds()
             int other = order[j];
             if (forest(keeper))
                 std::swap(keeper, other);
-            objects[other].id = next++;
+            objects[other].id = newId();
             changed++;
         }
         first = last;
