@@ -272,6 +272,16 @@ pub(crate) fn global_overlay_parameters(slot: u32, flags: u32, ordered: f32, bla
     [f32::from_bits(slot),black,white,1.0]
 }
 
+// RFG-118: Enfusion's GlobalMCRMap in production (any section, encoded colour). `mode` is
+// WgrModelMaterial::global_overlay_mode: bit 0 on, bit 1 Multiply, bit 2 UV set 2. Slot zero is
+// the white fallback and never becomes an admitted blend.
+pub(crate) fn global_mcr_parameters(slot: u32, mode: u32, black: f32, white: f32) -> [f32;4] {
+    if slot == 0 || mode & 1 == 0 || !black.is_finite() || !white.is_finite() ||
+        !(0.0..=16.0).contains(&black) || !(0.0..=16.0).contains(&white) { return [0.0;4]; }
+    let code = 3.0 + if mode & 2 != 0 { 1.0 } else { 0.0 } + if mode & 4 != 0 { 2.0 } else { 0.0 };
+    [f32::from_bits(slot),black,white,code]
+}
+
 // A permissive plane that never culls anything: dot(0, p) + BIG >= -radius always holds.
 // Used for the far plane (radial distance is culled by objects_z2 instead of a flat far
 // plane, which would clip peripheral content early — see the frustum-cull hazard note).

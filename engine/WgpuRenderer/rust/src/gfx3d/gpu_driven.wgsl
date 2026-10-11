@@ -194,6 +194,18 @@ fn tint_albedo(c: vec3<f32>, k: vec3<f32>) -> vec3<f32> {
     return c * k;
 }
 
+// RFG-118: GlobalMCRMode. Overlay: the map's dark half darkens with OverlayBlackPower and its
+// light half lightens with OverlayWhitePower (0.5 neutral) -- the same blend the linear preview
+// (native_pbr_global_overlay) uses, here on encoded colour. Multiply: a straight product.
+fn global_mcr_apply(base: vec3<f32>, mcr: vec3<f32>, powers: vec2<f32>, multiply: bool) -> vec3<f32> {
+    if (multiply) { return base * mcr; }
+    let strength = select(vec3<f32>(powers.y), vec3<f32>(powers.x), mcr < vec3<f32>(0.5));
+    let q = clamp(vec3<f32>(0.5) + (mcr - vec3<f32>(0.5)) * strength, vec3<f32>(0.0), vec3<f32>(1.0));
+    let low = 2.0 * base * q;
+    let high = vec3<f32>(1.0) - 2.0 * (vec3<f32>(1.0) - base) * (vec3<f32>(1.0) - q);
+    return select(low, high, q > vec3<f32>(0.5));
+}
+
 #ifdef NATIVE_PBR_PREVIEW
 const SECTION_NATIVE_PBR_SRGB: u32 = 256u;
 const SECTION_NATIVE_PBR_NORMALS: u32 = 512u;
@@ -1178,9 +1190,27 @@ fn fs_gpu_body(in: VsOut
 #endif
         base = vec4<f32>(base.rgb * layer_base_weight + blended, base.a);
     }
+    // RFG-118: Enfusion's GlobalMCRMap in production (global_overlay.w = 3 + multiply + 2*uv1).
+    // The object's own baked colour detail over the composed layers -- without it a granite
+    // rock is only its tiled grey layers. Encoded space, where the layers were mixed.
+    if (sm.global_overlay.w > 2.5) {
+        let code = u32(sm.global_overlay.w - 3.0 + 0.5);
+        let mcr_uv = select(in.uv, in.uv1, (code & 2u) != 0u);
+        let mcr = textureSampleBias(textures[bitcast<u32>(sm.global_overlay.x)], samplers[sm.sampler_idx], mcr_uv,
+                                    frame.renscale.x).rgb;
+        var encoded = base.rgb;
+#ifdef NATIVE_PBR_PREVIEW
+        if (bcr_linear) { encoded = native_pbr_encode_albedo(base.rgb); }
+#endif
+        var applied = global_mcr_apply(encoded, mcr, sm.global_overlay.yz, (code & 1u) != 0u);
+#ifdef NATIVE_PBR_PREVIEW
+        if (bcr_linear) { applied = srgb_to_linear(applied); }
+#endif
+        base = vec4<f32>(applied, base.a);
+    }
 #ifdef NATIVE_PBR_PREVIEW
 #ifdef NATIVE_PBR_GLOBAL_OVERLAY
-    if (bcr_linear && sm.global_overlay.w > 0.5 && sm.native_pbr_scales.w > 1.5) {
+    if (bcr_linear && sm.global_overlay.w > 0.5 && sm.global_overlay.w < 1.5 && sm.native_pbr_scales.w > 1.5) {
         let overlay_slot = bitcast<u32>(sm.global_overlay.x);
         let overlay = textureSampleBias(textures[overlay_slot], samplers[sm.sampler_idx], in.uv1, frame.renscale.x);
         let composed = native_pbr_global_overlay(vec4<f32>(base.rgb, pbr_roughness), overlay, sm.global_overlay.yz);

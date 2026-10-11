@@ -688,6 +688,49 @@ inline EmatGlobalOverlayParameters ReadNativePbrGlobalOverlay(const EmatMaterial
     return result;
 }
 
+// RFG-118: the production GlobalMCRMap contract. Unlike ReadNativePbrGlobalOverlay (the linear
+// preview, which refuses any unstated key) this takes Enfusion's own defaults for what the
+// material leaves out -- read off Workbench's Material Editor, where an unstated property shows
+// its default in plain type: Overlay, black power 1, white power 1, UV set 1. Of the 2,031
+// corpus materials naming a GlobalMCRMap, 1,385 state no black power, 1,231 no white power and
+// 277 no UV source; the preview admitted none of the granite rocks for that reason.
+inline EmatGlobalMcr ReadEmatGlobalMcr(const EmatMaterial& emat)
+{
+    EmatGlobalMcr result;
+    const std::string path = emat.TextureOf("GlobalMCRMap");
+    if (path.empty())
+        return result;
+    result.texture = RvTextureRef::Parse(path);
+    if (result.texture.isProcedural)
+        return result;
+    if (emat.Has("GlobalMCRMode"))
+    {
+        const std::string mode = emat.WordOf("GlobalMCRMode");
+        if (EmatMaterial::NameMatches(mode, "Multiply"))
+            result.multiply = true;
+        else if (!EmatMaterial::NameMatches(mode, "Overlay"))
+            return result; // a mode this renderer does not know: draw without it
+    }
+    if (emat.Has("UVSrcGlobalMaps"))
+    {
+        const std::string uv = emat.WordOf("UVSrcGlobalMaps");
+        if (EmatMaterial::NameMatches(uv, "UV set 2"))
+            result.uv1 = true;
+        else if (!EmatMaterial::NameMatches(uv, "UV set 1"))
+            return result;
+    }
+    const auto power = [&](const char* key, float& value)
+    {
+        if (!emat.Has(key))
+            return true;
+        return emat.FloatOf(key, value) && std::isfinite(value) && value >= 0.0f && value <= 16.0f;
+    };
+    if (!power("OverlayBlackPower", result.blackPower) || !power("OverlayWhitePower", result.whitePower))
+        return result;
+    result.present = true;
+    return result;
+}
+
 // Translates an `.emat` into the engine's material form. `family` is carried through from
 // the rvmat that pointed here.
 inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::string& origin, const std::string& family)
@@ -789,6 +832,7 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         AddEmatSlot(out, emat, "NMO_4", MaterialSlot::LayerNormal3);
     }
     AddEmatSlot(out, emat, "EnvironmentMap", MaterialSlot::Environment);
+    out.globalMcr = ReadEmatGlobalMcr(emat);
 
     // Record authored PBR facts without silently converting them to legacy
     // Blinn-Phong constants. The first condition is deliberately strict:

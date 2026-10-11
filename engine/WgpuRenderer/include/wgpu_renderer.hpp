@@ -35,7 +35,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 25u // Append-only optional linear global overlay
+#define WGR_ABI_VERSION 26u // Append-only GlobalMCR production mode
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -536,6 +536,11 @@ struct WgrModelMaterial
     WgrTexture global_overlay_texture_id{};
     float global_overlay_black{};
     float global_overlay_white{};
+    /* RFG-118: 0 = the linear preview contract; bit 0 = Enfusion GlobalMCRMap in production
+     * (encoded colour), bit 1 = GlobalMCRMode Multiply (else Overlay), bit 2 = UVSrcGlobalMaps
+     * "UV set 2" (else the first set, Enfusion's default). */
+    uint32_t global_overlay_mode{};
+    uint32_t global_overlay_pad{};
 };
 
 /* One drawable LOD level: its FindSqrtLevel resolution threshold (_resolutions[i]) +
@@ -608,7 +613,8 @@ struct WgrInstance
  * inherit it. These reserved lanes preserve the public struct layout. */
 
 static_assert(sizeof(WgrModelSection) == 24, "WgrModelSection must match Rust");
-static_assert(sizeof(WgrModelMaterial) == 456, "WgrModelMaterial must match Rust");
+static_assert(sizeof(WgrModelMaterial) == 464, "WgrModelMaterial must match Rust");
+static_assert(offsetof(WgrModelMaterial, global_overlay_mode) == 456, "Append-only GlobalMCR mode");
 static_assert(offsetof(WgrModelMaterial, layer_mask_texture_id) == 336, "Append-only mask handles");
 static_assert(offsetof(WgrModelMaterial, layer_mask_params) == 360, "Append-only mask parameters");
 static_assert(offsetof(WgrModelMaterial, global_normal_uv) == 408, "Append-only global normal UV");

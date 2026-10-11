@@ -9571,9 +9571,16 @@ impl Gfx3d {
                         srgb_bcr_slots = [0; 4];
                     }
                 } else { flags &= !NATIVE_PBR_SRGB; }
-                let global_overlay = cull::global_overlay_parameters(
-                    textures.texture_slot(m.global_overlay_texture_id), flags,
-                    m.native_pbr_scales[3], m.global_overlay_black, m.global_overlay_white);
+                // RFG-118: a production GlobalMCR (mode bit 0) rides the same lane with w = 3 +
+                // (multiply 1, uv1 2); the linear preview keeps w = 1.
+                let global_overlay = if m.global_overlay_mode & 1 != 0 {
+                    cull::global_mcr_parameters(textures.texture_slot(m.global_overlay_texture_id),
+                        m.global_overlay_mode, m.global_overlay_black, m.global_overlay_white)
+                } else {
+                    cull::global_overlay_parameters(
+                        textures.texture_slot(m.global_overlay_texture_id), flags,
+                        m.native_pbr_scales[3], m.global_overlay_black, m.global_overlay_white)
+                };
                 if m.global_overlay_texture_id != 0 {
                     global_overlay_admission.0 += 1;
                     if global_overlay[3] > 0.5 { global_overlay_admission.1 += 1; }
@@ -12627,7 +12634,7 @@ fn multi_layer_normals_keep_every_layout_in_step() {
     // Mirrors the C++ static_assert in include/wgpu_renderer.hpp.
     assert_eq!(
         std::mem::size_of::<WgrModelMaterial>(),
-        456,
+        464,
         "WgrModelMaterial includes native PBR scales; wgpu_renderer.hpp must agree"
     );
     assert_eq!(

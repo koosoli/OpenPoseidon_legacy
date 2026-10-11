@@ -1442,6 +1442,28 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
                          placement.position[2], placement.angles[0], placement.angles[1], placement.angles[2],
                          placement.scale, placement.hasFlags ? 1 : 0);
             }
+            // POSEIDON_PLACEMENT_REGION="x:z:radius": every placement within radius metres of
+            // (x, z) (first 300), with its mesh and prefab class -- "what is standing at this
+            // reported pose" without guessing a substring first.
+            static const char* region = std::getenv("POSEIDON_PLACEMENT_REGION");
+            static float regionX = 0.0f, regionZ = 0.0f, regionR = -1.0f;
+            static int regionRows = 0;
+            if (region && *region && regionR < 0.0f &&
+                std::sscanf(region, "%f:%f:%f", &regionX, &regionZ, &regionR) != 3)
+                regionR = 0.0f;
+            if (regionR > 0.0f && regionRows < 300)
+            {
+                const float dx = placement.position[0] - regionX, dz = placement.position[2] - regionZ;
+                if (dx * dx + dz * dz <= regionR * regionR)
+                {
+                    ++regionRows;
+                    LOG_INFO(World, "Placement region: '{}' class='{}' pos=[{:.2f} {:.2f} {:.2f}] angles=[{:.1f} {:.1f} "
+                                    "{:.1f}] scale={:.2f} flags={}",
+                             cached->second, placement.className, placement.position[0], placement.position[1],
+                             placement.position[2], placement.angles[0], placement.angles[1], placement.angles[2],
+                             placement.scale, placement.hasFlags ? 1 : 0);
+                }
+            }
         }
         item.scale = (std::isfinite(placement.scale) && placement.scale > 0.0f) ? placement.scale : 1.0f;
         // The Y rule, measured over Everon's 1.23 M placements: with a Flags block

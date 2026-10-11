@@ -66,6 +66,34 @@ TEST_CASE("Global overlay metadata round trips and declines unsupported inputs",
     REQUIRE_FALSE(ReadNativePbrGlobalOverlay(ParseEmat("MatPBRMulti {\n UVSrcGlobalMaps \"UV set 2\"\n OverlayBlackPower 1\n OverlayWhitePower 1\n GlobalMCRMap \"Assets/Owned_BCR.edds\"\n}\n")).supported);
 }
 
+TEST_CASE("Production GlobalMCR takes Enfusion's defaults for unstated keys",
+          "[asset][material][emat][global-mcr]")
+{
+    using namespace Poseidon::Asset::Material;
+    // GraniteRock_01: white power stated, everything else left to the defaults Workbench shows.
+    const auto rock = ReadEmatGlobalMcr(ParseEmat(
+        "MatPBRMulti {\n GlobalMCRMap \"{7A33F9D2284BC947}Assets/Rocks/Granite/Data/GraniteRock_01_MCR.edds\"\n"
+        " OverlayWhitePower 0.1\n}\n"));
+    REQUIRE(rock.present);
+    REQUIRE(rock.blackPower == 1.0f);
+    REQUIRE(rock.whitePower == 0.1f);
+    REQUIRE_FALSE(rock.multiply);
+    REQUIRE_FALSE(rock.uv1);
+    const auto bare = ParseEmat("MatPBRMulti {\n GlobalMCRMap \"{0000000000000001}Assets/A_MCR.edds\"\n}\n");
+    REQUIRE(ReadEmatGlobalMcr(bare).present);
+    REQUIRE(TranslateEmat(bare, "a.emat", "").globalMcr.present);
+    const auto building = ReadEmatGlobalMcr(ParseEmat(
+        "MatPBRMulti {\n GlobalMCRMap \"{0000000000000001}Assets/B_MCR.edds\"\n GlobalMCRMode Multiply\n UVSrcGlobalMaps \"UV set 2\"\n}\n"));
+    REQUIRE(building.present);
+    REQUIRE(building.multiply);
+    REQUIRE(building.uv1);
+    REQUIRE_FALSE(ReadEmatGlobalMcr(ParseEmat("MatPBRMulti {\n BCRMap \"{0000000000000001}Assets/C_BCR.edds\"\n}\n")).present);
+    REQUIRE_FALSE(ReadEmatGlobalMcr(ParseEmat(
+        "MatPBRMulti {\n GlobalMCRMap \"{0000000000000001}Assets/D_MCR.edds\"\n GlobalMCRMode Screen\n}\n")).present);
+    REQUIRE_FALSE(ReadEmatGlobalMcr(ParseEmat(
+        "MatPBRMulti {\n GlobalMCRMap \"{0000000000000001}Assets/E_MCR.edds\"\n OverlayBlackPower 17\n}\n")).present);
+}
+
 TEST_CASE("Ordered normal parameters keep global UV separate and reject unsupported inputs",
           "[asset][material][emat][arf][normal-preview]")
 {

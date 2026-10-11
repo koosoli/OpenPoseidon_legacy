@@ -359,6 +359,11 @@ pub struct WgrModelMaterial {
     pub global_overlay_texture_id: u64,
     pub global_overlay_black: f32,
     pub global_overlay_white: f32,
+    // RFG-118: 0 = the linear preview contract above; bit 0 = Enfusion GlobalMCRMap in
+    // production (encoded colour), bit 1 = GlobalMCRMode Multiply (else Overlay),
+    // bit 2 = UVSrcGlobalMaps "UV set 2" (else the first set, Enfusion's default).
+    pub global_overlay_mode: u32,
+    pub global_overlay_pad: u32,
 }
 
 // One drawable LOD level of a model: its FindSqrtLevel resolution threshold (`_resolutions[i]`)
@@ -1741,7 +1746,8 @@ const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 68);
 const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 288);
 const _: () = assert!(std::mem::size_of::<WgrLight>() == 64);
 const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);
-const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 456);
+const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 464);
+const _: () = assert!(std::mem::offset_of!(WgrModelMaterial, global_overlay_mode) == 456);
 const _: () = assert!(std::mem::offset_of!(WgrModelMaterial, global_normal_uv) == 408);
 const _: () = assert!(std::mem::offset_of!(WgrModelMaterial, detail_normal_strength) == 424);
 const _: () = assert!(std::mem::offset_of!(WgrModelMaterial, global_overlay_texture_id) == 440);
@@ -1922,9 +1928,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(25)
+            .unwrap_or(26)
     } else {
-        25
+        26
     }
 }
 
@@ -2301,12 +2307,12 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 25); // Append-only linear global overlay
+        assert_eq!(super::wgr_abi_version(), 26); // Append-only GlobalMCR production mode
     }
 
     #[test]
     fn pre_global_overlay_material_pair_is_refused() {
-        assert_eq!(std::mem::size_of::<super::WgrModelMaterial>(),456);
+        assert_eq!(std::mem::size_of::<super::WgrModelMaterial>(),464);
         let mut check=good_check();check.abi_version=24;
         assert_eq!(unsafe {super::wgr_abi_validate(&check)},0);
     }

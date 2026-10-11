@@ -6,6 +6,7 @@
 #include <Poseidon/Graphics/Textures/PixelFormat.hpp>
 #include <Poseidon/Graphics/Textures/ImageContainer.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
+#include <Poseidon/Graphics/Shared/PNGWriter.hpp>
 #include <Poseidon/Asset/Probes/AssetInfo.hpp>
 #include <Poseidon/Asset/Probes/AssetPreview.hpp>
 #include <iostream>
@@ -488,8 +489,10 @@ static void setupImageEddsCensus(CLI::App& image)
     auto* cmd = image.add_subcommand("edds", "Decode .edds textures and report container closure");
     static std::string inputPath;
     static bool listFailures = false;
+    static std::string pngOut;
     cmd->add_option("input", inputPath, "An .edds file, or a directory to walk")->required()->check(CLI::ExistingPath);
     cmd->add_flag("--failures", listFailures, "Print every failure rather than the first ten");
+    cmd->add_option("--png", pngOut, "Single file only: also write level 0 as an RGBA PNG here");
 
     cmd->callback(
         []()
@@ -592,6 +595,13 @@ static void setupImageEddsCensus(CLI::App& image)
                                           << std::fixed << std::setprecision(1) << mean << " sd "
                                           << std::sqrt(var > 0.0 ? var : 0.0) << std::defaultfloat << "\n";
                             }
+                            if (!pngOut.empty())
+                                std::cout << "PNG: "
+                                          << (Poseidon::PNGWriter::WritePNG(pngOut.c_str(), image.mipmaps[0].width,
+                                                                            image.mipmaps[0].height, 4, rgba.data())
+                                                  ? pngOut
+                                                  : std::string("write failed"))
+                                          << "\n";
                         }
                     }
                 }

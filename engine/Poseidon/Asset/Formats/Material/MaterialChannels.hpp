@@ -215,6 +215,20 @@ struct EmatGlobalOverlayParameters
     float whitePower = 0.0f;
 };
 
+// RFG-118: Enfusion's `GlobalMCRMap` in production -- the object's own baked colour detail
+// (a rock's lichen and cracks, a wall's grime), blended over the composed MatPBRMulti layers.
+// Defaults are what Workbench's Material Editor shows for an unstated key (2026-10-11):
+// GlobalMCRMode Overlay, OverlayBlackPower 1, OverlayWhitePower 1, UVSrcGlobalMaps "UV set 1".
+struct EmatGlobalMcr
+{
+    bool present = false;
+    RvTextureRef texture;
+    float blackPower = 1.0f;
+    float whitePower = 1.0f;
+    bool multiply = false; // GlobalMCRMode Multiply (16 of 2,031 corpus materials)
+    bool uv1 = false;      // UVSrcGlobalMaps "UV set 2"
+};
+
 struct EmatPbrProvenance
 {
     // Index 0 is BCRMap (or BCR_1); indices 1..3 are BCR_2..4.
@@ -285,6 +299,8 @@ struct TranslatedMaterial
     // double-sided (wire mesh, glass panes). False for every material that
     // names no Cull key, and all legacy.
     bool                 doubleSided = false;
+    // RFG-118: the GlobalMCRMap overlay; `present` false for every material that names none.
+    EmatGlobalMcr        globalMcr;
     // Default-null diagnostic. No per-material provenance allocation in normal
     // gameplay and no GPU field or shading effect.
     std::shared_ptr<const EmatPbrProvenance> ematPbr;

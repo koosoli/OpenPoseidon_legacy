@@ -15920,6 +15920,41 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadC
                                  path, sourceSupported, s->HasUV1(), admitted);
                 }
             }
+            // RFG-118: Enfusion's GlobalMCRMap in production. 2,031 Reforger materials carry one --
+            // every granite rock, most building shells -- and none of it was drawn: a rock showed
+            // only its 20x-tiled grey detail layers, flat at any distance ("the rocks are still
+            // untextured"). Overlay (or Multiply) of the object's own baked colour onto the
+            // composed layers, in the same encoded space the layers are mixed in (gpu_driven.wgsl
+            // global_mcr_apply). WGR_REFORGER_GLOBAL_MCR=0 turns it off.
+            static const bool globalMcrOn = [] {
+                const char* value = std::getenv("WGR_REFORGER_GLOBAL_MCR");
+                return !(value && value[0] == '0');
+            }();
+            if (globalMcrOn && mat.global_overlay_texture_id == 0)
+            {
+                const auto& sourceSection = s->GetSection(i);
+                const char* path = sourceSection.surfMat ? sourceSection.surfMat->GetName().Data() : nullptr;
+                const auto found = path ? _materialBindings.find(path) : _materialBindings.end();
+                if (found != _materialBindings.end() && found->second.globalMcr.present)
+                {
+                    const auto& mcr = found->second.globalMcr;
+                    // A mask on the second set is only meaningful when the shape carries one;
+                    // MeshBuild copies uv0 into uv1 otherwise, which would smear the bake.
+                    if (!mcr.uv1 || s->HasUV1())
+                    {
+                        Ref<Texture> texture = _wbank->Load(mcr.texture.path.canonical().c_str());
+                        auto* native = static_cast<TextureWgpu*>(texture.GetRef());
+                        const uint64_t handle = native ? native->EnsureUploaded() : 0;
+                        if (handle != 0)
+                        {
+                            mat.global_overlay_texture_id = handle;
+                            mat.global_overlay_black = mcr.blackPower;
+                            mat.global_overlay_white = mcr.whitePower;
+                            mat.global_overlay_mode = 1u | (mcr.multiply ? 2u : 0u) | (mcr.uv1 ? 4u : 0u);
+                        }
+                    }
+                }
+            }
             // Multi's mask lives on the second UV set in the BI corpora (TexGen uvSource
             // "tex1") and in Reforger's (`UVSrcGlobalMaps "UV set 2"`, RFG-072); the shader
             // samples it with uv1 when told so -- and ONLY when the shape carries a second
