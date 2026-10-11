@@ -7,7 +7,7 @@
 // Shares group(0) (the camera UBO + cascade shadow map) with the lit 3D
 // pipeline via the frame module, so terrain receives the same CSM shadows and
 // sun lighting.
-#import frame::{frame, reverse_z, fog_factor, apply_fog_terrain, fog_sun_reach, sky_irradiance, sky_vis_ao, canopy_sky_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_rain_coverage, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
+#import frame::{frame, reverse_z, fog_factor, apply_fog_terrain, fog_sun_reach, sky_irradiance, sky_vis_ao, canopy_sky_ao, canopy_sun_shadow, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_rain_coverage, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
 #import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
 #import frame::ground_sky_reflection
 #import frame::wet_soil_debug_mode
@@ -1396,7 +1396,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // (world_y was sampled once above for the snow cover; reused here.)
     let lit = smoothstep(sm.r - sm.g, sm.r + sm.g + 1e-3, world_y);
     let terrain_s = clamp(sm.b * (1.0 - lit), 0.0, 1.0) * in.fog;
-    let shadow = max(csm_s, terrain_s);
+    let shadow = max(max(csm_s, terrain_s), canopy_sun_shadow(vec3<f32>(in.world_xz.x, world_y, in.world_xz.y)));
 
     // Coast wet band: near-flat terrain around the (swash-moved) sea level reads as damp sand —
     // darker albedo — strongest at the waterline, fading out over wet_height metres. Keyed on

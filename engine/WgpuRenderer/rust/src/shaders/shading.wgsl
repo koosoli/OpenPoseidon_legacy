@@ -8,7 +8,7 @@
 
 #define_import_path shading
 
-#import frame::{frame, gi_irradiance, terrain_sun_shadow, apply_fog_receiver, fog_sun_reach, cloud_sun_shadow, sky_irradiance, sky_vis_ao, canopy_sky_ao, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, sky_specular_split, spec_power_to_gloss}
+#import frame::{frame, gi_irradiance, terrain_sun_shadow, apply_fog_receiver, fog_sun_reach, cloud_sun_shadow, sky_irradiance, sky_vis_ao, canopy_sky_ao, canopy_sun_shadow, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, sky_specular_split, spec_power_to_gloss}
 #import shadow::shadow_strength
 #import lighting::lights_material_contrib
 #import color::srgb_to_linear
@@ -356,7 +356,7 @@ fn shade(
     let cave = cave_daylight2(cave_pos);
     let underground_s = 1.0 - cave.x; // direct sun: only through an opening's footprint
     let underground_amb_s = 1.0 - cave.y; // sky / bounce: fades with the reach from an opening
-    let terrain_s = max(terrain_sun_shadow(world_abs.xz, world_abs.y), underground_s);
+    let terrain_s = max(max(terrain_sun_shadow(world_abs.xz, world_abs.y), underground_s), canopy_sun_shadow(world_abs));
     let sun_occ = select(terrain_s, max(terrain_s, csm_s), sky_lit);
     // CLD-020: cloud transmittance MULTIPLIES the remaining direct sun rather than joining the
     // max() above. The others are binary occluders answering "is something between me and the

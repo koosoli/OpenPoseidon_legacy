@@ -1,4 +1,4 @@
-#import frame::{frame, reverse_z, apply_fog, sky_irradiance, terrain_sun_shadow, sky_vis_ao, canopy_sky_ao, cloud_sun_shadow}
+#import frame::{frame, reverse_z, apply_fog, sky_irradiance, terrain_sun_shadow, sky_vis_ao, canopy_sky_ao, canopy_sun_shadow, cloud_sun_shadow}
 #import gbuffer::{oct_encode, a2c_coverage}
 #import shadow::shadow_strength
 
@@ -1805,7 +1805,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let light_dir = grass_light_dir();
     let ndl = max(dot(n, light_dir), 0.0);
     let wrap = max((dot(n, light_dir) + 0.35) / 1.35, 0.0);
-    let terrain_shadow = terrain_sun_shadow(world.xz, world.y);
+    let terrain_shadow = max(terrain_sun_shadow(world.xz, world.y), canopy_sun_shadow(world));
     let cloud_lit = cloud_sun_shadow(world.xz);
     // Blade-on-blade: (sun occlusion, ambient AO). Identity at strength 0.
     // RFG-091: the blade-on-blade terms assume a bare procedural blade; the native atlas is
@@ -1888,7 +1888,7 @@ fn fs_grass_far(in: VsOut) -> @location(0) vec4<f32> {
     let n = normalize(mix(mix(in.normal, macro_normal, 0.42), vec3<f32>(0.0, 1.0, 0.0), 0.48));
     let light_dir = grass_light_dir();
     let diffuse = max((dot(n, light_dir) + 0.35) / 1.35, 0.0);
-    let terrain_shadow = terrain_sun_shadow(world.xz, world.y);
+    let terrain_shadow = max(terrain_sun_shadow(world.xz, world.y), canopy_sun_shadow(world));
     let cloud_lit = cloud_sun_shadow(world.xz);
     let direct = frame.sun_diffuse.rgb * diffuse * (1.0 - terrain_shadow) * cloud_lit;
     let ambient = sky_irradiance(n) * sky_vis_ao(world.xz);
@@ -2112,7 +2112,7 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     let light_dir = grass_light_dir();
     let ndl = max(dot(n, light_dir), 0.0);
     let wrap = max((dot(n, light_dir) + 0.35) / 1.35, 0.0);
-    let terrain_shadow = terrain_sun_shadow(world.xz, world.y);
+    let terrain_shadow = max(terrain_sun_shadow(world.xz, world.y), canopy_sun_shadow(world));
     // Grass shadowing grass. The cascade already contains these same cards
     // (draw_shadow submits the near and mid tuft rings), so this is a real
     // occlusion test, not a fake.

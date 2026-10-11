@@ -811,6 +811,34 @@ fn canopy_sky_ao(world_abs: vec3<f32>) -> f32 {
     return 1.0 - CANOPY_STRENGTH * occ;
 }
 
+// Canopy SUN shadow at a world-absolute point [0,1], 1 = fully shadowed. Marches up the sun ray
+// through the same canopy height field: if the canopy at the ray's footprint rises above the ray,
+// the point is under foliage that the sun must pass through. The cascades cannot resolve this past a
+// few hundred metres (a texel is wider than a crown there), which is why a distant forest otherwise
+// takes full sun on every trunk and lower bough. Partial (CANOPY_SUN_OPACITY): foliage transmits
+// some light, and the cascades still draw the sharp near shadow on top through the caller's max().
+const CANOPY_SUN_OPACITY: f32 = 0.8;
+fn canopy_sun_shadow(world_abs: vec3<f32>) -> f32 {
+    if (terrain_shadow_map.enabled < 0.5) {
+        return 0.0;
+    }
+    let l = -frame.sun_dir_world.xyz;
+    if (l.y < 0.05) {
+        return 0.0;
+    }
+    var shade = 0.0;
+    for (var k = 1; k <= 4; k++) {
+        let p = world_abs + l * (f32(k) * 3.0 / l.y);
+        let uv = (p.xz - terrain_shadow_map.origin) * terrain_shadow_map.inv_span;
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+            continue;
+        }
+        let c = textureSampleLevel(terrain_skyvis_mask, terrain_shadow_samp, uv, 0.0);
+        shade = max(shade, clamp(c.b, 0.0, 1.0) * smoothstep(0.0, 2.0, c.g - p.y));
+    }
+    return CANOPY_SUN_OPACITY * shade;
+}
+
 // Screen-space AO multiplier at this fragment [0,1], 1 = unoccluded. Returns 1 when the pass did
 // not run: the AO texture RETAINS its last contents when GTAO is disabled or skipped, so an
 // ungated read would shade the world with a frozen AO buffer — a failure that looks like a
