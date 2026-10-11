@@ -3581,6 +3581,21 @@ pub unsafe extern "C" fn wgr_grass_set_layer_size(renderer: *mut WgrRenderer, si
     }));
 }
 
+/// RFG-116: bit i = atlas layer i belongs to a surface naming no PlantMat (no near blades).
+///
+/// # Safety
+/// `renderer` must be null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_blade_skip(renderer: *mut WgrRenderer, mask: u32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        renderer.grass_set_blade_skip(mask);
+    }));
+}
+
 /// RFG-107: the native world's road segments per land cell, for the grass placement (layout in
 /// grass.wgsl, `road_edge_distance`); null or zero `count` clears them.
 ///

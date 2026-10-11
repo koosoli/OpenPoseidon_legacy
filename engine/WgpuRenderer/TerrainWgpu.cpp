@@ -105,7 +105,7 @@ double TerrainPageElapsedMs(TerrainPageClock::time_point start)
 //               for the surface that dominates the cell. NOTHING consumes it
 //               yet: it is what per-surface clutter VARIETY selects on, and it
 //               costs nothing to carry now that the mask is being decoded.
-//   bits 28-30  reserved, always 0.
+//   bits 28-30  run count, 1..7 atlas layers from `first` (0 = no run: global mix).
 //   bit  31     GrassTextureCell -- this cell can grow grass at all.
 // ---------------------------------------------------------------------------
 // Aliases: the values themselves live in TerrainWgpu.hpp so the Enfusion clutter
@@ -124,7 +124,8 @@ constexpr uint32_t GrassRunCountMask = GrassGeo::RunCountMask;
 // `first + hash*count` instead of walking a bitmask -- so the budget is the SUM
 // of the per-surface lists, not their distinct union: Stratis needs 28 slots
 // over 21 distinct classes, Takistan 25 over 10. 32 is also exactly what the
-// 5-bit `first` field can address, and 8 what the 3-bit `count` field can.
+// 5-bit `first` field can address, and 7 what the 3-bit `count` field can
+// (it said 8 until RFG-115: an 8-plant run packed to count 0, i.e. no run at all).
 //
 // 512 rather than 1024 square: this atlas feeds the MID ring only, the plates
 // are 54-89% empty so a cropped sub-image carries what a whole 1024 plate did,
@@ -1898,6 +1899,7 @@ bool TerrainWgpu::BuildClutterAtlas(const std::vector<std::pair<std::string, RSt
     std::vector<CardJob> jobs;
     std::vector<std::string> platePaths;
     std::unordered_map<std::string, size_t> plateIds;
+    _clutterBladeSkip = 0; // RFG-116: a native-world answer; Arma clutter keeps its blades
 
     for (const auto& [surfaceKey, character] : surfaces)
     {
@@ -1906,7 +1908,7 @@ bool TerrainWgpu::BuildClutterAtlas(const std::vector<std::pair<std::string, RSt
             continue;
         }
         std::vector<TerrainSurfaceCatalog::Clutter> classes = _surfaceCatalog.ClutterFor(character.Data());
-        // Highest probability first, so a run truncated by the 8-layer cap keeps
+        // Highest probability first, so a run truncated by the run cap keeps
         // the plants that actually cover the ground.
         std::stable_sort(classes.begin(), classes.end(),
                          [](const TerrainSurfaceCatalog::Clutter& a, const TerrainSurfaceCatalog::Clutter& b)
@@ -3143,6 +3145,7 @@ void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
             }
             wgr_grass_set_layer_size(_renderer, sizes, spreads, 32);
         }
+        wgr_grass_set_blade_skip(_renderer, _clutterBladeSkip);
         _grassTuftWorld = worldKey;
         LOG_INFO(Graphics, "Wgpu grass: uploaded the map's clutter atlas ({} of {} layers used, {}x{}, {:.1f} MB)",
                  _clutterAtlasLayers, GrassAtlasLayers, GrassAtlasSize, GrassAtlasSize,
@@ -3225,6 +3228,7 @@ void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
         wgr_grass_set_tufts(_renderer, TargetSize, TargetSize, MaxPhotoGrassFamilies + 1u, layers.data());
         wgr_grass_set_layer_pick(_renderer, nullptr, nullptr, 0);
         wgr_grass_set_layer_size(_renderer, nullptr, nullptr, 0);
+        wgr_grass_set_blade_skip(_renderer, 0);
         _grassTuftWorld = worldKey;
         LOG_INFO(Graphics, "Wgpu grass: {} photographed clump families discovered ({} atlas layers)", named,
                  MaxPhotoGrassFamilies + 1u);

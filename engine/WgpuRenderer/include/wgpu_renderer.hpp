@@ -2870,6 +2870,9 @@ extern "C"
      * as a fraction of it; count <= 32, null resets. */
     WGR_API void wgr_grass_set_layer_size(WgrRenderer* renderer, const float* sizes, const float* spreads,
                                           uint32_t count);
+    /* RFG-116: bit i = atlas layer i belongs to a surface whose .emat names no PlantMat, so the
+       near ring grows no blades on cells whose run starts there. 0 = blades everywhere. */
+    WGR_API void wgr_grass_set_blade_skip(WgrRenderer* renderer, uint32_t mask);
     WGR_API void wgr_grass_set_geography(WgrRenderer* renderer, uint32_t width, uint32_t height,
                                          const uint32_t* geography);
     WGR_API void wgr_grass_set_params(WgrRenderer* renderer, const WgrGrassParams* params);

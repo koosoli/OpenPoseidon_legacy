@@ -382,6 +382,9 @@ struct GrassParams {
     blade_layer_means: [f32; 32],
     // Per card layer: weight, max-distance fraction, 0, 0 (grass.wgsl layer_pick).
     layer_pick: [f32; 128],
+    // RFG-116: .x = bit per atlas layer whose run belongs to a surface that names no PlantMat,
+    // so the near ring grows no blades there (Reforger's forest/dirt floors); .yzw spare.
+    blade_skip: [u32; 4],
 }
 
 /// Neutral card-layer pick: uniform weights (0 = "the map gave none") and no distance limit.
@@ -853,6 +856,7 @@ impl Grass {
             wind_flutter: [0.0, 0.0, 1.0, 0.0],
             blade_layer_means: [0.0; 32],
             layer_pick: default_layer_pick(),
+            blade_skip: [0; 4],
         };
         queue.write_buffer(&grass_params, 0, bytemuck::bytes_of(&params));
 
@@ -1964,6 +1968,14 @@ impl Grass {
                            bytemuck::cast_slice(&self.layer_pick));
     }
 
+    /// RFG-116: bit i set = atlas layer i belongs to a surface whose `.emat` names no PlantMat,
+    /// so the near ring places no blade on a cell whose run starts there. 0 = blades everywhere.
+    pub fn set_blade_skip(&mut self, queue: &wgpu::Queue, mask: u32) {
+        self.last_params.blade_skip = [mask, 0, 0, 0];
+        queue.write_buffer(&self.grass_params, std::mem::offset_of!(GrassParams, blade_skip) as u64,
+                           bytemuck::cast_slice(&self.last_params.blade_skip));
+    }
+
     pub fn set_geography(
         &mut self,
         device: &wgpu::Device,
@@ -2338,6 +2350,7 @@ impl Grass {
             wind_flutter: self.last_params.wind_flutter,
             blade_layer_means: self.last_params.blade_layer_means,
             layer_pick: self.layer_pick,
+            blade_skip: self.last_params.blade_skip,
         };
         self.near_grid_dim = near_grid_dim;
         self.mid_grid_dim = mid_grid_dim;

@@ -43,7 +43,13 @@ constexpr uint32_t SurfaceMask = 0x0f800000u;
 constexpr uint32_t RunCountShift = 28u;
 constexpr uint32_t RunCountMask = 0x70000000u;
 constexpr uint32_t AtlasLayers = 32;
-constexpr uint32_t AtlasMaxRun = 8;
+// RFG-115: the count field is 3 bits, so a run holds at most 7. This was 8, and an
+// 8-plant run packed as (8 << 28) & RunCountMask == 0 -- which the shader reads as
+// "no run of its own" and answers with the GLOBAL mix (layers 0..8). Everon's two
+// conifer floors are 8-plant surfaces: they grew Grass_03's meadow cards instead of
+// needles, ferns and bilberry, and the forest floor looked like a sunlit meadow.
+constexpr uint32_t AtlasMaxRun = 7;
+static_assert(AtlasMaxRun <= (RunCountMask >> RunCountShift), "a run must fit the count field");
 constexpr int AtlasSize = 512;
 constexpr uint32_t BakedMask = TextureCell | AuthoredCell | CoverageMask | SurfaceMask | RunCountMask;
 } // namespace GrassGeo
@@ -420,6 +426,8 @@ class TerrainWgpu : public ITerrainRenderer
     //! {mean, half spread / mean}. Sent with wgr_grass_set_layer_size.
     float _clutterLayerSize[32] = {};
     float _clutterLayerScale[32][2] = {};
+    //! RFG-116: bit per atlas layer whose surface names no PlantMat (wgr_grass_set_blade_skip).
+    uint32_t _clutterBladeSkip = 0;
 
     // Terrain params UBO mirror. The static fields (grid/dims/range) are set at upload; the
     // coast wet-band fields (sea_level/time/swash/wet_*) are refreshed and pushed every frame.

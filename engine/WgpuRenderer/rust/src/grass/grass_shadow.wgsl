@@ -48,6 +48,8 @@ struct GrassParams {
     // uniform), y = max draw distance as a fraction of the card ring's reach. Renderer-owned,
     // set by wgr_grass_set_layer_pick from the map's own clutter definitions.
     layer_pick: array<vec4<f32>, 32>,
+    // RFG-116: .x = atlas layers whose surface names no PlantMat (no near blades).
+    blade_skip: vec4<u32>,
 };
 // Must mirror grass.wgsl's 32-byte layout exactly: both shaders bind the same
 // instance buffer through the shared `data_layout`.

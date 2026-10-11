@@ -134,6 +134,9 @@ struct GrassParams {
     // uniform), y = max draw distance as a fraction of the card ring's reach. Renderer-owned,
     // set by wgr_grass_set_layer_pick from the map's own clutter definitions.
     layer_pick: array<vec4<f32>, 32>,
+    // RFG-116: .x = bit per atlas layer whose run belongs to a surface naming no PlantMat;
+    // the near ring places no blade on a cell whose run starts there. .yzw spare.
+    blade_skip: vec4<u32>,
 };
 
 // 32 bytes. `pos_seed` stays f32 for world precision; everything the compute
@@ -573,6 +576,12 @@ fn photo_layer_weight(index: u32) -> f32 {
 // and the vertex shader already reads `packed.w` for the species.
 fn instance_layer_run(packed_w: u32) -> vec2<u32> {
     return vec2<u32>((packed_w >> 3u) & 31u, (packed_w >> 8u) & 7u);
+}
+
+// RFG-116: the cell's run starts on a layer whose surface names no PlantMat.
+fn cell_skips_blades(geo: u32) -> bool {
+    if (grass.blade_skip.x == 0u || (geo & GEO_AUTHORED) == 0u || ((geo >> 28u) & 7u) == 0u) { return false; }
+    return ((grass.blade_skip.x >> ((geo & GEO_SURFACE_MASK) >> GEO_SURFACE_SHIFT)) & 1u) != 0u;
 }
 
 // The "Photo grass mix" slider (renderer.z): the fraction of world-space patches
@@ -1191,6 +1200,9 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (authored_thinned(cell_id, geo)) { return; }
     // Cards only: the card coverage (map's own where authored, else card_look.x).
     if (cards_on_near() && card_thinned(cell_id, geo)) { return; }
+    // RFG-116: blades only where the cell's surface names a PlantMat. A Reforger forest or dirt
+    // floor grows its clutter (needles, ferns, moss) on the card ring and no grass at all.
+    if (!cards_on_near() && cell_skips_blades(geo)) { return; }
     let y = sample_height(world_xz);
     if (in_terrain_hole(vec3<f32>(world_xz.x, y, world_xz.y))) { return; } // preserve ground above a bounded cave mouth
     if (y <= terrain.sea_level + 0.35) { return; }

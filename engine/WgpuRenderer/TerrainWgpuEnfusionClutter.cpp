@@ -1084,10 +1084,15 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
         {
             int surface = 0;
             float weight = 0.0f;
+            bool plantMat = false;
             std::unordered_set<std::string> models;
         };
         std::vector<Starved> starved;
         std::vector<std::unordered_set<std::string>> runModels(static_cast<size_t>(paletteSize));
+        // RFG-116: whether each surface's .emat names a PlantMat (Reforger's procedural blade
+        // layer). Only those grow blades; a forest or dirt floor grows its clutter and no grass.
+        std::vector<char> surfacePlantMat(static_cast<size_t>(paletteSize), 0);
+        _clutterBladeSkip = 0;
 
         // RFG-064: hand out atlas layers by how much GROUND a surface covers, not by its
         // index in the palette.
@@ -1127,6 +1132,10 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
             if (setPath == nullptr || setPath->empty())
                 continue; // a surface the map says grows nothing -- rock, seabed, asphalt
             ++surfacesWithSet;
+            {
+                const std::string* plantMat = material.Key("PlantMat");
+                surfacePlantMat[static_cast<size_t>(i)] = plantMat != nullptr && !plantMat->empty();
+            }
 
             std::vector<NativePlant> plants;
             std::unordered_set<std::string> seenSets;
@@ -1148,6 +1157,7 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
                 // after the cap was bare earth. Remember its plants; it borrows a run below.
                 Starved entry;
                 entry.surface = i;
+                entry.plantMat = surfacePlantMat[static_cast<size_t>(i)] != 0;
                 for (size_t k = 0; k < plants.size() && k < MaxPlantsPerSurface; ++k)
                 {
                     entry.weight += plants[k].occurrence * 0.01f * std::max(plants[k].density, 0.01f);
@@ -1226,6 +1236,9 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
             runs[static_cast<size_t>(i)].layerFirst = static_cast<uint8_t>(first);
             runs[static_cast<size_t>(i)].layerCount = static_cast<uint8_t>(count);
             runs[static_cast<size_t>(i)].weight = weight;
+            if (!surfacePlantMat[static_cast<size_t>(i)])
+                for (uint32_t k = first; k < first + count && k < 32u; ++k)
+                    _clutterBladeSkip |= 1u << k;
             maxWeight = std::max(maxWeight, weight);
             ++surfacesWithClutter;
             if (report.size() < 700)
@@ -1245,20 +1258,26 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
         {
             int best = -1;
             size_t bestOverlap = 0;
-            for (const int j : surfaceOrder)
-            {
-                const SurfaceRun& run = runs[static_cast<size_t>(j)];
-                if (run.layerCount == 0 || j == entry.surface)
-                    continue;
-                size_t overlap = 0;
-                for (const std::string& model : entry.models)
-                    overlap += runModels[static_cast<size_t>(j)].count(model);
-                if (best < 0 || overlap > bestOverlap)
+            // RFG-116: a run carries its owner's blade answer (the per-layer skip bit), so a
+            // meadow must not borrow a forest floor's run or it loses its grass, and vice versa.
+            // Same-kind runs first; any run only when no surface of the same kind grew one.
+            for (int pass = 0; pass < 2 && best < 0; ++pass)
+                for (const int j : surfaceOrder)
                 {
-                    best = j;
-                    bestOverlap = overlap;
+                    const SurfaceRun& run = runs[static_cast<size_t>(j)];
+                    if (run.layerCount == 0 || j == entry.surface)
+                        continue;
+                    if (pass == 0 && (surfacePlantMat[static_cast<size_t>(j)] != 0) != entry.plantMat)
+                        continue;
+                    size_t overlap = 0;
+                    for (const std::string& model : entry.models)
+                        overlap += runModels[static_cast<size_t>(j)].count(model);
+                    if (best < 0 || overlap > bestOverlap)
+                    {
+                        best = j;
+                        bestOverlap = overlap;
+                    }
                 }
-            }
             if (best < 0 || entry.weight <= 0.0f)
                 continue;
             SurfaceRun& run = runs[static_cast<size_t>(entry.surface)];
@@ -1272,15 +1291,25 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
                                "({} of {} plant models in common, weight {:.2f})",
                      entry.surface, land.GetEnfusionSurface(entry.surface), best, land.GetEnfusionSurface(best),
                      bestOverlap, entry.models.size(), entry.weight);
+            if ((surfacePlantMat[static_cast<size_t>(best)] != 0) != entry.plantMat)
+                LOG_WARN(Graphics, "Wgpu grass Enfusion clutter: surface {} borrows a run of the other blade kind "
+                                   "(PlantMat {} vs {}); its near blades follow the run's owner",
+                         entry.surface, entry.plantMat, surfacePlantMat[static_cast<size_t>(best)] != 0);
         }
+
+        // Opt-in: WGR_NATIVE_PLANTMAT_BLADES=1 grows blades only where the surface names a
+        // PlantMat, as Reforger's data says. Off by default: the owner compared the two on a conifer
+        // floor (2026-10-11) and preferred the grass, so the mask is computed and logged but unsent.
+        if (const char* env = std::getenv("WGR_NATIVE_PLANTMAT_BLADES"); env == nullptr || env[0] != '1')
+            _clutterBladeSkip = 0;
 
         LOG_INFO(
             Graphics,
             "Wgpu grass Enfusion clutter: {} of {} palette surfaces name a ClutterConfig, {} grew a run over {} of {} "
             "atlas layers ({} plants rasterised from their own model, {} had no colour+coverage pair, {} dropped at "
-            "the {}-per-surface / {}-layer caps) [{}]",
+            "the {}-per-surface / {}-layer caps; blade-free layers 0x{:08x}) [{}]",
             surfacesWithSet, paletteSize, surfacesWithClutter, layerCount, GrassGeo::AtlasLayers, plantsImpostor,
-            plantsMissingTexture, plantsDropped, MaxPlantsPerSurface, GrassGeo::AtlasLayers,
+            plantsMissingTexture, plantsDropped, MaxPlantsPerSurface, GrassGeo::AtlasLayers, _clutterBladeSkip,
             report.empty() ? "none" : report);
 
         if (surfacesWithClutter == 0 || layerCount <= 1 || maxWeight <= 0.0f)
