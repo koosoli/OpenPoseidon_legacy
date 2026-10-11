@@ -817,7 +817,7 @@ fn canopy_sky_ao(world_abs: vec3<f32>) -> f32 {
 // few hundred metres (a texel is wider than a crown there), which is why a distant forest otherwise
 // takes full sun on every trunk and lower bough. Partial (CANOPY_SUN_OPACITY): foliage transmits
 // some light, and the cascades still draw the sharp near shadow on top through the caller's max().
-const CANOPY_SUN_OPACITY: f32 = 0.8;
+const CANOPY_SUN_OPACITY: f32 = 0.7;
 fn canopy_sun_shadow(world_abs: vec3<f32>) -> f32 {
     if (terrain_shadow_map.enabled < 0.5) {
         return 0.0;
@@ -827,7 +827,9 @@ fn canopy_sun_shadow(world_abs: vec3<f32>) -> f32 {
         return 0.0;
     }
     var shade = 0.0;
-    for (var k = 1; k <= 4; k++) {
+    // From 6 m up the ray: a tree's OWN cell would otherwise shadow its whole crown below the top
+    // (self-shading is the crown AO's and n.l's job); the neighbours' canopy is what this adds.
+    for (var k = 2; k <= 5; k++) {
         let p = world_abs + l * (f32(k) * 3.0 / l.y);
         let uv = (p.xz - terrain_shadow_map.origin) * terrain_shadow_map.inv_span;
         if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
