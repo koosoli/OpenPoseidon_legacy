@@ -919,11 +919,6 @@ static GameValue A1Str(const GameState*, GameValuePar oper1)
     return GameValue(oper1.GetText());
 }
 
-static GameValue A1IgnoredBinary(const GameState*, GameValuePar, GameValuePar)
-{
-    return NOTHING;
-}
-
 static GameValue A1PreloadSound(const GameState*, GameValuePar)
 {
     return GameValue(true); // sounds load when played
