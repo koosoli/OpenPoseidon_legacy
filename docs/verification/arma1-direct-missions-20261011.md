@@ -76,6 +76,8 @@ mission booted and the runtime ran; "clean" = no script error until the test end
 |---|---|---|---|
 | 550a359 (baseline) | 17 | – | 114 |
 | 2241051 | 91 | 74 | 40 |
+| f498083 | 129 | 117 | 2 |
+| f11c945 (2026-10-12 00:43, stamped) | 130 | 122 | 1 |
 
 Fixed between the two: crashes in `Building`/`AILocker`/`OperField` (generated `A1x_`
 classes inherited scope 0 from abstract CWA bases, so the type was no `BuildingType`);
@@ -90,10 +92,15 @@ refusals), `init.sqf` scheduled like Arma 1 (comments, sleep), `switch/case/defa
 `moveInTurret`, `createUnit` on a group, `str`, `date`, multiplayer missions started alone
 play their first playable unit.
 
+Remaining on f11c945 and the commit that addresses each (built, not yet measured):
+s03dolores / fos_lament crash in `FileCache::Find` from a sound-preload worker (d8f2e36);
+RA_M03 `switch` with sleeping cases (1c66833); m13/m14 `while` with sleep/`exitWith` in
+scheduled code (26268f0, e104692); mp23 `parseText` (e104692); 03CAMP `enableAI` (1c66833).
+Strategic-map labels now render (c991c58); its mission icons draw as pictures (328230a).
+
 ## Known gaps (honest list)
 
-- Strategic-map texts (structured text controls) are empty; buttons work.
-- `09tsunami`: `[] spawn {waitUntil {preloadCamera ..}}` in init.sqs still reports a general
-  expression error (diagnostics added in 41e21a4 will name the operator).
+- `armory1.intro` needs the config script commands (`configFile >> ..`, `getText`, ...),
+  which are not implemented.
 - Missions needing third-party addons (`un-impossible_mission.cain`: `BBB006`) cannot run.
 - No fading for `ctrlSetFade` (shown/hidden on commit), no team switch, no aperture.
