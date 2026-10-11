@@ -1,5 +1,5 @@
 // Island Editor: a standalone editor for the islands (.wrp) of Cold War Assault /
-// Operation Flashpoint and Open Malprave.  Opens 4WVR, 3WVR and the binarized OPRW,
+// Operation Flashpoint (from Open Malprave, skinned for Open Poseidon).  Opens 4WVR, 3WVR and the binarized OPRW,
 // shapes the land, paints ground textures, moves and places objects, and saves 4WVR,
 // which those games load as it is.
 
@@ -169,7 +169,8 @@ float S(float v)
 }
 
 const float kLeftWidth = 264.0f, kRightWidth = 336.0f, kMargin = 10.0f, kStatusHeight = 30.0f;
-const ImVec4 kAccent(0.24f, 0.56f, 0.92f, 1.0f), kAccentHover(0.32f, 0.64f, 1.0f, 1.0f);
+// the highlight of the active tool and primary buttons: ImGui dark's own blue (its check marks and sliders)
+const ImVec4 kAccent(0.26f, 0.59f, 0.98f, 1.0f), kAccentHover(0.36f, 0.66f, 1.0f, 1.0f);
 
 // a remark in the dim colour, wrapped to the width there is
 void Hint(const char* text)
@@ -411,7 +412,7 @@ struct App
     // ---- settings -----------------------------------------------------------
     void LoadSettings()
     {
-        settingsFile = Poseidon::Foundation::getUserConfigDir("OpenMalpraveIslandEditor") + "/settings.ini";
+        settingsFile = Poseidon::Foundation::getUserConfigDir("OpenPoseidonIslandEditor") + "/settings.ini";
         std::ifstream f(settingsFile);
         std::string line;
         while (std::getline(f, line))
@@ -485,7 +486,7 @@ struct App
 
     void UpdateTitle()
     {
-        std::string t = "Island Editor";
+        std::string t = "Open Poseidon Island Editor";
         if (is.size > 0)
             t += " - " + (is.path.empty() ? std::string("new island") : fs::path(is.path).filename().string()) +
                  (is.modified ? " *" : "");
@@ -1707,58 +1708,44 @@ void App::HandleTool(float dt)
 
 void SetupTheme()
 {
+    // Open Poseidon's tool theme, as PoseidonStudio sets it (StudioApp::setupTheme): ImGui's dark style with neutral
+    // grey panels, 2 px corners and compact spacing. The editor came from Open Malprave with its own rounded,
+    // blue-tinted theme; it is skinned to match the other tools here.
     ImGuiStyle& s = ImGui::GetStyle();
     ImGui::StyleColorsDark();
-    s.WindowRounding = 8.0f;
-    s.ChildRounding = 6.0f;
-    s.FrameRounding = 5.0f;
-    s.PopupRounding = 6.0f;
-    s.GrabRounding = 5.0f;
-    s.TabRounding = 5.0f;
-    s.ScrollbarRounding = 8.0f;
-    s.WindowBorderSize = 0.0f;
-    s.FrameBorderSize = 0.0f;
-    s.WindowPadding = ImVec2(12, 12);
-    s.FramePadding = ImVec2(9, 6);
-    s.ItemSpacing = ImVec2(8, 7);
-    s.ScrollbarSize = 12.0f;
-    s.GrabMinSize = 12.0f;
-    s.PopupBorderSize = 1.0f;
-    s.SeparatorTextBorderSize = 1.0f;
-    s.SeparatorTextAlign = ImVec2(0.0f, 0.5f);
-    s.SeparatorTextPadding = ImVec2(0.0f, 2.0f);
-    s.WindowTitleAlign = ImVec2(0.0f, 0.5f);
-    s.DisabledAlpha = 0.45f;
     ImVec4* c = s.Colors;
-    const ImVec4 accent = kAccent;
-    c[ImGuiCol_Border] = ImVec4(0.24f, 0.26f, 0.30f, 1.0f);
+    c[ImGuiCol_WindowBg] = ImVec4(0.10f, 0.10f, 0.11f, 1.0f);
+    c[ImGuiCol_ChildBg] = ImVec4(0.12f, 0.12f, 0.13f, 1.0f);
+    c[ImGuiCol_PopupBg] = ImVec4(0.15f, 0.15f, 0.16f, 1.0f);
+    c[ImGuiCol_FrameBg] = ImVec4(0.18f, 0.18f, 0.20f, 1.0f);
+    c[ImGuiCol_FrameBgHovered] = ImVec4(0.25f, 0.25f, 0.28f, 1.0f);
+    c[ImGuiCol_FrameBgActive] = ImVec4(0.30f, 0.30f, 0.33f, 1.0f);
+    c[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.08f, 0.09f, 1.0f);
+    c[ImGuiCol_TitleBgActive] = ImVec4(0.12f, 0.12f, 0.14f, 1.0f);
+    c[ImGuiCol_MenuBarBg] = ImVec4(0.08f, 0.08f, 0.09f, 1.0f);
+    c[ImGuiCol_Header] = ImVec4(0.20f, 0.20f, 0.22f, 1.0f);
+    c[ImGuiCol_HeaderHovered] = ImVec4(0.28f, 0.28f, 0.30f, 1.0f);
+    c[ImGuiCol_HeaderActive] = ImVec4(0.35f, 0.35f, 0.38f, 1.0f);
+    c[ImGuiCol_Button] = ImVec4(0.22f, 0.22f, 0.25f, 1.0f);
+    c[ImGuiCol_ButtonHovered] = ImVec4(0.30f, 0.30f, 0.35f, 1.0f);
+    c[ImGuiCol_ButtonActive] = ImVec4(0.38f, 0.38f, 0.42f, 1.0f);
+    c[ImGuiCol_Tab] = ImVec4(0.15f, 0.15f, 0.17f, 1.0f);
+    c[ImGuiCol_TabHovered] = ImVec4(0.30f, 0.30f, 0.35f, 1.0f);
+    c[ImGuiCol_TabSelected] = ImVec4(0.22f, 0.22f, 0.25f, 1.0f);
+    c[ImGuiCol_Separator] = ImVec4(0.25f, 0.25f, 0.28f, 1.0f);
+    // the editor's own panels float over the island view: a dim behind its dialogs, as before
     c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.55f);
-    c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_ScrollbarGrab] = ImVec4(0.26f, 0.28f, 0.33f, 1.0f);
-    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.34f, 0.37f, 0.43f, 1.0f);
-    c[ImGuiCol_ScrollbarGrabActive] = accent;
-    c[ImGuiCol_WindowBg] = ImVec4(0.10f, 0.11f, 0.13f, 0.96f);
-    c[ImGuiCol_PopupBg] = ImVec4(0.10f, 0.11f, 0.13f, 0.98f);
-    c[ImGuiCol_MenuBarBg] = ImVec4(0.08f, 0.09f, 0.10f, 1.0f);
-    c[ImGuiCol_FrameBg] = ImVec4(0.17f, 0.18f, 0.21f, 1.0f);
-    c[ImGuiCol_FrameBgHovered] = ImVec4(0.22f, 0.24f, 0.28f, 1.0f);
-    c[ImGuiCol_FrameBgActive] = ImVec4(0.26f, 0.29f, 0.34f, 1.0f);
-    c[ImGuiCol_TitleBg] = c[ImGuiCol_TitleBgActive] = ImVec4(0.08f, 0.09f, 0.10f, 1.0f);
-    c[ImGuiCol_Button] = ImVec4(0.19f, 0.21f, 0.25f, 1.0f);
-    c[ImGuiCol_ButtonHovered] = ImVec4(0.26f, 0.30f, 0.37f, 1.0f);
-    c[ImGuiCol_ButtonActive] = accent;
-    c[ImGuiCol_Header] = ImVec4(0.20f, 0.33f, 0.50f, 1.0f);
-    c[ImGuiCol_HeaderHovered] = ImVec4(0.24f, 0.42f, 0.66f, 1.0f);
-    c[ImGuiCol_HeaderActive] = accent;
-    c[ImGuiCol_SliderGrab] = ImVec4(accent.x, accent.y, accent.z, 0.55f);
-    c[ImGuiCol_SliderGrabActive] = ImVec4(0.40f, 0.70f, 1.0f, 1.0f);
-    c[ImGuiCol_CheckMark] = accent;
-    c[ImGuiCol_Tab] = ImVec4(0.14f, 0.15f, 0.18f, 1.0f);
-    c[ImGuiCol_TabHovered] = ImVec4(0.24f, 0.42f, 0.66f, 1.0f);
-    c[ImGuiCol_TabSelected] = ImVec4(0.20f, 0.36f, 0.56f, 1.0f);
-    c[ImGuiCol_Separator] = ImVec4(0.24f, 0.26f, 0.30f, 1.0f);
-    c[ImGuiCol_Text] = ImVec4(0.92f, 0.93f, 0.95f, 1.0f);
-    c[ImGuiCol_TextDisabled] = ImVec4(0.58f, 0.60f, 0.65f, 1.0f);
+    s.WindowRounding = 2.0f;
+    s.ChildRounding = 2.0f;
+    s.FrameRounding = 2.0f;
+    s.PopupRounding = 2.0f;
+    s.GrabRounding = 2.0f;
+    s.TabRounding = 2.0f;
+    s.WindowPadding = ImVec2(8, 8);
+    s.FramePadding = ImVec2(6, 4);
+    s.ItemSpacing = ImVec2(8, 4);
+    s.SeparatorTextAlign = ImVec2(0.0f, 0.5f);
+    s.DisabledAlpha = 0.45f;
     // everything above is in pixels at 96 dpi
     s.ScaleAllSizes(g_ui);
     s.FontScaleDpi = g_ui;
@@ -2582,7 +2569,7 @@ void App::Dialogs()
         ImGui::TextUnformatted("Island Editor");
         if (g_bold)
             ImGui::PopFont();
-        ImGui::TextWrapped("For the islands of Cold War Assault / Operation Flashpoint and Open Malprave.");
+        ImGui::TextWrapped("For the islands of Cold War Assault / Operation Flashpoint and Open Poseidon.");
         ImGui::Spacing();
         Hint("Opens 4WVR, 3WVR and binarized (OPRW) islands; saves 4WVR, which the games load directly. The file being replaced is "
              "kept as <name>.wrp.bak.");
@@ -2843,7 +2830,7 @@ void App::Interface(int width, int height)
         ImGui::TextUnformatted("Island Editor");
         if (g_bold)
             ImGui::PopFont();
-        ImGui::TextDisabled("Cold War Assault / Operation Flashpoint / Open Malprave islands");
+        ImGui::TextDisabled("Cold War Assault / Operation Flashpoint / Open Poseidon islands");
         ImGui::Spacing();
         ImGui::Spacing();
         const ImVec2 big(std::max(S(320), ImGui::GetItemRectSize().x), S(38));
@@ -3951,7 +3938,7 @@ int main(int argc, char* argv[])
     if (!Poseidon::Foundation::CpuIsSupported(true))
         return 1;
 #endif
-    CLI::App cli{"Island Editor - edits the islands (.wrp) of Cold War Assault / Operation Flashpoint and Open Malprave"};
+    CLI::App cli{"Open Poseidon Island Editor - edits the islands (.wrp) of Cold War Assault / Operation Flashpoint"};
     std::string file, gameDir, shot, selfTest;
     int shotFrames = 30, toolIndex = -1;
     bool demoStroke = false;
@@ -4211,7 +4198,7 @@ int main(int argc, char* argv[])
         return 1;
     }
     // a picture is taken without the window ever showing: nothing pops up over what else is running
-    SDL_Window* window = SDL_CreateWindow("Island Editor", 1600, 900,
+    SDL_Window* window = SDL_CreateWindow("Open Poseidon Island Editor", 1600, 900,
                                           SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | (shot.empty() && !checkModels ? 0 : SDL_WINDOW_HIDDEN));
     if (!window)
     {
@@ -4239,11 +4226,11 @@ int main(int argc, char* argv[])
         if (!(g_ui >= 0.5f && g_ui <= 4.0f))
             g_ui = 1.0f;
         ImFontConfig cfg;
-        if (!io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 17.0f, &cfg))
+        if (!io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 16.0f, &cfg))
             io.Fonts->AddFontDefault();
         std::error_code ec;
         if (std::filesystem::exists("C:\\Windows\\Fonts\\seguisb.ttf", ec))
-            g_bold = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\seguisb.ttf", 17.0f, &cfg);
+            g_bold = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\seguisb.ttf", 16.0f, &cfg);
     }
     SetupTheme();
     ImGui_ImplSDL3_InitForD3D(window);
