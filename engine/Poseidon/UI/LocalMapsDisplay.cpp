@@ -12,6 +12,7 @@
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <chrono>
@@ -21,6 +22,7 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <utility>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -151,7 +153,12 @@ class LocalMapsDisplay : public Display
                 values->AddValue(value);
         };
         color("colorText", 0.94f, 0.95f, 0.97f, 1.0f);
-        color("colorSelect", 1.0f, 1.0f, 1.0f, 1.0f);
+        // A list box draws its selection bar in colorText and the selected row's text in colorSelect,
+        // so white here was white-on-white; dark navy reads on the light bar.
+        if (id == ListId)
+            color("colorSelect", 0.03f, 0.08f, 0.14f, 1.0f);
+        else
+            color("colorSelect", 1.0f, 1.0f, 1.0f, 1.0f);
         color("colorActive", 0.24f, 0.38f, 0.49f, 1.0f);
         const bool button = std::string(base) == "RscButton";
         color("colorBackground", button ? 0.12f : 0.04f, button ? 0.19f : 0.05f, button ? 0.25f : 0.065f,
@@ -189,7 +196,10 @@ class LocalMapsDisplay : public Display
     static void OnFolderPicked(void*, const char* const* files, int)
     {
         if (!files || !files[0])
-            return; // cancelled or failed
+        {
+            LOG_INFO(Core, "Arma content: folder picker {} ({})", files ? "cancelled" : "failed", SDL_GetError());
+            return;
+        }
         PickedFolder& picked = Picked();
         std::lock_guard guard(picked.lock);
         picked.path = files[0];
@@ -200,22 +210,35 @@ class LocalMapsDisplay : public Display
         std::string start;
         if (auto* edit = dynamic_cast<CEdit*>(GetCtrl(FolderId)))
             start = edit->GetText().Data();
+        LOG_INFO(Core, "Arma content: opening the folder picker");
+        Status("Choose the folder that holds an Arma install or ALDP_* data packages...");
         SDL_ShowOpenFolderDialog(&OnFolderPicked, nullptr, SDL_GetKeyboardFocus(),
                                  start.empty() ? nullptr : start.c_str(), false);
     }
     // `remember`: an explicit search or browse saves the folder for the next visit (a data package
     // or a non-Steam install lives outside Steam); the automatic scan on opening does not, so an
     // empty box at start-up never wipes a remembered folder.
+    // A search asked for while one is running (the automatic scan on opening takes a few seconds)
+    // runs as soon as it finishes. Dropping it silently was why a typed or browsed folder never
+    // got scanned -- or remembered.
+    bool _rescanPending = false;
+    bool _rescanRemember = false;
     void Scan(bool remember = true)
     {
         if (_scan.valid())
+        {
+            _rescanPending = true;
+            _rescanRemember = _rescanRemember || remember;
+            Status("Search queued; finishing the current scan first...");
             return;
+        }
         std::string folder;
         if (auto* edit = dynamic_cast<CEdit*>(GetCtrl(FolderId)))
             folder = edit->GetText().Data();
         if (remember && Foundation::GamePaths::Instance().IsInitialized())
             std::ofstream(FolderMemory(), std::ios::trunc) << folder;
         Status("Searching installed Steam games... (archive directories only)");
+        LOG_INFO(Core, "Arma content: scanning Steam libraries{}{}", folder.empty() ? "" : " and ", folder);
         _scan = std::async(std::launch::async, [folder] { return ScanLocalMaps(folder); });
     }
     void Open()
@@ -521,6 +544,17 @@ class LocalMapsDisplay : public Display
             try
             {
                 _catalog = _scan.get();
+                LOG_INFO(Core, "Arma content: scan found {} maps, {} missions ({} diagnostics)", _catalog.maps.size(),
+                         _catalog.missions.size(), _catalog.diagnostics.size());
+                if (_rescanPending)
+                {
+                    _rescanPending = false;
+                    const bool remember = std::exchange(_rescanRemember, false);
+                    Fill();
+                    Scan(remember);
+                    Display::OnSimulate(vehicle);
+                    return;
+                }
             }
             catch (const std::exception& e)
             {
