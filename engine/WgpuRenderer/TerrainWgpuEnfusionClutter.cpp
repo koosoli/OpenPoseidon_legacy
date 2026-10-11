@@ -1512,35 +1512,50 @@ struct AtlasRect
 {
     float u0 = 0.0f, u1 = 1.0f, v0 = 0.0f, v1 = 1.0f;
     float weight = 1.0f;
+    float scale = 1.0f; //!< RFG-117: the rectangle's ScaleDistribution entry
 };
+
+// A quoted float list `Key "a b c ..."`, the key matched only as a whole word at the start of
+// its line -- `Distribution "` also occurs inside `ScaleDistribution "` and
+// `DistanceDistribution "`, and which comes first in the file is not something to rely on.
+std::vector<float> ReadFloatList(const std::string& text, const char* key)
+{
+    std::vector<float> out;
+    const std::string needle = std::string(key) + " \"";
+    for (size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + 1))
+    {
+        size_t lineStart = at;
+        while (lineStart > 0 && (text[lineStart - 1] == ' ' || text[lineStart - 1] == '\t'))
+            --lineStart;
+        if (lineStart != 0 && text[lineStart - 1] != '\n' && text[lineStart - 1] != '\r')
+            continue;
+        const size_t open = at + needle.size() - 1;
+        const size_t close = text.find('"', open + 1);
+        if (close == std::string::npos)
+            break;
+        const std::string list = text.substr(open + 1, close - open - 1);
+        const char* p = list.c_str();
+        for (;;)
+        {
+            char* end = nullptr;
+            const float v = std::strtof(p, &end);
+            if (end == p)
+                break;
+            out.push_back(v);
+            p = end;
+        }
+        break;
+    }
+    return out;
+}
 
 // `DistributionAtlasUVs { u0 u1 v0 v1 ... }` and `Distribution "w w w ..."` out of the raw
 // material text: the block is rows of bare numbers, which the key/value parser folds into
 // nothing useful, so it is read by hand.
 void ReadAtlasRects(const std::string& text, std::vector<AtlasRect>& out)
 {
-    std::vector<float> weights;
-    if (const size_t d = text.find("Distribution \""); d != std::string::npos)
-    {
-        const size_t open = text.find('"', d);
-        const size_t close = open == std::string::npos ? std::string::npos : text.find('"', open + 1);
-        if (open != std::string::npos && close != std::string::npos)
-        {
-            const std::string list = text.substr(open + 1, close - open - 1);
-            size_t at = 0;
-            while (at < list.size())
-            {
-                char* end = nullptr;
-                const float v = std::strtof(list.c_str() + at, &end);
-                if (end == list.c_str() + at)
-                    break;
-                weights.push_back(v);
-                at = static_cast<size_t>(end - list.c_str());
-                while (at < list.size() && list[at] == ' ')
-                    ++at;
-            }
-        }
-    }
+    const std::vector<float> weights = ReadFloatList(text, "Distribution");
+    const std::vector<float> scales = ReadFloatList(text, "ScaleDistribution");
     const size_t b = text.find("DistributionAtlasUVs");
     if (b == std::string::npos)
         return;
@@ -1573,6 +1588,7 @@ void ReadAtlasRects(const std::string& text, std::vector<AtlasRect>& out)
         r.v1 = numbers[i + 3];
         const size_t index = i / 4;
         r.weight = index < weights.size() ? weights[index] : 1.0f;
+        r.scale = index < scales.size() && scales[index] > 0.0f ? scales[index] : 1.0f;
         if (r.u1 > r.u0 && r.v1 > r.v0)
             out.push_back(r);
     }
@@ -1655,19 +1671,54 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
     ReadAtlasRects(text, rects);
     if (rects.empty())
         rects.push_back(AtlasRect{}); // the whole atlas as one tuft, rather than nothing
-    std::stable_sort(rects.begin(), rects.end(), [](const AtlasRect& a, const AtlasRect& b) { return a.weight > b.weight; });
-    // Distinct rectangles only: the list repeats a rectangle to weight it, and eight copies
-    // of one tuft would be a poorer field than eight different ones.
+    // Distinct rectangles, each carrying the SUM of its entries' weights: the list repeats a
+    // rectangle to weight it (cp_grass_03: the tall tuft 4 x 3 of 20). RFG-117: the eight layers
+    // are then handed out in proportion to those sums, so a hashed layer pick reproduces the
+    // PlantMat's Distribution instead of cycling the distinct tufts evenly.
     std::vector<AtlasRect> distinct;
     for (const AtlasRect& r : rects)
     {
-        bool seen = false;
-        for (const AtlasRect& d : distinct)
-            seen = seen || (std::fabs(d.u0 - r.u0) < 1e-4f && std::fabs(d.u1 - r.u1) < 1e-4f &&
-                            std::fabs(d.v0 - r.v0) < 1e-4f && std::fabs(d.v1 - r.v1) < 1e-4f);
-        if (!seen)
+        AtlasRect* same = nullptr;
+        for (AtlasRect& d : distinct)
+            if (std::fabs(d.u0 - r.u0) < 1e-4f && std::fabs(d.u1 - r.u1) < 1e-4f && std::fabs(d.v0 - r.v0) < 1e-4f &&
+                std::fabs(d.v1 - r.v1) < 1e-4f)
+                same = &d;
+        if (same != nullptr)
+            same->weight += r.weight;
+        else
             distinct.push_back(r);
     }
+    std::stable_sort(distinct.begin(), distinct.end(),
+                     [](const AtlasRect& a, const AtlasRect& b) { return a.weight > b.weight; });
+    constexpr int Layers = 8;
+    if (distinct.size() > static_cast<size_t>(Layers))
+        distinct.resize(Layers);
+    std::vector<int> slots(distinct.size(), 1); // every distinct tuft at least once
+    {
+        float total = 0.0f;
+        for (const AtlasRect& d : distinct)
+            total += std::max(d.weight, 0.0f);
+        for (int given = static_cast<int>(distinct.size()); given < Layers; ++given)
+        {
+            size_t best = 0;
+            float bestDeficit = -1e9f;
+            for (size_t k = 0; k < distinct.size(); ++k)
+            {
+                const float ideal = total > 0.0f ? Layers * std::max(distinct[k].weight, 0.0f) / total : 1.0f;
+                const float deficit = ideal - static_cast<float>(slots[k]);
+                if (deficit > bestDeficit)
+                {
+                    bestDeficit = deficit;
+                    best = k;
+                }
+            }
+            ++slots[best];
+        }
+    }
+    std::vector<size_t> layerRect;
+    for (size_t k = 0; k < distinct.size(); ++k)
+        for (int s = 0; s < slots[k]; ++s)
+            layerRect.push_back(k);
 
     int cw = 0, ch = 0, aw = 0, ah = 0;
     std::vector<uint8_t> colour, opacity;
@@ -1689,24 +1740,40 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
     for (size_t i = 0; i + 3 < colour.size(); i += 4)
         colour[i + 3] = std::max({opacity[i + 0], opacity[i + 1], opacity[i + 2]});
 
-    constexpr int LayerW = 64, LayerH = 256, Layers = 8;
-    std::vector<uint8_t> layers(static_cast<size_t>(LayerW) * LayerH * 4u * Layers, 0u);
+    // RFG-117: 256 square. The tuft cards restore each rectangle's own proportions in geometry
+    // (tuft_aspect), so the layer only needs resolution: the old 64 px across a 2:1 tuft left its
+    // stems a texel wide.
+    constexpr int LayerW = 256, LayerH = 256;
+    // RFG-117: the PlantMat's SatMapBlendMask (R) says per texel how far SatMapLerp may pull the
+    // blade towards the ground colour -- grass fully, flower heads, clover and the mid band of the
+    // wide tufts not at all. Without it every flower was washed into the ground. It rides as eight
+    // more layers of the same array (8..15), cropped exactly like the colour.
+    int mw = 0, mh = 0;
+    std::vector<uint8_t> satMask;
+    if (const std::string* maskKey = mat.Key("SatMapBlendMask"); maskKey != nullptr && !maskKey->empty())
+        if (!DecodeEdds(mount, StripGuid(*maskKey), 2048, mw, mh, satMask) || mw <= 0 || mh <= 0)
+            satMask.clear();
+    const int uploadLayers = satMask.empty() ? Layers : 2 * Layers;
+    std::vector<uint8_t> layers(static_cast<size_t>(LayerW) * LayerH * 4u * uploadLayers, 0u);
+    float tuftAspect[Layers] = {}, tuftScale[Layers] = {};
     std::string report;
     for (int layer = 0; layer < Layers; ++layer)
     {
-        const AtlasRect& r = distinct[static_cast<size_t>(layer) % distinct.size()];
+        const AtlasRect& r = distinct[layerRect[static_cast<size_t>(layer)]];
         const int x0 = std::clamp(static_cast<int>(r.u0 * cw), 0, cw - 1);
         const int x1 = std::clamp(static_cast<int>(r.u1 * cw), x0 + 1, cw);
         const int y0 = std::clamp(static_cast<int>(r.v0 * ch), 0, ch - 1);
         const int y1 = std::clamp(static_cast<int>(r.v1 * ch), y0 + 1, ch);
         const int rw = x1 - x0, rh = y1 - y0;
+        tuftAspect[layer] = static_cast<float>(rw) / static_cast<float>(rh);
+        tuftScale[layer] = r.scale;
         // Crop, then STRETCH to the whole layer. Bottom-aligning at the tuft's own aspect
         // left the plant in the lower third of the blade quad, exactly where the shader's
         // root shade and root occlusion are strongest, and the field came out black. The
         // blade quad is a thin strip; a tuft stretched onto it reads as blade streaks,
-        // which at 10 cm is what the eye gets from Reforger's cover too. (The faithful
-        // port is Reforger's own geometry -- `Plants 8` x `BladesCount 3` crossed CARDS
-        // of the whole tuft -- which is the card path at blade spacing; parked.)
+        // which at 10 cm is what the eye gets from Reforger's cover too. RFG-117: the faithful
+        // port -- `Plants` x `BladesCount` crossed CARDS of the whole tuft -- is now the default
+        // (vs_native_tuft), and puts the proportions back from tuftAspect.
         std::vector<uint8_t> crop(static_cast<size_t>(rw) * rh * 4u);
         for (int y = 0; y < rh; ++y)
             std::memcpy(crop.data() + static_cast<size_t>(y) * rw * 4,
@@ -1718,14 +1785,61 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
         for (int y = 0; y < fitH; ++y)
             std::memcpy(dst + static_cast<size_t>(LayerH - fitH + y) * LayerW * 4,
                         fitted.data() + static_cast<size_t>(y) * LayerW * 4, static_cast<size_t>(LayerW) * 4);
-        char line[64];
-        std::snprintf(line, sizeof(line), "%s%d:[%.2f-%.2f,%.2f-%.2f]w%.0f", layer ? " " : "", layer, r.u0, r.u1,
-                      r.v0, r.v1, r.weight);
+        if (!satMask.empty())
+        {
+            const int mx0 = std::clamp(static_cast<int>(r.u0 * mw), 0, mw - 1);
+            const int mx1 = std::clamp(static_cast<int>(r.u1 * mw), mx0 + 1, mw);
+            const int my0 = std::clamp(static_cast<int>(r.v0 * mh), 0, mh - 1);
+            const int my1 = std::clamp(static_cast<int>(r.v1 * mh), my0 + 1, mh);
+            const int qw = mx1 - mx0, qh = my1 - my0;
+            std::vector<uint8_t> maskCrop(static_cast<size_t>(qw) * qh * 4u);
+            for (int y = 0; y < qh; ++y)
+                std::memcpy(maskCrop.data() + static_cast<size_t>(y) * qw * 4,
+                            satMask.data() + (static_cast<size_t>(my0 + y) * mw + mx0) * 4, static_cast<size_t>(qw) * 4);
+            uint8_t* mdst = layers.data() + static_cast<size_t>(Layers + layer) * LayerW * LayerH * 4u;
+            stbir_resize_uint8_linear(maskCrop.data(), qw, qh, qw * 4, mdst, LayerW, LayerH, LayerW * 4, STBIR_RGBA);
+            for (size_t i = 0; i < static_cast<size_t>(LayerW) * LayerH; ++i)
+            {
+                mdst[i * 4 + 1] = mdst[i * 4 + 0];
+                mdst[i * 4 + 2] = mdst[i * 4 + 0];
+                mdst[i * 4 + 3] = 255;
+            }
+        }
+        char line[96];
+        std::snprintf(line, sizeof(line), "%s%d:[%.2f-%.2f,%.2f-%.2f]w%.0f a%.2f s%.2f", layer ? " " : "", layer, r.u0,
+                      r.u1, r.v0, r.v1, r.weight, tuftAspect[layer], tuftScale[layer]);
         report += line;
     }
 
     EngineWgpu::AcquireProducerWindow("grass blade atlas");
-    wgr_grass_set_blade_atlas(_renderer, LayerW, LayerH, Layers, layers.data());
+    wgr_grass_set_blade_atlas(_renderer, LayerW, LayerH, static_cast<uint32_t>(uploadLayers), layers.data());
+    // RFG-117: the near ring draws these as Reforger plants -- BladesCount crossed cards of a whole
+    // tuft, leaning Zenith +- ZenithRandomOffset, Plants per square metre, from the PlantMat.
+    // Height is a look choice, not a measurement (Reforger's `Height 0.1` unit is unknown and the
+    // owner ruled the exact height unimportant): WGR_NATIVE_TUFT_HEIGHT, default 0.60 m -- at 0.30
+    // the near meadow read bald from eye height against Reforger's continuous carpet.
+    // WGR_NATIVE_TUFT_CARDS=0 keeps the old procedural blades.
+    {
+        const char* cardsEnv = std::getenv("WGR_NATIVE_TUFT_CARDS");
+        const bool on = !(cardsEnv && cardsEnv[0] == '0');
+        float height = 0.60f;
+        if (const char* h = std::getenv("WGR_NATIVE_TUFT_HEIGHT"); h != nullptr && *h != '\0')
+            height = std::clamp(std::strtof(h, nullptr), 0.02f, 3.0f);
+        const float cfg[8] = {on ? 1.0f : 0.0f,
+                              std::clamp(mat.Number("BladesCount", 3.0f), 1.0f, 6.0f),
+                              mat.Number("Zenith", 15.0f),
+                              mat.Number("ZenithRandomOffset", 15.0f),
+                              height,
+                              std::clamp(mat.Number("HeightRandomOffset", 0.5f), 0.0f, 1.0f),
+                              std::clamp(mat.Number("Plants", 8.0f), 0.25f, 64.0f),
+                              satMask.empty() ? 0.0f : 1.0f};
+        wgr_grass_set_native_tufts(_renderer, cfg, tuftAspect, tuftScale);
+        LOG_INFO(Graphics,
+                 "Wgpu grass: native near ring {} (WGR_NATIVE_TUFT_CARDS): {} cards/plant, {:.0f} plants/m2, "
+                 "zenith {:.0f}+-{:.0f} deg, height {:.2f} m +-{:.0f}% (WGR_NATIVE_TUFT_HEIGHT)",
+                 on ? "draws Reforger tuft cards" : "keeps procedural blades", cfg[1], cfg[6], cfg[2], cfg[3], cfg[4],
+                 cfg[5] * 100.0f);
+    }
     _enfusionBladeHeight = std::clamp(mat.Number("Height", 0.0f), 0.0f, 2.0f);
     // RFG-091: the ground colour behind the atlas. Reforger lerps the blade towards the
     // satellite map by `SatMapLerp`; with no satellite pages here, the mean linear albedo
@@ -1768,6 +1882,17 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
         char path[512];
         std::snprintf(path, sizeof(path), "%s/enfusion_blade_atlas.png", dumpDir);
         Poseidon::PNGWriter::WritePNG(path, cw, ch, 4, colour.data());
+        // RFG-117: the PlantMat's SatMapBlendMask, to see where Reforger lets the ground colour in.
+        if (const std::string* maskKey = mat.Key("SatMapBlendMask"); maskKey != nullptr && !maskKey->empty())
+        {
+            int mw = 0, mh = 0;
+            std::vector<uint8_t> mask;
+            if (DecodeEdds(mount, StripGuid(*maskKey), 1024, mw, mh, mask))
+            {
+                std::snprintf(path, sizeof(path), "%s/enfusion_blade_satmask.png", dumpDir);
+                Poseidon::PNGWriter::WritePNG(path, mw, mh, 4, mask.data());
+            }
+        }
         LOG_INFO(Graphics, "Wgpu grass: blade layers dumped to {}", dumpDir);
     }
     _grassBladeAtlasWorld = worldKey;

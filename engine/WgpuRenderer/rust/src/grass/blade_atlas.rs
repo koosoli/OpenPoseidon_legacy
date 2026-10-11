@@ -765,7 +765,10 @@ pub fn blade_layer_means(width: u32, height: u32, layers: u32, rgba: &[u8]) -> [
     let Some(layer_bytes) = (width as usize).checked_mul(height as usize).and_then(|n| n.checked_mul(4)) else {
         return out;
     };
-    if layer_bytes == 0 || layers != LAYERS || layer_bytes.checked_mul(layers as usize) != Some(rgba.len()) {
+    // RFG-117: a native upload may carry LAYERS more (the SatMapBlendMask layers); the means are
+    // of the colour layers only.
+    if layer_bytes == 0 || (layers != LAYERS && layers != 2 * LAYERS) ||
+        layer_bytes.checked_mul(layers as usize) != Some(rgba.len()) {
         return out;
     }
     let lut: [f64; 256] = std::array::from_fn(|i| {
@@ -800,7 +803,9 @@ pub fn create_from_images(
     rgba: &[u8],
 ) -> Option<wgpu::TextureView> {
     let layer_bytes = width as usize * height as usize * 4;
-    if width == 0 || height == 0 || layers != LAYERS || rgba.len() != layer_bytes * layers as usize
+    // RFG-117: 2 x LAYERS = the colour layers then the PlantMat's SatMapBlendMask (R) per layer.
+    if width == 0 || height == 0 || (layers != LAYERS && layers != 2 * LAYERS) ||
+        rgba.len() != layer_bytes * layers as usize
     {
         return None;
     }
@@ -822,9 +827,14 @@ pub fn create_from_images(
         view_formats: &[],
     });
 
+    // RFG-117: the native near ring cuts these layers out by alpha (fs_grass_native_tuft*), so
+    // the chain keeps each layer's alpha-tested coverage like the tuft atlas does; a plain box
+    // filter thins a tuft of stems into nothing two mips down.
+    const CUTOFF: u8 = 128;
     for layer in 0..layers {
         let start = layer as usize * layer_bytes;
         let mut data = rgba[start..start + layer_bytes].to_vec();
+        let base_coverage = coverage(&data, CUTOFF);
         let (mut w, mut h) = (width, height);
         for mip in 0..mip_levels {
             queue.write_texture(
@@ -851,7 +861,8 @@ pub fn create_from_images(
                 },
             );
             if mip + 1 < mip_levels {
-                let (next, nw, nh) = downsample(&data, w, h);
+                let (mut next, nw, nh) = downsample_cutout(&data, w, h);
+                preserve_coverage(&mut next, base_coverage, CUTOFF);
                 data = next;
                 w = nw;
                 h = nh;

@@ -3285,6 +3285,7 @@ void TerrainWgpu::UploadGrassBladeAtlas(const std::string& worldKey)
     EngineWgpu::AcquireProducerWindow("grass blade atlas");
     wgr_grass_set_blade_atlas(_renderer, static_cast<uint32_t>(width), static_cast<uint32_t>(height),
                               static_cast<uint32_t>(BladePaths.size()), layers.data());
+    wgr_grass_set_native_tufts(_renderer, nullptr, nullptr, nullptr); // RFG-117: blades again
     _grassBladeAtlasWorld = worldKey;
     LOG_INFO(Graphics, "Wgpu grass: near-LOD photo blade atlas uploaded ({} layers, {}x{})", BladePaths.size(), width,
              height);

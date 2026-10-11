@@ -3581,6 +3581,25 @@ pub unsafe extern "C" fn wgr_grass_set_layer_size(renderer: *mut WgrRenderer, si
     }));
 }
 
+/// RFG-117: the near ring as Reforger PlantMat tuft cards. `cfg` = 8 floats [on, cards per plant,
+/// Zenith, ZenithRandomOffset, height m, HeightRandomOffset, Plants per m^2, 0]; `aspect` and
+/// `scale` = 8 floats each (per blade layer). Null `cfg` turns it off.
+///
+/// # Safety
+/// `renderer` must be null or live; each non-null pointer must address 8 readable floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_native_tufts(renderer: *mut WgrRenderer, cfg: *const f32,
+                                                    aspect: *const f32, scale: *const f32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let read = |p: *const f32| -> &[f32] { if p.is_null() { &[] } else { unsafe { std::slice::from_raw_parts(p, 8) } } };
+        renderer.grass_set_native_tufts(read(cfg), read(aspect), read(scale));
+    }));
+}
+
 /// RFG-116: bit i = atlas layer i belongs to a surface naming no PlantMat (no near blades).
 ///
 /// # Safety

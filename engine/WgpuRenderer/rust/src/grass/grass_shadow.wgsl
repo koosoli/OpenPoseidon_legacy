@@ -50,6 +50,11 @@ struct GrassParams {
     layer_pick: array<vec4<f32>, 32>,
     // RFG-116: .x = atlas layers whose surface names no PlantMat (no near blades).
     blade_skip: vec4<u32>,
+    // RFG-117: mirrors grass.wgsl (native near-ring tuft cards).
+    native_tuft: vec4<f32>,
+    native_tuft2: vec4<f32>,
+    tuft_aspect: array<vec4<f32>, 2>,
+    tuft_scale: array<vec4<f32>, 2>,
 };
 // Must mirror grass.wgsl's 32-byte layout exactly: both shaders bind the same
 // instance buffer through the shared `data_layout`.

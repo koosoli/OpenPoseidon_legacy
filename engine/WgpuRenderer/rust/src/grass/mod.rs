@@ -385,6 +385,11 @@ struct GrassParams {
     // RFG-116: .x = bit per atlas layer whose run belongs to a surface that names no PlantMat,
     // so the near ring grows no blades there (Reforger's forest/dirt floors); .yzw spare.
     blade_skip: [u32; 4],
+    // RFG-117: mirrors native_tuft / native_tuft2 / tuft_aspect / tuft_scale in grass.wgsl.
+    native_tuft: [f32; 4],
+    native_tuft2: [f32; 4],
+    tuft_aspect: [f32; 8],
+    tuft_scale: [f32; 8],
 }
 
 /// Neutral card-layer pick: uniform weights (0 = "the map gave none") and no distance limit.
@@ -544,6 +549,10 @@ pub struct Grass {
     // grass colour pass with the feature switched off.
     cards_color_pipeline: wgpu::RenderPipeline,
     cards_color_no_write_pipeline: wgpu::RenderPipeline,
+    // RFG-117: near ring as Reforger tuft cards (native worlds).
+    native_tuft_color_pipeline: wgpu::RenderPipeline,
+    native_tuft_color_no_write_pipeline: wgpu::RenderPipeline,
+    native_tuft_prepass_pipeline: wgpu::RenderPipeline,
     prepass_pipeline: wgpu::RenderPipeline,
     mid_prepass_pipeline: wgpu::RenderPipeline,
     mid_color_pipeline: wgpu::RenderPipeline,
@@ -857,6 +866,10 @@ impl Grass {
             blade_layer_means: [0.0; 32],
             layer_pick: default_layer_pick(),
             blade_skip: [0; 4],
+            native_tuft: [0.0; 4],
+            native_tuft2: [0.0; 4],
+            tuft_aspect: [1.0; 8],
+            tuft_scale: [1.0; 8],
         };
         queue.write_buffer(&grass_params, 0, bytemuck::bytes_of(&params));
 
@@ -1412,6 +1425,31 @@ impl Grass {
             NORMAL_FORMAT,
             true,
         );
+        // RFG-117: the near ring as Reforger tuft cards (native worlds, native_tuft.x). Cut out by
+        // the atlas alpha in BOTH passes, A2C under MSAA like the mid tufts.
+        let (native_fs, native_prepass_fs) = if card_a2c {
+            ("fs_grass_native_tuft_a2c", "fs_grass_native_tuft_prepass_a2c")
+        } else {
+            ("fs_grass_native_tuft", "fs_grass_native_tuft_prepass")
+        };
+        let native_tuft_color_pipeline =
+            make_pipeline_a2c("wgr_grass_native_tuft_color", "vs_grass", native_fs, surface_format, true, card_a2c);
+        let native_tuft_color_no_write_pipeline = make_pipeline_a2c(
+            "wgr_grass_native_tuft_color_no_write",
+            "vs_grass",
+            native_fs,
+            surface_format,
+            false,
+            card_a2c,
+        );
+        let native_tuft_prepass_pipeline = make_pipeline_a2c(
+            "wgr_grass_native_tuft_prepass",
+            "vs_grass",
+            native_prepass_fs,
+            NORMAL_FORMAT,
+            true,
+            card_a2c,
+        );
         let mid_prepass_pipeline = make_pipeline(
             "wgr_grass_mid_prepass",
             "vs_grass_mid",
@@ -1629,6 +1667,9 @@ impl Grass {
             color_no_write_pipeline,
             cards_color_pipeline,
             cards_color_no_write_pipeline,
+            native_tuft_color_pipeline,
+            native_tuft_color_no_write_pipeline,
+            native_tuft_prepass_pipeline,
             prepass_pipeline,
             mid_prepass_pipeline,
             mid_color_pipeline,
@@ -1974,6 +2015,25 @@ impl Grass {
         self.last_params.blade_skip = [mask, 0, 0, 0];
         queue.write_buffer(&self.grass_params, std::mem::offset_of!(GrassParams, blade_skip) as u64,
                            bytemuck::cast_slice(&self.last_params.blade_skip));
+    }
+
+    /// RFG-117: the near ring as Reforger PlantMat plants. `cfg` = [on, cards per plant, Zenith deg,
+    /// ZenithRandomOffset deg, card height m, HeightRandomOffset, Plants per m^2, 0]; `aspect` /
+    /// `scale` per blade layer (atlas rectangle width/height, ScaleDistribution). An empty `cfg`
+    /// turns it off.
+    pub fn set_native_tufts(&mut self, queue: &wgpu::Queue, cfg: &[f32], aspect: &[f32], scale: &[f32]) {
+        let finite = |v: f32, d: f32| if v.is_finite() { v } else { d };
+        let mut c = [0.0f32; 8];
+        for (i, v) in cfg.iter().take(8).enumerate() {
+            c[i] = finite(*v, 0.0);
+        }
+        self.last_params.native_tuft = [c[0], c[1], c[2], c[3]];
+        self.last_params.native_tuft2 = [c[4], c[5], c[6], c[7]];
+        for i in 0..8 {
+            self.last_params.tuft_aspect[i] = finite(aspect.get(i).copied().unwrap_or(1.0), 1.0).clamp(0.1, 6.0);
+            self.last_params.tuft_scale[i] = finite(scale.get(i).copied().unwrap_or(1.0), 1.0).clamp(0.1, 4.0);
+        }
+        queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&self.last_params));
     }
 
     pub fn set_geography(
@@ -2351,6 +2411,10 @@ impl Grass {
             blade_layer_means: self.last_params.blade_layer_means,
             layer_pick: self.layer_pick,
             blade_skip: self.last_params.blade_skip,
+            native_tuft: self.last_params.native_tuft,
+            native_tuft2: self.last_params.native_tuft2,
+            tuft_aspect: self.last_params.tuft_aspect,
+            tuft_scale: self.last_params.tuft_scale,
         };
         self.near_grid_dim = near_grid_dim;
         self.mid_grid_dim = mid_grid_dim;
@@ -2801,7 +2865,12 @@ impl Grass {
         // would have to pay the same early-Z loss to remove texels the depth
         // buffer already handles conservatively.
         let cutout = self.last_params.alpha_cards > 0.5;
+        // RFG-117: Reforger tuft cards replace the blades on the near ring, all three passes.
+        let native_tufts = self.last_params.native_tuft[0] > 0.5 && self.last_params.near_blades_only > 0.0;
         let pipeline = match kind {
+            GrassPass::Color if native_tufts => &self.native_tuft_color_pipeline,
+            GrassPass::ColorNoWrite if native_tufts => &self.native_tuft_color_no_write_pipeline,
+            GrassPass::Prepass if native_tufts => &self.native_tuft_prepass_pipeline,
             GrassPass::Color if cutout => &self.cards_color_pipeline,
             GrassPass::ColorNoWrite if cutout => &self.cards_color_no_write_pipeline,
             GrassPass::Color => &self.color_pipeline,

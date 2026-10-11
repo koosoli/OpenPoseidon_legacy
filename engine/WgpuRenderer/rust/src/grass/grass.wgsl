@@ -137,6 +137,15 @@ struct GrassParams {
     // RFG-116: .x = bit per atlas layer whose run belongs to a surface naming no PlantMat;
     // the near ring places no blade on a cell whose run starts there. .yzw spare.
     blade_skip: vec4<u32>,
+    // RFG-117: the near ring as Reforger's PlantMat plants -- each instance BladesCount crossed
+    // cards of a whole atlas tuft, cut out by the atlas alpha. .x = 1 on (native only), .y cards
+    // per plant, .z Zenith lean (deg), .w ZenithRandomOffset (deg).
+    native_tuft: vec4<f32>,
+    // .x card height (m), .y HeightRandomOffset, .z plants per m^2 (the PlantMat's Plants), .w spare.
+    native_tuft2: vec4<f32>,
+    // Per blade layer (8): width / height of its atlas rectangle, and its ScaleDistribution.
+    tuft_aspect: array<vec4<f32>, 2>,
+    tuft_scale: array<vec4<f32>, 2>,
 };
 
 // 32 bytes. `pos_seed` stays f32 for world precision; everything the compute
@@ -290,7 +299,14 @@ fn card_placement_spacing() -> f32 {
 
 // Must mirror `near_placement_spacing` in grass/mod.rs: the shader decides where
 // candidates land, the renderer decides how many cells exist.
+// RFG-117: the near ring draws whole Reforger tufts (native_tuft.x), one PlantMat plant per cell.
+fn native_tufts_on() -> bool { return grass.native_tuft.x > 0.5 && grass.native.x > 0.0; }
+
 fn near_placement_spacing() -> f32 {
+    // `Plants` per square metre: one plant per cell of 1/sqrt(Plants) metres.
+    if (native_tufts_on()) {
+        return inverseSqrt(clamp(grass.native_tuft2.z, 0.25, 64.0)) / sqrt(max(grass.density, 1.0));
+    }
     let blade = grass.spacing * select(1.72, 3.20, grass.renderer.x > 0.5);
     return select(blade, card_placement_spacing(), cards_on_near()) / sqrt(max(grass.density, 1.0));
 }
@@ -1391,6 +1407,58 @@ struct VsOut {
     @location(6) @interpolate(flat) blade_taper: f32,
 };
 
+// RFG-117: one Reforger PlantMat plant. `native_tuft.y` crossed cards, each showing a WHOLE atlas
+// tuft (layer hashed per card; the C++ upload fills the eight layers in proportion to the
+// PlantMat's Distribution), as wide as the tuft's own rectangle is (tuft_aspect), as tall as
+// Height x that rectangle's ScaleDistribution x HeightRandomOffset jitter, leaning Zenith +-
+// ZenithRandomOffset degrees. No taper: the silhouette is the atlas alpha (fs_grass_native_tuft*).
+// The old near blade squeezed a 2:1 tuft into a 3 cm tapered strip -- the solid dark "commas"
+// that popped under a moving camera. Blade slots past the card count collapse outside clip space.
+fn vs_native_tuft(inst: vec4<f32>, inst_packed: vec4<u32>, card: u32, t: f32, left: bool) -> VsOut {
+    var out: VsOut;
+    let cards = u32(clamp(grass.native_tuft.y, 1.0, 6.0));
+    if (card >= cards) {
+        out.clip = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        out.normal = vec3<f32>(0.0, 1.0, 0.0);
+        return out;
+    }
+    let seed = inst.w;
+    let pick = hash11(inst.xz + vec2<f32>(f32(card) * 31.0 + 5.0, f32(card) * 17.0 + 13.0));
+    let layer = min(u32(pick * 8.0), 7u);
+    let aspect = clamp(grass.tuft_aspect[layer / 4u][layer % 4u], 0.1, 6.0);
+    let scale = clamp(grass.tuft_scale[layer / 4u][layer % 4u], 0.1, 4.0);
+    let jitter = hash11(inst.xz + vec2<f32>(f32(card) * 7.0 + 1.0, 41.0)) - 0.5;
+    let height = max(grass.native_tuft2.x, 0.01) * scale *
+        (1.0 + jitter * 2.0 * clamp(grass.native_tuft2.y, 0.0, 1.0)) * lod_height_scale(inst_packed.z);
+    let crush_dir = unpack2x16snorm(inst_packed.x);
+    let crush = unpack2x16unorm(inst_packed.y).x;
+    let depth = imprint_depth();
+    let crushed_height = height * (1.0 - depth * crush);
+    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (depth * crush);
+    // Crossed evenly over half a turn, the plant as a whole turned by its seed.
+    let yaw = seed * 6.2831853 + f32(card) * (3.14159265 / f32(cards));
+    let axis = vec3<f32>(cos(yaw), 0.0, sin(yaw));
+    let facing = vec3<f32>(-sin(yaw), 0.0, cos(yaw));
+    let lean_rand = hash11(inst.xz + vec2<f32>(f32(card) * 11.0 + 3.0, 97.0));
+    let zenith = radians(clamp(grass.native_tuft.z + (lean_rand - 0.5) * 2.0 * grass.native_tuft.w, -60.0, 60.0));
+    let up = vec3<f32>(0.0, cos(zenith), 0.0) + facing * sin(zenith);
+    let wind = sample_wind_field(inst.xz, t, seed + pick);
+    let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * grass.wind_strength *
+        (0.035 + 0.21 * wind.gust + wind.turbulence) * (1.0 - depth * crush);
+    let u = select(1.0, 0.0, left);
+    let local = axis * ((u - 0.5) * height * aspect) + up * (crushed_height * t) + (wind_bend + crush_bend) * (t * t);
+    let rel = inst.xyz + local - frame.cam_pos.xyz;
+    out.clip = reverse_z(frame.proj * frame.view * vec4<f32>(rel, 1.0));
+    out.world_rel = rel;
+    out.normal = normalize(cross(axis, up));
+    out.height_t = t;
+    out.seed = seed;
+    out.wind_gust = wind.gust;
+    out.blade_uv = vec4<f32>(u, 1.0 - t, f32(layer), blade_texture_strength(rel));
+    out.blade_taper = 1.0;
+    return out;
+}
+
 @vertex
 fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VsOut {
     let inst = instances[instance_index].pos_seed;
@@ -1411,6 +1479,9 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     let row = packed / 2u;
     let left = (packed % 2u) == 0u;
     let t = f32(row) / f32(BLADE_SEGMENTS);
+    if (native_tufts_on()) {
+        return vs_native_tuft(inst, inst_packed, blade, t, left);
+    }
     // Four clump archetypes: compact upright, open meadow, low splayed, tall wisp.
     let archetype = u32(seed * 4.0);
     // Most meadow clumps stay short; the occasional wisp preserves a layered
@@ -1873,6 +1944,15 @@ fn grass_ground_colour(world_xz: vec2<f32>) -> vec3<f32> {
     return grass.native.yzw;
 }
 
+// RFG-117: how far the ground colour may pull this texel (the PlantMat's SatMapBlendMask, uploaded
+// as blade layers 8..15 when native_tuft2.w is set; 1 = everywhere, the pre-mask behaviour). The
+// array is sRGB, the mask is authored linear: re-encode what the sampler decoded.
+fn native_sat_mask(uv: vec4<f32>) -> f32 {
+    if (grass.native_tuft2.w < 0.5) { return 1.0; }
+    let m = textureSampleBias(blade_tex, blade_samp, uv.xy, i32(uv.z) + 8, frame.renscale.x).r;
+    return select(1.055 * pow(m, 1.0 / 2.4) - 0.055, m * 12.92, m <= 0.0031308);
+}
+
 fn grass_shade(in: VsOut) -> vec4<f32> {
     let shading_detail = blade_shading_detail(in.blade_uv.xy);
     let height_detail = blade_height_resolution(length(vec2<f32>(dpdx(in.blade_uv.y), dpdy(in.blade_uv.y))));
@@ -1935,7 +2015,9 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
         let ground = grass_ground_colour(world.xz);
         let recoloured = ground * (dot(blade_colour, luma) / max(dot(ground, luma), 0.02));
         // No root shade: the atlas tuft carries its own base darkening.
-        textured = mix(blade_colour, recoloured, clamp(grass.native2.x, 0.0, 1.0)) * variation * gust_highlight;
+        // RFG-117: SatMapLerp scaled per texel by the PlantMat's SatMapBlendMask (layers 8..15).
+        textured = mix(blade_colour, recoloured, clamp(grass.native2.x, 0.0, 1.0) * native_sat_mask(in.blade_uv)) *
+            variation * gust_highlight;
     }
     // shape_mix.w scales the photo texture globally on top of the distance fade
     // already in blade_uv.w, so the detail can be dialled back without deleting
@@ -2368,6 +2450,45 @@ fn fs_grass_mid_tuft_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
     if (cov <= 0.0) { discard; }
     let normal_view = (frame.view * vec4<f32>(normalize(in.normal), 0.0)).xyz;
     let oct = oct_encode(normalize(normal_view));
+    return vec4<f32>(oct.x, oct.y, 0.0, cov);
+}
+
+// RFG-117: native near-ring tuft cards (vs_native_tuft). The silhouette is the atlas alpha, so
+// these discard / emit coverage exactly like the mid tufts, prepass twins included -- a prepass
+// that wrote the whole card would stamp its transparent margin into depth over the ground.
+// Two-sided: the back face shades with the flipped normal, bent half way to upright so a card
+// seen edge-on to the sun does not go black (the old blades' dark side).
+fn native_tuft_alpha(in: VsOut) -> f32 {
+    return textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), frame.renscale.x).a;
+}
+fn native_tuft_facing(in: VsOut, front: bool) -> VsOut {
+    var o = in;
+    o.normal = normalize(mix(select(-in.normal, in.normal, front), vec3<f32>(0.0, 1.0, 0.0), 0.5));
+    return o;
+}
+@fragment
+fn fs_grass_native_tuft(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    if (native_tuft_alpha(in) < tuft_alpha_cutoff()) { discard; }
+    return grass_shade(native_tuft_facing(in, front));
+}
+@fragment
+fn fs_grass_native_tuft_a2c(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let cov = a2c_coverage(native_tuft_alpha(in), tuft_alpha_cutoff());
+    if (cov <= 0.0) { discard; }
+    return vec4<f32>(grass_shade(native_tuft_facing(in, front)).rgb, cov);
+}
+@fragment
+fn fs_grass_native_tuft_prepass(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec2<f32> {
+    if (native_tuft_alpha(in) < tuft_alpha_cutoff()) { discard; }
+    let n = native_tuft_facing(in, front).normal;
+    return oct_encode(normalize((frame.view * vec4<f32>(n, 0.0)).xyz));
+}
+@fragment
+fn fs_grass_native_tuft_prepass_a2c(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let cov = a2c_coverage(native_tuft_alpha(in), tuft_alpha_cutoff());
+    if (cov <= 0.0) { discard; }
+    let n = native_tuft_facing(in, front).normal;
+    let oct = oct_encode(normalize((frame.view * vec4<f32>(n, 0.0)).xyz));
     return vec4<f32>(oct.x, oct.y, 0.0, cov);
 }
 

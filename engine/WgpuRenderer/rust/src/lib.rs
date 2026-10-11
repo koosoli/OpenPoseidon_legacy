@@ -7276,6 +7276,10 @@ impl Renderer {
         self.grass.set_layer_size(&self.queue, sizes, spreads);
     }
 
+    fn grass_set_native_tufts(&mut self, cfg: &[f32], aspect: &[f32], scale: &[f32]) {
+        self.grass.set_native_tufts(&self.queue, cfg, aspect, scale);
+    }
+
     fn grass_set_blade_skip(&mut self, mask: u32) {
         self.grass.set_blade_skip(&self.queue, mask);
     }

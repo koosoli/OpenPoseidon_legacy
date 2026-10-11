@@ -2873,6 +2873,11 @@ extern "C"
     /* RFG-116: bit i = atlas layer i belongs to a surface whose .emat names no PlantMat, so the
        near ring grows no blades on cells whose run starts there. 0 = blades everywhere. */
     WGR_API void wgr_grass_set_blade_skip(WgrRenderer* renderer, uint32_t mask);
+    /* RFG-117: the near ring as Reforger PlantMat tuft cards. cfg = 8 floats [on, cards per plant,
+       Zenith deg, ZenithRandomOffset deg, card height m, HeightRandomOffset, Plants per m^2, 0];
+       aspect / scale = 8 floats each, per blade layer. cfg null = off. */
+    WGR_API void wgr_grass_set_native_tufts(WgrRenderer* renderer, const float* cfg, const float* aspect,
+                                            const float* scale);
     WGR_API void wgr_grass_set_geography(WgrRenderer* renderer, uint32_t width, uint32_t height,
                                          const uint32_t* geography);
     WGR_API void wgr_grass_set_params(WgrRenderer* renderer, const WgrGrassParams* params);
