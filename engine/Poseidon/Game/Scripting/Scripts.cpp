@@ -850,16 +850,81 @@ bool HasSuspension(const std::string& s)
     return false;
 }
 
+struct SqfCase
+{
+    std::vector<std::string> values; // empty: default
+    std::string code;
+};
+
 struct SqfControl
 {
     enum Kind
     {
         While,
         If,
-        For
+        For,
+        Switch
     } kind = While;
     std::string condition, body, elseBody, init, step;
+    std::vector<SqfCase> cases; // Switch; condition holds the switched value
 };
+
+// "case v: {code}" / "case v" (falls through) / "default {code}"
+bool ParseSwitchBody(const std::string& body, std::vector<SqfCase>& cases)
+{
+    std::vector<std::string> pending;
+    for (const std::string& statement : SplitSqfStatements(body))
+    {
+        std::string rest;
+        if (StartsWithWord(statement, "default", rest))
+        {
+            std::string code;
+            if (!UnwrapBraces(rest, code))
+                return false;
+            cases.push_back({{}, code});
+            continue;
+        }
+        if (!StartsWithWord(statement, "case", rest))
+            return false;
+        // the ':' at bracket depth 0 outside strings separates value and code
+        int depth = 0;
+        char quote = 0;
+        size_t colon = std::string::npos;
+        for (size_t i = 0; i < rest.size() && colon == std::string::npos; i++)
+        {
+            const char c = rest[i];
+            if (quote)
+            {
+                if (c == quote)
+                    quote = 0;
+                continue;
+            }
+            if (c == '"' || c == '\'')
+                quote = c;
+            else if (c == '(' || c == '[' || c == '{')
+                depth++;
+            else if (c == ')' || c == ']' || c == '}')
+                depth--;
+            else if (c == ':' && depth == 0)
+                colon = i;
+        }
+        if (colon == std::string::npos)
+        {
+            pending.push_back(rest); // falls through to the next case with code
+            continue;
+        }
+        std::string code;
+        size_t b = colon + 1;
+        while (b < rest.size() && isspace(static_cast<unsigned char>(rest[b])))
+            b++;
+        if (!UnwrapBraces(rest.substr(b), code))
+            return false;
+        pending.push_back(rest.substr(0, colon));
+        cases.push_back({pending, code});
+        pending.clear();
+    }
+    return true;
+}
 
 // while {c} do {b} | if (c) then {a} [else {b}] | for "_v" from a to b [step s] do {b} |
 // for [{i},{c},{s}] do {b}
@@ -882,6 +947,13 @@ bool ParseSqfControl(const std::string& s, SqfControl& out)
         if (TakeWord(s, pos, "else") && !TakeBracketed(s, pos, '{', '}', out.elseBody))
             return false;
         return AtEnd(s, pos);
+    }
+    pos = 0;
+    if (TakeWord(s, pos, "switch"))
+    {
+        out.kind = SqfControl::Switch;
+        return TakeBracketed(s, pos, '(', ')', out.condition) && TakeWord(s, pos, "do") &&
+               TakeBracketed(s, pos, '{', '}', out.body) && AtEnd(s, pos) && ParseSwitchBody(out.body, out.cases);
     }
     pos = 0;
     if (!TakeWord(s, pos, "for"))
@@ -1034,6 +1106,32 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
                     addGoto(next);
                     placeLabel(otherwise);
                     emitBlock(control.elseBody);
+                    placeLabel(next);
+                    break;
+                }
+                case SqfControl::Switch:
+                {
+                    const std::string value = "_a1switch" + std::to_string(labelCount);
+                    addCondLine("", value + " = (" + control.condition + ")");
+                    const SqfCase* fallback = nullptr;
+                    for (const SqfCase& c : control.cases)
+                    {
+                        if (c.values.empty())
+                        {
+                            fallback = &c;
+                            continue;
+                        }
+                        std::string match;
+                        for (const std::string& v : c.values)
+                            match += (match.empty() ? "" : " || ") + std::string("(") + value + " == (" + v + "))";
+                        const std::string skip = newLabel();
+                        addCondLine("!(" + match + ")", "goto \"" + skip + "\"");
+                        emitBlock(c.code);
+                        addGoto(next);
+                        placeLabel(skip);
+                    }
+                    if (fallback)
+                        emitBlock(fallback->code);
                     placeLabel(next);
                     break;
                 }

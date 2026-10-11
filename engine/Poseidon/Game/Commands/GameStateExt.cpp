@@ -1784,6 +1784,7 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "joinSilent", function, ListJoin, GameArray, GameObjectOrGroup),
         GameOperator(GameNothing, "hintC", function, A1HintC, GameString, GameString | GameArray),
         GameOperator(GameNothing, "setRank", function, A1IgnoredBinary, GameObject, GameString),
+        GameOperator(GameNothing, "enableAI", function, A1IgnoredBinary, GameObject, GameString),
         GameOperator(GameNothing, "setParticleParams", function, A1IgnoredBinary, GameObject, GameArray),
         GameOperator(GameNothing, "setParticleRandom", function, A1IgnoredBinary, GameObject, GameArray),
         GameOperator(GameNothing, "setParticleCircle", function, A1IgnoredBinary, GameObject, GameArray),
