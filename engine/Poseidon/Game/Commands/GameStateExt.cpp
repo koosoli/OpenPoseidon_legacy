@@ -8,6 +8,7 @@
 #include <Poseidon/World/Scene/Fireplace.hpp>
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -941,6 +942,42 @@ static GameValue A1Distance(const GameState* state, GameValuePar oper1, GameValu
     return GameValue(a.Distance(b));
 }
 
+// object isKindOf "class": CWA's class tree, and for an Arma 1 unit also Arma 1's own
+static bool CfgDerived(const ParamEntry* vehicles, const char* type, const char* base)
+{
+    const ParamEntry* t = vehicles ? vehicles->FindEntry(type) : nullptr;
+    const ParamEntry* b = vehicles ? vehicles->FindEntry(base) : nullptr;
+    const ParamClass* tc = t ? t->GetClassInterface() : nullptr;
+    const ParamClass* bc = b ? b->GetClassInterface() : nullptr;
+    return tc && bc && (tc == bc || tc->IsDerivedFrom(*bc));
+}
+
+static GameValue A1IsKindOf(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    const RString type = ObjGetType(state, oper1);
+    const RString base = oper2;
+    if (type.GetLength() == 0 || base.GetLength() == 0)
+        return GameValue(false);
+    if (CfgDerived(Pars.FindEntry("CfgVehicles"), type, base))
+        return GameValue(true);
+    if (Poseidon::Arma1Compat::Active())
+    {
+        if (_strnicmp(type, "A1x_", 4) == 0)
+        {
+            const ParamEntry* a1 = Poseidon::Arma1Compat::FindConfigClass("CfgVehicles", (const char*)type + 4);
+            const ParamEntry* a1Base = Poseidon::Arma1Compat::FindConfigClass("CfgVehicles", base);
+            const ParamClass* tc = a1 ? a1->GetClassInterface() : nullptr;
+            const ParamClass* bc = a1Base ? a1Base->GetClassInterface() : nullptr;
+            if (tc && bc && (tc == bc || tc->IsDerivedFrom(*bc)))
+                return GameValue(true);
+        }
+        const RString cwaBase = Poseidon::Arma1Compat::ResolveVehicleClass(base);
+        if (cwaBase != base && CfgDerived(Pars.FindEntry("CfgVehicles"), type, cwaBase))
+            return GameValue(true);
+    }
+    return GameValue(false);
+}
+
 // compile: code is a string here, so compiling is the identity
 static GameValue A1Compile(const GameState*, GameValuePar oper1)
 {
@@ -1444,6 +1481,8 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameScalar, "distance", function, A1Distance, GameArray, GameObject | GameArray),
         GameOperator(GameScalar, "distance", function, A1Distance, GameObject, GameArray),
         GameOperator(GameNothing, "moveInTurret", function, A1MoveInTurret, GameObject, GameArray),
+        GameOperator(GameBool, "isKindOf", function, A1IsKindOf, GameObject, GameString),
+        GameOperator(GameNothing, "assignTeam", function, A1IgnoredBinary, GameObject, GameString),
         GameOperator(GameNothing, "setPos", function, ObjSetPos, GameObject, GameArray),
         GameOperator(GameNothing, "setPosASL", function, ObjSetPosASL, GameObject, GameArray),
         GameOperator(GameNothing, "setDir", function, ObjSetDir, GameObject, GameScalar),

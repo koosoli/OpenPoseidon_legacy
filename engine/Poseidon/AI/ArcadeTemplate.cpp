@@ -1833,6 +1833,40 @@ int ArcadeTemplate::SplitOversizedGroups()
     return created;
 }
 
+bool ArcadeTemplate::PromotePlayableToPlayer()
+{
+    if (FindPlayer())
+        return false;
+    for (int i = 0; i < groups.Size(); i++)
+    {
+        for (int j = 0; j < groups[i].units.Size(); j++)
+        {
+            ArcadeUnitInfo& u = groups[i].units[j];
+            switch (u.player)
+            {
+                case APPlayableD:
+                case APPlayableDG:
+                    u.player = APPlayerDriver;
+                    break;
+                case APPlayableG:
+                    u.player = APPlayerGunner;
+                    break;
+                case APPlayableC:
+                case APPlayableCD:
+                case APPlayableCG:
+                case APPlayableCDG:
+                    u.player = APPlayerCommander;
+                    break;
+                default:
+                    continue;
+            }
+            LOG_INFO(Mission, "Arma 1: no player unit; playable '{}' in group {} plays", (const char*)u.vehicle, i);
+            return true;
+        }
+    }
+    return false;
+}
+
 bool ArcadeTemplate::IsConsistent(Display* disp, bool multiplayer)
 {
     int nPlayers1 = 0;
