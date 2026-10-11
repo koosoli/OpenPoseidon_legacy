@@ -21,7 +21,7 @@ namespace
 // -- by hand, deliberately -- whenever their output changes for input that did
 // not. It is NOT a build stamp: a rebuild that changes nothing must not
 // invalidate every cache in existence.
-constexpr int kModelProducerVersion = 1;
+constexpr int kModelProducerVersion = 2; // 2: ODOL 40 bounding centre in metadata
 
 // 512 MiB, sized against the measured corpus rather than picked round.
 //

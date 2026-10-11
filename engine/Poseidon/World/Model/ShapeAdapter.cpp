@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <mutex>
 #include <memory>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
@@ -517,6 +518,20 @@ static RString Arma1CrewProxyStandIn(const RString& modelName)
     std::string leaf(base);
     for (char& c : leaf)
         c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    // Arma 1's own CfgNonAIVehicles says what the proxy is; the name heuristics
+    // below are the fallback for names it does not list.
+    std::string a1Simulation;
+    int a1Position = -1;
+    if (Arma1Compat::ProxyKind(modelName, a1Simulation, a1Position))
+    {
+        const char* kind = a1Simulation == "proxyweapon"      ? "Weapon"
+                           : a1Simulation == "proxysecweapon" ? "SecWeapon"
+                           : a1Simulation == "proxyhandgun"   ? "HandGun"
+                           : a1Simulation == "flag"           ? "Flag"
+                                                              : nullptr;
+        if (kind && (Pars >> "CfgNonAIVehicles").FindEntry(RString("Proxy") + RString(kind)))
+            return RString(kind);
+    }
     if (leaf.rfind("view", 0) == 0 || leaf.find("out") != std::string::npos)
         return RString();
     int position = -1; // CrewPosition: 0 driver, 1 gunner, 2 commander, 3 cargo
@@ -529,6 +544,8 @@ static RString Arma1CrewProxyStandIn(const RString& modelName)
         position = 1;
     else if (leaf.find("driver") != std::string::npos || leaf.find("pilot") != std::string::npos)
         position = 0;
+    if (a1Position >= 0)
+        position = a1Position;
     if (position < 0)
         return RString();
 
@@ -1616,6 +1633,19 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
         shape->_minMax[1] = ::Vector3(model.boundingBox.max.x, model.boundingBox.max.y, model.boundingBox.max.z);
         shape->_boundingCenter = ::Vector3(model.boundingCenter.x, model.boundingCenter.y, model.boundingCenter.z);
         shape->_geometryCenter = ::Vector3(model.geometryCenter.x, model.geometryCenter.y, model.geometryCenter.z);
+        // Arma 1 (ODOL 40): vertices are stored around the binariser's bounding centre,
+        // the RTM animations in the source model's space. The animation code poses
+        // around this; drawing keeps the zero bounding centre it always had.
+        shape->_animationOrigin = ::Vector3(0, 0, 0);
+        if (const auto centre = model.metadata.find("odolBoundingCenter"); centre != model.metadata.end())
+        {
+            float x = 0, y = 0, z = 0;
+            if (std::sscanf(centre->second.c_str(), "%f %f %f", &x, &y, &z) == 3)
+            {
+                // the source origin, in the centred coordinates the vertices use
+                shape->_animationOrigin = reversed ? ::Vector3(x, -y, z) : ::Vector3(-x, -y, -z);
+            }
+        }
         shape->_aimingCenter = ::Vector3(model.aimingCenter.x, model.aimingCenter.y, model.aimingCenter.z);
         shape->_centerOfMass = ::Vector3(model.centerOfMass.x, model.centerOfMass.y, model.centerOfMass.z);
         shape->_color = PackedColor(model.color);

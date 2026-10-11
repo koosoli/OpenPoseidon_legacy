@@ -1276,7 +1276,8 @@ void AnimationRT::PrepareMatrices(Matrix4Array& matrix, float time, float factor
     }
 }
 
-Vector3 AnimationRT::Point(const WeightInfo& lWeights, LODShape* lShape, int level, float time, int index) const
+Vector3 AnimationRT::Point(const WeightInfo& lWeights, LODShape* lShape, int level, float time, int index,
+                           Vector3Par origin) const
 {
     if (index < 0)
     {
@@ -1318,7 +1319,7 @@ Vector3 AnimationRT::Point(const WeightInfo& lWeights, LODShape* lShape, int lev
     shape->SaveOriginalPos();
 
     PoseidonAssert(lShape->BoundingCenter().SquareSize() < 1e-10);
-    Vector3 pos = shape->OrigPos(index);
+    Vector3 pos = shape->OrigPos(index) - origin;
 
     Vector3 res = VZero;
     float f1 = 1 - interpol;
@@ -1336,7 +1337,7 @@ Vector3 AnimationRT::Point(const WeightInfo& lWeights, LODShape* lShape, int lev
     }
 
     PoseidonAssert(lShape->BoundingCenter().SquareSize() < 1e-10);
-    return res;
+    return res + origin; // the weights sum to one
 }
 
 void AnimationRT::Matrix(Matrix4& mat, float time, const AnimationRTWeight& wgt) const

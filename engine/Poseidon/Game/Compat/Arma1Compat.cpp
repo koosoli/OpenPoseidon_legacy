@@ -70,7 +70,11 @@ const fs::path& RootPath()
     return root;
 }
 
-void MountFolder(const fs::path& folder, bool missionBanks, const char* remountPrefix = nullptr)
+// `missionRoot`: single/multiplayer mission archives declare only "M09ConvoyAttack"
+// as their prefix, while the mission loader needs the world suffix that is in the
+// FILE name ("m09convoyattack.sara"). They are mounted as <missionRoot>\<file stem>\.
+void MountFolder(const fs::path& folder, bool missionBanks, const char* remountPrefix = nullptr,
+                 const char* missionRoot = nullptr)
 {
     std::error_code ec;
     if (!fs::is_directory(folder, ec))
@@ -78,8 +82,13 @@ void MountFolder(const fs::path& folder, bool missionBanks, const char* remountP
     std::vector<fs::path> pbos;
     for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
     {
-        if (it->is_regular_file(ec) && Lower(it->path().extension().string()) == ".pbo")
-            pbos.push_back(it->path());
+        if (!it->is_regular_file(ec) || Lower(it->path().extension().string()) != ".pbo")
+            continue;
+        // CWR_* are the bundled Cold War Rearmed conversions (they need the @CWR mod,
+        // which is not mounted), not Arma 1 content.
+        if (Lower(it->path().filename().string()).rfind("cwr_", 0) == 0)
+            continue;
+        pbos.push_back(it->path());
     }
     std::sort(pbos.begin(), pbos.end());
     const std::string dir = folder.string() + "\\";
@@ -96,11 +105,20 @@ void MountFolder(const fs::path& folder, bool missionBanks, const char* remountP
             // own folders; they are re-mounted under a private name instead.
             if (remountPrefix)
                 bank.SetPrefix(RString(remountPrefix) + RString(Lower(pbo.stem().string()).c_str()) + RString("\\"));
+            else if (missionRoot)
+                bank.SetPrefix(RString(missionRoot) + RString("\\") + RString(Lower(pbo.stem().string()).c_str()) +
+                               RString("\\"));
             std::string prefix = (const char*)bank.GetPrefix();
             AllBankPrefixesMutable().push_back(prefix);
             while (!prefix.empty() && (prefix.back() == '\\' || prefix.back() == '/'))
                 prefix.pop_back();
-            if (!remountPrefix && (missionBanks || Lower(prefix).find("missions") != std::string::npos))
+            if (missionRoot)
+            {
+                if (std::find(MissionBankPrefixes().begin(), MissionBankPrefixes().end(), missionRoot) ==
+                    MissionBankPrefixes().end())
+                    MissionBankPrefixes().push_back(missionRoot);
+            }
+            else if (!remountPrefix && (missionBanks || Lower(prefix).find("missions") != std::string::npos))
                 MissionBankPrefixes().push_back(prefix);
         }
         else
@@ -331,7 +349,8 @@ void MountArchives()
     MountFolder(root / "DBE1" / "AddOns", false);
     MountFolder(root / "Campaigns", true);
     MountFolder(root / "DBE1" / "Campaigns", true);
-    MountFolder(root / "Missions", true);
+    MountFolder(root / "Missions", true, nullptr, "arma1\\missions");
+    MountFolder(root / "MPMissions", true, nullptr, "arma1\\mpmissions");
     LOG_INFO(Mission, "Arma 1: mounted {} read-only from {} ({} mission archives)",
              "AddOns/Campaigns", root.string(), MissionBankPrefixes().size());
 }

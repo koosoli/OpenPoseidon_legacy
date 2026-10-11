@@ -914,6 +914,10 @@ void Man::ApplyAnimation(int level, RStringB move, float time)
         // moved, i.e. the face would come off the head.
         MATRIX_4_ARRAY(matrix, 128);
         anim->PrepareMatrices(matrix, time, 1);
+        // Arma 1 shapes are stored around their bounding centre (see PrepareBasePose).
+        if (const Vector3 o = GetShape()->AnimationOrigin(); o.SquareSize() > 1e-8f)
+            for (int i = 0; i < matrix.Size(); i++)
+                matrix[i].SetPosition(matrix[i].FastTransform(-o) + o);
         if (matrix.Size() > 0)
         {
             // AnimationRT::Apply returns early on an animation with no phases; matching

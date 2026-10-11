@@ -788,6 +788,11 @@ class LODShape: public RefCountWithLinks
 	Vector3 _boundingCenter;
 	// bounding sphere or geometry center
 	Vector3 _geometryCenter;
+	// Where the source model's own origin lies in these (centred) coordinates, for
+	// skeletal animation authored in the source space. Zero for everything the engine
+	// drew before (OFP shapes are animated where they are); an Arma 1 ODOL stores its
+	// vertices around the bounding centre and leaves _boundingCenter at zero for drawing.
+	Vector3 _animationOrigin;
 
 	// center of mass
 	Vector3 _centerOfMass;
@@ -1023,6 +1028,7 @@ class LODShape: public RefCountWithLinks
 	uint64_t QueryPolicyRevision() const {return _queryPolicyRevision;}
 	float BoundingSphere() const {return _boundingSphere;}
 	Vector3Val BoundingCenter() const {return _boundingCenter;}
+	Vector3Val AnimationOrigin() const {return _animationOrigin;}
 	float GeometrySphere() const {return _geometrySphere;}
 	Vector3Val GeometryCenter() const {return _geometryCenter;}
 	Vector3Val AimingCenter() const {return _aimingCenter;}

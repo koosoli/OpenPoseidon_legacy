@@ -42,6 +42,12 @@ const ParamEntry* FindConfigClass(const char* root, const char* name);
 // `cwaClass` when there is no usable Arma 1 model.
 RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass);
 
+// What an Arma 1 proxy model path stands for, from Arma 1's own CfgNonAIVehicles
+// ("\\ca\\weapons\\ak_47_v58_proxy" -> ProxyAK_47_v58_Proxy, simulation "proxyweapon";
+// "...\\uh_60\\pilot" -> ProxyPilot, "proxycrew" at crew position 0). Lower-case
+// simulation; crewPosition 0 driver, 1 gunner, 2 commander, 3 cargo, else -1.
+bool ProxyKind(const char* modelName, std::string& simulation, int& crewPosition);
+
 // Returns the class to spawn for a mission/script class name. Classes CWA defines
 // are returned unchanged; Arma 1-only classes map to a CWA counterpart.
 RString ResolveVehicleClass(const RString& className);

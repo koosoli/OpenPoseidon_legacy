@@ -9,6 +9,7 @@
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <cctype>
@@ -282,6 +283,17 @@ class ODOLLoader
         model.armor    = info.armor;
         model.invArmor = info.invArmor;
         model.centerOfMass = Vector3(info.centerOfMass.x, info.centerOfMass.y, info.centerOfMass.z);
+        // Arma 1 (ODOL 40) stores vertices relative to the bounding centre, while its
+        // RTM animations are authored in the source model's space. The centre is not
+        // applied to drawing (every proxy and grounding offset assumes zero); it is
+        // carried for the animation code, which needs it to pose a skinned man.
+        if (info.boundingCenter.x != 0.0f || info.boundingCenter.y != 0.0f || info.boundingCenter.z != 0.0f)
+        {
+            char centre[96];
+            std::snprintf(centre, sizeof(centre), "%.6f %.6f %.6f", info.boundingCenter.x, info.boundingCenter.y,
+                          info.boundingCenter.z);
+            model.metadata["odolBoundingCenter"] = centre;
+        }
         for (int row = 0; row < 3; ++row)
         {
             model.invInertia[row * 3 + 0] = info.invInertia[row].x;

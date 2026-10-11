@@ -2020,6 +2020,27 @@ RString GetBaseSubdirectory();
 RString GetCampaignSaveDirectory(RString campaign);
 bool ParseMission(bool);
 void StartCampaign(RString, Display*);
+bool StartCampaignAt(RString, RString, Display*);
+
+// --arma1-mission naming a mission of an Arma 1 campaign ("campaigns\\ca\\missions\\
+// m09convoyattack.sara"): start that campaign AT this mission, so intro, briefing,
+// debriefing and the following missions run as in the campaign.
+static bool StartArma1CampaignMission(const char* missionFile)
+{
+    const std::string base = Arma1Compat::CampaignBaseForMission(missionFile); // "campaigns/ca/"
+    if (base.size() < 12)
+        return false;
+    const std::string campaign = base.substr(10, base.size() - 11);
+    std::string file = missionFile;
+    std::replace(file.begin(), file.end(), '\\', '/');
+    const size_t end = file.rfind('/');
+    if (end == std::string::npos || end == 0)
+        return false;
+    const size_t start = file.rfind('/', end - 1);
+    const std::string templ = start == std::string::npos ? file.substr(0, end) : file.substr(start + 1, end - start - 1);
+    LOG_INFO(Core, "Arma 1: '{}' is mission '{}' of campaign '{}'", missionFile, templ, campaign);
+    return StartCampaignAt(RString(campaign.c_str()), RString(templ.c_str()), nullptr);
+}
 void OpenEditor();
 } // namespace Poseidon
 
@@ -2825,6 +2846,10 @@ void World::StartIntro()
                             GApp->m_closeRequest = true;
                         }
                     }
+                }
+                else if (!AppConfig::Instance().GetArma1Mission().empty() && StartArma1CampaignMission(LoadFile))
+                {
+                    // a campaign mission: played inside its campaign, which then goes on
                 }
                 else if (!AppConfig::Instance().GetArma1Mission().empty())
                 {

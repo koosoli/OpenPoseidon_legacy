@@ -778,6 +778,32 @@ const ParamEntry* FindConfigClass(const char* root, const char* name)
     return cls ? cls->FindEntry(name) : nullptr;
 }
 
+bool ProxyKind(const char* modelName, std::string& simulation, int& crewPosition)
+{
+    simulation.clear();
+    crewPosition = -1;
+    if (!Active() || !ConfigLoaded() || !modelName || !*modelName)
+        return false;
+    const char* leaf = modelName;
+    for (const char* q = modelName; *q; q++)
+        if (*q == '\\' || *q == '/')
+            leaf = q + 1;
+    std::string name = leaf;
+    // "cargo.01" style sequence suffixes are not part of the class name
+    if (const size_t dot = name.find('.'); dot != std::string::npos)
+        name.resize(dot);
+    const ParamEntry* cls = FindConfigClass("CfgNonAIVehicles", ("Proxy" + name).c_str());
+    if (!cls || !cls->IsClass())
+        return false;
+    simulation = Lower(StringValue(*cls, "simulation"));
+    if (simulation == "proxycrew")
+    {
+        const std::string pos = Lower(StringValue(*cls, "crewPosition"));
+        crewPosition = pos == "cpdriver" ? 0 : pos == "cpgunner" ? 1 : pos == "cpcommander" ? 2 : pos == "cpcargo" ? 3 : -1;
+    }
+    return !simulation.empty();
+}
+
 RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
 {
     if (!Active() || !ConfigLoaded())

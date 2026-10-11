@@ -36,6 +36,10 @@ struct Odol73Preamble
     float viewDensity = 0.0f;
     Vector3 bboxMin;
     Vector3 bboxMax;
+    // The binariser's bounding centre: the vertices are stored relative to it. Not
+    // used for drawing (see the readers); kept so skinned animation, which is
+    // authored in the source model's own space, can be applied there (Arma 1 men).
+    Vector3 boundingCenter;
 
     // COL-001: the physical body. These sit in the same ModelInfo prefix every
     // later revision (40, 48-54, 73) reads, and every one of those readers used
