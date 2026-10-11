@@ -1070,6 +1070,32 @@ static GameValue A1SwitchDo(const GameState* state, GameValuePar oper1, GameValu
     return sw.result;
 }
 
+// Arma 1 createVehicle(Local): "#particlesource"/"#lightpoint" engine objects have no
+// counterpart here; they come back as objNull and their set* commands are ignored.
+static GameValue A1VehCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    const RString type = oper1;
+    if (type.GetLength() > 0 && type[0] == '#')
+        return GameValueExt((Object*)nullptr);
+    return VehCreate(state, oper1, oper2);
+}
+
+// "title" hintC [texts] / "title" hintC "text": the texts as one hint
+static GameValue A1HintC(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    RString text = oper1;
+    if (oper2.GetType() == GameString)
+        text = text + RString("\n") + RString(oper2);
+    else if (oper2.GetType() == GameArray)
+    {
+        const GameArrayType& a = oper2;
+        for (int i = 0; i < a.Size(); i++)
+            if (a[i].GetType() == GameString)
+                text = text + RString("\n") + RString(a[i]);
+    }
+    return ShowHintC(state, GameValue(text));
+}
+
 // compile: code is a string here, so compiling is the identity
 static GameValue A1Compile(const GameState*, GameValuePar oper1)
 {
@@ -1710,7 +1736,19 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "addWeaponCargo", function, ObjAddWeaponCargo, GameObject, GameArray),
         GameOperator(GameNothing, "addMagazineCargo", function, ObjAddMagazineCargo, GameObject, GameArray),
 
-        GameOperator(GameObject, "createVehicle", function, VehCreate, GameString, GameArray),
+        GameOperator(GameObject, "createVehicle", function, A1VehCreate, GameString, GameArray),
+        GameOperator(GameObject, "createVehicleLocal", function, A1VehCreate, GameString, GameArray),
+        GameOperator(GameNothing, "joinSilent", function, ListJoin, GameArray, GameObjectOrGroup),
+        GameOperator(GameNothing, "hintC", function, A1HintC, GameString, GameString | GameArray),
+        GameOperator(GameNothing, "setRank", function, A1IgnoredBinary, GameObject, GameString),
+        GameOperator(GameNothing, "setParticleParams", function, A1IgnoredBinary, GameObject, GameArray),
+        GameOperator(GameNothing, "setParticleRandom", function, A1IgnoredBinary, GameObject, GameArray),
+        GameOperator(GameNothing, "setParticleCircle", function, A1IgnoredBinary, GameObject, GameArray),
+        GameOperator(GameNothing, "setDropInterval", function, A1IgnoredBinary, GameObject, GameScalar),
+        GameOperator(GameNothing, "setLightColor", function, A1IgnoredBinary, GameObject, GameArray),
+        GameOperator(GameNothing, "setLightAmbient", function, A1IgnoredBinary, GameObject, GameArray),
+        GameOperator(GameNothing, "setLightBrightness", function, A1IgnoredBinary, GameObject, GameScalar),
+        GameOperator(GameNothing, "lightAttachObject", function, A1IgnoredBinary, GameObject, GameArray),
         GameOperator(GameNothing, "createUnit", function, UnitCreate, GameString, GameArray),
         GameOperator(GameObject, "createUnit", function, A1UnitCreate, GameGroup, GameArray),
         GameOperator(GameNothing, "setVehicleVarName", function, A1IgnoredBinary, GameObject, GameString),
