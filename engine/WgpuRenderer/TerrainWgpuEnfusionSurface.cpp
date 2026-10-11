@@ -444,6 +444,27 @@ Ref<Texture> TerrainWgpu::BuildEnfusionSatmap(const Landscape& land)
                  missing, failed);
         return {};
     }
+    // Orientation proof, with a denominator: the satellite is transparent under the road ribbons,
+    // and the loader marks road cells from the ribbons themselves. Rows running with world z
+    // must put road cells on transparent texels far more often than the flipped reading does.
+    {
+        const int range = land.GetLandRange();
+        size_t roads = 0, hitAsIs = 0, hitFlipped = 0;
+        for (int z = 0; z < range; ++z)
+            for (int x = 0; x < range; ++x)
+            {
+                if (!land.GetEnfusionRoadCell(z, x))
+                    continue;
+                ++roads;
+                const int sx = std::min(edge - 1, static_cast<int>((x + 0.5) * edge / range));
+                const int sz = std::min(edge - 1, static_cast<int>((z + 0.5) * edge / range));
+                hitAsIs += rgba[(static_cast<size_t>(sz) * edge + sx) * 4 + 3] < 128 ? 1 : 0;
+                hitFlipped += rgba[(static_cast<size_t>(edge - 1 - sz) * edge + sx) * 4 + 3] < 128 ? 1 : 0;
+            }
+        LOG_INFO(Graphics, "Wgpu Enfusion satmap orientation: of {} road cells, {:.1f}% sit on transparent texels "
+                           "as composited, {:.1f}% with rows flipped",
+                 roads, roads ? 100.0 * hitAsIs / roads : 0.0, roads ? 100.0 * hitFlipped / roads : 0.0);
+    }
     auto* bank = dynamic_cast<TextureBankWgpu*>(GEngine != nullptr ? GEngine->TextBank() : nullptr);
     if (bank == nullptr)
         return {};
