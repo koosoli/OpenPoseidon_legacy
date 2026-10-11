@@ -593,6 +593,22 @@ static GameValue Abs(const GameState* state, GameValuePar oper1)
     return (float)fabs((float)oper1);
 }
 
+// Arma 1 additions (round half away from zero, as Arma does)
+static GameValue Round(const GameState* state, GameValuePar oper1)
+{
+    return (float)std::round((float)oper1);
+}
+
+static GameValue Floor(const GameState* state, GameValuePar oper1)
+{
+    return (float)std::floor((float)oper1);
+}
+
+static GameValue Ceil(const GameState* state, GameValuePar oper1)
+{
+    return (float)std::ceil((float)oper1);
+}
+
 static GameValue BoolNot(const GameState* state, GameValuePar oper1)
 {
     return !bool(oper1);
@@ -1178,6 +1194,9 @@ static const GameFunction* GetDefaultUnary(int* outSize = nullptr)
         GameFunction(GameScalar, "exp", Exp, GameScalar),
         GameFunction(GameScalar, "sqrt", Odmocnina, GameScalar),
         GameFunction(GameScalar, "abs", Abs, GameScalar),
+        GameFunction(GameScalar, "round", Round, GameScalar),
+        GameFunction(GameScalar, "floor", Floor, GameScalar),
+        GameFunction(GameScalar, "ceil", Ceil, GameScalar),
         GameFunction(GameScalar, "+", Plus, GameScalar), // known special cases
         GameFunction(GameArray, "+", Plus, GameArray),   // replication
         GameFunction(GameScalar, "-", Minus, GameScalar),

@@ -456,6 +456,10 @@ void DetectVoiceLanguages(RString root, MissionLanguageDetector::MissionLanguage
     for (int i = 0; i < cfgSounds->GetEntryCount(); ++i)
     {
         const ParamEntry& soundClass = cfgSounds->GetEntry(i);
+        // CfgSounds also holds the `sounds[]` list; asking an array for a member is a
+        // config error that latched and refused the mission (every Arma 1 campaign).
+        if (!soundClass.IsClass())
+            continue;
         const ParamEntry* sound = soundClass.FindEntry("sound");
         if (!sound || !sound->IsArray() || sound->GetSize() <= 0)
             continue;
@@ -503,6 +507,10 @@ void DetectVoiceLanguages(const QFBank& bank, MissionLanguageDetector::MissionLa
     for (int i = 0; i < cfgSounds->GetEntryCount(); ++i)
     {
         const ParamEntry& soundClass = cfgSounds->GetEntry(i);
+        // CfgSounds also holds the `sounds[]` list; asking an array for a member is a
+        // config error that latched and refused the mission (every Arma 1 campaign).
+        if (!soundClass.IsClass())
+            continue;
         const ParamEntry* sound = soundClass.FindEntry("sound");
         if (!sound || !sound->IsArray() || sound->GetSize() <= 0)
             continue;
