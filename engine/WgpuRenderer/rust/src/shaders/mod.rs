@@ -117,6 +117,9 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
         Ok("terms") => { defs.insert("GRASS_DEBUG_TERMS".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
         _ => {}
     }
+    if std::env::var("WGR_GRASS_LEGACY_SUN").as_deref() == Ok("1") {
+        defs.insert("GRASS_LEGACY_SUN_SIGN".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
     if std::env::var("WGR_COALESCED_PCF").as_deref() == Ok("1") {
         defs.insert("COALESCED_PCF".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }

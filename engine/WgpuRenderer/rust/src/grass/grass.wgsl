@@ -1767,7 +1767,15 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let upright = vec3<f32>(0.0, 1.0, 0.0);
     let resolved_normal = normalize(mix(normalize(in.normal), upright, 0.24));
     let n = normalize(mix(upright, resolved_normal, shading_detail));
+    // frame.sun_dir_world is the light's TRAVEL direction (lighting.wgsl); surface -> sun is its
+    // negation. Grass took it un-negated from its first commit, so the sun term was zero at
+    // every elevation and the field lived on sky fill alone (black on native Reforger cover).
+    // WGR_GRASS_LEGACY_SUN=1 restores the old sign for an A/B.
+#ifdef GRASS_LEGACY_SUN_SIGN
     let light_dir = normalize(frame.sun_dir_world.xyz);
+#else
+    let light_dir = normalize(-frame.sun_dir_world.xyz);
+#endif
     let ndl = max(dot(n, light_dir), 0.0);
     let wrap = max((dot(n, light_dir) + 0.35) / 1.35, 0.0);
     let terrain_shadow = terrain_sun_shadow(world.xz, world.y);
@@ -1851,7 +1859,15 @@ fn fs_grass_far(in: VsOut) -> @location(0) vec4<f32> {
         clump_noise(world.xz - vec2<f32>(0.0, 1.0), 0.075, 0x4f93d71bu);
     let macro_normal = normalize(vec3<f32>(-macro_dx * 0.24, 1.0, -macro_dz * 0.24));
     let n = normalize(mix(mix(in.normal, macro_normal, 0.42), vec3<f32>(0.0, 1.0, 0.0), 0.48));
+    // frame.sun_dir_world is the light's TRAVEL direction (lighting.wgsl); surface -> sun is its
+    // negation. Grass took it un-negated from its first commit, so the sun term was zero at
+    // every elevation and the field lived on sky fill alone (black on native Reforger cover).
+    // WGR_GRASS_LEGACY_SUN=1 restores the old sign for an A/B.
+#ifdef GRASS_LEGACY_SUN_SIGN
     let light_dir = normalize(frame.sun_dir_world.xyz);
+#else
+    let light_dir = normalize(-frame.sun_dir_world.xyz);
+#endif
     let diffuse = max((dot(n, light_dir) + 0.35) / 1.35, 0.0);
     let terrain_shadow = terrain_sun_shadow(world.xz, world.y);
     let cloud_lit = cloud_sun_shadow(world.xz);
@@ -2069,7 +2085,15 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     // upright normal per texel, which is view-stable and gives the silhouette
     // real relief instead of one flat value across the whole plate.
     let n = tuft_contour_normal(in.blade_uv.xy, i32(in.blade_uv.z), in.normal);
+    // frame.sun_dir_world is the light's TRAVEL direction (lighting.wgsl); surface -> sun is its
+    // negation. Grass took it un-negated from its first commit, so the sun term was zero at
+    // every elevation and the field lived on sky fill alone (black on native Reforger cover).
+    // WGR_GRASS_LEGACY_SUN=1 restores the old sign for an A/B.
+#ifdef GRASS_LEGACY_SUN_SIGN
     let light_dir = normalize(frame.sun_dir_world.xyz);
+#else
+    let light_dir = normalize(-frame.sun_dir_world.xyz);
+#endif
     let ndl = max(dot(n, light_dir), 0.0);
     let wrap = max((dot(n, light_dir) + 0.35) / 1.35, 0.0);
     let terrain_shadow = terrain_sun_shadow(world.xz, world.y);

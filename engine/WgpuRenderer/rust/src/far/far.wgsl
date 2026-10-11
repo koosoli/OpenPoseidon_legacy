@@ -231,7 +231,15 @@ struct VsOut {
 // far grass ring made for as long as it carried two hardcoded greens.
 fn far_shade(albedo: vec3<f32>, normal: vec3<f32>, world_rel: vec3<f32>) -> vec4<f32> {
     let world = world_rel + frame.cam_pos.xyz;
+    // frame.sun_dir_world is the light's TRAVEL direction (lighting.wgsl); surface -> sun is its
+    // negation. The far proxies took it un-negated from its first commit, so the sun term was zero at
+    // every elevation and they lived on sky fill alone.
+    // WGR_GRASS_LEGACY_SUN=1 restores the old sign here too.
+#ifdef GRASS_LEGACY_SUN_SIGN
     let light_dir = normalize(frame.sun_dir_world.xyz);
+#else
+    let light_dir = normalize(-frame.sun_dir_world.xyz);
+#endif
     let diffuse = max((dot(normal, light_dir) + 0.35) / 1.35, 0.0);
     let direct = frame.sun_diffuse.rgb * diffuse * cloud_sun_shadow(world.xz);
     let ambient = sky_irradiance(normal);
