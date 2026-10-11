@@ -166,6 +166,7 @@ void GameStateStringtableInfoFunctions::DisplayErrorMessage(const char* position
         // its shutdown sequence (incl. test-mission cleanup, so we don't
         // pollute packages/<pkg>/Missions/).
         LOG_ERROR(Script, "Script error at '{}': {} (test mode — aborting)", position, error);
+        GameState::s_abortLoops = true;
         if (Poseidon::GApp)
         {
             if (Poseidon::GApp->m_exitCode == 0)

@@ -812,6 +812,8 @@ static GameValue StringRepeat(const GameState* state, GameValuePar oper1, GameVa
             state->SetError(EvalGen);
             break;
         }
+        if (GameState::s_abortLoops)
+            break;
         // test condition
         {
             GameVarSpace local(state->GetContext());
@@ -967,6 +969,8 @@ static GameValue ForDoOp(const GameState* state, GameValuePar oper1, GameValuePa
             state->SetError(EvalGen);
             break;
         }
+        if (GameState::s_abortLoops)
+            break;
         GameVarSpace local(state->GetContext());
         state->BeginContext(&local);
         state->VarSetLocal(toData->GetVar(), GameValue(i));
@@ -1277,6 +1281,7 @@ void GameState::TypeErrorOperator(const char* name, GameType left, GameType righ
     }
     else
     {
+        RptF("Operator %s: no overload for the operand types 0x%x, 0x%x", name, (unsigned)left, (unsigned)right);
         SetError(EvalGen);
     }
 }
@@ -1299,6 +1304,7 @@ void GameState::TypeErrorFunction(const char* name, GameType right) const
     }
     else
     {
+        RptF("Function %s: no overload for the operand type 0x%x", name, (unsigned)right);
         SetError(EvalGen);
     }
 }

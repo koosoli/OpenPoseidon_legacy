@@ -22,6 +22,7 @@
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/RStringArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 
@@ -1757,6 +1758,81 @@ void ArcadeTemplate::CheckSynchro()
     nextSyncId = maxSync + 1;
 }
 
+namespace
+{
+int CrewSeats(const RString& vehicle)
+{
+    const VehicleType* type = dynamic_cast<const VehicleType*>(VehicleTypes.New(vehicle));
+    if (!type)
+        return 1;
+    const int seats = (type->HasDriver() ? 1 : 0) + (type->HasCommander() ? 1 : 0) + (type->HasGunner() ? 1 : 0);
+    return seats > 0 ? seats : 0;
+}
+} // namespace
+
+int ArcadeTemplate::SplitOversizedGroups()
+{
+    // Arma 1 lifted the 12-unit group limit; this engine's AIGroup holds a fixed
+    // MAX_UNITS_PER_GROUP. The units that do not fit go, in order, into new groups of
+    // the same side that follow copies of the original waypoints (without their
+    // synchronisations, which stay with the original group).
+    int created = 0;
+    const int n = groups.Size();
+    for (int i = 0; i < n; i++)
+    {
+        int seats = 0;
+        int cut = -1;
+        for (int j = 0; j < groups[i].units.Size(); j++)
+        {
+            seats += CrewSeats(groups[i].units[j].vehicle);
+            if (seats > MAX_UNITS_PER_GROUP)
+            {
+                cut = j;
+                break;
+            }
+        }
+        if (cut <= 0)
+            continue;
+        AutoArray<ArcadeUnitInfo> rest;
+        for (int j = cut; j < groups[i].units.Size(); j++)
+            rest.Add(groups[i].units[j]);
+        groups[i].units.Resize(cut);
+        const TargetSide side = groups[i].side;
+        const AutoArray<ArcadeWaypointInfo> waypoints = groups[i].waypoints;
+        while (rest.Size() > 0)
+        {
+            ArcadeGroupInfo& g = groups.Append();
+            g.side = side;
+            g.waypoints = waypoints;
+            for (int w = 0; w < g.waypoints.Size(); w++)
+                g.waypoints[w].synchronizations.Clear();
+            int used = 0;
+            int take = 0;
+            while (take < rest.Size())
+            {
+                const int s = CrewSeats(rest[take].vehicle);
+                if (take > 0 && used + s > MAX_UNITS_PER_GROUP)
+                    break;
+                used += s;
+                take++;
+            }
+            for (int j = 0; j < take; j++)
+            {
+                g.units.Add(rest[j]);
+                g.units[j].leader = j == 0;
+            }
+            AutoArray<ArcadeUnitInfo> remaining;
+            for (int j = take; j < rest.Size(); j++)
+                remaining.Add(rest[j]);
+            rest = remaining;
+            created++;
+        }
+        LOG_INFO(Mission, "Arma 1: group {} exceeds {} crew seats; units from #{} moved into new groups ({} so far)",
+                 i, MAX_UNITS_PER_GROUP, cut, created);
+    }
+    return created;
+}
+
 bool ArcadeTemplate::IsConsistent(Display* disp, bool multiplayer)
 {
     int nPlayers1 = 0;
@@ -1828,6 +1904,8 @@ bool ArcadeTemplate::IsConsistent(Display* disp, bool multiplayer)
         AI_ERROR(nUnits > 0);
         if (nUnits > MAX_UNITS_PER_GROUP)
         {
+            LOG_WARN(Mission, "Mission rejected: group {} needs {} crew seats (limit {})", i, nUnits,
+                     MAX_UNITS_PER_GROUP);
             if (disp)
             {
                 char buffer[256];
@@ -1842,6 +1920,7 @@ bool ArcadeTemplate::IsConsistent(Display* disp, bool multiplayer)
 #if !_ENABLE_CHEATS
     if (!multiplayer && nPlayers1 == 0)
     {
+        LOG_WARN(Mission, "Mission rejected: no player unit");
         if (disp)
         {
             disp->CreateMsgBox(MB_BUTTON_OK, LocalizeString(IDS_MSG_NO_PLAYER));
@@ -1853,6 +1932,7 @@ bool ArcadeTemplate::IsConsistent(Display* disp, bool multiplayer)
     if (nWestGroups > MaxGroups || nEastGroups > MaxGroups || nGuerrilaGroups > MaxGroups ||
         nCivilianGroups > MaxGroups || nLogicGroups > MaxGroups)
     {
+        LOG_WARN(Mission, "Mission rejected: more than {} groups on one side", MaxGroups);
         if (disp)
         {
             char buffer[256];

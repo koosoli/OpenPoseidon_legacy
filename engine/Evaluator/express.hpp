@@ -852,6 +852,10 @@ struct GameTypeType : public Poseidon::Foundation::EnumName
     RString GetLastErrorText() const;
     int GetLastErrorPos() const;
 
+    //! Set when a script error is fatal (test mode): loops stop iterating, so a
+    //! failing while/for cannot spin the frame forever after the abort was requested.
+    static inline bool s_abortLoops = false;
+
     // evaluate an expression
     //! get actual context (started by BeginContext)
     GameVarSpace* GetContext() const;

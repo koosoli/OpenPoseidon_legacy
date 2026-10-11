@@ -210,6 +210,28 @@ static ParamEntryError& GetParamEntryError()
 }
 #pragma clang diagnostic pop
 
+// The last `class >> name` lookup that missed, so a later use of the error entry (the
+// classic "Size: '/' not an array") can say which entry was actually missing.
+namespace
+{
+thread_local const ParamClass* gLastMissClass = nullptr;
+thread_local char gLastMissName[64] = {};
+
+void NoteMiss(const ParamClass* cls, const char* name)
+{
+    gLastMissClass = cls;
+    ::strncpy(gLastMissName, name ? name : "", sizeof(gLastMissName) - 1);
+    gLastMissName[sizeof(gLastMissName) - 1] = 0;
+}
+
+RString LastMissContext()
+{
+    if (!gLastMissClass)
+        return RString("?");
+    return gLastMissClass->GetContext(gLastMissName);
+}
+} // namespace
+
 ParamEntry* ParamEntry::FindEntry(const RStringB& name, IParamVisibleTest& visible) const
 {
     NotClass(GetContext(), name);
@@ -457,7 +479,10 @@ void ParamEntry::SetValue(int index, int val)
 
 int ParamEntry::GetSize() const
 {
-    ErrorMessage(EMError, "Size: '%s' not an array", (const char*)GetContext());
+    if (this == &GetParamEntryError())
+        ErrorMessage(EMError, "Size: missing entry '%s' (not an array)", (const char*)LastMissContext());
+    else
+        ErrorMessage(EMError, "Size: '%s' not an array", (const char*)GetContext());
     return 0;
 }
 
@@ -1313,6 +1338,7 @@ const ParamEntry& ParamClass::operator>>(const char* name) const
     {
         return *entry;
     }
+    NoteMiss(this, name);
     LOG_DEBUG(Core, "ParamFile error: No entry '{}'", (const char*)GetContext(name));
     return GetParamEntryError();
 }

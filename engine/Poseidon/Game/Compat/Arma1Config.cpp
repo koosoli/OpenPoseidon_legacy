@@ -810,6 +810,51 @@ bool UsableCwaBase(const char* name, const std::string& sim, int side, bool need
     }
     return true;
 }
+
+// A concrete CWA class derived from abstract `base` (scope >= 2, else >= 1) with the same
+// simulation: the one that adds the fewest entries of its own, i.e. the plainest one, so
+// that as little as possible of its own character (ladders, animations, destruction)
+// rides along under the Arma 1 model. Cached per base; "" when there is none.
+RString ConcreteCwaDescendant(const char* base)
+{
+    static std::map<std::string, RString> cache;
+    const std::string key = Lower(base);
+    if (const auto it = cache.find(key); it != cache.end())
+        return it->second;
+    RString found;
+    const ParamEntry* vehicles = Pars.FindEntry("CfgVehicles");
+    const ParamEntry* baseEntry = CwaVehicle(base);
+    const ParamClass* b = baseEntry ? baseEntry->GetClassInterface() : nullptr;
+    if (vehicles && b)
+    {
+        const std::string sim = Lower(StringValue(*baseEntry, "simulation"));
+        int fewest = 0;
+        for (int want = 2; want >= 1 && found.GetLength() == 0; want--)
+        {
+            for (int i = 0; i < vehicles->GetEntryCount(); i++)
+            {
+                const ParamEntry& e = vehicles->GetEntry(i);
+                if (!e.IsClass())
+                    continue;
+                const ParamClass* c = e.GetClassInterface();
+                if (!c || c == b || !c->IsDerivedFrom(*b))
+                    continue;
+                const ParamEntry* scope = e.FindEntry("scope");
+                if (!scope || (int)*scope < want || Lower(StringValue(e, "simulation")) != sim)
+                    continue;
+                if (_strnicmp((const char*)e.GetName(), "A1x_", 4) == 0)
+                    continue;
+                if (found.GetLength() == 0 || e.GetEntryCount() < fewest)
+                {
+                    found = RString((const char*)e.GetName());
+                    fewest = e.GetEntryCount();
+                }
+            }
+        }
+    }
+    cache[key] = found;
+    return found;
+}
 } // namespace
 
 bool Arma1RapFileToText(const char* fileName, std::string& text)
@@ -889,15 +934,24 @@ RString FallbackCwaClass(const RString& a1Name)
     for (const Default& d : defaults)
         if (sim == d.sim && CwaVehicle(d.bySide[s]))
             return RString(d.bySide[s]);
-    // 3. any CWA ancestor at all (houses, things, fires, flags ...)
+    // 3. the nearest CWA ancestor at all (houses, things, fires, flags ...). An abstract
+    //    one (Strategic, ReammoBox, Fence: scope 0) is never instantiated by CWA itself and
+    //    lacks entries concrete classes carry -- creating it crashed Building's constructor
+    //    and tripped "Size: not an array" -- so it stands for its first concrete descendant.
     const ParamClass* c = a1->GetClassInterface();
     for (int guard = 0; c && guard < 40; guard++)
     {
         const char* base = c->GetBaseName();
         if (!base || !*base)
             break;
-        if (CwaVehicle(base))
-            return RString(base);
+        if (const ParamEntry* cwa = CwaVehicle(base))
+        {
+            const ParamEntry* scope = cwa->FindEntry("scope");
+            if (scope && (int)*scope >= 1)
+                return RString(base);
+            if (const RString concrete = ConcreteCwaDescendant(base); concrete.GetLength() > 0)
+                return concrete;
+        }
         const ParamEntry* next = FindConfigClass("CfgVehicles", base);
         c = next ? next->GetClassInterface() : nullptr;
     }
@@ -959,6 +1013,11 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     std::string text = "class CfgVehicles\r\n{\r\n\tclass " + std::string(cwaClass.Data()) + ";\r\n\tclass " +
                        generated + ": " + std::string(cwaClass.Data()) + "\r\n\t{\r\n";
     text += "\t\tmodel=\"" + model + "\";\r\n";
+    // A scope-0 base makes the generated class abstract too: VehicleTypes then builds a
+    // plain EntityAIType while NewVehicle still constructs by simulation (a Building on a
+    // type that is no BuildingType -- the 0xC0000005 in Building's constructor).
+    if (const ParamEntry* scope = cwa->FindEntry("scope"); !scope || (int)*scope < 1)
+        text += "\t\tscope=1;\r\n";
     const std::string displayName = StringValue(*a1, "displayName");
     if (!displayName.empty())
         text += "\t\tdisplayName=\"" + displayName + "\";\r\n";

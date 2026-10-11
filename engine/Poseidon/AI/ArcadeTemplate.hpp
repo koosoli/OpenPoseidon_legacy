@@ -189,6 +189,8 @@ struct ArcadeTemplate : public SerializeClass
 	LSError Serialize(ParamArchive &ar) override;
 
 	void CheckSynchro();
+	//! Arma 1 groups may exceed MAX_UNITS_PER_GROUP; the tail is moved into new groups
+	int SplitOversizedGroups();
 	ArcadeUnitInfo *FindUnit(int id, int &idGroup, int &idUnit);
 	ArcadeUnitInfo *FindPlayer();
 	ArcadeGroupInfo *FindPlayerGroup();

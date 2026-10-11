@@ -482,6 +482,17 @@ GameValue DeleteIdentity(const GameState* state, GameValuePar oper1);
 GameValue DeleteStatus(const GameState* state, GameValuePar oper1);
 GameValue DialogClose(const GameState* state, GameValuePar oper1);
 GameValue DialogCreate(const GameState* state, GameValuePar oper1);
+GameValue A1FindDisplay(const GameState* state, GameValuePar oper1);
+GameValue A1DisplayCtrl(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1DisplaySetEventHandler(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1CtrlShow(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1CtrlEnable(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1CtrlSetText(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1ButtonSetAction(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1CtrlSetFade(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1CtrlCommit(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1CtrlIgnored(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1CtrlCommitted(const GameState* state, GameValuePar oper1);
 GameValue DisableUserInput(const GameState* state, GameValuePar oper1);
 GameValue EnableRadio(const GameState* state, GameValuePar oper1);
 GameValue EstimatedTimeLeft(const GameState* state, GameValuePar oper1);
@@ -826,6 +837,7 @@ GameValue TriggerSetTimeout(const GameState* state, GameValuePar oper1, GameValu
 GameValue TriggerSetType(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue TriggerSynchronize(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ValueAdd(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ValueGet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue VehAddEventHandler(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -899,6 +911,52 @@ static GameValue A1CamPreloaded(const GameState*, GameValuePar)
     return GameValue(true);
 }
 
+// str: a value as text; a string comes back in quotes
+static GameValue A1Str(const GameState*, GameValuePar oper1)
+{
+    if (oper1.GetType() == GameString)
+        return GameValue(RString("\"") + RString(oper1) + RString("\""));
+    return GameValue(oper1.GetText());
+}
+
+static GameValue A1IgnoredBinary(const GameState*, GameValuePar, GameValuePar)
+{
+    return NOTHING;
+}
+
+static GameValue A1PreloadSound(const GameState*, GameValuePar)
+{
+    return GameValue(true); // sounds load when played
+}
+
+static GameValue A1Ignored(const GameState*, GameValuePar)
+{
+    return NOTHING; // setAperture, enableTeamSwitch, ...: no counterpart here
+}
+
+namespace Poseidon
+{
+int GetDaysInMonth(int year, int month);
+}
+
+// date: [year, month, day, hour, minute]
+static GameValue A1Date(const GameState*)
+{
+    int day = toIntFloor(Glob.clock.GetTimeInYear() / OneDay);
+    const int year = Glob.clock.GetYear();
+    int month = 0;
+    while (month < 11 && day >= Poseidon::GetDaysInMonth(year, month))
+        day -= Poseidon::GetDaysInMonth(year, month++);
+    const int minutes = toIntFloor(Glob.clock.GetTimeOfDay() * 24 * 60 + 0.01f);
+    GameArrayType date;
+    date.Add(GameValue((float)year));
+    date.Add(GameValue((float)(month + 1)));
+    date.Add(GameValue((float)(day + 1)));
+    date.Add(GameValue((float)(minutes / 60)));
+    date.Add(GameValue((float)(minutes % 60)));
+    return GameValue(date);
+}
+
 // unit/units doGetOut: leave the vehicle now, keep the assignment
 static GameValue A1DoGetOut(const GameState* state, GameValuePar oper1)
 {
@@ -940,6 +998,7 @@ static const GameNular* GetExtNular(int& count)
         GameNular(GameGroup, "grpNull", GrpNull),
         GameNular(GameScalar, "time", GameTime),
         GameNular(GameScalar, "dayTime", DayTime),
+        GameNular(GameArray, "date", A1Date),
         GameNular(GameBool, "cadetMode", CadetMode),
         GameNular(GameScalar, "benchmark", Benchmark),
         GameNular(GameScalar, "accTime", GetAcceleratedTime),
@@ -1014,6 +1073,10 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameBool, "isNull", ObjIsNull, GameObject),
         GameFunction(GameScalar, "execVM", ScriptExecVMUnary, GameString),
         GameFunction(GameBool, "camPreloaded", A1CamPreloaded, GameObject),
+        GameFunction(GameBool, "preloadSound", A1PreloadSound, GameString),
+        GameFunction(GameString, "str", A1Str, GameVoid),
+        GameFunction(GameNothing, "setAperture", A1Ignored, GameScalar),
+        GameFunction(GameNothing, "enableTeamSwitch", A1Ignored, GameBool),
         GameFunction(GameBool, "isNil", A1IsNil, GameString),
         GameFunction(GameNothing, "doGetOut", A1DoGetOut, GameObjectOrArray),
         GameFunction(GameNothing, "enableEnvironment", A1IgnoredUnary, GameBool),
@@ -1172,6 +1235,8 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameNothing, "estimatedTimeLeft", EstimatedTimeLeft, GameScalar),
 
         GameFunction(GameBool, "createDialog", DialogCreate, GameString),
+        GameFunction(GameScalar, "findDisplay", A1FindDisplay, GameScalar),
+        GameFunction(GameBool, "ctrlCommitted", A1CtrlCommitted, GameScalar),
         GameFunction(GameNothing, "closeDialog", DialogClose, GameScalar),
 
         GameFunction(GameBool, "ctrlVisible", CtrlVisible, GameScalar),
@@ -1418,6 +1483,18 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "exec", function, ScriptExecute, GameVoid, GameString),
         GameOperator(GameScalar, "spawn", function, ScriptSpawn, GameVoid, GameString),
         // Arma 1 commands (see A1* above)
+        GameOperator(GameScalar, "displayCtrl", function, A1DisplayCtrl, GameScalar, GameScalar),
+        GameOperator(GameNothing, "displaySetEventHandler", function, A1DisplaySetEventHandler, GameScalar, GameArray),
+        GameOperator(GameNothing, "ctrlShow", function, A1CtrlShow, GameScalar, GameBool),
+        GameOperator(GameNothing, "ctrlEnable", function, A1CtrlEnable, GameScalar, GameBool),
+        GameOperator(GameNothing, "ctrlSetText", function, A1CtrlSetText, GameScalar, GameString),
+        GameOperator(GameNothing, "buttonSetAction", function, A1ButtonSetAction, GameScalar, GameString),
+        GameOperator(GameNothing, "ctrlSetFade", function, A1CtrlSetFade, GameScalar, GameScalar),
+        GameOperator(GameNothing, "ctrlCommit", function, A1CtrlCommit, GameScalar, GameScalar),
+        GameOperator(GameNothing, "ctrlSetPosition", function, A1CtrlIgnored, GameScalar, GameArray),
+        GameOperator(GameNothing, "ctrlSetTextColor", function, A1CtrlIgnored, GameScalar, GameArray),
+        GameOperator(GameNothing, "ctrlSetBackgroundColor", function, A1CtrlIgnored, GameScalar, GameArray),
+        GameOperator(GameNothing, "ctrlSetForegroundColor", function, A1CtrlIgnored, GameScalar, GameArray),
         GameOperator(GameObject, "nearestObject", function, A1NearestObject, GameArray, GameScalar | GameString),
         GameOperator(GameNothing, "lookAt", function, A1LookAt, GameObjectOrArray, GameObject | GameArray),
         GameOperator(GameNothing, "enableAttack", function, A1IgnoredBinary, GameObjectOrGroup, GameBool),
@@ -1448,6 +1525,8 @@ static const GameOperator* GetExtBinary(int& count)
 
         GameOperator(GameObject, "createVehicle", function, VehCreate, GameString, GameArray),
         GameOperator(GameNothing, "createUnit", function, UnitCreate, GameString, GameArray),
+        GameOperator(GameObject, "createUnit", function, A1UnitCreate, GameGroup, GameArray),
+        GameOperator(GameNothing, "setVehicleVarName", function, A1IgnoredBinary, GameObject, GameString),
 
         GameOperator(GameNothing, "fadeMusic", function, SetMusicVolume, GameScalar, GameScalar),
         GameOperator(GameNothing, "fadeSound", function, SetSoundVolume, GameScalar, GameScalar),
