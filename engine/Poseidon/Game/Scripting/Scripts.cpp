@@ -863,7 +863,8 @@ struct SqfControl
         While,
         If,
         For,
-        Switch
+        Switch,
+        ExitWith
     } kind = While;
     std::string condition, body, elseBody, init, step;
     std::vector<SqfCase> cases; // Switch; condition holds the switched value
@@ -940,6 +941,16 @@ bool ParseSqfControl(const std::string& s, SqfControl& out)
     pos = 0;
     if (TakeWord(s, pos, "if"))
     {
+        size_t probe = pos;
+        std::string c, b;
+        if (TakeBracketed(s, probe, '(', ')', c) && TakeWord(s, probe, "exitWith") &&
+            TakeBracketed(s, probe, '{', '}', b) && AtEnd(s, probe))
+        {
+            out.kind = SqfControl::ExitWith;
+            out.condition = c;
+            out.body = b;
+            return true;
+        }
         out.kind = SqfControl::If;
         if (!TakeBracketed(s, pos, '(', ')', out.condition) || !TakeWord(s, pos, "then") ||
             !TakeBracketed(s, pos, '{', '}', out.body))
@@ -1061,6 +1072,8 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
     };
     const auto addGoto = [&addCondLine](const std::string& label) { addCondLine("", "goto \"" + label + "\""); };
 
+    std::vector<std::string> loopExits; // where exitWith leaves to (innermost loop)
+    const std::string scriptEnd = newLabel();
     std::function<void(const std::string&)> emit;
     const auto emitBlock = [&emit](const std::string& code)
     {
@@ -1085,7 +1098,16 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
             addLine(empty, empty, RString(wait.c_str()));
             addLine(empty, RString("__waituntil"), empty);
         }
-        else if (HasSuspension(statement) && ParseSqfControl(statement, control))
+        else if (!loopExits.empty() && ParseSqfControl(statement, control) && control.kind == SqfControl::ExitWith)
+        {
+            const std::string skip = newLabel();
+            addCondLine("!(" + control.condition + ")", "goto \"" + skip + "\"");
+            emitBlock(control.body);
+            addGoto(loopExits.back());
+            placeLabel(skip);
+        }
+        else if (HasSuspension(statement) && ParseSqfControl(statement, control) &&
+                 control.kind != SqfControl::ExitWith)
         {
             const std::string top = newLabel();
             const std::string next = newLabel();
@@ -1094,9 +1116,13 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
                 case SqfControl::While:
                     placeLabel(top);
                     addCondLine("!(" + control.condition + ")", "goto \"" + next + "\"");
+                    loopExits.push_back(next);
                     emitBlock(control.body);
+                    loopExits.pop_back();
                     addGoto(top);
                     placeLabel(next);
+                    break;
+                case SqfControl::ExitWith:
                     break;
                 case SqfControl::If:
                 {
@@ -1139,7 +1165,9 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
                     addCondLine("", control.init);
                     placeLabel(top);
                     addCondLine("!(" + control.condition + ")", "goto \"" + next + "\"");
+                    loopExits.push_back(next);
                     emitBlock(control.body);
+                    loopExits.pop_back();
                     addCondLine("", control.step);
                     addGoto(top);
                     placeLabel(next);
@@ -1152,6 +1180,7 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
         }
     };
     emitBlock(StripSqfComments(code.Data()));
+    placeLabel(scriptEnd);
     return script;
 }
 

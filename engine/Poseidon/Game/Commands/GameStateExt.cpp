@@ -34,6 +34,7 @@
 
 #include <ctype.h>
 #include <time.h>
+#include <string>
 #include <vector>
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
@@ -1128,6 +1129,32 @@ static GameValue A1HintC(const GameState* state, GameValuePar oper1, GameValuePa
     return ShowHintC(state, GameValue(text));
 }
 
+// parseText: structured text is plain text here -- tags dropped, <br/> as a line break
+static GameValue A1ParseText(const GameState*, GameValuePar oper1)
+{
+    const std::string in = (const char*)RString(oper1);
+    std::string out;
+    for (size_t i = 0; i < in.size(); i++)
+    {
+        if (in[i] != '<')
+        {
+            out.push_back(in[i]);
+            continue;
+        }
+        const size_t close = in.find('>', i);
+        if (close == std::string::npos)
+        {
+            out.append(in, i, std::string::npos);
+            break;
+        }
+        const std::string tag = in.substr(i + 1, close - i - 1);
+        if (_strnicmp(tag.c_str(), "br", 2) == 0)
+            out += "\\n";
+        i = close;
+    }
+    return GameValue(RString(out.c_str()));
+}
+
 // isPlayer unit: in single player, the player's unit
 static GameValue A1IsPlayer(const GameState* state, GameValuePar oper1)
 {
@@ -1316,6 +1343,7 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameString, "str", A1Str, GameVoid),
         GameFunction(GameString, "compile", A1Compile, GameString),
         GameFunction(GameBool, "isPlayer", A1IsPlayer, GameObject),
+        GameFunction(GameString, "parseText", A1ParseText, GameString),
         GameFunction(GameArray, "switch", A1Switch_, GameVoid),
         GameFunction(GameArray, "for", A1ForArray, GameArray),
         GameFunction(GameArray, "case", A1Case, GameVoid),
