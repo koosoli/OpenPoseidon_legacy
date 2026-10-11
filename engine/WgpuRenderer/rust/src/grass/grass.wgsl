@@ -157,6 +157,9 @@ struct WindField {
 @group(1) @binding(0) var<uniform> terrain: TerrainParams;
 @group(1) @binding(1) var heightmap: texture_2d<f32>;
 @group(1) @binding(2) var geography: texture_2d<u32>;
+// RFG-PBR: a native world's satellite over the whole land (sRGB-encoded, alpha 0 where it has no
+// say); a 1x1 placeholder elsewhere. Read by grass_ground_colour.
+@group(1) @binding(4) var grass_satellite: texture_2d<f32>;
 
 // Sinkhole W1 (port of Malprave terrainHole2 to wgpu): terrain holes -- world X/Z convex areas a hole-cutting
 // object (memory-LOD `terrain_hole*` selection + roadway LOD) has cut out of the ground. Written by
@@ -1675,6 +1678,20 @@ fn grass_light_dir() -> vec3<f32> {
 #endif
 }
 
+// RFG-PBR: the ground colour a native blade leans towards (SatMapLerp): the satellite under it
+// when the world has one -- what Reforger's PlantMat names -- else the surface's mean albedo.
+fn grass_ground_colour(world_xz: vec2<f32>) -> vec3<f32> {
+    if (textureDimensions(grass_satellite).x > 1u) {
+        let extent = terrain.land_grid * f32(terrain.land_range);
+        let s = textureSampleLevel(grass_satellite, blade_samp,
+                                   (world_xz - terrain.world_origin) / max(extent, 1.0), 0.0);
+        if (s.a > 0.5) {
+            return pow(s.rgb, vec3<f32>(2.2));
+        }
+    }
+    return grass.native.yzw;
+}
+
 fn grass_shade(in: VsOut) -> vec4<f32> {
     let shading_detail = blade_shading_detail(in.blade_uv.xy);
     let height_detail = blade_height_resolution(length(vec2<f32>(dpdx(in.blade_uv.y), dpdy(in.blade_uv.y))));
@@ -1734,7 +1751,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
         // the ground's mean albedo stands in: the atlas keeps its luminance structure, the
         // ground lends its hue and saturation.
         let luma = vec3<f32>(0.2126, 0.7152, 0.0722);
-        let ground = grass.native.yzw;
+        let ground = grass_ground_colour(world.xz);
         let recoloured = ground * (dot(blade_colour, luma) / max(dot(ground, luma), 0.02));
         // No root shade: the atlas tuft carries its own base darkening.
         textured = mix(blade_colour, recoloured, clamp(grass.native2.x, 0.0, 1.0)) * variation * gust_highlight;

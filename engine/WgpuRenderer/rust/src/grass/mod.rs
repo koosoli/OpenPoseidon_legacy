@@ -509,6 +509,8 @@ pub struct Grass {
     heightmap_view: wgpu::TextureView,
     geography: wgpu::Texture,
     geography_view: wgpu::TextureView,
+    // RFG-PBR: the native world's satellite (set_satellite) or the 1x1 placeholder.
+    satellite_view: wgpu::TextureView,
     terrain_generation: u64,
     // Whole World: the streamed near patch the grass stands on instead of the native island (an empty
     // placeholder in that mode), with its own geography; see set_earth_ground.
@@ -947,8 +949,21 @@ impl Grass {
                     },
                     count: None,
                 },
+                // RFG-PBR: a native world's satellite (supertexture) over the whole land, the
+                // colour its procedural blades lean towards (SatMapLerp); 1x1 elsewhere.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
+        let satellite_view = create_satellite_placeholder(device, queue);
         let holes = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_grass_terrain_holes"),
             size: crate::terrain::TERRAIN_HOLES_BYTES,
@@ -1166,6 +1181,7 @@ impl Grass {
             &heightmap_view,
             &geography_view,
             &holes,
+            &satellite_view,
         );
         let data_bind = make_data_bind(
             device,
@@ -1568,6 +1584,7 @@ impl Grass {
             heightmap_view,
             geography,
             geography_view,
+            satellite_view,
             terrain_generation: u64::MAX,
             earth: None,
             earth_gen: 0,
@@ -1867,6 +1884,14 @@ impl Grass {
         self.far_data_bind = rebuild(&self.far_instances, &self.far_placement_count);
     }
 
+    /// RFG-PBR: the native world's satellite (one texture over the whole land, sRGB-encoded
+    /// colour, alpha 0 where it has no say), or None for the placeholder. Rebinds group 1.
+    pub fn set_satellite(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, view: Option<wgpu::TextureView>) {
+        self.satellite_view = view.unwrap_or_else(|| create_satellite_placeholder(device, queue));
+        // the next prepare_terrain rebuilds the terrain bind with it
+        self.terrain_generation = u64::MAX;
+    }
+
     pub fn set_geography(
         &mut self,
         device: &wgpu::Device,
@@ -1911,6 +1936,7 @@ impl Grass {
             &self.heightmap_view,
             &self.geography_view,
             &self.holes,
+            &self.satellite_view,
         );
     }
 
@@ -2339,6 +2365,7 @@ impl Grass {
                 &heightmap,
                 &geography,
                 &self.holes,
+                &self.satellite_view,
             );
         }
     }
@@ -2864,6 +2891,7 @@ fn make_terrain_bind(
     heightmap: &wgpu::TextureView,
     geography: &wgpu::TextureView,
     holes: &wgpu::Buffer,
+    satellite: &wgpu::TextureView,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("wgr_grass_terrain_bind"),
@@ -2885,8 +2913,33 @@ fn make_terrain_bind(
                 binding: 3,
                 resource: holes.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(satellite),
+            },
         ],
     })
+}
+
+/// The 1x1 satellite the grass binds when the world has none (grass.wgsl tests its size).
+fn create_satellite_placeholder(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::TextureView {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("wgr_grass_satellite_placeholder"),
+        size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        texture.as_image_copy(),
+        &[0, 0, 0, 0],
+        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
+        wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+    );
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
 fn make_data_bind(

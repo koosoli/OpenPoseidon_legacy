@@ -2853,6 +2853,9 @@ extern "C"
                                             const float* heights, float geo_cell, uint32_t geo_n, const uint32_t* geography,
                                             float sea_level);
     WGR_API void wgr_grass_clear_earth_ground(WgrRenderer* renderer);
+    /* RFG-PBR: the native world's satellite (bank texture handle, one image over the whole land)
+     * that the procedural blades lean towards; 0 clears it. */
+    WGR_API void wgr_grass_set_satellite(WgrRenderer* renderer, uint64_t handle);
     WGR_API void wgr_grass_set_geography(WgrRenderer* renderer, uint32_t width, uint32_t height,
                                          const uint32_t* geography);
     WGR_API void wgr_grass_set_params(WgrRenderer* renderer, const WgrGrassParams* params);

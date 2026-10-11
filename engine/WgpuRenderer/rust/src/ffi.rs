@@ -3520,6 +3520,22 @@ pub unsafe extern "C" fn wgr_terrain_set_materials(
     }));
 }
 
+/// RFG-PBR: the native world's satellite for the grass (a texture handle from the bank, one image
+/// over the whole land); 0 clears it.
+///
+/// # Safety
+/// `renderer` must be live; `handle` must be 0 or a live texture handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_satellite(renderer: *mut WgrRenderer, handle: u64) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        renderer.grass_set_satellite(handle);
+    }));
+}
+
 /// Upload per-land-cell geography flags for GPU grass placement.  The values are
 /// `GeographyInfo::packed`, one `u32` for every landscape cell.
 ///

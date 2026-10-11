@@ -7256,6 +7256,11 @@ impl Renderer {
             .set_materials(&self.device, &self.queue, materials);
     }
 
+    fn grass_set_satellite(&mut self, handle: u64) {
+        let view = if handle != 0 { Some(self.textures.texture_view(handle).clone()) } else { None };
+        self.grass.set_satellite(&self.device, &self.queue, view);
+    }
+
     fn grass_set_geography(&mut self, width: u32, height: u32, values: &[u32]) {
         self.grass
             .set_geography(&self.device, &self.queue, width, height, values);

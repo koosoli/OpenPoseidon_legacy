@@ -1101,6 +1101,13 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             ++complete;
     }
 
+    // RFG-PBR: the grass leans its native blades towards the same satellite (SatMapLerp).
+    {
+        uint64_t satHandle = 0;
+        if (!paged && _enfusionSatmap && _enfusionSatmapExtent > 0.0f)
+            satHandle = static_cast<TextureWgpu*>(_enfusionSatmap.GetRef())->EnsureUploaded();
+        wgr_grass_set_satellite(_renderer, satHandle);
+    }
     Ref<Texture> previousSatmap = _automaticSatmap;
     if (!paged && authored == 0 && _enfusionGround.empty())
     {
