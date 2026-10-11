@@ -2641,6 +2641,15 @@ uint64_t TextureWgpu::EnsureUploaded()
                             admit.textureBc3PreparedBytes += bc3.size();
                         }
                     }
+                    else if (AuthoredCompositeMips() && preparedSource &&
+                             preparedSource->EncodeAuthoredBc3(preparedBc3))
+                    {
+                        // RFG-112: the composite's own (FoliageAlpha) mips, not box mips.
+                        bc3 = std::move(preparedBc3.blocks);
+                        bc3Offsets = std::move(preparedBc3.offsets);
+                        bc3Levels = preparedBc3.levels;
+                        encoded = true;
+                    }
                     else
                         encoded = encodeBc3(pixels.data(), _w, _h, bc3, bc3Offsets, bc3Levels);
                 }

@@ -1043,10 +1043,71 @@ size_t TextureSourceDDS::CompositeBc3Reservation() const
     return PreparedByteSize() + footprint.scratchBytes;
 }
 
+// RFG-112: an `enfa|` leaf composite keeps the coverage mips Enfusion authored. Bohemia's import
+// gives vegetation opacity a dedicated `FoliageAlpha` mip filter "so they keep better/denser
+// opacity also in smaller MIPs, which are drawn further away" (Arma Reforger:Textures), and the
+// composite above already merges those per level -- then the BC3 encode threw them away and
+// box-averaged new ones from the top level, which is exactly what thins a distant crown.
+bool AuthoredCompositeMips()
+{
+    // POSEIDON_AUTHORED_LEAF_MIPS=0 restores the regenerated box mips for the A/B.
+    static const bool on = []
+    {
+        const char* env = std::getenv("POSEIDON_AUTHORED_LEAF_MIPS");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
+
+bool TextureSourceDDS::EncodeAuthoredBc3(Bc3MipChain& out) const
+{
+    if (_levels.size() < 2 || _w < 4 || _h < 4)
+        return false;
+    Bc3MipChain chain;
+    int w = _w, h = _h;
+    for (size_t i = 0; i < _levels.size(); ++i)
+    {
+        if (_levels[i].width != w || _levels[i].height != h)
+            return false;
+        std::vector<uint8_t> rgba(static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
+        PacLevelMem mip;
+        mip._w = static_cast<short>(w);
+        mip._h = static_cast<short>(h);
+        mip._dFormat = PacARGB8888;
+        mip._pitch = w * 4;
+        if (!GetMipmapData(rgba.data(), mip, static_cast<int>(i)))
+            return false;
+        for (size_t p = 0; p + 2 < rgba.size(); p += 4)
+            std::swap(rgba[p], rgba[p + 2]);
+        chain.offsets.push_back(static_cast<uint32_t>(chain.blocks.size()));
+        AppendBc3LevelRGBA(rgba.data(), w, h, chain.blocks);
+        ++chain.levels;
+        if (w <= 4 && h <= 4)
+            break;
+        w = std::max(w / 2, 1);
+        h = std::max(h / 2, 1);
+    }
+    if (chain.levels < 2 || chain.blocks.size() > UINT32_MAX)
+        return false;
+    chain.width = _w;
+    chain.height = _h;
+    out = std::move(chain);
+    return true;
+}
+
 bool TextureSourceDDS::PrepareCompositeBc3(size_t reservedBytes, const Bc3EncodingObserver* observer)
 {
     const size_t required = CompositeBc3Reservation();
     if (!required || reservedBytes < required) return false;
+    if (AuthoredCompositeMips())
+    {
+        Bc3MipChain authored;
+        if (EncodeAuthoredBc3(authored))
+        {
+            _preparedBc3 = std::move(authored);
+            return true;
+        }
+    }
     Bc3EncodingFootprint footprint;
     if (!MeasureBc3EncodingFootprint(_w, _h, footprint)) return false;
     // Same top source pixels, channel swap, encoder and generated mips as wgpu's

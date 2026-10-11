@@ -34,4 +34,7 @@ bool MeasureBc3EncodingFootprint(int width, int height, Bc3EncodingFootprint& ou
 bool EncodeBc3ChainRGBA(const uint8_t* rgba, int width, int height,
                         std::vector<uint8_t>& blocks, std::vector<uint32_t>& offsets, int& levels,
                         const Bc3EncodingObserver* observer = nullptr);
+// RFG-112: ONE level, appended to `blocks`, with no mip generation -- for a source whose own
+// mip chain must survive (Enfusion opacity mips are authored with a FoliageAlpha filter).
+void AppendBc3LevelRGBA(const uint8_t* rgba, int width, int height, std::vector<uint8_t>& blocks);
 }

@@ -31,6 +31,26 @@ bool MeasureBc3EncodingFootprint(int width, int height, Bc3EncodingFootprint& ou
     return true;
 }
 
+void AppendBc3LevelRGBA(const uint8_t* rgba, int width, int height, std::vector<uint8_t>& blocks)
+{
+    if (!rgba || width <= 0 || height <= 0)
+        return;
+    uint8_t block[64], out[16];
+    const int bw = (width + 3) / 4, bh = (height + 3) / 4;
+    for (int by = 0; by < bh; ++by)
+        for (int bx = 0; bx < bw; ++bx)
+        {
+            for (int y = 0; y < 4; ++y)
+                for (int x = 0; x < 4; ++x)
+                {
+                    const int sx = std::min(bx * 4 + x, width - 1), sy = std::min(by * 4 + y, height - 1);
+                    std::memcpy(block + (y * 4 + x) * 4, rgba + (static_cast<size_t>(sy) * width + sx) * 4, 4);
+                }
+            stb_compress_dxt_block(out, block, 1, STB_DXT_NORMAL);
+            blocks.insert(blocks.end(), out, out + 16);
+        }
+}
+
 bool EncodeBc3ChainRGBA(const uint8_t* rgba, int width, int height, std::vector<uint8_t>& blocks,
                         std::vector<uint32_t>& offsets, int& levels, const Bc3EncodingObserver* observer)
 {
