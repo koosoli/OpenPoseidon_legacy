@@ -1069,7 +1069,11 @@ fn fs_gpu_body(in: VsOut
         let colorize = unpack4x8unorm(bitcast<u32>(sm.crown_ao_p1.w));
         let ramp_m = colorize.a * 255.0;
         let ramp = select(1.0, clamp(length(in.world_pos) / max(ramp_m, 1.0), 0.0, 1.0), ramp_m > 0.0);
-        let target_colour = select(colorize.rgb, srgb_to_linear(colorize.rgb), bcr_linear);
+        var colorize_linear = false;
+#ifdef NATIVE_PBR_PREVIEW
+        colorize_linear = bcr_linear;
+#endif
+        let target_colour = select(colorize.rgb, srgb_to_linear(colorize.rgb), colorize_linear);
         base = vec4<f32>(mix(base.rgb, target_colour, sm.crown_ao_p1.z * ramp), base.a);
     }
     // The final per-layer mask weights, hoisted out of the block below so the NORMAL blend
