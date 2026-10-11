@@ -368,7 +368,8 @@ struct GrassParams {
     // cards are on, and the mid ring's cards begin at the camera; .yzw spare.
     near_blades_only: f32,
     native_tint: [f32; 3],
-    // RFG-091: `native2`: .x tint lerp; .y gust variation (-1 = old gusts), .z front metres; .w spare.
+    // RFG-091: `native2`: .x tint lerp; .y gust variation (-1 = old gusts), .z front metres;
+    // .w = 1 lights a native world's cover with the real sun (grass_light_dir).
     native_tint_lerp: f32,
     _native2_pad: [f32; 3],
     // Renderer-derived from the uploaded atlas, never from the caller.
@@ -2223,7 +2224,8 @@ impl Grass {
                 if params.tint_photo[3].is_finite() && params.tint_photo[3] >= 10.0 {
                     params.tint_photo[3].clamp(10.0, 200.0)
                 } else { 45.0 },
-                0.0,
+                // .w: the real sun (grass.wgsl grass_light_dir) on a native world's cover.
+                if params.near_blades_only > 0.0 || params.native_tint_lerp > 0.0 { 1.0 } else { 0.0 },
             ],
             // Always the renderer's own measurement of the loaded atlas.
             photo_layer_bounds: self.tuft_bounds,

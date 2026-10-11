@@ -117,8 +117,12 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
         Ok("terms") => { defs.insert("GRASS_DEBUG_TERMS".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
         _ => {}
     }
-    if std::env::var("WGR_GRASS_LEGACY_SUN").as_deref() == Ok("1") {
-        defs.insert("GRASS_LEGACY_SUN_SIGN".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    // Grass / far-proxy sun sign (grass.wgsl grass_light_dir): unset = real sun on native worlds
+    // only, 1 = real sun everywhere, 0 = the old (sky-only) sign everywhere.
+    match std::env::var("WGR_GRASS_SUN").as_deref() {
+        Ok("1") => { defs.insert("GRASS_SUN_ALL".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        Ok("0") => { defs.insert("GRASS_LEGACY_SUN_SIGN".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        _ => {}
     }
     if std::env::var("WGR_COALESCED_PCF").as_deref() == Ok("1") {
         defs.insert("COALESCED_PCF".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
