@@ -3106,6 +3106,17 @@ void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
             std::memcpy(_clutterAtlas.data() + static_cast<size_t>(layer) * LayerBytes, _clutterAtlas.data(),
                         LayerBytes);
         }
+        // POSEIDON_ENFUSION_BLADES_DUMP=<dir> also writes the card layers: texture or shading?
+        if (const char* dumpDir = std::getenv("POSEIDON_ENFUSION_BLADES_DUMP"); dumpDir != nullptr && *dumpDir != '\0')
+        {
+            for (uint32_t layer = 0; layer < _clutterAtlasLayers; ++layer)
+            {
+                char path[512];
+                std::snprintf(path, sizeof(path), "%s/enfusion_card_%02u.png", dumpDir, layer);
+                Poseidon::PNGWriter::WritePNG(path, GrassAtlasSize, GrassAtlasSize, 4,
+                                              _clutterAtlas.data() + static_cast<size_t>(layer) * LayerBytes);
+            }
+        }
         _grassPhotoFamilies.clear();
         _grassPhotoFamilies.emplace_back("map clutter (per surface)");
         EngineWgpu::AcquireProducerWindow("grass tufts");
