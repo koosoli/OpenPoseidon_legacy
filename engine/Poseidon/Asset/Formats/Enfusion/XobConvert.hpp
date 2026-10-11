@@ -687,7 +687,15 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
             }
 
             const bool hasSecond = part.uvSets.size() > 1 && part.uvSets[1].size() == part.positions.size();
-            anySecondSet = anySecondSet || hasSecond;
+            // RFG-106: the colour stream's third byte is the authored crown occlusion -- dark core
+            // to open rim (alnus: 18 levels over 0..255, fit R=0.74 against the GeometryAO volume;
+            // docs/roadmap/decisions/REFORGER-MATERIAL-SHADER-PARITY-20260914.md section 25). A
+            // one-UV-set part has no use for UV set 2, so it rides there as (occlusion, -7): the
+            // sentinel V says "this is occlusion, not a coordinate", and the renderer applies it to
+            // leaf cutout sections only.
+            const bool bakedOcclusion =
+                !hasSecond && options.secondUv && part.colours.size() == part.positions.size();
+            anySecondSet = anySecondSet || hasSecond || bakedOcclusion;
             if (!part.uvSets.empty() && part.uvSets[0].size() == part.positions.size())
             {
                 float u0 = 1e9f, u1 = -1e9f, v0 = 1e9f, v1 = -1e9f;
@@ -808,6 +816,11 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                     {
                         face.vertices[c].u1 = (renderUv && part.renderUvSets.size() > 1) ? part.renderUvSets[1][rcorner[c]].u : part.uvSets[1][corner[c]].u;
                         face.vertices[c].v1 = (renderUv && part.renderUvSets.size() > 1) ? part.renderUvSets[1][rcorner[c]].v : part.uvSets[1][corner[c]].v;
+                    }
+                    else if (bakedOcclusion)
+                    {
+                        face.vertices[c].u1 = static_cast<float>((part.colours[corner[c]] >> 16) & 0xFFu) / 255.0f;
+                        face.vertices[c].v1 = -7.0f;
                     }
                 }
                 if (preserveTangentFrame)

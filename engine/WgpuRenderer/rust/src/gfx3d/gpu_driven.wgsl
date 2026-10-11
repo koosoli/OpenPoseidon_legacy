@@ -793,7 +793,14 @@ fn vs_gpu(
     // merged forests whose vertices live in patch space, not tree space.
     // Forests keep 1.0 (follow-up with the per-vertex crown table).
     var crown_ao = 1.0;
-    if (canopy != 0u && (canopy & INST_CANOPY_FOREST) == 0u &&
+    // RFG-106: the model's own baked occlusion (xob colour byte 2, carried in UV set 2 with the
+    // -7 sentinel V by the converter). Per vertex, so it is right in a merged forest's patch space
+    // too, where the model-space volume below cannot be evaluated. Intensity from GeometryAO
+    // when the material gives one.
+    if (canopy != 0u && section_materials[rec.section].alpha_ref > 0.0 && uv1.y < -6.5) {
+        let ao_w = section_materials[rec.section].crown_ao_p0.w;
+        crown_ao = clamp(mix(1.0 - select(1.0, ao_w, ao_w > 0.0), 1.0, clamp(uv1.x, 0.0, 1.0)), 0.0, 1.0);
+    } else if (canopy != 0u && (canopy & INST_CANOPY_FOREST) == 0u &&
         section_materials[rec.section].alpha_ref > 0.0) {
         let ao = section_materials[rec.section].crown_ao_p0;
         if (ao.w > 0.0) {
@@ -1058,10 +1065,6 @@ fn fs_gpu_body(in: VsOut
 #ifdef NATIVE_PBR_PREVIEW
     }
 #endif
-    // Crown self-occlusion: the vertex shader's GeometryAO factor, applied to the
-    // albedo like a baked vertex colour (which is what it replaces). 1.0 for every
-    // section whose material names no volume, so this is a no-op everywhere else.
-    base = vec4<f32>(base.rgb * retained_crown_ao(in), base.a);
     // Enfusion vegetation colorization (EngineWgpu::ResolveMaterialCrownAo): the albedo lerps
     // toward the world colorize colour by crown_ao_p1.z, ramping in from the camera over the
     // authored distance (alpha byte, metres). Lerp 0 = every non-crown material, a no-op.
@@ -1076,6 +1079,12 @@ fn fs_gpu_body(in: VsOut
         let target_colour = select(colorize.rgb, srgb_to_linear(colorize.rgb), colorize_linear);
         base = vec4<f32>(mix(base.rgb, target_colour, sm.crown_ao_p1.z * ramp), base.a);
     }
+    // Crown self-occlusion (the model's baked occlusion, else the GeometryAO volume), applied to
+    // the albedo like the baked vertex colour it is -- and AFTER the colorize lerp. Before it, a
+    // ColorizeMapLerp of 0.8 replaced 80% of the occluded albedo with the flat world colour, so
+    // the crowns' authored dark cores never reached the picture (RFG-106). 1.0 for every section
+    // without either, a no-op everywhere else.
+    base = vec4<f32>(base.rgb * retained_crown_ao(in), base.a);
     // The final per-layer mask weights, hoisted out of the block below so the NORMAL blend
     // (MAT-048, further down) uses exactly the weights the colour blend used — one mask
     // sample, one set of weights, colours and normals agreeing per fragment by construction.
