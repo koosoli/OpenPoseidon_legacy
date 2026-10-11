@@ -4409,6 +4409,7 @@ pub struct Gfx3d {
     snow_surface: [f32; 4],
     ground_weather: [f32; 4],
     layer_fog_requested: bool,
+    world_max_height: f32,
     object_snow_enabled: bool,
     snow_surface_trace: bool,
     snow_surface_trace_rows: u8,
@@ -5367,6 +5368,7 @@ impl Gfx3d {
             snow_surface: [0.0, -1.0, 0.0, 0.0],
             ground_weather: [0.0; 4],
             layer_fog_requested: false,
+            world_max_height: f32::NAN,
             object_snow_enabled: std::env::var("WGR_OBJECT_SNOW").as_deref() != Ok("0"),
             snow_surface_trace: std::env::var("WGR_SNOW_SURFACE_FIXTURE").as_deref() == Ok("1"),
             snow_surface_trace_rows: 0,
@@ -8299,11 +8301,13 @@ impl Gfx3d {
             let main = cameras.get(gtao_camera).unwrap_or(&cameras[0]);
             let sky_cam = glam::Vec3::new(main.cam_pos[0], main.cam_pos[1], main.cam_pos[2]);
             self.prepare_interior_sky(device, sky_cam);
+            // Snow that can reach a surface on this world, not every configured snowline.
+            let cover_snow = weather_cover::snow_for_cover(self.snow_surface, self.world_max_height);
             self.weather_cover.prepare(device, queue, sky_cam, self.cull.instance_epoch(),
-                self.snow_surface, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0, self.layer_fog_requested);
+                cover_snow, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0, self.layer_fog_requested);
             self.weather_cover.camera_offset = (gtao_camera as u64 * self.cameras.stride) as u32;
             self.weather_cover_far.prepare(device, queue, sky_cam, self.cull.instance_epoch(),
-                self.snow_surface, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0, self.layer_fog_requested);
+                cover_snow, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0, self.layer_fog_requested);
             self.weather_cover_far.camera_offset = (gtao_camera as u64 * self.cameras.stride) as u32;
             let epoch = self.cull.instance_epoch();
             let gi_retry = self.gi_rsm_publication.as_ref()
@@ -11897,6 +11901,8 @@ impl Gfx3d {
     }
 
     pub fn set_layer_fog_requested(&mut self, active:bool) {self.layer_fog_requested=active;}
+    /// Highest terrain point of the loaded world (NaN = unknown); see weather_cover::snow_for_cover.
+    pub fn set_world_max_height(&mut self, h: f32) {self.world_max_height=h;}
     // Exact current encoder publication, not yesterday's committed map. Overflow
     // remains a GPU refusal through the real COUNT/EMIT buffers.
     pub fn layer_fog_weather_inputs(&self)->crate::layered_fog::WeatherInputs {

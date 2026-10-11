@@ -3959,6 +3959,10 @@ impl Renderer {
             self.log.log(log_level::INFO, &line);
         }
         self.gfx3d.set_ground_weather(self.terrain.ground_weather_params());
+        let bounds = self.terrain.native_height_bounds();
+        // Unknown on a streamed Earth patch: its mountains are not in the island's heightmap.
+        self.gfx3d.set_world_max_height(if bounds[1] > bounds[0] && !self.grass.earth_active() { bounds[1] }
+            else { f32::NAN });
         let mut prepared_cameras = cameras.to_vec();
         // REN-TEMP-001E: temporal camera state + jitter. The UNJITTERED main camera is
         // snapshotted first (velocity and history math use it), then the jitter is folded

@@ -2077,6 +2077,11 @@ impl Grass {
     }
 
     /// Back to the native island's ground (leaving Whole World, or relocating before the next patch).
+    /// Whole World: the grass stands on a streamed Earth patch, not the native island.
+    pub fn earth_active(&self) -> bool {
+        self.earth.is_some()
+    }
+
     pub fn clear_earth_ground(&mut self) {
         if self.earth.take().is_some() {
             self.terrain_generation = u64::MAX;
