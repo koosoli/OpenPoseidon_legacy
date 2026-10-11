@@ -114,6 +114,7 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
         Ok("albedo") => { defs.insert("GRASS_DEBUG_ALBEDO".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
         Ok("direct") => { defs.insert("GRASS_DEBUG_DIRECT".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
         Ok("ambient") => { defs.insert("GRASS_DEBUG_AMBIENT".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        Ok("terms") => { defs.insert("GRASS_DEBUG_TERMS".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
         _ => {}
     }
     if std::env::var("WGR_COALESCED_PCF").as_deref() == Ok("1") {

@@ -1804,6 +1804,9 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
 #ifdef GRASS_DEBUG_AMBIENT
     return vec4<f32>(ambient, 1.0);
 #endif
+#ifdef GRASS_DEBUG_TERMS
+    return vec4<f32>(terrain_shadow, cloud_lit, ndl, 1.0);
+#endif
     let fogged = apply_fog(lit, in.world_rel);
     return vec4<f32>(select(lit, fogged, grass.render_flags.y >= 0.5), 1.0);
 }
