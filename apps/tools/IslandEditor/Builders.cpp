@@ -491,7 +491,7 @@ int SetForestCells(Island& is, const ForestKind& kind, const std::vector<std::ar
     auto isForest = [&](int x, int z) { return is.InRange(x, z) && forest[static_cast<size_t>(z) * n + x] != 0; };
 
     // out with the blocks of cleared cells and every corner block near a change; the rest stays
-    std::vector<Object> now;
+    ObjectList now;
     now.reserve(is.objects.size() + static_cast<size_t>(changed) * 2);
     int nextId = 0;
     for (const Object& o : is.objects)
@@ -765,7 +765,7 @@ void ImportRegion(Island& is, const Island& src, const RegionInfo& info, int dx,
     if (opt.objects)
     {
         const float minX = dx * is.cell, minZ = dz * is.cell, maxX = (dx + w) * is.cell, maxZ = (dz + h) * is.cell;
-        std::vector<Object> now;
+        ObjectList now;
         now.reserve(is.objects.size() + src.objects.size());
         int id = 0;
         for (const Object& o : is.objects)

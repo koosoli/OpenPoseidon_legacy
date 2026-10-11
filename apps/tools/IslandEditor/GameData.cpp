@@ -677,8 +677,10 @@ const ModelShape& GameData::Model(const std::string& name) const
 //     points a side, so a finer grid is sampled at every 2nd / 4th point and the cell grows to match;
 //   * there is no ground texture per cell (the ground is satellite and mask layers): the cells start untextured,
 //     for the paint and auto paint tools;
-//   * the objects come as they stand, with their own model paths.
-// Saved, it is a 4WVR island of that cell size (CfgWorlds >> landGrid), elevations within the format's 1474 m.
+//   * the objects come as they stand, with their own model paths. All of them: the list is not held by the engine's
+//     allocator (Island.hpp, ObjectList), so a world of three million loads as one of fifty thousand does.
+// Saved, it is a 4WVR island with elevations within the format's 1474 m, and its cell size beside it (Island::Save).
+// The game does not use that yet: it loads every OFP-format island at 50 m a cell (Landscape, SetLandGrid(50)).
 static bool LoadModernIsland(const std::string& file, Island& out, std::string& error)
 {
     using namespace Poseidon;
@@ -727,18 +729,10 @@ static bool LoadModernIsland(const std::string& file, Island& out, std::string& 
                 clamped++;
             heights[static_cast<size_t>(z) * n + x] = std::clamp(y, kMinHeight, kMaxHeight);
         }
-    // The objects are held in one block, and the engine's allocator (which this program links) gives out at most
-    // 256 MiB in one piece: about 2.7 million objects. DayZ's ChernarusPlus has 2.97 million. Such a world opens
-    // with its land only, and says so, rather than not at all.
-    constexpr size_t kMaxObjectBytes = 240u * 1024u * 1024u;
-    const bool tooMany = world.objects.size() > kMaxObjectBytes / sizeof(Object);
-    std::vector<Object> objects;
-    if (!tooMany)
-        objects.reserve(world.objects.size());
+    ObjectList objects;
+    objects.reserve(world.objects.size());
     for (const W::Oprw25Object& src : world.objects)
     {
-        if (tooMany)
-            break;
         if (src.modelIndex < 0 || static_cast<size_t>(src.modelIndex) >= world.models.size())
             continue;
         Object o;
@@ -757,8 +751,6 @@ static bool LoadModernIsland(const std::string& file, Island& out, std::string& 
              step > 1 ? (", every " + std::to_string(step) + (step == 2 ? "nd" : "th") + " kept").c_str() : "",
              clamped ? (", " + std::to_string(clamped) + " elevations beyond 1474 m cut").c_str() : "");
     std::string note = format;
-    if (tooMany)
-        note += "; LAND ONLY: its " + std::to_string(world.objects.size()) + " objects are more than the editor can hold";
     out.Adopt(n, std::move(heights), std::vector<uint16_t>(), std::vector<std::string>(kMaxTextures), std::move(objects), file,
               note, cellSize);
     // saving writes 4WVR: under a name of its own, never over the Arma / DayZ world it was read from
@@ -816,7 +808,7 @@ bool GameData::LoadIsland(const std::string& file, Island& out, std::string& err
     std::vector<std::string> table(kMaxTextures);
     for (int i = 0; i < reader.GetTextureCount(); i++)
         table[i] = static_cast<const char*>(reader.GetTextureName(i));
-    std::vector<Object> objects;
+    ObjectList objects;
     objects.reserve(static_cast<size_t>(reader.GetObjectCount()));
     for (int i = 0; i < reader.GetObjectCount(); i++)
     {

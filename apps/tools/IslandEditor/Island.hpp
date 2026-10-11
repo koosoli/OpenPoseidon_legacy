@@ -11,6 +11,8 @@
 // load directly: elevations as 16-bit steps of 4.5 cm, at most 512 textures.
 
 #include <cstdint>
+#include <cstdlib>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -38,6 +40,28 @@ struct Object
     float X() const { return m[9]; }
     float Z() const { return m[11]; }
 };
+
+// The objects of an island, in one block as a vector holds them. The engine library this program links replaces
+// operator new with its own allocator, which gives out at most 256 MiB in one piece (a sanity limit for the game):
+// about 2.7 million objects. Arma 2's Chernarus has a million, DayZ's ChernarusPlus three, and a list near the limit
+// could be read but not grown. The list takes its block from the system instead, so its size is the machine's.
+template <class T> struct SystemAllocator
+{
+    using value_type = T;
+    SystemAllocator() = default;
+    template <class U> SystemAllocator(const SystemAllocator<U>&) {}
+    T* allocate(size_t n)
+    {
+        void* p = n <= static_cast<size_t>(-1) / sizeof(T) ? std::malloc(n * sizeof(T)) : nullptr;
+        if (!p)
+            throw std::bad_alloc();
+        return static_cast<T*>(p);
+    }
+    void deallocate(T* p, size_t) { std::free(p); }
+    template <class U> bool operator==(const SystemAllocator<U>&) const { return true; }
+    template <class U> bool operator!=(const SystemAllocator<U>&) const { return false; }
+};
+using ObjectList = std::vector<Object, SystemAllocator<Object>>;
 
 enum class Falloff
 {
@@ -102,7 +126,7 @@ class Island
     std::vector<float> height;         // size * size, index z * size + x
     std::vector<uint16_t> tex;         // texture slot of each cell
     std::vector<std::string> textures; // the table: kMaxTextures slots, empty = unused; slot 0 is the sea
-    std::vector<Object> objects;
+    ObjectList objects;
     std::string path;         // where it was loaded from / last saved to
     std::string sourceFormat; // "4WVR", "OPRW v3" ...
     // Binarized islands may give several objects one id; the plain format may not.  This many
@@ -118,7 +142,7 @@ class Island
     // the game's decompression at hand, and handed over through Adopt.
     bool LoadRaw(const std::string& file, std::string& error);
     void Adopt(int cells, std::vector<float>&& heights, std::vector<uint16_t>&& texIndices,
-               std::vector<std::string>&& textureTable, std::vector<Object>&& objs, const std::string& file,
+               std::vector<std::string>&& textureTable, ObjectList&& objs, const std::string& file,
                const std::string& format, float cellSize = 50.0f);
     // Always 4WVR.  An existing file is kept beside it as <name>.bak first.
     bool Save(const std::string& file, std::string& error);
@@ -192,7 +216,7 @@ class Island
                                   const Brush* brush = nullptr, float wx = 0, float wz = 0);
     void RenameTexture(int slot, const std::string& name);
     // every object at once (one undo step however many change)
-    void ReplaceObjects(std::vector<Object>&& now);
+    void ReplaceObjects(ObjectList&& now);
 
   private:
     struct CellChange
@@ -225,7 +249,7 @@ class Island
         std::vector<std::string> texturesBefore; // the table, when the step changed it
         std::vector<std::string> texturesAfter;
         bool allObjects = false; // ReplaceObjects: the whole list before and after
-        std::vector<Object> objectsBefore, objectsAfter;
+        ObjectList objectsBefore, objectsAfter;
         bool Empty() const { return heights.empty() && texs.empty() && objs.empty() && texturesBefore.empty() && !allObjects; }
     };
     void Apply(const Step& s, bool forward);

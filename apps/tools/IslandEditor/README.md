@@ -36,7 +36,7 @@ Besides the OFP formats, this build opens the later binarized worlds, read with 
 | Arma (Armed Assault) | 18, 20 | Sahrani Lite |
 | Arma 2, Operation Arrowhead | 24 | Utes, Chernarus (1,055,157 objects), Takistan |
 | Arma 3 | 25 | read by the same code; no Arma 3 world was at hand to try |
-| DayZ | 29 | ChernarusPlus, land only (see below) |
+| DayZ | 29 | ChernarusPlus (2,971,218 objects) |
 
 Take the `.wrp` out of its `.pbo` first (`PoseidonTools pbo extract`). Opening one is a conversion, because these
 worlds are not built as an OFP island is:
@@ -50,10 +50,12 @@ worlds are not built as an OFP island is:
   (`--game "...\Arma 2"`), their real models are drawn.
 * **Saving** writes 4WVR under a name of its own, `<world>_4wvr.wrp`, never over the world it was read from.
   4WVR has no cell size, so an island that is not 50 m a cell keeps it in `<file>.cell` beside it, which the
-  editor reads back. The game needs the same figure as `landGrid` in the island's `CfgWorlds` class.
-* **Too many objects.** The objects are held in one block and the engine's allocator gives out at most 256 MiB
-  in one piece, about 2.7 million objects. A world with more (DayZ's ChernarusPlus has 2.97 million) opens with
-  its land only, and the status line says so.
+  editor reads back.
+* **Not yet playable at its own scale.** The game loads every OFP-format island at 50 m a cell
+  (`SetLandGrid(50)` in the engine's `LandSave.cpp`) and has no setting for another size. A converted island
+  whose cells are 10 or 15 m is right in the editor and wrong in the game until the engine reads that size.
+* **Any number of objects.** The object list takes its memory from the system, not from the engine's allocator
+  (which gives out at most 256 MiB in one piece), so a world of three million objects opens like any other.
 
 ## Working with it
 

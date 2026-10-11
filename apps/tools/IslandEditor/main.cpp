@@ -1081,7 +1081,7 @@ void App::BuilderPanel()
         ImGui::BeginDisabled(!regionSet);
         if (ImGui::Button("Remove the objects in it", ImVec2(-FLT_MIN, 0)))
         {
-            std::vector<island::Object> kept;
+            island::ObjectList kept;
             for (const island::Object& o : is.objects)
                 if (o.X() < x0 * is.cell || o.X() >= (x1 + 1) * is.cell || o.Z() < z0 * is.cell || o.Z() >= (z1 + 1) * is.cell)
                     kept.push_back(o);
@@ -3044,7 +3044,7 @@ int SelfTest(const std::string& file)
     {
         // a change of every object at once is one step
         const size_t count = b.objects.size();
-        std::vector<island::Object> half(b.objects.begin(), b.objects.begin() + count / 2);
+        island::ObjectList half(b.objects.begin(), b.objects.begin() + count / 2);
         b.BeginEdit("thin out");
         b.ReplaceObjects(std::move(half));
         b.RenameTexture(1, "test" "\\" "renamed.paa");
@@ -3298,7 +3298,7 @@ bool ApplyCliEdits(Island& is, GameData& game, const CliEdits& e, const std::str
                 bool met = false;
             };
             std::vector<Was> was;
-            std::vector<island::Object> rest;
+            island::ObjectList rest;
             std::vector<std::vector<std::array<int, 2>>> cells(kinds.size());
             for (const island::Object& o : is.objects)
             {

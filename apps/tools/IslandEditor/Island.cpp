@@ -149,7 +149,7 @@ void Island::New(int cells, float baseHeight, const std::string& groundTexture)
 }
 
 void Island::Adopt(int cells, std::vector<float>&& heights, std::vector<uint16_t>&& texIndices,
-                   std::vector<std::string>&& textureTable, std::vector<Object>&& objs, const std::string& file,
+                   std::vector<std::string>&& textureTable, ObjectList&& objs, const std::string& file,
                    const std::string& format, float cellSize)
 {
     size = cells;
@@ -224,7 +224,7 @@ bool Island::LoadRaw(const std::string& file, std::string& error)
     std::vector<float> h(n);
     for (size_t i = 0; i < n; i++)
         h[i] = raw[i] * kHeightStep;
-    std::vector<Object> objs;
+    ObjectList objs;
     for (;;)
     {
         Object o;
@@ -252,7 +252,7 @@ bool Island::LoadRaw(const std::string& file, std::string& error)
         }
         objs.push_back(std::move(o));
     }
-    // 4WVR has no cell size: the game takes it from CfgWorlds (landGrid, 50 m in OFP). An island that is not 50 m
+    // 4WVR has no cell size: OFP's is 50 m, and the game loads the format at that. An island that is not 50 m
     // a cell -- one converted from an Arma or DayZ world -- keeps it in <file>.cell beside it (see Save).
     float cellSize = 50.0f;
     {
@@ -323,8 +323,8 @@ bool Island::Save(const std::string& file, std::string& error)
         }
     }
     std::error_code ec;
-    // the cell size beside the island when it is not OFP's 50 m (LoadRaw reads it back; the game needs the same
-    // figure as landGrid in the island's CfgWorlds class)
+    // the cell size beside the island when it is not OFP's 50 m (LoadRaw reads it back). The game loads the format
+    // at 50 m whatever this says: such an island is for editing, not yet for playing at its own scale
     if (std::fabs(cell - 50.0f) > 1e-3f)
     {
         std::ofstream side(file + ".cell", std::ios::trunc);
@@ -369,19 +369,15 @@ int Island::UniqueObjectIds()
     int maxId = 0;
     for (const Object& o : objects)
         maxId = std::max(maxId, o.id);
-    std::vector<std::vector<int>> byId; // id -> the objects with it, in file order
-    byId.resize(static_cast<size_t>(maxId) + 1);
-    bool any = false;
+    // The objects in the order of their ids, those of one id in file order. (This was a table with an entry per
+    // id up to the highest. OFP islands number their objects from 1 up; a DayZ world's ids are sparse and large,
+    // and the table was bigger than the machine.)
+    std::vector<int, SystemAllocator<int>> order;
+    order.reserve(objects.size());
     for (size_t i = 0; i < objects.size(); i++)
-    {
-        if (objects[i].id < 0)
-            continue;
-        std::vector<int>& v = byId[objects[i].id];
-        v.push_back(static_cast<int>(i));
-        any = any || v.size() > 1;
-    }
-    if (!any)
-        return 0;
+        if (objects[i].id >= 0)
+            order.push_back(static_cast<int>(i));
+    std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return objects[a].id < objects[b].id; });
     auto forest = [&](int index)
     {
         const std::string m = LowerPath(objects[index].model);
@@ -389,19 +385,22 @@ int Island::UniqueObjectIds()
         return m.compare(slash == std::string::npos ? 0 : slash + 1, 3, "les") == 0;
     };
     int next = maxId + 1, changed = 0;
-    for (std::vector<int>& v : byId)
+    for (size_t first = 0; first < order.size();)
     {
-        if (v.size() < 2)
-            continue;
-        int keeper = v[0];
-        for (size_t j = 1; j < v.size(); j++)
+        size_t last = first + 1;
+        while (last < order.size() && objects[order[last]].id == objects[order[first]].id)
+            last++;
+        // objects[order[first .. last)] share an id (read before any of them is renumbered below)
+        int keeper = order[first];
+        for (size_t j = first + 1; j < last; j++)
         {
-            int other = v[j];
+            int other = order[j];
             if (forest(keeper))
                 std::swap(keeper, other);
             objects[other].id = next++;
             changed++;
         }
+        first = last;
     }
     return changed;
 }
@@ -1423,7 +1422,7 @@ void Island::RenameTexture(int slot, const std::string& name)
     textures[slot] = name;
 }
 
-void Island::ReplaceObjects(std::vector<Object>&& now)
+void Island::ReplaceObjects(ObjectList&& now)
 {
     if (_editing)
     {

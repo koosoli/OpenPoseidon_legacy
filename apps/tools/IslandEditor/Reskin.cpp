@@ -293,7 +293,7 @@ bool ReskinIsland(Island& is, GameData& game, const ReskinOptions& opt, ReskinRe
         is.RenameTexture(r.slot, r.name);
     if (opt.removeTrees > 0 || opt.removeBushes > 0)
     {
-        std::vector<Object> kept;
+        ObjectList kept;
         kept.reserve(is.objects.size());
         for (const Object& o : is.objects)
         {
