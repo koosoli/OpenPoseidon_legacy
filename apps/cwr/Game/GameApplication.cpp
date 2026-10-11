@@ -1262,7 +1262,35 @@ struct AutoKeyEvent
     TimedTrigger trigger;
     SDL_Scancode scancode;
     SDL_Keymod mod;
+    uint32_t holdMs = 0;       // >0: key stays down this long (driving, flying tests)
+    uint32_t releaseAtMs = 0;  // pending key-up time while held
+    bool holding = false;
 };
+
+static void PushAutoKey(const AutoKeyEvent& ak, bool down)
+{
+    SDL_Event ev = {};
+    ev.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+    ev.key.scancode = ak.scancode;
+    // The ImGui SDL3 backend maps letter keys through the KEYCODE; an event with
+    // only a scancode reaches the game but never a dev-panel hotkey.
+    ev.key.key = SDL_GetKeyFromScancode(ak.scancode, ak.mod, false);
+    ev.key.mod = ak.mod;
+    ev.key.down = down;
+    SDL_PushEvent(&ev);
+}
+
+// Releases the held auto-keys whose time is up.
+static void ReleaseHeldAutoKeys(std::vector<AutoKeyEvent>& events, uint32_t elapsedMs)
+{
+    for (auto& ak : events)
+        if (ak.holding && elapsedMs >= ak.releaseAtMs)
+        {
+            PushAutoKey(ak, false);
+            ak.holding = false;
+            LOG_INFO(Core, "Auto-key released: t={:.1f}s scancode={}", elapsedMs / 1000.0f, (int)ak.scancode);
+        }
+}
 
 struct AutoScreenshotSpec
 {
@@ -1270,7 +1298,8 @@ struct AutoScreenshotSpec
     std::string path;
 };
 
-// Parse --auto-keys ("trigger:scancode[:modflags],..."). Missing-colon tokens skipped.
+// Parse --auto-keys ("trigger:scancode[:modflags[:holdSeconds]],..."). Missing-colon tokens
+// skipped. A hold keeps the key down for that long instead of tapping it.
 static std::vector<AutoKeyEvent> ParseAutoKeys(const std::string& spec)
 {
     std::vector<AutoKeyEvent> out;
@@ -1288,16 +1317,23 @@ static std::vector<AutoKeyEvent> ParseAutoKeys(const std::string& spec)
         auto colon2 = rest.find(':');
         int sc;
         SDL_Keymod mod = SDL_KMOD_NONE;
+        uint32_t holdMs = 0;
         if (colon2 != std::string::npos)
         {
             sc = std::stoi(rest.substr(0, colon2));
-            mod = (SDL_Keymod)std::stoi(rest.substr(colon2 + 1));
+            std::string modAndHold = rest.substr(colon2 + 1);
+            const auto colon3 = modAndHold.find(':');
+            mod = (SDL_Keymod)std::stoi(modAndHold.substr(0, colon3));
+            if (colon3 != std::string::npos)
+                holdMs = static_cast<uint32_t>(std::max(0.0, std::stod(modAndHold.substr(colon3 + 1))) * 1000.0);
         }
         else
         {
             sc = std::stoi(rest);
         }
-        out.push_back({trig, (SDL_Scancode)sc, mod});
+        AutoKeyEvent ev{trig, (SDL_Scancode)sc, mod};
+        ev.holdMs = holdMs;
+        out.push_back(ev);
     }
     if (!out.empty())
         LOG_INFO(Core, "Auto-keys: {} events scheduled", out.size());
@@ -1983,22 +2019,23 @@ void GameApplication::RunMainLoop()
 
         // Inject auto-key events via SDL (scancodes)
         DWORD elapsedMs = GetTickCount() - loopStartTick;
+        ReleaseHeldAutoKeys(autoKeyEvents, elapsedMs);
         for (auto& ak : autoKeyEvents)
         {
             if (TriggerReady(ak.trigger, mainFrameCounter, elapsedMs))
             {
-                SDL_Event ev = {};
-                ev.type = SDL_EVENT_KEY_DOWN;
-                ev.key.scancode = ak.scancode;
-                // The ImGui SDL3 backend maps letter keys through the KEYCODE; an event with
-                // only a scancode reaches the game but never a dev-panel hotkey.
-                ev.key.key = SDL_GetKeyFromScancode(ak.scancode, ak.mod, false);
-                ev.key.mod = ak.mod;
-                SDL_PushEvent(&ev);
-                ev.type = SDL_EVENT_KEY_UP;
-                SDL_PushEvent(&ev);
-                LOG_INFO(Core, "Auto-key injected: frame={} t={:.1f}s sc={}", mainFrameCounter, elapsedMs / 1000.0f,
-                         (int)ak.scancode);
+                PushAutoKey(ak, true);
+                if (ak.holdMs > 0)
+                {
+                    ak.holding = true;
+                    ak.releaseAtMs = elapsedMs + ak.holdMs;
+                }
+                else
+                {
+                    PushAutoKey(ak, false);
+                }
+                LOG_INFO(Core, "Auto-key injected: frame={} t={:.1f}s sc={} hold={}ms", mainFrameCounter,
+                         elapsedMs / 1000.0f, (int)ak.scancode, ak.holdMs);
             }
         }
 
@@ -2523,6 +2560,7 @@ void GameApplication::RunMainLoop()
         DWORD elapsedMs = Poseidon::Foundation::GlobalTickCount() - loopStartTick;
 
         // Inject auto-key events for this frame / time
+        ReleaseHeldAutoKeys(autoKeyEvents, static_cast<uint32_t>(elapsedMs));
         for (auto& ak : autoKeyEvents)
         {
             if (!TriggerReady(ak.trigger, mainFrameCounter, elapsedMs))
@@ -2536,20 +2574,19 @@ void GameApplication::RunMainLoop()
                 LOG_INFO(Core, "Auto-key injected: frame={} SDL_QUIT", mainFrameCounter);
                 continue;
             }
-            SDL_Event ev = {};
-            ev.type = SDL_EVENT_KEY_DOWN;
-            ev.key.scancode = ak.scancode;
-            ev.key.key = SDL_GetKeyFromScancode(ak.scancode, ak.mod, false);
-            ev.key.mod = ak.mod;
-            ev.key.down = true;
-            SDL_PushEvent(&ev);
-
-            // Also push KEY_UP on the next tick
-            ev.type = SDL_EVENT_KEY_UP;
-            ev.key.down = false;
-            SDL_PushEvent(&ev);
-            LOG_INFO(Core, "Auto-key injected: frame={} t={:.1f}s scancode={} mod={}", mainFrameCounter,
-                     elapsedMs / 1000.0f, (int)ak.scancode, (int)ak.mod);
+            PushAutoKey(ak, true);
+            if (ak.holdMs > 0)
+            {
+                ak.holding = true;
+                ak.releaseAtMs = static_cast<uint32_t>(elapsedMs) + ak.holdMs;
+            }
+            else
+            {
+                // Also push KEY_UP on the next tick
+                PushAutoKey(ak, false);
+            }
+            LOG_INFO(Core, "Auto-key injected: frame={} t={:.1f}s scancode={} mod={} hold={}ms", mainFrameCounter,
+                     elapsedMs / 1000.0f, (int)ak.scancode, (int)ak.mod, ak.holdMs);
         }
 
         auto frameT0 = TerrainProfile::Now();
