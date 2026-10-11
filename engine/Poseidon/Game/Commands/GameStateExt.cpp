@@ -864,6 +864,65 @@ GameValue WaypointShow(const GameState* state, GameValuePar oper1, GameValuePar 
 GameValue WaypointSynchronize(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue WpSetPos(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 
+// ---- Arma 1 commands with an existing CWA equivalent (used by the Arma 1 campaigns) ----
+
+// pos nearestObject id  /  pos nearestObject "type"
+static GameValue A1NearestObject(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    if (oper2.GetType() == GameScalar)
+        return GetObject(state, oper2); // map object ids are unique on the world
+    GameArrayType args;
+    args.Add(oper1);
+    args.Add(oper2);
+    return GetNearestObject(state, GameValue(args));
+}
+
+// unit lookAt target: the closest CWA order is doWatch
+static GameValue A1LookAt(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return VehDoWatch(state, oper1, oper2);
+}
+
+static GameValue A1CamPrepareTarget(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return oper2.GetType() == GameObject ? CamSetTargetObj(state, oper1, oper2) : CamSetTargetVec(state, oper1, oper2);
+}
+
+// Arma 1's prepared camera state is CWA's pending one: camCommitPrepared commits it.
+static GameValue A1CamPreload(const GameState*, GameValuePar, GameValuePar)
+{
+    return NOTHING; // CWA streams the scene without a preload request
+}
+
+static GameValue A1CamPreloaded(const GameState*, GameValuePar)
+{
+    return GameValue(true);
+}
+
+// unit/units doGetOut: leave the vehicle now, keep the assignment
+static GameValue A1DoGetOut(const GameState* state, GameValuePar oper1)
+{
+    GameValue units = oper1;
+    if (oper1.GetType() != GameArray)
+    {
+        GameArrayType list;
+        list.Add(oper1);
+        units = GameValue(list);
+    }
+    return ListOrderGetIn(state, units, GameValue(false));
+}
+
+// group enableAttack bool / enableEnvironment bool / reload unit: no CWA state behind them.
+static GameValue A1IgnoredBinary(const GameState*, GameValuePar, GameValuePar)
+{
+    return NOTHING;
+}
+
+static GameValue A1IgnoredUnary(const GameState*, GameValuePar)
+{
+    return NOTHING;
+}
+
 static const GameNular* GetExtNular(int& count)
 {
     static const GameNular ExtNular[] = {
@@ -945,6 +1004,10 @@ static const GameFunction* GetExtUnary(int& count)
     static const GameFunction ExtUnary[] = {
         GameFunction(GameBool, "isNull", ObjIsNull, GameObject),
         GameFunction(GameScalar, "execVM", ScriptExecVMUnary, GameString),
+        GameFunction(GameBool, "camPreloaded", A1CamPreloaded, GameObject),
+        GameFunction(GameNothing, "doGetOut", A1DoGetOut, GameObjectOrArray),
+        GameFunction(GameNothing, "enableEnvironment", A1IgnoredUnary, GameBool),
+        GameFunction(GameNothing, "reload", A1IgnoredUnary, GameObject),
         GameFunction(GameNothing, "terminate", ScriptTerminate, GameScalar),
         GameFunction(GameBool, "scriptDone", ScriptIsDone, GameScalar),
         GameFunction(GameBool, "waitUntil", ScriptWaitUntilUnscheduled, GameString),
@@ -1344,6 +1407,20 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "objStatus", function, SetObjectiveStatus, GameString, GameString),
         GameOperator(GameNothing, "exec", function, ScriptExecute, GameVoid, GameString),
         GameOperator(GameScalar, "spawn", function, ScriptSpawn, GameVoid, GameString),
+        // Arma 1 commands (see A1* above)
+        GameOperator(GameObject, "nearestObject", function, A1NearestObject, GameArray, GameScalar | GameString),
+        GameOperator(GameNothing, "lookAt", function, A1LookAt, GameObjectOrArray, GameObject | GameArray),
+        GameOperator(GameNothing, "enableAttack", function, A1IgnoredBinary, GameObjectOrGroup, GameBool),
+        GameOperator(GameNothing, "camPreparePos", function, CamSetPos, GameObject, GameArray),
+        GameOperator(GameNothing, "camPrepareRelPos", function, CamSetRelPos, GameObject, GameArray),
+        GameOperator(GameNothing, "camPrepareTarget", function, A1CamPrepareTarget, GameObject, GameObject | GameArray),
+        GameOperator(GameNothing, "camPrepareFov", function, CamSetFOV, GameObject, GameScalar),
+        GameOperator(GameNothing, "camPrepareFovRange", function, CamSetFOVRange, GameObject, GameArray),
+        GameOperator(GameNothing, "camPrepareDir", function, CamSetDive, GameObject, GameScalar),
+        GameOperator(GameNothing, "camPrepareDive", function, CamSetDive, GameObject, GameScalar),
+        GameOperator(GameNothing, "camPrepareBank", function, CamSetDive, GameObject, GameScalar),
+        GameOperator(GameNothing, "camCommitPrepared", function, CamCommit, GameObject, GameScalar),
+        GameOperator(GameNothing, "camPreload", function, A1CamPreload, GameObject, GameScalar),
         GameOperator(GameScalar, "execVM", function, ScriptExecVM, GameVoid, GameString),
         GameOperator(GameBool, "preloadObject", function, PreloadObjectReady, GameScalar, GameObject),
 

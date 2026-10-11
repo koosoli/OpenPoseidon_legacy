@@ -2845,7 +2845,8 @@ void World::StartIntro()
                             LOG_ERROR(Core, "StartAutoTest error latch: {}",
                                       (const char*)GetMaxErrorMessage());
                         }
-                        if (AppConfig::Instance().IsMissionSmokeCheck())
+                        if (AppConfig::Instance().IsMissionSmokeCheck() ||
+                            AppConfig::Instance().GetArma1TestSeconds() > 0.0f)
                         {
                             LOG_ERROR(Core, "Mission smoke check failed: StartAutoTest could not boot '{}'", LoadFile);
                             GApp->m_exitCode = 1;

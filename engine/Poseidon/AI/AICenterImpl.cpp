@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <algorithm>
 #include <Poseidon/Foundation/Framework/PoTime.hpp>
 #include <Poseidon/Core/Application.hpp>
@@ -34,6 +35,17 @@
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
 
 #include <Poseidon/Game/UiActions.hpp>
+
+namespace
+{
+// Editor-given names (units, vehicles, triggers) are read-only in OFP; Arma 1
+// missions reassign them ("defend=0" for a trigger named defend), so under
+// --arma1 they are ordinary variables.
+inline bool EditorNamesReadOnly()
+{
+    return !Poseidon::Arma1Compat::Active();
+}
+} // namespace
 
 namespace Poseidon
 {
@@ -1033,7 +1045,7 @@ static EntityAI* CreateVehicle(const ArcadeUnitInfo& info, ArcadeTemplate& t, Ta
     if (info.name.GetLength() > 0)
     {
         veh->SetVarName(info.name);
-        GWorld->GetGameState()->VarSet(info.name, GameValueExt(veh.GetRef()), true);
+        GWorld->GetGameState()->VarSet(info.name, GameValueExt(veh.GetRef()), EditorNamesReadOnly());
     }
 
     // Add into World
@@ -1329,7 +1341,7 @@ Vehicle* CreateSensor(const ArcadeSensorInfo& info, AIGroup* grp, bool multiplay
 
     if (info.name.GetLength() > 0)
     {
-        GWorld->GetGameState()->VarSet(info.name, GameValueExt(vehicle.GetRef()), true);
+        GWorld->GetGameState()->VarSet(info.name, GameValueExt(vehicle.GetRef()), EditorNamesReadOnly());
     }
 
     // position is on sea level now
@@ -1656,7 +1668,7 @@ AIUnit* AICenter::CreateUnit(const ArcadeUnitInfo& info, ArcadeTemplate& t, bool
             {
                 name = info.name + RString("d");
                 driver->GetPerson()->SetVarName(name);
-                GWorld->GetGameState()->VarSet(name, GameValueExt(driver->GetPerson()), true);
+                GWorld->GetGameState()->VarSet(name, GameValueExt(driver->GetPerson()), EditorNamesReadOnly());
             }
             if (multiplayer)
             {
@@ -1690,7 +1702,7 @@ AIUnit* AICenter::CreateUnit(const ArcadeUnitInfo& info, ArcadeTemplate& t, bool
             {
                 name = info.name + RString("c");
                 commander->GetPerson()->SetVarName(name);
-                GWorld->GetGameState()->VarSet(name, GameValueExt(commander->GetPerson()), true);
+                GWorld->GetGameState()->VarSet(name, GameValueExt(commander->GetPerson()), EditorNamesReadOnly());
             }
             else
             {
@@ -1718,7 +1730,7 @@ AIUnit* AICenter::CreateUnit(const ArcadeUnitInfo& info, ArcadeTemplate& t, bool
             {
                 name = info.name + RString("g");
                 gunner->GetPerson()->SetVarName(name);
-                GWorld->GetGameState()->VarSet(name, GameValueExt(gunner->GetPerson()), true);
+                GWorld->GetGameState()->VarSet(name, GameValueExt(gunner->GetPerson()), EditorNamesReadOnly());
             }
             else
             {

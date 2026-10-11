@@ -48,6 +48,11 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass);
 // simulation; crewPosition 0 driver, 1 gunner, 2 commander, 3 cargo, else -1.
 bool ProxyKind(const char* modelName, std::string& simulation, int& crewPosition);
 
+// A CWA class to carry an Arma 1 class CWA does not define and no alias names:
+// its nearest Arma 1 ancestor CWA has (same simulation, usable scope), else a CWA
+// class of that simulation and side, else any CWA ancestor. Empty when none.
+RString FallbackCwaClass(const RString& a1Name);
+
 // Returns the class to spawn for a mission/script class name. Classes CWA defines
 // are returned unchanged; Arma 1-only classes map to a CWA counterpart.
 RString ResolveVehicleClass(const RString& className);

@@ -1803,9 +1803,14 @@ GameValue GameState::Vyhod() const
 
                         RString name(_e->_pos, idlen);
                         name.Lower();
-                        if (_e->_checkOnly || IsNull(_vars[name]))
+                        // Here an operator is expected, so a variable of the same name
+                        // cannot be meant: Arma 1 missions name objects "spawn" and
+                        // still write `[] spawn {...}`. Only when no operator of that
+                        // name exists is the name left unresolved, as before.
+                        operators = &_operators[name];
+                        if (!_e->_checkOnly && !IsNull(_vars[name]) && _operators.IsNull(*operators))
                         {
-                            operators = &_operators[name];
+                            operators = nullptr;
                         }
                     }
                     else

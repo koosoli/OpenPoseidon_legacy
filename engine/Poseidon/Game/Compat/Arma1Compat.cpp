@@ -268,7 +268,7 @@ const std::map<std::string, std::vector<const char*>>& MagazineAliases()
 }
 
 RString ResolveFrom(const char* configClass, const RString& name,
-                    const std::map<std::string, std::vector<const char*>>& table)
+                    const std::map<std::string, std::vector<const char*>>& table, bool warn = true)
 {
     if (!Active() || name.GetLength() == 0)
         return name;
@@ -290,7 +290,7 @@ RString ResolveFrom(const char* configClass, const RString& name,
             }
         }
     }
-    if (reported.insert(std::string(configClass) + key).second)
+    if (warn && reported.insert(std::string(configClass) + key).second)
         LOG_WARN(Mission, "Arma 1: {} '{}' has no CWA counterpart", configClass, name.Data());
     return name;
 }
@@ -428,7 +428,25 @@ RString ResolveVehicleClass(const RString& className)
     // A class generated earlier for this mission keeps resolving to itself.
     if (_strnicmp(className.Data(), "A1x_", 4) == 0)
         return className;
-    const RString cwa = ResolveFrom("CfgVehicles", className, VehicleAliases());
+    RString cwa = ResolveFrom("CfgVehicles", className, VehicleAliases(), false);
+    const ParamEntry* vehicles = Pars.FindEntry("CfgVehicles");
+    if (vehicles && !vehicles->FindEntry(cwa))
+    {
+        static std::set<std::string> reported;
+        const RString fallback = FallbackCwaClass(className);
+        const bool first = reported.insert(Lower(className.Data())).second;
+        if (fallback.GetLength() > 0)
+        {
+            if (first)
+                LOG_INFO(Mission, "Arma 1: CfgVehicles '{}' is carried by CWA '{}' (by its Arma 1 kind)",
+                         className.Data(), fallback.Data());
+            cwa = fallback;
+        }
+        else if (first)
+        {
+            LOG_WARN(Mission, "Arma 1: CfgVehicles '{}' has no CWA counterpart", className.Data());
+        }
+    }
     return Arma1ModelClass(className, cwa);
 }
 

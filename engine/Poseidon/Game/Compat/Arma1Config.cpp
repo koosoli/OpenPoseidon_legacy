@@ -778,6 +778,102 @@ const ParamEntry* FindConfigClass(const char* root, const char* name)
     return cls ? cls->FindEntry(name) : nullptr;
 }
 
+namespace
+{
+const ParamEntry* CwaVehicle(const char* name)
+{
+    const ParamEntry* vehicles = Pars.FindEntry("CfgVehicles");
+    const ParamEntry* e = vehicles && name && *name ? vehicles->FindEntryNoInheritance(name) : nullptr;
+    return e && e->IsClass() ? e : nullptr;
+}
+
+bool UsableCwaBase(const char* name, const std::string& sim, int side, bool needScope)
+{
+    const ParamEntry* c = CwaVehicle(name);
+    if (!c)
+        return false;
+    if (needScope)
+    {
+        const ParamEntry* scope = c->FindEntry("scope");
+        if (!scope || (int)*scope < 1)
+            return false;
+    }
+    if (Lower(StringValue(*c, "simulation")) != sim)
+        return false;
+    const bool sided = sim == "soldier" || sim == "car" || sim == "tank" || sim == "helicopter" ||
+                       sim == "airplane" || sim == "ship" || sim == "motorcycle";
+    if (sided && side >= 0)
+    {
+        const ParamEntry* s = c->FindEntry("side");
+        if (s && (int)*s != side)
+            return false;
+    }
+    return true;
+}
+} // namespace
+
+RString FallbackCwaClass(const RString& a1Name)
+{
+    if (!Active() || !ConfigLoaded())
+        return RString();
+    const ParamEntry* a1 = FindConfigClass("CfgVehicles", a1Name);
+    if (!a1 || !a1->IsClass())
+        return RString();
+    const std::string sim = Lower(StringValue(*a1, "simulation"));
+    int side = -1;
+    if (const ParamEntry* s = a1->FindEntry("side"); s && !s->IsClass() && !s->IsArray())
+        side = (int)*s;
+    // 1. the nearest Arma 1 ancestor that CWA defines as a usable class of the same kind
+    //    (Civilian13 -> Civilian, hilux1_civil_3_open -> ... -> Car)
+    for (int pass = 0; pass < 2; pass++)
+    {
+        const ParamClass* c = a1->GetClassInterface();
+        for (int guard = 0; c && guard < 40; guard++)
+        {
+            const char* base = c->GetBaseName();
+            if (!base || !*base)
+                break;
+            if (UsableCwaBase(base, sim, pass == 0 ? side : -1, true))
+                return RString(base);
+            const ParamEntry* next = FindConfigClass("CfgVehicles", base);
+            c = next ? next->GetClassInterface() : nullptr;
+        }
+    }
+    // 2. a CWA class by simulation and side
+    struct Default
+    {
+        const char* sim;
+        const char* bySide[4]; // east, west, resistance, civilian
+    };
+    static const Default defaults[] = {
+        {"soldier", {"SoldierEB", "SoldierWB", "SoldierGB", "Civilian"}},
+        {"car", {"UAZ", "Jeep", "GJeep", "Skoda"}},
+        {"tank", {"T72", "M1Abrams", "T72", "T72"}},
+        {"helicopter", {"Mi17", "UH60", "UH60", "UH60"}},
+        {"airplane", {"Su25", "A10", "A10", "Cessna"}},
+        {"ship", {"BoatE", "BoatW", "BoatW", "BoatW"}},
+        {"motorcycle", {"Kolo", "Kolo", "Kolo", "Kolo"}},
+        {"parachute", {"ParachuteEast", "ParachuteWest", "ParachuteG", "ParachuteC"}},
+    };
+    const int s = side >= 0 && side <= 3 ? side : 3;
+    for (const Default& d : defaults)
+        if (sim == d.sim && CwaVehicle(d.bySide[s]))
+            return RString(d.bySide[s]);
+    // 3. any CWA ancestor at all (houses, things, fires, flags ...)
+    const ParamClass* c = a1->GetClassInterface();
+    for (int guard = 0; c && guard < 40; guard++)
+    {
+        const char* base = c->GetBaseName();
+        if (!base || !*base)
+            break;
+        if (CwaVehicle(base))
+            return RString(base);
+        const ParamEntry* next = FindConfigClass("CfgVehicles", base);
+        c = next ? next->GetClassInterface() : nullptr;
+    }
+    return RString();
+}
+
 bool ProxyKind(const char* modelName, std::string& simulation, int& crewPosition)
 {
     simulation.clear();
