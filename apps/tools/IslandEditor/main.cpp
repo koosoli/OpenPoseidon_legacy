@@ -4085,6 +4085,9 @@ int main(int argc, char* argv[])
     bool checkModels = false, modelFormats = false;
     cli.add_flag("--check-models", checkModels, "Test: drive the editor by script (window hidden) and check what the models do; --shot prefix for pictures");
     cli.add_flag("--model-formats", modelFormats, "Print how many of the game's models are binarized (ODOL) and how many are not (MLOD)");
+    bool worldModels = false;
+    cli.add_flag("--world-models", worldModels,
+                 "Print how many of the island's models (and objects) can be read from the game folder, and the most used that cannot (needs --game)");
     bool probeRoads = false;
     cli.add_flag("--probe-roads", probeRoads, "Print the joining points of the island's road models and how well the pieces meet");
     std::string convertTo;
@@ -4135,6 +4138,41 @@ int main(int argc, char* argv[])
                        part.texture.empty() ? "(no texture)" : part.texture.c_str(),
                        part.texture.empty() ? "" : game.LoadTexture(part.texture).Valid() ? "" : "NOT FOUND");
         }
+        return 0;
+    }
+    if (worldModels)
+    {
+        // What of an island the editor can show: its models as this game folder holds them and this build reads
+        // them. (Open Poseidon: the worlds of the later games name models the folder may not have, or in a model
+        // format the reader does not take; those objects are drawn as markers.)
+        GameData game;
+        Island is;
+        std::string error;
+        if (gameDir.empty() || !game.Mount(gameDir) || file.empty() || !GameData::LoadIsland(file, is, error))
+        {
+            fprintf(stderr, "needs an island and --game%s%s\n", error.empty() ? "" : ": ", error.c_str());
+            return 1;
+        }
+        std::map<std::string, size_t> uses;
+        for (const island::Object& o : is.objects)
+            uses[LowerPath(o.model)]++;
+        size_t read = 0, objectsRead = 0;
+        std::vector<std::pair<size_t, std::string>> not_read;
+        for (const auto& [name, count] : uses)
+        {
+            if (game.Mesh(name).valid)
+                read++, objectsRead += count;
+            else
+                not_read.emplace_back(count, name);
+        }
+        std::sort(not_read.rbegin(), not_read.rend());
+        printf("%s (%s)\n", file.c_str(), is.sourceFormat.c_str());
+        printf("models: %zu of %zu read (%.1f %%); objects drawn as their model: %zu of %zu (%.1f %%)\n", read, uses.size(),
+               uses.empty() ? 0.0 : 100.0 * read / uses.size(), objectsRead, is.objects.size(),
+               is.objects.empty() ? 0.0 : 100.0 * objectsRead / is.objects.size());
+        for (size_t i = 0; i < not_read.size() && i < 12; i++)
+            printf("  not read: %-60s %zu objects (%s)\n", not_read[i].second.c_str(), not_read[i].first,
+                   game.ModelFormat(not_read[i].second).empty() ? "not in the game folder" : "in the folder, not readable");
         return 0;
     }
     if (modelFormats)

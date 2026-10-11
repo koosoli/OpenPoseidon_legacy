@@ -59,6 +59,63 @@ worlds are not built as an OFP island is:
 * **Any number of objects.** The object list takes its memory from the system, not from the engine's allocator
   (which gives out at most 256 MiB in one piece), so a world of three million objects opens like any other.
 
+### What was measured (2026-10-11)
+
+`PoseidonIslandEditor <world.wrp> --game <folder> --world-models` prints how much of a world the editor can show.
+
+| World | Game folder | Models read | Objects drawn as their model |
+| --- | --- | --- | --- |
+| Everon | Cold War Assault | 264 of 264 | 56,740 of 56,740 |
+| Sahrani Lite | ARMA Gold | 685 of 687 | 168,553 of 168,817 (99.8 %) |
+| Utes | Arma 2 | 144 of 145 | 17,394 of 17,474 (99.5 %) |
+| Chernarus | Arma 2 | 1,243 of 1,245 | 1,054,747 of 1,055,157 (100.0 %) |
+| Takistan | Operation Arrowhead (`...\Expansion`) | 468 of 534 | 434,446 of 438,906 (99.0 %) |
+| ChernarusPlus | DayZ | 2,352 of 2,352 | 2,971,218 of 2,971,218 |
+
+The models not read on Sahrani, Utes and Chernarus are the invisible road pieces (`road_invisible*.p3d`,
+`voidpath*`), which have nothing to draw. Takistan's are Arma 2's own models (`ca\structures\wall\...`), which
+are in the Arma 2 folder, not Operation Arrowhead's.
+
+`--selftest` passes on all of them (19 checks: save, reload, same heights, objects, ids and cell size, the land the
+right way round under the objects, every tool, undo).
+
+### Open points and things to check
+
+Known, not done:
+
+* **A converted island is not playable at its own scale.** The game loads every OFP-format island at 50 m a cell
+  (see above). The engine would have to read the cell size (the `.cell` file, or a world config entry).
+* **One game folder at a time.** Operation Arrowhead's worlds use Arma 2's models too, and an island being
+  textured with an OFP texture set needs Cold War Assault's folder while its objects need the other game's.
+  Mounting several folders would settle both.
+* **No ground textures from these worlds.** Their satellite image and surface masks are not read; the island
+  starts untextured.
+* **Every second elevation of a 2048 grid is dropped** (the editor's limit is 1024 a side): 7.5 m detail becomes
+  15 m. Objects keep their exact heights; small terrain features between the kept points do not.
+* **Roads.** These worlds keep their roads in a road network beside the objects (`Oprw25World::roadNet`). The road
+  pieces that are objects come across; the network itself is not read, so the Road tool does not know them.
+* **`.wrp` only.** The world has to be taken out of its `.pbo` by hand.
+
+To check, not yet tried:
+
+* **Arma 3** (revision 25): the same code reads it; no Arma 3 world was at hand. Its grids are 4096 and more
+  (every 4th elevation kept), so expect coarser land.
+* **DayZ, the other world** (Livonia / Enoch) and DayZ's own format details: only ChernarusPlus was opened. Its
+  object ids are sparse and large (highest 654,367,047), which broke two things here on the way (both fixed, with a
+  test); anything else that takes an id as a table index would break the same way. Its longest model name is
+  exactly the 75 characters the saved format holds: a longer one in another world would be cut on saving, and the
+  self-test reports it.
+* **DayZ models as drawn.** All 2,352 are read and drawn, but in a close view of Chernogorsk a number of houses
+  are plain grey and one strip is flat green: some of DayZ's textures or materials are not found or not
+  understood (its materials and LODs are newer than the reader was written for). Which, and why, is not
+  looked into yet. Arma 2's and Operation Arrowhead's models show their textures.
+* **Speed with three million objects.** ChernarusPlus opens in the window in about 50 s and draws at ~15 frames a
+  second where the view is full (67 ms a frame measured, against 6 ms on Utes). Selecting, dragging and undo
+  were not tried at that size; undo of "replace all objects" copies the whole list.
+* **Saving a converted world and opening it again in the window**, then using each tool on it. The self-test
+  does this without the window; with the window only opening and looking was tried.
+* **The 21 scripted model checks (`--check-models`)** were run on Cold War Assault only, not on the later games.
+
 ## Working with it
 
 | | |
