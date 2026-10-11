@@ -919,6 +919,12 @@ static GameValue A1Str(const GameState*, GameValuePar oper1)
     return GameValue(oper1.GetText());
 }
 
+// Arma 1: distance preloadObject "className" -- models stream on demand here
+static GameValue A1PreloadClass(const GameState*, GameValuePar, GameValuePar)
+{
+    return GameValue(true);
+}
+
 static GameValue A1PreloadSound(const GameState*, GameValuePar)
 {
     return GameValue(true); // sounds load when played
@@ -1505,6 +1511,7 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "camPreload", function, A1CamPreload, GameObject, GameScalar),
         GameOperator(GameScalar, "execVM", function, ScriptExecVM, GameVoid, GameString),
         GameOperator(GameBool, "preloadObject", function, PreloadObjectReady, GameScalar, GameObject),
+        GameOperator(GameBool, "preloadObject", function, A1PreloadClass, GameScalar, GameString),
 
         GameOperator(GameNothing, "setOvercast", function, SetOvercast, GameScalar, GameScalar),
         GameOperator(GameNothing, "setFog", function, SetFog, GameScalar, GameScalar),
