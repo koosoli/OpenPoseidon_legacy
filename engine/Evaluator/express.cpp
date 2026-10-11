@@ -1342,7 +1342,8 @@ void GameState::VyhCast(int Prio) const
                 {
                     const GameOperator* op = nullptr;
 
-                    if (IsNull(_vars[oper2]))
+                    // The parser already decided this is an operator (a variable of the
+                    // same name -- an object called "spawn" -- cannot be meant here).
                     {
                         const GameOperators& operators = _operators[oper2];
                         if (!_operators.IsNull(operators))
