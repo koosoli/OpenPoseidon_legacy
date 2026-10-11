@@ -372,6 +372,10 @@ class TerrainWgpu : public ITerrainRenderer
     Ref<Texture> _enfusionSatmap;
     float _enfusionSatmapExtent = 0.0f; //!< metres the image covers
     Ref<Texture> BuildEnfusionSatmap(const Landscape& land);
+    //! Native worlds use their own HBAO radius/power (see TerrainWgpuEnfusionSurface.cpp).
+    void ApplyEnfusionAmbientOcclusion(bool native);
+    Engine::AoSettings _enfusionAoSaved{};
+    bool _enfusionAoApplied = false;
     //! Keeps the built textures alive for as long as the world is loaded.
     std::vector<Ref<Texture>> _enfusionGroundTextures;
     std::string _enfusionGroundWorld;

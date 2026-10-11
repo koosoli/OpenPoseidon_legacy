@@ -194,6 +194,7 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
         _enfusionGround.clear();
         _enfusionGroundTextures.clear();
         _enfusionGroundWorld.clear();
+        ApplyEnfusionAmbientOcclusion(false);
         return false;
     }
     // Keyed on the palette itself rather than on the map name, for the same reason:
@@ -349,6 +350,7 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
     }
 
     _enfusionSatmap = BuildEnfusionSatmap(land);
+    ApplyEnfusionAmbientOcclusion(true);
     LOG_INFO(Graphics,
              "Wgpu Enfusion ground: {} of {} palette entries read an .emat; {} BCR, {} NHO, {} middle BCR, "
              "{} ScaleUV, {} SatMapBlend>0; "
@@ -358,6 +360,54 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
     LOG_INFO(Graphics, "Wgpu Enfusion ground normals: {} of {} NHO sources bound (RG, 512px max; enabled={})",
              normalBound, nho, normalsOn);
     return bound > 0;
+}
+
+// RFG-PBR: a native world takes the screen-space AO its own post-process chain authors. Everon's
+// GenericWorldPP_Default names an HBAO effect whose quality tiers (Common/Postprocess/HBAO_*.emat)
+// all set RadiusMeters 8.5 and Intensity 2 -- against our 2 m / 1 -- and vary only the sample count.
+// The parameter set (SmallScaleAO, LargeScaleAO, a power) is HBAO+'s, whose power is an exponent on
+// visibility: the same meaning as AoSettings::strength. At 2 m the AO cannot reach between trees,
+// which is most of why a measured Reforger forest bottoms out at sRGB 18 and ours at 70.
+// WGR_ENFUSION_AO=0 keeps the engine defaults. Restored when a non-native world loads.
+void TerrainWgpu::ApplyEnfusionAmbientOcclusion(bool native)
+{
+    static const bool enabled = [] {
+        const char* v = std::getenv("WGR_ENFUSION_AO");
+        return !(v && v[0] == '0');
+    }();
+    if (!native || !enabled)
+    {
+        if (_enfusionAoApplied)
+        {
+            _engine.SetAoSettings(_enfusionAoSaved);
+            _enfusionAoApplied = false;
+            LOG_INFO(Graphics, "Wgpu Enfusion AO: engine defaults restored");
+        }
+        return;
+    }
+    float radius = 0.0f, intensity = 0.0f;
+    std::vector<uint8_t> bytes;
+    if (EnfusionMount::Instance().Read("Common/Postprocess/HBAO_High.emat", bytes))
+    {
+        const Mat::EmatMaterial hbao =
+            Mat::ParseEmat(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+        hbao.FloatOf("RadiusMeters", radius);
+        hbao.FloatOf("Intensity", intensity);
+    }
+    if (!(radius > 0.0f) || !(intensity > 0.0f))
+    {
+        LOG_INFO(Graphics, "Wgpu Enfusion AO: HBAO_High.emat not readable, engine AO kept");
+        return;
+    }
+    if (!_enfusionAoApplied)
+        _enfusionAoSaved = _engine.GetAoSettings();
+    Engine::AoSettings ao = _enfusionAoSaved;
+    ao.radius = radius;
+    ao.strength = intensity;
+    _engine.SetAoSettings(ao);
+    _enfusionAoApplied = true;
+    LOG_INFO(Graphics, "Wgpu Enfusion AO: HBAO radius {} m, power {} (from Common/Postprocess/HBAO_High.emat)",
+             radius, intensity);
 }
 
 // RFG-PBR: the world's supertexture -- one `<name>_<index>_supertexture.edds` per terrain tile
