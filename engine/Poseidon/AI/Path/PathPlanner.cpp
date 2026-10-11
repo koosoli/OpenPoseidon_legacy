@@ -31,8 +31,20 @@ using namespace Foundation;
 using Foundation::EnumName;
 
 // A* algoritm for searching the best path
-#define ITER_PER_CYCLE 50
-#define MAX_ITER 10000
+//
+// The budgets were sized for OFP's 256 x 256 land grid. A larger world (Arma 1's
+// Sahrani is 512 x 512 at 40 m) has four times the fields a path can cross, and a
+// fixed 10000-node budget ran out on ordinary cross-country orders: the driver
+// answered "can't get there" and never moved. Both budgets scale with the field
+// count relative to 256 x 256, so OFP/CWA worlds keep exactly the old numbers.
+static int PlannerBudgetScale()
+{
+    const int range = LandRange;
+    const int scale = range > 256 ? (range / 256) * (range / 256) : 1;
+    return scale < 64 ? scale : 64;
+}
+#define ITER_PER_CYCLE (50 * PlannerBudgetScale())
+#define MAX_ITER (10000 * PlannerBudgetScale())
 #define Directions 20
 #define direction_delta directions20
 
