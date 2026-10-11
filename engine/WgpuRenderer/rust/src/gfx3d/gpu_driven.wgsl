@@ -1062,6 +1062,16 @@ fn fs_gpu_body(in: VsOut
     // albedo like a baked vertex colour (which is what it replaces). 1.0 for every
     // section whose material names no volume, so this is a no-op everywhere else.
     base = vec4<f32>(base.rgb * retained_crown_ao(in), base.a);
+    // Enfusion vegetation colorization (EngineWgpu::ResolveMaterialCrownAo): the albedo lerps
+    // toward the world colorize colour by crown_ao_p1.z, ramping in from the camera over the
+    // authored distance (alpha byte, metres). Lerp 0 = every non-crown material, a no-op.
+    if (sm.crown_ao_p1.z > 0.0) {
+        let colorize = unpack4x8unorm(bitcast<u32>(sm.crown_ao_p1.w));
+        let ramp_m = colorize.a * 255.0;
+        let ramp = select(1.0, clamp(length(in.world_pos) / max(ramp_m, 1.0), 0.0, 1.0), ramp_m > 0.0);
+        let target_colour = select(colorize.rgb, srgb_to_linear(colorize.rgb), bcr_linear);
+        base = vec4<f32>(mix(base.rgb, target_colour, sm.crown_ao_p1.z * ramp), base.a);
+    }
     // The final per-layer mask weights, hoisted out of the block below so the NORMAL blend
     // (MAT-048, further down) uses exactly the weights the colour blend used — one mask
     // sample, one set of weights, colours and normals agreeing per fragment by construction.

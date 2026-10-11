@@ -1146,6 +1146,7 @@ class EngineWgpu : public EngineDummy
     // translation-cache ordering dependency. WGR_FOLIAGE_CROWN_AO=0 zeroes the
     // intensity lane (the pre-support picture) for the A/B.
     void ResolveMaterialCrownAo(const ShapeSection& section, float aoP0[4], float aoP1[4]);
+    uint32_t ResolveColorizeMean(const std::string& path);
     // A section's environment (reflection) map when its material names a loadable one,
     // or 0. DZ-003: DayZ water is authored as a near-black constant plus a reflection,
     // so a non-zero answer here is what marks a surface reflective for the shader.

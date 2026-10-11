@@ -4,6 +4,9 @@
 #include "GroundMeshSurface.hpp"
 #include "TreeSnowSurface.hpp"
 #include "RainWaterPublication.hpp"
+#include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
+#include <Poseidon/Graphics/Textures/EddsReader.hpp>
+#include <Poseidon/Graphics/Textures/Image.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Entities/Vehicles/Tracks.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageCameraDemand.hpp>
@@ -13219,6 +13222,49 @@ float EngineWgpu::ResolveMaterialNormalPower(const ShapeSection& section)
     return cached->second.normalPower;
 }
 
+// The mean colour of a vegetation colorize map (`WorldColorizeMap`), as packed RGB8 (r in the low
+// byte), from its smallest mip at or above 4x4. Cached per path; 0 when unreadable.
+uint32_t EngineWgpu::ResolveColorizeMean(const std::string& path)
+{
+    static std::unordered_map<std::string, uint32_t> cache;
+    const auto found = cache.find(path);
+    if (found != cache.end())
+        return found->second;
+    uint32_t packed = 0;
+    std::vector<uint8_t> bytes;
+    const auto& mount = Poseidon::Asset::Formats::Enfusion::EnfusionMount::Instance();
+    if (mount.IsOpen() && mount.Read(path, bytes) && IsEddsBuffer(bytes.data(), bytes.size()))
+    {
+        const EddsImage image = ReadEddsBuffer(bytes.data(), bytes.size());
+        size_t level = 0;
+        for (size_t i = 0; i < image.mipmaps.size(); ++i)
+            if (image.mipmaps[i].width >= 4 && image.mipmaps[i].height >= 4)
+                level = i;
+        if (image.valid() && level < image.mipmaps.size())
+        {
+            const auto& mip = image.mipmaps[level];
+            std::vector<uint8_t> rgba(static_cast<size_t>(mip.width) * mip.height * 4);
+            if (ConvertPixels(mip.data.data(), rgba.data(), mip.width, mip.height, image.format, PixelFormat::RGBA8888))
+            {
+                if (image.format == PixelFormat::ARGB8888)
+                    for (size_t i = 0; i + 2 < rgba.size(); i += 4)
+                        std::swap(rgba[i], rgba[i + 2]);
+                double sum[3] = {0.0, 0.0, 0.0};
+                const size_t n = static_cast<size_t>(mip.width) * mip.height;
+                for (size_t i = 0; i < n; ++i)
+                    for (int c = 0; c < 3; ++c)
+                        sum[c] += rgba[i * 4 + c];
+                packed = static_cast<uint32_t>(sum[0] / n) | (static_cast<uint32_t>(sum[1] / n) << 8) |
+                         (static_cast<uint32_t>(sum[2] / n) << 16);
+                LOG_INFO(Graphics, "Wgpu foliage colorize: '{}' mean sRGB {}/{}/{}", path, packed & 0xFF,
+                         (packed >> 8) & 0xFF, (packed >> 16) & 0xFF);
+            }
+        }
+    }
+    cache.emplace(path, packed);
+    return packed;
+}
+
 // Crown self-occlusion volume, packed for the section record. Zero lanes when
 // the material names no volume, so every legacy section and every silent .emat
 // renders exactly as before.
@@ -13226,13 +13272,13 @@ void EngineWgpu::ResolveMaterialCrownAo(const ShapeSection& section, float aoP0[
 {
     aoP0[0] = aoP0[1] = aoP0[2] = aoP0[3] = 0.0f;
     aoP1[0] = aoP1[1] = aoP1[2] = aoP1[3] = 0.0f;
+    // On by default since 2026-10-11 (Reforger reference: the crowns' dark interior). Off with
+    // WGR_FOLIAGE_CROWN_AO=0.
     static const bool enabled = []
     {
         const char* v = std::getenv("WGR_FOLIAGE_CROWN_AO");
-        return v && v[0] == '1';
+        return !(v && v[0] == '0');
     }();
-    if (!enabled)
-        return;
     if (!section.surfMat)
         return;
     const char* materialPath = section.surfMat->GetName().Data();
@@ -13242,7 +13288,34 @@ void EngineWgpu::ResolveMaterialCrownAo(const ShapeSection& section, float aoP0[
     if (cached == _materialBindings.end())
         return; // ResolveMaterialBaseColour fills the cache first
     const auto& translated = cached->second;
-    if (translated.crownAoIntensity <= 0.0f || translated.crownAoWidth <= 0.0f)
+    // Colorization rides lanes z/w of the second vector, independent of the AO volume (the far
+    // MLOD crowns author colorization with GeometryAOIntensity 0). z = lerp, w = the bits of an
+    // RGBA8 word: rgb the map's mean colour (sRGB) x brightness/0.5, a the ramp distance in
+    // metres (0..255). See gpu_driven.wgsl, native_colorize.
+    static const bool colorizeOn = []
+    {
+        const char* v = std::getenv("WGR_FOLIAGE_COLORIZE");
+        return !(v && v[0] == '0');
+    }();
+    if (colorizeOn && translated.colorizeLerp > 0.0f && !translated.colorizeMap.empty())
+    {
+        const uint32_t mean = ResolveColorizeMean(translated.colorizeMap);
+        if (mean != 0)
+        {
+            const float gain = translated.colorizeBrightness / 0.5f;
+            auto channel = [&](int shift)
+            {
+                const float v = static_cast<float>((mean >> shift) & 0xFFu) * gain;
+                return static_cast<uint32_t>(std::clamp(v, 0.0f, 255.0f));
+            };
+            const uint32_t distance =
+                static_cast<uint32_t>(std::clamp(translated.colorizeLerpDistance, 0.0f, 255.0f));
+            const uint32_t word = channel(0) | (channel(8) << 8) | (channel(16) << 16) | (distance << 24);
+            aoP1[2] = translated.colorizeLerp;
+            std::memcpy(&aoP1[3], &word, sizeof(word));
+        }
+    }
+    if (!enabled || translated.crownAoIntensity <= 0.0f || translated.crownAoWidth <= 0.0f)
         return;
     aoP0[0] = translated.crownAoCenter[0];
     aoP0[1] = translated.crownAoCenter[1];

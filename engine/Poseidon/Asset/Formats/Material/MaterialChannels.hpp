@@ -267,6 +267,16 @@ struct TranslatedMaterial
     float                crownAoHeight = 0.0f;
     float                crownAoWidth = 0.0f;
     float                crownAoIntensity = 0.0f;
+    // Enfusion vegetation colorization (`EnableColorization`, `WorldColorizeMap`,
+    // `ColorizeMapLerp`, `ColorizeMapLerpAtCamera`, `ColorizeMapLerpDistance`,
+    // `ColorizeMapBrightness`): the crown's albedo is lerped toward a world-space
+    // colour map, by an amount that ramps from the at-camera value to the full lerp
+    // over the distance. Lerp 0 (every material that names none) disables it.
+    std::string          colorizeMap;
+    float                colorizeLerp = 0.0f;
+    float                colorizeLerpAtCamera = 0.0f;
+    float                colorizeLerpDistance = 0.0f;
+    float                colorizeBrightness = 0.5f;
     // Enfusion's global normal map (`GlobalNMOMap`, `UVSrcGlobNormal`) lives
     // in the object's own unwrap rather than the tiling frame: sample it
     // with the second UV set. False for every material that names neither.

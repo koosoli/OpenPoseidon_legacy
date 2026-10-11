@@ -954,6 +954,28 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         cull && !cull->values.empty() && !cull->values[0].isNumber)
         out.doubleSided = EmatMaterial::NameMatches(cull->values[0].text, "none");
 
+    // Vegetation colorization. Parsed as authored; the renderer resolves the map's colour.
+    // `EnableColorization` is an enum whose observed values are `Full` and absent; anything
+    // but an explicit off-spelling with a map and a positive lerp counts as enabled.
+    {
+        const std::string map = emat.TextureOf("WorldColorizeMap");
+        float lerp = 0.0f;
+        bool on = true;
+        if (const EmatProperty* enable = emat.Find("EnableColorization");
+            enable && !enable->values.empty() && !enable->values[0].isNumber)
+            on = !EmatMaterial::NameMatches(enable->values[0].text, "none") &&
+                 !EmatMaterial::NameMatches(enable->values[0].text, "off") &&
+                 !EmatMaterial::NameMatches(enable->values[0].text, "disabled");
+        if (on && !map.empty() && emat.FloatOf("ColorizeMapLerp", lerp) && lerp > 0.0f)
+        {
+            out.colorizeMap = map;
+            out.colorizeLerp = lerp > 1.0f ? 1.0f : lerp;
+            emat.FloatOf("ColorizeMapLerpAtCamera", out.colorizeLerpAtCamera);
+            emat.FloatOf("ColorizeMapLerpDistance", out.colorizeLerpDistance);
+            emat.FloatOf("ColorizeMapBrightness", out.colorizeBrightness);
+        }
+    }
+
     // Crown self-occlusion volume. Parsed whole or not at all: a center without
     // dimensions (or dimensions without an intensity) cannot evaluate, and a
     // half-read volume would darken the wrong leaves. Intensity clamps to
