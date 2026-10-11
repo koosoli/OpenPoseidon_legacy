@@ -86,6 +86,8 @@ class TextureWgpu : public Texture
     // clutter card and WRONG for anything that gets minified -- an Enfusion ground
     // layer tiled every few metres (RFG-065) is aliasing noise without it.
     void InitDynamic(int w, int h, const void* rgba, uint32_t size, bool genMips = false);
+    // Pre-compressed upload: `format` a WgrTextureFormat, `data` `mipCount` tightly packed levels.
+    bool InitCompressed(int w, int h, int32_t format, uint32_t mipCount, const void* data, uint32_t size);
     // Reserve _slotLease if not already held; returns it (0 = none available).
     uint32_t AcquireSlotLease();
 

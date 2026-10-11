@@ -159,6 +159,10 @@ class TextureBankWgpu : public AbstractTextBank
     Texture* CreateDynamic(int w, int h, const void* rgba, uint32_t size, bool mipmap = false,
                            int alphaClass = -1) override;
     void UpdateDynamic(Texture* tex, const void* rgba, uint32_t size) override;
+    // A texture from already-compressed mip levels (see TextureWgpu::InitCompressed). Null when
+    // the upload fails, e.g. on a device without BC support -- the caller keeps its fallback.
+    Texture* CreateCompressed(int w, int h, int32_t format, uint32_t mipCount, const void* data, uint32_t size,
+                              int alphaClass = -1);
 };
 
 } // namespace Poseidon

@@ -1361,6 +1361,9 @@ impl Renderer {
                 .limits()
                 .max_sampled_textures_per_shader_stage
                 .clamp(16, 64),
+            // Whatever the adapter offers up to 16k (D3D12 / Vulkan desktop: 16,384); the
+            // 8,192 default refused the native world's full-resolution satellite map.
+            max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d.clamp(8192, 16384),
             // The geometry pool is one buffer for every resident mesh, and it is
             // bound as STORAGE (the skin-bake reads it) as well as VERTEX. The
             // defaults are 256 MB for a buffer and 128 MB for a storage binding,

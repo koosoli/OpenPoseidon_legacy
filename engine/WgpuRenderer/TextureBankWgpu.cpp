@@ -670,6 +670,20 @@ Texture* TextureBankWgpu::CreateDynamic(int w, int h, const void* rgba, uint32_t
     return texture;
 }
 
+Texture* TextureBankWgpu::CreateCompressed(int w, int h, int32_t format, uint32_t mipCount, const void* data,
+                                           uint32_t size, int alphaClass)
+{
+    auto* texture = new TextureWgpu(this);
+    if (!texture->InitCompressed(w, h, format, mipCount, data, size))
+    {
+        Ref<Texture> discard = texture; // released here
+        return nullptr;
+    }
+    if (alphaClass >= 0)
+        texture->SetAlphaClassHint(static_cast<AlphaStats::Kind>(alphaClass));
+    return texture;
+}
+
 void TextureBankWgpu::UpdateDynamic(Texture* tex, const void* rgba, uint32_t size)
 {
     if (auto* t = static_cast<TextureWgpu*>(tex))

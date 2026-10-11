@@ -1794,6 +1794,25 @@ void TextureWgpu::InitDynamic(int w, int h, const void* rgba, uint32_t size, boo
     }
 }
 
+bool TextureWgpu::InitCompressed(int w, int h, int32_t format, uint32_t mipCount, const void* data, uint32_t size)
+{
+    _dynamic = true;
+    _uploadTried = true;
+    _w = w;
+    _h = h;
+    _nMipmaps = static_cast<int>(mipCount);
+    if (WgrRenderer* r = _bank ? _bank->Renderer() : nullptr)
+    {
+        CheckProducerMayTouchRenderer("texture create");
+        _gpuHandle = wgr_texture_create(r, static_cast<uint32_t>(w), static_cast<uint32_t>(h), format, mipCount, 0u,
+                                        static_cast<const uint8_t*>(data), size);
+    }
+    if (!_gpuHandle)
+        LOG_WARN(Graphics, "Wgpu: failed to upload compressed texture {}x{} format={} mips={} size={}", w, h, format,
+                 mipCount, size);
+    return _gpuHandle != 0;
+}
+
 void TextureWgpu::UpdateDynamic(const void* rgba, uint32_t size)
 {
     if (!_gpuHandle)

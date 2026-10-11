@@ -659,6 +659,12 @@ impl SharedTextures {
     }
 
     pub fn create(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, tex: &TextureData) -> u64 {
+        // A size the device cannot hold is a refusal, not a validation error: the caller keeps
+        // its fallback (the native satellite map asks for 12,800^2 and drops to 3,200^2).
+        let max_dim = device.limits().max_texture_dimension_2d;
+        if tex.width > max_dim || tex.height > max_dim {
+            return 0;
+        }
         // Reserve a bindless slot up front (recycled free slot, else grow); None = the
         // array is at cap, so the texture still loads but samples via slot 0 (white).
         let slot = self.alloc_slot();

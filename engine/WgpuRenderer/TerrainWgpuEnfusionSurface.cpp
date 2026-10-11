@@ -103,6 +103,8 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
 #include <algorithm>
+#include <cstring>
+#include <atomic>
 #include <chrono>
 #include <thread>
 #include <cstdint>
@@ -431,6 +433,23 @@ Ref<Texture> TerrainWgpu::BuildEnfusionSatmap(const Landscape& land)
     constexpr int kPageEdge = 64;
     const int edge = tiles * kPageEdge;
     std::vector<uint8_t> rgba(static_cast<size_t>(edge) * edge * 4, 0);
+    // RFG-105: the pages at their FULL 1 m, from their own BC7 blocks. The 4 m composite above
+    // cannot carry the 5-10 m green/straw mottling Reforger's meadows show past DetailMaxDistance
+    // (SatMapBlend 0.7 hands most of the colour to the satellite there); the pages can, and as
+    // BC7 they go to the GPU without a decode: block rows are copied into one 12,800^2 BC7 chain
+    // (mips 0..6, 256 down to 4 per page), ~218 MB. Any page that is not BC7 with those mips --
+    // or a device that refuses the upload -- keeps the 4 m image. WGR_ENFUSION_SATMAP_FULL=0 off.
+    constexpr int kFullPageEdge = 256, kFullMips = 7;
+    const char* fullEnv = std::getenv("WGR_ENFUSION_SATMAP_FULL");
+    const bool wantFull = !(fullEnv != nullptr && fullEnv[0] == '0');
+    std::vector<std::vector<uint8_t>> fullLevels;
+    std::atomic<bool> fullOk{wantFull};
+    if (wantFull)
+        for (int level = 0; level < kFullMips; ++level)
+        {
+            const size_t blocksPerRow = static_cast<size_t>(tiles) * ((kFullPageEdge >> level) / 4);
+            fullLevels.emplace_back(blocksPerRow * blocksPerRow * 16, 0);
+        }
     const EnfusionMount& mount = EnfusionMount::Instance();
     const auto start = std::chrono::steady_clock::now();
     int pages = 0, missing = 0, failed = 0;
@@ -471,6 +490,32 @@ Ref<Texture> TerrainWgpu::BuildEnfusionSatmap(const Landscape& land)
             {
                 ++st.failed;
                 continue;
+            }
+            if (fullOk.load(std::memory_order_relaxed))
+            {
+                bool copied = image.format == PixelFormat::BC7;
+                for (int level = 0; copied && level < kFullMips; ++level)
+                {
+                    const int pageEdge = kFullPageEdge >> level;
+                    const DDSMipLevel* mip = nullptr;
+                    for (const auto& m : image.mipmaps)
+                        if (m.width == pageEdge && m.height == pageEdge)
+                            mip = &m;
+                    const size_t pageBlocks = static_cast<size_t>(pageEdge / 4);
+                    if (mip == nullptr || mip->data.size() < pageBlocks * pageBlocks * 16)
+                    {
+                        copied = false;
+                        break;
+                    }
+                    const size_t bigBlocks = static_cast<size_t>(tiles) * pageBlocks;
+                    const size_t ox = static_cast<size_t>(index % tiles) * pageBlocks;
+                    const size_t oz = static_cast<size_t>(index / tiles) * pageBlocks;
+                    for (size_t row = 0; row < pageBlocks; ++row)
+                        std::memcpy(fullLevels[level].data() + ((oz + row) * bigBlocks + ox) * 16,
+                                    mip->data.data() + row * pageBlocks * 16, pageBlocks * 16);
+                }
+                if (!copied)
+                    fullOk.store(false, std::memory_order_relaxed);
             }
             page.assign(static_cast<size_t>(kPageEdge) * kPageEdge * 4, 0);
             if (!ConvertPixels(chosen->data.data(), page.data(), kPageEdge, kPageEdge, image.format,
@@ -553,15 +598,38 @@ Ref<Texture> TerrainWgpu::BuildEnfusionSatmap(const Landscape& land)
         return {};
     // Alpha is the road mask here, not cutout coverage; pinned opaque for the same reason as
     // the BCR maps above (the alpha class decides cutout handling elsewhere).
-    Ref<Texture> texture = bank->CreateDynamic(edge, edge, rgba.data(), static_cast<uint32_t>(rgba.size()),
-                                               /*mipmap=*/true, static_cast<int>(AlphaStats::Opaque));
+    Ref<Texture> texture;
+    int builtEdge = edge;
+    if (fullOk.load() && pages == tiles * tiles)
+    {
+        std::vector<uint8_t> chain;
+        size_t total = 0;
+        for (const auto& level : fullLevels)
+            total += level.size();
+        chain.reserve(total);
+        for (auto& level : fullLevels)
+        {
+            chain.insert(chain.end(), level.begin(), level.end());
+            std::vector<uint8_t>().swap(level);
+        }
+        builtEdge = tiles * kFullPageEdge;
+        if (chain.size() <= 0xffffffffull)
+            texture = bank->CreateCompressed(builtEdge, builtEdge, WGR_TEXTURE_BC7, kFullMips, chain.data(),
+                                             static_cast<uint32_t>(chain.size()), static_cast<int>(AlphaStats::Opaque));
+        if (!texture)
+            builtEdge = edge;
+    }
+    if (!texture)
+        texture = bank->CreateDynamic(edge, edge, rgba.data(), static_cast<uint32_t>(rgba.size()),
+                                      /*mipmap=*/true, static_cast<int>(AlphaStats::Opaque));
     if (texture)
         _enfusionSatmapExtent = land.GetLandGrid() * static_cast<float>(land.GetLandRange());
     const double n = opaque > 0 ? static_cast<double>(opaque) : 1.0;
     LOG_INFO(Graphics,
              "Wgpu Enfusion satmap: {} of {} supertexture pages ({} missing, {} failed) -> {}x{} at {:.2f} m, "
              "opaque mean sRGB {:.0f}/{:.0f}/{:.0f} over {:.1f}% of texels, {} ms",
-             pages, tiles * tiles, missing, failed, edge, edge, _enfusionSatmapExtent / static_cast<float>(edge),
+             pages, tiles * tiles, missing, failed, builtEdge, builtEdge,
+             _enfusionSatmapExtent / static_cast<float>(builtEdge),
              sum[0] / n, sum[1] / n, sum[2] / n, 100.0 * static_cast<double>(opaque) / (static_cast<double>(edge) * edge),
              std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
     return texture;
