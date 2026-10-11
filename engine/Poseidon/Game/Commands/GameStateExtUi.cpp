@@ -1,3 +1,5 @@
+#include <vector>
+#include <algorithm>
 #include <Poseidon/Network/NetworkImpl.hpp>
 #include <Poseidon/Network/NetworkImplServer.hpp>
 #include <Poseidon/Core/Application.hpp>
@@ -551,6 +553,72 @@ GameValue nearestObject(const Vector3& pos, const RString& typeName, const float
     return GameValueExt(object);
 }
 } // namespace
+
+// Arma 1: position nearObjects radius | position nearObjects ["type", radius]
+// -> the objects in range (of that class or derived from it), nearest first
+GameValue A1NearObjects(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    Vector3 pos;
+    if (oper1.GetType() == GameObject)
+    {
+        Object* center = GetObject(oper1);
+        if (!center)
+            return result;
+        pos = center->Position();
+    }
+    else if (!GetPos(state, pos, oper1))
+        return result;
+    RString typeName;
+    float radius = 50;
+    if (oper2.GetType() == GameScalar)
+        radius = oper2;
+    else
+    {
+        const GameArrayType& a = oper2;
+        if (a.Size() != 2 || a[0].GetType() != GameString || a[1].GetType() != GameScalar)
+            return result;
+        typeName = a[0];
+        radius = a[1];
+    }
+    const ParamEntry* vehicles = Pars.FindEntry("CfgVehicles");
+    const ParamEntry* base = typeName.GetLength() > 0 && vehicles ? vehicles->FindEntry(typeName) : nullptr;
+    const ParamClass* baseClass = base ? base->GetClassInterface() : nullptr;
+    if (typeName.GetLength() > 0 && !baseClass)
+        return result; // a class this game does not know matches nothing
+
+    std::vector<std::pair<float, Object*>> found;
+    int xMin, xMax, zMin, zMax;
+    ObjRadiusRectangle(xMin, xMax, zMin, zMax, pos, pos, radius);
+    for (int x = xMin; x <= xMax; x++)
+    {
+        for (int z = zMin; z <= zMax; z++)
+        {
+            const ObjectList& list = GLandscape->GetObjects(z, x);
+            for (int i = 0; i < list.Size(); i++)
+            {
+                Object* obj = list[i];
+                const float dist2 = obj->Position().Distance2(pos);
+                if (dist2 > Square(radius))
+                    continue;
+                if (baseClass)
+                {
+                    Vehicle* veh = dyn_cast<Vehicle>(obj);
+                    const ParamEntry* own = veh && vehicles ? vehicles->FindEntry(veh->GetName()) : nullptr;
+                    const ParamClass* ownClass = own ? own->GetClassInterface() : nullptr;
+                    if (!ownClass || (ownClass != baseClass && !ownClass->IsDerivedFrom(*baseClass)))
+                        continue;
+                }
+                found.emplace_back(dist2, obj);
+            }
+        }
+    }
+    std::sort(found.begin(), found.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    GameArrayType& array = result;
+    for (const auto& f : found)
+        array.Add(GameValueExt(f.second));
+    return result;
+}
 
 GameValue GetNearestObjectByDistance(const GameState* state, GameValuePar oper1)
 {

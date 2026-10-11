@@ -504,6 +504,7 @@ GameValue GameTitleText(const GameState* state, GameValuePar oper1);
 GameValue GetLaserTarget(const GameState* state, GameValuePar oper1);
 GameValue GetNearestObject(const GameState* state, GameValuePar oper1);
 GameValue GetNearestObjectByDistance(const GameState* state, GameValuePar oper1);
+GameValue A1NearObjects(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue GetNetIdObj(const GameState* state, GameValuePar oper1);
 GameValue GetNetworkId(const GameState* state, GameValuePar oper1);
 GameValue GetObjFromNetId(const GameState* state, GameValuePar oper1);
@@ -1740,6 +1741,7 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "ctrlSetBackgroundColor", function, A1CtrlIgnored, GameScalar, GameArray),
         GameOperator(GameNothing, "ctrlSetForegroundColor", function, A1CtrlIgnored, GameScalar, GameArray),
         GameOperator(GameObject, "nearestObject", function, A1NearestObject, GameArray, GameScalar | GameString),
+        GameOperator(GameArray, "nearObjects", function, A1NearObjects, GameArray | GameObject, GameArray | GameScalar),
         GameOperator(GameNothing, "lookAt", function, A1LookAt, GameObjectOrArray, GameObject | GameArray),
         GameOperator(GameNothing, "enableAttack", function, A1IgnoredBinary, GameObjectOrGroup, GameBool),
         GameOperator(GameNothing, "camPreparePos", function, CamSetPos, GameObject, GameArray),
