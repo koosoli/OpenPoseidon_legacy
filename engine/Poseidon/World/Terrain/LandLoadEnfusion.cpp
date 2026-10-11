@@ -41,9 +41,12 @@
 #include <Poseidon/Asset/Formats/Enfusion/TerrainMaterials.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainTile.hpp>
 #include <Poseidon/Asset/Formats/Material/EmatSource.hpp>
+#include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Core/ProgressSystem.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
+#include <array>
+#include <functional>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // RFG-070 `enft|` layer tint
 #include <Poseidon/Graphics/Textures/Image.hpp>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
@@ -1050,6 +1053,26 @@ struct ResolvedRoad
     float width = 0.0f;                   //!< metres, 0 when the road left it default
     std::string texture;                  //!< colour `.edds`, empty when unresolved
     std::string material;                 //!< the `.emat` the texture came from
+    //! From the road's MatPBRRoad: the coverage map that cuts the strip into its tracks (the
+    //! ground shows between and beside them), the `Color` multiplier over the dark base
+    //! texture, how many side-by-side variants the textures hold (`NumVersions`, U slices) and
+    //! the length tiling (`GlobalMapsUVTransform TilingV`, repeats per width). Empty / 1 / 0
+    //! when the material does not say.
+    std::string opacity;
+    float tint[3] = {1.0f, 1.0f, 1.0f};
+    bool tinted = false;
+    int versions = 1;
+    float tilingV = 0.0f;
+};
+
+//! The parts of a road's `.emat` its strip is built from (see ResolvedRoad).
+struct RoadLook
+{
+    std::string texture, material, opacity;
+    float tint[3] = {1.0f, 1.0f, 1.0f};
+    bool tinted = false;
+    int versions = 1;
+    float tilingV = 0.0f;
 };
 
 namespace Enf = Poseidon::Asset::Formats::Enfusion;
@@ -1212,7 +1235,7 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
     resolved.reserve(world.placements.size());
     // Resolved once per material GUID: 2,370 roads share a couple of dozen surfaces
     // and each resolution reads an `.emat` out of an archive.
-    std::unordered_map<std::string, std::pair<std::string, std::string>> roadTextures;
+    std::unordered_map<std::string, RoadLook> roadTextures;
 
     for (const Enf::EbinPlacement& placement : world.placements)
     {
@@ -1248,17 +1271,43 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
                     if (prefabHit != byGuid.end())
                         ematPath = Enf::ResolvePrefabMaterial(mount, prefabHit->second);
                 }
-                std::string texture;
+                RoadLook look;
+                look.material = ematPath;
                 if (!ematPath.empty())
                 {
                     Poseidon::Asset::Material::EmatMaterial material;
                     if (LoadEmatFromMount(mount, ematPath, material))
-                        texture = ColourTextureOf(material);
+                    {
+                        look.texture = ColourTextureOf(material);
+                        look.opacity = material.TextureOf("OpacityMap");
+                        float color[4];
+                        if (material.Vec4Of("Color", color))
+                        {
+                            look.tint[0] = color[0], look.tint[1] = color[1], look.tint[2] = color[2];
+                            look.tinted = color[0] != 1.0f || color[1] != 1.0f || color[2] != 1.0f;
+                        }
+                        if (const auto* versions = material.Find("NumVersions"); versions && !versions->values.empty())
+                        {
+                            const auto& v = versions->values[0];
+                            const int n = v.isNumber ? static_cast<int>(v.number) : std::atoi(v.text.c_str());
+                            look.versions = std::clamp(n, 1, 8);
+                        }
+                        Poseidon::Asset::Material::RvUvTransform uv;
+                        if (Poseidon::Asset::Material::EmatUvTransform(material, "GlobalMapsUVTransform", uv) &&
+                            uv.up[1] > 0.0f)
+                            look.tilingV = uv.up[1];
+                    }
                 }
-                cachedTexture = roadTextures.emplace(materialKey, std::make_pair(texture, ematPath)).first;
+                cachedTexture = roadTextures.emplace(materialKey, std::move(look)).first;
             }
-            road.texture = cachedTexture->second.first;
-            road.material = cachedTexture->second.second;
+            const RoadLook& look = cachedTexture->second;
+            road.texture = look.texture;
+            road.material = look.material;
+            road.opacity = look.opacity;
+            std::copy(std::begin(look.tint), std::end(look.tint), road.tint);
+            road.tinted = look.tinted;
+            road.versions = look.versions;
+            road.tilingV = look.tilingV;
             roads.push_back(std::move(road));
             continue;
         }
@@ -1405,36 +1454,74 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
     return out;
 }
 
-/// RFG-027: a road's centreline -> a ribbon of quads the engine can draw.
+/// RFG-027: a road's centreline -> a strip of quads the engine can draw.
 ///
 /// Everon ships no road geometry at all: Enfusion generates the strip at load time
 /// from `RoadEntity`'s spline, so anything that wants roads has to generate them
-/// too. This is the same generation, reduced to what a first pass needs -- a flat
-/// ribbon of the authored width, mitred at each interior point so the seams do not
-/// gap on a bend, with V running along the road so the tarmac tiles by length.
+/// too. This is the same generation, reduced to what it needs: a ribbon of the
+/// authored width, mitred at each interior point so the seams do not gap on a bend.
 ///
-/// Deliberately NOT modelled: crossings, end caps, the separate line-marking pass,
-/// and the terrain cut Enfusion applies underneath. Those are the difference between
-/// "the road network is there" and "the road network is finished", and the first is
-/// worth having on its own.
-LODShapeWithShadow* BuildRoadShape(const std::vector<float>& points, float width, const std::string& texture,
-                                   const std::string& material, const std::string& name)
+/// RFG-104: what the strip is made of comes from its own MatPBRRoad.
+///   * Three vertices across (left, centre, right), EACH draped on the ground through
+///     `groundY`. Draping only the centreline left a strip that is level across its
+///     width, so on any cross-slope the uphill edge sank under the terrain and the edge
+///     drew as a sawtooth where the ground poked through between vertices.
+///   * `OpacityMap` folded into the colour's alpha (`enfa|`): a road's look IS its
+///     coverage -- a dirt trail is two worn tracks with the ground showing between and
+///     beside them, not a solid band of gravel.
+///   * `Color` as a multiplier over the base texture (`enft|`), which on Everon's dirt
+///     roads is a near-black gravel tile that the colour turns grey-brown.
+///   * `NumVersions` side-by-side variants: U spans ONE of them, picked per road. U 0..1
+///     drew all of them abreast, which is a strip of parallel stripes.
+///   * V repeats every width / `TilingV` metres (`GlobalMapsUVTransform`), which leaves a
+///     2-version 0.5-tiling road texel-square.
+///
+/// Not modelled: crossings, end caps, line markings, Enfusion's terrain cut, and the
+/// along-road variant switching (MidPiece weights).
+LODShapeWithShadow* BuildRoadShape(const ResolvedRoad& road, const std::function<float(float, float)>& groundY,
+                                   size_t variantSeed, const std::string& name)
 {
     namespace Fmt = Poseidon::Asset::Formats;
 
+    // Densified to at most 2 m between centreline points: the strip is draped vertex by vertex,
+    // and the terrain between two draped vertices is not the straight line between them.
+    std::vector<float> points;
+    {
+        const std::vector<float>& source = road.points;
+        const size_t sourceCount = source.size() / 3;
+        if (sourceCount < 2)
+            return nullptr;
+        points.reserve(source.size() * 2);
+        for (size_t i = 0; i < sourceCount; ++i)
+        {
+            if (i > 0)
+            {
+                const float dx = source[i * 3 + 0] - source[(i - 1) * 3 + 0];
+                const float dz = source[i * 3 + 2] - source[(i - 1) * 3 + 2];
+                const int steps = std::max(1, static_cast<int>(std::ceil(std::sqrt(dx * dx + dz * dz) / 2.0f)));
+                for (int k = 1; k < steps; ++k)
+                {
+                    const float t = static_cast<float>(k) / static_cast<float>(steps);
+                    for (int c = 0; c < 3; ++c)
+                        points.push_back(source[(i - 1) * 3 + c] + (source[i * 3 + c] - source[(i - 1) * 3 + c]) * t);
+                }
+            }
+            for (int c = 0; c < 3; ++c)
+                points.push_back(source[i * 3 + c]);
+        }
+    }
     const size_t count = points.size() / 3;
-    if (count < 2)
-        return nullptr;
 
     // The authored default. Everon's roads that set `Width` cluster on 6-8 m; a road
     // that leaves it unset gets the commonest value rather than a zero-area ribbon.
-    const float halfWidth = 0.5f * ((width > 0.1f) ? width : 6.0f);
+    const float width = (road.width > 0.1f) ? road.width : 6.0f;
+    const float halfWidth = 0.5f * width;
 
     Fmt::MLOD::WriteLod lod;
     lod.resolution = 1.0f;
-    lod.points.reserve(count * 2);
-    lod.normals.reserve(count * 2);
-    lod.faces.reserve(count * 2);
+    lod.points.reserve(count * 3);
+    lod.normals.reserve(count * 3);
+    lod.faces.reserve(count * 4);
 
     std::vector<float> distance(count, 0.0f);
     for (size_t i = 1; i < count; ++i)
@@ -1475,70 +1562,117 @@ LODShapeWithShadow* BuildRoadShape(const std::vector<float>& points, float width
         // Perpendicular in the ground plane.
         const float nx = -dz * halfWidth;
         const float nz = dx * halfWidth;
-
-        Fmt::MLOD::WritePoint left;
-        left.position = {points[i * 3 + 0] + nx, points[i * 3 + 1], points[i * 3 + 2] + nz};
-        Fmt::MLOD::WritePoint right;
-        right.position = {points[i * 3 + 0] - nx, points[i * 3 + 1], points[i * 3 + 2] - nz};
-        lod.points.push_back(left);
-        lod.points.push_back(right);
-        // ONE NORMAL PER POINT, indexed by the point index, exactly as the `.xob`
-        // converter writes them. A single shared normal with every corner indexing 0
-        // is a legal MLOD and loads without complaint -- and the section it produces
-        // draws untextured, which is a much harder thing to see than a failure.
-        //
-        // And it points DOWN in the file, which is what an upward-facing surface
-        // looks like here: `MeshBuild.cpp:44` negates every normal on the way to the
-        // vertex buffer, and `shading.wgsl` then takes `max(dot(N, -sun), 0)`. A road
-        // written with +Y gets no sun term at all AND samples the sky irradiance from
-        // the darkest point of the dome -- which is the whole of "the roads are
-        // black". The `.xob` path reaches the same convention from the other side,
-        // via `fixOrientation`.
-        lod.normals.push_back({0.0f, -1.0f, 0.0f});
-        lod.normals.push_back({0.0f, -1.0f, 0.0f});
+        const float cx = points[i * 3 + 0], cz = points[i * 3 + 2];
+        for (const float side : {1.0f, 0.0f, -1.0f}) // left, centre, right
+        {
+            Fmt::MLOD::WritePoint point;
+            const float x = cx + side * nx, z = cz + side * nz;
+            point.position = {x, groundY(x, z), z};
+            lod.points.push_back(point);
+            // ONE NORMAL PER POINT, indexed by the point index, exactly as the `.xob`
+            // converter writes them. A single shared normal with every corner indexing 0
+            // is a legal MLOD and loads without complaint -- and the section it produces
+            // draws untextured, which is a much harder thing to see than a failure.
+            //
+            // And it points DOWN in the file, which is what an upward-facing surface
+            // looks like here: `MeshBuild.cpp:44` negates every normal on the way to the
+            // vertex buffer, and `shading.wgsl` then takes `max(dot(N, -sun), 0)`. A road
+            // written with +Y gets no sun term at all AND samples the sky irradiance from
+            // the darkest point of the dome -- which is the whole of "the roads are
+            // black". The `.xob` path reaches the same convention from the other side,
+            // via `fixOrientation`.
+            lod.normals.push_back({0.0f, -1.0f, 0.0f});
+        }
     }
+
+    // Upper envelope. Each quad is checked against the terrain at its centre and edge
+    // midpoints; where the ground rises above the quad's own interpolation there, its corners
+    // are raised by the shortfall. Draping corners alone left whole stretches under a convex
+    // terrain cell -- a run of the strip vanishing behind a straight triangle edge.
+    {
+        std::vector<float> raise(lod.points.size(), 0.0f);
+        const auto at = [&](size_t index)
+        {
+            const auto& p = lod.points[index].position;
+            return std::array<float, 3>{p.x, p.y, p.z};
+        };
+        for (size_t i = 0; i + 1 < count; ++i)
+            for (size_t c = 0; c < 2; ++c)
+            {
+                const size_t a = i * 3 + c, b = i * 3 + c + 1, d = (i + 1) * 3 + c, e = (i + 1) * 3 + c + 1;
+                float shortfall = 0.0f;
+                for (const auto& [s, t] : {std::pair{0.5f, 0.5f}, std::pair{0.5f, 0.0f}, std::pair{0.5f, 1.0f},
+                                           std::pair{0.0f, 0.5f}, std::pair{1.0f, 0.5f}})
+                {
+                    // Bilinear over the quad (s across, t along) -- what the two triangles give
+                    // to within their shared diagonal.
+                    const auto lerp = [](const auto& p, const auto& q, float k)
+                    {
+                        return std::array<float, 3>{p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k,
+                                                    p[2] + (q[2] - p[2]) * k};
+                    };
+                    const auto near = lerp(at(a), at(b), s), far = lerp(at(d), at(e), s);
+                    const auto mid = lerp(near, far, t);
+                    shortfall = std::max(shortfall, groundY(mid[0], mid[2]) - mid[1]);
+                }
+                for (const size_t v : {a, b, d, e})
+                    raise[v] = std::max(raise[v], shortfall);
+            }
+        for (size_t v = 0; v < lod.points.size(); ++v)
+            lod.points[v].position.y += raise[v];
+    }
+
+    // A road without a texture (dirt tracks, and any material that resolves to no colour
+    // texture) would otherwise draw with the white untextured fallback across metres of
+    // landscape: a flat dirt-grey constant through `enfc|` (RFG-039) instead.
+    std::string texture = road.texture.empty() ? "enfc|0.40,0.35,0.29" : road.texture;
+    if (!road.texture.empty() && !road.opacity.empty())
+        texture = "enfa|" + road.opacity + "|" + texture;
+    if (!road.texture.empty() && road.tinted && Poseidon::Enfusion::LayerTintEnabled())
+        texture = Poseidon::Enfusion::MakeLayerTintName(road.tint, texture);
+
+    const int versions = std::max(1, road.versions);
+    const float slice = 1.0f / static_cast<float>(versions);
+    const float u0 = slice * static_cast<float>(variantSeed % static_cast<size_t>(versions));
+    const float uc = u0 + 0.5f * slice, u1 = u0 + slice;
+    // V per metre of length. Without a TilingV, every 2 x width as before.
+    const float vPerMetre = road.tilingV > 0.0f ? road.tilingV / width : 1.0f / (2.0f * width);
 
     for (size_t i = 0; i + 1 < count; ++i)
     {
-        // V tiles every 2 x width of length, which is what makes a 6 m road's texture
-        // square rather than smeared.
-        const float v0 = distance[i] / (halfWidth * 4.0f);
-        const float v1 = distance[i + 1] / (halfWidth * 4.0f);
-        const int32_t base = static_cast<int32_t>(i) * 2;
-        const float u[4] = {0.0f, 1.0f, 1.0f, 0.0f};
-        const float v[4] = {v0, v0, v1, v1};
-        const int32_t point[4] = {base, base + 1, base + 3, base + 2};
-        // Two triangles rather than one quad, for the same reason as the normals:
-        // this is the shape the converter emits and the one the whole path is
-        // exercised against.
-        //
-        // Ring order, and it is the RIGHT order even though the cross product of the
-        // corner edges comes out negative on Y. Reversing it -- which the arithmetic
-        // alone argues for -- makes every road disappear behind backface culling
-        // while its shadow stays, so the engine's front face here is the one ring
-        // order gives. The arithmetic was measured against the picture and lost.
-        const int triangle[2][3] = {{0, 1, 2}, {0, 2, 3}};
-        for (const auto& corners : triangle)
+        const float v0 = distance[i] * vPerMetre;
+        const float v1 = distance[i + 1] * vPerMetre;
+        const int32_t base = static_cast<int32_t>(i) * 3;
+        // Two quads across: left-centre and centre-right. Each in the ring order the
+        // single-quad strip used (near-left, near-right, far-right, far-left), which is
+        // the engine's front face here even though the corner cross product comes out
+        // negative on Y -- reversing it hides every road behind backface culling while
+        // its shadow stays. The arithmetic was measured against the picture and lost.
+        struct Quad
         {
-            Fmt::MLOD::WriteFace face;
-            face.vertexCount = 3;
-            // A road without a texture (dirt tracks, and any material that
-            // resolves to no colour texture) would otherwise draw with the
-            // white untextured fallback across metres of landscape. Give it a
-            // flat dirt-grey constant through the existing `enfc|` mechanism
-            // (RFG-039) instead: native road ribbons only, no legacy path
-            // names such a texture.
-            face.texture = texture.empty() ? "enfc|0.40,0.35,0.29" : texture;
-            face.material = material;
-            for (int c = 0; c < 3; ++c)
+            int32_t point[4];
+            float u[4];
+        };
+        const Quad quads[2] = {{{base, base + 1, base + 4, base + 3}, {u0, uc, uc, u0}},
+                               {{base + 1, base + 2, base + 5, base + 4}, {uc, u1, u1, uc}}};
+        const float v[4] = {v0, v0, v1, v1};
+        const int triangle[2][3] = {{0, 1, 2}, {0, 2, 3}};
+        for (const Quad& quad : quads)
+            for (const auto& corners : triangle)
             {
-                face.vertices[c].point = point[corners[c]];
-                face.vertices[c].normal = point[corners[c]];
-                face.vertices[c].u = u[corners[c]];
-                face.vertices[c].v = v[corners[c]];
+                Fmt::MLOD::WriteFace face;
+                face.vertexCount = 3;
+                face.texture = texture;
+                face.material = road.material;
+                for (int c = 0; c < 3; ++c)
+                {
+                    face.vertices[c].point = quad.point[corners[c]];
+                    face.vertices[c].normal = quad.point[corners[c]];
+                    face.vertices[c].u = quad.u[corners[c]];
+                    face.vertices[c].v = v[corners[c]];
+                }
+                lod.faces.push_back(face);
             }
-            lod.faces.push_back(face);
-        }
     }
 
     Fmt::MLOD::WriteModel model;
@@ -2775,8 +2909,12 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     }
 
                     const std::string name = "enfusion_road_" + std::to_string(r);
-                    LODShapeWithShadow* shape =
-                        BuildRoadShape(road.points, road.width, road.texture, road.material, name);
+                    // Each strip vertex sits on the engine's own terrain, 8 cm up, whatever the
+                    // centreline's height (see BuildRoadShape: a strip draped by its centre
+                    // alone sinks its uphill edge).
+                    const auto ground = [this, &road](float x, float z)
+                    { return SurfaceY(road.origin[0] + x, road.origin[2] + z) + 0.08f - road.origin[1]; };
+                    LODShapeWithShadow* shape = BuildRoadShape(road, ground, static_cast<size_t>(r), name);
                     if (shape == nullptr)
                     {
                         ++roadsFailed;
