@@ -543,10 +543,11 @@ bool StartCampaignAt(RString campaign, RString missionTemplate, Display* disp)
     }
     if (battle.GetLength() == 0)
     {
-        LOG_WARN(Mission, "Campaign '{}' has no mission with template '{}'; starting at its beginning",
-                 (const char*)campaign, (const char*)missionTemplate);
-        StartCampaign(campaign, disp);
-        return CurrentBattle.GetLength() > 0;
+        // Not part of the campaign's flow (Arma 1 ships stand-alone copies of some
+        // campaign missions inside the campaign archive): the caller plays it alone.
+        LOG_INFO(Mission, "Campaign '{}' has no mission with template '{}'", (const char*)campaign,
+                 (const char*)missionTemplate);
+        return false;
     }
     CurrentBattle = battle;
     CurrentMission = mission;

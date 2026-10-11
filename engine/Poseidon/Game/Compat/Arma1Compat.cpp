@@ -452,8 +452,10 @@ void FilterMissionAddons(FindArrayRStringCI& addOns)
     {
         const std::string name = Lower(addOns[i].Data());
         const bool known = patches && patches->FindEntry(addOns[i]);
-        // Arma 1 content patches are CA*, the expansion DBE1 and Warfare.
-        if (!known && (name.rfind("ca", 0) == 0 || name.rfind("dbe1", 0) == 0 || name == "warfare"))
+        // Arma 1 content patches are CA*, the expansion DBE1 and Warfare -- and anything
+        // else Arma 1's own CfgPatches declares ("Sara", "SaraLite", "Porto", ...).
+        const bool arma1Patch = FindConfigClass("CfgPatches", addOns[i].Data()) != nullptr;
+        if (!known && (arma1Patch || name.rfind("ca", 0) == 0 || name.rfind("dbe1", 0) == 0 || name == "warfare"))
         {
             LOG_INFO(Mission, "Arma 1: addon '{}' is provided by the mounted Arma 1 archives", addOns[i].Data());
             addOns.DeleteAt(i);
