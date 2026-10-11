@@ -1297,10 +1297,10 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
                          entry.surface, entry.plantMat, surfacePlantMat[static_cast<size_t>(best)] != 0);
         }
 
-        // Opt-in: WGR_NATIVE_PLANTMAT_BLADES=1 grows blades only where the surface names a
-        // PlantMat, as Reforger's data says. Off by default: the owner compared the two on a conifer
-        // floor (2026-10-11) and preferred the grass, so the mask is computed and logged but unsent.
-        if (const char* env = std::getenv("WGR_NATIVE_PLANTMAT_BLADES"); env == nullptr || env[0] != '1')
+        // Blades only where the surface names a PlantMat, as Reforger's data says (owner's call,
+        // 2026-10-11: "if Reforger has no grass on the forest floor, neither should we").
+        // WGR_NATIVE_PLANTMAT_BLADES=0 puts blades back on every clutter surface.
+        if (const char* env = std::getenv("WGR_NATIVE_PLANTMAT_BLADES"); env != nullptr && env[0] == '0')
             _clutterBladeSkip = 0;
 
         LOG_INFO(

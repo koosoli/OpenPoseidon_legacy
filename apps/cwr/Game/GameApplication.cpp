@@ -1219,6 +1219,11 @@ static std::string HarnessHandleQuery(const char* what, cJSON* root)
 // Auto-key / auto-screenshot scheduler. Trident parity + flicker scripts
 // ship specs like "700:path" (frame-based) or "2.5s:path" (time-based);
 // TimedTrigger stores both and fires once when either condition matches.
+// POSEIDON_FREEFLY_DRIFT state: the freefly camera, its per-frame step, and when it starts.
+static OLink<CameraVehicle> s_driftCamera;
+static Vector3 s_driftStep;
+static int s_driftStartMs = -1;
+
 struct TimedTrigger
 {
     int frame = -1;
@@ -2160,6 +2165,23 @@ void GameApplication::RunMainLoop()
                     }
                     camera->SetCrossHairs(false);
                     camera->ResetTargets();
+                    // POSEIDON_FREEFLY_DRIFT="vx,vz,startSeconds": from startSeconds on, the camera
+                    // moves vx,vz metres per second at a nominal 60 frames -- a fixed step per
+                    // FRAME, so a run of consecutive auto-screenshots (each stalls ~0.6 s on the
+                    // readback) shows walking-pace motion rather than one jump per capture. For
+                    // grass/foliage flicker probes, which a still camera cannot reproduce.
+                    if (const char* drift = std::getenv("POSEIDON_FREEFLY_DRIFT"); drift != nullptr && *drift != 0)
+                    {
+                        float vx = 0.0f, vz = 0.0f, start = 0.0f;
+                        if (std::sscanf(drift, "%f,%f,%f", &vx, &vz, &start) >= 2)
+                        {
+                            s_driftCamera = camera;
+                            s_driftStep = Vector3(vx / 60.0f, 0.0f, vz / 60.0f);
+                            s_driftStartMs = static_cast<int>(start * 1000.0f);
+                            LOG_INFO(Core, "--test-world-freefly: drift {} {} m/s from {} s (POSEIDON_FREEFLY_DRIFT)", vx,
+                                     vz, start);
+                        }
+                    }
                     GWorld->AddAnimal(camera);
                     GWorld->SetCameraEffect(CreateCameraEffect(camera, "Internal", CamEffectTop, true));
                     // A camera effect is a cutscene as far as CameraEffect::Draw is
@@ -2426,6 +2448,11 @@ void GameApplication::RunMainLoop()
                 screenshotCloseAfterFrame = mainFrameCounter + 2;
             }
         }
+
+        // POSEIDON_FREEFLY_DRIFT: one fixed step per frame (see where the freefly camera is made).
+        if (s_driftStartMs >= 0 && static_cast<int>(elapsedMs) >= s_driftStartMs)
+            if (s_driftCamera)
+                s_driftCamera->Move(s_driftCamera->Position() + s_driftStep);
 
         // Auto-screenshot: capture at specified frame/time triggers
         if (nextAutoScreenshot < autoScreenshots.size() &&
