@@ -2051,7 +2051,12 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     // The per-layer material stand-in (card_tone_gain) multiplies BOTH the
     // sample and its contrast pivot below, so contrast stays brightness-neutral.
     let tone_gain = card_tone_gain(u32(in.blade_uv.z));
-    let a3_albedo = tex.rgb * PHOTO_TONE_CORRECTION * photo_brightness * tone_gain;
+    // A native world's clutter atlas is authored albedo, lit by the real sun (grass_light_dir):
+    // the A3 plate calibration and its white sun sheen were both made for sky-lit A3 plates and
+    // bleach it to mint.
+    let native_card = grass.native2.w > 0.5;
+    let tone_correction = select(PHOTO_TONE_CORRECTION, vec3<f32>(1.0), native_card);
+    let a3_albedo = tex.rgb * tone_correction * photo_brightness * tone_gain;
     // The source plates have strong chlorophyll green. Keep their natural
     // stem variation but pull this card-only correction toward luma before
     // the user's global grass saturation is applied.
@@ -2072,7 +2077,7 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     // the near-field cancellation between bright stems and dark gaps disappears.
     let contrast = clamp(grass.photo.x, 0.5, 2.5);
     let mean_a3 = grass.layer_means[min(u32(in.blade_uv.z), 31u)].rgb *
-        PHOTO_TONE_CORRECTION * photo_brightness * tone_gain;
+        tone_correction * photo_brightness * tone_gain;
     let mean_luma = dot(mean_a3, vec3<f32>(0.2126, 0.7152, 0.0722));
     let plate_pivot = mix(vec3<f32>(mean_luma), mean_a3, photo_sat);
     let shaped = max((photo_natural - plate_pivot) * contrast + plate_pivot, vec3<f32>(0.0));
@@ -2108,7 +2113,7 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     let sheen_amount = grass_broad_sun_response(dot(clump_normal, half_direction), height_detail,
         view_dir.y, GRASS_MEDIUM_LIGHTING);
     let sheen = frame.sun_diffuse.rgb * vec3<f32>(0.85, 1.0, 0.75) * sheen_amount *
-        (1.0 - max(terrain_shadow, clump_shadow)) * cloud_lit;
+        (1.0 - max(terrain_shadow, clump_shadow)) * cloud_lit * select(1.0, 0.0, native_card);
     let lit = albedo * (ambient + direct) + sheen;
 #ifdef GRASS_DEBUG_ALBEDO
     return albedo;

@@ -3163,10 +3163,13 @@ mod tests {
         // Applied to the sample AND its pivot in tuft_shade, and to layer 0 in
         // fs_grass_far. The correction vector is one constant everywhere.
         assert!(SHADER.contains("let tone_gain = card_tone_gain(u32(in.blade_uv.z));"));
-        assert!(SHADER.contains("tex.rgb * PHOTO_TONE_CORRECTION * photo_brightness * tone_gain;"));
+        // The correction is PHOTO_TONE_CORRECTION on A3 plates and 1 on a native world's
+        // authored atlas (tone_correction); the same factor reaches sample and pivot.
+        assert!(SHADER.contains("let tone_correction = select(PHOTO_TONE_CORRECTION, vec3<f32>(1.0), native_card);"));
+        assert!(SHADER.contains("tex.rgb * tone_correction * photo_brightness * tone_gain;"));
         assert_eq!(
             SHADER
-                .matches("PHOTO_TONE_CORRECTION * photo_brightness * tone_gain;")
+                .matches("tone_correction * photo_brightness * tone_gain;")
                 .count(),
             2,
             "sample and pivot"
