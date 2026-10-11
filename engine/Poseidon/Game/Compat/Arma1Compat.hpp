@@ -53,6 +53,11 @@ bool ProxyKind(const char* modelName, std::string& simulation, int& crewPosition
 // class of that simulation and side, else any CWA ancestor. Empty when none.
 RString FallbackCwaClass(const RString& a1Name);
 
+// An Arma 1 binarised config FILE (mission.sqm, description.ext, ...) as config
+// text the engine's parser reads. False when the file is not in Arma 1's layout
+// (OFP/CWA's own binarised files keep their reader). Works without --arma1.
+bool Arma1RapFileToText(const char* fileName, std::string& text);
+
 // Returns the class to spawn for a mission/script class name. Classes CWA defines
 // are returned unchanged; Arma 1-only classes map to a CWA counterpart.
 RString ResolveVehicleClass(const RString& className);

@@ -16,9 +16,12 @@ class Preprocessor : public Preproc
 
     static std::string DirectoryOf(const char* path)
     {
-        const char* slash = strrchr(path, '/');
-        if (!slash)
-            slash = strrchr(path, '\\');
+        // the LAST separator of either kind: an include written with a backslash
+        // ("UIScripts\\vendorUI.hpp") under a forward-slash path keeps its folder,
+        // so that file's own includes resolve beside it (Arma 1 Merc shop missions)
+        const char* fwd = strrchr(path, '/');
+        const char* back = strrchr(path, '\\');
+        const char* slash = !fwd ? back : !back ? fwd : (fwd > back ? fwd : back);
         if (!slash)
             return {};
         return std::string(path, slash - path);

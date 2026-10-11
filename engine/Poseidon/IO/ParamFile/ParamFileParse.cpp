@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/Foundation/Framework/AppFrame.hpp>
 #include <Poseidon/Foundation/Strings/Bstring.hpp>
@@ -300,6 +301,17 @@ LSError ParamFile::Parse(const char* name)
     {
         LOG_DEBUG(Core, "ParamFile::Parse() - File does not exist: {}", fullPath);
         return LSOK;
+    }
+
+    // Arma 1 ships binarised mission.sqm files in its own raP layout (version word 0).
+    {
+        std::string a1Text;
+        if (Arma1Compat::Arma1RapFileToText(name, a1Text))
+        {
+            QIStream a1In(a1Text.data(), static_cast<int>(a1Text.size()));
+            Parse(a1In);
+            return LSOK;
+        }
     }
 
 #if OUTPUT_PREPROC
@@ -964,6 +976,15 @@ bool ParamFile::ParseBin(const char* name)
     if (!QIFStreamB::FileExist(name))
     {
         return LSOK;
+    }
+    {
+        std::string a1Text;
+        if (Arma1Compat::Arma1RapFileToText(name, a1Text))
+        {
+            QIStream a1In(a1Text.data(), static_cast<int>(a1Text.size()));
+            Parse(a1In);
+            return true;
+        }
     }
 
     QIFStreamB in;

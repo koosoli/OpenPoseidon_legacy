@@ -812,6 +812,36 @@ bool UsableCwaBase(const char* name, const std::string& sim, int side, bool need
 }
 } // namespace
 
+bool Arma1RapFileToText(const char* fileName, std::string& text)
+{
+    if (!fileName || !*fileName || !QIFStreamB::FileExist(fileName))
+        return false;
+    QIFStreamB in;
+    in.AutoOpen(fileName);
+    const int size = in.rest();
+    if (in.fail() || size < 16)
+        return false;
+    // Arma 1 layout: "\0raP" followed by a zero word (OFP's carries version 2..4).
+    // Only the header is read for every other file (this sits on the text parse path).
+    uint8_t head[8] = {};
+    in.read(head, sizeof(head));
+    if (std::memcmp(head, "\0raP", 4) != 0 || head[4] || head[5] || head[6] || head[7])
+        return false;
+    std::vector<uint8_t> bytes(static_cast<size_t>(size));
+    std::memcpy(bytes.data(), head, sizeof(head));
+    in.read(bytes.data() + sizeof(head), size - static_cast<int>(sizeof(head)));
+    try
+    {
+        text = RapToText(bytes).Convert();
+    }
+    catch (const std::exception& e)
+    {
+        LOG_WARN(Mission, "Arma 1: binarised {} not readable: {}", fileName, e.what());
+        return false;
+    }
+    return true;
+}
+
 RString FallbackCwaClass(const RString& a1Name)
 {
     if (!Active() || !ConfigLoaded())
