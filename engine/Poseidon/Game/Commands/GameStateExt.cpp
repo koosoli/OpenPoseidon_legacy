@@ -918,6 +918,15 @@ static GameValue A1IgnoredBinary(const GameState*, GameValuePar, GameValuePar)
     return NOTHING;
 }
 
+// isNil "name": true when the variable has no value
+static GameValue A1IsNil(const GameState* state, GameValuePar oper1)
+{
+    RString name = oper1;
+    if (name.GetLength() == 0)
+        return GameValue(true);
+    return GameValue(state->VarGet(name).GetNil());
+}
+
 static GameValue A1IgnoredUnary(const GameState*, GameValuePar)
 {
     return NOTHING;
@@ -1005,6 +1014,7 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameBool, "isNull", ObjIsNull, GameObject),
         GameFunction(GameScalar, "execVM", ScriptExecVMUnary, GameString),
         GameFunction(GameBool, "camPreloaded", A1CamPreloaded, GameObject),
+        GameFunction(GameBool, "isNil", A1IsNil, GameString),
         GameFunction(GameNothing, "doGetOut", A1DoGetOut, GameObjectOrArray),
         GameFunction(GameNothing, "enableEnvironment", A1IgnoredUnary, GameBool),
         GameFunction(GameNothing, "reload", A1IgnoredUnary, GameObject),
