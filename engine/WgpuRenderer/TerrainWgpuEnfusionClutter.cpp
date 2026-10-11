@@ -610,6 +610,15 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
         std::unordered_map<std::string, uint32_t> layerOfModel;
         std::string report;
         int surfacesWithClutter = 0, surfacesWithSet = 0, plantsMissingTexture = 0, plantsDropped = 0;
+        // Surfaces that reached the loop after the atlas was full: they share a grown run below.
+        struct Starved
+        {
+            int surface = 0;
+            float weight = 0.0f;
+            std::unordered_set<std::string> models;
+        };
+        std::vector<Starved> starved;
+        std::vector<std::unordered_set<std::string>> runModels(static_cast<size_t>(paletteSize));
 
         // RFG-064: hand out atlas layers by how much GROUND a surface covers, not by its
         // index in the palette.
@@ -663,6 +672,22 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
             const uint32_t first = layerCount;
             uint32_t count = 0;
             float weight = 0.0f;
+            if (layerCount >= GrassGeo::AtlasLayers)
+            {
+                // The atlas is full. Without a run the surface grows NOTHING -- not even the
+                // PlantMat blades, which ride the same TextureCell bit -- so a meadow that came
+                // after the cap was bare earth. Remember its plants; it borrows a run below.
+                Starved entry;
+                entry.surface = i;
+                for (size_t k = 0; k < plants.size() && k < MaxPlantsPerSurface; ++k)
+                {
+                    entry.weight += plants[k].occurrence * 0.01f * std::max(plants[k].density, 0.01f);
+                    entry.models.insert(LowerCopy(plants[k].model));
+                }
+                plantsDropped += static_cast<int>(plants.size());
+                starved.push_back(std::move(entry));
+                continue;
+            }
             for (const NativePlant& plant : plants)
             {
                 if (count >= MaxPlantsPerSurface || layerCount >= GrassGeo::AtlasLayers)
@@ -696,6 +721,7 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
                     layerOfModel.emplace(modelKey, layerCount);
                 }
                 weight += plant.occurrence * 0.01f * std::max(plant.density, 0.01f);
+                runModels[static_cast<size_t>(i)].insert(modelKey);
                 ++layerCount;
                 ++count;
             }
@@ -713,6 +739,43 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
                               surface.c_str(), count, first, weight);
                 report += line;
             }
+        }
+
+        // RFG-PBR: a starved surface shares the grown run whose plant models overlap its own the
+        // most (ties: the commonest surface, which sorted first). A run only has to be contiguous,
+        // not exclusive, so this costs no layer; the surface keeps its own density weight.
+        int surfacesShared = 0;
+        for (const Starved& entry : starved)
+        {
+            int best = -1;
+            size_t bestOverlap = 0;
+            for (const int j : surfaceOrder)
+            {
+                const SurfaceRun& run = runs[static_cast<size_t>(j)];
+                if (run.layerCount == 0 || j == entry.surface)
+                    continue;
+                size_t overlap = 0;
+                for (const std::string& model : entry.models)
+                    overlap += runModels[static_cast<size_t>(j)].count(model);
+                if (best < 0 || overlap > bestOverlap)
+                {
+                    best = j;
+                    bestOverlap = overlap;
+                }
+            }
+            if (best < 0 || entry.weight <= 0.0f)
+                continue;
+            SurfaceRun& run = runs[static_cast<size_t>(entry.surface)];
+            run.layerFirst = runs[static_cast<size_t>(best)].layerFirst;
+            run.layerCount = runs[static_cast<size_t>(best)].layerCount;
+            run.weight = entry.weight;
+            maxWeight = std::max(maxWeight, entry.weight);
+            ++surfacesShared;
+            ++surfacesWithClutter;
+            LOG_INFO(Graphics, "Wgpu grass Enfusion clutter: surface {} '{}' (atlas full) shares the run of {} '{}' "
+                               "({} of {} plant models in common, weight {:.2f})",
+                     entry.surface, land.GetEnfusionSurface(entry.surface), best, land.GetEnfusionSurface(best),
+                     bestOverlap, entry.models.size(), entry.weight);
         }
 
         LOG_INFO(
