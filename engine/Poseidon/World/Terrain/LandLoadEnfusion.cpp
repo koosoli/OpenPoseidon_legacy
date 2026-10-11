@@ -1134,7 +1134,7 @@ const std::vector<Enf::XobBone>& BonesOf(AttachWorkspace& ws, const std::string&
         return hit->second;
     std::vector<Enf::XobBone> bones;
     std::vector<uint8_t> blob;
-    if (ws.mount->Read(xobPath, blob))
+    if (ws.mount->Read(Enf::SplitRemappedMeshKey(xobPath), blob)) // RFG-121: bones are the model's
     {
         const Enf::XobHeader header = Enf::ReadXobHeader(blob.data(), blob.size());
         if (header.valid())
@@ -1181,7 +1181,7 @@ void CollectAttachments(AttachWorkspace& ws, PlacementSummary& summary, const st
             const Enf::PrefabResolution resolved = Enf::ResolvePrefabModel(*ws.mount, partEt);
             if (resolved.xobPath.empty() && summary.slotFailure.empty())
                 summary.slotFailure = partEt + ": " + resolved.reason;
-            cached = ws.partToMesh.emplace(key, resolved.xobPath).first;
+            cached = ws.partToMesh.emplace(key, resolved.MeshKey()).first;
         }
         if (cached->second.empty())
         {
@@ -1252,7 +1252,7 @@ void CollectChildParts(AttachWorkspace& ws, PlacementSummary& summary, const std
         const std::string partKey = LowerCopy(child.prefab);
         auto cached = ws.partToMesh.find(partKey);
         if (cached == ws.partToMesh.end())
-            cached = ws.partToMesh.emplace(partKey, Enf::ResolvePrefabModel(*ws.mount, child.prefab).xobPath).first;
+            cached = ws.partToMesh.emplace(partKey, Enf::ResolvePrefabModel(*ws.mount, child.prefab).MeshKey()).first;
         if (!cached->second.empty())
         {
             MeshAttachment part;
@@ -1423,7 +1423,7 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
             {
                 const Enf::PrefabResolution resolved = Enf::ResolvePrefabModel(mount, guidHit->second);
                 if (!resolved.xobPath.empty())
-                    mesh = resolved.xobPath;
+                    mesh = resolved.MeshKey(); // RFG-121: a colour variant is its own model
                 else if (out.firstFailure.empty())
                     out.firstFailure = resolved.reason;
             }
@@ -1876,13 +1876,17 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
     namespace Enf = Poseidon::Asset::Formats::Enfusion;
     namespace Fmt = Poseidon::Asset::Formats;
 
+    // RFG-121: a mesh key may carry the placing prefab's material remap (enfm|...|<xob>).
+    std::vector<std::pair<std::string, std::string>> materialRemap;
+    const std::string xobFile = Enf::SplitRemappedMeshKey(xobPath, &materialRemap);
     std::vector<uint8_t> bytes;
-    if (!mount.Read(xobPath, bytes))
+    if (!mount.Read(xobFile, bytes))
     {
         why = "not in any archive";
         return nullptr;
     }
     Enf::ConvertOptions options;
+    options.materialRemap = std::move(materialRemap);
     // Both corrections ON. They are opt-in flags in the tool because that is where
     // the A/B lives; for a world that has to look right there is no argument for
     // either default. Orientation is an XOR PAIR -- negate the normal AND swap the
@@ -1923,7 +1927,7 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
     Fmt::MLOD::WriteModel model;
     Enf::ConvertStats stats;
     const MountMaterialSink sink(mount);
-    if (!Enf::ConvertXob(bytes, options, &sink, xobPath, model, stats, why))
+    if (!Enf::ConvertXob(bytes, options, &sink, xobFile, model, stats, why))
         return nullptr;
 
     // RFG-040: does the material path survive the trip? A section with no surface

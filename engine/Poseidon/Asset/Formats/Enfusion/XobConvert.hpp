@@ -143,6 +143,9 @@ struct TextureOptions
 
 struct ConvertOptions
 {
+    //! RFG-121: the placing prefab's MaterialAssignClass list, material SLOT NAME (the `.xob`'s
+    //! string-table name, e.g. `CarpetFrame_01`) -> `.emat`. Empty = the model's own materials.
+    std::vector<std::pair<std::string, std::string>> materialRemap;
     float resolution = 1.0f;  //!< runtime detail value at which the first coarser LOD becomes active
     bool preserveTangentFrame = false; // optional UV0 render-frame import sidecar
     bool secondUv = false;    //!< emit both #UVSet# blocks when a part declares two sets
@@ -632,7 +635,20 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
             // either, or they would sit in the file referenced by nothing.
             std::string materialSource;
             if (part.materialIndex < header.materials.size())
+            {
                 materialSource = header.materials[part.materialIndex].path;
+                // RFG-121: the prefab's colour variant replaces the slot's default material.
+                const std::string& slot = header.materials[part.materialIndex].name;
+                for (const auto& [name, assigned] : options.materialRemap)
+                    if (name.size() == slot.size() &&
+                        std::equal(name.begin(), name.end(), slot.begin(), [](char a, char b)
+                                   { return std::tolower(static_cast<unsigned char>(a)) ==
+                                            std::tolower(static_cast<unsigned char>(b)); }))
+                    {
+                        materialSource = assigned;
+                        break;
+                    }
+            }
             const XobMaterialSink* bakedPart = nullptr;
             if (baker && !materialSource.empty())
             {

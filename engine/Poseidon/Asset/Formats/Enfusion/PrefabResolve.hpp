@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -202,7 +203,60 @@ struct PrefabResolution
     std::string via;    //!< the `.et` the mesh was finally found in
     int depth = 0;      //!< 0 when the placed prefab carried its own mesh
     std::string reason; //!< empty on success; names what failed
+    //! RFG-121: `MeshObject { Materials { MaterialAssignClass { SourceMaterial "<slot>"
+    //! AssignedMaterial "<.emat>" } } }` -- the prefab's own colour variant of a shared model
+    //! (CarpetFrame_01_green over a model whose slot `CarpetFrame_01` defaults to Red; door,
+    //! window-frame and roof variants the same way). Slot name -> `.emat`, child first.
+    std::vector<std::pair<std::string, std::string>> materialRemap;
+
+    //! The mesh key the loader lists: the `.xob` itself, or `enfm|slot=emat;...|<xob>` when the
+    //! prefab remaps materials, so each colour variant is its own model and the key still ends
+    //! in `.xob` (the object stream recognises native models by that suffix).
+    std::string MeshKey() const;
 };
+
+//! Splits a mesh key from PrefabResolution::MeshKey back into the `.xob` and its remap.
+inline std::string SplitRemappedMeshKey(const std::string& key,
+                                        std::vector<std::pair<std::string, std::string>>* remap = nullptr)
+{
+    if (key.compare(0, 5, "enfm|") != 0)
+        return key;
+    const size_t bar = key.find('|', 5);
+    if (bar == std::string::npos)
+        return key;
+    if (remap != nullptr)
+    {
+        const std::string spec = key.substr(5, bar - 5);
+        size_t at = 0;
+        while (at < spec.size())
+        {
+            size_t semi = spec.find(';', at);
+            if (semi == std::string::npos)
+                semi = spec.size();
+            const std::string entry = spec.substr(at, semi - at);
+            const size_t eq = entry.find('=');
+            if (eq != std::string::npos && eq > 0)
+                remap->emplace_back(entry.substr(0, eq), entry.substr(eq + 1));
+            at = semi + 1;
+        }
+    }
+    return key.substr(bar + 1);
+}
+
+inline std::string PrefabResolution::MeshKey() const
+{
+    if (materialRemap.empty() || xobPath.empty())
+        return xobPath;
+    std::string key = "enfm|";
+    for (size_t i = 0; i < materialRemap.size(); ++i)
+        key += (i ? ";" : "") + materialRemap[i].first + "=" + materialRemap[i].second;
+    return key + "|" + xobPath;
+}
+
+//! RFG-121: the root entity's own MaterialAssignClass pairs in one `.et` body (defined below,
+//! after the line helpers it uses).
+inline void FindMaterialAssignments(const std::vector<uint8_t>& blob,
+                                    std::vector<std::pair<std::string, std::string>>& out);
 
 //! Follows a prefab's inheritance chain until a `MeshObject`'s `Object` appears.
 //!
@@ -231,6 +285,29 @@ inline PrefabResolution ResolvePrefabModel(const EnfusionMount& mount, const std
         {
             out.reason = "prefab not in any .pak: " + current;
             return out;
+        }
+        // RFG-121: the variant's material assignments, child first (the first file that names
+        // a slot decides it). POSEIDON_PREFAB_MATERIALS=0 ignores them (every variant draws the
+        // model's default materials, the pre-RFG-121 look).
+        {
+            static const bool remapOn = []
+            {
+                const char* env = std::getenv("POSEIDON_PREFAB_MATERIALS");
+                return !(env && env[0] == '0');
+            }();
+            if (remapOn)
+            {
+                std::vector<std::pair<std::string, std::string>> assigned;
+                FindMaterialAssignments(blob, assigned);
+                for (auto& pair : assigned)
+                {
+                    bool known = false;
+                    for (const auto& have : out.materialRemap)
+                        known = known || PrefabDetail::LowerCopy(have.first) == PrefabDetail::LowerCopy(pair.first);
+                    if (!known)
+                        out.materialRemap.push_back(std::move(pair));
+                }
+            }
         }
         const std::string object = FindObjectReference(blob);
         if (!object.empty())
@@ -372,6 +449,53 @@ inline bool Keyword(const char* data, size_t begin, size_t end, const char* key)
            static_cast<unsigned char>(data[begin + n]) <= ' ';
 }
 } // namespace PrefabDetail
+
+//! RFG-121: the root entity's own MaterialAssignClass pairs in one `.et` body (child entities'
+//! assignments belong to them and are skipped).
+inline void FindMaterialAssignments(const std::vector<uint8_t>& blob,
+                                    std::vector<std::pair<std::string, std::string>>& out)
+{
+    const char* data = reinterpret_cast<const char*>(blob.data());
+    const size_t size = blob.size();
+    int depth = 0;
+    int childDepth = -1; // >= 0 while inside a child entity declared at that depth
+    std::string pendingSource;
+    size_t at = 0;
+    while (at < size)
+    {
+        size_t lineEnd = at;
+        while (lineEnd < size && data[lineEnd] != '\n')
+            ++lineEnd;
+        size_t cursor = at;
+        while (cursor < lineEnd && static_cast<unsigned char>(data[cursor]) <= ' ')
+            ++cursor;
+        std::string quoted;
+        if (childDepth < 0 && depth >= 1)
+        {
+            // A child entity header: `Class : "x.et" {` (MaterialAssignClass has no colon).
+            const size_t colon = std::string_view(data + cursor, lineEnd - cursor).find(" : ");
+            if (colon != std::string_view::npos && PrefabDetail::ChildHeader(data, cursor, lineEnd, quoted))
+                childDepth = depth;
+            else if (PrefabDetail::Keyword(data, cursor, lineEnd, "SourceMaterial"))
+            {
+                std::string source;
+                if (PrefabDetail::QuotedReference(data, cursor, lineEnd, source))
+                    pendingSource = source;
+            }
+            else if (PrefabDetail::Keyword(data, cursor, lineEnd, "AssignedMaterial") && !pendingSource.empty())
+            {
+                std::string assigned;
+                if (PrefabDetail::QuotedReference(data, cursor, lineEnd, assigned) && !assigned.empty())
+                    out.emplace_back(pendingSource, assigned);
+                pendingSource.clear();
+            }
+        }
+        depth += PrefabDetail::NetBraces(data, cursor, lineEnd);
+        if (childDepth >= 0 && depth <= childDepth)
+            childDepth = -1;
+        at = lineEnd + 1;
+    }
+}
 
 //! One `.et` body's own slot declarations, in file order.
 inline void FindSlotDeclarations(const std::vector<uint8_t>& blob, std::vector<PrefabSlot>& exact,
