@@ -364,8 +364,14 @@ class TerrainWgpu : public ITerrainRenderer
         //! because the tile is shared: Dirt_01_Middle_BCR serves 12 materials under 9
         //! different MiddleColors.
         float middleColor[3] = {1.0f, 1.0f, 1.0f};
+        float satBlend = 0.0f; //!< SatMapBlend, 0..1: the supertexture's share past DetailMaxDistance
     };
     std::vector<EnfusionGroundMaterial> _enfusionGround;
+    //! RFG-PBR: the world's supertexture pages composited into one image (see
+    //! BuildEnfusionSatmap); null on every other world or when the pages are absent.
+    Ref<Texture> _enfusionSatmap;
+    float _enfusionSatmapExtent = 0.0f; //!< metres the image covers
+    Ref<Texture> BuildEnfusionSatmap(const Landscape& land);
     //! Keeps the built textures alive for as long as the world is loaded.
     std::vector<Ref<Texture>> _enfusionGroundTextures;
     std::string _enfusionGroundWorld;

@@ -996,6 +996,19 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
                     material.middle = bindLayer(enf->middle, false);
                 if (enf->normal != nullptr)
                     material.tile_normal = bindLayer(enf->normal, false);
+                // RFG-PBR: the composited supertexture (terrain.wgsl, native branch). _pad0 = 2 marks
+                // it; satellite_uv.u carries 1/extent and the material's SatMapBlend.
+                if (_enfusionSatmap && _enfusionSatmapExtent > 0.0f)
+                {
+                    const uint32_t sat = bindLayer(_enfusionSatmap.GetRef(), false);
+                    if (sat != 0)
+                    {
+                        material.satellite = sat;
+                        material._pad0 = 2;
+                        material.satellite_uv.u[0] = 1.0f / _enfusionSatmapExtent;
+                        material.satellite_uv.u[1] = enf->satBlend;
+                    }
+                }
             }
         }
     }

@@ -582,6 +582,10 @@ class Landscape : public SerializeClass
     // shader blends this map instead. Empty on every world the native loader did not build.
     std::vector<uint8_t> _enfusionSurfaceMap;
     int _enfusionSurfaceEdge = 0;
+    // The native tile grid: `<dir>/.Data/<name>_` and tiles per edge, row-major like the
+    // `.ttile`s, for the per-tile pages a renderer may page in (the supertexture).
+    std::string _enfusionTilePrefix;
+    int _enfusionTilesX = 0;
     // Dev switch (Grass > "Clutter cleared under Enfusion roads"): whether the bake
     // honours _enfusionRoadCells. A process-wide flag rather than a GrassSettings field
     // because the mask is a WORLD fact that lives here; the terrain re-bakes when it moves.
@@ -1215,6 +1219,8 @@ class Landscape : public SerializeClass
     // every world that is not a natively loaded Reforger one. See _enfusionSurfaces.
     int GetEnfusionSurfaceCount() const { return _enfusionSurfaces.Size(); }
     // The native surface map (see _enfusionSurfaceMap): its texels and edge, or edge 0.
+    const std::string& GetEnfusionTilePrefix() const { return _enfusionTilePrefix; }
+    int GetEnfusionTilesX() const { return _enfusionTilesX; }
     const std::vector<uint8_t>& GetEnfusionSurfaceMap(int& edge) const
     {
         edge = _enfusionSurfaceEdge;

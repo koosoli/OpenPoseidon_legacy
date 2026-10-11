@@ -75,6 +75,8 @@ void Landscape::Init()
     _enfusionSurfaces.Resize(0);
     _enfusionSurfaceMap.clear();
     _enfusionSurfaceEdge = 0;
+    _enfusionTilePrefix.clear();
+    _enfusionTilesX = 0;
     _enfusionRoadCells.clear(); // same hazard: Everon's roads would clear Malden's clutter
     const ParamEntry& sky = Remaster >> "CfgLandscapeSky";
     RStringB skyName = sky >> "sky" >> "model";

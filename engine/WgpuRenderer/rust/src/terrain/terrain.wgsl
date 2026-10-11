@@ -818,6 +818,26 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                                  max(material.detail_max, 1.0), length(view_pos));
             rgb = mix(rgb, mid, far * clamp(material.middle_blend, 0.0, 1.0));
         }
+        // RFG-PBR: the world's supertexture (TerrainWgpuEnfusionSurface BuildEnfusionSatmap),
+        // flagged by legacy_satellite_generated == 2; satellite_uv.u = (1/extent, SatMapBlend).
+        // Read as a LERP weight, the only reading a blend scalar in 0..1 admits: the material
+        // hands that share of its colour to the satellite past its own DetailMaxDistance (the
+        // band the middle map uses), and every material hands all of it over between 0.8 and
+        // 2.5 km, where a 4 m detail tile can only alias. Satellite alpha 0 -- under the road
+        // ribbons -- leaves the material's own colour.
+        if (material.legacy_satellite_generated == 2u && material.satellite != 0u) {
+            let dist = length(view_pos);
+            let near_band = smoothstep(max(material.detail_max - material.detail_fade, 0.0),
+                                       max(material.detail_max, 1.0), dist);
+            let w_sat = max(clamp(material.satellite_uv.u.y, 0.0, 1.0) * near_band,
+                            smoothstep(800.0, 2500.0, dist));
+            if (w_sat > 0.0) {
+                let s_scale = material.satellite_uv.u.x;
+                let sat = textureSampleGrad(ground[material.satellite], ground_clamp_samp,
+                                            (wxz - tp.world_origin) * s_scale, duv * s_scale, dvv * s_scale);
+                rgb = mix(rgb, sat.rgb, w_sat * clamp(sat.a, 0.0, 1.0));
+            }
+        }
         // Blended, not switched, so the dev panel's A/B is a crossfade and 0 is
         // BIT-EXACT the legacy sample below. Full on costs ONE fetch (two with a
         // middle map): the legacy tap is only taken while the slider is between.

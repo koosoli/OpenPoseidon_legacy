@@ -705,6 +705,9 @@ struct EnfusionTerrain
     TerrainDescriptor descriptor;
     std::vector<uint16_t> heights;
     uint32_t tileEdge = 0;
+    uint32_t tilesX = 0;
+    //! `<dir>/.Data/<name>_` -- the per-tile pages (`_supertexture.edds` and friends) share it
+    std::string tilePrefix;
     size_t tilesFound = 0;
     size_t tilesFailed = 0;
     /// RFG-006: which authored surface covers each square metre, from the tiles' TMAT
@@ -756,6 +759,8 @@ EnfusionTerrain AssembleTerrain(const std::string& addonsDir)
                 !std::all_of(digits.begin(), digits.end(), [](unsigned char c) { return std::isdigit(c) != 0; }))
                 continue;
             tiles[static_cast<uint32_t>(std::stoul(digits))] = path;
+            if (out.tilePrefix.empty())
+                out.tilePrefix = path.substr(0, underscore + 1);
         }
     }
 
@@ -808,6 +813,7 @@ EnfusionTerrain AssembleTerrain(const std::string& addonsDir)
         {
             out.tileEdge = tile.samples - 1;
             tilesX = (gridW - 1) / out.tileEdge;
+            out.tilesX = tilesX;
             if (out.descriptor.subPerTileEdge > 0)
             {
                 out.materialEdge = tilesX * out.descriptor.subPerTileEdge * Tmat::kMaskEdge;
@@ -1930,6 +1936,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
         }
         _enfusionSurfaceEdge = edge;
     }
+    _enfusionTilePrefix = terrain.tilePrefix;
+    _enfusionTilesX = static_cast<int>(terrain.tilesX);
 
     // The palette itself. The names resolve to nothing yet -- they are `.emat` paths
     // INSIDE the archives, and the engine's file layer cannot open a `.pak` -- so the

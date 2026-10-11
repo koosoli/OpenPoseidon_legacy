@@ -103,6 +103,7 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <string>
@@ -277,6 +278,7 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
         float satBlend = 0.0f;
         if (material.FloatOf("SatMapBlend", satBlend) && satBlend > 0.0f)
             ++satmap;
+        _enfusionGround[static_cast<size_t>(i)].satBlend = std::clamp(satBlend, 0.0f, 1.0f);
 
         Texture* detail = load(colour, kDetailMaxEdge);
         const bool semanticMud = TerrainPuddles::EligibleNativeSurface(ematPath);
@@ -346,15 +348,119 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
         out.detailFade = std::clamp(detailFade > 0.0f ? detailFade : out.detailMax, 0.0f, out.detailMax);
     }
 
+    _enfusionSatmap = BuildEnfusionSatmap(land);
     LOG_INFO(Graphics,
              "Wgpu Enfusion ground: {} of {} palette entries read an .emat; {} BCR, {} NHO, {} middle BCR, "
-             "{} ScaleUV, {} SatMapBlend>0 (not bound: needs the supertexture pages); "
+             "{} ScaleUV, {} SatMapBlend>0; "
              "bound {} detail + {} middle over {} distinct images; {} MiddleColor declared, {} MiddleColor applied{}",
              emats, layerCount, bcr, nho, middle, scaled, satmap, bound, middleBound, _enfusionGroundTextures.size(),
              middleColour, middleColourApplied, tintOn ? "" : " (POSEIDON_ENFUSION_MIDDLE_COLOR=0)");
     LOG_INFO(Graphics, "Wgpu Enfusion ground normals: {} of {} NHO sources bound (RG, 512px max; enabled={})",
              normalBound, nho, normalsOn);
     return bound > 0;
+}
+
+// RFG-PBR: the world's supertexture -- one `<name>_<index>_supertexture.edds` per terrain tile
+// (Everon: 2,500 pages, 256 x 256 BC7 over 256 m, so 1 m a texel), the low-frequency colour of
+// the ground as seen from a distance. Measured on Everon tile 1275: sRGB mean 65/66/44, darker
+// and more saturated than any surface's own detail map, with ALPHA 0 under the road ribbons
+// (the road meshes draw there). Composited here at one mip level per page -- 64 x 64, 4 m a
+// texel, 3200 x 3200 on Everon -- into a single image the terrain shader samples by world
+// position. Alpha is kept: the shader reads it as "the satellite has no say here".
+Ref<Texture> TerrainWgpu::BuildEnfusionSatmap(const Landscape& land)
+{
+    _enfusionSatmapExtent = 0.0f;
+    const char* env = std::getenv("WGR_ENFUSION_SATMAP");
+    if (env != nullptr && env[0] == '0')
+        return {};
+    const std::string& prefix = land.GetEnfusionTilePrefix();
+    const int tiles = land.GetEnfusionTilesX();
+    if (prefix.empty() || tiles <= 0)
+        return {};
+    constexpr int kPageEdge = 64;
+    const int edge = tiles * kPageEdge;
+    std::vector<uint8_t> rgba(static_cast<size_t>(edge) * edge * 4, 0);
+    const EnfusionMount& mount = EnfusionMount::Instance();
+    const auto start = std::chrono::steady_clock::now();
+    int pages = 0, missing = 0, failed = 0;
+    double sum[3] = {0.0, 0.0, 0.0};
+    size_t opaque = 0;
+    std::vector<uint8_t> bytes, page;
+    for (int index = 0; index < tiles * tiles; ++index)
+    {
+        const std::string path = prefix + std::to_string(index) + "_supertexture.edds";
+        if (!mount.Read(path, bytes) || !IsEddsBuffer(bytes.data(), bytes.size()))
+        {
+            ++missing;
+            continue;
+        }
+        const EddsImage image = ReadEddsBuffer(bytes.data(), bytes.size());
+        const DDSMipLevel* chosen = nullptr;
+        for (const auto& mip : image.mipmaps)
+            if (mip.width == kPageEdge && mip.height == kPageEdge && !mip.data.empty())
+            {
+                chosen = &mip;
+                break;
+            }
+        if (!image.valid() || chosen == nullptr)
+        {
+            ++failed;
+            continue;
+        }
+        page.assign(static_cast<size_t>(kPageEdge) * kPageEdge * 4, 0);
+        if (!ConvertPixels(chosen->data.data(), page.data(), kPageEdge, kPageEdge, image.format,
+                           PixelFormat::RGBA8888))
+        {
+            ++failed;
+            continue;
+        }
+        if (image.format == PixelFormat::ARGB8888)
+            for (size_t i = 0; i + 2 < page.size(); i += 4)
+                std::swap(page[i], page[i + 2]);
+        // Row-major over the tile grid, rows running with world z -- the `.ttile` order.
+        const int originX = (index % tiles) * kPageEdge;
+        const int originZ = (index / tiles) * kPageEdge;
+        for (int z = 0; z < kPageEdge; ++z)
+        {
+            std::copy_n(page.data() + static_cast<size_t>(z) * kPageEdge * 4, kPageEdge * 4,
+                        rgba.data() + (static_cast<size_t>(originZ + z) * edge + originX) * 4);
+            for (int x = 0; x < kPageEdge; ++x)
+            {
+                const uint8_t* t = page.data() + (static_cast<size_t>(z) * kPageEdge + x) * 4;
+                if (t[3] > 127)
+                {
+                    sum[0] += t[0];
+                    sum[1] += t[1];
+                    sum[2] += t[2];
+                    ++opaque;
+                }
+            }
+        }
+        ++pages;
+    }
+    if (pages == 0)
+    {
+        LOG_INFO(Graphics, "Wgpu Enfusion satmap: no supertexture pages under '{}' ({} missing, {} failed)", prefix,
+                 missing, failed);
+        return {};
+    }
+    auto* bank = dynamic_cast<TextureBankWgpu*>(GEngine != nullptr ? GEngine->TextBank() : nullptr);
+    if (bank == nullptr)
+        return {};
+    // Alpha is the road mask here, not cutout coverage; pinned opaque for the same reason as
+    // the BCR maps above (the alpha class decides cutout handling elsewhere).
+    Ref<Texture> texture = bank->CreateDynamic(edge, edge, rgba.data(), static_cast<uint32_t>(rgba.size()),
+                                               /*mipmap=*/true, static_cast<int>(AlphaStats::Opaque));
+    if (texture)
+        _enfusionSatmapExtent = land.GetLandGrid() * static_cast<float>(land.GetLandRange());
+    const double n = opaque > 0 ? static_cast<double>(opaque) : 1.0;
+    LOG_INFO(Graphics,
+             "Wgpu Enfusion satmap: {} of {} supertexture pages ({} missing, {} failed) -> {}x{} at {:.2f} m, "
+             "opaque mean sRGB {:.0f}/{:.0f}/{:.0f} over {:.1f}% of texels, {} ms",
+             pages, tiles * tiles, missing, failed, edge, edge, _enfusionSatmapExtent / static_cast<float>(edge),
+             sum[0] / n, sum[1] / n, sum[2] / n, 100.0 * static_cast<double>(opaque) / (static_cast<double>(edge) * edge),
+             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+    return texture;
 }
 
 } // namespace Poseidon
