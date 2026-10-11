@@ -43,7 +43,8 @@ struct CullParams {
     // Private diagnostic target; Rust CullParamsGpu carries the same aligned tail.
     target_model_id: u32,
     target_count_enabled: u32,
-    _target_pad: vec2<u32>,
+    lod_floor_dist2: f32,    // LOD metric floor for coarse depth-only views (0 = off)
+    _target_pad: u32,
 };
 
 struct Instance {
@@ -225,7 +226,9 @@ fn classify(idx: u32) -> CullResult {
     }
 
     // Sub-pixel: diameter² < (pixel_limit * lod_scale)² * detail²  -> too small to see.
-    let detail2 = dist2 * cull.lod_inv_width * cull.lod_inv_width;
+    // A coarse depth-only view (weather cover, far shadow cascade) floors the metric at the
+    // distance where a main-view pixel spans one of its texels; the main view leaves it 0.
+    let detail2 = max(dist2, cull.lod_floor_dist2) * cull.lod_inv_width * cull.lod_inv_width;
     let diameter = model.bounding_sphere * 2.0 * scale;
     let px = cull.pixel_limit * cull.lod_scale;
     if (diameter * diameter < px * px * detail2) {

@@ -45,7 +45,11 @@ pub struct CullParamsGpu {
     // Private diagnostic COUNT target; all-zero tail disables the extra atomic.
     pub target_model_id: u32,
     pub target_count_enabled: u32,
-    pub _target_pad: [u32; 2],
+    // Squared distance below which an instance's LOD/sub-pixel metric is clamped: a depth-only
+    // view whose texels are coarser than the main view's pixels never needs a finer LOD than
+    // the main view would pick at the distance where its pixel matches one texel. 0 = off.
+    pub lod_floor_dist2: f32,
+    pub _target_pad: u32,
 }
 
 /// Collision-free identity of the inputs that can change a plain COUNT's
@@ -4196,6 +4200,32 @@ pub fn params_from_shadow_cascade(
     p
 }
 
+/// Floor the LOD metric of an ORTHOGRAPHIC depth-only view at its texel size. The main view's
+/// pixel at distance d spans `d * 2 * lod_scale / main_width` metres; below the distance where
+/// that equals one of this view's texels, a finer LOD changes nothing the map can resolve, yet
+/// it is exactly what the main-view metric picks for every caster near the camera. `factor`
+/// scales the floor distance (1 = pixel matches texel, 0 = off). The texel comes from the
+/// matrix itself (an ortho VP maps its width to 2 NDC units), so nothing view-specific leaks in.
+pub fn with_texel_lod_floor(
+    mut p: CullParamsGpu,
+    view_proj: Mat4,
+    resolution: u32,
+    main_width: f32,
+    factor: f32,
+) -> CullParamsGpu {
+    let row0 = glam::Vec3::new(view_proj.x_axis.x, view_proj.y_axis.x, view_proj.z_axis.x).length();
+    let perspective = view_proj.x_axis.w != 0.0 || view_proj.y_axis.w != 0.0 || view_proj.z_axis.w != 0.0;
+    if perspective || !(row0 > 0.0) || resolution == 0 || !(factor > 0.0) || !(p.lod_scale > 0.0) {
+        return p;
+    }
+    let texel = 2.0 / (row0 * resolution as f32);
+    let floor = factor * texel * main_width / (2.0 * p.lod_scale);
+    if floor.is_finite() {
+        p.lod_floor_dist2 = floor * floor;
+    }
+    p
+}
+
 // The GPU-driven draw's group-1 layout: instances + records + section materials, all
 // read-only storage (docs/gpu-culling-and-depth-plan.md Stage 3b). Groups 0/2/3 (camera,
 // bindless textures, sampler array) are shared with the per-draw path.
@@ -5189,6 +5219,21 @@ pub(crate) mod tests {
         assert!((reduced.lod_inv_width - 0.0027).abs() < 1.0e-7);
         assert_eq!(reduced.pixel_limit, input.pixel_limit);
         assert_eq!(input.for_reduced_view(f32::NAN).lod_inv_width, 0.001);
+    }
+
+    #[test]
+    fn texel_lod_floor_matches_main_pixel_to_ortho_texel() {
+        let inputs = CullInputs { objects_z: 1500.0, lod_scale: 0.75, lod_inv_width: 0.001, pixel_limit: 0.125 };
+        // 640 m wide ortho map at 2048 texels: 0.3125 m texels. A 1920-wide main view at
+        // tan(half fov) 0.75 has 0.3125 m pixels at 400 m.
+        let ortho = Mat4::orthographic_rh(-320.0, 320.0, -320.0, 320.0, 0.0, 1024.0);
+        let base = params_from_shadow_cascade(ortho, Vec3::ZERO, inputs);
+        let p = with_texel_lod_floor(base, ortho, 2048, 1920.0, 1.0);
+        assert!((p.lod_floor_dist2.sqrt() - 400.0).abs() < 0.01, "{}", p.lod_floor_dist2.sqrt());
+        assert_eq!(with_texel_lod_floor(base, ortho, 2048, 1920.0, 0.0).lod_floor_dist2, 0.0);
+        let persp = Mat4::perspective_rh(1.0, 1.0, 0.1, 100.0);
+        assert_eq!(with_texel_lod_floor(base, persp, 2048, 1920.0, 1.0).lod_floor_dist2, 0.0);
+        assert_eq!(base.lod_floor_dist2, 0.0);
     }
 
     fn inside(planes: &[[f32; 4]; 6], p: Vec3) -> bool {

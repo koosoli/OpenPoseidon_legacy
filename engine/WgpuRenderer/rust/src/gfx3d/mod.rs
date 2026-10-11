@@ -10621,12 +10621,20 @@ impl Gfx3d {
         self.cull
             .set_shadow_view_count(device, n_cascades + n_local);
         let scam = glam::Vec3::new(shadow.cam_pos[0], shadow.cam_pos[1], shadow.cam_pos[2]);
+        // Cascades from WGR_SHADOW_LOD_FLOOR_FROM on (default 2: the near two keep the main
+        // view's LOD, so nothing inside their range self-shadows against a coarser caster) floor
+        // their LOD metric at the cascade's texel size (WGR_DEPTH_VIEW_LOD_FLOOR, 0 = off). The
+        // weather-cover maps below take the same floor.
+        let lod_floor = env_f32("WGR_DEPTH_VIEW_LOD_FLOOR", 1.0);
+        let lod_floor_from = env_f32("WGR_SHADOW_LOD_FLOOR_FROM", 2.0).max(0.0) as usize;
+        let main_width = self.depth_size.0 as f32;
         for c in 0..n_cascades {
             let lvp = glam::Mat4::from_cols_array(&shadow.light_vp[c]);
-            self.cull.set_shadow_params(
-                c,
-                cull::params_from_shadow_cascade(lvp, scam, self.cull_inputs),
-            );
+            let mut p = cull::params_from_shadow_cascade(lvp, scam, self.cull_inputs);
+            if c >= lod_floor_from {
+                p = cull::with_texel_lod_floor(p, lvp, shadow.resolution, main_width, lod_floor);
+            }
+            self.cull.set_shadow_params(c, p);
         }
         for k in 0..n_local {
             // Same helper as a cascade: it takes a view-projection and builds frustum planes
@@ -10700,13 +10708,15 @@ impl Gfx3d {
         }
         if let Some(view) = self.weather_cover.view {
             let vp_rel = view.view_proj * glam::Mat4::from_translation(cam_pos);
-            self.cull.set_sky_params(weather_cover::CULL_VIEW,
-                cull::params_from_shadow_cascade(vp_rel, cam_pos, self.cull_inputs));
+            self.cull.set_sky_params(weather_cover::CULL_VIEW, cull::with_texel_lod_floor(
+                cull::params_from_shadow_cascade(vp_rel, cam_pos, self.cull_inputs),
+                vp_rel, weather_cover::RESOLUTION, main_width, lod_floor));
         }
         if let Some(view) = self.weather_cover_far.view {
             let vp_rel = view.view_proj * glam::Mat4::from_translation(cam_pos);
-            self.cull.set_sky_params(weather_cover::FAR_CULL_VIEW,
-                cull::params_from_shadow_cascade(vp_rel, cam_pos, self.cull_inputs));
+            self.cull.set_sky_params(weather_cover::FAR_CULL_VIEW, cull::with_texel_lod_floor(
+                cull::params_from_shadow_cascade(vp_rel, cam_pos, self.cull_inputs),
+                vp_rel, weather_cover::RESOLUTION, main_width, lod_floor));
         }
         // Seed the dummies on the first call so the group-1 layout is satisfiable
         // immediately, bake or no bake.
