@@ -152,7 +152,7 @@ bool CActiveText::OnKeyUp(unsigned nChar, unsigned nRepCnt, unsigned nFlags)
 
 bool CActiveText::IsInside(float x, float y)
 {
-    if (_text.GetLength() == 0 || !_font)
+    if (_text.GetLength() == 0 || !_font || (_style & ST_TYPE) == ST_PICTURE)
         return Control::IsInside(x, y);
     // The same placement OnDraw uses, so the hot area is exactly the label.
     const float size = _scale * _size;
@@ -233,6 +233,30 @@ void CActiveText::OnLButtonUp(float x, float y)
 
 void CActiveText::OnDraw(float alpha)
 {
+    if ((_style & ST_TYPE) == ST_PICTURE)
+    {
+        if (_pictureName != _text)
+        {
+            _pictureName = _text;
+            RString name = Poseidon::FindPicture(_text);
+            name.Lower();
+            _picture = name.GetLength() > 0 ? GlobLoadTexture(name) : nullptr;
+        }
+        if (_picture)
+        {
+            PackedColor color = ModAlpha(_active ? _colorActive : _color, alpha);
+            if (!IsEnabled())
+                color = ModAlpha(color, 0.25);
+            // a fully transparent text colour (Arma 1 icons) still shows the picture
+            if (color.A8() == 0)
+                color = ModAlpha(PackedColor(Color(1, 1, 1, 1)), alpha * (_active ? 1.0f : 0.85f));
+            const float w = GLOB_ENGINE->Width2D();
+            const float h = GLOB_ENGINE->Height2D();
+            MipInfo mip = GLOB_ENGINE->TextBank()->UseMipmap(_picture, 0, 0);
+            GLOB_ENGINE->Draw2D(mip, color, Rect2DPixel(_x * w, _y * h, _w * w, _h * h));
+        }
+        return;
+    }
     float size = _scale * _size;
     bool vertical = false;
     float height = size;
