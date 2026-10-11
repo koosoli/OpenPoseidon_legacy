@@ -2076,8 +2076,25 @@ void GameApplication::RunMainLoop()
             {
                 const int hour = static_cast<int>(testWorldHour);
                 const int minute = static_cast<int>((testWorldHour - hour) * 60.0f + 0.5f);
-                GWorld->SetDate(1985, 5, 11, hour, minute);
-                LOG_INFO(Core, "--test-world-hour: set world time to {:02d}:{:02d}", hour, minute);
+                // POSEIDON_TEST_DATE=YYYY-MM-DD: the day too, so the sun matches a reference frame
+                // taken on another date (the default stays the long-standing 1985-05-11).
+                int year = 1985, month = 5, day = 11;
+                if (const char* dateEnv = std::getenv("POSEIDON_TEST_DATE"); dateEnv != nullptr)
+                {
+                    int y = 0, m = 0, d = 0;
+                    if (std::sscanf(dateEnv, "%d-%d-%d", &y, &m, &d) == 3 && m >= 1 && m <= 12 && d >= 1 && d <= 31)
+                        year = y, month = m, day = d;
+                }
+                GWorld->SetDate(year, month, day, hour, minute);
+                LOG_INFO(Core, "--test-world-hour: set world time to {:04d}-{:02d}-{:02d} {:02d}:{:02d}", year, month,
+                         day, hour, minute);
+            }
+            // POSEIDON_TEST_OVERCAST=0..1: the sky a reference frame was taken under, applied at once.
+            if (const char* overcastEnv = std::getenv("POSEIDON_TEST_OVERCAST"); overcastEnv != nullptr && *overcastEnv)
+            {
+                const float overcast = std::clamp(std::strtof(overcastEnv, nullptr), 0.0f, 1.0f);
+                GWorld->SetWeather(overcast, -1, 0);
+                LOG_INFO(Core, "POSEIDON_TEST_OVERCAST: overcast {}", overcast);
             }
             Object* cameraOn = GWorld->CameraOn();
             if (!freeFlyPose && (!cameraOn || !GLandscape))

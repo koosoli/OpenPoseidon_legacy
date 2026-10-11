@@ -5441,10 +5441,13 @@ void Landscape::ClearNativeFarResidency()
 
 void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
 {
-    // Kept opt-in until the authored-mesh cost/coverage and lifetime tests pass.
+    // On by default since 2026-10-11: against a capture of Arma Reforger itself at the same
+    // Game Master pose, the hillsides past the residency window were bare ground without it and
+    // carry their forests and granite with it (+3.6 ms GPU at that pose). WGR_NATIVE_FAR_AUTHORED=0
+    // restores the window-only world.
     static const bool enabled = [] {
         const char* value = std::getenv("WGR_NATIVE_FAR_AUTHORED");
-        return value && value[0] == '1';
+        return !(value && value[0] == '0');
     }();
     if (!enabled || !_modernObjectStreaming || GetEnfusionSurfaceCount() == 0 || !GEngine)
         return;
