@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 
 #include <Poseidon/IO/Streams/QBStream.hpp>
@@ -20,6 +21,7 @@
 
 namespace Poseidon
 {
+RString GetMissionDirectory(); // OptionsUI.cpp
 
 FontID GetFontID(RString baseName)
 {
@@ -221,6 +223,9 @@ LSError SoundPars::Serialize(ParamArchive& ar)
 
 RString GetWorldName(RString baseName)
 {
+    // --arma1: a world name inside an Arma 1 mission can mean a different island than
+    // the CWA class of the same name ("intro"). Identity otherwise.
+    baseName = Arma1Compat::WorldClassForMission(baseName, GetMissionDirectory());
     if (IsLocalMapWorldIdentifier(baseName.Data()))
     {
         // Preserve reserved identities even when their source metadata is missing.

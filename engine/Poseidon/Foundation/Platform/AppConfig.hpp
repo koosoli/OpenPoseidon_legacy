@@ -174,6 +174,10 @@ class AppConfig
     const std::string& GetArma1Root() const { return _arma1Root; }
     /// --arma1-mission: mission folder inside the mounted Arma 1 campaign/mission archives.
     const std::string& GetArma1Mission() const { return _arma1Mission; }
+    /// --arma1-test-seconds: start the mission without briefing, play N seconds, exit.
+    float GetArma1TestSeconds() const { return _arma1TestSeconds; }
+    /// --arma1-campaign: start an Arma 1 campaign (ca, ra, merc) from its mounted archive.
+    const std::string& GetArma1Campaign() const { return _arma1Campaign; }
     uint32_t GetWaitForParent() const { return _waitForParent; }
     const std::string& GetReforgerWorld() const { return _reforgerWorld; }
 
@@ -301,7 +305,7 @@ class AppConfig
     float GetTestModelScale() const { return _testModelScale; }
 
     /// True when --check and --test-mission are combined to run a bounded mission smoke boot.
-    bool IsMissionSmokeCheck() const { return _checkInit && !_testMissionPath.empty(); }
+    bool IsMissionSmokeCheck() const { return _checkInit && (!_testMissionPath.empty() || !_arma1Mission.empty()); }
 
     /// True when --check and --simulate are combined to run a bounded MP smoke boot.
     bool IsSimulateSmokeCheck() const { return _checkInit && _simulateMode; }
@@ -505,6 +509,8 @@ class AppConfig
     std::string _localMapWorldId;
     std::string _arma1Root;
     std::string _arma1Mission;
+    float _arma1TestSeconds = 0.0f;
+    std::string _arma1Campaign;
     uint32_t _waitForParent = 0;
     std::string _reforgerWorld;
     RString _modsDir;     // resolved --mods-dir base ("" if unset)

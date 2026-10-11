@@ -3043,8 +3043,11 @@ void GameApplication::StartGameMode()
             }
             strncpy(LoadFile, missionFile.c_str(), sizeof(LoadFile) - 1);
             LoadFile[sizeof(LoadFile) - 1] = 0;
-            AutoTest = true;
-            LOG_INFO(Core, "Arma 1 mission: {} -> {}", arma1Mission, missionFile);
+            // Played: intro, briefing, mission. Tested (--arma1-test-seconds / --check):
+            // straight into the mission.
+            AutoTest = AppConfig::Instance().GetArma1TestSeconds() > 0.0f || AppConfig::Instance().IsMissionSmokeCheck();
+            LOG_INFO(Core, "Arma 1 mission{}: {} -> {}", AutoTest ? " (test, no briefing)" : "", arma1Mission,
+                     missionFile);
         }
         else if (!testMission.empty())
         {

@@ -7,12 +7,14 @@
 // the folder's archives are mounted read-only (nothing is copied into the CWA
 // install or anywhere else), Arma 1 terrains get generated CfgWorlds classes that
 // inherit CWA's Eden, and Arma 1 unit/vehicle classes that CWA does not define are
-// represented by their nearest CWA counterpart. Arma 1 configs are NOT parsed:
-// gameplay, physics and weapons stay CWA's. Everything here is inert unless the
-// game was started with --arma1.
+// represented by their nearest CWA counterpart, drawn with the Arma 1 model where one
+// exists. Arma 1 configs are read into a private tree (Arma1Config.cpp) and never
+// merged into Pars: gameplay, physics and weapons stay CWA's. Everything here is
+// inert unless the game was started with --arma1.
 
 #include <Poseidon/Foundation/Containers/RStringArray.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
+#include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <string>
 
 namespace Poseidon::Arma1Compat
@@ -27,6 +29,18 @@ void MountArchives();
 // Generates CfgWorlds classes for the Arma 1 terrains (Sara, SaraLite, Sara_dbe1,
 // Porto) after the CWA config has been loaded. Existing CWA classes are never edited.
 void RegisterWorldClasses();
+
+// Reads the Arma 1 configs (bin + every addon config.bin) into a private tree and
+// the Arma 1 stringtables into a lowest-priority table. Never merged into Pars.
+void LoadConfig();
+
+// Arma 1 config class root >> name (CfgRadio, CfgSounds, CfgSFX, ...), or null.
+const ParamEntry* FindConfigClass(const char* root, const char* name);
+
+// A generated CfgVehicles class that keeps `cwaClass`'s simulation but draws the
+// Arma 1 model of `missionClass` (soldiers also get the Arma 1 moves). Returns
+// `cwaClass` when there is no usable Arma 1 model.
+RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass);
 
 // Returns the class to spawn for a mission/script class name. Classes CWA defines
 // are returned unchanged; Arma 1-only classes map to a CWA counterpart.
@@ -46,6 +60,13 @@ void ActivateKey(const char* key);
 // ("campaigns\ca\missions\m09convoyattack.sara\mission.sqm"). Empty on failure,
 // with the reason in `error`.
 std::string ResolveMissionFile(const std::string& spec, std::string& error);
+
+// True when the mission directory lies inside a mounted Arma 1 archive.
+bool IsArma1MissionDirectory(const char* missionDirectory);
+
+// The CfgWorlds class an Arma 1 mission's world name means: "intro" in an Arma 1
+// archive is Arma 1's desert (A1_Intro), not CWA's Intro island.
+RString WorldClassForMission(const RString& world, const char* missionDirectory);
 
 // For a virtual campaign mission path, the campaign base directory
 // ("campaigns/ca/") so the campaign stringtable/description apply. Empty otherwise.

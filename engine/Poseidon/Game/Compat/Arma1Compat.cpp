@@ -43,6 +43,12 @@ std::vector<std::string>& MissionBankPrefixes()
     return prefixes;
 }
 
+std::vector<std::string>& AllBankPrefixesMutable()
+{
+    static std::vector<std::string> prefixes;
+    return prefixes;
+}
+
 const fs::path& RootPath()
 {
     static fs::path root;
@@ -64,7 +70,7 @@ const fs::path& RootPath()
     return root;
 }
 
-void MountFolder(const fs::path& folder, bool missionBanks)
+void MountFolder(const fs::path& folder, bool missionBanks, const char* remountPrefix = nullptr)
 {
     std::error_code ec;
     if (!fs::is_directory(folder, ec))
@@ -85,10 +91,16 @@ void MountFolder(const fs::path& folder, bool missionBanks)
         GFileBanks.Load(dir.c_str(), "", pbo.stem().string().c_str(), true);
         if (GFileBanks.Size() > before)
         {
-            std::string prefix = (const char*)GFileBanks[GFileBanks.Size() - 1].GetPrefix();
+            QFBank& bank = GFileBanks[GFileBanks.Size() - 1];
+            // Arma 1's Dta archives declare prefixes ("bin", "core") that would shadow CWA's
+            // own folders; they are re-mounted under a private name instead.
+            if (remountPrefix)
+                bank.SetPrefix(RString(remountPrefix) + RString(Lower(pbo.stem().string()).c_str()) + RString("\\"));
+            std::string prefix = (const char*)bank.GetPrefix();
+            AllBankPrefixesMutable().push_back(prefix);
             while (!prefix.empty() && (prefix.back() == '\\' || prefix.back() == '/'))
                 prefix.pop_back();
-            if (missionBanks || Lower(prefix).find("missions") != std::string::npos)
+            if (!remountPrefix && (missionBanks || Lower(prefix).find("missions") != std::string::npos))
                 MissionBankPrefixes().push_back(prefix);
         }
         else
@@ -291,6 +303,16 @@ std::set<std::string>& Keys()
 }
 } // namespace
 
+const std::vector<std::string>& BankPrefixes()
+{
+    return AllBankPrefixesMutable();
+}
+
+std::string RootFolder()
+{
+    return RootPath().string();
+}
+
 bool Active()
 {
     return !RootPath().empty();
@@ -301,7 +323,10 @@ void MountArchives()
     if (!Active())
         return;
     MissionBankPrefixes().clear();
+    AllBankPrefixesMutable().clear();
     const fs::path& root = RootPath();
+    // Dta\bin.pbo / core.pbo are NOT mounted: their declared prefixes ("bin", "core")
+    // would shadow CWA's own UI resources. Arma1Config reads bin.pbo privately.
     MountFolder(root / "AddOns", false);
     MountFolder(root / "DBE1" / "AddOns", false);
     MountFolder(root / "Campaigns", true);
@@ -315,6 +340,7 @@ void RegisterWorldClasses()
 {
     if (!Active())
         return;
+    LoadConfig();
     ParamEntry* cfgWorlds = Pars.FindEntry("CfgWorlds");
     ParamEntry* cfgList = Pars.FindEntry("CfgWorldList");
     ParamEntry* eden = cfgWorlds ? cfgWorlds->FindEntry("Eden") : nullptr;
@@ -331,6 +357,9 @@ void RegisterWorldClasses()
         {"SaraLite", "\\ca\\saralite\\SaraLite.wrp", "Arma 1 / Southern Sahrani"},
         {"Sara_dbe1", "\\DBE1\\Sara_DBE1\\sara_dbe1.wrp", "Arma 1 / United Sahrani"},
         {"Porto", "\\ca\\Desert2\\porto.wrp", "Arma 1 / Porto"},
+        // Arma 1's "Intro" desert collides with CWA's Intro island: it is registered
+        // under a private name and chosen only for missions from an Arma 1 archive.
+        {"A1_Intro", "\\ca\\desert\\intro.wrp", "Arma 1 / Rahmadi desert"},
     };
     for (const World& world : worlds)
     {
@@ -375,7 +404,13 @@ void RegisterWorldClasses()
 
 RString ResolveVehicleClass(const RString& className)
 {
-    return ResolveFrom("CfgVehicles", className, VehicleAliases());
+    if (!Active() || className.GetLength() == 0)
+        return className;
+    // A class generated earlier for this mission keeps resolving to itself.
+    if (_strnicmp(className.Data(), "A1x_", 4) == 0)
+        return className;
+    const RString cwa = ResolveFrom("CfgVehicles", className, VehicleAliases());
+    return Arma1ModelClass(className, cwa);
 }
 
 RString ResolveWeaponClass(const RString& className)
@@ -457,6 +492,31 @@ std::string ResolveMissionFile(const std::string& spec, std::string& error)
     }
     error = "mission '" + spec + "' was not found in the Arma 1 campaign/mission archives";
     return {};
+}
+
+bool IsArma1MissionDirectory(const char* missionDirectory)
+{
+    if (!Active() || !missionDirectory || !*missionDirectory)
+        return false;
+    std::string dir = Lower(missionDirectory);
+    std::replace(dir.begin(), dir.end(), '/', '\\');
+    for (const std::string& prefix : AllBankPrefixesMutable())
+    {
+        const std::string p = Lower(prefix);
+        if (!p.empty() && dir.rfind(p, 0) == 0)
+            return true;
+    }
+    return false;
+}
+
+RString WorldClassForMission(const RString& world, const char* missionDirectory)
+{
+    if (!IsArma1MissionDirectory(missionDirectory))
+        return world;
+    const std::string alias = "A1_" + std::string(world.Data());
+    const ParamEntry* worlds = Pars.FindEntry("CfgWorlds");
+    const ParamEntry* entry = worlds ? worlds->FindEntry(alias.c_str()) : nullptr;
+    return entry ? RString(alias.c_str()) : world;
 }
 
 std::string CampaignBaseForMission(const std::string& missionFile)

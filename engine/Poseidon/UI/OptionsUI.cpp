@@ -1,5 +1,6 @@
 
 #include <Poseidon/UI/Options/OptionsShell.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/Game/Mission/MissionPathLoader.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -343,6 +344,14 @@ void FindEnvSound(RString name, SoundPars& day, SoundPars& night)
         return;
     }
 
+    // Arma 1 content (--arma1): its global config is the last place to look.
+    if (const ParamEntry* a1 = Arma1Compat::FindConfigClass("CfgEnvSounds", name))
+    {
+        GetValue(day, (*a1) >> "sound");
+        GetValue(night, (*a1) >> "soundNight");
+        return;
+    }
+
     Poseidon::Foundation::WarningMessage("Environmental sound %s not found", (const char*)name);
 }
 
@@ -436,6 +445,20 @@ void FindSFX(RString name, SoundEntry& emptySound, AutoArray<SoundEntry>& sounds
         return; // Pars.GetName();
     }
 
+    if (const ParamEntry* a1 = Arma1Compat::FindConfigClass("CfgSFX", name))
+    {
+        emptySound = DynSound::LoadEntry((*a1) >> "empty");
+        const ParamEntry& list = (*a1) >> "sounds";
+        int n = list.GetSize();
+        sounds.Resize(n);
+        for (int i = 0; i < n; i++)
+        {
+            RString soundName = list[i];
+            sounds[i] = DynSound::LoadEntry((*a1) >> soundName);
+        }
+        return;
+    }
+
     Poseidon::Foundation::WarningMessage("SFX %s not found", (const char*)name);
     // "";
 }
@@ -503,6 +526,12 @@ const ParamEntry* FindSound(RString name, SoundPars& pars)
     // through LOG_WARN rather than WarningMessage — the latter is a no-op in the
     // shipping app frame, which is why a bad `say`/sound surfaced only as the
     // file server's context-free "Empty or nullptr name not allowed".)
+    if (const ParamEntry* a1 = Arma1Compat::FindConfigClass("CfgSounds", name))
+    {
+        GetValue(pars, (*a1) >> "sound");
+        return a1;
+    }
+
     LOG_WARN(Audio, "Sound '{}' not found in any CfgSounds — nothing will play", (const char*)name);
 #if POSEIDON_DIAG
     Dev::OpDiag::OnSoundMissing("CfgSounds", (const char*)name); // DIAG-001
@@ -547,6 +576,12 @@ const ParamEntry* FindMusic(RString name, SoundPars& pars)
         return entry;
     }
 
+    if (const ParamEntry* a1 = Arma1Compat::FindConfigClass("CfgMusic", name))
+    {
+        GetValue(pars, (*a1) >> "sound");
+        return a1;
+    }
+
     Poseidon::Foundation::WarningMessage("Music %s not found", (const char*)name);
     return nullptr;
 }
@@ -588,6 +623,12 @@ const ParamEntry* FindRadio(RString name, SoundPars& pars)
     {
         GetValue(pars, (*entry) >> "sound");
         return entry;
+    }
+
+    if (const ParamEntry* a1 = Arma1Compat::FindConfigClass("CfgRadio", name))
+    {
+        GetValue(pars, (*a1) >> "sound");
+        return a1;
     }
 
     Poseidon::Foundation::WarningMessage("Radio message %s not found", (const char*)name);

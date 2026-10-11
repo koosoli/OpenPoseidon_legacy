@@ -1932,14 +1932,29 @@ void ParamClass::Update(const ParamClass& source)
             if (srcCls->_base)
             {
                 ParamEntry* baseEntry = Find(srcCls->_base->GetName(), true, true, DefaultAccess);
+                // `class Turrets: Turrets` (Arma-era configs) names the INHERITED class of the
+                // same name. The parser resolves it before the new class exists; here the
+                // destination class is already a member, so the lookup finds the class itself
+                // and would make it its own base -- endless recursion on the next lookup.
+                // Resolve it the way the parser does: past this class's own members.
+                if (baseEntry == dstCls)
+                {
+                    baseEntry = nullptr;
+                    if (_base)
+                        baseEntry = _base->Find(srcCls->_base->GetName(), true, true, DefaultAccess);
+                    if (!baseEntry && _parent)
+                        baseEntry = _parent->Find(srcCls->_base->GetName(), true, true, DefaultAccess);
+                    if (baseEntry == dstCls)
+                        baseEntry = nullptr;
+                }
                 if (!baseEntry || !baseEntry->IsClass())
                 {
+                    // Keep merging the members; only the base change is impossible.
                     ErrorMessage("%s: Cannot find base class '%s'", (const char*)GetContext(),
                                  (const char*)srcCls->_base->GetName());
-                    return;
                 }
                 // check if changing base is enabled
-                if (baseEntry != dstCls->_base)
+                else if (baseEntry != dstCls->_base)
                 {
                     if (dstCls->GetAccessMode() < PAReadOnly)
                     {
@@ -2038,6 +2053,13 @@ void ParamClass::Update(const ParamClass& source)
             }
             else if (dynamic_cast<const ParamValue*>(&srcEntry))
             {
+                // A text value replacing a numeric one (an addon redefining `x=0.5` as
+                // `x="0.5*y"`): the numeric entry cannot hold text, so it is replaced.
+                if (dstEntry && _access < PAReadAndCreate && (dstEntry->IsFloatValue() || dstEntry->IsIntValue()))
+                {
+                    Delete(srcEntry.GetName());
+                    dstEntry = nullptr;
+                }
                 if (!dstEntry)
                 {
                     dstEntry = new ParamValue(srcEntry.GetName());

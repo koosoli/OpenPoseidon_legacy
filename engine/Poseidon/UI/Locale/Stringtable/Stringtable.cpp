@@ -69,6 +69,8 @@ class StringTableDynamic : public StringTableMap
     void Init();
     void Add(RString name, RString value, bool fromUtf8, std::set<std::string>& appliedInBatch);
     void Load(const char* filename, std::set<std::string>& appliedInBatch);
+    // Same as Load, reading an already opened stream; `filename` names it in messages.
+    void Load(QIStream& file, const char* filename, std::set<std::string>& appliedInBatch);
 };
 
 void StringTableDynamic::Init()
@@ -282,6 +284,11 @@ void StringTableDynamic::Load(const char* filename, std::set<std::string>& appli
 {
     QIFStreamB file;
     file.AutoOpen(filename);
+    Load(file, filename, appliedInBatch);
+}
+
+void StringTableDynamic::Load(QIStream& file, const char* filename, std::set<std::string>& appliedInBatch)
+{
     bool fileIsUtf8 = HasUtf8CsvSuffix(filename);
     // Arma 1 stringtables are UTF-16 with a BOM: decode them to UTF-8 in memory.
     std::string utf16Decoded;
@@ -422,15 +429,27 @@ class StringTable
   protected:
     StringTableDynamic _tableGlobal;
     StringTableDynamic _tableCampaign;
+    // Read-only Arma 1 strings (--arma1); consulted only after every CWA table.
+    StringTableDynamic _tableArma1;
     StringTableDynamic _tableMission;
     AutoArray<StringTableItem> _registered;
     AutoArray<LoadedEntry> _loaded;
+    std::vector<std::pair<std::string, std::string>> _arma1Memory;
+
+    void LoadArma1Memory(const std::string& name, const std::string& bytes)
+    {
+        QIStream in(bytes.data(), static_cast<int>(bytes.size()));
+        std::set<std::string> applied;
+        _tableArma1.Load(in, name.c_str(), applied);
+    }
 
   public:
     StringTable() = default;
     void Clear();
 
     void Load(RString type, RString filename, float priority, bool init);
+    // Arma 1 stringtable read from a private archive; kept for language switches.
+    void LoadArma1FromMemory(const char* name, const char* data, size_t size);
 
     int Register(RString name);
 
@@ -452,8 +471,16 @@ void StringTable::Clear()
     _tableGlobal.Clear();
     _tableCampaign.Clear();
     _tableMission.Clear();
+    _tableArma1.Clear();
     _registered.Clear();
     _loaded.Clear();
+    _arma1Memory.clear();
+}
+
+void StringTable::LoadArma1FromMemory(const char* name, const char* data, size_t size)
+{
+    _arma1Memory.emplace_back(name, std::string(data, size));
+    LoadArma1Memory(_arma1Memory.back().first, _arma1Memory.back().second);
 }
 
 void StringTable::Load(RString type, RString filename, float priority, bool init)
@@ -470,6 +497,10 @@ void StringTable::Load(RString type, RString filename, float priority, bool init
     else if (stricmp(type, "mission") == 0)
     {
         table = &_tableMission;
+    }
+    else if (stricmp(type, "arma1") == 0)
+    {
+        table = &_tableArma1;
     }
     else
     {
@@ -581,6 +612,8 @@ void StringTable::ReloadAll()
         // init=false: tables already cleared by SetLanguage. Priority unused today.
         Load(snapshot[i].type, snapshot[i].filename, 0.0f, false);
     }
+    for (const auto& [name, bytes] : _arma1Memory)
+        LoadArma1Memory(name, bytes);
 }
 
 bool StringTable::SetLanguage(RString newLang)
@@ -601,6 +634,7 @@ bool StringTable::SetLanguage(RString newLang)
     _tableGlobal.Init();
     _tableCampaign.Init();
     _tableMission.Init();
+    _tableArma1.Init();
 
     // Replay every tracked Load. Load() dedupes against _loaded so entries don't multiply.
     ReloadAll();
@@ -629,6 +663,12 @@ RString StringTable::Localize(const char* str)
     if (!_tableGlobal.IsNull(item3))
     {
         return item3.value;
+    }
+
+    const StringTableItem& item4 = _tableArma1[str];
+    if (!_tableArma1.IsNull(item4))
+    {
+        return item4.value;
     }
 
     RptF("String %s not found", (const char*)str);
@@ -664,6 +704,12 @@ inline StringTable& GetStringTable()
 void LoadStringtable(RString type, RString filename, float priority, bool init)
 {
     GStringTable.Load(type, filename, priority, init);
+    ++GLanguageGeneration;
+}
+
+void LoadArma1StringtableFromMemory(const char* name, const char* data, size_t size)
+{
+    GStringTable.LoadArma1FromMemory(name, data, size);
     ++GLanguageGeneration;
 }
 

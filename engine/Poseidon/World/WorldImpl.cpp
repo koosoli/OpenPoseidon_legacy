@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
@@ -160,6 +161,7 @@ using namespace Dev;
 namespace Poseidon
 {
 bool StartAutoTest();
+bool StartMissionWithBriefing();
 bool ProcessFullName(RString);
 } // namespace Poseidon
 
@@ -2762,6 +2764,21 @@ void World::StartIntro()
     CurrentBattle = "";
     CurrentMission = "";
 
+    // --arma1-campaign: the campaign archive is mounted as campaigns\<name>, so the
+    // stock campaign flow (battles, missions, ends, saves) runs it unchanged.
+    if (const std::string& a1Campaign = AppConfig::Instance().GetArma1Campaign();
+        !a1Campaign.empty() && Arma1Compat::Active())
+    {
+        const RString description = GetCampaignDirectory(RString(a1Campaign.c_str())) + RString("description.ext");
+        if (QIFStreamB::FileExist(description))
+        {
+            LOG_INFO(Core, "Arma 1 campaign: {}", a1Campaign);
+            StartCampaign(RString(a1Campaign.c_str()), nullptr);
+            return;
+        }
+        LOG_ERROR(Core, "Arma 1 campaign '{}' not found ({} missing)", a1Campaign, (const char*)description);
+    }
+
     const char* ext = strrchr(LoadFile, '.');
     if (ext && QIFStreamB::FileExist(LoadFile))
     {
@@ -2807,6 +2824,13 @@ void World::StartIntro()
                             GApp->m_exitCode = 1;
                             GApp->m_closeRequest = true;
                         }
+                    }
+                }
+                else if (!AppConfig::Instance().GetArma1Mission().empty())
+                {
+                    if (!StartMissionWithBriefing())
+                    {
+                        LOG_ERROR(Core, "Arma 1 mission '{}' could not be started", LoadFile);
                     }
                 }
                 else

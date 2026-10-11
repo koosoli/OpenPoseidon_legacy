@@ -519,6 +519,10 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                                 "Arma 1 (ArmA Gold) install folder: its archives are mounted read-only, nothing is copied");
         configGroup->add_option("--arma1-mission", _arma1Mission,
                                 "Play an Arma 1 mission straight from the --arma1 archives (e.g. m09convoyattack.sara)");
+        configGroup->add_option("--arma1-test-seconds", _arma1TestSeconds,
+                                "Test an --arma1-mission: skip the briefing, play N seconds, log and exit");
+        configGroup->add_option("--arma1-campaign", _arma1Campaign,
+                                "Play an Arma 1 campaign from the --arma1 archives (ca, ra or merc)");
         configGroup->add_option("--wait-for-parent", _waitForParent, "Wait for the map-browser parent process before starting");
         configGroup->add_option("--reforger-world", _reforgerWorld, "Native Enfusion world virtual directory");
 

@@ -12,6 +12,7 @@
 #include <Poseidon/Graphics/Rendering/Lighting/Material.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
@@ -504,6 +505,61 @@ void BuildAdapterBankTables(const Poseidon::Model::Model& model, AdapterBankTabl
                  model.sourceFormat, lodCount, textureCalls, materialCalls, loadMs, headerMs, materialMs);
 }
 
+// A CWA crew proxy (CfgNonAIVehicles class, simulation ProxyCrew) for an Arma 1 crew
+// placeholder, chosen by the seat its name states. Empty when the name is no seat
+// (view anchors, turned-out duplicates) or CWA defines no proxy for that seat.
+static RString Arma1CrewProxyStandIn(const RString& modelName)
+{
+    const char* base = modelName;
+    for (const char* q = modelName; *q; q++)
+        if (*q == '\\' || *q == '/')
+            base = q + 1;
+    std::string leaf(base);
+    for (char& c : leaf)
+        c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    if (leaf.rfind("view", 0) == 0 || leaf.find("out") != std::string::npos)
+        return RString();
+    int position = -1; // CrewPosition: 0 driver, 1 gunner, 2 commander, 3 cargo
+    if (leaf.find("cargo") != std::string::npos || leaf.find("codriver") != std::string::npos ||
+        leaf.find("passenger") != std::string::npos)
+        position = 3;
+    else if (leaf.find("commander") != std::string::npos)
+        position = 2;
+    else if (leaf.find("gunner") != std::string::npos)
+        position = 1;
+    else if (leaf.find("driver") != std::string::npos || leaf.find("pilot") != std::string::npos)
+        position = 0;
+    if (position < 0)
+        return RString();
+
+    static RString chosen[4];
+    static bool scanned = false;
+    if (!scanned)
+    {
+        scanned = true;
+        const ParamEntry& classes = Pars >> "CfgNonAIVehicles";
+        for (int i = 0; i < classes.GetEntryCount(); i++)
+        {
+            const ParamEntry& cls = classes.GetEntry(i);
+            if (!cls.IsClass())
+                continue;
+            const char* name = cls.GetName();
+            if (strnicmp(name, "Proxy", 5) != 0 || !name[5])
+                continue;
+            const ParamEntry* sim = cls.FindEntry("simulation");
+            const ParamEntry* pos = cls.FindEntry("crewPosition");
+            if (!sim || !pos || stricmp((const char*)(RStringB)*sim, "ProxyCrew") != 0)
+                continue;
+            const int p = (int)*pos;
+            if (p >= 0 && p < 4 && chosen[p].GetLength() == 0)
+                chosen[p] = RString(name + 5);
+        }
+        LOG_INFO(Graphics, "Arma 1 crew proxies stand in as CWA driver '{}' gunner '{}' commander '{}' cargo '{}'",
+                 (const char*)chosen[0], (const char*)chosen[1], (const char*)chosen[2], (const char*)chosen[3]);
+    }
+    return chosen[position];
+}
+
 // Proxy objects for a converted shape. MAIN THREAD ONLY: the probe reads the
 // config (Pars) and the file table (QIFStreamB), and NewProxyObject/NewObject
 // recurse into ShapeBank::New. Split out of convertToLODShape so the geometry
@@ -561,8 +617,21 @@ void CreateAdapterProxies(LODShapeWithShadow* shape, const Poseidon::Model::Mode
                 // the file probe is the fallback for config-less paths
                 // (the Arma-era \ca\temp\... placeholders this probe was
                 // written for, which have neither class nor file).
-                const bool proxyHasConfigClass =
+                bool proxyHasConfigClass =
                     (Pars >> "CfgNonAIVehicles").FindEntry(RString("Proxy") + modelName) != nullptr;
+                // --arma1: Arma 1 crew placeholders (\ca\temp\proxies\uaz\driver, ...cargo01)
+                // name only a seat. Stand a CWA crew proxy of the same seat in for them, so
+                // the vehicle gets its driver/gunner/commander/cargo positions and the crew
+                // is drawn where Arma 1 seats it instead of not at all.
+                if (!proxyHasConfigClass && Arma1Compat::Active() && !QIFStreamB::FileExist(GetShapeName(modelName)))
+                {
+                    RString substitute = Arma1CrewProxyStandIn(modelName);
+                    if (substitute.GetLength() > 0)
+                    {
+                        modelName = substitute;
+                        proxyHasConfigClass = true;
+                    }
+                }
                 if (!proxyHasConfigClass && !QIFStreamB::FileExist(GetShapeName(modelName)))
                 {
                     // MAT-053: before dropping a PILOT/DRIVER seat, remember where it

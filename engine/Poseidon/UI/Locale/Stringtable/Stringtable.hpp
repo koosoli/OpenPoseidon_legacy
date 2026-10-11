@@ -19,6 +19,8 @@ RString& GetLanguage();
 #define GLanguage ::Poseidon::GetLanguage()
 
 void LoadStringtable(RString type, RString filename, float priority = 0, bool init = true);
+// Arma 1 (--arma1) stringtable bytes read from a privately opened archive.
+void LoadArma1StringtableFromMemory(const char* name, const char* data, size_t size);
 
 int RegisterString(RString name);
 
