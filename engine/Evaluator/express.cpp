@@ -808,7 +808,7 @@ static GameValue StringRepeat(const GameState* state, GameValuePar oper1, GameVa
     {
         if (i >= maxIters)
         {
-            RptF("Max iteration count exceeded in while loop");
+            LOG_WARN(Core, "SQF: max iteration count exceeded in while loop");
             state->SetError(EvalGen);
             break;
         }
@@ -965,7 +965,7 @@ static GameValue ForDoOp(const GameState* state, GameValuePar oper1, GameValuePa
     {
         if (count++ >= maxIters)
         {
-            RptF("Max iteration count exceeded in for loop");
+            LOG_WARN(Core, "SQF: max iteration count exceeded in for loop");
             state->SetError(EvalGen);
             break;
         }
@@ -1281,7 +1281,7 @@ void GameState::TypeErrorOperator(const char* name, GameType left, GameType righ
     }
     else
     {
-        RptF("Operator %s: no overload for the operand types 0x%x, 0x%x", name, (unsigned)left, (unsigned)right);
+        LOG_WARN(Core, "SQF operator {}: no overload for operand types 0x{:x}, 0x{:x}", name, (unsigned)left, (unsigned)right);
         SetError(EvalGen);
     }
 }
@@ -1304,7 +1304,7 @@ void GameState::TypeErrorFunction(const char* name, GameType right) const
     }
     else
     {
-        RptF("Function %s: no overload for the operand type 0x%x", name, (unsigned)right);
+        LOG_WARN(Core, "SQF function {}: no overload for operand type 0x{:x}", name, (unsigned)right);
         SetError(EvalGen);
     }
 }
