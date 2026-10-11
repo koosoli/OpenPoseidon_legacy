@@ -919,6 +919,49 @@ static GameValue A1Str(const GameState*, GameValuePar oper1)
     return GameValue(oper1.GetText());
 }
 
+// Arma 1: distance between positions and/or objects
+static bool A1WorldPos(const GameState* state, GameValuePar v, Vector3& pos)
+{
+    if (v.GetType() == GameObject)
+    {
+        Object* obj = GetObject(v);
+        if (!obj)
+            return false;
+        pos = obj->WorldPosition();
+        return true;
+    }
+    return GetPos(state, pos, v);
+}
+
+static GameValue A1Distance(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Vector3 a, b;
+    if (!A1WorldPos(state, oper1, a) || !A1WorldPos(state, oper2, b))
+        return GameValue(1e10f);
+    return GameValue(a.Distance(b));
+}
+
+// compile: code is a string here, so compiling is the identity
+static GameValue A1Compile(const GameState*, GameValuePar oper1)
+{
+    return oper1;
+}
+
+// unit moveInTurret [vehicle, path]: [0] is the gunner, anything else rides as commander or cargo
+static GameValue A1MoveInTurret(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& array = oper2;
+    if (array.Size() < 2 || array[0].GetType() != GameObject || array[1].GetType() != GameArray)
+        return NOTHING;
+    const GameArrayType& path = array[1];
+    const int first = path.Size() > 0 && path[0].GetType() == GameScalar ? toInt((float)path[0]) : -1;
+    if (first == 0)
+        return ObjMoveInGunner(state, oper1, array[0]);
+    if (first == 1)
+        return ObjMoveInCommander(state, oper1, array[0]);
+    return ObjMoveInCargo(state, oper1, array[0]);
+}
+
 // Arma 1: distance preloadObject "className" -- models stream on demand here
 static GameValue A1PreloadClass(const GameState*, GameValuePar, GameValuePar)
 {
@@ -1076,6 +1119,8 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameBool, "camPreloaded", A1CamPreloaded, GameObject),
         GameFunction(GameBool, "preloadSound", A1PreloadSound, GameString),
         GameFunction(GameString, "str", A1Str, GameVoid),
+        GameFunction(GameString, "compile", A1Compile, GameString),
+        GameFunction(GameNothing, "hideBody", A1Ignored, GameObject),
         GameFunction(GameNothing, "setAperture", A1Ignored, GameScalar),
         GameFunction(GameNothing, "enableTeamSwitch", A1Ignored, GameBool),
         GameFunction(GameBool, "isNil", A1IsNil, GameString),
@@ -1395,6 +1440,9 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "addRating", function, ObjAddExperience, GameObject, GameScalar),
         GameOperator(GameNothing, "addScore", function, ObjAddScore, GameObject, GameScalar),
         GameOperator(GameScalar, "distance", function, ObjDistance, GameObject, GameObject),
+        GameOperator(GameScalar, "distance", function, A1Distance, GameArray, GameObject | GameArray),
+        GameOperator(GameScalar, "distance", function, A1Distance, GameObject, GameArray),
+        GameOperator(GameNothing, "moveInTurret", function, A1MoveInTurret, GameObject, GameArray),
         GameOperator(GameNothing, "setPos", function, ObjSetPos, GameObject, GameArray),
         GameOperator(GameNothing, "setPosASL", function, ObjSetPosASL, GameObject, GameArray),
         GameOperator(GameNothing, "setDir", function, ObjSetDir, GameObject, GameScalar),
