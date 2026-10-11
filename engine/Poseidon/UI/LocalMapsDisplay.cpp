@@ -18,6 +18,9 @@
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <map>
+#include <mutex>
+#include <set>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -27,7 +30,7 @@ namespace Poseidon
 namespace
 {
 constexpr int ListId = 62001, FolderId = 62002, ScanId = 62003, OpenId = 62004, StatusId = 62005, BackId = 62006,
-              MapsId = 62008, VehiclesId = 62009, MissionsId = 62011;
+              MapsId = 62008, VehiclesId = 62009, MissionsId = 62011, BrowseId = 62012;
 enum class BrowserMode { Maps, Vehicles, Missions };
 class LocalBrowserButton : public CButton
 {
@@ -48,6 +51,83 @@ class LocalMapsDisplay : public Display
     LocalMapsCatalog _catalog;
     std::vector<LocalVehicle> _vehicles;
     BrowserMode _mode = BrowserMode::Maps;
+    // Missions tab as a collapsible tree in the list box: game -> campaign/collection -> mission.
+    // One row per visible list line; a header row toggles, a mission row opens.
+    struct MissionRow
+    {
+        std::string game, collection; // collection empty on a game row
+        int mission = -1;             // index into _catalog.missions, -1 on a header row
+    };
+    std::vector<MissionRow> _missionRows;
+    std::set<std::string> _expanded; // "game" and "game|collection" keys
+
+    void FillMissionTree(CListBox* list)
+    {
+        _missionRows.clear();
+        // The catalog is sorted playable-first; group by game and collection in first-seen order.
+        std::vector<std::string> games;
+        std::map<std::string, std::vector<std::string>> collections;
+        std::map<std::string, std::pair<int, int>> totals; // key -> (playable, all)
+        for (const LocalMission& mission : _catalog.missions)
+        {
+            if (std::find(games.begin(), games.end(), mission.game) == games.end())
+                games.push_back(mission.game);
+            auto& names = collections[mission.game];
+            if (std::find(names.begin(), names.end(), mission.collection) == names.end())
+                names.push_back(mission.collection);
+            for (const std::string& key : {mission.game, mission.game + "|" + mission.collection})
+            {
+                totals[key].first += mission.supported ? 1 : 0;
+                totals[key].second += 1;
+            }
+        }
+        const auto count = [&](const std::string& key)
+        {
+            const auto [playable, all] = totals[key];
+            return "  (" + std::to_string(playable) + " of " + std::to_string(all) + " playable)";
+        };
+        for (const std::string& game : games)
+        {
+            const bool open = _expanded.contains(game);
+            list->AddString(((open ? "[-] " : "[+] ") + game + count(game)).c_str());
+            _missionRows.push_back({game, {}, -1});
+            if (!open)
+                continue;
+            for (const std::string& collection : collections[game])
+            {
+                const std::string key = game + "|" + collection;
+                const bool sub = _expanded.contains(key);
+                list->AddString(("      " + std::string(sub ? "[-] " : "[+] ") + collection + count(key)).c_str());
+                _missionRows.push_back({game, collection, -1});
+                if (!sub)
+                    continue;
+                for (size_t i = 0; i < _catalog.missions.size(); ++i)
+                {
+                    const LocalMission& mission = _catalog.missions[i];
+                    if (mission.game != game || mission.collection != collection)
+                        continue;
+                    list->AddString(("              " + mission.name +
+                                     (mission.supported ? "" : "   -- " + mission.reason))
+                                        .c_str());
+                    _missionRows.push_back({game, collection, static_cast<int>(i)});
+                }
+            }
+        }
+    }
+    // Header row: expand/collapse and keep it selected. Returns true when the row was a header.
+    bool ToggleMissionRow(int index)
+    {
+        if (index < 0 || index >= static_cast<int>(_missionRows.size()) || _missionRows[index].mission >= 0)
+            return false;
+        const MissionRow& row = _missionRows[index];
+        const std::string key = row.collection.empty() ? row.game : row.game + "|" + row.collection;
+        if (!_expanded.erase(key))
+            _expanded.insert(key);
+        Fill();
+        if (auto* list = dynamic_cast<CListBox*>(GetCtrl(ListId)))
+            list->SetCurSel(index);
+        return true;
+    }
     void AddControl(const char* base, const char* name, int id, const char* text, float x, float y, float w, float h)
     {
         const ParamEntry* inherited = Res.FindEntry(base);
@@ -93,15 +173,47 @@ class LocalMapsDisplay : public Display
         if (auto* ctrl = dynamic_cast<CStatic*>(GetCtrl(StatusId)))
             ctrl->SetText(text.c_str());
     }
-    void Scan()
+    // The OS folder picker answers on its own thread, possibly after this display is gone, so the
+    // answer goes through a process-wide slot that OnSimulate drains.
+    struct PickedFolder
+    {
+        std::mutex lock;
+        std::string path;
+        bool ready = false;
+    };
+    static PickedFolder& Picked()
+    {
+        static PickedFolder picked;
+        return picked;
+    }
+    static void OnFolderPicked(void*, const char* const* files, int)
+    {
+        if (!files || !files[0])
+            return; // cancelled or failed
+        PickedFolder& picked = Picked();
+        std::lock_guard guard(picked.lock);
+        picked.path = files[0];
+        picked.ready = true;
+    }
+    void Browse()
+    {
+        std::string start;
+        if (auto* edit = dynamic_cast<CEdit*>(GetCtrl(FolderId)))
+            start = edit->GetText().Data();
+        SDL_ShowOpenFolderDialog(&OnFolderPicked, nullptr, SDL_GetKeyboardFocus(),
+                                 start.empty() ? nullptr : start.c_str(), false);
+    }
+    // `remember`: an explicit search or browse saves the folder for the next visit (a data package
+    // or a non-Steam install lives outside Steam); the automatic scan on opening does not, so an
+    // empty box at start-up never wipes a remembered folder.
+    void Scan(bool remember = true)
     {
         if (_scan.valid())
             return;
         std::string folder;
         if (auto* edit = dynamic_cast<CEdit*>(GetCtrl(FolderId)))
             folder = edit->GetText().Data();
-        // Remembered for the next visit (a data package or a non-Steam install lives outside Steam).
-        if (Foundation::GamePaths::Instance().IsInitialized())
+        if (remember && Foundation::GamePaths::Instance().IsInitialized())
             std::ofstream(FolderMemory(), std::ios::trunc) << folder;
         Status("Searching installed Steam games... (archive directories only)");
         _scan = std::async(std::launch::async, [folder] { return ScanLocalMaps(folder); });
@@ -111,13 +223,16 @@ class LocalMapsDisplay : public Display
         auto* list = dynamic_cast<CListBox*>(GetCtrl(ListId));
         const int index = list ? list->GetCurSel() : -1;
         const size_t count = _mode == BrowserMode::Vehicles   ? _vehicles.size()
-                             : _mode == BrowserMode::Missions ? _catalog.missions.size()
+                             : _mode == BrowserMode::Missions ? _missionRows.size()
                                                               : _catalog.maps.size();
         if (index < 0 || index >= static_cast<int>(count))
             return;
+        if (_mode == BrowserMode::Missions && ToggleMissionRow(index))
+            return;
         const LocalMap* map = _mode == BrowserMode::Maps ? &_catalog.maps[index] : nullptr;
         const LocalVehicle* vehicle = _mode == BrowserMode::Vehicles ? &_vehicles[index] : nullptr;
-        const LocalMission* localMission = _mode == BrowserMode::Missions ? &_catalog.missions[index] : nullptr;
+        const LocalMission* localMission =
+            _mode == BrowserMode::Missions ? &_catalog.missions[_missionRows[index].mission] : nullptr;
         if ((map && !map->supported) || (vehicle && !vehicle->ready))
         {
             Status("This selected content is not supported or its local bridge is incomplete.");
@@ -299,7 +414,8 @@ class LocalMapsDisplay : public Display
         AddControl("RscButton", "MapsTab", MapsId, "Maps", 0.38f, 0.15f, 0.18f, 0.05f);
         AddControl("RscButton", "VehiclesTab", VehiclesId, "Vehicles", 0.57f, 0.15f, 0.18f, 0.05f);
         AddControl("RscButton", "MissionsTab", MissionsId, "Missions", 0.76f, 0.15f, 0.18f, 0.05f);
-        AddControl("RscEdit", "Folder", FolderId, "", 0.06f, 0.22f, 0.65f, 0.05f);
+        AddControl("RscEdit", "Folder", FolderId, "", 0.06f, 0.22f, 0.50f, 0.05f);
+        AddControl("RscButton", "Browse", BrowseId, "Browse...", 0.57f, 0.22f, 0.15f, 0.05f);
         AddControl("RscButton", "Scan", ScanId, "Search / refresh", 0.73f, 0.22f, 0.21f, 0.05f);
         AddControl("RscListBox", "Maps", ListId, "", 0.06f, 0.29f, 0.88f, 0.38f);
         AddControl("RscText", "Status", StatusId, "", 0.06f, 0.69f, 0.88f, 0.08f);
@@ -313,7 +429,7 @@ class LocalMapsDisplay : public Display
             if (auto* edit = dynamic_cast<CEdit*>(GetCtrl(FolderId)); edit && !remembered.empty())
                 edit->SetText(remembered.c_str());
         }
-        Scan();
+        Scan(false); // opening the screen is not a choice of folder; keep the remembered one
     }
     Control* OnCreateCtrl(int type, int idc, const ParamEntry& cls) override
     {
@@ -330,12 +446,7 @@ class LocalMapsDisplay : public Display
                 for (const auto& vehicle : _vehicles)
                     list->AddString((vehicle.label + (vehicle.ready ? " (local bridge)" : " (incomplete)")).c_str());
             else if (_mode == BrowserMode::Missions)
-                for (const auto& mission : _catalog.missions)
-                {
-                    const auto label = mission.game + " | " + mission.collection + " | " + mission.name +
-                                       (mission.supported ? " (playable)" : " (" + mission.reason + ")");
-                    list->AddString(label.c_str());
-                }
+                FillMissionTree(list);
             else
                 for (const auto& map : _catalog.maps)
                 {
@@ -355,8 +466,9 @@ class LocalMapsDisplay : public Display
             const auto playable = std::count_if(_catalog.missions.begin(), _catalog.missions.end(),
                                                 [](const LocalMission& m) { return m.supported; });
             Status(std::to_string(_catalog.missions.size()) + " missions found, " + std::to_string(playable) +
-                   " playable. Played from the game's own archives (nothing is copied); units and vehicles the "
-                   "engine lacks are stood in for by OFP ones. Open restarts engine.");
+                   " playable. Double-click a game or campaign to open it. Missions play from the game's own "
+                   "archives (nothing is copied); units the engine lacks are stood in for by OFP ones. Open restarts "
+                   "engine. Not a Steam install? Browse... to its folder.");
         }
         else
             Status(std::to_string(_catalog.maps.size()) +
@@ -369,6 +481,8 @@ class LocalMapsDisplay : public Display
             Exit(2);
         else if (idc == ScanId)
             Scan();
+        else if (idc == BrowseId)
+            Browse();
         else if (idc == OpenId)
             Open();
         else if (idc == MapsId || idc == VehiclesId || idc == MissionsId)
@@ -381,8 +495,27 @@ class LocalMapsDisplay : public Display
         else
             Display::OnButtonClicked(idc);
     }
+    void OnLBDblClick(int idc, int curSel) override
+    {
+        if (idc == ListId)
+            Open(); // a header row expands/collapses, an item opens
+        else
+            Display::OnLBDblClick(idc, curSel);
+    }
     void OnSimulate(EntityAI* vehicle) override
     {
+        {
+            PickedFolder& picked = Picked();
+            std::lock_guard guard(picked.lock);
+            if (picked.ready)
+            {
+                picked.ready = false;
+                if (auto* edit = dynamic_cast<CEdit*>(GetCtrl(FolderId)))
+                    edit->SetText(picked.path.c_str());
+                _mode = BrowserMode::Missions;
+                Scan();
+            }
+        }
         if (_scan.valid() && _scan.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
         {
             try
