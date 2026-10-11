@@ -628,6 +628,55 @@ fn geo_clutter_coverage(geo: u32) -> f32 {
     return f32((geo & GEO_COVERAGE_MASK) >> GEO_COVERAGE_SHIFT) * (1.0 / 127.0);
 }
 
+// A geography cell grass may never enter: water, road, track, hard objects (buildings), and the
+// forest flags unless the diagnostic override relaxes them. Never faded into, never spilled onto.
+fn grass_cell_blocked(geo: u32) -> bool {
+    return (geo & GEO_EXCLUDE_HARD) != 0u ||
+        (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u);
+}
+
+fn grass_cell_weight(cell: vec2<i32>) -> f32 {
+    let c = clamp(cell, vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
+    let geo = textureLoad(geography, c, 0).x;
+    return select(0.0, 1.0, (geo & 0x80000000u) != 0u && !grass_cell_blocked(geo));
+}
+
+// How much of a full meadow this point carries, 0..1, from the grass/no-grass state of the four
+// geography cells around it. The cells are tens of metres wide on OFP worlds, and testing only the
+// point's own cell drew every meadow as a hard-edged square block. Interpolating the four cell
+// centres and sharpening with a warped threshold gives an edge that thins over ~a third of a cell
+// and wanders like a real field margin. A point in a blocked cell is 0 outright, and a blocked
+// neighbour counts as bare ground, so grass thins TOWARDS a road or building cell and never into
+// it. GRASS_HARD_CELL_EDGES (WGR_GRASS_EDGE_FADE=0) restores the square cells.
+fn grass_edge_presence(world_xz: vec2<f32>, own_geo: u32) -> f32 {
+    if (grass_cell_blocked(own_geo)) { return 0.0; }
+#ifdef GRASS_HARD_CELL_EDGES
+    return select(0.0, 1.0, (own_geo & 0x80000000u) != 0u);
+#else
+    let g = (world_xz - terrain.world_origin) / terrain.land_grid - vec2<f32>(0.5);
+    let c0 = vec2<i32>(floor(g));
+    let f = g - floor(g);
+    let w00 = grass_cell_weight(c0);
+    let w10 = grass_cell_weight(c0 + vec2<i32>(1, 0));
+    let w01 = grass_cell_weight(c0 + vec2<i32>(0, 1));
+    let w11 = grass_cell_weight(c0 + vec2<i32>(1, 1));
+    // Uniform neighbourhoods (the inside of a meadow, open bare ground) skip the noise.
+    let sum = w00 + w10 + w01 + w11;
+    if (sum >= 3.999) { return 1.0; }
+    if (sum <= 0.001) { return 0.0; }
+    let s = f * f * (vec2<f32>(3.0) - 2.0 * f);
+    let b = mix(mix(w00, w10, s.x), mix(w01, w11, s.x), s.y);
+    // Two octaves of value noise, ~0.6 and ~0.17 of a cell, scaled to the cell so a coarse world and a fine
+    // one get the same proportion of wander.
+    let cell_m = max(terrain.land_grid, 1.0);
+    let n = clump_noise(world_xz, 1.7 / cell_m, 0x5e3a91c7u) * 0.6 +
+            clump_noise(world_xz, 6.0 / cell_m, 0x2b7d40e5u) * 0.4;
+    // The threshold sits above 0.5, so the margin falls mostly inside the grass cell rather than
+    // spilling onto the neighbouring ground; the noise amplitude is what keeps it off a straight line.
+    return smoothstep(0.40, 0.90, b + (n - 0.5) * 0.55);
+#endif
+}
+
 // Stable thinning by the authored coverage. Keyed on a salt of its own rather
 // than reusing the candidate's survival seed, so the coverage field thins the
 // set independently instead of correlating with the density hash and carving
@@ -967,9 +1016,14 @@ fn grass_sky_fill(n: vec3<f32>, view_dir: vec3<f32>, light_dir: vec3<f32>) -> ve
     let luma = dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722));
     let warm = vec3<f32>(1.02, 1.0, 0.90);
     let neutral = warm * luma / dot(warm, vec3<f32>(0.2126, 0.7152, 0.0722));
-    let daylight = smoothstep(-0.02, 0.15, light_dir.y);
-    let backlight = smoothstep(0.05, 0.70, dot(view_dir, -light_dir));
-    return mix(sky, neutral, daylight * backlight * 0.65);
+    // Day is judged from the true sun height, whichever sign grass_light_dir uses: on OFP the
+    // legacy sign put light_dir BELOW the horizon at noon, so this read as night.
+    let daylight = smoothstep(-0.02, 0.15, -frame.sun_dir_world.y);
+    // In every view direction, not only "backlit": inside a meadow the shaded side of a blade sees
+    // mostly other blades and ground, not open sky. Gating it on backlight made the field turn
+    // blue whenever the view swung away from that direction -- on OFP, where grass keeps the
+    // legacy sun sign, that was every view TOWARDS the sun.
+    return mix(sky, neutral, daylight * 0.65);
 }
 
 // `geo` carries the surface's atlas run in bits 23-30 (see the geography word
@@ -1050,9 +1104,10 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     // cells. Bit 2 (`full`) is intentionally NOT excluded: legacy Everon
     // marks broad normal ground with it, so rejecting it removes every blade
     // despite the surface being valid grass terrain.
-    if ((geo & 0x80000000u) == 0u) { return; }
-    if ((geo & GEO_EXCLUDE_HARD) != 0u) { return; }
-    if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
+    // Blocked cells (roads, buildings, water) stay bare; meadow margins thin out instead of
+    // ending on the cell's square edge (grass_edge_presence).
+    let presence = grass_edge_presence(world_xz, geo);
+    if (presence <= 0.0 || hash_cell01(cell_id, 0x6d2b79f5u) >= presence) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
     // Cards only: the card coverage (map's own where authored, else card_look.x).
     if (cards_on_near() && card_thinned(cell_id, geo)) { return; }
@@ -1074,7 +1129,8 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     instances[out_index].pos_seed = vec4<f32>(world_xz.x, y, world_xz.y, seed);
     var packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz), geo);
-    packed.z = pack_lod_fade(near_fade);
+    // The margin is shorter as well as sparser.
+    packed.z = pack_lod_fade(min(near_fade, presence));
     instances[out_index].packed = packed;
 }
 
@@ -1121,8 +1177,8 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (any(world_xz < terrain.world_origin) || any(world_xz >= map_max)) { return; }
     let geocell = clamp(vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid)), vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
     let geo = textureLoad(geography, geocell, 0).x;
-    if ((geo & 0x80000000u) == 0u || (geo & GEO_EXCLUDE_HARD) != 0u) { return; }
-    if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
+    let presence = grass_edge_presence(world_xz, geo);
+    if (presence <= 0.0 || hash_cell01(cell_id, 0x6d2b79f5u) >= presence) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
     // Cards only: the card coverage (map's own where authored, else card_look.x).
     if (cards_on_mid() && card_thinned(cell_id, geo)) { return; }
@@ -1139,7 +1195,7 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     instances[out_index].pos_seed = vec4<f32>(world_xz.x, y, world_xz.y, seed);
     var packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz), geo);
-    packed.z = pack_lod_fade(mid_fade);
+    packed.z = pack_lod_fade(min(mid_fade, presence));
     packed.w |= 1u << 11u;
     instances[out_index].packed = packed;
 }
@@ -1207,8 +1263,8 @@ fn cs_place_far(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (any(world_xz < terrain.world_origin) || any(world_xz >= map_max)) { return; }
     let geocell = clamp(vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid)), vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
     let geo = textureLoad(geography, geocell, 0).x;
-    if ((geo & 0x80000000u) == 0u || (geo & GEO_EXCLUDE_HARD) != 0u) { return; }
-    if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
+    let presence = grass_edge_presence(world_xz, geo);
+    if (presence <= 0.0 || hash_cell01(cell_id, 0x6d2b79f5u) >= presence) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
     let y = sample_height(world_xz);
     if (in_terrain_hole(vec3<f32>(world_xz.x, y, world_xz.y))) { return; } // preserve ground above a bounded cave mouth

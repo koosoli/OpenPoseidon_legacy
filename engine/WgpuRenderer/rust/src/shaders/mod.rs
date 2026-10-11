@@ -124,6 +124,10 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
         Ok("0") => { defs.insert("GRASS_LEGACY_SUN_SIGN".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
         _ => {}
     }
+    // Meadow margins fade across geography cells (grass.wgsl grass_edge_presence); 0 = square cells.
+    if std::env::var("WGR_GRASS_EDGE_FADE").as_deref() == Ok("0") {
+        defs.insert("GRASS_HARD_CELL_EDGES".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
     if std::env::var("WGR_COALESCED_PCF").as_deref() == Ok("1") {
         defs.insert("COALESCED_PCF".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
