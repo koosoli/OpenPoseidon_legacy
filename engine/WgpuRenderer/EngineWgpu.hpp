@@ -208,6 +208,20 @@ class EngineWgpu : public EngineDummy
     bool CaptureWarmRapStageRead(const char* key, WarmTextureRead& out) const override;
     bool SceneFarObjectCreated(uint32_t id, LODShapeWithShadow* shape, const Matrix4& transform) override;
     void SceneFarObjectRemoved(uint32_t id) override;
+    // Canopy occlusion map (frame.wgsl canopy_sky_ao): every canopy-classed object the scene hands
+    // the renderer (MapTree / MapSmallTree / MapBush / forests), as a top height and crown radius,
+    // rasterised into a world grid and handed to the terrain sky-visibility texture. Generic: it
+    // follows whatever the world draws, near objects and far authored instances alike.
+    struct CanopyEntry
+    {
+        float x = 0.0f, z = 0.0f, top = 0.0f, radius = 0.0f;
+    };
+    std::unordered_map<uint64_t, CanopyEntry> _canopy;
+    bool _canopyDirty = false;
+    std::chrono::steady_clock::time_point _canopyBuilt{};
+    void CanopyNote(uint64_t key, const LODShapeWithShadow* shape, const Matrix4& transform);
+    void CanopyForget(uint64_t key);
+    void UpdateCanopyMap();
     void ClearFarObjects() override;
     // Independent Worldgen presentation owners. Authored affine transforms are
     // already grounded against resident Earth; never sample the native island.
@@ -1285,6 +1299,10 @@ class EngineWgpu : public EngineDummy
         float farNearCutoff = 0.0f, farDistance = 0.0f, farPixelLimit = 0.0f;
         uint32_t farEnabled = 0;
         bool farParamsDirty = false;
+        // Canopy occlusion grid (UpdateCanopyMap), n x n; applied by wgr_terrain_set_canopy.
+        uint32_t canopyN = 0;
+        std::vector<float> canopyTop, canopyCover;
+        bool canopyDirty = false;
 
         // REN-THR-013: the per-frame producer-side pushes that used to reach the renderer
         // directly from NextFrame and the draw traversal. Queued like the rest, applied by the

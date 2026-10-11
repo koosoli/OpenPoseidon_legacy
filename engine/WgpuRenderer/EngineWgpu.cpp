@@ -3285,6 +3285,12 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
         wgr_far_set_params(_renderer, p.farNearCutoff, p.farDistance, p.farPixelLimit, p.farEnabled);
         p.farParamsDirty = false;
     }
+    if (p.canopyDirty)
+    {
+        wgr_terrain_set_canopy(_renderer, p.canopyN, p.canopyTop.empty() ? nullptr : p.canopyTop.data(),
+                               p.canopyCover.empty() ? nullptr : p.canopyCover.data());
+        p.canopyDirty = false;
+    }
     // REN-THR-013
     if (p.renderParamsDirty)
     {
@@ -5363,7 +5369,7 @@ Engine::RenderThreadInfo EngineWgpu::GetRenderThreadInfo() const
 // keep their capacity and come back on the slot's next turn.
 void EngineWgpu::MoveQueuesInto(FrameQueues& q)
 {
-    q.settings = _pendingSet;
+    q.settings = std::move(_pendingSet);
     _pendingSet = PendingRendererSettings{};
     q.resourceOps.swap(_resourceOps);
     _resourceOps.clear();
@@ -7506,6 +7512,7 @@ void EngineWgpu::PushSceneCamera()
             _pendingSet.farParamsDirty = true;
         }
     }
+    UpdateCanopyMap();
 
     _cameras.push_back(entry);
     _currentCamera = U32(_cameras.size() - 1);
@@ -17029,6 +17036,7 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
         }
     }
     _gpuInstances[obj] = GpuInstance{model, slot, shape, obj->Transform().Position(), cp.mode, cov};
+    CanopyNote(reinterpret_cast<uint64_t>(obj), shape, obj->Transform());
     static const bool coldWorldSource = ModelCompressedSourceBirth::ReadScope::Enabled();
     if (coldWorldSource)
         ObserveRetailWorldPlacement(obj, inst, slot);
@@ -17063,7 +17071,122 @@ bool EngineWgpu::SceneFarObjectCreated(uint32_t id, LODShapeWithShadow* shape, c
     RetainGpuModel(shape);
     ++_farGpuModelRefs[shape];
     _farGpuInstances.emplace(id, FarGpuInstance{slot, shape});
+    CanopyNote((1ull << 63) | id, shape, transform);
     return true;
+}
+
+void EngineWgpu::CanopyNote(uint64_t key, const LODShapeWithShadow* shape, const Matrix4& transform)
+{
+    static const bool enabled = [] {
+        const char* v = std::getenv("WGR_CANOPY_AO");
+        return !(v && v[0] == '0');
+    }();
+    if (!enabled || !shape)
+        return;
+    const MapType type = shape->GetMapType();
+    const bool canopy = type == MapTree || type == MapSmallTree || type == MapBush || type == MapForestBorder ||
+                        type == MapForestTriangle || type == MapForestSquare;
+    if (!canopy)
+        return;
+    const Vector3 lo = shape->Min();
+    const Vector3 hi = shape->Max();
+    const float scale = transform.Scale();
+    const Vector3 position = transform.Position();
+    CanopyEntry entry;
+    // The bounding box's centre in world space (the box is in the model's own frame).
+    const Vector3 centre = transform.FastTransform((lo + hi) * 0.5f);
+    entry.x = centre.X();
+    entry.z = centre.Z();
+    entry.top = position.Y() + hi.Y() * scale;
+    entry.radius = 0.5f * std::max(hi.X() - lo.X(), hi.Z() - lo.Z()) * scale;
+    if (!(entry.radius > 0.1f) || !(entry.top > position.Y() + 0.5f))
+        return;
+    _canopy[key] = entry;
+    _canopyDirty = true;
+}
+
+void EngineWgpu::CanopyForget(uint64_t key)
+{
+    if (_canopy.erase(key))
+        _canopyDirty = true;
+}
+
+// Rasterise the canopy table into a world grid over the terrain span: per cell the highest canopy
+// top and the coverage (a crown covers the cells its disc reaches, graded over one cell at the rim).
+// Rebuilt at most every 1.5 s while the table changes, which is what streaming does all the time.
+void EngineWgpu::UpdateCanopyMap()
+{
+    if (!_canopyDirty || !GLandscape || !_renderer)
+        return;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - _canopyBuilt < std::chrono::milliseconds(1500))
+        return;
+    _canopyBuilt = now;
+    _canopyDirty = false;
+    const float extent = static_cast<float>(GLandscape->GetTerrainRange()) * GLandscape->GetTerrainGrid();
+    if (!(extent > 0.0f))
+        return;
+    const uint32_t n = static_cast<uint32_t>(std::clamp(std::ceil(extent / 6.25f), 64.0f, 2048.0f));
+    const float cell = extent / static_cast<float>(n);
+    std::vector<float> top(static_cast<size_t>(n) * n, -60000.0f);
+    std::vector<float> cover(static_cast<size_t>(n) * n, 0.0f);
+    for (const auto& [key, e] : _canopy)
+    {
+        const float reach = e.radius + cell * 0.5f;
+        const int x0 = std::max(0, static_cast<int>(std::floor((e.x - reach) / cell)));
+        const int x1 = std::min(static_cast<int>(n) - 1, static_cast<int>(std::floor((e.x + reach) / cell)));
+        const int z0 = std::max(0, static_cast<int>(std::floor((e.z - reach) / cell)));
+        const int z1 = std::min(static_cast<int>(n) - 1, static_cast<int>(std::floor((e.z + reach) / cell)));
+        for (int z = z0; z <= z1; ++z)
+            for (int x = x0; x <= x1; ++x)
+            {
+                const float cx = (static_cast<float>(x) + 0.5f) * cell - e.x;
+                const float cz = (static_cast<float>(z) + 0.5f) * cell - e.z;
+                const float d = std::sqrt(cx * cx + cz * cz);
+                // graded over one cell at the crown's rim; a crown smaller than a cell still
+                // covers the cell its centre falls in, in proportion to its area
+                float w = std::clamp((e.radius - d) / cell + 0.5f, 0.0f, 1.0f);
+                if (d < cell * 0.71f)
+                    w = std::max(w, std::min(1.0f, 3.14159f * e.radius * e.radius / (cell * cell)));
+                if (w <= 0.0f)
+                    continue;
+                const size_t i = static_cast<size_t>(z) * n + static_cast<size_t>(x);
+                cover[i] = 1.0f - (1.0f - cover[i]) * (1.0f - w);
+                top[i] = std::max(top[i], e.top);
+            }
+    }
+    // Empty cells take their highest neighbour's top so the shader's bilinear tap never mixes a
+    // real canopy height with the "none" sentinel; coverage alone fades the edge out.
+    std::vector<float> dilated = top;
+    for (uint32_t z = 0; z < n; ++z)
+        for (uint32_t x = 0; x < n; ++x)
+        {
+            const size_t i = static_cast<size_t>(z) * n + x;
+            if (cover[i] > 0.0f)
+                continue;
+            float best = -60000.0f;
+            for (int dz = -1; dz <= 1; ++dz)
+                for (int dx = -1; dx <= 1; ++dx)
+                {
+                    const int sx = static_cast<int>(x) + dx, sz = static_cast<int>(z) + dz;
+                    if (sx < 0 || sz < 0 || sx >= static_cast<int>(n) || sz >= static_cast<int>(n))
+                        continue;
+                    const size_t j = static_cast<size_t>(sz) * n + static_cast<size_t>(sx);
+                    if (cover[j] > 0.0f)
+                        best = std::max(best, top[j]);
+                }
+            dilated[i] = best;
+        }
+    _pendingSet.canopyN = n;
+    _pendingSet.canopyTop = std::move(dilated);
+    _pendingSet.canopyCover = std::move(cover);
+    _pendingSet.canopyDirty = true;
+    static size_t reported = 0;
+    if (_canopy.size() / 20000 != reported)
+    {
+        reported = _canopy.size() / 20000;
+        LOG_INFO(Graphics, "Wgpu canopy map: {} canopy objects -> {}x{} at {:.2f} m", _canopy.size(), n, n, cell);
+    }
 }
 
 void EngineWgpu::SceneFarObjectRemoved(uint32_t id)
@@ -17072,6 +17195,7 @@ void EngineWgpu::SceneFarObjectRemoved(uint32_t id)
     if (found == _farGpuInstances.end())
         return;
     const auto* shape = found->second.shape.GetRef();
+    CanopyForget((1ull << 63) | id);
     EnqueueInstanceRemove(found->second.slot);
     ++_ops.instanceRemove;
     if (--_farGpuModelRefs[shape] == 0)
@@ -17239,6 +17363,7 @@ void EngineWgpu::SceneObjectRemoved(Object* obj)
     _ops.instanceRemove++;
     EnqueueInstanceRemove(it->second.slot);
     const LODShapeWithShadow* shape = it->second.shape;
+    CanopyForget(reinterpret_cast<uint64_t>(obj));
     _gpuInstances.erase(it);
     ReleaseGpuModel(shape);
     obj->SetGpuCoverage(static_cast<int>(GpuDrawCoverage::None)); // back to the CPU path

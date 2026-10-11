@@ -3456,6 +3456,30 @@ pub unsafe extern "C" fn wgr_terrain_set_ground_layers(
     }));
 }
 
+/// Canopy occlusion grid: `n` x `n` cells over the terrain's world span (row-major z, x), the
+/// highest canopy top in metres and the canopy coverage [0,1]. Lowers sky ambient below the canopy.
+/// `n` 0 clears it.
+///
+/// # Safety
+/// `renderer` must be live; `top` and `cover` must hold `n * n` floats each (or be null with n 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_canopy(renderer: *mut WgrRenderer, n: u32, top: *const f32, cover: *const f32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        if n == 0 || top.is_null() || cover.is_null() {
+            renderer.terrain_set_canopy(0, &[], &[]);
+            return;
+        }
+        let cells = (n as usize) * (n as usize);
+        let top = unsafe { std::slice::from_raw_parts(top, cells) };
+        let cover = unsafe { std::slice::from_raw_parts(cover, cells) };
+        renderer.terrain_set_canopy(n, top, cover);
+    }));
+}
+
 /// RFG-PBR: a native Reforger world's surface map, `edge` x `edge` palette indices (one byte each),
 /// for the terrain shader's blend (see terrain::set_surface_map). `edge` 0 clears it.
 ///

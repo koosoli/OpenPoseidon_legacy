@@ -2739,6 +2739,9 @@ extern "C"
     /* RFG-PBR: a native Reforger world's surface map, edge x edge palette indices (one byte each),
      * blended by the terrain shader when WgrTerrainParams::_pad4 (the surface grid, metres per
      * texel) is above zero. edge 0 clears it. */
+    /* Canopy occlusion grid: n x n cells over the terrain's world span (row-major z, x), the highest
+     * canopy top (m) and coverage [0,1] per cell. Lowers sky ambient below the canopy. n 0 clears. */
+    WGR_API void wgr_terrain_set_canopy(WgrRenderer* renderer, uint32_t n, const float* top, const float* cover);
     WGR_API void wgr_terrain_set_surface_map(WgrRenderer* renderer, uint32_t edge, const uint8_t* data);
     WGR_API void wgr_terrain_set_index_map(WgrRenderer* renderer, uint32_t width, uint32_t height,
                                            const uint16_t* indices);

@@ -8,7 +8,7 @@
 
 #define_import_path shading
 
-#import frame::{frame, gi_irradiance, terrain_sun_shadow, apply_fog_receiver, fog_sun_reach, cloud_sun_shadow, sky_irradiance, sky_vis_ao, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, sky_specular_split, spec_power_to_gloss}
+#import frame::{frame, gi_irradiance, terrain_sun_shadow, apply_fog_receiver, fog_sun_reach, cloud_sun_shadow, sky_irradiance, sky_vis_ao, canopy_sky_ao, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, sky_specular_split, spec_power_to_gloss}
 #import shadow::shadow_strength
 #import lighting::lights_material_contrib
 #import color::srgb_to_linear
@@ -402,7 +402,7 @@ fn shade(
     // static buildings it has rooms for; a soldier walking in a cave got the open-sky ambient (owner report:
     // "soldiers also illuminated and not dark"). The same ramp as the sun test, so a cave is one consistent dark.
     let underground_amb = mix(1.0, 0.03, underground_amb_s);
-    let amb_ao = sky_vis_ao(world_abs.xz) * gtao_t * interior_ao * clamp(baked_sky_vis, 0.0, 1.0)
+    let amb_ao = sky_vis_ao(world_abs.xz) * canopy_sky_ao(world_abs) * gtao_t * interior_ao * clamp(baked_sky_vis, 0.0, 1.0)
         * leaf_cavity * mix(mat.native_ao, 1.0, snow_cover) * underground_amb;
     // ...and a FOURTH, at a scale none of the three can reach: the normal map's own micro-
     // occlusion. Sky-vis is keyed on the terrain column (km), GTAO marches the depth buffer

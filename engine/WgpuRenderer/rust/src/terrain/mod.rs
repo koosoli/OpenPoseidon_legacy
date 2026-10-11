@@ -334,6 +334,11 @@ pub struct Terrain {
     // Source heightfield kept so the ImGui-tuned scan options (radius/K/downsample) can re-run the
     // scan without a fresh heightmap upload. None until the first heightmap arrives.
     skyvis_src: Option<SkyvisSrc>,
+    // The last finished sky-view grid (w, h, values), kept so a canopy update can recompose the
+    // shared texture without re-running the scan.
+    skyvis_last: Option<(u32, u32, Vec<f32>)>,
+    // Canopy occlusion grid (see set_canopy): n x n over the same world span as the sky-view map.
+    canopy: Option<(u32, Vec<f32>, Vec<f32>)>,
 
     shadow_sweep_ubo: wgpu::Buffer,
     shadow_sweep_layout: wgpu::BindGroupLayout,
@@ -657,7 +662,7 @@ impl Terrain {
         let shadow_mask = create_shadow_mask(device, 1, 1);
         let shadow_mask_view = shadow_mask.create_view(&wgpu::TextureViewDescriptor::default());
         // 1x1 stand-in sky-visibility mask (fully visible = 255) until a heightmap loads.
-        let (skyvis_mask, skyvis_view) = create_skyvis(device, queue, 1, 1, &[255u8]);
+        let (skyvis_mask, skyvis_view) = create_skyvis(device, queue, 1, 1, &skyvis_texels_empty());
         // Default-ON with the user-tuned values (2026-07-12). Terrain params reach the renderer only
         // via the SetShadowMapTuning FFI push, so — like the sun-shadow sweep — the RENDERER default is
         // what makes it on out of the box; the C++ ShadowMapTuning defaults mirror these for ImGui.
@@ -1130,6 +1135,8 @@ impl Terrain {
                 ..skyvis::SkyvisOptions::default()
             },
             skyvis_src: None,
+            skyvis_last: None,
+            canopy: None,
             shadow_sweep_ubo,
             shadow_sweep_layout,
             shadow_sweep_bind,
@@ -1543,26 +1550,45 @@ impl Terrain {
             previous.map(|old| (old.heights.as_slice(), old.raw_visibility.as_slice())),
         );
         src.raw_visibility = raw;
-        let sv_bytes: Vec<u8> = sv
-            .iter()
-            .map(|v| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8)
-            .collect();
-        if terrain_resource_reuse() && same_texture_size(
-            (self.skyvis_mask.width(), self.skyvis_mask.height()), (sv_w, sv_h)) {
+        self.skyvis_last = Some((sv_w, sv_h, sv));
+        self.upload_skyvis(device, queue);
+    }
+
+    // Compose the shared sky-visibility texture: R = the terrain sky-view factor, G = canopy top
+    // height (absolute metres), B = canopy coverage [0,1]. At the canopy grid's resolution when one
+    // is set (the sky-view grid is coarse and is resampled bilinearly), else at the sky-view grid's.
+    fn upload_skyvis(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let Some((sv_w, sv_h, sv)) = &self.skyvis_last else {
+            return;
+        };
+        let (w, h, texels) = compose_skyvis_texels(*sv_w, *sv_h, sv, self.canopy.as_ref());
+        if terrain_resource_reuse() && same_texture_size((self.skyvis_mask.width(), self.skyvis_mask.height()), (w, h)) {
             queue.write_texture(
                 texel_copy(&self.skyvis_mask),
-                &sv_bytes,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0, bytes_per_row: Some(sv_w), rows_per_image: Some(sv_h),
-                },
-                wgpu::Extent3d { width: sv_w, height: sv_h, depth_or_array_layers: 1 },
+                bytemuck::cast_slice(&texels),
+                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 8), rows_per_image: Some(h) },
+                wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
             );
         } else {
-            let (skyvis_mask, skyvis_view) = create_skyvis(device, queue, sv_w, sv_h, &sv_bytes);
+            let (skyvis_mask, skyvis_view) = create_skyvis(device, queue, w, h, &texels);
             self.skyvis_mask = skyvis_mask;
             self.skyvis_view = skyvis_view;
         }
         self.mask_gen += 1;
+    }
+
+    /// Canopy occlusion: an `n` x `n` grid over the sky-view map's world span, row-major (z, x):
+    /// the highest canopy top (absolute metres) and the canopy coverage [0,1] in each cell. Ambient
+    /// sky light is reduced for points below the local canopy top (frame.wgsl canopy_sky_ao).
+    /// `n` 0 clears it.
+    pub fn set_canopy(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, n: u32, top: &[f32], cover: &[f32]) {
+        let cells = (n as usize) * (n as usize);
+        self.canopy = if n == 0 || top.len() < cells || cover.len() < cells {
+            None
+        } else {
+            Some((n, top[..cells].to_vec(), cover[..cells].to_vec()))
+        };
+        self.upload_skyvis(device, queue);
     }
 
     // Live sky-visibility tuning from the ImGui shadow tab (via wgr_terrain_set_sky_visibility).
@@ -1951,7 +1977,7 @@ fn create_skyvis(
     queue: &wgpu::Queue,
     w: u32,
     h: u32,
-    bytes: &[u8],
+    texels: &[u16],
 ) -> (wgpu::Texture, wgpu::TextureView) {
     let tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("wgr_terrain_skyvis_mask"),
@@ -1963,16 +1989,16 @@ fn create_skyvis(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R8Unorm,
+        format: wgpu::TextureFormat::Rgba16Float,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
     queue.write_texture(
         texel_copy(&tex),
-        bytes,
+        bytemuck::cast_slice(texels),
         wgpu::TexelCopyBufferLayout {
             offset: 0,
-            bytes_per_row: Some(w),
+            bytes_per_row: Some(w * 8),
             rows_per_image: Some(h),
         },
         wgpu::Extent3d {
@@ -1983,6 +2009,76 @@ fn create_skyvis(
     );
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
     (tex, view)
+}
+
+// IEEE half from f32 (round to nearest, overflow to inf, subnormals flushed). The sky-visibility
+// texture is Rgba16Float, and heights to a few hundred metres need the exponent a unorm lacks.
+fn f32_to_f16_bits(v: f32) -> u16 {
+    let x = v.to_bits();
+    let sign = ((x >> 16) & 0x8000) as u16;
+    let exp = ((x >> 23) & 0xff) as i32 - 127 + 15;
+    let mant = x & 0x7f_ffff;
+    if exp <= 0 {
+        return sign;
+    }
+    if exp >= 31 {
+        return sign | 0x7c00;
+    }
+    let half = sign | ((exp as u16) << 10) | ((mant >> 13) as u16);
+    // round to nearest
+    if (mant & 0x1000) != 0 { half.wrapping_add(1) } else { half }
+}
+
+// The 1x1 stand-in: open sky, no canopy.
+fn skyvis_texels_empty() -> [u16; 4] {
+    [f32_to_f16_bits(1.0), f32_to_f16_bits(-60000.0), 0, f32_to_f16_bits(1.0)]
+}
+
+// R = sky-view factor, G = canopy top, B = canopy cover, A = 1; see Terrain::upload_skyvis.
+fn compose_skyvis_texels(sv_w: u32, sv_h: u32, sv: &[f32], canopy: Option<&(u32, Vec<f32>, Vec<f32>)>) -> (u32, u32, Vec<u16>) {
+    let (w, h) = match canopy {
+        Some((n, _, _)) => (*n, *n),
+        None => (sv_w, sv_h),
+    };
+    let one = f32_to_f16_bits(1.0);
+    let no_top = f32_to_f16_bits(-60000.0);
+    let mut out = vec![0u16; (w as usize) * (h as usize) * 4];
+    for z in 0..h {
+        for x in 0..w {
+            // the sky-view value at this texel's centre, bilinear over its own grid
+            let vis = if w == sv_w && h == sv_h {
+                sv[(z * sv_w + x) as usize]
+            } else {
+                let fx = ((x as f32 + 0.5) / w as f32) * sv_w as f32 - 0.5;
+                let fz = ((z as f32 + 0.5) / h as f32) * sv_h as f32 - 0.5;
+                let x0 = fx.floor().clamp(0.0, (sv_w - 1) as f32) as u32;
+                let z0 = fz.floor().clamp(0.0, (sv_h - 1) as f32) as u32;
+                let x1 = (x0 + 1).min(sv_w - 1);
+                let z1 = (z0 + 1).min(sv_h - 1);
+                let tx = (fx - x0 as f32).clamp(0.0, 1.0);
+                let tz = (fz - z0 as f32).clamp(0.0, 1.0);
+                let at = |cx: u32, cz: u32| sv[(cz * sv_w + cx) as usize];
+                let a = at(x0, z0) + (at(x1, z0) - at(x0, z0)) * tx;
+                let b = at(x0, z1) + (at(x1, z1) - at(x0, z1)) * tx;
+                a + (b - a) * tz
+            };
+            let o = ((z * w + x) as usize) * 4;
+            out[o] = f32_to_f16_bits(vis.clamp(0.0, 1.0));
+            match canopy {
+                Some((n, top, cover)) => {
+                    let c = (z * n + x) as usize;
+                    out[o + 1] = if cover[c] > 0.0 { f32_to_f16_bits(top[c]) } else { no_top };
+                    out[o + 2] = f32_to_f16_bits(cover[c].clamp(0.0, 1.0));
+                }
+                None => {
+                    out[o + 1] = no_top;
+                    out[o + 2] = 0;
+                }
+            }
+            out[o + 3] = one;
+        }
+    }
+    (w, h, out)
 }
 
 // Parse a float env var, falling back to `default` when unset or unparseable.

@@ -1,4 +1,4 @@
-#import frame::{frame, reverse_z, apply_fog, sky_irradiance, terrain_sun_shadow, sky_vis_ao, cloud_sun_shadow}
+#import frame::{frame, reverse_z, apply_fog, sky_irradiance, terrain_sun_shadow, sky_vis_ao, canopy_sky_ao, cloud_sun_shadow}
 #import gbuffer::{oct_encode, a2c_coverage}
 #import shadow::shadow_strength
 
@@ -1816,7 +1816,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let direct = frame.sun_diffuse.rgb * mix(ndl, wrap, 0.35) *
         (1.0 - max(terrain_shadow, self_shadow.x)) * cloud_lit;
     let ambient = grass_sky_fill(normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.45)), view_dir, light_dir) * sky_vis_ao(world.xz) *
-        self_shadow.y;
+        canopy_sky_ao(world) * self_shadow.y;
     let transmission = species_transmission(u32(in.blade_uv.z));
     let transmission_amount = pow(max(dot(view_dir, -light_dir), 0.0), 1.5) * (1.0 - ndl) *
         grass.debug_flags.w * transmission.w;

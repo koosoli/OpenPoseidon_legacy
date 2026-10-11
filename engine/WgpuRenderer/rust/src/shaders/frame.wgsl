@@ -787,6 +787,30 @@ fn sky_vis_ao(world_xz: vec2<f32>) -> f32 {
     return max(ao, terrain_shadow_map.sky_vis_floor);
 }
 
+// Canopy sky occlusion at a WORLD-ABSOLUTE point [0,1], 1 = open. The terrain sky-visibility
+// texture carries the canopy top (G, absolute m) and coverage (B) of every canopy-classed object the
+// engine has drawn (EngineWgpu canopy map; trees, bushes, forests -- any world). A point below the
+// local canopy top loses sky light in proportion to coverage and depth: crown tops stay lit, crown
+// interiors, trunks and the floor under a forest go dark, as they do under a real canopy.
+const CANOPY_DEPTH_START: f32 = 0.5;
+const CANOPY_DEPTH_FULL: f32 = 6.0;
+const CANOPY_STRENGTH: f32 = 0.85;
+fn canopy_sky_ao(world_abs: vec3<f32>) -> f32 {
+    if (terrain_shadow_map.enabled < 0.5) {
+        return 1.0;
+    }
+    let uv = (world_abs.xz - terrain_shadow_map.origin) * terrain_shadow_map.inv_span;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        return 1.0;
+    }
+    let c = textureSampleLevel(terrain_skyvis_mask, terrain_shadow_samp, uv, 0.0);
+    if (c.b <= 0.002) {
+        return 1.0;
+    }
+    let occ = clamp(c.b, 0.0, 1.0) * smoothstep(CANOPY_DEPTH_START, CANOPY_DEPTH_FULL, c.g - world_abs.y);
+    return 1.0 - CANOPY_STRENGTH * occ;
+}
+
 // Screen-space AO multiplier at this fragment [0,1], 1 = unoccluded. Returns 1 when the pass did
 // not run: the AO texture RETAINS its last contents when GTAO is disabled or skipped, so an
 // ungated read would shade the world with a frozen AO buffer — a failure that looks like a
