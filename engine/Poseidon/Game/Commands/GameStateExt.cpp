@@ -374,6 +374,18 @@ bool OpenScript(QIFStreamB& in, RString name);
 
 GameValue ScriptExecute(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ScriptExit(const GameState* state);
+// Scheduled SQF / Arma 1 campaign commands (Scripts.cpp)
+GameValue ScriptSpawn(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ScriptExecVM(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ScriptExecVMUnary(const GameState* state, GameValuePar oper1);
+GameValue ScriptTerminate(const GameState* state, GameValuePar oper1);
+GameValue ScriptIsDone(const GameState* state, GameValuePar oper1);
+GameValue ScriptWaitUntilUnscheduled(const GameState* state, GameValuePar oper1);
+GameValue ScriptSleepUnscheduled(const GameState* state, GameValuePar oper1);
+GameValue PreloadCameraReady(const GameState* state, GameValuePar oper1);
+GameValue PreloadObjectReady(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue CampaignKeyActive(const GameState* state, GameValuePar oper1);
+GameValue CampaignKeyActivate(const GameState* state, GameValuePar oper1);
 GameValue ScriptGoto(const GameState* state, GameValuePar oper1);
 
 GameValue PoolAddWeapon(const GameState* state, GameValuePar oper1);
@@ -932,6 +944,14 @@ static const GameFunction* GetExtUnary(int& count)
 {
     static const GameFunction ExtUnary[] = {
         GameFunction(GameBool, "isNull", ObjIsNull, GameObject),
+        GameFunction(GameScalar, "execVM", ScriptExecVMUnary, GameString),
+        GameFunction(GameNothing, "terminate", ScriptTerminate, GameScalar),
+        GameFunction(GameBool, "scriptDone", ScriptIsDone, GameScalar),
+        GameFunction(GameBool, "waitUntil", ScriptWaitUntilUnscheduled, GameString),
+        GameFunction(GameNothing, "sleep", ScriptSleepUnscheduled, GameScalar),
+        GameFunction(GameBool, "preloadCamera", PreloadCameraReady, GameArray),
+        GameFunction(GameBool, "isKeyActive", CampaignKeyActive, GameString),
+        GameFunction(GameNothing, "activateKey", CampaignKeyActivate, GameString),
         GameFunction(GameBool, "isNull", GrpIsNull, GameGroup),
         GameFunction(GameBool, "alive", ObjAlive, GameObject),
         GameFunction(GameBool, "local", ObjIsLocal, GameObject),
@@ -1323,6 +1343,9 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "allowFleeing", function, GrpAllowFleeing, GameObjectOrGroup, GameScalar),
         GameOperator(GameNothing, "objStatus", function, SetObjectiveStatus, GameString, GameString),
         GameOperator(GameNothing, "exec", function, ScriptExecute, GameVoid, GameString),
+        GameOperator(GameScalar, "spawn", function, ScriptSpawn, GameVoid, GameString),
+        GameOperator(GameScalar, "execVM", function, ScriptExecVM, GameVoid, GameString),
+        GameOperator(GameBool, "preloadObject", function, PreloadObjectReady, GameScalar, GameObject),
 
         GameOperator(GameNothing, "setOvercast", function, SetOvercast, GameScalar, GameScalar),
         GameOperator(GameNothing, "setFog", function, SetFog, GameScalar, GameScalar),

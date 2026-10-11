@@ -1,4 +1,5 @@
 #include <Poseidon/UI/Map/UIMap.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Foundation/Common/Win.h>
 
 #include <Poseidon/Core/resincl.hpp>
@@ -912,6 +913,17 @@ bool ProcessFullName(RString name)
     CurrentCampaign = "";
     CurrentBattle = "";
     CurrentMission = "";
+    // An Arma 1 campaign mission played from its mounted archive keeps its campaign's
+    // stringtable and description.ext (CfgSounds/CfgRadio live there in Arma 1).
+    const std::string campaignBase = Arma1Compat::CampaignBaseForMission(selection->missionFilePath);
+    if (Arma1Compat::Active() && !campaignBase.empty() &&
+        selection->missionParentDirectory.size() > campaignBase.size())
+    {
+        SetBaseDirectory(RString(campaignBase.c_str()));
+        SetMission(selection->worldName.c_str(), selection->missionName.c_str(),
+                   selection->missionParentDirectory.substr(campaignBase.size()).c_str());
+        return true;
+    }
     SetBaseDirectory("");
     SetMission(selection->worldName.c_str(), selection->missionName.c_str(), selection->missionParentDirectory.c_str());
     return true;

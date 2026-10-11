@@ -378,6 +378,29 @@ int Landscape::LoadData(const char* name, float landGrid)
         return LSUnknownError;
     }
 
+    // Later-generation (Arma 1+) OPRW worlds named by a CfgWorlds class, e.g. the
+    // generated Arma 1 world classes (Arma1Compat): route them to the modern reader
+    // the same way --test-world does. OFP's own OPRW v2/v3 keep the classic path.
+    {
+        QIFStreamB probe;
+        probe.AutoOpen(name);
+        char magic[8]{};
+        probe.read(magic, sizeof(magic));
+        int version = 0;
+        memcpy(&version, magic + 4, sizeof(version));
+        if (!probe.fail() && memcmp(magic, "OPRW", 4) == 0 && version > 3)
+        {
+            Log("Load modern OPRW%d landscape %s", version, name);
+            if (LoadOprwModern(name))
+            {
+                LOG_DEBUG(World, "Landscape::LoadData time {}", Poseidon::Foundation::GlobalTickCount() - start);
+                return LSOK;
+            }
+            Poseidon::Foundation::ErrorMessage("Cannot load world '%s'", name);
+            return LSUnknownError;
+        }
+    }
+
     // FIX - allow worlds in banks
     QIFStreamB f;
     f.AutoOpen(name);

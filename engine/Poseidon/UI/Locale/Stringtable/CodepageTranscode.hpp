@@ -34,6 +34,11 @@ Codepage SelectLegacyTextCodepage(const std::string& input, Codepage preferredCp
 // keeps original mods readable when their stringtable/config literals carry
 // CP1250 or CP1251 text under a different selected language.
 std::string DecodeLegacyTextToUtf8(const std::string& input, Codepage preferredCp);
+
+// Arma 1 ships stringtables and briefings as UTF-16 with a byte-order mark. When
+// `data` starts with an FF FE / FE FF BOM, writes the UTF-8 text (without the BOM)
+// to `out` and returns true; otherwise returns false and leaves `out` untouched.
+bool DecodeUtf16BomToUtf8(const char* data, size_t size, std::string& out);
 RString DecodeLegacyTextToRString(RString input, Codepage preferredCp);
 RString DecodeLegacyTextToRString(RString input, const char* languageName);
 

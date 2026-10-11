@@ -1,4 +1,5 @@
 #include <Poseidon/UI/LocalMapWorlds.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/World/Terrain/TerrainPreviewStart.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
@@ -2869,6 +2870,7 @@ void GameApplication::ConfigureBankMerge()
 void GameApplication::OnGlobInitialized()
 {
     Poseidon::RestoreLocalMapWorldClasses();
+    Poseidon::Arma1Compat::RegisterWorldClasses();
     Config::InitDifficulties();
 }
 
@@ -3053,7 +3055,27 @@ void GameApplication::StartGameMode()
         extern bool AutoTest;
         extern char LoadFile[256];
         const std::string& testMission = AppConfig::Instance().GetTestMissionPath();
-        if (!testMission.empty())
+        const std::string& arma1Mission = AppConfig::Instance().GetArma1Mission();
+        if (!arma1Mission.empty())
+        {
+            // Arma 1 mission straight from the mounted Arma 1 archives: a virtual bank
+            // path, never extracted or copied (see Arma1Compat).
+            std::string error;
+            const std::string missionFile = Poseidon::Arma1Compat::ResolveMissionFile(arma1Mission, error);
+            if (missionFile.empty())
+            {
+                LOG_ERROR(Core, "--arma1-mission: {}", error);
+                Poseidon::Foundation::WarningMessage("Arma 1 mission: %s", error.c_str());
+                m_exitCode = 44;
+                m_closeRequest = true;
+                return;
+            }
+            strncpy(LoadFile, missionFile.c_str(), sizeof(LoadFile) - 1);
+            LoadFile[sizeof(LoadFile) - 1] = 0;
+            AutoTest = true;
+            LOG_INFO(Core, "Arma 1 mission: {} -> {}", arma1Mission, missionFile);
+        }
+        else if (!testMission.empty())
         {
             const std::string staged = StageTestMissionForGame(testMission);
             const auto loadPath = MissionPathLoader::Loader::ResolveMissionFile(staged);

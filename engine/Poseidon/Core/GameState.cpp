@@ -29,6 +29,7 @@
 #include <Poseidon/UI/Locale/Languages.hpp>
 #include <Poseidon/Asset/Addon/AddonInfo.hpp>
 #include <Poseidon/Asset/Addon/AddonSystem.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <stdio.h>
 #include <string.h>
 #include <functional>
@@ -333,6 +334,8 @@ void Globals::Init()
             if (mapEnd == std::string::npos) break;
             mapStart = mapEnd + 1;
         }
+        // --arma1: an installed Arma 1 folder, mounted data-only like the map roots above.
+        Poseidon::Arma1Compat::MountArchives();
         AddonSystem::ParseAllAddonConfigs();
         AddonSystem::ClearAddonConfigs();
         AddonSystem::MarkAllAddonsLockable();

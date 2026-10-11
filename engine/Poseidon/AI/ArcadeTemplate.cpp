@@ -1,5 +1,6 @@
 
 #include <Poseidon/AI/ArcadeTemplate.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
@@ -373,6 +374,8 @@ LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.SerializeEnum("side", side, 1))
 
     PARAM_CHECK(ar.Serialize("vehicle", vehicle, 1))
+    if (ar.IsLoading())
+        vehicle = Arma1Compat::ResolveVehicleClass(vehicle); // identity unless --arma1
     PARAM_CHECK(ar.SerializeEnum("player", player, 1, APNonplayable))
     PARAM_CHECK(ar.Serialize("leader", leader, 1, 0))
     if (ar.IsSaving() || ar.GetArVersion() >= 11)
@@ -2011,6 +2014,7 @@ LSError ArcadeTemplate::Serialize(ParamArchive& ar)
         addOns.Resize(0);
         missingAddOns.Resize(0);
         PARAM_CHECK(ar.SerializeArray("addOns", addOns, 1))
+        Arma1Compat::FilterMissionAddons(addOns); // identity unless --arma1
         CheckPatch(addOns, missingAddOns);
         if (missingAddOns.Size() > 0)
         {

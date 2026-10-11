@@ -14,6 +14,15 @@
 #include <filesystem>
 #include <stdio.h>
 #include <string.h>
+// CLI11 is linked precompiled (CLI11.lib), but CLI/StringTools.hpp keeps two inline
+// functions with a function-local `static const std::string` (valid_alias_name_string,
+// is_separator). With a recent MSVC STL + clang this C++20 TU constant-initializes those
+// objects into .rdata, while CLI11.lib -- built at CLI11's own older standard -- runs a
+// dynamic initializer on the very same COMDAT: an access violation in
+// ParseCommandLine before anything is logged (seen with VS 18 / MSVC 14.51 + clang 22).
+// Giving this TU's copies their own names keeps the two initialization strategies apart.
+#define valid_alias_name_string PoseidonCli11ValidAliasNameString
+#define is_separator PoseidonCli11IsSeparator
 #include <CLI/Error.hpp>
 #include <CLI/Option.hpp>
 #include <CLI/Validators.hpp>
@@ -31,6 +40,8 @@
 #include <CLI/App.hpp>
 #include <CLI/Config.hpp>
 #include <CLI/Formatter.hpp>
+#undef valid_alias_name_string
+#undef is_separator
 
 #include <cctype>
 #include <cstdlib>
@@ -504,6 +515,10 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
 
         std::string mapArchiveRootsStr;
         configGroup->add_option("--map-archive-root", mapArchiveRootsStr, "External terrain archive folders; read-only assets, no foreign configs");
+        configGroup->add_option("--arma1", _arma1Root,
+                                "Arma 1 (ArmA Gold) install folder: its archives are mounted read-only, nothing is copied");
+        configGroup->add_option("--arma1-mission", _arma1Mission,
+                                "Play an Arma 1 mission straight from the --arma1 archives (e.g. m09convoyattack.sara)");
         configGroup->add_option("--wait-for-parent", _waitForParent, "Wait for the map-browser parent process before starting");
         configGroup->add_option("--reforger-world", _reforgerWorld, "Native Enfusion world virtual directory");
 
