@@ -1,6 +1,8 @@
 
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Game/Scripting/Scripts.hpp>
+#include <functional>
+#include <string>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/AI/AI.hpp>
@@ -767,6 +769,180 @@ bool UnwrapBraces(const std::string& s, std::string& body)
     body = s.substr(1, s.size() - 2);
     return true;
 }
+
+// The balanced {..} / (..) / [..] starting at s[pos] (pos at the opening bracket); its inner
+// text in `inner`, pos moved past the closing bracket.
+bool TakeBracketed(const std::string& s, size_t& pos, char open, char close, std::string& inner)
+{
+    while (pos < s.size() && isspace(static_cast<unsigned char>(s[pos])))
+        pos++;
+    if (pos >= s.size() || s[pos] != open)
+        return false;
+    int depth = 0;
+    char quote = 0;
+    for (size_t i = pos; i < s.size(); i++)
+    {
+        const char c = s[i];
+        if (quote)
+        {
+            if (c == quote)
+                quote = 0;
+            continue;
+        }
+        if (c == '"' || c == '\'')
+            quote = c;
+        else if (c == open)
+            depth++;
+        else if (c == close && --depth == 0)
+        {
+            inner = s.substr(pos + 1, i - pos - 1);
+            pos = i + 1;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool TakeWord(const std::string& s, size_t& pos, const char* word)
+{
+    while (pos < s.size() && isspace(static_cast<unsigned char>(s[pos])))
+        pos++;
+    const size_t n = strlen(word);
+    if (s.size() - pos < n || _strnicmp(s.c_str() + pos, word, n) != 0)
+        return false;
+    if (pos + n < s.size() && (isalnum(static_cast<unsigned char>(s[pos + n])) || s[pos + n] == '_'))
+        return false;
+    pos += n;
+    return true;
+}
+
+bool AtEnd(const std::string& s, size_t pos)
+{
+    while (pos < s.size() && isspace(static_cast<unsigned char>(s[pos])))
+        pos++;
+    return pos >= s.size();
+}
+
+// Does the code contain sleep or waitUntil (outside strings, as whole words)?
+bool HasSuspension(const std::string& s)
+{
+    char quote = 0;
+    for (size_t i = 0; i < s.size(); i++)
+    {
+        const char c = s[i];
+        if (quote)
+        {
+            if (c == quote)
+                quote = 0;
+            continue;
+        }
+        if (c == '"' || c == '\'')
+        {
+            quote = c;
+            continue;
+        }
+        if (i > 0 && (isalnum(static_cast<unsigned char>(s[i - 1])) || s[i - 1] == '_'))
+            continue;
+        size_t p = i;
+        if (TakeWord(s, p, "sleep") || TakeWord(s, p, "waitUntil"))
+            return true;
+    }
+    return false;
+}
+
+struct SqfControl
+{
+    enum Kind
+    {
+        While,
+        If,
+        For
+    } kind = While;
+    std::string condition, body, elseBody, init, step;
+};
+
+// while {c} do {b} | if (c) then {a} [else {b}] | for "_v" from a to b [step s] do {b} |
+// for [{i},{c},{s}] do {b}
+bool ParseSqfControl(const std::string& s, SqfControl& out)
+{
+    size_t pos = 0;
+    if (TakeWord(s, pos, "while"))
+    {
+        out.kind = SqfControl::While;
+        return TakeBracketed(s, pos, '{', '}', out.condition) && TakeWord(s, pos, "do") &&
+               TakeBracketed(s, pos, '{', '}', out.body) && AtEnd(s, pos);
+    }
+    pos = 0;
+    if (TakeWord(s, pos, "if"))
+    {
+        out.kind = SqfControl::If;
+        if (!TakeBracketed(s, pos, '(', ')', out.condition) || !TakeWord(s, pos, "then") ||
+            !TakeBracketed(s, pos, '{', '}', out.body))
+            return false;
+        if (TakeWord(s, pos, "else") && !TakeBracketed(s, pos, '{', '}', out.elseBody))
+            return false;
+        return AtEnd(s, pos);
+    }
+    pos = 0;
+    if (!TakeWord(s, pos, "for"))
+        return false;
+    out.kind = SqfControl::For;
+    std::string inner;
+    if (TakeBracketed(s, pos, '[', ']', inner))
+    {
+        const std::vector<std::string> parts = SplitSqfStatements(inner); // splits at ','
+        std::string a, b, c;
+        if (parts.size() != 3 || !UnwrapBraces(parts[0], a) || !UnwrapBraces(parts[1], b) ||
+            !UnwrapBraces(parts[2], c))
+            return false;
+        out.init = a;
+        out.condition = b;
+        out.step = c;
+        return TakeWord(s, pos, "do") && TakeBracketed(s, pos, '{', '}', out.body) && AtEnd(s, pos);
+    }
+    // for "_v" from a to b [step s] do {body}
+    while (pos < s.size() && isspace(static_cast<unsigned char>(s[pos])))
+        pos++;
+    if (pos >= s.size() || s[pos] != '"')
+        return false;
+    const size_t close = s.find('"', pos + 1);
+    if (close == std::string::npos)
+        return false;
+    const std::string var = s.substr(pos + 1, close - pos - 1);
+    pos = close + 1;
+    if (!TakeWord(s, pos, "from"))
+        return false;
+    const auto until = [&s](size_t from, const char* word) -> size_t
+    {
+        for (size_t i = from; i < s.size(); i++)
+        {
+            size_t p = i;
+            if ((i == 0 || isspace(static_cast<unsigned char>(s[i - 1]))) && TakeWord(s, p, word))
+                return i;
+        }
+        return std::string::npos;
+    };
+    const size_t toAt = until(pos, "to");
+    const size_t doAt = until(pos, "do");
+    if (toAt == std::string::npos || doAt == std::string::npos || doAt < toAt)
+        return false;
+    const std::string from = s.substr(pos, toAt - pos);
+    size_t stepAt = until(toAt, "step");
+    if (stepAt != std::string::npos && stepAt > doAt)
+        stepAt = std::string::npos;
+    size_t p = toAt + 2;
+    const std::string to = s.substr(p, (stepAt != std::string::npos ? stepAt : doAt) - p);
+    std::string stepValue = "1";
+    if (stepAt != std::string::npos)
+        stepValue = s.substr(stepAt + 4, doAt - stepAt - 4);
+    pos = doAt + 2;
+    if (!TakeBracketed(s, pos, '{', '}', out.body) || !AtEnd(s, pos))
+        return false;
+    out.init = var + " = (" + from + ")";
+    out.condition = "if ((" + stepValue + ") >= 0) then {" + var + " <= (" + to + ")} else {" + var + " >= (" + to + ")}";
+    out.step = var + " = " + var + " + (" + stepValue + ")";
+    return true;
+}
 } // namespace
 
 Script* Script::FindByHandle(int handle)
@@ -794,10 +970,36 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
         script->_lines[i].statement = statement;
     };
 
-    for (const std::string& statement : SplitSqfStatements(StripSqfComments(code.Data())))
+    // Scheduled code may suspend anywhere: a sleep/waitUntil inside while, if or for is
+    // compiled into script lines with labels and gotos (the same machinery SQS uses), so
+    // the loop yields to the frame instead of spinning unscheduled.
+    int labelCount = 0;
+    const auto newLabel = [&labelCount]() { return "__a1l" + std::to_string(labelCount++); };
+    const auto placeLabel = [script](const std::string& name)
+    {
+        const int i = script->_labels.Add();
+        script->_labels[i].name = RString(name.c_str());
+        script->_labels[i].line = script->_lines.Size();
+    };
+    const auto addCondLine = [script](const std::string& condition, const std::string& statement)
+    {
+        const int i = script->_lines.Add();
+        script->_lines[i].condition = RString(condition.c_str());
+        script->_lines[i].statement = RString(statement.c_str());
+    };
+    const auto addGoto = [&addCondLine](const std::string& label) { addCondLine("", "goto \"" + label + "\""); };
+
+    std::function<void(const std::string&)> emit;
+    const auto emitBlock = [&emit](const std::string& code)
+    {
+        for (const std::string& statement : SplitSqfStatements(code))
+            emit(statement);
+    };
+    emit = [&](const std::string& statement)
     {
         std::string rest;
         std::string body;
+        SqfControl control;
         if (StartsWithWord(statement, "waitUntil", rest) && UnwrapBraces(rest, body))
         {
             // A multi-statement condition evaluates as code; its value is the last statement's.
@@ -811,11 +1013,47 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
             addLine(empty, empty, RString(wait.c_str()));
             addLine(empty, RString("__waituntil"), empty);
         }
+        else if (HasSuspension(statement) && ParseSqfControl(statement, control))
+        {
+            const std::string top = newLabel();
+            const std::string next = newLabel();
+            switch (control.kind)
+            {
+                case SqfControl::While:
+                    placeLabel(top);
+                    addCondLine("!(" + control.condition + ")", "goto \"" + next + "\"");
+                    emitBlock(control.body);
+                    addGoto(top);
+                    placeLabel(next);
+                    break;
+                case SqfControl::If:
+                {
+                    const std::string otherwise = newLabel();
+                    addCondLine("!(" + control.condition + ")", "goto \"" + otherwise + "\"");
+                    emitBlock(control.body);
+                    addGoto(next);
+                    placeLabel(otherwise);
+                    emitBlock(control.elseBody);
+                    placeLabel(next);
+                    break;
+                }
+                case SqfControl::For:
+                    addCondLine("", control.init);
+                    placeLabel(top);
+                    addCondLine("!(" + control.condition + ")", "goto \"" + next + "\"");
+                    emitBlock(control.body);
+                    addCondLine("", control.step);
+                    addGoto(top);
+                    placeLabel(next);
+                    break;
+            }
+        }
         else
         {
             addLine(empty, empty, RString(statement.c_str()));
         }
-    }
+    };
+    emitBlock(StripSqfComments(code.Data()));
     return script;
 }
 
