@@ -1698,6 +1698,38 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     desc.width = U32(_w > 0 ? _w : 1);
     desc.height = U32(_h > 0 ? _h : 1);
 
+    // RFG-PBR: native Reforger materials shade with their authored roughness, metalness and AO by
+    // default (the previews below, each read across C++ and Rust as "=1 enables"). Once their
+    // specular was energy-normalised (an F0 of 0.22 on a bare N.H^n lobe had washed every rough
+    // roof to cream) the whole stack rendered Everon's village correctly in capture, so every
+    // switch the user has not set is set to 1 here, before anything reads it. WGR_REFORGER_PBR=0
+    // leaves them all unset (the previous default path); an individual switch set to 0 still wins.
+    {
+        const char* master = std::getenv("WGR_REFORGER_PBR");
+        if (!(master && master[0] == '0'))
+        {
+            static const char* const previews[] = {
+                "WGR_REFORGER_PBR_PREVIEW",           "WGR_REFORGER_SRGB_PREVIEW",
+                "WGR_REFORGER_LAYER_ORDER_PREVIEW",   "WGR_REFORGER_TANGENT_PREVIEW",
+                "WGR_REFORGER_NORMAL_PREVIEW",        "WGR_REFORGER_GLOBAL_OVERLAY_PREVIEW",
+                "WGR_REFORGER_AO_PREVIEW",            "WGR_REFORGER_MASK_SCALE_PREVIEW"};
+            int set = 0;
+            for (const char* name : previews)
+            {
+                if (std::getenv(name))
+                    continue;
+#ifdef _WIN32
+                _putenv_s(name, "1");
+                SetEnvironmentVariableA(name, "1");
+#else
+                setenv(name, "1", 0);
+#endif
+                ++set;
+            }
+            LOG_INFO(Graphics, "Wgpu: native Reforger PBR on by default ({} preview switch(es) defaulted to 1; "
+                               "WGR_REFORGER_PBR=0 turns the stack off)", set);
+        }
+    }
     const WgrLogCallbacks log{&WgrLogThunk, nullptr};
     LOG_INFO(Graphics, "Wgpu: creating renderer {} ({}x{}), crate v{}, build {}", GetRendererName().Data(), _w, _h,
              wgr_version(), wgr_build_id());
