@@ -192,6 +192,15 @@ struct ConvertOptions
     //! 3,216-triangle LOD 0 out to ~420 m and then fell straight to the 6-triangle card, so
     //! levels 1-3 were never drawn and a forest view was ~13 M triangles at any LOD budget.
     float lodCoverageScale = 0.0f;
+    //! RFG-111: with lodCoverageScale, place each level by Enfusion's OWN switching rule instead of
+    //! the `.xob` thresholds. Bohemia's LOD page says the system keeps a constant triangle/pixel
+    //! ratio; Workbench's model viewer (Runtime Stats: Cur. LOD, zoomed out step by step on
+    //! T_Carpinus_betulus_0) measured it -- each LOD leaves when its triangle count reaches ~0.8
+    //! per pixel of the projected bounding sphere (0.77 / 1.06 / 0.79 / 0.76 over four switches).
+    //! The thresholds are a template: every hornbeam from the 386-triangle sapling to the
+    //! 2,456-triangle adult carries 0.5 / 0.15 / 0.02 / 0.005 / 0.001. The value is K, triangles
+    //! per pixel of sphere area at 1080 lines; 0 keeps the RFG-103 threshold reading.
+    float lodTrianglesPerPixel = 0.0f;
     TextureOptions textures;
 };
 
@@ -528,9 +537,31 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                             dz = header.bboxMax.z - header.bboxMin.z;
                 diameter = std::sqrt(dx * dx + dy * dy + dz * dz);
             }
-            const float coverage = VisualLodResolutionFromCoverage(
-                rank, options.resolution, options.lodCoverageScale, diameter, header.lods[lodOrder[0]].threshold,
-                rank > 0 ? header.lods[lodOrder[rank - 1]].threshold : 0.0f);
+            float finest = header.lods[lodOrder[0]].threshold;
+            float previous = rank > 0 ? header.lods[lodOrder[rank - 1]].threshold : 0.0f;
+            if (options.lodTrianglesPerPixel > 0.0f)
+            {
+                // RFG-111: the coverage (sphere diameter / 1080 lines) at which a level of T
+                // triangles reaches K triangles per pixel of sphere area: pi (c*1080/2)^2 = T/K.
+                // The diameter is the bounding-box diagonal, the size the measurement used.
+                const float dx = header.bboxMax.x - header.bboxMin.x, dy = header.bboxMax.y - header.bboxMin.y,
+                            dz = header.bboxMax.z - header.bboxMin.z;
+                const float diagonal = std::sqrt(dx * dx + dy * dy + dz * dz);
+                if (diagonal > 0.0f && std::isfinite(diagonal))
+                    diameter = diagonal;
+                auto coverageOf = [&](size_t level)
+                {
+                    uint64_t tris = 0;
+                    for (const XobPartDesc& part : header.lods[lodOrder[level]].parts)
+                        tris += part.triangleCount;
+                    const double area = static_cast<double>(std::max<uint64_t>(tris, 1)) / options.lodTrianglesPerPixel;
+                    return static_cast<float>(2.0 * std::sqrt(area / 3.14159265358979) / 1080.0);
+                };
+                finest = coverageOf(0);
+                previous = rank > 0 ? coverageOf(rank - 1) : 0.0f;
+            }
+            const float coverage = VisualLodResolutionFromCoverage(rank, options.resolution, options.lodCoverageScale,
+                                                                   diameter, finest, previous);
             // Only when it keeps the ladder ascending; otherwise the ratio value stands and the
             // guards below place it.
             if (coverage > 0.0f && std::isfinite(coverage) &&

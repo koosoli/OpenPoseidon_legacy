@@ -1735,6 +1735,10 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
     {
         const char* env = std::getenv("POSEIDON_XOB_LOD_COVERAGE");
         options.lodCoverageScale = (env && env[0] == '0' && env[1] == '\0') ? 0.0f : 10.0f / 1080.0f;
+        // RFG-111: Enfusion's measured triangle/pixel rule in place of the template thresholds.
+        // POSEIDON_XOB_LOD_TPP overrides K (0 = the RFG-103 threshold reading).
+        const char* tpp = std::getenv("POSEIDON_XOB_LOD_TPP");
+        options.lodTrianglesPerPixel = tpp ? static_cast<float>(std::atof(tpp)) : 0.8f;
     }
     // RFG-072: BOTH UV sets. A `MatPBRMulti` paints its GLOBAL_MASK in the `.xob`'s second
     // stream (`UVSrcGlobalMaps "UV set 2"`), and without this block the mask sampled the
