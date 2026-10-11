@@ -169,8 +169,8 @@ float S(float v)
 }
 
 const float kLeftWidth = 264.0f, kRightWidth = 336.0f, kMargin = 10.0f, kStatusHeight = 30.0f;
-// the highlight of the active tool and primary buttons: ImGui dark's own blue (its check marks and sliders)
-const ImVec4 kAccent(0.26f, 0.59f, 0.98f, 1.0f), kAccentHover(0.36f, 0.66f, 1.0f, 1.0f);
+// the highlight of the active tool and primary buttons: the Open Poseidon logo's azure, and its cyan highlight
+const ImVec4 kAccent(0.118f, 0.608f, 1.0f, 1.0f), kAccentHover(0.271f, 0.769f, 1.0f, 1.0f);
 
 // a remark in the dim colour, wrapped to the width there is
 void Hint(const char* text)
@@ -1708,42 +1708,75 @@ void App::HandleTool(float dt)
 
 void SetupTheme()
 {
-    // Open Poseidon's tool theme, as PoseidonStudio sets it (StudioApp::setupTheme): ImGui's dark style with neutral
-    // grey panels, 2 px corners and compact spacing. The editor came from Open Malprave with its own rounded,
-    // blue-tinted theme; it is skinned to match the other tools here.
+    // The Open Poseidon Engine look, from its banner (owner, 2026-10-11): deep navy night sea, steel-blue panels, the
+    // logo's azure and cyan as the accent, silver-white lettering; squared 3 px corners with a thin azure outline,
+    // like the banner's bracketed captions. Compact spacing as the other tools have (PoseidonStudio).
     ImGuiStyle& s = ImGui::GetStyle();
     ImGui::StyleColorsDark();
     ImVec4* c = s.Colors;
-    c[ImGuiCol_WindowBg] = ImVec4(0.10f, 0.10f, 0.11f, 1.0f);
-    c[ImGuiCol_ChildBg] = ImVec4(0.12f, 0.12f, 0.13f, 1.0f);
-    c[ImGuiCol_PopupBg] = ImVec4(0.15f, 0.15f, 0.16f, 1.0f);
-    c[ImGuiCol_FrameBg] = ImVec4(0.18f, 0.18f, 0.20f, 1.0f);
-    c[ImGuiCol_FrameBgHovered] = ImVec4(0.25f, 0.25f, 0.28f, 1.0f);
-    c[ImGuiCol_FrameBgActive] = ImVec4(0.30f, 0.30f, 0.33f, 1.0f);
-    c[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.08f, 0.09f, 1.0f);
-    c[ImGuiCol_TitleBgActive] = ImVec4(0.12f, 0.12f, 0.14f, 1.0f);
-    c[ImGuiCol_MenuBarBg] = ImVec4(0.08f, 0.08f, 0.09f, 1.0f);
-    c[ImGuiCol_Header] = ImVec4(0.20f, 0.20f, 0.22f, 1.0f);
-    c[ImGuiCol_HeaderHovered] = ImVec4(0.28f, 0.28f, 0.30f, 1.0f);
-    c[ImGuiCol_HeaderActive] = ImVec4(0.35f, 0.35f, 0.38f, 1.0f);
-    c[ImGuiCol_Button] = ImVec4(0.22f, 0.22f, 0.25f, 1.0f);
-    c[ImGuiCol_ButtonHovered] = ImVec4(0.30f, 0.30f, 0.35f, 1.0f);
-    c[ImGuiCol_ButtonActive] = ImVec4(0.38f, 0.38f, 0.42f, 1.0f);
-    c[ImGuiCol_Tab] = ImVec4(0.15f, 0.15f, 0.17f, 1.0f);
-    c[ImGuiCol_TabHovered] = ImVec4(0.30f, 0.30f, 0.35f, 1.0f);
-    c[ImGuiCol_TabSelected] = ImVec4(0.22f, 0.22f, 0.25f, 1.0f);
-    c[ImGuiCol_Separator] = ImVec4(0.25f, 0.25f, 0.28f, 1.0f);
-    // the editor's own panels float over the island view: a dim behind its dialogs, as before
-    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.55f);
-    s.WindowRounding = 2.0f;
-    s.ChildRounding = 2.0f;
-    s.FrameRounding = 2.0f;
-    s.PopupRounding = 2.0f;
-    s.GrabRounding = 2.0f;
-    s.TabRounding = 2.0f;
+    const ImVec4 navy(0.027f, 0.063f, 0.125f, 1.0f);    // #07101F  the night sea
+    const ImVec4 panel(0.043f, 0.098f, 0.188f, 0.97f);  // #0B1930  panels over the island view
+    const ImVec4 raised(0.071f, 0.153f, 0.282f, 1.0f);  // #122748  fields and buttons
+    const ImVec4 hover(0.102f, 0.227f, 0.412f, 1.0f);   // #1A3A69
+    const ImVec4 line(0.118f, 0.290f, 0.502f, 1.0f);    // #1E4A80  outlines and separators
+    const ImVec4 azure = kAccent;                        // #1E9BFF  the logo's wave
+    const ImVec4 cyan = kAccentHover;                    // #45C4FF  its highlights
+    c[ImGuiCol_Text] = ImVec4(0.906f, 0.941f, 0.980f, 1.0f);          // #E7F0FA silver-white
+    c[ImGuiCol_TextDisabled] = ImVec4(0.490f, 0.596f, 0.729f, 1.0f);  // #7D98BA
+    c[ImGuiCol_WindowBg] = panel;
+    c[ImGuiCol_ChildBg] = ImVec4(0.035f, 0.082f, 0.161f, 1.0f);
+    c[ImGuiCol_PopupBg] = ImVec4(0.043f, 0.098f, 0.188f, 0.99f);
+    c[ImGuiCol_MenuBarBg] = navy;
+    c[ImGuiCol_TitleBg] = navy;
+    c[ImGuiCol_TitleBgActive] = ImVec4(0.055f, 0.125f, 0.235f, 1.0f);
+    c[ImGuiCol_TitleBgCollapsed] = navy;
+    c[ImGuiCol_Border] = line;
+    c[ImGuiCol_Separator] = line;
+    c[ImGuiCol_SeparatorHovered] = azure;
+    c[ImGuiCol_SeparatorActive] = cyan;
+    c[ImGuiCol_FrameBg] = raised;
+    c[ImGuiCol_FrameBgHovered] = hover;
+    c[ImGuiCol_FrameBgActive] = ImVec4(0.125f, 0.290f, 0.522f, 1.0f);
+    c[ImGuiCol_Button] = raised;
+    c[ImGuiCol_ButtonHovered] = hover;
+    c[ImGuiCol_ButtonActive] = azure;
+    c[ImGuiCol_Header] = ImVec4(0.086f, 0.212f, 0.392f, 1.0f);
+    c[ImGuiCol_HeaderHovered] = ImVec4(0.110f, 0.310f, 0.580f, 1.0f);
+    c[ImGuiCol_HeaderActive] = azure;
+    c[ImGuiCol_Tab] = ImVec4(0.055f, 0.125f, 0.235f, 1.0f);
+    c[ImGuiCol_TabHovered] = ImVec4(0.110f, 0.310f, 0.580f, 1.0f);
+    c[ImGuiCol_TabSelected] = ImVec4(0.086f, 0.243f, 0.455f, 1.0f);
+    c[ImGuiCol_TabSelectedOverline] = cyan;
+    c[ImGuiCol_CheckMark] = cyan;
+    c[ImGuiCol_SliderGrab] = azure;
+    c[ImGuiCol_SliderGrabActive] = cyan;
+    c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
+    c[ImGuiCol_ScrollbarGrab] = ImVec4(0.102f, 0.227f, 0.412f, 1.0f);
+    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.125f, 0.290f, 0.522f, 1.0f);
+    c[ImGuiCol_ScrollbarGrabActive] = azure;
+    c[ImGuiCol_ResizeGrip] = ImVec4(azure.x, azure.y, azure.z, 0.25f);
+    c[ImGuiCol_ResizeGripHovered] = ImVec4(azure.x, azure.y, azure.z, 0.60f);
+    c[ImGuiCol_ResizeGripActive] = cyan;
+    c[ImGuiCol_TextSelectedBg] = ImVec4(azure.x, azure.y, azure.z, 0.40f);
+    c[ImGuiCol_NavCursor] = cyan;
+    c[ImGuiCol_PlotHistogram] = azure;
+    c[ImGuiCol_PlotLines] = cyan;
+    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.0f, 0.02f, 0.06f, 0.60f);
+    s.WindowRounding = 3.0f;
+    s.ChildRounding = 3.0f;
+    s.FrameRounding = 3.0f;
+    s.PopupRounding = 3.0f;
+    s.GrabRounding = 3.0f;
+    s.TabRounding = 3.0f;
+    s.ScrollbarRounding = 3.0f;
+    s.WindowBorderSize = 1.0f;
+    s.PopupBorderSize = 1.0f;
+    s.FrameBorderSize = 0.0f;
     s.WindowPadding = ImVec2(8, 8);
-    s.FramePadding = ImVec2(6, 4);
-    s.ItemSpacing = ImVec2(8, 4);
+    s.FramePadding = ImVec2(7, 4);
+    s.ItemSpacing = ImVec2(8, 5);
+    s.ScrollbarSize = 12.0f;
+    s.SeparatorTextBorderSize = 1.0f;
     s.SeparatorTextAlign = ImVec2(0.0f, 0.5f);
     s.DisabledAlpha = 0.45f;
     // everything above is in pixels at 96 dpi
@@ -2564,6 +2597,7 @@ void App::Dialogs()
     }
     if (BeginDialog("About"))
     {
+        ImGui::TextColored(kAccentHover, "OPEN POSEIDON ENGINE");
         if (g_bold)
             ImGui::PushFont(g_bold, 0.0f);
         ImGui::TextUnformatted("Island Editor");
@@ -2825,6 +2859,7 @@ void App::Interface(int width, int height)
         ImGui::SetNextWindowPos(ImVec2(width * 0.5f, height * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(S(28), S(24)));
         ImGui::Begin("welcome", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove);
+        ImGui::TextColored(kAccentHover, "OPEN POSEIDON ENGINE"); // the banner's caption, in its cyan
         if (g_bold)
             ImGui::PushFont(g_bold, S(24) / g_ui);
         ImGui::TextUnformatted("Island Editor");
@@ -2895,7 +2930,7 @@ void App::Frame(float dt, int width, int height)
         }
     }
     device->Clear(0, nullptr, GXCLEAR_TARGET | GXCLEAR_ZBUFFER | GXCLEAR_STENCIL,
-                  is.size > 0 ? GX_COLOR_XRGB(120, 160, 205) : GX_COLOR_XRGB(30, 33, 39), 1.0f, 0); // sky, or the empty desk
+                  is.size > 0 ? GX_COLOR_XRGB(120, 160, 205) : GX_COLOR_XRGB(7, 16, 32), 1.0f, 0); // sky, or the empty desk (Open Poseidon navy)
     renderer.Draw(cam, view, bv, width, height, tool == Tool::Objects ? selected : -1, &overlay);
 }
 
