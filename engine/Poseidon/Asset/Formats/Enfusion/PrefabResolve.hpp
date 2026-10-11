@@ -156,6 +156,46 @@ inline std::string ResolvePrefabMaterial(const EnfusionMount& mount, const std::
     return {};
 }
 
+//! RFG-114: the prefab's `placement` mode (`slopelandcontact`, `none`, ...), lowercase, from the
+//! first file down the inheritance chain that declares one at the ENTITY's top level (one
+//! leading space -- nested component blocks are indented further). Empty when none does.
+//! 205 of Reforger's wall/fence prefabs declare `slopelandcontact`, 8 `none`; a fence run in
+//! Eden.ent stores pitch 0 / roll 0 and stepped heights, so the tilt is the runtime's job.
+inline std::string ResolvePrefabPlacement(const EnfusionMount& mount, const std::string& etPath, int depthLimit = 8)
+{
+    std::string current = etPath;
+    for (int depth = 0; depth <= depthLimit; ++depth)
+    {
+        std::vector<uint8_t> blob;
+        if (!mount.Read(current, blob))
+            return {};
+        const char* data = reinterpret_cast<const char*>(blob.data());
+        const size_t size = blob.size();
+        size_t at = 0;
+        while (at < size)
+        {
+            size_t lineEnd = at;
+            while (lineEnd < size && data[lineEnd] != 0x0A)
+                ++lineEnd;
+            static constexpr char key[] = " placement ";
+            const size_t keyLen = sizeof(key) - 1;
+            if (lineEnd - at > keyLen && std::memcmp(data + at, key, keyLen) == 0)
+            {
+                size_t b = at + keyLen, e = b;
+                while (e < lineEnd && data[e] != ' ' && data[e] != 0x0D && data[e] != 0x09)
+                    ++e;
+                return PrefabDetail::LowerCopy(std::string(data + b, e - b));
+            }
+            at = lineEnd + 1;
+        }
+        const auto parsed = Poseidon::Asset::Material::ParseEmat(std::string_view(data, size));
+        if (parsed.parentPath.empty())
+            return {};
+        current = parsed.parentPath;
+    }
+    return {};
+}
+
 struct PrefabResolution
 {
     std::string xobPath;

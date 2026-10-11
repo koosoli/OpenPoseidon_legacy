@@ -1040,6 +1040,9 @@ struct ResolvedPlacement
     float pitchDeg = 0.0f;
     float rollDeg = 0.0f;
     bool terrainRelative = false;
+    //! RFG-114: the prefab says `placement slopelandcontact` and the file stores no tilt: the
+    //! object leans to the terrain at load, as Enfusion does (see SlopeAlignedOrientation).
+    bool slopeAlign = false;
     uint32_t mesh = 0; //!< index into the mesh list
     uint32_t attachSet = kNoAttachSet; //!< RFG-064: index into the attachment sets, or none
 };
@@ -1223,6 +1226,7 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
     // One resolution per DISTINCT prefab, not per placement: Everon's 1.23 M
     // placements come from a few thousand prefabs, and the chain walk reads files.
     std::unordered_map<std::string, std::string> prefabToMesh;
+    std::unordered_map<std::string, bool> prefabSlopeAlign; // RFG-114, by prefab GUID
     std::unordered_map<std::string, uint32_t> meshIndex;
     std::vector<size_t> meshCounts;
     // RFG-064: the attachment side keeps its OWN mesh list. Sharing the main one
@@ -1394,6 +1398,27 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         item.yawDeg = -placement.angles[1];
         item.pitchDeg = -placement.angles[0];
         item.rollDeg = -placement.angles[2];
+        // RFG-114: Enfusion's `placement slopelandcontact` tilts the object to the ground at load;
+        // the world file then carries no tilt (fence runs: pitch 0 / roll 0, stepped heights).
+        // Only when the file stores none -- an authored tilt is the authored answer.
+        if (std::fabs(placement.angles[0]) < 0.01f && std::fabs(placement.angles[2]) < 0.01f)
+        {
+            static const bool slopeOn = []
+            {
+                const char* env = std::getenv("POSEIDON_SLOPE_PLACEMENT");
+                return !(env && env[0] == '0');
+            }();
+            auto slope = prefabSlopeAlign.find(placement.prefabGuid);
+            if (slope == prefabSlopeAlign.end())
+            {
+                bool align = false;
+                const auto guidHit = byGuid.find(placement.prefabGuid);
+                if (slopeOn && guidHit != byGuid.end())
+                    align = Enf::ResolvePrefabPlacement(mount, guidHit->second) == "slopelandcontact";
+                slope = prefabSlopeAlign.emplace(placement.prefabGuid, align).first;
+            }
+            item.slopeAlign = slope->second;
+        }
         {
             // RFG-100 diagnosis: every church_01* placement as resolved (doors stand in the nave).
             static int churchDiag = 0;
@@ -1402,6 +1427,21 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
                          cached->second, placement.className, placement.position[0], placement.position[1], placement.position[2],
                          placement.angles[0], placement.angles[1], placement.angles[2], placement.scale, placement.hasFlags ? 1 : 0,
                          placement.points.size());
+        }
+        {
+            // POSEIDON_PLACEMENT_PROBE=<substring>: the first 40 matching placements as stored
+            // (angles, flags, Y) -- what a "this object sits wrong" report needs first.
+            static const char* probe = std::getenv("POSEIDON_PLACEMENT_PROBE");
+            static int probeRows = 0;
+            if (probe && *probe && probeRows < 40 && LowerCopy(cached->second).find(LowerCopy(probe)) != std::string::npos)
+            {
+                ++probeRows;
+                LOG_INFO(World, "Placement probe: '{}' class='{}' pos=[{:.2f} {:.2f} {:.2f}] angles=[{:.2f} {:.2f} {:.2f}] "
+                                "scale={:.2f} flags={}",
+                         cached->second, placement.className, placement.position[0], placement.position[1],
+                         placement.position[2], placement.angles[0], placement.angles[1], placement.angles[2],
+                         placement.scale, placement.hasFlags ? 1 : 0);
+            }
         }
         item.scale = (std::isfinite(placement.scale) && placement.scale > 0.0f) ? placement.scale : 1.0f;
         // The Y rule, measured over Everon's 1.23 M placements: with a Flags block
@@ -2526,6 +2566,22 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                 _modernObjectPlacements.push_back(std::move(placement));
                 _modernObjectCells[static_cast<size_t>(cz) * _landRange + cx].push_back(index);
             };
+            // RFG-114: `placement slopelandcontact` -- keep the authored heading, stand the object
+            // on the ground's normal (central differences over 1 m), so a fence run follows the
+            // slope instead of stepping down it in level pieces.
+            size_t slopeAligned = 0;
+            const auto slopeFrame = [this, &slopeAligned](const Matrix3& yawed, float x, float z)
+            {
+                const float d = 1.0f;
+                const float hx = SurfaceY(x + d, z) - SurfaceY(x - d, z);
+                const float hz = SurfaceY(x, z + d) - SurfaceY(x, z - d);
+                Vector3 normal(-hx / (2.0f * d), 1.0f, -hz / (2.0f * d));
+                normal.Normalize();
+                Matrix3 framed;
+                framed.SetUpAndDirection(normal, yawed.Direction());
+                ++slopeAligned;
+                return framed;
+            };
             for (const ResolvedPlacement& item : placed)
             {
                 if (streamNative)
@@ -2548,6 +2604,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                         orientation = orientation * Matrix3(MRotationX, item.pitchDeg * 0.01745329252f);
                     if (std::fabs(item.rollDeg) > 0.01f)
                         orientation = orientation * Matrix3(MRotationZ, item.rollDeg * 0.01745329252f);
+                    if (item.slopeAlign)
+                        orientation = slopeFrame(orientation, item.position[0], item.position[2]);
                     if (std::fabs(item.scale - 1.0f) > 1e-3f)
                         orientation = orientation * Matrix3(MScale, item.scale);
                     const Vector3 position(item.position[0], y, item.position[2]);
@@ -2640,6 +2698,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                         orientation = orientation * Matrix3(MRotationX, item.pitchDeg * 0.01745329252f);
                     if (std::fabs(item.rollDeg) > 0.01f)
                         orientation = orientation * Matrix3(MRotationZ, item.rollDeg * 0.01745329252f);
+                    if (item.slopeAlign)
+                        orientation = slopeFrame(orientation, item.position[0], item.position[2]);
                     if (std::fabs(item.scale - 1.0f) > 1e-3f)
                         orientation = orientation * Matrix3(MScale, item.scale);
                     placedObject->SetOrientation(orientation);
@@ -2773,6 +2833,9 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                      firstBuriedStructure.empty() ? (firstBuried.empty() ? "" : ("; first: " + firstBuried))
                                                   : ("; first structure: " + firstBuriedStructure),
                      firstBuildFailure.empty() ? "" : ("; first build failure: " + firstBuildFailure));
+            LOG_INFO(World, "Enfusion native load: {} placements stood on the terrain normal (prefab placement "
+                            "slopelandcontact, no stored tilt; POSEIDON_SLOPE_PLACEMENT=0 = off)",
+                     slopeAligned);
 
             // RFG-064: the one line that says whether the houses got their doors
             // back. Everything else about this feature is invisible from the air --
