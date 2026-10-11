@@ -13,6 +13,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/XobConvert.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobModel.hpp>
 
 #include <algorithm>
@@ -628,4 +629,31 @@ TEST_CASE("XOB: byte accounting refuses a file that does not close", "[asset][en
     const auto wrongForm = ReadXobHeader(notXob.data(), notXob.size());
     REQUIRE_FALSE(wrongForm.valid());
     REQUIRE(wrongForm.error.find("XOB9") != std::string::npos);
+}
+
+// RFG-103: an authored threshold is the screen-height coverage at which the NEXT level takes
+// over. A 22 m spruce authored 0.5 / 0.15 / 0.02 / 0.005 / 0.001 must reach level 1 at
+// coverage 0.5, level 2 at 0.15 and so on -- not hold level 0 until the ratio ladder's
+// 3.3 x base, which kept it at full detail to ~420 m.
+TEST_CASE("XOB LOD resolution follows authored screen coverage", "[xob][lod]")
+{
+    using Poseidon::Asset::Formats::Enfusion::VisualLodResolutionFromCoverage;
+    const float scale = 10.0f / 1080.0f;
+    const float thresholds[] = {0.5f, 0.15f, 0.02f, 0.005f, 0.001f};
+    float previous = -1.0f;
+    for (size_t rank = 0; rank < 5; ++rank)
+    {
+        const float r = VisualLodResolutionFromCoverage(rank, 1.0f, scale, 22.0f, thresholds[0],
+                                                        rank ? thresholds[rank - 1] : 0.0f);
+        REQUIRE(r > previous); // MLOD's strictly ascending contract
+        previous = r;
+    }
+    REQUIRE(VisualLodResolutionFromCoverage(1, 1.0f, scale, 22.0f, 0.5f, 0.5f) == Approx(scale * 22.0f / 0.5f));
+    REQUIRE(VisualLodResolutionFromCoverage(3, 1.0f, scale, 22.0f, 0.5f, 0.02f) == Approx(scale * 22.0f / 0.02f));
+    // Level 0 keeps the base anchor unless that would sit at or above level 1.
+    REQUIRE(VisualLodResolutionFromCoverage(0, 1.0f, scale, 220.0f, 0.5f, 0.0f) == Approx(1.0f));
+    REQUIRE(VisualLodResolutionFromCoverage(0, 1.0f, scale, 22.0f, 0.5f, 0.0f) < scale * 22.0f / 0.5f);
+    // Off or unusable inputs return 0, so the caller keeps the ratio ladder.
+    REQUIRE(VisualLodResolutionFromCoverage(1, 1.0f, 0.0f, 22.0f, 0.5f, 0.5f) == 0.0f);
+    REQUIRE(VisualLodResolutionFromCoverage(1, 1.0f, scale, 0.0f, 0.5f, 0.5f) == 0.0f);
 }

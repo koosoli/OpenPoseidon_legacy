@@ -4,11 +4,13 @@ param(
  [ValidateRange(1,16)][int]$MotionSamples=1,
  [ValidateRange(0.25,5)][double]$MotionInterval=0.5,
  [ValidateRange(30,600)][int]$WarmupSeconds=90,
- [ValidateSet('Village','Pub','Coast','Forest','ForestHigh','Church','Reference')][string]$Pose='Village',
+ [ValidateSet('Village','Pub','Coast','Forest','ForestHigh','Church','Reference','Durras')][string]$Pose='Village',
  [ValidateRange(-1,23.999)][double]$WorldHour=-1,
  [ValidateRange(0,1)][int]$NativeTextureKeys=1,
  [ValidateRange(-1,1)][int]$LazyBcrTint=-1,
  [hashtable]$Overrides=@{},
+ # Run this build (with its wgpu_renderer.dll) instead of the game folder's deployed exe.
+ [string]$Exe='',
  [string]$ReforgerAddons='C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons'
 )
 $ErrorActionPreference='Stop'
@@ -40,11 +42,13 @@ $camera=switch ($Pose) {
  'ForestHigh' {@(4697.60,3998.02,450.0,220.6,-25.0)}
  'Church' {@(4680.0,6810.0,240.0,28.8,-16.0)}
  'Reference' {@(4665.50,7132.80,192.09,123.7,-11.8)}
+ # Arma Reforger's own Game Master start pose 7 (GM_Eden.ent), where the original runs ~108 fps.
+ 'Durras' {@(8595.2,3069.61,234.15,145.015,-11.963)}
 }
 & "$PSScriptRoot/farfield-bench.ps1" -Label "$Pose-$Label" -Mission 'tests/perf/missions/perf_field.eden' `
  -World $ReforgerAddons -Freefly $camera -WorldHour $WorldHour -Out $out -Env $settings -Repeats $Repeats `
  -Width 1920 -Height 1080 -Windowed -WarmupSeconds $WarmupSeconds -TimeoutSeconds ($WarmupSeconds+210) -RequireAll `
- -MotionSamples $MotionSamples -MotionInterval $MotionInterval
+ -MotionSamples $MotionSamples -MotionInterval $MotionInterval -Exe $Exe
 if ($LASTEXITCODE -ne 0) {throw 'Native capture failed; inspect per-run lifecycle metadata'}
 for ($repeat=1; $repeat -le $Repeats; $repeat++) {
  $stem=Join-Path (Join-Path $out "$Pose-$Label") ('run-{0:D2}' -f $repeat)

@@ -1591,6 +1591,17 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
     // 1..5 brings that impostor in to a few tens of metres, which reads as a forest of
     // flat cards.
     options.lodFromThreshold = true;
+    // RFG-103: and in the threshold's own unit, screen-height coverage. The engine selects a
+    // level once distance * lodInvWidth * tan(halfFovX) passes its resolution; with
+    // lodInvWidth = lodCoef * 2 / width that reaches coverage c of a diameter-D model at
+    // resolution lodCoef * D / (height * c). Calibrated at the reference camera the bench
+    // and default config use (lodCoef 10, 1080 lines); other widths and lodCoef settings then
+    // scale these models exactly as they scale the engine's own. POSEIDON_XOB_LOD_COVERAGE=0
+    // restores the RFG-022 ratio ladder for the A/B.
+    {
+        const char* env = std::getenv("POSEIDON_XOB_LOD_COVERAGE");
+        options.lodCoverageScale = (env && env[0] == '0' && env[1] == '\0') ? 0.0f : 10.0f / 1080.0f;
+    }
     // RFG-072: BOTH UV sets. A `MatPBRMulti` paints its GLOBAL_MASK in the `.xob`'s second
     // stream (`UVSrcGlobalMaps "UV set 2"`), and without this block the mask sampled the
     // first -- the metre-scale tiling unwrap, u[-16..32] on Church_01's walls -- and

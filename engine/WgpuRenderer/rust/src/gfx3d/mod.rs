@@ -476,6 +476,17 @@ fn is_power_of_ten(n: u64) -> bool {
     v == 1
 }
 
+// WGR_LOD_CENSUS=1: log the main view's heaviest models every 600 frames (diagnostic only).
+fn lod_census_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_LOD_CENSUS").as_deref() == Ok("1"))
+}
+fn lod_census_names() -> &'static std::sync::Mutex<std::collections::HashMap<u32, String>> {
+    static NAMES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u32, String>>> =
+        std::sync::OnceLock::new();
+    NAMES.get_or_init(Default::default)
+}
+
 pub(crate) fn env_f32(name: &'static str, default: f32) -> f32 {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
@@ -9633,6 +9644,11 @@ impl Gfx3d {
             self.queued_log.push(line);
         }
         self.bake_model_sky_visibility(device, queue, model, lods, sections, name);
+        if lod_census_enabled() {
+            if let Ok(mut names) = lod_census_names().lock() {
+                names.insert(model, name.unwrap_or("(unnamed)").to_owned());
+            }
+        }
         model
     }
 
@@ -10517,6 +10533,21 @@ impl Gfx3d {
     ) {
         if !self.gpu_driven_enabled {
             return;
+        }
+        if lod_census_enabled() {
+            static FRAMES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 600 == 599 {
+                let rows = self.cull.main_lod_census(30);
+                let names = lod_census_names().lock().map(|n| n.clone()).unwrap_or_default();
+                let total: u64 = rows.iter().map(|r| r.2).sum();
+                self.queued_log.push(format!("[wgr] lod census (main view, top 30 = {total} tris):"));
+                for (model, n, tris, hist) in rows {
+                    let ladder: Vec<String> = self.cull.model_lod_ladder(model).iter()
+                        .map(|(r, t)| format!("{r:.1}:{t}")).collect();
+                    self.queued_log.push(format!("[wgr]   {tris:>9} tris  {n:>6} inst  levels={hist:?}  ladder=[{}]  {}",
+                        ladder.join(" "), names.get(&model).map_or("?", |s| s.as_str())));
+                }
+            }
         }
         // Re-resolve section pool addressing from the current mesh allocs (a mesh's vbase can
         // move when its VB is recreated), so the cull emits correct base_vertex/first_index.

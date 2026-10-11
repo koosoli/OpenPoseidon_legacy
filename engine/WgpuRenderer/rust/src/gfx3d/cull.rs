@@ -3980,6 +3980,88 @@ impl CullState {
         self.params.instance_count
     }
 
+    /// Diagnostic (WGR_LOD_CENSUS): a CPU replica of classify() against the main view's
+    /// current params, summed per model. Returns (model, instances, triangles, level histogram)
+    /// for the `top` models by triangles. Distance, frustum, sub-pixel, LOD walk and the far-tier
+    /// flag match the shader; occlusion is not modelled, so this is the prepass set.
+    pub fn main_lod_census(&self, top: usize) -> Vec<(u32, u32, u64, [u32; 8])> {
+        let p = &self.params;
+        let cam = Vec3::new(p.cam_pos[0], p.cam_pos[1], p.cam_pos[2]);
+        let mut per: std::collections::HashMap<u32, (u32, u64, [u32; 8])> = Default::default();
+        for inst in &self.instances.slots {
+            if inst.model == INVALID_MODEL || (inst.flags & INSTANCE_OTHER_VIEWS_ONLY) != 0 {
+                continue;
+            }
+            let Some(model) = self.models.get(inst.model as usize) else { continue };
+            let scale = inst.center[3];
+            let radius = model.bounding_sphere * scale;
+            let center = Vec3::new(inst.center[0], inst.center[1], inst.center[2]);
+            let cull_radius = if inst.cull_radius != 0 { f32::from_bits(inst.cull_radius) } else { radius };
+            let rel = center - cam;
+            let mut dist2 = rel.length_squared();
+            if radius * radius > dist2 * 0.0625 {
+                let dn = (dist2.sqrt() - radius).max(0.0);
+                dist2 = dn * dn;
+            }
+            if dist2 > p.objects_z2 {
+                continue;
+            }
+            if (p.debug_flags & 1) == 0
+                && p.frustum.iter().any(|pl| pl[0] * rel.x + pl[1] * rel.y + pl[2] * rel.z + pl[3] < -cull_radius)
+            {
+                continue;
+            }
+            let detail2 = dist2 * p.lod_inv_width * p.lod_inv_width;
+            let diameter = model.bounding_sphere * 2.0 * scale;
+            let px = p.pixel_limit * p.lod_scale;
+            if diameter * diameter < px * px * detail2 {
+                continue;
+            }
+            let lod = |i: u32| self.lods.get((model.lod_base + i) as usize).copied();
+            let mut level = 0u32;
+            if model.lod_count >= 2 {
+                let resol2 = detail2 * p.lod_scale * p.lod_scale;
+                let mut i = 1u32;
+                while i < model.lod_count {
+                    let r = lod(i).map_or(f32::MAX, |l| l.resolution);
+                    if r * r > resol2 { break; }
+                    i += 1;
+                }
+                i -= 1;
+                while i != 0 && lod(i).is_some_and(|l| l.is_decal != 0) { i -= 1; }
+                level = i;
+            }
+            if (inst.flags & 16) != 0 && model.lod_count > 0 {
+                let mut far = model.lod_count - 1;
+                while far != 0 && lod(far).is_some_and(|l| l.is_decal != 0) { far -= 1; }
+                level = far;
+            }
+            let tris: u64 = lod(level).map_or(0, |l| {
+                let a = l.section_base as usize;
+                self.sections.get(a..a + l.section_count as usize)
+                    .map_or(0, |s| s.iter().map(|s| u64::from(s.index_count / 3)).sum())
+            });
+            let e = per.entry(inst.model).or_default();
+            e.0 += 1;
+            e.1 += tris;
+            e.2[(level as usize).min(7)] += 1;
+        }
+        let mut rows: Vec<_> = per.into_iter().map(|(m, (n, t, h))| (m, n, t, h)).collect();
+        rows.sort_by(|a, b| b.2.cmp(&a.2));
+        rows.truncate(top);
+        rows
+    }
+
+    /// Diagnostic: (resolution, triangles) per LOD of one model.
+    pub fn model_lod_ladder(&self, model: u32) -> Vec<(f32, u64)> {
+        let Some(m) = self.models.get(model as usize) else { return Vec::new() };
+        (0..m.lod_count).filter_map(|i| self.lods.get((m.lod_base + i) as usize)).map(|l| {
+            let a = l.section_base as usize;
+            (l.resolution, self.sections.get(a..a + l.section_count as usize)
+                .map_or(0, |s| s.iter().map(|s| u64::from(s.index_count / 3)).sum()))
+        }).collect()
+    }
+
     // Runtime toggle for the ImGui Culling tab: OR/clear bit 0 of the debug flags (skip the
     // frustum test). Takes effect on the next set_params (called every frame in prepare_cull).
     pub fn set_no_frustum(&mut self, no_frustum: bool) {

@@ -182,6 +182,16 @@ struct ConvertOptions
     //! behaviour is unchanged, and pushes the impostor back out to where it was
     //! authored to appear.
     bool lodFromThreshold = false;
+    //! RFG-103: with lodFromThreshold, read each threshold as what it is -- the fraction of
+    //! screen height the model's bounding sphere covers when the NEXT level takes over -- and
+    //! place the level where this engine's LOD metric reaches that coverage. The value is
+    //! resolution per metre of diameter per unit coverage at the engine's reference camera;
+    //! 0 keeps RFG-022's ratio ladder anchored at `resolution`.
+    //!
+    //! The ratio ladder kept the spacing but not the unit: anchored at 1.0, a spruce kept its
+    //! 3,216-triangle LOD 0 out to ~420 m and then fell straight to the 6-triangle card, so
+    //! levels 1-3 were never drawn and a forest view was ~13 M triangles at any LOD budget.
+    float lodCoverageScale = 0.0f;
     TextureOptions textures;
 };
 
@@ -352,6 +362,23 @@ inline float VisualLodResolutionFromThreshold(size_t rank, float base, float fin
     return scaled > base ? scaled : VisualLodResolution(rank, base);
 }
 
+//! RFG-103: resolution from authored screen coverage. Level `rank` takes over where the
+//! model's diameter covers `previousThreshold` of the screen height, i.e. at
+//! resolution `scale * diameter / previousThreshold` in this engine's metric. Level 0 is never
+//! selected by its resolution (the walk starts at level 1), so it only has to stay below
+//! level 1's: it keeps `base` unless that would not.
+inline float VisualLodResolutionFromCoverage(size_t rank, float base, float scale, float diameter,
+                                             float finestThreshold, float previousThreshold)
+{
+    if (!(scale > 0.0f) || !(diameter > 0.0f) || !(finestThreshold > 0.0f))
+        return 0.0f;
+    if (rank == 0)
+        return std::min(base, 0.5f * scale * diameter / finestThreshold);
+    if (!(previousThreshold > 0.0f))
+        return 0.0f;
+    return scale * diameter / previousThreshold;
+}
+
 //! Face-UV scale/offset from a part material's `GlobalMapsUVTransform`
 //! (e.g. NetFence_Wire.emat TilingU/V 24: sampled at the face's raw UV the
 //! wire cutout is magnified 24x and the panel reads as an empty frame).
@@ -492,6 +519,24 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                 ? VisualLodResolutionFromThreshold(rank, options.resolution,
                                                    header.lods[lodOrder[0]].threshold, header.lods[lodIndex].threshold)
                 : VisualLodResolution(rank, options.resolution);
+        if (options.lodFromThreshold && options.lodCoverageScale > 0.0f)
+        {
+            float diameter = 2.0f * header.sphereRadius;
+            if (!(diameter > 0.0f) || !std::isfinite(diameter))
+            {
+                const float dx = header.bboxMax.x - header.bboxMin.x, dy = header.bboxMax.y - header.bboxMin.y,
+                            dz = header.bboxMax.z - header.bboxMin.z;
+                diameter = std::sqrt(dx * dx + dy * dy + dz * dz);
+            }
+            const float coverage = VisualLodResolutionFromCoverage(
+                rank, options.resolution, options.lodCoverageScale, diameter, header.lods[lodOrder[0]].threshold,
+                rank > 0 ? header.lods[lodOrder[rank - 1]].threshold : 0.0f);
+            // Only when it keeps the ladder ascending; otherwise the ratio value stands and the
+            // guards below place it.
+            if (coverage > 0.0f && std::isfinite(coverage) &&
+                (out.lods.empty() || coverage > out.lods.back().resolution))
+                writeLod.resolution = coverage;
+        }
         // RFG-029: an authored ladder whose ratio runs past the visual range falls
         // back to the rank convention for THAT level rather than refusing the model.
         //
