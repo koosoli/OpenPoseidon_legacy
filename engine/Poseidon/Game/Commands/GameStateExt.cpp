@@ -1522,6 +1522,7 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "createUnit", function, UnitCreate, GameString, GameArray),
         GameOperator(GameObject, "createUnit", function, A1UnitCreate, GameGroup, GameArray),
         GameOperator(GameNothing, "setVehicleVarName", function, A1IgnoredBinary, GameObject, GameString),
+        GameOperator(GameNothing, "camSetFocus", function, A1IgnoredBinary, GameObject, GameArray),
 
         GameOperator(GameNothing, "fadeMusic", function, SetMusicVolume, GameScalar, GameScalar),
         GameOperator(GameNothing, "fadeSound", function, SetSoundVolume, GameScalar, GameScalar),
