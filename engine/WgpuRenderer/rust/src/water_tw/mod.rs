@@ -255,10 +255,10 @@ fn lip_override() -> Option<f32> {
 /// the coverage that starts a cap, the coverage that is a full one). Tidewater thresholds its lace
 /// pattern by the raw coverage, which suits its calm tropical sea; on a rough sea the low foam
 /// spread over every wave left only the pattern's densest veins, thin white squiggles all over the
-/// water (owner, 2026-10-12). Off by default since Tidewater's own bias was restored (fft.rs
-/// whitecap_bias): WGR_TW_WHITECAP=1 turns it on, "lo,hi" tunes it.
+/// water (owner, 2026-10-12). On by default: the owner chose distinct caps over Tidewater's spread
+/// foam ("more white caps and less foam"); WGR_TW_WHITECAP=0 restores Tidewater's look, "lo,hi"
+/// tunes the cover that starts a cap and the cover that is a full one.
 pub const WHITECAP_PATCH: [f32; 2] = [0.012, 0.07];
-/// Opt-in: Tidewater's own foam is the default (the worms were too little cover, not its pattern).
 const WHITECAP_PATCH_DEFAULT_ON: bool = true;
 fn whitecap_patch() -> [f32; 2] {
     static V: std::sync::OnceLock<[f32; 2]> = std::sync::OnceLock::new();

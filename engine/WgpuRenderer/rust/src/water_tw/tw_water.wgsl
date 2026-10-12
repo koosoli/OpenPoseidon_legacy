@@ -983,7 +983,8 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let lH = normalize(vec2<f32>(L.x, L.z) + 1e-5);
         let back = pow(sat(dot(vH, -lH) * 0.6 + 0.4), 2.5);
         let crest = sat(vHeight * 0.9 + 0.1) * (sat((1.0 - N.y) * 4.0) + 0.25);
-        let sssCol = vec3<f32>(0.12, 0.55, 0.45) * 0.06;
+        // (OP) temperate green, not Tidewater's tropical cyan (0.12, 0.55, 0.45): see tw_lip.wgsl tint
+        let sssCol = vec3<f32>(0.13, 0.36, 0.30) * 0.06;
         let sss = sunLight * sssCol * back * crest * tw.material0.y * smoothstep(0.0, 0.25, L.y);
 
         // (W3j) the water's own glow (light scattered inside it toward the eye) x the Water tab's
@@ -994,14 +995,25 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let glowK = tw.material1.w;
         let transmitted = sceneCol * Tview * (1.0 - 0.3 * lipW) + (inSun + inAmb + sss) * glowK;
 
-        // ---- foam: bright diffuse scatterer (albedo ~0.85), wrapped sun + sky irradiance
+        // ---- foam: diffuse scatterer, wrapped sun + sky irradiance. (OP) albedo 0.6, not Tidewater's
+        // 0.85: under OFP's sun a 0.85 white is a perfect white wall, so whitecaps clipped to flat
+        // white slabs and bloomed ("glowing", owner 2026-10-12). Fresh dense sea foam measures
+        // ~0.4-0.6 in the visible; a whitecap's mix of foam and bubbles is lower still.
         // OP: albedo 0.5 with the whitecap patches on (absorption.w > 0) instead of Tidewater's 0.85.
         // Measured whitecap reflectance is ~0.4-0.55 for fresh dense foam and ~0.22 effective over a
         // whitecap's area (Koepke 1984); at 0.85 under our sun the caps clipped past white and
         // bloomed into glowing discs (owner, 2026-10-12).
-        let foamAlbedo = select(0.85, 0.5, tw.absorption.w > 0.0);
-        var foamLit = (sunLight * (max(dot(N, L), 0.0) * 0.75 + 0.25) * INV_PI + skyIrr * 0.95) * foamAlbedo;
-        if (simOn) { foamLit = surfFoamLight(surf.foamInfo, foamGrad, N, L, V, sunLight, skyIrr); }
+        let foamAlbedo = select(0.6, 0.5, tw.absorption.w > 0.0);
+        // OP: the foam's sky light is the sky's own irradiance (SH, E/PI) wherever the frame is
+        // physical, not the legacy flat ambient (an artistic sun-scaled fill, ~30x the sun here):
+        // with it every cap clipped past white and bloomed (owner, 2026-10-12). Earth water already
+        // reads the SH sky for the same reason (above).
+        var foamSky = skyIrr;
+        if (linear > 0.5 && frame.sun_diffuse.w > 0.5) {
+            foamSky = sky_irradiance(N) * frame.sun_ambient.w;
+        }
+        var foamLit = (sunLight * (max(dot(N, L), 0.0) * 0.75 + 0.25) * INV_PI + foamSky * 0.95) * foamAlbedo;
+        if (simOn) { foamLit = surfFoamLight(surf.foamInfo, foamGrad, N, L, V, sunLight, foamSky); }
         let foamCol = foamLit * tw.material0.z;
 
         let rim = smoothstep(0.0, 0.025, frontD) * smoothstep(0.1, 0.035, frontD) * uprush;

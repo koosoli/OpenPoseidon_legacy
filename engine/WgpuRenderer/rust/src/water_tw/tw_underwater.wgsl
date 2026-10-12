@@ -31,7 +31,12 @@ const UW_STRADDLE: f32 = 1.0;
 // +-5 cm of bob and the view flipped between air and water as each wave passed. At 0.6 m it sweeps
 // the frame over about +-0.35 m, the bob the waves actually give a swimmer's eye -- a half-submerged
 // camera's waterline, rising and falling across the lens.
-const UW_PORT: f32 = 0.6;
+//
+// 0.6 -> 0.12 m (owner, 2026-10-12, "two underwater systems that fight each other" in high waves):
+// an eye up to ~0.3 m ABOVE the drawn surface looking down put the 0.6 m port under it, so the
+// lower frame became underwater fog laid over the very surface the water material was drawing
+// from above. At 0.12 m the split stays where the drawn surface really crosses the lens.
+const UW_PORT: f32 = 0.12;
 const UW_BAND: i32 = 16;
 const UW_IOR: f32 = 1.333;
 const UW_PI: f32 = 3.141592653589793;

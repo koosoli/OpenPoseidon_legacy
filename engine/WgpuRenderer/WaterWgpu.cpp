@@ -1231,12 +1231,14 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         };
         // Choppiness and whitecaps toward Tidewater's own sea presets (Calm 0.6/0, Choppy 1.5/0.75,
         // Storm 1.9/1): the owner, 2026-10-12, in Tidewater itself: "if I bring choppiness up I get a
-        // lot more nice whitecaps". Ours stopped at 1.2, where a rough sea had almost none.
+        // lot more nice whitecaps". Choppiness stays at most 1.3: past ~1.2 the displaced mesh folds
+        // over itself in a 7 m sea and the folds' back faces shade as water seen from below (the
+        // turquoise in high waves); the whitecap count comes from the cap threshold instead.
         static constexpr TwSea kTwSea[4] = {
             {3.5f, 40.0f, 0.65f, 0.28f, 0.18f, 11.0f, 0.1f},   // Calm
             {7.0f, 120.0f, 0.9f, 0.48f, 0.34f, 9.0f, 0.5f},    // Breezy (Tidewater's defaults)
-            {12.0f, 300.0f, 1.4f, 0.68f, 0.56f, 8.5f, 0.8f},   // Choppy
-            {20.0f, 900.0f, 1.8f, 1.0f, 0.9f, 12.0f, 1.0f},    // Storm
+            {12.0f, 300.0f, 1.15f, 0.68f, 0.56f, 8.5f, 0.8f},  // Choppy
+            {20.0f, 900.0f, 1.3f, 1.0f, 0.9f, 12.0f, 1.0f},    // Storm
         };
         // The weather wind (OFP's, 0..~12 m/s) at which Weather mode reaches each preset.
         static constexpr float kTwSeaWeatherWind[4] = {3.0f, 6.0f, 9.0f, 12.0f};

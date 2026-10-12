@@ -120,13 +120,15 @@ fn lipShade(in: LipOut, front: bool) -> vec4<f32> {
     let Hh = normalize(L + V);
     let spec = sun * (pow(max(dot(N, Hh), 0.0), 180.0) * 12.0) * F;
 
-    // light through the thin sheet: turquoise when backlit
-    let tint = vec3<f32>(0.16, 0.62, 0.56);
+    // light through the thin sheet: green when backlit. (OP, 2026-10-12) Tidewater's tropical
+    // turquoise (0.16, 0.62, 0.56) read as neon cyan on every curl of a temperate sea (owner); the
+    // light through a North-Atlantic lip is a muted bottle green.
+    let tint = vec3<f32>(0.13, 0.36, 0.30);
     let back = pow(sat(dot(-V, L) * 0.5 + 0.5), 4.0);
     let thin = mix(1.5, 0.7, v) * (sv.z * 0.3 + 0.8) * (sb * 0.8 + 0.6);
     // (W10d, OP) the backlit terms at about half Tidewater's (0.9 -> 0.5 here, 1.2 -> 0.5 in the
     // foam below): against a low sun the lip and its foam clipped to flat white slabs
-    let glow = (sun * tint * (back * 0.5 + 0.08) + skyIrr * tint * 1.4) * thin;
+    let glow = (sun * tint * (back * 0.5 + 0.08) + skyIrr * tint * 0.9) * thin;
     let aW = F + min((1.0 - F) * mix(0.42, 0.16, v) * (sv.x * 0.5 + 0.75) * (sb * 0.7 + 0.65), 0.85);
     let cW = refl * F + spec + glow * (1.0 - F) * 0.42;
 
