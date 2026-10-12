@@ -651,7 +651,7 @@ mod tests {
         );
         assert_eq!(
             values[26 * 25],
-            [ep.rate, ep.sky_weight, ep._pad1, ep._pad2]
+            [ep.rate, ep.sky_weight, ep.compensation, ep.meter_mode]
         );
         assert_eq!(values[27 * 25], [16., 16., 16., 16.]);
         let compiled_white = std::env::var("WGR_TONEMAP_WHITE")

@@ -105,6 +105,25 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
             defs.insert("NATIVE_PBR_TANGENTS".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
         }
     }
+    // Native-terrain diagnostics (terrain.wgsl, native Enfusion branch), to name what a ground
+    // pixel IS before reasoning about its colour: NATIVE_RED paints every native surface red (grass
+    // and objects stay as they are -- this is how the pale near meadow was shown to be grass
+    // blades, not terrain), DETAIL = the detail BCR alone, SATELLITE = the supertexture alone
+    // (magenta where a surface takes none). All flat-normal, AO 1. WGR_SATMAP_NEAR=1 applies the
+    // surface's SatMapBlend at every distance instead of past DetailMaxDistance -- an open
+    // question about Reforger's semantics, measured as a small change at the tree pose.
+    if std::env::var("WGR_TERRAIN_DEBUG_DETAIL").as_deref() == Ok("1") {
+        defs.insert("TERRAIN_DEBUG_DETAIL".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
+    if std::env::var("WGR_TERRAIN_DEBUG_SATELLITE").as_deref() == Ok("1") {
+        defs.insert("TERRAIN_DEBUG_SATELLITE".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
+    if std::env::var("WGR_TERRAIN_DEBUG_NATIVE_RED").as_deref() == Ok("1") {
+        defs.insert("TERRAIN_DEBUG_NATIVE_RED".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
+    if std::env::var("WGR_SATMAP_NEAR").as_deref() == Ok("1") {
+        defs.insert("SATMAP_NEAR_EXPERIMENT".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
     if std::env::var("WGR_NATIVE_GROUND_AO").as_deref() == Ok("0") {
         defs.insert("DISABLE_NATIVE_GROUND_AO".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }

@@ -520,8 +520,8 @@ pub struct WgrExposure {
     pub max_scale: f32,
     pub rate: f32,       // per-frame ease toward the target (0..1)
     pub sky_weight: f32, // metering weight of the top of frame (sky) vs bottom (ground)
-    pub _pad1: f32,
-    pub _pad2: f32,
+    pub compensation: f32, // RFG-150: share of a metered change compensated (<= 0 = 1)
+    pub meter_mode: f32,   // RFG-150: 0 = sky weight, 1 = Reforger centre-weighted mask
 }
 
 impl Default for WgrExposure {
@@ -533,8 +533,8 @@ impl Default for WgrExposure {
             max_scale: 4.0,
             rate: 0.03,
             sky_weight: 0.3,
-            _pad1: 0.0,
-            _pad2: 0.0,
+            compensation: 1.0,
+            meter_mode: 0.0,
         }
     }
 }
