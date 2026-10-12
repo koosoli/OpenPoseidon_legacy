@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/UI/Locale/Stringtable/CodepageTranscode.hpp>
@@ -1369,6 +1370,9 @@ bool AIUnit::IsInCargo() const
 
 void AIUnit::SetAbility(float ability)
 {
+    // Arma 1/2 missions may give a unit skill 0; keep the inverse finite.
+    if (ability <= 0 && Poseidon::Arma1Compat::Active())
+        ability = 0.05f;
     AI_ERROR(ability > 0);
     _ability = ability;
     _invAbility = 1.0 / ability;

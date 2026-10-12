@@ -2190,6 +2190,14 @@ LSError ArcadeTemplate::Serialize(ParamArchive& ar)
         AI_ERROR(params);
         nextSyncId = params->nextSyncId;
         nextVehId = params->nextVehId;
+        // A unit whose class stops its archive early (an Arma 1/2 entry this game reads
+        // differently) never reaches the id bookkeeping; count every id actually loaded so
+        // Compact does not index past its table.
+        for (int i = 0; i < emptyVehicles.Size(); i++)
+            saturateMax(nextVehId, emptyVehicles[i].id + 1);
+        for (int i = 0; i < groups.Size(); i++)
+            for (int j = 0; j < groups[i].units.Size(); j++)
+                saturateMax(nextVehId, groups[i].units[j].id + 1);
         CheckSynchro(); // remove invalid synchronizations
         Compact();
     }
