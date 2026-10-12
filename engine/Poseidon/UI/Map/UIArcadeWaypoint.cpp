@@ -962,6 +962,12 @@ bool ParseCutscene(RString cutscene, bool multiplayer)
         }
     }
 
+    if (Arma1Compat::Active())
+    {
+        CurrentTemplate.SplitOversizedGroups();
+        if (!multiplayer)
+            CurrentTemplate.PromotePlayableToPlayer();
+    }
     if (CurrentTemplate.groups.Size() == 0 || !CurrentTemplate.IsConsistent(nullptr, multiplayer))
     {
         CurrentTemplate.Clear();

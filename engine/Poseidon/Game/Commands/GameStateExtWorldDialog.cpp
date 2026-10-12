@@ -8,6 +8,7 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <SDL3/SDL_scancode.h>
+#include <map>
 #include <Poseidon/UI/Controls/UIControls.hpp>
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -88,11 +89,31 @@ class UserDisplay : public Display
         _exitVK = -1;
     }
     ~UserDisplay() override { InputSubsystem::Instance().ChangeGameFocus(-1); }
-    void DestroyHUD(int exit) override { GWorld->DestroyUserDialog(); }
+    void DestroyHUD(int exit) override;
 
     void OnButtonClicked(int idc) override;
     void OnSimulate(EntityAI* vehicle) override;
 };
+
+// Arma 1 "Unload" handlers (displaySetEventHandler), by IDD.
+static std::map<int, RString>& A1UnloadHandlers()
+{
+    static std::map<int, RString> handlers;
+    return handlers;
+}
+
+void UserDisplay::DestroyHUD(int exit)
+{
+    RString unload;
+    if (const auto it = A1UnloadHandlers().find(IDD()); it != A1UnloadHandlers().end())
+    {
+        unload = it->second;
+        A1UnloadHandlers().erase(it);
+    }
+    GWorld->DestroyUserDialog();
+    if (unload.GetLength() > 0)
+        GWorld->GetGameState()->Execute(unload);
+}
 
 void UserDisplay::OnButtonClicked(int idc)
 {
@@ -906,4 +927,121 @@ GameValue SliderSetSpeed(const GameState* state, GameValuePar oper1)
         slider->SetSpeed(array[1], array[2]);
     }
     return NOTHING;
+}
+
+// ---------------------------------------------------------------------------
+// Arma 1 display/control commands. Arma 1 passes Display and Control values; here a
+// display is its IDD and a control its IDC (a scalar), and the binary forms map onto the
+// OFP IDC commands above, which act on the topmost user dialog.
+// ---------------------------------------------------------------------------
+namespace
+{
+GameValue Pair(GameValuePar a, GameValuePar b)
+{
+    GameArrayType args;
+    args.Add(a);
+    args.Add(b);
+    return GameValue(args);
+}
+
+std::map<int, float>& PendingFade()
+{
+    static std::map<int, float> fade;
+    return fade;
+}
+} // namespace
+
+GameValue A1FindDisplay(const GameState* state, GameValuePar oper1)
+{
+    // The topmost user dialog stands for any IDD asked for; -1 (displayNull) when none
+    // is open, which no control lookup matches.
+    return GameValue(GetUserDialog() ? (float)oper1 : -1.0f);
+}
+
+GameValue A1DisplayCtrl(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return GameValue((float)oper2);
+}
+
+GameValue A1DisplaySetEventHandler(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& array = oper2;
+    if (array.Size() != 2 || array[0].GetType() != GameString || array[1].GetType() != GameString)
+        return NOTHING;
+    if (stricmp(RString(array[0]), "Unload") == 0)
+        A1UnloadHandlers()[toInt((float)oper1)] = RString(array[1]);
+    return NOTHING;
+}
+
+GameValue A1CtrlShow(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return CtrlShow(state, Pair(oper1, oper2));
+}
+
+GameValue A1CtrlEnable(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return CtrlEnable(state, Pair(oper1, oper2));
+}
+
+GameValue A1CtrlSetText(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return CtrlSetText(state, Pair(oper1, oper2));
+}
+
+GameValue A1ButtonSetAction(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return ButtonSetAction(state, Pair(oper1, oper2));
+}
+
+GameValue A1CtrlSetFade(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    PendingFade()[toInt((float)oper1)] = (float)oper2;
+    return NOTHING;
+}
+
+GameValue A1CtrlCommit(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    // No fading here: a committed fade shows or hides the control at once.
+    const int idc = toInt((float)oper1);
+    if (const auto it = PendingFade().find(idc); it != PendingFade().end())
+    {
+        if (IControl* ctrl = GetCtrl(state, oper1))
+            ctrl->ShowCtrl(it->second < 0.99f);
+        PendingFade().erase(it);
+    }
+    return NOTHING;
+}
+
+GameValue A1CtrlIgnored(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return NOTHING;
+}
+
+GameValue A1CtrlCommitted(const GameState* state, GameValuePar oper1)
+{
+    return GameValue(true);
+}
+
+// ctrlPosition control -> [x, y, w, h]
+GameValue A1CtrlPosition(const GameState* state, GameValuePar oper1)
+{
+    GameArrayType out;
+    Control* ctrl = dynamic_cast<Control*>(GetCtrl(state, oper1));
+    out.Add(GameValue(ctrl ? ctrl->X() : 0.0f));
+    out.Add(GameValue(ctrl ? ctrl->Y() : 0.0f));
+    out.Add(GameValue(ctrl ? ctrl->W() : 0.0f));
+    out.Add(GameValue(ctrl ? ctrl->H() : 0.0f));
+    return GameValue(out);
+}
+
+// control ctrlSetStructuredText text: structured text is plain text here (already untagged)
+GameValue A1CtrlSetStructuredText(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return CtrlSetText(state, Pair(oper1, oper2));
+}
+
+// ctrlParent control -> its display (the topmost user dialog stands for any)
+GameValue A1CtrlParent(const GameState* state, GameValuePar oper1)
+{
+    return GameValue(GetUserDialog() ? 0.0f : -1.0f);
 }

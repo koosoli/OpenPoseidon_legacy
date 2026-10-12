@@ -520,6 +520,20 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                                 "ALDP_A1 data packages): archives are mounted read-only, nothing is copied");
         configGroup->add_option("--arma1-mission", _arma1Mission,
                                 "Play an Arma 1 mission straight from the --arma1 archives (e.g. m09convoyattack.sara)");
+        configGroup->add_option("--arma1-test-seconds", _arma1TestSeconds,
+                                "Test an --arma1-mission: skip the briefing, play N seconds, log and exit");
+        configGroup->add_option("--arma1-campaign", _arma1Campaign,
+                                "Play an Arma 1 campaign from the --arma1 archives (ca, ra or merc)");
+        configGroup->add_option("--arma2", _arma2Root,
+                                "Arma 2 install folder: its archives are mounted read-only, nothing is copied");
+        configGroup->add_option("--arma2oa", _arma2OaRoot,
+                                "Arma 2: Operation Arrowhead folder (Expansion, BAF, PMC), mounted with --arma2");
+        configGroup->add_option("--arma2-mission", _arma2Mission,
+                                "Play an Arma 2 mission straight from the --arma2 archives (e.g. SP_EyeForEye.Chernarus)");
+        configGroup->add_option("--arma2-test-seconds", _arma2TestSeconds,
+                                "Test an --arma2-mission: skip the briefing, play N seconds, log and exit");
+        configGroup->add_option("--arma2-campaign", _arma2Campaign,
+                                "Play an Arma 2 campaign from the --arma2 archives");
         configGroup->add_option("--wait-for-parent", _waitForParent, "Wait for the map-browser parent process before starting");
         configGroup->add_option("--reforger-world", _reforgerWorld, "Native Enfusion world virtual directory");
 

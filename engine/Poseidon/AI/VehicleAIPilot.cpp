@@ -34,6 +34,9 @@
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 
+namespace Poseidon { class EntityAI; class Person; }
+bool Arma2RunUserAction(Poseidon::EntityAI* veh, Poseidon::Person* caller, int id, const RString& script); // GameStateExtA2.cpp
+
 namespace Poseidon
 {
 const float LostUnitMin = 150.0f;
@@ -1181,7 +1184,11 @@ void EntityAI::PerformAction(const UIAction& action, AIUnit* unit)
             if (unit)
             {
                 const UserActionDescription* desc = FindUserAction(action.param);
-                if (desc && desc->script.GetLength() > 0)
+                if (desc && desc->script.GetLength() > 0 &&
+                    Arma2RunUserAction(this, unit->GetPerson(), desc->id, desc->script))
+                {
+                }
+                else if (desc && desc->script.GetLength() > 0)
                 {
                     GameArrayType arguments;
                     arguments.Add(GameValueExt(this));

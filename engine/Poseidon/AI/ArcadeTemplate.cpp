@@ -22,6 +22,7 @@
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/RStringArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 
@@ -374,8 +375,26 @@ LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.SerializeEnum("side", side, 1))
 
     PARAM_CHECK(ar.Serialize("vehicle", vehicle, 1))
+    RString arma2Init; // init event handler of an Arma 2 module class (FunctionsManager, ...)
     if (ar.IsLoading())
+    {
+        arma2Init = Arma1Compat::Arma2ModuleInit(vehicle);
         vehicle = Arma1Compat::ResolveVehicleClass(vehicle); // identity unless --arma1
+        // A class neither game defines (a third-party addon that is not installed): Arma 1
+        // reports it and plays on without it. Here it is stood in for by a plain unit of
+        // the same side (an empty object by a game logic), so the mission still loads.
+        if (Arma1Compat::Active() && !(Pars >> "CfgVehicles").FindEntry(vehicle))
+        {
+            const char* standIn = side == TEast       ? "SoldierEB"
+                                  : side == TWest     ? "SoldierWB"
+                                  : side == TGuerrila ? "SoldierGB"
+                                  : side == TCivilian ? "Civilian"
+                                                      : "Logic";
+            LOG_WARN(Mission, "{}: class '{}' is not installed (missing addon); '{}' stands in", Arma1Compat::Label(),
+                     (const char*)vehicle, standIn);
+            vehicle = standIn;
+        }
+    }
     PARAM_CHECK(ar.SerializeEnum("player", player, 1, APNonplayable))
     PARAM_CHECK(ar.Serialize("leader", leader, 1, 0))
     if (ar.IsSaving() || ar.GetArVersion() >= 11)
@@ -394,6 +413,12 @@ LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("text", name, 7, ""))
     PARAM_CHECK(ar.SerializeArray("markers", markers, 1))
     PARAM_CHECK(ar.Serialize("init", init, 7, ""))
+    if (ar.IsLoading() && arma2Init.GetLength() > 0)
+    {
+        // Arma 2 starts a module from its class's init event handler, with _this = [unit],
+        // before the unit's own init field runs.
+        init = RString("[this] call {") + arma2Init + RString("}; ") + init;
+    }
 
     if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
     {
@@ -1757,6 +1782,115 @@ void ArcadeTemplate::CheckSynchro()
     nextSyncId = maxSync + 1;
 }
 
+namespace
+{
+int CrewSeats(const RString& vehicle)
+{
+    const VehicleType* type = dynamic_cast<const VehicleType*>(VehicleTypes.New(vehicle));
+    if (!type)
+        return 1;
+    const int seats = (type->HasDriver() ? 1 : 0) + (type->HasCommander() ? 1 : 0) + (type->HasGunner() ? 1 : 0);
+    return seats > 0 ? seats : 0;
+}
+} // namespace
+
+int ArcadeTemplate::SplitOversizedGroups()
+{
+    // Arma 1 lifted the 12-unit group limit; this engine's AIGroup holds a fixed
+    // MAX_UNITS_PER_GROUP. The units that do not fit go, in order, into new groups of
+    // the same side that follow copies of the original waypoints (without their
+    // synchronisations, which stay with the original group).
+    int created = 0;
+    const int n = groups.Size();
+    for (int i = 0; i < n; i++)
+    {
+        int seats = 0;
+        int cut = -1;
+        for (int j = 0; j < groups[i].units.Size(); j++)
+        {
+            seats += CrewSeats(groups[i].units[j].vehicle);
+            if (seats > MAX_UNITS_PER_GROUP)
+            {
+                cut = j;
+                break;
+            }
+        }
+        if (cut <= 0)
+            continue;
+        AutoArray<ArcadeUnitInfo> rest;
+        for (int j = cut; j < groups[i].units.Size(); j++)
+            rest.Add(groups[i].units[j]);
+        groups[i].units.Resize(cut);
+        const TargetSide side = groups[i].side;
+        const AutoArray<ArcadeWaypointInfo> waypoints = groups[i].waypoints;
+        while (rest.Size() > 0)
+        {
+            ArcadeGroupInfo& g = groups.Append();
+            g.side = side;
+            g.waypoints = waypoints;
+            for (int w = 0; w < g.waypoints.Size(); w++)
+                g.waypoints[w].synchronizations.Clear();
+            int used = 0;
+            int take = 0;
+            while (take < rest.Size())
+            {
+                const int s = CrewSeats(rest[take].vehicle);
+                if (take > 0 && used + s > MAX_UNITS_PER_GROUP)
+                    break;
+                used += s;
+                take++;
+            }
+            for (int j = 0; j < take; j++)
+            {
+                g.units.Add(rest[j]);
+                g.units[j].leader = j == 0;
+            }
+            AutoArray<ArcadeUnitInfo> remaining;
+            for (int j = take; j < rest.Size(); j++)
+                remaining.Add(rest[j]);
+            rest = remaining;
+            created++;
+        }
+        LOG_INFO(Mission, "{}: group {} exceeds {} crew seats; units from #{} moved into new groups ({} so far)", Arma1Compat::Label(),
+                 i, MAX_UNITS_PER_GROUP, cut, created);
+    }
+    return created;
+}
+
+bool ArcadeTemplate::PromotePlayableToPlayer()
+{
+    if (FindPlayer())
+        return false;
+    for (int i = 0; i < groups.Size(); i++)
+    {
+        for (int j = 0; j < groups[i].units.Size(); j++)
+        {
+            ArcadeUnitInfo& u = groups[i].units[j];
+            switch (u.player)
+            {
+                case APPlayableD:
+                case APPlayableDG:
+                    u.player = APPlayerDriver;
+                    break;
+                case APPlayableG:
+                    u.player = APPlayerGunner;
+                    break;
+                case APPlayableC:
+                case APPlayableCD:
+                case APPlayableCG:
+                case APPlayableCDG:
+                    u.player = APPlayerCommander;
+                    break;
+                default:
+                    continue;
+            }
+            LOG_INFO(Mission, "{}: no player unit; playable '{}' in group {} plays", Arma1Compat::Label(), (const char*)u.vehicle, i);
+            return true;
+        }
+    }
+    return false;
+}
+
 bool ArcadeTemplate::IsConsistent(Display* disp, bool multiplayer)
 {
     int nPlayers1 = 0;
@@ -1828,6 +1962,8 @@ bool ArcadeTemplate::IsConsistent(Display* disp, bool multiplayer)
         AI_ERROR(nUnits > 0);
         if (nUnits > MAX_UNITS_PER_GROUP)
         {
+            LOG_WARN(Mission, "Mission rejected: group {} needs {} crew seats (limit {})", i, nUnits,
+                     MAX_UNITS_PER_GROUP);
             if (disp)
             {
                 char buffer[256];
@@ -1842,6 +1978,7 @@ bool ArcadeTemplate::IsConsistent(Display* disp, bool multiplayer)
 #if !_ENABLE_CHEATS
     if (!multiplayer && nPlayers1 == 0)
     {
+        LOG_WARN(Mission, "Mission rejected: no player unit");
         if (disp)
         {
             disp->CreateMsgBox(MB_BUTTON_OK, LocalizeString(IDS_MSG_NO_PLAYER));
@@ -1853,6 +1990,7 @@ bool ArcadeTemplate::IsConsistent(Display* disp, bool multiplayer)
     if (nWestGroups > MaxGroups || nEastGroups > MaxGroups || nGuerrilaGroups > MaxGroups ||
         nCivilianGroups > MaxGroups || nLogicGroups > MaxGroups)
     {
+        LOG_WARN(Mission, "Mission rejected: more than {} groups on one side", MaxGroups);
         if (disp)
         {
             char buffer[256];
@@ -2052,6 +2190,14 @@ LSError ArcadeTemplate::Serialize(ParamArchive& ar)
         AI_ERROR(params);
         nextSyncId = params->nextSyncId;
         nextVehId = params->nextVehId;
+        // A unit whose class stops its archive early (an Arma 1/2 entry this game reads
+        // differently) never reaches the id bookkeeping; count every id actually loaded so
+        // Compact does not index past its table.
+        for (int i = 0; i < emptyVehicles.Size(); i++)
+            saturateMax(nextVehId, emptyVehicles[i].id + 1);
+        for (int i = 0; i < groups.Size(); i++)
+            for (int j = 0; j < groups[i].units.Size(); j++)
+                saturateMax(nextVehId, groups[i].units[j].id + 1);
         CheckSynchro(); // remove invalid synchronizations
         Compact();
     }

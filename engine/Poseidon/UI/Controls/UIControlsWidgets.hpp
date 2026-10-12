@@ -180,6 +180,10 @@ protected:
 
 	RString _action;
 
+	// style ST_PICTURE (Arma 1 strategic-map icons): _text names a texture
+	Ref<Texture> _picture;
+	RString _pictureName;
+
 public:
 
 	CActiveText(ControlsContainer *parent, int idc, const ParamEntry &cls);

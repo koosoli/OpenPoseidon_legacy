@@ -219,14 +219,15 @@ GameValue GameState::Const() const
         }
         return VarGet(name);
     }
-    else if (*_e->_pos == '"')
+    else if (*_e->_pos == '"' || (*_e->_pos == '\'' && s_singleQuoteStrings))
     {
-        // string
+        // string ("..." always; '...' for Arma 2 content, see s_singleQuoteStrings)
+        const char quote = *_e->_pos;
         const char* start = ++_e->_pos;
         RString string = "";
         for (;;)
         {
-            while (*_e->_pos != '"')
+            while (*_e->_pos != quote)
             {
                 if (!*_e->_pos)
                 {
@@ -240,9 +241,9 @@ GameValue GameState::Const() const
             // check if another quote mark is encountered
             // if yes, append it, and continue parsing, otherwise we are done
             ++_e->_pos;
-            if (*_e->_pos == '"')
+            if (*_e->_pos == quote)
             {
-                string = string + RString("\"");
+                string = string + RString(quote == '"' ? "\"" : "'");
                 ++_e->_pos;
                 start = _e->_pos;
             }
@@ -264,15 +265,16 @@ GameValue GameState::Const() const
         for (;;)
         {
             // note: any quotes inside may prevent closing bracket
-            if (*end == '"')
+            if (*end == '"' || (*end == '\'' && s_singleQuoteStrings))
             {
+                const char quote = *end;
                 end++;
                 // skip anything until another quote mark
-                while (*end != 0 && *end != '"')
+                while (*end != 0 && *end != quote)
                 {
                     end++;
                 }
-                if (*end != '"')
+                if (*end != quote)
                 {
                     SetError(EvalCloseB);
                     return RString();
@@ -593,6 +595,22 @@ static GameValue Abs(const GameState* state, GameValuePar oper1)
     return (float)fabs((float)oper1);
 }
 
+// Arma 1 additions (round half away from zero, as Arma does)
+static GameValue Round(const GameState* state, GameValuePar oper1)
+{
+    return (float)std::round((float)oper1);
+}
+
+static GameValue Floor(const GameState* state, GameValuePar oper1)
+{
+    return (float)std::floor((float)oper1);
+}
+
+static GameValue Ceil(const GameState* state, GameValuePar oper1)
+{
+    return (float)std::ceil((float)oper1);
+}
+
 static GameValue BoolNot(const GameState* state, GameValuePar oper1)
 {
     return !bool(oper1);
@@ -792,10 +810,12 @@ static GameValue StringRepeat(const GameState* state, GameValuePar oper1, GameVa
     {
         if (i >= maxIters)
         {
-            RptF("Max iteration count exceeded in while loop");
+            LOG_WARN(Core, "SQF: max iteration count exceeded in while loop");
             state->SetError(EvalGen);
             break;
         }
+        if (GameState::s_abortLoops)
+            break;
         // test condition
         {
             GameVarSpace local(state->GetContext());
@@ -947,10 +967,12 @@ static GameValue ForDoOp(const GameState* state, GameValuePar oper1, GameValuePa
     {
         if (count++ >= maxIters)
         {
-            RptF("Max iteration count exceeded in for loop");
+            LOG_WARN(Core, "SQF: max iteration count exceeded in for loop");
             state->SetError(EvalGen);
             break;
         }
+        if (GameState::s_abortLoops)
+            break;
         GameVarSpace local(state->GetContext());
         state->BeginContext(&local);
         state->VarSetLocal(toData->GetVar(), GameValue(i));
@@ -1178,6 +1200,9 @@ static const GameFunction* GetDefaultUnary(int* outSize = nullptr)
         GameFunction(GameScalar, "exp", Exp, GameScalar),
         GameFunction(GameScalar, "sqrt", Odmocnina, GameScalar),
         GameFunction(GameScalar, "abs", Abs, GameScalar),
+        GameFunction(GameScalar, "round", Round, GameScalar),
+        GameFunction(GameScalar, "floor", Floor, GameScalar),
+        GameFunction(GameScalar, "ceil", Ceil, GameScalar),
         GameFunction(GameScalar, "+", Plus, GameScalar), // known special cases
         GameFunction(GameArray, "+", Plus, GameArray),   // replication
         GameFunction(GameScalar, "-", Minus, GameScalar),
@@ -1258,6 +1283,7 @@ void GameState::TypeErrorOperator(const char* name, GameType left, GameType righ
     }
     else
     {
+        LOG_WARN(Core, "SQF operator {}: no overload for operand types 0x{:x}, 0x{:x}", name, (unsigned)left, (unsigned)right);
         SetError(EvalGen);
     }
 }
@@ -1280,6 +1306,7 @@ void GameState::TypeErrorFunction(const char* name, GameType right) const
     }
     else
     {
+        LOG_WARN(Core, "SQF function {}: no overload for operand type 0x{:x}", name, (unsigned)right);
         SetError(EvalGen);
     }
 }
@@ -1317,7 +1344,8 @@ void GameState::VyhCast(int Prio) const
                 {
                     const GameOperator* op = nullptr;
 
-                    if (IsNull(_vars[oper2]))
+                    // The parser already decided this is an operator (a variable of the
+                    // same name -- an object called "spawn" -- cannot be meant here).
                     {
                         const GameOperators& operators = _operators[oper2];
                         if (!_operators.IsNull(operators))
@@ -1518,21 +1546,21 @@ struct VyhodFrameGuard
     // SP are scratch space the next caller is welcome to use.  Saving
     // just the live prefix keeps the cost proportional to actual
     // nesting depth (typical < 10, capped at SL=256).
-    GameValue savedStack[SL];
-    RString savedOperStack[SL];
-    int savedUB[SL];
-    int savedPriorStack[SL];
+    std::vector<GameValue> savedStack;
+    std::vector<RString> savedOperStack;
+    std::vector<int> savedUB;
+    std::vector<int> savedPriorStack;
 
     explicit VyhodFrameGuard(GameEvaluator& ev)
         : e(ev), savedSP(ev.SP), savedParPrior(ev._parPrior), savedListPrior(ev._listPrior), savedPos(ev._pos),
           savedPos0(ev._pos0), savedSubexpBeg(ev._subexpBeg), savedSubexpEnd(ev._subexpEnd)
     {
-        for (int i = 0; i < savedSP; ++i)
+        if (savedSP > 0)
         {
-            savedStack[i] = e._stack[i];
-            savedOperStack[i] = e._operStack[i];
-            savedUB[i] = e.UB[i];
-            savedPriorStack[i] = e._priorStack[i];
+            savedStack.assign(e._stack.begin(), e._stack.begin() + savedSP);
+            savedOperStack.assign(e._operStack.begin(), e._operStack.begin() + savedSP);
+            savedUB.assign(e.UB.begin(), e.UB.begin() + savedSP);
+            savedPriorStack.assign(e._priorStack.begin(), e._priorStack.begin() + savedSP);
         }
     }
 
@@ -1588,7 +1616,7 @@ GameValue GameState::Vyhod() const
                 // empty list construction
                 _e->_pos++;
 
-                if (_e->SP >= SL)
+                if (!_e->Reserve(_e->SP))
                 {
                     SetError(EvalLineLong);
                     return NOTHING;
@@ -1638,7 +1666,7 @@ GameValue GameState::Vyhod() const
         }
         if (!functions || _functions.IsNull(*functions))
         {
-            if (_e->SP >= SL)
+            if (!_e->Reserve(_e->SP))
             {
                 SetError(EvalLineLong);
                 return NOTHING;
@@ -1723,7 +1751,7 @@ GameValue GameState::Vyhod() const
                         array.Add(_e->_stack[i]);
                     }
                     _e->SP = SPP;
-                    if (_e->SP >= SL)
+                    if (!_e->Reserve(_e->SP))
                     {
                         SetError(EvalLineLong);
                         return NOTHING;
@@ -1803,9 +1831,14 @@ GameValue GameState::Vyhod() const
 
                         RString name(_e->_pos, idlen);
                         name.Lower();
-                        if (_e->_checkOnly || IsNull(_vars[name]))
+                        // Here an operator is expected, so a variable of the same name
+                        // cannot be meant: Arma 1 missions name objects "spawn" and
+                        // still write `[] spawn {...}`. Only when no operator of that
+                        // name exists is the name left unresolved, as before.
+                        operators = &_operators[name];
+                        if (!_e->_checkOnly && !IsNull(_vars[name]) && _operators.IsNull(*operators))
                         {
-                            operators = &_operators[name];
+                            operators = nullptr;
                         }
                     }
                     else
@@ -1847,7 +1880,7 @@ GameValue GameState::Vyhod() const
         else // unary operator
         {
             _e->_pos += strlen(functions->_name);
-            if (_e->SP >= SL)
+            if (!_e->Reserve(_e->SP))
             {
                 SetError(EvalLineLong);
                 return NOTHING;
@@ -2631,6 +2664,8 @@ int GameState::GetLastErrorPos() const
 
 GameValue GameState::Evaluate(const char* expression) const
 {
+    if (s_traceExpression)
+        s_traceExpression(expression);
     // Snapshot _e on entry so any nested Evaluate triggered by an
     // operator handler (UI menu condition checks, animation rotations,
     // mission scripts, harness eval, etc.) leaves the outer caller's
@@ -2701,6 +2736,8 @@ static const char* CheckAssignment(const char* p)
 // localOnly restricts assignments to local variables.
 GameValue GameState::EvaluateMultiple(const char* expression, bool localOnly) const
 {
+    if (s_traceExpression)
+        s_traceExpression(expression);
     // Reentrancy guard — see Evaluate above and VyhodFrameGuard.
     VyhodFrameGuard frameGuard(*_e);
 
@@ -2723,6 +2760,13 @@ GameValue GameState::EvaluateMultiple(const char* expression, bool localOnly) co
             }
         }
         vynech();
+        if (s_emptyStatementKeepsValue && (*_e->_pos == 0 || *_e->_pos == ';'))
+        {
+            if (*_e->_pos == 0)
+                break;
+            _e->_pos++;
+            continue;
+        }
         // check if expression is assignment
         // assignment must start with identifier
         _e->_subexpBeg = _e->_pos;
@@ -2917,6 +2961,8 @@ bool GameState::PerformAssignment(bool localOnly)
 
 void GameState::Execute(const char* expression)
 {
+    if (s_traceExpression)
+        s_traceExpression(expression);
     // Reentrancy guard — see Evaluate above and VyhodFrameGuard.
     VyhodFrameGuard frameGuard(*_e);
 
@@ -3010,7 +3056,7 @@ void GameState::ShowError() const
     }
 }
 
-GameEvaluator::GameEvaluator(GameVarSpace* vars)
+GameEvaluator::GameEvaluator(GameVarSpace* vars) : _stack(SL), UB(SL), _priorStack(SL), _operStack(SL)
 {
     local = vars;
     // Initialize parser-private fields so VyhodFrameGuard's snapshot of an

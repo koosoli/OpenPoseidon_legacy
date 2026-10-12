@@ -1010,6 +1010,23 @@ void Man::PrepareBasePose(Matrix4Array& matrices) const
             else anim->PrepareMatrices(matrices, _secondaryTime, 1 - _primaryFactor);
         }
     }
+    // The RTMs pose the source model's space; an Arma 1 model is stored around its
+    // bounding centre (LODShape::AnimationOrigin). Pose about the source origin and
+    // stay in the stored coordinates: M'(v) = M(v - o) + o. Zero for OFP shapes, so
+    // this is a no-op there. Without it every bone the pose rotates far from the bind
+    // pose (hands, fingers, forearms) lands a metre or more away from the body.
+    if (_shape && !held)
+    {
+        const Vector3 o = _shape->AnimationOrigin();
+        if (o.SquareSize() > 1e-8f)
+        {
+            for (int i = 0; i < matrices.Size(); i++)
+            {
+                Matrix4& m = matrices[i];
+                m.SetPosition(m.FastTransform(-o) + o);
+            }
+        }
+    }
 }
 
 RString Man::CompareCorpsePose() const
@@ -2729,6 +2746,11 @@ void Man::AnimateMatrix(Matrix4& mat, const AnimationRTWeight& wgt) const
         held = false;
     }
     const ManType* type = Type();
+    // Arma 1 shapes: pose about the source origin (see PrepareBasePose).
+    const Vector3 origin = held ? VZero : _shape->AnimationOrigin();
+    const bool shifted = origin.SquareSize() > 1e-8f;
+    if (shifted)
+        mat.SetPosition(mat.Position() - origin);
     Matrix4 res = MZero;
     if (_primaryFactor > 0.01f)
     {
@@ -2753,6 +2775,8 @@ void Man::AnimateMatrix(Matrix4& mat, const AnimationRTWeight& wgt) const
         res += temp * (1 - _primaryFactor);
     }
     res.Orthogonalize();
+    if (shifted)
+        res.SetPosition(res.Position() + origin);
     mat = res;
 }
 
@@ -2849,7 +2873,7 @@ Vector3 Man::AnimatePoint(int level, int index) const
     }
     auto point = [&](const AffinePhasePose& pose, AnimationRT* anim, float time)
     {
-        if (!held) return anim->Point(rtw, _shape, level, time, index);
+        if (!held) return anim->Point(rtw, _shape, level, time, index, _shape->AnimationOrigin());
         if (index < 0) return Vector3(VZero);
         Shape* shape = _shape->LevelOpaque(level);
         if (rtw[level][index].Size() <= 0) return Vector3(shape->Pos(index));

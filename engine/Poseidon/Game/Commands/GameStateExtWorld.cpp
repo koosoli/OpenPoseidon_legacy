@@ -1,5 +1,6 @@
 
 #include <Poseidon/Core/Config/EngineConfig.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Core/Version.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
@@ -82,7 +83,7 @@ void AddDeadIdentity(RString);
 
 GameValue VehCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
-    GameStringType type = oper1;
+    GameStringType type = Poseidon::Arma1Compat::ResolveVehicleClass(oper1); // identity unless --arma1
 
     Vector3 pos, normal = VUp;
     if (!GetPos(state, pos, oper2))
@@ -152,18 +153,19 @@ GameValue VehCreate(const GameState* state, GameValuePar oper1, GameValuePar ope
     return GameValueExt(veh.GetRef());
 }
 
-void CreateUnit(AIGroup* group, RString type, Vector3Par position, RString init, float skill, Rank rank)
+static EntityAI* CreateUnitImpl(AIGroup* group, RString type, Vector3Par position, RString init, float skill,
+                                Rank rank)
 {
     if (group->NUnits() >= MAX_UNITS_PER_GROUP)
     {
-        return;
+        return nullptr;
     }
 
     Ref<EntityAI> veh = NewVehicle(type);
     Person* soldier = dyn_cast<Person>(veh.GetRef());
     if (!soldier)
     {
-        return;
+        return nullptr;
     }
 
     Vector3 normal, pos = position;
@@ -232,11 +234,39 @@ void CreateUnit(AIGroup* group, RString type, Vector3Par position, RString init,
     {
         center->SelectLeader(group);
     }
+    return veh.GetRef();
+}
+
+void CreateUnit(AIGroup* group, RString type, Vector3Par position, RString init, float skill, Rank rank)
+{
+    CreateUnitImpl(group, type, position, init, skill, rank);
+}
+
+// Arma 1: group createUnit [type, position, markers, placement, special] -> the unit
+GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& array = oper2;
+    if (array.Size() < 2 || array[0].GetType() != GameString)
+    {
+        state->SetError(EvalDim, array.Size(), 5);
+        return GameValueExt((Object*)nullptr);
+    }
+    AIGroup* grp = GetGroup(oper1);
+    Vector3 pos;
+    if (!grp || !GetRelPos(state, pos, array[1]))
+        return GameValueExt((Object*)nullptr);
+    const RString type = Poseidon::Arma1Compat::ResolveVehicleClass(RString(array[0]));
+    if (!grp->IsLocal())
+    {
+        GetNetworkManager().AskForCreateUnit(grp, type, pos, "", 0.5f, RankPrivate);
+        return GameValueExt((Object*)nullptr);
+    }
+    return GameValueExt(CreateUnitImpl(grp, type, pos, "", 0.5f, RankPrivate));
 }
 
 GameValue UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
-    GameStringType type = oper1;
+    GameStringType type = Poseidon::Arma1Compat::ResolveVehicleClass(oper1); // identity unless --arma1
     const GameArrayType& array = oper2;
 
     Vector3 pos;

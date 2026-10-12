@@ -139,7 +139,7 @@ inline Odol73LodDirectory ReadOdol40StaticDirectory(BinaryReader& reader, int fi
     // Bounding centre, geometry centre (still skipped -- see the revision-73
     // reader for why), centre of mass, then the three rows of the inverse
     // inertia tensor (COL-001).
-    skipVector();
+    readVector(result.model.boundingCenter);
     skipVector();
     readVector(result.model.centerOfMass);
     for (int i = 0; i < 3; ++i)

@@ -20,6 +20,8 @@
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <Poseidon/UI/Locale/MissionHtmlLocalization.hpp>
+
+int Arma2BriefingRevision(); // GameStateExtA2.cpp
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 #include <Poseidon/Foundation/Strings/Bstring.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
@@ -1581,6 +1583,18 @@ void DisplayMap::OnDraw(EntityAI* vehicle, float alpha)
 void DisplayMap::OnSimulate(EntityAI* vehicle)
 {
     Display::OnSimulate(vehicle);
+
+    // Arma 2: diary records and tasks arrive from scripts while the mission runs.
+    {
+        static int shownRevision = -1;
+        const int revision = Arma2BriefingRevision();
+        if (revision != shownRevision && revision > 0 && _briefing)
+        {
+            shownRevision = revision;
+            ReloadBriefingContent(GetCurrentHtmlSectionName(_briefing));
+            UpdatePlan();
+        }
+    }
 
     // JIP deferred refresh: unit wasn't assigned at init, retry now
     if (_needsHUDRefresh && GWorld->FocusOn())

@@ -1,0 +1,2217 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Arma 2 script commands (--arma2).
+//
+// Original Arma 2 missions are written against a much larger scripting surface than
+// OFP/CWA offers. This file adds the parts the official Arma 2 / OA missions and their
+// shared scripts (MP framework, modules) lean on, implemented on CWA's own systems:
+//
+//   - variables on objects and groups, and the mission/ui namespaces
+//     (setVariable / getVariable / missionNamespace / uiNamespace)
+//   - simple tasks and diary records (kept, reported as hints; there is no Arma 2
+//     diary UI in CWA)
+//   - the conversation system: kbAddTopic reads the .bikb sentence file, kbTell shows
+//     the sentence as chat text and plays its recorded speech, kbWasSaid reports it
+//     once the line has been spoken
+//   - scripted FSMs: execFSM runs an Arma 2 .fsm (the FSM editor's compiled config)
+//     state by state, one transition per simulation step, with its own local variables
+//   - post-process effects, loading screens and other presentation-only commands are
+//     accepted without effect (CWA has no such pipeline)
+//
+// Everything is ordinary OFP script machinery underneath: code is a string, a task or
+// diary record is a tagged string ("::TASK::3"), an FSM handle a number.
+
+#include <Poseidon/Game/Commands/GameStateExt.hpp>
+#include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <Poseidon/Game/Scripting/Scripts.hpp>
+
+#include <Poseidon/AI/AI.hpp>
+#include <Poseidon/AI/AICenter.hpp>
+#include <Poseidon/AI/AIGroup.hpp>
+#include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
+#include <Poseidon/Foundation/Platform/AppConfig.hpp>
+#include <Poseidon/Foundation/Platform/CrashHandler.hpp>
+#include <Poseidon/Foundation/Modules/Modules.hpp>
+#include <Poseidon/IO/ParamFile/ParamFile.hpp>
+#include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/IO/Streams/QStream.hpp>
+#include <Poseidon/UI/Locale/Stringtable/Stringtable.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/World.hpp>
+#include <Poseidon/World/Detection/Detector.hpp>
+#include <Poseidon/World/Entities/Vehicles/Transport.hpp>
+
+#include <algorithm>
+#include <atomic>
+#include <thread>
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <map>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+using namespace Poseidon;
+
+bool PreprocessScriptFile(const char* name, std::string& out); // GameStateExtWorldConfig.cpp
+
+void Arma2RuntimeSimulate(); // called from World::SimulateScripts
+
+// CWA commands reused below (defined in the other GameStateExt*.cpp files).
+GameValue ShowHint(const GameState* state, GameValuePar oper1);
+GameValue ObjGroupChat(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjSay(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjPlayMove(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjGetPrimaryWeapon(const GameState* state, GameValuePar oper1);
+GameValue ObjCommander(const GameState* state, GameValuePar oper1);
+GameValue ObjSetPos(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjLock(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1NearObjects(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue MarkerCreate(const GameState* state, GameValuePar oper1);
+GameValue MarkerDelete(const GameState* state, GameValuePar oper1);
+GameValue MarkerGetDir(const GameState* state, GameValuePar oper1);
+GameValue MarkerSetPos(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue MarkerSetType(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue MarkerSetSize(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue MarkerSetColor(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue MarkerSetText(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue MarkerSetShape(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue MarkerSetBrush(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue MarkerSetDir(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue GameTime(const GameState* state);
+GameValue VehCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjMoveInCargo(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue CutText(const GameState* state, GameValuePar oper1);
+GameValue CutRsc(const GameState* state, GameValuePar oper1);
+GameValue CutObj(const GameState* state, GameValuePar oper1);
+GameValue StrFormat(const GameState* state, GameValuePar oper1);
+GameValue ObjSide(const GameState* state, GameValuePar oper1);
+GameValue A1MissionConfigFile(const GameState* state);
+
+namespace
+{
+float Now()
+{
+    return Glob.time - Poseidon::Foundation::Time(0);
+}
+
+std::string Lower(std::string s)
+{
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return s;
+}
+
+// "$STR_x" / "@STR_x" -> localized text; anything else verbatim.
+RString LocalizeText(const char* text)
+{
+    if (!text)
+        return RString();
+    if (text[0] == '$' || text[0] == '@')
+        return LocalizeString(text + 1);
+    return RString(text);
+}
+
+// ---------------------------------------------------------------------------
+// Per-mission state. Reset whenever a new mission starts (time runs backwards or the
+// mission file changes).
+// ---------------------------------------------------------------------------
+struct Fsm
+{
+    int handle = 0;
+    std::string file;
+    std::unique_ptr<ParamFile> config;
+    const ParamEntry* states = nullptr;
+    std::string state;
+    std::vector<std::string> finals;
+    GameVarSpace vars;
+    bool done = false;
+    bool started = false;
+};
+
+struct KbSentence
+{
+    float start = 0;
+    float end = 0;
+};
+
+struct Task
+{
+    std::string name;
+    std::string description;
+    std::string state = "CREATED";
+    GameValue destination;
+    OLink<Object> owner;
+};
+
+struct Runtime
+{
+    std::string mission;
+    float lastTime = -1;
+    // setVariable storage
+    std::unordered_map<const void*, std::map<std::string, GameValue>> objectVars;
+    std::map<std::string, GameValue> uiVars;
+    // tasks / diary
+    std::vector<Task> tasks;
+    std::map<const void*, int> currentTask;
+    int diaryRecords = 0;
+    struct DiaryEntry
+    {
+        std::string subject;
+        std::string title;
+        std::string text;
+    };
+    std::vector<DiaryEntry> diary;
+    int revision = 0; // bumped whenever the diary or a task changes (briefing refresh)
+    // kb: topic -> parsed bikb, per speaker
+    std::map<std::string, std::shared_ptr<ParamFile>> bikbFiles;                 // file -> parsed
+    std::map<const void*, std::map<std::string, std::string>> topics;            // speaker -> topic -> file
+    std::map<std::string, KbSentence> said;                                      // speaker|receiver|topic|id
+    int soundSerial = 0;
+    // FSMs
+    std::vector<std::unique_ptr<Fsm>> fsms;
+    int nextFsm = 0;
+    // locations: the world's named places (CfgWorlds >> world >> Names), then any the
+    // mission creates
+    struct Location
+    {
+        std::string type;
+        std::string text;
+        float x = 0;
+        float y = 0;
+        float sizeA = 0;
+        float sizeB = 0;
+        bool deleted = false;
+    };
+    std::vector<Location> locations;
+    bool worldLocations = false;
+    // setVehicleInit, run by processInitCommands
+    std::vector<std::pair<OLink<Object>, std::string>> vehicleInits;
+    // attachTo: object follows target at a model-space offset
+    struct Attachment
+    {
+        OLink<Object> object;
+        OLink<Object> target;
+        Vector3 offset;
+    };
+    std::vector<Attachment> attachments;
+    // addAction arguments (Arma 2 form), by entity and action id
+    std::map<std::pair<const void*, int>, GameValue> actionArguments;
+};
+
+Runtime& RT()
+{
+    static Runtime rt;
+    const float now = Now();
+    const std::string mission = (const char*)Glob.header.filenameReal;
+    if (mission != rt.mission || now + 0.001f < rt.lastTime)
+    {
+        rt = Runtime();
+        rt.mission = mission;
+    }
+    rt.lastTime = now;
+    return rt;
+}
+
+// ---------------------------------------------------------------------------
+// Namespaces and variables
+// ---------------------------------------------------------------------------
+constexpr const char* kNsMission = "::NS::mission";
+constexpr const char* kNsUi = "::NS::ui";
+
+const void* VarKey(GameValuePar v)
+{
+    if (v.GetType() == GameObject)
+        return GetObject(v);
+    if (v.GetType() == GameGroup)
+        return GetGroup(v);
+    return nullptr;
+}
+
+GameValue A2MissionNamespace(const GameState*)
+{
+    return GameValue(RString(kNsMission));
+}
+
+GameValue A2UiNamespace(const GameState*)
+{
+    return GameValue(RString(kNsUi));
+}
+
+GameValue A2SetVariable(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& args = oper2;
+    if (args.Size() < 2 || args[0].GetType() != GameString)
+        return NOTHING;
+    const RString name = args[0];
+    if (oper1.GetType() == GameString)
+    {
+        const RString ns = oper1;
+        if (strcmp(ns, kNsUi) == 0)
+            RT().uiVars[Lower((const char*)name)] = args[1];
+        else
+            const_cast<GameState*>(state)->VarSet(name, args[1]);
+        return NOTHING;
+    }
+    const void* key = VarKey(oper1);
+    if (key)
+        RT().objectVars[key][Lower((const char*)name)] = args[1];
+    return NOTHING;
+}
+
+GameValue A2GetVariable(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    RString name;
+    GameValue fallback;
+    if (oper2.GetType() == GameArray)
+    {
+        const GameArrayType& args = oper2;
+        if (args.Size() < 1 || args[0].GetType() != GameString)
+            return NOTHING;
+        name = args[0];
+        if (args.Size() > 1)
+            fallback = args[1];
+    }
+    else
+    {
+        name = oper2;
+    }
+    if (oper1.GetType() == GameString)
+    {
+        const RString ns = oper1;
+        if (strcmp(ns, kNsUi) == 0)
+        {
+            auto& vars = RT().uiVars;
+            const auto it = vars.find(Lower((const char*)name));
+            return it != vars.end() ? it->second : fallback;
+        }
+        GameValue v = state->VarGet(name);
+        return v.GetNil() ? fallback : v;
+    }
+    const void* key = VarKey(oper1);
+    if (!key)
+        return fallback;
+    auto& all = RT().objectVars;
+    const auto obj = all.find(key);
+    if (obj == all.end())
+        return fallback;
+    const auto it = obj->second.find(Lower((const char*)name));
+    return it != obj->second.end() ? it->second : fallback;
+}
+
+// ---------------------------------------------------------------------------
+// Tasks and diary
+// ---------------------------------------------------------------------------
+constexpr const char* kTask = "::TASK::";
+
+Task* FindTask(GameValuePar v)
+{
+    if (v.GetType() != GameString)
+        return nullptr;
+    const RString s = v;
+    if (strncmp(s, kTask, strlen(kTask)) != 0)
+        return nullptr;
+    const int index = atoi((const char*)s + strlen(kTask)) - 1;
+    auto& tasks = RT().tasks;
+    return index >= 0 && index < static_cast<int>(tasks.size()) ? &tasks[index] : nullptr;
+}
+
+GameValue TaskValue(int index)
+{
+    return GameValue(RString((std::string(kTask) + std::to_string(index + 1)).c_str()));
+}
+
+GameValue A2CreateSimpleTask(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& args = oper2;
+    Task task;
+    if (args.Size() > 0 && args[0].GetType() == GameString)
+        task.name = (const char*)RString(args[0]);
+    task.owner = GetObject(oper1);
+    auto& tasks = RT().tasks;
+    tasks.push_back(task);
+    RT().revision++;
+    LOG_INFO(Mission, "Arma 2: task '{}' created", task.name);
+    return TaskValue(static_cast<int>(tasks.size()) - 1);
+}
+
+GameValue A2SetSimpleTaskDescription(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    if (Task* task = FindTask(oper1))
+    {
+        const GameArrayType& args = oper2;
+        if (args.Size() > 0 && args[0].GetType() == GameString)
+            task->description = (const char*)RString(args[0]);
+        if (args.Size() > 1 && args[1].GetType() == GameString && RString(args[1]).GetLength() > 0)
+            task->name = (const char*)RString(args[1]);
+        RT().revision++;
+    }
+    return NOTHING;
+}
+
+GameValue A2SetSimpleTaskDestination(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    if (Task* task = FindTask(oper1))
+        task->destination = oper2;
+    return NOTHING;
+}
+
+GameValue A2SetTaskState(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Task* task = FindTask(oper1);
+    if (!task)
+        return NOTHING;
+    const std::string next = Lower((const char*)RString(oper2));
+    std::string upper = next;
+    std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    if (upper == task->state)
+        return NOTHING;
+    task->state = upper;
+    RT().revision++;
+    LOG_INFO(Mission, "Arma 2: task '{}' -> {}", task->name, upper);
+    if (upper == "SUCCEEDED" || upper == "FAILED" || upper == "CANCELED")
+    {
+        const char* word = upper == "SUCCEEDED" ? "Task accomplished" : upper == "FAILED" ? "Task failed" : "Task canceled";
+        ShowHint(state, GameValue(RString((std::string(word) + ":\n" + task->name).c_str())));
+    }
+    return NOTHING;
+}
+
+GameValue A2TaskState(const GameState*, GameValuePar oper1)
+{
+    Task* task = FindTask(oper1);
+    return GameValue(RString(task ? task->state.c_str() : "NONE"));
+}
+
+GameValue A2TaskCompleted(const GameState*, GameValuePar oper1)
+{
+    Task* task = FindTask(oper1);
+    return GameValue(task && (task->state == "SUCCEEDED" || task->state == "FAILED" || task->state == "CANCELED"));
+}
+
+GameValue A2TaskDescription(const GameState* state, GameValuePar oper1)
+{
+    Task* task = FindTask(oper1);
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& array = result;
+    array.Add(GameValue(RString(task ? task->description.c_str() : "")));
+    array.Add(GameValue(RString(task ? task->name.c_str() : "")));
+    array.Add(GameValue(RString("")));
+    return result;
+}
+
+GameValue A2TaskDestination(const GameState* state, GameValuePar oper1)
+{
+    Task* task = FindTask(oper1);
+    if (task && task->destination.GetType() == GameArray)
+        return task->destination;
+    return state->CreateGameValue(GameArray);
+}
+
+GameValue A2SetCurrentTask(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* obj = GetObject(oper1);
+    const RString s = oper2.GetType() == GameString ? RString(oper2) : RString();
+    if (obj && FindTask(oper2))
+    {
+        const int index = atoi((const char*)s + strlen(kTask)) - 1;
+        if (RT().currentTask[obj] != index + 1)
+        {
+            RT().currentTask[obj] = index + 1;
+            if (obj == GWorld->GetRealPlayer())
+                ShowHint(state, GameValue(RString(("Current task:\n" + RT().tasks[index].name).c_str())));
+        }
+    }
+    return NOTHING;
+}
+
+GameValue A2CurrentTask(const GameState*, GameValuePar oper1)
+{
+    Object* obj = GetObject(oper1);
+    const auto it = RT().currentTask.find(obj);
+    if (it == RT().currentTask.end() || it->second <= 0)
+        return GameValue(RString(""));
+    return TaskValue(it->second - 1);
+}
+
+GameValue A2SimpleTasks(const GameState* state, GameValuePar oper1)
+{
+    Object* obj = GetObject(oper1);
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& array = result;
+    const auto& tasks = RT().tasks;
+    for (size_t i = 0; i < tasks.size(); i++)
+        if (!obj || tasks[i].owner == obj)
+            array.Add(TaskValue(static_cast<int>(i)));
+    return result;
+}
+
+GameValue A2TaskHint(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& args = oper1;
+    if (args.Size() > 0 && args[0].GetType() == GameString)
+        ShowHint(state, args[0]);
+    return NOTHING;
+}
+
+GameValue A2CreateDiaryRecord(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& args = oper2;
+    if (args.Size() > 1 && args[1].GetType() == GameArray)
+    {
+        const GameArrayType& entry = args[1];
+        Runtime::DiaryEntry record;
+        record.subject = args[0].GetType() == GameString ? (const char*)RString(args[0]) : "Diary";
+        if (entry.Size() > 0 && entry[0].GetType() == GameString)
+            record.title = (const char*)RString(entry[0]);
+        if (entry.Size() > 1 && entry[1].GetType() == GameString)
+            record.text = (const char*)RString(entry[1]);
+        LOG_INFO(Mission, "Arma 2: diary '{}': {}", record.subject, record.title);
+        RT().diary.push_back(std::move(record));
+        RT().revision++;
+    }
+    return GameValue(RString(("::DIARY::" + std::to_string(++RT().diaryRecords)).c_str()));
+}
+
+// Drops a trailing SQF "// comment" from a code fragment out[from..] (quotes inside a
+// config string are doubled; SQF also uses '...').
+void StripSqfLineComment(std::string& out, size_t from)
+{
+    bool dq = false, sq = false;
+    for (size_t i = from; i + 1 < out.size(); i++)
+    {
+        const char c = out[i];
+        if (!sq && c == '"' && out[i + 1] == '"')
+        {
+            dq = !dq;
+            i++;
+            continue;
+        }
+        if (!dq && c == '\'')
+        {
+            sq = !sq;
+            continue;
+        }
+        if (!dq && !sq && c == '/' && out[i + 1] == '/')
+        {
+            out.resize(i);
+            return;
+        }
+    }
+}
+
+// The FSM editor and conversation files continue a string over lines as
+// "line one" \n "line two"; CWA's config parser does not know that form. The pieces are
+// joined into one string (a line's trailing // comment dropped, as the line break that
+// ended it is gone).
+std::string JoinConfigStrings(const std::string& in)
+{
+    std::string out;
+    out.reserve(in.size());
+    const size_t n = in.size();
+    size_t i = 0;
+    auto space = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+    while (i < n)
+    {
+        const char c = in[i];
+        if (c == '/' && i + 1 < n && in[i + 1] == '/')
+        {
+            while (i < n && in[i] != '\n')
+                out.push_back(in[i++]);
+            continue;
+        }
+        if (c == '/' && i + 1 < n && in[i + 1] == '*')
+        {
+            const size_t end = in.find("*/", i + 2);
+            const size_t stop = end == std::string::npos ? n : end + 2;
+            out.append(in, i, stop - i);
+            i = stop;
+            continue;
+        }
+        if (c != '"')
+        {
+            out.push_back(c);
+            i++;
+            continue;
+        }
+        out.push_back('"');
+        i++;
+        size_t fragment = out.size();
+        while (i < n)
+        {
+            if (in[i] != '"')
+            {
+                out.push_back(in[i++]);
+                continue;
+            }
+            if (i + 1 < n && in[i + 1] == '"')
+            {
+                out.append("\"\"");
+                i += 2;
+                continue;
+            }
+            size_t j = i + 1;
+            while (j < n && space(in[j]))
+                j++;
+            if (j + 1 < n && in[j] == '\\' && in[j + 1] == 'n')
+            {
+                size_t k = j + 2;
+                while (k < n && space(in[k]))
+                    k++;
+                if (k < n && in[k] == '"')
+                {
+                    StripSqfLineComment(out, fragment);
+                    out.push_back(' ');
+                    fragment = out.size();
+                    i = k + 1;
+                    continue;
+                }
+            }
+            out.push_back('"');
+            i++;
+            break;
+        }
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// Conversations (kb*)
+// ---------------------------------------------------------------------------
+std::shared_ptr<ParamFile> LoadBikb(const std::string& file)
+{
+    auto& cache = RT().bikbFiles;
+    const auto it = cache.find(Lower(file));
+    if (it != cache.end())
+        return it->second;
+    std::shared_ptr<ParamFile> cfg;
+    std::string text;
+    if (PreprocessScriptFile(file.c_str(), text))
+    {
+        cfg = std::make_shared<ParamFile>();
+        text = JoinConfigStrings(text);
+        QIStream in(text.data(), static_cast<int>(text.size()));
+        cfg->Parse(in);
+    }
+    else
+    {
+        LOG_WARN(Mission, "Arma 2: conversation file '{}' not found", file);
+    }
+    cache[Lower(file)] = cfg;
+    return cfg;
+}
+
+GameValue A2KbAddTopic(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* obj = GetObject(oper1);
+    const GameArrayType& args = oper2;
+    if (!obj || args.Size() < 2 || args[0].GetType() != GameString || args[1].GetType() != GameString)
+        return NOTHING;
+    const std::string topic = Lower((const char*)RString(args[0]));
+    const std::string file = (const char*)RString(args[1]);
+    RT().topics[obj][topic] = file;
+    LoadBikb(file);
+    return NOTHING;
+}
+
+GameValue A2KbRemoveTopic(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* obj = GetObject(oper1);
+    if (obj)
+        RT().topics[obj].erase(Lower((const char*)RString(oper2)));
+    return NOTHING;
+}
+
+GameValue A2KbHasTopic(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* obj = GetObject(oper1);
+    if (!obj)
+        return GameValue(false);
+    const auto& t = RT().topics[obj];
+    return GameValue(t.find(Lower((const char*)RString(oper2))) != t.end());
+}
+
+std::string SaidKey(const void* who, const void* to, const std::string& topic, const std::string& id)
+{
+    return std::to_string(reinterpret_cast<uintptr_t>(who)) + "|" + std::to_string(reinterpret_cast<uintptr_t>(to)) +
+           "|" + Lower(topic) + "|" + Lower(id);
+}
+
+// A CfgSounds class for a recorded sentence, so `say` plays it through CWA's sound path.
+RString SpeechSoundClass(const char* file, const char* text)
+{
+    ParamEntry* sounds = Pars.FindEntry("CfgSounds");
+    if (!sounds || !file || !*file)
+        return RString();
+    const std::string name = "A2kb_" + std::to_string(++RT().soundSerial);
+    const ParamAccessMode access = sounds->GetAccessMode();
+    sounds->SetAccessMode(PAReadAndWrite);
+    ParamClass* cls = sounds->AddClass(name.c_str());
+    sounds->SetAccessMode(access);
+    if (!cls)
+        return RString();
+    cls->Add("name", RString(""));
+    if (ParamEntry* sound = cls->AddArray("sound"))
+    {
+        std::string path = file;
+        // CWA prefixes '\' itself for bank paths; keep Arma 2's absolute form.
+        sound->AddValue(RStringB(path.c_str()));
+        sound->AddValue(1.0f);
+        sound->AddValue(1.0f);
+    }
+    if (ParamEntry* titles = cls->AddArray("titles"))
+    {
+        titles->AddValue(0.0f);
+        titles->AddValue(RStringB(text ? text : ""));
+    }
+    return RString(name.c_str());
+}
+
+GameValue A2KbTell(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* who = GetObject(oper1);
+    const GameArrayType& args = oper2;
+    if (!who || args.Size() < 3 || args[1].GetType() != GameString || args[2].GetType() != GameString)
+        return NOTHING;
+    Object* to = args[0].GetType() == GameObject ? GetObject(args[0]) : nullptr;
+    const std::string topic = (const char*)RString(args[1]);
+    const std::string id = (const char*)RString(args[2]);
+    std::string file;
+    {
+        const auto& mine = RT().topics[who];
+        const auto it = mine.find(Lower(topic));
+        if (it != mine.end())
+            file = it->second;
+    }
+    float duration = 2.0f;
+    std::string shown;
+    if (!file.empty())
+    {
+        if (const std::shared_ptr<ParamFile> cfg = LoadBikb(file))
+        {
+            const ParamEntry* sentences = cfg->FindEntry("Sentences");
+            const ParamEntry* sentence = sentences ? sentences->FindEntry(id.c_str()) : nullptr;
+            if (sentence && sentence->IsClass())
+            {
+                if (const ParamEntry* text = sentence->FindEntry("text"); text && !text->IsClass() && !text->IsArray())
+                    shown = (const char*)LocalizeText((const char*)(RStringB)*text);
+                if (const ParamEntry* speech = sentence->FindEntry("speech"); speech && speech->IsArray() && speech->GetSize() > 0)
+                {
+                    std::string wave = (const char*)(RStringB)(*speech)[0];
+                    std::string bank = wave;
+                    while (!bank.empty() && (bank[0] == '\\' || bank[0] == '/'))
+                        bank.erase(0, 1);
+                    if (!bank.empty() && QIFStreamB::FileExist(bank.c_str()))
+                    {
+                        const RString cls = SpeechSoundClass(wave.c_str(), shown.c_str());
+                        if (cls.GetLength() > 0)
+                            ObjSay(state, oper1, GameValue(cls));
+                        duration = std::max(duration, 0.07f * static_cast<float>(shown.size()) + 1.0f);
+                    }
+                }
+            }
+        }
+    }
+    if (shown.empty())
+        shown = id;
+    duration = std::max(duration, 0.06f * static_cast<float>(shown.size()) + 1.0f);
+    ObjGroupChat(state, oper1, GameValue(RString(shown.c_str())));
+    KbSentence s;
+    s.start = Now();
+    s.end = s.start + duration;
+    RT().said[SaidKey(who, to, topic, id)] = s;
+    RT().said[SaidKey(who, nullptr, topic, id)] = s;
+    return NOTHING;
+}
+
+GameValue A2KbWasSaid(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* who = GetObject(oper1);
+    const GameArrayType& args = oper2;
+    if (!who || args.Size() < 3 || args[1].GetType() != GameString || args[2].GetType() != GameString)
+        return GameValue(false);
+    Object* to = args[0].GetType() == GameObject ? GetObject(args[0]) : nullptr;
+    const float maxAge = args.Size() > 3 && args[3].GetType() == GameScalar ? static_cast<float>(args[3]) : 1e9f;
+    const auto& said = RT().said;
+    auto it = said.find(SaidKey(who, to, (const char*)RString(args[1]), (const char*)RString(args[2])));
+    if (it == said.end())
+        it = said.find(SaidKey(who, nullptr, (const char*)RString(args[1]), (const char*)RString(args[2])));
+    if (it == said.end())
+        return GameValue(false);
+    const float now = Now();
+    return GameValue(now >= it->second.end && now - it->second.end <= maxAge);
+}
+
+// ---------------------------------------------------------------------------
+// Scripted FSMs (execFSM)
+// ---------------------------------------------------------------------------
+std::string EntryText(const ParamEntry* cls, const char* key)
+{
+    const ParamEntry* e = cls ? cls->FindEntry(key) : nullptr;
+    if (!e || e->IsClass() || e->IsArray())
+        return {};
+    return (const char*)(RStringB)*e;
+}
+
+void FsmRun(Fsm& fsm, const std::string& code)
+{
+    if (code.empty())
+        return;
+    GameState* gstate = GWorld->GetGameState();
+    gstate->BeginContext(&fsm.vars);
+    gstate->EvaluateMultiple(code.c_str());
+    gstate->EndContext();
+}
+
+bool FsmTrue(Fsm& fsm, const std::string& code)
+{
+    if (code.empty())
+        return true;
+    GameState* gstate = GWorld->GetGameState();
+    gstate->BeginContext(&fsm.vars);
+    const GameValue v = gstate->EvaluateMultiple(code.c_str());
+    gstate->EndContext();
+    return v.GetType() == GameBool && static_cast<bool>(v);
+}
+
+void FsmEnter(Fsm& fsm, const std::string& name)
+{
+    fsm.state = name;
+    const ParamEntry* st = fsm.states ? fsm.states->FindEntry(name.c_str()) : nullptr;
+    FsmRun(fsm, EntryText(st, "init"));
+    for (const std::string& f : fsm.finals)
+        if (_stricmp(f.c_str(), name.c_str()) == 0)
+            fsm.done = true;
+    if (!st)
+        fsm.done = true;
+}
+
+void FsmStep(Fsm& fsm)
+{
+    if (fsm.done)
+        return;
+    if (!fsm.started)
+    {
+        fsm.started = true;
+        const ParamEntry* root = fsm.config ? fsm.config->FindEntry("FSM") : nullptr;
+        FsmEnter(fsm, EntryText(root, "initState"));
+        return;
+    }
+    const ParamEntry* st = fsm.states ? fsm.states->FindEntry(fsm.state.c_str()) : nullptr;
+    const ParamEntry* links = st ? st->FindEntry("Links") : nullptr;
+    if (!links || !links->IsClass())
+        return;
+    std::vector<std::pair<float, const ParamEntry*>> ordered;
+    for (int i = 0; i < links->GetEntryCount(); i++)
+    {
+        const ParamEntry& l = links->GetEntry(i);
+        if (!l.IsClass())
+            continue;
+        const ParamEntry* p = l.FindEntry("priority");
+        ordered.emplace_back(p && !p->IsClass() && !p->IsArray() ? static_cast<float>(*p) : 0.0f, &l);
+    }
+    std::stable_sort(ordered.begin(), ordered.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+    for (const auto& [priority, link] : ordered)
+    {
+        (void)priority;
+        if (!FsmTrue(fsm, EntryText(link, "condition")))
+            continue;
+        FsmRun(fsm, EntryText(link, "action"));
+        FsmEnter(fsm, EntryText(link, "to"));
+        return;
+    }
+}
+
+Fsm* FindFsm(GameValuePar v)
+{
+    if (v.GetType() != GameScalar)
+        return nullptr;
+    const int handle = static_cast<int>(static_cast<float>(v));
+    for (auto& f : RT().fsms)
+        if (f->handle == handle)
+            return f.get();
+    return nullptr;
+}
+
+GameValue A2ExecFSM(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    const std::string file = (const char*)RString(oper2);
+    auto fsm = std::make_unique<Fsm>();
+    fsm->handle = ++RT().nextFsm;
+    fsm->file = file;
+    std::string text;
+    if (!PreprocessScriptFile(file.c_str(), text))
+    {
+        LOG_WARN(Mission, "Arma 2: FSM '{}' not found", file);
+        fsm->done = true;
+    }
+    else
+    {
+        fsm->config = std::make_unique<ParamFile>();
+        text = JoinConfigStrings(text);
+        QIStream in(text.data(), static_cast<int>(text.size()));
+        fsm->config->Parse(in);
+        const ParamEntry* root = fsm->config->FindEntry("FSM");
+        fsm->states = root ? root->FindEntry("States") : nullptr;
+        if (const ParamEntry* finals = root ? root->FindEntry("finalStates") : nullptr; finals && finals->IsArray())
+            for (int i = 0; i < finals->GetSize(); i++)
+                fsm->finals.push_back((const char*)(RStringB)(*finals)[i]);
+        if (!fsm->states)
+        {
+            LOG_WARN(Mission, "Arma 2: '{}' is not a scripted FSM", file);
+            fsm->done = true;
+        }
+    }
+    fsm->vars.VarSet("_this", oper1.GetNil() ? GameValue() : oper1, true);
+    const int handle = fsm->handle;
+    RT().fsms.push_back(std::move(fsm));
+    return GameValue(static_cast<float>(handle));
+}
+
+GameValue A2ExecFSMUnary(const GameState* state, GameValuePar oper1)
+{
+    return A2ExecFSM(state, GameValue(), oper1);
+}
+
+GameValue A2CompletedFSM(const GameState*, GameValuePar oper1)
+{
+    Fsm* fsm = FindFsm(oper1);
+    return GameValue(!fsm || fsm->done);
+}
+
+GameValue A2GetFSMVariable(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Fsm* fsm = FindFsm(oper1);
+    GameValue v;
+    if (fsm)
+        fsm->vars.VarGet(RString(oper2), v);
+    return v;
+}
+
+GameValue A2SetFSMVariable(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Fsm* fsm = FindFsm(oper1);
+    const GameArrayType& args = oper2;
+    if (fsm && args.Size() >= 2 && args[0].GetType() == GameString)
+        fsm->vars.VarSet(RString(args[0]), args[1]);
+    return NOTHING;
+}
+
+// ---------------------------------------------------------------------------
+// Mission flow, units and small helpers
+// ---------------------------------------------------------------------------
+GameValue A2EndMission(const GameState*, GameValuePar oper1)
+{
+    const std::string kind = Lower((const char*)RString(oper1));
+    EndMode mode = EMEnd1;
+    if (kind.size() == 4 && kind.rfind("end", 0) == 0 && kind[3] >= '1' && kind[3] <= '6')
+        mode = static_cast<EndMode>(EMEnd1 + (kind[3] - '1'));
+    else if (kind == "loser")
+        mode = EMLoser;
+    else if (kind == "killed")
+        mode = EMKilled;
+    LOG_INFO(Mission, "Arma 2: endMission \"{}\"", kind);
+    GWorld->SetEndMode(mode);
+    return NOTHING;
+}
+
+GameValue A2FailMission(const GameState* state, GameValuePar oper1)
+{
+    GWorld->SetEndMode(EMLoser);
+    return NOTHING;
+}
+
+void CollectGroups(std::vector<AIGroup*>& out)
+{
+    AICenter* centers[] = {GWorld->GetWestCenter(), GWorld->GetEastCenter(), GWorld->GetGuerrilaCenter(),
+                           GWorld->GetCivilianCenter(), GWorld->GetLogicCenter()};
+    for (AICenter* c : centers)
+    {
+        if (!c)
+            continue;
+        for (int i = 0; i < c->NGroups(); i++)
+            if (AIGroup* g = c->GetGroup(i))
+                out.push_back(g);
+    }
+}
+
+GameValue A2AllUnits(const GameState* state)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& array = result;
+    std::vector<AIGroup*> groups;
+    CollectGroups(groups);
+    for (AIGroup* g : groups)
+    {
+        if (g->GetCenter() == GWorld->GetLogicCenter())
+            continue;
+        for (int i = 0; i < MAX_UNITS_PER_GROUP; i++)
+            if (AIUnit* unit = g->UnitWithID(i + 1))
+                if (EntityAI* person = unit->GetPerson())
+                    array.Add(GameValueExt(person));
+    }
+    return result;
+}
+
+GameValue A2AllGroups(const GameState* state)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& array = result;
+    std::vector<AIGroup*> groups;
+    CollectGroups(groups);
+    for (AIGroup* g : groups)
+        array.Add(GameValueExt(g));
+    return result;
+}
+
+GameValue A2LifeState(const GameState*, GameValuePar oper1)
+{
+    Object* obj = GetObject(oper1);
+    return GameValue(RString(obj && !obj->IsDammageDestroyed() ? "ALIVE" : "DEAD"));
+}
+
+GameValue A2VehicleVarName(const GameState*, GameValuePar)
+{
+    return GameValue(RString(""));
+}
+
+GameValue A2NearestObjects(const GameState* state, GameValuePar oper1)
+{
+    // nearestObjects [position, ["Class", ...], radius]
+    const GameArrayType& args = oper1;
+    GameValue result = state->CreateGameValue(GameArray);
+    if (args.Size() < 3)
+        return result;
+    const float radius = args[2].GetType() == GameScalar ? static_cast<float>(args[2]) : 50.0f;
+    const GameArrayType* types = args[1].GetType() == GameArray ? &static_cast<const GameArrayType&>(args[1]) : nullptr;
+    if (!types || types->Size() == 0)
+        return A1NearObjects(state, args[0], GameValue(radius));
+    GameArrayType& out = result;
+    std::vector<Object*> seen;
+    for (int i = 0; i < types->Size(); i++)
+    {
+        if ((*types)[i].GetType() != GameString)
+            continue;
+        GameArrayType query;
+        query.Add((*types)[i]);
+        query.Add(GameValue(radius));
+        const GameValue part = A1NearObjects(state, args[0], GameValue(query));
+        const GameArrayType& list = part;
+        for (int k = 0; k < list.Size(); k++)
+        {
+            Object* o = GetObject(list[k]);
+            if (o && std::find(seen.begin(), seen.end(), o) == seen.end())
+            {
+                seen.push_back(o);
+                out.Add(list[k]);
+            }
+        }
+    }
+    return result;
+}
+
+GameValue A2NearEntities(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    GameValue all = A1NearObjects(state, oper1, oper2);
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& out = result;
+    const GameArrayType& list = all;
+    for (int i = 0; i < list.Size(); i++)
+        if (dyn_cast<EntityAI>(GetObject(list[i])))
+            out.Add(list[i]);
+    return result;
+}
+
+GameValue A2GetPosATL(const GameState* state, GameValuePar oper1)
+{
+    Object* obj = GetObject(oper1);
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& array = result;
+    if (!obj)
+        return result;
+    const Vector3 pos = obj->Position();
+    array.Add(GameValue(pos.X()));
+    array.Add(GameValue(pos.Z()));
+    array.Add(GameValue(pos.Y() - GLandscape->SurfaceY(pos.X(), pos.Z())));
+    return result;
+}
+
+GameValue A2DiagTickTime(const GameState*)
+{
+    using clock = std::chrono::steady_clock;
+    static const clock::time_point start = clock::now();
+    return GameValue(std::chrono::duration<float>(clock::now() - start).count());
+}
+
+GameValue A2DiagFrameNo(const GameState*)
+{
+    static float frames = 0;
+    return GameValue(frames += 1.0f);
+}
+
+GameValue A2False(const GameState*)
+{
+    return GameValue(false);
+}
+
+GameValue A2True(const GameState*)
+{
+    return GameValue(true);
+}
+
+GameValue A2Zero(const GameState*)
+{
+    return GameValue(0.0f);
+}
+
+GameValue A2One(const GameState*)
+{
+    return GameValue(1.0f);
+}
+
+GameValue A2NothingNular(const GameState*)
+{
+    return NOTHING;
+}
+
+GameValue A2NothingUnary(const GameState*, GameValuePar)
+{
+    return NOTHING;
+}
+
+GameValue A2NothingBinary(const GameState*, GameValuePar, GameValuePar)
+{
+    return NOTHING;
+}
+
+GameValue A2TrueUnary(const GameState*, GameValuePar)
+{
+    return GameValue(true);
+}
+
+GameValue A2TrueBinary(const GameState*, GameValuePar, GameValuePar)
+{
+    return GameValue(true);
+}
+
+GameValue A2OneUnary(const GameState*, GameValuePar)
+{
+    return GameValue(1.0f);
+}
+
+GameValue A2ZeroUnary(const GameState*, GameValuePar)
+{
+    return GameValue(0.0f);
+}
+
+GameValue A2EmptyArrayUnary(const GameState* state, GameValuePar)
+{
+    return state->CreateGameValue(GameArray);
+}
+
+GameValue A2EmptyArrayBinary(const GameState* state, GameValuePar, GameValuePar)
+{
+    return state->CreateGameValue(GameArray);
+}
+
+GameValue A2PpEffectCreate(const GameState*, GameValuePar)
+{
+    static float next = 0;
+    return GameValue(next += 1.0f);
+}
+
+// x factor [a, b]: where x lies between a and b, clamped to 0..1 (Arma 2 config
+// expressions: radio protocol, sound controllers).
+GameValue A2Factor(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& range = oper2;
+    if (range.Size() < 2 || range[0].GetType() != GameScalar || range[1].GetType() != GameScalar)
+        return GameValue(0.0f);
+    const float a = range[0], b = range[1], x = oper1;
+    if (std::fabs(b - a) < 1e-9f)
+        return GameValue(x >= b ? 1.0f : 0.0f);
+    return GameValue(std::clamp((x - a) / (b - a), 0.0f, 1.0f));
+}
+
+GameValue A2TextLogFormat(const GameState* state, GameValuePar oper1)
+{
+    const RString text = StrFormat(state, oper1);
+    LOG_INFO(Script, "textLogFormat: {}", (const char*)text);
+    return NOTHING;
+}
+
+GameValue A2Rank(const GameState*, GameValuePar oper1)
+{
+    static const char* names[] = {"PRIVATE", "CORPORAL", "SERGEANT", "LIEUTENANT", "CAPTAIN", "MAJOR", "COLONEL"};
+    Person* person = dyn_cast<Person>(GetObject(oper1));
+    if (!person)
+        return GameValue(RString(""));
+    const int rank = static_cast<int>(person->GetRank()) - static_cast<int>(RankPrivate);
+    return GameValue(RString(rank >= 0 && rank < 7 ? names[rank] : "PRIVATE"));
+}
+
+GameValue A2GetFriend(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameDataSide* a = dynamic_cast<const GameDataSide*>(oper1.GetData());
+    const GameDataSide* b = dynamic_cast<const GameDataSide*>(oper2.GetData());
+    if (!a || !b || !GWorld)
+        return GameValue(0.0f);
+    AICenter* center = GWorld->GetCenter(a->GetSide());
+    if (!center || b->GetSide() >= TSideUnknown)
+        return GameValue(a->GetSide() == b->GetSide() ? 1.0f : 0.0f);
+    return GameValue(center->GetFriendship(b->GetSide()));
+}
+
+GameValue A2HintSilent(const GameState* state, GameValuePar oper1)
+{
+    return ShowHint(state, oper1);
+}
+
+GameValue A2SetPosATL(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return ObjSetPos(state, oper1, oper2);
+}
+
+GameValue A2PlayMoveNow(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return ObjPlayMove(state, oper1, oper2);
+}
+
+GameValue A2SetVehicleLock(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    const std::string mode = Lower((const char*)RString(oper2));
+    return ObjLock(state, oper1, GameValue(mode == "locked"));
+}
+
+GameValue A2PlayerSide(const GameState* state)
+{
+    return state->Evaluate("side player");
+}
+
+GameValue A2SafeZoneW(const GameState*)
+{
+    return GameValue(1.0f);
+}
+
+GameValue A2MinusOne(const GameState*)
+{
+    return GameValue(-1.0f);
+}
+
+// isNull display/control: those are numbers here, -1 for none
+GameValue A2IsNullHandle(const GameState*, GameValuePar oper1)
+{
+    return GameValue(static_cast<float>(oper1) < 0);
+}
+
+GameValue A2EmptyArrayNular(const GameState* state)
+{
+    return state->CreateGameValue(GameArray);
+}
+
+GameValue A2TextLogEmpty(const GameState*, GameValuePar)
+{
+    return GameValue(RString(""));
+}
+
+GameValue A2ObjNullUnary(const GameState*, GameValuePar)
+{
+    return GameValueExt((Object*)nullptr);
+}
+
+GameValue A2ObjNull(const GameState*)
+{
+    return OBJECT_NULL;
+}
+
+GameValue A2Faction(const GameState*, GameValuePar oper1)
+{
+    Object* obj = GetObject(oper1);
+    Vehicle* veh = dyn_cast<Vehicle>(obj);
+    if (!veh)
+        return GameValue(RString(""));
+    std::string type = (const char*)veh->GetName();
+    if (_strnicmp(type.c_str(), "A1x_", 4) == 0)
+        type = type.substr(4);
+    const ParamEntry* cls = Arma1Compat::FindConfigClass("CfgVehicles", type.c_str());
+    return GameValue(RString(EntryText(cls, "faction").c_str()));
+}
+// ---------------------------------------------------------------------------
+// Locations. A location is the tagged string "::LOC::n"; the world's named places are
+// read from the Arma 2 CfgWorlds class on first use.
+// ---------------------------------------------------------------------------
+constexpr const char* LocTag = "::LOC::";
+
+Runtime::Location* LocationOf(GameValuePar v)
+{
+    if (v.GetType() != GameString)
+        return nullptr;
+    const RString s = v;
+    const size_t n = strlen(LocTag);
+    if (strncmp(s, LocTag, n) != 0)
+        return nullptr;
+    Runtime& rt = RT();
+    const int index = atoi((const char*)s + n);
+    if (index < 0 || index >= static_cast<int>(rt.locations.size()) || rt.locations[index].deleted)
+        return nullptr;
+    return &rt.locations[index];
+}
+
+GameValue LocationValue(int index)
+{
+    return GameValue(RString((std::string(LocTag) + std::to_string(index)).c_str()));
+}
+
+void LoadWorldLocations(Runtime& rt)
+{
+    if (rt.worldLocations)
+        return;
+    rt.worldLocations = true;
+    std::string world = Glob.header.worldname;
+    if (_strnicmp(world.c_str(), "A2_", 3) == 0)
+        world = world.substr(3);
+    const ParamEntry* cls = Arma1Compat::FindConfigClass("CfgWorlds", world.c_str());
+    const ParamEntry* names = cls ? cls->FindEntry("Names") : nullptr;
+    for (int i = 0; names && names->IsClass() && i < names->GetEntryCount(); i++)
+    {
+        const ParamEntry& e = names->GetEntry(i);
+        if (!e.IsClass())
+            continue;
+        const ParamEntry* pos = e.FindEntry("position");
+        if (!pos || !pos->IsArray() || pos->GetSize() < 2)
+            continue;
+        Runtime::Location loc;
+        loc.type = EntryText(&e, "type");
+        loc.text = (const char*)LocalizeText(EntryText(&e, "name").c_str());
+        loc.x = static_cast<float>((*pos)[0]);
+        loc.y = static_cast<float>((*pos)[1]);
+        if (const ParamEntry* a = e.FindEntry("radiusA"); a && !a->IsClass() && !a->IsArray())
+            loc.sizeA = static_cast<float>(*a);
+        if (const ParamEntry* b = e.FindEntry("radiusB"); b && !b->IsClass() && !b->IsArray())
+            loc.sizeB = static_cast<float>(*b);
+        rt.locations.push_back(loc);
+    }
+    LOG_INFO(Mission, "Arma 2: {} named locations on '{}'", rt.locations.size(), world);
+}
+
+// A position argument: [x, y(, z)] (y = north), an object, or a location.
+bool Position2D(GameValuePar v, float& x, float& y)
+{
+    if (v.GetType() == GameArray)
+    {
+        const GameArrayType& a = v;
+        if (a.Size() < 2 || a[0].GetType() != GameScalar || a[1].GetType() != GameScalar)
+            return false;
+        x = a[0];
+        y = a[1];
+        return true;
+    }
+    if (const Runtime::Location* loc = LocationOf(v))
+    {
+        x = loc->x;
+        y = loc->y;
+        return true;
+    }
+    if (Object* obj = GetObject(v))
+    {
+        x = obj->Position().X();
+        y = obj->Position().Z();
+        return true;
+    }
+    return false;
+}
+
+GameValue A2CreateLocation(const GameState*, GameValuePar oper1)
+{
+    // createLocation [type, position, sizeX, sizeY]
+    const GameArrayType& args = oper1;
+    Runtime& rt = RT();
+    LoadWorldLocations(rt);
+    Runtime::Location loc;
+    if (args.Size() > 0 && args[0].GetType() == GameString)
+        loc.type = (const char*)(RString)args[0];
+    if (args.Size() > 1)
+        Position2D(args[1], loc.x, loc.y);
+    if (args.Size() > 2 && args[2].GetType() == GameScalar)
+        loc.sizeA = args[2];
+    if (args.Size() > 3 && args[3].GetType() == GameScalar)
+        loc.sizeB = args[3];
+    rt.locations.push_back(loc);
+    return LocationValue(static_cast<int>(rt.locations.size()) - 1);
+}
+
+GameValue A2DeleteLocation(const GameState*, GameValuePar oper1)
+{
+    if (Runtime::Location* loc = LocationOf(oper1))
+        loc->deleted = true;
+    return NOTHING;
+}
+
+GameValue A2LocSetText(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    if (Runtime::Location* loc = LocationOf(oper1))
+        loc->text = (const char*)(RString)oper2;
+    return NOTHING;
+}
+
+GameValue A2LocSetType(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    if (Runtime::Location* loc = LocationOf(oper1))
+        loc->type = (const char*)(RString)oper2;
+    return NOTHING;
+}
+
+GameValue A2LocSetPosition(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    if (Runtime::Location* loc = LocationOf(oper1))
+        Position2D(oper2, loc->x, loc->y);
+    return NOTHING;
+}
+
+GameValue A2LocSetSize(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Runtime::Location* loc = LocationOf(oper1);
+    const GameArrayType& a = oper2;
+    if (loc && a.Size() >= 2 && a[0].GetType() == GameScalar && a[1].GetType() == GameScalar)
+    {
+        loc->sizeA = a[0];
+        loc->sizeB = a[1];
+    }
+    return NOTHING;
+}
+
+// text location -> its name; text "string" -> the string (structured text is plain here)
+GameValue A2Text(const GameState*, GameValuePar oper1)
+{
+    if (const Runtime::Location* loc = LocationOf(oper1))
+        return GameValue(RString(loc->text.c_str()));
+    return oper1;
+}
+
+GameValue A2LocationPosition(const GameState* state, GameValuePar oper1)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& a = result;
+    float x = 0, y = 0;
+    if (Position2D(oper1, x, y))
+    {
+        a.Add(GameValue(x));
+        a.Add(GameValue(y));
+        a.Add(GameValue(0.0f));
+    }
+    return result;
+}
+
+GameValue A2LocSize(const GameState* state, GameValuePar oper1)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& a = result;
+    if (const Runtime::Location* loc = LocationOf(oper1))
+    {
+        a.Add(GameValue(loc->sizeA));
+        a.Add(GameValue(loc->sizeB));
+    }
+    return result;
+}
+
+GameValue A2LocType(const GameState*, GameValuePar oper1)
+{
+    const Runtime::Location* loc = LocationOf(oper1);
+    return GameValue(RString(loc ? loc->type.c_str() : ""));
+}
+
+bool TypeMatches(const std::string& type, const GameValue& types)
+{
+    if (types.GetType() == GameString)
+        return _stricmp(type.c_str(), (const char*)(RString)types) == 0;
+    if (types.GetType() != GameArray)
+        return true;
+    const GameArrayType& a = types;
+    if (a.Size() == 0)
+        return true;
+    for (int i = 0; i < a.Size(); i++)
+        if (a[i].GetType() == GameString && _stricmp(type.c_str(), (const char*)(RString)a[i]) == 0)
+            return true;
+    return false;
+}
+
+// nearestLocations [position, [types], radius] / nearestLocation [position, type]
+std::vector<std::pair<float, int>> NearLocations(GameValuePar oper1, bool limitRadius)
+{
+    std::vector<std::pair<float, int>> found;
+    const GameArrayType& args = oper1;
+    float x = 0, y = 0;
+    if (args.Size() < 2 || !Position2D(args[0], x, y))
+        return found;
+    const float radius = limitRadius && args.Size() > 2 && args[2].GetType() == GameScalar ? (float)args[2] : 1e9f;
+    Runtime& rt = RT();
+    LoadWorldLocations(rt);
+    for (size_t i = 0; i < rt.locations.size(); i++)
+    {
+        const Runtime::Location& loc = rt.locations[i];
+        if (loc.deleted || !TypeMatches(loc.type, args[1]))
+            continue;
+        const float d = std::hypot(loc.x - x, loc.y - y);
+        if (d <= radius)
+            found.emplace_back(d, static_cast<int>(i));
+    }
+    std::sort(found.begin(), found.end());
+    return found;
+}
+
+GameValue A2NearestLocations(const GameState* state, GameValuePar oper1)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& a = result;
+    for (const auto& [d, index] : NearLocations(oper1, true))
+        a.Add(LocationValue(index));
+    return result;
+}
+
+GameValue A2NearestLocation(const GameState*, GameValuePar oper1)
+{
+    const auto found = NearLocations(oper1, false);
+    if (found.empty())
+        return GameValue(RString(""));
+    return LocationValue(found.front().second);
+}
+
+// ---------------------------------------------------------------------------
+// Arma 2 forms of CWA commands
+// ---------------------------------------------------------------------------
+// createVehicle [type, position, markers, placement, special]
+GameValue A2CreateVehicleArray(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& args = oper1;
+    if (args.Size() < 2 || args[0].GetType() != GameString)
+        return GameValueExt((Object*)nullptr);
+    const RString type = args[0];
+    if (type.GetLength() > 0 && type[0] == '#')
+        return GameValueExt((Object*)nullptr);
+    GameValue pos = args[1];
+    if (pos.GetType() == GameObject)
+        pos = A2GetPosATL(state, pos);
+    return VehCreate(state, args[0], pos);
+}
+
+// unit moveInCargo [vehicle, cargoIndex]
+GameValue A2MoveInCargoIndex(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& args = oper2;
+    if (args.Size() < 1)
+        return NOTHING;
+    return ObjMoveInCargo(state, oper1, args[0]);
+}
+
+// layer cutText / cutRsc / cutObj [...]: CWA has a single layer
+GameValue A2CutTextLayer(const GameState* state, GameValuePar, GameValuePar oper2)
+{
+    return CutText(state, oper2);
+}
+
+GameValue A2CutRscLayer(const GameState* state, GameValuePar, GameValuePar oper2)
+{
+    return CutRsc(state, oper2);
+}
+
+GameValue A2CutObjLayer(const GameState* state, GameValuePar, GameValuePar oper2)
+{
+    return CutObj(state, oper2);
+}
+// WFSideText side/unit/group: the side as the Warfare scripts spell it in variable names
+GameValue A2WFSideText(const GameState* state, GameValuePar oper1)
+{
+    const TargetSide side = oper1.GetType() == GameSide ? GetSide(oper1) : GetSide(ObjSide(state, oper1));
+    switch (side)
+    {
+    case TWest:
+        return GameValue(RString("West"));
+    case TEast:
+        return GameValue(RString("East"));
+    case TGuerrila:
+        return GameValue(RString("Resistance"));
+    case TCivilian:
+        return GameValue(RString("Civilian"));
+    default:
+        return GameValue(RString("Unknown"));
+    }
+}
+
+// obj setVehicleInit "code" ... processInitCommands
+GameValue A2SetVehicleInit(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* obj = GetObject(oper1);
+    if (!obj)
+        return NOTHING;
+    Runtime& rt = RT();
+    rt.vehicleInits.emplace_back(OLink<Object>(obj), std::string((const char*)(RString)oper2));
+    return NOTHING;
+}
+
+GameValue A2ClearVehicleInit(const GameState*, GameValuePar oper1)
+{
+    Object* obj = GetObject(oper1);
+    auto& list = RT().vehicleInits;
+    list.erase(std::remove_if(list.begin(), list.end(), [obj](const auto& e) { return e.first == obj; }), list.end());
+    return NOTHING;
+}
+
+GameValue A2ProcessInitCommands(const GameState*)
+{
+    auto pending = std::move(RT().vehicleInits);
+    RT().vehicleInits.clear();
+    GameState* gstate = GWorld->GetGameState();
+    for (auto& [obj, code] : pending)
+    {
+        if (!obj || code.empty())
+            continue;
+        gstate->VarSet("this", GameValueExt(obj.GetLink()), true);
+        gstate->Execute(code.c_str());
+    }
+    return NOTHING;
+}
+
+// obj attachTo [target, [x, y, z] (model space, z up), memoryPoint]
+GameValue A2AttachTo(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* obj = GetObject(oper1);
+    const GameArrayType& args = oper2;
+    Object* target = args.Size() > 0 ? GetObject(args[0]) : nullptr;
+    if (!obj || !target || obj == target)
+        return NOTHING;
+    Vector3 offset(0, 0, 0);
+    if (args.Size() > 1 && args[1].GetType() == GameArray)
+    {
+        const GameArrayType& o = args[1];
+        if (o.Size() >= 3 && o[0].GetType() == GameScalar && o[1].GetType() == GameScalar && o[2].GetType() == GameScalar)
+            offset = Vector3(static_cast<float>(o[0]), static_cast<float>(o[2]), static_cast<float>(o[1]));
+    }
+    else
+        offset = target->GetInvTransform() * obj->Position();
+    auto& list = RT().attachments;
+    list.erase(std::remove_if(list.begin(), list.end(), [obj](const auto& a) { return a.object == obj; }), list.end());
+    list.push_back({OLink<Object>(obj), OLink<Object>(target), offset});
+    return NOTHING;
+}
+
+GameValue A2Detach(const GameState*, GameValuePar oper1)
+{
+    Object* obj = GetObject(oper1);
+    auto& list = RT().attachments;
+    list.erase(std::remove_if(list.begin(), list.end(), [obj](const auto& a) { return a.object == obj; }), list.end());
+    return NOTHING;
+}
+
+void UpdateAttachments(Runtime& rt)
+{
+    GameState* gstate = GWorld->GetGameState();
+    for (size_t i = 0; i < rt.attachments.size();)
+    {
+        Runtime::Attachment& a = rt.attachments[i];
+        if (!a.object || !a.target)
+        {
+            rt.attachments.erase(rt.attachments.begin() + i);
+            continue;
+        }
+        const Vector3 p = a.target->PositionModelToWorld(a.offset);
+        GameValue pos = gstate->CreateGameValue(GameArray);
+        GameArrayType& arr = pos;
+        arr.Add(GameValue(p.X()));
+        arr.Add(GameValue(p.Z()));
+        arr.Add(GameValue(p.Y() - GLandscape->SurfaceY(p.X(), p.Z())));
+        ObjSetPos(gstate, GameValueExt(a.object.GetLink()), pos);
+        i++;
+    }
+}
+// ---------------------------------------------------------------------------
+// Triggers, waypoints, vehicles
+// ---------------------------------------------------------------------------
+GameValue A2TriggerActivated(const GameState*, GameValuePar oper1)
+{
+    Detector* det = dyn_cast<Detector>(GetObject(oper1));
+    return GameValue(det && det->IsActive());
+}
+
+GameValue A2TriggerArea(const GameState* state, GameValuePar oper1)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& a = result;
+    if (Detector* det = dyn_cast<Detector>(GetObject(oper1)))
+    {
+        a.Add(GameValue(det->GetAreaA()));
+        a.Add(GameValue(det->GetAreaB()));
+        a.Add(GameValue(det->GetAreaAngleDeg()));
+        a.Add(GameValue(det->IsAreaRectangular()));
+    }
+    return result;
+}
+
+AIGroup* GroupOf(GameValuePar v)
+{
+    if (v.GetType() == GameGroup)
+        return GetGroup(v);
+    if (EntityAI* e = dyn_cast<EntityAI>(GetObject(v)))
+        if (AIUnit* u = e->CommanderUnit())
+            return u->GetGroup();
+    return nullptr;
+}
+
+GameValue A2CurrentWaypoint(const GameState*, GameValuePar oper1)
+{
+    AIGroup* grp = GroupOf(oper1);
+    if (!grp)
+        return GameValue(0.0f);
+    auto* cur = grp->GetCurrent();
+    if (!cur || !cur->_fsm)
+        return GameValue(static_cast<float>(grp->NWaypoints()));
+    return GameValue(static_cast<float>(cur->_fsm->Var(0)));
+}
+
+// group setCurrentWaypoint [group, index]
+GameValue A2SetCurrentWaypoint(const GameState*, GameValuePar, GameValuePar oper2)
+{
+    const GameArrayType& wp = oper2;
+    if (wp.Size() < 2 || wp[1].GetType() != GameScalar)
+        return NOTHING;
+    AIGroup* grp = GroupOf(wp[0]);
+    if (!grp)
+        return NOTHING;
+    auto* cur = grp->GetCurrent();
+    const int index = static_cast<int>(static_cast<float>(wp[1]));
+    if (cur && cur->_fsm && index >= 0 && index <= grp->NWaypoints())
+        cur->_fsm->Var(0) = index;
+    return NOTHING;
+}
+
+// vehicle emptyPositions "driver" | "gunner" | "commander" | "cargo"
+GameValue A2EmptyPositions(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Transport* t = dyn_cast<Transport>(GetObject(oper1));
+    if (!t)
+        return GameValue(0.0f);
+    const RString what = oper2;
+    int n = 0;
+    if (_stricmp(what, "driver") == 0)
+        n = t->Type()->HasDriver() && !t->Driver() ? 1 : 0;
+    else if (_stricmp(what, "gunner") == 0)
+        n = t->Type()->HasGunner() && !t->Gunner() ? 1 : 0;
+    else if (_stricmp(what, "commander") == 0)
+        n = t->Type()->HasCommander() && !t->Commander() ? 1 : 0;
+    else if (_stricmp(what, "cargo") == 0)
+        n = std::max(0, t->GetMaxManCargo() - t->GetManCargoSize());
+    return GameValue(static_cast<float>(n));
+}
+
+GameValue A2SideUnknown(const GameState*)
+{
+    return CreateGameSide(TSideUnknown);
+}
+
+// mapGridPosition object|position: six-digit grid reference (100 m squares)
+GameValue A2MapGridPosition(const GameState*, GameValuePar oper1)
+{
+    float x = 0, y = 0;
+    Position2D(oper1, x, y);
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%03d%03d", std::clamp(static_cast<int>(x / 100), 0, 999),
+             std::clamp(static_cast<int>(y / 100), 0, 999));
+    return GameValue(RString(buffer));
+}
+
+GameValue A2MinusOneUnary(const GameState*, GameValuePar)
+{
+    return GameValue(-1.0f);
+}
+
+GameValue A2ZeroBinary(const GameState*, GameValuePar, GameValuePar)
+{
+    return GameValue(0.0f);
+}
+
+GameValue A2EmptyString(const GameState*)
+{
+    return GameValue(RString(""));
+}
+
+GameValue A2ZeroPos(const GameState* state, GameValuePar, GameValuePar)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& a = result;
+    for (int i = 0; i < 3; i++)
+        a.Add(GameValue(0.0f));
+    return result;
+}
+} // namespace
+
+// Arma 2 briefing: the diary and the simple tasks, as the HTML sections the CWA map
+// notebook shows ("Main" = diary, "Plan" = tasks), added when the mission's own
+// briefing.html has none; <localized id="..."/> tags are resolved.
+namespace
+{
+std::string SanitizeRichText(const std::string& in)
+{
+    std::string out;
+    for (size_t i = 0; i < in.size(); i++)
+    {
+        if (in[i] != '<')
+        {
+            out += in[i];
+            continue;
+        }
+        const size_t end = in.find('>', i);
+        if (end == std::string::npos)
+            break;
+        std::string tag = Lower(in.substr(i + 1, end - i - 1));
+        while (!tag.empty() && (tag.back() == '/' || tag.back() == ' '))
+            tag.pop_back();
+        const std::string name = tag.substr(0, tag.find(' '));
+        if (name == "br")
+            out += "<br>";
+        else if (name == "b" || name == "/b" || name == "i" || name == "/i" || name == "p" || name == "/p")
+            out += "<" + name + ">";
+        i = end;
+    }
+    return out;
+}
+
+std::string ResolveLocalizedTags(const std::string& html)
+{
+    std::string out;
+    size_t pos = 0;
+    while (true)
+    {
+        const size_t at = html.find("<localized", pos);
+        if (at == std::string::npos)
+        {
+            out.append(html, pos, std::string::npos);
+            return out;
+        }
+        out.append(html, pos, at - pos);
+        const size_t end = html.find('>', at);
+        if (end == std::string::npos)
+        {
+            out.append(html, at, std::string::npos);
+            return out;
+        }
+        const std::string tag = html.substr(at, end - at);
+        const size_t id = tag.find("id=");
+        std::string key;
+        if (id != std::string::npos && id + 4 <= tag.size())
+        {
+            const char q = tag[id + 3];
+            const size_t close = tag.find(q, id + 4);
+            if (close != std::string::npos)
+                key = tag.substr(id + 4, close - id - 4);
+        }
+        if (!key.empty())
+            out += (const char*)LocalizeString(key.c_str());
+        pos = end + 1;
+    }
+}
+} // namespace
+
+int Arma2BriefingRevision()
+{
+    return Arma1Compat::Generation() == 2 ? RT().revision : 0;
+}
+
+std::string Arma2BriefingHtml(const std::string& html)
+{
+    if (Arma1Compat::Generation() != 2)
+        return html;
+    std::string out = ResolveLocalizedTags(html);
+    const std::string lower = Lower(out);
+    const Runtime& rt = RT();
+    if (lower.find("name=\"main\"") == std::string::npos && !rt.diary.empty())
+    {
+        out += "\n<hr>\n<p><a name=\"Main\"></a></p>\n";
+        for (auto it = rt.diary.rbegin(); it != rt.diary.rend(); ++it) // newest first, as Arma 2 lists them
+            out += "<h2>" + SanitizeRichText(it->title) + "</h2>\n<p>" + SanitizeRichText(it->text) + "</p>\n";
+    }
+    if (lower.find("name=\"plan\"") == std::string::npos && !rt.tasks.empty())
+    {
+        out += "\n<hr>\n<p><a name=\"Plan\"></a></p>\n";
+        std::vector<std::string> shown;
+        for (const Task& t : rt.tasks)
+        {
+            if (std::find(shown.begin(), shown.end(), t.name) != shown.end())
+                continue; // one entry per task, not per group member
+            shown.push_back(t.name);
+            const char* state = t.state == "SUCCEEDED" ? " (accomplished)" : t.state == "FAILED" ? " (failed)"
+                                : t.state == "CANCELED" ? " (canceled)" : "";
+            out += "<h2>" + SanitizeRichText(t.name) + state + "</h2>\n<p>" + SanitizeRichText(t.description) + "</p>\n";
+        }
+    }
+    out += "\n<hr>\n";
+    return out;
+}
+
+// Runs the scripted FSMs one transition per simulation step (World::SimulateScripts).
+
+// Arma 2 addAction: arguments are passed as _this select 3; the script is a .sqf (run
+// like execVM), a .sqs, or code.
+void Arma2SetUserActionArguments(EntityAI* veh, int id, GameValuePar arguments)
+{
+    RT().actionArguments[{veh, id}] = arguments;
+}
+
+GameValue ScriptExecVM(const GameState* state, GameValuePar oper1, GameValuePar oper2); // Scripts.cpp
+
+bool Arma2RunUserAction(EntityAI* veh, Person* caller, int id, const RString& script)
+{
+    if (Arma1Compat::Generation() != 2)
+        return false;
+    GameState* gstate = GWorld->GetGameState();
+    GameValue args = gstate->CreateGameValue(GameArray);
+    GameArrayType& a = args;
+    a.Add(GameValueExt(veh));
+    a.Add(GameValueExt(caller));
+    a.Add(GameValue(static_cast<float>(id)));
+    auto& map = RT().actionArguments;
+    const auto found = map.find({veh, id});
+    a.Add(found != map.end() ? found->second : GameValue());
+    const std::string name = Lower((const char*)script);
+    auto endsWith = [&](const char* ext) {
+        const size_t n = strlen(ext);
+        return name.size() >= n && name.compare(name.size() - n, n, ext) == 0;
+    };
+    if (endsWith(".sqs"))
+        return false; // CWA's own path runs .sqs files
+    if (endsWith(".sqf"))
+        ScriptExecVM(gstate, args, GameValue(script));
+    else
+        GWorld->AddScript(Script::CreateFromCode("addAction", script, args));
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Stall report (--arma2-test-seconds only). A mission that freezes the main loop leaves
+// nothing in the log; this names the expression the evaluator last started, every 10 s
+// while the simulation does not advance.
+// ---------------------------------------------------------------------------
+namespace
+{
+std::atomic<const char*> GLastExpression{nullptr};
+std::atomic<unsigned> GSimulateTick{0};
+
+void StallMonitor()
+{
+    unsigned last = GSimulateTick.load();
+    int stalled = 0;
+    for (;;)
+    {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        const unsigned now = GSimulateTick.load();
+        if (now != last)
+        {
+            last = now;
+            stalled = 0;
+            continue;
+        }
+        if (++stalled % 10 != 0)
+            continue;
+        std::string expr;
+        if (const char* e = GLastExpression.load())
+        {
+            for (int i = 0; i < 400 && e[i]; i++)
+                expr.push_back(e[i] == '\n' || e[i] == '\r' ? ' ' : e[i]);
+        }
+        LOG_WARN(Script, "Arma 2 stall: no simulation step for {} s; evaluator last started: {}", stalled, expr);
+        if (stalled == 10 || stalled == 30)
+            Poseidon::Foundation::LogStallThreadStack();
+    }
+}
+
+void TraceExpression(const char* expression)
+{
+    GLastExpression.store(expression, std::memory_order_relaxed);
+}
+} // namespace
+
+void Arma2StartStallMonitor()
+{
+    static bool started = false;
+    if (started || Arma1Compat::Generation() != 2 ||
+        Poseidon::Foundation::AppConfig::Instance().GetArma1TestSeconds() <= 0.0f)
+        return;
+    started = true;
+    Poseidon::Foundation::RememberStallThread();
+    GameState::s_traceExpression = TraceExpression;
+    std::thread(StallMonitor).detach();
+}
+
+void Arma2RuntimeSimulate()
+{
+    GSimulateTick.fetch_add(1, std::memory_order_relaxed);
+    if (Arma1Compat::Generation() != 2 || !GWorld || !GWorld->GetGameState())
+        return;
+    Runtime& rt = RT();
+    for (size_t i = 0; i < rt.fsms.size(); i++) // FSMs may start FSMs
+        FsmStep(*rt.fsms[i]);
+    UpdateAttachments(rt);
+
+    // Diagnostics: OP_A2_WATCH="var1,var2,..." logs those variables every 10 s of game time.
+    static const std::string watch = [] {
+        const char* e = std::getenv("OP_A2_WATCH");
+        return std::string(e ? e : "");
+    }();
+    static float nextWatch = 0;
+    if (!watch.empty() && (Now() >= nextWatch || Now() + 1 < nextWatch - 10))
+    {
+        nextWatch = Now() + 10;
+        GameState* gstate = GWorld->GetGameState();
+        size_t pos = 0;
+        while (pos < watch.size())
+        {
+            size_t end = watch.find(',', pos);
+            if (end == std::string::npos)
+                end = watch.size();
+            const std::string name = watch.substr(pos, end - pos);
+            if (!name.empty())
+            {
+                const GameValue v = gstate->VarGet(name.c_str());
+                LOG_INFO(Script, "watch t={:.0f} {} = {}", Now(), name, v.GetNil() ? "<nil>" : (const char*)v.GetText());
+            }
+            pos = end + 1;
+        }
+        // OP_A2_EVAL="expression": evaluated and logged at the same times.
+        static const std::string eval = [] {
+            const char* e = std::getenv("OP_A2_EVAL");
+            return std::string(e ? e : "");
+        }();
+        if (!eval.empty())
+        {
+            const GameValue v = gstate->EvaluateMultiple(eval.c_str());
+            LOG_INFO(Script, "eval t={:.0f} {} = {}", Now(), eval, v.GetNil() ? "<nil>" : (const char*)v.GetText());
+        }
+    }
+}
+
+namespace
+{
+const GameNular A2Nular[] = {
+    GameNular(GameString, "missionNamespace", A2MissionNamespace),
+    GameNular(GameString, "uiNamespace", A2UiNamespace),
+    GameNular(GameString, "parsingNamespace", A2MissionNamespace),
+    GameNular(GameString, "profileNamespace", A2UiNamespace),
+    GameNular(GameArray, "allUnits", A2AllUnits),
+    GameNular(GameArray, "allGroups", A2AllGroups),
+    GameNular(GameScalar, "diag_tickTime", A2DiagTickTime),
+    GameNular(GameScalar, "diag_frameNo", A2DiagFrameNo),
+    GameNular(GameScalar, "diag_fps", A2One),
+    GameNular(GameBool, "isMultiplayer", A2False),
+    GameNular(GameBool, "isDedicated", A2False),
+    GameNular(GameScalar, "serverTime", GameTime),
+    GameNular(GameSide, "playerSide", A2PlayerSide),
+    GameNular(GameScalar, "safeZoneX", A2Zero),
+    GameNular(GameScalar, "safeZoneY", A2Zero),
+    GameNular(GameScalar, "safeZoneW", A2SafeZoneW),
+    GameNular(GameScalar, "safeZoneH", A2SafeZoneW),
+    GameNular(GameScalar, "safeZoneXAbs", A2Zero),
+    GameNular(GameScalar, "safeZoneWAbs", A2SafeZoneW),
+    GameNular(GameObject, "locationNull", A2ObjNull),
+    GameNular(GameNothing, "disableSerialization", A2NothingNular),
+    GameNular(GameNothing, "endLoadingScreen", A2NothingNular),
+    GameNular(GameNothing, "clearRadio", A2NothingNular),
+    GameNular(GameBool, "visibleMap", A2False),
+    GameNular(GameBool, "savingEnabled", A2True),
+    GameNular(GameBool, "teamSwitchEnabled", A2False),
+    GameNular(GameScalar, "viewDistance", A2One),
+    GameNular(GameNothing, "processInitCommands", A2ProcessInitCommands),
+    GameNular(GameString, "campaignConfigFile", A1MissionConfigFile),
+    GameNular(GameSide, "sideUnknown", A2SideUnknown),
+    GameNular(GameString, "commandingMenu", A2EmptyString),
+    GameNular(GameScalar, "displayNull", A2MinusOne),
+    GameNular(GameScalar, "controlNull", A2MinusOne),
+    GameNular(GameBool, "hcShownBar", A2False),
+    GameNular(GameArray, "hcSelected", A2EmptyArrayNular),
+};
+
+const GameFunction A2Unary[] = {
+    GameFunction(GameNothing, "textLogFormat", A2TextLogFormat, GameArray),
+    GameFunction(GameNothing, "onPreloadStarted", A2NothingUnary, GameString),
+    GameFunction(GameNothing, "onPreloadFinished", A2NothingUnary, GameString),
+    GameFunction(GameNothing, "scriptName", A2NothingUnary, GameString),
+    GameFunction(GameNothing, "startLoadingScreen", A2NothingUnary, GameArray),
+    GameFunction(GameNothing, "progressLoadingScreen", A2NothingUnary, GameScalar),
+    GameFunction(GameNothing, "activateAddons", A2NothingUnary, GameArray),
+    GameFunction(GameNothing, "enableSaving", A2NothingUnary, GameArray | GameBool),
+    GameFunction(GameNothing, "enableSentences", A2NothingUnary, GameBool),
+    GameFunction(GameNothing, "showCommandingMenu", A2NothingUnary, GameString),
+    GameFunction(GameNothing, "setWind", A2NothingUnary, GameArray),
+    GameFunction(GameNothing, "camUseNVG", A2NothingUnary, GameBool),
+    GameFunction(GameNothing, "hintSilent", A2HintSilent, GameString),
+    GameFunction(GameNothing, "endMission", A2EndMission, GameString),
+    GameFunction(GameNothing, "failMission", A2FailMission, GameString),
+    GameFunction(GameNothing, "taskHint", A2TaskHint, GameArray),
+    GameFunction(GameNothing, "ppEffectDestroy", A2NothingUnary, GameScalar | GameArray),
+    GameFunction(GameScalar, "ppEffectCreate", A2PpEffectCreate, GameArray),
+    GameFunction(GameBool, "ppEffectCommitted", A2TrueUnary, GameScalar | GameString),
+    GameFunction(GameString, "createMarkerLocal", MarkerCreate, GameArray),
+    GameFunction(GameNothing, "deleteMarkerLocal", MarkerDelete, GameString),
+    GameFunction(GameScalar, "markerDir", MarkerGetDir, GameString),
+    GameFunction(GameScalar, "markerAlpha", A2OneUnary, GameString),
+    GameFunction(GameString, "taskState", A2TaskState, GameString),
+    GameFunction(GameBool, "taskCompleted", A2TaskCompleted, GameString),
+    GameFunction(GameArray, "taskDescription", A2TaskDescription, GameString),
+    GameFunction(GameArray, "taskDestination", A2TaskDestination, GameString),
+    GameFunction(GameString, "currentTask", A2CurrentTask, GameObject),
+    GameFunction(GameArray, "simpleTasks", A2SimpleTasks, GameObject),
+    GameFunction(GameScalar, "execFSM", A2ExecFSMUnary, GameString),
+    GameFunction(GameBool, "completedFSM", A2CompletedFSM, GameScalar),
+    GameFunction(GameString, "lifeState", A2LifeState, GameObject),
+    GameFunction(GameString, "rank", A2Rank, GameObject),
+    GameFunction(GameString, "vehicleVarName", A2VehicleVarName, GameObject),
+    GameFunction(GameArray, "nearestObjects", A2NearestObjects, GameArray),
+    GameFunction(GameArray, "getPosATL", A2GetPosATL, GameObject),
+    GameFunction(GameString, "currentWeapon", ObjGetPrimaryWeapon, GameObject),
+    GameFunction(GameObject, "effectiveCommander", ObjCommander, GameObject),
+    GameFunction(GameString, "faction", A2Faction, GameObject),
+    GameFunction(GameArray, "synchronizedObjects", A2EmptyArrayUnary, GameObject),
+    GameFunction(GameArray, "actionKeysNames", A2EmptyArrayUnary, GameString | GameArray),
+    GameFunction(GameNothing, "hcRemoveAllGroups", A2NothingUnary, GameObject),
+    GameFunction(GameString, "createLocation", A2CreateLocation, GameArray),
+    GameFunction(GameNothing, "deleteLocation", A2DeleteLocation, GameString),
+    GameFunction(GameString, "text", A2Text, GameString),
+    GameFunction(GameArray, "locationPosition", A2LocationPosition, GameString),
+    GameFunction(GameArray, "size", A2LocSize, GameString),
+    GameFunction(GameString, "type", A2LocType, GameString),
+    GameFunction(GameArray, "nearestLocations", A2NearestLocations, GameArray),
+    GameFunction(GameString, "nearestLocation", A2NearestLocation, GameArray),
+    GameFunction(GameObject, "createVehicle", A2CreateVehicleArray, GameArray),
+    GameFunction(GameObject, "createVehicleLocal", A2CreateVehicleArray, GameArray),
+    GameFunction(GameBool, "simulationEnabled", A2TrueUnary, GameObject),
+    GameFunction(GameNothing, "cutFadeOut", A2NothingUnary, GameScalar),
+    GameFunction(GameObject, "hcLeader", A2ObjNullUnary, GameGroup),
+    GameFunction(GameString, "WFSideText", A2WFSideText, GameSide | GameObject | GameGroup),
+    GameFunction(GameNothing, "clearVehicleInit", A2ClearVehicleInit, GameObject),
+    GameFunction(GameNothing, "detach", A2Detach, GameObject),
+    GameFunction(GameNothing, "setGroupIconsVisible", A2NothingUnary, GameArray),
+    GameFunction(GameString, "actionKeysImages", A2TextLogEmpty, GameString | GameArray),
+    GameFunction(GameBool, "triggerActivated", A2TriggerActivated, GameObject),
+    GameFunction(GameBool, "isNull", A2IsNullHandle, GameScalar),
+    GameFunction(GameArray, "items", A2EmptyArrayUnary, GameObject),
+    GameFunction(GameArray, "assignedItems", A2EmptyArrayUnary, GameObject),
+    GameFunction(GameArray, "triggerArea", A2TriggerArea, GameObject),
+    GameFunction(GameScalar, "currentWaypoint", A2CurrentWaypoint, GameGroup | GameObject),
+    GameFunction(GameString, "mapGridPosition", A2MapGridPosition, GameObject | GameArray),
+    GameFunction(GameScalar, "moveTime", A2ZeroUnary, GameObject),
+    GameFunction(GameNothing, "openMap", A2NothingUnary, GameBool | GameArray),
+    GameFunction(GameArray, "hcAllGroups", A2EmptyArrayUnary, GameObject),
+    GameFunction(GameScalar, "lnbCurSelRow", A2MinusOneUnary, GameScalar | GameArray),
+    GameFunction(GameNothing, "lnbClear", A2NothingUnary, GameScalar | GameArray),
+    GameFunction(GameScalar, "lnbAddRow", A2ZeroUnary, GameArray),
+    GameFunction(GameScalar, "lnbValue", A2ZeroUnary, GameArray),
+    GameFunction(GameString, "lnbData", A2TextLogEmpty, GameArray),
+    GameFunction(GameString, "lnbText", A2TextLogEmpty, GameArray),
+    GameFunction(GameNothing, "lnbSetValue", A2NothingUnary, GameArray),
+    GameFunction(GameNothing, "lnbSetData", A2NothingUnary, GameArray),
+    GameFunction(GameNothing, "lnbSetCurSelRow", A2NothingUnary, GameArray),
+    GameFunction(GameScalar, "lnbSize", A2ZeroUnary, GameScalar | GameArray),
+};
+
+const GameOperator A2Binary[] = {
+    GameOperator(GameScalar, "factor", function, A2Factor, GameScalar, GameArray),
+    GameOperator(GameScalar, "getFriend", function, A2GetFriend, GameSide, GameSide),
+    GameOperator(GameNothing, "setVariable", function, A2SetVariable, GameObject | GameGroup | GameString, GameArray),
+    GameOperator(GameAny, "getVariable", function, A2GetVariable, GameObject | GameGroup | GameString, GameString | GameArray),
+    GameOperator(GameString, "createSimpleTask", function, A2CreateSimpleTask, GameObject, GameArray),
+    GameOperator(GameNothing, "setSimpleTaskDescription", function, A2SetSimpleTaskDescription, GameString, GameArray),
+    GameOperator(GameNothing, "setSimpleTaskDestination", function, A2SetSimpleTaskDestination, GameString, GameArray),
+    GameOperator(GameNothing, "setTaskState", function, A2SetTaskState, GameString, GameString),
+    GameOperator(GameNothing, "setCurrentTask", function, A2SetCurrentTask, GameObject, GameString),
+    GameOperator(GameNothing, "removeSimpleTask", function, A2NothingBinary, GameObject, GameString),
+    GameOperator(GameString, "createDiaryRecord", function, A2CreateDiaryRecord, GameObject, GameArray),
+    GameOperator(GameString, "createDiarySubject", function, A2NothingBinary, GameObject, GameArray),
+    GameOperator(GameNothing, "selectDiarySubject", function, A2NothingBinary, GameObject, GameString),
+    GameOperator(GameNothing, "kbAddTopic", function, A2KbAddTopic, GameObject, GameArray),
+    GameOperator(GameNothing, "kbRemoveTopic", function, A2KbRemoveTopic, GameObject, GameString),
+    GameOperator(GameBool, "kbHasTopic", function, A2KbHasTopic, GameObject, GameString),
+    GameOperator(GameNothing, "kbTell", function, A2KbTell, GameObject, GameArray),
+    GameOperator(GameBool, "kbWasSaid", function, A2KbWasSaid, GameObject, GameArray),
+    GameOperator(GameBool, "kbAddDatabase", function, A2TrueBinary, GameObject, GameString),
+    GameOperator(GameBool, "kbAddDatabaseTargets", function, A2TrueBinary, GameObject, GameString),
+    GameOperator(GameNothing, "kbReact", function, A2NothingBinary, GameObject, GameArray),
+    GameOperator(GameScalar, "execFSM", function, A2ExecFSM, GameVoid, GameString),
+    GameOperator(GameAny, "getFSMVariable", function, A2GetFSMVariable, GameScalar, GameString),
+    GameOperator(GameNothing, "setFSMVariable", function, A2SetFSMVariable, GameScalar, GameArray),
+    GameOperator(GameNothing, "ppEffectAdjust", function, A2NothingBinary, GameString | GameScalar, GameArray),
+    GameOperator(GameNothing, "ppEffectCommit", function, A2NothingBinary, GameString | GameScalar | GameArray, GameScalar),
+    GameOperator(GameNothing, "ppEffectEnable", function, A2NothingBinary, GameString | GameScalar | GameArray, GameBool),
+    GameOperator(GameNothing, "setMarkerPosLocal", function, MarkerSetPos, GameString, GameArray),
+    GameOperator(GameNothing, "setMarkerTypeLocal", function, MarkerSetType, GameString, GameString),
+    GameOperator(GameNothing, "setMarkerSizeLocal", function, MarkerSetSize, GameString, GameArray),
+    GameOperator(GameNothing, "setMarkerColorLocal", function, MarkerSetColor, GameString, GameString),
+    GameOperator(GameNothing, "setMarkerTextLocal", function, MarkerSetText, GameString, GameString),
+    GameOperator(GameNothing, "setMarkerShapeLocal", function, MarkerSetShape, GameString, GameString),
+    GameOperator(GameNothing, "setMarkerBrushLocal", function, MarkerSetBrush, GameString, GameString),
+    GameOperator(GameNothing, "setMarkerDirLocal", function, MarkerSetDir, GameString, GameScalar),
+    GameOperator(GameNothing, "setMarkerAlpha", function, A2NothingBinary, GameString, GameScalar),
+    GameOperator(GameNothing, "setMarkerAlphaLocal", function, A2NothingBinary, GameString, GameScalar),
+    GameOperator(GameArray, "nearEntities", function, A2NearEntities, GameArray | GameObject, GameArray | GameScalar),
+    GameOperator(GameNothing, "setPosATL", function, A2SetPosATL, GameObject, GameArray),
+    GameOperator(GameNothing, "playMoveNow", function, A2PlayMoveNow, GameObject, GameString),
+    GameOperator(GameNothing, "playAction", function, A2NothingBinary, GameObject, GameString),
+    GameOperator(GameNothing, "playActionNow", function, A2NothingBinary, GameObject, GameString),
+    GameOperator(GameNothing, "switchAction", function, A2NothingBinary, GameObject, GameString),
+    GameOperator(GameNothing, "glanceAt", function, A2NothingBinary, GameObjectOrArray, GameObject | GameArray),
+    GameOperator(GameNothing, "forceSpeed", function, A2NothingBinary, GameObject, GameScalar),
+    GameOperator(GameNothing, "setUnitAbility", function, A2NothingBinary, GameObject, GameScalar),
+    GameOperator(GameNothing, "setUnitRank", function, A2NothingBinary, GameObject, GameString),
+    GameOperator(GameNothing, "setVehicleLock", function, A2SetVehicleLock, GameObject, GameString),
+    GameOperator(GameNothing, "setWaypointCompletionRadius", function, A2NothingBinary, GameArray, GameScalar),
+    GameOperator(GameNothing, "synchronizeObjectsAdd", function, A2NothingBinary, GameObject, GameArray),
+    GameOperator(GameNothing, "synchronizeObjectsRemove", function, A2NothingBinary, GameObject, GameArray),
+    GameOperator(GameNothing, "disableConversation", function, A2NothingBinary, GameObject, GameBool),
+    GameOperator(GameNothing, "setHit", function, A2NothingBinary, GameObject, GameArray),
+    GameOperator(GameNothing, "addPublicVariableEventHandler", function, A2NothingBinary, GameString, GameString),
+    GameOperator(GameNothing, "ctrlSetTooltip", function, A2NothingBinary, GameVoid, GameString),
+    GameOperator(GameNothing, "progressSetPosition", function, A2NothingBinary, GameVoid, GameScalar),
+    GameOperator(GameNothing, "setText", function, A2LocSetText, GameString, GameString),
+    GameOperator(GameNothing, "setType", function, A2LocSetType, GameString, GameString),
+    GameOperator(GameNothing, "setPosition", function, A2LocSetPosition, GameString, GameArray),
+    GameOperator(GameNothing, "setSize", function, A2LocSetSize, GameString, GameArray),
+    GameOperator(GameNothing, "setRectangular", function, A2NothingBinary, GameString, GameBool),
+    GameOperator(GameNothing, "setDirection", function, A2NothingBinary, GameString, GameScalar),
+    GameOperator(GameNothing, "moveInCargo", function, A2MoveInCargoIndex, GameObject, GameArray),
+    GameOperator(GameNothing, "enableSimulation", function, A2NothingBinary, GameObject, GameBool),
+    GameOperator(GameNothing, "hcSetGroup", function, A2NothingBinary, GameObject, GameArray),
+    GameOperator(GameNothing, "hcRemoveGroup", function, A2NothingBinary, GameObject, GameGroup),
+    GameOperator(GameNothing, "cutText", function, A2CutTextLayer, GameScalar, GameArray),
+    GameOperator(GameNothing, "cutRsc", function, A2CutRscLayer, GameScalar, GameArray),
+    GameOperator(GameNothing, "cutObj", function, A2CutObjLayer, GameScalar, GameArray),
+    GameOperator(GameNothing, "cutFadeOut", function, A2NothingBinary, GameScalar, GameScalar),
+    GameOperator(GameNothing, "setVehicleInit", function, A2SetVehicleInit, GameObject, GameString),
+    GameOperator(GameNothing, "attachTo", function, A2AttachTo, GameObject, GameArray),
+    GameOperator(GameNothing, "copyWaypoints", function, A2NothingBinary, GameGroup, GameGroup),
+    GameOperator(GameNothing, "setCurrentWaypoint", function, A2SetCurrentWaypoint, GameGroup, GameArray),
+    GameOperator(GameScalar, "emptyPositions", function, A2EmptyPositions, GameObject, GameString),
+    GameOperator(GameNothing, "useAudioTimeForMoves", function, A2NothingBinary, GameObject, GameBool),
+    GameOperator(GameScalar, "displayAddEventHandler", function, A2ZeroBinary, GameAny, GameArray),
+    GameOperator(GameNothing, "displayRemoveEventHandler", function, A2NothingBinary, GameAny, GameArray),
+    GameOperator(GameScalar, "ctrlAddEventHandler", function, A2ZeroBinary, GameAny, GameArray),
+    GameOperator(GameNothing, "ctrlRemoveEventHandler", function, A2NothingBinary, GameAny, GameArray),
+    GameOperator(GameArray, "selectionPosition", function, A2ZeroPos, GameObject, GameString),
+    GameOperator(GameNothing, "hcSelectGroup", function, A2NothingBinary, GameObject, GameArray),
+    GameOperator(GameNothing, "lnbSetColumnsPos", function, A2NothingBinary, GameScalar, GameArray),
+    GameOperator(GameNothing, "setVehicleArmor", function, A2NothingBinary, GameObject, GameScalar),
+    GameOperator(GameNothing, "lockCargo", function, A2NothingBinary, GameObject, GameBool | GameArray),
+    GameOperator(GameNothing, "lockDriver", function, A2NothingBinary, GameObject, GameBool),
+    GameOperator(GameNothing, "lockTurret", function, A2NothingBinary, GameObject, GameArray),
+};
+} // namespace
+
+INIT_MODULE(GameStateExtA2, 3)
+{
+    for (const GameNular& n : A2Nular)
+        GGameState.NewNularOp(n);
+    for (const GameFunction& f : A2Unary)
+        GGameState.NewFunction(f);
+    for (const GameOperator& o : A2Binary)
+        GGameState.NewOperator(o);
+};

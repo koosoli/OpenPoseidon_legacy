@@ -1,5 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
+#include <Poseidon/Graphics/Rendering/Draw/FontMapping.hpp>
 
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
@@ -7,6 +9,7 @@
 #include <Poseidon/UI/LocalMapWorlds.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <algorithm>
+#include <set>
 #include <string>
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 #include <string.h>
@@ -20,6 +23,7 @@
 
 namespace Poseidon
 {
+RString GetMissionDirectory(); // OptionsUI.cpp
 
 FontID GetFontID(RString baseName)
 {
@@ -40,6 +44,21 @@ FontID GetFontID(RString baseName)
         {
             lookupName = *entry;
             langID = Poseidon::Foundation::GetLangID();
+        }
+    }
+    if (Poseidon::Arma1Compat::Active())
+    {
+        // Arma 1 font families (BitStream, Zeppelin32, ...) have no CWA atlas: keep the
+        // text visible with CWA's own UI font instead of drawing nothing.
+        RString low = lookupName;
+        low.Lower();
+        const RString fxy = GetDefaultName(lookupName, "fonts\\", "") + RString(".fxy");
+        if (!FindFontMapping(low) && !QIFStreamB::FileExist(fxy))
+        {
+            static std::set<std::string> reported;
+            if (reported.insert((const char*)low).second)
+                LOG_INFO(Mission, "Arma 1: font '{}' is drawn with CWA's tahomaB24", (const char*)lookupName);
+            lookupName = "tahomaB24";
         }
     }
     return FontID(GetDefaultName(lookupName, "fonts\\", ""), langID);
@@ -221,6 +240,9 @@ LSError SoundPars::Serialize(ParamArchive& ar)
 
 RString GetWorldName(RString baseName)
 {
+    // --arma1: a world name inside an Arma 1 mission can mean a different island than
+    // the CWA class of the same name ("intro"). Identity otherwise.
+    baseName = Arma1Compat::WorldClassForMission(baseName, GetMissionDirectory());
     if (IsLocalMapWorldIdentifier(baseName.Data()))
     {
         // Preserve reserved identities even when their source metadata is missing.

@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <cstdlib>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -45,6 +46,17 @@
 #endif
 
 #include <Poseidon/Foundation/Math/Statistics.hpp>
+
+namespace
+{
+// Editor-given names (units, vehicles, triggers) are read-only in OFP; Arma 1
+// missions reassign them ("defend=0" for a trigger named defend), so under
+// --arma1 they are ordinary variables.
+inline bool EditorNamesReadOnly()
+{
+    return !Poseidon::Arma1Compat::Active();
+}
+} // namespace
 
 using namespace Poseidon;
 bool IsDedicatedServer();
@@ -1835,7 +1847,7 @@ Entity* Entity::CreateObject(NetworkMessageContext& ctx)
     if (name.GetLength() > 0)
     {
         veh->SetVarName(name);
-        GWorld->GetGameState()->VarSet(name, GameValueExt(veh), true);
+        GWorld->GetGameState()->VarSet(name, GameValueExt(veh), EditorNamesReadOnly());
     }
 
     NetworkId objectId;

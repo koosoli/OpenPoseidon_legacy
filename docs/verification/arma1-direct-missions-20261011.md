@@ -66,12 +66,86 @@ mounted, `Sara` world class registered, `AH1W` represented by `Cobra`, mission p
 7 groups / 21 markers, Sahrani loaded in 1.7 s, `InitVehicles ok=1`. The owner played it for
 about seven minutes; normal shutdown (exit code 0), no script or mission errors in the log.
 
+## All-missions run, 2026-10-11 22:32 (binary 2241051, stamped in the game folder)
+
+131 missions (campaigns ca/ra/Merc, armory, `Missions\*`, `MPMissions\*`), each started with
+`--arma1-mission <m> --arma1-test-seconds 25`, one screenshot at 20 s. "Entered" = the
+mission booted and the runtime ran; "clean" = no script error until the test ended.
+
+| binary | entered | clean (exit 0) | not booted |
+|---|---|---|---|
+| 550a359 (baseline) | 17 | – | 114 |
+| 2241051 | 91 | 74 | 40 |
+| f498083 | 129 | 117 | 2 |
+| f11c945 (2026-10-12 00:43, stamped) | 130 | 122 | 1 |
+| 9cfe1ef (2026-10-12 07:09, stamped) | 130 | 127 | 1 |
+| fcd1a51 (2026-10-12 08:26, stamped) | 130 | 128 | 1 |
+| 8edc850 (2026-10-12 09:30, stamped) | 130 | 129 | 1 |
+| 212decb (2026-10-12 11:00, stamped) | 131 | 131 | 0 |
+
+Fixed between the two: crashes in `Building`/`AILocker`/`OperField` (generated `A1x_`
+classes inherited scope 0 from abstract CWA bases, so the type was no `BuildingType`);
+groups above 12 crew seats (now split); unknown addons refusing the mission; binarised
+`mission.sqm`; ~40 missing A1 script commands; Arma 1 `CfgSounds`; the strategic map
+dialogs (`findDisplay`/`displayCtrl`/binary `ctrl*`).
+
+Fixed after that run (f498083, not yet measured): Arma 1 weapon/magazine names in cargo,
+pool and `addWeapon`/`addMagazine` (the remaining `Size: missing entry 'muzzles'/'modes'`
+refusals), `init.sqf` scheduled like Arma 1 (comments, sleep), `switch/case/default`,
+`isKindOf`, `compile`, `preprocessFileLineNumbers`, `distance` with positions,
+`moveInTurret`, `createUnit` on a group, `str`, `date`, multiplayer missions started alone
+play their first playable unit.
+
+Remaining on f11c945 and the commit that addresses each (built, not yet measured):
+s03dolores / fos_lament crash in `FileCache::Find` from a sound-preload worker (d8f2e36);
+RA_M03 `switch` with sleeping cases (1c66833); m13/m14 `while` with sleep/`exitWith` in
+scheduled code (26268f0, e104692); mp23 `parseText` (e104692); 03CAMP `enableAI` (1c66833).
+Strategic-map labels now render (c991c58); its mission icons draw as pictures (328230a).
+
+On 9cfe1ef the four left are: armory1 (config script commands, not implemented),
+un-impossible_mission (third-party addon BBB006), m13 (`animationState`) and mp23
+(`composeText`/`lineBreak`) -- the last two added in d9990e5. Since then also d512c1b:
+constant arithmetic in config values (`style = ST_LEFT + ST_MULTI`), which makes the
+strategic map's overview wrap over several lines.
+
+On fcd1a51 three are left: armory1 (config script commands), un-impossible_mission
+(third-party addon) and m13, whose `while` sleeps inside a `forEach` body -- compiled
+since 157bd71 (not yet measured).
+
+On 8edc850 only two remain: armory1.intro (config script commands such as
+`configFile >> ..` / `getText`, not implemented) and un-impossible_mission (needs the
+third-party addon class BBB006).
+
+On 212decb every one of the 131 missions boots and runs its 25 s without a script
+error. f68e88c (installed afterwards, armory-only re-run) adds the remaining commands the
+Armory scripts call.
+
+## Closing status (2026-10-12)
+
+What the automated run proves: each mission loads (world, units, objects, scripts,
+briefing path) and runs 25 s with no script error, crash or hang. What it does not prove:
+
+- **Mission completion.** No mission was played to its end; outros, debriefings and the
+  step from one campaign mission to the next were checked by hand only for the start of
+  campaign `ca` (intro, briefing) and M09.
+- **Multiplayer.** MP missions ran alone (first playable unit as player). No network game.
+- **Armory (armory1.intro).** Loads and runs without errors, but the Armory library dialog
+  does not appear within 65 s (camera at sea, cinema borders still on): its init does not
+  reach `createDialog "RscLibrary_Main"` in that time, and the dialog uses Arma 1 control
+  types (structured text, controls groups) the CWA UI does not have. Not functional.
+- **Stand-ins / no-ops.** Classes from addons that are not installed (BBB006, BBB007,
+  AAA739 in un-impossible_mission) are replaced by a plain unit of the same side or a game
+  logic. Commands accepted without effect: particle sources, lights, setRank, enableAI,
+  setAperture, enableTeamSwitch, camSetFocus, setCameraInterest, ctrlSetEventHandler,
+  ctrlSetFocus, doFSM/execFSM (FSMs do not run), scopeName/breakOut/breakTo.
+  ctrlSetFade shows/hides on commit (no fading). Structured text is shown as plain text.
+- **UI.** Arma 1 font families are drawn with tahomaB24. The strategic map's overview
+  box stays empty (its text goes to a single-line control).
+- **Vehicles and animations.** Driving (HMMWV), flying (UH-60, OH-58 incl. AI), boarding
+  and the Arma 1 soldier animations were checked with dedicated test missions; not every
+  vehicle type and crew position was checked individually.
+
 ## Known gaps (honest list)
 
-- Arma 1 radio/sound classes defined only in Arma 1's global config (e.g. M09's
-  `sideRadio "M09r0x"`, trigger sound `HedgeSparrow`) are not available.
-- The mission starts directly (autotest path), without the briefing screen; the briefing
-  is reachable from the in-game map/notebook.
-- No Arma 1 models for units or vehicles yet (owner's choice for this slice: CWA
-  counterparts first). Terrain objects (buildings, trees, roads) are Arma 1's own.
-- Campaign flow (`class Campaign`, progression between missions) is not implemented.
+- Missions needing third-party addons (`un-impossible_mission.cain`: `BBB006`) cannot run.
+- No fading for `ctrlSetFade` (shown/hidden on commit), no team switch, no aperture.

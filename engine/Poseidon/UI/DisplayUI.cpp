@@ -21,6 +21,7 @@
 #include <Poseidon/Foundation/Strings/StrFormat.hpp>
 
 #include <Poseidon/Game/Scripting/Scripts.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 
 #include <SDL3/SDL_scancode.h>
 #include <Poseidon/Foundation/Common/Win.h>
@@ -130,7 +131,14 @@ void RunInitScript()
 
     // Also run init.sqf if present (SQF format, unscheduled execution)
     RString initSqf = GetMissionDirectory() + RString("init.sqf");
-    if (QIFStreamB::FileExist(initSqf))
+    if (Arma1Compat::Active() && QIFStreamB::FileExist(initSqf))
+    {
+        // Arma 1 runs init.sqf scheduled (execVM): comments, sleep and waitUntil work.
+        if (GameState* gs = GWorld->GetGameState())
+            gs->Execute("[] execVM \"init.sqf\"");
+        GWorld->SimulateScripts();
+    }
+    else if (QIFStreamB::FileExist(initSqf))
     {
         QIFStreamB in;
         in.AutoOpen(initSqf);

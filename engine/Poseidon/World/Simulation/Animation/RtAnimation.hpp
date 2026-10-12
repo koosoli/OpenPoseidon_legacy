@@ -301,10 +301,12 @@ class AnimationRT: public RefCount, public CLDLink
 	(
 		Matrix4 &mat, float time, const AnimationRTWeight &wgt
 	) const;
+	// `origin`: where the source model's origin lies in the shape's coordinates
+	// (LODShape::AnimationOrigin); the pose is applied about it. Zero for OFP shapes.
 	Vector3 Point
 	(
 		const WeightInfo &lWeights, LODShape *lShape, int level,
-		float time, int index
+		float time, int index, Vector3Par origin = VZero
 	) const;
 	const AnimationRTName &GetName() const {return _name;}
 	const char *Name() const {return _name.name;}

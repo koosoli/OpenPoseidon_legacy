@@ -540,6 +540,35 @@ void AnimationRTCache::Load(AnimationRT* anim)
 
 static AnimationRTCache GAnimationRTCache;
 
+// An Arma 2 binarised animation (BMTR) in `in`, converted to plain RTM bytes in `out`.
+// False (stream rewound) for anything else.
+static bool BinarisedToRtm(QIStream& in, std::string& out)
+{
+    const int start = in.tellg();
+    char magic[4] = {};
+    in.read(magic, 4);
+    const bool binarised = !in.fail() && std::memcmp(magic, "BMTR", 4) == 0;
+    in.seekg(start, QIOS::beg);
+    if (!binarised)
+        return false;
+    std::vector<uint8_t> bytes;
+    bytes.reserve(static_cast<size_t>(std::max(0, in.rest())));
+    while (true)
+    {
+        const int c = in.get();
+        if (in.eof() || in.fail() || c < 0)
+            break;
+        bytes.push_back(static_cast<uint8_t>(c));
+    }
+    if (!Poseidon::Asset::Formats::ConvertBMTRToRTM(bytes.data(), bytes.size(), out))
+    {
+        LOG_ERROR(Physics, "Binarised animation could not be read ({} bytes)", bytes.size());
+        out.clear();
+        return false;
+    }
+    return true;
+}
+
 void AnimationRT::FullLoad(Skeleton* skelet, const char* file)
 {
     QIFStreamB in;
@@ -551,7 +580,15 @@ void AnimationRT::FullLoad(Skeleton* skelet, const char* file)
     }
 
     Poseidon::Asset::Formats::RTMAnimation rtm;
-    if (!Poseidon::Asset::Formats::readRTM(in, rtm))
+    std::string bmtr; // Arma 2 binarised animation, converted (RTMReader.hpp)
+    QIStream converted;
+    QIStream* source = &in;
+    if (BinarisedToRtm(in, bmtr))
+    {
+        converted.init(bmtr.data(), static_cast<int>(bmtr.size()));
+        source = &converted;
+    }
+    if (!Poseidon::Asset::Formats::readRTM(*source, rtm))
     {
         ErrorMessage("Bad animation file format in file '%s'.", file);
         return;
@@ -729,6 +766,14 @@ void AnimationRT::Load(Skeleton* skelet, const char* file, bool reversed)
         _nPhases = 1;
         _loadCount = 0;
 
+        return;
+    }
+    std::string bmtr; // Arma 2 binarised animation, converted (RTMReader.hpp)
+    if (BinarisedToRtm(in, bmtr))
+    {
+        QIStream converted;
+        converted.init(bmtr.data(), static_cast<int>(bmtr.size()));
+        Load(converted, skelet, file, reversed);
         return;
     }
     Load(in, skelet, file, reversed);
@@ -1276,7 +1321,8 @@ void AnimationRT::PrepareMatrices(Matrix4Array& matrix, float time, float factor
     }
 }
 
-Vector3 AnimationRT::Point(const WeightInfo& lWeights, LODShape* lShape, int level, float time, int index) const
+Vector3 AnimationRT::Point(const WeightInfo& lWeights, LODShape* lShape, int level, float time, int index,
+                           Vector3Par origin) const
 {
     if (index < 0)
     {
@@ -1318,7 +1364,7 @@ Vector3 AnimationRT::Point(const WeightInfo& lWeights, LODShape* lShape, int lev
     shape->SaveOriginalPos();
 
     PoseidonAssert(lShape->BoundingCenter().SquareSize() < 1e-10);
-    Vector3 pos = shape->OrigPos(index);
+    Vector3 pos = shape->OrigPos(index) - origin;
 
     Vector3 res = VZero;
     float f1 = 1 - interpol;
@@ -1336,7 +1382,7 @@ Vector3 AnimationRT::Point(const WeightInfo& lWeights, LODShape* lShape, int lev
     }
 
     PoseidonAssert(lShape->BoundingCenter().SquareSize() < 1e-10);
-    return res;
+    return res + origin; // the weights sum to one
 }
 
 void AnimationRT::Matrix(Matrix4& mat, float time, const AnimationRTWeight& wgt) const

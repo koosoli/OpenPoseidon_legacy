@@ -61,6 +61,7 @@ using namespace Poseidon;
 #include <vector>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Framework/AppFrame.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/Types/LLinks.hpp>
@@ -488,6 +489,81 @@ void StartCampaign(RString campaign, Display* disp)
     SaveMission(buffer);
 
     StartMission(disp, true);
+}
+
+// Starts `campaign` at the mission whose template is `missionTemplate` (case-insensitive,
+// e.g. "m09convoyattack.sara"): the campaign flow then continues from there exactly as
+// if the player had reached it (briefing, debriefing, next mission by the end class).
+// An empty or unknown template starts at the campaign's first mission.
+bool StartCampaignAt(RString campaign, RString missionTemplate, Display* disp)
+{
+    if (missionTemplate.GetLength() == 0)
+    {
+        StartCampaign(campaign, disp);
+        return CurrentBattle.GetLength() > 0;
+    }
+    if (!disp)
+    {
+        disp = dynamic_cast<Display*>(GWorld->Options());
+    }
+    if (!disp)
+    {
+        return false;
+    }
+    SetCampaign(campaign);
+    const ParamEntry* campaignCls = ExtParsCampaign.FindEntry("Campaign");
+    if (!campaignCls || !campaignCls->IsClass())
+    {
+        return false;
+    }
+    RString battle, mission;
+    for (int i = 0; i < campaignCls->GetEntryCount() && battle.GetLength() == 0; i++)
+    {
+        const ParamEntry& battleCls = campaignCls->GetEntry(i);
+        if (!battleCls.IsClass())
+        {
+            continue;
+        }
+        for (int j = 0; j < battleCls.GetEntryCount(); j++)
+        {
+            const ParamEntry& missionCls = battleCls.GetEntry(j);
+            if (!missionCls.IsClass())
+            {
+                continue;
+            }
+            const ParamEntry* templ = missionCls.FindEntry("template");
+            if (templ && !templ->IsClass() && !templ->IsArray() &&
+                strcmpi((const char*)templ->GetValueRaw(), (const char*)missionTemplate) == 0)
+            {
+                battle = battleCls.GetName();
+                mission = missionCls.GetName();
+                break;
+            }
+        }
+    }
+    if (battle.GetLength() == 0)
+    {
+        // Not part of the campaign's flow (Arma 1 ships stand-alone copies of some
+        // campaign missions inside the campaign archive): the caller plays it alone.
+        LOG_INFO(Mission, "Campaign '{}' has no mission with template '{}'", (const char*)campaign,
+                 (const char*)missionTemplate);
+        return false;
+    }
+    CurrentBattle = battle;
+    CurrentMission = mission;
+
+    Glob.header.playerSide = TWest;
+    GStats.ClearAll();
+    GetGCampaignHistory().Clear(CurrentCampaign);
+    GetGCampaignHistory().campaignName = CurrentCampaign;
+
+    RString dir = GetTmpSaveDirectory();
+    char buffer[256];
+    snprintf(buffer, sizeof(buffer), "%s%s.sqc", (const char*)dir, (const char*)CurrentCampaign);
+    SaveMission(buffer);
+
+    StartMission(disp, false);
+    return true;
 }
 
 static void UpdateUserProfile()

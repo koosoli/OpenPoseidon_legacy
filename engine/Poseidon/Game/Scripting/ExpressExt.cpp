@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Evaluator/express.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 
@@ -159,10 +160,17 @@ void GameStateStringtableInfoFunctions::DisplayErrorMessage(const char* position
         return;
     }
 #endif
-    // An Arma 1 mission is started through the autotest path (--arma1-mission) but is played, not
-    // tested: the original's scripts use names and idioms this engine rejects, and one such line
-    // must not end the mission. It is reported like any other script error below.
-    if (AutoTest && !Poseidon::Arma1Compat::Active())
+    if (AutoTest && Poseidon::Arma1Compat::Generation() == 2)
+    {
+        // Arma 2 test runs (--arma2-test-seconds) collect every error of a mission in one
+        // pass instead of stopping at the first: the content still has gaps, and a run
+        // that names all of them is worth more than one that names the first.
+        LOG_WARN(Script, "Script error at '{}': {} (arma2 test: mission continues)", position, error);
+    }
+    // An Arma 1 mission is started through the autotest path (--arma1-mission) but is played,
+    // not tested: one rejected line of the original's scripts must not end the mission. It is
+    // reported like any other script error below.
+    else if (AutoTest && !Poseidon::Arma1Compat::Active())
     {
         // Test mode: surface every SQF/SQS error as a hard failure so the
         // test reports it instead of silently timing out.  Logging at
@@ -170,6 +178,7 @@ void GameStateStringtableInfoFunctions::DisplayErrorMessage(const char* position
         // its shutdown sequence (incl. test-mission cleanup, so we don't
         // pollute packages/<pkg>/Missions/).
         LOG_ERROR(Script, "Script error at '{}': {} (test mode — aborting)", position, error);
+        GameState::s_abortLoops = true;
         if (Poseidon::GApp)
         {
             if (Poseidon::GApp->m_exitCode == 0)

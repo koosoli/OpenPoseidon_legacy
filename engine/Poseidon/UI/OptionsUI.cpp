@@ -1,5 +1,6 @@
 
 #include <Poseidon/UI/Options/OptionsShell.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/Game/Mission/MissionPathLoader.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -300,7 +301,7 @@ void FindEnvSound(RString name, SoundPars& day, SoundPars& night)
     // find in mission
     const ParamEntry* cls = ExtParsMission.FindEntry("CfgEnvSounds");
     const ParamEntry* entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         GetValue(day, (*entry) >> "sound");
         if (day.name.GetLength() > 0)
@@ -318,7 +319,7 @@ void FindEnvSound(RString name, SoundPars& day, SoundPars& night)
     // find in campaign
     cls = ExtParsCampaign.FindEntry("CfgEnvSounds");
     entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         GetValue(day, (*entry) >> "sound");
         if (day.name.GetLength() > 0)
@@ -336,10 +337,18 @@ void FindEnvSound(RString name, SoundPars& day, SoundPars& night)
     // find in config
     cls = Pars.FindEntry("CfgEnvSounds");
     entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         GetValue(day, (*entry) >> "sound");
         GetValue(night, (*entry) >> "soundNight");
+        return;
+    }
+
+    // Arma 1 content (--arma1): its global config is the last place to look.
+    if (const ParamEntry* a1 = Arma1Compat::FindConfigClass("CfgEnvSounds", name); a1 && a1->IsClass())
+    {
+        GetValue(day, (*a1) >> "sound");
+        GetValue(night, (*a1) >> "soundNight");
         return;
     }
 
@@ -359,7 +368,7 @@ void FindSFX(RString name, SoundEntry& emptySound, AutoArray<SoundEntry>& sounds
     // find in mission
     const ParamEntry* cls = ExtParsMission.FindEntry("CfgSFX");
     const ParamEntry* entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         // load empty sound
         emptySound = DynSound::LoadEntry((*entry) >> "empty");
@@ -389,7 +398,7 @@ void FindSFX(RString name, SoundEntry& emptySound, AutoArray<SoundEntry>& sounds
     // find in campaign
     cls = ExtParsCampaign.FindEntry("CfgSFX");
     entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         // load empty sound
         emptySound = DynSound::LoadEntry((*entry) >> "empty");
@@ -419,7 +428,7 @@ void FindSFX(RString name, SoundEntry& emptySound, AutoArray<SoundEntry>& sounds
     // find in config
     cls = Pars.FindEntry("CfgSFX");
     entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         // load empty sound
         emptySound = DynSound::LoadEntry((*entry) >> "empty");
@@ -434,6 +443,20 @@ void FindSFX(RString name, SoundEntry& emptySound, AutoArray<SoundEntry>& sounds
             sound = DynSound::LoadEntry((*entry) >> name);
         }
         return; // Pars.GetName();
+    }
+
+    if (const ParamEntry* a1 = Arma1Compat::FindConfigClass("CfgSFX", name); a1 && a1->IsClass())
+    {
+        emptySound = DynSound::LoadEntry((*a1) >> "empty");
+        const ParamEntry& list = (*a1) >> "sounds";
+        int n = list.GetSize();
+        sounds.Resize(n);
+        for (int i = 0; i < n; i++)
+        {
+            RString soundName = list[i];
+            sounds[i] = DynSound::LoadEntry((*a1) >> soundName);
+        }
+        return;
     }
 
     Poseidon::Foundation::WarningMessage("SFX %s not found", (const char*)name);
@@ -461,7 +484,7 @@ const ParamEntry* FindSound(RString name, SoundPars& pars)
     // find in mission
     const ParamEntry* cls = ExtParsMission.FindEntry("CfgSounds");
     const ParamEntry* entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         GetValue(pars, (*entry) >> "sound");
         if (pars.name.GetLength() > 0)
@@ -478,7 +501,7 @@ const ParamEntry* FindSound(RString name, SoundPars& pars)
     // find in campaign
     cls = ExtParsCampaign.FindEntry("CfgSounds");
     entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         GetValue(pars, (*entry) >> "sound");
         if (pars.name.GetLength() > 0)
@@ -492,7 +515,7 @@ const ParamEntry* FindSound(RString name, SoundPars& pars)
     // find in config
     cls = Pars.FindEntry("CfgSounds");
     entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         GetValue(pars, (*entry) >> "sound");
         return entry;
@@ -503,6 +526,12 @@ const ParamEntry* FindSound(RString name, SoundPars& pars)
     // through LOG_WARN rather than WarningMessage — the latter is a no-op in the
     // shipping app frame, which is why a bad `say`/sound surfaced only as the
     // file server's context-free "Empty or nullptr name not allowed".)
+    if (const ParamEntry* a1 = Arma1Compat::FindConfigClass("CfgSounds", name); a1 && a1->IsClass())
+    {
+        GetValue(pars, (*a1) >> "sound");
+        return a1;
+    }
+
     LOG_WARN(Audio, "Sound '{}' not found in any CfgSounds — nothing will play", (const char*)name);
 #if POSEIDON_DIAG
     Dev::OpDiag::OnSoundMissing("CfgSounds", (const char*)name); // DIAG-001
@@ -515,7 +544,7 @@ const ParamEntry* FindMusic(RString name, SoundPars& pars)
     // find in mission
     const ParamEntry* cls = ExtParsMission.FindEntry("CfgMusic");
     const ParamEntry* entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         GetValue(pars, (*entry) >> "sound");
         if (pars.name.GetLength() > 0)
@@ -528,7 +557,7 @@ const ParamEntry* FindMusic(RString name, SoundPars& pars)
     // find in campaign
     cls = ExtParsCampaign.FindEntry("CfgMusic");
     entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         GetValue(pars, (*entry) >> "sound");
         if (pars.name.GetLength() > 0)
@@ -541,10 +570,16 @@ const ParamEntry* FindMusic(RString name, SoundPars& pars)
     // find in config
     cls = Pars.FindEntry("CfgMusic");
     entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         GetValue(pars, (*entry) >> "sound");
         return entry;
+    }
+
+    if (const ParamEntry* a1 = Arma1Compat::FindConfigClass("CfgMusic", name); a1 && a1->IsClass())
+    {
+        GetValue(pars, (*a1) >> "sound");
+        return a1;
     }
 
     Poseidon::Foundation::WarningMessage("Music %s not found", (const char*)name);
@@ -556,7 +591,7 @@ const ParamEntry* FindRadio(RString name, SoundPars& pars)
     // find in mission
     const ParamEntry* cls = ExtParsMission.FindEntry("CfgRadio");
     const ParamEntry* entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         GetValue(pars, (*entry) >> "sound");
         if (pars.name.GetLength() > 0)
@@ -570,7 +605,7 @@ const ParamEntry* FindRadio(RString name, SoundPars& pars)
     // find in campaign
     cls = ExtParsCampaign.FindEntry("CfgRadio");
     entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         GetValue(pars, (*entry) >> "sound");
         if (pars.name.GetLength() > 0)
@@ -584,10 +619,16 @@ const ParamEntry* FindRadio(RString name, SoundPars& pars)
     // find in config
     cls = Pars.FindEntry("CfgRadio");
     entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         GetValue(pars, (*entry) >> "sound");
         return entry;
+    }
+
+    if (const ParamEntry* a1 = Arma1Compat::FindConfigClass("CfgRadio", name); a1 && a1->IsClass())
+    {
+        GetValue(pars, (*a1) >> "sound");
+        return a1;
     }
 
     Poseidon::Foundation::WarningMessage("Radio message %s not found", (const char*)name);
@@ -759,7 +800,7 @@ const ParamEntry* FindRscTitle(RString name)
     // find in mission
     const ParamEntry* cls = ExtParsMission.FindEntry("RscTitles");
     const ParamEntry* entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         return entry;
     }
@@ -767,7 +808,7 @@ const ParamEntry* FindRscTitle(RString name)
     // find in campaign
     cls = ExtParsCampaign.FindEntry("RscTitles");
     entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         return entry;
     }
@@ -775,7 +816,7 @@ const ParamEntry* FindRscTitle(RString name)
     // find in resource
     cls = Res.FindEntry("RscTitles");
     entry = cls ? cls->FindEntry(name) : nullptr;
-    if (entry)
+    if (entry && entry->IsClass())
     {
         return entry;
     }
@@ -1416,7 +1457,11 @@ GameValue PoolAddWeapon(const GameState* state, GameValuePar oper1)
         return GameValue();
     }
 
-    RString name = array[0];
+    RString name = Arma1Compat::ResolveWeaponClass(RString(array[0])); // identity unless --arma1
+    if (Arma1Compat::Active() && !(Pars >> "CfgWeapons").FindEntry(name))
+    {
+        return GameValue();
+    }
     int count = toInt((float)array[1]);
 
     int i = GetGCampaignHistory().battles.Size() - 1;
@@ -1444,7 +1489,11 @@ GameValue PoolAddMagazine(const GameState* state, GameValuePar oper1)
         return GameValue();
     }
 
-    RString name = array[0];
+    RString name = Arma1Compat::ResolveMagazineClass(RString(array[0])); // identity unless --arma1
+    if (Arma1Compat::Active() && !(Pars >> "CfgWeapons").FindEntry(name))
+    {
+        return GameValue();
+    }
     int count = toInt((float)array[1]);
 
     int i = GetGCampaignHistory().battles.Size() - 1;

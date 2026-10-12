@@ -1512,39 +1512,26 @@ void SoundSystemOAL::PreloadWave(const char* name)
         return;
     }
 
-    auto work = [this, path = std::string(name)]()
+    // Loading goes through the FileCache, which is main-thread only: an Arma 1 mission's
+    // preloads raced it from a pool worker (0xC0000005 in FileCache::Find). The waves
+    // preloaded here are short effects, so they are read and decoded right here.
+    Ref<WaveStream> stream = SoundLoadFile(name);
+    if (!stream)
     {
-        Ref<WaveStream> stream = SoundLoadFile(path.c_str());
-        if (!stream)
-        {
-            LOG_DEBUG(Audio, "PreloadWave: '{}' not found", path.c_str());
-            return;
-        }
-        const int size = stream->GetUncompressedSize();
-        if (size <= 0 || static_cast<size_t>(size) > Audio::PcmCache::kMaxEntryBytes)
-        {
-            return; // oversized waves decode async at play time instead
-        }
-        auto entry = std::make_shared<Audio::PcmCache::Entry>();
-        stream->GetFormat(entry->fmt);
-        entry->uncompressedSize = static_cast<unsigned int>(size);
-        entry->pcm.assign(static_cast<size_t>(size), 0);
-        stream->GetData(entry->pcm.data(), 0, size);
-        _pcmCache.Insert(path.c_str(), std::move(entry));
-    };
-
-    // The system can be torn down (device switch / shutdown) while a
-    // worker holds the lambda; the mission-load call site runs inside
-    // the loading screen where that cannot happen, but guard the late
-    // case by running synchronously when no pool exists.
-    if (auto* pool = GetGlobalTaskPool())
-    {
-        pool->Submit(work);
+        LOG_DEBUG(Audio, "PreloadWave: '{}' not found", name);
+        return;
     }
-    else
+    const int size = stream->GetUncompressedSize();
+    if (size <= 0 || static_cast<size_t>(size) > Audio::PcmCache::kMaxEntryBytes)
     {
-        work();
+        return; // oversized waves decode async at play time instead
     }
+    auto entry = std::make_shared<Audio::PcmCache::Entry>();
+    stream->GetFormat(entry->fmt);
+    entry->uncompressedSize = static_cast<unsigned int>(size);
+    entry->pcm.assign(static_cast<size_t>(size), 0);
+    stream->GetData(entry->pcm.data(), 0, size);
+    _pcmCache.Insert(name, std::move(entry));
 }
 void SoundSystemOAL::StartCategoryPreview(WaveKind kind)
 {

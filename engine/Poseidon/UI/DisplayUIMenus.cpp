@@ -931,6 +931,27 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
     _compass->ShowCtrl(GWorld->HasCompass());
     _watch->ShowCtrl(GWorld->HasWatch());
 
+    // --arma1-test-seconds: play the mission for N wall-clock seconds, then leave.
+    if (const float testSeconds = AppConfig::Instance().GetArma1TestSeconds(); testSeconds > 0.0f)
+    {
+        static DWORD testStart = 0;
+        const DWORD now = Poseidon::Foundation::GlobalTickCount();
+        if (testStart == 0)
+        {
+            testStart = now;
+            LOG_INFO(Core, "ARMA1-TEST mission runtime entered ({}.{})", (const char*)Glob.header.filename,
+                     (const char*)Glob.header.worldname);
+        }
+        else if (now - testStart >= static_cast<DWORD>(testSeconds * 1000.0f))
+        {
+            LOG_INFO(Core, "ARMA1-TEST PASS ({}.{}) played {} s", (const char*)Glob.header.filename,
+                     (const char*)Glob.header.worldname, testSeconds);
+            testStart = 0xFFFFFFFF;
+            GApp->m_exitCode = 0;
+            GApp->m_closeRequest = true;
+        }
+    }
+
     if (AppConfig::Instance().IsMissionSmokeCheck() && !_missionSmokeReported)
     {
         std::string missionName =
@@ -2092,6 +2113,25 @@ void StartMission()
         return;
     }
     options->CreateChild(new DisplayMission(options));
+}
+
+// Plays the mission selected by ProcessFullName the way the single-mission menu
+// does: its intro (if any), then the briefing, then the mission (--arma1-mission).
+bool StartMissionWithBriefing()
+{
+    CurrentTemplate.Clear();
+    if (GWorld->UI())
+    {
+        GWorld->UI()->Init();
+    }
+    GStats.ClearAll();
+    Display* options = dynamic_cast<Display*>(GWorld->Options());
+    if (!options)
+    {
+        return false;
+    }
+    options->CreateChild(new DisplayIntro(options));
+    return true;
 }
 
 bool StartAutoTest()

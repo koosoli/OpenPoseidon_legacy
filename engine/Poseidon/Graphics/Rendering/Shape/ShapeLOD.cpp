@@ -676,6 +676,7 @@ void LODShape::DoClear()
     _mapType = MapHide;
     _boundingCenter = VZero;
     _geometryCenter = VZero;
+    _animationOrigin = VZero;
     _boundingSphere = 0;
     _minMax[0] = VZero;
     _minMax[1] = VZero;

@@ -1,6 +1,9 @@
 
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Game/Scripting/Scripts.hpp>
+#include <functional>
+#include <string>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/AI/AI.hpp>
@@ -484,6 +487,10 @@ bool Script::SimulateBody()
         LOG_DEBUG(Script, "Script paused after {} ms", time - timeStart);
     }
 #endif
+    // Arma 2 spawned code may reassign _this ("_this = _this select 0; waitUntil {...}");
+    // keep what it assigned for the next step instead of restoring the spawn argument.
+    if (Poseidon::Arma1Compat::Generation() == 2)
+        _argument = gstate->VarGet("_this");
     return _currentLine >= _lines.Size();
 }
 
@@ -767,6 +774,277 @@ bool UnwrapBraces(const std::string& s, std::string& body)
     body = s.substr(1, s.size() - 2);
     return true;
 }
+
+// The balanced {..} / (..) / [..] starting at s[pos] (pos at the opening bracket); its inner
+// text in `inner`, pos moved past the closing bracket.
+bool TakeBracketed(const std::string& s, size_t& pos, char open, char close, std::string& inner)
+{
+    while (pos < s.size() && isspace(static_cast<unsigned char>(s[pos])))
+        pos++;
+    if (pos >= s.size() || s[pos] != open)
+        return false;
+    int depth = 0;
+    char quote = 0;
+    for (size_t i = pos; i < s.size(); i++)
+    {
+        const char c = s[i];
+        if (quote)
+        {
+            if (c == quote)
+                quote = 0;
+            continue;
+        }
+        if (c == '"' || c == '\'')
+            quote = c;
+        else if (c == open)
+            depth++;
+        else if (c == close && --depth == 0)
+        {
+            inner = s.substr(pos + 1, i - pos - 1);
+            pos = i + 1;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool TakeWord(const std::string& s, size_t& pos, const char* word)
+{
+    while (pos < s.size() && isspace(static_cast<unsigned char>(s[pos])))
+        pos++;
+    const size_t n = strlen(word);
+    if (s.size() - pos < n || _strnicmp(s.c_str() + pos, word, n) != 0)
+        return false;
+    if (pos + n < s.size() && (isalnum(static_cast<unsigned char>(s[pos + n])) || s[pos + n] == '_'))
+        return false;
+    pos += n;
+    return true;
+}
+
+bool AtEnd(const std::string& s, size_t pos)
+{
+    while (pos < s.size() && isspace(static_cast<unsigned char>(s[pos])))
+        pos++;
+    return pos >= s.size();
+}
+
+// Does the code contain sleep or waitUntil (outside strings, as whole words)?
+bool HasSuspension(const std::string& s)
+{
+    char quote = 0;
+    for (size_t i = 0; i < s.size(); i++)
+    {
+        const char c = s[i];
+        if (quote)
+        {
+            if (c == quote)
+                quote = 0;
+            continue;
+        }
+        if (c == '"' || c == '\'')
+        {
+            quote = c;
+            continue;
+        }
+        if (i > 0 && (isalnum(static_cast<unsigned char>(s[i - 1])) || s[i - 1] == '_'))
+            continue;
+        size_t p = i;
+        if (TakeWord(s, p, "sleep") || TakeWord(s, p, "waitUntil"))
+            return true;
+    }
+    return false;
+}
+
+struct SqfCase
+{
+    std::vector<std::string> values; // empty: default
+    std::string code;
+};
+
+struct SqfControl
+{
+    enum Kind
+    {
+        While,
+        If,
+        For,
+        Switch,
+        ExitWith,
+        ForEach
+    } kind = While;
+    std::string condition, body, elseBody, init, step;
+    std::vector<SqfCase> cases; // Switch; condition holds the switched value
+};
+
+// "case v: {code}" / "case v" (falls through) / "default {code}"
+bool ParseSwitchBody(const std::string& body, std::vector<SqfCase>& cases)
+{
+    std::vector<std::string> pending;
+    for (const std::string& statement : SplitSqfStatements(body))
+    {
+        std::string rest;
+        if (StartsWithWord(statement, "default", rest))
+        {
+            std::string code;
+            if (!UnwrapBraces(rest, code))
+                return false;
+            cases.push_back({{}, code});
+            continue;
+        }
+        if (!StartsWithWord(statement, "case", rest))
+            return false;
+        // the ':' at bracket depth 0 outside strings separates value and code
+        int depth = 0;
+        char quote = 0;
+        size_t colon = std::string::npos;
+        for (size_t i = 0; i < rest.size() && colon == std::string::npos; i++)
+        {
+            const char c = rest[i];
+            if (quote)
+            {
+                if (c == quote)
+                    quote = 0;
+                continue;
+            }
+            if (c == '"' || c == '\'')
+                quote = c;
+            else if (c == '(' || c == '[' || c == '{')
+                depth++;
+            else if (c == ')' || c == ']' || c == '}')
+                depth--;
+            else if (c == ':' && depth == 0)
+                colon = i;
+        }
+        if (colon == std::string::npos)
+        {
+            pending.push_back(rest); // falls through to the next case with code
+            continue;
+        }
+        std::string code;
+        size_t b = colon + 1;
+        while (b < rest.size() && isspace(static_cast<unsigned char>(rest[b])))
+            b++;
+        if (!UnwrapBraces(rest.substr(b), code))
+            return false;
+        pending.push_back(rest.substr(0, colon));
+        cases.push_back({pending, code});
+        pending.clear();
+    }
+    return true;
+}
+
+// while {c} do {b} | if (c) then {a} [else {b}] | for "_v" from a to b [step s] do {b} |
+// for [{i},{c},{s}] do {b}
+bool ParseSqfControl(const std::string& s, SqfControl& out)
+{
+    size_t pos = 0;
+    if (TakeWord(s, pos, "while"))
+    {
+        out.kind = SqfControl::While;
+        return TakeBracketed(s, pos, '{', '}', out.condition) && TakeWord(s, pos, "do") &&
+               TakeBracketed(s, pos, '{', '}', out.body) && AtEnd(s, pos);
+    }
+    pos = 0;
+    if (TakeWord(s, pos, "if"))
+    {
+        size_t probe = pos;
+        std::string c, b;
+        if (TakeBracketed(s, probe, '(', ')', c) && TakeWord(s, probe, "exitWith") &&
+            TakeBracketed(s, probe, '{', '}', b) && AtEnd(s, probe))
+        {
+            out.kind = SqfControl::ExitWith;
+            out.condition = c;
+            out.body = b;
+            return true;
+        }
+        out.kind = SqfControl::If;
+        if (!TakeBracketed(s, pos, '(', ')', out.condition) || !TakeWord(s, pos, "then") ||
+            !TakeBracketed(s, pos, '{', '}', out.body))
+            return false;
+        if (TakeWord(s, pos, "else") && !TakeBracketed(s, pos, '{', '}', out.elseBody))
+            return false;
+        return AtEnd(s, pos);
+    }
+    pos = 0;
+    {
+        // {body} forEach list
+        std::string b;
+        size_t probe = 0;
+        if (TakeBracketed(s, probe, '{', '}', b) && TakeWord(s, probe, "forEach"))
+        {
+            out.kind = SqfControl::ForEach;
+            out.body = b;
+            out.condition = s.substr(probe); // the list expression
+            return !AtEnd(s, probe);
+        }
+    }
+    pos = 0;
+    if (TakeWord(s, pos, "switch"))
+    {
+        out.kind = SqfControl::Switch;
+        return TakeBracketed(s, pos, '(', ')', out.condition) && TakeWord(s, pos, "do") &&
+               TakeBracketed(s, pos, '{', '}', out.body) && AtEnd(s, pos) && ParseSwitchBody(out.body, out.cases);
+    }
+    pos = 0;
+    if (!TakeWord(s, pos, "for"))
+        return false;
+    out.kind = SqfControl::For;
+    std::string inner;
+    if (TakeBracketed(s, pos, '[', ']', inner))
+    {
+        const std::vector<std::string> parts = SplitSqfStatements(inner); // splits at ','
+        std::string a, b, c;
+        if (parts.size() != 3 || !UnwrapBraces(parts[0], a) || !UnwrapBraces(parts[1], b) ||
+            !UnwrapBraces(parts[2], c))
+            return false;
+        out.init = a;
+        out.condition = b;
+        out.step = c;
+        return TakeWord(s, pos, "do") && TakeBracketed(s, pos, '{', '}', out.body) && AtEnd(s, pos);
+    }
+    // for "_v" from a to b [step s] do {body}
+    while (pos < s.size() && isspace(static_cast<unsigned char>(s[pos])))
+        pos++;
+    if (pos >= s.size() || s[pos] != '"')
+        return false;
+    const size_t close = s.find('"', pos + 1);
+    if (close == std::string::npos)
+        return false;
+    const std::string var = s.substr(pos + 1, close - pos - 1);
+    pos = close + 1;
+    if (!TakeWord(s, pos, "from"))
+        return false;
+    const auto until = [&s](size_t from, const char* word) -> size_t
+    {
+        for (size_t i = from; i < s.size(); i++)
+        {
+            size_t p = i;
+            if ((i == 0 || isspace(static_cast<unsigned char>(s[i - 1]))) && TakeWord(s, p, word))
+                return i;
+        }
+        return std::string::npos;
+    };
+    const size_t toAt = until(pos, "to");
+    const size_t doAt = until(pos, "do");
+    if (toAt == std::string::npos || doAt == std::string::npos || doAt < toAt)
+        return false;
+    const std::string from = s.substr(pos, toAt - pos);
+    size_t stepAt = until(toAt, "step");
+    if (stepAt != std::string::npos && stepAt > doAt)
+        stepAt = std::string::npos;
+    size_t p = toAt + 2;
+    const std::string to = s.substr(p, (stepAt != std::string::npos ? stepAt : doAt) - p);
+    std::string stepValue = "1";
+    if (stepAt != std::string::npos)
+        stepValue = s.substr(stepAt + 4, doAt - stepAt - 4);
+    pos = doAt + 2;
+    if (!TakeBracketed(s, pos, '{', '}', out.body) || !AtEnd(s, pos))
+        return false;
+    out.init = var + " = (" + from + ")";
+    out.condition = "if ((" + stepValue + ") >= 0) then {" + var + " <= (" + to + ")} else {" + var + " >= (" + to + ")}";
+    out.step = var + " = " + var + " + (" + stepValue + ")";
+    return true;
+}
 } // namespace
 
 Script* Script::FindByHandle(int handle)
@@ -794,10 +1072,39 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
         script->_lines[i].statement = statement;
     };
 
-    for (const std::string& statement : SplitSqfStatements(StripSqfComments(code.Data())))
+    // Scheduled code may suspend anywhere: a sleep/waitUntil inside while, if or for is
+    // compiled into script lines with labels and gotos (the same machinery SQS uses), so
+    // the loop yields to the frame instead of spinning unscheduled.
+    int labelCount = 0;
+    const auto newLabel = [&labelCount]() { return "__a1l" + std::to_string(labelCount++); };
+    const auto placeLabel = [script](const std::string& name)
+    {
+        const int i = script->_labels.Add();
+        script->_labels[i].name = RString(name.c_str());
+        script->_labels[i].line = script->_lines.Size();
+    };
+    const auto addCondLine = [script](const std::string& condition, const std::string& statement)
+    {
+        const int i = script->_lines.Add();
+        script->_lines[i].condition = RString(condition.c_str());
+        script->_lines[i].statement = RString(statement.c_str());
+    };
+    const auto addGoto = [&addCondLine](const std::string& label) { addCondLine("", "goto \"" + label + "\""); };
+
+    std::vector<std::string> loopExits; // where exitWith leaves to (innermost loop)
+    std::vector<std::pair<std::string, std::string>> forEachVars; // (list, index) of compiled forEach loops
+    const std::string scriptEnd = newLabel();
+    std::function<void(const std::string&)> emit;
+    const auto emitBlock = [&emit](const std::string& code)
+    {
+        for (const std::string& statement : SplitSqfStatements(code))
+            emit(statement);
+    };
+    emit = [&](const std::string& statement)
     {
         std::string rest;
         std::string body;
+        SqfControl control;
         if (StartsWithWord(statement, "waitUntil", rest) && UnwrapBraces(rest, body))
         {
             // A multi-statement condition evaluates as code; its value is the last statement's.
@@ -811,11 +1118,117 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
             addLine(empty, empty, RString(wait.c_str()));
             addLine(empty, RString("__waituntil"), empty);
         }
+        else if (ParseSqfControl(statement, control) && control.kind == SqfControl::ExitWith)
+        {
+            // exitWith leaves the innermost compiled scope (loop body, if/switch branch);
+            // at the top level of the script it ends the script, as in Arma.
+            const std::string skip = newLabel();
+            addCondLine("!(" + control.condition + ")", "goto \"" + skip + "\"");
+            emitBlock(control.body);
+            addGoto(loopExits.empty() ? scriptEnd : loopExits.back());
+            placeLabel(skip);
+        }
+        else if (HasSuspension(statement) && ParseSqfControl(statement, control) &&
+                 control.kind != SqfControl::ExitWith)
+        {
+            const std::string top = newLabel();
+            const std::string next = newLabel();
+            switch (control.kind)
+            {
+                case SqfControl::While:
+                    placeLabel(top);
+                    addCondLine("!(" + control.condition + ")", "goto \"" + next + "\"");
+                    loopExits.push_back(next);
+                    emitBlock(control.body);
+                    loopExits.pop_back();
+                    addGoto(top);
+                    placeLabel(next);
+                    break;
+                case SqfControl::ExitWith:
+                    break;
+                case SqfControl::ForEach:
+                {
+                    const std::string id = std::to_string(labelCount);
+                    const std::string list = "_a1felist" + id;
+                    const std::string index = "_a1feindex" + id;
+                    addCondLine("", list + " = (" + control.condition + "); " + index + " = 0");
+                    placeLabel(top);
+                    addCondLine("!(" + index + " < count " + list + ")", "goto \"" + next + "\"");
+                    addCondLine("", "_x = " + list + " select " + index);
+                    loopExits.push_back(next);
+                    forEachVars.emplace_back(list, index);
+                    emitBlock(control.body);
+                    forEachVars.pop_back();
+                    loopExits.pop_back();
+                    addCondLine("", index + " = " + index + " + 1");
+                    addGoto(top);
+                    placeLabel(next);
+                    // an enclosing compiled forEach gets its own _x back
+                    if (!forEachVars.empty())
+                        addCondLine("", "if (" + forEachVars.back().second + " < count " + forEachVars.back().first +
+                                            ") then {_x = " + forEachVars.back().first + " select " +
+                                            forEachVars.back().second + "}");
+                    break;
+                }
+                case SqfControl::If:
+                {
+                    const std::string otherwise = newLabel();
+                    addCondLine("!(" + control.condition + ")", "goto \"" + otherwise + "\"");
+                    loopExits.push_back(next);
+                    emitBlock(control.body);
+                    addGoto(next);
+                    placeLabel(otherwise);
+                    emitBlock(control.elseBody);
+                    loopExits.pop_back();
+                    placeLabel(next);
+                    break;
+                }
+                case SqfControl::Switch:
+                {
+                    const std::string value = "_a1switch" + std::to_string(labelCount);
+                    addCondLine("", value + " = (" + control.condition + ")");
+                    const SqfCase* fallback = nullptr;
+                    for (const SqfCase& c : control.cases)
+                    {
+                        if (c.values.empty())
+                        {
+                            fallback = &c;
+                            continue;
+                        }
+                        std::string match;
+                        for (const std::string& v : c.values)
+                            match += (match.empty() ? "" : " || ") + std::string("(") + value + " == (" + v + "))";
+                        const std::string skip = newLabel();
+                        addCondLine("!(" + match + ")", "goto \"" + skip + "\"");
+                        emitBlock(c.code);
+                        addGoto(next);
+                        placeLabel(skip);
+                    }
+                    if (fallback)
+                        emitBlock(fallback->code);
+                    placeLabel(next);
+                    break;
+                }
+                case SqfControl::For:
+                    addCondLine("", control.init);
+                    placeLabel(top);
+                    addCondLine("!(" + control.condition + ")", "goto \"" + next + "\"");
+                    loopExits.push_back(next);
+                    emitBlock(control.body);
+                    loopExits.pop_back();
+                    addCondLine("", control.step);
+                    addGoto(top);
+                    placeLabel(next);
+                    break;
+            }
+        }
         else
         {
             addLine(empty, empty, RString(statement.c_str()));
         }
-    }
+    };
+    emitBlock(StripSqfComments(code.Data()));
+    placeLabel(scriptEnd);
     return script;
 }
 
@@ -829,13 +1242,21 @@ GameValue ScriptSpawn(const GameState* state, GameValuePar oper1, GameValuePar o
     return GameValue(static_cast<float>(script->GetHandle()));
 }
 
+bool PreprocessScriptFile(const char* name, std::string& out); // GameStateExtWorldConfig.cpp
+
 GameValue ScriptExecVM(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     using namespace Poseidon;
     RString name = oper2;
     QIFStreamB in;
     std::string code;
-    if (OpenScript(in, name))
+    // Arma 2 scripts rely on #include / #define: run them through the preprocessor
+    // preprocessFile uses. Arma 1 content keeps the plain read below.
+    if (Arma1Compat::Generation() == 2 && PreprocessScriptFile(name, code))
+    {
+        // preprocessed; '#line' markers and the like are dropped below
+    }
+    else if (OpenScript(in, name))
     {
         while (true)
         {
@@ -850,7 +1271,8 @@ GameValue ScriptExecVM(const GameState* state, GameValuePar oper1, GameValuePar 
         LOG_WARN(Script, "execVM: script '{}' not found", (const char*)name);
     }
     // Preprocessor directives are not expanded here; report them instead of guessing.
-    if (code.find("#include") != std::string::npos || code.find("#define") != std::string::npos)
+    if (Arma1Compat::Generation() != 2 &&
+        (code.find("#include") != std::string::npos || code.find("#define") != std::string::npos))
         LOG_WARN(Script, "execVM '{}': preprocessor directives are not supported and were ignored",
                  (const char*)name);
     std::string filtered;

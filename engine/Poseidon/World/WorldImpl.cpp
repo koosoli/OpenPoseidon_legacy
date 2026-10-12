@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
@@ -160,6 +161,7 @@ using namespace Dev;
 namespace Poseidon
 {
 bool StartAutoTest();
+bool StartMissionWithBriefing();
 bool ProcessFullName(RString);
 } // namespace Poseidon
 
@@ -2018,6 +2020,33 @@ RString GetBaseSubdirectory();
 RString GetCampaignSaveDirectory(RString campaign);
 bool ParseMission(bool);
 void StartCampaign(RString, Display*);
+bool StartCampaignAt(RString, RString, Display*);
+void SetCampaign(RString name);
+
+// --arma1-mission naming a mission of an Arma 1 campaign ("campaigns\\ca\\missions\\
+// m09convoyattack.sara"): start that campaign AT this mission, so intro, briefing,
+// debriefing and the following missions run as in the campaign.
+static bool StartArma1CampaignMission(const char* missionFile)
+{
+    const std::string base = Arma1Compat::CampaignBaseForMission(missionFile); // "campaigns/ca/"
+    if (base.size() < 12)
+        return false;
+    const std::string campaign = base.substr(10, base.size() - 11);
+    std::string file = missionFile;
+    std::replace(file.begin(), file.end(), '\\', '/');
+    const size_t end = file.rfind('/');
+    if (end == std::string::npos || end == 0)
+        return false;
+    const size_t start = file.rfind('/', end - 1);
+    const std::string templ = start == std::string::npos ? file.substr(0, end) : file.substr(start + 1, end - start - 1);
+    LOG_INFO(Core, "{}: '{}' is mission '{}' of campaign '{}'", Arma1Compat::Label(), missionFile, templ, campaign);
+    if (StartCampaignAt(RString(campaign.c_str()), RString(templ.c_str()), nullptr))
+        return true;
+    // not in the campaign's flow: undo the campaign selection, play the mission alone
+    SetCampaign(RString());
+    ProcessFullName(RString(missionFile));
+    return false;
+}
 void OpenEditor();
 } // namespace Poseidon
 
@@ -2762,6 +2791,21 @@ void World::StartIntro()
     CurrentBattle = "";
     CurrentMission = "";
 
+    // --arma1-campaign: the campaign archive is mounted as campaigns\<name>, so the
+    // stock campaign flow (battles, missions, ends, saves) runs it unchanged.
+    if (const std::string& a1Campaign = AppConfig::Instance().GetArma1Campaign();
+        !a1Campaign.empty() && Arma1Compat::Active())
+    {
+        const RString description = GetCampaignDirectory(RString(a1Campaign.c_str())) + RString("description.ext");
+        if (QIFStreamB::FileExist(description))
+        {
+            LOG_INFO(Core, "Arma 1 campaign: {}", a1Campaign);
+            StartCampaign(RString(a1Campaign.c_str()), nullptr);
+            return;
+        }
+        LOG_ERROR(Core, "Arma 1 campaign '{}' not found ({} missing)", a1Campaign, (const char*)description);
+    }
+
     const char* ext = strrchr(LoadFile, '.');
     if (ext && QIFStreamB::FileExist(LoadFile))
     {
@@ -2801,12 +2845,24 @@ void World::StartIntro()
                             LOG_ERROR(Core, "StartAutoTest error latch: {}",
                                       (const char*)GetMaxErrorMessage());
                         }
-                        if (AppConfig::Instance().IsMissionSmokeCheck())
+                        if (AppConfig::Instance().IsMissionSmokeCheck() ||
+                            AppConfig::Instance().GetArma1TestSeconds() > 0.0f)
                         {
                             LOG_ERROR(Core, "Mission smoke check failed: StartAutoTest could not boot '{}'", LoadFile);
                             GApp->m_exitCode = 1;
                             GApp->m_closeRequest = true;
                         }
+                    }
+                }
+                else if (!AppConfig::Instance().GetArma1Mission().empty() && StartArma1CampaignMission(LoadFile))
+                {
+                    // a campaign mission: played inside its campaign, which then goes on
+                }
+                else if (!AppConfig::Instance().GetArma1Mission().empty())
+                {
+                    if (!StartMissionWithBriefing())
+                    {
+                        LOG_ERROR(Core, "Arma 1 mission '{}' could not be started", LoadFile);
                     }
                 }
                 else

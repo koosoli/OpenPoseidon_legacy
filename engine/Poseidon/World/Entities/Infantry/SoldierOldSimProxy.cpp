@@ -914,6 +914,10 @@ void Man::ApplyAnimation(int level, RStringB move, float time)
         // moved, i.e. the face would come off the head.
         MATRIX_4_ARRAY(matrix, 128);
         anim->PrepareMatrices(matrix, time, 1);
+        // Arma 1 shapes are stored around their bounding centre (see PrepareBasePose).
+        if (const Vector3 o = GetShape()->AnimationOrigin(); o.SquareSize() > 1e-8f)
+            for (int i = 0; i < matrix.Size(); i++)
+                matrix[i].SetPosition(matrix[i].FastTransform(-o) + o);
         if (matrix.Size() > 0)
         {
             // AnimationRT::Apply returns early on an animation with no phases; matching
@@ -1107,6 +1111,22 @@ const EnumName* Foundation::GetEnumNames(ManAction action)
     return ManActionNames;
 }
 
+// The move an action map gives for `action`. Arma 1 move sets (A1_CfgMovesMaleSdr)
+// name the vehicle boarding actions by height instead of by vehicle; an absent
+// OFP action falls back to its Arma 1 equivalent rather than to a config error.
+static RStringB ActionMove(const ParamEntry& map, const char* action)
+{
+    if (const ParamEntry* entry = map.FindEntry(action))
+        return *entry;
+    static const char* const aliases[][2] = {
+        {"GetInCar", "GetInLow"}, {"GetOutCar", "GetOutLow"}, {"GetInTank", "GetInMedium"}, {"GetOutTank", "GetOutMedium"}};
+    for (const auto& alias : aliases)
+        if (_stricmp(action, alias[0]) == 0)
+            if (const ParamEntry* entry = map.FindEntry(alias[1]))
+                return *entry;
+    return map >> action;
+}
+
 ActionMap::ActionMap(const ActionMapName& name)
 {
     _name = name;
@@ -1116,7 +1136,7 @@ ActionMap::ActionMap(const ActionMapName& name)
     _upDegree = e >> "upDegree";
     _limitFast = e >> "limitFast";
 
-#define ACTION(x) _actions[ManAct##x] = _name.motion->GetMoveId(e >> #x);
+#define ACTION(x) _actions[ManAct##x] = _name.motion->GetMoveId(ActionMove(e, #x));
 #include <Poseidon/World/Entities/Infantry/ManActions.hpp>
 #undef ACTION
 }
@@ -1208,8 +1228,24 @@ void BlendAnimSelections::Load(Skeleton* skelet, const ParamEntry& cfg)
     {
         RStringB name = cfg[i];
         float factor = cfg[i + 1];
-        BlendAnimInfo& info = Set(Add());
         int index = skelet->FindBone(name);
+        if (index < 0)
+        {
+            // Skeleton bone names are lower case (the RTM loader lowers them); OFP's
+            // configs name bones in lower case too, Arma 1's do not ("LeftShoulder").
+            char lower[64];
+            snprintf(lower, sizeof(lower), "%s", (const char*)name);
+            for (char* c = lower; *c; c++)
+                *c = static_cast<char>(tolower(static_cast<unsigned char>(*c)));
+            index = skelet->FindBone(RStringB(lower));
+        }
+        if (index < 0)
+        {
+            // An unknown bone used to stay in the list as matrix index -1, and the
+            // blend then read the matrix before the palette: a garbage transform.
+            continue;
+        }
+        BlendAnimInfo& info = Set(Add());
         info.matrixIndex = index;
         info.factor = factor;
     }
@@ -1456,6 +1492,19 @@ void ManType::Load(const ParamEntry& par)
     }
 }
 
+// Engine-facing names (bones, memory points, selections) default to OFP's Czech
+// names. A class may name its own -- the Arma 1 properties (boneHead, weaponBone,
+// memoryPointAim, selectionHeadWound, ...) are read where present, so an Arma 1
+// model can be driven by this code without renaming its selections.
+static RStringB ManNameOr(const ParamEntry& par, const char* key, const char* fallback)
+{
+    const ParamEntry* entry = par.FindEntry(key);
+    if (!entry || entry->IsClass() || entry->IsArray())
+        return RStringB(fallback);
+    RStringB value = *entry;
+    return value.GetLength() > 0 ? value : RStringB(fallback);
+}
+
 void ManType::InitShape()
 {
     _scopeLevel = 2;
@@ -1491,7 +1540,7 @@ void ManType::InitShape()
     Shape* mem = _shape->MemoryLevel();
     PoseidonAssert(mem);
 
-    _cameraPoint = mem ? mem->PointIndex("zamerny") : -1;
+    _cameraPoint = mem ? mem->PointIndex(ManNameOr(par, "memoryPointAim", "zamerny")) : -1;
     _pilotPoint = mem ? mem->FindNamedSel("pilot") : -1;
     // An EMPTY "pilot" selection is no pilot point. Every reader takes sel[0] of it (the camera /
     // eye position), and community MLODs ship memory selections with no points -- fml_vorhees'
@@ -1510,17 +1559,17 @@ void ManType::InitShape()
 
     WoundInfo woundInfo;
     woundInfo.LoadAndRegister(_shape, par >> "wounds");
-    _headWound.Init(_shape, woundInfo, "head injury", nullptr);
-    _bodyWound.Init(_shape, woundInfo, "body injury", nullptr);
-    _lArmWound.Init(_shape, woundInfo, "l arm injury", nullptr);
-    _rArmWound.Init(_shape, woundInfo, "r arm injury", "p arm injury");
-    _lLegWound.Init(_shape, woundInfo, "l leg injury", nullptr);
-    _rLegWound.Init(_shape, woundInfo, "r leg injury", "p leg injury");
+    _headWound.Init(_shape, woundInfo, ManNameOr(par, "selectionHeadWound", "head injury"), nullptr);
+    _bodyWound.Init(_shape, woundInfo, ManNameOr(par, "selectionBodyWound", "body injury"), nullptr);
+    _lArmWound.Init(_shape, woundInfo, ManNameOr(par, "selectionLArmWound", "l arm injury"), nullptr);
+    _rArmWound.Init(_shape, woundInfo, ManNameOr(par, "selectionRArmWound", "r arm injury"), "p arm injury");
+    _lLegWound.Init(_shape, woundInfo, ManNameOr(par, "selectionLLegWound", "l leg injury"), nullptr);
+    _rLegWound.Init(_shape, woundInfo, ManNameOr(par, "selectionRLegWound", "r leg injury"), "p leg injury");
 
     _head.InitShape(par, _shape);
 
-    _headHide.Init(_shape, "hlava", nullptr);
-    _neckHide.Init(_shape, "krk", nullptr);
+    _headHide.Init(_shape, ManNameOr(par, "selectionHeadHide", "hlava"), nullptr);
+    _neckHide.Init(_shape, ManNameOr(par, "selectionNeckHide", "krk"), nullptr);
 
     _lightPos = _shape->MemoryPoint("L svetlo");
     _lightDir = _shape->MemoryPoint("konec L svetla") - _lightPos;
@@ -1529,21 +1578,21 @@ void ManType::InitShape()
     _insideView = 0;
     _gunnerView = 0;
 
-    _stepLIndex = mem ? mem->PointIndex("stopaL") : -1;
-    _stepRIndex = mem ? mem->PointIndex("stopaP") : -1;
+    _stepLIndex = mem ? mem->PointIndex(ManNameOr(par, "memoryPointLStep", "stopaL")) : -1;
+    _stepRIndex = mem ? mem->PointIndex(ManNameOr(par, "memoryPointRStep", "stopaP")) : -1;
 
     _aimPoint = -1;
     _aimingAxisPoint = -1;
     _headAxisPoint = -1;
     if (mem)
     {
-        _aimPoint = mem->PointIndex("zamerny");
+        _aimPoint = mem->PointIndex(ManNameOr(par, "memoryPointAim", "zamerny"));
         if (_aimPoint < 0)
         {
             LOG_DEBUG(Physics, "No aim point in {}", (const char*)GetName());
         }
-        _aimingAxisPoint = mem->PointIndex("osa mireni");
-        _headAxisPoint = mem->PointIndex("osa otaceni");
+        _aimingAxisPoint = mem->PointIndex(ManNameOr(par, "memoryPointAimingAxis", "osa mireni"));
+        _headAxisPoint = mem->PointIndex(ManNameOr(par, "memoryPointHeadAxis", "osa otaceni"));
         if (_headAxisPoint < 0)
         {
             _headAxisPoint = _aimingAxisPoint;
@@ -1577,10 +1626,10 @@ void ManType::InitShape()
 
     if (_isMan)
     {
-        _gunMatIndex = _moveType->GetSkeleton()->FindBone("zbran");
-        _rpgMatIndex = _moveType->GetSkeleton()->FindBone("roura");
-        _handMatIndex = _moveType->GetSkeleton()->FindBone("lruka");
-        _rightHandMatIndex = _moveType->GetSkeleton()->FindBone("pruka");
+        _gunMatIndex = _moveType->GetSkeleton()->FindBone(ManNameOr(par, "weaponBone", "zbran"));
+        _rpgMatIndex = _moveType->GetSkeleton()->FindBone(ManNameOr(par, "boneLauncher", "roura"));
+        _handMatIndex = _moveType->GetSkeleton()->FindBone(ManNameOr(par, "boneLeftHand", "lruka"));
+        _rightHandMatIndex = _moveType->GetSkeleton()->FindBone(ManNameOr(par, "boneRightHand", "pruka"));
         if (_gunMatIndex < 0)
         {
             LOG_ERROR(Physics, "Bone 'zbran' not found in {}", (const char*)_shape->GetName());
@@ -1631,7 +1680,7 @@ void ManType::InitShape()
         }
     }
 
-    int headIndex = GetSkeleton()->FindBone("hlava");
+    int headIndex = GetSkeleton()->FindBone(ManNameOr(par, "boneHead", "hlava"));
     if (headIndex >= 0)
     {
         _headOnlyWeight.Add(AnimationRTPair(headIndex, 1));
@@ -1644,10 +1693,10 @@ void ManType::InitShape()
         }
     }
 
-    DEF_HIT(_shape, _headHit, "hlava", nullptr, GetArmor() * (float)(par >> "armorHead"));
-    DEF_HIT(_shape, _bodyHit, "telo", nullptr, GetArmor() * (float)(par >> "armorBody"));
-    DEF_HIT(_shape, _handsHit, "ruce", nullptr, GetArmor() * (float)(par >> "armorHands"));
-    DEF_HIT(_shape, _legsHit, "nohy", nullptr, GetArmor() * (float)(par >> "armorLegs"));
+    DEF_HIT(_shape, _headHit, ManNameOr(par, "hitNameHead", "hlava"), nullptr, GetArmor() * (float)(par >> "armorHead"));
+    DEF_HIT(_shape, _bodyHit, ManNameOr(par, "hitNameBody", "telo"), nullptr, GetArmor() * (float)(par >> "armorBody"));
+    DEF_HIT(_shape, _handsHit, ManNameOr(par, "hitNameHands", "ruce"), nullptr, GetArmor() * (float)(par >> "armorHands"));
+    DEF_HIT(_shape, _legsHit, ManNameOr(par, "hitNameLegs", "nohy"), nullptr, GetArmor() * (float)(par >> "armorLegs"));
 }
 
 void ManType::DeinitShape()

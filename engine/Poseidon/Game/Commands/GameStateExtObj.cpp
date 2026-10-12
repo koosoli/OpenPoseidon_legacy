@@ -384,7 +384,7 @@ GameValue ObjAddWeaponCargo(const GameState* state, GameValuePar oper1, GameValu
     // Cargo of an Arma 1 mission names Arma 1 weapons: map them like addWeapon does, and skip a class
     // the config does not define -- constructing a type for it latches a config error that fails the
     // whole mission start (Arma 1's M02MinerConvoy fills its truck this way).
-    RString name = Poseidon::Arma1Compat::ResolveWeaponClass(array[0]); // identity unless --arma1
+    RString name = Poseidon::Arma1Compat::ResolveWeaponClass(RString(array[0])); // identity unless --arma1
     if (const ParamEntry* weapons = Pars.FindEntry("CfgWeapons"); !weapons || !weapons->FindEntry(name))
     {
         return NOTHING;
@@ -427,7 +427,7 @@ GameValue ObjAddMagazineCargo(const GameState* state, GameValuePar oper1, GameVa
         return NOTHING;
     }
 
-    RString name = Poseidon::Arma1Compat::ResolveMagazineClass(array[0]); // as addWeaponCargo above
+    RString name = Poseidon::Arma1Compat::ResolveMagazineClass(RString(array[0])); // as addWeaponCargo above
     if (const ParamEntry* weapons = Pars.FindEntry("CfgWeapons"); !weapons || !weapons->FindEntry(name))
     {
         return NOTHING;
@@ -1248,6 +1248,10 @@ GameValue ObjAddWeapon(const GameState* state, GameValuePar oper1, GameValuePar 
         return NOTHING;
     }
     GameStringType weapon = Poseidon::Arma1Compat::ResolveWeaponClass(oper2); // identity unless --arma1
+    if (Poseidon::Arma1Compat::Active() && !(Pars >> "CfgWeapons").FindEntry(weapon))
+    {
+        return NOTHING; // unknown weapon (another game's class): its config reads would fail the mission
+    }
     ai->AddWeapon(weapon);
     ai->AutoReloadAll();
     return NOTHING;
@@ -1284,6 +1288,10 @@ GameValue ObjAddMagazine(const GameState* state, GameValuePar oper1, GameValuePa
         return NOTHING;
     }
     GameStringType magazine = Poseidon::Arma1Compat::ResolveMagazineClass(oper2); // identity unless --arma1
+    if (Poseidon::Arma1Compat::Active() && !(Pars >> "CfgWeapons").FindEntry(magazine))
+    {
+        return NOTHING;
+    }
     ai->AddMagazine(magazine);
     ai->AutoReloadAll();
     return NOTHING;
