@@ -260,6 +260,45 @@ struct NgxFeatureRequirement {
     min_os_version: [u8; 255],
 }
 
+/// The snippet search paths and logging handed to NGX, shared by the requirements query and init
+/// (built once, leaked to 'static -- see init). Explicit search paths: the executable's folder,
+/// where Deploy.ps1 puts nvngx_dlss.dll; its assets folder, where the shareable exe + dll + assets
+/// build keeps it (Package-Share.ps1); then WGR_NGX_SNIPPET_DIR, which the headless tests use
+/// (their exe dir is target/debug/deps, which carries no snippet). Same list as
+/// dlss_status::snippet_search_dirs. The requirements query used to pass no list at all, so NGX
+/// looked beside the exe only and answered NotImplemented for a snippet in assets.
+fn snippet_common_info() -> &'static NgxFeatureCommonInfo {
+    static INFO: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let ptr = *INFO.get_or_init(|| {
+        fn wide(s: &str) -> &'static [u16] {
+            Box::leak(s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>().into_boxed_slice())
+        }
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .map(|d| d.to_string_lossy().into_owned())
+            .unwrap_or_else(|| ".".to_owned());
+        let assets_dir = std::path::Path::new(&exe_dir).join("assets").to_string_lossy().into_owned();
+        let mut path_vec: Vec<*const u16> = vec![wide(&exe_dir).as_ptr(), wide(&assets_dir).as_ptr()];
+        if let Ok(extra) = std::env::var("WGR_NGX_SNIPPET_DIR") {
+            path_vec.push(wide(&extra).as_ptr());
+        }
+        let path_len = path_vec.len() as u32;
+        let paths: &'static [*const u16] = Box::leak(path_vec.into_boxed_slice());
+        let info: &'static NgxFeatureCommonInfo = Box::leak(Box::new(NgxFeatureCommonInfo {
+            path_list: NgxPathListInfo { path: paths.as_ptr(), length: path_len },
+            internal_data: std::ptr::null_mut(),
+            logging: NgxLoggingInfo {
+                callback: ngx_log as *const c_void,
+                minimum_level: 2, // verbose
+                disable_other_sinks: false,
+            },
+        }));
+        info as *const NgxFeatureCommonInfo as usize
+    });
+    unsafe { &*(ptr as *const NgxFeatureCommonInfo) }
+}
+
 // Ask the driver directly whether DLSS SR is supported on this adapter, BEFORE any
 // device exists. Returns the raw support bitfield (0 = supported) or Err(ngx result).
 pub fn feature_requirements(
@@ -285,7 +324,7 @@ pub fn feature_requirements(
             },
         },
         application_data_path: data_path.as_ptr(),
-        feature_info: std::ptr::null(),
+        feature_info: snippet_common_info(),
     };
     let mut req = NgxFeatureRequirement {
         feature_supported: u32::MAX,
@@ -360,35 +399,7 @@ impl Ngx {
             .unwrap_or_else(|_| ".".to_owned());
         let _ = std::fs::create_dir_all(&data_dir);
         let data_path: &'static [u16] = wide(&data_dir);
-        // Explicit snippet search path: the executable's folder, where Deploy.ps1 puts
-        // nvngx_dlss.dll.
-        let exe_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-            .map(|d| d.to_string_lossy().into_owned())
-            .unwrap_or_else(|| ".".to_owned());
-        // WGR_NGX_SNIPPET_DIR appends an extra search directory — the headless tests
-        // use it (their exe dir is target/debug/deps, which carries no snippet).
-        // The shareable build (exe + dll + assets) keeps the snippet in <exe>/assets.
-        let assets_dir = std::path::Path::new(&exe_dir).join("assets").to_string_lossy().into_owned();
-        let mut path_vec: Vec<*const u16> = vec![wide(&exe_dir).as_ptr(), wide(&assets_dir).as_ptr()];
-        if let Ok(extra) = std::env::var("WGR_NGX_SNIPPET_DIR") {
-            path_vec.push(wide(&extra).as_ptr());
-        }
-        let path_len = path_vec.len() as u32;
-        let paths: &'static [*const u16] = Box::leak(path_vec.into_boxed_slice());
-        let common: &'static NgxFeatureCommonInfo = Box::leak(Box::new(NgxFeatureCommonInfo {
-            path_list: NgxPathListInfo {
-                path: paths.as_ptr(),
-                length: path_len,
-            },
-            internal_data: std::ptr::null_mut(),
-            logging: NgxLoggingInfo {
-                callback: ngx_log as *const c_void,
-                minimum_level: 2, // verbose
-                disable_other_sinks: false,
-            },
-        }));
+        let common = snippet_common_info();
         let r = unsafe {
             NVSDK_NGX_VULKAN_Init_with_ProjectID(
                 // A stable project UUID + CUSTOM engine: NVIDIA's documented path for
