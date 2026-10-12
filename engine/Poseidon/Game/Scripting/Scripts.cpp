@@ -1,4 +1,5 @@
 
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Game/Scripting/Scripts.hpp>
 #include <functional>
@@ -486,6 +487,10 @@ bool Script::SimulateBody()
         LOG_DEBUG(Script, "Script paused after {} ms", time - timeStart);
     }
 #endif
+    // Arma 2 spawned code may reassign _this ("_this = _this select 0; waitUntil {...}");
+    // keep what it assigned for the next step instead of restoring the spawn argument.
+    if (Poseidon::Arma1Compat::Generation() == 2)
+        _argument = gstate->VarGet("_this");
     return _currentLine >= _lines.Size();
 }
 
