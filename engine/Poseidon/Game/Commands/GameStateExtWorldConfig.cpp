@@ -9,6 +9,7 @@
 #include <Poseidon/World/Scene/Fireplace.hpp>
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -1177,11 +1178,37 @@ bool PreprocessScriptFile(const char* name, std::string& out)
     if (!preproc.Process(&processed, RString(file.c_str())))
         return false;
     out.assign(processed.str(), processed.pcount());
+    // Drop what the preprocessor leaves behind as directives ("#line ..."): the
+    // expression evaluator does not read them.
+    std::string kept;
+    kept.reserve(out.size());
+    size_t pos = 0;
+    while (pos < out.size())
+    {
+        size_t end = out.find('\n', pos);
+        if (end == std::string::npos)
+            end = out.size();
+        size_t b = pos;
+        while (b < end && (out[b] == ' ' || out[b] == '\t'))
+            b++;
+        if (b >= end || out[b] != '#')
+            kept.append(out, pos, end - pos);
+        kept.push_back('\n');
+        pos = end + 1;
+    }
+    out.swap(kept);
     return true;
 }
 
 GameValue StringPreprocess(const GameState* state, GameValuePar oper1)
 {
+    if (Poseidon::Arma1Compat::Generation() == 2)
+    {
+        // Arma 2 names its library scripts by absolute bank path ("\\ca\\modules\\...").
+        std::string text;
+        if (PreprocessScriptFile(RString(oper1), text))
+            return RString(text.c_str());
+    }
     RString filename = Poseidon::FindScript(oper1);
     FilePreprocessor preproc;
     QOStream processed;

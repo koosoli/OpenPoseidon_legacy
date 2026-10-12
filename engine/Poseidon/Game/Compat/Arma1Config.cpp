@@ -564,7 +564,7 @@ void WriteRap(const RapNode& node, std::string& out, int depth)
 {
     const std::string pad(static_cast<size_t>(depth), '\t');
     for (const auto& c : node.children)
-        if (!c->isClass)
+        if (!c->isClass && (c->text.empty() || c->text[0] != '\x01')) // not a pending "delete"
             out += pad + c->text + "\r\n";
     std::vector<int> state(node.children.size(), 0);
     std::function<void(size_t)> visit = [&](size_t i)

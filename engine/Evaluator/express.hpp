@@ -855,6 +855,9 @@ struct GameTypeType : public Poseidon::Foundation::EnumName
     //! Set when a script error is fatal (test mode): loops stop iterating, so a
     //! failing while/for cannot spin the frame forever after the abort was requested.
     static inline bool s_abortLoops = false;
+    //! Arma 2 content writes strings in single quotes too ('text'); OFP's scripts use
+    //! the apostrophe in comments and SQS text, so it is a string delimiter only when set.
+    static inline bool s_singleQuoteStrings = false;
 
     // evaluate an expression
     //! get actual context (started by BeginContext)

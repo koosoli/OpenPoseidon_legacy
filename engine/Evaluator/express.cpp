@@ -219,14 +219,15 @@ GameValue GameState::Const() const
         }
         return VarGet(name);
     }
-    else if (*_e->_pos == '"')
+    else if (*_e->_pos == '"' || (*_e->_pos == '\'' && s_singleQuoteStrings))
     {
-        // string
+        // string ("..." always; '...' for Arma 2 content, see s_singleQuoteStrings)
+        const char quote = *_e->_pos;
         const char* start = ++_e->_pos;
         RString string = "";
         for (;;)
         {
-            while (*_e->_pos != '"')
+            while (*_e->_pos != quote)
             {
                 if (!*_e->_pos)
                 {
@@ -240,9 +241,9 @@ GameValue GameState::Const() const
             // check if another quote mark is encountered
             // if yes, append it, and continue parsing, otherwise we are done
             ++_e->_pos;
-            if (*_e->_pos == '"')
+            if (*_e->_pos == quote)
             {
-                string = string + RString("\"");
+                string = string + RString(quote == '"' ? "\"" : "'");
                 ++_e->_pos;
                 start = _e->_pos;
             }
@@ -264,15 +265,16 @@ GameValue GameState::Const() const
         for (;;)
         {
             // note: any quotes inside may prevent closing bracket
-            if (*end == '"')
+            if (*end == '"' || (*end == '\'' && s_singleQuoteStrings))
             {
+                const char quote = *end;
                 end++;
                 // skip anything until another quote mark
-                while (*end != 0 && *end != '"')
+                while (*end != 0 && *end != quote)
                 {
                     end++;
                 }
-                if (*end != '"')
+                if (*end != quote)
                 {
                     SetError(EvalCloseB);
                     return RString();

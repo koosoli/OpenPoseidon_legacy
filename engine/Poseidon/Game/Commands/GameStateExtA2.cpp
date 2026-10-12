@@ -1054,6 +1054,8 @@ const GameNular A2Nular[] = {
 
 const GameFunction A2Unary[] = {
     GameFunction(GameNothing, "textLogFormat", A2NothingUnary, GameArray),
+    GameFunction(GameNothing, "onPreloadStarted", A2NothingUnary, GameString),
+    GameFunction(GameNothing, "onPreloadFinished", A2NothingUnary, GameString),
     GameFunction(GameNothing, "scriptName", A2NothingUnary, GameString),
     GameFunction(GameNothing, "startLoadingScreen", A2NothingUnary, GameArray),
     GameFunction(GameNothing, "progressLoadingScreen", A2NothingUnary, GameScalar),

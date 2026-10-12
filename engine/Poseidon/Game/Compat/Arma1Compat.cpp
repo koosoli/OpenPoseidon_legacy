@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 
+#include <Evaluator/express.hpp>
+
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
@@ -413,6 +415,7 @@ void MountArchives()
     const fs::path& root = RootPath();
     // Dta\bin.pbo / core.pbo are NOT mounted: their declared prefixes ("bin", "core")
     // would shadow CWA's own UI resources. Arma1Config reads bin.pbo privately.
+    GameState::s_singleQuoteStrings = Generation() == 2;
     if (Generation() == 2)
     {
         // Arma 2 keeps its campaigns and scenarios inside AddOns\missions*.pbo. Operation
