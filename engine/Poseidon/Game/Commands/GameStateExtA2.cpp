@@ -1092,6 +1092,17 @@ GameValue A2SafeZoneW(const GameState*)
     return GameValue(1.0f);
 }
 
+GameValue A2MinusOne(const GameState*)
+{
+    return GameValue(-1.0f);
+}
+
+// isNull display/control: those are numbers here, -1 for none
+GameValue A2IsNullHandle(const GameState*, GameValuePar oper1)
+{
+    return GameValue(static_cast<float>(oper1) < 0);
+}
+
 GameValue A2EmptyArrayNular(const GameState* state)
 {
     return state->CreateGameValue(GameArray);
@@ -1895,8 +1906,9 @@ const GameNular A2Nular[] = {
     GameNular(GameNothing, "processInitCommands", A2ProcessInitCommands),
     GameNular(GameSide, "sideUnknown", A2SideUnknown),
     GameNular(GameString, "commandingMenu", A2EmptyString),
-    GameNular(GameScalar, "displayNull", A2Zero),
-    GameNular(GameScalar, "controlNull", A2Zero),
+    GameNular(GameScalar, "displayNull", A2MinusOne),
+    GameNular(GameScalar, "controlNull", A2MinusOne),
+    GameNular(GameBool, "hcShownBar", A2False),
     GameNular(GameArray, "hcSelected", A2EmptyArrayNular),
 };
 
@@ -1943,7 +1955,6 @@ const GameFunction A2Unary[] = {
     GameFunction(GameArray, "synchronizedObjects", A2EmptyArrayUnary, GameObject),
     GameFunction(GameArray, "actionKeysNames", A2EmptyArrayUnary, GameString | GameArray),
     GameFunction(GameNothing, "hcRemoveAllGroups", A2NothingUnary, GameObject),
-    GameFunction(GameBool, "hcShownBar", A2TrueUnary, GameAny),
     GameFunction(GameString, "createLocation", A2CreateLocation, GameArray),
     GameFunction(GameNothing, "deleteLocation", A2DeleteLocation, GameString),
     GameFunction(GameString, "text", A2Text, GameString),
@@ -1961,6 +1972,9 @@ const GameFunction A2Unary[] = {
     GameFunction(GameNothing, "clearVehicleInit", A2ClearVehicleInit, GameObject),
     GameFunction(GameNothing, "detach", A2Detach, GameObject),
     GameFunction(GameBool, "triggerActivated", A2TriggerActivated, GameObject),
+    GameFunction(GameBool, "isNull", A2IsNullHandle, GameScalar),
+    GameFunction(GameArray, "items", A2EmptyArrayUnary, GameObject),
+    GameFunction(GameArray, "assignedItems", A2EmptyArrayUnary, GameObject),
     GameFunction(GameArray, "triggerArea", A2TriggerArea, GameObject),
     GameFunction(GameScalar, "currentWaypoint", A2CurrentWaypoint, GameGroup | GameObject),
     GameFunction(GameString, "mapGridPosition", A2MapGridPosition, GameObject | GameArray),
