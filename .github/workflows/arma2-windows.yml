@@ -6,6 +6,14 @@ name: Arma 2 / Windows game build
 # they can be read through the API.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - MrDudeX-arma2
+
+# Only the newest push is worth a build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
