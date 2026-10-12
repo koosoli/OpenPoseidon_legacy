@@ -36,6 +36,7 @@
 mod boat_spray;
 mod impacts;
 pub(crate) mod probe;
+pub(crate) mod swash;
 mod breakers;
 mod cdlod;
 mod fft;
@@ -203,9 +204,23 @@ struct ShoreGrid {
     centre: [f32; 2],
 }
 
-/// Tidewater's `frame.waterAbsorption` / `frame.waterScattering` defaults (Frame.js), 1/m.
-const WATER_ABSORPTION: [f32; 3] = [0.42, 0.075, 0.035];
-const WATER_SCATTERING: [f32; 3] = [0.012, 0.018, 0.024];
+/// Tidewater's `frame.waterAbsorption` / `frame.waterScattering` defaults (Frame.js), 1/m: clear
+/// tropical ocean (its island), the turquoise.
+const TROPICAL_ABSORPTION: [f32; 3] = [0.42, 0.075, 0.035];
+const TROPICAL_SCATTERING: [f32; 3] = [0.012, 0.018, 0.024];
+/// (OP) temperate coastal water for OFP's islands (owner, 2026-10-12: "this turquoise blue just
+/// does not look right"). Pure water's red absorption, plus the dissolved organic matter and
+/// chlorophyll of a temperate coast, which absorb most in the blue (blue above green, as in Jerlov's
+/// coastal types), and ~0.04-0.05/m of particle scattering, flat-ish across the spectrum. Reads
+/// green-grey and ~7 m clear instead of turquoise and ~25 m clear. WGR_TW_WATER_OPTICS=tropical
+/// restores Tidewater's.
+const TEMPERATE_ABSORPTION: [f32; 3] = [0.45, 0.09, 0.12];
+const TEMPERATE_SCATTERING: [f32; 3] = [0.04, 0.05, 0.045];
+fn water_optics() -> ([f32; 3], [f32; 3]) {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let tropical = *V.get_or_init(|| std::env::var("WGR_TW_WATER_OPTICS").map(|v| v.trim().eq_ignore_ascii_case("tropical")).unwrap_or(false));
+    if tropical { (TROPICAL_ABSORPTION, TROPICAL_SCATTERING) } else { (TEMPERATE_ABSORPTION, TEMPERATE_SCATTERING) }
+}
 
 /// `TwSurface` in tw_water.wgsl.
 #[repr(C)]
@@ -365,8 +380,8 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         material0: [tw[2][3], tw[2][2], tw[1][1], tw[1][3]],
         // roughness, ssr on, debug view, water glow (W3j; tidewater_fx.z)
         material1: [tw[2][1], tw[1][2], debug_view_override().unwrap_or(tw[3][3]), glow_override().unwrap_or(p.tidewater_fx[2]).clamp(0.0, 2.0)],
-        absorption: [WATER_ABSORPTION[0], WATER_ABSORPTION[1], WATER_ABSORPTION[2], whitecap_patch()[0]],
-        scattering: [WATER_SCATTERING[0], WATER_SCATTERING[1], WATER_SCATTERING[2], whitecap_patch()[1]],
+        absorption: [water_optics().0[0], water_optics().0[1], water_optics().0[2], whitecap_patch()[0]],
+        scattering: [water_optics().1[0], water_optics().1[1], water_optics().1[2], whitecap_patch()[1]],
         detail: [tw[3][0], tw[3][1], tw[3][2], if earth_preview(p) { 1.0 } else { 0.0 }],
         shore0,
         shore1,
@@ -520,6 +535,8 @@ pub struct Tidewater {
     impacts: impacts::Impacts,
     // W9a: the surface around the camera, as drawn (underwater composite, view side, gate)
     probe: probe::Probe,
+    // (OP) the swash field around the camera, for the shorebirds (swash.rs)
+    swash: swash::Swash,
     // Swimming: the exact lanes recorded alongside each probe readback.
     probe_lanes: [f32; 4],
     // W5e: the frame's spot lights (the diver's torch is picked from them in prepare)
@@ -765,6 +782,7 @@ impl Tidewater {
         let spray = spray::SprayGpu::new(device, queue, camera_layout, &layout, &shader, surface_format, sample_count, linear);
         let uw = underwater::TwUnderwater::new(device, surface_format);
         let probe = probe::Probe::new(device, &layout, &shader);
+        let swash = swash::Swash::new(device, &layout, &shader);
         let caustics = caustics::Caustics::new(device);
         let wake = wake::WakeGpu::new(device, TW_WAKE_KERNEL_WGSL);
 
@@ -841,6 +859,7 @@ impl Tidewater {
             spots: Vec::new(),
             impacts: Default::default(),
             probe,
+            swash,
             probe_lanes: [0.0; 4],
             spray,
             uw,
@@ -1069,6 +1088,7 @@ impl Tidewater {
             && self.brk.ns >= 2;
         self.spray.poll_stats();
         self.probe.poll();
+        self.swash.poll();
         let cp = [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]];
         let (gain, intensity) = spray_override().unwrap_or((p.tidewater_fx[0], p.tidewater_fx[1]));
         // W6i: the boats' bow spray into the ring's CPU tail, and their hulls as collision bodies
@@ -1122,7 +1142,7 @@ impl Tidewater {
         {
             let glow = glow_override().unwrap_or(p.tidewater_fx[2]);
             let torch = underwater::pick_torch(&self.spots, [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]]);
-            let mut uwp = underwater::UwParams::new(cam, &p, self.linear, glow, spec.sizes, self.caustics.tiles, WATER_ABSORPTION, WATER_SCATTERING, p.underwater_gate[0] > 0.5, torch);
+            let mut uwp = underwater::UwParams::new(cam, &p, self.linear, glow, spec.sizes, self.caustics.tiles, water_optics().0, water_optics().1, p.underwater_gate[0] > 0.5, torch);
             // W9a: the drawn surface around the camera (the grid is drawn in `update`, before the
             // composite reads it; until the first one exists the composite uses the FFT alone)
             uwp.probe = if self.probe.ready || !self.bind_dirty { probe::Probe::lanes(cp) } else { [0.0; 4] };
@@ -1184,6 +1204,7 @@ impl Tidewater {
             // W9a: the surface around the camera, after everything that displaces it
             if !self.bind_dirty {
                 self.probe.record(encoder, &self.bind, self.probe_lanes);
+                self.swash.record(encoder, &self.bind, self.probe_lanes);
             }
         }
     }
@@ -1207,8 +1228,9 @@ impl Tidewater {
         source: &wgpu::TextureView,
         depth: &wgpu::TextureView,
         destination: &wgpu::TextureView,
+        sky_sh: &wgpu::Buffer,
     ) {
-        self.uw.render(device, encoder, source, depth, destination, self.fft.displacement_view(), (self.caustics.fine_view(), self.caustics.broad_view()), &self.probe.view);
+        self.uw.render(device, encoder, source, depth, destination, self.fft.displacement_view(), (self.caustics.fine_view(), self.caustics.broad_view()), &self.probe.view, sky_sh);
     }
 
     /// W4b: the lips' and the spray's coverage into the upscalers' history-control ("reactive")

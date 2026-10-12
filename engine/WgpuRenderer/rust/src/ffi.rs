@@ -3330,6 +3330,34 @@ pub unsafe extern "C" fn wgr_water_set_interaction_params(
 ///
 /// # Safety
 /// `xyz` must hold `cap * 3` floats, `lanes` 4 and `age_ms` 1.
+/// (OP) The swash field around the camera for the shorebirds (water_tw/swash.rs, read back 1-3
+/// frames late): up to `cap` texels of (runup, inland, dRdt, tau) into `texels` (4 floats each; w < 0
+/// where no shore waves run), the lattice's lanes (first texel x, z, step, texels per side) into
+/// `lanes` and the readback's age into `age_ms`. Returns the texel count, 0 when there is none. Any thread.
+///
+/// # Safety
+/// `texels` must hold `cap * 4` floats, `lanes` 4 and `age_ms` 1.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_water_swash_field(texels: *mut f32, cap: u32, lanes: *mut f32, age_ms: *mut f32) -> u32 {
+    if texels.is_null() || lanes.is_null() || age_ms.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let out = unsafe { std::slice::from_raw_parts_mut(texels as *mut [f32; 4], cap as usize) };
+        let mut l = [0.0f32; 4];
+        let mut age = 0.0f32;
+        let n = crate::water_tw::swash::field(out, &mut l, &mut age);
+        if n > 0 {
+            unsafe {
+                std::ptr::copy_nonoverlapping(l.as_ptr(), lanes, 4);
+                *age_ms = age;
+            }
+        }
+        n as u32
+    }))
+    .unwrap_or(0)
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wgr_water_drawn_grid(xyz: *mut f32, cap: u32, lanes: *mut f32, age_ms: *mut f32) -> u32 {
     if xyz.is_null() || lanes.is_null() || age_ms.is_null() {

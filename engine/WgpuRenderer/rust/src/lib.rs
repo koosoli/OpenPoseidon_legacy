@@ -2764,7 +2764,7 @@ impl Renderer {
             self.gpu_timers
                 .begin(encoder, TimerRegion::UnderwaterComposite);
             self.water
-                .render_underwater(&self.device, encoder, source, depth, target);
+                .render_underwater(&self.device, encoder, source, depth, target, self.sky.sh_buffer());
             self.gpu_timers
                 .end(encoder, TimerRegion::UnderwaterComposite);
             post_source_tex = self.underwater_target.as_ref().map(|(t, _)| t.clone());
@@ -6621,7 +6621,7 @@ impl Renderer {
                 self.gpu_timers
                     .begin(&mut encoder, TimerRegion::UnderwaterComposite);
                 self.water
-                    .render_underwater(&self.device, &mut encoder, &scene_view, depth, &color);
+                    .render_underwater(&self.device, &mut encoder, &scene_view, depth, &color, self.sky.sh_buffer());
                 self.gpu_timers
                     .end(&mut encoder, TimerRegion::UnderwaterComposite);
                 resolved = true;
@@ -6654,7 +6654,7 @@ impl Renderer {
             self.gpu_timers
                 .begin(&mut encoder, TimerRegion::UnderwaterComposite);
             self.water
-                .render_underwater(&self.device, &mut encoder, &scene_view, depth, &color);
+                .render_underwater(&self.device, &mut encoder, &scene_view, depth, &color, self.sky.sh_buffer());
             self.gpu_timers
                 .end(&mut encoder, TimerRegion::UnderwaterComposite);
         }

@@ -38,3 +38,26 @@ fn fs_tw_probe(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let d = twDisplace(xz, PROBE_MESH);
     return vec4<f32>(d.world, 1.0);
 }
+
+// (OP) the swash field for the shorebirds (swash.rs; Tidewater's SwashProbe evaluates the same
+// run-up at the birds' own points): SW_N x SW_N texels SW_STEP m apart on a lattice around the
+// camera, each the shore waves' swash at that point -- run-up of the current wave and the point's
+// own distance up the beach (both m along the beach), the leading edge's speed (dRt/dt, > 0 while
+// the water runs up) and the swash cycle's phase. The lattice is derived from the probe's lanes (the
+// camera), the same way swash.rs derives it, so no lane of its own is needed.
+const SW_N: f32 = 64.0;
+const SW_STEP: f32 = 3.0;
+
+fn swashOrigin() -> vec2<f32> {
+    let cam = tw.probe.xy + vec2<f32>(tw.probe.w * 0.5 * tw.probe.z);
+    return (floor(cam / SW_STEP) - SW_N * 0.5) * SW_STEP;
+}
+
+@fragment
+fn fs_tw_swash(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    if (tw.probe.w < 2.0 || tw.shore1.w <= 0.0) { return vec4<f32>(0.0, 0.0, 0.0, -1.0); }
+    let xz = swashOrigin() + floor(pos.xy) * SW_STEP;
+    let ground = materialTerrainHeightAt(xz);
+    let s = shoreEvaluateNoNormal(xz, waterLevelAt(xz) - ground, ground);
+    return vec4<f32>(s.runup, s.inland, s.dRdt, s.tau);
+}

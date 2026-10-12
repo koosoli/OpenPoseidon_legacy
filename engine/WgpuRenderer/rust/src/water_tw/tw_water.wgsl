@@ -489,7 +489,10 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     // and a crest that is breaking reads as a solid cap that frays at its edge.
     let capPatches = tw.absorption.w > 0.0;
     if (capPatches) {
-        capCover = smoothstep(tw.absorption.w, tw.scattering.w, capCover);
+        // open water only: in the surf and on the swash sheet the shore foam draws the white water,
+        // and the (attenuated) FFT foam there, which this threshold sits far below, turned the uprush
+        // into solid white blobs running up the sand
+        capCover = smoothstep(tw.absorption.w, tw.scattering.w, capCover) * smoothstep(1.0, 4.0, depth);
     }
     let coverage = sat(foamSum * tw.surface.z + capCover);
     // the cover the lace pattern below draws: everything but the caps in patch mode
@@ -520,7 +523,8 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
         // sheet's hard edge (the floes of the first attempt); the core is where the crest breaks now
         let capSoft = min(0.25 + footprint * 0.05, 0.4); // unclamped, a far pixel turned the horizon white
         let body = smoothstep(0.5 - capSoft, 0.5 + capSoft, rag);
-        let cap = sat(body * 1.45 - (1.0 - pattern) * 0.75) * (p1.y * 0.2 + 0.85);
+        // the core is opaque (owner: "white caps need to be whiter"); only the rim is lace
+        let cap = sat(body * 1.45 - (1.0 - pattern) * 0.75) * mix(p1.y * 0.2 + 0.85, 1.0, smoothstep(0.7, 1.0, body));
         foam = max(foam, cap);
     }
 
@@ -729,11 +733,14 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         }
         horizon = srgb_to_linear(horizon);
     }
-    if (earthWater() && linear > 0.5 && frame.sun_diffuse.w > 0.5) {
+    if (linear > 0.5 && frame.sun_diffuse.w > 0.5) {
         // Match physical Earth land's directional sky irradiance. The legacy
         // flat ambient RGB is an artistic sun-scaled fill, not sky radiance;
         // feeding it to the water volume/foam produces an ambient wash.
-        skyIrr = sky_irradiance(earthWaterNormal(pos.xz)) * frame.sun_ambient.w;
+        // (OP, 2026-10-12) on every physical world, not only Earth: on stock worlds the fill is ~30x
+        // the sun, and it lit the water's in-scatter and the foam into neon turquoise and glowing caps.
+        let skyN = select(vec3<f32>(0.0, 1.0, 0.0), earthWaterNormal(pos.xz), earthWater());
+        skyIrr = sky_irradiance(skyN) * frame.sun_ambient.w;
     }
     var csm = 0.0;
     var ter = 0.0;

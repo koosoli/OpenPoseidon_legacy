@@ -67,6 +67,20 @@ struct UwParams {
 @group(0) @binding(6) var causticsFineTex: texture_2d<f32>;  // W5b (caustics.rs)
 @group(0) @binding(7) var causticsBroadTex: texture_2d<f32>;
 @group(0) @binding(8) var uwProbe: texture_2d<f32>;           // (W9a) r32float surface heights
+// (OP) the sky's SH-9 irradiance (sky_sh.wgsl), for the light the water column receives from the
+// sky: OFP's flat ambient (sky_e) is an artistic fill ~30x the sun's irradiance on stock worlds, and
+// lit with it the water seen from inside glowed neon turquoise (owner, 2026-10-12).
+struct UwSkySh { c: array<vec4<f32>, 9>, };
+@group(0) @binding(9) var<uniform> uwSkySh: UwSkySh;
+
+// downwelling sky irradiance / PI at the surface (sky_irradiance(+y) of frame.wgsl), x the frame's
+// ambient scale (uw.absorption.w); the flat ambient when no scale is given
+fn uwSkyE() -> vec3<f32> {
+    if (uw.absorption.w <= 0.0) { return uw.sky_e.rgb; }
+    let e = 0.886227 * uwSkySh.c[0].rgb - 0.247708 * uwSkySh.c[6].rgb + 2.0 * 0.511664 * uwSkySh.c[1].rgb
+        - 0.429043 * uwSkySh.c[8].rgb;
+    return max(e, vec3<f32>(0.0)) * (1.0 / 3.14159265359) * uw.absorption.w;
+}
 
 struct UwOut {
     @builtin(position) pos: vec4<f32>,
@@ -302,7 +316,7 @@ fn fs_uw(in: UwOut) -> @location(0) vec4<f32> {
                 let attAmbient = exp(-sigT * zq * 1.2) * 0.85 + vec3<f32>(0.0, 0.02, 0.04) * exp(zq * -0.1);
                 let lumW = vec3<f32>(0.2126, 0.7152, 0.0722);
                 let eSun = dot(uw.sun_e.rgb, lumW) * max(L.y, 0.0) / UW_PI;
-                let eSky = dot(uw.sky_e.rgb, lumW);
+                let eSky = dot(uwSkyE(), lumW);
                 let share = eSun / max(eSun + eSky, 1e-5);
                 base *= mix(vec3<f32>(1.0), attDirect * share + attAmbient * (1.0 - share), smoothstep(0.0, 0.08, zq));
             }
@@ -313,7 +327,7 @@ fn fs_uw(in: UwOut) -> @location(0) vec4<f32> {
         let g = 0.85;
         let phase = (1.0 - g * g) / (4.0 * UW_PI) / pow(max(1.0 + g * g - cosPh * 2.0 * g, 1e-4), 1.5) * 0.75 + 0.25 / (4.0 * UW_PI);
         let sunE = uw.sun_e.rgb * 0.96;
-        let ambE = uw.sky_e.rgb * UW_PI * 0.9;
+        let ambE = uwSkyE() * UW_PI * 0.9;
         let bb = sigS * 0.035;
         let msAlb = bb * 1.3 / (sigA + bb);
         let k = uw.sun_dir.w;

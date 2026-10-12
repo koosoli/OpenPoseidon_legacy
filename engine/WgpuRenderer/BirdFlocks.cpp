@@ -12,7 +12,14 @@
 //                  flap / glide rhythm) and the per-species FLIGHT table;
 //   BirdBatch.js   the plumage of each species (its fragment shader's colour rules);
 //   Birds.js       the behaviours: gulls roaming and circling, terns patrolling beyond the surf,
-//                  pelicans skimming the swell in a line, frigatebirds soaring high.
+//                  pelicans skimming the swell in a line, frigatebirds soaring high;
+//   Shorebirds.js  (2026-10-12, from the island-expansion branch) sanderlings working the swash:
+//                  small flocks chasing the backwash down the wet sand, probing as they go,
+//                  scurrying up the beach ahead of every uprush, running from someone walking up
+//                  and flushing when pressed. BirdShapes.js's folded wings and two-bone legs and
+//                  BirdPose.js's groundPose / solveLeg / setHead come with them. The edge of the
+//                  water is the shore waves' own run-up (water_tw/swash.rs, read back like
+//                  Tidewater's SwashProbe); the beaches are wherever those waves run.
 //
 // What OP changes: the wing poses are baked into meshes (16 phases of the flap cycle and the glide
 // pose per species) instead of skinned in a vertex shader; the plumage is painted into a small
@@ -66,6 +73,12 @@ struct Species
     Tail tail;
     Wing wing;
     float eye[3];
+    // BirdShapes.js pivot (the neck joint the head turns about), fold (front, tip, top, h, minX:
+    // the wing laid along the flank) and legs (hip x y z, tibia, tarsus, radius, toe, web); only
+    // the sanderling stands, so only it carries them
+    float pivot[3] = {};
+    float fold[5] = {};
+    float legs[8] = {};
 };
 enum
 {
@@ -73,6 +86,7 @@ enum
     Tern,
     Pelican,
     Frigate,
+    Sanderling,
     SpeciesCount
 };
 // BirdShapes.js SPECIES (the four that fly here)
@@ -125,6 +139,21 @@ const Species SpeciesTable[SpeciesCount] = {
       {{0, 0.07f}, {0.19f, 0.08f}, {0.41f, 0.09f}, {0.68f, 0.01f}, {0.88f, -0.09f}, {1, -0.19f}},
       {{0, 0.3f}, {0.19f, 0.29f}, {0.41f, 0.26f}, {0.68f, 0.17f}, {0.88f, 0.09f}, {1, 0.018f}}},
      {0.212f, 0.04f, 0.0055f}},
+    {"sanderling", 0.2f, 0.38f,
+     {{-0.066f, 0.007f, 0.011f, 0.007f, 0.007f}, {-0.046f, 0.004f, 0.021f, 0.017f, 0.019f}, {-0.016f, 0, 0.029f, 0.025f, 0.029f},
+      {0.014f, 0, 0.03f, 0.026f, 0.029f}, {0.038f, 0.004f, 0.025f, 0.023f, 0.024f}, {0.056f, 0.012f, 0.017f, 0.018f, 0.016f},
+      {0.069f, 0.017f, 0.016f, 0.018f, 0.015f}, {0.082f, 0.019f, 0.015f, 0.017f, 0.013f}, {0.093f, 0.017f, 0.011f, 0.013f, 0.009f},
+      {0.1f, 0.014f, 0.006f, 0.007f, 0.005f}},
+     {0.043f, 0.062f},
+     {0.096f, 0.0135f, 0.027f, -0.06f, 0.0026f, 0.0028f, 0.0024f, 0.0004f, 0, 0},
+     {-0.062f, 0.008f, 0.01f, {0.05f, 0.048f, 0.045f, 0.041f}, 0.3f},
+     {{0.016f, 0.012f, 0.012f}, 0.174f, 0.22f, 0.46f, {0.15f, 0.08f, 0.035f},
+      {{0, 0.016f}, {0.22f, 0.019f}, {0.46f, 0.017f}, {0.7f, 0.001f}, {0.88f, -0.016f}, {1, -0.038f}},
+      {{0, 0.06f}, {0.22f, 0.058f}, {0.46f, 0.052f}, {0.7f, 0.04f}, {0.88f, 0.025f}, {1, 0.005f}}},
+     {0.081f, 0.025f, 0.0024f},
+     {0, 0.008f, 0.05f},
+     {0.035f, -0.1f, 0.022f, 0.03f, 0.005f},
+     {0.011f, -0.021f, 0.004f, 0.02f, 0.024f, 0.0019f, 0.017f, 0}},
 };
 
 // Flight.js FLIGHT: cruise airspeed, min speed, max bank, roll rate, climb, sink, flap Hz,
@@ -140,6 +169,7 @@ const Cfg FlightTable[SpeciesCount] = {
     {9, 5, 0.95f, 3, 2.2f, 0.8f, 2.7f, 0.95f, 0.12f, -0.1f, 0.02f, 0.25f, 0.55f, -0.12f, 0.85f},
     {11, 7, 0.6f, 1.4f, 1.6f, 0.55f, 1.6f, 0.62f, 0.02f, -0.05f, 0.02f, 0.12f, 0.12f, 0.06f, 0.2f},
     {9, 6, 0.55f, 1.2f, 1.2f, 0.45f, 2.0f, 0.55f, 0.1f, -0.18f, 0.03f, 0.42f, 0.85f, -0.28f, 0.02f},
+    {13, 6, 1.0f, 4, 2.5f, 1.2f, 11, 0.8f, 0.08f, -0.05f, 0.02f, 0.3f, 0.55f, -0.15f, 0.8f},
 };
 
 // ---------------------------------------------------------------- small maths
@@ -229,6 +259,10 @@ struct RV
     int part;
     float w;
     float u, v;
+    // (Shorebirds) wings: the folded position; legs (part 8): side, segment (0 hip, 1 knee, 2 ankle
+    // ring, 3 foot), and the ring direction / radius factor -- or, on the foot, its offset in f
+    BV3 f{};
+    float legSide = 0, legSeg = 0, rx = 0, ry = 0, rk = 0;
 };
 struct Rest
 {
@@ -241,7 +275,7 @@ struct Rest
 // Atlas: body (along, around) in u 0..0.5 / v 0..0.5; bill in u 0.5..0.75; tail in u 0.75..1;
 // wings (span, chord) in v 0.5..1, the upper surface from the leading edge at v 0.75 up to the
 // trailing edge at 0.5, the lower surface down to 1.
-Rest BuildRest(const Species& sp)
+Rest BuildRest(const Species& sp, bool withLegs)
 {
     Rest r;
     auto vtx = [&](BV3 p, int part, float w, float u, float v)
@@ -350,6 +384,16 @@ Rest BuildRest(const Species& sp)
         return BV3{Wg.root[0] + u * Wg.span, Wg.root[1], Wg.root[2] + le - c * 0.22f};
     };
     r.S = joint(0), r.E = joint(Wg.elbow), r.W = joint(Wg.wrist);
+    // BirdShapes.js flankX: half width of the body at (y, z), 0 outside it
+    auto flankX = [&](float y, float z)
+    {
+        if (z < z0 || z > z1)
+            return 0.0f;
+        const float yc = Prof(Y, z), hw = Prof(HW, z), hh = y > yc ? Prof(HT, z) : Prof(HB, z);
+        const float d = (y - yc) / std::max(hh, 1e-5f);
+        return std::fabs(d) >= 1 ? 0.0f : hw * std::sqrt(1 - d * d);
+    };
+    const float* Fd = sp.fold;
     const std::array<std::pair<int, int>, 6> ring = {{{0, 1}, {1, 1}, {2, 1}, {3, 0}, {2, -1}, {1, -1}}};
     for (int sideI = 0; sideI < 2; ++sideI)
     {
@@ -382,7 +426,17 @@ Rest BuildRest(const Species& sp)
                 // atlas: the upper surface from the leading edge (0.75) to the trailing edge (0.5),
                 // the lower one on to 1
                 const float av = s >= 0 ? 0.75f - 0.25f * v : 0.75f + 0.25f * v;
-                vtx({side * x, y, Wg.root[2] + le - v * c}, pt, w, u, av);
+                const uint32_t vi = vtx({side * x, y, Wg.root[2] + le - v * c}, pt, w, u, av);
+                // folded: laid back along the upper flank, primaries bundled over the tail
+                const float a = std::pow(u, 0.85f);
+                const float zfA = Fd[0] + (Fd[1] - Fd[0]) * a;
+                const float hA = Fd[3] * std::pow(1 - a, 0.55f) * (1 - 0.25f * a) + Fd[3] * 0.08f;
+                const float yTop = Prof(Y, std::min(std::max(zfA, z0), z1)) + Fd[2] * (1 - 0.55f * a) - 0.004f * a;
+                const float yf = yTop - v * hA, zf = zfA - v * hA * 0.35f;
+                const float layer = s >= 0 ? 0.0035f : -0.001f;
+                const float xf = std::max(flankX(yf, zf) * 1.06f, Fd[4] * (1 - 0.3f * v)) + layer * (sp.length / 0.4f) +
+                                 0.0015f * (1 - u);
+                r.v[vi].f = {side * xf, yf, zf};
             }
         }
         auto PW = [&](int i, int j) { return first + uint32_t(i * 6 + (j % 6)); };
@@ -394,6 +448,55 @@ Rest BuildRest(const Species& sp)
                 else
                     r.idx.insert(r.idx.end(), {PW(i, j), PW(i + 1, j), PW(i, j + 1), PW(i, j + 1), PW(i + 1, j), PW(i + 1, j + 1)});
             }
+    }
+    // legs (BirdShapes.js): a 4-sided tube hip -> knee -> ankle and a slender foot at the ankle; the
+    // posing puts them where the solved knee and foot are. Coloured from the bill's atlas texels.
+    if (withLegs && sp.legs[3] > 0)
+    {
+        for (int sideI = 0; sideI < 2; ++sideI)
+        {
+            const float side = sideI == 0 ? 1.0f : -1.0f;
+            const uint32_t first = uint32_t(r.v.size());
+            for (int rr = 0; rr < 3; ++rr)
+                for (int j = 0; j < 4; ++j)
+                {
+                    const float a = float(j) / 4 * Tau + Pi / 4;
+                    const uint32_t i = vtx({}, 8, 0, 0.6f, 0.25f);
+                    RV& q = r.v[i];
+                    q.legSide = side, q.legSeg = float(rr);
+                    q.rx = std::cos(a), q.ry = std::sin(a), q.rk = rr == 0 ? 1.25f : rr == 1 ? 1.1f : 0.9f;
+                }
+            auto PL = [&](int rr, int j) { return first + uint32_t(rr * 4 + (j % 4)); };
+            for (int rr = 0; rr < 2; ++rr)
+                for (int j = 0; j < 4; ++j)
+                    r.idx.insert(r.idx.end(), {PL(rr, j), PL(rr, j + 1), PL(rr + 1, j), PL(rr, j + 1), PL(rr + 1, j + 1), PL(rr + 1, j)});
+            const float toe = sp.legs[6], web = sp.legs[7];
+            const float toes[3] = {-0.5f, 0, 0.5f};
+            std::vector<BV3> footPts{{0, 0, -toe * 0.12f}};
+            for (int k = 0; k < 3; ++k)
+            {
+                const float a = toes[k] * side;
+                footPts.push_back({std::sin(a) * toe, 0, std::cos(a) * toe * (k == 1 ? 1.08f : 0.92f)});
+                if (k < 2)
+                {
+                    const float b = (toes[k] + 0.25f) * side, wr = toe * (0.22f + 0.55f * web);
+                    footPts.push_back({std::sin(b) * wr, 0, std::cos(b) * wr});
+                }
+            }
+            const uint32_t fc = uint32_t(r.v.size());
+            for (const BV3& f : footPts)
+            {
+                const uint32_t i = vtx({}, 8, 0, 0.6f, 0.25f);
+                r.v[i].legSide = side, r.v[i].legSeg = 3, r.v[i].f = f;
+            }
+            for (uint32_t k = 1; k + 1 < uint32_t(footPts.size()); ++k)
+            {
+                if (side > 0)
+                    r.idx.insert(r.idx.end(), {fc, fc + k + 1, fc + k});
+                else
+                    r.idx.insert(r.idx.end(), {fc, fc + k, fc + k + 1});
+            }
+        }
     }
     return r;
 }
@@ -423,14 +526,92 @@ WingPose FlapWings(const Cfg& g, float ph, float amp)
                     -amp * 0.15f * s);
 }
 
+// (Shorebirds) the rest of a pose: wings morphed toward their folded shape, the legs' knees and
+// feet (body frame; left = +x), the head bone (about the species' neck pivot) and the tail's pitch
+struct BodyPose
+{
+    float fold = 0;
+    BV3 knee[2]{}, foot[2]{}; // [0] left (+x), [1] right; knee = foot = hip collapses the legs
+    BQ head{};
+    BV3 headOff{};
+    float tailPitch = 0;
+};
+
+// BirdPose.js solveLeg: two-bone leg hip -> knee -> foot (body frame), the knee bending backward
+void SolveLeg(BV3& knee, BV3& foot, BV3 hip, BV3 f, float a, float b)
+{
+    BV3 d = f - hip;
+    float dl = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+    const float maxD = (a + b) * 0.999f;
+    if (dl > maxD)
+    {
+        d = d * (maxD / dl);
+        dl = maxD;
+        f = hip + d;
+    }
+    foot = f;
+    const float x = (a * a - b * b + dl * dl) / (2 * std::max(dl, 1e-6f));
+    const float h = std::sqrt(std::max(0.0f, a * a - x * x));
+    const BV3 u = d * (1 / std::max(dl, 1e-6f));
+    BV3 bd{0, 0, -1};
+    const float dp = bd.x * u.x + bd.y * u.y + bd.z * u.z;
+    bd = bd - u * dp;
+    const float bl = std::sqrt(bd.x * bd.x + bd.y * bd.y + bd.z * bd.z);
+    knee = hip + u * x + bd * (h / (bl > 0 ? bl : 1));
+}
+
+// BirdPose.js standHeight: the body origin above the feet, legs slightly bent
+float StandHeight(const Species& sp, float bend = 0.9f) { return -sp.legs[1] + (sp.legs[3] + sp.legs[4]) * bend * 0.93f; }
+
+// BirdPose.js groundPose (the legs only; the body's place and yaw / pitch go into the draw's matrix):
+// feet on the ground plane `height` below the body origin, the stride's phase (the feet alternate),
+// stride length, step height and how far apart the feet are
+void GroundLegs(const Species& sp, BodyPose& bp, float pitch, float height, float phase, float stride, float lift, float spread = 1)
+{
+    const float c = std::cos(pitch), sn = std::sin(pitch);
+    const float fx = sp.legs[0] * 0.9f * spread;
+    const float base = sp.legs[2] * c + 0.25f * sp.legs[4] * sn;
+    for (int k = 0; k < 2; ++k)
+    {
+        const float ph = phase + k * Pi;
+        const float fz = base + std::sin(ph) * stride * 0.5f;
+        const float fy = -height + std::max(0.0f, std::cos(ph)) * lift;
+        const float lx = k == 0 ? fx : -fx;
+        const float by = fy * c - fz * sn, bz = fy * sn + fz * c;
+        const BV3 hip{k == 0 ? sp.legs[0] : -sp.legs[0], sp.legs[1], sp.legs[2]};
+        SolveLeg(bp.knee[k], bp.foot[k], hip, {lx, by, bz}, sp.legs[3], sp.legs[4]);
+    }
+}
+
+// The sanderling's ground poses: GroundRunPhases running (the stride's phases), then standing, then
+// probing (the bill jabbed into the sand). Shorebirds.js groundPoseOf: body pitched a little down while
+// running, up while standing; head lowered and pushed forward to probe; wings folded; tail pitched.
+constexpr int GroundRunPhases = 8;
+constexpr int GroundStand = GroundRunPhases, GroundProbe = GroundRunPhases + 1, GroundPoses = GroundRunPhases + 2;
+float GroundPitch(int pose) { return pose < GroundRunPhases ? -0.05f : pose == GroundProbe ? -0.04f : 0.04f; }
+BodyPose SanderlingGround(int pose)
+{
+    const Species& sp = SpeciesTable[Sanderling];
+    BodyPose bp;
+    bp.fold = 1;
+    bp.tailPitch = 0.05f;
+    const float head = pose == GroundProbe ? 1.0f : 0.0f;
+    bp.head = QAxis(1, 0, 0, -0.1f + head * 1.15f);
+    bp.headOff = {0, -0.006f * head, 0.004f * head};
+    const bool run = pose < GroundRunPhases;
+    GroundLegs(sp, bp, GroundPitch(pose), StandHeight(sp), run ? Tau * pose / GroundRunPhases : 0, run ? 0.06f : 0, run ? 0.012f : 0);
+    return bp;
+}
+
 struct MeshOut
 {
     std::vector<WgrMeshVertex> v;
     std::vector<uint32_t> idx;
 };
+
 // BirdBatch.js vertex stage, baked: the wings posed by their bones (mirrored for the right wing,
 // blended at the joints), the tail spread about the centre line
-MeshOut Pose(const Rest& r, const WingPose& wp, float tailSpread)
+MeshOut Pose(const Rest& r, const WingPose& wp, float tailSpread, const Species* spB = nullptr, const BodyPose* bp = nullptr)
 {
     MeshOut m;
     m.idx = r.idx;
@@ -442,7 +623,42 @@ MeshOut Pose(const Rest& r, const WingPose& wp, float tailSpread)
         if (a.part == 4)
         {
             const BV3 d = a.p - r.tailBase;
-            p = r.tailBase + BV3{d.x * tailSpread, d.y, d.z};
+            const float tp = bp ? bp->tailPitch : 0.0f, c = std::cos(tp), sn = std::sin(tp);
+            const BV3 ds{d.x * tailSpread, d.y, d.z};
+            p = r.tailBase + BV3{ds.x, ds.y * c + ds.z * sn, ds.z * c - ds.y * sn};
+        }
+        else if (a.part <= 3 && bp && spB)
+        {
+            // the head bone turns about the neck pivot: the body stays, the neck blends, the head
+            // and the bill turn whole
+            const BV3 piv{spB->pivot[0], spB->pivot[1], spB->pivot[2]};
+            const BV3 hp = piv + bp->headOff + QRot(bp->head, a.p - piv);
+            const float w = a.part == 3 ? 0.0f : 1.0f - Smooth01(spB->neck[0], spB->neck[1], a.p.z);
+            p = Mix(hp, a.p, w);
+        }
+        else if (a.part == 8)
+        {
+            // legs: tube hip -> knee -> ankle, the foot at the ankle (collapsed when tucked)
+            const int L = a.legSide > 0 ? 0 : 1;
+            const BV3 hip{spB ? spB->legs[0] * a.legSide : 0, spB ? spB->legs[1] : 0, spB ? spB->legs[2] : 0};
+            const BV3 knee = bp ? bp->knee[L] : hip, foot = bp ? bp->foot[L] : hip;
+            const auto len = [](BV3 v) { return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); };
+            const float reach = Smooth01(0, 0.01f, len(knee - hip) + len(foot - knee));
+            if (a.legSeg > 2.5f)
+                p = foot + a.f * Smooth01(0, 0.01f, len(foot - knee));
+            else
+            {
+                const BV3 c = a.legSeg < 0.5f ? hip : a.legSeg < 1.5f ? knee : foot;
+                const BV3 d0 = a.legSeg < 0.5f ? knee - hip : a.legSeg < 1.5f ? foot - hip : foot - knee;
+                const float dl = std::max(len(d0), 1e-5f);
+                const BV3 dir = d0 * (1 / dl);
+                auto cross = [](BV3 u, BV3 v) { return BV3{u.y * v.z - u.z * v.y, u.z * v.x - u.x * v.z, u.x * v.y - u.y * v.x}; };
+                BV3 ax = cross(dir, {1, 0, 0.001f});
+                ax = ax * (1 / std::max(len(ax), 1e-6f));
+                const BV3 ay = cross(dir, ax);
+                const float rad = (spB ? spB->legs[5] : 0) * a.rk * reach;
+                p = c + (ax * a.rx + ay * a.ry) * rad;
+            }
         }
         else if (a.part >= 5)
         {
@@ -458,6 +674,8 @@ MeshOut Pose(const Rest& r, const WingPose& wp, float tailSpread)
             const BV3 pc = Wp + QRot(qc, a.p - Wj);
             const int seg = a.part - 5;
             p = seg == 0 ? pa : seg == 1 ? Mix(pb, pa, a.w) : Mix(pc, pb, a.w);
+            if (bp && bp->fold > 0)
+                p = Mix(p, a.f, bp->fold);
             (void)sx;
         }
         WgrMeshVertex& w = m.v[i];
@@ -603,6 +821,23 @@ Rgb Plumage(const Species& sp, int s, float tu, float tv)
             c = MixC(MixC(Rgb{0.58f, 0.54f, 0.5f}, Rgb{0.75f, 0.55f, 0.45f}, Smooth01(0.6f, 1.0f, u)), Rgb{0.22f, 0.21f, 0.2f}, pouch);
         }
     }
+    else if (s == Sanderling)
+    {
+        // sanderling (winter): pale grey above with dark feather centres, white below, dark
+        // shoulder and primaries, bold white wing bar, black bill and legs
+        const Rgb white{0.95f, 0.95f, 0.94f};
+        const Rgb grey = MixC(Rgb{0.62f, 0.62f, 0.6f}, Rgb{0.48f, 0.48f, 0.47f}, Smooth01(0.2f, 0.7f, fnz));
+        const float upper = Smooth01(-0.05f, 0.35f, N.y) * std::max(1 - Smooth01(0.08f, 0.092f, P.z), Smooth01(0.2f, 0.6f, N.y));
+        const Rgb body = MixC(white, grey, upper);
+        const float bar = Smooth01(0.18f, 0.26f, u) * (1 - Smooth01(0.7f, 0.78f, u)) * Smooth01(0.42f, 0.48f, v) * (1 - Smooth01(0.6f, 0.66f, v));
+        const float shoulder = Smooth01(0.2f, 0.3f, u) * (1 - Smooth01(0.45f, 0.55f, u)) * (1 - Smooth01(0.1f, 0.3f, v));
+        const Rgb wingTop = MixC(MixC(MixC(grey, Rgb{0.12f, 0.12f, 0.12f}, Smooth01(0.62f, 0.72f, u)), white, bar), Rgb{0.1f, 0.1f, 0.1f},
+                                 shoulder * 0.8f);
+        c = isWing ? (top ? wingTop : white)
+                   : part == TailP ? MixC(grey, Rgb{0.2f, 0.2f, 0.2f}, 1 - Smooth01(0.0f, 0.25f, std::fabs(u - 0.5f))) : body;
+        if (part == BillP)
+            c = {0.04f, 0.04f, 0.04f};
+    }
     else
     {
         // magnificent frigatebird (female): black with a white breast and a brown bar on the upperwing
@@ -643,7 +878,7 @@ void BirdFlocks::EnsureMeshes()
     _indexCounts.assign(_meshes.size(), 0);
     for (int s = 0; s < SpeciesCount; ++s)
     {
-        const Rest rest = BuildRest(SpeciesTable[s]);
+        const Rest rest = BuildRest(SpeciesTable[s], s == Sanderling);
         const Cfg& g = FlightTable[s];
         for (int p = 0; p <= Phases; ++p)
         {
@@ -652,6 +887,17 @@ void BirdFlocks::EnsureMeshes()
             const size_t i = size_t(s) * (Phases + 1) + p;
             _meshes[i] = wgr_mesh_create(_renderer, WgrSlice<WgrMeshVertex>(m.v), WgrSlice<uint32_t>(m.idx));
             _indexCounts[i] = uint32_t(m.idx.size());
+        }
+        if (s == Sanderling)
+        {
+            // folded and standing on its legs: the running phases, standing, probing
+            for (int g = 0; g < GroundPoses; ++g)
+            {
+                const BodyPose bp = SanderlingGround(g);
+                const MeshOut m = Pose(rest, FlapWings(FlightTable[s], Pi / 2, 0), 1.0f, &SpeciesTable[s], &bp);
+                _groundMeshes.push_back(wgr_mesh_create(_renderer, WgrSlice<WgrMeshVertex>(m.v), WgrSlice<uint32_t>(m.idx)));
+                _groundCounts.push_back(uint32_t(m.idx.size()));
+            }
         }
         constexpr int TW = 128, TH = 128;
         std::vector<uint8_t> px(TW * TH * 4);
@@ -903,6 +1149,22 @@ void BirdFlocks::Update(const Vector3& camera, float time)
         if (_nearSea < 700.0f && camera.Y() < sea + 1200.0f)
             Spawn(camera);
     }
+    // (Shorebirds.js) the sanderlings on the beaches near the camera
+    static const bool shorebirds = []
+    {
+        const char* v = std::getenv("WGR_SHOREBIRDS");
+        return !(v && v[0] == '0');
+    }();
+    int sandDrawn = 0;
+    if (shorebirds)
+    {
+        UpdateShorebirds(camera, dt, time);
+        if (!_sand.empty())
+        {
+            EnsureMeshes();
+            DrawSand(camera, sandDrawn);
+        }
+    }
     if (_birds.empty())
         return;
     EnsureMeshes();
@@ -996,9 +1258,431 @@ void BirdFlocks::Update(const Vector3& camera, float time)
     if (time >= nextLog)
     {
         nextLog = time + 5.0f;
-        LOG_INFO(Graphics, "Birds: {} flying, {} drawn, sea {:.0f} m from the camera; camera {:.0f} {:.0f} {:.0f}, first {:.0f} {:.0f} {:.0f}",
+        LOG_INFO(Graphics, "Birds: {} flying, {} drawn, sea {:.0f} m from the camera; camera {:.0f} {:.0f} {:.0f}, first {:.0f} {:.0f} {:.0f}; "
+                           "sanderlings {} in {} flocks ({} drawn, swash field {} texels, first at {:.1f} {:.2f} {:.1f})",
                  _birds.size(), drawn, _nearSea > 1e8f ? -1.0f : _nearSea, camera.X(), camera.Y(), camera.Z(), _birds[0].x,
-                 _birds[0].y, _birds[0].z);
+                 _birds[0].y, _birds[0].z, _sand.size(), _flocks.size(), sandDrawn, _swashTexels,
+                 _sand.empty() ? 0.0f : _sand[0].x, _sand.empty() ? 0.0f : _sand[0].y, _sand.empty() ? 0.0f : _sand[0].z);
+    }
+}
+// ---------------------------------------------------------------- sanderlings (Shorebirds.js)
+
+namespace
+{
+constexpr float SandDraw = 190.0f;            // Shorebirds.js DRAW
+constexpr float SandWary = 15.0f, SandFlush = 8.0f; // m
+constexpr float BeachSlope = 0.066f;          // ShoreWaves' nominal beach slope (tw_shore.wgsl)
+} // namespace
+
+bool BirdFlocks::SwashAt(float x, float z, float& runup, float& speed) const
+{
+    if (_swashTexels <= 0 || _swashLanes[2] <= 0)
+        return false;
+    const int n = int(_swashLanes[3]);
+    const int i = int(std::floor((x - _swashLanes[0]) / _swashLanes[2] + 0.5f));
+    const int j = int(std::floor((z - _swashLanes[1]) / _swashLanes[2] + 0.5f));
+    if (i < 0 || j < 0 || i >= n || j >= n || j * n + i >= _swashTexels)
+        return false;
+    const float* t = &_swash[size_t(j * n + i) * 4];
+    if (t[3] < 0)
+        return false;
+    runup = t[0];
+    speed = t[2];
+    return true;
+}
+
+// A new flock where the shore waves run onto a gentle beach near the camera: a swash-field texel
+// whose ground is a little above the sea, on a slope a sanderling can run on, away from other flocks.
+void BirdFlocks::SpawnShoreFlock(const Vector3& camera)
+{
+    const int n = int(_swashLanes[3]);
+    if (_swashTexels <= 0 || n <= 0)
+        return;
+    for (int tries = 0; tries < 40; ++tries)
+    {
+        const int i = int(Unit(_rng) * n), j = int(Unit(_rng) * n);
+        const float* t = &_swash[size_t(j * n + i) * 4];
+        if (t[3] < 0 || t[0] < 0.6f)
+            continue;
+        const float x = _swashLanes[0] + i * _swashLanes[2], z = _swashLanes[1] + j * _swashLanes[2];
+        const float d = std::hypot(x - camera.X(), z - camera.Z());
+        if (d < 25 || d > 150)
+            continue;
+        const float sea = Wildlife::SeaLevel(x, z), h = Wildlife::Ground(x, z);
+        if (h < sea + 0.05f || h > sea + 1.2f)
+            continue;
+        const float e = 1.0f;
+        const float gx = (Wildlife::Ground(x + e, z) - Wildlife::Ground(x - e, z)) / (2 * e);
+        const float gz = (Wildlife::Ground(x, z + e) - Wildlife::Ground(x, z - e)) / (2 * e);
+        const float g = std::hypot(gx, gz);
+        if (g < 0.01f || g > 0.2f)
+            continue;
+        bool clear = true;
+        for (const ShoreFlock& o : _flocks)
+            clear &= std::hypot(o.cx - x, o.cz - z) > 90;
+        if (!clear)
+            continue;
+        ShoreFlock F;
+        F.cx = x, F.cz = z;
+        F.tx = -gz / g, F.tz = gx / g; // along the shore: across the uphill direction
+        F.drift = Unit(_rng) < 0.5f ? -1.0f : 1.0f;
+        F.range = 40 + Unit(_rng) * 25;
+        const int fi = int(_flocks.size());
+        _flocks.push_back(F);
+        const int birds = 7 + int(Unit(_rng) * 6 * std::min(Wildlife::Density(), 2.0f));
+        for (int k = 0; k < birds; ++k)
+        {
+            Sand b;
+            b.flock = fi;
+            b.offset = (Unit(_rng) - 0.5f) * 11;
+            b.margin = Unit(_rng);
+            b.phase = Unit(_rng) * Tau;
+            b.peckT = Unit(_rng);
+            const float along = b.offset + (Unit(_rng) - 0.5f) * 4;
+            b.x = x + F.tx * along + gx / g * (Unit(_rng) * 2 - 1);
+            b.z = z + F.tz * along + gz / g * (Unit(_rng) * 2 - 1);
+            b.y = Wildlife::Ground(b.x, b.z);
+            b.yaw = Unit(_rng) * Tau;
+            for (float& v : b.form)
+                v = Unit(_rng) - 0.5f;
+            b.form[0] *= 4, b.form[1] *= 1.2f, b.form[2] *= 3;
+            b.f.species = Sanderling;
+            b.f.freqMul = 0.94f + Unit(_rng) * 0.12f;
+            b.f.scale = 0.92f + Unit(_rng) * 0.16f;
+            b.f.wander = Unit(_rng) * 100;
+            _sand.push_back(b);
+        }
+        LOG_INFO(Graphics, "Sanderlings: a flock of {} at {:.0f} {:.0f} ({:.0f} m from the camera)", birds, x, z, d);
+        return;
+    }
+}
+
+void BirdFlocks::UpdateShorebirds(const Vector3& camera, float dt, float time)
+{
+    // the swash field (1-3 frames old on the GPU side; re-read every few frames here)
+    _shoreScan -= dt;
+    static float swashRead = 0;
+    swashRead -= dt;
+    if (swashRead <= 0)
+    {
+        swashRead = 0.1f;
+        const uint32_t cap = 64 * 64;
+        _swash.resize(size_t(cap) * 4);
+        float age = 0;
+        const uint32_t got = wgr_water_swash_field(_swash.data(), cap, _swashLanes, &age);
+        _swashTexels = got > 0 && age < 1500.0f ? int(got) : 0;
+    }
+    // retire flocks the camera left behind; found new ones now and then
+    if (_shoreScan <= 0)
+    {
+        _shoreScan = 3.0f;
+        for (int fi = int(_flocks.size()) - 1; fi >= 0; --fi)
+        {
+            if (std::hypot(_flocks[fi].cx - camera.X(), _flocks[fi].cz - camera.Z()) < 320)
+                continue;
+            _sand.erase(std::remove_if(_sand.begin(), _sand.end(), [&](const Sand& b) { return b.flock == fi; }), _sand.end());
+            for (Sand& b : _sand)
+                if (b.flock > fi)
+                    --b.flock;
+            _flocks.erase(_flocks.begin() + fi);
+        }
+        const float sea = Wildlife::SeaLevel(camera.X(), camera.Z());
+        if (_flocks.size() < 2 && camera.Y() < sea + 120 && !Wildlife::Earth())
+            SpawnShoreFlock(camera);
+    }
+    if (_flocks.empty())
+        return;
+    // the viewer (the camera near the ground): wary birds run off along the beach, pressed ones flush
+    static Vector3 lastCam = camera;
+    const float camSpeed = dt > 0 ? (camera - lastCam).Size() / dt : 0;
+    lastCam = camera;
+    const bool viewerLow = camera.Y() < Wildlife::Ground(camera.X(), camera.Z()) + 3.5f;
+    for (int fi = 0; fi < int(_flocks.size()); ++fi)
+    {
+        ShoreFlock& F = _flocks[fi];
+        float threat = 1e9f;
+        float cs = 0;
+        int nb = 0;
+        for (const Sand& b : _sand)
+        {
+            if (b.flock != fi)
+                continue;
+            cs += (b.x - F.cx) * F.tx + (b.z - F.cz) * F.tz;
+            ++nb;
+            if (!b.flying && viewerLow)
+                threat = std::min(threat, std::hypot(b.x - camera.X(), b.z - camera.Z()));
+        }
+        if (nb == 0)
+            continue;
+        cs /= nb;
+        const float viewerS = (camera.X() - F.cx) * F.tx + (camera.Z() - F.cz) * F.tz;
+        F.away = cs >= viewerS ? 1.0f : -1.0f;
+        const bool running = camSpeed > 3.5f;
+        const bool flush = threat < SandFlush || (running && threat < SandFlush * 1.7f);
+        if (!F.flying && flush)
+        {
+            F.alarm += dt;
+            if (F.alarm > 0.15f)
+                FlushFlock(fi, camera);
+        }
+        else
+            F.alarm = std::max(0.0f, F.alarm - dt);
+        F.wary = threat < SandWary + (running ? 6 : 0);
+        if (!F.flying)
+        {
+            if (Unit(_rng) < dt / 25)
+                F.drift = -F.drift;
+            F.s += F.drift * 0.25f * dt + (F.wary ? F.away * 1.4f * dt : 0);
+            F.s = Clamp(F.s, -F.range + 8, F.range - 8);
+        }
+        else if (!F.path.empty())
+        {
+            // the flock point runs along the flush path at 12.5 m/s
+            F.pathS = std::min(F.pathLen, F.pathS + dt * 12.5f);
+            float acc = 0;
+            for (size_t k = 1; k < F.path.size(); ++k)
+            {
+                const auto& a = F.path[k - 1];
+                const auto& b2 = F.path[k];
+                const float l = std::hypot(b2[0] - a[0], b2[2] - a[2]);
+                if (acc + l >= F.pathS || k + 1 == F.path.size())
+                {
+                    const float t = l > 0 ? Clamp((F.pathS - acc) / l, 0, 1) : 1;
+                    F.px = a[0] + (b2[0] - a[0]) * t, F.py = a[1] + (b2[1] - a[1]) * t, F.pz = a[2] + (b2[2] - a[2]) * t;
+                    F.hx = (b2[0] - a[0]) / std::max(l, 1e-3f), F.hz = (b2[2] - a[2]) / std::max(l, 1e-3f);
+                    break;
+                }
+                acc += l;
+            }
+        }
+        bool anyFlying = false;
+        for (Sand& b : _sand)
+        {
+            if (b.flock != fi)
+                continue;
+            if (b.flying)
+                FlySand(b, F, dt);
+            else
+                GroundSand(b, F, dt);
+            anyFlying |= b.flying;
+        }
+        if (F.flying && !anyFlying)
+            F.flying = false;
+    }
+    (void)time;
+}
+
+void BirdFlocks::GroundSand(Sand& b, ShoreFlock& F, float dt)
+{
+    const float e = 0.6f;
+    const float gx = (Wildlife::Ground(b.x + e, b.z) - Wildlife::Ground(b.x - e, b.z)) / (2 * e);
+    const float gz = (Wildlife::Ground(b.x, b.z + e) - Wildlife::Ground(b.x, b.z - e)) / (2 * e);
+    const float gl = std::hypot(gx, gz);
+    const float ux = gl > 1e-4f ? gx / gl : -F.tz, uz = gl > 1e-4f ? gz / gl : F.tx; // uphill
+    const float g = std::max(gl, 0.015f);
+    const float tx = -uz, tz = ux; // along the shore here
+    const float sea = Wildlife::SeaLevel(b.x, b.z);
+    const float h = Wildlife::Ground(b.x, b.z);
+    // where the water's edge is relative to this bird (m along the ground, > 0: the bird is dry)
+    float dm = 3, vf = 0;
+    bool up = false;
+    float runup = 0, speed = 0;
+    if (SwashAt(b.x, b.z, runup, speed))
+    {
+        const float inland = std::max(h - sea, 0.0f) / BeachSlope;
+        dm = (inland - runup) * BeachSlope / g;
+        vf = speed * BeachSlope / g;
+        up = speed > 0.05f;
+    }
+    else
+        dm = (h - sea - 0.35f) / g; // no field: keep to a fixed band of the wet sand
+    // wanted place relative to the edge: just above the retreating water, well ahead of an uprush
+    const float want = up ? 1.0f + b.margin * 1.2f : 0.15f + b.margin * 0.55f;
+    float vUp = Clamp((up ? vf : 0) + (want - dm) * 2.2f, -1.3f, 2.4f);
+    // along the shore: keep the flock together, spaced out, running off when wary
+    const float targetX = F.cx + F.tx * (F.s + b.offset), targetZ = F.cz + F.tz * (F.s + b.offset);
+    float vAl = Clamp(((targetX - b.x) * tx + (targetZ - b.z) * tz) * 0.6f, -0.9f, 0.9f);
+    if (F.wary)
+        vAl = F.away * (F.tx * tx + F.tz * tz >= 0 ? 1.0f : -1.0f) * (1.3f + b.margin * 0.5f);
+    for (const Sand& o : _sand)
+    {
+        if (&o == &b || o.flying || o.flock != b.flock)
+            continue;
+        const float dx = b.x - o.x, dz = b.z - o.z, d2 = dx * dx + dz * dz;
+        if (d2 < 0.25f && d2 > 1e-6f)
+        {
+            const float d = std::sqrt(d2);
+            vAl += (dx * tx + dz * tz) / d * (0.5f - d) * 3;
+            vUp += (dx * ux + dz * uz) / d * (0.5f - d) * 3;
+        }
+    }
+    // stop-and-go: quick spurts, then a pause to probe the sand
+    const float err = want - dm;
+    const bool caught = dm < 0.25f && up;
+    b.stop = std::max(0.0f, b.stop - dt);
+    if (b.stop > 0)
+    {
+        if (caught || F.wary || std::fabs(err) > 0.8f + b.margin * 0.5f || std::fabs(vAl) > 0.7f)
+            b.stop = 0;
+    }
+    else if (std::fabs(err) < 0.3f && std::fabs(vAl) < 0.55f && !caught && !F.wary)
+        b.stop = 0.5f + Unit(_rng) * 1.6f;
+    const float go = b.stop > 0 ? 0.0f : 1.0f;
+    const float vx = (ux * vUp + tx * vAl) * go, vz = (uz * vUp + tz * vAl) * go;
+    const float k = Approach(14, dt);
+    b.vx += (vx - b.vx) * k;
+    b.vz += (vz - b.vz) * k;
+    b.v = std::hypot(b.vx, b.vz);
+    b.x += b.vx * dt;
+    b.z += b.vz * dt;
+    if (b.v > 0.15f)
+        b.yaw += AngleDiff(std::atan2(b.vx, b.vz), b.yaw) * Approach(16, dt);
+    // caught by the water: a flutter hop up the beach
+    if (caught && dm < -0.35f && b.hop <= 0)
+        b.hop = 0.45f;
+    b.hop = std::max(0.0f, b.hop - dt);
+    // probing: quick jabs of the bill while stopped
+    b.peckT += dt * (b.stop > 0 ? 4.5f : 0.0f);
+    const float jab = b.stop > 0 ? std::pow(std::max(0.0f, std::sin(b.peckT * Pi)), 0.6f) : 0.0f;
+    b.head += (jab - b.head) * Approach(30, dt);
+    // legs: a blur of tiny, very fast steps
+    const float f = b.v > 0.05f ? Clamp(5 + b.v * 5, 5, 14) : 0.0f;
+    b.phase = std::fmod(b.phase + Tau * f * dt, Tau);
+    b.y = Wildlife::Ground(b.x, b.z);
+}
+
+// Shorebirds.js flush: the whole flock bursts up, out over the surf, along the beach, back in to land
+void BirdFlocks::FlushFlock(int fi, const Vector3& camera)
+{
+    ShoreFlock& F = _flocks[fi];
+    F.flying = true;
+    // where along the shore: away from the viewer, or back past him when there is no room
+    float cs = 0;
+    int nb = 0;
+    for (const Sand& b : _sand)
+        if (b.flock == fi)
+            cs += (b.x - F.cx) * F.tx + (b.z - F.cz) * F.tz, ++nb;
+    cs /= std::max(nb, 1);
+    float dir = F.away;
+    float dest = cs + dir * (55 + Unit(_rng) * 50);
+    if (dest < -F.range + 10 || dest > F.range - 10)
+    {
+        dir = -dir;
+        const float viewerS = (camera.X() - F.cx) * F.tx + (camera.Z() - F.cz) * F.tz;
+        dest = Clamp(viewerS + dir * (50 + Unit(_rng) * 40), -F.range + 10, F.range - 10);
+    }
+    // seaward: down the beach at the flock's centre
+    const float e = 1.0f;
+    const float gx = (Wildlife::Ground(F.cx + e, F.cz) - Wildlife::Ground(F.cx - e, F.cz)) / (2 * e);
+    const float gz = (Wildlife::Ground(F.cx, F.cz + e) - Wildlife::Ground(F.cx, F.cz - e)) / (2 * e);
+    const float gl = std::max(std::hypot(gx, gz), 1e-4f);
+    const float sx = -gx / gl, sz = -gz / gl;
+    const float mid = (cs + dest) / 2;
+    auto at = [&](float along, float hgt, float seaward)
+    {
+        const float x = F.cx + F.tx * along + sx * seaward, z = F.cz + F.tz * along + sz * seaward;
+        return std::array<float, 3>{x, std::max(Wildlife::Ground(x, z), Wildlife::SeaLevel(x, z)) + hgt, z};
+    };
+    F.path = {at(cs, 0.6f, 0), at(cs + dir * 10, 2.2f, 7), at(mid - dir * 12, 3 + Unit(_rng) * 2, 14 + Unit(_rng) * 8),
+              at(mid + dir * 14, 2.5f + Unit(_rng) * 2, 12 + Unit(_rng) * 8), at(dest - dir * 12, 1.4f, 4), at(dest, 0.4f, -1.5f)};
+    F.pathLen = 0;
+    for (size_t k = 1; k < F.path.size(); ++k)
+        F.pathLen += std::hypot(F.path[k][0] - F.path[k - 1][0], F.path[k][2] - F.path[k - 1][2]);
+    F.pathS = 0;
+    F.s = dest;
+    for (Sand& b : _sand)
+    {
+        if (b.flock != fi)
+            continue;
+        b.flying = true;
+        b.t = -Unit(_rng) * 0.3f; // take-off spread over a moment
+        const auto land = at(dest + b.offset * 0.8f, 0, -0.5f - b.margin * 2);
+        b.lx = land[0], b.lz = land[2];
+        Flyer& f = b.f;
+        f.x = b.x, f.y = b.y + 0.06f, f.z = b.z;
+        f.yaw = std::atan2(F.path[1][0] - b.x, F.path[1][2] - b.z);
+        f.speed = 3, f.vy = 1.5f, f.flap = 0, f.bank = 0, f.pitch = 0.3f;
+    }
+    LOG_INFO(Graphics, "Sanderlings: a flock flushed ({} birds)", nb);
+}
+
+void BirdFlocks::FlySand(Sand& b, ShoreFlock& F, float dt)
+{
+    b.t += dt;
+    if (b.t < 0)
+        return; // not off yet: keep standing
+    Flyer& f = b.f;
+    const float hl = std::max(std::hypot(F.hx, F.hz), 1e-4f);
+    const float hx = F.hx / hl, hz = F.hz / hl;
+    float tx = F.px + hx * b.form[2] - hz * b.form[0], ty = F.py + b.form[1] * 0.6f, tz = F.pz + hz * b.form[2] + hx * b.form[0];
+    const bool end = F.pathS >= F.pathLen - 0.01f;
+    const float dl = std::hypot(b.lx - f.x, b.lz - f.z);
+    if (end || F.pathS > F.pathLen - 14)
+    {
+        tx = b.lx, tz = b.lz;
+        ty = Wildlife::Ground(b.lx, b.lz) + std::min(1.2f, dl * 0.25f);
+    }
+    const float ahead = std::hypot(tx - f.x, tz - f.z);
+    const float speed = Clamp(9 + (ahead - 2) * 1.2f, 5, 16);
+    const Vector3 wind = GLandscape ? GLandscape->GetWind() : Vector3(0, 0, 0);
+    Steer(f, dt, tx, ty, tz, speed, b.t < 0.6f ? 2.0f : 1.0f, 2.2f, wind.X() * 0.7f, wind.Z() * 0.7f);
+    const float ground = std::max(Wildlife::Ground(f.x, f.z), Wildlife::SeaLevel(f.x, f.z));
+    f.y = std::max(f.y, ground + 0.25f);
+    Animate(f, dt);
+    if (dl < 0.6f && f.y < ground + 0.45f && F.pathS > F.pathLen - 14)
+    {
+        // touch down, running on a few steps
+        b.flying = false;
+        b.x = f.x, b.z = f.z, b.y = Wildlife::Ground(b.x, b.z);
+        b.vx = std::sin(f.yaw) * f.speed * 0.3f, b.vz = std::cos(f.yaw) * f.speed * 0.3f;
+        b.yaw = f.yaw;
+        b.stop = 0;
+    }
+}
+
+void BirdFlocks::DrawSand(const Vector3& camera, int& drawn)
+{
+    const Species& sp = SpeciesTable[Sanderling];
+    const float H = StandHeight(sp);
+    for (const Sand& b : _sand)
+    {
+        const bool air = b.flying && b.t >= 0;
+        const float x = air ? b.f.x : b.x, y = air ? b.f.y : b.y, z = air ? b.f.z : b.z;
+        const float dist = std::hypot(x - camera.X(), y - camera.Y(), z - camera.Z());
+        if (dist > SandDraw || sp.length * b.f.scale / std::max(dist, 0.1f) < 0.0012f)
+            continue;
+        const float s = b.f.scale * Smooth01(SandDraw, SandDraw * 0.8f, dist);
+        size_t mi;
+        uint32_t count;
+        WgrMesh mesh;
+        BQ q;
+        float px = x, py = y, pz = z;
+        if (air || b.hop > 0)
+        {
+            // flying (or a flutter hop clear of the water): the flap cycle
+            const Flyer& f = b.f;
+            const float phase = air ? f.phase : std::fmod(b.hop * 60, Tau);
+            const int pose = air && f.flap < 0.2f ? Phases : std::clamp(int(phase / Tau * Phases), 0, Phases - 1);
+            mi = size_t(Sanderling) * (Phases + 1) + pose;
+            mesh = _meshes[mi], count = _indexCounts[mi];
+            q = air ? QMul(QMul(QAxis(0, 1, 0, f.yaw), QAxis(1, 0, 0, -f.pitch)), QAxis(0, 0, 1, -f.bank)) : QAxis(0, 1, 0, b.yaw);
+            if (!air)
+                py += H + std::sin(Pi * b.hop / 0.45f) * 0.12f;
+        }
+        else
+        {
+            const int pose = b.v > 0.05f ? std::clamp(int(b.phase / Tau * GroundRunPhases), 0, GroundRunPhases - 1)
+                                         : (b.stop > 0 && b.head > 0.5f ? GroundProbe : GroundStand);
+            if (size_t(pose) >= _groundMeshes.size())
+                continue;
+            mesh = _groundMeshes[pose], count = _groundCounts[pose];
+            q = QMul(QAxis(0, 1, 0, b.yaw), QAxis(1, 0, 0, -GroundPitch(pose)));
+            py += H;
+        }
+        const BV3 ax = QRot(q, {s, 0, 0}), upv = QRot(q, {0, s, 0}), fw = QRot(q, {0, 0, s});
+        const float world[16] = {ax.x, ax.y, ax.z, 0, upv.x, upv.y, upv.z, 0, fw.x, fw.y, fw.z, 0, px, py, pz, 1};
+        _engine.SubmitDynamicMesh(mesh, count, world, _textures[Sanderling], 2);
+        ++drawn;
     }
 }
 } // namespace Poseidon
