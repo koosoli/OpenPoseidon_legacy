@@ -1244,6 +1244,73 @@ GameValue A2SwitchableUnits(const GameState* state)
     return result;
 }
 
+// ---------------------------------------------------------------------------
+// String helpers (Operation Arrowhead): toArray, toString, toLower, toUpper, parseNumber
+// ---------------------------------------------------------------------------
+GameValue A2ToArray(const GameState* state, GameValuePar oper1)
+{
+    const RString text = oper1;
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& out = result;
+    const unsigned char* p = reinterpret_cast<const unsigned char*>((const char*)text);
+    while (p && *p)
+    {
+        unsigned code = *p++;
+        int extra = code >= 0xF0 ? 3 : code >= 0xE0 ? 2 : code >= 0xC0 ? 1 : 0;
+        if (extra)
+            code &= 0x3F >> extra;
+        while (extra-- > 0 && (*p & 0xC0) == 0x80)
+            code = (code << 6) | (*p++ & 0x3F);
+        out.Add(GameValue(static_cast<float>(code)));
+    }
+    return result;
+}
+
+GameValue A2ToString(const GameState*, GameValuePar oper1)
+{
+    const GameArrayType& in = oper1;
+    std::string out;
+    for (int i = 0; i < in.Size(); i++)
+    {
+        if (in[i].GetType() != GameScalar)
+            continue;
+        const unsigned c = static_cast<unsigned>(static_cast<float>(in[i]));
+        if (c == 0)
+            continue;
+        if (c < 0x80)
+            out.push_back(static_cast<char>(c));
+        else if (c < 0x800)
+        {
+            out.push_back(static_cast<char>(0xC0 | (c >> 6)));
+            out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        }
+        else
+        {
+            out.push_back(static_cast<char>(0xE0 | (c >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        }
+    }
+    return GameValue(RString(out.c_str()));
+}
+
+GameValue A2ToLower(const GameState*, GameValuePar oper1)
+{
+    return GameValue(RString(Lower((const char*)RString(oper1)).c_str()));
+}
+
+GameValue A2ToUpper(const GameState*, GameValuePar oper1)
+{
+    std::string s = (const char*)RString(oper1);
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    return GameValue(RString(s.c_str()));
+}
+
+GameValue A2ParseNumber(const GameState*, GameValuePar oper1)
+{
+    return GameValue(static_cast<float>(std::atof((const char*)RString(oper1))));
+}
+
 GameValue A2EmptyArrayNular(const GameState* state)
 {
     return state->CreateGameValue(GameArray);
@@ -2146,6 +2213,11 @@ const GameFunction A2Unary[] = {
     GameFunction(GameNothing, "detach", A2Detach, GameObject),
     GameFunction(GameNothing, "deleteCollection", A2DeleteCollection, GameObject),
     GameFunction(GameObject, "createAgent", A2CreateAgent, GameArray),
+    GameFunction(GameArray, "toArray", A2ToArray, GameString),
+    GameFunction(GameString, "toString", A2ToString, GameArray),
+    GameFunction(GameString, "toLower", A2ToLower, GameString),
+    GameFunction(GameString, "toUpper", A2ToUpper, GameString),
+    GameFunction(GameScalar, "parseNumber", A2ParseNumber, GameString),
     GameFunction(GameScalar, "needReload", A2ZeroUnary, GameObject),
     GameFunction(GameNothing, "setGroupIconsVisible", A2NothingUnary, GameArray),
     GameFunction(GameString, "actionKeysImages", A2TextLogEmpty, GameString | GameArray),
