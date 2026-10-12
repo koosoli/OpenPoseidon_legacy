@@ -1390,7 +1390,14 @@ ParamEntry* ParamClass::Find(const RStringB& name, bool parent, bool base, IPara
     }
     if (base && _base != nullptr)
     {
-        return _base->Find(name, parent, base, visible);
+        ParamEntry* found = _base->Find(name, parent, base, visible);
+        // Not in the base chain: a base-class name is also looked up in the enclosing
+        // scopes (Arma 2 configs rely on it: a control group's class deriving from a
+        // sibling of the group). Lookups that succeeded before are unchanged.
+        if (found || !parent)
+        {
+            return found;
+        }
     }
     if (parent && _parent != nullptr)
     {
@@ -1768,14 +1775,19 @@ void ParamClass::Parse(QIStream& in, ParamFile* file)
                 ParamEntry* entry = Find(base, true, true, DefaultAccess); // search parents and bases of my parent
                 if (!entry)
                 {
+                    // Reported, and the class is read without a base rather than abandoning
+                    // the rest of the section (which cascaded into "input after EndOfFile"
+                    // and dropped every class after it).
                     ErrorMessage("%s: Undefined base class '%s'", (const char*)GetContext(word), (const char*)base);
-                    return;
                 }
-                section->_base = dynamic_cast<ParamClass*>(entry);
-                if (!section->_base)
+                else
                 {
-                    ErrorMessage("%s: '%s' is not class", (const char*)GetContext(word), (const char*)base);
-                    return;
+                    section->_base = dynamic_cast<ParamClass*>(entry);
+                    if (!section->_base)
+                    {
+                        ErrorMessage("%s: '%s' is not class", (const char*)GetContext(word), (const char*)base);
+                        return;
+                    }
                 }
                 c = in.get();
             }

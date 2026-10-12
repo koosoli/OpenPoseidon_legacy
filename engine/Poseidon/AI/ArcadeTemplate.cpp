@@ -375,8 +375,10 @@ LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.SerializeEnum("side", side, 1))
 
     PARAM_CHECK(ar.Serialize("vehicle", vehicle, 1))
+    RString arma2Init; // init event handler of an Arma 2 module class (FunctionsManager, ...)
     if (ar.IsLoading())
     {
+        arma2Init = Arma1Compat::Arma2ModuleInit(vehicle);
         vehicle = Arma1Compat::ResolveVehicleClass(vehicle); // identity unless --arma1
         // A class neither game defines (a third-party addon that is not installed): Arma 1
         // reports it and plays on without it. Here it is stood in for by a plain unit of
@@ -411,6 +413,12 @@ LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("text", name, 7, ""))
     PARAM_CHECK(ar.SerializeArray("markers", markers, 1))
     PARAM_CHECK(ar.Serialize("init", init, 7, ""))
+    if (ar.IsLoading() && arma2Init.GetLength() > 0)
+    {
+        // Arma 2 starts a module from its class's init event handler, with _this = [unit],
+        // before the unit's own init field runs.
+        init = RString("[this] call {") + arma2Init + RString("}; ") + init;
+    }
 
     if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
     {

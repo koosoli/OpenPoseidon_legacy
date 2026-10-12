@@ -82,6 +82,10 @@ RString ResolveMagazineClass(const RString& className);
 // name is no Arma 2 weapon or magazine.
 RString Arma2WeaponFallback(const RString& name);
 
+// Arma 2: the EventHandlers >> init code of a module (a class derived from Logic, such
+// as FunctionsManager or the first-aid modules) that a mission places; empty otherwise.
+RString Arma2ModuleInit(const RString& className);
+
 // Drops Arma 1 addon names (CACharacters, CAWheeled, ...) from a mission's
 // addOns[] so the CWA addon check does not refuse an Arma 1 mission.
 void FilterMissionAddons(FindArrayRStringCI& addOns);

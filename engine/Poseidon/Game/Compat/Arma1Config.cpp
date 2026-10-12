@@ -534,8 +534,11 @@ void MergeRap(RapNode& dst, const RapNode& src)
                 existing->isExtern = false;
                 MergeRap(*existing, *child);
             }
-            else
+            else if (!child->isExtern)
             {
+                // An extern ("class Sounds;") names a class the scope inherits or that
+                // another addon defines: adding it as an empty class would shadow the
+                // inherited one (LandVehicle >> Sounds hiding AllVehicles >> Sounds).
                 dst.Put(child->Clone());
             }
         }
@@ -575,7 +578,7 @@ void WriteRap(const RapNode& node, std::string& out, int depth)
         for (const std::string& b : bases)
         {
             const auto it = node.index.find(b);
-            if (it != node.index.end() && it->second != i)
+            if (it != node.index.end() && it->second != i && !node.children[it->second]->isExtern)
                 visit(it->second);
         }
         out += pad + "class " + c.name;
@@ -587,7 +590,7 @@ void WriteRap(const RapNode& node, std::string& out, int depth)
         state[i] = 2;
     };
     for (size_t i = 0; i < node.children.size(); i++)
-        if (node.children[i]->isClass)
+        if (node.children[i]->isClass && !node.children[i]->isExtern)
             visit(i);
 }
 
@@ -1502,6 +1505,23 @@ RString Arma2WeaponFallback(const RString& name)
     if (const ParamEntry* mags = w->FindEntry("magazines"); mags && mags->IsArray() && mags->GetSize() > 0)
         return RString((const char*)(RStringB)(*mags)[0]);
     return RString(weapon);
+}
+
+RString Arma2ModuleInit(const RString& className)
+{
+    if (Generation() != 2 || !ConfigLoaded() || className.GetLength() == 0)
+        return RString();
+    const ParamEntry* cls = FindConfigClass("CfgVehicles", className);
+    if (!cls || !cls->IsClass() || !IsKindOf(cls, "Logic"))
+        return RString();
+    const ParamEntry* handlers = cls->FindEntry("EventHandlers");
+    if (!handlers || !handlers->IsClass())
+        handlers = cls->FindEntry("Eventhandlers");
+    const std::string code = handlers && handlers->IsClass() ? StringValue(*handlers, "init") : std::string();
+    if (code.empty())
+        return RString();
+    LOG_INFO(Mission, "{}: module '{}' starts from its init event handler", Label(), className.Data());
+    return RString(code.c_str());
 }
 
 bool ProxyKind(const char* modelName, std::string& simulation, int& crewPosition)
