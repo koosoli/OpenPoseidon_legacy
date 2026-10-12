@@ -9,6 +9,7 @@
 
 #include <wgpu_renderer.hpp>
 #include "TerrainPuddles.hpp"
+#include "TerrainWgpuTidewaterGround.hpp"
 #include "EarthTerrainStream.hpp"
 #include "EarthBuildingStream.hpp"
 #include "EarthSurfaceStream.hpp"
@@ -202,6 +203,12 @@ class TerrainWgpu : public ITerrainRenderer
     // a shared coarse surface fallback.
     void UploadGroundTextures(const Landscape& land, const std::vector<int>* activeMaterials = nullptr);
     Ref<Texture> BuildAutomaticSatmap(const Landscape& land);
+    // Tidewater's sand and soil baked into OFP's sand / field layers (TerrainWgpuTidewaterGround.hpp),
+    // once per layer per world
+    TidewaterGround _twGround;
+    std::string _twGroundWorld;
+    std::vector<std::pair<Texture*, Ref<Texture>>> _twGroundBaked;
+    Texture* TidewaterGroundLayer(const Landscape& land, Texture* layer);
     Ref<Texture> _automaticSatmap;
     void UpdateGroundTexturePages(const Landscape& land, const Camera& camera, bool force);
     void UploadIndexMap(const Landscape& land);

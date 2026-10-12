@@ -955,21 +955,25 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             // `legacy` slot, so with the dev switch off the ground is the same image at
             // the same UV as before -- only mipped.
             Texture* colour = enf != nullptr && enf->detail != nullptr ? enf->detail : land.GetTexture(i);
+            // OFP's own image, for the enhancement lookups below (they go by its name)
+            Texture* const source = colour;
+            if (enf == nullptr && land.GetA3TerrainMaterial(i) == nullptr)
+                colour = TidewaterGroundLayer(land, colour);
             material.legacy = bindLayer(colour, false);
             material.satellite = material.legacy;
             if (colour != nullptr && enf == nullptr && land.GetA3TerrainMaterial(i) == nullptr)
             {
                 auto* bank = static_cast<TextureBankWgpu*>(_engine.TextBank());
-                Ref<Texture> normal = bank->LoadLegacyEnhancementNormal(colour->Name());
+                Ref<Texture> normal = bank->LoadLegacyEnhancementNormal(source->Name());
                 if (normal.GetRef() != nullptr)
                 {
                     material.tile_normal = bindLayer(normal.GetRef(), false);
                     if (material.tile_normal != 0)
                     {
                         _a3TerrainTextures.push_back(normal);
-                        LOG_INFO(Graphics, "Wgpu legacy terrain: {} enhanced by {}", (const char*)colour->Name(),
+                        LOG_INFO(Graphics, "Wgpu legacy terrain: {} enhanced by {}", (const char*)source->Name(),
                                  (const char*)normal->Name());
-                        Ref<Texture> detail = bank->LoadLegacyTerrainDetailNormal(colour->Name(), material.legacy_detail_scale);
+                        Ref<Texture> detail = bank->LoadLegacyTerrainDetailNormal(source->Name(), material.legacy_detail_scale);
                         if (detail.GetRef() != nullptr)
                         {
                             material.legacy_detail_normal = bindLayer(detail.GetRef(), false);
@@ -977,7 +981,7 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
                             {
                                 _a3TerrainTextures.push_back(detail);
                                 LOG_INFO(Graphics, "Wgpu legacy terrain detail: {} -> {} repeats/metre={}",
-                                         (const char*)colour->Name(), (const char*)detail->Name(), material.legacy_detail_scale);
+                                         (const char*)source->Name(), (const char*)detail->Name(), material.legacy_detail_scale);
                             }
                         }
                     }
@@ -1433,6 +1437,28 @@ void BakeSatmapObjects(const Landscape& land, int size, std::vector<uint8_t>& pi
 }
 }
 
+Texture* TerrainWgpu::TidewaterGroundLayer(const Landscape& land, Texture* layer)
+{
+    if (layer == nullptr || !TidewaterGround::Enabled())
+        return layer;
+    const std::string world = land.GetName() ? land.GetName() : "";
+    if (world != _twGroundWorld)
+    {
+        _twGroundWorld = world;
+        _twGroundBaked.clear();
+    }
+    for (const auto& [from, to] : _twGroundBaked)
+        if (from == layer)
+            return to.GetRef() != nullptr ? to.GetRef() : layer;
+    _twGround.Prepare(land);
+    EngineWgpu::AcquireProducerWindow("Tidewater ground layer");
+    Ref<Texture> baked = _twGround.Bake(layer, _engine.TextBank());
+    _twGroundBaked.emplace_back(layer, baked);
+    if (baked.GetRef() != nullptr)
+        LOG_INFO(Graphics, "Tidewater ground: {} recoloured", (const char*)layer->Name());
+    return baked.GetRef() != nullptr ? baked.GetRef() : layer;
+}
+
 Ref<Texture> TerrainWgpu::BuildAutomaticSatmap(const Landscape& land)
 {
     const char* enabled = std::getenv("WGR_OFP_SATMAP");
@@ -1475,6 +1501,12 @@ Ref<Texture> TerrainWgpu::BuildAutomaticSatmap(const Landscape& land)
         {
             LOG_WARN(Graphics,"OFP automatic satmap skipped: decode failed {}",texture->Name());
             return nullptr; // Never bake white missing tiles into a whole island.
+        }
+        // the far albedo agrees with the near ground: Tidewater's sand and soil here too
+        if (TidewaterGround::Enabled())
+        {
+            _twGround.Prepare(land);
+            _twGround.Recolour(TidewaterGround::BaseName(sourceName),image);
         }
         if (!stbir_resize_uint8_linear(image.rgba.data(),image.width,image.height,image.width*4,
                                       tiles[i].data(),tileSize,tileSize,tileSize*4,STBIR_RGBA)) return nullptr;
