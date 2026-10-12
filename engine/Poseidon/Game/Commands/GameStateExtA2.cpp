@@ -94,6 +94,9 @@ GameValue StrFormat(const GameState* state, GameValuePar oper1);
 GameValue ObjSide(const GameState* state, GameValuePar oper1);
 GameValue A1MissionConfigFile(const GameState* state);
 GameValue VehDelete(const GameState* state, GameValuePar oper1);
+GameValue GroupCreate(const GameState* state, GameValuePar oper1);
+GameValue SideCivilian(const GameState* state);
+GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 
 namespace
 {
@@ -1215,6 +1218,13 @@ GameValue A2DeleteCollection(const GameState* state, GameValuePar oper1)
     return VehDelete(state, oper1);
 }
 
+// createAgent [class, position, markers, placement, special]: a unit in a group of its own
+GameValue A2CreateAgent(const GameState* state, GameValuePar oper1)
+{
+    const GameValue group = GroupCreate(state, SideCivilian(state));
+    return A1UnitCreate(state, group, oper1);
+}
+
 GameValue A2EmptyArrayNular(const GameState* state)
 {
     return state->CreateGameValue(GameArray);
@@ -2114,6 +2124,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameNothing, "clearVehicleInit", A2ClearVehicleInit, GameObject),
     GameFunction(GameNothing, "detach", A2Detach, GameObject),
     GameFunction(GameNothing, "deleteCollection", A2DeleteCollection, GameObject),
+    GameFunction(GameObject, "createAgent", A2CreateAgent, GameArray),
     GameFunction(GameScalar, "needReload", A2ZeroUnary, GameObject),
     GameFunction(GameNothing, "setGroupIconsVisible", A2NothingUnary, GameArray),
     GameFunction(GameString, "actionKeysImages", A2TextLogEmpty, GameString | GameArray),
