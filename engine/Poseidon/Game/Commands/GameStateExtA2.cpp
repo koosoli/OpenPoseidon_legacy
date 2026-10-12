@@ -2167,7 +2167,6 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "setWaypointCompletionRadius", function, A2NothingBinary, GameArray, GameScalar),
     GameOperator(GameNothing, "synchronizeObjectsAdd", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameNothing, "synchronizeObjectsRemove", function, A2NothingBinary, GameObject, GameArray),
-    GameOperator(GameNothing, "setGroupIconsVisible", function, A2NothingBinary, GameVoid, GameArray),
     GameOperator(GameNothing, "disableConversation", function, A2NothingBinary, GameObject, GameBool),
     GameOperator(GameNothing, "setHit", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameNothing, "addPublicVariableEventHandler", function, A2NothingBinary, GameString, GameString),
