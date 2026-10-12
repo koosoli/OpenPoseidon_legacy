@@ -345,6 +345,37 @@ bool AlphaShapeGuardEnabled()
 //
 // `WGR_ALPHA_MASK_DEMOTE=1` turns it on.  The counter and the trace below report it either
 // way, so a run can measure how many textures it WOULD move before anyone enables it.
+// A SOLID panel with an anti-aliased outline -- a town sign, a clock face, a flag, a dashboard
+// cut to shape -- is the opposite end of the mask family: almost every texel opaque, a few clear
+// ones outside the outline, and a one-or-two-texel partial rim between them. ARGB4444 quantises
+// that rim into partial alpha, 2-5% of the texture, which is over ClassifyAlpha's 2% blend cut,
+// so the whole sign went to the back-to-front pass with no depth write and the sky drew through
+// it (tester report 2026-10-04, "Ortsschilder sind transparent"; measured on the CWA corpus:
+// obec_old* 8.4% clear / 89.1% opaque / 2.5% partial, obec_reflex* 2.5-3.6% clear / 94-95.5%
+// opaque / 2.1-2.5% partial; Nogova's direction/town signs, ukazatel_smer.paa, 18% clear / 75.6%
+// opaque / 6.3% partial). Census of the stock corpus (7,103 textures, 1,354 Blend): 96 have this
+// body (>= 60% opaque, <= 10% partial, >= 1% clear), and the engine's own shape measure passes 80
+// of them -- wheels (every "kolo"), sights, signs, clock faces, cut-out dashboards, rotor blades.
+// The 16 it keeps blended are the ones whose partial texels are a WIDE band (gauge glass, lamp
+// lenses: band width 5-30 texels against 0.5-3.5 for an outline). Foliage cannot reach the rule
+// (leaf cards are ~77% clear, no opaque body) and neither can glass (no opaque body).
+// On by default; WGR_ALPHA_SILHOUETTE_DEMOTE=0 turns it off.
+bool AlphaSilhouetteDemoteEnabled()
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_ALPHA_SILHOUETTE_DEMOTE");
+        return !v || v[0] != '0';
+    }();
+    return enabled;
+}
+
+bool CouldBeSolidSilhouette(const AlphaStats& stats)
+{
+    return stats.kind == AlphaStats::Blend && stats.pctOpaque >= 60.0 && stats.pctPartial <= 10.0 &&
+           stats.pctClear >= 1.0;
+}
+
 bool AlphaMaskDemoteEnabled()
 {
     static const bool enabled = []
@@ -366,6 +397,7 @@ AlphaShape MeasureAlphaShape(const uint8_t* rgba, int w, int h, size_t stride, s
 // to be able to say about itself (MAT-048's lesson: a lever that cannot fire produces a null
 // that means nothing).
 std::atomic<uint64_t> GAlphaSpeckleDemotions{0}; // Cutout -> Opaque (dithered packed alpha)
+std::atomic<uint64_t> GAlphaSilhouetteDemotions{0}; // Blend -> Cutout (solid panel, anti-aliased outline)
 std::atomic<uint64_t> GAlphaMaskDemotions{0};    // Blend  -> Cutout (anti-aliased mask)
 
 bool AlphaShapeTraceEnabled()
@@ -392,7 +424,8 @@ AlphaShape RefineAlphaClassByShape(AlphaStats& stats, const uint8_t* rgba, int w
 
     const bool couldBeSpeckle = stats.kind == AlphaStats::Cutout && stats.pctClear > 0.0;
     const bool couldBeAntialiasedMask = stats.kind == AlphaStats::Blend && stats.pctClear >= 2.0;
-    if (!couldBeSpeckle && !couldBeAntialiasedMask)
+    const bool couldBeSilhouette = AlphaSilhouetteDemoteEnabled() && CouldBeSolidSilhouette(stats);
+    if (!couldBeSpeckle && !couldBeAntialiasedMask && !couldBeSilhouette)
     {
         return shape; // glass, solid colour, and every already-Opaque texture exit here
     }
@@ -411,6 +444,14 @@ AlphaShape RefineAlphaClassByShape(AlphaStats& stats, const uint8_t* rgba, int w
         // a wrongly-opaque surface looks wrong, a wrongly-perforated one looks broken.
         stats.kind = AlphaStats::Opaque;
         GAlphaSpeckleDemotions.fetch_add(1, std::memory_order_relaxed);
+    }
+    else if (couldBeSilhouette && shape.partialBandWidth <= bandWidthMax && shape.meanClearNeighbours >= 2.5)
+    {
+        // (2.5, not neighboursMin: a sign's clear area is its rounded corners, thin strips that
+        // measure 2.6-2.7 neighbours. Packed data in the alpha lane scatters below 2.)
+        // A solid panel with an anti-aliased outline (see AlphaSilhouetteDemoteEnabled): occlude.
+        stats.kind = AlphaStats::Cutout;
+        GAlphaSilhouetteDemotions.fetch_add(1, std::memory_order_relaxed);
     }
     else if (couldBeAntialiasedMask && shape.partialBandWidth <= bandWidthMax &&
              shape.meanClearNeighbours >= neighboursMin)
@@ -921,7 +962,7 @@ void ReportTextureStreamStats(uint64_t uploads)
     LOG_INFO(Graphics,
              "Wgpu texture stream stats: uploads={} mipOpens={} blockMB={:.1f} readMs={:.1f} "
              "createMs={:.1f} fallbacks={} fallbackMs={:.1f} alphaScans={} alphaBlockScans={} "
-             "alphaHandoffs={} alphaSpeckleDemotions={} alphaMaskDemotions={} formatAlphaDemotions={} "
+             "alphaHandoffs={} alphaSpeckleDemotions={} alphaSilhouetteDemotions={} alphaMaskDemotions={} formatAlphaDemotions={} "
              "alphaMs={:.1f} totalMs={:.1f}",
              uploads, TextureMipOpenCount(),
              static_cast<double>(GTextureStreamStats.blockBytes.load(std::memory_order_relaxed)) / (1024.0 * 1024.0),
@@ -930,6 +971,7 @@ void ReportTextureStreamStats(uint64_t uploads)
              GTextureStreamStats.alphaBlockScans.load(std::memory_order_relaxed),
              GTextureStreamStats.alphaHandoffs.load(std::memory_order_relaxed),
              GAlphaSpeckleDemotions.load(std::memory_order_relaxed),
+             GAlphaSilhouetteDemotions.load(std::memory_order_relaxed),
              GAlphaMaskDemotions.load(std::memory_order_relaxed),
              GFormatAlphaDemotions.load(std::memory_order_relaxed), alphaUs / 1000.0,
              (readUs + createUs + fallbackUs + alphaUs) / 1000.0);
