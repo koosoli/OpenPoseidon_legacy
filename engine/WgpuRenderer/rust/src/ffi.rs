@@ -3651,8 +3651,8 @@ pub unsafe extern "C" fn wgr_geo_pool_reserve(renderer: *mut WgrRenderer, vert_b
 /// null or 64 floats each.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wgr_grass_set_blade_sets(renderer: *mut WgrRenderer, set_words: *const u32,
-                                                  card_skip: u32, sets: *const f32, aspect: *const f32,
-                                                  scale: *const f32) {
+                                                  card_skip: u32, card_full: u32, sets: *const f32,
+                                                  aspect: *const f32, scale: *const f32) {
     if renderer.is_null() {
         return;
     }
@@ -3660,7 +3660,7 @@ pub unsafe extern "C" fn wgr_grass_set_blade_sets(renderer: *mut WgrRenderer, se
         let renderer = unsafe { &mut *renderer };
         let words: &[u32] = if set_words.is_null() { &[] } else { unsafe { std::slice::from_raw_parts(set_words, 3) } };
         let read = |p: *const f32| -> &[f32] { if p.is_null() { &[] } else { unsafe { std::slice::from_raw_parts(p, 64) } } };
-        renderer.grass_set_blade_sets(words, card_skip, read(sets), read(aspect), read(scale));
+        renderer.grass_set_blade_sets(words, card_skip, card_full, read(sets), read(aspect), read(scale));
     }));
 }
 

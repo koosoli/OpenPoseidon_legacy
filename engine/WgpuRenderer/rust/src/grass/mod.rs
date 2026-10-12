@@ -2177,8 +2177,8 @@ impl Grass {
     /// run starting on that layer draws its near-ring tufts from, layer L at bit 3L across the
     /// three words); `card_skip` = bit per layer whose run grows blades only. `sets` = 8 floats per
     /// set (see GrassParams::tuft_sets), `aspect` / `scale` = 8 per set. Missing entries reset.
-    pub fn set_blade_sets(&mut self, queue: &wgpu::Queue, set_words: &[u32], card_skip: u32, sets: &[f32],
-                          aspect: &[f32], scale: &[f32]) {
+    pub fn set_blade_sets(&mut self, queue: &wgpu::Queue, set_words: &[u32], card_skip: u32, card_full: u32,
+                          sets: &[f32], aspect: &[f32], scale: &[f32]) {
         let finite = |v: f32, d: f32| if v.is_finite() { v } else { d };
         for i in 0..3 {
             self.last_params.blade_skip[i + 1] = set_words.get(i).copied().unwrap_or(0);
@@ -2196,7 +2196,7 @@ impl Grass {
             }
             self.last_params.blade_skip[1..4].copy_from_slice(&bits);
         }
-        self.last_params.card_skip = [card_skip, 0, 0, 0];
+        self.last_params.card_skip = [card_skip, card_full, 0, 0];
         for i in 0..64 {
             self.last_params.tuft_sets[i] = finite(sets.get(i).copied().unwrap_or(0.0), 0.0);
             self.last_params.tuft_set_aspect[i] = finite(aspect.get(i).copied().unwrap_or(1.0), 1.0).clamp(0.1, 6.0);

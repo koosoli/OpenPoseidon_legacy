@@ -3258,6 +3258,7 @@ void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
         wgr_grass_set_layer_size(_renderer, nullptr, nullptr, 0);
         wgr_grass_set_blade_skip(_renderer, 0);
         _clutterCardSkip = 0; // RFG-138: no native runs on this world
+        _clutterCardFull = 0;
         SendEnfusionBladeSets();
         _grassTuftWorld = worldKey;
         LOG_INFO(Graphics, "Wgpu grass: {} photographed clump families discovered ({} atlas layers)", named,

@@ -153,7 +153,8 @@ struct GrassParams {
     tuft_sets: array<vec4<f32>, 16>,
     tuft_set_aspect: array<vec4<f32>, 16>,
     tuft_set_scale: array<vec4<f32>, 16>,
-    // .x = bit per atlas layer whose run grows blades only (no cards). .yzw spare.
+    // .x = bit per atlas layer whose run grows blades only (no cards); .y = bit per layer whose
+    // cards are drawn at full coverage (RFG-143 crop distance cards). .zw spare.
     card_skip: vec4<u32>,
 };
 
@@ -626,6 +627,12 @@ fn cell_skips_cards(geo: u32) -> bool {
     return ((grass.card_skip.x >> ((geo & GEO_SURFACE_MASK) >> GEO_SURFACE_SHIFT)) & 1u) != 0u;
 }
 
+// RFG-143: the cell's run is a crop surface's PlantMat distance card (card_skip.y): full coverage.
+fn cell_full_cards(geo: u32) -> bool {
+    if (grass.card_skip.y == 0u || (geo & GEO_AUTHORED) == 0u || ((geo >> 28u) & 7u) == 0u) { return false; }
+    return ((grass.card_skip.y >> ((geo & GEO_SURFACE_MASK) >> GEO_SURFACE_SHIFT)) & 1u) != 0u;
+}
+
 // RFG-116: the cell's run starts on a layer whose surface names no PlantMat.
 fn cell_skips_blades(geo: u32) -> bool {
     if (grass.blade_skip.x == 0u || (geo & GEO_AUTHORED) == 0u || ((geo >> 28u) & 7u) == 0u) { return false; }
@@ -850,6 +857,8 @@ fn photo_card_scale() -> f32 {
 }
 
 fn card_coverage_for(geo: u32) -> f32 {
+    // RFG-143: a crop field's cards are the field itself, not scattered meadow plants -- full.
+    if (cell_full_cards(geo)) { return 1.0; }
     let manual = clamp(grass.card_look.x, 0.0, 1.0);
     let authored = (geo & GEO_AUTHORED) != 0u;
     return select(manual, 1.0, authored && grass.card_look.y > 0.5);

@@ -433,6 +433,8 @@ class TerrainWgpu : public ITerrainRenderer
     uint32_t _clutterBladeSkip = 0;
     //! RFG-138: bit per atlas layer whose run grows blades only (wgr_grass_set_blade_sets).
     uint32_t _clutterCardSkip = 0;
+    //! RFG-143: bit per atlas layer whose cards are a crop field's distance card (full coverage).
+    uint32_t _clutterCardFull = 0;
     //! RFG-138: per-surface PlantMat blade sets. Set index per palette surface (-1 = names no
     //! PlantMat), the PlantMat per set (commonest ground first, at most 8), whether a set's
     //! surface is blades-only (crop: its authored Height in metres), and the per-set tuft

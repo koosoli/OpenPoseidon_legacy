@@ -1004,6 +1004,12 @@ bool TerrainWgpu::UploadGrassRoadCells(const Landscape& land)
     return roads;
 }
 
+namespace
+{
+// RFG-143, defined beside ReadAtlasRects below.
+bool ComposePlantMatClump(const EnfusionMount& mount, const std::string& plantMat, uint8_t* layer, float& sizeMetres);
+} // namespace
+
 // ---------------------------------------------------------------------------
 // The bake
 // ---------------------------------------------------------------------------
@@ -1094,8 +1100,10 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
         std::vector<char> surfacePlantMat(static_cast<size_t>(paletteSize), 0);
         _clutterBladeSkip = 0;
         _clutterCardSkip = 0;
+        _clutterCardFull = 0;
         ResolveEnfusionBladeSets(land); // RFG-138
         int bladesOnlySurfaces = 0;
+        int cropCards = 0; // RFG-143
 
         // RFG-064: hand out atlas layers by how much GROUND a surface covers, not by its
         // index in the palette.
@@ -1145,7 +1153,22 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
             run.weight = 0.0f; // set to the bake's reference below
             _clutterLayerWeight[layerCount] = 0.0f;
             _clutterLayerFar[layerCount] = 0.0f;
-            _clutterCardSkip |= 1u << layerCount;
+            // RFG-143: a card of the surface's own PlantMat for the mid ring (wheat to 500 m);
+            // card-free (the RFG-138 transparent layer) only if it cannot be built.
+            float clumpSize = 0.0f;
+            const char* clumpEnv = std::getenv("WGR_NATIVE_CROP_CARDS");
+            if (!(clumpEnv && clumpEnv[0] == '0') &&
+                ComposePlantMatClump(mount, StripGuid(*plantMat), atlas.data() + static_cast<size_t>(layerCount) * LayerBytes,
+                                     clumpSize))
+            {
+                _clutterLayerSize[layerCount] = clumpSize;
+                _clutterLayerScale[layerCount][0] = 1.0f;
+                _clutterLayerScale[layerCount][1] = 0.15f;
+                _clutterCardFull |= 1u << layerCount;
+                ++cropCards;
+            }
+            else
+                _clutterCardSkip |= 1u << layerCount;
             ++layerCount;
             ++bladesOnlySurfaces;
         }
@@ -1343,10 +1366,10 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
             "Wgpu grass Enfusion clutter: {} of {} palette surfaces name a ClutterConfig, {} grew a run over {} of {} "
             "atlas layers ({} plants rasterised from their own model, {} had no colour+coverage pair, {} dropped at "
             "the {}-per-surface / {}-layer caps; blade-free layers 0x{:08x}; RFG-138 blades-only (crop) runs {}, "
-            "card-free layers 0x{:08x}) [{}]",
+            "card-free layers 0x{:08x}, RFG-143 crop distance cards {}) [{}]",
             surfacesWithSet, paletteSize, surfacesWithClutter, layerCount, GrassGeo::AtlasLayers, plantsImpostor,
             plantsMissingTexture, plantsDropped, MaxPlantsPerSurface, GrassGeo::AtlasLayers, _clutterBladeSkip,
-            bladesOnlySurfaces, _clutterCardSkip, report.empty() ? "none" : report);
+            bladesOnlySurfaces, _clutterCardSkip, cropCards, report.empty() ? "none" : report);
 
         if (surfacesWithClutter == 0 || layerCount <= 1 || maxWeight <= 0.0f)
         {
@@ -1634,6 +1657,105 @@ void ReadAtlasRects(const std::string& text, std::vector<AtlasRect>& out)
             out.push_back(r);
     }
 }
+
+// RFG-143: the distance card for a blades-only (crop) surface. Reforger's wheat reads as wheat to the
+// horizon; here the near ring's PlantMat tufts stopped at its radius and the field beyond was bare
+// tan ground. The mid card ring reaches 500 m on a native world, so the crop surface's clutter layer
+// gets a card made from its OWN PlantMat: the most-weighted tuft rectangle, three copies side by
+// side, bottom-aligned in the square (a dense patch, which is what a field is at that range). Empty
+// texels take the mean covered colour, as the blade layers do, so the coverage-preserving mips do
+// not bleed the atlas background. `sizeMetres` = world size of the square: the PlantMat's Height
+// (metres, measured for cp_wheat_01) x 1.25 for the jitter headroom.
+bool ComposePlantMatClump(const EnfusionMount& mount, const std::string& plantMat, uint8_t* layer, float& sizeMetres)
+{
+    std::vector<uint8_t> raw;
+    if (!mount.Read(plantMat, raw))
+        return false;
+    const std::string text(reinterpret_cast<const char*>(raw.data()), raw.size());
+    ConfNode mat;
+    if (!ParseConfText(text, mat))
+        return false;
+    const std::string* colourKey = mat.Key("BCRMap");
+    const std::string* opacityKey = mat.Key("OpacityMap");
+    if (colourKey == nullptr || opacityKey == nullptr)
+        return false;
+    std::vector<AtlasRect> rects;
+    ReadAtlasRects(text, rects);
+    if (rects.empty())
+        rects.push_back(AtlasRect{});
+    // The most-weighted distinct rectangle.
+    AtlasRect best = rects[0];
+    float bestWeight = -1.0f;
+    for (const AtlasRect& r : rects)
+    {
+        float w = 0.0f;
+        for (const AtlasRect& q : rects)
+            if (std::fabs(q.u0 - r.u0) < 1e-4f && std::fabs(q.u1 - r.u1) < 1e-4f && std::fabs(q.v0 - r.v0) < 1e-4f &&
+                std::fabs(q.v1 - r.v1) < 1e-4f)
+                w += q.weight;
+        if (w > bestWeight)
+        {
+            bestWeight = w;
+            best = r;
+        }
+    }
+    int cw = 0, ch = 0, aw = 0, ah = 0;
+    std::vector<uint8_t> colour, opacity;
+    if (!DecodeEdds(mount, StripGuid(*colourKey), 2048, cw, ch, colour) ||
+        !DecodeEdds(mount, StripGuid(*opacityKey), 2048, aw, ah, opacity))
+        return false;
+    if (aw != cw || ah != ch)
+    {
+        std::vector<uint8_t> resized(static_cast<size_t>(cw) * ch * 4u);
+        stbir_resize_uint8_linear(opacity.data(), aw, ah, aw * 4, resized.data(), cw, ch, cw * 4, STBIR_RGBA);
+        opacity.swap(resized);
+    }
+    for (size_t i = 0; i + 3 < colour.size(); i += 4)
+        colour[i + 3] = std::max({opacity[i + 0], opacity[i + 1], opacity[i + 2]});
+    const int x0 = std::clamp(static_cast<int>(best.u0 * cw), 0, cw - 1);
+    const int x1 = std::clamp(static_cast<int>(best.u1 * cw), x0 + 1, cw);
+    const int y0 = std::clamp(static_cast<int>(best.v0 * ch), 0, ch - 1);
+    const int y1 = std::clamp(static_cast<int>(best.v1 * ch), y0 + 1, ch);
+    const int rw = x1 - x0, rh = y1 - y0;
+    std::vector<uint8_t> crop(static_cast<size_t>(rw) * rh * 4u);
+    for (int y = 0; y < rh; ++y)
+        std::memcpy(crop.data() + static_cast<size_t>(y) * rw * 4,
+                    colour.data() + (static_cast<size_t>(y0 + y) * cw + x0) * 4, static_cast<size_t>(rw) * 4);
+    const int S = GrassGeo::AtlasSize;
+    std::fill(layer, layer + static_cast<size_t>(S) * S * 4u, uint8_t{0});
+    // Each copy as tall as the square, a third of it wide (squeezed or stretched to fit: at the
+    // range this card is drawn, the tuft's proportions matter less than an unbroken patch).
+    const int copyW = S / 3, copyH = S;
+    std::vector<uint8_t> fitted(static_cast<size_t>(copyW) * copyH * 4u);
+    stbir_resize_uint8_linear(crop.data(), rw, rh, rw * 4, fitted.data(), copyW, copyH, copyW * 4, STBIR_RGBA);
+    for (int k = 0; k < 3; ++k)
+        for (int y = 0; y < copyH; ++y)
+            for (int x = 0; x < copyW; ++x)
+            {
+                const uint8_t* src = fitted.data() + (static_cast<size_t>(y) * copyW + x) * 4;
+                uint8_t* dst = layer + (static_cast<size_t>(y) * S + static_cast<size_t>(k * copyW + x)) * 4;
+                if (src[3] > dst[3])
+                    std::memcpy(dst, src, 4);
+            }
+    double sum[3] = {0.0, 0.0, 0.0};
+    size_t covered = 0;
+    for (size_t t = 0; t < static_cast<size_t>(S) * S; ++t)
+        if (layer[t * 4 + 3] >= 128)
+        {
+            for (int c = 0; c < 3; ++c)
+                sum[c] += layer[t * 4 + static_cast<size_t>(c)];
+            ++covered;
+        }
+    if (covered < 64)
+        return false;
+    for (size_t t = 0; t < static_cast<size_t>(S) * S; ++t)
+        if (layer[t * 4 + 3] < 128)
+            for (int c = 0; c < 3; ++c)
+                layer[t * 4 + static_cast<size_t>(c)] =
+                    static_cast<uint8_t>(sum[c] / static_cast<double>(covered) + 0.5);
+    sizeMetres = std::clamp(mat.Number("Height", 0.6f), 0.1f, 3.0f) * 1.25f;
+    return true;
+}
 } // namespace
 
 // RFG-138: which PlantMat each palette surface draws its near-ring tufts from. Distinct PlantMats
@@ -1755,7 +1877,7 @@ void TerrainWgpu::SendEnfusionBladeSets()
         }
     }
     const bool ready = _enfusionBladeSetParamsReady;
-    wgr_grass_set_blade_sets(_renderer, ready ? words : nullptr, _clutterCardSkip,
+    wgr_grass_set_blade_sets(_renderer, ready ? words : nullptr, _clutterCardSkip, _clutterCardFull,
                              ready ? _enfusionBladeSetParams : nullptr, ready ? _enfusionBladeSetAspect : nullptr,
                              ready ? _enfusionBladeSetScale : nullptr);
 }
