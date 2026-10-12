@@ -95,6 +95,10 @@ GameValue ObjSide(const GameState* state, GameValuePar oper1);
 GameValue A1MissionConfigFile(const GameState* state);
 GameValue VehDelete(const GameState* state, GameValuePar oper1);
 GameValue Player(const GameState* state);
+GameValue ObjSetPosASL(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjSetVelocity(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjSetVectorDirectionAndUp(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue GrpKnowsAbout(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue GroupCreate(const GameState* state, GameValuePar oper1);
 GameValue SideCivilian(const GameState* state);
 GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -1322,6 +1326,69 @@ GameValue A2WithDo(const GameState* state, GameValuePar, GameValuePar oper2)
     return state->EvaluateMultiple(RString(oper2));
 }
 
+// obj setVelocityTransformation [pos1, pos2, vel1, vel2, dir1, dir2, up1, up2, t]
+// (unit-capture playback, BIS_fnc_UnitPlay): the state interpolated at t in 0..1.
+GameValue A2SetVelocityTransformation(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& a = oper2;
+    if (a.Size() < 9 || a[8].GetType() != GameScalar)
+        return NOTHING;
+    const float t = std::clamp(static_cast<float>(a[8]), 0.0f, 1.0f);
+    auto lerp = [&](int i, int j) {
+        GameValue out = state->CreateGameValue(GameArray);
+        GameArrayType& o = out;
+        if (a[i].GetType() != GameArray || a[j].GetType() != GameArray)
+            return GameValue();
+        const GameArrayType& p = a[i];
+        const GameArrayType& q = a[j];
+        for (int k = 0; k < 3 && k < p.Size() && k < q.Size(); k++)
+            o.Add(GameValue(static_cast<float>(p[k]) + (static_cast<float>(q[k]) - static_cast<float>(p[k])) * t));
+        return out;
+    };
+    const GameValue pos = lerp(0, 1);
+    if (pos.GetType() == GameArray && static_cast<const GameArrayType&>(pos).Size() == 3)
+        ObjSetPosASL(state, oper1, pos);
+    const GameValue dir = lerp(4, 5);
+    const GameValue up = lerp(6, 7);
+    if (dir.GetType() == GameArray && up.GetType() == GameArray && static_cast<const GameArrayType&>(dir).Size() == 3 &&
+        static_cast<const GameArrayType&>(up).Size() == 3)
+    {
+        GameArrayType du;
+        du.Add(dir);
+        du.Add(up);
+        ObjSetVectorDirectionAndUp(state, oper1, GameValue(du));
+    }
+    const GameValue vel = lerp(2, 3);
+    if (vel.GetType() == GameArray && static_cast<const GameArrayType&>(vel).Size() == 3)
+        ObjSetVelocity(state, oper1, vel);
+    return NOTHING;
+}
+
+// side knowsAbout target: the best a group of that side knows
+GameValue A2SideKnowsAbout(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    std::vector<AIGroup*> groups;
+    CollectGroups(groups);
+    const TargetSide side = GetSide(oper1);
+    float best = 0;
+    for (AIGroup* g : groups)
+        if (g->GetCenter() && g->GetCenter()->GetSide() == side)
+            best = std::max(best, static_cast<float>(GrpKnowsAbout(state, GameValueExt(g), oper2)));
+    return GameValue(best);
+}
+
+GameValue A2WeaponDirection(const GameState* state, GameValuePar oper1, GameValuePar)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& a = result;
+    Object* obj = GetObject(oper1);
+    const Vector3 d = obj ? obj->Direction() : Vector3(0, 0, 1);
+    a.Add(GameValue(d.X()));
+    a.Add(GameValue(d.Z()));
+    a.Add(GameValue(d.Y()));
+    return result;
+}
+
 GameValue A2EmptyArrayNular(const GameState* state)
 {
     return state->CreateGameValue(GameArray);
@@ -2229,6 +2296,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameNothing, "hideObject", A2NothingUnary, GameObject),
     GameFunction(GameNothing, "ctrlMapAnimCommit", A2NothingUnary, GameAny),
     GameFunction(GameString, "keyName", A2TextLogEmpty, GameScalar),
+    GameFunction(GameScalar, "currentVisionMode", A2ZeroUnary, GameObject),
     GameFunction(GameString, "toString", A2ToString, GameArray),
     GameFunction(GameString, "toLower", A2ToLower, GameString),
     GameFunction(GameString, "toUpper", A2ToUpper, GameString),
@@ -2343,6 +2411,11 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "hcSelectGroup", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameNothing, "lnbSetColumnsPos", function, A2NothingBinary, GameScalar, GameArray),
     GameOperator(GameAny, "do", function, A2WithDo, GameString, GameString),
+    GameOperator(GameNothing, "setVelocityTransformation", function, A2SetVelocityTransformation, GameObject, GameArray),
+    GameOperator(GameScalar, "knowsAbout", function, A2SideKnowsAbout, GameSide, GameObject),
+    GameOperator(GameArray, "weaponDirection", function, A2WeaponDirection, GameObject, GameString),
+    GameOperator(GameScalar, "addGroupIcon", function, A2ZeroBinary, GameGroup, GameArray),
+    GameOperator(GameNothing, "setGroupIconParams", function, A2NothingBinary, GameGroup, GameArray),
     GameOperator(GameNothing, "enableIRLasers", function, A2NothingBinary, GameObject | GameGroup, GameBool),
     GameOperator(GameNothing, "respawnVehicle", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameNothing, "ctrlMapAnimAdd", function, A2NothingBinary, GameAny, GameArray),
