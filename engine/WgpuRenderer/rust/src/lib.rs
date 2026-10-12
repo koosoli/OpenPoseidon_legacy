@@ -3183,8 +3183,16 @@ impl Renderer {
         let requested = match interval {
             0 => wgpu::PresentMode::Immediate,
             1 => wgpu::PresentMode::Fifo,
+            // Adaptive: synced while frames are on time, presented at once (a tear, not a held
+            // frame) when one is late. FifoRelaxed is exactly that. Mailbox -- what this used to pick
+            // -- still waits for the next vblank, so at 38 fps on a 60 Hz screen every frame was held
+            // to 16.7 or 33.3 ms and the motion stuttered the moment the cap was missed (tester
+            // report, 2026-09-12). Mailbox, then Immediate, only where the backend has no
+            // FifoRelaxed (DX12).
             -1 => {
-                if self.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+                if self.present_modes.contains(&wgpu::PresentMode::FifoRelaxed) {
+                    wgpu::PresentMode::FifoRelaxed
+                } else if self.present_modes.contains(&wgpu::PresentMode::Mailbox) {
                     wgpu::PresentMode::Mailbox
                 } else {
                     wgpu::PresentMode::Immediate

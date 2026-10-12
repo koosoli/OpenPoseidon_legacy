@@ -42,7 +42,7 @@ const GraphicsRowText kRows[] = {
      "Density and draw distance of ground clutter. The most expensive single setting: Off is worth about a quarter of "
      "the GPU frame. Lower it first if the frame rate is short."},
     {"STR_DISP_MAIN_OPT_GRAPHICS_VSYNC", "STR_DISP_MAIN_OPT_GRAPHICS_VSYNC_DESC", "VSync",
-     "Synchronise frame presentation to the monitor refresh. Adaptive falls back to On when the GPU cannot keep up."},
+     "Synchronise frame presentation to the monitor refresh. Adaptive syncs while the frame rate keeps up and shows a late frame at once instead of holding it for the next refresh, which avoids the stutter below the refresh rate (Vulkan; elsewhere it behaves like Off without tearing where possible)."},
     {"STR_DISP_MAIN_OPT_GRAPHICS_FPS_CAP", "STR_DISP_MAIN_OPT_GRAPHICS_FPS_CAP_DESC", "FPS Cap",
      "Limits how fast frames are drawn. Native follows your monitor's refresh rate. Unlimited keeps a 300 FPS "
      "ceiling."},
