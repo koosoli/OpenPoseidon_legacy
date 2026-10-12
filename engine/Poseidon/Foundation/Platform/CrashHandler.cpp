@@ -189,6 +189,81 @@ void InstallCrashHandler(const char* crashDir)
         AllocateDumpContext();
     SetUnhandledExceptionFilter(CrashFilter);
 }
+
+namespace
+{
+HANDLE g_watchedThread = nullptr;
+}
+
+void RememberStallThread()
+{
+    if (g_watchedThread)
+        return;
+    DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &g_watchedThread,
+                    THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, 0);
+}
+
+void LogStallThreadStack()
+{
+    if (!g_watchedThread)
+        return;
+    HANDLE proc = GetCurrentProcess();
+    static bool symbols = false;
+    if (!symbols)
+    {
+        symbols = true;
+        SymInitialize(proc, nullptr, TRUE);
+    }
+    if (SuspendThread(g_watchedThread) == (DWORD)-1)
+        return;
+    CONTEXT ctx = {};
+    ctx.ContextFlags = CONTEXT_FULL;
+    if (!GetThreadContext(g_watchedThread, &ctx))
+    {
+        ResumeThread(g_watchedThread);
+        return;
+    }
+    STACKFRAME64 frame = {};
+#if defined(_M_X64) || defined(__x86_64__)
+    constexpr DWORD machineType = IMAGE_FILE_MACHINE_AMD64;
+    frame.AddrPC.Offset = ctx.Rip;
+    frame.AddrFrame.Offset = ctx.Rbp;
+    frame.AddrStack.Offset = ctx.Rsp;
+#else
+    constexpr DWORD machineType = IMAGE_FILE_MACHINE_I386;
+    frame.AddrPC.Offset = ctx.Eip;
+    frame.AddrFrame.Offset = ctx.Ebp;
+    frame.AddrStack.Offset = ctx.Esp;
+#endif
+    frame.AddrPC.Mode = AddrModeFlat;
+    frame.AddrFrame.Mode = AddrModeFlat;
+    frame.AddrStack.Mode = AddrModeFlat;
+    // Walk while suspended (the stack must not move), log after resuming.
+    DWORD64 pcs[48];
+    int n = 0;
+    while (n < 48 && StackWalk64(machineType, proc, g_watchedThread, &frame, &ctx, nullptr, SymFunctionTableAccess64,
+                                 SymGetModuleBase64, nullptr) &&
+           frame.AddrPC.Offset)
+        pcs[n++] = frame.AddrPC.Offset;
+    ResumeThread(g_watchedThread);
+    char symBuf[sizeof(SYMBOL_INFO) + 256];
+    SYMBOL_INFO* sym = reinterpret_cast<SYMBOL_INFO*>(symBuf);
+    for (int i = 0; i < n; i++)
+    {
+        sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+        sym->MaxNameLen = 255;
+        DWORD64 disp = 0;
+        const char* name = SymFromAddr(proc, pcs[i], &disp, sym) ? sym->Name : "<unknown>";
+        IMAGEHLP_LINE64 line = {};
+        line.SizeOfStruct = sizeof(line);
+        DWORD lineDisp = 0;
+        if (SymGetLineFromAddr64(proc, pcs[i], &lineDisp, &line))
+            LOG_WARN(Core, "  stall #{:02} {}+0x{:x} ({}:{})", i, name, static_cast<unsigned long long>(disp),
+                     line.FileName ? line.FileName : "?", line.LineNumber);
+        else
+            LOG_WARN(Core, "  stall #{:02} {}+0x{:x}", i, name, static_cast<unsigned long long>(disp));
+    }
+}
 } // namespace Poseidon::Foundation
 
 #else // _WIN32
@@ -391,6 +466,8 @@ void captureBuildId()
 } // namespace
 
 void SetCrashNotify(CrashNotifyFn) {} // DIAG-001: Windows only (see CrashHandler.hpp)
+void RememberStallThread() {}
+void LogStallThreadStack() {}
 
 void InstallCrashHandler(const char* crashDir)
 {

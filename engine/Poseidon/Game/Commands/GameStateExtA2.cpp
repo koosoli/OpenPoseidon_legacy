@@ -33,6 +33,7 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
+#include <Poseidon/Foundation/Platform/CrashHandler.hpp>
 #include <Poseidon/Foundation/Modules/Modules.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
@@ -1816,6 +1817,8 @@ void StallMonitor()
                 expr.push_back(e[i] == '\n' || e[i] == '\r' ? ' ' : e[i]);
         }
         LOG_WARN(Script, "Arma 2 stall: no simulation step for {} s; evaluator last started: {}", stalled, expr);
+        if (stalled == 10 || stalled == 30)
+            Poseidon::Foundation::LogStallThreadStack();
     }
 }
 
@@ -1832,6 +1835,7 @@ void Arma2StartStallMonitor()
         Poseidon::Foundation::AppConfig::Instance().GetArma1TestSeconds() <= 0.0f)
         return;
     started = true;
+    Poseidon::Foundation::RememberStallThread();
     GameState::s_traceExpression = TraceExpression;
     std::thread(StallMonitor).detach();
 }
