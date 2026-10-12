@@ -10,7 +10,8 @@
 // Which layers: CfgSurfaces' Sand (files "ps??????": the pure "ps" image and every transition with a
 // "ps" corner) and Field (files "pol", soundEnviron "dirt"). A transition image blends its four corner
 // surfaces (OFP names it by them: "psszpsps"); each pixel's share of sand is estimated from its colour
-// against the corner surfaces' pure images, so a sand-to-rock edge keeps its rock. WGR_TW_GROUND=0 off.
+// against the corner surfaces' pure images, so a sand-to-rock edge keeps its rock. Opt-in for now:
+// WGR_TW_GROUND=1.
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <array>

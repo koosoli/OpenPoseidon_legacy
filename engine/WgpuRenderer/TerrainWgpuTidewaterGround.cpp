@@ -93,8 +93,9 @@ bool TidewaterGround::Enabled()
 {
     static const bool on = []
     {
+        // opt-in (WGR_TW_GROUND=1) until the owner has seen it: the pure sand layer is not found yet
         const char* v = std::getenv("WGR_TW_GROUND");
-        return !(v && v[0] == '0');
+        return v && v[0] == '1';
     }();
     return on;
 }
