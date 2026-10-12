@@ -10,6 +10,7 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -96,6 +97,66 @@ const fs::path& OaRootPath()
         }
     }
     return root;
+}
+
+// Every folder Arma 2 content is read from: --arma2, --arma2oa, and, next to the
+// --arma2 folder, any "Arma 2 Operation Arrowhead*" folder (Steam installs OA and each
+// of its DLCs -- BAF, PMC, ACR -- into a folder of its own).
+const std::vector<fs::path>& Arma2Roots()
+{
+    static std::vector<fs::path> roots;
+    static bool resolved = false;
+    if (resolved)
+        return roots;
+    resolved = true;
+    roots.push_back(RootPath());
+    if (!OaRootPath().empty() && OaRootPath() != RootPath())
+        roots.push_back(OaRootPath());
+    // OP_A2_ONLY=1: plain Arma 2, without the Operation Arrowhead folders next to it.
+    if (const char* only = std::getenv("OP_A2_ONLY"); only && *only == '1')
+        return roots;
+    std::error_code ec;
+    const fs::path parent = RootPath().parent_path();
+    std::vector<fs::path> siblings;
+    for (fs::directory_iterator it(parent, ec), end; !ec && it != end; it.increment(ec))
+    {
+        if (!it->is_directory(ec))
+            continue;
+        const std::string name = Lower(it->path().filename().string());
+        if (name.rfind("arma 2 operation arrowhead", 0) == 0 || name.rfind("arma2oa", 0) == 0)
+            siblings.push_back(it->path());
+    }
+    std::sort(siblings.begin(), siblings.end());
+    for (const fs::path& s : siblings)
+        if (std::find(roots.begin(), roots.end(), s) == roots.end())
+            roots.push_back(s);
+    return roots;
+}
+
+// The archive folders of one Arma 2 root: AddOns, Expansion\AddOns, <DLC>\AddOns and
+// the Steam DLC payloads DLCsetup\<DLC>\<DLC>_data.
+std::vector<fs::path> Arma2AddonFolders(const fs::path& r)
+{
+    std::vector<fs::path> out{r / "AddOns"};
+    for (const char* dlc : {"Expansion", "BAF", "PMC", "ACR"})
+        out.push_back(r / dlc / "AddOns");
+    std::error_code ec;
+    for (fs::directory_iterator it(r / "DLCsetup", ec), end; !ec && it != end; it.increment(ec))
+    {
+        if (!it->is_directory(ec))
+            continue;
+        std::error_code ec2;
+        std::vector<fs::path> data;
+        for (fs::directory_iterator sub(it->path(), ec2), send; !ec2 && sub != send; sub.increment(ec2))
+        {
+            const std::string name = Lower(sub->path().filename().string());
+            if (sub->is_directory(ec2) && name.size() > 5 && name.compare(name.size() - 5, 5, "_data") == 0)
+                data.push_back(sub->path());
+        }
+        std::sort(data.begin(), data.end());
+        out.insert(out.end(), data.begin(), data.end());
+    }
+    return out;
 }
 
 // `missionRoot`: single/multiplayer mission archives declare only "M09ConvoyAttack"
@@ -395,10 +456,7 @@ std::vector<std::string> DtaFolders()
     out.push_back((RootPath() / "Dta").string());
     if (Generation() == 2)
     {
-        std::vector<fs::path> roots{RootPath()};
-        if (!OaRootPath().empty())
-            roots.push_back(OaRootPath());
-        for (const fs::path& r : roots)
+        for (const fs::path& r : Arma2Roots())
         {
             std::error_code ec;
             if (fs::is_directory(r / "Expansion" / "Dta", ec))
@@ -423,17 +481,10 @@ void MountArchives()
     {
         // Arma 2 keeps its campaigns and scenarios inside AddOns\missions*.pbo. Operation
         // Arrowhead and its DLCs add folders of their own; later mounts are searched first.
-        MountFolder(root / "AddOns", false);
-        std::vector<fs::path> roots{root};
-        if (!OaRootPath().empty() && OaRootPath() != root)
-            roots.push_back(OaRootPath());
+        const std::vector<fs::path>& roots = Arma2Roots();
         for (const fs::path& r : roots)
-        {
-            if (r != root)
-                MountFolder(r / "AddOns", false);
-            for (const char* dlc : {"Expansion", "BAF", "PMC", "ACR"})
-                MountFolder(r / dlc / "AddOns", false);
-        }
+            for (const fs::path& folder : Arma2AddonFolders(r))
+                MountFolder(folder, false);
         for (const fs::path& r : roots)
         {
             MountFolder(r / "Missions", true, nullptr, "arma2\\missions");
@@ -449,9 +500,12 @@ void MountArchives()
         MountFolder(root / "Missions", true, nullptr, "arma1\\missions");
         MountFolder(root / "MPMissions", true, nullptr, "arma1\\mpmissions");
     }
-    LOG_INFO(Mission, "{}: mounted {} archives read-only from {}{}{} ({} mission archives)", Label(),
-             AllBankPrefixesMutable().size(), root.string(), OaRootPath().empty() ? "" : " and ",
-             OaRootPath().string(), MissionBankPrefixes().size());
+    std::string from = root.string();
+    if (Generation() == 2)
+        for (size_t i = 1; i < Arma2Roots().size(); i++)
+            from += " + " + Arma2Roots()[i].string();
+    LOG_INFO(Mission, "{}: mounted {} archives read-only from {} ({} mission archives)", Label(),
+             AllBankPrefixesMutable().size(), from, MissionBankPrefixes().size());
 }
 
 void RegisterWorldClasses()
