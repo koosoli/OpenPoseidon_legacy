@@ -390,7 +390,7 @@ LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
                                   : side == TGuerrila ? "SoldierGB"
                                   : side == TCivilian ? "Civilian"
                                                       : "Logic";
-            LOG_WARN(Mission, "Arma 1: class '{}' is not installed (missing addon); '{}' stands in",
+            LOG_WARN(Mission, "{}: class '{}' is not installed (missing addon); '{}' stands in", Arma1Compat::Label(),
                      (const char*)vehicle, standIn);
             vehicle = standIn;
         }
@@ -1851,7 +1851,7 @@ int ArcadeTemplate::SplitOversizedGroups()
             rest = remaining;
             created++;
         }
-        LOG_INFO(Mission, "Arma 1: group {} exceeds {} crew seats; units from #{} moved into new groups ({} so far)",
+        LOG_INFO(Mission, "{}: group {} exceeds {} crew seats; units from #{} moved into new groups ({} so far)", Arma1Compat::Label(),
                  i, MAX_UNITS_PER_GROUP, cut, created);
     }
     return created;
@@ -1884,7 +1884,7 @@ bool ArcadeTemplate::PromotePlayableToPlayer()
                 default:
                     continue;
             }
-            LOG_INFO(Mission, "Arma 1: no player unit; playable '{}' in group {} plays", (const char*)u.vehicle, i);
+            LOG_INFO(Mission, "{}: no player unit; playable '{}' in group {} plays", Arma1Compat::Label(), (const char*)u.vehicle, i);
             return true;
         }
     }

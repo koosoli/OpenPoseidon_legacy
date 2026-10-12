@@ -3083,7 +3083,7 @@ void GameApplication::StartGameMode()
             // Played: intro, briefing, mission. Tested (--arma1-test-seconds / --check):
             // straight into the mission.
             AutoTest = AppConfig::Instance().GetArma1TestSeconds() > 0.0f || AppConfig::Instance().IsMissionSmokeCheck();
-            LOG_INFO(Core, "Arma 1 mission{}: {} -> {}", AutoTest ? " (test, no briefing)" : "", arma1Mission,
+            LOG_INFO(Core, "{} mission{}: {} -> {}", Poseidon::Arma1Compat::Label(), AutoTest ? " (test, no briefing)" : "", arma1Mission,
                      missionFile);
         }
         else if (!testMission.empty())

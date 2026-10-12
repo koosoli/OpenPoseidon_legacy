@@ -2039,7 +2039,7 @@ static bool StartArma1CampaignMission(const char* missionFile)
         return false;
     const size_t start = file.rfind('/', end - 1);
     const std::string templ = start == std::string::npos ? file.substr(0, end) : file.substr(start + 1, end - start - 1);
-    LOG_INFO(Core, "Arma 1: '{}' is mission '{}' of campaign '{}'", missionFile, templ, campaign);
+    LOG_INFO(Core, "{}: '{}' is mission '{}' of campaign '{}'", Arma1Compat::Label(), missionFile, templ, campaign);
     if (StartCampaignAt(RString(campaign.c_str()), RString(templ.c_str()), nullptr))
         return true;
     // not in the campaign's flow: undo the campaign selection, play the mission alone

@@ -40,6 +40,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -960,6 +961,19 @@ GameValue A2PpEffectCreate(const GameState*, GameValuePar)
     return GameValue(next += 1.0f);
 }
 
+// x factor [a, b]: where x lies between a and b, clamped to 0..1 (Arma 2 config
+// expressions: radio protocol, sound controllers).
+GameValue A2Factor(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& range = oper2;
+    if (range.Size() < 2 || range[0].GetType() != GameScalar || range[1].GetType() != GameScalar)
+        return GameValue(0.0f);
+    const float a = range[0], b = range[1], x = oper1;
+    if (std::fabs(b - a) < 1e-9f)
+        return GameValue(x >= b ? 1.0f : 0.0f);
+    return GameValue(std::clamp((x - a) / (b - a), 0.0f, 1.0f));
+}
+
 GameValue A2HintSilent(const GameState* state, GameValuePar oper1)
 {
     return ShowHint(state, oper1);
@@ -1098,6 +1112,7 @@ const GameFunction A2Unary[] = {
 };
 
 const GameOperator A2Binary[] = {
+    GameOperator(GameScalar, "factor", function, A2Factor, GameScalar, GameArray),
     GameOperator(GameNothing, "setVariable", function, A2SetVariable, GameObject | GameGroup | GameString, GameArray),
     GameOperator(GameAny, "getVariable", function, A2GetVariable, GameObject | GameGroup | GameString, GameString | GameArray),
     GameOperator(GameString, "createSimpleTask", function, A2CreateSimpleTask, GameObject, GameArray),

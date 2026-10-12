@@ -1113,12 +1113,14 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
             addLine(empty, empty, RString(wait.c_str()));
             addLine(empty, RString("__waituntil"), empty);
         }
-        else if (!loopExits.empty() && ParseSqfControl(statement, control) && control.kind == SqfControl::ExitWith)
+        else if (ParseSqfControl(statement, control) && control.kind == SqfControl::ExitWith)
         {
+            // exitWith leaves the innermost compiled scope (loop body, if/switch branch);
+            // at the top level of the script it ends the script, as in Arma.
             const std::string skip = newLabel();
             addCondLine("!(" + control.condition + ")", "goto \"" + skip + "\"");
             emitBlock(control.body);
-            addGoto(loopExits.back());
+            addGoto(loopExits.empty() ? scriptEnd : loopExits.back());
             placeLabel(skip);
         }
         else if (HasSuspension(statement) && ParseSqfControl(statement, control) &&
@@ -1167,10 +1169,12 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
                 {
                     const std::string otherwise = newLabel();
                     addCondLine("!(" + control.condition + ")", "goto \"" + otherwise + "\"");
+                    loopExits.push_back(next);
                     emitBlock(control.body);
                     addGoto(next);
                     placeLabel(otherwise);
                     emitBlock(control.elseBody);
+                    loopExits.pop_back();
                     placeLabel(next);
                     break;
                 }
