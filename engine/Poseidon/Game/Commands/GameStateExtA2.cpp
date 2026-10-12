@@ -92,6 +92,7 @@ GameValue CutRsc(const GameState* state, GameValuePar oper1);
 GameValue CutObj(const GameState* state, GameValuePar oper1);
 GameValue StrFormat(const GameState* state, GameValuePar oper1);
 GameValue ObjSide(const GameState* state, GameValuePar oper1);
+GameValue A1MissionConfigFile(const GameState* state);
 
 namespace
 {
@@ -477,6 +478,108 @@ GameValue A2CreateDiaryRecord(const GameState*, GameValuePar oper1, GameValuePar
     return GameValue(RString(("::DIARY::" + std::to_string(++RT().diaryRecords)).c_str()));
 }
 
+// Drops a trailing SQF "// comment" from a code fragment out[from..] (quotes inside a
+// config string are doubled; SQF also uses '...').
+void StripSqfLineComment(std::string& out, size_t from)
+{
+    bool dq = false, sq = false;
+    for (size_t i = from; i + 1 < out.size(); i++)
+    {
+        const char c = out[i];
+        if (!sq && c == '"' && out[i + 1] == '"')
+        {
+            dq = !dq;
+            i++;
+            continue;
+        }
+        if (!dq && c == '\'')
+        {
+            sq = !sq;
+            continue;
+        }
+        if (!dq && !sq && c == '/' && out[i + 1] == '/')
+        {
+            out.resize(i);
+            return;
+        }
+    }
+}
+
+// The FSM editor and conversation files continue a string over lines as
+// "line one" \n "line two"; CWA's config parser does not know that form. The pieces are
+// joined into one string (a line's trailing // comment dropped, as the line break that
+// ended it is gone).
+std::string JoinConfigStrings(const std::string& in)
+{
+    std::string out;
+    out.reserve(in.size());
+    const size_t n = in.size();
+    size_t i = 0;
+    auto space = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+    while (i < n)
+    {
+        const char c = in[i];
+        if (c == '/' && i + 1 < n && in[i + 1] == '/')
+        {
+            while (i < n && in[i] != '\n')
+                out.push_back(in[i++]);
+            continue;
+        }
+        if (c == '/' && i + 1 < n && in[i + 1] == '*')
+        {
+            const size_t end = in.find("*/", i + 2);
+            const size_t stop = end == std::string::npos ? n : end + 2;
+            out.append(in, i, stop - i);
+            i = stop;
+            continue;
+        }
+        if (c != '"')
+        {
+            out.push_back(c);
+            i++;
+            continue;
+        }
+        out.push_back('"');
+        i++;
+        size_t fragment = out.size();
+        while (i < n)
+        {
+            if (in[i] != '"')
+            {
+                out.push_back(in[i++]);
+                continue;
+            }
+            if (i + 1 < n && in[i + 1] == '"')
+            {
+                out.append("\"\"");
+                i += 2;
+                continue;
+            }
+            size_t j = i + 1;
+            while (j < n && space(in[j]))
+                j++;
+            if (j + 1 < n && in[j] == '\\' && in[j + 1] == 'n')
+            {
+                size_t k = j + 2;
+                while (k < n && space(in[k]))
+                    k++;
+                if (k < n && in[k] == '"')
+                {
+                    StripSqfLineComment(out, fragment);
+                    out.push_back(' ');
+                    fragment = out.size();
+                    i = k + 1;
+                    continue;
+                }
+            }
+            out.push_back('"');
+            i++;
+            break;
+        }
+    }
+    return out;
+}
+
 // ---------------------------------------------------------------------------
 // Conversations (kb*)
 // ---------------------------------------------------------------------------
@@ -491,6 +594,7 @@ std::shared_ptr<ParamFile> LoadBikb(const std::string& file)
     if (PreprocessScriptFile(file.c_str(), text))
     {
         cfg = std::make_shared<ParamFile>();
+        text = JoinConfigStrings(text);
         QIStream in(text.data(), static_cast<int>(text.size()));
         cfg->Parse(in);
     }
@@ -749,6 +853,7 @@ GameValue A2ExecFSM(const GameState*, GameValuePar oper1, GameValuePar oper2)
     else
     {
         fsm->config = std::make_unique<ParamFile>();
+        text = JoinConfigStrings(text);
         QIStream in(text.data(), static_cast<int>(text.size()));
         fsm->config->Parse(in);
         const ParamEntry* root = fsm->config->FindEntry("FSM");
@@ -1874,6 +1979,16 @@ void Arma2RuntimeSimulate()
             }
             pos = end + 1;
         }
+        // OP_A2_EVAL="expression": evaluated and logged at the same times.
+        static const std::string eval = [] {
+            const char* e = std::getenv("OP_A2_EVAL");
+            return std::string(e ? e : "");
+        }();
+        if (!eval.empty())
+        {
+            const GameValue v = gstate->EvaluateMultiple(eval.c_str());
+            LOG_INFO(Script, "eval t={:.0f} {} = {}", Now(), eval, v.GetNil() ? "<nil>" : (const char*)v.GetText());
+        }
     }
 }
 
@@ -1908,6 +2023,7 @@ const GameNular A2Nular[] = {
     GameNular(GameBool, "teamSwitchEnabled", A2False),
     GameNular(GameScalar, "viewDistance", A2One),
     GameNular(GameNothing, "processInitCommands", A2ProcessInitCommands),
+    GameNular(GameString, "campaignConfigFile", A1MissionConfigFile),
     GameNular(GameSide, "sideUnknown", A2SideUnknown),
     GameNular(GameString, "commandingMenu", A2EmptyString),
     GameNular(GameScalar, "displayNull", A2MinusOne),
