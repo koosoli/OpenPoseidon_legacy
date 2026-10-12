@@ -824,6 +824,119 @@ static float ScanFloat(const char* ptr, bool& ok)
     return 0;
 }
 
+// Constant arithmetic in an unquoted value: Arma 1 resources write
+// `style = ST_LEFT + ST_MULTI + ST_NO_RECT;`, which after macro expansion is
+// `0x00 + 16 + 512`. Numbers (decimal, hex, float), + - * / and parentheses only;
+// anything else is not arithmetic and stays a string. Result in `out` as text.
+namespace
+{
+struct ConstExprParser
+{
+    const char* p;
+    bool ok = true;
+    bool isFloat = false;
+
+    void Skip()
+    {
+        while (*p == ' ' || *p == '\t')
+            p++;
+    }
+    double Number()
+    {
+        Skip();
+        if (*p == '(')
+        {
+            p++;
+            const double v = Sum();
+            Skip();
+            if (*p != ')')
+                ok = false;
+            else
+                p++;
+            return v;
+        }
+        if (*p == '-' || *p == '+')
+        {
+            const bool neg = *p++ == '-';
+            const double v = Number();
+            return neg ? -v : v;
+        }
+        char* end = nullptr;
+        if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X'))
+        {
+            const long v = strtol(p + 2, &end, 16);
+            if (end == p + 2)
+                ok = false;
+            p = end;
+            return (double)v;
+        }
+        const double v = strtod(p, &end);
+        if (end == p)
+        {
+            ok = false;
+            return 0;
+        }
+        for (const char* q = p; q < end; q++)
+            if (*q == '.' || *q == 'e' || *q == 'E')
+                isFloat = true;
+        p = end;
+        return v;
+    }
+    double Product()
+    {
+        double v = Number();
+        for (Skip(); ok && (*p == '*' || *p == '/'); Skip())
+        {
+            const char op = *p++;
+            const double r = Number();
+            if (op == '*')
+                v *= r;
+            else
+            {
+                isFloat = isFloat || (r != 0 && std::fmod(v, r) != 0);
+                v = r != 0 ? v / r : 0;
+            }
+        }
+        return v;
+    }
+    double Sum()
+    {
+        double v = Product();
+        for (Skip(); ok && (*p == '+' || *p == '-'); Skip())
+        {
+            const char op = *p++;
+            const double r = Product();
+            v = op == '+' ? v + r : v - r;
+        }
+        return v;
+    }
+};
+} // namespace
+
+bool ParamConstArithmetic(const char* text, char* out, size_t outSize)
+{
+    bool hasOperator = false;
+    for (const char* q = text; *q; q++)
+    {
+        if (strchr("+-*/", *q) && q != text)
+            hasOperator = true;
+        else if (!strchr("0123456789abcdefABCDEFxX.() \t+-*/", *q))
+            return false;
+    }
+    if (!hasOperator)
+        return false;
+    ConstExprParser parser{text};
+    const double v = parser.Sum();
+    parser.Skip();
+    if (!parser.ok || *parser.p != 0)
+        return false;
+    if (parser.isFloat)
+        snprintf(out, outSize, "%g", v);
+    else
+        snprintf(out, outSize, "%d", (int)std::lround(v));
+    return true;
+}
+
 const RStringB ParamRawValue::GetValue() const
 {
     const char* val = _value;
@@ -1879,6 +1992,12 @@ void ParamClass::Parse(QIStream& in, ParamFile* file)
                     // constants from named macros without requiring the
                     // BIS-style __EVAL prefix on every site.
                     ::strcpy(word, file->EvaluateStringInternal(word));
+                }
+                else if (!quot)
+                {
+                    char folded[64];
+                    if (ParamConstArithmetic(word, folded, sizeof(folded)))
+                        ::strcpy(word, folded);
                 }
 
                 // check if value is integer or float
