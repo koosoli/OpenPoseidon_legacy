@@ -189,6 +189,13 @@ option(POSEIDON_BUILD_FUZZERS "Build libFuzzer network harnesses" OFF)
 # Auto-disabled with a warning if cargo is not found, so a missing Rust
 # toolchain never breaks the C++ build.
 option(POSEIDON_ENABLE_WGPU "Build the Rust/wgpu graphics backend" ON)
+# Steam Audio backend (--audio steam): Valve's air absorption + binaural HRTF over an SDL3 device and
+# an in-engine mixer, next to OpenAL (the default). Windows only: never built elsewhere yet.
+if(WIN32)
+    option(POSEIDON_ENABLE_STEAMAUDIO "Build the Steam Audio backend (--audio steam)" ON)
+else()
+    option(POSEIDON_ENABLE_STEAMAUDIO "Build the Steam Audio backend (--audio steam)" OFF)
+endif()
 if(POSEIDON_ENABLE_WGPU)
     find_program(CARGO_EXECUTABLE cargo)
     if(NOT CARGO_EXECUTABLE)
@@ -253,6 +260,9 @@ set(DIST_DIR "${CMAKE_SOURCE_DIR}/dist/${DIST_PRESET_NAME}")
 add_subdirectory(engine/Poseidon)
 add_subdirectory(engine/PoseidonGL33)
 add_subdirectory(engine/PoseidonOpenAL)
+if(POSEIDON_ENABLE_STEAMAUDIO)
+    add_subdirectory(engine/PoseidonSteamAudio)
+endif()
 add_subdirectory(engine/PoseidonFormats)
 if(POSEIDON_ENABLE_WGPU)
     add_subdirectory(engine/WgpuRenderer)

@@ -73,6 +73,7 @@ private:
 void RegisterDummyAudioBackend();
 void RegisterTextAudioBackend();
 void RegisterOpenALAudioBackend();
+void RegisterSteamAudioBackend(); // engine/PoseidonSteamAudio (POSEIDON_ENABLE_STEAMAUDIO)
 
 } // namespace Poseidon
 
