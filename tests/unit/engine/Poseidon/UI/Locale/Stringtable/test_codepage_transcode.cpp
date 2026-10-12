@@ -501,3 +501,19 @@ TEST_CASE("legacy-encoded folder names decode for display", "[locale][codepage][
     const std::string utf8Csla = "ČSLA";
     CHECK(DecodeLegacyTextToUtf8(utf8Csla, Codepage::CP1250) == utf8Csla);
 }
+
+TEST_CASE("UTF-16LE written through a text-mode stream decodes its line breaks", "[locale][codepage][utf16]")
+{
+    // Arma 1's campaign briefings (ca.pbo, m09convoyattack.sara/briefing.html) carry a 0x0D byte
+    // before every UTF-16LE line feed: "0A 00" became "0D 0A 00". Read unit by unit that drew two
+    // boxes (U+0A0D, U+0D00) at every line break.
+    const unsigned char bytes[] = {0xFF, 0xFE, 'A', 0x00, 0x0D, 0x0A, 0x00, 'B', 0x00, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x00, 'C', 0x00};
+    std::string out;
+    REQUIRE(Poseidon::DecodeUtf16BomToUtf8(reinterpret_cast<const char*>(bytes), sizeof(bytes), out));
+    CHECK(out == "A\nB\n\nC");
+
+    // a well-formed CR LF pair is unchanged
+    const unsigned char clean[] = {0xFF, 0xFE, 'A', 0x00, 0x0D, 0x00, 0x0A, 0x00, 'B', 0x00};
+    REQUIRE(Poseidon::DecodeUtf16BomToUtf8(reinterpret_cast<const char*>(clean), sizeof(clean), out));
+    CHECK(out == "A\r\nB");
+}
