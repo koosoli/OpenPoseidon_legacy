@@ -1,5 +1,6 @@
 
 #include <Poseidon/Core/Config/EngineConfig.hpp>
+#include <string>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Core/Version.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
@@ -1119,15 +1120,27 @@ GameValue StringLoad(const GameState* state, GameValuePar oper1)
 
 class FilePreprocessor : public Preproc
 {
+  public:
+    // Folder of the file being preprocessed ("ca\\modules\\functions\\"), for includes
+    // given relative to it. Arma 2 scripts include both ways.
+    std::string baseDir;
+
   protected:
     QIStream* OnEnterInclude(const char* filename) override
     {
-        if (!QIFStreamB::FileExist(filename))
+        std::string name = filename ? filename : "";
+        // Arma 2 names bank paths with a leading backslash ("\\ca\\modules\\...").
+        while (!name.empty() && (name[0] == '\\' || name[0] == '/'))
+            name.erase(0, 1);
+        if (!QIFStreamB::FileExist(name.c_str()) && !baseDir.empty() &&
+            QIFStreamB::FileExist((baseDir + name).c_str()))
+            name = baseDir + name;
+        if (!QIFStreamB::FileExist(name.c_str()))
         {
             return nullptr;
         }
         QIFStreamB* stream = new QIFStreamB();
-        stream->AutoOpen(filename);
+        stream->AutoOpen(name.c_str());
         return stream;
     }
     void OnExitInclude(QIStream* stream) override
@@ -1138,6 +1151,35 @@ class FilePreprocessor : public Preproc
         }
     }
 };
+// Arma 2 content: preprocesses a script/FSM file (#include, #define, #ifdef) the way
+// preprocessFile does. False when the file cannot be opened or preprocessed.
+bool PreprocessScriptFile(const char* name, std::string& out)
+{
+    std::string file = name ? name : "";
+    const bool absolute = !file.empty() && (file[0] == '\\' || file[0] == '/');
+    while (!file.empty() && (file[0] == '\\' || file[0] == '/'))
+        file.erase(0, 1);
+    if (!absolute)
+    {
+        const std::string inMission = std::string((const char*)GetMissionDirectory()) + file;
+        if (QIFStreamB::FileExist(inMission.c_str()))
+            file = inMission;
+        else if (!QIFStreamB::FileExist(file.c_str()))
+            file = (const char*)Poseidon::FindScript(RString(file.c_str()));
+    }
+    if (file.empty() || !QIFStreamB::FileExist(file.c_str()))
+        return false;
+    FilePreprocessor preproc;
+    const size_t slash = file.find_last_of("\\/");
+    if (slash != std::string::npos)
+        preproc.baseDir = file.substr(0, slash + 1);
+    QOStream processed;
+    if (!preproc.Process(&processed, RString(file.c_str())))
+        return false;
+    out.assign(processed.str(), processed.pcount());
+    return true;
+}
+
 GameValue StringPreprocess(const GameState* state, GameValuePar oper1)
 {
     RString filename = Poseidon::FindScript(oper1);

@@ -1548,6 +1548,8 @@ void World::TerminateScript(Script* script)
     _scripts.Delete(index);
 }
 
+void Arma2RuntimeSimulate(); // GameStateExtA2.cpp: Arma 2 scripted FSMs (--arma2 only)
+
 void World::SimulateScripts()
 {
     for (int i = 0; i < _scripts.Size();)
@@ -1561,6 +1563,7 @@ void World::SimulateScripts()
             i++;
         }
     }
+    Arma2RuntimeSimulate();
 }
 
 void World::SetCameraScript(Script* script)

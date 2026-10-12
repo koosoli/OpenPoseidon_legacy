@@ -259,6 +259,337 @@ class RapToText
     }
 };
 
+// ---------------------------------------------------------------------------
+// raP -> tree, merged across every addon before it is parsed (Arma 2)
+// ---------------------------------------------------------------------------
+//
+// Arma 2 configs name base classes that the same file does not declare (a world's
+// Lighting classes derive from CfgWorlds' DayLighting* defined by another addon). The
+// engine's parser resolves a base while it reads, so such a file cannot be parsed on
+// its own. Instead every config.bin is read into this tree, the trees are merged in
+// requiredAddons order the way the game merges them, and the merged whole is written
+// out as one config text whose classes come after the classes they derive from.
+
+struct RapNode
+{
+    std::string name;  // original case
+    std::string base;  // for classes
+    bool isClass = false;
+    bool isExtern = false;      // "class X;" -- names a class, defines nothing
+    std::string text;           // for values: "name=value;" / "name[]={...};"
+    std::vector<std::string> strings; // array values: the top-level string items
+    std::vector<std::unique_ptr<RapNode>> children;
+    std::map<std::string, size_t> index; // lower-case name -> children slot
+
+    RapNode* Find(const std::string& lowerName) const
+    {
+        const auto it = index.find(lowerName);
+        return it == index.end() ? nullptr : children[it->second].get();
+    }
+    void Put(std::unique_ptr<RapNode> node)
+    {
+        const std::string key = Lower(node->name);
+        const auto it = index.find(key);
+        if (it != index.end())
+            children[it->second] = std::move(node);
+        else
+        {
+            index[key] = children.size();
+            children.push_back(std::move(node));
+        }
+    }
+    void Remove(const std::string& lowerName)
+    {
+        const auto it = index.find(lowerName);
+        if (it == index.end())
+            return;
+        children.erase(children.begin() + static_cast<long>(it->second));
+        index.clear();
+        for (size_t i = 0; i < children.size(); i++)
+            index[Lower(children[i]->name)] = i;
+    }
+    std::unique_ptr<RapNode> Clone() const
+    {
+        auto n = std::make_unique<RapNode>();
+        n->name = name;
+        n->base = base;
+        n->isClass = isClass;
+        n->isExtern = isExtern;
+        n->text = text;
+        n->strings = strings;
+        for (const auto& c : children)
+            n->Put(c->Clone());
+        return n;
+    }
+};
+
+class RapTree
+{
+    const std::vector<uint8_t>& _bytes;
+
+    void Need(size_t at, size_t n) const
+    {
+        if (at + n > _bytes.size())
+            throw std::runtime_error("truncated raP");
+    }
+    uint8_t Byte(size_t& at) const
+    {
+        Need(at, 1);
+        return _bytes[at++];
+    }
+    uint32_t U32(size_t& at) const
+    {
+        Need(at, 4);
+        const uint32_t v = uint32_t(_bytes[at]) | (uint32_t(_bytes[at + 1]) << 8) | (uint32_t(_bytes[at + 2]) << 16) |
+                           (uint32_t(_bytes[at + 3]) << 24);
+        at += 4;
+        return v;
+    }
+    float F32(size_t& at) const
+    {
+        const uint32_t bits = U32(at);
+        float f;
+        std::memcpy(&f, &bits, sizeof(f));
+        return f;
+    }
+    std::string Str(size_t& at) const
+    {
+        const size_t start = at;
+        while (Byte(at) != 0)
+        {
+        }
+        return std::string(reinterpret_cast<const char*>(_bytes.data() + start), at - start - 1);
+    }
+    uint32_t Count(size_t& at) const
+    {
+        uint32_t v = 0;
+        for (unsigned shift = 0; shift <= 28; shift += 7)
+        {
+            const uint8_t b = Byte(at);
+            v |= uint32_t(b & 0x7f) << shift;
+            if (!(b & 0x80))
+                return v;
+        }
+        throw std::runtime_error("bad raP count");
+    }
+    static std::string Quote(const std::string& s)
+    {
+        std::string q = "\"";
+        for (char c : s)
+        {
+            if (c == '"')
+                q += "\"\"";
+            else if (c == '\r' || c == '\n')
+                q += ' ';
+            else
+                q += c;
+        }
+        return q + "\"";
+    }
+    static std::string Float(float f)
+    {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%.9g", f);
+        if (strchr(buf, 'e') || strchr(buf, 'E') || strstr(buf, "inf") || strstr(buf, "nan"))
+            snprintf(buf, sizeof(buf), "%.6f", static_cast<double>(f));
+        return buf;
+    }
+    static std::string Scalar(const std::string& s)
+    {
+        if (s.rfind("ManPos", 0) == 0)
+        {
+            const int v = ManPosValue(s);
+            if (v != -1000)
+                return std::to_string(v);
+        }
+        return Quote(s);
+    }
+    std::string Array(size_t& at, int depth, std::vector<std::string>* strings)
+    {
+        if (depth > 32)
+            throw std::runtime_error("raP array too deep");
+        const uint32_t n = Count(at);
+        std::string out = "{";
+        for (uint32_t i = 0; i < n; i++)
+        {
+            if (i)
+                out += ",";
+            const uint8_t t = Byte(at);
+            if (t == 0 || t == 4)
+            {
+                const std::string v = Str(at);
+                if (strings)
+                    strings->push_back(v);
+                out += Scalar(v);
+            }
+            else if (t == 1)
+                out += Float(F32(at));
+            else if (t == 2)
+                out += std::to_string(static_cast<int32_t>(U32(at)));
+            else if (t == 3)
+                out += Array(at, depth + 1, nullptr);
+            else
+                throw std::runtime_error("bad raP array element");
+        }
+        return out + "}";
+    }
+    void Body(size_t at, RapNode& node, int depth)
+    {
+        if (depth > 64)
+            throw std::runtime_error("raP class too deep");
+        (void)Str(at); // parent name, read with the class header
+        const uint32_t n = Count(at);
+        for (uint32_t i = 0; i < n; i++)
+        {
+            const uint8_t type = Byte(at);
+            auto child = std::make_unique<RapNode>();
+            if (type == 0)
+            {
+                child->name = Str(at);
+                child->isClass = true;
+                size_t body = U32(at);
+                size_t peek = body;
+                child->base = Str(peek);
+                Body(body, *child, depth + 1);
+                node.Put(std::move(child));
+            }
+            else if (type == 1)
+            {
+                const uint8_t sub = Byte(at);
+                child->name = Str(at);
+                std::string value;
+                if (sub == 0 || sub == 4)
+                    value = Scalar(Str(at));
+                else if (sub == 1)
+                    value = Float(F32(at));
+                else if (sub == 2)
+                    value = std::to_string(static_cast<int32_t>(U32(at)));
+                else
+                    throw std::runtime_error("bad raP value");
+                child->text = child->name + "=" + value + ";";
+                node.Put(std::move(child));
+            }
+            else if (type == 2 || type == 5)
+            {
+                if (type == 5)
+                    (void)U32(at); // "+=" flag: appended arrays are taken whole
+                child->name = Str(at);
+                child->text = child->name + "[]=" + Array(at, 0, &child->strings) + ";";
+                node.Put(std::move(child));
+            }
+            else if (type == 3)
+            {
+                child->name = Str(at);
+                child->isClass = true;
+                child->isExtern = true;
+                if (!node.Find(Lower(child->name)))
+                    node.Put(std::move(child));
+            }
+            else if (type == 4)
+            {
+                // "delete X;" -- kept as a marker the merge applies to the destination
+                child->name = Str(at);
+                child->text = "\x01" "delete";
+                node.Put(std::move(child));
+            }
+            else
+                throw std::runtime_error("bad raP entry");
+        }
+    }
+
+  public:
+    explicit RapTree(const std::vector<uint8_t>& bytes) : _bytes(bytes) {}
+    std::unique_ptr<RapNode> Read()
+    {
+        if (_bytes.size() < 16 || std::memcmp(_bytes.data(), "\0raP", 4) != 0)
+            throw std::runtime_error("not a raP config");
+        auto root = std::make_unique<RapNode>();
+        root->isClass = true;
+        Body(16, *root, 0);
+        return root;
+    }
+};
+
+// Merges `src` into `dst` like an addon config updating the config before it.
+void MergeRap(RapNode& dst, const RapNode& src)
+{
+    for (const auto& child : src.children)
+    {
+        const std::string key = Lower(child->name);
+        if (child->text == "\x01" "delete")
+        {
+            dst.Remove(key);
+            continue;
+        }
+        RapNode* existing = dst.Find(key);
+        if (child->isClass)
+        {
+            if (existing && existing->isClass)
+            {
+                if (child->isExtern)
+                    continue;
+                if (!child->base.empty() || existing->isExtern)
+                    existing->base = child->base;
+                existing->isExtern = false;
+                MergeRap(*existing, *child);
+            }
+            else
+            {
+                dst.Put(child->Clone());
+            }
+        }
+        else
+        {
+            dst.Put(child->Clone());
+        }
+    }
+}
+
+void CollectRapBases(const RapNode& node, std::set<std::string>& names)
+{
+    if (node.isClass && !node.base.empty())
+        names.insert(Lower(node.base));
+    for (const auto& c : node.children)
+        if (c->isClass)
+            CollectRapBases(*c, names);
+}
+
+// Writes the merged tree as config text. Within a class, values come first, then the
+// classes, each after the siblings its subtree derives from.
+void WriteRap(const RapNode& node, std::string& out, int depth)
+{
+    const std::string pad(static_cast<size_t>(depth), '\t');
+    for (const auto& c : node.children)
+        if (!c->isClass)
+            out += pad + c->text + "\r\n";
+    std::vector<int> state(node.children.size(), 0);
+    std::function<void(size_t)> visit = [&](size_t i)
+    {
+        if (state[i])
+            return;
+        state[i] = 1;
+        const RapNode& c = *node.children[i];
+        std::set<std::string> bases;
+        CollectRapBases(c, bases);
+        for (const std::string& b : bases)
+        {
+            const auto it = node.index.find(b);
+            if (it != node.index.end() && it->second != i)
+                visit(it->second);
+        }
+        out += pad + "class " + c.name;
+        if (!c.base.empty())
+            out += ": " + c.base;
+        out += "\r\n" + pad + "{\r\n";
+        WriteRap(c, out, depth + 1);
+        out += pad + "};\r\n";
+        state[i] = 2;
+    };
+    for (size_t i = 0; i < node.children.size(); i++)
+        if (node.children[i]->isClass)
+            visit(i);
+}
+
 std::vector<uint8_t> ReadArchiveFile(const std::string& name)
 {
     std::vector<uint8_t> bytes;
@@ -322,6 +653,7 @@ struct LoadedConfig
 {
     std::string source;
     std::unique_ptr<ParamFile> file;
+    std::unique_ptr<RapNode> tree; // Arma 2: merged as raP trees, parsed once (RapTree)
     std::vector<std::string> patches;
     std::vector<std::string> requiredAddons;
     bool isBase = false;
@@ -670,14 +1002,22 @@ void LoadConfig()
                 const std::string path = binPath + ".pbo:" + name;
                 try
                 {
-                    const std::string text = RapToText(readPrivate(name)).Convert();
-                    LOG_INFO(Mission, "{}: parsing {} ({} bytes)", Label(), path, text.size());
                     LoadedConfig cfg;
                     cfg.source = path;
                     cfg.isBase = true;
-                    cfg.file = std::make_unique<ParamFile>();
-                    QIStream in(text.data(), static_cast<int>(text.size()));
-                    cfg.file->Parse(in);
+                    if (Generation() == 2)
+                    {
+                        cfg.tree = RapTree(readPrivate(name)).Read();
+                        LOG_INFO(Mission, "{}: read {}", Label(), path);
+                    }
+                    else
+                    {
+                        const std::string text = RapToText(readPrivate(name)).Convert();
+                        LOG_INFO(Mission, "{}: parsing {} ({} bytes)", Label(), path, text.size());
+                        cfg.file = std::make_unique<ParamFile>();
+                        QIStream in(text.data(), static_cast<int>(text.size()));
+                        cfg.file->Parse(in);
+                    }
                     configs.insert(configs.begin() + baseConfigs, std::move(cfg));
                     baseConfigs++;
                 }
@@ -704,10 +1044,28 @@ void LoadConfig()
             const std::string path = prefix + name;
             try
             {
-                const std::string text = RapToText(ReadArchiveFile(path)).Convert();
-                LOG_INFO(Mission, "{}: parsing {} ({} bytes)", Label(), path, text.size());
                 LoadedConfig cfg;
                 cfg.source = path;
+                if (Generation() == 2)
+                {
+                    cfg.tree = RapTree(ReadArchiveFile(path)).Read();
+                    if (const RapNode* patches = cfg.tree->Find("cfgpatches"))
+                    {
+                        for (const auto& patch : patches->children)
+                        {
+                            if (!patch->isClass || patch->isExtern)
+                                continue;
+                            cfg.patches.push_back(Lower(patch->name));
+                            if (const RapNode* req = patch->Find("requiredaddons"))
+                                for (const std::string& r : req->strings)
+                                    cfg.requiredAddons.push_back(Lower(r));
+                        }
+                    }
+                    configs.push_back(std::move(cfg));
+                    continue;
+                }
+                const std::string text = RapToText(ReadArchiveFile(path)).Convert();
+                LOG_INFO(Mission, "{}: parsing {} ({} bytes)", Label(), path, text.size());
                 cfg.file = std::make_unique<ParamFile>();
                 QIStream in(text.data(), static_cast<int>(text.size()));
                 cfg.file->Parse(in);
@@ -733,6 +1091,8 @@ void LoadConfig()
         }
     }
 
+    auto mergedTree = std::make_unique<RapNode>();
+    mergedTree->isClass = true;
     // requiredAddons order (Kahn), bin first; unknown requirements are ignored.
     std::set<std::string> known;
     for (const auto& c : configs)
@@ -754,8 +1114,11 @@ void LoadConfig()
                     ready = false;
             if (!ready)
                 continue;
-            LOG_INFO(Mission, "{}: merging {}", Label(), configs[i].source);
-            Arma1Pars().Update(*configs[i].file);
+            LOG_DEBUG(Mission, "{}: merging {}", Label(), configs[i].source);
+            if (configs[i].tree)
+                MergeRap(*mergedTree, *configs[i].tree);
+            else
+                Arma1Pars().Update(*configs[i].file);
             done.insert(configs[i].patches.begin(), configs[i].patches.end());
             merged[i] = true;
             mergedCount++;
@@ -767,11 +1130,23 @@ void LoadConfig()
                 if (!merged[i])
                 {
                     LOG_WARN(Mission, "{}: dependency cycle, merging {} anyway", Label(), configs[i].source);
-                    Arma1Pars().Update(*configs[i].file);
+                    if (configs[i].tree)
+                        MergeRap(*mergedTree, *configs[i].tree);
+                    else
+                        Arma1Pars().Update(*configs[i].file);
                     merged[i] = true;
                     mergedCount++;
                 }
         }
+    }
+    if (!mergedTree->children.empty())
+    {
+        // Arma 2: the merged tree, written once with every base ahead of its users.
+        std::string text;
+        WriteRap(*mergedTree, text, 0);
+        LOG_INFO(Mission, "{}: parsing the merged config ({} bytes of text)", Label(), text.size());
+        QIStream in(text.data(), static_cast<int>(text.size()));
+        Arma1Pars().Parse(in);
     }
     Arma1Pars().SetFile(&Arma1Pars());
     const ParamEntry* vehicles = Arma1Pars().FindEntry("CfgVehicles");

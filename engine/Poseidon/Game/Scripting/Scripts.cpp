@@ -1233,13 +1233,21 @@ GameValue ScriptSpawn(const GameState* state, GameValuePar oper1, GameValuePar o
     return GameValue(static_cast<float>(script->GetHandle()));
 }
 
+bool PreprocessScriptFile(const char* name, std::string& out); // GameStateExtWorldConfig.cpp
+
 GameValue ScriptExecVM(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     using namespace Poseidon;
     RString name = oper2;
     QIFStreamB in;
     std::string code;
-    if (OpenScript(in, name))
+    // Arma 2 scripts rely on #include / #define: run them through the preprocessor
+    // preprocessFile uses. Arma 1 content keeps the plain read below.
+    if (Arma1Compat::Generation() == 2 && PreprocessScriptFile(name, code))
+    {
+        // preprocessed; '#line' markers and the like are dropped below
+    }
+    else if (OpenScript(in, name))
     {
         while (true)
         {
@@ -1254,7 +1262,8 @@ GameValue ScriptExecVM(const GameState* state, GameValuePar oper1, GameValuePar 
         LOG_WARN(Script, "execVM: script '{}' not found", (const char*)name);
     }
     // Preprocessor directives are not expanded here; report them instead of guessing.
-    if (code.find("#include") != std::string::npos || code.find("#define") != std::string::npos)
+    if (Arma1Compat::Generation() != 2 &&
+        (code.find("#include") != std::string::npos || code.find("#define") != std::string::npos))
         LOG_WARN(Script, "execVM '{}': preprocessor directives are not supported and were ignored",
                  (const char*)name);
     std::string filtered;
