@@ -1528,6 +1528,14 @@ extern void ApplyEffects(AIGroup* group, int index);
 AIUnit* AICenter::CreateSoldier(Transport* transport, int rank, const ParamEntry& cfgSide, bool multiplayer)
 {
     RString nameType = transport->Type()->GetCrew();
+    if (nameType.GetLength() == 0 && Poseidon::Arma1Compat::Active())
+    {
+        // An Arma 1/2 vehicle carried by a CWA class without a crew entry (a static
+        // object standing in for a weapon, say): crewed by the side's basic soldier.
+        nameType = _side == TEast ? "SoldierEB" : _side == TWest ? "SoldierWB" : _side == TGuerrila ? "SoldierGB" : "Civilian";
+        LOG_WARN(AI, "{}: '{}' names no crew; '{}' crews it", Poseidon::Arma1Compat::Label(),
+                 (const char*)transport->Type()->GetName(), (const char*)nameType);
+    }
     Person* soldier = dyn_cast<Person>(NewVehicle(nameType));
     // FIX: better handling of invalid crew specification
     if (!soldier)
