@@ -376,7 +376,23 @@ LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
 
     PARAM_CHECK(ar.Serialize("vehicle", vehicle, 1))
     if (ar.IsLoading())
+    {
         vehicle = Arma1Compat::ResolveVehicleClass(vehicle); // identity unless --arma1
+        // A class neither game defines (a third-party addon that is not installed): Arma 1
+        // reports it and plays on without it. Here it is stood in for by a plain unit of
+        // the same side (an empty object by a game logic), so the mission still loads.
+        if (Arma1Compat::Active() && !(Pars >> "CfgVehicles").FindEntry(vehicle))
+        {
+            const char* standIn = side == TEast       ? "SoldierEB"
+                                  : side == TWest     ? "SoldierWB"
+                                  : side == TGuerrila ? "SoldierGB"
+                                  : side == TCivilian ? "Civilian"
+                                                      : "Logic";
+            LOG_WARN(Mission, "Arma 1: class '{}' is not installed (missing addon); '{}' stands in",
+                     (const char*)vehicle, standIn);
+            vehicle = standIn;
+        }
+    }
     PARAM_CHECK(ar.SerializeEnum("player", player, 1, APNonplayable))
     PARAM_CHECK(ar.Serialize("leader", leader, 1, 0))
     if (ar.IsSaving() || ar.GetArVersion() >= 11)
