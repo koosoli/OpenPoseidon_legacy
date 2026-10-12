@@ -142,7 +142,7 @@ TEST_CASE("GamePage: view-distance helpers clamp and round to the supported rang
     CHECK(std::fmod(GamePage::SliderToViewDistance(37), 100.0f) == Catch::Approx(0.0f));
 }
 
-TEST_CASE("GamePage: every hundred metres is reachable including 800m", "[UI][GamePage]")
+TEST_CASE("GamePage: every hundred metres to 5 km is reachable including 800m", "[UI][GamePage]")
 {
     GamePageStateSnapshot snap;
     TestableGamePage page;
@@ -150,12 +150,23 @@ TEST_CASE("GamePage: every hundred metres is reachable including 800m", "[UI][Ga
     const auto row = p.RowFor(2); // includes the actual WithCloseRow forwarding.
     REQUIRE(row.sliderStep == 1);
     REQUIRE(row.sliderMax == GamePage::ViewDistanceSliderMax());
-    for (int position = 0; position <= row.sliderMax; position += row.sliderStep)
+    // A mouse must be able to pick a value: the whole range in ~100 positions, not 1,499.
+    CHECK(row.sliderMax <= 120);
+    for (int position = 0; position <= 49; ++position)
     {
         const float metres = GameSettingsConfig::kMinViewDistance + position * 100.0f;
         p.SetRowValue(2, position);
         REQUIRE(GetSelectedPreferredViewDistance() == metres);
         REQUIRE(p.RowValue(2) == position);
+    }
+    // every position maps to a distance that maps back to it, increasing
+    float previous = 0.0f;
+    for (int position = 0; position <= row.sliderMax; ++position)
+    {
+        const float metres = GamePage::SliderToViewDistance(position);
+        REQUIRE(metres > previous);
+        REQUIRE(GamePage::ViewDistanceToSlider(metres) == position);
+        previous = metres;
     }
     p.SetRowValue(2, GamePage::ViewDistanceToSlider(800.0f));
     CHECK(GetSelectedPreferredViewDistance() == 800.0f);
