@@ -563,13 +563,14 @@ impl WaterBackend {
         source: &wgpu::TextureView,
         depth: &wgpu::TextureView,
         destination: &wgpu::TextureView,
+        sky_sh: &wgpu::Buffer,
     ) {
         match &self.active {
             Active::CurrentOp(op) => {
                 let displacement = op.water.underwater_displacement_view();
                 op.underwater.render(device, encoder, source, depth, destination, &displacement);
             }
-            Active::Tidewater(tw) => tw.render_underwater(device, encoder, source, depth, destination),
+            Active::Tidewater(tw) => tw.render_underwater(device, encoder, source, depth, destination, sky_sh),
             Active::Empty => {}
         }
     }

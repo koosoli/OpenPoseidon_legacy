@@ -133,7 +133,8 @@ impl UwParams {
             sun_dir: [-d[0] / dl, -d[1] / dl, -d[2] / dl, glow.max(MIN_GLOW)],
             sun_e: [lin(cam.sun_diffuse[0]) * pi, lin(cam.sun_diffuse[1]) * pi, lin(cam.sun_diffuse[2]) * pi, BAND_PX],
             sky_e: [lin(cam.sun_ambient[0]), lin(cam.sun_ambient[1]), lin(cam.sun_ambient[2]), if enabled { 1.0 } else { 0.0 }],
-            absorption: [absorption[0], absorption[1], absorption[2], 0.0],
+            // w: the SH sky's scale (frame sun_ambient.w) for uwSkyE; 0 falls back to sky_e
+            absorption: [absorption[0], absorption[1], absorption[2], cam.sun_ambient[3].max(0.0)],
             scattering: [scattering[0], scattering[1], scattering[2], p.sea_level],
             ocean: [p.tidewater[0][0], 4.0, caustic_tiles[0], caustic_tiles[1]],
             sizes,
@@ -189,6 +190,13 @@ impl TwUnderwater {
                 tex(7, S::Float { filterable: true }, D::D2),
                 // W9a/W12d: the probe grid (rgba32float mesh vertices, loaded)
                 tex(8, S::Float { filterable: false }, D::D2),
+                // (OP) the sky's SH-9 irradiance (sky::Sky::sh_buffer)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: f,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
             ],
         });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -254,6 +262,7 @@ impl TwUnderwater {
         displacement: &wgpu::TextureView,
         caustics: (&wgpu::TextureView, &wgpu::TextureView),
         probe: &wgpu::TextureView,
+        sky_sh: &wgpu::Buffer,
     ) {
         use wgpu::BindingResource as R;
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -269,6 +278,7 @@ impl TwUnderwater {
                 wgpu::BindGroupEntry { binding: 6, resource: R::TextureView(caustics.0) },
                 wgpu::BindGroupEntry { binding: 7, resource: R::TextureView(caustics.1) },
                 wgpu::BindGroupEntry { binding: 8, resource: R::TextureView(probe) },
+                wgpu::BindGroupEntry { binding: 9, resource: sky_sh.as_entire_binding() },
             ],
         });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
