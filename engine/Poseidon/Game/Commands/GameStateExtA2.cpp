@@ -93,6 +93,7 @@ GameValue CutObj(const GameState* state, GameValuePar oper1);
 GameValue StrFormat(const GameState* state, GameValuePar oper1);
 GameValue ObjSide(const GameState* state, GameValuePar oper1);
 GameValue A1MissionConfigFile(const GameState* state);
+GameValue VehDelete(const GameState* state, GameValuePar oper1);
 
 namespace
 {
@@ -1209,6 +1210,11 @@ GameValue A2IsNullHandle(const GameState*, GameValuePar oper1)
     return GameValue(static_cast<float>(oper1) < 0);
 }
 
+GameValue A2DeleteCollection(const GameState* state, GameValuePar oper1)
+{
+    return VehDelete(state, oper1);
+}
+
 GameValue A2EmptyArrayNular(const GameState* state)
 {
     return state->CreateGameValue(GameArray);
@@ -1853,6 +1859,22 @@ std::string Arma2BriefingHtml(const std::string& html)
 
 // Runs the scripted FSMs one transition per simulation step (World::SimulateScripts).
 
+// waypoints group|unit: [[group, 0], [group, 1], ...] (index 0 is the start position)
+GameValue A2Waypoints(const GameState* state, GameValuePar oper1)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& out = result;
+    AIGroup* grp = GroupOf(oper1);
+    for (int i = 0; grp && i < grp->NWaypoints(); i++)
+    {
+        GameArrayType wp;
+        wp.Add(GameValueExt(grp));
+        wp.Add(GameValue(static_cast<float>(i)));
+        out.Add(GameValue(wp));
+    }
+    return result;
+}
+
 // Arma 2 addAction: arguments are passed as _this select 3; the script is a .sqf (run
 // like execVM), a .sqs, or code.
 void Arma2SetUserActionArguments(EntityAI* veh, int id, GameValuePar arguments)
@@ -2091,6 +2113,8 @@ const GameFunction A2Unary[] = {
     GameFunction(GameString, "WFSideText", A2WFSideText, GameSide | GameObject | GameGroup),
     GameFunction(GameNothing, "clearVehicleInit", A2ClearVehicleInit, GameObject),
     GameFunction(GameNothing, "detach", A2Detach, GameObject),
+    GameFunction(GameNothing, "deleteCollection", A2DeleteCollection, GameObject),
+    GameFunction(GameScalar, "needReload", A2ZeroUnary, GameObject),
     GameFunction(GameNothing, "setGroupIconsVisible", A2NothingUnary, GameArray),
     GameFunction(GameString, "actionKeysImages", A2TextLogEmpty, GameString | GameArray),
     GameFunction(GameBool, "triggerActivated", A2TriggerActivated, GameObject),
