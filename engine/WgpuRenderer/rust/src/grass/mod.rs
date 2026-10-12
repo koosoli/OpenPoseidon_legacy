@@ -562,6 +562,7 @@ pub struct Grass {
     native_tuft_color_pipeline: wgpu::RenderPipeline,
     native_tuft_color_no_write_pipeline: wgpu::RenderPipeline,
     native_tuft_prepass_pipeline: wgpu::RenderPipeline,
+    native_tuft_shadow_pipeline: wgpu::RenderPipeline,
     prepass_pipeline: wgpu::RenderPipeline,
     mid_prepass_pipeline: wgpu::RenderPipeline,
     mid_color_pipeline: wgpu::RenderPipeline,
@@ -1638,6 +1639,42 @@ impl Grass {
             multiview_mask: None,
             cache: None,
         });
+        // RFG-141: the native near ring's PlantMat tufts, cut out by the blade atlas alpha.
+        let native_tuft_shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("wgr_grass_native_tuft_shadow"),
+            layout: Some(&shadow_layout),
+            vertex: wgpu::VertexState {
+                module: &shadow_shader,
+                entry_point: Some("vs_grass_native_tuft_shadow"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: Default::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 4,
+                    slope_scale: 2.5,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shadow_shader,
+                entry_point: Some("fs_grass_native_tuft_shadow"),
+                compilation_options: Default::default(),
+                targets: &[],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         Self {
             enabled,
             force_off: !enabled,
@@ -1683,6 +1720,7 @@ impl Grass {
             native_tuft_color_pipeline,
             native_tuft_color_no_write_pipeline,
             native_tuft_prepass_pipeline,
+            native_tuft_shadow_pipeline,
             prepass_pipeline,
             mid_prepass_pipeline,
             mid_color_pipeline,
@@ -3003,10 +3041,20 @@ impl Grass {
         // their cascade shadows stamped a sharp dark comma beside every blade -- ink marks
         // all over the meadow that Reforger's own ground cover does not have. The plants
         // (the card ring below) still cast. WGR_NATIVE_BLADE_SHADOW=1 restores them.
-        static NATIVE_BLADE_SHADOW: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        static NATIVE_BLADE_SHADOW: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
         let native_blades = self.last_raw_params.near_blades_only != 0.0 && !self.near_draws_cards();
-        let skip_near = native_blades &&
-            !*NATIVE_BLADE_SHADOW.get_or_init(|| std::env::var("WGR_NATIVE_BLADE_SHADOW").as_deref() == Ok("1"));
+        // RFG-141: since RFG-117 those blades are whole PlantMat tuft CARDS, and with no shadow at
+        // all the wheat and the meadow sat on the ground like stickers. They cast their own
+        // alpha-cut silhouette now (vs_grass_native_tuft_shadow); WGR_NATIVE_BLADE_SHADOW=0 keeps
+        // the near ring shadowless, =1 restores the old procedural-blade shadow.
+        let native_tufts = native_blades && self.last_params.native_tuft[0] > 0.5;
+        let mode = *NATIVE_BLADE_SHADOW.get_or_init(|| match std::env::var("WGR_NATIVE_BLADE_SHADOW").as_deref() {
+            Ok("0") => 0u8,
+            Ok("1") => 1u8,
+            _ => 2u8,
+        });
+        let skip_near = native_blades && (mode == 0 || (mode == 2 && !native_tufts));
+        let near_shadow_pipeline = if native_tufts && mode == 2 { &self.native_tuft_shadow_pipeline } else { near_shadow_pipeline };
         pass.set_bind_group(0, shadow_bind, &[shadow_offset]);
         pass.set_bind_group(1, &self.terrain_bind, &[]);
         if !skip_near {

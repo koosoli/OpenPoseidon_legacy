@@ -7302,6 +7302,10 @@ impl Renderer {
         self.grass.set_blade_skip(&self.queue, mask);
     }
 
+    fn geo_pool_reserve(&mut self, vert_bytes: u64, index_bytes: u64) {
+        self.gfx3d.reserve_geometry(&self.device, &self.queue, vert_bytes, index_bytes);
+    }
+
     fn grass_set_blade_sets(&mut self, words: &[u32], card_skip: u32, sets: &[f32], aspect: &[f32], scale: &[f32]) {
         self.grass.set_blade_sets(&self.queue, words, card_skip, sets, aspect, scale);
     }

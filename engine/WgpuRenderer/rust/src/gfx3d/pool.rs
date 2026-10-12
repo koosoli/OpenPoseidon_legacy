@@ -309,6 +309,10 @@ pub struct GeometryPool {
     // growth, and by a shrink that actually fired.
     shrink_streak: u32,
     pressure_budget: u64,
+    // RFG-140: capacity floors from `reserve()` -- the shrink never goes below them, so a
+    // reservation made while VRAM is empty is not given back and re-grown under load.
+    reserve_verts: u32,
+    reserve_indices: u32,
 }
 
 impl GeometryPool {
@@ -364,7 +368,47 @@ impl GeometryPool {
             submitted_retired_bytes: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             shrink_streak: 0,
             pressure_budget: 0,
+            reserve_verts: 0,
+            reserve_indices: 0,
         }
+    }
+
+    /// RFG-140: grow the pool to at least these sizes NOW and keep them as a floor. A growth
+    /// keeps the old and the new buffer alive together; at Everon 5052/5312 that overlap
+    /// (1088 -> 2176 MB vertex pool beside 5.3 GB of other allocations on an 8 GB card) lost the
+    /// device, in 1 of 2-3 runs, at every pose dense enough to cross the 1088 MB step. Reserved at
+    /// world load, while VRAM is nearly empty, the same capacity costs a 17 MB overlap.
+    pub fn reserve(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vert_bytes: u64, index_bytes: u64) {
+        let to_units = |bytes: u64, unit: u64| (bytes / unit).min(u64::from(u32::MAX)) as u32;
+        let verts = to_units(vert_bytes, VERT_SIZE);
+        let indices = to_units(index_bytes, INDEX_SIZE);
+        self.reserve_verts = verts;
+        self.reserve_indices = indices;
+        let mut grew = false;
+        if verts > self.valloc.cap {
+            let new_buf = Self::make_vbuf(device, verts);
+            Self::copy_prefix(device, queue, &self.vbuf, &new_buf,
+                              u64::from(self.valloc.occupied_prefix_units()) * VERT_SIZE, "v");
+            let old = std::mem::replace(&mut self.vbuf, new_buf);
+            self.retire(old);
+            self.valloc.grow(verts);
+            grew = true;
+        }
+        if indices > self.ialloc.cap {
+            let new_buf = Self::make_ibuf(device, indices);
+            Self::copy_prefix(device, queue, &self.ibuf, &new_buf,
+                              u64::from(self.ialloc.occupied_prefix_units()) * INDEX_SIZE, "i");
+            let old = std::mem::replace(&mut self.ibuf, new_buf);
+            self.retire(old);
+            self.ialloc.grow(indices);
+            grew = true;
+        }
+        if grew {
+            self.epoch += 1;
+            self.shrink_streak = 0;
+        }
+        pool_event(&format!("reserve vbuf {:.1}MB ibuf {:.1}MB (grew {})",
+                            vert_bytes as f64 / 1048576.0, index_bytes as f64 / 1048576.0, grew));
     }
 
     // STORAGE on both: the vbuf is the compute skin-bake's rest-pose source, and a
@@ -489,7 +533,7 @@ impl GeometryPool {
         self.shrink_streak = 0;
 
         let mut shrank = false;
-        if let Some(new_cap) = Self::shrink_target(&self.valloc, Self::INIT_VERTS) {
+        if let Some(new_cap) = Self::shrink_target(&self.valloc, Self::INIT_VERTS.max(self.reserve_verts)) {
             let new_buf = Self::make_vbuf(device, new_cap);
             Self::copy_prefix(
                 device,
@@ -506,7 +550,7 @@ impl GeometryPool {
             self.valloc.shrink(new_cap);
             shrank = true;
         }
-        if let Some(new_cap) = Self::shrink_target(&self.ialloc, Self::INIT_INDICES) {
+        if let Some(new_cap) = Self::shrink_target(&self.ialloc, Self::INIT_INDICES.max(self.reserve_indices)) {
             let new_buf = Self::make_ibuf(device, new_cap);
             Self::copy_prefix(
                 device,

@@ -2606,6 +2606,33 @@ void TerrainWgpu::UploadGeography(const Landscape& land, bool reuseClutterDefini
     // and the whole-world fallback does not fire because that stray 1 keeps
     // resolvedLayers non-zero. The native bake answers this world instead.
     _hasEnfusionSurfaces = land.GetEnfusionSurfaceCount() == layerCount && layerCount > 0;
+    // RFG-140: a native world's retained geometry reaches ~1.1 GB of vertices and ~256 MB of
+    // indices at dense poses (Everon 5052/5312: 7,104 meshes, 1,089 MB). Growing the pool there
+    // mid-flight keeps old + new alive beside ~5.3 GB of other allocations -- on an 8 GB card the
+    // device was lost (TDR) in 1 of 2-3 runs. Reserve it once, now, while VRAM is nearly empty.
+    // WGR_GEO_POOL_RESERVE_MB="vertMB,indexMB" (default 1600,384; 0 = off).
+    if (_hasEnfusionSurfaces && _renderer)
+    {
+        static bool reserved = false;
+        if (!reserved)
+        {
+            reserved = true;
+            double vertMb = 1600.0, indexMb = 384.0;
+            if (const char* env = std::getenv("WGR_GEO_POOL_RESERVE_MB"); env != nullptr && *env != '\0')
+            {
+                vertMb = std::atof(env);
+                const char* comma = std::strchr(env, ',');
+                indexMb = comma ? std::atof(comma + 1) : (vertMb > 0.0 ? indexMb : 0.0);
+            }
+            if (vertMb > 0.0 || indexMb > 0.0)
+            {
+                wgr_geo_pool_reserve(_renderer, static_cast<uint64_t>(std::max(vertMb, 0.0) * 1048576.0),
+                                     static_cast<uint64_t>(std::max(indexMb, 0.0) * 1048576.0));
+                LOG_INFO(Graphics, "Wgpu: RFG-140 native world -- geometry pool reserved {:.0f} MB vertices, {:.0f} MB "
+                                   "indices (WGR_GEO_POOL_RESERVE_MB)", vertMb, indexMb);
+            }
+        }
+    }
     const auto layerName = [&](int i) -> std::string
     {
         if (_hasEnfusionSurfaces)

@@ -6194,6 +6194,11 @@ impl Gfx3d {
         self.pool.set_pressure_budget(bytes);
     }
 
+    /// RFG-140: see GeometryPool::reserve.
+    pub fn reserve_geometry(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vert_bytes: u64, index_bytes: u64) {
+        self.pool.reserve(device, queue, vert_bytes, index_bytes);
+    }
+
     pub fn geometry_residency(&self) -> pool::GeometryResidency {
         self.pool.residency()
     }

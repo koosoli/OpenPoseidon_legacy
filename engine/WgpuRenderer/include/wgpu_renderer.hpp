@@ -2889,6 +2889,9 @@ extern "C"
        aspect / scale = 8 floats each, per blade layer. cfg null = off. */
     WGR_API void wgr_grass_set_native_tufts(WgrRenderer* renderer, const float* cfg, const float* aspect,
                                             const float* scale);
+    /* RFG-140: grow the shared geometry pool to these sizes now and keep them as a floor the
+       shrink never crosses -- a mid-flight growth keeps old and new buffers alive together. */
+    WGR_API void wgr_geo_pool_reserve(WgrRenderer* renderer, uint64_t vertBytes, uint64_t indexBytes);
     /* RFG-138: per-surface PlantMat blade sets. setWords = 3 words, 3 bits per atlas layer (layer L
        at bit 3L across the words) naming the set the run starting on L draws its tufts from;
        cardSkip = bit per layer whose run grows blades only (no cards). sets = 64 floats (8 per set:

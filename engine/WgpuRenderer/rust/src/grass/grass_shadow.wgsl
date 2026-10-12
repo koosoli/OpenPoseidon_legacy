@@ -443,3 +443,96 @@ fn fs_grass_tuft_shadow(in: TuftShadowOut) {
     if (textureSampleBias(tuft_tex, blade_samp, in.uv.xy, i32(in.uv.z), 0.75).a <
         clamp(grass.place.w, 0.05, 0.95)) { discard; }
 }
+
+// RFG-141: the native near ring's Reforger tuft cards cast their own shadow. RFG-108 switched the
+// near ring's cascade shadow off because the PROCEDURAL blades stamped dark commas; since RFG-117
+// the near ring draws whole PlantMat tufts (vs_native_tuft in grass.wgsl), and with no shadow the
+// wheat and the meadow sat on the ground like stickers. This mirrors vs_native_tuft exactly --
+// set lookup, card count, layer pick, aspect/scale, height jitter, Zenith lean, wind bend -- and
+// cuts by the same atlas alpha, so the shadow is the card's own silhouette.
+@group(2) @binding(3) var blade_tex: texture_2d_array<f32>;
+
+fn shadow_blade_set_of(first: u32) -> u32 {
+    let bit = min(first, 31u) * 3u;
+    let word = bit / 32u;
+    let shift = bit % 32u;
+    let lo = select(select(grass.blade_skip.w, grass.blade_skip.z, word == 1u), grass.blade_skip.y, word == 0u);
+    var v = lo >> shift;
+    if (shift > 29u) {
+        let hi = select(grass.blade_skip.w, grass.blade_skip.z, word == 0u);
+        v = v | (hi << (32u - shift));
+    }
+    return v & 7u;
+}
+
+struct NativeTuftShadowOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) uv: vec3<f32>,
+};
+
+@vertex
+fn vs_grass_native_tuft_shadow(@builtin(vertex_index) vertex_index: u32,
+                               @builtin(instance_index) instance_index: u32) -> NativeTuftShadowOut {
+    var out: NativeTuftShadowOut;
+    let inst = instances[instance_index].pos_seed;
+    let inst_packed = instances[instance_index].packed;
+    // The near shadow index table: 12 unique vertices per card slot, every stride-th slot.
+    let stride = max(u32(grass.card_look.w + 0.5), 1u);
+    let card = (vertex_index / 12u) * stride;
+    let packed = vertex_index % 12u;
+    let t = f32(packed / 2u) / 5.0;
+    let left = (packed % 2u) == 0u;
+
+    let run = instance_layer_run(inst_packed.w);
+    let sets = grass.tuft_sets[0].x > 0.5;
+    let bset = select(0u, shadow_blade_set_of(run.x), sets && run.y > 0u);
+    var p0 = vec4<f32>(grass.native_tuft.y, grass.native_tuft.z, grass.native_tuft.w, grass.native_tuft2.x);
+    var p1 = vec4<f32>(grass.native_tuft2.y, grass.native_tuft2.z, 0.0, 0.0);
+    if (sets) {
+        p0 = grass.tuft_sets[bset * 2u];
+        p1 = grass.tuft_sets[bset * 2u + 1u];
+    }
+    let cards = u32(clamp(p0.x, 1.0, 6.0));
+    if (card >= cards) {
+        out.clip = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        return out;
+    }
+    let seed = inst.w;
+    let pick = hash11(inst.xz + vec2<f32>(f32(card) * 31.0 + 5.0, f32(card) * 17.0 + 13.0));
+    let layer = min(u32(pick * 8.0), 7u);
+    var aspect = clamp(grass.tuft_aspect[layer / 4u][layer % 4u], 0.1, 6.0);
+    var scale = clamp(grass.tuft_scale[layer / 4u][layer % 4u], 0.1, 4.0);
+    if (sets) {
+        aspect = clamp(grass.tuft_set_aspect[bset * 2u + layer / 4u][layer % 4u], 0.1, 6.0);
+        scale = clamp(grass.tuft_set_scale[bset * 2u + layer / 4u][layer % 4u], 0.1, 4.0);
+    }
+    let jitter = hash11(inst.xz + vec2<f32>(f32(card) * 7.0 + 1.0, 41.0)) - 0.5;
+    let height = max(p0.w, 0.01) * scale *
+        (1.0 + jitter * 2.0 * clamp(p1.x, 0.0, 1.0)) * lod_height_scale(inst_packed.z);
+    let crush_dir = unpack2x16snorm(inst_packed.x);
+    let crush = unpack2x16unorm(inst_packed.y).x;
+    let depth = clamp(grass.photo_mix.w, 0.0, 0.95);
+    let crushed_height = height * (1.0 - depth * crush);
+    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (depth * crush);
+    let yaw = seed * 6.2831853 + f32(card) * (3.14159265 / f32(cards));
+    let axis = vec3<f32>(cos(yaw), 0.0, sin(yaw));
+    let facing = vec3<f32>(-sin(yaw), 0.0, cos(yaw));
+    let lean_rand = hash11(inst.xz + vec2<f32>(f32(card) * 11.0 + 3.0, 97.0));
+    let zenith = radians(clamp(p0.y + (lean_rand - 0.5) * 2.0 * p0.z, -60.0, 60.0));
+    let up = vec3<f32>(0.0, cos(zenith), 0.0) + facing * sin(zenith);
+    let wind = sample_wind_field(inst.xz, t, seed + pick);
+    let wind_bend = vec3<f32>(wind.x, 0.0, wind.y) * grass.wind_strength *
+        (0.035 + 0.21 * wind.z + wind.w) * (1.0 - depth * crush);
+    let u = select(1.0, 0.0, left);
+    let local = axis * ((u - 0.5) * height * aspect) + up * (crushed_height * t) + (wind_bend + crush_bend) * (t * t);
+    out.clip = shadow.light_vp * vec4<f32>(inst.xyz + local - shadow.cam_pos.xyz, 1.0);
+    out.uv = vec3<f32>(u, 1.0 - t, f32(bset * 16u + layer));
+    return out;
+}
+
+@fragment
+fn fs_grass_native_tuft_shadow(in: NativeTuftShadowOut) {
+    // Same cutoff as fs_grass_native_tuft; the layer index is rounded, never truncated (RFG-138).
+    if (textureSampleLevel(blade_tex, blade_samp, in.uv.xy, i32(in.uv.z + 0.5), 1.0).a <
+        clamp(grass.place.w, 0.05, 0.95)) { discard; }
+}

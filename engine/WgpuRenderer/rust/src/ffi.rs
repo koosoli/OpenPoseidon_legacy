@@ -3629,6 +3629,21 @@ pub unsafe extern "C" fn wgr_grass_set_native_tufts(renderer: *mut WgrRenderer, 
     }));
 }
 
+/// RFG-140: reserve the shared geometry pool (bytes) now and keep it as a shrink floor.
+///
+/// # Safety
+/// `renderer` must be null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_geo_pool_reserve(renderer: *mut WgrRenderer, vert_bytes: u64, index_bytes: u64) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        renderer.geo_pool_reserve(vert_bytes, index_bytes);
+    }));
+}
+
 /// RFG-138: per-surface PlantMat blade sets (see GrassRenderer::set_blade_sets).
 ///
 /// # Safety
