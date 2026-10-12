@@ -1052,7 +1052,13 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let N = Nview;
         let NdV = max(dot(N, V), 1e-4);
         let F = fresnelDielectric(NdV, 1.0 / IOR);
-        let Tt = refract(-V, N, IOR);
+        // (OP, 2026-10-12) the Snell window shimmers: fine ripples the FFT mesh does not resolve bend
+        // the refracted sky near the eye (it read as undistorted sky through a clean hole)
+        let ripT = tw.sea.y;
+        let rip = vec2<f32>(sin(lagXZ.x * 3.1 + ripT * 1.7 + sin(lagXZ.y * 2.3)), cos(lagXZ.y * 2.9 - ripT * 1.3 + sin(lagXZ.x * 1.9)))
+            + 0.5 * vec2<f32>(sin(lagXZ.y * 7.3 - ripT * 2.9), cos(lagXZ.x * 6.7 + ripT * 3.1));
+        let Nr = normalize(N + vec3<f32>(rip.x, 0.0, rip.y) * 0.09 * smoothstep(30.0, 2.0, dist));
+        let Tt = refract(-V, Nr, IOR);
         let tValid = dot(Tt, Tt) > 0.5;
         let Td = normalize(select(vec3<f32>(0.0, 1.0, 0.0), Tt, tValid));
         let skyT = min(sky_env_sample(Td), vec3<f32>(60.0));

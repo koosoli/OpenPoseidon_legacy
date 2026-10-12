@@ -162,13 +162,10 @@ impl SpectrumInputs {
         // Zeroed params (no C++ side yet) read as Tidewater's 0.5.
         let whitecaps = if sea == [0.0; 4] { 0.5 } else { sea[2].clamp(0.0, 1.0) };
         let choppiness = tw[0][1];
-        // Tidewater's rule, but never past the share of the sea a real sea foams at this wind
-        // (whitecap_share_cap): in a storm its bias foamed nearly every crest and the slow decay kept
-        // it, and the whole ocean turned white (owner, 2026-10-12)
-        let (_, mss) = sea_stats(sizes, local, swell, 500.0);
-        let sigma = (choppiness.max(0.05) as f64) * (mss.max(1e-6) as f64).sqrt();
-        let cap = (1.0 + sigma * normal_quantile(whitecap_share_cap(local.wind_speed) as f64)) as f32;
-        let foam_bias = q((whitecap_bias(local.wind_speed, whitecaps) + foam_bias_add()).min(cap), 0.005);
+        // Tidewater's rule, but never past WHITECAP_BIAS_MAX: in a storm its bias foamed nearly every
+        // crest and the slow decay kept it, and the whole ocean turned white (owner, 2026-10-12)
+        let _ = choppiness;
+        let foam_bias = q((whitecap_bias(local.wind_speed, whitecaps) + foam_bias_add()).min(whitecap_bias_max(local.wind_speed)), 0.005);
         // (OP) at least 0.35/s: Tidewater's 0.25 in a storm let the foam outlive the next crests
         let foam_decay = q(foam_decay_override().unwrap_or((0.6 - 0.35 * whitecaps).max(0.35)), 0.005);
         Self { sizes, local, swell, depth: 500.0, seed: 1337, foam_bias, foam_decay }
@@ -275,6 +272,7 @@ pub fn sea_stats(sizes: [f32; 4], local: WaveSystem, swell: WaveSystem, depth: f
 }
 
 /// Standard normal quantile (Acklam's rational approximation, |error| < 1.2e-9).
+#[allow(dead_code)]
 fn normal_quantile(p: f64) -> f64 {
     let p = p.clamp(1e-9, 1.0 - 1e-9);
     const A: [f64; 6] = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2, 1.383577518672690e2, -3.066479806614716e1, 2.506628277459239];
@@ -296,6 +294,7 @@ fn normal_quantile(p: f64) -> f64 {
 }
 
 /// Standard normal CDF (Abramowitz-Stegun 26.2.17 via erfc, |error| < 7.5e-8).
+#[allow(dead_code)]
 fn normal_cdf(z: f64) -> f64 {
     let t = 1.0 / (1.0 + 0.2316419 * z.abs());
     let d = 0.3989422804014327 * (-z * z * 0.5).exp();
@@ -325,12 +324,13 @@ pub fn whitecap_bias(wind_speed: f32, whitecaps: f32) -> f32 {
     0.5 + 0.16 * whitecaps.clamp(0.0, 1.0) + 0.01 * (wind_speed - 7.0).clamp(-5.0, 12.0)
 }
 
-/// The most of the sea that may start foaming, by wind (m/s): three times Monahan and
-/// O'Muircheartaigh's (1980) measured whitecap cover, W = 3.84e-6 U^3.41 (a game shows more, and the
-/// foam also lingers after the crest), at most 25%: ~1% at 7 m/s, ~5% at 12, ~25% at 20 and above.
-pub fn whitecap_share_cap(wind_speed: f32) -> f32 {
-    let u = wind_speed.max(0.1) as f64;
-    (3.0 * 3.84e-6 * u.powf(3.41)).clamp(0.002, 0.25) as f32
+/// The highest whitecap threshold: 0.78, the many separate caps of the rough sea the owner signed off
+/// (the Choppy preset at 12 m/s, measured). A storm (Tidewater's rule plus OP's offset: 0.88) foamed
+/// nearly every crest and, with the foam's persistence, turned the whole sea white; at the same
+/// threshold its steeper waves still foam more than a 12 m/s sea. (A cap computed from the measured
+/// whitecap cover in this model's share units came out far lower and left a 12 m/s sea with none.)
+pub fn whitecap_bias_max(_wind_speed: f32) -> f32 {
+    0.78
 }
 
 /// OP's offset over Tidewater's whitecap threshold (more of the sea's crests break into caps).
@@ -1232,19 +1232,15 @@ mod tests {
 
     #[test]
     fn a_storm_never_foams_more_than_the_share_cap() {
-        // the owner's storm: the whole sea white. The cap: ~1% at 7 m/s, ~25% at 20 and above
-        assert!((0.005..0.02).contains(&whitecap_share_cap(7.0)), "{}", whitecap_share_cap(7.0));
-        assert!((0.03..0.08).contains(&whitecap_share_cap(12.0)));
-        assert_eq!(whitecap_share_cap(30.0), 0.25);
+        // the owner's storm: the whole sea white at bias 0.88. Capped at the rough sea's 0.78
         let mut p = <WgrWaterParams as bytemuck::Zeroable>::zeroed();
         p.tidewater = crate::water_tw::DEFAULT_PARAMS;
         p.tidewater_sea = [20.0, 900.0, 1.0, 4.0];
         p.tidewater[0][1] = 1.3;
         let spec = SpectrumInputs::from_params(&p);
-        let (_, mss) = sea_stats(spec.sizes, spec.local, spec.swell, 500.0);
-        let share = normal_cdf((spec.foam_bias as f64 - 1.0) / (1.3 * (mss as f64).sqrt()));
-        assert!(share <= 0.26, "storm foams {share}");
+        assert!(spec.foam_bias <= 0.78 + 1e-3, "storm bias {}", spec.foam_bias);
         assert!(spec.foam_decay >= 0.35);
+        assert!((whitecap_bias_max(12.0) - 0.78).abs() < 1e-6);
     }
 
     #[test]

@@ -42,6 +42,8 @@ const UW_STRADDLE: f32 = 0.05;
 // lower frame became underwater fog laid over the very surface the water material was drawing
 // from above. At 0.12 m the split stays where the drawn surface really crosses the lens.
 const UW_PORT: f32 = 0.03;
+// (OP) the shortest water path a view ray from a submerged eye up to the surface is given (m)
+const UW_SURFACE_VEIL: f32 = 1.5;
 const UW_BAND: i32 = 16;
 const UW_IOR: f32 = 1.333;
 const UW_PI: f32 = 3.141592653589793;
@@ -304,7 +306,11 @@ fn fs_uw(in: UwOut) -> @location(0) vec4<f32> {
         // (W5a.1, OP) OP's water writes no depth: a ray that meets the surface from below leaves
         // the water there (Tidewater: the surface's own depth ends it)
         if (dir.y > 0.01) {
-            dist = min(dist, max(camWater - uw.cam.y, 0.0) / dir.y);
+            // (OP, 2026-10-12) at least UW_SURFACE_VEIL: just under the surface the column to it is
+            // centimetres, and the view up read as clear air with the sky undimmed (owner: "water is
+            // totally transparent, no underwater effect" until he dived deeper). The bright, hazy,
+            // tinted ceiling a swimmer sees there is the water around him too, not only above him.
+            dist = max(min(dist, max(camWater - uw.cam.y, 0.0) / dir.y), UW_SURFACE_VEIL);
         }
 
         // (OP) UnderwaterLighting in post: OP lit the submerged scene as if it stood in air;

@@ -4267,6 +4267,22 @@ impl Renderer {
                     })
                 });
         let underwater_engaged = underwater_state.is_some();
+        {
+            static GATE_N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = GATE_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n % 120 == 0 && std::env::var("WGR_UW_GATE_TRACE").is_ok() {
+                eprintln!(
+                    "[wgr] uw gate trace: engaged={} cameras={} water_camera={} y={:?} measured={:?} engine={:?} enabled={}",
+                    underwater_engaged,
+                    prepared_cameras.len(),
+                    water_camera,
+                    prepared_cameras.get(water_camera).map(|c| c.cam_pos[1]),
+                    cam_surface,
+                    self.water.underwater_params().map(|(l, _, s)| (l, s)),
+                    underwater_enabled,
+                );
+            }
+        }
         // TW-WATER W5d: more than a metre under the surface (flat datum or measured submersion).
         self.submerged_view = underwater_state.as_ref().is_some_and(|(_, above, _, _)| *above < -1.0);
         if self.underwater_engaged_logged != Some(underwater_engaged) {
@@ -4274,10 +4290,18 @@ impl Renderer {
             // eprintln! rather than self.log, matching the other [wgr] renderer diagnostics —
             // it is what actually reaches the captured stderr in a harness run.
             eprintln!(
-                "[wgr] underwater compositor {} (enabled={} band={:.2}m)",
+                "[wgr] underwater compositor {} (enabled={} band={:.2}m, measured surface under the camera {:?}, engine level/submersion {:?})",
                 if underwater_engaged { "ENGAGED" } else { "off" },
                 underwater_enabled,
                 underwater_near_surface_band,
+                cam_surface,
+                self.water.underwater_params().map(|(l, _, s)| (l, s)),
+            );
+            eprintln!(
+                "[wgr] underwater gate camera: index {} of {}, y {:?}",
+                water_camera,
+                prepared_cameras.len(),
+                prepared_cameras.get(water_camera).map(|c| c.cam_pos[1]),
             );
         }
         let underwater_time = underwater_state.map(|(time, _, _, _)| time);
