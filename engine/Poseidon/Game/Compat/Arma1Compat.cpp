@@ -175,6 +175,14 @@ void MountFolder(const fs::path& folder, bool missionBanks, const char* remountP
         if (GFileBanks.Size() > before)
         {
             QFBank& bank = GFileBanks[GFileBanks.Size() - 1];
+            // Copy-protected archives (DLC payloads only the original game unlocks) are
+            // left alone.
+            if (bank.GetProperty(RString("hprotect")).GetLength() > 0)
+            {
+                LOG_INFO(Mission, "{}: {} is copy-protected; not read", Label(), pbo.string());
+                GFileBanks.Delete(GFileBanks.Size() - 1);
+                continue;
+            }
             // Arma 1's Dta archives declare prefixes ("bin", "core") that would shadow CWA's
             // own folders; they are re-mounted under a private name instead.
             if (remountPrefix)
