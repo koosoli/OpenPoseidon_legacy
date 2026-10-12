@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <map>
@@ -1548,9 +1549,14 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         return cwaClass;
 
     const bool man = IsKindOf(a1, "CAManBase") || IsKindOf(a1, "Man");
-    // Arma 2 moves are binarised animations (BMTR) the engine has no reader for yet:
-    // an Arma 2 soldier keeps the CWA soldier's model and moves.
-    if (man && (Generation() == 2 || !MovesImported()))
+    // Arma 2 soldiers: their models and moves (binarised BMTR animations, converted on
+    // load) are in testing; OP_A2_SOLDIERS=1 turns them on, else an Arma 2 soldier keeps
+    // the CWA soldier's model and moves.
+    static const bool a2Soldiers = [] {
+        const char* e = std::getenv("OP_A2_SOLDIERS");
+        return e && *e == '1';
+    }();
+    if (man && ((Generation() == 2 && !a2Soldiers) || !MovesImported()))
         return cwaClass;
 
     const std::string generated = "A1x_" + std::string(missionClass.Data());
