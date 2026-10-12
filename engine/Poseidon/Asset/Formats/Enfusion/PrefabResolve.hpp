@@ -369,6 +369,10 @@ struct PrefabSlot
     std::string bone;   //!< lower-cased exact bone name; empty when this is a prefix rule
     std::string prefix; //!< lower-cased bone-name prefix; empty when `bone` is set
     std::string prefab; //!< the `.et` of the part to attach
+    //! RFG-128: MaterialAssignClass pairs written inside this child's own block -- the parent's
+    //! override of the part (a door's glass child: window_glass -> window_glass_uneven_INT).
+    //! They outrank the part prefab's own assignments.
+    std::vector<std::pair<std::string, std::string>> materialRemap;
 };
 
 struct PrefabSlots
@@ -508,10 +512,25 @@ inline void FindSlotDeclarations(const std::vector<uint8_t>& blob, std::vector<P
     // own header sits at depth 0 and names its PARENT, not a child, so it is never
     // pushed: attributing a pivot to it would hang the house's own doors off the
     // house's base prefab.
-    std::vector<std::pair<int, std::string>> stack;
+    struct ChildFrame
+    {
+        int depth = 0;
+        std::string prefab;
+        std::vector<std::pair<std::string, std::string>> remap; //!< RFG-128: its own assignments
+        std::string pendingSource;
+        int slot = -1; //!< index into `exact` once its PivotID is read
+    };
+    std::vector<ChildFrame> stack;
     std::string pendingPrefix;
     int depth = 0;
     size_t at = 0;
+    const auto popFrame = [&]()
+    {
+        ChildFrame& frame = stack.back();
+        if (frame.slot >= 0 && static_cast<size_t>(frame.slot) < exact.size())
+            exact[static_cast<size_t>(frame.slot)].materialRemap = std::move(frame.remap);
+        stack.pop_back();
+    };
     while (at < size)
     {
         size_t lineEnd = at;
@@ -524,12 +543,30 @@ inline void FindSlotDeclarations(const std::vector<uint8_t>& blob, std::vector<P
         std::string quoted;
         if (depth >= 1 && PrefabDetail::ChildHeader(data, cursor, lineEnd, quoted))
         {
-            stack.emplace_back(depth, quoted);
+            ChildFrame frame;
+            frame.depth = depth;
+            frame.prefab = quoted;
+            stack.push_back(std::move(frame));
         }
         else if (PrefabDetail::Keyword(data, cursor, lineEnd, "PivotID"))
         {
             if (!stack.empty() && PrefabDetail::QuotedReference(data, cursor, lineEnd, quoted) && !quoted.empty())
-                exact.push_back({PrefabDetail::LowerCopy(quoted), std::string(), stack.back().second});
+            {
+                exact.push_back({PrefabDetail::LowerCopy(quoted), std::string(), stack.back().prefab, {}});
+                stack.back().slot = static_cast<int>(exact.size()) - 1;
+            }
+        }
+        else if (!stack.empty() && PrefabDetail::Keyword(data, cursor, lineEnd, "SourceMaterial"))
+        {
+            PrefabDetail::QuotedReference(data, cursor, lineEnd, stack.back().pendingSource);
+        }
+        else if (!stack.empty() && PrefabDetail::Keyword(data, cursor, lineEnd, "AssignedMaterial"))
+        {
+            ChildFrame& frame = stack.back();
+            if (!frame.pendingSource.empty() && PrefabDetail::QuotedReference(data, cursor, lineEnd, quoted) &&
+                !quoted.empty())
+                frame.remap.emplace_back(frame.pendingSource, quoted);
+            frame.pendingSource.clear();
         }
         else if (PrefabDetail::Keyword(data, cursor, lineEnd, "BonePrefix"))
         {
@@ -539,15 +576,17 @@ inline void FindSlotDeclarations(const std::vector<uint8_t>& blob, std::vector<P
         else if (PrefabDetail::Keyword(data, cursor, lineEnd, "Prefab") && !pendingPrefix.empty())
         {
             if (PrefabDetail::QuotedReference(data, cursor, lineEnd, quoted) && !quoted.empty())
-                prefixes.push_back({std::string(), pendingPrefix, quoted});
+                prefixes.push_back({std::string(), pendingPrefix, quoted, {}});
             pendingPrefix.clear();
         }
 
         depth += PrefabDetail::NetBraces(data, cursor, lineEnd);
-        while (!stack.empty() && depth <= stack.back().first)
-            stack.pop_back();
+        while (!stack.empty() && depth <= stack.back().depth)
+            popFrame();
         at = lineEnd + 1;
     }
+    while (!stack.empty())
+        popFrame();
 }
 
 //! Every slot a prefab declares or inherits. Child first; ancestors only add.
@@ -607,6 +646,24 @@ inline PrefabSlots ResolvePrefabSlots(const EnfusionMount& mount, const std::str
 //! The part a bone takes, or empty. Exact pivot first, then the LONGEST matching
 //! prefix -- `socket_win_130x142` and `socket_win_130x72` share nine characters, and
 //! a shortest-match rule would hang the wrong window on half a village.
+inline const PrefabSlot* SlotForBone(const PrefabSlots& slots, const std::string& boneName)
+{
+    const std::string lower = PrefabDetail::LowerCopy(boneName);
+    for (const PrefabSlot& slot : slots.exact)
+        if (slot.bone == lower)
+            return &slot;
+    const PrefabSlot* best = nullptr;
+    for (const PrefabSlot& slot : slots.prefixes)
+    {
+        if (slot.prefix.empty() || lower.size() < slot.prefix.size() ||
+            lower.compare(0, slot.prefix.size(), slot.prefix) != 0)
+            continue;
+        if (best == nullptr || slot.prefix.size() > best->prefix.size())
+            best = &slot;
+    }
+    return best;
+}
+
 inline std::string SlotPrefabForBone(const PrefabSlots& slots, const std::string& boneName)
 {
     const std::string lower = PrefabDetail::LowerCopy(boneName);

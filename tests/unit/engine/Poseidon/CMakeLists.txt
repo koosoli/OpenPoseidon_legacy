@@ -365,6 +365,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Asset/Formats/Enfusion/test_resource_database.cpp
     Asset/Formats/Enfusion/test_xob_model.cpp
     Asset/Formats/Enfusion/test_xob_collision.cpp
+    Asset/Formats/Enfusion/test_prefab_resolve.cpp
     Foundation/Algorithms/test_lzo1x.cpp
     Graphics/Rendering/test_paa_lzo_replay_cache.cpp
     Graphics/Rendering/test_paa_dxt_bounds.cpp

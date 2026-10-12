@@ -79,7 +79,11 @@ fn direct_material_flags(flags: u32, misc: u32, late_surface: bool) -> u32 {
         | crate::ffi::WGR_DRAW3D_BOOT_RELIEF
         | crate::ffi::WGR_DRAW3D_EARTH_SURFACE
         | crate::ffi::WGR_DRAW3D_NORMAL_RG
-        | crate::ffi::WGR_DRAW3D_NATIVE_CAVITY;
+        | crate::ffi::WGR_DRAW3D_NATIVE_CAVITY
+        // RFG-129: a blend-pass section that is not on a surface (glass, nets). Its texels are
+        // not in the depth prepass, so the screen-space AO under it is the AO of whatever is
+        // BEHIND it: a pane over a dark room drew black. The shader skips GTAO for these.
+        | crate::ffi::WGR_DRAW3D_BLEND_SECTION;
     ((misc >> 8) & 1) | (flags & material_bits) | (u32::from(late_surface) << 6)
 }
 
@@ -93,8 +97,8 @@ fn direct_normal_channels_keep_flags_and_exclude_red_from_parallax() {
         direct_material_flags(DRAW3D_ON_SURFACE | DRAW3D_ZBIAS_MASK, 0, false),
         0
     );
-    assert_eq!(direct_material_flags(u32::MAX, 0, true), 56574);
-    assert_eq!(direct_material_flags(u32::MAX, 0xffff_0100, true), 56575);
+    assert_eq!(direct_material_flags(u32::MAX, 0, true), 56574 | crate::ffi::WGR_DRAW3D_BLEND_SECTION);
+    assert_eq!(direct_material_flags(u32::MAX, 0xffff_0100, true), 56575 | crate::ffi::WGR_DRAW3D_BLEND_SECTION);
     assert_eq!(direct_material_flags(crate::ffi::WGR_DRAW3D_NATIVE_CAVITY, 0, false), 1024);
     assert_eq!(direct_material_flags(crate::ffi::WGR_DRAW3D_GROUND_RECEIVER, 0, false), 4096);
     let src = include_str!("shader3d.wgsl");
@@ -419,6 +423,17 @@ pub(crate) fn foliage_screen_ao() -> f32 {
     static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
     *V.get_or_init(|| {
         std::env::var("WGR_FOLIAGE_SCREEN_AO")
+            .map(|v| if v.trim() == "1" { 1.0 } else { 0.0 })
+            .unwrap_or(0.0)
+    })
+}
+
+// RFG-129: whether blend-pass sections off any surface (glass) sample GTAO. Default OFF: what
+// they would read is the AO of the geometry behind them. WGR_BLEND_SECTION_SCREEN_AO=1 = old look.
+pub(crate) fn blend_section_screen_ao() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("WGR_BLEND_SECTION_SCREEN_AO")
             .map(|v| if v.trim() == "1" { 1.0 } else { 0.0 })
             .unwrap_or(0.0)
     })
@@ -5812,6 +5827,7 @@ impl Gfx3d {
             ("linear", linear),
             ("a2c", if a2c { 1.0 } else { 0.0 }),
             ("foliage_screen_ao", foliage_screen_ao() as f64),
+            ("blend_section_screen_ao", blend_section_screen_ao() as f64),
             ("count_fragments", count_fragments() as f64),
             ("translucent", translucent),
 

@@ -978,6 +978,7 @@ struct PlacementSummary
     size_t slotPrefabs = 0;    //!< distinct prefabs whose .et chain declared slots
     size_t slotBones = 0;      //!< socket bones that matched a slot rule
     size_t slotUnresolved = 0; //!< of those, bones whose part prefab gave no .xob
+    size_t slotRemapped = 0;   //!< RFG-128: distinct parts re-materialled by their parent's block
     size_t slotBuildings = 0;  //!< PLACEMENTS that carry at least one attachment
     size_t childPrefabs = 0;   //!< RFG-120: distinct prefabs whose transform children became parts
     size_t childParts = 0;     //!< RFG-120: those parts, per distinct prefab (furniture, props)
@@ -1196,17 +1197,42 @@ void CollectAttachments(AttachWorkspace& ws, PlacementSummary& summary, const st
     const std::vector<Enf::XobBone> bones = BonesOf(ws, xobPath, summary);
     for (const Enf::XobBone& bone : bones)
     {
-        const std::string partEt = Enf::SlotPrefabForBone(slots, bone.name);
+        const Enf::PrefabSlot* boneSlot = Enf::SlotForBone(slots, bone.name);
+        const std::string partEt = boneSlot != nullptr ? boneSlot->prefab : std::string();
         if (partEt.empty())
             continue;
         ++summary.slotBones;
-        const std::string key = LowerCopy(partEt);
+        // RFG-128: the parent's inline material override of this part is part of its identity.
+        static const bool inlineRemap = []
+        {
+            const char* env = std::getenv("POSEIDON_SLOT_MATERIALS");
+            return !(env && env[0] == '0');
+        }();
+        const bool overridden = inlineRemap && !boneSlot->materialRemap.empty();
+        std::string key = LowerCopy(partEt);
+        if (overridden)
+            for (const auto& [source, assigned] : boneSlot->materialRemap)
+                key += "|" + LowerCopy(source) + "=" + LowerCopy(assigned);
         auto cached = ws.partToMesh.find(key);
         if (cached == ws.partToMesh.end())
         {
-            const Enf::PrefabResolution resolved = Enf::ResolvePrefabModel(*ws.mount, partEt);
+            Enf::PrefabResolution resolved = Enf::ResolvePrefabModel(*ws.mount, partEt);
             if (resolved.xobPath.empty() && summary.slotFailure.empty())
                 summary.slotFailure = partEt + ": " + resolved.reason;
+            if (overridden)
+            {
+                std::vector<std::pair<std::string, std::string>> merged = boneSlot->materialRemap;
+                for (auto& pair : resolved.materialRemap)
+                {
+                    bool known = false;
+                    for (const auto& have : merged)
+                        known = known || LowerCopy(have.first) == LowerCopy(pair.first);
+                    if (!known)
+                        merged.push_back(std::move(pair));
+                }
+                resolved.materialRemap = std::move(merged);
+                ++summary.slotRemapped;
+            }
             cached = ws.partToMesh.emplace(key, resolved.MeshKey()).first;
         }
         if (cached->second.empty())
@@ -3015,8 +3041,9 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                      firstAttachFailure.empty() ? "" : ("; first build failure: " + firstAttachFailure));
             LOG_INFO(World,
                      "Enfusion native load: RFG-120 prefab children: {} prefabs place {} transform children "
-                     "(furniture, props; per distinct prefab) (POSEIDON_PREFAB_CHILDREN)",
-                     summary.childPrefabs, summary.childParts);
+                     "(furniture, props; per distinct prefab) (POSEIDON_PREFAB_CHILDREN); RFG-128: {} socket "
+                     "parts take their parent's inline material override (POSEIDON_SLOT_MATERIALS)",
+                     summary.childPrefabs, summary.childParts, summary.slotRemapped);
 
             // RFG-027: the road network. One shape per road rather than one shared
             // shape placed many times, because every road is a different length and

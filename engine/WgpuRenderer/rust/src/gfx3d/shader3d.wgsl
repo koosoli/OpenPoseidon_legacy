@@ -152,6 +152,8 @@ const MATFLAG_COCKPIT: u32 = 16u;
 const MATFLAG_NORMAL_RG: u32 = 128u;
 const MATFLAG_SNOW_RECEIVER: u32 = 2048u;
 const MATFLAG_GROUND_RECEIVER: u32 = 4096u;
+// RFG-129: WGR_DRAW3D_BLEND_SECTION -- a back-to-front section not on a surface; see mod.rs.
+const MATFLAG_BLEND_SECTION: u32 = 8192u;
 const MATFLAG_BOOT_RELIEF: u32 = 16384u;
 const MATFLAG_EARTH_SURFACE: u32 = 32768u;
 
@@ -401,6 +403,7 @@ override is_shadow: f32 = 0.0;   // 1 = output black + shadow-strength alpha
 // MSAA; the prepass twin (fs_prepass_a2c) emits the same coverage so the masks match.
 override a2c: f32 = 0.0;
 override foliage_screen_ao: f32 = 0.0; // REN-OBJ-001, as in gpu_driven.wgsl
+override blend_section_screen_ao: f32 = 0.0; // RFG-129
 override count_fragments: f32 = 0.0;   // REN-OBJ-003, as in gpu_driven.wgsl (colour pass only here)
 // 1 = an alpha-blended (glass) pipeline: the shared shading damps its diffuse sky-irradiance
 // ambient so transparent cockpit canopies don't wash out to the sky (and crash auto-exposure).
@@ -1416,7 +1419,9 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         veg_cutout, translucent > 0.5 && (material_flags(material) & MATFLAG_GLASS) != 0u, veg_cutout,
         material.sun_ambient.w > 0.5,
         (material_flags(material) & MATFLAG_COCKPIT) != 0u, in.clip.xy,
-        !(veg_cutout && foliage_screen_ao < 0.5),
+        !(veg_cutout && foliage_screen_ao < 0.5) &&
+            !(translucent > 0.5 && (material_flags(material) & MATFLAG_BLEND_SECTION) != 0u &&
+              blend_section_screen_ao < 0.5),
         direct_snow_receiver(in), 0.0,
         direct_tree_snow_cover(in),
         ground_surface,
