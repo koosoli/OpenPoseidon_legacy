@@ -1059,7 +1059,15 @@ float EntityAI::NeedsAmbulance() const
     {
         return 0;
     }
-    return CommanderUnit()->GetPerson()->NeedsAmbulance();
+    // A unit whose body is not a soldier (an Arma 1/2 class carried by a CWA object
+    // kind) is its own "person": asking it again would loop forever (the call compiles
+    // to a tail jump, so it spins instead of overflowing the stack).
+    const EntityAI* person = CommanderUnit()->GetPerson();
+    if (!person || person == this)
+    {
+        return 0;
+    }
+    return person->NeedsAmbulance();
 }
 
 float EntityAI::NeedsRepair() const
