@@ -2760,6 +2760,13 @@ GameValue GameState::EvaluateMultiple(const char* expression, bool localOnly) co
             }
         }
         vynech();
+        if (s_emptyStatementKeepsValue && (*_e->_pos == 0 || *_e->_pos == ';'))
+        {
+            if (*_e->_pos == 0)
+                break;
+            _e->_pos++;
+            continue;
+        }
         // check if expression is assignment
         // assignment must start with identifier
         _e->_subexpBeg = _e->_pos;

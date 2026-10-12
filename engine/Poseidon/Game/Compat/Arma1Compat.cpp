@@ -470,6 +470,7 @@ void MountArchives()
     // Dta\bin.pbo / core.pbo are NOT mounted: their declared prefixes ("bin", "core")
     // would shadow CWA's own UI resources. Arma1Config reads bin.pbo privately.
     GameState::s_singleQuoteStrings = Generation() == 2;
+    GameState::s_emptyStatementKeepsValue = true;
     if (Generation() == 2)
     {
         // Arma 2 keeps its campaigns and scenarios inside AddOns\missions*.pbo. Operation

@@ -877,6 +877,10 @@ struct GameTypeType : public Poseidon::Foundation::EnumName
     //! Arma 2 content writes strings in single quotes too ('text'); OFP's scripts use
     //! the apostrophe in comments and SQS text, so it is a string delimiter only when set.
     static inline bool s_singleQuoteStrings = false;
+    // Arma 1/2 semantics: an empty statement (a trailing ';' before the end of the code,
+    // or ';;') does not replace the value of the statement before it. Arma 2's function
+    // library returns values from code ending in "_this call f;\n".
+    static inline bool s_emptyStatementKeepsValue = false;
     // Optional observer of every expression the evaluator starts (stall diagnostics in the
     // Arma 2 test mode); null when unused.
     static inline void (*s_traceExpression)(const char* expression) = nullptr;
