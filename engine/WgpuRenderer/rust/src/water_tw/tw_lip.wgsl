@@ -111,6 +111,12 @@ fn lipShade(in: LipOut, front: bool) -> vec4<f32> {
         sunDiffuse = srgb_to_linear(sunDiffuse);
         skyIrr = srgb_to_linear(skyIrr);
     }
+    if (linear > 0.5 && frame.sun_diffuse.w > 0.5) {
+        // (OP, 2026-10-12) the sky's own irradiance (SH), not the legacy flat ambient: that is an
+        // artistic fill ~30x the sun on stock worlds, and lit by it every breaker and spray blob
+        // glowed flat white (the owner's "white film" / glowing foam), as the water's foam did
+        skyIrr = sky_irradiance(vec3<f32>(0.0, 1.0, 0.0)) * frame.sun_ambient.w;
+    }
     let sun = sunDiffuse * PI * cloud_sun_shadow(pos.xz);
 
     // reflection: sky + sun glint
