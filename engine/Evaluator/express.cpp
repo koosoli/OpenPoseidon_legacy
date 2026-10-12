@@ -824,8 +824,15 @@ static thread_local GameValue tls_exitWithValue;
 static GameValue StringRepeat(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     int maxIters = 10000;
+    unsigned yields = GameState::s_scheduledYields ? GameState::s_scheduledYields() : 0;
     for (int i = 0;; i++)
     {
+        if (i >= maxIters && GameState::s_scheduledYields && GameState::s_scheduledYields() != yields)
+        {
+            // a scheduled loop that waits (sleep / waitUntil) is not runaway code
+            yields = GameState::s_scheduledYields();
+            i = 0;
+        }
         if (i >= maxIters)
         {
             LOG_WARN(Core, "SQF: max iteration count exceeded in while loop");
@@ -834,6 +841,8 @@ static GameValue StringRepeat(const GameState* state, GameValuePar oper1, GameVa
         }
         if (GameState::s_abortLoops)
             break;
+        if (GameState::s_scheduledTick)
+            GameState::s_scheduledTick();
         // test condition
         {
             GameVarSpace local(state->GetContext());
