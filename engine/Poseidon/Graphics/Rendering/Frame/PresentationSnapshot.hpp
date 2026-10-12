@@ -89,7 +89,7 @@ struct PresentationSnapshot
     Vector3 moonSunDirection = VUp;
 
     // Glob's two clocks.
-    float timeSeconds = 0.0f; // Glob.time.toFloat(): the water/cloud/sway clock
+    float timeSeconds = 0.0f; // PresentationClockSeconds(): the water/cloud/sway clock, at the drawn time between ticks
     float timeOfDay = 0.5f;   // Glob.clock.GetTimeOfDay(): 0..1, drives ToD presets
 
     // GLandscape weather + sea state.

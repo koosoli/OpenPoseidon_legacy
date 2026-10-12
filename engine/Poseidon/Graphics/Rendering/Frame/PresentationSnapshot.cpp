@@ -243,7 +243,7 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
         }
     }
 
-    snap.timeSeconds = Glob.time.toFloat();
+    snap.timeSeconds = PresentationClockSeconds(); // between ticks, like the objects (REN-INTERP-001)
     snap.timeOfDay = Glob.clock.GetTimeOfDay();
 
     if (GLandscape)

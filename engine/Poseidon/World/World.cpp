@@ -114,6 +114,29 @@ extern int gPerfDrawCalls;
 
 namespace
 {
+// The clock before and after the last tick (seconds), for PresentationClockSeconds().
+float s_clockBeforeLastTick = 0.0f;
+float s_clockAfterLastTick = 0.0f;
+
+void NoteClockTick(float before, float after)
+{
+    s_clockBeforeLastTick = before;
+    s_clockAfterLastTick = after;
+}
+} // namespace
+
+float Poseidon::PresentationClockSeconds()
+{
+    const float now = Glob.time.toFloat();
+    // A clock set from outside the tick (load, setDate, a test) is not interpolated.
+    if (!Object::RenderInterpEnabled() || now != s_clockAfterLastTick)
+        return now;
+    const float alpha = Object::RenderInterpAlpha();
+    return s_clockBeforeLastTick + (now - s_clockBeforeLastTick) * alpha;
+}
+
+namespace
+{
 
 /// FAR-001. Resolve the altitude-dependent far plane, and push the matching haze
 /// range into the scene. Returns the far plane to hand to
@@ -2462,12 +2485,16 @@ void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicl
                                 switch (stage)
                                 {
                                 case Sim::SimStage::Clock:
+                                {
                                     // Keep the world clock, weather and wind in the same tick as the
                                     // vehicles that consume them. Rendering observes the most recently
                                     // completed tick.
+                                    const float before = Glob.time.toFloat();
                                     Glob.time += step.deltaT;
+                                    NoteClockTick(before, Glob.time.toFloat());
                                     world.SimulateLandscape(step.deltaT);
                                     break;
+                                }
 
                                 case Sim::SimStage::Scripts:
                                     // After the clock so a script observing `time` sees this tick's
