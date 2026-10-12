@@ -369,7 +369,9 @@ impl Ngx {
             .unwrap_or_else(|| ".".to_owned());
         // WGR_NGX_SNIPPET_DIR appends an extra search directory — the headless tests
         // use it (their exe dir is target/debug/deps, which carries no snippet).
-        let mut path_vec: Vec<*const u16> = vec![wide(&exe_dir).as_ptr()];
+        // The shareable build (exe + dll + assets) keeps the snippet in <exe>/assets.
+        let assets_dir = std::path::Path::new(&exe_dir).join("assets").to_string_lossy().into_owned();
+        let mut path_vec: Vec<*const u16> = vec![wide(&exe_dir).as_ptr(), wide(&assets_dir).as_ptr()];
         if let Ok(extra) = std::env::var("WGR_NGX_SNIPPET_DIR") {
             path_vec.push(wide(&extra).as_ptr());
         }

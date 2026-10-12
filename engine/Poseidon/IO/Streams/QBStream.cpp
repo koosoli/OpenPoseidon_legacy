@@ -98,6 +98,21 @@ bool ResolveModRootAliasCallback(RStringB dir, void* opaque)
     return true;
 }
 
+// The shareable build (exe + dll + assets\) keeps the loose files the retail game lacks -- the
+// remaster's menu resources (bin\*.hpp), fonts, dtaExt -- under assets\ instead of beside the
+// game's own folders. A relative path not found anywhere else is looked for there, last.
+std::string ResolveAssetsOverlay(const char* name)
+{
+    if (!name || !*name || name[1] == ':' || *name == '/' || *name == '\\')
+        return {};
+    if (strnicmp(name, "assets\\", 7) == 0 || strnicmp(name, "assets/", 7) == 0)
+        return {};
+    std::string overlay = std::string("assets\\") + name;
+    if (!QIFStream::FileExists(overlay.c_str()))
+        return {};
+    return overlay;
+}
+
 std::string ResolveModRootAlias(const char* name)
 {
     if (!name || !*name || name[1] == ':' || *name == '/' || *name == '\\')
@@ -2537,9 +2552,16 @@ void QIFStreamB::AutoOpen(const char* name, IQFBankContext* context)
                 if (_sharedData)
                 {
                     _bank = bank;
+                    return;
                 }
             }
         }
+    }
+
+    const std::string overlay = ResolveAssetsOverlay(name0);
+    if (!overlay.empty())
+    {
+        QIFStream::open(overlay.c_str());
     }
 }
 
@@ -2614,7 +2636,7 @@ bool QIFStreamB::FileExist(const char* name, IQFBankContext* context)
             }
         }
     }
-    return false;
+    return !ResolveAssetsOverlay(name).empty();
 }
 
 struct EncryptorInformation

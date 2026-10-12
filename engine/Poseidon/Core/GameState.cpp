@@ -317,6 +317,9 @@ void Globals::Init()
         LoadAddonArchiveRoots();
         LoadBanksEx("dta", true);
         LoadBanksEx("addons", true, true);
+        // The shareable build keeps what the retail game lacks in assets\ (Install.ps1 -Package): its
+        // add-ons (cwr_logo.pbo) mount after the game's own, and a bank the game already has is skipped.
+        LoadBanks("addons", "assets\\addons", true, true);
         LoadBanksEx("Campaigns", false);
         // Local map previews mount only assets: foreign gameplay/config classes cannot replace CWA units.
         const std::string mapRoots = AppConfig::Instance().GetMapArchivePaths().Data();
