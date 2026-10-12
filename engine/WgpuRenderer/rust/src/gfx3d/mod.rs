@@ -1751,10 +1751,11 @@ impl CameraGroup {
                     count: None,
                 },
                 // SH-9 sky-irradiance coefficients (Sky-owned, lent by buffer), for directional sky
-                // ambient on the lit-mesh + terrain fragment shaders (frame::sky_irradiance).
+                // ambient on the lit-mesh + terrain fragment shaders (frame::sky_irradiance); VERTEX for the
+                // Tidewater spray, which lights each particle in its vertex stage (tw_spray.wgsl).
                 wgpu::BindGroupLayoutEntry {
                     binding: 9,
-                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,

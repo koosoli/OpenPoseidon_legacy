@@ -145,6 +145,12 @@ fn vs_spray(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
         sunDiffuse = srgb_to_linear(sunDiffuse);
         skyIrr = srgb_to_linear(skyIrr);
     }
+    if (linear > 0.5 && frame.sun_diffuse.w > 0.5) {
+        // (OP, 2026-10-12) the sky's own irradiance (SH), not the legacy flat ambient: that is an
+        // artistic fill ~30x the sun on stock worlds, and lit by it every breaker and spray blob
+        // glowed flat white (the owner's "white film" / glowing foam), as the water's foam did
+        skyIrr = sky_irradiance(vec3<f32>(0.0, 1.0, 0.0)) * frame.sun_ambient.w;
+    }
     let cosT = dot(-Vd, L); // 1 = looking toward the sun through the particle
     let cosA = dot(Vd, L);
     // (OP: the cloud shadow is a fragment-stage texture in the camera group; it is applied in
@@ -179,7 +185,8 @@ fn vs_spray(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     let baseA = sprayByKind(kind, 0.55, 0.06, 0.45, 0.5, 0.12);
     // far: fade out; very near the eye: sheets and mist would fill the screen
     let maxD = sprayR.b.z;
-    let distFade = smoothstep(maxD, maxD * 0.55, dist) * select(smoothstep(0.6, 3.0, dist), 1.0, water);
+    // (OP) dense spray too fades in the last few metres: a blob a metre or two wide filled the lens
+    let distFade = smoothstep(maxD, maxD * 0.55, dist) * select(smoothstep(0.6, 3.0, dist), smoothstep(0.8, 2.5, dist), water);
     let a = select(baseA * fadeIn * fadeOut * cover * distFade * sprayR.b.y * sprayR.cam.w, 1.0, dbgDots && sprayR.cam.w > 0.5);
 
     var o: SprayOut;
