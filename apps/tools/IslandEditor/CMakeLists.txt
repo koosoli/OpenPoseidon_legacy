@@ -70,7 +70,7 @@ add_executable(PoseidonIslandEditor
     Builders.cpp
     Builders.hpp
     ${ISLAND_EDITOR_SHADER_HEADERS}
-    ${CMAKE_SOURCE_DIR}/resources/icon-tool.rc
+    ${CMAKE_SOURCE_DIR}/resources/icon-openposeidon.rc # the game's own icon (owner)
 )
 
 target_compile_definitions(PoseidonIslandEditor PRIVATE
