@@ -83,10 +83,16 @@ symbolised call stack. `OP_A2_WATCH="var,var"` and `OP_A2_EVAL="expr"` log value
 
 ## Results so far
 
-Every Arma 2 mission is played 25 s by `.a2build\run-a2-tests.ps1` (one log and one
-screenshot each). Run 3 (commit `a142bf4`-era build, before the `NeedsAmbulance` and
-trailing-`;` fixes), first 34 of 63 missions: **34/34 start and enter the mission**, 19
-without a single script error. The time-outs (C5 Badlands, C6 Dogs of War, MP CivilWar,
-Superpowers, UrbanWarfare, WarWelcome -- the Warfare missions) were the `NeedsAmbulance`
-spin, fixed in `472fed2`. Run 4 (`6651f0d`, with Operation Arrowhead mounted next to
-Arma 2): first 7 missions all clean; the full table follows when the run completes.
+Every mission is played 25 s by `.a2build\run-a2-tests.ps1` (one log and one screenshot
+each). The `Templates\*` and `MPTemplates\*` folders are editor templates without a world
+and are not counted.
+
+| Run | Build | Missions | Enter the mission | Without a script error | Hangs / crashes |
+|-----|-------|----------|-------------------|------------------------|-----------------|
+| 3 | `a142bf4` | 34 (Arma 2, partial) | 34 | 19 | 6 hangs (Warfare: `NeedsAmbulance`) |
+| 4 | `6651f0d` | 63 (Arma 2, incl. templates) | 50 | 23 | 0 |
+| 5 | `f4a567d` | 98 (Arma 2 + Operation Arrowhead) | 91 | 27 | 7 crashes (flag proxy, fixed `47c5b1c`), 5 OA campaign time-outs |
+
+SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
+Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
+Takistan and Zargabad render; its bootcamp and scenarios start.
