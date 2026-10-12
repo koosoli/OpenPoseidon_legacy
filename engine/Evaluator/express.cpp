@@ -130,9 +130,27 @@ void GameState::TypeError(GameType exp, GameType was, const char* name) const
 
 void GameState::vynech() const
 {
-    while (isspace(*_e->_pos))
+    for (;;)
     {
-        _e->_pos++;
+        while (isspace(*_e->_pos))
+        {
+            _e->_pos++;
+        }
+        // Arma 2 accepts C++ comments in code that never went through the preprocessor
+        // (init lines, triggers, waypoint statements).
+        if (s_singleQuoteStrings && _e->_pos[0] == '/' && _e->_pos[1] == '/')
+        {
+            while (*_e->_pos && *_e->_pos != '\n')
+                _e->_pos++;
+            continue;
+        }
+        if (s_singleQuoteStrings && _e->_pos[0] == '/' && _e->_pos[1] == '*')
+        {
+            const char* end = strstr(_e->_pos + 2, "*/");
+            _e->_pos = end ? end + 2 : _e->_pos + strlen(_e->_pos);
+            continue;
+        }
+        return;
     }
 }
 
@@ -806,8 +824,15 @@ static thread_local GameValue tls_exitWithValue;
 static GameValue StringRepeat(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     int maxIters = 10000;
+    unsigned yields = GameState::s_scheduledYields ? GameState::s_scheduledYields() : 0;
     for (int i = 0;; i++)
     {
+        if (i >= maxIters && GameState::s_scheduledYields && GameState::s_scheduledYields() != yields)
+        {
+            // a scheduled loop that waits (sleep / waitUntil) is not runaway code
+            yields = GameState::s_scheduledYields();
+            i = 0;
+        }
         if (i >= maxIters)
         {
             LOG_WARN(Core, "SQF: max iteration count exceeded in while loop");
@@ -816,6 +841,8 @@ static GameValue StringRepeat(const GameState* state, GameValuePar oper1, GameVa
         }
         if (GameState::s_abortLoops)
             break;
+        if (GameState::s_scheduledTick)
+            GameState::s_scheduledTick();
         // test condition
         {
             GameVarSpace local(state->GetContext());
@@ -2436,6 +2463,14 @@ void GameState::Reset()
     VarSet("this", false, true);
 }
 
+// Arma 1/2: a local variable used where no local scope exists (a unit's init line,
+// "_x = [this] execVM ...") lives in one shared scratch scope instead of being an error.
+static GameVarSpace& GlobalScratchLocals()
+{
+    static GameVarSpace scratch;
+    return scratch;
+}
+
 GameValue GameState::VarGet(const char* name) const
 {
     // convert name to lower case
@@ -2457,6 +2492,13 @@ GameValue GameState::VarGet(const char* name) const
     {
         if (source[0] == '_')
         {
+            if (s_emptyStatementKeepsValue)
+            {
+                GameValue ret;
+                if (GlobalScratchLocals().VarGet(source, ret))
+                    return ret;
+                return GameValueNil();
+            }
             SetError(EvalNamespace);
             return GameValueNil();
         }
@@ -2588,6 +2630,8 @@ void GameState::VarSet(const char* name, GameValuePar value, bool readOnly, bool
     source.Lower();
 
     GameVarSpace* space = (forceLocal || *name == '_' ? _e->local : this);
+    if (!space && s_emptyStatementKeepsValue)
+        space = &GlobalScratchLocals();
     if (!space)
     {
         SetError(EvalNamespace);

@@ -884,6 +884,42 @@ struct GameTypeType : public Poseidon::Foundation::EnumName
     // Optional observer of every expression the evaluator starts (stall diagnostics in the
     // Arma 2 test mode); null when unused.
     static inline void (*s_traceExpression)(const char* expression) = nullptr;
+    // Scheduled scripts that suspend anywhere (Arma 2): the number of suspensions so far,
+    // so a while loop that sleeps is not cut at the unscheduled iteration limit. Null
+    // when unused.
+    static inline unsigned (*s_scheduledYields)() = nullptr;
+    // Called once per while-loop iteration; a scheduled script gives the frame back when
+    // its time slice is used up. Null when unused.
+    static inline void (*s_scheduledTick)() = nullptr;
+
+    // Evaluator contexts of a suspended script are taken off the shared stack while it
+    // waits and put back when it resumes.
+    int ContextLevel() const { return _actContext; }
+    void DetachContextsAbove(int level, std::vector<Ref<GameEvaluator>>& out) const
+    {
+        out.clear();
+        for (int i = level + 1; i <= _actContext; i++)
+        {
+            out.push_back(_contextStack[i]);
+            _contextStack[i].Free();
+        }
+        if (_actContext > level)
+        {
+            _actContext = level;
+            _e = _contextStack[_actContext];
+        }
+    }
+    void AttachContexts(std::vector<Ref<GameEvaluator>>& in) const
+    {
+        for (Ref<GameEvaluator>& c : in)
+        {
+            if (_actContext + 1 >= MaxContexts)
+                break;
+            _contextStack[++_actContext] = c;
+        }
+        _e = _contextStack[_actContext];
+        in.clear();
+    }
 
     // evaluate an expression
     //! get actual context (started by BeginContext)

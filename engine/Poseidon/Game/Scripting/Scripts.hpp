@@ -34,9 +34,13 @@ struct ScriptLabel
 namespace Poseidon
 {
 
+struct ScriptFiber; // Scripts.cpp: Arma 2 scheduled code running on its own stack
+
 class Script : public RemoveLLinks
 {
+	friend struct ScriptFiber;
 protected:
+	ScriptFiber *_fiber = nullptr;
 	GameValue _argument;
 	Poseidon::Foundation::Time _baseTime;
 	int _currentLine;
@@ -60,6 +64,8 @@ public:
 	// '@' and '~'. Suspension nested inside other statements is not available and is
 	// reported once. Returns a script with a fresh handle (see GetHandle).
 	static Script *CreateFromCode(RString name, RString code, GameValuePar argument);
+	// Arma 2: the same as a coroutine that may suspend anywhere (see ScriptFiber).
+	static Script *CreateFiberScript(RString name, RString code, GameValuePar argument);
 	int GetHandle() const {return _handle;}
 	static Script *FindByHandle(int handle);
 
@@ -77,6 +83,7 @@ public:
 	static Script *CreateObject(ParamArchive &ar) {return new Script();}
 	
 	bool SimulateBody();
+	bool SimulateFiber();
 	bool OnSimulate();
 	bool Simulate(float deltaT);
 	bool IsTerminated() const;

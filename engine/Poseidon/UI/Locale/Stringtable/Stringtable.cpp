@@ -67,6 +67,9 @@ class StringTableDynamic : public StringTableMap
     typedef StringTableMap base;
 
   public:
+    // Arma 1/2 keys are case-insensitive ("$STR_x" names the XML id "str_x"): such a table
+    // stores and looks up its keys in lower case.
+    bool lowerKeys = false;
     void Init();
     void Add(RString name, RString value, bool fromUtf8, std::set<std::string>& appliedInBatch);
     void Load(const char* filename, std::set<std::string>& appliedInBatch);
@@ -81,6 +84,8 @@ void StringTableDynamic::Init()
 
 void StringTableDynamic::Add(RString name, RString value, bool fromUtf8, std::set<std::string>& appliedInBatch)
 {
+    if (lowerKeys)
+        name.Lower();
     const StringTableItem& check = Get(name);
     if (!IsNull(check))
     {
@@ -656,7 +661,7 @@ class StringTable
     }
 
   public:
-    StringTable() = default;
+    StringTable() { _tableArma1.lowerKeys = true; }
     void Clear();
 
     void Load(RString type, RString filename, float priority, bool init);
@@ -877,7 +882,9 @@ RString StringTable::Localize(const char* str)
         return item3.value;
     }
 
-    const StringTableItem& item4 = _tableArma1[str];
+    RString lower = str;
+    lower.Lower();
+    const StringTableItem& item4 = _tableArma1[lower];
     if (!_tableArma1.IsNull(item4))
     {
         return item4.value;

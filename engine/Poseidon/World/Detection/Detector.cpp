@@ -1542,7 +1542,10 @@ namespace Poseidon
 
 Flag::Flag(EntityType* name, int id) : base(name->GetShape(), name, id)
 {
-    _fabric.Init(_shape, "latka", nullptr);
+    // A flag proxy whose type has no shape (an Arma 2 model this game could not load)
+    // simply has no fabric to animate.
+    if (_shape)
+        _fabric.Init(_shape, "latka", nullptr);
 
     const float prec = 0.1;
     _simulationSkipped = GRandGen.RandomValue() * prec;
@@ -1551,8 +1554,8 @@ Flag::Flag(EntityType* name, int id) : base(name->GetShape(), name, id)
 
 void Flag::Init(Matrix4Par pos)
 {
-    Shape* shape = _shape->Level(0);
-    int selIndex = _fabric.GetSelection(0);
+    Shape* shape = _shape ? _shape->Level(0) : nullptr;
+    int selIndex = shape ? _fabric.GetSelection(0) : -1;
     if (selIndex >= 0)
     {
         const NamedSelection& sel = shape->NamedSel(selIndex);
