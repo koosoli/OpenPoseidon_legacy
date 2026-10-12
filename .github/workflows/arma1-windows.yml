@@ -60,19 +60,36 @@ jobs:
           done
           exit 1
 
+      - name: Build starter (Arma1Start.exe)
+        shell: pwsh
+        run: |
+          $clang = (Get-Command clang-cl -ErrorAction SilentlyContinue).Source
+          if (-not $clang) { $clang = 'C:\Program Files\LLVM\bin\clang-cl.exe' }
+          New-Item -ItemType Directory -Force out | Out-Null
+          & $clang /nologo /O2 /W3 /DUNICODE /D_UNICODE /D_CRT_SECURE_NO_WARNINGS tools/arma1-launcher/Arma1Start.c `
+            /Fe:out/Arma1Start.exe /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib advapi32.lib ole32.lib
+          if ($LASTEXITCODE -ne 0) { throw "starter build failed" }
+          Remove-Item out/*.obj -ErrorAction SilentlyContinue
+
       - name: Collect game files
         shell: bash
         run: |
-          mkdir -p out
+          mkdir -p out/Werkzeuge
           cp "$CWR_DIST_DIR/OpenPoseidon.exe" out/
           if [ -f "$CWR_DIST_DIR/wgpu_renderer.dll" ]; then cp "$CWR_DIST_DIR/wgpu_renderer.dll" out/; else cp "$CWR_BUILD_DIR/engine/WgpuRenderer/wgpu_renderer.dll" out/; fi
-          cp "$CWR_DIST_DIR/OpenAL32.dll" out/ 2>/dev/null || true
+          cp "$CWR_DIST_DIR/OpenAL32.dll" "$CWR_DIST_DIR/OpenAL-Soft.LICENSE.txt" out/ 2>/dev/null || true
+          # The same content Deploy.ps1 installs: menu scene, logo, inventory icons, default packs.
+          [ -d "$CWR_DIST_DIR/assets" ] && cp -r "$CWR_DIST_DIR/assets" out/
+          [ -d "$CWR_DIST_DIR/Mods" ] && cp -r "$CWR_DIST_DIR/Mods" out/
+          cp tools/arma1-launcher/LIESMICH.txt out/
+          cp scripts/Install.ps1 scripts/CwaCommon.ps1 out/Werkzeuge/
           printf 'branch=%s\ncommit=%s\nsource=GitHub Actions %s (%s)\n' "$GITHUB_REF_NAME" "${GITHUB_SHA::7}" "$GITHUB_RUN_ID" "$CWR_PRESET" > out/BUILT-FROM.txt
-          ls -la out
+          printf '%s %s %s github-actions-zip\n' "$GITHUB_REF_NAME" "${GITHUB_SHA::7}" "$(date +%Y-%m-%d_%H:%M)" > out/DEPLOYED-FROM.txt
+          find out -maxdepth 2 | sort
 
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
-          name: OpenPoseidon-Windows-${{ github.ref_name }}-${{ steps.meta.outputs.sha_short }}
+          name: OpenPoseidon-Arma1-spielbar-${{ steps.meta.outputs.sha_short }}
           path: out/*
           if-no-files-found: error
