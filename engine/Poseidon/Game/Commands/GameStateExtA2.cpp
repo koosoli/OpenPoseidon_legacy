@@ -24,6 +24,7 @@
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <Poseidon/Game/Scripting/Scripts.hpp>
 
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICenter.hpp>
@@ -197,6 +198,8 @@ struct Runtime
         Vector3 offset;
     };
     std::vector<Attachment> attachments;
+    // addAction arguments (Arma 2 form), by entity and action id
+    std::map<std::pair<const void*, int>, GameValue> actionArguments;
 };
 
 Runtime& RT()
@@ -1732,6 +1735,42 @@ std::string Arma2BriefingHtml(const std::string& html)
 }
 
 // Runs the scripted FSMs one transition per simulation step (World::SimulateScripts).
+
+// Arma 2 addAction: arguments are passed as _this select 3; the script is a .sqf (run
+// like execVM), a .sqs, or code.
+void Arma2SetUserActionArguments(EntityAI* veh, int id, GameValuePar arguments)
+{
+    RT().actionArguments[{veh, id}] = arguments;
+}
+
+GameValue ScriptExecVM(const GameState* state, GameValuePar oper1, GameValuePar oper2); // Scripts.cpp
+
+bool Arma2RunUserAction(EntityAI* veh, Person* caller, int id, const RString& script)
+{
+    if (Arma1Compat::Generation() != 2)
+        return false;
+    GameState* gstate = GWorld->GetGameState();
+    GameValue args = gstate->CreateGameValue(GameArray);
+    GameArrayType& a = args;
+    a.Add(GameValueExt(veh));
+    a.Add(GameValueExt(caller));
+    a.Add(GameValue(static_cast<float>(id)));
+    auto& map = RT().actionArguments;
+    const auto found = map.find({veh, id});
+    a.Add(found != map.end() ? found->second : GameValue());
+    const std::string name = Lower((const char*)script);
+    auto endsWith = [&](const char* ext) {
+        const size_t n = strlen(ext);
+        return name.size() >= n && name.compare(name.size() - n, n, ext) == 0;
+    };
+    if (endsWith(".sqs"))
+        return false; // CWA's own path runs .sqs files
+    if (endsWith(".sqf"))
+        ScriptExecVM(gstate, args, GameValue(script));
+    else
+        GWorld->AddScript(Script::CreateFromCode("addAction", script, args));
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // Stall report (--arma2-test-seconds only). A mission that freezes the main loop leaves

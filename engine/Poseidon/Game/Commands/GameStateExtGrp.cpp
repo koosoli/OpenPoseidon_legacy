@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -1418,6 +1419,8 @@ GameValue VehProcessAction(const GameState* state, GameValuePar oper1, GameValue
     }
 }
 
+void Arma2SetUserActionArguments(Poseidon::EntityAI* veh, int id, GameValuePar arguments); // GameStateExtA2.cpp
+
 GameValue VehAddUserAction(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     EntityAI* veh = dyn_cast<EntityAI>(GetObject(oper1));
@@ -1427,7 +1430,9 @@ GameValue VehAddUserAction(const GameState* state, GameValuePar oper1, GameValue
     }
 
     const GameArrayType& array = oper2;
-    if (array.Size() != 2)
+    // Arma 2: [title, script, arguments, priority, showWindow, hideOnUse, shortcut, condition]
+    const bool arma2 = Poseidon::Arma1Compat::Generation() == 2;
+    if (array.Size() != 2 && !(arma2 && array.Size() > 2))
     {
         state->SetError(EvalDim, array.Size(), 2);
         return -1.0f;
@@ -1442,7 +1447,10 @@ GameValue VehAddUserAction(const GameState* state, GameValuePar oper1, GameValue
         state->TypeError(GameString, array[1].GetType());
         return -1.0f;
     }
-    return (float)veh->AddUserAction(array[0], array[1]);
+    const int id = veh->AddUserAction(array[0], array[1]);
+    if (arma2 && array.Size() > 2)
+        Arma2SetUserActionArguments(veh, id, array[2]);
+    return (float)id;
 }
 
 GameValue VehRemoveUserAction(const GameState* state, GameValuePar oper1, GameValuePar oper2)
