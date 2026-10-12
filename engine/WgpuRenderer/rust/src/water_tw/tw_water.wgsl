@@ -815,7 +815,13 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     // the eye was within 1.5 m of the flat sea above it (the flat blue sheet at the waterline), and
     // as seen from above when it was just under it.
     let seenFromAbove = !front;
-    let viewFromBelow = select(camH < 0.0, !seenFromAbove, nearSurface && !folded);
+    // (OP, 2026-10-12) away from the lens, a point is seen from below only when the eye is under
+    // the water AND the point lies above the eye. It was "the eye is under the water" alone, so a crest
+    // passing over a swimmer's eye turned the whole distant sea, seen through that crest from above,
+    // into the view from below: total internal reflection, the water's own teal in-scatter, a teal band
+    // along the horizon at the waterline (owner's "turquoise in high waves").
+    let farFromBelow = camH < 0.0 && pos.y > frame.cam_pos.y;
+    let viewFromBelow = select(farFromBelow, !seenFromAbove, nearSurface && !folded);
     let Nup = surf.normal;
     let Nside = select(Nup, -Nup, viewFromBelow);
     let Nview = normalize(Nside + V * max(-dot(Nside, V) + 0.03, 0.0));
