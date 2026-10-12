@@ -314,6 +314,19 @@ RString ResolveFrom(const char* configClass, const RString& name,
             }
         }
     }
+    // Arma 2 names hundreds of weapons and magazines; the ones not in the table are
+    // carried by the CWA weapon of the same kind and calibre (Arma2WeaponFallback).
+    if (Generation() == 2 && strcmp(configClass, "CfgWeapons") == 0)
+    {
+        const RString fallback = Arma2WeaponFallback(name);
+        if (fallback.GetLength() > 0 && config->FindEntry(fallback))
+        {
+            if (reported.insert(std::string(configClass) + key).second)
+                LOG_INFO(Mission, "{}: {} '{}' is carried by CWA '{}' (by kind and calibre)", Label(), configClass,
+                         name.Data(), fallback.Data());
+            return fallback;
+        }
+    }
     if (warn && reported.insert(std::string(configClass) + key).second)
         LOG_WARN(Mission, "{}: {} '{}' has no CWA counterpart", Label(), configClass, name.Data());
     return name;
@@ -545,6 +558,62 @@ RString ResolveVehicleClass(const RString& className)
         return className;
     RString cwa = ResolveFrom("CfgVehicles", className, VehicleAliases(), false);
     const ParamEntry* vehicles = Pars.FindEntry("CfgVehicles");
+    if (Generation() == 2 && vehicles && !vehicles->FindEntry(cwa))
+    {
+        // Arma 2 vehicle names carry their type ("BRDM2_INS", "UralOpen_CDF",
+        // "DSHKM_Ins"): the CWA vehicle of that type, before the generic fallback.
+        static const std::vector<std::pair<const char*, std::vector<const char*>>> rules = {
+            {"brdm", {"BRDM"}},           {"uralreammo", {"Ural", "Truck5t"}}, {"ural", {"Ural", "Truck5t"}},
+            {"kamaz", {"Ural", "Truck5t"}}, {"uaz", {"UAZ"}},                 {"bmp", {"BMP", "BMP2"}},
+            {"btr", {"BMP", "BMP2"}},     {"t72", {"T72"}},                   {"t90", {"T80", "T72"}},
+            {"t34", {"T55", "T72"}},      {"t55", {"T55", "T72"}},            {"zsu", {"ZSU", "T72"}},
+            {"2s6", {"ZSU", "T72"}},      {"m1a", {"M1Abrams"}},              {"m2a", {"M2A2", "M113"}},
+            {"m6_", {"Vulcan", "M2A2"}},  {"aav", {"M113", "M2A2"}},          {"lav25", {"M2A2", "M113"}},
+            {"m113", {"M113"}},           {"hmmwv", {"HMMWV", "Jeep"}},       {"mtvr", {"Truck5t"}},
+            {"v3s", {"Truck5t", "Ural"}}, {"landrover", {"GJeep", "Jeep"}},   {"skoda", {"Skoda"}},
+            {"lada", {"SkodaBlue", "Skoda"}}, {"car_", {"SkodaBlue", "Skoda"}}, {"volha", {"SkodaRed", "Skoda"}},
+            {"vwgolf", {"SkodaGreen", "Skoda"}}, {"datsun", {"Skoda"}},         {"hilux", {"Skoda"}},
+            {"ikarus", {"Bus"}},          {"bus", {"Bus"}},                   {"tractor", {"Tractor"}},
+            {"mi17", {"Mi17"}},           {"mi24", {"Mi24", "Mi17"}},         {"ka52", {"Mi24", "Mi17"}},
+            {"ka60", {"Mi17"}},           {"uh1", {"UH60"}},                  {"uh60", {"UH60"}},
+            {"mh60", {"UH60"}},           {"mh6", {"OH58", "UH60"}},          {"ah6", {"OH58", "UH60"}},
+            {"ah1", {"Cobra"}},           {"ah64", {"Cobra"}},                {"mv22", {"UH60"}},
+            {"ch47", {"CH47D", "UH60"}},  {"c130", {"UH60"}},                 {"su25", {"Su25"}},
+            {"su34", {"Su25"}},           {"su39", {"Su25"}},                 {"a10", {"A10"}},
+            {"av8b", {"A10"}},            {"f35", {"A10"}},                   {"l39", {"Su25"}},
+            {"an2", {"Cessna", "UH60"}},  {"zu23", {"M2StaticMG"}},           {"dshk", {"M2StaticMG"}},
+            {"kord", {"M2StaticMG"}},     {"m2staticmg", {"M2StaticMG"}},     {"m2hd", {"M2StaticMG"}},
+            {"ags", {"M2StaticMG"}},      {"mk19", {"M2StaticMG"}},           {"d30", {"M2StaticMG"}},
+            {"m119", {"M2StaticMG"}},     {"2b14", {"M2StaticMG"}},           {"m252", {"M2StaticMG"}},
+            {"searchlight", {"M2StaticMG"}}, {"igla", {"M2StaticMG"}},        {"stinger_pod", {"M2StaticMG"}},
+            {"rhib", {"BoatW"}},          {"zodiac", {"BoatW"}},              {"pbx", {"BoatW"}},
+            {"smallboat", {"BoatW"}},     {"fishing_boat", {"BoatW"}},        {"tt650", {"Kolo"}},
+            {"m1030", {"Kolo"}},          {"motorcycle", {"Kolo"}},           {"old_bike", {"Kolo"}},
+            {"mmt", {"Kolo"}},
+        };
+        const std::string lower = Lower(className.Data());
+        std::string sim;
+        if (const ParamEntry* a2 = FindConfigClass("CfgVehicles", className.Data()))
+            if (const ParamEntry* e = a2->FindEntry("simulation"); e && !e->IsClass() && !e->IsArray())
+                sim = Lower((const char*)(RStringB)*e);
+        const bool vehicle = sim == "car" || sim == "tank" || sim == "helicopter" || sim == "airplane" ||
+                             sim == "ship" || sim == "motorcycle" || sim == "bicycle" || sim == "parachute";
+        for (const auto& [word, candidates] : rules)
+        {
+            if (!vehicle)
+                break;
+            if (lower.find(word) == std::string::npos)
+                continue;
+            for (const char* c : candidates)
+                if (vehicles->FindEntry(c))
+                {
+                    cwa = RString(c);
+                    break;
+                }
+            if (vehicles->FindEntry(cwa))
+                break;
+        }
+    }
     if (vehicles && !vehicles->FindEntry(cwa))
     {
         static std::set<std::string> reported;

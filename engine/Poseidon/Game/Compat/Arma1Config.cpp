@@ -1374,6 +1374,135 @@ RString FallbackCwaClass(const RString& a1Name)
     return RString();
 }
 
+namespace
+{
+bool A2Derives(const ParamEntry* cls, const char* base)
+{
+    const ParamEntry* b = FindConfigClass("CfgWeapons", base);
+    const ParamClass* c = cls ? cls->GetClassInterface() : nullptr;
+    const ParamClass* bc = b ? b->GetClassInterface() : nullptr;
+    return c && bc && (c == bc || c->IsDerivedFrom(*bc));
+}
+
+// The CWA weapon for an Arma 2 weapon class, by ancestry and ammunition.
+std::string A2Calibre(const ParamEntry* weapon)
+{
+    // first magazine -> its ammo name ("B_545x39_Ball", "R_PG7V_AT", ...)
+    const ParamEntry* mags = weapon ? weapon->FindEntry("magazines") : nullptr;
+    if (!mags || !mags->IsArray() || mags->GetSize() == 0)
+        return {};
+    const ParamEntry* mag = FindConfigClass("CfgMagazines", (const char*)(RStringB)(*mags)[0]);
+    return Lower(mag ? StringValue(*mag, "ammo") + " " + std::string((const char*)(RStringB)(*mags)[0])
+                     : std::string((const char*)(RStringB)(*mags)[0]));
+}
+
+const char* CwaWeaponFor(const std::string& lowerName, const ParamEntry* weapon, const std::string& calibre)
+{
+    const auto has = [&](const char* w) { return calibre.find(w) != std::string::npos || lowerName.find(w) != std::string::npos; };
+    if (A2Derives(weapon, "Binocular") || lowerName.find("binocular") != std::string::npos ||
+        lowerName.find("laserdesignator") != std::string::npos)
+        return "Binocular";
+    if (A2Derives(weapon, "NVGoggles") || lowerName.find("nvgoggles") != std::string::npos)
+        return "NVGoggles";
+    const bool launcher = A2Derives(weapon, "LauncherCore") || A2Derives(weapon, "Launcher");
+    if (launcher)
+    {
+        if (has("pg7") || has("rpg") || has("og7"))
+            return "RPGLauncher";
+        if (has("stinger") || has("igla") || has("strela"))
+            return has("stinger") ? "Stinger" : "Strela";
+        if (has("m136") || has("m72") || has("law"))
+            return "LAWLauncher";
+        return "CarlGustavLauncher";
+    }
+    const bool pistol = A2Derives(weapon, "PistolCore") || A2Derives(weapon, "Pistol");
+    if (pistol)
+        return has("9x18") || has("makarov") ? "Tokarev" : has("9x19") ? "Beretta" : "Revolver";
+    const bool mgun = A2Derives(weapon, "MGunCore") || A2Derives(weapon, "MGun") || has("m249") || has("m240") ||
+                      has("mk_48") || has("pk") || has("rpk") || has("100rnd") || has("200rnd");
+    const bool sniper = has("m24") || has("m40") || has("dmr") || has("svd") || has("ksvk") || has("m107") ||
+                        has("as50") || has("vss") || has("sniper") || has("ksvk");
+    if (has("127x") || has("762x54") || has("762x51"))
+    {
+        if (mgun && !sniper)
+            return has("762x54") ? "PK" : "M60";
+        return has("762x54") || has("127x108") ? "SVDDragunov" : "M21";
+    }
+    const bool gl = lowerName.find("gl") != std::string::npos || lowerName.find("gp25") != std::string::npos ||
+                    lowerName.find("m203") != std::string::npos;
+    if (has("545x39"))
+        return mgun ? "PK" : gl ? "AK74GrenadeLauncher" : (has("aks") ? "AK74SU" : "AK74");
+    if (has("762x39"))
+        return mgun ? "PK" : "AK47";
+    if (has("556x45"))
+        return mgun ? "M60" : gl ? "M16GrenadeLauncher" : "M16";
+    if (has("9x19") || has("mp5") || has("bizon") || has("9x18"))
+        return "HK";
+    if (A2Derives(weapon, "RifleCore") || A2Derives(weapon, "Rifle"))
+        return "M16";
+    return nullptr;
+}
+} // namespace
+
+RString Arma2WeaponFallback(const RString& name)
+{
+    if (Generation() != 2 || !ConfigLoaded() || name.GetLength() == 0)
+        return RString();
+    const std::string lower = Lower(name.Data());
+    const ParamEntry* cwaWeapons = Pars.FindEntry("CfgWeapons");
+    if (!cwaWeapons)
+        return RString();
+    // A weapon
+    if (const ParamEntry* weapon = FindConfigClass("CfgWeapons", name); weapon && weapon->IsClass())
+    {
+        const char* cwa = CwaWeaponFor(lower, weapon, A2Calibre(weapon));
+        return cwa && cwaWeapons->FindEntry(cwa) ? RString(cwa) : RString();
+    }
+    // A magazine: grenades, explosives by name; else the CWA weapon of its calibre,
+    // whose own first magazine stands for it.
+    const ParamEntry* mag = FindConfigClass("CfgMagazines", name);
+    if (!mag || !mag->IsClass())
+        return RString();
+    const std::string ammo = Lower(StringValue(*mag, "ammo"));
+    const auto any = [&](std::initializer_list<const char*> words)
+    {
+        for (const char* w : words)
+            if (lower.find(w) != std::string::npos || ammo.find(w) != std::string::npos)
+                return true;
+        return false;
+    };
+    const char* direct = nullptr;
+    if (any({"smokeshellred"}))
+        direct = "SmokeShellRed";
+    else if (any({"smokeshellgreen"}))
+        direct = "SmokeShellGreen";
+    else if (any({"smokeshell", "smoke"}))
+        direct = "SmokeShell";
+    else if (any({"handgrenade", "grenadehand"}))
+        direct = "HandGrenade";
+    else if (any({"pipebomb", "satchel"}))
+        direct = "PipeBomb";
+    else if (any({"timebomb"}))
+        direct = "TimeBomb";
+    else if (any({"minee", "mine_e", "tm46"}))
+        direct = "MineE";
+    else if (any({"mine"}))
+        direct = "Mine";
+    else if (any({"m203", "gp25", "40mm", "g_40"}))
+        direct = "GrenadeLauncher";
+    if (direct)
+        return cwaWeapons->FindEntry(direct) ? RString(direct) : RString();
+    const char* weapon = CwaWeaponFor(lower, nullptr, ammo + " " + lower);
+    if (!weapon)
+        return RString();
+    const ParamEntry* w = cwaWeapons->FindEntry(weapon);
+    if (!w)
+        return RString();
+    if (const ParamEntry* mags = w->FindEntry("magazines"); mags && mags->IsArray() && mags->GetSize() > 0)
+        return RString((const char*)(RStringB)(*mags)[0]);
+    return RString(weapon);
+}
+
 bool ProxyKind(const char* modelName, std::string& simulation, int& crewPosition)
 {
     simulation.clear();

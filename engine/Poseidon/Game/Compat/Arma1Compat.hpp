@@ -76,6 +76,12 @@ RString ResolveVehicleClass(const RString& className);
 RString ResolveWeaponClass(const RString& className);
 RString ResolveMagazineClass(const RString& className);
 
+// Arma 2: the CWA weapon (for a weapon) or magazine (for a magazine) that carries an
+// Arma 2 weapon/magazine class, chosen by its kind (pistol, rifle, machine gun, sniper
+// rifle, launcher, grenade, ...) and the calibre of its ammunition. Empty when the
+// name is no Arma 2 weapon or magazine.
+RString Arma2WeaponFallback(const RString& name);
+
 // Drops Arma 1 addon names (CACharacters, CAWheeled, ...) from a mission's
 // addOns[] so the CWA addon check does not refuse an Arma 1 mission.
 void FilterMissionAddons(FindArrayRStringCI& addOns);

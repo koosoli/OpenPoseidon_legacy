@@ -51,10 +51,7 @@ using namespace Poseidon;
 
 bool PreprocessScriptFile(const char* name, std::string& out); // GameStateExtWorldConfig.cpp
 
-namespace Poseidon
-{
-void Arma2RuntimeSimulate();
-}
+void Arma2RuntimeSimulate(); // called from World::SimulateScripts
 
 // CWA commands reused below (defined in the other GameStateExt*.cpp files).
 GameValue ShowHint(const GameState* state, GameValuePar oper1);
@@ -1014,7 +1011,7 @@ GameValue A2Faction(const GameState*, GameValuePar oper1)
 } // namespace
 
 // Runs the scripted FSMs one transition per simulation step (World::SimulateScripts).
-void Poseidon::Arma2RuntimeSimulate()
+void Arma2RuntimeSimulate()
 {
     if (Arma1Compat::Generation() != 2 || !GWorld || !GWorld->GetGameState())
         return;
