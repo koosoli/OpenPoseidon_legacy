@@ -78,6 +78,7 @@ mission booted and the runtime ran; "clean" = no script error until the test end
 | 2241051 | 91 | 74 | 40 |
 | f498083 | 129 | 117 | 2 |
 | f11c945 (2026-10-12 00:43, stamped) | 130 | 122 | 1 |
+| 9cfe1ef (2026-10-12 07:09, stamped) | 130 | 127 | 1 |
 
 Fixed between the two: crashes in `Building`/`AILocker`/`OperField` (generated `A1x_`
 classes inherited scope 0 from abstract CWA bases, so the type was no `BuildingType`);
@@ -97,6 +98,12 @@ s03dolores / fos_lament crash in `FileCache::Find` from a sound-preload worker (
 RA_M03 `switch` with sleeping cases (1c66833); m13/m14 `while` with sleep/`exitWith` in
 scheduled code (26268f0, e104692); mp23 `parseText` (e104692); 03CAMP `enableAI` (1c66833).
 Strategic-map labels now render (c991c58); its mission icons draw as pictures (328230a).
+
+On 9cfe1ef the four left are: armory1 (config script commands, not implemented),
+un-impossible_mission (third-party addon BBB006), m13 (`animationState`) and mp23
+(`composeText`/`lineBreak`) -- the last two added in d9990e5. Since then also d512c1b:
+constant arithmetic in config values (`style = ST_LEFT + ST_MULTI`), which makes the
+strategic map's overview wrap over several lines.
 
 ## Known gaps (honest list)
 
