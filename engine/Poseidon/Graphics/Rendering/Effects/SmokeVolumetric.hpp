@@ -99,13 +99,17 @@ enum class SmokeSystemMode : int
     Legacy = 0,     //!< the 2001 billboards, unchanged; the volumetric subsystem is inert
     Volumetric = 1, //!< the froxel field; the injected billboards stop drawing
     Both = 2,       //!< debug A/B: double-counts the smoke on purpose
+    //! The default since 2026-10-12 (owner): Fire Pro's solver (wgpu fire/) draws the game's smoke
+    //! as a volume near its source -- smoke grenades, wrecks, fires -- and the 2001 puffs carry it
+    //! where it leaves the solver's box and beyond its four nearest sources. The froxel field is off.
+    FirePro = 3,
 };
 
 struct SmokeVolumetricParams
 {
-    // Legacy, per the standing rule for a new render path. POSEIDON_SMOKE_SYSTEM=1 selects
-    // the volumetric system, =2 draws both.
-    SmokeSystemMode mode = SmokeSystemMode::Legacy;
+    // Fire Pro (owner, 2026-10-12). POSEIDON_SMOKE_SYSTEM=0 is the 2001 billboards alone, =1 the
+    // froxel field, =2 draws field and billboards (A/B), =3 Fire Pro.
+    SmokeSystemMode mode = SmokeSystemMode::FirePro;
     float cellSize = 1.0f;     //!< POSEIDON_SMOKE_VOL_CELL: metres per froxel
     int marchSteps = 48;       //!< POSEIDON_SMOKE_VOL_STEPS: samples along the view ray
     int sunSteps = 4;          //!< POSEIDON_SMOKE_VOL_SUN_STEPS: 0 = no self-shadow march
@@ -135,6 +139,19 @@ SmokeVolumetricParams& GSmokeVolumetric();
 inline bool SmokeBillboardsSuppressed()
 {
     return GSmokeVolumetric().mode == SmokeSystemMode::Volumetric;
+}
+
+//! True when the camera-anchored froxel field is drawn (Volumetric, or the A/B view).
+inline bool SmokeFieldActive()
+{
+    const SmokeSystemMode m = GSmokeVolumetric().mode;
+    return m == SmokeSystemMode::Volumetric || m == SmokeSystemMode::Both;
+}
+
+//! True when smoke is drawn by Fire Pro's solver near its source (the default).
+inline bool FireProSmokeActive()
+{
+    return GSmokeVolumetric().mode == SmokeSystemMode::FirePro;
 }
 
 } // namespace Poseidon

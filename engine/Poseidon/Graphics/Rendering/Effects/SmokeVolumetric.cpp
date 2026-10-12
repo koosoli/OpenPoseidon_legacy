@@ -31,8 +31,10 @@ SmokeVolumetricParams& GSmokeVolumetric()
         if (const char* e = std::getenv("POSEIDON_SMOKE_SYSTEM"))
         {
             const int m = std::atoi(e);
-            v.mode = (m == 1) ? SmokeSystemMode::Volumetric
-                              : (m == 2 ? SmokeSystemMode::Both : SmokeSystemMode::Legacy);
+            v.mode = (m == 1)   ? SmokeSystemMode::Volumetric
+                     : (m == 2) ? SmokeSystemMode::Both
+                     : (m == 3) ? SmokeSystemMode::FirePro
+                                : SmokeSystemMode::Legacy;
         }
         if (const char* e = std::getenv("POSEIDON_SMOKE_VOL_CELL"))
             v.cellSize = std::clamp(static_cast<float>(std::atof(e)), 0.1f, 8.0f);
