@@ -2663,6 +2663,24 @@ impl Renderer {
                         &obj_uniform,
                         veg_uniform.as_ref(),
                     );
+                    // RFG-142: the native near ring's swaying tufts (grass had no motion at all).
+                    if let (Some(cam), Some(depth), Some(delta)) = (
+                        self.gfx3d.camera_bind(),
+                        self.gfx3d.water_depth_view(),
+                        self.temporal.camera_delta(),
+                    ) {
+                        self.grass.draw_velocity(
+                            &self.device,
+                            &self.queue,
+                            encoder,
+                            &vel_view,
+                            cam,
+                            self.main_cam_off,
+                            &obj_uniform,
+                            delta,
+                            depth,
+                        );
+                    }
                 }
             }
         }

@@ -521,7 +521,8 @@ fn vs_grass_native_tuft_shadow(@builtin(vertex_index) vertex_index: u32,
     let zenith = radians(clamp(p0.y + (lean_rand - 0.5) * 2.0 * p0.z, -60.0, 60.0));
     let up = vec3<f32>(0.0, cos(zenith), 0.0) + facing * sin(zenith);
     let wind = sample_wind_field(inst.xz, t, seed + pick);
-    let wind_bend = vec3<f32>(wind.x, 0.0, wind.y) * grass.wind_strength *
+    // RFG-142: the calm floor and height scaling of grass.wgsl native_tuft_geometry (0.8, /0.6 m).
+    let wind_bend = vec3<f32>(wind.x, 0.0, wind.y) * max(grass.wind_strength, 0.8) * (height / 0.6) *
         (0.035 + 0.21 * wind.z + wind.w) * (1.0 - depth * crush);
     let u = select(1.0, 0.0, left);
     let local = axis * ((u - 0.5) * height * aspect) + up * (crushed_height * t) + (wind_bend + crush_bend) * (t * t);

@@ -422,6 +422,16 @@ impl Temporal {
     }
 
     // The matrices the object-velocity pass needs, or None while history is invalid.
+    /// RFG-142: current camera minus previous (world metres), for passes that rebuild the
+    /// previous position relative to the previous camera.
+    pub fn camera_delta(&self) -> Option<[f32; 3]> {
+        if !self.enabled || self.reset {
+            return None;
+        }
+        let (cur, prev) = (self.cur.as_ref()?, self.prev.as_ref()?);
+        Some([cur.cam_pos[0] - prev.cam_pos[0], cur.cam_pos[1] - prev.cam_pos[1], cur.cam_pos[2] - prev.cam_pos[2]])
+    }
+
     pub fn object_velocity_uniform(&self) -> Option<ObjVelUniform> {
         if !self.enabled || self.reset {
             return None;

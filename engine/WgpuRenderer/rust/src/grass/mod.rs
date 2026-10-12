@@ -563,6 +563,13 @@ pub struct Grass {
     native_tuft_color_no_write_pipeline: wgpu::RenderPipeline,
     native_tuft_prepass_pipeline: wgpu::RenderPipeline,
     native_tuft_shadow_pipeline: wgpu::RenderPipeline,
+    // RFG-142: motion vectors for the native near ring (vs_grass_velocity / fs_grass_velocity).
+    velocity_pipeline: wgpu::RenderPipeline,
+    velocity_layout: wgpu::BindGroupLayout,
+    velocity_uniform: wgpu::Buffer,
+    // The wind lanes of the frame the last velocity pass ran for: strength, direction, advection
+    // (4), flutter (4). None until the first frame, which then uses its own lanes (zero motion).
+    velocity_prev_lanes: std::cell::Cell<Option<[f32; 10]>>,
     prepass_pipeline: wgpu::RenderPipeline,
     mid_prepass_pipeline: wgpu::RenderPipeline,
     mid_color_pipeline: wgpu::RenderPipeline,
@@ -1675,6 +1682,78 @@ impl Grass {
             multiview_mask: None,
             cache: None,
         });
+        // RFG-142: grass motion vectors. Group 3 = the velocity uniform (matrices, camera delta,
+        // previous wind lanes) and the single-sample scene depth for the visibility compare.
+        let velocity_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("wgr_grass_velocity_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let velocity_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("wgr_grass_velocity_pipeline_layout"),
+            bind_group_layouts: &[
+                Some(camera_layout),
+                Some(&terrain_layout),
+                Some(&data_layout),
+                Some(&velocity_layout),
+            ],
+            immediate_size: 0,
+        });
+        let velocity_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("wgr_grass_velocity"),
+            layout: Some(&velocity_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_grass_velocity"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_grass_velocity"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rg16Float,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let velocity_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_grass_velocity_uniform"),
+            size: 272,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         Self {
             enabled,
             force_off: !enabled,
@@ -1721,6 +1800,10 @@ impl Grass {
             native_tuft_color_no_write_pipeline,
             native_tuft_prepass_pipeline,
             native_tuft_shadow_pipeline,
+            velocity_pipeline,
+            velocity_layout,
+            velocity_uniform,
+            velocity_prev_lanes: std::cell::Cell::new(None),
             prepass_pipeline,
             mid_prepass_pipeline,
             mid_color_pipeline,
@@ -3014,6 +3097,82 @@ impl Grass {
         timers.end_pass(pass, region);
     }
 
+    /// RFG-142: write the native near ring's motion into the velocity target (Rg16Float, UV-space
+    /// current -> previous), over the camera-only reprojection already there. The geometry is the
+    /// colour pass's (native_tuft_geometry), evaluated for this frame's wind lanes and the last.
+    /// `mats` = jittered / current / previous view-projection + depth tolerance (temporal's
+    /// ObjVelUniform); `cam_delta` = current camera minus previous.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_velocity(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        camera_bind: &wgpu::BindGroup,
+        camera_offset: u32,
+        mats: &crate::temporal::ObjVelUniform,
+        cam_delta: [f32; 3],
+        scene_depth: &wgpu::TextureView,
+    ) {
+        let p = &self.last_params;
+        let lanes = [
+            p.wind_strength, p.wind_direction,
+            p.wind_advection[0], p.wind_advection[1], p.wind_advection[2], p.wind_advection[3],
+            p.wind_flutter[0], p.wind_flutter[1], p.wind_flutter[2], p.wind_flutter[3],
+        ];
+        let prev = self.velocity_prev_lanes.replace(Some(lanes)).unwrap_or(lanes);
+        let native_tufts = p.native_tuft[0] > 0.5 && p.near_blades_only > 0.0 && !self.near_draws_cards();
+        if !self.enabled || !self.have_heightmap || !native_tufts {
+            return;
+        }
+        static OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *OFF.get_or_init(|| std::env::var("WGR_GRASS_VELOCITY").as_deref() == Ok("0")) {
+            return;
+        }
+        let mut data = [0.0f32; 68];
+        data[0..16].copy_from_slice(&mats.jittered_vp);
+        data[16..32].copy_from_slice(&mats.cur_vp);
+        data[32..48].copy_from_slice(&mats.prev_vp);
+        data[48..52].copy_from_slice(&mats.misc);
+        data[52..55].copy_from_slice(&cam_delta);
+        data[56] = prev[0];
+        data[57] = prev[1];
+        data[60..64].copy_from_slice(&prev[2..6]);
+        data[64..68].copy_from_slice(&prev[6..10]);
+        queue.write_buffer(&self.velocity_uniform, 0, bytemuck::cast_slice(&data));
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("wgr_grass_velocity_bind"),
+            layout: &self.velocity_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: self.velocity_uniform.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(scene_depth) },
+            ],
+        });
+        static LIVE: std::sync::Once = std::sync::Once::new();
+        LIVE.call_once(|| eprintln!("[wgr] grass velocity live: native near-ring tufts write motion vectors"));
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("wgr_grass_velocity"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&self.velocity_pipeline);
+        pass.set_bind_group(0, camera_bind, &[camera_offset]);
+        pass.set_bind_group(1, &self.terrain_bind, &[]);
+        pass.set_bind_group(2, &self.data_bind, &[]);
+        pass.set_bind_group(3, &bind, &[]);
+        pass.set_index_buffer(self.near_index.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed_indirect(&self.indirect, 0);
+    }
+
     /// Near grass always casts. When photographed clump cards are enabled, the
     /// mid cards also enter the cascade: otherwise they look ungrounded and
     /// cannot shade each other or the terrain at their visible range.
@@ -3292,6 +3451,8 @@ mod tests {
     #[test]
     fn both_grass_shaders_consume_integrated_wind_phases()
     {
+        assert!(SHADER.contains("lanes.advection = grass.wind_advection;"));
+        assert!(SHADER.contains("lanes.flutter = grass.wind_flutter;"));
         for (name, src) in [("grass.wgsl", SHADER), ("grass_shadow.wgsl", SHADOW)]
         {
             for (term, phase) in [("broad_scroll", "grass.wind_advection.xy"),
@@ -3303,8 +3464,11 @@ mod tests {
                     .find(&head)
                     .unwrap_or_else(|| panic!("{name} has no `{head}`"));
                 let end = start + src[start..].find(';').expect("unterminated statement");
+                // RFG-142: grass.wgsl reads the phase through WindLanes (filled from the uniform by
+                // wind_lanes_now, or from the previous frame's lanes for motion vectors).
+                let via_lanes = phase.replace("grass.wind_", "lanes.").replace("lanes.advection", "lanes.advection");
                 assert!(
-                    src[start..end].contains(phase),
+                    src[start..end].contains(phase) || src[start..end].contains(via_lanes.as_str()),
                     "{name}: `{term}` does not read the integrated phase"
                 );
             }

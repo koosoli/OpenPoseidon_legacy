@@ -882,9 +882,31 @@ fn density_field(world_xz: vec2<f32>) -> f32 {
 
 // The renderer integrates the scroll slider and weather into shared phases.
 // Reading the phase here avoids t * v(t), whose jumps grow with mission age.
+// RFG-142: the wind lanes that move from frame to frame, so the grass velocity pass can evaluate
+// the same field for the PREVIOUS frame (motion vectors) -- see vs_grass_velocity.
+struct WindLanes {
+    strength: f32,
+    direction: f32,
+    advection: vec4<f32>,
+    flutter: vec4<f32>,
+};
+
+fn wind_lanes_now() -> WindLanes {
+    var lanes: WindLanes;
+    lanes.strength = grass.wind_strength;
+    lanes.direction = grass.wind_direction;
+    lanes.advection = grass.wind_advection;
+    lanes.flutter = grass.wind_flutter;
+    return lanes;
+}
+
 fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField {
-    let strength = clamp(grass.wind_strength, 0.0, 3.0);
-    let base_angle = grass.wind_direction * 0.01745329252;
+    return sample_wind_field_lanes(world_xz, height_t, seed, wind_lanes_now());
+}
+
+fn sample_wind_field_lanes(world_xz: vec2<f32>, height_t: f32, seed: f32, lanes: WindLanes) -> WindField {
+    let strength = clamp(lanes.strength, 0.0, 3.0);
+    let base_angle = lanes.direction * 0.01745329252;
     let base_direction = vec2<f32>(cos(base_angle), sin(base_angle));
     // Advect two fields at distinct scales.  The broad field turns coherent
     // gusts gradually; the smaller field supplies strength and tip flutter.
@@ -893,8 +915,8 @@ fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField
     // which is also the direction blades bend. Sampling noise at `p + v*t`
     // makes the pattern travel along `-v`, so the scroll is negated -- gust
     // fronts previously swept across the field opposite to the blades' lean.
-    let broad_scroll = grass.wind_advection.xy;
-    let gust_scroll = grass.wind_advection.zw;
+    let broad_scroll = lanes.advection.xy;
+    let gust_scroll = lanes.advection.zw;
     let direction_noise = clump_noise(world_xz + broad_scroll, 0.006, 0x0d7e31a5u);
     // Stretch the existing gust sample into coherent fronts perpendicular to
     // the wind. Integrated phase keeps their location stable when weather or
@@ -903,7 +925,7 @@ fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField
     let front_size = max(grass.native2.z, 10.0);
     // Frozen heading lives in the existing flutter spare lanes. Changing the
     // wind turns transport velocity, never absolute world-space coordinates.
-    let front_direction = grass.wind_flutter.zw;
+    let front_direction = lanes.flutter.zw;
     let cross_direction = vec2<f32>(-front_direction.y, front_direction.x);
     let front_position = vec2<f32>(dot(gust_position, front_direction),
                                   dot(gust_position, cross_direction) / 3.0) / front_size;
@@ -916,7 +938,7 @@ fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField
     let local_gust = mix(0.18, 1.0, gust_pulse);
     let gust = select(local_gust, mix(0.55, local_gust, clamp(grass.native2.y, 0.0, 1.0)), grass.native2.y >= 0.0);
     let direction_angle = base_angle + (direction_noise - 0.5) * min(strength, 1.5) * 1.10;
-    let flutter_scroll = grass.wind_flutter.xy;
+    let flutter_scroll = lanes.flutter.xy;
     let flutter_noise = clump_noise(world_xz + flutter_scroll + base_direction * (height_t * height_t * 4.0) +
                                     vec2<f32>(seed * 19.0, seed * 31.0),
                                     0.105, 0x3f5a91c7u);
@@ -1440,15 +1462,26 @@ struct VsOut {
     @location(6) @interpolate(flat) blade_taper: f32,
 };
 
-// RFG-117: one Reforger PlantMat plant. `native_tuft.y` crossed cards, each showing a WHOLE atlas
-// tuft (layer hashed per card; the C++ upload fills the eight layers in proportion to the
-// PlantMat's Distribution), as wide as the tuft's own rectangle is (tuft_aspect), as tall as
-// Height x that rectangle's ScaleDistribution x HeightRandomOffset jitter, leaning Zenith +-
-// ZenithRandomOffset degrees. No taper: the silhouette is the atlas alpha (fs_grass_native_tuft*).
-// The old near blade squeezed a 2:1 tuft into a 3 cm tapered strip -- the solid dark "commas"
-// that popped under a moving camera. Blade slots past the card count collapse outside clip space.
-fn vs_native_tuft(inst: vec4<f32>, inst_packed: vec4<u32>, card: u32, t: f32, left: bool) -> VsOut {
-    var out: VsOut;
+// RFG-142: native tufts sway visibly in calm weather too. The live wind strength is speed x 0.2 x
+// gain -- ~0.3 on a calm Everon day, which bent a 0.6 m tuft's tip 1-8 cm and read as frozen
+// (owner: "no wind sway"). Floored like the trees' calm floor; stronger wind still scales it.
+const NATIVE_TUFT_WIND_FLOOR: f32 = 0.8;
+
+struct NativeTuftGeo {
+    valid: bool,
+    local: vec3<f32>,
+    axis: vec3<f32>,
+    up: vec3<f32>,
+    u: f32,
+    layer_index: u32,
+    gust: f32,
+};
+
+// One Reforger PlantMat card's corner, relative to its instance, under the given wind lanes.
+fn native_tuft_geometry(inst: vec4<f32>, inst_packed: vec4<u32>, card: u32, t: f32, left: bool,
+                        lanes: WindLanes) -> NativeTuftGeo {
+    var g: NativeTuftGeo;
+    g.valid = false;
     // RFG-138: this cell's PlantMat set -- wheat on a crop field, Grass_02's own tufts on Grass_02.
     let run = instance_layer_run(inst_packed.w);
     let sets = blade_sets_on();
@@ -1461,9 +1494,7 @@ fn vs_native_tuft(inst: vec4<f32>, inst_packed: vec4<u32>, card: u32, t: f32, le
     }
     let cards = u32(clamp(p0.x, 1.0, 6.0));
     if (card >= cards) {
-        out.clip = vec4<f32>(2.0, 2.0, 2.0, 1.0);
-        out.normal = vec3<f32>(0.0, 1.0, 0.0);
-        return out;
+        return g;
     }
     let seed = inst.w;
     let pick = hash11(inst.xz + vec2<f32>(f32(card) * 31.0 + 5.0, f32(card) * 17.0 + 13.0));
@@ -1484,28 +1515,131 @@ fn vs_native_tuft(inst: vec4<f32>, inst_packed: vec4<u32>, card: u32, t: f32, le
     let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (depth * crush);
     // Crossed evenly over half a turn, the plant as a whole turned by its seed.
     let yaw = seed * 6.2831853 + f32(card) * (3.14159265 / f32(cards));
-    let axis = vec3<f32>(cos(yaw), 0.0, sin(yaw));
+    g.axis = vec3<f32>(cos(yaw), 0.0, sin(yaw));
     let facing = vec3<f32>(-sin(yaw), 0.0, cos(yaw));
     let lean_rand = hash11(inst.xz + vec2<f32>(f32(card) * 11.0 + 3.0, 97.0));
     let zenith = radians(clamp(p0.y + (lean_rand - 0.5) * 2.0 * p0.z, -60.0, 60.0));
-    let up = vec3<f32>(0.0, cos(zenith), 0.0) + facing * sin(zenith);
-    let wind = sample_wind_field(inst.xz, t, seed + pick);
-    let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * grass.wind_strength *
+    g.up = vec3<f32>(0.0, cos(zenith), 0.0) + facing * sin(zenith);
+    let wind = sample_wind_field_lanes(inst.xz, t, seed + pick, lanes);
+    // The bend scales with the card's own height, so a 0.2 m stubble and a 0.6 m wheat head lean
+    // by the same ANGLE (it was absolute metres, tuned for 0.6 m).
+    let sway = max(lanes.strength, NATIVE_TUFT_WIND_FLOOR) * (height / 0.6);
+    let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * sway *
         (0.035 + 0.21 * wind.gust + wind.turbulence) * (1.0 - depth * crush);
-    let u = select(1.0, 0.0, left);
-    let local = axis * ((u - 0.5) * height * aspect) + up * (crushed_height * t) + (wind_bend + crush_bend) * (t * t);
-    let rel = inst.xyz + local - frame.cam_pos.xyz;
-    out.clip = reverse_z(frame.proj * frame.view * vec4<f32>(rel, 1.0));
-    out.world_rel = rel;
-    out.normal = normalize(cross(axis, up));
-    out.height_t = t;
-    out.seed = seed;
-    out.wind_gust = wind.gust;
+    g.u = select(1.0, 0.0, left);
+    g.local = g.axis * ((g.u - 0.5) * height * aspect) + g.up * (crushed_height * t) +
+        (wind_bend + crush_bend) * (t * t);
     // RFG-138: set s owns array layers 16s..16s+7 (colour) and 16s+8.. (its SatMapBlendMask), so
     // native_sat_mask's +8 stays inside the set.
-    out.blade_uv = vec4<f32>(u, 1.0 - t, f32(bset * 16u + layer), blade_texture_strength(rel));
+    g.layer_index = bset * 16u + layer;
+    g.gust = wind.gust;
+    g.valid = true;
+    return g;
+}
+
+// RFG-117: one Reforger PlantMat plant. `native_tuft.y` crossed cards, each showing a WHOLE atlas
+// tuft, as wide as the tuft's own rectangle is (tuft_aspect), as tall as Height x that rectangle's
+// ScaleDistribution x HeightRandomOffset jitter, leaning Zenith +- ZenithRandomOffset degrees. No
+// taper: the silhouette is the atlas alpha (fs_grass_native_tuft*). Card slots past the card count
+// collapse outside clip space.
+fn vs_native_tuft(inst: vec4<f32>, inst_packed: vec4<u32>, card: u32, t: f32, left: bool) -> VsOut {
+    var out: VsOut;
+    let g = native_tuft_geometry(inst, inst_packed, card, t, left, wind_lanes_now());
+    if (!g.valid) {
+        out.clip = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        out.normal = vec3<f32>(0.0, 1.0, 0.0);
+        return out;
+    }
+    let rel = inst.xyz + g.local - frame.cam_pos.xyz;
+    out.clip = reverse_z(frame.proj * frame.view * vec4<f32>(rel, 1.0));
+    out.world_rel = rel;
+    out.normal = normalize(cross(g.axis, g.up));
+    out.height_t = t;
+    out.seed = inst.w;
+    out.wind_gust = g.gust;
+    out.blade_uv = vec4<f32>(g.u, 1.0 - t, f32(g.layer_index), blade_texture_strength(rel));
     out.blade_taper = 1.0;
     return out;
+}
+
+// RFG-142: motion vectors for the native near ring. Without them DLSS took every swaying tuft for
+// a static surface and smeared it (the failure RFG-136 fixed for trees). Same geometry as
+// vs_native_tuft, evaluated for this frame's wind lanes and the previous frame's; conventions as
+// in velocity_obj.wgsl (jittered raster for the depth test, unjittered matrices for the motion,
+// previous position relative to the previous camera, output = UV-space motion current -> previous).
+struct GrassVelParams {
+    jittered_vp: mat4x4<f32>,
+    cur_vp: mat4x4<f32>,
+    prev_vp: mat4x4<f32>,
+    misc: vec4<f32>,           // x = relative depth tolerance
+    cam_delta: vec4<f32>,      // cam_cur - cam_prev
+    prev_wind: vec4<f32>,      // x = strength, y = direction (deg)
+    prev_advection: vec4<f32>,
+    prev_flutter: vec4<f32>,
+};
+@group(3) @binding(0) var<uniform> gvel: GrassVelParams;
+@group(3) @binding(1) var gvel_scene_depth: texture_depth_2d;
+
+struct GrassVelOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) cur_clip: vec4<f32>,
+    @location(1) prev_clip: vec4<f32>,
+    @location(2) uv: vec3<f32>,
+};
+
+@vertex
+fn vs_grass_velocity(@builtin(vertex_index) vertex_index: u32,
+                     @builtin(instance_index) instance_index: u32) -> GrassVelOut {
+    var out: GrassVelOut;
+    out.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    if (!native_tufts_on()) {
+        return out;
+    }
+    let inst = instances[instance_index].pos_seed;
+    let inst_packed = instances[instance_index].packed;
+    let blade = vertex_index / VERTS_PER_NEAR_BLADE_UNIQUE;
+    let packed = vertex_index % VERTS_PER_NEAR_BLADE_UNIQUE;
+    let t = f32(packed / 2u) / f32(BLADE_SEGMENTS);
+    let left = (packed % 2u) == 0u;
+    let cur = native_tuft_geometry(inst, inst_packed, blade, t, left, wind_lanes_now());
+    if (!cur.valid) {
+        return out;
+    }
+    var prev_lanes: WindLanes;
+    prev_lanes.strength = gvel.prev_wind.x;
+    prev_lanes.direction = gvel.prev_wind.y;
+    prev_lanes.advection = gvel.prev_advection;
+    prev_lanes.flutter = gvel.prev_flutter;
+    let prev = native_tuft_geometry(inst, inst_packed, blade, t, left, prev_lanes);
+    let base = inst.xyz - frame.cam_pos.xyz;
+    let cur_pos = vec4<f32>(base + cur.local, 1.0);
+    let prev_pos = vec4<f32>(base + gvel.cam_delta.xyz + prev.local, 1.0);
+    var raster = gvel.jittered_vp * cur_pos;
+    raster.z = raster.w - raster.z;
+    out.pos = raster;
+    out.cur_clip = gvel.cur_vp * cur_pos;
+    out.prev_clip = gvel.prev_vp * prev_pos;
+    out.uv = vec3<f32>(cur.u, 1.0 - t, f32(cur.layer_index));
+    return out;
+}
+
+@fragment
+fn fs_grass_velocity(in: GrassVelOut) -> @location(0) vec2<f32> {
+    // The card's own silhouette, as the colour pass cuts it.
+    if (textureSampleLevel(blade_tex, blade_samp, in.uv.xy, blade_layer(in.uv.z), 0.0).a <
+        tuft_alpha_cutoff()) {
+        discard;
+    }
+    // Visible surface only (velocity_obj.wgsl fs_velocity): no depth attachment on this pass.
+    let scene_d = textureLoad(gvel_scene_depth, vec2<i32>(in.pos.xy), 0);
+    if (in.pos.z < scene_d * (1.0 - gvel.misc.x)) {
+        discard;
+    }
+    if (in.prev_clip.w <= 1e-6) {
+        return vec2<f32>(0.0, 0.0);
+    }
+    let d = in.cur_clip.xy / max(in.cur_clip.w, 1e-6) - in.prev_clip.xy / in.prev_clip.w;
+    return vec2<f32>(d.x * 0.5, d.y * -0.5);
 }
 
 @vertex
