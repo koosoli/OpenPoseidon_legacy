@@ -2120,6 +2120,12 @@ void StallMonitor()
         LOG_WARN(Script, "Arma 2 stall: no simulation step for {} s; evaluator last started: {}", stalled, expr);
         if (stalled == 10 || stalled == 30)
             Poseidon::Foundation::LogStallThreadStack();
+        if (stalled >= 60)
+        {
+            // a test run that cannot continue ends instead of holding the batch
+            LOG_ERROR(Script, "Arma 2 stall: giving up after {} s (test mode)", stalled);
+            std::_Exit(3);
+        }
     }
 }
 
