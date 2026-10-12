@@ -175,10 +175,7 @@ bool SoundSystemSteam::InitImpl(bool openDevice)
     SetWaveVolume(5.f);
     SetCDVolume(5.f);
 
-    LoadConfig();
-    // Reverb is always on: start with the default environment's preset rather
-    // than waiting for the first SetEnvironment change.
-    ApplyReverb();
+    LoadConfig(); // applies the EAX (reverb) setting, and with it the default environment's preset
 
     LOG_INFO(Audio, "Init OK: Steam Audio {}.{}.{} on '{}' ({} Hz, {} output)", STEAMAUDIO_VERSION_MAJOR,
              STEAMAUDIO_VERSION_MINOR, STEAMAUDIO_VERSION_PATCH,
@@ -365,10 +362,23 @@ void SoundSystemSteam::UpdateDeviceState()
 
 // --- Reverb (environment presets) -------------------------------------------
 
+bool SoundSystemSteam::EnableEAX(bool val)
+{
+    _eaxEnabled = val;
+    ApplyReverb();
+    LOG_INFO(Audio, "EAX (environment reverb) {}", _eaxEnabled ? "enabled" : "disabled");
+    return _eaxEnabled;
+}
+
 void SoundSystemSteam::ApplyReverb()
 {
     if (!_mixer)
         return;
+    if (!_eaxEnabled)
+    {
+        _mixer->SetReverb(nullptr);
+        return;
+    }
     const EFX::PresetEntry* entry = EFX::FindPreset(PresetForEnvironment(_env.type));
     if (!entry)
         return;
@@ -389,7 +399,7 @@ void SoundSystemSteam::SetEnvironment(const SoundEnvironment& env)
 bool SoundSystemSteam::ApplyPresetByName(const char* presetName, float size)
 {
     const EFX::PresetEntry* entry = EFX::FindPreset(presetName);
-    if (!entry || !_mixer)
+    if (!entry || !_mixer || !_eaxEnabled)
         return false;
     const EFXEAXREVERBPROPERTIES props = EFX::ScaledPreset(*entry, size);
     _mixer->SetReverb(&props);
@@ -467,6 +477,7 @@ void SoundSystemSteam::LoadConfig()
     SetWaveVolume(cfg.effectsVolume / 10.0f);
     SetSpeechVolume(cfg.speechVolume / 10.0f);
     SetHrtfMode(static_cast<HrtfMode>(std::clamp(cfg.hrtfMode, 0, 2)));
+    EnableEAX(cfg.eaxEnabled);
 
     if (!cfg.outputDevice.empty())
         SwitchOutputDevice(cfg.outputDevice.c_str());
@@ -487,6 +498,7 @@ void SoundSystemSteam::SaveConfig()
     cfg.effectsVolume = (int)(GetWaveVolume() * 10.0f + 0.5f);
     cfg.speechVolume = (int)(GetSpeechVolume() * 10.0f + 0.5f);
     cfg.hrtfMode = static_cast<int>(_hrtfMode);
+    cfg.eaxEnabled = _eaxEnabled;
     cfg.outputDevice = _selectedDevice;
     cfg.inputDevice = _selectedInputDevice;
 

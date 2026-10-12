@@ -748,13 +748,15 @@ void Mixer::MixVoiceFrame(MixVoice& v, float* sendBuf)
     }
     v._lastGain = g1;
 
-    // Reverb send: not distance-attenuated by the room rolloff (0 in every
-    // preset) but faded by the reverb's own decay over distance:
-    // 0.001^(d / (decay * c)), i.e. -60 dB after one decay time of travel.
+    // Reverb send: the source's DISTANCE-ATTENUATED level (OpenAL Soft's auxiliary send applies
+    // the source's distance gain too -- AL_AUXILIARY_SEND_FILTER_GAIN_AUTO), then faded by the
+    // reverb's own decay over distance: 0.001^(d / (decay * c)). The port sent the full,
+    // unattenuated gain, so a shot 300 m away drove the reverb as hard as one beside the
+    // listener and everything echoed hugely (owner, 2026-10-12).
     if (p.reverbSend && _reverbOn.load(std::memory_order_acquire))
     {
         const float decay = std::max(_reverb.DecayTime(), 0.1f);
-        const float w1 = std::min(p.gain, 1.f) * std::pow(0.001f, dist / (decay * kSpeedOfSound));
+        const float w1 = std::min(p.gain, 1.f) * att * std::pow(0.001f, dist / (decay * kSpeedOfSound));
         const float w0 = v._lastWet;
         const float dw = (w1 - w0) / kFrameSize;
         for (int i = 0; i < kFrameSize; i++)
