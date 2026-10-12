@@ -146,6 +146,14 @@ struct Runtime
     std::vector<Task> tasks;
     std::map<const void*, int> currentTask;
     int diaryRecords = 0;
+    struct DiaryEntry
+    {
+        std::string subject;
+        std::string title;
+        std::string text;
+    };
+    std::vector<DiaryEntry> diary;
+    int revision = 0; // bumped whenever the diary or a task changes (briefing refresh)
     // kb: topic -> parsed bikb, per speaker
     std::map<std::string, std::shared_ptr<ParamFile>> bikbFiles;                 // file -> parsed
     std::map<const void*, std::map<std::string, std::string>> topics;            // speaker -> topic -> file
@@ -287,6 +295,7 @@ GameValue A2CreateSimpleTask(const GameState* state, GameValuePar oper1, GameVal
     task.owner = GetObject(oper1);
     auto& tasks = RT().tasks;
     tasks.push_back(task);
+    RT().revision++;
     LOG_INFO(Mission, "Arma 2: task '{}' created", task.name);
     return TaskValue(static_cast<int>(tasks.size()) - 1);
 }
@@ -298,8 +307,9 @@ GameValue A2SetSimpleTaskDescription(const GameState*, GameValuePar oper1, GameV
         const GameArrayType& args = oper2;
         if (args.Size() > 0 && args[0].GetType() == GameString)
             task->description = (const char*)RString(args[0]);
-        if (args.Size() > 1 && args[1].GetType() == GameString && task->name.empty())
+        if (args.Size() > 1 && args[1].GetType() == GameString && RString(args[1]).GetLength() > 0)
             task->name = (const char*)RString(args[1]);
+        RT().revision++;
     }
     return NOTHING;
 }
@@ -322,6 +332,7 @@ GameValue A2SetTaskState(const GameState* state, GameValuePar oper1, GameValuePa
     if (upper == task->state)
         return NOTHING;
     task->state = upper;
+    RT().revision++;
     LOG_INFO(Mission, "Arma 2: task '{}' -> {}", task->name, upper);
     if (upper == "SUCCEEDED" || upper == "FAILED" || upper == "CANCELED")
     {
@@ -414,9 +425,15 @@ GameValue A2CreateDiaryRecord(const GameState*, GameValuePar oper1, GameValuePar
     if (args.Size() > 1 && args[1].GetType() == GameArray)
     {
         const GameArrayType& entry = args[1];
+        Runtime::DiaryEntry record;
+        record.subject = args[0].GetType() == GameString ? (const char*)RString(args[0]) : "Diary";
         if (entry.Size() > 0 && entry[0].GetType() == GameString)
-            LOG_INFO(Mission, "Arma 2: diary '{}': {}", (const char*)RString(args[0]),
-                     (const char*)RString(entry[0]));
+            record.title = (const char*)RString(entry[0]);
+        if (entry.Size() > 1 && entry[1].GetType() == GameString)
+            record.text = (const char*)RString(entry[1]);
+        LOG_INFO(Mission, "Arma 2: diary '{}': {}", record.subject, record.title);
+        RT().diary.push_back(std::move(record));
+        RT().revision++;
     }
     return GameValue(RString(("::DIARY::" + std::to_string(++RT().diaryRecords)).c_str()));
 }
@@ -1055,6 +1072,109 @@ GameValue A2Faction(const GameState*, GameValuePar oper1)
     return GameValue(RString(EntryText(cls, "faction").c_str()));
 }
 } // namespace
+
+// Arma 2 briefing: the diary and the simple tasks, as the HTML sections the CWA map
+// notebook shows ("Main" = diary, "Plan" = tasks), added when the mission's own
+// briefing.html has none; <localized id="..."/> tags are resolved.
+namespace
+{
+std::string SanitizeRichText(const std::string& in)
+{
+    std::string out;
+    for (size_t i = 0; i < in.size(); i++)
+    {
+        if (in[i] != '<')
+        {
+            out += in[i];
+            continue;
+        }
+        const size_t end = in.find('>', i);
+        if (end == std::string::npos)
+            break;
+        std::string tag = Lower(in.substr(i + 1, end - i - 1));
+        while (!tag.empty() && (tag.back() == '/' || tag.back() == ' '))
+            tag.pop_back();
+        const std::string name = tag.substr(0, tag.find(' '));
+        if (name == "br")
+            out += "<br>";
+        else if (name == "b" || name == "/b" || name == "i" || name == "/i" || name == "p" || name == "/p")
+            out += "<" + name + ">";
+        i = end;
+    }
+    return out;
+}
+
+std::string ResolveLocalizedTags(const std::string& html)
+{
+    std::string out;
+    size_t pos = 0;
+    while (true)
+    {
+        const size_t at = html.find("<localized", pos);
+        if (at == std::string::npos)
+        {
+            out.append(html, pos, std::string::npos);
+            return out;
+        }
+        out.append(html, pos, at - pos);
+        const size_t end = html.find('>', at);
+        if (end == std::string::npos)
+        {
+            out.append(html, at, std::string::npos);
+            return out;
+        }
+        const std::string tag = html.substr(at, end - at);
+        const size_t id = tag.find("id=");
+        std::string key;
+        if (id != std::string::npos && id + 4 <= tag.size())
+        {
+            const char q = tag[id + 3];
+            const size_t close = tag.find(q, id + 4);
+            if (close != std::string::npos)
+                key = tag.substr(id + 4, close - id - 4);
+        }
+        if (!key.empty())
+            out += (const char*)LocalizeString(key.c_str());
+        pos = end + 1;
+    }
+}
+} // namespace
+
+int Arma2BriefingRevision()
+{
+    return Arma1Compat::Generation() == 2 ? RT().revision : 0;
+}
+
+std::string Arma2BriefingHtml(const std::string& html)
+{
+    if (Arma1Compat::Generation() != 2)
+        return html;
+    std::string out = ResolveLocalizedTags(html);
+    const std::string lower = Lower(out);
+    const Runtime& rt = RT();
+    if (lower.find("name=\"main\"") == std::string::npos && !rt.diary.empty())
+    {
+        out += "\n<hr>\n<p><a name=\"Main\"></a></p>\n";
+        for (auto it = rt.diary.rbegin(); it != rt.diary.rend(); ++it) // newest first, as Arma 2 lists them
+            out += "<h2>" + SanitizeRichText(it->title) + "</h2>\n<p>" + SanitizeRichText(it->text) + "</p>\n";
+    }
+    if (lower.find("name=\"plan\"") == std::string::npos && !rt.tasks.empty())
+    {
+        out += "\n<hr>\n<p><a name=\"Plan\"></a></p>\n";
+        std::vector<std::string> shown;
+        for (const Task& t : rt.tasks)
+        {
+            if (std::find(shown.begin(), shown.end(), t.name) != shown.end())
+                continue; // one entry per task, not per group member
+            shown.push_back(t.name);
+            const char* state = t.state == "SUCCEEDED" ? " (accomplished)" : t.state == "FAILED" ? " (failed)"
+                                : t.state == "CANCELED" ? " (canceled)" : "";
+            out += "<h2>" + SanitizeRichText(t.name) + state + "</h2>\n<p>" + SanitizeRichText(t.description) + "</p>\n";
+        }
+    }
+    out += "\n<hr>\n";
+    return out;
+}
 
 // Runs the scripted FSMs one transition per simulation step (World::SimulateScripts).
 void Arma2RuntimeSimulate()

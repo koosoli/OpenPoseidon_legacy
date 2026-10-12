@@ -20,6 +20,11 @@
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <Poseidon/UI/Locale/MissionHtmlLocalization.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <string>
+
+std::string Arma2BriefingHtml(const std::string& html); // GameStateExtA2.cpp
+int Arma2BriefingRevision();                           // GameStateExtA2.cpp
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 #include <Poseidon/Foundation/Strings/Bstring.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
@@ -611,7 +616,19 @@ void DisplayMap::ReloadBriefingContent(RString activeSection)
     if (!_briefing)
         return;
 
-    LoadLocalizedMissionHtml(_briefing, GetBriefingFile());
+    if (Arma1Compat::Generation() == 2)
+    {
+        // Arma 2 briefs through the diary and simple tasks (Arma2BriefingHtml).
+        const RString file = GetBriefingFile();
+        const std::string html =
+            Arma2BriefingHtml(file.GetLength() > 0 ? std::string((const char*)LoadLocalizedMissionHtmlUtf8(file)) : "");
+        _briefing->Init();
+        _briefing->LoadBuffer(file.GetLength() > 0 ? (const char*)file : "briefing.html", html.c_str(), false);
+    }
+    else
+    {
+        LoadLocalizedMissionHtml(_briefing, GetBriefingFile());
+    }
 
     AIUnit* unit = GWorld->FocusOn();
     int section = FindSectionForUnit(_briefing, "Main", unit);
