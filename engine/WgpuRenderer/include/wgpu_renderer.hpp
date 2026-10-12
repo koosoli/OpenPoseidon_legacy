@@ -2540,6 +2540,11 @@ extern "C"
      * indices; returns a non-zero handle, or 0 on failure. */
     WGR_API WgrMesh wgr_mesh_create(WgrRenderer* renderer, WgrSlice<WgrMeshVertex> verts, WgrSlice<uint32_t> indices);
 
+    /* RFG-127: as wgr_mesh_create, for static geometry never passed to wgr_mesh_update.
+     * Byte-identical content shares one pool allocation (WGR_MESH_DEDUP=0 disables). */
+    WGR_API WgrMesh wgr_mesh_create_shared(WgrRenderer* renderer, WgrSlice<WgrMeshVertex> verts,
+                                           WgrSlice<uint32_t> indices);
+
     /* Re-upload vertex data for an existing mesh (dynamic / animated shapes).
      * The topology (indices) is unchanged; the vertex count must not exceed the
      * mesh's original vertex count. */

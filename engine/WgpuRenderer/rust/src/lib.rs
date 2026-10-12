@@ -6965,6 +6965,24 @@ impl Renderer {
         }
     }
 
+    // RFG-127: the retained static path. Same pool republish as mesh_create; a shared mesh is
+    // never registered with the off-handle uploader, which exists to rewrite vertices in place.
+    fn mesh_create_shared(&mut self, verts: &[WgrMeshVertex], indices: &[u32]) -> u64 {
+        let id = self
+            .gfx3d
+            .mesh_create_shared(&self.device, &self.queue, verts, indices);
+        if id != 0 {
+            self.publish_pool_to_uploader();
+            if !self.gfx3d.mesh_is_shared(id) {
+                if let Some((vbase, vert_count)) = self.gfx3d.mesh_upload_meta(id) {
+                    self.uploader
+                        .register_mesh(id, uploader::MeshUpload { vbase, vert_count });
+                }
+            }
+        }
+        id
+    }
+
     fn mesh_create(&mut self, verts: &[WgrMeshVertex], indices: &[u32]) -> u64 {
         let id = self
             .gfx3d

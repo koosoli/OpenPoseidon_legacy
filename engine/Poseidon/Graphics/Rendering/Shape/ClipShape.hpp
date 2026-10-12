@@ -67,6 +67,8 @@ bool SectionRetainedRefuses(const ShapeSectionInfo &sec);
 // and it is what lets a tree whose LOD 0 is all IsAlpha leaf cards register that LOD instead
 // of its coarser neighbour. True translucency (Blend class, Default route) stays the CPU's.
 bool SectionGpuOwned(const ShapeSectionInfo &sec);
+//! RFG-123: authored Enfusion glass blends (POSEIDON_AUTHORED_GLASS_BLEND=0 turns it off).
+bool AuthoredGlassBlendEnabled();
 
 struct ShapeSection: public ShapeSectionInfo
 {

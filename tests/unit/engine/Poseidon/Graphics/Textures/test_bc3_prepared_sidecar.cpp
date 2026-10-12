@@ -196,7 +196,28 @@ TEST_CASE("Prepared composite sidecar preserves original pixels metadata and exa
     CHECK(source.GetMipmapCount() == beforeMips);
     auto rgba = beforePixels;
     for (size_t i = 0; i < rgba.size(); i += 4) std::swap(rgba[i], rgba[i+2]);
-    const auto expected = LegacyEncode(rgba, mips[0]._w, mips[0]._h);
+    auto expected = LegacyEncode(rgba, mips[0]._w, mips[0]._h);
+    if (Poseidon::AuthoredCompositeMips())
+    {
+        // RFG-112: the composite keeps the mips it was authored with, each level encoded as it
+        // is, instead of box mips regenerated from the top level.
+        Poseidon::Bc3MipChain authored;
+        const std::vector<uint8_t>* levels[] = {&beforePixels, &beforeLower, &beforeLast};
+        int w = mips[0]._w, h = mips[0]._h;
+        for (const auto* level : levels)
+        {
+            auto px = *level;
+            for (size_t i = 0; i < px.size(); i += 4) std::swap(px[i], px[i+2]);
+            const auto one = LegacyEncode(px, w, h);
+            const size_t end = one.offsets.size() > 1 ? one.offsets[1] : one.blocks.size();
+            authored.offsets.push_back(static_cast<uint32_t>(authored.blocks.size()));
+            authored.blocks.insert(authored.blocks.end(), one.blocks.begin(), one.blocks.begin() + end);
+            ++authored.levels;
+            w = std::max(w / 2, 1);
+            h = std::max(h / 2, 1);
+        }
+        expected = std::move(authored);
+    }
     Poseidon::Bc3MipChain prepared;
     CHECK_FALSE(source.TakeCompositeBc3("enfa|wrong.edds|colour.edds", 16, 16, prepared));
     CHECK_FALSE(source.TakeCompositeBc3("enfa|coverage.edds|colour.edds", 8, 16, prepared));

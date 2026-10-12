@@ -2664,6 +2664,29 @@ pub unsafe extern "C" fn wgr_mesh_create(
     .unwrap_or(0)
 }
 
+/// RFG-127: `wgr_mesh_create` for static geometry that is never updated in place; content
+/// identical to a live shared mesh reuses its pool allocation.
+///
+/// # Safety
+/// As `wgr_mesh_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_mesh_create_shared(
+    renderer: *mut WgrRenderer,
+    verts: WgrSlice<WgrMeshVertex>,
+    indices: WgrSlice<u32>,
+) -> u64 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let verts = unsafe { verts.as_slice() };
+        let indices = unsafe { indices.as_slice() };
+        renderer.mesh_create_shared(verts, indices)
+    }))
+    .unwrap_or(0)
+}
+
 /// # Safety
 /// `renderer` must be live; `verts` must be a valid slice (its data valid for its
 /// length, or null with length 0). `id` must be a handle returned by

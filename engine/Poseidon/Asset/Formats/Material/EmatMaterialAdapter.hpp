@@ -831,6 +831,39 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         AddEmatSlot(out, emat, "BCR_4", MaterialSlot::LayerColour3);
         AddEmatSlot(out, emat, "NMO_4", MaterialSlot::LayerNormal3);
     }
+    // RFG-122: a layer with a `Color_N` and no `BCR_N` is a PAINT layer -- flat colour where
+    // the mask puts it (Door_Village_E_B_INT: cream layers 2 and 3 over bare wood; window
+    // frames the same way). Unbound, the paint vanished and the door drew as its wood base
+    // plus the wear bake: dark with white blotches. Bound as a flat white source that the
+    // layer's Color_N tint (below) turns into the paint. POSEIDON_EMAT_PAINT_LAYERS=0 = off.
+    {
+        static const bool paintLayers = []
+        {
+            const char* env = std::getenv("POSEIDON_EMAT_PAINT_LAYERS");
+            return !(env && env[0] == '0');
+        }();
+        const struct { bool enabled; const char* bcr; const char* colour; MaterialSlot slot; } paint[] = {
+            {en2, "BCR_2", "Color_2", MaterialSlot::LayerColour1},
+            {en3, "BCR_3", "Color_3", MaterialSlot::LayerColour2},
+            {en4, "BCR_4", "Color_4", MaterialSlot::LayerColour3},
+        };
+        float colour[4] = {};
+        // Only with a MaskMap: it is what puts the paint anywhere. A deployed copy keeps Color_N
+        // after the converter strips MaskMap and BCR_N, and must stay a plain BaseColour.
+        const bool masked = !emat.TextureOf("MaskMap").empty();
+        for (const auto& layer : paint)
+            if (paintLayers && masked && layer.enabled && emat.TextureOf(layer.bcr).empty() && !out.Find(layer.slot) &&
+                emat.Vec4Of(layer.colour, colour) && EmatMaterial::NameMatches(emat.className, "MatPBRMulti"))
+            {
+                TranslatedSlot entry;
+                entry.slot = layer.slot;
+                entry.present = true;
+                entry.sourceStage = -1;
+                entry.texture = RvTextureRef::Parse("enfc|1.0000,1.0000,1.0000");
+                entry.channels = ChannelsForSlot(layer.slot);
+                out.slots.push_back(std::move(entry));
+            }
+    }
     AddEmatSlot(out, emat, "EnvironmentMap", MaterialSlot::Environment);
     out.globalMcr = ReadEmatGlobalMcr(emat);
 

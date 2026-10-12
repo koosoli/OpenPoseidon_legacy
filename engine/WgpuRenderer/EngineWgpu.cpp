@@ -3851,7 +3851,9 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                     op.verts[vi].conform = base + op.crownComp[vi];
                 }
             }
-            _meshIdOf[op.mesh] = wgr_mesh_create(
+            // RFG-127: retained geometry is never rewritten in place, so identical copies
+            // (a prefab's colour variants) share one pool allocation.
+            _meshIdOf[op.mesh] = wgr_mesh_create_shared(
                 _renderer, AsMeshVerts(op.verts),
                 WgrSlice<uint32_t>{reinterpret_cast<const uint32_t*>(op.indices.data()), U32(op.indices.size())});
             if (_geometryOwnerLedger)
@@ -9095,10 +9097,24 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         alphaClass == Poseidon::AlphaStats::Blend && GpuSectionMaterialUsesLeafCards(debugSection.surfMat);
     // An OpacityMap material that authors `BlendMode AlphaBlend` (wire mesh,
     // glass) blends; testing it would keep what the author meant translucent.
-    const bool materialBlends = GpuEmatBlends(debugSection.surfMat);
+    // RFG-123: plus the constant-alpha `enfk|` pane, which names no OpacityMap (window_glass:
+    // AlphaMul 0.243, AlphaTest 0.01 -- the AlphaTest made it "leaf cards", forced opaque below).
+    const bool constantAlphaGlass = AuthoredGlassBlendEnabled() && texture &&
+                                    render::IsEnfusionConstantAlphaTexture(texture->Name());
+    const bool materialBlends = GpuEmatBlends(debugSection.surfMat) || constantAlphaGlass;
+    const bool authoredGlass = AuthoredGlassBlendEnabled() && tex != 0 && texture &&
+                               (constantAlphaGlass || (materialBlends && render::IsEnfusionCoverageTexture(texture->Name())));
     const bool materialCutout =
         materialUsesLeafCards && !materialBlends && GpuSectionMaterialIsCutout(debugSection.surfMat, texture);
-    if (GpuTextureIsBarkOrTrunk(texture))
+    if (authoredGlass)
+    {
+        // RFG-123: the material's BlendMode AlphaBlend is the authority. The `enfa|` class is
+        // Cutout by rule (RFG-055, for leaves) and the `enfk|` spec is not IsAlpha, so neither
+        // the spec nor the class can say this; the CPU blend revisit (SectionIsBlend) draws it.
+        blend = render::BlendMode::AlphaBlend;
+        alphaRef = 0.0f;
+    }
+    else if (GpuTextureIsBarkOrTrunk(texture))
     {
         // The common legacy section descriptor itself can carry a stale alpha
         // reference even for TreeAdvTrunk.  Texture role is authoritative for

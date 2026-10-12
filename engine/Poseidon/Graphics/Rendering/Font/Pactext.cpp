@@ -2421,7 +2421,9 @@ ITextureSourceFactory* SelectTextureSourceFactory(const char* name)
     // The DDS source is the one that understands the name; hand it over before the
     // extension is looked at. The other `enf*|` names carry a real `.edds` at the end
     // and were never affected.
-    if (strncmp(name, "enfc|", 5) == 0)
+    // RFG-125: a stencil decal `enfa|<coverage>|enfc|r,g,b` ends in a colour too.
+    if (strncmp(name, "enfc|", 5) == 0 ||
+        (strncmp(name, "enf", 3) == 0 && strstr(name, "|enfc|") != nullptr))
     {
         return GTextureSourceDDSFactory;
     }

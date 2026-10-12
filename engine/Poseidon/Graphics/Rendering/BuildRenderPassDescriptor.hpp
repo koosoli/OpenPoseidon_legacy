@@ -318,6 +318,14 @@ inline bool IsEnfusionCoverageTexture(const char* texturePath)
     return texturePath != nullptr && std::strncmp(Enfusion::SkipLayerTint(texturePath), "enfa|", 5) == 0;
 }
 
+//! RFG-123: an `enfk|<alpha>|<colour>` face texture (RFG-119) is Enfusion glass that blends
+//! by its material's constant `AlphaMul`. The name is only ever built for a material that
+//! authors `BlendMode AlphaBlend`, so it is the material's own statement of translucency.
+inline bool IsEnfusionConstantAlphaTexture(const char* texturePath)
+{
+    return texturePath != nullptr && std::strncmp(Enfusion::SkipLayerTint(texturePath), "enfk|", 5) == 0;
+}
+
 inline bool IsLegacyPlantCutoutTexture(const char* texturePath)
 {
     if (!texturePath || !*texturePath)

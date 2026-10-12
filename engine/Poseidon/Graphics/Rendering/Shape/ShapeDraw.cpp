@@ -283,9 +283,37 @@ static bool SectionMaterialCullNone(const Ref<TexMaterial>& surfMat)
     return cullNone;
 }
 
+// RFG-123: Enfusion glass is translucent because its material says so, whatever the texture
+// class reads. Two shapes of it: an `OpacityMap` + `BlendMode AlphaBlend` (the dirt-atlas pane,
+// whose `enfa|` composite RFG-055 classifies Cutout for the leaf cards' sake), and a constant
+// `AlphaMul` with no map (`enfk|`). Gated on the class alone, both stayed in the opaque pass
+// and drew as solid sheets: every Everon window looked bricked up from inside.
+// POSEIDON_AUTHORED_GLASS_BLEND=0 restores the old routing for an A/B.
+bool AuthoredGlassBlendEnabled()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("POSEIDON_AUTHORED_GLASS_BLEND");
+        return !(v && v[0] == '0');
+    }();
+    return on;
+}
+
+static bool SectionAuthoredTranslucent(const ShapeSectionInfo& sec)
+{
+    auto* tex = sec.properties.GetTexture();
+    if (!tex || !AuthoredGlassBlendEnabled())
+        return false;
+    if (render::IsEnfusionConstantAlphaTexture(tex->Name()))
+        return true;
+    return render::IsEnfusionCoverageTexture(tex->Name()) && SectionMaterialEmatBlends(sec.surfMat);
+}
+
 // The single place that decides whether a section belongs in the back-to-front pass.
 static bool SectionIsBlend(const ShapeSectionInfo& sec)
 {
+    if (SectionAuthoredTranslucent(sec))
+        return true;
     auto* tex = sec.properties.GetTexture();
     if (!tex || tex->GetAlphaClass() != Poseidon::AlphaStats::Blend)
         return false;
@@ -334,6 +362,9 @@ static bool SectionIsBlend(const ShapeSectionInfo& sec)
 // today's behaviour -- which, since the route reader landed, they do.
 bool SectionRetainedRefuses(const ShapeSectionInfo& sec)
 {
+    // RFG-123: the retained path has no blend pass, so authored glass is the CPU's.
+    if (SectionAuthoredTranslucent(sec))
+        return true;
     if (!SectionIsBlend(sec))
         return false;
     const char* mat = sec.surfMat.IsNull() ? nullptr : sec.surfMat->GetName().Data();
@@ -346,6 +377,8 @@ bool SectionGpuOwned(const ShapeSectionInfo& sec)
     if (render::IsGpuOwnedSectionSpec(spec))
         return !SectionRetainedRefuses(sec);
     // IsAlpha spec. Owned only when the per-draw path would hard-test it in the opaque pass.
+    if (SectionAuthoredTranslucent(sec))
+        return false;
     const render::RenderPassDescriptor desc = render::BuildRenderPassDescriptor(render::SplitLegacy(spec));
     if (desc.blend != render::BlendMode::AlphaBlend || desc.surface != render::SurfaceMode::Default)
         return false;

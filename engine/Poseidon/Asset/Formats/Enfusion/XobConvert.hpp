@@ -85,6 +85,10 @@ struct XobMaterialSink
     virtual bool HideFaces(const std::string& materialSource) const = 0;
     virtual std::string TexturePath(const std::string& materialSource) const = 0;
     virtual std::string MaterialField(const std::string& materialSource) const = 0;
+    //! RFG-126: metres to lift a part off the surface it decorates, along its own outward
+    //! normal. Enfusion draws `MatPBRDecal` as a projected decal, so a mural authored a few
+    //! centimetres inside a wall still shows; drawn as a mesh it loses the depth test.
+    virtual float DecalLift(const std::string& /*materialSource*/) const { return 0.0f; }
 };
 
 struct TextureOptions
@@ -660,6 +664,8 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                 }
             }
 
+            const float decalLift = bakedPart != nullptr ? bakedPart->DecalLift(materialSource) : 0.0f;
+
             // Only referenced source vertices become points. Every point must be
             // referenced for the round-trip check below to be an identity.
             std::vector<int32_t> remap(part.positions.size(), -1);
@@ -678,6 +684,11 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
 
                 Fmt::MLOD::WritePoint point;
                 point.position = {part.positions[v].x, part.positions[v].y, part.positions[v].z};
+                // RFG-126: the file's normals are OUTWARD (fact 6 below), so this is off the wall.
+                if (decalLift != 0.0f && v < part.normals.size())
+                    point.position = {part.positions[v].x + decalLift * part.normals[v].x,
+                                      part.positions[v].y + decalLift * part.normals[v].y,
+                                      part.positions[v].z + decalLift * part.normals[v].z};
                 point.flags = 0;
                 writeLod.points.push_back(point);
                 // Fact 6: `.xob` normals are outward, this engine's are inward. The

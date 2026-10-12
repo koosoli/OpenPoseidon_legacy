@@ -403,6 +403,19 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
         return resolved.waterErase || (resolved.decal && resolved.colour.empty());
     }
 
+    //! RFG-126: `MatPBRDecal` faces are lifted off their wall; POSEIDON_DECAL_LIFT_CM sets it
+    //! (0 = off). Enfusion projects these decals, so their mesh need not lie in front.
+    float DecalLift(const std::string& materialSource) const override
+    {
+        static const float lift = []
+        {
+            const char* env = std::getenv("POSEIDON_DECAL_LIFT_CM");
+            const float cm = env ? static_cast<float>(std::atof(env)) : 2.0f;
+            return std::isfinite(cm) ? std::clamp(cm, 0.0f, 50.0f) * 0.01f : 0.0f;
+        }();
+        return lift > 0.0f && Resolve(materialSource).decal ? lift : 0.0f;
+    }
+
     std::string TexturePath(const std::string& materialSource) const override
     {
         const Resolved& r = Resolve(materialSource);
@@ -515,9 +528,21 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
                 // can composite one. Drawn as an ordinary face it is a white rectangle
                 // stuck to a wall, so a decal with no albedo of its own is hidden --
                 // absent is closer to right than white.
-                if (!out.decal)
+                //
+                // RFG-125: except a decal that DOES have a shape -- an OpacityMap -- and a flat
+                // `Color` to paint it with. That is a stencil (Graffiti_02: near-black spray
+                // paint, no BCRMap), and its letters are the coverage. Named
+                // `enfa|<coverage>|enfc|r,g,b`. POSEIDON_ENFUSION_PAINT_DECALS=0 hides it again.
+                static const bool paintDecals = []
+                {
+                    const char* env = std::getenv("POSEIDON_ENFUSION_PAINT_DECALS");
+                    return !(env && env[0] == '0');
+                }();
+                const bool stencil = out.decal && paintDecals && !out.opacity.empty();
+                if (!out.decal || stencil)
                     out.colour = ColourConstantOf(material);
-                out.opacity.clear();
+                if (!stencil || out.colour.empty())
+                    out.opacity.clear();
                 if (!out.colour.empty())
                     kind = ColourKind::Flat;
             }
@@ -572,7 +597,8 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
             if (GColourCensus.firstNone.empty())
                 GColourCensus.firstNone = materialSource;
         }
-        if (!out.colour.empty() && !out.opacity.empty())
+        // A flat `enfc|` colour (RFG-125 stencils) is not a file and is shared by many decals.
+        if (!out.colour.empty() && !out.opacity.empty() && out.colour.rfind("enfc|", 0) != 0)
             _byColour.emplace(LowerCopy(out.colour), out.opacity);
         // RFG-038: name the materials that yield no colour texture at all. 71 sections
         // in one village bind nothing, and a section with no texture draws white --

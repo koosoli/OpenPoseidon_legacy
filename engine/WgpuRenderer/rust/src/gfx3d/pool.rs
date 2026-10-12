@@ -267,7 +267,8 @@ pub struct GeometryResidency {
     pub retired_bytes: u64,
 }
 
-// Where one mesh's geometry landed in the pool.
+// Where one mesh's geometry landed in the pool. Copy since RFG-127: shared meshes hold the same one.
+#[derive(Clone, Copy)]
 pub struct MeshAlloc {
     pub vbase: u32,
     pub ibase: u32,

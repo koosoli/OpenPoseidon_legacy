@@ -3465,6 +3465,14 @@ pub(crate) fn normal_relief_log_line() -> String {
     )
 }
 
+// RFG-124: the GTAO thickness fade used to scale a receding sample's horizon cosine toward 0
+// (a horizon 90 degrees off the view ray) instead of toward the hemisphere's low horizon, so an
+// occluder far outside the radius still occluded. WGR_GTAO_FADE_LEGACY=1 restores it.
+fn gtao_fade_legacy() -> bool {
+    static LEGACY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *LEGACY.get_or_init(|| std::env::var("WGR_GTAO_FADE_LEGACY").as_deref() == Ok("1"))
+}
+
 /// WGR_GTAO=0 hard-disables screen-space AO (see `Gfx3d::gtao_force_off`). Read once at renderer
 /// construction so an A/B is two runs of the same binary differing in exactly one term.
 fn gtao_force_off_from_env() -> bool {
@@ -4760,6 +4768,73 @@ pub struct Gfx3d {
     cull_debug_bind: Option<wgpu::BindGroup>,
 
     meshes: SlotMap<MeshKey, Mesh>,
+    // RFG-127: retained meshes with byte-identical geometry share one pool allocation.
+    shared_meshes: SharedMeshes,
+}
+
+// RFG-127: content-keyed sharing of static mesh geometry. A Reforger prefab's colour variants
+// (RFG-121, 402 on Everon) are each their own model with the SAME vertices and indices, and every
+// one used to take its own copy in the pool -- enough to push the vertex buffer from 1088 MB to
+// 2176 MB, whose doubling step (old + new live during the copy) then intermittently failed on an
+// 8 GB card: an invalid `wgr_geo_pool_vbuf` and a black frame. Only the retained static path
+// opts in (`mesh_create_shared`); a mesh that is ever rewritten in place (`mesh_update`) is
+// created unshared, and an update aimed at a shared one is refused rather than written into a
+// twin. WGR_MESH_DEDUP=0 turns it off.
+type MeshContentKey = [u64; 4];
+
+#[derive(Default)]
+struct SharedMeshes {
+    by_content: std::collections::HashMap<MeshContentKey, (MeshAlloc, u32)>,
+    of_mesh: std::collections::HashMap<MeshKey, MeshContentKey>,
+    hits: u64,
+    saved_bytes: u64,
+    reported_hits: u64,
+}
+
+fn mesh_dedup_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_MESH_DEDUP").as_deref() != Ok("0"))
+}
+
+// Two independent 64-bit word hashes plus both counts: a false match would draw one model's
+// triangles as another's, so the key is wide rather than fast-and-hopeful.
+fn mesh_content_key(verts: &[WgrMeshVertex], indices: &[u32]) -> MeshContentKey {
+    fn words(bytes: &[u8], mut f: impl FnMut(u64)) {
+        let mut chunks = bytes.chunks_exact(8);
+        for c in &mut chunks {
+            f(u64::from_le_bytes(c.try_into().unwrap()));
+        }
+        let rest = chunks.remainder();
+        if !rest.is_empty() {
+            let mut w = [0u8; 8];
+            w[..rest.len()].copy_from_slice(rest);
+            f(u64::from_le_bytes(w));
+        }
+    }
+    let (mut a, mut b) = (0x243f_6a88_85a3_08d3u64, 0x1319_8a2e_0370_7344u64);
+    for bytes in [bytemuck::cast_slice::<WgrMeshVertex, u8>(verts), bytemuck::cast_slice::<u32, u8>(indices)] {
+        words(bytes, |w| {
+            a = (a.rotate_left(5) ^ w).wrapping_mul(0x51_7cc1_b727_220a_95);
+            let mut z = w ^ b;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            b = (b.rotate_left(17) ^ z ^ (z >> 31)).wrapping_add(0x9e37_79b9_7f4a_7c15);
+        });
+    }
+    [a, b, verts.len() as u64, indices.len() as u64]
+}
+
+#[test]
+fn mesh_content_key_separates_geometry_and_matches_copies() {
+    let v = |x: f32| {
+        let mut m: WgrMeshVertex = bytemuck::Zeroable::zeroed();
+        m.pos.x = x;
+        m
+    };
+    let a = mesh_content_key(&[v(1.0), v(2.0), v(3.0)], &[0, 1, 2]);
+    assert_eq!(a, mesh_content_key(&[v(1.0), v(2.0), v(3.0)], &[0, 1, 2]));
+    assert_ne!(a, mesh_content_key(&[v(1.0), v(2.0), v(3.5)], &[0, 1, 2]));
+    assert_ne!(a, mesh_content_key(&[v(1.0), v(2.0), v(3.0)], &[0, 2, 1]));
 }
 
 impl Gfx3d {
@@ -5542,6 +5617,7 @@ impl Gfx3d {
             cull_debug_layout,
             cull_debug_bind: None,
             meshes: SlotMap::with_key(),
+            shared_meshes: SharedMeshes::default(),
         }
     }
 
@@ -6036,6 +6112,68 @@ impl Gfx3d {
         key.data().as_ffi()
     }
 
+    // RFG-127: `mesh_create` for geometry that is never rewritten in place. Byte-identical
+    // content reuses the live allocation of its first copy (see SharedMeshes).
+    pub fn mesh_create_shared(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        verts: &[WgrMeshVertex],
+        indices: &[u32],
+    ) -> u64 {
+        if !mesh_dedup_enabled() || verts.is_empty() || indices.is_empty() {
+            return self.mesh_create(device, queue, verts, indices);
+        }
+        let content = mesh_content_key(verts, indices);
+        if let Some((alloc, refs)) = self.shared_meshes.by_content.get_mut(&content) {
+            *refs += 1;
+            let alloc = *alloc;
+            let (mut aabb_min, mut aabb_max) = ([f32::MAX; 3], [f32::MIN; 3]);
+            for v in verts {
+                let p = [v.pos.x, v.pos.y, v.pos.z];
+                for a in 0..3 {
+                    aabb_min[a] = aabb_min[a].min(p[a]);
+                    aabb_max[a] = aabb_max[a].max(p[a]);
+                }
+            }
+            let key = self.meshes.insert(Mesh {
+                alloc,
+                index_count: indices.len() as u32,
+                vert_count: verts.len() as u32,
+                skin: None,
+                aabb_min,
+                aabb_max,
+            });
+            self.shared_meshes.of_mesh.insert(key, content);
+            self.shared_meshes.hits += 1;
+            self.shared_meshes.saved_bytes += (std::mem::size_of_val(verts) + std::mem::size_of_val(indices)) as u64;
+            let s = &mut self.shared_meshes;
+            if s.hits >= s.reported_hits.saturating_mul(2).max(1) {
+                s.reported_hits = s.hits;
+                eprintln!(
+                    "[wgr] mesh dedup (RFG-127): {} meshes share an existing allocation, {:.1} MB of pool not written",
+                    s.hits,
+                    s.saved_bytes as f64 / 1048576.0
+                );
+            }
+            self.gpu_section_refresh.invalidate();
+            return key.data().as_ffi();
+        }
+        let id = self.mesh_create(device, queue, verts, indices);
+        if id != 0 {
+            let key: MeshKey = KeyData::from_ffi(id).into();
+            if let Some(mesh) = self.meshes.get(key) {
+                self.shared_meshes.by_content.insert(content, (mesh.alloc, 1));
+                self.shared_meshes.of_mesh.insert(key, content);
+            }
+        }
+        id
+    }
+
+    pub fn mesh_is_shared(&self, handle: u64) -> bool {
+        self.shared_meshes.of_mesh.contains_key(&KeyData::from_ffi(handle).into())
+    }
+
     pub fn set_geometry_pressure_budget(&mut self, bytes: u64) {
         self.pool.set_pressure_budget(bytes);
     }
@@ -6218,6 +6356,14 @@ impl Gfx3d {
         if verts.is_empty() || verts.len() as u32 > mesh.vert_count {
             return;
         }
+        // RFG-127: shared geometry belongs to every twin; writing it would move them all.
+        if self.shared_meshes.of_mesh.contains_key(&KeyData::from_ffi(handle).into()) {
+            static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            if !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("[wgr] mesh_update refused on a shared (RFG-127) mesh {handle:#x}");
+            }
+            return;
+        }
         let vbase = mesh.alloc.vbase;
         self.pool.update_verts(queue, vbase, verts);
         // The pool handle can be shared by multiple model sections. Until a
@@ -6284,8 +6430,24 @@ impl Gfx3d {
             // Return the mesh's pool ranges to the free-list so a later load reuses them.
             if let Some(mesh) = self.meshes.remove(key) {
                 self.gpu_section_refresh.invalidate();
-                self.pool
-                    .free(&mesh.alloc, mesh.vert_count, mesh.index_count);
+                // RFG-127: a shared allocation is freed by its last user only.
+                let free_now = match self.shared_meshes.of_mesh.remove(&key) {
+                    Some(content) => match self.shared_meshes.by_content.get_mut(&content) {
+                        Some((_, refs)) if *refs > 1 => {
+                            *refs -= 1;
+                            false
+                        }
+                        _ => {
+                            self.shared_meshes.by_content.remove(&content);
+                            true
+                        }
+                    },
+                    None => true,
+                };
+                if free_now {
+                    self.pool
+                        .free(&mesh.alloc, mesh.vert_count, mesh.index_count);
+                }
             }
             // Drop any cached skin-bake bind that referenced this mesh's skin buffer.
             self.bake_bind_cache.remove(&key);
@@ -12031,7 +12193,8 @@ impl Gfx3d {
                     s.thickness.max(0.01),
                     // Must match the `scale` handed to `dispatch` below — see its comment.
                     self.gtao_scale.max(1) as f32,
-                    0.0,
+                    // RFG-124: 1 = the old fade toward a 90-degree horizon (WGR_GTAO_FADE_LEGACY=1).
+                    if gtao_fade_legacy() { 1.0 } else { 0.0 },
                 ],
             },
         );

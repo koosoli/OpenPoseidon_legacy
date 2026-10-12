@@ -866,9 +866,16 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     std::string compositeColour;
     std::string compositeCoverage;
     const bool composite = SplitEnfusionAlphaName(name, compositeColour, compositeCoverage);
+    // RFG-125: `enfa|<coverage>|enfc|r,g,b` -- a decal whose whole albedo is its flat `Color`
+    // (Graffiti_02: no BCRMap, near-black paint through an OpacityMap). The coverage file is
+    // decoded as the image and its RGB painted over below, so the result has the coverage's
+    // own size and authored mips.
+    float paintRgb[3] = {1.0f, 1.0f, 1.0f};
+    const bool paintComposite = composite && SplitEnfusionColourName(compositeColour.c_str(), paintRgb);
 
     std::vector<uint8_t> buffer;
-    if (!reader(composite ? compositeColour.c_str() : name, buffer) || buffer.empty())
+    if (!reader(composite ? (paintComposite ? compositeCoverage.c_str() : compositeColour.c_str()) : name, buffer) ||
+        buffer.empty())
         return false;
     trace.inputBytes = buffer.size();
     trace.Mark(trace.read);
@@ -917,6 +924,18 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
         if (reusable) prepared.PutDdsDecode(reuseKey, buffer, *this);
     }
     trace.Mark(trace.decode);
+
+    if (paintComposite && _format == PixelFormat::ARGB8888)
+    {
+        // ARGB8888 in this engine means B,G,R,A in memory; alpha is the merge's below.
+        const auto channel = [](float v)
+        { return static_cast<uint8_t>(v <= 0.0f ? 0.0f : (v >= 1.0f ? 255.0f : v * 255.0f + 0.5f)); };
+        const uint8_t bgr[3] = {channel(paintRgb[2]), channel(paintRgb[1]), channel(paintRgb[0])};
+        for (DDSMipLevel& level : _levels)
+            for (size_t i = 0; i + 3 < level.data.size(); i += 4)
+                std::memcpy(level.data.data() + i, bgr, 3);
+        _avgColor = AverageOfSmallest(_levels, _format);
+    }
 
     if (composite)
     {
@@ -1351,12 +1370,18 @@ bool TextureSourceDDSFactory::Check(const char* name)
     // QIFStreamB::FileExist verbatim, misses, and the section falls back to white -- the
     // exact defect the tint was added to fix, arriving through the factory instead.
     name = Enfusion::SkipLayerTint(name);
+    // RFG-119: the constant-coverage wrapper is the same kind of statement. Left on, the
+    // mount lookup missed every glass pane and they drew on the white fallback.
+    if (std::strncmp(name, "enfk|", 5) == 0)
+        if (const char* bar = std::strchr(name + 5, '|'); bar != nullptr && bar[1] != '\0')
+            name = bar + 1;
     float solid[3];
     if (SplitEnfusionColourName(name, solid))
         return true;
     std::string colour, coverage;
     if (SplitEnfusionAlphaName(name, colour, coverage))
-        name = colour.c_str();
+        // RFG-125: a flat-colour composite exists when its coverage does.
+        name = SplitEnfusionColourName(colour.c_str(), solid) ? coverage.c_str() : colour.c_str();
     const auto& mount = Poseidon::Asset::Formats::Enfusion::EnfusionMount::Instance();
     if (mount.IsOpen() && mount.Has(name))
         return true;
