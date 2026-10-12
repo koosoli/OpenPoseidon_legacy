@@ -13341,13 +13341,22 @@ void EngineWgpu::ResolveMaterialCrownAo(const ShapeSection& section, float aoP0[
             std::memcpy(&aoP1[3], &word, sizeof(word));
         }
     }
+    // RFG-144: lane x of the second vector carries FadeFaces (the cylinder height it used to hold
+    // was never read by the shader -- the fitted falloff is radial-only). WGR_FOLIAGE_FADE_FACES=0
+    // turns the fade off.
+    static const bool fadeFaces = []
+    {
+        const char* v = std::getenv("WGR_FOLIAGE_FADE_FACES");
+        return !(v && v[0] == '0');
+    }();
+    if (fadeFaces)
+        aoP1[0] = translated.fadeFaces;
     if (!enabled || translated.crownAoIntensity <= 0.0f || translated.crownAoWidth <= 0.0f)
         return;
     aoP0[0] = translated.crownAoCenter[0];
     aoP0[1] = translated.crownAoCenter[1];
     aoP0[2] = translated.crownAoCenter[2];
     aoP0[3] = translated.crownAoIntensity;
-    aoP1[0] = translated.crownAoHeight;
     aoP1[1] = translated.crownAoWidth;
 }
 

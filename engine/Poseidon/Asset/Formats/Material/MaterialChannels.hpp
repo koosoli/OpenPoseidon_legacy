@@ -281,6 +281,10 @@ struct TranslatedMaterial
     float                crownAoHeight = 0.0f;
     float                crownAoWidth = 0.0f;
     float                crownAoIntensity = 0.0f;
+    // RFG-144: Enfusion `FadeFaces` (MatPBRTreeCrown; default 0 = off, range 0..1, both read from
+    // Workbench): leaf cards whose face turns edge-on to the viewer fade out below this |N.V|.
+    // 114 of 468 crowns author it (0.15..1, 0.3 commonest).
+    float                fadeFaces = 0.0f;
     // Enfusion vegetation colorization (`EnableColorization`, `WorldColorizeMap`,
     // `ColorizeMapLerp`, `ColorizeMapLerpAtCamera`, `ColorizeMapLerpDistance`,
     // `ColorizeMapBrightness`): the crown's albedo is lerped toward a world-space

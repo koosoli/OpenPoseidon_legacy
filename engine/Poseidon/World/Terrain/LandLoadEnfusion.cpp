@@ -1576,6 +1576,20 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
                             look.tilingV = uv.up[1];
                     }
                 }
+                // RFG-139 follow-up: name the roads that still resolve no texture (79 on Everon),
+                // one line per distinct key, so the next fix starts from data.
+                if (look.texture.empty())
+                {
+                    static int named = 0;
+                    if (named++ < 12)
+                    {
+                        const auto prefabHit = byGuid.find(placement.prefabGuid);
+                        LOG_INFO(World, "Enfusion road without texture: class {} material {} prefab {} ({}) emat '{}'",
+                                 placement.className, placement.materialGuid.empty() ? "-" : placement.materialGuid,
+                                 placement.prefabGuid.empty() ? "-" : placement.prefabGuid,
+                                 prefabHit != byGuid.end() ? prefabHit->second : std::string("unresolved"), ematPath);
+                    }
+                }
                 cachedTexture = roadTextures.emplace(materialKey, std::move(look)).first;
             }
             const RoadLook& look = cachedTexture->second;

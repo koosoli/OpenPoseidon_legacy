@@ -1097,6 +1097,10 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         out.crownAoWidth = aoWidth;
         out.crownAoIntensity = aoIntensity < 1.0f ? aoIntensity : 1.0f;
     }
+    // RFG-144: the edge-on card fade (see TranslatedMaterial::fadeFaces).
+    float fadeFaces = 0.0f;
+    if (emat.FloatOf("FadeFaces", fadeFaces) && fadeFaces > 0.0f)
+        out.fadeFaces = fadeFaces < 1.0f ? fadeFaces : 1.0f;
 
     return out;
 }

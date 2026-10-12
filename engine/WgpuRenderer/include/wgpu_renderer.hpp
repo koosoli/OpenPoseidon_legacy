@@ -513,8 +513,7 @@ struct WgrModelMaterial
     float normal_power = 1.0f;
     /* Crown self-occlusion volume (`GeometryAOCenter/Height/Width/Intensity`):
      * xyz = trunk-axis centre in MODEL space, w = intensity (0 = off); second
-     * lane x = cylinder height (reserved: the fitted falloff is radial-only),
-     * y = cylinder radius. Zero lanes keep every material that names none
+     * lane x = FadeFaces (RFG-144: edge-on leaf-card fade, 0 = off), y = cylinder radius. Zero lanes keep every material that names none
      * exactly where it was. */
     WgrVec4 crown_ao_p0;
     WgrVec4 crown_ao_p1;

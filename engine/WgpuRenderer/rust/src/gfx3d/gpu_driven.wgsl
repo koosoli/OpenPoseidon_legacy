@@ -1228,6 +1228,7 @@ fn fs_gpu_body(in: VsOut
     if (sm.alpha_ref > 0.0) {
         let dims0 = vec2<f32>(textureDimensions(textures[sm.texture_slot]));
         cut_a = mip_alpha_boost(base.a, in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw, dims0, cutout_mip_alpha);
+        cut_a = fade_faces_alpha(cut_a, sm.crown_ao_p1.x, in.world_pos, dwx, dwy);
     }
     var out_a = base.a;
     if (a2c > 0.5) {
@@ -1743,8 +1744,10 @@ fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
         // Same mip-coverage lift as fs_gpu, or the prepass keeps depth for texels the colour
         // pass discards (and vice versa) -- the exact mismatch prepass_match exists to prevent.
         let dims0 = vec2<f32>(textureDimensions(textures[sm.texture_slot]));
-        let a = mip_alpha_boost(textureSampleBias(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv, frame.renscale.x).a,
-                                base_uv, dims0, cutout_mip_alpha);
+        let a = fade_faces_alpha(
+            mip_alpha_boost(textureSampleBias(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv, frame.renscale.x).a,
+                            base_uv, dims0, cutout_mip_alpha),
+            sm.crown_ao_p1.x, in.world_pos, dwx, dwy);
         if (a < sm.alpha_ref) {
             discard;
         }
@@ -1753,6 +1756,24 @@ fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
     // direction gives view space (matches shader3d::fs_prepass).
     let n_view = (frame.view * vec4<f32>(snow_surface_n, 0.0)).xyz;
     return oct_encode(normalize(n_view));
+}
+
+// RFG-144: Enfusion `FadeFaces` (section crown_ao_p1.x, 0 = off). A leaf card turned edge-on to
+// the viewer fades out below this |N.V| -- without it the edge-on cards drew as long smeared
+// streaks of stretched leaf texture through every crown. The GEOMETRIC face normal from the
+// position derivatives, not the vertex normal: crown cards carry bent normals pointing out of the
+// crown, which say nothing about which way the card faces.
+fn fade_faces_alpha(a: f32, fade: f32, world_pos: vec3<f32>, dwx: vec3<f32>, dwy: vec3<f32>) -> f32 {
+    if (fade <= 0.0) {
+        return a;
+    }
+    let n = cross(dwx, dwy);
+    let len = length(n);
+    if (len <= 1e-12) {
+        return a;
+    }
+    let ndv = abs(dot(n / len, normalize(-world_pos)));
+    return a * smoothstep(0.0, fade, ndv);
 }
 
 // Actual retained material alpha and authored wind; no shading/target sampling.
@@ -1790,8 +1811,10 @@ fn fs_gpu_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
     if (sm.alpha_ref > 0.0) {
         let base_uv = prepass_base_uv(in.uv, sm.layer_uv[0]);
         let dims0 = vec2<f32>(textureDimensions(textures[sm.texture_slot]));
-        let alpha = mip_alpha_boost(textureSampleBias(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv, frame.renscale.x).a,
-                                    base_uv, dims0, cutout_mip_alpha);
+        let alpha = fade_faces_alpha(
+            mip_alpha_boost(textureSampleBias(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv, frame.renscale.x).a,
+                            base_uv, dims0, cutout_mip_alpha),
+            sm.crown_ao_p1.x, in.world_pos, dwx, dwy);
         cov = a2c_coverage(alpha, sm.alpha_ref);
         if (cov <= 0.0) {
             discard;
