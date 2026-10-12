@@ -979,7 +979,8 @@ static bool CfgDerived(const ParamEntry* vehicles, const char* type, const char*
 
 static GameValue A1IsKindOf(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
-    const RString type = ObjGetType(state, oper1);
+    // Arma 2: "className" isKindOf "Base" asks about a config class, not an object.
+    const RString type = oper1.GetType() == GameString ? static_cast<RString>(oper1) : static_cast<RString>(ObjGetType(state, oper1));
     const RString base = oper2;
     if (type.GetLength() == 0 || base.GetLength() == 0)
         return GameValue(false);
@@ -987,9 +988,11 @@ static GameValue A1IsKindOf(const GameState* state, GameValuePar oper1, GameValu
         return GameValue(true);
     if (Poseidon::Arma1Compat::Active())
     {
-        if (_strnicmp(type, "A1x_", 4) == 0)
+        const bool generated = _strnicmp(type, "A1x_", 4) == 0;
+        if (generated || oper1.GetType() == GameString)
         {
-            const ParamEntry* a1 = Poseidon::Arma1Compat::FindConfigClass("CfgVehicles", (const char*)type + 4);
+            const ParamEntry* a1 =
+                Poseidon::Arma1Compat::FindConfigClass("CfgVehicles", (const char*)type + (generated ? 4 : 0));
             const ParamEntry* a1Base = Poseidon::Arma1Compat::FindConfigClass("CfgVehicles", base);
             const ParamClass* tc = a1 ? a1->GetClassInterface() : nullptr;
             const ParamClass* bc = a1Base ? a1Base->GetClassInterface() : nullptr;
@@ -1840,7 +1843,7 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameScalar, "distance", function, A1Distance, GameArray, GameObject | GameArray),
         GameOperator(GameScalar, "distance", function, A1Distance, GameObject, GameArray),
         GameOperator(GameNothing, "moveInTurret", function, A1MoveInTurret, GameObject, GameArray),
-        GameOperator(GameBool, "isKindOf", function, A1IsKindOf, GameObject, GameString),
+        GameOperator(GameBool, "isKindOf", function, A1IsKindOf, GameObject | GameString, GameString),
         GameOperator(GameVoid, "do", function, A1SwitchDo, GameArray, GameString),
         GameOperator(GameNothing, ":", function, A1CaseCode, GameArray, GameString),
         GameOperator(GameNothing, "assignTeam", function, A1IgnoredBinary, GameObject, GameString),

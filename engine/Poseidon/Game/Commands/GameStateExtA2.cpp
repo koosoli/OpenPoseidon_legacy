@@ -78,6 +78,11 @@ GameValue MarkerSetShape(const GameState* state, GameValuePar oper1, GameValuePa
 GameValue MarkerSetBrush(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue MarkerSetDir(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue GameTime(const GameState* state);
+GameValue VehCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjMoveInCargo(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue CutText(const GameState* state, GameValuePar oper1);
+GameValue CutRsc(const GameState* state, GameValuePar oper1);
+GameValue CutObj(const GameState* state, GameValuePar oper1);
 GameValue StrFormat(const GameState* state, GameValuePar oper1);
 
 namespace
@@ -162,6 +167,20 @@ struct Runtime
     // FSMs
     std::vector<std::unique_ptr<Fsm>> fsms;
     int nextFsm = 0;
+    // locations: the world's named places (CfgWorlds >> world >> Names), then any the
+    // mission creates
+    struct Location
+    {
+        std::string type;
+        std::string text;
+        float x = 0;
+        float y = 0;
+        float sizeA = 0;
+        float sizeB = 0;
+        bool deleted = false;
+    };
+    std::vector<Location> locations;
+    bool worldLocations = false;
 };
 
 Runtime& RT()
@@ -1054,6 +1073,11 @@ GameValue A2SafeZoneW(const GameState*)
     return GameValue(1.0f);
 }
 
+GameValue A2ObjNullUnary(const GameState*, GameValuePar)
+{
+    return GameValueExt((Object*)nullptr);
+}
+
 GameValue A2ObjNull(const GameState*)
 {
     return OBJECT_NULL;
@@ -1070,6 +1094,288 @@ GameValue A2Faction(const GameState*, GameValuePar oper1)
         type = type.substr(4);
     const ParamEntry* cls = Arma1Compat::FindConfigClass("CfgVehicles", type.c_str());
     return GameValue(RString(EntryText(cls, "faction").c_str()));
+}
+// ---------------------------------------------------------------------------
+// Locations. A location is the tagged string "::LOC::n"; the world's named places are
+// read from the Arma 2 CfgWorlds class on first use.
+// ---------------------------------------------------------------------------
+constexpr const char* LocTag = "::LOC::";
+
+Runtime::Location* LocationOf(GameValuePar v)
+{
+    if (v.GetType() != GameString)
+        return nullptr;
+    const RString s = v;
+    const size_t n = strlen(LocTag);
+    if (strncmp(s, LocTag, n) != 0)
+        return nullptr;
+    Runtime& rt = RT();
+    const int index = atoi((const char*)s + n);
+    if (index < 0 || index >= static_cast<int>(rt.locations.size()) || rt.locations[index].deleted)
+        return nullptr;
+    return &rt.locations[index];
+}
+
+GameValue LocationValue(int index)
+{
+    return GameValue(RString((std::string(LocTag) + std::to_string(index)).c_str()));
+}
+
+void LoadWorldLocations(Runtime& rt)
+{
+    if (rt.worldLocations)
+        return;
+    rt.worldLocations = true;
+    std::string world = Glob.header.worldname;
+    if (_strnicmp(world.c_str(), "A2_", 3) == 0)
+        world = world.substr(3);
+    const ParamEntry* cls = Arma1Compat::FindConfigClass("CfgWorlds", world.c_str());
+    const ParamEntry* names = cls ? cls->FindEntry("Names") : nullptr;
+    for (int i = 0; names && names->IsClass() && i < names->GetEntryCount(); i++)
+    {
+        const ParamEntry& e = names->GetEntry(i);
+        if (!e.IsClass())
+            continue;
+        const ParamEntry* pos = e.FindEntry("position");
+        if (!pos || !pos->IsArray() || pos->GetSize() < 2)
+            continue;
+        Runtime::Location loc;
+        loc.type = EntryText(&e, "type");
+        loc.text = (const char*)LocalizeText(EntryText(&e, "name").c_str());
+        loc.x = static_cast<float>((*pos)[0]);
+        loc.y = static_cast<float>((*pos)[1]);
+        if (const ParamEntry* a = e.FindEntry("radiusA"); a && !a->IsClass() && !a->IsArray())
+            loc.sizeA = static_cast<float>(*a);
+        if (const ParamEntry* b = e.FindEntry("radiusB"); b && !b->IsClass() && !b->IsArray())
+            loc.sizeB = static_cast<float>(*b);
+        rt.locations.push_back(loc);
+    }
+    LOG_INFO(Mission, "Arma 2: {} named locations on '{}'", rt.locations.size(), world);
+}
+
+// A position argument: [x, y(, z)] (y = north), an object, or a location.
+bool Position2D(GameValuePar v, float& x, float& y)
+{
+    if (v.GetType() == GameArray)
+    {
+        const GameArrayType& a = v;
+        if (a.Size() < 2 || a[0].GetType() != GameScalar || a[1].GetType() != GameScalar)
+            return false;
+        x = a[0];
+        y = a[1];
+        return true;
+    }
+    if (const Runtime::Location* loc = LocationOf(v))
+    {
+        x = loc->x;
+        y = loc->y;
+        return true;
+    }
+    if (Object* obj = GetObject(v))
+    {
+        x = obj->Position().X();
+        y = obj->Position().Z();
+        return true;
+    }
+    return false;
+}
+
+GameValue A2CreateLocation(const GameState*, GameValuePar oper1)
+{
+    // createLocation [type, position, sizeX, sizeY]
+    const GameArrayType& args = oper1;
+    Runtime& rt = RT();
+    LoadWorldLocations(rt);
+    Runtime::Location loc;
+    if (args.Size() > 0 && args[0].GetType() == GameString)
+        loc.type = (const char*)(RString)args[0];
+    if (args.Size() > 1)
+        Position2D(args[1], loc.x, loc.y);
+    if (args.Size() > 2 && args[2].GetType() == GameScalar)
+        loc.sizeA = args[2];
+    if (args.Size() > 3 && args[3].GetType() == GameScalar)
+        loc.sizeB = args[3];
+    rt.locations.push_back(loc);
+    return LocationValue(static_cast<int>(rt.locations.size()) - 1);
+}
+
+GameValue A2DeleteLocation(const GameState*, GameValuePar oper1)
+{
+    if (Runtime::Location* loc = LocationOf(oper1))
+        loc->deleted = true;
+    return NOTHING;
+}
+
+GameValue A2LocSetText(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    if (Runtime::Location* loc = LocationOf(oper1))
+        loc->text = (const char*)(RString)oper2;
+    return NOTHING;
+}
+
+GameValue A2LocSetType(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    if (Runtime::Location* loc = LocationOf(oper1))
+        loc->type = (const char*)(RString)oper2;
+    return NOTHING;
+}
+
+GameValue A2LocSetPosition(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    if (Runtime::Location* loc = LocationOf(oper1))
+        Position2D(oper2, loc->x, loc->y);
+    return NOTHING;
+}
+
+GameValue A2LocSetSize(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Runtime::Location* loc = LocationOf(oper1);
+    const GameArrayType& a = oper2;
+    if (loc && a.Size() >= 2 && a[0].GetType() == GameScalar && a[1].GetType() == GameScalar)
+    {
+        loc->sizeA = a[0];
+        loc->sizeB = a[1];
+    }
+    return NOTHING;
+}
+
+// text location -> its name; text "string" -> the string (structured text is plain here)
+GameValue A2Text(const GameState*, GameValuePar oper1)
+{
+    if (const Runtime::Location* loc = LocationOf(oper1))
+        return GameValue(RString(loc->text.c_str()));
+    return oper1;
+}
+
+GameValue A2LocationPosition(const GameState* state, GameValuePar oper1)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& a = result;
+    float x = 0, y = 0;
+    if (Position2D(oper1, x, y))
+    {
+        a.Add(GameValue(x));
+        a.Add(GameValue(y));
+        a.Add(GameValue(0.0f));
+    }
+    return result;
+}
+
+GameValue A2LocSize(const GameState* state, GameValuePar oper1)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& a = result;
+    if (const Runtime::Location* loc = LocationOf(oper1))
+    {
+        a.Add(GameValue(loc->sizeA));
+        a.Add(GameValue(loc->sizeB));
+    }
+    return result;
+}
+
+GameValue A2LocType(const GameState*, GameValuePar oper1)
+{
+    const Runtime::Location* loc = LocationOf(oper1);
+    return GameValue(RString(loc ? loc->type.c_str() : ""));
+}
+
+bool TypeMatches(const std::string& type, const GameValue& types)
+{
+    if (types.GetType() == GameString)
+        return _stricmp(type.c_str(), (const char*)(RString)types) == 0;
+    if (types.GetType() != GameArray)
+        return true;
+    const GameArrayType& a = types;
+    if (a.Size() == 0)
+        return true;
+    for (int i = 0; i < a.Size(); i++)
+        if (a[i].GetType() == GameString && _stricmp(type.c_str(), (const char*)(RString)a[i]) == 0)
+            return true;
+    return false;
+}
+
+// nearestLocations [position, [types], radius] / nearestLocation [position, type]
+std::vector<std::pair<float, int>> NearLocations(GameValuePar oper1, bool limitRadius)
+{
+    std::vector<std::pair<float, int>> found;
+    const GameArrayType& args = oper1;
+    float x = 0, y = 0;
+    if (args.Size() < 2 || !Position2D(args[0], x, y))
+        return found;
+    const float radius = limitRadius && args.Size() > 2 && args[2].GetType() == GameScalar ? (float)args[2] : 1e9f;
+    Runtime& rt = RT();
+    LoadWorldLocations(rt);
+    for (size_t i = 0; i < rt.locations.size(); i++)
+    {
+        const Runtime::Location& loc = rt.locations[i];
+        if (loc.deleted || !TypeMatches(loc.type, args[1]))
+            continue;
+        const float d = std::hypot(loc.x - x, loc.y - y);
+        if (d <= radius)
+            found.emplace_back(d, static_cast<int>(i));
+    }
+    std::sort(found.begin(), found.end());
+    return found;
+}
+
+GameValue A2NearestLocations(const GameState* state, GameValuePar oper1)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& a = result;
+    for (const auto& [d, index] : NearLocations(oper1, true))
+        a.Add(LocationValue(index));
+    return result;
+}
+
+GameValue A2NearestLocation(const GameState*, GameValuePar oper1)
+{
+    const auto found = NearLocations(oper1, false);
+    if (found.empty())
+        return GameValue(RString(""));
+    return LocationValue(found.front().second);
+}
+
+// ---------------------------------------------------------------------------
+// Arma 2 forms of CWA commands
+// ---------------------------------------------------------------------------
+// createVehicle [type, position, markers, placement, special]
+GameValue A2CreateVehicleArray(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& args = oper1;
+    if (args.Size() < 2 || args[0].GetType() != GameString)
+        return GameValueExt((Object*)nullptr);
+    const RString type = args[0];
+    if (type.GetLength() > 0 && type[0] == '#')
+        return GameValueExt((Object*)nullptr);
+    GameValue pos = args[1];
+    if (pos.GetType() == GameObject)
+        pos = A2GetPosATL(state, pos);
+    return VehCreate(state, args[0], pos);
+}
+
+// unit moveInCargo [vehicle, cargoIndex]
+GameValue A2MoveInCargoIndex(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& args = oper2;
+    if (args.Size() < 1)
+        return NOTHING;
+    return ObjMoveInCargo(state, oper1, args[0]);
+}
+
+// layer cutText / cutRsc / cutObj [...]: CWA has a single layer
+GameValue A2CutTextLayer(const GameState* state, GameValuePar, GameValuePar oper2)
+{
+    return CutText(state, oper2);
+}
+
+GameValue A2CutRscLayer(const GameState* state, GameValuePar, GameValuePar oper2)
+{
+    return CutRsc(state, oper2);
+}
+
+GameValue A2CutObjLayer(const GameState* state, GameValuePar, GameValuePar oper2)
+{
+    return CutObj(state, oper2);
 }
 } // namespace
 
@@ -1288,6 +1594,19 @@ const GameFunction A2Unary[] = {
     GameFunction(GameArray, "actionKeysNames", A2EmptyArrayUnary, GameString | GameArray),
     GameFunction(GameNothing, "hcRemoveAllGroups", A2NothingUnary, GameObject),
     GameFunction(GameBool, "hcShownBar", A2TrueUnary, GameAny),
+    GameFunction(GameString, "createLocation", A2CreateLocation, GameArray),
+    GameFunction(GameNothing, "deleteLocation", A2DeleteLocation, GameString),
+    GameFunction(GameString, "text", A2Text, GameString),
+    GameFunction(GameArray, "locationPosition", A2LocationPosition, GameString),
+    GameFunction(GameArray, "size", A2LocSize, GameString),
+    GameFunction(GameString, "type", A2LocType, GameString),
+    GameFunction(GameArray, "nearestLocations", A2NearestLocations, GameArray),
+    GameFunction(GameString, "nearestLocation", A2NearestLocation, GameArray),
+    GameFunction(GameObject, "createVehicle", A2CreateVehicleArray, GameArray),
+    GameFunction(GameObject, "createVehicleLocal", A2CreateVehicleArray, GameArray),
+    GameFunction(GameBool, "simulationEnabled", A2TrueUnary, GameObject),
+    GameFunction(GameNothing, "cutFadeOut", A2NothingUnary, GameScalar),
+    GameFunction(GameObject, "hcLeader", A2ObjNullUnary, GameGroup),
 };
 
 const GameOperator A2Binary[] = {
@@ -1348,6 +1667,20 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "addPublicVariableEventHandler", function, A2NothingBinary, GameString, GameString),
     GameOperator(GameNothing, "ctrlSetTooltip", function, A2NothingBinary, GameVoid, GameString),
     GameOperator(GameNothing, "progressSetPosition", function, A2NothingBinary, GameVoid, GameScalar),
+    GameOperator(GameNothing, "setText", function, A2LocSetText, GameString, GameString),
+    GameOperator(GameNothing, "setType", function, A2LocSetType, GameString, GameString),
+    GameOperator(GameNothing, "setPosition", function, A2LocSetPosition, GameString, GameArray),
+    GameOperator(GameNothing, "setSize", function, A2LocSetSize, GameString, GameArray),
+    GameOperator(GameNothing, "setRectangular", function, A2NothingBinary, GameString, GameBool),
+    GameOperator(GameNothing, "setDirection", function, A2NothingBinary, GameString, GameScalar),
+    GameOperator(GameNothing, "moveInCargo", function, A2MoveInCargoIndex, GameObject, GameArray),
+    GameOperator(GameNothing, "enableSimulation", function, A2NothingBinary, GameObject, GameBool),
+    GameOperator(GameNothing, "hcSetGroup", function, A2NothingBinary, GameObject, GameArray),
+    GameOperator(GameNothing, "hcRemoveGroup", function, A2NothingBinary, GameObject, GameGroup),
+    GameOperator(GameNothing, "cutText", function, A2CutTextLayer, GameScalar, GameArray),
+    GameOperator(GameNothing, "cutRsc", function, A2CutRscLayer, GameScalar, GameArray),
+    GameOperator(GameNothing, "cutObj", function, A2CutObjLayer, GameScalar, GameArray),
+    GameOperator(GameNothing, "cutFadeOut", function, A2NothingBinary, GameScalar, GameScalar),
 };
 } // namespace
 
