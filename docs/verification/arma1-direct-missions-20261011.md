@@ -81,6 +81,7 @@ mission booted and the runtime ran; "clean" = no script error until the test end
 | 9cfe1ef (2026-10-12 07:09, stamped) | 130 | 127 | 1 |
 | fcd1a51 (2026-10-12 08:26, stamped) | 130 | 128 | 1 |
 | 8edc850 (2026-10-12 09:30, stamped) | 130 | 129 | 1 |
+| 212decb (2026-10-12 11:00, stamped) | 131 | 131 | 0 |
 
 Fixed between the two: crashes in `Building`/`AILocker`/`OperField` (generated `A1x_`
 classes inherited scope 0 from abstract CWA bases, so the type was no `BuildingType`);
@@ -115,9 +116,36 @@ On 8edc850 only two remain: armory1.intro (config script commands such as
 `configFile >> ..` / `getText`, not implemented) and un-impossible_mission (needs the
 third-party addon class BBB006).
 
+On 212decb every one of the 131 missions boots and runs its 25 s without a script
+error. f68e88c (installed afterwards, armory-only re-run) adds the remaining commands the
+Armory scripts call.
+
+## Closing status (2026-10-12)
+
+What the automated run proves: each mission loads (world, units, objects, scripts,
+briefing path) and runs 25 s with no script error, crash or hang. What it does not prove:
+
+- **Mission completion.** No mission was played to its end; outros, debriefings and the
+  step from one campaign mission to the next were checked by hand only for the start of
+  campaign `ca` (intro, briefing) and M09.
+- **Multiplayer.** MP missions ran alone (first playable unit as player). No network game.
+- **Armory (armory1.intro).** Loads and runs without errors, but the Armory library dialog
+  does not appear within 65 s (camera at sea, cinema borders still on): its init does not
+  reach `createDialog "RscLibrary_Main"` in that time, and the dialog uses Arma 1 control
+  types (structured text, controls groups) the CWA UI does not have. Not functional.
+- **Stand-ins / no-ops.** Classes from addons that are not installed (BBB006, BBB007,
+  AAA739 in un-impossible_mission) are replaced by a plain unit of the same side or a game
+  logic. Commands accepted without effect: particle sources, lights, setRank, enableAI,
+  setAperture, enableTeamSwitch, camSetFocus, setCameraInterest, ctrlSetEventHandler,
+  ctrlSetFocus, doFSM/execFSM (FSMs do not run), scopeName/breakOut/breakTo.
+  ctrlSetFade shows/hides on commit (no fading). Structured text is shown as plain text.
+- **UI.** Arma 1 font families are drawn with tahomaB24. The strategic map's overview
+  box stays empty (its text goes to a single-line control).
+- **Vehicles and animations.** Driving (HMMWV), flying (UH-60, OH-58 incl. AI), boarding
+  and the Arma 1 soldier animations were checked with dedicated test missions; not every
+  vehicle type and crew position was checked individually.
+
 ## Known gaps (honest list)
 
-- `armory1.intro` needs the config script commands (`configFile >> ..`, `getText`, ...),
-  which are not implemented.
 - Missions needing third-party addons (`un-impossible_mission.cain`: `BBB006`) cannot run.
 - No fading for `ctrlSetFade` (shown/hidden on commit), no team switch, no aperture.
