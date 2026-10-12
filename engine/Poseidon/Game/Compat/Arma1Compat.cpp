@@ -133,29 +133,14 @@ const std::vector<fs::path>& Arma2Roots()
     return roots;
 }
 
-// The archive folders of one Arma 2 root: AddOns, Expansion\AddOns, <DLC>\AddOns and
-// the Steam DLC payloads DLCsetup\<DLC>\<DLC>_data.
+// The archive folders of one Arma 2 root: AddOns, Expansion\AddOns and <DLC>\AddOns.
+// The Steam DLC payloads under DLCsetup\<DLC>\<DLC>_data are not read: their archives
+// are copy-protected ("hprotect") and only the original game unlocks them.
 std::vector<fs::path> Arma2AddonFolders(const fs::path& r)
 {
     std::vector<fs::path> out{r / "AddOns"};
     for (const char* dlc : {"Expansion", "BAF", "PMC", "ACR"})
         out.push_back(r / dlc / "AddOns");
-    std::error_code ec;
-    for (fs::directory_iterator it(r / "DLCsetup", ec), end; !ec && it != end; it.increment(ec))
-    {
-        if (!it->is_directory(ec))
-            continue;
-        std::error_code ec2;
-        std::vector<fs::path> data;
-        for (fs::directory_iterator sub(it->path(), ec2), send; !ec2 && sub != send; sub.increment(ec2))
-        {
-            const std::string name = Lower(sub->path().filename().string());
-            if (sub->is_directory(ec2) && name.size() > 5 && name.compare(name.size() - 5, 5, "_data") == 0)
-                data.push_back(sub->path());
-        }
-        std::sort(data.begin(), data.end());
-        out.insert(out.end(), data.begin(), data.end());
-    }
     return out;
 }
 
