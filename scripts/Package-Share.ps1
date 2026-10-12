@@ -148,8 +148,7 @@ foreach ($doc in @('LICENSE', 'LICENSE.md', 'CREDITS.md', 'NOTICE', 'NOTICE.md')
     if (Test-Path -LiteralPath $p) { Copy-Into $p (Join-Path 'legal' $doc) }
 }
 # Steam Audio is linked statically (Apache-2.0): its licence and the CIPIC HRTF notice ship with it.
-foreach ($notice in Get-ChildItem -LiteralPath (Join-Path $repoRoot 'engine\PoseidonSteamAudio
-otices') -File -ErrorAction SilentlyContinue) {
+foreach ($notice in Get-ChildItem -LiteralPath (Join-Path $repoRoot 'engine\PoseidonSteamAudio\notices') -File -ErrorAction SilentlyContinue) {
     Copy-Into $notice.FullName (Join-Path 'legal' $notice.Name)
 }
 @"
