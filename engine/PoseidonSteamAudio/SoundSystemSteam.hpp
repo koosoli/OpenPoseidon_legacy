@@ -61,6 +61,7 @@ class SoundSystemSteam : public IAudioSystem
 
     bool _headphones = false;
     HrtfMode _hrtfMode = HrtfMode::Auto;
+    bool _eaxEnabled = false;
 
     float _volumeAdjustEffect = 1.0f;
     float _volumeAdjustSpeech = 1.0f;
@@ -160,8 +161,10 @@ class SoundSystemSteam : public IAudioSystem
     // ApplyReverbPreset; reverb is always on here (an EFX-preset FDN), and this is a software mixer.
     bool ApplyEFXByName(const char* presetName, float size) override { return ApplyReverbPreset(presetName, size); }
     bool ApplyReverbPreset(const char* presetName, float size);
-    bool EnableEAX(bool) override { return true; }
-    bool GetEAX() const override { return true; }
+    // The environment reverb follows the EAX setting (Options > Audio), OFF by default as on
+    // OpenAL: Open Malprave ran it always on, which over OFP's open landscapes read as a huge echo.
+    bool EnableEAX(bool val) override;
+    bool GetEAX() const override { return _eaxEnabled; }
     bool EnableHWAccel(bool) override { return false; }
     bool GetHWAccel() const override { return false; }
 
