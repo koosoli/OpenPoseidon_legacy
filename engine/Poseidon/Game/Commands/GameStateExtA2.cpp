@@ -2025,6 +2025,9 @@ const GameOperator A2Binary[] = {
     GameOperator(GameArray, "selectionPosition", function, A2ZeroPos, GameObject, GameString),
     GameOperator(GameNothing, "hcSelectGroup", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameNothing, "lnbSetColumnsPos", function, A2NothingBinary, GameScalar, GameArray),
+    GameOperator(GameNothing, "lockCargo", function, A2NothingBinary, GameObject, GameBool | GameArray),
+    GameOperator(GameNothing, "lockDriver", function, A2NothingBinary, GameObject, GameBool),
+    GameOperator(GameNothing, "lockTurret", function, A2NothingBinary, GameObject, GameArray),
 };
 } // namespace
 
