@@ -1372,7 +1372,24 @@ static GameValue A1IsNil(const GameState* state, GameValuePar oper1)
     RString name = oper1;
     if (name.GetLength() == 0)
         return GameValue(true);
-    return GameValue(state->VarGet(name).GetNil());
+    // isNil "name" asks about a variable; isNil {code} (a string here too) about the
+    // value of an expression. Anything that is not a bare identifier is evaluated.
+    const char* p = name;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+        p++;
+    const char* q = p;
+    while (*q && (isalnum(static_cast<unsigned char>(*q)) || *q == '_'))
+        q++;
+    const char* r = q;
+    while (*r == ' ' || *r == '\t' || *r == '\r' || *r == '\n')
+        r++;
+    if (q > p && *r == 0)
+        return GameValue(state->VarGet(RString(p, static_cast<int>(q - p))).GetNil());
+    GameVarSpace local(state->GetContext());
+    state->BeginContext(&local);
+    const GameValue value = state->EvaluateMultiple(name);
+    state->EndContext();
+    return GameValue(value.GetNil() || value.GetType() == GameNothing);
 }
 
 static GameValue A1IgnoredUnary(const GameState*, GameValuePar)

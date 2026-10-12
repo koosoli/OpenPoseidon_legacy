@@ -951,6 +951,10 @@ GameValue MissionStart(const GameState* state)
 
 GameValue IsServer(const GameState* state)
 {
+    // Arma 1/2 content (--arma1/--arma2) treats a single-player game as its own server:
+    // mission scripts put the whole mission set-up behind 'if (isServer)'.
+    if (Poseidon::Arma1Compat::Active() && GWorld && GWorld->GetMode() != GModeNetware)
+        return GameValue(true);
     return GetNetworkManager().IsServer();
 }
 
