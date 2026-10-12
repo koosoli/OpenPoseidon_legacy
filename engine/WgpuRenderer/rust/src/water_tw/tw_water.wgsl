@@ -510,10 +510,17 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
         // like a white oil film") and never the lace's veins. The edge is the slow mottle, the
         // bubbles speckle its rim; a far cap stays white because its edge only softens with the
         // pixel footprint, it does not fade.
-        let rag = capCover * (0.55 + 0.9 * p1.z) + (p1.y - 0.4) * 0.12;
-        let capSoft = min(0.04 + footprint * 0.06, 0.2); // unclamped, a far pixel turned the horizon white
-        // inside, Tidewater's own lace and bubbles (a cap is aerated water, not a painted disc)
-        let cap = smoothstep(0.5 - capSoft, 0.5 + capSoft, rag) * mix(0.55, 1.0, sat(pattern * 1.3)) * (p1.y * 0.2 + 0.85);
+        // the fringe tears into streaks down the wind, not round floes: the mottle read on a
+        // wind-aligned coordinate stretched 4:1
+        let wdir = tw.wind.xy;
+        let wuv = vec2<f32>(dot(lagXZ, wdir) * 0.25, dot(lagXZ, vec2<f32>(-wdir.y, wdir.x))) * tw.surface.w;
+        let tear = textureSample(waterFoamTex, smpAniso4Repeat, wuv * 1.7 + vec2<f32>(0.21, 0.63)).z;
+        let rag = capCover * (0.45 + 1.1 * mix(p1.z, tear, 0.6)) + (p1.y - 0.4) * 0.12;
+        // a dense core whose rim the lace eats into, so a cap frays like foam instead of ending in a
+        // sheet's hard edge (the floes of the first attempt); the core is where the crest breaks now
+        let capSoft = min(0.25 + footprint * 0.05, 0.4); // unclamped, a far pixel turned the horizon white
+        let body = smoothstep(0.5 - capSoft, 0.5 + capSoft, rag);
+        let cap = sat(body * 1.45 - (1.0 - pattern) * 0.75) * (p1.y * 0.2 + 0.85);
         foam = max(foam, cap);
     }
 
@@ -995,15 +1002,10 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let glowK = tw.material1.w;
         let transmitted = sceneCol * Tview * (1.0 - 0.3 * lipW) + (inSun + inAmb + sss) * glowK;
 
-        // ---- foam: diffuse scatterer, wrapped sun + sky irradiance. (OP) albedo 0.6, not Tidewater's
-        // 0.85: under OFP's sun a 0.85 white is a perfect white wall, so whitecaps clipped to flat
-        // white slabs and bloomed ("glowing", owner 2026-10-12). Fresh dense sea foam measures
-        // ~0.4-0.6 in the visible; a whitecap's mix of foam and bubbles is lower still.
-        // OP: albedo 0.5 with the whitecap patches on (absorption.w > 0) instead of Tidewater's 0.85.
-        // Measured whitecap reflectance is ~0.4-0.55 for fresh dense foam and ~0.22 effective over a
-        // whitecap's area (Koepke 1984); at 0.85 under our sun the caps clipped past white and
-        // bloomed into glowing discs (owner, 2026-10-12).
-        let foamAlbedo = select(0.6, 0.5, tw.absorption.w > 0.0);
+        // ---- foam: diffuse scatterer, wrapped sun + sky irradiance
+        // Tidewater's 0.85 (owner: "white caps must not be gray"). The glow (owner, 2026-10-12) was
+        // never the albedo: it was the legacy flat ambient (foamSky below), ~30x the sun here.
+        let foamAlbedo = 0.85;
         // OP: the foam's sky light is the sky's own irradiance (SH, E/PI) wherever the frame is
         // physical, not the legacy flat ambient (an artistic sun-scaled fill, ~30x the sun here):
         // with it every cap clipped past white and bloomed (owner, 2026-10-12). Earth water already

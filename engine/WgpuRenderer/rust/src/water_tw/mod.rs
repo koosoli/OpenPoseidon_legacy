@@ -258,7 +258,7 @@ fn lip_override() -> Option<f32> {
 /// water (owner, 2026-10-12). On by default: the owner chose distinct caps over Tidewater's spread
 /// foam ("more white caps and less foam"); WGR_TW_WHITECAP=0 restores Tidewater's look, "lo,hi"
 /// tunes the cover that starts a cap and the cover that is a full one.
-pub const WHITECAP_PATCH: [f32; 2] = [0.012, 0.07];
+pub const WHITECAP_PATCH: [f32; 2] = [0.008, 0.11];
 const WHITECAP_PATCH_DEFAULT_ON: bool = true;
 fn whitecap_patch() -> [f32; 2] {
     static V: std::sync::OnceLock<[f32; 2]> = std::sync::OnceLock::new();

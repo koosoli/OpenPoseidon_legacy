@@ -163,7 +163,7 @@ impl SpectrumInputs {
         let whitecaps = if sea == [0.0; 4] { 0.5 } else { sea[2].clamp(0.0, 1.0) };
         let choppiness = tw[0][1];
         let _ = choppiness; // the Jacobian's spread carries it (see whitecap_bias)
-        let foam_bias = q(whitecap_bias(local.wind_speed, whitecaps), 0.005);
+        let foam_bias = q(whitecap_bias(local.wind_speed, whitecaps) + foam_bias_add(), 0.005);
         let foam_decay = q(foam_decay_override().unwrap_or(0.6 - 0.35 * whitecaps), 0.005);
         Self { sizes, local, swell, depth: 500.0, seed: 1337, foam_bias, foam_decay }
     }
@@ -319,6 +319,14 @@ pub fn wind_fetch_km(wind_speed: f32) -> f32 {
 /// lace pattern's thinnest veins (white worms).
 pub fn whitecap_bias(wind_speed: f32, whitecaps: f32) -> f32 {
     0.5 + 0.16 * whitecaps.clamp(0.0, 1.0) + 0.01 * (wind_speed - 7.0).clamp(-5.0, 12.0)
+}
+
+/// OP's offset over Tidewater's whitecap threshold (more of the sea's crests break into caps).
+/// WGR_TW_FOAM_BIAS_ADD overrides it.
+pub const FOAM_BIAS_ADD: f32 = 0.1;
+fn foam_bias_add() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_FOAM_BIAS_ADD").ok().and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(FOAM_BIAS_ADD).clamp(-0.3, 0.4))
 }
 
 /// WGR_TW_FOAM_DECAY=<1/s>: overrides the whitecap foam's decay rate (capture tuning).
