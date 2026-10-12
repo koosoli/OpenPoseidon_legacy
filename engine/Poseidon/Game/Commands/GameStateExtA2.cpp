@@ -94,6 +94,7 @@ GameValue StrFormat(const GameState* state, GameValuePar oper1);
 GameValue ObjSide(const GameState* state, GameValuePar oper1);
 GameValue A1MissionConfigFile(const GameState* state);
 GameValue VehDelete(const GameState* state, GameValuePar oper1);
+GameValue Player(const GameState* state);
 GameValue GroupCreate(const GameState* state, GameValuePar oper1);
 GameValue SideCivilian(const GameState* state);
 GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -1232,6 +1233,17 @@ GameValue A2CreateAgent(const GameState* state, GameValuePar oper1)
     return A1UnitCreate(state, group, oper1);
 }
 
+// switchableUnits: in single player the player alone (no team switch here)
+GameValue A2SwitchableUnits(const GameState* state)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& a = result;
+    const GameValue p = Player(state);
+    if (GetObject(p))
+        a.Add(p);
+    return result;
+}
+
 GameValue A2EmptyArrayNular(const GameState* state)
 {
     return state->CreateGameValue(GameArray);
@@ -2064,6 +2076,8 @@ const GameNular A2Nular[] = {
     GameNular(GameNothing, "processInitCommands", A2ProcessInitCommands),
     GameNular(GameString, "campaignConfigFile", A1MissionConfigFile),
     GameNular(GameSide, "sideUnknown", A2SideUnknown),
+    GameNular(GameArray, "playableUnits", A2EmptyArrayNular),
+    GameNular(GameArray, "switchableUnits", A2SwitchableUnits),
     GameNular(GameString, "commandingMenu", A2EmptyString),
     GameNular(GameScalar, "displayNull", A2MinusOne),
     GameNular(GameScalar, "controlNull", A2MinusOne),
