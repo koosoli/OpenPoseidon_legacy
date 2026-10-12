@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -76,6 +77,7 @@ GameValue MarkerSetShape(const GameState* state, GameValuePar oper1, GameValuePa
 GameValue MarkerSetBrush(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue MarkerSetDir(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue GameTime(const GameState* state);
+GameValue StrFormat(const GameState* state, GameValuePar oper1);
 
 namespace
 {
@@ -974,6 +976,13 @@ GameValue A2Factor(const GameState*, GameValuePar oper1, GameValuePar oper2)
     return GameValue(std::clamp((x - a) / (b - a), 0.0f, 1.0f));
 }
 
+GameValue A2TextLogFormat(const GameState* state, GameValuePar oper1)
+{
+    const RString text = StrFormat(state, oper1);
+    LOG_INFO(Script, "textLogFormat: {}", (const char*)text);
+    return NOTHING;
+}
+
 GameValue A2HintSilent(const GameState* state, GameValuePar oper1)
 {
     return ShowHint(state, oper1);
@@ -1032,6 +1041,32 @@ void Arma2RuntimeSimulate()
     Runtime& rt = RT();
     for (size_t i = 0; i < rt.fsms.size(); i++) // FSMs may start FSMs
         FsmStep(*rt.fsms[i]);
+
+    // Diagnostics: OP_A2_WATCH="var1,var2,..." logs those variables every 10 s of game time.
+    static const std::string watch = [] {
+        const char* e = std::getenv("OP_A2_WATCH");
+        return std::string(e ? e : "");
+    }();
+    static float nextWatch = 0;
+    if (!watch.empty() && (Now() >= nextWatch || Now() + 1 < nextWatch - 10))
+    {
+        nextWatch = Now() + 10;
+        GameState* gstate = GWorld->GetGameState();
+        size_t pos = 0;
+        while (pos < watch.size())
+        {
+            size_t end = watch.find(',', pos);
+            if (end == std::string::npos)
+                end = watch.size();
+            const std::string name = watch.substr(pos, end - pos);
+            if (!name.empty())
+            {
+                const GameValue v = gstate->VarGet(name.c_str());
+                LOG_INFO(Script, "watch t={:.0f} {} = {}", Now(), name, v.GetNil() ? "<nil>" : (const char*)v.GetText());
+            }
+            pos = end + 1;
+        }
+    }
 }
 
 namespace
@@ -1067,7 +1102,7 @@ const GameNular A2Nular[] = {
 };
 
 const GameFunction A2Unary[] = {
-    GameFunction(GameNothing, "textLogFormat", A2NothingUnary, GameArray),
+    GameFunction(GameNothing, "textLogFormat", A2TextLogFormat, GameArray),
     GameFunction(GameNothing, "onPreloadStarted", A2NothingUnary, GameString),
     GameFunction(GameNothing, "onPreloadFinished", A2NothingUnary, GameString),
     GameFunction(GameNothing, "scriptName", A2NothingUnary, GameString),
