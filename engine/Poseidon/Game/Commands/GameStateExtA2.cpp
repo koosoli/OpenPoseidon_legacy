@@ -1311,6 +1311,17 @@ GameValue A2ParseNumber(const GameState*, GameValuePar oper1)
     return GameValue(static_cast<float>(std::atof((const char*)RString(oper1))));
 }
 
+// with namespace do {code}: there is one variable space here, so the code just runs
+GameValue A2With(const GameState*, GameValuePar oper1)
+{
+    return oper1;
+}
+
+GameValue A2WithDo(const GameState* state, GameValuePar, GameValuePar oper2)
+{
+    return state->EvaluateMultiple(RString(oper2));
+}
+
 GameValue A2EmptyArrayNular(const GameState* state)
 {
     return state->CreateGameValue(GameArray);
@@ -2214,6 +2225,9 @@ const GameFunction A2Unary[] = {
     GameFunction(GameNothing, "deleteCollection", A2DeleteCollection, GameObject),
     GameFunction(GameObject, "createAgent", A2CreateAgent, GameArray),
     GameFunction(GameArray, "toArray", A2ToArray, GameString),
+    GameFunction(GameString, "with", A2With, GameString),
+    GameFunction(GameNothing, "hideObject", A2NothingUnary, GameObject),
+    GameFunction(GameString, "keyName", A2TextLogEmpty, GameScalar),
     GameFunction(GameString, "toString", A2ToString, GameArray),
     GameFunction(GameString, "toLower", A2ToLower, GameString),
     GameFunction(GameString, "toUpper", A2ToUpper, GameString),
@@ -2327,6 +2341,11 @@ const GameOperator A2Binary[] = {
     GameOperator(GameArray, "selectionPosition", function, A2ZeroPos, GameObject, GameString),
     GameOperator(GameNothing, "hcSelectGroup", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameNothing, "lnbSetColumnsPos", function, A2NothingBinary, GameScalar, GameArray),
+    GameOperator(GameAny, "do", function, A2WithDo, GameString, GameString),
+    GameOperator(GameNothing, "enableIRLasers", function, A2NothingBinary, GameObject | GameGroup, GameBool),
+    GameOperator(GameNothing, "respawnVehicle", function, A2NothingBinary, GameObject, GameArray),
+    GameOperator(GameNothing, "ctrlMapAnimAdd", function, A2NothingBinary, GameAny, GameArray),
+    GameOperator(GameNothing, "ctrlMapAnimCommit", function, A2NothingBinary, GameAny, GameAny),
     GameOperator(GameNothing, "setVehicleArmor", function, A2NothingBinary, GameObject, GameScalar),
     GameOperator(GameNothing, "lockCargo", function, A2NothingBinary, GameObject, GameBool | GameArray),
     GameOperator(GameNothing, "lockDriver", function, A2NothingBinary, GameObject, GameBool),
