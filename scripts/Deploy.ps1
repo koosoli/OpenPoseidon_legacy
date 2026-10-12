@@ -271,6 +271,14 @@ foreach ($name in $payload)
     Write-Host ("  + {0,-22} {1,10:N0} bytes  built {2}" -f $name, (Get-Item -LiteralPath $dst).Length, $stamp)
 }
 
+# The Island Editor (main menu "ISLAND EDITOR") is a standalone exe with no renderer DLL of its own,
+# so it is not part of the matched pair above; it is installed beside the game when it was built.
+$islandEditor = Join-Path $distDir 'PoseidonIslandEditor.exe'
+if (Test-Path -LiteralPath $islandEditor) {
+    Copy-Item -LiteralPath $islandEditor -Destination (Join-Path $GameDir 'PoseidonIslandEditor.exe') -Force
+    Write-Host "  + PoseidonIslandEditor.exe"
+}
+
 function Get-ContentPayloadHash([string]$Path) {
     $stream = [IO.File]::OpenRead($Path)
     $sha = [Security.Cryptography.SHA256]::Create()
