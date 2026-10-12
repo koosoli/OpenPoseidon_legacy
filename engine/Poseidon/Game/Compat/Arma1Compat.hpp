@@ -16,11 +16,20 @@
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <string>
+#include <vector>
 
 namespace Poseidon::Arma1Compat
 {
-// True when --arma1 named a usable Arma 1 install.
+// True when --arma1 or --arma2 named a usable install.
 bool Active();
+
+// The mounted generation: 1 for Arma 1 (--arma1), 2 for Arma 2 / OA (--arma2); 0 inactive.
+// Everything below serves both; where Arma 2 lays its data out differently (Dta, the
+// expansion folders, XML stringtables, binarised animations) the generation decides.
+int Generation();
+
+// "Arma 1" / "Arma 2", for log lines.
+const char* Label();
 
 // Mounts <root>\AddOns, <root>\DBE1\AddOns and the campaign archives, data-only.
 // Called from Globals::Init while the file banks are (re)built.
@@ -79,6 +88,10 @@ void ActivateKey(const char* key);
 // ("campaigns\ca\missions\m09convoyattack.sara\mission.sqm"). Empty on failure,
 // with the reason in `error`.
 std::string ResolveMissionFile(const std::string& spec, std::string& error);
+
+// Every mission.sqm inside the mounted archives, as virtual paths ("ca\\missions\\Scenarios\\
+// SP_EyeForEye.Chernarus\\mission.sqm"). Templates and campaigns included.
+std::vector<std::string> MissionFiles();
 
 // True when the mission directory lies inside a mounted Arma 1 archive.
 bool IsArma1MissionDirectory(const char* missionDirectory);

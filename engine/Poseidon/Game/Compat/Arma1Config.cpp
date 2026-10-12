@@ -37,6 +37,7 @@ namespace Poseidon::Arma1Compat
 {
 const std::vector<std::string>& BankPrefixes(); // Arma1Compat.cpp
 std::string RootFolder();                       // Arma1Compat.cpp
+std::vector<std::string> DtaFolders();          // Arma1Compat.cpp
 
 namespace
 {
@@ -313,7 +314,8 @@ bool IsStringtable(const std::string& n)
 {
     const size_t slash = n.find_last_of("\\/");
     const std::string leaf = slash == std::string::npos ? n : n.substr(slash + 1);
-    return leaf.rfind("stringtable", 0) == 0 && leaf.size() > 4 && leaf.compare(leaf.size() - 4, 4, ".csv") == 0;
+    return leaf.rfind("stringtable", 0) == 0 && leaf.size() > 4 &&
+           (leaf.compare(leaf.size() - 4, 4, ".csv") == 0 || leaf.compare(leaf.size() - 4, 4, ".xml") == 0);
 }
 
 struct LoadedConfig
@@ -340,7 +342,7 @@ void ImportIntoPars(const std::string& text, const char* what)
     Pars.Update(tmp);
     Pars.SetAccessMode(access);
     Pars.SetFile(&Pars);
-    LOG_INFO(Mission, "Arma 1: imported {} ({} bytes of config)", what, text.size());
+    LOG_INFO(Mission, "{}: imported {} ({} bytes of config)", Label(), what, text.size());
 }
 
 // Config text for a class of the merged Arma 1 tree. Not ParamEntry::Save: a merged
@@ -500,7 +502,7 @@ bool MovesImported()
     const ParamEntry* male = Arma1Pars().FindEntryNoInheritance("CfgMovesMaleSdr");
     if (!basic || !male || !male->FindEntry("States"))
     {
-        LOG_WARN(Mission, "Arma 1: CfgMovesMaleSdr not found, soldiers keep CWA models");
+        LOG_WARN(Mission, "{}: CfgMovesMaleSdr not found, soldiers keep CWA models", Label());
         return false;
     }
     std::string basicText = SaveText(*basic);
@@ -627,13 +629,23 @@ void LoadConfig()
     std::vector<LoadedConfig> configs;
     int stringtables = 0;
 
-    // Dta\bin.pbo: the base config and global stringtable. Opened as a private bank,
-    // never added to GFileBanks, so CWA's own bin\ keeps answering CWA's lookups.
+    // Dta\bin.pbo: the base config and global stringtable (Arma 2 keeps its global
+    // strings in Dta\languagecore.pbo; Operation Arrowhead adds Expansion\Dta). Opened
+    // as private banks, never added to GFileBanks, so CWA's own bin\ keeps answering
+    // CWA's lookups. Later Dta folders override earlier ones.
+    int baseConfigs = 0;
+    for (const std::string& dtaFolder : DtaFolders())
     {
-        const std::string binPath = RootFolder() + "\\Dta\\bin";
-        QFBank dta;
-        if (dta.open(RString(binPath.c_str())))
+        for (const char* archive : {"bin", "languagecore"})
         {
+            const std::string binPath = dtaFolder + "\\" + archive;
+            QFBank dta;
+            if (!dta.open(RString(binPath.c_str())))
+            {
+                if (std::string(archive) == "bin")
+                    LOG_WARN(Mission, "{}: {}.pbo not readable, base config missing", Label(), binPath);
+                continue;
+            }
             dta.Lock();
             const auto readPrivate = [&](const std::string& name)
             {
@@ -649,35 +661,32 @@ void LoadConfig()
                 const std::vector<uint8_t> bytes = readPrivate(name);
                 if (bytes.empty())
                     continue;
-                LoadArma1StringtableFromMemory(("arma1dta:bin\\" + name).c_str(),
+                LoadArma1StringtableFromMemory(("dta:" + binPath + "\\" + name).c_str(),
                                                reinterpret_cast<const char*>(bytes.data()), bytes.size());
                 stringtables++;
             }
             for (const std::string& name : BankFiles(dta, IsConfigBin))
             {
-                const std::string path = "Dta\\bin.pbo:" + name;
+                const std::string path = binPath + ".pbo:" + name;
                 try
                 {
                     const std::string text = RapToText(readPrivate(name)).Convert();
-                    LOG_INFO(Mission, "Arma 1: parsing {} ({} bytes)", path, text.size());
+                    LOG_INFO(Mission, "{}: parsing {} ({} bytes)", Label(), path, text.size());
                     LoadedConfig cfg;
                     cfg.source = path;
                     cfg.isBase = true;
                     cfg.file = std::make_unique<ParamFile>();
                     QIStream in(text.data(), static_cast<int>(text.size()));
                     cfg.file->Parse(in);
-                    configs.insert(configs.begin(), std::move(cfg));
+                    configs.insert(configs.begin() + baseConfigs, std::move(cfg));
+                    baseConfigs++;
                 }
                 catch (const std::exception& e)
                 {
-                    LOG_WARN(Mission, "Arma 1: config {} not read: {}", path, e.what());
+                    LOG_WARN(Mission, "{}: config {} not read: {}", Label(), path, e.what());
                 }
             }
             dta.close();
-        }
-        else
-        {
-            LOG_WARN(Mission, "Arma 1: {}.pbo not readable, Arma 1 base config missing", binPath);
         }
     }
     for (const std::string& prefix : BankPrefixes())
@@ -696,7 +705,7 @@ void LoadConfig()
             try
             {
                 const std::string text = RapToText(ReadArchiveFile(path)).Convert();
-                LOG_INFO(Mission, "Arma 1: parsing {} ({} bytes)", path, text.size());
+                LOG_INFO(Mission, "{}: parsing {} ({} bytes)", Label(), path, text.size());
                 LoadedConfig cfg;
                 cfg.source = path;
                 cfg.file = std::make_unique<ParamFile>();
@@ -719,7 +728,7 @@ void LoadConfig()
             }
             catch (const std::exception& e)
             {
-                LOG_WARN(Mission, "Arma 1: config {} not read: {}", path, e.what());
+                LOG_WARN(Mission, "{}: config {} not read: {}", Label(), path, e.what());
             }
         }
     }
@@ -745,7 +754,7 @@ void LoadConfig()
                     ready = false;
             if (!ready)
                 continue;
-            LOG_INFO(Mission, "Arma 1: merging {}", configs[i].source);
+            LOG_INFO(Mission, "{}: merging {}", Label(), configs[i].source);
             Arma1Pars().Update(*configs[i].file);
             done.insert(configs[i].patches.begin(), configs[i].patches.end());
             merged[i] = true;
@@ -757,7 +766,7 @@ void LoadConfig()
             for (size_t i = 0; i < configs.size(); i++)
                 if (!merged[i])
                 {
-                    LOG_WARN(Mission, "Arma 1: dependency cycle, merging {} anyway", configs[i].source);
+                    LOG_WARN(Mission, "{}: dependency cycle, merging {} anyway", Label(), configs[i].source);
                     Arma1Pars().Update(*configs[i].file);
                     merged[i] = true;
                     mergedCount++;
@@ -766,8 +775,35 @@ void LoadConfig()
     }
     Arma1Pars().SetFile(&Arma1Pars());
     const ParamEntry* vehicles = Arma1Pars().FindEntry("CfgVehicles");
-    LOG_INFO(Mission, "Arma 1: config read from {} archives ({} CfgVehicles classes, {} stringtables)",
+    LOG_INFO(Mission, "{}: config read from {} archives ({} CfgVehicles classes, {} stringtables)", Label(),
              configs.size(), vehicles ? vehicles->GetEntryCount() : 0, stringtables);
+}
+
+namespace
+{
+bool IsMissionSqm(const std::string& n)
+{
+    return n == "mission.sqm" || (n.size() > 12 && n.compare(n.size() - 12, 12, "\\mission.sqm") == 0);
+}
+} // namespace
+
+std::vector<std::string> MissionFiles()
+{
+    std::vector<std::string> out;
+    if (!Active())
+        return out;
+    std::set<std::string> seen;
+    for (const std::string& prefix : BankPrefixes())
+    {
+        if (!seen.insert(Lower(prefix)).second)
+            continue;
+        QFBank* bank = FindBank(prefix);
+        if (!bank)
+            continue;
+        for (const std::string& name : BankFiles(*bank, IsMissionSqm))
+            out.push_back(prefix + name);
+    }
+    return out;
 }
 
 const ParamEntry* ConfigRoot()
@@ -886,7 +922,7 @@ bool Arma1RapFileToText(const char* fileName, std::string& text)
     }
     catch (const std::exception& e)
     {
-        LOG_WARN(Mission, "Arma 1: binarised {} not readable: {}", fileName, e.what());
+        LOG_WARN(Mission, "{}: binarised {} not readable: {}", Label(), fileName, e.what());
         return false;
     }
     return true;
@@ -1008,7 +1044,9 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         return cwaClass;
 
     const bool man = IsKindOf(a1, "CAManBase") || IsKindOf(a1, "Man");
-    if (man && !MovesImported())
+    // Arma 2 moves are binarised animations (BMTR) the engine has no reader for yet:
+    // an Arma 2 soldier keeps the CWA soldier's model and moves.
+    if (man && (Generation() == 2 || !MovesImported()))
         return cwaClass;
 
     const std::string generated = "A1x_" + std::string(missionClass.Data());
@@ -1056,7 +1094,7 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     ImportIntoPars(text, generated.c_str());
     if (!(Pars >> "CfgVehicles").FindEntry(generated.c_str()))
         return cwaClass;
-    LOG_INFO(Mission, "Arma 1: '{}' uses the Arma 1 model {} on CWA '{}'{}", missionClass.Data(), model,
+    LOG_INFO(Mission, "{}: '{}' uses the Arma 1 model {} on CWA '{}'{}", Label(), missionClass.Data(), model,
              cwaClass.Data(), man ? " with the Arma 1 moves" : "");
     return RString(generated.c_str());
 }

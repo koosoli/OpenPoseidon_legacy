@@ -18,6 +18,7 @@ using Poseidon::QIFStreamB;
 } // namespace Poseidon
 #include <algorithm>
 #include <ctype.h>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <set>
@@ -189,6 +190,13 @@ static std::vector<std::string> ResolveStringtableLoadList(const char* filename)
     {
         files.push_back(baseFile);
     }
+    else if (HasCsvSuffix(requested.c_str()))
+    {
+        // Arma 2 missions and campaigns ship stringtable.xml instead.
+        const std::string xml = requested.substr(0, requested.size() - strlen(".csv")) + ".xml";
+        if (QIFStreamB::FileExist(xml.c_str()))
+            files.push_back(xml);
+    }
 
     size_t slashPos = requested.find_last_of("/\\");
     const std::string dir = slashPos == std::string::npos ? "." : requested.substr(0, slashPos);
@@ -255,6 +263,164 @@ static std::vector<std::string> ResolveStringtableLoadList(const char* filename)
     return files;
 }
 
+
+// Arma 2 stringtable.xml -> the CSV layout the loader below reads.
+//
+//   <Project><Package><Container>...<Key ID="str_x"><English>..</English><German>..</German></Key>
+//
+// Every element that directly holds text inside a <Key> is a language column.
+// <Original> is the authoring language (English in Bohemia's files) and stands in
+// for English where a key has no <English> of its own. Entities are decoded; line
+// breaks inside a value become spaces (the CSV reader is line based).
+static std::string DecodeXmlEntities(const std::string& in)
+{
+    std::string out;
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size(); i++)
+    {
+        if (in[i] != '&')
+        {
+            out += (in[i] == '\r' || in[i] == '\n') ? ' ' : in[i];
+            continue;
+        }
+        const size_t semi = in.find(';', i);
+        if (semi == std::string::npos || semi - i > 10)
+        {
+            out += in[i];
+            continue;
+        }
+        const std::string ent = in.substr(i + 1, semi - i - 1);
+        unsigned long code = 0;
+        if (ent == "lt") out += '<';
+        else if (ent == "gt") out += '>';
+        else if (ent == "amp") out += '&';
+        else if (ent == "quot") out += '"';
+        else if (ent == "apos") out += '\'';
+        else if (!ent.empty() && ent[0] == '#')
+        {
+            code = ent.size() > 1 && (ent[1] == 'x' || ent[1] == 'X') ? std::strtoul(ent.c_str() + 2, nullptr, 16)
+                                                                       : std::strtoul(ent.c_str() + 1, nullptr, 10);
+            if (code < 0x80) out += static_cast<char>(code);
+            else if (code < 0x800) { out += static_cast<char>(0xC0 | (code >> 6)); out += static_cast<char>(0x80 | (code & 0x3F)); }
+            else if (code < 0x10000) { out += static_cast<char>(0xE0 | (code >> 12)); out += static_cast<char>(0x80 | ((code >> 6) & 0x3F)); out += static_cast<char>(0x80 | (code & 0x3F)); }
+            else { out += static_cast<char>(0xF0 | (code >> 18)); out += static_cast<char>(0x80 | ((code >> 12) & 0x3F)); out += static_cast<char>(0x80 | ((code >> 6) & 0x3F)); out += static_cast<char>(0x80 | (code & 0x3F)); }
+        }
+        else
+        {
+            out += in.substr(i, semi - i + 1);
+        }
+        i = semi;
+    }
+    return out;
+}
+
+static bool XmlStringtableToCsv(const std::string& xml, std::string& csv)
+{
+    std::vector<std::string> languages; // column order, English first
+    std::map<std::string, int> column;  // lower-case language -> index
+    struct Row
+    {
+        std::string id;
+        std::map<int, std::string> values;
+    };
+    std::vector<Row> rows;
+    const auto columnOf = [&](const std::string& tag)
+    {
+        std::string key = LowerAscii(tag == "Original" ? std::string("Original") : tag);
+        auto it = column.find(key);
+        if (it != column.end())
+            return it->second;
+        languages.push_back(tag);
+        column[key] = static_cast<int>(languages.size()) - 1;
+        return static_cast<int>(languages.size()) - 1;
+    };
+    columnOf("English");
+    const int originalColumn = columnOf("Original");
+    size_t pos = 0;
+    while (true)
+    {
+        const size_t key = xml.find("<Key", pos);
+        if (key == std::string::npos)
+            break;
+        const size_t keyEnd = xml.find("</Key>", key);
+        const size_t headEnd = xml.find('>', key);
+        if (keyEnd == std::string::npos || headEnd == std::string::npos || headEnd > keyEnd)
+            break;
+        pos = keyEnd + 6;
+        const std::string head = xml.substr(key, headEnd - key);
+        const size_t idAt = head.find("ID=");
+        if (idAt == std::string::npos || idAt + 4 > head.size())
+            continue;
+        const char quote = head[idAt + 3];
+        const size_t idEnd = head.find(quote, idAt + 4);
+        if (idEnd == std::string::npos)
+            continue;
+        Row row;
+        row.id = head.substr(idAt + 4, idEnd - idAt - 4);
+        size_t at = headEnd + 1;
+        while (at < keyEnd)
+        {
+            const size_t open = xml.find('<', at);
+            if (open == std::string::npos || open >= keyEnd)
+                break;
+            const size_t close = xml.find('>', open);
+            if (close == std::string::npos || close > keyEnd)
+                break;
+            std::string tag = xml.substr(open + 1, close - open - 1);
+            if (tag.empty() || tag[0] == '/' || tag[0] == '!' || tag.back() == '/')
+            {
+                at = close + 1;
+                continue;
+            }
+            if (const size_t sp = tag.find_first_of(" \t\r\n"); sp != std::string::npos)
+                tag.resize(sp);
+            const std::string endTag = "</" + tag + ">";
+            const size_t end = xml.find(endTag, close + 1);
+            if (end == std::string::npos || end > keyEnd)
+            {
+                at = close + 1;
+                continue;
+            }
+            row.values[columnOf(tag)] = DecodeXmlEntities(xml.substr(close + 1, end - close - 1));
+            at = end + endTag.size();
+        }
+        if (row.values.find(0) == row.values.end() && row.values.count(originalColumn))
+            row.values[0] = row.values[originalColumn];
+        rows.push_back(std::move(row));
+    }
+    if (rows.empty())
+        return false;
+    const auto quoted = [](const std::string& v)
+    {
+        std::string q = "\"";
+        for (char c : v)
+        {
+            if (c == '"')
+                q += "\"\"";
+            else
+                q += c;
+        }
+        return q + "\"";
+    };
+    csv = "LANGUAGE";
+    for (const std::string& l : languages)
+        csv += "," + l;
+    csv += "\n";
+    for (const Row& row : rows)
+    {
+        csv += row.id;
+        for (int c = 0; c < static_cast<int>(languages.size()); c++)
+        {
+            csv += ",";
+            const auto it = row.values.find(c);
+            if (it != row.values.end())
+                csv += quoted(it->second);
+        }
+        csv += "\n";
+    }
+    return true;
+}
+
 static void MergeSurplusLegacyCsvCells(std::vector<std::string>& row, int expectedColumns, int mergeColumn)
 {
     if (expectedColumns <= 0 || mergeColumn < 0 || mergeColumn >= expectedColumns ||
@@ -319,6 +485,52 @@ void StringTableDynamic::Load(QIStream& file, const char* filename, std::set<std
         else
         {
             file.seekg(0, QIOS::beg);
+        }
+    }
+    // Arma 2 stringtables are XML (UTF-8, optional BOM): converted to CSV in memory.
+    std::string xmlCsv;
+    QIStream xmlMemory;
+    {
+        std::string head;
+        const int start = stream->tellg();
+        for (int i = 0; i < 64; i++)
+        {
+            const int c = stream->get();
+            if (stream->eof() || stream->fail() || c < 0)
+                break;
+            head.push_back(static_cast<char>(c));
+        }
+        size_t first = 0;
+        if (head.size() >= 3 && static_cast<unsigned char>(head[0]) == 0xEF &&
+            static_cast<unsigned char>(head[1]) == 0xBB && static_cast<unsigned char>(head[2]) == 0xBF)
+            first = 3;
+        while (first < head.size() && isspace(static_cast<unsigned char>(head[first])))
+            first++;
+        const bool isXml = first < head.size() && head[first] == '<';
+        if (isXml)
+        {
+            std::string text = head;
+            while (true)
+            {
+                const int c = stream->get();
+                if (stream->eof() || stream->fail() || c < 0)
+                    break;
+                text.push_back(static_cast<char>(c));
+            }
+            if (XmlStringtableToCsv(text, xmlCsv))
+            {
+                xmlMemory.init(xmlCsv.data(), static_cast<int>(xmlCsv.size()));
+                stream = &xmlMemory;
+                fileIsUtf8 = true;
+            }
+            else
+            {
+                return;
+            }
+        }
+        else
+        {
+            stream->seekg(start, QIOS::beg);
         }
     }
     QIStream& f = *stream;

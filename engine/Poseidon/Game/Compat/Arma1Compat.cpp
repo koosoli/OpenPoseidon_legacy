@@ -64,7 +64,31 @@ const fs::path& RootPath()
             if (!ec && fs::is_directory(candidate / "AddOns", ec))
                 root = candidate;
             else
-                LOG_ERROR(Mission, "--arma1 '{}' is not an Arma 1 folder (no AddOns subfolder)", configured);
+                LOG_ERROR(Mission, "--arma{} '{}' is not an Arma folder (no AddOns subfolder)",
+                          Foundation::AppConfig::Instance().GetArmaGeneration(), configured);
+        }
+    }
+    return root;
+}
+
+// --arma2oa: the Operation Arrowhead folder, or empty. Its Expansion/BAF/PMC/ACR
+// folders are looked for there and in the --arma2 folder (a combined install).
+const fs::path& OaRootPath()
+{
+    static fs::path root;
+    static bool resolved = false;
+    if (!resolved)
+    {
+        resolved = true;
+        const std::string& configured = Foundation::AppConfig::Instance().GetArma2OaRoot();
+        if (!configured.empty())
+        {
+            std::error_code ec;
+            fs::path candidate = fs::absolute(fs::path(configured), ec);
+            if (!ec && fs::is_directory(candidate, ec))
+                root = candidate;
+            else
+                LOG_ERROR(Mission, "--arma2oa '{}' is not a folder", configured);
         }
     }
     return root;
@@ -123,7 +147,7 @@ void MountFolder(const fs::path& folder, bool missionBanks, const char* remountP
         }
         else
         {
-            LOG_WARN(Mission, "Arma 1: could not mount {}", pbo.string());
+            LOG_WARN(Mission, "{}: could not mount {}", Label(), pbo.string());
         }
     }
 }
@@ -285,13 +309,13 @@ RString ResolveFrom(const char* configClass, const RString& name,
             if (config->FindEntry(candidate))
             {
                 if (reported.insert(std::string(configClass) + key).second)
-                    LOG_INFO(Mission, "Arma 1: {} '{}' is represented by CWA '{}'", configClass, name.Data(), candidate);
+                    LOG_INFO(Mission, "{}: {} '{}' is represented by CWA '{}'", Label(), configClass, name.Data(), candidate);
                 return RString(candidate);
             }
         }
     }
     if (warn && reported.insert(std::string(configClass) + key).second)
-        LOG_WARN(Mission, "Arma 1: {} '{}' has no CWA counterpart", configClass, name.Data());
+        LOG_WARN(Mission, "{}: {} '{}' has no CWA counterpart", Label(), configClass, name.Data());
     return name;
 }
 
@@ -336,6 +360,37 @@ bool Active()
     return !RootPath().empty();
 }
 
+int Generation()
+{
+    return Active() ? Foundation::AppConfig::Instance().GetArmaGeneration() : 0;
+}
+
+const char* Label()
+{
+    return Generation() == 2 ? "Arma 2" : "Arma 1";
+}
+
+std::vector<std::string> DtaFolders()
+{
+    std::vector<std::string> out;
+    if (!Active())
+        return out;
+    out.push_back((RootPath() / "Dta").string());
+    if (Generation() == 2)
+    {
+        std::vector<fs::path> roots{RootPath()};
+        if (!OaRootPath().empty())
+            roots.push_back(OaRootPath());
+        for (const fs::path& r : roots)
+        {
+            std::error_code ec;
+            if (fs::is_directory(r / "Expansion" / "Dta", ec))
+                out.push_back((r / "Expansion" / "Dta").string());
+        }
+    }
+    return out;
+}
+
 void MountArchives()
 {
     if (!Active())
@@ -345,14 +400,39 @@ void MountArchives()
     const fs::path& root = RootPath();
     // Dta\bin.pbo / core.pbo are NOT mounted: their declared prefixes ("bin", "core")
     // would shadow CWA's own UI resources. Arma1Config reads bin.pbo privately.
-    MountFolder(root / "AddOns", false);
-    MountFolder(root / "DBE1" / "AddOns", false);
-    MountFolder(root / "Campaigns", true);
-    MountFolder(root / "DBE1" / "Campaigns", true);
-    MountFolder(root / "Missions", true, nullptr, "arma1\\missions");
-    MountFolder(root / "MPMissions", true, nullptr, "arma1\\mpmissions");
-    LOG_INFO(Mission, "Arma 1: mounted {} read-only from {} ({} mission archives)",
-             "AddOns/Campaigns", root.string(), MissionBankPrefixes().size());
+    if (Generation() == 2)
+    {
+        // Arma 2 keeps its campaigns and scenarios inside AddOns\missions*.pbo. Operation
+        // Arrowhead and its DLCs add folders of their own; later mounts are searched first.
+        MountFolder(root / "AddOns", false);
+        std::vector<fs::path> roots{root};
+        if (!OaRootPath().empty() && OaRootPath() != root)
+            roots.push_back(OaRootPath());
+        for (const fs::path& r : roots)
+        {
+            if (r != root)
+                MountFolder(r / "AddOns", false);
+            for (const char* dlc : {"Expansion", "BAF", "PMC", "ACR"})
+                MountFolder(r / dlc / "AddOns", false);
+        }
+        for (const fs::path& r : roots)
+        {
+            MountFolder(r / "Missions", true, nullptr, "arma2\\missions");
+            MountFolder(r / "MPMissions", true, nullptr, "arma2\\mpmissions");
+        }
+    }
+    else
+    {
+        MountFolder(root / "AddOns", false);
+        MountFolder(root / "DBE1" / "AddOns", false);
+        MountFolder(root / "Campaigns", true);
+        MountFolder(root / "DBE1" / "Campaigns", true);
+        MountFolder(root / "Missions", true, nullptr, "arma1\\missions");
+        MountFolder(root / "MPMissions", true, nullptr, "arma1\\mpmissions");
+    }
+    LOG_INFO(Mission, "{}: mounted {} archives read-only from {}{}{} ({} mission archives)", Label(),
+             AllBankPrefixesMutable().size(), root.string(), OaRootPath().empty() ? "" : " and ",
+             OaRootPath().string(), MissionBankPrefixes().size());
 }
 
 void RegisterWorldClasses()
@@ -367,43 +447,78 @@ void RegisterWorldClasses()
         return;
     struct World
     {
-        const char* name;
-        const char* wrp;
-        const char* description;
+        std::string name;
+        std::string wrp;
+        std::string description;
     };
-    static const World worlds[] = {
-        {"Sara", "\\ca\\sara\\sara.wrp", "Arma 1 / Sahrani"},
-        {"SaraLite", "\\ca\\saralite\\SaraLite.wrp", "Arma 1 / Southern Sahrani"},
-        {"Sara_dbe1", "\\DBE1\\Sara_DBE1\\sara_dbe1.wrp", "Arma 1 / United Sahrani"},
-        {"Porto", "\\ca\\Desert2\\porto.wrp", "Arma 1 / Porto"},
-        // Arma 1's "Intro" desert collides with CWA's Intro island: it is registered
-        // under a private name and chosen only for missions from an Arma 1 archive.
-        {"A1_Intro", "\\ca\\desert\\intro.wrp", "Arma 1 / Rahmadi desert"},
-    };
+    std::vector<World> worlds;
+    if (Generation() == 2)
+    {
+        // Arma 2 / OA: every CfgWorlds class of the Arma 2 config whose world file is
+        // mounted (Chernarus, Utes, Takistan, Zargabad, Desert_E, Shapur_BAF, ...). A name
+        // CWA already uses ("Intro") gets the private prefix A2_ and is chosen only for
+        // missions from an Arma 2 archive (WorldClassForMission).
+        const ParamEntry* a2Worlds = ConfigRoot() ? ConfigRoot()->FindEntry("CfgWorlds") : nullptr;
+        for (int i = 0; a2Worlds && i < a2Worlds->GetEntryCount(); i++)
+        {
+            const ParamEntry& w = a2Worlds->GetEntry(i);
+            if (!w.IsClass())
+                continue;
+            const ParamEntry* wn = w.FindEntry("worldName");
+            if (!wn || wn->IsClass() || wn->IsArray())
+                continue;
+            std::string wrp = (const char*)(RStringB)*wn;
+            if (wrp.empty())
+                continue;
+            if (wrp[0] != '\\')
+                wrp = "\\" + wrp;
+            std::string name = (const char*)w.GetName();
+            if (ParamEntry* existing = cfgWorlds->FindEntryNoInheritance(name.c_str()))
+            {
+                const ParamEntry* owned = existing->FindEntry("opArma1World");
+                if (!owned || static_cast<int>(*owned) != 1)
+                    name = "A2_" + name;
+            }
+            std::string description = std::string("Arma 2 / ") + (const char*)w.GetName();
+            worlds.push_back({name, wrp, description});
+        }
+    }
+    else
+    {
+        worlds = {
+            {"Sara", "\\ca\\sara\\sara.wrp", "Arma 1 / Sahrani"},
+            {"SaraLite", "\\ca\\saralite\\SaraLite.wrp", "Arma 1 / Southern Sahrani"},
+            {"Sara_dbe1", "\\DBE1\\Sara_DBE1\\sara_dbe1.wrp", "Arma 1 / United Sahrani"},
+            {"Porto", "\\ca\\Desert2\\porto.wrp", "Arma 1 / Porto"},
+            // Arma 1's "Intro" desert collides with CWA's Intro island: it is registered
+            // under a private name and chosen only for missions from an Arma 1 archive.
+            {"A1_Intro", "\\ca\\desert\\intro.wrp", "Arma 1 / Rahmadi desert"},
+        };
+    }
     for (const World& world : worlds)
     {
-        if (!QIFStreamB::FileExist(world.wrp + 1))
+        if (!QIFStreamB::FileExist(world.wrp.c_str() + 1))
             continue;
-        if (ParamEntry* existing = cfgWorlds->FindEntryNoInheritance(world.name))
+        if (ParamEntry* existing = cfgWorlds->FindEntryNoInheritance(world.name.c_str()))
         {
             const ParamEntry* owned = existing->FindEntry("opArma1World");
             if (!owned || static_cast<int>(*owned) != 1)
             {
-                LOG_WARN(Mission, "Arma 1: CfgWorlds already defines '{}', left unchanged", world.name);
+                LOG_WARN(Mission, "{}: CfgWorlds already defines '{}', left unchanged", Label(), world.name);
                 continue;
             }
         }
         const ParamAccessMode worldAccess = cfgWorlds->GetAccessMode();
         cfgWorlds->SetAccessMode(PAReadAndWrite);
-        ParamClass* cls = cfgWorlds->AddClass(world.name);
+        ParamClass* cls = cfgWorlds->AddClass(world.name.c_str());
         cfgWorlds->SetAccessMode(worldAccess);
         if (!cls)
             continue;
         // Write owned entries before attaching Eden as the base (see RegisterWorldClass).
         cls->SetBase(nullptr);
         cls->Add("opArma1World", 1);
-        cls->Add("worldName", RString(world.wrp));
-        cls->Add("description", RString(world.description));
+        cls->Add("worldName", RString(world.wrp.c_str()));
+        cls->Add("description", RString(world.description.c_str()));
         if (ParamClass* names = cls->AddClass("Names"))
         {
             names->SetBase(nullptr);
@@ -414,10 +529,10 @@ void RegisterWorldClasses()
         {
             const ParamAccessMode listAccess = cfgList->GetAccessMode();
             cfgList->SetAccessMode(PAReadAndWrite);
-            cfgList->AddClass(world.name);
+            cfgList->AddClass(world.name.c_str());
             cfgList->SetAccessMode(listAccess);
         }
-        LOG_INFO(Mission, "Arma 1: world class '{}' -> {}", world.name, world.wrp);
+        LOG_INFO(Mission, "{}: world class '{}' -> {}", Label(), world.name, world.wrp);
     }
 }
 
@@ -438,13 +553,13 @@ RString ResolveVehicleClass(const RString& className)
         if (fallback.GetLength() > 0)
         {
             if (first)
-                LOG_INFO(Mission, "Arma 1: CfgVehicles '{}' is carried by CWA '{}' (by its Arma 1 kind)",
+                LOG_INFO(Mission, "{}: CfgVehicles '{}' is carried by CWA '{}' (by its Arma 1 kind)", Label(),
                          className.Data(), fallback.Data());
             cwa = fallback;
         }
         else if (first)
         {
-            LOG_WARN(Mission, "Arma 1: CfgVehicles '{}' has no CWA counterpart", className.Data());
+            LOG_WARN(Mission, "{}: CfgVehicles '{}' has no CWA counterpart", Label(), className.Data());
         }
     }
     return Arma1ModelClass(className, cwa);
@@ -476,11 +591,11 @@ void FilterMissionAddons(FindArrayRStringCI& addOns)
         if (known)
             continue;
         if (arma1Patch || name.rfind("ca", 0) == 0 || name.rfind("dbe1", 0) == 0 || name == "warfare")
-            LOG_INFO(Mission, "Arma 1: addon '{}' is provided by the mounted Arma 1 archives", addOns[i].Data());
+            LOG_INFO(Mission, "{}: addon '{}' is provided by the mounted Arma 1 archives", Label(), addOns[i].Data());
         else
             // Refusing the whole mission over one name helps nobody: a class it really
             // needs and cannot find is reported (and carried by a CWA class) on its own.
-            LOG_WARN(Mission, "Arma 1: addon '{}' is not installed; mission loaded without it", addOns[i].Data());
+            LOG_WARN(Mission, "{}: addon '{}' is not installed; mission loaded without it", Label(), addOns[i].Data());
         addOns.DeleteAt(i);
     }
 }
@@ -500,7 +615,7 @@ void ActivateKey(const char* key)
     fs::create_directories(KeysFile().parent_path(), ec);
     std::ofstream out(KeysFile(), std::ios::app);
     out << key << "\n";
-    LOG_INFO(Mission, "Arma 1: campaign key '{}' activated", key);
+    LOG_INFO(Mission, "{}: campaign key '{}' activated", Label(), key);
 }
 
 std::string ResolveMissionFile(const std::string& spec, std::string& error)
@@ -533,7 +648,21 @@ std::string ResolveMissionFile(const std::string& spec, std::string& error)
         if (QIFStreamB::FileExist(file.c_str()))
             return ForwardSlashes(file);
     }
-    error = "mission '" + spec + "' was not found in the Arma 1 campaign/mission archives";
+    // Anywhere below a mounted mission archive (Arma 2 keeps scenarios, campaigns and
+    // bootcamp in subfolders of AddOns\missions*.pbo): match the mission folder name,
+    // or a trailing part of its path.
+    {
+        std::string want = Lower(mission);
+        const std::string suffix = "\\" + want + "\\mission.sqm";
+        for (const std::string& file : MissionFiles())
+        {
+            const std::string lower = Lower(file);
+            if (lower == want + "\\mission.sqm" ||
+                (lower.size() > suffix.size() && lower.compare(lower.size() - suffix.size(), suffix.size(), suffix) == 0))
+                return ForwardSlashes(file);
+        }
+    }
+    error = "mission '" + spec + "' was not found in the " + Label() + " campaign/mission archives";
     return {};
 }
 
@@ -556,7 +685,7 @@ RString WorldClassForMission(const RString& world, const char* missionDirectory)
 {
     if (!IsArma1MissionDirectory(missionDirectory))
         return world;
-    const std::string alias = "A1_" + std::string(world.Data());
+    const std::string alias = (Generation() == 2 ? "A2_" : "A1_") + std::string(world.Data());
     const ParamEntry* worlds = Pars.FindEntry("CfgWorlds");
     const ParamEntry* entry = worlds ? worlds->FindEntry(alias.c_str()) : nullptr;
     return entry ? RString(alias.c_str()) : world;
@@ -566,11 +695,22 @@ std::string CampaignBaseForMission(const std::string& missionFile)
 {
     const std::string path = ForwardSlashes(missionFile);
     const std::string lower = Lower(path);
-    if (lower.rfind("campaigns/", 0) != 0)
-        return {};
-    const size_t missions = lower.find("/missions/");
-    if (missions == std::string::npos)
-        return {};
-    return path.substr(0, missions + 1);
+    if (lower.rfind("campaigns/", 0) == 0)
+    {
+        const size_t missions = lower.find("/missions/");
+        if (missions == std::string::npos)
+            return {};
+        return path.substr(0, missions + 1);
+    }
+    // Arma 2: <archive prefix>/campaign/missions/<mission>/mission.sqm, with the campaign's
+    // description.ext next to that missions folder.
+    const size_t missions = lower.rfind("/missions/");
+    if (Generation() == 2 && missions != std::string::npos && missions > 0)
+    {
+        const std::string base = path.substr(0, missions + 1);
+        if (QIFStreamB::FileExist((base + "description.ext").c_str()))
+            return base;
+    }
+    return {};
 }
 } // namespace Poseidon::Arma1Compat

@@ -170,14 +170,19 @@ class AppConfig
         _mapArchivePaths = roots.c_str();
         _localMapWorldId = worldId;
     }
-    /// --arma1: an installed Arma 1 (ArmA Gold) folder whose archives are mounted read-only.
-    const std::string& GetArma1Root() const { return _arma1Root; }
-    /// --arma1-mission: mission folder inside the mounted Arma 1 campaign/mission archives.
-    const std::string& GetArma1Mission() const { return _arma1Mission; }
-    /// --arma1-test-seconds: start the mission without briefing, play N seconds, exit.
-    float GetArma1TestSeconds() const { return _arma1TestSeconds; }
-    /// --arma1-campaign: start an Arma 1 campaign (ca, ra, merc) from its mounted archive.
-    const std::string& GetArma1Campaign() const { return _arma1Campaign; }
+    /// --arma1 / --arma2: the installed Arma 1 (ArmA Gold) or Arma 2 folder whose archives
+    /// are mounted read-only. --arma2 wins when both are given (one generation at a time).
+    const std::string& GetArma1Root() const { return _arma2Root.empty() ? _arma1Root : _arma2Root; }
+    /// 2 when --arma2 named the external install, 1 for --arma1, 0 for neither.
+    int GetArmaGeneration() const { return !_arma2Root.empty() ? 2 : !_arma1Root.empty() ? 1 : 0; }
+    /// --arma2oa: the Arma 2: Operation Arrowhead folder (Expansion, BAF, PMC, ACR), optional.
+    const std::string& GetArma2OaRoot() const { return _arma2OaRoot; }
+    /// --arma1-mission / --arma2-mission: mission folder inside the mounted mission archives.
+    const std::string& GetArma1Mission() const { return _arma2Mission.empty() ? _arma1Mission : _arma2Mission; }
+    /// --arma1-test-seconds / --arma2-test-seconds: start without briefing, play N seconds, exit.
+    float GetArma1TestSeconds() const { return _arma2TestSeconds > 0.0f ? _arma2TestSeconds : _arma1TestSeconds; }
+    /// --arma1-campaign / --arma2-campaign: start a campaign from its mounted archive.
+    const std::string& GetArma1Campaign() const { return _arma2Campaign.empty() ? _arma1Campaign : _arma2Campaign; }
     uint32_t GetWaitForParent() const { return _waitForParent; }
     const std::string& GetReforgerWorld() const { return _reforgerWorld; }
 
@@ -305,7 +310,7 @@ class AppConfig
     float GetTestModelScale() const { return _testModelScale; }
 
     /// True when --check and --test-mission are combined to run a bounded mission smoke boot.
-    bool IsMissionSmokeCheck() const { return _checkInit && (!_testMissionPath.empty() || !_arma1Mission.empty()); }
+    bool IsMissionSmokeCheck() const { return _checkInit && (!_testMissionPath.empty() || !GetArma1Mission().empty()); }
 
     /// True when --check and --simulate are combined to run a bounded MP smoke boot.
     bool IsSimulateSmokeCheck() const { return _checkInit && _simulateMode; }
@@ -511,6 +516,11 @@ class AppConfig
     std::string _arma1Mission;
     float _arma1TestSeconds = 0.0f;
     std::string _arma1Campaign;
+    std::string _arma2Root;
+    std::string _arma2OaRoot;
+    std::string _arma2Mission;
+    float _arma2TestSeconds = 0.0f;
+    std::string _arma2Campaign;
     uint32_t _waitForParent = 0;
     std::string _reforgerWorld;
     RString _modsDir;     // resolved --mods-dir base ("" if unset)
