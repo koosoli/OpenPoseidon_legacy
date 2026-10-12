@@ -15,8 +15,8 @@ struct TwSurface {
     surface: vec4<f32>,    // amplitude, slope scale, foam coverage, foam pattern scale (1/m)
     material0: vec4<f32>,  // backscatter, sss, foam intensity, reflection strength
     material1: vec4<f32>,  // roughness, ssr on, debug view, water glow (W3j: in-scatter scale)
-    absorption: vec4<f32>, // rgb 1/m
-    scattering: vec4<f32>, // rgb 1/m
+    absorption: vec4<f32>, // rgb 1/m; w = whitecap patch start (OP, 0 = Tidewater's lace look)
+    scattering: vec4<f32>, // rgb 1/m; w = whitecap patch full
     detail: vec4<f32>,     // gust, slick, streak amounts, Earth preview marker
     shore0: vec4<f32>,     // ShoreParams: period (s), amplitude (H/2, m), variation, gamma
     shore1: vec4<f32>,     // ShoreParams: breakSpan, curl, runup, enabled (0 until the field exists)

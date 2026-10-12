@@ -473,21 +473,49 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
 
     // whitecaps: persistent (per vertex) + fresh where the surface is compressed right now;
     // more of them inside gusts, plus windrow lines in fresh wind
-    let fresh = sat((ocean.p0.y - 0.15 - jac) * 2.0);
+    // OP: the per-pixel term only sharpens a cap the persistent (per-vertex) foam already draws.
+    // On its own it is a thin line along every compressed crest ridge -- at a rough sea's
+    // choppiness, white worms all over the water (owner, 2026-10-12); the debug view (25) showed
+    // the vertex foam as soft patches and every worm in the per-pixel coverage.
+    let fresh = sat((ocean.p0.y - 0.15 - jac) * 2.0) * sat(vertexFoam * 2.5);
     var whitecaps = vertexFoam + fresh;
-    whitecaps = whitecaps * mix(0.5, 1.5, det.gust) + det.streak * 0.5;
-    let coverage = sat((foamSum + whitecaps) * tw.surface.z);
+    // OP: the windrows stay in the roughness (seaDetailSample) but draw no foam: as foam they are
+    // thin white lines ~11 m apart across the whole sea once the wind passes ~10 m/s, which read as
+    // worms, not as whitecaps (owner, 2026-10-12). Tidewater adds det.streak * 0.5 here.
+    whitecaps = whitecaps * mix(0.5, 1.5, det.gust);
+    var capCover = whitecaps * tw.surface.z;
+    // OP: whitecaps as patches on the crests (see water_tw::WHITECAP_PATCH): the low foam a rough
+    // sea leaves on every wave goes to nothing instead of to the lace pattern's thinnest veins,
+    // and a crest that is breaking reads as a solid cap that frays at its edge.
+    let capPatches = tw.absorption.w > 0.0;
+    if (capPatches) {
+        capCover = smoothstep(tw.absorption.w, tw.scattering.w, capCover);
+    }
+    let coverage = sat(foamSum * tw.surface.z + capCover);
+    // the cover the lace pattern below draws: everything but the caps in patch mode
+    let laceCover = select(coverage, sat(foamSum * tw.surface.z), capPatches);
 
     let fuv = lagXZ * tw.surface.w;
     let p1 = textureSample(waterFoamTex, smpAniso4Repeat, fuv);
     let r2 = vec2<f32>(fuv.x * 0.8 - fuv.y * 0.6, fuv.x * 0.6 + fuv.y * 0.8);
     let p2 = textureSample(waterFoamTex, smpAniso4Repeat, r2 * 2.37 + vec2<f32>(0.31, 0.77));
     let pattern = p1.x * 0.62 + p2.x * 0.38;
-    let thresh = 1.05 - coverage * 1.1;
+    let thresh = 1.05 - laceCover * 1.1;
     let soft = 0.06 + footprint * 0.1;
     let detail = smoothstep(thresh - soft, thresh + soft, pattern) * (p1.y * 0.25 + 0.8);
     let far = smoothstep(0.15, 1.2, footprint);
-    var foam = mix(detail, coverage * 0.85, far);
+    var foam = mix(detail, laceCover * 0.85, far);
+    if (capPatches) {
+        // a cap is solid white water with a ragged edge -- never a translucent veil (owner: "looks
+        // like a white oil film") and never the lace's veins. The edge is the slow mottle, the
+        // bubbles speckle its rim; a far cap stays white because its edge only softens with the
+        // pixel footprint, it does not fade.
+        let rag = capCover * (0.55 + 0.9 * p1.z) + (p1.y - 0.4) * 0.12;
+        let capSoft = min(0.04 + footprint * 0.06, 0.2); // unclamped, a far pixel turned the horizon white
+        // inside, Tidewater's own lace and bubbles (a cap is aerated water, not a painted disc)
+        let cap = smoothstep(0.5 - capSoft, 0.5 + capSoft, rag) * mix(0.55, 1.0, sat(pattern * 1.3)) * (p1.y * 0.2 + 0.85);
+        foam = max(foam, cap);
+    }
 
     var o: WaterSurfaceFrag;
     o.foamInfo = SurfFoamInfo(foam, sat(coverage), 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
@@ -967,7 +995,12 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let transmitted = sceneCol * Tview * (1.0 - 0.3 * lipW) + (inSun + inAmb + sss) * glowK;
 
         // ---- foam: bright diffuse scatterer (albedo ~0.85), wrapped sun + sky irradiance
-        var foamLit = (sunLight * (max(dot(N, L), 0.0) * 0.75 + 0.25) * INV_PI + skyIrr * 0.95) * 0.85;
+        // OP: albedo 0.5 with the whitecap patches on (absorption.w > 0) instead of Tidewater's 0.85.
+        // Measured whitecap reflectance is ~0.4-0.55 for fresh dense foam and ~0.22 effective over a
+        // whitecap's area (Koepke 1984); at 0.85 under our sun the caps clipped past white and
+        // bloomed into glowing discs (owner, 2026-10-12).
+        let foamAlbedo = select(0.85, 0.5, tw.absorption.w > 0.0);
+        var foamLit = (sunLight * (max(dot(N, L), 0.0) * 0.75 + 0.25) * INV_PI + skyIrr * 0.95) * foamAlbedo;
         if (simOn) { foamLit = surfFoamLight(surf.foamInfo, foamGrad, N, L, V, sunLight, skyIrr); }
         let foamCol = foamLit * tw.material0.z;
 

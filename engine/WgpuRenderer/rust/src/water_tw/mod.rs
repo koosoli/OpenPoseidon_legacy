@@ -251,6 +251,27 @@ fn lip_override() -> Option<f32> {
     *V.get_or_init(|| std::env::var("WGR_TW_LIP").ok().and_then(|v| v.trim().parse::<f32>().ok()))
 }
 
+/// OP: whitecaps drawn as patches on the crests (lanes absorption.w / scattering.w of TwSurface =
+/// the coverage that starts a cap, the coverage that is a full one). Tidewater thresholds its lace
+/// pattern by the raw coverage, which suits its calm tropical sea; on a rough sea the low foam
+/// spread over every wave left only the pattern's densest veins, thin white squiggles all over the
+/// water (owner, 2026-10-12). Off by default since Tidewater's own bias was restored (fft.rs
+/// whitecap_bias): WGR_TW_WHITECAP=1 turns it on, "lo,hi" tunes it.
+pub const WHITECAP_PATCH: [f32; 2] = [0.012, 0.07];
+/// Opt-in: Tidewater's own foam is the default (the worms were too little cover, not its pattern).
+const WHITECAP_PATCH_DEFAULT_ON: bool = true;
+fn whitecap_patch() -> [f32; 2] {
+    static V: std::sync::OnceLock<[f32; 2]> = std::sync::OnceLock::new();
+    *V.get_or_init(|| match std::env::var("WGR_TW_WHITECAP") {
+        Ok(v) if v.trim() == "0" => [0.0, 0.0],
+        Ok(v) => {
+            let n: Vec<f32> = v.split(',').filter_map(|s| s.trim().parse::<f32>().ok()).collect();
+            if n.len() == 2 && n[1] > n[0] && n[0] > 0.0 { [n[0], n[1]] } else if v.trim() == "1" { WHITECAP_PATCH } else { [0.0, 0.0] }
+        }
+        Err(_) => if WHITECAP_PATCH_DEFAULT_ON { WHITECAP_PATCH } else { [0.0, 0.0] },
+    })
+}
+
 fn spray_on(p: &WgrWaterParams) -> bool {
     p.tidewater_fx[0] > 0.0 && p.tidewater_fx[1] > 0.0
 }
@@ -344,8 +365,8 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         material0: [tw[2][3], tw[2][2], tw[1][1], tw[1][3]],
         // roughness, ssr on, debug view, water glow (W3j; tidewater_fx.z)
         material1: [tw[2][1], tw[1][2], debug_view_override().unwrap_or(tw[3][3]), glow_override().unwrap_or(p.tidewater_fx[2]).clamp(0.0, 2.0)],
-        absorption: [WATER_ABSORPTION[0], WATER_ABSORPTION[1], WATER_ABSORPTION[2], 0.0],
-        scattering: [WATER_SCATTERING[0], WATER_SCATTERING[1], WATER_SCATTERING[2], 0.0],
+        absorption: [WATER_ABSORPTION[0], WATER_ABSORPTION[1], WATER_ABSORPTION[2], whitecap_patch()[0]],
+        scattering: [WATER_SCATTERING[0], WATER_SCATTERING[1], WATER_SCATTERING[2], whitecap_patch()[1]],
         detail: [tw[3][0], tw[3][1], tw[3][2], if earth_preview(p) { 1.0 } else { 0.0 }],
         shore0,
         shore1,
@@ -1334,13 +1355,14 @@ impl Tidewater {
             (Some(p), Some(spec)) => {
                 let (var_h, mss) = fft::sea_stats(spec.sizes, spec.local, spec.swell, spec.depth);
                 format!(
-                    " | (W9c) sea: wind {:.1} m/s fetch {:.0} km, Hs {:.2} m (x amplitude {:.2}), rms slope {:.3}, foam bias {:.3} | (W9a) surface under the camera {}",
+                    " | (W9c) sea: wind {:.1} m/s fetch {:.0} km, Hs {:.2} m (x amplitude {:.2}), rms slope {:.3}, foam bias {:.3} decay {:.3} | (W9a) surface under the camera {}",
                     spec.local.wind_speed,
                     spec.local.fetch_km,
                     4.0 * var_h.max(0.0).sqrt() * p.tidewater[0][0],
                     p.tidewater[0][0],
                     mss.max(0.0).sqrt(),
                     spec.foam_bias,
+                    spec.foam_decay,
                     self.probe.camera_height().map_or("none".to_string(), |h| format!("{h:.2} m (sea {:.2}, read {} frames ago)", p.sea_level, self.probe.age))
                 )
             }

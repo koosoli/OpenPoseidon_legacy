@@ -1229,12 +1229,17 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         {
             float wind, fetch, chop, swell, surf, period, whitecaps;
         };
+        // Choppiness and whitecaps toward Tidewater's own sea presets (Calm 0.6/0, Choppy 1.5/0.75,
+        // Storm 1.9/1): the owner, 2026-10-12, in Tidewater itself: "if I bring choppiness up I get a
+        // lot more nice whitecaps". Ours stopped at 1.2, where a rough sea had almost none.
         static constexpr TwSea kTwSea[4] = {
-            {3.5f, 40.0f, 0.75f, 0.28f, 0.18f, 11.0f, 0.2f},   // Calm
+            {3.5f, 40.0f, 0.65f, 0.28f, 0.18f, 11.0f, 0.1f},   // Calm
             {7.0f, 120.0f, 0.9f, 0.48f, 0.34f, 9.0f, 0.5f},    // Breezy (Tidewater's defaults)
-            {12.0f, 300.0f, 1.05f, 0.68f, 0.56f, 8.5f, 0.75f}, // Choppy
-            {20.0f, 900.0f, 1.2f, 1.0f, 0.9f, 12.0f, 1.0f},    // Storm
+            {12.0f, 300.0f, 1.4f, 0.68f, 0.56f, 8.5f, 0.8f},   // Choppy
+            {20.0f, 900.0f, 1.8f, 1.0f, 0.9f, 12.0f, 1.0f},    // Storm
         };
+        // The weather wind (OFP's, 0..~12 m/s) at which Weather mode reaches each preset.
+        static constexpr float kTwSeaWeatherWind[4] = {3.0f, 6.0f, 9.0f, 12.0f};
         float seaWindOverride = 7.0f; // Tidewater's authored Breezy local wind
         float seaFetch = 120.0f;
         float seaWhitecaps = std::clamp(t.whitecaps, 0.0f, 1.0f);
@@ -1254,6 +1259,26 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
                     tidewaterAmplitude = WeatherAmplitudeScale(envWind, 7.0f, look.seaCalmScale);
                 }
                 c = kTwSea[1]; // Breezy, Tidewater's default
+                // The weather drives the whole sea, not only its height: wind, choppiness, swell,
+                // whitecaps and surf follow the presets by the weather wind. Before 2026-10-12 this
+                // was Breezy at any weather with the amplitude scaled, so a storm had Breezy's few
+                // whitecaps and its choppiness. WGR_TW_WEATHER_SEA=0 restores that.
+                static const bool weatherSea = EnvFloat("WGR_TW_WEATHER_SEA", 1.0f) > 0.5f;
+                if (weatherSea && _seaWindInit && envWind <= 0.0f)
+                {
+                    const float w = std::clamp(_seaWindSpeed, kTwSeaWeatherWind[0], kTwSeaWeatherWind[3]);
+                    int i = 0;
+                    while (i < 2 && w > kTwSeaWeatherWind[i + 1])
+                        ++i;
+                    const float f = (w - kTwSeaWeatherWind[i]) / (kTwSeaWeatherWind[i + 1] - kTwSeaWeatherWind[i]);
+                    const TwSea& a = kTwSea[i];
+                    const TwSea& b = kTwSea[i + 1];
+                    auto lerp = [f](float x, float y) { return x + (y - x) * f; };
+                    c = {lerp(a.wind, b.wind),   lerp(a.fetch, b.fetch), lerp(a.chop, b.chop),
+                         lerp(a.swell, b.swell), lerp(a.surf, b.surf),   lerp(a.period, b.period),
+                         lerp(a.whitecaps, b.whitecaps)};
+                    tidewaterAmplitude = 1.0f; // the preset's own spectrum carries the height
+                }
             }
             else
             {
