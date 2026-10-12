@@ -1841,7 +1841,12 @@ fn veg_sway_prev_at(model_y: f32, phase_xz: vec2<f32>, leaf: f32) -> vec3<f32> {
     let hn = clamp(max(model_y, 0.0) / 12.0, 0.0, 3.0);
     let coherent_hs = model_y / 12.0 * (1.6 / max(velp.sway_prev2.z, 0.25));
     let hs = select(pow(hn, velp.sway_prev2.z), coherent_hs, leaf < 0.0);
-    let ph = dot(phase_xz, vec2<f32>(0.37, 0.29));
+    // RFG-136: the coherent mode (leaf < 0, every native tree) snaps its phase to a 2 m cell
+    // (frame.wgsl veg_sway_phase). This copy used the raw phase, so the motion vectors described
+    // a different sway than the one drawn and DLSS smeared every native crown.
+    let cell = vec2<f32>(2.0, 2.0);
+    let ph_xz = select(phase_xz, floor(phase_xz / cell) * cell + cell * 0.5, leaf < 0.0);
+    let ph = dot(ph_xz, vec2<f32>(0.37, 0.29));
     let gust = 1.0 + 0.65 * velp.sway_prev2.x;
     let s = sin(t * 0.9 + ph) * 0.65 + sin(t * 1.63 + ph * 1.7) * 0.35;
     var bend = dir * (amp * hs * s * gust);
