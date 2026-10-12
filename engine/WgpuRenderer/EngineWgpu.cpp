@@ -20943,7 +20943,7 @@ void EngineWgpu::PushRenderParams()
             // SHADOW TEXEL. Collected only while the volumetric system is selected, so
             // choosing Legacy costs a comparison.
             SmokeVolumetricParams& vol = GSmokeVolumetric();
-            if (vol.mode != SmokeSystemMode::Legacy)
+            if (SmokeFieldActive())
             {
                 static std::vector<SmokeSystem::ShadowBlob> volBlobs;
                 GSmokeSystem.CollectShadowBlobs(volBlobs, 2048, true);
@@ -21016,7 +21016,8 @@ void EngineWgpu::PushRenderParams()
             // The sun the smoke is lit by is the one SMK-035 already shades the billboards
             // with, so the two systems cannot disagree about the time of day.
             WgrSmokeVolumeParams vp{};
-            vp.mode = static_cast<uint32_t>(vol.mode);
+            // the renderer's field knows Legacy (off) / Volumetric / Both; Fire Pro leaves it off
+            vp.mode = SmokeFieldActive() ? static_cast<uint32_t>(vol.mode) : 0u;
             vp.cell_size = vol.cellSize;
             vp.march_steps = static_cast<uint32_t>(vol.marchSteps);
             vp.sun_steps = static_cast<uint32_t>(vol.sunSteps);

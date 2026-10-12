@@ -650,6 +650,17 @@ bool DecodeUtf16BomToUtf8(const char* data, size_t size, std::string& out)
     { return little ? (bytes[i] | (bytes[i + 1] << 8)) : ((bytes[i] << 8) | bytes[i + 1]); };
     for (size_t i = 2; i + 1 < size; i += 2)
     {
+        // A UTF-16LE file once written through a TEXT-mode stream has a 0x0D byte inserted before
+        // every line feed's 0x0A: "0A 00" became "0D 0A 00", one byte out of step. Read as units
+        // that is U+0A0D, U+0D00 -- two boxes at every line break, and every later character on
+        // the odd byte. Arma 1's campaign briefings are stored exactly like that (ca.pbo,
+        // m09convoyattack: boxes around each paragraph). Take the three bytes as one line feed.
+        if (little && bytes[i] == 0x0D && bytes[i + 1] == 0x0A && i + 2 < size && bytes[i + 2] == 0x00)
+        {
+            result.push_back('\n');
+            i += 1; // with the loop's 2: past all three bytes, back on a unit boundary
+            continue;
+        }
         unsigned cp = unit(i);
         if (cp >= 0xD800 && cp <= 0xDBFF && i + 3 < size)
         {

@@ -414,7 +414,10 @@ DefaultContentResolveResult ResolveDefaultContentPacks(const std::string& gameDi
             continue;
         }
         // One canonical content root. Do not silently revive obsolete root packs.
-        const std::string path = AbsoluteResolvedModPath(std::filesystem::path(gameDir) / "Mods" / pack.folder);
+        std::string path = AbsoluteResolvedModPath(std::filesystem::path(gameDir) / "Mods" / pack.folder);
+        // The shareable build (exe + dll + assets) carries the default packs in assets\Mods.
+        if (path.empty())
+            path = AbsoluteResolvedModPath(std::filesystem::path(gameDir) / "assets" / "Mods" / pack.folder);
         if (path.empty())
         {
             report("not installed; using original content");

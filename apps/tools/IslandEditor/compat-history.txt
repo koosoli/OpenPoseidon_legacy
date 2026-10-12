@@ -1,0 +1,10 @@
+Commits to apps/tools/IslandEditor in Open Malprave:
+
+de5e8a5 2026-10-11 Island Editor: standalone editor for Cold War Assault / Open Malprave islands
+ee9b377 2026-10-11 Island Editor: land from height maps, auto texture, reskins
+ff0cbc4 2026-10-11 Island Editor: road, forest and bridge builders, region import/export
+ded339f 2026-10-11 Island Editor: tidy the interface
+f62f4af 2026-10-11 Island Editor: objects drawn as their real models
+042eaac 2026-10-11 Island Editor: scripted checks of the models; fixes they turned up
+37e9224 2026-10-11 Build for AVX2 processors (the Direct3D 12 era), with release inlining
+6bf437d 2026-10-11 Island Editor: the processor check only where the tree has one

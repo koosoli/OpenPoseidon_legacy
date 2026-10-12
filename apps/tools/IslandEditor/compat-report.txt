@@ -1,0 +1,38 @@
+Island Editor against Open Poseidon
+
+Open Poseidon (S:\OliOpenPoseidon) at: 31b73f95 2026-10-03 Record successful owner demo handoff and filter harness events
+Open Malprave (source of the editor) at: 6bf437d 2026-10-11 Island Editor: the processor check only where the tree has one
+
+Engine headers the editor includes, compared with Open Poseidon's:
+  same     Poseidon/Graphics/Textures/Image.hpp
+  same     Poseidon/World/Terrain/WrpReader.hpp
+  differs  Poseidon/IO/Streams/QStream.hpp
+  differs  Poseidon/IO/Streams/QBStream.hpp
+  same     Poseidon/IO/PackFiles.hpp
+  same     Poseidon/Graphics/Textures/PAAEncoder.hpp
+  differs  Poseidon/Graphics/Textures/PAADecoder.hpp
+  same     Poseidon/Graphics/Textures/DDSConverter.hpp
+  same     Poseidon/Graphics/Shared/PNGWriter.hpp
+  differs  Poseidon/Foundation/Strings/RString.hpp
+  missing  Poseidon/Foundation/Platform/CpuCheck.hpp
+  differs  Poseidon/Foundation/Math/Math3D.hpp
+  differs  Poseidon/Foundation/Containers/Array.hpp
+  same     Poseidon/Foundation/Common/PlatformPaths.hpp
+  differs  Poseidon/Asset/Probes/AssetInfo.hpp
+  differs  Poseidon/Asset/Formats/P3D/ODOLLoader.hpp
+  differs  Poseidon/Asset/Formats/P3D/MLODLoader.hpp
+
+Every source file of the editor compiled (syntax only, clang-cl, C++20) against Open Poseidon's
+engine headers, with the Dx12 device layer from this export and Open Malprave's vcpkg headers
+(SDL3, imgui with the dx12 binding, CLI11, stb):
+
+  Builders.cpp   0 error(s)
+  GameData.cpp   0 error(s)
+  HeightMap.cpp  0 error(s)
+  Island.cpp     0 error(s)
+  Renderer.cpp   0 error(s)
+  Reskin.cpp     0 error(s)
+  main.cpp       0 error(s)
+  total 0
+
+Not done: linking and running in Open Poseidon (its folder was only read).

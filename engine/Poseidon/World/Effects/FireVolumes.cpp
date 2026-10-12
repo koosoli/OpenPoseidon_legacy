@@ -4,6 +4,7 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/SmokeVolumetric.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -133,6 +134,14 @@ void ReportFireVolume(const void* owner, Vector3Par base, float radius, float in
 {
     if (!FireVolumesEnabled())
         return;
+    // Smoke goes to the solver only when Fire Pro draws the game's smoke (the dev panel's smoke
+    // system); otherwise the selected system has it and the volume would draw it twice.
+    if (!FireProSmokeActive())
+    {
+        if (kind == FireKindSmoke)
+            return;
+        smoke = 0.0f; // a fire's flames stay volumetric; its smoke is the other system's
+    }
     FireVolumeReport& r = Live()[owner];
     if (r.key == 0)
         r.key = KeyOf(owner);

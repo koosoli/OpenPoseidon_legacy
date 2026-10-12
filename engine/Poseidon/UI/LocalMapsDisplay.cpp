@@ -572,4 +572,45 @@ Display* CreateLocalMapsDisplay(ControlsContainer* parent)
 {
     return new LocalMapsDisplay(parent);
 }
+
+bool LaunchIslandEditor(std::string& error)
+{
+#ifdef _WIN32
+    wchar_t exePath[32768]{};
+    if (!GetModuleFileNameW(nullptr, exePath, 32768))
+    {
+        error = "Cannot locate the engine executable.";
+        return false;
+    }
+    const std::filesystem::path folder = std::filesystem::path(exePath).parent_path();
+    std::filesystem::path editor = folder / "PoseidonIslandEditor.exe";
+    std::error_code ec;
+    // the shareable build (exe + dll + assets) carries the editor in assets
+    if (!std::filesystem::exists(editor, ec))
+        editor = folder / "assets" / "PoseidonIslandEditor.exe";
+    if (!std::filesystem::exists(editor, ec))
+    {
+        error = "PoseidonIslandEditor.exe is not installed next to the game.";
+        return false;
+    }
+    const auto editorUtf8 = editor.u8string();
+    const auto folderUtf8 = folder.u8string();
+    const std::string editorArg(editorUtf8.begin(), editorUtf8.end());
+    const std::string folderArg(folderUtf8.begin(), folderUtf8.end());
+    // --game: the islands' ground textures and models are read from this install's archives.
+    const char* argv[] = {editorArg.c_str(), "--game", folderArg.c_str(), nullptr};
+    SDL_Process* process = SDL_CreateProcess(argv, false);
+    if (!process)
+    {
+        error = std::string("Cannot start the Island Editor: ") + SDL_GetError();
+        return false;
+    }
+    SDL_DestroyProcess(process); // detached: the editor outlives this handle
+    LOG_INFO(UI, "Island Editor started: {} --game {}", editorArg, folderArg);
+    return true;
+#else
+    error = "The Island Editor draws with Direct3D 12 and runs on Windows only.";
+    return false;
+#endif
+}
 } // namespace Poseidon

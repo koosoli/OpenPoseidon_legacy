@@ -26,6 +26,18 @@ const PZ: u32 = 48;
 const PLUME_WIND: f32 = 0.8;
 const JACOBI: u32 = 24;
 const STEP: f32 = 1.0 / 60.0;
+/// How long a smoke-only plume's box keeps the smoke in the air after its source stops (seconds;
+/// WGR_FIRE_SMOKE_LINGER). The 2001 puffs a smoke grenade drops live their cloudletDuration after it
+/// stops emitting; at the solver's 0.06/s dissipation 20 s leaves about a third, and the fade-out
+/// takes the rest. Without it the cloud vanished a second after the grenade went out (owner, 2026-10-12:
+/// "as long lifetime as our previous version").
+fn smoke_linger() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("WGR_FIRE_SMOKE_LINGER").ok().and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(20.0).clamp(0.0, 120.0)
+    })
+}
+
 /// Beyond this a fire is not simulated or drawn (the legacy sprites still are).
 const RANGE: f32 = 300.0;
 const LUT_SIZE: usize = 512;
@@ -138,6 +150,10 @@ struct Grid {
     width: f32,
     src: FireSource,
     fade: f32,
+    /// A smoke-only plume whose source has stopped (a spent grenade): seconds it keeps simulating
+    /// with no emission, so the cloud in the air thins out by the solver's own dissipation instead
+    /// of vanishing with its source. Negative: the source is still reported.
+    linger: f32,
     seen: bool,
     needs_clear: bool,
     time: f32,
@@ -490,6 +506,7 @@ impl FireSystem {
             if let Some(g) = self.grids.iter_mut().find(|g| g.key == key) {
                 g.src = s;
                 g.seen = true;
+                g.linger = -1.0;
                 continue;
             }
             if self.grids.len() >= MAX_FIRES {
@@ -504,8 +521,12 @@ impl FireSystem {
         }
         for g in &mut self.grids {
             if !g.seen {
-                // no longer reported: the bed stops burning and the box fades out
+                // no longer reported: the bed stops burning and the box fades out -- after the
+                // smoke it already put in the air has had its time (smoke-only plumes, see `linger`)
                 g.src.params[0] = 0.0;
+                if g.linger < 0.0 {
+                    g.linger = if g.src.params[3] > 2.5 { smoke_linger() } else { 0.0 };
+                }
             }
         }
     }
@@ -684,7 +705,10 @@ impl FireSystem {
         self.assign(device, cam);
         // fades: a second in and out
         for g in &mut self.grids {
-            let target = if g.src.params[0] > 0.0 { 1.0 } else { 0.0 };
+            if !g.seen && g.linger > 0.0 {
+                g.linger = (g.linger - dt).max(0.0);
+            }
+            let target = if g.src.params[0] > 0.0 || g.linger > 0.0 { 1.0 } else { 0.0 };
             // a burst is there at once; a bed fades in over half a second
             let rise = if g.src.params[3] > 1.5 { 1.0 } else { dt * 2.0 };
             g.fade += (target - g.fade).clamp(-dt, rise);
@@ -893,6 +917,7 @@ impl Grid {
             width,
             src,
             fade: 0.0,
+            linger: -1.0,
             seen: true,
             needs_clear: true,
             time: 0.0,

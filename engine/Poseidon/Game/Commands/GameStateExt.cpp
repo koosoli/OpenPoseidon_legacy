@@ -864,6 +864,7 @@ GameValue TriggerSetType(const GameState* state, GameValuePar oper1, GameValuePa
 GameValue TriggerSynchronize(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A2Waypoints(const GameState* state, GameValuePar oper1); // GameStateExtA2.cpp
 GameValue ValueAdd(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ValueGet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue VehAddEventHandler(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -1495,7 +1496,7 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameNothing, "breakOut", A1Ignored, GameString),
         GameFunction(GameNothing, "breakTo", A1Ignored, GameString),
         GameFunction(GameArray, "boundingBox", A1BoundingBox, GameObject),
-        GameFunction(GameArray, "waypoints", A1EmptyArray, GameObjectOrGroup),
+        GameFunction(GameArray, "waypoints", A2Waypoints, GameObjectOrGroup),
         GameFunction(GameScalar, "precision", A1One, GameObject),
         GameFunction(GameNothing, "ctrlSetFocus", A1Ignored, GameScalar),
         GameFunction(GameString, "parseText", A1ParseText, GameString),

@@ -357,6 +357,10 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
     static ParamFile mapButtonResource, worldButtonResource;
     injectEntry(mapButtonResource, "LocalMapsButton", LocalMapsMenuId, "ARMA CONTENT");
     injectEntry(worldButtonResource, "WholeWorldButton", WholeWorldMenuId, "WHOLE WORLD");
+#ifdef _WIN32
+    static ParamFile islandEditorButtonResource;
+    injectEntry(islandEditorButtonResource, "IslandEditorButton", IslandEditorMenuId, "ISLAND EDITOR");
+#endif
 
     // Guard every control lookup: when the RscDisplayMain class is absent or
     // minimal (PoseidonUITest's own RESOURCE.BIN, or a headless --test-mission
@@ -2357,6 +2361,13 @@ void DisplayMain::OnButtonClicked(int idc)
 {
     if (idc == LocalMapsMenuId) { CreateChild(CreateLocalMapsDisplay(this)); return; }
     if (idc == WholeWorldMenuId) { CreateChild(CreateWholeWorldDisplay(this)); return; }
+    if (idc == IslandEditorMenuId)
+    {
+        std::string error;
+        if (!LaunchIslandEditor(error))
+            CreateMsgBox(MB_BUTTON_OK, RString(error.c_str()));
+        return;
+    }
     // Dispatch registered game module buttons via registry
     if (auto* mod = GameModuleRegistry::FindByIDC(idc))
     {
