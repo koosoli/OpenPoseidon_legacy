@@ -18,6 +18,7 @@
 #include <Poseidon/AI/AIRadio.hpp>
 #include <Poseidon/UI/Map/UIMap.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
+#include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 #include <Poseidon/World/Entities/Vehicles/Ground/Car.hpp>
 #include <Poseidon/World/Entities/Vehicles/Ground/Tank.hpp>
 #include <Poseidon/World/Entities/Vehicles/Air/Airplane.hpp>
@@ -496,6 +497,9 @@ GameValue A1CtrlSetFade(const GameState* state, GameValuePar oper1, GameValuePar
 GameValue A1CtrlCommit(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1CtrlIgnored(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1CtrlCommitted(const GameState* state, GameValuePar oper1);
+GameValue A1CtrlPosition(const GameState* state, GameValuePar oper1);
+GameValue A1CtrlSetStructuredText(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1CtrlParent(const GameState* state, GameValuePar oper1);
 GameValue DisableUserInput(const GameState* state, GameValuePar oper1);
 GameValue EnableRadio(const GameState* state, GameValuePar oper1);
 GameValue EstimatedTimeLeft(const GameState* state, GameValuePar oper1);
@@ -1197,6 +1201,84 @@ static GameValue A1LineBreak(const GameState*)
     return GameValue(RString("\\n"));
 }
 
+// group selectLeader unit
+static GameValue A1SelectLeader(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    AIGroup* grp = GetGroup(oper1);
+    Person* man = dyn_cast<Person>(GetObject(oper2));
+    if (grp && man && man->Brain() && man->Brain()->GetGroup() == grp)
+        grp->SelectLeader(man->Brain());
+    return NOTHING;
+}
+
+// selectPlayer unit: the player takes over that unit
+static GameValue A1SelectPlayer(const GameState*, GameValuePar oper1)
+{
+    if (Person* man = dyn_cast<Person>(GetObject(oper1)))
+        GWorld->SwitchPlayerTo(man);
+    return NOTHING;
+}
+
+// object modelToWorld [x, y, z] -> world position (x, z, height above ground as positions are)
+static GameValue A1ModelToWorld(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* obj = GetObject(oper1);
+    const GameArrayType& a = oper2;
+    GameArrayType out;
+    if (!obj || a.Size() < 3)
+        return GameValue(out);
+    const Vector3 world = obj->PositionModelToWorld(Vector3((float)a[0], (float)a[2], (float)a[1]));
+    out.Add(GameValue(world.X()));
+    out.Add(GameValue(world.Z()));
+    out.Add(GameValue(world.Y() - GLandscape->SurfaceYAboveWater(world.X(), world.Z())));
+    return GameValue(out);
+}
+
+// boundingBox object -> [[minX, minY, minZ], [maxX, maxY, maxZ]] in model space (y up as Arma 1: z up)
+static GameValue A1BoundingBox(const GameState*, GameValuePar oper1)
+{
+    Object* obj = GetObject(oper1);
+    GameArrayType out;
+    const auto corner = [](Vector3Val v)
+    {
+        GameArrayType c;
+        c.Add(GameValue(v.X()));
+        c.Add(GameValue(v.Z()));
+        c.Add(GameValue(v.Y()));
+        return GameValue(c);
+    };
+    if (obj && obj->GetShape())
+    {
+        out.Add(corner(obj->GetShape()->Min()));
+        out.Add(corner(obj->GetShape()->Max()));
+    }
+    else
+    {
+        out.Add(corner(VZero));
+        out.Add(corner(VZero));
+    }
+    return GameValue(out);
+}
+
+static GameValue A1AddVehicle(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    AIGroup* grp = GetGroup(oper1);
+    Transport* veh = dyn_cast<Transport>(GetObject(oper2));
+    if (grp && veh)
+        grp->AddVehicle(veh);
+    return NOTHING;
+}
+
+static GameValue A1EmptyArray(const GameState*, GameValuePar)
+{
+    return GameValue(GameArrayType());
+}
+
+static GameValue A1One(const GameState*, GameValuePar)
+{
+    return GameValue(1.0f);
+}
+
 // isPlayer unit: in single player, the player's unit
 static GameValue A1IsPlayer(const GameState* state, GameValuePar oper1)
 {
@@ -1388,6 +1470,14 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameString, "str", A1Str, GameVoid),
         GameFunction(GameString, "compile", A1Compile, GameString),
         GameFunction(GameBool, "isPlayer", A1IsPlayer, GameObject),
+        GameFunction(GameNothing, "selectPlayer", A1SelectPlayer, GameObject),
+        GameFunction(GameNothing, "scopeName", A1Ignored, GameString),
+        GameFunction(GameNothing, "breakOut", A1Ignored, GameString),
+        GameFunction(GameNothing, "breakTo", A1Ignored, GameString),
+        GameFunction(GameArray, "boundingBox", A1BoundingBox, GameObject),
+        GameFunction(GameArray, "waypoints", A1EmptyArray, GameObjectOrGroup),
+        GameFunction(GameScalar, "precision", A1One, GameObject),
+        GameFunction(GameNothing, "ctrlSetFocus", A1Ignored, GameScalar),
         GameFunction(GameString, "parseText", A1ParseText, GameString),
         GameFunction(GameString, "getText", A1GetText, GameString),
         GameFunction(GameScalar, "getNumber", A1GetNumber, GameString),
@@ -1570,6 +1660,8 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameBool, "createDialog", DialogCreate, GameString),
         GameFunction(GameScalar, "findDisplay", A1FindDisplay, GameScalar),
         GameFunction(GameBool, "ctrlCommitted", A1CtrlCommitted, GameScalar),
+        GameFunction(GameArray, "ctrlPosition", A1CtrlPosition, GameScalar),
+        GameFunction(GameScalar, "ctrlParent", A1CtrlParent, GameScalar),
         GameFunction(GameNothing, "closeDialog", DialogClose, GameScalar),
 
         GameFunction(GameBool, "ctrlVisible", CtrlVisible, GameScalar),
@@ -1832,6 +1924,7 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "buttonSetAction", function, A1ButtonSetAction, GameScalar, GameString),
         GameOperator(GameNothing, "ctrlSetFade", function, A1CtrlSetFade, GameScalar, GameScalar),
         GameOperator(GameNothing, "ctrlCommit", function, A1CtrlCommit, GameScalar, GameScalar),
+        GameOperator(GameNothing, "ctrlSetStructuredText", function, A1CtrlSetStructuredText, GameScalar, GameString),
         GameOperator(GameNothing, "ctrlSetPosition", function, A1CtrlIgnored, GameScalar, GameArray),
         GameOperator(GameNothing, "ctrlSetTextColor", function, A1CtrlIgnored, GameScalar, GameArray),
         GameOperator(GameNothing, "ctrlSetBackgroundColor", function, A1CtrlIgnored, GameScalar, GameArray),
@@ -1876,6 +1969,13 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "hintC", function, A1HintC, GameString, GameString | GameArray),
         GameOperator(GameNothing, "setRank", function, A1IgnoredBinary, GameObject, GameString),
         GameOperator(GameNothing, "enableAI", function, A1IgnoredBinary, GameObject, GameString),
+        GameOperator(GameNothing, "selectLeader", function, A1SelectLeader, GameGroup, GameObject),
+        GameOperator(GameArray, "modelToWorld", function, A1ModelToWorld, GameObject, GameArray),
+        GameOperator(GameNothing, "addVehicle", function, A1AddVehicle, GameGroup, GameObject),
+        GameOperator(GameNothing, "setCameraInterest", function, A1IgnoredBinary, GameObject, GameScalar),
+        GameOperator(GameNothing, "ctrlSetEventHandler", function, A1IgnoredBinary, GameScalar, GameArray),
+        GameOperator(GameNothing, "doFSM", function, A1IgnoredBinary, GameObjectOrArray, GameArray),
+        GameOperator(GameScalar, "execFSM", function, A1IgnoredBinary, GameVoid, GameString),
         GameOperator(GameNothing, "setParticleParams", function, A1IgnoredBinary, GameObject, GameArray),
         GameOperator(GameNothing, "setParticleRandom", function, A1IgnoredBinary, GameObject, GameArray),
         GameOperator(GameNothing, "setParticleCircle", function, A1IgnoredBinary, GameObject, GameArray),

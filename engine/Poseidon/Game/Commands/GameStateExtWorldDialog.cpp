@@ -1021,3 +1021,27 @@ GameValue A1CtrlCommitted(const GameState* state, GameValuePar oper1)
 {
     return GameValue(true);
 }
+
+// ctrlPosition control -> [x, y, w, h]
+GameValue A1CtrlPosition(const GameState* state, GameValuePar oper1)
+{
+    GameArrayType out;
+    Control* ctrl = dynamic_cast<Control*>(GetCtrl(state, oper1));
+    out.Add(GameValue(ctrl ? ctrl->X() : 0.0f));
+    out.Add(GameValue(ctrl ? ctrl->Y() : 0.0f));
+    out.Add(GameValue(ctrl ? ctrl->W() : 0.0f));
+    out.Add(GameValue(ctrl ? ctrl->H() : 0.0f));
+    return GameValue(out);
+}
+
+// control ctrlSetStructuredText text: structured text is plain text here (already untagged)
+GameValue A1CtrlSetStructuredText(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return CtrlSetText(state, Pair(oper1, oper2));
+}
+
+// ctrlParent control -> its display (the topmost user dialog stands for any)
+GameValue A1CtrlParent(const GameState* state, GameValuePar oper1)
+{
+    return GameValue(GetUserDialog() ? 0.0f : -1.0f);
+}
