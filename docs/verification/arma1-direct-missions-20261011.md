@@ -79,6 +79,7 @@ mission booted and the runtime ran; "clean" = no script error until the test end
 | f498083 | 129 | 117 | 2 |
 | f11c945 (2026-10-12 00:43, stamped) | 130 | 122 | 1 |
 | 9cfe1ef (2026-10-12 07:09, stamped) | 130 | 127 | 1 |
+| fcd1a51 (2026-10-12 08:26, stamped) | 130 | 128 | 1 |
 
 Fixed between the two: crashes in `Building`/`AILocker`/`OperField` (generated `A1x_`
 classes inherited scope 0 from abstract CWA bases, so the type was no `BuildingType`);
@@ -104,6 +105,10 @@ un-impossible_mission (third-party addon BBB006), m13 (`animationState`) and mp2
 (`composeText`/`lineBreak`) -- the last two added in d9990e5. Since then also d512c1b:
 constant arithmetic in config values (`style = ST_LEFT + ST_MULTI`), which makes the
 strategic map's overview wrap over several lines.
+
+On fcd1a51 three are left: armory1 (config script commands), un-impossible_mission
+(third-party addon) and m13, whose `while` sleeps inside a `forEach` body -- compiled
+since 157bd71 (not yet measured).
 
 ## Known gaps (honest list)
 
