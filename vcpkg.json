@@ -23,6 +23,11 @@
       "features": ["sdl3-binding", "sdl3-renderer-binding", "opengl3-binding", "freetype"]
     },
     {
+      "name": "imgui",
+      "features": ["dx12-binding"],
+      "platform": "windows"
+    },
+    {
       "name": "spdlog",
       "features": ["wchar"],
       "platform": "windows"
