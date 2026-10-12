@@ -357,9 +357,14 @@ class Reader
             // Inheriting the parent's prefab drew the whole villa again, nudged by the
             // override's offset: the doubled stair railings at 5009/3962, and 5,643 such
             // duplicate buildings across Everon.
+            //
+            // RFG-139: except a road generator. `RoadGeneratorEntity` inside a road prefab is not an
+            // override of anything -- it draws from its own points -- and the enclosing prefab is
+            // where its material comes from (`.et` -> `.emat`). Skipping it left 2,199 of Everon's
+            // 2,398 roads on the flat fallback colour.
             if (!decl.Prefab().empty())
                 placement.prefabGuid = decl.Prefab();
-            else if (decl.name.empty() || !EbinPrefabChildOverridesSkipped())
+            else if (decl.name.empty() || isRoad || !EbinPrefabChildOverridesSkipped())
                 placement.prefabGuid = inherited.Prefab();
 
             // A nested entity's transform is LOCAL to the entity that contains it,
