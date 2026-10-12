@@ -84,6 +84,7 @@ GameValue CutText(const GameState* state, GameValuePar oper1);
 GameValue CutRsc(const GameState* state, GameValuePar oper1);
 GameValue CutObj(const GameState* state, GameValuePar oper1);
 GameValue StrFormat(const GameState* state, GameValuePar oper1);
+GameValue ObjSide(const GameState* state, GameValuePar oper1);
 
 namespace
 {
@@ -181,6 +182,16 @@ struct Runtime
     };
     std::vector<Location> locations;
     bool worldLocations = false;
+    // setVehicleInit, run by processInitCommands
+    std::vector<std::pair<OLink<Object>, std::string>> vehicleInits;
+    // attachTo: object follows target at a model-space offset
+    struct Attachment
+    {
+        OLink<Object> object;
+        OLink<Object> target;
+        Vector3 offset;
+    };
+    std::vector<Attachment> attachments;
 };
 
 Runtime& RT()
@@ -1377,6 +1388,111 @@ GameValue A2CutObjLayer(const GameState* state, GameValuePar, GameValuePar oper2
 {
     return CutObj(state, oper2);
 }
+// WFSideText side/unit/group: the side as the Warfare scripts spell it in variable names
+GameValue A2WFSideText(const GameState* state, GameValuePar oper1)
+{
+    const TargetSide side = oper1.GetType() == GameSide ? GetSide(oper1) : GetSide(ObjSide(state, oper1));
+    switch (side)
+    {
+    case TWest:
+        return GameValue(RString("West"));
+    case TEast:
+        return GameValue(RString("East"));
+    case TGuerrila:
+        return GameValue(RString("Resistance"));
+    case TCivilian:
+        return GameValue(RString("Civilian"));
+    default:
+        return GameValue(RString("Unknown"));
+    }
+}
+
+// obj setVehicleInit "code" ... processInitCommands
+GameValue A2SetVehicleInit(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* obj = GetObject(oper1);
+    if (!obj)
+        return NOTHING;
+    Runtime& rt = RT();
+    rt.vehicleInits.emplace_back(OLink<Object>(obj), std::string((const char*)(RString)oper2));
+    return NOTHING;
+}
+
+GameValue A2ClearVehicleInit(const GameState*, GameValuePar oper1)
+{
+    Object* obj = GetObject(oper1);
+    auto& list = RT().vehicleInits;
+    list.erase(std::remove_if(list.begin(), list.end(), [obj](const auto& e) { return e.first == obj; }), list.end());
+    return NOTHING;
+}
+
+GameValue A2ProcessInitCommands(const GameState*)
+{
+    auto pending = std::move(RT().vehicleInits);
+    RT().vehicleInits.clear();
+    GameState* gstate = GWorld->GetGameState();
+    for (auto& [obj, code] : pending)
+    {
+        if (!obj || code.empty())
+            continue;
+        gstate->VarSet("this", GameValueExt(obj.GetLink()), true);
+        gstate->Execute(code.c_str());
+    }
+    return NOTHING;
+}
+
+// obj attachTo [target, [x, y, z] (model space, z up), memoryPoint]
+GameValue A2AttachTo(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* obj = GetObject(oper1);
+    const GameArrayType& args = oper2;
+    Object* target = args.Size() > 0 ? GetObject(args[0]) : nullptr;
+    if (!obj || !target || obj == target)
+        return NOTHING;
+    Vector3 offset(0, 0, 0);
+    if (args.Size() > 1 && args[1].GetType() == GameArray)
+    {
+        const GameArrayType& o = args[1];
+        if (o.Size() >= 3 && o[0].GetType() == GameScalar && o[1].GetType() == GameScalar && o[2].GetType() == GameScalar)
+            offset = Vector3(static_cast<float>(o[0]), static_cast<float>(o[2]), static_cast<float>(o[1]));
+    }
+    else
+        offset = target->GetInvTransform() * obj->Position();
+    auto& list = RT().attachments;
+    list.erase(std::remove_if(list.begin(), list.end(), [obj](const auto& a) { return a.object == obj; }), list.end());
+    list.push_back({OLink<Object>(obj), OLink<Object>(target), offset});
+    return NOTHING;
+}
+
+GameValue A2Detach(const GameState*, GameValuePar oper1)
+{
+    Object* obj = GetObject(oper1);
+    auto& list = RT().attachments;
+    list.erase(std::remove_if(list.begin(), list.end(), [obj](const auto& a) { return a.object == obj; }), list.end());
+    return NOTHING;
+}
+
+void UpdateAttachments(Runtime& rt)
+{
+    GameState* gstate = GWorld->GetGameState();
+    for (size_t i = 0; i < rt.attachments.size();)
+    {
+        Runtime::Attachment& a = rt.attachments[i];
+        if (!a.object || !a.target)
+        {
+            rt.attachments.erase(rt.attachments.begin() + i);
+            continue;
+        }
+        const Vector3 p = a.target->PositionModelToWorld(a.offset);
+        GameValue pos = gstate->CreateGameValue(GameArray);
+        GameArrayType& arr = pos;
+        arr.Add(GameValue(p.X()));
+        arr.Add(GameValue(p.Z()));
+        arr.Add(GameValue(p.Y() - GLandscape->SurfaceY(p.X(), p.Z())));
+        ObjSetPos(gstate, GameValueExt(a.object.GetLink()), pos);
+        i++;
+    }
+}
 } // namespace
 
 // Arma 2 briefing: the diary and the simple tasks, as the HTML sections the CWA map
@@ -1490,6 +1606,7 @@ void Arma2RuntimeSimulate()
     Runtime& rt = RT();
     for (size_t i = 0; i < rt.fsms.size(); i++) // FSMs may start FSMs
         FsmStep(*rt.fsms[i]);
+    UpdateAttachments(rt);
 
     // Diagnostics: OP_A2_WATCH="var1,var2,..." logs those variables every 10 s of game time.
     static const std::string watch = [] {
@@ -1548,6 +1665,7 @@ const GameNular A2Nular[] = {
     GameNular(GameBool, "savingEnabled", A2True),
     GameNular(GameBool, "teamSwitchEnabled", A2False),
     GameNular(GameScalar, "viewDistance", A2One),
+    GameNular(GameNothing, "processInitCommands", A2ProcessInitCommands),
 };
 
 const GameFunction A2Unary[] = {
@@ -1607,6 +1725,9 @@ const GameFunction A2Unary[] = {
     GameFunction(GameBool, "simulationEnabled", A2TrueUnary, GameObject),
     GameFunction(GameNothing, "cutFadeOut", A2NothingUnary, GameScalar),
     GameFunction(GameObject, "hcLeader", A2ObjNullUnary, GameGroup),
+    GameFunction(GameString, "WFSideText", A2WFSideText, GameSide | GameObject | GameGroup),
+    GameFunction(GameNothing, "clearVehicleInit", A2ClearVehicleInit, GameObject),
+    GameFunction(GameNothing, "detach", A2Detach, GameObject),
 };
 
 const GameOperator A2Binary[] = {
@@ -1681,6 +1802,9 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "cutRsc", function, A2CutRscLayer, GameScalar, GameArray),
     GameOperator(GameNothing, "cutObj", function, A2CutObjLayer, GameScalar, GameArray),
     GameOperator(GameNothing, "cutFadeOut", function, A2NothingBinary, GameScalar, GameScalar),
+    GameOperator(GameNothing, "setVehicleInit", function, A2SetVehicleInit, GameObject, GameString),
+    GameOperator(GameNothing, "attachTo", function, A2AttachTo, GameObject, GameArray),
+    GameOperator(GameNothing, "copyWaypoints", function, A2NothingBinary, GameGroup, GameGroup),
 };
 } // namespace
 
