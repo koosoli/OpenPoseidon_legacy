@@ -1546,21 +1546,21 @@ struct VyhodFrameGuard
     // SP are scratch space the next caller is welcome to use.  Saving
     // just the live prefix keeps the cost proportional to actual
     // nesting depth (typical < 10, capped at SL=256).
-    GameValue savedStack[SL];
-    RString savedOperStack[SL];
-    int savedUB[SL];
-    int savedPriorStack[SL];
+    std::vector<GameValue> savedStack;
+    std::vector<RString> savedOperStack;
+    std::vector<int> savedUB;
+    std::vector<int> savedPriorStack;
 
     explicit VyhodFrameGuard(GameEvaluator& ev)
         : e(ev), savedSP(ev.SP), savedParPrior(ev._parPrior), savedListPrior(ev._listPrior), savedPos(ev._pos),
           savedPos0(ev._pos0), savedSubexpBeg(ev._subexpBeg), savedSubexpEnd(ev._subexpEnd)
     {
-        for (int i = 0; i < savedSP; ++i)
+        if (savedSP > 0)
         {
-            savedStack[i] = e._stack[i];
-            savedOperStack[i] = e._operStack[i];
-            savedUB[i] = e.UB[i];
-            savedPriorStack[i] = e._priorStack[i];
+            savedStack.assign(e._stack.begin(), e._stack.begin() + savedSP);
+            savedOperStack.assign(e._operStack.begin(), e._operStack.begin() + savedSP);
+            savedUB.assign(e.UB.begin(), e.UB.begin() + savedSP);
+            savedPriorStack.assign(e._priorStack.begin(), e._priorStack.begin() + savedSP);
         }
     }
 
@@ -1616,7 +1616,7 @@ GameValue GameState::Vyhod() const
                 // empty list construction
                 _e->_pos++;
 
-                if (_e->SP >= SL)
+                if (!_e->Reserve(_e->SP))
                 {
                     SetError(EvalLineLong);
                     return NOTHING;
@@ -1666,7 +1666,7 @@ GameValue GameState::Vyhod() const
         }
         if (!functions || _functions.IsNull(*functions))
         {
-            if (_e->SP >= SL)
+            if (!_e->Reserve(_e->SP))
             {
                 SetError(EvalLineLong);
                 return NOTHING;
@@ -1751,7 +1751,7 @@ GameValue GameState::Vyhod() const
                         array.Add(_e->_stack[i]);
                     }
                     _e->SP = SPP;
-                    if (_e->SP >= SL)
+                    if (!_e->Reserve(_e->SP))
                     {
                         SetError(EvalLineLong);
                         return NOTHING;
@@ -1880,7 +1880,7 @@ GameValue GameState::Vyhod() const
         else // unary operator
         {
             _e->_pos += strlen(functions->_name);
-            if (_e->SP >= SL)
+            if (!_e->Reserve(_e->SP))
             {
                 SetError(EvalLineLong);
                 return NOTHING;
@@ -3049,7 +3049,7 @@ void GameState::ShowError() const
     }
 }
 
-GameEvaluator::GameEvaluator(GameVarSpace* vars)
+GameEvaluator::GameEvaluator(GameVarSpace* vars) : _stack(SL), UB(SL), _priorStack(SL), _operStack(SL)
 {
     local = vars;
     // Initialize parser-private fields so VyhodFrameGuard's snapshot of an
