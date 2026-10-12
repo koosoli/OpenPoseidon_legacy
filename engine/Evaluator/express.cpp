@@ -2664,6 +2664,8 @@ int GameState::GetLastErrorPos() const
 
 GameValue GameState::Evaluate(const char* expression) const
 {
+    if (s_traceExpression)
+        s_traceExpression(expression);
     // Snapshot _e on entry so any nested Evaluate triggered by an
     // operator handler (UI menu condition checks, animation rotations,
     // mission scripts, harness eval, etc.) leaves the outer caller's
@@ -2734,6 +2736,8 @@ static const char* CheckAssignment(const char* p)
 // localOnly restricts assignments to local variables.
 GameValue GameState::EvaluateMultiple(const char* expression, bool localOnly) const
 {
+    if (s_traceExpression)
+        s_traceExpression(expression);
     // Reentrancy guard — see Evaluate above and VyhodFrameGuard.
     VyhodFrameGuard frameGuard(*_e);
 
@@ -2950,6 +2954,8 @@ bool GameState::PerformAssignment(bool localOnly)
 
 void GameState::Execute(const char* expression)
 {
+    if (s_traceExpression)
+        s_traceExpression(expression);
     // Reentrancy guard — see Evaluate above and VyhodFrameGuard.
     VyhodFrameGuard frameGuard(*_e);
 

@@ -31,6 +31,7 @@
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
+#include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Foundation/Modules/Modules.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
@@ -40,6 +41,8 @@
 #include <Poseidon/World/World.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <thread>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -1599,8 +1602,63 @@ std::string Arma2BriefingHtml(const std::string& html)
 }
 
 // Runs the scripted FSMs one transition per simulation step (World::SimulateScripts).
+
+// ---------------------------------------------------------------------------
+// Stall report (--arma2-test-seconds only). A mission that freezes the main loop leaves
+// nothing in the log; this names the expression the evaluator last started, every 10 s
+// while the simulation does not advance.
+// ---------------------------------------------------------------------------
+namespace
+{
+std::atomic<const char*> GLastExpression{nullptr};
+std::atomic<unsigned> GSimulateTick{0};
+
+void StallMonitor()
+{
+    unsigned last = GSimulateTick.load();
+    int stalled = 0;
+    for (;;)
+    {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        const unsigned now = GSimulateTick.load();
+        if (now != last)
+        {
+            last = now;
+            stalled = 0;
+            continue;
+        }
+        if (++stalled % 10 != 0)
+            continue;
+        std::string expr;
+        if (const char* e = GLastExpression.load())
+        {
+            for (int i = 0; i < 400 && e[i]; i++)
+                expr.push_back(e[i] == '\n' || e[i] == '\r' ? ' ' : e[i]);
+        }
+        LOG_WARN(Script, "Arma 2 stall: no simulation step for {} s; evaluator last started: {}", stalled, expr);
+    }
+}
+
+void TraceExpression(const char* expression)
+{
+    GLastExpression.store(expression, std::memory_order_relaxed);
+}
+} // namespace
+
+void Arma2StartStallMonitor()
+{
+    static bool started = false;
+    if (started || Arma1Compat::Generation() != 2 ||
+        Poseidon::Foundation::AppConfig::Instance().GetArma1TestSeconds() <= 0.0f)
+        return;
+    started = true;
+    GameState::s_traceExpression = TraceExpression;
+    std::thread(StallMonitor).detach();
+}
+
 void Arma2RuntimeSimulate()
 {
+    GSimulateTick.fetch_add(1, std::memory_order_relaxed);
     if (Arma1Compat::Generation() != 2 || !GWorld || !GWorld->GetGameState())
         return;
     Runtime& rt = RT();

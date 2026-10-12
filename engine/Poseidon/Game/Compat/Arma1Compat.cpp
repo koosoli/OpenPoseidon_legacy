@@ -18,6 +18,8 @@
 #include <string>
 #include <vector>
 
+void Arma2StartStallMonitor(); // GameStateExtA2.cpp (Arma 2 test mode only)
+
 namespace Poseidon::Arma1Compat
 {
 namespace
@@ -410,6 +412,7 @@ void MountArchives()
 {
     if (!Active())
         return;
+    ::Arma2StartStallMonitor();
     MissionBankPrefixes().clear();
     AllBankPrefixesMutable().clear();
     const fs::path& root = RootPath();
