@@ -36,6 +36,7 @@
 mod boat_spray;
 mod impacts;
 pub(crate) mod probe;
+pub(crate) mod swash;
 mod breakers;
 mod cdlod;
 mod fft;
@@ -534,6 +535,8 @@ pub struct Tidewater {
     impacts: impacts::Impacts,
     // W9a: the surface around the camera, as drawn (underwater composite, view side, gate)
     probe: probe::Probe,
+    // (OP) the swash field around the camera, for the shorebirds (swash.rs)
+    swash: swash::Swash,
     // Swimming: the exact lanes recorded alongside each probe readback.
     probe_lanes: [f32; 4],
     // W5e: the frame's spot lights (the diver's torch is picked from them in prepare)
@@ -779,6 +782,7 @@ impl Tidewater {
         let spray = spray::SprayGpu::new(device, queue, camera_layout, &layout, &shader, surface_format, sample_count, linear);
         let uw = underwater::TwUnderwater::new(device, surface_format);
         let probe = probe::Probe::new(device, &layout, &shader);
+        let swash = swash::Swash::new(device, &layout, &shader);
         let caustics = caustics::Caustics::new(device);
         let wake = wake::WakeGpu::new(device, TW_WAKE_KERNEL_WGSL);
 
@@ -855,6 +859,7 @@ impl Tidewater {
             spots: Vec::new(),
             impacts: Default::default(),
             probe,
+            swash,
             probe_lanes: [0.0; 4],
             spray,
             uw,
@@ -1083,6 +1088,7 @@ impl Tidewater {
             && self.brk.ns >= 2;
         self.spray.poll_stats();
         self.probe.poll();
+        self.swash.poll();
         let cp = [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]];
         let (gain, intensity) = spray_override().unwrap_or((p.tidewater_fx[0], p.tidewater_fx[1]));
         // W6i: the boats' bow spray into the ring's CPU tail, and their hulls as collision bodies
@@ -1198,6 +1204,7 @@ impl Tidewater {
             // W9a: the surface around the camera, after everything that displaces it
             if !self.bind_dirty {
                 self.probe.record(encoder, &self.bind, self.probe_lanes);
+                self.swash.record(encoder, &self.bind, self.probe_lanes);
             }
         }
     }

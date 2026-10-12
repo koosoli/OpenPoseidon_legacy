@@ -489,7 +489,10 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     // and a crest that is breaking reads as a solid cap that frays at its edge.
     let capPatches = tw.absorption.w > 0.0;
     if (capPatches) {
-        capCover = smoothstep(tw.absorption.w, tw.scattering.w, capCover);
+        // open water only: in the surf and on the swash sheet the shore foam draws the white water,
+        // and the (attenuated) FFT foam there, which this threshold sits far below, turned the uprush
+        // into solid white blobs running up the sand
+        capCover = smoothstep(tw.absorption.w, tw.scattering.w, capCover) * smoothstep(1.0, 4.0, depth);
     }
     let coverage = sat(foamSum * tw.surface.z + capCover);
     // the cover the lace pattern below draws: everything but the caps in patch mode

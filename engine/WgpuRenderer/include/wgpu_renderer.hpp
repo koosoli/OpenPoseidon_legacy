@@ -2954,6 +2954,12 @@ extern "C"
      * lattice x, z, step, texels per side) into `lanes[4]`, the readback's age into `age_ms`. Returns
      * the texel count, 0 when there is none. Any thread. */
     WGR_API uint32_t wgr_water_drawn_grid(float* xyz, uint32_t cap, float* lanes, float* age_ms);
+    /* (OP) The swash field around the camera for the shorebirds (water_tw/swash.rs, read back 1-3
+     * frames late): up to `cap` texels of (runup, inland, dRdt, tau) into `texels` (4 floats each;
+     * w < 0 where no shore waves run), the lattice lanes (first texel x, z, step, texels per side)
+     * into `lanes[4]`, the readback's age into `age_ms`. Returns the texel count, 0 when there is
+     * none. Any thread. */
+    WGR_API uint32_t wgr_water_swash_field(float* texels, uint32_t cap, float* lanes, float* age_ms);
 
     /* Render + present one frame. Returns 0 on success (incl. transient skipped
      * frames), negative on error. */
