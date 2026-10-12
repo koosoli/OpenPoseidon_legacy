@@ -2226,12 +2226,19 @@ void GameApplication::RunMainLoop()
                     // the captured pose is unchanged.
                     if (cameraOn && GLandscape)
                     {
-                        const float groundY = GLandscape->SurfaceY(x, z) + 1.8f;
-                        cameraOn->Move(Vector3(x, groundY, z));
+                        // POSEIDON_FREEFLY_PLAYER_AWAY=<metres>: ground the player that far east of
+                        // the camera instead, so an interior capture is not filled by the player's
+                        // own body standing at the lens.
+                        float away = 0.0f;
+                        if (const char* a = std::getenv("POSEIDON_FREEFLY_PLAYER_AWAY"); a && *a)
+                            away = static_cast<float>(std::atof(a));
+                        const float px = x + away;
+                        const float groundY = GLandscape->SurfaceY(px, z) + 1.8f;
+                        cameraOn->Move(Vector3(px, groundY, z));
                         LOG_INFO(Core,
                                  "--test-world-freefly: grounded the player at {}, {}, {} so a"
                                  " drowning player cannot end the mission",
-                                 x, groundY, z);
+                                 px, groundY, z);
                     }
                     LOG_INFO(Core,
                              "--test-world-freefly: camera at {}, {}, {}; azimuth {} elevation {} degrees{}", x,
