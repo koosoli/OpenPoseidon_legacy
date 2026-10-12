@@ -43,10 +43,10 @@
 // The unguided-rocket half is ported too and lives further down (`SimulateUnguidedMissile*`,
 // `CompensateUnguidedMissile`). It is a genuinely different model, not a variation -- see the
 // comment above MissileParams for why a rocket droops less than a shell of the same speed.
-class AmmoType;
-
 namespace Poseidon
 {
+class AmmoType;
+
 namespace Ballistics
 {
 
