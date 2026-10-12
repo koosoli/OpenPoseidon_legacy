@@ -130,23 +130,53 @@ void TidewaterGround::Prepare(const Landscape& land)
         return;
     _world = world;
     _means.clear();
-    for (int i = 0; i < land.GetNTextures(); ++i)
+    const auto measure = [&](const std::string& base, const DecodedImage& image)
     {
-        Texture* t = land.GetTexture(i);
-        if (!t)
-            continue;
-        const std::string base = BaseName(static_cast<const TextureWgpu*>(t)->SourceName());
-        if (base.size() > 3 || _means.count(base))
-            continue; // the pure surfaces only ("ps", "sz", "pol", ...)
-        const DecodedImage image = DecodeLayer(t);
         if (!image.valid())
-            continue;
+            return;
         double sum[3] = {};
         const size_t n = size_t(image.width) * image.height;
         for (size_t p = 0; p < n; ++p)
             for (int c = 0; c < 3; ++c)
                 sum[c] += image.rgba[p * 4 + c];
         _means[base] = {float(sum[0] / n / 255.0), float(sum[1] / n / 255.0), float(sum[2] / n / 255.0)};
+    };
+    // corner surfaces the transitions name, and the folder they live in
+    std::map<std::string, std::string> cornerDirs;
+    for (int i = 0; i < land.GetNTextures(); ++i)
+    {
+        Texture* t = land.GetTexture(i);
+        if (!t)
+            continue;
+        const char* source = static_cast<const TextureWgpu*>(t)->SourceName();
+        const std::string base = BaseName(source);
+        if (base.size() == 8 && source)
+        {
+            const std::string path = source;
+            const size_t slash = path.find_last_of("\\/");
+            const std::string dir = slash == std::string::npos ? std::string() : path.substr(0, slash + 1);
+            for (const std::string& c : Corners(base))
+                cornerDirs.emplace(c, dir);
+        }
+        if (base.size() > 3 || _means.count(base))
+            continue; // the pure surfaces only ("ps", "sz", "pol", ...)
+        measure(base, DecodeLayer(t));
+    }
+    // A world need not place a pure surface on any cell (Eden never lays plain "ps": its beaches are
+    // all transitions), yet the pure image ships beside the transitions; read it from there.
+    for (const auto& [code, dir] : cornerDirs)
+    {
+        if (_means.count(code))
+            continue;
+        for (const char* ext : {".paa", ".pac"})
+        {
+            const std::string path = dir + code + ext;
+            const auto bytes = ReadSource(path.c_str());
+            if (bytes.empty())
+                continue;
+            measure(code, DecodePAABuffer(bytes.data(), bytes.size(), std::strcmp(ext, ".pac") != 0));
+            break;
+        }
     }
     LOG_INFO(Graphics, "Tidewater ground: {} pure OFP surfaces measured on '{}' (sand {}, field {})", _means.size(), world,
              _means.count("ps") ? "yes" : "no", _means.count("pol") ? "yes" : "no");
