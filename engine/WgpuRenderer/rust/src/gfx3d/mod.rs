@@ -26,6 +26,8 @@ mod boot_relief_tests;
 mod native_pbr_tests;
 #[cfg(test)]
 mod earth_ground_detail_tests;
+#[cfg(test)]
+mod tidewater_pipeline_tests;
 mod interior_publication;
 mod weather_cover;
 mod weather_cover_policy;
