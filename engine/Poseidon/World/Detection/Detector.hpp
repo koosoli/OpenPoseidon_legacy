@@ -105,6 +105,10 @@ public:
 	void SetText(RString text) {_text = text;}
 
 	bool IsActive() const {return _active;}
+	float GetAreaA() const {return _a;}
+	float GetAreaB() const {return _b;}
+	float GetAreaAngleDeg() const {return atan2(_sinAngle, _cosAngle) * (180.0f / 3.14159265f);}
+	bool IsAreaRectangular() const {return _rectangular;}
 	bool IsCountdown() const {return _activeCountdown;}
 	bool IsRepeating() const {return _repeating;}
 

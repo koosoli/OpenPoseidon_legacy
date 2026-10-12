@@ -39,6 +39,8 @@
 #include <Poseidon/UI/Locale/Stringtable/Stringtable.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/World/Detection/Detector.hpp>
+#include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -1087,6 +1089,16 @@ GameValue A2SafeZoneW(const GameState*)
     return GameValue(1.0f);
 }
 
+GameValue A2EmptyArrayNular(const GameState* state)
+{
+    return state->CreateGameValue(GameArray);
+}
+
+GameValue A2TextLogEmpty(const GameState*, GameValuePar)
+{
+    return GameValue(RString(""));
+}
+
 GameValue A2ObjNullUnary(const GameState*, GameValuePar)
 {
     return GameValueExt((Object*)nullptr);
@@ -1496,6 +1508,124 @@ void UpdateAttachments(Runtime& rt)
         i++;
     }
 }
+// ---------------------------------------------------------------------------
+// Triggers, waypoints, vehicles
+// ---------------------------------------------------------------------------
+GameValue A2TriggerActivated(const GameState*, GameValuePar oper1)
+{
+    Detector* det = dyn_cast<Detector>(GetObject(oper1));
+    return GameValue(det && det->IsActive());
+}
+
+GameValue A2TriggerArea(const GameState* state, GameValuePar oper1)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& a = result;
+    if (Detector* det = dyn_cast<Detector>(GetObject(oper1)))
+    {
+        a.Add(GameValue(det->GetAreaA()));
+        a.Add(GameValue(det->GetAreaB()));
+        a.Add(GameValue(det->GetAreaAngleDeg()));
+        a.Add(GameValue(det->IsAreaRectangular()));
+    }
+    return result;
+}
+
+AIGroup* GroupOf(GameValuePar v)
+{
+    if (v.GetType() == GameGroup)
+        return GetGroup(v);
+    if (EntityAI* e = dyn_cast<EntityAI>(GetObject(v)))
+        if (AIUnit* u = e->CommanderUnit())
+            return u->GetGroup();
+    return nullptr;
+}
+
+GameValue A2CurrentWaypoint(const GameState*, GameValuePar oper1)
+{
+    AIGroup* grp = GroupOf(oper1);
+    if (!grp)
+        return GameValue(0.0f);
+    auto* cur = grp->GetCurrent();
+    if (!cur || !cur->_fsm)
+        return GameValue(static_cast<float>(grp->NWaypoints()));
+    return GameValue(static_cast<float>(cur->_fsm->Var(0)));
+}
+
+// group setCurrentWaypoint [group, index]
+GameValue A2SetCurrentWaypoint(const GameState*, GameValuePar, GameValuePar oper2)
+{
+    const GameArrayType& wp = oper2;
+    if (wp.Size() < 2 || wp[1].GetType() != GameScalar)
+        return NOTHING;
+    AIGroup* grp = GroupOf(wp[0]);
+    if (!grp)
+        return NOTHING;
+    auto* cur = grp->GetCurrent();
+    const int index = static_cast<int>(static_cast<float>(wp[1]));
+    if (cur && cur->_fsm && index >= 0 && index <= grp->NWaypoints())
+        cur->_fsm->Var(0) = index;
+    return NOTHING;
+}
+
+// vehicle emptyPositions "driver" | "gunner" | "commander" | "cargo"
+GameValue A2EmptyPositions(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Transport* t = dyn_cast<Transport>(GetObject(oper1));
+    if (!t)
+        return GameValue(0.0f);
+    const RString what = oper2;
+    int n = 0;
+    if (_stricmp(what, "driver") == 0)
+        n = t->Type()->HasDriver() && !t->Driver() ? 1 : 0;
+    else if (_stricmp(what, "gunner") == 0)
+        n = t->Type()->HasGunner() && !t->Gunner() ? 1 : 0;
+    else if (_stricmp(what, "commander") == 0)
+        n = t->Type()->HasCommander() && !t->Commander() ? 1 : 0;
+    else if (_stricmp(what, "cargo") == 0)
+        n = std::max(0, t->GetMaxManCargo() - t->GetManCargoSize());
+    return GameValue(static_cast<float>(n));
+}
+
+GameValue A2SideUnknown(const GameState*)
+{
+    return CreateGameSide(TSideUnknown);
+}
+
+// mapGridPosition object|position: six-digit grid reference (100 m squares)
+GameValue A2MapGridPosition(const GameState*, GameValuePar oper1)
+{
+    float x = 0, y = 0;
+    Position2D(oper1, x, y);
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%03d%03d", std::clamp(static_cast<int>(x / 100), 0, 999),
+             std::clamp(static_cast<int>(y / 100), 0, 999));
+    return GameValue(RString(buffer));
+}
+
+GameValue A2MinusOneUnary(const GameState*, GameValuePar)
+{
+    return GameValue(-1.0f);
+}
+
+GameValue A2ZeroBinary(const GameState*, GameValuePar, GameValuePar)
+{
+    return GameValue(0.0f);
+}
+
+GameValue A2EmptyString(const GameState*)
+{
+    return GameValue(RString(""));
+}
+
+GameValue A2ZeroPos(const GameState* state, GameValuePar, GameValuePar)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& a = result;
+    for (int i = 0; i < 3; i++)
+        a.Add(GameValue(0.0f));
+    return result;
+}
 } // namespace
 
 // Arma 2 briefing: the diary and the simple tasks, as the HTML sections the CWA map
@@ -1724,6 +1854,11 @@ const GameNular A2Nular[] = {
     GameNular(GameBool, "teamSwitchEnabled", A2False),
     GameNular(GameScalar, "viewDistance", A2One),
     GameNular(GameNothing, "processInitCommands", A2ProcessInitCommands),
+    GameNular(GameSide, "sideUnknown", A2SideUnknown),
+    GameNular(GameString, "commandingMenu", A2EmptyString),
+    GameNular(GameScalar, "displayNull", A2Zero),
+    GameNular(GameScalar, "controlNull", A2Zero),
+    GameNular(GameArray, "hcSelected", A2EmptyArrayNular),
 };
 
 const GameFunction A2Unary[] = {
@@ -1786,6 +1921,23 @@ const GameFunction A2Unary[] = {
     GameFunction(GameString, "WFSideText", A2WFSideText, GameSide | GameObject | GameGroup),
     GameFunction(GameNothing, "clearVehicleInit", A2ClearVehicleInit, GameObject),
     GameFunction(GameNothing, "detach", A2Detach, GameObject),
+    GameFunction(GameBool, "triggerActivated", A2TriggerActivated, GameObject),
+    GameFunction(GameArray, "triggerArea", A2TriggerArea, GameObject),
+    GameFunction(GameScalar, "currentWaypoint", A2CurrentWaypoint, GameGroup | GameObject),
+    GameFunction(GameString, "mapGridPosition", A2MapGridPosition, GameObject | GameArray),
+    GameFunction(GameScalar, "moveTime", A2ZeroUnary, GameObject),
+    GameFunction(GameNothing, "openMap", A2NothingUnary, GameBool | GameArray),
+    GameFunction(GameArray, "hcAllGroups", A2EmptyArrayUnary, GameObject),
+    GameFunction(GameScalar, "lnbCurSelRow", A2MinusOneUnary, GameScalar | GameArray),
+    GameFunction(GameNothing, "lnbClear", A2NothingUnary, GameScalar | GameArray),
+    GameFunction(GameScalar, "lnbAddRow", A2ZeroUnary, GameArray),
+    GameFunction(GameScalar, "lnbValue", A2ZeroUnary, GameArray),
+    GameFunction(GameString, "lnbData", A2TextLogEmpty, GameArray),
+    GameFunction(GameString, "lnbText", A2TextLogEmpty, GameArray),
+    GameFunction(GameNothing, "lnbSetValue", A2NothingUnary, GameArray),
+    GameFunction(GameNothing, "lnbSetData", A2NothingUnary, GameArray),
+    GameFunction(GameNothing, "lnbSetCurSelRow", A2NothingUnary, GameArray),
+    GameFunction(GameScalar, "lnbSize", A2ZeroUnary, GameScalar | GameArray),
 };
 
 const GameOperator A2Binary[] = {
@@ -1863,6 +2015,16 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "setVehicleInit", function, A2SetVehicleInit, GameObject, GameString),
     GameOperator(GameNothing, "attachTo", function, A2AttachTo, GameObject, GameArray),
     GameOperator(GameNothing, "copyWaypoints", function, A2NothingBinary, GameGroup, GameGroup),
+    GameOperator(GameNothing, "setCurrentWaypoint", function, A2SetCurrentWaypoint, GameGroup, GameArray),
+    GameOperator(GameScalar, "emptyPositions", function, A2EmptyPositions, GameObject, GameString),
+    GameOperator(GameNothing, "useAudioTimeForMoves", function, A2NothingBinary, GameObject, GameBool),
+    GameOperator(GameScalar, "displayAddEventHandler", function, A2ZeroBinary, GameAny, GameArray),
+    GameOperator(GameNothing, "displayRemoveEventHandler", function, A2NothingBinary, GameAny, GameArray),
+    GameOperator(GameScalar, "ctrlAddEventHandler", function, A2ZeroBinary, GameAny, GameArray),
+    GameOperator(GameNothing, "ctrlRemoveEventHandler", function, A2NothingBinary, GameAny, GameArray),
+    GameOperator(GameArray, "selectionPosition", function, A2ZeroPos, GameObject, GameString),
+    GameOperator(GameNothing, "hcSelectGroup", function, A2NothingBinary, GameObject, GameArray),
+    GameOperator(GameNothing, "lnbSetColumnsPos", function, A2NothingBinary, GameScalar, GameArray),
 };
 } // namespace
 
