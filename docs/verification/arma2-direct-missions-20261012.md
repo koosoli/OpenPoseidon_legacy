@@ -43,6 +43,12 @@ Operation Arrowhead folder explicitly.
 
 ## Script surface added (SQF)
 
+**Scheduling.** Every `spawn`/`execVM`/`addAction` script runs as a stackful coroutine
+(Windows fiber, POSIX ucontext): `sleep` and `waitUntil` suspend anywhere -- inside
+called functions, loops and conditions -- and a while loop holding the frame longer than
+~3 ms gives it back, as Arma 2's scheduler does (`OP_A2_FIBERS=0` restores the Arma 1 line
+compiler). Stringtable keys are case-insensitive, as in Arma.
+
 Single-quoted strings; `#include`/`#define` through the real preprocessor for
 `execVM`/`preprocessFile(LineNumbers)` (also `\ca\...` absolute paths); `exitWith` in
 scheduled code; growable parser stacks (literal arrays of thousands of values); a
