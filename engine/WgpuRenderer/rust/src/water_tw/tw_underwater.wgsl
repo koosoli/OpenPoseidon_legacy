@@ -25,7 +25,12 @@
 
 // (W9a) within this of the surface the medium is decided per pixel on the lens (was 0.35 m while
 // the camera's height came from the FFT alone; the probe's is the drawn surface's own)
-const UW_STRADDLE: f32 = 1.0;
+// (OP, 2026-10-12) 1.0 -> 0.05 m: within a metre the per-pixel test let a camera a few decimetres under
+// the water call every upward pixel "air" (its port point poked out of the surface), and with the
+// surface itself closer than the near plane and clipped, the owner saw plain undistorted clouds and
+// clear water until he dived deeper. Under the water the eye's own medium decides; only a lens really
+// touching the surface (a few centimetres) is split.
+const UW_STRADDLE: f32 = 0.05;
 // (OP) the split is decided on a virtual dome port this far along the view, not on the near plane:
 // the near plane is a few cm tall on screen terms, so the waterline crossed the whole frame within
 // +-5 cm of bob and the view flipped between air and water as each wave passed. At 0.6 m it sweeps
@@ -36,7 +41,7 @@ const UW_STRADDLE: f32 = 1.0;
 // an eye up to ~0.3 m ABOVE the drawn surface looking down put the 0.6 m port under it, so the
 // lower frame became underwater fog laid over the very surface the water material was drawing
 // from above. At 0.12 m the split stays where the drawn surface really crosses the lens.
-const UW_PORT: f32 = 0.12;
+const UW_PORT: f32 = 0.03;
 const UW_BAND: i32 = 16;
 const UW_IOR: f32 = 1.333;
 const UW_PI: f32 = 3.141592653589793;
