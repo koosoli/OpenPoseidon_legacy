@@ -70,6 +70,7 @@ bool RegisterVoiceBackend(const VoiceBackendDescriptor& backend);
 const VoiceBackendDescriptor& GetSelectedVoiceBackend();
 
 void RegisterOpenALVoiceBackend();
+void RegisterSDLVoiceBackend(); // engine/PoseidonSteamAudio (POSEIDON_ENABLE_STEAMAUDIO)
 
 // Test-only backend simulating an always-hot microphone that produces a
 // continuous 440 Hz tone in real time. Selected over the platform backends

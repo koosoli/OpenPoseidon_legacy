@@ -2890,6 +2890,10 @@ void GameApplication::RegisterAudioBackends()
     Poseidon::RegisterTextAudioBackend();
     Poseidon::RegisterOpenALAudioBackend();
     Poseidon::RegisterOpenALVoiceBackend();
+#if POSEIDON_ENABLE_STEAMAUDIO
+    Poseidon::RegisterSteamAudioBackend(); // --audio steam
+    Poseidon::RegisterSDLVoiceBackend();
+#endif
     Poseidon::RegisterTestToneVoiceBackend();
 }
 

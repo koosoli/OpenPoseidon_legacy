@@ -86,6 +86,11 @@ else()
     )
 endif()
 
+if(POSEIDON_ENABLE_STEAMAUDIO)
+    target_link_libraries(PoseidonGame PRIVATE PoseidonSteamAudio)
+    target_compile_definitions(PoseidonGame PRIVATE POSEIDON_ENABLE_STEAMAUDIO=1)
+endif()
+
 if(POSEIDON_ENABLE_WGPU)
     target_compile_definitions(PoseidonGame PRIVATE POSEIDON_ENABLE_WGPU=1)
     wgpu_renderer_stage_dll(PoseidonGame)
