@@ -1013,6 +1013,13 @@ GameValue GrpSetIdentity(const GameState* state, GameValuePar oper1, GameValuePa
             name = array[0];
             color = array[1];
             break;
+        case 1:
+            // Arma 2: setGroupId ["Fist"] -- a free group name; CWA's group identities
+            // come from CfgWorlds >> GroupNames, so the call is accepted and changes nothing.
+            if (array[0].GetType() == GameString)
+                return NOTHING;
+            state->TypeError(GameString, array[0].GetType());
+            return NOTHING;
         default:
             state->SetError(EvalDim, array.Size(), 3);
             return NOTHING;

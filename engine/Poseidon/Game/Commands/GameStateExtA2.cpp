@@ -28,6 +28,7 @@
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICenter.hpp>
 #include <Poseidon/AI/AIGroup.hpp>
+#include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Modules/Modules.hpp>
@@ -983,6 +984,28 @@ GameValue A2TextLogFormat(const GameState* state, GameValuePar oper1)
     return NOTHING;
 }
 
+GameValue A2Rank(const GameState*, GameValuePar oper1)
+{
+    static const char* names[] = {"PRIVATE", "CORPORAL", "SERGEANT", "LIEUTENANT", "CAPTAIN", "MAJOR", "COLONEL"};
+    Person* person = dyn_cast<Person>(GetObject(oper1));
+    if (!person)
+        return GameValue(RString(""));
+    const int rank = static_cast<int>(person->GetRank()) - static_cast<int>(RankPrivate);
+    return GameValue(RString(rank >= 0 && rank < 7 ? names[rank] : "PRIVATE"));
+}
+
+GameValue A2GetFriend(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameDataSide* a = dynamic_cast<const GameDataSide*>(oper1.GetData());
+    const GameDataSide* b = dynamic_cast<const GameDataSide*>(oper2.GetData());
+    if (!a || !b || !GWorld)
+        return GameValue(0.0f);
+    AICenter* center = GWorld->GetCenter(a->GetSide());
+    if (!center || b->GetSide() >= TSideUnknown)
+        return GameValue(a->GetSide() == b->GetSide() ? 1.0f : 0.0f);
+    return GameValue(center->GetFriendship(b->GetSide()));
+}
+
 GameValue A2HintSilent(const GameState* state, GameValuePar oper1)
 {
     return ShowHint(state, oper1);
@@ -1134,6 +1157,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameScalar, "execFSM", A2ExecFSMUnary, GameString),
     GameFunction(GameBool, "completedFSM", A2CompletedFSM, GameScalar),
     GameFunction(GameString, "lifeState", A2LifeState, GameObject),
+    GameFunction(GameString, "rank", A2Rank, GameObject),
     GameFunction(GameString, "vehicleVarName", A2VehicleVarName, GameObject),
     GameFunction(GameArray, "nearestObjects", A2NearestObjects, GameArray),
     GameFunction(GameArray, "getPosATL", A2GetPosATL, GameObject),
@@ -1148,6 +1172,7 @@ const GameFunction A2Unary[] = {
 
 const GameOperator A2Binary[] = {
     GameOperator(GameScalar, "factor", function, A2Factor, GameScalar, GameArray),
+    GameOperator(GameScalar, "getFriend", function, A2GetFriend, GameSide, GameSide),
     GameOperator(GameNothing, "setVariable", function, A2SetVariable, GameObject | GameGroup | GameString, GameArray),
     GameOperator(GameAny, "getVariable", function, A2GetVariable, GameObject | GameGroup | GameString, GameString | GameArray),
     GameOperator(GameString, "createSimpleTask", function, A2CreateSimpleTask, GameObject, GameArray),
