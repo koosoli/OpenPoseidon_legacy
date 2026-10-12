@@ -55,6 +55,11 @@ struct GrassParams {
     native_tuft2: vec4<f32>,
     tuft_aspect: array<vec4<f32>, 2>,
     tuft_scale: array<vec4<f32>, 2>,
+    // RFG-138: mirrors grass.wgsl (per-surface PlantMat blade sets, blades-only runs).
+    tuft_sets: array<vec4<f32>, 16>,
+    tuft_set_aspect: array<vec4<f32>, 16>,
+    tuft_set_scale: array<vec4<f32>, 16>,
+    card_skip: vec4<u32>,
 };
 // Must mirror grass.wgsl's 32-byte layout exactly: both shaders bind the same
 // instance buffer through the shared `data_layout`.

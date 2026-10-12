@@ -146,6 +146,15 @@ struct GrassParams {
     // Per blade layer (8): width / height of its atlas rectangle, and its ScaleDistribution.
     tuft_aspect: array<vec4<f32>, 2>,
     tuft_scale: array<vec4<f32>, 2>,
+    // RFG-138: per-surface PlantMat blade sets (blade_set_of picks the set from the cell's run).
+    // Set s: tuft_sets[2s] = cards, Zenith deg, ZenithRandomOffset deg, height m;
+    //        tuft_sets[2s+1] = HeightRandomOffset, Plants/m2, ground-colour lerp, has mask.
+    // tuft_set_aspect / tuft_set_scale: set s, layer k at [2s + k/4][k%4]. All zero = one set.
+    tuft_sets: array<vec4<f32>, 16>,
+    tuft_set_aspect: array<vec4<f32>, 16>,
+    tuft_set_scale: array<vec4<f32>, 16>,
+    // .x = bit per atlas layer whose run grows blades only (no cards). .yzw spare.
+    card_skip: vec4<u32>,
 };
 
 // 32 bytes. `pos_seed` stays f32 for world precision; everything the compute
@@ -594,6 +603,29 @@ fn instance_layer_run(packed_w: u32) -> vec2<u32> {
     return vec2<u32>((packed_w >> 3u) & 31u, (packed_w >> 8u) & 7u);
 }
 
+// RFG-138: the blade set (0..7) the run starting on atlas layer `first` draws its near-ring tufts
+// from -- 3 bits per layer across blade_skip.yzw, layer L at bit 3L. 0 when no sets were uploaded.
+fn blade_set_of(first: u32) -> u32 {
+    let bit = min(first, 31u) * 3u;
+    let word = bit / 32u;
+    let shift = bit % 32u;
+    let lo = select(select(grass.blade_skip.w, grass.blade_skip.z, word == 1u), grass.blade_skip.y, word == 0u);
+    var v = lo >> shift;
+    if (shift > 29u) {
+        let hi = select(grass.blade_skip.w, grass.blade_skip.z, word == 0u);
+        v = v | (hi << (32u - shift));
+    }
+    return v & 7u;
+}
+
+fn blade_sets_on() -> bool { return grass.tuft_sets[0].x > 0.5; }
+
+// RFG-138: the cell's run grows blades only (a PlantMat surface with no ClutterConfig: crop fields).
+fn cell_skips_cards(geo: u32) -> bool {
+    if (grass.card_skip.x == 0u || (geo & GEO_AUTHORED) == 0u || ((geo >> 28u) & 7u) == 0u) { return false; }
+    return ((grass.card_skip.x >> ((geo & GEO_SURFACE_MASK) >> GEO_SURFACE_SHIFT)) & 1u) != 0u;
+}
+
 // RFG-116: the cell's run starts on a layer whose surface names no PlantMat.
 fn cell_skips_blades(geo: u32) -> bool {
     if (grass.blade_skip.x == 0u || (geo & GEO_AUTHORED) == 0u || ((geo >> 28u) & 7u) == 0u) { return false; }
@@ -826,6 +858,7 @@ fn card_coverage_for(geo: u32) -> f32 {
 // Stable card thinning, salted apart from both the density seed and the
 // authored-coverage seed so the three thin the field independently.
 fn card_thinned(cell_id: vec2<i32>, geo: u32) -> bool {
+    if (cell_skips_cards(geo)) { return true; } // RFG-138
     let cover = card_coverage_for(geo);
     if (cover >= 0.999) { return false; }
     return hash_cell01(cell_id, 0x2e7d9b41u) >= cover;
@@ -1416,7 +1449,17 @@ struct VsOut {
 // that popped under a moving camera. Blade slots past the card count collapse outside clip space.
 fn vs_native_tuft(inst: vec4<f32>, inst_packed: vec4<u32>, card: u32, t: f32, left: bool) -> VsOut {
     var out: VsOut;
-    let cards = u32(clamp(grass.native_tuft.y, 1.0, 6.0));
+    // RFG-138: this cell's PlantMat set -- wheat on a crop field, Grass_02's own tufts on Grass_02.
+    let run = instance_layer_run(inst_packed.w);
+    let sets = blade_sets_on();
+    let bset = select(0u, blade_set_of(run.x), sets && run.y > 0u);
+    var p0 = vec4<f32>(grass.native_tuft.y, grass.native_tuft.z, grass.native_tuft.w, grass.native_tuft2.x);
+    var p1 = vec4<f32>(grass.native_tuft2.y, grass.native_tuft2.z, 0.0, 0.0);
+    if (sets) {
+        p0 = grass.tuft_sets[bset * 2u];
+        p1 = grass.tuft_sets[bset * 2u + 1u];
+    }
+    let cards = u32(clamp(p0.x, 1.0, 6.0));
     if (card >= cards) {
         out.clip = vec4<f32>(2.0, 2.0, 2.0, 1.0);
         out.normal = vec3<f32>(0.0, 1.0, 0.0);
@@ -1425,11 +1468,15 @@ fn vs_native_tuft(inst: vec4<f32>, inst_packed: vec4<u32>, card: u32, t: f32, le
     let seed = inst.w;
     let pick = hash11(inst.xz + vec2<f32>(f32(card) * 31.0 + 5.0, f32(card) * 17.0 + 13.0));
     let layer = min(u32(pick * 8.0), 7u);
-    let aspect = clamp(grass.tuft_aspect[layer / 4u][layer % 4u], 0.1, 6.0);
-    let scale = clamp(grass.tuft_scale[layer / 4u][layer % 4u], 0.1, 4.0);
+    var aspect = clamp(grass.tuft_aspect[layer / 4u][layer % 4u], 0.1, 6.0);
+    var scale = clamp(grass.tuft_scale[layer / 4u][layer % 4u], 0.1, 4.0);
+    if (sets) {
+        aspect = clamp(grass.tuft_set_aspect[bset * 2u + layer / 4u][layer % 4u], 0.1, 6.0);
+        scale = clamp(grass.tuft_set_scale[bset * 2u + layer / 4u][layer % 4u], 0.1, 4.0);
+    }
     let jitter = hash11(inst.xz + vec2<f32>(f32(card) * 7.0 + 1.0, 41.0)) - 0.5;
-    let height = max(grass.native_tuft2.x, 0.01) * scale *
-        (1.0 + jitter * 2.0 * clamp(grass.native_tuft2.y, 0.0, 1.0)) * lod_height_scale(inst_packed.z);
+    let height = max(p0.w, 0.01) * scale *
+        (1.0 + jitter * 2.0 * clamp(p1.x, 0.0, 1.0)) * lod_height_scale(inst_packed.z);
     let crush_dir = unpack2x16snorm(inst_packed.x);
     let crush = unpack2x16unorm(inst_packed.y).x;
     let depth = imprint_depth();
@@ -1440,7 +1487,7 @@ fn vs_native_tuft(inst: vec4<f32>, inst_packed: vec4<u32>, card: u32, t: f32, le
     let axis = vec3<f32>(cos(yaw), 0.0, sin(yaw));
     let facing = vec3<f32>(-sin(yaw), 0.0, cos(yaw));
     let lean_rand = hash11(inst.xz + vec2<f32>(f32(card) * 11.0 + 3.0, 97.0));
-    let zenith = radians(clamp(grass.native_tuft.z + (lean_rand - 0.5) * 2.0 * grass.native_tuft.w, -60.0, 60.0));
+    let zenith = radians(clamp(p0.y + (lean_rand - 0.5) * 2.0 * p0.z, -60.0, 60.0));
     let up = vec3<f32>(0.0, cos(zenith), 0.0) + facing * sin(zenith);
     let wind = sample_wind_field(inst.xz, t, seed + pick);
     let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * grass.wind_strength *
@@ -1454,7 +1501,9 @@ fn vs_native_tuft(inst: vec4<f32>, inst_packed: vec4<u32>, card: u32, t: f32, le
     out.height_t = t;
     out.seed = seed;
     out.wind_gust = wind.gust;
-    out.blade_uv = vec4<f32>(u, 1.0 - t, f32(layer), blade_texture_strength(rel));
+    // RFG-138: set s owns array layers 16s..16s+7 (colour) and 16s+8.. (its SatMapBlendMask), so
+    // native_sat_mask's +8 stays inside the set.
+    out.blade_uv = vec4<f32>(u, 1.0 - t, f32(bset * 16u + layer), blade_texture_strength(rel));
     out.blade_taper = 1.0;
     return out;
 }
@@ -1759,7 +1808,7 @@ fn vs_grass_far(@builtin(vertex_index) vertex_index: u32, @builtin(instance_inde
 // pipelines, one shading function, no penalty on the default path.
 @fragment
 fn fs_grass_cards(in: VsOut) -> @location(0) vec4<f32> {
-    let cutout = textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), frame.renscale.x);
+    let cutout = textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, blade_layer(in.blade_uv.z), frame.renscale.x);
     if (cutout.a < grass.cards.y) {
         discard;
     }
@@ -1907,6 +1956,12 @@ fn blade_height_ao_mean(taper: f32) -> f32 {
 // Preserve the authored species palette on an unresolved native ribbon. Its
 // opacity-weighted CPU mean excludes transparent margins; sampled alpha still
 // belongs to coverage and is never altered here. Empty layers retain the sample.
+// RFG-138: the array layer a blade's interpolated `blade_uv.z` names. ROUNDED, never truncated:
+// the value is constant per card but interpolated, and 16.0 arrives as 15.9999 on some pixels --
+// truncated, a set-1 card sampled set 0's last SatMapBlendMask layer (solid white) there and drew
+// as a sparkling white rectangle. Layer 0 cannot fall below itself, which hid this until sets.
+fn blade_layer(z: f32) -> i32 { return i32(z + 0.5); }
+
 fn native_blade_colour(sampled: vec3<f32>, mean: vec4<f32>, detail: f32) -> vec3<f32> {
     return select(sampled, mix(mean.rgb, sampled, detail), mean.w > 0.0);
 }
@@ -1949,7 +2004,7 @@ fn grass_ground_colour(world_xz: vec2<f32>) -> vec3<f32> {
 // array is sRGB, the mask is authored linear: re-encode what the sampler decoded.
 fn native_sat_mask(uv: vec4<f32>) -> f32 {
     if (grass.native_tuft2.w < 0.5) { return 1.0; }
-    let m = textureSampleBias(blade_tex, blade_samp, uv.xy, i32(uv.z) + 8, frame.renscale.x).r;
+    let m = textureSampleBias(blade_tex, blade_samp, uv.xy, blade_layer(uv.z) + 8, frame.renscale.x).r;
     return select(1.055 * pow(m, 1.0 / 2.4) - 0.055, m * 12.92, m <= 0.0031308);
 }
 
@@ -1981,11 +2036,14 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // Photo veins can alias as sub-pixel blades move in the wind. A small
     // positive mip bias stabilises that fine detail while keeping it readable
     // at the close ranges where this near-LOD texture is actually visible.
-    let blade = textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), frame.renscale.x);
+    let blade = textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, blade_layer(in.blade_uv.z), frame.renscale.x);
     var blade_colour = blade.rgb;
     if (grass.native.x > 0.0) {
-        blade_colour = native_blade_colour(blade.rgb,
-            grass.blade_layer_means[min(u32(in.blade_uv.z), 7u)], shading_detail);
+        // RFG-138: the means are measured for set 0's eight layers only; another set keeps its own
+        // sampled colour rather than drifting towards grass_03's green with distance.
+        let mean_layer = u32(blade_layer(in.blade_uv.z));
+        let layer_mean_native = select(vec4<f32>(0.0), grass.blade_layer_means[min(mean_layer, 7u)], mean_layer < 8u);
+        blade_colour = native_blade_colour(blade.rgb, layer_mean_native, shading_detail);
     } else {
         // The procedural atlas has several green, yellow and brown species.
         // Keep their fibres and luminance relief, but give the OFP meadow one
@@ -2016,7 +2074,13 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
         let recoloured = ground * (dot(blade_colour, luma) / max(dot(ground, luma), 0.02));
         // No root shade: the atlas tuft carries its own base darkening.
         // RFG-117: SatMapLerp scaled per texel by the PlantMat's SatMapBlendMask (layers 8..15).
-        textured = mix(blade_colour, recoloured, clamp(grass.native2.x, 0.0, 1.0) * native_sat_mask(in.blade_uv)) *
+        // RFG-138: each PlantMat its own SatMapLerp (wheat 0.65, cut wheat 0.5, grass 0.8); the set
+        // is the array layer's 16-layer block.
+        var lerp = grass.native2.x;
+        if (blade_sets_on() && native_tufts_on()) {
+            lerp = grass.tuft_sets[min(u32(in.blade_uv.z + 0.5) / 16u, 7u) * 2u + 1u].z;
+        }
+        textured = mix(blade_colour, recoloured, clamp(lerp, 0.0, 1.0) * native_sat_mask(in.blade_uv)) *
             variation * gust_highlight;
     }
     // shape_mix.w scales the photo texture globally on top of the distance fade
@@ -2279,7 +2343,7 @@ fn tuft_contour_normal(uv: vec2<f32>, layer: i32, card_normal: vec3<f32>) -> vec
 // without softening close clumps. Colour, prepass and A2C twins all go through
 // here so they sample the same mip of the same texel and agree on the alpha.
 fn tuft_sample(in: VsOut) -> vec4<f32> {
-    return textureSampleBias(tuft_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), 0.75);
+    return textureSampleBias(tuft_tex, blade_samp, in.blade_uv.xy, blade_layer(in.blade_uv.z), 0.75);
 }
 
 // Alpha-to-coverage for the cards under MSAA (grass/mod.rs builds the *_a2c
@@ -2378,7 +2442,7 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     // camera orbited it. The photograph's luma gradient then perturbs that
     // upright normal per texel, which is view-stable and gives the silhouette
     // real relief instead of one flat value across the whole plate.
-    let n = tuft_contour_normal(in.blade_uv.xy, i32(in.blade_uv.z), in.normal);
+    let n = tuft_contour_normal(in.blade_uv.xy, blade_layer(in.blade_uv.z), in.normal);
     let light_dir = grass_light_dir();
     let ndl = max(dot(n, light_dir), 0.0);
     let wrap = max((dot(n, light_dir) + 0.35) / 1.35, 0.0);
@@ -2459,7 +2523,7 @@ fn fs_grass_mid_tuft_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
 // Two-sided: the back face shades with the flipped normal, bent half way to upright so a card
 // seen edge-on to the sun does not go black (the old blades' dark side).
 fn native_tuft_alpha(in: VsOut) -> f32 {
-    return textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), frame.renscale.x).a;
+    return textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, blade_layer(in.blade_uv.z), frame.renscale.x).a;
 }
 fn native_tuft_facing(in: VsOut, front: bool) -> VsOut {
     var o = in;

@@ -830,8 +830,11 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     {
         const auto channel = [](float v)
         { return static_cast<uint8_t>(v <= 0.0f ? 0.0f : (v >= 1.0f ? 255.0f : v * 255.0f + 0.5f)); };
-        // ARGB8888 in this engine means B,G,R,A in memory.
-        const uint8_t texel[4] = {channel(solid[2]), channel(solid[1]), channel(solid[0]), 255};
+        // ARGB8888 in this engine means B,G,R,A in memory. RFG-137: an `enfk|` constant
+        // coverage over a flat colour (the river film) keeps its alpha -- this branch returns
+        // before the overwrite below, so it has to be applied here.
+        const uint8_t alpha = constantAlpha >= 0.0f ? channel(constantAlpha) : 255;
+        const uint8_t texel[4] = {channel(solid[2]), channel(solid[1]), channel(solid[0]), alpha};
         DDSMipLevel level;
         level.width = 4;
         level.height = 4;
@@ -844,7 +847,7 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
         _pacFormat = ToPacFormat(_format);
         _w = 4;
         _h = 4;
-        _hasAlpha = false;
+        _hasAlpha = alpha < 255; // as the constant-coverage overwrite below states it
         _mipmaps = 1;
         _avgColor = AverageOfSmallest(_levels, _format);
         _isTransparent = false;

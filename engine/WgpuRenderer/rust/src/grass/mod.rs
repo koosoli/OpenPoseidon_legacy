@@ -390,6 +390,15 @@ struct GrassParams {
     native_tuft2: [f32; 4],
     tuft_aspect: [f32; 8],
     tuft_scale: [f32; 8],
+    // RFG-138: per-surface PlantMat blade sets (grass.wgsl tuft_sets / tuft_set_aspect /
+    // tuft_set_scale / card_skip). Set s: tuft_sets[8s..8s+4] = cards, Zenith, ZenithRandomOffset,
+    // height m; [8s+4..8s+8] = HeightRandomOffset, Plants/m2, ground-colour lerp, has mask.
+    tuft_sets: [f32; 64],
+    tuft_set_aspect: [f32; 64],
+    tuft_set_scale: [f32; 64],
+    // .x = bit per atlas layer whose run grows blades only (a PlantMat surface with no
+    // ClutterConfig: Reforger's crop fields); the card rings place nothing there. .yzw spare.
+    card_skip: [u32; 4],
 }
 
 /// Neutral card-layer pick: uniform weights (0 = "the map gave none") and no distance limit.
@@ -870,6 +879,10 @@ impl Grass {
             native_tuft2: [0.0; 4],
             tuft_aspect: [1.0; 8],
             tuft_scale: [1.0; 8],
+            tuft_sets: [0.0; 64],
+            tuft_set_aspect: [1.0; 64],
+            tuft_set_scale: [1.0; 64],
+            card_skip: [0; 4],
         };
         queue.write_buffer(&grass_params, 0, bytemuck::bytes_of(&params));
 
@@ -1930,8 +1943,10 @@ impl Grass {
         let Some(view) =
             blade_atlas::create_from_images(device, queue, width, height, layers, rgba)
         else {
+            eprintln!("[wgr] grass blade atlas REJECTED: {width}x{height} x {layers} layers, {} bytes", rgba.len());
             return;
         };
+        eprintln!("[wgr] grass blade atlas: {width}x{height} x {layers} layers");
         self.blade_view = view;
         self.have_blade_atlas = true;
         let means = blade_atlas::blade_layer_means(width, height, layers, rgba);
@@ -2012,7 +2027,8 @@ impl Grass {
     /// RFG-116: bit i set = atlas layer i belongs to a surface whose `.emat` names no PlantMat,
     /// so the near ring places no blade on a cell whose run starts there. 0 = blades everywhere.
     pub fn set_blade_skip(&mut self, queue: &wgpu::Queue, mask: u32) {
-        self.last_params.blade_skip = [mask, 0, 0, 0];
+        // .yzw are the RFG-138 blade-set words (set_blade_sets); this answer leaves them alone.
+        self.last_params.blade_skip[0] = mask;
         queue.write_buffer(&self.grass_params, std::mem::offset_of!(GrassParams, blade_skip) as u64,
                            bytemuck::cast_slice(&self.last_params.blade_skip));
     }
@@ -2032,6 +2048,38 @@ impl Grass {
         for i in 0..8 {
             self.last_params.tuft_aspect[i] = finite(aspect.get(i).copied().unwrap_or(1.0), 1.0).clamp(0.1, 6.0);
             self.last_params.tuft_scale[i] = finite(scale.get(i).copied().unwrap_or(1.0), 1.0).clamp(0.1, 4.0);
+        }
+        queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&self.last_params));
+    }
+
+    /// RFG-138: per-surface PlantMat blade sets. `set_words` = 3 bits per atlas layer (the set the
+    /// run starting on that layer draws its near-ring tufts from, layer L at bit 3L across the
+    /// three words); `card_skip` = bit per layer whose run grows blades only. `sets` = 8 floats per
+    /// set (see GrassParams::tuft_sets), `aspect` / `scale` = 8 per set. Missing entries reset.
+    pub fn set_blade_sets(&mut self, queue: &wgpu::Queue, set_words: &[u32], card_skip: u32, sets: &[f32],
+                          aspect: &[f32], scale: &[f32]) {
+        let finite = |v: f32, d: f32| if v.is_finite() { v } else { d };
+        for i in 0..3 {
+            self.last_params.blade_skip[i + 1] = set_words.get(i).copied().unwrap_or(0);
+        }
+        // WGR_DEBUG_BLADE_SET=<0..7>: every run draws from that set (diagnostic only).
+        if let Some(forced) = std::env::var("WGR_DEBUG_BLADE_SET").ok().and_then(|v| v.parse::<u32>().ok()) {
+            let mut bits = [0u32; 3];
+            for layer in 0..32u32 {
+                let bit = layer * 3;
+                let (word, shift) = ((bit / 32) as usize, bit % 32);
+                bits[word] |= (forced & 7) << shift;
+                if shift > 29 && word + 1 < 3 {
+                    bits[word + 1] |= (forced & 7) >> (32 - shift);
+                }
+            }
+            self.last_params.blade_skip[1..4].copy_from_slice(&bits);
+        }
+        self.last_params.card_skip = [card_skip, 0, 0, 0];
+        for i in 0..64 {
+            self.last_params.tuft_sets[i] = finite(sets.get(i).copied().unwrap_or(0.0), 0.0);
+            self.last_params.tuft_set_aspect[i] = finite(aspect.get(i).copied().unwrap_or(1.0), 1.0).clamp(0.1, 6.0);
+            self.last_params.tuft_set_scale[i] = finite(scale.get(i).copied().unwrap_or(1.0), 1.0).clamp(0.1, 4.0);
         }
         queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&self.last_params));
     }
@@ -2415,6 +2463,10 @@ impl Grass {
             native_tuft2: self.last_params.native_tuft2,
             tuft_aspect: self.last_params.tuft_aspect,
             tuft_scale: self.last_params.tuft_scale,
+            tuft_sets: self.last_params.tuft_sets,
+            tuft_set_aspect: self.last_params.tuft_set_aspect,
+            tuft_set_scale: self.last_params.tuft_set_scale,
+            card_skip: self.last_params.card_skip,
         };
         self.near_grid_dim = near_grid_dim;
         self.mid_grid_dim = mid_grid_dim;

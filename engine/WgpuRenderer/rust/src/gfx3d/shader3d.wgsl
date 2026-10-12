@@ -1463,13 +1463,31 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // the per-draw path's own per-instance debug lane is a legacy of the material-debug
     // slice and would give the panel two switches for one checkbox.
     var out_rgb = rgb;
+    var out_a2 = out_a;
     if ((material_flags(material) & MATFLAG_REFLECTIVE) != 0u && linear > 0.5
         && !matdbg_flag(MATDBG_DISABLE_FRESNEL_ENV)) {
-        out_rgb = env_reflection(out_rgb, shading_normal, in.world_pos, in.fog);
+        if (translucent > 0.5) {
+            // RFG-137: a translucent reflective surface (a river over its bed). The reflection
+            // sits ON TOP of the film, so it is not scaled by the film's alpha:
+            //   out = env*F + (1-F) * (a*shaded + (1-a)*bed)
+            // which standard alpha blending gives with A = 1-(1-F)(1-a) and src = (env*F +
+            // (1-F)*a*shaded) / A. Scaling a mix() by the film alpha instead capped every
+            // reflection at a -- a grazing river would never mirror the sky.
+            let view_dir = normalize(-in.world_pos);
+            let n = select(-shading_normal, shading_normal, dot(shading_normal, view_dir) >= 0.0);
+            let daylight = cave_daylight(in.world_pos + frame.cam_pos.xyz);
+            let f = env_fresnel(clamp(dot(n, view_dir), 0.0, 1.0)) * clamp(in.fog, 0.0, 1.0) * daylight;
+            let env = sky_env_sample(reflect(-view_dir, n));
+            let a = clamp(out_a, 0.0, 1.0);
+            let a_out = 1.0 - (1.0 - f) * (1.0 - a);
+            out_rgb = (env * f + (1.0 - f) * a * out_rgb) / max(a_out, 1e-4);
+            out_a2 = a_out;
+        } else {
+            out_rgb = env_reflection(out_rgb, shading_normal, in.world_pos, in.fog);
+        }
     }
     // MAT-051: a glass pane keeps a minimum presence head-on. Applied AFTER the
     // reflection so the floor composites the reflected colour, not the bare albedo.
-    var out_a2 = out_a;
     if ((material_flags(material) & MATFLAG_GLASS) != 0u) {
         out_a2 = max(out_a2, GLASS_MIN_ALPHA);
     }

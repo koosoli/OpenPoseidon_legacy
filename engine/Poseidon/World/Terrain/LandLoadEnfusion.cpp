@@ -1432,6 +1432,20 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         const char* env = std::getenv("POSEIDON_ENFUSION_RIVERS");
         return !(env && env[0] == '0');
     }();
+    static const bool riverOpaque = []
+    {
+        // OPT-IN for now (POSEIDON_RIVER_TRANSLUCENT=1): blended, the ribbons leave the retained
+        // set for the per-draw path, and at Everon 5052/5312 that pushed the geometry pool past
+        // 1088 MB on an 8 GB card -- device lost even with pressure growth. Opaque until that
+        // path's cost is understood.
+        const char* env = std::getenv("POSEIDON_RIVER_TRANSLUCENT");
+        return !(env && env[0] == '1');
+    }();
+    static const float riverAlpha = []
+    {
+        const char* env = std::getenv("POSEIDON_RIVER_ALPHA");
+        return (env && *env) ? static_cast<float>(std::atof(env)) : -1.0f;
+    }();
     for (const Enf::EbinRiver& source : world.rivers)
     {
         if (!riversOn || !source.isRiver || source.points.size() < 6)
@@ -1448,6 +1462,7 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         for (size_t i = 0; i < river.pointWidths.size() && i < source.pointWidths.size(); ++i)
             if (i < source.pointWidthModes.size() && source.pointWidthModes[i] == 2 && source.pointWidths[i] > 0.1f)
                 river.pointWidths[i] = source.pointWidths[i];
+        constexpr float kRiverFilmAlpha = 0.4f; // measured, see RFG-137 below
         if (const auto hit = byGuid.find(source.materialGuid); hit != byGuid.end())
         {
             river.material = hit->second;
@@ -1462,6 +1477,20 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         }
         if (river.texture.empty())
             river.texture = "enfc|0.0350,0.0400,0.0190"; // RiverSurface_01's own Color
+        // RFG-137: a river is a clear film over its bed, not an opaque sheet. Measured in
+        // Workbench: Reforger's surface is ~0.1 m above the channel bottom (HalfLightDistance
+        // 30 m makes that depth practically transparent) and the gravel shows through. The
+        // constant-alpha route (`enfk|`, as glass) draws it blended and the shader composites the
+        // Fresnel reflection on top at full strength. The film alpha is MEASURED, not read from
+        // a field whose semantics are unknown: in Workbench the same gravel under the river is
+        // 0.59/0.67/0.60 (R/G/B) of its dry brightness, i.e. (1 - a) ~ 0.62. Opt-in, see riverOpaque;
+        // POSEIDON_RIVER_ALPHA=<0..1> overrides the alpha for an A/B.
+        if (!riverOpaque)
+        {
+            char head[32];
+            std::snprintf(head, sizeof(head), "enfk|%.3f|", std::clamp(riverAlpha >= 0.0f ? riverAlpha : kRiverFilmAlpha, 0.02f, 1.0f));
+            river.texture = head + river.texture;
+        }
         if (std::getenv("POSEIDON_RIVER_DUMP"))
         {
             size_t fixedPoints = 0;

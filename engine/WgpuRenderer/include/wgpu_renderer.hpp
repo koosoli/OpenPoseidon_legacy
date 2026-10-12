@@ -2889,6 +2889,13 @@ extern "C"
        aspect / scale = 8 floats each, per blade layer. cfg null = off. */
     WGR_API void wgr_grass_set_native_tufts(WgrRenderer* renderer, const float* cfg, const float* aspect,
                                             const float* scale);
+    /* RFG-138: per-surface PlantMat blade sets. setWords = 3 words, 3 bits per atlas layer (layer L
+       at bit 3L across the words) naming the set the run starting on L draws its tufts from;
+       cardSkip = bit per layer whose run grows blades only (no cards). sets = 64 floats (8 per set:
+       cards, Zenith, ZenithRandomOffset, height m, HeightRandomOffset, Plants/m2, ground-colour
+       lerp, has mask); aspect / scale = 64 floats (8 layers per set). Nulls reset to one set. */
+    WGR_API void wgr_grass_set_blade_sets(WgrRenderer* renderer, const uint32_t* setWords, uint32_t cardSkip,
+                                          const float* sets, const float* aspect, const float* scale);
     WGR_API void wgr_grass_set_geography(WgrRenderer* renderer, uint32_t width, uint32_t height,
                                          const uint32_t* geography);
     WGR_API void wgr_grass_set_params(WgrRenderer* renderer, const WgrGrassParams* params);

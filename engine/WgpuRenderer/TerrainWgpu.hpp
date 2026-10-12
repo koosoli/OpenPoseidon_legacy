@@ -354,6 +354,9 @@ class TerrainWgpu : public ITerrainRenderer
         float weight = 0.0f;
         uint8_t layerFirst = 0;
         uint8_t layerCount = 0;
+        //! RFG-138: a PlantMat surface with no ClutterConfig (crop fields) -- one transparent layer
+        //! so the cell carries a run for its blades; no cards. Weight follows the bake's reference.
+        bool bladesOnly = false;
     };
     // Only geography-only refreshes reuse these; world/material/UI uploads rebuild.
     std::vector<EnfusionClutterRun> _enfusionClutterRuns;
@@ -428,6 +431,23 @@ class TerrainWgpu : public ITerrainRenderer
     float _clutterLayerScale[32][2] = {};
     //! RFG-116: bit per atlas layer whose surface names no PlantMat (wgr_grass_set_blade_skip).
     uint32_t _clutterBladeSkip = 0;
+    //! RFG-138: bit per atlas layer whose run grows blades only (wgr_grass_set_blade_sets).
+    uint32_t _clutterCardSkip = 0;
+    //! RFG-138: per-surface PlantMat blade sets. Set index per palette surface (-1 = names no
+    //! PlantMat), the PlantMat per set (commonest ground first, at most 8), whether a set's
+    //! surface is blades-only (crop: its authored Height in metres), and the per-set tuft
+    //! parameters UploadEnfusionBladeAtlas measured, sent by SendEnfusionBladeSets.
+    std::string _enfusionBladeSetKey; //!< the palette the sets below were resolved for
+    std::vector<int> _enfusionBladeSetOfSurface;
+    std::vector<std::string> _enfusionBladeSetPlantMats;
+    std::vector<std::string> _enfusionBladeSetSurfaces;
+    std::vector<bool> _enfusionBladeSetBladesOnly;
+    bool _enfusionBladeSetParamsReady = false;
+    float _enfusionBladeSetParams[64] = {};
+    float _enfusionBladeSetAspect[64] = {};
+    float _enfusionBladeSetScale[64] = {};
+    void ResolveEnfusionBladeSets(const Landscape& land);
+    void SendEnfusionBladeSets();
 
     // Terrain params UBO mirror. The static fields (grid/dims/range) are set at upload; the
     // coast wet-band fields (sea_level/time/swash/wet_*) are refreshed and pushed every frame.

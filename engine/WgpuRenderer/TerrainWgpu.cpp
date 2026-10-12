@@ -3146,6 +3146,7 @@ void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
             wgr_grass_set_layer_size(_renderer, sizes, spreads, 32);
         }
         wgr_grass_set_blade_skip(_renderer, _clutterBladeSkip);
+        SendEnfusionBladeSets(); // RFG-138: card-free (crop) layers and the per-layer blade sets
         _grassTuftWorld = worldKey;
         LOG_INFO(Graphics, "Wgpu grass: uploaded the map's clutter atlas ({} of {} layers used, {}x{}, {:.1f} MB)",
                  _clutterAtlasLayers, GrassAtlasLayers, GrassAtlasSize, GrassAtlasSize,
@@ -3229,6 +3230,8 @@ void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
         wgr_grass_set_layer_pick(_renderer, nullptr, nullptr, 0);
         wgr_grass_set_layer_size(_renderer, nullptr, nullptr, 0);
         wgr_grass_set_blade_skip(_renderer, 0);
+        _clutterCardSkip = 0; // RFG-138: no native runs on this world
+        SendEnfusionBladeSets();
         _grassTuftWorld = worldKey;
         LOG_INFO(Graphics, "Wgpu grass: {} photographed clump families discovered ({} atlas layers)", named,
                  MaxPhotoGrassFamilies + 1u);
@@ -3286,6 +3289,8 @@ void TerrainWgpu::UploadGrassBladeAtlas(const std::string& worldKey)
     wgr_grass_set_blade_atlas(_renderer, static_cast<uint32_t>(width), static_cast<uint32_t>(height),
                               static_cast<uint32_t>(BladePaths.size()), layers.data());
     wgr_grass_set_native_tufts(_renderer, nullptr, nullptr, nullptr); // RFG-117: blades again
+    _enfusionBladeSetParamsReady = false; // RFG-138: and one set
+    SendEnfusionBladeSets();
     _grassBladeAtlasWorld = worldKey;
     LOG_INFO(Graphics, "Wgpu grass: near-LOD photo blade atlas uploaded ({} layers, {}x{})", BladePaths.size(), width,
              height);

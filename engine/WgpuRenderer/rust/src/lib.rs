@@ -7302,6 +7302,10 @@ impl Renderer {
         self.grass.set_blade_skip(&self.queue, mask);
     }
 
+    fn grass_set_blade_sets(&mut self, words: &[u32], card_skip: u32, sets: &[f32], aspect: &[f32], scale: &[f32]) {
+        self.grass.set_blade_sets(&self.queue, words, card_skip, sets, aspect, scale);
+    }
+
     fn grass_set_road_cells(&mut self, data: &[u32]) {
         self.grass.set_road_cells(&self.device, data);
     }

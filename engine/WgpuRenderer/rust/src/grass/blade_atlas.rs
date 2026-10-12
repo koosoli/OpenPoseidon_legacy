@@ -22,6 +22,9 @@
 pub const LAYER_W: u32 = 64;
 pub const LAYER_H: u32 = 256;
 pub const LAYERS: u32 = 8;
+/// RFG-138: per-surface PlantMat blade sets a native world may upload (16 layers each:
+/// 8 colour + 8 SatMapBlendMask). Mirrored by the 3-bit set index in grass.wgsl blade_set_of.
+pub const MAX_BLADE_SETS: u32 = 8;
 
 /// Which species a layer is. The compute placement pass picks one per clump and
 /// stores the index in `packed.w`; the vertex shader also reads it to vary the
@@ -767,7 +770,8 @@ pub fn blade_layer_means(width: u32, height: u32, layers: u32, rgba: &[u8]) -> [
     };
     // RFG-117: a native upload may carry LAYERS more (the SatMapBlendMask layers); the means are
     // of the colour layers only.
-    if layer_bytes == 0 || (layers != LAYERS && layers != 2 * LAYERS) ||
+    // RFG-138: with several blade sets, the first set's colour layers stand for the means.
+    if layer_bytes == 0 || layers == 0 || layers % LAYERS != 0 ||
         layer_bytes.checked_mul(layers as usize) != Some(rgba.len()) {
         return out;
     }
@@ -804,7 +808,8 @@ pub fn create_from_images(
 ) -> Option<wgpu::TextureView> {
     let layer_bytes = width as usize * height as usize * 4;
     // RFG-117: 2 x LAYERS = the colour layers then the PlantMat's SatMapBlendMask (R) per layer.
-    if width == 0 || height == 0 || (layers != LAYERS && layers != 2 * LAYERS) ||
+    // RFG-138: and up to MAX_BLADE_SETS such pairs, one per PlantMat a native world names.
+    if width == 0 || height == 0 || layers == 0 || layers % LAYERS != 0 || layers > 2 * LAYERS * MAX_BLADE_SETS ||
         rgba.len() != layer_bytes * layers as usize
     {
         return None;
