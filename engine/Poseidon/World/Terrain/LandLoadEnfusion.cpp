@@ -972,6 +972,9 @@ struct PlacementSummary
     size_t meshResolved = 0;
     size_t distinctMeshes = 0;
     size_t terrainRelative = 0;
+    size_t yRuleToRelative = 0; //!< RFG-130: placements the authored RELATIVE_Y flag moved to relative
+    size_t yRuleToAbsolute = 0; //!< ...and to absolute
+    size_t yRuleUnknown = 0;    //!< ...and whose prefab chain declares no Flags (heuristic kept)
     // RFG-064, the attachment side. Counted separately from the mesh totals above
     // because "the houses are missing" and "the houses have no doors" are different
     // failures and the placement histogram cannot tell them apart.
@@ -1097,12 +1100,40 @@ struct ResolvedPlacement
     float pitchDeg = 0.0f;
     float rollDeg = 0.0f;
     bool terrainRelative = false;
+    bool hasFlags = false;   //!< RFG-130 census: the entity carried its own `Flags`
+    uint16_t classIndex = 0; //!< RFG-130 census: index into the census class names
     //! RFG-114: the prefab says `placement slopelandcontact` and the file stores no tilt: the
     //! object leans to the terrain at load, as Enfusion does (see SlopeAlignedOrientation).
     bool slopeAlign = false;
     uint32_t mesh = 0; //!< index into the mesh list
     uint32_t attachSet = kNoAttachSet; //!< RFG-064: index into the attachment sets, or none
 };
+
+//! RFG-130: the Y-rule census (POSEIDON_Y_CENSUS=1). Entity class names, interned.
+std::vector<std::string>& YCensusClasses()
+{
+    static std::vector<std::string> names{"?"};
+    return names;
+}
+
+uint16_t YCensusClassIndex(const std::string& className)
+{
+    static const bool on = []
+    {
+        const char* env = std::getenv("POSEIDON_Y_CENSUS");
+        return env && env[0] == '1';
+    }();
+    if (!on)
+        return 0;
+    auto& names = YCensusClasses();
+    for (size_t i = 0; i < names.size(); ++i)
+        if (names[i] == className)
+            return static_cast<uint16_t>(i);
+    if (names.size() >= 0xFFFF)
+        return 0;
+    names.push_back(className);
+    return static_cast<uint16_t>(names.size() - 1);
+}
 
 //! RFG-027: one road, ready to become a strip of geometry.
 struct ResolvedRoad
@@ -1371,6 +1402,7 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
     // One resolution per DISTINCT prefab, not per placement: Everon's 1.23 M
     // placements come from a few thousand prefabs, and the chain walk reads files.
     std::unordered_map<std::string, std::string> prefabToMesh;
+    std::unordered_map<std::string, Enf::PrefabEntityFlags> prefabFlags; // RFG-130, per GUID
     std::unordered_map<std::string, bool> prefabSlopeAlign; // RFG-114, by prefab GUID
     std::unordered_map<std::string, uint32_t> meshIndex;
     std::vector<size_t> meshCounts;
@@ -1628,6 +1660,41 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         // exactly 0. Reading every Y as absolute buries the houses a median 29 m
         // under, because SCR_DestructibleBuildingEntity is 93% flagless.
         item.terrainRelative = !placement.hasFlags && std::fabs(placement.position[1]) < 2.0f;
+        // RFG-130: the authored rule replaces the heuristic above wherever the prefab chain
+        // states its flags. Building_Base.et sets RELATIVE_Y (`Flags 0x80403 0`); Props_Base.et
+        // does not (`Flags 0x403 0`); an instance may set or clear bits over that. The |Y| < 2
+        // heuristic floated the harbour's sea bollards 2.7 m over the quay (relative Y ~5 over a
+        // -2.8 m seabed) and is kept only for chains that declare nothing.
+        {
+            static const bool authoredY = []
+            {
+                const char* env = std::getenv("POSEIDON_Y_RULE_FLAGS");
+                return !(env && env[0] == '0');
+            }();
+            if (authoredY)
+            {
+                auto flagsHit = prefabFlags.find(placement.prefabGuid);
+                if (flagsHit == prefabFlags.end())
+                {
+                    Enf::PrefabEntityFlags resolvedFlags;
+                    if (const auto guidHit = byGuid.find(placement.prefabGuid); guidHit != byGuid.end())
+                        resolvedFlags = Enf::ResolvePrefabEntityFlags(mount, guidHit->second);
+                    flagsHit = prefabFlags.emplace(placement.prefabGuid, resolvedFlags).first;
+                }
+                if (flagsHit->second.known)
+                {
+                    const uint32_t flags = (flagsHit->second.flags | placement.flagsSet) & ~placement.flagsClear;
+                    const bool relative = (flags & 0x80000u) != 0;
+                    if (relative != item.terrainRelative)
+                        ++(relative ? out.yRuleToRelative : out.yRuleToAbsolute);
+                    item.terrainRelative = relative;
+                }
+                else
+                    ++out.yRuleUnknown;
+            }
+        }
+        item.hasFlags = placement.hasFlags;
+        item.classIndex = YCensusClassIndex(placement.className);
         item.mesh = slot->second;
         // RFG-064: the parts this prefab hangs off its shell's socket bones. Once
         // per DISTINCT prefab GUID, like the mesh above.
@@ -2430,6 +2497,11 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                      summary.placements, summary.withGuid, summary.meshResolved, summary.distinctMeshes,
                      summary.terrainRelative, Poseidon::Foundation::GlobalTickCount() - placeStart,
                      summary.firstFailure.empty() ? "" : ("; first failure: " + summary.firstFailure), top);
+            LOG_INFO(World,
+                     "Enfusion native load: RFG-130 Y rule from EntityFlags.RELATIVE_Y: {} placements moved to "
+                     "terrain-relative, {} to absolute, {} prefab chains declare no Flags (|Y|<2 heuristic kept) "
+                     "(POSEIDON_Y_RULE_FLAGS=0 = heuristic only)",
+                     summary.yRuleToRelative, summary.yRuleToAbsolute, summary.yRuleUnknown);
 
             // RFG-013: build the meshes and put their placements in the world.
             //
@@ -3010,6 +3082,62 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     ++shownProps;
                     LOG_INFO(World, "Enfusion native load: furniture at [{:.0f} {:.0f} {:.0f}] {}",
                              item.position[0], item.position[1], item.position[2], meshes[item.mesh].first);
+                }
+            }
+            // RFG-130: the Y-rule census, by entity class. For each placement: raw Y, the drawn
+            // ground under it, and which reading puts it ON that ground. An absolute Y that is
+            // far from the ground while Y itself is a small offset says "relative"; one that
+            // matches the ground says "absolute". Measured, then the rule follows the data.
+            if (YCensusClasses().size() > 1)
+            {
+                struct Row
+                {
+                    size_t n = 0, flags = 0, small = 0, absOnGround = 0, relOnly = 0, neither = 0;
+                    std::vector<std::string> examples;
+                };
+                std::vector<Row> rows(YCensusClasses().size());
+                for (const ResolvedPlacement& item : placed)
+                {
+                    Row& row = rows[item.classIndex < rows.size() ? item.classIndex : 0];
+                    ++row.n;
+                    if (item.hasFlags)
+                    {
+                        ++row.flags;
+                        continue;
+                    }
+                    const float y = item.position[1];
+                    const float g = SurfaceY(item.position[0], item.position[2]);
+                    if (std::fabs(y) < 2.0f)
+                    {
+                        ++row.small;
+                        continue;
+                    }
+                    if (std::fabs(y - g) < 1.5f)
+                        ++row.absOnGround;
+                    else if (y > 0.0f && y < 40.0f)
+                    {
+                        ++row.relOnly;
+                        if (row.examples.size() < 4 && static_cast<size_t>(item.mesh) < meshes.size())
+                            row.examples.push_back(meshes[item.mesh].first + " Y=" + std::to_string(y) +
+                                                   " ground=" + std::to_string(g) + " at " +
+                                                   std::to_string(int(item.position[0])) + "," +
+                                                   std::to_string(int(item.position[2])));
+                    }
+                    else
+                        ++row.neither;
+                }
+                for (size_t i = 0; i < rows.size(); ++i)
+                {
+                    const Row& row = rows[i];
+                    if (row.n < 50)
+                        continue;
+                    std::string ex;
+                    for (const auto& e : row.examples)
+                        ex += " | " + e;
+                    LOG_INFO(World,
+                             "RFG-130 Y census: class '{}' n={} flags={} flagless|Y|<2={} flagless absolute-on-ground={} "
+                             "flagless off-ground small-offset(0..40)={} other={}{}",
+                             YCensusClasses()[i], row.n, row.flags, row.small, row.absOnGround, row.relOnly, row.neither, ex);
                 }
             }
             LOG_INFO(World,

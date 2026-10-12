@@ -163,9 +163,18 @@ class Reader
                 // it is what tells an importer whether `coords` Y is absolute or an
                 // offset above the terrain. See EbinPlacement::hasFlags for the
                 // measurement that establishes this.
+                // RFG-130: and its two values, (bits set, bits cleared) over the prefab's own
+                // flags -- EntityFlags.RELATIVE_Y (0x80000) is what decides the Y reading.
                 if (decl.name == "Flags")
                     if (EbinPlacement* current = Current())
+                    {
+                        if (!_c.Has(8))
+                            return Refuse("Flags truncated");
                         current->hasFlags = true;
+                        current->flagsSet = _c.U32();
+                        current->flagsClear = _c.U32();
+                        return true;
+                    }
                 return Skip(8);
             case 0x05: // interned GUID as a value
             {

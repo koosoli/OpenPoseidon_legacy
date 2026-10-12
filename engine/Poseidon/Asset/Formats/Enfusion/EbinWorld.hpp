@@ -98,6 +98,12 @@ struct EbinPlacement
     //! height lives with the exporter that has a terrain to resolve against
     //! (`IsTerrainRelative` in XobCommand.cpp).
     bool hasFlags = false;
+    //! RFG-130: the `Flags` pair itself -- bits SET and bits CLEARED over the flags the
+    //! prefab chain declares (prefabs write `Flags 0x80403 0`, instances `Flags 0 0x80000`).
+    //! Bit 0x80000 is EntityFlags.RELATIVE_Y (public Enfusion script API: "The Y coordinate
+    //! stored in..."); the 870,021 instances that clear it sit on the terrain at absolute Y.
+    uint32_t flagsSet = 0;
+    uint32_t flagsClear = 0;
 
     //! RFG-027: the shape of a spline entity, in the entity's OWN local frame.
     //!

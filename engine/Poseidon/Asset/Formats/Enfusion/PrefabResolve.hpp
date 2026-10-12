@@ -808,6 +808,83 @@ inline void FindChildPlacements(const std::vector<uint8_t>& blob, std::vector<Pr
     }
 }
 
+//! RFG-130: the root entity's own `Flags <set> <clear>` in one `.et` body (depth 1 only: a
+//! component block's `Flags` is the component's). False when the body declares none.
+inline bool FindEntityFlags(const std::vector<uint8_t>& blob, uint32_t& set, uint32_t& clear)
+{
+    const char* data = reinterpret_cast<const char*>(blob.data());
+    const size_t size = blob.size();
+    int depth = 0;
+    size_t at = 0;
+    while (at < size)
+    {
+        size_t lineEnd = at;
+        while (lineEnd < size && data[lineEnd] != '\n')
+            ++lineEnd;
+        size_t cursor = at;
+        while (cursor < lineEnd && static_cast<unsigned char>(data[cursor]) <= ' ')
+            ++cursor;
+        if (depth == 1 && PrefabDetail::Keyword(data, cursor, lineEnd, "Flags"))
+        {
+            const std::string text(data + cursor + 5, lineEnd - cursor - 5);
+            char* next = nullptr;
+            const unsigned long a = std::strtoul(text.c_str(), &next, 0);
+            if (next != text.c_str())
+            {
+                const char* second = next;
+                const unsigned long b = std::strtoul(second, &next, 0);
+                set = static_cast<uint32_t>(a);
+                clear = next != second ? static_cast<uint32_t>(b) : 0u;
+                return true;
+            }
+        }
+        depth += PrefabDetail::NetBraces(data, cursor, lineEnd);
+        at = lineEnd + 1;
+    }
+    return false;
+}
+
+//! RFG-130: the entity flags a prefab chain resolves to -- each level's (set, clear) applied
+//! from the root ancestor down. `known` is false when no level declares any.
+struct PrefabEntityFlags
+{
+    bool known = false;
+    uint32_t flags = 0;
+};
+
+inline PrefabEntityFlags ResolvePrefabEntityFlags(const EnfusionMount& mount, const std::string& etPath,
+                                                  int depthLimit = 8)
+{
+    std::vector<std::pair<uint32_t, uint32_t>> levels; // leaf first
+    std::string current = etPath;
+    std::vector<std::string> seen;
+    for (int depth = 0; depth <= depthLimit && !current.empty(); ++depth)
+    {
+        bool cycle = false;
+        for (const std::string& before : seen)
+            cycle = cycle || PrefabDetail::LowerCopy(before) == PrefabDetail::LowerCopy(current);
+        if (cycle)
+            break;
+        seen.push_back(current);
+        std::vector<uint8_t> blob;
+        if (!mount.Read(current, blob))
+            break;
+        uint32_t set = 0, clear = 0;
+        if (FindEntityFlags(blob, set, clear))
+            levels.emplace_back(set, clear);
+        current = Poseidon::Asset::Material::ParseEmat(
+                      std::string_view(reinterpret_cast<const char*>(blob.data()), blob.size()))
+                      .parentPath;
+    }
+    PrefabEntityFlags out;
+    for (auto it = levels.rbegin(); it != levels.rend(); ++it)
+    {
+        out.flags = (out.flags | it->first) & ~it->second;
+        out.known = true;
+    }
+    return out;
+}
+
 //! Every transform-placed child a prefab declares or inherits. Child first; an ancestor's
 //! entry with an ID the descendant already declared is the same child, and the descendant's
 //! version wins.

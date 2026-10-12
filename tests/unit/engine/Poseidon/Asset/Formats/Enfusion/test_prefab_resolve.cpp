@@ -76,3 +76,29 @@ TEST_CASE("Prefab slots carry the parent's inline material override of the part"
     CHECK(SlotForBone(slots, "socket_nothing") == nullptr);
     CHECK(SlotPrefabForBone(slots, "socket_handle") == "Prefabs/Handle.et");
 }
+
+TEST_CASE("Prefab entity Flags are the root entity's own (set, clear) pair", "[enfusion][prefab][rfg-130]")
+{
+    // Building_Base.et: the entity sets RELATIVE_Y (0x80000); a component's own Flags is not it.
+    const char* building = R"(GenericEntity {
+ ID "1"
+ components {
+  RigidBody "{2}" {
+   Flags 0 0x1
+  }
+ }
+ Flags 0x80403 0
+}
+)";
+    uint32_t set = 0, clear = 0;
+    REQUIRE(FindEntityFlags(Bytes(building), set, clear));
+    CHECK(set == 0x80403u);
+    CHECK(clear == 0u);
+
+    const char* props = "GenericEntity {\n Flags 0x403 0\n}\n";
+    REQUIRE(FindEntityFlags(Bytes(props), set, clear));
+    CHECK((set & 0x80000u) == 0u);
+
+    const char* none = "GenericEntity : \"{A}Prefabs/X.et\" {\n ID \"3\"\n}\n";
+    CHECK_FALSE(FindEntityFlags(Bytes(none), set, clear));
+}
