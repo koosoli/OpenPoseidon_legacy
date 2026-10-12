@@ -215,6 +215,9 @@ Runtime& RT()
     const std::string mission = (const char*)Glob.header.filenameReal;
     if (mission != rt.mission || now + 0.001f < rt.lastTime)
     {
+        if (!rt.mission.empty())
+            LOG_INFO(Mission, "Arma 2: mission state reset ('{}' t={:.2f} -> '{}' t={:.2f})", rt.mission, rt.lastTime,
+                     mission, now);
         rt = Runtime();
         rt.mission = mission;
     }
@@ -620,6 +623,7 @@ GameValue A2KbAddTopic(const GameState*, GameValuePar oper1, GameValuePar oper2)
     const std::string file = (const char*)RString(args[1]);
     RT().topics[obj][topic] = file;
     LoadBikb(file);
+    LOG_INFO(Mission, "Arma 2: kbAddTopic '{}' ({}) for {}", topic, file, (const char*)obj->GetDebugName());
     return NOTHING;
 }
 
@@ -721,6 +725,9 @@ GameValue A2KbTell(const GameState* state, GameValuePar oper1, GameValuePar oper
             }
         }
     }
+    if (file.empty())
+        LOG_WARN(Mission, "Arma 2: kbTell '{}' / '{}': speaker {} has no such topic", topic, id,
+                 (const char*)who->GetDebugName());
     if (shown.empty())
         shown = id;
     duration = std::max(duration, 0.06f * static_cast<float>(shown.size()) + 1.0f);
