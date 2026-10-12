@@ -157,7 +157,15 @@ class Reader
         switch (tag)
         {
             case 0x01: // i32
-                return Skip(4);
+            {
+                if (!_c.Has(4))
+                    return Refuse("i32 truncated");
+                const int32_t value = static_cast<int32_t>(_c.U32());
+                // RFG-134: a river point's width mode (2 = its own FixedWidth).
+                if (decl.name == "WidthOverride" && _carrier != nullptr && !_carrier->pointWidthModes.empty())
+                    _carrier->pointWidthModes.back() = value;
+                return true;
+            }
             case 0x02: // two u32 -- EIGHT bytes; four was the census's decisive error
                 // Only its PRESENCE is kept, and only on the entity that declares it:
                 // it is what tells an importer whether `coords` Y is absolute or an
@@ -183,6 +191,8 @@ class Reader
                 const uint16_t index = _c.U16();
                 if (decl.name == "Material" && _roadIndex != kNoPlacement && index < _world.guids.size())
                     _world.placements[_roadIndex].materialGuid = _world.guids[index];
+                else if (decl.name == "Material" && _riverActive && _carrier != nullptr && index < _world.guids.size())
+                    _carrier->materialGuid = _world.guids[index];
                 return true;
             }
             case 0x06: // f32
@@ -195,6 +205,16 @@ class Reader
                         current->scale = value;
                 if (decl.name == "Width" && _roadIndex != kNoPlacement)
                     _world.placements[_roadIndex].width = value;
+                // RFG-134: the river generator's own values, onto its spline.
+                if (_riverActive && _carrier != nullptr)
+                {
+                    if (decl.name == "Width")
+                        _carrier->width = value;
+                    else if (decl.name == "SplineOffsetUp")
+                        _carrier->splineOffsetUp = value;
+                }
+                if (decl.name == "FixedWidth" && _carrier != nullptr && !_carrier->pointWidths.empty())
+                    _carrier->pointWidths.back() = value;
                 return true;
             }
             case 0x07: // f32[2]
@@ -241,6 +261,16 @@ class Reader
                     road.points.push_back(v[1]);
                     road.points.push_back(v[2]);
                 }
+                // RFG-134: a spline carrier's `Points { ShapePoint { Position } }`, kept for a
+                // generator child (a river) to build on. Its width slots start "default".
+                else if (decl.name == "Position" && _carrier != nullptr)
+                {
+                    _carrier->points.push_back(v[0]);
+                    _carrier->points.push_back(v[1]);
+                    _carrier->points.push_back(v[2]);
+                    _carrier->pointWidths.push_back(0.0f);
+                    _carrier->pointWidthModes.push_back(0);
+                }
                 return true;
             }
             case 0x09: // f32[4]
@@ -252,6 +282,8 @@ class Reader
                 const uint8_t value = _c.U8();
                 if (decl.name == "IsClosedSpline" && _roadIndex != kNoPlacement)
                     _world.placements[_roadIndex].closedSpline = value != 0;
+                if (decl.name == "ReverseFlow" && _riverActive && _carrier != nullptr)
+                    _carrier->reverseFlow = value != 0;
                 return true;
             }
             case 0x0C: // string
@@ -365,6 +397,20 @@ class Reader
             const size_t subtreeStart = _world.placements.size();
             if (isRoad)
                 _roadIndex = index;
+            // RFG-134: rivers. A carrier's points belong to it; a RiverEntity inside one marks it.
+            EbinRiver* const outerCarrier = _carrier;
+            const bool outerRiver = _riverActive;
+            EbinRiver pendingRiver;
+            if (IsSplineCarrierClass(placement.className))
+            {
+                _carrier = &pendingRiver;
+                _riverActive = false;
+            }
+            else if (placement.className == "RiverEntity" && _carrier != nullptr)
+            {
+                _riverActive = true;
+                _carrier->isRiver = true;
+            }
 
             Declaration pass;
             pass.name = placement.className;
@@ -397,6 +443,16 @@ class Reader
                 child.position[2] = parentPos[2] - s * lx + c * lz;
                 child.angles[1] += parentYawDeg;
                 child.scale *= parentScale;
+            }
+            // RFG-134: a carrier that held a river hands it over with its own composed transform.
+            if (IsSplineCarrierClass(placement.className) && pendingRiver.isRiver && pendingRiver.points.size() >= 6)
+            {
+                const EbinPlacement& carrier = _world.placements[index];
+                pendingRiver.position[0] = carrier.position[0];
+                pendingRiver.position[1] = carrier.position[1];
+                pendingRiver.position[2] = carrier.position[2];
+                pendingRiver.yawDeg = carrier.angles[1];
+                _world.rivers.push_back(std::move(pendingRiver));
             }
             if (!_world.placements[index].hasPosition && _world.placements[index].points.empty())
                 _world.placements.erase(_world.placements.begin() + static_cast<ptrdiff_t>(index));
@@ -431,6 +487,8 @@ class Reader
                 }
             }
             _roadIndex = outerRoad;
+            _carrier = outerCarrier;
+            _riverActive = outerRiver;
             return ok;
         }
         if (first == 0x0D || first == 0x43 || first == 0x44 || first == 0x45 || first == 0x0E)
@@ -470,6 +528,8 @@ class Reader
     size_t _currentIndex = kNoPlacement;
     //! The road entity whose subtree is being walked, or kNoPlacement outside one.
     size_t _roadIndex = kNoPlacement;
+    EbinRiver* _carrier = nullptr;      //!< RFG-134: the enclosing SplineShapeEntity's pending river
+    bool _riverActive = false;           //!< RFG-134: inside its RiverEntity generator
 
     EbinPlacement* Current() { return _currentIndex == kNoPlacement ? nullptr : &_world.placements[_currentIndex]; }
 };

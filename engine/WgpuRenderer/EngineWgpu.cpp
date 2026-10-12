@@ -8854,7 +8854,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                             bindSlot->baseLoadName = RStringB(base->texture.raw.c_str());
                         }
                         bindSlot->isCalmWater = Asset::Material::IsCalmWater(translated);
-                        bindSlot->reflective = translated.shaderFamily == "CalmWater";
+                        bindSlot->reflective = Asset::Material::IsCalmWater(translated); // RFG-134: and MatRiver
                         const auto* normalSlot = translated.Find(Asset::Material::MaterialSlot::NormalMap);
                         bindSlot->hasNormal =
                             normalSlot && !normalSlot->texture.isProcedural && !normalSlot->texture.path.empty();
@@ -13467,7 +13467,7 @@ bool EngineWgpu::MaterialIsReflective(const ShapeSection& section)
         else
         {
             const auto uncached = _materialBindings.find(materialPath);
-            if (uncached == _materialBindings.end() || uncached->second.shaderFamily != "CalmWater")
+            if (uncached == _materialBindings.end() || !Asset::Material::IsCalmWater(uncached->second))
                 return false;
         }
     }
@@ -13480,7 +13480,7 @@ bool EngineWgpu::MaterialIsReflective(const ShapeSection& section)
         // The `.emat` substitution deliberately keeps the rvmat's own family string rather
         // than inventing one (EmatMaterialAdapter::TranslateEmat), so this test reads the
         // same on a water_bliss surface and on a bare water one.
-        if (cached->second.shaderFamily != "CalmWater")
+        if (!Asset::Material::IsCalmWater(cached->second))
             return false;
     }
     static std::unordered_set<std::string> logged;

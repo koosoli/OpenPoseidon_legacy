@@ -124,6 +124,31 @@ struct EbinPlacement
     std::string materialGuid;   //!< `Material`, resolvable through the resource database
 };
 
+//! RFG-134: one river. Everon's 28 rivers are a `SplineShapeEntity` whose `Points` carry the
+//! centreline (each point may carry a `RiverPointData`), with a child `RiverEntity` generator
+//! holding `Width`, `Material` (MatRiver), `ReverseFlow` and `SplineOffsetUp`. Kept in its own
+//! list rather than on EbinPlacement: 1.2 M placements grow in one vector, and widening that
+//! struct pushed its growth step past what the engine heap will hand out in one block.
+struct EbinRiver
+{
+    float position[3] = {0.0f, 0.0f, 0.0f}; //!< the carrier's composed `coords`
+    float yawDeg = 0.0f;
+    std::vector<float> points;              //!< x,y,z triples, local to `position`
+    std::vector<float> pointWidths;         //!< per point: `FixedWidth`, 0 when unset
+    std::vector<int> pointWidthModes;       //!< per point: `WidthOverride` (2 = fixed), 0 when unset
+    float width = 0.0f;
+    float splineOffsetUp = 0.0f;
+    bool reverseFlow = false;
+    bool isRiver = false;                   //!< a RiverEntity generator was found inside
+    std::string materialGuid;
+};
+
+//! RFG-134: the spline carrier whose `Points` a child generator (a river) builds on.
+inline bool IsSplineCarrierClass(const std::string& className)
+{
+    return className == "SplineShapeEntity";
+}
+
 //! Whether a class name is one whose f32[3] arrays are a spline centreline.
 //!
 //! A closed set rather than a substring test: `PowerlineEntity` and `RiverEntity`
@@ -152,6 +177,7 @@ struct EbinWorld
     std::vector<std::string> names;
     std::vector<std::string> guids; //!< uppercase hex
     std::vector<EbinPlacement> placements;
+    std::vector<EbinRiver> rivers; //!< RFG-134
     size_t blocks = 0;
     size_t entityBlocks = 0;
     size_t opaqueBlobs = 0;

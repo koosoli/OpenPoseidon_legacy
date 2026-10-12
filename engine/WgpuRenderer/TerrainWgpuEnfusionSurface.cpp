@@ -469,11 +469,22 @@ void TerrainWgpu::ApplyEnfusionAmbientOcclusion(bool native)
         _enfusionAoSaved = _engine.GetAoSettings();
     Engine::AoSettings ao = _enfusionAoSaved;
     ao.radius = radius;
-    ao.strength = intensity;
+    // RFG-133: the radius is Reforger's, the exponent is not. Workbench's own HBAOEffect class
+    // reports Intensity defaulting to 10 (range 0.1-100), so Everon's 2 is a LOW setting, not
+    // the power-of-two it was read as here -- which squared GTAO's visibility and turned every
+    // room seen through a window from outside black (q11: room/facade 0.06, Reforger 0.29).
+    // Exponent 1 (GTAO's physical result) measures 0.21 there, and Morton's conifers and meadow
+    // do not move (48 vs 49, 143 vs 143). `intensity` stays read so the log says what was there.
+    ao.strength = 1.0f;
+    // Calibration levers: WGR_ENFUSION_AO_RADIUS / WGR_ENFUSION_AO_STRENGTH.
+    if (const char* v = std::getenv("WGR_ENFUSION_AO_RADIUS"); v && *v)
+        ao.radius = std::max(0.1f, static_cast<float>(std::atof(v)));
+    if (const char* v = std::getenv("WGR_ENFUSION_AO_STRENGTH"); v && *v)
+        ao.strength = std::max(0.0f, static_cast<float>(std::atof(v)));
     _engine.SetAoSettings(ao);
     _enfusionAoApplied = true;
-    LOG_INFO(Graphics, "Wgpu Enfusion AO: HBAO radius {} m, power {} (from Common/Postprocess/HBAO_High.emat)",
-             radius, intensity);
+    LOG_INFO(Graphics, "Wgpu Enfusion AO: radius {} m, exponent {} (HBAO_High.emat radius {} m, Intensity {})",
+             ao.radius, ao.strength, radius, intensity);
 }
 
 // RFG-PBR: the world's supertexture -- one `<name>_<index>_supertexture.edds` per terrain tile

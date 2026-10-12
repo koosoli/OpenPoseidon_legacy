@@ -974,6 +974,7 @@ struct PlacementSummary
     size_t yRuleToRelative = 0; //!< RFG-130: placements the authored RELATIVE_Y flag moved to relative
     size_t yRuleToAbsolute = 0; //!< ...and to absolute
     size_t yRuleUnknown = 0;    //!< ...and whose prefab chain declares no Flags (heuristic kept)
+    size_t rivers = 0;          //!< RFG-134: SplineShapeEntity carriers with a RiverEntity
     // RFG-064, the attachment side. Counted separately from the mesh totals above
     // because "the houses are missing" and "the houses have no doors" are different
     // failures and the placement histogram cannot tell them apart.
@@ -1153,6 +1154,10 @@ struct ResolvedRoad
     bool tinted = false;
     int versions = 1;
     float tilingV = 0.0f;
+    //! RFG-134: a river ribbon. Its surface follows the spline's own height (plus the
+    //! generator's SplineOffsetUp) instead of being draped, and its width can vary per point.
+    bool river = false;
+    std::vector<float> pointWidths; //!< aligned with `points`; <= 0 = `width`
 };
 
 //! The parts of a road's `.emat` its strip is built from (see ResolvedRoad).
@@ -1419,6 +1424,67 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
     // Resolved once per material GUID: 2,370 roads share a couple of dozen surfaces
     // and each resolution reads an `.emat` out of an archive.
     std::unordered_map<std::string, RoadLook> roadTextures;
+
+    // RFG-134: rivers. A `SplineShapeEntity` holding a `RiverEntity` generator, read into its
+    // own list by the EBIN walk; built here as level water ribbons along the spline.
+    static const bool riversOn = []
+    {
+        const char* env = std::getenv("POSEIDON_ENFUSION_RIVERS");
+        return !(env && env[0] == '0');
+    }();
+    for (const Enf::EbinRiver& source : world.rivers)
+    {
+        if (!riversOn || !source.isRiver || source.points.size() < 6)
+            continue;
+        ResolvedRoad river;
+        river.river = true;
+        river.origin[0] = source.position[0];
+        river.origin[1] = source.position[1] + source.splineOffsetUp;
+        river.origin[2] = source.position[2];
+        river.points = source.points;
+        river.yawDeg = source.yawDeg;
+        river.width = source.width > 0.1f ? source.width : 5.0f;
+        river.pointWidths.assign(source.points.size() / 3, 0.0f);
+        for (size_t i = 0; i < river.pointWidths.size() && i < source.pointWidths.size(); ++i)
+            if (i < source.pointWidthModes.size() && source.pointWidthModes[i] == 2 && source.pointWidths[i] > 0.1f)
+                river.pointWidths[i] = source.pointWidths[i];
+        if (const auto hit = byGuid.find(source.materialGuid); hit != byGuid.end())
+        {
+            river.material = hit->second;
+            Poseidon::Asset::Material::EmatMaterial material;
+            float colour[4];
+            if (LoadEmatFromMount(mount, river.material, material) && material.Vec4Of("Color", colour))
+            {
+                char text[96];
+                std::snprintf(text, sizeof(text), "enfc|%.4f,%.4f,%.4f", colour[0], colour[1], colour[2]);
+                river.texture = text;
+            }
+        }
+        if (river.texture.empty())
+            river.texture = "enfc|0.0350,0.0400,0.0190"; // RiverSurface_01's own Color
+        if (std::getenv("POSEIDON_RIVER_DUMP"))
+        {
+            size_t fixedPoints = 0;
+            float minW = 1e9f, maxW = 0.0f;
+            for (const float w : river.pointWidths)
+                if (w > 0.1f)
+                {
+                    ++fixedPoints;
+                    minW = std::min(minW, w);
+                    maxW = std::max(maxW, w);
+                }
+            int modes[4] = {0, 0, 0, 0};
+            for (const int m : source.pointWidthModes)
+                ++modes[m >= 0 && m < 3 ? m : 3];
+            LOG_INFO(World, "RFG-134 river at ({:.0f},{:.0f},{:.0f}): {} points, Width {:.2f} (authored {:.2f}), "
+                            "offsetUp {:.2f}, fixed widths {} [{:.2f}..{:.2f}], WidthOverride modes 0:{} 1:{} 2:{} other:{}",
+                     source.position[0], source.position[1], source.position[2], source.points.size() / 3, river.width,
+                     source.width, source.splineOffsetUp, fixedPoints, fixedPoints ? minW : 0.0f, maxW, modes[0],
+                     modes[1], modes[2], modes[3]);
+        }
+        ++out.rivers;
+        roads.push_back(std::move(river));
+    }
 
     for (const Enf::EbinPlacement& placement : world.placements)
     {
@@ -1778,11 +1844,16 @@ LODShapeWithShadow* BuildRoadShape(const ResolvedRoad& road, const std::function
     // Densified to at most 2 m between centreline points: the strip is draped vertex by vertex,
     // and the terrain between two draped vertices is not the straight line between them.
     std::vector<float> points;
+    std::vector<float> halfWidths; // RFG-134: per point (rivers vary along their length)
     {
         const std::vector<float>& source = road.points;
         const size_t sourceCount = source.size() / 3;
         if (sourceCount < 2)
             return nullptr;
+        const float defaultWidth = (road.width > 0.1f) ? road.width : 6.0f;
+        const bool perPoint = road.pointWidths.size() == sourceCount;
+        const auto widthAt = [&](size_t i)
+        { return perPoint && road.pointWidths[i] > 0.1f ? road.pointWidths[i] : defaultWidth; };
         points.reserve(source.size() * 2);
         for (size_t i = 0; i < sourceCount; ++i)
         {
@@ -1796,10 +1867,12 @@ LODShapeWithShadow* BuildRoadShape(const ResolvedRoad& road, const std::function
                     const float t = static_cast<float>(k) / static_cast<float>(steps);
                     for (int c = 0; c < 3; ++c)
                         points.push_back(source[(i - 1) * 3 + c] + (source[i * 3 + c] - source[(i - 1) * 3 + c]) * t);
+                    halfWidths.push_back(0.5f * (widthAt(i - 1) + (widthAt(i) - widthAt(i - 1)) * t));
                 }
             }
             for (int c = 0; c < 3; ++c)
                 points.push_back(source[i * 3 + c]);
+            halfWidths.push_back(0.5f * widthAt(i));
         }
     }
     const size_t count = points.size() / 3;
@@ -1852,14 +1925,20 @@ LODShapeWithShadow* BuildRoadShape(const ResolvedRoad& road, const std::function
             dz = 0.0f;
         }
         // Perpendicular in the ground plane.
-        const float nx = -dz * halfWidth;
-        const float nz = dx * halfWidth;
+        const float half = road.river ? halfWidths[i] : halfWidth;
+        const float nx = -dz * half;
+        const float nz = dx * half;
         const float cx = points[i * 3 + 0], cz = points[i * 3 + 2];
         for (const float side : {1.0f, 0.0f, -1.0f}) // left, centre, right
         {
             Fmt::MLOD::WritePoint point;
             const float x = cx + side * nx, z = cz + side * nz;
-            point.position = {x, groundY(x, z), z};
+            // RFG-134: a river is a level water surface across its width, at its centreline
+            // height. The banks cover its edges: Reforger's authored Width is the full ribbon,
+            // and at the matched Workbench pose only the part below the banks shows (lifting
+            // the edges onto the ground drew a 7 m river ~2.5x wider than Reforger's frame).
+            const float y = road.river ? points[i * 3 + 1] : groundY(x, z);
+            point.position = {x, y, z};
             lod.points.push_back(point);
             // ONE NORMAL PER POINT, indexed by the point index, exactly as the `.xob`
             // converter writes them. A single shared normal with every corner indexing 0
@@ -1881,6 +1960,11 @@ LODShapeWithShadow* BuildRoadShape(const ResolvedRoad& road, const std::function
     // midpoints; where the ground rises above the quad's own interpolation there, its corners
     // are raised by the shortfall. Draping corners alone left whole stretches under a convex
     // terrain cell -- a run of the strip vanishing behind a straight triangle edge.
+    //
+    // RFG-134: never for a river. Its surface is level water and its banks are MEANT to cover
+    // its edges (measured on Everon: banks 0.4 m above the spline at 1.5 m out, 1.4 m at 4.5 m);
+    // raising the strip onto them drew every river at its full authored Width.
+    if (!road.river)
     {
         std::vector<float> raise(lod.points.size(), 0.0f);
         const auto at = [&](size_t index)
@@ -2267,7 +2351,20 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
     // The engine's grids are powers of two. 2048 terrain cells over 12.8 km is 6.25 m,
     // matching what the converting exporter emits, so a native frame and a converted
     // one are the same resolution and can be compared directly.
-    const int terrainRange = 2048;
+    //
+    // RFG-135: 4096 (3.125 m) by default against Reforger's own 2 m field -- at 6.25 m a 7 m
+    // river channel or a road cut is a single sample wide, and the smoothed V floated the rivers.
+    // Terrain GPU time measured unchanged at the river pose (CDLOD: 1.27-1.43 ms at 6.25 m,
+    // 1.40-1.70 ms at 3.125 m, run noise); load +15 s. POSEIDON_REFORGER_TERRAIN_CELLS=2048 restores.
+    static const int terrainRange = []
+    {
+        const char* v = std::getenv("POSEIDON_REFORGER_TERRAIN_CELLS");
+        const int wanted = (v != nullptr && *v != 0) ? std::atoi(v) : 4096;
+        for (int candidate : {8192, 4096, 2048})
+            if (wanted >= candidate)
+                return candidate;
+        return 2048;
+    }();
     // RFG-009: 1024 land cells, not 256. The surface index is ONE material per land
     // cell, so a 50 m cell paints fifty metres of ground with whichever material sat
     // under its centre -- visible as square patches from the air. 12.5 m is four times
@@ -2301,6 +2398,34 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
     // second thing to be wrong about.
     const uint32_t gridW = d.gridWidth;
     const uint32_t gridH = d.gridHeight;
+    // RFG-135: finer than the default grid, the source is sampled bilinearly -- at 3.125 m over
+    // a 2 m field, point sampling moves every bank and cut by up to a metre.
+    if (terrainRange > 2048)
+    {
+        const float scaleX = static_cast<float>(gridW - 1) / static_cast<float>(terrainRange);
+        const float scaleZ = static_cast<float>(gridH - 1) / static_cast<float>(terrainRange);
+        const auto raw = [&](uint32_t sx, uint32_t sz)
+        {
+            return static_cast<float>(
+                terrain.heights[static_cast<size_t>(std::min(sz, gridH - 1)) * gridW + std::min(sx, gridW - 1)]);
+        };
+        for (int z = 0; z < terrainRange; ++z)
+        {
+            const float fz = static_cast<float>(z) * scaleZ;
+            const uint32_t z0 = static_cast<uint32_t>(fz);
+            const float tz = fz - static_cast<float>(z0);
+            for (int x = 0; x < terrainRange; ++x)
+            {
+                const float fx = static_cast<float>(x) * scaleX;
+                const uint32_t x0 = static_cast<uint32_t>(fx);
+                const float tx = fx - static_cast<float>(x0);
+                const float top = raw(x0, z0) + (raw(x0 + 1, z0) - raw(x0, z0)) * tx;
+                const float bottom = raw(x0, z0 + 1) + (raw(x0 + 1, z0 + 1) - raw(x0, z0 + 1)) * tx;
+                SetData(x, z, (top + (bottom - top) * tz) * d.heightScale + d.heightOffset);
+            }
+        }
+    }
+    else
     for (int z = 0; z < terrainRange; ++z)
     {
         const uint32_t srcZ = std::min<uint32_t>(
@@ -2504,6 +2629,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                      "terrain-relative, {} to absolute, {} prefab chains declare no Flags (|Y|<2 heuristic kept) "
                      "(POSEIDON_Y_RULE_FLAGS=0 = heuristic only)",
                      summary.yRuleToRelative, summary.yRuleToAbsolute, summary.yRuleUnknown);
+            LOG_INFO(World, "Enfusion native load: RFG-134 {} rivers (spline + RiverEntity, MatRiver) "
+                            "built as water ribbons (POSEIDON_ENFUSION_RIVERS=0 = off)", summary.rivers);
 
             // RFG-013: build the meshes and put their placements in the world.
             //
@@ -3209,8 +3336,12 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     // right, the ribbon simply had nowhere to bend.
                     {
                         std::vector<float> dense;
+                        std::vector<float> denseWidths; // RFG-134: rivers only
+                        const bool widths = road.river && road.pointWidths.size() == road.points.size() / 3;
                         dense.reserve(road.points.size() * 4);
                         const size_t source = road.points.size() / 3;
+                        const auto widthAt = [&](size_t i)
+                        { return road.pointWidths[i] > 0.1f ? road.pointWidths[i] : road.width; };
                         for (size_t i = 0; i + 1 < source; ++i)
                         {
                             const float ax = road.points[i * 3 + 0];
@@ -3229,12 +3360,17 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                                 dense.push_back(ax + (bx - ax) * t);
                                 dense.push_back(ay + (by - ay) * t);
                                 dense.push_back(az + (bz - az) * t);
+                                if (widths)
+                                    denseWidths.push_back(widthAt(i) + (widthAt(i + 1) - widthAt(i)) * t);
                             }
                         }
                         dense.push_back(road.points[(source - 1) * 3 + 0]);
                         dense.push_back(road.points[(source - 1) * 3 + 1]);
                         dense.push_back(road.points[(source - 1) * 3 + 2]);
+                        if (widths)
+                            denseWidths.push_back(widthAt(source - 1));
                         road.points = std::move(dense);
+                        road.pointWidths = std::move(denseWidths);
                     }
 
                     const size_t pointCount = road.points.size() / 3;
@@ -3288,8 +3424,26 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                         const float worldZ = road.origin[2] + road.points[i * 3 + 2];
                         const float splineY = road.origin[1] + road.points[i * 3 + 1];
                         const float groundY = SurfaceY(worldX, worldZ);
-                        (void)splineY;
-                        road.points[i * 3 + 1] = groundY + 0.08f - road.origin[1];
+                        // RFG-134: a river's surface is its spline, already raised by its own
+                        // SplineOffsetUp in `origin` -- Reforger's authored water level. Measured on
+                        // Everon the 2 m channel bottom sits within ~0.1 m of it; our resampled ground
+                        // smooths that V upward, so lifting the water onto it (the first cut) floated
+                        // every river a few decimetres high. POSEIDON_RIVER_ON_GROUND=1 restores the 5 cm lift.
+                        if (road.river)
+                        {
+                            static const bool onGround = []
+                            {
+                                const char* env = std::getenv("POSEIDON_RIVER_ON_GROUND");
+                                return env && env[0] == '1';
+                            }();
+                            // Never under the ground at the centreline, though: the 3.125 m field
+                            // still rounds the channel bottom up in places, and a river that
+                            // dips under it breaks into pieces (2 cm, not the first cut's 5).
+                            road.points[i * 3 + 1] =
+                                std::max(splineY, groundY + (onGround ? 0.05f : 0.02f)) - road.origin[1];
+                        }
+                        else
+                            road.points[i * 3 + 1] = groundY + 0.08f - road.origin[1];
                         if (i > 0)
                         {
                             const float dx = road.points[i * 3 + 0] - road.points[(i - 1) * 3 + 0];
@@ -3413,6 +3567,15 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                  uv.partsFaceUvScaled, uv.firstFaceUvScaled.empty() ? "-" : uv.firstFaceUvScaled.c_str());
     }
     InitGeography();
+    // RFG-135: point-for-point terrain comparison against Reforger's own BaseWorld.GetSurfaceY
+    // (the Workbench RfProbe helper reads the same file format: one "x z" per line).
+    if (const char* probe = std::getenv("POSEIDON_SURFACE_PROBE"); probe != nullptr && *probe != 0)
+    {
+        std::ifstream in(probe);
+        float x = 0.0f, z = 0.0f;
+        while (in >> x >> z)
+            LOG_INFO(World, "RFG-135 probe {:.2f} {:.2f} {:.3f}", x, z, SurfaceY(x, z));
+    }
     ProgressFinish();
 
     // RFG-066: the denominator for "are the buildings' textures right". Without it the

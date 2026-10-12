@@ -1307,7 +1307,10 @@ inline EmatMaterial MakeDeployedEmat(const EmatMaterial& resolved, const std::st
 // True for the shader family DayZ uses for every water surface it ships.
 inline bool IsCalmWater(const TranslatedMaterial& material)
 {
-    return EmatMaterial::NameMatches(material.shaderFamily, "CalmWater");
+    // RFG-134: Reforger's river surface (MatRiver) is the same thing -- a near-black base whose
+    // whole look is reflection -- and takes the same route.
+    return EmatMaterial::NameMatches(material.shaderFamily, "CalmWater") ||
+           EmatMaterial::NameMatches(material.shaderFamily, "MatRiver");
 }
 
 // DayZ's built-in water appearance, for a `CalmWater` surface that ships no `.emat`.
