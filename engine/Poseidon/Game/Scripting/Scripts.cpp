@@ -864,7 +864,8 @@ struct SqfControl
         If,
         For,
         Switch,
-        ExitWith
+        ExitWith,
+        ForEach
     } kind = While;
     std::string condition, body, elseBody, init, step;
     std::vector<SqfCase> cases; // Switch; condition holds the switched value
@@ -958,6 +959,19 @@ bool ParseSqfControl(const std::string& s, SqfControl& out)
         if (TakeWord(s, pos, "else") && !TakeBracketed(s, pos, '{', '}', out.elseBody))
             return false;
         return AtEnd(s, pos);
+    }
+    pos = 0;
+    {
+        // {body} forEach list
+        std::string b;
+        size_t probe = 0;
+        if (TakeBracketed(s, probe, '{', '}', b) && TakeWord(s, probe, "forEach"))
+        {
+            out.kind = SqfControl::ForEach;
+            out.body = b;
+            out.condition = s.substr(probe); // the list expression
+            return !AtEnd(s, probe);
+        }
     }
     pos = 0;
     if (TakeWord(s, pos, "switch"))
@@ -1073,6 +1087,7 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
     const auto addGoto = [&addCondLine](const std::string& label) { addCondLine("", "goto \"" + label + "\""); };
 
     std::vector<std::string> loopExits; // where exitWith leaves to (innermost loop)
+    std::vector<std::pair<std::string, std::string>> forEachVars; // (list, index) of compiled forEach loops
     const std::string scriptEnd = newLabel();
     std::function<void(const std::string&)> emit;
     const auto emitBlock = [&emit](const std::string& code)
@@ -1124,6 +1139,30 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
                     break;
                 case SqfControl::ExitWith:
                     break;
+                case SqfControl::ForEach:
+                {
+                    const std::string id = std::to_string(labelCount);
+                    const std::string list = "_a1felist" + id;
+                    const std::string index = "_a1feindex" + id;
+                    addCondLine("", list + " = (" + control.condition + "); " + index + " = 0");
+                    placeLabel(top);
+                    addCondLine("!(" + index + " < count " + list + ")", "goto \"" + next + "\"");
+                    addCondLine("", "_x = " + list + " select " + index);
+                    loopExits.push_back(next);
+                    forEachVars.emplace_back(list, index);
+                    emitBlock(control.body);
+                    forEachVars.pop_back();
+                    loopExits.pop_back();
+                    addCondLine("", index + " = " + index + " + 1");
+                    addGoto(top);
+                    placeLabel(next);
+                    // an enclosing compiled forEach gets its own _x back
+                    if (!forEachVars.empty())
+                        addCondLine("", "if (" + forEachVars.back().second + " < count " + forEachVars.back().first +
+                                            ") then {_x = " + forEachVars.back().first + " select " +
+                                            forEachVars.back().second + "}");
+                    break;
+                }
                 case SqfControl::If:
                 {
                     const std::string otherwise = newLabel();
