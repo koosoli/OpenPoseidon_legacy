@@ -4,8 +4,11 @@
 
 #include <cctype>
 #include <cstdlib>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace Poseidon::Asset::Material
@@ -203,10 +206,61 @@ inline void SplitGuid(const std::string& token, std::string& guid, std::string& 
     path = token;
 }
 
+//! RFG-132: Enfusion resolves a `{GUID}path` reference by its GUID; the text path is a
+//! label that can go stale. House_Town_E_2I01_Ext_Details_V2.emat names
+//! `{BBA0ACD4E9DCCC05}..._Ext_GLOBAL_MASK.edds`, but that GUID is
+//! `..._V2_Ext_GLOBAL_MASK.edds` in resourceDatabase.rdb -- resolving by text drew the parent
+//! house's mask, which put the trim stripes across the roof. 33 corpus references disagree.
+//! The loader publishes the database here; a GUID it knows wins. POSEIDON_GUID_PATHS=0 = off.
+using EmatGuidPaths = std::unordered_map<std::string, std::string>;
+inline std::shared_ptr<const EmatGuidPaths>& EmatGuidPathsSlot()
+{
+    static std::shared_ptr<const EmatGuidPaths> slot;
+    return slot;
+}
+inline std::mutex& EmatGuidPathsMutex()
+{
+    static std::mutex m;
+    return m;
+}
+inline void SetEmatGuidPaths(std::shared_ptr<const EmatGuidPaths> paths)
+{
+    std::lock_guard<std::mutex> lock(EmatGuidPathsMutex());
+    EmatGuidPathsSlot() = std::move(paths);
+}
+inline bool ResolveEmatGuid(const std::string& guid, std::string& path)
+{
+    static const bool on = []
+    {
+        const char* env = std::getenv("POSEIDON_GUID_PATHS");
+        return !(env && env[0] == '0');
+    }();
+    if (!on || guid.empty())
+        return false;
+    std::shared_ptr<const EmatGuidPaths> paths;
+    {
+        std::lock_guard<std::mutex> lock(EmatGuidPathsMutex());
+        paths = EmatGuidPathsSlot();
+    }
+    if (!paths)
+        return false;
+    std::string key = guid;
+    for (char& c : key)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    const auto hit = paths->find(key);
+    if (hit == paths->end() || hit->second.empty())
+        return false;
+    path = hit->second;
+    return true;
+}
+
 inline EmatValue MakeValue(const std::string& token, bool wasQuoted)
 {
     EmatValue value;
     SplitGuid(token, value.guid, value.text);
+    // RFG-132: the GUID is the reference; the written path is only its label.
+    if (!value.guid.empty())
+        ResolveEmatGuid(value.guid, value.text);
     if (!value.guid.empty())
         return value; // a GUID reference is never a number
 

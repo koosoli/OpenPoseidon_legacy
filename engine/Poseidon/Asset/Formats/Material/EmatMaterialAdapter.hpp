@@ -499,6 +499,31 @@ inline std::array<float, 3> NativePbrMultiMaskScales(const TranslatedMaterial& m
     return scales;
 }
 
+// RFG-131: MatPBRMulti defaults as Workbench itself reports them (a RfDump plugin over
+// BaseContainerTools.CreateContainer("MatPBRMulti"), GetDefaultAsString, 2026-10-12):
+//   Enabled_2..4 = 0, MaskSharpness_N = 0, MaskOffset_N = 0, MaskUVScale_N = 1,
+//   OverlayBlack/WhitePower = 1, DirtOpacity = 0, MudOpacity = 0.
+// Layer 1 is the base and has no switch. POSEIDON_EMAT_MEASURED_DEFAULTS=0 restores the old
+// assumptions (an absent Enabled_N is on; a missing MaskSharpness refuses the ordered path).
+inline bool EmatMaskDefaultsMeasured()
+{
+    static const bool on = []
+    {
+        const char* env = std::getenv("POSEIDON_EMAT_MEASURED_DEFAULTS");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
+
+inline bool EmatLayerEnabled(const EmatMaterial& emat, int layer)
+{
+    if (layer <= 1)
+        return true;
+    float v = EmatMaskDefaultsMeasured() ? 0.0f : 1.0f;
+    emat.FloatOf("Enabled_" + std::to_string(layer), v);
+    return v != 0.0f;
+}
+
 // Deliberately bounded standard blend contract. Unknown material switches are
 // rejected, rather than silently treated as standard interpolation. In particular
 // this preview has no fine masks, angle masks, alternate overlay or rotated UVs.
@@ -516,7 +541,7 @@ inline bool ReadNativePbrStandardMasks(const EmatMaterial& emat,
             "GlobalNMOMap", "GlobalNMOUVTransform", "MudOpacity", "MudColor", "MudMetalness",
             "MudDetNormal", "MudBCRMap", "MudNMOMap", "MudMaskMap", "MudUVTransform",
             "DirtOpacity", "DirtLayerSharpness", "DirtColor", "DirtRoughness", "DirtMaskMap",
-            "DirtUVTransform"};
+            "DirtUVTransform", "DirtBCRMap"}; // RFG-131: DirtBCRMap beside its already-allowed siblings
         for (const char* item : common)
             if (EmatMaterial::NameMatches(key, item)) return true;
         const char* layer[] = {"Enabled_", "Color_", "BCR_", "NMO_", "UVTransform_",
@@ -549,10 +574,15 @@ inline bool ReadNativePbrStandardMasks(const EmatMaterial& emat,
     {
         const std::string suffix = std::to_string(i + 2);
         if (emat.Has("Mask_" + suffix) && emat.TextureOf("Mask_" + suffix).empty()) return false;
-        if (emat.Has("Enabled_" + suffix) && emat.FloatOr("Enabled_" + suffix, 1.0f) != 0.0f &&
-            emat.TextureOf("BCR_" + suffix).empty()) return false;
-        if (!emat.TextureOf("BCR_" + suffix).empty() && emat.FloatOr("Enabled_" + suffix, 1.0f) != 0.0f &&
-            !emat.Has("MaskSharpness_" + suffix)) return false;
+        // RFG-131: an enabled layer with no BCR is a PAINT layer when it names a Color (RFG-122
+        // binds it); only one with neither is outside the contract. And a missing MaskSharpness /
+        // MaskOffset is no longer a refusal: Workbench's MatPBRMulti class reports both default
+        // to 0 (UVScale 1), where the detail term reduces to the plain mask channel. 3,201 corpus
+        // layers rely on that default; every one of their materials used to fall back.
+        if (EmatLayerEnabled(emat, static_cast<int>(i) + 2) && emat.TextureOf("BCR_" + suffix).empty() &&
+            !emat.Has("Color_" + suffix)) return false;
+        if (!EmatMaskDefaultsMeasured() && !emat.TextureOf("BCR_" + suffix).empty() &&
+            EmatLayerEnabled(emat, static_cast<int>(i) + 2) && !emat.Has("MaskSharpness_" + suffix)) return false;
         params[i] = {1.0f, 0.0f, 0.0f, 0.0f};
         const char* keys[] = {"MaskUVScale_", "MaskSharpness_", "MaskOffset_"};
         for (size_t p = 0; p < 3; ++p)
@@ -611,7 +641,7 @@ inline EmatMultiNormalParameters ReadNativePbrMultiNormals(const EmatMaterial& e
     for (size_t i = 0; i < 4; ++i)
     {
         const std::string suffix = std::to_string(i + 1);
-        float enabled = 1.0f;
+        float enabled = (i == 0 || !EmatMaskDefaultsMeasured()) ? 1.0f : 0.0f; // RFG-131 class default
         if (emat.Has("Enabled_" + suffix) && !emat.FloatOf("Enabled_" + suffix, enabled)) return result;
         if (emat.TextureOf("BCR_" + suffix).empty() || emat.TextureOf("NMO_" + suffix).empty() ||
             enabled != 1.0f)
@@ -805,12 +835,9 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     // it anyway paints a layer the author removed. Absent means on (layer 1
     // has no switch at all, and dozens of materials name a BCR_N with none),
     // so this only ever removes explicitly disabled layers.
-    const auto layerEnabled = [&](const char* key)
-    {
-        float v = 1.0f;
-        return !emat.FloatOf(key, v) || v != 0.0f;
-    };
-    const bool en2 = layerEnabled("Enabled_2"), en3 = layerEnabled("Enabled_3"), en4 = layerEnabled("Enabled_4");
+    // RFG-131: absent means OFF -- Workbench's class default for Enabled_2..4 is 0 (218 corpus
+    // layers name a BCR_N with no switch; 10,261 write `Enabled_N 1`). See EmatLayerEnabled.
+    const bool en2 = EmatLayerEnabled(emat, 2), en3 = EmatLayerEnabled(emat, 3), en4 = EmatLayerEnabled(emat, 4);
     if (en2)
     {
         // `MatPBR2Layers` spells its second layer `BCRMap2`/`NMOMap2`

@@ -344,9 +344,8 @@ LayerTint ResolveLayerTint(const EnfusionMount& mount, const Poseidon::Asset::Ma
         const std::string index = std::to_string(layer);
         if (material.TextureOf("BCR_" + index).empty())
             continue;
-        float enabled = 1.0f;
-        material.FloatOf("Enabled_" + index, enabled);
-        if (enabled == 0.0f)
+        // RFG-131: layers 2..4 default OFF (Workbench class default); layer 1 has no switch.
+        if (!Poseidon::Asset::Material::EmatLayerEnabled(material, layer))
             continue;
         float colour[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         if (!material.Vec4Of("Color_" + index, colour))
@@ -1370,6 +1369,9 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
     std::unordered_map<std::string, std::string> byGuid;
     if (!LoadResourceDatabases(addonsDir, byGuid, out.error))
         return out;
+    // RFG-132: every `.emat` parsed from here on resolves `{GUID}path` by its GUID.
+    Poseidon::Asset::Material::Detail::SetEmatGuidPaths(
+        std::make_shared<const Poseidon::Asset::Material::Detail::EmatGuidPaths>(byGuid));
 
     // The world's own `.ent`, beside the terrain in the same folder.
     std::string entPath;

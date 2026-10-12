@@ -108,7 +108,8 @@ TEST_CASE("Ordered normal parameters keep global UV separate and reject unsuppor
         body += " NMO_" + suffix + " \"{0000000000000003}Assets/Owned_NMO.edds\"\n";
         body += " DetNormal_" + suffix + " " + std::to_string(i * .2f) + "\n";
         body += " UVTransform_" + suffix + " { TilingU 2 TilingV 3 }\n";
-        if (i != 1) body += " MaskSharpness_" + suffix + " 1\n";
+        // RFG-131: layers 2..4 are off unless switched on (Workbench class default Enabled_N 0).
+        if (i != 1) body += " Enabled_" + suffix + " 1\n MaskSharpness_" + suffix + " 1\n";
     }
     const auto parsed = ParseEmat(body + "}\n");
     const auto normal = ReadNativePbrMultiNormals(parsed);
@@ -1112,4 +1113,19 @@ TEST_CASE("EMAT deploy: the shipped alder crown, parent and all, through the rea
     // the OpacityMap, and the converter already folds it into the `_ca` face texture.
     // What turned the leaves into solid planes was the 21:23 re-export overwriting the
     // 140 cutout `.paa` files without the FLAG tagg (PAAEncoder.cpp, MAT-047).
+}
+
+TEST_CASE("A {GUID}path reference resolves by its GUID when the database knows it", "[asset][material][emat][rfg-132]")
+{
+    using namespace Poseidon::Asset::Material;
+    const char* text = "MatPBRMulti {\n MaskMap \"{BBA0ACD4E9DCCC05}Assets/H/H_Ext_GLOBAL_MASK.edds\"\n"
+                       " BCR_1 \"{0000000000000009}Assets/H/Tiles_BCR.edds\"\n}\n";
+    REQUIRE(ParseEmat(text).TextureOf("MaskMap") == "Assets/H/H_Ext_GLOBAL_MASK.edds");
+    auto paths = std::make_shared<Detail::EmatGuidPaths>();
+    (*paths)["BBA0ACD4E9DCCC05"] = "Assets/H/H_V2_Ext_GLOBAL_MASK.edds";
+    Detail::SetEmatGuidPaths(paths);
+    const auto parsed = ParseEmat(text);
+    Detail::SetEmatGuidPaths(nullptr);
+    CHECK(parsed.TextureOf("MaskMap") == "Assets/H/H_V2_Ext_GLOBAL_MASK.edds");
+    CHECK(parsed.TextureOf("BCR_1") == "Assets/H/Tiles_BCR.edds"); // unknown GUID keeps its text
 }
