@@ -60,6 +60,7 @@ class SoundSystemSteam : public IAudioSystem
     SoundEnvironment _env{SEPlain, 100.f, 0.5f};
 
     bool _headphones = false;
+    HrtfMode _hrtfMode = HrtfMode::Auto;
 
     float _volumeAdjustEffect = 1.0f;
     float _volumeAdjustSpeech = 1.0f;
@@ -145,7 +146,8 @@ class SoundSystemSteam : public IAudioSystem
     int WaveCacheEntries() const override { return static_cast<int>(_pcmCache.GetStats().entries); }
     int WaveCacheHits() const override { return static_cast<int>(_pcmCache.GetStats().hits); }
     void StartDevicePreview() override;
-    void StartSpatialPreview() override;
+    void StartEAXPreview() override { StartSpatialPreview(); }
+    void StartSpatialPreview();
     void SuppressMusicForPreview() override;
     void ResumeMusicForPreview() override;
     int CountSuppressedMusicWaves() const override { return static_cast<int>(_suppressedMusic.size()); }
@@ -154,10 +156,24 @@ class SoundSystemSteam : public IAudioSystem
     void SetVoiceBudgetCounters(int evictedThisFrame, int pausedThisFrame) override;
     void FlushBank(QFBank*) override {}
 
-    bool ApplyReverbPreset(const char* presetName, float size) override;
+    // OpenPoseidon's IAudioSystem names (the port's README): the EFX preset by name is our
+    // ApplyReverbPreset; reverb is always on here (an EFX-preset FDN), and this is a software mixer.
+    bool ApplyEFXByName(const char* presetName, float size) override { return ApplyReverbPreset(presetName, size); }
+    bool ApplyReverbPreset(const char* presetName, float size);
+    bool EnableEAX(bool) override { return true; }
+    bool GetEAX() const override { return true; }
+    bool EnableHWAccel(bool) override { return false; }
+    bool GetHWAccel() const override { return false; }
 
-    void SetHeadphones(bool headphones) override;
-    bool GetHeadphones() const override { return _headphones; }
+    // HRTF is Steam Audio's binaural renderer for headphones. Auto has no meaning here (SDL does
+    // not report headphones); it is taken as speakers, the Open Malprave default.
+    bool SetHrtfMode(HrtfMode mode) override { _hrtfMode = mode; SetHeadphones(mode == HrtfMode::On); return true; }
+    HrtfMode GetHrtfMode() const override { return _hrtfMode; }
+    HrtfStatus GetHrtfStatus() const override;
+    std::vector<std::string> ListHrtfSpecifiers() const override { return {"Steam Audio default HRTF"}; }
+
+    void SetHeadphones(bool headphones);
+    bool GetHeadphones() const { return _headphones; }
 
     void LoadConfig() override;
     void SaveConfig() override;

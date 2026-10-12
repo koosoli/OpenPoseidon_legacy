@@ -17,6 +17,13 @@
 
 namespace Poseidon
 {
+// OGG (music, long speech) streams in chunks; WSS/WAV decode whole. Open Malprave also
+// streams FLAC and MP3 (its patch 0002); OpenPoseidon has no decoder for them.
+static bool IsStreamedSoundName(const char* name)
+{
+    const size_t n = name ? strlen(name) : 0;
+    return n >= 4 && _stricmp(name + n - 4, ".ogg") == 0;
+}
 using SteamAudio::Mixer;
 using SteamAudio::MixVoice;
 using SteamAudio::VoiceFormat;

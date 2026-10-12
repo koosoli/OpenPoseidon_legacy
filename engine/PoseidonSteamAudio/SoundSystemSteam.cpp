@@ -29,6 +29,13 @@ extern Poseidon::ParamFile Pars;
 
 namespace Poseidon
 {
+// OGG (music, long speech) streams in chunks; WSS/WAV decode whole. Open Malprave also
+// streams FLAC and MP3 (its patch 0002); OpenPoseidon has no decoder for them.
+static bool IsStreamedSoundName(const char* name)
+{
+    const size_t n = name ? strlen(name) : 0;
+    return n >= 4 && _stricmp(name + n - 4, ".ogg") == 0;
+}
 
 using Poseidon::Foundation::IsOutOfMemory;
 using SteamAudio::Mixer;
@@ -389,6 +396,16 @@ bool SoundSystemSteam::ApplyPresetByName(const char* presetName, float size)
     return true;
 }
 
+IAudioSystem::HrtfStatus SoundSystemSteam::GetHrtfStatus() const
+{
+    HrtfStatus status;
+    status.supported = true;
+    status.active = _headphones;
+    status.specifier = _headphones ? "Steam Audio default HRTF" : "";
+    status.deviceStatus = _headphones ? HrtfDeviceStatus::Enabled : HrtfDeviceStatus::Disabled;
+    return status;
+}
+
 bool SoundSystemSteam::ApplyReverbPreset(const char* presetName, float size)
 {
     const bool ok = ApplyPresetByName(presetName, size);
@@ -449,9 +466,7 @@ void SoundSystemSteam::LoadConfig()
     SetCDVolume(cfg.musicVolume / 10.0f);
     SetWaveVolume(cfg.effectsVolume / 10.0f);
     SetSpeechVolume(cfg.speechVolume / 10.0f);
-    SetHeadphones(cfg.headphones);
-    if (GApp)
-        ENGINE_CONFIG.singleVoice = cfg.singleVoice;
+    SetHrtfMode(static_cast<HrtfMode>(std::clamp(cfg.hrtfMode, 0, 2)));
 
     if (!cfg.outputDevice.empty())
         SwitchOutputDevice(cfg.outputDevice.c_str());
@@ -471,8 +486,7 @@ void SoundSystemSteam::SaveConfig()
     cfg.musicVolume = (int)(GetCDVolume() * 10.0f + 0.5f);
     cfg.effectsVolume = (int)(GetWaveVolume() * 10.0f + 0.5f);
     cfg.speechVolume = (int)(GetSpeechVolume() * 10.0f + 0.5f);
-    cfg.headphones = _headphones;
-    cfg.singleVoice = GApp && ENGINE_CONFIG.singleVoice;
+    cfg.hrtfMode = static_cast<int>(_hrtfMode);
     cfg.outputDevice = _selectedDevice;
     cfg.inputDevice = _selectedInputDevice;
 
@@ -936,7 +950,10 @@ void RegisterSteamAudioBackend()
     AudioFactory::Register(AudioBackendDescriptor{
         "steam",
         "Steam Audio engine (SDL3 output)",
-        0, // below OpenAL (1): opt-in with --audio steam until it has been played here
+        // Above OpenAL (1): the default engine since 2026-10-12 (owner). Auto-selection falls back
+        // to OpenAL when Steam Audio cannot open an output device; --audio openal or the dev
+        // panel's Audio tab picks OpenAL explicitly.
+        2,
         &CreateSoundSystemSteam,
         &IsSteamAudioAvailable,
     });

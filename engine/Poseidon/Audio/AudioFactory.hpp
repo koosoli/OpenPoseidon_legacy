@@ -70,6 +70,14 @@ private:
     AudioFactory() = delete;
 };
 
+/// The audio engine chosen in the dev panel's Audio tab ("openal", "steam"; empty = default),
+/// kept in <user dir>/audioEngine.cfg -- its own file, because each backend rewrites audio.cfg
+/// from its own fields. Used at start-up when no --audio is given; a change applies on restart.
+std::string LoadPreferredAudioBackend();
+bool SavePreferredAudioBackend(const std::string& code);
+/// Code name of the backend AudioFactory::Create made last ("steam", "openal", ...), or empty.
+std::string RunningAudioBackend();
+
 void RegisterDummyAudioBackend();
 void RegisterTextAudioBackend();
 void RegisterOpenALAudioBackend();

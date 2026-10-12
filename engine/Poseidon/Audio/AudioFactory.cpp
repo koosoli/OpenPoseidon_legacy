@@ -1,5 +1,8 @@
 
 #include <Poseidon/Audio/AudioFactory.hpp>
+#include <Poseidon/Foundation/Common/GamePaths.hpp>
+#include <fstream>
+#include <string>
 #include <stddef.h>
 #include <algorithm>
 #include <Poseidon/Foundation/platform.hpp>
@@ -115,6 +118,22 @@ bool AudioFactory::Register(const AudioBackendDescriptor& descriptor)
     return RegisterBackendImpl(descriptor);
 }
 
+namespace
+{
+std::string g_runningAudioBackend;
+AudioCreateResult NoteRunning(AudioCreateResult created)
+{
+    if (created.status == AudioCreateStatus::Created && created.backend.codeName)
+        g_runningAudioBackend = created.backend.codeName;
+    return created;
+}
+} // namespace
+
+std::string RunningAudioBackend()
+{
+    return g_runningAudioBackend;
+}
+
 AudioCreateResult AudioFactory::Create(const std::string& requestedBackend, bool noSound)
 {
     const bool autoSelect = requestedBackend.empty() || MatchesCode(requestedBackend, "auto");
@@ -126,7 +145,7 @@ AudioCreateResult AudioFactory::Create(const std::string& requestedBackend, bool
         {
             AudioCreateResult created = TryCreate(*backend);
             if (created.status == AudioCreateStatus::Created)
-                return created;
+                return NoteRunning(created);
         }
 
         return {};
@@ -140,7 +159,7 @@ AudioCreateResult AudioFactory::Create(const std::string& requestedBackend, bool
         return result;
     }
 
-    return TryCreate(*backend);
+    return NoteRunning(TryCreate(*backend));
 }
 
 std::vector<AudioBackendInfo> AudioFactory::EnumerateRegistered()
@@ -172,4 +191,35 @@ std::string AudioFactory::DescribeAvailableCodes()
     return JoinBackendCodes(EnumerateAvailable());
 }
 
+} // namespace Poseidon
+
+namespace Poseidon
+{
+namespace
+{
+std::string PreferredAudioBackendPath()
+{
+    return GamePaths::Instance().UserDir() + "audioEngine.cfg"; // GamePaths ends it with a slash
+}
+} // namespace
+
+std::string LoadPreferredAudioBackend()
+{
+    std::ifstream in(PreferredAudioBackendPath());
+    std::string code;
+    if (!in || !std::getline(in, code))
+        return {};
+    while (!code.empty() && (code.back() == '\r' || code.back() == ' '))
+        code.pop_back();
+    return code;
+}
+
+bool SavePreferredAudioBackend(const std::string& code)
+{
+    std::ofstream out(PreferredAudioBackendPath(), std::ios::trunc);
+    if (!out)
+        return false;
+    out << code << std::endl;
+    return static_cast<bool>(out);
+}
 } // namespace Poseidon

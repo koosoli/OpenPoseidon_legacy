@@ -61,6 +61,7 @@
 #include <Poseidon/Dev/Diag/PictureModeTab.hpp>
 #include <Poseidon/Dev/Diag/WeatherTab.hpp>
 #include <Poseidon/Dev/Diag/SmokeTab.hpp>
+#include <Poseidon/Dev/Diag/AudioTab.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 3D overlay (--diag-draw)
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/UI/Settings/AspectRatio.hpp>
@@ -7671,6 +7672,11 @@ void DrawMainWindow()
         if (Dev::PanelTabItem("Weather"))
         {
             Poseidon::Dev::DrawWeatherTab();
+            ImGui::EndTabItem();
+        }
+        if (Dev::PanelTabItem("Audio")) // the audio engine (Steam Audio / OpenAL) and HRTF (AudioTab.cpp)
+        {
+            Poseidon::Dev::DrawAudioTab();
             ImGui::EndTabItem();
         }
         if (Dev::PanelTabItem("Particles")) // smoke, fire and the emitters (SmokeTab.cpp)

@@ -120,7 +120,23 @@ void ApplyConfigurationFlags()
 IAudioSystem* CreateAudioSystem(void* hwnd, bool noSound, bool isDedicatedServer)
 {
     bool useDummy = noSound || isDedicatedServer;
-    const std::string requestedBackend = ENGINE_CONFIG.requestedAudioBackend;
+    std::string requestedBackend = ENGINE_CONFIG.requestedAudioBackend;
+    // No --audio: the engine chosen in the dev panel's Audio tab (audioEngine.cfg), if any. It is a
+    // preference, not a demand: when it cannot start, the default selection takes over.
+    if (requestedBackend.empty() && !useDummy)
+    {
+        const std::string preferred = LoadPreferredAudioBackend();
+        if (!preferred.empty() && _stricmp(preferred.c_str(), "auto") != 0)
+        {
+            AudioCreateResult fromPanel = AudioFactory::Create(preferred, false);
+            if (fromPanel.system)
+            {
+                LOG_INFO(Audio, "Audio engine '{}' (dev panel Audio tab, audioEngine.cfg)", preferred);
+                return fromPanel.system;
+            }
+            LOG_WARN(Audio, "Audio engine '{}' from audioEngine.cfg could not start; using the default", preferred);
+        }
+    }
     const bool explicitSelection = !requestedBackend.empty() && _stricmp(requestedBackend.c_str(), "auto") != 0;
     AudioCreateResult created = AudioFactory::Create(requestedBackend, useDummy);
 
