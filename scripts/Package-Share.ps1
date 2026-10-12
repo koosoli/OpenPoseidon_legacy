@@ -79,7 +79,8 @@ function Copy-Tree([string]$Source, [string]$Relative)
     if (-not (Test-Path -LiteralPath $Source)) { return 0 }
     $n = 0
     foreach ($file in Get-ChildItem -LiteralPath $Source -Recurse -File) {
-        Copy-Into $file.FullName (Join-Path $Relative $file.FullName.Substring($Source.Length).TrimStart('\', '/'))
+        $rest = $file.FullName.Substring($Source.Length).TrimStart('\', '/')
+        Copy-Into $file.FullName $(if ($Relative) { [IO.Path]::Combine($Relative, $rest) } else { $rest })
         $n++
     }
     return $n
@@ -94,6 +95,19 @@ Write-Host "  + OpenPoseidon.exe, wgpu_renderer.dll"
 $n = Copy-Tree (Join-Path $distDir 'assets') ''
 Write-Host "  + assets\ (built content)            $n files"
 
+# 2b. assets the installed game folder has and the build does not stage (the grass plates under
+#     assets\grass are hand-made files the renderer reads from there; see TerrainWgpu.cpp)
+$retail = Get-CwaRetailDir
+if ($retail -and (Test-Path -LiteralPath (Join-Path $retail 'assets'))) {
+    $n = 0
+    $installed = Join-Path $retail 'assets'
+    foreach ($file in Get-ChildItem -LiteralPath $installed -Recurse -File) {
+        $rest = $file.FullName.Substring($installed.Length).TrimStart('\', '/')
+        if (-not (Test-Path -LiteralPath (Join-Path $assets $rest))) { Copy-Into $file.FullName $rest; $n++ }
+    }
+    Write-Host "  + assets\ (from the installed game, not staged by the build)  $n files"
+}
+
 # 3. the default content packs, as assets\Mods\@OP_*
 $n = 0
 foreach ($pack in Get-ChildItem -LiteralPath (Join-Path $distDir 'Mods') -Directory -ErrorAction SilentlyContinue) {
@@ -101,6 +115,9 @@ foreach ($pack in Get-ChildItem -LiteralPath (Join-Path $distDir 'Mods') -Direct
     $n += Copy-Tree $pack.FullName (Join-Path 'Mods' $pack.Name)
 }
 Write-Host "  + assets\Mods (default packs)        $n files"
+if ($n -eq 0) {
+    Write-Warning "No default content packs in $distDir\Mods: run .\scripts\Build.ps1 (it stages them via Build-DefaultContent.ps1), or the friend plays without the ground materials, jeep actions and swimming."
+}
 
 # 4. what Install.ps1 copies from the Demo
 $demo = Get-CwaDemoDir
