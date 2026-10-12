@@ -770,6 +770,11 @@ void LoadConfig()
              configs.size(), vehicles ? vehicles->GetEntryCount() : 0, stringtables);
 }
 
+const ParamEntry* ConfigRoot()
+{
+    return Active() && ConfigLoaded() ? &Arma1Pars() : nullptr;
+}
+
 const ParamEntry* FindConfigClass(const char* root, const char* name)
 {
     if (!Active() || !ConfigLoaded() || !root || !name || !*name)

@@ -34,6 +34,9 @@ void RegisterWorldClasses();
 // the Arma 1 stringtables into a lowest-priority table. Never merged into Pars.
 void LoadConfig();
 
+// The root of the Arma 1 config tree (for script config access), or null when not loaded.
+const ParamEntry* ConfigRoot();
+
 // Arma 1 config class root >> name (CfgRadio, CfgSounds, CfgSFX, ...), or null.
 const ParamEntry* FindConfigClass(const char* root, const char* name);
 

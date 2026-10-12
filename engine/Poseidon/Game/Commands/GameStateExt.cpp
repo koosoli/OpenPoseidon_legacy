@@ -506,6 +506,24 @@ GameValue GetLaserTarget(const GameState* state, GameValuePar oper1);
 GameValue GetNearestObject(const GameState* state, GameValuePar oper1);
 GameValue GetNearestObjectByDistance(const GameState* state, GameValuePar oper1);
 GameValue A1NearObjects(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1ConfigFile(const GameState* state);
+GameValue A1MissionConfigFile(const GameState* state);
+GameValue A1ConfigChild(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1GetText(const GameState* state, GameValuePar oper1);
+GameValue A1GetNumber(const GameState* state, GameValuePar oper1);
+GameValue A1GetArray(const GameState* state, GameValuePar oper1);
+GameValue A1IsClass(const GameState* state, GameValuePar oper1);
+GameValue A1IsArray(const GameState* state, GameValuePar oper1);
+GameValue A1IsText(const GameState* state, GameValuePar oper1);
+GameValue A1IsNumber(const GameState* state, GameValuePar oper1);
+GameValue A1ConfigName(const GameState* state, GameValuePar oper1);
+GameValue A1ConfigCount(const GameState* state, GameValuePar oper1);
+GameValue A1ConfigSelect(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1InheritsFrom(const GameState* state, GameValuePar oper1);
+GameValue A1Min(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1Max(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1TypeName(const GameState* state, GameValuePar oper1);
+GameValue A1SurfaceIsWater(const GameState* state, GameValuePar oper1);
 GameValue GetNetIdObj(const GameState* state, GameValuePar oper1);
 GameValue GetNetworkId(const GameState* state, GameValuePar oper1);
 GameValue GetObjFromNetId(const GameState* state, GameValuePar oper1);
@@ -1290,6 +1308,8 @@ static const GameNular* GetExtNular(int& count)
         GameNular(GameScalar, "dayTime", DayTime),
         GameNular(GameArray, "date", A1Date),
         GameNular(GameString, "lineBreak", A1LineBreak),
+        GameNular(GameString, "configFile", A1ConfigFile),
+        GameNular(GameString, "missionConfigFile", A1MissionConfigFile),
         GameNular(GameBool, "cadetMode", CadetMode),
         GameNular(GameScalar, "benchmark", Benchmark),
         GameNular(GameScalar, "accTime", GetAcceleratedTime),
@@ -1369,6 +1389,18 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameString, "compile", A1Compile, GameString),
         GameFunction(GameBool, "isPlayer", A1IsPlayer, GameObject),
         GameFunction(GameString, "parseText", A1ParseText, GameString),
+        GameFunction(GameString, "getText", A1GetText, GameString),
+        GameFunction(GameScalar, "getNumber", A1GetNumber, GameString),
+        GameFunction(GameArray, "getArray", A1GetArray, GameString),
+        GameFunction(GameBool, "isClass", A1IsClass, GameString),
+        GameFunction(GameBool, "isArray", A1IsArray, GameString),
+        GameFunction(GameBool, "isText", A1IsText, GameString),
+        GameFunction(GameBool, "isNumber", A1IsNumber, GameString),
+        GameFunction(GameString, "configName", A1ConfigName, GameString),
+        GameFunction(GameScalar, "count", A1ConfigCount, GameString),
+        GameFunction(GameString, "inheritsFrom", A1InheritsFrom, GameString),
+        GameFunction(GameString, "typeName", A1TypeName, GameVoid),
+        GameFunction(GameBool, "surfaceIsWater", A1SurfaceIsWater, GameArray),
         GameFunction(GameString, "animationState", A1AnimationState, GameObject),
         GameFunction(GameString, "composeText", A1ComposeText, GameArray),
         GameFunction(GameArray, "switch", A1Switch_, GameVoid),
@@ -1806,6 +1838,10 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "ctrlSetForegroundColor", function, A1CtrlIgnored, GameScalar, GameArray),
         GameOperator(GameObject, "nearestObject", function, A1NearestObject, GameArray, GameScalar | GameString),
         GameOperator(GameArray, "nearObjects", function, A1NearObjects, GameArray | GameObject, GameArray | GameScalar),
+        GameOperator(GameString, ">>", function, A1ConfigChild, GameString, GameString),
+        GameOperator(GameString, "select", function, A1ConfigSelect, GameString, GameScalar),
+        GameOperator(GameScalar, "min", function, A1Min, GameScalar, GameScalar),
+        GameOperator(GameScalar, "max", function, A1Max, GameScalar, GameScalar),
         GameOperator(GameNothing, "lookAt", function, A1LookAt, GameObjectOrArray, GameObject | GameArray),
         GameOperator(GameNothing, "enableAttack", function, A1IgnoredBinary, GameObjectOrGroup, GameBool),
         GameOperator(GameNothing, "camPreparePos", function, CamSetPos, GameObject, GameArray),
