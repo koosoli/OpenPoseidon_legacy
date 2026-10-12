@@ -1155,6 +1155,30 @@ static GameValue A1ParseText(const GameState*, GameValuePar oper1)
     return GameValue(RString(out.c_str()));
 }
 
+// animationState unit: the current move, lower case (Arma 1 compares it in lower case)
+static GameValue A1AnimationState(const GameState*, GameValuePar oper1)
+{
+    EntityAI* ai = dyn_cast<EntityAI>(GetObject(oper1));
+    RString move = ai ? ai->GetCurrentMove() : RString("");
+    move.Lower();
+    return GameValue(move);
+}
+
+// composeText [a, lineBreak, b]: plain text joined; lineBreak is a "\n" the statics wrap on
+static GameValue A1ComposeText(const GameState*, GameValuePar oper1)
+{
+    const GameArrayType& a = oper1;
+    RString out;
+    for (int i = 0; i < a.Size(); i++)
+        out = out + (a[i].GetType() == GameString ? RString(a[i]) : a[i].GetText());
+    return GameValue(out);
+}
+
+static GameValue A1LineBreak(const GameState*)
+{
+    return GameValue(RString("\\n"));
+}
+
 // isPlayer unit: in single player, the player's unit
 static GameValue A1IsPlayer(const GameState* state, GameValuePar oper1)
 {
@@ -1265,6 +1289,7 @@ static const GameNular* GetExtNular(int& count)
         GameNular(GameScalar, "time", GameTime),
         GameNular(GameScalar, "dayTime", DayTime),
         GameNular(GameArray, "date", A1Date),
+        GameNular(GameString, "lineBreak", A1LineBreak),
         GameNular(GameBool, "cadetMode", CadetMode),
         GameNular(GameScalar, "benchmark", Benchmark),
         GameNular(GameScalar, "accTime", GetAcceleratedTime),
@@ -1344,6 +1369,8 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameString, "compile", A1Compile, GameString),
         GameFunction(GameBool, "isPlayer", A1IsPlayer, GameObject),
         GameFunction(GameString, "parseText", A1ParseText, GameString),
+        GameFunction(GameString, "animationState", A1AnimationState, GameObject),
+        GameFunction(GameString, "composeText", A1ComposeText, GameArray),
         GameFunction(GameArray, "switch", A1Switch_, GameVoid),
         GameFunction(GameArray, "for", A1ForArray, GameArray),
         GameFunction(GameArray, "case", A1Case, GameVoid),
