@@ -7,6 +7,7 @@ set(EVALUATOR_TEST_SOURCES
     test_mock_objects.cpp
     test_sqs_runner.cpp
     test_sqs_integration.cpp
+    test_loop_exit.cpp
     test_validate.cpp
     test_integration.cpp
     test_host_api.cpp
