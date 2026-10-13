@@ -60,6 +60,12 @@ const Vector3 SwimHeadRest(0.011f, 0.516f, 0.003f);
 // bobs back up after a jump in.
 constexpr float SwimHeaveSpring = 28.0f;
 constexpr float SwimHeaveDamping = 8.5f;
+// the fastest the water line he follows may rise or fall (m/s): a storm sea's surface moves at 2-3 m/s,
+// but the surface he samples can STEP -- the drawn grid near the camera refreshes every 1-3 frames and
+// stands up to 2 m off the CPU predictor in a storm, so a free camera passing him switched sources --
+// and the step, read as the water's speed (125 m/s for 2 m in a frame), threw him 3 m out of the water
+// (owner, 2026-10-13)
+constexpr float SwimTargetMaxRate = 3.0f;
 // Share of the waves' orbital velocity that carries the swimmer.
 constexpr float SwimDrift = 0.85f;
 // How far the body leans with the wave face (0 upright .. 1 square to the surface), and how fast (s).
@@ -505,7 +511,12 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
         _swimChinValid = true;
         waterLine = _swimChin - (SwimChinAbove - SwimGearSink * (1.0f - gear)); // a heavy load rides lower
     }
-    const float target = surface - waterLine;
+    float target = surface - waterLine;
+    if (_swimTargetValid && deltaT > 0)
+    {
+        const float maxStep = SwimTargetMaxRate * deltaT;
+        target = std::clamp(target, _swimPrevTarget - maxStep, _swimPrevTarget + maxStep);
+    }
     const float targetVy = (_swimTargetValid && deltaT > 0) ? (target - _swimPrevTarget) / deltaT : 0.0f;
     _swimPrevTarget = target;
     _swimTargetValid = true;

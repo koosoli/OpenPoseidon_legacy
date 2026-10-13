@@ -1050,8 +1050,6 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     } else {
         // ================= BELOW WATER (looking up at the surface) =================
         let N = Nview;
-        let NdV = max(dot(N, V), 1e-4);
-        let F = fresnelDielectric(NdV, 1.0 / IOR);
         // (OP, 2026-10-12) the Snell window shimmers: fine ripples the FFT mesh does not resolve bend
         // the refracted sky near the eye (it read as undistorted sky through a clean hole)
         let ripT = tw.sea.y;
@@ -1060,6 +1058,12 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let Nr = normalize(N + vec3<f32>(rip.x, 0.0, rip.y) * 0.09 * smoothstep(30.0, 2.0, dist));
         let Tt = refract(-V, Nr, IOR);
         let tValid = dot(Tt, Tt) > 0.5;
+        // (OP, 2026-10-13) the mirror share from the SAME normal the ray is refracted through, and all
+        // mirror where that ray cannot leave the water. It came from the unrippled normal: wherever the
+        // ripple tipped a ray past the critical angle the shader still let (1 - F) through and, with no
+        // refracted ray, showed the zenith sky -- bright sky and clouds across the total-reflection
+        // band just under the surface (owner: clouds visible at 0.7 m, gone at 2.5 m)
+        let F = select(1.0, fresnelDielectric(max(dot(Nr, V), 1e-4), 1.0 / IOR), tValid);
         let Td = normalize(select(vec3<f32>(0.0, 1.0, 0.0), Tt, tValid));
         let skyT = min(sky_env_sample(Td), vec3<f32>(60.0));
 

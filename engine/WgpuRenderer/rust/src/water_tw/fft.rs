@@ -165,8 +165,8 @@ impl SpectrumInputs {
         // the threshold that gives this wind's measured whitecap cover (see WHITECAP_COVER_BIAS)
         let _ = choppiness;
         let foam_bias = q(whitecap_cover_bias(local.wind_speed, whitecaps) + foam_bias_add() - FOAM_BIAS_ADD, 0.005);
-        // (OP) at least 0.35/s: Tidewater's 0.25 in a storm let the foam outlive the next crests
-        let foam_decay = q(foam_decay_override().unwrap_or((0.6 - 0.35 * whitecaps).max(0.35)), 0.005);
+        // (OP) caps, not floes: see WHITECAP_FOAM_DECAY
+        let foam_decay = q(foam_decay_override().unwrap_or(WHITECAP_FOAM_DECAY), 0.005);
         Self { sizes, local, swell, depth: 500.0, seed: 1337, foam_bias, foam_decay }
     }
 
@@ -313,20 +313,30 @@ pub fn wind_fetch_km(wind_speed: f32) -> f32 {
 
 /// The whitecap threshold (OceanFFT `foamBias`) by wind, fitted to the cover the sea SHOWS: the
 /// share of open water the shader draws as a solid cap, measured on a real device with the weather
-/// presets' own spectra after 40 s of sea (fft_cover_tests.rs, `whitecap_cover_by_preset`):
+/// presets' own spectra after 40 s of sea (fft_cover_tests.rs, `whitecap_cover_by_preset`), at the
+/// caps' own decay (WHITECAP_FOAM_DECAY):
 ///
-///   wind  3.5 m/s  0.85  ->  0 %       (calm: no breaking)
-///         7         0.805 ->  ~1 %
-///        12         0.76  ->  ~8 %
-///        20         0.72  -> ~15 %
+///   wind  3.5 m/s  0.87  ->  0 %       (calm: no breaking)
+///         7         0.84  ->  ~1 %
+///        12         0.79  ->  ~4 %
+///        20         0.76  ->  ~8 %
+///        30         0.745 -> ~11 %
 ///
-/// Observed seas run ~2 % at 12 m/s and 10-14 % at 20 m/s (Monahan; Callaghan et al. 2008); 12 m/s
-/// sits above that because the owner asked for more, visible caps on a rough sea. Before 2026-10-13
-/// the threshold was Tidewater's rule (0.5 + 0.16 x whitecaps + 0.01 per m/s over 7, plus OP's 0.1)
-/// capped at 0.78, which measured 18 % at 12 m/s and 70 % in a storm: the cover is that steep in the
-/// threshold (storm: 0.70 -> 7 %, 0.75 -> 37 %), so no single cap could fit both, and the owner saw
-/// the whole ocean white whenever the wind rose.
-const WHITECAP_COVER_BIAS: [(f32, f32); 5] = [(3.5, 0.85), (7.0, 0.805), (12.0, 0.76), (20.0, 0.72), (30.0, 0.70)];
+/// Observed seas run ~2 % at 12 m/s and 10-14 % at 20 m/s (Monahan; Callaghan et al. 2008), most of
+/// it the decaying foam behind the caps; the actively breaking caps are about a quarter of that.
+/// History: Tidewater's rule (0.5 + 0.16 x whitecaps + 0.01 per m/s over 7, plus OP's 0.1) capped at
+/// 0.78 measured 70 % white in a storm (the cover is that steep in the threshold); a first fit at the
+/// old decay gave 15 % in a storm, drawn as large flat floes (owner, 2026-10-13: "the foam patches are
+/// still too big ... for the rest it should be white caps").
+const WHITECAP_COVER_BIAS: [(f32, f32); 5] = [(3.5, 0.87), (7.0, 0.84), (12.0, 0.79), (20.0, 0.76), (30.0, 0.745)];
+
+/// How fast the open sea's whitecap foam fades (1/s): 1.5, about a second above the drawing threshold,
+/// so a cap marks a crest that is breaking and leaves no trail. Tidewater's 0.6 - 0.35 x whitecaps
+/// (0.25 in a storm; OP held it at 0.35) kept each cap ~9 s and drew it as a flat white floe drifting
+/// behind the crest (captured: storm preset, three variants, owner's pose). The persistent foam
+/// patches belong to the surf near the coast, which the shore waves and simulation draw.
+/// WGR_TW_FOAM_DECAY overrides it.
+pub const WHITECAP_FOAM_DECAY: f32 = 1.5;
 
 /// The fitted threshold for this wind, moved by the whitecaps control around the weather presets'
 /// own value (0.1 calm .. 1.0 storm): +-0.03 at the extremes, so the control still means more or
@@ -1258,19 +1268,19 @@ mod tests {
 
     #[test]
     fn whitecap_threshold_follows_the_measured_cover_fit() {
-        // the owner's storm: 70 % of the sea white at Tidewater's capped 0.78; the fit gives ~15 %
+        // the owner's storm: 70 % of the sea white at Tidewater's capped 0.78; the fit gives ~8 % (short-lived caps)
         let mut p = <WgrWaterParams as bytemuck::Zeroable>::zeroed();
         p.tidewater = crate::water_tw::DEFAULT_PARAMS;
         p.tidewater_sea = [20.0, 900.0, 1.0, 4.0];
         p.tidewater[0][1] = 1.3;
         let spec = SpectrumInputs::from_params(&p);
-        assert!((spec.foam_bias - 0.72).abs() < 0.006, "storm bias {}", spec.foam_bias);
-        assert!(spec.foam_decay >= 0.35);
+        assert!((spec.foam_bias - 0.76).abs() < 0.006, "storm bias {}", spec.foam_bias);
+        assert!((spec.foam_decay - WHITECAP_FOAM_DECAY).abs() < 0.006);
         // the presets sit on the table; the control moves it at most 0.03 either way
-        assert!((whitecap_cover_bias(12.0, 0.8) - 0.76).abs() < 1e-5);
-        assert!((whitecap_cover_bias(7.0, 0.5) - 0.805).abs() < 1e-5);
-        assert!((whitecap_cover_bias(20.0, 0.5) - 0.69).abs() < 1e-5);
-        assert!((whitecap_cover_bias(7.0, 1.0) - 0.835).abs() < 1e-5);
+        assert!((whitecap_cover_bias(12.0, 0.8) - 0.79).abs() < 1e-5);
+        assert!((whitecap_cover_bias(7.0, 0.5) - 0.84).abs() < 1e-5);
+        assert!((whitecap_cover_bias(20.0, 0.5) - 0.73).abs() < 1e-5);
+        assert!((whitecap_cover_bias(7.0, 1.0) - 0.87).abs() < 1e-5);
         // more wind never means a higher threshold (fewer caps) at the presets' own control
         let mut last = 1.0;
         for w in [2.0, 3.5, 5.0, 7.0, 9.5, 12.0, 16.0, 20.0, 25.0, 30.0, 40.0] {

@@ -743,12 +743,14 @@ impl Tidewater {
                 cull_mode: None,
                 ..Default::default()
             },
-            // The water pass attaches depth READ-ONLY (lib.rs): the sea depth-tests against the
-            // coast like Current OP but cannot write depth there. Tidewater writes depth to
-            // reject hidden wave faces; front-to-back node order keeps most of that benefit.
+            // (OP) The water pass attaches a depth buffer of its own (water_zbuf.rs), initialised
+            // from the scene depth: the sea tests the coast AND itself, as Tidewater's does, so the
+            // nearest wave wins. Read-only (WGR_TW_WATER_ZBUF=0, the scene depth), the draw order
+            // decided between overlapping water, and the CDLOD nodes go front to back: the far sea
+            // painted over the near (slivers above the water, the sky through the surface below).
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: crate::gfx3d::depth_format(device),
-                depth_write_enabled: Some(false),
+                depth_write_enabled: Some(crate::water_zbuf::enabled()),
                 depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),

@@ -6907,6 +6907,11 @@ impl Gfx3d {
     // Farthest-sample sceen depth for water's seabed reconstruction (see the field comment). Under
     // MSAA this is stale until resolve_water_depth records the far-resolve; at 1x it's the live 1x
     // depth aspect. Paired with depth_gen() for bind-group rebuild tracking.
+    /// The scene depth target itself (its size, sample count and format size the water's own depth).
+    pub fn depth_texture(&self) -> Option<&wgpu::Texture> {
+        self.depth.as_ref().map(|(t, _)| t)
+    }
+
     pub fn water_depth_view(&self) -> Option<&wgpu::TextureView> {
         self.water_depth_view.as_ref()
     }

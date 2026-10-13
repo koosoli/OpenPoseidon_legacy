@@ -1,4 +1,5 @@
 mod bloom;
+mod water_zbuf;
 #[cfg(feature = "dlss")]
 mod dlss;
 #[cfg(feature = "dlss")]
@@ -978,6 +979,8 @@ pub struct Renderer {
     // and it is cleared by every pass that writes depth, which is what makes skipping provably
     // safe rather than a guess. See `ensure_far_depth_resolve`.
     far_depth_resolve_current: bool,
+    // (OP) the water pass's own depth buffer (water_zbuf.rs), built on first use
+    water_zbuf: Option<water_zbuf::WaterZBuf>,
     // Bloom pyramid, built alongside the tonemap on the HDR path; the resolve adds it.
     bloom: Option<Bloom>,
     // Eye adaptation / auto-exposure; produces a 1x1 exposure scale the resolve applies.
@@ -2142,6 +2145,7 @@ impl Renderer {
             godrays_composited: false,
             frame_depth_final_resolved: false,
             far_depth_resolve_current: false,
+            water_zbuf: None,
             bloom,
             exposure,
             exposure_params: ffi::WgrExposure::default(),
@@ -4284,7 +4288,11 @@ impl Renderer {
             }
         }
         // TW-WATER W5d: more than a metre under the surface (flat datum or measured submersion).
-        self.submerged_view = underwater_state.as_ref().is_some_and(|(_, above, _, _)| *above < -1.0);
+        // (OP, 2026-10-13) from 5 cm under the surface, not 1 m: the only reader is the cloud composite's
+        // gate below, and between 5 cm and 1 m it ran and painted the cloud deck over the underside of
+        // the surface (owner: plain clouds at 0.7 m under the water, gone at 2.5 m). The lens straddles
+        // the waterline within 5 cm (tw_underwater.wgsl UW_STRADDLE), where the sky above stays clouded.
+        self.submerged_view = underwater_state.as_ref().is_some_and(|(_, above, _, _)| *above < -0.05);
         if self.underwater_engaged_logged != Some(underwater_engaged) {
             self.underwater_engaged_logged = Some(underwater_engaged);
             // eprintln! rather than self.log, matching the other [wgr] renderer diagnostics —
@@ -6092,6 +6100,28 @@ impl Renderer {
                     self.gpu_timers.begin(&mut encoder, TimerRegion::WaterDraw);
                     encoder.push_debug_group("wgr_water");
                     let visibility_query = self.water_visibility.claim();
+                    // (OP) the water tests and writes a depth buffer of its own, initialised from the
+                    // scene depth (water_zbuf.rs): read-only, the far sea painted over the near sea
+                    let water_zview: Option<wgpu::TextureView> = match (
+                        water_zbuf::enabled(),
+                        self.gfx3d.depth_texture().cloned(),
+                        self.gfx3d.water_depth_view().cloned(),
+                    ) {
+                        (true, Some(tex), Some(src)) => {
+                            let device = &self.device;
+                            let zb = self.water_zbuf.get_or_insert_with(|| water_zbuf::WaterZBuf::new(device));
+                            Some(zb.prepare(device, &mut encoder, &tex, &src).clone())
+                        }
+                        _ => None,
+                    };
+                    let water_depth_attachment = match &water_zview {
+                        Some(v) => wgpu::RenderPassDepthStencilAttachment {
+                            view: v,
+                            depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Discard }),
+                            stencil_ops: None,
+                        },
+                        None => wgpu::RenderPassDepthStencilAttachment { view: seg_depth, depth_ops: None, stencil_ops: None },
+                    };
                     let mut wpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("wgr_water_pass"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -6103,11 +6133,7 @@ impl Renderer {
                                 store: wgpu::StoreOp::Store,
                             },
                         })],
-                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                            view: seg_depth,
-                            depth_ops: None,
-                            stencil_ops: None,
-                        }),
+                        depth_stencil_attachment: Some(water_depth_attachment),
                         timestamp_writes: None,
                         occlusion_query_set: visibility_query
                             .then_some(self.water_visibility.query_set()),
@@ -6129,6 +6155,16 @@ impl Renderer {
                         wpass.end_occlusion_query();
                     }
                     drop(wpass);
+                    // (OP) the water's surface into the scene depth (water_zbuf.rs merge): the
+                    // depth-aware clouds, smoke and transparents after it see the sea, not the sky
+                    // or the seabed behind it
+                    if water_zview.is_some() && water_zbuf::merge_enabled() {
+                        if let Some(zb) = self.water_zbuf.as_mut() {
+                            zb.merge(&self.device, &mut encoder, seg_depth);
+                            self.far_depth_resolve_current = false;
+                            self.frame_depth_final_resolved = false;
+                        }
+                    }
                     if self.water.has_curling_breaker() {
                         // Folded sheets must occlude themselves. The dedicated bind group
                         // deliberately excludes scene depth, so this pass may write it safely.
