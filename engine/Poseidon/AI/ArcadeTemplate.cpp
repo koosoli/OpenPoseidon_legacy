@@ -71,6 +71,10 @@ const EnumName* Foundation::GetEnumNames(ArcadeWaypointType dummy)
                                                        EnumName(ACSUPPORT, "SUPPORT"),
                                                        EnumName(ACAND, "AND"),
                                                        EnumName(ACOR, "OR"),
+                                                       // Arma 2 types read as their nearest CWA type
+                                                       EnumName(ACGETIN, "GETIN NEAREST"),
+                                                       EnumName(ACMOVE, "DISMISS"),
+                                                       EnumName(ACMOVE, "LOITER"),
                                                        EnumName()};
     return ArcadeWaypointTypeNames;
 }
@@ -176,6 +180,10 @@ const EnumName* Foundation::GetEnumNames(ArcadeSensorActivation dummy)
                                                            EnumName(ASAGroup, "GROUP"),
                                                            EnumName(ASALeader, "LEADER"),
                                                            EnumName(ASAMember, "MEMBER"),
+                                                           // Arma 2 "seized by" activations read as presence of that side
+                                                           EnumName(ASAWest, "WEST SEIZED"),
+                                                           EnumName(ASAEast, "EAST SEIZED"),
+                                                           EnumName(ASAGuerrila, "GUER SEIZED"),
                                                            EnumName()};
     return ArcadeSensorActivationNames;
 }
