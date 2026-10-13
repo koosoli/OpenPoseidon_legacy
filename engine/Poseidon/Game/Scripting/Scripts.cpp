@@ -529,6 +529,7 @@ bool Script::Simulate(float deltaT)
         if (!_fiber)
             gstate->VarSet("_time", _time); // make sure there is such variable
         ret = SimulateBody();
+        GameState::s_breakTarget.clear(); // a breakTo whose scope was never found
         if (!_fiber)
             _time = gstate->VarGet("_time");
         gstate->EndContext();
@@ -554,6 +555,7 @@ bool Script::OnSimulate()
         if (!_fiber)
             gstate->VarSet("_time", _time);
         ret = SimulateBody();
+        GameState::s_breakTarget.clear(); // a breakTo whose scope was never found
         if (!_fiber)
         {
             _time = gstate->VarGet("_time");
@@ -1126,6 +1128,7 @@ struct ScriptFiber
         try
         {
             gstate->EvaluateMultiple(f.code);
+            GameState::s_breakTarget.clear(); // a breakTo whose scope was never found
         }
         catch (const std::exception& e)
         {

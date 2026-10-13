@@ -813,6 +813,7 @@ void FsmEnter(Fsm& fsm, const std::string& name)
 
 void FsmStep(Fsm& fsm)
 {
+    GameState::s_breakTarget.clear(); // a breakTo whose scope was never found
     if (fsm.done)
         return;
     if (!fsm.started)
