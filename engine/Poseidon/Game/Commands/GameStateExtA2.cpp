@@ -1447,6 +1447,21 @@ GameValue LocationValue(int index)
     return GameValue(RString((std::string(LocTag) + std::to_string(index)).c_str()));
 }
 
+// locationNull is a location handle that names no location.
+GameValue A2LocationNull(const GameState*)
+{
+    return LocationValue(-1);
+}
+
+// isNull on a location handle (other strings are not null).
+GameValue A2IsNullLocation(const GameState*, GameValuePar oper1)
+{
+    const RString s = oper1;
+    if (strncmp(s, LocTag, strlen(LocTag)) != 0)
+        return GameValue(false);
+    return GameValue(LocationOf(oper1) == nullptr);
+}
+
 void LoadWorldLocations(Runtime& rt)
 {
     if (rt.worldLocations)
@@ -1657,7 +1672,7 @@ GameValue A2NearestLocation(const GameState*, GameValuePar oper1)
 {
     const auto found = NearLocations(oper1, false);
     if (found.empty())
-        return GameValue(RString(""));
+        return LocationValue(-1);
     return LocationValue(found.front().second);
 }
 
@@ -2216,7 +2231,7 @@ const GameNular A2Nular[] = {
     GameNular(GameScalar, "safeZoneH", A2SafeZoneW),
     GameNular(GameScalar, "safeZoneXAbs", A2Zero),
     GameNular(GameScalar, "safeZoneWAbs", A2SafeZoneW),
-    GameNular(GameObject, "locationNull", A2ObjNull),
+    GameNular(GameString, "locationNull", A2LocationNull),
     GameNular(GameNothing, "disableSerialization", A2NothingNular),
     GameNular(GameNothing, "endLoadingScreen", A2NothingNular),
     GameNular(GameNothing, "clearRadio", A2NothingNular),
@@ -2312,6 +2327,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameString, "actionKeysImages", A2TextLogEmpty, GameString | GameArray),
     GameFunction(GameBool, "triggerActivated", A2TriggerActivated, GameObject),
     GameFunction(GameBool, "isNull", A2IsNullHandle, GameScalar),
+    GameFunction(GameBool, "isNull", A2IsNullLocation, GameString),
     GameFunction(GameArray, "items", A2EmptyArrayUnary, GameObject),
     GameFunction(GameArray, "assignedItems", A2EmptyArrayUnary, GameObject),
     GameFunction(GameArray, "triggerArea", A2TriggerArea, GameObject),
