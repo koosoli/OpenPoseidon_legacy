@@ -126,6 +126,19 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
     if std::env::var("WGR_TERRAIN_DEBUG_NATIVE_RED").as_deref() == Ok("1") {
         defs.insert("TERRAIN_DEBUG_NATIVE_RED".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
+    // RFG-156 native leaf gloss: 1 = roughness 0.45, 2 = 0.3, 3 = 0.6 (gpu_driven.wgsl).
+    match std::env::var("WGR_NATIVE_LEAF_GLOSS").as_deref() {
+        Ok("1") | Ok("2") | Ok("3") => {
+            defs.insert("NATIVE_LEAF_GLOSS".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+            if std::env::var("WGR_NATIVE_LEAF_GLOSS").as_deref() == Ok("2") {
+                defs.insert("NATIVE_LEAF_GLOSS_SMOOTH".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+            }
+            if std::env::var("WGR_NATIVE_LEAF_GLOSS").as_deref() == Ok("3") {
+                defs.insert("NATIVE_LEAF_GLOSS_ROUGH".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+            }
+        }
+        _ => {}
+    }
     if std::env::var("WGR_SATMAP_NEAR").as_deref() == Ok("1") {
         defs.insert("SATMAP_NEAR_EXPERIMENT".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }

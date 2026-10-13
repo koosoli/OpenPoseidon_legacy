@@ -6200,7 +6200,15 @@ void EngineWgpu::NextFrame()
             // sun_ambient.rgb = flat ambient fill (still used by water + the legacy path). On the
             // sky-lit path .w carries the skyAmbient knob, scaling the DIRECTIONAL SH sky-irradiance
             // ambient the lit-mesh/terrain shaders now use in place of the flat rgb.
-            cameras[i].sun_ambient = {ambLin[0], ambLin[1], ambLin[2], skyLit > 0.5f ? _sky.skyAmbient : 0.0f};
+            // WGR_SKY_AMBIENT=<scale> overrides the sky-irradiance scale for one process (A/B only).
+            static const float skyAmbientOverride = []
+            {
+                const char* v = std::getenv("WGR_SKY_AMBIENT");
+                const float parsed = v ? std::strtof(v, nullptr) : -1.0f;
+                return std::isfinite(parsed) ? parsed : -1.0f;
+            }();
+            const float skyAmbientScale = skyAmbientOverride >= 0.0f ? skyAmbientOverride : _sky.skyAmbient;
+            cameras[i].sun_ambient = {ambLin[0], ambLin[1], ambLin[2], skyLit > 0.5f ? skyAmbientScale : 0.0f};
             // .w = the sun-only daylight factor (see `daylight` above).
             cameras[i].sun_dir_world = {sunDir.X(), sunDir.Y(), sunDir.Z(), daylight};
             if (shadowActive)

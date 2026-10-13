@@ -1294,6 +1294,29 @@ fn fs_gpu_body(in: VsOut
     // GlossToRoughnessUnvalidated out of the translation path; the map is bound and the
     // channel is there when that question is answered.
     m.spec_mask = 1.0;
+#ifdef NATIVE_LEAF_GLOSS
+    // RFG-156: native leaf cards (MatPBRTreeCrown) translate with specular 0 / power 0, so a
+    // Reforger crown rendered fully matte -- no sun glints, no sky sheen. Their BCR alpha is not
+    // usable as roughness here (the cutout consumes it), so give native vegetation cutouts the
+    // class default dielectric F0 0.04 and one fixed roughness through the same energy-
+    // normalised Blinn lobe as the PBR preview. Sections with authored specular are untouched.
+    if (retained_is_veg(in) != 0u && sm.alpha_ref > 0.0 && (sm.flags & SECTION_NORMAL_RG) != 0u
+        && m.spec_power <= 0.0) {
+#ifdef NATIVE_LEAF_GLOSS_SMOOTH
+        let leaf_rough = 0.3;
+#else
+#ifdef NATIVE_LEAF_GLOSS_ROUGH
+        let leaf_rough = 0.6;
+#else
+        let leaf_rough = 0.45;
+#endif
+#endif
+        m.spec_power = clamp(2.0 / (leaf_rough * leaf_rough) - 2.0, 1.0, 256.0);
+        let leaf_lobe = (m.spec_power + 8.0) / (8.0 * 3.14159265);
+        m.specular = frame.sun_diffuse.rgb * 0.04 * leaf_lobe;
+        m.local_specular = vec3<f32>(0.04 * leaf_lobe);
+    }
+#endif
     // The debug view exposes the authored map without another default-path fetch. Red is
     // SMDI G (specular level), green is SMDI B (gloss), blue marks that a map was present.
     // Materials without SMDI show their constant specular level/power and blue = 0.
