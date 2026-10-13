@@ -1209,7 +1209,8 @@ static const GameOperator* GetDefaultBinary(int* outSize = nullptr)
         GameOperator(GameForTo, "step", function, ForStepOp, GameForTo, GameScalar),
         GameOperator(GameAny, "do", function, ForDoOp, GameForTo, GameString),
 
-        GameOperator(GameAny, "call", function, StringCall, GameVoid, GameString),
+        // Arma 2 accepts a command that returns nothing on the left: (_x kbAddTopic [..]) call RE
+        GameOperator(GameAny, "call", function, StringCall, GameVoid | GameNothing, GameString),
     };
     if (outSize)
     {
