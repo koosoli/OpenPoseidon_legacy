@@ -119,6 +119,11 @@ port of the tree generator in [EZ-Tree](https://github.com/dgreenheck/ez-tree), 
 (Copyright (c) 2024 Daniel Greenheck). Only code and preset numbers were ported; the bark and leaf
 textures are generated procedurally and no EZ-Tree image is used.
 
+The hedges of the visual pack (`scripts/default-content/generate_hedges.py`) are built from two
+EZ-Tree leaf sheets, `src/app/public/textures/leaves/oak.png` and `ash.png` at commit
+`dcf309bd86bd521083d9c70f01f2de45fdc7c457`, MIT-licensed, vendored unmodified with the licence in
+`content/default-packs/visual/third-party/ez-tree/`.
+
 ### Tidewater (dgreenheck/tidewater)
 
 The *Tidewater Native* water backend (`engine/WgpuRenderer/rust/src/water_tw/`) is a

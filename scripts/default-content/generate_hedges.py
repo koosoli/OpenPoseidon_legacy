@@ -33,23 +33,30 @@ import numpy as np
 # LOD 0's resolution, and the stock images each hedge is built from (w/h aspect)
 HEDGES = {
     "krovi": dict(visual=((-2.69, -0.9, -1.52), (2.65, 0.9, 1.52)), geometry=((-2.13, -0.9, -0.63), (2.13, 0.3, 0.6)),
-                  res=0.5, textures=[("data\\maliny_opak.pac", 1.0), ("data\\krovi1.pac", 2.0), ("data\\kerik_bobul_02.pac", 1.0)]),
+                  res=0.5),
     "krovi2": dict(visual=((-2.95, -1.13, -1.68), (2.95, 1.06, 1.68)), geometry=((-2.26, -1.12, -0.38), (2.38, -0.1, 0.85)),
-                   res=0.5, textures=[("data\\krovi6.pac", 1.0), ("data\\kerik_bobul_02.pac", 1.0), ("data\\krovi7.pac", 1.0)]),
+                   res=0.5),
     "krovi3": dict(visual=((-3.01, -1.13, -1.63), (3.03, 1.16, 1.63)), geometry=((-2.75, -1.12, -0.33), (2.33, -0.1, 0.9)),
-                   res=0.5, textures=[("data\\krovi6.pac", 1.0), ("data\\krovi7.pac", 1.0), ("data\\kerik_bobul_02.pac", 1.0)]),
+                   res=0.5),
     "krovi4": dict(visual=((-2.66, -1.09, -1.56), (2.66, 1.13, 1.56)), geometry=((-2.24, -1.1, -0.63), (2.32, 0.1, 0.58)),
-                   res=0.0, textures=[("data\\kerik_bobul_02.pac", 1.0), ("data\\krovi6.pac", 1.0)]),
+                   res=0.0),
     "krovi_bigest": dict(visual=((-2.95, -1.47, -2.09), (2.97, 1.42, 2.09)), geometry=((-2.89, -1.47, -1.3), (2.84, 0.74, 1.32)),
-                         res=0.1, textures=[("data\\krovi6.pac", 1.0), ("data\\krovi7.pac", 1.0)]),
+                         res=0.1),
     "krovi_long": dict(visual=((-4.08, -1.36, -1.18), (4.08, 1.51, 1.1)), geometry=((-3.75, -1.28, -0.73), (3.76, 0.18, 0.7)),
-                       res=0.3, textures=[("data\\krovi4_start.pac", 1.0), ("data\\kerik_bobul_02.pac", 1.0), ("data\\krovi6.pac", 1.0)]),
+                       res=0.3),
 }
-# LOD resolutions after LOD 0, and the share of clumps (and their scale) each keeps
-LODS = [(None, 1.0, 1.0), (2.0, 0.4, 1.35), (5.0, 0.15, 1.8)]
+# LOD resolutions after LOD 0, and the share of sprigs (and their scale) each keeps
+LODS = [(None, 1.0, 1.0), (2.0, 0.33, 1.5), (5.0, 0.11, 2.3)]
 RES_GEOMETRY = 1e13
 RES_SHADOW = 6e15
-DENSITY = 0.32  # clump cards per (card size)^2 of hedge skin
+# Sprig cards (owner, 2026-10-13: "the hedges must be volumetric not just 3-4 textures"): each hedge
+# is a few hundred leafy sprigs (ez-tree's oak and ash leaf sheets, MIT) rooted inside the body and
+# pointing out of it, in two populations -- a shell and a darker interior that closes the gaps.
+SPRIG_LEN = (0.45, 0.75)  # m, the sheet's full height
+LAYERS = 2.6  # mean sprig cover over the skin (sheet fill ~35 %)
+SHEET_FILL = 0.35
+INTERIOR_SHARE = 0.3
+LEAF_TEXTURE = "hedge_leaves.paa"  # 2 x 1 atlas: oak | ash
 
 
 def body(spec):
@@ -72,67 +79,102 @@ def outward(b, p):
     return g / np.linalg.norm(g, axis=-1, keepdims=True)
 
 
-def clumps(spec, seed):
+def skin_point(b, x, th, depth):
+    """A point of the body at fraction `depth` of the way from its axis to its skin."""
+    end = (1 - abs(x) ** 6) ** (1 / 6)
+    cz, cy = math.cos(th), math.sin(th)
+    sz = np.sign(cz) * abs(cz) ** 0.8 * b["c"] * end * depth
+    sy = abs(cy) ** 0.8 * b["h"] * end * depth
+    return np.array([b["cx"] + x * b["a"] * depth ** 0.3, b["y0"] + sy, sz])
+
+
+def sprigs(spec, seed):
     rng = np.random.default_rng(seed)
     b = body(spec)
-    size = min(b["h"], 2 * b["c"]) * 0.5
     skin = 2 * b["a"] * math.pi * (b["h"] + b["c"]) / 2
-    n = int(skin / (size * size) / DENSITY)
+    mean_len = sum(SPRIG_LEN) / 2
+    n = int(LAYERS * skin / (mean_len * mean_len * SHEET_FILL))
     out = []
-    for _ in range(n):
-        x = rng.uniform(-1, 1)
-        th = rng.uniform(0, math.pi)
-        end = (1 - abs(x) ** 6) ** (1 / 6)
-        depth = 0.62 + 0.38 * math.sqrt(rng.uniform())  # toward the skin
-        cz, cy = math.cos(th), math.sin(th)
-        sz = np.sign(cz) * abs(cz) ** 0.8 * b["c"] * end * depth
-        sy = abs(cy) ** 0.8 * b["h"] * end * depth
-        p = np.array([b["cx"] + x * b["a"] * depth ** 0.3, b["y0"] + sy, sz])
-        out.append(dict(p=p, depth=depth, size=size * rng.uniform(0.75, 1.25), yaw=rng.uniform(0, math.pi),
-                        tilt=rng.uniform(-0.25, 0.25), tex=int(rng.integers(len(spec["textures"]))), keep=rng.uniform()))
+    for i in range(n):
+        interior = rng.uniform() < INTERIOR_SHARE
+        depth = rng.uniform(0.35, 0.75) if interior else 0.78 + 0.22 * math.sqrt(rng.uniform())
+        p = skin_point(b, rng.uniform(-1, 1), rng.uniform(0, math.pi), depth)
+        out.append(dict(p=p, depth=depth, length=rng.uniform(*SPRIG_LEN), roll=rng.uniform(0, math.pi),
+                        bend=rng.normal(0, 0.45, 3), leaf=int(rng.integers(2)), flip=bool(rng.integers(2)),
+                        keep=rng.uniform()))
     return b, out
 
 
-def visual_mesh(spec, b, cl, share, scale):
-    """Two crossed quads a clump, both faces (each its own points), normals from the body."""
+def visual_mesh(spec, b, sp, share, scale, texture):
+    """One quad a sprig, both faces (each its own points), rooted at its point and pointing out of the
+    body; normals from the body, turned down and in with depth."""
     pts, nrm, faces = [], [], []
     (bx0, by0, bz0), (bx1, by1, bz1) = b["box"]
-    for k in cl:
+    for k in sp:
         if k["keep"] >= share:
             continue
-        tex, aspect = spec["textures"][k["tex"]]
-        s = k["size"] * scale
-        hw, hh = s * 0.5 * min(aspect, 1.6) * 0.95, s * 0.45
-        centre = k["p"].copy()
-        centre[1] = max(centre[1], by0 + hh * 0.9)  # stands on the ground, not in it
-        out = outward(b, centre)
-        for q in range(2):
-            yaw = k["yaw"] + q * math.pi / 2
-            right = np.array([math.cos(yaw), 0.0, math.sin(yaw)])
-            # lean the card out from the body and tilt it a little
-            up = np.array([0.0, 1.0, 0.0]) + out * 0.35 + np.cross(right, [0, 1, 0]) * k["tilt"]
-            up /= np.linalg.norm(up)
-            corners = [centre - right * hw - up * hh, centre + right * hw - up * hh,
-                       centre + right * hw + up * hh, centre - right * hw + up * hh]
-            corners = [np.clip(c, (bx0, by0 - 0.05, bz0), (bx1, by1, bz1)) for c in corners]
-            uv = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]  # v up the card (the writer flips it)
-            n = outward(b, np.array(corners))
-            # the interior reads darker: deeper clumps turn their normals down and in
-            dark = (1 - k["depth"]) / 0.38
-            n = n * (1 - 0.55 * dark) + np.array([0.0, -0.45, 0.0]) * dark
-            n /= np.linalg.norm(n, axis=1, keepdims=True)
-            g = np.cross(corners[1] - corners[0], corners[3] - corners[0])
-            front = g @ n.mean(0) > 0
-            for side in (0, 1):
-                base = len(pts)
-                pts.extend(corners)
-                nrm.extend(n.tolist())
-                tri = [(0, 1, 2), (0, 2, 3)]
-                if front == (side == 1):
-                    tri = [(t[0], t[2], t[1]) for t in tri]
-                for t in tri:
-                    faces.append(([base + i for i in t], [uv[i] for i in t], tex))
+        length = k["length"] * scale
+        root = k["p"]
+        out = outward(b, root)
+        # out of the body, scattered, a little upward (sprigs grow toward the light)
+        axis = out + k["bend"] + np.array([0.0, 0.25, 0.0])
+        axis /= np.linalg.norm(axis)
+        side = np.cross(axis, [0.0, 1.0, 0.0])
+        if np.linalg.norm(side) < 1e-3:
+            side = np.array([1.0, 0.0, 0.0])
+        side /= np.linalg.norm(side)
+        other = np.cross(axis, side)
+        across = side * math.cos(k["roll"]) + other * math.sin(k["roll"])
+        # the sheet's stem is at its bottom centre: the root sits a little above the card's bottom edge
+        base = root - axis * length * 0.08
+        hw = length * 0.5
+        corners = [base - across * hw, base + across * hw, base + across * hw + axis * length, base - across * hw + axis * length]
+        corners = [np.clip(c, (bx0 - 0.2, by0 - 0.05, bz0 - 0.2), (bx1 + 0.2, by1 + 0.2, bz1 + 0.2)) for c in corners]
+        u0, u1 = (0.5, 0.0) if k["flip"] else (0.0, 0.5)
+        u0, u1 = u0 + 0.5 * k["leaf"], u1 + 0.5 * k["leaf"]
+        uv = [(u0, 0.0), (u1, 0.0), (u1, 1.0), (u0, 1.0)]  # v up the sheet (the writer flips it)
+        n = outward(b, np.array(corners))
+        # the interior reads darker: deeper sprigs turn their normals down and in
+        dark = min(max((0.95 - k["depth"]) / 0.6, 0.0), 1.0)
+        n = n * (1 - 0.6 * dark) + np.array([0.0, -0.5, 0.0]) * dark
+        n /= np.linalg.norm(n, axis=1, keepdims=True)
+        g = np.cross(corners[1] - corners[0], corners[3] - corners[0])
+        front = g @ n.mean(0) > 0
+        for face_side in (0, 1):
+            first = len(pts)
+            pts.extend(corners)
+            nrm.extend(n.tolist())
+            tri = [(0, 1, 2), (0, 2, 3)]
+            if front == (face_side == 1):
+                tri = [(t[0], t[2], t[1]) for t in tri]
+            for t in tri:
+                faces.append(([first + i for i in t], [uv[i] for i in t], texture))
     return pts, nrm, faces
+
+
+def leaf_atlas(ez_tree_leaves, out_png):
+    """oak | ash from ez-tree's leaf sheets (MIT), each 512 px: alpha cut at 0.5 (DXT1 punch-through
+    is classified cutout by format), colour dilated into the clear texels so the mips do not pull the
+    leaf edges toward the sheet's background."""
+    from PIL import Image, ImageFilter
+
+    atlas = Image.new("RGBA", (1024, 512))
+    for i, name in enumerate(("oak", "ash")):
+        im = Image.open(Path(ez_tree_leaves) / f"{name}.png").convert("RGBA").resize((512, 512), Image.LANCZOS)
+        a = np.asarray(im).astype(np.float32)
+        alpha = a[..., 3] >= 128
+        rgb = a[..., :3] * alpha[..., None]
+        w = alpha.astype(np.float32)
+        # push-pull dilation: blur colour and coverage together, divide, fill only the clear texels
+        for radius in (2, 6, 16, 48):
+            cb = np.asarray(Image.fromarray(rgb.astype(np.uint8)).filter(ImageFilter.GaussianBlur(radius))).astype(np.float32)
+            wb = np.asarray(Image.fromarray((w * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(radius))).astype(np.float32) / 255
+            fill = (w < 0.5) & (wb > 0.01)
+            rgb[fill] = (cb[fill] / np.maximum(wb[fill, None], 1e-3)).clip(0, 255)
+            w = np.maximum(w, (wb > 0.01).astype(np.float32))
+        tile = np.dstack([rgb.clip(0, 255), alpha * 255.0]).astype(np.uint8)
+        atlas.paste(Image.fromarray(tile), (512 * i, 0))
+    atlas.save(out_png)
 
 
 def box(lo, hi):
@@ -178,12 +220,12 @@ def lod_bytes(points, normals, faces, resolution, properties=(), selections=None
     return b"".join(out)
 
 
-def build(name, spec):
+def build(name, spec, texture):
     seed = int(hashlib.sha256(name.encode()).hexdigest()[:8], 16)
-    b, cl = clumps(spec, seed)
+    b, sp = sprigs(spec, seed)
     lods, triangles = [], []
     for res, share, scale in LODS:
-        pts, nrm, faces = visual_mesh(spec, b, cl, share, scale)
+        pts, nrm, faces = visual_mesh(spec, b, sp, share, scale, texture)
         triangles.append(len(faces))
         lods.append(lod_bytes(pts, nrm, faces, spec["res"] if res is None else res, [("lodnoshadow", "1")]))
     # collision: one convex box in the stock geometry LOD's extent, written inward (the engine's convention)
@@ -205,11 +247,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--prefix", default="op_ground_materials")
+    parser.add_argument("--leaves", type=Path, required=True, help="ez-tree's textures/leaves (oak.png, ash.png)")
+    parser.add_argument("--atlas", type=Path, required=True, help="where to write the leaf atlas PNG")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
+    leaf_atlas(args.leaves, args.atlas)
     manifest = {"api": 1, "models": []}
     for name, spec in HEDGES.items():
-        data, triangles = build(name, spec)
+        data, triangles = build(name, spec, f"{args.prefix}\\{LEAF_TEXTURE}")
         file = f"hedge_{name}.p3d"
         (args.out / file).write_bytes(data)
         manifest["models"].append({"source": f"data3d\\{name}.p3d", "model": f"{args.prefix}\\{file}"})

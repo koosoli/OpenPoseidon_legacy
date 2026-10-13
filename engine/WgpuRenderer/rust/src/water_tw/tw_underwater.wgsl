@@ -47,6 +47,7 @@ const UW_SURFACE_VEIL: f32 = 1.5;
 const UW_BAND: i32 = 16;
 const UW_IOR: f32 = 1.333;
 const UW_PI: f32 = 3.141592653589793;
+const UW_PROBE_FADE: f32 = 16.0; // probe cells (0.25 m): the outer 4 m of the 16 m grid
 
 struct UwParams {
     inv_view_proj: mat4x4<f32>, // inv(view) * inv(proj), camera-relative (Frame.inv_view_proj)
@@ -164,6 +165,11 @@ fn uwProbeHeight(xz: vec2<f32>) -> vec2<f32> {
     }
     let f = (p - base) / h;
     if (any(f < vec2<f32>(1.0)) || any(f > vec2<f32>(nf - 2.0))) { return vec2<f32>(0.0); }
+    // (OP, 2026-10-13) weight of the probe surface: 1 inside, fading to 0 over the outer
+    // UW_PROBE_FADE cells. A hard switch to the fallback put a square on the seabed that followed
+    // the camera (owner): the column depth, its light and caustics all stepped at the grid edge.
+    let edge = min(min(f.x, f.y) - 1.0, (nf - 2.0) - max(f.x, f.y));
+    let wEdge = max(smoothstep(0.0, UW_PROBE_FADE, edge), 0.001);
     let c0 = vec2<i32>(floor(f));
     let g0 = vec2<i32>(round(base / h));
     for (var k = 0; k < 9; k++) {
@@ -183,18 +189,18 @@ fn uwProbeHeight(xz: vec2<f32>) -> vec2<f32> {
             r = uwTri(xz, a, cc, d);
             if (r.y < 0.5) { r = uwTri(xz, a, d, b); }
         }
-        if (r.y > 0.5) { return r; }
+        if (r.y > 0.5) { return vec2<f32>(r.x, wEdge); }
     }
     // (no triangle found: a folded patch) the four vertices around the lattice point, averaged
     let i = clamp(c0, vec2<i32>(0), vec2<i32>(n - 2));
-    return vec2<f32>((uwProbeV(i).y + uwProbeV(i + vec2<i32>(1, 0)).y + uwProbeV(i + vec2<i32>(0, 1)).y + uwProbeV(i + vec2<i32>(1, 1)).y) * 0.25, 1.0);
+    return vec2<f32>((uwProbeV(i).y + uwProbeV(i + vec2<i32>(1, 0)).y + uwProbeV(i + vec2<i32>(0, 1)).y + uwProbeV(i + vec2<i32>(1, 1)).y) * 0.25, wEdge);
 }
 
 // water surface height at xz: the drawn surface near the camera (W9a), else sea level + the FFT's
 // vertical displacement
 fn uwWaterHeight(xz: vec2<f32>) -> f32 {
     let near = uwProbeHeight(xz);
-    if (near.y > 0.5) { return near.x; }
+    if (near.y >= 1.0) { return near.x; }
     var y = 0.0;
     let n = i32(uw.ocean.y);
     for (var c = 0; c < 4; c++) {
@@ -202,7 +208,8 @@ fn uwWaterHeight(xz: vec2<f32>) -> f32 {
             y += textureSampleLevel(uwDisplacement, uwRepeat, xz / uw.sizes[c], c, 0.0).y;
         }
     }
-    return uw.scattering.w + y * uw.ocean.x;
+    let far = uw.scattering.w + y * uw.ocean.x;
+    return mix(far, near.x, near.y);
 }
 
 fn uwDepthAt(uv: vec2<f32>) -> f32 {
