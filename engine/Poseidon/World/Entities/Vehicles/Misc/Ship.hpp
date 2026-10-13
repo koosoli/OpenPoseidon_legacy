@@ -89,6 +89,8 @@ class Ship: public Transport
 		uint32_t qVersion = 0;
 		double qSeconds = 0;
 		float anchorH[TwSamples] = {};
+		float switchOff[TwSamples] = {}; // a source switch's height jump, fading out
+		bool settled = false;             // past its first step (placed at its draft if it began afloat)
 	} _tw;
 	bool SimulateTidewater(float deltaT, Frame& moveTrans);
 

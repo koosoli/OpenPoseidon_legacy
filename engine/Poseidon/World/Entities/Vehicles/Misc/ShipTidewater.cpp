@@ -94,6 +94,9 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
     const Matrix3 orient0 = Orientation();
     const Vector3 pos0 = Position();
     int overWater = 0;
+    // the boat's very first step (see the settle below); a boat that starts beached never settles
+    const bool firstStep = !_tw.settled;
+    _tw.settled = true;
 
     // (OP) The drawn sea, anywhere: the renderer evaluates the surface it draws at this hull's samples
     // (asked here for the next frames, a latency ahead along the hull's motion, as Tidewater's
@@ -127,6 +130,13 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
     const bool newResults = fromQuery && (!_tw.fromQuery || qVersion != _tw.qVersion);
     const double nowSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
     const float resultDt = float(qSeconds - _tw.qSeconds);
+    // Switching between the drawn sea and the predictor (the first results arriving, a boat leaving the
+    // query budget) jumps the water under every sample by up to 2 m in a storm; the jump is carried as
+    // an offset that fades over a few seconds. Instantly, a fresh boat fell at 6.5 m/s with its keel out
+    // of the water when the first results replaced the predictor's sea; faded over 0.5 s the water
+    // rose under it at 4 m/s and threw it 3 m up. At 2.5 s the water moves well under 1 m/s.
+    const bool switched = _tw.hasWater && fromQuery != _tw.fromQuery;
+    const float offsetFade = std::exp(-deltaT / 2.5f);
 
     for (int i = 0; i < TwSamples; ++i)
     {
@@ -153,20 +163,23 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
                 _tw.gx[i] = qgx[i];
                 _tw.gz[i] = qgz[i];
             }
-            _tw.waterH[i] = h + _tw.waterV[i] * std::clamp(float(nowSeconds - qSeconds), 0.0f, 0.12f);
+            const float base = h + _tw.waterV[i] * std::clamp(float(nowSeconds - qSeconds), 0.0f, 0.12f);
+            _tw.switchOff[i] = switched ? _tw.waterH[i] - base : _tw.switchOff[i] * offsetFade;
+            _tw.waterH[i] = base + _tw.switchOff[i];
             continue;
         }
         const float h = WaterAt(w.X(), w.Z()) - _sink;
         const float gx = (WaterAt(w.X() + 0.5f, w.Z()) - WaterAt(w.X() - 0.5f, w.Z())) * 1.0f;
         const float gz = (WaterAt(w.X(), w.Z() + 0.5f) - WaterAt(w.X(), w.Z() - 0.5f)) * 1.0f;
-        float wv = 0;
-        if (_tw.hasWater)
+        if (_tw.hasWater && !switched)
         {
+            // against last frame's height without its fading offset
             const float dx = w.X() - _tw.qx[i], dz = w.Z() - _tw.qz[i];
-            wv = (h - _tw.waterH[i] - 0.5f * ((gx + _tw.gx[i]) * dx + (gz + _tw.gz[i]) * dz)) / deltaT;
+            const float wv = (h - (_tw.waterH[i] - _tw.switchOff[i]) - 0.5f * ((gx + _tw.gx[i]) * dx + (gz + _tw.gz[i]) * dz)) / deltaT;
+            _tw.waterV[i] += (std::clamp(wv, -3.0f, 3.0f) - _tw.waterV[i]) * 0.5f;
         }
-        _tw.waterV[i] += (std::clamp(wv, -3.0f, 3.0f) - _tw.waterV[i]) * 0.5f;
-        _tw.waterH[i] = h;
+        _tw.switchOff[i] = switched ? _tw.waterH[i] - h : _tw.switchOff[i] * offsetFade;
+        _tw.waterH[i] = h + _tw.switchOff[i];
         _tw.qx[i] = w.X();
         _tw.qz[i] = w.Z();
         _tw.gx[i] = gx;
@@ -184,6 +197,19 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
         return false; // beached: the legacy land contact handles it
     }
     _tw.hasWater = true;
+    // (OP) A boat the mission placed sits where its weight is carried, not where its origin was put:
+    // created at the mean sea level under a 9 m storm crest its keel was 2 m deep and the first second
+    // threw it 3.5 m into the air. On its first step, if on the water, it is moved to its design draft
+    // under the local surface, at rest vertically -- on its first step only, so a boat driven off a
+    // beach into the sea is never moved.
+    float settle = 0.0f;
+    if (firstStep)
+    {
+        float depth = 0.0f;
+        for (int i = 0; i < TwSamples; ++i)
+            depth += _tw.waterH[i] - (pos0 + orient0 * sample[i]).Y();
+        settle = depth / TwSamples - designDraft;
+    }
 
     // ---- controls: OFP's two engines -> throttle lever and rudder (positive = the yaw the legacy
     // differential thrust gave for R > L)
@@ -225,7 +251,9 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
     Vector3 velocity = _speed;
     Vector3 angular = _angVelocity;
     Matrix3 orient = orient0;
-    Vector3 com = pos0 + orient0 * comModel;
+    Vector3 com = pos0 + orient0 * comModel + Vector3(0, settle, 0);
+    if (settle != 0.0f)
+        velocity[1] = 0.0f;
     {
         velocity += _impulseForce * (1.0f / m);
         const Vector3 tl = orient.InverseRotation() * _impulseTorque;
