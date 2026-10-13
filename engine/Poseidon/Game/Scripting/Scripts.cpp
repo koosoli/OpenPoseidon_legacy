@@ -524,9 +524,13 @@ bool Script::Simulate(float deltaT)
         CurrentScript = this;
         GameState* gstate = GWorld->GetGameState();
         gstate->BeginContext(&_vars);
-        gstate->VarSet("_time", _time); // make sure there is such variable
+        // SQS keeps the script's clock in _time; in a scheduled SQF script _time is an
+        // ordinary local the script owns (fn_halo: _time = time, then time - _time).
+        if (!_fiber)
+            gstate->VarSet("_time", _time); // make sure there is such variable
         ret = SimulateBody();
-        _time = gstate->VarGet("_time");
+        if (!_fiber)
+            _time = gstate->VarGet("_time");
         gstate->EndContext();
         CurrentScript = nullptr;
     }
@@ -547,10 +551,14 @@ bool Script::OnSimulate()
         CurrentScript = this;
         GameState* gstate = GWorld->GetGameState();
         gstate->BeginContext(&_vars);
-        gstate->VarSet("_time", _time);
+        if (!_fiber)
+            gstate->VarSet("_time", _time);
         ret = SimulateBody();
-        _time = gstate->VarGet("_time");
-        _baseTime = Glob.time - _time;
+        if (!_fiber)
+        {
+            _time = gstate->VarGet("_time");
+            _baseTime = Glob.time - _time;
+        }
         gstate->EndContext();
         CurrentScript = nullptr;
     }
