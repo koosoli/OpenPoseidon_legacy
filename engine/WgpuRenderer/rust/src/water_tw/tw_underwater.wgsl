@@ -125,16 +125,20 @@ fn uwTri(xz: vec2<f32>, a: vec3<f32>, b: vec3<f32>, c: vec3<f32>) -> vec2<f32> {
 // vertices (tw_probe.wgsl). The triangles are CDLOD.js's grid (cdlod.rs grid_mesh): in a cell
 // (i, j) with i + j even, (a c b) (b c d), else (a c d) (a d b), a = (i, j), b = (i+1, j),
 // c = (i, j+1), d = (i+1, j+1); nodes start on even lattice indices, so the parity is the
-// world lattice's. The cell under xz is found from the lattice point displaced to it (two
-// fixed-point steps), then it and its 8 neighbours are tested. y = 0 outside the grid.
+// world lattice's. The cell under xz is found from the lattice point displaced to it (Newton
+// steps), then it and its 8 neighbours are tested. y = 0 outside the grid.
 fn uwProbeHeight(xz: vec2<f32>) -> vec2<f32> {
     let nf = uw.probe.w;
     if (nf < 2.0) { return vec2<f32>(0.0); }
     let n = i32(nf);
     let h = uw.probe.z;
     let base = uw.probe.xy;
+    // (OP, 2026-10-13) Newton on p + D(p) = xz with the cell's bilinear displacement, as probe.rs
+    // `surface_height` (tested there against a trochoid). The plain fixed-point step used before
+    // contracts by only 1 - kQ per step: on a choppy crest two steps left the point metres off,
+    // outside the 3 x 3 cells searched, and the camera's own depth came out wrong.
     var p = xz;
-    for (var k = 0; k < 2; k++) {
+    for (var k = 0; k < 6; k++) {
         let f = clamp((p - base) / h, vec2<f32>(0.0), vec2<f32>(nf - 1.001));
         let i = vec2<i32>(floor(f));
         let t = f - vec2<f32>(i);
@@ -142,7 +146,21 @@ fn uwProbeHeight(xz: vec2<f32>) -> vec2<f32> {
         let d10 = uwProbeV(i + vec2<i32>(1, 0)).xz - (base + vec2<f32>(i + vec2<i32>(1, 0)) * h);
         let d01 = uwProbeV(i + vec2<i32>(0, 1)).xz - (base + vec2<f32>(i + vec2<i32>(0, 1)) * h);
         let d11 = uwProbeV(i + vec2<i32>(1, 1)).xz - (base + vec2<f32>(i + vec2<i32>(1, 1)) * h);
-        p = xz - mix(mix(d00, d10, t.x), mix(d01, d11, t.x), t.y);
+        let a = mix(d00, d10, t.x);
+        let b = mix(d01, d11, t.x);
+        let m = mix(a, b, t.y);
+        // columns: d/dx and d/dz of p + D(p)
+        let jx = vec2<f32>(1.0, 0.0) + ((d10 - d00) * (1.0 - t.y) + (d11 - d01) * t.y) / h;
+        let jz = vec2<f32>(0.0, 1.0) + (b - a) / h;
+        let r = p + m - xz;
+        let det = jx.x * jz.y - jz.x * jx.y;
+        var step = r;
+        if (det > 0.05) {
+            step = vec2<f32>(jz.y * r.x - jz.x * r.y, jx.x * r.y - jx.y * r.x) / det;
+        }
+        let len = length(step);
+        if (len > 1.0) { step = step / len; }
+        p = p - step;
     }
     let f = (p - base) / h;
     if (any(f < vec2<f32>(1.0)) || any(f > vec2<f32>(nf - 2.0))) { return vec2<f32>(0.0); }

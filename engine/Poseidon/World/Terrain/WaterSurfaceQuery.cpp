@@ -130,19 +130,29 @@ float TidewaterSeaVarianceScale(const Engine::WaterSettings& look)
     const bool weatherWind = look.windFromWeather && GWind.IsActive();
     const float w = weatherWind ? std::round(GWind.Sample().meanSpeed) : 7.0f;
     const int mode = std::clamp(look.tidewater.seaConditions, 0, 5);
-    float wind = weatherWind ? w : 12.0f; // the spectrum's wind when no preset brings one
+    float wind = 12.0f; // the spectrum's wind when no preset brings one
     float fetch = 120.0f;
     float swell = std::max(look.tidewater.swellScale, 0.0f);
     if (mode == 0)
     {
+        // Exactly as the renderer resolves Weather mode (WaterWgpu.cpp kTwSeaWeatherWind): the weather
+        // wind, clamped to 3..12 m/s, picks the place between the presets, and the sea takes the
+        // PRESETS' wind, fetch and swell there; without a weather wind, Breezy. Until 2026-10-13 this
+        // interpolated by the presets' own winds and used the weather wind as the sea's: at a storm
+        // (weather 12 m/s) the boats rode a Choppy-sized sea about a third the height of the Storm
+        // drawn around them -- hanging in the air in its troughs -- and at a 30 m/s dev-panel wind one
+        // 40 % higher than it (owner: the boat "jumps around like crazy in the air").
+        constexpr float kWeatherWind[4] = {3.0f, 6.0f, 9.0f, 12.0f};
+        const float ww = weatherWind ? std::clamp(w, kWeatherWind[0], kWeatherWind[3]) : kWeatherWind[1];
         int i = 0;
-        while (i < 2 && w > kTidewaterSeaRows[i + 1].wind)
+        while (i < 2 && ww > kWeatherWind[i + 1])
         {
             ++i;
         }
         const TidewaterSeaRow& a = kTidewaterSeaRows[i];
         const TidewaterSeaRow& b = kTidewaterSeaRows[i + 1];
-        const float f = std::clamp((w - a.wind) / (b.wind - a.wind), 0.0f, 1.0f);
+        const float f = std::clamp((ww - kWeatherWind[i]) / (kWeatherWind[i + 1] - kWeatherWind[i]), 0.0f, 1.0f);
+        wind = a.wind + (b.wind - a.wind) * f;
         fetch = a.fetchKm + (b.fetchKm - a.fetchKm) * f;
         swell = a.swell + (b.swell - a.swell) * f;
     }

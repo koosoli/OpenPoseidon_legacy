@@ -83,6 +83,12 @@ class Ship: public Transport
 		float waterH[TwSamples] = {}, waterV[TwSamples] = {}, qx[TwSamples] = {}, qz[TwSamples] = {},
 			gx[TwSamples] = {}, gz[TwSamples] = {};
 		float heaveSpeed = 0; // last hull vertical speed relative to the water (ripples)
+		// (OP) the drawn sea from the renderer's queries (DrawnWaterQuery): the result set the samples'
+		// anchors came from, when it arrived, and each sample's height in it
+		bool fromQuery = false;
+		uint32_t qVersion = 0;
+		double qSeconds = 0;
+		float anchorH[TwSamples] = {};
 	} _tw;
 	bool SimulateTidewater(float deltaT, Frame& moveTrans);
 

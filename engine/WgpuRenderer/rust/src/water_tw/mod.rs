@@ -37,6 +37,7 @@ mod boat_spray;
 mod impacts;
 pub(crate) mod probe;
 pub(crate) mod swash;
+pub(crate) mod query;
 mod breakers;
 mod cdlod;
 mod fft;
@@ -537,6 +538,8 @@ pub struct Tidewater {
     probe: probe::Probe,
     // (OP) the swash field around the camera, for the shorebirds (swash.rs)
     swash: swash::Swash,
+    // (OP) water heights at the engine's points (boat hulls; query.rs)
+    query: query::Query,
     // Swimming: the exact lanes recorded alongside each probe readback.
     probe_lanes: [f32; 4],
     // W5e: the frame's spot lights (the diver's torch is picked from them in prepare)
@@ -783,6 +786,7 @@ impl Tidewater {
         let uw = underwater::TwUnderwater::new(device, surface_format);
         let probe = probe::Probe::new(device, &layout, &shader);
         let swash = swash::Swash::new(device, &layout, &shader);
+        let query = query::Query::new(device, &layout, &shader);
         let caustics = caustics::Caustics::new(device);
         let wake = wake::WakeGpu::new(device, TW_WAKE_KERNEL_WGSL);
 
@@ -860,6 +864,7 @@ impl Tidewater {
             impacts: Default::default(),
             probe,
             swash,
+            query,
             probe_lanes: [0.0; 4],
             spray,
             uw,
@@ -1089,6 +1094,7 @@ impl Tidewater {
         self.spray.poll_stats();
         self.probe.poll();
         self.swash.poll();
+        self.query.poll();
         let cp = [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]];
         let (gain, intensity) = spray_override().unwrap_or((p.tidewater_fx[0], p.tidewater_fx[1]));
         // W6i: the boats' bow spray into the ring's CPU tail, and their hulls as collision bodies
@@ -1147,6 +1153,8 @@ impl Tidewater {
             // composite reads it; until the first one exists the composite uses the FFT alone)
             uwp.probe = if self.probe.ready || !self.bind_dirty { probe::Probe::lanes(cp) } else { [0.0; 4] };
             self.probe_lanes = probe::Probe::lanes(cp);
+            self.probe.set_camera(cp);
+            self.query.prepare(queue);
             self.uw.set_frame(queue, &uwp);
         }
         self.fft.set_frame(queue, spec, p.tidewater[0][1], p.time, dt);
@@ -1205,6 +1213,7 @@ impl Tidewater {
             if !self.bind_dirty {
                 self.probe.record(encoder, &self.bind, self.probe_lanes);
                 self.swash.record(encoder, &self.bind, self.probe_lanes);
+                self.query.record(encoder, &self.bind);
             }
         }
     }

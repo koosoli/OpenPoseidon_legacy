@@ -137,10 +137,12 @@ WaterSurfaceSample SwimSurface(float x, float z, float level, float waveScale)
     // scale, not crest for crest, and the gap (half a metre at times) put the player's eyes under the drawn
     // crests. POSEIDON_SWIM_DRAWN=0: the predictor everywhere.
     static const bool drawn = EnvOn("POSEIDON_SWIM_DRAWN");
-    float y;
-    if (drawn && DrawnWaterHeightAt(x, z, y))
+    float y, w = 1.0f;
+    if (drawn && DrawnWaterHeightAt(x, z, y, &w))
     {
-        sample.height = y;
+        // blended to the predictor over the grid's outer 2 m: a boat whose hull straddled the edge stood
+        // on two seas metres apart in a storm and was thrown into the air (owner, 2026-10-13)
+        sample.height += (y - sample.height) * w;
     }
     return sample;
 }

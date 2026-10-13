@@ -1454,6 +1454,24 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         {
             SetDrawnWaterGrid(nullptr, 0, nullptr);
         }
+        // (OP) the boats' hull samples anywhere on the sea (water_tw/query.rs): this step's points up,
+        // the latest results down (stale after 250 ms, as the grid)
+        static float queryXz[WaterQueryMaxPoints * 2];
+        static float resultXz[WaterQueryMaxPoints * 2];
+        static float resultValues[WaterQueryMaxPoints * 4];
+        const bool tidewater = TidewaterDrawsWater(look.waterBackend);
+        const int asked = tidewater ? TakeWaterQueryRequests(queryXz, WaterQueryMaxPoints) : 0;
+        wgr_water_query_points(queryXz, uint32_t(asked));
+        float queryAge = 0.0f;
+        const uint32_t got = tidewater ? wgr_water_query_results(resultXz, resultValues, WaterQueryMaxPoints, &queryAge) : 0;
+        if (got > 0 && std::isfinite(queryAge) && queryAge >= 0.0f && queryAge < 250.0f)
+        {
+            SetWaterQueryResults(resultXz, resultValues, int(got));
+        }
+        else
+        {
+            SetWaterQueryResults(nullptr, nullptr, 0);
+        }
     }
     std::array<HydroWaterInteractionEvent, HydroMaxWaterInteractions> submitted{};
     const uint32_t submittedCount = DrainWaterInteractions(submitted.data(), HydroMaxWaterInteractions);

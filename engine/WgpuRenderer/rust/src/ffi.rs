@@ -3358,6 +3358,40 @@ pub unsafe extern "C" fn wgr_water_swash_field(texels: *mut f32, cap: u32, lanes
     .unwrap_or(0)
 }
 
+/// # Safety
+/// `xz` must point to `count` pairs of floats unless `count` is zero.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_water_query_points(xz: *const f32, count: u32) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let pts: &[[f32; 2]] = if xz.is_null() || count == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(xz as *const [f32; 2], count as usize) }
+        };
+        crate::water_tw::query::set_points(pts);
+    }));
+}
+
+/// # Safety
+/// `xz` must hold `cap` pairs and `values` `cap` quadruples of floats; `age_ms` must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_water_query_results(xz: *mut f32, values: *mut f32, cap: u32, age_ms: *mut f32) -> u32 {
+    if xz.is_null() || values.is_null() || age_ms.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let pts = unsafe { std::slice::from_raw_parts_mut(xz as *mut [f32; 2], cap as usize) };
+        let vals = unsafe { std::slice::from_raw_parts_mut(values as *mut [f32; 4], cap as usize) };
+        let mut age = 0.0f32;
+        let n = crate::water_tw::query::results(pts, vals, &mut age);
+        if n > 0 {
+            unsafe { *age_ms = age };
+        }
+        n as u32
+    }))
+    .unwrap_or(0)
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wgr_water_drawn_grid(xyz: *mut f32, cap: u32, lanes: *mut f32, age_ms: *mut f32) -> u32 {
     if xyz.is_null() || lanes.is_null() || age_ms.is_null() {

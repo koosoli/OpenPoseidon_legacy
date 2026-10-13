@@ -2954,6 +2954,13 @@ extern "C"
      * lattice x, z, step, texels per side) into `lanes[4]`, the readback's age into `age_ms`. Returns
      * the texel count, 0 when there is none. Any thread. */
     WGR_API uint32_t wgr_water_drawn_grid(float* xyz, uint32_t cap, float* lanes, float* age_ms);
+    /* (OP) Water height queries (water_tw/query.rs): the world points (x, z pairs, at most 128) the
+     * Tidewater water evaluates from the next frame on, and the latest results, read back 1-3 frames
+     * late with the points they were asked at: up to `cap` points into `xz` and (height, dh/dx, dh/dz,
+     * valid) into `values`, the readback's age into `age_ms`. Returns the count, 0 when there is
+     * none. Any thread. */
+    WGR_API void wgr_water_query_points(const float* xz, uint32_t count);
+    WGR_API uint32_t wgr_water_query_results(float* xz, float* values, uint32_t cap, float* age_ms);
     /* (OP) The swash field around the camera for the shorebirds (water_tw/swash.rs, read back 1-3
      * frames late): up to `cap` texels of (runup, inland, dRdt, tau) into `texels` (4 floats each;
      * w < 0 where no shore waves run), the lattice lanes (first texel x, z, step, texels per side)

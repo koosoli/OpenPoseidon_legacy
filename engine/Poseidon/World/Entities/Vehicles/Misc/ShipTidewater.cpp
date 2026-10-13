@@ -8,21 +8,25 @@
 // a lifting surface in the propeller race, hull lift and cross-flow drag along the keel, running trim,
 // grounding. Tidewater tuned it for one 8.2 m, 3.2 t lobster boat; here every term is scaled from
 // that hull to each OFP boat's own mass, length and beam, and OFP's left/right thrust controls drive
-// the throttle and the rudder. The water heights come from the CPU sea as drawn near the camera
-// (SwimWaterSurfaceY), so servers and headless runs integrate the same sea.
+// the throttle and the rudder. The water heights come from the renderer's queries of the drawn sea at
+// the hull samples (DrawnWaterQuery, 1-3 frames late, as Tidewater's WaterQuery), else from the CPU
+// sea as drawn near the camera (SwimWaterSurfaceY), which servers and headless runs integrate.
 //
-// What OP changes: no GPU read-back latency to lead (the heights are the current frame's), the
+// What OP changes: the read-back latency is led and extrapolated for the queried heights only, the
 // mooring lines and pier capsules are OFP's object collision instead, and the hull samples are a
 // 7 x 3 grid over each model's footprint rather than an authored hull.
 
 #include <Poseidon/World/Entities/Vehicles/Misc/Ship.hpp>
 #include <Poseidon/World/Entities/Infantry/SwimView.hpp>
+#include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 
 namespace Poseidon
@@ -90,11 +94,68 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
     const Matrix3 orient0 = Orientation();
     const Vector3 pos0 = Position();
     int overWater = 0;
+
+    // (OP) The drawn sea, anywhere: the renderer evaluates the surface it draws at this hull's samples
+    // (asked here for the next frames, a latency ahead along the hull's motion, as Tidewater's
+    // queueQueries) and answers 1-3 frames late. Without it a boat outside the 16 m around the camera
+    // floated on the CPU predictor, which matches the drawn sea in scale but not crest for crest: in a
+    // storm it hung over drawn troughs and sank into crests (owner, 2026-10-13). All samples or none,
+    // so a hull never rides two seas; a server or another water mode has no results and keeps the
+    // predictor. POSEIDON_BOAT_QUERY=0: the predictor (and the grid near the camera) always.
+    static const bool useQuery = []
+    {
+        const char* v = std::getenv("POSEIDON_BOAT_QUERY");
+        return !(v && v[0] == '0');
+    }();
+    float qh[TwSamples], qgx[TwSamples], qgz[TwSamples];
+    uint32_t qVersion = 0;
+    double qSeconds = 0;
+    bool fromQuery = useQuery;
+    if (useQuery)
+    {
+        float req[TwSamples * 2];
+        constexpr float Lead = 0.05f;
+        for (int i = 0; i < TwSamples && fromQuery; ++i)
+        {
+            const Vector3 w = pos0 + orient0 * sample[i];
+            req[i * 2] = w.X() + _speed.X() * Lead;
+            req[i * 2 + 1] = w.Z() + _speed.Z() * Lead;
+            fromQuery = DrawnWaterQuery(w.X(), w.Z(), qh[i], qgx[i], qgz[i], &qVersion, &qSeconds);
+        }
+        RequestWaterQueries(reinterpret_cast<uintptr_t>(this), req, TwSamples);
+    }
+    const bool newResults = fromQuery && (!_tw.fromQuery || qVersion != _tw.qVersion);
+    const double nowSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    const float resultDt = float(qSeconds - _tw.qSeconds);
+
     for (int i = 0; i < TwSamples; ++i)
     {
         const Vector3 w = pos0 + orient0 * sample[i];
         if (GLandscape->SurfaceY(w.X(), w.Z()) < GLandscape->GetSeaLevel())
             ++overWater;
+        if (fromQuery)
+        {
+            // the water's vertical speed between two result sets (not between frames: a set is reused
+            // for 1-3 frames), less the part the sample's own move across the slope explains; the
+            // height is carried from the set's age to now along it
+            const float h = qh[i] - _sink;
+            if (newResults)
+            {
+                if (_tw.hasWater && _tw.fromQuery && resultDt > 1e-3f)
+                {
+                    const float dx = w.X() - _tw.qx[i], dz = w.Z() - _tw.qz[i];
+                    const float wv = (h - _tw.anchorH[i] - 0.5f * ((qgx[i] + _tw.gx[i]) * dx + (qgz[i] + _tw.gz[i]) * dz)) / resultDt;
+                    _tw.waterV[i] += (std::clamp(wv, -3.0f, 3.0f) - _tw.waterV[i]) * 0.5f;
+                }
+                _tw.anchorH[i] = h;
+                _tw.qx[i] = w.X();
+                _tw.qz[i] = w.Z();
+                _tw.gx[i] = qgx[i];
+                _tw.gz[i] = qgz[i];
+            }
+            _tw.waterH[i] = h + _tw.waterV[i] * std::clamp(float(nowSeconds - qSeconds), 0.0f, 0.12f);
+            continue;
+        }
         const float h = WaterAt(w.X(), w.Z()) - _sink;
         const float gx = (WaterAt(w.X() + 0.5f, w.Z()) - WaterAt(w.X() - 0.5f, w.Z())) * 1.0f;
         const float gz = (WaterAt(w.X(), w.Z() + 0.5f) - WaterAt(w.X(), w.Z() - 0.5f)) * 1.0f;
@@ -110,6 +171,12 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
         _tw.qz[i] = w.Z();
         _tw.gx[i] = gx;
         _tw.gz[i] = gz;
+    }
+    _tw.fromQuery = fromQuery;
+    if (fromQuery)
+    {
+        _tw.qVersion = qVersion;
+        _tw.qSeconds = qSeconds;
     }
     if (overWater == 0)
     {
@@ -326,10 +393,10 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
         if (Glob.time.toFloat() >= next)
         {
             next = Glob.time.toFloat() + 0.25f;
-            LOG_INFO(Physics, "Boat TW: t={:.2f} y={:.2f} keel-water={:.2f} wet={:.2f} vy={:.2f} heave-rel={:.2f} u={:.2f} pitch={:.3f} roll={:.3f} thrust={:.0f} rudder={:.2f} steps={}",
+            LOG_INFO(Physics, "Boat TW: t={:.2f} y={:.2f} keel-water={:.2f} wet={:.2f} vy={:.2f} heave-rel={:.2f} u={:.2f} pitch={:.3f} roll={:.3f} thrust={:.0f} rudder={:.2f} steps={} water={}",
                      Glob.time.toFloat(), com.Y(), _tw.waterH[TwSamples / 2] - (com + orient * (sample[TwSamples / 2] - comModel)).Y(),
                      wetFraction, velocity.Y(), heave, (orient.InverseRotation() * velocity).Z(), orient.Direction().Y(),
-                     orient.DirectionAside().Y(), 0.0f, _tw.rudder, steps);
+                     orient.DirectionAside().Y(), 0.0f, _tw.rudder, steps, _tw.fromQuery ? "drawn" : "predictor");
         }
     }
     return true;

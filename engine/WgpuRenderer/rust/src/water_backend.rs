@@ -281,6 +281,7 @@ impl WaterBackend {
         let t0 = std::time::Instant::now();
         // Drop first: at no point do both backends hold GPU memory.
         crate::water_tw::probe::clear_drawn_grid();
+        crate::water_tw::query::clear();
         self.active = Active::Empty;
         self.active = match want {
             WaterBackendKind::CurrentOp => {
