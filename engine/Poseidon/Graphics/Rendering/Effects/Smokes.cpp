@@ -323,8 +323,9 @@ void SmokeSourceVehicle::SimulateExplosion()
             {
                 const Vector3 p = wreck->Position();
                 const float ground = GLandscape ? GLandscape->SurfaceY(p.X(), p.Z()) : p.Y();
+                // FIRE-002: Fire Pro's fuel fireball -- a vehicle's fuel goes up black (smoke 1)
                 SpawnFireVolume(Vector3(p.X(), ground, p.Z()), std::clamp(wreck->GetRadius() * 0.5f, 1.2f, 3.5f),
-                                0.75f, 2.5f, FireKindExplosion);
+                                1.0f, 3.5f, FireKindExplosion);
             }
             // change fire and darkFire parameters based on type.hit value
             float fireSize = type.hit * 0.001;
@@ -366,15 +367,51 @@ void SmokeSourceVehicle::Simulate(float deltaT, SimulationImportance prec)
     {
         canDelete = true;
     }
-    // FIRE-001: a wreck burns while it smokes: a bed the size of the hull on the ground under
-    // it, its strength the smoke's own fade in and out
+    // FIRE-002: a destroyed vehicle in Fire Pro's three acts. The fuel goes up as a fireball
+    // (SimulateExplosion); a thick black column then climbs off the hull and drifts with the wind
+    // (its smoke stack); and the wreck catches and burns (its delayed ignition: the flames start a
+    // couple of seconds after the blast and grow, instead of being there at full size at once).
+    // The column and the flames are separate solver boxes; both keep out of walls (FireVolumes).
     if (Object* wreck = GetObject(); wreck && _inOutDensity > 0.02f)
     {
+        _burnAge += deltaT;
         const Vector3 p = wreck->Position();
         const float ground = GLandscape ? GLandscape->SurfaceY(p.X(), p.Z()) : p.Y();
         const float radius = std::clamp(wreck->GetRadius() * 0.35f, 0.6f, 2.2f);
-        ReportFireVolume(this, Vector3(p.X(), std::max(ground, Position().Y() - 1.2f), p.Z()), radius,
-                         _inOutDensity, 0.5f, FireKindWreck);
+        // seconds since the fireball, or since the smoke began when there was none
+        const float since = _exploded ? std::max((Glob.time - _explosionTime), 0.0f) : _burnAge;
+        const auto ramp = [](float a, float b, float x)
+        {
+            const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
+            return t * t * (3.0f - 2.0f * t);
+        };
+        const float ignition = ramp(_exploded ? 1.5f : 2.0f, _exploded ? 4.5f : 6.0f, since);
+        if (ignition > 0.0f)
+            ReportFireVolume(this, Vector3(p.X(), std::max(ground, Position().Y() - 1.2f), p.Z()), radius,
+                             _inOutDensity * ignition, 0.5f, FireKindWreck);
+        // the column stands on the hull's top, so it climbs out of the flames, not through the hull
+        const LODShapeWithShadow* shape = wreck->GetShape();
+        const float top = shape ? p.Y() + shape->Max().Y() : p.Y() + 1.5f;
+        const float column = ramp(0.3f, 2.0f, since);
+        const void* columnOwner = reinterpret_cast<const char*>(this) + 1;
+        if (column > 0.0f)
+        {
+            // soot: near black, and dense (x6 per metre in the renderer)
+            static const float kSoot[4] = {0.016f, 0.016f, 0.017f, 1.5f};
+            ReportFireVolume(columnOwner, Vector3(p.X(), std::max(top, ground + 0.5f), p.Z()),
+                             std::clamp(wreck->GetRadius() * 0.25f, 0.8f, 1.6f), _inOutDensity * column, 1.0f,
+                             FireKindSmokeStack, kSoot);
+        }
+        // while the column is drawn, the 2001 puffs only carry it on where it leaves its box (as
+        // for a smoke grenade): ~2.3 box widths downwind in a breeze, ~1.8 up in calm air
+        if (FireVolumeDrawn(columnOwner))
+        {
+            const float wind = GLandscape ? GLandscape->GetWind().SizeXZ() : 0.0f;
+            const float reach = 2.0f * std::max(wreck->GetRadius() * 2.5f, 10.0f);
+            SetHandoffFadeIn(std::clamp(reach / std::max(wind, 1.5f), 3.0f, 12.0f));
+        }
+        else
+            SetHandoffFadeIn(0.0f);
     }
     if (_fire.Active() || _darkFire.Active())
     {

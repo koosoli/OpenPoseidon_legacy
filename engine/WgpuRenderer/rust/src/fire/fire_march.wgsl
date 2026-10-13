@@ -7,11 +7,11 @@
 // temperature from heat and the blackbody table of blackbody.ts) and the sun lobe of
 // fireProDirect.
 //
-// What OP changes: one full-screen pass over up to four dense boxes, nearest first; the march
+// What OP changes: one full-screen pass over up to six dense boxes, nearest first; the march
 // stops at OP's reversed-Z scene depth; the smoke is lit by OP's sun and ambient with a short
 // march toward the sun through the same box for its self-shadow (Fire Pro: a light volume).
 
-const MAX_FIRES: u32 = 4u;
+const MAX_FIRES: u32 = 6u;
 
 struct Box {
     origin_cell: vec4<f32>, // min corner relative to the camera (m), w: cell size
@@ -21,7 +21,7 @@ struct Box {
 };
 
 struct MarchParams {
-    boxes: array<Box, 4>,
+    boxes: array<Box, 6>,
     inv_view_proj: mat4x4<f32>, // camera-relative
     sizes: vec4<f32>,           // render width, height, box count, time
     sun_dir: vec4<f32>,         // toward the sun, w: Henyey-Greenstein g
@@ -39,6 +39,8 @@ struct MarchParams {
 @group(0) @binding(5) var field1: texture_3d<f32>;
 @group(0) @binding(6) var field2: texture_3d<f32>;
 @group(0) @binding(7) var field3: texture_3d<f32>;
+@group(0) @binding(8) var field4: texture_3d<f32>;
+@group(0) @binding(9) var field5: texture_3d<f32>;
 
 @vertex
 fn vs_fullscreen(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
@@ -57,7 +59,9 @@ fn sampleField(i: u32, q: vec3<f32>) -> vec4<f32> {
         case 0u: { return textureSampleLevel(field0, lin, q, 0.0); }
         case 1u: { return textureSampleLevel(field1, lin, q, 0.0); }
         case 2u: { return textureSampleLevel(field2, lin, q, 0.0); }
-        default: { return textureSampleLevel(field3, lin, q, 0.0); }
+        case 3u: { return textureSampleLevel(field3, lin, q, 0.0); }
+        case 4u: { return textureSampleLevel(field4, lin, q, 0.0); }
+        default: { return textureSampleLevel(field5, lin, q, 0.0); }
     }
 }
 

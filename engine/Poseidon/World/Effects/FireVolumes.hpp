@@ -17,6 +17,7 @@ enum FireVolumeKind
     FireKindWreck = 1,     // a burning vehicle: wide, smoky
     FireKindExplosion = 2, // a burst: hot, fast, short
     FireKindSmoke = 3,     // smoke without flame: a smoke grenade, a smouldering source
+    FireKindSmokeStack = 4, // FIRE-002: a wreck's thick black column (Fire Pro's smoke stack)
 };
 
 struct FireVolumeReport
@@ -57,6 +58,6 @@ bool FireVolumeDrawn(const void* owner);
 // False when the volumetric fire is switched off (WGR_FIRE=0).
 bool FireVolumesEnabled();
 
-constexpr int MaxDrawnFireVolumes = 4;
+constexpr int MaxDrawnFireVolumes = 6;
 constexpr float FireVolumeRange = 300.0f;
 } // namespace Poseidon

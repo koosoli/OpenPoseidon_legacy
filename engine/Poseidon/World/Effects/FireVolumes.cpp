@@ -48,6 +48,9 @@ std::unordered_set<const void*>& Drawn()
 // The renderer's box for this fire (fire/mod.rs Grid::new uses the width it is sent).
 float BoxWidth(const FireVolumeReport& r)
 {
+    // a wreck's column: wide enough that a climbing plume bends over inside it, not at its wall
+    if (r.kind == FireKindSmokeStack)
+        return std::max(r.radius * 10.0f, 10.0f);
     if (r.kind == FireKindSmoke)
         // a cloud spreads wider than its source; the box's cells (width / 48) must stay small enough
         // for its billows, so the length downwind comes from the wind-turned box, not the width
@@ -57,7 +60,7 @@ float BoxWidth(const FireVolumeReport& r)
 
 // Probe the world around the fire once: floors everywhere; walls and ceilings where they can
 // matter (a fireplace anywhere -- it may stand against a wall or in a room; a burst only under
-// a roof). A wreck is skipped: the probes would find its own hull and wall the flames in.
+// a roof). A wreck's probes start outside its own hull, or they would wall the flames in.
 void ProbeSolids(FireVolumeReport& r)
 {
     const ISmokeWorldQuery& q = GSmokeWorldQuery();
@@ -66,9 +69,14 @@ void ProbeSolids(FireVolumeReport& r)
     const float col = r.boxWidth / n;
     const float height = r.boxWidth * 1.8f;
     const Vector3 bed = r.base + Vector3(0, 0.3f + 0.6f * std::min(r.radius, 1.0f), 0);
-    bool walls = r.kind == FireKindBed || r.kind == FireKindSmoke;
+    // (a wreck's column starts on top of its hull, so the probes see the buildings, not the hull)
+    bool walls = r.kind == FireKindBed || r.kind == FireKindSmoke || r.kind == FireKindSmokeStack ||
+                 r.kind == FireKindWreck;
     if (r.kind == FireKindExplosion)
         walls = q.IsSheltered(bed, 12.0f);
+    // FIRE-002: a wreck's hull footprint (its bed is 0.35 of the hull's radius): over it the flames
+    // are open, beyond it a wall or a roof stops them like any fire's (they burned through houses)
+    const float hull = r.kind == FireKindWreck ? r.radius / 0.35f * 0.7f : 0.0f;
     for (int j = 0; j < n; ++j)
     {
         for (int i = 0; i < n; ++i)
@@ -84,9 +92,22 @@ void ProbeSolids(FireVolumeReport& r)
             const float fl = overBed ? r.base.Y() : q.FloorHeightBelow(Vector3(cx, bed.Y() + 0.5f, cz));
             r.floor[k] = std::max(fl, r.base.Y() - 2.0f);
             r.ceiling[k] = 1e6f;
-            if (r.kind == FireKindWreck || !walls)
+            if (!walls)
                 continue;
             Vector3 hit;
+            if (r.kind == FireKindWreck)
+            {
+                const float d = std::sqrt(dx * dx + dz * dz);
+                if (d < hull + col * 0.5f)
+                    continue;
+                const Vector3 from = bed + Vector3(dx / d * hull, 0, dz / d * hull);
+                if (q.ProbeSegment(from, Vector3(cx, bed.Y(), cz), hit))
+                    r.ceiling[k] = -1e6f;
+                else if (q.ProbeSegment(Vector3(cx, std::max(fl, r.base.Y()) + 0.3f, cz),
+                                        Vector3(cx, r.base.Y() + height, cz), hit))
+                    r.ceiling[k] = hit.Y();
+                continue;
+            }
             if (!overBed && q.ProbeSegment(bed, Vector3(cx, bed.Y(), cz), hit))
             {
                 r.ceiling[k] = -1e6f; // behind a wall
@@ -138,7 +159,7 @@ void ReportFireVolume(const void* owner, Vector3Par base, float radius, float in
     // system); otherwise the selected system has it and the volume would draw it twice.
     if (!FireProSmokeActive())
     {
-        if (kind == FireKindSmoke)
+        if (kind == FireKindSmoke || kind == FireKindSmokeStack)
             return;
         smoke = 0.0f; // a fire's flames stay volumetric; its smoke is the other system's
     }

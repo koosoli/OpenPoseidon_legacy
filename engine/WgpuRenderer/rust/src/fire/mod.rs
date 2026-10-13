@@ -12,7 +12,7 @@
 
 use std::time::Instant;
 
-pub const MAX_FIRES: usize = 4;
+pub const MAX_FIRES: usize = 6;
 const NX: u32 = 40;
 const NY: u32 = 72;
 const NZ: u32 = 40;
@@ -343,6 +343,8 @@ impl FireSystem {
                 frag_tex(5, wgpu::TextureViewDimension::D3),
                 frag_tex(6, wgpu::TextureViewDimension::D3),
                 frag_tex(7, wgpu::TextureViewDimension::D3),
+                frag_tex(8, wgpu::TextureViewDimension::D3),
+                frag_tex(9, wgpu::TextureViewDimension::D3),
             ],
         });
         let march_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -568,14 +570,26 @@ impl FireSystem {
         // rising faster, its gas expanding as it burns (Fire Pro's fuel-fireball look).
         let explosion = s.params[3] > 1.5 && s.params[3] < 2.5;
         let smoke_only = s.params[3] > 2.5;
+        // FIRE-002: a wreck's black column (kind 4, Fire Pro's smoke stack) and a wreck's flames
+        // (kind 1, Fire Pro's delayed ignition); see FireVolumeKind on the engine side
+        let stack = s.params[3] > 3.5;
+        let wreck = s.params[3] > 0.5 && s.params[3] < 1.5;
         // Froude scaling from the campfire the preset was tuned on (a 0.8 m bed): a fire twice
         // the size has flames twice as tall, rising and living sqrt(2) longer and faster. Big
         // beds also burn patchily (Fire Pro's burst variation), which breaks one tall tongue
         // into many flamelets that puff.
         let scale = (radius / 0.8).clamp(0.4, 5.0);
         let froude = scale.sqrt();
+        // the delayed-ignition preset's source is a 0.65 m sphere
+        let froude_di = (radius / 0.65).clamp(0.4, 5.0).sqrt();
         let (lift, heat, rise, life, expand, buoy) = if explosion {
             (0.55, 30.0, 3.0 + 1.5 * radius, 0.8 * froude, 1.6, 6.0)
+        } else if wreck {
+            // Fire Pro's delayed-ignition preset (editor/presets/delayed-ignition.json) instead of
+            // the campfire: a weak source (heat 1.5) whose flame lives long (1.2 s), keeps heating
+            // as it burns (4) and rises lazily (buoyancy 1.6), so a burning hull rolls up in big
+            // slow tongues under dark smoke rather than flickering like a small flame
+            (0.5, 1.5, 0.5 * froude_di, 1.2 * froude_di, 1.0, 1.6)
         } else {
             (0.5, 10.0, 0.92 * froude, 0.65 * froude, 0.3, 4.7)
         };
@@ -583,11 +597,25 @@ impl FireSystem {
         // Fire Pro's industrial-smoke preset (editor/presets/industrial-smoke.json): no flame, a
         // little heat, a lot of smoke, a steady rise; it drifts with the wind. Scaled to the
         // smoke's 0.06/s dissipation (what stays is rate / dissipation) and cooler than a stack's:
-        // a grenade's cloud rolls along a few metres up rather than climbing to the box's lid
-        let (heat, smoke_rate, rise, buoy) = if smoke_only {
+        // a grenade's cloud rolls along a few metres up rather than climbing to the box's lid.
+        // A wreck's column (stack) is the preset as a stack: hot enough to climb out of the box
+        // and so dense it stands black against the sky (owner, 2026-10-13: "thick black smoke").
+        let (heat, smoke_rate, rise, buoy) = if stack {
+            (5.0, 7.0 * intensity.max(0.05), 2.5 * froude, 1.6)
+        } else if smoke_only {
             (3.0, 4.0 * intensity.max(0.05), 1.2 * froude, 1.8)
         } else {
             (heat, 1.5 * smokiness * smokiness, rise, buoy)
+        };
+        // the soot the flame itself gives off as it burns (Fire Pro flame smokeRate): the
+        // campfire's 1.2, the delayed ignition's 1, the fuel fireball's 5 (a burning vehicle's
+        // fuel goes up black: the smokiest bursts lean that way)
+        let flame_smoke = if explosion {
+            0.6 + 1.2 * smokiness + 2.0 * smokiness.powi(4)
+        } else if wreck {
+            0.5 + smokiness
+        } else {
+            0.6 + 1.2 * smokiness
         };
         let p = SimParams {
             origin_cell: [g.origin[0], g.origin[1], g.origin[2], g.cell],
@@ -597,15 +625,21 @@ impl FireSystem {
             // the bed's flattened sphere stands on the ground (its half-height is 0.45 r)
             emitter: [s.pos_radius[0], s.pos_radius[1] + radius * lift, s.pos_radius[2], radius],
             emit: [intensity, heat, smoke_rate, rise],
-            flame: [life, 0.6 + 1.2 * smokiness, 3.0, expand],
+            flame: [life, flame_smoke, if wreck { 4.0 } else { 3.0 }, expand],
             motion: [buoy, 0.12, 0.1, 3.2],
             // turbulence: stronger for a bigger fire, its eddies a metre or so whatever the size
-            losses: if smoke_only {
+            losses: if stack {
+                // a column cools slower than a grenade's cloud (it climbs) and thins slower still
+                [0.4, 0.05, 0.5 * froude, 1.6]
+            } else if smoke_only {
                 // stronger, larger eddies than a flame's: what makes a plume billow instead of
                 // spreading as a smooth sheet; a grenade's smoke lasts (dissipation 0.06/s: at
                 // 0.35 a drifting plume was down to an eighth six seconds out, and the box's far
                 // end stood empty while the old puffs carried the cloud)
                 [0.62, 0.06, 0.5 * froude, 1.6]
+            } else if wreck {
+                // delayed ignition: cooling 0.62, its smoke thinning at 0.35/s, turbulence 0.6
+                [0.62 / froude_di, 0.35, 0.6 * froude_di, 1.1]
             } else {
                 [0.62 / froude, 0.94 - 0.5 * smokiness, 0.8 * froude, 1.1]
             },
@@ -778,7 +812,7 @@ impl FireSystem {
                 g.fields[g.cur].1.clone()
             })
         };
-        let fields = [field(0), field(1), field(2), field(3)];
+        let fields = [field(0), field(1), field(2), field(3), field(4), field(5)];
         let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wgr_fire_march_bind"),
             layout: &self.march_layout,
@@ -791,6 +825,8 @@ impl FireSystem {
                 wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&fields[1]) },
                 wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&fields[2]) },
                 wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(&fields[3]) },
+                wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&fields[4]) },
+                wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&fields[5]) },
             ],
         });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

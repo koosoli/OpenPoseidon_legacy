@@ -577,6 +577,9 @@ class SmokeSourceVehicle: public Entity,public SmokeSource
 	float _minExplosionFactor,_maxExplosionFactor;
 	Poseidon::Foundation::Time _explosionTime;
 	bool _exploded;
+	// FIRE-002: seconds this source has been smoking (the wreck's delayed ignition when there was no
+	// fireball); the address one byte in is the owner key of the wreck's black column
+	float _burnAge = 0;
 	
 	public:
 	SmokeSourceVehicle
