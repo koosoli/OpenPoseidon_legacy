@@ -44,6 +44,18 @@ HEDGES = {
                          res=0.1),
     "krovi_long": dict(visual=((-4.08, -1.36, -1.18), (4.08, 1.51, 1.1)), geometry=((-3.75, -1.28, -0.73), (3.76, 0.18, 0.7)),
                        res=0.3),
+    # (2026-10-13) the round bushes, after the owner found the stock ones beside the new hedges: an
+    # ellipsoid body (round=True), not the hedge's long rounded box. Extents measured with
+    # PoseidonFormats from DTA\Data3D.pbo. ("str krovisko vysoke" is a 7 m shrub with a trunk: a tree,
+    # left as it is.)
+    "ker listnac": dict(visual=((-1.36, -1.15, -1.50), (1.36, 0.16, 1.50)), geometry=((-1.33, -1.10, -1.05), (0.85, 1.15, 1.13)),
+                        res=0.5, round=True),
+    "ker pichlavej": dict(visual=((-2.07, -1.14, -1.75), (2.07, 0.59, 1.80)), geometry=((-1.76, -1.14, -1.32), (1.71, 1.14, 0.86)),
+                          res=0.5, round=True),
+    "ker buxus": dict(visual=((-1.35, -1.13, -1.45), (1.35, 0.32, 1.45)), geometry=((-0.95, -1.10, -1.04), (1.23, 1.15, 1.14)),
+                      res=0.5, round=True),
+    "ker s bobulema": dict(visual=((-1.03, -1.14, -1.37), (1.16, -0.03, 1.37)), geometry=((-1.16, -1.10, -1.09), (1.02, 1.15, 1.10)),
+                           res=0.5, round=True),
 }
 # LOD resolutions after LOD 0, and the share of sprigs (and their scale) each keeps
 LODS = [(None, 1.0, 1.0), (2.0, 0.33, 1.5), (5.0, 0.11, 2.3)]
@@ -75,7 +87,8 @@ def body(spec):
     a = (vx1 - vx0) / 2 * 0.94
     cx = (vx0 + vx1) / 2
     c = min(max(abs(gz0), abs(gz1)) * 1.35, (vz1 - vz0) / 2 * 0.9)
-    return dict(cx=cx, a=a, c=c, y0=vy0, h=(vy1 - vy0) * 0.92, box=spec["visual"])
+    # pe: the exponent of the ends in plan (6: a hedge's long rounded box, 2: a round bush)
+    return dict(cx=cx, a=a, c=c, y0=vy0, h=(vy1 - vy0) * 0.92, box=spec["visual"], pe=2 if spec.get("round") else 6)
 
 
 def outward(b, p):
@@ -83,7 +96,8 @@ def outward(b, p):
     x = (p[..., 0] - b["cx"]) / b["a"]
     y = np.maximum(p[..., 1] - b["y0"], 0) / b["h"]
     z = p[..., 2] / b["c"]
-    g = np.stack([6 * np.sign(x) * np.abs(x) ** 5 / b["a"], 2.5 * y ** 1.5 / b["h"], 2.5 * np.sign(z) * np.abs(z) ** 1.5 / b["c"]], -1)
+    pe = b["pe"]
+    g = np.stack([pe * np.sign(x) * np.abs(x) ** (pe - 1) / b["a"], 2.5 * y ** 1.5 / b["h"], 2.5 * np.sign(z) * np.abs(z) ** 1.5 / b["c"]], -1)
     g = g / np.maximum(np.linalg.norm(g, axis=-1, keepdims=True), 1e-6)
     g[..., 1] += 0.35
     return g / np.linalg.norm(g, axis=-1, keepdims=True)
@@ -91,7 +105,7 @@ def outward(b, p):
 
 def skin_point(b, x, th, depth):
     """A point of the body at fraction `depth` of the way from its axis to its skin."""
-    end = (1 - abs(x) ** 6) ** (1 / 6)
+    end = (1 - abs(x) ** b["pe"]) ** (1 / b["pe"])
     cz, cy = math.cos(th), math.sin(th)
     sz = np.sign(cz) * abs(cz) ** 0.8 * b["c"] * end * depth
     sy = abs(cy) ** 0.8 * b["h"] * end * depth
@@ -280,7 +294,7 @@ def main():
     manifest = {"api": 1, "models": []}
     for name, spec in HEDGES.items():
         data, triangles = build(name, spec, f"{args.prefix}\\{LEAF_TEXTURE}")
-        file = f"hedge_{name}.p3d"
+        file = f"hedge_{name.replace(' ', '_')}.p3d"
         (args.out / file).write_bytes(data)
         manifest["models"].append({"source": f"data3d\\{name}.p3d", "model": f"{args.prefix}\\{file}"})
         print(f"{name}: LOD triangles {triangles}")
