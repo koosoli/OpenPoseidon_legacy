@@ -6965,7 +6965,7 @@ impl Gfx3d {
         draws: &[crate::ffi::WgrDraw3D],
         subset: &[(u32, [f32; 16])],
         skin_subset: &[(u32, u32)],
-        veg_subset: &[(u32, f32)],
+        veg_subset: &[(u32, f32, f32)],
         uniform: &crate::temporal::ObjVelUniform,
         veg_uniform: Option<&crate::temporal::VegVelUniform>,
     ) {
@@ -7068,10 +7068,10 @@ impl Gfx3d {
         let mut veg_bind: Option<wgpu::BindGroup> = None;
         if veg_ready {
             let mut vdata: Vec<f32> = Vec::with_capacity(veg_subset.len() * 20);
-            for (idx, leaf) in veg_subset {
+            for (idx, leaf, bush) in veg_subset {
                 let d = &draws[*idx as usize];
                 vdata.extend_from_slice(&d.world);
-                vdata.extend_from_slice(&[*leaf, 0.0, 0.0, 0.0]);
+                vdata.extend_from_slice(&[*leaf, *bush, 0.0, 0.0]);
             }
             let vbytes: &[u8] = bytemuck::cast_slice(&vdata);
             if (vbytes.len() as u64) > vp.veg_ssbo_cap {
@@ -7204,7 +7204,7 @@ impl Gfx3d {
         if let Some(veg_bind) = veg_bind.as_ref() {
             pass.set_pipeline(&vp.veg_pipeline);
             pass.set_bind_group(0, veg_bind, &[]);
-            for (i, (idx, _)) in veg_subset.iter().enumerate() {
+            for (i, (idx, _, _)) in veg_subset.iter().enumerate() {
                 let d = &draws[*idx as usize];
                 let key: MeshKey = slotmap::KeyData::from_ffi(d.mesh).into();
                 let Some(mesh) = self.meshes.get(key) else {

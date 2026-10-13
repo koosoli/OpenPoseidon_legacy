@@ -167,9 +167,11 @@ def visual_mesh(spec, b, sp, share, scale, texture):
 
 
 def leaf_atlas(ez_tree_leaves, out_png):
-    """oak | ash from ez-tree's leaf sheets (MIT), each 512 px: alpha cut at 0.5 (DXT1 punch-through
-    is classified cutout by format), colour dilated into the clear texels so the mips do not pull the
-    leaf edges toward the sheet's background."""
+    """oak | ash from ez-tree's leaf sheets (MIT), each 512 px, colour dilated into the clear texels so
+    the mips do not pull the leaf edges toward the sheet's background. Alpha keeps a narrow soft rim
+    (DXT5): a 1-bit edge drew every leaf's contour hard (owner: "cartoony because the leaf contours are
+    drawn"), and the rim is what MSAA alpha-to-coverage softens. It stays narrow (a few texels) so the
+    texture classifies as an anti-aliased cutout (TextureWgpu.cpp), not a blend."""
     from PIL import Image, ImageFilter
 
     atlas = Image.new("RGBA", (1024, 1024))
@@ -177,6 +179,8 @@ def leaf_atlas(ez_tree_leaves, out_png):
         im = Image.open(Path(ez_tree_leaves) / f"{name}.png").convert("RGBA").resize((512, 512), Image.LANCZOS)
         a = np.asarray(im).astype(np.float32)
         alpha = a[..., 3] >= 128
+        t = np.clip((a[..., 3] / 255.0 - 0.3) / 0.4, 0.0, 1.0)
+        soft = t * t * (3 - 2 * t)
         rgb = a[..., :3] * alpha[..., None]
         w = alpha.astype(np.float32)
         # push-pull dilation: blur colour and coverage together, divide, fill only the clear texels
@@ -189,7 +193,7 @@ def leaf_atlas(ez_tree_leaves, out_png):
         lum = rgb @ np.array([0.2126, 0.7152, 0.0722])
         rgb = (lum[..., None] + (rgb - lum[..., None]) * LEAF_SATURATION) * LEAF_GAIN * np.array(LEAF_TINT)
         for row, gain in ((0, 1.0), (1, SHADED_GAIN)):
-            tile = np.dstack([(rgb * gain).clip(0, 255), alpha * 255.0]).astype(np.uint8)
+            tile = np.dstack([(rgb * gain).clip(0, 255), soft * 255.0]).astype(np.uint8)
             atlas.paste(Image.fromarray(tile), (512 * i, 512 * row))
     atlas.save(out_png)
 

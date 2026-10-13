@@ -222,6 +222,17 @@ const VEG_SWAY_HEIGHT_REF: f32 = 12.0;
 // its per-object phase for compatibility.
 const VEG_COHERENT_PHASE_CELL: f32 = 2.0;
 
+// (OP, 2026-10-13) The sway height of a BUSH vertex. OFP bushes are centred on their bounding box
+// (the lower half has negative model Y) and stand 1-3 m tall, so measured against a 12 m canopy
+// they bent by millimetres and the hedges stood still in a gale (owner: "hedge leaves are not yet
+// swaying with the wind"). A bush is taken from ~1 m below its centre and scaled so its top answers
+// like the upper third of a tree; the foot stays planted (y_eff ~ 0 there).
+const VEG_BUSH_FOOT: f32 = 1.0;
+const VEG_BUSH_SCALE: f32 = 3.0;
+fn veg_sway_height(model_y: f32, bush: bool) -> f32 {
+    return select(model_y, (model_y + VEG_BUSH_FOOT) * VEG_BUSH_SCALE, bush);
+}
+
 fn veg_sway_phase(phase_xz: vec2<f32>, leaf: f32) -> vec2<f32> {
     if (leaf < 0.0) {
         let cell = vec2<f32>(VEG_COHERENT_PHASE_CELL, VEG_COHERENT_PHASE_CELL);

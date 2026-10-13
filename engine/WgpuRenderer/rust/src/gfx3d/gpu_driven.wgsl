@@ -9,7 +9,7 @@
 // Rigid opaque only: terrain-conformed vegetation, skinned, and transparent draws stay on
 // the CPU path (they never enter the retained instance set), so this VS has no conform.
 
-#import frame::{frame, reverse_z, fog_factor, atmo_applied, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
+#import frame::{frame, reverse_z, fog_factor, atmo_applied, veg_sway_offset, veg_sway_height, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
 #import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal, object_snow_baked_exposure}
 #import tree_snow::{tree_snow_height, tree_snow_coverage, forest_snow_coverage, forest_snow_sample_uv, forest_snow_diagnostic_colour}
 #import frame::interior_rain_coverage
@@ -745,7 +745,7 @@ fn vs_gpu(
         }
         let leaf = select(select(0.0, 1.0, section_materials[rec.section].alpha_ref > 0.0),
                           -1.0, (inst.flags & INST_COHERENT_TREE_WIND) != 0u);
-        world_pos = world_pos + veg_sway_offset(pos.y, phase_xz, leaf);
+        world_pos = world_pos + veg_sway_offset(veg_sway_height(pos.y, (inst.flags & INST_CANOPY_BUSH) != 0u), phase_xz, leaf);
     }
     // Spherical / canopy normals (docs/foliage-translucency-plan.md Stage 3): bend a leaf's normal
     // toward a radial "crown" normal from the object centre, so the low-poly canopy shades as a
@@ -1967,8 +1967,9 @@ fn vs_gpu_velocity(
     }
     let leaf = select(select(0.0, 1.0, section_materials[rec.section].alpha_ref > 0.0),
                       -1.0, (inst.flags & INST_COHERENT_TREE_WIND) != 0u);
-    let s_cur = veg_sway_offset(pos.y, phase_xz, leaf);
-    let s_prev = veg_sway_prev_at(pos.y, phase_xz, leaf);
+    let sway_y = veg_sway_height(pos.y, (inst.flags & INST_CANOPY_BUSH) != 0u);
+    let s_cur = veg_sway_offset(sway_y, phase_xz, leaf);
+    let s_prev = veg_sway_prev_at(sway_y, phase_xz, leaf);
     let cur_pos = vec4<f32>(world_pos + s_cur, 1.0);
     let prev_pos = vec4<f32>(world_pos + velp.cam_delta.xyz + s_prev, 1.0);
     // frame.proj/view carry the jitter; reverse_z is the shared helper.

@@ -507,7 +507,9 @@ impl Temporal {
     // The swaying-vegetation subset: (draws3d index, leaf flag). Selection mirrors the
     // scene VS gate (1 = bush, 2 = legacy tree, 3 = coherent native tree).
     // A negative section value selects coherent wind, including on solid bark.
-    pub fn veg_velocity_subset(&self, draws: &[crate::ffi::WgrDraw3D]) -> Vec<(u32, f32)> {
+    // (draws3d index, wind section: -1 coherent / 0 solid / 1 leaf, 1.0 when the draw is a bush:
+    // frame.wgsl veg_sway_height)
+    pub fn veg_velocity_subset(&self, draws: &[crate::ffi::WgrDraw3D]) -> Vec<(u32, f32, f32)> {
         if !self.enabled || self.reset {
             return Vec::new();
         }
@@ -518,7 +520,8 @@ impl Temporal {
             }
             let wind_section = if d.mat_sun_ambient[3] > 2.5 { -1.0 }
                 else if d.alpha_ref > 0.0 { 1.0 } else { 0.0 };
-            out.push((i as u32, wind_section));
+            let bush = if d.mat_sun_ambient[3] < 1.5 { 1.0 } else { 0.0 };
+            out.push((i as u32, wind_section, bush));
             if out.len() >= 16384 {
                 break;
             }
@@ -1557,8 +1560,10 @@ mod tests {
         // Non-vegetation and skinned objects are still excluded.
         draws[5].mat_sun_ambient[3] = 3.0;
         draws[5].palette_slot = 0;
+        // a bush (foliage kind 1) is flagged for frame.wgsl veg_sway_height
+        draws[4].mat_sun_ambient[3] = 1.0;
         assert_eq!(temporal.veg_velocity_subset(&draws),
-                   vec![(0, -1.0), (1, -1.0), (2, 0.0), (3, 1.0)]);
+                   vec![(0, -1.0, 0.0), (1, -1.0, 0.0), (2, 0.0, 0.0), (3, 1.0, 0.0), (4, 0.0, 1.0)]);
     }
 
     #[test]

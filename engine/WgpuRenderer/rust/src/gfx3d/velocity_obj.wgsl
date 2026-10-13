@@ -109,7 +109,7 @@ struct VegVelParams {
 
 struct VegInst {
     world: mat4x4<f32>, // camera-relative current world (static objects: abs is shared)
-    params: vec4<f32>,  // x = leaf (alpha-cutout section: extra flutter), yzw unused
+    params: vec4<f32>,  // x = leaf (alpha-cutout section: extra flutter), y = 1 on a bush, zw unused
 };
 
 @group(0) @binding(5) var<uniform> veg: VegVelParams;
@@ -153,8 +153,10 @@ fn vs_veg_velocity(@location(0) pos: vec3<f32>, @builtin(instance_index) inst: u
     // Same phase seed as the scene VS: object origin back to ABSOLUTE world xz.
     let phase = vi.world[3].xz + veg.cams.xy;
     let leaf = vi.params.x;
-    let s_cur = veg_sway_at(pos.y, phase, leaf, veg.sway_cur, veg.sway_cur2);
-    let s_prev = veg_sway_at(pos.y, phase, leaf, veg.sway_prev, veg.sway_prev2);
+    // bushes: frame.wgsl veg_sway_height (keep in sync)
+    let sway_y = select(pos.y, (pos.y + 1.0) * 3.0, vi.params.y > 0.5);
+    let s_cur = veg_sway_at(sway_y, phase, leaf, veg.sway_cur, veg.sway_cur2);
+    let s_prev = veg_sway_at(sway_y, phase, leaf, veg.sway_prev, veg.sway_prev2);
     let cur_pos = vec4<f32>(rel.xyz + s_cur, 1.0);
     // Previous-camera-relative: abs - prev_cam = rel + (cam_cur - cam_prev).
     let prev_pos = vec4<f32>(rel.xyz + veg.cam_delta.xyz + s_prev, 1.0);

@@ -5,7 +5,7 @@
 // point): the plain pipeline binds `object`, the skinned pipeline binds the
 // bone `palette` (from the skin module). Shadowing is the shared cascade kernel.
 
-#import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, apply_layered_fog, apply_fog_terrain, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_FRESNEL_ENV, sky_irradiance}
+#import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, apply_layered_fog, apply_fog_terrain, veg_sway_offset, veg_sway_height, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_FRESNEL_ENV, sky_irradiance}
 #import shadow::shadow_strength
 #import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage}
 #import frame::{surface_rays, cloud_shadow_tex, terrain_shadow_samp, terrain_shadow_map, cloud_sun_shadow}
@@ -632,7 +632,7 @@ fn vs_main(
         // value would make every plant swim as the camera walks.
         let phase_xz = world[3].xz + frame.cam_pos.xz;
         let leaf = select(select(0.0, 1.0, alpha_ref > 0.0), -1.0, foliage_kind > 2.5);
-        let sway = veg_sway_offset(pos.y, phase_xz, leaf);
+        let sway = veg_sway_offset(veg_sway_height(pos.y, foliage_kind < 1.5), phase_xz, leaf);
         world_pos = vec4<f32>(world_pos.xyz + sway, world_pos.w);
     }
     // REGRESSION GUARD (CWA stock-tree canopies): legacy leaf cards have arbitrary authored

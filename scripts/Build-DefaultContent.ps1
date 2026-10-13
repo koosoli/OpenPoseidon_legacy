@@ -28,11 +28,11 @@ if ($LASTEXITCODE -ne 0) { throw 'Sand detail normal encoding failed' }
 $expected += 'sand_detail_nohq.paa'
 # Denser hedges for the stock krovi* models (generate_hedges.py) and the redirect manifest the
 # engine's ModelCache reads (models.json). Their leaves are ez-tree's oak and ash sheets (MIT,
-# third-party/ez-tree), one atlas, DXT1: one bit of alpha is a cutout, never a blend.
+# third-party/ez-tree), one atlas, DXT5 with a narrow soft rim (an anti-aliased cutout).
 & $Python "$PSScriptRoot/default-content/generate_hedges.py" --out "$generated/hedges" --prefix op_ground_materials `
     --leaves "$source/third-party/ez-tree/leaves" --atlas "$generated/hedge_leaves.png"
 if ($LASTEXITCODE -ne 0) { throw 'Hedge generation failed' }
-& $tools image convert "$generated/hedge_leaves.png" "$stage/hedge_leaves.paa" --format DXT1
+& $tools image convert "$generated/hedge_leaves.png" "$stage/hedge_leaves.paa" --format DXT5
 if ($LASTEXITCODE -ne 0) { throw 'Hedge leaf atlas encoding failed' }
 $expected += 'hedge_leaves.paa'
 foreach ($file in Get-ChildItem -LiteralPath "$generated/hedges" -File) {
