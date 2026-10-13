@@ -1143,9 +1143,19 @@ GameValue A2EmptyArrayBinary(const GameState* state, GameValuePar, GameValuePar)
     return state->CreateGameValue(GameArray);
 }
 
-GameValue A2PpEffectCreate(const GameState*, GameValuePar)
+// ppEffectCreate [name, priority] gives a handle; [[name, priority], ...] an array of them.
+GameValue A2PpEffectCreate(const GameState* state, GameValuePar oper1)
 {
     static float next = 0;
+    const GameArrayType& a = oper1;
+    if (a.Size() > 0 && a[0].GetType() == GameArray)
+    {
+        GameValue value = state->CreateGameValue(GameArray);
+        GameArrayType& out = value;
+        for (int i = 0; i < a.Size(); i++)
+            out.Add(GameValue(next += 1.0f));
+        return value;
+    }
     return GameValue(next += 1.0f);
 }
 
@@ -2414,7 +2424,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameNothing, "failMission", A2FailMission, GameString),
     GameFunction(GameNothing, "taskHint", A2TaskHint, GameArray),
     GameFunction(GameNothing, "ppEffectDestroy", A2NothingUnary, GameScalar | GameArray),
-    GameFunction(GameScalar, "ppEffectCreate", A2PpEffectCreate, GameArray),
+    GameFunction(GameScalar | GameArray, "ppEffectCreate", A2PpEffectCreate, GameArray),
     GameFunction(GameBool, "ppEffectCommitted", A2TrueUnary, GameScalar | GameString),
     GameFunction(GameString, "createMarkerLocal", MarkerCreate, GameArray),
     GameFunction(GameNothing, "deleteMarkerLocal", MarkerDelete, GameString),
