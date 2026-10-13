@@ -2323,6 +2323,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameString, "with", A2With, GameString),
     GameFunction(GameNothing, "hideObject", A2NothingUnary, GameObject),
     GameFunction(GameScalar, "inputAction", A2ZeroUnary, GameString),
+    GameFunction(GameNothing, "showHUD", A2NothingUnary, GameBool),
     GameFunction(GameNothing, "ctrlMapAnimCommit", A2NothingUnary, GameAny),
     GameFunction(GameString, "keyName", A2TextLogEmpty, GameScalar),
     GameFunction(GameScalar, "currentVisionMode", A2ZeroUnary, GameObject),
