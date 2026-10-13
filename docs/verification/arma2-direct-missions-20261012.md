@@ -102,3 +102,17 @@ and are not counted.
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
 Takistan and Zargabad render; its bootcamp and scenarios start.
+
+## Second machine (laptop, Intel Iris Xe), 2026-10-13
+
+Build `2e82aea` from the `Arma 2 / Windows game build` workflow, installed by hand into
+`ARMA Cold War Assault\Remastered` (Steam in `C:\Program Files (x86)`; Operation Arrowhead
+next to Arma 2 is found on its own).
+
+- **WGPU on Vulkan:** SP_EyeForEye loads and shows the briefing; on the first 3D frames
+  after "Continue" the driver reports `wgpu device lost (Unknown)` and the game exits
+  (code 1). Same with `OP_A2_FIBERS=0`, so not the scheduler. Renderer issue on this
+  integrated GPU, not Arma 2 specific.
+- **`--render gl33`:** SP_EyeForEye plays, no script error in the log, diary and tasks
+  created.
+- `WGPU_BACKEND=dx12` not yet tried.
