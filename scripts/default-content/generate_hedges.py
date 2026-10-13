@@ -63,6 +63,10 @@ LEAF_TEXTURE = "hedge_leaves.paa"  # 2 x 2 atlas: oak | ash, lit row over shaded
 LEAF_SATURATION = 0.8
 LEAF_GAIN = 0.52
 SHADED_GAIN = 0.36
+# Owner: "it needs to have the same color as the grass". Measured on a capture (Everon 7050/6441,
+# 2026-10-13): the grass renders at R/G 0.91, B/G 0.71, the graded leaves at 0.79 / 0.52, and the
+# lighting keeps those ratios -- so the leaves take the grass's ratios per channel.
+LEAF_TINT = (0.914 / 0.785, 1.0, 0.711 / 0.524)
 
 
 def body(spec):
@@ -183,7 +187,7 @@ def leaf_atlas(ez_tree_leaves, out_png):
             rgb[fill] = (cb[fill] / np.maximum(wb[fill, None], 1e-3)).clip(0, 255)
             w = np.maximum(w, (wb > 0.01).astype(np.float32))
         lum = rgb @ np.array([0.2126, 0.7152, 0.0722])
-        rgb = (lum[..., None] + (rgb - lum[..., None]) * LEAF_SATURATION) * LEAF_GAIN
+        rgb = (lum[..., None] + (rgb - lum[..., None]) * LEAF_SATURATION) * LEAF_GAIN * np.array(LEAF_TINT)
         for row, gain in ((0, 1.0), (1, SHADED_GAIN)):
             tile = np.dstack([(rgb * gain).clip(0, 255), alpha * 255.0]).astype(np.uint8)
             atlas.paste(Image.fromarray(tile), (512 * i, 512 * row))
