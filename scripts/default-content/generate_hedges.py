@@ -56,7 +56,13 @@ SPRIG_LEN = (0.45, 0.75)  # m, the sheet's full height
 LAYERS = 2.6  # mean sprig cover over the skin (sheet fill ~35 %)
 SHEET_FILL = 0.35
 INTERIOR_SHARE = 0.3
-LEAF_TEXTURE = "hedge_leaves.paa"  # 2 x 1 atlas: oak | ash
+LEAF_TEXTURE = "hedge_leaves.paa"  # 2 x 2 atlas: oak | ash, lit row over shaded row
+# ez-tree's sheets are bright spring leaves (mean sRGB ~(92, 124, 52)); next to OFP's grass they read
+# lime. Graded toward a summer hedge: a little desaturated, darker. The shaded row is the same
+# leaves inside the hedge and near the ground, where little sky reaches (OFP models carry no AO).
+LEAF_SATURATION = 0.8
+LEAF_GAIN = 0.68
+SHADED_GAIN = 0.45
 
 
 def body(spec):
@@ -132,7 +138,11 @@ def visual_mesh(spec, b, sp, share, scale, texture):
         corners = [np.clip(c, (bx0 - 0.2, by0 - 0.05, bz0 - 0.2), (bx1 + 0.2, by1 + 0.2, bz1 + 0.2)) for c in corners]
         u0, u1 = (0.5, 0.0) if k["flip"] else (0.0, 0.5)
         u0, u1 = u0 + 0.5 * k["leaf"], u1 + 0.5 * k["leaf"]
-        uv = [(u0, 0.0), (u1, 0.0), (u1, 1.0), (u0, 1.0)]  # v up the sheet (the writer flips it)
+        # the shaded row (the atlas's lower half) inside the body and along its foot
+        low = (root[1] - b["y0"]) / b["h"]
+        shaded = k["depth"] < 0.78 or low < 0.18 * k["keep"] + 0.08
+        v0 = 0.0 if shaded else 0.5
+        uv = [(u0, v0), (u1, v0), (u1, v0 + 0.5), (u0, v0 + 0.5)]  # v up the sheet (the writer flips it)
         n = outward(b, np.array(corners))
         # the interior reads darker: deeper sprigs turn their normals down and in
         dark = min(max((0.95 - k["depth"]) / 0.6, 0.0), 1.0)
@@ -158,7 +168,7 @@ def leaf_atlas(ez_tree_leaves, out_png):
     leaf edges toward the sheet's background."""
     from PIL import Image, ImageFilter
 
-    atlas = Image.new("RGBA", (1024, 512))
+    atlas = Image.new("RGBA", (1024, 1024))
     for i, name in enumerate(("oak", "ash")):
         im = Image.open(Path(ez_tree_leaves) / f"{name}.png").convert("RGBA").resize((512, 512), Image.LANCZOS)
         a = np.asarray(im).astype(np.float32)
@@ -172,8 +182,11 @@ def leaf_atlas(ez_tree_leaves, out_png):
             fill = (w < 0.5) & (wb > 0.01)
             rgb[fill] = (cb[fill] / np.maximum(wb[fill, None], 1e-3)).clip(0, 255)
             w = np.maximum(w, (wb > 0.01).astype(np.float32))
-        tile = np.dstack([rgb.clip(0, 255), alpha * 255.0]).astype(np.uint8)
-        atlas.paste(Image.fromarray(tile), (512 * i, 0))
+        lum = rgb @ np.array([0.2126, 0.7152, 0.0722])
+        rgb = (lum[..., None] + (rgb - lum[..., None]) * LEAF_SATURATION) * LEAF_GAIN
+        for row, gain in ((0, 1.0), (1, SHADED_GAIN)):
+            tile = np.dstack([(rgb * gain).clip(0, 255), alpha * 255.0]).astype(np.uint8)
+            atlas.paste(Image.fromarray(tile), (512 * i, 512 * row))
     atlas.save(out_png)
 
 
