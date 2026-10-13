@@ -113,4 +113,8 @@ RString WorldClassForMission(const RString& world, const char* missionDirectory)
 // For a virtual campaign mission path, the campaign base directory
 // ("campaigns/ca/") so the campaign stringtable/description apply. Empty otherwise.
 std::string CampaignBaseForMission(const std::string& missionFile);
+
+// Logs what every entity of the running mission became: class (A1x_ = the Arma model on a
+// CWA base), model, LOD count, crew and weapons, grouped by kind (Arma2Census.cpp).
+void LogAssetCensus();
 } // namespace Poseidon::Arma1Compat
