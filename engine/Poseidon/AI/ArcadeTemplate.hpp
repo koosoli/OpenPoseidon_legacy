@@ -43,6 +43,7 @@ struct ArcadeUnitInfo
 	RString name;
 	RString init;
 	AutoArray<RString> markers;
+	AutoArray<int> synchronizations; // Arma 2: ids of the objects it is synchronized with
 
 	ArcadeUnitInfo();
 	ArcadeUnitInfo(const ArcadeUnitInfo &src);

@@ -1085,6 +1085,26 @@ static GameValue A1CaseCode(const GameState* state, GameValuePar oper1, GameValu
     return NOTHING;
 }
 
+// scopeName names the scope it runs in; breakTo leaves the scopes inside the named one and
+// goes on in it after the statement that was running; breakOut leaves the named one too.
+static GameValue A1ScopeName(const GameState* state, GameValuePar oper1)
+{
+    state->SetScopeName(RString(oper1));
+    return NOTHING;
+}
+
+static GameValue A1BreakTo(const GameState* state, GameValuePar oper1)
+{
+    state->BreakToScope(RString(oper1), false);
+    return NOTHING;
+}
+
+static GameValue A1BreakOut(const GameState* state, GameValuePar oper1)
+{
+    state->BreakToScope(RString(oper1), true);
+    return NOTHING;
+}
+
 // for [{init}, {condition}, {step}] do {body}
 static GameValue A1ForArray(const GameState*, GameValuePar oper1)
 {
@@ -1106,9 +1126,19 @@ static GameValue A1ForArrayDo(const GameState* state, GameValuePar oper1, GameVa
     for (int i = 0; i < 100000 && !GameState::s_abortLoops; i++)
     {
         const GameValue test = state->EvaluateMultiple(RString(parts[1]));
-        if (!(test.GetType() & GameBool) || !(bool)test)
+        if (state->GetLastError() != EvalOK || !(test.GetType() & GameBool) || !(bool)test)
             break;
         gs->Execute(RString(oper2));
+        // the body ran in this scope: breakTo/breakOut keeps unwinding from here, exitWith
+        // ends the loop, any other error stops it (the step would clear the error)
+        if (state->GetLastError() == EvalBreak)
+        {
+            if (GameState::s_breakTarget.empty())
+                gs->SetError(EvalOK);
+            break;
+        }
+        if (state->GetLastError() != EvalOK)
+            break;
         gs->Execute(RString(parts[2]));
     }
     return NOTHING;
@@ -1494,9 +1524,9 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameString, "compile", A1Compile, GameString),
         GameFunction(GameBool, "isPlayer", A1IsPlayer, GameObject),
         GameFunction(GameNothing, "selectPlayer", A1SelectPlayer, GameObject),
-        GameFunction(GameNothing, "scopeName", A1Ignored, GameString),
-        GameFunction(GameNothing, "breakOut", A1Ignored, GameString),
-        GameFunction(GameNothing, "breakTo", A1Ignored, GameString),
+        GameFunction(GameNothing, "scopeName", A1ScopeName, GameString),
+        GameFunction(GameNothing, "breakOut", A1BreakOut, GameString),
+        GameFunction(GameNothing, "breakTo", A1BreakTo, GameString),
         GameFunction(GameArray, "boundingBox", A1BoundingBox, GameObject),
         GameFunction(GameArray, "waypoints", A2Waypoints, GameObjectOrGroup),
         GameFunction(GameScalar, "precision", A1One, GameObject),

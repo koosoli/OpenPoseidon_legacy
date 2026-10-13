@@ -586,6 +586,8 @@ static GameValue Atan2(const GameState* state, GameValuePar oper1, GameValuePar 
 {
     if ((float)oper1 == 0 && (float)oper2 == 0)
     {
+        if (GameState::s_singleQuoteStrings)
+            return 0.0f; // Arma 1/2: 0 atan2 0 is 0 (BIS_fnc_dirTo of a standing unit)
         state->SetError(EvalDivZero);
         return 0.0f;
     }
@@ -765,7 +767,7 @@ static thread_local GameValue tls_exitWithValue;
 // value, and the caller carries on with its next statement.
 static GameValue CallResult(const GameState* state, GameValue ret)
 {
-    if (state->GetLastError() == EvalBreak)
+    if (state->GetLastError() == EvalBreak && GameState::s_breakTarget.empty())
     {
         ret = tls_exitWithValue;
         tls_exitWithValue = GameValue();
@@ -881,15 +883,20 @@ static GameValue StringRepeat(const GameState* state, GameValuePar oper1, GameVa
             }
         }
         // perform loop body
+        EvalError bodyError = EvalOK;
         {
             GameVarSpace local(state->GetContext());
             state->BeginContext(&local);
             RString expression = oper2;
             const_cast<GameState*>(state)->Execute(expression);
+            // exitWith in the body ends the loop; its error lives in the body's own context
+            bodyError = state->GetLastError();
             state->EndContext();
         }
-        if (state->GetLastError() == EvalBreak)
+        if (bodyError == EvalBreak || state->GetLastError() == EvalBreak)
         {
+            if (!GameState::s_breakTarget.empty())
+                return NOTHING; // breakTo/breakOut: leave the loop, keep unwinding
             GameValue exitVal = tls_exitWithValue;
             const_cast<GameState*>(state)->SetError(EvalOK);
             return exitVal;
@@ -1018,9 +1025,13 @@ static GameValue ForDoOp(const GameState* state, GameValuePar oper1, GameValuePa
         state->BeginContext(&local);
         state->VarSetLocal(toData->GetVar(), GameValue(i));
         const_cast<GameState*>(state)->Execute(body);
+        // exitWith in the body ends the loop; its error lives in the body's own context
+        const EvalError bodyError = state->GetLastError();
         state->EndContext();
-        if (state->GetLastError() == EvalBreak)
+        if (bodyError == EvalBreak || state->GetLastError() == EvalBreak)
         {
+            if (!GameState::s_breakTarget.empty())
+                return NOTHING; // breakTo/breakOut: leave the loop, keep unwinding
             exitVal = tls_exitWithValue;
             const_cast<GameState*>(state)->SetError(EvalOK);
             break;
@@ -2793,12 +2804,23 @@ static const char* CheckAssignment(const char* p)
 }
 
 // localOnly restricts assignments to local variables.
+// scopeName belongs to one code block: each evaluation starts unnamed and gives the
+// enclosing block its name back when it returns.
+struct ScopeNameGuard
+{
+    GameEvaluator& e;
+    RString saved;
+    explicit ScopeNameGuard(GameEvaluator& ev) : e(ev), saved(ev._scopeName) { ev._scopeName = RString(); }
+    ~ScopeNameGuard() { e._scopeName = saved; }
+};
+
 GameValue GameState::EvaluateMultiple(const char* expression, bool localOnly) const
 {
     if (s_traceExpression)
         s_traceExpression(expression);
     // Reentrancy guard — see Evaluate above and VyhodFrameGuard.
     VyhodFrameGuard frameGuard(*_e);
+    ScopeNameGuard scopeGuard(*_e);
 
     _e->_pos = _e->_pos0 = expression;
     _e->_subexpBeg = expression;
@@ -2844,6 +2866,14 @@ GameValue GameState::EvaluateMultiple(const char* expression, bool localOnly) co
             CleanStack();
             if (_e->_error)
             {
+                bool leaveScope = false;
+                if (CatchBreak(leaveScope))
+                {
+                    ret = NOTHING;
+                    if (leaveScope)
+                        break;
+                    goto NextStatement;
+                }
                 // exitWith propagates its value even when breaking
                 if (_e->_error == EvalBreak)
                     ret = value;
@@ -2855,6 +2885,7 @@ GameValue GameState::EvaluateMultiple(const char* expression, bool localOnly) co
             // if result is fake type it is not OK
             ret = value;
         } // single command executed
+    NextStatement:
         vynech();
         char c = *_e->_pos;
         if (c == 0)
@@ -3024,6 +3055,7 @@ void GameState::Execute(const char* expression)
         s_traceExpression(expression);
     // Reentrancy guard — see Evaluate above and VyhodFrameGuard.
     VyhodFrameGuard frameGuard(*_e);
+    ScopeNameGuard scopeGuard(*_e);
 
     _e->_error = EvalOK;
     _e->_errorText = RString();
@@ -3055,6 +3087,13 @@ void GameState::Execute(const char* expression)
             CleanStack();
             if (_e->_error)
             {
+                bool leaveScope = false;
+                if (CatchBreak(leaveScope))
+                {
+                    if (leaveScope)
+                        break;
+                    goto NextExecStatement;
+                }
                 break;
             }
 
@@ -3070,6 +3109,7 @@ void GameState::Execute(const char* expression)
                 }
             }
         } // single command executed
+    NextExecStatement:
         vynech();
         char c = *_e->_pos;
         if (c == 0)
@@ -3164,9 +3204,69 @@ void GameState::EndContext() const
         Poseidon::Foundation::ErrorMessage("GameState context stack underflow");
         return;
     }
+    const bool breaking = !s_breakTarget.empty() && _contextStack[_actContext]->_error == EvalBreak;
     _contextStack[_actContext].Free();
     _actContext--;
     _e = _contextStack[_actContext];
+    if (breaking)
+        _e->_error = EvalBreak; // breakTo/breakOut unwinds into the enclosing scope
+}
+
+void GameState::SetScopeName(const char* name) const
+{
+    _e->_scopeName = name;
+}
+
+void GameState::BreakToScope(const char* name, bool out) const
+{
+    s_breakTarget = name ? name : "";
+    s_breakOut = out;
+    const_cast<GameState*>(this)->SetError(EvalBreak);
+}
+
+// Moves the parser past the rest of the current statement (to its ';' or the end).
+static const char* SkipStatement(const char* p)
+{
+    int depth = 0;
+    while (*p)
+    {
+        const char c = *p;
+        if (c == '"' || (c == '\'' && GameState::s_singleQuoteStrings))
+        {
+            const char q = c;
+            p++;
+            while (*p && *p != q)
+                p++;
+            if (*p)
+                p++;
+            continue;
+        }
+        if (c == '{' || c == '(' || c == '[')
+            depth++;
+        else if (c == '}' || c == ')' || c == ']')
+            depth--;
+        else if (c == ';' && depth <= 0)
+            return p;
+        p++;
+    }
+    return p;
+}
+
+bool GameState::CatchBreak(bool& leaveScope) const
+{
+    leaveScope = false;
+    if (_e->_error != EvalBreak || s_breakTarget.empty())
+        return false;
+    if (_e->_scopeName.GetLength() == 0 || stricmp(_e->_scopeName, s_breakTarget.c_str()) != 0)
+        return false;
+    leaveScope = s_breakOut;
+    s_breakTarget.clear();
+    s_breakOut = false;
+    _e->_error = EvalOK;
+    _e->_errorText = RString();
+    if (!leaveScope && _e->_pos)
+        _e->_pos = SkipStatement(_e->_pos);
+    return true;
 }
 
 bool GameState::CheckEvaluate(const char* expression) const

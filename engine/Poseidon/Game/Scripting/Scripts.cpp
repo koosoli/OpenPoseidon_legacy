@@ -524,9 +524,14 @@ bool Script::Simulate(float deltaT)
         CurrentScript = this;
         GameState* gstate = GWorld->GetGameState();
         gstate->BeginContext(&_vars);
-        gstate->VarSet("_time", _time); // make sure there is such variable
+        // SQS keeps the script's clock in _time; in a scheduled SQF script _time is an
+        // ordinary local the script owns (fn_halo: _time = time, then time - _time).
+        if (!_fiber)
+            gstate->VarSet("_time", _time); // make sure there is such variable
         ret = SimulateBody();
-        _time = gstate->VarGet("_time");
+        GameState::s_breakTarget.clear(); // a breakTo whose scope was never found
+        if (!_fiber)
+            _time = gstate->VarGet("_time");
         gstate->EndContext();
         CurrentScript = nullptr;
     }
@@ -547,10 +552,15 @@ bool Script::OnSimulate()
         CurrentScript = this;
         GameState* gstate = GWorld->GetGameState();
         gstate->BeginContext(&_vars);
-        gstate->VarSet("_time", _time);
+        if (!_fiber)
+            gstate->VarSet("_time", _time);
         ret = SimulateBody();
-        _time = gstate->VarGet("_time");
-        _baseTime = Glob.time - _time;
+        GameState::s_breakTarget.clear(); // a breakTo whose scope was never found
+        if (!_fiber)
+        {
+            _time = gstate->VarGet("_time");
+            _baseTime = Glob.time - _time;
+        }
         gstate->EndContext();
         CurrentScript = nullptr;
     }
@@ -1095,6 +1105,10 @@ struct ScriptFiber
     std::vector<Ref<GameEvaluator>> contexts;
     Coroutine::Handle* coroutine = nullptr;
     std::chrono::steady_clock::time_point sliceStart;
+    // Game time when it last gave the frame back. Arma 2 resumes a scheduled script in a
+    // later frame at the earliest, so `time` always moves across a sleep or a yield
+    // (scripts divide by that difference: fn_halo's _fpsCoef).
+    float suspendedAt = -1.0f;
 
     static void SuspendFor(ScriptFiber& f, float seconds)
     {
@@ -1114,6 +1128,7 @@ struct ScriptFiber
         try
         {
             gstate->EvaluateMultiple(f.code);
+            GameState::s_breakTarget.clear(); // a breakTo whose scope was never found
         }
         catch (const std::exception& e)
         {
@@ -1173,6 +1188,7 @@ void ScheduledYield()
     if (!f)
         return;
     GFiberYields++;
+    f->suspendedAt = Glob.time.toFloat();
     Coroutine::Suspend(f->coroutine);
     f->sliceStart = std::chrono::steady_clock::now();
 }
@@ -1202,6 +1218,8 @@ bool Script::SimulateFiber()
         return true;
     if (GRunningFiber)
         return false; // a scheduled script does not run another one inside itself
+    if (f.started && Glob.time.toFloat() == f.suspendedAt)
+        return false; // not again in the frame it gave back
     GameState* gstate = GWorld->GetGameState();
     if (!f.started)
     {

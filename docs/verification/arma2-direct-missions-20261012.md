@@ -101,6 +101,7 @@ and are not counted.
 | 5 | `f4a567d` | 98 (Arma 2 + Operation Arrowhead) | 91 | 27 | 7 crashes (flag proxy, fixed `47c5b1c`), 5 OA campaign time-outs |
 | 6 | `516bc8b` | 98 (Arma 2 + Operation Arrowhead) | 98 | 63 | 1 stall (CE5A: pathfinding, guarded `534f5f3`) |
 | 7 | `4799c30` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 96 | 0 |
+| 8 | `f02e242` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 96 | 0 |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
@@ -148,6 +149,13 @@ left no script error in any of them. Missions now say why they end on their own:
 - **MP_Deathmatch / MP_TeamDeathmatch / C7A_WarThatNeverWas** end by their own end
   conditions in single player (end modes 3 / 2).
 
+Run 8 showed the HALO free fall itself spinning (SPE1_Jackal, 132780 errors): the SQS
+runner wrote its own clock into `_time` around every step of a coroutine script, and
+fn_halo keeps its frame time in `_time`, so `time - _time` stayed 0 and the division by
+it failed before the loop's `sleep`. Coroutine scripts no longer get `_time`
+(`22b7a49`), a scheduled script resumes in a later frame at the earliest, and `0 atan2 0` is 0.
+Rerun: no script error in any of the six missions checked.
+
 The two missions left with an error: MP_Paradrop uses a variable it never sets
 (`_targetmarkerdir`; a mission bug, Arma 2 reports it too) and MP_WhenDiplomacyFails
 (Warfare `<null>SOLDIER`, fixed after the run).
@@ -165,3 +173,19 @@ next to Arma 2 is found on its own).
 - **`--render gl33`:** SP_EyeForEye plays, no script error in the log, diary and tasks
   created.
 - `WGPU_BACKEND=dx12` not yet tried.
+
+## Open findings from the run 8 screenshots
+
+Every mission now leaves a screenshot about 30 s into play (`.a2build\tests`). Most show
+the expected scene (bootcamps, the Chernarus campaign, Operation Arrowhead's campaign and
+scenarios). Not yet right:
+
+- **Utes, SP_TrialByFire:** the LHD that is part of the Utes map is drawn in pieces --
+  frames and catwalks without the flight deck, parts floating above it. The parts are
+  map objects, so this is about placing composite Arma 2 models (their origin vs. their
+  bounding centre), not about the mission.
+- **MPE_MountainWarfare (+3Sided):** the Warfare players start outside the map
+  (`y = -707` in mission.sqm, as Arma 2 has it) and are still there after 15 s; Warfare's
+  start-up should move them to their HQ. The player stands in the sea of the empty map edge.
+- **MPE1_Dogfighters:** the player's A-10 starts in the air with the engine reported off
+  and glides into the ground in about 9 s without input.

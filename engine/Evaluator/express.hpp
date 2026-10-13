@@ -1,4 +1,5 @@
 #pragma once
+#include <string>
 #include <algorithm>
 #include <vector>
 
@@ -582,6 +583,7 @@ class GameEvaluator : public RefCount
 {
     friend class GameState;
     friend struct VyhodFrameGuard;
+    friend struct ScopeNameGuard;
 
     GameVarSpace* local; // local variables
 
@@ -614,6 +616,7 @@ class GameEvaluator : public RefCount
     EvalError _error;
     RString _errorText; // user friendly error text
     int _errorCarretPos;
+    RString _scopeName; // scopeName of the scope this evaluator runs (Arma 2)
 
     GameEvaluator(GameVarSpace* vars = nullptr);
     ~GameEvaluator() override;
@@ -881,6 +884,15 @@ struct GameTypeType : public Poseidon::Foundation::EnumName
     // or ';;') does not replace the value of the statement before it. Arma 2's function
     // library returns values from code ending in "_this call f;\n".
     static inline bool s_emptyStatementKeepsValue = false;
+    // breakTo / breakOut (Arma 2): the scope being broken to, and whether that scope is
+    // left as well (breakOut). Set while a break unwinds; empty otherwise.
+    static inline std::string s_breakTarget;
+    static inline bool s_breakOut = false;
+    void SetScopeName(const char* name) const;
+    void BreakToScope(const char* name, bool out) const;
+    // A statement loop stopped by EvalBreak: true if this scope is the break's target
+    // (the break is then over: the statement is skipped, or the scope left for breakOut).
+    bool CatchBreak(bool& leaveScope) const;
     // Optional observer of every expression the evaluator starts (stall diagnostics in the
     // Arma 2 test mode); null when unused.
     static inline void (*s_traceExpression)(const char* expression) = nullptr;
