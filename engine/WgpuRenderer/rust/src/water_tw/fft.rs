@@ -112,6 +112,8 @@ pub struct SpectrumInputs {
     /// of a whitecapping sea lingers and trails behind the crest as a patch instead of staying a
     /// thin line on the ridge (the white worms, 2026-10-12).
     pub foam_decay: f32,
+    /// The whitecaps control (0..1), for the frame's amplitude-aware threshold (`ocean_params`).
+    pub whitecaps: f32,
 }
 
 impl SpectrumInputs {
@@ -162,12 +164,11 @@ impl SpectrumInputs {
         // Zeroed params (no C++ side yet) read as Tidewater's 0.5.
         let whitecaps = if sea == [0.0; 4] { 0.5 } else { sea[2].clamp(0.0, 1.0) };
         let choppiness = tw[0][1];
-        // the threshold that gives this wind's measured whitecap cover (see WHITECAP_COVER_BIAS)
+        // Tidewater's (island-expansion's) whitecap threshold and foam decay
         let _ = choppiness;
-        let foam_bias = q(whitecap_cover_bias(local.wind_speed, whitecaps) + foam_bias_add() - FOAM_BIAS_ADD, 0.005);
-        // (OP) caps, not floes: see WHITECAP_FOAM_DECAY
-        let foam_decay = q(foam_decay_override().unwrap_or(WHITECAP_FOAM_DECAY), 0.005);
-        Self { sizes, local, swell, depth: 500.0, seed: 1337, foam_bias, foam_decay }
+        let foam_bias = q(whitecap_bias(local.wind_speed, whitecaps) + foam_bias_add(), 0.005);
+        let foam_decay = q(foam_decay_override().unwrap_or(whitecap_decay(whitecaps)), 0.005);
+        Self { sizes, local, swell, depth: 500.0, seed: 1337, foam_bias, foam_decay, whitecaps }
     }
 
     pub fn cuts(&self) -> [[f32; 4]; 4] {
@@ -239,7 +240,7 @@ pub fn sea_stats(sizes: [f32; 4], local: WaveSystem, swell: WaveSystem, depth: f
     let fade = |k: f64, b: [f32; 4]| (-(b[3] as f64).powi(2) * k * k).exp();
     let (a0, b0) = local.packed();
     let (a1, b1) = swell.packed();
-    let spec = SpectrumInputs { sizes, local, swell, depth, seed: 0, foam_bias: 0.0, foam_decay: 0.35 };
+    let spec = SpectrumInputs { sizes, local, swell, depth, seed: 0, foam_bias: 0.0, foam_decay: 0.35, whitecaps: 0.5 };
     let cuts = spec.cuts();
     let (mut var_h, mut mss) = (0.0f64, 0.0f64);
     const STEP: i32 = 4;
@@ -311,59 +312,27 @@ pub fn wind_fetch_km(wind_speed: f32) -> f32 {
     (2.3 * wind_speed * wind_speed).clamp(120.0, 600.0)
 }
 
-/// The whitecap threshold (OceanFFT `foamBias`) by wind, fitted to the cover the sea SHOWS: the
-/// share of open water the shader draws as a solid cap, measured on a real device with the weather
-/// presets' own spectra after 40 s of sea (fft_cover_tests.rs, `whitecap_cover_by_preset`), at the
-/// caps' own decay (WHITECAP_FOAM_DECAY):
-///
-///   wind  3.5 m/s  0.87  ->  0 %       (calm: no breaking)
-///         7         0.84  ->  ~1 %
-///        12         0.79  ->  ~4 %
-///        20         0.76  ->  ~8 %
-///        30         0.745 -> ~11 %
-///
-/// Observed seas run ~2 % at 12 m/s and 10-14 % at 20 m/s (Monahan; Callaghan et al. 2008), most of
-/// it the decaying foam behind the caps; the actively breaking caps are about a quarter of that.
-/// History: Tidewater's rule (0.5 + 0.16 x whitecaps + 0.01 per m/s over 7, plus OP's 0.1) capped at
-/// 0.78 measured 70 % white in a storm (the cover is that steep in the threshold); a first fit at the
-/// old decay gave 15 % in a storm, drawn as large flat floes (owner, 2026-10-13: "the foam patches are
-/// still too big ... for the rest it should be white caps").
-const WHITECAP_COVER_BIAS: [(f32, f32); 5] = [(3.5, 0.87), (7.0, 0.84), (12.0, 0.79), (20.0, 0.76), (30.0, 0.745)];
-
-/// How fast the open sea's whitecap foam fades (1/s): 1.5, about a second above the drawing threshold,
-/// so a cap marks a crest that is breaking and leaves no trail. Tidewater's 0.6 - 0.35 x whitecaps
-/// (0.25 in a storm; OP held it at 0.35) kept each cap ~9 s and drew it as a flat white floe drifting
-/// behind the crest (captured: storm preset, three variants, owner's pose). The persistent foam
-/// patches belong to the surf near the coast, which the shore waves and simulation draw.
-/// WGR_TW_FOAM_DECAY overrides it.
-pub const WHITECAP_FOAM_DECAY: f32 = 1.5;
-
-/// The fitted threshold for this wind, moved by the whitecaps control around the weather presets'
-/// own value (0.1 calm .. 1.0 storm): +-0.03 at the extremes, so the control still means more or
-/// fewer caps without escaping the measured range.
-pub fn whitecap_cover_bias(wind_speed: f32, whitecaps: f32) -> f32 {
-    let lerp_table = |t: &[(f32, f32)], x: f32| {
-        if x <= t[0].0 {
-            return t[0].1;
-        }
-        for w in t.windows(2) {
-            if x <= w[1].0 {
-                let f = (x - w[0].0) / (w[1].0 - w[0].0);
-                return w[0].1 + (w[1].1 - w[0].1) * f;
-            }
-        }
-        t[t.len() - 1].1
-    };
-    let nominal = lerp_table(&[(3.5, 0.1), (7.0, 0.5), (12.0, 0.8), (20.0, 1.0)], wind_speed);
-    lerp_table(&WHITECAP_COVER_BIAS, wind_speed) + 0.03 * (whitecaps.clamp(0.0, 1.0) - nominal) / 0.5
+/// Tidewater's whitecap threshold (OceanFFT `foamBias`), exactly as island-expansion's sea panel sets
+/// it (AppUI.js `whitecaps()`): 0.5 + 0.16 x whitecaps + 0.01 per m/s of wind over 7 (clamped to
+/// -5..+12). The owner asked for the whitecaps and foam synced to island-expansion (2026-10-13), so
+/// OP's departures are gone: the +0.1 offset, the 0.78 cap and the fitted cover table, the faster
+/// decay, and the solid cap patches (WHITECAP_PATCH, now off). What remains of OP is what the owner
+/// asked for on top: the amplitude coupling (`frame_foam_bias`, the Jacobian of the drawn surface)
+/// and no windrow lines.
+pub fn whitecap_bias(wind_speed: f32, whitecaps: f32) -> f32 {
+    0.5 + 0.16 * whitecaps.clamp(0.0, 1.0) + 0.01 * (wind_speed - 7.0).clamp(-5.0, 12.0)
 }
 
-/// The offset OP once put over Tidewater's rule; now only the reference WGR_TW_FOAM_BIAS_ADD is read
-/// against (a tuning offset: WGR_TW_FOAM_BIAS_ADD=0.13 is +0.03 over the fitted threshold).
-pub const FOAM_BIAS_ADD: f32 = 0.1;
+/// Tidewater's foam decay (1/s), as island-expansion's sea panel sets it: 0.6 - 0.35 x whitecaps
+/// (more whitecaps: the foam lasts longer).
+pub fn whitecap_decay(whitecaps: f32) -> f32 {
+    0.6 - 0.35 * whitecaps.clamp(0.0, 1.0)
+}
+
+/// WGR_TW_FOAM_BIAS_ADD=<offset>: a tuning offset on Tidewater's threshold (capture A/B); 0 by default.
 fn foam_bias_add() -> f32 {
     static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
-    *V.get_or_init(|| std::env::var("WGR_TW_FOAM_BIAS_ADD").ok().and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(FOAM_BIAS_ADD).clamp(-0.3, 0.4))
+    *V.get_or_init(|| std::env::var("WGR_TW_FOAM_BIAS_ADD").ok().and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(0.0).clamp(-0.3, 0.4))
 }
 
 /// WGR_TW_FOAM_DECAY=<1/s>: overrides the whitecap foam's decay rate (capture tuning).
@@ -372,14 +341,32 @@ fn foam_decay_override() -> Option<f32> {
     *V.get_or_init(|| std::env::var("WGR_TW_FOAM_DECAY").ok().and_then(|v| v.trim().parse::<f32>().ok()).map(|v| v.clamp(0.05, 5.0)))
 }
 
+/// The whitecap threshold for this frame's drawn amplitude (the Water tab's x the weather's). Foam
+/// forms where the drawn surface's Jacobian falls below the threshold, and that Jacobian is the drawn
+/// one (choppiness x amplitude, `sizes[0].y` in the column kernel): a lower sea compresses less and
+/// so carries fewer caps at the same threshold, never more (owner, 2026-10-13: "at lower amplitude we
+/// can not have more foam ... use the foam and white caps behaviour of water amplitude 2 and calculate
+/// foam down for lower amplitudes"). Above amplitude 1 the choppiness is held so choppiness x amplitude
+/// stays at 1.3 (the mesh folds past it), which would leave a 30 m/s sea at amplitude 2 with a storm's
+/// caps; the threshold rises by AMPLITUDE_FOAM_BIAS per unit of amplitude over 1 instead, so the
+/// amplitude-2 sea is the most foamed (measured: storm 0.76 -> 8 % solid, 0.78 -> ~13 %).
+pub const AMPLITUDE_FOAM_BIAS: f32 = 0.02;
+pub fn frame_foam_bias(spec: &SpectrumInputs, amplitude: f32) -> f32 {
+    let a = if amplitude > 0.0 { amplitude } else { 1.0 };
+    let q = |v: f32, step: f32| (v / step).round() * step;
+    q(spec.foam_bias + AMPLITUDE_FOAM_BIAS * (a - 1.0).clamp(0.0, 1.0), 0.005)
+}
+
 /// Build the uniform for this frame.
-pub fn ocean_params(spec: &SpectrumInputs, choppiness: f32, time: f32, dt: f32) -> OceanParams {
+pub fn ocean_params(spec: &SpectrumInputs, choppiness: f32, amplitude: f32, time: f32, dt: f32) -> OceanParams {
     let (a0, b0) = spec.local.packed();
     let (a1, b1) = spec.swell.packed();
     let mut sizes = [[0.0; 4]; 4];
     for i in 0..4 {
         sizes[i] = [spec.sizes[i], 0.0, 0.0, 0.0];
     }
+    // the drawn amplitude, for the Jacobian of the drawn surface (0: 1)
+    sizes[0][1] = amplitude.max(0.0);
     OceanParams {
         sizes,
         cuts: spec.cuts(),
@@ -387,7 +374,7 @@ pub fn ocean_params(spec: &SpectrumInputs, choppiness: f32, time: f32, dt: f32) 
         sys_b: [b0, b1],
         // Tidewater's foam constants (OceanFFT.js): bias 0.58 (W3g: from the whitecaps control,
         // 0.58 at its default), gain 3, decay 0.35, add 2.5.
-        p0: [choppiness, spec.foam_bias, 3.0, spec.foam_decay],
+        p0: [choppiness, frame_foam_bias(spec, amplitude), 3.0, spec.foam_decay],
         p1: [2.5, time, spec.depth, dt],
         seed: [spec.seed, 0, 0, 0],
     }
@@ -737,6 +724,8 @@ fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid
 {stages}
 
     let lambda = ocean.p0.x;
+    // the Jacobian of the surface as DRAWN: its horizontal displacement is choppiness x amplitude
+    let lamJ = lambda * select(1.0, ocean.sizes[0].y, ocean.sizes[0].y > 0.0);
     for (var e = 0u; e < 2u; e++) {{
         let y = t + e * FFT_HALF;
         let idx = base + y * {N}u + col;
@@ -747,9 +736,9 @@ fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid
         let Dx = A.x; let Dz = A.y; let Dy = A.z; let Dxz = A.w;
         let Dyx = B.x; let Dyz = B.y; let Dxx = B.z; let Dzz = B.w;
 
-        let jxx = lambda * Dxx + 1.0;
-        let jzz = lambda * Dzz + 1.0;
-        let jxz = lambda * Dxz;
+        let jxx = lamJ * Dxx + 1.0;
+        let jzz = lamJ * Dzz + 1.0;
+        let jxz = lamJ * Dxz;
         let J = jxx * jzz - jxz * jxz;
 
         // Persistent foam: generated where the surface compresses (J < bias), then decays.
@@ -1107,12 +1096,12 @@ impl OceanFft {
     }
 
     /// Upload this frame's uniform; a changed spectrum marks h0 for regeneration.
-    pub fn set_frame(&mut self, queue: &wgpu::Queue, spec: SpectrumInputs, choppiness: f32, time: f32, dt: f32) {
+    pub fn set_frame(&mut self, queue: &wgpu::Queue, spec: SpectrumInputs, choppiness: f32, amplitude: f32, time: f32, dt: f32) {
         if self.spectrum != Some(spec) {
             self.spectrum = Some(spec);
             self.needs_spectrum = true;
         }
-        self.current = ocean_params(&spec, choppiness, time, dt);
+        self.current = ocean_params(&spec, choppiness, amplitude, time, dt);
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&self.current));
     }
 
@@ -1223,6 +1212,7 @@ mod tests {
             seed: 1337,
             foam_bias: 0.58,
             foam_decay: 0.35,
+            whitecaps: 0.5,
         };
         let cuts = s.cuts();
         assert_eq!(cuts[0][0], 0.0001);
@@ -1267,30 +1257,21 @@ mod tests {
     }
 
     #[test]
-    fn whitecap_threshold_follows_the_measured_cover_fit() {
-        // the owner's storm: 70 % of the sea white at Tidewater's capped 0.78; the fit gives ~8 % (short-lived caps)
+    fn whitecaps_follow_island_expansions_sea_panel() {
+        // AppUI.js whitecaps(): Breezy defaults (8 m/s, 0.4) and Storm (20 m/s, 1)
+        assert!((whitecap_bias(8.0, 0.4) - 0.574).abs() < 1e-5);
+        assert!((whitecap_bias(20.0, 1.0) - 0.78).abs() < 1e-5);
+        assert!((whitecap_decay(1.0) - 0.25).abs() < 1e-6);
+        assert!((whitecap_decay(0.5) - 0.425).abs() < 1e-6);
         let mut p = <WgrWaterParams as bytemuck::Zeroable>::zeroed();
         p.tidewater = crate::water_tw::DEFAULT_PARAMS;
         p.tidewater_sea = [20.0, 900.0, 1.0, 4.0];
-        p.tidewater[0][1] = 1.3;
         let spec = SpectrumInputs::from_params(&p);
-        assert!((spec.foam_bias - 0.76).abs() < 0.006, "storm bias {}", spec.foam_bias);
-        assert!((spec.foam_decay - WHITECAP_FOAM_DECAY).abs() < 0.006);
-        // the presets sit on the table; the control moves it at most 0.03 either way
-        assert!((whitecap_cover_bias(12.0, 0.8) - 0.79).abs() < 1e-5);
-        assert!((whitecap_cover_bias(7.0, 0.5) - 0.84).abs() < 1e-5);
-        assert!((whitecap_cover_bias(20.0, 0.5) - 0.73).abs() < 1e-5);
-        assert!((whitecap_cover_bias(7.0, 1.0) - 0.87).abs() < 1e-5);
-        // more wind never means a higher threshold (fewer caps) at the presets' own control
-        let mut last = 1.0;
-        for w in [2.0, 3.5, 5.0, 7.0, 9.5, 12.0, 16.0, 20.0, 25.0, 30.0, 40.0] {
-            let nominal = [(3.5, 0.1), (7.0, 0.5), (12.0, 0.8), (20.0, 1.0)]
-                .iter()
-                .fold(0.1f32, |acc, &(x, v)| if w >= x { v } else { acc });
-            let b = whitecap_cover_bias(w, nominal);
-            assert!(b <= last + 0.031, "wind {w}: {b} after {last}");
-            last = b;
-        }
+        assert!((spec.foam_bias - 0.78).abs() < 0.006, "storm bias {}", spec.foam_bias);
+        assert!((spec.foam_decay - 0.25).abs() < 0.006);
+        // more wind, more caps: the threshold never falls as the wind rises
+        assert!(whitecap_bias(14.0, 0.75) > whitecap_bias(8.0, 0.4));
+        assert!(whitecap_bias(2.5, 0.0) < whitecap_bias(8.0, 0.4));
         // and the waves do grow: Hs rises with the wind (with the fetch the wind brings)
         let hs = |w: f32| {
             let mut l = WaveSystem::LOCAL;
@@ -1300,6 +1281,20 @@ mod tests {
         };
         assert_eq!(wind_fetch_km(7.0), 120.0);
         assert!(hs(15.0) > hs(7.0) * 1.5 && hs(30.0) > hs(15.0), "{} {} {}", hs(7.0), hs(15.0), hs(30.0));
+    }
+
+    #[test]
+    fn a_lower_amplitude_never_raises_the_cap_threshold() {
+        let mut p = <WgrWaterParams as bytemuck::Zeroable>::zeroed();
+        p.tidewater = crate::water_tw::DEFAULT_PARAMS;
+        p.tidewater_sea = [20.0, 900.0, 1.0, 4.0];
+        let spec = SpectrumInputs::from_params(&p);
+        let b = |a: f32| frame_foam_bias(&spec, a);
+        assert_eq!(b(0.5), b(1.0));
+        assert!(b(1.5) > b(1.0) && b(2.0) > b(1.5));
+        assert_eq!(b(3.0), b(2.0));
+        // the Jacobian lane carries the amplitude
+        assert_eq!(ocean_params(&spec, 0.65, 2.0, 0.0, 0.016).sizes[0][1], 2.0);
     }
 
     #[test]

@@ -106,12 +106,29 @@ pub struct Selection<'a> {
     sea: f64,
     planes: Option<SidePlanes>,
     curved_earth: bool,
+    /// (OP) how far the drawn surface reaches out of a node's flat box: sideways (m) and as a
+    /// factor on the vertical bounds (see `displacement`)
+    margin_xz: f64,
+    scale_y: f64,
     pub nodes: Vec<[f32; 4]>,
 }
 
 impl<'a> Selection<'a> {
     pub fn new(cdlod: &'a Cdlod, cam: glam::DVec3, sea: f32, planes: Option<SidePlanes>) -> Self {
-        Self { cdlod, cam, sea: sea as f64, planes, curved_earth: false, nodes: Vec::with_capacity(256) }
+        Self { cdlod, cam, sea: sea as f64, planes, curved_earth: false, margin_xz: 0.0, scale_y: 1.0, nodes: Vec::with_capacity(256) }
+    }
+
+    /// (OP) The frame's amplitude and choppiness: the surface is drawn displaced sideways by up to
+    /// ~5 m x choppiness x amplitude and vertically by the amplitude, so a node's culling box grows
+    /// by that much. With the flat box a node whose displaced water was on screen was culled from
+    /// its undisplaced footprint, and its square showed the background through the sea (owner,
+    /// 2026-10-13: "for high water amplitude like 3 I see patches of water that are not rendered
+    /// and remain white squares").
+    pub fn displacement(mut self, amplitude: f32, choppiness: f32) -> Self {
+        let a = amplitude.max(0.0) as f64;
+        self.margin_xz = 5.0 * a * (choppiness.max(0.5) as f64);
+        self.scale_y = a.max(1.0);
+        self
     }
 
     /// Earth presentation only: conservative spherical height bounds. The
@@ -122,7 +139,7 @@ impl<'a> Selection<'a> {
     }
 
     fn rel_box(&self, x: f64, z: f64, size: f64) -> (glam::Vec3, glam::Vec3) {
-        let (mut min_y, mut max_y) = (self.sea + MIN_Y as f64, self.sea + MAX_Y as f64);
+        let (mut min_y, mut max_y) = (self.sea + MIN_Y as f64 * self.scale_y, self.sea + MAX_Y as f64 * self.scale_y);
         if self.curved_earth {
             let near_x = EARTH_ANCHOR.clamp(x, x + size);
             let near_z = EARTH_ANCHOR.clamp(z, z + size);
@@ -146,7 +163,9 @@ impl<'a> Selection<'a> {
         match &self.planes {
             None => true,
             Some(p) => {
-                let (min, max) = self.rel_box(x, z, size);
+                // the margin widens only the visibility test, not the LOD ranges
+                let m = self.margin_xz;
+                let (min, max) = self.rel_box(x - m, z - m, size + 2.0 * m);
                 p.box_visible(min, max)
             }
         }
