@@ -110,7 +110,10 @@ struct SmokeVolumetricParams
     // Fire Pro (owner, 2026-10-12). POSEIDON_SMOKE_SYSTEM=0 is the 2001 billboards alone, =1 the
     // froxel field, =2 draws field and billboards (A/B), =3 Fire Pro.
     SmokeSystemMode mode = SmokeSystemMode::FirePro;
-    float cellSize = 1.0f;     //!< POSEIDON_SMOKE_VOL_CELL: metres per froxel
+    //! POSEIDON_SMOKE_VOL_CELL: metres per froxel. 2 m since FIRE-002: the field now draws every
+    //! 2001 puff under Fire Pro too, and a wreck's column drifting off is seen from 200 m, not
+    //! from the 64 m a 1 m grid reaches.
+    float cellSize = 2.0f;
     int marchSteps = 48;       //!< POSEIDON_SMOKE_VOL_STEPS: samples along the view ray
     int sunSteps = 4;          //!< POSEIDON_SMOKE_VOL_SUN_STEPS: 0 = no self-shadow march
     float sunStepLen = 1.5f;   //!< metres, first sun step; they widen geometrically
@@ -136,16 +139,19 @@ struct SmokeVolumetricParams
 SmokeVolumetricParams& GSmokeVolumetric();
 
 //! True when the legacy billboard for an INJECTED particle must not be drawn as well.
+//! FIRE-002: under Fire Pro too -- the owner wants no 2001 puff drawn as a sprite any more
+//! (grenades, rockets, wrecks); the field draws them as volume instead.
 inline bool SmokeBillboardsSuppressed()
 {
-    return GSmokeVolumetric().mode == SmokeSystemMode::Volumetric;
+    const SmokeSystemMode m = GSmokeVolumetric().mode;
+    return m == SmokeSystemMode::Volumetric || m == SmokeSystemMode::FirePro;
 }
 
 //! True when the camera-anchored froxel field is drawn (Volumetric, or the A/B view).
 inline bool SmokeFieldActive()
 {
     const SmokeSystemMode m = GSmokeVolumetric().mode;
-    return m == SmokeSystemMode::Volumetric || m == SmokeSystemMode::Both;
+    return m == SmokeSystemMode::Volumetric || m == SmokeSystemMode::Both || m == SmokeSystemMode::FirePro;
 }
 
 //! True when smoke is drawn by Fire Pro's solver near its source (the default).

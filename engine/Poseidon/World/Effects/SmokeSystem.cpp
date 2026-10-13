@@ -324,6 +324,7 @@ void SmokeSystem::CollectShadowBlobs(std::vector<ShadowBlob>& out, std::size_t m
             b.radius = sample.radius;
             b.density = sample.density;
             b.heightAboveGround = sample.heightAboveGround;
+            b.albedo = sample.albedo;
             if (out.size() >= maxBlobs)
             {
                 // The cap was declared and never enforced on this branch. SMK-038 raises it

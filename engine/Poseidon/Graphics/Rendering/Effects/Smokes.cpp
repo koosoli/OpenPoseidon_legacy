@@ -325,7 +325,7 @@ void SmokeSourceVehicle::SimulateExplosion()
                 const float ground = GLandscape ? GLandscape->SurfaceY(p.X(), p.Z()) : p.Y();
                 // FIRE-002: Fire Pro's fuel fireball -- a vehicle's fuel goes up black (smoke 1)
                 SpawnFireVolume(Vector3(p.X(), ground, p.Z()), std::clamp(wreck->GetRadius() * 0.5f, 1.2f, 3.5f),
-                                1.0f, 3.5f, FireKindExplosion);
+                                1.0f, 5.0f, FireKindExplosion);
             }
             // change fire and darkFire parameters based on type.hit value
             float fireSize = type.hit * 0.001;
@@ -394,16 +394,17 @@ void SmokeSourceVehicle::Simulate(float deltaT, SimulationImportance prec)
         if (ignition > 0.0f)
             ReportFireVolume(this, Vector3(p.X(), std::max(ground, Position().Y() - 1.2f), p.Z()), radius,
                              _inOutDensity * ignition, 0.5f, FireKindWreck);
-        // the column stands on the hull's top, so it climbs out of the flames, not through the hull
-        const LODShapeWithShadow* shape = wreck->GetShape();
-        const float top = shape ? p.Y() + shape->Max().Y() : p.Y() + 1.5f;
+        // the column rises out of the fire itself, from the same bed as the flames (it stood on the
+        // hull's top and read as smoke hanging over the wreck -- owner, 2026-10-13); the probes
+        // that keep it out of walls start outside the hull (FireVolumes ProbeSolids)
+        const float bedY = std::max(ground, Position().Y() - 1.2f);
         const float column = ramp(0.3f, 2.0f, since);
         const void* columnOwner = reinterpret_cast<const char*>(this) + 1;
         if (column > 0.0f)
         {
-            // soot: near black, and dense (x6 per metre in the renderer)
-            static const float kSoot[4] = {0.016f, 0.016f, 0.017f, 1.5f};
-            ReportFireVolume(columnOwner, Vector3(p.X(), std::max(top, ground + 0.5f), p.Z()),
+            // soot: near black, and dense (x6 per metre in the renderer: 15 / m)
+            static const float kSoot[4] = {0.012f, 0.012f, 0.013f, 2.5f};
+            ReportFireVolume(columnOwner, Vector3(p.X(), bedY, p.Z()),
                              std::clamp(wreck->GetRadius() * 0.25f, 0.8f, 1.6f), _inOutDensity * column, 1.0f,
                              FireKindSmokeStack, kSoot);
         }
@@ -938,8 +939,23 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
     }
     // simulate acceleration
     _speed[1] += _accY * deltaT;
-    Friction(_speed[0], _xFriction, 0, deltaT);
-    Friction(_speed[2], _zFriction, 0, deltaT);
+    if (_smokeShadow && GLandscape != nullptr && _roomId < 0)
+    {
+        // FIRE-002: smoke in the air drifts with the wind as it is NOW. The 2001 puff took the
+        // wind once, when it was dropped, and its side friction then braked it to a standstill,
+        // so a change of wind never reached the smoke already up (owner, 2026-10-13). The
+        // horizontal speed relaxes toward the current wind instead of toward zero (a room's
+        // smoke, _roomId >= 0, still feels none).
+        const Vector3 wind = GLandscape->GetWind() * 0.8f;
+        const float rate = floatMax(floatMax(_xFriction, _zFriction), 0.6f) * deltaT;
+        _speed[0] += std::clamp(wind.X() - _speed[0], -rate, rate);
+        _speed[2] += std::clamp(wind.Z() - _speed[2], -rate, rate);
+    }
+    else
+    {
+        Friction(_speed[0], _xFriction, 0, deltaT);
+        Friction(_speed[2], _zFriction, 0, deltaT);
+    }
     Limit(_speed[1], _minYSpeed, _maxYSpeed);
     // SMK-030: keep the step inside the room it started in. Outdoors this costs one
     // room lookup for the whole life of the cloudlet (see the header note).
@@ -1162,6 +1178,10 @@ bool Cloudlet::SampleShadow(CloudletShadowSample& out) const
     out.pos = Position();
     out.radius = floatMax(_drawScale, 0.05f);
     out.density = density;
+    // FIRE-002: what the puff looks like, as a scattering albedo for the volumetric renderer
+    // (a wreck's soot near black, a smoke grenade's near white)
+    const PackedColor c = GetConstantColor();
+    out.albedo = std::clamp((0.2126f * c.R8() + 0.7152f * c.G8() + 0.0722f * c.B8()) * (1.0f / 255.0f), 0.02f, 0.92f);
     out.heightAboveGround = floatMax(out.pos.Y() - _groundY, 0.0f);
     return true;
 }

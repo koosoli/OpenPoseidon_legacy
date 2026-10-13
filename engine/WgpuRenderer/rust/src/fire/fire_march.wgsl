@@ -18,6 +18,8 @@ struct Box {
     dims_fade: vec4<f32>,   // nx, ny, nz, fade in (0..1)
     smoke: vec4<f32>,       // smoke colour (linear albedo), w: density (1/m per unit)
     frame: vec4<f32>,       // the frame's pivot (camera-relative), w: its turn about +y (rad)
+    look: vec4<f32>,        // FIRE-002: brightness, soot glow, flame opacity (1/m), temperature (K)
+    grey: vec4<f32>,        // FIRE-002: the albedo of the smoke's grey share (fields .w)
 };
 
 struct MarchParams {
@@ -92,7 +94,7 @@ fn fieldAt(i: u32, rel: vec3<f32>) -> vec4<f32> {
     let side = min(min(q.x, 1.0 - q.x), min(q.z, 1.0 - q.z));
     let fade = smoothstep(0.0, 0.1, side) * smoothstep(0.0, 0.15, 1.0 - q.y) * b.dims_fade.w;
     let f = sampleField(i, q);
-    return vec4<f32>(f.x * fade, f.y, f.z * fade, f.w);
+    return vec4<f32>(f.x * fade, f.y, f.z * fade, f.w * fade);
 }
 
 fn boxSpan(i: u32, dirWorld: vec3<f32>) -> vec2<f32> {
@@ -111,18 +113,19 @@ fn boxSpan(i: u32, dirWorld: vec3<f32>) -> vec2<f32> {
 // fire-emission.wgsl fireProGlow
 fn glow(life: f32) -> f32 { return clamp(life * 5.0, 0.0, 1.0); }
 
-// fireProEmission: thermal emission of the flame and the hot soot
-fn emission(f: vec4<f32>, smoke: vec4<f32>) -> vec3<f32> {
+// fireProEmission: thermal emission of the flame and the hot soot (look: the box's own
+// brightness, soot glow, flame opacity and temperature)
+fn emission(f: vec4<f32>, smoke: vec4<f32>, look: vec4<f32>) -> vec3<f32> {
     let absorption = (vec3<f32>(1.0) - smoke.xyz) * max(0.0, f.x) * smoke.w;
-    let source = absorption * M.ambient.w + vec3<f32>(glow(f.z) * M.fire.z);
+    let source = absorption * look.y + vec3<f32>(glow(f.z) * look.z);
     if (all(source == vec3<f32>(0.0))) { return vec3<f32>(0.0); }
     let heat = max(0.0, f.y);
-    let kelvin = 800.0 + heat / (heat + 2.0) * (M.fire.x - 800.0);
+    let kelvin = 800.0 + heat / (heat + 2.0) * (look.w - 800.0);
     let size = f32(textureDimensions(lut).x);
     let u = (clamp((kelvin - 500.0) / 9500.0, 0.0, 1.0) * (size - 1.0) + 0.5) / size;
     let spectrum = textureSampleLevel(lut, lin, vec2<f32>(u, 0.5), 0.0);
     let thermal = spectrum.rgb * exp2(clamp(spectrum.a, -24.0, 10.0));
-    return thermal * source * M.fire.y * M.fire.w;
+    return thermal * source * look.x * M.fire.w;
 }
 
 // optical depth toward the sun through the same box (four widening steps)
@@ -198,7 +201,9 @@ fn fs_fire(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
             let rel = dir * (t0 + (f32(k) + jitter) * ds);
             let f = fieldAt(i, rel);
             if (f.x + glow(f.z) > 0.002) {
-                let smoke = M.boxes[i].smoke;
+                // the smoke's colour here: the box's, mixed toward grey by the grey share it carries
+                let greyShare = clamp(f.w / max(f.x, 1e-4), 0.0, 1.0);
+                let smoke = vec4<f32>(mix(M.boxes[i].smoke.xyz, M.boxes[i].grey.xyz, greyShare), M.boxes[i].smoke.w);
                 let density = max(0.0, f.x) * smoke.w;
                 var scattering = vec3<f32>(0.0);
                 if (density > 0.0) {
@@ -215,8 +220,9 @@ fn fs_fire(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
                     if (plume) { skyVis = mix(0.1, 1.0, shadowAlong(i, rel, vec3<f32>(0.0, 1.0, 0.0), 4)); }
                     scattering = smoke.xyz * (M.ambient.xyz * skyVis + direct * sunVis) * density;
                 }
-                let sigma = density + glow(f.z) * M.fire.z;
-                let src = scattering + emission(f, smoke);
+                let look = M.boxes[i].look;
+                let sigma = density + glow(f.z) * look.z;
+                let src = scattering + emission(f, smoke, look);
                 let tau = sigma * ds;
                 var integral = ds * (1.0 - 0.5 * tau + tau * tau / 6.0);
                 if (tau >= 0.001) { integral = (1.0 - exp(-tau)) / sigma; }
@@ -248,7 +254,7 @@ fn fs_fire_mask(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         let ds = (t1 - s.x) / 16.0;
         for (var k = 0u; k < 16u; k++) {
             let f = fieldAt(i, dir * (s.x + (f32(k) + 0.5) * ds));
-            tau += (max(f.x, 0.0) * M.boxes[i].smoke.w + glow(f.z) * M.fire.z * 3.0) * ds;
+            tau += (max(f.x, 0.0) * M.boxes[i].smoke.w + glow(f.z) * M.boxes[i].look.z * 3.0) * ds;
         }
     }
     return vec4<f32>(clamp((1.0 - exp(-tau)) * 2.0, 0.0, 1.0), 0.0, 0.0, 1.0);

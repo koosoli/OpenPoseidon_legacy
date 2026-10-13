@@ -111,6 +111,7 @@ class SmokeSystem
     {
         float x, y, z, radius;
         float density, heightAboveGround;
+        float albedo = -1.0f; //!< FIRE-002: the volumetric renderer's albedo, -1 = its default
     };
 
     /// Gather this frame's shadow-casting particles from every live volume, densest

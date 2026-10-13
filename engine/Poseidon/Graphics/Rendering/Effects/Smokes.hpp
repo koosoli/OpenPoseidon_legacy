@@ -350,6 +350,7 @@ struct CloudletShadowSample
     float radius = 0.0f;
     float density = 0.0f;
     float heightAboveGround = 0.0f;
+    float albedo = -1.0f; //!< FIRE-002: scattering albedo, -1 = the renderer's default
 };
 //! Returns false for anything that is not a legacy cloudlet, or is too faint to matter.
 bool SampleCloudletShadow(const Entity* entity, CloudletShadowSample& out);

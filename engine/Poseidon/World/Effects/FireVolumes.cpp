@@ -56,7 +56,8 @@ float BoxWidth(const FireVolumeReport& r)
         // a cloud spreads wider than its source; the box's cells (width / 48) must stay small enough
         // for its billows, so the length downwind comes from the wind-turned box, not the width
         return std::max(r.radius * 10.0f, 8.0f);
-    return r.kind == FireKindExplosion ? r.radius * 4.0f : std::max(r.radius * 5.0f, 2.4f);
+    // (a fireball rolls up on its own buoyancy: a taller box than a flame's, room to climb)
+    return r.kind == FireKindExplosion ? r.radius * 5.0f : std::max(r.radius * 5.0f, 2.4f);
 }
 
 // Probe the world around the fire once: floors everywhere; walls and ceilings where they can
@@ -77,7 +78,12 @@ void ProbeSolids(FireVolumeReport& r)
         walls = q.IsSheltered(bed, 12.0f);
     // FIRE-002: a wreck's hull footprint (its bed is 0.35 of the hull's radius): over it the flames
     // are open, beyond it a wall or a roof stops them like any fire's (they burned through houses)
-    const float hull = r.kind == FireKindWreck ? r.radius / 0.35f * 0.7f : 0.0f;
+    // (the column of the same wreck, radius 0.25 of the hull's, rises from the same bed)
+    // (a fireball is spawned at 0.5 of the hull's radius: its probes too start outside it, or a
+    // wreck's own hull walled the burst in -- 76 wall columns in the FIRE-002 capture)
+    const float hull = r.kind == FireKindWreck ? r.radius / 0.35f * 0.7f
+                       : r.kind == FireKindSmokeStack ? r.radius / 0.25f * 0.7f
+                       : r.kind == FireKindExplosion ? r.radius * 1.4f : 0.0f;
     for (int j = 0; j < n; ++j)
     {
         for (int i = 0; i < n; ++i)
@@ -96,7 +102,7 @@ void ProbeSolids(FireVolumeReport& r)
             if (!walls)
                 continue;
             Vector3 hit;
-            if (r.kind == FireKindWreck)
+            if (hull > 0.0f)
             {
                 const float d = std::sqrt(dx * dx + dz * dz);
                 if (d < hull + col * 0.5f)
@@ -104,8 +110,10 @@ void ProbeSolids(FireVolumeReport& r)
                 const Vector3 from = bed + Vector3(dx / d * hull, 0, dz / d * hull);
                 if (q.ProbeSegment(from, Vector3(cx, bed.Y(), cz), hit))
                     r.ceiling[k] = -1e6f;
+                // (a "roof" lower than 3 m over a wreck is its own gun barrel or turret overhang)
                 else if (q.ProbeSegment(Vector3(cx, std::max(fl, r.base.Y()) + 0.3f, cz),
-                                        Vector3(cx, r.base.Y() + height, cz), hit))
+                                        Vector3(cx, r.base.Y() + height, cz), hit) &&
+                         hit.Y() > r.base.Y() + 3.0f)
                     r.ceiling[k] = hit.Y();
                 continue;
             }

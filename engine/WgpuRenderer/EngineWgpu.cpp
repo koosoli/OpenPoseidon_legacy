@@ -21066,7 +21066,7 @@ void EngineWgpu::PushRenderParams()
                     _pendingSet.smokeVolumeBlobs[i].pos_radius = {volBlobs[i].x, volBlobs[i].y, volBlobs[i].z,
                                                                   volBlobs[i].radius};
                     _pendingSet.smokeVolumeBlobs[i].density = {volBlobs[i].density, volBlobs[i].heightAboveGround,
-                                                               0.0f, 0.0f};
+                                                               volBlobs[i].albedo, 0.0f};
                 }
             }
             else
@@ -21129,8 +21129,11 @@ void EngineWgpu::PushRenderParams()
             // The sun the smoke is lit by is the one SMK-035 already shades the billboards
             // with, so the two systems cannot disagree about the time of day.
             WgrSmokeVolumeParams vp{};
-            // the renderer's field knows Legacy (off) / Volumetric / Both; Fire Pro leaves it off
-            vp.mode = SmokeFieldActive() ? static_cast<uint32_t>(vol.mode) : 0u;
+            // the renderer's field knows Legacy (off) / Volumetric / Both. FIRE-002: under Fire Pro
+            // the field draws every 2001 puff in place of its billboard (Volumetric).
+            vp.mode = !SmokeFieldActive() ? 0u
+                      : vol.mode == SmokeSystemMode::FirePro ? static_cast<uint32_t>(SmokeSystemMode::Volumetric)
+                                                              : static_cast<uint32_t>(vol.mode);
             vp.cell_size = vol.cellSize;
             vp.march_steps = static_cast<uint32_t>(vol.marchSteps);
             vp.sun_steps = static_cast<uint32_t>(vol.sunSteps);

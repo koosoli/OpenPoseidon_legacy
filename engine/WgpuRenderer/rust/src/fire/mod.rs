@@ -27,6 +27,14 @@ const PZ: u32 = 48;
 const STACK_X: u32 = 176;
 const STACK_Y: u32 = 56;
 const STACK_Z: u32 = 48;
+/// ... and in calm air an upright box three widths tall: smoke with no wind climbs.
+const STACK_UP_X: u32 = 40;
+const STACK_UP_Y: u32 = 120;
+/// A wreck's flames in a breeze (> 2 m/s): a wind-turned box, its fire a fifth of the way in
+/// from the upwind end, 48 cells across the wind like the upright box's 40 but finer.
+const WRECK_X: u32 = 88;
+const WRECK_Y: u32 = 72;
+const WRECK_Z: u32 = 48;
 /// below this wind (m/s) a plume rises: the upright box
 const PLUME_WIND: f32 = 0.8;
 const JACOBI: u32 = 24;
@@ -47,6 +55,11 @@ fn smoke_linger() -> f32 {
 /// Beyond this a fire is not simulated or drawn (the legacy sprites still are).
 const RANGE: f32 = 300.0;
 const LUT_SIZE: usize = 512;
+
+fn smooth01(a: f32, b: f32, x: f32) -> f32 {
+    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
 
 /// One fire, as the engine reports it (`WgrFireSource`, 864 bytes).
 #[repr(C)]
@@ -85,6 +98,9 @@ struct SimParams {
     wind: [f32; 4],
     /// x: flame (1) or smoke only (0), y: how much of the wind the gas takes up
     extra: [f32; 4],
+    /// FIRE-002: the share of the smoke that comes out grey rather than the box's colour --
+    /// x: mean, y: how far it swings, patchy in space and time (fire_sim.wgsl cs_evolve)
+    tint: [f32; 4],
     floor: [[f32; 4]; 25],
     ceiling: [[f32; 4]; 25],
 }
@@ -98,6 +114,11 @@ struct MarchBox {
     smoke: [f32; 4],
     /// the box frame's pivot (camera-relative), w: its turn about +y (rad; local +x = world (cos, sin))
     frame: [f32; 4],
+    /// FIRE-002, per fire: brightness, soot glow, flame opacity (1/m), flame temperature (K) --
+    /// Fire Pro's per-preset `flame` look (a fuel fireball burns brighter and its soot glows)
+    look: [f32; 4],
+    /// FIRE-002: the colour (linear albedo) of the grey share of the smoke (fields .w)
+    grey: [f32; 4],
 }
 
 #[repr(C)]
@@ -594,8 +615,13 @@ impl FireSystem {
         let froude = scale.sqrt();
         // the delayed-ignition preset's source is a 0.65 m sphere
         let froude_di = (radius / 0.65).clamp(0.4, 5.0).sqrt();
+        // Per kind: (emitter lift, source heat, source rise, flame life, expansion, buoyancy).
         let (lift, heat, rise, life, expand, buoy) = if explosion {
-            (0.55, 30.0, 3.0 + 1.5 * radius, 0.8 * froude, 1.6, 6.0)
+            // FIRE-002 (owner, 2026-10-13: "the fireball does not look real"): Fire Pro's fuel
+            // fireball as a BURST, not a jet -- a charge that blows outward for a fraction of a
+            // second, expands as it burns (6.23 in the preset) and rolls up on its own buoyancy
+            // (4.66), not a 3 m/s column fed for the whole explosion
+            (0.55, 30.0, 0.0, 1.6 * froude, 2.0, 4.7)
         } else if wreck {
             // Fire Pro's delayed-ignition preset (editor/presets/delayed-ignition.json) instead of
             // the campfire: a weak source (heat 1.5) whose flame lives long (1.2 s), keeps heating
@@ -613,7 +639,7 @@ impl FireSystem {
         // A wreck's column (stack) is the preset as a stack: hot enough to climb out of the box
         // and so dense it stands black against the sky (owner, 2026-10-13: "thick black smoke").
         let (heat, smoke_rate, rise, buoy) = if stack {
-            (5.0, 7.0 * intensity.max(0.05), 2.5 * froude, 1.6)
+            (5.0, 10.0 * intensity.max(0.05), 2.5 * froude, 1.6)
         } else if smoke_only {
             (3.0, 4.0 * intensity.max(0.05), 1.2 * froude, 1.8)
         } else {
@@ -629,6 +655,18 @@ impl FireSystem {
         } else {
             0.6 + 1.2 * smokiness
         };
+        // the burst: the charge burns for its first ~0.6 s (the box's own clock; Fire Pro's charge
+        // carries fuel that keeps it burning, this solver has none), then the fireball lives on
+        // what it already holds. A 0.4 s charge was torn apart before it was ever seen.
+        let burst = if explosion { 1.0 - smooth01(0.3, 0.8, g.time) } else { 1.0 };
+        let emit_strength = if explosion { burst } else { intensity };
+        // a flame leans in the wind but stands on its fuel: the gas takes up at most 6 m/s of it
+        // (at the weather's 30 m/s the whole flame lay down along the ground and ran into the
+        // side of its box -- the owner's "invisible wall"); smoke takes all of it
+        let (wx, wz) = (s.wind[0], s.wind[2]);
+        let wlen = (wx * wx + wz * wz).sqrt();
+        let wcap = if smoke_only { 1.0 } else { (6.0 / wlen.max(1e-3)).min(1.0) };
+        let (wx, wz) = (wx * wcap, wz * wcap);
         let p = SimParams {
             origin_cell: [g.origin[0], g.origin[1], g.origin[2], g.cell],
             dims: [g.dims[0], g.dims[1], g.dims[2], 1],
@@ -636,9 +674,11 @@ impl FireSystem {
             step: [STEP, g.time, (g.key % 97) as f32 * 1.7, g.width / 10.0],
             // the bed's flattened sphere stands on the ground (its half-height is 0.45 r)
             emitter: [s.pos_radius[0], s.pos_radius[1] + radius * lift, s.pos_radius[2], radius],
-            emit: [intensity, heat, smoke_rate, rise],
+            emit: [emit_strength, heat, smoke_rate, rise],
             flame: [life, flame_smoke, if wreck { 4.0 } else { 3.0 }, expand],
-            motion: [buoy, 0.12, 0.1, 3.2],
+            // the fireball's soot is heavy (the preset's smoke weight 1.45: it curls down round
+            // the rising ball, the mushroom) and its eddies few and big (vorticity 1.08)
+            motion: if explosion { [buoy, 0.6, 0.1, 1.5] } else { [buoy, 0.12, 0.1, 3.2] },
             // turbulence: stronger for a bigger fire, its eddies a metre or so whatever the size
             losses: if stack {
                 // a column cools slower than a grenade's cloud (it climbs) and thins slower still:
@@ -654,6 +694,9 @@ impl FireSystem {
             } else if wreck {
                 // delayed ignition: cooling 0.62, its smoke thinning at 0.35/s, turbulence 0.6
                 [0.62 / froude_di, 0.35, 0.6 * froude_di, 1.1]
+            } else if explosion {
+                // the fuel fireball cools slowly (0.26) and rolls in big eddies
+                [0.3, 0.3, 1.0 * froude, 1.6]
             } else {
                 [0.62 / froude, 0.94 - 0.5 * smokiness, 0.8 * froude, 1.1]
             },
@@ -665,12 +708,27 @@ impl FireSystem {
             // y: how patchily the bed burns (0 a steady bed)
             // the wind in the box's frame; extra.z: the frame's turn, for the world's solid columns
             wind: [
-                s.wind[0] * g.yaw.cos() + s.wind[2] * g.yaw.sin(),
+                wx * g.yaw.cos() + wz * g.yaw.sin(),
                 patchy,
-                -s.wind[0] * g.yaw.sin() + s.wind[2] * g.yaw.cos(),
+                -wx * g.yaw.sin() + wz * g.yaw.cos(),
                 if smoke_only { 1.5 } else { 1.8 },
             ],
-            extra: [if smoke_only { 0.0 } else { 1.0 }, if smoke_only { 1.0 } else { 0.7 }, g.yaw, 0.0],
+            // w: the charge's outward speed while it bursts (the preset's 7 m/s at its 0.5 m)
+            extra: [
+                if smoke_only { 0.0 } else { 1.0 },
+                if smoke_only { 1.0 } else { 0.7 },
+                g.yaw,
+                if explosion { 4.0 * froude.sqrt() * burst } else { 0.0 },
+            ],
+            // the column a third grey on average, swinging between near all-black and mostly grey
+            // puffs; the flames' own soot mostly black
+            tint: if stack {
+                [0.32, 0.4, 0.0, 0.0]
+            } else if wreck {
+                [0.15, 0.25, 0.0, 0.0]
+            } else {
+                [0.0; 4]
+            },
             floor: s.floor,
             ceiling: s.ceiling,
         };
@@ -789,7 +847,7 @@ impl FireSystem {
             c[0] * c[0] + c[1] * c[1] + c[2] * c[2]
         };
         order.sort_by(|&a, &b| dist(&self.grids[a]).total_cmp(&dist(&self.grids[b])));
-        let mut boxes = [MarchBox { origin_cell: [0.0; 4], dims_fade: [0.0; 4], smoke: [0.0; 4], frame: [0.0; 4] }; MAX_FIRES];
+        let mut boxes = [MarchBox { origin_cell: [0.0; 4], dims_fade: [0.0; 4], smoke: [0.0; 4], frame: [0.0; 4], look: [0.0; 4], grey: [0.0; 4] }; MAX_FIRES];
         for (slot, &gi) in order.iter().enumerate() {
             let g = &self.grids[gi];
             // the box frame's coordinates less the camera's world ones: the march turns a
@@ -798,6 +856,15 @@ impl FireSystem {
                 origin_cell: [g.origin[0] - cam[0], g.origin[1] - cam[1], g.origin[2] - cam[2], g.cell],
                 dims_fade: [g.dims[0] as f32, g.dims[1] as f32, g.dims[2] as f32, g.fade],
                 frame: [g.pivot[0] - cam[0], g.pivot[1] - cam[1], g.pivot[2] - cam[2], g.yaw],
+                // campfire 0.9 / 1 / 3200 K; delayed ignition 1.4; fuel fireball brighter, its soot
+                // glowing, cooler (2630 K)
+                look: match g.src.params[3] {
+                    k if k > 1.5 && k < 2.5 => [3.0, 3.0, 1.0, 2630.0],
+                    k if k > 0.5 && k < 1.5 => [1.4, 1.0, 1.0, 3200.0],
+                    _ => [0.9, 1.0, 1.0, 3200.0],
+                },
+                // a burning vehicle's smoke is black and grey by turns (owner, 2026-10-13)
+                grey: [0.16, 0.16, 0.165, 0.0],
                 // the source's colour; Fire Pro's campfire density 7.11 / m for soot, its
                 // industrial smoke's 6 for a plume
                 smoke: [
@@ -904,6 +971,24 @@ impl Grid {
         let (wx, wz) = (src.wind[0], src.wind[2]);
         let wlen = (wx * wx + wz * wz).sqrt();
         let pivot = [src.pos_radius[0], src.pos_radius[1], src.pos_radius[2]];
+        // FIRE-002: a wreck's flames in a breeze get a wind-turned box as well, its fire at the
+        // upwind end: the upright box's downwind side was the "invisible wall" the leaning
+        // flames ran into (owner, 2026-10-13)
+        let wreck = src.params[3] > 0.5 && src.params[3] < 1.5;
+        if wreck && wlen > 2.0 {
+            let size = (WRECK_X, WRECK_Y, WRECK_Z);
+            let cell = width / size.2 as f32;
+            let length = size.0 as f32 * cell;
+            let origin = [pivot[0] - 0.22 * length, pivot[1] - 2.0 * cell, pivot[2] - width * 0.5];
+            return Grid::build(device, key, src, size, origin, cell, width, wz.atan2(wx), pivot);
+        }
+        if src.params[3] > 3.5 && wlen <= PLUME_WIND {
+            // a column in calm air climbs: three widths tall
+            let size = (STACK_UP_X, STACK_UP_Y, STACK_UP_X);
+            let cell = width / size.0 as f32;
+            let origin = [pivot[0] - width * 0.5, pivot[1] - 2.0 * cell, pivot[2] - width * 0.5];
+            return Grid::build(device, key, src, size, origin, cell, width, 0.0, pivot);
+        }
         if src.params[3] > 2.5 && wlen > PLUME_WIND {
             // a drifting plume: turned to the wind, `width` across, PX cells long, the source a
             // tenth of the way in from the upwind end (a wreck's column: the longer, taller box)

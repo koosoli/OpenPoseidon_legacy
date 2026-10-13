@@ -157,7 +157,8 @@ impl SmokeVolume {
         });
         let accum_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_smoke_volume_accum"),
-            size: (CELL_COUNT as u64) * 4,
+            // FIRE-002: two lanes per cell, the density and the density-weighted albedo
+            size: (CELL_COUNT as u64) * 8,
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
@@ -605,7 +606,7 @@ impl SmokeVolume {
             });
             pass.set_bind_group(0, &self.compute_bind, &[]);
             pass.set_pipeline(&self.clear_pipeline);
-            pass.dispatch_workgroups(CELL_COUNT.div_ceil(64), 1, 1);
+            pass.dispatch_workgroups((CELL_COUNT * 2).div_ceil(64), 1, 1);
             if self.blob_count > 0 {
                 pass.set_pipeline(&self.inject_pipeline);
                 // One workgroup per particle -- see the shader header for why this is not a

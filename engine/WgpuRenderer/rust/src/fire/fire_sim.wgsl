@@ -24,7 +24,9 @@ struct SimParams {
     losses: vec4<f32>,      // cooling (1/s), dissipation (1/s), turbulence strength, turbulence scale
     wind: vec4<f32>,        // wind velocity x, bed patchiness (0..1), wind z, response (1/s)
     extra: vec4<f32>,       // x: flame (1) or smoke only (0), y: share of the wind taken up,
-                            // z: the box frame's turn about the vertical through the emitter (rad)
+                            // z: the box frame's turn about the vertical through the emitter (rad),
+                            // w: a bursting charge's outward speed (m/s, 0 for none)
+    tint: vec4<f32>,        // FIRE-002: grey share of new smoke: x mean, y swing (fields .w)
     // the solids (Fire Pro's colliders, solids.wgsl): 10 x 10 columns over the box, each open
     // from floor to ceiling (world y); a wall is a column whose ceiling is below its floor
     floor_h: array<vec4<f32>, 25>,
@@ -217,13 +219,24 @@ fn cs_evolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let losses = vec2<f32>(S.losses.y, S.losses.x); // smoke dissipation, heat cooling
     let dh = transported.xy * exp(-losses * dt) + (sourceProducts + products.xy) * exp(-losses * dt * 0.5);
+    // FIRE-002: the grey share of the smoke, a tracer carried in .w (fuel is not used here): the
+    // smoke made this step is grey by a share that drifts in patches through the source and in
+    // time, so a wreck's plume comes out black and grey by turns
+    var greyNow = 0.0;
+    if (S.tint.x > 0.0 || S.tint.y > 0.0) {
+        let tg = S.step.y;
+        let qg = (p - S.emitter.xyz) / max(S.emitter.w, 0.3) * 0.7 + vec3<f32>(S.step.z, -tg * 0.8, tg * 0.23);
+        greyNow = clamp(S.tint.x + S.tint.y * (vnoise(qg) - 0.5) * 2.0, 0.0, 1.0);
+    }
+    let made = (sourceProducts.x + products.x) * exp(-losses.x * dt * 0.5);
+    let greyW = transported.w * exp(-losses.x * dt) + made * greyNow;
     if (solidCell(id)) {
         // nothing lives inside a wall, a roof or the ground
         textureStore(outRgba, id, vec4<f32>(0.0));
         textureStore(outR, id, vec4<f32>(0.0));
         return;
     }
-    textureStore(outRgba, id, vec4<f32>(max(dh, vec2<f32>(0.0)), after, 0.0));
+    textureStore(outRgba, id, vec4<f32>(max(dh, vec2<f32>(0.0)), after, clamp(greyW, 0.0, max(dh.x, 0.0))));
     textureStore(outR, id, vec4<f32>(products.z, 0.0, 0.0, 0.0));
 }
 
@@ -322,6 +335,16 @@ fn cs_forces(@builtin(global_invocation_id) gid: vec3<u32>) {
     let layer = clamp(sqrt(max(p.y - bedBase, 0.0) / (3.0 * S.emitter.w + 1.0)), 0.2, 1.0);
     let windV = vec3<f32>(S.wind.x * S.extra.y * layer, v.y, S.wind.z * S.extra.y * layer);
     v = mix(v, windV, 1.0 - exp(-S.wind.w * layer * dt));
+    // FIRE-002: a bursting charge blows outward (Fire Pro's burst outwardSpeed), while it bursts
+    if (S.extra.w > 0.0) {
+        let dq = (p - S.emitter.xyz) / max(S.emitter.w, 0.03);
+        let rq = length(dq);
+        if (rq < 1.6) {
+            let w = 1.0 - smoothstep(0.6, 1.6, rq);
+            let outward = (p - S.emitter.xyz) / max(length(p - S.emitter.xyz), 1e-3);
+            v = mix(v, outward * S.extra.w, 1.0 - exp(-12.0 * w * dt));
+        }
+    }
     // the source's own velocity (sourceVelocity): a rise out of the bed
     let d = (p - S.emitter.xyz) / max(vec3<f32>(S.emitter.w, S.emitter.w * 0.45, S.emitter.w), vec3<f32>(0.03));
     let r = length(d);

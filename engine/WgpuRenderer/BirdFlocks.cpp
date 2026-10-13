@@ -962,9 +962,20 @@ void BirdFlocks::Steer(Flyer& f, float dt, float tx, float ty, float tz, float s
     // integrate (ground velocity = air velocity + some wind drift)
     const float h = std::cos(f.gamma) * f.speed;
     const float windK = f.species == Frigate ? 0.6f : 0.35f;
-    f.x += (std::sin(f.yaw) * h + windX * windK) * dt;
+    // the drift is capped well below a bird's airspeed: at the weather's 30 m/s a 0.35 share was
+    // ~10 m/s, a gull's whole cruise, and the birds hung in the air or slid backwards instead of
+    // flying their circles (owner, 2026-10-13: "they no longer fly around, they just drift")
+    float driftX = windX * windK, driftZ = windZ * windK;
+    const float drift = std::hypot(driftX, driftZ);
+    const float maxDrift = std::max(c.minSpeed, 2.0f) * 0.4f;
+    if (drift > maxDrift)
+    {
+        driftX *= maxDrift / drift;
+        driftZ *= maxDrift / drift;
+    }
+    f.x += (std::sin(f.yaw) * h + driftX) * dt;
     f.y += f.vy * dt;
-    f.z += (std::cos(f.yaw) * h + windZ * windK) * dt;
+    f.z += (std::cos(f.yaw) * h + driftZ) * dt;
 }
 
 void BirdFlocks::Animate(Flyer& f, float dt)
