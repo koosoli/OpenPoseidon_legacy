@@ -403,6 +403,8 @@ RString ResolveFrom(const char* configClass, const RString& name,
             {
                 if (reported.insert(std::string(configClass) + key).second)
                     LOG_INFO(Mission, "{}: {} '{}' is represented by CWA '{}'", Label(), configClass, name.Data(), candidate);
+                if (Generation() == 2 && strcmp(configClass, "CfgWeapons") == 0)
+                    return Arma2WeaponModelClass(name, RString(candidate));
                 return RString(candidate);
             }
         }
@@ -417,7 +419,7 @@ RString ResolveFrom(const char* configClass, const RString& name,
             if (reported.insert(std::string(configClass) + key).second)
                 LOG_INFO(Mission, "{}: {} '{}' is carried by CWA '{}' (by kind and calibre)", Label(), configClass,
                          name.Data(), fallback.Data());
-            return fallback;
+            return Arma2WeaponModelClass(name, fallback);
         }
     }
     if (warn && reported.insert(std::string(configClass) + key).second)
