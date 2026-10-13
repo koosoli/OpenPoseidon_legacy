@@ -873,6 +873,17 @@ fn card_thinned(cell_id: vec2<i32>, geo: u32) -> bool {
     return hash_cell01(cell_id, 0x2e7d9b41u) >= cover;
 }
 
+// RFG-153: inside card_skip.z metres of the camera a native world's clutter plants are drawn as
+// their own models (TerrainWgpuNativeClutterMeshes.cpp), so the card yields -- entirely inside the
+// handover band, with probability 1 - smoothstep(r - 4, r, d) across it; the mesh ring keeps the
+// complement. Crop distance cards and unauthored cells keep their cards. 0 = off.
+fn card_yields_to_mesh(world_xz: vec2<f32>, distance: f32, geo: u32) -> bool {
+    let r = bitcast<f32>(grass.card_skip.z);
+    if (!(r > 4.0) || (geo & GEO_AUTHORED) == 0u || cell_full_cards(geo)) { return false; }
+    let keep = smoothstep(r - 4.0, r, distance);
+    return hash11(world_xz + vec2<f32>(71.3, 29.7)) >= keep;
+}
+
 // Coverage multiplier from a world-space noise map, so density is patchy rather
 // than uniform. Strength 0 = flat; 0.55 reproduces the previous hardcoded
 // 0.45..1.35 range. `clumping` stays the master blend so it can still be
@@ -1354,6 +1365,7 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (authored_thinned(cell_id, geo)) { return; }
     // Cards only: the card coverage (map's own where authored, else card_look.x).
     if (cards_on_mid() && card_thinned(cell_id, geo)) { return; }
+    if (cards_on_mid() && card_yields_to_mesh(world_xz, distance, geo)) { return; }
     let y = sample_height(world_xz);
     if (in_terrain_hole(vec3<f32>(world_xz.x, y, world_xz.y))) { return; } // preserve ground above a bounded cave mouth
     if (y <= terrain.sea_level + 0.35 || sample_normal(world_xz).y < 0.70) { return; }

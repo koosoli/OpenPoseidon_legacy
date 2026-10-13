@@ -17,9 +17,13 @@
 #include "EarthWorldgen.hpp"
 
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <unordered_set>
+
+class LODShapeWithShadow;
 
 namespace Poseidon
 {
@@ -258,6 +262,14 @@ class TerrainWgpu : public ITerrainRenderer
     // are binned. Returns true when the grass has the roads (the bake then leaves road cells
     // growing). Implemented in TerrainWgpuEnfusionClutter.cpp.
     bool UploadGrassRoadCells(const Landscape& land);
+  public:
+    // RFG-153: Reforger's clutter plants near the camera as their own meshes (GPU-driven
+    // render-only instances); the cards yield inside the radius. Once per frame on the producer
+    // side (EngineWgpu::UpdateNativeClutter). TerrainWgpuNativeClutterMeshes.cpp.
+    void UpdateNativeClutterMeshes(const Landscape& land, const Vector3& camera);
+
+  private:
+    void ResetNativeClutterMeshes();
     const Landscape* _grassRoadLand = nullptr;
     size_t _grassRoadSegments = 0;
     bool _grassRoadUploaded = false;
@@ -442,6 +454,28 @@ class TerrainWgpu : public ITerrainRenderer
     uint32_t _clutterCardSkip = 0;
     //! RFG-143: bit per atlas layer whose cards are a crop field's distance card (full coverage).
     uint32_t _clutterCardFull = 0;
+    //! RFG-153: the .xob each clutter-atlas layer was rasterised from ("" = a texture-sheet card
+    //! or a crop distance card: no mesh), and the near-mesh ring built from them.
+    std::string _clutterLayerModel[32];
+    std::vector<uint32_t> _clutterGeoCopy; //!< the geography last sent to the grass (land cells)
+    uint32_t _clutterMeshBakeEpoch = 0, _clutterMeshSeenBake = 0, _clutterMeshShapeEpoch = 0;
+    struct ClutterMeshCell
+    {
+        std::vector<uint32_t> ids;
+        float builtX = 0.0f, builtZ = 0.0f;
+        uint32_t shapeEpoch = 0;
+        bool partial = false;
+    };
+    std::unordered_map<int64_t, ClutterMeshCell> _clutterMeshCells;
+    std::unordered_map<std::string, Ref<LODShapeWithShadow>> _clutterMeshShapes;
+    std::unordered_set<std::string> _clutterMeshFailed;
+    std::vector<uint32_t> _clutterMeshFreeIds;
+    uint32_t _clutterMeshNextId = 0;
+    float _clutterMeshRadiusSent = -1.0f;
+    float _clutterMeshExclX = 1e30f, _clutterMeshExclZ = 1e30f;
+    size_t _clutterMeshFootprintsSeen = 0;
+    std::vector<float> _clutterMeshRoads, _clutterMeshBoxes;
+    uint32_t _clutterMeshLogTick = 0;
     //! RFG-138: per-surface PlantMat blade sets. Set index per palette surface (-1 = names no
     //! PlantMat), the PlantMat per set (commonest ground first, at most 8), whether a set's
     //! surface is blades-only (crop: its authored Height in metres), and the per-set tuft

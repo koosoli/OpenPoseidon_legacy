@@ -3524,6 +3524,12 @@ class Engine : public IGraphicsEngine
     // Appended owner-only opt-in colour diagnostic. -1 queries, 0..4 sets;
     // -2 unavailable/backend/owner, -3 invalid mode. No public renderer ABI grows.
     virtual int ControlWetSoilDiagnostic(int /*mode*/ = -1) { return -2; }
+    // RFG-153: render-only near clutter instances (Reforger's own plant models near the camera).
+    // Unlike SceneFarObjectCreated they keep the normal coverage LOD walk. APPENDED.
+    virtual bool SceneClutterObjectCreated(uint32_t, LODShapeWithShadow*, const Matrix4&) { return false; }
+    virtual void SceneClutterObjectRemoved(uint32_t) {}
+    // RFG-153: once per frame on the producer side, beside UpdateNativeFarResidency.
+    virtual void UpdateNativeClutter(const Vector3& /*camera*/) {}
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy

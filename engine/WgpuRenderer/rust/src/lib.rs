@@ -7388,6 +7388,10 @@ impl Renderer {
         self.grass.set_blade_skip(&self.queue, mask);
     }
 
+    fn grass_set_clutter_mesh_radius(&mut self, radius: f32) {
+        self.grass.set_clutter_mesh_radius(&self.queue, radius);
+    }
+
     fn geo_pool_reserve(&mut self, vert_bytes: u64, index_bytes: u64) {
         self.gfx3d.reserve_geometry(&self.device, &self.queue, vert_bytes, index_bytes);
     }
