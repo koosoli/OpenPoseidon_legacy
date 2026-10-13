@@ -61,8 +61,8 @@ LEAF_TEXTURE = "hedge_leaves.paa"  # 2 x 2 atlas: oak | ash, lit row over shaded
 # lime. Graded toward a summer hedge: a little desaturated, darker. The shaded row is the same
 # leaves inside the hedge and near the ground, where little sky reaches (OFP models carry no AO).
 LEAF_SATURATION = 0.8
-LEAF_GAIN = 0.68
-SHADED_GAIN = 0.45
+LEAF_GAIN = 0.52
+SHADED_GAIN = 0.36
 
 
 def body(spec):
@@ -237,10 +237,14 @@ def build(name, spec, texture):
     seed = int(hashlib.sha256(name.encode()).hexdigest()[:8], 16)
     b, sp = sprigs(spec, seed)
     lods, triangles = [], []
-    for res, share, scale in LODS:
+    for i, (res, share, scale) in enumerate(LODS):
         pts, nrm, faces = visual_mesh(spec, b, sp, share, scale, texture)
         triangles.append(len(faces))
-        lods.append(lod_bytes(pts, nrm, faces, spec["res"] if res is None else res, [("lodnoshadow", "1")]))
+        # Only LOD 0 is `lodnoshadow`: the cascades then cast from LOD 1 (a third of the sprigs,
+        # alpha-tested), so a hedge shades itself and the ground. With the flag on every visual LOD
+        # (the first version) the shadow pass found no caster and every leaf was lit alike.
+        props = [("lodnoshadow", "1")] if i == 0 else []
+        lods.append(lod_bytes(pts, nrm, faces, spec["res"] if res is None else res, props))
     # collision: one convex box in the stock geometry LOD's extent, written inward (the engine's convention)
     gv, gf = box(*spec["geometry"])
     gn = [(np.array(p) - np.mean(gv, 0)) / max(np.linalg.norm(np.array(p) - np.mean(gv, 0)), 1e-6) for p in gv]
