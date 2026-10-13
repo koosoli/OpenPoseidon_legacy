@@ -586,6 +586,8 @@ static GameValue Atan2(const GameState* state, GameValuePar oper1, GameValuePar 
 {
     if ((float)oper1 == 0 && (float)oper2 == 0)
     {
+        if (GameState::s_singleQuoteStrings)
+            return 0.0f; // Arma 1/2: 0 atan2 0 is 0 (BIS_fnc_dirTo of a standing unit)
         state->SetError(EvalDivZero);
         return 0.0f;
     }

@@ -1095,6 +1095,10 @@ struct ScriptFiber
     std::vector<Ref<GameEvaluator>> contexts;
     Coroutine::Handle* coroutine = nullptr;
     std::chrono::steady_clock::time_point sliceStart;
+    // Game time when it last gave the frame back. Arma 2 resumes a scheduled script in a
+    // later frame at the earliest, so `time` always moves across a sleep or a yield
+    // (scripts divide by that difference: fn_halo's _fpsCoef).
+    float suspendedAt = -1.0f;
 
     static void SuspendFor(ScriptFiber& f, float seconds)
     {
@@ -1173,6 +1177,7 @@ void ScheduledYield()
     if (!f)
         return;
     GFiberYields++;
+    f->suspendedAt = Glob.time.toFloat();
     Coroutine::Suspend(f->coroutine);
     f->sliceStart = std::chrono::steady_clock::now();
 }
@@ -1202,6 +1207,8 @@ bool Script::SimulateFiber()
         return true;
     if (GRunningFiber)
         return false; // a scheduled script does not run another one inside itself
+    if (f.started && Glob.time.toFloat() == f.suspendedAt)
+        return false; // not again in the frame it gave back
     GameState* gstate = GWorld->GetGameState();
     if (!f.started)
     {
