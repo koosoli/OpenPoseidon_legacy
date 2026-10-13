@@ -2205,15 +2205,26 @@ void Arma2RuntimeSimulate()
         FsmStep(*rt.fsms[i]);
     UpdateAttachments(rt);
 
-    // Diagnostics: OP_A2_WATCH="var1,var2,..." logs those variables every 10 s of game time.
+    // Diagnostics: OP_A2_WATCH="var1,var2,..." logs those variables every OP_A2_PERIOD s of game time.
     static const std::string watch = [] {
         const char* e = std::getenv("OP_A2_WATCH");
         return std::string(e ? e : "");
     }();
+    // OP_A2_EVAL="expression" is evaluated and logged at the same times; OP_A2_PERIOD sets
+    // the interval in seconds (default 10).
+    static const std::string eval = [] {
+        const char* e = std::getenv("OP_A2_EVAL");
+        return std::string(e ? e : "");
+    }();
+    static const float period = [] {
+        const char* e = std::getenv("OP_A2_PERIOD");
+        const float p = e ? static_cast<float>(atof(e)) : 10.0f;
+        return p > 0.05f ? p : 10.0f;
+    }();
     static float nextWatch = 0;
-    if (!watch.empty() && (Now() >= nextWatch || Now() + 1 < nextWatch - 10))
+    if ((!watch.empty() || !eval.empty()) && (Now() >= nextWatch || Now() + 1 < nextWatch - period))
     {
-        nextWatch = Now() + 10;
+        nextWatch = Now() + period;
         GameState* gstate = GWorld->GetGameState();
         size_t pos = 0;
         while (pos < watch.size())
@@ -2229,11 +2240,6 @@ void Arma2RuntimeSimulate()
             }
             pos = end + 1;
         }
-        // OP_A2_EVAL="expression": evaluated and logged at the same times.
-        static const std::string eval = [] {
-            const char* e = std::getenv("OP_A2_EVAL");
-            return std::string(e ? e : "");
-        }();
         if (!eval.empty())
         {
             const GameValue v = gstate->EvaluateMultiple(eval.c_str());
