@@ -30,12 +30,22 @@ class TidewaterGround
     static std::string BaseName(const char* path);
     // Whether a layer of this base name is recoloured (sand or field).
     static bool Applies(const std::string& base);
-    // (2026-10-13) Whether a layer is Tidewater rock in the terrain shader (tw_rock): a rock corner
-    // ("st", "ss") and no sand corner (sand wins a mixed transition). Its rock share goes in alpha.
-    static bool AppliesRock(const std::string& base);
-    // Linear luminance of the layer's rock corners (their pure images' means): the rock keeps OFP's
-    // brightness per surface (pale granite stays pale). 0 when unknown.
-    float RockLuminance(const std::string& base) const;
+    // (2026-10-13) The surface kind the terrain shader draws for an OFP surface code (terrain.wgsl
+    // TWK_*): 1 sand, 2 rock, 3 grass, 4 forest floor, 5 gravel, 6 dirt, 7 field; 0 = OFP's own image
+    // (roads, runways, concrete, village ground). Matches the retail CfgSurfaces classes.
+    static int KindOf(const std::string& code);
+    // A layer's two kinds: A takes the per-pixel share in the layer's alpha, B the rest. A is sand
+    // when a corner is sand, else the commonest procedural kind among the corners.
+    struct Plan
+    {
+        int kindA = 0, kindB = 0;
+        std::string codeA, codeB;
+        bool pure = false;
+    };
+    static Plan PlanFor(const std::string& base);
+    // A surface code's pure image mean colour, linear (the shader's per-kind colour anchor); zero
+    // when unknown (the shader then keeps Tidewater's own palette).
+    std::array<float, 3> AnchorLinear(const std::string& code) const;
     // Learn the pure surfaces' mean colours from the world's layers (decodes the 2-letter ones), once
     // per world.
     void Prepare(const Landscape& land);

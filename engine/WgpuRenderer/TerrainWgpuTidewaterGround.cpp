@@ -129,35 +129,74 @@ bool TidewaterGround::Applies(const std::string& base)
     return false;
 }
 
-static bool IsRockCode(const std::string& c)
+int TidewaterGround::KindOf(const std::string& code)
 {
-    return c == "st" || c == "ss";
+    // CfgSurfaces (retail CONFIG.BIN): Sand ps, SandAbel pi; Grass tn, GrassAbel tt, GrassHigh tv;
+    // Forest pl; Field pol; Rock s??????? (st, ss, and Kolgujev's sh), of which Everon's sz (gravel /
+    // shingle) and sp (sandy soil) look nothing like rock and get their own kinds
+    if (code == "ps" || code == "pi")
+        return 1;
+    if (code == "tn" || code == "tt" || code == "tv")
+        return 3;
+    if (code == "pl")
+        return 4;
+    if (code == "sz")
+        return 5;
+    if (code == "sp")
+        return 6;
+    if (code == "pol")
+        return 7;
+    if (code.size() == 2 && code[0] == 's')
+        return 2;
+    return 0;
 }
 
-bool TidewaterGround::AppliesRock(const std::string& base)
+TidewaterGround::Plan TidewaterGround::PlanFor(const std::string& base)
 {
-    if (base == "pol" || Applies(base))
-        return false;
-    for (const std::string& c : Corners(base))
-        if (IsRockCode(c))
-            return true;
-    return false;
-}
-
-float TidewaterGround::RockLuminance(const std::string& base) const
-{
-    float sum = 0;
-    int n = 0;
-    for (const std::string& c : Corners(base))
+    Plan plan;
+    const std::vector<std::string> corners = Corners(base);
+    std::map<std::string, int> count;
+    for (const std::string& c : corners)
+        ++count[c];
+    plan.pure = count.size() == 1;
+    int best = 0;
+    for (const auto& [code, n] : count)
     {
-        const auto it = _means.find(c);
-        if (!IsRockCode(c) || it == _means.end())
+        const int kind = KindOf(code);
+        if (kind == 0)
             continue;
-        const auto lin = [](float v) { return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f); };
-        sum += 0.2126f * lin(it->second[0]) + 0.7152f * lin(it->second[1]) + 0.0722f * lin(it->second[2]);
-        ++n;
+        const int score = n + (kind == 1 ? 100 : 0); // sand first: its bake also recolours
+        if (score > best)
+        {
+            best = score;
+            plan.kindA = kind;
+            plan.codeA = code;
+        }
     }
-    return n ? sum / n : 0.0f;
+    if (plan.kindA == 0)
+        return plan;
+    best = 0;
+    for (const auto& [code, n] : count)
+    {
+        if (KindOf(code) == plan.kindA)
+            continue;
+        if (n > best)
+        {
+            best = n;
+            plan.kindB = KindOf(code);
+            plan.codeB = code;
+        }
+    }
+    return plan;
+}
+
+std::array<float, 3> TidewaterGround::AnchorLinear(const std::string& code) const
+{
+    const auto it = _means.find(code);
+    if (code.empty() || it == _means.end())
+        return {0, 0, 0};
+    const auto lin = [](float v) { return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f); };
+    return {lin(it->second[0]), lin(it->second[1]), lin(it->second[2])};
 }
 
 void TidewaterGround::Prepare(const Landscape& land)
@@ -223,9 +262,11 @@ bool TidewaterGround::Recolour(const std::string& base, DecodedImage& image) con
 {
     if (!Enabled() || !image.valid())
         return false;
-    if (AppliesRock(base))
+    const Plan plan = PlanFor(base);
+    if (plan.kindA != 0 && !Applies(base))
     {
-        // rock: OFP's colour stays (the shader replaces it by its share); only the share, in alpha
+        // every kind but the recoloured sand: OFP's colour stays (the shader replaces it by its
+        // share); only the first kind's share, in alpha
         const std::vector<std::string> corners = Corners(base);
         const std::set<std::string> codes(corners.begin(), corners.end());
         const size_t n = size_t(image.width) * image.height;
@@ -243,7 +284,7 @@ bool TidewaterGround::Recolour(const std::string& base, DecodedImage& image) con
                     d += (px[k] / 255.0f - it->second[k]) * (px[k] / 255.0f - it->second[k]);
                 const float l = std::exp(-d / (2 * 0.06f * 0.06f));
                 total += l;
-                if (IsRockCode(code))
+                if (KindOf(code) == plan.kindA)
                     mine += l;
             }
             const float share = codes.size() > 1 ? (total > 1e-6f ? mine / total : 0.0f) : 1.0f;
@@ -328,7 +369,9 @@ Ref<Texture> TidewaterGround::Bake(Texture* layer, AbstractTextBank* bank) const
     if (!layer || !bank || !Enabled())
         return nullptr;
     const std::string base = BaseName(static_cast<const TextureWgpu*>(layer)->SourceName());
-    if (!Applies(base) && !AppliesRock(base))
+    const Plan plan = PlanFor(base);
+    // a pure layer's own image is opaque: its alpha already says "all of the first kind"
+    if (plan.kindA == 0 || (plan.pure && !Applies(base)))
         return nullptr;
     DecodedImage image = DecodeLayer(layer);
     if (!Recolour(base, image))

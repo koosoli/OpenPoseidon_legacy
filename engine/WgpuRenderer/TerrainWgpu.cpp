@@ -966,11 +966,10 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
                 // Tidewater's sand per pixel (terrain.wgsl tw_beach_sand): its share is in the
                 // layer's alpha -- written by the bake on a transition, 1 on a pure sand image
                 const std::string base = source ? TidewaterGround::BaseName(source->Name()) : std::string();
-                const bool sand = TidewaterGround::Enabled() && base != "pol" && TidewaterGround::Applies(base) &&
-                                  (colour != source || base == "ps");
-                // rock (terrain.wgsl tw_rock): the share is in alpha only when the bake wrote it
-                const bool rock = TidewaterGround::Enabled() && TidewaterGround::AppliesRock(base) && colour != source;
-                if (sand || rock)
+                // terrain.wgsl tw_cell: the share is in alpha where the bake wrote it, and on a pure
+                // layer (opaque: all of its one kind)
+                const TidewaterGround::Plan plan = TidewaterGround::PlanFor(base);
+                if (TidewaterGround::Enabled() && plan.kindA != 0 && (colour != source || plan.pure))
                 {
                     if (_twDetail.GetRef() == nullptr)
                     {
@@ -981,9 +980,14 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
                     // Enfusion-only fields, free on a legacy layer: the detail layer and the rock's
                     // OFP brightness
                     material.middle = bindLayer(_twDetail.GetRef(), false);
-                    material.puddle_flags |= sand ? 0x10000u : 0x20000u; // TWS_FLAG / TWR_FLAG
-                    if (rock)
-                        material.detail_max = _twGround.RockLuminance(base);
+                    material.puddle_flags |= (uint32_t(plan.kindA) << 16) | (uint32_t(plan.kindB) << 20);
+                    const auto a = _twGround.AnchorLinear(plan.codeA);
+                    const auto b = _twGround.AnchorLinear(plan.codeB);
+                    for (int c = 0; c < 3; ++c)
+                        material.middle_color[c] = a[size_t(c)];
+                    material.detail_scale = b[0];
+                    material.middle_scale = b[1];
+                    material.middle_blend = b[2];
                 }
             }
             material.legacy = bindLayer(colour, false);
@@ -1052,19 +1056,17 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
         // pure rock cell is, to aim a capture at
         if (_twDetail.GetRef() != nullptr)
         {
-            int sandLayers = 0, rockLayers = 0;
+            int kinds[8] = {};
             for (int i = 0; i < materialCount; ++i)
-            {
-                sandLayers += (materials[size_t(i)].puddle_flags & 0x10000u) != 0;
-                rockLayers += (materials[size_t(i)].puddle_flags & 0x20000u) != 0;
-            }
+                ++kinds[(materials[size_t(i)].puddle_flags >> 16) & 7u];
+            const int sandLayers = kinds[1], rockLayers = kinds[2];
             const int range = land.GetLandRange();
             int rockX = -1, rockZ = -1;
             for (int z = 0; z < range && rockX < 0; ++z)
                 for (int x = 0; x < range; ++x)
                 {
                     const int id = land.GetTexture(z, x);
-                    if (id < 0 || id >= materialCount || (materials[size_t(id)].puddle_flags & 0x20000u) == 0)
+                    if (id < 0 || id >= materialCount || ((materials[size_t(id)].puddle_flags >> 16) & 15u) != 2u)
                         continue;
                     const std::string base = TidewaterGround::BaseName(land.GetTexture(id)->Name());
                     if (base.size() == 2)
@@ -1074,8 +1076,10 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
                         break;
                     }
                 }
-            LOG_INFO(Graphics, "Tidewater ground: {} sand and {} rock layers shaded per pixel; first pure rock cell at {:.0f} {:.0f}",
-                     sandLayers, rockLayers, (rockX + 0.5f) * land.GetLandGrid(), (rockZ + 0.5f) * land.GetLandGrid());
+            LOG_INFO(Graphics, "Tidewater ground: layers per pixel by first kind: sand {} rock {} grass {} forest {} gravel {} "
+                     "dirt {} field {}, OFP image {}; first pure rock cell at {:.0f} {:.0f}",
+                     sandLayers, rockLayers, kinds[3], kinds[4], kinds[5], kinds[6], kinds[7], kinds[0],
+                     (rockX + 0.5f) * land.GetLandGrid(), (rockZ + 0.5f) * land.GetLandGrid());
         }
     }
     else
