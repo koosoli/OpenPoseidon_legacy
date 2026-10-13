@@ -2319,6 +2319,8 @@ const GameFunction A2Unary[] = {
     GameFunction(GameString, "mapGridPosition", A2MapGridPosition, GameObject | GameArray),
     GameFunction(GameScalar, "moveTime", A2ZeroUnary, GameObject),
     GameFunction(GameNothing, "openMap", A2NothingUnary, GameBool | GameArray),
+    GameFunction(GameNothing, "addSwitchableUnit", A2NothingUnary, GameObject),
+    GameFunction(GameNothing, "removeSwitchableUnit", A2NothingUnary, GameObject),
     GameFunction(GameArray, "hcAllGroups", A2EmptyArrayUnary, GameObject),
     GameFunction(GameScalar, "lnbCurSelRow", A2MinusOneUnary, GameScalar | GameArray),
     GameFunction(GameNothing, "lnbClear", A2NothingUnary, GameScalar | GameArray),
