@@ -102,6 +102,7 @@ and are not counted.
 | 6 | `516bc8b` | 98 (Arma 2 + Operation Arrowhead) | 98 | 63 | 1 stall (CE5A: pathfinding, guarded `534f5f3`) |
 | 7 | `4799c30` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 96 | 0 |
 | 8 | `f02e242` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 96 | 0 |
+| 9 | `06789da` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 97 | 0 |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
@@ -184,8 +185,17 @@ scenarios). Not yet right:
   frames and catwalks without the flight deck, parts floating above it. The parts are
   map objects, so this is about placing composite Arma 2 models (their origin vs. their
   bounding centre), not about the mission.
-- **MPE_MountainWarfare (+3Sided):** the Warfare players start outside the map
-  (`y = -707` in mission.sqm, as Arma 2 has it) and are still there after 15 s; Warfare's
-  start-up should move them to their HQ. The player stands in the sea of the empty map edge.
+- ~~**MPE_MountainWarfare (+3Sided):** the Warfare players stayed outside the map.~~
+  Fixed for run 9: `scopeName`/`breakTo`/`breakOut` were ignored (Warfare's list of
+  starting points filled up with nil), `worldName` did not exist (no towns found) and
+  `synchronizedObjects` was always empty (no teams). All three work now, and the player
+  starts at the base. A scan of every SQF/FSM in the Arma 2 and Operation Arrowhead
+  archives for command names the engine does not know added about 30 more
+  (`overcast`, `fog`, `rain`, `wind`, `cursorTarget`, `actionKeys`, `nearRoads`, ...).
 - **MPE1_Dogfighters:** the player's A-10 starts in the air with the engine reported off
   and glides into the ground in about 9 s without input.
+
+Run 9 leaves one mission with a script error, MP_Paradrop, whose script uses a variable
+it never sets (Arma 2 reports it as well). After it: `exitWith` in the body of a
+`while` or `for ... from ... to` loop ends the loop (it was lost with the body's own
+context, so such loops never ended).
