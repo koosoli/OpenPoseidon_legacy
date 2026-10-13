@@ -1496,6 +1496,51 @@ GameValue A2IsNullLocation(const GameState*, GameValuePar oper1)
     return GameValue(LocationOf(oper1) == nullptr);
 }
 
+// Weather getters (Arma 1/2): the current values of what setOvercast/setFog/setRain set.
+GameValue A2Overcast(const GameState*)
+{
+    return GameValue(GLandscape ? GLandscape->GetOvercast() : 0.0f);
+}
+
+GameValue A2Fog(const GameState*)
+{
+    return GameValue(GLandscape ? GLandscape->GetFog() : 0.0f);
+}
+
+GameValue A2Rain(const GameState*)
+{
+    return GameValue(GLandscape ? GLandscape->GetRainDensity() : 0.0f);
+}
+
+// wind: [x, y, z] in m/s (Arma's x east, y north)
+GameValue A2Wind(const GameState* state)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& a = value;
+    const Vector3 w = GLandscape ? GLandscape->GetWind() : VZero;
+    a.Add(GameValue(w.X()));
+    a.Add(GameValue(w.Z()));
+    a.Add(GameValue(w.Y()));
+    return value;
+}
+
+// serverCommand: there is no dedicated server to command.
+GameValue A2ServerCommand(const GameState*, GameValuePar)
+{
+    return GameValue(false);
+}
+
+// worldName: the world's CfgWorlds class name, spelled as the config spells it.
+GameValue A2WorldName(const GameState*)
+{
+    std::string world = Glob.header.worldname;
+    if (_strnicmp(world.c_str(), "A2_", 3) == 0)
+        world = world.substr(3);
+    if (const ParamEntry* cls = Arma1Compat::FindConfigClass("CfgWorlds", world.c_str()))
+        return GameValue(RString(cls->GetName()));
+    return GameValue(RString(world.c_str()));
+}
+
 void LoadWorldLocations(Runtime& rt)
 {
     if (rt.worldLocations)
@@ -2284,6 +2329,15 @@ const GameNular A2Nular[] = {
     GameNular(GameSide, "sideUnknown", A2SideUnknown),
     GameNular(GameArray, "playableUnits", A2EmptyArrayNular),
     GameNular(GameArray, "switchableUnits", A2SwitchableUnits),
+    GameNular(GameString, "worldName", A2WorldName),
+    GameNular(GameObject, "cursorTarget", A2ObjNull),
+    GameNular(GameScalar, "overcast", A2Overcast),
+    GameNular(GameScalar, "fog", A2Fog),
+    GameNular(GameScalar, "rain", A2Rain),
+    GameNular(GameArray, "wind", A2Wind),
+    GameNular(GameScalar, "estimatedEndServerTime", A2Zero),
+    GameNular(GameBool, "serverCommandAvailable", A2False),
+    GameNular(GameArray, "groupIconsVisible", A2EmptyArrayNular),
     GameNular(GameString, "commandingMenu", A2EmptyString),
     GameNular(GameScalar, "displayNull", A2MinusOne),
     GameNular(GameScalar, "controlNull", A2MinusOne),
@@ -2395,6 +2449,29 @@ const GameFunction A2Unary[] = {
     GameFunction(GameNothing, "lnbSetValue", A2NothingUnary, GameArray),
     GameFunction(GameNothing, "lnbSetData", A2NothingUnary, GameArray),
     GameFunction(GameNothing, "lnbSetCurSelRow", A2NothingUnary, GameArray),
+    GameFunction(GameNothing, "lnbSetPicture", A2NothingUnary, GameArray),
+    GameFunction(GameArray, "actionKeys", A2EmptyArrayUnary, GameString),
+    GameFunction(GameNothing, "ctrlActivate", A2NothingUnary, GameScalar),
+    GameFunction(GameBool, "serverCommand", A2ServerCommand, GameString),
+    GameFunction(GameNothing, "closeDisplay", A2NothingUnary, GameScalar | GameArray),
+    GameFunction(GameNothing, "copyToClipboard", A2NothingUnary, GameString),
+    GameFunction(GameArray, "nearRoads", A2EmptyArrayUnary, GameArray),
+    GameFunction(GameArray, "roadsConnectedTo", A2EmptyArrayUnary, GameObject),
+    GameFunction(GameBool, "isOnRoad", A2ServerCommand, GameObject | GameArray),
+    GameFunction(GameString, "getPlayerUID", A2TextLogEmpty, GameObject),
+    GameFunction(GameArray, "assignedCargo", A2EmptyArrayUnary, GameObject),
+    GameFunction(GameBool, "difficultyEnabled", A2ServerCommand, GameString),
+    GameFunction(GameScalar, "sizeOf", A2ZeroUnary, GameString),
+    GameFunction(GameNothing, "lbSort", A2NothingUnary, GameScalar | GameArray),
+    GameFunction(GameNothing, "lnbSetText", A2NothingUnary, GameArray),
+    GameFunction(GameNothing, "lnbSetColor", A2NothingUnary, GameArray),
+    GameFunction(GameArray, "getGroupIcon", A2EmptyArrayUnary, GameArray),
+    GameFunction(GameScalar, "ctrlFade", A2ZeroUnary, GameScalar),
+    GameFunction(GameNothing, "setCamUseTi", A2NothingUnary, GameArray),
+    GameFunction(GameScalar, "ctrlMapScale", A2OneUnary, GameScalar),
+    GameFunction(GameString, "createDiaryLink", A2TextLogEmpty, GameArray),
+    GameFunction(GameString, "waypointDescription", A2TextLogEmpty, GameArray),
+    GameFunction(GameArray, "getGroupIconParams", A2EmptyArrayUnary, GameGroup),
     GameFunction(GameScalar, "lnbSize", A2ZeroUnary, GameScalar | GameArray),
 };
 
@@ -2465,6 +2542,11 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "enableSimulation", function, A2NothingBinary, GameObject, GameBool),
     GameOperator(GameNothing, "hideObject", function, A2NothingBinary, GameObject, GameBool),
     GameOperator(GameNothing, "forceWalk", function, A2NothingBinary, GameObject, GameBool),
+    GameOperator(GameNothing, "say2D", function, A2NothingBinary, GameObject, GameString | GameArray),
+    GameOperator(GameNothing, "ctrlSetScale", function, A2NothingBinary, GameScalar, GameScalar),
+    GameOperator(GameNothing, "groupSelectUnit", function, A2NothingBinary, GameObject, GameArray),
+    GameOperator(GameNothing, "setVehicleTiPars", function, A2NothingBinary, GameObject, GameArray),
+    GameOperator(GameArray, "unitsBelowHeight", function, A2EmptyArrayBinary, GameGroup | GameArray, GameScalar),
     GameOperator(GameNothing, "addBackpack", function, A2NothingBinary, GameObject, GameString),
     GameOperator(GameNothing, "hcSetGroup", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameNothing, "hcRemoveGroup", function, A2NothingBinary, GameObject, GameGroup),
