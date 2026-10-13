@@ -105,6 +105,7 @@ GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar 
 
 GameValue VehProcessAction(const GameState* state, GameValuePar oper1, GameValuePar oper2); // GameStateExtGrp.cpp
 GameValue ObjVehicle(const GameState* state, GameValuePar oper1);                         // GameStateExtUi.cpp
+GameValue PlaySound(const GameState* state, GameValuePar oper1);                          // GameStateExtUi.cpp
 
 namespace
 {
@@ -1414,6 +1415,15 @@ GameValue A2ObjNullUnary(const GameState*, GameValuePar)
 }
 
 
+// playSound [name, isSpeech] (Arma 2): the sound name is what counts here.
+GameValue A2PlaySoundArray(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& a = oper1;
+    if (a.Size() < 1 || a[0].GetType() != GameString)
+        return NOTHING;
+    return PlaySound(state, a[0]);
+}
+
 // moveOut unit: the unit leaves its vehicle (as the "GetOut" action).
 GameValue A2MoveOut(const GameState* state, GameValuePar oper1)
 {
@@ -2342,6 +2352,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameScalar, "inputAction", A2ZeroUnary, GameString),
     GameFunction(GameNothing, "showHUD", A2NothingUnary, GameBool),
     GameFunction(GameNothing, "moveOut", A2MoveOut, GameObject),
+    GameFunction(GameNothing, "playSound", A2PlaySoundArray, GameArray),
     GameFunction(GameObject, "unitBackpack", A2ObjNullUnary, GameObject),
     GameFunction(GameNothing, "removeBackpack", A2NothingUnary, GameObject),
     GameFunction(GameNothing, "ctrlMapAnimCommit", A2NothingUnary, GameAny),
