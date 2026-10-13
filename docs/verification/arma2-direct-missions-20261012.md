@@ -173,3 +173,19 @@ next to Arma 2 is found on its own).
 - **`--render gl33`:** SP_EyeForEye plays, no script error in the log, diary and tasks
   created.
 - `WGPU_BACKEND=dx12` not yet tried.
+
+## Open findings from the run 8 screenshots
+
+Every mission now leaves a screenshot about 30 s into play (`.a2build\tests`). Most show
+the expected scene (bootcamps, the Chernarus campaign, Operation Arrowhead's campaign and
+scenarios). Not yet right:
+
+- **Utes, SP_TrialByFire:** the LHD that is part of the Utes map is drawn in pieces --
+  frames and catwalks without the flight deck, parts floating above it. The parts are
+  map objects, so this is about placing composite Arma 2 models (their origin vs. their
+  bounding centre), not about the mission.
+- **MPE_MountainWarfare (+3Sided):** the Warfare players start outside the map
+  (`y = -707` in mission.sqm, as Arma 2 has it) and are still there after 15 s; Warfare's
+  start-up should move them to their HQ. The player stands in the sea of the empty map edge.
+- **MPE1_Dogfighters:** the player's A-10 starts in the air with the engine reported off
+  and glides into the ground in about 9 s without input.
