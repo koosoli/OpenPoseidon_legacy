@@ -1462,6 +1462,10 @@ impl Tidewater {
             cdlod::grid(),
             self.sim.regions.iter().flatten().count()
         );
+        // (OP) where the shore simulation runs: outside these the beach has no swash wetness
+        let regions: Vec<String> = self.sim.regions.iter().flatten()
+            .map(|r| format!("{:.0},{:.0} (w {:.2})", r.centre[0], r.centre[1], r.weight())).collect();
+        let s = format!("{s} at [{}]", regions.join("; "));
         self.prep_stats = [0.0; 7];
         // W7j: where the shore field found coast (16 samples), to pick a second coast for captures
         let n = self.coast.len();
