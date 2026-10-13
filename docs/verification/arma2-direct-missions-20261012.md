@@ -89,8 +89,9 @@ symbolised call stack. `OP_A2_WATCH="var,var"` and `OP_A2_EVAL="expr"` log value
 
 ## Results so far
 
-Every mission is played 25 s by `.a2build\run-a2-tests.ps1` (one log and one screenshot
-each). The `Templates\*` and `MPTemplates\*` folders are editor templates without a world
+Every mission is played by `.a2build\run-a2-tests.ps1` (one log and one screenshot
+each): 40 s from run 7 on. Until run 6 the screenshot, taken 20 s after the mission
+started loading, also ended the run, so missions played only about 10-20 s. The `Templates\*` and `MPTemplates\*` folders are editor templates without a world
 and are not counted.
 
 | Run | Build | Missions | Enter the mission | Without a script error | Hangs / crashes |
@@ -99,6 +100,7 @@ and are not counted.
 | 4 | `6651f0d` | 63 (Arma 2, incl. templates) | 50 | 23 | 0 |
 | 5 | `f4a567d` | 98 (Arma 2 + Operation Arrowhead) | 91 | 27 | 7 crashes (flag proxy, fixed `47c5b1c`), 5 OA campaign time-outs |
 | 6 | `516bc8b` | 98 (Arma 2 + Operation Arrowhead) | 98 | 63 | 1 stall (CE5A: pathfinding, guarded `534f5f3`) |
+| 7 | `4799c30` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 96 | 0 |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
@@ -122,6 +124,21 @@ What it found, fixed afterwards:
   stall in CE5A_Sandstorm was inside that loop.
 - Commands: `addSwitchableUnit`/`removeSwitchableUnit`, `ctrlShown`, `inputAction`,
   `showHUD`, binary `hideObject`, `moveOut`, `forceWalk`, backpack commands.
+
+Run 7 (all 98 enter, 96 without a script error, none hangs) followed one more find:
+
+- **`rank="LIEUTENANT"`.** CWA spells the rank `LIEUTNANT`; the mission loader stops
+  reading a class at its first unknown enum value, so 236 Arma 2 units lost their name
+  and init line. In C1_IntoTheStorm that was the helicopter pilot: never put in the
+  seat, the Venom carrying the player fell into the sea. Arma 2's other spellings in the
+  shipped `mission.sqm` files (`AMBIENT LIFE`, `DIAMOND`, `FILE`, `GETIN NEAREST`,
+  `DISMISS`, `... SEIZED`) are read as the nearest CWA value, and an unknown value is
+  logged. C1 now flies its route with no script error.
+- `format` prints nil as `any`, `call` accepts a nothing value on its left.
+
+The two missions left with an error: MP_Paradrop uses a variable it never sets
+(`_targetmarkerdir`; a mission bug, Arma 2 reports it too) and MP_WhenDiplomacyFails
+(Warfare `<null>SOLDIER`, fixed after the run).
 
 ## Second machine (laptop, Intel Iris Xe), 2026-10-13
 
