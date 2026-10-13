@@ -2883,6 +2883,9 @@ extern "C"
     /* RFG-116: bit i = atlas layer i belongs to a surface whose .emat names no PlantMat, so the
        near ring grows no blades on cells whose run starts there. 0 = blades everywhere. */
     WGR_API void wgr_grass_set_blade_skip(WgrRenderer* renderer, uint32_t mask);
+    /* RFG-153: radius (m) inside which native clutter plants draw as their own meshes and the mid
+       ring's cards yield (card_skip.z); 0 = off. */
+    WGR_API void wgr_grass_set_clutter_mesh_radius(WgrRenderer* renderer, float radius);
     /* RFG-117: the near ring as Reforger PlantMat tuft cards. cfg = 8 floats [on, cards per plant,
        Zenith deg, ZenithRandomOffset deg, card height m, HeightRandomOffset, Plants per m^2, 0];
        aspect / scale = 8 floats each, per blade layer. cfg null = off. */

@@ -17273,6 +17273,45 @@ void EngineWgpu::ClearFarObjects()
         SceneFarObjectRemoved(_farGpuInstances.begin()->first);
 }
 
+// RFG-153: near clutter -- Reforger's own plant .xob models within a few tens of metres of the
+// camera, where the grass system's impostor cards read as flat photographs. GPU-driven like the
+// far tier, but WITHOUT WGR_INSTANCE_FAR_AUTHORED (which pins the coarsest LOD): the cull walks
+// the model's coverage ladder as for any object, so a plant at the camera draws its LOD0.
+bool EngineWgpu::SceneClutterObjectCreated(uint32_t id, LODShapeWithShadow* shape, const Matrix4& transform)
+{
+    if (!_gpuDriven || !_renderer || !shape)
+        return false;
+    if (_clutterGpuInstances.count(id))
+        return true;
+    const uint32_t model = RegisterGpuModel(shape);
+    if (model == WGR_INVALID_MODEL || _gpuConformShapes.count(shape))
+        return false;
+    WgrInstance inst = BuildGpuProxyInstance(transform, model);
+    inst.flags = 0;
+    const uint32_t slot = EnqueueInstanceAdd(inst);
+    ++_ops.instanceAdd;
+    RetainGpuModel(shape);
+    _clutterGpuInstances.emplace(id, FarGpuInstance{slot, shape});
+    return true;
+}
+
+void EngineWgpu::UpdateNativeClutter(const Vector3& camera)
+{
+    if (_terrain && GLandscape)
+        _terrain->UpdateNativeClutterMeshes(*GLandscape, camera);
+}
+
+void EngineWgpu::SceneClutterObjectRemoved(uint32_t id)
+{
+    const auto found = _clutterGpuInstances.find(id);
+    if (found == _clutterGpuInstances.end())
+        return;
+    EnqueueInstanceRemove(found->second.slot);
+    ++_ops.instanceRemove;
+    ReleaseGpuModel(found->second.shape.GetRef());
+    _clutterGpuInstances.erase(found);
+}
+
 // REN-TEMP-001H: pointer -> stable 16-bit draw-object id, allocated on first sight.
 // Cached per bracket (the same object submits many sections in a row). 0 is reserved
 // for "no identity"; the 16-bit counter wraps long after the ids it re-issues have

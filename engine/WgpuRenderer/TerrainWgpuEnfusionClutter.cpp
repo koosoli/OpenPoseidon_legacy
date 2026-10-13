@@ -367,6 +367,9 @@ struct NativePlant
 //! Walks a ClutterSet (and the sets it inherits) down to the collections, and the
 //! collections down to the individual plants. Duplicates are folded by conf path so
 //! a plant named by two collections does not take two atlas layers.
+bool DecodeEdds(const EnfusionMount& mount, const std::string& path, int maxEdge, int& width, int& height,
+                std::vector<uint8_t>& rgba);
+
 void CollectPlants(const EnfusionMount& mount, const std::string& setPath, std::vector<NativePlant>& out,
                    std::unordered_set<std::string>& seenSets, int depth = 0)
 {
@@ -382,6 +385,37 @@ void CollectPlants(const EnfusionMount& mount, const std::string& setPath, std::
     std::vector<std::string> refs = set.refs;
     for (const ConfNode& child : set.children)
         refs.insert(refs.end(), child.refs.begin(), child.refs.end());
+    // RFG-152: the set's DistributionMap, one colour channel per collection in listed order (R the
+    // first, G the second, B the third). Everon's Grass_03 mask is G ~1 everywhere, R in ~7%
+    // patches and B exactly 0 -- and Workbench at a matched meadow pose shows its third collection
+    // (dry thistle, Occurrence 100) nowhere, its second (the weeds) sparsely throughout. Each
+    // collection's plants are weighted by its channel's mean over the mask; a missing map or a
+    // fourth collection keeps weight 1. WGR_CLUTTER_CMASK=0 restores the unweighted sum.
+    float channelMean[3] = {1.0f, 1.0f, 1.0f};
+    bool haveMask = false;
+    {
+        static const bool cmaskOn = []
+        {
+            const char* env = std::getenv("WGR_CLUTTER_CMASK");
+            return !(env != nullptr && env[0] == '0');
+        }();
+        const std::string* mapKey = set.Key("DistributionMap");
+        int mw = 0, mh = 0;
+        std::vector<uint8_t> mask;
+        if (cmaskOn && mapKey != nullptr && !mapKey->empty() &&
+            DecodeEdds(mount, StripGuid(*mapKey), 128, mw, mh, mask) && mw > 0 && mh > 0)
+        {
+            double sum[3] = {0.0, 0.0, 0.0};
+            const size_t texels = static_cast<size_t>(mw) * static_cast<size_t>(mh);
+            for (size_t i = 0; i < texels; ++i)
+                for (int c = 0; c < 3; ++c)
+                    sum[c] += mask[i * 4 + static_cast<size_t>(c)];
+            for (int c = 0; c < 3; ++c)
+                channelMean[c] = static_cast<float>(sum[c] / (255.0 * static_cast<double>(texels)));
+            haveMask = true;
+        }
+    }
+    int collectionIndex = -1;
     for (const std::string& ref : refs)
     {
         const std::string lower = LowerCopy(ref);
@@ -390,6 +424,10 @@ void CollectPlants(const EnfusionMount& mount, const std::string& setPath, std::
             CollectPlants(mount, ref, out, seenSets, depth + 1);
             continue;
         }
+        ++collectionIndex;
+        const float maskWeight = haveMask && collectionIndex < 3 ? channelMean[collectionIndex] : 1.0f;
+        if (maskWeight <= 0.0f)
+            continue;
         ConfNode collection;
         if (!ReadConf(mount, ref, collection))
             continue;
@@ -417,7 +455,7 @@ void CollectPlants(const EnfusionMount& mount, const std::string& setPath, std::
             NativePlant plant;
             plant.conf = *confRef;
             plant.model = *model;
-            plant.occurrence = definition->Number("Occurrence", 100.0f);
+            plant.occurrence = definition->Number("Occurrence", 100.0f) * maskWeight;
             plant.density = plantConf.Number("Density", 1.0f);
             plant.maxDraw = plantConf.Number("MaxDrawDistance", 1.0f);
             plant.minScale = plantConf.Number("MinScale", 1.0f);
@@ -1105,6 +1143,10 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
         constexpr size_t LayerBytes = static_cast<size_t>(GrassGeo::AtlasSize) * GrassGeo::AtlasSize * 4u;
         std::vector<uint8_t> atlas(LayerBytes * GrassGeo::AtlasLayers, 0u);
         layerCount = 1; // layer 0 stays the loose primary card, filled by UploadGrassTuft
+        // RFG-153: the near-mesh ring follows the layers this bake produces (a reuse keeps them).
+        for (std::string& model : _clutterLayerModel)
+            model.clear();
+        ++_clutterMeshBakeEpoch;
         std::fill(std::begin(_clutterLayerWeight), std::end(_clutterLayerWeight), 0.0f);
         std::fill(std::begin(_clutterLayerFar), std::end(_clutterLayerFar), 0.0f);
         std::fill(std::begin(_clutterLayerSize), std::end(_clutterLayerSize), 0.0f);
@@ -1279,6 +1321,7 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
                     std::memcpy(atlas.data() + static_cast<size_t>(layerCount) * LayerBytes,
                                 atlas.data() + static_cast<size_t>(cached->second) * LayerBytes, LayerBytes);
                     _clutterLayerSize[layerCount] = _clutterLayerSize[cached->second];
+                    _clutterLayerModel[layerCount] = _clutterLayerModel[cached->second];
                 }
                 else
                 {
@@ -1291,6 +1334,7 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
                     {
                         ++plantsImpostor;
                         _clutterLayerSize[layerCount] = impostorSize;
+                        _clutterLayerModel[layerCount] = plant.model;
                     }
                     else
                     {
@@ -2165,7 +2209,17 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
         params[2] = mat.Number("ZenithRandomOffset", 15.0f);
         params[3] = crop ? std::clamp(mat.Number("Height", lookHeight), 0.05f, 3.0f) : lookHeight;
         params[4] = std::clamp(mat.Number("HeightRandomOffset", 0.5f), 0.0f, 1.0f);
-        params[5] = std::clamp(mat.Number("Plants", 8.0f), 0.25f, 64.0f);
+        // RFG-152: `Plants` against Reforger itself (Workbench, cp_wheat_01 overridden to Plants 2 at
+        // a matched pose): our field at its authored Plants 7 reads as Reforger's at ~2, so one of our
+        // plants covers ~1/3.5 of one of theirs, so the authored density is drawn 3.5x (matched at the
+        // wheat field: the soil closes as Reforger's does). WGR_NATIVE_PLANTS_SCALE overrides (1 = old).
+        static const float plantsScale = []
+        {
+            const char* v = std::getenv("WGR_NATIVE_PLANTS_SCALE");
+            const float f = v != nullptr ? std::strtof(v, nullptr) : 0.0f;
+            return f > 0.0f ? std::clamp(f, 0.1f, 8.0f) : 3.5f;
+        }();
+        params[5] = std::clamp(mat.Number("Plants", 8.0f) * plantsScale, 0.25f, 64.0f);
         params[6] = std::clamp(mat.Number("SatMapLerp", 0.8f), 0.0f, 1.0f);
         params[7] = satMask.empty() ? 0.0f : 1.0f;
         LOG_INFO(Graphics,

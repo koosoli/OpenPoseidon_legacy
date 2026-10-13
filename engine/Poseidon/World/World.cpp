@@ -2352,6 +2352,8 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // NextFrame still owns queue publication and GPU-side mutation ordering.
         if (farResidencySupported && GLandscape && _scene.GetCamera())
             GLandscape->UpdateNativeFarResidency(_scene.GetCamera()->Position());
+        if (farResidencySupported && GLandscape && _scene.GetCamera())
+            GEngine->UpdateNativeClutter(_scene.GetCamera()->Position());
         GEngine->NextFrame();
     }
 

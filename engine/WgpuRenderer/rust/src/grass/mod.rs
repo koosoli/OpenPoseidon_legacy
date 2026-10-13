@@ -2147,6 +2147,16 @@ impl Grass {
 
     /// RFG-116: bit i set = atlas layer i belongs to a surface whose `.emat` names no PlantMat,
     /// so the near ring places no blade on a cell whose run starts there. 0 = blades everywhere.
+    /// RFG-153: radius (m) inside which Reforger's clutter plants draw as their own meshes
+    /// (TerrainWgpuNativeClutterMeshes.cpp); the mid ring's cards yield there (grass.wgsl
+    /// card_yields_to_mesh). 0 = off. Carried in card_skip.z as f32 bits.
+    pub fn set_clutter_mesh_radius(&mut self, queue: &wgpu::Queue, radius: f32) {
+        let r = if radius.is_finite() { radius.max(0.0) } else { 0.0 };
+        self.last_params.card_skip[2] = r.to_bits();
+        queue.write_buffer(&self.grass_params, std::mem::offset_of!(GrassParams, card_skip) as u64,
+                           bytemuck::cast_slice(&self.last_params.card_skip));
+    }
+
     pub fn set_blade_skip(&mut self, queue: &wgpu::Queue, mask: u32) {
         // .yzw are the RFG-138 blade-set words (set_blade_sets); this answer leaves them alone.
         self.last_params.blade_skip[0] = mask;
@@ -2196,7 +2206,7 @@ impl Grass {
             }
             self.last_params.blade_skip[1..4].copy_from_slice(&bits);
         }
-        self.last_params.card_skip = [card_skip, card_full, 0, 0];
+        self.last_params.card_skip = [card_skip, card_full, self.last_params.card_skip[2], 0];
         for i in 0..64 {
             self.last_params.tuft_sets[i] = finite(sets.get(i).copied().unwrap_or(0.0), 0.0);
             self.last_params.tuft_set_aspect[i] = finite(aspect.get(i).copied().unwrap_or(1.0), 1.0).clamp(0.1, 6.0);

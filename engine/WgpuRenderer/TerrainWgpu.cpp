@@ -2935,6 +2935,7 @@ void TerrainWgpu::UploadGeography(const Landscape& land, bool reuseClutterDefini
              authored ? "authored LCA surfaces" : "legacy per-layer", grassLayerCount, grassCellCount, geography.size(),
              grassRenderableCellCount, hardOnlyCells, grassLayerNames.empty() ? "none matched" : grassLayerNames);
     LOG_INFO(Graphics, "Wgpu terrain texture layers: [{}]", allLayerNames);
+    _clutterGeoCopy = geography; // RFG-153: the near-mesh ring places from the same words
     EngineWgpu::AcquireProducerWindow("grass geography");
     wgr_grass_set_geography(_renderer, static_cast<uint32_t>(n), static_cast<uint32_t>(n), geography.data());
 
