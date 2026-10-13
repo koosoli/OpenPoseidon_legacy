@@ -574,6 +574,38 @@ bool ComposeCard(const EnfusionMount& mount, const std::string& colourPath, cons
 // alpha-tested per sample, then the colour is pushed into the transparent texels so
 // the mip chain does not average the plant towards whatever the empty texels held.
 // `sizeMetres` is the world size of the layer's full square, base at the bottom edge.
+// RFG-151: an Enfusion `Color` over an RGBA8 sRGB image, the way every other Enfusion layer tint
+// is applied (RFG-071, measured against Enfusion's own bakes): linearToSrgb(srgbToLinear(texel) *
+// Color). Alpha untouched. WGR_CLUTTER_IMPOSTOR_TINT=0 skips it (raw BCR, the old look).
+bool ClutterTintEnabled()
+{
+    static const bool on = []
+    {
+        const char* env = std::getenv("WGR_CLUTTER_IMPOSTOR_TINT");
+        return !(env != nullptr && env[0] == '0');
+    }();
+    return on;
+}
+
+void ApplyColourTint(std::vector<uint8_t>& rgba, const float tint[3])
+{
+    if (tint[0] == 1.0f && tint[1] == 1.0f && tint[2] == 1.0f)
+        return;
+    uint8_t lut[3][256];
+    for (int c = 0; c < 3; ++c)
+        for (int v = 0; v < 256; ++v)
+        {
+            const float s = static_cast<float>(v) / 255.0f;
+            const float lin = s <= 0.04045f ? s / 12.92f : std::pow((s + 0.055f) / 1.055f, 2.4f);
+            const float l = std::clamp(lin * std::max(tint[c], 0.0f), 0.0f, 1.0f);
+            const float o = l <= 0.0031308f ? l * 12.92f : 1.055f * std::pow(l, 1.0f / 2.4f) - 0.055f;
+            lut[c][v] = static_cast<uint8_t>(std::clamp(o * 255.0f + 0.5f, 0.0f, 255.0f));
+        }
+    for (size_t i = 0; i + 3 < rgba.size(); i += 4)
+        for (int c = 0; c < 3; ++c)
+            rgba[i + static_cast<size_t>(c)] = lut[c][rgba[i + static_cast<size_t>(c)]];
+}
+
 struct ImpostorTexture
 {
     int w = 0, h = 0;
@@ -631,6 +663,12 @@ bool ComposeImpostor(const EnfusionMount& mount, const std::string& modelPath, u
                     if (!opacity.empty() &&
                         !DecodeEdds(mount, opacity, 1024, texture->ow, texture->oh, texture->opacity))
                         texture->opacity.clear();
+                    // RFG-151: every clutter plant is a MatPBRTreeCrown whose `Color` multiplies its
+                    // BCR -- 0.429 on the green thistle, 0.791 on the dry grass atlas -- and the bake
+                    // copied the raw BCR, so the meadow's plant cards came out pale cream.
+                    float tint[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+                    if (ClutterTintEnabled() && parsed.Vec4Of("Color", tint))
+                        ApplyColourTint(texture->colour, tint);
                     result = texture;
                 }
             }
@@ -2027,6 +2065,13 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
         // Opacity sits in the coverage map; the BCR alpha is roughness (measured, RFG-049).
         for (size_t i = 0; i + 3 < colour.size(); i += 4)
             colour[i + 3] = std::max({opacity[i + 0], opacity[i + 1], opacity[i + 2]});
+        // RFG-151: the PlantMat's own `Color` (cp_grass_03: 0.784) over its atlas, as for the clutter.
+        if (const std::string* colourValue = mat.Key("Color"); colourValue != nullptr && ClutterTintEnabled())
+        {
+            float tint[3] = {1.0f, 1.0f, 1.0f};
+            if (std::sscanf(colourValue->c_str(), "%f %f %f", &tint[0], &tint[1], &tint[2]) == 3)
+                ApplyColourTint(colour, tint);
+        }
 
         // RFG-117: the PlantMat's SatMapBlendMask (R) says per texel how far SatMapLerp may pull the
         // blade towards the ground colour -- grass fully, flower heads, clover and the mid band of

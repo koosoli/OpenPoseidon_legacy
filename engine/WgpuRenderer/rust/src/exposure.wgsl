@@ -35,8 +35,10 @@ struct ExpParams {
     max_scale: f32,
     rate: f32,       // per-frame ease toward the target (0..1)
     sky_weight: f32, // metering weight of the top of frame (sky) vs bottom (ground)
-    _p1: f32,
-    _p2: f32,
+    // RFG-150: the share of a metered brightness change the iris compensates (1 = all of it,
+    // key/avg; <= 0 also means 1). Native Enfusion worlds use 0.55 -- see EngineWgpu.
+    compensation: f32,
+    meter_mode: f32, // 0 = sky_weight by screen height; 1 = Reforger's centre-weighted mask
 };
 
 // ---- Reduction (src + sampler + params at group 0) ---------------------------
@@ -48,6 +50,15 @@ struct ExpParams {
 // down-weighted toward ep.sky_weight), uv.y = 1 is the bottom (ground, full weight).
 // A screen-space heuristic — cheap, and the horizon usually sits in the upper half.
 fn meter_weight(uv: vec2<f32>) -> f32 {
+    if (ep.meter_mode > 0.5) {
+        // RFG-150: Reforger's HDR.emat meters through HDR_MeasureArea_01_Mask.edds, a radially
+        // symmetric fall-off stretched over the frame: 1.0 out to r = 0.4, 0.74 at the edge
+        // midpoints, 0.30 in the corners (r = 1 at an edge midpoint). This curve fits the
+        // decoded mask to 0.012 everywhere. It does NOT down-weight the sky.
+        let r = length((uv - vec2<f32>(0.5)) * 2.0);
+        let t = max(r - 0.35, 0.0) / 1.05;
+        return max(1.0 - 0.7 * t * t, 0.05);
+    }
     return mix(ep.sky_weight, 1.0, smoothstep(0.2, 0.8, uv.y));
 }
 
@@ -84,7 +95,11 @@ fn fs_adapt(in: VsOut) -> @location(0) vec4<f32> {
     }
     var tgt = 1.0;
     if (ep.enabled > 0.5) {
-        tgt = clamp(ep.key / max(avg_lum, 1e-4), ep.min_scale, ep.max_scale);
+        var raw = ep.key / max(avg_lum, 1e-4);
+        if (ep.compensation > 0.0 && ep.compensation != 1.0) {
+            raw = ep.key * pow(max(avg_lum, 1e-4), -ep.compensation);
+        }
+        tgt = clamp(raw, ep.min_scale, ep.max_scale);
     }
     let scale = mix(prev, tgt, clamp(ep.rate, 0.0, 1.0));
     return vec4<f32>(scale, 0.0, 0.0, 1.0);

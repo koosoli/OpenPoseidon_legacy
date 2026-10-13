@@ -20818,11 +20818,61 @@ void EngineWgpu::PushRenderParams()
         _dof.apertureBlades,
     };
 
+    // RFG-150: on a native Enfusion world the iris follows Reforger. Fitted against 15 Workbench
+    // reference frames at one light (Morton, the tree pose and the owner's 13 problem poses, outdoor
+    // and interior), each rendered once at full compensation with the ceiling lifted and solved per
+    // frame for the scale that matches (Hable inverted per grid cell, median): least squares in
+    // log2 gives scale = 0.168 * avg^-0.55, 0.73 EV RMS over the 13 unclamped poses, against
+    // ~1.2 EV for the legacy meter (key/avg, capped at 1.1, which left every interior 1-2 EV
+    // dark) and 1.86 EV for key/avg uncapped (outdoor views 2-5x too bright: the tree pose).
+    // That is the shape Reforger's HDREffect declares -- "semi-automatic" (SemiAutomaticLVRange 2,
+    // an absolute base corrected by the meter, not a key/avg loop) -- metered through its own
+    // centre-weighted mask; trimming to VisiblePercentBlack/White 10..90 changes nothing measurable
+    // (2.58 vs 2.45 EV between two poses, offline). Interiors need up to ~4.4x, so the daytime
+    // ceiling is 8 -- by DAY only: HDR.emat gives night its own curve at half the exposure bias
+    // (SecondSceneLV -6, FilmicExposureBias2 10 vs 20), i.e. Reforger keeps nights dark rather
+    // than lifting them, so the ceiling eases back to the legacy one between sun +5 and -6 deg.
+    // WGR_NATIVE_EXPOSURE=0 restores the legacy meter; WGR_NATIVE_EXPOSURE_KEY / _COMPENSATION /
+    // _MAX tune it.
+    static const float nativeExposureKey = []
+    {
+        const char* v = std::getenv("WGR_NATIVE_EXPOSURE_KEY");
+        const float f = v != nullptr ? std::strtof(v, nullptr) : 0.0f;
+        return f > 0.0f ? f : 0.168f;
+    }();
+    static const float nativeExposureCompensation = []
+    {
+        const char* v = std::getenv("WGR_NATIVE_EXPOSURE_COMPENSATION");
+        const float f = v != nullptr ? std::strtof(v, nullptr) : 0.0f;
+        return f > 0.0f ? f : 0.55f;
+    }();
+    static const float nativeExposureMax = []
+    {
+        const char* v = std::getenv("WGR_NATIVE_EXPOSURE_MAX");
+        const float f = v != nullptr ? std::strtof(v, nullptr) : 0.0f;
+        return f > 0.0f ? f : 8.0f;
+    }();
+    static const bool nativeExposureOn = []
+    {
+        const char* v = std::getenv("WGR_NATIVE_EXPOSURE");
+        return !(v != nullptr && v[0] == '0');
+    }();
+    const bool nativeExposure =
+        nativeExposureOn && GLandscape != nullptr && GLandscape->GetEnfusionSurfaceCount() > 0;
+    float nativeCeiling = _exposure.maxScale;
+    if (nativeExposure)
+    {
+        const float sunUp = -render::frame::GPresentationSnapshot().sunDirection.Y();
+        const float elevation = std::asin(std::clamp(sunUp, -1.0f, 1.0f)) * (180.0f / 3.14159265f);
+        const float day = std::clamp((elevation + 6.0f) / 11.0f, 0.0f, 1.0f);
+        nativeCeiling = std::max(_exposure.maxScale,
+                                 _exposure.maxScale + (nativeExposureMax - _exposure.maxScale) * day);
+    }
     p.exposure = {
         _exposure.enabled ? 1.0f : 0.0f,
-        _exposure.key,
+        nativeExposure ? nativeExposureKey : _exposure.key,
         _exposure.minScale,
-        _exposure.maxScale,
+        nativeCeiling,
         // The framerate-INDEPENDENT ease derived from the time constant, which is now the
         // normal case (ExposureSettings::rateTau defaults to 0.4 s). UpdateAutoExposureRate
         // leaves this 0 when the effective tau is <= 0 -- i.e. only when the authored rateTau
@@ -20830,8 +20880,8 @@ void EngineWgpu::PushRenderParams()
         // the first frame in tau mode, where there is no measured dt yet.
         _autoExposureRate > 0.0f ? _autoExposureRate : _exposure.rate,
         _exposure.skyWeight,
-        0.0f,
-        0.0f,
+        nativeExposure ? nativeExposureCompensation : 1.0f,
+        nativeExposure ? 1.0f : 0.0f,
     };
 
     // Authored sky look (no celestial/runtime — that rides WgrSkyRuntime in PushSkyRuntime).

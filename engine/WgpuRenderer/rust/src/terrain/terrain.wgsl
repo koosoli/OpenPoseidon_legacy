@@ -766,6 +766,9 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     // and needs Everon's 2,500 `_supertexture.edds` paged in, which is a build, not a
     // binding.
     if (material.enfusion != 0u && tp.enfusion_ground > 0.0) {
+#ifdef TERRAIN_DEBUG_NATIVE_RED
+        return AuthoredCell(vec3<f32>(0.5, 0.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), 1.0, 0.0);
+#endif
         let wxz = vec2<f32>(world_pos.x, world_pos.z);
         let duv = vec2<f32>(world_dwx.x, world_dwx.z);
         let dvv = vec2<f32>(world_dwy.x, world_dwy.z);
@@ -788,6 +791,9 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
         }
         var rgb = textureSampleGrad(ground[material.legacy], ground_samp, d_uv,
                                     duv * material.detail_scale, dvv * material.detail_scale).rgb;
+#ifdef TERRAIN_DEBUG_DETAIL
+        return AuthoredCell(rgb, vec3<f32>(0.0, 0.0, 1.0), 1.0, 0.0);
+#endif
         var normal_ts = vec3<f32>(0.0, 0.0, 1.0);
         var authored_ao = 1.0;
         let detail_end = max(material.detail_max, 1.0);
@@ -843,8 +849,12 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
         // ribbons -- leaves the material's own colour.
         if (material.legacy_satellite_generated == 2u && material.satellite != 0u) {
             let dist = length(view_pos);
+#ifdef SATMAP_NEAR_EXPERIMENT
+            let near_band = 1.0;
+#else
             let near_band = smoothstep(max(material.detail_max - material.detail_fade, 0.0),
                                        max(material.detail_max, 1.0), dist);
+#endif
             let w_sat = max(clamp(material.satellite_uv.u.y, 0.0, 1.0) * near_band,
                             smoothstep(800.0, 2500.0, dist));
             if (w_sat > 0.0) {
@@ -852,8 +862,14 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                 let sat = textureSampleGrad(ground[material.satellite], ground_clamp_samp,
                                             (wxz - tp.world_origin) * s_scale, duv * s_scale, dvv * s_scale);
                 rgb = mix(rgb, sat.rgb, w_sat * clamp(sat.a, 0.0, 1.0));
+#ifdef TERRAIN_DEBUG_SATELLITE
+                return AuthoredCell(vec3<f32>(sat.rgb), vec3<f32>(0.0, 0.0, 1.0), 1.0, 0.0);
+#endif
             }
         }
+#ifdef TERRAIN_DEBUG_SATELLITE
+        return AuthoredCell(vec3<f32>(1.0, 0.0, 1.0), vec3<f32>(0.0, 0.0, 1.0), 1.0, 0.0);
+#endif
         // Blended, not switched, so the dev panel's A/B is a crossfade and 0 is
         // BIT-EXACT the legacy sample below. Full on costs ONE fetch (two with a
         // middle map): the legacy tap is only taken while the slider is between.
