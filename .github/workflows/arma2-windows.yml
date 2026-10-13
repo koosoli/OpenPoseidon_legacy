@@ -73,6 +73,12 @@ jobs:
           cp "$CWR_DIST_DIR/OpenPoseidon.exe" out/
           if [ -f "$CWR_DIST_DIR/wgpu_renderer.dll" ]; then cp "$CWR_DIST_DIR/wgpu_renderer.dll" out/; else cp "$CWR_BUILD_DIR/engine/WgpuRenderer/wgpu_renderer.dll" out/; fi
           cp "$CWR_DIST_DIR/OpenAL32.dll" out/ 2>/dev/null || true
+          # Debug symbols next to the exe: the crash handler then prints function names
+          # and lines instead of bare addresses (the test machine has no toolchain).
+          for pdb in OpenPoseidon.pdb wgpu_renderer.pdb; do
+            f=$(find "$CWR_DIST_DIR" "$CWR_BUILD_DIR" -name "$pdb" -print -quit 2>/dev/null)
+            if [ -n "$f" ]; then cp "$f" out/; fi
+          done
           printf 'branch=%s\ncommit=%s\nsource=GitHub Actions %s (%s)\n' "$GITHUB_REF_NAME" "${GITHUB_SHA::7}" "$GITHUB_RUN_ID" "$CWR_PRESET" > out/BUILT-FROM.txt
           ls -la out
 
