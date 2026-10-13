@@ -4,6 +4,7 @@
 #include <Poseidon/Game/Scripting/Scripts.hpp>
 #include <algorithm>
 #include <chrono>
+#include <exception>
 #include <cstdlib>
 #include <functional>
 #include <vector>
@@ -1106,10 +1107,24 @@ struct ScriptFiber
         GameState* gstate = GWorld->GetGameState();
         // The fiber's own context on top of the frame's: everything it opens is above
         // baseLevel and travels with it while it waits.
+        const int level = gstate->ContextLevel();
         gstate->BeginContext(&f.script->_vars);
         gstate->VarSetLocal("_this", f.script->_argument, true);
-        gstate->EvaluateMultiple(f.code);
-        gstate->EndContext();
+        // Nothing may unwind out of a coroutine: its stack has no caller to catch it.
+        try
+        {
+            gstate->EvaluateMultiple(f.code);
+        }
+        catch (const std::exception& e)
+        {
+            LOG_ERROR(Script, "script '{}' stopped by an exception: {}", (const char*)f.script->_name, e.what());
+        }
+        catch (...)
+        {
+            LOG_ERROR(Script, "script '{}' stopped by an exception", (const char*)f.script->_name);
+        }
+        while (gstate->ContextLevel() > level)
+            gstate->EndContext();
         f.done = true;
     }
 };
@@ -1118,7 +1133,7 @@ namespace
 {
 ScriptFiber* GRunningFiber = nullptr;
 unsigned GFiberYields = 0;
-constexpr size_t FiberStackSize = 4u << 20;
+constexpr size_t FiberStackSize = 16u << 20; // reserved, committed as used
 
 unsigned FiberYieldCount()
 {
