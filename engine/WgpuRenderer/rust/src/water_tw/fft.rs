@@ -162,10 +162,9 @@ impl SpectrumInputs {
         // Zeroed params (no C++ side yet) read as Tidewater's 0.5.
         let whitecaps = if sea == [0.0; 4] { 0.5 } else { sea[2].clamp(0.0, 1.0) };
         let choppiness = tw[0][1];
-        // Tidewater's rule, but never past WHITECAP_BIAS_MAX: in a storm its bias foamed nearly every
-        // crest and the slow decay kept it, and the whole ocean turned white (owner, 2026-10-12)
+        // the threshold that gives this wind's measured whitecap cover (see WHITECAP_COVER_BIAS)
         let _ = choppiness;
-        let foam_bias = q((whitecap_bias(local.wind_speed, whitecaps) + foam_bias_add()).min(whitecap_bias_max(local.wind_speed)), 0.005);
+        let foam_bias = q(whitecap_cover_bias(local.wind_speed, whitecaps) + foam_bias_add() - FOAM_BIAS_ADD, 0.005);
         // (OP) at least 0.35/s: Tidewater's 0.25 in a storm let the foam outlive the next crests
         let foam_decay = q(foam_decay_override().unwrap_or((0.6 - 0.35 * whitecaps).max(0.35)), 0.005);
         Self { sizes, local, swell, depth: 500.0, seed: 1337, foam_bias, foam_decay }
@@ -312,29 +311,45 @@ pub fn wind_fetch_km(wind_speed: f32) -> f32 {
     (2.3 * wind_speed * wind_speed).clamp(120.0, 600.0)
 }
 
-/// Tidewater's whitecap threshold (OceanFFT `foamBias`), as its sea panel sets it
-/// (island-expansion `AppUI.js`): 0.5 + 0.16 x whitecaps + 0.01 per m/s of wind over 7 (clamped to
-/// -5..+12). The foam kernel foams where the horizontal Jacobian falls below it, so a choppier sea
-/// (wider Jacobian spread) and a windier one both carry more whitecaps -- which is the look the
-/// owner chose in Tidewater itself (2026-10-12: "if I bring choppiness up I get a lot more nice
-/// whitecaps"). W9c had replaced this with a bias that held the foamed SHARE fixed against the
-/// slope spread, which cancelled exactly that: our rough seas kept ~0.1% foam and drew it as the
-/// lace pattern's thinnest veins (white worms).
-pub fn whitecap_bias(wind_speed: f32, whitecaps: f32) -> f32 {
-    0.5 + 0.16 * whitecaps.clamp(0.0, 1.0) + 0.01 * (wind_speed - 7.0).clamp(-5.0, 12.0)
+/// The whitecap threshold (OceanFFT `foamBias`) by wind, fitted to the cover the sea SHOWS: the
+/// share of open water the shader draws as a solid cap, measured on a real device with the weather
+/// presets' own spectra after 40 s of sea (fft_cover_tests.rs, `whitecap_cover_by_preset`):
+///
+///   wind  3.5 m/s  0.85  ->  0 %       (calm: no breaking)
+///         7         0.805 ->  ~1 %
+///        12         0.76  ->  ~8 %
+///        20         0.72  -> ~15 %
+///
+/// Observed seas run ~2 % at 12 m/s and 10-14 % at 20 m/s (Monahan; Callaghan et al. 2008); 12 m/s
+/// sits above that because the owner asked for more, visible caps on a rough sea. Before 2026-10-13
+/// the threshold was Tidewater's rule (0.5 + 0.16 x whitecaps + 0.01 per m/s over 7, plus OP's 0.1)
+/// capped at 0.78, which measured 18 % at 12 m/s and 70 % in a storm: the cover is that steep in the
+/// threshold (storm: 0.70 -> 7 %, 0.75 -> 37 %), so no single cap could fit both, and the owner saw
+/// the whole ocean white whenever the wind rose.
+const WHITECAP_COVER_BIAS: [(f32, f32); 5] = [(3.5, 0.85), (7.0, 0.805), (12.0, 0.76), (20.0, 0.72), (30.0, 0.70)];
+
+/// The fitted threshold for this wind, moved by the whitecaps control around the weather presets'
+/// own value (0.1 calm .. 1.0 storm): +-0.03 at the extremes, so the control still means more or
+/// fewer caps without escaping the measured range.
+pub fn whitecap_cover_bias(wind_speed: f32, whitecaps: f32) -> f32 {
+    let lerp_table = |t: &[(f32, f32)], x: f32| {
+        if x <= t[0].0 {
+            return t[0].1;
+        }
+        for w in t.windows(2) {
+            if x <= w[1].0 {
+                let f = (x - w[0].0) / (w[1].0 - w[0].0);
+                return w[0].1 + (w[1].1 - w[0].1) * f;
+            }
+        }
+        t[t.len() - 1].1
+    };
+    let nominal = lerp_table(&[(3.5, 0.1), (7.0, 0.5), (12.0, 0.8), (20.0, 1.0)], wind_speed);
+    lerp_table(&WHITECAP_COVER_BIAS, wind_speed) + 0.03 * (whitecaps.clamp(0.0, 1.0) - nominal) / 0.5
 }
 
-/// The highest whitecap threshold: 0.78, the many separate caps of the rough sea the owner signed off
-/// (the Choppy preset at 12 m/s, measured). A storm (Tidewater's rule plus OP's offset: 0.88) foamed
-/// nearly every crest and, with the foam's persistence, turned the whole sea white; at the same
-/// threshold its steeper waves still foam more than a 12 m/s sea. (A cap computed from the measured
-/// whitecap cover in this model's share units came out far lower and left a 12 m/s sea with none.)
-pub fn whitecap_bias_max(_wind_speed: f32) -> f32 {
-    0.78
-}
-
-/// OP's offset over Tidewater's whitecap threshold (more of the sea's crests break into caps).
-/// WGR_TW_FOAM_BIAS_ADD overrides it.
+/// The offset OP once put over Tidewater's rule; now only the reference WGR_TW_FOAM_BIAS_ADD is read
+/// against (a tuning offset: WGR_TW_FOAM_BIAS_ADD=0.13 is +0.03 over the fitted threshold).
 pub const FOAM_BIAS_ADD: f32 = 0.1;
 fn foam_bias_add() -> f32 {
     static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
@@ -917,7 +932,8 @@ fn storage(device: &wgpu::Device, label: &str, bytes: u64) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
         size: bytes,
-        usage: wgpu::BufferUsages::STORAGE,
+        // COPY_SRC: the whitecap cover test reads the foam field back
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     })
 }
@@ -1134,11 +1150,21 @@ impl OceanFft {
         timers.end(encoder, Region::TwOceanFft);
     }
 
+    /// The persistent foam field (N x N x CASCADES f32), for the cover measurement.
+    #[cfg(test)]
+    pub fn foam_buffer(&self) -> &wgpu::Buffer {
+        &self._buffers[3]
+    }
+
     #[allow(dead_code)]
     pub fn textures(&self) -> (&wgpu::Texture, &wgpu::Texture) {
         (&self.displacement, &self.derivatives)
     }
 }
+
+#[cfg(test)]
+#[path = "fft_cover_tests.rs"]
+mod cover_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1231,25 +1257,30 @@ mod tests {
     }
 
     #[test]
-    fn a_storm_never_foams_more_than_the_share_cap() {
-        // the owner's storm: the whole sea white at bias 0.88. Capped at the rough sea's 0.78
+    fn whitecap_threshold_follows_the_measured_cover_fit() {
+        // the owner's storm: 70 % of the sea white at Tidewater's capped 0.78; the fit gives ~15 %
         let mut p = <WgrWaterParams as bytemuck::Zeroable>::zeroed();
         p.tidewater = crate::water_tw::DEFAULT_PARAMS;
         p.tidewater_sea = [20.0, 900.0, 1.0, 4.0];
         p.tidewater[0][1] = 1.3;
         let spec = SpectrumInputs::from_params(&p);
-        assert!(spec.foam_bias <= 0.78 + 1e-3, "storm bias {}", spec.foam_bias);
+        assert!((spec.foam_bias - 0.72).abs() < 0.006, "storm bias {}", spec.foam_bias);
         assert!(spec.foam_decay >= 0.35);
-        assert!((whitecap_bias_max(12.0) - 0.78).abs() < 1e-6);
-    }
-
-    #[test]
-    fn whitecap_bias_is_tidewaters_and_grows_with_wind_and_the_whitecaps_control() {
-        // Tidewater's sea panel at its Breezy defaults (8 m/s, whitecaps 0.4) and its Storm (26, 1)
-        assert!((whitecap_bias(8.0, 0.4) - 0.574).abs() < 1e-5);
-        assert!((whitecap_bias(26.0, 1.0) - 0.78).abs() < 1e-5);
-        assert!(whitecap_bias(14.0, 0.75) > whitecap_bias(8.0, 0.4));
-        assert!(whitecap_bias(2.5, 0.0) < whitecap_bias(8.0, 0.4));
+        // the presets sit on the table; the control moves it at most 0.03 either way
+        assert!((whitecap_cover_bias(12.0, 0.8) - 0.76).abs() < 1e-5);
+        assert!((whitecap_cover_bias(7.0, 0.5) - 0.805).abs() < 1e-5);
+        assert!((whitecap_cover_bias(20.0, 0.5) - 0.69).abs() < 1e-5);
+        assert!((whitecap_cover_bias(7.0, 1.0) - 0.835).abs() < 1e-5);
+        // more wind never means a higher threshold (fewer caps) at the presets' own control
+        let mut last = 1.0;
+        for w in [2.0, 3.5, 5.0, 7.0, 9.5, 12.0, 16.0, 20.0, 25.0, 30.0, 40.0] {
+            let nominal = [(3.5, 0.1), (7.0, 0.5), (12.0, 0.8), (20.0, 1.0)]
+                .iter()
+                .fold(0.1f32, |acc, &(x, v)| if w >= x { v } else { acc });
+            let b = whitecap_cover_bias(w, nominal);
+            assert!(b <= last + 0.031, "wind {w}: {b} after {last}");
+            last = b;
+        }
         // and the waves do grow: Hs rises with the wind (with the fetch the wind brings)
         let hs = |w: f32| {
             let mut l = WaveSystem::LOCAL;
