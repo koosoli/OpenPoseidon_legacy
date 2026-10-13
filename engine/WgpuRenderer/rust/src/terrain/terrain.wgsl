@@ -889,7 +889,9 @@ fn tw_beach_sand(det: u32, t: TwIn, rel: vec3<f32>, cam: vec2<f32>, h: f32, fp: 
 
     // ---- damp sand below the berm, darker in mottled drying patches
     let dampMottle = smoothstep(0.3, 0.7, dMw + (dNy - 0.45) * 0.6 + (macroB - 0.5) * 0.4);
-    let damp = smoothstep(1.7, 0.5, h + dMw * 0.3) * mix(0.22, 0.5, dampMottle) * landW;
+    // (the berm's height follows the slope, as the wet band's does: a steep OFP shore face is a few
+    // metres of beach, not 1.7 m of height)
+    let damp = smoothstep(clamp(grade * 5.0, 1.9, 3.0), 0.5, h + dMw * 0.3) * mix(0.3, 0.65, dampMottle) * landW;
     sand = mix(sand, tws_sat(sand * 0.58, 1.15) * vec3<f32>(0.97, 0.98, 1.0), damp);
     // swash marks: thin wavy lines of grit at the limits of earlier uprushes
     let sl = (h + dMw * 0.18 + dNw * 0.05) / 0.13;
@@ -1965,13 +1967,27 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
             if (inside > 0.0) { sim = tw_sim_state_at(in.world_xz, i32(pick.x)) * inside; }
         }
         // outside the simulated regions: Tidewater's static damp band
-        let band = smoothstep(0.45, 0.0, h);
+        // (OP, 2026-10-13) 0.8 m, not Tidewater's 0.45, and kept at 3/4 inside the simulated regions
+        // instead of switched off there: OFP's beaches are steeper than Tidewater's, and the sand the
+        // last waves and the tide left wet read as a hairline at the water's edge (owner, after the
+        // swash fix: the wet band too narrow)
+        // ... and measured in metres INLAND, not only of height: OFP's shore face rises steeply at the
+        // water and flattens into the beach (a 12.5 m grid smooths one into the other), so any height
+        // band was a hairline on the face (debug tint, 2026-10-13). The ground 2.5 m and 5 m downhill:
+        // where it is under water, this sand is that close to the waterline.
+        var band = smoothstep(0.8, 0.05, h);
+        if (h < 3.0 && h > -0.2) {
+            let down = normalize(geometric_n.xz + vec2<f32>(1e-5, 0.0));
+            let h25 = sample_height(in.world_xz + down * 2.5) - tww.p.y;
+            let h50 = sample_height(in.world_xz + down * 5.0) - tww.p.y;
+            band = max(band, max(smoothstep(0.3, -0.1, h25), smoothstep(0.3, -0.1, h50) * 0.7));
+        }
         // (Tidewater's landW: the seabed below the waterline is not the wet beach)
         let land = 1.0 - smoothstep(0.12, -0.6, h);
-        let tw_wet = max(sim.y, band * (1.0 - inside)) * flat * land;
+        let tw_wet = max(sim.y, band * (1.0 - inside * 0.25)) * flat * land;
         // Tidewater Terrain.js: wet sand is darker (wetDarken 0.58), a little more saturated and
         // a touch cooler
-        let wet_c = rgb * 0.58;
+        let wet_c = rgb * 0.5; // (Tidewater 0.58; OFP's pale coral sand read barely damp at it)
         let lum = dot(wet_c, vec3<f32>(0.2126, 0.7152, 0.0722));
         let wet_albedo = mix(vec3<f32>(lum), wet_c, 1.15) * vec3<f32>(0.97, 0.98, 1.0);
         rgb = mix(rgb, wet_albedo, tw_wet);
