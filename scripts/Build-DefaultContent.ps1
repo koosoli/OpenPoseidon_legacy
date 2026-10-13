@@ -26,6 +26,14 @@ foreach ($material in @('road_asphalt','sand','gravel')) {
 & $tools image convert "$generated/sand_detail_nohq.png" "$stage/sand_detail_nohq.paa" --format DXT5
 if ($LASTEXITCODE -ne 0) { throw 'Sand detail normal encoding failed' }
 $expected += 'sand_detail_nohq.paa'
+# Denser hedges for the stock krovi* models (generate_hedges.py) and the redirect manifest the
+# engine's ModelCache reads (models.json); the stock images are referenced, not copied.
+& $Python "$PSScriptRoot/default-content/generate_hedges.py" --out "$generated/hedges" --prefix op_ground_materials
+if ($LASTEXITCODE -ne 0) { throw 'Hedge generation failed' }
+foreach ($file in Get-ChildItem -LiteralPath "$generated/hedges" -File) {
+    Copy-Item -LiteralPath $file.FullName -Destination "$stage/$($file.Name)" -Force
+    $expected += $file.Name
+}
 Copy-Item -LiteralPath "$source/config.cpp" -Destination "$stage/config.cpp" -Force
 Copy-Item -LiteralPath "$source/material-overrides.json" -Destination "$stage/materials.json" -Force
 foreach ($file in Get-ChildItem -LiteralPath $stage -Force) {
