@@ -267,9 +267,11 @@ class TerrainWgpu : public ITerrainRenderer
     // render-only instances); the cards yield inside the radius. Once per frame on the producer
     // side (EngineWgpu::UpdateNativeClutter). TerrainWgpuNativeClutterMeshes.cpp.
     void UpdateNativeClutterMeshes(const Landscape& land, const Vector3& camera);
+    // Drops every near-clutter instance and, with `forgetModels`, the cached plant models too --
+    // a world unload must not keep references to shapes from content that is going away.
+    void ResetNativeClutterMeshes(bool forgetModels = false);
 
   private:
-    void ResetNativeClutterMeshes();
     const Landscape* _grassRoadLand = nullptr;
     size_t _grassRoadSegments = 0;
     bool _grassRoadUploaded = false;

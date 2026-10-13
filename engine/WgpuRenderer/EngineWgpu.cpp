@@ -2477,6 +2477,11 @@ EngineWgpu::~EngineWgpu()
     if (_sharedMeshEpoch) _sharedMeshEpoch->Close();
     if (_geometryOwnerLedger) _geometryOwnerLedger->CloseEpoch(_geometryOwnerEpoch);
     ClearFarObjects();
+    // RFG-153's near clutter holds model references exactly like the far tier. Left to the
+    // member destructor, they were released AFTER wgr_destroy, and each VertexBufferWgpu then
+    // called wgr_uploader_mesh_destroy on the freed uploader: the hash lookup spun forever and
+    // the game never exited (owner, 2026-10-13: window closed, process still burning a core).
+    ClearClutterObjects();
     ClearEarthWorldgenObjects();
     ClearEarthTreeObjects();
     s_self = nullptr;
@@ -17279,6 +17284,9 @@ void EngineWgpu::ClearFarObjects()
 {
     while (!_farGpuInstances.empty())
         SceneFarObjectRemoved(_farGpuInstances.begin()->first);
+    // The landscape is going away (Landscape::ClearNativeFarResidency): the near clutter's
+    // instances and cached plant models belong to it as much as the far tier does.
+    ClearClutterObjects();
 }
 
 // RFG-153: near clutter -- Reforger's own plant .xob models within a few tens of metres of the
@@ -17318,6 +17326,14 @@ void EngineWgpu::SceneClutterObjectRemoved(uint32_t id)
     ++_ops.instanceRemove;
     ReleaseGpuModel(found->second.shape.GetRef());
     _clutterGpuInstances.erase(found);
+}
+
+void EngineWgpu::ClearClutterObjects()
+{
+    if (_terrain)
+        _terrain->ResetNativeClutterMeshes(true);
+    while (!_clutterGpuInstances.empty())
+        SceneClutterObjectRemoved(_clutterGpuInstances.begin()->first);
 }
 
 // REN-TEMP-001H: pointer -> stable 16-bit draw-object id, allocated on first sight.

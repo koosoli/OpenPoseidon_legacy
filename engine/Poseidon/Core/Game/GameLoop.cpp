@@ -1,4 +1,5 @@
 #include <Poseidon/UI/LocalMapEditor.hpp>
+#include <Poseidon/UI/LocalMapWorlds.hpp>
 #include <Poseidon/Core/Game/GameLoop.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/Config.hpp>
@@ -375,6 +376,27 @@ bool AppIdle()
 
     if (Poseidon::ServiceLocalMapEditor())
         return true;
+
+    // POSEIDON_OPEN_LOCAL_MAP=<OP_Local_ id or alias>: press the ARMA CONTENT browser's "Open
+    // selected" for a saved map once the menu is live -- the same RequestLocalMapEditor call,
+    // so the remount and editor path can be reproduced without driving the menu by hand.
+    {
+        static bool openLocalMapDone = false;
+        const char* openLocalMap = openLocalMapDone ? nullptr : std::getenv("POSEIDON_OPEN_LOCAL_MAP");
+        if (openLocalMap && *openLocalMap && GWorld != nullptr && GWorld->GetMode() == GModeIntro &&
+            GWorld->Options() != nullptr)
+        {
+            openLocalMapDone = true;
+            std::string error;
+            const Poseidon::LocalMap* map = Poseidon::FindLocalMapWorld(openLocalMap);
+            if (!map)
+                LOG_WARN(Core, "POSEIDON_OPEN_LOCAL_MAP: no saved map '{}'", openLocalMap);
+            else if (!Poseidon::RequestLocalMapEditor(*map, error))
+                LOG_WARN(Core, "POSEIDON_OPEN_LOCAL_MAP: {}", error);
+            else
+                LOG_INFO(Core, "POSEIDON_OPEN_LOCAL_MAP: opening '{}' ({})", map->name, openLocalMap);
+        }
+    }
 
     // Finish a deferred MP join: after a mod-apply re-mount lands back on the menu,
     // connect to the server stashed before the re-mount.

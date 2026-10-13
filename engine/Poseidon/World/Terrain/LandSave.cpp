@@ -5450,7 +5450,9 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
 
 void Landscape::ClearNativeFarResidency()
 {
-    if (GEngine && !_nativeFarActive.empty())
+    // Unconditional: the engine also holds the near clutter (RFG-153), which the far set says
+    // nothing about. Cheap when there is nothing to clear.
+    if (GEngine)
         GEngine->ClearFarObjects();
     _nativeFarActive.clear();
     _nativeFarModels.clear();

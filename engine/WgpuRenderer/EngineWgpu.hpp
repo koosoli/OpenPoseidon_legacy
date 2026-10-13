@@ -327,6 +327,7 @@ class EngineWgpu : public EngineDummy
     int ControlWetSoilDiagnostic(int mode = -1) override;
     bool SceneClutterObjectCreated(uint32_t id, LODShapeWithShadow* shape, const Matrix4& transform) override;
     void SceneClutterObjectRemoved(uint32_t id) override;
+    void ClearClutterObjects();
     void UpdateNativeClutter(const Vector3& camera) override;
     void SetSkySettings(const SkySettings& s) override;
     // Second cloud layer (high cirrus at ~7 km): on/off and flat-vs-volumetric. Defined here

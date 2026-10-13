@@ -86,7 +86,7 @@ constexpr uint32_t kGeoExcludeHard = 0x00000c63u;
 constexpr uint32_t kGeoExcludeSoft = 0x00000018u;
 } // namespace
 
-void TerrainWgpu::ResetNativeClutterMeshes()
+void TerrainWgpu::ResetNativeClutterMeshes(bool forgetModels)
 {
     for (auto& entry : _clutterMeshCells)
         for (uint32_t id : entry.second.ids)
@@ -95,6 +95,12 @@ void TerrainWgpu::ResetNativeClutterMeshes()
             _clutterMeshFreeIds.push_back(id);
         }
     _clutterMeshCells.clear();
+    if (forgetModels)
+    {
+        _clutterMeshShapes.clear();
+        _clutterMeshFailed.clear();
+        ++_clutterMeshShapeEpoch;
+    }
 }
 
 void TerrainWgpu::UpdateNativeClutterMeshes(const Landscape& land, const Vector3& camera)
