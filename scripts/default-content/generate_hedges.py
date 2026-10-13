@@ -61,12 +61,12 @@ LEAF_TEXTURE = "hedge_leaves.paa"  # 2 x 2 atlas: oak | ash, lit row over shaded
 # lime. Graded toward a summer hedge: a little desaturated, darker. The shaded row is the same
 # leaves inside the hedge and near the ground, where little sky reaches (OFP models carry no AO).
 LEAF_SATURATION = 0.8
-LEAF_GAIN = 0.52
+LEAF_GAIN = 0.42  # second capture: 0.52 rendered 18 % brighter than the grass
 SHADED_GAIN = 0.36
 # Owner: "it needs to have the same color as the grass". Measured on a capture (Everon 7050/6441,
 # 2026-10-13): the grass renders at R/G 0.91, B/G 0.71, the graded leaves at 0.79 / 0.52, and the
 # lighting keeps those ratios -- so the leaves take the grass's ratios per channel.
-LEAF_TINT = (0.914 / 0.785, 1.0, 0.711 / 0.524)
+LEAF_TINT = (0.914 / 0.785 * 0.957, 1.0, 0.711 / 0.524)  # (red trimmed after the second capture)
 
 
 def body(spec):
