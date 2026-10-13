@@ -82,6 +82,12 @@ RString ResolveMagazineClass(const RString& className);
 // name is no Arma 2 weapon or magazine.
 RString Arma2WeaponFallback(const RString& name);
 
+// For an Arma 2 weapon carried by the CWA weapon cwaWeapon: a generated A1x_<name> class with
+// the Arma 2 model (in the hand, on the ground) on that CWA weapon, which keeps its magazines
+// and ballistics. Returns cwaWeapon when there is no usable model. OP_A2_WEAPON_MODELS=0 turns
+// it off.
+RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon);
+
 // Arma 2: the EventHandlers >> init code of a module (a class derived from Logic, such
 // as FunctionsManager or the first-aid modules) that a mission places; empty otherwise.
 RString Arma2ModuleInit(const RString& className);

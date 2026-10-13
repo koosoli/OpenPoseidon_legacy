@@ -1507,6 +1507,89 @@ RString Arma2WeaponFallback(const RString& name)
     return RString(weapon);
 }
 
+RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
+{
+    if (Generation() != 2 || !ConfigLoaded() || name.GetLength() == 0 || cwaWeapon.GetLength() == 0)
+        return cwaWeapon;
+    static const bool off = [] {
+        const char* e = std::getenv("OP_A2_WEAPON_MODELS");
+        return e && *e == '0';
+    }();
+    if (off)
+        return cwaWeapon;
+    const ParamEntry* a2 = FindConfigClass("CfgWeapons", name);
+    const ParamEntry* cwaWeapons = Pars.FindEntry("CfgWeapons");
+    const ParamEntry* cwa = cwaWeapons ? cwaWeapons->FindEntry(cwaWeapon) : nullptr;
+    if (!a2 || !a2->IsClass() || !cwa)
+        return cwaWeapon;
+    // Only weapons carry a model of their own here; binoculars and goggles keep CWA's.
+    if (A2Derives(a2, "Binocular") || A2Derives(a2, "NVGoggles"))
+        return cwaWeapon;
+    std::string model = StringValue(*a2, "model");
+    if (model.empty() || model == "\\" || model == "-")
+        return cwaWeapon;
+    std::string shape = model;
+    if (shape.size() < 4 || Lower(shape.substr(shape.size() - 4)) != ".p3d")
+        shape += ".p3d";
+    if (!QIFStreamB::FileExist(shape[0] == '\\' ? shape.c_str() + 1 : shape.c_str()))
+        return cwaWeapon;
+
+    const std::string generated = "A1x_" + std::string(name.Data());
+    if (cwaWeapons->FindEntry(generated.c_str()))
+        return RString(generated.c_str());
+    std::string text = "class CfgWeapons\r\n{\r\n\tclass " + std::string(cwaWeapon.Data()) + ";\r\n\tclass " +
+                       generated + ": " + std::string(cwaWeapon.Data()) + "\r\n\t{\r\n";
+    text += "\t\tmodel=\"" + model + "\";\r\n";
+    const std::string displayName = StringValue(*a2, "displayName");
+    if (!displayName.empty())
+        text += "\t\tdisplayName=\"" + displayName + "\";\r\n";
+    if (const ParamEntry* scope = cwa->FindEntry("scope"); !scope || (int)*scope < 1)
+        text += "\t\tscope=1;\r\n";
+    text += "\t};\r\n};\r\n";
+    ImportIntoPars(text, generated.c_str());
+    if (!(Pars >> "CfgWeapons").FindEntry(generated.c_str()))
+        return cwaWeapon;
+    LOG_INFO(Mission, "{}: weapon '{}' uses the Arma model {} on CWA '{}'", Label(), name.Data(), model,
+             cwaWeapon.Data());
+    return RString(generated.c_str());
+}
+
+namespace
+{
+// weapons[] and magazines[] of an Arma 2 soldier class, each resolved to what this
+// game can carry (A1x_ weapons with the Arma 2 model, CWA magazines of the same
+// calibre). Items CWA has no counterpart for (ItemMap, ItemRadio, ...) are left out.
+std::string Arma2Loadout(const ParamEntry& soldier)
+{
+    const ParamEntry* cwaWeapons = Pars.FindEntry("CfgWeapons");
+    if (!cwaWeapons)
+        return {};
+    std::string out;
+    const auto list = [&](const char* key, RString (*resolve)(const RString&))
+    {
+        const ParamEntry* arr = soldier.FindEntry(key);
+        if (!arr || !arr->IsArray())
+            return;
+        std::string items;
+        int n = 0;
+        for (int i = 0; i < arr->GetSize(); i++)
+        {
+            const RString name = (RStringB)(*arr)[i];
+            if (name.GetLength() == 0)
+                continue;
+            const RString cwa = resolve(name);
+            if (cwa.GetLength() == 0 || !cwaWeapons->FindEntry(cwa))
+                continue;
+            items += std::string(n++ ? "," : "") + "\"" + std::string(cwa.Data()) + "\"";
+        }
+        out += std::string("\t\t") + key + "[]={" + items + "};\r\n";
+    };
+    list("weapons", &ResolveWeaponClass);
+    list("magazines", &ResolveMagazineClass);
+    return out;
+}
+} // namespace
+
 RString Arma2ModuleInit(const RString& className)
 {
     if (Generation() != 2 || !ConfigLoaded() || className.GetLength() == 0)
@@ -1559,24 +1642,27 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     const ParamEntry* cwa = cwaVehicles ? cwaVehicles->FindEntry(cwaClass) : nullptr;
     if (!a1 || !cwa)
         return cwaClass;
-    std::string model = StringValue(*a1, "model");
-    if (model.empty() || model == "\\" || model.find("bmp.p3d") != std::string::npos)
-        return cwaClass;
-    std::string shape = model;
-    if (shape.size() < 4 || Lower(shape.substr(shape.size() - 4)) != ".p3d")
-        shape += ".p3d";
-    if (!QIFStreamB::FileExist(shape[0] == '\\' ? shape.c_str() + 1 : shape.c_str()))
-        return cwaClass;
-
     const bool man = IsKindOf(a1, "CAManBase") || IsKindOf(a1, "Man");
     // Arma 2 soldiers: their models and moves (binarised BMTR animations, converted on
     // load) are in testing; OP_A2_SOLDIERS=1 turns them on, else an Arma 2 soldier keeps
-    // the CWA soldier's model and moves.
+    // the CWA soldier's model and moves -- but still carries its own weapons.
     static const bool a2Soldiers = [] {
         const char* e = std::getenv("OP_A2_SOLDIERS");
         return e && *e == '1';
     }();
+    std::string model = StringValue(*a1, "model");
+    bool useModel = !(model.empty() || model == "\\" || model.find("bmp.p3d") != std::string::npos);
+    if (useModel)
+    {
+        std::string shape = model;
+        if (shape.size() < 4 || Lower(shape.substr(shape.size() - 4)) != ".p3d")
+            shape += ".p3d";
+        useModel = QIFStreamB::FileExist(shape[0] == '\\' ? shape.c_str() + 1 : shape.c_str());
+    }
     if (man && ((Generation() == 2 && !a2Soldiers) || !MovesImported()))
+        useModel = false;
+    const bool loadout = man && Generation() == 2;
+    if (!useModel && !loadout)
         return cwaClass;
 
     const std::string generated = "A1x_" + std::string(missionClass.Data());
@@ -1585,7 +1671,8 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
 
     std::string text = "class CfgVehicles\r\n{\r\n\tclass " + std::string(cwaClass.Data()) + ";\r\n\tclass " +
                        generated + ": " + std::string(cwaClass.Data()) + "\r\n\t{\r\n";
-    text += "\t\tmodel=\"" + model + "\";\r\n";
+    if (useModel)
+        text += "\t\tmodel=\"" + model + "\";\r\n";
     // A scope-0 base makes the generated class abstract too: VehicleTypes then builds a
     // plain EntityAIType while NewVehicle still constructs by simulation (a Building on a
     // type that is no BuildingType -- the 0xC0000005 in Building's constructor).
@@ -1594,7 +1681,9 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     const std::string displayName = StringValue(*a1, "displayName");
     if (!displayName.empty())
         text += "\t\tdisplayName=\"" + displayName + "\";\r\n";
-    if (man)
+    if (loadout)
+        text += Arma2Loadout(*a1);
+    if (man && useModel)
     {
         text += "\t\tmoves=\"A1_CfgMovesMaleSdr\";\r\n";
         for (const char* key : kManNameKeys)
@@ -1624,8 +1713,12 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     ImportIntoPars(text, generated.c_str());
     if (!(Pars >> "CfgVehicles").FindEntry(generated.c_str()))
         return cwaClass;
-    LOG_INFO(Mission, "{}: '{}' uses the Arma 1 model {} on CWA '{}'{}", Label(), missionClass.Data(), model,
-             cwaClass.Data(), man ? " with the Arma 1 moves" : "");
+    if (useModel)
+        LOG_INFO(Mission, "{}: '{}' uses the Arma 1 model {} on CWA '{}'{}", Label(), missionClass.Data(), model,
+                 cwaClass.Data(), man ? " with the Arma 1 moves" : "");
+    else
+        LOG_INFO(Mission, "{}: '{}' is the CWA soldier '{}' with its own weapons", Label(), missionClass.Data(),
+                 cwaClass.Data());
     return RString(generated.c_str());
 }
 } // namespace Poseidon::Arma1Compat
