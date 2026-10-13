@@ -167,6 +167,10 @@ TEST_CASE("Local mission scan finds campaign missions and marks the playable one
     REQUIRE_FALSE(Poseidon::LocalMissionSupported("Arma 1", "intro", reason));
     REQUIRE_FALSE(reason.empty());
     REQUIRE_FALSE(Poseidon::LocalMissionSupported("Arma 3", "altis", reason));
+    // Arma 2 and OA missions are offered experimentally, on any terrain, with the reason shown
+    REQUIRE(Poseidon::LocalMissionSupported("Arma 2", "chernarus", reason));
+    REQUIRE_FALSE(reason.empty());
+    REQUIRE(Poseidon::LocalMissionSupported("Arma 2 OA", "takistan", reason));
 }
 
 // Manual probe, hidden from normal runs: OP_CONTENT_SCAN=<folder> PoseidonTests "[.content-probe]"

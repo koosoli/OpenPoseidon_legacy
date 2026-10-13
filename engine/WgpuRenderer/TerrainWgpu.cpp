@@ -3,6 +3,7 @@
 #include "BirdFlocks.hpp"
 #include "ReefLife.hpp"
 #include "BeachCritters.hpp"
+#include "BeachDebris.hpp"
 #include "EarthTreeDetail.hpp"
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/SnowShelter.hpp>
@@ -4561,6 +4562,9 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         if (!_crabs)
             _crabs = std::make_unique<BeachCritters>(_engine, _renderer);
         _crabs->Update(camera->Position(), Glob.time.toFloat());
+        if (!_debris)
+            _debris = std::make_unique<BeachDebris>(_engine, _renderer);
+        _debris->Update(camera->Position());
     }
 }
 

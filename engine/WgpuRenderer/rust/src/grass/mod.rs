@@ -3132,10 +3132,12 @@ impl Grass {
             p.wind_flutter[0], p.wind_flutter[1], p.wind_flutter[2], p.wind_flutter[3],
         ];
         let prev = self.velocity_prev_lanes.replace(Some(lanes)).unwrap_or(lanes);
-        let native_tufts = p.native_tuft[0] > 0.5 && p.near_blades_only > 0.0 && !self.near_draws_cards();
-        if !self.enabled || !self.have_heightmap || !native_tufts {
+        // the native near ring's tufts, or (FIRE-002 round) OFP's own blades; not a ring of cards
+        let native_tufts = p.native_tuft[0] > 0.5 && p.near_blades_only > 0.0;
+        if !self.enabled || !self.have_heightmap || self.near_draws_cards() {
             return;
         }
+        let _ = native_tufts;
         static OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if *OFF.get_or_init(|| std::env::var("WGR_GRASS_VELOCITY").as_deref() == Ok("0")) {
             return;
@@ -3160,7 +3162,7 @@ impl Grass {
             ],
         });
         static LIVE: std::sync::Once = std::sync::Once::new();
-        LIVE.call_once(|| eprintln!("[wgr] grass velocity live: native near-ring tufts write motion vectors"));
+        LIVE.call_once(|| eprintln!("[wgr] grass velocity live: near-ring blades and tufts write motion vectors"));
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("wgr_grass_velocity"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {

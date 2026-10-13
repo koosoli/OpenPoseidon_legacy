@@ -266,6 +266,8 @@ class LocalMapsDisplay : public Display
             Status("This mission is not playable yet: " + localMission->reason + ".");
             return;
         }
+        if (localMission && !localMission->reason.empty())
+            Status("Starting it anyway -- " + localMission->reason + ".");
         if (map)
         {
             std::string error;
@@ -321,7 +323,11 @@ class LocalMapsDisplay : public Display
                                          "--render=" + Foundation::AppConfig::Instance().GetRenderBackend(),
                                          "--wait-for-parent",
                                          std::to_string(GetCurrentProcessId())};
-        if (localMission)
+        if (localMission && localMission->game.rfind("Arma 2", 0) == 0)
+            // Experimental: the Arma 2 bridge mounts the install read-only (Arma1Compat, --arma2)
+            args.insert(args.end(), {"--arma2", localMission->installRoot, "--arma2-mission",
+                                     localMission->virtualPath});
+        else if (localMission)
             // The game's own archives are mounted read-only; nothing is extracted (Arma1Compat).
             args.insert(args.end(), {"--arma1", localMission->installRoot, "--arma1-mission",
                                      localMission->virtualPath});

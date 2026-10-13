@@ -268,9 +268,17 @@ void ScanInstall(const std::vector<fs::path>& installs, const std::string& game,
 bool LocalMissionSupported(const std::string& game, const std::string& world, std::string& reason)
 {
     reason.clear();
+    // Arma 2 / Operation Arrowhead missions are offered as an experiment (owner, 2026-10-13: "let me
+    // select them; if they fail, they fail"): they start through --arma2 (MrDudeX-arma2's bridge),
+    // whatever their terrain, and may not load or play correctly.
+    if (game.rfind("Arma 2", 0) == 0)
+    {
+        reason = "experimental: Arma 2 missions may fail to start or play";
+        return true;
+    }
     if (game != "Arma 1")
     {
-        reason = "only Arma 1 missions are playable so far";
+        reason = "only Arma 1 missions are playable so far (Arma 2 experimentally)";
         return false;
     }
     // The terrains Arma1Compat::RegisterWorldClasses generates a CfgWorlds class for.

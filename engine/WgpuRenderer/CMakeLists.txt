@@ -81,6 +81,7 @@ add_library(WgpuRenderer STATIC
     BirdFlocks.cpp
     ReefLife.cpp
     BeachCritters.cpp
+    BeachDebris.cpp
     EarthTreeDetail.cpp
     TerrainWgpuEnfusionClutter.cpp
     TerrainWgpuNativeClutterMeshes.cpp

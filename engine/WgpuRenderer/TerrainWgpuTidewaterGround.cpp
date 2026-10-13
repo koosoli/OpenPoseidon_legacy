@@ -89,15 +89,21 @@ Rgb Mix(const Rgb& a, const Rgb& b, float t) { return {a[0] + (b[0] - a[0]) * t,
 float Lum(const Rgb& c) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; }
 } // namespace
 
+// WGR_TW_GROUND: unset = Tidewater's sand on every sand layer (owner, 2026-10-13: "replace all sand
+// with that texture"), 1 = the bare field soil as well (the former opt-in), 0 = off.
+static int GroundMode()
+{
+    static const int mode = []
+    {
+        const char* v = std::getenv("WGR_TW_GROUND");
+        return !v || !*v ? 2 : v[0] == '0' ? 0 : 1;
+    }();
+    return mode;
+}
+
 bool TidewaterGround::Enabled()
 {
-    static const bool on = []
-    {
-        // opt-in (WGR_TW_GROUND=1) until the owner has seen it: the pure sand layer is not found yet
-        const char* v = std::getenv("WGR_TW_GROUND");
-        return v && v[0] == '1';
-    }();
-    return on;
+    return GroundMode() != 0;
 }
 
 std::string TidewaterGround::BaseName(const char* path)
@@ -116,7 +122,7 @@ std::string TidewaterGround::BaseName(const char* path)
 bool TidewaterGround::Applies(const std::string& base)
 {
     if (base == "pol")
-        return true;
+        return GroundMode() == 1;
     for (const std::string& c : Corners(base))
         if (c == "ps")
             return true;

@@ -1614,7 +1614,7 @@ fn vs_grass_velocity(@builtin(vertex_index) vertex_index: u32,
     var out: GrassVelOut;
     out.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
     if (!native_tufts_on()) {
-        return out;
+        return vs_ofp_blade_velocity(vertex_index, instance_index);
     }
     let inst = instances[instance_index].pos_seed;
     let inst_packed = instances[instance_index].packed;
@@ -1644,10 +1644,40 @@ fn vs_grass_velocity(@builtin(vertex_index) vertex_index: u32,
     return out;
 }
 
+// An OFP blade's motion (see ofp_blade): its uv.z is -1, the blade is cut by its geometry, not a
+// card's alpha.
+fn vs_ofp_blade_velocity(vertex_index: u32, instance_index: u32) -> GrassVelOut {
+    var out: GrassVelOut;
+    out.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    let inst = instances[instance_index].pos_seed;
+    let inst_packed = instances[instance_index].packed;
+    let blade = vertex_index / VERTS_PER_NEAR_BLADE_UNIQUE;
+    let packed = vertex_index % VERTS_PER_NEAR_BLADE_UNIQUE;
+    let t = f32(packed / 2u) / f32(BLADE_SEGMENTS);
+    let left = (packed % 2u) == 0u;
+    let cur = ofp_blade(inst, inst_packed, blade, t, left, wind_lanes_now());
+    var prev_lanes: WindLanes;
+    prev_lanes.strength = gvel.prev_wind.x;
+    prev_lanes.direction = gvel.prev_wind.y;
+    prev_lanes.advection = gvel.prev_advection;
+    prev_lanes.flutter = gvel.prev_flutter;
+    let prev = ofp_blade(inst, inst_packed, blade, t, left, prev_lanes);
+    let base = inst.xyz - frame.cam_pos.xyz;
+    let cur_pos = vec4<f32>(base + cur.local, 1.0);
+    let prev_pos = vec4<f32>(base + gvel.cam_delta.xyz + prev.local, 1.0);
+    var raster = gvel.jittered_vp * cur_pos;
+    raster.z = raster.w - raster.z;
+    out.pos = raster;
+    out.cur_clip = gvel.cur_vp * cur_pos;
+    out.prev_clip = gvel.prev_vp * prev_pos;
+    out.uv = vec3<f32>(0.0, 0.0, -1.0);
+    return out;
+}
+
 @fragment
 fn fs_grass_velocity(in: GrassVelOut) -> @location(0) vec2<f32> {
-    // The card's own silhouette, as the colour pass cuts it.
-    if (textureSampleLevel(blade_tex, blade_samp, in.uv.xy, blade_layer(in.uv.z), 0.0).a <
+    // The card's own silhouette, as the colour pass cuts it (an OFP blade, uv.z < 0, has none).
+    if (in.uv.z >= 0.0 && textureSampleLevel(blade_tex, blade_samp, in.uv.xy, blade_layer(in.uv.z), 0.0).a <
         tuft_alpha_cutoff()) {
         discard;
     }
@@ -1686,6 +1716,42 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     if (native_tufts_on()) {
         return vs_native_tuft(inst, inst_packed, blade, t, left);
     }
+    let b = ofp_blade(inst, inst_packed, blade, t, left, wind_lanes_now());
+    let world = inst.xyz + b.local;
+    let rel = world - frame.cam_pos.xyz;
+    var out: VsOut;
+    out.clip = reverse_z(frame.proj * frame.view * vec4<f32>(rel, 1.0));
+    out.world_rel = rel;
+    out.normal = normalize(cross(b.blade_axis, b.tangent));
+    out.height_t = t;
+    out.seed = seed;
+    out.wind_gust = b.gust;
+    out.blade_uv = vec4<f32>(select(1.0, 0.0, left), 1.0 - t, f32(inst_packed.w & 7u),
+                             blade_texture_strength(rel));
+    out.blade_taper = b.taper_exp;
+    return out;
+}
+
+// FIRE-002 round (owner, 2026-10-13: "grass is smearing when I fly around ... DLSS"): an OFP
+// near-ring blade, for this frame's wind lanes or the last frame's. The colour pass and the
+// velocity pass share it, so the motion vectors describe the sway that is drawn -- before this only
+// the native (Reforger) tufts had any (RFG-142) and every OFP blade swayed as a "static" surface.
+struct OfpBlade {
+    local: vec3<f32>,
+    tangent: vec3<f32>,
+    blade_axis: vec3<f32>,
+    gust: f32,
+    taper_exp: f32,
+};
+
+fn ofp_blade(inst: vec4<f32>, inst_packed: vec4<u32>, blade: u32, t: f32, left: bool, lanes: WindLanes) -> OfpBlade {
+    let seed = inst.w;
+    let shape = species_shape_mixed(inst_packed.w & 7u, grass.shape_mix.x);
+    let crush_dir = unpack2x16snorm(inst_packed.x);
+    let crush_data = unpack2x16unorm(inst_packed.y);
+    let crush = crush_data.x;
+    let rotor_wash = active_rotor_wash(inst.xz, crush, crush_data.y);
+    let blade_count = select(6.0, 12.0, grass.renderer.x > 0.5);
     // Four clump archetypes: compact upright, open meadow, low splayed, tall wisp.
     let archetype = u32(seed * 4.0);
     // Most meadow clumps stay short; the occasional wisp preserves a layered
@@ -1707,8 +1773,8 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     let depth = imprint_depth();
     let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (depth * crush);
     let crushed_height = height * (1.0 - depth * crush);
-    let wind = sample_wind_field(inst.xz + base_offset.xz, t, seed + blade_seed);
-    let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * grass.wind_strength *
+    let wind = sample_wind_field_lanes(inst.xz + base_offset.xz, t, seed + blade_seed, lanes);
+    let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * lanes.strength *
         (0.035 + 0.21 * wind.gust + wind.turbulence);
     // Rotor wash has its own fast, per-blade turbulence. It is driven by the
     // cached crush amount so normal grass remains governed solely by weather.
@@ -1732,19 +1798,13 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     let edge_on = pow(1.0 - abs(dot(blade_normal, view_dir)), 4.0);
     let lateral = select(blade_axis * half_width, -blade_axis * half_width, left) * (1.0 + edge_on * 1.6);
     let local = base_offset + lateral + vec3<f32>(0.0, crushed_height * t, 0.0) + curve;
-    let world = inst.xyz + local;
-    let rel = world - frame.cam_pos.xyz;
-    var out: VsOut;
-    out.clip = reverse_z(frame.proj * frame.view * vec4<f32>(rel, 1.0));
-    out.world_rel = rel;
-    out.normal = normalize(cross(blade_axis, tangent));
-    out.height_t = t;
-    out.seed = seed;
-    out.wind_gust = wind.gust;
-    out.blade_uv = vec4<f32>(select(1.0, 0.0, left), 1.0 - t, f32(inst_packed.w & 7u),
-                             blade_texture_strength(rel));
-    out.blade_taper = max(shape.z * taper_jitter, 0.05);
-    return out;
+    var o: OfpBlade;
+    o.local = local;
+    o.tangent = tangent;
+    o.blade_axis = blade_axis;
+    o.gust = wind.gust;
+    o.taper_exp = max(shape.z * taper_jitter, 0.05);
+    return o;
 }
 
 @vertex

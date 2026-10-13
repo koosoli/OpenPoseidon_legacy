@@ -315,7 +315,9 @@ fn unresolved_ramps_keep_the_native_and_resolved_paths_and_actual_taper() {
         )
     );
     assert!(SHADER.contains("@location(6) @interpolate(flat) blade_taper: f32"));
-    assert!(SHADER.contains("out.blade_taper = max(shape.z * taper_jitter, 0.05);"));
+    // (the OFP blade's geometry lives in ofp_blade since the grass motion vectors)
+    assert!(SHADER.contains("o.taper_exp = max(shape.z * taper_jitter, 0.05);"));
+    assert!(SHADER.contains("out.blade_taper = b.taper_exp;"));
     assert!(SHADER.contains("out.blade_taper = shape.z;"));
     assert!(SHADER.contains("albedo = textured;"));
 }
