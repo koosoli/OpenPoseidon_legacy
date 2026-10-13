@@ -28,3 +28,15 @@ TEST_CASE("a loop without exitWith runs to its end", "[loop-exit]")
     REQUIRE(f.state().GetLastError() == EvalOK);
     REQUIRE((float)result == 15.0f);
 }
+
+TEST_CASE("exitWith gives a called function its value", "[loop-exit]")
+{
+    EvalFixture f;
+    GameValue result = f.state().EvaluateMultiple(
+        "loopExitF = {if (_this == 1) exitWith {\"one\"}; \"other\"}; [1 call loopExitF, 2 call loopExitF]");
+    REQUIRE(f.state().GetLastError() == EvalOK);
+    const GameArrayType& a = result;
+    REQUIRE(a.Size() == 2);
+    REQUIRE(RString(a[0]) == RString("one"));
+    REQUIRE(RString(a[1]) == RString("other"));
+}
