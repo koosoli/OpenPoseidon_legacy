@@ -1783,7 +1783,26 @@ GameValue A2CreateVehicleArray(const GameState* state, GameValuePar oper1)
     GameValue pos = args[1];
     if (pos.GetType() == GameObject)
         pos = A2GetPosATL(state, pos);
-    return VehCreate(state, args[0], pos);
+    GameValue created = VehCreate(state, args[0], pos);
+    // [type, pos, markers, radius, "FLY"]: an aircraft starts in the air, engine running,
+    // at flight speed -- as a mission.sqm vehicle placed "FLY" does (AICenter).
+    if (args.Size() >= 5 && args[4].GetType() == GameString && Lower((const char*)(RString)args[4]) == "fly")
+    {
+        EntityAI* veh = dyn_cast<EntityAI>(GetObject(created));
+        if (veh && veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeAir)))
+        {
+            Vector3 p = veh->Position();
+            Matrix4 transform = veh->Transform();
+            Matrix3 dir;
+            dir.SetUpAndDirection(VUp, veh->Direction());
+            transform.SetOrientation(dir);
+            veh->SetTransform(transform);
+            p[1] = GLandscape->SurfaceYAboveWater(p[0], p[2]) + veh->MakeAirborne();
+            transform.SetPosition(p);
+            veh->Move(transform);
+        }
+    }
+    return created;
 }
 
 // unit moveInCargo [vehicle, cargoIndex]
