@@ -883,14 +883,17 @@ static GameValue StringRepeat(const GameState* state, GameValuePar oper1, GameVa
             }
         }
         // perform loop body
+        EvalError bodyError = EvalOK;
         {
             GameVarSpace local(state->GetContext());
             state->BeginContext(&local);
             RString expression = oper2;
             const_cast<GameState*>(state)->Execute(expression);
+            // exitWith in the body ends the loop; its error lives in the body's own context
+            bodyError = state->GetLastError();
             state->EndContext();
         }
-        if (state->GetLastError() == EvalBreak)
+        if (bodyError == EvalBreak || state->GetLastError() == EvalBreak)
         {
             if (!GameState::s_breakTarget.empty())
                 return NOTHING; // breakTo/breakOut: leave the loop, keep unwinding
@@ -1022,8 +1025,10 @@ static GameValue ForDoOp(const GameState* state, GameValuePar oper1, GameValuePa
         state->BeginContext(&local);
         state->VarSetLocal(toData->GetVar(), GameValue(i));
         const_cast<GameState*>(state)->Execute(body);
+        // exitWith in the body ends the loop; its error lives in the body's own context
+        const EvalError bodyError = state->GetLastError();
         state->EndContext();
-        if (state->GetLastError() == EvalBreak)
+        if (bodyError == EvalBreak || state->GetLastError() == EvalBreak)
         {
             if (!GameState::s_breakTarget.empty())
                 return NOTHING; // breakTo/breakOut: leave the loop, keep unwinding
