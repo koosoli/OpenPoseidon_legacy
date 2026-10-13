@@ -341,32 +341,53 @@ fn foam_decay_override() -> Option<f32> {
     *V.get_or_init(|| std::env::var("WGR_TW_FOAM_DECAY").ok().and_then(|v| v.trim().parse::<f32>().ok()).map(|v| v.clamp(0.05, 5.0)))
 }
 
-/// The whitecap threshold for this frame's drawn amplitude (the Water tab's x the weather's). Foam
-/// forms where the drawn surface's Jacobian falls below the threshold, and that Jacobian is the drawn
-/// one (choppiness x amplitude, `sizes[0].y` in the column kernel): a lower sea compresses less and
-/// so carries fewer caps at the same threshold, never more (owner, 2026-10-13: "at lower amplitude we
-/// can not have more foam ... use the foam and white caps behaviour of water amplitude 2 and calculate
-/// foam down for lower amplitudes"). Above amplitude 1 the choppiness is held so choppiness x amplitude
-/// stays at 1.3 (the mesh folds past it), which would leave a 30 m/s sea at amplitude 2 with a storm's
-/// caps; the threshold rises by AMPLITUDE_FOAM_BIAS per unit of amplitude over 1 instead, so the
-/// amplitude-2 sea is the most foamed (measured: storm 0.76 -> 8 % solid, 0.78 -> ~13 %).
-pub const AMPLITUDE_FOAM_BIAS: f32 = 0.02;
+/// The whitecap threshold for this frame's drawn sea. island-expansion ties it to the wind alone, which
+/// left a tall sea in a light wind with none at all (owner, 2026-10-13: "still no white caps if wind is
+/// auto but water amplitude is maxed out"). Here the wind it is read at is the larger of the sea's and
+/// the wind that would raise the DRAWN significant height (Hs x amplitude) in a fully developed sea
+/// (Pierson-Moskowitz: Hs = 0.21 U^2 / g), and the whitecaps control rises with that wind as the
+/// weather presets' does (to 1 at 20 m/s). A lower sea never reads a stronger wind than its own.
 pub fn frame_foam_bias(spec: &SpectrumInputs, amplitude: f32) -> f32 {
     let a = if amplitude > 0.0 { amplitude } else { 1.0 };
+    let (var_h, _) = sea_stats(spec.sizes, spec.local, spec.swell, spec.depth);
+    let hs = 4.0 * var_h.max(0.0).sqrt() * a;
+    let u_eq = (hs * GRAVITY / 0.21).sqrt();
+    let wind = spec.local.wind_speed;
     let q = |v: f32, step: f32| (v / step).round() * step;
-    q(spec.foam_bias + AMPLITUDE_FOAM_BIAS * (a - 1.0).clamp(0.0, 1.0), 0.005)
+    if u_eq <= wind {
+        return spec.foam_bias;
+    }
+    let wc = spec.whitecaps.max(((u_eq - 7.0) / 13.0).clamp(0.0, 1.0));
+    q(whitecap_bias(u_eq, wc) + foam_bias_add(), 0.005).max(spec.foam_bias)
 }
 
 /// Build the uniform for this frame.
-pub fn ocean_params(spec: &SpectrumInputs, choppiness: f32, amplitude: f32, time: f32, dt: f32) -> OceanParams {
+/// The most compression the whitecap foam is computed with: choppiness x amplitude x the sea's rms
+/// slope. Cover follows that product across seas (measured, fft_cover_tests.rs: storm 1.2 x 0.21 =
+/// 0.25 -> 4 %, 1.6 x 0.21 = 0.34 -> 25 % cover; calm at amplitude 3, 2.25 x 0.148 = 0.33 -> 10 %);
+/// 0.33 is the most any sea gets, a storm at amplitude 2 and up (~12 % solid), below the 64-100 % a
+/// storm reached unbounded.
+pub const MAX_FOAM_COMPRESSION: f32 = 0.33;
+
+/// `foam_choppiness`: the sea's choppiness before the fold cap (0: `choppiness`); the whitecap foam's
+/// Jacobian is that x the amplitude, so a tall sea held flat against folding still breaks.
+pub fn ocean_params(spec: &SpectrumInputs, choppiness: f32, amplitude: f32, foam_choppiness: f32, time: f32, dt: f32) -> OceanParams {
     let (a0, b0) = spec.local.packed();
     let (a1, b1) = spec.swell.packed();
     let mut sizes = [[0.0; 4]; 4];
     for i in 0..4 {
         sizes[i] = [spec.sizes[i], 0.0, 0.0, 0.0];
     }
-    // the drawn amplitude, for the Jacobian of the drawn surface (0: 1)
-    sizes[0][1] = amplitude.max(0.0);
+    // the foam Jacobian's factor on the choppiness (0: 1): the amplitude, and the fold cap undone --
+    // but the compression it reaches (choppiness x factor x the sea's rms slope) held at
+    // MAX_FOAM_COMPRESSION, so a steep storm at a high amplitude caps out instead of turning white
+    let chop_ratio = if foam_choppiness > 0.0 && choppiness > 0.0 { (foam_choppiness / choppiness).max(1.0) } else { 1.0 };
+    let mut lane = amplitude.max(0.0) * chop_ratio;
+    if lane > 1.0 && choppiness > 0.0 {
+        let rms = sea_stats(spec.sizes, spec.local, spec.swell, spec.depth).1.max(1e-6).sqrt();
+        lane = lane.min((MAX_FOAM_COMPRESSION / (choppiness * rms)).max(1.0));
+    }
+    sizes[0][1] = lane;
     OceanParams {
         sizes,
         cuts: spec.cuts(),
@@ -1096,12 +1117,12 @@ impl OceanFft {
     }
 
     /// Upload this frame's uniform; a changed spectrum marks h0 for regeneration.
-    pub fn set_frame(&mut self, queue: &wgpu::Queue, spec: SpectrumInputs, choppiness: f32, amplitude: f32, time: f32, dt: f32) {
+    pub fn set_frame(&mut self, queue: &wgpu::Queue, spec: SpectrumInputs, choppiness: f32, amplitude: f32, foam_choppiness: f32, time: f32, dt: f32) {
         if self.spectrum != Some(spec) {
             self.spectrum = Some(spec);
             self.needs_spectrum = true;
         }
-        self.current = ocean_params(&spec, choppiness, amplitude, time, dt);
+        self.current = ocean_params(&spec, choppiness, amplitude, foam_choppiness, time, dt);
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&self.current));
     }
 
@@ -1284,17 +1305,20 @@ mod tests {
     }
 
     #[test]
-    fn a_lower_amplitude_never_raises_the_cap_threshold() {
+    fn a_taller_drawn_sea_reads_a_stronger_wind_for_its_caps() {
         let mut p = <WgrWaterParams as bytemuck::Zeroable>::zeroed();
         p.tidewater = crate::water_tw::DEFAULT_PARAMS;
-        p.tidewater_sea = [20.0, 900.0, 1.0, 4.0];
+        p.tidewater[0][2] = 0.28;
+        p.tidewater_sea = [3.5, 40.0, 0.2, 1.0]; // Calm
         let spec = SpectrumInputs::from_params(&p);
         let b = |a: f32| frame_foam_bias(&spec, a);
-        assert_eq!(b(0.5), b(1.0));
-        assert!(b(1.5) > b(1.0) && b(2.0) > b(1.5));
-        assert_eq!(b(3.0), b(2.0));
-        // the Jacobian lane carries the amplitude
-        assert_eq!(ocean_params(&spec, 0.65, 2.0, 0.0, 0.016).sizes[0][1], 2.0);
+        assert!(b(0.5) <= b(1.0) + 1e-6);
+        assert!(b(3.0) > b(1.0) + 0.1, "{} {}", b(3.0), b(1.0));
+        assert!(b(3.0) <= 0.78 + 1e-3);
+        // the foam lane carries the amplitude and undoes the fold cap
+        let lane = ocean_params(&spec, 0.25, 3.0, 0.75, 0.0, 0.016).sizes[0][1];
+        assert!(lane > 3.0 && lane <= 9.0, "{lane}");
+        assert_eq!(ocean_params(&spec, 0.75, 1.0, 0.0, 0.0, 0.016).sizes[0][1], 1.0);
     }
 
     #[test]

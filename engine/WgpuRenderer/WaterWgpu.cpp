@@ -1320,6 +1320,8 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         t.amplitude *= tidewaterAmplitude;
         // the surface is drawn with choppiness x amplitude; past TidewaterMaxDisplayedChop the mesh folds
         // (dark creases along the crests), so a higher amplitude draws with less choppiness
+        // (the whitecaps keep the sea's own choppiness: tidewater_fx[3] below)
+        const float seaChoppiness = std::clamp(t.choppiness, 0.0f, 2.0f);
         t.choppiness = std::min(t.choppiness, TidewaterMaxDisplayedChop / std::max(t.amplitude, 1.0f));
         _params.tidewater[0] = {std::max(t.amplitude, 0.0f), std::clamp(t.choppiness, 0.0f, 2.0f),
                                 std::max(t.swellScale, 0.0f), t.swellHeadingDeg};
@@ -1338,8 +1340,9 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         _params.tidewater_shore[2] = {std::clamp(t.shoreTurbidity, 0.0f, 1.0f), t.shoreSim ? 1.0f : 0.0f,
                                       std::clamp(t.shoreDryTime, 2.0f, 300.0f), std::clamp(t.shoreLips, 0.0f, 2.0f)};
         _params.tidewater_sea = {seaWindOverride, seaFetch, seaWhitecaps, static_cast<float>(seaMode)};
+        // w: the sea's choppiness before the fold cap, which the whitecap foam is computed with
         _params.tidewater_fx = {std::clamp(t.spray, 0.0f, 3.0f), std::clamp(t.sprayIntensity, 0.0f, 3.0f),
-                                std::clamp(t.waterGlow, 0.0f, 2.0f), 0.0f};
+                                std::clamp(t.waterGlow, 0.0f, 2.0f), seaChoppiness};
     }
     // TW-WATER W6 — the boats for the Tidewater wake simulation, from the frame's captured block
     // (the two nearest the camera; lanes in wgpu_renderer.hpp). Current OP ignores them.

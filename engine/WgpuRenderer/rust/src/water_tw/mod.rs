@@ -126,6 +126,46 @@ pub const AVAILABLE: bool = true;
 /// `WGR_TW_DEBUG=<n>` forces Tidewater's material debug view (the Water tab's "TW debug view":
 /// 6 path length, 7 sea bed seen through, 8 sea depth, ...) for a session, so a capture script can
 /// take the debug views without a Water-tab edit. Read once.
+/// WGR_TW_TIME_TRACE=1: every 600 frames, how evenly the water clock advanced against wall time
+/// (the owner sees the curl waves stutter "as if frames were missing"): frames whose clock step was
+/// zero (a repeated animation frame), the step's min / median / max, and the wall frame time's.
+fn time_trace(dt: f32) {
+    use std::sync::Mutex;
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var("WGR_TW_TIME_TRACE").is_ok_and(|v| v.trim() == "1")) {
+        return;
+    }
+    struct T {
+        last: Option<std::time::Instant>,
+        clock: Vec<f32>,
+        wall: Vec<f32>,
+    }
+    static S: Mutex<T> = Mutex::new(T { last: None, clock: Vec::new(), wall: Vec::new() });
+    let Ok(mut t) = S.lock() else { return };
+    let now = std::time::Instant::now();
+    if let Some(l) = t.last {
+        let w = (now - l).as_secs_f32();
+        t.wall.push(w);
+        t.clock.push(dt);
+    }
+    t.last = Some(now);
+    if t.clock.len() >= 600 {
+        let stats = |v: &mut Vec<f32>| {
+            v.sort_by(|a, b| a.total_cmp(b));
+            (v[0] * 1000.0, v[v.len() / 2] * 1000.0, v[v.len() - 1] * 1000.0)
+        };
+        let zero = t.clock.iter().filter(|&&d| d <= 1e-6).count();
+        let ratio_bad = t.clock.iter().zip(&t.wall).filter(|(c, w)| (**c - **w).abs() > 0.5 * **w).count();
+        let (c0, c1, c2) = stats(&mut t.clock);
+        let (w0, w1, w2) = stats(&mut t.wall);
+        eprintln!(
+            "[wgr] TW time trace (600 frames): clock step ms min/med/max {c0:.2}/{c1:.2}/{c2:.2}, zero steps {zero}, steps off their frame's wall time by >50%: {ratio_bad}; wall ms min/med/max {w0:.2}/{w1:.2}/{w2:.2}"
+        );
+        t.clock.clear();
+        t.wall.clear();
+    }
+}
+
 fn debug_view_override() -> Option<f32> {
     static V: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
     *V.get_or_init(|| std::env::var("WGR_TW_DEBUG").ok().and_then(|v| v.trim().parse::<f32>().ok()))
@@ -497,6 +537,8 @@ pub struct Tidewater {
     instance_count: u32,
     last_params: Option<WgrWaterParams>,
     last_time: Option<f32>,
+    /// (OP) the render-paced water clock (`smooth_clock`): (smoothed time, game time, wall instant)
+    clock: Option<(f64, f32, std::time::Instant)>,
     rotor: rotor_wash::RotorWash,
     detail_offset: [f32; 2],
     rotor_trace: rotor_wash::RotorTrace,
@@ -846,6 +888,7 @@ impl Tidewater {
             instance_count: 0,
             last_params: None,
             last_time: None,
+            clock: None,
             rotor: Default::default(),
             detail_offset: [0.0; 2],
             rotor_trace: Default::default(),
@@ -1047,6 +1090,39 @@ impl Tidewater {
 
     /// CDLOD selection for this frame's water camera, plus the per-frame uniforms.
     /// CDLOD selection for this frame's water camera, plus the per-frame uniforms (timed, W7b).
+    /// (OP) The water's animation clock, advanced by the wall time between this thread's frames and
+    /// steered toward the game's presentation clock (8 % of the gap a frame; a gap past 0.25 s snaps).
+    /// The game clock is interpolated on the simulation side, which runs a frame ahead of the renderer
+    /// on its own pace, so the step it gave each drawn frame missed the frame's real duration by more
+    /// than half on ~8 % of frames (WGR_TW_TIME_TRACE at the owner's Stratis pose) -- the waves and the
+    /// curling lips jumped (owner: "the curl wave animation is not fluid ... as if frames were
+    /// missing"). A clock that stops (pause) stops the water; one set from outside (load, setDate)
+    /// snaps. WGR_TW_SMOOTH_CLOCK=0: the game clock as given.
+    fn smooth_clock(&mut self, game: f32) -> f32 {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if !*ON.get_or_init(|| !std::env::var("WGR_TW_SMOOTH_CLOCK").is_ok_and(|v| v.trim() == "0")) {
+            return game;
+        }
+        let now = std::time::Instant::now();
+        let t = match self.clock {
+            None => game as f64,
+            Some((smooth, last_game, last_wall)) => {
+                let wall = (now - last_wall).as_secs_f64().min(0.1);
+                let advancing = game > last_game;
+                let mut s = if advancing { smooth + wall } else { smooth };
+                let err = game as f64 - s;
+                if err.abs() > 0.25 {
+                    s = game as f64;
+                } else {
+                    s += err * 0.08;
+                }
+                s
+            }
+        };
+        self.clock = Some((t, game, now));
+        t as f32
+    }
+
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, camera: Option<&WgrCamera>) {
         let t0 = std::time::Instant::now();
         self.prepare_inner(device, queue, camera);
@@ -1077,9 +1153,16 @@ impl Tidewater {
             self.instance_count = 0;
             return;
         }
+        // the water's clock, paced by this thread's own frames (see `smooth_clock`)
+        let mut p = p;
+        p.time = self.smooth_clock(p.time);
+        if let Some(lp) = self.last_params.as_mut() {
+            lp.time = p.time;
+        }
         // water clock, pause-coherent like Current OP's (Glob.time)
         let dt = self.last_time.map_or(0.0, |t| (p.time - t).clamp(0.0, 0.1));
         self.last_time = Some(p.time);
+        time_trace(dt);
         // SeaDetail.update: gust patterns drift downwind at ~0.7 x the wind speed
         // ShoreSim regions on the coast nearest the camera (W3b)
         if shore_sim_on(&p, self.shore_grid) {
@@ -1161,7 +1244,7 @@ impl Tidewater {
             self.query.prepare(queue);
             self.uw.set_frame(queue, &uwp);
         }
-        self.fft.set_frame(queue, spec, p.tidewater[0][1], p.tidewater[0][0], p.time, dt);
+        self.fft.set_frame(queue, spec, p.tidewater[0][1], p.tidewater[0][0], p.tidewater_fx[3], p.time, dt);
 
         let cam_pos = glam::DVec3::new(cam.cam_pos[0] as f64, cam.cam_pos[1] as f64, cam.cam_pos[2] as f64);
         let clip = glam::Mat4::from_cols_array(&cam.proj) * glam::Mat4::from_cols_array(&cam.view);

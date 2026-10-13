@@ -12,11 +12,11 @@
 //! the water then tests AND writes it; the scene's depth is untouched. `WGR_TW_WATER_ZBUF=0`
 //! restores the read-only attachment.
 //!
-//! Opt-in (`WGR_TW_WATER_DEPTH_MERGE=1`): after the pass, the water's depth merged into the scene's
-//! (nearest wins), so the passes after the water would see its surface (smoke and transparents
-//! behind a wave composite over it today). Off until its effect on DLSS, DoF and the transparents
-//! is measured. (The clouds painted over the surface seen from just below were the cloud composite
-//! running under the water; that is gated in lib.rs, `submerged_view`.)
+//! After the pass the water's depth is merged into the scene's (nearest wins), so the passes after
+//! the water see its surface: the depth-aware cloud composite marched past every wave crest standing
+//! against the sky and painted the cloud deck over it (owner, 2026-10-13, at amplitude 3), and smoke
+//! and transparents behind a wave composited over it. `WGR_TW_WATER_DEPTH_MERGE=0` turns it off.
+//! (From just below the surface the cloud composite is off altogether: lib.rs `submerged_view`.)
 
 const ZINIT_WGSL: &str = r#"
 @group(0) @binding(0) var srcDepth: texture_depth_2d;
@@ -67,9 +67,9 @@ fn fs_main(@builtin(position) pos: vec4<f32>, @builtin(sample_index) si: u32) ->
 
 pub fn merge_enabled() -> bool {
     static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    // opt-in (WGR_TW_WATER_DEPTH_MERGE=1) until its effect on DLSS, DoF and the transparents is measured;
-    // the clouds over the surface from below are gated off in lib.rs instead (submerged_view)
-    *V.get_or_init(|| enabled() && std::env::var("WGR_TW_WATER_DEPTH_MERGE").is_ok_and(|v| v.trim() == "1"))
+    // on (WGR_TW_WATER_DEPTH_MERGE=0: off): without it the depth-aware cloud composite painted the cloud
+    // deck over every wave standing against the sky (owner, 2026-10-13, amplitude 3)
+    *V.get_or_init(|| enabled() && !std::env::var("WGR_TW_WATER_DEPTH_MERGE").is_ok_and(|v| v.trim() == "0"))
 }
 
 pub fn enabled() -> bool {
