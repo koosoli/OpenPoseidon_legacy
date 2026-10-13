@@ -28,7 +28,8 @@
       "heightMetres": 0.02,
       "rippleMetres": 0.55,
       "rippleHeightMetres": 0.008,
-      "baseSrgb": [195, 180, 145],
+      "baseSrgb": [212, 191, 153],
+      "tidewater": true,
       "roughness": 0.97,
       "road": false
     },

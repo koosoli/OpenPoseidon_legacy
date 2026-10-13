@@ -40,6 +40,13 @@ class MaterialTests(unittest.TestCase):
         self.assertLess(result[0, 0, 3], 128)
         np.testing.assert_array_equal(encode_nohq(np.roll(height, 7, 1), [1, 1]), np.roll(result, 7, 1))
 
+    def test_sand_albedo_is_tidewater_coral_sand(self):
+        maps = generate(self.specs["sand"], 128)
+        mean = maps["co"][:, :, :3].reshape(-1, 3).mean(0)
+        # Tidewater's palette: pale coral sand, sRGB ~(0.83..0.9, 0.75..0.84, 0.6..0.72)
+        self.assertTrue(200 < mean[0] < 235 and 185 < mean[1] < 220 and 150 < mean[2] < 190, mean)
+        self.assertTrue(mean[0] > mean[1] > mean[2])
+
     def test_sand_ripples_are_relief_not_baked_light(self):
         spec = self.specs["sand"]
         rippled = generate(spec, 128)
@@ -76,7 +83,7 @@ class MaterialTests(unittest.TestCase):
         self.assertGreater(maps["nohq"][:, :, 3].std(), 1.0)
         self.assertEqual(maps["nohq"][:, :, 0].max(), 0)
 
-    def test_original_sand_additions_retain_authored_albedo_and_sources(self):
+    def test_original_sand_additions_take_tidewater_sand_and_keep_sources(self):
         root = Path(__file__).resolve().parents[2]
         catalog = json.loads((root / "content/default-packs/visual/material-overrides.json").read_text())
         entries = {entry["source"].lower(): entry for entry in catalog["materials"]}
@@ -88,7 +95,9 @@ class MaterialTests(unittest.TestCase):
             ("o\\ps.paa", "AddOns\\O.pbo", "noe", "Sand"),
         ):
             entry = entries[source]
-            self.assertEqual(entry["albedo"], source)
+            # owner, 2026-10-13: the beaches of the OFP maps take Tidewater's sand (the generated
+            # sand albedo), not their authored 2001 tiles
+            self.assertEqual(entry["albedo"], "op_ground_materials\\sand_co.paa")
             self.assertEqual(entry["sourceArchive"], archive)
             palette = next(p for p in census["maps"][world]["qualifyingPalette"] if p["texture"] == source)
             self.assertTrue(palette["pureSand"])
