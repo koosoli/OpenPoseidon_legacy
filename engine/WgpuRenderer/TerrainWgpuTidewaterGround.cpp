@@ -129,6 +129,37 @@ bool TidewaterGround::Applies(const std::string& base)
     return false;
 }
 
+static bool IsRockCode(const std::string& c)
+{
+    return c == "st" || c == "ss";
+}
+
+bool TidewaterGround::AppliesRock(const std::string& base)
+{
+    if (base == "pol" || Applies(base))
+        return false;
+    for (const std::string& c : Corners(base))
+        if (IsRockCode(c))
+            return true;
+    return false;
+}
+
+float TidewaterGround::RockLuminance(const std::string& base) const
+{
+    float sum = 0;
+    int n = 0;
+    for (const std::string& c : Corners(base))
+    {
+        const auto it = _means.find(c);
+        if (!IsRockCode(c) || it == _means.end())
+            continue;
+        const auto lin = [](float v) { return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f); };
+        sum += 0.2126f * lin(it->second[0]) + 0.7152f * lin(it->second[1]) + 0.0722f * lin(it->second[2]);
+        ++n;
+    }
+    return n ? sum / n : 0.0f;
+}
+
 void TidewaterGround::Prepare(const Landscape& land)
 {
     const std::string world = land.GetName() ? land.GetName() : "";
@@ -190,7 +221,37 @@ void TidewaterGround::Prepare(const Landscape& land)
 
 bool TidewaterGround::Recolour(const std::string& base, DecodedImage& image) const
 {
-    if (!Enabled() || !image.valid() || !Applies(base))
+    if (!Enabled() || !image.valid())
+        return false;
+    if (AppliesRock(base))
+    {
+        // rock: OFP's colour stays (the shader replaces it by its share); only the share, in alpha
+        const std::vector<std::string> corners = Corners(base);
+        const std::set<std::string> codes(corners.begin(), corners.end());
+        const size_t n = size_t(image.width) * image.height;
+        for (size_t p = 0; p < n; ++p)
+        {
+            uint8_t* px = &image.rgba[p * 4];
+            float total = 0, mine = 0;
+            for (const std::string& code : codes)
+            {
+                const auto it = _means.find(code);
+                if (it == _means.end())
+                    continue;
+                float d = 0;
+                for (int k = 0; k < 3; ++k)
+                    d += (px[k] / 255.0f - it->second[k]) * (px[k] / 255.0f - it->second[k]);
+                const float l = std::exp(-d / (2 * 0.06f * 0.06f));
+                total += l;
+                if (IsRockCode(code))
+                    mine += l;
+            }
+            const float share = codes.size() > 1 ? (total > 1e-6f ? mine / total : 0.0f) : 1.0f;
+            px[3] = uint8_t(std::clamp(share * 255.0f + 0.5f, 0.0f, 255.0f));
+        }
+        return true;
+    }
+    if (!Applies(base))
         return false;
     const bool field = base == "pol";
     const std::vector<std::string> corners = Corners(base);
@@ -267,7 +328,7 @@ Ref<Texture> TidewaterGround::Bake(Texture* layer, AbstractTextBank* bank) const
     if (!layer || !bank || !Enabled())
         return nullptr;
     const std::string base = BaseName(static_cast<const TextureWgpu*>(layer)->SourceName());
-    if (!Applies(base))
+    if (!Applies(base) && !AppliesRock(base))
         return nullptr;
     DecodedImage image = DecodeLayer(layer);
     if (!Recolour(base, image))

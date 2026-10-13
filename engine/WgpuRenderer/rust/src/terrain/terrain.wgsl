@@ -468,14 +468,25 @@ fn sample_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
 // millimetres there), and every term finer than a few pixels fades to its mean by footprint --
 // the ripples and the grain must not alias (DLSS turns aliasing into drift).
 const TWS_FLAG: u32 = 0x10000u;
+// (OP, 2026-10-13) Tidewater's rock on OFP's rock layers ("st", "ss"; owner: "can we do that also
+// with the stone texture of tidewater?"): the same share-in-alpha contract under its own bit, the
+// layer's OFP brightness in `detail_max`, Tidewater's detail heights (TerrainWgpuTidewaterDetail.cpp)
+// as ground layer `middle` -- both Enfusion-only fields, free on a legacy layer.
+const TWR_FLAG: u32 = 0x20000u;
 
-fn cell_sand(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>, ddx: vec2<f32>, ddy: vec2<f32>) -> f32 {
+// (sand share, rock share, rock OFP luminance weighted by its share, detail layer)
+fn cell_tws(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>, ddx: vec2<f32>, ddy: vec2<f32>) -> vec4<f32> {
     let material = terrain_materials[entry & CELL_LAYER_MASK];
-    if ((material.puddle_flags & TWS_FLAG) == 0u) { return 0.0; }
+    let flags = material.puddle_flags & (TWS_FLAG | TWR_FLAG);
+    if (flags == 0u) { return vec4<f32>(0.0); }
+    var a = 0.0;
     if ((entry & CELL_CLAMPED) != 0u) {
-        return textureSampleGrad(ground[material.legacy], ground_clamp_samp, tile_uv - cell, ddx, ddy).a;
+        a = textureSampleGrad(ground[material.legacy], ground_clamp_samp, tile_uv - cell, ddx, ddy).a;
+    } else {
+        a = textureSampleGrad(ground[material.legacy], ground_samp, tile_uv, ddx, ddy).a;
     }
-    return textureSampleGrad(ground[material.legacy], ground_samp, tile_uv, ddx, ddy).a;
+    if ((flags & TWS_FLAG) != 0u) { return vec4<f32>(a, 0.0, 0.0, f32(material.middle)); }
+    return vec4<f32>(0.0, a, a * material.detail_max, f32(material.middle));
 }
 
 fn tws_hash(i: vec2<i32>, seed: u32) -> f32 {
@@ -522,6 +533,123 @@ struct TwSand {
     albedo: vec3<f32>, // sRGB, as the legacy ground before its decode
     slope: vec2<f32>,  // d(micro height)/dx, /dz
 };
+
+// one detail sample with explicit gradients (branch safe)
+fn twd(det: u32, uv: vec2<f32>, gx: vec2<f32>, gy: vec2<f32>) -> vec4<f32> {
+    return textureSampleGrad(ground[det], ground_samp, uv, gx, gy);
+}
+
+// Tidewater terrainTriplanar, on camera-relative coordinates: rel / tile plus the camera's own
+// fractional tile (an absolute 10 km coordinate keeps only ~1/1000 of a tile in f32)
+fn twr_tri(det: u32, rel: vec3<f32>, cam: vec3<f32>, w: vec3<f32>, tile: f32, dwx: vec3<f32>, dwy: vec3<f32>) -> vec4<f32> {
+    let s = 1.0 / tile;
+    let q = rel * s + fract(cam * s);
+    let x = twd(det, q.zy, dwx.zy * s, dwy.zy * s);
+    let y = twd(det, q.xz + 0.37, dwx.xz * s, dwy.xz * s);
+    let z = twd(det, q.xy + 0.71, dwx.xy * s, dwy.xy * s);
+    return x * w.x + y * w.y + z * w.z;
+}
+
+// Tidewater TerrainShading.js terrainRockSurface (seed 0.5, moss 1), with OFP's brightness: the
+// palette is scaled so its mid tone meets the layer's own mean (pale granite stays pale).
+// abs_p/rel: absolute and camera-relative position; n: ground normal; h: height over the sea;
+// ofp_lum: the layer's mean linear luminance (0 = Tidewater's own)
+fn tw_rock(det: u32, abs_p: vec3<f32>, rel: vec3<f32>, n: vec3<f32>, h: f32, dwx: vec3<f32>, dwy: vec3<f32>,
+           ofp_lum: f32) -> TwSand {
+    let cam = abs_p - rel;
+    let a2 = abs(n) * abs(n);
+    let a4 = a2 * a2;
+    let w = a4 / (a4.x + a4.y + a4.z);
+    let big = twr_tri(det, rel, cam, w, 27.0, dwx, dwy);
+    let mid = twr_tri(det, rel, cam, w, 6.1, dwx, dwy);
+    let fine = twr_tri(det, rel, cam, w, 1.3, dwx, dwy);
+    let macroA = twd(det, tws_rot(abs_p.xz, 0.7) / 173.0, vec2<f32>(0.0), vec2<f32>(0.0)).w;
+    let macroB = twd(det, tws_rot(abs_p.xz, 2.1) / 47.0, vec2<f32>(0.0), vec2<f32>(0.0)).w;
+    let mcr = macroA * 0.6 + macroB * 0.4;
+    let px = max(length(dwx), length(dwy));
+    let fineK = 1.0 - smoothstep(0.006, 0.02, px);
+    let midK = 1.0 - smoothstep(0.03, 0.1, px);
+    let hr = big.x * 0.45 + mid.x * 0.35 + ((fine.x - 0.5) * fineK + 0.5) * 0.2;
+    // bedding on steep faces, faded out once a band is thinner than a few pixels
+    let steep = 1.0 - smoothstep(0.55, 0.85, n.y);
+    let bandY = abs_p.y + mid.w * 2.5 + mcr * 6.0;
+    let fwY = abs(dwx.y) + abs(dwy.y);
+    let strata = twd(det, vec2<f32>(bandY / 14.0, 0.5 * 0.37 + 0.13), vec2<f32>(fwY / 14.0, 0.0), vec2<f32>(0.0)).w;
+    let strataAA = 1.0 - smoothstep(0.15, 0.6, fwY);
+    let tone = hr * 0.9 + (mcr - 0.5) * 0.7 + (strata - 0.5) * 0.8 * steep * strataAA;
+    let rockDark = srgb_to_linear(vec3<f32>(0.15, 0.145, 0.135));
+    let rockMid = srgb_to_linear(vec3<f32>(0.3, 0.285, 0.265));
+    let rockLight = srgb_to_linear(vec3<f32>(0.48, 0.455, 0.42));
+    var col = mix(rockDark, rockMid, smoothstep(0.1, 0.5, tone));
+    col = mix(col, rockLight, smoothstep(0.5, 0.85, tone));
+    col = mix(col, srgb_to_linear(vec3<f32>(0.44, 0.37, 0.30)), smoothstep(0.62, 0.8, mid.w + mcr * 0.3) * 0.18);
+    // joints between the big blocks, fainter between plates
+    col = col * (smoothstep(0.05, 0.25, big.x) * 0.35 + 0.65) * (smoothstep(0.05, 0.25, mid.x) * 0.15 + 0.85);
+    // rain streaks down steep faces
+    let sdiv = vec3<f32>(3.1, 41.0, 3.1);
+    let sq = rel / sdiv + fract(cam / sdiv);
+    let sa = twd(det, vec2<f32>(sq.z, sq.y), vec2<f32>(dwx.z / 3.1, dwx.y / 41.0), vec2<f32>(dwy.z / 3.1, dwy.y / 41.0));
+    let sb = twd(det, vec2<f32>(sq.x + 0.5, sq.y + 0.3), vec2<f32>(dwx.x / 3.1, dwx.y / 41.0), vec2<f32>(dwy.x / 3.1, dwy.y / 41.0));
+    let n2 = n.xz * n.xz;
+    let sw4 = n2 * n2;
+    let stainS = (sa.w * sw4.x + sb.w * sw4.y) / (sw4.x + sw4.y + 1e-5);
+    let stain = smoothstep(0.52, 0.72, stainS) * steep;
+    col = col * (1.0 - stain * 0.4) * (smoothstep(0.35, 0.2, stainS) * steep * 0.12 + 1.0);
+    // OFP's brightness for the stone itself, before lichen and moss (they keep their own colours)
+    if (ofp_lum > 0.0) {
+        let ref_lum = dot(rockMid, vec3<f32>(0.2126, 0.7152, 0.0722));
+        col = col * clamp(ofp_lum / ref_lum, 0.6, 2.2);
+    }
+    // lichens on the dry upper faces
+    let dry = smoothstep(2.6, 4.0, h);
+    let lichen = smoothstep(0.6, 0.78, mid.y) * smoothstep(0.2, 0.7, n.y) * dry * smoothstep(0.45, 0.65, mcr);
+    col = mix(col, srgb_to_linear(vec3<f32>(0.70, 0.70, 0.64)), lichen * 0.45);
+    col = mix(col, srgb_to_linear(vec3<f32>(0.78, 0.50, 0.20)), smoothstep(0.8, 0.88, mid.y) * dry * smoothstep(0.5, 0.8, n.y) * 0.3);
+    // moss / grass on ledges and tops
+    let ledge = smoothstep(0.55, 0.7, strata) * steep * strataAA * smoothstep(0.4, 0.6, mid.w + (mcr - 0.5) * 0.4);
+    // (OP) in patches: Tidewater's rock is cliff, where "up-facing" is a ledge; OFP lays its rock
+    // layers on gentle ground too, and moss on every up-facing texel turned a whole rock field green
+    let mossPatch = smoothstep(0.5, 0.72, mid.w + (mcr - 0.5) * 0.4 + (big.x - 0.5) * 0.3);
+    let moss = max(smoothstep(0.62, 0.9, n.y + (big.x - 0.5) * 0.5 + (mcr - 0.5) * 0.3) * mossPatch, ledge * 0.8)
+        * smoothstep(2.5, 5.0, h);
+    col = mix(col, mix(srgb_to_linear(vec3<f32>(0.19, 0.29, 0.08)), srgb_to_linear(vec3<f32>(0.3, 0.34, 0.14)), mid.w), moss * 0.9);
+    // shoreline zonation: black splash band, sun-bleached tops, barnacles and algae, wet foot
+    let splash = smoothstep(0.5, 1.0, h) * smoothstep(2.8, 1.8, h + mid.w * 1.2) * smoothstep(0.35, 0.6, mcr + mid.w * 0.3);
+    col = mix(col, srgb_to_linear(vec3<f32>(0.075, 0.075, 0.07)), splash * 0.55);
+    col = mix(col, rockLight, smoothstep(0.35, 0.95, n.y) * smoothstep(1.5, 3.0, h) * 0.3);
+    let inter = smoothstep(-0.7, -0.2, h) * smoothstep(0.7, 0.2, h);
+    let barn = smoothstep(0.62, 0.72, fine.z) * inter * fineK;
+    col = mix(col, srgb_to_linear(vec3<f32>(0.20, 0.27, 0.10)), inter * smoothstep(0.4, 0.6, mid.y) * 0.6);
+    col = mix(col, srgb_to_linear(vec3<f32>(0.78, 0.76, 0.70)), barn * 0.8);
+    let sub = smoothstep(-0.3, -1.2, h);
+    col = mix(col, mix(srgb_to_linear(vec3<f32>(0.20, 0.27, 0.10)), srgb_to_linear(vec3<f32>(0.62, 0.44, 0.46)),
+                       smoothstep(0.45, 0.7, mid.w)), sub * 0.55);
+    let wet = smoothstep(1.0, 0.25, h + mid.w * 0.3);
+    col = col * mix(1.0, 0.55, wet);
+
+    // relief: Tidewater's hd = big*0.25 + mid*0.07 (+ grain), differentiated on the top projection
+    // (finite differences of the detail field: no screen-space derivatives in this branch)
+    let e = 1.0 / 512.0;
+    let qb = rel.xz / 27.0 + fract(cam.xz / 27.0) + 0.37;
+    let qm = rel.xz / 6.1 + fract(cam.xz / 6.1) + 0.37;
+    let gb = dwx.xz / 27.0;
+    let hb = dwy.xz / 27.0;
+    let gm = dwx.xz / 6.1;
+    let hm = dwy.xz / 6.1;
+    let b0 = twd(det, qb, gb, hb).x;
+    let bx = twd(det, qb + vec2<f32>(e, 0.0), gb, hb).x;
+    let bz = twd(det, qb + vec2<f32>(0.0, e), gb, hb).x;
+    let m0 = twd(det, qm, gm, hm).x;
+    let mx = twd(det, qm + vec2<f32>(e, 0.0), gm, hm).x;
+    let mz = twd(det, qm + vec2<f32>(0.0, e), gm, hm).x;
+    let slope = (vec2<f32>(bx - b0, bz - b0) / (e * 27.0) * 0.25
+               + vec2<f32>(mx - m0, mz - m0) / (e * 6.1) * 0.07 * (midK * 0.6 + 0.4)) * w.y;
+
+    var o: TwSand;
+    o.albedo = ground_linear_to_srgb(max(col, vec3<f32>(0.0)));
+    o.slope = slope;
+    return o;
+}
 
 // xz: world position; rel: camera-relative position; h: height over the sea; fp: footprint (m per
 // pixel); wind: horizontal wind direction (Tidewater's frame.windDir); grade: |grad h| of the ground
@@ -1521,16 +1649,20 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     }
     // (OP) Tidewater's sand where the layer says so (tw_beach_sand), blended across the cells as
     // the colour is; faded out where the satellite takes over the far ground
-    var sand = 0.0;
+    var tws4 = vec4<f32>(0.0);
     if (uniform_cell) {
-        sand = cell_sand(e00, base, tile_uv, duvdx, duvdy);
+        tws4 = cell_tws(e00, base, tile_uv, duvdx, duvdy);
     } else {
-        sand = w00 * cell_sand(e00, base, tile_uv, duvdx, duvdy)
-             + w10 * cell_sand(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy)
-             + w01 * cell_sand(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy)
-             + w11 * cell_sand(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy);
+        let t00 = cell_tws(e00, base, tile_uv, duvdx, duvdy);
+        let t10 = cell_tws(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy);
+        let t01 = cell_tws(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy);
+        let t11 = cell_tws(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy);
+        tws4 = vec4<f32>(w00 * t00.xyz + w10 * t10.xyz + w01 * t01.xyz + w11 * t11.xyz,
+                         max(max(t00.w, t10.w), max(t01.w, t11.w)));
     }
-    sand *= 1.0 - smoothstep(800.0, 2400.0, length(in.world_pos));
+    let tws_fade = 1.0 - smoothstep(800.0, 2400.0, length(in.world_pos));
+    let sand = tws4.x * tws_fade;
+    let rock = tws4.y * tws_fade;
 
     // High-frequency detail noise: alpha modulates around neutral (matches GL33's
     // r0.rgb *= t1.a * 2.0, detail UV = base UV * 32).
@@ -1547,6 +1679,12 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
                                 length(gn.xz) / max(gn.y, 0.2));
         rgb = mix(rgb, tws.albedo, sand);
         tws_slope = tws.slope * sand;
+    }
+    if (rock > 0.001 && tws4.w > 0.5) {
+        let twr = tw_rock(u32(tws4.w + 0.5), absolute_world_pos, in.world_pos, geometric_n,
+                          absolute_world_pos.y - tp.sea_level, dwx, dwy, tws4.z / max(tws4.y, 1e-4));
+        rgb = mix(rgb, twr.albedo, rock);
+        tws_slope += twr.slope * rock;
     }
     // HDR path: decode the gamma-space ground albedo (blend + detail done in gamma,
     // the §5 pragmatic fold) to linear before lighting.

@@ -87,6 +87,7 @@ add_library(WgpuRenderer STATIC
     TerrainWgpuEnfusionClutter.cpp
     TerrainWgpuNativeClutterMeshes.cpp
     TerrainWgpuTidewaterGround.cpp
+    TerrainWgpuTidewaterDetail.cpp
     TerrainWgpuEnfusionSurface.cpp
     WaterWgpu.cpp
     TextureWgpu.cpp

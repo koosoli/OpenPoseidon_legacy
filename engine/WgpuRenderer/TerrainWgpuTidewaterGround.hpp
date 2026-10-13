@@ -30,6 +30,12 @@ class TidewaterGround
     static std::string BaseName(const char* path);
     // Whether a layer of this base name is recoloured (sand or field).
     static bool Applies(const std::string& base);
+    // (2026-10-13) Whether a layer is Tidewater rock in the terrain shader (tw_rock): a rock corner
+    // ("st", "ss") and no sand corner (sand wins a mixed transition). Its rock share goes in alpha.
+    static bool AppliesRock(const std::string& base);
+    // Linear luminance of the layer's rock corners (their pure images' means): the rock keeps OFP's
+    // brightness per surface (pale granite stays pale). 0 when unknown.
+    float RockLuminance(const std::string& base) const;
     // Learn the pure surfaces' mean colours from the world's layers (decodes the 2-letter ones), once
     // per world.
     void Prepare(const Landscape& land);

@@ -215,6 +215,9 @@ class TerrainWgpu : public ITerrainRenderer
     std::string _twGroundWorld;
     std::vector<std::pair<Texture*, Ref<Texture>>> _twGroundBaked;
     Texture* TidewaterGroundLayer(const Landscape& land, Texture* layer);
+    // Tidewater's detail heights (TerrainWgpuTidewaterDetail.hpp), built once, bound as a ground
+    // layer for the shader's sand and rock (TerrainMaterial.middle on those legacy layers)
+    Ref<Texture> _twDetail;
     Ref<Texture> _automaticSatmap;
     void UpdateGroundTexturePages(const Landscape& land, const Camera& camera, bool force);
     void UploadIndexMap(const Landscape& land);
