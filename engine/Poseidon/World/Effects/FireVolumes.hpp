@@ -59,5 +59,7 @@ bool FireVolumeDrawn(const void* owner);
 bool FireVolumesEnabled();
 
 constexpr int MaxDrawnFireVolumes = 6;
+// a wreck column's wind-turned box: this many box widths long downwind (fire/mod.rs STACK_X / STACK_Z)
+constexpr float FireStackLengthRatio = 176.0f / 48.0f;
 constexpr float FireVolumeRange = 300.0f;
 } // namespace Poseidon

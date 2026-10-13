@@ -337,7 +337,12 @@ void SmokeSourceVehicle::SimulateExplosion()
             _fire.Start(fireTime);
             _darkFire.Start(fireTime);
             float rndTime = GRandGen.RandomValue() * 0.4 + 0.8;
-            SetSourceTimes(0, 40 * rndTime, 40 * rndTime);
+            // FIRE-002: with Fire Pro drawing it, a wreck burns and smokes for a minute and a half
+            // and takes another minute to go out (the 2001 wreck: 40 s and 40 s)
+            if (FireProSmokeActive() && FireVolumesEnabled())
+                SetSourceTimes(0, 90 * rndTime, 60 * rndTime);
+            else
+                SetSourceTimes(0, 40 * rndTime, 40 * rndTime);
             // sound of explosion
             const ParamEntry& par = Pars >> "CfgDestroy" >> "EngineHit";
             SoundPars soundPars;
@@ -403,12 +408,15 @@ void SmokeSourceVehicle::Simulate(float deltaT, SimulationImportance prec)
                              FireKindSmokeStack, kSoot);
         }
         // while the column is drawn, the 2001 puffs only carry it on where it leaves its box (as
-        // for a smoke grenade): ~2.3 box widths downwind in a breeze, ~1.8 up in calm air
+        // for a smoke grenade) -- and then far: they live half a minute and drift with the wind
+        // (owner, 2026-10-13: "make the smoke really go far and live long")
         if (FireVolumeDrawn(columnOwner))
         {
             const float wind = GLandscape ? GLandscape->GetWind().SizeXZ() : 0.0f;
-            const float reach = 2.0f * std::max(wreck->GetRadius() * 2.5f, 10.0f);
-            SetHandoffFadeIn(std::clamp(reach / std::max(wind, 1.5f), 3.0f, 12.0f));
+            const float columnRadius = std::clamp(wreck->GetRadius() * 0.25f, 0.8f, 1.6f);
+            const float reach = 0.85f * FireStackLengthRatio * std::max(columnRadius * 12.0f, 16.0f);
+            SetHandoffFadeIn(std::clamp(reach / std::max(wind, 1.5f), 3.0f, 20.0f));
+            SetTimes(30.0f, 3.0f);
         }
         else
             SetHandoffFadeIn(0.0f);

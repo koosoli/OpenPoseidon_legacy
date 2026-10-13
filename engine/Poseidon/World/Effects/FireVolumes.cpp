@@ -48,9 +48,10 @@ std::unordered_set<const void*>& Drawn()
 // The renderer's box for this fire (fire/mod.rs Grid::new uses the width it is sent).
 float BoxWidth(const FireVolumeReport& r)
 {
-    // a wreck's column: wide enough that a climbing plume bends over inside it, not at its wall
+    // a wreck's column: wide enough that a climbing plume bends over inside it, not at its wall;
+    // its box is FireStackLengthRatio widths long downwind (fire/mod.rs STACK_*)
     if (r.kind == FireKindSmokeStack)
-        return std::max(r.radius * 10.0f, 10.0f);
+        return std::max(r.radius * 12.0f, 16.0f);
     if (r.kind == FireKindSmoke)
         // a cloud spreads wider than its source; the box's cells (width / 48) must stay small enough
         // for its billows, so the length downwind comes from the wind-turned box, not the width
@@ -133,10 +134,18 @@ void ProbeSolids(FireVolumeReport& r)
              r.kind, r.radius, r.boxWidth, r.base.X(), r.base.Z(), wallCols, roofCols, lo, hi);
 }
 
+// A hash of the whole address: one owner may report two fires a byte apart (a wreck's flames and
+// its column), and dropping the low bits gave both the same key -- one solver box that flipped
+// between the two every frame.
 uint32_t KeyOf(const void* owner)
 {
-    const auto bits = reinterpret_cast<std::uintptr_t>(owner);
-    return static_cast<uint32_t>((bits >> 4) ^ (bits >> 36)) | 1u;
+    uint64_t x = static_cast<uint64_t>(reinterpret_cast<std::uintptr_t>(owner));
+    x ^= x >> 33;
+    x *= 0xff51afd7ed558ccdull;
+    x ^= x >> 33;
+    x *= 0xc4ceb9fe1a85ec53ull;
+    x ^= x >> 33;
+    return static_cast<uint32_t>(x) | 1u;
 }
 } // namespace
 

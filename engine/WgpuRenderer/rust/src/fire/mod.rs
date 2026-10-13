@@ -22,19 +22,25 @@ const NZ: u32 = 40;
 const PX: u32 = 112;
 const PY: u32 = 48;
 const PZ: u32 = 48;
+/// A wreck's column (kind 4) in a breeze: a longer, taller wind-turned box than a grenade's, so the
+/// black smoke goes far before the 2001 puffs take it on (FireStackLengthRatio on the engine side).
+const STACK_X: u32 = 176;
+const STACK_Y: u32 = 56;
+const STACK_Z: u32 = 48;
 /// below this wind (m/s) a plume rises: the upright box
 const PLUME_WIND: f32 = 0.8;
 const JACOBI: u32 = 24;
 const STEP: f32 = 1.0 / 60.0;
 /// How long a smoke-only plume's box keeps the smoke in the air after its source stops (seconds;
 /// WGR_FIRE_SMOKE_LINGER). The 2001 puffs a smoke grenade drops live their cloudletDuration after it
-/// stops emitting; at the solver's 0.06/s dissipation 20 s leaves about a third, and the fade-out
+/// stops emitting; at the solver's 0.04/s dissipation 45 s leaves about a sixth, and the fade-out
 /// takes the rest. Without it the cloud vanished a second after the grenade went out (owner, 2026-10-12:
-/// "as long lifetime as our previous version").
+/// "as long lifetime as our previous version"; 2026-10-13: "make the smoke really go far and live
+/// long"). A wreck's column keeps its smoke half as long again.
 fn smoke_linger() -> f32 {
     static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
     *V.get_or_init(|| {
-        std::env::var("WGR_FIRE_SMOKE_LINGER").ok().and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(20.0).clamp(0.0, 120.0)
+        std::env::var("WGR_FIRE_SMOKE_LINGER").ok().and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(45.0).clamp(0.0, 180.0)
     })
 }
 
@@ -527,7 +533,13 @@ impl FireSystem {
                 // smoke it already put in the air has had its time (smoke-only plumes, see `linger`)
                 g.src.params[0] = 0.0;
                 if g.linger < 0.0 {
-                    g.linger = if g.src.params[3] > 2.5 { smoke_linger() } else { 0.0 };
+                    g.linger = if g.src.params[3] > 3.5 {
+                        smoke_linger() * 1.5
+                    } else if g.src.params[3] > 2.5 {
+                        smoke_linger()
+                    } else {
+                        0.0
+                    };
                 }
             }
         }
@@ -629,14 +641,16 @@ impl FireSystem {
             motion: [buoy, 0.12, 0.1, 3.2],
             // turbulence: stronger for a bigger fire, its eddies a metre or so whatever the size
             losses: if stack {
-                // a column cools slower than a grenade's cloud (it climbs) and thins slower still
-                [0.4, 0.05, 0.5 * froude, 1.6]
+                // a column cools slower than a grenade's cloud (it climbs) and thins slower still:
+                // at 0.02/s its smoke is still half there 35 s on, at the far end of its box
+                [0.4, 0.02, 0.5 * froude, 1.6]
             } else if smoke_only {
                 // stronger, larger eddies than a flame's: what makes a plume billow instead of
                 // spreading as a smooth sheet; a grenade's smoke lasts (dissipation 0.06/s: at
                 // 0.35 a drifting plume was down to an eighth six seconds out, and the box's far
-                // end stood empty while the old puffs carried the cloud)
-                [0.62, 0.06, 0.5 * froude, 1.6]
+                // end stood empty while the old puffs carried the cloud; 0.04 since 2026-10-13:
+                // "make the smoke really go far and live long")
+                [0.62, 0.04, 0.5 * froude, 1.6]
             } else if wreck {
                 // delayed ignition: cooling 0.62, its smoke thinning at 0.35/s, turbulence 0.6
                 [0.62 / froude_di, 0.35, 0.6 * froude_di, 1.1]
@@ -892,10 +906,10 @@ impl Grid {
         let pivot = [src.pos_radius[0], src.pos_radius[1], src.pos_radius[2]];
         if src.params[3] > 2.5 && wlen > PLUME_WIND {
             // a drifting plume: turned to the wind, `width` across, PX cells long, the source a
-            // tenth of the way in from the upwind end
-            let size = (PX, PY, PZ);
-            let cell = width / PZ as f32;
-            let length = PX as f32 * cell;
+            // tenth of the way in from the upwind end (a wreck's column: the longer, taller box)
+            let size = if src.params[3] > 3.5 { (STACK_X, STACK_Y, STACK_Z) } else { (PX, PY, PZ) };
+            let cell = width / size.2 as f32;
+            let length = size.0 as f32 * cell;
             let origin = [pivot[0] - 0.1 * length, pivot[1] - 2.0 * cell, pivot[2] - width * 0.5];
             return Grid::build(device, key, src, size, origin, cell, width, wz.atan2(wx), pivot);
         }
