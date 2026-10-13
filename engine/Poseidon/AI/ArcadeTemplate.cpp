@@ -263,6 +263,7 @@ ArcadeUnitInfo::ArcadeUnitInfo(const ArcadeUnitInfo& src)
     ammo = src.ammo;
     name = src.name;
     markers = src.markers;
+    synchronizations = src.synchronizations;
     selected = src.selected;
     init = src.init;
 }
@@ -292,6 +293,7 @@ void ArcadeUnitInfo::Init()
     ammo = 1.0;
     name = "";
     markers.Clear();
+    synchronizations.Clear();
     selected = false;
     init = "";
 }
@@ -421,6 +423,7 @@ LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("text", name, 7, ""))
     PARAM_CHECK(ar.SerializeArray("markers", markers, 1))
     PARAM_CHECK(ar.Serialize("init", init, 7, ""))
+    PARAM_CHECK(ar.SerializeArray("synchronizations", synchronizations, 1))
     if (ar.IsLoading() && arma2Init.GetLength() > 0)
     {
         // Arma 2 starts a module from its class's init event handler, with _this = [unit],

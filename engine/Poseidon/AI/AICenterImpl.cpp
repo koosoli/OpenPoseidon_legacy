@@ -1,4 +1,5 @@
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <vector>
 #include <algorithm>
 #include <Poseidon/Foundation/Framework/PoTime.hpp>
 #include <Poseidon/Core/Application.hpp>
@@ -75,6 +76,7 @@ RString GetUserDirectory();
 #include <Poseidon/Foundation/platform.hpp>
 
 extern SRef<EntityAI> GDummyVehicle;
+void Arma2RegisterMissionObject(int id, Poseidon::Object* obj, const std::vector<int>& sync); // GameStateExtA2.cpp
 bool IsEnemy(const AICenter* center, TargetSide side);
 bool IsUnknown(const AICenter* center, TargetSide side);
 
@@ -1046,6 +1048,13 @@ static EntityAI* CreateVehicle(const ArcadeUnitInfo& info, ArcadeTemplate& t, Ta
     {
         veh->SetVarName(info.name);
         GWorld->GetGameState()->VarSet(info.name, GameValueExt(veh.GetRef()), EditorNamesReadOnly());
+    }
+    if (Poseidon::Arma1Compat::Generation() == 2)
+    {
+        std::vector<int> sync;
+        for (int i = 0; i < info.synchronizations.Size(); i++)
+            sync.push_back(info.synchronizations[i]);
+        ::Arma2RegisterMissionObject(info.id, veh.GetRef(), sync);
     }
 
     // Add into World

@@ -213,6 +213,9 @@ struct Runtime
         Vector3 offset;
     };
     std::vector<Attachment> attachments;
+    // mission.sqm objects by id, and the ids each one is synchronized with
+    std::map<int, OLink<Object>> missionObjects;
+    std::vector<std::pair<int, std::vector<int>>> missionSync;
     // addAction arguments (Arma 2 form), by entity and action id
     std::map<std::pair<const void*, int>, GameValue> actionArguments;
 };
@@ -2143,11 +2146,59 @@ GameValue A2Waypoints(const GameState* state, GameValuePar oper1)
     return result;
 }
 
+// ---------------------------------------------------------------------------
+// synchronizedObjects: the mission.sqm "synchronizations[]" links between objects
+// (a Warfare module and the teams it runs, say). Links go both ways.
+// ---------------------------------------------------------------------------
+GameValue A2SynchronizedObjects(const GameState* state, GameValuePar oper1)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& out = value;
+    Object* obj = GetObject(oper1);
+    Runtime& rt = RT();
+    int self = -1;
+    for (const auto& [id, o] : rt.missionObjects)
+        if (o.GetLink() == obj)
+            self = id;
+    if (!obj || self < 0)
+        return value;
+    std::vector<int> ids;
+    for (const auto& [id, sync] : rt.missionSync)
+    {
+        if (id == self)
+            ids.insert(ids.end(), sync.begin(), sync.end());
+        else if (std::find(sync.begin(), sync.end(), self) != sync.end())
+            ids.push_back(id);
+    }
+    std::vector<Object*> seen;
+    for (int id : ids)
+    {
+        const auto it = rt.missionObjects.find(id);
+        Object* o = it != rt.missionObjects.end() ? it->second.GetLink() : nullptr;
+        if (!o || o == obj || std::find(seen.begin(), seen.end(), o) != seen.end())
+            continue;
+        seen.push_back(o);
+        out.Add(GameValueExt(o));
+    }
+    return value;
+}
+
 // Arma 2 addAction: arguments are passed as _this select 3; the script is a .sqf (run
 // like execVM), a .sqs, or code.
 void Arma2SetUserActionArguments(EntityAI* veh, int id, GameValuePar arguments)
 {
     RT().actionArguments[{veh, id}] = arguments;
+}
+
+// Called for every object mission.sqm creates (AICenterImpl.cpp).
+void Arma2RegisterMissionObject(int id, Object* obj, const std::vector<int>& sync)
+{
+    if (id < 0 || !obj)
+        return;
+    Runtime& rt = RT();
+    rt.missionObjects[id] = obj;
+    if (!sync.empty())
+        rt.missionSync.emplace_back(id, sync);
 }
 
 GameValue ScriptExecVM(const GameState* state, GameValuePar oper1, GameValuePar oper2); // Scripts.cpp
@@ -2385,7 +2436,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameString, "currentWeapon", ObjGetPrimaryWeapon, GameObject),
     GameFunction(GameObject, "effectiveCommander", ObjCommander, GameObject),
     GameFunction(GameString, "faction", A2Faction, GameObject),
-    GameFunction(GameArray, "synchronizedObjects", A2EmptyArrayUnary, GameObject),
+    GameFunction(GameArray, "synchronizedObjects", A2SynchronizedObjects, GameObject),
     GameFunction(GameArray, "actionKeysNames", A2EmptyArrayUnary, GameString | GameArray),
     GameFunction(GameNothing, "hcRemoveAllGroups", A2NothingUnary, GameObject),
     GameFunction(GameString, "createLocation", A2CreateLocation, GameArray),
