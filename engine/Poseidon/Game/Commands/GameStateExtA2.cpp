@@ -1225,6 +1225,12 @@ GameValue A2IsNullHandle(const GameState*, GameValuePar oper1)
     return GameValue(static_cast<float>(oper1) < 0);
 }
 
+// ctrlShown control: a control handle that exists is taken as shown.
+GameValue A2CtrlShown(const GameState*, GameValuePar oper1)
+{
+    return GameValue(static_cast<float>(oper1) >= 0);
+}
+
 GameValue A2DeleteCollection(const GameState* state, GameValuePar oper1)
 {
     return VehDelete(state, oper1);
@@ -2298,6 +2304,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameNothing, "deleteLocation", A2DeleteLocation, GameString),
     GameFunction(GameString, "text", A2Text, GameString),
     GameFunction(GameArray, "locationPosition", A2LocationPosition, GameString),
+    GameFunction(GameArray, "position", A2LocationPosition, GameString),
     GameFunction(GameArray, "size", A2LocSize, GameString),
     GameFunction(GameString, "type", A2LocType, GameString),
     GameFunction(GameArray, "nearestLocations", A2NearestLocations, GameArray),
@@ -2327,6 +2334,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameString, "actionKeysImages", A2TextLogEmpty, GameString | GameArray),
     GameFunction(GameBool, "triggerActivated", A2TriggerActivated, GameObject),
     GameFunction(GameBool, "isNull", A2IsNullHandle, GameScalar),
+    GameFunction(GameBool, "ctrlShown", A2CtrlShown, GameScalar),
     GameFunction(GameBool, "isNull", A2IsNullLocation, GameString),
     GameFunction(GameArray, "items", A2EmptyArrayUnary, GameObject),
     GameFunction(GameArray, "assignedItems", A2EmptyArrayUnary, GameObject),
