@@ -176,7 +176,9 @@ fn run(device: &wgpu::Device, queue: &wgpu::Queue, spec: SpectrumInputs, chop: f
     // TW_COVER_AMP: the drawn amplitude (choppiness held as the game holds it, x amplitude <= 1.3)
     let amp = std::env::var("TW_COVER_AMP").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0);
     for f in 0..frames {
-        fft.set_frame(queue, spec, chop.min(1.3 / amp.max(1.0)), amp, 100.0 + f as f32 * dt, dt);
+        // TW_COVER_FOAMLANE: the Jacobian lane (choppiness factor the foam sees) instead of the amplitude
+        let lane = std::env::var("TW_COVER_FOAMLANE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(amp);
+        fft.set_frame(queue, spec, chop.min(1.3 / amp.max(1.0)), lane, if std::env::var("TW_COVER_FOAMLANE").is_ok() { 0.0 } else { chop }, 100.0 + f as f32 * dt, dt);
         let mut enc = device.create_command_encoder(&Default::default());
         fft.dispatch(&mut enc, &timers);
         queue.submit([enc.finish()]);
