@@ -98,10 +98,30 @@ and are not counted.
 | 3 | `a142bf4` | 34 (Arma 2, partial) | 34 | 19 | 6 hangs (Warfare: `NeedsAmbulance`) |
 | 4 | `6651f0d` | 63 (Arma 2, incl. templates) | 50 | 23 | 0 |
 | 5 | `f4a567d` | 98 (Arma 2 + Operation Arrowhead) | 91 | 27 | 7 crashes (flag proxy, fixed `47c5b1c`), 5 OA campaign time-outs |
+| 6 | `516bc8b` | 98 (Arma 2 + Operation Arrowhead) | 98 | 63 | 1 stall (CE5A: pathfinding, guarded `534f5f3`) |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
 Takistan and Zargabad render; its bootcamp and scenarios start.
+
+Run 6 is the first with scripts as coroutines: the Operation Arrowhead campaign no
+longer times out (CE0-CE8 all enter and run), and every one of the 98 missions enters.
+What it found, fixed afterwards:
+
+- **Config strings were cut at 2 KB.** FSM states keep whole scripts in one string
+  (C1_IntoTheStorm's opening radio conversation is 5966 characters); the config parser's
+  word buffer ended them mid-block. Values are now read up to 256 KB.
+- **`exitWith` inside a `call`ed function** broke out of the caller as well, so
+  `_side call GetSideLetter` gave nil and the Warfare unit tables were built from
+  `<null>SOLDIER`. `call` now takes the exitWith value as its result.
+- **`typeOf`** returned the import's `A1x_` class name; scripts look it up in their own
+  class lists (C7B's convoy). It returns the mission's name now.
+- **Locations are their own type** (`typeName` = `LOCATION`, `locationNull`, `isNull`),
+  which `BIS_fnc_locations` relies on.
+- **Pathfinding:** the operative-path field map only walks fields on the map; a 60 s
+  stall in CE5A_Sandstorm was inside that loop.
+- Commands: `addSwitchableUnit`/`removeSwitchableUnit`, `ctrlShown`, `inputAction`,
+  `showHUD`, binary `hideObject`, `moveOut`, `forceWalk`, backpack commands.
 
 ## Second machine (laptop, Intel Iris Xe), 2026-10-13
 
