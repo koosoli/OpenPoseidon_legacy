@@ -1,6 +1,7 @@
 #include "WaterWgpu.hpp"
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/World/Terrain/WaterBodies.hpp>
+#include <Poseidon/World/Terrain/WaterSurfaceQuery.hpp>
 #include <sstream>
 
 #include "CdlodDriver.hpp"
@@ -616,7 +617,11 @@ bool WaterWgpu::UpdateSeaWind(float now)
     }
 
     // Mean speed only; neither gusts nor heading alter the water configuration.
-    const float wantSpeed = SnapToBucket(windSnap.windMeanSpeed, kSeaWindSpeedBucket);
+    // WGR_TW_WEATHER_WIND=<m/s>: a capture override of the weather wind the sea follows (the dev
+    // panel's wind, for a scripted run)
+    static const float envWeatherWind = EnvFloat("WGR_TW_WEATHER_WIND", 0.0f);
+    const float meanSpeed = envWeatherWind > 0.0f ? envWeatherWind : windSnap.windMeanSpeed;
+    const float wantSpeed = SnapToBucket(meanSpeed, kSeaWindSpeedBucket);
 
     if (!_seaWindInit)
     {
@@ -639,7 +644,7 @@ bool WaterWgpu::UpdateSeaWind(float now)
     }
     // (b) moved out of the latched bucket by more than half a bucket + hysteresis
     const bool speedMoved =
-        std::abs(windSnap.windMeanSpeed - _seaWindSpeed) > (kSeaWindSpeedBucket * 0.5f + kSeaWindSpeedHysteresis);
+        std::abs(meanSpeed - _seaWindSpeed) > (kSeaWindSpeedBucket * 0.5f + kSeaWindSpeedHysteresis);
     if (!speedMoved)
     {
         return false;
@@ -1229,16 +1234,16 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         {
             float wind, fetch, chop, swell, surf, period, whitecaps;
         };
-        // Choppiness and whitecaps toward Tidewater's own sea presets (Calm 0.6/0, Choppy 1.5/0.75,
-        // Storm 1.9/1): the owner, 2026-10-12, in Tidewater itself: "if I bring choppiness up I get a
-        // lot more nice whitecaps". Choppiness stays at most 1.3: past ~1.2 the displaced mesh folds
-        // over itself in a 7 m sea and the folds' back faces shade as water seen from below (the
-        // turquoise in high waves); the whitecap count comes from the cap threshold instead.
+        // Choppiness and whitecaps as island-expansion's sea presets (AppUI.js SEA). The displayed
+        // choppiness x amplitude is held at TidewaterMaxDisplayedChop (1.3) below: past it the displaced
+        // mesh folds over itself and the folds' back faces shade as water seen from below.
+        // (2026-10-13) island-expansion's own table (AppUI.js SEA), synced on the owner's request:
+        // its choppiness and whitecaps, not OP's 0.65/1.15/1.3 and 0.1/0.8.
         static constexpr TwSea kTwSea[4] = {
-            {3.5f, 40.0f, 0.65f, 0.28f, 0.18f, 11.0f, 0.1f},   // Calm
+            {3.5f, 40.0f, 0.75f, 0.28f, 0.18f, 11.0f, 0.2f},   // Calm
             {7.0f, 120.0f, 0.9f, 0.48f, 0.34f, 9.0f, 0.5f},    // Breezy (Tidewater's defaults)
-            {12.0f, 300.0f, 1.15f, 0.68f, 0.56f, 8.5f, 0.8f},  // Choppy
-            {20.0f, 900.0f, 1.3f, 1.0f, 0.9f, 12.0f, 1.0f},    // Storm
+            {12.0f, 300.0f, 1.05f, 0.68f, 0.56f, 8.5f, 0.75f}, // Choppy
+            {20.0f, 900.0f, 1.2f, 1.0f, 0.9f, 12.0f, 1.0f},    // Storm
         };
         // The weather wind (OFP's, 0..~12 m/s) at which Weather mode reaches each preset.
         static constexpr float kTwSeaWeatherWind[4] = {3.0f, 6.0f, 9.0f, 12.0f};
@@ -1279,7 +1284,9 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
                     c = {lerp(a.wind, b.wind),   lerp(a.fetch, b.fetch), lerp(a.chop, b.chop),
                          lerp(a.swell, b.swell), lerp(a.surf, b.surf),   lerp(a.period, b.period),
                          lerp(a.whitecaps, b.whitecaps)};
-                    tidewaterAmplitude = 1.0f; // the preset's own spectrum carries the height
+                    // the preset's own spectrum carries the height up to the Storm preset; past it the
+                    // weather wind raises the amplitude to 2.0 at 30 m/s (TidewaterWindAmplitude)
+                    tidewaterAmplitude = TidewaterWindAmplitude(_seaWindSpeed);
                 }
             }
             else
@@ -1311,6 +1318,9 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
             t.swellScale *= 1.25f;
         }
         t.amplitude *= tidewaterAmplitude;
+        // the surface is drawn with choppiness x amplitude; past TidewaterMaxDisplayedChop the mesh folds
+        // (dark creases along the crests), so a higher amplitude draws with less choppiness
+        t.choppiness = std::min(t.choppiness, TidewaterMaxDisplayedChop / std::max(t.amplitude, 1.0f));
         _params.tidewater[0] = {std::max(t.amplitude, 0.0f), std::clamp(t.choppiness, 0.0f, 2.0f),
                                 std::max(t.swellScale, 0.0f), t.swellHeadingDeg};
         _params.tidewater[1] = {std::max(t.foamCoverage, 0.0f), std::max(t.foamIntensity, 0.0f), t.ssr ? 1.0f : 0.0f,

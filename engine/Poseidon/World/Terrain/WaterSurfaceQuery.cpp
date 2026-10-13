@@ -234,6 +234,11 @@ WaterSurfaceSample QueryWaterSurfaceScaled(float worldX, float worldZ, float tim
             amplitude *= 1.60f;
         }
         amplitudeScale = amplitude * std::sqrt(TidewaterSeaVarianceScale(look));
+        // past the Storm preset the weather wind raises the amplitude (as the renderer does)
+        if (look.windFromWeather && GWind.IsActive() && std::clamp(look.tidewater.seaConditions, 0, 5) == 0)
+        {
+            amplitudeScale *= TidewaterWindAmplitude(std::round(GWind.Sample().meanSpeed));
+        }
         lengthScale = std::max(look.tidewater.cascadeScale, 0.01f);
         shoal = true;
     }

@@ -275,7 +275,9 @@ fn lip_override() -> Option<f32> {
 /// foam ("more white caps and less foam"); WGR_TW_WHITECAP=0 restores Tidewater's look, "lo,hi"
 /// tunes the cover that starts a cap and the cover that is a full one.
 pub const WHITECAP_PATCH: [f32; 2] = [0.008, 0.11];
-const WHITECAP_PATCH_DEFAULT_ON: bool = true;
+// off: the whitecaps are drawn as island-expansion draws them (the coverage thresholds its bubbly
+// lace pattern), synced on the owner's request 2026-10-13; WGR_TW_WHITECAP=1 brings the patches back
+const WHITECAP_PATCH_DEFAULT_ON: bool = false;
 fn whitecap_patch() -> [f32; 2] {
     static V: std::sync::OnceLock<[f32; 2]> = std::sync::OnceLock::new();
     *V.get_or_init(|| match std::env::var("WGR_TW_WHITECAP") {
@@ -1159,7 +1161,7 @@ impl Tidewater {
             self.query.prepare(queue);
             self.uw.set_frame(queue, &uwp);
         }
-        self.fft.set_frame(queue, spec, p.tidewater[0][1], p.time, dt);
+        self.fft.set_frame(queue, spec, p.tidewater[0][1], p.tidewater[0][0], p.time, dt);
 
         let cam_pos = glam::DVec3::new(cam.cam_pos[0] as f64, cam.cam_pos[1] as f64, cam.cam_pos[2] as f64);
         let clip = glam::Mat4::from_cols_array(&cam.proj) * glam::Mat4::from_cols_array(&cam.view);
@@ -1169,6 +1171,7 @@ impl Tidewater {
         // Existing CDLOD levels/node cap cover the curved sea to its horizon;
         // opaque scene depth retains land outside the near height window.
         let nodes = cdlod::Selection::new(&self.cdlod, cam_pos, p.sea_level, Some(planes))
+            .displacement(p.tidewater[0][0], p.tidewater[0][1])
             .curved_earth(earth_preview(&p)).run();
         self.prep_stats[3] += tc.elapsed().as_secs_f32() * 1000.0;
         self.instance_count = nodes.len() as u32;

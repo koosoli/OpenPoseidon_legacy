@@ -325,7 +325,11 @@ fn seaDetailSample(xz: vec2<f32>, footprint: f32) -> SeaDetailSample {
     let streakFar = 1.0 - smoothstep(2.0, 8.0, footprint);
     let streak = smoothstep(0.68, 0.82, st) * smoothstep(0.4, 0.62, breakUp) * freshWind * tw.detail.z * streakFar;
 
-    let rough = mix(0.5, 1.5, gust) * (1.0 - slick * 0.8) * (1.0 - streak / max(tw.detail.z, 1e-3) * 0.45);
+    // (OP, 2026-10-13) the windrows no longer touch the surface at all: as foam they were white worms,
+    // left in the roughness they drew thin dark creases across the whole sea once the wind passed
+    // ~10 m/s (owner: "remove these darker lines ... they look like shit"; gone with windrow 0 at his
+    // pose). `streak` is still reported for the debug views.
+    let rough = mix(0.5, 1.5, gust) * (1.0 - slick * 0.8);
     return SeaDetailSample(rough, gust, slick, streak);
 }
 
@@ -477,11 +481,12 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     // On its own it is a thin line along every compressed crest ridge -- at a rough sea's
     // choppiness, white worms all over the water (owner, 2026-10-12); the debug view (25) showed
     // the vertex foam as soft patches and every worm in the per-pixel coverage.
-    let fresh = sat((ocean.p0.y - 0.15 - jac) * 2.0) * sat(vertexFoam * 2.5);
+    // whitecaps: persistent (per vertex) + fresh where the surface is compressed right now; more of
+    // them inside gusts -- island-expansion's WaterSurface.js, synced on the owner's request
+    // (2026-10-13). OP keeps one departure the owner asked for: no windrow lines (Tidewater adds
+    // det.streak * 0.5 here, drawn as thin white lines across the sea in fresh wind).
+    let fresh = sat((ocean.p0.y - 0.15 - jac) * 2.0);
     var whitecaps = vertexFoam + fresh;
-    // OP: the windrows stay in the roughness (seaDetailSample) but draw no foam: as foam they are
-    // thin white lines ~11 m apart across the whole sea once the wind passes ~10 m/s, which read as
-    // worms, not as whitecaps (owner, 2026-10-12). Tidewater adds det.streak * 0.5 here.
     whitecaps = whitecaps * mix(0.5, 1.5, det.gust);
     var capCover = whitecaps * tw.surface.z;
     // OP: whitecaps as patches on the crests (see water_tw::WHITECAP_PATCH): the low foam a rough
