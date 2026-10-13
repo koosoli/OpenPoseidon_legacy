@@ -103,6 +103,9 @@ GameValue GroupCreate(const GameState* state, GameValuePar oper1);
 GameValue SideCivilian(const GameState* state);
 GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 
+GameValue VehProcessAction(const GameState* state, GameValuePar oper1, GameValuePar oper2); // GameStateExtGrp.cpp
+GameValue ObjVehicle(const GameState* state, GameValuePar oper1);                         // GameStateExtUi.cpp
+
 namespace
 {
 float Now()
@@ -1410,6 +1413,20 @@ GameValue A2ObjNullUnary(const GameState*, GameValuePar)
     return GameValueExt((Object*)nullptr);
 }
 
+
+// moveOut unit: the unit leaves its vehicle (as the "GetOut" action).
+GameValue A2MoveOut(const GameState* state, GameValuePar oper1)
+{
+    const GameValue veh = ObjVehicle(state, oper1);
+    if (GetObject(veh) == GetObject(oper1))
+        return NOTHING;
+    GameValue args = state->CreateGameValue(GameArray);
+    GameArrayType& a = args;
+    a.Add(GameValue(RString("GetOut")));
+    a.Add(veh);
+    return VehProcessAction(state, oper1, args);
+}
+
 GameValue A2ObjNull(const GameState*)
 {
     return OBJECT_NULL;
@@ -2324,6 +2341,9 @@ const GameFunction A2Unary[] = {
     GameFunction(GameNothing, "hideObject", A2NothingUnary, GameObject),
     GameFunction(GameScalar, "inputAction", A2ZeroUnary, GameString),
     GameFunction(GameNothing, "showHUD", A2NothingUnary, GameBool),
+    GameFunction(GameNothing, "moveOut", A2MoveOut, GameObject),
+    GameFunction(GameObject, "unitBackpack", A2ObjNullUnary, GameObject),
+    GameFunction(GameNothing, "removeBackpack", A2NothingUnary, GameObject),
     GameFunction(GameNothing, "ctrlMapAnimCommit", A2NothingUnary, GameAny),
     GameFunction(GameString, "keyName", A2TextLogEmpty, GameScalar),
     GameFunction(GameScalar, "currentVisionMode", A2ZeroUnary, GameObject),
@@ -2426,6 +2446,8 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "moveInCargo", function, A2MoveInCargoIndex, GameObject, GameArray),
     GameOperator(GameNothing, "enableSimulation", function, A2NothingBinary, GameObject, GameBool),
     GameOperator(GameNothing, "hideObject", function, A2NothingBinary, GameObject, GameBool),
+    GameOperator(GameNothing, "forceWalk", function, A2NothingBinary, GameObject, GameBool),
+    GameOperator(GameNothing, "addBackpack", function, A2NothingBinary, GameObject, GameString),
     GameOperator(GameNothing, "hcSetGroup", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameNothing, "hcRemoveGroup", function, A2NothingBinary, GameObject, GameGroup),
     GameOperator(GameNothing, "cutText", function, A2CutTextLayer, GameScalar, GameArray),
