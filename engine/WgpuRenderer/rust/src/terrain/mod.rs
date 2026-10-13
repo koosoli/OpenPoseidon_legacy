@@ -4,6 +4,7 @@ use wgpu::util::DeviceExt;
 use crate::ffi::{WgrTerrainMaterial, WgrTerrainNode, WgrTerrainParams};
 use crate::gfx3d::{NORMAL_FORMAT, depth_format};
 
+mod rain_flow;
 mod shore_wet;
 mod skyvis;
 #[cfg(test)]
@@ -396,6 +397,8 @@ pub struct Terrain {
     max_dim: u32,
     // TW-WATER W3b: Tidewater's wet sand (group 3; a placeholder with Current OP).
     shore_wet: shore_wet::ShoreWet,
+    /// RAIN-FLOW: rain running off and gathering into puddles around the camera (rain_flow.rs)
+    rain_flow: rain_flow::RainFlow,
 }
 
 impl Terrain {
@@ -987,7 +990,8 @@ impl Terrain {
                     .clamp(0.0, 1.0),
             ),
         ];
-        let shore_wet = shore_wet::ShoreWet::new(device, queue);
+        let rain_flow = rain_flow::RainFlow::new(device);
+        let shore_wet = shore_wet::ShoreWet::new(device, queue, rain_flow.view().clone());
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("wgr_terrain_pipeline_layout"),
             bind_group_layouts: &[
@@ -1180,6 +1184,7 @@ impl Terrain {
             planar_pipeline,
             max_dim: device.limits().max_texture_dimension_2d,
             shore_wet,
+            rain_flow,
         }
     }
 
@@ -1866,6 +1871,20 @@ impl Terrain {
             self.instance_cap = cap;
         }
         queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(nodes));
+    }
+
+    /// RAIN-FLOW: one frame of the rain water around the camera (world xz), recorded into `encoder`
+    /// before the terrain draws sample it.
+    pub fn step_rain_flow(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        cam_xz: [f32; 2],
+    ) {
+        let hm_gen = self.heightmap_gen();
+        self.rain_flow.step(device, queue, encoder, &self.heightmap_view, hm_gen, &self.params, cam_xz);
+        self.shore_wet.set_rain(queue, self.rain_flow.window());
     }
 
     /// TW-WATER W3b: Tidewater's wet sand for this frame (state, lace, generation, params), or

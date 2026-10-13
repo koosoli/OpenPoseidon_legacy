@@ -188,10 +188,36 @@ fn terrain_snow_normal(xz: vec2<f32>, world_y: f32, geometric: vec3<f32>,
 struct TwWet {
     regions: array<vec4<f32>, 2>, // per shore-simulation region: min xz, size (m), weight
     p: vec4<f32>,                 // x = on, y = sea level
+    rain: vec4<f32>,              // RAIN-FLOW window: min xz, size (m), weight (0 = not running)
 };
 @group(3) @binding(0) var<uniform> tww: TwWet;
 @group(3) @binding(1) var tw_sim_state: texture_2d_array<f32>;
 @group(3) @binding(2) var tw_sim_lace: texture_2d<f32>;
+// RAIN-FLOW (rain_flow.rs): r = water depth (m), g = flow speed (m/s); slot (x mod N, z mod N) holds
+// absolute cell (x, z) of the window around the camera
+@group(3) @binding(3) var rain_water: texture_2d<f32>;
+
+fn rain_water_load(c: vec2<i32>, n: i32) -> vec2<f32> {
+    return textureLoad(rain_water, ((c % n) + n) % n, 0).xy;
+}
+
+// (depth m, speed m/s, window weight) of the rain water at world xz; weight 0 outside the window
+fn rain_water_at(xz: vec2<f32>) -> vec3<f32> {
+    let w = tww.rain;
+    if (w.w <= 0.0) { return vec3<f32>(0.0); }
+    let rel = xz - w.xy;
+    let edge = min(min(rel.x, rel.y), min(w.z - rel.x, w.z - rel.y));
+    let weight = smoothstep(2.0, 12.0, edge) * w.w;
+    if (weight <= 0.0) { return vec3<f32>(0.0); }
+    let n = i32(textureDimensions(rain_water).x);
+    let t = xz / (w.z / f32(n)) - 0.5;
+    let b = floor(t);
+    let f = t - b;
+    let c = vec2<i32>(b);
+    let v = mix(mix(rain_water_load(c, n), rain_water_load(c + vec2<i32>(1, 0), n), f.x),
+                mix(rain_water_load(c + vec2<i32>(0, 1), n), rain_water_load(c + vec2<i32>(1, 1), n), f.x), f.y);
+    return vec3<f32>(v, weight);
+}
 
 const TW_SIM_RES: f32 = 768.0;
 const TW_LACE_TILE: f32 = 3.5;
@@ -1906,6 +1932,15 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         rain_puddle = ground_puddle_mask(in.world_xz, puddle_footprint, tp.rain_wetness)
             * ground_puddle_land_factor(geometric_n.y, world_y, tp.sea_level,
                                        snow_cover(in.world_xz, world_y));
+    }
+    // RAIN-FLOW: inside the simulated window the puddles are the water that actually gathered
+    // there, and a running film wets the ground it flows over; the noise mask stays outside it
+    let rain_flow = rain_water_at(in.world_xz);
+    if (rain_flow.z > 0.0) {
+        let snowless = 1.0 - smoothstep(0.002, 0.02, snow_cover(in.world_xz, world_y));
+        let pool = smoothstep(0.003, 0.012, rain_flow.x) * snowless;
+        rain_puddle = mix(rain_puddle, pool, rain_flow.z);
+        soil_wet = max(soil_wet, smoothstep(0.0002, 0.0015, rain_flow.x) * rain_flow.z * snowless);
     }
     if (snow.info.w > 0.0 || line_depth > 0.0) {
         let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, world_y);

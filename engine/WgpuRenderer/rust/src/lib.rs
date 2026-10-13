@@ -4180,7 +4180,7 @@ impl Renderer {
                         w.state,
                         w.lace,
                         w.generation,
-                        crate::terrain::TwWetParams { regions: w.regions, p: [1.0, w.sea_level, 0.0, 0.0] },
+                        crate::terrain::TwWetParams { regions: w.regions, p: [1.0, w.sea_level, 0.0, 0.0], rain: [0.0; 4] },
                     )
                 }),
             );
@@ -5005,6 +5005,8 @@ impl Renderer {
             // here would leave an empty group on the frames it skips.
             self.terrain
                 .render_shadow_mask(&self.queue, &mut encoder, sun_to_light);
+            // RAIN-FLOW: the rain water around the camera, before the terrain samples it
+            self.terrain.step_rain_flow(&self.device, &self.queue, &mut encoder, [cam.cam_pos[0], cam.cam_pos[2]]);
         }
 
         // Replay the instancing plan. It splits into a scene phase and a UI phase at

@@ -15,6 +15,8 @@ pub struct TwWetParams {
     pub regions: [[f32; 4]; 2],
     /// x = on, y = sea level, zw unused
     pub p: [f32; 4],
+    /// (OP) RAIN-FLOW: the rain water window (min x, min z, size m, weight), see rain_flow.rs
+    pub rain: [f32; 4],
 }
 
 pub struct ShoreWet {
@@ -23,6 +25,10 @@ pub struct ShoreWet {
     bind: wgpu::BindGroup,
     dummy_state: wgpu::TextureView,
     dummy_lace: wgpu::TextureView,
+    /// RAIN-FLOW's water texture (binding 3): always bound, it never reallocates
+    rain: wgpu::TextureView,
+    /// the rain lane of the last params written (kept when Tidewater's lanes change)
+    rain_lane: [f32; 4],
     /// generation of the views in `bind` (0 = the placeholders)
     generation: u64,
 }
@@ -46,7 +52,7 @@ fn dummy(device: &wgpu::Device, label: &str, format: wgpu::TextureFormat, array:
 }
 
 impl ShoreWet {
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, rain: wgpu::TextureView) -> Self {
         let f = wgpu::ShaderStages::FRAGMENT;
         let tex = |binding, dim| wgpu::BindGroupLayoutEntry {
             binding,
@@ -73,6 +79,7 @@ impl ShoreWet {
                 },
                 tex(1, wgpu::TextureViewDimension::D2Array),
                 tex(2, wgpu::TextureViewDimension::D2),
+                tex(3, wgpu::TextureViewDimension::D2),
             ],
         });
         let ubo = device.create_buffer(&wgpu::BufferDescriptor {
@@ -84,8 +91,8 @@ impl ShoreWet {
         queue.write_buffer(&ubo, 0, bytemuck::bytes_of(&<TwWetParams as bytemuck::Zeroable>::zeroed()));
         let dummy_state = dummy(device, "wgr_terrain_tw_wet_state_dummy", wgpu::TextureFormat::Rgba16Float, true);
         let dummy_lace = dummy(device, "wgr_terrain_tw_wet_lace_dummy", wgpu::TextureFormat::Rgba8Unorm, false);
-        let bind = Self::make_bind(device, &layout, &ubo, &dummy_state, &dummy_lace);
-        Self { layout, ubo, bind, dummy_state, dummy_lace, generation: 0 }
+        let bind = Self::make_bind(device, &layout, &ubo, &dummy_state, &dummy_lace, &rain);
+        Self { layout, ubo, bind, dummy_state, dummy_lace, rain, rain_lane: [0.0; 4], generation: 0 }
     }
 
     fn make_bind(
@@ -94,6 +101,7 @@ impl ShoreWet {
         ubo: &wgpu::Buffer,
         state: &wgpu::TextureView,
         lace: &wgpu::TextureView,
+        rain: &wgpu::TextureView,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wgr_terrain_tw_wet"),
@@ -102,6 +110,7 @@ impl ShoreWet {
                 wgpu::BindGroupEntry { binding: 0, resource: ubo.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(state) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(lace) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(rain) },
             ],
         })
     }
@@ -114,6 +123,12 @@ impl ShoreWet {
         &self.bind
     }
 
+    /// Per frame: RAIN-FLOW's window (rain_flow.rs `window`), written into its own lane.
+    pub fn set_rain(&mut self, queue: &wgpu::Queue, lane: [f32; 4]) {
+        self.rain_lane = lane;
+        queue.write_buffer(&self.ubo, std::mem::offset_of!(TwWetParams, rain) as u64, bytemuck::bytes_of(&lane));
+    }
+
     /// Per frame: Tidewater's wetness inputs, or None for OP's own coast wet band.
     pub fn set(
         &mut self,
@@ -122,18 +137,21 @@ impl ShoreWet {
         wet: Option<(&wgpu::TextureView, &wgpu::TextureView, u64, TwWetParams)>,
     ) {
         match wet {
-            Some((state, lace, generation, params)) => {
+            Some((state, lace, generation, mut params)) => {
                 if self.generation != generation {
-                    self.bind = Self::make_bind(device, &self.layout, &self.ubo, state, lace);
+                    self.bind = Self::make_bind(device, &self.layout, &self.ubo, state, lace, &self.rain);
                     self.generation = generation;
                 }
+                params.rain = self.rain_lane;
                 queue.write_buffer(&self.ubo, 0, bytemuck::bytes_of(&params));
             }
             None => {
                 if self.generation != 0 {
-                    self.bind = Self::make_bind(device, &self.layout, &self.ubo, &self.dummy_state, &self.dummy_lace);
+                    self.bind = Self::make_bind(device, &self.layout, &self.ubo, &self.dummy_state, &self.dummy_lace, &self.rain);
                     self.generation = 0;
-                    queue.write_buffer(&self.ubo, 0, bytemuck::bytes_of(&<TwWetParams as bytemuck::Zeroable>::zeroed()));
+                    let mut params = <TwWetParams as bytemuck::Zeroable>::zeroed();
+                    params.rain = self.rain_lane;
+                    queue.write_buffer(&self.ubo, 0, bytemuck::bytes_of(&params));
                 }
             }
         }
@@ -144,6 +162,6 @@ impl ShoreWet {
 mod tests {
     #[test]
     fn params_match_the_wgsl_struct() {
-        assert_eq!(std::mem::size_of::<super::TwWetParams>(), 48);
+        assert_eq!(std::mem::size_of::<super::TwWetParams>(), 64);
     }
 }
