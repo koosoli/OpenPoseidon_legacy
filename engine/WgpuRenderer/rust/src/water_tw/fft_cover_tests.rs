@@ -169,12 +169,18 @@ fn cover(foam: &[f32], sizes: [f32; 4], patch: [f32; 2]) -> Cover {
 
 /// Runs the sea for `seconds` at 60 Hz and returns the cover after it.
 fn run(device: &wgpu::Device, queue: &wgpu::Queue, spec: SpectrumInputs, chop: f32, seconds: f32) -> Cover {
+    // the coverage island-expansion thresholds its lace pattern by (foam x foamCoverage 1, smoothed)
+    // TW_COVER_AMP: the drawn amplitude (choppiness held as the game holds it, x amplitude <= 1.3)
+    let amp = std::env::var("TW_COVER_AMP").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0);
+    cover(&run_foam(device, queue, spec, chop, seconds, amp), spec.sizes, [0.0, 1.0])
+}
+
+/// Runs the sea for `seconds` at 60 Hz and returns the persistent foam field after it.
+fn run_foam(device: &wgpu::Device, queue: &wgpu::Queue, spec: SpectrumInputs, chop: f32, seconds: f32, amp: f32) -> Vec<f32> {
     let timers = crate::gpu_timers::GpuTimers::new(device, queue, false, false);
     let mut fft = OceanFft::new(device);
     let dt = 1.0 / 60.0;
     let frames = (seconds / dt) as u32;
-    // TW_COVER_AMP: the drawn amplitude (choppiness held as the game holds it, x amplitude <= 1.3)
-    let amp = std::env::var("TW_COVER_AMP").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0);
     for f in 0..frames {
         // TW_COVER_FOAMLANE: the Jacobian lane (choppiness factor the foam sees) instead of the amplitude
         let lane = std::env::var("TW_COVER_FOAMLANE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(amp);
@@ -186,8 +192,7 @@ fn run(device: &wgpu::Device, queue: &wgpu::Queue, spec: SpectrumInputs, chop: f
             device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         }
     }
-    // the coverage island-expansion thresholds its lace pattern by (foam x foamCoverage 1, smoothed)
-    cover(&read_foam(device, queue, &fft), spec.sizes, [0.0, 1.0])
+    read_foam(device, queue, &fft)
 }
 
 /// Prints the cover per preset (cargo test ... whitecap_cover -- --ignored --nocapture).
@@ -237,4 +242,245 @@ fn whitecap_coverage_rises_with_the_wind() {
     };
     let (breezy, choppy, storm) = (mean("breezy"), mean("choppy"), mean("storm"));
     assert!(breezy < choppy && choppy < storm, "{breezy} {choppy} {storm}");
+}
+
+/// The foam pattern (FoamTexture.js) at full resolution, read back: (foam, bubbles) per texel.
+fn bake_pattern(device: &wgpu::Device, queue: &wgpu::Queue) -> Vec<[f32; 2]> {
+    let size = crate::water_tw::textures::FOAM_SIZE;
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("tw_foam_pattern_readback"),
+        size: wgpu::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("tw_foam_pattern"),
+        source: wgpu::ShaderSource::Wgsl(crate::water_tw::textures::wgsl_foam_pattern().into()),
+    });
+    let pipe = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("tw_foam_pattern"),
+        layout: None,
+        module: &module,
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    let view = tex.create_view(&Default::default());
+    let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &pipe.get_bind_group_layout(0),
+        entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }],
+    });
+    let row = size * 8;
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: (row * size) as u64,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let mut enc = device.create_command_encoder(&Default::default());
+    {
+        let mut pass = enc.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipe);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.dispatch_workgroups(size / 8, size / 8, 1);
+    }
+    enc.copy_texture_to_buffer(
+        tex.as_image_copy(),
+        wgpu::TexelCopyBufferInfo { buffer: &staging, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: None } },
+        wgpu::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
+    );
+    queue.submit([enc.finish()]);
+    staging.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let half = |h: u16| -> f32 {
+        let s = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
+        let e = ((h >> 10) & 0x1f) as i32;
+        let m = (h & 0x3ff) as f32;
+        s * if e == 0 { m * 2f32.powi(-24) } else { (1.0 + m / 1024.0) * 2f32.powi(e - 15) }
+    };
+    let raw = staging.slice(..).get_mapped_range();
+    let h: &[u16] = bytemuck::cast_slice(&raw);
+    (0..(size * size) as usize).map(|i| [half(h[i * 4]), half(h[i * 4 + 1])]).collect()
+}
+
+/// Box mips of a square single-channel image, level 0 first.
+fn box_mips(base: Vec<f32>, size: usize) -> Vec<(usize, Vec<f32>)> {
+    let mut out = vec![(size, base)];
+    while out.last().unwrap().0 > 1 {
+        let (n, prev) = out.last().unwrap();
+        let (n, h) = (*n, *n / 2);
+        let mut next = vec![0.0f32; h * h];
+        for y in 0..h {
+            for x in 0..h {
+                next[y * h + x] = 0.25 * (prev[2 * y * n + 2 * x] + prev[2 * y * n + 2 * x + 1] + prev[(2 * y + 1) * n + 2 * x] + prev[(2 * y + 1) * n + 2 * x + 1]);
+            }
+        }
+        out.push((h, next));
+    }
+    out
+}
+
+/// The lace's area mean (tw_water.wgsl `detail` at footprint 0) at coverages 0..1 in steps of 0.05,
+/// from the full-resolution pattern: what `laceExpected` must return far off.
+fn lace_table(px: &[(usize, Vec<f32>)], py: &[(usize, Vec<f32>)]) -> Vec<f32> {
+    let (ps, x0) = (px[0].0, &px[0].1);
+    let y0 = &py[0].1;
+    let at = |img: &Vec<f32>, u: f32, v: f32| {
+        let x = (u.rem_euclid(1.0) * ps as f32) as usize % ps;
+        let y = (v.rem_euclid(1.0) * ps as f32) as usize % ps;
+        img[y * ps + x]
+    };
+    let smooth = |a: f32, b: f32, x: f32| {
+        let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    (0..=20)
+        .map(|k| {
+            let c = k as f32 / 20.0;
+            let thresh = 1.05 - c * 1.1;
+            let (mut s, mut cnt) = (0.0f64, 0.0f64);
+            for j in (0..ps).step_by(3) {
+                for i in (0..ps).step_by(3) {
+                    let (fu, fv) = (i as f32 / ps as f32, j as f32 / ps as f32);
+                    let r2 = (fu * 0.8 - fv * 0.6, fu * 0.6 + fv * 0.8);
+                    let pattern = at(x0, fu, fv) * 0.62 + at(x0, r2.0 * 2.37 + 0.31, r2.1 * 2.37 + 0.77) * 0.38;
+                    s += (smooth(thresh - 0.06, thresh + 0.06, pattern) * (at(y0, fu, fv) * 0.25 + 0.8)) as f64;
+                    cnt += 1.0;
+                }
+            }
+            (s / cnt) as f32
+        })
+        .collect()
+}
+
+/// The guard: the far lace table in tw_water.wgsl is what the foam pattern really draws. If the
+/// pattern (textures.rs) or the lace threshold changes, the table must be measured again (the
+/// `far_foam_matches_near_lace` print shows the new one) or a distant sea turns milky or dark.
+#[test]
+fn lace_expected_table_matches_the_pattern() {
+    let Some((device, queue)) = device() else {
+        eprintln!("lace table: no adapter");
+        return;
+    };
+    let src = include_str!("tw_water.wgsl");
+    let start = src.find("var g = array<f32, 21>(").expect("laceExpected table") + "var g = array<f32, 21>(".len();
+    let end = start + src[start..].find(')').unwrap();
+    let table: Vec<f32> = src[start..end].split(',').map(|v| v.trim().parse::<f32>().unwrap()).collect();
+    let pat = bake_pattern(&device, &queue);
+    let ps = crate::water_tw::textures::FOAM_SIZE as usize;
+    let px = box_mips(pat.iter().map(|p| p[0]).collect(), ps);
+    let py = box_mips(pat.iter().map(|p| p[1]).collect(), ps);
+    let measured = lace_table(&px, &py);
+    for (k, (t, m)) in table.iter().zip(&measured).enumerate() {
+        assert!((t - m).abs() < 0.01, "coverage {:.2}: table {t} measured {m}", k as f32 / 20.0);
+    }
+}
+
+/// What a whitecapping sea looks like near the camera and far from it, from the same foam field:
+/// the lace detail (tw_water.wgsl `detail`) with the pattern read at the mip a pixel of the given
+/// footprint reads, averaged over the area, against the full-resolution (near) average. A value
+/// well above the near one is a sea that turns milky with distance.
+/// (cargo test ... far_foam -- --ignored --nocapture)
+#[test]
+#[ignore]
+fn far_foam_matches_near_lace() {
+    let Some((device, queue)) = device() else {
+        eprintln!("far foam: no adapter");
+        return;
+    };
+    let pat = bake_pattern(&device, &queue);
+    let ps = crate::water_tw::textures::FOAM_SIZE as usize;
+    let px = box_mips(pat.iter().map(|p| p[0]).collect(), ps);
+    let py = box_mips(pat.iter().map(|p| p[1]).collect(), ps);
+    let stats = |v: &Vec<f32>| {
+        let m = v.iter().map(|&x| x as f64).sum::<f64>() / v.len() as f64;
+        let var = v.iter().map(|&x| (x as f64 - m).powi(2)).sum::<f64>() / v.len() as f64;
+        (m as f32, var.sqrt() as f32)
+    };
+    for (l, (n, v)) in px.iter().enumerate() {
+        let (m, sd) = stats(v);
+        eprintln!("pattern mip {l:2} ({n:4}): mean {m:.4} sd {sd:.4}");
+    }
+    let at = |mips: &Vec<(usize, Vec<f32>)>, lod: f32, u: f32, v: f32| {
+        let l = (lod.max(0.0).round() as usize).min(mips.len() - 1);
+        let (n, img) = &mips[l];
+        let x = (u.rem_euclid(1.0) * *n as f32) as usize % n;
+        let y = (v.rem_euclid(1.0) * *n as f32) as usize % n;
+        img[y * n + x]
+    };
+    let sd0 = stats(&px[0].1).1;
+    let sd_at: Vec<f32> = px.iter().map(|(_, v)| stats(v).1).collect();
+    let mean0 = stats(&px[0].1).0;
+    let scale = 0.09f32; // tw.surface.w
+    let n = N as usize;
+    let weights = [0.35f32, 0.45, 0.5, 0.25];
+    let smooth = |a: f32, b: f32, x: f32| {
+        let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    let g_table = lace_table(&px, &py);
+    eprintln!("G(c) c=0..1 step 0.05: {:?}", g_table.iter().map(|g| (g * 1000.0).round() / 1000.0).collect::<Vec<_>>());
+    let amp_list: Vec<f32> = std::env::var("TW_FAR_AMPS").ok().map(|v| v.split(',').filter_map(|s| s.trim().parse().ok()).collect()).unwrap_or(vec![1.0, 2.0]);
+    let only = std::env::var("TW_COVER_ONLY").unwrap_or_else(|_| "choppy,storm,gale".into());
+    // TW_FAR_FIX: 1 = expected-lace far value + contrast-restored pattern mips, 2 = far value only
+    let fix_mode = std::env::var("TW_FAR_FIX").ok().and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(0);
+    for p in PRESETS.iter().filter(|p| only.contains(p.name)) {
+        for &amp in &amp_list {
+            let foam = run_foam(&device, &queue, spectrum(p), p.chop, 40.0, amp);
+            let sizes = spectrum(p).sizes;
+            let sample = |c: usize, wx: f32, wz: f32| {
+                let x = ((wx / sizes[c]).rem_euclid(1.0) * n as f32) as usize % n;
+                let y = ((wz / sizes[c]).rem_euclid(1.0) * n as f32) as usize % n;
+                foam[c * n * n + y * n + x]
+            };
+            let mut line = format!("{:6} amp {:.1}:", p.name, amp);
+            let mut cbar = 0.0;
+            for &fp in &[0.0f32, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6, 4.0] {
+                let lod1 = if fp > 0.0 { (fp * scale * ps as f32).log2() } else { 0.0 };
+                let lod2 = lod1 + 2.37f32.log2();
+                let far = smooth(0.15, 1.2, fp);
+                let soft = 0.06 + fp * 0.1;
+                let (mut acc, mut cov_sum, mut cnt) = (0.0f64, 0.0f64, 0.0f64);
+                let (step, g) = (0.5f32, 240usize);
+                for j in 0..g {
+                    for i in 0..g {
+                        let (wx, wz) = (i as f32 * step + 0.11, j as f32 * step + 0.29);
+                        let f: f32 = (0..4).map(|c| sample(c, wx, wz) * weights[c]).sum();
+                        let cov = f.clamp(0.0, 1.0);
+                        let (fu, fv) = (wx * scale, wz * scale);
+                        let mut p1 = at(&px, lod1, fu, fv);
+                        let r2 = (fu * 0.8 - fv * 0.6, fu * 0.6 + fv * 0.8);
+                        let mut p2 = at(&px, lod2, r2.0 * 2.37 + 0.31, r2.1 * 2.37 + 0.77);
+                        if fix_mode == 1 {
+                            // the contrast a mip loses, restored around the pattern's mean
+                            let k = |lod: f32| sd0 / sd_at[(lod.max(0.0).round() as usize).min(sd_at.len() - 1)].max(1e-4);
+                            p1 = mean0 + (p1 - mean0) * k(lod1);
+                            p2 = mean0 + (p2 - mean0) * k(lod2);
+                        }
+                        let pattern = p1 * 0.62 + p2 * 0.38;
+                        let thresh = 1.05 - cov * 1.1;
+                        let detail = smooth(thresh - soft, thresh + soft, pattern) * (at(&py, lod1, fu, fv) * 0.25 + 0.8);
+                        let far_v = if fix_mode > 0 {
+                            let x = cov * 20.0;
+                            let k = (x.floor() as usize).min(19);
+                            g_table[k] + (g_table[k + 1] - g_table[k]) * (x - k as f32)
+                        } else {
+                            cov * 0.85
+                        };
+                        acc += (detail + (far_v - detail) * far) as f64;
+                        cov_sum += cov as f64;
+                        cnt += 1.0;
+                    }
+                }
+                cbar = cov_sum / cnt;
+                line += &format!(" {fp:.2}m {:5.1}%", acc / cnt * 100.0);
+            }
+            eprintln!("{line}   (mean coverage {cbar:.3})");
+        }
+    }
 }

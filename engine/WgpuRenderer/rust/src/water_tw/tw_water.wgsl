@@ -396,6 +396,18 @@ fn rotorWashSlopes(worldXZ: vec2<f32>, footprint: f32) -> vec2<f32> {
     return slopes * min(1.0,0.32/max(length(slopes),0.001));
 }
 
+// The area mean of the lace (`detail` in waterSurfaceFragment) at a coverage, 0..1 in steps of
+// 0.05, measured over the full-resolution foam pattern: what a pixel covering metres of lace shows.
+// The lace thresholds a pattern centred on 0.49, so it stays nearly clear up to a coverage of 0.3
+// and its brightest is 0.82. Guarded against the pattern by fft_cover_tests.rs
+// (`lace_expected_table_matches_the_pattern`).
+fn laceExpected(c: f32) -> f32 {
+    var g = array<f32, 21>(0.0, 0.0, 0.001, 0.005, 0.018, 0.046, 0.09, 0.154, 0.234, 0.325, 0.417, 0.506, 0.586, 0.655, 0.711, 0.755, 0.785, 0.804, 0.815, 0.821, 0.823);
+    let x = sat(c) * 20.0;
+    let i = min(u32(x), 19u);
+    return mix(g[i], g[i + 1u], x - f32(i));
+}
+
 fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam: f32, shoreN: vec3<f32>, shoreFoam: f32, extraFoam: f32, surfMask: vec2<f32>, simIn: f32, sf: SurfFoamCtx) -> WaterSurfaceFrag {
     var d = vec4<f32>(0.0);
     var foamSum = 0.0;
@@ -512,7 +524,10 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     let soft = 0.06 + footprint * 0.1;
     let detail = smoothstep(thresh - soft, thresh + soft, pattern) * (p1.y * 0.25 + 0.8);
     let far = smoothstep(0.15, 1.2, footprint);
-    var foam = mix(detail, laceCover * 0.85, far);
+    // (OP, 2026-10-13) far off, the white the lace WOULD show at this coverage, not the coverage:
+    // `laceCover * 0.85` drew a light sea up to 9x whiter than the lace it stands for (a 30 m/s
+    // gale went white as milk with distance while close up it read as dark water with caps)
+    var foam = mix(detail, laceExpected(laceCover), far);
     if (capPatches) {
         // a cap is solid white water with a ragged edge -- never a translucent veil (owner: "looks
         // like a white oil film") and never the lace's veins. The edge is the slow mottle, the
