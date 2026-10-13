@@ -85,17 +85,23 @@ fn rf_micro(xz: vec2<f32>) -> f32 {
     return -smoothstep(0.5, 0.85, field) * 0.07 + (rf_noise(xz / 3.1) - 0.5) * 0.06 + (rf_noise(xz / 0.9) - 0.5) * 0.012;
 }
 
+// a mod n in [0, n), spelled out per component: the vector `%` chain this was written with mapped a
+// third of the window's slots to the wrong cells on the GPU (the field repeated every 128 cells; GPU
+// test rain_flow_depth_field_on_a_slope, 2026-10-14)
+fn rf_mod(a: i32, n: i32) -> i32 {
+    let r = a - (a / n) * n;
+    return select(r, r + n, r < 0);
+}
+
 fn rf_slot_of(abs_cell: vec2<i32>) -> u32 {
     let n = i32(rp.n);
-    let s = ((abs_cell % n) + n) % n;
-    return u32(s.y) * rp.n + u32(s.x);
+    return u32(rf_mod(abs_cell.y, n)) * rp.n + u32(rf_mod(abs_cell.x, n));
 }
 
 // the absolute cell slot (sx, sz) stands for now
 fn rf_abs_of(slot: vec2<i32>) -> vec2<i32> {
     let n = i32(rp.n);
-    let o = ((rp.origin % n) + n) % n;
-    let rel = ((slot - o) % n + n) % n;
+    let rel = vec2<i32>(rf_mod(slot.x - rf_mod(rp.origin.x, n), n), rf_mod(slot.y - rf_mod(rp.origin.y, n), n));
     return rp.origin + rel;
 }
 
@@ -146,8 +152,10 @@ fn cs_flux(@builtin(global_invocation_id) gid: vec3<u32>) {
     var nb = array<vec2<i32>, 4>(vec2<i32>(-1, 0), vec2<i32>(1, 0), vec2<i32>(0, -1), vec2<i32>(0, 1));
     for (var k = 0; k < 4; k++) {
         let o = c + nb[k];
-        // the window's edge is a wall: water neither leaves nor enters through it
-        var dh = 0.0;
+        // the window's edge drains: water leaves through it at its own depth's head and is gone
+        // (it ran on beyond the simulated ground). A wall there pooled every slope's runoff into a
+        // straight-edged lake along the window (capture, 2026-10-13).
+        var dh = d;
         if (rf_inside(o)) { dh = h - rf_level(o); }
         f[k] = max(0.0, f[k] + rp.dt * RF_G * a * dh);
     }

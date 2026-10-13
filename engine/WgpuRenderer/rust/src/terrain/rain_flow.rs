@@ -8,9 +8,13 @@
 
 use crate::ffi::WgrTerrainParams;
 
-/// Cells per side and their size: a 128 m window at 25 cm.
-pub const N: u32 = 512;
-pub const CELL: f32 = 0.25;
+/// Cells per side and their size: a 128 m window at 1/3 m. (512 at 25 cm measured 0.85 ms of GPU
+/// frame in rain, 22.07 vs 21.21 ms median, Everon field, 2026-10-13: too much for puddles.)
+pub const N: u32 = 384;
+pub const CELL: f32 = 128.0 / 384.0;
+/// After the rain stops the water keeps flowing and drying this long (s), then the simulation
+/// stops (no cost in dry weather) and the terrain is back to its own wetness.
+pub const DRY_AFTER: f32 = 600.0;
 /// Rain at full strength (m/s): ~50x a real downpour, so puddles gather in minutes, not hours.
 pub const RAIN_RATE: f32 = 3.0e-4;
 /// The share of the rain the soil takes while it falls, and what it keeps taking afterwards (m/s).
@@ -57,8 +61,13 @@ pub struct RainFlow {
     binds: Vec<wgpu::BindGroup>,
     heightmap_gen: u64,
     origin: [i32; 2],
+    /// the origin the slots were last validated for (validate only when the window moved)
+    validated: Option<[i32; 2]>,
     last_time: Option<f32>,
+    /// game seconds since the last rain (DRY_AFTER stops the simulation)
+    dry_for: f32,
     active: bool,
+    frames: u64,
 }
 
 impl RainFlow {
@@ -137,7 +146,7 @@ impl RainFlow {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
                 size,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             })
         };
@@ -150,7 +159,7 @@ impl RainFlow {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let ubos = (0..MAX_SUBSTEPS)
@@ -177,8 +186,11 @@ impl RainFlow {
             binds: Vec::new(),
             heightmap_gen: u64::MAX,
             origin: [0, 0],
+            validated: None,
             last_time: None,
+            dry_for: f32::INFINITY,
             active: false,
+            frames: 0,
         }
     }
 
@@ -207,9 +219,20 @@ impl RainFlow {
         params: &WgrTerrainParams,
         cam_xz: [f32; 2],
     ) {
-        self.active = enabled() && params.hm_width > 1;
+        let raining = params._pad2 > 0.0;
+        let dt_seen = match self.last_time {
+            Some(t) if params.time >= t => (params.time - t).min(5.0),
+            _ => 0.0,
+        };
+        self.dry_for = if raining { 0.0 } else { self.dry_for + dt_seen };
+        self.active = enabled() && params.hm_width > 1 && self.dry_for < DRY_AFTER;
         if !self.active {
-            self.last_time = None;
+            self.last_time = Some(params.time);
+            // the water is gone: a later shower starts from dry ground
+            if self.validated.is_some() {
+                encoder.clear_buffer(&self.keys, 0, None);
+                self.validated = None;
+            }
             return;
         }
         if self.binds.is_empty() || self.heightmap_gen != heightmap_gen {
@@ -235,6 +258,7 @@ impl RainFlow {
             // a new heightmap (another world, a crater) invalidates every slot's cached ground
             if self.heightmap_gen != u64::MAX {
                 encoder.clear_buffer(&self.keys, 0, None);
+                self.validated = None;
             }
             self.heightmap_gen = heightmap_gen;
         }
@@ -278,7 +302,7 @@ impl RainFlow {
                 timestamp_writes: None,
             });
             pass.set_bind_group(0, &self.binds[s as usize], &[]);
-            if s == 0 {
+            if s == 0 && self.validated != Some(self.origin) {
                 pass.set_pipeline(&self.validate);
                 pass.dispatch_workgroups(groups, groups, 1);
             }
@@ -288,6 +312,15 @@ impl RainFlow {
             pass.dispatch_workgroups(groups, groups, 1);
         }
         encoder.pop_debug_group();
+        self.validated = Some(self.origin);
+        self.frames += 1;
+        if self.frames % 600 == 1 {
+            eprintln!(
+                "[wgr] rain flow: window {:.1},{:.1} +{:.0} m, camera {:.1},{:.1}, rain {:.2}, {} substeps of {:.3} s",
+                self.origin[0] as f32 * CELL, self.origin[1] as f32 * CELL, N as f32 * CELL, cam_xz[0], cam_xz[1],
+                params._pad2, substeps, dt
+            );
+        }
     }
 }
 
@@ -296,6 +329,133 @@ mod tests {
     #[test]
     fn params_layout_matches_the_wgsl_struct() {
         assert_eq!(std::mem::size_of::<super::RainParams>(), 64);
+    }
+
+    /// Runs the real passes on a synthetic slope with a shallow bowl, five minutes of rain, and
+    /// writes the depth field to RAIN_FLOW_PGM (default: the temp dir). Ignored: a look, not a gate.
+    #[test]
+    #[ignore]
+    fn rain_flow_depth_field_on_a_slope() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
+            eprintln!("skipped: no adapter");
+            return;
+        };
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+        // 64 x 64 heights at 12.5 m: a 2 % slope down +x with a 1.5 m deep bowl at (400, 420)
+        let (w, h, grid) = (64u32, 64u32, 12.5f32);
+        let mut heights = Vec::with_capacity((w * h) as usize);
+        for z in 0..h {
+            for x in 0..w {
+                let (wx, wz) = (x as f32 * grid, z as f32 * grid);
+                let bowl = -1.5 * (-(((wx - 400.0).powi(2) + (wz - 420.0).powi(2)) / (2.0 * 30.0f32.powi(2)))).exp();
+                heights.push(50.0 - wx * 0.02 + bowl);
+            }
+        }
+        let hm = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            hm.as_image_copy(),
+            bytemuck::cast_slice(&heights),
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: Some(h) },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        let hm_view = hm.create_view(&Default::default());
+        let mut params = <crate::ffi::WgrTerrainParams as bytemuck::Zeroable>::zeroed();
+        params.terrain_grid = grid;
+        params.hm_width = w;
+        params.hm_height = h;
+        params.sea_level = -100.0;
+        params._pad2 = 1.0;
+        let mut flow = super::RainFlow::new(&device);
+        let cam = [410.0, 400.0];
+        for frame in 0..(300 * 30) {
+            params.time = frame as f32 / 30.0;
+            let mut enc = device.create_command_encoder(&Default::default());
+            flow.step(&device, &queue, &mut enc, &hm_view, 1, &params, cam);
+            queue.submit([enc.finish()]);
+            if frame % 300 == 0 {
+                let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            }
+        }
+        // read the output texture back
+        let n = super::N;
+        let row = n * 8;
+        let buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: (row * n) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut enc = device.create_command_encoder(&Default::default());
+        enc.copy_texture_to_buffer(
+            flow.view().texture().as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buf,
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(n) },
+            },
+            wgpu::Extent3d { width: n, height: n, depth_or_array_layers: 1 },
+        );
+        queue.submit([enc.finish()]);
+        buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let data = buf.slice(..).get_mapped_range();
+        let px: &[u16] = bytemuck::cast_slice(&data);
+        let f16 = |b: u16| -> f32 {
+            let (s, e, m) = ((b >> 15) as i32, ((b >> 10) & 31) as i32, (b & 1023) as f32);
+            let v = if e == 0 { m / 1024.0 * 2f32.powi(-14) } else { (1.0 + m / 1024.0) * 2f32.powi(e - 15) };
+            if s == 1 { -v } else { v }
+        };
+        let depth: Vec<f32> = (0..(n * n) as usize).map(|i| f16(px[i * 4])).collect();
+        // the cached ground per slot, to tell the sim from its input
+        let gbuf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: (n * n * 4) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut enc = device.create_command_encoder(&Default::default());
+        enc.copy_buffer_to_buffer(&flow.ground, 0, &gbuf, 0, (n * n * 4) as u64);
+        queue.submit([enc.finish()]);
+        gbuf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let gdata = gbuf.slice(..).get_mapped_range();
+        let ground: &[f32] = bytemuck::cast_slice(&gdata);
+        let (gmin, gmax) = ground.iter().fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
+        eprintln!("ground: {gmin:.3} .. {gmax:.3}; slot (0,0) {:.3}, (128,0) {:.3}, (256,0) {:.3}, (0,128) {:.3}",
+                  ground[0], ground[128], ground[256], ground[128 * n as usize]);
+        if let Ok(dir) = std::env::var("RAIN_FLOW_RAW") {
+            std::fs::write(format!("{dir}/ground.bin"), bytemuck::cast_slice(ground)).unwrap();
+            std::fs::write(format!("{dir}/depth.bin"), bytemuck::cast_slice(&depth)).unwrap();
+            std::fs::write(format!("{dir}/origin.txt"), format!("{} {} {}", flow.origin[0], flow.origin[1], n)).unwrap();
+        }
+        let max = depth.iter().cloned().fold(0.0f32, f32::max);
+        let wet = depth.iter().filter(|d| **d > 0.003).count();
+        eprintln!("rain flow: max depth {max:.3} m, {wet} of {} cells over 3 mm", depth.len());
+        // the image in WINDOW order (slot -> absolute cell), so the seam would show as a seam
+        let origin = flow.origin;
+        let mut img = vec![0u8; (n * n) as usize];
+        for z in 0..n as i32 {
+            for x in 0..n as i32 {
+                let (ax, az) = (origin[0] + x, origin[1] + z);
+                let s = (az.rem_euclid(n as i32) * n as i32 + ax.rem_euclid(n as i32)) as usize;
+                img[(z * n as i32 + x) as usize] = ((depth[s] / 0.05).clamp(0.0, 1.0) * 255.0) as u8;
+            }
+        }
+        let path = std::env::var("RAIN_FLOW_PGM")
+            .unwrap_or_else(|_| std::env::temp_dir().join("rain_flow.pgm").to_string_lossy().into_owned());
+        let mut pgm = format!("P5\n{n} {n}\n255\n").into_bytes();
+        pgm.extend_from_slice(&img);
+        std::fs::write(&path, pgm).unwrap();
+        eprintln!("wrote {path}");
     }
 
     #[test]

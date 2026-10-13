@@ -49,6 +49,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/World/Scene/InsideViewPass.hpp>
 #include <Poseidon/World/Scene/AlphaSortOrder.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
+#include <Poseidon/World/Entities/Infantry/SwimView.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 // MAT-048: `render::GBlendSectionDepthReadOnly`, set around the object-blend branch in
 // DrawObjectsAndShadowsPass2.  Previously reached only transitively (via RenderFlags.hpp for
@@ -689,6 +690,13 @@ void Scene::DrawRain()
     // compared against the particle rain on a clear day; -1 means "follow the weather".
     float density = GRain.LegacyDensityOverride() >= 0.0f ? GRain.LegacyDensityOverride()
                                                           : GetLandscape()->GetRainDensity();
+    // the screen-space rain layer stays above the water too (see RainSystem::UpdateAndDraw)
+    if (const Camera* camera = GetCamera())
+    {
+        const Vector3 eye = camera->Position();
+        if (eye.Y() < SwimWaterSurfaceY(eye.X(), eye.Z()))
+            return;
+    }
     if (density >= 0.1)
     {
         Vector3Val dir = GetCamera()->Direction();

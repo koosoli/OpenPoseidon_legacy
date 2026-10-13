@@ -6,6 +6,7 @@
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/World/Effects/BuildingInterior.hpp>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp>
+#include <Poseidon/World/Entities/Infantry/SwimView.hpp>
 #include <Poseidon/World/Entities/Vehicles/House.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -602,7 +603,8 @@ void RainSystem::Simulate(float deltaT)
         // -- fall ---------------------------------------------------------
         drop.position = nextPosition;
 
-        float ground = query.GroundHeight(drop.position.X(), drop.position.Z());
+        // the sea's surface is where a drop over it ends (the seabed was: rain fell through the water)
+        float ground = std::max(query.GroundHeight(drop.position.X(), drop.position.Z()), GLandscape->GetSeaLevel());
         if (nearShell)
         {
             // Under a shell the terrain is not what the drop lands on: the
@@ -823,6 +825,18 @@ void RainSystem::UpdateAndDraw()
     if (GScene == nullptr || GLandscape == nullptr)
     {
         return;
+    }
+    // No rain under water (owner, 2026-10-13: "it is raining under water which is a bug"): a camera
+    // below the surface draws none; above it, drops end on the water (Simulate), not on the seabed.
+    if (const Camera* camera = GScene->GetCamera())
+    {
+        const Vector3 eye = camera->Position();
+        if (eye.Y() < SwimWaterSurfaceY(eye.X(), eye.Z()))
+        {
+            _drops.clear();
+            _splashes.clear();
+            return;
+        }
     }
 
     if (_forceWeatherRain)
