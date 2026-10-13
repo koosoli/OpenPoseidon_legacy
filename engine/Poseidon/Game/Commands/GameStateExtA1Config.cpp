@@ -250,6 +250,19 @@ GameValue A1Max(const GameState*, GameValuePar oper1, GameValuePar oper2)
 GameValue A1TypeName(const GameState*, GameValuePar oper1)
 {
     const GameType t = oper1.GetType();
+    // Arma 2 handles that are tagged strings here.
+    if (t == GameString)
+    {
+        const RString s = oper1;
+        static const struct
+        {
+            const char* tag;
+            const char* name;
+        } tagged[] = {{"::LOC::", "LOCATION"}, {"::TASK::", "TASK"}, {"::DIARY::", "DIARY_RECORD"}, {"::NS::", "NAMESPACE"}};
+        for (const auto& k : tagged)
+            if (strncmp(s, k.tag, strlen(k.tag)) == 0)
+                return GameValue(RString(k.name));
+    }
     const char* name = t == GameScalar   ? "SCALAR"
                        : t == GameBool   ? "BOOL"
                        : t == GameArray  ? "ARRAY"

@@ -546,7 +546,9 @@ GameValue ListCountUnknown(const GameState* state, GameValuePar oper1, GameValue
     return (float)ListCountSideH(oper2, GetObject(oper1), &AICenter::IsUnknown);
 }
 
-GameValue ObjGetType(const GameState* state, GameValuePar oper1)
+// The engine's class name of an object; vehicles imported from an Arma 1/2 config carry
+// the generated "A1x_" prefix here.
+RString ObjGetTypeRaw(GameValuePar oper1)
 {
     Object* obj = GetObject(oper1);
     Entity* ent = dyn_cast<Entity>(obj);
@@ -559,6 +561,16 @@ GameValue ObjGetType(const GameState* state, GameValuePar oper1)
             type = etype->GetName();
         }
     }
+    return type;
+}
+
+GameValue ObjGetType(const GameState* state, GameValuePar oper1)
+{
+    RString type = ObjGetTypeRaw(oper1);
+    // Scripts compare typeOf with the mission's own class names ("T72_INS"), not the
+    // name the import gave the class.
+    if (Poseidon::Arma1Compat::Active() && _strnicmp(type, "A1x_", 4) == 0)
+        type = RString((const char*)type + 4);
     return type;
 }
 

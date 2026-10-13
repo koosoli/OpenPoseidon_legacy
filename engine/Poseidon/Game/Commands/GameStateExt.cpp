@@ -978,10 +978,12 @@ static bool CfgDerived(const ParamEntry* vehicles, const char* type, const char*
     return tc && bc && (tc == bc || tc->IsDerivedFrom(*bc));
 }
 
+RString ObjGetTypeRaw(GameValuePar oper1); // GameStateExtGrp.cpp
+
 static GameValue A1IsKindOf(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     // Arma 2: "className" isKindOf "Base" asks about a config class, not an object.
-    const RString type = oper1.GetType() == GameString ? static_cast<RString>(oper1) : static_cast<RString>(ObjGetType(state, oper1));
+    const RString type = oper1.GetType() == GameString ? static_cast<RString>(oper1) : ObjGetTypeRaw(oper1);
     const RString base = oper2;
     if (type.GetLength() == 0 || base.GetLength() == 0)
         return GameValue(false);

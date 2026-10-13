@@ -103,6 +103,10 @@ GameValue GroupCreate(const GameState* state, GameValuePar oper1);
 GameValue SideCivilian(const GameState* state);
 GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 
+GameValue VehProcessAction(const GameState* state, GameValuePar oper1, GameValuePar oper2); // GameStateExtGrp.cpp
+GameValue ObjVehicle(const GameState* state, GameValuePar oper1);                         // GameStateExtUi.cpp
+GameValue PlaySound(const GameState* state, GameValuePar oper1);                          // GameStateExtUi.cpp
+
 namespace
 {
 float Now()
@@ -1225,6 +1229,12 @@ GameValue A2IsNullHandle(const GameState*, GameValuePar oper1)
     return GameValue(static_cast<float>(oper1) < 0);
 }
 
+// ctrlShown control: a control handle that exists is taken as shown.
+GameValue A2CtrlShown(const GameState*, GameValuePar oper1)
+{
+    return GameValue(static_cast<float>(oper1) >= 0);
+}
+
 GameValue A2DeleteCollection(const GameState* state, GameValuePar oper1)
 {
     return VehDelete(state, oper1);
@@ -1404,6 +1414,29 @@ GameValue A2ObjNullUnary(const GameState*, GameValuePar)
     return GameValueExt((Object*)nullptr);
 }
 
+
+// playSound [name, isSpeech] (Arma 2): the sound name is what counts here.
+GameValue A2PlaySoundArray(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& a = oper1;
+    if (a.Size() < 1 || a[0].GetType() != GameString)
+        return NOTHING;
+    return PlaySound(state, a[0]);
+}
+
+// moveOut unit: the unit leaves its vehicle (as the "GetOut" action).
+GameValue A2MoveOut(const GameState* state, GameValuePar oper1)
+{
+    const GameValue veh = ObjVehicle(state, oper1);
+    if (GetObject(veh) == GetObject(oper1))
+        return NOTHING;
+    GameValue args = state->CreateGameValue(GameArray);
+    GameArrayType& a = args;
+    a.Add(GameValue(RString("GetOut")));
+    a.Add(veh);
+    return VehProcessAction(state, oper1, args);
+}
+
 GameValue A2ObjNull(const GameState*)
 {
     return OBJECT_NULL;
@@ -1445,6 +1478,21 @@ Runtime::Location* LocationOf(GameValuePar v)
 GameValue LocationValue(int index)
 {
     return GameValue(RString((std::string(LocTag) + std::to_string(index)).c_str()));
+}
+
+// locationNull is a location handle that names no location.
+GameValue A2LocationNull(const GameState*)
+{
+    return LocationValue(-1);
+}
+
+// isNull on a location handle (other strings are not null).
+GameValue A2IsNullLocation(const GameState*, GameValuePar oper1)
+{
+    const RString s = oper1;
+    if (strncmp(s, LocTag, strlen(LocTag)) != 0)
+        return GameValue(false);
+    return GameValue(LocationOf(oper1) == nullptr);
 }
 
 void LoadWorldLocations(Runtime& rt)
@@ -1657,7 +1705,7 @@ GameValue A2NearestLocation(const GameState*, GameValuePar oper1)
 {
     const auto found = NearLocations(oper1, false);
     if (found.empty())
-        return GameValue(RString(""));
+        return LocationValue(-1);
     return LocationValue(found.front().second);
 }
 
@@ -2157,15 +2205,26 @@ void Arma2RuntimeSimulate()
         FsmStep(*rt.fsms[i]);
     UpdateAttachments(rt);
 
-    // Diagnostics: OP_A2_WATCH="var1,var2,..." logs those variables every 10 s of game time.
+    // Diagnostics: OP_A2_WATCH="var1,var2,..." logs those variables every OP_A2_PERIOD s of game time.
     static const std::string watch = [] {
         const char* e = std::getenv("OP_A2_WATCH");
         return std::string(e ? e : "");
     }();
+    // OP_A2_EVAL="expression" is evaluated and logged at the same times; OP_A2_PERIOD sets
+    // the interval in seconds (default 10).
+    static const std::string eval = [] {
+        const char* e = std::getenv("OP_A2_EVAL");
+        return std::string(e ? e : "");
+    }();
+    static const float period = [] {
+        const char* e = std::getenv("OP_A2_PERIOD");
+        const float p = e ? static_cast<float>(atof(e)) : 10.0f;
+        return p > 0.05f ? p : 10.0f;
+    }();
     static float nextWatch = 0;
-    if (!watch.empty() && (Now() >= nextWatch || Now() + 1 < nextWatch - 10))
+    if ((!watch.empty() || !eval.empty()) && (Now() >= nextWatch || Now() + 1 < nextWatch - period))
     {
-        nextWatch = Now() + 10;
+        nextWatch = Now() + period;
         GameState* gstate = GWorld->GetGameState();
         size_t pos = 0;
         while (pos < watch.size())
@@ -2181,11 +2240,6 @@ void Arma2RuntimeSimulate()
             }
             pos = end + 1;
         }
-        // OP_A2_EVAL="expression": evaluated and logged at the same times.
-        static const std::string eval = [] {
-            const char* e = std::getenv("OP_A2_EVAL");
-            return std::string(e ? e : "");
-        }();
         if (!eval.empty())
         {
             const GameValue v = gstate->EvaluateMultiple(eval.c_str());
@@ -2216,7 +2270,7 @@ const GameNular A2Nular[] = {
     GameNular(GameScalar, "safeZoneH", A2SafeZoneW),
     GameNular(GameScalar, "safeZoneXAbs", A2Zero),
     GameNular(GameScalar, "safeZoneWAbs", A2SafeZoneW),
-    GameNular(GameObject, "locationNull", A2ObjNull),
+    GameNular(GameString, "locationNull", A2LocationNull),
     GameNular(GameNothing, "disableSerialization", A2NothingNular),
     GameNular(GameNothing, "endLoadingScreen", A2NothingNular),
     GameNular(GameNothing, "clearRadio", A2NothingNular),
@@ -2283,6 +2337,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameNothing, "deleteLocation", A2DeleteLocation, GameString),
     GameFunction(GameString, "text", A2Text, GameString),
     GameFunction(GameArray, "locationPosition", A2LocationPosition, GameString),
+    GameFunction(GameArray, "position", A2LocationPosition, GameString),
     GameFunction(GameArray, "size", A2LocSize, GameString),
     GameFunction(GameString, "type", A2LocType, GameString),
     GameFunction(GameArray, "nearestLocations", A2NearestLocations, GameArray),
@@ -2300,6 +2355,12 @@ const GameFunction A2Unary[] = {
     GameFunction(GameArray, "toArray", A2ToArray, GameString),
     GameFunction(GameString, "with", A2With, GameString),
     GameFunction(GameNothing, "hideObject", A2NothingUnary, GameObject),
+    GameFunction(GameScalar, "inputAction", A2ZeroUnary, GameString),
+    GameFunction(GameNothing, "showHUD", A2NothingUnary, GameBool),
+    GameFunction(GameNothing, "moveOut", A2MoveOut, GameObject),
+    GameFunction(GameNothing, "playSound", A2PlaySoundArray, GameArray),
+    GameFunction(GameObject, "unitBackpack", A2ObjNullUnary, GameObject),
+    GameFunction(GameNothing, "removeBackpack", A2NothingUnary, GameObject),
     GameFunction(GameNothing, "ctrlMapAnimCommit", A2NothingUnary, GameAny),
     GameFunction(GameString, "keyName", A2TextLogEmpty, GameScalar),
     GameFunction(GameScalar, "currentVisionMode", A2ZeroUnary, GameObject),
@@ -2312,6 +2373,8 @@ const GameFunction A2Unary[] = {
     GameFunction(GameString, "actionKeysImages", A2TextLogEmpty, GameString | GameArray),
     GameFunction(GameBool, "triggerActivated", A2TriggerActivated, GameObject),
     GameFunction(GameBool, "isNull", A2IsNullHandle, GameScalar),
+    GameFunction(GameBool, "ctrlShown", A2CtrlShown, GameScalar),
+    GameFunction(GameBool, "isNull", A2IsNullLocation, GameString),
     GameFunction(GameArray, "items", A2EmptyArrayUnary, GameObject),
     GameFunction(GameArray, "assignedItems", A2EmptyArrayUnary, GameObject),
     GameFunction(GameArray, "triggerArea", A2TriggerArea, GameObject),
@@ -2319,6 +2382,8 @@ const GameFunction A2Unary[] = {
     GameFunction(GameString, "mapGridPosition", A2MapGridPosition, GameObject | GameArray),
     GameFunction(GameScalar, "moveTime", A2ZeroUnary, GameObject),
     GameFunction(GameNothing, "openMap", A2NothingUnary, GameBool | GameArray),
+    GameFunction(GameNothing, "addSwitchableUnit", A2NothingUnary, GameObject),
+    GameFunction(GameNothing, "removeSwitchableUnit", A2NothingUnary, GameObject),
     GameFunction(GameArray, "hcAllGroups", A2EmptyArrayUnary, GameObject),
     GameFunction(GameScalar, "lnbCurSelRow", A2MinusOneUnary, GameScalar | GameArray),
     GameFunction(GameNothing, "lnbClear", A2NothingUnary, GameScalar | GameArray),
@@ -2397,6 +2462,9 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "setDirection", function, A2NothingBinary, GameString, GameScalar),
     GameOperator(GameNothing, "moveInCargo", function, A2MoveInCargoIndex, GameObject, GameArray),
     GameOperator(GameNothing, "enableSimulation", function, A2NothingBinary, GameObject, GameBool),
+    GameOperator(GameNothing, "hideObject", function, A2NothingBinary, GameObject, GameBool),
+    GameOperator(GameNothing, "forceWalk", function, A2NothingBinary, GameObject, GameBool),
+    GameOperator(GameNothing, "addBackpack", function, A2NothingBinary, GameObject, GameString),
     GameOperator(GameNothing, "hcSetGroup", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameNothing, "hcRemoveGroup", function, A2NothingBinary, GameObject, GameGroup),
     GameOperator(GameNothing, "cutText", function, A2CutTextLayer, GameScalar, GameArray),

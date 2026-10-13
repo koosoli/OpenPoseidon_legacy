@@ -754,7 +754,11 @@ GameValue StrFormat(const GameState* state, GameValuePar oper1)
                 continue;
             }
             const GameValue& value = array[index];
-            RString text = (value.GetType() == GameString) ? value.GetData()->GetString() : value.GetText();
+            RString text;
+            if ((value.GetNil() || !value.GetData()) && Poseidon::Arma1Compat::Active())
+                text = "any"; // Arma 1/2 format a nil value as "any"
+            else
+                text = (value.GetType() == GameString) ? value.GetData()->GetString() : value.GetText();
             result.append(static_cast<const char*>(text), text.GetLength());
         }
         else

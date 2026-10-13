@@ -703,7 +703,16 @@ RString FindScript(RString name)
         return fullname;
     }
 
+    // Arma 1/2 also take a path inside the game's archives without its leading
+    // backslash: exec "ca\air2\halo\data\Scripts\HALO_init.sqs"
+    if (Poseidon::Arma1Compat::Active() && QIFStreamB::FileExist(name))
+    {
+        return name;
+    }
+
     Poseidon::Foundation::WarningMessage("Script %s not found", (const char*)name);
+    if (Poseidon::Arma1Compat::Active())
+        LOG_WARN(Script, "Script {} not found", (const char*)name);
     return "";
 }
 

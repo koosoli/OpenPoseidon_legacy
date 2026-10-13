@@ -1003,6 +1003,8 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
             {
                 if (AutoTest)
                 {
+                    LOG_INFO(Core, "AUTO-TEST mission ended: player killed ({}.{})", (const char*)Glob.header.filename,
+                             (const char*)Glob.header.worldname);
                     GWorld->DestroyMap(IDC_OK);
                     Exit(IDC_MAIN_QUIT);
                 }
@@ -1032,6 +1034,8 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
         GWorld->DestroyMap(IDC_OK);
         if (AutoTest)
         {
+            LOG_INFO(Core, "AUTO-TEST mission ended: end mode {} ({}.{})", static_cast<int>(GWorld->GetEndMode()),
+                     (const char*)Glob.header.filename, (const char*)Glob.header.worldname);
             Exit(IDC_MAIN_QUIT);
         }
         else

@@ -166,6 +166,9 @@ const EnumName* Poseidon::Foundation::GetEnumNames(AI::Formation dummy)
                                               EnumName(AI::FormEcholonRight, "ECH RIGHT"),
                                               EnumName(AI::FormVee, "VEE"),
                                               EnumName(AI::FormLine, "LINE"),
+                                              // Arma 2 formations read as their nearest CWA formation
+                                              EnumName(AI::FormWedge, "DIAMOND"),
+                                              EnumName(AI::FormColumn, "FILE"),
                                               EnumName()};
     return FormationNames;
 }
@@ -176,7 +179,9 @@ const EnumName* Poseidon::Foundation::GetEnumNames(Rank dummy)
     static const EnumName RankNames[] = {
         EnumName(RankUndefined, "UNDEFINED"), EnumName(RankPrivate, "PRIVATE"),     EnumName(RankCorporal, "CORPORAL"),
         EnumName(RankSergeant, "SERGEANT"),   EnumName(RankLieutnant, "LIEUTNANT"), EnumName(RankCaptain, "CAPTAIN"),
-        EnumName(RankMajor, "MAJOR"),         EnumName(RankColonel, "COLONEL"),     EnumName()};
+        EnumName(RankMajor, "MAJOR"),         EnumName(RankColonel, "COLONEL"),
+        // Arma 1/2 missions spell it out; read only (a value is written with its first name).
+        EnumName(RankLieutnant, "LIEUTENANT"), EnumName()};
     return RankNames;
 }
 

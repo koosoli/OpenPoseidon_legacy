@@ -756,6 +756,24 @@ static GameValue ListSet(const GameState* state, GameValuePar oper1, GameValuePa
     return NOTHING;
 }
 
+// Thread-local storage for the value passed to exitWith { expr }.
+// Set by StringExitWith when the condition is true; read and cleared
+// by loop handlers (ForDoOp, StringRepeat) to propagate the exit value.
+static thread_local GameValue tls_exitWithValue;
+
+// exitWith in a called function leaves that function only: its value is the call's
+// value, and the caller carries on with its next statement.
+static GameValue CallResult(const GameState* state, GameValue ret)
+{
+    if (state->GetLastError() == EvalBreak)
+    {
+        ret = tls_exitWithValue;
+        tls_exitWithValue = GameValue();
+        const_cast<GameState*>(state)->SetError(EvalOK);
+    }
+    return ret;
+}
+
 static GameValue StringCall(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     GameVarSpace local(state->GetContext());
@@ -764,7 +782,7 @@ static GameValue StringCall(const GameState* state, GameValuePar oper1, GameValu
     RString expression = oper2;
     GameValue ret = state->EvaluateMultiple(expression);
     state->EndContext();
-    return ret;
+    return CallResult(state, ret);
 }
 
 static GameValue StringLocal(const GameState* state, GameValuePar oper1)
@@ -808,7 +826,7 @@ static GameValue StringCallNoArg(const GameState* state, GameValuePar oper1)
     RString expression = oper1;
     GameValue ret = state->EvaluateMultiple(expression);
     state->EndContext();
-    return ret;
+    return CallResult(state, ret);
 }
 
 static GameValue StringIgnore(const GameState* state, GameValuePar oper1)
@@ -816,10 +834,6 @@ static GameValue StringIgnore(const GameState* state, GameValuePar oper1)
     return NOTHING;
 }
 
-// Thread-local storage for the value passed to exitWith { expr }.
-// Set by StringExitWith when the condition is true; read and cleared
-// by loop handlers (ForDoOp, StringRepeat) to propagate the exit value.
-static thread_local GameValue tls_exitWithValue;
 
 static GameValue StringRepeat(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
@@ -1195,7 +1209,8 @@ static const GameOperator* GetDefaultBinary(int* outSize = nullptr)
         GameOperator(GameForTo, "step", function, ForStepOp, GameForTo, GameScalar),
         GameOperator(GameAny, "do", function, ForDoOp, GameForTo, GameString),
 
-        GameOperator(GameAny, "call", function, StringCall, GameVoid, GameString),
+        // Arma 2 accepts a command that returns nothing on the left: (_x kbAddTopic [..]) call RE
+        GameOperator(GameAny, "call", function, StringCall, GameVoid | GameNothing, GameString),
     };
     if (outSize)
     {

@@ -89,8 +89,9 @@ symbolised call stack. `OP_A2_WATCH="var,var"` and `OP_A2_EVAL="expr"` log value
 
 ## Results so far
 
-Every mission is played 25 s by `.a2build\run-a2-tests.ps1` (one log and one screenshot
-each). The `Templates\*` and `MPTemplates\*` folders are editor templates without a world
+Every mission is played by `.a2build\run-a2-tests.ps1` (one log and one screenshot
+each): 40 s from run 7 on. Until run 6 the screenshot, taken 20 s after the mission
+started loading, also ended the run, so missions played only about 10-20 s. The `Templates\*` and `MPTemplates\*` folders are editor templates without a world
 and are not counted.
 
 | Run | Build | Missions | Enter the mission | Without a script error | Hangs / crashes |
@@ -98,7 +99,69 @@ and are not counted.
 | 3 | `a142bf4` | 34 (Arma 2, partial) | 34 | 19 | 6 hangs (Warfare: `NeedsAmbulance`) |
 | 4 | `6651f0d` | 63 (Arma 2, incl. templates) | 50 | 23 | 0 |
 | 5 | `f4a567d` | 98 (Arma 2 + Operation Arrowhead) | 91 | 27 | 7 crashes (flag proxy, fixed `47c5b1c`), 5 OA campaign time-outs |
+| 6 | `516bc8b` | 98 (Arma 2 + Operation Arrowhead) | 98 | 63 | 1 stall (CE5A: pathfinding, guarded `534f5f3`) |
+| 7 | `4799c30` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 96 | 0 |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
 Takistan and Zargabad render; its bootcamp and scenarios start.
+
+Run 6 is the first with scripts as coroutines: the Operation Arrowhead campaign no
+longer times out (CE0-CE8 all enter and run), and every one of the 98 missions enters.
+What it found, fixed afterwards:
+
+- **Config strings were cut at 2 KB.** FSM states keep whole scripts in one string
+  (C1_IntoTheStorm's opening radio conversation is 5966 characters); the config parser's
+  word buffer ended them mid-block. Values are now read up to 256 KB.
+- **`exitWith` inside a `call`ed function** broke out of the caller as well, so
+  `_side call GetSideLetter` gave nil and the Warfare unit tables were built from
+  `<null>SOLDIER`. `call` now takes the exitWith value as its result.
+- **`typeOf`** returned the import's `A1x_` class name; scripts look it up in their own
+  class lists (C7B's convoy). It returns the mission's name now.
+- **Locations are their own type** (`typeName` = `LOCATION`, `locationNull`, `isNull`),
+  which `BIS_fnc_locations` relies on.
+- **Pathfinding:** the operative-path field map only walks fields on the map; a 60 s
+  stall in CE5A_Sandstorm was inside that loop.
+- Commands: `addSwitchableUnit`/`removeSwitchableUnit`, `ctrlShown`, `inputAction`,
+  `showHUD`, binary `hideObject`, `moveOut`, `forceWalk`, backpack commands.
+
+Run 7 (all 98 enter, 96 without a script error, none hangs) followed one more find:
+
+- **`rank="LIEUTENANT"`.** CWA spells the rank `LIEUTNANT`; the mission loader stops
+  reading a class at its first unknown enum value, so 236 Arma 2 units lost their name
+  and init line. In C1_IntoTheStorm that was the helicopter pilot: never put in the
+  seat, the Venom carrying the player fell into the sea. Arma 2's other spellings in the
+  shipped `mission.sqm` files (`AMBIENT LIFE`, `DIAMOND`, `FILE`, `GETIN NEAREST`,
+  `DISMISS`, `... SEIZED`) are read as the nearest CWA value, and an unknown value is
+  logged. C1 now flies its route with no script error.
+- `format` prints nil as `any`, `call` accepts a nothing value on its left.
+
+A rerun of the missions that ended early or had errors (build `877165b`, then `f02e242`)
+left no script error in any of them. Missions now say why they end on their own:
+
+- **SPE1_Jackal** starts with a HALO jump from an archive script given without its
+  leading backslash; `exec` did not find it, so the player started on the ground among
+  the enemy. Fixed: the player now falls from 2000 m (`bis_fnc_halo`), and in the
+  unattended test hits the ground at 36 s because nobody opens the parachute.
+- **MPE1_Dogfighters**: the player's A-10 starts in the air and, with nobody at the
+  controls, crashes after 9 s -- expected without input.
+- **MP_Deathmatch / MP_TeamDeathmatch / C7A_WarThatNeverWas** end by their own end
+  conditions in single player (end modes 3 / 2).
+
+The two missions left with an error: MP_Paradrop uses a variable it never sets
+(`_targetmarkerdir`; a mission bug, Arma 2 reports it too) and MP_WhenDiplomacyFails
+(Warfare `<null>SOLDIER`, fixed after the run).
+
+## Second machine (laptop, Intel Iris Xe), 2026-10-13
+
+Build `2e82aea` from the `Arma 2 / Windows game build` workflow, installed by hand into
+`ARMA Cold War Assault\Remastered` (Steam in `C:\Program Files (x86)`; Operation Arrowhead
+next to Arma 2 is found on its own).
+
+- **WGPU on Vulkan:** SP_EyeForEye loads and shows the briefing; on the first 3D frames
+  after "Continue" the driver reports `wgpu device lost (Unknown)` and the game exits
+  (code 1). Same with `OP_A2_FIBERS=0`, so not the scheduler. Renderer issue on this
+  integrated GPU, not Arma 2 specific.
+- **`--render gl33`:** SP_EyeForEye plays, no script error in the log, diary and tasks
+  created.
+- `WGPU_BACKEND=dx12` not yet tried.
