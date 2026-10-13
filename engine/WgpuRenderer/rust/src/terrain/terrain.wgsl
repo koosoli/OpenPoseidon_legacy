@@ -741,7 +741,9 @@ fn tw_rock(det: u32, abs_p: vec3<f32>, rel: vec3<f32>, n: vec3<f32>, h: f32, dwx
     col = mix(col, rockLight, smoothstep(0.5, 0.85, tone));
     col = mix(col, srgb_to_linear(vec3<f32>(0.44, 0.37, 0.30)), smoothstep(0.62, 0.8, mid.w + mcr * 0.3) * 0.18);
     // joints between the big blocks, fainter between plates
-    col = col * (smoothstep(0.05, 0.25, big.x) * 0.35 + 0.65) * (smoothstep(0.05, 0.25, mid.x) * 0.15 + 0.85);
+    // (OP: deeper joints than Tidewater's 0.35 / 0.15 -- its rock is cliff, lit edge-on; OFP's lies on
+    // gentle slopes under a high sun, where the cracks are what reads as stone)
+    col = col * (smoothstep(0.05, 0.25, big.x) * 0.5 + 0.5) * (smoothstep(0.05, 0.25, mid.x) * 0.28 + 0.72);
     // rain streaks down steep faces
     let sdiv = vec3<f32>(3.1, 41.0, 3.1);
     let sq = rel / sdiv + fract(cam / sdiv);
@@ -799,8 +801,10 @@ fn tw_rock(det: u32, abs_p: vec3<f32>, rel: vec3<f32>, n: vec3<f32>, h: f32, dwx
     let m0 = twd(det, qm, gm, hm).x;
     let mx = twd(det, qm + vec2<f32>(e, 0.0), gm, hm).x;
     let mz = twd(det, qm + vec2<f32>(0.0, e), gm, hm).x;
+    // (x3 over Tidewater's hd: on gentle ground the plates' tilt is the relief that shows; owner, "i also
+    // do not really see the new rock texture")
     let slope = (vec2<f32>(bx - b0, bz - b0) / (e * 27.0) * 0.25
-               + vec2<f32>(mx - m0, mz - m0) / (e * 6.1) * 0.07 * (midK * 0.6 + 0.4)) * w.y;
+               + vec2<f32>(mx - m0, mz - m0) / (e * 6.1) * 0.07 * (midK * 0.6 + 0.4)) * w.y * 3.0;
 
     var o: TwSand;
     o.albedo = ground_linear_to_srgb(max(col, vec3<f32>(0.0)));
