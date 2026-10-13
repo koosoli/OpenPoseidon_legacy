@@ -82,6 +82,7 @@ add_library(WgpuRenderer STATIC
     ReefLife.cpp
     BeachCritters.cpp
     BeachDebris.cpp
+    ProceduralTrees.cpp
     EarthTreeDetail.cpp
     TerrainWgpuEnfusionClutter.cpp
     TerrainWgpuNativeClutterMeshes.cpp

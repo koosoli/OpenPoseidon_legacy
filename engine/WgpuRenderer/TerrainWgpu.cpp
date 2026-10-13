@@ -4,6 +4,7 @@
 #include "ReefLife.hpp"
 #include "BeachCritters.hpp"
 #include "BeachDebris.hpp"
+#include "ProceduralTrees.hpp"
 #include "EarthTreeDetail.hpp"
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/SnowShelter.hpp>
@@ -4565,6 +4566,10 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         if (!_debris)
             _debris = std::make_unique<BeachDebris>(_engine, _renderer);
         _debris->Update(camera->Position());
+        // the owner's ez-tree test (Map editor tab), inert while it is off
+        if (!_ezTrees)
+            _ezTrees = std::make_unique<ProceduralTrees>(_engine, _renderer);
+        _ezTrees->Update(camera->Position());
     }
 }
 

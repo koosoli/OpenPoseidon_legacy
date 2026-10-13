@@ -167,6 +167,7 @@ class TerrainWgpu : public ITerrainRenderer
     std::unique_ptr<class ReefLife> _reef;
     std::unique_ptr<class BeachCritters> _crabs;
     std::unique_ptr<class BeachDebris> _debris;
+    std::unique_ptr<class ProceduralTrees> _ezTrees;
     std::unique_ptr<class EarthTreeDetail> _earthTreeDetail;
     float _surfaceGrid = 0.0f; // RFG-PBR: metres per native surface-map texel, 0 = none
     bool _earthTreeModels = false; // the game's own tree models carry the trees (PlaceEarthTreeModels)

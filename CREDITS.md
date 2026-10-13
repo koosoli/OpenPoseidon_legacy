@@ -111,6 +111,14 @@ port is listed here and in its decision record, with what was rewritten for this
 | Infantry hearing/report/order/suppression fixes, convoy/tank/aircraft/parachutist fixes, and optional spotting/hunting/exposure mechanisms | Malprave AI patches listed in `AI-MALPRAVE-01-ai-port-plan-20261004.md`; selected behavior ideas were inspired by OpenXRay. The unavailable upstream patch set prevents independent verification of that earlier source chain; no STALKER assets are included. |
 | Diagnostics layer: `--diag` event log, `diag_*` harness commands, overlay (`engine/Poseidon/Dev/Diag/OpDiag*`, hooks in World / Shots / Collisions / Dammage / VehicleAICombat / SoldierOldMove / ExpressExt / SoundScene / VehicleTypes / OptionsUI / DebugOverlay / CrashHandler); Cry of Fear parts stripped, pause / step / camera / overlay rewritten for this tree (`docs/roadmap/decisions/DIAG-01-malprave-diagnostics-20261003.md`) | `engine/Poseidon/Dev/Diag/MwDiag.cpp`, `MwDiag2.cpp`, `MwDiag7.cpp`, `MwDiag9.cpp`, `MwDiagHarness.cpp`, `MwDiagHarness2.cpp`, `MwDiagOverlay.cpp` (mwDiag) |
 
+### EZ-Tree (dgreenheck/ez-tree)
+
+`engine/WgpuRenderer/ProceduralTrees.cpp` (the owner's procedural-tree test, Map editor tab) is a
+port of the tree generator in [EZ-Tree](https://github.com/dgreenheck/ez-tree), `src/lib/tree.js`,
+`rng.js` and the presets in `src/lib/presets/` (oak, ash, aspen, pine, bush), MIT-licensed
+(Copyright (c) 2024 Daniel Greenheck). Only code and preset numbers were ported; the bark and leaf
+textures are generated procedurally and no EZ-Tree image is used.
+
 ### Tidewater (dgreenheck/tidewater)
 
 The *Tidewater Native* water backend (`engine/WgpuRenderer/rust/src/water_tw/`) is a
@@ -143,6 +151,8 @@ models, textures, cloud noise files) is used.
 | `BirdFlocks.cpp` (wgpu renderer, the seabirds around the camera) | `src/world/wildlife/BirdShapes.js` (species and the template), `BirdPose.js` (wing articulation), `Flight.js` (flight model), `BirdBatch.js` (plumage), `Birds.js` (behaviours) |
 | `EarthTreeDetail.cpp` (wgpu renderer, the whole-world trees near the camera) | `src/world/Vegetation.js` and `src/world/vegetation/PlantGeometry.js` (the broadleaf limbs, lobes and leaf-cluster cards, the conifer tiers, the outermost-first card order) |
 | `engine/Poseidon/World/Entities/Vehicles/Misc/ShipTidewater.cpp` (the small-boat float and drive model) | `src/player/BoatController.js` |
+| `BeachDebris.cpp` (wgpu renderer, shells, pebbles, driftwood and wrack on the beaches around the camera) | `src/world/debris/DebrisShapes.js` (shell, stone, driftwood and weed-mat shapes), `DebrisPlacement.js` (the wrack-line bands), `PebbleField.js` (the camera-following field) |
+| `scripts/default-content/generate_materials.py` (`tidewater` sand albedo) | `src/world/Terrain.js` (the beach-sand palette, drifts, grain, trodden patches, shell grit) |
 
 Written for OpenPoseidon, with no Tidewater counterpart (not ported; listed so the table above
 reads as complete): `water_tw/impacts.rs` and `water_tw/tw_impact.wgsl` (shells and bullets on
