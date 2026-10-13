@@ -1408,6 +1408,13 @@ void OperMap::CreateMap(EntityAI* veh, int xMin, int zMin, int xMax, int zMax)
 {
     int mask = MASK_AVOID_OBJECTS | MASK_PREFER_ROADS | MASK_USE_BUFFER;
 
+    // Only fields on the map exist; a bad end point (a huge or non-finite position)
+    // otherwise made this loop walk billions of cells that are all skipped.
+    xMin = std::max(xMin, 0);
+    zMin = std::max(zMin, 0);
+    xMax = std::min(xMax, static_cast<int>(LandRange) - 1);
+    zMax = std::min(zMax, static_cast<int>(LandRange) - 1);
+
     int i, j;
     for (i = xMin; i <= xMax; i++)
     {

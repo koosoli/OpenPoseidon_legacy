@@ -2127,6 +2127,11 @@ bool AIUnit::CreateNoRoadPath(Vector3Val from, Vector3Val pos, const IPaths* fro
     float zStart = fromOutside.Z();
     float xEnd = toOutside.X();
     float zEnd = toOutside.Z();
+    if (!std::isfinite(xStart) || !std::isfinite(zStart) || !std::isfinite(xEnd) || !std::isfinite(zEnd))
+    {
+        LOG_WARN(AI, "Unit {}: path with a non-finite end point refused", (const char*)GetDebugName());
+        return false;
+    }
 
     float xsf = xStart * InvOperItemGrid;
     float zsf = zStart * InvOperItemGrid;
@@ -2156,6 +2161,12 @@ bool AIUnit::CreateNoRoadPath(Vector3Val from, Vector3Val pos, const IPaths* fro
 #else
     const int border = 1;
 #endif
+
+    if ((xMax - xMin + 1) * (zMax - zMin + 1) > 400)
+    {
+        LOG_WARN(AI, "Unit {}: operative path over {}x{} fields ({:.0f},{:.0f} -> {:.0f},{:.0f})", (const char*)GetDebugName(),
+                 xMax - xMin + 1, zMax - zMin + 1, xStart, zStart, xEnd, zEnd);
+    }
 
     OperMap map;
     map.CreateMap(veh, xMin - border, zMin - border, xMax + border, zMax + border);
