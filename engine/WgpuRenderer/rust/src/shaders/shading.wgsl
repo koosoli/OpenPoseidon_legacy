@@ -658,6 +658,15 @@ fn shade(
     let raw = sun + local.diffuse;
     let lit = select(clamp(raw, vec3<f32>(0.0), vec3<f32>(1.0)), max(raw, vec3<f32>(0.0)), linear > 0.5);
     var rgb = albedo * lit;
+    // Object lighting diagnostics (WGR_OBJECT_DEBUG_VIEW=albedo|light): the albedo alone, or the
+    // light it receives (sun + sky + local, before albedo) at 1/8 -- to tell a dark texture from a
+    // dark light before reasoning about either.
+#ifdef OBJECT_DEBUG_ALBEDO
+    rgb = albedo;
+#endif
+#ifdef OBJECT_DEBUG_LIGHT
+    rgb = lit * 0.125;
+#endif
     rgb += select(clamp(local.specular, vec3<f32>(0.0), vec3<f32>(1.0)),
                   max(local.specular, vec3<f32>(0.0)), linear > 0.5);
     // Sun-only Blinn-Phong specular (untextured, additive, before the shadow multiply). The

@@ -112,6 +112,11 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
     // (magenta where a surface takes none). All flat-normal, AO 1. WGR_SATMAP_NEAR=1 applies the
     // surface's SatMapBlend at every distance instead of past DetailMaxDistance -- an open
     // question about Reforger's semantics, measured as a small change at the tree pose.
+    match std::env::var("WGR_OBJECT_DEBUG_VIEW").as_deref() {
+        Ok("albedo") => { defs.insert("OBJECT_DEBUG_ALBEDO".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        Ok("light") => { defs.insert("OBJECT_DEBUG_LIGHT".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        _ => {}
+    }
     if std::env::var("WGR_TERRAIN_DEBUG_DETAIL").as_deref() == Ok("1") {
         defs.insert("TERRAIN_DEBUG_DETAIL".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
