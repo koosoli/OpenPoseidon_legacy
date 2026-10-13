@@ -960,7 +960,15 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             // OFP's own image, for the enhancement lookups below (they go by its name)
             Texture* const source = colour;
             if (enf == nullptr && land.GetA3TerrainMaterial(i) == nullptr)
+            {
                 colour = TidewaterGroundLayer(land, colour);
+                // Tidewater's sand per pixel (terrain.wgsl tw_beach_sand): its share is in the
+                // layer's alpha -- written by the bake on a transition, 1 on a pure sand image
+                const std::string base = source ? TidewaterGround::BaseName(source->Name()) : std::string();
+                if (TidewaterGround::Enabled() && base != "pol" && TidewaterGround::Applies(base) &&
+                    (colour != source || base == "ps"))
+                    material.puddle_flags |= 0x10000u; // TWS_FLAG
+            }
             material.legacy = bindLayer(colour, false);
             material.satellite = material.legacy;
             if (colour != nullptr && enf == nullptr && land.GetA3TerrainMaterial(i) == nullptr)

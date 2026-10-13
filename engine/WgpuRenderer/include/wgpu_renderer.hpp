@@ -2829,7 +2829,7 @@ extern "C"
         float detail_fade;
         float legacy_detail_scale; // Repeats/metre for legacy_detail_normal; 0 = absent.
         float middle_color[3];
-        uint32_t puddle_flags; // Former padding: bit 0 ground receiver; bit 1 legacy/native soft soil; bits 8..13 authored soft-soil slots.
+        uint32_t puddle_flags; // Former padding: bit 0 ground receiver; bit 1 legacy/native soft soil; bits 8..13 authored soft-soil slots; bit 16 Tidewater sand share in the legacy layer alpha (TWS_FLAG).
     };
     /* 20 header words, then the satellite/mask UVs and six per-slot UVs of two
      * vec4 each, then the Enfusion block. The WGSL `TerrainMaterial` in terrain.wgsl

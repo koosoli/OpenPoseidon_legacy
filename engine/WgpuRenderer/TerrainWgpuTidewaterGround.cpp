@@ -234,6 +234,10 @@ bool TidewaterGround::Recolour(const std::string& base, DecodedImage& image) con
                 }
                 share = total > 1e-6f ? mine / total : 0.0f;
             }
+            // the sand share rides in alpha: the terrain shader builds Tidewater's sand per pixel
+            // from it (tw_beach_sand, TWS_FLAG). OFP's ground layers are opaque, so nothing read it.
+            if (!field)
+                px[3] = uint8_t(std::clamp(share * 255.0f + 0.5f, 0.0f, 255.0f));
             if (share <= 0.002f)
                 continue;
             const float u = (x + 0.5f) / w, v = (y + 0.5f) / h;

@@ -453,6 +453,197 @@ fn sample_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     return textureSampleGrad(ground[layer], ground_samp, tile_uv, ddx, ddy).rgb;
 }
 
+// --- (OP, 2026-10-13) Tidewater's beach sand, per pixel -------------------------------------------
+//
+// Owner: "the sand looks nothing like in tidewater" (matthewcosier/tidewater, island-expansion,
+// src/world/Terrain.js). The baked layer (TerrainWgpuTidewaterGround.cpp) only recoloured OFP's
+// sand image -- a 12.5 m photo stretched over the cell, its own grain blurred to nothing. Tidewater's
+// sand is built per pixel: pale coral sand in macro drifts, grain at two scales, wind ripples, shell
+// grit and a wrack line on the high-water band, damp sand below the berm, swash marks, ripple
+// fields on the seabed, and a micro relief that lights all of it. This is that, ported.
+//
+// The layer's alpha carries the sand share (1 on pure sand, per pixel on a transition), read only
+// where the material sets TWS_FLAG. Tidewater reads its noise from a baked detail texture; here it
+// is value noise at the same scales, the fine octaves on a 64 m wrapped lattice (f32 keeps
+// millimetres there), and every term finer than a few pixels fades to its mean by footprint --
+// the ripples and the grain must not alias (DLSS turns aliasing into drift).
+const TWS_FLAG: u32 = 0x10000u;
+
+fn cell_sand(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>, ddx: vec2<f32>, ddy: vec2<f32>) -> f32 {
+    let material = terrain_materials[entry & CELL_LAYER_MASK];
+    if ((material.puddle_flags & TWS_FLAG) == 0u) { return 0.0; }
+    if ((entry & CELL_CLAMPED) != 0u) {
+        return textureSampleGrad(ground[material.legacy], ground_clamp_samp, tile_uv - cell, ddx, ddy).a;
+    }
+    return textureSampleGrad(ground[material.legacy], ground_samp, tile_uv, ddx, ddy).a;
+}
+
+fn tws_hash(i: vec2<i32>, seed: u32) -> f32 {
+    var h = u32(i.x) * 374761393u + u32(i.y) * 668265263u + seed * 2246822519u;
+    h = (h ^ (h >> 13u)) * 1274126177u;
+    return f32((h ^ (h >> 16u)) & 0xffffffu) / 16777215.0;
+}
+
+// value noise, 0..1; `period` > 0 wraps the lattice (cells)
+fn tws_noise(p: vec2<f32>, seed: u32, period: i32) -> f32 {
+    let i = floor(p);
+    let f = p - i;
+    let u = f * f * (3.0 - 2.0 * f);
+    var a = vec2<i32>(i);
+    var b = a + vec2<i32>(1, 1);
+    if (period > 0) {
+        a = ((a % period) + period) % period;
+        b = ((b % period) + period) % period;
+    }
+    let v00 = tws_hash(a, seed);
+    let v10 = tws_hash(vec2<i32>(b.x, a.y), seed);
+    let v01 = tws_hash(vec2<i32>(a.x, b.y), seed);
+    let v11 = tws_hash(b, seed);
+    return mix(mix(v00, v10, u.x), mix(v01, v11, u.x), u.y);
+}
+
+fn tws_fbm(p: vec2<f32>, seed: u32, period: i32) -> f32 {
+    return tws_noise(p, seed, period) * 0.55 + tws_noise(p * 2.0, seed + 1u, period * 2) * 0.3
+         + tws_noise(p * 4.0, seed + 2u, period * 4) * 0.15;
+}
+
+fn tws_rot(p: vec2<f32>, a: f32) -> vec2<f32> {
+    let c = cos(a);
+    let s = sin(a);
+    return vec2<f32>(c * p.x - s * p.y, s * p.x + c * p.y);
+}
+
+fn tws_sat(c: vec3<f32>, s: f32) -> vec3<f32> {
+    let l = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    return max(mix(vec3<f32>(l), c, s), vec3<f32>(0.0));
+}
+
+struct TwSand {
+    albedo: vec3<f32>, // sRGB, as the legacy ground before its decode
+    slope: vec2<f32>,  // d(micro height)/dx, /dz
+};
+
+// xz: world position; rel: camera-relative position; h: height over the sea; fp: footprint (m per
+// pixel); wind: horizontal wind direction (Tidewater's frame.windDir); grade: |grad h| of the ground
+fn tw_beach_sand(xz: vec2<f32>, rel: vec3<f32>, h: f32, fp: f32, wind: vec2<f32>, grade: f32) -> TwSand {
+    // fine lattice: wrapped every 64 m
+    let xw = xz - floor(xz / 64.0) * 64.0;
+    let macroA = tws_fbm(tws_rot(xz, 0.7) / 173.0, 11u, 0);
+    let macroB = tws_fbm(tws_rot(xz, 2.1) / 47.0, 17u, 0);
+    let mcr = macroA * 0.6 + macroB * 0.4;
+    let dMw = tws_fbm(tws_rot(xz, 1.3) / 6.7 + 0.21, 23u, 0);
+    let dMy = tws_noise(tws_rot(xz, 1.3) / 6.7 + 3.7, 29u, 0);
+    let dMx = tws_noise(tws_rot(xz, 1.3) / 6.7 + 7.1, 31u, 0);
+    let dNw = tws_fbm(xw / 2.0, 37u, 32);
+    let dNy = tws_noise(xw / 2.0, 41u, 32);
+    // grain (Tidewater: the detail tile's sand channel, ~7 mm and ~2.5 mm): to the mean when finer
+    // than a pixel
+    let gK = 1.0 - smoothstep(0.008, 0.03, fp);
+    let gFK = 1.0 - smoothstep(0.004, 0.015, fp);
+    var grain = 0.45;
+    var grainF = 0.45;
+    if (gK > 0.0) { grain = mix(0.45, min(tws_noise(xw * 128.0, 43u, 8192), 0.62), gK); }
+    if (gFK > 0.0) { grainF = mix(0.45, min(tws_noise(xw * 256.0, 47u, 16384), 0.62), gFK); }
+    let camDist = length(rel);
+
+    // ---- beach sand: pale coral sand, drifts of warmer / coarser sand, grain
+    let dryK = smoothstep(0.8, 3.0, h);
+    var sand = mix(srgb_to_linear(vec3<f32>(0.83, 0.75, 0.6)), srgb_to_linear(vec3<f32>(0.9, 0.84, 0.72)),
+                   smoothstep(0.3, 0.72, mcr + dryK * 0.2));
+    sand = mix(sand, srgb_to_linear(vec3<f32>(0.84, 0.72, 0.55)), smoothstep(0.55, 0.8, dMw + (macroB - 0.5) * 0.6) * 0.45);
+    sand = sand * ((dMw - 0.5) * 0.16 + 1.0) * ((dNw - 0.5) * 0.1 + 1.0);
+    sand = sand * ((grain - 0.45) * 0.3 + 0.97) * ((grainF - 0.45) * 0.2 + 1.0);
+    // disturbed / trodden patches: slightly darker, coarser
+    let trod = smoothstep(0.52, 0.7, dNy + (dMy - 0.5) * 0.6) * dryK;
+    sand = sand * (1.0 - trod * 0.07);
+    // the high-water band collects shell grit, coral bits and dried seaweed
+    let hw = h + (dMw - 0.5) * 0.5;
+    let wrackBand = smoothstep(1.15, 1.4, hw) * smoothstep(2.1, 1.7, hw);
+    let landW = 1.0 - smoothstep(0.12, -0.6, h);
+    var pebW = 0.0;
+    if (camDist < 35.0) {
+        // grit: ~3 cm speckles (Tidewater's dN.z peaks), faded as they reach a pixel
+        let pebDensity = smoothstep(0.62, 0.85, macroB + dMw * 0.3) * 0.2 + wrackBand * smoothstep(0.3, 0.6, dMy);
+        let speck = tws_noise(xw * 32.0, 53u, 2048);
+        pebW = smoothstep(0.66, 0.8, speck) * clamp(pebDensity, 0.0, 1.0) * landW
+             * (1.0 - smoothstep(12.0, 35.0, camDist)) * (1.0 - smoothstep(0.015, 0.05, fp));
+        let pebCol = mix(mix(srgb_to_linear(vec3<f32>(0.86, 0.82, 0.74)), srgb_to_linear(vec3<f32>(0.78, 0.64, 0.6)),
+                             smoothstep(0.45, 0.75, dMx)),
+                         srgb_to_linear(vec3<f32>(0.36, 0.33, 0.3)), smoothstep(0.74, 0.82, dMy));
+        sand = mix(sand, pebCol, pebW * 0.75);
+    }
+    let wrack = wrackBand * smoothstep(0.58, 0.72, dNy) * smoothstep(0.4, 0.6, macroB);
+    sand = mix(sand, srgb_to_linear(vec3<f32>(0.24, 0.18, 0.11)), wrack * 0.8);
+
+    // wind ripples on the dry sand: crests across the wind, ~10.5 cm, bent by the noise. The phase
+    // is camera-relative plus the camera's own phase (a world-absolute phase at 10 km loses the
+    // sub-millimetre f32 the ripple needs); its pixel rate from the footprint, not fwidth (this runs
+    // only on sand: no derivatives in divergent flow).
+    let k1 = 6.2832 / 0.105;
+    let camPh = fract(dot(xz - rel.xz, wind) / 0.105) * 6.2832;
+    let ph1 = dot(rel.xz, wind) * k1 + camPh + dMw * 24.0 + dNw * 7.0 + macroB * 30.0;
+    let fade1 = 1.0 - smoothstep(0.6, 2.2, fp * k1);
+    let s1 = sin(ph1) * 0.5 + 0.5;
+    let rip1 = pow(s1, 1.6);
+    let windK = fade1 * smoothstep(1.5, 2.2, h) * (1.0 - trod * 0.7) * smoothstep(0.2, 0.5, macroB + dMw * 0.3);
+    sand = sand * ((rip1 - 0.5) * 0.12 * windK + 1.0);
+    let dRip1 = 1.6 * pow(max(s1, 1e-4), 0.6) * 0.5 * cos(ph1) * k1;
+
+    // ---- seabed: lighter shallow sand, megaripple fields (~0.75 m) and wave ripples (~0.16 m)
+    let underW = smoothstep(0.12, -0.6, h);
+    let depth = -h;
+    var slope = wind * (dRip1 * 0.005 * windK);
+    if (underW > 0.0) {
+        var under = mix(srgb_to_linear(vec3<f32>(0.84, 0.78, 0.64)), srgb_to_linear(vec3<f32>(0.72, 0.7, 0.58)),
+                        smoothstep(1.0, 9.0, depth));
+        under = under * ((dMw - 0.5) * 0.14 + 1.0) * ((grain - 0.45) * 0.25 + 1.0);
+        let k2 = 6.2832 / 0.75;
+        let ph2 = dot(rel.xz, wind) * k2 + fract(dot(xz - rel.xz, wind) / 0.75) * 6.2832 + dMw * 16.0 + macroB * 24.0;
+        let fade2 = 1.0 - smoothstep(0.5, 2.0, fp * k2);
+        let s2 = sin(ph2) * 0.5 + 0.5;
+        let rip2 = pow(s2, 1.4);
+        let fieldW = smoothstep(0.42, 0.62, macroB + (dMw - 0.5) * 0.35) * smoothstep(0.9, 2.0, depth);
+        under = under * ((rip2 - 0.55) * 0.22 * fieldW * fade2 + 1.0);
+        let k3 = 6.2832 / 0.16;
+        let ph3 = dot(rel.xz, wind) * k3 + fract(dot(xz - rel.xz, wind) / 0.16) * 6.2832 + dMw * 26.0 + dNw * 5.0;
+        let fade3 = 1.0 - smoothstep(0.6, 2.2, fp * k3);
+        let s3 = sin(ph3) * 0.5 + 0.5;
+        sand = mix(sand, under, underW);
+        let dRip2 = 1.4 * pow(max(s2, 1e-4), 0.4) * 0.5 * cos(ph2) * k2;
+        let dRip3 = 1.5 * pow(max(s3, 1e-4), 0.5) * 0.5 * cos(ph3) * k3;
+        slope += wind * (dRip3 * 0.012 * fade3 * smoothstep(-0.3, -0.9, h) + dRip2 * 0.035 * fade2 * fieldW) * underW;
+    }
+
+    // ---- damp sand below the berm, darker in mottled drying patches (Tidewater's static band; the
+    // live swash wetness is the shore simulation's, further down in fs_terrain)
+    let dampMottle = smoothstep(0.3, 0.7, dMw + (dNy - 0.45) * 0.6 + (macroB - 0.5) * 0.4);
+    let damp = smoothstep(1.7, 0.5, h + dMw * 0.3) * mix(0.22, 0.5, dampMottle) * landW;
+    sand = mix(sand, tws_sat(sand * 0.58, 1.15) * vec3<f32>(0.97, 0.98, 1.0), damp);
+    // swash marks: thin wavy lines of grit at the limits of earlier uprushes
+    let sl = (h + dMw * 0.18 + dNw * 0.05) / 0.13;
+    let slD = abs(fract(sl) - 0.5);
+    let slW = fp * grade / 0.13 + 1e-4;
+    let swashLine = smoothstep(slW * 1.5 + 0.04, 0.0, slD) * smoothstep(0.2, 0.4, h) * smoothstep(1.6, 1.2, h)
+        * smoothstep(0.45, 0.65, dMy + (macroB - 0.5) * 0.4) * (1.0 - smoothstep(0.8, 2.0, slW * 10.0));
+    sand = mix(sand * (1.0 - swashLine * 0.3), srgb_to_linear(vec3<f32>(0.9, 0.88, 0.84)),
+               swashLine * smoothstep(0.6, 0.75, grainF) * 0.5);
+
+    // ---- micro relief: the ripples (analytic, above) and the grain (finite differences, only
+    // where it is resolved)
+    if (gK > 0.0) {
+        let e = 1.0 / 256.0;
+        let g0 = tws_noise(xw * 128.0, 43u, 8192);
+        let gx = tws_noise((xw + vec2<f32>(e, 0.0)) * 128.0, 43u, 8192);
+        let gz = tws_noise((xw + vec2<f32>(0.0, e)) * 128.0, 43u, 8192);
+        slope += vec2<f32>(gx - g0, gz - g0) / e * 0.004 * gK * (1.0 - underW * 0.5);
+    }
+
+    var o: TwSand;
+    o.albedo = ground_linear_to_srgb(max(sand, vec3<f32>(0.0)));
+    o.slope = slope;
+    return o;
+}
+
 fn terrain_uv(transform: TerrainUv, source_bit: u32, source_mask: u32,
               world_pos: vec3<f32>, tile_uv: vec2<f32>) -> vec2<f32> {
     let source = select(vec3<f32>(tile_uv, 0.0), world_pos, (source_mask & (1u << source_bit)) != 0u);
@@ -1328,20 +1519,41 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
                     + w01 * c01.ambient_occlusion + w11 * c11.ambient_occlusion;
         mud = w00 * c00.mud + w10 * c10.mud + w01 * c01.mud + w11 * c11.mud;
     }
+    // (OP) Tidewater's sand where the layer says so (tw_beach_sand), blended across the cells as
+    // the colour is; faded out where the satellite takes over the far ground
+    var sand = 0.0;
+    if (uniform_cell) {
+        sand = cell_sand(e00, base, tile_uv, duvdx, duvdy);
+    } else {
+        sand = w00 * cell_sand(e00, base, tile_uv, duvdx, duvdy)
+             + w10 * cell_sand(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy)
+             + w01 * cell_sand(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy)
+             + w11 * cell_sand(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy);
+    }
+    sand *= 1.0 - smoothstep(800.0, 2400.0, length(in.world_pos));
 
     // High-frequency detail noise: alpha modulates around neutral (matches GL33's
     // r0.rgb *= t1.a * 2.0, detail UV = base UV * 32).
     let detail_a = textureSampleBias(detail, ground_samp, tile_uv * 32.0, frame.renscale.x).a;
     rgb *= detail_a * 2.0;
+    // Per-pixel normal at a fixed heightmap step (independent of patch LOD/morph).
+    let ground_normals = sample_mud_normals(in.world_xz, tp.terrain_grid, snow_footprint);
+    let geometric_n = ground_normals.fine;
+    var tws_slope = vec2<f32>(0.0);
+    if (sand > 0.001) {
+        let gn = geometric_n;
+        let tws = tw_beach_sand(absolute_world_pos.xz, in.world_pos, absolute_world_pos.y - tp.sea_level,
+                                snow_footprint, normalize(frame.foliaged.zw + vec2<f32>(1e-4, 0.0)),
+                                length(gn.xz) / max(gn.y, 0.2));
+        rgb = mix(rgb, tws.albedo, sand);
+        tws_slope = tws.slope * sand;
+    }
     // HDR path: decode the gamma-space ground albedo (blend + detail done in gamma,
     // the §5 pragmatic fold) to linear before lighting.
     if (linear > 0.5) {
         rgb = srgb_to_linear(rgb);
     }
 
-    // Per-pixel normal at a fixed heightmap step (independent of patch LOD/morph).
-    let ground_normals = sample_mud_normals(in.world_xz, tp.terrain_grid, snow_footprint);
-    let geometric_n = ground_normals.fine;
     // Reuse the pre-existing broad normal: no additional height samples.
     // Keep actual horizon/pixel filtering outside material/admission branches.
     let moist_horizon = dot(reflect(-normalize(-in.world_pos), geometric_n), ground_normals.broad);
@@ -1374,6 +1586,10 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         n = normalize(t_axis * authored_normal_ts.x
                     + b_axis * authored_normal_ts.y
                     + geometric_n * max(authored_normal_ts.z, 1e-3));
+    }
+    // the sand's micro relief (ripples, grain) on top: a height field's normal is (-dh/dx, 1, -dh/dz)
+    if (abs(tws_slope.x) + abs(tws_slope.y) > 1e-6) {
+        n = normalize(n - vec3<f32>(tws_slope.x, 0.0, tws_slope.y));
     }
 
     // Fine-surface world height, sampled once and shared by the snow cover
