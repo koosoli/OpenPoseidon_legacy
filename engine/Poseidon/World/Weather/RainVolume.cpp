@@ -214,6 +214,152 @@ bool SnowParticleInViewVolume(Vector3Par particle, Vector3Par camera, float radi
     return offset.X()*offset.X()+offset.Z()*offset.Z() <= radius*radius && std::abs(offset.Y()) <= height;
 }
 
+// (OP, 2026-10-14) RAIN part 2, roof runoff (owner: "make our rain ... better inspired with the tarp
+// runoff demo" of dgreenheck/threejs-particle-fluids). Rain on a roof does not vanish at the
+// roofline: it runs down the roof and leaves it along the eaves, in drips that land in a line
+// under them. The roof of a building type is mapped once, in model space, from its interior's
+// cached shell columns: a covered column with an open neighbour is the roof's edge, and it is an
+// EAVE where the roof falls toward that neighbour (a gable end, where it does not, sheds nothing).
+const std::vector<Vector3>& RainSystem::EavesOf(const Occluder& occluder)
+{
+    const auto found = _eaves.find(occluder.interior);
+    if (found != _eaves.end())
+    {
+        return found->second;
+    }
+    std::vector<Vector3> eaves;
+    int nCovered = 0, nEdges = 0, nLow = 0, nFlat = 0;
+    const LODShapeWithShadow* shape = occluder.object->GetShape();
+    if (shape != nullptr)
+    {
+        const Vector3 lo = shape->Min(), hi = shape->Max();
+        constexpr float step = 0.5f;
+        const int nx = std::clamp(static_cast<int>((hi.X() - lo.X()) / step) + 1, 1, 128);
+        const int nz = std::clamp(static_cast<int>((hi.Z() - lo.Z()) / step) + 1, 1, 128);
+        const BuildingInterior& interior = *occluder.interior;
+        std::vector<unsigned char> covered(static_cast<size_t>(nx) * nz);
+        for (int z = 0; z < nz; ++z)
+            for (int x = 0; x < nx; ++x)
+                covered[static_cast<size_t>(z) * nx + x] =
+                    interior.CoveredFromAboveModel(Vector3(lo.X() + x * step, lo.Y() + 0.1f, lo.Z() + z * step)) ? 1 : 0;
+        for (unsigned char c : covered)
+            nCovered += c;
+        const auto isCovered = [&](int x, int z)
+        { return x >= 0 && z >= 0 && x < nx && z < nz && covered[static_cast<size_t>(z) * nx + x] != 0; };
+        // the roof's height over a column: the topmost shell voxel, scanned down from the top
+        const auto roofY = [&](int x, int z)
+        {
+            const float px = lo.X() + x * step, pz = lo.Z() + z * step;
+            for (float y = hi.Y(); y > lo.Y(); y -= 0.15f)
+                if (interior.ClassifyModel(Vector3(px, y, pz)) == -2)
+                    return y;
+            return lo.Y();
+        };
+        const int dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        for (int z = 0; z < nz; ++z)
+            for (int x = 0; x < nx; ++x)
+            {
+                if (!isCovered(x, z))
+                    continue;
+                for (const auto& d : dirs)
+                {
+                    if (isCovered(x + d[0], z + d[1]))
+                        continue;
+                    // the roof must fall toward this edge, over the cell behind it
+                    if (!isCovered(x - d[0], z - d[1]))
+                        continue;
+                    ++nEdges;
+                    // the overhang is thin: the outermost covered column often holds no shell voxel at
+                    // the sample points (89 of 106 edges on zluty_statek_in), so the roof's height
+                    // there is taken from the first column inward that has one, and its fall from
+                    // the next one in
+                    float edge = lo.Y();
+                    int k0 = 0;
+                    for (; k0 < 4; ++k0)
+                    {
+                        edge = roofY(x - d[0] * k0, z - d[1] * k0);
+                        if (edge >= lo.Y() + 1.5f)
+                            break;
+                    }
+                    if (k0 == 4)
+                    {
+                        ++nLow;
+                        continue;
+                    }
+                    const float inner = roofY(x - d[0] * (k0 + 1), z - d[1] * (k0 + 1));
+                    if (inner < edge + 0.03f)
+                    {
+                        ++nFlat;
+                        continue;
+                    }
+                    // extrapolate the roof's fall out to the edge column
+                    edge -= (inner - edge) * static_cast<float>(k0);
+                    eaves.emplace_back(lo.X() + (x + d[0] * 0.6f) * step, edge - 0.05f, lo.Z() + (z + d[1] * 0.6f) * step);
+                }
+            }
+    }
+    LOG_INFO(World, "Rain runoff: {} eave points on '{}' ({} covered columns, {} edges, {} low, {} not falling; box {:.1f}..{:.1f} m)",
+             eaves.size(), occluder.object->GetShape() ? occluder.object->GetShape()->Name() : "?", nCovered, nEdges, nLow,
+             nFlat, shape ? shape->Min().Y() : 0.0f, shape ? shape->Max().Y() : 0.0f);
+    return _eaves.emplace(occluder.interior, std::move(eaves)).first->second;
+}
+
+void RainSystem::EmitEaveDrips(float deltaT)
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_RAIN_EAVES");
+        return !(v && v[0] == '0');
+    }();
+    if (!enabled || _params.snowflakes || _occluders.empty() || deltaT <= 0.0f)
+    {
+        return;
+    }
+    const float density = EffectiveDensity();
+    static const bool trace = std::getenv("POSEIDON_RAIN_TRACE") != nullptr;
+    static float nextTrace = 0.0f;
+    if (trace && Glob.time.toFloat() > nextTrace)
+    {
+        nextTrace = Glob.time.toFloat() + 2.0f;
+        size_t points = 0;
+        for (const Occluder& occluder : _occluders)
+        {
+            const auto it = _eaves.find(occluder.interior);
+            points += it == _eaves.end() ? 0 : it->second.size();
+        }
+        LOG_INFO(World, "Rain runoff: density {:.2f}, {} buildings, {} eave points", density, _occluders.size(), points);
+    }
+    if (density < 0.05f)
+    {
+        return;
+    }
+    // drips per second along each 0.5 m of eave at full rain: a steady patter, heavier than the rain
+    const float perPoint = 2.5f * density;
+    for (const Occluder& occluder : _occluders)
+    {
+        const std::vector<Vector3>& eaves = EavesOf(occluder);
+        if (eaves.empty())
+        {
+            continue;
+        }
+        _dripAccumulator += perPoint * deltaT * static_cast<float>(eaves.size());
+        while (_dripAccumulator >= 1.0f && static_cast<int>(_drops.size()) < _params.maxDrops)
+        {
+            _dripAccumulator -= 1.0f;
+            const Vector3& at = eaves[static_cast<size_t>(RandUnit() * eaves.size()) % eaves.size()];
+            Drop drop;
+            drop.position = occluder.object->PositionModelToWorld(
+                Vector3(at.X() + RandSymmetric() * 0.2f, at.Y(), at.Z() + RandSymmetric() * 0.2f));
+            // a drip leaves the eave slowly and does not ride the wind like spray
+            drop.speed = _params.fallSpeed * (0.85f + 0.1f * RandSymmetric());
+            drop.size = 1.6f;
+            drop.occlusionTimer = RandUnit() * _params.occlusionCadence;
+            _drops.push_back(drop);
+        }
+        _dripAccumulator = std::min(_dripAccumulator, 1.0f);
+    }
+}
+
 float RainSystem::EffectiveDensity() const
 {
     if (_mode != RainParticle && _mode != RainBoth)
@@ -880,6 +1026,7 @@ void RainSystem::UpdateAndDraw()
 
     auto phase = std::chrono::steady_clock::now();
     Spawn(deltaT);
+    EmitEaveDrips(deltaT);
     auto now = std::chrono::steady_clock::now();
     _stats.spawnMicroseconds = std::chrono::duration<double, std::micro>(now - phase).count();
     phase = now;
