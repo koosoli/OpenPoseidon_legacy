@@ -136,6 +136,18 @@ Run 7 (all 98 enter, 96 without a script error, none hangs) followed one more fi
   logged. C1 now flies its route with no script error.
 - `format` prints nil as `any`, `call` accepts a nothing value on its left.
 
+A rerun of the missions that ended early or had errors (build `877165b`, then `f02e242`)
+left no script error in any of them. Missions now say why they end on their own:
+
+- **SPE1_Jackal** starts with a HALO jump from an archive script given without its
+  leading backslash; `exec` did not find it, so the player started on the ground among
+  the enemy. Fixed: the player now falls from 2000 m (`bis_fnc_halo`), and in the
+  unattended test hits the ground at 36 s because nobody opens the parachute.
+- **MPE1_Dogfighters**: the player's A-10 starts in the air and, with nobody at the
+  controls, crashes after 9 s -- expected without input.
+- **MP_Deathmatch / MP_TeamDeathmatch / C7A_WarThatNeverWas** end by their own end
+  conditions in single player (end modes 3 / 2).
+
 The two missions left with an error: MP_Paradrop uses a variable it never sets
 (`_targetmarkerdir`; a mission bug, Arma 2 reports it too) and MP_WhenDiplomacyFails
 (Warfare `<null>SOLDIER`, fixed after the run).
