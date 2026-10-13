@@ -1,0 +1,17 @@
+; Water smoke test (owner's sign-off session): the swim-boat start -- the player in deep water off the
+; Everon bay beach, an empty BoatW fifteen metres to his left -- but he cannot die. A test mission ends
+; the whole game three seconds after the player dies, and a player left floating while the camera
+; flies elsewhere drowns or is thrown about by a storm sea: on 2026-10-13 that closed the owner's
+; session in the middle of his test.
+setViewDistance 1500
+player setPos [9950, 1430, 0]
+player setDir 180
+player switchCamera "EXTERNAL"
+testBoat = "BoatW" createVehicle [9935, 1424, 0]
+testBoat setDir 180
+~2
+hint "Water smoke test: you cannot die here. Swim with W, board the boat with the action menu."
+#keepalive
+player setDammage 0
+~0.5
+goto "keepalive"
