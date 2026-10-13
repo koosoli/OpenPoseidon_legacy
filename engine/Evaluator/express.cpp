@@ -2874,9 +2874,10 @@ GameValue GameState::EvaluateMultiple(const char* expression, bool localOnly) co
                         break;
                     goto NextStatement;
                 }
-                // exitWith propagates its value even when breaking
+                // exitWith gives the scope its value (the statement itself stops before
+                // returning one, so it is taken from where exitWith left it)
                 if (_e->_error == EvalBreak)
-                    ret = value;
+                    ret = s_breakTarget.empty() ? tls_exitWithValue : value;
                 break;
             }
 
