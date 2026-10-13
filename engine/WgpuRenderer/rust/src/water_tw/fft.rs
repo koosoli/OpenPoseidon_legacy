@@ -367,7 +367,18 @@ pub fn frame_foam_bias(spec: &SpectrumInputs, amplitude: f32) -> f32 {
 /// 0.25 -> 4 %, 1.6 x 0.21 = 0.34 -> 25 % cover; calm at amplitude 3, 2.25 x 0.148 = 0.33 -> 10 %);
 /// 0.33 is the most any sea gets, a storm at amplitude 2 and up (~12 % solid), below the 64-100 % a
 /// storm reached unbounded.
-pub const MAX_FOAM_COMPRESSION: f32 = 0.33;
+/// 0.30 since 2026-10-13 (owner: "water is still foaming too much ... when wind is maxed out"): a
+/// gale at amplitude 2 shows 5.4 % lace white, near and far (fft_cover_tests.rs far_foam_matches_near_lace,
+/// TW_FAR_FIX=2); 0.33 showed 13 %, 0.29 3.8 %, 0.26 1 % -- the cover is that steep in the cap.
+pub const MAX_FOAM_COMPRESSION: f32 = 0.30;
+
+/// WGR_TW_MAX_FOAM_COMPRESSION=<c>: overrides MAX_FOAM_COMPRESSION (cover sweeps).
+fn max_foam_compression() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("WGR_TW_MAX_FOAM_COMPRESSION").ok().and_then(|v| v.trim().parse::<f32>().ok()).map_or(MAX_FOAM_COMPRESSION, |v| v.clamp(0.1, 0.6))
+    })
+}
 
 /// `foam_choppiness`: the sea's choppiness before the fold cap (0: `choppiness`); the whitecap foam's
 /// Jacobian is that x the amplitude, so a tall sea held flat against folding still breaks.
@@ -385,7 +396,7 @@ pub fn ocean_params(spec: &SpectrumInputs, choppiness: f32, amplitude: f32, foam
     let mut lane = amplitude.max(0.0) * chop_ratio;
     if lane > 1.0 && choppiness > 0.0 {
         let rms = sea_stats(spec.sizes, spec.local, spec.swell, spec.depth).1.max(1e-6).sqrt();
-        lane = lane.min((MAX_FOAM_COMPRESSION / (choppiness * rms)).max(1.0));
+        lane = lane.min((max_foam_compression() / (choppiness * rms)).max(1.0));
     }
     sizes[0][1] = lane;
     OceanParams {
