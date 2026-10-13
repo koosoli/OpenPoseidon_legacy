@@ -103,6 +103,7 @@ and are not counted.
 | 7 | `4799c30` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 96 | 0 |
 | 8 | `f02e242` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 96 | 0 |
 | 9 | `06789da` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 97 | 0 |
+| 10 | `9e32ad8` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 96 | 0 |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
@@ -199,3 +200,7 @@ Run 9 leaves one mission with a script error, MP_Paradrop, whose script uses a v
 it never sets (Arma 2 reports it as well). After it: `exitWith` in the body of a
 `while` or `for ... from ... to` loop ends the loop (it was lost with the body's own
 context, so such loops never ended).
+
+Run 10 (with the loop `exitWith` fix) shows no regression. With Warfare now starting
+properly, MPE_MountainWarfare gets further and reports `createUnit` with an undefined
+soldier class twice (`Format ["%1SOLDIER", side letter]`) -- open.
