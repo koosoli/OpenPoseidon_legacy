@@ -16,6 +16,13 @@ namespace Poseidon::Dev
 namespace { TerrainBrushSettings settings; }
 namespace
 {
+    // The largest heightmap the brush and the rocket craters edit. Imported worlds are subdivided
+    // past 2049 (Sahrani draws at 4096 x 5 m, logged 2026-10-13), and the old 2049 limit made
+    // both silently do nothing there. The journal is sparse, so only the physics mirror is bounded.
+    constexpr int kMaxEditRange = 8193;
+    // Box3DBackend::PatchTerrain tiles grids up to this size; a larger landscape is edited without
+    // its physics mirror (the game's own collision reads the landscape, not the physics world).
+    constexpr int kMaxPhysicsRange = 2049;
     TerrainEditJournal terrainBaseline;
     Landscape* baselineOwner = nullptr;
     int baselineRange = 0;
@@ -39,7 +46,7 @@ bool CaptureTerrainEditBaseline(int x, int z, int width, int height)
     // Never apply an old grid's sample indices to a newly subdivided landscape.
     if (!terrainBaseline.Empty() && !HasTerrainEditBaseline()) return false;
     const int range = GLandscape->GetTerrainRange();
-    if (range < 2 || range > 2049) return false;
+    if (range < 2 || range > kMaxEditRange) return false;
     if (!terrainBaseline.Remember(range,x,z,width,height,
             [](int ix,int iz) { return GLandscape->GetHeight(iz,ix); })) return false;
     baselineOwner = GLandscape;
@@ -50,19 +57,22 @@ bool CaptureTerrainEditBaseline(int x, int z, int width, int height)
 bool RestoreEditedTerrain()
 {
     if (!HasTerrainEditBaseline() || !GWorld || GWorld->GetMode() == GModeNetware) return false;
-    auto& world = Physics::EnsurePhysicsWorld();
-    // Collision replacement remains whole-grid until its regional publication
-    // gate is implemented. The persistent undo state itself is now sparse.
-    std::vector<float> restored(static_cast<size_t>(baselineRange)*baselineRange);
-    for (int z=0; z<baselineRange; ++z)
-        for (int x=0; x<baselineRange; ++x)
-            restored[static_cast<size_t>(z)*baselineRange+x] = GLandscape->GetHeight(z,x);
-    terrainBaseline.ForEach([&](int x,int z,float before) {
-        restored[static_cast<size_t>(z)*baselineRange+x] = before;
-    });
-    // SetTerrain publishes transactionally. Keep both the visible edit and its backup on failure.
-    if (!world.Create() || !world.SetTerrain(restored.data(),baselineRange,baselineRange,
-                                           baselineSpacing,0,0)) return false;
+    if (baselineRange <= kMaxPhysicsRange)
+    {
+        auto& world = Physics::EnsurePhysicsWorld();
+        // Collision replacement remains whole-grid until its regional publication
+        // gate is implemented. The persistent undo state itself is now sparse.
+        std::vector<float> restored(static_cast<size_t>(baselineRange)*baselineRange);
+        for (int z=0; z<baselineRange; ++z)
+            for (int x=0; x<baselineRange; ++x)
+                restored[static_cast<size_t>(z)*baselineRange+x] = GLandscape->GetHeight(z,x);
+        terrainBaseline.ForEach([&](int x,int z,float before) {
+            restored[static_cast<size_t>(z)*baselineRange+x] = before;
+        });
+        // SetTerrain publishes transactionally. Keep both the visible edit and its backup on failure.
+        if (!world.Create() || !world.SetTerrain(restored.data(),baselineRange,baselineRange,
+                                               baselineSpacing,0,0)) return false;
+    }
     terrainBaseline.ForEach([](int x,int z,float before) {
         if (before != GLandscape->GetHeight(z,x)) GLandscape->HeightChange(x,z,before);
     });
@@ -97,7 +107,7 @@ bool PaintTerrain(float cx, float cz, float radius, float delta)
     auto& land = *GLandscape;
     const int range = land.GetTerrainRange();
     const float spacing = land.GetTerrainGrid();
-    if (range < 2 || range > 2049 || !(spacing > 0) || !std::isfinite(spacing) ||
+    if (range < 2 || range > kMaxEditRange || !(spacing > 0) || !std::isfinite(spacing) ||
         cx < 0 || cz < 0 || cx > (range-1)*spacing || cz > (range-1)*spacing)
         return false;
     radius = TerrainBrushRadius(radius, spacing);
@@ -120,19 +130,22 @@ bool PaintTerrain(float cx, float cz, float radius, float delta)
         }
     if (!changed) return false;
     if (!CaptureTerrainEditBaseline(left,top,width,height)) return false;
-    auto& world = Physics::EnsurePhysicsWorld();
-    if (!world.Create()) return false;
-    const auto stats = world.GetStats();
-    if (!stats.terrainRegistered || stats.terrainWidth != range || stats.terrainHeight != range ||
-        stats.terrainCellSize != spacing || stats.terrainOriginX != 0 || stats.terrainOriginZ != 0)
+    if (range <= kMaxPhysicsRange)
     {
-        std::vector<float> all(static_cast<size_t>(range)*range);
-        for (int z=0; z<range; ++z)
-            for (int x=0; x<range; ++x)
-                all[static_cast<size_t>(z)*range+x]=land.GetHeight(z,x);
-        if (!world.SetTerrain(all.data(),range,range,spacing,0,0)) return false;
+        auto& world = Physics::EnsurePhysicsWorld();
+        if (!world.Create()) return false;
+        const auto stats = world.GetStats();
+        if (!stats.terrainRegistered || stats.terrainWidth != range || stats.terrainHeight != range ||
+            stats.terrainCellSize != spacing || stats.terrainOriginX != 0 || stats.terrainOriginZ != 0)
+        {
+            std::vector<float> all(static_cast<size_t>(range)*range);
+            for (int z=0; z<range; ++z)
+                for (int x=0; x<range; ++x)
+                    all[static_cast<size_t>(z)*range+x]=land.GetHeight(z,x);
+            if (!world.SetTerrain(all.data(),range,range,spacing,0,0)) return false;
+        }
+        if (!world.PatchTerrain(left,top,width,height,patch.data())) return false;
     }
-    if (!world.PatchTerrain(left,top,width,height,patch.data())) return false;
     for (int z=0; z<height; ++z)
         for (int x=0; x<width; ++x)
         {
@@ -166,7 +179,7 @@ bool TerrainBrushTargetAtPixel(float x, float y, TerrainBrushTarget& target)
     if (!(spacing > 0) || !std::isfinite(spacing)) return false;
     target.x = hit.X(); target.y = hit.Y(); target.z = hit.Z();
     target.radius = TerrainBrushRadius(settings.radius, spacing);
-    target.editable = GWorld && GWorld->GetMode() != GModeNetware && range >= 2 && range <= 2049 &&
+    target.editable = GWorld && GWorld->GetMode() != GModeNetware && range >= 2 && range <= kMaxEditRange &&
         hit.X() >= 0 && hit.Z() >= 0 && hit.X() <= (range-1)*spacing && hit.Z() <= (range-1)*spacing;
     if (target.editable)
     {

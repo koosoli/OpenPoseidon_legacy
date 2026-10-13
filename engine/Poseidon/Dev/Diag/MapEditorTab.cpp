@@ -44,8 +44,8 @@ MapEditorAction DrawMapEditorTab()
     {
         const float grid = GLandscape->GetTerrainGrid();
         ImGui::Text("Terrain grid: %.1f m | Effective radius: %.1f m", grid, TerrainBrushRadius(brush.radius, grid));
-        if (GLandscape->GetTerrainRange() > 2049)
-            ImGui::TextWrapped("Painting unavailable: this world exceeds the current 2049-sample editing limit.");
+        if (GLandscape->GetTerrainRange() > 8193)
+            ImGui::TextWrapped("Painting unavailable: this world exceeds the 8193-sample editing limit.");
     }
     MapEditorAction action =
         Button("Start painting (free-fly)") ? MapEditorAction::StartPainting : MapEditorAction::None;
