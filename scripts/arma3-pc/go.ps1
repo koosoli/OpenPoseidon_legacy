@@ -3,13 +3,15 @@
 # double-click). Settings in job.txt (KEY=value). Writes go.status, tests\<mission>.log,
 # tests\<mission>_1st.png / _3rd.png (SHOTS=1) and tests\exitcodes.txt. A file named STOP
 # next to this script (stop.cmd) ends the run after the current mission.
+param([string]$JobFile = 'job.txt')
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $game = 'H:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered'
 $a3   = 'F:\SteamLibrary\steamapps\common\Arma 3'
 $job = @{ WAIT='480'; QUIET='90'; DEPLOY='0'; LIST='missions_first.txt'; OUT='tests'; SECONDS='40'; RENDER=''; EXTRA=''; WINDOW='1'; SHOTS='1'; EXE='bin' }
-if (Test-Path "$here\job.txt") {
-  Get-Content "$here\job.txt" | ForEach-Object { if ($_ -match '^\s*([A-Z0-9_]+)\s*=(.*)$') { $job[$matches[1]] = $matches[2].Trim() } }
+$jobPath = if ([IO.Path]::IsPathRooted($JobFile)) { $JobFile } else { Join-Path $here $JobFile }
+if (Test-Path $jobPath) {
+  Get-Content $jobPath | ForEach-Object { if ($_ -match '^\s*([A-Z0-9_]+)\s*=(.*)$') { $job[$matches[1]] = $matches[2].Trim() } }
 }
 $status = "$here\go.status"
 function St($s) { "$(Get-Date -Format 'HH:mm:ss') $s" | Add-Content $status }
