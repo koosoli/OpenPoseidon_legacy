@@ -1615,7 +1615,19 @@ void ManType::InitShape()
     Shape* mem = _shape->MemoryLevel();
     PoseidonAssert(mem);
 
-    _cameraPoint = mem ? mem->PointIndex(ManNameOr(par, "memoryPointAim", "zamerny")) : -1;
+    // An Arma 2 man names its memory points in English ("aimpoint", "aiming_axis",
+    // "head_axis", "footstepl"); the imported class does not carry CAManBase's
+    // memoryPoint* entries, so the OFP default is tried first and then the Arma 2 name.
+    // Without "aiming_axis" the player's aim turned his rifle about his feet.
+    const auto pointOr = [&](const char* key, const char* ofpName, const char* a2Name) {
+        if (!mem)
+            return -1;
+        int index = mem->PointIndex(ManNameOr(par, key, ofpName));
+        if (index < 0 && a2Name)
+            index = mem->PointIndex(a2Name);
+        return index;
+    };
+    _cameraPoint = pointOr("memoryPointAim", "zamerny", "aimpoint");
     _pilotPoint = mem ? mem->FindNamedSel("pilot") : -1;
     // An EMPTY "pilot" selection is no pilot point. Every reader takes sel[0] of it (the camera /
     // eye position), and community MLODs ship memory selections with no points -- fml_vorhees'
@@ -1653,21 +1665,21 @@ void ManType::InitShape()
     _insideView = 0;
     _gunnerView = 0;
 
-    _stepLIndex = mem ? mem->PointIndex(ManNameOr(par, "memoryPointLStep", "stopaL")) : -1;
-    _stepRIndex = mem ? mem->PointIndex(ManNameOr(par, "memoryPointRStep", "stopaP")) : -1;
+    _stepLIndex = pointOr("memoryPointLStep", "stopaL", "footstepl");
+    _stepRIndex = pointOr("memoryPointRStep", "stopaP", "footstepr");
 
     _aimPoint = -1;
     _aimingAxisPoint = -1;
     _headAxisPoint = -1;
     if (mem)
     {
-        _aimPoint = mem->PointIndex(ManNameOr(par, "memoryPointAim", "zamerny"));
+        _aimPoint = pointOr("memoryPointAim", "zamerny", "aimpoint");
         if (_aimPoint < 0)
         {
             LOG_DEBUG(Physics, "No aim point in {}", (const char*)GetName());
         }
-        _aimingAxisPoint = mem->PointIndex(ManNameOr(par, "memoryPointAimingAxis", "osa mireni"));
-        _headAxisPoint = mem->PointIndex(ManNameOr(par, "memoryPointHeadAxis", "osa otaceni"));
+        _aimingAxisPoint = pointOr("memoryPointAimingAxis", "osa mireni", "aiming_axis");
+        _headAxisPoint = pointOr("memoryPointHeadAxis", "osa otaceni", "head_axis");
         if (_headAxisPoint < 0)
         {
             _headAxisPoint = _aimingAxisPoint;
