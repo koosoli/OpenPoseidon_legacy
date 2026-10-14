@@ -86,6 +86,12 @@ RString ScriptClassName(const RString& engineName);
 // A1x_SoldierWB -> "30Rnd_556x45_Stanag"). The CWA name for any other unit or magazine.
 RString ScriptMagazineName(const RString& unitClass, const RString& cwaMagazine);
 
+// The text the HUD and the action menu show for a CWA magazine that an entity of class
+// `ownerClass` carries or holds: the displayName of the Arma magazine it stands for (see
+// ScriptMagazineName; for other entities, the Arma magazine first resolved to it). Empty
+// when there is none, or without --arma1/--arma2.
+RString MagazineDisplayName(const RString& ownerClass, const RString& cwaMagazine);
+
 // Whether a weapon or muzzle name a script gives ("M4AIM") names the engine weapon
 // `engineName`: the name itself, the generated A1x_ class of it, or the CWA class it
 // resolves to. Exact (case-insensitive) comparison when no Arma install is active.

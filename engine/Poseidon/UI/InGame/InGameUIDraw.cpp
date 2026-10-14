@@ -19,6 +19,7 @@
 #include <Poseidon/World/Entities/Infantry/MoveActions.hpp>
 
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <stdio.h>
 #include <string.h>
 #include <cmath>
@@ -98,6 +99,38 @@ struct DrawActionInfo
     bool selected;
 };
 
+// Arma 1/2: a generated A1x_ weapon fires CWA's magazines, whose modes are named after
+// the CWA weapon ("M16" for an M4 Aimpoint). Its own muzzle shows the Arma weapon's name
+// instead, with the mode's class name for any mode after the first. Unchanged otherwise.
+static RString ArmaSlotName(const MagazineSlot& slot, RString displayName)
+{
+    if (!Poseidon::Arma1Compat::Active() || !slot._weapon || !slot._muzzle)
+        return displayName;
+    const char* weapon = slot._weapon->GetName();
+    if (_strnicmp(weapon, "A1x_", 4) != 0 || stricmp(slot._muzzle->GetName(), weapon) != 0)
+        return displayName;
+    RString name = slot._weapon->GetDisplayName();
+    if (name.GetLength() == 0)
+        return displayName;
+    const Magazine* magazine = slot._magazine;
+    if (magazine && magazine->_type && slot._mode > 0 && slot._mode < magazine->_type->_modes.Size())
+        name = name + RString(" (") + RString(magazine->_type->_modes[slot._mode]->GetName()) + RString(")");
+    return name;
+}
+
+// Arma 1/2: the Arma magazine's name for a CWA magazine that `owner` carries or holds.
+static RString MagazineName(const EntityAI* owner, const MagazineType* type)
+{
+    if (Poseidon::Arma1Compat::Active() && type)
+    {
+        const RString ownerClass = owner && owner->GetType() ? RString(owner->GetType()->GetName()) : RString();
+        const RString arma = Poseidon::Arma1Compat::MagazineDisplayName(ownerClass, type->GetName());
+        if (arma.GetLength() > 0)
+            return arma;
+    }
+    return type ? RString(type->GetDisplayName()) : RString();
+}
+
 static void FormatWeapon(char* buffer, size_t bufferSize, const char* format, EntityAI* veh, int weapon)
 {
     if (veh)
@@ -111,7 +144,8 @@ static void FormatWeapon(char* buffer, size_t bufferSize, const char* format, En
             {
                 displayName = mode->GetDisplayName();
             }
-            snprintf(buffer, bufferSize, format, (const char*)displayName);
+            const RString shown = ArmaSlotName(slot, displayName);
+            snprintf(buffer, bufferSize, format, (const char*)shown);
         }
         else
         {
@@ -293,7 +327,7 @@ RString UIAction::GetDisplayName(AIUnit* unit) const
                         }
                         if (conflict[i]->_ammo > 0 && conflict[i]->_type != magazine->_type)
                         {
-                            strncat(drop, (const char*)conflict[i]->_type->GetDisplayName(),
+                            strncat(drop, (const char*)MagazineName(unit ? unit->GetPerson() : nullptr, conflict[i]->_type),
                                     sizeof(drop) - strlen(drop) - 1);
                             n++;
                         }
@@ -301,12 +335,12 @@ RString UIAction::GetDisplayName(AIUnit* unit) const
                     if (n > 0)
                     {
                         snprintf(buffer, sizeof(buffer), LocalizeString(IDS_ACTION_DROPTAKEMAGAZINE),
-                                 (const char*)magazine->_type->GetDisplayName(), drop);
+                                 (const char*)MagazineName(veh, magazine->_type), drop);
                     }
                     else
                     {
                         snprintf(buffer, sizeof(buffer), LocalizeString(IDS_ACTION_TAKEMAGAZINE),
-                                 (const char*)magazine->_type->GetDisplayName());
+                                 (const char*)MagazineName(veh, magazine->_type));
                     }
                 }
                 else
@@ -340,12 +374,13 @@ RString UIAction::GetDisplayName(AIUnit* unit) const
             if (target)
             {
                 snprintf(buffer, sizeof(buffer), LocalizeString(IDS_ACTION_PUT_MAGAZINE),
-                         (const char*)type->GetDisplayName(), (const char*)target->GetDisplayName());
+                         (const char*)MagazineName(unit ? unit->GetPerson() : nullptr, type),
+                         (const char*)target->GetDisplayName());
             }
             else
             {
                 snprintf(buffer, sizeof(buffer), LocalizeString(IDS_ACTION_DROP_MAGAZINE),
-                         (const char*)type->GetDisplayName());
+                         (const char*)MagazineName(unit ? unit->GetPerson() : nullptr, type));
             }
             break;
         }
@@ -399,7 +434,8 @@ RString UIAction::GetDisplayName(AIUnit* unit) const
                             left++;
                         }
                     }
-                    snprintf(buffer, sizeof(buffer), mode->_useActionTitle, (const char*)mode->GetDisplayName(), left);
+                    const RString shown = ArmaSlotName(slot, mode->GetDisplayName());
+                    snprintf(buffer, sizeof(buffer), mode->_useActionTitle, (const char*)shown, left);
                 }
                 else
                 {
@@ -432,7 +468,7 @@ RString UIAction::GetDisplayName(AIUnit* unit) const
                         }
                     }
                     snprintf(buffer, sizeof(buffer), magazine->_type->_useActionTitle,
-                             (const char*)magazine->_type->GetDisplayName(), left);
+                             (const char*)MagazineName(veh, magazine->_type), left);
                 }
                 else
                 {
@@ -453,7 +489,7 @@ RString UIAction::GetDisplayName(AIUnit* unit) const
                 if (magazine)
                 {
                     snprintf(buffer, sizeof(buffer), LocalizeString(IDS_ACTION_MAGAZINE),
-                             (const char*)magazine->_type->GetDisplayName());
+                             (const char*)MagazineName(veh, magazine->_type));
                 }
                 else
                 {
@@ -1470,7 +1506,7 @@ void InGameUI::DrawUnitInfo(EntityAI* vehicle)
         }
         if (mode)
         {
-            displayName = mode->GetDisplayName();
+            displayName = ArmaSlotName(slot, mode->GetDisplayName());
             if (mode->_ammo)
             {
                 ammoCur = magazine->_ammo;
