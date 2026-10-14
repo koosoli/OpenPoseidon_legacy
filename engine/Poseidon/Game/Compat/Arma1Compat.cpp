@@ -401,7 +401,9 @@ RString ResolveFrom(const char* configClass, const RString& name,
     {
         // A weapon both games name alike (AK74, PK, M16A2 ...): CWA's class keeps the
         // magazines and ballistics, the Arma model is drawn on it like for any other.
-        if (weaponModels && Generation() >= 1 && _strnicmp(name.Data(), "A1x_", 4) != 0)
+        // Arma 2 hand weapons named like CWA's (PK, Strela, Stinger) take the Arma 2 model too.
+        if ((weaponModels && Generation() >= 1 && _strnicmp(name.Data(), "A1x_", 4) != 0) ||
+            (Generation() == 2 && strcmp(configClass, "CfgWeapons") == 0 && Arma2IsHandWeapon(name)))
             return Arma2WeaponModelClass(name, name);
         return name;
     }

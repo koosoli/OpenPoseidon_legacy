@@ -1529,6 +1529,17 @@ RString Arma2WeaponFallback(const RString& name)
     return RString(weapon);
 }
 
+bool Arma2IsHandWeapon(const RString& name)
+{
+    if (Generation() != 2 || !ConfigLoaded() || name.GetLength() == 0)
+        return false;
+    const ParamEntry* weapon = FindConfigClass("CfgWeapons", name);
+    if (!weapon || !weapon->IsClass())
+        return false;
+    return A2Derives(weapon, "RifleCore") || A2Derives(weapon, "Rifle") || A2Derives(weapon, "PistolCore") ||
+           A2Derives(weapon, "Pistol") || A2Derives(weapon, "LauncherCore") || A2Derives(weapon, "Launcher");
+}
+
 RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
 {
     if (Generation() < 1 || !ConfigLoaded() || name.GetLength() == 0 || cwaWeapon.GetLength() == 0)
