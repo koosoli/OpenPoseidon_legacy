@@ -1197,6 +1197,7 @@ MovesType::MovesType(const MovesTypeName& name)
 
     LODShapeWithShadow* shape = _name.shape;
     _weights = WeigthBank.New(wname);
+    bool anyAnimation = false;
     for (int i = 0; i < _moves.Size(); i++)
     {
         MoveId id = MoveId(i);
@@ -1220,10 +1221,17 @@ MovesType::MovesType(const MovesTypeName& name)
         AnimationRT* anim = moveI;
         if (anim)
         {
-            _name.motionType->GetSkeleton()->Prepare(shape, GetWeights());
+            anyAnimation = true;
             anim->SetLooped((*entry) >> "looped");
         }
     }
+    // The weights depend only on the skeleton's bone list, which the moves above have now
+    // completed, so one Prepare after the loop gives what the last per-move Prepare gave.
+    // Preparing after every move re-weighted every LOD hundreds of times: with Arma 2's
+    // ~2000 moves and 132-bone soldiers that alone took over a minute per soldier model on
+    // the laptop, and the stall watchdog ended the test before the mission started.
+    if (anyAnimation)
+        _name.motionType->GetSkeleton()->Prepare(shape, GetWeights());
 
     // FACE-002: after the LAST Prepare -- Prepare re-Inits the weights, so a rig built
     // inside the loop would be wiped by the next move.
