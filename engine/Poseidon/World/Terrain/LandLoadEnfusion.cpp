@@ -33,6 +33,7 @@
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobConvert.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp> // RFG-097 external loader
+#include <Poseidon/World/Model/ShapeAdapter.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobModel.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODLoader.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODWriter.hpp>
@@ -2542,15 +2543,19 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
 
 //! The ShapeBank half of BuildShapeFromXob: MAIN THREAD ONLY (bank insert, texture and
 //! material banks). BuildModelFromXob is the half that may run on workers.
+//! `preadapted`: the model already converted with its bank tables (ConvertPartsOnPool); the
+//! bank adopts it. Null converts in place, as before.
 LODShapeWithShadow* InstallShapeFromXobModel(const std::string& xobPath, std::shared_ptr<Poseidon::Model::Model> parsed,
-                                             std::string& why)
+                                             std::string& why, LODShapeWithShadow* preadapted = nullptr)
 {
+    std::unique_ptr<LODShapeWithShadow> adopted(preadapted);
     if (!parsed)
         return nullptr;
     // The name is only a cache key here -- no file is opened, because the parsed
     // model is handed in.
     Poseidon::ShapeBank::WorldModelScope worldModel(Poseidon::Shapes); // RFG-099
-    LODShapeWithShadow* shape = Poseidon::Shapes.NewFromModel(xobPath.c_str(), false, true, parsed, nullptr);
+    LODShapeWithShadow* shape =
+        Poseidon::Shapes.NewFromModel(xobPath.c_str(), false, true, parsed, nullptr, adopted.release());
     if (shape == nullptr)
     {
         why = "ShapeBank refused the model";
@@ -2668,6 +2673,71 @@ LODShapeWithShadow* InstallShapeFromXobModel(const std::string& xobPath, std::sh
 LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::string& xobPath, std::string& why)
 {
     return InstallShapeFromXobModel(xobPath, BuildModelFromXob(mount, xobPath, why), why);
+}
+
+//! PERF (2026-10-14): converts `models[i]` (installed as `names[i]`) with their bank tables
+//! ahead of the install, the conversion itself on the pool. The split is the object
+//! streamer's (SIM-807): the tables -- every texture and material bank call -- are built here,
+//! on the main thread and in model order, and only the tables-mode conversion, which makes no
+//! bank calls, runs on workers. For an MLOD model that is the whole conversion (its tail has
+//! no proxies and stays inside it), so the shape the bank adopts is the one it would have
+//! built. Entries the pool cannot convert stay null and convert in place.
+//! POSEIDON_PART_POOL_ADAPT=0 converts every part in place.
+std::vector<std::unique_ptr<LODShapeWithShadow>>
+ConvertPartsOnPool(const std::vector<std::string>& names,
+                   const std::vector<std::shared_ptr<Poseidon::Model::Model>>& models)
+{
+    namespace Adapter = Poseidon::Model::ShapeAdapter;
+    std::vector<std::unique_ptr<LODShapeWithShadow>> out(models.size());
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("POSEIDON_PART_POOL_ADAPT");
+        return !(v && v[0] == '0');
+    }();
+    Poseidon::TaskPool* pool = Poseidon::GetGlobalTaskPool();
+    if (!enabled || pool == nullptr || models.size() < 2)
+        return out;
+    std::vector<Adapter::AdapterBankTables> tables(models.size());
+    std::vector<uint8_t> wanted(models.size(), 0);
+    for (size_t i = 0; i < models.size(); ++i)
+    {
+        Poseidon::Model::Model* model = models[i].get();
+        if (model == nullptr || model->sourceFormat != "MLOD" || model->lodLevels.empty() ||
+            Poseidon::Shapes.Find(names[i].c_str(), false, true) != nullptr)
+            continue;
+        bool sp3x = true;
+        for (const auto& lod : model->lodLevels)
+            sp3x = sp3x && lod.sourceEncoding == "SP3X";
+        if (sp3x)
+            continue; // the bank sends an all-SP3X MLOD down its legacy loader
+        // The adapter names the shape from sourcePath: the bank's lowered, 127-character key.
+        std::string low = names[i].substr(0, 127);
+        for (char& c : low)
+            if (c >= 'A' && c <= 'Z')
+                c = static_cast<char>(c - 'A' + 'a');
+        model->sourcePath = low;
+        Adapter::BuildAdapterBankTables(*model, tables[i]);
+        wanted[i] = 1;
+    }
+    pool->ParallelFor(static_cast<uint32_t>(models.size()),
+                      [&](uint32_t start, uint32_t end)
+                      {
+                          for (uint32_t i = start; i < end; ++i)
+                          {
+                              if (!wanted[i])
+                                  continue;
+                              try
+                              {
+                                  out[i].reset(Adapter::convertToLODShape(*models[i], false, &tables[i],
+                                                                          /*finishTail=*/false));
+                              }
+                              catch (...)
+                              {
+                                  out[i].reset();
+                              }
+                          }
+                      });
+    return out;
 }
 } // namespace
 
@@ -3259,11 +3329,22 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     partTextures.ms += prep.ms;
                 }
                 const Poseidon::NativeInstallTextureScope installTextures;
+                std::vector<std::unique_ptr<LODShapeWithShadow>> converted;
+                {
+                    std::vector<std::string> names;
+                    std::vector<std::shared_ptr<Poseidon::Model::Model>> models;
+                    for (size_t i = chunk; i < chunkEnd; ++i)
+                    {
+                        names.push_back(attachMeshes[i].first);
+                        models.push_back(attachModels[i]);
+                    }
+                    converted = ConvertPartsOnPool(names, models);
+                }
                 for (size_t i = chunk; i < chunkEnd; ++i)
                 {
                     std::string why = std::move(attachWhy[i]);
-                    LODShapeWithShadow* shape =
-                        InstallShapeFromXobModel(attachMeshes[i].first, std::move(attachModels[i]), why);
+                    LODShapeWithShadow* shape = InstallShapeFromXobModel(
+                        attachMeshes[i].first, std::move(attachModels[i]), why, converted[i - chunk].release());
                     if (shape == nullptr)
                     {
                         ++attachBuildFailed;
