@@ -295,6 +295,59 @@ class ODOLLoader
                           info.boundingCenter.z);
             model.metadata["odolBoundingCenter"] = centre;
         }
+        // An Arma 2 man (the skeleton has pelvis, spine and head) is modelled with its
+        // origin at the hip, and the binariser stored the vertices around the bounding
+        // centre on top of that, so the feet sit 1.8 m below this engine's man origin --
+        // which every placement in the soldier code takes as ground level ("landContact at
+        // y=0"). The whole model is lifted until its lowest drawn point is at y=0; the
+        // animation origin moves with it, so the moves still pose about the same point.
+        if (sourceVersion >= 48 && sourceVersion <= 54 && !model.lodLevels.empty())
+        {
+            bool man = false, spine = false, head = false;
+            for (const auto& b : source.directory.bones)
+            {
+                std::string n = b.name;
+                for (char& c : n)
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                man |= n == "pelvis";
+                spine |= n == "spine";
+                head |= n == "head";
+            }
+            static const bool keep = [] {
+                const char* e = std::getenv("OP_A2_MAN_NO_LIFT");
+                return e && *e == '1';
+            }();
+            const auto& lod0 = model.lodLevels.front().mesh.vertices;
+            if (man && spine && head && !keep && !lod0.empty())
+            {
+                float minY = lod0.front().position.y;
+                for (const auto& v : lod0)
+                    minY = std::min(minY, v.position.y);
+                const float lift = -minY;
+                if (lift > 0.2f && lift < 5.0f)
+                {
+                    for (auto& lod : model.lodLevels)
+                    {
+                        for (auto& v : lod.mesh.vertices)
+                            v.position.y += lift;
+                        for (auto& proxy : lod.mesh.proxies)
+                            proxy.transform.m[1][3] += lift;
+                        lod.mesh.boundingBox.min.y += lift;
+                        lod.mesh.boundingBox.max.y += lift;
+                        lod.mesh.bCenter.y += lift;
+                    }
+                    model.boundingBox.min.y += lift;
+                    model.boundingBox.max.y += lift;
+                    model.aimingCenter.y += lift;
+                    model.centerOfMass.y += lift;
+                    char centre[96];
+                    std::snprintf(centre, sizeof(centre), "%.6f %.6f %.6f", info.boundingCenter.x,
+                                  info.boundingCenter.y - lift, info.boundingCenter.z);
+                    model.metadata["odolBoundingCenter"] = centre;
+                    LOG_INFO(Graphics, "Arma 2 man {}: lifted {:.3f} m so the feet stand at y=0", sourcePath, lift);
+                }
+            }
+        }
         for (int row = 0; row < 3; ++row)
         {
             model.invInertia[row * 3 + 0] = info.invInertia[row].x;
