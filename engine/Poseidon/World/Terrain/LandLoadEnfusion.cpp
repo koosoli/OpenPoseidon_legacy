@@ -67,6 +67,7 @@
 #include <unordered_map>
 #include <iterator>
 #include <filesystem>
+#include <future>
 #include <map>
 #include <string>
 #include <vector>
@@ -1049,10 +1050,16 @@ bool LoadResourceDatabases(const std::string& addonsDir, std::unordered_map<std:
             continue;
         if (LowerCopy(it->path().filename().string()) != "resourcedatabase.rdb")
             continue;
-        std::ifstream file(it->path(), std::ios::binary);
+        std::ifstream file(it->path(), std::ios::binary | std::ios::ate);
         if (!file)
             continue;
-        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        // One sized read: the stream-iterator copy this replaces went through the stream a
+        // byte at a time, and Reforger's databases are megabytes.
+        std::vector<uint8_t> bytes(static_cast<size_t>(std::max<std::streamoff>(file.tellg(), 0)));
+        file.seekg(0);
+        if (!bytes.empty() &&
+            !file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size())))
+            bytes.resize(static_cast<size_t>(std::max<std::streamsize>(file.gcount(), 0)));
         const Enf::ResourceDatabase db = Enf::ReadResourceDatabase(bytes.data(), bytes.size());
         // Refused WHOLE rather than partially: a walk that stopped early yields
         // plausible paths for the wrong GUIDs, which is worse than none.
@@ -1224,9 +1231,50 @@ namespace Enf = Poseidon::Asset::Formats::Enfusion;
 /// ASSET: Everon places one farmhouse prefab thousands of times, and reading its
 /// shell `.xob` -- a multi-megabyte zlib decompress -- once per placement would cost
 /// more than the rest of the world load put together.
+//! What the placement pass asks of each prefab, answered on the task pool before it runs.
+//!
+//! The serial pass keeps the order every mesh, part and counter is indexed and counted in, so
+//! it stays serial; what it waited on was the chain walks (each a few archive reads and an
+//! `.et` parse per question, ~4,000 prefabs on Everon). These are pure functions of the mount,
+//! so a lookup here returns exactly what the pass would have computed; a path that is not here
+//! is computed in place as before. POSEIDON_PREFAB_PREPASS=0 skips it.
+struct PrefabPrepass
+{
+    struct Answers
+    {
+        Enf::PrefabResolution model;
+        Enf::PrefabSlots slots;
+        std::vector<Enf::PrefabChild> children;
+        bool topLevel = false; //!< `placement` and `flags` are filled only for placed prefabs
+        std::string placement;
+        Enf::PrefabEntityFlags flags;
+    };
+    struct Bones
+    {
+        bool read = false;
+        Enf::XobHeader header;
+    };
+    //! Keyed by the exact `.et` path the pass passes (a GUID's path, a slot's or child's prefab).
+    std::unordered_map<std::string, Answers> byPath;
+    //! Keyed by the `.xob` (a mesh key's model, remap stripped), for prefabs that declare slots.
+    std::unordered_map<std::string, Bones> bonesByXob;
+
+    const Answers* Find(const std::string& path) const
+    {
+        const auto hit = byPath.find(path);
+        return hit == byPath.end() ? nullptr : &hit->second;
+    }
+    const Bones* FindBones(const std::string& xob) const
+    {
+        const auto hit = bonesByXob.find(xob);
+        return hit == bonesByXob.end() ? nullptr : &hit->second;
+    }
+};
+
 struct AttachWorkspace
 {
     const EnfusionMount* mount = nullptr;
+    const PrefabPrepass* prepass = nullptr;
     std::unordered_map<std::string, std::string> partToMesh;              //!< `.et` (lower) -> `.xob`
     std::unordered_map<std::string, std::vector<Enf::XobBone>> meshBones; //!< `.xob` -> its bones
     std::unordered_map<std::string, uint32_t> index;                      //!< `.xob` -> attachment mesh slot
@@ -1241,16 +1289,147 @@ const std::vector<Enf::XobBone>& BonesOf(AttachWorkspace& ws, const std::string&
     if (hit != ws.meshBones.end())
         return hit->second;
     std::vector<Enf::XobBone> bones;
-    std::vector<uint8_t> blob;
-    if (ws.mount->Read(Enf::SplitRemappedMeshKey(xobPath), blob)) // RFG-121: bones are the model's
+    const std::string xob = Enf::SplitRemappedMeshKey(xobPath); // RFG-121: bones are the model's
+    const auto apply = [&](const Enf::XobHeader& header)
     {
-        const Enf::XobHeader header = Enf::ReadXobHeader(blob.data(), blob.size());
         if (header.valid())
             bones = header.bones;
         else if (summary.slotFailure.empty())
             summary.slotFailure = xobPath + ": " + header.error;
+    };
+    if (const PrefabPrepass::Bones* pre = ws.prepass ? ws.prepass->FindBones(xob) : nullptr)
+    {
+        if (pre->read)
+            apply(pre->header);
+    }
+    else
+    {
+        std::vector<uint8_t> blob;
+        if (ws.mount->Read(xob, blob))
+            apply(Enf::ReadXobHeader(blob.data(), blob.size()));
     }
     return ws.meshBones.emplace(xobPath, std::move(bones)).first->second;
+}
+
+Enf::PrefabResolution PrefabModelOf(const AttachWorkspace& ws, const std::string& etPath)
+{
+    if (const PrefabPrepass::Answers* pre = ws.prepass ? ws.prepass->Find(etPath) : nullptr)
+        return pre->model;
+    return Enf::ResolvePrefabModel(*ws.mount, etPath);
+}
+
+Enf::PrefabSlots PrefabSlotsOf(const AttachWorkspace& ws, const std::string& etPath)
+{
+    if (const PrefabPrepass::Answers* pre = ws.prepass ? ws.prepass->Find(etPath) : nullptr)
+        return pre->slots;
+    return Enf::ResolvePrefabSlots(*ws.mount, etPath);
+}
+
+std::vector<Enf::PrefabChild> PrefabChildrenOf(const AttachWorkspace& ws, const std::string& etPath)
+{
+    if (const PrefabPrepass::Answers* pre = ws.prepass ? ws.prepass->Find(etPath) : nullptr)
+        return pre->children;
+    return Enf::ResolvePrefabChildren(*ws.mount, etPath);
+}
+
+//! Fills `out` for the placed prefabs `topPaths` and, round by round, every slot part and
+//! transform child they lead to -- the same paths the serial pass will ask about.
+void BuildPrefabPrepass(const EnfusionMount& mount, const std::vector<std::string>& topPaths, bool wantPlacement,
+                        bool wantFlags, PrefabPrepass& out)
+{
+    Poseidon::TaskPool* pool = Poseidon::GetGlobalTaskPool();
+    const auto parallel = [pool](size_t count, const std::function<void(size_t)>& work)
+    {
+        if (pool != nullptr && count > 1)
+            pool->ParallelFor(static_cast<uint32_t>(count),
+                              [&](uint32_t start, uint32_t end)
+                              {
+                                  for (uint32_t i = start; i < end; ++i)
+                                      work(i);
+                              });
+        else
+            for (size_t i = 0; i < count; ++i)
+                work(i);
+    };
+    std::vector<std::string> round = topPaths;
+    std::unordered_set<std::string> seen(round.begin(), round.end());
+    // Building -> set -> leaf for slots, four levels for children: six rounds cover both.
+    for (int level = 0; level < 6 && !round.empty(); ++level)
+    {
+        std::vector<PrefabPrepass::Answers> answers(round.size());
+        std::vector<uint8_t> ok(round.size(), 0);
+        parallel(round.size(),
+                 [&](size_t i)
+                 {
+                     try
+                     {
+                         PrefabPrepass::Answers& a = answers[i];
+                         a.model = Enf::ResolvePrefabModel(mount, round[i]);
+                         a.slots = Enf::ResolvePrefabSlots(mount, round[i]);
+                         a.children = Enf::ResolvePrefabChildren(mount, round[i]);
+                         if (level == 0)
+                         {
+                             a.topLevel = true;
+                             if (wantPlacement)
+                                 a.placement = Enf::ResolvePrefabPlacement(mount, round[i]);
+                             if (wantFlags)
+                                 a.flags = Enf::ResolvePrefabEntityFlags(mount, round[i]);
+                         }
+                         ok[i] = 1;
+                     }
+                     catch (...)
+                     {
+                         // Left out: the serial pass computes it in place.
+                     }
+                 });
+        std::vector<std::string> next;
+        const auto follow = [&](const std::string& path)
+        {
+            if (!path.empty() && seen.insert(path).second)
+                next.push_back(path);
+        };
+        for (size_t i = 0; i < round.size(); ++i)
+        {
+            if (!ok[i])
+                continue;
+            for (const Enf::PrefabSlot& slot : answers[i].slots.exact)
+                follow(slot.prefab);
+            for (const Enf::PrefabSlot& slot : answers[i].slots.prefixes)
+                follow(slot.prefab);
+            for (const Enf::PrefabChild& child : answers[i].children)
+                follow(child.prefab);
+            out.byPath.emplace(round[i], std::move(answers[i]));
+        }
+        round = std::move(next);
+    }
+
+    std::vector<std::string> xobs;
+    {
+        std::unordered_set<std::string> distinct;
+        for (const auto& [path, a] : out.byPath)
+            if (!a.slots.empty() && !a.model.xobPath.empty() && distinct.insert(a.model.xobPath).second)
+                xobs.push_back(a.model.xobPath);
+    }
+    std::vector<PrefabPrepass::Bones> bones(xobs.size());
+    std::vector<uint8_t> ok(xobs.size(), 0);
+    parallel(xobs.size(),
+             [&](size_t i)
+             {
+                 try
+                 {
+                     std::vector<uint8_t> blob;
+                     bones[i].read = mount.Read(xobs[i], blob);
+                     if (bones[i].read)
+                         bones[i].header = Enf::ReadXobHeader(blob.data(), blob.size());
+                     ok[i] = 1;
+                 }
+                 catch (...)
+                 {
+                 }
+             });
+    for (size_t i = 0; i < xobs.size(); ++i)
+        if (ok[i])
+            out.bonesByXob.emplace(xobs[i], std::move(bones[i]));
 }
 
 /// Every part a prefab hangs on its shell, flattened into the shell's model space.
@@ -1268,7 +1447,7 @@ void CollectAttachments(AttachWorkspace& ws, PlacementSummary& summary, const st
     // the limit is here to bound authored data, not to express an expectation.
     if (depth > 2)
         return;
-    const Enf::PrefabSlots slots = Enf::ResolvePrefabSlots(*ws.mount, etPath);
+    const Enf::PrefabSlots slots = PrefabSlotsOf(ws, etPath);
     if (slots.empty())
         return;
     if (depth == 0)
@@ -1297,7 +1476,7 @@ void CollectAttachments(AttachWorkspace& ws, PlacementSummary& summary, const st
         auto cached = ws.partToMesh.find(key);
         if (cached == ws.partToMesh.end())
         {
-            Enf::PrefabResolution resolved = Enf::ResolvePrefabModel(*ws.mount, partEt);
+            Enf::PrefabResolution resolved = PrefabModelOf(ws, partEt);
             if (resolved.xobPath.empty() && summary.slotFailure.empty())
                 summary.slotFailure = partEt + ": " + resolved.reason;
             if (overridden)
@@ -1366,7 +1545,7 @@ void CollectChildParts(AttachWorkspace& ws, PlacementSummary& summary, const std
     const std::string key = LowerCopy(etPath);
     auto known = ws.children.find(key);
     if (known == ws.children.end())
-        known = ws.children.emplace(key, Enf::ResolvePrefabChildren(*ws.mount, etPath)).first;
+        known = ws.children.emplace(key, PrefabChildrenOf(ws, etPath)).first;
     // Copied: the recursion below inserts into `children`.
     const std::vector<Enf::PrefabChild> children = known->second;
     constexpr float toRad = 0.01745329252f;
@@ -1385,7 +1564,7 @@ void CollectChildParts(AttachWorkspace& ws, PlacementSummary& summary, const std
         const std::string partKey = LowerCopy(child.prefab);
         auto cached = ws.partToMesh.find(partKey);
         if (cached == ws.partToMesh.end())
-            cached = ws.partToMesh.emplace(partKey, Enf::ResolvePrefabModel(*ws.mount, child.prefab).MeshKey()).first;
+            cached = ws.partToMesh.emplace(partKey, PrefabModelOf(ws, child.prefab).MeshKey()).first;
         if (!cached->second.empty())
         {
             MeshAttachment part;
@@ -1417,12 +1596,11 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
     namespace Enf = Poseidon::Asset::Formats::Enfusion;
     PlacementSummary out;
 
+    // The resource databases load on their own thread while this one reads and parses the
+    // world file; neither needs the other. The errors keep their order: databases first.
     std::unordered_map<std::string, std::string> byGuid;
-    if (!LoadResourceDatabases(addonsDir, byGuid, out.error))
-        return out;
-    // RFG-132: every `.emat` parsed from here on resolves `{GUID}path` by its GUID.
-    Poseidon::Asset::Material::Detail::SetEmatGuidPaths(
-        std::make_shared<const Poseidon::Asset::Material::Detail::EmatGuidPaths>(byGuid));
+    std::string rdbError;
+    auto rdb = std::async(std::launch::async, [&] { return LoadResourceDatabases(addonsDir, byGuid, rdbError); });
 
     // The world's own `.ent`, beside the terrain in the same folder.
     std::string entPath;
@@ -1433,23 +1611,32 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
             entPath = path;
             break;
         }
-    if (entPath.empty())
-    {
-        out.error = "no .ent world beside the terrain";
-        return out;
-    }
+    std::string entError;
     std::vector<uint8_t> bytes;
-    if (!mount.Read(entPath, bytes))
+    Enf::EbinWorld world;
+    if (entPath.empty())
+        entError = "no .ent world beside the terrain";
+    else if (!mount.Read(entPath, bytes))
+        entError = "cannot read " + entPath;
+    else
     {
-        out.error = "cannot read " + entPath;
+        world = Enf::ReadEbin(bytes.data(), bytes.size());
+        if (!world.valid())
+            entError = world.error;
+    }
+    if (!rdb.get())
+    {
+        out.error = rdbError;
         return out;
     }
-    const Enf::EbinWorld world = Enf::ReadEbin(bytes.data(), bytes.size());
-    if (!world.valid())
+    if (!entError.empty())
     {
-        out.error = world.error;
+        out.error = entError;
         return out;
     }
+    // RFG-132: every `.emat` parsed from here on resolves `{GUID}path` by its GUID.
+    Poseidon::Asset::Material::Detail::SetEmatGuidPaths(
+        std::make_shared<const Poseidon::Asset::Material::Detail::EmatGuidPaths>(byGuid));
     out.placements = world.placements.size();
 
     // One resolution per DISTINCT prefab, not per placement: Everon's 1.23 M
@@ -1467,6 +1654,46 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
     AttachWorkspace workspace;
     workspace.mount = &mount;
     resolved.reserve(world.placements.size());
+
+    static const bool slopeOn = []
+    {
+        const char* env = std::getenv("POSEIDON_SLOPE_PLACEMENT");
+        return !(env && env[0] == '0');
+    }();
+    static const bool authoredY = []
+    {
+        const char* env = std::getenv("POSEIDON_Y_RULE_FLAGS");
+        return !(env && env[0] == '0');
+    }();
+    PrefabPrepass prepass;
+    {
+        static const bool prepassOn = []
+        {
+            const char* env = std::getenv("POSEIDON_PREFAB_PREPASS");
+            return !(env && env[0] == '0');
+        }();
+        if (prepassOn)
+        {
+            const auto prepassStart = std::chrono::steady_clock::now();
+            std::vector<std::string> topPaths;
+            std::unordered_set<std::string> seenGuid;
+            for (const Enf::EbinPlacement& placement : world.placements)
+                if (placement.points.empty() && !placement.prefabGuid.empty() &&
+                    seenGuid.insert(placement.prefabGuid).second)
+                    if (const auto hit = byGuid.find(placement.prefabGuid); hit != byGuid.end())
+                        topPaths.push_back(hit->second);
+            std::sort(topPaths.begin(), topPaths.end());
+            topPaths.erase(std::unique(topPaths.begin(), topPaths.end()), topPaths.end());
+            BuildPrefabPrepass(mount, topPaths, slopeOn, authoredY, prepass);
+            workspace.prepass = &prepass;
+            LOG_INFO(
+                World,
+                "Enfusion native load: prefab pre-pass answered {} prefabs ({} placed) and {} models' bones in "
+                "{:.0f} ms (POSEIDON_PREFAB_PREPASS=0 = off)",
+                prepass.byPath.size(), topPaths.size(), prepass.bonesByXob.size(),
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - prepassStart).count());
+        }
+    }
     // Resolved once per material GUID: 2,370 roads share a couple of dozen surfaces
     // and each resolution reads an `.emat` out of an archive.
     std::unordered_map<std::string, RoadLook> roadTextures;
@@ -1662,7 +1889,7 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
             const auto guidHit = byGuid.find(placement.prefabGuid);
             if (guidHit != byGuid.end())
             {
-                const Enf::PrefabResolution resolved = Enf::ResolvePrefabModel(mount, guidHit->second);
+                const Enf::PrefabResolution resolved = PrefabModelOf(workspace, guidHit->second);
                 if (!resolved.xobPath.empty())
                     mesh = resolved.MeshKey(); // RFG-121: a colour variant is its own model
                 else if (out.firstFailure.empty())
@@ -1737,18 +1964,18 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         // Only when the file stores none -- an authored tilt is the authored answer.
         if (std::fabs(placement.angles[0]) < 0.01f && std::fabs(placement.angles[2]) < 0.01f)
         {
-            static const bool slopeOn = []
-            {
-                const char* env = std::getenv("POSEIDON_SLOPE_PLACEMENT");
-                return !(env && env[0] == '0');
-            }();
             auto slope = prefabSlopeAlign.find(placement.prefabGuid);
             if (slope == prefabSlopeAlign.end())
             {
                 bool align = false;
                 const auto guidHit = byGuid.find(placement.prefabGuid);
                 if (slopeOn && guidHit != byGuid.end())
-                    align = Enf::ResolvePrefabPlacement(mount, guidHit->second) == "slopelandcontact";
+                {
+                    const PrefabPrepass::Answers* pre = workspace.prepass ? prepass.Find(guidHit->second) : nullptr;
+                    align =
+                        (pre && pre->topLevel ? pre->placement : Enf::ResolvePrefabPlacement(mount, guidHit->second)) ==
+                        "slopelandcontact";
+                }
                 slope = prefabSlopeAlign.emplace(placement.prefabGuid, align).first;
             }
             item.slopeAlign = slope->second;
@@ -1823,11 +2050,6 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         // heuristic floated the harbour's sea bollards 2.7 m over the quay (relative Y ~5 over a
         // -2.8 m seabed) and is kept only for chains that declare nothing.
         {
-            static const bool authoredY = []
-            {
-                const char* env = std::getenv("POSEIDON_Y_RULE_FLAGS");
-                return !(env && env[0] == '0');
-            }();
             if (authoredY)
             {
                 auto flagsHit = prefabFlags.find(placement.prefabGuid);
@@ -1835,7 +2057,11 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
                 {
                     Enf::PrefabEntityFlags resolvedFlags;
                     if (const auto guidHit = byGuid.find(placement.prefabGuid); guidHit != byGuid.end())
-                        resolvedFlags = Enf::ResolvePrefabEntityFlags(mount, guidHit->second);
+                    {
+                        const PrefabPrepass::Answers* pre = workspace.prepass ? prepass.Find(guidHit->second) : nullptr;
+                        resolvedFlags =
+                            pre && pre->topLevel ? pre->flags : Enf::ResolvePrefabEntityFlags(mount, guidHit->second);
+                    }
                     flagsHit = prefabFlags.emplace(placement.prefabGuid, resolvedFlags).first;
                 }
                 if (flagsHit->second.known)
