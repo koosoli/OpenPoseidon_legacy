@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $game = 'H:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered'
 $a3   = 'F:\SteamLibrary\steamapps\common\Arma 3'
-$job = @{ DEPLOY='0'; LIST='missions_first.txt'; OUT='tests'; SECONDS='40'; RENDER=''; EXTRA=''; WINDOW='1'; SHOTS='1'; EXE='bin' }
+$job = @{ WAIT='480'; QUIET='90'; DEPLOY='0'; LIST='missions_first.txt'; OUT='tests'; SECONDS='40'; RENDER=''; EXTRA=''; WINDOW='1'; SHOTS='1'; EXE='bin' }
 if (Test-Path "$here\job.txt") {
   Get-Content "$here\job.txt" | ForEach-Object { if ($_ -match '^\s*([A-Z0-9_]+)\s*=(.*)$') { $job[$matches[1]] = $matches[2].Trim() } }
 }
@@ -15,7 +15,23 @@ $status = "$here\go.status"
 function St($s) { "$(Get-Date -Format 'HH:mm:ss') $s" | Add-Content $status }
 Set-Content $status "start $(Get-Date -Format s)"
 Remove-Item "$here\STOP" -ErrorAction SilentlyContinue
-if (Get-Process OpenPoseidon -ErrorAction SilentlyContinue) { St 'BUSY: OpenPoseidon laeuft schon'; exit 1 }
+# One game at a time (CLAUDE.md rule 0d): another session's or the owner's OpenPoseidon is
+# waited for, and the run starts only after no instance has been seen for QUIET seconds
+# (another harness starts its next mission within seconds). WAIT=0 gives up at once.
+function Wait-GameFree {
+  $quiet = [int]$job.QUIET; $deadline = (Get-Date).AddMinutes([int]$job.WAIT); $free = $null; $said = $false
+  while ($true) {
+    if (Test-Path "$here\STOP") { St 'STOPPED while waiting'; exit 1 }
+    if (Get-Process OpenPoseidon -ErrorAction SilentlyContinue) {
+      $free = $null
+      if (-not $said) { St 'BUSY: OpenPoseidon laeuft schon, warte'; $said = $true }
+      if ((Get-Date) -gt $deadline) { St 'BUSY: gave up waiting'; exit 1 }
+    } elseif (-not $free) { $free = Get-Date }
+    elseif (((Get-Date) - $free).TotalSeconds -ge $quiet) { if ($said) { St 'free' }; return }
+    Start-Sleep 5
+  }
+}
+Wait-GameFree
 # DEPLOY=1: unpack the newest CI artifact zip (OpenPoseidon-Windows-MrDudeX-arma3-<sha>.zip,
 # downloaded from the "Arma 3 / Windows game build" run) into bin\ first. Looked for in
 # incoming\, next to this script and in the user's Downloads folder.
@@ -53,6 +69,7 @@ $i = 0
 foreach ($m in $missions) {
   $i++
   if (Test-Path "$here\STOP") { St 'STOPPED'; break }
+  if (Get-Process OpenPoseidon -ErrorAction SilentlyContinue) { Wait-GameFree }
   $name = ($m.Trim() -replace '[\\/:]', '_')
   $log = Join-Path $out "$name.log"; $err = Join-Path $out "$name.stderr.txt"
   Remove-Item $log, $err -ErrorAction SilentlyContinue
