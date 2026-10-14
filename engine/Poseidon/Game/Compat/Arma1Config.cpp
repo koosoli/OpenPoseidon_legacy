@@ -1466,6 +1466,10 @@ const char* CwaWeaponFor(const std::string& lowerName, const ParamEntry* weapon,
         return mgun ? "M60" : gl ? "M16GrenadeLauncher" : "M16";
     if (has("9x19") || has("mp5") || has("bizon") || has("9x18"))
         return "HK";
+    if (has("9x39") || has("vss"))
+        return "SVDDragunov";
+    if (has("22_lr") || has("hmr") || has("huntingrifle"))
+        return "HuntingRifle";
     if (A2Derives(weapon, "RifleCore") || A2Derives(weapon, "Rifle"))
         return "M16";
     return nullptr;
@@ -1542,8 +1546,15 @@ RString Arma2WeaponFallback(const RString& name)
     const ParamEntry* w = cwaWeapons->FindEntry(weapon);
     if (!w)
         return RString();
+    // OFP's magazines[]={"this"} means the weapon is its own magazine (PK, M21, the
+    // launchers): "this" names no class, and every RPK, DMR, Bizon and RPG round looked
+    // up that way found no CWA magazine (run 17: 75Rnd_545x39_RPK, 20Rnd_762x51_DMR, ...).
     if (const ParamEntry* mags = w->FindEntry("magazines"); mags && mags->IsArray() && mags->GetSize() > 0)
-        return RString((const char*)(RStringB)(*mags)[0]);
+    {
+        const RString first = (RStringB)(*mags)[0];
+        if (stricmp(first.Data(), "this") != 0)
+            return first;
+    }
     return RString(weapon);
 }
 
