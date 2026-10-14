@@ -1439,6 +1439,8 @@ const char* CwaWeaponFor(const std::string& lowerName, const ParamEntry* weapon,
             return "AT4Launcher";
         if (has("m72") || has("law"))
             return "LAWLauncher";
+        if (has("at13") || has("metis") || has("javelin") || has("dragon") || has("at5") || has("konkurs"))
+            return "AT4Launcher";
         return "CarlGustavLauncher";
     }
     const bool pistol = A2Derives(weapon, "PistolCore") || A2Derives(weapon, "Pistol");
@@ -1518,7 +1520,23 @@ RString Arma2WeaponFallback(const RString& name)
         direct = "GrenadeLauncher";
     if (direct)
         return cwaWeapons->FindEntry(direct) ? RString(direct) : RString();
-    const char* weapon = CwaWeaponFor(lower, nullptr, ammo + " " + lower);
+    // launcher rounds: the CWA launcher of the kind, whose own magazine stands for them
+    // (PG7VL and OG7 found no counterpart at all; a magazine has no ancestry to test)
+    const char* weapon = nullptr;
+    if (any({"pg7", "og7", "rpg"}))
+        weapon = "RPGLauncher";
+    else if (any({"smaw", "maaws", "carlgustav"}))
+        weapon = "CarlGustavLauncher";
+    else if (any({"m136", "m72", "law"}))
+        weapon = "LAWLauncher";
+    else if (any({"stinger"}))
+        weapon = "AALauncher";
+    else if (any({"strela", "igla"}))
+        weapon = "9K32Launcher";
+    else if (any({"at13", "metis", "javelin", "dragon", "at5", "konkurs"}))
+        weapon = "AT4Launcher";
+    if (!weapon)
+        weapon = CwaWeaponFor(lower, nullptr, ammo + " " + lower);
     if (!weapon)
         return RString();
     const ParamEntry* w = cwaWeapons->FindEntry(weapon);
