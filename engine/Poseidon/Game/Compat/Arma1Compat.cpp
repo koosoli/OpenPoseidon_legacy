@@ -384,8 +384,11 @@ const std::map<std::string, std::vector<const char*>>& MagazineAliases()
     return table;
 }
 
+// weaponModels: a resolved weapon gets the A1x_ class with the Arma model; a magazine
+// never does (its name must stay the CWA magazine the weapon's magazines[] lists).
 RString ResolveFrom(const char* configClass, const RString& name,
-                    const std::map<std::string, std::vector<const char*>>& table, bool warn = true)
+                    const std::map<std::string, std::vector<const char*>>& table, bool warn = true,
+                    bool weaponModels = false)
 {
     if (!Active() || name.GetLength() == 0)
         return name;
@@ -396,7 +399,7 @@ RString ResolveFrom(const char* configClass, const RString& name,
     {
         // A weapon both games name alike (AK74, PK, M16A2 ...): CWA's class keeps the
         // magazines and ballistics, the Arma model is drawn on it like for any other.
-        if (Generation() >= 1 && strcmp(configClass, "CfgWeapons") == 0 && _strnicmp(name.Data(), "A1x_", 4) != 0)
+        if (weaponModels && Generation() >= 1 && _strnicmp(name.Data(), "A1x_", 4) != 0)
             return Arma2WeaponModelClass(name, name);
         return name;
     }
@@ -411,7 +414,7 @@ RString ResolveFrom(const char* configClass, const RString& name,
             {
                 if (reported.insert(std::string(configClass) + key).second)
                     LOG_INFO(Mission, "{}: {} '{}' is represented by CWA '{}'", Label(), configClass, name.Data(), candidate);
-                if (Generation() >= 1 && strcmp(configClass, "CfgWeapons") == 0)
+                if (weaponModels && Generation() >= 1)
                     return Arma2WeaponModelClass(name, RString(candidate));
                 return RString(candidate);
             }
@@ -427,7 +430,7 @@ RString ResolveFrom(const char* configClass, const RString& name,
             if (reported.insert(std::string(configClass) + key).second)
                 LOG_INFO(Mission, "{}: {} '{}' is carried by CWA '{}' (by kind and calibre)", Label(), configClass,
                          name.Data(), fallback.Data());
-            return Arma2WeaponModelClass(name, fallback);
+            return weaponModels ? Arma2WeaponModelClass(name, fallback) : fallback;
         }
     }
     if (warn && reported.insert(std::string(configClass) + key).second)
@@ -759,7 +762,7 @@ RString ResolveVehicleClass(const RString& className)
 
 RString ResolveWeaponClass(const RString& className)
 {
-    return ResolveFrom("CfgWeapons", className, WeaponAliases());
+    return ResolveFrom("CfgWeapons", className, WeaponAliases(), true, true);
 }
 
 RString ResolveMagazineClass(const RString& className)
