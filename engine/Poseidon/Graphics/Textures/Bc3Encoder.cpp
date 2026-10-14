@@ -1,4 +1,6 @@
 #include <Poseidon/Graphics/Textures/Bc3Encoder.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <algorithm>
 #include <cstring>
 #include <limits>
@@ -35,20 +37,36 @@ void AppendBc3LevelRGBA(const uint8_t* rgba, int width, int height, std::vector<
 {
     if (!rgba || width <= 0 || height <= 0)
         return;
-    uint8_t block[64], out[16];
     const int bw = (width + 3) / 4, bh = (height + 3) / 4;
-    for (int by = 0; by < bh; ++by)
-        for (int bx = 0; bx < bw; ++bx)
-        {
-            for (int y = 0; y < 4; ++y)
-                for (int x = 0; x < 4; ++x)
-                {
-                    const int sx = std::min(bx * 4 + x, width - 1), sy = std::min(by * 4 + y, height - 1);
-                    std::memcpy(block + (y * 4 + x) * 4, rgba + (static_cast<size_t>(sy) * width + sx) * 4, 4);
-                }
-            stb_compress_dxt_block(out, block, 1, STB_DXT_NORMAL);
-            blocks.insert(blocks.end(), out, out + 16);
-        }
+    const size_t base = blocks.size();
+    blocks.resize(base + static_cast<size_t>(bw) * static_cast<size_t>(bh) * 16);
+    uint8_t* const dst = blocks.data() + base;
+    const auto encodeRows = [&](int by0, int by1)
+    {
+        uint8_t block[64];
+        for (int by = by0; by < by1; ++by)
+            for (int bx = 0; bx < bw; ++bx)
+            {
+                for (int y = 0; y < 4; ++y)
+                    for (int x = 0; x < 4; ++x)
+                    {
+                        const int sx = std::min(bx * 4 + x, width - 1), sy = std::min(by * 4 + y, height - 1);
+                        std::memcpy(block + (y * 4 + x) * 4, rgba + (static_cast<size_t>(sy) * width + sx) * 4, 4);
+                    }
+                stb_compress_dxt_block(dst + (static_cast<size_t>(by) * bw + bx) * 16, block, 1, STB_DXT_NORMAL);
+            }
+    };
+    // PERF (2026-10-14): a native leaf composite's chain is encoded here on the main thread when
+    // a far model registers (EncodeAuthoredBc3) -- ~7% of it while the far tier fills. Every block
+    // is independent and has its own slot, so rows encode on the task pool with byte-identical
+    // output (stb_dxt keeps no global state since v1.11). Only from the main thread: the object
+    // stream's own workers also come through here, and ParallelFor is not theirs to call.
+    TaskPool* pool = GetGlobalTaskPool();
+    if (pool != nullptr && bh >= 16 && Foundation::IsMainThread())
+        pool->ParallelFor(static_cast<uint32_t>(bh), [&](uint32_t start, uint32_t end)
+                          { encodeRows(static_cast<int>(start), static_cast<int>(end)); });
+    else
+        encodeRows(0, bh);
 }
 
 bool EncodeBc3ChainRGBA(const uint8_t* rgba, int width, int height, std::vector<uint8_t>& blocks,

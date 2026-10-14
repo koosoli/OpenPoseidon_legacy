@@ -3,6 +3,8 @@
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/Foundation/Platform/FpEnvironment.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
 #include <algorithm>
 #include <cstring>
 #include <cstdlib>
@@ -321,4 +323,37 @@ TEST_CASE("DDS factory adopts exact consumer identity for a normalized prepared 
     CHECK(sidecar.blocks == LegacyEncode(rgba, 16, 16).blocks);
     CHECK(store.SnapshotStats().bytes == 0);
     store.Clear();
+}
+
+TEST_CASE("BC3 level encoding on the task pool is byte-identical to the serial encode", "[graphics][bc3]")
+{
+    // AppendBc3LevelRGBA splits block rows across the global pool when called from the main
+    // thread. Every block has its own slot, so the bytes must not depend on the split.
+    constexpr int w = 256, h = 200; // not a multiple of the row split, and an edge-clamped tail row
+    std::vector<uint8_t> rgba(static_cast<size_t>(w) * h * 4);
+    uint32_t state = 12345u;
+    for (auto& b : rgba)
+    {
+        state = state * 1664525u + 1013904223u;
+        b = static_cast<uint8_t>(state >> 24);
+    }
+    Poseidon::Foundation::ResetMainThreadCaptureForTest();
+    std::vector<uint8_t> serial;
+    Poseidon::AppendBc3LevelRGBA(rgba.data(), w, h, serial); // no main thread captured: serial path
+
+    const bool ownPool = Poseidon::GetGlobalTaskPool() == nullptr;
+    if (ownPool)
+        Poseidon::InitGlobalTaskPool(4);
+    Poseidon::Foundation::CaptureMainThread();
+    std::vector<uint8_t> pooled = {7, 8, 9}; // appends after existing bytes, as the chain does
+    Poseidon::AppendBc3LevelRGBA(rgba.data(), w, h, pooled);
+    Poseidon::Foundation::ResetMainThreadCaptureForTest();
+    if (ownPool)
+        Poseidon::ShutdownGlobalTaskPool();
+
+    REQUIRE(serial.size() == static_cast<size_t>((w + 3) / 4) * ((h + 3) / 4) * 16);
+    REQUIRE(pooled.size() == serial.size() + 3);
+    CHECK(pooled[0] == 7);
+    CHECK(pooled[2] == 9);
+    CHECK(std::equal(serial.begin(), serial.end(), pooled.begin() + 3));
 }
