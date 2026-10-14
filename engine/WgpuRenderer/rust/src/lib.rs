@@ -1449,8 +1449,8 @@ impl Renderer {
         // the hal device route succeeded AND NGX reported DLSS available. Same
         // strict-fallback rule as the instance: any failure names itself and the
         // renderer continues on the plain path.
-        #[cfg(feature = "dlss")]
         init_timer.mark("adapter+limits");
+        #[cfg(feature = "dlss")]
         let mut ngx_raw: Option<(dlss_device::NgxRawHandles, dlss::Ngx)> = None;
         let (device, queue) = 'dev: {
             #[cfg(feature = "dlss")]
