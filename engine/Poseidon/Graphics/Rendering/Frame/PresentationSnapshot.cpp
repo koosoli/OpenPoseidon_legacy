@@ -311,7 +311,7 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
             if (dx * dx + dz * dz < farthestD2)
                 snap.rotorSources[farthest] = source;
         };
-        const Helicopter* cameraHeli = dynamic_cast<const Helicopter*>(cameraOn);
+        const Helicopter* cameraHeli = cameraOn ? cameraOn->AsHelicopter() : nullptr;
         if (cameraHeli)
         {
             addRotor(cameraHeli);
@@ -320,7 +320,8 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
         }
         for (int i = 0; i < GWorld->NVehicles(); ++i)
         {
-            const Helicopter* helicopter = dynamic_cast<const Helicopter*>(GWorld->GetVehicle(i));
+            const Entity* vehicle = GWorld->GetVehicle(i);
+            const Helicopter* helicopter = vehicle ? vehicle->AsHelicopter() : nullptr;
             if (helicopter && helicopter != cameraHeli)
                 addRotor(helicopter);
         }
@@ -415,9 +416,12 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
                     snap.wakeBoats[farthest] = boat;
             };
             for (int i = 0; i < GWorld->NVehicles(); ++i)
-                addBoat(dynamic_cast<const Ship*>(GWorld->GetVehicle(i)));
+            {
+                const Entity* vehicle = GWorld->GetVehicle(i);
+                addBoat(vehicle ? vehicle->AsShip() : nullptr);
+            }
             // the occupied boat is not always in the vehicle list (see the rotor walk above)
-            const Ship* cameraShip = dynamic_cast<const Ship*>(cameraOn);
+            const Ship* cameraShip = cameraOn ? cameraOn->AsShip() : nullptr;
             bool listed = false;
             for (int k = 0; k < snap.wakeBoatCount; ++k)
                 listed |= cameraShip && snap.wakeBoats[k].id ==

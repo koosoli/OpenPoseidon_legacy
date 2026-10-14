@@ -49,6 +49,9 @@ float ShipDesignDraft(float length);
 class Ship: public Transport
 {
 	typedef Transport base;
+
+	public:
+	const Ship *AsShip() const override {return this;}
 	protected:
 	Vector3 _lastAngVelocity;
 	float _randFrequency;

@@ -90,6 +90,9 @@ class Helicopter: public Transport
 {
 	typedef Transport base;
 
+	public:
+	const Helicopter *AsHelicopter() const override {return this;}
+
 	protected:
 	Ref<Shape> _cargoCockpit;
 

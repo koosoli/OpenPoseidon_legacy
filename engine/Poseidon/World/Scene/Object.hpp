@@ -247,6 +247,9 @@ class ObjectShapeType: public RefCountWithLinks
 };
 
 // Object is the interface and default implementation of any object present in Landscape.
+class Helicopter;
+class Ship;
+
 class Object: public NetworkObject, public FrameBase, public IAnimator
 {
 	protected:
@@ -462,6 +465,13 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	virtual RString GetNameSound() const;
 	// Check if object should be used as reference for Move command
 	virtual bool IsMoveTarget() const;
+	// What dynamic_cast<const Helicopter*> / <const Ship*> answer, as one virtual call
+	// (PERF, 2026-10-14). Per-frame scans of the whole vehicle list -- the presentation
+	// snapshot's rotor and wake lists, the airflow field's rotor wash -- asked the cast of
+	// every soldier, and a failing dynamic_cast walks the hierarchy. Overridden only by
+	// Helicopter and Ship, so their subclasses get exactly the answer the cast gives.
+	virtual const Helicopter *AsHelicopter() const {return nullptr;}
+	virtual const Ship *AsShip() const {return nullptr;}
 	// Check which rendering pass this object should be drawn in
 	virtual int PassNum( int lod );
 

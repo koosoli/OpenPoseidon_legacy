@@ -188,7 +188,8 @@ void AirflowField::Update(Vector3Par focus)
 
     for (int i = 0; i < GWorld->NVehicles(); ++i)
     {
-        consider(dynamic_cast<const Helicopter*>(GWorld->GetVehicle(i)));
+        const Entity* vehicle = GWorld->GetVehicle(i);
+        consider(vehicle ? vehicle->AsHelicopter() : nullptr);
     }
 
     // Compact: slots that were never filled still hold infinity.
