@@ -281,6 +281,39 @@ int Landscape::GatherTerrainHoles(Vector3Par pos, float radius, TerrainHoleArea*
         for (int x = xMin; x <= xMax; x++)
         {
             const ObjectList& list = _objects(x, z);
+            if (list.Null())
+            {
+                continue;
+            }
+            // PERF (2026-10-14): every soldier asks this every tick (GroundCollision), and the
+            // walk below loaded the shape of every object in a 75-125 m square just to find
+            // that it has no roadway. Only roadway objects can hold a hole, and each cell
+            // already mirrors exactly those (ObjectListFull::GetRoadwayObject, which soldier
+            // ground contact relies on too). So ask the mirror, with the walk's own filters,
+            // whether this cell can contribute anything; only a cell that can is walked, and
+            // walked exactly as before, so hole order and RegisterHoleObject are unchanged.
+            // A stock world has no hole objects and now skips every cell.
+            bool mayHoldHole = false;
+            const ObjectListFull* full = list.GetList();
+            for (int i = 0; i < full->GetRoadwayObjectCount() && !mayHoldHole; i++)
+            {
+                const Object* obj = full->GetRoadwayObject(i);
+                const LODShape* shape = obj ? obj->GetShape() : nullptr;
+                if (!shape || shape->FindRoadwayLevel() < 0 || shape->FindMemoryLevel() < 0)
+                {
+                    continue;
+                }
+                const float r = shape->BoundingSphere() + radius;
+                if ((obj->Position() - pos).SquareSizeXZ() > r * r)
+                {
+                    continue;
+                }
+                mayHoldHole = !ShapeHolesOf(shape).empty();
+            }
+            if (!mayHoldHole)
+            {
+                continue;
+            }
             for (int i = 0; i < list.Size(); i++)
             {
                 const Object* obj = list[i];
