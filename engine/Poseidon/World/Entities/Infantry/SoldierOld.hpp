@@ -325,6 +325,13 @@ class MotionType
 
 	bool FindPath(MotionPath &path, MoveId from, MotionPathItem to) const;
 
+	private:
+	// FindPath's shortest-path tree depends only on `from` and the (static) graph, so the
+	// predecessor array of each start state is computed once and kept (PERF 2026-10-14).
+	// Emptied whenever the graph changes (Load, Unload, AddEdge, DeleteEdge).
+	const std::vector<int> &PredecessorsFrom(MoveId from) const;
+	void ClearPathCache();
+	mutable std::vector<std::vector<int>> _pathPredecessors;
 };
 
 struct MovesTypeName

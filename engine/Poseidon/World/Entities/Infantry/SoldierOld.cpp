@@ -10,6 +10,7 @@
 #include <array>
 #include <chrono>
 #include <limits.h>
+#include <mutex>
 #include <utility>
 #include <cstdio>
 #include <cstring>
@@ -130,6 +131,7 @@ const MotionEdge& MotionType::Edge(MoveId a, MoveId b) const
 
 void MotionType::AddEdge(MoveId a, MoveId b, MotionEdgeType type, float cost)
 {
+    ClearPathCache();
     int iCost = toInt(cost * 50);
     if (iCost > SHRT_MAX || iCost < SHRT_MIN)
     {
@@ -153,6 +155,7 @@ void MotionType::AddEdge(MoveId a, MoveId b, MotionEdgeType type, float cost)
 
 void MotionType::DeleteEdge(MoveId a, MoveId b)
 {
+    ClearPathCache();
     MotionEdges& edges = _vertex[a];
     for (int i = 0; i < edges.Size(); i++)
     {
@@ -167,34 +170,43 @@ void MotionType::DeleteEdge(MoveId a, MoveId b)
 
 #define LOG_PATH 0
 
-bool MotionType::FindPath(MotionPath& path, MoveId from, MotionPathItem to) const
+namespace
 {
-    path.Resize(0);
-    int nVerts = _vertex.Size();
-    if (from < 0 || from >= nVerts || to.id < 0 || to.id >= nVerts)
-    {
-        return false;
-    }
+// Guards MotionType::_pathPredecessors. Simulation calls FindPath from one thread today; the
+// lock keeps the lazily filled cache safe if that ever changes, at ~20 ns uncontended.
+std::mutex GMotionPathCacheMutex;
+} // namespace
 
-    const MotionEdge& edge = Edge(from, to.id);
-    if ((MotionEdgeType)edge.type != MEdgeNone)
+void MotionType::ClearPathCache()
+{
+    std::lock_guard<std::mutex> lock(GMotionPathCacheMutex);
+    _pathPredecessors.clear();
+}
+
+// Dijkstra from `from` over the whole motion graph: an O(V^2) scan that FindPath used to run on
+// every indirect move change -- MotionType::FindPath was 4.7% of perf_combat's main-thread SELF
+// time. The algorithm below is the original, unchanged (including its tie-breaking), so the
+// cached predecessors are exactly what each call computed before.
+const std::vector<int>& MotionType::PredecessorsFrom(MoveId from) const
+{
+    std::lock_guard<std::mutex> lock(GMotionPathCacheMutex);
+    const int nVerts = _vertex.Size();
+    if (_pathPredecessors.size() != static_cast<size_t>(nVerts))
     {
-        path.Add(to);
-#if LOG_PATH
-        LOG_DEBUG(Physics, "Direct path from {} to {}", NAME(from), NAME(to.id));
-        LOG_DEBUG(Physics, "  insert {}, cost {}", NAME(to.id), edge.cost);
-#endif
-        return true;
+        _pathPredecessors.clear();
+        _pathPredecessors.resize(nVerts);
     }
+    std::vector<int>& p = _pathPredecessors[from];
+    if (!p.empty())
+        return p;
 
     AUTO_STATIC_ARRAY(int, vs, 1024);
     AUTO_STATIC_ARRAY(int, d, 1024);
-    AUTO_STATIC_ARRAY(int, p, 1024);
     d.Resize(nVerts);
-    p.Resize(nVerts);
+    p.assign(nVerts, -1);
     for (int i = 0; i < nVerts; i++)
     {
-        d[i] = INT_MAX, p[i] = -1;
+        d[i] = INT_MAX;
     }
     for (int i = 0; i < nVerts; i++)
     {
@@ -239,6 +251,30 @@ bool MotionType::FindPath(MotionPath& path, MoveId from, MotionPathItem to) cons
             }
         }
     }
+    return p;
+}
+
+bool MotionType::FindPath(MotionPath& path, MoveId from, MotionPathItem to) const
+{
+    path.Resize(0);
+    int nVerts = _vertex.Size();
+    if (from < 0 || from >= nVerts || to.id < 0 || to.id >= nVerts)
+    {
+        return false;
+    }
+
+    const MotionEdge& edge = Edge(from, to.id);
+    if ((MotionEdgeType)edge.type != MEdgeNone)
+    {
+        path.Add(to);
+#if LOG_PATH
+        LOG_DEBUG(Physics, "Direct path from {} to {}", NAME(from), NAME(to.id));
+        LOG_DEBUG(Physics, "  insert {}, cost {}", NAME(to.id), edge.cost);
+#endif
+        return true;
+    }
+
+    const std::vector<int>& p = PredecessorsFrom(from);
 
     if (p[to.id] < 0)
     {
@@ -404,6 +440,7 @@ void MotionType::Load(const ParamEntry& entry)
     _moveIds.Close();
 
     int moveIdN = MoveIdN();
+    ClearPathCache();
     _vertex.Realloc(moveIdN);
     _vertex.Resize(moveIdN);
 
@@ -641,6 +678,7 @@ void MotionType::Load(const ParamEntry& entry)
 
 void MotionType::Unload()
 {
+    ClearPathCache();
     _moveIds.Clear();
     _vertex.Clear();
     _entry = nullptr;
