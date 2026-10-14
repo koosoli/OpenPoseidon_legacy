@@ -141,7 +141,8 @@ fn mud_height_offset(world_xz: vec2<f32>) -> f32 {
     let offset = mix(mix(snow.deficits[i], snow.deficits[i + 1u], f.x),
                      mix(snow.deficits[i + 512u], snow.deficits[i + 513u], f.x), f.y);
     let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
-    return clamp(offset, -limit, 0.0) * smoothstep(0.0, 24.0, edge);
+    // (MUD-RUNNER) up to 9 cm of ridge beside a rut (MudField::MaxRidge)
+    return clamp(offset, -limit, 0.09) * smoothstep(0.0, 24.0, edge);
 }
 
 // Third signed view: sand compaction and positive loose-grain rims.

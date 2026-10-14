@@ -25,7 +25,7 @@ int main()
     assert(MudRollingDeceleration(std::numeric_limits<float>::quiet_NaN(), .24f, 1, .1f, 4, 4) == 0);
     const float whole = MudRollingDeceleration(10, .24f, 1, .1f, 4, 4);
     const float half = MudRollingDeceleration(10, .24f, 1, .1f, 2, 4);
-    assert(std::abs(whole - 1.2f) < .000001f && std::abs(half * 2 - whole) < .000001f);
+    assert(std::abs(whole - 2.6f) < .000001f && std::abs(half * 2 - whole) < .000001f);
     assert(MudRollingDeceleration(-10, .24f, 1, .1f, 4, 4) == -whole);
 
     // Across speeds and time steps, resistance cannot add kinetic energy or
@@ -35,7 +35,7 @@ int main()
         {
             const float a = MudRollingDeceleration(speed, 1, 1, seconds, 50, 4);
             const float next = speed - seconds * a;
-            assert(std::abs(a) <= 1.200001f);
+            assert(std::abs(a) <= 2.600001f);
             assert(std::abs(next) <= std::abs(speed) + .000001f);
             assert(speed * next >= -.000001f);
         }

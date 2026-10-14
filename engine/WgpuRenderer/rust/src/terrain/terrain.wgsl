@@ -317,7 +317,8 @@ fn mud_height_offset(world_xz: vec2<f32>) -> f32 {
     let offset = mix(mix(snow.deficits[i], snow.deficits[i + 1u], f.x),
                      mix(snow.deficits[i + 512u], snow.deficits[i + 513u], f.x), f.y);
     let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
-    return clamp(offset, -limit, 0.0) * smoothstep(0.0, 24.0, edge);
+    // (MUD-RUNNER) up to 9 cm of ridge beside a rut (MudField::MaxRidge)
+    return clamp(offset, -limit, 0.09) * smoothstep(0.0, 24.0, edge);
 }
 
 // Third signed view: sand compaction and positive loose-grain rims.
@@ -1927,6 +1928,16 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let line_depth = snowline_depth(in.world_xz, world_y);
     let initial_soil_wet = soil_wet_amount(mud, tp.rain_wetness, snow_cover(in.world_xz, world_y));
     var soil_wet = initial_soil_wet;
+    // (MUD-RUNNER, 2026-10-14) a rut is churned, wet mud: darker, browner and wet-glossy along its
+    // floor; the ridge beside it is churned soil, a little darker than the untouched ground
+    let mud_dig = -mud_height_offset(in.world_xz);
+    if (mud_dig > 0.003) {
+        let rutK = smoothstep(0.004, 0.06, mud_dig);
+        rgb = mix(rgb, rgb * vec3<f32>(0.5, 0.44, 0.38), rutK * 0.75);
+        soil_wet = max(soil_wet, rutK * 0.85);
+    } else if (mud_dig < -0.003) {
+        rgb = rgb * (1.0 - smoothstep(0.003, 0.04, -mud_dig) * 0.18);
+    }
     var rain_puddle = 0.0;
     if (tp.rain_wetness > 0.0) {
         rain_puddle = ground_puddle_mask(in.world_xz, puddle_footprint, tp.rain_wetness)

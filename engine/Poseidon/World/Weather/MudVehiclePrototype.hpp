@@ -23,6 +23,17 @@ inline MudWheelProfile SelectMudWheelProfile(const char* name, bool truckOptIn, 
     return {};
 }
 
+// (MUD-RUNNER, 2026-10-14) every wheeled vehicle digs in single player, by its weight: a 1.5 t car
+// cuts ~13 cm ruts, a 10 t truck ~28 cm. The named profiles above keep their verified numbers.
+inline MudWheelProfile SelectMudWheelProfileByMass(const char* name, float massKg, int wheels, bool singlePlayer)
+{
+    MudWheelProfile named = SelectMudWheelProfile(name, true, singlePlayer);
+    if (named.enabled) return named;
+    if (!singlePlayer || !std::isfinite(massKg) || massKg < 300.0f) return {};
+    const float t = std::clamp((massKg - 1500.0f) / 8500.0f, 0.0f, 1.0f);
+    return {0.5f + 0.25f * t, 0.13f + 0.15f * t, std::clamp(wheels, 2, 8), true};
+}
+
 // Signed longitudinal deceleration, no force at rest and no direction reversal
 // from this contribution alone. This is rolling resistance, not a tyre solver.
 inline float MudRollingDeceleration(float speed, float layerDepth, float wetness, float seconds,
@@ -33,7 +44,8 @@ inline float MudRollingDeceleration(float speed, float layerDepth, float wetness
     const float soft = std::clamp((wetness - 0.15f) / 0.85f, 0.0f, 1.0f);
     const float depth = std::clamp(layerDepth / 0.24f, 0.0f, 1.0f);
     const float support = std::clamp(float(admittedWheels) / totalWheels, 0.0f, 1.0f);
-    const float magnitude = std::min(1.2f * soft * depth * support, std::abs(speed) / seconds);
+    // (MUD-RUNNER: 2.6 m/s^2 at full softness, was 1.2 -- deep mud is a slog, not a speed bump)
+    const float magnitude = std::min(2.6f * soft * depth * support, std::abs(speed) / seconds);
     return std::copysign(magnitude, speed);
 }
 } // namespace Poseidon

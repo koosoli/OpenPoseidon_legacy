@@ -624,7 +624,9 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
         return !value || std::strcmp(value, "0") != 0;
     }();
     const bool singlePlayer = GWorld && GWorld->GetMode() != GModeNetware;
-    const auto mudProfile = SelectMudWheelProfile(Type()->GetName(), mudTruckEnabled, singlePlayer);
+    const auto mudProfile = mudTruckEnabled
+        ? SelectMudWheelProfileByMass(Type()->GetName(), GetMass(), 4, singlePlayer)
+        : SelectMudWheelProfile(Type()->GetName(), mudTruckEnabled, singlePlayer);
     // Verified stock truck ruts and rolling resistance are default in SP.
     // Startup overrides set to0 retain the old behavior; MP scope is unchanged.
     const bool mudPrototype = IsLocal() && mudProfile.enabled &&
@@ -1612,6 +1614,20 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
     // Resting vehicles must still keep newly deposited snow below their chassis.
     _track.UpdateSnow(*this, !_landContact || DirectionUp().Y() < 0.3f, deltaT);
 
+    {
+        static const bool mudGateTrace = [] {
+            const char* value = std::getenv("POSEIDON_MUD_TRACE");
+            return value && std::strcmp(value, "1") == 0;
+        }();
+        if (mudGateTrace && std::fmod(Glob.time.toFloat(), 1.0f) < deltaT)
+        {
+            int grounded = 0;
+            for (int wheel = 0; wheel < MaxWheels; ++wheel) grounded += mudGrounded[wheel] ? 1 : 0;
+            LOG_INFO(Physics, "MUD_GATE class={} mass={:.0f} profile={} local={} active={} wet={:.2f} up={:.2f} grounded={} water={}",
+                     Type()->GetName().Data(), GetMass(), mudProfile.enabled, IsLocal(), GMud().ContactActive(),
+                     GMud().Wetness(), DirectionUp().Y(), grounded, _waterContact);
+        }
+    }
     // Publish only after all collision forces were evaluated against one field
     // state. Each wheel carries its own actual support; car-wide contact cannot
     // stamp airborne wheels. No contacts during stopped simulation means no dig.

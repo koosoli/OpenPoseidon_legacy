@@ -19,8 +19,11 @@ public:
     static constexpr int WindowSize = 512;
     static constexpr int ChunkSize = 16;
     static constexpr float CellSize = 0.125f;
-    static constexpr float DefaultLayerDepth = 0.24f;
-    static constexpr float MaxDepth = 0.35f;
+    static constexpr float DefaultLayerDepth = 0.30f;
+    static constexpr float MaxDepth = 0.40f;
+    // (MUD-RUNNER, 2026-10-14) the soil pushed out of a rut stands as a ridge beside it: stored as a
+    // NEGATIVE depression, up to this high (m)
+    static constexpr float MaxRidge = 0.09f;
     static constexpr float MaxCellSlope = 0.45f;
     static constexpr float MaxContactRadius = 4.0f * MaxDepth;
     static constexpr size_t MaxChunks = 8192;
@@ -29,7 +32,7 @@ public:
     void Reset()
     {
         _chunks.clear();
-        _wetness = 0.0f;
+        _wetness = BaseMoisture(); // (MUD-RUNNER) a new mission starts on soft ground
         _rejected = 0;
         ++_revision;
     }
@@ -40,10 +43,24 @@ public:
         const double fill = double(liquidRain) / 30.0;
         const double dry = (1.0 - double(liquidRain)) / 180.0;
         const double rate = fill + dry;
-        _wetness = float(std::clamp(fill / rate + (double(_wetness) - fill / rate) *
-            std::exp(-rate * seconds), 0.0, 1.0));
+        // (MUD-RUNNER, owner 2026-10-14: "mud like in the game MudRunner") soft ground holds water
+        // between showers: it dries toward BaseMoisture(), not to dust, so fields and forest floors
+        // take ruts in any weather; rain softens them further
+        const double floor = BaseMoisture();
+        const double target = std::max(fill / rate, floor);
+        _wetness = float(std::clamp(target + (double(_wetness) - target) * std::exp(-rate * seconds), 0.0, 1.0));
     }
     float Wetness() const { return _wetness; }
+    // POSEIDON_MUD_BASE_MOISTURE (0..1, default 0.55; 0 = the old bone-dry fields)
+    static float BaseMoisture()
+    {
+        static const float v = [] {
+            const char* text = std::getenv("POSEIDON_MUD_BASE_MOISTURE");
+            const float f = text ? float(std::atof(text)) : 0.55f;
+            return std::isfinite(f) ? std::clamp(f, 0.0f, 1.0f) : 0.55f;
+        }();
+        return v;
+    }
     bool ContactActive() const { return enabled && _wetness > 0.15f; }
     // Thickness is capacity, not an automatic lowering of untouched terrain.
     // Changing capacity never clips previously stored depressions.
@@ -123,6 +140,40 @@ public:
                 const float next = std::min(target.depth, neighbourLimit);
                 if (next > stored + 0.000001f) { stored = next; changed = true; }
             }
+        // the ridge: the soil displaced from under the contact rises in a ring just outside it
+        // (less than the volume moved: the rest is compacted), never over a rut
+        const float ridge = std::min(MaxRidge, depth * 0.3f * pressure);
+        if (ridge > 0.002f)
+        {
+            const float outer = std::min(radius * 1.7f, MaxContactRadius * 1.2f);
+            const int rx0 = int(std::floor((x - outer) / CellSize)), rx1 = int(std::floor((x + outer) / CellSize));
+            const int rz0 = int(std::floor((z - outer) / CellSize)), rz1 = int(std::floor((z + outer) / CellSize));
+            for (int iz = rz0; iz <= rz1; ++iz)
+                for (int ix = rx0; ix <= rx1; ++ix)
+                {
+                    const float r = std::hypot((ix + 0.5f) * CellSize - x, (iz + 0.5f) * CellSize - z) / radius;
+                    if (r <= 0.95f || r >= outer / radius) continue;
+                    // a bump peaking at 1.25 radii
+                    const float t = std::clamp(1.0f - std::abs(r - 1.25f) / std::max(outer / radius - 1.25f, 0.3f), 0.0f, 1.0f);
+                    const float raise = ridge * t * t * (3.0f - 2.0f * t);
+                    if (raise <= 0.0005f) continue;
+                    // a ridge never claims storage of its own (the chunk budget is the ruts')
+                    const int cx = FloorChunk(ix), cz = FloorChunk(iz);
+                    auto it = _chunks.find(Key(cx, cz));
+                    if (it == _chunks.end()) continue;
+                    float& stored = it->second.cells[(iz - cz * ChunkSize) * ChunkSize + ix - cx * ChunkSize];
+                    // only untouched or already-raised ground rises; a rut is never filled
+                    if (stored <= 0.0f && -raise < stored)
+                    {
+                        // the same neighbour slope bound as the rut (MaxCellSlope)
+                        const float neighbourMax = std::max({CellDepth(ix-1, iz), CellDepth(ix+1, iz),
+                            CellDepth(ix, iz-1), CellDepth(ix, iz+1)});
+                        const float next = std::max({-MaxRidge, stored - raise * 0.5f,
+                                                     neighbourMax - MaxCellSlope * CellSize});
+                        if (next < stored - 0.000001f) { stored = next; changed = true; }
+                    }
+                }
+        }
         if (changed) ++_revision;
         return changed;
     }
@@ -192,7 +243,7 @@ private:
         return it == _chunks.end() ? 0.0f : it->second.cells[(iz - cz * ChunkSize) * ChunkSize + ix - cx * ChunkSize];
     }
     std::unordered_map<uint64_t, Chunk> _chunks;
-    float _wetness = 0.0f;
+    float _wetness = BaseMoisture();
     float _layerDepth = DefaultLayerDepth;
     size_t _rejected = 0;
     uint64_t _revision = 0;

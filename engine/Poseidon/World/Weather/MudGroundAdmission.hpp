@@ -9,7 +9,11 @@ namespace Poseidon
 inline bool StockMudSoil(std::string_view surfaceClass, std::string_view files,
                          std::string_view sound, std::string_view character)
 {
-    return surfaceClass == "Field" && files == "pol" && sound == "dirt" && character.empty();
+    if (surfaceClass == "Field" && files == "pol" && sound == "dirt" && character.empty())
+        return true;
+    // (MUD-RUNNER, 2026-10-14) the forest floor ("pl??????", soundEnviron "forest") takes ruts too:
+    // vehicles leaving the fields churned nothing under the trees
+    return surfaceClass == "Forest" && files == "pl??????" && sound == "forest";
 }
 
 // Exact stock virtual source identities, normalising only path slash/case and

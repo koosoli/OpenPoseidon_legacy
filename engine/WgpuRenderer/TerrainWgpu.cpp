@@ -1076,10 +1076,28 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
                         break;
                     }
                 }
+            // the pure field cell nearest the map's centre (capture aiming: mud, ruts)
+            int fieldX = -1, fieldZ = -1;
+            long best = -1;
+            for (int z = 0; z < range; ++z)
+                for (int x = 0; x < range; ++x)
+                {
+                    const int id = land.GetTexture(z, x);
+                    if (id < 0 || id >= materialCount || TidewaterGround::BaseName(land.GetTexture(id)->Name()) != "pol")
+                        continue;
+                    const long d = long(x - range / 2) * (x - range / 2) + long(z - range / 2) * (z - range / 2);
+                    if (best < 0 || d < best)
+                    {
+                        best = d;
+                        fieldX = x;
+                        fieldZ = z;
+                    }
+                }
             LOG_INFO(Graphics, "Tidewater ground: layers per pixel by first kind: sand {} rock {} grass {} forest {} gravel {} "
-                     "dirt {} field {}, OFP image {}; first pure rock cell at {:.0f} {:.0f}",
+                     "dirt {} field {}, OFP image {}; first pure rock cell at {:.0f} {:.0f}; field cell nearest the centre at {:.0f} {:.0f}",
                      sandLayers, rockLayers, kinds[3], kinds[4], kinds[5], kinds[6], kinds[7], kinds[0],
-                     (rockX + 0.5f) * land.GetLandGrid(), (rockZ + 0.5f) * land.GetLandGrid());
+                     (rockX + 0.5f) * land.GetLandGrid(), (rockZ + 0.5f) * land.GetLandGrid(),
+                     (fieldX + 0.5f) * land.GetLandGrid(), (fieldZ + 0.5f) * land.GetLandGrid());
         }
     }
     else
