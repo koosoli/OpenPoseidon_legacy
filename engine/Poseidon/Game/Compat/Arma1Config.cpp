@@ -1424,9 +1424,13 @@ const char* CwaWeaponFor(const std::string& lowerName, const ParamEntry* weapon,
     {
         if (has("pg7") || has("rpg") || has("og7"))
             return "RPGLauncher";
+        // CWA's AA launchers: AALauncher (Stinger) and 9K32Launcher (Strela).
         if (has("stinger") || has("igla") || has("strela"))
-            return has("stinger") ? "Stinger" : "Strela";
-        if (has("m136") || has("m72") || has("law"))
+            return has("stinger") ? "AALauncher" : "9K32Launcher";
+        // The M136 is the AT4.
+        if (has("m136"))
+            return "AT4Launcher";
+        if (has("m72") || has("law"))
             return "LAWLauncher";
         return "CarlGustavLauncher";
     }
