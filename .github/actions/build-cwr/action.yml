@@ -35,6 +35,10 @@ inputs:
     description: Extra arguments for the configure command.
     required: false
     default: ''
+  build-target:
+    description: Build only this target (empty builds everything).
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -124,7 +128,7 @@ runs:
 
     - name: Build
       shell: bash
-      run: cmake --build ${{ inputs.build-dir }} --parallel 2
+      run: cmake --build ${{ inputs.build-dir }} --parallel 2 ${{ inputs.build-target != '' && format('--target {0}', inputs.build-target) || '' }}
 
     - name: Test
       if: inputs.run-tests == 'true'
