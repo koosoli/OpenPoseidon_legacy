@@ -355,8 +355,17 @@ RString ResolveFrom(const char* configClass, const RString& name,
     if (!Active() || name.GetLength() == 0)
         return name;
     const ParamEntry* config = Pars.FindEntry(configClass);
-    if (!config || config->FindEntry(name))
+    if (!config)
         return name;
+    if (config->FindEntry(name))
+    {
+        // A hand weapon both games name alike (PK, Strela, Stinger) keeps the CWA weapon's
+        // behaviour but is drawn with the Arma 2 model, like every other Arma 2 weapon:
+        // the CDF machine gunners carried CWA's PK.
+        if (Generation() == 2 && strcmp(configClass, "CfgWeapons") == 0 && Arma2IsHandWeapon(name))
+            return Arma2WeaponModelClass(name, name);
+        return name;
+    }
     static std::set<std::string> reported;
     const std::string key = Lower(name.Data());
     const auto found = table.find(key);

@@ -87,6 +87,9 @@ RString Arma2WeaponFallback(const RString& name);
 // and ballistics. Returns cwaWeapon when there is no usable model. OP_A2_WEAPON_MODELS=0 turns
 // it off.
 RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon);
+// Whether an Arma 2 CfgWeapons class is a hand weapon (rifle, machine gun, pistol,
+// launcher) -- the kind that carries a model of its own in the soldier's hands.
+bool Arma2IsHandWeapon(const RString& name);
 
 // Arma 2: the EventHandlers >> init code of a module (a class derived from Logic, such
 // as FunctionsManager or the first-aid modules) that a mission places; empty otherwise.
