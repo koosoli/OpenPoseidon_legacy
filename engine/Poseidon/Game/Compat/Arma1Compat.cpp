@@ -21,6 +21,8 @@
 #include <vector>
 
 void Arma2StartStallMonitor(); // GameStateExtA2.cpp (Arma 2 test mode only)
+void Arma3InstallFunctionLibrary(); // GameStateExtA3Functions.cpp
+void Arma3RegisterScriptCommands(); // GameStateExtA3.cpp
 
 namespace Poseidon::Arma1Compat
 {
@@ -539,6 +541,13 @@ void MountArchives()
     // Dta\bin.pbo / core.pbo are NOT mounted: their declared prefixes ("bin", "core")
     // would shadow CWA's own UI resources. Arma1Config reads bin.pbo privately.
     GameState::s_singleQuoteStrings = Generation() >= 2;
+    // Arma 3: {...} is code (typeName "CODE"), and the function library compiles on use.
+    GameState::s_codeValues = Generation() == 3;
+    if (Generation() == 3)
+    {
+        ::Arma3RegisterScriptCommands();
+        ::Arma3InstallFunctionLibrary();
+    }
     GameState::s_emptyStatementKeepsValue = true;
     if (Generation() == 3)
     {

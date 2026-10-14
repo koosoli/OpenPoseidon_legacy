@@ -112,6 +112,8 @@ class GameData : public RefCount
 
     virtual const char* GetTypeName() const { return "unknown"; }
     virtual bool GetNil() const { return false; }
+    //! a code block ({...}) rather than a string (see GameDataCode)
+    virtual bool IsCode() const { return false; }
 
 #ifndef ACCESS_ONLY
     static GameData* CreateObject(ParamArchive& ar);
@@ -208,6 +210,20 @@ class GameDataString : public GameData
 #endif
 
     USE_FAST_ALLOCATOR
+};
+
+// A code block ({...}) when GameState::s_codeValues is set (Arma 3 content). It is still a
+// string to every command that takes code -- this engine runs code from its text -- but
+// typeName, isEqualType and params can tell it from a string, as Arma 3's scripts expect.
+class GameDataCode : public GameDataString
+{
+  public:
+    GameDataCode() = default;
+    GameDataCode(GameStringType value) : GameDataString(value) {}
+    bool IsCode() const override { return true; }
+    RString GetText() const override;
+    const char* GetTypeName() const override { return "code"; }
+    GameData* Clone() const override { return new GameDataCode(*this); }
 };
 
 class GameDataBool : public GameData
@@ -880,6 +896,13 @@ struct GameTypeType : public Poseidon::Foundation::EnumName
     //! Arma 2 content writes strings in single quotes too ('text'); OFP's scripts use
     //! the apostrophe in comments and SQS text, so it is a string delimiter only when set.
     static inline bool s_singleQuoteStrings = false;
+    // Arma 3 content: {...} evaluates to a GameDataCode (typeName "CODE") instead of a
+    // plain string.
+    static inline bool s_codeValues = false;
+    // A global variable that is not set: asked before nil is returned (Arma 3: the
+    // functions of CfgFunctions are compiled when first used). Returns true and fills
+    // `value` when the name stands for something; the value is then kept as the variable.
+    static inline bool (*s_resolveGlobal)(const char* lowerName, GameValue& value) = nullptr;
     // Arma 1/2 semantics: an empty statement (a trailing ';' before the end of the code,
     // or ';;') does not replace the value of the statement before it. Arma 2's function
     // library returns values from code ending in "_this call f;\n".

@@ -283,6 +283,8 @@ class ParamClass : public ParamEntry
     const char* GetBaseName() const { return _base.NotNull() ? _base->GetName() : nullptr; }
     // Presence is independent of the base's name (runtime bases may be unnamed).
     bool HasBase() const { return _base.NotNull(); }
+    /// The class this one inherits from, or null (configProperties walks it).
+    const ParamClass* GetBase() const { return _base; }
 
     bool IsDerivedFrom(const ParamClass& parent) const;
 

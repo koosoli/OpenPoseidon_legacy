@@ -119,6 +119,16 @@ class RapToText
         std::memcpy(&f, &bits, sizeof(f));
         return f;
     }
+    // Arma 3 stores a few very large numbers as 64-bit integers (value / array element
+    // type 6: armour 1e18 on ship hulls, transportFuel 1e12, move speeds 1e10). The
+    // engine's config numbers are 32-bit, so they are written as floats.
+    std::string I64(size_t& at) const
+    {
+        const uint64_t lo = U32(at);
+        const uint64_t hi = U32(at);
+        const int64_t v = static_cast<int64_t>(lo | (hi << 32));
+        return Float(static_cast<float>(v));
+    }
     std::string Str(size_t& at) const
     {
         const size_t start = at;
@@ -195,6 +205,8 @@ class RapToText
                 out += std::to_string(static_cast<int32_t>(U32(at)));
             else if (t == 3)
                 out += Array(at, depth + 1);
+            else if (t == 6)
+                out += I64(at);
             else
                 throw std::runtime_error("bad raP array element");
         }
@@ -232,6 +244,8 @@ class RapToText
                     value = Float(F32(at));
                 else if (sub == 2)
                     value = std::to_string(static_cast<int32_t>(U32(at)));
+                else if (sub == 6)
+                    value = I64(at);
                 else
                     throw std::runtime_error("bad raP value");
                 _out += indent + name + "=" + value + ";\n";
@@ -361,6 +375,16 @@ class RapTree
         std::memcpy(&f, &bits, sizeof(f));
         return f;
     }
+    // Arma 3 stores a few very large numbers as 64-bit integers (value / array element
+    // type 6: armour 1e18 on ship hulls, transportFuel 1e12, move speeds 1e10). The
+    // engine's config numbers are 32-bit, so they are written as floats.
+    std::string I64(size_t& at) const
+    {
+        const uint64_t lo = U32(at);
+        const uint64_t hi = U32(at);
+        const int64_t v = static_cast<int64_t>(lo | (hi << 32));
+        return Float(static_cast<float>(v));
+    }
     std::string Str(size_t& at) const
     {
         const size_t start = at;
@@ -437,6 +461,8 @@ class RapTree
                 out += std::to_string(static_cast<int32_t>(U32(at)));
             else if (t == 3)
                 out += Array(at, depth + 1, nullptr);
+            else if (t == 6)
+                out += I64(at);
             else
                 throw std::runtime_error("bad raP array element");
         }
@@ -473,6 +499,8 @@ class RapTree
                     value = Float(F32(at));
                 else if (sub == 2)
                     value = std::to_string(static_cast<int32_t>(U32(at)));
+                else if (sub == 6)
+                    value = I64(at);
                 else
                     throw std::runtime_error("bad raP value");
                 child->text = child->name + "=" + value + ";";
