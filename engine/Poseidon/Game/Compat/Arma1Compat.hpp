@@ -88,6 +88,9 @@ RString Arma2WeaponFallback(const RString& name);
 // it off.
 RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon);
 
+// Arma 1 soldiers carry their own weapons with the Arma 1 models (OP_A1_WEAPONS=0: off).
+bool Arma1OwnWeapons();
+
 // Arma 2: the EventHandlers >> init code of a module (a class derived from Logic, such
 // as FunctionsManager or the first-aid modules) that a mission places; empty otherwise.
 RString Arma2ModuleInit(const RString& className);

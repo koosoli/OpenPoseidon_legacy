@@ -368,15 +368,15 @@ RString ResolveFrom(const char* configClass, const RString& name,
             {
                 if (reported.insert(std::string(configClass) + key).second)
                     LOG_INFO(Mission, "{}: {} '{}' is represented by CWA '{}'", Label(), configClass, name.Data(), candidate);
-                if (Generation() == 2 && strcmp(configClass, "CfgWeapons") == 0)
+                if (Generation() >= 1 && strcmp(configClass, "CfgWeapons") == 0)
                     return Arma2WeaponModelClass(name, RString(candidate));
                 return RString(candidate);
             }
         }
     }
-    // Arma 2 names hundreds of weapons and magazines; the ones not in the table are
+    // Arma 1 and 2 name hundreds of weapons and magazines; the ones not in the table are
     // carried by the CWA weapon of the same kind and calibre (Arma2WeaponFallback).
-    if (Generation() == 2 && strcmp(configClass, "CfgWeapons") == 0)
+    if (Generation() >= 1 && strcmp(configClass, "CfgWeapons") == 0)
     {
         const RString fallback = Arma2WeaponFallback(name);
         if (fallback.GetLength() > 0 && config->FindEntry(fallback))
