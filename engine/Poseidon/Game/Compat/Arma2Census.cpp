@@ -140,6 +140,20 @@ void LogAssetCensus()
                     entry.first++;
                 }
             }
+        // every entity within 3 m of the player (a weapon lying at his feet in third person
+        // is either one of these or one of his own proxies)
+        const auto closeBy = [&](Entity* e) {
+            if (!e || e == on)
+                return;
+            const float d = e->Position().Distance(p);
+            if (d < 3.0f)
+                LOG_INFO(Mission, "{}: census within 3 m of the player: {} at {:.2f} m (dy {:.2f})", Label(),
+                         Describe(e), d, e->Position().Y() - p.Y());
+        };
+        for (int i = 0; i < GWorld->NVehicles(); i++)
+            closeBy(GWorld->GetVehicle(i));
+        for (int i = 0; i < GWorld->NOutVehicles(); i++)
+            closeBy(GWorld->GetOutVehicle(i));
         int listed = 0;
         for (const auto& [model, info] : near)
             if (listed++ < 40)
