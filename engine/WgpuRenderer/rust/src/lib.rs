@@ -1201,6 +1201,12 @@ impl Renderer {
         // validation layers separately via WGR_GPU_VALIDATION (they are expensive).
         let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
         instance_desc.flags |= wgpu::InstanceFlags::DEBUG;
+        // A/B lever: wgpu validates every indirect draw/dispatch argument with a compute pass
+        // (VALIDATION_INDIRECT_CALL, on by default in all build types). WGR_INDIRECT_VALIDATION=0
+        // drops it.
+        if std::env::var("WGR_INDIRECT_VALIDATION").map_or(false, |v| v == "0") {
+            instance_desc.flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
+        }
         if std::env::var("WGR_GPU_VALIDATION").is_ok() {
             instance_desc.flags |= wgpu::InstanceFlags::VALIDATION;
         }
