@@ -1379,6 +1379,16 @@ RString FallbackCwaClass(const RString& a1Name)
     return RString();
 }
 
+// Arma 1 soldiers carry their own weapons with the Arma 1 models unless OP_A1_WEAPONS=0.
+bool Arma1OwnWeapons()
+{
+    static const bool on = [] {
+        const char* e = std::getenv("OP_A1_WEAPONS");
+        return !(e && *e == '0');
+    }();
+    return on;
+}
+
 namespace
 {
 bool A2Derives(const ParamEntry* cls, const char* base)
@@ -1451,7 +1461,7 @@ const char* CwaWeaponFor(const std::string& lowerName, const ParamEntry* weapon,
 
 RString Arma2WeaponFallback(const RString& name)
 {
-    if (Generation() != 2 || !ConfigLoaded() || name.GetLength() == 0)
+    if (Generation() < 1 || !ConfigLoaded() || name.GetLength() == 0)
         return RString();
     const std::string lower = Lower(name.Data());
     const ParamEntry* cwaWeapons = Pars.FindEntry("CfgWeapons");
@@ -1510,7 +1520,9 @@ RString Arma2WeaponFallback(const RString& name)
 
 RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
 {
-    if (Generation() != 2 || !ConfigLoaded() || name.GetLength() == 0 || cwaWeapon.GetLength() == 0)
+    if (Generation() < 1 || !ConfigLoaded() || name.GetLength() == 0 || cwaWeapon.GetLength() == 0)
+        return cwaWeapon;
+    if (Generation() == 1 && !Arma1OwnWeapons())
         return cwaWeapon;
     static const bool off = [] {
         const char* e = std::getenv("OP_A2_WEAPON_MODELS");
@@ -1662,7 +1674,10 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     }
     if (man && ((Generation() == 2 && !a2Soldiers) || !MovesImported()))
         useModel = false;
-    const bool loadout = man && Generation() == 2;
+    // Arma 1 soldiers (with their own model and moves) carry their own weapons too: the
+    // Arma 1 weapons[] and magazines[], shown with the Arma 1 weapon models (OP_A1_WEAPONS=0
+    // keeps the CWA soldier's loadout).
+    const bool loadout = man && (Generation() == 2 || (Generation() == 1 && useModel && Arma1OwnWeapons()));
     if (!useModel && !loadout)
         return cwaClass;
 
