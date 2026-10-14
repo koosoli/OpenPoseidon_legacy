@@ -400,6 +400,93 @@ class ODOLLoader
     // Dominant influence only: vehicle parts are rigid, and OFP's own
     // animations treat membership as binary; weight 255 keeps ShapeAdapter's
     // linear scale honest.
+    // Skinned-character variant of synthesizeBoneSelections: every (bone, weight) pair of a
+    // vertex goes into that bone's empty selection with its weight, and every empty proxy
+    // selection (weapon, handgun, head, goggles, ...) gets one vertex that its proxy's bone
+    // moves alone, so the proxy follows that bone (Man::DrawProxies reads the weights of the
+    // selection's first point).
+    template <class Refs, class Lowered>
+    static void fillSkinnedSelections(const std::vector<P3D::Odol73Bone>& bones, const P3D::Odol73StaticLod& source,
+                                      Mesh& mesh, const std::unordered_map<std::string, uint32_t>& boneByName,
+                                      const Refs& refs,
+                                      const std::vector<int32_t>& remap, bool indexFirst, uint32_t indexShift,
+                                      uint32_t indexLimit, bool perPoint, const std::vector<int32_t>& vertexToPoint,
+                                      const std::string& sourcePath, size_t lodIndex, Lowered lowered)
+    {
+        // per bone: (vertex, weight); per bone: the vertex it moves with the greatest weight
+        std::vector<std::vector<std::pair<uint32_t, uint8_t>>> byBone(bones.size());
+        std::vector<std::pair<int64_t, int>> bestVertex(bones.size(), {-1, -1});
+        for (size_t v = 0; v < mesh.vertices.size(); ++v)
+        {
+            size_t record = v;
+            if (perPoint)
+            {
+                const int32_t point = v < vertexToPoint.size() ? vertexToPoint[v] : -1;
+                if (point < 0)
+                    continue;
+                record = static_cast<size_t>(point);
+            }
+            if (record >= refs.size())
+                continue;
+            const auto& r = refs[record];
+            const int pairs = std::min<int>(r.count, 4);
+            for (int p = 0; p < pairs; ++p)
+            {
+                const uint32_t index =
+                    static_cast<uint32_t>(r.data[static_cast<size_t>(p) * 2 + (indexFirst ? 0 : 1)]) >> indexShift;
+                const uint8_t weight = r.data[static_cast<size_t>(p) * 2 + (indexFirst ? 1 : 0)];
+                if (index >= indexLimit || weight == 0)
+                    continue;
+                const uint32_t modelBone = remap.empty() ? index : static_cast<uint32_t>(remap[index]);
+                if (modelBone >= bones.size())
+                    continue;
+                byBone[modelBone].push_back({static_cast<uint32_t>(v), weight});
+                if (static_cast<int>(weight) > bestVertex[modelBone].second)
+                    bestVertex[modelBone] = {static_cast<int64_t>(v), weight};
+            }
+        }
+        size_t filled = 0, proxies = 0;
+        for (auto& sel : mesh.selections)
+        {
+            if (!sel.vertexIndices.empty())
+                continue;
+            const auto bone = boneByName.find(lowered(sel.name));
+            if (bone == boneByName.end() || byBone[bone->second].empty())
+                continue;
+            auto& list = byBone[bone->second];
+            std::sort(list.begin(), list.end());
+            for (const auto& [vertex, weight] : list)
+            {
+                if (!sel.vertexIndices.empty() && sel.vertexIndices.back() == vertex)
+                    continue;
+                sel.vertexIndices.push_back(vertex);
+                sel.vertexWeights.push_back(weight);
+            }
+            ++filled;
+        }
+        for (const auto& proxy : source.header.proxies)
+        {
+            const int32_t selIndex = proxy.namedSelectionIndex;
+            if (selIndex < 0 || static_cast<size_t>(selIndex) >= mesh.selections.size())
+                continue;
+            auto& sel = mesh.selections[static_cast<size_t>(selIndex)];
+            if (!sel.vertexIndices.empty())
+                continue;
+            int32_t bone = proxy.boneIndex;
+            if (!remap.empty())
+                bone = bone >= 0 && static_cast<size_t>(bone) < remap.size() ? remap[static_cast<size_t>(bone)] : -1;
+            if (bone < 0 || static_cast<size_t>(bone) >= bones.size() || bestVertex[static_cast<size_t>(bone)].first < 0)
+                continue;
+            sel.vertexIndices.push_back(static_cast<uint32_t>(bestVertex[static_cast<size_t>(bone)].first));
+            sel.vertexWeights.push_back(255);
+            ++proxies;
+        }
+        LOG_INFO(Graphics,
+                 "Bone-selection synthesis (skinned): {} lod {} filled {} bone selections with weights and {} of {} "
+                 "proxy selections",
+                 sourcePath, lodIndex, filled, proxies, source.header.proxies.size());
+    }
+
     static void synthesizeBoneSelections(const std::vector<P3D::Odol73Bone>& bones, const P3D::Odol73StaticLod& source,
                                          Mesh& mesh, const std::string& sourcePath, size_t lodIndex)
     {
@@ -563,6 +650,19 @@ class ODOLLoader
         for (size_t v = 0; v < dominantBone.size(); ++v)
             if (dominantBone[v] >= 0)
                 verticesByBone[static_cast<uint32_t>(dominantBone[v])].push_back(static_cast<uint32_t>(v));
+
+        // A skinned character (Arma 2's man skeleton: pelvis, spine, head, ...) is not a
+        // rigid vehicle. Its vertices blend up to four bones, and a bone's selection must
+        // hold only the vertices that bone itself moves, each with its own weight -- the
+        // descendant closure below gave every spine selection the whole upper body at full
+        // weight, so each vertex averaged all its ancestors and the soldier crumpled.
+        const bool skinned = boneByName.count("pelvis") && boneByName.count("spine") && boneByName.count("head");
+        if (skinned)
+        {
+            fillSkinnedSelections(bones, source, mesh, boneByName, refs, remap, indexFirst, indexShift, indexLimit,
+                                  perPoint, vertexToPoint, sourcePath, lodIndex, lowered);
+            return;
+        }
 
         // A bone-named selection takes its bone's vertices AND EVERY
         // DESCENDANT BONE'S. This is the difference between a rotor and a bare
