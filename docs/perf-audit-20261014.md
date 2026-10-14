@@ -1,7 +1,7 @@
 # Performance audit, 2026-10-14
 
 Branch `perf/optimization-20261014`, backed up on `safety`, deployed to the game folder as
-`74121e0f6`.
+`5f56cc7e6`.
 
 Every change was found by sampling the process, and none of them changes what the game shows.
 - Each one is either exact by construction, with a verify lever that compares old and new
@@ -73,6 +73,10 @@ What it took on native worlds:
 - The 60–150 ms canopy-map hitch every 1.5 s is gone: the map builds on its own thread.
 - During the far-tier fill, BC3 encoding of leaf composites splits block rows across the pool,
   byte-identical: 11.2% → 1.9% of the busy main thread.
+- Streaming smoothness: every canopy change recomposed the 2048² sky-visibility map on the
+  render thread (~160 ms each, every few seconds while objects stream in). It now composes on
+  up to 8 threads, with identical texels (unit test). Fill frame p95 89–98 → 76–78 ms, frames
+  over 100 ms 49–53 → 31–32. `WGR_SKYVIS_COMPOSE_THREADS=1` = serial.
 - GPU:
   - Far shadow cascades reuse last frame's depth while it still covers the view: −2.1 ms.
   - Mid-ring grass placement tests the frustum first: −0.45 ms.
@@ -137,6 +141,14 @@ What it took on native worlds:
   improve.
 
 ## What is left, largest first
+
+0. **The firefight frame is balanced across three limits** (stock Everon, 1600×900, DLSS):
+   main thread ~20 ms (draw 39%, sim 38%, nothing above 6%), render thread ~99% busy (wgpu's
+   command encoding at `finish()`: about a third inside the Vulkan driver, plus binding
+   flushes, render-pass begins and texture-usage tracking), GPU ~20 ms. The common factor is
+   the 3,767 direct per-draw ops: skinned soldiers, weapons and effects in each pass. Moving
+   skinned meshes onto the retained, instanced path with per-instance palettes would cut the
+   render-thread and GPU costs together. That is a renderer project, not a tweak.
 
 1. **Native roads.** 2,398 legacy blend objects cost ~2 ms GPU and ~1.6 ms main thread at Durras.
    That is per-draw overhead, not fill (`POSEIDON_REFORGER_NO_ROADS=1` is the A/B). Batching them
