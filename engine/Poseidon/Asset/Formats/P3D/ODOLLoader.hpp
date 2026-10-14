@@ -344,6 +344,13 @@ class ODOLLoader
                     std::snprintf(centre, sizeof(centre), "%.6f %.6f %.6f", info.boundingCenter.x,
                                   info.boundingCenter.y - lift, info.boundingCenter.z);
                     model.metadata["odolBoundingCenter"] = centre;
+                    // Its land-contact LOD is a single point at the hip (model y=0): Arma 2
+                    // grounds a man by his animated feet, this engine by that point. Put it at
+                    // the feet, or the soldier stands a metre deep (getPosATL -1.03 measured).
+                    for (auto& lod : model.lodLevels)
+                        if (std::abs(lod.resolution - 2e15f) < 1e13f)
+                            for (auto& v : lod.mesh.vertices)
+                                v.position.y = 0.0f;
                     // and kept there: auto-centring would move the bounding-box centre back to
                     // the origin (the waist-deep soldier of 3c27692, lifted and re-centred)
                     model.autoCenterEnabled = 0;
