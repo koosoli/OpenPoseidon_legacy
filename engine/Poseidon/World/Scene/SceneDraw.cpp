@@ -3093,7 +3093,14 @@ void Scene::DrawObjectsAndShadowsPass2()
             // MAT-051 diagnostic (temporary): name each object the blend-revisit
             // pass actually draws, so a glass-owning shape that never appears
             // here names the gap.
-            if (const char* trace = std::getenv("WGR_BLEND_PASS_TRACE"); trace && *trace == '1')
+            // Read once: a getenv per blend object per frame walked the whole environment
+            // block under the CRT lock, ~3% of the Durras main thread (PERF, 2026-10-14).
+            static const bool blendPassTrace = []
+            {
+                const char* trace = std::getenv("WGR_BLEND_PASS_TRACE");
+                return trace && *trace == '1';
+            }();
+            if (blendPassTrace)
             {
                 static std::unordered_set<std::string> logged;
                 const char* nm = shape ? shape->Name() : nullptr;

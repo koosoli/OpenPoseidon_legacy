@@ -1113,6 +1113,48 @@ TEST_CASE("Enfusion composite names nest: tint outside coverage", "[graphics][ed
     REQUIRE(!Poseidon::Enfusion::SplitLayerTintName("enft|0.5,0.5,0.5", back, &rest)); // no inner
 }
 
+TEST_CASE("Enfusion layer tint: the parse-free skip agrees with the full parse", "[graphics][edds][rfg-070]")
+{
+    // SkipLayerTint runs per section per frame and no longer goes through sscanf. The
+    // claim is that it still reaches the SAME verdict as SplitLayerTintName on every name,
+    // well-formed or not -- if they ever disagree, a tinted cutout classifies one way in
+    // the pass build and the other in the texture source.
+    const char* names[] = {
+        "enft|0.1723,0.1038,0.0944|assets/a_bcr.edds",
+        "enft|-0.5000,+1.0000,12.|enfa|c.edds|b.edds",
+        "enft|1,1,1|x.edds",
+        "enft|.5,0.5,0.5|x.edds",
+        "enft|0.5,0.5|x.edds",
+        "enft|0.5,0.5,0.5,0.5|x.edds",
+        "enft|a,b,c|x.edds",
+        "enft|0.5,,0.5|x.edds",
+        "enft|0.5,0.5,0.5|",
+        "enft|0.5,0.5,0.5",
+        "enft|",
+        "enft",
+        "enfa|c.edds|b.edds",
+        "data\\wall.paa",
+        "",
+    };
+    for (const char* name : names)
+    {
+        CAPTURE(name);
+        float rgb[3];
+        const char* inner = nullptr;
+        const bool split = Poseidon::Enfusion::SplitLayerTintName(name, rgb, &inner);
+        const char* skipped = Poseidon::Enfusion::SkipLayerTint(name);
+        CHECK(split == (skipped != name));
+        if (split)
+            CHECK(skipped == inner);
+    }
+    float rgb[3];
+    const char* inner = nullptr;
+    CHECK(Poseidon::Enfusion::SplitLayerTintName("enft|-0.5000,+1.0000,12.|enfa|c.edds|b.edds", rgb, &inner));
+    CHECK(rgb[0] == -0.5f);
+    CHECK(rgb[2] == 12.0f);
+    CHECK(Poseidon::Enfusion::SkipLayerTint(nullptr) == nullptr);
+}
+
 TEST_CASE("Selected global overlay keeps original linear BC7 data alpha only under all preview gates",
           "[graphics][edds][global-overlay]")
 {

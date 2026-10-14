@@ -40,20 +40,50 @@ namespace Enfusion
 inline constexpr const char* kLayerTintPrefix = "enft|";
 inline constexpr size_t kLayerTintPrefixLength = 5;
 
+//! The inner name of `enft|r,g,b|<inner>` by SHAPE alone, or null when `name` is not one.
+//!
+//! PERF (2026-10-14): the classifiers below run per section per frame -- Shape::Draw's
+//! SectionGpuOwned and EngineWgpu::DrawSectionTL both ask -- and they only need WHERE the
+//! inner name starts. Getting there through sscanf measured ~20% of the Durras main thread.
+//! The head must be three fields of `[-+]digits[.digits]`, which is what MakeLayerTintName
+//! writes and a subset of what `%f` accepts, so a name that passes here always parses in
+//! SplitLayerTintName -- which goes through this first, so the two cannot disagree.
+inline const char* LayerTintInner(const char* name)
+{
+    if (name == nullptr || std::strncmp(name, kLayerTintPrefix, kLayerTintPrefixLength) != 0)
+        return nullptr;
+    const char* p = name + kLayerTintPrefixLength;
+    for (int field = 0; field < 3; ++field)
+    {
+        if (*p == '-' || *p == '+')
+            ++p;
+        int digits = 0;
+        while (*p >= '0' && *p <= '9')
+            ++p, ++digits;
+        if (*p == '.')
+        {
+            ++p;
+            while (*p >= '0' && *p <= '9')
+                ++p, ++digits;
+        }
+        if (digits == 0 || *p != (field < 2 ? ',' : '|'))
+            return nullptr;
+        ++p;
+    }
+    return *p != '\0' ? p : nullptr;
+}
+
 //! Parse `enft|r,g,b|<inner>`. `inner` points INTO `name`, so it lives as long as it does.
 inline bool SplitLayerTintName(const char* name, float rgb[3], const char** inner)
 {
-    if (name == nullptr || std::strncmp(name, kLayerTintPrefix, kLayerTintPrefixLength) != 0)
-        return false;
-    const char* rest = name + kLayerTintPrefixLength;
-    const char* bar = std::strchr(rest, '|');
-    if (bar == nullptr || bar[1] == '\0')
+    const char* body = LayerTintInner(name);
+    if (body == nullptr)
         return false;
     // Stops at the '|' on its own; the three floats are the whole of the head.
-    if (std::sscanf(rest, "%f,%f,%f", &rgb[0], &rgb[1], &rgb[2]) != 3)
+    if (std::sscanf(name + kLayerTintPrefixLength, "%f,%f,%f", &rgb[0], &rgb[1], &rgb[2]) != 3)
         return false;
     if (inner != nullptr)
-        *inner = bar + 1;
+        *inner = body;
     return true;
 }
 
@@ -66,9 +96,8 @@ inline bool SplitLayerTintName(const char* name, float rgb[3], const char** inne
 //! adding a tint silently changes three decisions that have nothing to do with colour.
 inline const char* SkipLayerTint(const char* name)
 {
-    const char* inner = nullptr;
-    float rgb[3];
-    return SplitLayerTintName(name, rgb, &inner) ? inner : name;
+    const char* inner = LayerTintInner(name);
+    return inner != nullptr ? inner : name;
 }
 
 inline bool IsOpacityCompositeName(const char* name)
