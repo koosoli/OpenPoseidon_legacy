@@ -7,6 +7,7 @@
 #include <Poseidon/World/Weather/MudContact.hpp>
 #include <Poseidon/World/Weather/MudVehiclePrototype.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
+#include <Poseidon/World/Effects/MudSpray.hpp>
 #include <Poseidon/AI/AI.hpp>
 
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
@@ -1597,6 +1598,33 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
         _mudTrackR.Update(r.X(), r.Y(), r.Z(), dig, [&](float x, float y, float z) {
             return StampMudTrackContact(*GLOB_LAND, *this, Vector3(x, y, z), profile);
         });
+        // MUD-001 for tracks: the run of track coming off the rear sprocket throws the mud it picked
+        // up back and up, like a wheel's tread (Car.cpp), from the rear of each track
+        if (dig && MudSprayEnabled())
+        {
+            const Vector3 v = Speed();
+            const float ground = std::min(v.SizeXZ(), 15.0f);
+            if (ground > 1.0f)
+            {
+                const Vector3 fwd = Direction();
+                const float sign = v * fwd >= 0.0f ? 1.0f : -1.0f;
+                const float rearZ = sign >= 0.0f ? GetShape()->Min().Z() : GetShape()->Max().Z();
+                for (Vector3Par model : {_track.LeftPos(), _track.RightPos()})
+                {
+                    Vector3 p = PositionModelToWorld(Vector3(model.X(), model.Y(), rearZ));
+                    p[1] = GLOB_LAND->SurfaceY(p.X(), p.Z());
+                    if (!AdmitMudWheelContact(*GLOB_LAND, *this, p)) continue;
+                    MudSprayReport spray;
+                    spray.pos = p + VUp * 0.15f;
+                    spray.vel = v * 0.3f - fwd * (sign * ground * 0.5f) + VUp * (1.4f + 0.2f * ground);
+                    spray.count = ground * 30.0f * deltaT * GMud().Wetness();
+                    spray.velSpread = 0.9f + 0.08f * ground;
+                    spray.size = 0.035f;
+                    spray.posSpread = 0.35f;
+                    ReportMudSpray(spray);
+                }
+            }
+        }
     }
     base::Simulate(deltaT, prec);
 }
