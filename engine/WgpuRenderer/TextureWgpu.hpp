@@ -222,6 +222,20 @@ class TextureWgpu : public Texture
         NameNmoChannels //!< the name test inside NativeNmoMaterialChannelsAvailable
     };
     bool NameIs(NameClass which) const;
+    // The same memo for pure name tests that live with their callers (EngineWgpu's per-section
+    // classifiers). `compute` must be a pure function of the name; each slot always takes the
+    // same function.
+    enum NameSlot : uint32_t
+    {
+        SlotBarkOrTrunk = 3,
+        SlotLegacyPlantCutout,
+        SlotEnfusionCoverage,
+        SlotClothPlain,
+        SlotClothWestAtlas,
+        SlotClothEastAtlas,
+        SlotEnfusionConstantAlpha
+    };
+    bool NameMemo(NameSlot slot, bool (*compute)(const char* name)) const;
     bool HasNativeLinearMask(bool singleChannel) const;
     bool HasNativeSrgbBcr() const;
 

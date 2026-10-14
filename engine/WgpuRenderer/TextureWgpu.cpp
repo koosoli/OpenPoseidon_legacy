@@ -1783,6 +1783,17 @@ bool TextureWgpu::NameIs(NameClass which) const
     return value;
 }
 
+bool TextureWgpu::NameMemo(NameSlot slot, bool (*compute)(const char* name)) const
+{
+    const uint32_t shift = static_cast<uint32_t>(slot) * 2;
+    const uint32_t word = _nameClassMemo.load(std::memory_order_relaxed);
+    if (word & (1u << shift))
+        return (word >> (shift + 1)) & 1u;
+    const bool value = compute(Name());
+    _nameClassMemo.fetch_or((1u | (value ? 2u : 0u)) << shift, std::memory_order_relaxed);
+    return value;
+}
+
 bool TextureWgpu::HasNativeLinearMask(bool singleChannel) const
 {
     // The ordered-mask preview supports original linear one-channel DDS sources.

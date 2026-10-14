@@ -90,3 +90,26 @@ TEST_CASE("Only verified primary-body stock cloth materials admit wet shading", 
     REQUIRE(EncodeUniformWetness(UniformCloth::WestAtlas, 2) == 3);
     REQUIRE(EncodeUniformWetness(UniformCloth::EastAtlas, std::numeric_limits<float>::quiet_NaN()) == 0);
 }
+
+TEST_CASE("Uniform cloth admission split by texture gives the same answer", "[simulation][uniform-wetness]")
+{
+    const char* models[] = {"data3d\\mc vojakw2.p3d", "DATA3D/MC VOJAKW2.P3D", "data3d\\mc vojake2.p3d",
+                            "data3d\\other.p3d", ""};
+    const char* textures[] = {"merged\\00007mc_vojakw2.paa",
+                              "MERGED/00007MC_VOJAKW2.PAA",
+                              "merged\\00008mc_vojake2.paa",
+                              "data\\g_hrud_p.pac",
+                              "DATA/W_TANK_NOHY_Z.PAC",
+                              "data\\g_hrud_p.pa",
+                              "data\\other.pac",
+                              ""};
+    for (const char* model : models)
+        for (const char* texture : textures)
+        {
+            const auto split =
+                AdmitUniformClothByTexture(model, UniformClothWestAtlasTexture(texture),
+                                           UniformClothEastAtlasTexture(texture), UniformClothPlainTexture(texture));
+            INFO("model=" << model << " texture=" << texture);
+            REQUIRE(split == AdmitUniformCloth(model, texture));
+        }
+}

@@ -9132,11 +9132,14 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // glass) blends; testing it would keep what the author meant translucent.
     // RFG-123: plus the constant-alpha `enfk|` pane, which names no OpacityMap (window_glass:
     // AlphaMul 0.243, AlphaTest 0.01 -- the AlphaTest made it "leaf cards", forced opaque below).
-    const bool constantAlphaGlass = AuthoredGlassBlendEnabled() && texture &&
-                                    render::IsEnfusionConstantAlphaTexture(texture->Name());
+    const bool constantAlphaGlass =
+        AuthoredGlassBlendEnabled() && texture &&
+        texture->NameMemo(TextureWgpu::SlotEnfusionConstantAlpha, &render::IsEnfusionConstantAlphaTexture);
     const bool materialBlends = GpuEmatBlends(debugSection.surfMat) || constantAlphaGlass;
-    const bool authoredGlass = AuthoredGlassBlendEnabled() && tex != 0 && texture &&
-                               (constantAlphaGlass || (materialBlends && render::IsEnfusionCoverageTexture(texture->Name())));
+    const bool authoredGlass =
+        AuthoredGlassBlendEnabled() && tex != 0 && texture &&
+        (constantAlphaGlass ||
+         (materialBlends && texture->NameMemo(TextureWgpu::SlotEnfusionCoverage, &render::IsEnfusionCoverageTexture)));
     const bool materialCutout =
         materialUsesLeafCards && !materialBlends && GpuSectionMaterialIsCutout(debugSection.surfMat, texture);
     if (authoredGlass)
@@ -9165,10 +9168,11 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         blend = render::BlendMode::Opaque;
         alphaRef = 0.0f;
     }
-    else if (tex != 0 && (alphaClass == Poseidon::AlphaStats::Cutout || materialCutout ||
-                          (texture && (render::IsLegacyPlantCutoutTexture(texture->Name()) ||
-                                       (render::IsEnfusionCoverageTexture(texture->Name()) &&
-                                        texture->HasAlphaHoles() && !materialBlends)))))
+    else if (tex != 0 &&
+             (alphaClass == Poseidon::AlphaStats::Cutout || materialCutout ||
+              (texture && (texture->NameMemo(TextureWgpu::SlotLegacyPlantCutout, &render::IsLegacyPlantCutoutTexture) ||
+                           (texture->NameMemo(TextureWgpu::SlotEnfusionCoverage, &render::IsEnfusionCoverageTexture) &&
+                            texture->HasAlphaHoles() && !materialBlends)))))
     {
         // A cutout classification means the source has binary transparent texels, irrespective
         // of whether the P3D section remembered to set IsAlpha.  Some legacy sections are
@@ -9557,15 +9561,25 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         // mesh identity as well as positive stock clothing texture admission.
         if (primaryMesh)
         {
+            // The texture half of the admission is memoised on the texture (asked per section of
+            // every soldier, per frame); the result is AdmitUniformCloth's.
+            const std::string_view ownerModel = static_cast<const char*>(ownerShape->GetName());
+            const auto admit = [&ownerModel](const Texture* candidate)
+            {
+                if (!candidate)
+                    return render::AdmitUniformCloth(ownerModel, "");
+                const auto* t = static_cast<const TextureWgpu*>(candidate);
+                return render::AdmitUniformClothByTexture(
+                    ownerModel, t->NameMemo(TextureWgpu::SlotClothWestAtlas, &render::UniformClothWestAtlasTexture),
+                    t->NameMemo(TextureWgpu::SlotClothEastAtlas, &render::UniformClothEastAtlasTexture),
+                    t->NameMemo(TextureWgpu::SlotClothPlain, &render::UniformClothPlainTexture));
+            };
             const Texture* texture = sMesh.GetSection(beg).properties.GetTexture();
-            const auto cloth = render::AdmitUniformCloth(static_cast<const char*>(ownerShape->GetName()),
-                                                        texture ? texture->Name() : "");
+            const auto cloth = admit(texture);
             // A combined draw must contain ONLY the same admitted material.
             for (int section = beg + 1; section < end; ++section)
             {
-                const Texture* next = sMesh.GetSection(section).properties.GetTexture();
-                if (render::AdmitUniformCloth(static_cast<const char*>(ownerShape->GetName()),
-                                             next ? next->Name() : "") != cloth)
+                if (admit(sMesh.GetSection(section).properties.GetTexture()) != cloth)
                     sameCloth = false;
             }
             if (sameCloth && uniformWetEnabled)
@@ -9867,36 +9881,33 @@ bool GpuSectionMaterialUsesLeafCardsUncached(const Ref<TexMaterial>& surfMat)
 // apart.  The texture's authored role can: every A3 bark map lives in _bark or
 // carries a bark/trunk name.  Keep it opaque while the actual polyplane cards
 // retain the TreeAdv alpha test.
-bool GpuTextureIsBarkOrTrunkUncached(const TextureWgpu* texture)
+static bool BarkOrTrunkName(const char* path)
 {
-    const char* path = texture ? texture->Name() : nullptr;
     return path && (ContainsNoCase(path, "\\_bark\\") || ContainsNoCase(path, "bark_") ||
                     ContainsNoCase(path, "_bark") || ContainsNoCase(path, "\\trunk") ||
                     ContainsNoCase(path, "_trunk"));
 }
 
-// PERF-015: five substring scans of a full texture path, per section, per frame. Same
-// address-keyed / path-validated scheme as MaterialClassSlot, for the same reason.
+bool GpuTextureIsBarkOrTrunkUncached(const TextureWgpu* texture)
+{
+    return BarkOrTrunkName(texture ? texture->Name() : nullptr);
+}
+
+// PERF-015: five substring scans of a full texture path, per section, per frame. Memoised on
+// the texture (its name never changes); it was an address-keyed map with a path compare per
+// call, which cost about as much as the scans on a firefight's soldiers.
 bool GpuTextureIsBarkOrTrunk(const TextureWgpu* texture)
 {
     const char* path = texture ? texture->Name() : nullptr;
     if (!SectionClassCacheEnabled() || !path || !*path)
         return GpuTextureIsBarkOrTrunkUncached(texture);
-    struct TextureClass
-    {
-        std::string path;
-        bool        barkOrTrunk = false;
-    };
-    thread_local std::unordered_map<const void*, TextureClass> cache;
-    TextureClass& slot = cache[static_cast<const void*>(texture)];
     Pass1Submit::gSecClassCalls.fetch_add(1, std::memory_order_relaxed);
-    if (slot.path.empty() || slot.path != path)
-    {
-        Pass1Submit::gSecClassMisses.fetch_add(1, std::memory_order_relaxed);
-        slot.path = path;
-        slot.barkOrTrunk = GpuTextureIsBarkOrTrunkUncached(texture);
-    }
-    return slot.barkOrTrunk;
+    return texture->NameMemo(TextureWgpu::SlotBarkOrTrunk,
+                             [](const char* name)
+                             {
+                                 Pass1Submit::gSecClassMisses.fetch_add(1, std::memory_order_relaxed);
+                                 return BarkOrTrunkName(name);
+                             });
 }
 
 bool GpuSectionMaterialIsCutout(const Ref<TexMaterial>& surfMat, TextureWgpu* texture)
@@ -10194,9 +10205,10 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     // that fooled SectionIsBlend would push half a canopy's LODs out of the retained set.
     // Treat them as the alpha-tested cards they are, on BOTH paths, or the two disagree and a
     // section is drawn twice or not at all (see IsGpuOwnedSection).
-    const bool legacyPlantCutout = texture && (render::IsLegacyPlantCutoutTexture(texture->Name()) ||
-                                               (render::IsEnfusionCoverageTexture(texture->Name()) &&
-                                                texture->HasAlphaHoles() && !GpuEmatBlends(sec.surfMat)));
+    const bool legacyPlantCutout =
+        texture && (texture->NameMemo(TextureWgpu::SlotLegacyPlantCutout, &render::IsLegacyPlantCutoutTexture) ||
+                    (texture->NameMemo(TextureWgpu::SlotEnfusionCoverage, &render::IsEnfusionCoverageTexture) &&
+                     texture->HasAlphaHoles() && !GpuEmatBlends(sec.surfMat)));
     const bool materialCutout =
         alphaClass == Poseidon::AlphaStats::Blend && !GpuEmatBlends(sec.surfMat) &&
         GpuSectionMaterialIsCutout(sec.surfMat, texture);
