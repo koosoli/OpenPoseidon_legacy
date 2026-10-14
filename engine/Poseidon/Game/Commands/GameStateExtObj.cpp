@@ -74,6 +74,20 @@ RString EngineMuzzleName(const EntityAI* ai, const RString& scriptName)
         if (muzzle && Poseidon::Arma1Compat::ScriptWeaponMatches(muzzle->GetName(), scriptName))
             return muzzle->GetName();
     }
+    // Arma names the Throw/Put muzzles after their magazine plus "Muzzle" (HandGrenadeMuzzle,
+    // SmokeShellRedMuzzle, PipeBombMuzzle); CWA after the magazine alone (HandGrenade).
+    const int n = scriptName.GetLength();
+    if (n > 6 && _stricmp(scriptName.Data() + n - 6, "Muzzle") == 0)
+    {
+        const RString base(scriptName.Data(), n - 6);
+        const RString resolved = Poseidon::Arma1Compat::ResolveMagazineClass(base);
+        for (int i = 0; i < ai->NMagazineSlots(); i++)
+        {
+            const MuzzleType* muzzle = ai->GetMagazineSlot(i)._muzzle;
+            if (muzzle && (_stricmp(muzzle->GetName(), base) == 0 || _stricmp(muzzle->GetName(), resolved) == 0))
+                return muzzle->GetName();
+        }
+    }
     return scriptName;
 }
 
@@ -1535,6 +1549,10 @@ GameValue ObjFireEx(const GameState* state, GameValuePar oper1, GameValuePar ope
             return NOTHING;
     }
 
+    // Arma 1/2: a mode name CWA's weapon does not have (FullAuto on an M4 that CWA's M16
+    // fires Single/Burst, HandGrenadeMuzzle as the grenade's mode) fires the muzzle in
+    // its first mode instead of not at all.
+    int anyMode = -1;
     for (int i = 0; i < veh->NMagazineSlots(); i++)
     {
         const MagazineSlot& slot = veh->GetMagazineSlot(i);
@@ -1543,7 +1561,8 @@ GameValue ObjFireEx(const GameState* state, GameValuePar oper1, GameValuePar ope
             continue;
         }
 
-        if (magazine.GetLength() > 0)
+        if (magazine.GetLength() > 0 &&
+            (!Poseidon::Arma1Compat::Active() || (Pars >> "CfgWeapons").FindEntry(magazine)))
         {
             Ref<MagazineType> type = MagazineTypes.New(magazine);
             int best = veh->FindBestMagazine(type, 0);
@@ -1560,8 +1579,12 @@ GameValue ObjFireEx(const GameState* state, GameValuePar oper1, GameValuePar ope
         // check mode
         const WeaponModeType* modeType = veh->GetWeaponMode(i);
         PoseidonAssert(modeType);
-        if (stricmp(modeType->GetName(), mode) != 0)
+        if (!modeType || stricmp(modeType->GetName(), mode) != 0)
         {
+            if (anyMode < 0)
+            {
+                anyMode = i;
+            }
             continue;
         }
 
@@ -1572,6 +1595,14 @@ GameValue ObjFireEx(const GameState* state, GameValuePar oper1, GameValuePar ope
 
         veh->ForceFire(i);
         return NOTHING;
+    }
+    if (anyMode >= 0 && Poseidon::Arma1Compat::Active())
+    {
+        const MagazineSlot& slot = veh->GetMagazineSlot(anyMode);
+        if (slot._magazine && !(slot._magazine->_type->_maxAmmo > 0 && slot._magazine->_ammo == 0))
+        {
+            veh->ForceFire(anyMode);
+        }
     }
     return NOTHING;
 }
