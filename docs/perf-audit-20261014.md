@@ -1,7 +1,7 @@
 # Performance audit, 2026-10-14
 
 Branch `perf/optimization-20261014`, backed up on `safety`, deployed to the game folder as
-`5f56cc7e6`.
+`42b22f79e`.
 
 Every change was found by sampling the process, and none of them changes what the game shows.
 - Each one is either exact by construction, with a verify lever that compares old and new
@@ -205,6 +205,34 @@ region. Estimated 1–2 ms.
 The firefight is too non-deterministic for small A/Bs: between runs of the same arm, direct draws
 ranged from 2,862 to 4,365 and the GPU frame from 15.7 to 25.4 ms. Draw-batching work there
 needs a deterministic bench first.
+
+## Deterministic firefight bench, and what it found
+
+`perf_combat` as benched varies too much for A/Bs. A fixed free-fly camera over the battle
+(`--test-world-freefly 6100 6440 172 75 -10`; Y is absolute) with `POSEIDON_LOCKSTEP_HZ=30` and
+the LOD governor pinned gives identical instance and triangle counts every run, direct draws
+within ±6, and CPU frame within ±0.6 ms. GPU frame totals still wander, so compare per-pass
+timers and profile shares.
+
+Exact wins found with it (both deployed):
+- Per-section texture-name classifiers (bark/trunk, plant cutout, coverage, constant-alpha
+  glass, the uniform-cloth admission) are memoised on the texture: `DrawSectionTL` 9.6% → 7.3%
+  of the main thread.
+- Section blend routing asks the same name questions through a memo on the base `Texture`:
+  `SectionIsBlend` 2.2% → 1.0%.
+- CPU frame on the bench: 23.6–24.8 → 22.7 ms.
+
+Found, not taken:
+- **Every soldier is drawn twice per frame:** once in pass 1, and again in pass 2 for its blend
+  sections (`HasBlendSections`). The second visit re-runs `Man::Animate` (as costly as the first,
+  ~1.8% of the main thread) plus proxies and palettes. Only the pose matrices could be reused
+  (~0.75%); the skinning writes into the shared shape and must re-run. The real fix is
+  structural: record the blend sections during pass 1.
+- **Corpse pose validation** could not drop its per-tick full `Valid()`: a unit test pins that a
+  binding corrupted after capture is refused.
+- **Durras transparent pass** (`ops post-water`, 3.3–3.6 ms GPU): roads ~1.1 ms, plus ~540 tiny
+  window-glass and net-fence draws at ~4 µs GPU each (2.2 ms for 4,252 triangles).
+  wgpu indirect validation is not the cause (A/B: no change).
 
 ## Levers added
 
