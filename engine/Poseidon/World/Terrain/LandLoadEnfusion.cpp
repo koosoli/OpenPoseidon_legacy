@@ -2543,7 +2543,7 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
 
 //! The ShapeBank half of BuildShapeFromXob: MAIN THREAD ONLY (bank insert, texture and
 //! material banks). BuildModelFromXob is the half that may run on workers.
-//! `preadapted`: the model already converted with its bank tables (ConvertPartsOnPool); the
+//! `preadapted`: the model already converted with its bank tables (ConvertModelsOnPool); the
 //! bank adopts it. Null converts in place, as before.
 LODShapeWithShadow* InstallShapeFromXobModel(const std::string& xobPath, std::shared_ptr<Poseidon::Model::Model> parsed,
                                              std::string& why, LODShapeWithShadow* preadapted = nullptr)
@@ -2682,10 +2682,10 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
 //! bank calls, runs on workers. For an MLOD model that is the whole conversion (its tail has
 //! no proxies and stays inside it), so the shape the bank adopts is the one it would have
 //! built. Entries the pool cannot convert stay null and convert in place.
-//! POSEIDON_PART_POOL_ADAPT=0 converts every part in place.
+//! POSEIDON_PART_POOL_ADAPT=0 converts every part and road in place.
 std::vector<std::unique_ptr<LODShapeWithShadow>>
-ConvertPartsOnPool(const std::vector<std::string>& names,
-                   const std::vector<std::shared_ptr<Poseidon::Model::Model>>& models)
+ConvertModelsOnPool(const std::vector<std::string>& names,
+                    const std::vector<std::shared_ptr<Poseidon::Model::Model>>& models)
 {
     namespace Adapter = Poseidon::Model::ShapeAdapter;
     std::vector<std::unique_ptr<LODShapeWithShadow>> out(models.size());
@@ -3338,7 +3338,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                         names.push_back(attachMeshes[i].first);
                         models.push_back(attachModels[i]);
                     }
-                    converted = ConvertPartsOnPool(names, models);
+                    converted = ConvertModelsOnPool(names, models);
                 }
                 for (size_t i = chunk; i < chunkEnd; ++i)
                 {
@@ -4024,6 +4024,19 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                              prep.prepared, prep.names, prep.failed, prep.ms);
                     roadTextures.emplace();
                 }
+                // Converted on the pool and adopted below, as the part shapes are.
+                std::vector<std::unique_ptr<LODShapeWithShadow>> roadShapes;
+                {
+                    std::vector<std::string> names(roads.size());
+                    std::vector<std::shared_ptr<Poseidon::Model::Model>> models(roads.size());
+                    for (size_t r = 0; r < roads.size(); ++r)
+                        if (roadReady[r] && roadModels[r])
+                        {
+                            names[r] = "enfusion_road_" + std::to_string(r);
+                            models[r] = roadModels[r];
+                        }
+                    roadShapes = ConvertModelsOnPool(names, models);
+                }
                 for (size_t r = 0; r < roads.size(); ++r)
                 {
                     if (!roadReady[r])
@@ -4032,9 +4045,10 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     const size_t pointCount = road.points.size() / 3;
                     const std::string name = "enfusion_road_" + std::to_string(r);
                     LODShapeWithShadow* shape =
-                        roadModels[r] ? Poseidon::Shapes.NewFromModel(name.c_str(), false, true,
-                                                                       std::move(roadModels[r]), nullptr)
-                                      : nullptr;
+                        roadModels[r]
+                            ? Poseidon::Shapes.NewFromModel(name.c_str(), false, true, std::move(roadModels[r]),
+                                                            nullptr, roadShapes[r].release())
+                            : nullptr;
                     if (shape == nullptr)
                     {
                         ++roadsFailed;
