@@ -2319,11 +2319,16 @@ void StallMonitor()
 {
     unsigned last = GSimulateTick.load();
     int stalled = 0;
+    // Arma 3 mounts some 550 archives and merges a 50 MB config before the first frame, and
+    // its mission start compiles the function library's preInit functions in one step:
+    // nothing is counted before the first simulation step, and a step may take longer.
+    const bool arma3 = Arma1Compat::Generation() >= 3;
+    const int giveUp = arma3 ? 120 : 60;
     for (;;)
     {
         std::this_thread::sleep_for(std::chrono::seconds(1));
         const unsigned now = GSimulateTick.load();
-        if (now != last)
+        if (now != last || (arma3 && now == 0))
         {
             last = now;
             stalled = 0;
@@ -2337,13 +2342,14 @@ void StallMonitor()
             for (int i = 0; i < 400 && e[i]; i++)
                 expr.push_back(e[i] == '\n' || e[i] == '\r' ? ' ' : e[i]);
         }
-        LOG_WARN(Script, "Arma 2 stall: no simulation step for {} s; evaluator last started: {}", stalled, expr);
+        LOG_WARN(Script, "{} stall: no simulation step for {} s; evaluator last started: {}", Arma1Compat::Label(),
+                 stalled, expr);
         if (stalled == 10 || stalled == 30)
             Poseidon::Foundation::LogStallThreadStack();
-        if (stalled >= 60)
+        if (stalled >= giveUp)
         {
             // a test run that cannot continue ends instead of holding the batch
-            LOG_ERROR(Script, "Arma 2 stall: giving up after {} s (test mode)", stalled);
+            LOG_ERROR(Script, "{} stall: giving up after {} s (test mode)", Arma1Compat::Label(), stalled);
             std::_Exit(3);
         }
     }
