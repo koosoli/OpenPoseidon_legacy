@@ -114,6 +114,16 @@ class ObjectListFull : public SmallArray<Ref<Object>>
 
     Vector3 _bCenter; // bounding sphere of static objects
     float _bRadius;
+    /// PERF (2026-10-14): max over static objects of |pos - _bCenter| + 2 * radius, with no
+    /// floor. Only grows on Add, is recomputed by StaticChanged, and is never shrunk by
+    /// Delete, so it stays an upper bound. Line queries skip the cell past it (see
+    /// LineQueryMaySkipCell); `_bRadius` cannot serve, because its 50 m floor is four cells
+    /// wide on a native Reforger world's 12.5 m grid.
+    float _staticReach;
+    /// The same bound measured in XZ only, from the cell centre (which is `_bCenter`'s XZ:
+    /// SetBSphere(x,z) puts it there and nothing moves it). ObjectList caches it inline so a
+    /// line query can drop the cell without dereferencing this object at all.
+    float _staticReachXZ;
     int _nNonStatic;
     /// PERF-031: how many entries are `TypeVehicle`. `PredictCollision` skips a cell with
     /// none, which is the filter its own loop applies anyway -- and which `_nNonStatic`
@@ -155,6 +165,10 @@ class ObjectListFull : public SmallArray<Ref<Object>>
 
     Vector3 GetBSphereCenter() const { return _bCenter; }
     float GetBSphereRadius() const { return _bRadius; }
+    float GetStaticReach() const { return _staticReach; }
+    //! XZ reach a line query may skip the cell beyond; unbounded while anything non-static is
+    //! in it, because those move within the cell and are walked object by object.
+    float CullReachXZ() const { return _nNonStatic > 0 ? 3.0e38f : _staticReachXZ; }
 
     // only add/remove methods
     int Add(Object* object, bool avoidRecalculation = false);
@@ -171,8 +185,16 @@ class ObjectListFull : public SmallArray<Ref<Object>>
 class ObjectList
 {
     SRef<ObjectListFull> _list;
+    /// ObjectListFull::CullReachXZ, refreshed after every mutation below -- they are the only
+    /// way a cell's list changes. Kept here, in the landscape's contiguous cell array, so a
+    /// line query skips an occupied cell for the price of reading the array it already walks
+    /// (PERF, 2026-10-14). Zero for an empty cell.
+    float _cullReachXZ = 0;
+
+    void SyncCull() { _cullReachXZ = _list ? _list->CullReachXZ() : 0; }
 
   public:
+    float CullReachXZ() const { return _cullReachXZ; }
     // check size, guranteed to be non-empty
     int SizeNotEmpty() const { return _list->Size(); }
     // check size, gurannteed to be non-empty
@@ -188,13 +210,16 @@ class ObjectList
     {
         if (!_list)
             _list = new ObjectListFull(x, z);
-        return _list->Add(object, avoidRecalculation);
+        const int index = _list->Add(object, avoidRecalculation);
+        SyncCull();
+        return index;
     }
     // recalculate what is neccessary
     void Recalculate()
     {
         if (_list)
             _list->StaticChanged();
+        SyncCull();
     }
     // delete given object
     void Delete(int index)
@@ -203,6 +228,7 @@ class ObjectList
         _list->Delete(index);
         if (_list->Size() == 0)
             _list.Free();
+        SyncCull();
     }
     // compact memory usage
     void Compact()
@@ -213,9 +239,14 @@ class ObjectList
             if (_list->Size() == 0)
                 _list.Free();
         }
+        SyncCull();
     }
     // release all memory
-    void Clear() { _list.Free(); }
+    void Clear()
+    {
+        _list.Free();
+        SyncCull();
+    }
 
     // get underlying object list
     ObjectListFull* GetList() const { return _list; }

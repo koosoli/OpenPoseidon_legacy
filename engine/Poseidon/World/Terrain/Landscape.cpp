@@ -3358,10 +3358,20 @@ void ObjectListFull::ChangeNonStaticCount(int val)
     PoseidonAssert(CountNonStatic() == _nNonStatic);
 }
 
+// One static object's XZ reach from the cell centre: see _staticReachXZ.
+static inline float StaticReachXZTerm(const Object* obj, Vector3Par center)
+{
+    const float dx = obj->Position().X() - center.X();
+    const float dz = obj->Position().Z() - center.Z();
+    return std::sqrt(dx * dx + dz * dz) + 2 * obj->GetRadius();
+}
+
 void ObjectListFull::StaticChanged() // recalculate what is neccessary
 {
     // recalculate bounding sphere
     _bRadius = 50;
+    _staticReach = 0;
+    _staticReachXZ = 0;
     for (int i = 0; i < Size(); i++)
     {
         Object* obj = Get(i);
@@ -3369,8 +3379,11 @@ void ObjectListFull::StaticChanged() // recalculate what is neccessary
         {
             continue;
         }
-        float dist = obj->Position().Distance(_bCenter) + obj->GetRadius();
+        const float centre = obj->Position().Distance(_bCenter);
+        float dist = centre + obj->GetRadius();
         saturateMax(_bRadius, dist);
+        saturateMax(_staticReach, centre + 2 * obj->GetRadius());
+        saturateMax(_staticReachXZ, StaticReachXZTerm(obj, _bCenter));
     }
     // assume center is not changed
 }
@@ -3416,6 +3429,10 @@ int ObjectListFull::Add(Object* object, bool avoidRecalculation)
     }
     if (object->Static())
     {
+        // Folded in whatever avoidRecalculation says: one distance, and a line query that
+        // trusted a stale reach would lose a hit rather than merely cull too little.
+        saturateMax(_staticReach, object->Position().Distance(_bCenter) + 2 * object->GetRadius());
+        saturateMax(_staticReachXZ, StaticReachXZTerm(object, _bCenter));
         if (!avoidRecalculation)
         {
             // A bounding sphere only ever grows on insertion, so the full O(n) rescan
@@ -3530,12 +3547,15 @@ void ObjectListFull::Clear()
     _roadwayObjects.Clear();
     _nNonStatic = 0;
     _nTypeVehicle = 0;
+    _staticReach = 0;
+    _staticReachXZ = 0;
     // Same rescan as ChangeNonStaticCount - debug-only self-check. (After base::Clear()
     // the list is empty, so the scan can only ever agree.)
     PoseidonAssert(CountNonStatic() == _nNonStatic);
 }
 
-ObjectListFull::ObjectListFull(int x, int z) : _bRadius(1e10), _nNonStatic(0), _nTypeVehicle(0)
+ObjectListFull::ObjectListFull(int x, int z)
+    : _bRadius(1e10), _staticReach(0), _staticReachXZ(0), _nNonStatic(0), _nTypeVehicle(0)
 {
     SetBSphere(x, z);
 }

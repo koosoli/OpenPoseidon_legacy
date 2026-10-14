@@ -13,7 +13,12 @@
 #include <Poseidon/World/Terrain/WaterSurfaceQuery.hpp>
 #include <Poseidon/World/Terrain/WaterBodies.hpp>
 #include <stdlib.h>
+#include <algorithm>
+#include <atomic>
+#include <vector>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Containers/Array2D.hpp>
@@ -272,43 +277,154 @@ void Landscape::ObjectCollision(CollisionBuffer& retVal, Object* with, Object* i
     if (boundingSphere < 50)
 #endif
     {
-        for (x = xMin; x <= xMax; x++)
+        // PERF (2026-10-14): the rectangle above spans the whole segment, so a long query
+        // walks O(length^2) cells -- the HUD's cursor ray (InGameUI::CheckCursorTarget, every
+        // frame, several hundred metres) was 11% of the Durras main thread, nearly all of it
+        // loading Objects this loop then threw away. A cell holding only static objects is
+        // skipped when the segment passes beyond its reach: nothing in it could survive
+        // Object::Intersect's own first test (LineQueryMaySkipCell has the proof). Cells with
+        // anything non-static are walked as before.
+        //   POSEIDON_OBJCOLL_CELL_CULL=0       the full walk, for an A/B
+        //   POSEIDON_OBJCOLL_CELL_CULL=verify  both, and log any query where they differ
+        static const int cellCull = []
         {
+            const char* v = std::getenv("POSEIDON_OBJCOLL_CELL_CULL");
+            if (v && std::strcmp(v, "verify") == 0)
+                return 2;
+            return (v && *v == '0') ? 0 : 1;
+        }();
+        int cellsSkipped = 0, cellsWalked = 0;
+        const auto visitCell = [&](const ObjectList& list, CollisionBuffer& out)
+        {
+            const int n = list.SizeNotEmpty();
+            for (int i = 0; i < n; i++)
+            {
+                Object* obj = list[i];
+                if (obj == with)
+                {
+                    continue;
+                }
+                if (obj == ignore)
+                {
+                    continue;
+                }
+                if (obj->GetType() == Network && obj->GetShape()->FindGeometryLevel() < 0)
+                {
+                    continue; // no collisions with roads
+                }
+                if (obj->GetType() == Temporary)
+                {
+                    continue; // no collisions with temporary
+                }
+                if (obj->GetType() == TypeTempVehicle)
+                {
+                    continue;
+                }
+                float dist2 = obj->Position().Distance2Inline(boundingCenter);
+                float maxDist2 = Square(boundingSphere + obj->GetRadius());
+                if (dist2 > maxDist2)
+                {
+                    continue;
+                }
+                obj->Intersect(out, beg, end, radius, type);
+            }
+        };
+        const auto walk = [&](CollisionBuffer& out, bool cull)
+        {
+            if (!cull)
+            {
+                for (x = xMin; x <= xMax; x++)
+                {
+                    for (z = zMin; z <= zMax; z++)
+                    {
+                        const ObjectList& list = _objects(x, z);
+                        if (!list.Null())
+                        {
+                            visitCell(list, out);
+                        }
+                    }
+                }
+                return;
+            }
+            // The cells are stored row by row (z * range + x), and the walk above goes down
+            // columns: on a 1024-cell native grid every step is a 16 KB stride, a cache and a
+            // TLB miss per cell, and a cursor ray out to tacticalZ spans tens of thousands of
+            // them. So scan rows, in memory order, keeping only cells the inline XZ summary
+            // cannot rule out -- then visit those in the column order above, so results come
+            // out exactly as the full walk orders them.
+            const int height = zMax - zMin + 1;
+            std::vector<int> keep;
+            keep.reserve(64);
             for (z = zMin; z <= zMax; z++)
             {
-                const ObjectList& list = _objects(x, z);
-                int n = list.Size();
-                for (int i = 0; i < n; i++)
+                const float cz = z * _landGrid + _landGrid * 0.5f;
+                for (x = xMin; x <= xMax; x++)
                 {
-                    Object* obj = list[i];
-                    if (obj == with)
+                    const ObjectList& list = _objects(x, z);
+                    if (list.Null())
                     {
                         continue;
                     }
-                    if (obj == ignore)
+                    const float cx = x * _landGrid + _landGrid * 0.5f;
+                    const float d2 = SegmentPointDistance2(beg.X(), 0, beg.Z(), end.X(), 0, end.Z(), cx, 0, cz);
+                    if (LineQueryMaySkipCell(d2, list.CullReachXZ()))
                     {
+                        ++cellsSkipped;
                         continue;
                     }
-                    if (obj->GetType() == Network && obj->GetShape()->FindGeometryLevel() < 0)
-                    {
-                        continue; // no collisions with roads
-                    }
-                    if (obj->GetType() == Temporary)
-                    {
-                        continue; // no collisions with temporary
-                    }
-                    if (obj->GetType() == TypeTempVehicle)
-                    {
-                        continue;
-                    }
-                    float dist2 = obj->Position().Distance2Inline(boundingCenter);
-                    float maxDist2 = Square(boundingSphere + obj->GetRadius());
-                    if (dist2 > maxDist2)
-                    {
-                        continue;
-                    }
-                    obj->Intersect(retVal, beg, end, radius, type);
+                    keep.push_back((x - xMin) * height + (z - zMin));
                 }
+            }
+            std::sort(keep.begin(), keep.end());
+            for (const int key : keep)
+            {
+                x = xMin + key / height;
+                z = zMin + key % height;
+                const ObjectList& list = _objects(x, z);
+                // Then in 3D against the cell's own sphere centre, which needs the list.
+                if (list->GetNonStaticCount() == 0)
+                {
+                    const Vector3 c = list->GetBSphereCenter();
+                    const float d2 = SegmentPointDistance2(beg.X(), beg.Y(), beg.Z(), end.X(), end.Y(), end.Z(), c.X(),
+                                                           c.Y(), c.Z());
+                    if (LineQueryMaySkipCell(d2, list->GetStaticReach()))
+                    {
+                        ++cellsSkipped;
+                        continue;
+                    }
+                }
+                ++cellsWalked;
+                visitCell(list, out);
+            }
+        };
+        walk(retVal, cellCull != 0);
+        if (cellCull == 2)
+        {
+            CollisionBuffer reference;
+            walk(reference, false);
+            const int got = retVal.Size() - firstContact;
+            bool equal = reference.Size() == got;
+            for (int i = 0; equal && i < got; ++i)
+            {
+                const CollisionInfo& a = retVal[firstContact + i];
+                const CollisionInfo& b = reference[i];
+                equal = a.object == b.object && a.under == b.under && a.pos == b.pos;
+            }
+            // The denominators say whether a 0 means anything: queries that hit something,
+            // and how many occupied cells the cull actually dropped.
+            static std::atomic<int64_t> queries{0}, mismatches{0}, hitting{0}, hits{0}, skipped{0}, walked{0};
+            const int64_t q = ++queries;
+            const int64_t m = equal ? mismatches.load() : ++mismatches;
+            hitting += reference.Size() > 0 ? 1 : 0;
+            hits += reference.Size();
+            skipped += cellsSkipped;
+            walked += cellsWalked;
+            if (!equal || (q & (q - 1)) == 0)
+            {
+                LOG_INFO(World,
+                         "ObjectCollision cell cull verify: {} queries ({} with hits, {} hits), {} mismatched{}; "
+                         "occupied cells skipped {} walked {}",
+                         q, hitting.load(), hits.load(), m, equal ? "" : " (this one)", skipped.load(), walked.load());
             }
         }
     }
