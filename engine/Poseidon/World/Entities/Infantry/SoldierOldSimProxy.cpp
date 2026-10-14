@@ -1231,6 +1231,8 @@ MovesType::MovesType(const MovesTypeName& name)
     // re-Inits the weights from scratch, so only the last call ever counted; the skeleton
     // grows as each move's RTM loads (Skeleton::NewBone), and the last call already came after
     // the last load. Nothing in the loop reads the weights. Same final weights, one pass.
+    // (MrDudeX-arma1 made the same fix independently: with Arma 2's ~2000 moves and 132-bone
+    // soldiers the per-move Prepare took over a minute per soldier model on the laptop.)
     if (anyAnimation)
         _name.motionType->GetSkeleton()->Prepare(shape, GetWeights());
 
