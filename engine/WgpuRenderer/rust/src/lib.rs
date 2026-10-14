@@ -1166,71 +1166,89 @@ impl Renderer {
         // building the GPU-driven pipelines (gpu_driven.wgsl) at start-up -- two testers, RX 6600 and
         // RX 6700 XT, identical fault offset, 2026-10-09. Prefer DX12 there unless the backend was
         // chosen explicitly (WGPU_BACKEND) or WGR_AMD_VULKAN=1 asks for Vulkan anyway.
+        // (PERF, 2026-10-14) Decided from the adapter actually chosen, rebuilding on DX12 only on an
+        // AMD Vulkan adapter. It was a separate probe instance + adapter before: ~170 ms of every
+        // start on every GPU, to change something only on AMD.
         #[cfg(windows)]
-        if std::env::var_os("WGPU_BACKEND").is_none()
-            && std::env::var("WGR_AMD_VULKAN").map(|v| v == "0").unwrap_or(true)
-        {
-            let mut probe_desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
-            probe_desc.backends = wgpu::Backends::VULKAN;
-            let probe = wgpu::Instance::new(probe_desc);
-            let amd = pollster::block_on(probe.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            }))
-            .map(|a| a.get_info().vendor == 0x1002)
-            .unwrap_or(false);
-            drop(probe);
-            if amd {
-                instance_desc.backends = wgpu::Backends::DX12;
-                log.log(
-                    log_level::WARN,
-                    "AMD GPU: using DX12 instead of Vulkan (the AMD Vulkan driver crashes compiling the \
-                     GPU-driven pipelines). WGR_AMD_VULKAN=1 or WGPU_BACKEND=vulkan forces Vulkan.",
-                );
-            }
-        }
+        let amd_dx12_allowed = std::env::var_os("WGPU_BACKEND").is_none()
+            && std::env::var("WGR_AMD_VULKAN").map(|v| v == "0").unwrap_or(true);
+        let instance_flags = instance_desc.flags;
+        let mut amd_dx12 = false;
+        let mut instance_desc = Some(instance_desc);
         #[cfg(feature = "dlss")]
         let mut dlss_instance_active = false;
-        let instance = 'inst: {
-            #[cfg(feature = "dlss")]
-            if dlss_requested {
-                match dlss_device::create_instance(instance_desc.flags) {
-                    Ok(i) => {
-                        log.log(
-                            log_level::INFO,
-                            "wgpu instance created via hal route with NGX extensions (WGR_DLSS)",
-                        );
-                        dlss_instance_active = true;
-                        break 'inst i;
-                    }
-                    Err(e) => {
-                        log.log(
-                            log_level::WARN,
-                            &format!("WGR_DLSS instance path failed ({e}); native path instead"),
-                        );
-                        dlss_status
-                            .latch(format!("Vulkan instance with the NGX extensions failed: {e}"));
+        let (_instance, surface, adapter) = loop {
+            let instance = 'inst: {
+                #[cfg(feature = "dlss")]
+                if dlss_requested && !amd_dx12 {
+                    match dlss_device::create_instance(instance_flags) {
+                        Ok(i) => {
+                            log.log(
+                                log_level::INFO,
+                                "wgpu instance created via hal route with NGX extensions (WGR_DLSS)",
+                            );
+                            dlss_instance_active = true;
+                            break 'inst i;
+                        }
+                        Err(e) => {
+                            log.log(
+                                log_level::WARN,
+                                &format!("WGR_DLSS instance path failed ({e}); native path instead"),
+                            );
+                            dlss_status
+                                .latch(format!("Vulkan instance with the NGX extensions failed: {e}"));
+                        }
                     }
                 }
+                let desc = instance_desc.take().unwrap_or_else(|| {
+                    let mut d = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+                    d.flags = instance_flags;
+                    d
+                });
+                let mut desc = desc;
+                if amd_dx12 {
+                    desc.backends = wgpu::Backends::DX12;
+                }
+                wgpu::Instance::new(desc)
+            };
+
+            let surface: wgpu::Surface<'static> = unsafe {
+                instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
+                    raw_display_handle: Some(raw_display_handle),
+                    raw_window_handle,
+                })
             }
-            wgpu::Instance::new(instance_desc)
+            .map_err(|e| format!("create_surface_unsafe failed: {e}"))?;
+
+            init_timer.mark("instance+surface");
+            let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            }))
+            .map_err(|e| format!("request_adapter failed: {e}"))?;
+
+            #[cfg(windows)]
+            {
+                let chosen = adapter.get_info();
+                if !amd_dx12 && amd_dx12_allowed && chosen.vendor == 0x1002 && chosen.backend == wgpu::Backend::Vulkan {
+                    log.log(
+                        log_level::WARN,
+                        "AMD GPU: using DX12 instead of Vulkan (the AMD Vulkan driver crashes compiling the                          GPU-driven pipelines). WGR_AMD_VULKAN=1 or WGPU_BACKEND=vulkan forces Vulkan.",
+                    );
+                    amd_dx12 = true;
+                    #[cfg(feature = "dlss")]
+                    {
+                        dlss_instance_active = false;
+                    }
+                    drop(adapter);
+                    drop(surface);
+                    drop(instance);
+                    continue;
+                }
+            }
+            break (instance, surface, adapter);
         };
-
-        let surface: wgpu::Surface<'static> = unsafe {
-            instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
-                raw_display_handle: Some(raw_display_handle),
-                raw_window_handle,
-            })
-        }
-        .map_err(|e| format!("create_surface_unsafe failed: {e}"))?;
-
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }))
-        .map_err(|e| format!("request_adapter failed: {e}"))?;
 
         let info = adapter.get_info();
         log.log(
@@ -1432,6 +1450,7 @@ impl Renderer {
         // strict-fallback rule as the instance: any failure names itself and the
         // renderer continues on the plain path.
         #[cfg(feature = "dlss")]
+        init_timer.mark("adapter+limits");
         let mut ngx_raw: Option<(dlss_device::NgxRawHandles, dlss::Ngx)> = None;
         let (device, queue) = 'dev: {
             #[cfg(feature = "dlss")]
@@ -1571,6 +1590,7 @@ impl Renderer {
         // than a backend-dependent black readback.
         config.usage |= wgpu::TextureUsages::COPY_SRC;
 
+        init_timer.mark("device");
         surface.configure(&device, &config);
 
         // HDR path (docs/hdr-pipeline-plan.md). Now the default for the wgpu backend —
@@ -1780,7 +1800,7 @@ impl Renderer {
             );
         }
 
-        init_timer.mark("pre-textures (instance/adapter/device/surface)");
+        init_timer.mark("configure..textures");
         // (PERF, 2026-10-14) The sky (its own composer, layered fog and ~16 pipelines) needs
         // nothing from the other subsystems, so it builds on its own thread while gfx3d, terrain,
         // grass and water build here: ~0.5 s of a ~2.8 s renderer start. Joined where it was built.
