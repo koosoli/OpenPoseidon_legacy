@@ -534,6 +534,15 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                                 "Test an --arma2-mission: skip the briefing, play N seconds, log and exit");
         configGroup->add_option("--arma2-campaign", _arma2Campaign,
                                 "Play an Arma 2 campaign from the --arma2 archives");
+        configGroup->add_option("--arma3", _arma3Root,
+                                "Arma 3 install folder: its archives and those of its DLC folders are mounted read-only, "
+                                "nothing is copied");
+        configGroup->add_option("--arma3-mission", _arma3Mission,
+                                "Play an Arma 3 mission straight from the --arma3 archives (e.g. Showcase_Infantry.Stratis)");
+        configGroup->add_option("--arma3-test-seconds", _arma3TestSeconds,
+                                "Test an --arma3-mission: skip the briefing, play N seconds, log and exit");
+        configGroup->add_option("--arma3-campaign", _arma3Campaign,
+                                "Play an Arma 3 campaign from the --arma3 archives");
         configGroup->add_option("--wait-for-parent", _waitForParent, "Wait for the map-browser parent process before starting");
         configGroup->add_option("--reforger-world", _reforgerWorld, "Native Enfusion world virtual directory");
 

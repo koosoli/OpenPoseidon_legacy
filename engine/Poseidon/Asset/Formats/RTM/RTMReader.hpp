@@ -152,11 +152,12 @@ inline bool readRTMFromFile(const char* path, RTMAnimation& anim)
 }
 
 
-// Binarised animation ("BMTR", Arma 2 / Operation Arrowhead), converted to the plain
+// Binarised animation ("BMTR", Arma 2 / Operation Arrowhead / Arma 3), converted to the plain
 // RTM_0101 layout the readers above take. Layout, as read from the Arma 2 data:
 //
-//   char[4] "BMTR"; u32 version (3); u8 flag; float step[3]; u32 phases; u32 (unused);
-//   u32 bones; u32 bone names; asciiz name[bones];
+//   char[4] "BMTR"; u32 version (3, 4; Arma 3: 5); u8 flag; float step[3]; u32 phases;
+//   u32 (unused); u32 bones; u32 bone names; asciiz name[bones];
+//   (version 5: u32, u32 -- both zero in Arma 3's data)
 //   u32 phases; float time[phases]          -- an "array" (see below)
 //   per phase: u32 bones; Transform t[bones] -- an "array"
 //   Transform = int16 quaternion x,y,z,w (1.0 = 16384) + half-float position x,y,z
@@ -228,12 +229,20 @@ struct BmtrCursor
             ok = false;
         return s;
     }
+    // Version 5 (Arma 3) puts an explicit flag before every non-empty array: 0 raw, else
+    // LZO -- the rule of the Arma 3 model format (ODOL 73).
+    bool flagged = false;
     bool array(size_t bytes, std::vector<uint8_t>& out)
     {
         out.resize(bytes);
         if (bytes == 0)
             return true;
-        if (bytes < 1024)
+        bool compressed = bytes >= 1024;
+        if (flagged)
+            compressed = u8() != 0;
+        if (!ok)
+            return false;
+        if (!compressed)
         {
             if (!need(bytes))
                 return false;
@@ -289,6 +298,14 @@ inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
     std::vector<std::string> boneNames(bones);
     for (auto& n : boneNames)
         n = c.asciiz();
+    if (version >= 5)
+    {
+        // Arma 3: eight bytes (zero in every shipped move) follow the names, and every
+        // array carries its compression flag.
+        (void)c.u32();
+        (void)c.u32();
+        c.flagged = true;
+    }
     const uint32_t timeCount = c.u32();
     if (!c.ok || timeCount != phases)
         return false;

@@ -2154,12 +2154,12 @@ std::string ResolveLocalizedTags(const std::string& html)
 
 int Arma2BriefingRevision()
 {
-    return Arma1Compat::Generation() == 2 ? RT().revision : 0;
+    return Arma1Compat::Generation() >= 2 ? RT().revision : 0;
 }
 
 std::string Arma2BriefingHtml(const std::string& html)
 {
-    if (Arma1Compat::Generation() != 2)
+    if (Arma1Compat::Generation() < 2)
         return html;
     std::string out = ResolveLocalizedTags(html);
     const std::string lower = Lower(out);
@@ -2265,7 +2265,7 @@ GameValue ScriptExecVM(const GameState* state, GameValuePar oper1, GameValuePar 
 
 bool Arma2RunUserAction(EntityAI* veh, Person* caller, int id, const RString& script)
 {
-    if (Arma1Compat::Generation() != 2)
+    if (Arma1Compat::Generation() < 2)
         return false;
     GameState* gstate = GWorld->GetGameState();
     GameValue args = gstate->CreateGameValue(GameArray);
@@ -2343,7 +2343,7 @@ void TraceExpression(const char* expression)
 void Arma2StartStallMonitor()
 {
     static bool started = false;
-    if (started || Arma1Compat::Generation() != 2 ||
+    if (started || Arma1Compat::Generation() < 2 ||
         Poseidon::Foundation::AppConfig::Instance().GetArma1TestSeconds() <= 0.0f)
         return;
     started = true;
@@ -2355,7 +2355,7 @@ void Arma2StartStallMonitor()
 void Arma2RuntimeSimulate()
 {
     GSimulateTick.fetch_add(1, std::memory_order_relaxed);
-    if (Arma1Compat::Generation() != 2 || !GWorld || !GWorld->GetGameState())
+    if (Arma1Compat::Generation() < 2 || !GWorld || !GWorld->GetGameState())
         return;
     Runtime& rt = RT();
     for (size_t i = 0; i < rt.fsms.size(); i++) // FSMs may start FSMs

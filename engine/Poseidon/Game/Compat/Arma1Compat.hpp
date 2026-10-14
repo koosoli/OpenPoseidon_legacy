@@ -15,20 +15,23 @@
 #include <Poseidon/Foundation/Containers/RStringArray.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
+#include <cstdint>
 #include <string>
 #include <vector>
 
 namespace Poseidon::Arma1Compat
 {
-// True when --arma1 or --arma2 named a usable install.
+// True when --arma1, --arma2 or --arma3 named a usable install.
 bool Active();
 
-// The mounted generation: 1 for Arma 1 (--arma1), 2 for Arma 2 / OA (--arma2); 0 inactive.
-// Everything below serves both; where Arma 2 lays its data out differently (Dta, the
-// expansion folders, XML stringtables, binarised animations) the generation decides.
+// The mounted generation: 1 for Arma 1 (--arma1), 2 for Arma 2 / OA (--arma2), 3 for
+// Arma 3 and its DLCs (--arma3); 0 inactive. Everything below serves all three; where a
+// later game lays its data out differently (Dta, the expansion and DLC folders, XML
+// stringtables, binarised animations, the Eden mission layout) the generation decides.
+// "Arma 2 and later" is written Generation() >= 2.
 int Generation();
 
-// "Arma 1" / "Arma 2", for log lines.
+// "Arma 1" / "Arma 2" / "Arma 3", for log lines.
 const char* Label();
 
 // Mounts <root>\AddOns, <root>\DBE1\AddOns and the campaign archives, data-only.
@@ -176,6 +179,28 @@ std::string CampaignBaseForMission(const std::string& missionFile);
 // Steam release holds .ogg files where the configs still say .wss. "" when nothing is
 // found, or outside --arma1/--arma2.
 RString FindArmaSoundFile(const char* configName);
+// A simulation name without Arma 3's PhysX suffixes: carx -> car, tankx -> tank,
+// helicopterrtd / helicopterx -> helicopter, airplanex -> airplane, shipx / submarinex ->
+// ship. Lower case. Arma 1 / 2 names come back unchanged (lower case).
+std::string SimKind(const std::string& simulation);
+
+// Arma 3: the CWA class that carries an Arma 3 vehicle class, chosen by the class's
+// ancestry in the Arma 3 config (Tank / APC / anti-air, Wheeled_APC_F, Truck_F, Car,
+// Helicopter attack / transport / light, Plane, Ship, StaticWeapon, ParachuteBase) and
+// its side. Empty for anything else (men, things) and outside Arma 3. (Arma3Compat.cpp)
+RString Arma3VehicleCarrier(const RString& className);
+
+// Arma 3: true for animals (Animal_Base_F), which are left out like Arma 2's.
+bool Arma3IsAnimal(const RString& className);
+
+// Arma 3: a mission.sqm as config text the engine's parser reads -- binarised or not,
+// Eden layout or Arma 2 layout (Arma3Eden.hpp). False when the file is no Arma 3
+// mission.sqm that needs it (outside --arma3, other files, plain text the parser reads
+// as it is).
+bool Arma3MissionFileToText(const char* fileName, std::string& text);
+
+// Any binarised config ("\0raP") as config text. False when it is not one.
+bool RapBytesToText(const std::vector<uint8_t>& bytes, std::string& text);
 
 // Logs what every entity of the running mission became: class (A1x_ = the Arma model on a
 // CWA base), model, LOD count, crew and weapons, grouped by kind (Arma2Census.cpp).
