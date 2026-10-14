@@ -227,6 +227,12 @@ struct CascadeSet
     float splitViewDist[4]; // frustum tiers: FAR view-space distance (eye-depth select)
     float omniRadius[4];    // omni tiers: camera-relative 3D radius (distance select); 0 for frustum tiers
     Vec3 sunDir;            // normalized sun travel direction the set was built with
+    // Each tier's RECEIVER volume, camera-relative: the frustum slice it was fitted to, or the
+    // bounding cube of an omni tier's sphere. A tier rendered on an earlier frame is still valid
+    // for this frame's receivers exactly when these corners (and the caster band zPad towards
+    // the sun) fall inside the box it was rendered for -- the test the wgpu cascade cache makes.
+    std::array<Vec3, 8> receiverCorners[4];
+    float zPad = 0.0f;
 };
 
 struct CascadeBuildParams
@@ -247,6 +253,19 @@ struct CascadeBuildParams
 };
 
 CascadeSet BuildShadowCascades(const CascadeBuildParams& p);
+
+// CASCADE REUSE (wgpu far-cascade cache). A cascade rendered with the camera-relative `vp`
+// around camera position `camAt`, re-expressed for points relative to `camNow`:
+// vp * T(camNow - camAt). Exact, because the cascade's box is anchored to the world, not to the
+// camera; only the origin the casters/receivers are measured from moved.
+Mat4 CarryCascadeVP(const Mat4& vp, const Vec3& camAt, const Vec3& camNow);
+
+// Whether a cascade sampled through `carried` (CarryCascadeVP) still covers a tier's receivers:
+// every corner of the receiver volume (camera-relative to camNow), and each moved `zPad` towards
+// the sun (where its casters are), must land inside the depth box with `marginTexels` of filter
+// margin on a side of `resolution` texels.
+bool CascadeCoversReceivers(const Mat4& carried, const std::array<Vec3, 8>& receiverCorners, const Vec3& sunDir,
+                            float zPad, int resolution, float marginTexels = 2.0f);
 
 // Camera-centred omnidirectional shadow cascade: fits a snapped ortho around a
 // sphere of `radius` centred on the camera, so it covers ALL directions. A frustum

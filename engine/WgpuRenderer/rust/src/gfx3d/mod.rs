@@ -4572,6 +4572,10 @@ pub struct Gfx3d {
     shadow_target: Option<ShadowTarget>,
     // Bumped on shadow-target recreation so the camera bind group refreshes.
     shadow_gen: u64,
+    // The shadow_gen the cascade layers were last rendered into. A kept cascade
+    // (WgrShadowPass::cascade_keep_mask) is honoured only while this still equals shadow_gen:
+    // a reallocated target holds nothing worth keeping.
+    shadow_gen_rendered: std::cell::Cell<u64>,
     // 1x1 stand-in bound while no shadow map exists (the layout always binds).
     dummy_shadow_view: wgpu::TextureView,
     // 1x1 stand-in for the GTAO target before the first ensure_depth (see its creation).
@@ -5530,6 +5534,7 @@ impl Gfx3d {
             shadow_pipelines: None,
             shadow_target: None,
             shadow_gen: 0,
+            shadow_gen_rendered: std::cell::Cell::new(u64::MAX),
             dummy_shadow_view,
             dummy_ao_view,
             interior_sky: SkyVisSettings::default(),
@@ -8024,6 +8029,12 @@ impl Gfx3d {
             if is_local && !self.local_view_refresh.contains(&local_index) {
                 continue;
             }
+            // PERF 2026-10-14: a far sun cascade the engine kept from an earlier frame is the
+            // same saving -- its layer already holds depth for the box it is sampled with.
+            if !is_local && c < 32 && (pass.cascade_keep_mask >> c) & 1 != 0 &&
+                self.shadow_gen_rendered.get() == self.shadow_gen {
+                continue;
+            }
             // LGT-026: and so a local view can no longer CLEAR THE LAYER, because the tiles it
             // would wipe are the cached ones it is being run beside. Every local view loads and
             // resets only its own tile, with the clear-quad below.
@@ -8230,6 +8241,9 @@ impl Gfx3d {
         if local_timer_open {
             timers.end(encoder, crate::gpu_timers::Region::LocalShadow);
             timers.cpu_end(crate::gpu_timers::Region::LocalShadow);
+        }
+        if count > 0 {
+            self.shadow_gen_rendered.set(self.shadow_gen);
         }
     }
 

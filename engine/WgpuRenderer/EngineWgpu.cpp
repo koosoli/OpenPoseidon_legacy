@@ -6221,7 +6221,8 @@ void EngineWgpu::NextFrame()
                 WgrCameraShadow& sb = cameras[i].shadow;
                 for (int c = 0; c < _smCascades.count && c < 4; c++)
                 {
-                    std::memcpy(sb.cascade_vp[c].m, _smCascades.camRelVP[c].m.data(), sizeof(sb.cascade_vp[c].m));
+                    // _smSampleVP: this frame's matrix, or a kept layer's own (UpdateShadowCascadeCache).
+                    std::memcpy(sb.cascade_vp[c].m, _smSampleVP[c].m.data(), sizeof(sb.cascade_vp[c].m));
                 }
                 sb.splits = {_smCascades.splitViewDist[0], _smCascades.splitViewDist[1], _smCascades.splitViewDist[2],
                              _smCascades.splitViewDist[3]};
@@ -6463,8 +6464,19 @@ void EngineWgpu::NextFrame()
             }
             for (int c = 0; c < _smCascades.count && c < 4; c++)
             {
-                std::memcpy(frame.shadow.light_vp[c].m, _smCascades.camRelVP[c].m.data(),
-                            sizeof(frame.shadow.light_vp[c].m));
+                // _smSampleVP, not camRelVP: for a kept cascade it is the layer's own carried
+                // matrix, so if the renderer must redraw that layer after all (its target was
+                // reallocated) it draws exactly what the lit pass samples.
+                std::memcpy(frame.shadow.light_vp[c].m, _smSampleVP[c].m.data(), sizeof(frame.shadow.light_vp[c].m));
+            }
+            // Far-cascade reuse: the layers this frame keeps are not drawn; the ones it renders
+            // become what the cache describes. Committed HERE, where the pass is actually sent.
+            if (sunShadowActive)
+            {
+                frame.shadow.cascade_keep_mask = _smKeepMask;
+                for (int c = 0; c < 4; c++)
+                    if (_smRefreshMask & (1u << c))
+                        _smCache[c] = _smCachePending[c];
             }
             // Casters are camera-relative to the camera captured in AddShadowCaster (NOT
             // _currentCamera, which may have advanced to a HUD/weapon camera by now); the
@@ -18206,6 +18218,105 @@ void EngineWgpu::SetShadowCascades(const shadow::CascadeSet& cascades, int resol
         _smCamPos[0] = cam.pos[0];
         _smCamPos[1] = cam.pos[1];
         _smCamPos[2] = cam.pos[2];
+    }
+    UpdateShadowCascadeCache();
+}
+
+// FAR-CASCADE REUSE (PERF 2026-10-14).
+//
+// All four sun cascades were culled, cleared and redrawn every frame. At Reforger's Durras pose
+// (DLSS Quality, 1286x724 internal) cascades 2 and 3 cost 3.7 ms of a 25.8 ms GPU frame, and
+// none of it scales with resolution: it is the whole forest drawn twice more, from the sun.
+// Most frames, those two layers would come out (nearly) identical to the previous frame's.
+//
+// So cascades 2 and 3 take turns: each frame re-renders at most one of them, and the other KEEPS
+// the depth it already holds -- sampled with the matrix it was rendered with, carried to this
+// frame's camera origin. The cascades are camera-relative and world-snapped, so that is exact:
+// vp_old * T(cam_now - cam_old) maps a point relative to the new camera into the old layer.
+//
+// A layer is only kept when it still covers this frame's receivers, which is checked exactly:
+// every corner of the tier's receiver volume (its frustum slice), and the same corners moved
+// zPad towards the sun (where their casters are), must land inside the old box with a 2-texel
+// PCF margin. The cascade fit (quantized radius, texel-snapped box) leaves a few percent of
+// slack, so a still or slowly moving camera keeps; a fast turn, a teleport, a resolution or
+// split change, or a sun that moved more than ~0.1 degree simply re-renders. What remains is
+// staleness: a moving object's far shadow, or a swaying crown 40+ m away, lags by one frame.
+//
+// WGR_SHADOW_CASCADE_CACHE=0 renders every cascade every frame, exactly as before.
+void EngineWgpu::UpdateShadowCascadeCache()
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_SHADOW_CASCADE_CACHE");
+        return !(v && v[0] == '0');
+    }();
+    constexpr int kFirstReusedCascade = 2;
+    _smKeepMask = 0;
+    _smRefreshMask = 0;
+    const int count = std::clamp(_smCascades.count, 0, 4);
+    for (int c = 0; c < 4; c++)
+        _smSampleVP[c] = _smCascades.camRelVP[c];
+    if (!_smCascadesValid || count <= 0)
+        return;
+    ++_smCacheTick;
+    // One line per 1,800 updates: how often the far cascades were reused, and how often a
+    // layer would have been reused but no longer covered the view (camera moved/turned).
+    if (_smCacheStats.considered >= 1800)
+    {
+        LOG_INFO(
+            Graphics,
+            "Wgpu shadow cascade reuse: {} of {} far-cascade updates kept ({} on their turn, {} no longer covered){}",
+            _smCacheStats.kept, _smCacheStats.considered,
+            _smCacheStats.considered - _smCacheStats.kept - _smCacheStats.uncovered, _smCacheStats.uncovered,
+            enabled ? "" : " -- WGR_SHADOW_CASCADE_CACHE=0");
+        _smCacheStats = {};
+    }
+    const float cosSunTolerance = 0.9999985f; // ~0.1 degree
+    for (int c = 0; c < count; c++)
+    {
+        ShadowCascadeCacheEntry fresh;
+        fresh.valid = true;
+        fresh.vp = _smCascades.camRelVP[c];
+        fresh.camPos[0] = _smCamPos[0];
+        fresh.camPos[1] = _smCamPos[1];
+        fresh.camPos[2] = _smCamPos[2];
+        fresh.sunDir = _smCascades.sunDir;
+        fresh.split = _smCascades.splitViewDist[c];
+        fresh.omniRadius = _smCascades.omniRadius[c];
+        fresh.count = count;
+        fresh.omniCount = _smCascades.omniCount;
+        fresh.resolution = _smCascadeRes;
+
+        const ShadowCascadeCacheEntry& old = _smCache[c];
+        bool keep = enabled && !ShadowLegacyGateEnabled() && c >= kFirstReusedCascade && old.valid &&
+                    old.count == fresh.count && old.omniCount == fresh.omniCount &&
+                    old.resolution == fresh.resolution && old.split == fresh.split &&
+                    old.omniRadius == fresh.omniRadius && shadow::Dot(old.sunDir, fresh.sunDir) >= cosSunTolerance &&
+                    ((_smCacheTick + static_cast<uint64_t>(c)) & 1u) != 0; // this cascade's turn is every other frame
+        shadow::Mat4 carried;
+        if (keep)
+        {
+            carried = shadow::CarryCascadeVP(old.vp, {old.camPos[0], old.camPos[1], old.camPos[2]},
+                                             {_smCamPos[0], _smCamPos[1], _smCamPos[2]});
+            keep = shadow::CascadeCoversReceivers(carried, _smCascades.receiverCorners[c], fresh.sunDir,
+                                                  _smCascades.zPad, fresh.resolution);
+            _smCacheStats.uncovered += keep ? 0u : 1u;
+        }
+        if (c >= kFirstReusedCascade)
+        {
+            ++_smCacheStats.considered;
+            _smCacheStats.kept += keep ? 1u : 0u;
+        }
+        if (keep)
+        {
+            _smKeepMask |= 1u << c;
+            _smSampleVP[c] = carried;
+        }
+        else
+        {
+            _smRefreshMask |= 1u << c;
+            _smCachePending[c] = fresh;
+        }
     }
 }
 

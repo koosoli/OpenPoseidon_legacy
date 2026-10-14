@@ -1135,7 +1135,10 @@ pub struct WgrShadowPass {
     /// the light's parameters live in ABSOLUTE world space; the renderer adds the reasons only
     /// it can see (the retained-set epoch, the caster set, the target's shape).
     pub local_dirty_mask: u32,
-    pub local_pad: [u32; 1],
+    /// PERF 2026-10-14. Bit c set = sun cascade c keeps the depth it holds from an earlier frame
+    /// (no pass, no clear); the engine samples it with the matrix it was rendered with. A former
+    /// pad word, so the ABI is unchanged.
+    pub cascade_keep_mask: u32,
     pub local_vp: [WgrMat4; 24],
 }
 

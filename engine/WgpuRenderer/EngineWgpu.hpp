@@ -1209,6 +1209,28 @@ class EngineWgpu : public EngineDummy
     bool _smEnabledFrame = false;
     shadow::CascadeSet _smCascades;
     int _smCascadeRes = 0;
+    // FAR-CASCADE REUSE (PERF 2026-10-14, UpdateShadowCascadeCache). What each sun cascade
+    // layer currently holds, what this frame decided, and the matrices the lit pass samples.
+    struct ShadowCascadeCacheEntry
+    {
+        bool valid = false;
+        shadow::Mat4 vp; // camera-relative light VP the layer was rendered with
+        float camPos[3] = {0.0f, 0.0f, 0.0f};
+        shadow::Vec3 sunDir;
+        float split = 0.0f, omniRadius = 0.0f;
+        int count = 0, omniCount = 0, resolution = 0;
+    };
+    ShadowCascadeCacheEntry _smCache[4];
+    ShadowCascadeCacheEntry _smCachePending[4];
+    uint32_t _smKeepMask = 0;
+    uint32_t _smRefreshMask = 0;
+    shadow::Mat4 _smSampleVP[4];
+    uint64_t _smCacheTick = 0;
+    struct
+    {
+        uint32_t considered = 0, kept = 0, uncovered = 0;
+    } _smCacheStats;
+    void UpdateShadowCascadeCache();
     bool _smCascadesValid = false;
     std::vector<WgrShadowCaster> _shadowCasters;
 

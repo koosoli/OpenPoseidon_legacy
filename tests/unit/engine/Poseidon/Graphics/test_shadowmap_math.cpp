@@ -1038,3 +1038,87 @@ TEST_CASE("ShadowMath point: a face does not cover its neighbours", "[Graphics][
     REQUIRE_FALSE(InCascade(plusX, {0.0f, 10.0f, 0.0f}));   // +Y's face
     REQUIRE_FALSE(InCascade(plusX, {0.0f, 0.0f, 10.0f}));   // +Z's face
 }
+
+// Far-cascade reuse (EngineWgpu::UpdateShadowCascadeCache): a layer rendered around one camera
+// position is sampled from a later one through CarryCascadeVP, and kept only while
+// CascadeCoversReceivers says the new frustum slice still fits.
+namespace
+{
+CascadeBuildParams ReuseParams(const Vec3& camPos)
+{
+    CascadeBuildParams p;
+    p.camPos = camPos;
+    p.forward = Normalize({0.3f, -0.1f, 1.0f});
+    p.right = Normalize(Cross({0.0f, 1.0f, 0.0f}, p.forward));
+    p.up = Cross(p.forward, p.right);
+    p.tanHalfX = 0.60f;
+    p.tanHalfY = 0.45f;
+    p.nearD = 0.5f;
+    p.farD = 2500.0f;
+    p.sunDir = Normalize({0.4f, -1.0f, 0.3f});
+    p.count = 4;
+    p.resolution = 2048;
+    p.zPad = 50.0f;
+    return p;
+}
+} // namespace
+
+TEST_CASE("ShadowMath cascade reuse: a carried matrix maps a world point where the original did",
+          "[Graphics][ShadowMath][CascadeReuse]")
+{
+    const Vec3 camA{5500.0f, 30.0f, -4700.0f};
+    const Vec3 camB = camA + Vec3{3.25f, 0.4f, -1.75f};
+    const CascadeSet cs = BuildShadowCascades(ReuseParams(camA));
+    for (int c = 0; c < cs.count; c++)
+    {
+        const Mat4 carried = CarryCascadeVP(cs.camRelVP[c], camA, camB);
+        for (const Vec3& world :
+             {camA + Vec3{40.0f, -3.0f, 120.0f}, camA + Vec3{-90.0f, 12.0f, 260.0f}, camB + Vec3{5.0f, 0.0f, 8.0f}})
+        {
+            const Vec3 original = TransformPoint(cs.camRelVP[c], world - camA);
+            const Vec3 reused = TransformPoint(carried, world - camB);
+            CHECK(reused.x == Catch::Approx(original.x).margin(1e-4));
+            CHECK(reused.y == Catch::Approx(original.y).margin(1e-4));
+            CHECK(reused.z == Catch::Approx(original.z).margin(1e-4));
+        }
+    }
+}
+
+TEST_CASE("ShadowMath cascade reuse: coverage holds in place and fails when the camera has left",
+          "[Graphics][ShadowMath][CascadeReuse]")
+{
+    const Vec3 camA{5500.0f, 30.0f, -4700.0f};
+    const CascadeBuildParams pA = ReuseParams(camA);
+    const CascadeSet csA = BuildShadowCascades(pA);
+    for (int c = 0; c < csA.count; c++)
+    {
+        // Same camera: the layer covers its own receivers by construction (fit + snap margin).
+        CHECK(CascadeCoversReceivers(csA.camRelVP[c], csA.receiverCorners[c], csA.sunDir, csA.zPad, pA.resolution));
+        // Moved far beyond the tier: the old box cannot hold the new slice.
+        const Vec3 camFar = camA + Vec3{900.0f, 0.0f, 900.0f};
+        const CascadeSet csFar = BuildShadowCascades(ReuseParams(camFar));
+        CHECK_FALSE(CascadeCoversReceivers(CarryCascadeVP(csA.camRelVP[c], camA, camFar), csFar.receiverCorners[c],
+                                           csFar.sunDir, csFar.zPad, pA.resolution));
+    }
+    // Whenever coverage is reported for a moved camera, every receiver corner of the NEW slice
+    // really does land inside the reused layer (the property the renderer relies on).
+    for (float step : {0.05f, 0.5f, 2.0f, 8.0f})
+    {
+        const Vec3 camB = camA + Vec3{step, 0.0f, step * 0.5f};
+        const CascadeSet csB = BuildShadowCascades(ReuseParams(camB));
+        for (int c = 0; c < csB.count; c++)
+        {
+            const Mat4 carried = CarryCascadeVP(csA.camRelVP[c], camA, camB);
+            if (!CascadeCoversReceivers(carried, csB.receiverCorners[c], csB.sunDir, csB.zPad, pA.resolution))
+                continue;
+            for (const Vec3& corner : csB.receiverCorners[c])
+            {
+                const Vec3 ndc = TransformPoint(carried, corner);
+                CHECK(std::fabs(ndc.x) <= 1.0f);
+                CHECK(std::fabs(ndc.y) <= 1.0f);
+                CHECK(ndc.z >= 0.0f);
+                CHECK(ndc.z <= 1.0f);
+            }
+        }
+    }
+}

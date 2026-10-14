@@ -1071,7 +1071,11 @@ struct WgrShadowPass
      * the renderer cannot see them, and everything it CAN see (the retained-set epoch, the
      * caster set, the depth target's shape) it adds itself. */
     uint32_t local_dirty_mask;
-    uint32_t local_pad[1];
+    /* PERF 2026-10-14 -- bit c set = sun cascade c KEEPS the depth it holds from an earlier
+     * frame: no pass, no clear. The engine sets it only when that layer still covers this
+     * frame's receivers, and samples it with the matrix it was rendered with (EngineWgpu::
+     * UpdateShadowCascadeCache). Occupies what was a pad word, so the ABI is unchanged. */
+    uint32_t cascade_keep_mask;
     WgrMat4 local_vp[24];
 };
 

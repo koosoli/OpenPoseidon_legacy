@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 
 namespace Poseidon::shadow
 {
@@ -650,6 +651,34 @@ Mat4 CascadeLightVPStable(const std::array<Vec3, 8>& corners, float t0, float t1
     return Mul(Ortho(minX, maxX, minY, maxY, -zMax, -zMin), lv);
 }
 
+Mat4 CarryCascadeVP(const Mat4& vp, const Vec3& camAt, const Vec3& camNow)
+{
+    Mat4 move = Identity();
+    move.at(0, 3) = camNow.x - camAt.x;
+    move.at(1, 3) = camNow.y - camAt.y;
+    move.at(2, 3) = camNow.z - camAt.z;
+    return Mul(vp, move);
+}
+
+bool CascadeCoversReceivers(const Mat4& carried, const std::array<Vec3, 8>& receiverCorners, const Vec3& sunDir,
+                            float zPad, int resolution, float marginTexels)
+{
+    const float margin = 2.0f * marginTexels / static_cast<float>(resolution > 0 ? resolution : 1);
+    const Vec3 towardsSun = Normalize(sunDir) * -(zPad > 0.0f ? zPad : 0.0f);
+    for (const Vec3& corner : receiverCorners)
+    {
+        for (const Vec3& p : {corner, corner + towardsSun})
+        {
+            const Vec4 clip = Transform(carried, Vec4{p.x, p.y, p.z, 1.0f});
+            const float w = clip.w != 0.0f ? clip.w : 1.0f;
+            const float x = clip.x / w, y = clip.y / w, z = clip.z / w;
+            if (!(std::fabs(x) <= 1.0f - margin && std::fabs(y) <= 1.0f - margin && z >= 0.0f && z <= 1.0f))
+                return false;
+        }
+    }
+    return true;
+}
+
 int SelectCascade(float eyeDepth, const float* splitViewDistances, int count)
 {
     for (int i = 0; i < count; i++)
@@ -713,7 +742,9 @@ CascadeSet BuildShadowCascades(const CascadeBuildParams& p)
         float t1 = (splits[i + 1] - p.nearD) / span;
         cs.camRelVP[i] = CascadeLightVPStable(corners, t0, t1, sd, up, p.resolution, p.zPad, p.camPos);
         cs.splitViewDist[i] = splits[i + 1];
+        cs.receiverCorners[i] = SliceFrustum(corners, t0, t1);
     }
+    cs.zPad = p.zPad;
     return cs;
 }
 
@@ -833,6 +864,8 @@ CascadeSet BuildShadowCascadesTiered(const CascadeBuildParams& p)
         }
         cs.camRelVP[i] = OmniSphereLightVP(p.camPos, r, sd, up, p.resolution, p.zPad);
         cs.omniRadius[i] = r;
+        for (int k = 0; k < 8; k++)
+            cs.receiverCorners[i][k] = Vec3{(k & 1) ? r : -r, (k & 2) ? r : -r, (k & 4) ? r : -r};
         cs.splitViewDist[i] = r; // unused by selection for omni, kept sane for fallthrough
         lastOmniR = r;
     }
@@ -859,8 +892,10 @@ CascadeSet BuildShadowCascadesTiered(const CascadeBuildParams& p)
             cs.camRelVP[gi] = CascadeLightVPStable(corners, t0, t1, sd, up, p.resolution, p.zPad, p.camPos);
             cs.splitViewDist[gi] = fsplits[k + 1];
             cs.omniRadius[gi] = 0.0f;
+            cs.receiverCorners[gi] = SliceFrustum(corners, t0, t1);
         }
     }
+    cs.zPad = p.zPad;
     return cs;
 }
 
