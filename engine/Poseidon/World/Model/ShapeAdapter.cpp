@@ -1416,12 +1416,23 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
                 // Derived from the texture exactly as the MLOD path above does per face.
                 if (isODOL && model.sourceVersion >= 40 && tex)
                 {
-                    if (!tables)
-                        tex->LoadHeaders();
                     int spec = shapeSections[s].properties.Special();
-                    if (tex->IsAlpha())
-                        spec |= IsAlpha | IsAlphaOrdered;
-                    if (tex->IsTransparent())
+                    // A streamed world object is converted on a worker (`tables`), where the
+                    // texture's headers are not loaded and IsAlpha() says nothing; there the
+                    // Arma naming rule decides: *_ca.paa carries alpha (colour + alpha), and
+                    // foliage is cut out by it. Measured: the d427d85 run still drew Utes'
+                    // trees as cards, every one of them a streamed object.
+                    if (!tables)
+                    {
+                        tex->LoadHeaders();
+                        if (tex->IsAlpha())
+                            spec |= IsAlpha | IsAlphaOrdered;
+                        if (tex->IsTransparent())
+                            spec |= IsTransparent;
+                    }
+                    const char* name = tex->Name();
+                    const size_t len = name ? strlen(name) : 0;
+                    if (len > 7 && !strcmpi(name + len - 7, "_ca.paa") && !(spec & (IsAlpha | IsTransparent)))
                         spec |= IsTransparent;
                     shapeSections[s].properties.SetSpecial(spec);
                 }
