@@ -39,6 +39,9 @@
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Containers/BankArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
+#include <set>
+#include <string>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Math/Math3DP.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
@@ -102,6 +105,19 @@ RString EngineMuzzleName(const EntityAI* ai, const RString& scriptName)
                 if (muzzle && muzzle->CanUse(type))
                     return muzzle->GetName();
             }
+    }
+    // Nothing matched: say once per name which muzzles the unit has, so a script's
+    // weapon name the mapping misses shows up in the log instead of silently doing nothing.
+    static std::set<std::string> reported;
+    if (reported.insert(std::string(scriptName.Data())).second)
+    {
+        std::string muzzles;
+        for (int i = 0; i < ai->NMagazineSlots(); i++)
+            if (const MuzzleType* muzzle = ai->GetMagazineSlot(i)._muzzle)
+                if (muzzles.find(std::string(muzzle->GetName()) + ",") == std::string::npos)
+                    muzzles += std::string(muzzle->GetName()) + ",";
+        LOG_WARN(Mission, "{}: no muzzle '{}' on '{}' (muzzles: {})", Poseidon::Arma1Compat::Label(), scriptName.Data(),
+                 ai->GetType() ? (const char*)ai->GetType()->GetName() : "", muzzles);
     }
     return scriptName;
 }

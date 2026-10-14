@@ -367,6 +367,7 @@ const std::map<std::string, std::vector<const char*>>& MagazineAliases()
         {"30rnd_9x19_mp5", {"HK", "M16"}},  {"30rnd_9x19_mp5sd", {"HK", "M16"}},
         {"15rnd_9x19_m9", {"Beretta", "Revolver"}}, {"15rnd_9x19_m9sd", {"Beretta", "Revolver"}},
         {"7rnd_45acp_1911", {"Revolver"}},  {"8rnd_9x18_makarov", {"Tokarev", "Revolver"}},
+        {"8rnd_9x18_makarovsd", {"Tokarev", "Revolver"}}, {"5rnd_127x108_ksvk", {"SVDDragunov", "M21"}},
         {"30rnd_545x39_ak", {"AK74"}},      {"30rnd_762x39_ak47", {"AK47"}},
         {"10rnd_762x54_svd", {"SVDDragunov"}}, {"100rnd_762x54_pk", {"PK"}},
         {"m136", {"AT4Launcher", "LAWLauncher"}}, {"smaw_he", {"CarlGustavLauncher", "LAWLauncher"}},
