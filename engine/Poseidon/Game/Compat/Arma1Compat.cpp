@@ -729,6 +729,32 @@ RString ResolveMagazineClass(const RString& className)
     return ResolveFrom("CfgWeapons", className, MagazineAliases());
 }
 
+RString ScriptClassName(const RString& engineName)
+{
+    if (!Active() || _strnicmp(engineName.Data(), "A1x_", 4) != 0)
+        return engineName;
+    return RString(engineName.Data() + 4);
+}
+
+bool ScriptWeaponMatches(const char* engineName, const RString& scriptName)
+{
+    if (!engineName || scriptName.GetLength() == 0)
+        return false;
+    if (_stricmp(engineName, scriptName.Data()) == 0)
+        return true;
+    if (!Active())
+        return false;
+    if (_strnicmp(engineName, "A1x_", 4) == 0 && _stricmp(engineName + 4, scriptName.Data()) == 0)
+        return true;
+    // An Arma weapon carried by a CWA class without a model of its own ("M9" on CWA's
+    // pistol): the script's name resolves to it. Muzzle names (M203Muzzle) are no
+    // top-level weapons and are left alone, so this logs nothing for them.
+    if (!FindConfigClass("CfgWeapons", scriptName.Data()))
+        return false;
+    const RString resolved = ResolveFrom("CfgWeapons", scriptName, WeaponAliases(), false, true);
+    return _stricmp(engineName, resolved.Data()) == 0;
+}
+
 void FilterMissionAddons(FindArrayRStringCI& addOns)
 {
     if (!Active())
