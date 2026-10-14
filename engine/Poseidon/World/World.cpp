@@ -1969,15 +1969,30 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // so probing once is safe.
         if (GLandscape && GEngine)
         {
+            // Arma 2 worlds (Chernarus, Utes, Takistan) keep their map objects ONLY in the
+            // streamed placement list, so with no residency update an OpenGL 3.3 run had no
+            // buildings, no trees and no ship: C0_FirstToFight's crew stood on the water where
+            // Utes' LHD should be (census: 0-1 map models within 150 m on every Arma 2
+            // mission). The residency update creates ordinary Objects, which every renderer
+            // draws; it now runs on every engine. OP_RESIDENCY_WGPU_ONLY=1 restores the gate.
             static const bool modernObjectsEngine = []
             {
+                const char* only = std::getenv("OP_RESIDENCY_WGPU_ONLY");
+                if (!(only && *only == '1'))
+                    return true;
                 Engine::ObjectStatsOut probe;
                 return GEngine->GetObjectStats(probe);
             }();
             Camera* residencyCamera = _scene.GetCamera();
+            static const bool farTierEngine = []
+            {
+                Engine::ObjectStatsOut probe;
+                return GEngine->GetObjectStats(probe);
+            }();
             if (modernObjectsEngine && residencyCamera)
             {
-                farResidencySupported = true;
+                // the far instance tier is the WGPU renderer's own; only it gets that update
+                farResidencySupported = farTierEngine;
                 GLandscape->UpdateModernObjectResidency(residencyCamera->Position());
             }
         }

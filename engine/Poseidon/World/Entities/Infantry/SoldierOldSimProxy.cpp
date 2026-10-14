@@ -424,6 +424,22 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
             pLevel = GScene->LevelFromDistance2(pshape, dist2, pTransform.Scale(), pTransform.Direction(),
                                                 GScene->GetCamera()->Direction());
         }
+        if (proxyLog && matIndex == type->_gunMatIndex && GWorld && GWorld->CameraOn() == this)
+        {
+            static DWORD lastLevel = 0;
+            const DWORD now = Poseidon::Foundation::GlobalTickCount();
+            if (now - lastLevel > 2000)
+            {
+                lastLevel = now;
+                const Vector3 wp = pTransform.Position();
+                LOG_INFO(Graphics,
+                         "A2 proxy PLAYER draw: man level {} -> weapon level {} of {} (scale {:.2f}) world pos "
+                         "{:.2f},{:.2f},{:.2f} man at {:.2f},{:.2f},{:.2f} filter {} reversed {}",
+                         level, pLevel, pshape->NLevels(), pTransform.Scale(), wp.X(), wp.Y(), wp.Z(),
+                         transform.Position().X(), transform.Position().Y(), transform.Position().Z(),
+                         static_cast<int>(GSectionFilter), (pshape->Remarks() & REM_REVERSED) != 0);
+            }
+        }
         if (pLevel == LOD_INVISIBLE)
         {
             continue;
