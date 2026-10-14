@@ -1693,6 +1693,14 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         if (sim == "car" || sim == "tank" || sim == "helicopter" || sim == "airplane" || sim == "ship" ||
             sim == "motorcycle")
         {
+            // Its crew: the Arma 2 crew class (a TK tank is crewed by TK crewmen, not CWA's
+            // SoldierECrew), resolved like any mission class.
+            if (const std::string crew = StringValue(*a1, "crew"); !crew.empty())
+            {
+                const RString resolved = ResolveVehicleClass(RString(crew.c_str()));
+                if (const ParamEntry* now = Pars.FindEntry("CfgVehicles"); resolved.GetLength() > 0 && now && now->FindEntry(resolved))
+                    text += "\t\tcrew=\"" + std::string(resolved.Data()) + "\";\r\n";
+            }
             for (const char* key : {"maxSpeed", "armor", "fuelCapacity", "transportSoldier"})
             {
                 const ParamEntry* e = a1->FindEntry(key);
