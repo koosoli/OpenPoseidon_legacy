@@ -326,23 +326,56 @@ class ODOLLoader
                 const float lift = -minY;
                 if (lift > 0.2f && lift < 5.0f)
                 {
+                    // and centred over its origin across the ground: the binariser stored the
+                    // vertices around the bounding centre, which on usmc_soldier_light lies
+                    // 0.31 m aside and 0.38 m behind the body's own axis (its "pilot" eye point
+                    // sits at x -0.30, z 0.29). Left there, the soldier stands half a metre off
+                    // the point he turns about, collides at and aims from.
+                    static const bool keepAside = [] {
+                        const char* e = std::getenv("OP_A2_MAN_NO_CENTRE");
+                        return e && *e == '1';
+                    }();
+                    const float sx = keepAside ? 0.0f : info.boundingCenter.x;
+                    const float sz = keepAside ? 0.0f : info.boundingCenter.z;
                     for (auto& lod : model.lodLevels)
                     {
                         for (auto& v : lod.mesh.vertices)
+                        {
+                            v.position.x += sx;
                             v.position.y += lift;
+                            v.position.z += sz;
+                        }
                         for (auto& proxy : lod.mesh.proxies)
+                        {
+                            proxy.transform.m[0][3] += sx;
                             proxy.transform.m[1][3] += lift;
+                            proxy.transform.m[2][3] += sz;
+                        }
+                        lod.mesh.boundingBox.min.x += sx;
+                        lod.mesh.boundingBox.max.x += sx;
                         lod.mesh.boundingBox.min.y += lift;
                         lod.mesh.boundingBox.max.y += lift;
+                        lod.mesh.boundingBox.min.z += sz;
+                        lod.mesh.boundingBox.max.z += sz;
+                        lod.mesh.bCenter.x += sx;
                         lod.mesh.bCenter.y += lift;
+                        lod.mesh.bCenter.z += sz;
                     }
+                    model.boundingBox.min.x += sx;
+                    model.boundingBox.max.x += sx;
                     model.boundingBox.min.y += lift;
                     model.boundingBox.max.y += lift;
+                    model.boundingBox.min.z += sz;
+                    model.boundingBox.max.z += sz;
+                    model.aimingCenter.x += sx;
                     model.aimingCenter.y += lift;
+                    model.aimingCenter.z += sz;
+                    model.centerOfMass.x += sx;
                     model.centerOfMass.y += lift;
+                    model.centerOfMass.z += sz;
                     char centre[96];
-                    std::snprintf(centre, sizeof(centre), "%.6f %.6f %.6f", info.boundingCenter.x,
-                                  info.boundingCenter.y - lift, info.boundingCenter.z);
+                    std::snprintf(centre, sizeof(centre), "%.6f %.6f %.6f", info.boundingCenter.x - sx,
+                                  info.boundingCenter.y - lift, info.boundingCenter.z - sz);
                     model.metadata["odolBoundingCenter"] = centre;
                     // Its land-contact LOD is a single point at the hip (model y=0): Arma 2
                     // grounds a man by his animated feet, this engine by that point. Put it at
@@ -354,7 +387,8 @@ class ODOLLoader
                     // and kept there: auto-centring would move the bounding-box centre back to
                     // the origin (the waist-deep soldier of 3c27692, lifted and re-centred)
                     model.autoCenterEnabled = 0;
-                    LOG_INFO(Graphics, "Arma 2 man {}: lifted {:.3f} m so the feet stand at y=0", sourcePath, lift);
+                    LOG_INFO(Graphics, "Arma 2 man {}: lifted {:.3f} m so the feet stand at y=0, centred by {:.3f},{:.3f}", sourcePath,
+                             lift, sx, sz);
                 }
             }
         }
