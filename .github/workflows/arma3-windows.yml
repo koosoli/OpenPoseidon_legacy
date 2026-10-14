@@ -42,7 +42,8 @@ jobs:
         shell: bash
         run: echo "sha_short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
-      # The full build also compiles test programs; only the game has to succeed.
+      # Only the game: the tools and test programs would double the build time (the unit
+      # tests of the Arma 3 layer run on Linux, see tests/unit/.../test_arma3_eden.cpp).
       - name: Build
         continue-on-error: true
         uses: ./.github/actions/build-cwr
@@ -51,6 +52,7 @@ jobs:
           vcpkg-triplet: x64-windows-clang
           build-dir: ${{ env.CWR_BUILD_DIR }}
           run-tests: 'false'
+          build-target: PoseidonGame
 
       - name: Build the game
         shell: bash
