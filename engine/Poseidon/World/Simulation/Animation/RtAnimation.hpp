@@ -63,6 +63,7 @@ class AnimationRTWeights
 	void Normalize();
 	bool IsSimple() const {return _isSimple;}
 	const AnimationRTWeight &operator [] ( int i )const {return _data[i];}
+	int Size() const {return _data.Size();}
 	const AnimationRTWeight *Data() const {return _data.Data();}
 
 };

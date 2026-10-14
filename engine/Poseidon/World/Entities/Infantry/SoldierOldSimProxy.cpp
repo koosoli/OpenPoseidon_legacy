@@ -23,6 +23,9 @@
 #include <Poseidon/Foundation/platform.hpp>
 #include <Random/randomGen.hpp>
 
+#include <set>
+#include <string>
+
 namespace Poseidon
 {
 using namespace Foundation;
@@ -53,9 +56,14 @@ Object* Man::GetProxy(LODShapeWithShadow*& shape, int level, Matrix4& transform,
         }
     }
     const ProxyObject& proxy = sShape->Proxy(i);
+    if (proxy.selection < 0 || proxy.selection >= sShape->NNamedSel())
+        return nullptr;
     const NamedSelection& sel = sShape->NamedSel(proxy.selection);
+    if (sel.Size() <= 0)
+        return nullptr;
     int point = sel[0];
-    PoseidonAssert(sel.Size() > 0);
+    if (point < 0 || point >= wgt.Size() || wgt[point].Size() <= 0)
+        return nullptr; // see DrawProxies: an Arma 2 proxy without skeleton weight
     const AnimationRTWeight& wg = wgt[point];
     int matIndex = wg[0].GetSel();
 
@@ -182,6 +190,20 @@ int Man::GetProxyComplexity(int level, const FrameBase& pos, float dist2) const
     return nFaces;
 }
 
+namespace
+{
+// Once per model and LOD: which proxy could not be placed, so a missing weapon names itself.
+void ReportUnweightedProxy(const LODShapeWithShadow* shape, int level, const ProxyObject& proxy, const char* why)
+{
+    static std::set<std::string> reported;
+    const std::string key = std::string(shape ? (const char*)shape->Name() : "?") + "#" + std::to_string(level) + "#" +
+                            std::string((const char*)proxy.name);
+    if (reported.insert(key).second)
+        LOG_WARN(Graphics, "Man proxy '{}' on {} level {} not drawn: {}", (const char*)proxy.name,
+                 shape ? (const char*)shape->Name() : "?", level, why);
+}
+} // namespace
+
 void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, const Matrix4& invTransform,
                       float dist2, float z2, const LightList& lights)
 {
@@ -205,9 +227,24 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
             }
         }
         const ProxyObject& proxy = sShape->Proxy(i);
+        // A proxy whose selection has no point, or whose point carries no skeleton weight,
+        // cannot be placed on the skeleton. OFP models never do this; Arma 2 ODOL can (its
+        // skinning lives in per-vertex bone references), and indexing past the end here was
+        // the first-frame 0xC0000005 with Arma 2 soldiers. Such a proxy is not drawn.
+        if (proxy.selection < 0 || proxy.selection >= sShape->NNamedSel())
+            continue;
         const NamedSelection& sel = sShape->NamedSel(proxy.selection);
+        if (sel.Size() <= 0)
+        {
+            ReportUnweightedProxy(_shape, level, proxy, "selection has no point");
+            continue;
+        }
         int point = sel[0];
-        PoseidonAssert(sel.Size() > 0);
+        if (point < 0 || point >= wgt.Size() || wgt[point].Size() <= 0)
+        {
+            ReportUnweightedProxy(_shape, level, proxy, "point has no skeleton weight");
+            continue;
+        }
         const AnimationRTWeight& wg = wgt[point];
         int matIndex = wg[0].GetSel();
 
