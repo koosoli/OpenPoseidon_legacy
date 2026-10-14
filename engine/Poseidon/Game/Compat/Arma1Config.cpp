@@ -1684,6 +1684,36 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         text += "\t\tdisplayName=\"" + displayName + "\";\r\n";
     if (loadout)
         text += Arma2Loadout(*a1);
+    if (useModel && Generation() == 2)
+    {
+        // Arma 2 colours one model several ways through hiddenSelections plus
+        // hiddenSelectionsTextures (the LHD deck crew's jerseys and helmets, desert and
+        // woodland vehicles). Only selections WITH a texture are carried over: an OFP
+        // hidden selection without one is hidden, an Arma 2 one keeps its model texture.
+        const ParamEntry* sels = a1->FindEntry("hiddenSelections");
+        const ParamEntry* texs = a1->FindEntry("hiddenSelectionsTextures");
+        if (sels && sels->IsArray() && texs && texs->IsArray())
+        {
+            std::string names, textures;
+            int n = 0;
+            for (int i = 0; i < sels->GetSize() && i < texs->GetSize(); i++)
+            {
+                const std::string sel = Lower((const char*)(RStringB)(*sels)[i]);
+                std::string tex = (const char*)(RStringB)(*texs)[i];
+                if (sel.empty() || tex.empty())
+                    continue;
+                // a texture this install does not have would hide the selection instead
+                if (tex[0] != '#' && !QIFStreamB::FileExist(tex[0] == '\\' ? tex.c_str() + 1 : tex.c_str()))
+                    continue;
+                names += std::string(n ? "," : "") + "\"" + sel + "\"";
+                textures += std::string(n ? "," : "") + "\"" + tex + "\"";
+                n++;
+            }
+            if (n > 0)
+                text += "\t\thiddenSelections[]={" + names + "};\r\n\t\thiddenSelectionsTextures[]={" + textures +
+                        "};\r\n";
+        }
+    }
     if (!man && useModel && Generation() == 2)
     {
         // A vehicle with the Arma 2 model: its own speed, armour, fuel and seats, so a
