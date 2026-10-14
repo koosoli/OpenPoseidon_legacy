@@ -373,6 +373,36 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
 
         Matrix4 pTransform = transform * animTransform;
 
+        // OP_A2_PROXYLOG=1: where a held weapon lands, the player against one other man,
+        // every two seconds (the player's rifle was drawn at his feet, the AI's in hand).
+        static const bool proxyLog = [] {
+            const char* e = std::getenv("OP_A2_PROXYLOG");
+            return e && *e == '1';
+        }();
+        if (proxyLog && matIndex == type->_gunMatIndex)
+        {
+            static DWORD lastPlayer = 0, lastOther = 0;
+            const bool isPlayer = GWorld && GWorld->CameraOn() == this;
+            DWORD& last = isPlayer ? lastPlayer : lastOther;
+            const DWORD now = Poseidon::Foundation::GlobalTickCount();
+            if (now - last > 2000)
+            {
+                last = now;
+                const Vector3 ap = animTransform.Position();
+                const Vector3 gp = _gunTrans.Position();
+                LOG_INFO(Graphics,
+                         "A2 proxy {}: level {} res {} insideView {} proxy '{}' shape {} anim pos {:.2f},{:.2f},{:.2f} "
+                         "up {:.2f},{:.2f},{:.2f} gunIdent {} gunTrans pos {:.2f},{:.2f},{:.2f} aimX {:.3f} aimY {:.3f} "
+                         "move {} cam {}",
+                         isPlayer ? "PLAYER" : "other", level, _shape->Resolution(level), type->_insideView,
+                         (const char*)proxy.name, (const char*)pshape->Name(), ap.X(), ap.Y(), ap.Z(),
+                         animTransform.DirectionUp().X(), animTransform.DirectionUp().Y(),
+                         animTransform.DirectionUp().Z(), _gunTransIdent, gp.X(), gp.Y(), gp.Z(), _gunXRot, _gunYRot,
+                         (const char*)Type()->GetMoveName(_primaryMove.id),
+                         GWorld ? static_cast<int>(GWorld->GetCameraType()) : -1);
+            }
+        }
+
         if (pshape->Remarks() & REM_REVERSED)
         {
             Matrix4 swapM(MScale, -1, +1, -1);
