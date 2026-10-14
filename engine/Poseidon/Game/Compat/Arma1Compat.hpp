@@ -76,6 +76,16 @@ RString ResolveVehicleClass(const RString& className);
 RString ResolveWeaponClass(const RString& className);
 RString ResolveMagazineClass(const RString& className);
 
+// The class name a script sees for an engine class: a class the import generated
+// ("A1x_SoldierWB", "A1x_M4AIM") is shown under the mission's own name ("M4AIM").
+// Identity for every other name and when no Arma install is active.
+RString ScriptClassName(const RString& engineName);
+
+// Whether a weapon or muzzle name a script gives ("M4AIM") names the engine weapon
+// `engineName`: the name itself, the generated A1x_ class of it, or the CWA class it
+// resolves to. Exact (case-insensitive) comparison when no Arma install is active.
+bool ScriptWeaponMatches(const char* engineName, const RString& scriptName);
+
 // Arma 2: the CWA weapon (for a weapon) or magazine (for a magazine) that carries an
 // Arma 2 weapon/magazine class, chosen by its kind (pistol, rifle, machine gun, sniper
 // rifle, launcher, grenade, ...) and the calibre of its ammunition. Empty when the

@@ -59,6 +59,39 @@ namespace Poseidon
 
 #include <Poseidon/Foundation/Platform/VersionNo.h>
 
+namespace
+{
+// The engine's muzzle name for the one a script names. An Arma 1/2 script says "M4AIM"
+// for the weapon the import generated as A1x_M4AIM (Arma1Compat::ScriptWeaponMatches);
+// identity without --arma1/--arma2 or when the unit has no such muzzle.
+RString EngineMuzzleName(const EntityAI* ai, const RString& scriptName)
+{
+    if (!ai || !Poseidon::Arma1Compat::Active())
+        return scriptName;
+    for (int i = 0; i < ai->NMagazineSlots(); i++)
+    {
+        const MuzzleType* muzzle = ai->GetMagazineSlot(i)._muzzle;
+        if (muzzle && Poseidon::Arma1Compat::ScriptWeaponMatches(muzzle->GetName(), scriptName))
+            return muzzle->GetName();
+    }
+    return scriptName;
+}
+
+// The same for a weapon the unit carries.
+RString EngineWeaponName(const EntityAI* ai, const RString& scriptName)
+{
+    if (!ai || !Poseidon::Arma1Compat::Active())
+        return scriptName;
+    for (int i = 0; i < ai->NWeaponSystems(); i++)
+    {
+        const WeaponType* weapon = ai->GetWeaponSystem(i);
+        if (weapon && Poseidon::Arma1Compat::ScriptWeaponMatches(weapon->GetName(), scriptName))
+            return weapon->GetName();
+    }
+    return scriptName;
+}
+} // namespace
+
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 
 GameValue ObjNull(const GameState* state)
@@ -459,7 +492,7 @@ GameValue ObjSelectWeapon(const GameState* state, GameValuePar oper1, GameValueP
         return NOTHING;
     }
 
-    RString name = oper2;
+    RString name = EngineMuzzleName(veh, oper2);
     for (int i = 0; i < veh->NMagazineSlots(); i++)
     {
         const MuzzleType* muzzle = veh->GetMagazineSlot(i)._muzzle;
@@ -542,7 +575,7 @@ GameValue ObjGetPrimaryWeapon(const GameState* state, GameValuePar oper1)
         }
         if ((weapon->_weaponType & MaskSlotPrimary) != 0)
         {
-            return weapon->GetName();
+            return Poseidon::Arma1Compat::ScriptClassName(weapon->GetName());
         }
     }
 
@@ -571,7 +604,7 @@ GameValue ObjGetSecondaryWeapon(const GameState* state, GameValuePar oper1)
         }
         if ((weapon->_weaponType & MaskSlotSecondary) != 0 && (weapon->_weaponType & MaskSlotPrimary) == 0)
         {
-            return weapon->GetName();
+            return Poseidon::Arma1Compat::ScriptClassName(weapon->GetName());
         }
     }
 
@@ -605,7 +638,7 @@ GameValue ObjGetAllWeapons(const GameState* state, GameValuePar oper1)
         {
             continue;
         }
-        array.Add(weapon->GetName());
+        array.Add(Poseidon::Arma1Compat::ScriptClassName(weapon->GetName()));
     }
 
     return value;
@@ -935,7 +968,7 @@ GameValue ObjAmmo(const GameState* state, GameValuePar oper1, GameValuePar oper2
     {
         return 0.0f;
     }
-    GameStringType weapon = oper2;
+    GameStringType weapon = EngineMuzzleName(ai, oper2);
     for (int i = 0; i < ai->NMagazineSlots(); i++)
     {
         const MagazineSlot& slot = ai->GetMagazineSlot(i);
@@ -1002,7 +1035,7 @@ GameValue ObjAmmoArray(const GameState* state, GameValuePar oper1, GameValuePar 
         return value;
     }
 
-    GameStringType muzzle = oper2;
+    GameStringType muzzle = EngineMuzzleName(ai, oper2);
     const MagazineSlot* pSlot = ai->GetmagazineSlotByMuzzle(muzzle);
     if (!pSlot)
     {
@@ -1224,7 +1257,7 @@ GameValue ObjHasWeapon(const GameState* state, GameValuePar oper1, GameValuePar 
         return false;
     }
 
-    GameStringType name = oper2;
+    GameStringType name = EngineWeaponName(veh, oper2);
     for (int i = 0; i < veh->NWeaponSystems(); i++)
     {
         const WeaponType* weapon = veh->GetWeaponSystem(i);
@@ -1264,7 +1297,7 @@ GameValue ObjRemoveWeapon(const GameState* state, GameValuePar oper1, GameValueP
     {
         return NOTHING;
     }
-    GameStringType weapon = oper2;
+    GameStringType weapon = EngineWeaponName(ai, oper2);
     ai->RemoveWeapon(weapon);
     return NOTHING;
 }
@@ -1304,7 +1337,7 @@ GameValue ObjRemoveMagazine(const GameState* state, GameValuePar oper1, GameValu
     {
         return NOTHING;
     }
-    GameStringType magazine = oper2;
+    GameStringType magazine = Poseidon::Arma1Compat::ResolveMagazineClass(oper2); // identity unless --arma1
     ai->RemoveMagazine(magazine);
     return NOTHING;
 }
@@ -1316,7 +1349,7 @@ GameValue ObjRemoveMagazines(const GameState* state, GameValuePar oper1, GameVal
     {
         return NOTHING;
     }
-    GameStringType magazine = oper2;
+    GameStringType magazine = Poseidon::Arma1Compat::ResolveMagazineClass(oper2); // identity unless --arma1
     ai->RemoveMagazines(magazine);
     return NOTHING;
 }
@@ -1334,7 +1367,7 @@ GameValue ObjFire(const GameState* state, GameValuePar oper1, GameValuePar oper2
         return NOTHING;
     }
 
-    GameStringType muzzle = oper2;
+    GameStringType muzzle = EngineMuzzleName(veh, oper2);
 
     for (int i = 0; i < veh->NMagazineSlots(); i++)
     {
@@ -1373,7 +1406,7 @@ GameValue ObjMuzzleReloadTime(const GameState* state, GameValuePar oper1, GameVa
         return -1.0f;
     }
 
-    GameStringType muzzle = oper2;
+    GameStringType muzzle = EngineMuzzleName(veh, oper2);
 
     const MagazineSlot* pSlot = veh->GetmagazineSlotByMuzzle(muzzle);
     if (!pSlot)
@@ -1423,13 +1456,14 @@ GameValue ObjFireEx(const GameState* state, GameValuePar oper1, GameValuePar ope
             {
                 return NOTHING;
             }
-            magazine = array[2];
+            magazine = Poseidon::Arma1Compat::ResolveMagazineClass(array[2]); // identity unless --arma1
+            [[fallthrough]];
         case 2:
             if (array[0].GetType() != GameString)
             {
                 return NOTHING;
             }
-            muzzle = array[0];
+            muzzle = EngineMuzzleName(veh, array[0]);
             if (array[1].GetType() != GameString)
             {
                 return NOTHING;
