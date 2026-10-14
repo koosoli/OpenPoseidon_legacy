@@ -1120,17 +1120,10 @@ int TextureWgpu::Init()
 
     const auto loadSource = [&]()
     {
-        static const bool lazyTint = [] {
-            const char* v = std::getenv("WGR_LAZY_BCR_TINT");
-            // Exact mip/corpus tests and paired native routes preserve the GPU
-            // image while avoiding duplicate decoded CPU chains. 0 is the A/B control.
-            return !v || v[0] != '0';
-        }();
         float rgb[3];
         const char* innerName = nullptr;
-        if (lazyTint && _bank && Poseidon::Dev::GResidencyLevers().layerTintInShader &&
-            Enfusion::LayerTintLinearMultiply() && Enfusion::SplitLayerTintName(SourceName(), rgb, &innerName) &&
-            innerName && *innerName)
+        if (_bank && LazyBcrTintRoute() && Enfusion::SplitLayerTintName(SourceName(), rgb, &innerName) && innerName &&
+            *innerName)
         {
             Ref<Texture> inner = _bank->Load(innerName);
             auto* texture = inner ? static_cast<TextureWgpu*>(inner.GetRef()) : nullptr;

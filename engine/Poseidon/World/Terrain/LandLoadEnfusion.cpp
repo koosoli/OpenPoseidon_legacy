@@ -44,10 +44,13 @@
 #include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Core/ProgressSystem.hpp>
 #include <Poseidon/Core/TaskPool.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
 #include <array>
 #include <atomic>
+#include <optional>
+#include <unordered_set>
 #include <chrono>
 #include <functional>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // RFG-070 `enft|` layer tint
@@ -2964,21 +2967,46 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     pool != nullptr ? pool->ThreadCount() : 1u, workUs.load() / 1000.0);
             }
             const auto installStart = std::chrono::steady_clock::now();
-            for (size_t i = 0; !deferAttachmentShapes && i < attachMeshes.size(); ++i)
+            // PERF (2026-10-14): each chunk's textures first, on the pool; its installs then take
+            // them instead of reading and decoding each on this thread. Chunked so the prepared
+            // sources waiting to be taken stay well inside the store's byte budget.
+            std::unordered_set<std::string> installTextureClaims;
+            Poseidon::NativeInstallTexturePrep partTextures;
+            constexpr size_t kInstallChunk = 192;
+            for (size_t chunk = 0; !deferAttachmentShapes && chunk < attachMeshes.size(); chunk += kInstallChunk)
             {
-                std::string why = std::move(attachWhy[i]);
-                LODShapeWithShadow* shape =
-                    InstallShapeFromXobModel(attachMeshes[i].first, std::move(attachModels[i]), why);
-                if (shape == nullptr)
+                const size_t chunkEnd = std::min(attachMeshes.size(), chunk + kInstallChunk);
                 {
-                    ++attachBuildFailed;
-                    if (firstAttachFailure.empty())
-                        firstAttachFailure = attachMeshes[i].first + ": " + why;
-                    continue;
+                    std::vector<const Poseidon::Model::Model*> batch;
+                    for (size_t i = chunk; i < chunkEnd; ++i)
+                        batch.push_back(attachModels[i].get());
+                    const auto prep = Poseidon::PrepareNativeInstallTextures(batch, Poseidon::GetGlobalTaskPool(),
+                                                                             installTextureClaims);
+                    partTextures.names += prep.names;
+                    partTextures.prepared += prep.prepared;
+                    partTextures.failed += prep.failed;
+                    partTextures.ms += prep.ms;
                 }
-                attachShapes.emplace(static_cast<uint32_t>(i), shape);
-                ++attachBuilt;
+                const Poseidon::NativeInstallTextureScope installTextures;
+                for (size_t i = chunk; i < chunkEnd; ++i)
+                {
+                    std::string why = std::move(attachWhy[i]);
+                    LODShapeWithShadow* shape =
+                        InstallShapeFromXobModel(attachMeshes[i].first, std::move(attachModels[i]), why);
+                    if (shape == nullptr)
+                    {
+                        ++attachBuildFailed;
+                        if (firstAttachFailure.empty())
+                            firstAttachFailure = attachMeshes[i].first + ": " + why;
+                        continue;
+                    }
+                    attachShapes.emplace(static_cast<uint32_t>(i), shape);
+                    ++attachBuilt;
+                }
             }
+            if (!deferAttachmentShapes)
+                LOG_INFO(World, "Enfusion native load: part textures prepared {} of {} ({} fell back) in {:.0f} ms",
+                         partTextures.prepared, partTextures.names, partTextures.failed, partTextures.ms);
             if (!deferAttachmentShapes)
                 LOG_INFO(
                     World, "Enfusion native load: {} part shapes installed in {:.0f} ms", attachBuilt,
@@ -3629,6 +3657,21 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                         for (size_t r = 0; r < roads.size(); ++r)
                             buildRoad(r);
                 }
+                // Their textures first, on the pool, as for the part shapes above.
+                std::optional<Poseidon::NativeInstallTextureScope> roadTextures;
+                {
+                    std::vector<const Poseidon::Model::Model*> batch;
+                    batch.reserve(roadModels.size());
+                    for (const auto& model : roadModels)
+                        if (model)
+                            batch.push_back(model.get());
+                    std::unordered_set<std::string> roadTextureClaims;
+                    const auto prep =
+                        Poseidon::PrepareNativeInstallTextures(batch, Poseidon::GetGlobalTaskPool(), roadTextureClaims);
+                    LOG_INFO(World, "Enfusion native load: road textures prepared {} of {} ({} fell back) in {:.0f} ms",
+                             prep.prepared, prep.names, prep.failed, prep.ms);
+                    roadTextures.emplace();
+                }
                 for (size_t r = 0; r < roads.size(); ++r)
                 {
                     if (!roadReady[r])
@@ -3707,6 +3750,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     AddObject(Vector3(road.origin[0], road.origin[1], road.origin[2]), road.yawDeg, shape);
                     ++roadsBuilt;
                 }
+                roadTextures.reset();
                 for (const auto& [path, count] : textureUse)
                     LOG_INFO(World, "Enfusion native load: road surface {}x '{}'", count,
                              path.empty() ? "(none)" : path);

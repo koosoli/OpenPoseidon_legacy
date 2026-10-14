@@ -10,6 +10,7 @@
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // RFG-070 `enft|` layer tint
+#include <Poseidon/Dev/Diag/StreamingDiag.hpp>                // GResidencyLevers: LazyBcrTintRoute
 #include <Poseidon/IO/FileServer.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
@@ -404,6 +405,18 @@ bool IsEnfusionRgNormalName(const char* name)
     const size_t end = dot == std::string::npos || dot < start ? lower.size() : dot;
     if (end >= start + 4 && lower.compare(end - 4, 4, "_nho") == 0) return true;
     return !legacyNtc && end >= start + 4 && lower.compare(end - 4, 4, "_ntc") == 0;
+}
+
+bool LazyBcrTintRoute()
+{
+    static const bool lazyTint = []
+    {
+        const char* v = std::getenv("WGR_LAZY_BCR_TINT");
+        // Exact mip/corpus tests and paired native routes preserve the GPU
+        // image while avoiding duplicate decoded CPU chains. 0 is the A/B control.
+        return !v || v[0] != '0';
+    }();
+    return lazyTint && Dev::GResidencyLevers().layerTintInShader && Enfusion::LayerTintLinearMultiply();
 }
 
 TextureSourceDDS::TextureSourceDDS() = default;
@@ -1399,7 +1412,7 @@ void TextureSourceDDSFactory::PreInit(const char* name)
 
 ITextureSource* TextureSourceDDSFactory::Create(const char* name, PacLevelMem* mips, int maxMips)
 {
-    if (render::PreparedTextureStore::NativeDdsEnabled())
+    if (render::PreparedTextureStore::NativeDdsEnabled() || render::PreparedTextureStore::InstallBatchTake())
     {
         auto prepared = render::PreparedTextureStore::Instance().TakeDdsPrepared(
             render::PreparedTextureStore::Key(name), CaptureDdsPreparationOptions());

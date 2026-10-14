@@ -77,6 +77,12 @@ DdsPreparationOptions CaptureDdsPreparationOptions();
 // RFG-112: whether `enfa|` leaf composites keep their authored mip levels (default on).
 bool AuthoredCompositeMips();
 
+// Whether an `enft|r,g,b|inner` texture is built as a lazy linear-tint VIEW of `inner`
+// (TextureWgpu's loadSource) rather than decoded and tinted as a composite of its own. On
+// that route the DDS factory is asked for `inner`, never for the composite name, so anything
+// preparing sources ahead of the factory must key on `inner` too. One definition, used by both.
+bool LazyBcrTintRoute();
+
 class TextureSourceDDS : public ITextureSource
 {
     friend class TextureSourceDDSLinearTint;

@@ -2,6 +2,7 @@
 // thread-safety boundary; this file is the mechanism only.
 
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
 #include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamTextureNames.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamRapStageNames.hpp>
@@ -23,6 +24,7 @@
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // the worker->main-thread mip-chain store
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp>
+#include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/World/Model/ModelMemory.hpp>
@@ -49,6 +51,8 @@
 #include <new>
 #include <thread>
 #include <vector>
+#include <unordered_set>
+#include <functional>
 
 namespace Poseidon
 {
@@ -3130,6 +3134,109 @@ ObjectStreamPreparer::Stats ObjectStreamPreparer::SnapshotStats() const
     auto result = _impl->stats;
     result.warmTextureQueueBytes = _impl->WarmStorageBytes();
     return result;
+}
+
+NativeInstallTexturePrep PrepareNativeInstallTextures(const std::vector<const Model::Model*>& models, TaskPool* pool,
+                                                      std::unordered_set<std::string>& claimed)
+{
+    NativeInstallTexturePrep out;
+    if (models.empty() || !render::PreparedTextureStore::Enabled())
+        return out;
+    const auto began = std::chrono::steady_clock::now();
+    const auto& mount = Asset::Formats::Enfusion::EnfusionMount::Instance();
+    const auto parallel = [&](size_t count, const std::function<void(size_t)>& body)
+    {
+        if (pool != nullptr && count > 1)
+            pool->ParallelFor(static_cast<uint32_t>(count),
+                              [&](uint32_t start, uint32_t end)
+                              {
+                                  for (uint32_t i = start; i < end; ++i)
+                                      body(i);
+                              });
+        else
+            for (size_t i = 0; i < count; ++i)
+                body(i);
+    };
+
+    // Exactly the names ShapeAdapter::BuildAdapterBankTables hands GlobLoadTexture: every
+    // material's face texture in every level, lower-cased. A tinted name on the lazy route asks
+    // the factory for its INNER image only (LazyBcrTintRoute), and many tints share one tile.
+    // Material stages (.emat maps) are resolved later, at GPU registration, and are not here.
+    render::PreparedTextureStore& store = render::PreparedTextureStore::Instance();
+    const bool lazyTint = LazyBcrTintRoute();
+    std::vector<std::string> keys;
+    for (const Model::Model* model : models)
+    {
+        if (model == nullptr)
+            continue;
+        for (const auto& level : model->lodLevels)
+            for (const auto& material : level.mesh.materials)
+            {
+                if (material.texturePath.empty())
+                    continue;
+                std::string name = material.texturePath;
+                for (char& c : name)
+                    if (c >= 'A' && c <= 'Z')
+                        c = static_cast<char>(c - 'A' + 'a');
+                float rgb[3];
+                const char* inner = nullptr;
+                std::string key =
+                    (lazyTint && Enfusion::SplitLayerTintName(name.c_str(), rgb, &inner) && inner && *inner)
+                        ? render::PreparedTextureStore::Key(inner)
+                        : render::PreparedTextureStore::Key(name);
+                if (key.size() >= 4 && (key.ends_with(".edds") || key.ends_with(".dds")) && !claimed.count(key) &&
+                    store.ShouldPrepare(key))
+                {
+                    claimed.insert(key);
+                    keys.push_back(std::move(key));
+                }
+            }
+    }
+    out.names = keys.size();
+
+    const uint64_t generation = store.Generation();
+    const auto options = CaptureDdsPreparationOptions();
+    std::atomic<size_t> prepared{0}, failed{0};
+    parallel(keys.size(),
+             [&](size_t i)
+             {
+                 try
+                 {
+                     auto source = std::make_unique<TextureSourceDDS>();
+                     PacLevelMem mips[16];
+                     const bool loaded = source->InitFromReader(
+                         keys[i].c_str(), mips, 16,
+                         [&](const char* name, std::vector<uint8_t>& bytes)
+                         {
+                             const auto request = mount.MakeReadRequest(name);
+                             std::string error;
+                             return request && request->Read(bytes, error);
+                         },
+                         options);
+                     if (loaded && store.PutDdsPrepared(keys[i], std::move(source), options, generation))
+                         ++prepared;
+                     else
+                         ++failed;
+                 }
+                 catch (...)
+                 {
+                     ++failed;
+                 }
+             });
+    out.prepared = prepared.load();
+    out.failed = failed.load();
+    out.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+    return out;
+}
+
+NativeInstallTextureScope::NativeInstallTextureScope()
+{
+    render::PreparedTextureStore::SetInstallBatchTake(true);
+}
+
+NativeInstallTextureScope::~NativeInstallTextureScope()
+{
+    render::PreparedTextureStore::SetInstallBatchTake(false);
 }
 
 } // namespace Poseidon

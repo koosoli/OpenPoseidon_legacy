@@ -1,3 +1,4 @@
+#include <atomic>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
@@ -210,6 +211,18 @@ bool PreparedTextureStore::Enabled()
         return !(v && std::strcmp(v, "0") == 0);
     }();
     return on;
+}
+
+static std::atomic<bool> GInstallBatchTake{false};
+
+void PreparedTextureStore::SetInstallBatchTake(bool on)
+{
+    GInstallBatchTake.store(on, std::memory_order_relaxed);
+}
+
+bool PreparedTextureStore::InstallBatchTake()
+{
+    return GInstallBatchTake.load(std::memory_order_relaxed);
 }
 
 bool PreparedTextureStore::NativeDdsEnabled()
