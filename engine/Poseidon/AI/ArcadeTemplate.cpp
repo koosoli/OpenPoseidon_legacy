@@ -389,7 +389,21 @@ LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
     if (ar.IsLoading())
     {
         arma2Init = Arma1Compat::Arma2ModuleInit(vehicle);
+        const RString requested = vehicle;
         vehicle = Arma1Compat::ResolveVehicleClass(vehicle); // identity unless --arma1
+        // A class the compat layer leaves out on purpose (Arma 2's animals, until their
+        // models and moves are in) resolves to nothing: the unit is not placed at all
+        // (presence and presenceCondition were read above; the class below only keeps the
+        // entry valid for the editor and a save). Treated as a missing addon, every sheep
+        // and cow became a CWA civilian (139 of them in run 15, the census's only CWA
+        // stand-ins). A playable unit ignores presence, so one stays a stand-in.
+        if (Arma1Compat::Active() && vehicle.GetLength() == 0 && requested.GetLength() > 0)
+        {
+            presence = 0;
+            presenceCondition = "false";
+            vehicle = side == TEast ? "SoldierEB" : side == TWest ? "SoldierWB" : side == TGuerrila ? "SoldierGB"
+                                                                                                   : "Civilian";
+        }
         // A class neither game defines (a third-party addon that is not installed): Arma 1
         // reports it and plays on without it. Here it is stood in for by a plain unit of
         // the same side (an empty object by a game logic), so the mission still loads.
