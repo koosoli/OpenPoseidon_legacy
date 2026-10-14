@@ -777,8 +777,14 @@ bool StockCorpseCapability(LODShape* shape, Skeleton* skeleton, RString& refusal
 bool AutomaticRagdollEnabled()
 {
     if (g_automaticInfantryDeathsOverride >= 0) return g_automaticInfantryDeathsOverride != 0;
-    const char* enabled = std::getenv("POSEIDON_AUTOMATIC_RAGDOLL");
-    return !enabled || std::strcmp(enabled,"0") != 0;
+    // Read once: this runs several times per soldier per tick, and the CRT's getenv locks and
+    // scans the whole environment block -- 5% of the main thread in perf_combat (PERF 2026-10-14).
+    static const bool enabledByEnv = []
+    {
+        const char* enabled = std::getenv("POSEIDON_AUTOMATIC_RAGDOLL");
+        return !enabled || std::strcmp(enabled, "0") != 0;
+    }();
+    return enabledByEnv;
 }
 
 bool AutomaticRagdollTerrain(RString& refusal)
@@ -2119,9 +2125,13 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
     }
     std::vector<Matrix4> deltas;
     for (int part : state.boneParts) deltas.push_back(parts[part]);
-    CorrectedCorpsePose candidate = pose;
-    candidate.root = root;
-    if (!candidate.Apply(deltas)) return FallBackAutomaticRagdoll("invalid-affine-pose");
+    // Applied IN PLACE (PERF 2026-10-14). This used to compose a full copy of the pose -- every
+    // level's palettes, points and per-point bone/weight vectors, thousands of allocations per
+    // corpse per tick, ~4% of perf_combat's main thread -- so a failure would leave `pose`
+    // untouched. Every failure below ends in FallBackAutomaticRagdoll, which discards the pose
+    // (ClearCorpsePose) and reads only lastSpeed/lastAngularVelocity, already written above.
+    pose.root = root;
+    if (!pose.Apply(deltas)) return FallBackAutomaticRagdoll("invalid-affine-pose");
     bool first = true; float radius = 0;
     Vector3 lo = VZero, hi = VZero;
     const auto& weights = Type()->GetWeights();
@@ -2130,7 +2140,7 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
         Shape* shape = _shape->Level(level);
         MATRIX_4_ARRAY(palette,128);
         palette.Resize(33);
-        for (int bone = 0; bone < 33; ++bone) palette[bone] = candidate.levels[level].palette[bone];
+        for (int bone = 0; bone < 33; ++bone) palette[bone] = pose.levels[level].palette[bone];
         for (int p = 0; p < shape->NPos(); ++p)
         {
             const Vector3 point = AnimationRT::ApplyMatricesPoint(weights[level],_shape,level,palette,p);
@@ -2139,15 +2149,15 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
             for (int axis = 0; axis < 3; ++axis)
             { lo[axis] = std::min(lo[axis],point[axis]); hi[axis] = std::max(hi[axis],point[axis]); }
             radius = std::max(radius,point.Size());
-            const Vector3 cpu = candidate.levels[level].points[p];
+            const Vector3 cpu = pose.levels[level].points[p];
             for (int axis = 0; axis < 3; ++axis)
             { lo[axis] = std::min(lo[axis],cpu[axis]); hi[axis] = std::max(hi[axis],cpu[axis]); }
             radius = std::max(radius,cpu.Size());
         }
     }
     if (first) return FallBackAutomaticRagdoll("missing-render-bounds");
-    candidate.minimum = lo; candidate.maximum = hi; candidate.radius = radius;
-    pose = std::move(candidate); state.minimum = lo; state.maximum = hi; state.radius = radius;
+    pose.minimum = lo; pose.maximum = hi; pose.radius = radius;
+    state.minimum = lo; state.maximum = hi; state.radius = radius;
     if(state.wakeRecipe) for(int part=0;part<11;++part)
     {
         auto& retained=state.retainedTransforms[part]; retained=MIdentity;
