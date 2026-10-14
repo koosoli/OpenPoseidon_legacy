@@ -30,6 +30,24 @@ behaves like Arma 2 beyond what the CWA stand-in does.
 - `4b750f0` vehicles with the Arma 2 model take its `maxSpeed`, `armor`, `fuelCapacity`,
   `transportSoldier`.
 
+- `c44ba31` Arma 2 vehicles are crewed by their own crew classes.
+- `121cc8c` animals (sheep, cows, ...) are left out instead of walking about as civilians.
+
+### Arma 2 soldiers (`OP_A2_SOLDIERS=1`), 2026-10-14
+
+What it took, each step measured on the laptop or offline on Arma 2's own files:
+
+| Commit | Symptom | Cause |
+|--------|---------|-------|
+| `33d95cf` | crash in `Man::DrawProxies` on the first frame | a proxy's selection point indexed unchecked; Arma 2 proxy selections are empty |
+| `b41e75c` | soldier crumpled | bone selections took each bone's whole subtree at full weight (right for rotors, wrong for a skin): now per-pair weights; empty proxy selections get a vertex of their bone |
+| `6c90af4` | missions stall > 60 s while loading | `Skeleton::Prepare` ran after each of ~2000 moves; now once |
+| `8cca829` | limbs flung about | BMTR moves are **local** (rotation about the rest joint, parent first), mirrored in x, root = pelvis height above ground; and the ODOL 48/49 reader skipped the bounding centre the vertices are stored around. Edge stretch of the posed mesh 4.3 -> 0.17 (stand, walk, kneel, prone) |
+| `3c27692`, `e4d47fe`, `f738f76` | waist-deep in the ground | an Arma 2 man's origin is at the hip; lifted to feet at y=0, kept out of auto-centring, and the land-contact point (one point at the hip) moved to the feet. `getPosATL player` -1.03 -> -0.02 |
+
+Offline check: a small program built from the repo's own ODOL and RTM readers poses
+`USMC_Soldier_Light` with a move and scores the result by how much the mesh's edges stretch.
+
 ## Steps
 
 1. **Measure first.** Per mission: an asset census in the log (every class created, what it
