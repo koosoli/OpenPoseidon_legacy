@@ -110,6 +110,7 @@ and are not counted.
 | 15 | `b7e1654` | 98, laptop gl33, Arma 2 soldiers, map objects and foliage on every Arma 2 / OA world | 98 | 97 | 0 (TE06 and C6B, the run-13 failures, pass); the one script error is MP_Paradrop's own `setTriggerArea` |
 | 17 | `58afdbb` | 41 of 98 (stopped for the first-person diagnostics), laptop gl33 | 41 | 40 | 0; the one script error is MP_Paradrop's own `_targetmarkerdir`. Census of the first 29: 3078 entities with the Arma model, 77 CWA civilians -- all animals, fixed `601bf9f` |
 | focus 7 | `5253d47` | 6 (T01, MP_Superpowers, SPE1_Vehicles_Allies, T05, SP_TrialByFire, C2B), laptop gl33, `OP_A2_PROXYLOG=1` | 6 | 6 | 0; census 607 Arma, **0 CWA**; armed HMMWV / Land Rover carry a gun; T05's stray waypoint label gone. Found the soldiers posed as their mirror image (face to the back) and the white concrete walls, fixed `dee0e27`, `a7f3a32` |
+| focus 8 | `a7f3a32` | 8 (MP_Superpowers, T01, SPE1_Vehicles_Allies, T03, SP_TrialByFire, C2B, MP_UrbanWarfare, C0), laptop gl33 | 8 | 8 | 0; census 763 Arma, 0 CWA. First person shows the rifle in both hands at the shoulder (M16A4/ACOG, M4/EOTech), FR and ACR soldiers see past their own gear, third person shows every soldier's back to a camera behind him; SPE1's concrete walls are textured |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
