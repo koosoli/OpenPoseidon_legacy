@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstring>
 #include <functional>
 #include <map>
 #include <memory>
@@ -1683,6 +1684,31 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         text += "\t\tdisplayName=\"" + displayName + "\";\r\n";
     if (loadout)
         text += Arma2Loadout(*a1);
+    if (!man && useModel && Generation() == 2)
+    {
+        // A vehicle with the Arma 2 model: its own speed, armour, fuel and seats, so a
+        // Ural is not as fast as the CWA truck behind it and a Black Hawk seats its own
+        // cargo. Steering, turrets and weapons stay with the CWA class for now.
+        const std::string sim = Lower(StringValue(*a1, "simulation"));
+        if (sim == "car" || sim == "tank" || sim == "helicopter" || sim == "airplane" || sim == "ship" ||
+            sim == "motorcycle")
+        {
+            for (const char* key : {"maxSpeed", "armor", "fuelCapacity", "transportSoldier"})
+            {
+                const ParamEntry* e = a1->FindEntry(key);
+                if (e && !e->IsClass() && !e->IsArray())
+                {
+                    const float value = (float)*e;
+                    if ((value > 0.0f || (value == 0.0f && strcmp(key, "transportSoldier") == 0)) && value < 1e6f)
+                    {
+                        char line[96];
+                        std::snprintf(line, sizeof(line), "\t\t%s=%g;\r\n", key, value);
+                        text += line;
+                    }
+                }
+            }
+        }
+    }
     if (man && useModel)
     {
         text += "\t\tmoves=\"A1_CfgMovesMaleSdr\";\r\n";
