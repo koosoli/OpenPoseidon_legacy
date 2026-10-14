@@ -344,6 +344,9 @@ class ODOLLoader
                     std::snprintf(centre, sizeof(centre), "%.6f %.6f %.6f", info.boundingCenter.x,
                                   info.boundingCenter.y - lift, info.boundingCenter.z);
                     model.metadata["odolBoundingCenter"] = centre;
+                    // and kept there: auto-centring would move the bounding-box centre back to
+                    // the origin (the waist-deep soldier of 3c27692, lifted and re-centred)
+                    model.autoCenterEnabled = 0;
                     LOG_INFO(Graphics, "Arma 2 man {}: lifted {:.3f} m so the feet stand at y=0", sourcePath, lift);
                 }
             }
