@@ -25,7 +25,7 @@ Every change was found by sampling the process, and none of them changes what th
 | | before | after |
 |---|---|---|
 | Native Reforger Everon, `SwitchLandscape` | 46.2 s | **13.1 s** |
-| Native Everon, first simulation tick after launch | 60.9 s | ~24 s |
+| Native Everon, launch → mission running (final build, measured) | — | 17.9–18.4 s |
 | Stock Everon, renderer creation | 5.0 s | 3.1 s (NGX-bound, see below) |
 | Stock Everon, world load + mission start | — | 1.4 s |
 
