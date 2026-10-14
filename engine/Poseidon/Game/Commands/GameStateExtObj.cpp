@@ -475,6 +475,59 @@ GameValue ObjAddMagazineCargo(const GameState* state, GameValuePar oper1, GameVa
     return NOTHING;
 }
 
+namespace
+{
+// [[names], [counts]] of a crate's or vehicle's cargo, one name per kind.
+GameValue CargoList(const GameState* state, const AutoArray<RString>& names)
+{
+    GameValue kinds = state->CreateGameValue(GameArray);
+    GameValue counts = state->CreateGameValue(GameArray);
+    GameArrayType& k = kinds;
+    GameArrayType& c = counts;
+    for (int i = 0; i < names.Size(); i++)
+    {
+        int found = -1;
+        for (int j = 0; j < k.Size(); j++)
+            if (stricmp((RString)k[j], names[i]) == 0)
+                found = j;
+        if (found < 0)
+        {
+            k.Add(GameValue(names[i]));
+            c.Add(GameValue(1.0f));
+        }
+        else
+            c[found] = GameValue((float)c[found] + 1.0f);
+    }
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    array.Add(kinds);
+    array.Add(counts);
+    return value;
+}
+} // namespace
+
+// Arma 1: getWeaponCargo box -> [["M16A2", "M136"], [10, 4]] (Arma names of the weapons).
+GameValue A1GetWeaponCargo(const GameState* state, GameValuePar oper1)
+{
+    AutoArray<RString> names;
+    if (const VehicleSupply* veh = dyn_cast<VehicleSupply>(GetObject(oper1)))
+        for (int i = 0; i < veh->GetWeaponCargoSize(); i++)
+            if (const WeaponType* weapon = veh->GetWeaponCargo(i))
+                names.Add(Poseidon::Arma1Compat::ScriptClassName(weapon->GetName()));
+    return CargoList(state, names);
+}
+
+// Arma 1: getMagazineCargo box -> [["M16", "HandGrenade"], [40, 12]].
+GameValue A1GetMagazineCargo(const GameState* state, GameValuePar oper1)
+{
+    AutoArray<RString> names;
+    if (const VehicleSupply* veh = dyn_cast<VehicleSupply>(GetObject(oper1)))
+        for (int i = 0; i < veh->GetMagazineCargoSize(); i++)
+            if (const Magazine* magazine = veh->GetMagazineCargo(i); magazine && magazine->_type)
+                names.Add(RString(magazine->_type->GetName()));
+    return CargoList(state, names);
+}
+
 GameValue ObjSelectWeapon(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     Object* obj = GetObject(oper1);

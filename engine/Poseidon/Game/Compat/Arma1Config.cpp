@@ -1622,6 +1622,59 @@ std::string Arma2Loadout(const ParamEntry& soldier)
     list("magazines", &ResolveMagazineClass);
     return out;
 }
+
+// TransportWeapons / TransportMagazines of an Arma 1 crate or vehicle, resolved like a
+// soldier's loadout: A1x_ weapons with the Arma 1 models, CWA magazines of the same
+// calibre. Inherited, the CWA class's own cargo would hand out CWA weapons from an Arma 1
+// crate. Entries with no CWA counterpart are left out; `items` counts what is kept.
+std::string Arma1Cargo(const ParamEntry& cls, int& items)
+{
+    items = 0;
+    const ParamEntry* cwaWeapons = Pars.FindEntry("CfgWeapons");
+    if (!cwaWeapons)
+        return {};
+    std::string out;
+    const auto section = [&](const char* key, const char* field, RString (*resolve)(const RString&))
+    {
+        const ParamEntry* sec = cls.FindEntry(key);
+        if (!sec || !sec->IsClass())
+            return;
+        out += std::string("\t\tclass ") + key + "\r\n\t\t{\r\n";
+        for (int i = 0; i < sec->GetEntryCount(); i++)
+        {
+            const ParamEntry& item = sec->GetEntry(i);
+            if (!item.IsClass())
+                continue;
+            const std::string name = StringValue(item, field);
+            const ParamEntry* countEntry = item.FindEntry("count");
+            const int count =
+                countEntry && !countEntry->IsClass() && !countEntry->IsArray() ? (int)(float)*countEntry : 0;
+            if (name.empty() || count <= 0)
+                continue;
+            const RString cwa = resolve(RString(name.c_str()));
+            if (cwa.GetLength() == 0 || !cwaWeapons->FindEntry(cwa))
+                continue;
+            out += "\t\t\tclass " + std::string((const char*)item.GetName()) + "\r\n\t\t\t{\r\n\t\t\t\t" + field +
+                   "=\"" + std::string(cwa.Data()) + "\";\r\n\t\t\t\tcount=" + std::to_string(count) +
+                   ";\r\n\t\t\t};\r\n";
+            items++;
+        }
+        out += "\t\t};\r\n";
+    };
+    section("TransportWeapons", "weapon", &ResolveWeaponClass);
+    section("TransportMagazines", "magazine", &ResolveMagazineClass);
+    for (const char* key : {"transportMaxWeapons", "transportMaxMagazines"})
+    {
+        const ParamEntry* e = cls.FindEntry(key);
+        if (e && !e->IsClass() && !e->IsArray())
+        {
+            const float value = (float)*e;
+            if (value > 0.0f && value < 1e6f)
+                out += std::string("\t\t") + key + "=" + std::to_string((int)value) + ";\r\n";
+        }
+    }
+    return out;
+}
 } // namespace
 
 RString Arma2ModuleInit(const RString& className)
@@ -1720,6 +1773,10 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         text += "\t\tdisplayName=\"" + displayName + "\";\r\n";
     if (loadout)
         text += Arma2Loadout(*a1);
+    // Arma 1 crates and vehicles hand out Arma 1 weapons (OP_A1_WEAPONS=0: CWA's cargo).
+    int cargoItems = 0;
+    if (!man && useModel && Generation() == 1 && Arma1OwnWeapons())
+        text += Arma1Cargo(*a1, cargoItems);
     if (!man && useModel && Generation() == 2)
     {
         // A vehicle with the Arma 2 model: its own speed, armour, fuel and seats, so a
@@ -1786,6 +1843,9 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     if (useModel)
         LOG_INFO(Mission, "{}: '{}' uses the Arma 1 model {} on CWA '{}'{}", Label(), missionClass.Data(), model,
                  cwaClass.Data(), man ? " with the Arma 1 moves" : "");
+    if (cargoItems > 0)
+        LOG_INFO(Mission, "{}: '{}' carries its own cargo ({} weapon/magazine entries)", Label(), missionClass.Data(),
+                 cargoItems);
     else
         LOG_INFO(Mission, "{}: '{}' is the CWA soldier '{}' with its own weapons", Label(), missionClass.Data(),
                  cwaClass.Data());
