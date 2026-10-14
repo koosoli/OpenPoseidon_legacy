@@ -1,7 +1,7 @@
 # Performance audit, 2026-10-14
 
 Branch `perf/optimization-20261014`, backed up on `safety`, deployed to the game folder as
-`f801a13ba`.
+`1c0edc792`.
 
 Every change was found by sampling the process, and none of them changes what the game shows.
 - Each one is either exact by construction, with a verify lever that compares old and new
@@ -24,8 +24,8 @@ Every change was found by sampling the process, and none of them changes what th
 
 | | before | after |
 |---|---|---|
-| Native Reforger Everon, `SwitchLandscape` | 46.2 s | **13.1 s** |
-| Native Everon, launch → mission running (final build, measured) | — | 17.9–18.4 s |
+| Native Reforger Everon, `SwitchLandscape` | 46.2 s | **8.6–8.8 s** |
+| Native Everon, launch → mission running | — | ~14 s |
 | Stock Everon, renderer creation | 5.0 s | 3.1 s (NGX-bound, see below) |
 | Stock Everon, world load + mission start | — | 1.4 s |
 
@@ -41,6 +41,24 @@ What it took on native worlds:
   the pool (`PrepareNativeInstallTextures`). Verified with `WGR_NATIVE_DDS_PREPARE_VERIFY=1`:
   447 of 447 taken, 447 identical.
 - **Task pool cap 8 → 16 threads.** Load −1.2 s, and −2.4 ms of main thread in the firefight.
+- **Prefab pre-pass.** Every distinct placed prefab (and, round by round, the slot parts and
+  children it leads to) has its model, slots, children, placement mode and flags resolved on
+  the pool before the serial pass, which reads the answers in its original order. A hash over
+  the whole resolve output is identical with it on and off. Resolve 3.4 → 1.85 s.
+  `POSEIDON_PREFAB_PREPASS=0`.
+- **MLOD round trip.** The reader scans face strings in place instead of a character at a time,
+  and the writer sizes its buffer up front. Material indices are looked up once per run of
+  faces, and a layer tint's mask means are memoised per file. Part models 2.48 → 1.57 s.
+- **Parts and roads convert on the pool.** The bank tables are built on the main thread in model
+  order, and the tables-mode conversion runs on the pool (the streamer's SIM-807 split); the
+  bank adopts each shape. 1,375 parts hashed identical to the in-place conversion.
+  Part install 2.28 → 1.2 s. `POSEIDON_PART_POOL_ADAPT=0`.
+- **Road textures.** A tinted name whose inner image is an alpha composite cannot carry the
+  lazy tint view and falls back to the full name; the install prep now prepares that name too
+  (556 prepared sources identical to the main-thread decode). Roads 1.87 → 1.33 s.
+- **Placement sort.** The 1.22 M placements are sorted by a precomputed (distance², index) key
+  instead of a `stable_sort` that recomputed both distances per comparison (same order,
+  verified).
 
 ## Frame time
 
@@ -105,6 +123,12 @@ What it took on native worlds:
   33.5 s).
 - **Removing the grass depth prepass.** It also writes the normals AO reads, so the image would
   change.
+- **A read cache for prefab files during the resolve.** It answered 95% of reads from memory, but
+  once the pre-pass ran the reads in parallel it measured as noise (prepass 335 against 357 ms).
+- **Batching the streamer's texture preparation across an update's models.** Bank-table time per
+  update fell from 30–160 ms to ~1 ms, but the admit loop is time-budgeted, so it just admitted
+  more per update: the fill took 19.0–19.7 s either way and the fill's frame-time p95 did not
+  improve.
 
 ## What is left, largest first
 
@@ -120,8 +144,9 @@ What it took on native worlds:
 3. **Far-tier registration textures.** The `.emat` layer maps are loaded on the main thread inside
    `RegisterGpuModel`, ~12% of the main thread during the far fill. The same prepare-then-take
    pattern applies, but the names come from the renderer's material translation.
-4. **Native placements resolve.** 3.6 s of the load, a third of it waiting on serial prefab and
-   `.xob` reads.
+4. **Native world file parse.** ~0.8 s of the resolve is reading the 1.2 M-entry `.ent`; a third
+   of that is the placement vector regrowing (and being re-zeroed by the engine heap) under a
+   256 MiB single-allocation cap.
 5. **Geography refresh.** ~18 ms every ~2 s while native objects stream, mostly rebuilding the
    grass road/footprint cell table.
 6. **The engine allocator zero-fills every `new`.** Callers rely on it, so it cannot simply stop.
@@ -139,6 +164,8 @@ What it took on native worlds:
 | `POSEIDON_DRAW_WALK_PREFETCH` | on | `0` = scene walk without prefetch |
 | `POSEIDON_TRACK_TARGETS_PREFETCH` | on | `0` = target tracking without prefetch |
 | `POSEIDON_STREAM_TEXTURE_PREP` | on | `0` = streamed bank tables without texture preparation |
+| `POSEIDON_PREFAB_PREPASS` | on | `0` = native placement resolve answers each prefab in the serial pass |
+| `POSEIDON_PART_POOL_ADAPT` | on | `0` = native parts and roads convert in place on the main thread |
 | `WGR_SHADOW_CASCADE_CACHE` | on | `0` = every cascade every frame |
 | `WGR_DLSS_ASYNC_INIT` | on | `0` = synchronous NGX probe |
 | `WGR_INDIRECT_VALIDATION` | on | `0` = skip wgpu's indirect-argument validation |
