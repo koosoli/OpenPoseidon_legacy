@@ -1560,6 +1560,20 @@ RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
     const std::string displayName = StringValue(*a2, "displayName");
     if (!displayName.empty())
         text += "\t\tdisplayName=\"" + displayName + "\";\r\n";
+    // Arma 1: the gear and briefing show the Arma 1 weapon's own picture
+    // ("\CA\weapons\data\equip\w_m4aim_ca.paa") instead of the CWA carrier's.
+    if (Generation() == 1)
+    {
+        std::string picture = StringValue(*a2, "picture");
+        if (picture.size() > 1 && picture[0] == '\\')
+        {
+            std::string file = picture.substr(1);
+            if (file.size() < 4 || file[file.size() - 4] != '.')
+                file += ".paa";
+            if (QIFStreamB::FileExist(file.c_str()))
+                text += "\t\tpicture=\"" + picture + "\";\r\n";
+        }
+    }
     if (const ParamEntry* scope = cwa->FindEntry("scope"); !scope || (int)*scope < 1)
         text += "\t\tscope=1;\r\n";
     // OFP weapons often list magazines[]={this}: the magazine is the weapon class itself
