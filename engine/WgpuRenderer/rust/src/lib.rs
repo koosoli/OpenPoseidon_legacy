@@ -1066,6 +1066,99 @@ impl Drop for Renderer {
     }
 }
 
+/// What the DLSS start-up probe found, and the log lines that say so in the order they
+/// happened. Built where the probe ran (possibly a thread) and logged by the caller.
+#[cfg(feature = "dlss")]
+struct NgxOutcome {
+    lines: Vec<(i32, String)>,
+    result: Result<dlss::Ngx, String>,
+}
+
+/// `Renderer::new` failed only because the speculative (threaded) NGX probe disagreed
+/// with the configuration built for it; `wgr_create` retries with the synchronous probe.
+#[cfg(feature = "dlss")]
+const ERR_NGX_SPECULATION: &str = "speculative DLSS start-up did not hold; rebuilding with the synchronous probe";
+
+#[cfg(feature = "dlss")]
+static NGX_FORCE_SYNC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the NGX probe may run on a thread while the renderer builds as if DLSS will be up.
+/// Only where the answer is near-certain -- an NVIDIA RTX adapter (every DLSS-capable GeForce,
+/// Quadro and workstation part carries "RTX"; GTX 16xx and older do not) -- because a wrong
+/// guess costs a second renderer build. WGR_DLSS_ASYNC_INIT=0 opts out.
+#[cfg(feature = "dlss")]
+fn ngx_speculation_allowed(adapter_name: &str, vendor: u32) -> bool {
+    !NGX_FORCE_SYNC.load(std::sync::atomic::Ordering::Relaxed)
+        && std::env::var("WGR_DLSS_ASYNC_INIT").map_or(true, |v| v != "0")
+        && vendor == 0x10DE
+        && adapter_name.to_ascii_uppercase().contains("RTX")
+}
+
+/// Ask the driver whether DLSS Super Sampling is supported, then bring NGX up.
+///
+/// NGX comes up at start-up, not at the first upscaled frame: the verdict ("snippet did not
+/// load", "driver too old") is then in the startup log and the panel before any frame is
+/// drawn, the temporal/67% defaults are never auto-enabled for a DLSS that will not run, and
+/// a machine without DLSS never has its first frame split around a raw command buffer that
+/// goes nowhere. Without the requirements gate an AMD/Intel box boots into the temporal
+/// defaults and shimmers through the bilinear fallback at 67% (tester reports, 2026-08-30).
+///
+/// Thread-safe: instance/device-level NGX calls only, no queue submission.
+#[cfg(feature = "dlss")]
+fn ngx_probe_and_init(
+    raw: &dlss_device::NgxRawHandles,
+    adapter_name: &str,
+    snippet: Option<&std::path::Path>,
+) -> NgxOutcome {
+    let mut lines = Vec::new();
+    let result = match dlss::feature_requirements(raw.instance, raw.physical_device) {
+        Ok(0) => {
+            lines.push((log_level::INFO, "driver reports DLSS Super Sampling supported".to_owned()));
+            match unsafe { dlss::Ngx::init(raw.instance, raw.physical_device, raw.device) } {
+                Ok(ngx) => {
+                    if ngx.supersampling_available() {
+                        lines.push((
+                            log_level::INFO,
+                            "NGX initialised; DLSS Super Resolution available".to_owned(),
+                        ));
+                        Ok(ngx)
+                    } else {
+                        let reason = ngx.availability_reason(snippet);
+                        lines.push((
+                            log_level::WARN,
+                            format!(
+                                "DLSS unavailable: {reason} ({}); native path",
+                                ngx.availability_diagnostics()
+                            ),
+                        ));
+                        ngx.release();
+                        Err(reason)
+                    }
+                }
+                Err(r) => {
+                    let reason = dlss_status::init_failed_reason(r);
+                    lines.push((log_level::WARN, format!("DLSS unavailable: {reason}; native path")));
+                    Err(reason)
+                }
+            }
+        }
+        Ok(bits) => {
+            let reason = dlss_status::requirements_reason(bits, adapter_name);
+            lines.push((
+                log_level::WARN,
+                format!("DLSS unsupported on this GPU/driver: {reason}; native path"),
+            ));
+            Err(reason)
+        }
+        Err(r) => {
+            let reason = format!("NGX GetFeatureRequirements failed ({})", dlss_status::ngx_code(r));
+            lines.push((log_level::WARN, format!("DLSS support probe failed: {reason}; native path")));
+            Err(reason)
+        }
+    };
+    NgxOutcome { lines, result }
+}
+
 struct InitTimer {
     on: bool,
     last: std::time::Instant,
@@ -1452,6 +1545,9 @@ impl Renderer {
         init_timer.mark("adapter+limits");
         #[cfg(feature = "dlss")]
         let mut ngx_raw: Option<(dlss_device::NgxRawHandles, dlss::Ngx)> = None;
+        // The speculative probe (see below): joined before the renderer struct is built.
+        #[cfg(feature = "dlss")]
+        let mut ngx_pending: Option<(dlss_device::NgxRawHandles, std::thread::JoinHandle<NgxOutcome>)> = None;
         let (device, queue) = 'dev: {
             #[cfg(feature = "dlss")]
             if dlss_instance_active {
@@ -1461,79 +1557,46 @@ impl Renderer {
                             log_level::INFO,
                             "wgpu device created via hal route with NGX extensions (WGR_DLSS)",
                         );
-                        // The extension route proves nothing about DLSS itself — the
-                        // NGX extensions are generic Vulkan, so an AMD/Intel box gets
-                        // this far too. Ask the driver NOW whether Super Sampling is
-                        // actually supported; without this gate such a box boots into
-                        // the temporal defaults and shimmers through the bilinear
-                        // fallback at 67% (tester reports, 2026-08-30).
-                        match dlss::feature_requirements(raw.instance, raw.physical_device)
-                        {
-                            Ok(0) => {
-                                log.log(
-                                    log_level::INFO,
-                                    "driver reports DLSS Super Sampling supported",
-                                );
-                                // NGX comes up HERE, not at the first upscaled frame:
-                                // the verdict ("snippet did not load", "driver too old")
-                                // is then in the startup log and the panel before any
-                                // frame is drawn, the temporal/67% defaults are never
-                                // auto-enabled for a DLSS that will not run, and a
-                                // machine without DLSS never has its first frame split
-                                // around a raw command buffer that goes nowhere.
-                                match unsafe {
-                                    dlss::Ngx::init(raw.instance, raw.physical_device, raw.device)
-                                } {
-                                    Ok(ngx) => {
-                                        if ngx.supersampling_available() {
-                                            log.log(
-                                                log_level::INFO,
-                                                "NGX initialised; DLSS Super Resolution available",
-                                            );
-                                            ngx_raw = Some((raw, ngx));
-                                        } else {
-                                            let reason =
-                                                ngx.availability_reason(dlss_snippet.as_deref());
-                                            log.log(
-                                                log_level::WARN,
-                                                &format!(
-                                                    "DLSS unavailable: {reason} ({}); native path",
-                                                    ngx.availability_diagnostics()
-                                                ),
-                                            );
-                                            ngx.release();
-                                            dlss_status.latch(reason);
-                                        }
-                                    }
-                                    Err(r) => {
-                                        let reason = dlss_status::init_failed_reason(r);
-                                        log.log(
-                                            log_level::WARN,
-                                            &format!("DLSS unavailable: {reason}; native path"),
-                                        );
-                                        dlss_status.latch(reason);
-                                    }
+                        // The extension route proves nothing about DLSS itself -- the NGX
+                        // extensions are generic Vulkan, so an AMD/Intel box gets this far too.
+                        // ngx_probe_and_init asks the driver whether Super Sampling is supported
+                        // and brings NGX up (see its note for why HERE and not at the first
+                        // upscaled frame).
+                        //
+                        // (PERF, 2026-10-14) On an NVIDIA RTX adapter that answer is the
+                        // overwhelmingly likely one, and finding it out costs ~2.8 s of start-up
+                        // (GetFeatureRequirements ~1.6 s + Init ~1.2 s, both driver-side). So the
+                        // probe runs on a thread while the rest of the renderer builds AS IF it
+                        // will succeed, and is joined before anything holds the NGX handle. If it
+                        // does not succeed, creation is redone with the synchronous probe
+                        // (ERR_NGX_SPECULATION): MSAA is chosen from the answer and cannot change
+                        // once pipelines exist. WGR_DLSS_ASYNC_INIT=0 keeps it synchronous.
+                        if ngx_speculation_allowed(&info.name, info.vendor) {
+                            let thread_raw = dlss_device::NgxRawHandles {
+                                instance: raw.instance,
+                                physical_device: raw.physical_device,
+                                device: raw.device,
+                            };
+                            let name = info.name.clone();
+                            let snippet = dlss_snippet.clone();
+                            match std::thread::Builder::new().name("wgr-ngx-init".into()).spawn(move || {
+                                let raw = thread_raw;
+                                ngx_probe_and_init(&raw, &name, snippet.as_deref())
+                            }) {
+                                Ok(handle) => {
+                                    ngx_pending = Some((raw, handle));
+                                    break 'dev (d, q);
                                 }
+                                Err(_) => {} // no thread: probe synchronously below
                             }
-                            Ok(bits) => {
-                                let reason = dlss_status::requirements_reason(bits, &info.name);
-                                log.log(
-                                    log_level::WARN,
-                                    &format!("DLSS unsupported on this GPU/driver: {reason}; native path"),
-                                );
-                                dlss_status.latch(reason);
-                            }
-                            Err(r) => {
-                                let reason = format!(
-                                    "NGX GetFeatureRequirements failed ({})",
-                                    dlss_status::ngx_code(r)
-                                );
-                                log.log(
-                                    log_level::WARN,
-                                    &format!("DLSS support probe failed: {reason}; native path"),
-                                );
-                                dlss_status.latch(reason);
-                            }
+                        }
+                        let outcome = ngx_probe_and_init(&raw, &info.name, dlss_snippet.as_deref());
+                        for (level, line) in &outcome.lines {
+                            log.log(*level, line);
+                        }
+                        match outcome.result {
+                            Ok(ngx) => ngx_raw = Some((raw, ngx)),
+                            Err(reason) => dlss_status.latch(reason),
                         }
                         break 'dev (d, q);
                     }
@@ -1615,7 +1678,7 @@ impl Renderer {
                 .unwrap_or(false);
             #[cfg(feature = "dlss")]
             {
-                env_on || ngx_raw.is_some()
+                env_on || ngx_raw.is_some() || ngx_pending.is_some()
             }
             #[cfg(not(feature = "dlss"))]
             {
@@ -1653,7 +1716,9 @@ impl Renderer {
         let hdr_enabled = std::env::var("WGR_HDR").map(|v| v != "0").unwrap_or(true);
         // The one line a tester's log must carry: DLSS, and if not, why (dlss_status.rs).
         #[cfg(feature = "dlss")]
-        let dlss_up = ngx_raw.is_some();
+        // A pending speculative probe counts as up: everything below is built for it, and
+        // the join before the struct is built undoes the whole creation if it was wrong.
+        let dlss_up = ngx_raw.is_some() || ngx_pending.is_some();
         #[cfg(not(feature = "dlss"))]
         let dlss_up = false;
         if dlss_up && !hdr_enabled {
@@ -1765,7 +1830,7 @@ impl Renderer {
         // changes it live; a plain (non-dlss) build never reaches this.
         #[cfg(feature = "dlss")]
         let (render_scale, render_scale_auto) =
-            if ngx_raw.is_some() && hdr_enabled && std::env::var("WGR_RENDER_SCALE").is_err() {
+            if (ngx_raw.is_some() || ngx_pending.is_some()) && hdr_enabled && std::env::var("WGR_RENDER_SCALE").is_err() {
                 log.log(
                     log_level::INFO,
                     "wgpu render scale defaulting to 67% (DLSS route up; dev panel tunes it live)",
@@ -2058,6 +2123,27 @@ impl Renderer {
             | (if hdr_enabled { 1 << 6 } else { 0 })
             | (if sample_count > 1 { 1 << 7 } else { 0 });
 
+        // The speculative NGX probe, joined last so it overlapped everything above.
+        #[cfg(feature = "dlss")]
+        if let Some((raw, handle)) = ngx_pending.take() {
+            let outcome = handle.join().unwrap_or_else(|_| NgxOutcome {
+                lines: vec![(log_level::WARN, "DLSS start-up thread panicked".to_owned())],
+                result: Err("DLSS start-up thread panicked".to_owned()),
+            });
+            init_timer.mark("ngx join");
+            for (level, line) in &outcome.lines {
+                log.log(*level, line);
+            }
+            match outcome.result {
+                Ok(ngx) => ngx_raw = Some((raw, ngx)),
+                Err(_) => {
+                    // Everything above was built for DLSS (MSAA off, 67% scale): redo the
+                    // creation the slow way so the native path gets its own configuration.
+                    NGX_FORCE_SYNC.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return Err(ERR_NGX_SPECULATION.to_owned());
+                }
+            }
+        }
         #[allow(unused_mut)]
         let mut temporal_auto = false;
         init_timer.mark("rest of new()");

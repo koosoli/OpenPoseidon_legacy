@@ -2420,7 +2420,18 @@ pub unsafe extern "C" fn wgr_create(
             },
             None => LogSink::none(),
         };
-        match Renderer::new(desc, sink) {
+        let created = Renderer::new(desc, sink);
+        // The threaded DLSS probe disagreed with the configuration built for it (lib.rs,
+        // ngx_speculation_allowed): build once more with the synchronous probe.
+        #[cfg(feature = "dlss")]
+        let created = match created {
+            Err(e) if e == super::ERR_NGX_SPECULATION => {
+                sink.log(log_level::WARN, &e);
+                Renderer::new(desc, sink)
+            }
+            other => other,
+        };
+        match created {
             Ok(renderer) => {
                 sink.log(log_level::INFO, "wgpu renderer created");
                 Box::into_raw(Box::new(renderer))
