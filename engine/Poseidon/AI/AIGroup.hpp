@@ -218,10 +218,29 @@ public:
 
 	float GetExposure(int x, int z);
 
+	//! PERF (2026-10-14): while alive (one AIPathPlanner::ProcessSearching batch), the
+	//! per-unit half of CalculateExposure -- armour, cost, whether the unit can defend
+	//! itself -- is computed once per subgroup instead of once per expanded field. Nothing
+	//! simulates inside a batch, so those terms cannot change within it.
+	struct ExposureCacheScope
+	{
+		ExposureCacheScope();
+		~ExposureCacheScope();
+	};
+
 protected:
 	// implementation
 	// strategic planning
 	float CalculateExposure(int x, int z);
+	struct ExposureUnitTerm
+	{
+		bool present = false;
+		float invArmor = 0;
+		float cost = 0;
+		bool ableToDefend = false;
+	};
+	std::vector<ExposureUnitTerm> _exposureTerms;
+	uint32_t _exposureTermsEpoch = 0;
 	bool IsSafe(int x, int z, float threshold);
 	bool GetSafety(int x, int z, float &exposure);
 
