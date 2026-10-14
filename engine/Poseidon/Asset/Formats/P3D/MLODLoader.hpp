@@ -499,14 +499,32 @@ class MLODLoader
         // two distinct materials. Keying on the texture would merge those into a
         // single "#default#" material and silently discard the distinction this
         // ticket exists to preserve.
-        auto keyOf = [](const MLOD::DataFaceEx& face)
-        { return face.textureName + '|' + face.materialName; };
-
+        //
+        // One lookup per run of faces, not two string builds and two lookups per face:
+        // neighbouring faces almost always share their pair, and the same pair always maps
+        // to the same entry, so the result is the same.
         std::unordered_map<std::string, uint32_t> materialMap;
-        for (const auto& face : faceTable.faces)
+        std::vector<uint32_t> faceMaterial(faceTable.faces.size(), 0);
+        const MLOD::DataFaceEx* previous = nullptr;
+        uint32_t previousIndex = 0;
+        std::string key;
+        for (size_t faceIdx = 0; faceIdx < faceTable.faces.size(); ++faceIdx)
         {
-            const std::string key = keyOf(face);
-            if (materialMap.find(key) != materialMap.end())
+            const auto& face = faceTable.faces[faceIdx];
+            if (previous != nullptr && face.textureName == previous->textureName &&
+                face.materialName == previous->materialName)
+            {
+                faceMaterial[faceIdx] = previousIndex;
+                continue;
+            }
+            key.assign(face.textureName);
+            key += '|';
+            key += face.materialName;
+            const auto [slot, inserted] = materialMap.try_emplace(key, static_cast<uint32_t>(mesh.materials.size()));
+            previous = &face;
+            previousIndex = slot->second;
+            faceMaterial[faceIdx] = slot->second;
+            if (!inserted)
                 continue;
 
             Material mat;
@@ -521,14 +539,14 @@ class MLODLoader
             mat.texturePath  = face.textureName;
             mat.materialPath = face.materialName;
 
-            materialMap[key] = static_cast<uint32_t>(mesh.materials.size());
-            mesh.materials.push_back(mat);
+            mesh.materials.push_back(std::move(mat));
         }
 
         size_t triIdx = 0, quadIdx = 0;
-        for (const auto& face : faceTable.faces)
+        for (size_t faceIdx = 0; faceIdx < faceTable.faces.size(); ++faceIdx)
         {
-            const uint32_t materialIdx = materialMap[keyOf(face)];
+            const auto& face = faceTable.faces[faceIdx];
+            const uint32_t materialIdx = faceMaterial[faceIdx];
             if (face.n == 3)
             {
                 if (triIdx < mesh.triangles.size())

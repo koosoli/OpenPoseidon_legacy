@@ -69,6 +69,7 @@
 #include <filesystem>
 #include <future>
 #include <map>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -313,6 +314,57 @@ struct LayerTint
     float rgb[3] = {0.0f, 0.0f, 0.0f};
 };
 
+//! A mask's R, G and B means at its 64-px mip, or `decoded == false`.
+//!
+//! Memoised per path for the mount's current generation: decoding the mask (the whole
+//! `.edds`, every mip) was most of what a tint costs, and the same material -- so the same
+//! mask -- recurs across hundreds of part models and streamed conversions. The means are
+//! the same numbers either way.
+struct MaskMeans
+{
+    bool decoded = false;
+    double mean[3] = {0.0, 0.0, 0.0};
+};
+
+MaskMeans MaskChannelMeans(const EnfusionMount& mount, const std::string& maskPath)
+{
+    static std::mutex mutex;
+    static std::unordered_map<std::string, MaskMeans> cache;
+    static const EnfusionMount* cacheMount = nullptr;
+    static uint64_t cacheGeneration = 0;
+    const uint64_t generation = mount.Generation();
+    {
+        std::lock_guard lock(mutex);
+        if (cacheMount != &mount || cacheGeneration != generation)
+        {
+            cache.clear();
+            cacheMount = &mount;
+            cacheGeneration = generation;
+        }
+        if (const auto hit = cache.find(maskPath); hit != cache.end())
+            return hit->second;
+    }
+    MaskMeans out;
+    int width = 0, height = 0;
+    std::vector<uint8_t> rgba;
+    if (DecodeEddsRgba(mount, maskPath, 64, width, height, rgba) && !rgba.empty())
+    {
+        const size_t texels = rgba.size() / 4;
+        for (int c = 0; c < 3; ++c)
+        {
+            double sum = 0.0;
+            for (size_t t = 0; t < texels; ++t)
+                sum += rgba[t * 4 + static_cast<size_t>(c)];
+            out.mean[c] = sum / (255.0 * static_cast<double>(texels));
+        }
+        out.decoded = true;
+    }
+    std::lock_guard lock(mutex);
+    if (cacheMount == &mount && cacheGeneration == generation)
+        cache.emplace(maskPath, out);
+    return out;
+}
+
 LayerTint ResolveLayerTint(const EnfusionMount& mount, const Poseidon::Asset::Material::EmatMaterial& material)
 {
     LayerTint out;
@@ -324,20 +376,13 @@ LayerTint ResolveLayerTint(const EnfusionMount& mount, const Poseidon::Asset::Ma
     const std::string maskPath = material.TextureOf("MaskMap");
     if (!maskPath.empty())
     {
-        int width = 0, height = 0;
-        std::vector<uint8_t> rgba;
-        if (DecodeEddsRgba(mount, maskPath, 64, width, height, rgba) && !rgba.empty())
+        if (const MaskMeans means = MaskChannelMeans(mount, maskPath); means.decoded)
         {
-            const size_t texels = rgba.size() / 4;
             double covered = 0.0;
             for (int c = 0; c < 3; ++c)
             {
-                double sum = 0.0;
-                for (size_t t = 0; t < texels; ++t)
-                    sum += rgba[t * 4 + static_cast<size_t>(c)];
-                const double mean = sum / (255.0 * static_cast<double>(texels));
-                weight[c + 2] = static_cast<float>(mean);
-                covered += mean;
+                weight[c + 2] = static_cast<float>(means.mean[c]);
+                covered += means.mean[c];
             }
             weight[1] = static_cast<float>(covered < 1.0 ? 1.0 - covered : 0.0);
             out.maskWeighted = true;
