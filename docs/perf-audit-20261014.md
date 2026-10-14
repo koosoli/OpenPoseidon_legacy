@@ -178,6 +178,34 @@ What it took on native worlds:
    and rotor-flutter noise stubbed out, the grass timers did not move (colour 2.03 ms, prepass
    1.71 ms), so grass cost on stock worlds is not that ALU. Left alone.
 
+## Is a Nanite-style geometry system worth it? (measured)
+
+At the Durras pose (native Everon, fixed camera, two runs per arm), the native LOD rule was
+coarsened (`POSEIDON_XOB_LOD_TPP` 0.8 → 0.2):
+
+| | default | coarse LODs |
+|---|---|---|
+| main-pass triangles | 7.1 M | 5.0 M (−30%) |
+| shadow-cascade triangles | 26.0 M | 15.0 M (−42%) |
+| GPU frame | 22.7–23.0 ms | 19.95–20.1 ms (−12%) |
+| solid colour + prepass | 2.8 ms | 1.8 ms |
+| shadow cascades 1 + 2 | 3.6 ms | 2.2 ms |
+
+So geometry is a real but minority cost (about 12% of the GPU frame for a 30–40% triangle cut).
+The rest is shading, blending and per-draw cost. A full Nanite port (cluster hierarchy,
+visibility buffer, software rasterizer) is not justified: wgpu has no stable mesh shaders, and
+the visibility buffer needs 64-bit atomics. The triangle sink worth attacking is **shadow
+cascades 1–2: 20 M triangles for 34,000 casters**, 3.6 ms. The cascade cull tests only the
+cascade box's side planes. A receiver-aware cull (drop casters whose swept shadow cannot reach
+the camera frustum) would recover part of it. It is exact only if the cascade depth cache is
+invalidated when the receiver region changes, and if the passes that sample shadows outside the
+view (planar water reflection, which shares `frame.wgsl` lighting) get their own receiver
+region. Estimated 1–2 ms.
+
+The firefight is too non-deterministic for small A/Bs: between runs of the same arm, direct draws
+ranged from 2,862 to 4,365 and the GPU frame from 15.7 to 25.4 ms. Draw-batching work there
+needs a deterministic bench first.
+
 ## Levers added
 
 | lever | default | effect |
