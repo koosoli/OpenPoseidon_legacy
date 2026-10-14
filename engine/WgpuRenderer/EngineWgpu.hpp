@@ -219,6 +219,12 @@ class EngineWgpu : public EngineDummy
     std::unordered_map<uint64_t, CanopyEntry> _canopy;
     bool _canopyDirty = false;
     std::chrono::steady_clock::time_point _canopyBuilt{};
+    //! PERF (2026-10-14): the grid is built on its own thread from a snapshot of `_canopy` and
+    //! collected by a later UpdateCanopyMap -- see there. One build in flight at a time.
+    struct CanopyJob;
+    std::shared_ptr<CanopyJob> _canopyJob;
+    uint32_t _canopyPublishedN = 0;
+    uint64_t _canopyPublishedHash = 0;
     void CanopyNote(uint64_t key, const LODShapeWithShadow* shape, const Matrix4& transform);
     void CanopyForget(uint64_t key);
     void UpdateCanopyMap();

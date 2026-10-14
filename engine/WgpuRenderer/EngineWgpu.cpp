@@ -2471,6 +2471,7 @@ struct EngineWgpu::SharedMeshFixtureState
 
 EngineWgpu::~EngineWgpu()
 {
+    _canopyJob.reset(); // joins a canopy build still in flight
     StopRenderThread();
     _terrain.reset(); // Its Earth worker/mesh must be gone before wgr_destroy.
     _retailWorldVisible.reset();
@@ -17223,23 +17224,14 @@ void EngineWgpu::CanopyForget(uint64_t key)
 // Rasterise the canopy table into a world grid over the terrain span: per cell the highest canopy
 // top and the coverage (a crown covers the cells its disc reaches, graded over one cell at the rim).
 // Rebuilt at most every 1.5 s while the table changes, which is what streaming does all the time.
-void EngineWgpu::UpdateCanopyMap()
+// The canopy grid itself: `top` (highest crown over each cell, dilated into empty neighbours)
+// and `cover` (crown coverage). Pure -- reads only its arguments -- so it runs off the main thread.
+static void BuildCanopyGrid(const std::vector<EngineWgpu::CanopyEntry>& entries, uint32_t n, float cell,
+                            std::vector<float>& outTop, std::vector<float>& outCover)
 {
-    if (!_canopyDirty || !GLandscape || !_renderer)
-        return;
-    const auto now = std::chrono::steady_clock::now();
-    if (now - _canopyBuilt < std::chrono::milliseconds(1500))
-        return;
-    _canopyBuilt = now;
-    _canopyDirty = false;
-    const float extent = static_cast<float>(GLandscape->GetTerrainRange()) * GLandscape->GetTerrainGrid();
-    if (!(extent > 0.0f))
-        return;
-    const uint32_t n = static_cast<uint32_t>(std::clamp(std::ceil(extent / 6.25f), 64.0f, 2048.0f));
-    const float cell = extent / static_cast<float>(n);
     std::vector<float> top(static_cast<size_t>(n) * n, -60000.0f);
     std::vector<float> cover(static_cast<size_t>(n) * n, 0.0f);
-    for (const auto& [key, e] : _canopy)
+    for (const auto& e : entries)
     {
         const float reach = e.radius + cell * 0.5f;
         const int x0 = std::max(0, static_cast<int>(std::floor((e.x - reach) / cell)));
@@ -17286,16 +17278,102 @@ void EngineWgpu::UpdateCanopyMap()
                 }
             dilated[i] = best;
         }
-    _pendingSet.canopyN = n;
-    _pendingSet.canopyTop = std::move(dilated);
-    _pendingSet.canopyCover = std::move(cover);
-    _pendingSet.canopyDirty = true;
-    static size_t reported = 0;
-    if (_canopy.size() / 20000 != reported)
+    outTop = std::move(dilated);
+    outCover = std::move(cover);
+}
+
+struct EngineWgpu::CanopyJob
+{
+    std::vector<CanopyEntry> entries;
+    uint32_t n = 0;
+    float cell = 0.0f;
+    std::vector<float> top, cover;
+    uint64_t hash = 0;
+    std::atomic<bool> done{false};
+    std::thread worker;
+    ~CanopyJob()
     {
-        reported = _canopy.size() / 20000;
-        LOG_INFO(Graphics, "Wgpu canopy map: {} canopy objects -> {}x{} at {:.2f} m", _canopy.size(), n, n, cell);
+        if (worker.joinable())
+            worker.join();
     }
+};
+
+void EngineWgpu::UpdateCanopyMap()
+{
+    // PERF (2026-10-14): the build ran right here, on the main thread -- a 2048x2048 grid for a
+    // 12.8 km world, three 16 MB arrays allocated and zeroed, every canopy object splatted and
+    // every cell dilated -- 60-150 ms, sometimes 400 ms, and on a native world it was due every
+    // 1.5 s for as long as the far tier kept adding and removing instances. It now runs on its own
+    // thread from a snapshot of the entries; this collects the finished grid on a later call
+    // (the same arithmetic, ~0.1 s later than it used to appear, against a 1.5 s throttle). A
+    // grid identical to the one last handed over is not handed over again, so churn that changes
+    // nothing no longer re-uploads 32 MB either.
+    if (_canopyJob && _canopyJob->done.load(std::memory_order_acquire))
+    {
+        CanopyJob& job = *_canopyJob;
+        if (job.n != 0 && (job.n != _canopyPublishedN || job.hash != _canopyPublishedHash))
+        {
+            _pendingSet.canopyN = job.n;
+            _pendingSet.canopyTop = std::move(job.top);
+            _pendingSet.canopyCover = std::move(job.cover);
+            _pendingSet.canopyDirty = true;
+            _canopyPublishedN = job.n;
+            _canopyPublishedHash = job.hash;
+        }
+        static size_t reported = 0;
+        if (job.entries.size() / 20000 != reported)
+        {
+            reported = job.entries.size() / 20000;
+            LOG_INFO(Graphics, "Wgpu canopy map: {} canopy objects -> {}x{} at {:.2f} m", job.entries.size(), job.n,
+                     job.n, job.cell);
+        }
+        _canopyJob.reset(); // joins the finished worker
+    }
+    if (_canopyJob || !_canopyDirty || !GLandscape || !_renderer)
+        return;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - _canopyBuilt < std::chrono::milliseconds(1500))
+        return;
+    _canopyBuilt = now;
+    _canopyDirty = false;
+    const float extent = static_cast<float>(GLandscape->GetTerrainRange()) * GLandscape->GetTerrainGrid();
+    if (!(extent > 0.0f))
+        return;
+    auto job = std::make_shared<CanopyJob>();
+    job->n = static_cast<uint32_t>(std::clamp(std::ceil(extent / 6.25f), 64.0f, 2048.0f));
+    job->cell = extent / static_cast<float>(job->n);
+    job->entries.reserve(_canopy.size());
+    for (const auto& [key, e] : _canopy)
+        job->entries.push_back(e);
+    CanopyJob* raw = job.get();
+    try
+    {
+        job->worker = std::thread(
+            [raw]
+            {
+                Foundation::SetCurrentThreadName("wgr-canopy");
+                BuildCanopyGrid(raw->entries, raw->n, raw->cell, raw->top, raw->cover);
+                // FNV-1a over the bytes of both grids: "is this the grid we already handed over".
+                uint64_t h = 1469598103934665603ull;
+                for (const std::vector<float>* grid : {&raw->top, &raw->cover})
+                {
+                    const auto* bytes = reinterpret_cast<const uint8_t*>(grid->data());
+                    for (size_t i = 0, count = grid->size() * sizeof(float); i < count; ++i)
+                        h = (h ^ bytes[i]) * 1099511628211ull;
+                }
+                raw->hash = h;
+                raw->done.store(true, std::memory_order_release);
+            });
+    }
+    catch (...)
+    {
+        // No thread: build here, as before.
+        BuildCanopyGrid(raw->entries, raw->n, raw->cell, raw->top, raw->cover);
+        raw->hash = 0;
+        raw->done.store(true, std::memory_order_release);
+        _canopyPublishedHash = ~0ull; // never matches 0, so this grid is always handed over
+    }
+    _canopyJob = std::move(job);
 }
 
 void EngineWgpu::SceneFarObjectRemoved(uint32_t id)
