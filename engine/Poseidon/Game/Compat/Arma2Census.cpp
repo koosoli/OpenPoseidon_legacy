@@ -13,6 +13,7 @@
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -106,5 +107,45 @@ void LogAssetCensus()
              cwa, kinds.size());
     for (const auto& [line, count] : kinds)
         LOG_INFO(Mission, "{}: census {}x {}", Label(), count, line);
+
+    // Where the player stands and what the map has around him: a unit on a ship or a
+    // roof stands on a map object, and a missing one shows as a soldier on the water.
+    Object* on = GWorld->CameraOn();
+    if (on && GLandscape)
+    {
+        const Vector3 p = on->Position();
+        const float surface = GLandscape->SurfaceY(p.X(), p.Z());
+        LOG_INFO(Mission, "{}: census player {} at {:.1f},{:.1f},{:.1f} (surface {:.1f}, above it {:.1f})", Label(),
+                 TypeName(dyn_cast<Entity>(on)), p.X(), p.Y(), p.Z(), surface, p.Y() - surface);
+        std::map<std::string, std::pair<int, float>> near; // model -> count, nearest distance
+        const int cx = static_cast<int>(p.X() * InvLandGrid), cz = static_cast<int>(p.Z() * InvLandGrid);
+        const int reach = static_cast<int>(150.0f * InvLandGrid) + 1;
+        for (int z = cz - reach; z <= cz + reach; z++)
+            for (int x = cx - reach; x <= cx + reach; x++)
+            {
+                if (x < 0 || z < 0 || x >= LandRange || z >= LandRange)
+                    continue;
+                const ObjectList& list = GLandscape->GetObjects(z, x);
+                for (int i = 0; i < list.Size(); i++)
+                {
+                    const Object* o = list[i];
+                    if (!o || !o->GetShape() || dyn_cast<const EntityAI>(o))
+                        continue;
+                    const float d = o->Position().Distance(p);
+                    if (d > 150.0f)
+                        continue;
+                    auto& entry = near[std::string((const char*)o->GetShape()->Name())];
+                    if (entry.first == 0 || d < entry.second)
+                        entry.second = d;
+                    entry.first++;
+                }
+            }
+        int listed = 0;
+        for (const auto& [model, info] : near)
+            if (listed++ < 40)
+                LOG_INFO(Mission, "{}: census near player {}x {} (nearest {:.0f} m)", Label(), info.first, model,
+                         info.second);
+        LOG_INFO(Mission, "{}: census {} map models within 150 m of the player", Label(), near.size());
+    }
 }
 } // namespace Poseidon::Arma1Compat
