@@ -510,6 +510,8 @@ GameValue GetLaserTarget(const GameState* state, GameValuePar oper1);
 GameValue GetNearestObject(const GameState* state, GameValuePar oper1);
 GameValue GetNearestObjectByDistance(const GameState* state, GameValuePar oper1);
 GameValue A1NearObjects(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1GetWeaponCargo(const GameState* state, GameValuePar oper1);
+GameValue A1GetMagazineCargo(const GameState* state, GameValuePar oper1);
 GameValue A1ConfigFile(const GameState* state);
 GameValue A1MissionConfigFile(const GameState* state);
 GameValue A1ConfigChild(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -1544,6 +1546,8 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameString, "inheritsFrom", A1InheritsFrom, GameString),
         GameFunction(GameString, "typeName", A1TypeName, GameVoid),
         GameFunction(GameBool, "surfaceIsWater", A1SurfaceIsWater, GameArray),
+        GameFunction(GameArray, "getWeaponCargo", A1GetWeaponCargo, GameObject),
+        GameFunction(GameArray, "getMagazineCargo", A1GetMagazineCargo, GameObject),
         GameFunction(GameString, "animationState", A1AnimationState, GameObject),
         GameFunction(GameString, "composeText", A1ComposeText, GameArray),
         GameFunction(GameArray, "switch", A1Switch_, GameVoid),
