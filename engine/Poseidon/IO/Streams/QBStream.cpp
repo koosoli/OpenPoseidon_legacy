@@ -18,6 +18,8 @@
 #include <atomic>
 #include <cstdlib>
 #include <vector>
+#include <memory>
+#include <algorithm>
 #include <Poseidon/Foundation/Algorithms/Sha256.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Framework/AppFrame.hpp>
@@ -250,18 +252,6 @@ QFBank::QFBank()
 namespace Poseidon
 {
 
-static int LoadInt(HANDLE f)
-{
-    int i = 0;
-    DWORD rd = 0;
-    ReadFile(f, &i, sizeof(i), &rd, nullptr);
-    if (rd != sizeof(i))
-    {
-        i = 0;
-    }
-    return i;
-}
-
 static int LoadInt(QIStream& f)
 {
     int i = 0;
@@ -271,41 +261,6 @@ static int LoadInt(QIStream& f)
         i = 0;
     }
     return i;
-}
-
-static void LoadFileInfo(FileInfoO& i, HANDLE f)
-{
-    // read zero terminated name
-    char name[512];
-    char* n = name;
-    int maxLen = sizeof(name) - 1;
-    DWORD rd;
-    for (int l = 0; l < maxLen; l++)
-    {
-        char c;
-        ReadFile(f, &c, sizeof(c), &rd, nullptr);
-        if (rd != 1)
-        {
-            // error during file reading
-            i.name = "";
-            i.startOffset = 0;
-            i.length = 0;
-            return;
-        }
-        if (!c)
-        {
-            break;
-        }
-        *n++ = c;
-    }
-    *n = 0; // zero terminate in any case
-    strlwr(name);
-    i.name = name;
-    i.compressedMagic = LoadInt(f);
-    i.uncompressedSize = LoadInt(f);
-    i.startOffset = LoadInt(f);
-    i.time = LoadInt(f);
-    i.length = LoadInt(f);
 }
 
 static void LoadFileInfo(FileInfoO& i, QIStream& f)
@@ -339,6 +294,135 @@ static void LoadFileInfo(FileInfoO& i, QIStream& f)
     i.startOffset = LoadInt(f);
     i.time = LoadInt(f);
     i.length = LoadInt(f);
+}
+
+// A bank's header is a run of short zero-terminated names and ints. Read with one ReadFile
+// per byte (and per int), opening Arma 3's ~520 archives -- some with tens of thousands of
+// entries -- took about a minute before anything else could start. BankHeaderReader reads
+// the same bytes in 64 KB blocks; Sync() leaves the file pointer exactly where the byte-wise
+// reading would have, which the rest of QFBank::Load relies on (the header size is taken
+// from it).
+class BankHeaderReader
+{
+  public:
+    explicit BankHeaderReader(HANDLE h) : _h(h), _buf(new char[kBlock])
+    {
+        // DWORD on Windows (0xFFFFFFFF on error), off_t elsewhere (-1 on error)
+        const int64_t at = static_cast<int64_t>(SetFilePointer(h, 0, nullptr, FILE_CURRENT));
+        _filePos = (at < 0 || at == 0xFFFFFFFFLL) ? 0 : at;
+    }
+
+    bool Get(char& c)
+    {
+        if (_at == _size && !Fill())
+            return false;
+        c = _buf[_at++];
+        return true;
+    }
+
+    bool Read(void* dst, size_t n)
+    {
+        char* d = static_cast<char*>(dst);
+        while (n > 0)
+        {
+            if (_at == _size && !Fill())
+                return false;
+            const size_t k = std::min(n, _size - _at);
+            memcpy(d, _buf.get() + _at, k);
+            _at += k;
+            d += k;
+            n -= k;
+        }
+        return true;
+    }
+
+    // Puts the file pointer at the first byte not consumed and drops the buffer.
+    void Sync()
+    {
+        if (_size == 0)
+            return;
+        const int64_t logical = _filePos - static_cast<int64_t>(_size - _at);
+        SetFilePointer(_h, static_cast<long>(logical), nullptr, FILE_BEGIN);
+        _filePos = logical;
+        _at = _size = 0;
+    }
+
+  private:
+    static constexpr size_t kBlock = 64 * 1024;
+
+    bool Fill()
+    {
+        DWORD rd = 0;
+        if (!ReadFile(_h, _buf.get(), static_cast<DWORD>(kBlock), &rd, nullptr) || rd == 0)
+        {
+            _at = _size = 0;
+            return false;
+        }
+        _filePos += rd;
+        _size = rd;
+        _at = 0;
+        return true;
+    }
+
+    HANDLE _h;
+    std::unique_ptr<char[]> _buf;
+    size_t _at = 0;
+    size_t _size = 0;
+    int64_t _filePos = 0; // file offset of the byte after the buffered block
+};
+
+static int LoadInt(BankHeaderReader& f)
+{
+    int i = 0;
+    if (!f.Read(&i, sizeof(i)))
+        i = 0;
+    return i;
+}
+
+static void LoadFileInfo(FileInfoO& i, BankHeaderReader& f)
+{
+    // read zero terminated name
+    char name[512];
+    char* n = name;
+    int maxLen = sizeof(name) - 1;
+    for (int l = 0; l < maxLen; l++)
+    {
+        char c;
+        if (!f.Get(c))
+        {
+            // error during file reading
+            i.name = "";
+            i.startOffset = 0;
+            i.length = 0;
+            return;
+        }
+        if (!c)
+        {
+            break;
+        }
+        *n++ = c;
+    }
+    *n = 0; // zero terminate in any case
+    strlwr(name);
+    i.name = name;
+    i.compressedMagic = LoadInt(f);
+    i.uncompressedSize = LoadInt(f);
+    i.startOffset = LoadInt(f);
+    i.time = LoadInt(f);
+    i.length = LoadInt(f);
+}
+
+static RString LoadFromFile(BankHeaderReader& f)
+{
+    BString<1024> buf;
+    for (;;)
+    {
+        char c[2] = {0, 0};
+        if (!f.Get(c[0]) || c[0] == 0)
+            break;
+        buf += c;
+    }
+    return RString(buf);
 }
 
 } // namespace Poseidon
@@ -621,13 +705,14 @@ bool QFBank::Load()
     }
 
     _pos = _wantPos = 0;
+    BankHeaderReader header((HANDLE)(intptr_t)_handle);
     // int64: a tampered bank with huge per-file lengths must not overflow the
     // running offset (UB); a sum past int range means a corrupt bank — stop.
     int64_t startOffset = 0;
     FileInfoO info;
     for (;;)
     {
-        LoadFileInfo(info, (HANDLE)(intptr_t)_handle);
+        LoadFileInfo(info, header);
 
         info.startOffset = static_cast<int>(startOffset);
         startOffset += info.length;
@@ -646,17 +731,18 @@ bool QFBank::Load()
         // read properties
         for (;;)
         {
-            RString name = LoadFromFile((HANDLE)(intptr_t)_handle);
+            RString name = LoadFromFile(header);
             if (name.GetLength() == 0)
             {
                 break;
             }
-            RString value = LoadFromFile((HANDLE)(intptr_t)_handle);
+            RString value = LoadFromFile(header);
             QFProperty& prop = _properties.Append();
             prop.name = name;
             prop.value = value;
         }
 
+        header.Sync();
         if (_openBeforeOpenCallback)
         {
             bool ok = _openBeforeOpenCallback(this, _openContext);
@@ -675,8 +761,8 @@ bool QFBank::Load()
             // we need to load encrypted headers
             // for this we need to know headers encrypted size
             // load decoded size
-            int headersSize = LoadInt((HANDLE)(intptr_t)_handle);
-            int headersEncodedSize = LoadInt((HANDLE)(intptr_t)_handle);
+            int headersSize = LoadInt(header);
+            int headersEncodedSize = LoadInt(header);
             // Both sizes come straight off the wire; reject negative or absurd values
             // before they drive a Temp<char> allocation (a negative int becomes a
             // near-2^64 size_t). A PBO header block far above this is malformed.
@@ -690,9 +776,7 @@ bool QFBank::Load()
             }
             // read encoded headers into memory
             Temp<char> headers(headersEncodedSize);
-            DWORD rd = 0;
-            ReadFile(_handle, headers.Data(), headers.Size(), &rd, nullptr);
-            if (rd == static_cast<DWORD>(headers.Size()))
+            if (header.Read(headers.Data(), headers.Size()))
             {
                 Ref<IFilebankEncryption> ss = CreateFilebankEncryption(encryption, nullptr);
                 if (ss)
@@ -722,7 +806,7 @@ bool QFBank::Load()
         {
             for (;;)
             {
-                LoadFileInfo(info, (HANDLE)(intptr_t)_handle);
+                LoadFileInfo(info, header);
 
                 info.startOffset = startOffset;
                 startOffset += info.length;
@@ -738,6 +822,7 @@ bool QFBank::Load()
     }
     else
     {
+        header.Sync();
         if (_openBeforeOpenCallback)
         {
             bool ok = _openBeforeOpenCallback(this, _openContext);
@@ -751,6 +836,7 @@ bool QFBank::Load()
         }
     }
 
+    header.Sync();
     int headerSize = SetFilePointer(_handle, 0, nullptr, FILE_CURRENT);
     BEG_SERIALIZE
     // filemapping uses offset from end of header; direct access uses file offset
