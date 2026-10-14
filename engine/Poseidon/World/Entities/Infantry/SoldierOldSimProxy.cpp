@@ -36,6 +36,30 @@ bool Man::CastProxyShadow(int level, int index) const
     return true;
 }
 
+namespace
+{
+// A held item (rifle, launcher, binocular) is drawn with a DIFFERENT model than the proxy
+// placeholder it replaces. The proxy's matrix already carries the placeholder's own
+// source-origin offset (ShapeAdapter); undo it here, and add the drawn model's
+// (HeldModelSourceOrigin). Both are zero for every OFP/CWA model, so nothing changes there;
+// an Arma ODOL model is stored around its bounding centre, and the corepatch M16A4 (centre
+// 0.98 m up, 0.48 m along) was drawn at its bearer's feet without this.
+Matrix4 HeldModelPlaceholderUndo(const ProxyObject& proxy)
+{
+    const LODShapeWithShadow* placeholder = proxy.obj ? proxy.obj->GetShape() : nullptr;
+    if (!placeholder || placeholder->AnimationOrigin().SquareSize() < 1e-8f)
+        return MIdentity;
+    return Matrix4(MTranslation, placeholder->AnimationOrigin());
+}
+
+Matrix4 HeldModelSourceOrigin(const LODShapeWithShadow* drawn)
+{
+    if (!drawn || drawn->AnimationOrigin().SquareSize() < 1e-8f)
+        return MIdentity;
+    return Matrix4(MTranslation, -drawn->AnimationOrigin());
+}
+} // namespace
+
 Object* Man::GetProxy(LODShapeWithShadow*& shape, int level, Matrix4& transform, Matrix4& invTransform,
                       const FrameBase& parentPos, int i) const
 {
@@ -169,7 +193,7 @@ Object* Man::GetProxy(LODShapeWithShadow*& shape, int level, Matrix4& transform,
     Matrix4 animTransform = AnimateProxyMatrix(level, proxy);
 
     animTransform.Orthogonalize();
-    transform = transform * animTransform;
+    transform = transform * animTransform * HeldModelPlaceholderUndo(proxy);
 
     // if shape is reversed, reverse orientation
     if (pshape->Remarks() & REM_REVERSED)
@@ -177,6 +201,7 @@ Object* Man::GetProxy(LODShapeWithShadow*& shape, int level, Matrix4& transform,
         Matrix4 swapM(MScale, -1, +1, -1);
         transform = transform * swapM;
     }
+    transform = transform * HeldModelSourceOrigin(pshape);
     invTransform = transform.InverseScaled();
 
     shape = pshape;
@@ -371,7 +396,7 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
 
         Matrix4 animTransform = AnimateProxyMatrix(level, proxy);
 
-        Matrix4 pTransform = transform * animTransform;
+        Matrix4 pTransform = transform * animTransform * HeldModelPlaceholderUndo(proxy);
 
         // OP_A2_PROXYLOG=1: where a held weapon lands, the player against one other man,
         // every two seconds (the player's rifle was drawn at his feet, the AI's in hand).
@@ -408,6 +433,7 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
             Matrix4 swapM(MScale, -1, +1, -1);
             pTransform = pTransform * swapM;
         }
+        pTransform = pTransform * HeldModelSourceOrigin(pshape);
         Matrix4Val invPTransform = pTransform.InverseScaled();
 
         int pLevel = -1;

@@ -709,8 +709,14 @@ void CreateAdapterProxies(LODShapeWithShadow* shape, const Poseidon::Model::Mode
                 trans.SetPosition(::Vector3(m[0][3], m[1][3], m[2][3]));
 
                 LODShapeWithShadow* pshape = po->obj->GetShape();
+                // The proxy places the proxied model's SOURCE origin. An Arma ODOL model
+                // (revision 40 on) is stored around its binariser's bounding centre, which
+                // this engine keeps out of BoundingCenter() (it stays zero for drawing) and
+                // records as AnimationOrigin(): where the source origin lies in the stored
+                // coordinates. Without it a proxied model is drawn off by its whole centre --
+                // the corepatch M16A4 (centre 0.98 m up, 0.48 m along) at a soldier's feet.
                 if (pshape)
-                    trans.SetPosition(trans.FastTransform(pshape->BoundingCenter()));
+                    trans.SetPosition(trans.FastTransform(pshape->BoundingCenter() - pshape->AnimationOrigin()));
                 po->obj->SetTransform(trans);
                 po->invTransform = trans.InverseScaled();
                 po->obj->SetDestructType(DestructNo);
