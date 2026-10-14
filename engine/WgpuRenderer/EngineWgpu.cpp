@@ -5558,6 +5558,7 @@ void EngineWgpu::WaitRenderIdle()
 
 void EngineWgpu::RenderThreadMain()
 {
+    Foundation::SetCurrentThreadName("wgr-render");
     for (;;)
     {
         WgrFrame* frame = nullptr;

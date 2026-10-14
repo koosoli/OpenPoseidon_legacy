@@ -61,6 +61,10 @@ void NoteMainThreadOnly(MainThreadOnlySite& site, const char* what);
 // Test seam: forget the captured owner so a test can drive the adoption path.
 void ResetMainThreadCaptureForTest();
 
+// Name the calling thread for debuggers, profilers and crash dumps (SetThreadDescription on
+// Windows, pthread_setname_np elsewhere). Best effort: a failure is silent.
+void SetCurrentThreadName(const char* name);
+
 } // namespace Poseidon::Foundation
 
 // One-liner for a guarded call site:

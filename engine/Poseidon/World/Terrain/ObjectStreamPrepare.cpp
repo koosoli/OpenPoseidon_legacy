@@ -743,7 +743,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
     // created long after InitFPU, so the capture is always live by the time we get here.
     Foundation::ApplyMainFpEnvironment();
 
-    (void)workerIndex;
+    Foundation::SetCurrentThreadName(("obj-prep-" + std::to_string(workerIndex)).c_str());
 
     std::unique_lock<std::mutex> lock(mutex);
     for (;;)
