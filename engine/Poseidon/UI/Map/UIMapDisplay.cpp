@@ -22,6 +22,7 @@
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <Poseidon/UI/Locale/MissionHtmlLocalization.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <string>
 
 std::string Arma2BriefingHtml(const std::string& html); // GameStateExtA2.cpp
@@ -489,6 +490,11 @@ bool WeaponsInfo::Import(const ParamEntry& superclass)
                 _magazinesPool.Add(magazine);
             }
         }
+    }
+    if (Poseidon::Arma1Compat::Active())
+    {
+        LOG_INFO(Mission, "{}: briefing weapon pool {} weapons, {} magazines", Poseidon::Arma1Compat::Label(),
+                 _weaponsPool.Size(), _magazinesPool.Size());
     }
     return true;
 }
