@@ -3,12 +3,14 @@
 #include <Poseidon/Foundation/Algorithms/Lzo1x.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -252,6 +254,16 @@ struct BmtrCursor
 };
 } // namespace detail
 
+// Bone -> parent (lower case) of the skinned skeletons seen so far. The ODOL loader fills it
+// from an Arma 2 man model's skeleton (OFP2_ManSkeleton) before that model's moves are
+// loaded; BMTR conversion needs it, because a binarised move stores each bone relative to
+// its parent (see ConvertBMTRToRTM).
+inline std::map<std::string, std::string>& BmtrSkeletonParents()
+{
+    static std::map<std::string, std::string> parents;
+    return parents;
+}
+
 inline bool IsBMTR(const uint8_t* data, size_t size)
 {
     return size >= 8 && std::memcmp(data, "BMTR", 4) == 0;
@@ -309,12 +321,55 @@ inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
         std::memcpy(name, n.data(), std::min<size_t>(n.size(), BONE_NAME_LEN - 1));
         put(name, BONE_NAME_LEN);
     }
+    // What a BMTR transform is, measured on Arma 2's own data (a USMC soldier, ODOL 48,
+    // posed by AmovPercMstpSrasWrflDnon and AmovPercMwlkSrasWrflDf):
+    //  - the quaternion is the conjugate of the RTM orientation (see above), and the
+    //    data is mirrored in x against the model (S M S, S = diag(-1, 1, 1));
+    //  - each bone is LOCAL: a rotation about its own rest joint (R p + t, so t = J - R J),
+    //    applied before its parent's -- world = parent * local, down the skeleton;
+    //  - the root (pelvis) holds its height above the ground instead (about 0.98 m
+    //    standing), so its translation is that height less the rest height.
+    // Composed this way every joint closes (mean edge stretch 0.17 against 2.5-5 for the
+    // plain reading, which tore the soldier apart in game). Without a known skeleton
+    // (BmtrSkeletonParents empty for these bones) the transforms stay as stored.
+    const auto lower = [](std::string v)
+    {
+        for (char& ch : v)
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        return v;
+    };
+    const auto& parents = BmtrSkeletonParents();
+    std::vector<int> parentIndex(bones, -1);
+    bool hierarchical = false;
+    {
+        std::map<std::string, int> index;
+        for (uint32_t b = 0; b < bones; b++)
+            index[lower(boneNames[b])] = static_cast<int>(b);
+        for (uint32_t b = 0; b < bones; b++)
+        {
+            const auto it = parents.find(lower(boneNames[b]));
+            if (it == parents.end())
+                continue;
+            hierarchical = true;
+            if (const auto p = index.find(it->second); p != index.end())
+                parentIndex[b] = p->second;
+        }
+    }
+    static const bool flat = [] {
+        const char* e = std::getenv("BMTR_FLAT");
+        return e && *e == '1';
+    }();
+    if (flat)
+        hierarchical = false;
+    constexpr float kRootRestHeight = 0.98f;
+
     for (uint32_t p = 0; p < phases; p++)
     {
         const uint32_t count = c.u32();
         if (!c.ok || count != bones || !c.array(static_cast<size_t>(count) * 14, raw))
             return false;
         put(&times[p], 4);
+        std::vector<std::array<float, 12>> local(bones);
         for (uint32_t b = 0; b < bones; b++)
         {
             const uint8_t* t = raw.data() + static_cast<size_t>(b) * 14;
@@ -337,7 +392,7 @@ inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
                 y = -y;
                 z = -z;
             }
-            float m[12];
+            float* m = local[b].data();
             // columns of the rotation matrix: aside, up, dir
             m[0] = 1 - 2 * (y * y + z * z);
             m[1] = 2 * (x * y + w * z);
@@ -351,10 +406,73 @@ inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
             m[9] = detail::HalfToFloat(h[0]);
             m[10] = detail::HalfToFloat(h[1]);
             m[11] = detail::HalfToFloat(h[2]);
+            if (hierarchical)
+            {
+                // mirror in x: S M S
+                m[1] = -m[1];
+                m[2] = -m[2];
+                m[3] = -m[3];
+                m[6] = -m[6];
+                m[9] = -m[9];
+                if (parentIndex[b] < 0 && parents.count(lower(boneNames[b])) && parents.at(lower(boneNames[b])).empty())
+                {
+                    // the root: its height above the ground, not a joint offset
+                    m[9] = 0.0f;
+                    m[10] -= kRootRestHeight;
+                    m[11] = 0.0f;
+                }
+            }
+        }
+        std::vector<std::array<float, 12>> world = local;
+        if (hierarchical)
+        {
+            std::vector<int> state(bones, 0); // 0 todo, 1 busy, 2 done
+            std::vector<uint32_t> stack;
+            for (uint32_t root = 0; root < bones; root++)
+            {
+                if (state[root] == 2)
+                    continue;
+                // walk up to the first resolved ancestor, then resolve back down
+                stack.clear();
+                uint32_t b = root;
+                while (state[b] == 0)
+                {
+                    state[b] = 1;
+                    stack.push_back(b);
+                    if (parentIndex[b] < 0 || state[static_cast<uint32_t>(parentIndex[b])] != 0)
+                        break;
+                    b = static_cast<uint32_t>(parentIndex[b]);
+                }
+                for (auto it = stack.rbegin(); it != stack.rend(); ++it)
+                {
+                    const uint32_t bone = *it;
+                    const int parent = parentIndex[bone];
+                    if (parent >= 0 && state[static_cast<uint32_t>(parent)] == 2)
+                    {
+                        const auto& A = world[static_cast<uint32_t>(parent)];
+                        const auto& B = local[bone];
+                        auto& C = world[bone];
+                        for (int col = 0; col < 4; col++)
+                            for (int row = 0; row < 3; row++)
+                            {
+                                float v = 0;
+                                for (int k = 0; k < 3; k++)
+                                    v += A[static_cast<size_t>(k * 3 + row)] * B[static_cast<size_t>(col * 3 + k)];
+                                if (col == 3)
+                                    v += A[static_cast<size_t>(9 + row)];
+                                C[static_cast<size_t>(col * 3 + row)] = v;
+                            }
+                    }
+                    state[bone] = 2;
+                }
+            }
+        }
+        for (uint32_t b = 0; b < bones; b++)
+        {
             char name[BONE_NAME_LEN] = {};
             std::memcpy(name, boneNames[b].data(), std::min<size_t>(boneNames[b].size(), BONE_NAME_LEN - 1));
             put(name, BONE_NAME_LEN);
-            put(m, sizeof(m));
+            put(world[b].data(), sizeof(float) * 12);
         }
     }
     return c.ok;
