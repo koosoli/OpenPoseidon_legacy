@@ -1,7 +1,7 @@
 # Performance audit, 2026-10-14
 
 Branch `perf/optimization-20261014`, backed up on `safety`, deployed to the game folder as
-`1c0edc792`.
+`74121e0f6`.
 
 Every change was found by sampling the process, and none of them changes what the game shows.
 - Each one is either exact by construction, with a verify lever that compares old and new
@@ -125,6 +125,12 @@ What it took on native worlds:
   change.
 - **A read cache for prefab files during the resolve.** It answered 95% of reads from memory, but
   once the pre-pass ran the reads in parallel it measured as noise (prepass 335 against 357 ms).
+- **A mirror of each cell's non-static objects for off-screen cells in the draw walk.**
+  Exact once it followed SmallArray's slot reuse (18,500 cells verified), but the CPU frame did
+  not move (20.3 ms either way): only ~20 such cells a frame.
+- **Prefetching ahead in `Scene::AdjustComplexity`.** Its profile share did not drop (5.0% with,
+  4.2% without). The draw walk's prefetch, measured in the same A/B, does help (walk self time
+  6.4% with it, 7.9% without).
 - **Batching the streamer's texture preparation across an update's models.** Bank-table time per
   update fell from 30–160 ms to ~1 ms, but the admit loop is time-budgeted, so it just admitted
   more per update: the fill took 19.0–19.7 s either way and the fill's frame-time p95 did not
@@ -137,10 +143,14 @@ What it took on native worlds:
    changes how roads blend against glass; drawing them in the surface pass is the safer first step.
 2. **Main/render overlap lost while models register.** Creating a texture from the main
    thread first waits for the render thread to finish its in-flight frame
-   (`AcquireProducerWindow`: 'texture create', waits up to hundreds of ms in the log). Every
-   frame that registers a model therefore runs main and render back to back. The fix is to
-   create textures through the render thread rather than around it. That is architecture, in
-   an area with a history (see render-overlap notes), so it is left for a deliberate change.
+   (`AcquireProducerWindow`). Measured during the native fill: **9–11 ms of main-thread wait
+   per frame** (`render thread window: ... lazyWait=11.05 ms`), i.e. roughly half of a fill
+   frame, for ~20 s after every native load. Stock islands create almost no textures after
+   load (lazyWait ≈ 0). The fix is to queue the creates the way the instance and mesh ops
+   already are. The renderer's registry assigns texture handles and slot leases, so the C++
+   texture lifecycle needs pre-assigned handles or slots. That is a deliberate FFI change in an
+   area with a history (the overlap race of 2026-09-02), so it is written up rather than
+   rushed.
 3. **Far-tier registration textures.** The `.emat` layer maps are loaded on the main thread inside
    `RegisterGpuModel`, ~12% of the main thread during the far fill. The same prepare-then-take
    pattern applies, but the names come from the renderer's material translation.
@@ -166,6 +176,7 @@ What it took on native worlds:
 | `POSEIDON_STREAM_TEXTURE_PREP` | on | `0` = streamed bank tables without texture preparation |
 | `POSEIDON_PREFAB_PREPASS` | on | `0` = native placement resolve answers each prefab in the serial pass |
 | `POSEIDON_PART_POOL_ADAPT` | on | `0` = native parts and roads convert in place on the main thread |
+| `POSEIDON_GETENV_ONCE(name)` | — | macro: a per-site cached environment switch, for per-frame and per-object paths |
 | `WGR_SHADOW_CASCADE_CACHE` | on | `0` = every cascade every frame |
 | `WGR_DLSS_ASYNC_INIT` | on | `0` = synchronous NGX probe |
 | `WGR_INDIRECT_VALIDATION` | on | `0` = skip wgpu's indirect-argument validation |
