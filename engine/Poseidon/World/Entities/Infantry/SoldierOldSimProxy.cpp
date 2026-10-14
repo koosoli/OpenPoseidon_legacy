@@ -1160,6 +1160,7 @@ MovesType::MovesType(const MovesTypeName& name)
 
     LODShapeWithShadow* shape = _name.shape;
     _weights = WeigthBank.New(wname);
+    bool anyAnimation = false;
     for (int i = 0; i < _moves.Size(); i++)
     {
         MoveId id = MoveId(i);
@@ -1183,10 +1184,18 @@ MovesType::MovesType(const MovesTypeName& name)
         AnimationRT* anim = moveI;
         if (anim)
         {
-            _name.motionType->GetSkeleton()->Prepare(shape, GetWeights());
+            anyAnimation = true;
             anim->SetLooped((*entry) >> "looped");
         }
     }
+    // PERF (2026-10-14): once, after the loop. This ran inside it, once per animated move --
+    // hundreds per soldier type at mission start, each a case-insensitive search of every
+    // selection for every bone on every level (~half of a ~1 s MovesType build). Prepare
+    // re-Inits the weights from scratch, so only the last call ever counted; the skeleton
+    // grows as each move's RTM loads (Skeleton::NewBone), and the last call already came after
+    // the last load. Nothing in the loop reads the weights. Same final weights, one pass.
+    if (anyAnimation)
+        _name.motionType->GetSkeleton()->Prepare(shape, GetWeights());
 
     // FACE-002: after the LAST Prepare -- Prepare re-Inits the weights, so a rig built
     // inside the loop would be wiped by the next move.
