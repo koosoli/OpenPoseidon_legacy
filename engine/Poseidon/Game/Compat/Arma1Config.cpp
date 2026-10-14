@@ -1590,6 +1590,16 @@ RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
         text += "\t\tdisplayName=\"" + displayName + "\";\r\n";
     if (const ParamEntry* scope = cwa->FindEntry("scope"); !scope || (int)*scope < 1)
         text += "\t\tscope=1;\r\n";
+    // OFP's magazines[]={"this"} makes a weapon its own magazine. Inherited, "this" would
+    // name the A1x class, which no magazine is: the M107 on CWA's M21 had eight M21
+    // magazines and an empty gun (HUD "M107 0"). Name the CWA weapon instead.
+    if (const ParamEntry* mags = cwa->FindEntry("magazines"); mags && mags->IsArray())
+        for (int i = 0; i < mags->GetSize(); i++)
+            if (stricmp(((RString)(RStringB)(*mags)[i]).Data(), "this") == 0)
+            {
+                text += "\t\tmagazines[]={\"" + std::string(cwaWeapon.Data()) + "\"};\r\n";
+                break;
+            }
     // A scoped Arma 2 weapon looks through its own scope: modelOptics is a 2D scope model
     // ("\ca\weapons\2Dscope_Acog_4x32", the SVD's optika_snpiere, the Pecheneg's), drawn
     // in front of the camera as CWA's optics are, with its own zoom. Open sights ("-") keep
