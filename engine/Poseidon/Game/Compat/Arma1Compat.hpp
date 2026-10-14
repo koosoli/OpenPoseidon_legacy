@@ -16,11 +16,20 @@
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <string>
+#include <vector>
 
 namespace Poseidon::Arma1Compat
 {
-// True when --arma1 named a usable Arma 1 install.
+// True when --arma1 or --arma2 named a usable install.
 bool Active();
+
+// The mounted generation: 1 for Arma 1 (--arma1), 2 for Arma 2 / OA (--arma2); 0 inactive.
+// Everything below serves both; where Arma 2 lays its data out differently (Dta, the
+// expansion folders, XML stringtables, binarised animations) the generation decides.
+int Generation();
+
+// "Arma 1" / "Arma 2", for log lines.
+const char* Label();
 
 // Mounts <root>\AddOns, <root>\DBE1\AddOns and the campaign archives, data-only.
 // Called from Globals::Init while the file banks are (re)built.
@@ -67,6 +76,22 @@ RString ResolveVehicleClass(const RString& className);
 RString ResolveWeaponClass(const RString& className);
 RString ResolveMagazineClass(const RString& className);
 
+// Arma 2: the CWA weapon (for a weapon) or magazine (for a magazine) that carries an
+// Arma 2 weapon/magazine class, chosen by its kind (pistol, rifle, machine gun, sniper
+// rifle, launcher, grenade, ...) and the calibre of its ammunition. Empty when the
+// name is no Arma 2 weapon or magazine.
+RString Arma2WeaponFallback(const RString& name);
+
+// For an Arma 2 weapon carried by the CWA weapon cwaWeapon: a generated A1x_<name> class with
+// the Arma 2 model (in the hand, on the ground) on that CWA weapon, which keeps its magazines
+// and ballistics. Returns cwaWeapon when there is no usable model. OP_A2_WEAPON_MODELS=0 turns
+// it off.
+RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon);
+
+// Arma 2: the EventHandlers >> init code of a module (a class derived from Logic, such
+// as FunctionsManager or the first-aid modules) that a mission places; empty otherwise.
+RString Arma2ModuleInit(const RString& className);
+
 // Drops Arma 1 addon names (CACharacters, CAWheeled, ...) from a mission's
 // addOns[] so the CWA addon check does not refuse an Arma 1 mission.
 void FilterMissionAddons(FindArrayRStringCI& addOns);
@@ -80,6 +105,10 @@ void ActivateKey(const char* key);
 // with the reason in `error`.
 std::string ResolveMissionFile(const std::string& spec, std::string& error);
 
+// Every mission.sqm inside the mounted archives, as virtual paths ("ca\\missions\\Scenarios\\
+// SP_EyeForEye.Chernarus\\mission.sqm"). Templates and campaigns included.
+std::vector<std::string> MissionFiles();
+
 // True when the mission directory lies inside a mounted Arma 1 archive.
 bool IsArma1MissionDirectory(const char* missionDirectory);
 
@@ -90,4 +119,8 @@ RString WorldClassForMission(const RString& world, const char* missionDirectory)
 // For a virtual campaign mission path, the campaign base directory
 // ("campaigns/ca/") so the campaign stringtable/description apply. Empty otherwise.
 std::string CampaignBaseForMission(const std::string& missionFile);
+
+// Logs what every entity of the running mission became: class (A1x_ = the Arma model on a
+// CWA base), model, LOD count, crew and weapons, grouped by kind (Arma2Census.cpp).
+void LogAssetCensus();
 } // namespace Poseidon::Arma1Compat

@@ -1,4 +1,7 @@
 #pragma once
+#include <string>
+#include <algorithm>
+#include <vector>
 
 #ifndef _express_hpp
 #define _express_hpp
@@ -443,7 +446,8 @@ typedef MapStringToClass<GameVariable, AutoArray<GameVariable>> VarBankType;
 // typedef double Real;
 typedef float Real;
 
-#define SL 256 // stack levels
+#define SL 256 // stack levels (initial)
+#define SLMax 65536 // stack levels (most)
 
 class GameState;
 typedef GameValue (*ProcBinary)(const GameState* state, GameValuePar o1, GameValuePar o2);
@@ -579,15 +583,32 @@ class GameEvaluator : public RefCount
 {
     friend class GameState;
     friend struct VyhodFrameGuard;
+    friend struct ScopeNameGuard;
 
     GameVarSpace* local; // local variables
 
     const char *_pos, *_pos0;
     const char *_subexpBeg, *_subexpEnd;
-    GameValue _stack[SL]; // value stack
-    int UB[SL];           // unary/binary flag
-    int _priorStack[SL];  // prioriry stack
-    RString _operStack[SL];
+    // Parser stacks. They start at SL entries and grow (up to SLMax) when an expression
+    // needs more -- a literal array pushes every element before it is collected, and
+    // Arma 2 mission scripts hold arrays of thousands of values.
+    std::vector<GameValue> _stack; // value stack
+    std::vector<int> UB;           // unary/binary flag
+    std::vector<int> _priorStack;  // prioriry stack
+    std::vector<RString> _operStack;
+    bool Reserve(int sp)
+    {
+        if (sp < static_cast<int>(_stack.size()))
+            return true;
+        if (static_cast<int>(_stack.size()) >= SLMax)
+            return false;
+        const size_t n = std::min<size_t>(_stack.size() * 2, SLMax);
+        _stack.resize(n);
+        UB.resize(n);
+        _priorStack.resize(n);
+        _operStack.resize(n);
+        return true;
+    }
     int SP;         // stack pointer
     int _parPrior;  // parenthesis priority
     int _listPrior; // parenthesis priority
@@ -595,6 +616,7 @@ class GameEvaluator : public RefCount
     EvalError _error;
     RString _errorText; // user friendly error text
     int _errorCarretPos;
+    RString _scopeName; // scopeName of the scope this evaluator runs (Arma 2)
 
     GameEvaluator(GameVarSpace* vars = nullptr);
     ~GameEvaluator() override;
@@ -855,6 +877,61 @@ struct GameTypeType : public Poseidon::Foundation::EnumName
     //! Set when a script error is fatal (test mode): loops stop iterating, so a
     //! failing while/for cannot spin the frame forever after the abort was requested.
     static inline bool s_abortLoops = false;
+    //! Arma 2 content writes strings in single quotes too ('text'); OFP's scripts use
+    //! the apostrophe in comments and SQS text, so it is a string delimiter only when set.
+    static inline bool s_singleQuoteStrings = false;
+    // Arma 1/2 semantics: an empty statement (a trailing ';' before the end of the code,
+    // or ';;') does not replace the value of the statement before it. Arma 2's function
+    // library returns values from code ending in "_this call f;\n".
+    static inline bool s_emptyStatementKeepsValue = false;
+    // breakTo / breakOut (Arma 2): the scope being broken to, and whether that scope is
+    // left as well (breakOut). Set while a break unwinds; empty otherwise.
+    static inline std::string s_breakTarget;
+    static inline bool s_breakOut = false;
+    void SetScopeName(const char* name) const;
+    void BreakToScope(const char* name, bool out) const;
+    // A statement loop stopped by EvalBreak: true if this scope is the break's target
+    // (the break is then over: the statement is skipped, or the scope left for breakOut).
+    bool CatchBreak(bool& leaveScope) const;
+    // Optional observer of every expression the evaluator starts (stall diagnostics in the
+    // Arma 2 test mode); null when unused.
+    static inline void (*s_traceExpression)(const char* expression) = nullptr;
+    // Scheduled scripts that suspend anywhere (Arma 2): the number of suspensions so far,
+    // so a while loop that sleeps is not cut at the unscheduled iteration limit. Null
+    // when unused.
+    static inline unsigned (*s_scheduledYields)() = nullptr;
+    // Called once per while-loop iteration; a scheduled script gives the frame back when
+    // its time slice is used up. Null when unused.
+    static inline void (*s_scheduledTick)() = nullptr;
+
+    // Evaluator contexts of a suspended script are taken off the shared stack while it
+    // waits and put back when it resumes.
+    int ContextLevel() const { return _actContext; }
+    void DetachContextsAbove(int level, std::vector<Ref<GameEvaluator>>& out) const
+    {
+        out.clear();
+        for (int i = level + 1; i <= _actContext; i++)
+        {
+            out.push_back(_contextStack[i]);
+            _contextStack[i].Free();
+        }
+        if (_actContext > level)
+        {
+            _actContext = level;
+            _e = _contextStack[_actContext];
+        }
+    }
+    void AttachContexts(std::vector<Ref<GameEvaluator>>& in) const
+    {
+        for (Ref<GameEvaluator>& c : in)
+        {
+            if (_actContext + 1 >= MaxContexts)
+                break;
+            _contextStack[++_actContext] = c;
+        }
+        _e = _contextStack[_actContext];
+        in.clear();
+    }
 
     // evaluate an expression
     //! get actual context (started by BeginContext)

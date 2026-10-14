@@ -1410,6 +1410,32 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
                     tex = materialIndexToTexture[sec.materialIndex];
                 shapeSections[s].properties.SetTexture(tex);
                 shapeSections[s].properties.SetSpecial(static_cast<int>(sec.hints));
+                // Arma ODOL (revision 40 on) does not carry OFP's alpha bits in the section
+                // hints: its foliage is cut out by the texture's own alpha (*_ca.paa). Without
+                // the bits the GL33 pass drew every Chernarus tree and bush as an opaque card.
+                // Derived from the texture exactly as the MLOD path above does per face.
+                if (isODOL && model.sourceVersion >= 40 && tex)
+                {
+                    int spec = shapeSections[s].properties.Special();
+                    // A streamed world object is converted on a worker (`tables`), where the
+                    // texture's headers are not loaded and IsAlpha() says nothing; there the
+                    // Arma naming rule decides: *_ca.paa carries alpha (colour + alpha), and
+                    // foliage is cut out by it. Measured: the d427d85 run still drew Utes'
+                    // trees as cards, every one of them a streamed object.
+                    if (!tables)
+                    {
+                        tex->LoadHeaders();
+                        if (tex->IsAlpha())
+                            spec |= IsAlpha | IsAlphaOrdered;
+                        if (tex->IsTransparent())
+                            spec |= IsTransparent;
+                    }
+                    const char* name = tex->Name();
+                    const size_t len = name ? strlen(name) : 0;
+                    if (len > 7 && !strcmpi(name + len - 7, "_ca.paa") && !(spec & (IsAlpha | IsTransparent)))
+                        spec |= IsTransparent;
+                    shapeSections[s].properties.SetSpecial(spec);
+                }
                 // An Arma P3D section may name an RVMAT independently of its
                 // base texture. Prefer that authored material over the legacy
                 // CfgTextureToMaterial lookup, which cannot recover the RVMAT

@@ -864,6 +864,7 @@ GameValue TriggerSetType(const GameState* state, GameValuePar oper1, GameValuePa
 GameValue TriggerSynchronize(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A2Waypoints(const GameState* state, GameValuePar oper1); // GameStateExtA2.cpp
 GameValue ValueAdd(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ValueGet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue VehAddEventHandler(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -977,9 +978,12 @@ static bool CfgDerived(const ParamEntry* vehicles, const char* type, const char*
     return tc && bc && (tc == bc || tc->IsDerivedFrom(*bc));
 }
 
+RString ObjGetTypeRaw(GameValuePar oper1); // GameStateExtGrp.cpp
+
 static GameValue A1IsKindOf(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
-    const RString type = ObjGetType(state, oper1);
+    // Arma 2: "className" isKindOf "Base" asks about a config class, not an object.
+    const RString type = oper1.GetType() == GameString ? static_cast<RString>(oper1) : ObjGetTypeRaw(oper1);
     const RString base = oper2;
     if (type.GetLength() == 0 || base.GetLength() == 0)
         return GameValue(false);
@@ -987,9 +991,11 @@ static GameValue A1IsKindOf(const GameState* state, GameValuePar oper1, GameValu
         return GameValue(true);
     if (Poseidon::Arma1Compat::Active())
     {
-        if (_strnicmp(type, "A1x_", 4) == 0)
+        const bool generated = _strnicmp(type, "A1x_", 4) == 0;
+        if (generated || oper1.GetType() == GameString)
         {
-            const ParamEntry* a1 = Poseidon::Arma1Compat::FindConfigClass("CfgVehicles", (const char*)type + 4);
+            const ParamEntry* a1 =
+                Poseidon::Arma1Compat::FindConfigClass("CfgVehicles", (const char*)type + (generated ? 4 : 0));
             const ParamEntry* a1Base = Poseidon::Arma1Compat::FindConfigClass("CfgVehicles", base);
             const ParamClass* tc = a1 ? a1->GetClassInterface() : nullptr;
             const ParamClass* bc = a1Base ? a1Base->GetClassInterface() : nullptr;
@@ -1079,6 +1085,26 @@ static GameValue A1CaseCode(const GameState* state, GameValuePar oper1, GameValu
     return NOTHING;
 }
 
+// scopeName names the scope it runs in; breakTo leaves the scopes inside the named one and
+// goes on in it after the statement that was running; breakOut leaves the named one too.
+static GameValue A1ScopeName(const GameState* state, GameValuePar oper1)
+{
+    state->SetScopeName(RString(oper1));
+    return NOTHING;
+}
+
+static GameValue A1BreakTo(const GameState* state, GameValuePar oper1)
+{
+    state->BreakToScope(RString(oper1), false);
+    return NOTHING;
+}
+
+static GameValue A1BreakOut(const GameState* state, GameValuePar oper1)
+{
+    state->BreakToScope(RString(oper1), true);
+    return NOTHING;
+}
+
 // for [{init}, {condition}, {step}] do {body}
 static GameValue A1ForArray(const GameState*, GameValuePar oper1)
 {
@@ -1100,9 +1126,19 @@ static GameValue A1ForArrayDo(const GameState* state, GameValuePar oper1, GameVa
     for (int i = 0; i < 100000 && !GameState::s_abortLoops; i++)
     {
         const GameValue test = state->EvaluateMultiple(RString(parts[1]));
-        if (!(test.GetType() & GameBool) || !(bool)test)
+        if (state->GetLastError() != EvalOK || !(test.GetType() & GameBool) || !(bool)test)
             break;
         gs->Execute(RString(oper2));
+        // the body ran in this scope: breakTo/breakOut keeps unwinding from here, exitWith
+        // ends the loop, any other error stops it (the step would clear the error)
+        if (state->GetLastError() == EvalBreak)
+        {
+            if (GameState::s_breakTarget.empty())
+                gs->SetError(EvalOK);
+            break;
+        }
+        if (state->GetLastError() != EvalOK)
+            break;
         gs->Execute(RString(parts[2]));
     }
     return NOTHING;
@@ -1372,7 +1408,24 @@ static GameValue A1IsNil(const GameState* state, GameValuePar oper1)
     RString name = oper1;
     if (name.GetLength() == 0)
         return GameValue(true);
-    return GameValue(state->VarGet(name).GetNil());
+    // isNil "name" asks about a variable; isNil {code} (a string here too) about the
+    // value of an expression. Anything that is not a bare identifier is evaluated.
+    const char* p = name;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+        p++;
+    const char* q = p;
+    while (*q && (isalnum(static_cast<unsigned char>(*q)) || *q == '_'))
+        q++;
+    const char* r = q;
+    while (*r == ' ' || *r == '\t' || *r == '\r' || *r == '\n')
+        r++;
+    if (q > p && *r == 0)
+        return GameValue(state->VarGet(RString(p, static_cast<int>(q - p))).GetNil());
+    GameVarSpace local(state->GetContext());
+    state->BeginContext(&local);
+    const GameValue value = state->EvaluateMultiple(name);
+    state->EndContext();
+    return GameValue(value.GetNil() || value.GetType() == GameNothing);
 }
 
 static GameValue A1IgnoredUnary(const GameState*, GameValuePar)
@@ -1471,11 +1524,11 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameString, "compile", A1Compile, GameString),
         GameFunction(GameBool, "isPlayer", A1IsPlayer, GameObject),
         GameFunction(GameNothing, "selectPlayer", A1SelectPlayer, GameObject),
-        GameFunction(GameNothing, "scopeName", A1Ignored, GameString),
-        GameFunction(GameNothing, "breakOut", A1Ignored, GameString),
-        GameFunction(GameNothing, "breakTo", A1Ignored, GameString),
+        GameFunction(GameNothing, "scopeName", A1ScopeName, GameString),
+        GameFunction(GameNothing, "breakOut", A1BreakOut, GameString),
+        GameFunction(GameNothing, "breakTo", A1BreakTo, GameString),
         GameFunction(GameArray, "boundingBox", A1BoundingBox, GameObject),
-        GameFunction(GameArray, "waypoints", A1EmptyArray, GameObjectOrGroup),
+        GameFunction(GameArray, "waypoints", A2Waypoints, GameObjectOrGroup),
         GameFunction(GameScalar, "precision", A1One, GameObject),
         GameFunction(GameNothing, "ctrlSetFocus", A1Ignored, GameScalar),
         GameFunction(GameString, "parseText", A1ParseText, GameString),
@@ -1823,7 +1876,7 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameScalar, "distance", function, A1Distance, GameArray, GameObject | GameArray),
         GameOperator(GameScalar, "distance", function, A1Distance, GameObject, GameArray),
         GameOperator(GameNothing, "moveInTurret", function, A1MoveInTurret, GameObject, GameArray),
-        GameOperator(GameBool, "isKindOf", function, A1IsKindOf, GameObject, GameString),
+        GameOperator(GameBool, "isKindOf", function, A1IsKindOf, GameObject | GameString, GameString),
         GameOperator(GameVoid, "do", function, A1SwitchDo, GameArray, GameString),
         GameOperator(GameNothing, ":", function, A1CaseCode, GameArray, GameString),
         GameOperator(GameNothing, "assignTeam", function, A1IgnoredBinary, GameObject, GameString),

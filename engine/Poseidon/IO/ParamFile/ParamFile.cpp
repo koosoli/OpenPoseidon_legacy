@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <cmath>
+#include <vector>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
@@ -1390,7 +1391,14 @@ ParamEntry* ParamClass::Find(const RStringB& name, bool parent, bool base, IPara
     }
     if (base && _base != nullptr)
     {
-        return _base->Find(name, parent, base, visible);
+        ParamEntry* found = _base->Find(name, parent, base, visible);
+        // Not in the base chain: a base-class name is also looked up in the enclosing
+        // scopes (Arma 2 configs rely on it: a control group's class deriving from a
+        // sibling of the group). Lookups that succeeded before are unchanged.
+        if (found || !parent)
+        {
+            return found;
+        }
     }
     if (parent && _parent != nullptr)
     {
@@ -1768,14 +1776,19 @@ void ParamClass::Parse(QIStream& in, ParamFile* file)
                 ParamEntry* entry = Find(base, true, true, DefaultAccess); // search parents and bases of my parent
                 if (!entry)
                 {
+                    // Reported, and the class is read without a base rather than abandoning
+                    // the rest of the section (which cascaded into "input after EndOfFile"
+                    // and dropped every class after it).
                     ErrorMessage("%s: Undefined base class '%s'", (const char*)GetContext(word), (const char*)base);
-                    return;
                 }
-                section->_base = dynamic_cast<ParamClass*>(entry);
-                if (!section->_base)
+                else
                 {
-                    ErrorMessage("%s: '%s' is not class", (const char*)GetContext(word), (const char*)base);
-                    return;
+                    section->_base = dynamic_cast<ParamClass*>(entry);
+                    if (!section->_base)
+                    {
+                        ErrorMessage("%s: '%s' is not class", (const char*)GetContext(word), (const char*)base);
+                        return;
+                    }
                 }
                 c = in.get();
             }
@@ -1968,7 +1981,14 @@ void ParamClass::Parse(QIStream& in, ParamFile* file)
                 }
                 in.unget();
                 bool quot;
-                GetWord(word, sizeof(word), in, ";\n\r", &quot);
+                // A value string can be far longer than an entry name: Arma 2 FSM states keep
+                // whole scripts (6000+ characters) in one string, which a 2 KB word buffer cut
+                // off mid-block. Read values into a large per-thread buffer instead.
+                static thread_local std::vector<char> valueBuf;
+                if (valueBuf.empty())
+                    valueBuf.resize(256 * 1024);
+                char* const vword = valueBuf.data();
+                GetWord(vword, static_cast<int>(valueBuf.size()), in, ";\n\r", &quot);
                 c = in.get();
                 // a macro value with trailing blanks: `text = "x" ;`
                 while (c == ' ' || c == '\t')
@@ -1981,23 +2001,23 @@ void ParamClass::Parse(QIStream& in, ParamFile* file)
                     return;
                 }
 
-                if (strncmp(word, "__EVAL", 6) == 0)
+                if (strncmp(vword, "__EVAL", 6) == 0)
                 {
-                    ::strcpy(word, file->EvaluateStringInternal(word + 6));
+                    ::strcpy(vword, file->EvaluateStringInternal(vword + 6));
                 }
-                else if (!quot && word[0] == '(')
+                else if (!quot && vword[0] == '(')
                 {
                     // Implicit arithmetic — `w = (1.0 - 2 * 0.02);` evaluates
                     // to 0.96.  Lets resource headers compose numeric layout
                     // constants from named macros without requiring the
                     // BIS-style __EVAL prefix on every site.
-                    ::strcpy(word, file->EvaluateStringInternal(word));
+                    ::strcpy(vword, file->EvaluateStringInternal(vword));
                 }
                 else if (!quot)
                 {
                     char folded[64];
-                    if (ParamConstArithmetic(word, folded, sizeof(folded)))
-                        ::strcpy(word, folded);
+                    if (ParamConstArithmetic(vword, folded, sizeof(folded)))
+                        ::strcpy(vword, folded);
                 }
 
                 // check if value is integer or float
@@ -2005,7 +2025,7 @@ void ParamClass::Parse(QIStream& in, ParamFile* file)
                 if (!quot)
                 {
                     bool ok = false;
-                    int val = ScanInt(word, ok);
+                    int val = ScanInt(vword, ok);
                     if (ok)
                     {
                         value = new ParamValueInt(valueName);
@@ -2013,7 +2033,7 @@ void ParamClass::Parse(QIStream& in, ParamFile* file)
                     }
                     else
                     {
-                        float val = ScanFloat(word, ok);
+                        float val = ScanFloat(vword, ok);
                         if (ok)
                         {
                             value = new ParamValueFloat(valueName);
@@ -2024,7 +2044,7 @@ void ParamClass::Parse(QIStream& in, ParamFile* file)
                 if (!value)
                 {
                     value = new ParamValue(valueName);
-                    value->SetValue(word);
+                    value->SetValue(vword);
                 }
 
                 // SetFile is done recursively at the end of parsing

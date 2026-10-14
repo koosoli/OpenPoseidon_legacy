@@ -23,6 +23,9 @@
 #include <Poseidon/Foundation/platform.hpp>
 #include <Random/randomGen.hpp>
 
+#include <set>
+#include <string>
+
 namespace Poseidon
 {
 using namespace Foundation;
@@ -53,9 +56,14 @@ Object* Man::GetProxy(LODShapeWithShadow*& shape, int level, Matrix4& transform,
         }
     }
     const ProxyObject& proxy = sShape->Proxy(i);
+    if (proxy.selection < 0 || proxy.selection >= sShape->NNamedSel())
+        return nullptr;
     const NamedSelection& sel = sShape->NamedSel(proxy.selection);
+    if (sel.Size() <= 0)
+        return nullptr;
     int point = sel[0];
-    PoseidonAssert(sel.Size() > 0);
+    if (point < 0 || point >= wgt.Size() || wgt[point].Size() <= 0)
+        return nullptr; // see DrawProxies: an Arma 2 proxy without skeleton weight
     const AnimationRTWeight& wg = wgt[point];
     int matIndex = wg[0].GetSel();
 
@@ -182,6 +190,20 @@ int Man::GetProxyComplexity(int level, const FrameBase& pos, float dist2) const
     return nFaces;
 }
 
+namespace
+{
+// Once per model and LOD: which proxy could not be placed, so a missing weapon names itself.
+void ReportUnweightedProxy(const LODShapeWithShadow* shape, int level, const ProxyObject& proxy, const char* why)
+{
+    static std::set<std::string> reported;
+    const std::string key = std::string(shape ? (const char*)shape->Name() : "?") + "#" + std::to_string(level) + "#" +
+                            std::string((const char*)proxy.name);
+    if (reported.insert(key).second)
+        LOG_WARN(Graphics, "Man proxy '{}' on {} level {} not drawn: {}", (const char*)proxy.name,
+                 shape ? (const char*)shape->Name() : "?", level, why);
+}
+} // namespace
+
 void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, const Matrix4& invTransform,
                       float dist2, float z2, const LightList& lights)
 {
@@ -205,9 +227,24 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
             }
         }
         const ProxyObject& proxy = sShape->Proxy(i);
+        // A proxy whose selection has no point, or whose point carries no skeleton weight,
+        // cannot be placed on the skeleton. OFP models never do this; Arma 2 ODOL can (its
+        // skinning lives in per-vertex bone references), and indexing past the end here was
+        // the first-frame 0xC0000005 with Arma 2 soldiers. Such a proxy is not drawn.
+        if (proxy.selection < 0 || proxy.selection >= sShape->NNamedSel())
+            continue;
         const NamedSelection& sel = sShape->NamedSel(proxy.selection);
+        if (sel.Size() <= 0)
+        {
+            ReportUnweightedProxy(_shape, level, proxy, "selection has no point");
+            continue;
+        }
         int point = sel[0];
-        PoseidonAssert(sel.Size() > 0);
+        if (point < 0 || point >= wgt.Size() || wgt[point].Size() <= 0)
+        {
+            ReportUnweightedProxy(_shape, level, proxy, "point has no skeleton weight");
+            continue;
+        }
         const AnimationRTWeight& wg = wgt[point];
         int matIndex = wg[0].GetSel();
 
@@ -336,6 +373,36 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
 
         Matrix4 pTransform = transform * animTransform;
 
+        // OP_A2_PROXYLOG=1: where a held weapon lands, the player against one other man,
+        // every two seconds (the player's rifle was drawn at his feet, the AI's in hand).
+        static const bool proxyLog = [] {
+            const char* e = std::getenv("OP_A2_PROXYLOG");
+            return e && *e == '1';
+        }();
+        if (proxyLog && matIndex == type->_gunMatIndex)
+        {
+            static DWORD lastPlayer = 0, lastOther = 0;
+            const bool isPlayer = GWorld && GWorld->CameraOn() == this;
+            DWORD& last = isPlayer ? lastPlayer : lastOther;
+            const DWORD now = Poseidon::Foundation::GlobalTickCount();
+            if (now - last > 2000)
+            {
+                last = now;
+                const Vector3 ap = animTransform.Position();
+                const Vector3 gp = _gunTrans.Position();
+                LOG_INFO(Graphics,
+                         "A2 proxy {}: level {} res {} insideView {} proxy '{}' shape {} anim pos {:.2f},{:.2f},{:.2f} "
+                         "up {:.2f},{:.2f},{:.2f} gunIdent {} gunTrans pos {:.2f},{:.2f},{:.2f} aimX {:.3f} aimY {:.3f} "
+                         "move {} cam {}",
+                         isPlayer ? "PLAYER" : "other", level, _shape->Resolution(level), type->_insideView,
+                         (const char*)proxy.name, (const char*)pshape->Name(), ap.X(), ap.Y(), ap.Z(),
+                         animTransform.DirectionUp().X(), animTransform.DirectionUp().Y(),
+                         animTransform.DirectionUp().Z(), _gunTransIdent, gp.X(), gp.Y(), gp.Z(), _gunXRot, _gunYRot,
+                         (const char*)Type()->GetMoveName(_primaryMove.id),
+                         GWorld ? static_cast<int>(GWorld->GetCameraType()) : -1);
+            }
+        }
+
         if (pshape->Remarks() & REM_REVERSED)
         {
             Matrix4 swapM(MScale, -1, +1, -1);
@@ -356,6 +423,30 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
         {
             pLevel = GScene->LevelFromDistance2(pshape, dist2, pTransform.Scale(), pTransform.Direction(),
                                                 GScene->GetCamera()->Direction());
+        }
+        if (proxyLog && GWorld && GWorld->CameraOn() == this)
+        {
+            static DWORD lastLevel[8] = {};
+            const DWORD now = Poseidon::Foundation::GlobalTickCount();
+            DWORD& last = lastLevel[i & 7];
+            if (now - last > 2000)
+            {
+                last = now;
+                const Vector3 wp = pTransform.Position();
+                const Vector3 up = pTransform.DirectionUp();
+                LOG_INFO(Graphics,
+                         "A2 proxy PLAYER draw #{} '{}' as {} ({}): man level {} -> level {} of {} (scale {:.2f}) world "
+                         "pos {:.2f},{:.2f},{:.2f} up {:.2f},{:.2f},{:.2f} man at {:.2f},{:.2f},{:.2f} filter {} "
+                         "reversed {}",
+                         i, (const char*)proxy.name, (const char*)pshape->Name(),
+                         matIndex == type->_gunMatIndex ? "gun" : matIndex == type->_rpgMatIndex ? "launcher"
+                         : matIndex == type->_handMatIndex ? "hand" : matIndex == type->_rightHandMatIndex ? "righthand"
+                                                                                                         : "other",
+                         level, pLevel, pshape->NLevels(), pTransform.Scale(), wp.X(), wp.Y(), wp.Z(), up.X(), up.Y(),
+                         up.Z(),
+                         transform.Position().X(), transform.Position().Y(), transform.Position().Z(),
+                         static_cast<int>(GSectionFilter), (pshape->Remarks() & REM_REVERSED) != 0);
+            }
         }
         if (pLevel == LOD_INVISIBLE)
         {
@@ -1160,6 +1251,7 @@ MovesType::MovesType(const MovesTypeName& name)
 
     LODShapeWithShadow* shape = _name.shape;
     _weights = WeigthBank.New(wname);
+    bool anyAnimation = false;
     for (int i = 0; i < _moves.Size(); i++)
     {
         MoveId id = MoveId(i);
@@ -1183,10 +1275,17 @@ MovesType::MovesType(const MovesTypeName& name)
         AnimationRT* anim = moveI;
         if (anim)
         {
-            _name.motionType->GetSkeleton()->Prepare(shape, GetWeights());
+            anyAnimation = true;
             anim->SetLooped((*entry) >> "looped");
         }
     }
+    // The weights depend only on the skeleton's bone list, which the moves above have now
+    // completed, so one Prepare after the loop gives what the last per-move Prepare gave.
+    // Preparing after every move re-weighted every LOD hundreds of times: with Arma 2's
+    // ~2000 moves and 132-bone soldiers that alone took over a minute per soldier model on
+    // the laptop, and the stall watchdog ended the test before the mission started.
+    if (anyAnimation)
+        _name.motionType->GetSkeleton()->Prepare(shape, GetWeights());
 
     // FACE-002: after the LAST Prepare -- Prepare re-Inits the weights, so a rig built
     // inside the loop would be wiped by the next move.
@@ -1540,7 +1639,19 @@ void ManType::InitShape()
     Shape* mem = _shape->MemoryLevel();
     PoseidonAssert(mem);
 
-    _cameraPoint = mem ? mem->PointIndex(ManNameOr(par, "memoryPointAim", "zamerny")) : -1;
+    // An Arma 2 man names its memory points in English ("aimpoint", "aiming_axis",
+    // "head_axis", "footstepl"); the imported class does not carry CAManBase's
+    // memoryPoint* entries, so the OFP default is tried first and then the Arma 2 name.
+    // Without "aiming_axis" the player's aim turned his rifle about his feet.
+    const auto pointOr = [&](const char* key, const char* ofpName, const char* a2Name) {
+        if (!mem)
+            return -1;
+        int index = mem->PointIndex(ManNameOr(par, key, ofpName));
+        if (index < 0 && a2Name)
+            index = mem->PointIndex(a2Name);
+        return index;
+    };
+    _cameraPoint = pointOr("memoryPointAim", "zamerny", "aimpoint");
     _pilotPoint = mem ? mem->FindNamedSel("pilot") : -1;
     // An EMPTY "pilot" selection is no pilot point. Every reader takes sel[0] of it (the camera /
     // eye position), and community MLODs ship memory selections with no points -- fml_vorhees'
@@ -1578,21 +1689,21 @@ void ManType::InitShape()
     _insideView = 0;
     _gunnerView = 0;
 
-    _stepLIndex = mem ? mem->PointIndex(ManNameOr(par, "memoryPointLStep", "stopaL")) : -1;
-    _stepRIndex = mem ? mem->PointIndex(ManNameOr(par, "memoryPointRStep", "stopaP")) : -1;
+    _stepLIndex = pointOr("memoryPointLStep", "stopaL", "footstepl");
+    _stepRIndex = pointOr("memoryPointRStep", "stopaP", "footstepr");
 
     _aimPoint = -1;
     _aimingAxisPoint = -1;
     _headAxisPoint = -1;
     if (mem)
     {
-        _aimPoint = mem->PointIndex(ManNameOr(par, "memoryPointAim", "zamerny"));
+        _aimPoint = pointOr("memoryPointAim", "zamerny", "aimpoint");
         if (_aimPoint < 0)
         {
             LOG_DEBUG(Physics, "No aim point in {}", (const char*)GetName());
         }
-        _aimingAxisPoint = mem->PointIndex(ManNameOr(par, "memoryPointAimingAxis", "osa mireni"));
-        _headAxisPoint = mem->PointIndex(ManNameOr(par, "memoryPointHeadAxis", "osa otaceni"));
+        _aimingAxisPoint = pointOr("memoryPointAimingAxis", "osa mireni", "aiming_axis");
+        _headAxisPoint = pointOr("memoryPointHeadAxis", "osa otaceni", "head_axis");
         if (_headAxisPoint < 0)
         {
             _headAxisPoint = _aimingAxisPoint;

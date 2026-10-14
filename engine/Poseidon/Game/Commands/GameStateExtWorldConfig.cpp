@@ -1,5 +1,6 @@
 
 #include <Poseidon/Core/Config/EngineConfig.hpp>
+#include <string>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Core/Version.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
@@ -8,6 +9,7 @@
 #include <Poseidon/World/Scene/Fireplace.hpp>
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -949,6 +951,10 @@ GameValue MissionStart(const GameState* state)
 
 GameValue IsServer(const GameState* state)
 {
+    // Arma 1/2 content (--arma1/--arma2) treats a single-player game as its own server:
+    // mission scripts put the whole mission set-up behind 'if (isServer)'.
+    if (Poseidon::Arma1Compat::Active() && GWorld && GWorld->GetMode() != GModeNetware)
+        return GameValue(true);
     return GetNetworkManager().IsServer();
 }
 
@@ -1119,15 +1125,27 @@ GameValue StringLoad(const GameState* state, GameValuePar oper1)
 
 class FilePreprocessor : public Preproc
 {
+  public:
+    // Folder of the file being preprocessed ("ca\\modules\\functions\\"), for includes
+    // given relative to it. Arma 2 scripts include both ways.
+    std::string baseDir;
+
   protected:
     QIStream* OnEnterInclude(const char* filename) override
     {
-        if (!QIFStreamB::FileExist(filename))
+        std::string name = filename ? filename : "";
+        // Arma 2 names bank paths with a leading backslash ("\\ca\\modules\\...").
+        while (!name.empty() && (name[0] == '\\' || name[0] == '/'))
+            name.erase(0, 1);
+        if (!QIFStreamB::FileExist(name.c_str()) && !baseDir.empty() &&
+            QIFStreamB::FileExist((baseDir + name).c_str()))
+            name = baseDir + name;
+        if (!QIFStreamB::FileExist(name.c_str()))
         {
             return nullptr;
         }
         QIFStreamB* stream = new QIFStreamB();
-        stream->AutoOpen(filename);
+        stream->AutoOpen(name.c_str());
         return stream;
     }
     void OnExitInclude(QIStream* stream) override
@@ -1138,8 +1156,63 @@ class FilePreprocessor : public Preproc
         }
     }
 };
+// Arma 2 content: preprocesses a script/FSM file (#include, #define, #ifdef) the way
+// preprocessFile does. False when the file cannot be opened or preprocessed.
+bool PreprocessScriptFile(const char* name, std::string& out)
+{
+    std::string file = name ? name : "";
+    const bool absolute = !file.empty() && (file[0] == '\\' || file[0] == '/');
+    while (!file.empty() && (file[0] == '\\' || file[0] == '/'))
+        file.erase(0, 1);
+    if (!absolute)
+    {
+        const std::string inMission = std::string((const char*)GetMissionDirectory()) + file;
+        if (QIFStreamB::FileExist(inMission.c_str()))
+            file = inMission;
+        else if (!QIFStreamB::FileExist(file.c_str()))
+            file = (const char*)Poseidon::FindScript(RString(file.c_str()));
+    }
+    if (file.empty() || !QIFStreamB::FileExist(file.c_str()))
+        return false;
+    FilePreprocessor preproc;
+    const size_t slash = file.find_last_of("\\/");
+    if (slash != std::string::npos)
+        preproc.baseDir = file.substr(0, slash + 1);
+    QOStream processed;
+    if (!preproc.Process(&processed, RString(file.c_str())))
+        return false;
+    out.assign(processed.str(), processed.pcount());
+    // Drop what the preprocessor leaves behind as directives ("#line ..."): the
+    // expression evaluator does not read them.
+    std::string kept;
+    kept.reserve(out.size());
+    size_t pos = 0;
+    while (pos < out.size())
+    {
+        size_t end = out.find('\n', pos);
+        if (end == std::string::npos)
+            end = out.size();
+        size_t b = pos;
+        while (b < end && (out[b] == ' ' || out[b] == '\t'))
+            b++;
+        if (b >= end || out[b] != '#')
+            kept.append(out, pos, end - pos);
+        kept.push_back('\n');
+        pos = end + 1;
+    }
+    out.swap(kept);
+    return true;
+}
+
 GameValue StringPreprocess(const GameState* state, GameValuePar oper1)
 {
+    if (Poseidon::Arma1Compat::Generation() == 2)
+    {
+        // Arma 2 names its library scripts by absolute bank path ("\\ca\\modules\\...").
+        std::string text;
+        if (PreprocessScriptFile(RString(oper1), text))
+            return RString(text.c_str());
+    }
     RString filename = Poseidon::FindScript(oper1);
     FilePreprocessor preproc;
     QOStream processed;

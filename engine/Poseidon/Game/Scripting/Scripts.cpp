@@ -1,7 +1,14 @@
 
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Game/Scripting/Scripts.hpp>
+#include <algorithm>
+#include <chrono>
+#include <exception>
+#include <cstdlib>
 #include <functional>
+#include <vector>
+#include <Poseidon/Game/Scripting/Coroutine.hpp>
 #include <string>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
@@ -27,6 +34,13 @@ RString FindScript(RString name);
 
 namespace Poseidon
 {
+struct ScriptFiber;
+bool InScheduledScript();
+void ScheduledYield();
+void ScheduledSleep(float seconds);
+bool ScriptFiberDone(const ScriptFiber* f);
+void ScriptFiberTerminate(ScriptFiber* f);
+void DestroyScriptFiber(ScriptFiber* f);
 #define DIAG_DEBUG 0 // script debug level (0..90)
 
 #if _MSC_VER >= 1300
@@ -202,6 +216,7 @@ Script::~Script()
 #if SCRIPTS_DEBUGGING
     DoneDebugger();
 #endif
+    DestroyScriptFiber(_fiber);
 }
 
 static void Trim(RString& str)
@@ -408,6 +423,8 @@ static Script* CurrentScript = nullptr;
 
 bool Script::IsTerminated() const
 {
+    if (_fiber)
+        return ScriptFiberDone(_fiber);
     return _currentLine >= _lines.Size();
 }
 
@@ -434,6 +451,8 @@ bool Script::SimulateBody()
     }
 #endif
 
+    if (_fiber)
+        return SimulateFiber();
     GameState* gstate = GWorld->GetGameState();
     gstate->VarSetLocal("_this", _argument, true);
 // if simulate body takes too long, interrupt it
@@ -486,6 +505,10 @@ bool Script::SimulateBody()
         LOG_DEBUG(Script, "Script paused after {} ms", time - timeStart);
     }
 #endif
+    // Arma 2 spawned code may reassign _this ("_this = _this select 0; waitUntil {...}");
+    // keep what it assigned for the next step instead of restoring the spawn argument.
+    if (Poseidon::Arma1Compat::Generation() == 2)
+        _argument = gstate->VarGet("_this");
     return _currentLine >= _lines.Size();
 }
 
@@ -501,9 +524,14 @@ bool Script::Simulate(float deltaT)
         CurrentScript = this;
         GameState* gstate = GWorld->GetGameState();
         gstate->BeginContext(&_vars);
-        gstate->VarSet("_time", _time); // make sure there is such variable
+        // SQS keeps the script's clock in _time; in a scheduled SQF script _time is an
+        // ordinary local the script owns (fn_halo: _time = time, then time - _time).
+        if (!_fiber)
+            gstate->VarSet("_time", _time); // make sure there is such variable
         ret = SimulateBody();
-        _time = gstate->VarGet("_time");
+        GameState::s_breakTarget.clear(); // a breakTo whose scope was never found
+        if (!_fiber)
+            _time = gstate->VarGet("_time");
         gstate->EndContext();
         CurrentScript = nullptr;
     }
@@ -524,10 +552,15 @@ bool Script::OnSimulate()
         CurrentScript = this;
         GameState* gstate = GWorld->GetGameState();
         gstate->BeginContext(&_vars);
-        gstate->VarSet("_time", _time);
+        if (!_fiber)
+            gstate->VarSet("_time", _time);
         ret = SimulateBody();
-        _time = gstate->VarGet("_time");
-        _baseTime = Glob.time - _time;
+        GameState::s_breakTarget.clear(); // a breakTo whose scope was never found
+        if (!_fiber)
+        {
+            _time = gstate->VarGet("_time");
+            _baseTime = Glob.time - _time;
+        }
         gstate->EndContext();
         CurrentScript = nullptr;
     }
@@ -568,6 +601,8 @@ void Script::GoTo(RString label)
 void Script::Exit()
 {
     _currentLine = _lines.Size();
+    if (_fiber)
+        ScriptFiberTerminate(_fiber);
 }
 
 #define NOTHING GameValue()
@@ -1048,8 +1083,190 @@ Script* Script::FindByHandle(int handle)
     return found == ScriptHandles().end() ? nullptr : found->second.GetLink();
 }
 
+// ---------------------------------------------------------------------------
+// Arma 2 scheduled code (spawn / execVM) on a stack of its own.
+//
+// Arma 2 suspends a script anywhere -- a sleep inside a function called from inside a
+// while loop is ordinary code there (BIS_fnc_UnitPlay, the scene functions, ...). The
+// line compiler above can only suspend at statements it sees. With --arma2 each
+// scheduled script instead runs as a coroutine (a Windows fiber / POSIX ucontext): sleep
+// and waitUntil switch back to the frame and the script continues exactly where it was
+// on a later one. Only one runs at a time, on the main thread; the evaluator contexts it
+// has open are taken off the shared stack while it waits.
+// ---------------------------------------------------------------------------
+struct ScriptFiber
+{
+    Script* script = nullptr;
+    RString code;
+    bool started = false;
+    bool done = false;
+    bool terminate = false;
+    int baseLevel = 0;
+    std::vector<Ref<GameEvaluator>> contexts;
+    Coroutine::Handle* coroutine = nullptr;
+    std::chrono::steady_clock::time_point sliceStart;
+    // Game time when it last gave the frame back. Arma 2 resumes a scheduled script in a
+    // later frame at the earliest, so `time` always moves across a sleep or a yield
+    // (scripts divide by that difference: fn_halo's _fpsCoef).
+    float suspendedAt = -1.0f;
+
+    static void SuspendFor(ScriptFiber& f, float seconds)
+    {
+        f.script->_suspendedUntil = f.script->_time + std::max(seconds, 0.0f);
+    }
+
+    static void Run(void* param)
+    {
+        ScriptFiber& f = *static_cast<ScriptFiber*>(param);
+        GameState* gstate = GWorld->GetGameState();
+        // The fiber's own context on top of the frame's: everything it opens is above
+        // baseLevel and travels with it while it waits.
+        const int level = gstate->ContextLevel();
+        gstate->BeginContext(&f.script->_vars);
+        gstate->VarSetLocal("_this", f.script->_argument, true);
+        // Nothing may unwind out of a coroutine: its stack has no caller to catch it.
+        try
+        {
+            gstate->EvaluateMultiple(f.code);
+            GameState::s_breakTarget.clear(); // a breakTo whose scope was never found
+        }
+        catch (const std::exception& e)
+        {
+            LOG_ERROR(Script, "script '{}' stopped by an exception: {}", (const char*)f.script->_name, e.what());
+        }
+        catch (...)
+        {
+            LOG_ERROR(Script, "script '{}' stopped by an exception", (const char*)f.script->_name);
+        }
+        while (gstate->ContextLevel() > level)
+            gstate->EndContext();
+        f.done = true;
+    }
+};
+
+namespace
+{
+ScriptFiber* GRunningFiber = nullptr;
+unsigned GFiberYields = 0;
+constexpr size_t FiberStackSize = 16u << 20; // reserved, committed as used
+
+unsigned FiberYieldCount()
+{
+    return GFiberYields;
+}
+
+} // namespace
+
+bool ScriptFiberDone(const ScriptFiber* f)
+{
+    return f->done || f->terminate;
+}
+
+void ScriptFiberTerminate(ScriptFiber* f)
+{
+    f->terminate = true;
+}
+
+void DestroyScriptFiber(ScriptFiber* f)
+{
+    if (!f || f == GRunningFiber)
+        return;
+    Coroutine::Destroy(f->coroutine);
+    delete f;
+}
+
+// True when the code being evaluated runs as a scheduled Arma 2 script.
+bool InScheduledScript()
+{
+    return GRunningFiber != nullptr;
+}
+
+// Gives the frame back; the script continues here on a later simulation step.
+void ScheduledYield()
+{
+    ScriptFiber* f = GRunningFiber;
+    if (!f)
+        return;
+    GFiberYields++;
+    f->suspendedAt = Glob.time.toFloat();
+    Coroutine::Suspend(f->coroutine);
+    f->sliceStart = std::chrono::steady_clock::now();
+}
+
+// sleep in scheduled code: resume once the script's clock has advanced by `seconds`
+void ScheduledSleep(float seconds)
+{
+    ScriptFiber* f = GRunningFiber;
+    if (!f)
+        return;
+    ScriptFiber::SuspendFor(*f, seconds);
+    ScheduledYield();
+}
+
+// A scheduled loop that keeps the frame longer than Arma 2's ~3 ms slice gives it back.
+void ScheduledTick()
+{
+    ScriptFiber* f = GRunningFiber;
+    if (f && std::chrono::steady_clock::now() - f->sliceStart > std::chrono::milliseconds(3))
+        ScheduledYield();
+}
+
+bool Script::SimulateFiber()
+{
+    ScriptFiber& f = *_fiber;
+    if (f.done || f.terminate)
+        return true;
+    if (GRunningFiber)
+        return false; // a scheduled script does not run another one inside itself
+    if (f.started && Glob.time.toFloat() == f.suspendedAt)
+        return false; // not again in the frame it gave back
+    GameState* gstate = GWorld->GetGameState();
+    if (!f.started)
+    {
+        f.started = true;
+        GameState::s_scheduledYields = FiberYieldCount;
+        GameState::s_scheduledTick = ScheduledTick;
+        f.coroutine = Coroutine::Create(ScriptFiber::Run, &f, FiberStackSize);
+        if (!f.coroutine)
+        {
+            LOG_ERROR(Script, "could not create a coroutine for '{}'", (const char*)_name);
+            f.done = true;
+            return true;
+        }
+    }
+    f.baseLevel = gstate->ContextLevel();
+    gstate->AttachContexts(f.contexts);
+    GRunningFiber = &f;
+    f.sliceStart = std::chrono::steady_clock::now();
+    Coroutine::Resume(f.coroutine);
+    GRunningFiber = nullptr;
+    gstate->DetachContextsAbove(f.baseLevel, f.contexts);
+    return f.done;
+}
+
+Script* Script::CreateFiberScript(RString name, RString code, GameValuePar argument)
+{
+    Script* script = new Script();
+    script->_argument = argument;
+    script->_maxLinesAtOnce = 100;
+    script->_name = name;
+    script->_handle = NextScriptHandle();
+    ScriptHandles()[script->_handle] = script;
+    script->_fiber = new ScriptFiber();
+    script->_fiber->script = script;
+    script->_fiber->code = code;
+    return script;
+}
+
 Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument)
 {
+    // Arma 2: a coroutine, so suspension works anywhere (OP_A2_FIBERS=0: line compiler)
+    static const bool fibers = [] {
+        const char* e = std::getenv("OP_A2_FIBERS");
+        return !(e && *e == '0');
+    }();
+    if (fibers && Arma1Compat::Generation() == 2)
+        return CreateFiberScript(name, code, argument);
     Script* script = new Script();
     script->_argument = argument;
     script->_maxLinesAtOnce = 100;
@@ -1113,12 +1330,14 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
             addLine(empty, empty, RString(wait.c_str()));
             addLine(empty, RString("__waituntil"), empty);
         }
-        else if (!loopExits.empty() && ParseSqfControl(statement, control) && control.kind == SqfControl::ExitWith)
+        else if (ParseSqfControl(statement, control) && control.kind == SqfControl::ExitWith)
         {
+            // exitWith leaves the innermost compiled scope (loop body, if/switch branch);
+            // at the top level of the script it ends the script, as in Arma.
             const std::string skip = newLabel();
             addCondLine("!(" + control.condition + ")", "goto \"" + skip + "\"");
             emitBlock(control.body);
-            addGoto(loopExits.back());
+            addGoto(loopExits.empty() ? scriptEnd : loopExits.back());
             placeLabel(skip);
         }
         else if (HasSuspension(statement) && ParseSqfControl(statement, control) &&
@@ -1167,10 +1386,12 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
                 {
                     const std::string otherwise = newLabel();
                     addCondLine("!(" + control.condition + ")", "goto \"" + otherwise + "\"");
+                    loopExits.push_back(next);
                     emitBlock(control.body);
                     addGoto(next);
                     placeLabel(otherwise);
                     emitBlock(control.elseBody);
+                    loopExits.pop_back();
                     placeLabel(next);
                     break;
                 }
@@ -1233,13 +1454,21 @@ GameValue ScriptSpawn(const GameState* state, GameValuePar oper1, GameValuePar o
     return GameValue(static_cast<float>(script->GetHandle()));
 }
 
+bool PreprocessScriptFile(const char* name, std::string& out); // GameStateExtWorldConfig.cpp
+
 GameValue ScriptExecVM(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     using namespace Poseidon;
     RString name = oper2;
     QIFStreamB in;
     std::string code;
-    if (OpenScript(in, name))
+    // Arma 2 scripts rely on #include / #define: run them through the preprocessor
+    // preprocessFile uses. Arma 1 content keeps the plain read below.
+    if (Arma1Compat::Generation() == 2 && PreprocessScriptFile(name, code))
+    {
+        // preprocessed; '#line' markers and the like are dropped below
+    }
+    else if (OpenScript(in, name))
     {
         while (true)
         {
@@ -1254,7 +1483,8 @@ GameValue ScriptExecVM(const GameState* state, GameValuePar oper1, GameValuePar 
         LOG_WARN(Script, "execVM: script '{}' not found", (const char*)name);
     }
     // Preprocessor directives are not expanded here; report them instead of guessing.
-    if (code.find("#include") != std::string::npos || code.find("#define") != std::string::npos)
+    if (Arma1Compat::Generation() != 2 &&
+        (code.find("#include") != std::string::npos || code.find("#define") != std::string::npos))
         LOG_WARN(Script, "execVM '{}': preprocessor directives are not supported and were ignored",
                  (const char*)name);
     std::string filtered;
@@ -1295,6 +1525,16 @@ GameValue ScriptIsDone(const GameState* state, GameValuePar oper1)
 GameValue ScriptWaitUntilUnscheduled(const GameState* state, GameValuePar oper1)
 {
     using namespace Poseidon;
+    if (InScheduledScript())
+    {
+        // scheduled: check once per simulation step until it holds
+        for (;;)
+        {
+            if (GWorld->GetGameState()->EvaluateBool(RString(oper1)))
+                return GameValue(true);
+            ScheduledYield();
+        }
+    }
     static bool reported = false;
     if (!reported)
     {
@@ -1307,6 +1547,11 @@ GameValue ScriptWaitUntilUnscheduled(const GameState* state, GameValuePar oper1)
 
 GameValue ScriptSleepUnscheduled(const GameState* state, GameValuePar oper1)
 {
+    if (Poseidon::InScheduledScript())
+    {
+        Poseidon::ScheduledSleep(static_cast<float>(oper1));
+        return GameValue();
+    }
     static bool reported = false;
     if (!reported)
     {

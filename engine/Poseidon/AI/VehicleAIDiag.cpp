@@ -613,6 +613,24 @@ void EntityAI::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transf
 
             // construct FrameWithInverse from transform and invTransform
 
+            // OP_A2_PROXYLOG=1: an "alwaysshow" proxy is drawn at its rest place, unanimated --
+            // say which, for the player (the rifle lying at his feet in third person)
+            static const bool proxyLog = [] {
+                const char* e = std::getenv("OP_A2_PROXYLOG");
+                return e && *e == '1';
+            }();
+            if (proxyLog && GWorld && GWorld->CameraOn() == this)
+            {
+                static DWORD last = 0;
+                const DWORD now = Poseidon::Foundation::GlobalTickCount();
+                if (now - last > 2000)
+                {
+                    last = now;
+                    const Vector3 wp = pTransform.Position();
+                    LOG_INFO(Graphics, "A2 proxy PLAYER alwaysshow '{}' model {} at {:.2f},{:.2f},{:.2f}",
+                             (const char*)proxy.name, (const char*)pshape->Name(), wp.X(), wp.Y(), wp.Z());
+                }
+            }
             obj->Draw(level, ClipAll, pFrame);
         }
         else if (_flag && _showFlag)
@@ -1059,7 +1077,15 @@ float EntityAI::NeedsAmbulance() const
     {
         return 0;
     }
-    return CommanderUnit()->GetPerson()->NeedsAmbulance();
+    // A unit whose body is not a soldier (an Arma 1/2 class carried by a CWA object
+    // kind) is its own "person": asking it again would loop forever (the call compiles
+    // to a tail jump, so it spins instead of overflowing the stack).
+    const EntityAI* person = CommanderUnit()->GetPerson();
+    if (!person || person == this)
+    {
+        return 0;
+    }
+    return person->NeedsAmbulance();
 }
 
 float EntityAI::NeedsRepair() const

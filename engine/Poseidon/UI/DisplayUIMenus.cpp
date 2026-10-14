@@ -32,7 +32,10 @@
 #include <Poseidon/Core/Profile/ProfileManager.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/Foundation/Platform/GamePaths.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/IO/Filesystem/Utf8Paths.hpp>
+#include <cstdlib>
 #include <filesystem>
 #include <limits.h>
 #include <stdio.h>
@@ -941,6 +944,7 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
             testStart = now;
             LOG_INFO(Core, "ARMA1-TEST mission runtime entered ({}.{})", (const char*)Glob.header.filename,
                      (const char*)Glob.header.worldname);
+            Poseidon::Arma1Compat::LogAssetCensus();
         }
         else if (now - testStart >= static_cast<DWORD>(testSeconds * 1000.0f))
         {
@@ -949,6 +953,36 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
             testStart = 0xFFFFFFFF;
             GApp->m_exitCode = 0;
             GApp->m_closeRequest = true;
+        }
+        if (testStart != 0 && testStart != 0xFFFFFFFF)
+        {
+            // OP_A2_SHOT=<path prefix>: the player's view at 8 s, then the player from
+            // outside (third person) at 14 s, to check the models without anyone watching.
+            static const std::string shot = [] {
+                const char* e = std::getenv("OP_A2_SHOT");
+                return std::string(e ? e : "");
+            }();
+            static int shotStep = 0;
+            const DWORD played = now - testStart;
+            if (!shot.empty() && GEngine && GWorld)
+            {
+                if (shotStep == 0 && played >= 8000)
+                {
+                    GEngine->Screenshot((shot + "_1st.png").c_str());
+                    shotStep = 1;
+                }
+                else if (shotStep == 1 && played >= 10000)
+                {
+                    if (Object* on = GWorld->CameraOn())
+                        GWorld->SwitchCameraTo(on, CamExternal);
+                    shotStep = 2;
+                }
+                else if (shotStep == 2 && played >= 14000)
+                {
+                    GEngine->Screenshot((shot + "_3rd.png").c_str());
+                    shotStep = 3;
+                }
+            }
         }
     }
 
@@ -1003,6 +1037,8 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
             {
                 if (AutoTest)
                 {
+                    LOG_INFO(Core, "AUTO-TEST mission ended: player killed ({}.{})", (const char*)Glob.header.filename,
+                             (const char*)Glob.header.worldname);
                     GWorld->DestroyMap(IDC_OK);
                     Exit(IDC_MAIN_QUIT);
                 }
@@ -1032,6 +1068,8 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
         GWorld->DestroyMap(IDC_OK);
         if (AutoTest)
         {
+            LOG_INFO(Core, "AUTO-TEST mission ended: end mode {} ({}.{})", static_cast<int>(GWorld->GetEndMode()),
+                     (const char*)Glob.header.filename, (const char*)Glob.header.worldname);
             Exit(IDC_MAIN_QUIT);
         }
         else

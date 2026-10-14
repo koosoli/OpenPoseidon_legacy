@@ -24,6 +24,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <cstring>
 #include <functional>
 #include <map>
@@ -37,6 +39,7 @@ namespace Poseidon::Arma1Compat
 {
 const std::vector<std::string>& BankPrefixes(); // Arma1Compat.cpp
 std::string RootFolder();                       // Arma1Compat.cpp
+std::vector<std::string> DtaFolders();          // Arma1Compat.cpp
 
 namespace
 {
@@ -258,6 +261,340 @@ class RapToText
     }
 };
 
+// ---------------------------------------------------------------------------
+// raP -> tree, merged across every addon before it is parsed (Arma 2)
+// ---------------------------------------------------------------------------
+//
+// Arma 2 configs name base classes that the same file does not declare (a world's
+// Lighting classes derive from CfgWorlds' DayLighting* defined by another addon). The
+// engine's parser resolves a base while it reads, so such a file cannot be parsed on
+// its own. Instead every config.bin is read into this tree, the trees are merged in
+// requiredAddons order the way the game merges them, and the merged whole is written
+// out as one config text whose classes come after the classes they derive from.
+
+struct RapNode
+{
+    std::string name;  // original case
+    std::string base;  // for classes
+    bool isClass = false;
+    bool isExtern = false;      // "class X;" -- names a class, defines nothing
+    std::string text;           // for values: "name=value;" / "name[]={...};"
+    std::vector<std::string> strings; // array values: the top-level string items
+    std::vector<std::unique_ptr<RapNode>> children;
+    std::map<std::string, size_t> index; // lower-case name -> children slot
+
+    RapNode* Find(const std::string& lowerName) const
+    {
+        const auto it = index.find(lowerName);
+        return it == index.end() ? nullptr : children[it->second].get();
+    }
+    void Put(std::unique_ptr<RapNode> node)
+    {
+        const std::string key = Lower(node->name);
+        const auto it = index.find(key);
+        if (it != index.end())
+            children[it->second] = std::move(node);
+        else
+        {
+            index[key] = children.size();
+            children.push_back(std::move(node));
+        }
+    }
+    void Remove(const std::string& lowerName)
+    {
+        const auto it = index.find(lowerName);
+        if (it == index.end())
+            return;
+        children.erase(children.begin() + static_cast<long>(it->second));
+        index.clear();
+        for (size_t i = 0; i < children.size(); i++)
+            index[Lower(children[i]->name)] = i;
+    }
+    std::unique_ptr<RapNode> Clone() const
+    {
+        auto n = std::make_unique<RapNode>();
+        n->name = name;
+        n->base = base;
+        n->isClass = isClass;
+        n->isExtern = isExtern;
+        n->text = text;
+        n->strings = strings;
+        for (const auto& c : children)
+            n->Put(c->Clone());
+        return n;
+    }
+};
+
+class RapTree
+{
+    const std::vector<uint8_t>& _bytes;
+
+    void Need(size_t at, size_t n) const
+    {
+        if (at + n > _bytes.size())
+            throw std::runtime_error("truncated raP");
+    }
+    uint8_t Byte(size_t& at) const
+    {
+        Need(at, 1);
+        return _bytes[at++];
+    }
+    uint32_t U32(size_t& at) const
+    {
+        Need(at, 4);
+        const uint32_t v = uint32_t(_bytes[at]) | (uint32_t(_bytes[at + 1]) << 8) | (uint32_t(_bytes[at + 2]) << 16) |
+                           (uint32_t(_bytes[at + 3]) << 24);
+        at += 4;
+        return v;
+    }
+    float F32(size_t& at) const
+    {
+        const uint32_t bits = U32(at);
+        float f;
+        std::memcpy(&f, &bits, sizeof(f));
+        return f;
+    }
+    std::string Str(size_t& at) const
+    {
+        const size_t start = at;
+        while (Byte(at) != 0)
+        {
+        }
+        return std::string(reinterpret_cast<const char*>(_bytes.data() + start), at - start - 1);
+    }
+    uint32_t Count(size_t& at) const
+    {
+        uint32_t v = 0;
+        for (unsigned shift = 0; shift <= 28; shift += 7)
+        {
+            const uint8_t b = Byte(at);
+            v |= uint32_t(b & 0x7f) << shift;
+            if (!(b & 0x80))
+                return v;
+        }
+        throw std::runtime_error("bad raP count");
+    }
+    static std::string Quote(const std::string& s)
+    {
+        std::string q = "\"";
+        for (char c : s)
+        {
+            if (c == '"')
+                q += "\"\"";
+            else if (c == '\r' || c == '\n')
+                q += ' ';
+            else
+                q += c;
+        }
+        return q + "\"";
+    }
+    static std::string Float(float f)
+    {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%.9g", f);
+        if (strchr(buf, 'e') || strchr(buf, 'E') || strstr(buf, "inf") || strstr(buf, "nan"))
+            snprintf(buf, sizeof(buf), "%.6f", static_cast<double>(f));
+        return buf;
+    }
+    static std::string Scalar(const std::string& s)
+    {
+        if (s.rfind("ManPos", 0) == 0)
+        {
+            const int v = ManPosValue(s);
+            if (v != -1000)
+                return std::to_string(v);
+        }
+        return Quote(s);
+    }
+    std::string Array(size_t& at, int depth, std::vector<std::string>* strings)
+    {
+        if (depth > 32)
+            throw std::runtime_error("raP array too deep");
+        const uint32_t n = Count(at);
+        std::string out = "{";
+        for (uint32_t i = 0; i < n; i++)
+        {
+            if (i)
+                out += ",";
+            const uint8_t t = Byte(at);
+            if (t == 0 || t == 4)
+            {
+                const std::string v = Str(at);
+                if (strings)
+                    strings->push_back(v);
+                out += Scalar(v);
+            }
+            else if (t == 1)
+                out += Float(F32(at));
+            else if (t == 2)
+                out += std::to_string(static_cast<int32_t>(U32(at)));
+            else if (t == 3)
+                out += Array(at, depth + 1, nullptr);
+            else
+                throw std::runtime_error("bad raP array element");
+        }
+        return out + "}";
+    }
+    void Body(size_t at, RapNode& node, int depth)
+    {
+        if (depth > 64)
+            throw std::runtime_error("raP class too deep");
+        (void)Str(at); // parent name, read with the class header
+        const uint32_t n = Count(at);
+        for (uint32_t i = 0; i < n; i++)
+        {
+            const uint8_t type = Byte(at);
+            auto child = std::make_unique<RapNode>();
+            if (type == 0)
+            {
+                child->name = Str(at);
+                child->isClass = true;
+                size_t body = U32(at);
+                size_t peek = body;
+                child->base = Str(peek);
+                Body(body, *child, depth + 1);
+                node.Put(std::move(child));
+            }
+            else if (type == 1)
+            {
+                const uint8_t sub = Byte(at);
+                child->name = Str(at);
+                std::string value;
+                if (sub == 0 || sub == 4)
+                    value = Scalar(Str(at));
+                else if (sub == 1)
+                    value = Float(F32(at));
+                else if (sub == 2)
+                    value = std::to_string(static_cast<int32_t>(U32(at)));
+                else
+                    throw std::runtime_error("bad raP value");
+                child->text = child->name + "=" + value + ";";
+                node.Put(std::move(child));
+            }
+            else if (type == 2 || type == 5)
+            {
+                if (type == 5)
+                    (void)U32(at); // "+=" flag: appended arrays are taken whole
+                child->name = Str(at);
+                child->text = child->name + "[]=" + Array(at, 0, &child->strings) + ";";
+                node.Put(std::move(child));
+            }
+            else if (type == 3)
+            {
+                child->name = Str(at);
+                child->isClass = true;
+                child->isExtern = true;
+                if (!node.Find(Lower(child->name)))
+                    node.Put(std::move(child));
+            }
+            else if (type == 4)
+            {
+                // "delete X;" -- kept as a marker the merge applies to the destination
+                child->name = Str(at);
+                child->text = "\x01" "delete";
+                node.Put(std::move(child));
+            }
+            else
+                throw std::runtime_error("bad raP entry");
+        }
+    }
+
+  public:
+    explicit RapTree(const std::vector<uint8_t>& bytes) : _bytes(bytes) {}
+    std::unique_ptr<RapNode> Read()
+    {
+        if (_bytes.size() < 16 || std::memcmp(_bytes.data(), "\0raP", 4) != 0)
+            throw std::runtime_error("not a raP config");
+        auto root = std::make_unique<RapNode>();
+        root->isClass = true;
+        Body(16, *root, 0);
+        return root;
+    }
+};
+
+// Merges `src` into `dst` like an addon config updating the config before it.
+void MergeRap(RapNode& dst, const RapNode& src)
+{
+    for (const auto& child : src.children)
+    {
+        const std::string key = Lower(child->name);
+        if (child->text == "\x01" "delete")
+        {
+            dst.Remove(key);
+            continue;
+        }
+        RapNode* existing = dst.Find(key);
+        if (child->isClass)
+        {
+            if (existing && existing->isClass)
+            {
+                if (child->isExtern)
+                    continue;
+                if (!child->base.empty() || existing->isExtern)
+                    existing->base = child->base;
+                existing->isExtern = false;
+                MergeRap(*existing, *child);
+            }
+            else if (!child->isExtern)
+            {
+                // An extern ("class Sounds;") names a class the scope inherits or that
+                // another addon defines: adding it as an empty class would shadow the
+                // inherited one (LandVehicle >> Sounds hiding AllVehicles >> Sounds).
+                dst.Put(child->Clone());
+            }
+        }
+        else
+        {
+            dst.Put(child->Clone());
+        }
+    }
+}
+
+void CollectRapBases(const RapNode& node, std::set<std::string>& names)
+{
+    if (node.isClass && !node.base.empty())
+        names.insert(Lower(node.base));
+    for (const auto& c : node.children)
+        if (c->isClass)
+            CollectRapBases(*c, names);
+}
+
+// Writes the merged tree as config text. Within a class, values come first, then the
+// classes, each after the siblings its subtree derives from.
+void WriteRap(const RapNode& node, std::string& out, int depth)
+{
+    const std::string pad(static_cast<size_t>(depth), '\t');
+    for (const auto& c : node.children)
+        if (!c->isClass && (c->text.empty() || c->text[0] != '\x01')) // not a pending "delete"
+            out += pad + c->text + "\r\n";
+    std::vector<int> state(node.children.size(), 0);
+    std::function<void(size_t)> visit = [&](size_t i)
+    {
+        if (state[i])
+            return;
+        state[i] = 1;
+        const RapNode& c = *node.children[i];
+        std::set<std::string> bases;
+        CollectRapBases(c, bases);
+        for (const std::string& b : bases)
+        {
+            const auto it = node.index.find(b);
+            if (it != node.index.end() && it->second != i && !node.children[it->second]->isExtern)
+                visit(it->second);
+        }
+        out += pad + "class " + c.name;
+        if (!c.base.empty())
+            out += ": " + c.base;
+        out += "\r\n" + pad + "{\r\n";
+        WriteRap(c, out, depth + 1);
+        out += pad + "};\r\n";
+        state[i] = 2;
+    };
+    for (size_t i = 0; i < node.children.size(); i++)
+        if (node.children[i]->isClass && !node.children[i]->isExtern)
+            visit(i);
+}
+
 std::vector<uint8_t> ReadArchiveFile(const std::string& name)
 {
     std::vector<uint8_t> bytes;
@@ -313,13 +650,15 @@ bool IsStringtable(const std::string& n)
 {
     const size_t slash = n.find_last_of("\\/");
     const std::string leaf = slash == std::string::npos ? n : n.substr(slash + 1);
-    return leaf.rfind("stringtable", 0) == 0 && leaf.size() > 4 && leaf.compare(leaf.size() - 4, 4, ".csv") == 0;
+    return leaf.rfind("stringtable", 0) == 0 && leaf.size() > 4 &&
+           (leaf.compare(leaf.size() - 4, 4, ".csv") == 0 || leaf.compare(leaf.size() - 4, 4, ".xml") == 0);
 }
 
 struct LoadedConfig
 {
     std::string source;
     std::unique_ptr<ParamFile> file;
+    std::unique_ptr<RapNode> tree; // Arma 2: merged as raP trees, parsed once (RapTree)
     std::vector<std::string> patches;
     std::vector<std::string> requiredAddons;
     bool isBase = false;
@@ -340,7 +679,7 @@ void ImportIntoPars(const std::string& text, const char* what)
     Pars.Update(tmp);
     Pars.SetAccessMode(access);
     Pars.SetFile(&Pars);
-    LOG_INFO(Mission, "Arma 1: imported {} ({} bytes of config)", what, text.size());
+    LOG_INFO(Mission, "{}: imported {} ({} bytes of config)", Label(), what, text.size());
 }
 
 // Config text for a class of the merged Arma 1 tree. Not ParamEntry::Save: a merged
@@ -500,7 +839,7 @@ bool MovesImported()
     const ParamEntry* male = Arma1Pars().FindEntryNoInheritance("CfgMovesMaleSdr");
     if (!basic || !male || !male->FindEntry("States"))
     {
-        LOG_WARN(Mission, "Arma 1: CfgMovesMaleSdr not found, soldiers keep CWA models");
+        LOG_WARN(Mission, "{}: CfgMovesMaleSdr not found, soldiers keep CWA models", Label());
         return false;
     }
     std::string basicText = SaveText(*basic);
@@ -627,13 +966,23 @@ void LoadConfig()
     std::vector<LoadedConfig> configs;
     int stringtables = 0;
 
-    // Dta\bin.pbo: the base config and global stringtable. Opened as a private bank,
-    // never added to GFileBanks, so CWA's own bin\ keeps answering CWA's lookups.
+    // Dta\bin.pbo: the base config and global stringtable (Arma 2 keeps its global
+    // strings in Dta\languagecore.pbo; Operation Arrowhead adds Expansion\Dta). Opened
+    // as private banks, never added to GFileBanks, so CWA's own bin\ keeps answering
+    // CWA's lookups. Later Dta folders override earlier ones.
+    int baseConfigs = 0;
+    for (const std::string& dtaFolder : DtaFolders())
     {
-        const std::string binPath = RootFolder() + "\\Dta\\bin";
-        QFBank dta;
-        if (dta.open(RString(binPath.c_str())))
+        for (const char* archive : {"bin", "languagecore"})
         {
+            const std::string binPath = dtaFolder + "\\" + archive;
+            QFBank dta;
+            if (!dta.open(RString(binPath.c_str())))
+            {
+                if (std::string(archive) == "bin")
+                    LOG_WARN(Mission, "{}: {}.pbo not readable, base config missing", Label(), binPath);
+                continue;
+            }
             dta.Lock();
             const auto readPrivate = [&](const std::string& name)
             {
@@ -649,35 +998,40 @@ void LoadConfig()
                 const std::vector<uint8_t> bytes = readPrivate(name);
                 if (bytes.empty())
                     continue;
-                LoadArma1StringtableFromMemory(("arma1dta:bin\\" + name).c_str(),
+                LoadArma1StringtableFromMemory(("dta:" + binPath + "\\" + name).c_str(),
                                                reinterpret_cast<const char*>(bytes.data()), bytes.size());
                 stringtables++;
             }
             for (const std::string& name : BankFiles(dta, IsConfigBin))
             {
-                const std::string path = "Dta\\bin.pbo:" + name;
+                const std::string path = binPath + ".pbo:" + name;
                 try
                 {
-                    const std::string text = RapToText(readPrivate(name)).Convert();
-                    LOG_INFO(Mission, "Arma 1: parsing {} ({} bytes)", path, text.size());
                     LoadedConfig cfg;
                     cfg.source = path;
                     cfg.isBase = true;
-                    cfg.file = std::make_unique<ParamFile>();
-                    QIStream in(text.data(), static_cast<int>(text.size()));
-                    cfg.file->Parse(in);
-                    configs.insert(configs.begin(), std::move(cfg));
+                    if (Generation() == 2)
+                    {
+                        cfg.tree = RapTree(readPrivate(name)).Read();
+                        LOG_INFO(Mission, "{}: read {}", Label(), path);
+                    }
+                    else
+                    {
+                        const std::string text = RapToText(readPrivate(name)).Convert();
+                        LOG_INFO(Mission, "{}: parsing {} ({} bytes)", Label(), path, text.size());
+                        cfg.file = std::make_unique<ParamFile>();
+                        QIStream in(text.data(), static_cast<int>(text.size()));
+                        cfg.file->Parse(in);
+                    }
+                    configs.insert(configs.begin() + baseConfigs, std::move(cfg));
+                    baseConfigs++;
                 }
                 catch (const std::exception& e)
                 {
-                    LOG_WARN(Mission, "Arma 1: config {} not read: {}", path, e.what());
+                    LOG_WARN(Mission, "{}: config {} not read: {}", Label(), path, e.what());
                 }
             }
             dta.close();
-        }
-        else
-        {
-            LOG_WARN(Mission, "Arma 1: {}.pbo not readable, Arma 1 base config missing", binPath);
         }
     }
     for (const std::string& prefix : BankPrefixes())
@@ -695,10 +1049,28 @@ void LoadConfig()
             const std::string path = prefix + name;
             try
             {
-                const std::string text = RapToText(ReadArchiveFile(path)).Convert();
-                LOG_INFO(Mission, "Arma 1: parsing {} ({} bytes)", path, text.size());
                 LoadedConfig cfg;
                 cfg.source = path;
+                if (Generation() == 2)
+                {
+                    cfg.tree = RapTree(ReadArchiveFile(path)).Read();
+                    if (const RapNode* patches = cfg.tree->Find("cfgpatches"))
+                    {
+                        for (const auto& patch : patches->children)
+                        {
+                            if (!patch->isClass || patch->isExtern)
+                                continue;
+                            cfg.patches.push_back(Lower(patch->name));
+                            if (const RapNode* req = patch->Find("requiredaddons"))
+                                for (const std::string& r : req->strings)
+                                    cfg.requiredAddons.push_back(Lower(r));
+                        }
+                    }
+                    configs.push_back(std::move(cfg));
+                    continue;
+                }
+                const std::string text = RapToText(ReadArchiveFile(path)).Convert();
+                LOG_INFO(Mission, "{}: parsing {} ({} bytes)", Label(), path, text.size());
                 cfg.file = std::make_unique<ParamFile>();
                 QIStream in(text.data(), static_cast<int>(text.size()));
                 cfg.file->Parse(in);
@@ -719,11 +1091,13 @@ void LoadConfig()
             }
             catch (const std::exception& e)
             {
-                LOG_WARN(Mission, "Arma 1: config {} not read: {}", path, e.what());
+                LOG_WARN(Mission, "{}: config {} not read: {}", Label(), path, e.what());
             }
         }
     }
 
+    auto mergedTree = std::make_unique<RapNode>();
+    mergedTree->isClass = true;
     // requiredAddons order (Kahn), bin first; unknown requirements are ignored.
     std::set<std::string> known;
     for (const auto& c : configs)
@@ -745,8 +1119,11 @@ void LoadConfig()
                     ready = false;
             if (!ready)
                 continue;
-            LOG_INFO(Mission, "Arma 1: merging {}", configs[i].source);
-            Arma1Pars().Update(*configs[i].file);
+            LOG_DEBUG(Mission, "{}: merging {}", Label(), configs[i].source);
+            if (configs[i].tree)
+                MergeRap(*mergedTree, *configs[i].tree);
+            else
+                Arma1Pars().Update(*configs[i].file);
             done.insert(configs[i].patches.begin(), configs[i].patches.end());
             merged[i] = true;
             mergedCount++;
@@ -757,17 +1134,56 @@ void LoadConfig()
             for (size_t i = 0; i < configs.size(); i++)
                 if (!merged[i])
                 {
-                    LOG_WARN(Mission, "Arma 1: dependency cycle, merging {} anyway", configs[i].source);
-                    Arma1Pars().Update(*configs[i].file);
+                    LOG_WARN(Mission, "{}: dependency cycle, merging {} anyway", Label(), configs[i].source);
+                    if (configs[i].tree)
+                        MergeRap(*mergedTree, *configs[i].tree);
+                    else
+                        Arma1Pars().Update(*configs[i].file);
                     merged[i] = true;
                     mergedCount++;
                 }
         }
     }
+    if (!mergedTree->children.empty())
+    {
+        // Arma 2: the merged tree, written once with every base ahead of its users.
+        std::string text;
+        WriteRap(*mergedTree, text, 0);
+        LOG_INFO(Mission, "{}: parsing the merged config ({} bytes of text)", Label(), text.size());
+        QIStream in(text.data(), static_cast<int>(text.size()));
+        Arma1Pars().Parse(in);
+    }
     Arma1Pars().SetFile(&Arma1Pars());
     const ParamEntry* vehicles = Arma1Pars().FindEntry("CfgVehicles");
-    LOG_INFO(Mission, "Arma 1: config read from {} archives ({} CfgVehicles classes, {} stringtables)",
+    LOG_INFO(Mission, "{}: config read from {} archives ({} CfgVehicles classes, {} stringtables)", Label(),
              configs.size(), vehicles ? vehicles->GetEntryCount() : 0, stringtables);
+}
+
+namespace
+{
+bool IsMissionSqm(const std::string& n)
+{
+    return n == "mission.sqm" || (n.size() > 12 && n.compare(n.size() - 12, 12, "\\mission.sqm") == 0);
+}
+} // namespace
+
+std::vector<std::string> MissionFiles()
+{
+    std::vector<std::string> out;
+    if (!Active())
+        return out;
+    std::set<std::string> seen;
+    for (const std::string& prefix : BankPrefixes())
+    {
+        if (!seen.insert(Lower(prefix)).second)
+            continue;
+        QFBank* bank = FindBank(prefix);
+        if (!bank)
+            continue;
+        for (const std::string& name : BankFiles(*bank, IsMissionSqm))
+            out.push_back(prefix + name);
+    }
+    return out;
 }
 
 const ParamEntry* ConfigRoot()
@@ -886,7 +1302,7 @@ bool Arma1RapFileToText(const char* fileName, std::string& text)
     }
     catch (const std::exception& e)
     {
-        LOG_WARN(Mission, "Arma 1: binarised {} not readable: {}", fileName, e.what());
+        LOG_WARN(Mission, "{}: binarised {} not readable: {}", Label(), fileName, e.what());
         return false;
     }
     return true;
@@ -963,6 +1379,235 @@ RString FallbackCwaClass(const RString& a1Name)
     return RString();
 }
 
+namespace
+{
+bool A2Derives(const ParamEntry* cls, const char* base)
+{
+    const ParamEntry* b = FindConfigClass("CfgWeapons", base);
+    const ParamClass* c = cls ? cls->GetClassInterface() : nullptr;
+    const ParamClass* bc = b ? b->GetClassInterface() : nullptr;
+    return c && bc && (c == bc || c->IsDerivedFrom(*bc));
+}
+
+// The CWA weapon for an Arma 2 weapon class, by ancestry and ammunition.
+std::string A2Calibre(const ParamEntry* weapon)
+{
+    // first magazine -> its ammo name ("B_545x39_Ball", "R_PG7V_AT", ...)
+    const ParamEntry* mags = weapon ? weapon->FindEntry("magazines") : nullptr;
+    if (!mags || !mags->IsArray() || mags->GetSize() == 0)
+        return {};
+    const ParamEntry* mag = FindConfigClass("CfgMagazines", (const char*)(RStringB)(*mags)[0]);
+    return Lower(mag ? StringValue(*mag, "ammo") + " " + std::string((const char*)(RStringB)(*mags)[0])
+                     : std::string((const char*)(RStringB)(*mags)[0]));
+}
+
+const char* CwaWeaponFor(const std::string& lowerName, const ParamEntry* weapon, const std::string& calibre)
+{
+    const auto has = [&](const char* w) { return calibre.find(w) != std::string::npos || lowerName.find(w) != std::string::npos; };
+    if (A2Derives(weapon, "Binocular") || lowerName.find("binocular") != std::string::npos ||
+        lowerName.find("laserdesignator") != std::string::npos)
+        return "Binocular";
+    if (A2Derives(weapon, "NVGoggles") || lowerName.find("nvgoggles") != std::string::npos)
+        return "NVGoggles";
+    const bool launcher = A2Derives(weapon, "LauncherCore") || A2Derives(weapon, "Launcher");
+    if (launcher)
+    {
+        if (has("pg7") || has("rpg") || has("og7"))
+            return "RPGLauncher";
+        if (has("stinger") || has("igla") || has("strela"))
+            return has("stinger") ? "Stinger" : "Strela";
+        if (has("m136") || has("m72") || has("law"))
+            return "LAWLauncher";
+        return "CarlGustavLauncher";
+    }
+    const bool pistol = A2Derives(weapon, "PistolCore") || A2Derives(weapon, "Pistol");
+    if (pistol)
+        return has("9x18") || has("makarov") ? "Tokarev" : has("9x19") ? "Beretta" : "Revolver";
+    const bool mgun = A2Derives(weapon, "MGunCore") || A2Derives(weapon, "MGun") || has("m249") || has("m240") ||
+                      has("mk_48") || has("pk") || has("rpk") || has("100rnd") || has("200rnd");
+    const bool sniper = has("m24") || has("m40") || has("dmr") || has("svd") || has("ksvk") || has("m107") ||
+                        has("as50") || has("vss") || has("sniper") || has("ksvk");
+    if (has("127x") || has("762x54") || has("762x51"))
+    {
+        if (mgun && !sniper)
+            return has("762x54") ? "PK" : "M60";
+        return has("762x54") || has("127x108") ? "SVDDragunov" : "M21";
+    }
+    const bool gl = lowerName.find("gl") != std::string::npos || lowerName.find("gp25") != std::string::npos ||
+                    lowerName.find("m203") != std::string::npos;
+    if (has("545x39"))
+        return mgun ? "PK" : gl ? "AK74GrenadeLauncher" : (has("aks") ? "AK74SU" : "AK74");
+    if (has("762x39"))
+        return mgun ? "PK" : "AK47";
+    if (has("556x45"))
+        return mgun ? "M60" : gl ? "M16GrenadeLauncher" : "M16";
+    if (has("9x19") || has("mp5") || has("bizon") || has("9x18"))
+        return "HK";
+    if (A2Derives(weapon, "RifleCore") || A2Derives(weapon, "Rifle"))
+        return "M16";
+    return nullptr;
+}
+} // namespace
+
+RString Arma2WeaponFallback(const RString& name)
+{
+    if (Generation() != 2 || !ConfigLoaded() || name.GetLength() == 0)
+        return RString();
+    const std::string lower = Lower(name.Data());
+    const ParamEntry* cwaWeapons = Pars.FindEntry("CfgWeapons");
+    if (!cwaWeapons)
+        return RString();
+    // A weapon
+    if (const ParamEntry* weapon = FindConfigClass("CfgWeapons", name); weapon && weapon->IsClass())
+    {
+        const char* cwa = CwaWeaponFor(lower, weapon, A2Calibre(weapon));
+        return cwa && cwaWeapons->FindEntry(cwa) ? RString(cwa) : RString();
+    }
+    // A magazine: grenades, explosives by name; else the CWA weapon of its calibre,
+    // whose own first magazine stands for it.
+    const ParamEntry* mag = FindConfigClass("CfgMagazines", name);
+    if (!mag || !mag->IsClass())
+        return RString();
+    const std::string ammo = Lower(StringValue(*mag, "ammo"));
+    const auto any = [&](std::initializer_list<const char*> words)
+    {
+        for (const char* w : words)
+            if (lower.find(w) != std::string::npos || ammo.find(w) != std::string::npos)
+                return true;
+        return false;
+    };
+    const char* direct = nullptr;
+    if (any({"smokeshellred"}))
+        direct = "SmokeShellRed";
+    else if (any({"smokeshellgreen"}))
+        direct = "SmokeShellGreen";
+    else if (any({"smokeshell", "smoke"}))
+        direct = "SmokeShell";
+    else if (any({"handgrenade", "grenadehand"}))
+        direct = "HandGrenade";
+    else if (any({"pipebomb", "satchel"}))
+        direct = "PipeBomb";
+    else if (any({"timebomb"}))
+        direct = "TimeBomb";
+    else if (any({"minee", "mine_e", "tm46"}))
+        direct = "MineE";
+    else if (any({"mine"}))
+        direct = "Mine";
+    else if (any({"m203", "gp25", "40mm", "g_40"}))
+        direct = "GrenadeLauncher";
+    if (direct)
+        return cwaWeapons->FindEntry(direct) ? RString(direct) : RString();
+    const char* weapon = CwaWeaponFor(lower, nullptr, ammo + " " + lower);
+    if (!weapon)
+        return RString();
+    const ParamEntry* w = cwaWeapons->FindEntry(weapon);
+    if (!w)
+        return RString();
+    if (const ParamEntry* mags = w->FindEntry("magazines"); mags && mags->IsArray() && mags->GetSize() > 0)
+        return RString((const char*)(RStringB)(*mags)[0]);
+    return RString(weapon);
+}
+
+RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
+{
+    if (Generation() != 2 || !ConfigLoaded() || name.GetLength() == 0 || cwaWeapon.GetLength() == 0)
+        return cwaWeapon;
+    static const bool off = [] {
+        const char* e = std::getenv("OP_A2_WEAPON_MODELS");
+        return e && *e == '0';
+    }();
+    if (off)
+        return cwaWeapon;
+    const ParamEntry* a2 = FindConfigClass("CfgWeapons", name);
+    const ParamEntry* cwaWeapons = Pars.FindEntry("CfgWeapons");
+    const ParamEntry* cwa = cwaWeapons ? cwaWeapons->FindEntry(cwaWeapon) : nullptr;
+    if (!a2 || !a2->IsClass() || !cwa)
+        return cwaWeapon;
+    // Only weapons carry a model of their own here; binoculars and goggles keep CWA's.
+    if (A2Derives(a2, "Binocular") || A2Derives(a2, "NVGoggles"))
+        return cwaWeapon;
+    std::string model = StringValue(*a2, "model");
+    if (model.empty() || model == "\\" || model == "-")
+        return cwaWeapon;
+    std::string shape = model;
+    if (shape.size() < 4 || Lower(shape.substr(shape.size() - 4)) != ".p3d")
+        shape += ".p3d";
+    if (!QIFStreamB::FileExist(shape[0] == '\\' ? shape.c_str() + 1 : shape.c_str()))
+        return cwaWeapon;
+
+    const std::string generated = "A1x_" + std::string(name.Data());
+    if (cwaWeapons->FindEntry(generated.c_str()))
+        return RString(generated.c_str());
+    std::string text = "class CfgWeapons\r\n{\r\n\tclass " + std::string(cwaWeapon.Data()) + ";\r\n\tclass " +
+                       generated + ": " + std::string(cwaWeapon.Data()) + "\r\n\t{\r\n";
+    text += "\t\tmodel=\"" + model + "\";\r\n";
+    const std::string displayName = StringValue(*a2, "displayName");
+    if (!displayName.empty())
+        text += "\t\tdisplayName=\"" + displayName + "\";\r\n";
+    if (const ParamEntry* scope = cwa->FindEntry("scope"); !scope || (int)*scope < 1)
+        text += "\t\tscope=1;\r\n";
+    text += "\t};\r\n};\r\n";
+    ImportIntoPars(text, generated.c_str());
+    if (!(Pars >> "CfgWeapons").FindEntry(generated.c_str()))
+        return cwaWeapon;
+    LOG_INFO(Mission, "{}: weapon '{}' uses the Arma model {} on CWA '{}'", Label(), name.Data(), model,
+             cwaWeapon.Data());
+    return RString(generated.c_str());
+}
+
+namespace
+{
+// weapons[] and magazines[] of an Arma 2 soldier class, each resolved to what this
+// game can carry (A1x_ weapons with the Arma 2 model, CWA magazines of the same
+// calibre). Items CWA has no counterpart for (ItemMap, ItemRadio, ...) are left out.
+std::string Arma2Loadout(const ParamEntry& soldier)
+{
+    const ParamEntry* cwaWeapons = Pars.FindEntry("CfgWeapons");
+    if (!cwaWeapons)
+        return {};
+    std::string out;
+    const auto list = [&](const char* key, RString (*resolve)(const RString&))
+    {
+        const ParamEntry* arr = soldier.FindEntry(key);
+        if (!arr || !arr->IsArray())
+            return;
+        std::string items;
+        int n = 0;
+        for (int i = 0; i < arr->GetSize(); i++)
+        {
+            const RString name = (RStringB)(*arr)[i];
+            if (name.GetLength() == 0)
+                continue;
+            const RString cwa = resolve(name);
+            if (cwa.GetLength() == 0 || !cwaWeapons->FindEntry(cwa))
+                continue;
+            items += std::string(n++ ? "," : "") + "\"" + std::string(cwa.Data()) + "\"";
+        }
+        out += std::string("\t\t") + key + "[]={" + items + "};\r\n";
+    };
+    list("weapons", &ResolveWeaponClass);
+    list("magazines", &ResolveMagazineClass);
+    return out;
+}
+} // namespace
+
+RString Arma2ModuleInit(const RString& className)
+{
+    if (Generation() != 2 || !ConfigLoaded() || className.GetLength() == 0)
+        return RString();
+    const ParamEntry* cls = FindConfigClass("CfgVehicles", className);
+    if (!cls || !cls->IsClass() || !IsKindOf(cls, "Logic"))
+        return RString();
+    const ParamEntry* handlers = cls->FindEntry("EventHandlers");
+    if (!handlers || !handlers->IsClass())
+        handlers = cls->FindEntry("Eventhandlers");
+    const std::string code = handlers && handlers->IsClass() ? StringValue(*handlers, "init") : std::string();
+    if (code.empty())
+        return RString();
+    LOG_INFO(Mission, "{}: module '{}' starts from its init event handler", Label(), className.Data());
+    return RString(code.c_str());
+}
+
 bool ProxyKind(const char* modelName, std::string& simulation, int& crewPosition)
 {
     simulation.clear();
@@ -998,17 +1643,27 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     const ParamEntry* cwa = cwaVehicles ? cwaVehicles->FindEntry(cwaClass) : nullptr;
     if (!a1 || !cwa)
         return cwaClass;
-    std::string model = StringValue(*a1, "model");
-    if (model.empty() || model == "\\" || model.find("bmp.p3d") != std::string::npos)
-        return cwaClass;
-    std::string shape = model;
-    if (shape.size() < 4 || Lower(shape.substr(shape.size() - 4)) != ".p3d")
-        shape += ".p3d";
-    if (!QIFStreamB::FileExist(shape[0] == '\\' ? shape.c_str() + 1 : shape.c_str()))
-        return cwaClass;
-
     const bool man = IsKindOf(a1, "CAManBase") || IsKindOf(a1, "Man");
-    if (man && !MovesImported())
+    // Arma 2 soldiers use their own models and moves (binarised BMTR animations, converted
+    // on load). OP_A2_SOLDIERS=0 brings back the CWA soldier's model and moves; the soldier
+    // still carries his own weapons.
+    static const bool a2Soldiers = [] {
+        const char* e = std::getenv("OP_A2_SOLDIERS");
+        return !(e && *e == '0');
+    }();
+    std::string model = StringValue(*a1, "model");
+    bool useModel = !(model.empty() || model == "\\" || model.find("bmp.p3d") != std::string::npos);
+    if (useModel)
+    {
+        std::string shape = model;
+        if (shape.size() < 4 || Lower(shape.substr(shape.size() - 4)) != ".p3d")
+            shape += ".p3d";
+        useModel = QIFStreamB::FileExist(shape[0] == '\\' ? shape.c_str() + 1 : shape.c_str());
+    }
+    if (man && ((Generation() == 2 && !a2Soldiers) || !MovesImported()))
+        useModel = false;
+    const bool loadout = man && Generation() == 2;
+    if (!useModel && !loadout)
         return cwaClass;
 
     const std::string generated = "A1x_" + std::string(missionClass.Data());
@@ -1017,7 +1672,8 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
 
     std::string text = "class CfgVehicles\r\n{\r\n\tclass " + std::string(cwaClass.Data()) + ";\r\n\tclass " +
                        generated + ": " + std::string(cwaClass.Data()) + "\r\n\t{\r\n";
-    text += "\t\tmodel=\"" + model + "\";\r\n";
+    if (useModel)
+        text += "\t\tmodel=\"" + model + "\";\r\n";
     // A scope-0 base makes the generated class abstract too: VehicleTypes then builds a
     // plain EntityAIType while NewVehicle still constructs by simulation (a Building on a
     // type that is no BuildingType -- the 0xC0000005 in Building's constructor).
@@ -1026,7 +1682,42 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     const std::string displayName = StringValue(*a1, "displayName");
     if (!displayName.empty())
         text += "\t\tdisplayName=\"" + displayName + "\";\r\n";
-    if (man)
+    if (loadout)
+        text += Arma2Loadout(*a1);
+    if (!man && useModel && Generation() == 2)
+    {
+        // A vehicle with the Arma 2 model: its own speed, armour, fuel and seats, so a
+        // Ural is not as fast as the CWA truck behind it and a Black Hawk seats its own
+        // cargo. Steering, turrets and weapons stay with the CWA class for now.
+        const std::string sim = Lower(StringValue(*a1, "simulation"));
+        if (sim == "car" || sim == "tank" || sim == "helicopter" || sim == "airplane" || sim == "ship" ||
+            sim == "motorcycle")
+        {
+            // Its crew: the Arma 2 crew class (a TK tank is crewed by TK crewmen, not CWA's
+            // SoldierECrew), resolved like any mission class.
+            if (const std::string crew = StringValue(*a1, "crew"); !crew.empty())
+            {
+                const RString resolved = ResolveVehicleClass(RString(crew.c_str()));
+                if (const ParamEntry* now = Pars.FindEntry("CfgVehicles"); resolved.GetLength() > 0 && now && now->FindEntry(resolved))
+                    text += "\t\tcrew=\"" + std::string(resolved.Data()) + "\";\r\n";
+            }
+            for (const char* key : {"maxSpeed", "armor", "fuelCapacity", "transportSoldier"})
+            {
+                const ParamEntry* e = a1->FindEntry(key);
+                if (e && !e->IsClass() && !e->IsArray())
+                {
+                    const float value = (float)*e;
+                    if ((value > 0.0f || (value == 0.0f && strcmp(key, "transportSoldier") == 0)) && value < 1e6f)
+                    {
+                        char line[96];
+                        std::snprintf(line, sizeof(line), "\t\t%s=%g;\r\n", key, value);
+                        text += line;
+                    }
+                }
+            }
+        }
+    }
+    if (man && useModel)
     {
         text += "\t\tmoves=\"A1_CfgMovesMaleSdr\";\r\n";
         for (const char* key : kManNameKeys)
@@ -1056,8 +1747,12 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     ImportIntoPars(text, generated.c_str());
     if (!(Pars >> "CfgVehicles").FindEntry(generated.c_str()))
         return cwaClass;
-    LOG_INFO(Mission, "Arma 1: '{}' uses the Arma 1 model {} on CWA '{}'{}", missionClass.Data(), model,
-             cwaClass.Data(), man ? " with the Arma 1 moves" : "");
+    if (useModel)
+        LOG_INFO(Mission, "{}: '{}' uses the Arma 1 model {} on CWA '{}'{}", Label(), missionClass.Data(), model,
+                 cwaClass.Data(), man ? " with the Arma 1 moves" : "");
+    else
+        LOG_INFO(Mission, "{}: '{}' is the CWA soldier '{}' with its own weapons", Label(), missionClass.Data(),
+                 cwaClass.Data());
     return RString(generated.c_str());
 }
 } // namespace Poseidon::Arma1Compat

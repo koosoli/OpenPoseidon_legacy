@@ -1298,7 +1298,11 @@ void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
 
                         // animate water texture
                         // water shape should have only one section
-                        PoseidonAssert(shape->NSections() == 1);
+                        // A water segment with no section (TE06_Parachute on Zargabad, a world
+                        // without sea) has nothing to draw; GetSection(0) on it was the
+                        // 0xC0000005 in PolyProperties::AnimateTexture.
+                        if (shape->NSections() < 1)
+                            continue;
                         ShapeSection& sec = shape->GetSection(0);
                         float texPhase = fastFmod(Glob.time.toFloat(), 2);
                         if (texPhase > 1.0f)

@@ -24,4 +24,9 @@ void InstallCrashHandler(const char* crashDir);
 //! nullptr turns it off. A no-op on Linux (the signal handler is async-signal-safe and stays that way).
 using CrashNotifyFn = void (*)(unsigned code, const void* addr, const char* dump, const char* stack);
 void SetCrashNotify(CrashNotifyFn fn);
+
+//! Stall diagnostics (Windows; no-ops elsewhere): RememberStallThread records the calling thread,
+//! LogStallThreadStack logs that thread's current call stack (suspending it briefly) from any other.
+void RememberStallThread();
+void LogStallThreadStack();
 } // namespace Poseidon::Foundation

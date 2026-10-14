@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -545,7 +546,9 @@ GameValue ListCountUnknown(const GameState* state, GameValuePar oper1, GameValue
     return (float)ListCountSideH(oper2, GetObject(oper1), &AICenter::IsUnknown);
 }
 
-GameValue ObjGetType(const GameState* state, GameValuePar oper1)
+// The engine's class name of an object; vehicles imported from an Arma 1/2 config carry
+// the generated "A1x_" prefix here.
+RString ObjGetTypeRaw(GameValuePar oper1)
 {
     Object* obj = GetObject(oper1);
     Entity* ent = dyn_cast<Entity>(obj);
@@ -558,6 +561,16 @@ GameValue ObjGetType(const GameState* state, GameValuePar oper1)
             type = etype->GetName();
         }
     }
+    return type;
+}
+
+GameValue ObjGetType(const GameState* state, GameValuePar oper1)
+{
+    RString type = ObjGetTypeRaw(oper1);
+    // Scripts compare typeOf with the mission's own class names ("T72_INS"), not the
+    // name the import gave the class.
+    if (Poseidon::Arma1Compat::Active() && _strnicmp(type, "A1x_", 4) == 0)
+        type = RString((const char*)type + 4);
     return type;
 }
 
@@ -1013,6 +1026,13 @@ GameValue GrpSetIdentity(const GameState* state, GameValuePar oper1, GameValuePa
             name = array[0];
             color = array[1];
             break;
+        case 1:
+            // Arma 2: setGroupId ["Fist"] -- a free group name; CWA's group identities
+            // come from CfgWorlds >> GroupNames, so the call is accepted and changes nothing.
+            if (array[0].GetType() == GameString)
+                return NOTHING;
+            state->TypeError(GameString, array[0].GetType());
+            return NOTHING;
         default:
             state->SetError(EvalDim, array.Size(), 3);
             return NOTHING;
@@ -1411,6 +1431,8 @@ GameValue VehProcessAction(const GameState* state, GameValuePar oper1, GameValue
     }
 }
 
+void Arma2SetUserActionArguments(Poseidon::EntityAI* veh, int id, GameValuePar arguments); // GameStateExtA2.cpp
+
 GameValue VehAddUserAction(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     EntityAI* veh = dyn_cast<EntityAI>(GetObject(oper1));
@@ -1420,7 +1442,9 @@ GameValue VehAddUserAction(const GameState* state, GameValuePar oper1, GameValue
     }
 
     const GameArrayType& array = oper2;
-    if (array.Size() != 2)
+    // Arma 2: [title, script, arguments, priority, showWindow, hideOnUse, shortcut, condition]
+    const bool arma2 = Poseidon::Arma1Compat::Generation() == 2;
+    if (array.Size() != 2 && !(arma2 && array.Size() > 2))
     {
         state->SetError(EvalDim, array.Size(), 2);
         return -1.0f;
@@ -1435,7 +1459,10 @@ GameValue VehAddUserAction(const GameState* state, GameValuePar oper1, GameValue
         state->TypeError(GameString, array[1].GetType());
         return -1.0f;
     }
-    return (float)veh->AddUserAction(array[0], array[1]);
+    const int id = veh->AddUserAction(array[0], array[1]);
+    if (arma2 && array.Size() > 2)
+        Arma2SetUserActionArguments(veh, id, array[2]);
+    return (float)id;
 }
 
 GameValue VehRemoveUserAction(const GameState* state, GameValuePar oper1, GameValuePar oper2)

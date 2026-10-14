@@ -536,6 +536,10 @@ LSError ParamArchive::SerializeEnumValue(const RStringB& name, int& value, int m
                 return LSOK;
             }
         }
+        // Loading stops at the first bad entry of a class, so everything after it in the
+        // same class (a unit's name and init line, say) is lost without this line.
+        LOG_WARN(Core, "Unknown value '{}' for '{}' ({}); the rest of that entry is not read", (const char*)str,
+                 (const char*)name, (const char*)_entry->GetContext(name));
         ON_ERROR(LSStructure, name);
     }
 }

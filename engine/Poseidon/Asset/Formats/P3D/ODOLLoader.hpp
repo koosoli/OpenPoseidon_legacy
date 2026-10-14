@@ -5,6 +5,7 @@
 #include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol40.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol49.hpp>
+#include <Poseidon/Asset/Formats/RTM/RTMReader.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol73.hpp>
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
@@ -294,6 +295,69 @@ class ODOLLoader
                           info.boundingCenter.z);
             model.metadata["odolBoundingCenter"] = centre;
         }
+        // An Arma 2 man (the skeleton has pelvis, spine and head) is modelled with its
+        // origin at the hip, and the binariser stored the vertices around the bounding
+        // centre on top of that, so the feet sit 1.8 m below this engine's man origin --
+        // which every placement in the soldier code takes as ground level ("landContact at
+        // y=0"). The whole model is lifted until its lowest drawn point is at y=0; the
+        // animation origin moves with it, so the moves still pose about the same point.
+        if (sourceVersion >= 48 && sourceVersion <= 54 && !model.lodLevels.empty())
+        {
+            bool man = false, spine = false, head = false;
+            for (const auto& b : source.directory.bones)
+            {
+                std::string n = b.name;
+                for (char& c : n)
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                man |= n == "pelvis";
+                spine |= n == "spine";
+                head |= n == "head";
+            }
+            static const bool keep = [] {
+                const char* e = std::getenv("OP_A2_MAN_NO_LIFT");
+                return e && *e == '1';
+            }();
+            const auto& lod0 = model.lodLevels.front().mesh.vertices;
+            if (man && spine && head && !keep && !lod0.empty())
+            {
+                float minY = lod0.front().position.y;
+                for (const auto& v : lod0)
+                    minY = std::min(minY, v.position.y);
+                const float lift = -minY;
+                if (lift > 0.2f && lift < 5.0f)
+                {
+                    for (auto& lod : model.lodLevels)
+                    {
+                        for (auto& v : lod.mesh.vertices)
+                            v.position.y += lift;
+                        for (auto& proxy : lod.mesh.proxies)
+                            proxy.transform.m[1][3] += lift;
+                        lod.mesh.boundingBox.min.y += lift;
+                        lod.mesh.boundingBox.max.y += lift;
+                        lod.mesh.bCenter.y += lift;
+                    }
+                    model.boundingBox.min.y += lift;
+                    model.boundingBox.max.y += lift;
+                    model.aimingCenter.y += lift;
+                    model.centerOfMass.y += lift;
+                    char centre[96];
+                    std::snprintf(centre, sizeof(centre), "%.6f %.6f %.6f", info.boundingCenter.x,
+                                  info.boundingCenter.y - lift, info.boundingCenter.z);
+                    model.metadata["odolBoundingCenter"] = centre;
+                    // Its land-contact LOD is a single point at the hip (model y=0): Arma 2
+                    // grounds a man by his animated feet, this engine by that point. Put it at
+                    // the feet, or the soldier stands a metre deep (getPosATL -1.03 measured).
+                    for (auto& lod : model.lodLevels)
+                        if (std::abs(lod.resolution - 2e15f) < 1e13f)
+                            for (auto& v : lod.mesh.vertices)
+                                v.position.y = 0.0f;
+                    // and kept there: auto-centring would move the bounding-box centre back to
+                    // the origin (the waist-deep soldier of 3c27692, lifted and re-centred)
+                    model.autoCenterEnabled = 0;
+                    LOG_INFO(Graphics, "Arma 2 man {}: lifted {:.3f} m so the feet stand at y=0", sourcePath, lift);
+                }
+            }
+        }
         for (int row = 0; row < 3; ++row)
         {
             model.invInertia[row * 3 + 0] = info.invInertia[row].x;
@@ -400,6 +464,102 @@ class ODOLLoader
     // Dominant influence only: vehicle parts are rigid, and OFP's own
     // animations treat membership as binary; weight 255 keeps ShapeAdapter's
     // linear scale honest.
+    // Skinned-character variant of synthesizeBoneSelections: every (bone, weight) pair of a
+    // vertex goes into that bone's empty selection with its weight, and every empty proxy
+    // selection (weapon, handgun, head, goggles, ...) gets one vertex that its proxy's bone
+    // moves alone, so the proxy follows that bone (Man::DrawProxies reads the weights of the
+    // selection's first point).
+    template <class Refs, class Lowered>
+    static void fillSkinnedSelections(const std::vector<P3D::Odol73Bone>& bones, const P3D::Odol73StaticLod& source,
+                                      Mesh& mesh, const std::unordered_map<std::string, uint32_t>& boneByName,
+                                      const Refs& refs,
+                                      const std::vector<int32_t>& remap, bool indexFirst, uint32_t indexShift,
+                                      uint32_t indexLimit, bool perPoint, const std::vector<int32_t>& vertexToPoint,
+                                      const std::string& sourcePath, size_t lodIndex, Lowered lowered)
+    {
+        // per bone: (vertex, weight); per bone: the vertex it moves with the greatest weight
+        std::vector<std::vector<std::pair<uint32_t, uint8_t>>> byBone(bones.size());
+        std::vector<std::pair<int64_t, int>> bestVertex(bones.size(), {-1, -1});
+        for (size_t v = 0; v < mesh.vertices.size(); ++v)
+        {
+            size_t record = v;
+            if (perPoint)
+            {
+                const int32_t point = v < vertexToPoint.size() ? vertexToPoint[v] : -1;
+                if (point < 0)
+                    continue;
+                record = static_cast<size_t>(point);
+            }
+            if (record >= refs.size())
+                continue;
+            const auto& r = refs[record];
+            const int pairs = std::min<int>(r.count, 4);
+            for (int p = 0; p < pairs; ++p)
+            {
+                const uint32_t index =
+                    static_cast<uint32_t>(r.data[static_cast<size_t>(p) * 2 + (indexFirst ? 0 : 1)]) >> indexShift;
+                const uint8_t weight = r.data[static_cast<size_t>(p) * 2 + (indexFirst ? 1 : 0)];
+                if (index >= indexLimit || weight == 0)
+                    continue;
+                const uint32_t modelBone = remap.empty() ? index : static_cast<uint32_t>(remap[index]);
+                if (modelBone >= bones.size())
+                    continue;
+                byBone[modelBone].push_back({static_cast<uint32_t>(v), weight});
+                if (static_cast<int>(weight) > bestVertex[modelBone].second)
+                    bestVertex[modelBone] = {static_cast<int64_t>(v), weight};
+            }
+        }
+        size_t filled = 0, proxies = 0;
+        for (auto& sel : mesh.selections)
+        {
+            if (!sel.vertexIndices.empty())
+                continue;
+            const auto bone = boneByName.find(lowered(sel.name));
+            if (bone == boneByName.end() || byBone[bone->second].empty())
+                continue;
+            auto& list = byBone[bone->second];
+            std::sort(list.begin(), list.end());
+            for (const auto& [vertex, weight] : list)
+            {
+                if (!sel.vertexIndices.empty() && sel.vertexIndices.back() == vertex)
+                    continue;
+                sel.vertexIndices.push_back(vertex);
+                sel.vertexWeights.push_back(weight);
+            }
+            ++filled;
+        }
+        for (const auto& proxy : source.header.proxies)
+        {
+            const int32_t selIndex = proxy.namedSelectionIndex;
+            if (selIndex < 0 || static_cast<size_t>(selIndex) >= mesh.selections.size())
+                continue;
+            auto& sel = mesh.selections[static_cast<size_t>(selIndex)];
+            if (!sel.vertexIndices.empty())
+                continue;
+            // The proxy's bone index is into the MODEL skeleton (not the LOD's sub-skeleton):
+            // on USMC_Soldier_Light the rifle proxy names bone 117 "weapon", the pistol 100
+            // "righthand", the launcher 118 "launcher". A head proxy (\characters\heads\...)
+            // carries -1 and follows the head.
+            int32_t bone = proxy.boneIndex;
+            if (bone < 0)
+            {
+                std::string model = lowered(proxy.model);
+                if (model.find("\\heads\\") != std::string::npos || model.find("/heads/") != std::string::npos)
+                    if (const auto head = boneByName.find("head"); head != boneByName.end())
+                        bone = static_cast<int32_t>(head->second);
+            }
+            if (bone < 0 || static_cast<size_t>(bone) >= bones.size() || bestVertex[static_cast<size_t>(bone)].first < 0)
+                continue;
+            sel.vertexIndices.push_back(static_cast<uint32_t>(bestVertex[static_cast<size_t>(bone)].first));
+            sel.vertexWeights.push_back(255);
+            ++proxies;
+        }
+        LOG_INFO(Graphics,
+                 "Bone-selection synthesis (skinned): {} lod {} filled {} bone selections with weights and {} of {} "
+                 "proxy selections",
+                 sourcePath, lodIndex, filled, proxies, source.header.proxies.size());
+    }
+
     static void synthesizeBoneSelections(const std::vector<P3D::Odol73Bone>& bones, const P3D::Odol73StaticLod& source,
                                          Mesh& mesh, const std::string& sourcePath, size_t lodIndex)
     {
@@ -418,6 +578,50 @@ class ODOLLoader
         std::unordered_map<std::string, uint32_t> boneByName;
         for (size_t b = 0; b < bones.size(); ++b)
             boneByName.emplace(lowered(bones[b].name), static_cast<uint32_t>(b));
+
+        // Arma 2 wheels exist ONLY as bones. A car's LODs carry wheel_1_1_hide and
+        // wheel_1_1_unhide, but no "wheel_1_1" selection at all: model.cfg turns
+        // the wheel by its bone. The CWA car code (CarType) turns a selection, so
+        // each wheel bone gets one, filled below like any other bone selection and
+        // dropped again where this LOD has no vertex on it. Measured on
+        // car_sedan, ural, hmmwv: wheel_<side>_<n>, side 1 left, 2 right; n 1
+        // front, 2 back, 3 middle, 4 second front (the HitLFWheel/LBWheel/
+        // LMWheel/LF2Wheel sources of their own _destruct animations).
+        const size_t ownSelections = mesh.selections.size();
+        for (const auto& b : bones)
+        {
+            const std::string name = lowered(b.name);
+            if (name.size() == 9 && name.rfind("wheel_", 0) == 0 && (name[6] == '1' || name[6] == '2') &&
+                name[7] == '_' && name[8] >= '1' && name[8] <= '4')
+            {
+                bool present = false;
+                for (size_t s = 0; s < ownSelections && !present; ++s)
+                    present = lowered(mesh.selections[s].name) == name;
+                if (!present)
+                {
+                    NamedSelection added;
+                    added.name = name;
+                    mesh.selections.push_back(std::move(added));
+                }
+            }
+        }
+        struct DropEmptyAdded
+        {
+            Mesh& mesh;
+            size_t from;
+            ~DropEmptyAdded()
+            {
+                size_t keep = from;
+                for (size_t s = from; s < mesh.selections.size(); ++s)
+                    if (!mesh.selections[s].vertexIndices.empty())
+                    {
+                        if (keep != s)
+                            mesh.selections[keep] = std::move(mesh.selections[s]);
+                        ++keep;
+                    }
+                mesh.selections.resize(keep);
+            }
+        } dropEmptyAdded{mesh, ownSelections};
 
         bool wanted = false;
         for (const auto& sel : mesh.selections)
@@ -563,6 +767,23 @@ class ODOLLoader
         for (size_t v = 0; v < dominantBone.size(); ++v)
             if (dominantBone[v] >= 0)
                 verticesByBone[static_cast<uint32_t>(dominantBone[v])].push_back(static_cast<uint32_t>(v));
+
+        // A skinned character (Arma 2's man skeleton: pelvis, spine, head, ...) is not a
+        // rigid vehicle. Its vertices blend up to four bones, and a bone's selection must
+        // hold only the vertices that bone itself moves, each with its own weight -- the
+        // descendant closure below gave every spine selection the whole upper body at full
+        // weight, so each vertex averaged all its ancestors and the soldier crumpled.
+        const bool skinned = boneByName.count("pelvis") && boneByName.count("spine") && boneByName.count("head");
+        if (skinned)
+        {
+            // the skeleton's parents, for the binarised moves of this rig (ConvertBMTRToRTM)
+            auto& parents = Poseidon::Asset::Formats::BmtrSkeletonParents();
+            for (const auto& b : bones)
+                parents.emplace(lowered(b.name), lowered(b.parent));
+            fillSkinnedSelections(bones, source, mesh, boneByName, refs, remap, indexFirst, indexShift, indexLimit,
+                                  perPoint, vertexToPoint, sourcePath, lodIndex, lowered);
+            return;
+        }
 
         // A bone-named selection takes its bone's vertices AND EVERY
         // DESCENDANT BONE'S. This is the difference between a rotor and a bare

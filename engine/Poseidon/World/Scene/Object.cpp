@@ -162,7 +162,9 @@ const ::Poseidon::Foundation::EnumName* ::Poseidon::Foundation::GetEnumNames(Tar
         ::Poseidon::Foundation::EnumName(TGuerrila, "GUER"),       ::Poseidon::Foundation::EnumName(TCivilian, "CIV"),
         ::Poseidon::Foundation::EnumName(TSideUnknown, "UNKNOWN"), ::Poseidon::Foundation::EnumName(TEnemy, "ENEMY"),
         ::Poseidon::Foundation::EnumName(TFriendly, "FRIENDLY"),   ::Poseidon::Foundation::EnumName(TLogic, "LOGIC"),
-        ::Poseidon::Foundation::EnumName(TEmpty, "EMPTY"),         ::Poseidon::Foundation::EnumName()};
+        ::Poseidon::Foundation::EnumName(TEmpty, "EMPTY"),
+        // Arma 2's animals; read only (a side is written with its first name)
+        ::Poseidon::Foundation::EnumName(TCivilian, "AMBIENT LIFE"), ::Poseidon::Foundation::EnumName()};
     return SideNames;
 }
 

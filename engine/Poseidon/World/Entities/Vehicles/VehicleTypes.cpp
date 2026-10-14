@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 
@@ -650,6 +651,14 @@ EntityAI* NewVehicle(RString typeName, RString shapeName, bool fullCreate)
     // FIX: better handling of invalid crew specification
     if (!aiType)
     {
+        // Arma 1/2 data names classes (crews, cargo, stand-ins) this game may not have;
+        // the caller skips the unit instead of the mission failing to start.
+        if (Poseidon::Arma1Compat::Active())
+        {
+            LOG_WARN(Mission, "{}: no vehicle class '{}'; not created", Poseidon::Arma1Compat::Label(),
+                     (const char*)typeName);
+            return nullptr;
+        }
         Foundation::ErrorMessage(Foundation::EMError, "Bad vehicle type %s", (const char*)typeName);
         return nullptr;
     }

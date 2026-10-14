@@ -97,9 +97,12 @@ inline Odol73LodDirectory ReadOdol49StaticDirectory(BinaryReader& reader, int fi
     result.model.colorType = reader.read<uint32_t>(); result.model.viewDensity = reader.read<float>();
     readVector(result.model.bboxMin); readVector(result.model.bboxMax);
     if (expectedRevision >= 52) { skipVector(); skipVector(); }
-    // Bounding centre, geometry centre (still skipped -- see the revision-73
-    // reader for why), then centre of mass and the inverse inertia rows (COL-001).
-    skipVector(); skipVector();
+    // Bounding centre (read: the vertices are stored relative to it and a skinned
+    // man's animations are authored in the source model's space -- an Arma 2 soldier
+    // posed without it flings its limbs about the wrong pivot), geometry centre (still
+    // skipped -- see the revision-73 reader), then centre of mass and the inverse
+    // inertia rows (COL-001).
+    readVector(result.model.boundingCenter); skipVector();
     readVector(result.model.centerOfMass);
     for (int i = 0; i < 3; ++i) readVector(result.model.invInertia[i]);
     // Revision 54 (DayZ) widens three fixed-size runs by six bytes in total: one

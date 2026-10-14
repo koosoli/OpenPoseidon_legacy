@@ -71,6 +71,10 @@ const EnumName* Foundation::GetEnumNames(ArcadeWaypointType dummy)
                                                        EnumName(ACSUPPORT, "SUPPORT"),
                                                        EnumName(ACAND, "AND"),
                                                        EnumName(ACOR, "OR"),
+                                                       // Arma 2 types read as their nearest CWA type
+                                                       EnumName(ACGETIN, "GETIN NEAREST"),
+                                                       EnumName(ACMOVE, "DISMISS"),
+                                                       EnumName(ACMOVE, "LOITER"),
                                                        EnumName()};
     return ArcadeWaypointTypeNames;
 }
@@ -176,6 +180,10 @@ const EnumName* Foundation::GetEnumNames(ArcadeSensorActivation dummy)
                                                            EnumName(ASAGroup, "GROUP"),
                                                            EnumName(ASALeader, "LEADER"),
                                                            EnumName(ASAMember, "MEMBER"),
+                                                           // Arma 2 "seized by" activations read as presence of that side
+                                                           EnumName(ASAWest, "WEST SEIZED"),
+                                                           EnumName(ASAEast, "EAST SEIZED"),
+                                                           EnumName(ASAGuerrila, "GUER SEIZED"),
                                                            EnumName()};
     return ArcadeSensorActivationNames;
 }
@@ -255,6 +263,7 @@ ArcadeUnitInfo::ArcadeUnitInfo(const ArcadeUnitInfo& src)
     ammo = src.ammo;
     name = src.name;
     markers = src.markers;
+    synchronizations = src.synchronizations;
     selected = src.selected;
     init = src.init;
 }
@@ -284,6 +293,7 @@ void ArcadeUnitInfo::Init()
     ammo = 1.0;
     name = "";
     markers.Clear();
+    synchronizations.Clear();
     selected = false;
     init = "";
 }
@@ -375,8 +385,10 @@ LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.SerializeEnum("side", side, 1))
 
     PARAM_CHECK(ar.Serialize("vehicle", vehicle, 1))
+    RString arma2Init; // init event handler of an Arma 2 module class (FunctionsManager, ...)
     if (ar.IsLoading())
     {
+        arma2Init = Arma1Compat::Arma2ModuleInit(vehicle);
         vehicle = Arma1Compat::ResolveVehicleClass(vehicle); // identity unless --arma1
         // A class neither game defines (a third-party addon that is not installed): Arma 1
         // reports it and plays on without it. Here it is stood in for by a plain unit of
@@ -388,7 +400,7 @@ LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
                                   : side == TGuerrila ? "SoldierGB"
                                   : side == TCivilian ? "Civilian"
                                                       : "Logic";
-            LOG_WARN(Mission, "Arma 1: class '{}' is not installed (missing addon); '{}' stands in",
+            LOG_WARN(Mission, "{}: class '{}' is not installed (missing addon); '{}' stands in", Arma1Compat::Label(),
                      (const char*)vehicle, standIn);
             vehicle = standIn;
         }
@@ -411,6 +423,13 @@ LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("text", name, 7, ""))
     PARAM_CHECK(ar.SerializeArray("markers", markers, 1))
     PARAM_CHECK(ar.Serialize("init", init, 7, ""))
+    PARAM_CHECK(ar.SerializeArray("synchronizations", synchronizations, 1))
+    if (ar.IsLoading() && arma2Init.GetLength() > 0)
+    {
+        // Arma 2 starts a module from its class's init event handler, with _this = [unit],
+        // before the unit's own init field runs.
+        init = RString("[this] call {") + arma2Init + RString("}; ") + init;
+    }
 
     if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
     {
@@ -1843,7 +1862,7 @@ int ArcadeTemplate::SplitOversizedGroups()
             rest = remaining;
             created++;
         }
-        LOG_INFO(Mission, "Arma 1: group {} exceeds {} crew seats; units from #{} moved into new groups ({} so far)",
+        LOG_INFO(Mission, "{}: group {} exceeds {} crew seats; units from #{} moved into new groups ({} so far)", Arma1Compat::Label(),
                  i, MAX_UNITS_PER_GROUP, cut, created);
     }
     return created;
@@ -1876,7 +1895,7 @@ bool ArcadeTemplate::PromotePlayableToPlayer()
                 default:
                     continue;
             }
-            LOG_INFO(Mission, "Arma 1: no player unit; playable '{}' in group {} plays", (const char*)u.vehicle, i);
+            LOG_INFO(Mission, "{}: no player unit; playable '{}' in group {} plays", Arma1Compat::Label(), (const char*)u.vehicle, i);
             return true;
         }
     }
@@ -2182,6 +2201,14 @@ LSError ArcadeTemplate::Serialize(ParamArchive& ar)
         AI_ERROR(params);
         nextSyncId = params->nextSyncId;
         nextVehId = params->nextVehId;
+        // A unit whose class stops its archive early (an Arma 1/2 entry this game reads
+        // differently) never reaches the id bookkeeping; count every id actually loaded so
+        // Compact does not index past its table.
+        for (int i = 0; i < emptyVehicles.Size(); i++)
+            saturateMax(nextVehId, emptyVehicles[i].id + 1);
+        for (int i = 0; i < groups.Size(); i++)
+            for (int j = 0; j < groups[i].units.Size(); j++)
+                saturateMax(nextVehId, groups[i].units[j].id + 1);
         CheckSynchro(); // remove invalid synchronizations
         Compact();
     }
