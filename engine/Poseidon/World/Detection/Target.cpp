@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <unordered_set>
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 
 #include <Poseidon/AI/AIDangerList.hpp> // AI-XRAY-004: typed dangers
@@ -976,8 +977,36 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
         wepDir = GetWeaponDirection(_currentWeapon);
     }
 
+    // PERF (2026-10-14): every unit walks its group's whole target list, and the first
+    // touches of each Target and of the entity it names were cache misses -- in a
+    // firefight most of this function's own time, and TrackNearTargets (100 m) rejects
+    // nearly every entry right after paying for them. Fetch the Targets eight ahead and,
+    // once those have arrived, their entities four ahead. Pure hints: nothing else changes.
+    // POSEIDON_TRACK_TARGETS_PREFETCH=0 turns them off for an A/B.
+    static const bool trackPrefetch = []
+    {
+        const char* v = std::getenv("POSEIDON_TRACK_TARGETS_PREFETCH");
+        return !(v && v[0] == '0');
+    }();
+    constexpr int kTargetAhead = 8, kEntityAhead = 4;
     for (int index = 0; index < res.Size(); index++)
     {
+        if (trackPrefetch)
+        {
+            const int targetCount = res.Size(); // re-read, as the loop does: callees may edit the list
+            if (index + kTargetAhead < targetCount)
+            {
+                PrefetchT0(static_cast<const Target*>(res[index + kTargetAhead]));
+            }
+            if (index + kEntityAhead < targetCount)
+            {
+                if (const EntityAI* ahead = res[index + kEntityAhead]->idExact)
+                {
+                    PrefetchT0(ahead);
+                    PrefetchT0Off(ahead, 64);
+                }
+            }
+        }
         Target* target = res[index];
         EntityAI* ai = target->idExact;
         if (!ai)
