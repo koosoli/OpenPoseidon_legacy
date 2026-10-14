@@ -992,6 +992,16 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
                 }
                 else if (shotStep == 4 && played >= 19000)
                 {
+                    // the aiming view is only granted while the weapon offers optics
+                    // (World::SimulateCamera drops CamGunner otherwise): say which
+                    {
+                        EntityAI* ai = dyn_cast<EntityAI>(GWorld->CameraOn());
+                        Person* player = GWorld->PlayerOn();
+                        LODShapeWithShadow* optics = ai && player ? ai->GetOpticsModel(player) : nullptr;
+                        LOG_INFO(Mission, "Arma 2: optics shot: camera type {}, optics model {}",
+                                 static_cast<int>(GWorld->GetCameraType()),
+                                 optics ? (const char*)optics->GetName() : "(none)");
+                    }
                     GEngine->Screenshot((shot + "_optic.png").c_str());
                     if (Object* on = GWorld->CameraOn())
                         GWorld->SwitchCameraTo(on, CamInternal);
