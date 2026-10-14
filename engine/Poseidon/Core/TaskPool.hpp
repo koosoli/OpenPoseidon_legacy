@@ -99,12 +99,18 @@ class TaskPool
     void                                 GcCompletedPending();
 };
 
-// Default cap on the auto-sized pool. A CWA-era game's parallel work (terrain
-// segment generation, async asset decode, sim decomposition) saturates well before
-// a high-core-count machine's logical processors, so spawning one worker per core
-// (enkiTS's default) just adds scheduling/sync overhead and oversubscribes the audio
-// mixer / network threads. Cap the auto count here; override with --max-threads.
-inline constexpr uint32_t kDefaultMaxTaskThreads = 8;
+// Default cap on the auto-sized pool, so a very wide machine does not spawn a worker per
+// core for work that stops scaling; override with --max-threads.
+//
+// It was 8, on the reasoning that a CWA-era game's parallel work saturates long before
+// that. It no longer does (PERF, 2026-10-14, 16 logical cores, same binary): the native
+// world load's model building runs on this pool, and a stock-Everon firefight's
+// landscape and object passes split across it. With 16 against 8 -- native Everon
+// SwitchLandscape 15.6 -> 14.4 s; perf_combat main thread land:obj 3.37 -> 2.43 ms and
+// drw:land 4.34 -> 2.90 ms, with average and p95 frame unchanged (the GPU becomes the
+// limit there). Machines with fewer logical cores are unaffected: the count never exceeds
+// what the machine has.
+inline constexpr uint32_t kDefaultMaxTaskThreads = 16;
 
 // Resolve the TaskPool thread count (total enki threads, incl. the calling thread)
 // from the --max-threads CLI value. `cliOverride`: >0 = explicit, 0 = uncapped (use
