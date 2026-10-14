@@ -355,8 +355,16 @@ RString ResolveFrom(const char* configClass, const RString& name,
     if (!Active() || name.GetLength() == 0)
         return name;
     const ParamEntry* config = Pars.FindEntry(configClass);
-    if (!config || config->FindEntry(name))
+    if (!config)
         return name;
+    if (config->FindEntry(name))
+    {
+        // A weapon both games name alike (AK74, PK, M16A2 ...): CWA's class keeps the
+        // magazines and ballistics, the Arma model is drawn on it like for any other.
+        if (Generation() >= 1 && strcmp(configClass, "CfgWeapons") == 0 && _strnicmp(name.Data(), "A1x_", 4) != 0)
+            return Arma2WeaponModelClass(name, name);
+        return name;
+    }
     static std::set<std::string> reported;
     const std::string key = Lower(name.Data());
     const auto found = table.find(key);
