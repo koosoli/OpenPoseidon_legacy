@@ -62,8 +62,12 @@ What it took, each step measured on the laptop or offline on Arma 2's own files:
 
 | `541fdb1` | the player's rifle lay at his feet (third person) | the corepatch M16A4 is stored around its binariser's bounding centre (0.98 m up, 0.48 m along), the vanilla AK-74 the AI carried is not. Proxies now place a model's source origin (`AnimationOrigin()`), for proxy objects in ShapeAdapter and for held items in `Man::DrawProxies`. Measured: the player holds his M16A4 in MP_Superpowers, MP_UrbanWarfare, C2B |
 
-Still open: first person shows neither hands nor rifle (`OP_A2_PROXYLOG=1` shows both drawn at
-level 1100 in the right place).
+| `da8a367` | each soldier stood ~0.5 m beside his own origin | the man block now shifts x and z by the binariser's centre as well as lifting y; offline the footstep points come out symmetric (x +-0.18) and the aiming axis on the origin |
+| `131eb6a` | **every Arma 2 soldier faced backwards** (aimed behind himself, rifle and hands out of the first-person view, hands seen from behind in third person) | the A1x man class inherited CWA's `reversed=1`; an Arma 2 man is stored facing +z (posed offline: knees and hands go to +z). The class now says `reversed=0` and BMTR moves are conjugated once so the engine's reversed load returns them as posed. Measured: first person shows hands and rifle (MP_Superpowers, UrbanWarfare, C2B), third person shows the soldiers' faces toward a camera in front of them |
+| `58afdbb` | C0's crew on the water | streamed objects arrive over the first frames; at the 8 s screenshot the census finds all nine LHD parts and the player at y 15.9 on the deck (tops 16.1) |
+
+Still open: in first person the hands are untextured-looking and the fingers spread; the
+rifle sits low in the view.
 
 Offline check: a small program built from the repo's own ODOL and RTM readers poses
 `USMC_Soldier_Light` with a move and scores the result by how much the mesh's edges stretch.
