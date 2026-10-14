@@ -485,15 +485,21 @@ GameValue CargoList(const GameState* state, const AutoArray<RString>& names)
     {
         int found = -1;
         for (int j = 0; j < k.Size(); j++)
-            if (stricmp((RString)k[j], names[i]) == 0)
+        {
+            const RString kind = k[j];
+            if (stricmp(kind, names[i]) == 0)
                 found = j;
+        }
         if (found < 0)
         {
             k.Add(GameValue(names[i]));
             c.Add(GameValue(1.0f));
         }
         else
-            c[found] = GameValue((float)c[found] + 1.0f);
+        {
+            const float n = c[found];
+            c[found] = GameValue(n + 1.0f);
+        }
     }
     GameValue value = state->CreateGameValue(GameArray);
     GameArrayType& array = value;
