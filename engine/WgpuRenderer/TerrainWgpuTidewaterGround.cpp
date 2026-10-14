@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <set>
+#include <thread>
 #include <vector>
 
 namespace Poseidon
@@ -373,9 +374,81 @@ Ref<Texture> TidewaterGround::Bake(Texture* layer, AbstractTextBank* bank) const
     // a pure layer's own image is opaque: its alpha already says "all of the first kind"
     if (plan.kindA == 0 || (plan.pure && !Applies(base)))
         return nullptr;
-    DecodedImage image = DecodeLayer(layer);
-    if (!Recolour(base, image))
-        return nullptr;
+    DecodedImage image;
+    if (!Cached(base, image))
+    {
+        image = DecodeLayer(layer);
+        if (!Recolour(base, image))
+            return nullptr;
+    }
     return bank->CreateDynamic(image.width, image.height, image.rgba.data(), uint32_t(image.rgba.size()), true);
+}
+
+bool TidewaterGround::Cached(const std::string& base, DecodedImage& image) const
+{
+    const auto it = _cache.find(base);
+    if (it == _cache.end() || !it->second.valid())
+        return false;
+    image = it->second;
+    return true;
+}
+
+void TidewaterGround::Precompute(const Landscape& land)
+{
+    const std::string world = land.GetName() ? land.GetName() : "";
+    if (world == _cacheWorld)
+        return;
+    _cacheWorld = world;
+    _cache.clear();
+    if (!Enabled())
+        return;
+    Prepare(land);
+    struct Job
+    {
+        std::string base;
+        std::vector<uint8_t> bytes;
+        bool pac = false;
+        DecodedImage image;
+        bool ok = false;
+    };
+    std::vector<Job> jobs;
+    std::set<std::string> seen;
+    for (int i = 0; i < land.GetNTextures(); ++i)
+    {
+        const Texture* t = land.GetTexture(i);
+        const char* source = t ? static_cast<const TextureWgpu*>(t)->SourceName() : nullptr;
+        if (!source)
+            continue;
+        const std::string base = BaseName(source);
+        if (!seen.insert(base).second)
+            continue;
+        const Plan plan = PlanFor(base);
+        if (plan.kindA == 0 && !Applies(base))
+            continue;
+        Job job;
+        job.base = base;
+        job.bytes = ReadSource(source); // file access stays on this thread
+        job.pac = Contains(source, ".pac");
+        if (!job.bytes.empty())
+            jobs.push_back(std::move(job));
+    }
+    const unsigned threads = std::clamp(std::thread::hardware_concurrency(), 1u, 16u);
+    std::vector<std::thread> pool;
+    for (unsigned w = 0; w < threads; ++w)
+        pool.emplace_back([&, w]
+        {
+            for (size_t j = w; j < jobs.size(); j += threads)
+            {
+                Job& job = jobs[j];
+                job.image = DecodePAABuffer(job.bytes.data(), job.bytes.size(), !job.pac);
+                job.ok = Recolour(job.base, job.image);
+            }
+        });
+    for (std::thread& t : pool)
+        t.join();
+    for (Job& job : jobs)
+        if (job.ok)
+            _cache.emplace(job.base, std::move(job.image));
+    LOG_INFO(Graphics, "Tidewater ground: {} layers decoded and recoloured on {} threads", _cache.size(), threads);
 }
 } // namespace Poseidon

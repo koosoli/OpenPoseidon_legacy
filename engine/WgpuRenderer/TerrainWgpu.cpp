@@ -1529,6 +1529,7 @@ Texture* TerrainWgpu::TidewaterGroundLayer(const Landscape& land, Texture* layer
         if (from == layer)
             return to.GetRef() != nullptr ? to.GetRef() : layer;
     _twGround.Prepare(land);
+    _twGround.Precompute(land);
     EngineWgpu::AcquireProducerWindow("Tidewater ground layer");
     Ref<Texture> baked = _twGround.Bake(layer, _engine.TextBank());
     _twGroundBaked.emplace_back(layer, baked);
@@ -1584,7 +1585,13 @@ Ref<Texture> TerrainWgpu::BuildAutomaticSatmap(const Landscape& land)
         if (TidewaterGround::Enabled())
         {
             _twGround.Prepare(land);
-            _twGround.Recolour(TidewaterGround::BaseName(sourceName),image);
+            _twGround.Precompute(land);
+            const std::string base = TidewaterGround::BaseName(sourceName);
+            DecodedImage cached;
+            if (_twGround.Cached(base, cached) && cached.width == image.width && cached.height == image.height)
+                image = std::move(cached);
+            else
+                _twGround.Recolour(base, image);
         }
         if (!stbir_resize_uint8_linear(image.rgba.data(),image.width,image.height,image.width*4,
                                       tiles[i].data(),tileSize,tileSize,tileSize*4,STBIR_RGBA)) return nullptr;

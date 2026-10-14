@@ -53,9 +53,17 @@ class TidewaterGround
     bool Recolour(const std::string& base, DecodedImage& image) const;
     // The recoloured layer as a new mipmapped texture, or null (not sand / field, or no source).
     Ref<Texture> Bake(Texture* layer, AbstractTextBank* bank) const;
+    // (PERF, 2026-10-14) Decode and recolour every layer of the world once, on all cores (the file
+    // reads stay on this thread), so Bake and the satellite bake take the result instead of each
+    // decoding and recolouring the same 200-odd images one after the other.
+    void Precompute(const Landscape& land);
+    // The precomputed recoloured image of a layer, copied into `image`; false when there is none.
+    bool Cached(const std::string& base, DecodedImage& image) const;
 
   private:
     std::map<std::string, std::array<float, 3>> _means; // pure surface code -> mean sRGB colour 0..1
     std::string _world;
+    std::map<std::string, DecodedImage> _cache; // base name -> recoloured image (Precompute)
+    std::string _cacheWorld;
 };
 } // namespace Poseidon
