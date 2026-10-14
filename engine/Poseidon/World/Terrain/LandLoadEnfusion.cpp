@@ -3369,13 +3369,26 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
             // it in file order empties whatever region the file happened to write
             // last -- which is a different region every world and none of them the
             // one being looked at.
-            std::stable_sort(placed.begin(), placed.end(),
-                             [&](const ResolvedPlacement& a, const ResolvedPlacement& b)
-                             {
-                                 const float ax = a.position[0] - focusX, az = a.position[2] - focusZ;
-                                 const float bx = b.position[0] - focusX, bz = b.position[2] - focusZ;
-                                 return ax * ax + az * az < bx * bx + bz * bz;
-                             });
+            //
+            // Sorted by key -- the distance worked out once per placement rather than twice per
+            // comparison, ties broken by file position -- which is exactly the order the
+            // stable_sort by distance this replaces produced, on 1.2 M placements.
+            {
+                std::vector<std::pair<float, uint32_t>> order(placed.size());
+                for (size_t i = 0; i < placed.size(); ++i)
+                {
+                    const float ax = placed[i].position[0] - focusX, az = placed[i].position[2] - focusZ;
+                    order[i] = {ax * ax + az * az, static_cast<uint32_t>(i)};
+                }
+                std::sort(order.begin(), order.end(),
+                          [](const std::pair<float, uint32_t>& a, const std::pair<float, uint32_t>& b)
+                          { return a.first < b.first || (!(b.first < a.first) && a.second < b.second); });
+                std::vector<ResolvedPlacement> sorted;
+                sorted.reserve(placed.size());
+                for (const auto& entry : order)
+                    sorted.push_back(placed[entry.second]);
+                placed = std::move(sorted);
+            }
 
             size_t added = 0;
             size_t attachPlaced = 0;

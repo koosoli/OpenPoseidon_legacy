@@ -3187,14 +3187,34 @@ NativeInstallTexturePrep PrepareNativeInstallTextures(const std::vector<const Mo
                 // image, is never asked of the factory.
                 if (alreadyLoaded && (alreadyLoaded(name.c_str()) || (viaInner && alreadyLoaded(inner))))
                     continue;
-                std::string key =
-                    viaInner ? render::PreparedTextureStore::Key(inner) : render::PreparedTextureStore::Key(name);
-                if (key.size() >= 4 && (key.ends_with(".edds") || key.ends_with(".dds")) && !claimed.count(key) &&
-                    store.ShouldPrepare(key))
+                // What the factory is asked for. On the lazy route that is the inner image; and
+                // when the inner image cannot carry a tint view -- only a plain BC7 `_bcr` file
+                // can (TextureSourceDDS::CreateLinearTintView) -- the texture falls back to the
+                // FULL tinted name as well, which is then decoded on the calling thread unless it
+                // is here too. An alpha composite (`enfa|`, every road) is always that case.
+                const auto want = [&](std::string key)
                 {
-                    claimed.insert(key);
-                    keys.push_back(std::move(key));
+                    // A file, or an alpha composite painted with a constant colour
+                    // (`enfa|<coverage>|enfc|r,g,b`), which the DDS source also composes.
+                    const bool composable = key.ends_with(".edds") || key.ends_with(".dds") ||
+                                            (key.starts_with("enfa|") && key.find("|enfc|") != std::string::npos);
+                    if (key.size() >= 4 && composable && !claimed.count(key) && store.ShouldPrepare(key))
+                    {
+                        claimed.insert(key);
+                        keys.push_back(std::move(key));
+                    }
+                };
+                if (viaInner)
+                {
+                    const std::string innerName = inner;
+                    want(render::PreparedTextureStore::Key(inner));
+                    const bool viewable = innerName.find('|') == std::string::npos &&
+                                          (innerName.ends_with("_bcr.edds") || innerName.ends_with("_bcr.dds"));
+                    if (!viewable)
+                        want(render::PreparedTextureStore::Key(name));
                 }
+                else
+                    want(render::PreparedTextureStore::Key(name));
             }
     }
     out.names = keys.size();
