@@ -2083,12 +2083,31 @@ void World::Simulate(float deltaT, bool& enableDraw)
                         zMax = ObjRange - 1;
                     }
 #define RECT_CLIPPERS 1
+                    // PERF (2026-10-14): this walk touches every object of every cell in view,
+                    // and each first touch -- a virtual Invisible() through the vtable pointer --
+                    // was a cache miss: ~7% of a stock-Everon firefight's main thread sat on
+                    // those loads. The pointers are known ahead, so fetch the next cell's list
+                    // and the objects a few places ahead while this one is processed. Pure
+                    // hints: order and results are untouched. POSEIDON_DRAW_WALK_PREFETCH=0
+                    // turns them off for an A/B.
+                    static const bool walkPrefetch = []
+                    {
+                        const char* v = std::getenv("POSEIDON_DRAW_WALK_PREFETCH");
+                        return !(v && v[0] == '0');
+                    }();
                     for (z = zMin; z <= zMax; z++)
                     {
                         for (x = xMin; x <= xMax; x++)
                         {
                             // build if necessary
                             const ObjectList& list = GLandscape->GetObjects(z, x);
+                            if (walkPrefetch && x < xMax)
+                            {
+                                if (const ObjectListFull* next = GLandscape->GetObjects(z, x + 1).GetList())
+                                {
+                                    PrefetchT0(next);
+                                }
+                            }
                             if (list.Null())
                             {
                                 continue;
@@ -2106,10 +2125,24 @@ void World::Simulate(float deltaT, bool& enableDraw)
 #endif
                             ClipFlags orClip = cam.MayBeClipped(bCenter, bRadius, 1);
                             int n = list.Size();
+                            constexpr int kPrefetchAhead = 4;
+                            if (walkPrefetch)
+                            {
+                                for (int i = 0; i < n && i < kPrefetchAhead; i++)
+                                {
+                                    PrefetchT0(list[i]);
+                                    PrefetchT0Off(list[i], 64);
+                                }
+                            }
                             for (int i = 0; i < n; i++)
                             {
                                 Object* obj = list[i];
                                 PoseidonAssert(obj);
+                                if (walkPrefetch && i + kPrefetchAhead < n)
+                                {
+                                    PrefetchT0(list[i + kPrefetchAhead]);
+                                    PrefetchT0Off(list[i + kPrefetchAhead], 64);
+                                }
                                 if (obj->Invisible())
                                 {
                                     continue;
