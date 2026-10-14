@@ -109,6 +109,33 @@ EntityType* VehicleTypeBank::New(const char* name)
     {
         return nullptr;
     }
+    // PERF (2026-10-14): Find is a linear, case-insensitive scan of every type, and some
+    // callers ask per event -- every footprint Mark constructs its type by name, many a second
+    // in a firefight. A small direct-mapped cache of name -> index answers the repeat with one
+    // compare. It is validated against the bank's CURRENT entry at that index (types are
+    // removed automatically when unreferenced, so entries can go null or move), and names in
+    // the bank are unique -- New finds before it loads -- so a validated index is the one Find
+    // would return. Anything that fails validation takes the old path.
+    constexpr size_t kCacheSize = 64;
+    static int cache[kCacheSize] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+                                    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+                                    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+                                    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+    uint32_t hash = 2166136261u;
+    for (const char* c = name; *c; ++c)
+    {
+        const unsigned char lower = static_cast<unsigned char>(*c >= 'A' && *c <= 'Z' ? *c - 'A' + 'a' : *c);
+        hash = (hash ^ lower) * 16777619u;
+    }
+    int& slot = cache[hash & (kCacheSize - 1)];
+    if (slot >= 0 && slot < Size())
+    {
+        EntityType* cached = Get(slot);
+        if (cached && !BankTraits<EntityType>::CompareNames(cached->GetName(), name))
+        {
+            return cached;
+        }
+    }
     int index = Find(name);
     if (index < 0)
     {
@@ -118,6 +145,7 @@ EntityType* VehicleTypeBank::New(const char* name)
     {
         return nullptr;
     }
+    slot = index;
     return Get(index);
 }
 
