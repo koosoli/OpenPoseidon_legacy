@@ -52,6 +52,9 @@
 #include <Poseidon/World/Model/Model.hpp>              // the IR handed over by ObjectStreamPreparer
 #include <Poseidon/World/Model/ModelMemory.hpp>        // conversion reservation estimate
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
 #include <Poseidon/World/Terrain/ObjectTextureUploadTrace.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamTreeFixture.hpp>
 #include <Poseidon/World/Terrain/WarmModelCaptureWindow.hpp>
@@ -3668,6 +3671,31 @@ bool Landscape::SetObjectStreamTestBudget(uint32_t budget)
     return true;
 }
 
+// PERF (2026-10-14): a streamed native model's bank tables, with its face textures prepared on
+// the task pool first (PrepareNativeInstallTextures: exactly the names BuildAdapterBankTables
+// loads, minus what the bank already holds). The table build here was the main thread's cold
+// admission cost -- each new .edds read, LZ4'd, BC7-decoded and tinted in turn. Only with
+// Enfusion archives mounted; POSEIDON_STREAM_TEXTURE_PREP=0 is the A/B.
+static void BuildStreamedBankTables(const Model::Model& model, Model::ShapeAdapter::AdapterBankTables& tables)
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("POSEIDON_STREAM_TEXTURE_PREP");
+        return !(v && v[0] == '0');
+    }();
+    AbstractTextBank* bank = GEngine ? GEngine->TextBank() : nullptr;
+    if (enabled && bank && Asset::Formats::Enfusion::EnfusionMount::Instance().ArchiveCount() > 0)
+    {
+        std::unordered_set<std::string> claims;
+        PrepareNativeInstallTextures({&model}, GetGlobalTaskPool(), claims,
+                                     [bank](const char* name) { return bank->IsLoaded(RStringB(name)); });
+        const NativeInstallTextureScope takePrepared;
+        Model::ShapeAdapter::BuildAdapterBankTables(model, tables);
+        return;
+    }
+    Model::ShapeAdapter::BuildAdapterBankTables(model, tables);
+}
+
 void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
 {
     if (!_modernObjectStreaming || _modernObjectCells.empty())
@@ -4766,7 +4794,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         const auto tableStart = std::chrono::steady_clock::now();
                         TenementPhysicalPaaScope physicalPaaTables(
                             low == R"(dz\structures\residential\tenements\tenement_small.p3d)");
-                        Model::ShapeAdapter::BuildAdapterBankTables(*preparsed, *tables);
+                        BuildStreamedBankTables(*preparsed, *tables);
                         if (TenementPhysicalPaaScope::Overflowed())
                             LOG_INFO(World, "DayZ physical prefetch: parent Init identity capture overflowed 256 attempts; uncaptured sources use ordinary reads");
                         tablePrepareMs += std::chrono::duration<double, std::milli>(
@@ -5632,7 +5660,7 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                             if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
                         model->sourcePath = low;
                         auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
-                        Model::ShapeAdapter::BuildAdapterBankTables(*model, *tables);
+                        BuildStreamedBankTables(*model, *tables);
                         const auto radiusToken = _modernObjectPreparer->QueryRadius(modelIndex);
                         _modernObjectPreparer->SubmitConvert(modelIndex, std::move(model), std::move(tables), &radiusToken);
                     }

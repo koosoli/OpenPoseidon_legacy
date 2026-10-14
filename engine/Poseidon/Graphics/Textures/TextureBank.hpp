@@ -163,6 +163,9 @@ class AbstractTextBank
 
     virtual Ref<Texture> Load(RStringB text) = 0;
     virtual Ref<Texture> LoadInterpolated(RStringB n1, RStringB n2, float factor) = 0;
+    //! Whether Load(name) would return an existing texture without creating a source. Used to
+    //! skip preparing what the factory will not be asked for; a bank that cannot tell says no.
+    virtual bool IsLoaded(RStringB name) const { return false; }
     virtual void AddGamma(float g) {}
 
     virtual int NTextures() const = 0;

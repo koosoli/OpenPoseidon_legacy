@@ -3137,7 +3137,8 @@ ObjectStreamPreparer::Stats ObjectStreamPreparer::SnapshotStats() const
 }
 
 NativeInstallTexturePrep PrepareNativeInstallTextures(const std::vector<const Model::Model*>& models, TaskPool* pool,
-                                                      std::unordered_set<std::string>& claimed)
+                                                      std::unordered_set<std::string>& claimed,
+                                                      const std::function<bool(const char*)>& alreadyLoaded)
 {
     NativeInstallTexturePrep out;
     if (models.empty() || !render::PreparedTextureStore::Enabled())
@@ -3180,10 +3181,14 @@ NativeInstallTexturePrep PrepareNativeInstallTextures(const std::vector<const Mo
                         c = static_cast<char>(c - 'A' + 'a');
                 float rgb[3];
                 const char* inner = nullptr;
+                const bool viaInner =
+                    lazyTint && Enfusion::SplitLayerTintName(name.c_str(), rgb, &inner) && inner && *inner;
+                // The bank answers first: a loaded name, or on the lazy route a loaded inner
+                // image, is never asked of the factory.
+                if (alreadyLoaded && (alreadyLoaded(name.c_str()) || (viaInner && alreadyLoaded(inner))))
+                    continue;
                 std::string key =
-                    (lazyTint && Enfusion::SplitLayerTintName(name.c_str(), rgb, &inner) && inner && *inner)
-                        ? render::PreparedTextureStore::Key(inner)
-                        : render::PreparedTextureStore::Key(name);
+                    viaInner ? render::PreparedTextureStore::Key(inner) : render::PreparedTextureStore::Key(name);
                 if (key.size() >= 4 && (key.ends_with(".edds") || key.ends_with(".dds")) && !claimed.count(key) &&
                     store.ShouldPrepare(key))
                 {

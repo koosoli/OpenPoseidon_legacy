@@ -81,6 +81,7 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <functional>
 #include <Poseidon/World/Terrain/StaticSourceEnvelope.hpp>
 #include <Poseidon/World/Terrain/StaticPlainSourceSummary.hpp>
 
@@ -489,8 +490,11 @@ struct NativeInstallTexturePrep
 //! `claimed` carries the names already prepared by an earlier batch of the same install: a
 //! texture the bank now holds is never asked of the factory again, so preparing it twice
 //! would only be thrown away.
+//! `alreadyLoaded(name)`, when given, answers whether the texture bank already holds `name`
+//! (AbstractTextBank::IsLoaded); such a name never reaches the factory, so it is not prepared.
 NativeInstallTexturePrep PrepareNativeInstallTextures(const std::vector<const Model::Model*>& models, TaskPool* pool,
-                                                      std::unordered_set<std::string>& claimed);
+                                                      std::unordered_set<std::string>& claimed,
+                                                      const std::function<bool(const char*)>& alreadyLoaded = {});
 
 //! While alive, TextureSourceDDSFactory takes prepared native sources even with the streaming
 //! experiment (WGR_NATIVE_DDS_PREPARE) off. Main thread; not reentrant.

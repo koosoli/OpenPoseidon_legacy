@@ -128,6 +128,7 @@ class TextureBankWgpu : public AbstractTextBank
     void TrimResidency();
 
     int Find(RStringB name) const;
+    bool IsLoaded(RStringB name) const override { return Find(name) >= 0; }
     Ref<Texture> Load(RStringB name) override;
     std::string LegacyNormalPath(const char* name);
     Ref<Texture> LoadLegacyEnhancementNormal(const char* name);
