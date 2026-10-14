@@ -467,6 +467,24 @@ inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
                 }
             }
         }
+        // The engine loads every move "reversed" (AnimationRTPhase::LoadFromRTM conjugates it
+        // by diag(-1, 1, -1)), as an OFP soldier is a turned model. An Arma 2 soldier is not
+        // turned (reversed=0, Arma1ModelClass), so the moves leave here conjugated once
+        // already and arrive as they were posed. OP_A2_MAN_REVERSED=1 keeps the old pair.
+        static const bool manReversed = [] {
+            const char* e = std::getenv("OP_A2_MAN_REVERSED");
+            return e && *e == '1';
+        }();
+        if (hierarchical && !manReversed)
+            for (auto& m : world)
+            {
+                m[1] = -m[1];
+                m[3] = -m[3];
+                m[5] = -m[5];
+                m[7] = -m[7];
+                m[9] = -m[9];
+                m[11] = -m[11];
+            }
         for (uint32_t b = 0; b < bones; b++)
         {
             char name[BONE_NAME_LEN] = {};
