@@ -7,6 +7,7 @@
 #include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/AI/AI.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/UI/InGame/InGameUIImpl.hpp>
 #include <Poseidon/UI/Controls/CursorLayout.hpp>
@@ -1582,7 +1583,15 @@ void InGameUI::DrawHUD(const Camera& camera, EntityAI* vehicle, CameraType cam)
                 PoseidonAssert(mis->_action == Mission::Arcade);
                 int& index = group->GetCurrent()->_fsm->Var(0);
                 int& waiting = group->GetCurrent()->_fsm->Var(4);
-                if (index < group->NWaypoints())
+                // An Arma mission's hidden waypoint ("showWP" NEVER, or EASY outside cadet mode)
+                // is not drawn here either, as the map already does: Arma 2 missions hide most of
+                // theirs and guide the player with their own markers and tasks. CWA missions keep
+                // the old behaviour (an OFP 1.0 mission reads its "show" flag as NEVER).
+                const bool wpShow =
+                    index < group->NWaypoints() &&
+                    (!Arma1Compat::Active() || group->GetWaypoint(index).showWP == ShowAlways ||
+                     (group->GetWaypoint(index).showWP == ShowEasy && USER_CONFIG.easyMode));
+                if (wpShow)
                 {
                     const ArcadeWaypointInfo& wInfo = group->GetWaypoint(index);
                     int type = wInfo.type;
@@ -1612,7 +1621,11 @@ void InGameUI::DrawHUD(const Camera& camera, EntityAI* vehicle, CameraType cam)
                         }
                         else
                         {
-                            description = LocalizeString(IDS_AC_MOVE + type - ACMOVE);
+                            // only the waypoint types have a name; anything else (an undefined
+                            // type, say) indexed the strings before them and read
+                            // "%s %s %s killed in action (%s)"
+                            description = LocalizeString(type >= ACMOVE && type < ACN ? IDS_AC_MOVE + type - ACMOVE
+                                                                                      : IDS_AC_MOVE);
                         }
                     }
 
