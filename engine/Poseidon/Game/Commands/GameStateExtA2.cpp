@@ -61,6 +61,8 @@
 using namespace Poseidon;
 
 bool PreprocessScriptFile(const char* name, std::string& out); // GameStateExtWorldConfig.cpp
+bool A1ConfigIsNull(GameValuePar v);                           // GameStateExtA1Config.cpp
+bool Arma3ResolveUiVariable(const char* lowerName, GameValue& value); // GameStateExtA3Functions.cpp
 
 void Arma2RuntimeSimulate(); // called from World::SimulateScripts
 
@@ -307,8 +309,18 @@ GameValue A2GetVariable(const GameState* state, GameValuePar oper1, GameValuePar
         if (strcmp(ns, kNsUi) == 0)
         {
             auto& vars = RT().uiVars;
-            const auto it = vars.find(Lower((const char*)name));
-            return it != vars.end() ? it->second : fallback;
+            const std::string key = Lower((const char*)name);
+            const auto it = vars.find(key);
+            if (it != vars.end())
+                return it->second;
+            // Arma 3 keeps its function library in uiNamespace as well
+            GameValue function;
+            if (Arma3ResolveUiVariable(key.c_str(), function))
+            {
+                vars[key] = function;
+                return function;
+            }
+            return fallback;
         }
         GameValue v = state->VarGet(name);
         return v.GetNil() ? fallback : v;
@@ -1532,9 +1544,12 @@ GameValue A2LocationNull(const GameState*)
 }
 
 // isNull on a location handle (other strings are not null).
+
 GameValue A2IsNullLocation(const GameState*, GameValuePar oper1)
 {
     const RString s = oper1;
+    if (strncmp(s, "::CFG::", 7) == 0 || strncmp(s, "::MCFG::", 8) == 0)
+        return GameValue(A1ConfigIsNull(oper1)); // Arma 3: isNull on a config entry
     if (strncmp(s, LocTag, strlen(LocTag)) != 0)
         return GameValue(false);
     return GameValue(LocationOf(oper1) == nullptr);
@@ -2352,9 +2367,12 @@ void Arma2StartStallMonitor()
     std::thread(StallMonitor).detach();
 }
 
+void Arma3RuntimeSimulate(); // GameStateExtA3.cpp
+
 void Arma2RuntimeSimulate()
 {
     GSimulateTick.fetch_add(1, std::memory_order_relaxed);
+    Arma3RuntimeSimulate();
     if (Arma1Compat::Generation() < 2 || !GWorld || !GWorld->GetGameState())
         return;
     Runtime& rt = RT();

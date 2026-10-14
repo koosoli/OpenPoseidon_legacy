@@ -319,6 +319,8 @@ GameValue GameState::Const() const
         if (closed)
         {
             _e->_pos = end + 1;
+            if (s_codeValues)
+                return GameValue(new GameDataCode(RString(start, end - start)));
             return RString(start, end - start);
         }
         else
@@ -1127,6 +1129,7 @@ static GameValue ListForEach(const GameState* state, GameValuePar oper1, GameVal
         const GameValue& val = array[i];
         // set local varible - will be deleted on EndContext
         state->VarSetLocal("_x", val, true);
+        state->VarSetLocal("_forEachIndex", GameValue(static_cast<float>(i)), true);
         const_cast<GameState*>(state)->Execute(expression);
         if (state->GetLastError())
         {
@@ -2109,6 +2112,11 @@ RString GameDataString::GetText() const
     return RString("\"") + _value + RString("\"");
 }
 
+RString GameDataCode::GetText() const
+{
+    return RString("{") + GetString() + RString("}");
+}
+
 bool GameDataString::IsEqualTo(const GameData* data) const
 {
     RString val1 = GetString();
@@ -2535,6 +2543,15 @@ GameValue GameState::VarGet(const char* name) const
     {
         // get variable value
         return var._value;
+    }
+    if (s_resolveGlobal && source[0] != '_')
+    {
+        GameValue resolved;
+        if (s_resolveGlobal(source, resolved))
+        {
+            const_cast<GameState*>(this)->VarSet(source, resolved);
+            return resolved;
+        }
     }
 
     return GameValueNil();

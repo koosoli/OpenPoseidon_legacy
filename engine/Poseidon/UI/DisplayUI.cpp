@@ -73,6 +73,8 @@
 
 extern bool AutoTest;
 
+void Arma3MissionStart(); // GameStateExtA3Functions.cpp (--arma3)
+
 namespace Poseidon
 {
 
@@ -127,6 +129,15 @@ void RunInitScript()
         Script* script = new Script("init.sqs", GameValue(), INT_MAX);
         GWorld->AddScript(script);
         GWorld->SimulateScripts();
+    }
+
+    // Arma 3: the function library's start sequence (preInit, modules, initServer /
+    // initPlayerLocal / initPlayerServer, postInit, then init.sqf).
+    if (Arma1Compat::Generation() == 3)
+    {
+        ::Arma3MissionStart();
+        GWorld->SimulateScripts();
+        return;
     }
 
     // Also run init.sqf if present (SQF format, unscheduled execution)

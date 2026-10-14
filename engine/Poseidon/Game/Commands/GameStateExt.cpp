@@ -1352,6 +1352,9 @@ static GameValue A1IsPlayer(const GameState* state, GameValuePar oper1)
 // compile: code is a string here, so compiling is the identity
 static GameValue A1Compile(const GameState*, GameValuePar oper1)
 {
+    // Arma 3 content: compiled text is code ({...}), which typeName and params tell apart.
+    if (GameState::s_codeValues)
+        return GameValue(new GameDataCode((RString)oper1));
     return oper1;
 }
 

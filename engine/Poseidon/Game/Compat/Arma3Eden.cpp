@@ -860,6 +860,7 @@ struct UnitOut
     std::vector<int> syncs;
     std::vector<std::string> markers;
     std::vector<std::string> prefix; // init statements ahead of the unit's own
+    std::vector<std::string> layers; // the Eden layers it sits in, innermost last
     CrewSeat seat;
 };
 
@@ -904,7 +905,9 @@ class EdenConverter
     std::vector<GroupOut> _groups;
     std::vector<UnitOut> _vehicles; // class Vehicles (side EMPTY)
     std::vector<const Node*> _markers;
+    std::vector<std::vector<std::string>> _markerLayers; // parallel to _markers
     std::vector<TriggerOut> _triggers;
+    std::vector<std::string> _layers; // the layers being collected, outermost first
     std::map<long, Ref> _refs;
     std::map<long, std::string> _vehicleNames;
     int _nextSync = 0;
@@ -936,6 +939,7 @@ class EdenConverter
         u.node = &item;
         u.edenId = item.I("id", -1);
         u.logic = logic;
+        u.layers = _layers;
         g.units.push_back(std::move(u));
     }
 
@@ -952,8 +956,10 @@ class EdenConverter
                 g.waypoints.push_back(item);
             else if (dt == "layer" && depth < 16)
             {
+                _layers.push_back(item->S("name"));
                 if (const Node* e = item->Class("Entities"))
                     CollectGroupEntities(g, *e, depth + 1);
+                _layers.pop_back();
             }
             else
                 Collect(*item, depth + 1); // markers, triggers... placed inside a group
@@ -967,9 +973,11 @@ class EdenConverter
         const std::string dt = Lower(item.S("dataType"));
         if (dt == "layer")
         {
+            _layers.push_back(item.S("name"));
             if (const Node* e = item.Class("Entities"))
                 for (const Node* child : e->Items())
                     Collect(*child, depth + 1);
+            _layers.pop_back();
         }
         else if (dt == "group")
         {
@@ -1001,6 +1009,7 @@ class EdenConverter
             UnitOut v;
             v.node = &item;
             v.edenId = item.I("id", -1);
+            v.layers = _layers;
             _vehicles.push_back(std::move(v));
         }
         else if (dt == "logic")
@@ -1015,7 +1024,10 @@ class EdenConverter
             if (Lower(item.S("markerType")) == "polyline")
                 _report.skipped++;
             else
+            {
                 _markers.push_back(&item);
+                _markerLayers.push_back(_layers);
+            }
         }
         else if (dt == "trigger")
         {
@@ -1193,8 +1205,51 @@ class EdenConverter
         return name;
     }
 
+    // getMissionLayerEntities: each object registers in the lists of its layers
+    // (op_eden_layer_<name>), markers through one logic of their own.
+    static std::string LayerVariable(const std::string& layer, bool markers)
+    {
+        return std::string(markers ? "op_eden_layer_markers_" : "op_eden_layer_") + Lower(layer);
+    }
+    static void RegisterInLayers(UnitOut& u)
+    {
+        for (const std::string& layer : u.layers)
+        {
+            // pushBack into one shared array: a layer of thousands of objects stays linear
+            const std::string var = SqfString(LayerVariable(layer, false));
+            u.prefix.push_back("if (isNil {missionNamespace getVariable " + var +
+                               "}) then {missionNamespace setVariable [" + var + ", []]}; (missionNamespace getVariable " +
+                               var + ") pushBack this");
+        }
+    }
+    void AddMarkerLayerLogic()
+    {
+        std::map<std::string, std::vector<std::string>> byLayer;
+        for (size_t i = 0; i < _markers.size(); i++)
+            for (const std::string& layer : _markerLayers[i])
+                byLayer[layer].push_back(_markers[i]->S("name"));
+        if (byLayer.empty())
+            return;
+        std::string init;
+        for (const auto& [layer, names] : byLayer)
+        {
+            std::string list = "[";
+            for (size_t i = 0; i < names.size(); i++)
+                list += (i ? "," : "") + SqfString(names[i]);
+            init += (init.empty() ? "" : "; ") + std::string("missionNamespace setVariable [") +
+                    SqfString(LayerVariable(layer, true)) + ", " + list + "]]";
+        }
+        _layerLogicInit = init;
+    }
+    std::string _layerLogicInit;
+
     void PrepareUnits()
     {
+        for (GroupOut& g : _groups)
+            for (UnitOut& u : g.units)
+                RegisterInLayers(u);
+        for (UnitOut& v : _vehicles)
+            RegisterInLayers(v);
         // the player: isPlayer, else the first playable unit
         bool havePlayer = false;
         for (GroupOut& g : _groups)
@@ -1474,6 +1529,9 @@ class EdenConverter
         _groups.clear();
         _vehicles.clear();
         _markers.clear();
+        _markerLayers.clear();
+        _layerLogicInit.clear();
+        _layers.clear();
         _triggers.clear();
         _refs.clear();
         _vehicleNames.clear();
@@ -1485,6 +1543,7 @@ class EdenConverter
         AssignIds();
         ApplyConnections(scenario.Class("Connections"));
         PrepareUnits();
+        AddMarkerLayerLogic();
         // a vehicle someone boards needs a name, also when the mission gave it none
         for (const GroupOut& g : _groups)
             for (const UnitOut& u : g.units)
@@ -1498,10 +1557,11 @@ class EdenConverter
         if (seed)
             w.Raw("randomSeed", ValText(seed->value));
         WriteIntel(w, scenario.Class("Intel"));
-        if (!_groups.empty())
+        const bool layerLogic = !_layerLogicInit.empty();
+        if (!_groups.empty() || layerLogic)
         {
             w.Open("Groups");
-            w.Raw("items", std::to_string(_groups.size()));
+            w.Raw("items", std::to_string(_groups.size() + (layerLogic ? 1 : 0)));
             for (size_t gi = 0; gi < _groups.size(); gi++)
             {
                 const GroupOut& g = _groups[gi];
@@ -1529,6 +1589,31 @@ class EdenConverter
                 }
                 w.Close();
                 _report.groups++;
+            }
+            if (layerLogic)
+            {
+                // the markers' layer lists, set by a logic of its own
+                int nextId = 0;
+                for (const GroupOut& g : _groups)
+                    for (const UnitOut& u : g.units)
+                        nextId = std::max(nextId, u.legacyId + 1);
+                for (const UnitOut& v : _vehicles)
+                    nextId = std::max(nextId, v.legacyId + 1);
+                w.Open("Item" + std::to_string(_groups.size()));
+                w.Str("side", "LOGIC");
+                w.Open("Vehicles");
+                w.Raw("items", "1");
+                w.Open("Item0");
+                w.Arr("position", "{0,0,0}");
+                w.Str("special", "NONE");
+                w.Raw("id", std::to_string(nextId));
+                w.Str("side", "LOGIC");
+                w.Str("vehicle", "Logic");
+                w.Raw("leader", "1");
+                w.Str("init", _layerLogicInit);
+                w.Close();
+                w.Close();
+                w.Close();
             }
             w.Close();
         }
