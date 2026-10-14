@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <cctype>
+#include <cstring>
 #include <map>
 #include <unordered_map>
 #include <stdexcept>
@@ -960,6 +961,30 @@ class ODOLLoader
                 sectionMaterialSlot[s] = static_cast<uint32_t>(mesh.materials.size());
                 mesh.materials.emplace_back(std::string(), std::string());
                 fillEmbedded(mesh.materials.back(), source.materials[section.materialIndex]);
+                // A renderer that draws a section by its texture alone (GL33) had nothing
+                // to draw these with: Arma 2's concrete walls (Wall_IndCnc_*, "Multi"
+                // shader, four layers blended by a mask) drew white along every Takistan
+                // and Chernarus base. Their first stage is the first layer's base colour;
+                // it stands in as the section's texture when it is one (*_co / *_ca).
+                Material& added = mesh.materials.back();
+                for (const MaterialStage& stage : added.embeddedStages)
+                {
+                    if (stage.sourceStage != 0 || stage.texturePath.empty() || stage.texturePath[0] == '#')
+                        continue;
+                    std::string lower = stage.texturePath;
+                    for (char& ch : lower)
+                        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                    const auto endsWith = [&](const char* suffix)
+                    {
+                        const size_t n = std::strlen(suffix);
+                        return lower.size() >= n && lower.compare(lower.size() - n, n, suffix) == 0;
+                    };
+                    if (endsWith("_co.paa") || endsWith("_ca.paa"))
+                    {
+                        added.name = stage.texturePath;
+                        added.texturePath = stage.texturePath;
+                    }
+                }
             }
         }
 
@@ -974,10 +999,18 @@ class ODOLLoader
         {
             const auto& indices = source.polygons.faces[face];
             uint32_t materialIndex = UINT32_MAX;
-            for (const auto& section : source.sections)
-                if (offsets[face] >= static_cast<uint32_t>(section.faceLower) &&
-                    offsets[face] < static_cast<uint32_t>(section.faceUpper) && section.textureIndex >= 0)
+            for (size_t s = 0; s < source.sections.size(); ++s)
+            {
+                const auto& section = source.sections[s];
+                if (offsets[face] < static_cast<uint32_t>(section.faceLower) ||
+                    offsets[face] >= static_cast<uint32_t>(section.faceUpper))
+                    continue;
+                if (section.textureIndex >= 0)
                     materialIndex = static_cast<uint32_t>(section.textureIndex);
+                else if (sectionMaterialSlot[s] != UINT32_MAX &&
+                         !mesh.materials[sectionMaterialSlot[s]].texturePath.empty())
+                    materialIndex = sectionMaterialSlot[s]; // a stage-0 base colour (above)
+            }
             if (indices.size() == 3)
             {
                 Triangle triangle;
