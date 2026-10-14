@@ -1644,12 +1644,12 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     if (!a1 || !cwa)
         return cwaClass;
     const bool man = IsKindOf(a1, "CAManBase") || IsKindOf(a1, "Man");
-    // Arma 2 soldiers: their models and moves (binarised BMTR animations, converted on
-    // load) are in testing; OP_A2_SOLDIERS=1 turns them on, else an Arma 2 soldier keeps
-    // the CWA soldier's model and moves -- but still carries its own weapons.
+    // Arma 2 soldiers use their own models and moves (binarised BMTR animations, converted
+    // on load). OP_A2_SOLDIERS=0 brings back the CWA soldier's model and moves; the soldier
+    // still carries his own weapons.
     static const bool a2Soldiers = [] {
         const char* e = std::getenv("OP_A2_SOLDIERS");
-        return e && *e == '1';
+        return !(e && *e == '0');
     }();
     std::string model = StringValue(*a1, "model");
     bool useModel = !(model.empty() || model == "\\" || model.find("bmp.p3d") != std::string::npos);
