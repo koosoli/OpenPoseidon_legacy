@@ -95,6 +95,16 @@ like LOD 0 (`OP_A2_PROXYLOG`: bones within 0-4 cm). What was wrong was the pose 
 | `dee0e27` | A stored Arma man faces **-z** like every Arma/OFP model: toes, eyes and the `pilot` camera point lie at -z. The BMTR moves were read mirrored in x: every joint closes (stretch 0.09-0.21) but the man becomes his own mirror image, limbs to +z and face to -z. `131eb6a` then left him unturned so the rifle pointed forward -- and the face backward: the first-person camera looked out of the back of his head (FR/ACR: their backpack filled the screen; USMC: his arms seen from the wrong side), and in third person the camera behind the player saw his face and knee pads | the moves pose the TURNED model, as the engine draws it: read without the x-mirror and conjugated once by diag(-1,1,-1) for the engine's reversed load, with the man turned again (CWA's `reversed=1`). `diag30` (the repo's own `ConvertBMTRToRTM` on USMC_Soldier_Light, USMC_Soldier_CO and FR Cooper; stand, aim, idle, walk, kneel, prone): stretch halves to 0.04-0.09, and eyes, hands, knees and toes land on the man's own front. `OP_A2_MAN_XMIRROR=1` restores the old pair |
 | `a7f3a32` | the "white fence" is Arma 2's concrete wall (`Wall_IndCnc_4_D`, `_End_2`, `_End_3`): one section with no face texture, only a `Multi` rvmat blending four layers by a mask; GL33 drew it white (census: section texture `(none)`) | a texture-less section takes its material's stage 0 as its texture when that is a base colour (`*_co`/`*_ca`); the wall draws with `concrete_wall_co.paa` |
 
+Measured in game with `a7f3a32` (focus run 8, 8 missions, all clean, census 763 Arma / 0
+CWA): first person shows the rifle in both hands at the shoulder (MP_Superpowers'
+M16A4 with ACOG, C2B's M4 with EOTech), the eye sits 17 cm in front of the neck (was 2 cm
+behind it), the FR and ACR soldiers no longer see their own backpack, and in third person
+every soldier, the player and the AI, turns his back to a camera behind him with the rifle
+pointing ahead. SPE1's concrete walls draw as concrete.
+
+Still open: the first-person hands look flat (skin texture with the `Skin` shader, which
+GL33 draws as plain diffuse); the LHD deck crew in C0 look gold all over.
+
 Offline check: a small program built from the repo's own ODOL and RTM readers poses
 `USMC_Soldier_Light` with a move and scores the result by how much the mesh's edges stretch.
 
