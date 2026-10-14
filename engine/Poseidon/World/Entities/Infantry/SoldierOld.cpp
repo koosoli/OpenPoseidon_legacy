@@ -798,6 +798,21 @@ bool AutomaticRagdollTerrain(RString& refusal)
     if (width*width > 4u*1024u*1024u) { refusal = "bounded-terrain-allocation-refused"; return false; }
     const float spacing = grid;
     std::vector<float> heights(width*width);
+    // (PERF, 2026-10-14) At a grid vertex SurfaceY is that vertex's own height, so the vertex
+    // table is read directly: 4M SurfaceY calls were ~0.3 s of every mission start. A sampled
+    // subgrid is still checked against SurfaceY, and any disagreement (a later surface layer
+    // folded into SurfaceY) falls back to the full per-vertex query below.
+    bool direct = true;
+    for (size_t z = 0; z < width && direct; ++z) for (size_t x = 0; x < width; ++x)
+    {
+        const float y = GLandscape->ClippedData(int(z),int(x));
+        if (!std::isfinite(y)) { refusal = "nonfinite-map-terrain"; return false; }
+        heights[z*width+x] = y;
+    }
+    for (size_t z = 0; z+1 < width && direct; z += 31) for (size_t x = 0; x+1 < width; x += 29)
+        if (std::abs(GLandscape->SurfaceY(float(x)*spacing,float(z)*spacing) - heights[z*width+x]) > 1e-3f)
+        { direct = false; break; }
+    if (!direct)
     for (size_t z = 0; z < width; ++z) for (size_t x = 0; x < width; ++x)
     {
         // SurfaceY requires an entire cell and returns outside-map sea at the
@@ -808,10 +823,11 @@ bool AutomaticRagdollTerrain(RString& refusal)
         if (!std::isfinite(y)) { refusal = "nonfinite-map-terrain"; return false; }
         heights[z*width+x] = y;
     }
+    const double fillMs = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
     if (!world.SetTerrain(heights.data(),int(width),int(width),spacing,0,0))
     { refusal = "physics-terrain-registration-refused"; return false; }
-    LOG_INFO(World,"AUTORAGDOLL: registered shared actual terrain width={} spacing={} mapGrid={} landGrid={} bytes={} milliseconds={}",
-        width,spacing,grid,GLandscape->GetLandGrid(),heights.size()*sizeof(float),
+    LOG_INFO(World,"AUTORAGDOLL: registered shared actual terrain width={} spacing={} mapGrid={} landGrid={} bytes={} direct={} fillMs={:.1f} milliseconds={}",
+        width,spacing,grid,GLandscape->GetLandGrid(),heights.size()*sizeof(float),direct,fillMs,
         std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count());
     return true;
 }
