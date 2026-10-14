@@ -329,7 +329,8 @@ class ODOLLoader
         // which every placement in the soldier code takes as ground level ("landContact at
         // y=0"). The whole model is lifted until its lowest drawn point is at y=0; the
         // animation origin moves with it, so the moves still pose about the same point.
-        if (sourceVersion >= 48 && sourceVersion <= 54 && !model.lodLevels.empty())
+        // Arma 3 (ODOL 73) men use the same skeleton; their feet are grounded the same way.
+        if (((sourceVersion >= 48 && sourceVersion <= 54) || sourceVersion == 73) && !model.lodLevels.empty())
         {
             bool man = false, spine = false, head = false;
             for (const auto& b : source.directory.bones)
