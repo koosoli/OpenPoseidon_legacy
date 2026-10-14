@@ -983,6 +983,20 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
                     GEngine->Screenshot((shot + "_3rd.png").c_str());
                     shotStep = 3;
                 }
+                // ... and through the weapon's optics (the aiming view) at 19 s
+                else if (shotStep == 3 && played >= 16000)
+                {
+                    if (Object* on = GWorld->CameraOn())
+                        GWorld->SwitchCameraTo(on, CamGunner);
+                    shotStep = 4;
+                }
+                else if (shotStep == 4 && played >= 19000)
+                {
+                    GEngine->Screenshot((shot + "_optic.png").c_str());
+                    if (Object* on = GWorld->CameraOn())
+                        GWorld->SwitchCameraTo(on, CamInternal);
+                    shotStep = 5;
+                }
             }
         }
     }
