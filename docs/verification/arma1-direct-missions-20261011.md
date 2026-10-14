@@ -141,9 +141,66 @@ briefing path) and runs 25 s with no script error, crash or hang. What it does n
   ctrlSetFade shows/hides on commit (no fading). Structured text is shown as plain text.
 - **UI.** Arma 1 font families are drawn with tahomaB24. The strategic map's overview
   box stays empty (its text goes to a single-line control).
+- **Weapons.** See [Weapons, 2026-10-14](#weapons-2026-10-14-binary-d0cdd15-stamped-in-the-game-folder):
+  Arma 1 weapons in hand, in crates and in the briefing pool; magazine sizes are CWA's.
 - **Vehicles and animations.** Driving (HMMWV), flying (UH-60, OH-58 incl. AI), boarding
   and the Arma 1 soldier animations were checked with dedicated test missions; not every
   vehicle type and crew position was checked individually.
+
+## Weapons, 2026-10-14 (binary d0cdd15, stamped in the game folder)
+
+Arma 1 soldiers carry their own Arma 1 weapons (178de3d): each one is a generated
+`A1x_<weapon>` class with the Arma 1 model on a CWA weapon, which keeps the magazines,
+ballistics and sounds. Fixed since, in order:
+
+| commit | what was wrong | now |
+|---|---|---|
+| ab0d541 | weapons both games name alike (AK74, PK, M16A2) kept the CWA model | Arma 1 model on the CWA class |
+| b1cab8b | carriers with `magazines[]={this}` (M60, LAWLauncher, RPGLauncher): the generated class took itself as magazine -- M240 with 0 rounds, launchers empty | the generated class names the CWA magazines |
+| d044160 | scripts saw `A1x_M4AIM`; `hasWeapon "M4AIM"`, `removeWeapon`, `selectWeapon`, `fire`, `ammo` found nothing | `primaryWeapon`/`secondaryWeapon`/`weapons` report Arma names, the others accept them |
+| 204f9ec | Arma 1 crates and vehicles handed out CWA rifles (CWA cargo inherited) | their own `TransportWeapons`/`TransportMagazines`; `getWeaponCargo`, `getMagazineCargo` |
+| eabbeb3 | `Stinger`/`Strela` mapped to classes CWA does not have (AA soldiers unarmed) | `AALauncher` / `9K32Launcher`; the M136 is CWA's `AT4Launcher` |
+| b36be5d | the briefing weapon pool read Arma 1 names (`AK74GL`, `SVD`, `30rnd_545x39_AK`) straight from CWA's CfgWeapons (18 `ca` missions + `m02minerconvoy`) | resolved like `addWeapon` |
+| 13c0586 | `magazines` listed CWA names (`M16`) | Arma names (`30Rnd_556x45_Stanag`) |
+| 1dd7199, 6483a1a | `fire ["HandGrenadeMuzzle", ...]`, `selectWeapon "HandGrenadeMuzzle"`, mode names CWA lacks (`FullAuto`) | mapped to the CWA muzzle that takes the magazine |
+| 583f221 | gear/briefing pictures were the CWA carrier's | Arma 1 equipment picture |
+| 99b4cde | `reload` did nothing | loads empty weapons |
+| 1ab101c | HUD said `M16` over an M4 Aimpoint, actions offered to drop `AT4` | Arma weapon and magazine names |
+| d0cdd15 | `5Rnd_127x108_KSVK` (crate/vehicle cargo in 79 missions) and `8Rnd_9x18_MakarovSD` had no counterpart | SVDDragunov / Tokarev magazines; a muzzle name that maps to nothing is logged once with the unit's muzzles |
+
+Test missions (`tests\missions\a1weap*.Sara` on the build machine), on 1ab101c and again on
+d0cdd15 unless noted:
+
+| check | result |
+|---|---|
+| weapons in hand, 3rd person, West + East (a1weapW/E, 0994802) | correct Arma 1 models, M136 on the back |
+| first person, rifle and launcher (a1weap1st, a1weapP) | Arma 1 M4 Aimpoint / M136 models in hand |
+| AI `fire` with every primary weapon, 8 soldiers | ammo 30→29 / 100→99 / 20→19 for all |
+| player fires rifle and M136 by key (a1weapP) | 30→29, 1→0, rocket hits 80 m out |
+| player throws a grenade by key (a1weapP3) | 10→9 magazines |
+| AI throws a grenade by script, Arma names (a1weap, a1weapT2) | 10→9 (`fire ["HandGrenadeMuzzle", "HandGrenadeMuzzle", "HandGrenade_East"]` reaches CWA's `Throw` muzzle) |
+| AI anti-tank in combat (a1weapAT) | SoldierWAT kills a T72 with the M136 at 90 m; SoldierEAT hits an M1 with the RPG7V (damage 0.22) |
+| crates (a1weap) | WeaponBoxWest/SpecialBoxWest/AmmoBoxEast hold M4, M16A4, M249, G36, M107, Stinger, ... |
+| briefing pool (m02minerconvoy, m01sniper) | 4 / 5 weapons, 45 magazines, no config error |
+| script names (a1weap) | `hasWeapon (primaryWeapon x)` true for all; remove/add round trip |
+| HUD and action menu (a1weapP) | `M136 Granatwerfer`, `Waffe M4 Aimpoint`, `Nachladen M136`, `M136 ablegen` |
+
+Regression: all 131 missions entered and ran 25 s with no script error, crash or hang on
+0994802 (2026-10-14 20:31-21:29) and again on 1ab101c (22:46-23:44); the 20-mission subset
+(`tests\missions_weap.txt`) ran clean on eabbeb3, 99b4cde and d0cdd15.
+
+Known limits, by design or not Arma 1 specific:
+
+- **Magazine capacity is CWA's.** An Arma 1 magazine is carried by the CWA magazine of the
+  same calibre: the M24 gets 20-round M21 magazines (5 in Arma 1), the M249 100-round
+  belts (200), the M107 20 rounds (10). Names shown are Arma 1's.
+- **`fire` from a script does not fire launchers**, and **`fire` on the player does
+  nothing** -- for CWA's own soldiers too (SoldierWLAW with LAWLauncher, CWA M16), so this is
+  the engine, not the Arma 1 layer. AI fires launchers normally in combat; the player fires
+  them by key. (CWA's grenade muzzle is `Throw`: `fire ["Throw", "HandGrenade", "HandGrenade"]`;
+  Arma 1's `HandGrenadeMuzzle` is mapped to it.)
+- `weapons` leaves out Throw/Put, as OFP did (`hasWeapon "Throw"` is true).
+- Weapons without a CWA counterpart are left out of loadouts and crates (logged once).
 
 ## Known gaps (honest list)
 
