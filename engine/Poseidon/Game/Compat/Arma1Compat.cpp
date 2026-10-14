@@ -727,9 +727,10 @@ RString ResolveVehicleClass(const RString& className)
     // A class generated earlier for this mission keeps resolving to itself.
     if (_strnicmp(className.Data(), "A1x_", 4) == 0)
         return className;
-    // Arma 2 animals (sheep, cows, goats, dogs) derive from Man; carried by a CWA class
-    // they became walking civilians in the fields. Until animal models and moves are in,
-    // they are left out.
+    // Animals (Arma 2's sheep, cows, goats, dogs; Arma 3's Animal_Base_F: goats, sheep,
+    // dogs, snakes, rabbits, fish) derive from Man; carried by a CWA class they became
+    // walking civilians in the fields. Until animal models and moves are in, they are left
+    // out -- Arma 3's first, then Arma 2's.
     if (Arma3IsAnimal(className))
     {
         static std::set<std::string> reported;
