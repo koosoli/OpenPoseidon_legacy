@@ -105,6 +105,7 @@ and are not counted.
 | 9 | `06789da` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 97 | 0 |
 | 10 | `9e32ad8` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 96 | 0 |
 | 11 | `c44ba31` | 98, laptop (Intel Iris Xe, `--render gl33`), 40 s each | 98 | 97 | 1 hang (SP_WarWelcome: modal `hintC`, fixed `7bf71f5`) |
+| 13 | `9fa39fe` | 63 of 98 (stopped for a newer build), laptop gl33, Arma 2 soldiers by default | 63 | 62 | 1 crash (TE06_Parachute: water without a section), 1 stall (C6B_DogsOfWar: `AILocker::LockPosition`), both fixed `3dfb515`; MP_Detector exited silently once, passed on rerun |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
