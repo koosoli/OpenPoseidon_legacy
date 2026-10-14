@@ -1066,6 +1066,24 @@ impl Drop for Renderer {
     }
 }
 
+struct InitTimer {
+    on: bool,
+    last: std::time::Instant,
+}
+
+impl InitTimer {
+    fn new() -> Self {
+        Self { on: std::env::var("WGR_INIT_TIMING").is_ok_and(|v| v == "1"), last: std::time::Instant::now() }
+    }
+    fn mark(&mut self, phase: &str) {
+        if self.on {
+            let now = std::time::Instant::now();
+            eprintln!("WGR_INIT {phase}: {:.1} ms", (now - self.last).as_secs_f64() * 1000.0);
+            self.last = now;
+        }
+    }
+}
+
 impl Renderer {
     /// Sinkhole W1b: see wgr_set_camera_underground.
     pub fn set_camera_underground(&mut self, underground: f32) {
@@ -1077,6 +1095,8 @@ impl Renderer {
     }
 
     fn new(desc: &ffi::WgrSurfaceDesc, log: LogSink) -> Result<Self, String> {
+        // WGR_INIT_TIMING=1: where renderer start-up goes, one stderr line per phase
+        let mut init_timer = InitTimer::new();
         let (raw_display_handle, raw_window_handle) = handles::build_handles(desc)?;
 
         // wgpu only enables VK_EXT_debug_utils — and thus emits our
@@ -1760,6 +1780,17 @@ impl Renderer {
             );
         }
 
+        init_timer.mark("pre-textures (instance/adapter/device/surface)");
+        // (PERF, 2026-10-14) The sky (its own composer, layered fog and ~16 pipelines) needs
+        // nothing from the other subsystems, so it builds on its own thread while gfx3d, terrain,
+        // grass and water build here: ~0.5 s of a ~2.8 s renderer start. Joined where it was built.
+        let sky_init = {
+            let (device, queue) = (device.clone(), queue.clone());
+            std::thread::Builder::new()
+                .name("wgr-sky-init".into())
+                .spawn(move || Sky::new(&device, &queue, color_format, sample_count))
+                .ok()
+        };
         let textures = SharedTextures::new(
             &device,
             &queue,
@@ -1773,6 +1804,7 @@ impl Renderer {
         // One composer, pre-loaded with the shared shader modules, shared by the
         // 3D subsystems that #import them.
         let mut composer = shaders::build_composer();
+        init_timer.mark("textures");
         let gfx2d = Gfx2d::new(
             &device,
             &textures,
@@ -1780,6 +1812,7 @@ impl Renderer {
             config.format,
             sample_count,
         );
+        init_timer.mark("gfx2d");
         let mut gfx3d = Gfx3d::new(
             &device,
             &textures,
@@ -1853,6 +1886,31 @@ impl Renderer {
                 );
             }
         }
+        init_timer.mark("gfx3d");
+        let fft_storage_supported = [
+            wgpu::TextureFormat::Rgba32Float,
+            wgpu::TextureFormat::Rgba16Float,
+        ]
+        .iter()
+        .all(|&format| {
+            adapter
+                .get_texture_format_features(format)
+                .allowed_usages
+                .contains(wgpu::TextureUsages::STORAGE_BINDING)
+        });
+        // (PERF, 2026-10-14) Water needs only the camera layout from here, so it builds on its own
+        // thread (with its own composer) while terrain, grass and the rest build on this one.
+        let water_init = {
+            let (device, queue, camera_layout) = (device.clone(), queue.clone(), gfx3d.camera_layout().clone());
+            std::thread::Builder::new()
+                .name("wgr-water-init".into())
+                .spawn(move || {
+                    let mut composer = shaders::build_composer();
+                    WaterBackend::new(&device, &queue, &camera_layout, color_format, sample_count,
+                        &mut composer, fft_storage_supported)
+                })
+                .ok()
+        };
         let terrain = Terrain::new(
             &device,
             &queue,
@@ -1863,6 +1921,7 @@ impl Renderer {
             textures.white_view().clone(),
             &mut composer,
         );
+        init_timer.mark("terrain");
         let grass = Grass::new(
             &device,
             &queue,
@@ -1876,6 +1935,7 @@ impl Renderer {
         // the world's source rows) are not allocated until a world actually pushes
         // placements, so a world with no far tier and a build launched with WGR_FAR_TIER=0
         // pay nothing but three shader compiles.
+        init_timer.mark("grass");
         let far = Far::new(
             &device,
             gfx3d.camera_layout(),
@@ -1883,22 +1943,17 @@ impl Renderer {
             sample_count,
             &mut composer,
         );
-        let fft_storage_supported = [
-            wgpu::TextureFormat::Rgba32Float,
-            wgpu::TextureFormat::Rgba16Float,
-        ]
-        .iter()
-        .all(|&format| {
-            adapter
-                .get_texture_format_features(format)
-                .allowed_usages
-                .contains(wgpu::TextureUsages::STORAGE_BINDING)
-        });
+        init_timer.mark("far");
         let tonemap = hdr_enabled.then(|| Tonemap::new(&device, config.format));
-        let water = WaterBackend::new(
-            &device, &queue, gfx3d.camera_layout(), color_format, sample_count,
-            &mut composer, fft_storage_supported,
-        );
+        init_timer.mark("tonemap");
+        let water = match water_init {
+            Some(handle) => handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+            None => WaterBackend::new(
+                &device, &queue, gfx3d.camera_layout(), color_format, sample_count,
+                &mut composer, fft_storage_supported,
+            ),
+        };
+        init_timer.mark("water");
         let rain_water = rain_water::RainWater::new(&device, gfx3d.camera_layout(), color_format, sample_count, &mut composer);
         log.log(log_level::INFO, &format!("Water backend: initial {}", water.kind().label()));
         if let Some(op) = water.current_op() {
@@ -1911,25 +1966,39 @@ impl Renderer {
                     "Hydro FFT ocean unavailable; using the analytic Gerstner fallback");
             }
         }
+        init_timer.mark("rain_water+");
         let bloom = hdr_enabled.then(|| Bloom::new(&device, HDR_FORMAT));
         // God rays composite into the HDR scene target, so like bloom they only exist on the
         // HDR path. Default ON; `WGR_GODRAYS=0` ablates it for an A/B capture.
+        init_timer.mark("bloom");
         let godrays = hdr_enabled.then(|| GodRays::new(&device, HDR_FORMAT, sample_count));
         // SMK-037: created unconditionally (one pipeline, no target until a frame asks).
+        init_timer.mark("godrays");
         let soft_particles = soft_particles::SoftParticles::new(&device);
         // SMK-038: same -- pipelines and the froxel texture, but no march target and no work
         // recorded until the mode is switched off Legacy.
+        init_timer.mark("soft_particles");
         let smoke_volume = smoke_volume::SmokeVolume::new(&device, color_format, sample_count);
+        init_timer.mark("smoke_volume");
         let fire = fire::FireSystem::new(&device, &queue, color_format, sample_count);
+        init_timer.mark("fire");
         let mud = mud::MudSystem::new(&device, color_format, sample_count);
+        init_timer.mark("mud");
         let planar_mips = PlanarMips::new(&device, HDR_FORMAT);
+        init_timer.mark("planar_mips");
         let exposure = hdr_enabled.then(|| Exposure::new(&device, &queue));
         // The sky targets the scene color format (HDR target or swapchain), matching
         // the scene pipelines, and self-tonemaps when that is an LDR-direct swapchain.
-        let sky = Sky::new(&device, &queue, color_format, sample_count);
+        init_timer.mark("exposure+");
+        let sky = match sky_init {
+            Some(handle) => handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+            None => Sky::new(&device, &queue, color_format, sample_count),
+        };
         // WTR-002 — the timestamp query set + readback ring (inert when unsupported).
+        init_timer.mark("sky+");
         let gpu_timers = GpuTimers::new(&device, &queue, ts_enabled, ts_inside_passes);
         let water_visibility = WaterVisibility::new(&device);
+        init_timer.mark("gpu_timers+visibility");
         if gpu_timers.enabled() {
             log.log(
                 log_level::INFO,
@@ -1971,6 +2040,7 @@ impl Renderer {
 
         #[allow(unused_mut)]
         let mut temporal_auto = false;
+        init_timer.mark("rest of new()");
         Ok(Self {
             // 1.35 by default: enough to push the reflection-target edge outside a normal
             // grazing view, without giving away more angular resolution than the mip-filtered
