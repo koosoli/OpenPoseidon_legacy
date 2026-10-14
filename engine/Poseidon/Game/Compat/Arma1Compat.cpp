@@ -654,6 +654,23 @@ RString ResolveVehicleClass(const RString& className)
     // A class generated earlier for this mission keeps resolving to itself.
     if (_strnicmp(className.Data(), "A1x_", 4) == 0)
         return className;
+    // Arma 2 animals (sheep, cows, goats, dogs) derive from Man; carried by a CWA class
+    // they became walking civilians in the fields. Until animal models and moves are in,
+    // they are left out.
+    if (Generation() == 2)
+    {
+        const ParamEntry* cls = FindConfigClass("CfgVehicles", className.Data());
+        const ParamEntry* animal = FindConfigClass("CfgVehicles", "CAAnimalBase");
+        const ParamClass* c = cls ? cls->GetClassInterface() : nullptr;
+        const ParamClass* a = animal ? animal->GetClassInterface() : nullptr;
+        if (c && a && (c == a || c->IsDerivedFrom(*a)))
+        {
+            static std::set<std::string> reported;
+            if (reported.insert(Lower(className.Data())).second)
+                LOG_INFO(Mission, "{}: animal '{}' left out (no animal models yet)", Label(), className.Data());
+            return RString();
+        }
+    }
     RString cwa = ResolveFrom("CfgVehicles", className, VehicleAliases(), false);
     const ParamEntry* vehicles = Pars.FindEntry("CfgVehicles");
     if (Generation() == 2 && vehicles && !vehicles->FindEntry(cwa))
