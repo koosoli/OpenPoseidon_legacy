@@ -19,6 +19,17 @@ What a mission class becomes today is decided in `Arma1Compat::ResolveVehicleCla
 So vehicles and objects already look like Arma 2, soldiers and weapons do not, and nothing
 behaves like Arma 2 beyond what the CWA stand-in does.
 
+## Done since (not yet measured on the laptop)
+
+- `4851193` asset census in the log and `OP_A2_SHOT` screenshots (first and third person).
+- `92ceb64` every Arma 2 soldier class carries its own `weapons[]`/`magazines[]`
+  (resolved by kind and calibre) instead of the CWA stand-in's M16; each weapon is
+  `A1x_<weapon>`, the Arma 2 model on the CWA weapon (magazines, ballistics stay CWA).
+- `0e9804e` `createVehicle [type, pos, [], r, "FLY"]` starts an aircraft airborne with the
+  engine on (MPE1_Dogfighters' A-10).
+- `4b750f0` vehicles with the Arma 2 model take its `maxSpeed`, `armor`, `fuelCapacity`,
+  `transportSoldier`.
+
 ## Steps
 
 1. **Measure first.** Per mission: an asset census in the log (every class created, what it
