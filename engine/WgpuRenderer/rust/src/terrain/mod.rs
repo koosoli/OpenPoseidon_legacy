@@ -984,6 +984,10 @@ impl Terrain {
             ("detail_normal_start", detail_normal_start),
             ("detail_normal_end", detail_normal_end),
             ("tile_normal_strength", tile_normal_strength),
+            (
+                "cost_stage",
+                std::env::var("WGR_TERRAIN_COST_STAGE").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0),
+            ),
             ("surface_normalise", surface_normalise),
             ("linear", linear),
             // WGR_TERRAIN_MIP_FROM_TILE=1 restores mip selection from the JITTERED tiling UV,

@@ -53,6 +53,7 @@ fn probe_source(terrain: bool) -> String {
         "sand_height_offset",
         "sand_height_gradient",
             "sample_height",
+            "grid_height",
             "sample_normal",
             "sample_mud_normals",
             "sample_mud_normal",

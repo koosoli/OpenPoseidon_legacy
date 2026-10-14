@@ -426,10 +426,61 @@ struct GroundNormalPair {
     broad: vec3<f32>,
     fine: vec3<f32>,
 };
+// The heightfield alone at a world-xz: sample_height without the mud and sand views.
+fn grid_height(world_xz: vec2<f32>) -> f32 {
+    let t = (world_xz - tp.world_origin) / tp.terrain_grid;
+    let base = floor(t);
+    let ix = i32(base.x);
+    let iz = i32(base.y);
+    let f = t - base;
+    let y00 = hm_load(ix, iz);
+    let y01 = hm_load(ix + 1, iz);
+    let y10 = hm_load(ix, iz + 1);
+    let y11 = hm_load(ix + 1, iz + 1);
+    if (f.x <= 1.0 - f.y)
+    {
+        return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x;
+    }
+    return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y;
+}
+
 fn sample_mud_normals(world_xz: vec2<f32>, step: f32, footprint: f32) -> GroundNormalPair {
-    let base = sample_normal(world_xz, step);
-    let delta = mud_height_gradient(world_xz, footprint) - mud_height_gradient(world_xz, step)
-        + sand_height_gradient(world_xz, footprint) - sand_height_gradient(world_xz, step);
+    // (PERF, 2026-10-14) The broad normal's four heights at +-step and the step-scale mud/sand
+    // gradients subtracted below read the SAME eight offsets; they were read twice (sample_normal,
+    // then mud/sand_height_gradient(step)). Read once, same arithmetic in the same order, so the
+    // result is unchanged. 32 storage loads per terrain pixel.
+    let hs = max(0.125, step); // the gradients' h; equal to `step` for any real terrain grid
+    let px = world_xz + vec2<f32>(hs, 0.0);
+    let nx = world_xz - vec2<f32>(hs, 0.0);
+    let pz = world_xz + vec2<f32>(0.0, hs);
+    let nz = world_xz - vec2<f32>(0.0, hs);
+    let m_px = mud_height_offset(px);
+    let m_nx = mud_height_offset(nx);
+    let m_pz = mud_height_offset(pz);
+    let m_nz = mud_height_offset(nz);
+    let s_px = sand_height_offset(px);
+    let s_nx = sand_height_offset(nx);
+    let s_pz = sand_height_offset(pz);
+    let s_nz = sand_height_offset(nz);
+    var base: vec3<f32>;
+    if (hs == step) {
+        let hx0 = grid_height(nx) + m_nx + s_nx;
+        let hx1 = grid_height(px) + m_px + s_px;
+        let hz0 = grid_height(nz) + m_nz + s_nz;
+        let hz1 = grid_height(pz) + m_pz + s_pz;
+        base = normalize(vec3<f32>(-(hx1 - hx0), 2.0 * step, -(hz1 - hz0)));
+    } else {
+        base = sample_normal(world_xz, step);
+    }
+    let mud_step = vec2<f32>(m_px - m_nx, m_pz - m_nz) / (2.0 * hs);
+    var sand_step: vec2<f32>;
+    if (step >= 0.125) {
+        sand_step = vec2<f32>(s_px - s_nx, s_pz - s_nz) / (2.0 * hs);
+    } else {
+        sand_step = sand_height_gradient(world_xz, step);
+    }
+    let delta = mud_height_gradient(world_xz, footprint) - mud_step
+        + sand_height_gradient(world_xz, footprint) - sand_step;
     let fine = normalize(vec3<f32>(base.x - delta.x * base.y, base.y, base.z - delta.y * base.y));
     return GroundNormalPair(base, fine);
 }
@@ -1728,6 +1779,9 @@ override detail_normal_end: f32 = 300.0;
 // for the feature: it toggles on ONE binary, so a before/after pair cannot drift on
 // anything but the tile normal.
 override tile_normal_strength: f32 = 1.0;
+// WGR_TERRAIN_COST_STAGE (profiling only, default 0 = off): fs_terrain returns after stage N so
+// the compiler drops the rest -- 1 ground colour, 2 + wet/mud/snow, 3 + shadows, 4 + lighting.
+override cost_stage: u32 = 0u;
 // How much of the authored surface's gain comes from its OWN measured average instead of
 // the assumed 0.5 behind the x2 (WGR_TERRAIN_SURFACE_NORMALISE). 0 = the shipped x2, exactly;
 // 1 = `surface / mean(surface)`, neutral by construction for any source albedo; between =
@@ -1977,6 +2031,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     if (linear > 0.5) {
         rgb = srgb_to_linear(rgb);
     }
+    if (cost_stage == 1u) { return vec4<f32>(rgb, 1.0); }
 
     // Reuse the pre-existing broad normal: no additional height samples.
     // Keep actual horizon/pixel filtering outside material/admission branches.
@@ -2061,6 +2116,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         authored_ao = mix(authored_ao, 1.0, coverage);
         n = normalize(mix(n, terrain_snow_normal(in.world_xz, world_y, geometric_n, snow_footprint, dry), coverage));
     }
+    if (cost_stage == 2u) { return vec4<f32>(rgb * (0.5 + 0.5 * n.y) * authored_ao + vec3<f32>(soil_wet * 0.01), 1.0); }
 
     // Combined sun shadow: CSM (objects + near contact) and the long-range
     // heightfield mask (terrain-on-terrain) compose by max() — whichever occludes
@@ -2088,6 +2144,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let lit = smoothstep(sm.r - sm.g, sm.r + sm.g + 1e-3, world_y);
     let terrain_s = clamp(sm.b * (1.0 - lit), 0.0, 1.0) * in.fog;
     let shadow = max(max(csm_s, terrain_s), canopy_sun_shadow(vec3<f32>(in.world_xz.x, world_y, in.world_xz.y)));
+    if (cost_stage == 3u) { return vec4<f32>(rgb * (0.5 + 0.5 * n.y) * authored_ao * (1.0 - 0.5 * shadow) + vec3<f32>(soil_wet * 0.01), 1.0); }
 
     // Coast wet band: near-flat terrain around the (swash-moved) sea level reads as damp sand —
     // darker albedo — strongest at the waterline, fading out over wet_height metres. Keyed on
@@ -2240,6 +2297,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let local = lights_contrib(in.world_pos, n, vec3<f32>(1.0), vec3<f32>(1.0), linear);
     let light_sum = sun + local;
     rgb *= select(clamp(light_sum, vec3<f32>(0.0), vec3<f32>(1.0)), max(light_sum, vec3<f32>(0.0)), linear > 0.5);
+    if (cost_stage == 4u) { return vec4<f32>(rgb + vec3<f32>(soil_wet * 0.01), 1.0); }
     if (soil_wet > 0.0) {
         let view = normalize(-in.world_pos);
         // Filter the disturbed-soil normal at the actual pixel footprint;

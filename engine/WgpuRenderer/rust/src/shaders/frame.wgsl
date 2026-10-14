@@ -841,6 +841,13 @@ fn canopy_sun_shadow(world_abs: vec3<f32>) -> f32 {
     if (l.y < 0.05) {
         return 0.0;
     }
+    // Near the camera the cascades draw the real crown shadow; a 6 m canopy cell drawn there is a
+    // hard square on the ground beside a lone tree. Fade in where the cascades stop resolving crowns.
+    // (PERF, 2026-10-14) Decided first: inside 60 m the four map taps below were multiplied by 0.
+    let fade = smoothstep(60.0, 160.0, length(world_abs - frame.cam_pos.xyz));
+    if (fade <= 0.0) {
+        return 0.0;
+    }
     var shade = 0.0;
     // From 6 m up the ray: a tree's OWN cell would otherwise shadow its whole crown below the top
     // (self-shading is the crown AO's and n.l's job); the neighbours' canopy is what this adds.
@@ -853,9 +860,6 @@ fn canopy_sun_shadow(world_abs: vec3<f32>) -> f32 {
         let c = textureSampleLevel(terrain_skyvis_mask, terrain_shadow_samp, uv, 0.0);
         shade = max(shade, clamp(c.b, 0.0, 1.0) * smoothstep(0.0, 2.0, c.g - p.y));
     }
-    // Near the camera the cascades draw the real crown shadow; a 6 m canopy cell drawn there is a
-    // hard square on the ground beside a lone tree. Fade in where the cascades stop resolving crowns.
-    let fade = smoothstep(60.0, 160.0, length(world_abs - frame.cam_pos.xyz));
     return CANOPY_SUN_OPACITY * shade * fade;
 }
 
