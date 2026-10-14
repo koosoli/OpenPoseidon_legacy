@@ -536,9 +536,18 @@ class ODOLLoader
             auto& sel = mesh.selections[static_cast<size_t>(selIndex)];
             if (!sel.vertexIndices.empty())
                 continue;
+            // The proxy's bone index is into the MODEL skeleton (not the LOD's sub-skeleton):
+            // on USMC_Soldier_Light the rifle proxy names bone 117 "weapon", the pistol 100
+            // "righthand", the launcher 118 "launcher". A head proxy (\characters\heads\...)
+            // carries -1 and follows the head.
             int32_t bone = proxy.boneIndex;
-            if (!remap.empty())
-                bone = bone >= 0 && static_cast<size_t>(bone) < remap.size() ? remap[static_cast<size_t>(bone)] : -1;
+            if (bone < 0)
+            {
+                std::string model = lowered(proxy.model);
+                if (model.find("\\heads\\") != std::string::npos || model.find("/heads/") != std::string::npos)
+                    if (const auto head = boneByName.find("head"); head != boneByName.end())
+                        bone = static_cast<int32_t>(head->second);
+            }
             if (bone < 0 || static_cast<size_t>(bone) >= bones.size() || bestVertex[static_cast<size_t>(bone)].first < 0)
                 continue;
             sel.vertexIndices.push_back(static_cast<uint32_t>(bestVertex[static_cast<size_t>(bone)].first));
