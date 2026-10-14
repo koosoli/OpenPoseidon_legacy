@@ -60,8 +60,10 @@ What it took, each step measured on the laptop or offline on Arma 2's own files:
 | `d427d85`, `b7e1654` | with map objects present, every tree and bush drew as an opaque card | Arma ODOL section hints lack OFP's alpha bits: taken from the texture, and for streamed objects (converted on a worker, no texture headers) from the `*_ca.paa` naming rule. Utes T01 now shows its pines, houses and road |
 | `3dfb515` | TE06_Parachute crash in `DrawWater`; C6B_DogsOfWar 60 s in `AILocker::LockPosition` | sectionless water segment skipped; lock range bounded |
 
-Still open: the player's own rifle is not drawn (the AI hold theirs; `OP_A2_PROXYLOG=1`
-logs its placement), first person shows neither hands nor rifle.
+| `541fdb1` | the player's rifle lay at his feet (third person) | the corepatch M16A4 is stored around its binariser's bounding centre (0.98 m up, 0.48 m along), the vanilla AK-74 the AI carried is not. Proxies now place a model's source origin (`AnimationOrigin()`), for proxy objects in ShapeAdapter and for held items in `Man::DrawProxies`. Measured: the player holds his M16A4 in MP_Superpowers, MP_UrbanWarfare, C2B |
+
+Still open: first person shows neither hands nor rifle (`OP_A2_PROXYLOG=1` shows both drawn at
+level 1100 in the right place).
 
 Offline check: a small program built from the repo's own ODOL and RTM readers poses
 `USMC_Soldier_Light` with a move and scores the result by how much the mesh's edges stretch.
