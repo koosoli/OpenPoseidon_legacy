@@ -1340,7 +1340,6 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     let world_xz = cell_world + jitter;
     let delta = world_xz - frame.cam_pos.xz;
     let distance2 = dot(delta, delta);
-    let coverage = min(grass.density, 1.0) * clamp(grass.lod_density.y, 0.0, 1.0) * density_field(world_xz);
     // The SAME cap cs_place applies. The two rings are complementary -- near
     // thins out across exactly the band mid thickens in across -- so if only one
     // of them clamped, a short near radius would leave the pair either
@@ -1349,15 +1348,27 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     // A small overlap avoids a bare annulus at the detailed/mid and mid/far
     // joins; the dissolve band widens that overlap into a real crossfade.
     let mid_start = select(max(0.0, grass.near_radius - mid_spacing * 1.5 - band), 0.0, mid_cards_from_camera());
-    if (distance2 < mid_start * mid_start || distance2 > mid_end * mid_end || seed > coverage) { return; }
+    if (distance2 < mid_start * mid_start || distance2 > mid_end * mid_end) { return; }
+    let map_max = terrain.world_origin + vec2<f32>(f32(terrain.hm_width - 1u), f32(terrain.hm_height - 1u)) * terrain.terrain_grid;
+    if (any(world_xz < terrain.world_origin) || any(world_xz >= map_max)) { return; }
+    // PERF (2026-10-14): the view test FIRST. The ring is a whole disc round the camera
+    // and the frustum sees a wedge of it, so most of its ~3 million candidates used to run
+    // the coverage noise, the geography neighbourhood, the road/footprint distance loop
+    // and the normal fetch only to be thrown away here. Every test in this function is a
+    // side-effect-free predicate of the candidate until the atomicAdd, so their order
+    // cannot change which blades are placed -- only how much work the rejected ones do.
+    let y = sample_height(world_xz);
+    let rel = vec3<f32>(world_xz.x, y, world_xz.y) - frame.cam_pos.xyz;
+    let clip = frame.proj * frame.view * vec4<f32>(rel, 1.0);
+    if (clip.w <= 0.0 || abs(clip.x) > clip.w * 1.15 || abs(clip.y) > clip.w * 1.15) { return; }
+    let coverage = min(grass.density, 1.0) * clamp(grass.lod_density.y, 0.0, 1.0) * density_field(world_xz);
+    if (seed > coverage) { return; }
     // Fade IN as the near ring fades out, and OUT as the far ring fades in.
     let distance = sqrt(distance2);
     let fade_in = select(smoothstep(mid_start, max(mid_start, grass.near_radius), distance), 1.0, mid_cards_from_camera());
     let fade_out = 1.0 - smoothstep(max(mid_end - band, mid_start), mid_end, distance);
     let mid_fade = min(fade_in, fade_out);
     if (!lod_dissolve(cell_id, mid_fade)) { return; }
-    let map_max = terrain.world_origin + vec2<f32>(f32(terrain.hm_width - 1u), f32(terrain.hm_height - 1u)) * terrain.terrain_grid;
-    if (any(world_xz < terrain.world_origin) || any(world_xz >= map_max)) { return; }
     let geocell = clamp(vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid)), vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
     let geo = textureLoad(geography, geocell, 0).x;
     let presence = grass_edge_presence(world_xz, geo) * grass_exclusion_presence(world_xz);
@@ -1366,12 +1377,8 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Cards only: the card coverage (map's own where authored, else card_look.x).
     if (cards_on_mid() && card_thinned(cell_id, geo)) { return; }
     if (cards_on_mid() && card_yields_to_mesh(world_xz, distance, geo)) { return; }
-    let y = sample_height(world_xz);
     if (in_terrain_hole(vec3<f32>(world_xz.x, y, world_xz.y))) { return; } // preserve ground above a bounded cave mouth
     if (y <= terrain.sea_level + 0.35 || sample_normal(world_xz).y < 0.70) { return; }
-    let rel = vec3<f32>(world_xz.x, y, world_xz.y) - frame.cam_pos.xyz;
-    let clip = frame.proj * frame.view * vec4<f32>(rel, 1.0);
-    if (clip.w <= 0.0 || abs(clip.x) > clip.w * 1.15 || abs(clip.y) > clip.w * 1.15) { return; }
     let out_index = atomicAdd(&placement_count[0], 1u);
     if (out_index >= MAX_MID_INSTANCES) {
         atomicMin(&placement_count[0], MAX_MID_INSTANCES);
