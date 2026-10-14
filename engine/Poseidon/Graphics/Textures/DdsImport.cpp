@@ -1,3 +1,4 @@
+#include <Poseidon/Foundation/Platform/EnvOnce.hpp>
 #include <Poseidon/Graphics/Textures/Image.hpp>
 #include <Poseidon/Graphics/Textures/BlockCompression.hpp>
 #include <Poseidon/Core/TaskPool.hpp>
@@ -51,7 +52,7 @@ bool Dxt1HasPunchThrough(const std::vector<uint8_t>& blocks)
 
 int DecodedMaxEdge()
 {
-    const char* value = std::getenv("POSEIDON_DECODED_MAX_EDGE");
+    const char* value = POSEIDON_GETENV_ONCE("POSEIDON_DECODED_MAX_EDGE"); // asked per texture
     const int parsed = value && *value ? std::atoi(value) : 0;
     return parsed >= 64 && parsed <= 8192 ? parsed : 1024;
 }
@@ -361,15 +362,15 @@ void ApplyEnfusionLayerTint(std::vector<DDSMipLevel>& levels, const float rgb[3]
 
 DdsPreparationOptions CaptureDdsPreparationOptions()
 {
-    const auto enabled = [](const char* key) {
-        const char* value = std::getenv(key);
-        return value && std::strcmp(value, "1") == 0;
-    };
+    // Asked per texture, so the switches are read once (the renderer's start-up defaults for the
+    // preview switches are set before any texture exists).
+    const auto enabled = [](const char* value) { return value && std::strcmp(value, "1") == 0; };
     return {DdsCompressedPassthrough(), Enfusion::LayerTintLinearMultiply(), DecodedMaxEdge(),
-            NativeGlobalOverlayDataSuffix(enabled("WGR_REFORGER_PBR_PREVIEW"),
-                enabled("WGR_REFORGER_LAYER_ORDER_PREVIEW"), enabled("WGR_REFORGER_SRGB_PREVIEW"),
-                enabled("WGR_REFORGER_GLOBAL_OVERLAY_PREVIEW"),
-                std::getenv("WGR_REFORGER_GLOBAL_OVERLAY_MATERIAL"))};
+            NativeGlobalOverlayDataSuffix(enabled(POSEIDON_GETENV_ONCE("WGR_REFORGER_PBR_PREVIEW")),
+                                          enabled(POSEIDON_GETENV_ONCE("WGR_REFORGER_LAYER_ORDER_PREVIEW")),
+                                          enabled(POSEIDON_GETENV_ONCE("WGR_REFORGER_SRGB_PREVIEW")),
+                                          enabled(POSEIDON_GETENV_ONCE("WGR_REFORGER_GLOBAL_OVERLAY_PREVIEW")),
+                                          POSEIDON_GETENV_ONCE("WGR_REFORGER_GLOBAL_OVERLAY_MATERIAL"))};
 }
 
 void SetDdsCompressedPassthrough(bool on)

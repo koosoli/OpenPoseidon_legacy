@@ -23,6 +23,7 @@
 // and it is deliberate — 2048 x 2048 over 12.8 km is 6.25 m a cell, the same figure
 // the converting exporter produces, so the two routes are comparable.
 
+#include <Poseidon/Foundation/Platform/EnvOnce.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp> // RFG-097/099: the nativeStreaming lever
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
@@ -2631,7 +2632,7 @@ LODShapeWithShadow* InstallShapeFromXobModel(const std::string& xobPath, std::sh
     // untextured-section warning -- that fires only when a section binds NOTHING, and
     // all 166 of those were roads. A wrong texture is bound, not absent, so the list
     // of what IS bound is the only thing that can name it.
-    if (std::getenv("POSEIDON_REFORGER_TEXTURE_CENSUS") != nullptr && shape->NLevels() > 0)
+    if (POSEIDON_GETENV_ONCE("POSEIDON_REFORGER_TEXTURE_CENSUS") != nullptr && shape->NLevels() > 0)
     {
         static std::map<std::string, size_t> census;
         static size_t shapesSeen = 0;

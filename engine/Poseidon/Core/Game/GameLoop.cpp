@@ -1,3 +1,4 @@
+#include <Poseidon/Foundation/Platform/EnvOnce.hpp>
 #include <Poseidon/UI/LocalMapEditor.hpp>
 #include <Poseidon/UI/LocalMapWorlds.hpp>
 #include <Poseidon/Core/Game/GameLoop.hpp>
@@ -382,7 +383,7 @@ bool AppIdle()
     // so the remount and editor path can be reproduced without driving the menu by hand.
     {
         static bool openLocalMapDone = false;
-        const char* openLocalMap = openLocalMapDone ? nullptr : std::getenv("POSEIDON_OPEN_LOCAL_MAP");
+        const char* openLocalMap = openLocalMapDone ? nullptr : POSEIDON_GETENV_ONCE("POSEIDON_OPEN_LOCAL_MAP");
         if (openLocalMap && *openLocalMap && GWorld != nullptr && GWorld->GetMode() == GModeIntro &&
             GWorld->Options() != nullptr)
         {

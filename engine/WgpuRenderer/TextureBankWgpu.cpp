@@ -1,3 +1,4 @@
+#include <Poseidon/Foundation/Platform/EnvOnce.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include "TextureBankWgpu.hpp"
 #include "EngineWgpu.hpp" // AcquireProducerWindow / LastMemoryStats (REN-THR-013)
@@ -555,7 +556,7 @@ Ref<Texture> TextureBankWgpu::LoadLegacyEnhancementNormal(const char* name)
     if (dot == std::string::npos || dot == 0)
         return {};
     const std::string mapped = LegacyNormalPath(name);
-    const char* normalMode = std::getenv("POSEIDON_VISUAL_UPGRADE_NORMALS");
+    const char* normalMode = POSEIDON_GETENV_ONCE("POSEIDON_VISUAL_UPGRADE_NORMALS"); // asked per section
     if (!mapped.empty() && normalMode && std::strcmp(normalMode, "0") == 0)
         return {}; // Albedo-only arm, without disabling unrelated authored normals.
     const std::string candidate = mapped.empty() ? key.substr(0, dot) + "_nohq.paa" : mapped;
@@ -571,8 +572,8 @@ Ref<Texture> TextureBankWgpu::LoadLegacyTerrainDetailNormal(const char* name, fl
     repeatsPerMetre = 0.0f;
     if (LegacyNormalPath(name).empty())
         return {};
-    const char* normalMode = std::getenv("POSEIDON_VISUAL_UPGRADE_NORMALS");
-    const char* detailMode = std::getenv("POSEIDON_VISUAL_UPGRADE_DETAIL_NORMALS");
+    const char* normalMode = POSEIDON_GETENV_ONCE("POSEIDON_VISUAL_UPGRADE_NORMALS");
+    const char* detailMode = POSEIDON_GETENV_ONCE("POSEIDON_VISUAL_UPGRADE_DETAIL_NORMALS");
     if ((normalMode && std::strcmp(normalMode, "0") == 0) ||
         (detailMode && std::strcmp(detailMode, "0") == 0))
         return {};

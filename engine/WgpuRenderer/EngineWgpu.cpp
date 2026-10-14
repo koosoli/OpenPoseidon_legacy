@@ -4,6 +4,7 @@
 #include "GroundMeshSurface.hpp"
 #include "TreeSnowSurface.hpp"
 #include "RainWaterPublication.hpp"
+#include <Poseidon/Foundation/Platform/EnvOnce.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
 #include <Poseidon/Graphics/Textures/Image.hpp>
@@ -5988,7 +5989,7 @@ void EngineWgpu::NextFrame()
                 _lights.push_back(pl);
             }
             _localShadowCount = localShadowSlots;
-            if (std::getenv("WGR_LOCAL_REACH_TRACE"))
+            if (POSEIDON_GETENV_ONCE("WGR_LOCAL_REACH_TRACE"))
             {
                 static unsigned int traceFrame = 0;
                 if ((traceFrame++ % 120) == 0)
@@ -6036,7 +6037,7 @@ void EngineWgpu::NextFrame()
             }
             Poseidon::Dev::GLightCounters().candidates = snap.lightCandidates;
             Poseidon::Dev::GLightCounters().cap = static_cast<uint32_t>(envCap);
-            if (!_lights.empty() && std::getenv("WGR_STATIC_LIGHT_TRACE"))
+            if (!_lights.empty() && POSEIDON_GETENV_ONCE("WGR_STATIC_LIGHT_TRACE"))
                 LOG_INFO(Graphics, "Wgpu local-light selection: candidates={} selected={} night={:.3f}",
                          snap.lightCandidates, selected, snap.nightEffect);
         }
@@ -6176,7 +6177,7 @@ void EngineWgpu::NextFrame()
         // One-shot companion to the TreeAdv material trace.  The HDR sky-lit
         // path bypasses generic per-material lighting, so its frame inputs must
         // be measured independently when diagnosing a night-bright tree.
-        if (std::getenv("WGR_TREEADV_LIGHT_TRACE") && GScene && GScene->MainLight() &&
+        if (POSEIDON_GETENV_ONCE("WGR_TREEADV_LIGHT_TRACE") && GScene && GScene->MainLight() &&
             GScene->MainLight()->NightEffect() > 0.9f)
         {
             static bool loggedTreeAdvNightFrame = false;
@@ -6698,7 +6699,7 @@ void EngineWgpu::NextFrame()
                 LOG_INFO(Graphics, "Wgpu model residency: {} models re-registering after a texture eviction",
                          stale);
         }
-        if (std::getenv("WGR_RESIDENCY_TRACE") &&
+        if (POSEIDON_GETENV_ONCE("WGR_RESIDENCY_TRACE") &&
             (++_residencyTraceFrame == 30 || (_residencyTraceFrame % 120) == 0))
         {
             GpuMemoryStatsOut stats{};
@@ -10360,7 +10361,9 @@ WgrInstance BuildGpuInstance(const Object& obj, uint32_t model, const ConformPla
     if (ForestAtlasSnowOwner(obj, cp.mode))
     {
         inst.conform2.w = ForestSnowSurface::OwnerProof;
-        if (std::getenv("WGR_TREE_SNOW_TRACE"))
+        // Read once: this runs per instance (and getenv locks and walks the environment).
+        static const bool treeSnowTrace = std::getenv("WGR_TREE_SNOW_TRACE") != nullptr;
+        if (treeSnowTrace)
         {
             static std::unordered_set<const LODShapeWithShadow*> seen;
             if (seen.size() < 16 && seen.insert(obj.GetShape()).second)
@@ -14768,7 +14771,8 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadC
                 _parkRefillActivationImages += activationRefills;
                 _parkRefillActivationFailures += refillFailed ? 1 : 0;
                 _parkRefillLeaseChangedStale += leaseChanged ? 1 : 0;
-                if ((activationRefills || refillFailed || leaseChanged) && std::getenv("WGR_MODEL_RESIDENCY_TRACE"))
+                static const bool residencyTrace = std::getenv("WGR_MODEL_RESIDENCY_TRACE") != nullptr;
+                if ((activationRefills || refillFailed || leaseChanged) && residencyTrace)
                     LOG_INFO(Graphics,
                              "Wgpu parked refill activation: model={} images={} reused={} failed={} leaseChanged={} "
                              "totals deferredChecks={} activationImages={} activationFailures={} leaseChangedStale={}",
@@ -14781,14 +14785,16 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadC
                 UnparkGpuModel(shape);
                 if (render::GObjectAdmitProfile.active)
                     ++render::GObjectAdmitProfile.parkHits;
-                if (std::getenv("WGR_MODEL_RESIDENCY_TRACE"))
+                static const bool unparkTrace = std::getenv("WGR_MODEL_RESIDENCY_TRACE") != nullptr;
+                if (unparkTrace)
                     LOG_INFO(Graphics, "Wgpu model residency unpark: model={} parked={}", shape->Name(),
                              _gpuModelParked.size());
                 return found->second;
             }
             if (render::GObjectAdmitProfile.active)
                 ++render::GObjectAdmitProfile.parkStale;
-            if (std::getenv("WGR_MODEL_RESIDENCY_TRACE"))
+            static const bool staleTrace = std::getenv("WGR_MODEL_RESIDENCY_TRACE") != nullptr;
+            if (staleTrace)
                 LOG_INFO(Graphics, "Wgpu model residency unpark STALE: model={} -- textures moved, rebuilding",
                          shape->Name());
             DestroyGpuModel(shape); // erases every map entry; registration proceeds below
@@ -15200,7 +15206,9 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadC
             rejectWhy = AdmitReject::IndexOverflow;
             break;
         }
-        if (std::getenv("WGR_INSTANCE_TRACE"))
+        // Read once: RegisterGpuModel runs per model (and getenv locks and walks the environment).
+        static const bool instanceTrace = std::getenv("WGR_INSTANCE_TRACE") != nullptr;
+        if (instanceTrace)
         {
             LOG_INFO(Graphics, "GpuModel lod name={} lod={} res={} vertices={} indices={} sections={} radius={}",
                      shape->Name(), level, shape->Resolution(level), nv, ni, s->NSections(), shape->BoundingSphere());
@@ -16134,7 +16142,8 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadC
                     face && face->SourceName() ? face->SourceName() : "", sec.variant == 1 && mat.alpha_ref > 0,
                     originalAlbedo, ordinary) : ForestSnowSurface::Atlas::None;
                 sec.flags |= ForestSnowSurface::Encode(atlas);
-                if (atlas != ForestSnowSurface::Atlas::None && std::getenv("WGR_TREE_SNOW_TRACE"))
+                static const bool snowAtlasTrace = std::getenv("WGR_TREE_SNOW_TRACE") != nullptr;
+                if (atlas != ForestSnowSurface::Atlas::None && snowAtlasTrace)
                     LOG_INFO(Graphics, "FOREST_SNOW_ATLAS model={} lod={} resolution={} texture={} category={} alphaRef={} scope=audited-uv-crowns-map-only",
                         shape->Name(), level, shape->Resolution(level), face->SourceName(), uint32_t(atlas), mat.alpha_ref);
             }
@@ -16228,7 +16237,12 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadC
     // MAT-051 diagnostic (temporary): WGR_COVERAGE_TRACE=1 prints each shape's
     // classification with its complement inputs, so a glass-owning vehicle
     // stamped Full names itself instead of silently losing its canopy.
-    if (const char* trace = std::getenv("WGR_COVERAGE_TRACE"); trace && *trace == '1')
+    static const bool coverageTrace = []
+    {
+        const char* trace = std::getenv("WGR_COVERAGE_TRACE");
+        return trace && *trace == '1';
+    }();
+    if (coverageTrace)
     {
         LOG_WARN(Graphics, "GpuModel coverage: {} -> {} (hasProxies={} hasComplement={} lods={} sections={})",
                  shape->Name(), (hasProxies || hasComplement) ? "Partial" : "Full", hasProxies ? 1 : 0,
@@ -16779,7 +16793,7 @@ void EngineWgpu::OnShapeDestroyed(const LODShape* shape)
     const auto* key = static_cast<const LODShapeWithShadow*>(shape);
     if (_gpuModels.count(key) == 0)
         return; // the common case: a shape this renderer never registered
-    if (std::getenv("WGR_MODEL_RESIDENCY_TRACE"))
+    if (POSEIDON_GETENV_ONCE("WGR_MODEL_RESIDENCY_TRACE"))
     {
         const auto refs = _gpuModelRefs.find(key);
         LOG_INFO(Graphics, "Wgpu model residency shape died: parked={} live-refs={}",
@@ -21202,7 +21216,7 @@ void EngineWgpu::PushRenderParams()
     // can already do this, but a --no-dev capture has no Sky tab, and the cloud deck occludes the
     // sun and moon discs per ray -- so with no way to force a clear sky from a command line, a
     // capture of anything celestial is a coin flip against the mission's overcast.
-    if (const char* cc = std::getenv("WGR_CLOUD_COVERAGE"))
+    if (const char* cc = POSEIDON_GETENV_ONCE("WGR_CLOUD_COVERAGE"))
     {
         const float v = std::strtof(cc, nullptr);
         _sky.cloudCoverage = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);

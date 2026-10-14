@@ -1,3 +1,4 @@
+#include <Poseidon/Foundation/Platform/EnvOnce.hpp>
 #include <cstdio>
 #include <mutex>
 #include <memory>
@@ -1437,7 +1438,8 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
             // Shape itself carries no source path at draw time, so this is the
             // only reliable way to distinguish a visible LOD from its similarly
             // numbered shadow LOD without changing runtime data structures.
-            if (const char* trace = std::getenv("WGR_MATERIAL_DEBUG_RVMAT"); trace && std::strcmp(trace, "__trace__") == 0)
+            if (const char* trace = POSEIDON_GETENV_ONCE("WGR_MATERIAL_DEBUG_RVMAT");
+                trace && std::strcmp(trace, "__trace__") == 0)
             {
                 for (int s = 0; s < nSections; ++s)
                 {
