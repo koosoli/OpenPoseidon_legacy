@@ -1,7 +1,7 @@
 # Performance audit, 2026-10-14
 
 Branch `perf/optimization-20261014`, backed up on `safety`, deployed to the game folder as
-`95026203d`.
+`f801a13ba`.
 
 Every change was found by sampling the process, and none of them changes what the game shows.
 - Each one is either exact by construction, with a verify lever that compares old and new
@@ -53,6 +53,8 @@ What it took on native worlds:
     `std::string`-keyed material caches under a mutex. Answers are now memoised on the material
     and texture objects. The transparent pass's `alphaDraw` went 3.4 → 1.7 ms.
 - The 60–150 ms canopy-map hitch every 1.5 s is gone: the map builds on its own thread.
+- During the far-tier fill, BC3 encoding of leaf composites splits block rows across the pool,
+  byte-identical: 11.2% → 1.9% of the busy main thread.
 - GPU:
   - Far shadow cascades reuse last frame's depth while it still covers the view: −2.1 ms.
   - Mid-ring grass placement tests the frustum first: −0.45 ms.
@@ -89,6 +91,9 @@ What it took on native worlds:
   - The September black-frame bug came from exactly this lazy design.
 - **Terrain and grass on their own init threads.** Only ~0.1 s, because each init thread builds its
   own shader composer and they contend.
+- **Preparing the far tier's `.emat` maps ahead of registration.** The names are a superset,
+  the preparation took 17.6% of the main thread, and the far fill got slower (36.5 s against
+  33.5 s).
 - **Removing the grass depth prepass.** It also writes the normals AO reads, so the image would
   change.
 
@@ -97,17 +102,23 @@ What it took on native worlds:
 1. **Native roads.** 2,398 legacy blend objects cost ~2 ms GPU and ~1.6 ms main thread at Durras.
    That is per-draw overhead, not fill (`POSEIDON_REFORGER_NO_ROADS=1` is the A/B). Batching them
    changes how roads blend against glass; drawing them in the surface pass is the safer first step.
-2. **Far-tier registration textures.** The `.emat` layer maps are loaded on the main thread inside
+2. **Main/render overlap lost while models register.** Creating a texture from the main
+   thread first waits for the render thread to finish its in-flight frame
+   (`AcquireProducerWindow`: 'texture create', waits up to hundreds of ms in the log). Every
+   frame that registers a model therefore runs main and render back to back. The fix is to
+   create textures through the render thread rather than around it. That is architecture, in
+   an area with a history (see render-overlap notes), so it is left for a deliberate change.
+3. **Far-tier registration textures.** The `.emat` layer maps are loaded on the main thread inside
    `RegisterGpuModel`, ~12% of the main thread during the far fill. The same prepare-then-take
    pattern applies, but the names come from the renderer's material translation.
-3. **Native placements resolve.** 3.6 s of the load, a third of it waiting on serial prefab and
+4. **Native placements resolve.** 3.6 s of the load, a third of it waiting on serial prefab and
    `.xob` reads.
-4. **Geography refresh.** ~18 ms every ~2 s while native objects stream, mostly rebuilding the
+5. **Geography refresh.** ~18 ms every ~2 s while native objects stream, mostly rebuilding the
    grass road/footprint cell table.
-5. **The engine allocator zero-fills every `new`.** Callers rely on it, so it cannot simply stop.
+6. **The engine allocator zero-fills every `new`.** Callers rely on it, so it cannot simply stop.
    It is ~6% of the main thread during streaming, through large buffers that are overwritten at
    once.
-6. **Mid-ring grass vertex shader.** Per-blade and per-clump values are recomputed for every
+7. **Mid-ring grass vertex shader.** Per-blade and per-clump values are recomputed for every
    vertex: ~12 M vertex invocations per pass on stock worlds, which are GPU-bound.
 
 ## Levers added
