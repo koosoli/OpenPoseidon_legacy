@@ -511,6 +511,7 @@ GameValue GetNearestObject(const GameState* state, GameValuePar oper1);
 GameValue GetNearestObjectByDistance(const GameState* state, GameValuePar oper1);
 GameValue A1NearObjects(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1GetWeaponCargo(const GameState* state, GameValuePar oper1);
+GameValue A1Reload(const GameState* state, GameValuePar oper1);
 GameValue A1GetMagazineCargo(const GameState* state, GameValuePar oper1);
 GameValue A1ConfigFile(const GameState* state);
 GameValue A1MissionConfigFile(const GameState* state);
@@ -1560,7 +1561,7 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameBool, "isNil", A1IsNil, GameString),
         GameFunction(GameNothing, "doGetOut", A1DoGetOut, GameObjectOrArray),
         GameFunction(GameNothing, "enableEnvironment", A1IgnoredUnary, GameBool),
-        GameFunction(GameNothing, "reload", A1IgnoredUnary, GameObject),
+        GameFunction(GameNothing, "reload", A1Reload, GameObject),
         GameFunction(GameNothing, "terminate", ScriptTerminate, GameScalar),
         GameFunction(GameBool, "scriptDone", ScriptIsDone, GameScalar),
         GameFunction(GameBool, "waitUntil", ScriptWaitUntilUnscheduled, GameString),

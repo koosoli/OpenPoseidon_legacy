@@ -526,6 +526,16 @@ GameValue CargoList(const GameState* state, const AutoArray<RString>& names)
 }
 } // namespace
 
+// Arma 1: reload unit -- loads every weapon of the unit that has no magazine in it.
+GameValue A1Reload(const GameState* state, GameValuePar oper1)
+{
+    if (EntityAI* ai = dyn_cast<EntityAI>(GetObject(oper1)))
+    {
+        ai->AutoReloadAll();
+    }
+    return NOTHING;
+}
+
 // Arma 1: getWeaponCargo box -> [["M16A2", "M136"], [10, 4]] (Arma names of the weapons).
 GameValue A1GetWeaponCargo(const GameState* state, GameValuePar oper1)
 {
