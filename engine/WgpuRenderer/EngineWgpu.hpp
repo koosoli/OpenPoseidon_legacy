@@ -189,6 +189,14 @@ class EngineWgpu : public EngineDummy
     void BeginMeshTL(const Shape& sMesh, int spec, bool dynamic) override;
     void EndMeshTL(const Shape& sMesh) override;
     void DrawSectionTL(const Shape& sMesh, int beg, int end) override;
+    // Pass-1 blend recording (Engine.hpp). Captured draws stay in _draws3d like any other;
+    // only their WGR_CMD_DRAW_3D entries wait in _blendStash until the scene splices them in.
+    bool BlendRecordAvailable() const override { return _renderer != nullptr; }
+    void BlendRecordCapture(bool on) override { _blendCapture = on; }
+    uint32_t BlendRecordSize() const override { return uint32_t(_blendStash.size()); }
+    void BlendRecordReplay(uint32_t beg, uint32_t end) override;
+    uint32_t BlendRecordStreamMark() const override { return uint32_t(_cmds.size()); }
+    bool BlendRecordMatches(uint32_t beg, uint32_t end, uint32_t mark) const override;
     // Captures the per-section material so DrawSectionTL can fold it with the sun
     // (GL33 parity: emissive + sun_ambient + sun_diffuse * N.L). Called by
     // ShapeSection::PrepareTL immediately before each DrawSectionTL.
@@ -784,6 +792,8 @@ class EngineWgpu : public EngineDummy
     std::vector<WgrDraw2DBatch> _batches;
     std::vector<WgrDraw3D> _draws3d;
     std::vector<WgrCmd> _cmds;
+    std::vector<WgrCmd> _blendStash; // see BlendRecordCapture; cleared with _cmds
+    bool _blendCapture = false;
     // Bone-matrix pool for skinned draws (128-matrix blocks; world pre-multiplied in).
     std::vector<WgrMat4> _palette;
     // Frame-global point/spot lights (rebuilt each frame in NextFrame, <= WGR_MAX_LIGHTS).

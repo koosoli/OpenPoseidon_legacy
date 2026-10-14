@@ -271,6 +271,20 @@ extern SectionClassFilter GSectionFilter;
 // 12a). Default false; only the wgpu GPU-driven path ever sets it, so GL33 is unaffected.
 extern bool GSkipGpuOwnedSections;
 
+// Pass-1 blend recording (PERF, 2026-10-14). An opaque object that owns blend sections used
+// to be drawn twice -- Animate, every section walk, every proxy, Deanimate -- once per pass,
+// and the second run existed only to emit its blend sections in back-to-front order. While
+// `active`, a Shape::Draw under the OpaqueAndCutout filter also walks its blend sections, with
+// `depthReadOnly` standing in for GBlendSectionDepthReadOnly, and the engine captures those
+// draws instead of emitting them; the scene replays the capture at the object's sorted slot
+// (SceneDraw.cpp, pass 2). Set only by the scene, only when the engine supports capture.
+struct BlendRecordRequest
+{
+    bool active = false;
+    bool depthReadOnly = false;
+};
+extern BlendRecordRequest GBlendRecord;
+
 // Terrain-conform plane published around a conformed object's draw (ForestPlain),
 // so the wgpu backend can upload the shared base mesh ONCE undeformed and conform it
 // per instance in the vertex shader instead of the CPU rewriting the shared vertex

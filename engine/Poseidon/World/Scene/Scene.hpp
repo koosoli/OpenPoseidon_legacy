@@ -66,6 +66,12 @@ class SortObject : public RefCount
     int sortComplexity; // GetShape()->Level(0)->NFaces()  (CmpShapeObj shape tiebreak)
     int sortPassOrder;  // object->PassOrder(drawLOD)       (CmpSurfaceObj primary key)
 
+    // Pass-1 blend recording (SceneDraw.cpp): this object's blend-section draws, captured in
+    // pass 1 of generation `blendRecordGen`, as a range of the engine's recording list.
+    int blendRecordGen = 0;
+    uint32_t blendRecordBeg = 0;
+    uint32_t blendRecordEnd = 0;
+
     USE_FAST_ALLOCATOR
 };
 

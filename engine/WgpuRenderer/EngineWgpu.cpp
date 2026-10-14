@@ -3096,6 +3096,8 @@ void EngineWgpu::InitDraw(bool clear, PackedColor color)
     // Indices into _draws3d; they must die with it or they patch a stranger (REN-THR-011).
     _draws3dPendingMesh.clear();
     _cmds.clear();
+    _blendStash.clear();
+    _blendCapture = false;
     _palette.clear();
     _cameras.clear();
     _currentCamera = 0;
@@ -6752,6 +6754,8 @@ void EngineWgpu::NextFrame()
     _batches.clear();
     _draws3d.clear();
     _cmds.clear();
+    _blendStash.clear();
+    _blendCapture = false;
     _palette.clear();
     _cameras.clear();
     _shadowCasters.clear();
@@ -9787,7 +9791,104 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     {
         _draws3dPendingMesh.push_back(PendingMeshRef{U32(_draws3d.size() - 1), buf->slot});
     }
-    _cmds.push_back(WgrCmd{WGR_CMD_DRAW_3D, U32(_draws3d.size() - 1)});
+    (_blendCapture ? _blendStash : _cmds).push_back(WgrCmd{WGR_CMD_DRAW_3D, U32(_draws3d.size() - 1)});
+}
+
+void EngineWgpu::BlendRecordReplay(uint32_t beg, uint32_t end)
+{
+    if (beg <= end && end <= _blendStash.size())
+    {
+        _cmds.insert(_cmds.end(), _blendStash.begin() + beg, _blendStash.begin() + end);
+    }
+}
+
+// The verification half of the lever: is the capture [beg, end) the same draws that the real
+// second draw of the object just appended to the stream after `mark`? Byte-equal records,
+// except the two per-frame table indices, whose CONTENTS are compared instead: a second draw
+// opens its own palette slot (a copy of the same bones) and may name a re-pushed camera.
+bool EngineWgpu::BlendRecordMatches(uint32_t beg, uint32_t end, uint32_t mark) const
+{
+    // Says why, the first few times: a verification that only counts cannot be acted on.
+    static int logged = 0;
+    const auto fail = [](const char* why, size_t detail)
+    {
+        if (logged++ < 12)
+            LOG_WARN(Graphics, "BLEND_RECORD mismatch detail: {} ({})", why, detail);
+        return false;
+    };
+    if (beg > end || end > _blendStash.size() || mark > _cmds.size() || end - beg != _cmds.size() - mark)
+    {
+        return fail("draw count", _cmds.size() - mark);
+    }
+    for (uint32_t k = 0; k < end - beg; k++)
+    {
+        const WgrCmd& a = _blendStash[beg + k];
+        const WgrCmd& b = _cmds[mark + k];
+        if (a.kind != b.kind || (a.kind != WGR_CMD_DRAW_3D && a.arg != b.arg))
+        {
+            return fail("command kind", b.kind);
+        }
+        if (a.kind != WGR_CMD_DRAW_3D)
+        {
+            continue;
+        }
+        if (a.arg >= _draws3d.size() || b.arg >= _draws3d.size())
+        {
+            return fail("draw index", b.arg);
+        }
+        WgrDraw3D da = _draws3d[a.arg];
+        WgrDraw3D db = _draws3d[b.arg];
+        if ((da.palette_slot == WGR_NO_PALETTE) != (db.palette_slot == WGR_NO_PALETTE))
+        {
+            return fail("palette presence", db.palette_slot);
+        }
+        if (da.palette_slot != WGR_NO_PALETTE)
+        {
+            const size_t pa = size_t(da.palette_slot) * WGR_PALETTE_SIZE;
+            const size_t pb = size_t(db.palette_slot) * WGR_PALETTE_SIZE;
+            if (pa + WGR_PALETTE_SIZE > _palette.size() || pb + WGR_PALETTE_SIZE > _palette.size() ||
+                std::memcmp(&_palette[pa], &_palette[pb], WGR_PALETTE_SIZE * sizeof(WgrMat4)) != 0)
+            {
+                return fail("palette contents", db.palette_slot);
+            }
+        }
+        if (da.camera != db.camera)
+        {
+            if (da.camera >= _cameras.size() || db.camera >= _cameras.size() ||
+                std::memcmp(&_cameras[da.camera], &_cameras[db.camera], sizeof(CameraEntry)) != 0)
+            {
+                return fail("camera contents", db.camera);
+            }
+        }
+        // A mesh created this frame records handle 0 plus a pending patch (REN-THR-011); the
+        // second draw can already read the real handle. Compare what publishing will carry.
+        const auto resolvedMesh = [this](uint32_t index, uint64_t mesh)
+        {
+            if (mesh != 0)
+                return mesh;
+            for (const PendingMeshRef& ref : _draws3dPendingMesh)
+                if (ref.index == index && ref.slot)
+                    return uint64_t(ref.slot->renderer);
+            return mesh;
+        };
+        if (resolvedMesh(a.arg, da.mesh) != resolvedMesh(b.arg, db.mesh))
+        {
+            return fail("mesh", 0);
+        }
+        da.mesh = db.mesh = 0;
+        da.palette_slot = db.palette_slot = 0;
+        da.camera = db.camera = 0;
+        if (std::memcmp(&da, &db, sizeof(WgrDraw3D)) != 0)
+        {
+            const auto* ba = reinterpret_cast<const unsigned char*>(&da);
+            const auto* bb = reinterpret_cast<const unsigned char*>(&db);
+            size_t first = 0;
+            while (first < sizeof(WgrDraw3D) && ba[first] == bb[first])
+                first++;
+            return fail("record bytes, first differing offset", first);
+        }
+    }
+    return true;
 }
 
 // --- GPU-driven retained scene (docs/gpu-culling-and-depth-plan.md Stage 3b) ---

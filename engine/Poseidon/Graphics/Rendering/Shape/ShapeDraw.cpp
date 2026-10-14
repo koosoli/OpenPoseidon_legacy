@@ -493,6 +493,7 @@ bool Shape::HasBlendSections() const
 
 SectionClassFilter GSectionFilter = SectionClassFilter::All;
 bool GSkipGpuOwnedSections = false;
+BlendRecordRequest GBlendRecord;
 ConformPlane GCurrentConformPlane;
 bool GCurrentIsVegetation = false;
 float GCurrentFoliageKind = 0.0f;
@@ -653,14 +654,6 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
             // check if shape is dynamic or not
             bool dynamic = matSource->GetAnimated(*this);
             engine->BeginMeshTL(*this, spec, dynamic);
-            // check first face properties
-            int secBeg = -1;
-            int secEnd = -1;
-            Texture* secTexture = (Texture*)-1;
-            int secSpecial = -1;
-            int secMaterial = -1;
-            TexMaterial* secSurfMat = nullptr;
-
             // MAT-052 diagnostic (temporary): WGR_SECTION_SKIP_TRACE=<substring> names, once
             // per shape, every section of a matching shape with its texture, flags and the
             // reason it was skipped -- because a section that is never submitted is invisible
@@ -694,92 +687,120 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
                                                                std::memory_order_relaxed);
             }
             const bool p1sSections = Poseidon::Pass1Submit::Counting();
-            for (int i = 0; i < NSections(); i++)
+            // One walk of the sections under `filter`. Run once, as always; run a second time
+            // for the blend sections when the scene is recording them (GBlendRecord), so the
+            // object's back-to-front draws come out of this one Animate instead of a second
+            // whole draw of the object in pass 2. Diagnostics and counters stay on the first.
+            const auto walkSections = [&](SectionClassFilter filter, bool firstWalk)
             {
-                const ShapeSection& sec = GetSection(i);
-                if (sectionTrace)
+                // check first face properties
+                int secBeg = -1;
+                int secEnd = -1;
+                Texture* secTexture = (Texture*)-1;
+                int secSpecial = -1;
+                int secMaterial = -1;
+                TexMaterial* secSurfMat = nullptr;
+                for (int i = 0; i < NSections(); i++)
                 {
-                    const Texture* t = sec.properties.GetTexture();
-                    const bool hid = (sec.properties.Special() & (IsHidden | IsHiddenProxy)) != 0;
-                    const bool gpuOwned = GSkipGpuOwnedSections && SectionGpuOwned(sec);
-                    const bool filtered = GSectionFilter != SectionClassFilter::All &&
-                                          ((GSectionFilter == SectionClassFilter::BlendOnly) != SectionIsBlend(sec));
-                    LOG_WARN(Graphics, "SECTRACE shape@{} sec {} tex={} special={:#x} {}{}{}",
-                             static_cast<const void*>(this), i, t ? t->Name() : "<none>",
-                             unsigned(sec.properties.Special()),
-                             hid ? "SKIP-HIDDEN " : "", gpuOwned ? "SKIP-GPUOWNED " : "",
-                             filtered ? "SKIP-FILTER " : "");
-                }
-                if (sec.properties.Special() & (IsHidden | IsHiddenProxy))
-                {
-                    continue;
-                }
-
-                // Partial GPU-driven object (wgpu §12): the GPU retained scene already drew
-                // this shape's GPU-owned (opaque, Default-surface) sections into the colour +
-                // prepass targets, so the CPU repaints only the complement (blend glass,
-                // decals). Same predicate the wgpu backend registered the section with, so
-                // owned sections are dropped exactly once — never double-drawn, never held.
-                if (GSkipGpuOwnedSections && SectionGpuOwned(sec))
-                {
-                    continue;
-                }
-
-                // per-section transparency routing: in the opaque pass draw only
-                // opaque+cutout sections, in the back-to-front pass only blend ones.
-                if (GSectionFilter != SectionClassFilter::All)
-                {
-                    const bool isBlend = SectionIsBlend(sec);
-                    if ((GSectionFilter == SectionClassFilter::BlendOnly) != isBlend)
+                    const ShapeSection& sec = GetSection(i);
+                    if (sectionTrace && firstWalk)
+                    {
+                        const Texture* t = sec.properties.GetTexture();
+                        const bool hid = (sec.properties.Special() & (IsHidden | IsHiddenProxy)) != 0;
+                        const bool gpuOwned = GSkipGpuOwnedSections && SectionGpuOwned(sec);
+                        const bool filtered =
+                            GSectionFilter != SectionClassFilter::All &&
+                            ((GSectionFilter == SectionClassFilter::BlendOnly) != SectionIsBlend(sec));
+                        LOG_WARN(Graphics, "SECTRACE shape@{} sec {} tex={} special={:#x} {}{}{}",
+                                 static_cast<const void*>(this), i, t ? t->Name() : "<none>",
+                                 unsigned(sec.properties.Special()), hid ? "SKIP-HIDDEN " : "",
+                                 gpuOwned ? "SKIP-GPUOWNED " : "", filtered ? "SKIP-FILTER " : "");
+                    }
+                    if (sec.properties.Special() & (IsHidden | IsHiddenProxy))
                     {
                         continue;
                     }
-                }
 
-                if (p1sSections)
-                {
-                    Poseidon::Pass1Submit::gSectionsDrawn.fetch_add(1, std::memory_order_relaxed);
+                    // Partial GPU-driven object (wgpu §12): the GPU retained scene already drew
+                    // this shape's GPU-owned (opaque, Default-surface) sections into the colour +
+                    // prepass targets, so the CPU repaints only the complement (blend glass,
+                    // decals). Same predicate the wgpu backend registered the section with, so
+                    // owned sections are dropped exactly once — never double-drawn, never held.
+                    if (GSkipGpuOwnedSections && SectionGpuOwned(sec))
+                    {
+                        continue;
+                    }
+
+                    // per-section transparency routing: in the opaque pass draw only
+                    // opaque+cutout sections, in the back-to-front pass only blend ones.
+                    if (filter != SectionClassFilter::All)
+                    {
+                        const bool isBlend = SectionIsBlend(sec);
+                        if ((filter == SectionClassFilter::BlendOnly) != isBlend)
+                        {
+                            continue;
+                        }
+                    }
+
+                    if (p1sSections && firstWalk)
+                    {
+                        Poseidon::Pass1Submit::gSectionsDrawn.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    if (secBeg < 0)
+                    {
+                        secBeg = i;
+                        secEnd = i + 1;
+                        secTexture = sec.properties.GetTexture();
+                        secSpecial = sec.properties.Special();
+                        secMaterial = sec.material;
+                        secSurfMat = sec.surfMat;
+                    }
+                    else if (sec.properties.GetTexture() == secTexture && sec.properties.Special() == secSpecial &&
+                             sec.material == secMaterial && sec.surfMat == secSurfMat && i == secEnd)
+                    {
+                        // extend section
+                        secEnd = i + 1;
+                    }
+                    else
+                    {
+                        // flush section
+                        TLMaterial mat;
+                        matSource->GetMaterial(mat, GetSection(secBeg).material);
+                        GetSection(secBeg).PrepareTL(mat, lights, spec);
+                        GEngine->DrawSectionTL(*this, secBeg, secEnd);
+                        // open another section
+                        secBeg = i;
+                        secEnd = i + 1;
+                        secTexture = sec.properties.GetTexture();
+                        secSpecial = sec.properties.Special();
+                        secMaterial = sec.material;
+                        secSurfMat = sec.surfMat;
+                    }
                 }
-                if (secBeg < 0)
+                if (secEnd > secBeg)
                 {
-                    secBeg = i;
-                    secEnd = i + 1;
-                    secTexture = sec.properties.GetTexture();
-                    secSpecial = sec.properties.Special();
-                    secMaterial = sec.material;
-                    secSurfMat = sec.surfMat;
-                }
-                else if (sec.properties.GetTexture() == secTexture && sec.properties.Special() == secSpecial &&
-                         sec.material == secMaterial && sec.surfMat == secSurfMat && i == secEnd)
-                {
-                    // extend section
-                    secEnd = i + 1;
-                }
-                else
-                {
-                    // flush section
+                    int matIndex = GetSection(secBeg).material;
                     TLMaterial mat;
-                    matSource->GetMaterial(mat, GetSection(secBeg).material);
+                    matSource->GetMaterial(mat, matIndex);
+                    // flush section
                     GetSection(secBeg).PrepareTL(mat, lights, spec);
-                    GEngine->DrawSectionTL(*this, secBeg, secEnd);
-                    // open another section
-                    secBeg = i;
-                    secEnd = i + 1;
-                    secTexture = sec.properties.GetTexture();
-                    secSpecial = sec.properties.Special();
-                    secMaterial = sec.material;
-                    secSurfMat = sec.surfMat;
-                }
-            }
-            if (secEnd > secBeg)
-            {
-                int matIndex = GetSection(secBeg).material;
-                TLMaterial mat;
-                matSource->GetMaterial(mat, matIndex);
-                // flush section
-                GetSection(secBeg).PrepareTL(mat, lights, spec);
 
-                GEngine->DrawSectionTL(*this, secBeg, secEnd);
+                    GEngine->DrawSectionTL(*this, secBeg, secEnd);
+                }
+            };
+            walkSections(GSectionFilter, true);
+            if (GBlendRecord.active && GSectionFilter == SectionClassFilter::OpaqueAndCutout)
+            {
+                // Exactly the state pass 2 draws these sections under: the BlendOnly filter
+                // (above) and the scene's depth-read-only choice. Everything else a section
+                // draw reads -- transform, palette, lights, bias, pass hint, draw owner -- was
+                // set by this same draw of the object and is what pass 2 would set again.
+                const bool savedDepthReadOnly = render::GBlendSectionDepthReadOnly;
+                render::GBlendSectionDepthReadOnly = GBlendRecord.depthReadOnly;
+                engine->BlendRecordCapture(true);
+                walkSections(SectionClassFilter::BlendOnly, false);
+                engine->BlendRecordCapture(false);
+                render::GBlendSectionDepthReadOnly = savedDepthReadOnly;
             }
 
             engine->EndMeshTL(*this);

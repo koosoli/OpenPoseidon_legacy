@@ -513,6 +513,19 @@ class Engine : public IGraphicsEngine
     virtual void EnableReorderQueues(bool enableReorded) {}
     virtual void FlushQueues() {}
 
+    // Pass-1 blend recording (Shape.hpp, GBlendRecord). A backend that can capture section
+    // draws into a per-frame side list and splice them back into its command stream later
+    // says so here; every other backend keeps drawing the object twice. Positions are
+    // indices into that side list, valid until the frame is submitted.
+    virtual bool BlendRecordAvailable() const { return false; }
+    virtual void BlendRecordCapture(bool on) {}
+    virtual uint32_t BlendRecordSize() const { return 0; }
+    virtual void BlendRecordReplay(uint32_t beg, uint32_t end) {}
+    // Verification lever: the stream position now, and whether the capture [beg, end)
+    // equals what the stream received since `mark` (the real second draw of the object).
+    virtual uint32_t BlendRecordStreamMark() const { return 0; }
+    virtual bool BlendRecordMatches(uint32_t beg, uint32_t end, uint32_t mark) const { return true; }
+
     // Shadow pipeline.  Wraps the per-caster shadow draw loop in scene.cpp:
     //   BeginShadowPass()   — color writes off, stencil REPLACE 0xFF
     //                          ALWAYS.  Each shadow draw stamps the

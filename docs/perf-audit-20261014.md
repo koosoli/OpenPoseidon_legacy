@@ -222,12 +222,26 @@ Exact wins found with it (both deployed):
   `SectionIsBlend` 2.2% → 1.0%.
 - CPU frame on the bench: 23.6–24.8 → 22.7 ms.
 
+**Objects with transparent parts are drawn once, not twice** (soldiers, vehicles, glazed
+buildings). Before, pass 2 re-ran each one's whole draw (`Animate`, every section walk, proxies,
+`Deanimate`) only to emit its blend sections back to front. Now pass 1 also walks the blend
+sections inside the same draw, under the BlendOnly filter and the same depth-read-only state.
+The engine holds those `DRAW_3D` commands in a side list, and pass 2 splices them in at the
+object's sorted slot (`GBlendRecord`, `Engine::BlendRecord*`; wgpu only, GL33 keeps the old path).
+- Main thread on the bench: `DrawObjectsAndShadowsPass2` 20.2% → 11.3%. Pass 1 is unchanged
+  (12.6% → 12.4%), `Man::Draw` 12.9% → 9.6%, and the main thread was busy ~15% less over the
+  same window.
+- `POSEIDON_BLEND_RECORD=verify` records and still draws twice, then compares the records byte
+  for byte. Palette slot, camera and same-frame mesh handles are compared by what they resolve
+  to. Results: Durras 0 mismatches in 169,788; bench 4 in 206,168, two explained kinds.
+  1. One frame where a soldier's mesh switches to GPU skinning. The recording matches that
+     frame's opaque parts.
+  2. Muzzle flashes. `_mGunFireFrames = 1` is meant to guarantee one visible frame, but the old
+     second draw decremented it first, so a flash older than 50 ms never showed. The recording
+     restores the one-frame flash; the counter now ticks once per frame, as written in 2001.
+- Screenshots on vs off differ by less than two runs of the same arm.
+
 Found, not taken:
-- **Every soldier is drawn twice per frame:** once in pass 1, and again in pass 2 for its blend
-  sections (`HasBlendSections`). The second visit re-runs `Man::Animate` (as costly as the first,
-  ~1.8% of the main thread) plus proxies and palettes. Only the pose matrices could be reused
-  (~0.75%); the skinning writes into the shared shape and must re-run. The real fix is
-  structural: record the blend sections during pass 1.
 - **Corpse pose validation** could not drop its per-tick full `Valid()`: a unit test pins that a
   binding corrupted after capture is refused.
 - **Durras transparent pass** (`ops post-water`, 3.3–3.6 ms GPU): roads ~1.1 ms, plus ~540 tiny
@@ -245,6 +259,7 @@ Found, not taken:
 | `POSEIDON_PREFAB_PREPASS` | on | `0` = native placement resolve answers each prefab in the serial pass |
 | `POSEIDON_PART_POOL_ADAPT` | on | `0` = native parts and roads convert in place on the main thread |
 | `POSEIDON_GETENV_ONCE(name)` | — | macro: a per-site cached environment switch, for per-frame and per-object paths |
+| `POSEIDON_BLEND_RECORD` | on | `0` = draw blend-owning objects twice; `verify` = both, compare, log counts every 300 frames |
 | `WGR_SHADOW_CASCADE_CACHE` | on | `0` = every cascade every frame |
 | `WGR_DLSS_ASYNC_INIT` | on | `0` = synchronous NGX probe |
 | `WGR_INDIRECT_VALIDATION` | on | `0` = skip wgpu's indirect-argument validation |
