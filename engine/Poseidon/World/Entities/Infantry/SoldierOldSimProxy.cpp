@@ -463,7 +463,7 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
                 LOG_INFO(Graphics,
                          "A2 proxy PLAYER draw #{} '{}' as {} ({}): man level {} -> level {} of {} (scale {:.2f}) world "
                          "pos {:.2f},{:.2f},{:.2f} up {:.2f},{:.2f},{:.2f} man at {:.2f},{:.2f},{:.2f} filter {} "
-                         "reversed {}",
+                         "reversed {} camera {:.2f},{:.2f},{:.2f} looking {:.2f},{:.2f},{:.2f} man facing {:.2f},{:.2f},{:.2f}",
                          i, (const char*)proxy.name, (const char*)pshape->Name(),
                          matIndex == type->_gunMatIndex ? "gun" : matIndex == type->_rpgMatIndex ? "launcher"
                          : matIndex == type->_handMatIndex ? "hand" : matIndex == type->_rightHandMatIndex ? "righthand"
@@ -471,7 +471,11 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
                          level, pLevel, pshape->NLevels(), pTransform.Scale(), wp.X(), wp.Y(), wp.Z(), up.X(), up.Y(),
                          up.Z(),
                          transform.Position().X(), transform.Position().Y(), transform.Position().Z(),
-                         static_cast<int>(GSectionFilter), (pshape->Remarks() & REM_REVERSED) != 0);
+                         static_cast<int>(GSectionFilter), (pshape->Remarks() & REM_REVERSED) != 0,
+                         GScene->GetCamera()->Position().X(), GScene->GetCamera()->Position().Y(),
+                         GScene->GetCamera()->Position().Z(), GScene->GetCamera()->Direction().X(),
+                         GScene->GetCamera()->Direction().Y(), GScene->GetCamera()->Direction().Z(),
+                         transform.Direction().X(), transform.Direction().Y(), transform.Direction().Z());
             }
         }
         if (pLevel == LOD_INVISIBLE)
