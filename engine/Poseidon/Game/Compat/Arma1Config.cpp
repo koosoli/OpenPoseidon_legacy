@@ -1466,8 +1466,67 @@ std::string A2Calibre(const ParamEntry* weapon)
                      : std::string((const char*)(RStringB)(*mags)[0]));
 }
 
+// Arma 3 weapon names and calibres: 6.5 mm caseless (MX, Katiba), 5.8 mm (CAR-95, Type
+// 115), 5.56 (TRG, Mk20, SPAR), 7.62 (Mk18, SPAR-17, Zafir), 9.3 mm (Navid, Cyrus),
+// .338 (Mk-1 EMR, SPMG), 12.7 / .408 (Lynx, M320), 9 mm (P07, Rook, Sting), .45 (ACP-C2,
+// Vermin), 5.7 (ADR-97); launchers by name (Titan, NLAW, RPG-42/7, MAAWS, Vorona).
+const char* CwaWeaponForArma3(const std::string& lowerName, const ParamEntry* weapon, const std::string& calibre)
+{
+    const auto has = [&](const char* w) { return calibre.find(w) != std::string::npos || lowerName.find(w) != std::string::npos; };
+    if (has("binocular") || has("rangefinder") || has("laserdesignator"))
+        return "Binocular";
+    if (has("nvgoggles") || has("_nvg"))
+        return "NVGoggles";
+    // a launcher, or a launcher's rocket (Titan_AA, NLAW_F, RPG32_F, MRAWS_HEAT_F ...)
+    const bool rocket = !weapon && (has("titan") || has("nlaw") || has("rpg") || has("mraws") || has("maaws") ||
+                                    has("vorona") || has("pg7"));
+    if (rocket || lowerName.rfind("launch_", 0) == 0 || A2Derives(weapon, "LauncherCore"))
+    {
+        if ((has("titan") && !has("short") && !has("_at")) || has("_aa"))
+            return has("o_") ? "Strela" : "Stinger";
+        if (has("rpg") || has("vorona") || has("pg7"))
+            return "RPGLauncher";
+        if (has("nlaw") || has("m72") || has("law"))
+            return "LAWLauncher";
+        return "CarlGustavLauncher";
+    }
+    if (lowerName.rfind("hgun_", 0) == 0 || A2Derives(weapon, "PistolCore"))
+    {
+        if (has("pdw") || has("sting") || has("vermin") || has("smg") || has("adr"))
+            return "HK";
+        return has("45acp") || has("acpc2") || has("pistol_heavy") ? "Revolver" : "Beretta";
+    }
+    if (lowerName.rfind("smg_", 0) == 0 || has("9x21") || has("45acp") || has("570x28") || has("57x28"))
+        return "HK";
+    const bool mgun = lowerName.rfind("lmg_", 0) == 0 || lowerName.rfind("mmg_", 0) == 0 || has("_sw_") ||
+                      has("_sw_f") || has("zafir") || has("mk200") || has("200rnd") || has("150rnd") || has("100rnd") ||
+                      has("130rnd") || has("belt");
+    const bool sniper = lowerName.rfind("srifle_", 0) == 0 || has("dmr") || has("ebr") || has("lrr") || has("gm6") ||
+                        has("m320") || has("cyrus") || has("asp") || has("rahim") || has("mar10") || has("lynx");
+    const bool gl = has("_gl_") || has("_gl") || has("ugl");
+    if (mgun)
+        return has("762x54") || has("93x64") ? "PK" : "M60";
+    if (sniper || has("127x") || has("408") || has("338") || has("93x64"))
+        return has("762x54") || has("127x108") || has("93x64") ? "SVDDragunov" : "M21";
+    if (has("762x39") || has("akm"))
+        return "AK47";
+    if (has("545x39") || has("ak12") || has("aks"))
+        return gl ? "AK74GrenadeLauncher" : "AK74";
+    if (has("58x42") || has("katiba") || has("car95") || has("type115"))
+        return gl ? "AK74GrenadeLauncher" : "AK74";
+    if (has("65x39") || has("556x45") || has("mx") || has("trg") || has("mk20") || has("spar") || has("sdar"))
+        return gl ? "M16GrenadeLauncher" : "M16";
+    if (has("762x51") || has("mk18") || has("spar_03"))
+        return "M21";
+    if (A2Derives(weapon, "RifleCore"))
+        return gl ? "M16GrenadeLauncher" : "M16";
+    return nullptr;
+}
+
 const char* CwaWeaponFor(const std::string& lowerName, const ParamEntry* weapon, const std::string& calibre)
 {
+    if (Generation() == 3)
+        return CwaWeaponForArma3(lowerName, weapon, calibre);
     const auto has = [&](const char* w) { return calibre.find(w) != std::string::npos || lowerName.find(w) != std::string::npos; };
     if (A2Derives(weapon, "Binocular") || lowerName.find("binocular") != std::string::npos ||
         lowerName.find("laserdesignator") != std::string::npos)
@@ -1554,8 +1613,10 @@ RString Arma2WeaponFallback(const RString& name)
         direct = "SmokeShell";
     else if (any({"handgrenade", "grenadehand"}))
         direct = "HandGrenade";
-    else if (any({"pipebomb", "satchel"}))
+    else if (any({"pipebomb", "satchel", "democharge", "claymore"}))
         direct = "PipeBomb";
+    else if (any({"minigrenade"}))
+        direct = "HandGrenade";
     else if (any({"timebomb"}))
         direct = "TimeBomb";
     else if (any({"minee", "mine_e", "tm46"}))
