@@ -67,6 +67,15 @@ What it took on native worlds:
   - terrain-hole gathering per soldier;
   - prefetching in the scene walk and in target tracking.
 - p95 frame 33 → 25–29 ms.
+- Later the same day, also exact:
+  - Soldiers lock building path points through a per-cell mirror of buildings:
+    `AILocker::LockPosition` 3.8% → 0.5%.
+  - Vehicle-type lookups by name are answered from a validated cache (every footprint did a
+    linear type scan).
+  - `Head::SetMimicMode` skips its config lookup when the mode is unchanged.
+  - The A* field cost reuses each unit's exposure terms within a search batch.
+  - A soldier type's skeleton weights are prepared once rather than once per animated move:
+    mission start `InitVehicles` 1.03 → 0.83–0.99 s.
 
 ## 2001-era limits found
 
