@@ -69,6 +69,32 @@ What it took, each step measured on the laptop or offline on Arma 2's own files:
 Still open: in first person the hands are untextured-looking and the fingers spread; the
 rifle sits low in the view.
 
+### After run 17 (laptop, gl33), 2026-10-14
+
+| Commit | Finding | Fix |
+|--------|---------|-----|
+| `601bf9f` | `121cc8c` left animals out by resolving them to no class, but `ArcadeUnitInfo::Serialize` took the empty class for a missing addon and stood in a CWA `Civilian` (run 15: 139 units, the census's only CWA stand-ins; run 17: 77 in the first 29 missions) | the unit gets presence 0 and `presenceCondition` false, so it is not created |
+| `9600cb1` | T05_FixedWing_VTOL_Training: a yellow waypoint bracket on the player's own F-35 reading "%s %s %s im Kampf (%s) gefallen (0 m)" | the 3D waypoint marker ignored `showWP` (the mission says NEVER, as most Arma 2 missions do; the map already honoured it), and its label indexed the waypoint-type strings by type, so a type outside MOVE..SUPPORT read the string before them (`STR_STAT_UNIT_LOST`). Under the compat layer the marker follows `showWP`; any unnamed type reads Move |
+| `5253d47` | the HMMWV M1151 M2 had no gunner and no gun (census `weapons=CarHorn`): every Arma 2 car resolved by name to CWA's unarmed jeep | a car whose Arma 2 `Turrets` mount a weapon (not a horn or smoke launcher) is carried by `JeepMG`. The M1151 keeps OFP's turret selections (`otocvez`/`otochlaven` in LOD 0, `osaveze`/`osahlavne`/`usti hlavne`/`konec hlavne`/`pos gunner` in memory) |
+| `ebe75b4`, `fac52fd` | first person broken on all three soldier models looked at: USMC (`usmc_soldier_CO`) shows spread pink fingers, FR (`Cooper`) and ACR (`acr_soldier`) a piece of gear filling the bottom of the screen and no rifle; Takistan's chain-link fence draws as a white wall | diagnostics: `OP_A2_PROXYLOG=1` logs the view-pilot LOD's posed bones against LOD 0 under the same palette, what lies in front of the eye and the section textures; the census lists the map models nearest the player first, with the textures and flags of the nearest dozen |
+
+Offline on Arma 2's own files (`diag29`): the view-pilot LOD (res 1100) of `USMC_Soldier_CO`
+carries the same skin weights as LOD 0 (6780 of 7210 vertices matched by position name the
+same dominant bone, the other 430 sit on a joint between neighbouring finger bones), so the
+skin data is not what breaks first person. The view LOD has no head and no helmet; its
+hands use `hhl_06_co.paa` with `hhl.rvmat` (`PixelShaderID Skin`), the same material the
+third-person hands use.
+
+Focus run 7 (`5253d47`, 6 missions, all entered and clean; census 607 entities with the
+Arma model, **0 CWA stand-ins** -- the animals are gone; HMMWV M1151 M2 and Land Rover
+Special now `weapons=Browning`; T05's stray label gone): in game the view LOD posed exactly
+like LOD 0 (`OP_A2_PROXYLOG`: bones within 0-4 cm). What was wrong was the pose itself:
+
+| Commit | Finding | Fix |
+|--------|---------|-----|
+| `dee0e27` | A stored Arma man faces **-z** like every Arma/OFP model: toes, eyes and the `pilot` camera point lie at -z. The BMTR moves were read mirrored in x: every joint closes (stretch 0.09-0.21) but the man becomes his own mirror image, limbs to +z and face to -z. `131eb6a` then left him unturned so the rifle pointed forward -- and the face backward: the first-person camera looked out of the back of his head (FR/ACR: their backpack filled the screen; USMC: his arms seen from the wrong side), and in third person the camera behind the player saw his face and knee pads | the moves pose the TURNED model, as the engine draws it: read without the x-mirror and conjugated once by diag(-1,1,-1) for the engine's reversed load, with the man turned again (CWA's `reversed=1`). `diag30` (the repo's own `ConvertBMTRToRTM` on USMC_Soldier_Light, USMC_Soldier_CO and FR Cooper; stand, aim, idle, walk, kneel, prone): stretch halves to 0.04-0.09, and eyes, hands, knees and toes land on the man's own front. `OP_A2_MAN_XMIRROR=1` restores the old pair |
+| `a7f3a32` | the "white fence" is Arma 2's concrete wall (`Wall_IndCnc_4_D`, `_End_2`, `_End_3`): one section with no face texture, only a `Multi` rvmat blending four layers by a mask; GL33 drew it white (census: section texture `(none)`) | a texture-less section takes its material's stage 0 as its texture when that is a base colour (`*_co`/`*_ca`); the wall draws with `concrete_wall_co.paa` |
+
 Offline check: a small program built from the repo's own ODOL and RTM readers poses
 `USMC_Soldier_Light` with a move and scores the result by how much the mesh's edges stretch.
 
