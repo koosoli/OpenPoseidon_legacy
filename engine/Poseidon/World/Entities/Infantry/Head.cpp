@@ -414,6 +414,15 @@ void SetupFaceBoneRig(Skeleton* skeleton, LODShapeWithShadow* lShape, WeightInfo
     {
         return;
     }
+    // An Arma 2 skeleton fills the whole palette (128 bones, BMTR) before the rig gets here.
+    // Reserving the face bones anyway grew it to 136: no rig (no room, below), but every
+    // pose of every Arma 2 man then built a 136-matrix palette, past the 128-entry stack
+    // array AnimationRT poses into, and the warning below once per man type and mission.
+    if (skeleton->FindBone(RStringB(GFaceBoneNames[0])) < 0 && skeleton->NBones() + NFaceGroups > 127)
+    {
+        weights._faceBoneBase = -1;
+        return;
+    }
     // Reserve the bones. NewBone is a find-or-append, so this is idempotent, and because it
     // appends, any bone a later-loading RTM introduces lands ABOVE the face bones -- the
     // indices captured by the one-time SetSkinData upload never move under us.
