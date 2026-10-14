@@ -1644,6 +1644,27 @@ RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
         if (hasThis)
             text += "\t\tmagazines[]={" + list + "};\r\n";
     }
+    // A scoped Arma 2 weapon looks through its own scope: modelOptics is a 2D scope model
+    // ("\ca\weapons\2Dscope_Acog_4x32", the SVD's optika_snpiere, the Pecheneg's), drawn
+    // in front of the camera as CWA's optics are, with its own zoom. Open sights ("-") keep
+    // the CWA weapon's view. Only the weapon's own (first) muzzle is covered.
+    if (const std::string optics = StringValue(*a2, "modelOptics"); optics.size() > 1 && optics[0] == '\\')
+    {
+        std::string shape = optics;
+        if (shape.size() < 4 || Lower(shape.substr(shape.size() - 4)) != ".p3d")
+            shape += ".p3d";
+        if (QIFStreamB::FileExist(shape.c_str() + 1))
+        {
+            text += "\t\tmodelOptics=\"" + optics + "\";\r\n";
+            for (const char* key : {"opticsZoomMin", "opticsZoomMax"})
+                if (const ParamEntry* e = a2->FindEntry(key); e && !e->IsClass() && !e->IsArray())
+                {
+                    char line[96];
+                    std::snprintf(line, sizeof(line), "\t\t%s=%g;\r\n", key, (float)*e);
+                    text += line;
+                }
+        }
+    }
     text += "\t};\r\n};\r\n";
     ImportIntoPars(text, generated.c_str());
     if (!(Pars >> "CfgWeapons").FindEntry(generated.c_str()))
