@@ -423,6 +423,7 @@ bool MaterialIsWindowUncached(const Ref<TexMaterial>& surfMat)
 struct MaterialClass
 {
     std::string path;
+    uint64_t serial = 0; //!< TexMaterial::Serial of the material this slot describes
     float       emitterTarget = 1.0f;
     bool        isWindow = false;
     bool        leafCards = false;
@@ -483,10 +484,14 @@ MaterialClass* MaterialClassSlot(const Ref<TexMaterial>& surfMat)
     thread_local std::unordered_map<const void*, MaterialClass> cache;
     MaterialClass& slot = cache[static_cast<const void*>(surfMat.GetRef())];
     Pass1Submit::gSecClassCalls.fetch_add(1, std::memory_order_relaxed);
-    if (slot.path.empty() || slot.path != path)
+    // Validated by the material's serial, not its path: a recycled address is a different
+    // material with a different serial, and a material's path never changes. The string
+    // compare this replaces was a strlen + memcmp per section per frame.
+    if (slot.serial != surfMat->Serial())
     {
         Pass1Submit::gSecClassMisses.fetch_add(1, std::memory_order_relaxed);
         slot.path = path;
+        slot.serial = surfMat->Serial();
         slot.emitterTarget = StaticEmitterRadianceTargetUncached(surfMat);
         slot.isWindow = MaterialIsWindowUncached(surfMat);
         slot.leafCardsResolved = false;
@@ -9940,7 +9945,7 @@ bool GpuEmatIsGlass(const Ref<TexMaterial>& surfMat)
     return !family.empty() && Asset::Material::EmatMaterial::NameMatches(family, "MatPBRBasicGlass");
 }
 
-bool GpuEmatBlends(const Ref<TexMaterial>& surfMat)
+static bool GpuEmatBlendsByPath(const Ref<TexMaterial>& surfMat)
 {
     if (surfMat.IsNull())
         return false;
@@ -10009,7 +10014,7 @@ bool GpuEmatIsOpaqueSolid(const Ref<TexMaterial>& surfMat)
 
 // Whether a section's `.emat` names `Cull none` (wire mesh, glass panes).
 // Same cached shape as the two answers above.
-bool GpuEmatCullNone(const Ref<TexMaterial>& surfMat)
+static bool GpuEmatCullNoneByPath(const Ref<TexMaterial>& surfMat)
 {
     if (surfMat.IsNull())
         return false;
@@ -10042,6 +10047,21 @@ bool GpuEmatCullNone(const Ref<TexMaterial>& surfMat)
     return cullNone;
 }
 
+// Per section per frame, so memoised on the material (TexMaterial::Memo); the path-keyed
+// caches above still answer the first time, so nothing is read from disk differently.
+bool GpuEmatBlends(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return false;
+    return surfMat->Memo(TexMaterial::MemoGpuEmatBlends, [&] { return int(GpuEmatBlendsByPath(surfMat)); }) != 0;
+}
+
+bool GpuEmatCullNone(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return false;
+    return surfMat->Memo(TexMaterial::MemoGpuEmatCullNone, [&] { return int(GpuEmatCullNoneByPath(surfMat)); }) != 0;
+}
 
 // RFG-074: name the classifier's refusals, once per (reason, texture). Every one of
 // these was a bare `return false`, and the church's ten opaque wall sections went

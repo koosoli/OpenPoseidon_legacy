@@ -196,6 +196,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_geometry_page_rigid_final_hierarchy_product.cpp
     Graphics/test_retail_page_record_observation.cpp
     Graphics/test_alpha_classify.cpp
+    Graphics/test_material_memo.cpp
     Graphics/test_surface_decompose.cpp
     Graphics/test_shadowmap_math.cpp
     Graphics/test_ephemeris.cpp

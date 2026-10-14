@@ -1761,8 +1761,33 @@ bool TextureWgpu::NormalHasNativeCavity() const
         return false;
     const bool decodedDds = _mipmaps[0].DstFormat() == PacARGB8888 &&
         dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(_src)) != nullptr;
-    return NativeNtcCavityChannelAvailable(_mipmaps[0].DstFormat(), decodedDds,
-                                            NormalIsRgPacked(), Name());
+    // NativeNtcCavityChannelAvailable, with its name half memoised.
+    return NativeAuxChannelsSurvive(_mipmaps[0].DstFormat(), decodedDds, NormalIsRgPacked()) && NameIs(NameNtcCavity);
+}
+
+bool TextureWgpu::NameIs(NameClass which) const
+{
+    const uint32_t shift = static_cast<uint32_t>(which) * 2;
+    const uint32_t word = _nameClassMemo.load(std::memory_order_relaxed);
+    if (word & (1u << shift))
+        return (word >> (shift + 1)) & 1u;
+    const char* name = Name();
+    bool value = false;
+    switch (which)
+    {
+        case NameRgNormal:
+            value = IsEnfusionRgNormalName(name);
+            break;
+        case NameNtcCavity:
+            value = IsNativeNtcName(name);
+            break;
+        case NameNmoChannels:
+            value = IsNativeNmoName(name);
+            break;
+    }
+    // A race computes the same pure function of an immutable name twice; either write is right.
+    _nameClassMemo.fetch_or((1u | (value ? 2u : 0u)) << shift, std::memory_order_relaxed);
+    return value;
 }
 
 bool TextureWgpu::HasNativeLinearMask(bool singleChannel) const
@@ -1780,8 +1805,8 @@ bool TextureWgpu::NormalHasNativePbrChannels() const
         return false;
     const bool decodedDds = _mipmaps[0].DstFormat() == PacARGB8888 &&
         dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(_src)) != nullptr;
-    return NativeNmoMaterialChannelsAvailable(_mipmaps[0].DstFormat(), decodedDds,
-                                               NormalIsRgPacked(), Name());
+    // NativeNmoMaterialChannelsAvailable, with its name half memoised.
+    return NativeAuxChannelsSurvive(_mipmaps[0].DstFormat(), decodedDds, NormalIsRgPacked()) && NameIs(NameNmoChannels);
 }
 
 bool TextureWgpu::HasNativeSrgbBcr() const
@@ -1813,7 +1838,7 @@ bool TextureWgpu::NormalIsRgPacked() const
     // R as POM height.
     const bool decodedDds =
         dst == PacARGB8888 && dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(_src)) != nullptr;
-    return (dst == PacBC7 || decodedDds) && IsEnfusionRgNormalName(Name());
+    return (dst == PacBC7 || decodedDds) && NameIs(NameRgNormal);
 }
 
 void TextureWgpu::InitDynamic(int w, int h, const void* rgba, uint32_t size, bool genMips)

@@ -9,9 +9,15 @@
 namespace Poseidon
 {
 
+static uint64_t NextTexMaterialSerial()
+{
+    static std::atomic<uint64_t> next{1};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
 TexMaterial::TexMaterial()
     : _emmisive(HBlack), _ambient(HWhite), _diffuse(HWhite), _forcedDiffuse(HBlack), _specular(HBlack),
-      _bumpmapFactor(0), _detailmapFactor(0), _specularPower(0)
+      _bumpmapFactor(0), _detailmapFactor(0), _specularPower(0), _serial(NextTexMaterialSerial())
 {
 }
 
@@ -43,7 +49,7 @@ Type LoadValue(const ParamEntry& cfg, const char* name, const Type& defVal)
     }
 }
 
-TexMaterial::TexMaterial(const char* name)
+TexMaterial::TexMaterial(const char* name) : _serial(NextTexMaterialSerial())
 {
     // Keep the authored RVMAT path for section diagnostics and cache identity.
     // TextureToMaterial historically supplied it through the cache key, but a

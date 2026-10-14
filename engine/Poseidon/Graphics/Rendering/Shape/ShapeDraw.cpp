@@ -127,7 +127,7 @@ static AuthoredAlphaRoute ShaderFamilyAlphaRoute(const char* family)
 // Resolving this means opening and parsing an RVMAT, which cannot happen per draw, so the
 // answer is cached by material path -- including the negative answers, so a missing or
 // unparseable material is not retried on every frame.
-static AuthoredAlphaRoute SectionMaterialAlphaRoute(const Ref<TexMaterial>& surfMat)
+static AuthoredAlphaRoute SectionMaterialAlphaRouteByPath(const Ref<TexMaterial>& surfMat)
 {
     if (surfMat.IsNull())
         return AuthoredAlphaRoute::Default;
@@ -175,7 +175,7 @@ static AuthoredAlphaRoute SectionMaterialAlphaRoute(const Ref<TexMaterial>& surf
 // Whether a section's `.emat` authors real translucency: an `OpacityMap`
 // plus `BlendMode AlphaBlend` on a non-solid surface (wire mesh, glass).
 // Same cached shape as the answers above.
-static bool SectionMaterialEmatBlends(const Ref<TexMaterial>& surfMat)
+static bool SectionMaterialEmatBlendsByPath(const Ref<TexMaterial>& surfMat)
 {
     if (surfMat.IsNull())
         return false;
@@ -247,7 +247,7 @@ static std::string SectionMaterialEmatFamily(const Ref<TexMaterial>& surfMat)
 
 // Whether a section's `.emat` names `Cull none` (wire mesh, glass panes).
 // Same cached shape as the two answers above: file read once per material.
-static bool SectionMaterialCullNone(const Ref<TexMaterial>& surfMat)
+static bool SectionMaterialCullNoneByPath(const Ref<TexMaterial>& surfMat)
 {
     if (surfMat.IsNull())
         return false;
@@ -281,6 +281,34 @@ static bool SectionMaterialCullNone(const Ref<TexMaterial>& surfMat)
     std::lock_guard<std::mutex> lock(cacheMutex);
     cache[key] = cullNone;
     return cullNone;
+}
+
+// The three answers above, asked per section per frame. The path-keyed caches make the
+// FIRST answer cheap; these make every later one a load from the material itself (see
+// TexMaterial::Memo) instead of a std::string built, hashed and looked up under a mutex.
+static AuthoredAlphaRoute SectionMaterialAlphaRoute(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return AuthoredAlphaRoute::Default;
+    return static_cast<AuthoredAlphaRoute>(
+        surfMat->Memo(TexMaterial::MemoSectionAlphaRoute,
+                      [&] { return static_cast<int>(SectionMaterialAlphaRouteByPath(surfMat)); }));
+}
+
+static bool SectionMaterialEmatBlends(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return false;
+    return surfMat->Memo(TexMaterial::MemoSectionEmatBlends,
+                         [&] { return int(SectionMaterialEmatBlendsByPath(surfMat)); }) != 0;
+}
+
+static bool SectionMaterialCullNone(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return false;
+    return surfMat->Memo(TexMaterial::MemoSectionCullNone,
+                         [&] { return int(SectionMaterialCullNoneByPath(surfMat)); }) != 0;
 }
 
 // RFG-123: Enfusion glass is translucent because its material says so, whatever the texture

@@ -8,6 +8,7 @@
 #include <Poseidon/Graphics/Textures/TextureReuseOnlyBinding.hpp>
 #include <Poseidon/Graphics/Textures/RetailPacPixelStage.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -27,6 +28,7 @@ class TextureWgpu : public Texture
     friend class TextureBankWgpu;
 
   private:
+    mutable std::atomic<uint32_t> _nameClassMemo{0}; //!< NameIs: two bits a class, known + value
     // Declared before _src so a borrowed CPU tint view dies BEFORE its owner.
     // RFG-086: the inner image also supplies the existing GPU tint delegate.
     Ref<Texture> _tintDelegate;
@@ -210,6 +212,16 @@ class TextureWgpu : public Texture
     bool NormalIsRgPacked() const;
     bool NormalHasNativeCavity() const;
     bool NormalHasNativePbrChannels() const;
+    // PERF (2026-10-14): the NAME halves of the three answers above, memoised. Each lowercased
+    // a copy of the path on every call, and DrawSectionTL asks per section per frame. The
+    // name never changes; the uploaded form can, so only the name half is kept.
+    enum NameClass : uint32_t
+    {
+        NameRgNormal,   //!< IsEnfusionRgNormalName
+        NameNtcCavity,  //!< the name test inside NativeNtcCavityChannelAvailable
+        NameNmoChannels //!< the name test inside NativeNmoMaterialChannelsAvailable
+    };
+    bool NameIs(NameClass which) const;
     bool HasNativeLinearMask(bool singleChannel) const;
     bool HasNativeSrgbBcr() const;
 
