@@ -7,6 +7,7 @@
 
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
 #include <Poseidon/Foundation/platform.hpp>
+#include <cfloat>
 #include <cmath>
 
 namespace Poseidon::Foundation
@@ -55,8 +56,6 @@ inline constexpr double InvSqrtEps = 1e-3;
     return 1.0f / c;
 }
 
-float InvSqrt(float c);
-
 [[nodiscard]] constexpr float Square(float x)
 {
     return x * x;
@@ -71,16 +70,24 @@ float InvSqrt(float c);
     return 1.0f / c;
 }
 
-//	NewtonRaphson Reciprocal Square Root
-//  	0.5 * rsqrtps * (3 - x * rsqrtps(x) * rsqrtps(x))
-float InvSqrt(float f);
-
 [[nodiscard]] constexpr float Square(float x)
 {
     return x * x;
 }
 
 #endif
+
+// 1/sqrt(x). (PERF 2026-10-14) This was the 2001 Graphics Gems V method -- a 16 KB seed table
+// plus one Newton step in double precision -- compiled out of line behind a function-local
+// static, i.e. never inlined: 5.2% of the main thread's SELF time in perf_combat, because every
+// Vector3 Size()/Normalized()/InvSize() goes through it. A modern sqrtss + divss is exact,
+// deterministic across CPU vendors (unlike rsqrtss) and inlines. Inputs at or below FLT_MIN
+// (zero, denormals, negatives, NaN) are clamped to FLT_MIN so the result stays FINITE, as the
+// table's did: InvSize() of a zero vector must not become inf and turn 0*inf into NaN.
+[[nodiscard]] inline float InvSqrt(float x)
+{
+    return 1.0f / std::sqrt(x > FLT_MIN ? x : FLT_MIN);
+}
 
 } // namespace Poseidon::Foundation
 
