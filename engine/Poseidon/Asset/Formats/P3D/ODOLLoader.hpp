@@ -5,6 +5,7 @@
 #include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol40.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol49.hpp>
+#include <Poseidon/Asset/Formats/RTM/RTMReader.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol73.hpp>
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
@@ -659,6 +660,10 @@ class ODOLLoader
         const bool skinned = boneByName.count("pelvis") && boneByName.count("spine") && boneByName.count("head");
         if (skinned)
         {
+            // the skeleton's parents, for the binarised moves of this rig (ConvertBMTRToRTM)
+            auto& parents = Poseidon::Asset::Formats::BmtrSkeletonParents();
+            for (const auto& b : bones)
+                parents.emplace(lowered(b.name), lowered(b.parent));
             fillSkinnedSelections(bones, source, mesh, boneByName, refs, remap, indexFirst, indexShift, indexLimit,
                                   perPoint, vertexToPoint, sourcePath, lodIndex, lowered);
             return;
