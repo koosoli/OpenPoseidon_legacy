@@ -1793,8 +1793,11 @@ void Landscape::SerializeBin(SerializeBinStream& f, float landGrid)
 
 bool Landscape::LoadOptimized(QIStream& f, float landGrid)
 {
+    const auto tStart = std::chrono::steady_clock::now();
     WrpReader reader;
-    if (!reader.Load(f))
+    const bool readerOk = reader.Load(f);
+    const auto tRead = std::chrono::steady_clock::now();
+    if (!readerOk)
     {
         RptF("WrpReader: %s", reader.GetError() ? reader.GetError() : "unknown error");
         return false;
@@ -1844,6 +1847,7 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
 
     // Create objects from reader data (names already resolved by WrpReader)
 #if _ENABLE_CHEATS
+    const auto tObjects = std::chrono::steady_clock::now();
     for (int i = 0; i < reader.GetObjectCount(); i++)
     {
         const auto& obj = reader.GetObject(i);
@@ -1946,6 +1950,10 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     }
 
     ProgressFinish();
+    LOG_INFO(World, "LoadOptimized parts: WrpReader {:.0f} ms, rest {:.0f} ms ({} objects)",
+             std::chrono::duration<double, std::milli>(tRead - tStart).count(),
+             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tRead).count(),
+             reader.GetObjectCount());
     return true;
 }
 
