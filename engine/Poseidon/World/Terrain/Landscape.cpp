@@ -1,3 +1,4 @@
+#include <chrono>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
@@ -2369,6 +2370,31 @@ inline bool IsShape(Object* obj, const char* name)
     return strstr(obj->GetShape()->Name(), name) != nullptr;
 }
 
+// POSEIDON_LOAD_PROFILE=1: where world object creation goes (LoadOptimized logs the totals)
+double GLoadProfileMs[4] = {};
+static bool LoadProfileOn()
+{
+    static const bool on = [] {
+        const char* v = std::getenv("POSEIDON_LOAD_PROFILE");
+        return v && v[0] == '1';
+    }();
+    return on;
+}
+struct LoadProfileSpan
+{
+    int slot;
+    std::chrono::steady_clock::time_point began;
+    explicit LoadProfileSpan(int s) : slot(LoadProfileOn() ? s : -1)
+    {
+        if (slot >= 0) began = std::chrono::steady_clock::now();
+    }
+    ~LoadProfileSpan()
+    {
+        if (slot >= 0)
+            GLoadProfileMs[slot] += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+    }
+};
+
 void Landscape::AddObject(Object* obj, int* xr, int* zr, bool avoidRecalculation, bool registerVisual)
 {
     int x, z;
@@ -2383,11 +2409,15 @@ void Landscape::AddObject(Object* obj, int* xr, int* zr, bool avoidRecalculation
     }
     // add into corresponding list
     ObjectList& list = _objects(x, z);
-    Verify(list.Add(obj, x, z, avoidRecalculation) >= 0); // <0  -> error
+    {
+        LoadProfileSpan span(2);
+        Verify(list.Add(obj, x, z, avoidRecalculation) >= 0); // <0  -> error
+    }
     // GPU-driven rendering (docs/gpu-culling-and-depth-plan.md Stage 3b): let a GPU-driven
     // backend register this object into its retained scene. No-op unless WGR_GPU_DRIVEN is on.
     if (GEngine && registerVisual)
     {
+        LoadProfileSpan span(3);
         GEngine->SceneObjectCreated(obj);
     }
 #ifdef LOG_OBJ_SHAPE
@@ -3049,7 +3079,11 @@ Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transfo
 {
     const ShapeBank::CpuOnlyLoadScope cpuOnly(!registerVisual);
     // create object based on Class hint in LOD 0
-    Ref<LODShapeWithShadow> shape = Shapes.New(name, false, true);
+    Ref<LODShapeWithShadow> shape;
+    {
+        LoadProfileSpan span(0);
+        shape = Shapes.New(name, false, true);
+    }
     return ObjectCreateFromShape(id, shape, name, transform, x, z, avoidRecalculation,
                                  preserveAuthoredElevation, registerVisual);
 }
@@ -3071,7 +3105,11 @@ Object* Landscape::ObjectCreateFromShape(int id, LODShapeWithShadow* shape, cons
                                        bool preserveAuthoredElevation, bool registerVisual)
 {
     const ShapeBank::CpuOnlyLoadScope cpuOnly(!registerVisual);
-    Object* obj = NewObject(shape, id);
+    Object* obj;
+    {
+        LoadProfileSpan span(1);
+        obj = NewObject(shape, id);
+    }
     obj->SetVisualResident(registerVisual);
 
     if (obj->GetType() != Primary && obj->GetType() != Network)

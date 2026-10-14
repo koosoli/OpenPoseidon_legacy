@@ -1875,6 +1875,15 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     RStringB worstFloatName;
     Vector3 worstFloatPos(0, 0, 0);
 
+    static const bool loadProfile = [] {
+        const char* v = std::getenv("POSEIDON_LOAD_PROFILE");
+        return v && v[0] == '1';
+    }();
+    if (loadProfile)
+    {
+        render::GObjectAdmitProfile.Reset();
+        render::GObjectAdmitProfile.active = true;
+    }
     for (int i = 0; i < reader.GetObjectCount(); i++)
     {
         const auto& obj = reader.GetObject(i);
@@ -1950,6 +1959,19 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     }
 
     ProgressFinish();
+    if (loadProfile)
+    {
+        const auto& ap = render::GObjectAdmitProfile;
+        LOG_INFO(World, "LoadOptimized admit profile: scene {:.0f} register {:.0f} proxies {:.0f} | meshBuild {:.0f} meshCreate {:.0f} section {:.0f} modelRegister {:.0f} | texHeader {:.0f} ({}) texRead {:.0f} texCreate {:.0f} texFallback {:.0f} alphaScan {:.0f} | meshes {} sections {} uploads {}",
+                 ap.sceneMs, ap.registerMs, ap.proxiesMs, ap.meshBuildMs, ap.meshCreateMs, ap.sectionMs, ap.modelRegisterMs,
+                 ap.texHeaderLoadMs, ap.texHeaderLoads, ap.textureReadMs, ap.textureCreateMs, ap.textureFallbackMs, ap.alphaScanMs,
+                 ap.meshes, ap.sections, ap.textureUploads);
+        render::GObjectAdmitProfile.active = false;
+    }
+    extern double GLoadProfileMs[4];
+    if (GLoadProfileMs[0] + GLoadProfileMs[1] + GLoadProfileMs[2] > 0)
+        LOG_INFO(World, "LoadOptimized object profile: Shapes.New {:.0f} ms, NewObject {:.0f} ms, list add {:.0f} ms, scene register {:.0f} ms",
+                 GLoadProfileMs[0], GLoadProfileMs[1], GLoadProfileMs[2], GLoadProfileMs[3]);
     LOG_INFO(World, "LoadOptimized parts: WrpReader {:.0f} ms, rest {:.0f} ms ({} objects)",
              std::chrono::duration<double, std::milli>(tRead - tStart).count(),
              std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tRead).count(),
