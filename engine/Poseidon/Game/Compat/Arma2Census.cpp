@@ -14,6 +14,8 @@
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
 #include <Poseidon/World/World.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <map>
 #include <string>
 
@@ -31,8 +33,14 @@ std::string Describe(Entity* e)
 {
     const EntityType* t = e->GetNonAIType();
     std::string line = TypeName(e);
-    const bool imported = line.rfind("A1x_", 0) == 0;
-    line += imported ? " [arma]" : " [cwa]";
+    // [arma] = drawn with an Arma model; [cwa] = a CWA model (a CWA class, or an A1x_
+    // class that kept its CWA base's model, as soldiers do without OP_A2_SOLDIERS).
+    std::string shapeName = t ? std::string((const char*)t->GetShapeName()) : std::string();
+    std::transform(shapeName.begin(), shapeName.end(), shapeName.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const bool cwaModel = shapeName.rfind("data3d\\", 0) == 0 || shapeName.rfind("\\data3d\\", 0) == 0 ||
+                          shapeName.empty();
+    line += cwaModel ? " [cwa]" : " [arma]";
     if (t)
     {
         const LODShapeWithShadow* shape = t->GetShape();
@@ -94,7 +102,7 @@ void LogAssetCensus()
         add(GWorld->GetVehicle(i));
     for (int i = 0; i < GWorld->NOutVehicles(); i++)
         add(GWorld->GetOutVehicle(i));
-    LOG_INFO(Mission, "{}: asset census: {} entities with the Arma model, {} CWA classes, {} kinds", Label(), arma,
+    LOG_INFO(Mission, "{}: asset census: {} entities with the Arma model, {} with a CWA model, {} kinds", Label(), arma,
              cwa, kinds.size());
     for (const auto& [line, count] : kinds)
         LOG_INFO(Mission, "{}: census {}x {}", Label(), count, line);
