@@ -16,7 +16,9 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  # write: the build is also published as the rolling pre-release "arma3-ci" (last step,
+  # agreed with the owner 2026-10-14); everything else only reads.
+  contents: write
 
 env:
   CCACHE_BASEDIR: ${{ github.workspace }}
@@ -90,3 +92,15 @@ jobs:
           name: OpenPoseidon-Windows-${{ github.ref_name }}-${{ steps.meta.outputs.sha_short }}
           path: out/*
           if-no-files-found: error
+
+      # The artifact store's download host is not reachable from the session that deploys
+      # to the test PC; release assets are. One rolling pre-release, replaced by every build.
+      - name: Publish as the rolling pre-release arma3-ci
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete arma3-ci -y --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create arma3-ci out/* -R "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+            --title "Arma 3 test build ${GITHUB_REF_NAME} ${GITHUB_SHA::7}" \
+            --notes "OpenPoseidon.exe + wgpu_renderer.dll (+ pdbs) of ${GITHUB_REF_NAME} at ${GITHUB_SHA}, run ${GITHUB_RUN_ID}. Replaced by every build; not a release."
