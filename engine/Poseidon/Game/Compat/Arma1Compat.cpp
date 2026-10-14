@@ -618,6 +618,32 @@ void RegisterWorldClasses()
     }
 }
 
+// Whether an Arma 2 vehicle class mounts a gun: any turret under Turrets with a weapon that
+// is more than a horn or a smoke launcher.
+static bool Arma2HasTurretWeapon(const RString& className)
+{
+    const ParamEntry* cls = FindConfigClass("CfgVehicles", className.Data());
+    const ParamEntry* turrets = cls ? cls->FindEntry("Turrets") : nullptr;
+    if (!turrets || !turrets->IsClass())
+        return false;
+    for (int t = 0; t < turrets->GetEntryCount(); t++)
+    {
+        const ParamEntry& turret = turrets->GetEntry(t);
+        if (!turret.IsClass())
+            continue;
+        const ParamEntry* weapons = turret.FindEntry("weapons");
+        if (!weapons || !weapons->IsArray())
+            continue;
+        for (int i = 0; i < weapons->GetSize(); i++)
+        {
+            const std::string w = Lower(((RString)(RStringB)(*weapons)[i]).Data());
+            if (!w.empty() && w.find("horn") == std::string::npos && w.find("smoke") == std::string::npos)
+                return true;
+        }
+    }
+    return false;
+}
+
 RString ResolveVehicleClass(const RString& className)
 {
     if (!Active() || className.GetLength() == 0)
@@ -684,9 +710,16 @@ RString ResolveVehicleClass(const RString& className)
                 sim = Lower((const char*)(RStringB)*e);
         const bool vehicle = sim == "car" || sim == "tank" || sim == "helicopter" || sim == "airplane" ||
                              sim == "ship" || sim == "motorcycle" || sim == "bicycle" || sim == "parachute";
+        // An armed Arma 2 car (HMMWV M2/Mk19/TOW, UAZ DShKM/AGS, Land Rover M2, pickups with
+        // a PK) is carried by CWA's jeep with the mounted M2, not by the unarmed jeep of its
+        // name: on the HMMWV the gunner had no seat and no gun (census: weapons=CarHorn).
+        // These models keep OFP's turret selections (otocvez/otochlaven in the LODs,
+        // osaveze/osahlavne/usti hlavne/konec hlavne in memory), which JeepMG animates.
+        if (sim == "car" && vehicles->FindEntry("JeepMG") && Arma2HasTurretWeapon(className))
+            cwa = RString("JeepMG");
         for (const auto& [word, candidates] : rules)
         {
-            if (!vehicle)
+            if (!vehicle || stricmp(cwa.Data(), "JeepMG") == 0)
                 break;
             if (lower.find(word) == std::string::npos)
                 continue;
