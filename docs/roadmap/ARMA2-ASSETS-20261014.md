@@ -57,6 +57,7 @@ What it took, each step measured on the laptop or offline on Arma 2's own files:
 | `797edce` | Arma 2 car wheels did not turn: the wheels exist only as bones (`wheel_<side>_<n>`), the LODs carry no wheel selection | the ODOL loader gives each wheel bone a selection; `CarType` takes those names when the CWA ones are missing (1 left / 2 right; 1 front, 2 back, 3 middle, 4 second front) |
 | `3c6a383` | the player's aim turned his rifle about his feet | Arma 2 memory points `aimpoint`, `aiming_axis`, `head_axis`, `footstepl/r` are looked up when the OFP names are missing |
 | `b25490e` | **no map objects at all on Arma 2 worlds under GL33** (census: 0-1 map models within 150 m of the player; Utes' LHD missing, C0's crew on the sea) | the streamed-object residency update ran only on WGPU; it now runs on every renderer |
+| `d427d85`, `b7e1654` | with map objects present, every tree and bush drew as an opaque card | Arma ODOL section hints lack OFP's alpha bits: taken from the texture, and for streamed objects (converted on a worker, no texture headers) from the `*_ca.paa` naming rule. Utes T01 now shows its pines, houses and road |
 | `3dfb515` | TE06_Parachute crash in `DrawWater`; C6B_DogsOfWar 60 s in `AILocker::LockPosition` | sectionless water segment skipped; lock range bounded |
 
 Still open: the player's own rifle is not drawn (the AI hold theirs; `OP_A2_PROXYLOG=1`
