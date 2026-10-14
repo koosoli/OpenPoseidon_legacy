@@ -1973,6 +1973,19 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         }
         // Skeleton bones the OFP code names in Czech.
         text += "\t\tboneLauncher=\"launcher\";\r\n\t\tboneLeftHand=\"lefthand\";\r\n\t\tboneRightHand=\"righthand\";\r\n";
+        // An Arma 2 man is stored facing +z, the way this engine's soldiers face once
+        // turned: not turned again. Reversed like a CWA soldier, every Arma 2 soldier faced
+        // backwards -- walked backwards, aimed behind himself (his rifle out of the
+        // first-person view, his hands seen from behind in third person). Measured: posed
+        // with AmovPercMstpSrasWrflDnon his knees and both hands go to +z in the stored
+        // model. Its moves are converted for an unturned model too (ConvertBMTRToRTM).
+        // OP_A2_MAN_REVERSED=1 turns him as before.
+        static const bool a2ManReversed = [] {
+            const char* e = std::getenv("OP_A2_MAN_REVERSED");
+            return e && *e == '1';
+        }();
+        if (Generation() == 2 && !a2ManReversed)
+            text += "\t\treversed=0;\r\n";
     }
     text += "\t};\r\n};\r\n";
     ImportIntoPars(text, generated.c_str());
