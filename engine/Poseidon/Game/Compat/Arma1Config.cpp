@@ -1558,6 +1558,27 @@ RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
         text += "\t\tdisplayName=\"" + displayName + "\";\r\n";
     if (const ParamEntry* scope = cwa->FindEntry("scope"); !scope || (int)*scope < 1)
         text += "\t\tscope=1;\r\n";
+    // OFP weapons often list magazines[]={this}: the magazine is the weapon class itself
+    // (M60, RPGLauncher, LAWLauncher). Inherited, "this" would name the generated class,
+    // which no soldier carries -- the weapon stayed empty (A1x_M240 with M60 belts: 0
+    // rounds). The generated class names CWA's magazines explicitly.
+    if (const ParamEntry* mags = cwa->FindEntry("magazines"); mags && mags->IsArray())
+    {
+        bool hasThis = false;
+        std::string list;
+        for (int i = 0; i < mags->GetSize(); i++)
+        {
+            std::string m = (const char*)(RStringB)(*mags)[i];
+            if (Lower(m) == "this")
+            {
+                hasThis = true;
+                m = cwaWeapon.Data();
+            }
+            list += std::string(i ? "," : "") + "\"" + m + "\"";
+        }
+        if (hasThis)
+            text += "\t\tmagazines[]={" + list + "};\r\n";
+    }
     text += "\t};\r\n};\r\n";
     ImportIntoPars(text, generated.c_str());
     if (!(Pars >> "CfgWeapons").FindEntry(generated.c_str()))
