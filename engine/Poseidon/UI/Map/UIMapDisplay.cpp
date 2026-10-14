@@ -21,6 +21,7 @@
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <Poseidon/UI/Locale/MissionHtmlLocalization.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <string>
 
 std::string Arma2BriefingHtml(const std::string& html); // GameStateExtA2.cpp
@@ -411,7 +412,19 @@ bool WeaponsInfo::Import(const ParamEntry& superclass)
         for (int i = 0; i < cls->GetEntryCount(); i++)
         {
             const ParamEntry& entry = cls->GetEntry(i);
-            Ref<WeaponType> weapon = WeaponTypes.New(entry.GetName());
+            // An Arma 1 mission's pool names Arma 1 weapons (AK74GL, SVD): the class that
+            // carries each one, and none for a weapon without a CWA counterpart -- its
+            // config reads would otherwise fail the briefing.
+            RString name = entry.GetName();
+            if (Poseidon::Arma1Compat::Active())
+            {
+                name = Poseidon::Arma1Compat::ResolveWeaponClass(name);
+                if (!(Pars >> "CfgWeapons").FindEntry(name))
+                {
+                    continue;
+                }
+            }
+            Ref<WeaponType> weapon = WeaponTypes.New(name);
             if (!weapon)
             {
                 continue;
@@ -438,7 +451,16 @@ bool WeaponsInfo::Import(const ParamEntry& superclass)
         for (int i = 0; i < cls->GetEntryCount(); i++)
         {
             const ParamEntry& entry = cls->GetEntry(i);
-            Ref<MagazineType> type = MagazineTypes.New(entry.GetName());
+            RString name = entry.GetName();
+            if (Poseidon::Arma1Compat::Active())
+            {
+                name = Poseidon::Arma1Compat::ResolveMagazineClass(name);
+                if (!(Pars >> "CfgWeapons").FindEntry(name))
+                {
+                    continue;
+                }
+            }
+            Ref<MagazineType> type = MagazineTypes.New(name);
             if (!type)
             {
                 continue;
@@ -466,6 +488,11 @@ bool WeaponsInfo::Import(const ParamEntry& superclass)
                 _magazinesPool.Add(magazine);
             }
         }
+    }
+    if (Poseidon::Arma1Compat::Active())
+    {
+        LOG_INFO(Mission, "{}: briefing weapon pool {} weapons, {} magazines", Poseidon::Arma1Compat::Label(),
+                 _weaponsPool.Size(), _magazinesPool.Size());
     }
     return true;
 }
