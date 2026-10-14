@@ -241,7 +241,17 @@ object's sorted slot (`GBlendRecord`, `Engine::BlendRecord*`; wgpu only, GL33 ke
      restores the one-frame flash; the counter now ticks once per frame, as written in 2001.
 - Screenshots on vs off differ by less than two runs of the same arm.
 
+Also exact, measured on the bench (2026-10-15): target tracking asks the observer's eye
+direction, ability and speed once per unit instead of per target (`GetEyeDirection` 0.91% → 0);
+the legacy `_nohq` lookup in `DrawSectionTL` is memoised on the texture (1.0–2.3% → 0.03%);
+the material-debug string compares are skipped without a selector; the free-fly camera's
+per-frame "no shape" error logs once.
+
 Found, not taken:
+- **Shadow casters re-animate every soldier** (`Man::Animate` in the shadow pass, ~2% of the
+  main thread). Reusing pass 1's palette block is NOT exact: verify showed `Animate` also hides
+  selections, so an unanimated caster submits 4–5 runs where the real one submits 3–4. Taking it
+  would need the hide state without the pose.
 - **Corpse pose validation** could not drop its per-tick full `Valid()`: a unit test pins that a
   binding corrupted after capture is refused.
 - **Durras transparent pass** (`ops post-water`, 3.3–3.6 ms GPU): roads ~1.1 ms, plus ~540 tiny
