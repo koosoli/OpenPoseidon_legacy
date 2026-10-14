@@ -106,6 +106,26 @@ void CarType::InitShape()
     base::InitShape();
 
     // wheel animations
+    // An Arma 2 model names its wheels by bone, wheel_<side>_<n> (side 1 left, 2 right;
+    // n 1 front, 2 back, 3 middle, 4 second front); the ODOL loader gives each wheel bone
+    // a selection. Taken only where the model has none of the CWA names.
+    const Shape* lod0 = _shape->NLevels() > 0 ? _shape->Level(0) : nullptr;
+    const bool a2Wheels =
+        lod0 && lod0->FindNamedSel("levy predni") < 0 && lod0->FindNamedSel("wheel_1_1") >= 0;
+    if (a2Wheels)
+    {
+        _frontLeftWheel.Init(_shape, "wheel_1_1", nullptr, nullptr);
+        _frontRightWheel.Init(_shape, "wheel_2_1", nullptr, nullptr);
+        _front2LeftWheel.Init(_shape, "wheel_1_4", nullptr, nullptr);
+        _front2RightWheel.Init(_shape, "wheel_2_4", nullptr, nullptr);
+        _midLeftWheel.Init(_shape, "wheel_1_3", nullptr, nullptr);
+        _midRightWheel.Init(_shape, "wheel_2_3", nullptr, nullptr);
+        _backLeftWheel.Init(_shape, "wheel_1_2", nullptr, nullptr);
+        _backRightWheel.Init(_shape, "wheel_2_2", nullptr, nullptr);
+        LOG_INFO(Graphics, "Car {}: Arma 2 wheels by bone (wheel_<side>_<n>)", (const char*)GetName());
+    }
+    else
+    {
     _frontLeftWheel.Init(_shape, "levy predni", "levy predni tlumic", nullptr);
     _frontRightWheel.Init(_shape, "pravy predni", "pravy predni tlumic", nullptr);
     _front2LeftWheel.Init(_shape, "levy dalsi", "levy dalsi tlumic", nullptr);
@@ -114,6 +134,7 @@ void CarType::InitShape()
     _midRightWheel.Init(_shape, "pravy prostredni", "pravy prostredni tlumic", nullptr);
     _backLeftWheel.Init(_shape, "levy zadni", "levy zadni tlumic", nullptr);
     _backRightWheel.Init(_shape, "pravy zadni", "pravy zadni tlumic", nullptr);
+    }
 
     _drivingWheel.Init(_shape, "volant", nullptr, "osaVolantKon");
 

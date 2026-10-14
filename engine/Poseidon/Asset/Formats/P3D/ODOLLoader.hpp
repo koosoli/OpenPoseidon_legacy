@@ -579,6 +579,50 @@ class ODOLLoader
         for (size_t b = 0; b < bones.size(); ++b)
             boneByName.emplace(lowered(bones[b].name), static_cast<uint32_t>(b));
 
+        // Arma 2 wheels exist ONLY as bones. A car's LODs carry wheel_1_1_hide and
+        // wheel_1_1_unhide, but no "wheel_1_1" selection at all: model.cfg turns
+        // the wheel by its bone. The CWA car code (CarType) turns a selection, so
+        // each wheel bone gets one, filled below like any other bone selection and
+        // dropped again where this LOD has no vertex on it. Measured on
+        // car_sedan, ural, hmmwv: wheel_<side>_<n>, side 1 left, 2 right; n 1
+        // front, 2 back, 3 middle, 4 second front (the HitLFWheel/LBWheel/
+        // LMWheel/LF2Wheel sources of their own _destruct animations).
+        const size_t ownSelections = mesh.selections.size();
+        for (const auto& b : bones)
+        {
+            const std::string name = lowered(b.name);
+            if (name.size() == 9 && name.rfind("wheel_", 0) == 0 && (name[6] == '1' || name[6] == '2') &&
+                name[7] == '_' && name[8] >= '1' && name[8] <= '4')
+            {
+                bool present = false;
+                for (size_t s = 0; s < ownSelections && !present; ++s)
+                    present = lowered(mesh.selections[s].name) == name;
+                if (!present)
+                {
+                    NamedSelection added;
+                    added.name = name;
+                    mesh.selections.push_back(std::move(added));
+                }
+            }
+        }
+        struct DropEmptyAdded
+        {
+            Mesh& mesh;
+            size_t from;
+            ~DropEmptyAdded()
+            {
+                size_t keep = from;
+                for (size_t s = from; s < mesh.selections.size(); ++s)
+                    if (!mesh.selections[s].vertexIndices.empty())
+                    {
+                        if (keep != s)
+                            mesh.selections[keep] = std::move(mesh.selections[s]);
+                        ++keep;
+                    }
+                mesh.selections.resize(keep);
+            }
+        } dropEmptyAdded{mesh, ownSelections};
+
         bool wanted = false;
         for (const auto& sel : mesh.selections)
             if (sel.vertexIndices.empty() && boneByName.count(lowered(sel.name)))
