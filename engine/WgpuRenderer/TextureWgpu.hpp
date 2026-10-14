@@ -29,6 +29,13 @@ class TextureWgpu : public Texture
 
   private:
     mutable std::atomic<uint32_t> _nameClassMemo{0}; //!< NameIs: two bits a class, known + value
+  public:
+    //! EngineWgpu::LegacyEnhancementNormal's answer for this texture's name. That cache is keyed
+    //! by name and never evicts, so its answer for an immutable name is fixed: the draw path asks
+    //! it per section per frame, and the string build + hash was ~1% of the firefight main thread.
+    mutable std::atomic<uint64_t> legacyNormalMemo{0};
+    mutable std::atomic<bool> legacyNormalKnown{false};
+  private:
     // Declared before _src so a borrowed CPU tint view dies BEFORE its owner.
     // RFG-086: the inner image also supplies the existing GPU tint delegate.
     Ref<Texture> _tintDelegate;

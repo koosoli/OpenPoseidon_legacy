@@ -8950,7 +8950,18 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         {
             if (const char* texName = faceTex->Name(); texName && *texName)
             {
-                const uint64_t handle = LegacyEnhancementNormal(texName);
+                const auto* wgpuFace = static_cast<const TextureWgpu*>(faceTex);
+                uint64_t handle = 0;
+                if (wgpuFace->legacyNormalKnown.load(std::memory_order_acquire))
+                {
+                    handle = wgpuFace->legacyNormalMemo.load(std::memory_order_relaxed);
+                }
+                else
+                {
+                    handle = LegacyEnhancementNormal(texName);
+                    wgpuFace->legacyNormalMemo.store(handle, std::memory_order_relaxed);
+                    wgpuFace->legacyNormalKnown.store(true, std::memory_order_release);
+                }
                 if (handle != 0 && !_materialDebug.disableNormalMap)
                     d.normal_texture_id = handle;
             }
