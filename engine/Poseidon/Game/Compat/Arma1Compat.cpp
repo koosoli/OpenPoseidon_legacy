@@ -8,6 +8,7 @@
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/UI/Locale/Stringtable/Stringtable.hpp>
 
 #include <algorithm>
 #include <cstdlib>
@@ -723,10 +724,23 @@ RString ResolveWeaponClass(const RString& className)
     return ResolveFrom("CfgWeapons", className, WeaponAliases(), true, true);
 }
 
+namespace
+{
+// CWA magazine (lower case) -> the first Arma magazine name resolved to it this session.
+std::map<std::string, std::string>& ResolvedMagazineNames()
+{
+    static std::map<std::string, std::string> names;
+    return names;
+}
+} // namespace
+
 RString ResolveMagazineClass(const RString& className)
 {
     // OFP/CWA keeps magazines in CfgWeapons as well.
-    return ResolveFrom("CfgWeapons", className, MagazineAliases());
+    const RString cwa = ResolveFrom("CfgWeapons", className, MagazineAliases());
+    if (Active() && cwa.GetLength() > 0 && className.GetLength() > 0 && _stricmp(cwa.Data(), className.Data()) != 0)
+        ResolvedMagazineNames().try_emplace(Lower(cwa.Data()), std::string(className.Data()));
+    return cwa;
 }
 
 RString ScriptClassName(const RString& engineName)
@@ -773,8 +787,36 @@ RString ScriptMagazineName(const RString& unitClass, const RString& cwaMagazine)
                 }
         }
     }
-    const auto found = it->second.find(Lower(cwaMagazine.Data()));
-    return found != it->second.end() ? RString(found->second.c_str()) : cwaMagazine;
+    const std::string key = Lower(cwaMagazine.Data());
+    if (const auto found = it->second.find(key); found != it->second.end())
+        return RString(found->second.c_str());
+    // A magazine outside the unit's own loadout (picked up, added by a script): the Arma
+    // name it was first resolved from.
+    if (const auto found = ResolvedMagazineNames().find(key); found != ResolvedMagazineNames().end())
+        return RString(found->second.c_str());
+    return cwaMagazine;
+}
+
+RString MagazineDisplayName(const RString& ownerClass, const RString& cwaMagazine)
+{
+    if (!Active() || cwaMagazine.GetLength() == 0)
+        return RString();
+    RString arma = ScriptMagazineName(ownerClass, cwaMagazine);
+    if (_strnicmp(ownerClass.Data(), "A1x_", 4) != 0)
+    {
+        const auto found = ResolvedMagazineNames().find(Lower(cwaMagazine.Data()));
+        if (found == ResolvedMagazineNames().end())
+            return RString();
+        arma = RString(found->second.c_str());
+    }
+    const ParamEntry* magazine = FindConfigClass("CfgMagazines", arma.Data());
+    const ParamEntry* name = magazine && magazine->IsClass() ? magazine->FindEntry("displayName") : nullptr;
+    if (!name || name->IsClass() || name->IsArray())
+        return RString();
+    const RString text = name->GetValue();
+    if (text.GetLength() > 1 && (text[0] == '$' || text[0] == '@'))
+        return Localize(text);
+    return text;
 }
 
 bool ScriptWeaponMatches(const char* engineName, const RString& scriptName)
