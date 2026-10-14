@@ -980,7 +980,8 @@ void LoadConfig()
     int baseConfigs = 0;
     for (const std::string& dtaFolder : DtaFolders())
     {
-        for (const char* archive : {"bin", "languagecore"})
+        // Arma 3 names its global stringtable archive languagecore_f.
+        for (const char* archive : {"bin", "languagecore", "languagecore_f"})
         {
             const std::string binPath = dtaFolder + "\\" + archive;
             QFBank dta;
@@ -1017,7 +1018,7 @@ void LoadConfig()
                     LoadedConfig cfg;
                     cfg.source = path;
                     cfg.isBase = true;
-                    if (Generation() == 2)
+                    if (Generation() >= 2)
                     {
                         cfg.tree = RapTree(readPrivate(name)).Read();
                         LOG_INFO(Mission, "{}: read {}", Label(), path);
@@ -1058,7 +1059,7 @@ void LoadConfig()
             {
                 LoadedConfig cfg;
                 cfg.source = path;
-                if (Generation() == 2)
+                if (Generation() >= 2)
                 {
                     cfg.tree = RapTree(ReadArchiveFile(path)).Read();
                     if (const RapNode* patches = cfg.tree->Find("cfgpatches"))
@@ -1226,7 +1227,7 @@ bool UsableCwaBase(const char* name, const std::string& sim, int side, bool need
         if (!scope || (int)*scope < 1)
             return false;
     }
-    if (Lower(StringValue(*c, "simulation")) != sim)
+    if (SimKind(StringValue(*c, "simulation")) != SimKind(sim))
         return false;
     const bool sided = sim == "soldier" || sim == "car" || sim == "tank" || sim == "helicopter" ||
                        sim == "airplane" || sim == "ship" || sim == "motorcycle";
@@ -1285,9 +1286,28 @@ RString ConcreteCwaDescendant(const char* base)
 }
 } // namespace
 
+bool RapBytesToText(const std::vector<uint8_t>& bytes, std::string& text)
+{
+    try
+    {
+        text = RapToText(bytes).Convert();
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        LOG_WARN(Mission, "{}: binarised config not readable: {}", Label(), e.what());
+        return false;
+    }
+}
+
 bool Arma1RapFileToText(const char* fileName, std::string& text)
 {
-    if (!fileName || !*fileName || !QIFStreamB::FileExist(fileName))
+    if (!fileName || !*fileName)
+        return false;
+    // Arma 3 missions (Eden or Arma 2 layout, binarised or not) have their own reader.
+    if (Arma3MissionFileToText(fileName, text))
+        return true;
+    if (!QIFStreamB::FileExist(fileName))
         return false;
     QIFStreamB in;
     in.AutoOpen(fileName);
@@ -1322,7 +1342,7 @@ RString FallbackCwaClass(const RString& a1Name)
     const ParamEntry* a1 = FindConfigClass("CfgVehicles", a1Name);
     if (!a1 || !a1->IsClass())
         return RString();
-    const std::string sim = Lower(StringValue(*a1, "simulation"));
+    const std::string sim = SimKind(StringValue(*a1, "simulation"));
     int side = -1;
     if (const ParamEntry* s = a1->FindEntry("side"); s && !s->IsClass() && !s->IsArray())
         side = (int)*s;
@@ -1817,7 +1837,7 @@ std::string Arma1Cargo(const ParamEntry& cls, int& items)
 
 RString Arma2ModuleInit(const RString& className)
 {
-    if (Generation() != 2 || !ConfigLoaded() || className.GetLength() == 0)
+    if (Generation() < 2 || !ConfigLoaded() || className.GetLength() == 0)
         return RString();
     const ParamEntry* cls = FindConfigClass("CfgVehicles", className);
     if (!cls || !cls->IsClass() || !IsKindOf(cls, "Logic"))
@@ -1884,12 +1904,12 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
             shape += ".p3d";
         useModel = QIFStreamB::FileExist(shape[0] == '\\' ? shape.c_str() + 1 : shape.c_str());
     }
-    if (man && ((Generation() == 2 && !a2Soldiers) || !MovesImported()))
+    if (man && ((Generation() >= 2 && !a2Soldiers) || !MovesImported()))
         useModel = false;
     // Arma 1 soldiers (with their own model and moves) carry their own weapons too: the
     // Arma 1 weapons[] and magazines[], shown with the Arma 1 weapon models (OP_A1_WEAPONS=0
     // keeps the CWA soldier's loadout).
-    const bool loadout = man && (Generation() == 2 || (Generation() == 1 && useModel && Arma1OwnWeapons()));
+    const bool loadout = man && (Generation() >= 2 || (Generation() == 1 && useModel && Arma1OwnWeapons()));
     if (!useModel && !loadout)
         return cwaClass;
 
@@ -1915,12 +1935,12 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     int cargoItems = 0;
     if (!man && useModel && Generation() == 1 && Arma1OwnWeapons())
         text += Arma1Cargo(*a1, cargoItems);
-    if (!man && useModel && Generation() == 2)
+    if (!man && useModel && Generation() >= 2)
     {
         // A vehicle with the Arma 2 model: its own speed, armour, fuel and seats, so a
         // Ural is not as fast as the CWA truck behind it and a Black Hawk seats its own
         // cargo. Steering, turrets and weapons stay with the CWA class for now.
-        const std::string sim = Lower(StringValue(*a1, "simulation"));
+        const std::string sim = SimKind(StringValue(*a1, "simulation"));
         if (sim == "car" || sim == "tank" || sim == "helicopter" || sim == "airplane" || sim == "ship" ||
             sim == "motorcycle")
         {

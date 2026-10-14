@@ -643,7 +643,7 @@ void DisplayMap::ReloadBriefingContent(RString activeSection)
     if (!_briefing)
         return;
 
-    if (Arma1Compat::Generation() == 2)
+    if (Arma1Compat::Generation() >= 2)
     {
         // Arma 2 briefs through the diary and simple tasks (Arma2BriefingHtml).
         const RString file = GetBriefingFile();

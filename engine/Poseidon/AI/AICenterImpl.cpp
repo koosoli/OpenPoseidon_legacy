@@ -1049,7 +1049,7 @@ static EntityAI* CreateVehicle(const ArcadeUnitInfo& info, ArcadeTemplate& t, Ta
         veh->SetVarName(info.name);
         GWorld->GetGameState()->VarSet(info.name, GameValueExt(veh.GetRef()), EditorNamesReadOnly());
     }
-    if (Poseidon::Arma1Compat::Generation() == 2)
+    if (Poseidon::Arma1Compat::Generation() >= 2)
     {
         std::vector<int> sync;
         for (int i = 0; i < info.synchronizations.Size(); i++)

@@ -159,7 +159,7 @@ void GameStateStringtableInfoFunctions::DisplayErrorMessage(const char* position
         return;
     }
 #endif
-    if (AutoTest && Poseidon::Arma1Compat::Generation() == 2)
+    if (AutoTest && Poseidon::Arma1Compat::Generation() >= 2)
     {
         // Arma 2 test runs (--arma2-test-seconds) collect every error of a mission in one
         // pass instead of stopping at the first: the content still has gaps, and a run

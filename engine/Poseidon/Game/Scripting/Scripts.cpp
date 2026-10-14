@@ -507,7 +507,7 @@ bool Script::SimulateBody()
 #endif
     // Arma 2 spawned code may reassign _this ("_this = _this select 0; waitUntil {...}");
     // keep what it assigned for the next step instead of restoring the spawn argument.
-    if (Poseidon::Arma1Compat::Generation() == 2)
+    if (Poseidon::Arma1Compat::Generation() >= 2)
         _argument = gstate->VarGet("_this");
     return _currentLine >= _lines.Size();
 }
@@ -1265,7 +1265,7 @@ Script* Script::CreateFromCode(RString name, RString code, GameValuePar argument
         const char* e = std::getenv("OP_A2_FIBERS");
         return !(e && *e == '0');
     }();
-    if (fibers && Arma1Compat::Generation() == 2)
+    if (fibers && Arma1Compat::Generation() >= 2)
         return CreateFiberScript(name, code, argument);
     Script* script = new Script();
     script->_argument = argument;
@@ -1464,7 +1464,7 @@ GameValue ScriptExecVM(const GameState* state, GameValuePar oper1, GameValuePar 
     std::string code;
     // Arma 2 scripts rely on #include / #define: run them through the preprocessor
     // preprocessFile uses. Arma 1 content keeps the plain read below.
-    if (Arma1Compat::Generation() == 2 && PreprocessScriptFile(name, code))
+    if (Arma1Compat::Generation() >= 2 && PreprocessScriptFile(name, code))
     {
         // preprocessed; '#line' markers and the like are dropped below
     }
@@ -1483,7 +1483,7 @@ GameValue ScriptExecVM(const GameState* state, GameValuePar oper1, GameValuePar 
         LOG_WARN(Script, "execVM: script '{}' not found", (const char*)name);
     }
     // Preprocessor directives are not expanded here; report them instead of guessing.
-    if (Arma1Compat::Generation() != 2 &&
+    if (Arma1Compat::Generation() < 2 &&
         (code.find("#include") != std::string::npos || code.find("#define") != std::string::npos))
         LOG_WARN(Script, "execVM '{}': preprocessor directives are not supported and were ignored",
                  (const char*)name);

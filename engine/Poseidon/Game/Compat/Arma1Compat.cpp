@@ -145,6 +145,53 @@ std::vector<fs::path> Arma2AddonFolders(const fs::path& r)
     return out;
 }
 
+// Arma 3: <root>\Addons plus every DLC folder beside it that holds an Addons folder of
+// its own (Expansion = Apex, Heli, Mark, Jets, Orange = Laws of War, Argo = Malden, Tacops,
+// Tank, Enoch + Contact, AoW, Kart, Curator = Zeus, ...). Steam installs them all into the
+// Arma 3 folder. Creator DLCs (GM, EF, RF, WS, ...) ship encrypted .ebo archives only the
+// original game opens: those are counted and logged, never read. Workshop and @mod folders
+// are not Arma 3's own content and are left alone.
+std::vector<fs::path> Arma3AddonFolders(const fs::path& r)
+{
+    std::vector<fs::path> out;
+    std::error_code ec;
+    if (fs::is_directory(r / "Addons", ec))
+        out.push_back(r / "Addons");
+    std::vector<fs::path> dlcs;
+    for (fs::directory_iterator it(r, ec), end; !ec && it != end; it.increment(ec))
+    {
+        if (!it->is_directory(ec))
+            continue;
+        const std::string name = Lower(it->path().filename().string());
+        if (name.empty() || name[0] == '@' || name[0] == '!' || name == "addons" || name == "dta" || name == "keys" ||
+            name == "missions" || name == "mpmissions" || name == "battleye" || name == "launcher" || name == "dll" ||
+            name == "logs" || name == "reshade-shaders")
+            continue;
+        for (const char* sub : {"Addons", "addons"})
+            if (fs::is_directory(it->path() / sub, ec))
+            {
+                dlcs.push_back(it->path() / sub);
+                break;
+            }
+    }
+    std::sort(dlcs.begin(), dlcs.end());
+    out.insert(out.end(), dlcs.begin(), dlcs.end());
+    return out;
+}
+
+// Encrypted archives (.ebo) in an Arma 3 folder: reported once, never opened.
+void ReportEncryptedArchives(const fs::path& folder)
+{
+    std::error_code ec;
+    int count = 0;
+    for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
+        if (it->is_regular_file(ec) && Lower(it->path().extension().string()) == ".ebo")
+            count++;
+    if (count > 0)
+        LOG_INFO(Mission, "Arma 3: {} holds {} encrypted .ebo archives (Creator DLC); they are not read",
+                 folder.string(), count);
+}
+
 // `missionRoot`: single/multiplayer mission archives declare only "M09ConvoyAttack"
 // as their prefix, while the mission loader needs the world suffix that is in the
 // FILE name ("m09convoyattack.sara"). They are mounted as <missionRoot>\<file stem>\.
@@ -453,7 +500,7 @@ int Generation()
 
 const char* Label()
 {
-    return Generation() == 2 ? "Arma 2" : "Arma 1";
+    return Generation() == 3 ? "Arma 3" : Generation() == 2 ? "Arma 2" : "Arma 1";
 }
 
 std::vector<std::string> DtaFolders()
@@ -462,6 +509,13 @@ std::vector<std::string> DtaFolders()
     if (!Active())
         return out;
     out.push_back((RootPath() / "Dta").string());
+    if (Generation() == 3)
+    {
+        // Arma 3's DLC folders keep no Dta of their own; Contact adds one.
+        std::error_code ec;
+        if (fs::is_directory(RootPath() / "Contact" / "Dta", ec))
+            out.push_back((RootPath() / "Contact" / "Dta").string());
+    }
     if (Generation() == 2)
     {
         for (const fs::path& r : Arma2Roots())
@@ -484,9 +538,22 @@ void MountArchives()
     const fs::path& root = RootPath();
     // Dta\bin.pbo / core.pbo are NOT mounted: their declared prefixes ("bin", "core")
     // would shadow CWA's own UI resources. Arma1Config reads bin.pbo privately.
-    GameState::s_singleQuoteStrings = Generation() == 2;
+    GameState::s_singleQuoteStrings = Generation() >= 2;
     GameState::s_emptyStatementKeepsValue = true;
-    if (Generation() == 2)
+    if (Generation() == 3)
+    {
+        // Arma 3: every scenario, showcase, campaign and challenge sits in
+        // Addons\missions_f*.pbo (and the DLC folders' own); the player's missions in
+        // Missions / MPMissions are archives of their own.
+        for (const fs::path& folder : Arma3AddonFolders(root))
+        {
+            ReportEncryptedArchives(folder);
+            MountFolder(folder, false);
+        }
+        MountFolder(root / "Missions", true, nullptr, "arma3\\missions");
+        MountFolder(root / "MPMissions", true, nullptr, "arma3\\mpmissions");
+    }
+    else if (Generation() == 2)
     {
         // Arma 2 keeps its campaigns and scenarios inside AddOns\missions*.pbo. Operation
         // Arrowhead and its DLCs add folders of their own; later mounts are searched first.
@@ -534,9 +601,9 @@ void RegisterWorldClasses()
         std::string description;
     };
     std::vector<World> worlds;
-    if (Generation() == 2)
+    if (Generation() >= 2)
     {
-        // Arma 2 / OA: every CfgWorlds class of the Arma 2 config whose world file is
+        // Arma 2 / OA / Arma 3: every CfgWorlds class of the Arma 2 config whose world file is
         // mounted (Chernarus, Utes, Takistan, Zargabad, Desert_E, Shapur_BAF, ...). A name
         // CWA already uses ("Intro") gets the private prefix A2_ and is chosen only for
         // missions from an Arma 2 archive (WorldClassForMission).
@@ -559,9 +626,9 @@ void RegisterWorldClasses()
             {
                 const ParamEntry* owned = existing->FindEntry("opArma1World");
                 if (!owned || static_cast<int>(*owned) != 1)
-                    name = "A2_" + name;
+                    name = (Generation() == 3 ? "A3_" : "A2_") + name;
             }
-            std::string description = std::string("Arma 2 / ") + (const char*)w.GetName();
+            std::string description = std::string(Label()) + " / " + (const char*)w.GetName();
             worlds.push_back({name, wrp, description});
         }
     }
@@ -654,6 +721,13 @@ RString ResolveVehicleClass(const RString& className)
     // Arma 2 animals (sheep, cows, goats, dogs) derive from Man; carried by a CWA class
     // they became walking civilians in the fields. Until animal models and moves are in,
     // they are left out.
+    if (Arma3IsAnimal(className))
+    {
+        static std::set<std::string> reported;
+        if (reported.insert(Lower(className.Data())).second)
+            LOG_INFO(Mission, "{}: animal '{}' left out (no animal models yet)", Label(), className.Data());
+        return RString();
+    }
     if (Generation() == 2)
     {
         const ParamEntry* cls = FindConfigClass("CfgVehicles", className.Data());
@@ -670,6 +744,19 @@ RString ResolveVehicleClass(const RString& className)
     }
     RString cwa = ResolveFrom("CfgVehicles", className, VehicleAliases(), false);
     const ParamEntry* vehicles = Pars.FindEntry("CfgVehicles");
+    if (Generation() == 3 && vehicles && !vehicles->FindEntry(cwa))
+    {
+        // Arma 3: by the class's kind in the Arma 3 config (tank, APC, truck, attack
+        // helicopter, ...); men and things go on to the generic fallback below.
+        if (const RString carrier = Arma3VehicleCarrier(className); carrier.GetLength() > 0)
+        {
+            static std::set<std::string> reported;
+            if (reported.insert(Lower(className.Data())).second)
+                LOG_INFO(Mission, "{}: CfgVehicles '{}' is carried by CWA '{}' (by its Arma 3 kind)", Label(),
+                         className.Data(), carrier.Data());
+            cwa = carrier;
+        }
+    }
     if (Generation() == 2 && vehicles && !vehicles->FindEntry(cwa))
     {
         // Arma 2 vehicle names carry their type ("BRDM2_INS", "UralOpen_CDF",
@@ -707,7 +794,7 @@ RString ResolveVehicleClass(const RString& className)
         std::string sim;
         if (const ParamEntry* a2 = FindConfigClass("CfgVehicles", className.Data()))
             if (const ParamEntry* e = a2->FindEntry("simulation"); e && !e->IsClass() && !e->IsArray())
-                sim = Lower((const char*)(RStringB)*e);
+                sim = SimKind((const char*)(RStringB)*e);
         const bool vehicle = sim == "car" || sim == "tank" || sim == "helicopter" || sim == "airplane" ||
                              sim == "ship" || sim == "motorcycle" || sim == "bicycle" || sim == "parachute";
         // An armed Arma 2 car (HMMWV M2/Mk19/TOW, UAZ DShKM/AGS, Land Rover M2, pickups with
@@ -990,7 +1077,8 @@ RString WorldClassForMission(const RString& world, const char* missionDirectory)
 {
     if (!IsArma1MissionDirectory(missionDirectory))
         return world;
-    const std::string alias = (Generation() == 2 ? "A2_" : "A1_") + std::string(world.Data());
+    const std::string alias =
+        (Generation() == 3 ? "A3_" : Generation() == 2 ? "A2_" : "A1_") + std::string(world.Data());
     const ParamEntry* worlds = Pars.FindEntry("CfgWorlds");
     const ParamEntry* entry = worlds ? worlds->FindEntry(alias.c_str()) : nullptr;
     return entry ? RString(alias.c_str()) : world;
@@ -1010,7 +1098,7 @@ std::string CampaignBaseForMission(const std::string& missionFile)
     // Arma 2: <archive prefix>/campaign/missions/<mission>/mission.sqm, with the campaign's
     // description.ext next to that missions folder.
     const size_t missions = lower.rfind("/missions/");
-    if (Generation() == 2 && missions != std::string::npos && missions > 0)
+    if (Generation() >= 2 && missions != std::string::npos && missions > 0)
     {
         const std::string base = path.substr(0, missions + 1);
         if (QIFStreamB::FileExist((base + "description.ext").c_str()))

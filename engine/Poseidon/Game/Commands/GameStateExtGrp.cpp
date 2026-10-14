@@ -1443,7 +1443,7 @@ GameValue VehAddUserAction(const GameState* state, GameValuePar oper1, GameValue
 
     const GameArrayType& array = oper2;
     // Arma 2: [title, script, arguments, priority, showWindow, hideOnUse, shortcut, condition]
-    const bool arma2 = Poseidon::Arma1Compat::Generation() == 2;
+    const bool arma2 = Poseidon::Arma1Compat::Generation() >= 2;
     if (array.Size() != 2 && !(arma2 && array.Size() > 2))
     {
         state->SetError(EvalDim, array.Size(), 2);

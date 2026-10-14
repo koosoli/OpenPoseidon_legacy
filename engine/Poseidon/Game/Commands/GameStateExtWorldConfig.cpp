@@ -1206,7 +1206,7 @@ bool PreprocessScriptFile(const char* name, std::string& out)
 
 GameValue StringPreprocess(const GameState* state, GameValuePar oper1)
 {
-    if (Poseidon::Arma1Compat::Generation() == 2)
+    if (Poseidon::Arma1Compat::Generation() >= 2)
     {
         // Arma 2 names its library scripts by absolute bank path ("\\ca\\modules\\...").
         std::string text;
