@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cmath>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AI.hpp>
@@ -125,9 +127,20 @@ void AILocker::UnlockItem(int x, int z, bool soldier)
     fld->Lock(x1, z1, soldier, false);
 }
 
+// Cells a lock of this radius covers. A non-finite or absurd radius (a vehicle whose model
+// reports a huge bounding sphere: C6B_DogsOfWar sat 60 s in LockPosition) would lock
+// millions of cells; no real vehicle covers more than a few dozen. Lock and unlock both
+// come here, so they always cover the same cells.
+static int LockCellRange(float radius)
+{
+    if (!std::isfinite(radius) || radius <= 0.0f)
+        return 0;
+    return std::min(toIntCeil(std::min(radius, 200.0f) * InvOperItemGrid), 64);
+}
+
 void AILocker::LockPosition(Vector3Val pos, float radius, bool soldier, float size)
 {
-    int LockRange = toIntCeil(radius * InvOperItemGrid);
+    int LockRange = LockCellRange(radius);
     if (LockRange < 0)
     {
         LockRange = 0;
@@ -220,7 +233,7 @@ void AILocker::LockPosition(Vector3Val pos, float radius, bool soldier, float si
 
 void AILocker::UnlockPosition(Vector3Val pos, float radius, bool soldier)
 {
-    int LockRange = toIntCeil(radius * InvOperItemGrid);
+    int LockRange = LockCellRange(radius);
     if (LockRange < 0)
     {
         LockRange = 0;
@@ -276,7 +289,7 @@ void AILocker::UnlockPosition(Vector3Val pos, float radius, bool soldier)
 
 void AILocker::LockPositionMan(Vector3Val pos, float radius)
 {
-    int LockRange = toIntCeil(radius * InvOperItemGrid);
+    int LockRange = LockCellRange(radius);
     if (LockRange < 0)
     {
         LockRange = 0;
@@ -300,7 +313,7 @@ void AILocker::LockPositionMan(Vector3Val pos, float radius)
 
 void AILocker::UnlockPositionMan(Vector3Val pos, float radius)
 {
-    int LockRange = toIntCeil(radius * InvOperItemGrid);
+    int LockRange = LockCellRange(radius);
     if (LockRange < 0)
     {
         LockRange = 0;
