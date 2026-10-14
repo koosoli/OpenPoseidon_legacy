@@ -188,8 +188,29 @@ Target* InGameUI::CheckCursorTarget(Vector3& itPos, Vector3Par cursorDir, const 
 
     float maxVisDist = floatMax(vehicle->GetType()->GetIRScanRange(), TACTICAL_VISIBILITY);
 
+    // PERF (2026-10-14): end the object query where the ray first meets the ground or sea.
+    // Below, a hit only becomes a target when no ground lies between the camera and 1.1x its
+    // distance, so nothing past the first ground hit can ever be chosen -- and a cursor ray out
+    // to tacticalZ (kilometres on a native world) made this query the heaviest thing the HUD
+    // did. Every hit nearer than the ground is still found, so the nearest one, and the
+    // decision about it, are unchanged. The ground distance comes from the hit POINT:
+    // IntersectWithGround's return value is a fraction of its last step, not a distance.
+    float queryDist = maxVisDist;
+    {
+        const Vector3 dirN = cursorDir.Normalized();
+        Vector3 groundPos;
+        const float reach = maxVisDist * cursorDir.Size();
+        if (GLandscape->IntersectWithGroundOrSea(&groundPos, camera.Position(), dirN, 0, reach) <= reach)
+        {
+            const float groundDist = groundPos.Distance(camera.Position());
+            const float dirSize = cursorDir.Size();
+            if (dirSize > 1e-6f && std::isfinite(groundDist))
+                queryDist = std::min(maxVisDist, (groundDist * 1.01f + 1.0f) / dirSize);
+        }
+    }
+
     CollisionBuffer retVal;
-    GLandscape->ObjectCollision(retVal, vehicle, nullptr, camera.Position(), camera.Position() + cursorDir * maxVisDist,
+    GLandscape->ObjectCollision(retVal, vehicle, nullptr, camera.Position(), camera.Position() + cursorDir * queryDist,
                                 0, ObjIntersectView);
     // select first intersected object
     int minI = -1;
