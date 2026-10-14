@@ -719,6 +719,8 @@ GameValue ObjGetAllMagazines(const GameState* state, GameValuePar oper1)
         return value;
     }
 
+    // Arma 1/2 units: the Arma names of their magazines (identity otherwise).
+    const RString unitClass = ai->GetType() ? RString(ai->GetType()->GetName()) : RString();
     for (int i = 0; i < ai->NMagazines(); i++)
     {
         const Magazine* magazine = ai->GetMagazine(i);
@@ -729,7 +731,7 @@ GameValue ObjGetAllMagazines(const GameState* state, GameValuePar oper1)
         const MagazineType* type = magazine->_type;
         if (type)
         {
-            array.Add(type->GetName());
+            array.Add(Poseidon::Arma1Compat::ScriptMagazineName(unitClass, type->GetName()));
         }
     }
 

@@ -778,6 +778,47 @@ RString ScriptClassName(const RString& engineName)
     return RString(engineName.Data() + 4);
 }
 
+RString ScriptMagazineName(const RString& unitClass, const RString& cwaMagazine)
+{
+    if (!Active() || cwaMagazine.GetLength() == 0 || _strnicmp(unitClass.Data(), "A1x_", 4) != 0)
+        return cwaMagazine;
+    // Per generated unit class: CWA magazine (lower case) -> the first Arma magazine of
+    // that class's own magazines[], then of its weapons' magazines[], that resolves to it.
+    static std::map<std::string, std::map<std::string, std::string>> cache;
+    auto [it, inserted] = cache.try_emplace(Lower(unitClass.Data()));
+    if (inserted)
+    {
+        std::map<std::string, std::string>& names = it->second;
+        const auto addList = [&](const ParamEntry* list)
+        {
+            if (!list || !list->IsArray())
+                return;
+            for (int i = 0; i < list->GetSize(); i++)
+            {
+                const RString name = (RStringB)(*list)[i];
+                if (name.GetLength() == 0 || _stricmp(name.Data(), "this") == 0)
+                    continue;
+                const RString cwa = ResolveFrom("CfgWeapons", name, MagazineAliases(), false);
+                if (cwa.GetLength() > 0)
+                    names.try_emplace(Lower(cwa.Data()), std::string(name.Data()));
+            }
+        };
+        if (const ParamEntry* cls = FindConfigClass("CfgVehicles", unitClass.Data() + 4); cls && cls->IsClass())
+        {
+            addList(cls->FindEntry("magazines"));
+            if (const ParamEntry* weapons = cls->FindEntry("weapons"); weapons && weapons->IsArray())
+                for (int i = 0; i < weapons->GetSize(); i++)
+                {
+                    const RString weapon = (RStringB)(*weapons)[i];
+                    if (const ParamEntry* w = FindConfigClass("CfgWeapons", weapon.Data()); w && w->IsClass())
+                        addList(w->FindEntry("magazines"));
+                }
+        }
+    }
+    const auto found = it->second.find(Lower(cwaMagazine.Data()));
+    return found != it->second.end() ? RString(found->second.c_str()) : cwaMagazine;
+}
+
 bool ScriptWeaponMatches(const char* engineName, const RString& scriptName)
 {
     if (!engineName || scriptName.GetLength() == 0)
