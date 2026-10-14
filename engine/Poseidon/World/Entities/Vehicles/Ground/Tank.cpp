@@ -4,6 +4,9 @@
 #include <Poseidon/World/Entities/Vehicles/Ground/Tank.hpp>
 #include <Poseidon/World/Entities/Vehicles/Ground/TankNetworkStabilization.hpp>
 #include <Poseidon/World/Entities/Vehicles/Ground/TrackedWaterResponse.hpp>
+#include <Poseidon/World/Weather/MudContact.hpp>
+#include <Poseidon/World/Weather/MudVehiclePrototype.hpp>
+#include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/AI/AI.hpp>
 
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
@@ -1537,6 +1540,39 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
 
     // A resting hull still keeps new snowfall out of its occupied volume.
     _track.UpdateTrackedSnow(*this, isStatic || !_landContact || DirectionUp().Y() < 0.3f, deltaT);
+
+    // (MUD-RUNNER, 2026-10-14) tracks churn soft ground too: a trough under each track, by weight
+    {
+        const bool singlePlayer = GWorld && GWorld->GetMode() != GModeNetware;
+        const auto profile = SelectMudWheelProfileByMass(Type()->GetName(), GetMass(), 2, singlePlayer);
+        // POSEIDON_MUD_TRACKS=0 keeps tanks out of the mud field (A/B against the legacy track decals)
+        static const bool tracksDig = [] {
+            const char* value = std::getenv("POSEIDON_MUD_TRACKS");
+            return !value || std::strcmp(value, "0") != 0;
+        }();
+        const bool dig = tracksDig && IsLocal() && profile.enabled && GMud().ContactActive() && _landContact &&
+                         !_waterContact && DirectionUp().Y() >= 0.3f && GLOB_LAND;
+        const auto trackPoint = [&](Vector3Par model) {
+            Vector3 p = PositionModelToWorld(model);
+            p[1] = GLOB_LAND->SurfaceY(p.X(), p.Z());
+            return p;
+        };
+        const Vector3 l = trackPoint(_track.LeftPos()), r = trackPoint(_track.RightPos());
+        static const bool trace = [] {
+            const char* value = std::getenv("POSEIDON_MUD_TRACE");
+            return value && value[0] == '1';
+        }();
+        if (trace && std::fmod(Glob.time.toFloat(), 1.0f) < std::max(deltaT, 0.02f))
+            LOG_INFO(Physics, "MUD_TANK {} dig={} enabled={} active={} land={} water={} up={:.2f} l=({:.1f},{:.1f}) r=({:.1f},{:.1f})",
+                     static_cast<const char*>(Type()->GetName()), dig, profile.enabled, GMud().ContactActive(),
+                     _landContact, _waterContact, DirectionUp().Y(), l.X(), l.Z(), r.X(), r.Z());
+        _mudTrackL.Update(l.X(), l.Y(), l.Z(), dig, [&](float x, float y, float z) {
+            return StampMudTrackContact(*GLOB_LAND, *this, Vector3(x, y, z), profile);
+        });
+        _mudTrackR.Update(r.X(), r.Y(), r.Z(), dig, [&](float x, float y, float z) {
+            return StampMudTrackContact(*GLOB_LAND, *this, Vector3(x, y, z), profile);
+        });
+    }
     base::Simulate(deltaT, prec);
 }
 

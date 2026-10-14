@@ -204,10 +204,17 @@ fn ground_weather_params(wetness: f32, rain: f32, sea_level: f32, time: f32) -> 
     [bounded(wetness), bounded(rain), sea_level, time]
 }
 
+// (MUD-RUNNER) MudField::MaxRidge: the churned shoulder beside a rut is a positive offset. Both
+// limits here lagged the MUD-RUNNER store, so every mud view after it was refused and the terrain
+// never showed a rut (WGR_MUD_UPLOAD_TRACE=1 prints accepted=false with the header).
+const MUD_MAX_RIDGE: f32 = 0.09;
+// MudField::MaxDepth (0.40 since MUD-RUNNER; this said 0.35 and refused every upload after it)
+const MUD_MAX_DEPTH: f32 = 0.40;
+
 fn valid_mud_view(data: &[f32]) -> bool {
     data.len() == 4 + 512 * 512 && data.iter().all(|v| v.is_finite())
-        && data[2] == 0.125 && data[3] >= 0.0 && data[3] <= 0.35
-        && data[4..].iter().all(|v| *v <= 0.0 && *v >= -data[3])
+        && data[2] == 0.125 && data[3] >= 0.0 && data[3] <= MUD_MAX_DEPTH
+        && data[4..].iter().all(|v| *v <= MUD_MAX_RIDGE && *v >= -data[3])
 }
 
 fn valid_sand_view(data: &[f32]) -> bool {
@@ -252,12 +259,13 @@ fn mud_upload_rejects_nonfinite_positive_and_excess_depth_without_touching_snow(
     let mut data = vec![0.0; 4 + 512 * 512];
     data[2] = 0.125; data[3] = 0.06; data[4] = -0.03;
     assert!(valid_mud_view(&data));
-    data[4] = 0.01; assert!(!valid_mud_view(&data));
+    data[4] = 0.01; assert!(valid_mud_view(&data));
+    data[4] = 0.091; assert!(!valid_mud_view(&data));
     data[4] = -0.061; assert!(!valid_mud_view(&data));
     data[4] = f32::NAN; assert!(!valid_mud_view(&data));
     data[4] = 0.0; data[2] = 0.25; assert!(!valid_mud_view(&data));
     data[2] = 0.125; data[3] = 0.35; data[4] = -0.24; assert!(valid_mud_view(&data));
-    data[3] = 0.351; assert!(!valid_mud_view(&data));
+    data[3] = 0.401; assert!(!valid_mud_view(&data));
     assert!(!valid_mud_view(&data[..data.len()-1]));
 }
 
@@ -1204,8 +1212,18 @@ impl Terrain {
     }
 
     pub fn set_mud(&mut self, queue: &wgpu::Queue, data: &[f32]) {
-        if valid_mud_view(data) {
+        let accepted = valid_mud_view(data);
+        if accepted {
             queue.write_buffer(&self.snow_buffer, (4 + 512 * 512) * 4, bytemuck::cast_slice(data));
+        }
+        static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *TRACE.get_or_init(|| std::env::var("WGR_MUD_UPLOAD_TRACE").is_ok_and(|v| v == "1")) {
+            let body = data.get(4..).unwrap_or(&[]);
+            let min = body.iter().copied().fold(0.0f32, f32::min);
+            let max = body.iter().copied().fold(0.0f32, f32::max);
+            let nonzero = body.iter().filter(|v| **v != 0.0).count();
+            eprintln!("MUD_UPLOAD accepted={accepted} count={} header={:?} nonzero={nonzero} min={min:.4} max={max:.4}",
+                data.len(), data.get(..4).unwrap_or(&[]));
         }
     }
 

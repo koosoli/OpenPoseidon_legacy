@@ -87,6 +87,22 @@ bool StampMudWheelContact(const Landscape& land, Object& actor, Vector3Par point
     return true;
 }
 
+bool StampMudTrackContact(const Landscape& land, Object& actor, Vector3Par point, MudWheelProfile profile)
+{
+    if (!profile.enabled || !AdmitMudWheelContact(land, actor, point)) return false;
+    auto& mud = GMud();
+    const float depth = std::min(profile.maxDepth, mud.ContactDepth() * profile.depthScale);
+    const bool changed = mud.Stamp(point.X(), point.Z(), 0.45f, depth, 0.9f);
+    static const bool trace = [] {
+        const char* value = std::getenv("POSEIDON_MUD_TRACE");
+        return value && value[0] == '1';
+    }();
+    if (trace && changed)
+        LOG_INFO(Physics, "MUD_TRACK x={:.3f} z={:.3f} capacity={:.4f} stored={:.4f}", point.X(), point.Z(), depth,
+                 mud.HeightOffsetAt(point.X(), point.Z()));
+    return true;
+}
+
 bool StampMudFootstep(const Landscape& land, Object& actor,
                       Vector3Par foot, Vector3Par direction)
 {

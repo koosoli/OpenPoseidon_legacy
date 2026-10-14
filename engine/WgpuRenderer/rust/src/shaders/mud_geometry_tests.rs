@@ -414,6 +414,8 @@ fn mud_geometry_gpu_samples_signed_depression_without_corrupting_snow() {
             let expected_offset = match case {
                 1 | 6 => -0.0325,
                 4 => -0.06,
+                // (MUD-RUNNER) a positive offset is a ridge, clamped to MudField::MaxRidge
+                5 => 0.09,
                 8 => -0.1725,
                 _ => 0.0,
             };

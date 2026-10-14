@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/World/Entities/Vehicles/TankOrCar.hpp>
+#include <Poseidon/World/Weather/MudWheelTrail.hpp>
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
 
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
@@ -96,6 +97,8 @@ class Tank: public TankOrCar
 	float _phaseL,_phaseR; // texture animation
 	
 	TrackOptimized _track;
+	// (MUD-RUNNER) ruts behind each track, sampled by distance like a wheel's
+	MudWheelTrail _mudTrackL, _mudTrackR;
 
 	Turret _mainTurret;
 	Turret _comTurret;
