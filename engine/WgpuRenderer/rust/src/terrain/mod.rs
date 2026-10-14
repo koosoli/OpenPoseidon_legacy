@@ -2079,6 +2079,16 @@ fn skyvis_texels_empty() -> [u16; 4] {
 
 // R = sky-view factor, G = canopy top, B = canopy cover, A = 1; see Terrain::upload_skyvis.
 fn compose_skyvis_texels(sv_w: u32, sv_h: u32, sv: &[f32], canopy: Option<&(u32, Vec<f32>, Vec<f32>)>) -> (u32, u32, Vec<u16>) {
+    compose_skyvis_texels_on(sv_w, sv_h, sv, canopy, skyvis_compose_threads())
+}
+
+fn compose_skyvis_texels_on(
+    sv_w: u32,
+    sv_h: u32,
+    sv: &[f32],
+    canopy: Option<&(u32, Vec<f32>, Vec<f32>)>,
+    threads: usize,
+) -> (u32, u32, Vec<u16>) {
     let (w, h) = match canopy {
         Some((n, _, _)) => (*n, *n),
         None => (sv_w, sv_h),
@@ -2086,7 +2096,8 @@ fn compose_skyvis_texels(sv_w: u32, sv_h: u32, sv: &[f32], canopy: Option<&(u32,
     let one = f32_to_f16_bits(1.0);
     let no_top = f32_to_f16_bits(-60000.0);
     let mut out = vec![0u16; (w as usize) * (h as usize) * 4];
-    for z in 0..h {
+    let row_len = (w as usize) * 4;
+    let compose_row = |z: u32, row: &mut [u16]| {
         for x in 0..w {
             // the sky-view value at this texel's centre, bilinear over its own grid
             let vis = if w == sv_w && h == sv_h {
@@ -2105,23 +2116,82 @@ fn compose_skyvis_texels(sv_w: u32, sv_h: u32, sv: &[f32], canopy: Option<&(u32,
                 let b = at(x0, z1) + (at(x1, z1) - at(x0, z1)) * tx;
                 a + (b - a) * tz
             };
-            let o = ((z * w + x) as usize) * 4;
-            out[o] = f32_to_f16_bits(vis.clamp(0.0, 1.0));
+            let o = (x as usize) * 4;
+            row[o] = f32_to_f16_bits(vis.clamp(0.0, 1.0));
             match canopy {
                 Some((n, top, cover)) => {
                     let c = (z * n + x) as usize;
-                    out[o + 1] = if cover[c] > 0.0 { f32_to_f16_bits(top[c]) } else { no_top };
-                    out[o + 2] = f32_to_f16_bits(cover[c].clamp(0.0, 1.0));
+                    row[o + 1] = if cover[c] > 0.0 { f32_to_f16_bits(top[c]) } else { no_top };
+                    row[o + 2] = f32_to_f16_bits(cover[c].clamp(0.0, 1.0));
                 }
                 None => {
-                    out[o + 1] = no_top;
-                    out[o + 2] = 0;
+                    row[o + 1] = no_top;
+                    row[o + 2] = 0;
                 }
             }
-            out[o + 3] = one;
+            row[o + 3] = one;
+        }
+    };
+    // PERF (2026-10-14): every canopy update recomposes the whole map on the render thread --
+    // 2048^2 texels on a native world, ~160 ms a time while objects stream in. Rows are
+    // independent, so a large map is split across a few scoped threads; each texel gets the
+    // same value either way. WGR_SKYVIS_COMPOSE_THREADS=1 composes on the calling thread.
+    if threads > 1 && h >= 256 && row_len > 0 {
+        let rows_per_chunk = (h as usize).div_ceil(threads);
+        std::thread::scope(|scope| {
+            for (chunk_index, chunk) in out.chunks_mut(rows_per_chunk * row_len).enumerate() {
+                let compose_row = &compose_row;
+                let first_row = (chunk_index * rows_per_chunk) as u32;
+                scope.spawn(move || {
+                    for (i, row) in chunk.chunks_mut(row_len).enumerate() {
+                        compose_row(first_row + i as u32, row);
+                    }
+                });
+            }
+        });
+    } else {
+        for (z, row) in out.chunks_mut(row_len.max(1)).enumerate() {
+            compose_row(z as u32, row);
         }
     }
     (w, h, out)
+}
+
+#[cfg(test)]
+mod skyvis_compose_tests {
+    use super::compose_skyvis_texels_on;
+
+    // The threaded composition is the serial one, texel for texel, on a grid that takes the
+    // bilinear path (sky-view and canopy grids of different sizes) and has empty cells.
+    #[test]
+    fn threaded_compose_matches_serial() {
+        let (sv_w, sv_h) = (173u32, 211u32);
+        let sv: Vec<f32> = (0..sv_w * sv_h).map(|i| (i.wrapping_mul(2654435761) % 1000) as f32 / 999.0).collect();
+        let n = 300u32;
+        let top: Vec<f32> = (0..n * n).map(|i| (i.wrapping_mul(40503) % 5000) as f32 * 0.1 - 50.0).collect();
+        let cover: Vec<f32> = (0..n * n).map(|i| ((i.wrapping_mul(7919) % 13) as f32 - 4.0) / 8.0).collect();
+        let canopy = (n, top, cover);
+        let serial = compose_skyvis_texels_on(sv_w, sv_h, &sv, Some(&canopy), 1);
+        for threads in [2usize, 3, 8] {
+            let threaded = compose_skyvis_texels_on(sv_w, sv_h, &sv, Some(&canopy), threads);
+            assert_eq!(serial, threaded, "threads={threads}");
+        }
+        let plain_serial = compose_skyvis_texels_on(sv_w, sv_h, &sv, None, 1);
+        let plain_threaded = compose_skyvis_texels_on(sv_w, sv_h, &sv, None, 8);
+        assert_eq!(plain_serial, plain_threaded);
+    }
+}
+
+// Threads for compose_skyvis_texels: up to 8, WGR_SKYVIS_COMPOSE_THREADS to pin (1 = serial).
+fn skyvis_compose_threads() -> usize {
+    static THREADS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *THREADS.get_or_init(|| {
+        let pinned = std::env::var("WGR_SKYVIS_COMPOSE_THREADS").ok();
+        if let Some(n) = pinned.and_then(|v| v.parse::<usize>().ok()) {
+            return n.max(1);
+        }
+        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(8)
+    })
 }
 
 // Parse a float env var, falling back to `default` when unset or unparseable.
