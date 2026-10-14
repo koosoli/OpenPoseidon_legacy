@@ -1408,6 +1408,31 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
         {
             _turretFrontUntil = Glob.time + 30;
         }
+        // (MUD-RUNNER, 2026-10-14) deep soft ground drags at the tracks as it does at wheels (Car.cpp),
+        // at half the rate: a track spreads the hull's weight over a long footprint, so it sinks and
+        // bogs less than a wheel of the same load. POSEIDON_MUD_TRACKS=0 turns it off with the ruts.
+        {
+            static const bool tracksMud = [] {
+                const char* value = std::getenv("POSEIDON_MUD_TRACKS");
+                return !value || std::strcmp(value, "0") != 0;
+            }();
+            const bool singlePlayer = GWorld && GWorld->GetMode() != GModeNetware;
+            const auto profile = SelectMudWheelProfileByMass(Type()->GetName(), GetMass(), 2, singlePlayer);
+            if (tracksMud && profile.enabled && singlePlayer && IsLocal() && _landContact && !_waterContact &&
+                GMud().ContactActive() && DirectionUp().Y() >= 0.3f && GLOB_LAND)
+            {
+                int admitted = 0;
+                for (Vector3Par model : {_track.LeftPos(), _track.RightPos()})
+                {
+                    Vector3 p = PositionModelToWorld(model);
+                    p[1] = GLOB_LAND->SurfaceY(p.X(), p.Z());
+                    if (AdmitMudWheelContact(*GLOB_LAND, *this, p)) ++admitted;
+                }
+                const float deceleration = 0.5f * MudRollingDeceleration(ModelSpeed()[2], GMud().ContactDepth(),
+                    GMud().Wetness(), deltaT, admitted, 2);
+                friction += DirectionModelToWorld(Vector3(0, 0, deceleration * GetMass()));
+            }
+        }
         // apply all forces
         // handle special case: brake is on, speed is very low and total forces are low
         Vector3 frictionedForce = AddFriction(force, -friction);
