@@ -75,18 +75,33 @@ RString EngineMuzzleName(const EntityAI* ai, const RString& scriptName)
             return muzzle->GetName();
     }
     // Arma names the Throw/Put muzzles after their magazine plus "Muzzle" (HandGrenadeMuzzle,
-    // SmokeShellRedMuzzle, PipeBombMuzzle); CWA after the magazine alone (HandGrenade).
+    // SmokeShellRedMuzzle, PipeBombMuzzle). The CWA muzzle is the one named like the
+    // magazine, else the one that takes the CWA magazine the Arma one resolves to.
     const int n = scriptName.GetLength();
     if (n > 6 && _stricmp(scriptName.Data() + n - 6, "Muzzle") == 0)
     {
         const RString base(scriptName.Data(), n - 6);
         const RString resolved = Poseidon::Arma1Compat::ResolveMagazineClass(base);
+        const MagazineType* type = nullptr;
+        Ref<MagazineType> typeRef;
+        if ((Pars >> "CfgWeapons").FindEntry(resolved))
+        {
+            typeRef = MagazineTypes.New(resolved);
+            type = typeRef;
+        }
         for (int i = 0; i < ai->NMagazineSlots(); i++)
         {
             const MuzzleType* muzzle = ai->GetMagazineSlot(i)._muzzle;
             if (muzzle && (_stricmp(muzzle->GetName(), base) == 0 || _stricmp(muzzle->GetName(), resolved) == 0))
                 return muzzle->GetName();
         }
+        if (type)
+            for (int i = 0; i < ai->NMagazineSlots(); i++)
+            {
+                const MuzzleType* muzzle = ai->GetMagazineSlot(i)._muzzle;
+                if (muzzle && muzzle->CanUse(type))
+                    return muzzle->GetName();
+            }
     }
     return scriptName;
 }
