@@ -27,7 +27,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cstring>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
@@ -1008,10 +1008,13 @@ void LoadConfig()
     int baseConfigs = 0;
     for (const std::string& dtaFolder : DtaFolders())
     {
-        // Arma 3 names its global stringtable archive languagecore_f.
+        // Arma 3 keeps only bin.pbo (and core.pbo) in Dta; its stringtables are in Addons.
         for (const char* archive : {"bin", "languagecore", "languagecore_f"})
         {
             const std::string binPath = dtaFolder + "\\" + archive;
+            std::error_code missing;
+            if (std::string(archive) != "bin" && !std::filesystem::is_regular_file(binPath + ".pbo", missing))
+                continue; // an absent archive is no error (opening it logs a critical one)
             QFBank dta;
             if (!dta.open(RString(binPath.c_str())))
             {
