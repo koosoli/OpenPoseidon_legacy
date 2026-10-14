@@ -1,0 +1,2 @@
+showcases\Showcase_Infantry.Stratis
+showcases\Showcase_Vehicles.Stratis

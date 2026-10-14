@@ -29,3 +29,20 @@ folder (nothing copied into the CWA install). They share one compat layer
 - Clean room: only the documented data formats are read (PBO, raP, ODOL/OPRW, PAA, RTM,
   SQF/SQS text). No Bohemia executable is disassembled or decompiled, and no Bohemia data
   is committed.
+
+## State of `MrDudeX-arma3` (2026-10-14 evening)
+
+- Rebased onto `MrDudeX-arma1` `99b4cde`, plus the seven `MrDudeX-arma2` commits `d721a0e..58afdbb`
+  that `MrDudeX-arma1` has not merged yet, picked unchanged (a later rebase drops them again).
+- **For the Arma 2 session:** `131eb6a` gives Arma 2 men `reversed=0` under
+  `Generation() == 2`, while `ConvertBMTRToRTM` converts every hierarchical move. Arma 3
+  men need the same, so this branch writes the check as `Generation() >= 2` (`68c8f0e`).
+  If you touch that block again, please keep `>= 2`.
+- **Game folder.** The Arma 3 test runs use their own binaries in
+  `<CWA>\_OpenPoseidon-Arma3\bin` with `Remastered` as working directory
+  (`scripts/arma3-pc/go.ps1`), so they never replace the exe/dll the Arma 1 / Arma 2 sessions
+  deployed. `Remastered` itself is only written when this branch contains the installed commit
+  (rule 0), with `DEPLOYED-FROM.txt` naming `MrDudeX-arma3`.
+- **Delivery of CI builds to the PC.** The cloud session cannot download Actions artifacts
+  (the artifact storage host is not reachable from it); a build reaches the PC as the zip
+  the owner downloads, which `go.ps1` (`DEPLOY=1`) unpacks from `Downloads` or `incoming`.

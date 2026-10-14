@@ -1,0 +1,9 @@
+DEPLOY=1
+LIST=missions_first.txt
+OUT=tests
+SECONDS=40
+WINDOW=1
+SHOTS=1
+EXE=bin
+RENDER=
+EXTRA=
