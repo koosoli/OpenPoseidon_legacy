@@ -1624,8 +1624,9 @@ const char* CwaWeaponForArma3(const std::string& lowerName, const ParamEntry* we
                                     has("vorona") || has("pg7"));
     if (rocket || lowerName.rfind("launch_", 0) == 0 || A2Derives(weapon, "LauncherCore"))
     {
+        // CWA's AA launchers are AALauncher (Stinger) and 9K32Launcher (Strela).
         if ((has("titan") && !has("short") && !has("_at")) || has("_aa"))
-            return has("o_") ? "Strela" : "Stinger";
+            return has("o_") ? "9K32Launcher" : "AALauncher";
         if (has("rpg") || has("vorona") || has("pg7"))
             return "RPGLauncher";
         if (has("nlaw") || has("m72") || has("law"))
