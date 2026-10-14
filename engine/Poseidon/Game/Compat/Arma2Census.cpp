@@ -108,8 +108,17 @@ void LogAssetCensus()
     for (const auto& [line, count] : kinds)
         LOG_INFO(Mission, "{}: census {}x {}", Label(), count, line);
 
-    // Where the player stands and what the map has around him: a unit on a ship or a
-    // roof stands on a map object, and a missing one shows as a soldier on the water.
+    LogPlayerSurroundings();
+}
+
+// Where the player stands and what the map has around him: a unit on a ship or a
+// roof stands on a map object, and a missing one shows as a soldier on the water.
+// Logged when the mission starts and again when the first screenshot is taken, since
+// streamed map objects arrive over the first frames.
+void LogPlayerSurroundings()
+{
+    if (!Active() || !GWorld)
+        return;
     Object* on = GWorld->CameraOn();
     if (on && GLandscape)
     {
@@ -117,7 +126,8 @@ void LogAssetCensus()
         const float surface = GLandscape->SurfaceY(p.X(), p.Z());
         LOG_INFO(Mission, "{}: census player {} at {:.1f},{:.1f},{:.1f} (surface {:.1f}, above it {:.1f})", Label(),
                  TypeName(dyn_cast<Entity>(on)), p.X(), p.Y(), p.Z(), surface, p.Y() - surface);
-        std::map<std::string, std::pair<int, float>> near; // model -> count, nearest distance
+        struct Near { int count = 0; float distance = 0; float y = 0; float top = 0; };
+        std::map<std::string, Near> near; // model -> count, nearest one
         const int cx = static_cast<int>(p.X() * InvLandGrid), cz = static_cast<int>(p.Z() * InvLandGrid);
         const int reach = static_cast<int>(150.0f * InvLandGrid) + 1;
         for (int z = cz - reach; z <= cz + reach; z++)
@@ -135,9 +145,13 @@ void LogAssetCensus()
                     if (d > 150.0f)
                         continue;
                     auto& entry = near[std::string((const char*)o->GetShape()->Name())];
-                    if (entry.first == 0 || d < entry.second)
-                        entry.second = d;
-                    entry.first++;
+                    if (entry.count == 0 || d < entry.distance)
+                    {
+                        entry.distance = d;
+                        entry.y = o->Position().Y();
+                        entry.top = o->Position().Y() + o->GetShape()->Max().Y();
+                    }
+                    entry.count++;
                 }
             }
         // every entity within 3 m of the player (a weapon lying at his feet in third person
@@ -157,8 +171,8 @@ void LogAssetCensus()
         int listed = 0;
         for (const auto& [model, info] : near)
             if (listed++ < 40)
-                LOG_INFO(Mission, "{}: census near player {}x {} (nearest {:.0f} m)", Label(), info.first, model,
-                         info.second);
+                LOG_INFO(Mission, "{}: census near player {}x {} (nearest {:.0f} m, at y {:.1f}, top {:.1f})",
+                         Label(), info.count, model, info.distance, info.y, info.top);
         LOG_INFO(Mission, "{}: census {} map models within 150 m of the player", Label(), near.size());
     }
 }
