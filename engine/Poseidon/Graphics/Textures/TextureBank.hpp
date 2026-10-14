@@ -2,6 +2,8 @@
 #define _TEXTBANK_HPP
 
 #include <Poseidon/Foundation/Strings/RString.hpp>
+#include <atomic>
+#include <cstdint>
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Graphics/Rendering/Font/Pactext.hpp>
 #include <Poseidon/Graphics/Rendering/Colors.hpp>
@@ -36,6 +38,8 @@ class Texture : public RemoveLLinks
     RStringB _character;
 #endif
     bool _refCountLocked;
+    //! NameMemo: two bits a slot, known + value; cleared by SetName.
+    mutable std::atomic<uint32_t> _nameMemo{0};
 
   protected:
     int _mipmapWanted, _mipmapNeeded;
@@ -98,6 +102,24 @@ class Texture : public RemoveLLinks
     const char* Name() const { return _name; }
     const RStringB& GetName() const { return _name; }
     void SetName(RStringB name);
+    // PERF (2026-10-14): a pure test of the name, answered once per texture. The draw path asks
+    // the same name questions per section per frame. Each slot always takes the same test.
+    enum NameSlot : uint32_t
+    {
+        NameSlotEnfusionConstantAlpha,
+        NameSlotEnfusionCoverage,
+        NameSlotLegacyPlantCutout
+    };
+    bool NameMemo(NameSlot slot, bool (*compute)(const char* name)) const
+    {
+        const uint32_t shift = static_cast<uint32_t>(slot) * 2;
+        const uint32_t word = _nameMemo.load(std::memory_order_relaxed);
+        if (word & (1u << shift))
+            return (word >> (shift + 1)) & 1u;
+        const bool value = compute(Name());
+        _nameMemo.fetch_or((1u | (value ? 2u : 0u)) << shift, std::memory_order_relaxed);
+        return value;
+    }
 
     float Roughness() const { return _roughness; } // for physical simulation
     void SetRoughness(float roughness) { _roughness = roughness; }

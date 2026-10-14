@@ -332,9 +332,10 @@ static bool SectionAuthoredTranslucent(const ShapeSectionInfo& sec)
     auto* tex = sec.properties.GetTexture();
     if (!tex || !AuthoredGlassBlendEnabled())
         return false;
-    if (render::IsEnfusionConstantAlphaTexture(tex->Name()))
+    if (tex->NameMemo(Texture::NameSlotEnfusionConstantAlpha, &render::IsEnfusionConstantAlphaTexture))
         return true;
-    return render::IsEnfusionCoverageTexture(tex->Name()) && SectionMaterialEmatBlends(sec.surfMat);
+    return tex->NameMemo(Texture::NameSlotEnfusionCoverage, &render::IsEnfusionCoverageTexture) &&
+           SectionMaterialEmatBlends(sec.surfMat);
 }
 
 // The single place that decides whether a section belongs in the back-to-front pass.
@@ -348,9 +349,9 @@ static bool SectionIsBlend(const ShapeSectionInfo& sec)
     // Legacy A1 foliage has no RVMAT to speak for it, so the histogram is the only voice in
     // the room and it mis-hears antialiased downscales as translucency. See
     // render::IsLegacyPlantCutoutTexture for the measured per-LOD split.
-    if (render::IsLegacyPlantCutoutTexture(tex->Name()))
+    if (tex->NameMemo(Texture::NameSlotLegacyPlantCutout, &render::IsLegacyPlantCutoutTexture))
         return false;
-    if (render::IsEnfusionCoverageTexture(tex->Name()))
+    if (tex->NameMemo(Texture::NameSlotEnfusionCoverage, &render::IsEnfusionCoverageTexture))
     {
         // Authored translucency (`OpacityMap` + `BlendMode AlphaBlend`: wire
         // mesh, glass) blends even when holey; merged coverage WITH holes
