@@ -97,6 +97,15 @@ informational and does not constitute any grant and/or waiver of rights.*
 
 ## Ported code
 
+### CWR-CE in-memory database
+
+The database scripting commands, handle type, tests and scripting guide were
+ported from [jschmidt92/cwr_ce_source](https://github.com/jschmidt92/cwr_ce_source),
+commit `ed938b183cd5af91453b8df9b3236add57cd9e7f`, authored by **jschmidt92**.
+The feature was reviewed against branch `feature/in-memory-database` at
+`96bda9c`. It is licensed under GPL-3.0-or-later with the additional Section 7
+terms in [LICENSE](LICENSE). No game assets or binaries were imported.
+
 ### Malprave (Dec's Poseidon fork)
 
 The Sinkhole workstream (`docs/roadmap/decisions/SINKHOLE-*`) ports engine code from
