@@ -6516,39 +6516,6 @@ impl Renderer {
                 }
             }
 
-            // MUD-001: thrown mud, at the same slot (opaque blobs tested against the scene depth)
-            if start == 0 && !resolved && self.mud.active() {
-                self.ensure_far_depth_resolve(&mut encoder);
-                if let (Some(depth_view), Some(frame)) = (
-                    self.gfx3d.water_depth_view().cloned(),
-                    self.godrays_frame,
-                ) {
-                    let (rw, rh) = self.render_size();
-                    let cam = [frame.cam_pos[0], frame.cam_pos[1], frame.cam_pos[2]];
-                    let m = frame.inv_view_proj;
-                    let mut ivp = [0.0f32; 16];
-                    for c in 0..4 {
-                        for r in 0..4 {
-                            ivp[c * 4 + r] = m[c][r];
-                        }
-                    }
-                    self.mud.record(
-                        &self.device,
-                        &self.queue,
-                        &mut encoder,
-                        &target,
-                        &depth_view,
-                        (rw, rh),
-                        cam,
-                        ivp,
-                        self.smoke_sun_dir,
-                        self.smoke_sun_radiance,
-                        self.smoke_ambient,
-                        &self.terrain,
-                    );
-                }
-            }
-
             if start == 0 && !resolved && self.soft_globals.active {
                 self.ensure_far_depth_resolve(&mut encoder);
                 if let Some(depth_view) = self.gfx3d.water_depth_view().cloned() {
@@ -6672,6 +6639,46 @@ impl Renderer {
                     .end(&mut encoder, TimerRegion::ObjColorSegment);
                 self.gpu_timers.cpu_end(TimerRegion::ObjColorSegment);
             }
+
+            // MUD-001: thrown mud (opaque blobs tested against the scene depth). After the
+            // post-water objects, not with the smoke: vehicles are among the objects the classic
+            // sort submits after water, so the mud thrown off a truck's wheels was tested against a
+            // depth with no truck in it and drew over the truck (owner, 2026-10-14).
+            if start == 0 && !resolved && self.mud.active() {
+                // Re-resolved here: the post-water objects wrote depth after every earlier resolve.
+                // One extra full-screen depth resolve, only while mud is flying.
+                self.far_depth_resolve_current = false;
+                self.ensure_far_depth_resolve(&mut encoder);
+                if let (Some(depth_view), Some(frame)) = (
+                    self.gfx3d.water_depth_view().cloned(),
+                    self.godrays_frame,
+                ) {
+                    let (rw, rh) = self.render_size();
+                    let cam = [frame.cam_pos[0], frame.cam_pos[1], frame.cam_pos[2]];
+                    let m = frame.inv_view_proj;
+                    let mut ivp = [0.0f32; 16];
+                    for c in 0..4 {
+                        for r in 0..4 {
+                            ivp[c * 4 + r] = m[c][r];
+                        }
+                    }
+                    self.mud.record(
+                        &self.device,
+                        &self.queue,
+                        &mut encoder,
+                        &target,
+                        &depth_view,
+                        (rw, rh),
+                        cam,
+                        ivp,
+                        self.smoke_sun_dir,
+                        self.smoke_sun_radiance,
+                        self.smoke_ambient,
+                        &self.terrain,
+                    );
+                }
+            }
+
 
             // 2D sub-pass: the overlays, over the fogged colour, loading the 3D depth +
             // stencil so any depth-tested 2D still occludes and stencil state carries over.

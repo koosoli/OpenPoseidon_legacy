@@ -8,7 +8,7 @@
 // pipeline via the frame module, so terrain receives the same CSM shadows and
 // sun lighting.
 #import frame::{frame, reverse_z, fog_factor, apply_fog_terrain, fog_sun_reach, sky_irradiance, sky_vis_ao, canopy_sky_ao, canopy_sun_shadow, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_rain_coverage, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
-#import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
+#import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal, puddle_noise}
 #import frame::ground_sky_reflection
 #import frame::wet_soil_debug_mode
 #import ground_wet::{cultivated_soil_fraction, soil_wet_amount, soil_wet_surface, soil_wet_fresnel, soil_wet_sun_specular, soil_wet_ground_reflection, soil_wet_environment_samples}
@@ -461,7 +461,7 @@ fn grid_height(world_xz: vec2<f32>) -> f32 {
 fn sample_mud_normals(world_xz: vec2<f32>, step: f32, footprint: f32) -> GroundNormalPair {
     // (PERF, 2026-10-14) The broad normal's four heights at +-step and the step-scale mud/sand
     // gradients subtracted below read the SAME eight offsets; they were read twice (sample_normal,
-    // then mud/sand_height_gradient(step)). Read once, same arithmetic in the same order, so the
+    // then the step-scale mud and sand gradients). Read once, same arithmetic in the same order, so the
     // result is unchanged. 32 storage loads per terrain pixel.
     let hs = max(0.125, step); // the gradients' h; equal to `step` for any real terrain grid
     let px = world_xz + vec2<f32>(hs, 0.0);
@@ -2314,16 +2314,27 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     if (cost_stage == 4u) { return vec4<f32>(rgb + vec3<f32>(soil_wet * 0.01), 1.0); }
     if (soil_wet > 0.0) {
         let view = normalize(-in.world_pos);
-        // Filter the disturbed-soil normal at the actual pixel footprint;
-        // never reflect the authored albedo grain or its fine normal map.
-        let moist_n = geometric_n;
+        // (2026-10-14) Wet mud is not an even film: water stands in its small hollows and the
+        // rest is dark, damp and dull. One coat over the whole field read as milky (owner). So the
+        // glossy share is patchy (two noise octaves, ~0.5 m and ~0.2 m, spreading as it wets) and
+        // the film is bumpy at mud scale, so the sky breaks into glints. The bump fades with the
+        // pixel footprint; never the authored albedo grain or its fine normal map.
+        let cov_field = puddle_noise(in.world_xz / 0.55) * 0.65 + puddle_noise(in.world_xz / 0.17) * 0.35;
+        let cov = smoothstep(mix(0.66, 0.46, soil_wet), mix(0.78, 0.58, soil_wet), cov_field);
+        let coat = soil_wet * (1.0 - rain_puddle) * mix(0.18, 1.0, cov);
+        let be = 0.02;
+        let bump = vec2<f32>(
+            puddle_noise((in.world_xz + vec2<f32>(be, 0.0)) / 0.23) - puddle_noise((in.world_xz - vec2<f32>(be, 0.0)) / 0.23),
+            puddle_noise((in.world_xz + vec2<f32>(0.0, be)) / 0.23) - puddle_noise((in.world_xz - vec2<f32>(0.0, be)) / 0.23))
+            / (2.0 * be) * 0.014 * (1.0 - smoothstep(0.04, 0.25, moist_normal_variation));
+        let moist_n = normalize(geometric_n + vec3<f32>(-bump.x, 0.0, -bump.y));
         let fresnel = soil_wet_fresnel(dot(moist_n, view));
         var reflected = sun_ambient;
         if (sky_lit) {
             // A wet soil coat reflects directional sky radiance. Diffuse SH
             // irradiance here washes the soil into a pale, cloudless coating.
             let samples = soil_wet_environment_samples(view, moist_n,
-                soil_wet * (1.0-rain_puddle), moist_normal_variation);
+                coat, moist_normal_variation);
             let sky_scale = frame.sun_ambient.w * sky_vis_ao(in.world_xz) * local_sky_visibility;
             var rough_reflected = vec3<f32>(0.0);
             var reflection_weight = 0.0;
@@ -2341,8 +2352,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
             reflected = select(rgb, rough_reflected, reflection_weight > 0.0);
         }
         let half_vector = normalize(view - frame.sun_dir_world.xyz + vec3<f32>(0.0, 1e-4, 0.0));
-        rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel,
-            soil_wet * (1.0 - rain_puddle));
+        rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel, coat);
         // Direct GGX already contains dielectric Fresnel; add after the sky mix.
         // Only the admitted moist fraction smooths its broad slope width;
         // geometric derivatives still widen it at unresolved pixel footprints.
@@ -2353,7 +2363,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
             clamp(dot(moist_n, -frame.sun_dir_world.xyz), 0.0, 1.0),
             clamp(dot(moist_n, half_vector), 0.0, 1.0),
             clamp(dot(view, half_vector), 0.0, 1.0),
-            moist_normal_variation, soil_wet * (1.0 - rain_puddle), solar_visibility);
+            moist_normal_variation, coat, solar_visibility);
         rgb += sun_diffuse * 3.14159265359 * solar_coat;
     }
     if (rain_puddle > 0.0) {

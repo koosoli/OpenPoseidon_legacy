@@ -79,7 +79,8 @@ fn wet_soil_sun_coat_composes_and_actual_terrain_uses_one_fresnel_and_filtered_n
     let derivative = source.find("let moist_normal_variation = length(fwidth(geometric_n));").unwrap();
     let coat = source.find("if (soil_wet > 0.0) {").unwrap();
     assert!(derivative < coat, "derivatives must be in uniform control flow");
-    assert!(source.contains("let moist_n = geometric_n"));
+    // (2026-10-14) patchy, bumpy wet film (owner: an even coat read as milky)
+    assert!(source.contains("let moist_n = normalize(geometric_n + vec3<f32>(-bump.x, 0.0, -bump.y))"));
     assert!(source.contains("soil_wet *= rain_proof"));
     assert!(source.contains("soil_wet_amount(mud, tp.rain_wetness, snow_cover("));
     assert!(source.contains("sun_diffuse * 3.14159265359 * solar_coat"));
@@ -370,7 +371,8 @@ fn soil_wetting_composes_with_actual_terrain_and_uses_physical_rain_proof() {
     assert!(source.contains("soil_wet *= rain_proof"));
     assert!(source.contains("soil_wet_amount(mud, tp.rain_wetness, snow_cover("));
     assert!(source.contains("soil_wet * (1.0 - rain_puddle)"));
-    assert!(source.contains("let moist_n = geometric_n"));
+    // (2026-10-14) patchy, bumpy wet film (owner: an even coat read as milky)
+    assert!(source.contains("let moist_n = normalize(geometric_n + vec3<f32>(-bump.x, 0.0, -bump.y))"));
 }
 
 #[test]

@@ -52,6 +52,6 @@ fn ground_puddle_ripple_normal(world_xz: vec2<f32>, time: f32, rain: f32, footpr
     var slope = impact.xz / max(impact.y, 0.001);
     // Thin films keep the old single-packet maximum tilt even when several
     // independent impacts overlap. Retained pools may show their fuller motion.
-    slope *= min(1.0, 0.135 / max(length(slope), 0.001));
+    slope *= min(1.0, 0.30 / max(length(slope), 0.001)); // (2026-10-14) was 0.135: invisible in a downpour
     return normalize(vec3<f32>(slope.x, 1.0, slope.y));
 }
