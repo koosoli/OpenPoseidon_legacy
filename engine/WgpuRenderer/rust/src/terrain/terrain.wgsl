@@ -470,14 +470,22 @@ fn cell_entry(cell: vec2<i32>) -> u32 {
 // boundary -- which is a candidate for the square lattice reported on Desert Island's sand.
 override jitter_scale: f32 = 1.0;
 
+// (PERF, 2026-10-14) the alpha of the last layer sample_cell read: on a legacy layer it carries the
+// Tidewater share (tw_cell), which took a second fetch of the same texel per cell before
+var<private> tw_last_alpha: f32 = 0.0;
+
 fn sample_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                ddx: vec2<f32>, ddy: vec2<f32>) -> vec3<f32> {
     let layer = entry & CELL_LAYER_MASK;
+    var t: vec4<f32>;
     if ((entry & CELL_CLAMPED) != 0u)
     {
-        return textureSampleGrad(ground[layer], ground_clamp_samp, tile_uv - cell, ddx, ddy).rgb;
+        t = textureSampleGrad(ground[layer], ground_clamp_samp, tile_uv - cell, ddx, ddy);
+    } else {
+        t = textureSampleGrad(ground[layer], ground_samp, tile_uv, ddx, ddy);
     }
-    return textureSampleGrad(ground[layer], ground_samp, tile_uv, ddx, ddy).rgb;
+    tw_last_alpha = t.a;
+    return t.rgb;
 }
 
 // --- (OP, 2026-10-13) Tidewater's beach sand, per pixel -------------------------------------------
@@ -519,7 +527,7 @@ struct TwCell {
     det: u32,
 };
 
-fn tw_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>, ddx: vec2<f32>, ddy: vec2<f32>) -> TwCell {
+fn tw_cell(entry: u32, alpha: f32) -> TwCell {
     let material = terrain_materials[entry & CELL_LAYER_MASK];
     var o: TwCell;
     o.ka = (material.puddle_flags >> 16u) & 15u;
@@ -529,21 +537,46 @@ fn tw_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>, ddx: vec2<f32>, ddy:
     o.cb = vec3<f32>(material.detail_scale, material.middle_scale, material.middle_blend);
     o.det = material.middle;
     if (o.ka == 0u) { return o; }
-    if ((entry & CELL_CLAMPED) != 0u) {
-        o.a = textureSampleGrad(ground[material.legacy], ground_clamp_samp, tile_uv - cell, ddx, ddy).a;
-    } else {
-        o.a = textureSampleGrad(ground[material.legacy], ground_samp, tile_uv, ddx, ddy).a;
-    }
+    o.a = alpha;
     return o;
 }
 
 // adds one cell's kinds, weighted by its cross-fade weight, to the per-kind weights / anchor sums
-fn tw_acc(w: ptr<function, array<f32, 8>>, c: ptr<function, array<vec3<f32>, 8>>, t: TwCell, wc: f32) {
+// (PERF, 2026-10-14) The kinds present at a pixel, in TWO register slots (the heaviest two of up to
+// eight contributions from the four cross-faded cells). Per-kind arrays indexed by a runtime kind
+// spilled to local memory and cost more than the shading itself.
+struct TwSlots {
+    k0: u32,
+    w0: f32,
+    c0: vec3<f32>,
+    k1: u32,
+    w1: f32,
+    c1: vec3<f32>,
+    total: f32,
+};
+
+fn tw_slot_add(s: ptr<function, TwSlots>, kind: u32, w: f32, c: vec3<f32>) {
+    if (kind == 0u || w <= 0.0) { return; }
+    (*s).total += w;
+    if ((*s).k0 == kind || (*s).w0 <= 0.0) {
+        (*s).k0 = kind;
+        (*s).w0 += w;
+        (*s).c0 += c * w;
+    } else if ((*s).k1 == kind || (*s).w1 <= 0.0) {
+        (*s).k1 = kind;
+        (*s).w1 += w;
+        (*s).c1 += c * w;
+    } else if (w > (*s).w1) {
+        (*s).k1 = kind;
+        (*s).w1 = w;
+        (*s).c1 = c * w;
+    }
+}
+
+fn tw_acc(s: ptr<function, TwSlots>, t: TwCell, wc: f32) {
     if (t.ka == 0u) { return; }
-    (*w)[t.ka] += wc * t.a;
-    (*c)[t.ka] += t.ca * (wc * t.a);
-    (*w)[t.kb] += wc * (1.0 - t.a);
-    (*c)[t.kb] += t.cb * (wc * (1.0 - t.a));
+    tw_slot_add(s, t.ka, wc * t.a, t.ca);
+    tw_slot_add(s, t.kb, wc * (1.0 - t.a), t.cb);
 }
 
 // Tidewater Terrain.js's per-pixel detail samples (dN 1.9 m, dM 6.7 m, dF 0.63 m, the 173 m / 47 m
@@ -675,6 +708,43 @@ fn tw_cover(kind: u32, det: u32, t: TwIn, anchor: vec3<f32>, ofp: vec3<f32>, abs
     o.albedo = ground_linear_to_srgb(max(col, vec3<f32>(0.0)));
     o.slope = slope;
     return o;
+}
+
+// (PERF, 2026-10-14) The far ground: past ~200 m every Tidewater term finer than its macro patches
+// is sub-pixel (and faded out by footprint anyway), so a kind's colour there is its macro tone
+// alone -- two detail taps instead of the 15-30 the near kinds take. Measured: the per-pixel ground
+// cost 2.4 ms of a 1600x900 aerial frame on Everon (terrain colour 6.78 vs 4.39 ms without it).
+fn tw_far_kind(kind: u32, macroA: f32, macroB: f32, anchor: vec3<f32>, n: vec3<f32>, h: f32) -> vec3<f32> {
+    let mcr = macroA * 0.6 + macroB * 0.4;
+    var col = vec3<f32>(0.0);
+    if (kind == TWK_SAND) {
+        let dryK = smoothstep(0.8, 3.0, h);
+        col = mix(srgb_to_linear(vec3<f32>(0.83, 0.75, 0.6)), srgb_to_linear(vec3<f32>(0.9, 0.84, 0.72)),
+                  smoothstep(0.3, 0.72, mcr + dryK * 0.2));
+        col = mix(col, srgb_to_linear(vec3<f32>(0.84, 0.72, 0.55)), smoothstep(0.55, 0.8, 0.5 + (macroB - 0.5) * 0.6) * 0.45);
+        let underW = smoothstep(0.12, -0.6, h);
+        col = mix(col, mix(srgb_to_linear(vec3<f32>(0.84, 0.78, 0.64)), srgb_to_linear(vec3<f32>(0.72, 0.7, 0.58)),
+                           smoothstep(1.0, 9.0, -h)), underW);
+    } else if (kind == TWK_ROCK) {
+        let rockMid = srgb_to_linear(vec3<f32>(0.3, 0.285, 0.265));
+        col = mix(srgb_to_linear(vec3<f32>(0.15, 0.145, 0.135)), rockMid, smoothstep(0.1, 0.5, 0.45 + (mcr - 0.5) * 0.7));
+        col = mix(col, srgb_to_linear(vec3<f32>(0.48, 0.455, 0.42)), smoothstep(0.5, 0.85, 0.45 + (mcr - 0.5) * 0.7));
+        let lum = dot(anchor, vec3<f32>(0.2126, 0.7152, 0.0722));
+        if (lum > 0.0) {
+            col = col * clamp(lum / dot(rockMid, vec3<f32>(0.2126, 0.7152, 0.0722)), 0.6, 2.2);
+        }
+    } else if (kind == TWK_GRASS) {
+        col = tw_anchor(tw_meadow_tone(macroA, macroB, 1.0 - n.y, n.z, 0.5), vec3<f32>(0.3, 0.34, 0.12), anchor);
+    } else if (kind == TWK_FOREST) {
+        var cover = mix(srgb_to_linear(vec3<f32>(0.08, 0.13, 0.04)), srgb_to_linear(vec3<f32>(0.17, 0.24, 0.07)), smoothstep(0.3, 0.7, mcr));
+        cover = mix(cover, srgb_to_linear(vec3<f32>(0.27, 0.29, 0.12)), smoothstep(0.66, 0.84, macroB + 0.1) * 0.45);
+        col = tw_anchor(cover * ((mcr - 0.5) * 0.3 + 1.0), vec3<f32>(0.19, 0.18, 0.08), anchor);
+    } else if (kind == TWK_GRAVEL) {
+        col = tw_anchor(srgb_to_linear(vec3<f32>(0.24, 0.21, 0.17)) * ((mcr - 0.5) * 0.3 + 1.0), vec3<f32>(0.24, 0.21, 0.17), anchor);
+    } else {
+        col = tw_anchor(srgb_to_linear(vec3<f32>(0.44, 0.37, 0.27)) * ((mcr - 0.5) * 0.25 + 1.0), vec3<f32>(0.44, 0.37, 0.27), anchor);
+    }
+    return ground_linear_to_srgb(max(col, vec3<f32>(0.0)));
 }
 
 // d/dx, d/dz of one detail channel (0 rock, 1 soil, 2 sand) on the top projection at `tile` m, by
@@ -1798,17 +1868,26 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // cell's own [0,1] frame, so the four taps genuinely differ even for one entry.
     // Those keep the full blend.
     let uniform_cell = e00 == e10 && e00 == e01 && e00 == e11 && (e00 & CELL_CLAMPED) == 0u;
+    var a00 = 0.0;
+    var a10 = 0.0;
+    var a01 = 0.0;
+    var a11 = 0.0;
     if (uniform_cell) {
         let c = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
+        a00 = tw_last_alpha;
         rgb = c.rgb;
         authored_normal_ts = c.normal_ts;
         authored_ao = c.ambient_occlusion;
         mud = c.mud;
     } else {
         let c00 = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
+        a00 = tw_last_alpha;
         let c10 = sample_authored_cell(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
+        a10 = tw_last_alpha;
         let c01 = sample_authored_cell(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
+        a01 = tw_last_alpha;
         let c11 = sample_authored_cell(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
+        a11 = tw_last_alpha;
         rgb = w00 * c00.rgb + w10 * c10.rgb + w01 * c01.rgb + w11 * c11.rgb;
         // The authored surface normal, blended across the same four cells as the colour so it
         // stays continuous over a cell boundary.
@@ -1821,23 +1900,24 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // (OP) Tidewater's ground where the layer says so (tw_cell), blended across the cells as the
     // colour is: a weight and an OFP anchor colour per surface kind; faded out where the satellite
     // takes over the far ground
-    var tw_w = array<f32, 8>(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-    var tw_c = array<vec3<f32>, 8>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0),
-                                   vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
+    var tws: TwSlots;
+    tws.k0 = 0u; tws.w0 = 0.0; tws.c0 = vec3<f32>(0.0);
+    tws.k1 = 0u; tws.w1 = 0.0; tws.c1 = vec3<f32>(0.0);
+    tws.total = 0.0;
     var tw_det = 0u;
     if (uniform_cell) {
-        let t00 = tw_cell(e00, base, tile_uv, duvdx, duvdy);
-        tw_acc(&tw_w, &tw_c, t00, 1.0);
+        let t00 = tw_cell(e00, a00);
+        tw_acc(&tws, t00, 1.0);
         tw_det = t00.det;
     } else {
-        let t00 = tw_cell(e00, base, tile_uv, duvdx, duvdy);
-        let t10 = tw_cell(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy);
-        let t01 = tw_cell(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy);
-        let t11 = tw_cell(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy);
-        tw_acc(&tw_w, &tw_c, t00, w00);
-        tw_acc(&tw_w, &tw_c, t10, w10);
-        tw_acc(&tw_w, &tw_c, t01, w01);
-        tw_acc(&tw_w, &tw_c, t11, w11);
+        let t00 = tw_cell(e00, a00);
+        let t10 = tw_cell(e10, a10);
+        let t01 = tw_cell(e01, a01);
+        let t11 = tw_cell(e11, a11);
+        tw_acc(&tws, t00, w00);
+        tw_acc(&tws, t10, w10);
+        tw_acc(&tws, t01, w01);
+        tw_acc(&tws, t11, w11);
         tw_det = max(max(t00.det, t10.det), max(t01.det, t11.det));
     }
     let tws_fade = 1.0 - smoothstep(800.0, 2400.0, length(in.world_pos));
@@ -1850,18 +1930,32 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let ground_normals = sample_mud_normals(in.world_xz, tp.terrain_grid, snow_footprint);
     let geometric_n = ground_normals.fine;
     var tws_slope = vec2<f32>(0.0);
-    var tw_total = 0.0;
-    for (var k = 1u; k < TWK_COUNT; k++) { tw_total += tw_w[k]; }
+    let tw_total = tws.w0 + tws.w1;
     if (tw_total * tws_fade > 0.001 && tw_det != 0u) {
         let wind = normalize(frame.foliaged.zw + vec2<f32>(1e-4, 0.0));
         let h_sea = absolute_world_pos.y - tp.sea_level;
-        let tin = tw_inputs(tw_det, absolute_world_pos, in.world_pos, dwx, dwy);
+        let farK = smoothstep(130.0, 200.0, length(in.world_pos));
+        let macroA = twd(tw_det, tws_rot(absolute_world_pos.xz, 0.7) / 173.0, vec2<f32>(0.0), vec2<f32>(0.0)).w;
+        let macroB = twd(tw_det, tws_rot(absolute_world_pos.xz, 2.1) / 47.0, vec2<f32>(0.0), vec2<f32>(0.0)).w;
+        var tin: TwIn;
+        if (farK < 1.0) { tin = tw_inputs(tw_det, absolute_world_pos, in.world_pos, dwx, dwy); }
         var acc = vec3<f32>(0.0);
-        for (var k = 1u; k < TWK_COUNT; k++) {
-            let wk = tw_w[k];
-            if (wk < 0.001) { continue; }
-            let anchor = tw_c[k] / wk;
+        for (var slot = 0u; slot < 2u; slot++) {
+            let k = select(tws.k1, tws.k0, slot == 0u);
+            let wk = select(tws.w1, tws.w0, slot == 0u);
+            if (wk < 0.001 || k == 0u) { continue; }
+            let anchor = select(tws.c1, tws.c0, slot == 0u) / wk;
             var s: TwSand;
+            s.albedo = vec3<f32>(0.0);
+            s.slope = vec2<f32>(0.0);
+            if (farK > 0.0) {
+                s.albedo = tw_far_kind(k, macroA, macroB, anchor, geometric_n, h_sea);
+            }
+            if (farK >= 1.0) {
+                acc += s.albedo * wk;
+                continue;
+            }
+            let farAlbedo = s.albedo;
             if (k == TWK_SAND) {
                 s = tw_beach_sand(tw_det, tin, in.world_pos, frame.cam_pos.xz, h_sea, snow_footprint,
                                   length(geometric_n.xz) / max(geometric_n.y, 0.2), dwx, dwy);
@@ -1871,10 +1965,10 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
             } else {
                 s = tw_cover(k, tw_det, tin, anchor, rgb, absolute_world_pos, in.world_pos, geometric_n, dwx, dwy, wind);
             }
-            acc += s.albedo * wk;
-            tws_slope += s.slope * wk;
+            acc += mix(s.albedo, farAlbedo, farK) * wk;
+            tws_slope += s.slope * (1.0 - farK) * wk;
         }
-        let share = min(tw_total, 1.0) * tws_fade;
+        let share = min(tw_total, 1.0) * tws_fade * (tw_total / max(tws.total, 1e-5));
         rgb = mix(rgb, acc / tw_total, share);
         tws_slope = tws_slope / tw_total * share;
     }
