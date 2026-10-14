@@ -2101,7 +2101,15 @@ Vector3 Object::AimingPosition() const
     LODShape* lShape = GetShape();
     if (!lShape)
     {
-        LOG_ERROR(Graphics, "No shape object {} tested for aiming position", (const char*)GetDebugName());
+        // Once: the shape-less free-fly camera asks this through CameraPosition every frame, and
+        // a log line per frame was ~0.4% of the main thread on the firefight bench.
+        static bool reported = false;
+        if (!reported)
+        {
+            reported = true;
+            LOG_ERROR(Graphics, "No shape object {} tested for aiming position (reported once)",
+                      (const char*)GetDebugName());
+        }
         return Position();
     }
     return PositionModelToWorld(GetShape()->AimingCenter());

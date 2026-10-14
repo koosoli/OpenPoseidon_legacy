@@ -989,6 +989,13 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
         return !(v && v[0] == '0');
     }();
     constexpr int kTargetAhead = 8, kEntityAhead = 4;
+    // Observer-side answers, asked once instead of once per target: nothing in the loop changes
+    // this unit's ability, speed or head pose (it edits Targets, and the unit's danger state).
+    // GetEyeDirection alone was ~8% of this function in a firefight (PERF, 2026-10-15).
+    const float unitInvAbility = unit->GetInvAbility();
+    const float myInvAbility = GetInvAbility();
+    const float mySpeedSize = _speed.Size();
+    const Vector3 eyeDirection = GetEyeDirection();
     for (int index = 0; index < res.Size(); index++)
     {
         if (trackPrefetch)
@@ -1030,7 +1037,7 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             continue;
         }
 
-        float incDist2 = 1 + (unit->GetInvAbility() - 1) * 0.4f;
+        float incDist2 = 1 + (unitInvAbility - 1) * 0.4f;
         dist2 *= incDist2;
         if (dist2 > Square(maxDist))
         {
@@ -1068,7 +1075,7 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
 
         if (!radarContact && !laserContact)
         {
-            float mySpeed = _speed.Size();
+            float mySpeed = mySpeedSize;
             float speedCoef = mySpeed * (1.0f / 200);
             saturateMin(speedCoef, 0.8f);
             visibility -= speedCoef;
@@ -1089,7 +1096,7 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
 
         float audibleAccuracy = audibility * 3;
 
-        Vector3Val eDir = GetEyeDirection();
+        Vector3Val eDir = eyeDirection;
         float cosFiEye = eDir.CosAngle(ai->Position() - sensorPosition);
         float cosFiWep = cosFiEye;
 
@@ -1416,13 +1423,13 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             }
         }
 
-        float myDelay = 1.0f * GetInvAbility() * delayCoef;
+        float myDelay = 1.0f * myInvAbility * delayCoef;
 
         if (radarContact || laserContact)
         {
             if (dist2 < Square(1000))
             {
-                float maxTime = dist2 * 0.000003f + 0.6f * GetInvAbility();
+                float maxTime = dist2 * 0.000003f + 0.6f * myInvAbility;
                 saturateMin(myDelay, maxTime);
             }
         }
@@ -1432,12 +1439,12 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             {
                 if (spotError < 1)
                 {
-                    float maxTime = dist2 * 0.0002f + 0.02f * GetInvAbility();
+                    float maxTime = dist2 * 0.0002f + 0.02f * myInvAbility;
                     saturateMin(myDelay, maxTime);
                 }
                 else
                 {
-                    float maxTime = dist2 * 0.001f + 0.1f * GetInvAbility();
+                    float maxTime = dist2 * 0.001f + 0.1f * myInvAbility;
                     saturateMin(myDelay, maxTime);
                 }
             }
