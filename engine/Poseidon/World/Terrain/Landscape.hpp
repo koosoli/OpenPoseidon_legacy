@@ -141,6 +141,13 @@ class ObjectListFull : public SmallArray<Ref<Object>>
     // Visibility rejects TypeTempVehicle unconditionally. Preserve the full
     // list order while avoiding footprint traversal on every sight query.
     SmallArray<Object*> _visibilityObjects;
+    // PERF (2026-10-14): non-owning mirror of the objects with building paths
+    // (Object::GetIPaths() != null -- a Building, by class, so constant for the
+    // object's life). AILocker::LockPosition locks the path points of every such
+    // object near each soldier, every tick; it walked the whole cell to find them.
+    // A std::vector, not a SmallArray: most cells hold none, and an empty vector
+    // costs no inline storage.
+    std::vector<Object*> _pathObjects;
 
   private:
     int CountNonStatic() const;
@@ -157,6 +164,8 @@ class ObjectListFull : public SmallArray<Ref<Object>>
     Object* GetRoadwayObject(int index) const { return _roadwayObjects[index]; }
     int GetVisibilityObjectCount() const { return _visibilityObjects.Size(); }
     Object* GetVisibilityObject(int index) const { return _visibilityObjects[index]; }
+    int GetPathObjectCount() const { return static_cast<int>(_pathObjects.size()); }
+    Object* GetPathObject(int index) const { return _pathObjects[static_cast<size_t>(index)]; }
     void ChangeNonStaticCount(int val);
     void ChangeTypeVehicleCount(int val);
     void StaticChanged(); // recalculate what is neccessary

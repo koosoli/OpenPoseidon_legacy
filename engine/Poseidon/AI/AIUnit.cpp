@@ -186,11 +186,14 @@ void AILocker::LockPosition(Vector3Val pos, float radius, bool soldier, float si
         {
             for (int z = zMin; z <= zMax; z++)
             {
-                const ObjectList& list = GLandscape->GetObjects(z, x);
-                int n = list.Size();
+                // Only buildings have path points: the cell's own mirror of them (see
+                // ObjectListFull::_pathObjects) instead of every object in it. Every match
+                // is locked, so the order they are visited in does not matter.
+                const ObjectListFull* list = GLandscape->GetObjects(z, x).GetList();
+                const int n = list ? list->GetPathObjectCount() : 0;
                 for (int i = 0; i < n; i++)
                 {
-                    Object* obj = list[i];
+                    Object* obj = list->GetPathObject(i);
 
                     IPaths* building = const_cast<IPaths*>(obj->GetIPaths());
                     if (!building)

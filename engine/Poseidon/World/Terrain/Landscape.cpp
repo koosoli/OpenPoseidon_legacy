@@ -29,6 +29,7 @@
 
 #include <Poseidon/Core/TaskPool.hpp>
 
+#include <algorithm>
 #include <vector>
 #include <limits.h>
 #include <stdint.h>
@@ -3422,6 +3423,8 @@ int ObjectListFull::Add(Object* object, bool avoidRecalculation)
 {
     int index = base::Add(object);
     if (object->GetType() != TypeTempVehicle) _visibilityObjects.Add(object);
+    if (object->GetIPaths())
+        _pathObjects.push_back(object);
     LODShape* shape = object->GetShape();
     if (shape && shape->FindRoadwayLevel() >= 0)
     {
@@ -3518,6 +3521,12 @@ void ObjectListFull::Delete(int index)
             if (_visibilityObjects[i] == obj) { _visibilityObjects.Delete(i); break; }
         }
     }
+    if (obj->GetIPaths())
+    {
+        const auto found = std::find(_pathObjects.begin(), _pathObjects.end(), obj);
+        if (found != _pathObjects.end())
+            _pathObjects.erase(found);
+    }
     // Release the owning cell reference only after its non-owning mirrors no
     // longer contain the pointer. A static map object can be owned solely by
     // the landscape index at teardown.
@@ -3542,6 +3551,7 @@ void ObjectListFull::Delete(int index)
 void ObjectListFull::Clear()
 {
     _visibilityObjects.Clear();
+    _pathObjects.clear();
     base::Clear();
     _typeVehicles.Clear();
     _roadwayObjects.Clear();
