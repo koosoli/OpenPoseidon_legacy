@@ -50,6 +50,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <unordered_set>
+#include <thread>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -1395,6 +1397,61 @@ void BakeSatmapObjects(const Landscape& land, int size, std::vector<uint8_t>& pi
                                       dst.rgba.data(),64,64,64*4,STBIR_RGBA)) dst = {};
         return &dst;
     };
+    // (PERF, 2026-10-14) Decode every texture the bake will meet up front, in parallel: the
+    // serial decode of ~520 full PAA images was most of this bake's ~265 ms. Same models in the
+    // same first-sight order and the same caps as the loop below, which then only finds them.
+    {
+        struct Job { Texture* texture; std::vector<uint8_t> bytes; bool pac; };
+        std::vector<Job> jobs;
+        std::unordered_set<const LODShapeWithShadow*> seenModels;
+        for (int z=0; z<land.GetLandRange(); ++z) for (int x=0; x<land.GetLandRange(); ++x)
+        {
+            const auto& objects = land.GetObjects(z,x);
+            for (int i=0; i<objects.Size(); ++i)
+            {
+                Object* object = objects[i];
+                if (!object || (object->GetType() != Primary && object->GetType() != Network)) continue;
+                auto* lod = object->GetShape();
+                if (!lod || seenModels.count(lod) || seenModels.size() >= MaxModels) continue;
+                seenModels.insert(lod);
+                Shape* shape = nullptr;
+                for (int l=0; l<lod->NLevels(); ++l)
+                    if (lod->IsNormalLevel(l)) {shape=lod->Level(l); break;}
+                if (!shape) continue;
+                const float sx=shape->Max().X()-shape->Min().X(), sz=shape->Max().Z()-shape->Min().Z();
+                if (!(sx>0.05f && sz>0.05f && sx<1000 && sz<1000 && shape->NFaces()<100000)) continue;
+                for (Offset f=shape->BeginFaces(); f<shape->EndFaces(); shape->NextFace(f))
+                {
+                    Texture* texture = shape->Face(f).GetTexture();
+                    if (!texture || textures.count(texture) || textures.size() >= MaxTextures) continue;
+                    textures[texture]; // claimed; an unreadable file stays an empty image, as before
+                    const char* source = static_cast<TextureWgpu*>(texture)->SourceName();
+                    Job job{texture, ReadVfsFile(source), !ContainsNoCase(source,".pac")};
+                    if (!job.bytes.empty()) jobs.push_back(std::move(job));
+                }
+            }
+        }
+        const unsigned threads = std::clamp(std::thread::hardware_concurrency(), 1u, 16u);
+        std::vector<DecodedImage> decoded(jobs.size());
+        std::vector<std::thread> pool;
+        for (unsigned w = 0; w < threads; ++w)
+            pool.emplace_back([&, w]
+            {
+                for (size_t j = w; j < jobs.size(); j += threads)
+                {
+                    const auto src = DecodePAABuffer(jobs[j].bytes.data(), jobs[j].bytes.size(), jobs[j].pac);
+                    if (!src.valid()) continue;
+                    DecodedImage dst;
+                    dst.width = dst.height = 64;
+                    dst.rgba.resize(64*64*4);
+                    if (!stbir_resize_uint8_linear(src.rgba.data(),src.width,src.height,src.width*4,
+                                                  dst.rgba.data(),64,64,64*4,STBIR_RGBA)) dst = {};
+                    decoded[j] = std::move(dst);
+                }
+            });
+        for (std::thread& t : pool) t.join();
+        for (size_t j = 0; j < jobs.size(); ++j) textures[jobs[j].texture] = std::move(decoded[j]);
+    }
     for (int z=0; z<land.GetLandRange(); ++z) for (int x=0; x<land.GetLandRange(); ++x)
     {
         const auto& objects = land.GetObjects(z,x);
