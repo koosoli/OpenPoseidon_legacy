@@ -134,7 +134,7 @@ std::optional<PakReadRequest> EnfusionMount::MakeReadRequest(const std::string& 
     const PakArchive& archive = _archives[hit->second.first];
     // Native XOB workers share this mount. In particular, read failures must not
     // race on PakArchive::_error even though each read has its own file handle.
-    return PakReadRequest{archive.Path(), archive.Entries()[hit->second.second]};
+    return PakReadRequest{archive.Path(), archive.Entries()[hit->second.second], archive.File()};
 }
 
 std::vector<std::string> EnfusionMount::FindAll(const std::string& needle) const

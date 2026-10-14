@@ -3,6 +3,7 @@
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionIff.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -51,13 +52,25 @@ struct PakEntry
     bool compressed() const { return flags != 0; }
 };
 
+//! One open OS handle on an archive, shared by every read of it (PERF, 2026-10-14).
+//! Reads are positional and independent -- overlapped on Windows, pread elsewhere -- so
+//! the main thread and the streaming workers read the same `.pak` concurrently without a
+//! seek position to fight over. Opened once by PakArchive::Open.
+class PakFile;
+
 // Owns its directory metadata; reading never mutates a mount/archive or a shared
 // error string. The caller owns output/error, and must handle stale/cancelled
-// requests before publishing results. This does not pin a file against edits.
+// requests before publishing results.
+//
+// `file` is the archive's shared handle. Without it (a request built from a path alone)
+// Read reopens the archive, which is what every read did until 2026-10-14: an ifstream
+// open + seek + read + close per member measured ~30% of native Everon's 46 s load
+// (ZwCreateFile/ZwClose/NtReadFile under this function, sampled on the main thread).
 struct PakReadRequest
 {
     std::string archivePath;
     PakEntry entry;
+    std::shared_ptr<const PakFile> file;
     bool Read(std::vector<uint8_t>& out, std::string& error) const;
 };
 
@@ -87,6 +100,8 @@ class PakArchive
     const std::string& Path() const { return _path; }
     const std::string& Error() const { return _error; }
     const std::vector<PakEntry>& Entries() const { return _entries; }
+    //! The shared read handle (null if the OS refused it; reads then reopen per member).
+    const std::shared_ptr<const PakFile>& File() const { return _file; }
     size_t DirectoryCount() const { return _directories; }
     const PakClosure& Closure() const { return _closure; }
 
@@ -106,6 +121,7 @@ class PakArchive
 
     std::string _path;
     std::string _error;
+    std::shared_ptr<const PakFile> _file;
     std::vector<PakEntry> _entries;
     size_t _directories = 0;
     PakClosure _closure;

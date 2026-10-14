@@ -43,9 +43,12 @@
 #include <Poseidon/Asset/Formats/Material/EmatSource.hpp>
 #include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Core/ProgressSystem.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <functional>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // RFG-070 `enft|` layer tint
 #include <Poseidon/Graphics/Textures/Image.hpp>
@@ -851,15 +854,55 @@ EnfusionTerrain AssembleTerrain(const std::string& addonsDir)
     // The tile edge comes from the tiles themselves: the descriptor does not carry it
     // and it is not constant across the corpus.
     uint32_t tilesX = 0;
-    for (const auto& [index, tilePath] : tiles)
+    // (PERF, 2026-10-14) Archive read + zlib + tile parse run on the task pool, a batch at a
+    // time (bounded memory); everything below stays serial in index order, so the result is
+    // the one the plain loop produced.
+    struct LoadedTile
     {
-        std::vector<uint8_t> tileBytes;
-        if (!mount.Read(tilePath, tileBytes))
+        bool read = false;
+        std::vector<uint8_t> bytes;
+        TerrainTile tile;
+    };
+    const std::vector<std::pair<uint32_t, std::string>> tileList(tiles.begin(), tiles.end());
+    Poseidon::TaskPool* tilePool = Poseidon::GetGlobalTaskPool();
+    constexpr size_t kTileBatch = 256;
+    std::vector<LoadedTile> batch;
+    const auto loadBatch = [&](size_t first)
+    {
+        const size_t count = std::min(kTileBatch, tileList.size() - first);
+        batch.clear();
+        batch.resize(count);
+        const auto loadTile = [&](size_t i)
+        {
+            LoadedTile& loaded = batch[i];
+            loaded.read = mount.Read(tileList[first + i].second, loaded.bytes);
+            if (loaded.read)
+                loaded.tile = ReadTerrainTile(loaded.bytes.data(), loaded.bytes.size());
+        };
+        if (tilePool != nullptr && count > 1)
+            tilePool->ParallelFor(static_cast<uint32_t>(count),
+                                  [&](uint32_t start, uint32_t end)
+                                  {
+                                      for (uint32_t i = start; i < end; ++i)
+                                          loadTile(i);
+                                  });
+        else
+            for (size_t i = 0; i < count; ++i)
+                loadTile(i);
+    };
+    for (size_t tileAt = 0; tileAt < tileList.size(); ++tileAt)
+    {
+        if (tileAt % kTileBatch == 0)
+            loadBatch(tileAt);
+        const uint32_t index = tileList[tileAt].first;
+        const LoadedTile& loaded = batch[tileAt % kTileBatch];
+        const std::vector<uint8_t>& tileBytes = loaded.bytes;
+        if (!loaded.read)
         {
             out.tilesFailed++;
             continue;
         }
-        const TerrainTile tile = ReadTerrainTile(tileBytes.data(), tileBytes.size());
+        const TerrainTile& tile = loaded.tile;
         if (!tile.valid() || tile.samples == 0)
         {
             out.tilesFailed++;
@@ -2184,10 +2227,10 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
     // report mat '(none)'" are one question, asked at two ends of the same chain. Count
     // it at the point the model leaves the converter, before MLOD can be blamed.
     {
-        static int reportedMat = 0;
-        if (reportedMat < 3 && !model.lods.empty())
+        // Atomic: this runs on the streaming workers and the load's task pool too.
+        static std::atomic<int> reportedMat{0};
+        if (!model.lods.empty() && reportedMat.fetch_add(1, std::memory_order_relaxed) < 3)
         {
-            ++reportedMat;
             size_t withMaterial = 0, withTexture = 0;
             for (const auto& face : model.lods[0].faces)
             {
@@ -2219,9 +2262,11 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
     return parsed;
 }
 
-LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::string& xobPath, std::string& why)
+//! The ShapeBank half of BuildShapeFromXob: MAIN THREAD ONLY (bank insert, texture and
+//! material banks). BuildModelFromXob is the half that may run on workers.
+LODShapeWithShadow* InstallShapeFromXobModel(const std::string& xobPath, std::shared_ptr<Poseidon::Model::Model> parsed,
+                                             std::string& why)
 {
-    std::shared_ptr<Poseidon::Model::Model> parsed = BuildModelFromXob(mount, xobPath, why);
     if (!parsed)
         return nullptr;
     // The name is only a cache key here -- no file is opened, because the parsed
@@ -2340,6 +2385,11 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
                  first.empty() ? "(none)" : first);
     }
     return shape;
+}
+
+LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::string& xobPath, std::string& why)
+{
+    return InstallShapeFromXobModel(xobPath, BuildModelFromXob(mount, xobPath, why), why);
 }
 } // namespace
 
@@ -2871,11 +2921,50 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
             std::unordered_map<uint32_t, LODShapeWithShadow*> attachShapes;
             size_t attachBuilt = 0, attachBuildFailed = 0;
             std::string firstAttachFailure;
+            // (PERF, 2026-10-14) The model half of every part is built up front on the task
+            // pool -- archive read + XOB convert + in-memory MLOD round trip, the same pure
+            // path the streaming workers run -- and only the ShapeBank install stays serial,
+            // in the original order. 1,429 parts on Everon: 19.5 s serial on the main thread.
+            std::vector<std::shared_ptr<Poseidon::Model::Model>> attachModels;
+            std::vector<std::string> attachWhy;
+            if (!deferAttachmentShapes)
+            {
+                attachModels.resize(attachMeshes.size());
+                attachWhy.resize(attachMeshes.size());
+                std::atomic<int64_t> workUs{0};
+                const auto buildModel = [&](size_t i)
+                {
+                    const auto t = std::chrono::steady_clock::now();
+                    attachModels[i] = BuildModelFromXob(EnfusionMount::Instance(), attachMeshes[i].first, attachWhy[i]);
+                    workUs.fetch_add(
+                        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t)
+                            .count(),
+                        std::memory_order_relaxed);
+                };
+                const auto parallelStart = std::chrono::steady_clock::now();
+                Poseidon::TaskPool* pool = Poseidon::GetGlobalTaskPool();
+                if (pool != nullptr && attachMeshes.size() > 1)
+                    pool->ParallelFor(static_cast<uint32_t>(attachMeshes.size()),
+                                      [&](uint32_t start, uint32_t end)
+                                      {
+                                          for (uint32_t i = start; i < end; ++i)
+                                              buildModel(i);
+                                      });
+                else
+                    for (size_t i = 0; i < attachMeshes.size(); ++i)
+                        buildModel(i);
+                LOG_INFO(
+                    World, "Enfusion native load: {} part models built in {:.0f} ms on {} threads ({:.0f} ms of work)",
+                    attachMeshes.size(),
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - parallelStart).count(),
+                    pool != nullptr ? pool->ThreadCount() : 1u, workUs.load() / 1000.0);
+            }
+            const auto installStart = std::chrono::steady_clock::now();
             for (size_t i = 0; !deferAttachmentShapes && i < attachMeshes.size(); ++i)
             {
-                std::string why;
+                std::string why = std::move(attachWhy[i]);
                 LODShapeWithShadow* shape =
-                    BuildShapeFromXob(EnfusionMount::Instance(), attachMeshes[i].first, why);
+                    InstallShapeFromXobModel(attachMeshes[i].first, std::move(attachModels[i]), why);
                 if (shape == nullptr)
                 {
                     ++attachBuildFailed;
@@ -2886,6 +2975,10 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                 attachShapes.emplace(static_cast<uint32_t>(i), shape);
                 ++attachBuilt;
             }
+            if (!deferAttachmentShapes)
+                LOG_INFO(
+                    World, "Enfusion native load: {} part shapes installed in {:.0f} ms", attachBuilt,
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - installStart).count());
             const DWORD buildMs = Poseidon::Foundation::GlobalTickCount() - buildStart;
 
             // Near first here too: the object cap walks this list in order, so leaving

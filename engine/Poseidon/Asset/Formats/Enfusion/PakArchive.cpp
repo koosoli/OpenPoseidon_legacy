@@ -4,10 +4,117 @@
 #include <cctype>
 #include <cstdio>
 #include <fstream>
+#include <memory>
 #include <zlib.h>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 namespace Poseidon::Asset::Formats::Enfusion
 {
+
+class PakFile
+{
+  public:
+    PakFile() = default;
+    PakFile(const PakFile&) = delete;
+    PakFile& operator=(const PakFile&) = delete;
+    ~PakFile()
+    {
+#ifdef _WIN32
+        if (_h != INVALID_HANDLE_VALUE)
+            CloseHandle(_h);
+#else
+        if (_fd >= 0)
+            close(_fd);
+#endif
+    }
+
+    static std::shared_ptr<const PakFile> Open(const std::string& path)
+    {
+        auto file = std::make_shared<PakFile>();
+#ifdef _WIN32
+        // Same narrow-path (ANSI) interpretation as the std::ifstream it replaces. OVERLAPPED so
+        // concurrent positional reads from several threads do not serialise on the file object
+        // the way a synchronous handle's reads do; SHARE_DELETE so holding it open for the
+        // mount's lifetime never blocks another program from updating the install.
+        file->_h = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
+        if (file->_h == INVALID_HANDLE_VALUE)
+            return nullptr;
+#else
+        file->_fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+        if (file->_fd < 0)
+            return nullptr;
+#endif
+        return file;
+    }
+
+    //! Exactly `size` bytes at absolute `offset`. Thread-safe and position-free.
+    bool ReadAt(uint64_t offset, uint8_t* dst, size_t size) const
+    {
+#ifdef _WIN32
+        struct ThreadEvent
+        {
+            HANDLE h = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            ~ThreadEvent()
+            {
+                if (h)
+                    CloseHandle(h);
+            }
+        };
+        thread_local ThreadEvent event;
+        if (!event.h)
+            return false;
+        while (size > 0)
+        {
+            const DWORD chunk = static_cast<DWORD>(std::min<size_t>(size, size_t(1) << 30));
+            OVERLAPPED ov{};
+            ov.Offset = static_cast<DWORD>(offset);
+            ov.OffsetHigh = static_cast<DWORD>(offset >> 32);
+            ov.hEvent = event.h;
+            DWORD got = 0;
+            if (!ReadFile(_h, dst, chunk, nullptr, &ov) && GetLastError() != ERROR_IO_PENDING)
+                return false;
+            if (!GetOverlappedResult(_h, &ov, &got, TRUE) || got == 0)
+                return false;
+            dst += got;
+            offset += got;
+            size -= got;
+        }
+        return true;
+#else
+        while (size > 0)
+        {
+            const ssize_t got = ::pread(_fd, dst, size, static_cast<off_t>(offset));
+            if (got <= 0)
+                return false;
+            dst += got;
+            offset += static_cast<uint64_t>(got);
+            size -= static_cast<size_t>(got);
+        }
+        return true;
+#endif
+    }
+
+  private:
+#ifdef _WIN32
+    HANDLE _h = INVALID_HANDLE_VALUE;
+#else
+    int _fd = -1;
+#endif
+};
+
 namespace
 {
 
@@ -25,6 +132,7 @@ void PakArchive::Close()
 {
     _path.clear();
     _error.clear();
+    _file.reset();
     _entries.clear();
     _directories = 0;
     _closure = {};
@@ -128,6 +236,8 @@ bool PakArchive::Open(const std::string& path)
         _error = message;
         return false;
     }
+    // Null on refusal: reads then fall back to reopening the archive per member.
+    _file = PakFile::Open(path);
     return true;
 }
 
@@ -279,7 +389,7 @@ const PakEntry* PakArchive::Find(const std::string& path) const
 bool PakArchive::Read(const PakEntry& entry, std::vector<uint8_t>& out) const
 {
     std::string error;
-    const bool ok = PakReadRequest{_path, entry}.Read(out, error);
+    const bool ok = PakReadRequest{_path, entry, _file}.Read(out, error);
     if (!ok) const_cast<PakArchive*>(this)->_error = std::move(error);
     return ok;
 }
@@ -288,20 +398,22 @@ bool PakReadRequest::Read(std::vector<uint8_t>& out, std::string& error) const
 {
     out.clear();
     error.clear();
-    std::ifstream file(archivePath, std::ios::binary);
-    if (!file)
-    {
-        error = "cannot reopen " + archivePath;
-        return false;
-    }
     std::vector<uint8_t> stored(entry.storedSize);
-    file.seekg(static_cast<std::streamoff>(entry.offset));
-    file.read(reinterpret_cast<char*>(stored.data()), static_cast<std::streamsize>(entry.storedSize));
-    if (!file)
+    if (!(file && file->ReadAt(entry.offset, stored.data(), stored.size())))
     {
-        error = entry.path + ": could not read " +
-                                                std::to_string(entry.storedSize) + " stored bytes";
-        return false;
+        std::ifstream reopened(archivePath, std::ios::binary);
+        if (!reopened)
+        {
+            error = "cannot reopen " + archivePath;
+            return false;
+        }
+        reopened.seekg(static_cast<std::streamoff>(entry.offset));
+        reopened.read(reinterpret_cast<char*>(stored.data()), static_cast<std::streamsize>(entry.storedSize));
+        if (!reopened)
+        {
+            error = entry.path + ": could not read " + std::to_string(entry.storedSize) + " stored bytes";
+            return false;
+        }
     }
 
     if (!entry.compressed())

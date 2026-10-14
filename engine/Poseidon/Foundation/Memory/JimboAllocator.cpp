@@ -4,6 +4,7 @@
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Common/Win.h>
 #include <stdlib.h>
+#include <algorithm>
 #include <Poseidon/Foundation/Framework/AppFrame.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Memory/CheckMem.hpp>
@@ -22,17 +23,68 @@
 namespace Poseidon::Foundation
 {
 #ifdef _WIN32
-static JimboAllocator GJimboAllocatorInstance;
+static JimboAllocator GJimboAllocatorInstance(true);
 static JimboAllocatorLocked GSafeJimboAllocatorInstance;
 #else
 // On Linux: use init_priority(101) to ensure early initialization
 // before any user-defined static constructors (default priority ~65535)
-static JimboAllocator GJimboAllocatorInstance __attribute__((init_priority(101)));
+[[gnu::init_priority(101)]] static JimboAllocator GJimboAllocatorInstance(true);
 static JimboAllocatorLocked GSafeJimboAllocatorInstance __attribute__((init_priority(102)));
 #endif
 
 MemFunctions* GMemFunctionsPtr = &GJimboAllocatorInstance;
 MemFunctions* GSafeMemFunctionsPtr = &GSafeJimboAllocatorInstance;
+
+namespace
+{
+// The calling thread's not-yet-folded accounting for the batched (global) instance. Plain
+// trivially-destructible thread_locals on purpose: the allocator serves allocations during
+// thread teardown too, after any thread_local destructor would have run.
+thread_local int64_t t_pendingBytes = 0;
+thread_local int64_t t_pendingBlocks = 0;
+} // namespace
+
+JimboAllocator::JimboAllocator(bool batchedAccounting) : JimboAllocator()
+{
+    _batched = batchedAccounting;
+}
+
+inline void JimboAllocator::Account(int64_t bytes, int64_t blocks)
+{
+    if (!_batched)
+    {
+        if (bytes >= 0)
+            _budget.Reserve(static_cast<size_t>(bytes));
+        else
+            _budget.Release(static_cast<size_t>(-bytes));
+        _allocCount.fetch_add(blocks, std::memory_order_relaxed);
+        return;
+    }
+    int64_t& pending = t_pendingBytes;
+    pending += bytes;
+    t_pendingBlocks += blocks;
+    if (pending > kAccountFlushBytes || pending < -kAccountFlushBytes)
+    {
+        if (pending >= 0)
+            _budget.Reserve(static_cast<size_t>(pending));
+        else
+            _budget.Release(static_cast<size_t>(-pending));
+        _allocCount.fetch_add(t_pendingBlocks, std::memory_order_relaxed);
+        pending = 0;
+        t_pendingBlocks = 0;
+    }
+}
+
+int64_t JimboAllocator::CallerPendingBytes() const
+{
+    return _batched ? t_pendingBytes : 0;
+}
+
+size_t JimboAllocator::UsedIncludingCaller() const
+{
+    const int64_t used = static_cast<int64_t>(_budget.Used()) + CallerPendingBytes();
+    return used > 0 ? static_cast<size_t>(used) : 0;
+}
 
 JimboAllocator::JimboAllocator() : _heap(nullptr), _allocCount(0), _outOfMemory(false)
 {
@@ -64,12 +116,6 @@ void* JimboAllocator::New(size_t size)
         return nullptr;
     }
 
-    // Process-wide budget accounting. With no hard ceiling (the default) this is
-    // one atomic add. With a ceiling, Reserve evicts caches via FreeOnDemand when
-    // over budget but always admits — a cap that returned null would crash the
-    // engine's many allocation sites that assume `new` never fails.
-    _budget.Reserve(size);
-
     // Allocate with 16-byte alignment (required for SSE and x64 vtables).
     // Zero on alloc — callers rely on `new` returning zeroed memory.
     // Use mi_zalloc_aligned (not mi_heap_zalloc_aligned) so mimalloc routes
@@ -88,16 +134,19 @@ void* JimboAllocator::New(size_t size)
 
     if (!mem)
     {
-        _budget.Release(size); // hand the reservation back — the alloc failed
+        // Nothing to hand back: accounting follows the backing allocation.
         _outOfMemory = true;
         LOG_DEBUG(Memory, "JimboAllocator: Out of memory allocating %zu bytes", size);
         return nullptr;
     }
 
-    // Reconcile the reservation (request size) with mimalloc's real usable size.
-    _budget.Reconcile(size, mi_usable_size(mem));
-    _allocCount++;
-    _outOfMemory = false;
+    // Account mimalloc's real usable size (what Delete will release). The budget never
+    // refuses, so accounting after the backing allocation equals the old reserve-then-
+    // reconcile pair. _outOfMemory is written only when it changes: an unconditional
+    // seq_cst store here was a full barrier plus a shared-line write on every new.
+    Account(static_cast<int64_t>(mi_usable_size(mem)), 1);
+    if (_outOfMemory.load(std::memory_order_relaxed))
+        _outOfMemory.store(false, std::memory_order_relaxed);
 
     return mem;
 }
@@ -115,11 +164,7 @@ void JimboAllocator::Delete(void* mem)
         return;
     }
 
-    _budget.Release(mi_usable_size(mem));
-    if (_allocCount > 0)
-    {
-        _allocCount--;
-    }
+    Account(-static_cast<int64_t>(mi_usable_size(mem)), -1);
 
     mi_free(mem);
 }
@@ -132,7 +177,7 @@ void* JimboAllocator::HeapBase()
 
 size_t JimboAllocator::HeapUsed()
 {
-    return _budget.Used();
+    return UsedIncludingCaller();
 }
 
 int JimboAllocator::FreeBlocks()
@@ -144,7 +189,10 @@ int JimboAllocator::FreeBlocks()
 
 int JimboAllocator::MemoryAllocatedBlocks()
 {
-    return static_cast<int>(_allocCount.load());
+    const int64_t blocks = _allocCount.load(std::memory_order_relaxed) + (_batched ? t_pendingBlocks : 0);
+    // Not clamped at 0: other threads' unflushed deltas are invisible here, so the global
+    // sum can dip below the true count, and a clamp would break before/after comparisons.
+    return static_cast<int>(std::clamp<int64_t>(blocks, INT32_MIN, INT32_MAX));
 }
 
 bool JimboAllocator::CheckIntegrity()
@@ -182,7 +230,7 @@ size_t JimboAllocator::FrameMaintenance()
 {
     const size_t soft = _budget.SoftLimit();
     const size_t hard = _budget.HardLimit();
-    const size_t used = _budget.Used();
+    const size_t used = UsedIncludingCaller();
 
     const bool overSoft = soft != 0 && used > soft;
     const bool overHard = hard != 0 && used > hard;
@@ -200,7 +248,7 @@ size_t JimboAllocator::FrameMaintenance()
     // _budget via the freed objects' Delete()/Release(), so re-read Used().
     if (hard != 0)
     {
-        const size_t now = _budget.Used();
+        const size_t now = UsedIncludingCaller();
         if (now > hard)
         {
             freed += _freeOnDemand.Free(now - hard);
