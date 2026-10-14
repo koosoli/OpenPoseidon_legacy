@@ -58,6 +58,131 @@ Matrix4 HeldModelSourceOrigin(const LODShapeWithShadow* drawn)
         return MIdentity;
     return Matrix4(MTranslation, -drawn->AnimationOrigin());
 }
+
+// OP_A2_PROXYLOG=1, first person: where the view-pilot LOD's arms, fingers and collar land
+// against the same bones of LOD 0 posed with the same palette, what sits in front of the eye,
+// and which textures the LOD draws with. The Arma 2 first-person view showed spread pink
+// fingers (USMC) or a piece of gear filling the bottom of the screen (FR, ACR), while the
+// same soldiers looked right from outside.
+void LogViewLodPose(LODShapeWithShadow* lshape, const WeightInfo& weights, int level, const Matrix4Array& matrix,
+                    Vector3Par eye)
+{
+    static const bool enabled = [] {
+        const char* e = std::getenv("OP_A2_PROXYLOG");
+        return e && *e == '1';
+    }();
+    if (!enabled || !lshape)
+        return;
+    static DWORD last = 0;
+    static bool texturesLogged = false;
+    const DWORD now = Poseidon::Foundation::GlobalTickCount();
+    if (now - last < 2000)
+        return;
+    last = now;
+    Shape* view = lshape->Level(level);
+    if (!view)
+        return;
+    // posed centroid of a named selection, from the palette (weights as AnimationRT applies them)
+    const auto posed = [&](int lod, const char* name, Vector3& out, int& count, float& weightSum) -> bool
+    {
+        Shape* s = lshape->Level(lod);
+        if (!s)
+            return false;
+        const int si = s->FindNamedSel(name);
+        if (si < 0)
+            return false;
+        const NamedSelection& sel = s->NamedSel(si);
+        const AnimationRTWeights& w = weights[lod];
+        Vector3 sum = VZero;
+        count = 0;
+        weightSum = 0;
+        for (int i = 0; i < sel.Size(); i++)
+        {
+            const int v = sel[i];
+            const Vector3 orig = s->OriginalPosValid() ? s->OrigPos(v) : s->Pos(v);
+            const AnimationRTWeight& wg = w[v];
+            Vector3 p = VZero;
+            float ws = 0;
+            for (int k = 0; k < wg.Size(); k++)
+            {
+                const int bone = wg[k].GetSel();
+                if (bone < 0 || bone >= matrix.Size())
+                    continue;
+                p += matrix[bone].FastTransform(orig) * wg[k].GetWeight();
+                ws += wg[k].GetWeight();
+            }
+            if (ws <= 0)
+                continue;
+            sum += p;
+            weightSum += ws;
+            count++;
+        }
+        if (count > 0)
+        {
+            out = sum / float(count);
+            weightSum /= float(count);
+        }
+        return count > 0;
+    };
+    LOG_INFO(Graphics, "A2 view LOD: level {} res {} of {} bones {} eye {:.2f},{:.2f},{:.2f} verts {} (lod 0: {})", level,
+             lshape->Resolution(level), (const char*)lshape->GetName(), matrix.Size(), eye.X(), eye.Y(), eye.Z(), view->NPos(),
+             lshape->Level(0) ? lshape->Level(0)->NPos() : 0);
+    static const char* const names[] = {"head",          "neck1",          "spine3",         "leftshoulder",
+                                        "leftforearm",   "lefthand",       "lefthandindex3", "lefthandthumb3",
+                                        "rightforearm",  "righthand",      "righthandindex3", "weapon"};
+    for (const char* name : names)
+    {
+        Vector3 a = VZero, b = VZero;
+        int na = 0, nb = 0;
+        float wa = 0, wb = 0;
+        const bool hasA = posed(level, name, a, na, wa);
+        const bool hasB = posed(0, name, b, nb, wb);
+        if (!hasA && !hasB)
+            continue;
+        LOG_INFO(Graphics,
+                 "A2 view LOD bone {}: view {} verts at {:.2f},{:.2f},{:.2f} (weight {:.2f}) | lod 0 {} verts at "
+                 "{:.2f},{:.2f},{:.2f} (weight {:.2f}) | apart {:.2f} m",
+                 name, na, a.X(), a.Y(), a.Z(), wa, nb, b.X(), b.Y(), b.Z(), wb, hasA && hasB ? a.Distance(b) : -1.0f);
+    }
+    // what the drawn (CPU-skinned) view LOD puts in front of the eye: model +z is forward
+    int ahead = 0, unweighted = 0;
+    Vector3 nearest = VZero;
+    float nearestD = 1e9f;
+    Vector3 mn(1e9f, 1e9f, 1e9f), mx(-1e9f, -1e9f, -1e9f);
+    const AnimationRTWeights& vw = weights[level];
+    for (int v = 0; v < view->NPos(); v++)
+    {
+        if (vw[v].Size() <= 0)
+            unweighted++;
+        const Vector3 d = view->Pos(v) - eye;
+        if (d.Z() < 0.03f || fabs(d.X()) > d.Z() * 0.8f || fabs(d.Y()) > d.Z() * 0.5f)
+            continue;
+        ahead++;
+        mn = Vector3(std::min(mn.X(), d.X()), std::min(mn.Y(), d.Y()), std::min(mn.Z(), d.Z()));
+        mx = Vector3(std::max(mx.X(), d.X()), std::max(mx.Y(), d.Y()), std::max(mx.Z(), d.Z()));
+        if (d.Size() < nearestD)
+        {
+            nearestD = d.Size();
+            nearest = d;
+        }
+    }
+    LOG_INFO(Graphics,
+             "A2 view LOD in view of the eye: {} of {} vertices (unweighted {}), relative box {:.2f},{:.2f},{:.2f} .. "
+             "{:.2f},{:.2f},{:.2f}, nearest {:.2f},{:.2f},{:.2f}",
+             ahead, view->NPos(), unweighted, mn.X(), mn.Y(), mn.Z(), mx.X(), mx.Y(), mx.Z(), nearest.X(), nearest.Y(),
+             nearest.Z());
+    if (!texturesLogged)
+    {
+        texturesLogged = true;
+        for (int i = 0; i < view->NSections(); i++)
+        {
+            const ShapeSection& sec = view->GetSection(i);
+            Texture* tex = sec.properties.GetTexture();
+            LOG_INFO(Graphics, "A2 view LOD section {}: texture {} special {:x}", i,
+                     tex ? (const char*)tex->GetName() : "(none)", sec.properties.Special());
+        }
+    }
+}
 } // namespace
 
 Object* Man::GetProxy(LODShapeWithShadow*& shape, int level, Matrix4& transform, Matrix4& invTransform,
@@ -1199,6 +1324,8 @@ void Man::Animate(int level)
         else _head.ApplyFaceBones(type->_head, type->GetWeights(), level, matrix, _isDead);
 
         AnimationRT::ApplyMatrices(type->GetWeights(), _shape, level, matrix);
+        if (level == type->_insideView && level > 0 && GWorld && GWorld->CameraOn() == this)
+            LogViewLodPose(_shape, type->GetWeights(), level, matrix, GetPilotPosition(CamInternal));
     }
 
     BasicAnimation(level);
