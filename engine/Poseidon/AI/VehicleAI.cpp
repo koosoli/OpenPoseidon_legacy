@@ -907,6 +907,12 @@ void EntityAIType::InitShape()
         int index = _hiddenSelections.Add();
         _hiddenSelections[index].Init(_shape, name, nullptr);
     }
+    // Arma's default texture per hidden selection (absent from every CWA class): what the
+    // selection shows until a script sets another with setObjectTexture.
+    _hiddenSelectionsTextureNames.Clear();
+    if (const ParamEntry* textures = par.FindEntry("hiddenSelectionsTextures"); textures && textures->IsArray())
+        for (int i = 0; i < textures->GetSize() && i < _hiddenSelections.Size(); i++)
+            _hiddenSelectionsTextureNames.Add((RString)(RStringB)(*textures)[i]);
 
     // reload animations
     const ParamEntry* array = par.FindEntry("ReloadAnimations");
@@ -1179,6 +1185,18 @@ EntityAI::EntityAI(EntityAIType* type, bool fullCreate)
 
     _hiddenSelectionsTextures.Realloc(type->_hiddenSelections.Size());
     _hiddenSelectionsTextures.Resize(type->_hiddenSelections.Size());
+    for (int i = 0; i < type->_hiddenSelectionsTextureNames.Size() && i < _hiddenSelectionsTextures.Size(); i++)
+    {
+        RString name = type->_hiddenSelectionsTextureNames[i];
+        if (name.GetLength() == 0)
+            continue;
+        const char* path = name.Data();
+        if (*path == '\\')
+            path++;
+        RString lower = path;
+        lower.Lower();
+        _hiddenSelectionsTextures[i] = GlobLoadTexture(lower);
+    }
 }
 
 EntityAI::~EntityAI()

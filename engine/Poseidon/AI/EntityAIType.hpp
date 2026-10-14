@@ -562,6 +562,7 @@ class EntityAIType: public EntityType
 	Vector3 _showDmgPoint;
 
 	AutoArray<AnimationSection> _hiddenSelections;
+	AutoArray<RString> _hiddenSelectionsTextureNames; // Arma: default texture per hidden selection
 
 	AutoArray<UserTypeAction> _userTypeActions;
 
