@@ -1973,18 +1973,18 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         }
         // Skeleton bones the OFP code names in Czech.
         text += "\t\tboneLauncher=\"launcher\";\r\n\t\tboneLeftHand=\"lefthand\";\r\n\t\tboneRightHand=\"righthand\";\r\n";
-        // An Arma 2 man is stored facing +z, the way this engine's soldiers face once
-        // turned: not turned again. Reversed like a CWA soldier, every Arma 2 soldier faced
-        // backwards -- walked backwards, aimed behind himself (his rifle out of the
-        // first-person view, his hands seen from behind in third person). Measured: posed
-        // with AmovPercMstpSrasWrflDnon his knees and both hands go to +z in the stored
-        // model. Its moves are converted for an unturned model too (ConvertBMTRToRTM).
-        // OP_A2_MAN_REVERSED=1 turns him as before.
-        static const bool a2ManReversed = [] {
-            const char* e = std::getenv("OP_A2_MAN_REVERSED");
+        // An Arma 2 man is stored facing -z like every Arma/OFP model (toes, eyes and the
+        // "pilot" camera point lie at -z), so he keeps CWA's reversed=1 and is turned at
+        // load; his moves (BMTR) pose the turned model (ConvertBMTRToRTM, measured with
+        // diag30). OP_A2_MAN_XMIRROR=1 brings back the earlier pair: moves read mirrored in
+        // x and the man left unturned (reversed=0), which made him his own mirror image --
+        // limbs to the front, face to the back, the first-person camera looking out of the
+        // back of his head at his backpack.
+        static const bool a2ManXMirror = [] {
+            const char* e = std::getenv("OP_A2_MAN_XMIRROR");
             return e && *e == '1';
         }();
-        if (Generation() == 2 && !a2ManReversed)
+        if (Generation() == 2 && a2ManXMirror)
             text += "\t\treversed=0;\r\n";
     }
     text += "\t};\r\n};\r\n";
