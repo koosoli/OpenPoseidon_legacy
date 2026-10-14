@@ -32,12 +32,15 @@ folder (nothing copied into the CWA install). They share one compat layer
 
 ## State of `MrDudeX-arma3` (2026-10-14 evening)
 
-- Rebased onto `MrDudeX-arma1` `99b4cde`, plus the seven `MrDudeX-arma2` commits `d721a0e..58afdbb`
+- Rebased onto `MrDudeX-arma1` `d0cdd15`, plus the 16 `MrDudeX-arma2` commits `d721a0e..0608cd7`
   that `MrDudeX-arma1` has not merged yet, picked unchanged (a later rebase drops them again).
-- **For the Arma 2 session:** `131eb6a` gives Arma 2 men `reversed=0` under
-  `Generation() == 2`, while `ConvertBMTRToRTM` converts every hierarchical move. Arma 3
-  men need the same, so this branch writes the check as `Generation() >= 2` (`68c8f0e`).
-  If you touch that block again, please keep `>= 2`.
+- Arma 3 men follow the Arma 2 man handling as it stands (turned, `reversed=1`, moves posed
+  for the turned model since `91d70f9`); nothing Arma 3 specific is needed there.
+- **Shared code touched (2026-10-15):** `QFBank::Load` reads PBO headers through a 64 KB
+  buffer (`BankHeaderReader`; checked byte-identical on 552 Arma 3 and 1,355 CWA archives) --
+  Arma 3's 521 archives took 59 s to mount with one `ReadFile` per byte. The test-mode stall
+  monitor in `GameStateExtA2.cpp` counts from the first simulation step and allows 120 s
+  under `--arma3` only; Arma 2 keeps 60 s from the start.
 - **Game folder.** The Arma 3 test runs use their own binaries in
   `<CWA>\_OpenPoseidon-Arma3\bin` with `Remastered` as working directory
   (`scripts/arma3-pc/go.ps1`), so they never replace the exe/dll the Arma 1 / Arma 2 sessions
