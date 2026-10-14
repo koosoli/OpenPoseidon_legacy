@@ -104,6 +104,7 @@ and are not counted.
 | 8 | `f02e242` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 96 | 0 |
 | 9 | `06789da` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 97 | 0 |
 | 10 | `9e32ad8` | 98 (Arma 2 + Operation Arrowhead), 40 s each | 98 | 96 | 0 |
+| 11 | `c44ba31` | 98, laptop (Intel Iris Xe, `--render gl33`), 40 s each | 98 | 97 | 1 hang (SP_WarWelcome: modal `hintC`, fixed `7bf71f5`) |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
@@ -204,3 +205,9 @@ context, so such loops never ended).
 Run 10 (with the loop `exitWith` fix) shows no regression. With Warfare now starting
 properly, MPE_MountainWarfare gets further and reports `createUnit` with an undefined
 soldier class twice (`Format ["%1SOLDIER", side letter]`) -- open.
+
+Run 11 is the first on the laptop and the first with Arma 2 soldiers carrying their own
+weapons (`A1x_` weapon classes with the Arma 2 models) and Arma 2 vehicles crewed by their
+own crew classes; see [the asset plan](../roadmap/ARMA2-ASSETS-20261014.md). No mission lost
+anything to that. SP_WarWelcome stopped at a modal `hintC` 25 s in, which an unattended
+test cannot dismiss; test mode now shows it as an ordinary hint.
