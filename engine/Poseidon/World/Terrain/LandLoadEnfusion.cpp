@@ -1922,8 +1922,12 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
 ///
 /// Not modelled: crossings, end caps, line markings, Enfusion's terrain cut, and the
 /// along-road variant switching (MidPiece weights).
-LODShapeWithShadow* BuildRoadShape(const ResolvedRoad& road, const std::function<float(float, float)>& groundY,
-                                   size_t variantSeed, const std::string& name)
+//! The model half of a road: the draped ribbon, through the MLOD round trip. Pure (the ground
+//! is read through `groundY`), so the loader builds every road's on the task pool and only
+//! registers the shapes on the main thread.
+std::shared_ptr<Poseidon::Model::Model> BuildRoadModel(const ResolvedRoad& road,
+                                                       const std::function<float(float, float)>& groundY,
+                                                       size_t variantSeed, const std::string& name)
 {
     namespace Fmt = Poseidon::Asset::Formats;
 
@@ -2147,7 +2151,7 @@ LODShapeWithShadow* BuildRoadShape(const ResolvedRoad& road, const std::function
         Fmt::MLODLoader::loadFromBuffer(buffer.data(), static_cast<int>(buffer.size()), name));
     if (parsed->lodLevels.empty())
         return nullptr;
-    return Poseidon::Shapes.NewFromModel(name.c_str(), false, true, parsed, nullptr);
+    return parsed;
 }
 
 /// RFG-013: one `.xob` in the archives -> one shape the engine can draw.
@@ -3456,6 +3460,14 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                 _enfusionRoadCells.assign(static_cast<size_t>(_landRange) * static_cast<size_t>(_landRange), 0);
                 _enfusionRoadSegments.clear();
                 size_t roadCells = 0;
+                // PERF (2026-10-14): three passes. Building each ribbon's model -- drape
+                // samples, the MLOD write and its parse -- was ~6 s of native Everon's load
+                // on the main thread, one road after another. Preparing the centrelines
+                // (densify, rotate, drape, the length total) stays serial and in order; the
+                // models build on the task pool; registration, the land-cell marks and
+                // AddObject then run serially in the same road order as before, so names,
+                // object order and every counter come out as they did.
+                std::vector<char> roadReady(roads.size(), 0);
                 for (size_t r = 0; r < roads.size(); ++r)
                 {
                     ResolvedRoad& road = roads[r];
@@ -3588,13 +3600,46 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                         }
                     }
 
+                    roadReady[r] = 1;
+                }
+                std::vector<std::shared_ptr<Poseidon::Model::Model>> roadModels(roads.size());
+                {
+                    const auto buildRoad = [&](size_t r)
+                    {
+                        if (!roadReady[r])
+                            return;
+                        const ResolvedRoad& road = roads[r];
+                        // Each strip vertex sits on the engine's own terrain, 8 cm up, whatever the
+                        // centreline's height (see BuildRoadModel: a strip draped by its centre
+                        // alone sinks its uphill edge).
+                        const auto ground = [this, &road](float x, float z)
+                        { return SurfaceY(road.origin[0] + x, road.origin[2] + z) + 0.08f - road.origin[1]; };
+                        roadModels[r] =
+                            BuildRoadModel(road, ground, static_cast<size_t>(r), "enfusion_road_" + std::to_string(r));
+                    };
+                    Poseidon::TaskPool* pool = Poseidon::GetGlobalTaskPool();
+                    if (pool != nullptr && roads.size() > 1)
+                        pool->ParallelFor(static_cast<uint32_t>(roads.size()),
+                                          [&](uint32_t start, uint32_t end)
+                                          {
+                                              for (uint32_t r = start; r < end; ++r)
+                                                  buildRoad(r);
+                                          });
+                    else
+                        for (size_t r = 0; r < roads.size(); ++r)
+                            buildRoad(r);
+                }
+                for (size_t r = 0; r < roads.size(); ++r)
+                {
+                    if (!roadReady[r])
+                        continue;
+                    ResolvedRoad& road = roads[r];
+                    const size_t pointCount = road.points.size() / 3;
                     const std::string name = "enfusion_road_" + std::to_string(r);
-                    // Each strip vertex sits on the engine's own terrain, 8 cm up, whatever the
-                    // centreline's height (see BuildRoadShape: a strip draped by its centre
-                    // alone sinks its uphill edge).
-                    const auto ground = [this, &road](float x, float z)
-                    { return SurfaceY(road.origin[0] + x, road.origin[2] + z) + 0.08f - road.origin[1]; };
-                    LODShapeWithShadow* shape = BuildRoadShape(road, ground, static_cast<size_t>(r), name);
+                    LODShapeWithShadow* shape =
+                        roadModels[r] ? Poseidon::Shapes.NewFromModel(name.c_str(), false, true,
+                                                                       std::move(roadModels[r]), nullptr)
+                                      : nullptr;
                     if (shape == nullptr)
                     {
                         ++roadsFailed;
@@ -3609,7 +3654,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     // is walked at 2 m and each sample tests the cells it can reach as a
                     // disc against the cell SQUARE -- a cell the ribbon merely clips at a
                     // corner is cleared too, which is what actually keeps grass off the
-                    // tarmac at this grid. The same default width BuildRoadShape uses.
+                    // tarmac at this grid. The same default width BuildRoadModel uses.
                     {
                         const float reach = 0.5f * ((road.width > 0.1f) ? road.width : 6.0f) + 1.0f;
                         const float reach2 = reach * reach;
