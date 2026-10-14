@@ -1110,6 +1110,11 @@ void Head::SetMimicMode(RStringB modeName)
 {
     if (modeName.GetLength() > 0)
     {
+        // PERF (2026-10-14): called every tick per soldier with the mode it already has. The
+        // entry was found by this same name (RStringB equality is the interned string), so
+        // the two linear config lookups below would return it again -- skip them.
+        if (_mimicMode && _mimicMode->GetName() == modeName)
+            return;
         const ParamEntry& par = Pars >> "CfgMimics" >> modeName;
         if (_mimicMode != &par)
         {
