@@ -45,6 +45,11 @@ What it took, each step measured on the laptop or offline on Arma 2's own files:
 | `8cca829` | limbs flung about | BMTR moves are **local** (rotation about the rest joint, parent first), mirrored in x, root = pelvis height above ground; and the ODOL 48/49 reader skipped the bounding centre the vertices are stored around. Edge stretch of the posed mesh 4.3 -> 0.17 (stand, walk, kneel, prone) |
 | `3c27692`, `e4d47fe`, `f738f76` | waist-deep in the ground | an Arma 2 man's origin is at the hip; lifted to feet at y=0, kept out of auto-centring, and the land-contact point (one point at the hip) moved to the feet. `getPosATL player` -1.03 -> -0.02 |
 
+| `9fa39fe` | no rifle in the hands, no head | a proxy's bone index is into the model skeleton, not the LOD's sub-skeleton; head proxies (-1) follow `head` |
+
+`0139b92` makes Arma 2 soldiers the default (`OP_A2_SOLDIERS=0` for the CWA models): on the
+12 asset missions 1241 entities are drawn from Arma 2 models and 20 from CWA (civilians).
+
 Offline check: a small program built from the repo's own ODOL and RTM readers poses
 `USMC_Soldier_Light` with a move and scores the result by how much the mesh's edges stretch.
 
