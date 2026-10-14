@@ -2261,7 +2261,7 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     int cargoItems = 0;
     if (!man && useModel && Generation() == 1 && Arma1OwnWeapons())
         text += Arma1Cargo(*a1, cargoItems);
-    if (useModel && Generation() == 2)
+    if (useModel && Generation() >= 2)
     {
         // Arma 2 colours one model several ways through hiddenSelections plus
         // hiddenSelectionsTextures (the LHD deck crew's jerseys and helmets, desert and
