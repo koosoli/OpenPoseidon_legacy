@@ -240,7 +240,8 @@ class TextureWgpu : public Texture
         SlotClothPlain,
         SlotClothWestAtlas,
         SlotClothEastAtlas,
-        SlotEnfusionConstantAlpha
+        SlotEnfusionConstantAlpha,
+        SlotLldrMonitor
     };
     bool NameMemo(NameSlot slot, bool (*compute)(const char* name)) const;
     bool HasNativeLinearMask(bool singleChannel) const;

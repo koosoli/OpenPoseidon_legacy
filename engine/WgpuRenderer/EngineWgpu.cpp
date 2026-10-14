@@ -8496,7 +8496,10 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // section numbers alone repeat across unrelated visible and shadow LODs.
     const ShapeSection& debugSection = sMesh.GetSection(beg);
     const char* debugMaterialPath = debugSection.surfMat ? debugSection.surfMat->GetName().Data() : nullptr;
-    if (_materialDebugRvmatMatch == "__trace__")
+    // Normal play has no selector; the string compares below cost a strlen each per section.
+    // Every one of them is false for an empty selector (ContainsNoCase too).
+    const bool debugSelectorSet = !_materialDebugRvmatMatch.empty();
+    if (debugSelectorSet && _materialDebugRvmatMatch == "__trace__")
     {
         const auto shapeId = reinterpret_cast<uintptr_t>(&sMesh);
         const std::string traceKey = std::to_string(shapeId) + ":" + std::to_string(beg) + ":" +
@@ -8515,9 +8518,11 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                      indexCount, sMesh.NSections(), sMesh.Min().X(), sMesh.Min().Y(), sMesh.Min().Z(),
                      sMesh.Max().X(), sMesh.Max().Y(), sMesh.Max().Z());
     }
-    const bool unassignedMaterialTarget = _materialDebugRvmatMatch == "__unassigned__" && !debugSection.surfMat;
-    const bool materialDebugTarget = unassignedMaterialTarget || _materialDebugRvmatMatch == "*" ||
-                                     ContainsNoCase(debugMaterialPath, _materialDebugRvmatMatch);
+    const bool unassignedMaterialTarget =
+        debugSelectorSet && _materialDebugRvmatMatch == "__unassigned__" && !debugSection.surfMat;
+    const bool materialDebugTarget =
+        debugSelectorSet && (unassignedMaterialTarget || _materialDebugRvmatMatch == "*" ||
+                             ContainsNoCase(debugMaterialPath, _materialDebugRvmatMatch));
     // `__trace__` is an OBSERVER, not a selector: it must not change what is drawn.
     //
     // It used to, and that silently invalidated every appearance judgement made in a
@@ -8526,7 +8531,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // for the whole CPU direct path -- every section drawn there came out untextured.
     // "It renders flat white under __trace__" was therefore a property of the flag, not
     // of the geometry. Treat the trace sentinel as no selector at all.
-    const bool diagnosticSelector = !_materialDebugRvmatMatch.empty() && _materialDebugRvmatMatch != "__trace__";
+    const bool diagnosticSelector = debugSelectorSet && _materialDebugRvmatMatch != "__trace__";
     // Without a diagnostic selector, authored section RVMATs are production
     // bindings. Unknown families and procedural stages remain intentionally
     // unbound after translation; there is no suffix-based fallback here.
@@ -9312,8 +9317,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     //    wgpu; the level-scaled offset resolves them without over-biasing roads.
     // d was zero-initialised; preserve the normal-channel bit from material binding.
     // The LLDR's authored translucent screen is a display, not an open hole.
-    if (texture && texture->Name() &&
-        std::strstr(texture->Name(), "lldr_monitor.paa") != nullptr)
+    if (texture && texture->NameMemo(TextureWgpu::SlotLldrMonitor, [](const char* name)
+                                     { return name && std::strstr(name, "lldr_monitor.paa") != nullptr; }))
     {
         d.flags |= WGR_DRAW3D_MONITOR;
     }
