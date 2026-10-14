@@ -6207,9 +6207,16 @@ impl Renderer {
                         _ => None,
                     };
                     let water_depth_attachment = match &water_zview {
+                        // Stored when the merge below reads it back: Discard left the merge reading an
+                        // undefined buffer, so no wave ever reached the scene depth and the cloud deck
+                        // was composited over every crest standing against the sky (the "see-through
+                        // huge waves", 2026-10-14).
                         Some(v) => wgpu::RenderPassDepthStencilAttachment {
                             view: v,
-                            depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Discard }),
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: if water_zbuf::merge_enabled() { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
+                            }),
                             stencil_ops: None,
                         },
                         None => wgpu::RenderPassDepthStencilAttachment { view: seg_depth, depth_ops: None, stencil_ops: None },
