@@ -81,6 +81,11 @@ RString ResolveMagazineClass(const RString& className);
 // Identity for every other name and when no Arma install is active.
 RString ScriptClassName(const RString& engineName);
 
+// The magazine name a script sees on a unit of the generated class `unitClass`: the Arma
+// magazine of that unit's own loadout that the CWA magazine stands for ("M16" on an
+// A1x_SoldierWB -> "30Rnd_556x45_Stanag"). The CWA name for any other unit or magazine.
+RString ScriptMagazineName(const RString& unitClass, const RString& cwaMagazine);
+
 // Whether a weapon or muzzle name a script gives ("M4AIM") names the engine weapon
 // `engineName`: the name itself, the generated A1x_ class of it, or the CWA class it
 // resolves to. Exact (case-insensitive) comparison when no Arma install is active.
