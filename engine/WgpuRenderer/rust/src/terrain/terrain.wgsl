@@ -390,6 +390,20 @@ fn mud_height_gradient(world_xz: vec2<f32>, footprint: f32) -> vec2<f32> {
         mud_height_offset(world_xz + vec2<f32>(0.0, h)) - mud_height_offset(world_xz - vec2<f32>(0.0, h))) / (2.0 * h);
 }
 
+// (OP, 2026-10-14) Beyond the map edge the heightfield clamps to its edge texels: an endless flat
+// shelf at the edge's depth. The sea above it is drawn as open ocean (tw_water.wgsl
+// materialTerrainHeightAt sinks the bed to sea level - 200 m over 400 m), so in a storm the wave
+// troughs off the map dipped below that shelf and showed it as flat pale patches between the
+// waves (Everon's south edge from 9975 470). The terrain follows the water's bed there -- only
+// where the edge is already under the sea, so land running into a map edge is unchanged.
+fn offmap_bed(world_xz: vec2<f32>, h: f32) -> f32 {
+    let size = vec2<f32>(f32(tp.hm_width - 1u), f32(tp.hm_height - 1u)) * tp.terrain_grid;
+    let r = world_xz - tp.world_origin;
+    let outside = length(max(max(-r, r - size), vec2<f32>(0.0)));
+    if (outside <= 0.0 || h >= tp.sea_level) { return h; }
+    return mix(h, min(h, tp.sea_level - 200.0), smoothstep(0.0, 400.0, outside));
+}
+
 fn sample_height(world_xz: vec2<f32>) -> f32 {
     let t = (world_xz - tp.world_origin) / tp.terrain_grid;
     let base = floor(t);
@@ -402,9 +416,9 @@ fn sample_height(world_xz: vec2<f32>) -> f32 {
     let y11 = hm_load(ix + 1, iz + 1);
     if (f.x <= 1.0 - f.y)
     {
-        return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x + mud_height_offset(world_xz) + sand_height_offset(world_xz);
+        return offmap_bed(world_xz, y00 + (y10 - y00) * f.y + (y01 - y00) * f.x) + mud_height_offset(world_xz) + sand_height_offset(world_xz);
     }
-    return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y + mud_height_offset(world_xz) + sand_height_offset(world_xz);
+    return offmap_bed(world_xz, y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y) + mud_height_offset(world_xz) + sand_height_offset(world_xz);
 }
 
 // Central-difference normal at a fixed heightmap step. Taken per-fragment (not
@@ -439,9 +453,9 @@ fn grid_height(world_xz: vec2<f32>) -> f32 {
     let y11 = hm_load(ix + 1, iz + 1);
     if (f.x <= 1.0 - f.y)
     {
-        return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x;
+        return offmap_bed(world_xz, y00 + (y10 - y00) * f.y + (y01 - y00) * f.x);
     }
-    return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y;
+    return offmap_bed(world_xz, y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y);
 }
 
 fn sample_mud_normals(world_xz: vec2<f32>, step: f32, footprint: f32) -> GroundNormalPair {
