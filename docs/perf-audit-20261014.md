@@ -127,8 +127,9 @@ What it took on native worlds:
 6. **The engine allocator zero-fills every `new`.** Callers rely on it, so it cannot simply stop.
    It is ~6% of the main thread during streaming, through large buffers that are overwritten at
    once.
-7. **Mid-ring grass vertex shader.** Per-blade and per-clump values are recomputed for every
-   vertex: ~12 M vertex invocations per pass on stock worlds, which are GPU-bound.
+7. ~~Mid-ring grass vertex shader~~. **Measured, not the bottleneck.** With the per-vertex wind
+   and rotor-flutter noise stubbed out, the grass timers did not move (colour 2.03 ms, prepass
+   1.71 ms), so grass cost on stock worlds is not that ALU. Left alone.
 
 ## Levers added
 
