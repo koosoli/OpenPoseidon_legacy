@@ -969,6 +969,7 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
                 if (shotStep == 0 && played >= 8000)
                 {
                     GEngine->Screenshot((shot + "_1st.png").c_str());
+                    Poseidon::Arma1Compat::LogPlayerSurroundings();
                     shotStep = 1;
                 }
                 else if (shotStep == 1 && played >= 10000)
