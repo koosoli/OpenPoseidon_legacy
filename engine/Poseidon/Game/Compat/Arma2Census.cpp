@@ -62,6 +62,23 @@ std::string Describe(Entity* e)
                 line += w ? std::string((const char*)w->GetName()) : std::string("?");
             }
         }
+        // magazines by kind: a soldier with a gun and no rounds for it shows here
+        if (ai->NMagazines() > 0 && dyn_cast<const Person>(e))
+        {
+            std::map<std::string, int> mags;
+            for (int i = 0; i < ai->NMagazines(); i++)
+                if (const Magazine* m = ai->GetMagazine(i); m && m->_type)
+                    mags[std::string((const char*)m->_type->GetName())]++;
+            line += " mags=";
+            bool first = true;
+            for (const auto& [name, count] : mags)
+            {
+                line += (first ? "" : ",") + std::to_string(count) + "x" + name;
+                first = false;
+            }
+        }
+        else if (dyn_cast<const Person>(e) && ai->NWeaponSystems() > 0)
+            line += " mags=none";
     }
     if (const auto* tr = dyn_cast<Transport>(e))
     {
