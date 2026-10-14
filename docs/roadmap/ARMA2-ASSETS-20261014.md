@@ -103,7 +103,19 @@ every soldier, the player and the AI, turns his back to a camera behind him with
 pointing ahead. SPE1's concrete walls draw as concrete.
 
 Still open: the first-person hands look flat (skin texture with the `Skin` shader, which
-GL33 draws as plain diffuse); the LHD deck crew in C0 look gold all over.
+GL33 draws as plain diffuse).
+
+### Weapons, magazines and colours, 2026-10-15
+
+| Commit | Finding | Fix |
+|--------|---------|-----|
+| `341a466` | the LHD deck crew in C0 all wore yellow ("gold all over"): Arma 2 colours one model per class through `hiddenSelections` + `hiddenSelectionsTextures`, which the import dropped | the A1x class carries the pairs whose texture exists (an OFP hidden selection without a texture is hidden, an Arma 2 one is not); an entity starts with those textures. Measured: red, green, white and yellow crew in C0 |
+| `6d42036` | the CDF/TK machine gunners carried CWA's PK: a weapon name both games know was returned unchanged | a hand weapon both games name alike (PK, Strela, Stinger, hunting rifle) gets the Arma 2 model on the CWA weapon of that name |
+| `31a0892` | `Stinger`/`Strela` name no CWA class (CWA: `AALauncher`, `9K32Launcher`), so AA soldiers had no launcher; launcher rounds (PG7VL, OG7, SMAW, AT13) found no magazine | AA, ATGM and RPG/SMAW/LAW launchers and their rounds map to the CWA launcher of their kind |
+| `e6bee9d` | RPK, DMR, Bizon, Makarov SD rounds found no magazine: OFP writes `magazines[]={"this"}` for a weapon that is its own magazine, and "this" names no class | "this" means the CWA weapon's own name; 9x39 goes to the SVD, .22/.17 HMR to the hunting rifle |
+| `3c30bb1` | the M107 (on CWA's M21) had eight M21 magazines and an empty gun: inherited, `{"this"}` named the A1x class | an A1x weapon on such a weapon names the CWA weapon as its magazine |
+| `ddc557d` | the face rig reserved its 8 bones on the full 128-bone Arma 2 skeleton before finding no room: 136-bone palettes for every Arma 2 man, 961 warnings per run | no room, no bones |
+| `7c1b32e`, `f012ca6`, `f77d01a`, `31df49c` | -- | census lists each soldier's magazines; a third screenshot through the weapon's optics, with the optics model logged; a scoped Arma 2 weapon takes its own 2D scope (`modelOptics`) and zoom -- not yet seen in game: the aiming view did not engage in the unattended test (being logged) |
 
 Offline check: a small program built from the repo's own ODOL and RTM readers poses
 `USMC_Soldier_Light` with a move and scores the result by how much the mesh's edges stretch.
