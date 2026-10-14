@@ -1546,6 +1546,7 @@ impl Terrain {
         };
         let previous = previous
             .filter(|old| old.w == src.w && old.h == src.h && old.terrain_grid == src.terrain_grid);
+        let t_sv = std::time::Instant::now();
         let (sv_w, sv_h, raw, sv) = skyvis::compute_cached(
             &src.heights,
             src.w,
@@ -1555,6 +1556,7 @@ impl Terrain {
             previous.map(|old| (old.heights.as_slice(), old.raw_visibility.as_slice())),
         );
         src.raw_visibility = raw;
+        eprintln!("[wgr] terrain sky visibility: {sv_w}x{sv_h} in {:.0} ms", t_sv.elapsed().as_secs_f64() * 1000.0);
         self.skyvis_last = Some((sv_w, sv_h, sv));
         self.upload_skyvis(device, queue);
     }

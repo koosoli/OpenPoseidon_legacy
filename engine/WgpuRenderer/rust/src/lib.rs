@@ -7254,11 +7254,18 @@ impl Renderer {
         // event the renderer can see today without an ABI change. Camera history from the
         // previous world must not reproject into this one.
         self.temporal.notify_reset("world load");
+        let t0 = std::time::Instant::now();
         self.terrain
             .set_heightmap(&self.device, &self.queue, heights, params);
+        let t1 = std::time::Instant::now();
         // TW-WATER W3: Tidewater's shore field is computed from the heights (on a worker thread).
         self.water.set_terrain_heights(heights, params);
-        self.log.log(log_level::INFO, &format!("Terrain heightfield ready={}", self.terrain.has_heightmap()));
+        let t2 = std::time::Instant::now();
+        self.log.log(log_level::INFO, &format!(
+            "Terrain heightfield ready={} (terrain upload {:.0} ms, water heights {:.0} ms)",
+            self.terrain.has_heightmap(),
+            (t1 - t0).as_secs_f64() * 1000.0,
+            (t2 - t1).as_secs_f64() * 1000.0));
     }
 
     fn water_set_params(&mut self, params: WgrWaterParams) {
