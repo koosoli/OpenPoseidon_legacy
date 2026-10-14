@@ -323,15 +323,26 @@ inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
     }
     // What a BMTR transform is, measured on Arma 2's own data (a USMC soldier, ODOL 48,
     // posed by AmovPercMstpSrasWrflDnon and AmovPercMwlkSrasWrflDf):
-    //  - the quaternion is the conjugate of the RTM orientation (see above), and the
-    //    data is mirrored in x against the model (S M S, S = diag(-1, 1, 1));
+    //  - the quaternion is the conjugate of the RTM orientation (see above);
     //  - each bone is LOCAL: a rotation about its own rest joint (R p + t, so t = J - R J),
     //    applied before its parent's -- world = parent * local, down the skeleton;
     //  - the root (pelvis) holds its height above the ground instead (about 0.98 m
-    //    standing), so its translation is that height less the rest height.
-    // Composed this way every joint closes (mean edge stretch 0.17 against 2.5-5 for the
-    // plain reading, which tore the soldier apart in game). Without a known skeleton
+    //    standing), so its translation is that height less the rest height;
+    //  - the moves pose the model TURNED, the way the engine draws it (a stored Arma man
+    //    faces -z like every Arma/OFP model: toes, eyes and the "pilot" camera point lie
+    //    at -z), so in the stored frame a move is W conjugated by diag(-1, 1, -1).
+    // Measured with diag30 on USMC_Soldier_Light, USMC_Soldier_CO and FR Cooper over
+    // stand/aim/idle/walk/kneel/prone: posed this way the mean edge stretch is 0.04-0.09,
+    // and eyes, hands, knees and toes all land on the model's own front. The x-mirror read
+    // before (OP_A2_MAN_XMIRROR=1) closed the joints too (0.09-0.21) but posed the man as
+    // his mirror image, limbs to +z with his face to -z: in game the soldier then either
+    // aimed behind himself (turned) or looked out of the back of his head (unturned; the
+    // first-person camera saw his backpack). Without a known skeleton
     // (BmtrSkeletonParents empty for these bones) the transforms stay as stored.
+    static const bool xMirror = [] {
+        const char* e = std::getenv("OP_A2_MAN_XMIRROR");
+        return e && *e == '1';
+    }();
     const auto lower = [](std::string v)
     {
         for (char& ch : v)
@@ -408,12 +419,15 @@ inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
             m[11] = detail::HalfToFloat(h[2]);
             if (hierarchical)
             {
-                // mirror in x: S M S
-                m[1] = -m[1];
-                m[2] = -m[2];
-                m[3] = -m[3];
-                m[6] = -m[6];
-                m[9] = -m[9];
+                if (xMirror)
+                {
+                    // the old reading, mirrored in x: S M S
+                    m[1] = -m[1];
+                    m[2] = -m[2];
+                    m[3] = -m[3];
+                    m[6] = -m[6];
+                    m[9] = -m[9];
+                }
                 if (parentIndex[b] < 0 && parents.count(lower(boneNames[b])) && parents.at(lower(boneNames[b])).empty())
                 {
                     // the root: its height above the ground, not a joint offset
@@ -467,15 +481,11 @@ inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
                 }
             }
         }
-        // The engine loads every move "reversed" (AnimationRTPhase::LoadFromRTM conjugates it
-        // by diag(-1, 1, -1)), as an OFP soldier is a turned model. An Arma 2 soldier is not
-        // turned (reversed=0, Arma1ModelClass), so the moves leave here conjugated once
-        // already and arrive as they were posed. OP_A2_MAN_REVERSED=1 keeps the old pair.
-        static const bool manReversed = [] {
-            const char* e = std::getenv("OP_A2_MAN_REVERSED");
-            return e && *e == '1';
-        }();
-        if (hierarchical && !manReversed)
+        // The engine loads every move of a turned (reversed) model conjugated by
+        // diag(-1, 1, -1), for the model it turns at load. Arma 2 men are turned like OFP's
+        // (Arma1ModelClass), and their moves already pose the turned model, so they leave
+        // here conjugated once and arrive as they were posed.
+        if (hierarchical)
             for (auto& m : world)
             {
                 m[1] = -m[1];
