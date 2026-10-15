@@ -323,7 +323,17 @@ impl River {
             env_f32("WGR_RIVER_SCATTER", 0.6, 0.0, 4.0),
             env_f32("WGR_RIVER_DEBUG", 0.0, 0.0, 1.0),
         ];
-        self.params.bed = [env_f32("WGR_RIVER_WET_FLOOR", look.wet_floor, 0.0, 0.9), 0.0, 0.0, 0.0];
+        // RFG-166: y = the water body's own colour per metre of column (Reforger's rivers read dark
+        // olive even 10-30 cm deep, which ln2/HalfLightDistance absorption alone cannot give);
+        // z = how much a grazing reflection that finds no screen-space hit takes the banks'
+        // colour instead of open sky (a river runs in a channel; the lavender sky sheen was the
+        // owner-visible "invisible river").
+        self.params.bed = [
+            env_f32("WGR_RIVER_WET_FLOOR", look.wet_floor.max(0.38), 0.0, 0.9),
+            env_f32("WGR_RIVER_BODY", 2.5, 0.0, 20.0),
+            env_f32("WGR_RIVER_BANK", 1.0, 0.0, 1.0),
+            0.0,
+        ];
     }
 
     /// Replace every river of the world. Empty releases them. Returns the triangle count.

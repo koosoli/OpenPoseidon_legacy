@@ -221,16 +221,26 @@ fn fs_river(in: VsOut) -> @location(0) vec4<f32> {
     let cloud = cloud_sun_shadow(in.world_rel.xz + frame.cam_pos.xz);
     let light = sky_irradiance(vec3<f32>(0.0, 1.0, 0.0)) + frame.sun_diffuse.rgb * max(sun_l.y, 0.0) * cloud;
     let inscatter = rp.colour.rgb * light * rp.misc.z * (vec3<f32>(1.0) - transmit);
-    let refracted = behind * transmit + inscatter;
+    var refracted = behind * transmit + inscatter;
+    // RFG-166: the water's own body colour over a shallow bed (bed.y per metre of column).
+    let body = (1.0 - exp(-column * max(rp.bed.y, 0.0))) * 0.85;
+    refracted = mix(refracted, rp.colour.rgb * light, body);
 
     // Reflection: sky, then the screen-space scene where the reflected ray finds it.
     let r = reflect(-v, n);
     let r_up = normalize(vec3<f32>(r.x, max(r.y, 0.02), r.z));
     var reflected = sky_env_sample(r_up);
+    var ssr_hit = 0.0;
     if (rp.misc.y > 0.5) {
         let ssr = reflected_scene(in.world_rel, r_up);
         reflected = mix(reflected, ssr.rgb, ssr.a);
+        ssr_hit = ssr.a;
     }
+    // RFG-166: a grazing reflection that found nothing on screen would mirror open sky; in a
+    // channel it meets the banks and their vegetation. Take the dimmed scene behind the water
+    // instead, fading in below ~20 degrees of reflected elevation.
+    let bank = (1.0 - smoothstep(0.06, 0.35, r_up.y)) * (1.0 - ssr_hit) * clamp(rp.bed.z, 0.0, 1.0);
+    reflected = mix(reflected, dry * 0.55, bank);
     let cos_v = clamp(dot(n, v), 0.0, 1.0);
     let f0 = clamp(rp.optics.x, 0.0, 1.0);
     let fresnel = f0 + (1.0 - f0) * pow(1.0 - cos_v, 5.0);
