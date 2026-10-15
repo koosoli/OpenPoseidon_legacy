@@ -192,14 +192,20 @@ $first = $true
 foreach ($p in $poses) {
   if ($p.Raw -ne '') { [void]$sqs.AppendLine($p.Raw); continue }
   $wait = if ($first) { $job.FIRST } else { $job.SETTLE }
+  $poseLines = @()
   if ($p.Abs) {
-    [void]$sqs.AppendLine("_r = triFreeFlyPose `"$($p.X) $($p.Z) $($p.Alt) $($p.Az) $($p.El)`"")
+    $poseLines += "_r = triFreeFlyPose `"$($p.X) $($p.Z) $($p.Alt) $($p.Az) $($p.El)`""
   } else {
-    [void]$sqs.AppendLine("_h = triTerrainHeight [$($p.X), $($p.Z)]")
-    [void]$sqs.AppendLine("_r = triFreeFlyPose format [`"%1 %2 %3 %4 %5`", $($p.X), $($p.Z), _h + $($p.Alt), $($p.Az), $($p.El)]")
+    $poseLines += "_h = triTerrainHeight [$($p.X), $($p.Z)]"
+    $poseLines += "_r = triFreeFlyPose format [`"%1 %2 %3 %4 %5`", $($p.X), $($p.Z), _h + $($p.Alt), $($p.Az), $($p.El)]"
   }
+  foreach ($l in $poseLines) { [void]$sqs.AppendLine($l) }
   [void]$sqs.AppendLine("logInfo format [`"parity pose $($p.Name): %1 ground %2`", _r, _h]")
   [void]$sqs.AppendLine("~$wait")
+  # Set it again just before the shot: a slow load can install the freefly camera after the
+  # first pose (houseFar from 400 m in a short run), and a stray input may have moved it.
+  foreach ($l in $poseLines) { [void]$sqs.AppendLine($l) }
+  [void]$sqs.AppendLine('~2')
   [void]$sqs.AppendLine("_r = triScreenshotNext `"$($p.Name)`"")
   [void]$sqs.AppendLine("logInfo format [`"parity shot $($p.Name): %1`", _r]")
   [void]$sqs.AppendLine('~2')
