@@ -745,6 +745,8 @@ class Landscape : public SerializeClass
     EnfusionDoorRegistry _enfusionDoors;
     //! RFG-158: the destructible window panes of native Enfusion buildings (EnfusionGlass.hpp).
     EnfusionGlassRegistry _enfusionGlass;
+    //! RFG-162: this world's rivers are with the renderer as water (released with the world).
+    bool _riversUploaded = false;
     int AuthoredObjectIDFloor() const;
     std::vector<std::vector<uint32_t>> _modernObjectCells;
     // One non-empty cell inside the residency window, with its squared cell distance from the

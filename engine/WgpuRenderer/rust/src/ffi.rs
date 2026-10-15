@@ -3226,6 +3226,36 @@ pub unsafe extern "C" fn wgr_far_set_instances(
     }));
 }
 
+/// RFG-162 — replace every river of a native world, drawn as water in the water pass.
+///
+/// `vertices` = 8 floats per vertex: absolute world position (3), metres along the spline
+/// downstream, the downstream direction (x, z), signed metres across from the centreline, the
+/// half width there. `indices` = triangles. `look` = the river's MatRiver: r, g, b (`Color`),
+/// HalfLightDistance, FlowSpeed, Fresnel, SunPower, SunInfluence, WetFloor (shorter = defaults).
+/// Empty `vertices` releases the rivers.
+///
+/// # Safety
+/// `renderer` must be live; every slice must be valid for its length (or null with length 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_river_set_mesh(
+    renderer: *mut WgrRenderer,
+    vertices: WgrSlice<f32>,
+    indices: WgrSlice<u32>,
+    look: WgrSlice<f32>,
+) -> u32 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let vertices = unsafe { vertices.as_slice() };
+        let indices = unsafe { indices.as_slice() };
+        let look = unsafe { look.as_slice() };
+        renderer.river_set_mesh(vertices, indices, look)
+    }))
+    .unwrap_or(0)
+}
+
 /// FAR INSTANCE TIER — per-frame knobs. `near_cutoff_m` is where the tier starts (it should be
 /// the object draw distance, so proxies begin exactly where real objects stop); `far_distance_m`
 /// where it ends; `pixel_limit` the sub-pixel rejection threshold in pixels of projected height,

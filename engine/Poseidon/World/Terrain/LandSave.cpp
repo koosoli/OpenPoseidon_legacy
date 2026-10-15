@@ -5628,6 +5628,10 @@ void Landscape::ClearNativeFarResidency()
     }
     _nativeProxyUploaded = false;
     _nativeFarCenterX = _nativeFarCenterZ = -0x3fffffff;
+    // RFG-162: the world's rivers go with it.
+    if (_riversUploaded && GEngine)
+        GEngine->SetRiverSurfaces(nullptr, 0, nullptr, 0, nullptr, 0);
+    _riversUploaded = false;
 }
 
 void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)

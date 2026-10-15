@@ -2685,6 +2685,15 @@ extern "C"
      * the C++ side walks these per frame. Passing an empty slice releases the set. */
     WGR_API void wgr_far_set_instances(WgrRenderer* renderer, WgrSlice<WgrFarInstance> instances);
 
+    /* RFG-162 — replace every river of a native world, drawn as water in the water pass.
+     * `vertices`: 8 floats per vertex -- absolute world x, y, z; metres along the spline
+     * downstream; downstream direction x, z; signed metres across from the centreline; half
+     * width. `indices`: triangles. `look`: the MatRiver's r, g, b (Color), HalfLightDistance,
+     * FlowSpeed, Fresnel, SunPower, SunInfluence, WetFloor (a shorter slice keeps defaults).
+     * Empty `vertices` releases them. Returns the triangle count drawn. */
+    WGR_API uint32_t wgr_river_set_mesh(WgrRenderer* renderer, WgrSlice<float> vertices, WgrSlice<uint32_t> indices,
+                                        WgrSlice<float> look);
+
     /* FAR INSTANCE TIER — per-frame knobs. `near_cutoff_m` is where the tier STARTS (proxies
      * closer than this are the real objects' job, so it should be the object draw distance);
      * `far_distance_m` is where it stops; `pixel_limit` is the sub-pixel rejection threshold in

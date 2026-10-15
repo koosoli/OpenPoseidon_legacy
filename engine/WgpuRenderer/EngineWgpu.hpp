@@ -459,6 +459,9 @@ class EngineWgpu : public EngineDummy
     // authored placement rows (Landscape::LoadOprwModern). Everything past the object
     // residency window is invisible without it; nothing here ever becomes an Object.
     void SetFarProxyInstances(const FarProxyInstance* data, size_t count) override;
+    bool SupportsRiverSurfaces() const override;
+    void SetRiverSurfaces(const float* vertices, size_t floatCount, const uint32_t* indices, size_t indexCount,
+                          const float* look, size_t lookCount) override;
     void SetNativeFarProxyStart(float metres) override { _nativeFarProxyStart = metres; }
     float _nativeFarProxyStart = -1.0f;
 

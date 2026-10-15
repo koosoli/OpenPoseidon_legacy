@@ -1272,6 +1272,11 @@ struct ResolvedRoad
     //! generator's SplineOffsetUp) instead of being draped, and its width can vary per point.
     bool river = false;
     std::vector<float> pointWidths; //!< aligned with `points`; <= 0 = `width`
+    //! RFG-162: the river's `ReverseFlow`, and its MatRiver look for the water renderer: Color
+    //! r, g, b, HalfLightDistance, FlowSpeed, Fresnel, SunPower, SunInfluence, WetFloor
+    //! (RiverSurface_01's values when the material does not say).
+    bool reverseFlow = false;
+    float riverLook[9] = {0.035f, 0.04f, 0.019f, 30.0f, 0.2f, 0.02f, 1024.0f, 0.025f, 0.3f};
 };
 
 //! The parts of a road's `.emat` its strip is built from (see ResolvedRoad).
@@ -1867,6 +1872,7 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         river.points = source.points;
         river.yawDeg = source.yawDeg;
         river.width = source.width > 0.1f ? source.width : 5.0f;
+        river.reverseFlow = source.reverseFlow;
         river.pointWidths.assign(source.points.size() / 3, 0.0f);
         for (size_t i = 0; i < river.pointWidths.size() && i < source.pointWidths.size(); ++i)
             if (i < source.pointWidthModes.size() && source.pointWidthModes[i] == 2 && source.pointWidths[i] > 0.1f)
@@ -1882,6 +1888,17 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
                 char text[96];
                 std::snprintf(text, sizeof(text), "enfc|%.4f,%.4f,%.4f", colour[0], colour[1], colour[2]);
                 river.texture = text;
+                for (int c = 0; c < 3; ++c)
+                    river.riverLook[c] = colour[c];
+                // RFG-162: the rest of the look the water renderer takes from the MatRiver.
+                static constexpr const char* kLookKeys[6] = {"HalfLightDistance", "FlowSpeed", "Fresnel",
+                                                             "SunPower",          "SunInfluence", "WetFloor"};
+                for (int k = 0; k < 6; ++k)
+                {
+                    float value = 0.0f;
+                    if (material.FloatOf(kLookKeys[k], value))
+                        river.riverLook[3 + k] = value;
+                }
             }
         }
         if (river.texture.empty())
@@ -2287,6 +2304,72 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
 ///
 /// Not modelled: crossings, end caps, line markings, Enfusion's terrain cut, and the
 /// along-road variant switching (MidPiece weights).
+//! RFG-162: one river's water surface for the renderer (Engine::SetRiverSurfaces): the dense
+//! centreline as the road pass leaves it (yaw folded in, at the river's water level, local to
+//! `origin`), a vertex either side at its half width, and per vertex the flow coordinates the
+//! water shader advects its ripples in -- metres along (downstream: the spline's direction
+//! unless `ReverseFlow`), the downstream direction, signed metres across, the half width.
+void AppendRiverWater(const ResolvedRoad& road, std::vector<float>& vertices, std::vector<uint32_t>& indices)
+{
+    const size_t count = road.points.size() / 3;
+    if (count < 2)
+        return;
+    const bool perPoint = road.pointWidths.size() == count;
+    const float defaultWidth = road.width > 0.1f ? road.width : 5.0f;
+    const float flowSign = road.reverseFlow ? -1.0f : 1.0f;
+    std::vector<float> run(count, 0.0f);
+    for (size_t i = 1; i < count; ++i)
+    {
+        const float dx = road.points[i * 3 + 0] - road.points[(i - 1) * 3 + 0];
+        const float dz = road.points[i * 3 + 2] - road.points[(i - 1) * 3 + 2];
+        run[i] = run[i - 1] + std::sqrt(dx * dx + dz * dz);
+    }
+    const float total = run.back();
+    const uint32_t base = static_cast<uint32_t>(vertices.size() / 8);
+    vertices.reserve(vertices.size() + count * 16);
+    for (size_t i = 0; i < count; ++i)
+    {
+        float dx = 0.0f, dz = 0.0f;
+        if (i + 1 < count)
+        {
+            dx += road.points[(i + 1) * 3 + 0] - road.points[i * 3 + 0];
+            dz += road.points[(i + 1) * 3 + 2] - road.points[i * 3 + 2];
+        }
+        if (i > 0)
+        {
+            dx += road.points[i * 3 + 0] - road.points[(i - 1) * 3 + 0];
+            dz += road.points[i * 3 + 2] - road.points[(i - 1) * 3 + 2];
+        }
+        const float length = std::sqrt(dx * dx + dz * dz);
+        if (length > 1e-4f)
+        {
+            dx /= length;
+            dz /= length;
+        }
+        else
+        {
+            dx = 1.0f;
+            dz = 0.0f;
+        }
+        const float half = 0.5f * (perPoint && road.pointWidths[i] > 0.1f ? road.pointWidths[i] : defaultWidth);
+        const float cx = road.origin[0] + road.points[i * 3 + 0];
+        const float cy = road.origin[1] + road.points[i * 3 + 1];
+        const float cz = road.origin[2] + road.points[i * 3 + 2];
+        const float along = road.reverseFlow ? total - run[i] : run[i];
+        for (const float side : {-1.0f, 1.0f})
+        {
+            const float across = side * half;
+            vertices.insert(vertices.end(), {cx - dz * across, cy, cz + dx * across, along, dx * flowSign,
+                                             dz * flowSign, across, half});
+        }
+    }
+    for (uint32_t i = 0; i + 1 < count; ++i)
+    {
+        const uint32_t a = base + 2 * i, b = a + 1, c = a + 2, d = a + 3;
+        indices.insert(indices.end(), {a, c, b, b, c, d});
+    }
+}
+
 //! The model half of a road: the draped ribbon, through the MLOD round trip. Pure (the ground
 //! is read through `groundY`), so the loader builds every road's on the task pool and only
 //! registers the shapes on the main thread.
@@ -4151,11 +4234,18 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
 
                     roadReady[r] = 1;
                 }
+                // RFG-162: rivers go to the renderer as water when it can draw them, instead of
+                // becoming opaque ribbon objects (WGR_RIVERS=0 keeps the ribbons).
+                const bool riversAsWater = Poseidon::GEngine != nullptr && Poseidon::GEngine->SupportsRiverSurfaces();
+                std::vector<float> riverVertices;
+                std::vector<uint32_t> riverIndices;
+                const float* riverLook = nullptr;
+                size_t riversAsWaterCount = 0;
                 std::vector<std::shared_ptr<Poseidon::Model::Model>> roadModels(roads.size());
                 {
                     const auto buildRoad = [&](size_t r)
                     {
-                        if (!roadReady[r])
+                        if (!roadReady[r] || (riversAsWater && roads[r].river))
                             return;
                         const ResolvedRoad& road = roads[r];
                         // Each strip vertex sits on the engine's own terrain, 8 cm up, whatever the
@@ -4212,20 +4302,24 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                         continue;
                     ResolvedRoad& road = roads[r];
                     const size_t pointCount = road.points.size() / 3;
-                    const std::string name = "enfusion_road_" + std::to_string(r);
-                    LODShapeWithShadow* shape =
-                        roadModels[r]
-                            ? Poseidon::Shapes.NewFromModel(name.c_str(), false, true, std::move(roadModels[r]),
-                                                            nullptr, roadShapes[r].release())
-                            : nullptr;
-                    if (shape == nullptr)
+                    const bool asWater = riversAsWater && road.river;
+                    LODShapeWithShadow* shape = nullptr;
+                    if (!asWater)
                     {
-                        ++roadsFailed;
-                        continue;
+                        const std::string name = "enfusion_road_" + std::to_string(r);
+                        shape = roadModels[r] ? Poseidon::Shapes.NewFromModel(name.c_str(), false, true,
+                                                                              std::move(roadModels[r]), nullptr,
+                                                                              roadShapes[r].release())
+                                              : nullptr;
+                        if (shape == nullptr)
+                        {
+                            ++roadsFailed;
+                            continue;
+                        }
+                        if (!road.texture.empty())
+                            ++roadTextured;
+                        ++textureUse[road.texture];
                     }
-                    if (!road.texture.empty())
-                        ++roadTextured;
-                    ++textureUse[road.texture];
                     // Mark every land cell within half the road width plus a 1 m verge of
                     // the centreline. The dense points are up to 4 m apart (up to ~8 m
                     // where a source segment rounded down to one step), so each segment
@@ -4280,10 +4374,27 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                             }
                         }
                     }
+                    if (asWater)
+                    {
+                        AppendRiverWater(road, riverVertices, riverIndices);
+                        riverLook = road.riverLook;
+                        ++riversAsWaterCount;
+                        continue;
+                    }
                     // The vertices are already local to `origin`, and a road carries
                     // no rotation of its own -- the spline is authored in world axes.
                     AddObject(Vector3(road.origin[0], road.origin[1], road.origin[2]), road.yawDeg, shape);
                     ++roadsBuilt;
+                }
+                if (riversAsWater)
+                {
+                    // One look for all of them: Everon's rivers share RiverSurface_01 (the last
+                    // river's MatRiver stands for the set).
+                    Poseidon::GEngine->SetRiverSurfaces(riverVertices.data(), riverVertices.size(), riverIndices.data(),
+                                              riverIndices.size(), riverLook, riverLook ? 9u : 0u);
+                    _riversUploaded = !riverVertices.empty();
+                    LOG_INFO(World, "Enfusion native load: RFG-162 {} rivers drawn as water ({} vertices)",
+                             riversAsWaterCount, riverVertices.size() / 8);
                 }
                 roadTextures.reset();
                 for (const auto& [path, count] : textureUse)

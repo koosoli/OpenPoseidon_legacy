@@ -40,6 +40,7 @@ mod water;
 mod rain_water;
 mod rain_water_medium;
 mod rain_water_reflections;
+mod river;
 // TW-WATER W1 — the selectable water backend (Current OP / Tidewater Native).
 mod water_backend;
 mod water_tw;
@@ -893,6 +894,8 @@ pub struct Renderer {
     grass: Grass,
     // FAR INSTANCE TIER — one proxy per authored placement, beyond where real objects live.
     far: Far,
+    // RFG-162: a native world's rivers, drawn as water in the water pass (river/mod.rs).
+    river: river::River,
     // TW-WATER W1 — the active water backend. Owns the surface AND the underwater compositor
     // (Current OP: today's `Water` + `Underwater`, unchanged); see water_backend.rs.
     water: WaterBackend,
@@ -2128,6 +2131,13 @@ impl Renderer {
             &mut composer,
         );
         init_timer.mark("far");
+        let river = river::River::new(
+            &device,
+            gfx3d.camera_layout(),
+            color_format,
+            sample_count,
+            &mut composer,
+        );
         let tonemap = hdr_enabled.then(|| Tonemap::new(&device, config.format));
         init_timer.mark("tonemap");
         let water = match water_init {
@@ -2271,6 +2281,7 @@ impl Renderer {
             terrain,
             grass,
             far,
+            river,
             water,
             rain_water,
             water_visibility,
@@ -6342,7 +6353,10 @@ impl Renderer {
             // (the world segment); the resolved MSAA depth that water samples is filled by the
             // depth-resolve run before this segment's colour pass.
             let has_water = seg_ops.iter().any(|o| matches!(o, Plan3dOp::Water(_)));
-            if has_water && !resolved {
+            // RFG-162: a native world's rivers ride this pass (its scene snapshot and resolved
+            // depth) whether or not any sea is in view -- only in the world segment.
+            let rivers_now = start == 0 && self.river.drawable() && self.hdr_enabled && self.water_scene.is_some();
+            if (has_water || rivers_now) && !resolved {
                 // Water reconstructs the seabed from the FARTHEST-sample depth resolve (not the
                 // Hi-Z near resolve): a nearest resolve reads A2C foliage/rotor edges as the seabed
                 // and rings them with foam. Record that resolve, then point water at it.
@@ -6406,6 +6420,19 @@ impl Renderer {
                     let scene_gen = self.hdr_size.0 as u64 ^ ((self.hdr_size.1 as u64) << 32);
                     self.water
                         .set_scene_view(&self.device, snapshot_view, scene_gen);
+                    if rivers_now {
+                        if let Some(depth_view) = self.gfx3d.water_depth_view() {
+                            self.river.prepare(
+                                &self.device,
+                                &self.queue,
+                                snapshot_view,
+                                scene_gen,
+                                depth_view,
+                                self.gfx3d.depth_gen(),
+                                self.sky.env_view(),
+                            );
+                        }
+                    }
                 }
                 // Lend Sky's reflection env map to water (Stage 4a). The env texture never resizes,
                 // so gen 0 binds it once; a no-op thereafter.
@@ -6486,6 +6513,11 @@ impl Renderer {
                     }
                     if visibility_query {
                         wpass.end_occlusion_query();
+                    }
+                    // RFG-162: after the sea's occlusion query, which must count the sea alone.
+                    if rivers_now {
+                        let off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
+                        self.river.draw(&mut wpass, cam, off);
                     }
                     drop(wpass);
                     // (OP) the water's surface into the scene depth (water_zbuf.rs merge): the
@@ -7543,6 +7575,25 @@ impl Renderer {
     // resident; only this frame's draw submission is skipped. C++ sets it every frame.
     fn set_suppress_world_objects(&mut self, suppress: bool) {
         self.suppress_world_objects = suppress;
+    }
+
+    // RFG-162 — a native world's rivers (river/mod.rs). Returns the triangle count drawn.
+    fn river_set_mesh(&mut self, vertices: &[f32], indices: &[u32], look: &[f32]) -> u32 {
+        let usable = vertices.len() / 8 * 8;
+        let Ok(rows) = bytemuck::try_cast_slice::<f32, river::RiverVertex>(&vertices[..usable]) else {
+            return 0;
+        };
+        self.river.set_look(river::RiverLook::from_floats(look));
+        let triangles = self.river.set_mesh(&self.device, rows, indices);
+        self.log.log(
+            log_level::INFO,
+            &format!(
+                "[wgr] rivers: {} vertices, {} triangles drawn as water (RFG-162; WGR_RIVERS=0 hides them)",
+                rows.len(),
+                triangles
+            ),
+        );
+        triangles
     }
 
     // FAR INSTANCE TIER — the whole proxy set, uploaded once per world. Logged with the

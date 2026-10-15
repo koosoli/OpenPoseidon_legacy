@@ -7406,6 +7406,31 @@ void EngineWgpu::SetFarProxyInstances(const FarProxyInstance* data, size_t count
                           WgrSlice<WgrFarInstance>{reinterpret_cast<const WgrFarInstance*>(data), U32(count)});
 }
 
+// RFG-162: rivers as water (river/mod.rs). WGR_RIVERS=0 at load keeps the opaque ribbons.
+bool EngineWgpu::SupportsRiverSurfaces() const
+{
+    static const bool on = []
+    {
+        const char* env = std::getenv("WGR_RIVERS");
+        return !(env != nullptr && env[0] == '0');
+    }();
+    return on && _renderer != nullptr;
+}
+
+void EngineWgpu::SetRiverSurfaces(const float* vertices, size_t floatCount, const uint32_t* indices,
+                                  size_t indexCount, const float* look, size_t lookCount)
+{
+    WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)
+    if (!_renderer)
+        return;
+    const size_t usable = vertices != nullptr ? floatCount / 8 * 8 : 0;
+    const uint32_t triangles = wgr_river_set_mesh(
+        _renderer, WgrSlice<float>{usable ? vertices : nullptr, U32(usable)},
+        WgrSlice<uint32_t>{usable && indices ? indices : nullptr, U32(usable ? indexCount : 0)},
+        WgrSlice<float>{look, U32(look ? lookCount : 0)});
+    LOG_INFO(Graphics, "Wgpu rivers: {} vertices, {} triangles drawn as water (RFG-162)", usable / 8, triangles);
+}
+
 void EngineWgpu::PushSceneCamera()
 {
     CameraEntry entry{};

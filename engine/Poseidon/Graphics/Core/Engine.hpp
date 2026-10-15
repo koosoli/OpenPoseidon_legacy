@@ -3144,6 +3144,18 @@ class Engine : public IGraphicsEngine
     // Replace the whole far-proxy set. Called ONCE per world load. Empty releases it.
     virtual void SetFarProxyInstances(const FarProxyInstance* /*data*/, size_t /*count*/) {}
 
+    // RFG-162: a native world's rivers as water. `vertices` = 8 floats per vertex (absolute
+    // world x, y, z; metres along the spline downstream; downstream direction x, z; signed
+    // metres across; half width), `indices` = triangles, `look` = the MatRiver's r, g, b,
+    // HalfLightDistance, FlowSpeed, Fresnel, SunPower, SunInfluence, WetFloor. Empty releases.
+    // A backend without a river renderer answers false from SupportsRiverSurfaces and the
+    // loader keeps building rivers as opaque ribbons.
+    virtual bool SupportsRiverSurfaces() const { return false; }
+    virtual void SetRiverSurfaces(const float* /*vertices*/, size_t /*floatCount*/, const uint32_t* /*indices*/,
+                                  size_t /*indexCount*/, const float* /*look*/, size_t /*lookCount*/)
+    {
+    }
+
     // SECOND CLOUD LAYER look: how MUCH of it there is (0 wisps .. 0.5 shipped .. 1 full veil) and
     // how far it resembles the FIRST layer (0 = high ice cloud, 1 = a second cumulus-like deck).
     // Same reasoning as SetSkyCirrus above — SkySettings carries both so they round-trip through
