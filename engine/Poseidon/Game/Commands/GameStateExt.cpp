@@ -68,6 +68,14 @@ RString GameDataObject::GetText() const
     {
         return "<nullptr-object>";
     }
+    // Arma 3 writes a named object as its variable name (str, format "%1"), and missions
+    // compile code from that: format ["%1 getVariable 'BIS_cleared'", _logic].
+    if (Poseidon::Arma1Compat::Active() && Poseidon::Arma1Compat::Generation() >= 3)
+    {
+        const RString name = _value->GetVarName();
+        if (name.GetLength() > 0)
+            return name;
+    }
     return _value->GetDebugName();
 }
 

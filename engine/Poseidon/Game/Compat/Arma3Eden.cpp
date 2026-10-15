@@ -746,6 +746,9 @@ bool SqfFromData(const Node& data, std::string& out, int depth = 0)
     if (const Node* t = data.Class("type"))
         if (const Val* arr = t->V("type"); arr && arr->array && !arr->items.empty())
             type = Lower(arr->items[0].s);
+    // newer Eden files name the type once: singleType="BOOL" (no class type)
+    if (type.empty())
+        type = Lower(data.S("singleType"));
     const Node* valueNode = data.Find("value");
     if (!valueNode)
         return false;
