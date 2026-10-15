@@ -85,6 +85,13 @@ folder (nothing copied into the CWA install). They share one compat layer
   - **Title resources** (`GameStateExtA3Rsc.cpp`, Generation 3 only; hooks in `CutRsc` /
     `GameTitleRsc` / `CutText` / `GameTitleText`, `A2CutRscLayer` / `A2CutTextLayer` and
     `A2IsNullHandle`): a cutRsc'd class with onLoad/onUnload runs them on a stand-in display.
+  - **Ambient sound map of OPRW worlds** (`caaaac7`, `LandSave.cpp` `LoadOprwModern`, every
+    Arma 1/2/3 world): it was never filled, so no cell played sea, birds, meadow or wind. Now
+    made like `InitSoundMap` from the grid's forest bit, sea depth and height.
+  - **Weapon shot override** (`4339389`, `Weapons.hpp/.cpp`, `VehicleAICombat.cpp`): a muzzle
+    with `a3SoundShot[]` plays it for every fire mode (only generated Arma 3 weapons have it).
+  - `allMissionObjects` (Arma 3 macro) goes over every world entity (`opA3AllEntities`); Arma 3
+    modules are generated as `A1x_<module>` on the CWA logic (`32cd409`).
   - Test runs log a **motion census** (AI soldiers that never moved, and why) and a **sound
     census** (`Audio/SoundTestLog.hpp`, hooked in `WaveOAL`) before `ARMA1-TEST PASS`.
 - **Foreign commits on this branch.** On 2026-10-15 09:54 another session pushed an upstream
