@@ -159,6 +159,11 @@ RString GetDefaultName(RString baseName, const char* dDir, const char* dExt)
     {
         name++;
     }
+    else if (Arma1Compat::IsArmaBankPath(name))
+    {
+        // an Arma archive path written without its leading backslash
+        // ("a3\anims_f\data\anim\...rtm" in Arma 3's binarised moves): used as it is
+    }
     else
     {
         // Skip the prefix if the name already starts with dDir (case-insensitive,

@@ -1068,6 +1068,33 @@ std::string ResolveMissionFile(const std::string& spec, std::string& error)
     return {};
 }
 
+bool IsArmaBankPath(const char* name)
+{
+    if (!Active() || !name || !*name)
+        return false;
+    const char* slash = name;
+    while (*slash && *slash != '\\' && *slash != '/')
+        slash++;
+    if (!*slash || slash == name)
+        return false;
+    static size_t knownBanks = 0;
+    static std::set<std::string> tops;
+    const auto& prefixes = AllBankPrefixesMutable();
+    if (knownBanks != prefixes.size())
+    {
+        knownBanks = prefixes.size();
+        tops.clear();
+        for (const std::string& prefix : prefixes)
+        {
+            std::string p = Lower(prefix);
+            const size_t cut = p.find_first_of("\\/");
+            if (cut != std::string::npos && cut > 0)
+                tops.insert(p.substr(0, cut));
+        }
+    }
+    return tops.count(Lower(std::string(name, slash))) > 0;
+}
+
 bool IsArma1MissionDirectory(const char* missionDirectory)
 {
     if (!Active() || !missionDirectory || !*missionDirectory)
