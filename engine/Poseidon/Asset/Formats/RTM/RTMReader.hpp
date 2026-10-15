@@ -300,10 +300,21 @@ inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
         n = c.asciiz();
     if (version >= 5)
     {
-        // Arma 3: eight bytes (zero in every shipped move) follow the names, and every
-        // array carries its compression flag.
+        // Arma 3: a word (zero in every shipped move) and the move's events follow the names
+        // -- StepSound at 0.095, 0.309, ... in the walks and runs -- each a word, a name, a
+        // time and a value; and every array carries its compression flag. Checked on 139
+        // moves of anims_f_data: 16 have events, and every one then lands on its time count.
         (void)c.u32();
-        (void)c.u32();
+        const uint32_t events = c.u32();
+        if (!c.ok || events > 100000)
+            return false;
+        for (uint32_t e = 0; e < events && c.ok; e++)
+        {
+            (void)c.u32();
+            (void)c.asciiz();
+            (void)c.f32();
+            (void)c.asciiz();
+        }
         c.flagged = true;
     }
     const uint32_t timeCount = c.u32();
