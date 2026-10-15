@@ -2183,9 +2183,20 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         // An armed Arma 1 car moved onto CWA's JeepMG (Arma1ArmedCarCarrier) keeps its own
         // seats: JeepMG seats one passenger, the HMMWV M2 and the PK pickups three.
         if (_stricmp(cwaClass.Data(), "JeepMG") == 0)
+        {
             if (const ParamEntry* seats = a1->FindEntry("transportSoldier");
                 seats && !seats->IsClass() && !seats->IsArray() && (int)*seats >= 0 && (int)*seats < 64)
                 text += "\t\ttransportSoldier=" + std::to_string((int)*seats) + ";\r\n";
+            // And its own crew: JeepMG's is SoldierWB, which put West soldiers into an East
+            // UAZ (a1vehArm census). Resolved like any mission class, as for Arma 2 vehicles.
+            if (const std::string crew = StringValue(*a1, "crew"); !crew.empty())
+            {
+                const RString resolved = ResolveVehicleClass(RString(crew.c_str()));
+                if (const ParamEntry* now = Pars.FindEntry("CfgVehicles");
+                    resolved.GetLength() > 0 && now && now->FindEntry(resolved))
+                    text += "\t\tcrew=\"" + std::string(resolved.Data()) + "\";\r\n";
+            }
+        }
         // A static without a real weapon (the searchlight) on CWA's static M2 drops the M2.
         if (IsKindOf(a1, "StaticWeapon"))
         {
