@@ -1620,10 +1620,53 @@ void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserve
         saturateMin(yMin, vv.Y()), saturateMax(yMax, vv.Y());
     }
 
+    // An Arma 2 2D optic (\ca\weapons\2Dscope_*) frames its 4:3 scope image with black
+    // TRIANGLES out to +-20 x +-15, far wider than any screen. Fitting that frame shrank
+    // the scope to a small box in the middle (the M107, focus run 10). Its inner edge is
+    // the scope image: fit that to the screen height, keep it square, black out the
+    // sides. OFP optics are all quads and keep the fit above.
+    bool frameOptic = false;
+    {
+        float outer = 0;
+        for (Offset o = shape->BeginFaces(); o < shape->EndFaces(); shape->NextFace(o))
+        {
+            const Poly& face = shape->Face(o);
+            if (face.N() == 4)
+                continue;
+            for (int i = 0; i < face.N(); i++)
+            {
+                Vector3Val vv = shape->Pos(face.GetVertex(i));
+                saturateMax(outer, floatMax(fabs(vv.X()), fabs(vv.Y())));
+            }
+        }
+        float ixMin = +1e10, ixMax = -1e10, iyMin = +1e10, iyMax = -1e10;
+        if (outer > 0)
+            for (Offset o = shape->BeginFaces(); o < shape->EndFaces(); shape->NextFace(o))
+            {
+                const Poly& face = shape->Face(o);
+                if (face.N() == 4)
+                    continue;
+                for (int i = 0; i < face.N(); i++)
+                {
+                    Vector3Val vv = shape->Pos(face.GetVertex(i));
+                    if (floatMax(fabs(vv.X()), fabs(vv.Y())) > 0.5f * outer)
+                        continue;
+                    saturateMin(ixMin, vv.X()), saturateMax(ixMax, vv.X());
+                    saturateMin(iyMin, vv.Y()), saturateMax(iyMax, vv.Y());
+                }
+            }
+        if (ixMax > ixMin && iyMax > iyMin)
+        {
+            frameOptic = true;
+            xMin = ixMin, xMax = ixMax, yMin = iyMin, yMax = iyMax;
+            preserveAspect4x3 = true;
+        }
+    }
+
     // leave some out reserve
     float xCoef = Inv(xMax - xMin);
     float yCoef = (3.0 / 4) * Inv(yMax - yMin);
-    float coef = floatMax(xCoef, yCoef) * 1.02;
+    float coef = frameOptic ? yCoef : floatMax(xCoef, yCoef) * 1.02;
     float xAvg = (xMax + xMin) * 0.5;
     float yAvg = (yMax + yMin) * 0.5;
 
@@ -1651,7 +1694,8 @@ void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserve
         }
         if (face.N() != 4)
         {
-            Fail("Non square in 2D object");
+            if (!frameOptic) // the frame's triangles: the side bars below stand in for them
+                Fail("Non square in 2D object");
             continue; // draw only rectangular faces
         }
         int faceVertices[4];
@@ -1717,6 +1761,8 @@ void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserve
         rect.y += h * 0.5;
         GEngine->Draw2D(pars, rect);
     }
+    if (frameOptic)
+        DrawWidescreenPillarbox(/*requireGameplayActive*/ false, /*force*/ true);
 }
 
 void Object::DrawWidescreenPillarbox(bool requireGameplayActive)

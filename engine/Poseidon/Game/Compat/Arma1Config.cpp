@@ -1701,13 +1701,14 @@ RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
                 text += line;
             }
     }
-    // A scoped Arma 2 weapon keeps the CWA weapon's sight for now. Arma 2's 2D scopes
-    // (modelOptics "\ca\weapons\2Dscope_*") are authored for its own screen mapping:
-    // drawn by CWA's Draw2D the M107's 2dscope_mildot_14 came out as a small box in a
-    // screen of flat colour, with no scene (focus run 10). OP_A2_SCOPES=1 takes them anyway.
+    // A scoped Arma 2 weapon looks through its own 2D scope (modelOptics
+    // "\ca\weapons\2Dscope_*") at its own zoom. The scope's black frame reaches far past
+    // the screen; Object::Draw2D fits its inner edge (in focus run 10 the M107's
+    // 2dscope_mildot_14 was a small box in the middle of the screen). OP_A2_SCOPES=0 keeps
+    // the CWA weapon's sight.
     static const bool a2Scopes = [] {
         const char* e = std::getenv("OP_A2_SCOPES");
-        return e && *e == '1';
+        return !(e && *e == '0');
     }();
     if (const std::string optics = StringValue(*a2, "modelOptics");
         a2Scopes && optics.size() > 1 && optics[0] == '\\')
