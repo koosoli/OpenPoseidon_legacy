@@ -51,6 +51,12 @@ TEST_CASE("GetDefaultName preserves an existing dir prefix", "[io][paramFileExt]
         RString r = GetDefaultName("data/pic.paa", "data\\", ".paa");
         REQUIRE(strcmp((const char*)r, "data/pic.paa") == 0);
     }
+
+    SECTION("a procedural texture is passed through untouched")
+    {
+        RString r = GetDefaultName("#(argb,8,8,3)color(0,0,0,1)", "data\\", ".paa");
+        REQUIRE(strcmp((const char*)r, "#(argb,8,8,3)color(0,0,0,1)") == 0);
+    }
 }
 
 TEST_CASE("GetSoundName accepts mission-relative sound/ paths", "[io][paramFileExt]")
