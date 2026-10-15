@@ -728,6 +728,91 @@ fn probe_device_local_bytes(adapter: &wgpu::Adapter) -> Result<u64, &'static str
     }
 }
 
+/// REN-RES-004 -- the driver's LIVE view of this process's device-local heap (VK_EXT_memory_budget):
+/// what the process uses and what the OS will let it use right now, other applications included.
+///
+/// Why: the startup budget above is a fixed 70% of the whole card and counts only object textures
+/// and pool geometry. At 3440x1440 the untracked render targets alone came to ~2.5 GB, and with a
+/// browser open the process reached 7.8 of 8 GB on an RTX 3070. Past that point Windows demotes
+/// allocations to system memory: one measured Durras run went from 24 ms to 260 ms a frame
+/// (the cloud march, which reads its noise volumes every step, from 2 to 204 ms) and never recovered.
+struct VramBudgetProbe {
+    instance: ash::Instance,
+    physical: ash::vk::PhysicalDevice,
+    heap: usize,
+}
+
+impl VramBudgetProbe {
+    fn new(adapter: &wgpu::Adapter) -> Option<Self> {
+        if adapter.get_info().backend != wgpu::Backend::Vulkan {
+            return None;
+        }
+        // SAFETY: read-only queries; the ash::Instance clone is a handle plus function table and
+        // the wgpu instance that owns it outlives the renderer.
+        unsafe {
+            let hal = adapter.as_hal::<wgpu::hal::api::Vulkan>()?;
+            let instance = hal.shared_instance().raw_instance().clone();
+            let physical = hal.raw_physical_device();
+            let supported = instance
+                .enumerate_device_extension_properties(physical)
+                .ok()?
+                .iter()
+                .any(|e| e.extension_name_as_c_str().map(|n| n == ash::ext::memory_budget::NAME).unwrap_or(false));
+            if !supported {
+                return None;
+            }
+            let props = instance.get_physical_device_memory_properties(physical);
+            let count = (props.memory_heap_count as usize).min(props.memory_heaps.len());
+            let heap = (0..count)
+                .filter(|&i| props.memory_heaps[i].flags.contains(ash::vk::MemoryHeapFlags::DEVICE_LOCAL))
+                .max_by_key(|&i| props.memory_heaps[i].size)?;
+            Some(Self { instance, physical, heap })
+        }
+    }
+
+    /// (usage, budget) of the device-local heap, in bytes.
+    fn read(&self) -> Option<(u64, u64)> {
+        let mut budget = ash::vk::PhysicalDeviceMemoryBudgetPropertiesEXT::default();
+        let mut props = ash::vk::PhysicalDeviceMemoryProperties2::default().push_next(&mut budget);
+        // SAFETY: the extension was found on this physical device in new().
+        unsafe { self.instance.get_physical_device_memory_properties2(self.physical, &mut props) };
+        let usage = budget.heap_usage[self.heap];
+        let limit = budget.heap_budget[self.heap];
+        (limit > 0).then_some((usage, limit))
+    }
+}
+
+/// The effective residency budget under live pressure: what the tracked set may grow to so that
+/// the process's whole usage stays `headroom` under the OS budget. Never above the static budget,
+/// never below `floor` (evicting everything would only trade a slow frame for a stream of uploads).
+/// A cut applies at once; a raise moves at most `step` per call, so the set does not oscillate.
+fn pressured_budget(static_budget: u64, current: u64, tracked: u64, usage: u64, os_budget: u64,
+                    headroom: u64, floor: u64, step: u64) -> u64 {
+    let untracked = usage.saturating_sub(tracked);
+    let allowed = os_budget.saturating_sub(headroom).saturating_sub(untracked);
+    let target = allowed.clamp(floor.min(static_budget), static_budget);
+    if target < current { target } else { target.min(current.saturating_add(step)) }
+}
+
+#[cfg(test)]
+mod pressured_budget_tests {
+    use super::pressured_budget;
+    const MB: u64 = 1024 * 1024;
+    #[test]
+    fn cuts_at_once_raises_slowly_and_respects_the_bounds() {
+        // 8 GB card, 5.6 GB static budget, 4.1 GB tracked, 7.8 GB used, OS allows 7.9 GB.
+        let s = 5611 * MB;
+        let cut = pressured_budget(s, s, 4100 * MB, 7800 * MB, 7900 * MB, 512 * MB, 1024 * MB, 128 * MB);
+        assert_eq!(cut, 3688 * MB, "4.1 GB tracked, 3.7 GB untracked: 7.9 - 0.5 - 3.7");
+        // Pressure gone: back up by one step per call, never past the static budget.
+        let up = pressured_budget(s, cut, 3000 * MB, 4000 * MB, 7900 * MB, 512 * MB, 1024 * MB, 128 * MB);
+        assert_eq!(up, cut + 128 * MB);
+        assert_eq!(pressured_budget(s, s, 0, 0, 7900 * MB, 512 * MB, 1024 * MB, 128 * MB), s);
+        // Floor: an impossible budget does not evict everything.
+        assert_eq!(pressured_budget(s, s, 0, 9000 * MB, 7900 * MB, 512 * MB, 1024 * MB, 128 * MB), 1024 * MB);
+    }
+}
+
 /// Turn the env override and the probe result into a budget in bytes plus the line that must
 /// be logged for it. Pure, so the four cases (override, override 0 = unlimited, probe present,
 /// probe absent) are unit-testable without a device.
@@ -826,6 +911,10 @@ pub struct Renderer {
     // owner-managed pools implicated by the DayZ exhaustion: authored object
     // textures and merged model geometry. Zero means observability-only.
     residency_budget_bytes: u64,
+    // REN-RES-004: the budget actually handed out, lowered under live VRAM pressure (memory_stats).
+    vram_probe: Option<VramBudgetProbe>,
+    vram_effective_budget: std::cell::Cell<u64>,
+    vram_probe_at: std::cell::Cell<Option<std::time::Instant>>,
     // HDR pipeline (docs/hdr-pipeline-plan.md). When enabled, the 3D/terrain/2D
     // scene renders into `hdr` (linear once Stage 2 lands) and `tonemap` resolves it
     // to the swapchain; the dev overlay + (later) screen-space UI composite after.
@@ -2184,6 +2273,13 @@ impl Renderer {
             direct_draws: std::cell::Cell::new(DirectDrawStats::default()),
             runtime_capabilities,
             residency_budget_bytes,
+            vram_probe: if std::env::var("WGR_VRAM_PRESSURE").as_deref() == Ok("0") || residency_budget_bytes == 0 {
+                None
+            } else {
+                VramBudgetProbe::new(&adapter)
+            },
+            vram_effective_budget: std::cell::Cell::new(residency_budget_bytes),
+            vram_probe_at: std::cell::Cell::new(None),
             hdr_enabled,
             hdr: None,
             hdr_resolve: None,
@@ -2643,19 +2739,42 @@ impl Renderer {
         let counters = self.device.get_internal_counters().hal;
         let backend_allocation_bytes = (counters.buffer_memory.read().max(0) as u64)
             .saturating_add(counters.texture_memory.read().max(0) as u64);
+        // REN-RES-004: at most twice a second, follow the driver's live budget (WGR_VRAM_PRESSURE=0
+        // keeps the static one). Lowering budget_bytes is all it takes: the engine's free-on-demand
+        // probe ("WGPU.Dynamic") evicts object textures toward it, as it does for the static budget.
+        if let Some(probe) = &self.vram_probe {
+            let now = std::time::Instant::now();
+            let due = self.vram_probe_at.get().is_none_or(|t| now.duration_since(t).as_millis() >= 500);
+            if due {
+                self.vram_probe_at.set(Some(now));
+                if let Some((usage, os_budget)) = probe.read() {
+                    const MB: u64 = 1024 * 1024;
+                    let before = self.vram_effective_budget.get();
+                    let after = pressured_budget(self.residency_budget_bytes, before, tracked_bytes, usage,
+                                                 os_budget, 512 * MB, 1024 * MB, 128 * MB);
+                    self.vram_effective_budget.set(after);
+                    if after / (256 * MB) != before / (256 * MB) {
+                        eprintln!(
+                            "[wgr] VRAM pressure: process uses {} of {} MB the OS allows; residency budget {} -> {} MB \
+                             (tracked {} MB; WGR_VRAM_PRESSURE=0 = static)",
+                            usage / MB, os_budget / MB, before / MB, after / MB, tracked_bytes / MB
+                        );
+                    }
+                }
+            }
+        }
+        let budget_bytes = self.vram_effective_budget.get();
         ffi::WgrMemoryStats {
             backend_allocation_bytes,
             tracked_bytes,
-            budget_bytes: self.residency_budget_bytes,
+            budget_bytes,
             object_texture_bytes,
             geometry_live_bytes: geometry.live_bytes,
             geometry_capacity_bytes: geometry.capacity_bytes,
             geometry_retired_bytes: geometry.retired_bytes,
             object_texture_count,
             object_texture_retired_bytes,
-            over_budget: u32::from(
-                self.residency_budget_bytes != 0 && tracked_bytes > self.residency_budget_bytes,
-            ),
+            over_budget: u32::from(budget_bytes != 0 && tracked_bytes > budget_bytes),
         }
     }
 
