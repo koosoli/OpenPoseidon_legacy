@@ -30,7 +30,7 @@ folder (nothing copied into the CWA install). They share one compat layer
   SQF/SQS text). No Bohemia executable is disassembled or decompiled, and no Bohemia data
   is committed.
 
-## State of `MrDudeX-arma3` (2026-10-14 evening)
+## State of `MrDudeX-arma3` (2026-10-15)
 
 - Rebased onto `MrDudeX-arma1` `d0cdd15`, plus the 16 `MrDudeX-arma2` commits `d721a0e..0608cd7`
   that `MrDudeX-arma1` has not merged yet, picked unchanged (a later rebase drops them again).
@@ -41,6 +41,28 @@ folder (nothing copied into the CWA install). They share one compat layer
   Arma 3's 521 archives took 59 s to mount with one `ReadFile` per byte. The test-mode stall
   monitor in `GameStateExtA2.cpp` counts from the first simulation step and allows 120 s
   under `--arma3` only; Arma 2 keeps 60 s from the start.
+- **Shared code touched (2026-10-15, second round)** -- all generic or gated, listed so a
+  rebase knows where to look:
+  - `Pactext.cpp` `PacLevelMem::GetPixelInt` decodes DXT2-5 and ARGB8888 (the inventory
+    icon preload sampled DXT5 Arma icons as "Bad texture format", 82 per mission).
+  - `ProceduralTexture.hpp`: `#(...)r2t(rendertarget0,...)` is generated as a dark screen.
+  - `Preproc.cpp` `GlobalScan`: a backslash ending a line outside `#define` continues the
+    line, as in C (Arma 3's `BIS_fnc_moduleInit` carries a stray one).
+  - `ObjAnimate` accepts Arma's third element; `ArcadeTemplate` reads `lock="LOCKEDPLAYER"`
+    as LOCKED (under `Arma1Compat::Active()`); `ObjAmmo` counts a CWA stand-in vehicle's
+    rounds by shot kind (Generation 3 only).
+  - `Odol73.hpp` keeps the binariser's bounding centre (`storedBoundingCenter`);
+    `ODOLLoader` uses it only for models on the man skeleton (pelvis, spine, head), the
+    Arma 2 man path. ModelInfo's `boundingCenter` stays zero for revision 73.
+  - `ODOLLoader` skinned synthesis: a bone-less proxy under `\proxies\` (headgear,
+    glasses, hair, hmd, nvg -> head; equipment, backpack*, radio -> spine3) gets a bone.
+  - `ManType`/`Man::DrawProxies`: Arma 3 gear slots (head, headgear, vest, backpack), only
+    with Generation 3.
+  - Picked from `MrDudeX-arma2`: `341a466` (hiddenSelectionsTextures), gate widened to
+    `Generation() >= 2`; `RegisterWorldClasses` carries latitude/longitude for Generation 3.
+- **Foreign commits on this branch.** On 2026-10-15 09:54 another session pushed an upstream
+  follow-up (`22d6461`, `58f1fe3`, `c479cde`, CWR-CE main) onto `MrDudeX-arma3` as onto the
+  Arma 1 and Arma 2 branches; this branch was rebased onto it, not merged.
 - **Game folder.** The Arma 3 test runs use their own binaries in
   `<CWA>\_OpenPoseidon-Arma3\bin` with `Remastered` as working directory
   (`scripts/arma3-pc/go.ps1`), so they never replace the exe/dll the Arma 1 / Arma 2 sessions
