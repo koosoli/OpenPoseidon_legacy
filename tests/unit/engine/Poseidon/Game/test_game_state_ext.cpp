@@ -805,7 +805,79 @@ TEST_CASE("DATABASE commands persist mutable nested data", "[game][gameStateExt]
     REQUIRE(overwrittenScore.GetType() == GameScalar);
     REQUIRE((float)overwrittenScore == 4321.0f);
 
+    int loadedIndex = -1;
+    for (int i = 0; i < 16; ++i)
+    {
+        GameValue snapshot = DatabaseLoad(&GGameState, RString(filename));
+        const int index = ExtractDatabase(snapshot).GetIndex();
+        REQUIRE(index >= 0);
+        if (loadedIndex >= 0)
+            REQUIRE(index == loadedIndex);
+        loadedIndex = index;
+        REQUIRE((float)DatabaseGet(&GGameState, snapshot,
+                                   MakeConfigAssignment(GGameState, "players.UID123.score", GameValue(-1.0f))) == 4321.0f);
+    }
+
     std::filesystem::remove(path, ec);
+}
+
+TEST_CASE("DATABASE slots are reused only after all handles are released", "[game][gameStateExt][database]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+
+    GameValue database = DatabaseNew(&GGameState);
+    const int index = ExtractDatabase(database).GetIndex();
+    REQUIRE((bool)DatabaseSet(&GGameState, database,
+                              MakeConfigAssignment(GGameState, "nested.score", GameValue(42.0f))));
+    GameValue alias = database;
+    GameValue clone(database.GetData()->Clone());
+    GameDatabaseType handle = ExtractDatabase(database);
+    GameDatabaseType assigned;
+    assigned = handle;
+    assigned = assigned;
+    database = GameValue();
+    alias = GameValue();
+    handle.SetIndex(-1);
+
+    GameValue other = DatabaseNew(&GGameState);
+    REQUIRE(ExtractDatabase(other).GetIndex() != index);
+    REQUIRE((float)DatabaseGet(&GGameState, clone,
+                               MakeConfigAssignment(GGameState, "nested.score", GameValue(-1.0f))) == 42.0f);
+    clone = GameValue();
+    GameValue fromHandle = GameValueExt(assigned);
+    REQUIRE((bool)DatabaseExists(&GGameState, fromHandle, RString("nested.score")));
+    fromHandle = GameValue();
+    assigned.SetIndex(-1);
+
+    for (int i = 0; i < 64; ++i)
+    {
+        GameValue reused = DatabaseNew(&GGameState);
+        REQUIRE(ExtractDatabase(reused).GetIndex() == index);
+        REQUIRE_FALSE((bool)DatabaseExists(&GGameState, reused, RString("nested.score")));
+        REQUIRE((bool)DatabaseSet(&GGameState, reused,
+                                  MakeConfigAssignment(GGameState, "nested.score", GameValue(99.0f))));
+        REQUIRE_FALSE((bool)DatabaseExists(&GGameState, other, RString("nested.score")));
+    }
+}
+
+TEST_CASE("DATABASE handle assignment releases only the replaced database", "[game][gameStateExt][database]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+
+    GameDatabaseType replaced = ExtractDatabase(DatabaseNew(&GGameState));
+    const int releasedIndex = replaced.GetIndex();
+    GameValue survivor = DatabaseNew(&GGameState);
+    REQUIRE((bool)DatabaseSet(&GGameState, survivor,
+                              MakeConfigAssignment(GGameState, "score", GameValue(7.0f))));
+    replaced = ExtractDatabase(survivor);
+    survivor = GameValue();
+    GameValue reused = DatabaseNew(&GGameState);
+    REQUIRE(ExtractDatabase(reused).GetIndex() == releasedIndex);
+    REQUIRE(ExtractDatabase(reused).GetIndex() != replaced.GetIndex());
+    REQUIRE((float)DatabaseGet(&GGameState, GameValueExt(replaced),
+                               MakeConfigAssignment(GGameState, "score", GameValue(-1.0f))) == 7.0f);
 }
 
 TEST_CASE("DATABASE save preserves a directory at the destination", "[game][gameStateExt][database]")

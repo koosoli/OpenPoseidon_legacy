@@ -4,6 +4,12 @@ The game database is an independent, in-memory key-value store exposed to script
 
 Database data is held in memory until explicitly saved. Persistence uses the database's binary `PDB1` format.
 
+Copies of a database handle share its in-memory contents. When the last handle
+is released, those contents and their container allocations are freed; unsaved
+changes are lost. The empty storage slot may be reused by a later `dbNew` or
+`dbLoad`. Live handles keep their own database intact. Slot-table capacity is
+retained for reuse and follows peak simultaneous database usage.
+
 ## Creating and loading databases
 
 ```sqf

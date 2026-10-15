@@ -56,9 +56,11 @@ struct DatabaseEntry
 {
     DatabaseValue root = DatabaseValue::MakeHash();
     int refCount = 0;
+    int nextFree = -1;
 };
 
 AutoArray<DatabaseEntry> GDatabaseEntries;
+int GFirstFreeDatabase = -1;
 
 static DatabaseEntry* GetDatabaseEntry(GameValuePar value)
 {
@@ -90,8 +92,17 @@ static RString DatabaseFilename(GameValuePar value)
 
 static GameDatabaseType NewDatabaseHandle()
 {
-    DatabaseEntry entry;
-    const int index = GDatabaseEntries.Add(entry);
+    int index = GFirstFreeDatabase;
+    if (index >= 0)
+    {
+        DatabaseEntry& entry = GDatabaseEntries[index];
+        GFirstFreeDatabase = entry.nextFree;
+        entry.nextFree = -1;
+    }
+    else
+    {
+        index = GDatabaseEntries.Add(DatabaseEntry());
+    }
     GameDatabaseType database;
     database.SetIndex(index);
     return database;
@@ -366,8 +377,13 @@ void ReleaseDatabaseRef(int index)
     if (index < 0 || index >= GDatabaseEntries.Size())
         return;
     DatabaseEntry& entry = GDatabaseEntries[index];
-    if (entry.refCount > 0)
-        --entry.refCount;
+    if (entry.refCount > 0 && --entry.refCount == 0)
+    {
+        // Drop nested values and container capacity before making the slot reusable.
+        entry.root = DatabaseValue::MakeHash();
+        entry.nextFree = GFirstFreeDatabase;
+        GFirstFreeDatabase = index;
+    }
 }
 } // namespace
 
