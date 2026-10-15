@@ -422,7 +422,19 @@ LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.SerializeEnum("player", player, 1, APNonplayable))
     PARAM_CHECK(ar.Serialize("leader", leader, 1, 0))
     if (ar.IsSaving() || ar.GetArVersion() >= 11)
-        PARAM_CHECK(ar.SerializeEnum("lock", lock, 1, (LockState)LSDefault))
+    {
+        // Arma 3 adds LOCKEDPLAYER: locked for players, open to the AI -- what OFP's LOCKED is.
+        RString lockName;
+        if (!ar.IsSaving() && Arma1Compat::Active() && ar.Serialize("lock", lockName, 1, RString()) == LSOK &&
+            stricmp(lockName, "LOCKEDPLAYER") == 0)
+        {
+            lock = LSLocked;
+        }
+        else
+        {
+            PARAM_CHECK(ar.SerializeEnum("lock", lock, 1, (LockState)LSDefault))
+        }
+    }
     else
     {
         bool locked;

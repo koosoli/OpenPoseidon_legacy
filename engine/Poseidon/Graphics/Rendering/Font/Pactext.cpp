@@ -1963,6 +1963,68 @@ PackedColor PacLevelMem::GetPixelInt(void* data, int u, int v) const
             int a = (rgb >> 8) & 0xff;
             return PackedColor(i, i, i, a);
         }
+        case PacARGB8888:
+        {
+            const unsigned int argb = ((const unsigned int*)data)[v * _w + u];
+            return PackedColor((argb >> 16) & 0xff, (argb >> 8) & 0xff, argb & 0xff, (argb >> 24) & 0xff);
+        }
+        case PacDXT2:
+        case PacDXT3:
+        case PacDXT4:
+        case PacDXT5:
+        {
+            // Arma's icons and most of its textures. A 128-bit block: 64 bits of alpha
+            // (explicit 4-bit for DXT2/3, two end points and 3-bit indices for DXT4/5) in
+            // front of a DXT1 colour block that is always in four-colour mode.
+            const int bPitch = _w >= 4 ? _w >> 2 : 1;
+            const unsigned char* b = (const unsigned char*)data + ((v >> 2) * bPitch + (u >> 2)) * 16;
+            const int t = (v & 3) * 4 + (u & 3);
+            int a;
+            if (_dFormat == PacDXT2 || _dFormat == PacDXT3)
+            {
+                a = ((b[t >> 1] >> ((t & 1) * 4)) & 0xf) * 17;
+            }
+            else
+            {
+                const int a0 = b[0], a1 = b[1];
+                unsigned long long bits = 0;
+                for (int i = 0; i < 6; i++)
+                    bits |= (unsigned long long)b[2 + i] << (8 * i);
+                const int idx = (int)((bits >> (3 * t)) & 7);
+                if (idx == 0)
+                    a = a0;
+                else if (idx == 1)
+                    a = a1;
+                else if (a0 > a1)
+                    a = ((8 - idx) * a0 + (idx - 1) * a1) / 7;
+                else if (idx == 6)
+                    a = 0;
+                else if (idx == 7)
+                    a = 255;
+                else
+                    a = ((6 - idx) * a0 + (idx - 1) * a1) / 5;
+            }
+            const int c0 = b[8] | (b[9] << 8);
+            const int c1 = b[10] | (b[11] << 8);
+            const unsigned int indices =
+                b[12] | (b[13] << 8) | (b[14] << 16) | ((unsigned int)b[15] << 24);
+            const int ci = (indices >> (2 * t)) & 3;
+            const int r0 = Convert5To8((c0 >> 11) & 0x1f), g0 = Convert6To8((c0 >> 5) & 0x3f),
+                      b0 = Convert5To8(c0 & 0x1f);
+            const int r1 = Convert5To8((c1 >> 11) & 0x1f), g1 = Convert6To8((c1 >> 5) & 0x3f),
+                      b1 = Convert5To8(c1 & 0x1f);
+            switch (ci)
+            {
+                case 0:
+                    return PackedColor(r0, g0, b0, a);
+                case 1:
+                    return PackedColor(r1, g1, b1, a);
+                case 2:
+                    return PackedColor((2 * r0 + r1) / 3, (2 * g0 + g1) / 3, (2 * b0 + b1) / 3, a);
+                default:
+                    return PackedColor((r0 + 2 * r1) / 3, (g0 + 2 * g1) / 3, (b0 + 2 * b1) / 3, a);
+            }
+        }
         default:
         {
             Fail("Bad texture format.");

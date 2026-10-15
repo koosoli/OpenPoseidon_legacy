@@ -417,6 +417,18 @@ bool Preproc::GlobalScan(QIStream& in, QOStream* out)
                     ReadNext(in);
                 }
             }
+            else if (item == lxLineBreak)
+            {
+                // A backslash ending a line outside a #define continues the line, as in C.
+                // Arma 3's own functions carry stray ones (BIS_fnc_moduleInit, after its
+                // _isPersistent line); copied through, the backslash was a script error that
+                // stopped every module. The line break itself stays, so line numbers hold.
+                if (out)
+                {
+                    out->put('\n');
+                }
+                ReadNext(in);
+            }
             else
             {
                 if (out)
