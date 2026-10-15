@@ -2988,6 +2988,25 @@ bool GameState::PerformAssignment(bool localOnly)
         vynech();
     }
 
+    // Arma 3 init lines write "0 = [] spawn {...};" (an init line must not return a value):
+    // a number on the left, so the value is computed and dropped. Arma 3 only (code values).
+    if (s_codeValues && !declareLocal && isdigit(static_cast<unsigned char>(*_e->_pos)))
+    {
+        while (isdigit(static_cast<unsigned char>(*_e->_pos)))
+            _e->_pos++;
+        vynech();
+        if (*_e->_pos != '=')
+        {
+            SetError(EvalEqu);
+            return false;
+        }
+        _e->_pos++;
+        vynech();
+        GameValue dropped = Vyhod();
+        CleanStack();
+        return !_e->_error;
+    }
+
     char name[MAX_EXPR_LEN];
     char* wName = name;
     if (isalphaext(*_e->_pos))

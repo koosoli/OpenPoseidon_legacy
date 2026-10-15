@@ -256,7 +256,11 @@ bool Compile(const Function& fn, GameValue& value)
     {
         static std::set<std::string> reported;
         if (reported.insert(Lower(fn.name)).second)
-            LOG_WARN(Script, "Arma 3: function {}: file {} not found", fn.name, fn.path);
+        {
+            const std::string bare = path[0] == '\\' ? path.substr(1) : path;
+            LOG_WARN(Script, "Arma 3: function {}: file {} {}", fn.name, fn.path,
+                     QIFStreamB::FileExist(bare.c_str()) ? "could not be preprocessed" : "not found");
+        }
         return false;
     }
     value = CodeValue(Header(fn) + text);

@@ -1123,6 +1123,40 @@ GameValue StringLoad(const GameState* state, GameValuePar oper1)
     return RString();
 }
 
+// "a3\functions_f\Sides\..\paramsCheck.inc" -> "a3\functions_f\paramsCheck.inc": the
+// archives know no "." or ".." folders, and Arma 3's function library includes its shared
+// headers that way (#include "..\paramsCheck.inc").
+static std::string CollapseDots(const std::string& path)
+{
+    std::vector<std::string> parts;
+    std::string part;
+    const auto flush = [&]
+    {
+        if (part == "..")
+        {
+            if (!parts.empty() && parts.back() != "..")
+                parts.pop_back();
+            else
+                parts.push_back(part);
+        }
+        else if (!part.empty() && part != ".")
+            parts.push_back(part);
+        part.clear();
+    };
+    for (char c : path)
+    {
+        if (c == '\\' || c == '/')
+            flush();
+        else
+            part += c;
+    }
+    flush();
+    std::string out;
+    for (size_t i = 0; i < parts.size(); i++)
+        out += (i ? "\\" : "") + parts[i];
+    return out;
+}
+
 class FilePreprocessor : public Preproc
 {
   public:
@@ -1137,9 +1171,12 @@ class FilePreprocessor : public Preproc
         // Arma 2 names bank paths with a leading backslash ("\\ca\\modules\\...").
         while (!name.empty() && (name[0] == '\\' || name[0] == '/'))
             name.erase(0, 1);
-        if (!QIFStreamB::FileExist(name.c_str()) && !baseDir.empty() &&
-            QIFStreamB::FileExist((baseDir + name).c_str()))
-            name = baseDir + name;
+        if (!QIFStreamB::FileExist(name.c_str()) && !baseDir.empty())
+        {
+            const std::string relative = CollapseDots(baseDir + name);
+            if (QIFStreamB::FileExist(relative.c_str()))
+                name = relative;
+        }
         if (!QIFStreamB::FileExist(name.c_str()))
         {
             return nullptr;

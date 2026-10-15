@@ -1940,6 +1940,38 @@ const Macro kMacros2[] = {
      "(_this select 0) addEventHandler [_t, (_this select 1) select 1]"},
     {"removeMPEventHandler", 'b', GameNothing, GameObject, GameArray, ""},
     {"removeAllMPEventHandlers", 'b', GameNothing, GameObject, GameString, ""},
+    // Arma 3's control forms of list, slider and display commands this engine knows only
+    // with an [idc, ...] argument (counted over Arma 3's own scripts: lbSetCurSel 227 times,
+    // lbData 207, lbAdd 174, ...). Controls are numbers here; the dialogs they fill are not
+    // shown, so the commands take effect on nothing and answer neutrally.
+    {"lbSetCurSel", 'b', GameNothing, GameAny, GameScalar, ""},
+    {"lbData", 'b', GameString, GameAny, GameScalar, "''"},
+    {"lbAdd", 'b', GameScalar, GameAny, GameString, "0"},
+    {"lbValue", 'b', GameScalar, GameAny, GameScalar, "0"},
+    {"lbText", 'b', GameString, GameAny, GameScalar, "''"},
+    {"lbPicture", 'b', GameString, GameAny, GameScalar, "''"},
+    {"lbSetData", 'b', GameNothing, GameAny, GameArray, ""},
+    {"lbSetValue", 'b', GameNothing, GameAny, GameArray, ""},
+    {"lbSetPicture", 'b', GameNothing, GameAny, GameArray, ""},
+    {"lbSetColor", 'b', GameNothing, GameAny, GameArray, ""},
+    {"lnbAddRow", 'b', GameScalar, GameAny, GameArray, "0"},
+    {"lnbData", 'b', GameString, GameAny, GameArray, "''"},
+    {"lnbText", 'b', GameString, GameAny, GameArray, "''"},
+    {"lnbValue", 'b', GameScalar, GameAny, GameArray, "0"},
+    {"lnbSetData", 'b', GameNothing, GameAny, GameArray, ""},
+    {"lnbSetText", 'b', GameNothing, GameAny, GameArray, ""},
+    {"lnbSetValue", 'b', GameNothing, GameAny, GameArray, ""},
+    {"lnbSetPicture", 'b', GameNothing, GameAny, GameArray, ""},
+    {"lnbSetColor", 'b', GameNothing, GameAny, GameArray, ""},
+    {"lnbSetCurSelRow", 'b', GameNothing, GameAny, GameScalar, ""},
+    {"sliderSetPosition", 'b', GameNothing, GameAny, GameScalar, ""},
+    {"sliderSetRange", 'b', GameNothing, GameAny, GameArray, ""},
+    {"closeDisplay", 'b', GameNothing, GameAny, GameScalar, ""},
+    // unit skill "aimingAccuracy": this engine has one skill per unit
+    {"skill", 'b', GameScalar, GameObject, GameString, "skill (_this select 0)"},
+    {"getGroupIcon", 'b', GameArray, GameGroup, GameScalar, "[]"},
+    // position nearRoads radius: the road network is not exposed to scripts yet
+    {"nearRoads", 'b', GameArray, GameArray | GameObject, GameScalar, "[]"},
 };
 
 template <size_t I>
