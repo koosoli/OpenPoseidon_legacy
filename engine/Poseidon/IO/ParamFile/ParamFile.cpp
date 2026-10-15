@@ -1786,8 +1786,12 @@ void ParamClass::Parse(QIStream& in, ParamFile* file)
                     section->_base = dynamic_cast<ParamClass*>(entry);
                     if (!section->_base)
                     {
+                        // Read without a base, like an undefined one: returning here dropped
+                        // the rest of the file. Arma 3 module arguments name their classes
+                        // after values of the module (Site_BLUFOR: `faction = ...;` and
+                        // `class Arguments: Arguments { class faction: faction {...} }`),
+                        // which ended the merged Arma 3 config in the middle of CfgVehicles.
                         ErrorMessage("%s: '%s' is not class", (const char*)GetContext(word), (const char*)base);
-                        return;
                     }
                 }
                 c = in.get();
