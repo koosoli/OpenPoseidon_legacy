@@ -2067,6 +2067,46 @@ GameValue A2ZeroPos(const GameState* state, GameValuePar, GameValuePar)
         a.Add(GameValue(0.0f));
     return result;
 }
+
+// object selectionPosition "name" (or [name, lod]): the named selection's centre in model
+// space, [x, y, z] with z up, as modelToWorld takes it -- from the memory LOD, else the
+// first LOD. Was always [0, 0, 0]; Arma 3's carrier puts each hull part at its base's
+// memory point this way, so the whole ship was stacked on the base at sea level.
+GameValue A2SelectionPosition(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& a = result;
+    Vector3 centre = VZero;
+    Object* obj = GetObject(oper1);
+    RString name;
+    if (oper2.GetType() == GameString)
+        name = oper2;
+    else if (oper2.GetType() == GameArray && static_cast<const GameArrayType&>(oper2).Size() > 0 &&
+             static_cast<const GameArrayType&>(oper2)[0].GetType() == GameString)
+        name = static_cast<const GameArrayType&>(oper2)[0];
+    LODShape* shape = obj ? obj->GetShape() : nullptr;
+    if (shape && name.GetLength() > 0)
+    {
+        Shape* levels[2] = {shape->MemoryLevel(), shape->NLevels() > 0 ? shape->Level(0) : nullptr};
+        for (Shape* level : levels)
+        {
+            const int sel = level ? level->FindNamedSel(name) : -1;
+            if (sel < 0)
+                continue;
+            const NamedSelection& points = level->NamedSel(sel);
+            if (points.Size() <= 0)
+                continue;
+            for (int i = 0; i < points.Size(); i++)
+                centre += level->Pos(points[i]);
+            centre /= static_cast<float>(points.Size());
+            break;
+        }
+    }
+    a.Add(GameValue(centre.X()));
+    a.Add(GameValue(centre.Z()));
+    a.Add(GameValue(centre.Y()));
+    return result;
+}
 } // namespace
 
 // Arma 2 briefing: the diary and the simple tasks, as the HTML sections the CWA map
@@ -2668,7 +2708,7 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "displayRemoveEventHandler", function, A2NothingBinary, GameAny, GameArray),
     GameOperator(GameScalar, "ctrlAddEventHandler", function, A2ZeroBinary, GameAny, GameArray),
     GameOperator(GameNothing, "ctrlRemoveEventHandler", function, A2NothingBinary, GameAny, GameArray),
-    GameOperator(GameArray, "selectionPosition", function, A2ZeroPos, GameObject, GameString),
+    GameOperator(GameArray, "selectionPosition", function, A2SelectionPosition, GameObject, GameString | GameArray),
     GameOperator(GameNothing, "hcSelectGroup", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameNothing, "lnbSetColumnsPos", function, A2NothingBinary, GameScalar, GameArray),
     GameOperator(GameAny, "do", function, A2WithDo, GameString, GameString),
