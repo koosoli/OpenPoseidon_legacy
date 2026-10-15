@@ -29,6 +29,7 @@
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICenter.hpp>
 #include <Poseidon/AI/AIGroup.hpp>
+#include <Poseidon/Audio/Streaming/WaveStream.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -662,6 +663,20 @@ std::string SaidKey(const void* who, const void* to, const std::string& topic, c
            "|" + Lower(topic) + "|" + Lower(id);
 }
 
+// Length in seconds of a recorded sentence (a bank path), or -1 when it cannot be read.
+float SpeechSeconds(const char* bankPath)
+{
+    Ref<WaveStream> stream = SoundLoadFile(bankPath);
+    if (!stream)
+        return -1.0f;
+    WAVEFORMATEX format{};
+    stream->GetFormat(format);
+    const int bytes = stream->GetUncompressedSize();
+    if (format.nAvgBytesPerSec <= 0 || bytes <= 0)
+        return -1.0f;
+    return static_cast<float>(bytes) / static_cast<float>(format.nAvgBytesPerSec);
+}
+
 // A CfgSounds class for a recorded sentence, so `say` plays it through CWA's sound path.
 RString SpeechSoundClass(const char* file, const char* text)
 {
@@ -709,6 +724,7 @@ GameValue A2KbTell(const GameState* state, GameValuePar oper1, GameValuePar oper
             file = it->second;
     }
     float duration = 2.0f;
+    float spoken = -1.0f; // length of the recorded line, when there is one
     std::string shown;
     if (!file.empty())
     {
@@ -731,7 +747,17 @@ GameValue A2KbTell(const GameState* state, GameValuePar oper1, GameValuePar oper
                         const RString cls = SpeechSoundClass(wave.c_str(), shown.c_str());
                         if (cls.GetLength() > 0)
                             ObjSay(state, oper1, GameValue(cls));
-                        duration = std::max(duration, 0.07f * static_cast<float>(shown.size()) + 1.0f);
+                        // kbWasSaid answers once the line has been spoken, and the
+                        // conversation FSMs of Arma 2's missions start the next line on it.
+                        // The recording's own length is that moment; a length guessed from
+                        // the text is not: of the official missions' 4495 recorded lines,
+                        // 2032 run more than 1 s past such a guess and 945 end more than
+                        // 1 s before it.
+                        spoken = SpeechSeconds(bank.c_str());
+                        if (spoken > 0.0f)
+                            duration = spoken;
+                        else
+                            duration = std::max(duration, 0.07f * static_cast<float>(shown.size()) + 1.0f);
                     }
                 }
             }
@@ -742,7 +768,12 @@ GameValue A2KbTell(const GameState* state, GameValuePar oper1, GameValuePar oper
                  (const char*)who->GetDebugName());
     if (shown.empty())
         shown = id;
-    duration = std::max(duration, 0.06f * static_cast<float>(shown.size()) + 1.0f);
+    // Without a readable recording the line is shown as text only, for a reading time
+    // estimated from its length.
+    if (spoken <= 0.0f)
+        duration = std::max(duration, 0.06f * static_cast<float>(shown.size()) + 1.0f);
+    LOG_INFO(Mission, "Arma 2: kbTell '{}' / '{}' by {}: {} {:.1f} s", topic, id, (const char*)who->GetDebugName(),
+             spoken > 0.0f ? "speech" : "text only", duration);
     ObjGroupChat(state, oper1, GameValue(RString(shown.c_str())));
     KbSentence s;
     s.start = Now();
