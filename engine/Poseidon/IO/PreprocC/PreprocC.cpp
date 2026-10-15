@@ -31,6 +31,14 @@ class Preprocessor : public Preproc
     QIStream* OnEnterInclude(const char* filename) override
     {
         std::string resolved = filename;
+        // "\a3\missions_f_contact\missions\description.inc": a leading separator names the
+        // root of the game's file system, where every archive is mounted under its prefix
+        // (no prefix starts with one). Arma 3 missions include their shared files this way.
+        if (!QIFStreamB::FileExist(resolved.c_str()) && (resolved[0] == '\\' || resolved[0] == '/') &&
+            QIFStreamB::FileExist(resolved.c_str() + 1))
+        {
+            resolved.erase(0, 1);
+        }
         if (!QIFStreamB::FileExist(resolved.c_str()) && !_includeStack.empty())
         {
             std::string dir = DirectoryOf(_includeStack.back().c_str());
