@@ -53,6 +53,7 @@ out vec2 vUV0;
 out vec2 vUV1;
 out float vFogTC;
 out vec3 vWorldRel;
+out vec3 vWorldNormal; // receiver normal for the shadow-map normal offset
 
 void main() {
     float w = 1.0 / aRhw;
@@ -66,6 +67,7 @@ void main() {
     vUV1 = aUV1;
     vFogTC = aSpecular.a;
     vWorldRel = vec3(0.0); // screen draws are never shadow-mapped
+    vWorldNormal = vec3(0.0);
 }
 )";
 
@@ -116,6 +118,7 @@ out vec2 vUV0;
 out vec2 vUV1;
 out float vFogTC;
 out vec3 vWorldRel;
+out vec3 vWorldNormal; // receiver normal for the shadow-map normal offset
 
 void main() {
     vec4 worldPos    = worldArr[gl_InstanceID] * vec4(pos, 1.0);
@@ -123,6 +126,7 @@ void main() {
     vec4 viewPos     = view * worldPos;
     gl_Position      = proj * viewPos;
     vWorldRel        = worldPos.xyz; // camera-relative world pos for cascade shadow lookup
+    vWorldNormal     = worldNormal;
 
     float NdotL = max(0.0, dot(worldNormal, -sunDir.xyz));
     vec4 litColor;
@@ -201,7 +205,7 @@ static const char s_psNormalGLSL[] = R"(#version 330 core
 layout(std140) uniform PSConstants {
     vec4 fogColor;    // c0
     vec4 alphaRef;    // c1: {ref, enabled, alphaToCoverage, flatDebug}
-    vec4 shadowCtl;   // c2: {enable, bias, darkness, texelSize}
+    vec4 shadowCtl;   // c2: {enable, normal offset (texels), darkness, texelSize}
     vec4 constColor; // c3: per-object IsColored tint (white = no-op)
     vec4 _pad4;
     vec4 _pad5;
@@ -223,6 +227,7 @@ in float vFogTC;
 
 uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused unless shadowCtl.x>0.5)
 in vec3 vWorldRel;
+in vec3 vWorldNormal;
 
 out vec4 fragColor;
 
@@ -302,7 +307,17 @@ void main() {
                 // later p force-samples the next looser tier (coverage fallthrough).
                 float w = (p == 0) ? (1.0 - bw) : ((wSum <= 0.0) ? 1.0 : ((p == 1) ? bw : 0.0));
                 if (w <= 0.0) continue;
-                vec4 cp = cascadeVP[c] * vec4(vWorldRel, 1.0);
+                // Normal offset: look the receiver up from a point pushed shadowCtl.y
+                // texels of this tier along its normal. The depth pass stores back faces,
+                // so a surface facing away from the sun compared against its own depth
+                // and came out in fine stripes, half shadowed -- every side of an Arma 2
+                // vehicle turned from the sun (C2B's HMMWV, T03's MTVR). Pushed along
+                // the normal it lies behind itself and is shadowed throughout; a face
+                // toward the sun moves toward the light. 0 turns it off.
+                vec3 rowX = vec3(cascadeVP[c][0][0], cascadeVP[c][1][0], cascadeVP[c][2][0]);
+                float texelWorld = 2.0 * ts / max(length(rowX), 1e-6);
+                vec3 nrm = dot(vWorldNormal, vWorldNormal) > 1e-6 ? normalize(vWorldNormal) : vec3(0.0);
+                vec4 cp = cascadeVP[c] * vec4(vWorldRel + nrm * (shadowCtl.y * texelWorld), 1.0);
                 vec3 sc = cp.xyz / cp.w;
                 vec2 suv = sc.xy * 0.5 + 0.5;
                 if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0) {
@@ -349,7 +364,7 @@ static const char s_psDetailGLSL[] = R"(#version 330 core
 layout(std140) uniform PSConstants {
     vec4 fogColor;
     vec4 alphaRef;
-    vec4 shadowCtl;   // c2: {enable, bias, darkness, texelSize}
+    vec4 shadowCtl;   // c2: {enable, normal offset (texels), darkness, texelSize}
     vec4 constColor; // c3: per-object IsColored tint (white = no-op)
     vec4 _pad4;
     vec4 _pad5;
@@ -372,6 +387,7 @@ in float vFogTC;
 
 uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused unless shadowCtl.x>0.5)
 in vec3 vWorldRel;
+in vec3 vWorldNormal;
 
 out vec4 fragColor;
 
@@ -448,7 +464,17 @@ void main() {
                 // later p force-samples the next looser tier (coverage fallthrough).
                 float w = (p == 0) ? (1.0 - bw) : ((wSum <= 0.0) ? 1.0 : ((p == 1) ? bw : 0.0));
                 if (w <= 0.0) continue;
-                vec4 cp = cascadeVP[c] * vec4(vWorldRel, 1.0);
+                // Normal offset: look the receiver up from a point pushed shadowCtl.y
+                // texels of this tier along its normal. The depth pass stores back faces,
+                // so a surface facing away from the sun compared against its own depth
+                // and came out in fine stripes, half shadowed -- every side of an Arma 2
+                // vehicle turned from the sun (C2B's HMMWV, T03's MTVR). Pushed along
+                // the normal it lies behind itself and is shadowed throughout; a face
+                // toward the sun moves toward the light. 0 turns it off.
+                vec3 rowX = vec3(cascadeVP[c][0][0], cascadeVP[c][1][0], cascadeVP[c][2][0]);
+                float texelWorld = 2.0 * ts / max(length(rowX), 1e-6);
+                vec3 nrm = dot(vWorldNormal, vWorldNormal) > 1e-6 ? normalize(vWorldNormal) : vec3(0.0);
+                vec4 cp = cascadeVP[c] * vec4(vWorldRel + nrm * (shadowCtl.y * texelWorld), 1.0);
                 vec3 sc = cp.xyz / cp.w;
                 vec2 suv = sc.xy * 0.5 + 0.5;
                 if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0) {
@@ -495,7 +521,7 @@ static const char s_psGrassGLSL[] = R"(#version 330 core
 layout(std140) uniform PSConstants {
     vec4 fogColor;
     vec4 alphaRef;
-    vec4 shadowCtl;   // c2: {enable, bias, darkness, texelSize}
+    vec4 shadowCtl;   // c2: {enable, normal offset (texels), darkness, texelSize}
     vec4 constColor; // c3: per-object IsColored tint (white = no-op)
     vec4 _pad4;
     vec4 grassCoef1;
@@ -518,6 +544,7 @@ in float vFogTC;
 
 uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused unless shadowCtl.x>0.5)
 in vec3 vWorldRel;
+in vec3 vWorldNormal;
 
 out vec4 fragColor;
 
@@ -596,7 +623,17 @@ void main() {
                 // later p force-samples the next looser tier (coverage fallthrough).
                 float w = (p == 0) ? (1.0 - bw) : ((wSum <= 0.0) ? 1.0 : ((p == 1) ? bw : 0.0));
                 if (w <= 0.0) continue;
-                vec4 cp = cascadeVP[c] * vec4(vWorldRel, 1.0);
+                // Normal offset: look the receiver up from a point pushed shadowCtl.y
+                // texels of this tier along its normal. The depth pass stores back faces,
+                // so a surface facing away from the sun compared against its own depth
+                // and came out in fine stripes, half shadowed -- every side of an Arma 2
+                // vehicle turned from the sun (C2B's HMMWV, T03's MTVR). Pushed along
+                // the normal it lies behind itself and is shadowed throughout; a face
+                // toward the sun moves toward the light. 0 turns it off.
+                vec3 rowX = vec3(cascadeVP[c][0][0], cascadeVP[c][1][0], cascadeVP[c][2][0]);
+                float texelWorld = 2.0 * ts / max(length(rowX), 1e-6);
+                vec3 nrm = dot(vWorldNormal, vWorldNormal) > 1e-6 ? normalize(vWorldNormal) : vec3(0.0);
+                vec4 cp = cascadeVP[c] * vec4(vWorldRel + nrm * (shadowCtl.y * texelWorld), 1.0);
                 vec3 sc = cp.xyz / cp.w;
                 vec2 suv = sc.xy * 0.5 + 0.5;
                 if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0) {
@@ -640,7 +677,7 @@ static const char s_psWaterGLSL[] = R"(#version 330 core
 layout(std140) uniform PSConstants {
     vec4 fogColor;
     vec4 alphaRef;    // c1: shared slot; water reads only .w (flatDebug)
-    vec4 shadowCtl;   // c2: {enable, bias, darkness, texelSize}
+    vec4 shadowCtl;   // c2: {enable, normal offset (texels), darkness, texelSize}
     vec4 constColor;  // c3: per-object IsColored tint (unused by water)
     vec4 lightDir;
     vec4 grassCoef1;
@@ -717,6 +754,7 @@ out vec2 vUV0;
 out vec2 vUV1;
 out float vFogTC;
 out vec3 vWorldRel;
+out vec3 vWorldNormal; // receiver normal for the shadow-map normal offset
 
 void main() {
     vec4 worldPos = worldArr[gl_InstanceID] * vec4(pos, 1.0);
@@ -727,6 +765,7 @@ void main() {
     vUV1          = vUV0;
     vFogTC        = 1.0;            // shadows ignore fog (DX8 D3DRS_FOGENABLE=FALSE)
     vWorldRel     = vec3(0.0);     // shadow casters aren't shadow-mapped receivers
+    vWorldNormal  = vec3(0.0);
 }
 )";
 
@@ -736,7 +775,7 @@ static const char s_psShadowGLSL[] = R"(#version 330 core
 layout(std140) uniform PSConstants {
     vec4 fogColor;
     vec4 alphaRef;      // {ref, enabled, 0, 0}
-    vec4 shadowCtl;   // c2: {enable, bias, darkness, texelSize}
+    vec4 shadowCtl;   // c2: {enable, normal offset (texels), darkness, texelSize}
     vec4 constColor; // c3: per-object IsColored tint (white = no-op)
     vec4 _pad4;
     vec4 _pad5;
@@ -1139,6 +1178,14 @@ void EngineGL33::UpdateShadowMapLitState()
     if (_shadowTuning.enabled && _shadowMapActive && _shadowMapTex && _shadowCascades > 0)
     {
         ctl[0] = 1.0f; // enable the per-fragment shadow test
+        // Receiver normal offset in texels of the tier (the PS comment says why).
+        // POSEIDON_GL33_SHADOW_NORMAL_OFFSET overrides it for an A/B; 0 turns it off.
+        static const float normalOffset = [] {
+            const char* v = std::getenv("POSEIDON_GL33_SHADOW_NORMAL_OFFSET");
+            const float parsed = v && *v ? static_cast<float>(std::atof(v)) : 1.5f;
+            return parsed >= 0.0f && parsed <= 8.0f ? parsed : 1.5f;
+        }();
+        ctl[1] = normalOffset;
         // Lit-colour multiplier where shadowed, faded toward 1.0 (no shadow) as the
         // sun sets: full darkness in daylight, none at night. _shadowSunFactor is 1
         // by day, 0 at night (Scene drives it from the sun's NightEffect).
