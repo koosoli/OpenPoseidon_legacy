@@ -34,7 +34,11 @@ function Wait-GameFree {
   $quiet = [int]$job.QUIET; $deadline = (Get-Date).AddSeconds([int]$job.WAIT); $free = $null; $said = $false
   while ($true) {
     if (Test-Path (Join-Path $here 'STOP')) { St 'STOPPED while waiting'; exit 1 }
-    if (Get-Process OpenPoseidon -ErrorAction SilentlyContinue) {
+    # Another session's harness mid-run (a sibling _OpenPoseidon-* with request.running) counts as
+    # busy too: its runs are one game process per mission, and the gaps between them are not free.
+    $siblingRun = Get-ChildItem $cwa -Directory -Filter '_OpenPoseidon-*' -ErrorAction SilentlyContinue |
+      Where-Object { $_.FullName -ne $here -and (Test-Path (Join-Path $_.FullName 'request.running')) }
+    if ((Get-Process OpenPoseidon -ErrorAction SilentlyContinue) -or $siblingRun) {
       $free = $null
       if (-not $said) { St 'BUSY: OpenPoseidon laeuft schon, warte'; $said = $true }
       if ((Get-Date) -gt $deadline) { St 'BUSY: gave up waiting'; exit 1 }
@@ -112,7 +116,8 @@ if ($job.MODE -eq 'workbench') {
   $gproj = Join-Path $proj 'addon.gproj'
   St "workbench $($poses.Count) poses, project $gproj"
   $p = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe -Parent) -PassThru -ArgumentList @(
-    '-gproj', "`"$gproj`"", '-wbModule=WorldEditor', '-run', '-plugin=MDX_ParityCapturePlugin')
+    '-gproj', "`"$gproj`"", '-addonsDir', "`"$($job.REFORGER)`"", '-wbModule=WorldEditor', '-run',
+    '-plugin=MDX_ParityCapturePlugin')
   $null = $p.Handle
   $deadline = (Get-Date).AddSeconds([int]$job.WBTIMEOUT)
   while (-not $p.HasExited) {
