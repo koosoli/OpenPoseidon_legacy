@@ -6,7 +6,7 @@
 // bone `palette` (from the skin module). Shadowing is the shared cascade kernel.
 
 #import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, apply_layered_fog, apply_fog_terrain, veg_sway_offset, veg_sway_height, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_FRESNEL_ENV, sky_irradiance}
-#import shadow::shadow_strength
+#import shadow::{shadow_strength, csm_occlusion_point}
 #import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage}
 #import frame::{surface_rays, cloud_shadow_tex, terrain_shadow_samp, terrain_shadow_map, cloud_sun_shadow}
 #import frame::monitor_scene
@@ -1535,7 +1535,13 @@ fn surface_scattering(pos: vec3<f32>) -> vec3<f32> {
             cloud = mix(visibility, 1.0, smoothstep(0.85, 1.0, edge));
         }
         let terrain = terrain_sun_shadow(world.xz, world.y);
+        // The god rays' own lookup (shadow.wgsl csm_occlusion_point); WGR_SURFACE_RAYS_FILTER=1
+        // restores the receiver filter here for an A/B.
+#ifdef SURFACE_RAYS_RECEIVER_FILTER
         let object = shadow_strength(rel, sun, 1.0, vec3<f32>(0.0), vec3<f32>(0.0));
+#else
+        let object = csm_occlusion_point(rel);
+#endif
         scatter = scatter + transmit * cloud * (1.0 - max(terrain, object)) * (1.0 - segment);
         transmit = transmit * segment;
         previous = next;

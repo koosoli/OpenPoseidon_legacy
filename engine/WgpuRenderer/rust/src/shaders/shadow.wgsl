@@ -317,3 +317,44 @@ fn shadow_strength(world_pos: vec3<f32>, normal_ws: vec3<f32>, fog: f32,
     let fade = clamp((last_split - eye_depth) / max(frame.shadow.ctl.z, 0.001), 0.0, 1.0);
     return (1.0 - lit) * fade * clamp(fog, 0.0, 1.0);
 }
+
+// The sun's occlusion [0,1] by the cascade map at a camera-relative point in the AIR: one
+// hardware compare tap, constant bias, no normal offset, no PCF -- exactly how the screen-space
+// god rays sample it (godrays.wgsl csm_occlusion), so the rays a blended surface integrates in
+// front of itself agree with the rays composited everywhere else. PERF (2026-10-15): that march
+// (shader3d surface_scattering) used to call shadow_strength -- the full receiver filter, PCSS
+// blocker search included -- once per step for every blended fragment, which made road and decal
+// layers the most expensive fragments in the frame.
+fn csm_occlusion_point(pos: vec3<f32>) -> f32 {
+    let n = i32(frame.shadow.ctl.x);
+    if (n <= 0) {
+        return 0.0;
+    }
+    let omni_n = i32(frame.shadow.ctl.y);
+    let eye_depth = dot(pos, frame.shadow.cam_fwd.xyz);
+    let dist3d = length(pos);
+    var ci = n;
+    for (var i = 0; i < 4; i++) {
+        if (i >= n) {
+            break;
+        }
+        let metric = select(eye_depth, dist3d, i < omni_n);
+        if (metric <= frame.shadow.splits[i]) {
+            ci = i;
+            break;
+        }
+    }
+    if (ci >= n) {
+        return 0.0;
+    }
+    let cp = frame.shadow.cascade_vp[ci] * vec4<f32>(pos, 1.0);
+    let sc = cp.xyz / cp.w;
+    let suv = vec2<f32>(sc.x * 0.5 + 0.5, 0.5 - sc.y * 0.5);
+    if (suv.x <= 0.0 || suv.x >= 1.0 || suv.y <= 0.0 || suv.y >= 1.0 || sc.z <= 0.0 || sc.z >= 1.0) {
+        return 0.0;
+    }
+    let bias = frame.shadow.ctl.w * f32(ci + 1) * f32(ci + 1);
+    let lit = textureSampleCompareLevel(shadow_map, shadow_samp, suv, ci, sc.z - bias);
+    let fade = clamp((frame.shadow.splits[n - 1] - eye_depth) / max(frame.shadow.ctl.z, 0.001), 0.0, 1.0);
+    return (1.0 - lit) * fade;
+}

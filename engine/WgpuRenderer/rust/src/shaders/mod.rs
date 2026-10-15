@@ -165,6 +165,9 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
     if std::env::var("WGR_GRASS_EDGE_FADE").as_deref() == Ok("0") {
         defs.insert("GRASS_HARD_CELL_EDGES".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
+    if std::env::var("WGR_SURFACE_RAYS_FILTER").as_deref() == Ok("1") {
+        defs.insert("SURFACE_RAYS_RECEIVER_FILTER".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
     if std::env::var("WGR_COALESCED_PCF").as_deref() == Ok("1") {
         defs.insert("COALESCED_PCF".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
