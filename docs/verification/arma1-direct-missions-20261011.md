@@ -141,13 +141,13 @@ briefing path) and runs 25 s with no script error, crash or hang. What it does n
   ctrlSetFade shows/hides on commit (no fading). Structured text is shown as plain text.
 - **UI.** Arma 1 font families are drawn with tahomaB24. The strategic map's overview
   box stays empty (its text goes to a single-line control).
-- **Weapons.** See [Weapons, 2026-10-14](#weapons-2026-10-14-binary-d0cdd15-stamped-in-the-game-folder):
-  Arma 1 weapons in hand, in crates and in the briefing pool; magazine sizes are CWA's.
+- **Weapons.** See [Weapons, 2026-10-14](#weapons-2026-101415-binary-9d545a7-stamped-in-the-game-folder):
+  Arma 1 weapons in hand, in crates and in the briefing pool, with Arma 1 magazine sizes.
 - **Vehicles and animations.** Driving (HMMWV), flying (UH-60, OH-58 incl. AI), boarding
   and the Arma 1 soldier animations were checked with dedicated test missions; not every
   vehicle type and crew position was checked individually.
 
-## Weapons, 2026-10-14 (binary d0cdd15, stamped in the game folder)
+## Weapons, 2026-10-14/15 (binary 9d545a7, stamped in the game folder)
 
 Arma 1 soldiers carry their own Arma 1 weapons (178de3d): each one is a generated
 `A1x_<weapon>` class with the Arma 1 model on a CWA weapon, which keeps the magazines,
@@ -167,9 +167,12 @@ ballistics and sounds. Fixed since, in order:
 | 99b4cde | `reload` did nothing | loads empty weapons |
 | 1ab101c | HUD said `M16` over an M4 Aimpoint, actions offered to drop `AT4` | Arma weapon and magazine names |
 | d0cdd15 | `5Rnd_127x108_KSVK` (crate/vehicle cargo in 79 missions) and `8Rnd_9x18_MakarovSD` had no counterpart | SVDDragunov / Tokarev magazines; a muzzle name that maps to nothing is logged once with the unit's muzzles |
+| 87feff9 | magazines took the size of their CWA carrier: M24 20 rounds (Arma 1: 5), M249 100 (200), M107 20 (10), M9 10 (15), KSVK 10 (5) | a magazine of another size is a generated `A1x_<magazine>` with the Arma 1 count and name; every muzzle that takes the carrier takes it, but an Arma 1 weapon only the magazines its Arma 1 class lists. `OP_A1_MAGAZINES=0` turns it off |
+| 79badd0 | -- | diagnostic: `OP_FORCEFIRE_LOG=1` logs why a scripted `fire` does not go off |
+| 9d545a7 | `unit fire "LAWLauncher"` never fired -- CWA's own AT soldiers too: the soldier selected the launcher but stayed in his rifle move, where no missile may leave; `player fire` waited for an AI aim the player's input never let settle | a pending scripted launcher shot raises the launcher; the player's unit fires where the player aims |
 
-Test missions (`tests\missions\a1weap*.Sara` on the build machine), on 1ab101c and again on
-d0cdd15 unless noted:
+Test missions (`tests\missions\a1weap*.Sara` on the build machine), on 1ab101c, d0cdd15 and
+9d545a7 unless noted:
 
 | check | result |
 |---|---|
@@ -184,21 +187,26 @@ d0cdd15 unless noted:
 | briefing pool (m02minerconvoy, m01sniper) | 4 / 5 weapons, 45 magazines, no config error |
 | script names (a1weap) | `hasWeapon (primaryWeapon x)` true for all; remove/add round trip |
 | HUD and action menu (a1weapP) | `M136 Granatwerfer`, `Waffe M4 Aimpoint`, `Nachladen M136`, `M136 ablegen` |
+| magazine sizes (a1weapMag, 79badd0 and 9d545a7) | M249 200, M107 10, M24 5, M9 15; the M24 shot empty 5→0 and reloaded to 5 with one magazine less; the M107 refuses M24 rounds (ammo 0); a CWA M21 magazine still fits the M24 (20) |
+| scripted launcher fire, out of combat (a1weapL2, 9d545a7) | LAW (CWA soldier), M136, RPG7V, Stinger all fire: magazines 7→6 (one round reloaded), Stinger 1→0 |
+| `player fire` (a1weap, a1weapL, 9d545a7) | Arma 1 player M4 30→29, CWA player M16 30→29 (before: no shot) |
 
 Regression: all 131 missions entered and ran 25 s with no script error, crash or hang on
-0994802 (2026-10-14 20:31-21:29) and again on 1ab101c (22:46-23:44); the 20-mission subset
-(`tests\missions_weap.txt`) ran clean on eabbeb3, 99b4cde and d0cdd15.
+0994802 (2026-10-14 20:31-21:29), 1ab101c (22:46-23:44) and 79badd0 (2026-10-15 09:30-10:30,
+with the generated magazines: M249, KSVK, M24, M9, M107 and 20-round Stanag generated in
+44-84 missions each); the 20-mission subset (`tests\missions_weap.txt`) ran clean on
+eabbeb3, 99b4cde, d0cdd15 and 9d545a7.
 
 Known limits, by design or not Arma 1 specific:
 
-- **Magazine capacity is CWA's.** An Arma 1 magazine is carried by the CWA magazine of the
-  same calibre: the M24 gets 20-round M21 magazines (5 in Arma 1), the M249 100-round
-  belts (200), the M107 20 rounds (10). Names shown are Arma 1's.
-- **`fire` from a script does not fire launchers**, and **`fire` on the player does
-  nothing** -- for CWA's own soldiers too (SoldierWLAW with LAWLauncher, CWA M16), so this is
-  the engine, not the Arma 1 layer. AI fires launchers normally in combat; the player fires
-  them by key. (CWA's grenade muzzle is `Throw`: `fire ["Throw", "HandGrenade", "HandGrenade"]`;
-  Arma 1's `HandGrenadeMuzzle` is mapped to it.)
+- **Magazines of the same size as their carrier stay CWA's** (Stanag on M16, M240 belt on
+  M60, AK on AK74); their Arma 1 names are shown. A weapon takes every magazine of its CWA
+  carrier, so an M249 also loads M240 belts. Ballistics and sounds are the carrier's.
+- **A scripted `fire` aims as before**: without a target it shoots into the air (a launcher
+  steeply up). CWA's grenade muzzle is `Throw`: `fire ["Throw", "HandGrenade", "HandGrenade"]`;
+  Arma 1's `HandGrenadeMuzzle` is mapped to it.
+- A campaign saved with generated `A1x_` weapons or magazines in its pool needs them
+  generated again before the pool is read (they are, when the mission's units load).
 - `weapons` leaves out Throw/Put, as OFP did (`hasWeapon "Throw"` is true).
 - Weapons without a CWA counterpart are left out of loadouts and crates (logged once).
 
