@@ -365,6 +365,11 @@ class Engine : public IGraphicsEngine
     void SetAspectSettings(const AspectSettings& set) { _aspectSettings = set; }
     void GetAspectSettings(AspectSettings& get) const { get = _aspectSettings; }
 
+    // Whether the backend samples a material's per-texel specular map (Arma's SMDI).
+    // One that does not gets the section's specular scaled by the map's mean instead
+    // (ShapeSection::PrepareTL, TexMaterial::SpecularMapLevel).
+    virtual bool SamplesSpecularMaps() const { return true; }
+
     virtual bool IsWBuffer() const { return false; }
     virtual bool CanWBuffer() const { return false; }
     virtual void SetWBuffer(bool val) {}

@@ -1488,6 +1488,13 @@ void ShapeSection::PrepareTL(const TLMaterial& mat, const LightList& lights, int
         // modulate material by material given in section
         TLMaterial matmod;
         surfMat->Combine(matmod, mat);
+        if (!GEngine->SamplesSpecularMaps())
+        {
+            const float level = surfMat->SpecularMapLevel();
+            if (level < 1.0f)
+                matmod.specular = Color(matmod.specular.R() * level, matmod.specular.G() * level,
+                                        matmod.specular.B() * level, matmod.specular.A());
+        }
         GEngine->SetMaterial(matmod, lights, specTyped);
     }
     else

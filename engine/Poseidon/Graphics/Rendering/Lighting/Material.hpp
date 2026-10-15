@@ -4,6 +4,8 @@
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/Foundation/Types/RemoveLinks.hpp>
 
+#include <string>
+
 // Surface material properties; primary consumer is ShapeSection.
 
 namespace Poseidon
@@ -30,9 +32,19 @@ class TexMaterial: public RefCountWithLinks
 	Ref<Texture> _detailmap;
 	float _detailmapFactor;
 
+	// The per-texel specular map an Arma RVMAT names -- Super's Stage5 `_smdi`, as a
+	// canonical path or a procedural `#(...)color(...,SMDI)` -- whose green channel
+	// scales _specular texel by texel. Empty for OFP materials.
+	std::string _specularMapName;
+	mutable float _specularMapLevel = -1.0f; // resolved on first use; -1 = not yet
+
 	TexMaterial();
 	TexMaterial(const char *name);
 	void Combine(TLMaterial &dst, const TLMaterial &src);
+	// The mean of that map's specular channel, 1 when there is none: what a backend
+	// that cannot sample the map should scale _specular by. Reads the map's header
+	// (TAGG AVGC) the first time, so call it from the render thread.
+	float SpecularMapLevel() const;
 	const RStringB &GetName() const {return _name;} // required by BankArray
 };
 
