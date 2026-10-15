@@ -7,6 +7,8 @@
 
 #include <Poseidon/Core/Types.hpp>
 
+#include <cstdlib>
+
 using namespace Poseidon;
 class TextureGL33;
 class TextBankGL33;
@@ -831,6 +833,16 @@ class EngineGL33 : public Engine
     int GetMsaaSamples() const override { return _msaaSamples; }
     bool HasWBuffer() const override { return false; }
 
+    // GL33 lights per vertex and never binds an SMDI map. OP_GL33_SPEC_MEAN=0 restores
+    // the unscaled specular for A/B comparison.
+    bool SamplesSpecularMaps() const override
+    {
+        static const bool unscaled = [] {
+            const char* e = std::getenv("OP_GL33_SPEC_MEAN");
+            return e && *e == '0';
+        }();
+        return unscaled;
+    }
     bool IsWBuffer() const override { return false; }
     bool CanWBuffer() const override { return false; }
     void SetWBuffer(bool) override {}
