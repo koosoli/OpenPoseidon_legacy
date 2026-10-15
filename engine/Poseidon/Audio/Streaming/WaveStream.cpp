@@ -5,9 +5,11 @@
 #include <Poseidon/Audio/Streaming/WaveStreamPlain.hpp>
 #include <Poseidon/Audio/Streaming/WaveStreamOGG.hpp>
 #include <Poseidon/Audio/Core/Format/WaveBuffer.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <string.h>
+#include <string>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
@@ -160,7 +162,21 @@ WaveStream* SoundLoadFile(const char* name)
         extern WaveStream* OGGLoadFile(const char* name);
         return OGGLoadFile(name);
     }
-    return WSSLoadFile(name);
+    WaveStream* wss = WSSLoadFile(name);
+    // Arma 1 configs and missions name their sounds .wss while the files ship as .ogg
+    // (mp04cleansweep's CfgSounds: sound\m04r01.wss, the archive: Sound\M04r01.ogg); Arma 1
+    // plays the .ogg. Only with --arma1/--arma2, and only when the .wss itself is missing.
+    if (!wss && !stricmp(ext, ".wss") && Arma1Compat::Active())
+    {
+        std::string ogg(name, static_cast<size_t>(ext - name));
+        ogg += ".ogg";
+        if (QIFStreamB::FileExist(ogg.c_str()))
+        {
+            extern WaveStream* OGGLoadFile(const char* name);
+            return OGGLoadFile(ogg.c_str());
+        }
+    }
+    return wss;
 }
 
 static QIFStream MakeStreamFromMemory(const void* data, size_t size)
