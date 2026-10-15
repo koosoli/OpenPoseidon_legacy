@@ -29,8 +29,11 @@
 #include <Poseidon/World/World.hpp>
 
 #include <cstdio>
+#include <cctype>
+#include <cstdlib>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -115,6 +118,34 @@ void Close(GameState* gs, int display)
 
 GameState* State() { return Poseidon::GWorld ? Poseidon::GWorld->GetGameState() : nullptr; }
 
+// Named cut layers ("BIS_layerTitlecard" cutRsc ..., BIS_fnc_rscLayer): Arma 3 numbers a name
+// the first time it is used; allCutLayers lists the names, each at its number. Layer 0 is the
+// unnamed one the unary commands use.
+std::vector<std::string>& LayerNames()
+{
+    static std::vector<std::string> names{""};
+    return names;
+}
+
+int LayerNumber(const std::string& name)
+{
+    auto& names = LayerNames();
+    for (size_t i = 0; i < names.size(); i++)
+        if (_stricmp(names[i].c_str(), name.c_str()) == 0)
+            return static_cast<int>(i);
+    names.push_back(name);
+    return static_cast<int>(names.size() - 1);
+}
+
+GameValue A3AllCutLayers(const GameState*)
+{
+    GameValue value = GGameState.CreateGameValue(GameArray);
+    GameArrayType& list = value;
+    for (const std::string& n : LayerNames())
+        list.Add(GameValue(RString(n.c_str())));
+    return value;
+}
+
 GameValue A3RscClose(const GameState*, GameValuePar oper1)
 {
     if (GameState* gs = State())
@@ -128,7 +159,7 @@ namespace Poseidon::Arma3Rsc
 std::string LayerKey(GameValuePar layer)
 {
     if (layer.GetType() == GameString)
-        return std::string((const char*)(RString)layer);
+        return std::to_string(LayerNumber(std::string((const char*)(RString)layer)));
     if (layer.GetType() == GameScalar)
     {
         char buf[32];
@@ -198,8 +229,79 @@ bool IsClosedDisplay(float value)
     return id >= kFirstDisplay && id < NextDisplay() && Displays().find(id) == Displays().end();
 }
 
+// layer cutFadeOut time: ends what the layer shows; a named layer answers its number (which
+// BIS_fnc_rscLayer returns -- as a type error it returned nothing, and every title the
+// showcases show went to no layer).
+GameValue A3CutFadeOutNamed(const GameState*, GameValuePar oper1, GameValuePar)
+{
+    const std::string key = LayerKey(oper1);
+    CloseLayer(key);
+    return GameValue(static_cast<float>(std::atoi(key.c_str())));
+}
+
+// display / control setVariable and getVariable: displays and controls are numbers here, and
+// Arma 3's user-interface scripts keep their state on them (BIS_fnc_initDisplay stores its
+// class, BIS_fnc_playVideo its video control). Without the forms the first such line
+// stopped the script.
+std::map<int, std::map<std::string, GameValue>>& HandleVars()
+{
+    static std::map<int, std::map<std::string, GameValue>> vars;
+    return vars;
+}
+
+std::string LowerName(const char* s)
+{
+    std::string out = s ? s : "";
+    for (char& c : out)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return out;
+}
+
+GameValue A3HandleSetVariable(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& args = oper2;
+    if (args.Size() < 2 || args[0].GetType() != GameString)
+        return NOTHING;
+    HandleVars()[toInt(static_cast<float>(oper1))][LowerName((const char*)(RString)args[0])] = args[1];
+    return NOTHING;
+}
+
+GameValue A3HandleGetVariable(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    GameValue fallback;
+    RString name;
+    if (oper2.GetType() == GameString)
+        name = oper2;
+    else if (oper2.GetType() == GameArray)
+    {
+        const GameArrayType& args = oper2;
+        if (args.Size() < 1 || args[0].GetType() != GameString)
+            return NOTHING;
+        name = args[0];
+        if (args.Size() > 1)
+            fallback = args[1];
+    }
+    else
+        return NOTHING;
+    const auto h = HandleVars().find(toInt(static_cast<float>(oper1)));
+    if (h != HandleVars().end())
+    {
+        const auto v = h->second.find(LowerName((const char*)name));
+        if (v != h->second.end())
+            return v->second;
+    }
+    return fallback;
+}
+
+// Registered before the macros and stubs: of two forms with the same arguments the first
+// registered is the one used.
 void Register()
 {
     GGameState.NewFunction(GameFunction(GameNothing, "opA3RscClose", A3RscClose, GameScalar));
+    GGameState.NewNularOp(GameNular(GameArray, "allCutLayers", A3AllCutLayers));
+    GGameState.NewOperator(GameOperator(GameScalar, "cutFadeOut", function, A3CutFadeOutNamed, GameString, GameScalar));
+    GGameState.NewOperator(GameOperator(GameNothing, "setVariable", function, A3HandleSetVariable, GameScalar, GameArray));
+    GGameState.NewOperator(
+        GameOperator(GameAny, "getVariable", function, A3HandleGetVariable, GameScalar, GameString | GameArray));
 }
 } // namespace Poseidon::Arma3Rsc

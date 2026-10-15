@@ -73,6 +73,20 @@ folder (nothing copied into the CWA install). They share one compat layer
   - `DisplayIntro::OnSimulate`: `--arma1-test-seconds` also ends an intro-only mission;
     `DisplayMission` logs the player's final position before `ARMA1-TEST PASS`.
   - `GameStateExtObj.cpp` `EngineMuzzleName`: a weapon's name stands for its first muzzle.
+- **Shared code touched (2026-10-15, fourth round)** -- worth taking on the Arma 1 / 2 branches:
+  - **`enableAI`** (`2d9d89a`, `GameStateExt.cpp` / `GameStateExtUi.cpp`, every game mode) was
+    registered as an ignored command, so a unit held back with `disableAI "MOVE"` never moved
+    again. It now clears what `disableAI` set; `"PATH"` reads as MOVE, `"ALL"` as every bit.
+  - **Step sounds** (`e1885f6`, `SoldierOldSimProxy.cpp`, all moves): when a move has no
+    `soundEdge1`/`soundEdge2`, the first two entries of Arma's `soundEdge[]` are the step
+    times. Every imported Arma move read 0/0 and no Arma soldier made a step sound.
+  - **`findDisplay 46`** (`GameStateExtWorldDialog.cpp`, Generation >= 2) is the mission's
+    display while a mission runs (it answered -1, displayNull).
+  - **Title resources** (`GameStateExtA3Rsc.cpp`, Generation 3 only; hooks in `CutRsc` /
+    `GameTitleRsc` / `CutText` / `GameTitleText`, `A2CutRscLayer` / `A2CutTextLayer` and
+    `A2IsNullHandle`): a cutRsc'd class with onLoad/onUnload runs them on a stand-in display.
+  - Test runs log a **motion census** (AI soldiers that never moved, and why) and a **sound
+    census** (`Audio/SoundTestLog.hpp`, hooked in `WaveOAL`) before `ARMA1-TEST PASS`.
 - **Foreign commits on this branch.** On 2026-10-15 09:54 another session pushed an upstream
   follow-up (`22d6461`, `58f1fe3`, `c479cde`, CWR-CE main) onto `MrDudeX-arma3` as onto the
   Arma 1 and Arma 2 branches; this branch was rebased onto it, not merged.
