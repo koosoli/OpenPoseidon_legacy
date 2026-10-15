@@ -766,6 +766,11 @@ class Landscape : public SerializeClass
     std::unordered_set<uint32_t> _nativeFarActive;
     std::unordered_map<uint32_t, Ref<LODShapeWithShadow>> _nativeFarModels;
     size_t _nativeFarCursor = 0;
+    // Models rejected for the far tier (too small, failed) when the candidate list was last
+    // built; more since then means the list wasted slots on them and is rebuilt without them.
+    size_t _nativeFarRejectedAtBuild = 0;
+    size_t _nativeFarRejectedCount = 0;
+    bool _nativeFarRejectRebuild = false;
     int _nativeFarCenterX = -0x3fffffff, _nativeFarCenterZ = -0x3fffffff;
     std::vector<uint8_t> _modernObjectCellActive;
     std::vector<uint8_t> _modernObjectCellDesired;

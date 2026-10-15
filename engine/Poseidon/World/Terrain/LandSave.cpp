@@ -5519,6 +5519,8 @@ void Landscape::ClearNativeFarResidency()
     _nativeFarModelWanted.clear();
     _nativeFarModelRejected.clear();
     _nativeFarCursor = 0;
+    _nativeFarRejectedAtBuild = _nativeFarRejectedCount = 0;
+    _nativeFarRejectRebuild = false;
     _nativeFarCenterX = _nativeFarCenterZ = -0x3fffffff;
 }
 
@@ -5538,12 +5540,26 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         return;
     constexpr float range = 3000.0f;
     constexpr size_t candidateBudget = 200000;
+    // WGR_NATIVE_FAR_SKIP_REJECTED=0: rejected models keep their candidate slots (the old list).
+    static const bool farSkipRejected = [] {
+        const char* value = std::getenv("WGR_NATIVE_FAR_SKIP_REJECTED");
+        return !(value && value[0] == '0');
+    }();
     const int cx = static_cast<int>(std::clamp(cameraPosition.X() / _landGrid,
                                              0.0f, static_cast<float>(_landRange - 1))) / 16 * 16;
     const int cz = static_cast<int>(std::clamp(cameraPosition.Z() / _landGrid,
                                              0.0f, static_cast<float>(_landRange - 1))) / 16 * 16;
+    // A finished sweep that rejected more models (props under 2 m, failures) rebuilds the list:
+    // those placements held candidate slots, and on a cluttered map they filled the cap before
+    // the ring reached the hillside forests (the bare far slopes at Durras).
+    if (_nativeFarRejectRebuild)
+    {
+        _nativeFarRejectRebuild = false;
+        _nativeFarCenterX = -0x3fffffff;
+    }
     if (cx != _nativeFarCenterX || cz != _nativeFarCenterZ)
     {
+        _nativeFarRejectedAtBuild = _nativeFarRejectedCount;
         _nativeFarCenterX = cx;
         _nativeFarCenterZ = cz;
         _nativeFarWanted.resize(_modernObjectPlacements.size(), 0);
@@ -5573,7 +5589,8 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
             for (uint32_t index : _modernObjectCells[cell.index])
             {
                 const auto& placement = _modernObjectPlacements[index];
-                if (placement.modelIndex >= _modernObjectModels.size() || (_nativeFarWanted[index] & 2))
+                if (placement.modelIndex >= _modernObjectModels.size() || (_nativeFarWanted[index] & 2) ||
+                    (farSkipRejected && _nativeFarModelRejected[placement.modelIndex]))
                     continue;
                 _nativeFarCandidates.push_back(index);
                 _nativeFarWanted[index] = 1;
@@ -5677,7 +5694,10 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                     }
                 }
                 else if (state == ObjectStreamPreparer::State::Failed || state == ObjectStreamPreparer::State::NotLoose)
+                {
                     _nativeFarModelRejected[modelIndex] = 1;
+                    ++_nativeFarRejectedCount;
+                }
                 if (!shape)
                     continue;
             }
@@ -5685,6 +5705,7 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
             if (shape->BoundingSphere() < 2.0f)
             {
                 _nativeFarModelRejected[modelIndex] = 1;
+                ++_nativeFarRejectedCount;
                 continue;
             }
             found = _nativeFarModels.emplace(modelIndex, shape).first;
@@ -5703,8 +5724,14 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
             ++added;
         }
         else
+        {
             _nativeFarModelRejected[modelIndex] = 1;
+            ++_nativeFarRejectedCount;
+        }
     }
+    if (completedSweep && farSkipRejected && _nativeFarRejectedCount != _nativeFarRejectedAtBuild &&
+        _nativeFarCandidates.size() >= candidateBudget)
+        _nativeFarRejectRebuild = true;
     if (completedSweep && _modernObjectPreparer &&
         _modernObjectModelPrefetchEpoch.size() == _nativeFarModelWanted.size())
     {
