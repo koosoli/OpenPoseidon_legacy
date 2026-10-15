@@ -1773,6 +1773,11 @@ const Macro kMacros[] = {
     {"getHitPointDamage", 'b', GameScalar, GameObject, GameString, "damage (_this select 0)"},
     {"getHitIndex", 'b', GameScalar, GameObject, GameScalar, "damage (_this select 0)"},
     {"cursorObject", 'n', GameObject, 0, 0, "cursorTarget"},
+    // parseNumber true / false (BIS_fnc_initDisplay: parseNumber _register)
+    {"parseNumber", 'u', GameScalar, 0, GameBool, "if (_this) then {1} else {0}"},
+    // compileScript [path, final, prefix]: the file, preprocessed, behind its prefix
+    {"compileScript", 'u', GameAny, 0, GameArray,
+     "compile ((_this param [2, '']) + (preprocessFileLineNumbers (_this select 0)))"},
     {"allPlayers", 'n', GameArray, 0, 0, "if (isNull player) then {[]} else {[player]}"},
     {"allDeadMen", 'n', GameArray, 0, 0, "[]"},
     {"allDead", 'n', GameArray, 0, 0, "[]"},
