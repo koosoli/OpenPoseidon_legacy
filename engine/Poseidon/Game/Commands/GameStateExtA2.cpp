@@ -2547,11 +2547,13 @@ void StallMonitor()
 {
     unsigned last = GSimulateTick.load();
     int stalled = 0;
-    // Arma 3 mounts some 550 archives and merges a 50 MB config before the first frame, and
-    // its mission start compiles the function library's preInit functions in one step:
-    // nothing is counted before the first simulation step, and a step may take longer.
+    // Until the mission's first simulation step the game is still loading: mounting the
+    // archives, the world, and under WGPU the renderer's pipelines (compiled on first use --
+    // on the laptop's Intel GPU under DX12 that alone ran past the 60 s). Up to then it gets
+    // 180 s, afterwards 60 s without a step end a test run.
+    bool simulating = false;
+    // Arma 3 mounts some 550 archives and its steps can be long (preInit compiles): 120 s per step.
     const bool arma3 = Arma1Compat::Generation() >= 3;
-    const int giveUp = arma3 ? 120 : 60;
     for (;;)
     {
         std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -2560,6 +2562,7 @@ void StallMonitor()
         {
             last = now;
             stalled = 0;
+            simulating = true;
             continue;
         }
         if (++stalled % 10 != 0)
@@ -2574,7 +2577,7 @@ void StallMonitor()
                  stalled, expr);
         if (stalled == 10 || stalled == 30)
             Poseidon::Foundation::LogStallThreadStack();
-        if (stalled >= giveUp)
+        if (stalled >= (simulating ? (arma3 ? 120 : 60) : 180))
         {
             // a test run that cannot continue ends instead of holding the batch
             LOG_ERROR(Script, "{} stall: giving up after {} s (test mode)", Arma1Compat::Label(), stalled);
