@@ -387,6 +387,17 @@ whose stderr a launcher may leave unwritable. `5422672` makes the renderer's `ep
 no frame for two minutes before the watchdog; the stall report printed garbage as the last
 expression (a pointer the evaluator had freed; `6e89b47` keeps a copy).
 
+Focus 20 (`6e89b47`, 5 missions, all clean, census 614 Arma, 0 CWA): the default heads draw
+sharp (skin detail, brows, stubble; the violet tint is gone). `createSoundSource` made the
+`fire` source in all five missions through `OP_A2_EVAL` (whether it is heard: not checked).
+The face's `CfgFaces` material was checked against the data: of the enabled faces only 8
+(the black faces, `hhl_black.rvmat`) name a material of their own -- not used yet.
+
+WGPU, third try (`6e89b47`): DX12 now creates the renderer in all three missions (~60 s) and
+then never reaches a simulation step (watchdog after 180 s). Vulkan on the same laptop
+created it in 60 s, entered T01 and played it to the end -- at a few frames per second, with
+no screenshots written. The stall report now also takes stacks at 90 and 170 s.
+
 ## Steps
 
 1. **Measure first.** Per mission: an asset census in the log (every class created, what it
