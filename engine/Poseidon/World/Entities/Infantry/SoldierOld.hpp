@@ -883,6 +883,13 @@ class Man: public Person
 
 	bool GetForceOptics(Person *person) const override;
 	LODShapeWithShadow *GetOpticsModel(Person *person) override;
+	bool LooksThroughSights(Person *person) const override;
+	//! The current weapon has 3D sights (MuzzleType::_optics3D) and its model the "eye"
+	//! point to look through them from
+	bool Optics3DSelected() const;
+	//! Man-space transform `weapon`'s model is drawn with at `level` (DrawProxies' chain
+	//! without the world transform); false when that LOD holds no proxy for it
+	bool HeldWeaponTransform(int level, const WeaponType *weapon, Matrix4 &out) const;
 
 	void ShowHead(int level, bool show = true) override;
 	void ShowWeapons(bool showPrimary = true, bool showSecondary = true) override;

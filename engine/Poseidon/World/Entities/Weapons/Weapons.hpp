@@ -223,6 +223,11 @@ public:
 	bool _backgroundReload;
 	bool _opticsFlare;
 	bool _forceOptics;
+	// Arma 2 3D sights: the aiming view looks along the weapon from its model's "eye"
+	// memory point (WeaponType::_eyePos) instead of over _opticsModel. `optics3D=1`,
+	// written by the Arma 2 weapon importer; _opticsModel stays as the fallback.
+	bool _optics3D = false;
+	float _opticsZoomInit = -1.0f; // initial aiming field of view; <= 0 keeps the engine default
 
 	int _canBeLocked;
 	int _primary;
@@ -294,6 +299,9 @@ public:
 	mutable Ref<LODShapeWithShadow> _model;
 	mutable AnimationAnimatedTexture _animFire;
 	mutable int _shapeRef;
+	// _model's "eye" memory point (Arma 2 weapons): where a 3D-sighted muzzle looks from
+	mutable Vector3 _eyePos;
+	mutable bool _hasEyePos = false;
 
 	mutable AnimationRotation _revolving;
 
