@@ -884,6 +884,9 @@ pub struct Renderer {
     config: wgpu::SurfaceConfiguration,
     present_modes: Vec<wgpu::PresentMode>,
     textures: SharedTextures,
+    // FLY-001: producer-side texture creation (textures.rs TextureIngress), drained into
+    // `textures` at frame start and before any call that resolves a handle.
+    texture_ingress: std::sync::Arc<textures::TextureIngress>,
     gfx2d: Gfx2d,
     gfx3d: Gfx3d,
     terrain: Terrain,
@@ -1981,6 +1984,7 @@ impl Renderer {
             // stderr, which this harness never captures. See announce_fallback_texel.
             &log,
         );
+        let texture_ingress = std::sync::Arc::new(textures.new_ingress(&device, &queue));
         // One composer, pre-loaded with the shared shader modules, shared by the
         // 3D subsystems that #import them.
         let mut composer = shaders::build_composer();
@@ -2261,6 +2265,7 @@ impl Renderer {
             config,
             present_modes,
             textures,
+            texture_ingress,
             gfx2d,
             gfx3d,
             terrain,
@@ -4019,6 +4024,7 @@ impl Renderer {
         mut call_timings: Option<&mut crate::gpu_timers::RenderCallCpuTimings>,
         main_count_request: Option<(u64, u32, u64)>,
     ) -> Result<bool, String> {
+        self.drain_texture_ingress();
         if let Some(probe)=self.post_optics_probe.as_mut(){probe.begin();}
         if let Some(tuple)=self.main_camera_tuple.as_mut(){tuple.begin();} // Failed calls invalidate old completion.
         // The GPU-resident (retained / GPU-driven) world objects are drawn by every presented frame unless
@@ -7311,6 +7317,7 @@ impl Renderer {
         gen_mips: bool,
         data: &[u8],
     ) -> u64 {
+        self.drain_texture_ingress();
         let handle = self.textures.create(
             &self.device,
             &self.queue,
@@ -7341,6 +7348,7 @@ impl Renderer {
         data: &[u8],
         slot: u32,
     ) -> u64 {
+        self.drain_texture_ingress();
         let handle = self.textures.create_in_slot(
             &self.device,
             &self.queue,
@@ -7361,6 +7369,19 @@ impl Renderer {
         handle
     }
 
+    /// FLY-001: fold the textures the producer made through the ingress into the registry.
+    fn drain_texture_ingress(&mut self) {
+        // As texture_create_in_slot: a slot that takes a new image drops its old mip feedback.
+        for slot in self.textures.drain_ingress(&self.texture_ingress) {
+            self.gfx3d.invalidate_texture_feedback(slot);
+        }
+    }
+
+    /// The ingress, for the producer (FFI `wgr_texture_ingress`); lives as long as the renderer.
+    fn texture_ingress_ptr(&self) -> *const textures::TextureIngress {
+        std::sync::Arc::as_ptr(&self.texture_ingress)
+    }
+
     fn texture_slot_acquire(&mut self) -> u32 {
         let slot = self.textures.slot_acquire();
         self.gfx3d.invalidate_texture_feedback(slot);
@@ -7368,18 +7389,21 @@ impl Renderer {
     }
 
     fn texture_slot_release(&mut self, slot: u32) {
+        self.drain_texture_ingress();
         if self.textures.slot_release(slot) {
             self.gfx3d.texture_content_changed();
         }
     }
 
     fn texture_update(&mut self, handle: u64, data: &[u8]) {
+        self.drain_texture_ingress();
         if self.textures.update_rgba(&self.queue, handle, data) {
             self.gfx3d.texture_content_changed();
         }
     }
 
     fn texture_destroy(&mut self, handle: u64) {
+        self.drain_texture_ingress();
         if self.textures.destroy(handle) {
             self.gfx3d.texture_content_changed();
         }
@@ -7469,6 +7493,7 @@ impl Renderer {
         materials: &[WgrModelMaterial],
         name: Option<&str>,
     ) -> u32 {
+        self.drain_texture_ingress();
         self.gfx3d.register_model(
             &self.device,
             &self.queue,
@@ -7687,6 +7712,7 @@ impl Renderer {
     }
 
     fn terrain_set_ground_layers(&mut self, handles: &[u64]) {
+        self.drain_texture_ingress();
         let views: Vec<wgpu::TextureView> = handles
             .iter()
             .map(|&h| self.textures.texture_view(h).clone())
@@ -7713,6 +7739,7 @@ impl Renderer {
     }
 
     fn grass_set_satellite(&mut self, handle: u64) {
+        self.drain_texture_ingress();
         let view = if handle != 0 { Some(self.textures.texture_view(handle).clone()) } else { None };
         self.grass.set_satellite(&self.device, &self.queue, view);
     }
@@ -7842,6 +7869,7 @@ impl Renderer {
     }
 
     fn terrain_set_detail_layer(&mut self, handle: u64) {
+        self.drain_texture_ingress();
         if handle == 0 {
             return;
         }

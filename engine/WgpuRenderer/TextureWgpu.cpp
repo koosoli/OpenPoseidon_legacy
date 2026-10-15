@@ -1036,6 +1036,38 @@ TextureWgpu::~TextureWgpu()
     }
 }
 
+// FLY-001: create this texture's GPU image without waiting for the render thread when the
+// producer window is closed (the render thread mid-frame): through the renderer's texture
+// ingress, with a lease from its pool. Window open, no ingress, or a refusal: the ordinary
+// call, which opens the window first. Opt-in until measured: WGR_TEXTURE_INGRESS=1.
+uint64_t TextureWgpu::CreateGpuTexture(WgrRenderer* r, uint32_t w, uint32_t h, int32_t format, uint32_t mips,
+                                       uint32_t flags, const uint8_t* data, uint32_t size)
+{
+    static const bool ingressOn = [] {
+        const char* value = std::getenv("WGR_TEXTURE_INGRESS");
+        return value && value[0] == '1';
+    }();
+    static WgrRenderer* ingressOwner = nullptr;
+    static const WgrTextureIngress* ingress = nullptr;
+    if (ingressOn && r != nullptr && !EngineWgpu::ProducerMayTouchRenderer())
+    {
+        if (ingressOwner != r)
+        {
+            ingressOwner = r;
+            ingress = wgr_texture_ingress(r);
+        }
+        if (ingress != nullptr)
+        {
+            if (_slotLease == 0 && !_dynamic)
+                _slotLease = wgr_texture_ingress_slot_acquire(ingress);
+            if (const uint64_t handle = wgr_texture_ingress_create(ingress, w, h, format, mips, flags, data, size, _slotLease))
+                return handle;
+        }
+    }
+    CheckProducerMayTouchRenderer("texture create");
+    return wgr_texture_create_in_slot(r, w, h, format, mips, flags, data, size, AcquireSlotLease());
+}
+
 // Reserve this texture's bindless slot on first use. 0 (array at cap) is not an error:
 // wgr_texture_create_in_slot then behaves exactly as wgr_texture_create.
 uint32_t TextureWgpu::AcquireSlotLease()
@@ -2441,10 +2473,9 @@ uint64_t TextureWgpu::EnsureUploaded()
             // Into this texture's LEASED slot, so a re-upload after an eviction reclaims
             // the bindless index registered models already baked (REN-RES-001).
             const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
-            CheckProducerMayTouchRenderer("texture create");
-            _gpuHandle = wgr_texture_create_in_slot(r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), bcFormat,
+            _gpuHandle = CreateGpuTexture(r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), bcFormat,
                                                     static_cast<uint32_t>(levelCount), 0, blocks.data(),
-                                                    static_cast<uint32_t>(blocks.size()), AcquireSlotLease());
+                                                    static_cast<uint32_t>(blocks.size()));
             if (terrainTiming.enabled) terrainTiming.compressedCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
             if (_gpuHandle)
                 NoteUploadSize(_w, _h, blocks.size(), true);
@@ -2627,11 +2658,10 @@ uint64_t TextureWgpu::EnsureUploaded()
                 encodeBc3(prepared.rgba.data(), prepared.width, prepared.height, bc3, bc3Offsets, bc3Levels))
             {
                 const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
-                CheckProducerMayTouchRenderer("texture create");
-                _gpuHandle = wgr_texture_create_in_slot(r, static_cast<uint32_t>(prepared.width),
+                _gpuHandle = CreateGpuTexture(r, static_cast<uint32_t>(prepared.width),
                                                         static_cast<uint32_t>(prepared.height), WGR_TEXTURE_BC3,
                                                         static_cast<uint32_t>(bc3Levels), 0, bc3.data(),
-                                                        static_cast<uint32_t>(bc3.size()), AcquireSlotLease());
+                                                        static_cast<uint32_t>(bc3.size()));
                 if (terrainTiming.enabled) terrainTiming.fallbackCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
                 if (_gpuHandle)
                 {
@@ -2727,11 +2757,9 @@ uint64_t TextureWgpu::EnsureUploaded()
                 if (encoded)
                 {
                     const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
-                    CheckProducerMayTouchRenderer("texture create");
-                    _gpuHandle = wgr_texture_create_in_slot(
+                    _gpuHandle = CreateGpuTexture(
                         r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), WGR_TEXTURE_BC3,
-                        static_cast<uint32_t>(bc3Levels), 0, bc3.data(), static_cast<uint32_t>(bc3.size()),
-                        AcquireSlotLease());
+                        static_cast<uint32_t>(bc3Levels), 0, bc3.data(), static_cast<uint32_t>(bc3.size()));
                     if (terrainTiming.enabled) terrainTiming.fallbackCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
                     if (_gpuHandle)
                         NoteUploadSize(_w, _h, bc3.size(), true);
@@ -2739,10 +2767,9 @@ uint64_t TextureWgpu::EnsureUploaded()
                 if (!_gpuHandle)
                 {
                     const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
-                    CheckProducerMayTouchRenderer("texture create");
-                    _gpuHandle = wgr_texture_create_in_slot(
+                    _gpuHandle = CreateGpuTexture(
                         r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), WGR_TEXTURE_RGBA8, 1,
-                        WGR_TEXTURE_GEN_MIPS, pixels.data(), static_cast<uint32_t>(pixels.size()), AcquireSlotLease());
+                        WGR_TEXTURE_GEN_MIPS, pixels.data(), static_cast<uint32_t>(pixels.size()));
                     if (terrainTiming.enabled) terrainTiming.fallbackCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
                     NoteUploadSize(_w, _h, pixels.size() * 4 / 3, false, Name());
                 }
@@ -2762,10 +2789,9 @@ uint64_t TextureWgpu::EnsureUploaded()
             {
                 warmMuzzle(img.rgba, img.width, img.height);
                 const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
-                CheckProducerMayTouchRenderer("texture create");
-                _gpuHandle = wgr_texture_create_in_slot(
+                _gpuHandle = CreateGpuTexture(
                     r, static_cast<uint32_t>(img.width), static_cast<uint32_t>(img.height), WGR_TEXTURE_RGBA8, 1,
-                    WGR_TEXTURE_GEN_MIPS, img.rgba.data(), static_cast<uint32_t>(img.rgba.size()), AcquireSlotLease());
+                    WGR_TEXTURE_GEN_MIPS, img.rgba.data(), static_cast<uint32_t>(img.rgba.size()));
                 if (terrainTiming.enabled) terrainTiming.fallbackCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
                 _w = img.width;
                 _h = img.height;

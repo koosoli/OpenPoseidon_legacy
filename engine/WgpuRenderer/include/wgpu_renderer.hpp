@@ -2534,6 +2534,17 @@ extern "C"
                                                   int32_t format, uint32_t mip_count, uint32_t flags,
                                                   const uint8_t* data, uint32_t byte_length, uint32_t slot);
 
+    /* FLY-001: texture creation from the producer while the render thread is mid-frame.
+       The ingress lives as long as the renderer; its calls are thread-safe. A created
+       texture joins the registry at the renderer's next frame (or next handle-resolving
+       call). create returns 0 when refused -- use wgr_texture_create_in_slot then. */
+    struct WgrTextureIngress;
+    WGR_API const WgrTextureIngress* wgr_texture_ingress(WgrRenderer* renderer);
+    WGR_API uint32_t wgr_texture_ingress_slot_acquire(const WgrTextureIngress* ingress);
+    WGR_API WgrTexture wgr_texture_ingress_create(const WgrTextureIngress* ingress, uint32_t width, uint32_t height,
+                                                  int32_t format, uint32_t mip_count, uint32_t flags,
+                                                  const uint8_t* data, uint32_t byte_length, uint32_t slot);
+
     /* Replace the pixels of an existing RGBA8 texture. */
     WGR_API void wgr_texture_update(WgrRenderer* renderer, WgrTexture id, const uint8_t* rgba, uint32_t byte_length);
 

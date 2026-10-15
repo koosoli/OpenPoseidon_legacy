@@ -2626,6 +2626,76 @@ pub unsafe extern "C" fn wgr_texture_create_in_slot(
     .unwrap_or(0)
 }
 
+/// FLY-001: the renderer's texture ingress, for creating textures from the producer thread
+/// without waiting for the render thread. Valid for the renderer's lifetime. Null when the
+/// renderer is null.
+///
+/// # Safety
+/// `renderer` must be a live pointer from `wgr_create`, or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_texture_ingress(renderer: *mut WgrRenderer) -> *const crate::textures::TextureIngress {
+    if renderer.is_null() {
+        return std::ptr::null();
+    }
+    unsafe { &*renderer }.texture_ingress_ptr()
+}
+
+/// A leased bindless slot from the ingress's pool (0 = none ready; see TextureIngress).
+/// Thread-safe.
+///
+/// # Safety
+/// `ingress` must come from `wgr_texture_ingress` on a live renderer, or be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_texture_ingress_slot_acquire(ingress: *const crate::textures::TextureIngress) -> u32 {
+    if ingress.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| unsafe { &*ingress }.slot_acquire())).unwrap_or(0)
+}
+
+/// As `wgr_texture_create_in_slot`, but callable while the render thread is mid-frame: the
+/// texture is made now and joins the registry at the next drain. 0 = refused; the caller then
+/// uses the ordinary path. Thread-safe.
+///
+/// # Safety
+/// `ingress` must come from `wgr_texture_ingress` on a live renderer; `data` must point to at
+/// least `byte_len` bytes.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn wgr_texture_ingress_create(
+    ingress: *const crate::textures::TextureIngress,
+    width: u32,
+    height: u32,
+    format: i32,
+    mip_count: u32,
+    flags: u32,
+    data: *const u8,
+    byte_len: u32,
+    slot: u32,
+) -> u64 {
+    if ingress.is_null() || data.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let Some(fmt) = TextureFormat::from_i32(format) else {
+            return 0;
+        };
+        let slice = unsafe { std::slice::from_raw_parts(data, byte_len as usize) };
+        unsafe { &*ingress }.create(
+            &crate::textures::TextureData {
+                width,
+                height,
+                format: fmt,
+                mip_count,
+                gen_mips: flags & TEXTURE_GEN_MIPS != 0,
+                bytes: slice,
+            },
+            slot,
+        )
+    }))
+    .unwrap_or(0)
+}
+
 /// # Safety
 /// `renderer` must be live; `data` must point to at least `byte_len` bytes, or be null.
 #[unsafe(no_mangle)]

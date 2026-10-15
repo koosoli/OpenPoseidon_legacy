@@ -1,5 +1,5 @@
 use slotmap::{Key, KeyData, SlotMap};
-use std::sync::{Arc, OnceLock, atomic::{AtomicU64, Ordering}};
+use std::sync::{Arc, Mutex, OnceLock, atomic::{AtomicU64, Ordering}};
 
 use crate::ffi::WgrSampler2D;
 use crate::log::{LogSink, log_level};
@@ -119,13 +119,20 @@ pub struct Texture2D {
 // real key never encodes to 0.
 struct TextureRegistry {
     map: SlotMap<TextureKey, Texture2D>,
+    // Textures that arrived through the ingress (handles carry INGRESS_HANDLE_BIT).
+    ingress: std::collections::HashMap<u64, Texture2D>,
     bc_supported: bool,
 }
+
+/// Handles issued by the [`TextureIngress`] carry this bit; slotmap handles never do
+/// (their version half would have to pass 2^31).
+pub const INGRESS_HANDLE_BIT: u64 = 1 << 63;
 
 impl TextureRegistry {
     fn new(bc_supported: bool) -> Self {
         TextureRegistry {
             map: SlotMap::with_key(),
+            ingress: std::collections::HashMap::new(),
             bc_supported,
         }
     }
@@ -134,10 +141,16 @@ impl TextureRegistry {
         if handle == 0 {
             return None;
         }
+        if handle & INGRESS_HANDLE_BIT != 0 {
+            return self.ingress.get(&handle);
+        }
         self.map.get(KeyData::from_ffi(handle).into())
     }
 
     fn destroy(&mut self, handle: u64) -> bool {
+        if handle & INGRESS_HANDLE_BIT != 0 {
+            return self.ingress.remove(&handle).is_some();
+        }
         handle != 0 && self.map.remove(KeyData::from_ffi(handle).into()).is_some()
     }
 
@@ -149,6 +162,23 @@ impl TextureRegistry {
         tex: &TextureData,
         slot: u32,
     ) -> u64 {
+        match build_texture(device, queue, layout, self.bc_supported, tex, slot) {
+            Some(texture) => self.map.insert(texture).data().as_ffi(),
+            None => 0,
+        }
+    }
+}
+
+/// One image to a GPU texture (mips written, view made, the shadow pass's group per the
+/// lazy-bind lever). Pure device/queue work, so the ingress may call it off the render thread.
+fn build_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    bc_supported: bool,
+    tex: &TextureData,
+    slot: u32,
+) -> Option<Texture2D> {
         let TextureData {
             width,
             height,
@@ -158,17 +188,17 @@ impl TextureRegistry {
             bytes,
         } = *tex;
         if width == 0 || height == 0 {
-            return 0;
+            return None;
         }
-        if format.is_block_compressed() && !self.bc_supported {
-            return 0;
+        if format.is_block_compressed() && !bc_supported {
+            return None;
         }
         let mip_count = mip_count.clamp(1, mip_chain_len(width, height));
         let total: u32 = (0..mip_count)
             .map(|i| format.expected_len((width >> i).max(1), (height >> i).max(1)))
             .sum();
         if (bytes.len() as u32) < total {
-            return 0;
+            return None;
         }
         let gen_mips = gen_mips && format == TextureFormat::Rgba8 && mip_count == 1;
         let mip_level_count = if gen_mips {
@@ -222,7 +252,7 @@ impl TextureRegistry {
             });
             let _ = bind_group.set(group); // brand-new cell cannot already be initialised
         }
-        let key = self.map.insert(Texture2D {
+        Some(Texture2D {
             texture,
             view,
             // Opt-in lazy mode makes the immutable image's group on first use;
@@ -232,15 +262,15 @@ impl TextureRegistry {
             resident_bytes: (0..mip_level_count)
                 .map(|i| format.expected_len((width >> i).max(1), (height >> i).max(1)) as u64)
                 .sum(),
-        });
-        key.data().as_ffi()
-    }
+        })
+}
 
+impl TextureRegistry {
     fn update_rgba(&mut self, queue: &wgpu::Queue, handle: u64, data: &[u8]) -> bool {
         if handle == 0 {
             return false;
         }
-        if let Some(t) = self.map.get(KeyData::from_ffi(handle).into()) {
+        if let Some(t) = self.get(handle) {
             let size = t.texture.size();
             if (data.len() as u32) >= size.width * size.height * 4 {
                 write_pixels(
@@ -255,6 +285,62 @@ impl TextureRegistry {
             }
         }
         false
+    }
+}
+
+/// Texture creation that does not wait for the render thread (FLY-001).
+///
+/// Every object texture used to be created through `&mut Renderer`, so the producer had to
+/// open the renderer window first -- i.e. wait for the render thread to finish the frame in
+/// flight, swapchain acquire included. Flying over Everon that was ~45 ms per new model. wgpu's
+/// device and queue are thread-safe, so the GPU texture itself can be made here, on the
+/// producer, while the render thread draws; only the registry insert and the bindless slot
+/// binding wait for [`SharedTextures::drain_ingress`], which the renderer runs at the start of
+/// each frame and before any call that resolves a texture handle.
+///
+/// Slots: a texture's bindless slot is LEASED (REN-RES-001). Leases normally come from
+/// `slot_acquire` under the window; the ingress hands out leases from a pool the drain keeps
+/// topped up, so the lease is real from the start and survives evict/re-upload as before.
+pub struct TextureIngress {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    layout: wgpu::BindGroupLayout,
+    bc_supported: bool,
+    max_dim: u32,
+    next: AtomicU64,
+    pending: Mutex<Vec<(u64, u32, Texture2D)>>,
+    slot_pool: Mutex<Vec<u32>>,
+}
+
+/// Leases the drain keeps ready for the ingress. A model's install takes a handful; the pool
+/// refills every frame.
+const INGRESS_SLOT_POOL: usize = 64;
+
+impl TextureIngress {
+    /// A leased slot for a new logical texture, or 0 when the pool is empty (the texture then
+    /// takes a per-upload slot at the drain, exactly as `create` does without a lease).
+    pub fn slot_acquire(&self) -> u32 {
+        self.slot_pool.lock().map(|mut pool| pool.pop().unwrap_or(0)).unwrap_or(0)
+    }
+
+    /// Make the GPU texture now; it joins the registry at the next drain. 0 = refused (the
+    /// caller falls back to the ordinary path, which reports the reason).
+    pub fn create(&self, tex: &TextureData, lease: u32) -> u64 {
+        if tex.width > self.max_dim || tex.height > self.max_dim {
+            return 0;
+        }
+        let Some(texture) = build_texture(&self.device, &self.queue, &self.layout, self.bc_supported, tex, lease)
+        else {
+            return 0;
+        };
+        let handle = INGRESS_HANDLE_BIT | self.next.fetch_add(1, Ordering::Relaxed);
+        match self.pending.lock() {
+            Ok(mut pending) => {
+                pending.push((handle, lease, texture));
+                handle
+            }
+            Err(_) => 0,
+        }
     }
 }
 
@@ -652,6 +738,58 @@ impl SharedTextures {
     }
 
     // Sampler bind group for a `point<<2 | clampV<<1 | clampU` index.
+    /// The producer-side creator sharing this registry's layout and limits (see [`TextureIngress`]).
+    pub fn new_ingress(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> TextureIngress {
+        TextureIngress {
+            device: device.clone(),
+            queue: queue.clone(),
+            layout: self.texture_layout.clone(),
+            bc_supported: self.registry.bc_supported,
+            max_dim: device.limits().max_texture_dimension_2d,
+            next: AtomicU64::new(1),
+            pending: Mutex::new(Vec::new()),
+            slot_pool: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Bring the ingress's textures into the registry and bind their slots, then refill its
+    /// lease pool. Render thread (or the producer holding the window) only.
+    pub fn drain_ingress(&mut self, ingress: &TextureIngress) -> Vec<u32> {
+        let mut bound = Vec::new();
+        let arrived = match ingress.pending.lock() {
+            Ok(mut pending) if !pending.is_empty() => std::mem::take(&mut *pending),
+            _ => Vec::new(),
+        };
+        for (handle, lease, mut texture) in arrived {
+            if lease != 0 && self.bindless_leased.contains(&lease) {
+                texture.slot = lease;
+                self.bindless_slots[lease as usize] = Some(texture.view.clone());
+                if let Some(&alias) = self.srgb_aliases.get(&lease) {
+                    self.bindless_slots[alias as usize] = Self::srgb_view(&texture);
+                }
+                self.bindless_dirty = true;
+            } else if let Some(slot) = self.alloc_slot() {
+                texture.slot = slot;
+                self.bindless_slots[slot as usize] = Some(texture.view.clone());
+                self.bindless_dirty = true;
+            } else {
+                texture.slot = 0;
+            }
+            if texture.slot != 0 {
+                bound.push(texture.slot);
+            }
+            self.registry.ingress.insert(handle, texture);
+        }
+        if let Ok(mut pool) = ingress.slot_pool.lock() {
+            while pool.len() < INGRESS_SLOT_POOL {
+                let Some(slot) = self.alloc_slot() else { break };
+                self.bindless_leased.insert(slot);
+                pool.push(slot);
+            }
+        }
+        bound
+    }
+
     pub fn sampler_bind(&self, index: usize) -> &wgpu::BindGroup {
         self.sampler_binds
             .get(index)
@@ -890,9 +1028,10 @@ impl SharedTextures {
             .registry
             .map
             .values()
+            .chain(self.registry.ingress.values())
             .map(|texture| texture.resident_bytes)
             .sum();
-        (bytes, self.registry.map.len() as u32)
+        (bytes, (self.registry.map.len() + self.registry.ingress.len()) as u32)
     }
 
     fn alloc_slot(&mut self) -> Option<u32> {

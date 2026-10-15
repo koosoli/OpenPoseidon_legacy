@@ -99,6 +99,9 @@ class TextureWgpu : public Texture
     bool InitCompressed(int w, int h, int32_t format, uint32_t mipCount, const void* data, uint32_t size);
     // Reserve _slotLease if not already held; returns it (0 = none available).
     uint32_t AcquireSlotLease();
+    // FLY-001: wgr_texture_create_in_slot, through the ingress when the producer window is closed.
+    uint64_t CreateGpuTexture(WgrRenderer* r, uint32_t w, uint32_t h, int32_t format, uint32_t mips, uint32_t flags,
+                              const uint8_t* data, uint32_t size);
 
     // How a needed alpha scan was served. The classification is identical across these
     // cases; only the work to reach it differs, and the split is what the streaming stats
