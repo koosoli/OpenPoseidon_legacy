@@ -2446,6 +2446,11 @@ void StallMonitor()
 {
     unsigned last = GSimulateTick.load();
     int stalled = 0;
+    // Until the mission's first simulation step the game is still loading: mounting the
+    // archives, the world, and under WGPU the renderer's pipelines (compiled on first use --
+    // on the laptop's Intel GPU under DX12 that alone ran past the 60 s). Up to then it gets
+    // 180 s, afterwards 60 s without a step end a test run.
+    bool simulating = false;
     for (;;)
     {
         std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -2454,6 +2459,7 @@ void StallMonitor()
         {
             last = now;
             stalled = 0;
+            simulating = true;
             continue;
         }
         if (++stalled % 10 != 0)
@@ -2467,7 +2473,7 @@ void StallMonitor()
         LOG_WARN(Script, "Arma 2 stall: no simulation step for {} s; evaluator last started: {}", stalled, expr);
         if (stalled == 10 || stalled == 30)
             Poseidon::Foundation::LogStallThreadStack();
-        if (stalled >= 60)
+        if (stalled >= (simulating ? 60 : 180))
         {
             // a test run that cannot continue ends instead of holding the batch
             LOG_ERROR(Script, "Arma 2 stall: giving up after {} s (test mode)", stalled);
