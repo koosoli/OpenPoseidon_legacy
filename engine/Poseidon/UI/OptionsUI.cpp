@@ -703,6 +703,18 @@ RString FindScript(RString name)
         return fullname;
     }
 
+    // Arma 1's own global scripts (ca.pbo: data\scripts\Timing.sqs, Area.sqf,
+    // GlobRunning.sqs), which its multiplayer missions call by bare name without
+    // shipping them (mp07capturetheflag: player exec "timing.sqs", execVM "Area.sqf").
+    if (Poseidon::Arma1Compat::Generation() == 1)
+    {
+        fullname = RString("ca\\data\\scripts\\") + name;
+        if (QIFStreamB::FileExist(fullname))
+        {
+            return fullname;
+        }
+    }
+
     // Arma 1/2 also take a path inside the game's archives without its leading
     // backslash: exec "ca\air2\halo\data\Scripts\HALO_init.sqs"
     if (Poseidon::Arma1Compat::Active() && QIFStreamB::FileExist(name))
