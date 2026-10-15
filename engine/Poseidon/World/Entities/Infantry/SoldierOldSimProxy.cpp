@@ -1,4 +1,5 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/World/Weather/SandField.hpp>
 #include <Poseidon/Core/Application.hpp>
@@ -434,7 +435,17 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
         const WeaponType* weapon = nullptr;
         LODShapeWithShadow* pshape = nullptr;
         const AnimationAnimatedTexture* animFire = nullptr;
-        if (matIndex == type->_rpgMatIndex)
+        const int gearSlot = type->A3GearSlotOf(level, i);
+        if (gearSlot >= 0)
+        {
+            // Arma 3: the head and what the class wears. In first person neither the head
+            // nor the helmet is drawn in front of the eye.
+            const bool onHead = gearSlot == ManType::A3GearHead || gearSlot == ManType::A3GearHeadgear;
+            if (onHead && (!_showHead || level == type->_insideView))
+                continue;
+            pshape = gearSlot == ManType::A3GearHead ? proxy.obj->GetShape() : type->_a3Gear[gearSlot].GetRef();
+        }
+        else if (matIndex == type->_rpgMatIndex)
         {
             if (!_showSecondaryWeapon)
             {
@@ -639,6 +650,16 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
         if (pLevel == LOD_INVISIBLE)
         {
             continue;
+        }
+
+        if (gearSlot > ManType::A3GearHead)
+        {
+            // the colours of this class's item on a model several items share
+            for (const ManType::A3GearColour& colour : type->_a3GearColours[gearSlot])
+            {
+                colour.selection.Unhide(pshape, pLevel);
+                colour.selection.SetTexture(pshape, pLevel, colour.texture);
+            }
         }
 
         if (animFire)
@@ -1844,6 +1865,75 @@ void ManType::InitShape()
             }
             _nvGogglesProxyIndex[l] = p;
             break;
+        }
+    }
+
+    // Arma 3 gear: the models the class wears (see _a3Gear) and, per LOD, which of the
+    // man's placeholder proxies draws which. Nothing for any other man.
+    const bool arma3 = Arma1Compat::Active() && Arma1Compat::Generation() >= 3;
+    static const char* const gearKeys[A3GearN] = {nullptr, "a3Headgear", "a3Vest", "a3Backpack"};
+    for (int g = 0; g < A3GearN; g++)
+    {
+        _a3Gear[g] = nullptr;
+        _a3GearColours[g].clear();
+        const ParamEntry* entry = arma3 && gearKeys[g] ? par.FindEntry(gearKeys[g]) : nullptr;
+        if (!entry || entry->IsClass() || entry->IsArray())
+            continue;
+        const RStringB model = *entry;
+        if (model.GetLength() == 0)
+            continue;
+        _a3Gear[g] = Shapes.New(::GetShapeName(model), false, true);
+        if (!_a3Gear[g])
+            continue;
+        _a3Gear[g]->SetAutoCenter(false);
+        _a3Gear[g]->CalculateMinMax();
+        const ParamEntry* sels = par.FindEntry(RString(gearKeys[g]) + RString("Selections"));
+        const ParamEntry* texs = par.FindEntry(RString(gearKeys[g]) + RString("Textures"));
+        if (!sels || !sels->IsArray() || !texs || !texs->IsArray())
+            continue;
+        for (int i = 0; i < sels->GetSize() && i < texs->GetSize(); i++)
+        {
+            RString path = (RStringB)(*texs)[i];
+            const char* p = path.Data();
+            if (*p == '\\')
+                p++;
+            RString lower = p;
+            lower.Lower();
+            Ref<Texture> texture = GlobLoadTexture(lower);
+            if (!texture)
+                continue;
+            A3GearColour& colour = _a3GearColours[g].emplace_back();
+            colour.selection.Init(_a3Gear[g], (RStringB)(*sels)[i], nullptr);
+            colour.texture = texture;
+        }
+    }
+    for (int l = 0; l < MAX_LOD_LEVELS; l++)
+    {
+        _a3GearProxySlot[l].clear();
+        Shape* shape = arma3 && l < _shape->NLevels() ? _shape->Level(l) : nullptr;
+        if (!shape)
+            continue;
+        _a3GearProxySlot[l].assign(shape->NProxies(), -1);
+        for (int p = 0; p < shape->NProxies(); p++)
+        {
+            std::string name = (const char*)shape->Proxy(p).name;
+            for (char& c : name)
+                c = c == '/' ? '\\' : static_cast<char>(tolower(static_cast<unsigned char>(c)));
+            const size_t slash = name.find_last_of('\\');
+            const std::string leaf = slash == std::string::npos ? name : name.substr(slash + 1);
+            const bool gearProxy = name.find("\\proxies\\") != std::string::npos;
+            int slot = -1;
+            if (name.find("\\heads\\") != std::string::npos)
+                slot = A3GearHead;
+            else if (gearProxy && leaf == "headgear")
+                slot = A3GearHeadgear;
+            else if (gearProxy && leaf == "equipment")
+                slot = A3GearVest;
+            else if (gearProxy && leaf == "backpack")
+                slot = A3GearBackpack;
+            if (slot > A3GearHead && !_a3Gear[slot])
+                slot = -1;
+            _a3GearProxySlot[l][p] = static_cast<signed char>(slot);
         }
     }
 
