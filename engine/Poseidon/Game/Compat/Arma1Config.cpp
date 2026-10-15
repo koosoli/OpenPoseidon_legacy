@@ -1468,6 +1468,10 @@ const char* CwaWeaponFor(const std::string& lowerName, const ParamEntry* weapon,
         return "HK";
     if (has("9x39") || has("vss"))
         return "SVDDragunov";
+    // shotguns (Saiga 12K, M1014): CWA has none; the hunting rifle stands in, for the
+    // gun and for its slug and pellet magazines alike
+    if (has("saiga") || has("beneli") || has("m1014") || has("_slug") || has("pellets"))
+        return "HuntingRifle";
     if (has("22_lr") || has("hmr") || has("huntingrifle"))
         return "HuntingRifle";
     if (A2Derives(weapon, "RifleCore") || A2Derives(weapon, "Rifle"))
