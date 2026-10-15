@@ -954,6 +954,39 @@ std::string StringValue(const ParamEntry& cls, const char* key)
     return (const char*)(RStringB)*e;
 }
 
+// Whether an Arma 2 vehicle class carries a real weapon, on itself or on any turret.
+// Horns, smoke and flare launchers do not count.
+bool Arma2VehicleArmed(const ParamEntry& cls)
+{
+    const auto real = [](const ParamEntry* weapons) {
+        if (!weapons || !weapons->IsArray())
+            return false;
+        for (int i = 0; i < weapons->GetSize(); i++)
+        {
+            const std::string w = Lower((const char*)(RStringB)(*weapons)[i]);
+            if (!w.empty() && w.find("horn") == std::string::npos && w.find("smoke") == std::string::npos &&
+                w.find("flare") == std::string::npos)
+                return true;
+        }
+        return false;
+    };
+    if (real(cls.FindEntry("weapons")))
+        return true;
+    std::function<bool(const ParamEntry&, int)> turrets = [&](const ParamEntry& c, int depth) {
+        const ParamEntry* t = depth < 4 ? c.FindEntry("Turrets") : nullptr;
+        if (!t || !t->IsClass())
+            return false;
+        for (int i = 0; i < t->GetEntryCount(); i++)
+        {
+            const ParamEntry& turret = t->GetEntry(i);
+            if (turret.IsClass() && (real(turret.FindEntry("weapons")) || turrets(turret, depth + 1)))
+                return true;
+        }
+        return false;
+    };
+    return turrets(cls, 0);
+}
+
 bool IsKindOf(const ParamEntry* cls, const char* base)
 {
     const ParamEntry* vehicles = Arma1Pars().FindEntry("CfgVehicles");
@@ -2052,6 +2085,12 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
                 if (const ParamEntry* now = Pars.FindEntry("CfgVehicles"); resolved.GetLength() > 0 && now && now->FindEntry(resolved))
                     text += "\t\tcrew=\"" + std::string(resolved.Data()) + "\";\r\n";
             }
+            // An unarmed Arma 2 vehicle on an armed CWA one drops the CWA weapons: the C-130J
+            // flew on CWA's UH-60 with its Zuni rockets, the fishing boat on the armed BoatW
+            // with a Browning (run 19 census). The gunner's seat stays.
+            if (const ParamEntry* cwaWeapons = cwa->FindEntry("weapons");
+                cwaWeapons && cwaWeapons->IsArray() && cwaWeapons->GetSize() > 0 && !Arma2VehicleArmed(*a1))
+                text += "\t\tweapons[]={};\r\n\t\tmagazines[]={};\r\n";
             for (const char* key : {"maxSpeed", "armor", "fuelCapacity", "transportSoldier"})
             {
                 const ParamEntry* e = a1->FindEntry(key);
