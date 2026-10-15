@@ -2639,7 +2639,7 @@ void StallMonitor()
         }
         LOG_WARN(Script, "{} stall: no simulation step for {} s; evaluator last started: {}", Arma1Compat::Label(),
                  stalled, expr);
-        if (stalled == 10 || stalled == 30)
+        if (stalled == 10 || stalled == 30 || stalled == 90 || stalled == 170)
             Poseidon::Foundation::LogStallThreadStack();
         if (stalled >= (simulating ? (arma3 ? 120 : 60) : 180))
         {
