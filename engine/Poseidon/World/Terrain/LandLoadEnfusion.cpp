@@ -2378,8 +2378,10 @@ void AppendRiverWater(const ResolvedRoad& road, std::vector<float>& vertices, st
         for (const float side : {-1.0f, 1.0f})
         {
             const float across = side * half;
+            // `across` is measured to the left of the FLOW (the shader's frame), which is the
+            // spline's right where the river runs against it.
             vertices.insert(vertices.end(), {cx - dz * across, cy, cz + dx * across, along, dx * flowSign,
-                                             dz * flowSign, across, half});
+                                             dz * flowSign, across * flowSign, half});
         }
     }
     for (uint32_t i = 0; i + 1 < count; ++i)
@@ -2398,17 +2400,31 @@ bool AppendLakeWater(const ResolvedRoad& road, std::vector<float>& vertices, std
     size_t count = road.points.size() / 3;
     if (count < 3)
         return false;
-    std::vector<float> x(count), z(count);
+    std::vector<float> x, z;
+    x.reserve(count);
+    z.reserve(count);
     float level = 1e30f;
     for (size_t i = 0; i < count; ++i)
     {
-        x[i] = road.origin[0] + road.points[i * 3 + 0];
-        z[i] = road.origin[2] + road.points[i * 3 + 2];
+        const float px = road.origin[0] + road.points[i * 3 + 0];
+        const float pz = road.origin[2] + road.points[i * 3 + 2];
         level = std::min(level, road.origin[1] + road.points[i * 3 + 1]);
+        // Repeated points (the closing one included) would make zero-length edges that block
+        // every ear touching them.
+        if (!x.empty() && std::fabs(px - x.back()) < 1e-3f && std::fabs(pz - z.back()) < 1e-3f)
+            continue;
+        x.push_back(px);
+        z.push_back(pz);
     }
-    // A closing point that repeats the first one would make a zero-length edge.
+    count = x.size();
     if (count > 3 && std::fabs(x[0] - x[count - 1]) < 1e-3f && std::fabs(z[0] - z[count - 1]) < 1e-3f)
+    {
+        x.pop_back();
+        z.pop_back();
         --count;
+    }
+    if (count < 3)
+        return false;
     double area = 0.0;
     for (size_t i = 0; i < count; ++i)
     {
@@ -2419,18 +2435,22 @@ bool AppendLakeWater(const ResolvedRoad& road, std::vector<float>& vertices, std
         return false;
     const float orientation = area > 0.0 ? 1.0f : -1.0f;
     const uint32_t base = static_cast<uint32_t>(vertices.size() / 8);
+    // Ripple coordinates local to the pond: world metres (to 12.8 km) are past what the shader's
+    // noise resolves.
+    const float ox = *std::min_element(x.begin(), x.end()), oz = *std::min_element(z.begin(), z.end());
     for (size_t i = 0; i < count; ++i)
-        vertices.insert(vertices.end(), {x[i], level, z[i], x[i], 1.0f, 0.0f, z[i], -1.0f});
+        vertices.insert(vertices.end(), {x[i], level, z[i], x[i] - ox, 1.0f, 0.0f, z[i] - oz, -1.0f});
     // Ear clipping: n is a few dozen at most.
     std::vector<uint32_t> ring(count);
     for (size_t i = 0; i < count; ++i)
         ring[i] = static_cast<uint32_t>(i);
     const auto cross = [&](uint32_t a, uint32_t b, uint32_t c)
     { return (x[b] - x[a]) * (z[c] - z[a]) - (z[b] - z[a]) * (x[c] - x[a]); };
+    // Strictly inside: a shore point ON an ear's edge (collinear shore) does not block it.
     const auto inside = [&](uint32_t p, uint32_t a, uint32_t b, uint32_t c)
     {
         const float d1 = cross(a, b, p) * orientation, d2 = cross(b, c, p) * orientation, d3 = cross(c, a, p) * orientation;
-        return d1 >= 0.0f && d2 >= 0.0f && d3 >= 0.0f;
+        return d1 > 1e-6f && d2 > 1e-6f && d3 > 1e-6f;
     };
     size_t guard = count * count + 8;
     while (ring.size() > 3 && guard-- > 0)

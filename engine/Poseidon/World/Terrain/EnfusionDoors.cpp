@@ -239,6 +239,13 @@ int EnfusionDoorRegistry::FindNearest(Vector3Par pos, float radius) const
     return best;
 }
 
+// A door that is open, opening or not yet closed counts towards _nonDefault (what lets
+// AdjustCreateTransform skip its lookup while every door is shut).
+static bool NotShut(float phase, bool target)
+{
+    return phase > 0.0f || target;
+}
+
 void EnfusionDoorRegistry::RequestState(int door, bool open)
 {
     if (door < 0 || static_cast<size_t>(door) >= _doors.size())
@@ -246,11 +253,15 @@ void EnfusionDoorRegistry::RequestState(int door, bool open)
     Door& d = _doors[static_cast<size_t>(door)];
     if (d.target == open)
         return;
+    const bool before = NotShut(d.phase, d.target);
     d.target = open;
+    const bool after = NotShut(d.phase, d.target);
+    if (after && !before)
+        ++_nonDefault;
+    else if (before && !after && _nonDefault > 0)
+        --_nonDefault;
     if (std::find(_animating.begin(), _animating.end(), static_cast<uint32_t>(door)) == _animating.end())
         _animating.push_back(static_cast<uint32_t>(door));
-    if (open && d.phase <= 0.0f)
-        ++_nonDefault;
 }
 
 void EnfusionDoorRegistry::Simulate(float deltaT, Landscape& land)
@@ -262,14 +273,15 @@ void EnfusionDoorRegistry::Simulate(float deltaT, Landscape& land)
     {
         Door& d = _doors[_animating[i]];
         const float before = d.phase;
+        const bool counted = NotShut(d.phase, d.target);
         d.phase = d.target ? std::min(1.0f, d.phase + step) : std::max(0.0f, d.phase - step);
         if (d.phase != before)
             MoveMembers(d, land);
+        if (counted && !NotShut(d.phase, d.target) && _nonDefault > 0)
+            --_nonDefault;
         const bool settled = d.target ? d.phase >= 1.0f : d.phase <= 0.0f;
         if (settled)
         {
-            if (!d.target && before > 0.0f && _nonDefault > 0)
-                --_nonDefault;
             _animating[i] = _animating.back();
             _animating.pop_back();
             continue;

@@ -2227,8 +2227,9 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
                     std::memcpy(ntoCrop.data() + static_cast<size_t>(y) * qw * 4,
                                 nto.data() + (static_cast<size_t>(ny0 + y) * nw + nx0) * 4, static_cast<size_t>(qw) * 4);
                 std::vector<uint8_t> ntoLayer(LayerBytes);
+                // Not STBIR_RGBA: that premultiplies by alpha, and the NTO alpha is occlusion.
                 stbir_resize_uint8_linear(ntoCrop.data(), qw, qh, qw * 4, ntoLayer.data(), LayerW, LayerH, LayerW * 4,
-                                          STBIR_RGBA);
+                                          STBIR_4CHANNEL);
                 for (size_t i = 0; i < static_cast<size_t>(LayerW) * LayerH; ++i)
                 {
                     mdst[i * 4 + 1] = ntoLayer[i * 4 + 0];

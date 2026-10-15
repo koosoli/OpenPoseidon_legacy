@@ -211,7 +211,11 @@ void PlayBreakSound(Vector3Par pos, const AmmoType* type)
     {
         // No Reforger audio is decoded here: the round's own building-hit sound, pitched up,
         // stands in for the shatter.
-        const SoundPars& pars = type->_hitBuilding.SelectSound(GRandGen.RandomValue());
+        // POSITIONAL random (by where it broke): the sequential stream is part of the simulation
+        // hash, and only resident panes break, so drawing from it here would diverge replays.
+        const SoundPars& pars = type->_hitBuilding.SelectSound(
+            GRandGen.RandomValue(static_cast<int>(std::floor(pos.X() * 4.0f)), static_cast<int>(std::floor(pos.Z() * 4.0f)),
+                                 static_cast<int>(std::floor(pos.Y() * 4.0f))));
         if (pars.name.GetLength() > 0)
             sound = GSoundScene->OpenAndPlayOnce(pars.name, pos, VZero, pars.vol, pars.freq * 1.6f);
     }

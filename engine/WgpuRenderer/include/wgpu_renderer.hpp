@@ -2693,6 +2693,8 @@ extern "C"
      * Empty `vertices` releases them. Returns the triangle count drawn. */
     WGR_API uint32_t wgr_river_set_mesh(WgrRenderer* renderer, WgrSlice<float> vertices, WgrSlice<uint32_t> indices,
                                         WgrSlice<float> look);
+    /* RFG-162 — 1 when the renderer draws rivers as water (it needs the HDR scene snapshot). */
+    WGR_API uint32_t wgr_river_supported(WgrRenderer* renderer);
 
     /* FAR INSTANCE TIER — per-frame knobs. `near_cutoff_m` is where the tier STARTS (proxies
      * closer than this are the real objects' job, so it should be the object draw distance);

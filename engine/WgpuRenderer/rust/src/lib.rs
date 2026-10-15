@@ -4161,6 +4161,18 @@ impl Renderer {
             terrain_batches.first().map(|b| b.camera as usize), draws3d.first().map(|d| d.camera as usize),
             water_batches.first().map(|b| b.camera as usize), grass_batches.first().map(|b| b.camera as usize));
         let main_scene_cam = main_selection.index; // Same existing front-entry priority, not a new camera policy.
+        // RFG-162: which river stretches this frame draws (and whether the water pass runs for them).
+        if let Some(camera) = cameras.get(main_scene_cam) {
+            let reach = if camera.params.fog_inv_range > 0.0 {
+                camera.params.fog_start + 1.0 / camera.params.fog_inv_range
+            } else {
+                3000.0
+            };
+            let fwd = camera.shadow.cam_fwd;
+            self.river.cull([camera.cam_pos[0], camera.cam_pos[1], camera.cam_pos[2]], [fwd[0], fwd[1], fwd[2]], reach);
+        } else {
+            self.river.cull([1.0e9; 3], [0.0; 3], 0.0); // no main camera: nothing in reach
+        }
         if let Some(camera) = cameras.get(main_scene_cam) {
             self.rain_water.prepare_medium(&self.device,&self.queue,self.terrain.rain_water_medium_resources());
             self.rain_water.prepare(&self.device, &self.queue, camera, &self.terrain.heightmap_view(),
@@ -6452,11 +6464,12 @@ impl Renderer {
                     // (they are fragment work, not separable passes; see gpu_timers.rs).
                     self.gpu_timers.begin(&mut encoder, TimerRegion::WaterDraw);
                     encoder.push_debug_group("wgr_water");
-                    let visibility_query = self.water_visibility.claim();
+                    // A rivers-only frame (RFG-162) is not a sea frame: no sea query, no sea zbuf.
+                    let visibility_query = has_water && self.water_visibility.claim();
                     // (OP) the water tests and writes a depth buffer of its own, initialised from the
                     // scene depth (water_zbuf.rs): read-only, the far sea painted over the near sea
                     let water_zview: Option<wgpu::TextureView> = match (
-                        water_zbuf::enabled(),
+                        water_zbuf::enabled() && has_water,
                         self.gfx3d.depth_texture().cloned(),
                         self.gfx3d.water_depth_view().cloned(),
                     ) {
@@ -7575,6 +7588,11 @@ impl Renderer {
     // resident; only this frame's draw submission is skipped. C++ sets it every frame.
     fn set_suppress_world_objects(&mut self, suppress: bool) {
         self.suppress_world_objects = suppress;
+    }
+
+    // RFG-162 — rivers need the HDR scene snapshot (the water pass refracts through it).
+    fn river_supported(&self) -> bool {
+        self.hdr_enabled
     }
 
     // RFG-162 — a native world's rivers (river/mod.rs). Returns the triangle count drawn.

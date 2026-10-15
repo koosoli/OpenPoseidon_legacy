@@ -1834,6 +1834,9 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
         _window = nullptr;
         return;
     }
+    // RFG-162: asked once here, before any render thread exists (SupportsRiverSurfaces is called
+    // from the loader while frames are in flight).
+    _riverSurfaces = wgr_river_supported(_renderer) != 0;
 
     _gpuMemoryProbe.Register(
         "WGPU.Dynamic", 0.35f,
@@ -7414,7 +7417,7 @@ bool EngineWgpu::SupportsRiverSurfaces() const
         const char* env = std::getenv("WGR_RIVERS");
         return !(env != nullptr && env[0] == '0');
     }();
-    return on && _renderer != nullptr;
+    return on && _renderer != nullptr && _riverSurfaces;
 }
 
 void EngineWgpu::SetRiverSurfaces(const float* vertices, size_t floatCount, const uint32_t* indices,

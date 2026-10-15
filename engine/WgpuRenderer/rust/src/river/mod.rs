@@ -89,7 +89,65 @@ fn env_f32(key: &str, default: f32, lo: f32, hi: f32) -> f32 {
 struct RiverMesh {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
-    index_count: u32,
+    /// Runs of the index buffer (a stretch of one river, or one pond) with their bounds, so a
+    /// frame draws -- and pays the water pass's snapshot for -- only rivers near the camera.
+    chunks: Vec<RiverChunk>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RiverChunk {
+    centre: [f32; 3],
+    radius: f32,
+    first: u32,
+    count: u32,
+}
+
+/// Indices per chunk: 64 quads of ribbon.
+const CHUNK_INDICES: usize = 384;
+
+fn build_chunks(vertices: &[RiverVertex], indices: &[u32]) -> Vec<RiverChunk> {
+    let mut chunks = Vec::new();
+    for (n, run) in indices.chunks(CHUNK_INDICES).enumerate() {
+        let mut lo = [f32::MAX; 3];
+        let mut hi = [f32::MIN; 3];
+        for &i in run {
+            let p = vertices[i as usize].pos;
+            for c in 0..3 {
+                lo[c] = lo[c].min(p[c]);
+                hi[c] = hi[c].max(p[c]);
+            }
+        }
+        let centre = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5];
+        let radius = ((hi[0] - lo[0]).powi(2) + (hi[1] - lo[1]).powi(2) + (hi[2] - lo[2]).powi(2)).sqrt() * 0.5;
+        chunks.push(RiverChunk {
+            centre,
+            radius,
+            first: (n * CHUNK_INDICES) as u32,
+            count: run.len() as u32,
+        });
+    }
+    chunks
+}
+
+/// The index ranges worth drawing from `cam`: within `reach` metres and not wholly behind the
+/// camera (`fwd` its unit forward). Adjacent chunks merge into one range.
+fn visible_ranges(chunks: &[RiverChunk], cam: [f32; 3], fwd: [f32; 3], reach: f32) -> Vec<(u32, u32)> {
+    let mut out: Vec<(u32, u32)> = Vec::new();
+    for c in chunks {
+        let d = [c.centre[0] - cam[0], c.centre[1] - cam[1], c.centre[2] - cam[2]];
+        let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        if dist - c.radius > reach {
+            continue;
+        }
+        if d[0] * fwd[0] + d[1] * fwd[1] + d[2] * fwd[2] < -c.radius {
+            continue;
+        }
+        match out.last_mut() {
+            Some(last) if last.0 + last.1 == c.first => last.1 += c.count,
+            _ => out.push((c.first, c.count)),
+        }
+    }
+    out
 }
 
 pub struct River {
@@ -100,6 +158,8 @@ pub struct River {
     scene_sampler: wgpu::Sampler,
     env_sampler: wgpu::Sampler,
     mesh: Option<RiverMesh>,
+    /// This frame's index ranges (cull).
+    visible: Vec<(u32, u32)>,
     bind: Option<(wgpu::BindGroup, (u64, u64))>,
     start: std::time::Instant,
 }
@@ -234,6 +294,7 @@ impl River {
             scene_sampler: linear("wgr_river_scene_samp", wgpu::AddressMode::ClampToEdge),
             env_sampler: linear("wgr_river_env_samp", wgpu::AddressMode::Repeat),
             mesh: None,
+            visible: Vec::new(),
             bind: None,
             start: std::time::Instant::now(),
         };
@@ -288,13 +349,23 @@ impl River {
         self.mesh = Some(RiverMesh {
             vertices: vb,
             indices: ib,
-            index_count: usable as u32,
+            chunks: build_chunks(vertices, &indices[..usable]),
         });
+        self.visible.clear();
         (usable / 3) as u32
     }
 
+    /// Per frame, before the water pass: which stretches are near enough and in front.
+    pub fn cull(&mut self, cam: [f32; 3], fwd: [f32; 3], reach: f32) {
+        self.visible.clear();
+        if let Some(mesh) = self.mesh.as_ref() {
+            self.visible = visible_ranges(&mesh.chunks, cam, fwd, reach.max(100.0));
+        }
+    }
+
+    /// Something to draw this frame (a mesh, a stretch in view, not switched off).
     pub fn drawable(&self) -> bool {
-        self.mesh.is_some() && std::env::var("WGR_RIVERS").map_or(true, |v| v != "0")
+        self.mesh.is_some() && !self.visible.is_empty() && std::env::var("WGR_RIVERS").map_or(true, |v| v != "0")
     }
 
     /// Bind this frame's scene snapshot, resolved depth and sky env map (rebuilt only when the
@@ -339,7 +410,9 @@ impl River {
         pass.set_bind_group(1, bind, &[]);
         pass.set_vertex_buffer(0, mesh.vertices.slice(..));
         pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+        for &(first, count) in &self.visible {
+            pass.draw_indexed(first..first + count, 0, 0..1);
+        }
     }
 }
 
@@ -354,6 +427,29 @@ mod tests {
         assert_eq!(std::mem::offset_of!(RiverVertex, flow), 16);
         assert_eq!(std::mem::offset_of!(RiverVertex, across), 24);
         assert_eq!(std::mem::offset_of!(RiverVertex, half_width), 28);
+    }
+
+    #[test]
+    fn cull_keeps_near_chunks_in_front_and_merges_neighbours() {
+        let v = |x: f32, z: f32| RiverVertex { pos: [x, 0.0, z], ..Default::default() };
+        // Three 384-index chunks along +x: near (0..10), near (10..20), far (5000).
+        let mut verts = Vec::new();
+        let mut idx = Vec::new();
+        for (k, x0) in [0.0f32, 10.0, 5000.0].iter().enumerate() {
+            let base = verts.len() as u32;
+            verts.extend([v(*x0, 0.0), v(*x0 + 10.0, 0.0), v(*x0, 5.0)]);
+            for _ in 0..CHUNK_INDICES / 3 {
+                idx.extend([base, base + 1, base + 2]);
+            }
+            assert_eq!(idx.len(), (k + 1) * CHUNK_INDICES);
+        }
+        let chunks = build_chunks(&verts, &idx);
+        assert_eq!(chunks.len(), 3);
+        let ranges = visible_ranges(&chunks, [0.0, 2.0, 0.0], [1.0, 0.0, 0.0], 1000.0);
+        assert_eq!(ranges, vec![(0, 2 * CHUNK_INDICES as u32)]);
+        // Looking the other way: the chunk the camera stands in stays (its radius reaches it).
+        let back = visible_ranges(&chunks, [30.0, 2.0, 0.0], [1.0, 0.0, 0.0], 1000.0);
+        assert!(back.is_empty() || back[0].0 >= CHUNK_INDICES as u32);
     }
 
     #[test]

@@ -3226,6 +3226,20 @@ pub unsafe extern "C" fn wgr_far_set_instances(
     }));
 }
 
+/// RFG-162 — whether this renderer draws rivers as water (it needs the HDR scene snapshot the
+/// water pass refracts through). 0 = keep building them as ribbons.
+///
+/// # Safety
+/// `renderer` must be live or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_river_supported(renderer: *mut WgrRenderer) -> u32 {
+    if renderer.is_null() {
+        return 0;
+    }
+    let renderer = unsafe { &*renderer };
+    u32::from(renderer.river_supported())
+}
+
 /// RFG-162 — replace every river of a native world, drawn as water in the water pass.
 ///
 /// `vertices` = 8 floats per vertex: absolute world position (3), metres along the spline

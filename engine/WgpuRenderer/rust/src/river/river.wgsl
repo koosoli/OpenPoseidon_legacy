@@ -72,9 +72,19 @@ fn vs_river(v: VsIn) -> VsOut {
     return o;
 }
 
+// Integer hash of a lattice cell (PCG-style): a sin()-based hash loses its precision kilometres
+// along a river, where the lattice coordinates reach the thousands.
+fn pcg(v: u32) -> u32 {
+    let state = v * 747796405u + 2891336453u;
+    let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
 fn hash2(p: vec2<f32>) -> vec2<f32> {
-    let q = vec2<f32>(dot(p, vec2<f32>(127.1, 311.7)), dot(p, vec2<f32>(269.5, 183.3)));
-    return fract(sin(q) * 43758.5453) * 2.0 - 1.0;
+    let c = vec2<u32>(bitcast<u32>(i32(p.x)), bitcast<u32>(i32(p.y)));
+    let h = pcg(c.x ^ pcg(c.y + 0x9e3779b9u));
+    let h2 = pcg(h ^ 0x85ebca6bu);
+    return vec2<f32>(f32(h & 0xffffu), f32(h2 & 0xffffu)) / 32767.5 - 1.0;
 }
 
 // Gradient noise with its analytic derivative (value, d/dx, d/dy).
