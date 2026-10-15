@@ -1042,9 +1042,11 @@ GameValue A2LifeState(const GameState*, GameValuePar oper1)
     return GameValue(RString(obj && !obj->IsDammageDestroyed() ? "ALIVE" : "DEAD"));
 }
 
-GameValue A2VehicleVarName(const GameState*, GameValuePar)
+GameValue A2VehicleVarName(const GameState*, GameValuePar oper1)
 {
-    return GameValue(RString(""));
+    // the name the mission gave the object (its sqm "text"), else ""
+    Object* obj = GetObject(oper1);
+    return GameValue(obj ? obj->GetVarName() : RString(""));
 }
 
 GameValue A2NearestObjects(const GameState* state, GameValuePar oper1)

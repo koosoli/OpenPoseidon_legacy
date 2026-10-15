@@ -1976,6 +1976,8 @@ const Macro kMacros2[] = {
     // forms Arma 3 adds to older commands (seen in the showcases): a skill by name (the
     // engine has one skill per unit), fog with decay and base, a named or numbered cut layer
     {"setSkill", 'b', GameNothing, GameObject, GameArray, ""},
+    // addMagazine [name, rounds]: the magazine (a full one)
+    {"addMagazine", 'b', GameNothing, GameObject, GameArray, "(_this select 0) addMagazine ((_this select 1) select 0)"},
     {"setFog", 'b', GameNothing, GameScalar, GameArray, "(_this select 0) setFog ((_this select 1) select 0)"},
     {"cutText", 'b', GameNothing, GameString | GameScalar, GameArray, "cutText (_this select 1)"},
     {"titleText", 'b', GameNothing, GameString | GameScalar, GameArray, "titleText (_this select 1)"},
