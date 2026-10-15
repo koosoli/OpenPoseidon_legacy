@@ -117,15 +117,18 @@ GL33 draws as plain diffuse).
 | `ddc557d` | the face rig reserved its 8 bones on the full 128-bone Arma 2 skeleton before finding no room: 136-bone palettes for every Arma 2 man, 961 warnings per run | no room, no bones |
 | `7c1b32e`, `f012ca6`, `f77d01a`, `31df49c` | -- | census lists each soldier's magazines; a third screenshot through the weapon's optics, with the optics model logged; a scoped Arma 2 weapon takes its own 2D scope (`modelOptics`) and zoom -- not yet seen in game: the aiming view did not engage in the unattended test (being logged) |
 
-Open, aiming: in run 19 the test switches the player to the aiming view and the world
-reports it (`CameraType` 1 = CamGunner, optics model `data3d\optika_m16.p3d` for MP_Superpowers'
-M16A4, `optika_ak47.p3d` for MP_CivilWar's AK), but the frame shows the plain first-person
-view with the Arma 2 rifle and no CWA sight overlay and no zoom. `Man::Draw` returns after
-drawing the 2D optics for CamGunner, so the first-person LOD should not be in that frame at
-all; the camera comes from `Man::GetWeaponRelTransform`, i.e. the weapon proxy's
-placeholder camera point. To be traced with a CWA soldier first, to tell whether it is
-Arma 2 specific. Arma 2's own sights (`modelOptics="-"`: the camera at the weapon model's
-eye point) are not modelled yet.
+Aiming: in run 19 the test switched the player to the aiming view and the world reported
+it (`CameraType` 1 = CamGunner, optics model `data3d\optika_m16.p3d` for MP_Superpowers'
+M16A4, `optika_ak47.p3d` for MP_CivilWar's AK), but every `_optic.png` showed the plain
+first-person view: GL33 writes a requested screenshot at the end of a later frame, and the
+test switched back to first person in the same tick (`14e4478` waits two seconds). Arma 2's
+own sights (`modelOptics="-"`: the camera at the weapon model's eye point) are not
+modelled yet.
+
+| Commit | Finding | Fix |
+|--------|---------|-----|
+| `767f07d` | first-person hands a flat salmon by day and glowing orange at night (MP_Paradrop, run 19) | Arma's `Skin` shader (hands, faces: `hhl.rvmat`) reads `emmisive` and `forcedDiffuse` as subsurface parameters (`{1,0.6,0.05,0.6}`, `{2.8,0.22,0.12,0.22}`), which `TexMaterial` took as colours; a Skin material keeps neither |
+| `4562178` | Saiga 12K and M1014 slugs/pellets had no CWA magazine (the last unmapped rounds in run 19 besides laser batteries) | shotguns and their rounds go to CWA's hunting rifle |
 
 Offline check: a small program built from the repo's own ODOL and RTM readers poses
 `USMC_Soldier_Light` with a move and scores the result by how much the mesh's edges stretch.
