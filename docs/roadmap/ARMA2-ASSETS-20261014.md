@@ -130,6 +130,24 @@ modelled yet.
 | `767f07d` | first-person hands a flat salmon by day and glowing orange at night (MP_Paradrop, run 19) | Arma's `Skin` shader (hands, faces: `hhl.rvmat`) reads `emmisive` and `forcedDiffuse` as subsurface parameters (`{1,0.6,0.05,0.6}`, `{2.8,0.22,0.12,0.22}`), which `TexMaterial` took as colours; a Skin material keeps neither |
 | `4562178` | Saiga 12K and M1014 slugs/pellets had no CWA magazine (the last unmapped rounds in run 19 besides laser batteries) | shotguns and their rounds go to CWA's hunting rifle |
 
+### Focus run 10 (build `e783482`), 2026-10-15
+
+7 missions, all entered, census 608 Arma, 0 CWA. The Skin fix holds (MP_Superpowers'
+hands natural by day, MP_Paradrop's dark at night), TE02's Takistan bushes draw leaves
+(`_can`), and the aiming view now engages: MP_Superpowers and C2B look over CWA's M16
+iron-sight overlay. Three findings, fixed after the run:
+
+| Commit | Finding | Fix |
+|--------|---------|-----|
+| `8e1af97` | the M107's own 2D scope (`\ca\weapons\2dscope_mildot_14`, copied by `31df49c`) drew as a small black box with an ellipse in a screen of flat red-brown, no scene | Arma 2's 2D scopes are authored for its own screen mapping; the weapon keeps the CWA weapon's scope (M21) until that is handled. `OP_A2_SCOPES=1` takes them anyway |
+| `949ee53` | under GL33 the HMMWV came out a striped light grey with no camouflage, the M1A1 and MTVR slate blue, the deck crew glossy gold (C2B, T03, C0) | Super's `specular[]` is the ceiling the SMDI green channel scales per texel; GL33 lights per vertex and has no SMDI, so it applied 0.69 everywhere -- the HMMWV's SMDI averages 8/255. `TexMaterial` records the SpecularDetail map and GL33 scales the specular by its TAGG AVGC green (or a procedural `color()`'s g). WGPU binds the map and is unchanged; `OP_GL33_SPEC_MEAN=0` for A/B |
+| `fa764b4` | an Arma 2 rifle aimed through CWA's 2D sight: TE02's SCAR with its EOTech showed the M16 rear-sight mask | Arma 2 sights are part of the weapon model (`modelOptics="-"`, Rifle/Pistol/Launcher bases): the import writes `optics3D=1` and Arma 2's `opticsZoomMin/Max/Init`, `distanceZoom*`; the aiming view then draws the soldier as in first person and puts the camera at the weapon model's `eye` memory point along the barrel, with the weapon placed exactly as the first-person LOD draws it, near plane 0.07 m. A model without `eye` keeps the CWA overlay. `OP_A2_SIGHTS=0` turns it off |
+
+Measured for `949ee53`: `hmmwv_body_co.paa` (A2 `wheeled.pbo`) averages RGB 81/78/67, a
+dull woodland; `hmmwv_body_1_smdi.paa` (OA `wheeled_e.pbo`, Stage5 of `hmmwv_body_2.rvmat`)
+TAGG AVGC `7f08ffff` (green 8), `hmmwv_body_1_as.paa` green 130. The HMMWV in C2B is OA's
+`ca\wheeled_e\hmmwv\hmmwv.p3d` with Arma 2's woodland texture.
+
 Offline check: a small program built from the repo's own ODOL and RTM readers poses
 `USMC_Soldier_Light` with a move and scores the result by how much the mesh's edges stretch.
 
