@@ -164,6 +164,11 @@ std::vector<std::string> MissionFiles();
 
 // True when the mission directory lies inside a mounted Arma 1 archive.
 bool IsArma1MissionDirectory(const char* missionDirectory);
+// True when `name` (a file name from an Arma config) starts with the top folder of a mounted
+// Arma archive ("a3\anims_f\...", "ca\..."): a path of its own, though written without
+// the leading backslash (Arma 3's binarised configs drop it), which must not be put under
+// CWA's default folder ("anim\", "data\", "sound\").
+bool IsArmaBankPath(const char* name);
 
 // The CfgWorlds class an Arma 1 mission's world name means: "intro" in an Arma 1
 // archive is Arma 1's desert (A1_Intro), not CWA's Intro island.
