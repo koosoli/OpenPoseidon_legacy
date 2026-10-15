@@ -740,7 +740,13 @@ RString ResolveMagazineClass(const RString& className)
     // OFP/CWA keeps magazines in CfgWeapons as well.
     const RString cwa = ResolveFrom("CfgWeapons", className, MagazineAliases());
     if (Active() && cwa.GetLength() > 0 && className.GetLength() > 0 && _stricmp(cwa.Data(), className.Data()) != 0)
+    {
+        // An Arma 1 magazine of another size than its carrier gets a class of its own.
+        const RString own = Arma1MagazineClass(className, cwa);
+        if (_stricmp(own.Data(), cwa.Data()) != 0)
+            return own;
         ResolvedMagazineNames().try_emplace(Lower(cwa.Data()), std::string(className.Data()));
+    }
     return cwa;
 }
 
@@ -753,6 +759,9 @@ RString ScriptClassName(const RString& engineName)
 
 RString ScriptMagazineName(const RString& unitClass, const RString& cwaMagazine)
 {
+    // A generated magazine is shown under its Arma name on any unit.
+    if (Active() && _strnicmp(cwaMagazine.Data(), "A1x_", 4) == 0)
+        return RString(cwaMagazine.Data() + 4);
     if (!Active() || cwaMagazine.GetLength() == 0 || _strnicmp(unitClass.Data(), "A1x_", 4) != 0)
         return cwaMagazine;
     // Per generated unit class: CWA magazine (lower case) -> the first Arma magazine of

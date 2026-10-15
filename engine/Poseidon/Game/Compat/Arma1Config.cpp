@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -34,6 +35,12 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+namespace Poseidon
+{
+// Weapons.cpp: every muzzle already built that takes baseMagazine also takes magazine.
+void AddMagazineToMuzzlesTaking(const char* baseMagazine, const char* magazine);
+} // namespace Poseidon
 
 namespace Poseidon::Arma1Compat
 {
@@ -1603,6 +1610,119 @@ RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
         return cwaWeapon;
     LOG_INFO(Mission, "{}: weapon '{}' uses the Arma model {} on CWA '{}'", Label(), name.Data(), model,
              cwaWeapon.Data());
+    return RString(generated.c_str());
+}
+
+namespace
+{
+// CWA magazine (lower case) -> magazines generated on it.
+std::map<std::string, std::vector<RString>>& GeneratedMagazines()
+{
+    static std::map<std::string, std::vector<RString>> generated;
+    return generated;
+}
+} // namespace
+
+std::vector<RString> GeneratedMagazinesFor(const char* cwaMagazine)
+{
+    if (!Active() || !cwaMagazine || !*cwaMagazine)
+        return {};
+    const auto found = GeneratedMagazines().find(Lower(cwaMagazine));
+    return found != GeneratedMagazines().end() ? found->second : std::vector<RString>();
+}
+
+bool GeneratedMagazineFits(const char* weaponClass, const char* magazine)
+{
+    if (!Active() || !weaponClass || !magazine || _strnicmp(weaponClass, "A1x_", 4) != 0 ||
+        _strnicmp(magazine, "A1x_", 4) != 0)
+        return true;
+    const ParamEntry* a1 = FindConfigClass("CfgWeapons", weaponClass + 4);
+    if (!a1 || !a1->IsClass())
+        return true;
+    const char* armaMagazine = magazine + 4;
+    bool listed = false;
+    bool any = false;
+    const auto scan = [&](const ParamEntry& cls)
+    {
+        const ParamEntry* mags = cls.FindEntry("magazines");
+        if (!mags || !mags->IsArray())
+            return;
+        for (int i = 0; i < mags->GetSize(); i++)
+        {
+            any = true;
+            const RString listedName = (RStringB)(*mags)[i];
+            if (_stricmp(listedName.Data(), armaMagazine) == 0)
+                listed = true;
+        }
+    };
+    scan(*a1);
+    if (const ParamEntry* muzzles = a1->FindEntry("muzzles"); muzzles && muzzles->IsArray())
+        for (int i = 0; i < muzzles->GetSize(); i++)
+        {
+            const RString muzzle = (RStringB)(*muzzles)[i];
+            if (muzzle.GetLength() == 0 || _stricmp(muzzle.Data(), "this") == 0)
+                continue;
+            if (const ParamEntry* cls = a1->FindEntry(muzzle.Data()); cls && cls->IsClass())
+                scan(*cls);
+        }
+    return listed || !any;
+}
+
+RString Arma1MagazineClass(const RString& name, const RString& cwaMagazine)
+{
+    if (Generation() != 1 || !ConfigLoaded() || !Arma1OwnWeapons() || name.GetLength() == 0 ||
+        cwaMagazine.GetLength() == 0 || _stricmp(name.Data(), cwaMagazine.Data()) == 0 ||
+        _strnicmp(name.Data(), "A1x_", 4) == 0)
+        return cwaMagazine;
+    static const bool off = [] {
+        const char* e = std::getenv("OP_A1_MAGAZINES");
+        return e && *e == '0';
+    }();
+    if (off)
+        return cwaMagazine;
+    const ParamEntry* a1 = FindConfigClass("CfgMagazines", name);
+    if (!a1 || !a1->IsClass())
+        return cwaMagazine;
+    // Arma 1 names some launcher rounds like the launcher (M136, Stinger): A1x_<name> is
+    // the weapon's class there, and one round per launcher is what CWA's carrier holds too.
+    if (FindConfigClass("CfgWeapons", name))
+        return cwaMagazine;
+    const ParamEntry* cwaWeapons = Pars.FindEntry("CfgWeapons");
+    const ParamEntry* cwa = cwaWeapons ? cwaWeapons->FindEntry(cwaMagazine) : nullptr;
+    if (!cwa || !cwa->IsClass())
+        return cwaMagazine;
+    const ParamEntry* a1Count = a1->FindEntry("count");
+    const ParamEntry* cwaCount = cwa->FindEntry("count");
+    if (!a1Count || !cwaCount || a1Count->IsClass() || a1Count->IsArray() || cwaCount->IsClass() || cwaCount->IsArray())
+        return cwaMagazine;
+    const int count = static_cast<int>(std::lround((float)*a1Count));
+    const int carrierCount = static_cast<int>(std::lround((float)*cwaCount));
+    if (count <= 0 || count > 10000 || count == carrierCount)
+        return cwaMagazine;
+
+    const std::string generated = "A1x_" + std::string(name.Data());
+    if (!cwaWeapons->FindEntry(generated.c_str()))
+    {
+        std::string text = "class CfgWeapons\r\n{\r\n\tclass " + std::string(cwaMagazine.Data()) + ";\r\n\tclass " +
+                           generated + ": " + std::string(cwaMagazine.Data()) + "\r\n\t{\r\n";
+        text += "\t\tcount=" + std::to_string(count) + ";\r\n";
+        const std::string displayName = StringValue(*a1, "displayName");
+        if (!displayName.empty())
+            text += "\t\tdisplayNameMagazine=\"" + displayName + "\";\r\n";
+        const std::string shortName = StringValue(*a1, "displayNameShort");
+        if (!shortName.empty())
+            text += "\t\tshortNameMagazine=\"" + shortName + "\";\r\n";
+        text += "\t};\r\n};\r\n";
+        ImportIntoPars(text, generated.c_str());
+        if (!(Pars >> "CfgWeapons").FindEntry(generated.c_str()))
+            return cwaMagazine;
+        GeneratedMagazines()[Lower(cwaMagazine.Data())].push_back(RString(generated.c_str()));
+        // Muzzles built before this magazine existed learn it now; later ones read it
+        // through GeneratedMagazinesFor when they are built.
+        AddMagazineToMuzzlesTaking(cwaMagazine, RString(generated.c_str()));
+        LOG_INFO(Mission, "{}: magazine '{}' holds {} rounds on CWA '{}' ({})", Label(), name.Data(), count,
+                 cwaMagazine.Data(), carrierCount);
+    }
     return RString(generated.c_str());
 }
 
