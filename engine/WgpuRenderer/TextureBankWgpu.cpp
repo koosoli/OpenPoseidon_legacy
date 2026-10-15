@@ -308,9 +308,6 @@ void TextureBankWgpu::TrimResidency()
     const uint64_t textureBudget = TextureBudgetBytes(stats.budget_bytes);
     if (stats.object_texture_bytes <= textureBudget)
         return;
-    EngineWgpu::AcquireProducerWindow("texture residency trim");
-    if (!wgr_get_memory_stats(_renderer, &stats) || stats.object_texture_bytes <= textureBudget)
-        return;
 
     // NOTE on the ResidentPins() check below. A pin means "some REGISTERED model references
     // this", and while pins were unconditionally exempt this LRU starved to 1-31 candidates on
@@ -381,6 +378,16 @@ void TextureBankWgpu::TrimResidency()
             continue;
         candidates.push_back(texture);
     }
+    // The window is opened only when there is something to evict. The candidates are all
+    // CPU-side state (handle, last use, pins), so choosing them needs no renderer. Opening it
+    // first made an over-budget frame with nothing evictable wait for the render thread to
+    // finish the frame just published -- every frame, at Durras under the live VRAM budget
+    // (REN-RES-004): lazy wait 16 ms in 90% of frames, overlap reduced to lockstep, no LRU row.
+    if (candidates.empty())
+        return;
+    EngineWgpu::AcquireProducerWindow("texture residency trim");
+    if (!wgr_get_memory_stats(_renderer, &stats) || stats.object_texture_bytes <= textureBudget)
+        return;
     std::sort(candidates.begin(), candidates.end(), [](const TextureWgpu* a, const TextureWgpu* b)
               { return a->LastUsedFrame() < b->LastUsedFrame(); });
 

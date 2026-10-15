@@ -771,6 +771,19 @@ class Landscape : public SerializeClass
     size_t _nativeFarRejectedAtBuild = 0;
     size_t _nativeFarRejectedCount = 0;
     bool _nativeFarRejectRebuild = false;
+public:
+    // Where the far tier's per-frame time goes, logged every 600 frames (UpdateNativeFarResidency).
+    struct NativeFarStats
+    {
+        uint32_t calls = 0, slowCalls = 0, installs = 0, ready = 0, rebuilds = 0;
+        double callMs = 0, callMaxMs = 0, installMs = 0, installMaxMs = 0, readyMs = 0, rebuildMs = 0;
+    };
+  protected:
+    NativeFarStats _nativeFarStats;
+    // The far window's cells, nearest first, and where the candidate fill stopped in them.
+    std::vector<ModernObjectCellCandidate> _nativeFarCells;
+    size_t _nativeFarFillCell = 0;
+    size_t _nativeFarFillEntry = 0;
     int _nativeFarCenterX = -0x3fffffff, _nativeFarCenterZ = -0x3fffffff;
     std::vector<uint8_t> _modernObjectCellActive;
     std::vector<uint8_t> _modernObjectCellDesired;

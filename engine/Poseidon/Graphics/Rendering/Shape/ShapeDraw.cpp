@@ -1054,6 +1054,7 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
     // both recognised P3D encodings through that path keeps test-model (and
     // normal-map smoke tests) from silently producing an empty mesh.
     LODShapeWithShadow* shape = nullptr;
+    double installTailMs = 0.0, installRegisterMs = 0.0, installOptimizeMs = 0.0;
     std::shared_ptr<const ModelCompressedSourceBirth> parsedSourceBirth;
     bool freshCanonicalAdapter = false;
     if (preadapted)
@@ -1064,8 +1065,10 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
         shape = preadapted;
         // The worker stopped before the ODOL tail; run it here, in order (proxies
         // first, then OptimizeShapes and the rest), before OptimizeOneShape below.
+        const auto tailStart = ::Poseidon::Dev::Perf::Now();
         if (preparsed)
             Poseidon::Model::ShapeAdapter::FinishOdolAdapterTail(shape, *preparsed, reversed);
+        installTailMs = ::Poseidon::Dev::Perf::ElapsedMs(tailStart);
         if (timing)
         {
             timing->preparsed = true;
@@ -1220,13 +1223,19 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
             // RFG-099: let the retained renderer own the mesh first.
             if (_worldModelScope && GEngine)
                 GEngine->WorldShapeLoaded(shape);
+            installRegisterMs = ::Poseidon::Dev::Perf::ElapsedMs(optimizeStart);
+            const auto legacyStart = ::Poseidon::Dev::Perf::Now();
             OptimizeOneShape(shape);
+            installOptimizeMs = ::Poseidon::Dev::Perf::ElapsedMs(legacyStart);
         }
         if (timing)
             timing->optimizeMs = ::Poseidon::Dev::Perf::ElapsedMs(optimizeStart);
     }
 
     const double _perfShapeLoadMs = ::Poseidon::Dev::Perf::ElapsedMs(_perfShapeLoadStart);
+    if (preadapted && _perfShapeLoadMs >= 30.0)
+        LOG_INFO(Graphics, "Slow shape install: {} {:.1f} ms | tail {:.1f} register {:.1f} optimize {:.1f} ({} LODs)",
+                 lowName, _perfShapeLoadMs, installTailMs, installRegisterMs, installOptimizeMs, shape->NLevels());
     if (_perfShapeLoadMs >= 1.0)
     {
         LOG_DEBUG(Graphics, "PERF: ShapeBank::New {} took {:.2f}ms ({} LODs)", lowName, _perfShapeLoadMs,

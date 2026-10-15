@@ -5521,6 +5521,8 @@ void Landscape::ClearNativeFarResidency()
     _nativeFarCursor = 0;
     _nativeFarRejectedAtBuild = _nativeFarRejectedCount = 0;
     _nativeFarRejectRebuild = false;
+    _nativeFarCells.clear();
+    _nativeFarFillCell = _nativeFarFillEntry = 0;
     _nativeFarCenterX = _nativeFarCenterZ = -0x3fffffff;
 }
 
@@ -5549,16 +5551,63 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                                              0.0f, static_cast<float>(_landRange - 1))) / 16 * 16;
     const int cz = static_cast<int>(std::clamp(cameraPosition.Z() / _landGrid,
                                              0.0f, static_cast<float>(_landRange - 1))) / 16 * 16;
-    // A finished sweep that rejected more models (props under 2 m, failures) rebuilds the list:
-    // those placements held candidate slots, and on a cluttered map they filled the cap before
-    // the ring reached the hillside forests (the bare far slopes at Durras).
-    if (_nativeFarRejectRebuild)
+    // The ring fill, resumable: nearest cells first, from where the last fill stopped, until the
+    // list holds candidateBudget placements. Models rejected for the far tier are skipped.
+    const auto fillCandidates = [&] {
+        for (; _nativeFarFillCell < _nativeFarCells.size(); ++_nativeFarFillCell, _nativeFarFillEntry = 0)
+        {
+            const auto& entries = _modernObjectCells[_nativeFarCells[_nativeFarFillCell].index];
+            for (; _nativeFarFillEntry < entries.size(); ++_nativeFarFillEntry)
+            {
+                if (_nativeFarCandidates.size() >= candidateBudget)
+                    return;
+                const uint32_t index = entries[_nativeFarFillEntry];
+                const auto& placement = _modernObjectPlacements[index];
+                if (placement.modelIndex >= _modernObjectModels.size() || (_nativeFarWanted[index] & 2) ||
+                    (farSkipRejected && _nativeFarModelRejected[placement.modelIndex]))
+                    continue;
+                _nativeFarCandidates.push_back(index);
+                _nativeFarWanted[index] = 1;
+                _nativeFarModelWanted[placement.modelIndex] = 1;
+            }
+        }
+    };
+    // A finished sweep that rejected more models (props under 2 m, failures) frees their slots:
+    // on a cluttered map those placements filled the cap before the ring reached the hillside
+    // forests (the bare far slopes at Durras). The list is compacted and the fill resumes where it
+    // stopped, which costs a pass over the list. Rebuilding it whole, as this first did, cost
+    // 20-40 ms on the main thread every ~1.5 s at Durras while the rejections trickled in.
+    if (_nativeFarRejectRebuild && cx == _nativeFarCenterX && cz == _nativeFarCenterZ)
     {
+        const auto compactStart = std::chrono::steady_clock::now();
         _nativeFarRejectRebuild = false;
-        _nativeFarCenterX = -0x3fffffff;
+        _nativeFarRejectedAtBuild = _nativeFarRejectedCount;
+        const size_t before = _nativeFarCandidates.size();
+        size_t kept = 0;
+        for (const uint32_t index : _nativeFarCandidates)
+        {
+            if (_nativeFarModelRejected[_modernObjectPlacements[index].modelIndex])
+                _nativeFarWanted[index] &= 2;
+            else
+                _nativeFarCandidates[kept++] = index;
+        }
+        _nativeFarCandidates.resize(kept);
+        fillCandidates();
+        _nativeFarCursor = 0;
+        const double compactMs =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - compactStart).count();
+        ++_nativeFarStats.rebuilds;
+        _nativeFarStats.rebuildMs += compactMs;
+        LOG_INFO(World, "Native authored far window: compacted {} -> {} candidates, refilled to {} in {:.1f} ms",
+                 before, kept, _nativeFarCandidates.size(), compactMs);
     }
+    _nativeFarRejectRebuild = false;
     if (cx != _nativeFarCenterX || cz != _nativeFarCenterZ)
     {
+        const auto buildStart = std::chrono::steady_clock::now();
+        const auto sinceBuild = [&buildStart] {
+            return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - buildStart).count();
+        };
         _nativeFarRejectedAtBuild = _nativeFarRejectedCount;
         _nativeFarCenterX = cx;
         _nativeFarCenterZ = cz;
@@ -5571,7 +5620,10 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         _nativeFarCursor = 0;
         const int radius = static_cast<int>(std::min(std::ceil(range / _landGrid),
                                                     static_cast<float>(_landRange)));
-        std::vector<ModernObjectCellCandidate> cells;
+        std::vector<ModernObjectCellCandidate>& cells = _nativeFarCells;
+        cells.clear();
+        _nativeFarFillCell = 0;
+        _nativeFarFillEntry = 0;
         for (int z = std::max(0, cz - radius); z <= std::min(_landRange - 1, cz + radius); ++z)
             for (int x = std::max(0, cx - radius); x <= std::min(_landRange - 1, cx + radius); ++x)
             {
@@ -5584,23 +5636,9 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         std::sort(cells.begin(), cells.end(), [](const auto& a, const auto& b) {
             return a.distance2 != b.distance2 ? a.distance2 < b.distance2 : a.index < b.index;
         });
-        for (const auto& cell : cells)
-        {
-            for (uint32_t index : _modernObjectCells[cell.index])
-            {
-                const auto& placement = _modernObjectPlacements[index];
-                if (placement.modelIndex >= _modernObjectModels.size() || (_nativeFarWanted[index] & 2) ||
-                    (farSkipRejected && _nativeFarModelRejected[placement.modelIndex]))
-                    continue;
-                _nativeFarCandidates.push_back(index);
-                _nativeFarWanted[index] = 1;
-                _nativeFarModelWanted[placement.modelIndex] = 1;
-                if (_nativeFarCandidates.size() >= candidateBudget)
-                    break;
-            }
-            if (_nativeFarCandidates.size() >= candidateBudget)
-                break;
-        }
+        const double cellsMs = sinceBuild();
+        fillCandidates();
+        const double listMs = sinceBuild();
         for (auto it = _nativeFarActive.begin(); it != _nativeFarActive.end();)
         {
             if ((_nativeFarWanted[*it] & 1) == 0 || _modernObjectPlacements[*it].resident)
@@ -5616,6 +5654,7 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                 it = _nativeFarModels.erase(it);
             else
                 ++it;
+        const double activeMs = sinceBuild();
         // Preserve near requests and retire old far work through the SAME queue.
         if (_modernObjectPreparer && _modernObjectModelPrefetchEpoch.size() == _nativeFarModelWanted.size())
         {
@@ -5627,9 +5666,10 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
             PreserveModernSourceDiagnosticRequests(epochs, _modernObjectPrefetchEpoch);
             _modernObjectPreparer->DropStale(epochs.data(), epochs.size(), _modernObjectPrefetchEpoch);
         }
-        LOG_INFO(World, "Native authored far window: candidates={} active={} models={} radius={}m cap={}",
+        LOG_INFO(World, "Native authored far window: candidates={} active={} models={} radius={}m cap={} | "
+                 "build {:.1f} ms (cells {:.1f}, list {:.1f}, active {:.1f})",
                  _nativeFarCandidates.size(), _nativeFarActive.size(), _nativeFarModels.size(), range,
-                 candidateBudget);
+                 candidateBudget, sinceBuild(), cellsMs, listMs - cellsMs, activeMs - listMs);
     }
     if (_nativeFarCandidates.empty())
         return;
@@ -5668,10 +5708,25 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                     _modernObjectPreparer->Request(modelIndex);
                 else if (state == ObjectStreamPreparer::State::Ready)
                 {
+                    const auto tReady = std::chrono::steady_clock::now();
                     auto model = _modernObjectPreparer->Take(modelIndex);
+                    struct ReadyTimer
+                    {
+                        Landscape::NativeFarStats& stats;
+                        std::chrono::steady_clock::time_point began;
+                        bool counted = false;
+                        ~ReadyTimer()
+                        {
+                            if (counted)
+                                stats.readyMs += std::chrono::duration<double, std::milli>(
+                                    std::chrono::steady_clock::now() - began).count();
+                        }
+                    } readyTimer{_nativeFarStats, tReady};
                     if (model)
                     {
                         ++modelWork;
+                        ++_nativeFarStats.ready;
+                        readyTimer.counted = true;
                         std::string low(static_cast<const char*>(name));
                         for (char& c : low)
                             if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
@@ -5688,9 +5743,29 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                     if (converted.shape)
                     {
                         ++modelWork;
+                        const auto tNew = std::chrono::steady_clock::now();
+                        const bool profWas = render::GObjectAdmitProfile.active;
+                        if (!profWas)
+                        {
+                            render::GObjectAdmitProfile.Reset();
+                            render::GObjectAdmitProfile.active = true;
+                        }
                         ShapeBank::WorldModelScope worldModel(Shapes);
                         shape = Shapes.NewFromModel(name, false, true, std::move(converted.model),
                                                     nullptr, converted.shape);
+                        const double newMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tNew).count();
+                        ++_nativeFarStats.installs;
+                        _nativeFarStats.installMs += newMs;
+                        _nativeFarStats.installMaxMs = std::max(_nativeFarStats.installMaxMs, newMs);
+                        const auto& ap = render::GObjectAdmitProfile;
+                        if (newMs >= 30.0)
+                            LOG_INFO(World, "Native authored far: NewFromModel {:.1f} ms | meshBuild {:.1f} meshCreate {:.1f} section {:.1f} modelRegister {:.1f} | texHeader {:.1f} ({}) texRead {:.1f} texCreate {:.1f} winWait {:.1f} encode {:.1f} fallback {:.1f} alpha {:.1f} ({}) | meshes {} sections {} uploads {} prepared {}",
+                                     newMs, ap.meshBuildMs, ap.meshCreateMs, ap.sectionMs, ap.modelRegisterMs, ap.texHeaderLoadMs,
+                                     ap.texHeaderLoads, ap.textureReadMs, ap.textureCreateMs, ap.textureWindowWaitMs, ap.textureEncodeMs,
+                                     ap.textureFallbackMs, ap.alphaScanMs, ap.alphaScans, ap.meshes, ap.sections, ap.textureUploads,
+                                     ap.texturePrepared);
+                        if (!profWas)
+                            render::GObjectAdmitProfile.active = false;
                     }
                 }
                 else if (state == ObjectStreamPreparer::State::Failed || state == ObjectStreamPreparer::State::NotLoose)
@@ -5754,6 +5829,26 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
             epochs.data(), epochs.size(), _modernObjectPrefetchEpoch);
         if (retired)
             LOG_INFO(World, "Native authored far: retired {} unneeded prepared results", retired);
+        const double sweepEndMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        if (sweepEndMs >= 10.0)
+            LOG_INFO(World, "Native authored far: sweep end took {:.1f} ms over {} models", sweepEndMs, epochs.size());
+    }
+    {
+        const double callMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        ++_nativeFarStats.calls;
+        _nativeFarStats.callMs += callMs;
+        _nativeFarStats.callMaxMs = std::max(_nativeFarStats.callMaxMs, callMs);
+        if (callMs >= 30.0)
+            ++_nativeFarStats.slowCalls;
+        if (_nativeFarStats.calls >= 600)
+        {
+            const auto& st = _nativeFarStats;
+            LOG_INFO(World, "Native authored far stats over {} frames: {:.1f} ms total (max {:.1f}, {} >= 30 ms) | "
+                     "installs {} {:.1f} ms (max {:.1f}) | ready hand-offs {} {:.1f} ms | list rebuilds {} {:.1f} ms",
+                     st.calls, st.callMs, st.callMaxMs, st.slowCalls, st.installs, st.installMs, st.installMaxMs,
+                     st.ready, st.readyMs, st.rebuilds, st.rebuildMs);
+            _nativeFarStats = {};
+        }
     }
     if (added && (_nativeFarActive.size() / 10000 != (_nativeFarActive.size() - added) / 10000))
         LOG_INFO(World, "Native authored far progress: active={} sharedModels={} near={}",

@@ -2398,11 +2398,28 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // registration may acquire the exclusive renderer window; do it after
         // traversal so it cannot serialize the whole producer at InitDraw.
         // NextFrame still owns queue publication and GPU-side mutation ordering.
+        const auto tSwap0 = std::chrono::steady_clock::now();
         if (farResidencySupported && GLandscape && _scene.GetCamera())
             GLandscape->UpdateNativeFarResidency(_scene.GetCamera()->Position());
+        const auto tSwap1 = std::chrono::steady_clock::now();
         if (farResidencySupported && GLandscape && _scene.GetCamera())
             GEngine->UpdateNativeClutter(_scene.GetCamera()->Position());
+        const auto tSwap2 = std::chrono::steady_clock::now();
         GEngine->NextFrame();
+        // The swap phase is these three calls; a frame-trace spike in swap_ms says nothing about
+        // which. POSEIDON_SWAP_SLOW_MS (default 60, 0 = off) names the one that took the time.
+        static const double swapSlowMs = [] {
+            const char* v = std::getenv("POSEIDON_SWAP_SLOW_MS");
+            return (v != nullptr && v[0] != 0) ? std::atof(v) : 60.0;
+        }();
+        if (swapSlowMs > 0.0)
+        {
+            const auto tSwap3 = std::chrono::steady_clock::now();
+            const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+            if (ms(tSwap0, tSwap3) >= swapSlowMs)
+                LOG_INFO(World, "Slow swap: {:.1f} ms | native far {:.1f} clutter {:.1f} NextFrame {:.1f}",
+                         ms(tSwap0, tSwap3), ms(tSwap0, tSwap1), ms(tSwap1, tSwap2), ms(tSwap2, tSwap3));
+        }
     }
 
     perf.Mark(Dev::FrameProfiler::PhaseSwap);

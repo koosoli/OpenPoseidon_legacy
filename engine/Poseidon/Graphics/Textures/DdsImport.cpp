@@ -537,10 +537,21 @@ bool TextureSourceDDS::InitFromMemoryWithOptions(const void* data, size_t size, 
         // retain the existing decoding/coverage behavior.
         const bool globalOverlayData = _format == PixelFormat::BC7 && !_bc7Srgb &&
             NativeGlobalOverlayDataName(who, options.globalOverlayDataSuffix);
+        // `_mcr` (Enfusion's GlobalMCRMap) joined on 2026-10-15: its only consumer is
+        // gpu_driven.wgsl global_mcr_apply, which reads `.rgb`, and BC7 uploads UNORM like the
+        // decoded RGBA8 it replaces, so the texels sampled are the same. Declined, every one was
+        // a 4 B/texel CPU decode on the main thread -- ~10 ms each at 1024, measured as most of
+        // the 20-120 ms far-model install hitches at Durras -- and 4x the VRAM.
+        // POSEIDON_DDS_MCR_PASSTHROUGH=0 restores the decode.
+        static const bool mcrPassthrough = [] {
+            const char* value = std::getenv("POSEIDON_DDS_MCR_PASSTHROUGH");
+            return !(value && value[0] == '0');
+        }();
         const bool dataInAlpha = globalOverlayData || roughnessInAlpha || lowerWho.find("_nmo") != std::string::npos ||
                                  lowerWho.find("_nho") != std::string::npos ||
                                  lowerWho.find("_ntc") != std::string::npos ||
-                                 lowerWho.find("_mask") != std::string::npos;
+                                 lowerWho.find("_mask") != std::string::npos ||
+                                 (mcrPassthrough && lowerWho.find("_mcr") != std::string::npos);
         // One decode, of the SMALLEST level -- typically 4x4 or 8x8. It answers two
         // questions the block data cannot: the average colour (the distant-LOD stand-in,
         // which AverageOfSmallest returns black for on a block format), and whether the
