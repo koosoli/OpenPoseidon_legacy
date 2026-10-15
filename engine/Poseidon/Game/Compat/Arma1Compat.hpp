@@ -75,6 +75,11 @@ RString FallbackCwaClass(const RString& a1Name);
 // OP_A1_ARMED_CARS=0 turns it off.
 RString Arma1ArmedCarCarrier(const RString& a1Name, const RString& cwaClass);
 
+// Arma 1 vehicles get their own gunner weapons, rebuilt as generated A1v_<weapon> classes on
+// CWA weapons of their kind (rounds, rate of fire, muzzle velocity, sound and name from Arma
+// 1; ammunition CWA's). Cars, boats and static weapons; OP_A1_VEHICLE_WEAPONS=0 turns it off.
+bool Arma1VehicleWeapons();
+
 // An Arma 1 binarised config FILE (mission.sqm, description.ext, ...) as config
 // text the engine's parser reads. False when the file is not in Arma 1's layout
 // (OFP/CWA's own binarised files keep their reader). Works without --arma1.
