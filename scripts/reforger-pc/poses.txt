@@ -4,6 +4,7 @@
 #   altitude: metres above the terrain, or absolute when it ends in A
 #   azimuth: compass degrees (0 = north, 90 = east); elevation: degrees above the horizon
 meadowNear   4650.0  6150.0  1.6     90.0   -8.0
+meadowOpen   5250.0  5150.0  1.7     45.0   -4.0
 meadowWide   4600.0  6100.0  8.0     60.0   -6.0
 fieldEdge    4950.0  4550.0  1.8     75.0    0.0
 forestIn     5300.0  4700.0  1.7      0.0    0.0
