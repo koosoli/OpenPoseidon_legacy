@@ -1436,9 +1436,13 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
                         if (tex->IsTransparent())
                             spec |= IsTransparent;
                     }
+                    // Operation Arrowhead's plants name theirs *_can.paa (alpha, normal-mapped):
+                    // Takistan's bushes still drew as green cards under the *_ca rule alone.
                     const char* name = tex->Name();
                     const size_t len = name ? strlen(name) : 0;
-                    if (len > 7 && !strcmpi(name + len - 7, "_ca.paa") && !(spec & (IsAlpha | IsTransparent)))
+                    const bool alphaNamed = (len > 7 && !strcmpi(name + len - 7, "_ca.paa")) ||
+                                            (len > 8 && !strcmpi(name + len - 8, "_can.paa"));
+                    if (alphaNamed && !(spec & (IsAlpha | IsTransparent)))
                         spec |= IsTransparent;
                     shapeSections[s].properties.SetSpecial(spec);
                 }
