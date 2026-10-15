@@ -1,0 +1,13 @@
+showcases\Showcase_Infantry.Stratis
+showcases\Showcase_Vehicles.Stratis
+showcases\Showcase_Helicopters.Stratis
+Showcases\Showcase_Combined_Arms.Stratis
+Showcases\Showcase_Tanks.Altis
+Showcases\Showcase_Marksman.Altis
+Showcases\Showcase_EndGame.Tanoa
+showcases\showcase_jets.altis
+Showcases\Showcase_LawsOfWar.VR
+Scenarios\Arsenal.VR
+MPScenarios\MP_EscapeFromMalden.Malden
+Missions\Intro1.Enoch
+MPScenarios\MP_ZR_8_Karts02.Stratis
