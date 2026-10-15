@@ -2256,7 +2256,29 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
         params[0] = std::clamp(mat.Number("BladesCount", 3.0f), 1.0f, 6.0f);
         params[1] = mat.Number("Zenith", 15.0f);
         params[2] = mat.Number("ZenithRandomOffset", 15.0f);
-        params[3] = crop ? std::clamp(mat.Number("Height", lookHeight), 0.05f, 3.0f) : lookHeight;
+        // RFG-167: lawns are not meadows. Everon's yards and village greens are Grass_01/Grass_02
+        // (GrassLawn_01 albedo; PlantMat cp_grass_01/02, whose clutter is clover, plantain and
+        // hawkbit, nothing tall), and in Reforger they read as a short carpet with low flowers --
+        // the parity poses houseFar and pond1 showed ours knee-high. Their cards take the lawn look
+        // (WGR_NATIVE_LAWN_HEIGHT, default 0.22 m; 0 = the meadow look as before).
+        static const float lawnHeight = []
+        {
+            const char* v = std::getenv("WGR_NATIVE_LAWN_HEIGHT");
+            const float f = v != nullptr ? std::strtof(v, nullptr) : 0.22f;
+            return std::clamp(f, 0.0f, 3.0f);
+        }();
+        const auto lowerName = [](std::string n)
+        {
+            for (char& c : n)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return n;
+        };
+        const std::string plantMatLower = lowerName(plantMat);
+        const bool lawn = !crop && lawnHeight > 0.0f &&
+                          (plantMatLower.find("cp_grass_01") != std::string::npos ||
+                           plantMatLower.find("cp_grass_02") != std::string::npos);
+        params[3] = crop ? std::clamp(mat.Number("Height", lookHeight), 0.05f, 3.0f)
+                         : (lawn ? std::min(lawnHeight, lookHeight) : lookHeight);
         params[4] = std::clamp(mat.Number("HeightRandomOffset", 0.5f), 0.0f, 1.0f);
         // RFG-152: `Plants` against Reforger itself (Workbench, cp_wheat_01 overridden to Plants 2 at
         // a matched pose): our field at its authored Plants 7 reads as Reforger's at ~2, so one of our
