@@ -230,12 +230,25 @@ if ($job.EXTRA -ne '') { $al += $job.EXTRA.Split(' ') }
 ($al -join ' ') | Set-Content (Join-Path $out 'args.txt')
 $limit = [int]$job.FIRST + $poses.Count * ([int]$job.SETTLE + 4) + 900
 St "launch $($poses.Count) poses, limit $limit s -> $out"
-$sw = [Diagnostics.Stopwatch]::StartNew()
-$proc = Start-Process -FilePath $exe -ArgumentList $al -WorkingDirectory $game -PassThru -RedirectStandardError $err
-$null = $proc.Handle
-$timedOut = -not $proc.WaitForExit($limit * 1000)
-if ($timedOut) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue; Start-Sleep 2 }
-$code = if ($timedOut) { 'TIMEOUT' } else { $proc.ExitCode }
+# A start that dies within seconds is tried up to twice more (2026-10-15: 'wgpu renderer creation
+# panicked: failed printing to stderr: Zugriff verweigert' -- the redirected stderr file; the same
+# failure the Arma 3 harness retries). Each try writes its own stderr file.
+for ($try = 1; $try -le 3; $try++) {
+  $errTry = if ($try -eq 1) { $err } else { Join-Path $out "stderr.try$try.txt" }
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  $proc = Start-Process -FilePath $exe -ArgumentList $al -WorkingDirectory $game -PassThru -RedirectStandardError $errTry
+  $null = $proc.Handle
+  $timedOut = -not $proc.WaitForExit($limit * 1000)
+  if ($timedOut) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue; Start-Sleep 2 }
+  $code = if ($timedOut) { 'TIMEOUT' } else { $proc.ExitCode }
+  if (-not $timedOut -and $code -ne 0 -and $sw.Elapsed.TotalSeconds -lt 30 -and $try -lt 3) {
+    St "  exit $code after $([int]$sw.Elapsed.TotalSeconds) s, trying again"
+    Copy-Item $log "$log.try$try" -ErrorAction SilentlyContinue
+    Start-Sleep 10
+    continue
+  }
+  break
+}
 if ($job.KEEPBMP -ne '1') { Get-ChildItem $out -Filter '*.bmp' | Remove-Item -ErrorAction SilentlyContinue }
 "exit=$code seconds=$([int]$sw.Elapsed.TotalSeconds) commit=$commit" | Set-Content (Join-Path $out 'result.txt')
 St "DONE exit $code after $([int]$sw.Elapsed.TotalSeconds) s -> $out"
