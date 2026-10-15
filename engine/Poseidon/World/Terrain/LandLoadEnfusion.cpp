@@ -4158,7 +4158,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
     }
     {
         // RFG-096: the second UV set carries the MatPBRMulti mask; say what it looked like.
-        const auto& uv = Poseidon::Asset::Formats::Enfusion::GXobUvCensus();
+        auto& uv = Poseidon::Asset::Formats::Enfusion::GXobUvCensus();
+        std::lock_guard<std::mutex> censusLock(uv.mutex); // streaming workers may still be converting
         LOG_INFO(World,
                  "Enfusion native load: UV set 2 census -- {} parts carry one, {} outside [0,1], {} degenerate (all "
                  "corners one texel), first outside: {}",

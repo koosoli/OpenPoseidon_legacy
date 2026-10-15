@@ -43,6 +43,10 @@ namespace Poseidon::Asset::Formats::Enfusion
 //! RFG-096: what the second UV set of every converted part looked like (see XobConvert).
 struct XobUvCensus
 {
+    // ConvertXob runs on the load's task pool and on the streaming workers at the same time.
+    // The strings and the vector below are written from there, and two unlocked writers to one
+    // std::string corrupt the heap (a load crash in mimalloc under ConvertXob, 2026-10-15).
+    std::mutex  mutex;
     size_t      partsWithSecond = 0;
     size_t      partsOutOfRange = 0;
     size_t      partsDegenerate = 0;
@@ -734,6 +738,7 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
             if (faceUvT.active)
             {
                 XobUvCensus& c = GXobUvCensus();
+                std::lock_guard<std::mutex> censusLock(c.mutex);
                 ++c.partsFaceUvScaled;
                 if (c.firstFaceUvScaled.empty())
                 {
@@ -764,6 +769,7 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                 }
                 const float span = std::max(u1 - u0, v1 - v0);
                 XobUvCensus& c = GXobUvCensus();
+                std::lock_guard<std::mutex> censusLock(c.mutex);
                 ++c.set0Parts;
                 if (span <= 1.01f) ++c.set0SpanLe1;
                 else if (span <= 8.0f) ++c.set0SpanLe8;
@@ -792,6 +798,7 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                     v0 = std::min(v0, uv.v); v1 = std::max(v1, uv.v);
                 }
                 XobUvCensus& c = GXobUvCensus();
+                std::lock_guard<std::mutex> censusLock(c.mutex);
                 ++c.partsWithSecond;
                 if (u0 < -0.01f || v0 < -0.01f || u1 > 1.01f || v1 > 1.01f)
                     ++c.partsOutOfRange;
