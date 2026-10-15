@@ -83,18 +83,18 @@ const std::vector<fs::path>& Roots()
         size_t start = 0;
         while (start <= configured.size() && !configured.empty())
         {
-            const size_t end = generation == 2 ? configured.size()
-                                               : std::min(configured.find(';', start), configured.size());
+            // ';' joins the parts of a data package (Arma 1's and Arma 2's ALDP sets ship one game as
+            // several folders of PBOs); the ARMA CONTENT browser passes them that way.
+            const size_t end = std::min(configured.find(';', start), configured.size());
             const std::string item = configured.substr(start, end - start);
             start = end + 1;
             if (item.empty())
                 continue;
             std::error_code ec;
             const fs::path candidate = fs::absolute(fs::path(item), ec);
-            const bool ok = !ec && (fs::is_directory(candidate / "AddOns", ec) ||
+            const bool ok = !ec && (fs::is_directory(candidate / "AddOns", ec) || HasPbos(candidate) ||
                                     (generation != 2 && (fs::is_directory(candidate / "Campaigns", ec) ||
-                                                         fs::is_directory(candidate / "Missions", ec) ||
-                                                         HasPbos(candidate))));
+                                                         fs::is_directory(candidate / "Missions", ec))));
             if (ok)
                 roots.push_back(candidate);
             else
@@ -145,8 +145,9 @@ const std::vector<fs::path>& Arma2Roots()
     if (resolved)
         return roots;
     resolved = true;
-    roots.push_back(RootPath());
-    if (!OaRootPath().empty() && OaRootPath() != RootPath())
+    // Every --arma2 part (a data package's folders), then the Arrowhead folders.
+    roots = Roots();
+    if (!OaRootPath().empty() && std::find(roots.begin(), roots.end(), OaRootPath()) == roots.end())
         roots.push_back(OaRootPath());
     // OP_A2_ONLY=1: plain Arma 2, without the Operation Arrowhead folders next to it.
     if (const char* only = std::getenv("OP_A2_ONLY"); only && *only == '1')
@@ -174,7 +175,8 @@ const std::vector<fs::path>& Arma2Roots()
 // are copy-protected ("hprotect") and only the original game unlocks them.
 std::vector<fs::path> Arma2AddonFolders(const fs::path& r)
 {
-    std::vector<fs::path> out{r / "AddOns"};
+    // A data package part keeps its PBOs at its top level (ALDP_A2_PBOs_*); an install in AddOns.
+    std::vector<fs::path> out{r, r / "AddOns"};
     for (const char* dlc : {"Expansion", "BAF", "PMC", "ACR"})
         out.push_back(r / dlc / "AddOns");
     return out;
