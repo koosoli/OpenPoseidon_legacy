@@ -93,7 +93,49 @@ Only under `--arma3` (OFP, Arma 1 and Arma 2 missions see none of it):
 - **740 presentation-only commands** (UI controls, Zeus, Eden, cosmetics) are accepted with
   a neutral result, their arity read from the scripts of the install.
 
-## Runtime status
+## Runtime status (2026-10-15)
 
-The engine build of `5989082` compiles (Windows CI run 38616228687, 1 h 7 min cold).
-Not yet played in the engine: see the open items in the coordination doc.
+Played on the owner's PC with the CI builds (rolling pre-release `arma3-ci`), installed into
+`_OpenPoseidon-Arma3\bin` and run by `scripts/arma3-pc/go.ps1` against the 13 missions of
+`missions_smoke.txt` (one per world and DLC: Stratis, Altis, Tanoa, VR, Malden, Livonia,
+Jets, Tanks, Marksmen, Laws of War, Apex, Karts, Contact), 40 s each, first- and
+third-person screenshots at 8 s and 14 s.
+
+| build | result |
+|-------|--------|
+| `59b5455` | 13/13 missions load, play and quit cleanly (exit 0) |
+| `e51a102` | 10/13; the other three lost the renderer at creation to `failed printing to stderr: Zugriff verweigert` (the harness's redirected stderr file) -- the harness now retries such a start |
+
+What the runs found, and what changed for it:
+
+- **Mount time.** 521 archives took 59 s to mount (one `ReadFile` per header byte); a 64 KB
+  header buffer brings it to about 4 s.
+- **Config.** A module class whose arguments are named like its values (`faction: faction`)
+  ended the merged config in the middle of CfgVehicles; quoted array strings that look like
+  `(...)` were evaluated. Both fixed in `ParamFile`.
+- **Moves.** Arma 3's binarised moves (`BMTR` 5) carry the move's events (`StepSound`, ...)
+  after the bone names; without reading them every move failed ("Binarised animation could
+  not be read", 2,211 per run). Then the soldiers stood posed, but knotted: arms through the
+  body, legs wound round each other. The moves are read like Arma 2's (each bone local to its
+  parent, a rotation about its rest joint, posing the turned model), but they pose the
+  **source** model, and ODOL 73's reader dropped the binariser's bounding centre, so the man
+  was posed around a point 0.3 m aside, 0.4 m behind and 0.8 m below his hips. Measured
+  offline with the repo's own ODOL 73 and BMTR readers on `b_soldier_01` (bounding centre
+  0.305, 0.836, -0.401) and four moves, as the mean stretch of the posed mesh's edges:
+  4.3-4.9 around the stored centre, 0.08-0.12 around the bounding centre (Arma 2's soldiers:
+  0.04-0.09). Taking the bones as model space instead measures 0.22-0.28, so the Arma 2
+  reading stays.
+- **Dressing.** An Arma 3 man is dressed by his class: `linkedItems[]` (helmet: ItemInfo
+  type 605, vest: 701, drawn with `uniformModel`) and `backpack`; the model only carries
+  placeholder proxies at its origin, without bones. The head proxy (`heads\bysta`) is drawn
+  with `CfgHeads >> Default_A3`, the gear proxies with the class's items, held on the head
+  (helmet, goggles) and the upper back (vest, pack); uniforms take their
+  `hiddenSelectionsTextures`.
+- **Scripts.** Function headers included as `..\paramsCheck.inc`, `0 = ...` init lines,
+  list-box/list-n-box control commands, `animate` with three elements, `lock="LOCKEDPLAYER"`,
+  a backslash ending a line in `BIS_fnc_moduleInit`, `ammo` on a CWA stand-in vehicle
+  (division by zero in the helicopter showcase).
+- **Worlds.** The generated world classes keep the Arma 3 world's latitude and longitude
+  (the showcases start at dawn and at night; Everon's sun is not Stratis's).
+- **Ships.** The carrier and the destroyer assemble themselves from their init handler
+  (multi-part bases).
