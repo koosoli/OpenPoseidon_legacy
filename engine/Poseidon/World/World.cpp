@@ -589,7 +589,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
         {
             if (person)
             {
-                enableOptics = camAI->GetOpticsModel(person) != nullptr;
+                enableOptics = camAI->GetOpticsModel(person) != nullptr || camAI->LooksThroughSights(person);
                 forceOptics = camAI->GetForceOptics(person);
             }
         }
@@ -1810,6 +1810,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // normal soldier fov is about 0.85
         float cNear = 0.067f / fov;
         saturate(cNear, 0.07f, 0.2f);
+        // Through 3D sights the rear sight sits a few centimetres from the eye; a zoomed
+        // view's 0.2 m near plane would cut the sights away.
+        if (_camType == CamGunner && camAI && camAI->LooksThroughSights(PlayerOn()))
+            cNear = 0.07f;
         // FAR-001: the far plane and the fog range were literally this one
         // expression -- `GetFogMaxRange()` was handed straight in as `cFar`, which
         // is why an aircraft above ~900 m flew over a world that had stopped being

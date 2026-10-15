@@ -812,6 +812,24 @@ Vector3 Man::GetWeaponRelDirection(int weapon) const
 
 Matrix4 Man::GetWeaponRelTransform(int weapon) const
 {
+    // Arma 2 3D sights: from the weapon model's "eye" memory point along the barrel, with
+    // the weapon placed exactly as the first-person LOD draws it, so the camera lines up
+    // with the sights on screen. The proxy below is the memory LOD's placeholder, whose
+    // "pilot" point no Arma weapon defines.
+    if (weapon == _currentWeapon && Optics3DSelected())
+    {
+        const MagazineSlot& slot = GetMagazineSlot(weapon);
+        Matrix4 held;
+        if (HeldWeaponTransform(Type()->_insideView, slot._weapon, held))
+        {
+            Vector3 dir = held.Rotate(slot._muzzle->_muzzleDir);
+            dir.Normalize();
+            Matrix4 trans;
+            trans.SetDirectionAndUp(dir, held.DirectionUp());
+            trans.SetPosition(held.FastTransform(slot._weapon->_eyePos));
+            return trans;
+        }
+    }
     if (weapon >= 0 && weapon < NMagazineSlots())
     {
         int weaponIndex = -1;

@@ -998,9 +998,10 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
                         EntityAI* ai = dyn_cast<EntityAI>(GWorld->CameraOn());
                         Person* player = GWorld->PlayerOn();
                         LODShapeWithShadow* optics = ai && player ? ai->GetOpticsModel(player) : nullptr;
-                        LOG_INFO(Mission, "Arma 2: optics shot: camera type {}, optics model {}",
+                        LOG_INFO(Mission, "Arma 2: optics shot: camera type {}, optics model {}, 3D sights {}",
                                  static_cast<int>(GWorld->GetCameraType()),
-                                 optics ? (const char*)optics->GetName() : "(none)");
+                                 optics ? (const char*)optics->GetName() : "(none)",
+                                 ai && player && ai->LooksThroughSights(player) ? "yes" : "no");
                     }
                     GEngine->Screenshot((shot + "_optic.png").c_str());
                     shotStep = 5;

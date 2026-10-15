@@ -749,6 +749,9 @@ protected:
 	virtual PackedColor GetOpticsColor(Person *person);
 	//! Check if optics must be used
 	virtual bool GetForceOptics(Person *person) const;
+	//! The aiming view looks through the weapon model's own 3D sights (Arma 2's
+	//! modelOptics "-") instead of over a 2D optics overlay
+	virtual bool LooksThroughSights(Person *person) const {return false;}
 
 	//! Get texture that is currently used to draw flag
 	//! This function is implemented directly in Flag

@@ -1604,6 +1604,26 @@ RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
                 text += "\t\tmagazines[]={\"" + std::string(cwaWeapon.Data()) + "\"};\r\n";
                 break;
             }
+    // Arma 2's iron and holographic sights are part of the weapon model (modelOptics "-"):
+    // the aiming view looks along the weapon from its model's "eye" point
+    // (MuzzleType::_optics3D) and opens at Arma 2's field of view, 0.5 for a rifle. The
+    // CWA weapon's 2D sight stays inherited as the fallback for a model without the point.
+    // OP_A2_SIGHTS=0 keeps the CWA sight throughout.
+    static const bool a2Sights = [] {
+        const char* e = std::getenv("OP_A2_SIGHTS");
+        return !(e && *e == '0');
+    }();
+    if (a2Sights && StringValue(*a2, "modelOptics") == "-")
+    {
+        text += "\t\toptics3D=1;\r\n";
+        for (const char* key : {"opticsZoomMin", "opticsZoomMax", "opticsZoomInit", "distanceZoomMin", "distanceZoomMax"})
+            if (const ParamEntry* e = a2->FindEntry(key); e && !e->IsClass() && !e->IsArray())
+            {
+                char line[96];
+                std::snprintf(line, sizeof(line), "\t\t%s=%g;\r\n", key, (float)*e);
+                text += line;
+            }
+    }
     // A scoped Arma 2 weapon keeps the CWA weapon's sight for now. Arma 2's 2D scopes
     // (modelOptics "\ca\weapons\2Dscope_*") are authored for its own screen mapping:
     // drawn by CWA's Draw2D the M107's 2dscope_mildot_14 came out as a small box in a

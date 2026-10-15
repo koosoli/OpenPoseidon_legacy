@@ -354,6 +354,39 @@ void ReportUnweightedProxy(const LODShapeWithShadow* shape, int level, const Pro
 }
 } // namespace
 
+bool Man::HeldWeaponTransform(int level, const WeaponType* weapon, Matrix4& out) const
+{
+    if (!weapon || !weapon->_model || level < 0 || level >= _shape->NLevels())
+        return false;
+    const ManType* type = Type();
+    const int wantMat = (weapon->_weaponType & MaskSlotPrimary)     ? type->_gunMatIndex
+                        : (weapon->_weaponType & MaskSlotSecondary) ? type->_rpgMatIndex
+                                                                    : -1;
+    if (wantMat < 0)
+        return false;
+    const Shape* sShape = _shape->LevelOpaque(level);
+    const AnimationRTWeights& wgt = type->GetWeights()[level];
+    for (int i = 0; i < sShape->NProxies(); i++)
+    {
+        const ProxyObject& proxy = sShape->Proxy(i);
+        if (proxy.selection < 0 || proxy.selection >= sShape->NNamedSel())
+            continue;
+        const NamedSelection& sel = sShape->NamedSel(proxy.selection);
+        if (sel.Size() <= 0)
+            continue;
+        const int point = sel[0];
+        if (point < 0 || point >= wgt.Size() || wgt[point].Size() <= 0 || wgt[point][0].GetSel() != wantMat)
+            continue;
+        // DrawProxies' chain for this proxy, less the man's world transform
+        Matrix4 t = AnimateProxyMatrix(level, proxy) * HeldModelPlaceholderUndo(proxy);
+        if (weapon->_model->Remarks() & REM_REVERSED)
+            t = t * Matrix4(MScale, -1, +1, -1);
+        out = t * HeldModelSourceOrigin(weapon->_model);
+        return true;
+    }
+    return false;
+}
+
 void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, const Matrix4& invTransform,
                       float dist2, float z2, const LightList& lights)
 {
@@ -796,7 +829,9 @@ void Man::Draw(int level, ClipFlags clipFlags, const FrameBase& pos)
         }
     }
 #endif
-    if (GWorld->GetCameraType() == CamGunner && GWorld->CameraOn() == this)
+    // Through Arma 2 3D sights the soldier is drawn as in first person -- the camera sits
+    // at the weapon's "eye" -- rather than replaced by the 2D optics overlay.
+    if (GWorld->GetCameraType() == CamGunner && GWorld->CameraOn() == this && !Optics3DSelected())
     {
         if (_currentWeapon >= 0 && _currentWeapon < NMagazineSlots())
         {
@@ -934,6 +969,22 @@ bool Man::IsAbleToStand() const
 bool Man::IsAbleToFire() const
 {
     return true;
+}
+
+bool Man::Optics3DSelected() const
+{
+    if (_currentWeapon < 0 || _currentWeapon >= NMagazineSlots() || !EnableOptics())
+        return false;
+    if (LauncherSelected() && !EnableMissile()) // as GetOpticsModel
+        return false;
+    const MagazineSlot& slot = GetMagazineSlot(_currentWeapon);
+    return slot._muzzle && slot._muzzle->_optics3D && slot._weapon && slot._weapon->_model &&
+           slot._weapon->_hasEyePos;
+}
+
+bool Man::LooksThroughSights(Person* person) const
+{
+    return person == this && Optics3DSelected();
 }
 
 LODShapeWithShadow* Man::GetOpticsModel(Person* person)

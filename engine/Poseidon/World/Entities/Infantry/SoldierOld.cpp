@@ -3086,6 +3086,11 @@ void Man::InitVirtual(CameraType camType, float& heading, float& dive, float& fo
     {
         case CamGunner:
             fov = 0.21f;
+            // Arma 2 weapons name the field of view their sights open at
+            if (_currentWeapon >= 0 && _currentWeapon < NMagazineSlots())
+                if (const MuzzleType* muzzle = GetMagazineSlot(_currentWeapon)._muzzle;
+                    muzzle && muzzle->_opticsZoomInit > 0)
+                    fov = muzzle->_opticsZoomInit;
             dive = 0;
             break;
     }

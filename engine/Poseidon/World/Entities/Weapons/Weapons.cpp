@@ -492,6 +492,12 @@ void MuzzleType::Init(const ParamEntry& cls, const WeaponType* weapon)
 
     _opticsFlare = cls >> "opticsFlare";
     _forceOptics = cls >> "forceOptics";
+    {
+        const ParamEntry* optics3D = cls.FindEntry("optics3D");
+        _optics3D = optics3D && (int)*optics3D != 0;
+        const ParamEntry* zoomInit = cls.FindEntry("opticsZoomInit");
+        _opticsZoomInit = zoomInit ? (float)*zoomInit : -1.0f;
+    }
 
     _muzzlePos = VZero;
     _muzzleDir = VForward;
@@ -619,6 +625,12 @@ void WeaponType::InitShape() const
             _model->SetAutoCenter(false);
             _model->CalculateMinMax();
             _animFire.Init(_model, "zasleh", nullptr);
+            _hasEyePos = false;
+            if (Shape* mem = _model->MemoryLevel(); mem && mem->FindNamedSel("eye") >= 0)
+            {
+                _eyePos = mem->NamedPosition("eye");
+                _hasEyePos = true;
+            }
 
             if (_parClass->FindEntry("revolving") && _parClass->FindEntry("revolvingAxis"))
             {
