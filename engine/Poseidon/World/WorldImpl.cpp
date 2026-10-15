@@ -1568,6 +1568,22 @@ void World::AdjustSubdivisionGrid(float gridSize)
     LOG_DEBUG(World, "Terrain subdivision wanted: {} ({:.3f})", coefLogInt, coefLog);
     int currentLog = TerrainRangeLog - LandRangeLog;
     int terrainChange = coefLogInt - currentLog;
+    // A native Enfusion world arrives at its own terrain grid (Everon: 3.125 m, which matches
+    // Reforger's GetSurfaceY to 5 mm), and everything placed at load was fitted to THAT surface:
+    // the road strips are draped on it, terrain-relative objects stand on it. Coarsening it to
+    // the Terrain Detail tier afterwards (Ultra = 6.25 m) lifted convex cells over the roads --
+    // "streets partly in the ground" -- and sank or floated what stood on them. Finer stays
+    // allowed. POSEIDON_NATIVE_TERRAIN_KEEP=0 restores the tier's coarser grid.
+    static const bool keepNative = [] {
+        const char* value = std::getenv("POSEIDON_NATIVE_TERRAIN_KEEP");
+        return !(value && value[0] == '0');
+    }();
+    if (terrainChange < 0 && keepNative && GLandscape && GLandscape->GetEnfusionSurfaceCount() > 0)
+    {
+        LOG_INFO(World, "Terrain grid: native world keeps its {} m grid (Terrain Detail asked for {} m; "
+                 "POSEIDON_NATIVE_TERRAIN_KEEP=0 = coarsen)", LandGrid / static_cast<float>(1 << currentLog), gridSize);
+        terrainChange = 0;
+    }
     if (requestedLog != coefLogInt && terrainChange != 0)
         LOG_INFO(World, "Terrain refinement capped for {} land cells: requested {}m, effective {}m",
                  LandRange, gridSize, LandGrid / static_cast<float>(1 << coefLogInt));

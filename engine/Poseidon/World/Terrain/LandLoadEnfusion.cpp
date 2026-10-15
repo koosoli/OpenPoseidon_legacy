@@ -2368,7 +2368,11 @@ std::shared_ptr<Poseidon::Model::Model> BuildRoadModel(const ResolvedRoad& road,
     // texture) would otherwise draw with the white untextured fallback across metres of
     // landscape: a flat dirt-grey constant through `enfc|` (RFG-039) instead.
     std::string texture = road.texture.empty() ? "enfc|0.40,0.35,0.29" : road.texture;
-    if (!road.texture.empty() && !road.opacity.empty())
+    static const bool roadOpacity = [] {
+        const char* value = std::getenv("POSEIDON_ROAD_OPACITY");
+        return !(value && value[0] == '0');
+    }();
+    if (!road.texture.empty() && !road.opacity.empty() && roadOpacity)
         texture = "enfa|" + road.opacity + "|" + texture;
     if (!road.texture.empty() && road.tinted && Poseidon::Enfusion::LayerTintEnabled())
         texture = Poseidon::Enfusion::MakeLayerTintName(road.tint, texture);
