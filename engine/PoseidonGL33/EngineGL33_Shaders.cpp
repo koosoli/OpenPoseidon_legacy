@@ -317,7 +317,19 @@ void main() {
                 vec3 rowX = vec3(cascadeVP[c][0][0], cascadeVP[c][1][0], cascadeVP[c][2][0]);
                 float texelWorld = 2.0 * ts / max(length(rowX), 1e-6);
                 vec3 nrm = dot(vWorldNormal, vWorldNormal) > 1e-6 ? normalize(vWorldNormal) : vec3(0.0);
-                vec4 cp = cascadeVP[c] * vec4(vWorldRel + nrm * (shadowCtl.y * texelWorld), 1.0);
+                float nOff = shadowCtl.y >= 0.0 ? shadowCtl.y : -shadowCtl.y - 1.0;
+                vec4 cp = cascadeVP[c] * vec4(vWorldRel + nrm * (nOff * texelWorld), 1.0);
+                // A receiver turned from the light (its normal along the light's view
+                // direction) lies in its own shadow, and its own back face is what the
+                // depth pass stored -- within a texel's depth slope of it, which at a
+                // grazing angle beats any bias or offset (the stripes stayed with 1.5
+                // texels, focus run 12). So for such a receiver a stored surface up to
+                // ~1 m BEHIND it shadows it too. One with nothing close behind (a
+                // hillside turned from the sun, no caster) stays lit as before.
+                // shadowCtl.y < 0 turns this off.
+                vec3 rowZ = vec3(cascadeVP[c][0][2], cascadeVP[c][1][2], cascadeVP[c][2][2]);
+                float zPerM = length(rowZ);
+                float selfTol = (shadowCtl.y >= 0.0 && dot(nrm, rowZ) > 0.05 * zPerM) ? 0.75 * zPerM : -2.0;
                 vec3 sc = cp.xyz / cp.w;
                 vec2 suv = sc.xy * 0.5 + 0.5;
                 if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0) {
@@ -325,7 +337,10 @@ void main() {
                     float lit = 0.0;
                     for (int dy = -1; dy <= 1; ++dy)
                         for (int dx = -1; dx <= 1; ++dx)
-                            lit += (sc.z - bias > texture(shadowMap, vec3(suv + vec2(float(dx), float(dy)) * ts, float(c))).r) ? 0.0 : 1.0;
+                        {
+                            float stored = texture(shadowMap, vec3(suv + vec2(float(dx), float(dy)) * ts, float(c))).r;
+                            lit += (sc.z - bias > stored || stored < sc.z + selfTol) ? 0.0 : 1.0;
+                        }
                     litSum += w * (lit / 9.0);
                     wSum += w;
                 }
@@ -474,7 +489,19 @@ void main() {
                 vec3 rowX = vec3(cascadeVP[c][0][0], cascadeVP[c][1][0], cascadeVP[c][2][0]);
                 float texelWorld = 2.0 * ts / max(length(rowX), 1e-6);
                 vec3 nrm = dot(vWorldNormal, vWorldNormal) > 1e-6 ? normalize(vWorldNormal) : vec3(0.0);
-                vec4 cp = cascadeVP[c] * vec4(vWorldRel + nrm * (shadowCtl.y * texelWorld), 1.0);
+                float nOff = shadowCtl.y >= 0.0 ? shadowCtl.y : -shadowCtl.y - 1.0;
+                vec4 cp = cascadeVP[c] * vec4(vWorldRel + nrm * (nOff * texelWorld), 1.0);
+                // A receiver turned from the light (its normal along the light's view
+                // direction) lies in its own shadow, and its own back face is what the
+                // depth pass stored -- within a texel's depth slope of it, which at a
+                // grazing angle beats any bias or offset (the stripes stayed with 1.5
+                // texels, focus run 12). So for such a receiver a stored surface up to
+                // ~1 m BEHIND it shadows it too. One with nothing close behind (a
+                // hillside turned from the sun, no caster) stays lit as before.
+                // shadowCtl.y < 0 turns this off.
+                vec3 rowZ = vec3(cascadeVP[c][0][2], cascadeVP[c][1][2], cascadeVP[c][2][2]);
+                float zPerM = length(rowZ);
+                float selfTol = (shadowCtl.y >= 0.0 && dot(nrm, rowZ) > 0.05 * zPerM) ? 0.75 * zPerM : -2.0;
                 vec3 sc = cp.xyz / cp.w;
                 vec2 suv = sc.xy * 0.5 + 0.5;
                 if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0) {
@@ -482,7 +509,10 @@ void main() {
                     float lit = 0.0;
                     for (int dy = -1; dy <= 1; ++dy)
                         for (int dx = -1; dx <= 1; ++dx)
-                            lit += (sc.z - bias > texture(shadowMap, vec3(suv + vec2(float(dx), float(dy)) * ts, float(c))).r) ? 0.0 : 1.0;
+                        {
+                            float stored = texture(shadowMap, vec3(suv + vec2(float(dx), float(dy)) * ts, float(c))).r;
+                            lit += (sc.z - bias > stored || stored < sc.z + selfTol) ? 0.0 : 1.0;
+                        }
                     litSum += w * (lit / 9.0);
                     wSum += w;
                 }
@@ -633,7 +663,19 @@ void main() {
                 vec3 rowX = vec3(cascadeVP[c][0][0], cascadeVP[c][1][0], cascadeVP[c][2][0]);
                 float texelWorld = 2.0 * ts / max(length(rowX), 1e-6);
                 vec3 nrm = dot(vWorldNormal, vWorldNormal) > 1e-6 ? normalize(vWorldNormal) : vec3(0.0);
-                vec4 cp = cascadeVP[c] * vec4(vWorldRel + nrm * (shadowCtl.y * texelWorld), 1.0);
+                float nOff = shadowCtl.y >= 0.0 ? shadowCtl.y : -shadowCtl.y - 1.0;
+                vec4 cp = cascadeVP[c] * vec4(vWorldRel + nrm * (nOff * texelWorld), 1.0);
+                // A receiver turned from the light (its normal along the light's view
+                // direction) lies in its own shadow, and its own back face is what the
+                // depth pass stored -- within a texel's depth slope of it, which at a
+                // grazing angle beats any bias or offset (the stripes stayed with 1.5
+                // texels, focus run 12). So for such a receiver a stored surface up to
+                // ~1 m BEHIND it shadows it too. One with nothing close behind (a
+                // hillside turned from the sun, no caster) stays lit as before.
+                // shadowCtl.y < 0 turns this off.
+                vec3 rowZ = vec3(cascadeVP[c][0][2], cascadeVP[c][1][2], cascadeVP[c][2][2]);
+                float zPerM = length(rowZ);
+                float selfTol = (shadowCtl.y >= 0.0 && dot(nrm, rowZ) > 0.05 * zPerM) ? 0.75 * zPerM : -2.0;
                 vec3 sc = cp.xyz / cp.w;
                 vec2 suv = sc.xy * 0.5 + 0.5;
                 if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0) {
@@ -641,7 +683,10 @@ void main() {
                     float lit = 0.0;
                     for (int dy = -1; dy <= 1; ++dy)
                         for (int dx = -1; dx <= 1; ++dx)
-                            lit += (sc.z - bias > texture(shadowMap, vec3(suv + vec2(float(dx), float(dy)) * ts, float(c))).r) ? 0.0 : 1.0;
+                        {
+                            float stored = texture(shadowMap, vec3(suv + vec2(float(dx), float(dy)) * ts, float(c))).r;
+                            lit += (sc.z - bias > stored || stored < sc.z + selfTol) ? 0.0 : 1.0;
+                        }
                     litSum += w * (lit / 9.0);
                     wSum += w;
                 }
@@ -1185,7 +1230,12 @@ void EngineGL33::UpdateShadowMapLitState()
             const float parsed = v && *v ? static_cast<float>(std::atof(v)) : 1.5f;
             return parsed >= 0.0f && parsed <= 8.0f ? parsed : 1.5f;
         }();
-        ctl[1] = normalOffset;
+        // POSEIDON_GL33_SHADOW_SELF=0 turns the turned-from-the-light rule off (sign).
+        static const bool selfRule = [] {
+            const char* v = std::getenv("POSEIDON_GL33_SHADOW_SELF");
+            return !(v && *v == '0');
+        }();
+        ctl[1] = selfRule ? normalOffset : -1.0f - normalOffset;
         // Lit-colour multiplier where shadowed, faded toward 1.0 (no shadow) as the
         // sun sets: full darkness in daylight, none at night. _shadowSunFactor is 1
         // by day, 0 at night (Scene drives it from the sun's NightEffect).
