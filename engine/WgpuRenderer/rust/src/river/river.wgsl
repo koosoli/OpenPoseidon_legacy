@@ -202,7 +202,11 @@ fn fs_river(in: VsOut) -> @location(0) vec4<f32> {
     // Refraction: the ripple pushes the lookup, scaled by how much water there is to bend through.
     let offset_m = rp.optics.w * clamp(column, 0.0, 1.5);
     let refr_rel = in.world_rel + vec3<f32>(n.x, 0.0, n.z) * offset_m;
-    let refr_clip = frame.proj * frame.view * vec4<f32>(refr_rel - vec3<f32>(0.0, column, 0.0), 1.0);
+    // RFG-169: the bed point is looked up at most 0.25 m below the surface. Over a deep lake the
+    // full column (metres) projected far down the screen, and every pixel near the camera sampled
+    // a stretched strip of bed: long vertical streaks across Lake_Center (also with refraction off).
+    let refr_rel_bed = refr_rel - vec3<f32>(0.0, min(column, 0.25), 0.0);
+    let refr_clip = frame.proj * frame.view * vec4<f32>(refr_rel_bed, 1.0);
     var refr_uv = uv;
     if (refr_clip.w > 1e-5) {
         refr_uv = clamp(refr_clip.xy / refr_clip.w * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5), vec2<f32>(0.001), vec2<f32>(0.999));
@@ -236,7 +240,10 @@ fn fs_river(in: VsOut) -> @location(0) vec4<f32> {
     var refracted = behind * transmit + inscatter;
     // RFG-166: the water's own body colour over a shallow bed (bed.y per metre of column).
     let body = (1.0 - exp(-look_column * max(rp.bed.y, 0.0))) * 0.9;
-    refracted = mix(refracted, rp.colour.rgb * light, body);
+    // RFG-169: Color x the full sky+sun irradiance read as pale sand over Lake_Center and a pale
+    // film on the streams (A/B WGR_RIVER_BODY=20 at the parity poses); the water body scatters a
+    // fraction of it back: 0.5 x WGR_RIVER_SCATTER (0.6) -> dark olive, as Reforger's.
+    refracted = mix(refracted, rp.colour.rgb * light * 0.5 * max(rp.misc.z, 0.0), body);
 
     // Reflection: sky, then the screen-space scene where the reflected ray finds it.
     let r = reflect(-v, n);
