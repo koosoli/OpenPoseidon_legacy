@@ -73,4 +73,6 @@ DEFINE_ENUM_BEG(UIActionType)
 	ATUseMagazine,
 	ATCargoWeaponReady,
 	ATCargoWeaponStow,
+	ATOpenDoor,  /* RFG-157: a native Enfusion door (param = door index) */
+	ATCloseDoor,
 DEFINE_ENUM_END(UIActionType)

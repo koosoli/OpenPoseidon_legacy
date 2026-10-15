@@ -338,6 +338,16 @@ void InGameUI::ProcessActions(AIUnit* unit)
 
     ::AddDropActions(unit, actions);
 
+    // RFG-157: the native Enfusion door within reach, if any.
+    if (GLandscape && unit->IsFreeSoldier() && GLandscape->EnfusionDoors().Count() > 0)
+    {
+        Person* doorPerson = unit->GetPerson();
+        const int door = GLandscape->EnfusionDoors().FindForAction(doorPerson->Position() + Vector3(0.0f, 1.0f, 0.0f));
+        if (door >= 0)
+            actions.Add(GLandscape->EnfusionDoors().IsOpen(door) ? ATCloseDoor : ATOpenDoor, doorPerson, 1.6f, door,
+                        true);
+    }
+
     Person* person = unit->GetPerson();
     if (person->QIsManual())
     {

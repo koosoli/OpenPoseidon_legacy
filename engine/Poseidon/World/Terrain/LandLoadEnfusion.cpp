@@ -1079,6 +1079,9 @@ struct PlacementSummary
     size_t slotBuildings = 0;  //!< PLACEMENTS that carry at least one attachment
     size_t childPrefabs = 0;   //!< RFG-120: distinct prefabs whose transform children became parts
     size_t childParts = 0;     //!< RFG-120: those parts, per distinct prefab (furniture, props)
+    size_t doorLeaves = 0;     //!< RFG-157: door leaves found, per distinct building prefab
+    size_t doorMembers = 0;    //!< RFG-157: parts riding on them (glass, handles)
+    size_t doorSkipped = 0;    //!< RFG-157: DoorComponents that do not turn as a whole entity
     std::string slotFailure;
     std::string firstFailure;
     std::string error;
@@ -1142,6 +1145,13 @@ struct MeshAttachment
     Vector3 offset;    //!< in the shell's model space
     Matrix3 basis;     //!< part model space -> shell model space
     uint32_t mesh = 0; //!< index into the ATTACHMENT mesh list
+    //! RFG-157: a door leaf (DoorComponent, WholeEntity): its AngleRange, degrees; 0 = no door.
+    float doorAngle = 0.0f;
+    float doorAction[3] = {1.2f, 1.1f, 0.0f}; //!< the door's action point, leaf space
+    float doorRadius = 0.65f;
+    //! RFG-157: index in the set's parts of the door leaf this part rides on (its glass, its
+    //! handle), or -1.
+    int32_t doorLeaf = -1;
 };
 
 //! Everything one building prefab hangs on itself. Keyed per prefab, not per mesh:
@@ -1295,6 +1305,7 @@ struct PrefabPrepass
         bool topLevel = false; //!< `placement` and `flags` are filled only for placed prefabs
         std::string placement;
         Enf::PrefabEntityFlags flags;
+        Enf::PrefabDoor door; //!< RFG-157
     };
     struct Bones
     {
@@ -1372,6 +1383,15 @@ Enf::PrefabSlots PrefabSlotsOf(const AttachWorkspace& ws, const std::string& etP
     return Enf::ResolvePrefabSlots(*ws.mount, etPath);
 }
 
+Enf::PrefabDoor PrefabDoorOf(const AttachWorkspace& ws, const std::string& etPath)
+{
+    if (!EnfusionDoorRegistry::Enabled())
+        return {};
+    if (const PrefabPrepass::Answers* pre = ws.prepass ? ws.prepass->Find(etPath) : nullptr)
+        return pre->door;
+    return Enf::ResolvePrefabDoor(*ws.mount, etPath);
+}
+
 std::vector<Enf::PrefabChild> PrefabChildrenOf(const AttachWorkspace& ws, const std::string& etPath)
 {
     if (const PrefabPrepass::Answers* pre = ws.prepass ? ws.prepass->Find(etPath) : nullptr)
@@ -1414,6 +1434,8 @@ void BuildPrefabPrepass(const EnfusionMount& mount, const std::vector<std::strin
                          a.model = Enf::ResolvePrefabModel(mount, round[i]);
                          a.slots = Enf::ResolvePrefabSlots(mount, round[i]);
                          a.children = Enf::ResolvePrefabChildren(mount, round[i]);
+                         if (EnfusionDoorRegistry::Enabled())
+                             a.door = Enf::ResolvePrefabDoor(mount, round[i]);
                          if (level == 0)
                          {
                              a.topLevel = true;
@@ -1488,7 +1510,7 @@ void BuildPrefabPrepass(const EnfusionMount& mount, const std::vector<std::strin
 /// the hole this whole change is here to close.
 void CollectAttachments(AttachWorkspace& ws, PlacementSummary& summary, const std::string& etPath,
                         const std::string& xobPath, const Vector3& offset, const Matrix3& basis, int depth,
-                        std::vector<MeshAttachment>& out)
+                        std::vector<MeshAttachment>& out, float inheritedDoorAngle = NAN)
 {
     // Three levels is building -> set -> leaf, which is the deepest the corpus goes;
     // the limit is here to bound authored data, not to express an expectation.
@@ -1567,9 +1589,37 @@ void CollectAttachments(AttachWorkspace& ws, PlacementSummary& summary, const st
             ws.counts.push_back(0);
         }
         part.mesh = slot->second;
+        // RFG-157: a door leaf. The angle is the nearest override (the building's instance block
+        // for this door set, then this slot's own block), else the leaf prefab's AngleRange.
+        const float slotAngle = std::isnan(inheritedDoorAngle) ? boneSlot->doorAngle : inheritedDoorAngle;
+        const Enf::PrefabDoor door = PrefabDoorOf(ws, partEt);
+        const bool isDoor = door.isDoor && door.wholeEntity;
+        if (isDoor)
+        {
+            const float angle = !std::isnan(slotAngle) ? slotAngle : (!std::isnan(door.angleDeg) ? door.angleDeg : 90.0f);
+            part.doorAngle = std::fabs(angle) > 0.5f ? angle : 0.0f;
+            for (int i = 0; i < 3; ++i)
+                if (!std::isnan(door.offset[i]))
+                    part.doorAction[i] = door.offset[i];
+            if (!std::isnan(door.radius) && door.radius > 0.0f)
+                part.doorRadius = door.radius;
+            if (part.doorAngle != 0.0f)
+                ++summary.doorLeaves;
+        }
+        else if (door.isDoor)
+            ++summary.doorSkipped;
+        const size_t partIndex = out.size();
         out.push_back(part);
 
-        CollectAttachments(ws, summary, partEt, cached->second, part.offset, part.basis, depth + 1, out);
+        CollectAttachments(ws, summary, partEt, cached->second, part.offset, part.basis, depth + 1, out,
+                           isDoor ? NAN : slotAngle);
+        if (isDoor && out[partIndex].doorAngle != 0.0f)
+            for (size_t k = partIndex + 1; k < out.size(); ++k)
+                if (out[k].doorLeaf < 0 && out[k].doorAngle == 0.0f)
+                {
+                    out[k].doorLeaf = static_cast<int32_t>(partIndex);
+                    ++summary.doorMembers;
+                }
     }
 }
 
@@ -3398,6 +3448,37 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
             size_t added = 0;
             size_t attachPlaced = 0;
             size_t attachSkipped = 0;
+            // RFG-157: the doors of these buildings, registered as their parts are placed.
+            _enfusionDoors.Clear();
+            std::vector<int> doorOfPart; // per part of the current building: its door index, or -1
+            const auto registerDoorPart = [&](const AttachSet& set, size_t partIndex, int objectId,
+                                              const Matrix4& frame)
+            {
+                if (!EnfusionDoorRegistry::Enabled())
+                    return;
+                if (partIndex == 0)
+                    doorOfPart.assign(set.parts.size(), -1);
+                const MeshAttachment& part = set.parts[partIndex];
+                if (part.doorAngle != 0.0f)
+                {
+                    EnfusionDoorRegistry::Spec spec;
+                    spec.angleDeg = part.doorAngle;
+                    for (int i = 0; i < 3; ++i)
+                        spec.action[i] = part.doorAction[i];
+                    spec.radius = part.doorRadius;
+                    doorOfPart[partIndex] = _enfusionDoors.AddDoor(_enfusionDoors.AddSpec(spec), objectId, frame);
+                }
+                else if (part.doorLeaf >= 0 && static_cast<size_t>(part.doorLeaf) < doorOfPart.size() &&
+                         doorOfPart[static_cast<size_t>(part.doorLeaf)] >= 0)
+                    _enfusionDoors.AddMember(doorOfPart[static_cast<size_t>(part.doorLeaf)], objectId, frame);
+            };
+            const auto frameOf = [](const Vector3& position, const Matrix3& orientation)
+            {
+                Matrix4 frame;
+                frame.SetOrientation(orientation);
+                frame.SetPosition(position);
+                return frame;
+            };
             size_t buriedObjects = 0;
             size_t buriedStructures = 0;
             size_t rescuedObjects = 0;
@@ -3539,10 +3620,16 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     ++streamed;
                     if (item.attachSet != kNoAttachSet)
                     {
-                        for (const MeshAttachment& part : attachSets[item.attachSet].parts)
+                        const AttachSet& set = attachSets[item.attachSet];
+                        for (size_t partIndex = 0; partIndex < set.parts.size(); ++partIndex)
                         {
-                            pushStreamPlacement(static_cast<uint32_t>(meshes.size() + part.mesh),
-                                                position + orientation * part.offset, orientation * part.basis);
+                            const MeshAttachment& part = set.parts[partIndex];
+                            const Vector3 partPosition = position + orientation * part.offset;
+                            const Matrix3 partOrientation = orientation * part.basis;
+                            pushStreamPlacement(static_cast<uint32_t>(meshes.size() + part.mesh), partPosition,
+                                                partOrientation);
+                            registerDoorPart(set, partIndex, _modernObjectPlacements.back().id,
+                                             frameOf(partPosition, partOrientation));
                             ++streamedParts;
                         }
                     }
@@ -3641,8 +3728,12 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     // exceeding the cap by the number of its openings.
                     if (item.attachSet != kNoAttachSet)
                     {
-                        for (const MeshAttachment& part : attachSets[item.attachSet].parts)
+                        const AttachSet& set = attachSets[item.attachSet];
+                        for (size_t partIndex = 0; partIndex < set.parts.size(); ++partIndex)
                         {
+                            const MeshAttachment& part = set.parts[partIndex];
+                            if (partIndex == 0 && EnfusionDoorRegistry::Enabled())
+                                doorOfPart.assign(set.parts.size(), -1);
                             const auto partShape = attachShapes.find(part.mesh);
                             if (partShape == attachShapes.end())
                             {
@@ -3658,6 +3749,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                                 continue;
                             }
                             attached->SetOrientation(orientation * part.basis);
+                            registerDoorPart(set, partIndex, attached->ID(), attached->Transform());
                             ++attachPlaced;
                         }
                     }
@@ -3839,6 +3931,12 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                      "(furniture, props; per distinct prefab) (POSEIDON_PREFAB_CHILDREN); RFG-128: {} socket "
                      "parts take their parent's inline material override (POSEIDON_SLOT_MATERIALS)",
                      summary.childPrefabs, summary.childParts, summary.slotRemapped);
+            LOG_INFO(World,
+                     "Enfusion native load: RFG-157 doors: {} door leaves in {} building prefabs carry {} riding "
+                     "parts ({} DoorComponents not WholeEntity, skipped); {} doors registered with {} parts "
+                     "(POSEIDON_ENFUSION_DOORS={})",
+                     summary.doorLeaves, summary.slotPrefabs, summary.doorMembers, summary.doorSkipped,
+                     _enfusionDoors.Count(), _enfusionDoors.MemberCount(), EnfusionDoorRegistry::Enabled() ? 1 : 0);
 
             // RFG-027: the road network. One shape per road rather than one shared
             // shape placed many times, because every road is a different length and

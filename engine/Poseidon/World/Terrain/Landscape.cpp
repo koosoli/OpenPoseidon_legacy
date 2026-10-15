@@ -300,6 +300,7 @@ void Landscape::Init()
     _modernLogicalOnlyObjects.clear();
     _modernObjectPlacements.clear();
     _modernObjectCells.clear();
+    _enfusionDoors.Clear();
     _modernObjectModels.clear();
     _modernObjectCellActive.clear();
     _modernObjectCellDesired.clear();
@@ -802,6 +803,8 @@ Texture* Landscape::SkyTexture()
 
 void Landscape::Simulate(float deltaT)
 {
+    // RFG-157: native Enfusion doors that are swinging.
+    _enfusionDoors.Simulate(deltaT, *this);
     // simulate weather changes
     _weather.MoveClouds(deltaT);
     // simulate tide
@@ -3133,6 +3136,8 @@ Object* Landscape::ObjectCreateFromShape(int id, LODShapeWithShadow* shape, cons
                                                         obj->GetType() == Network,
                                                         (shape->GetOrHints() & ClipLandKeep) != 0);
 
+    // RFG-157: a part of an open (or swinging) native door comes back at its door's angle.
+    _enfusionDoors.AdjustCreateTransform(id, nTransform);
     obj->SetTransform(nTransform);
 
 #if 1

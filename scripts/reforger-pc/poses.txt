@@ -1,0 +1,17 @@
+# Reforger parity poses on Everon (worlds/eden), shared by go.ps1 (Open Poseidon) and the
+# Workbench capture plugin (original Reforger).
+# name  x  z  altitude  azimuth  elevation
+#   altitude: metres above the terrain, or absolute when it ends in A
+#   azimuth: compass degrees (0 = north, 90 = east); elevation: degrees above the horizon
+meadowNear   4650.0  6150.0  1.6     90.0   -8.0
+meadowWide   4600.0  6100.0  8.0     60.0   -6.0
+fieldEdge    4950.0  4550.0  1.8     75.0    0.0
+forestIn     5300.0  4700.0  1.7      0.0    0.0
+forestHill   5000.0  5600.0  120.0   30.0   -8.0
+forestHigh   4697.6  3998.02 450A   220.6  -25.0
+houseFar     5149.2  5389.8  1.8    125.0   -3.0
+houseNear    5154.1  5386.3  1.8    125.0    2.0
+river1       5042.1  5356.4  2.5    314.0  -12.0
+pond1        5168.9  5323.5  2.5     56.0  -12.0
+village      5092.61 3995.64 18.3A  200.9  -13.5
+durras       8595.2  3069.61 234.15A 145.0 -12.0

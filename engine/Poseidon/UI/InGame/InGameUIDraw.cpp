@@ -395,6 +395,12 @@ RString UIAction::GetDisplayName(AIUnit* unit) const
             snprintf(buffer, sizeof(buffer), "%s", strcmpi(GLanguage, "German") == 0
                 ? "Waffe im Fahrzeug wegstecken" : "Stow personal weapon");
             break;
+        case ATOpenDoor:
+            snprintf(buffer, sizeof(buffer), "%s", strcmpi(GLanguage, "German") == 0 ? "T\xC3\xBCr \xC3\xB6" "ffnen" : "Open door");
+            break;
+        case ATCloseDoor:
+            snprintf(buffer, sizeof(buffer), "%s", strcmpi(GLanguage, "German") == 0 ? "T\xC3\xBCr schlie\xC3\x9F" "en" : "Close door");
+            break;
         case ATLightOn:
             snprintf(buffer, sizeof(buffer), "%s", (const char*)LocalizeString(IDS_ACTION_LIGHTON));
             break;

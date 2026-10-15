@@ -10,6 +10,7 @@
 #include <Poseidon/World/Terrain/SimulationObjectCoverage.hpp>
 #include <Poseidon/World/Terrain/SimulationResidency.hpp>
 #include <Poseidon/World/Terrain/StaticPlainRouteProbe.hpp>
+#include <Poseidon/World/Terrain/EnfusionDoors.hpp>
 
 namespace Poseidon::Asset::Material
 {
@@ -739,6 +740,8 @@ class Landscape : public SerializeClass
     std::unordered_set<int> _modernLogicalOnlyObjects;
     void RegisterModernObjectVisual(Object* object);
     std::vector<ModernObjectPlacement> _modernObjectPlacements;
+    //! RFG-157: the doors of native Enfusion buildings (EnfusionDoors.hpp).
+    EnfusionDoorRegistry _enfusionDoors;
     int AuthoredObjectIDFloor() const;
     std::vector<std::vector<uint32_t>> _modernObjectCells;
     // One non-empty cell inside the residency window, with its squared cell distance from the
@@ -1265,6 +1268,9 @@ public:
     Object* FindObjectNC(int id) const; // do not use cache
     Object* FindObject(int id) const;   // cache may be available
     Object* GetObject(int id) const;
+    //! RFG-157: the doors of native Enfusion buildings that open and close.
+    EnfusionDoorRegistry& EnfusionDoors() { return _enfusionDoors; }
+    const EnfusionDoorRegistry& EnfusionDoors() const { return _enfusionDoors; }
     // Owner-only, instance-only observation of EXISTING constructed objects.
     // No resolution, required pin, shape load or persistent group certification.
     Streaming::InstanceCoverageObservation ObserveConstructedObjectCoverage(

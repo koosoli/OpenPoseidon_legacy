@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -373,6 +374,10 @@ struct PrefabSlot
     //! override of the part (a door's glass child: window_glass -> window_glass_uneven_INT).
     //! They outrank the part prefab's own assignments.
     std::vector<std::pair<std::string, std::string>> materialRemap;
+    //! RFG-157: an `AngleRange` written inside this child's own block -- the parent's per-instance
+    //! override of the door it carries (a house turning one interior door the other way:
+    //! `{ GenericEntity { components { DoorComponent { AngleRange -100 } } } }`). NaN = none.
+    float doorAngle = NAN;
 };
 
 struct PrefabSlots
@@ -567,6 +572,15 @@ inline void FindSlotDeclarations(const std::vector<uint8_t>& blob, std::vector<P
                 !quoted.empty())
                 frame.remap.emplace_back(frame.pendingSource, quoted);
             frame.pendingSource.clear();
+        }
+        else if (!stack.empty() && stack.back().slot >= 0 && PrefabDetail::Keyword(data, cursor, lineEnd, "AngleRange"))
+        {
+            // RFG-157: the override sits after the instance's PivotID, so the frame's slot is set.
+            char* next = nullptr;
+            const std::string text(data + cursor + 10, lineEnd - cursor - 10);
+            const float value = std::strtof(text.c_str(), &next);
+            if (next != text.c_str() && std::isfinite(value) && static_cast<size_t>(stack.back().slot) < exact.size())
+                exact[static_cast<size_t>(stack.back().slot)].doorAngle = value;
         }
         else if (PrefabDetail::Keyword(data, cursor, lineEnd, "BonePrefix"))
         {
@@ -919,6 +933,143 @@ inline std::vector<PrefabChild> ResolvePrefabChildren(const EnfusionMount& mount
         if (parsed.parentPath.empty())
             return out;
         current = parsed.parentPath;
+    }
+    return out;
+}
+
+
+//! RFG-157: a door leaf, from the `DoorComponent` its prefab chain declares on the ROOT entity
+//! (`Prefabs/Structures/BuildingParts/Doors/Door_Base.et` and its children). Fields are NaN /
+//! empty until some level of the chain declares them; the nearest level wins.
+//!
+//!   DoorComponent { AngleRange 90  DoorAnimationType WholeEntity  SoundFilename "..acp" }
+//!   ActionsManagerComponent { ActionContexts { UserActionContext { Position PointInfo {
+//!       Offset 1.2 1.1 0 } Radius 0.65 } } }
+//!
+//! WholeEntity is the whole leaf turning about its own origin (the hinge) and its up axis.
+struct PrefabDoor
+{
+    bool isDoor = false;
+    bool wholeEntity = true;  //!< false once a level names another DoorAnimationType
+    bool animTypeKnown = false;
+    float angleDeg = NAN;     //!< AngleRange, degrees; the sign picks the swing direction
+    float offset[3] = {NAN, NAN, NAN}; //!< the action point, leaf space
+    float radius = NAN;       //!< the action's reach around that point
+};
+
+//! One `.et` body's own door declarations (root entity only; child entities -- the leaf's glass
+//! and handles, or an anonymous children block -- are skipped). Fills only what is still unset.
+inline void FindDoorDeclarations(const std::vector<uint8_t>& blob, PrefabDoor& io)
+{
+    const char* data = reinterpret_cast<const char*>(blob.data());
+    const size_t size = blob.size();
+    int depth = 0;
+    int childDepth = -1;   // >= 0 while inside a child entity (or the children block)
+    int doorDepth = -1;    // >= 0 while inside DoorComponent
+    int actionsDepth = -1; // >= 0 while inside ActionsManagerComponent
+    const auto number = [&](size_t from, size_t lineEnd, float* out, int count)
+    {
+        std::string text(data + from, lineEnd - from);
+        const char* p = text.c_str();
+        for (int i = 0; i < count; ++i)
+        {
+            char* next = nullptr;
+            const float v = std::strtof(p, &next);
+            if (next == p || !std::isfinite(v))
+                return false;
+            out[i] = v;
+            p = next;
+        }
+        return true;
+    };
+    size_t at = 0;
+    while (at < size)
+    {
+        size_t lineEnd = at;
+        while (lineEnd < size && data[lineEnd] != '\n')
+            ++lineEnd;
+        size_t cursor = at;
+        while (cursor < lineEnd && static_cast<unsigned char>(data[cursor]) <= ' ')
+            ++cursor;
+        size_t trimmedEnd = lineEnd;
+        while (trimmedEnd > cursor && static_cast<unsigned char>(data[trimmedEnd - 1]) <= ' ')
+            --trimmedEnd;
+        if (childDepth < 0 && depth >= 1)
+        {
+            std::string quoted;
+            const std::string_view line(data + cursor, trimmedEnd - cursor);
+            if (depth == 1 && line == "{")
+                childDepth = depth; // the root's anonymous children block
+            else if (line.find(" : ") != std::string_view::npos && PrefabDetail::ChildHeader(data, cursor, lineEnd, quoted))
+                childDepth = depth;
+            else if (PrefabDetail::Keyword(data, cursor, lineEnd, "DoorComponent"))
+            {
+                io.isDoor = true;
+                doorDepth = depth;
+            }
+            else if (PrefabDetail::Keyword(data, cursor, lineEnd, "ActionsManagerComponent"))
+                actionsDepth = depth;
+            else if (doorDepth >= 0 && PrefabDetail::Keyword(data, cursor, lineEnd, "AngleRange"))
+            {
+                float v = 0.0f;
+                if (std::isnan(io.angleDeg) && number(cursor + 10, lineEnd, &v, 1))
+                    io.angleDeg = v;
+            }
+            else if (doorDepth >= 0 && PrefabDetail::Keyword(data, cursor, lineEnd, "DoorAnimationType"))
+            {
+                if (!io.animTypeKnown)
+                {
+                    io.animTypeKnown = true;
+                    io.wholeEntity = std::string_view(data + cursor, trimmedEnd - cursor).find("WholeEntity") !=
+                                     std::string_view::npos;
+                }
+            }
+            else if (actionsDepth >= 0 && PrefabDetail::Keyword(data, cursor, lineEnd, "Offset"))
+            {
+                float v[3];
+                if (std::isnan(io.offset[0]) && number(cursor + 6, lineEnd, v, 3))
+                    for (int i = 0; i < 3; ++i)
+                        io.offset[i] = v[i];
+            }
+            else if (actionsDepth >= 0 && PrefabDetail::Keyword(data, cursor, lineEnd, "Radius"))
+            {
+                float v = 0.0f;
+                if (std::isnan(io.radius) && number(cursor + 6, lineEnd, &v, 1))
+                    io.radius = v;
+            }
+        }
+        depth += PrefabDetail::NetBraces(data, cursor, lineEnd);
+        if (childDepth >= 0 && depth <= childDepth)
+            childDepth = -1;
+        if (doorDepth >= 0 && depth <= doorDepth)
+            doorDepth = -1;
+        if (actionsDepth >= 0 && depth <= actionsDepth)
+            actionsDepth = -1;
+        at = lineEnd + 1;
+    }
+}
+
+//! RFG-157: the door a prefab chain resolves to. Child first, nearest declaration wins.
+inline PrefabDoor ResolvePrefabDoor(const EnfusionMount& mount, const std::string& etPath, int depthLimit = 8)
+{
+    PrefabDoor out;
+    std::string current = etPath;
+    std::vector<std::string> seen;
+    for (int depth = 0; depth <= depthLimit && !current.empty(); ++depth)
+    {
+        bool cycle = false;
+        for (const std::string& before : seen)
+            cycle = cycle || PrefabDetail::LowerCopy(before) == PrefabDetail::LowerCopy(current);
+        if (cycle)
+            break;
+        seen.push_back(current);
+        std::vector<uint8_t> blob;
+        if (!mount.Read(current, blob))
+            break;
+        FindDoorDeclarations(blob, out);
+        current = Poseidon::Asset::Material::ParseEmat(
+                      std::string_view(reinterpret_cast<const char*>(blob.data()), blob.size()))
+                      .parentPath;
     }
     return out;
 }
