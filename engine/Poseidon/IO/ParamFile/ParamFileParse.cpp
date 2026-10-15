@@ -480,7 +480,8 @@ void ParamRawArray::Parse(QIStream& in, ParamFile* file)
         else
         {
             WordBuf word;
-            bool someWord = GetWord(word, sizeof(word), in, ",;}");
+            bool quot = false;
+            bool someWord = GetWord(word, sizeof(word), in, ",;}", &quot);
             c = in.get();
             // c may be one of ,;} or \n or \r
             if (c == ',' || c == ';' || someWord)
@@ -489,10 +490,13 @@ void ParamRawArray::Parse(QIStream& in, ParamFile* file)
                 {
                     ::strcpy(word, file->EvaluateStringInternal(word + 6));
                 }
-                else if (word[0] == '(')
+                else if (!quot && word[0] == '(')
                 {
                     // Implicit arithmetic — array elements like
-                    // `position[]={0, (-A - B), 0.3};` evaluate inline.
+                    // `position[]={0, (-A - B), 0.3};` evaluate inline. A quoted element
+                    // is a string even when it starts with '(' (Arma 3's particle and sound
+                    // expressions, "(distToSurface interpolate [0.2,10,1.2,0.01])"), as for
+                    // single values.
                     ::strcpy(word, file->EvaluateStringInternal(word));
                 }
 
