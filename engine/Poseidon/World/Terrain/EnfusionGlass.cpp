@@ -6,6 +6,7 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp> // _modernObjectLightOwners holds Ref<LightPoint>
 #include <Poseidon/World/Scene/Object.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp> // Ref<LightPoint> in _modernObjectLightOwners
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
 #include <Poseidon/Audio/SoundScene.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>

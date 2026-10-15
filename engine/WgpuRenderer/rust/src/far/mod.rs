@@ -102,6 +102,13 @@ fn far_accepts(
     !real_drawn
 }
 
+/// RFG-161: WGR_NATIVE_FAR_SUN=0 keeps a native world's far proxies on sky light alone (the look
+/// before: the sun term was zero, so a distant forest was the same dull tone on its sunny and its
+/// shaded side and darker than the real trees in front of it).
+fn native_far_sun() -> bool {
+    !matches!(std::env::var("WGR_NATIVE_FAR_SUN").ok().as_deref(), Some("0"))
+}
+
 /// `WGR_FAR_MODE=distance` restores the pre-complement pure-distance start rule from the SAME
 /// binary, so an A/B of the two rules is one environment variable and not a rebuild. Anything
 /// else (including unset) is the complement.
@@ -417,6 +424,9 @@ impl Far {
         // enabled == 2: pure-distance start rule from `near_cutoff_m` (a native world whose real
         // models end at a known reach -- the authored far window -- rather than at the cull).
         self.params.tune[3] = if enabled == 2 { 1.0 } else { mode_from_env() };
+        // RFG-161: a native world's proxies take the real sun (far_shade); the OFP/Arma look was
+        // tuned without it and keeps that.
+        self.params.cull[2] = if enabled == 2 && native_far_sun() { 1.0 } else { 0.0 };
         self.upload_params(queue);
     }
 
@@ -607,15 +617,15 @@ mod tests {
         // Params still unset, so a live buffer alone must NOT switch the tier on — otherwise
         // "off" would depend on nothing having been loaded yet.
         assert!(!far.active());
-        far.set_params(&queue, 700.0, 12000.0, 2.0, true);
+        far.set_params(&queue, 700.0, 12000.0, 2.0, 1);
         far.set_view_metrics(&queue, 540.0);
         assert!(far.active());
         // The kill switch has to work with a set resident, which is the only case that matters.
-        far.set_params(&queue, 700.0, 12000.0, 2.0, false);
+        far.set_params(&queue, 700.0, 12000.0, 2.0, 0);
         assert!(!far.active());
 
         far.set_instances(&device, &queue, &[]);
-        far.set_params(&queue, 700.0, 12000.0, 2.0, true);
+        far.set_params(&queue, 700.0, 12000.0, 2.0, 1);
         assert!(!far.active());
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }

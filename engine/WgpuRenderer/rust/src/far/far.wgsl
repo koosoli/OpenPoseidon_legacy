@@ -32,7 +32,7 @@ struct FarParams {
     // same four numbers wgr_set_cull_params hands the object cull.
     //   x = k = pixel_limit * lod_scale * lod_inv_width   (the sub-pixel coefficient, folded)
     //   y = objects_z (m)                                 (the object cull's radial edge)
-    //   z, w spare
+    //   z = 1: a native world's proxies take the real sun (RFG-161), w spare
     // These MOVE AT RUNTIME: the framerate governor drives lod_inv_width, so k is not a
     // constant and a start rule expressed as a distance cannot track it.
     cull: vec4<f32>,
@@ -237,7 +237,8 @@ fn far_shade(albedo: vec3<f32>, normal: vec3<f32>, world_rel: vec3<f32>) -> vec4
 #ifdef GRASS_SUN_ALL
     let light_dir = normalize(-frame.sun_dir_world.xyz);
 #else
-    let light_dir = normalize(frame.sun_dir_world.xyz);
+    // RFG-161: a native world (far.cull.z) takes the real sun, as its grass does (native2.w).
+    let light_dir = normalize(select(1.0, -1.0, far.cull.z > 0.5) * frame.sun_dir_world.xyz);
 #endif
     let diffuse = max((dot(normal, light_dir) + 0.35) / 1.35, 0.0);
     let direct = frame.sun_diffuse.rgb * diffuse * cloud_sun_shadow(world.xz);
