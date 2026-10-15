@@ -71,6 +71,7 @@ void Arma2RuntimeSimulate(); // called from World::SimulateScripts
 
 // CWA commands reused below (defined in the other GameStateExt*.cpp files).
 GameValue ShowHint(const GameState* state, GameValuePar oper1);
+GameValue MarkerGetPos(const GameState* state, GameValuePar oper1);
 GameValue ObjGroupChat(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSay(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjPlayMove(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -2032,8 +2033,6 @@ GameValue A2CreateVehicleArray(const GameState* state, GameValuePar oper1)
     }
     return created;
 }
-
-GameValue MarkerGetPos(const GameState* state, GameValuePar oper1);
 
 // createSoundSource [type, position, markers, placement] (C4_BitterChill's burning houses):
 // a CfgVehicles class whose `sound` names a CfgSFX entry, played where it is put -- the
