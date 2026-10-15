@@ -105,6 +105,8 @@ third-person screenshots at 8 s and 14 s.
 |-------|--------|
 | `59b5455` | 13/13 missions load, play and quit cleanly (exit 0) |
 | `e51a102` | 10/13; the other three lost the renderer at creation to `failed printing to stderr: Zugriff verweigert` (the harness's redirected stderr file) -- the harness now retries such a start |
+| `fea1971` | smoke 13/13; `missions_part00` (40 missions: Bootcamp, East Wind, Apex, ...) 40/40 exit 0 |
+| `61b1a32` | jets showcase + `missions_part01` (41: VR scenarios, Contact's missions and sites): 39 exit 0, Contact `Outro2` crashed (`switchLight` on a UGV, fixed in `a82fa18`), the Contact scene `Enoch_intro1` (intro only) timed out (fixed in `f40f72f`) |
 
 What the runs found, and what changed for it:
 
@@ -139,3 +141,21 @@ What the runs found, and what changed for it:
   (the showcases start at dawn and at night; Everon's sun is not Stratis's).
 - **Ships.** The carrier and the destroyer assemble themselves from their init handler
   (multi-part bases).
+- **Heights.** Eden keeps a unit's or object's height (a pilot on the carrier's deck at
+  23.7 m ASL, atlOffset 0.04 because the deck is the surface); CWA stands everything on the
+  ground or the sea. Every non-crew unit, vehicle and object more than 1.5 m above the terrain
+  or the sea is put back at its height from its own init line (Eden's height is a soldier's
+  feet and a vehicle's model origin, which is where this engine has their origins).
+- **Crashes.** Symbolised from the CI's pdb (the crash handler prints module addresses; the
+  image base is found by matching `WinMain`/`__scrt_common_main_seh` at the bottom of the
+  stack): `dyn_cast<StreetLamp>` accepted any entity, so `this switchLight "OFF"` on a vehicle
+  crashed. Six more classes had the same missing class id (see the coordination note).
+- **Script surface, third round.** `try`/`catch`/`throw`; eight nular commands the stub table
+  had as unary (`allCutLayers`, `isTutHintsEnabled`, ...); `#include "\a3\..."` from the
+  file-system root (every Contact mission's `description.ext` failed to preprocess);
+  `reveal [obj, n]`; `getGroupIconParams` (50,000 errors a run in `VR.VR`); action titles
+  without their structured-text tags; a weapon's name as its own muzzle.
+- **Known, open.** A soldier in some Contact sites (`s_dolnik_00`) is drawn stretched, with
+  long panels round him -- not yet explained; Arma 3 config noise ("Undefined base class
+  'Components'" in a few CfgAmmo sensor classes); `nearestTerrainObjects [obj, ...] #0` in
+  Contact's `Intro2` is wrong in Arma 3 too (`#` binds tighter than the command).
