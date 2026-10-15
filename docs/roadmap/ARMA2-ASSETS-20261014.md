@@ -349,6 +349,44 @@ simulation step (exit 3) -- it counted the loading. `4bf48c7` gives a test 180 s
 before the first step. Still open: whether the DX12 start-up finishes at all, and the stderr
 panic (149 `eprintln!` in the renderer; Rust panics when stderr cannot be written).
 
+### Faces and heads measured (focus 18, 19), 2026-10-15
+
+Focus 18 (`b5727b2`): the heads face forward. Face pictures of the 8 missions, and of T01
+alone after its run there ended early (rerun: entered, clean -- not reproduced):
+
+- **Custom heads draw right.** Cooper (`Cooper.p3d`, his own `cooper_co.paa`) and O'Hara
+  have eyes, brows and skin detail. Offline (`diag38`, the repo's ODOL reader): Arma 2's
+  `Cooper.p3d` has no `osobnost` selection, so the face texture `CfgFaces >> CooperHead`
+  names (`hhl_27_co`) never replaces his own -- the same as in Arma 2's data.
+- **Default heads were blurred, pale and eyeless** (T01's soldiers, TE02's player:
+  `defaulthead.p3d` with a random `hhl_NN_co`). An Arma 2 ODOL selection names its
+  sections and keeps no face list; `Shape::RegisterTexture(texture, selection)` returned on
+  the empty list, so the face texture was never registered with an area and stayed at its
+  smallest mip -- the violet of the texture's unused background bled into the face.
+  `3e4dc87` takes the replaced texture from the selection's first section. (This was the
+  "violet tint" noted after focus 18.)
+- **Polygonal light and dark patches on faces are the GL33 shadow map**, measured on the
+  same build: with `triShadowSetDarkness 1` (focus 19) they are gone on every face; with
+  only the self-shadow rule off (`POSEIDON_GL33_SHADOW_SELF=0`, `e0bbaac`) O'Hara's face is
+  clean and Cooper's, bent forward under his cap, keeps them. The shadow is cast from the
+  body's low-polygon shadow LOD onto the detailed head. Not changed -- part of the open GL33
+  shadow decision.
+- Not done: the face `material` of `CfgFaces` (camouflage paint, the black faces' own
+  rvmat) -- the head's own material is used; glasses; wounds; the face's own bones (no
+  lip sync, no expressions).
+
+`createSoundSource` (`3e4dc87`, link fix `5422672`): of the scanned mission archives only
+C4_BitterChill's `houseBurn.sqf` calls it (`"Sound_Fire"`); it was an unknown command. It
+now creates the class's CfgSFX sound source where a mission.sqm sound source would be
+placed. Not run yet.
+
+WGPU on the laptop, second try (`b5727b2`, DX12): T01 and TE02 lost the renderer to the same
+stderr panic -- std's `eprintln!` panics when the write fails, and the game is a GUI program
+whose stderr a launcher may leave unwritable. `5422672` makes the renderer's `eprintln!` and
+`println!` drop a failed write. C2B created the renderer after 44 s (DX12, Iris Xe) and drew
+no frame for two minutes before the watchdog; the stall report printed garbage as the last
+expression (a pointer the evaluator had freed; `6e89b47` keeps a copy).
+
 ## Steps
 
 1. **Measure first.** Per mission: an asset census in the log (every class created, what it
