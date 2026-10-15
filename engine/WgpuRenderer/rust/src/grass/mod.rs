@@ -399,6 +399,64 @@ struct GrassParams {
     // .x = bit per atlas layer whose run grows blades only (a PlantMat surface with no
     // ClutterConfig: Reforger's crop fields); the card rings place nothing there. .yzw spare.
     card_skip: [u32; 4],
+    // RFG-159: how the native near ring's PlantMat tufts are lit (grass.wgsl native_tuft_shade).
+    // Renderer-owned, read once from the environment (native_look_from_env).
+    native_look: [f32; 4],
+    native_look2: [f32; 4],
+    // RFG-160: the native near ring's reach (native_ring_from_env).
+    native_ring: [f32; 4],
+}
+
+/// RFG-160: how far a native world's PlantMat tufts reach and how they thin. [distance (m) past
+/// which plants thin as d0/d -- constant plants per screen area, the far ones widened by
+/// (d/d0)^exponent so the meadow keeps its cover; that exponent; the height floor in the ring's
+/// outer dissolve (RFG-117 shrank tufts to 0.45 there, which flattened the meadow from 20 m on);
+/// the near radius multiplier on a native world (Ultra's 41 m -> 82 m; Reforger draws its grass to
+/// 120 m at Ultra)]. WGR_NATIVE_RING_SCALE=1 WGR_NATIVE_RING_THIN=0 WGR_NATIVE_RING_HEIGHT_FLOOR=0.45
+/// is the RFG-117 ring.
+fn native_ring_from_env() -> [f32; 4] {
+    let num = |key: &str, default: f32, lo: f32, hi: f32| -> f32 {
+        std::env::var(key)
+            .ok()
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .filter(|v| v.is_finite())
+            .map_or(default, |v| v.clamp(lo, hi))
+    };
+    [
+        num("WGR_NATIVE_RING_THIN", 22.0, 0.0, 200.0),
+        num("WGR_NATIVE_RING_WIDEN", 0.5, 0.0, 1.0),
+        num("WGR_NATIVE_RING_HEIGHT_FLOOR", 0.85, 0.0, 1.0),
+        num("WGR_NATIVE_RING_SCALE", 2.0, 0.25, 4.0),
+    ]
+}
+
+/// RFG-159: the native tuft look. `native_look` = [on, root occlusion strength, translucency,
+/// NTOMap green sign (-1 = DirectX, the Enfusion convention measured on cp_grass_01's atlas;
+/// 0 = no per-texel normal)]; `native_look2` = [receive cascade shadows, up-bend of the shading
+/// normal, NormalPower multiplier, cascade fade-out distance m]. WGR_NATIVE_TUFT_SHADE=0 keeps the
+/// RFG-117 shading (grass_shade with the card normal bent half way up).
+fn native_look_from_env() -> ([f32; 4], [f32; 4]) {
+    let num = |key: &str, default: f32, lo: f32, hi: f32| -> f32 {
+        std::env::var(key)
+            .ok()
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .filter(|v| v.is_finite())
+            .map_or(default, |v| v.clamp(lo, hi))
+    };
+    let on = num("WGR_NATIVE_TUFT_SHADE", 1.0, 0.0, 1.0);
+    let look = [
+        if on > 0.5 { 1.0 } else { 0.0 },
+        num("WGR_NATIVE_TUFT_AO", 0.8, 0.0, 1.0),
+        num("WGR_NATIVE_TUFT_SSS", 0.55, 0.0, 2.0),
+        num("WGR_NATIVE_TUFT_NTO_GREEN", -1.0, -1.0, 1.0),
+    ];
+    let look2 = [
+        if num("WGR_NATIVE_TUFT_CSM", 1.0, 0.0, 1.0) > 0.5 { 1.0 } else { 0.0 },
+        num("WGR_NATIVE_TUFT_UPBEND", 0.30, 0.0, 1.0),
+        num("WGR_NATIVE_TUFT_NORMAL", 0.6, 0.0, 4.0),
+        num("WGR_NATIVE_TUFT_CSM_RANGE", 80.0, 10.0, 400.0),
+    ];
+    (look, look2)
 }
 
 /// Neutral card-layer pick: uniform weights (0 = "the map gave none") and no distance limit.
@@ -891,6 +949,9 @@ impl Grass {
             tuft_set_aspect: [1.0; 64],
             tuft_set_scale: [1.0; 64],
             card_skip: [0; 4],
+            native_look: native_look_from_env().0,
+            native_look2: native_look_from_env().1,
+            native_ring: native_ring_from_env(),
         };
         queue.write_buffer(&grass_params, 0, bytemuck::bytes_of(&params));
 
@@ -2204,13 +2265,20 @@ impl Grass {
         for (i, v) in cfg.iter().take(8).enumerate() {
             c[i] = finite(*v, 0.0);
         }
+        // RFG-160: the near grid is sized from these (native radius and spacing, set_params).
+        let grid_inputs = (self.last_params.native_tuft[0], self.last_params.native_tuft2[2]);
         self.last_params.native_tuft = [c[0], c[1], c[2], c[3]];
         self.last_params.native_tuft2 = [c[4], c[5], c[6], c[7]];
         for i in 0..8 {
             self.last_params.tuft_aspect[i] = finite(aspect.get(i).copied().unwrap_or(1.0), 1.0).clamp(0.1, 6.0);
             self.last_params.tuft_scale[i] = finite(scale.get(i).copied().unwrap_or(1.0), 1.0).clamp(0.1, 4.0);
         }
-        queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&self.last_params));
+        if grid_inputs != (c[0], c[6]) && self.last_raw_params.near_radius > 0.0 {
+            let raw = self.last_raw_params;
+            self.set_params(queue, raw);
+        } else {
+            queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&self.last_params));
+        }
     }
 
     /// RFG-138: per-surface PlantMat blade sets. `set_words` = 3 bits per atlas layer (the set the
@@ -2419,10 +2487,23 @@ impl Grass {
         // RFG-090: a native world keeps blades on the near ring (cards move to the mid
         // ring, which then starts at the camera -- see cs_place_mid).
         let cards_near = cards_mid && clump_renderer && params.near_blades_only == 0.0;
+        // RFG-160: a native world's near ring of PlantMat tufts (native_tufts_on in grass.wgsl)
+        // reaches further, and its grid is sized with the spacing the shader really places them
+        // on -- one plant per 1/sqrt(Plants) m. It used the procedural blade spacing (0.16 m) here,
+        // so the grid's reach only matched the shader's by accident of Plants 8 x 3.5.
+        let native_tufts = self.last_params.native_tuft[0] > 0.5 && params.near_blades_only > 0.0;
+        let near_radius = if native_tufts {
+            (near_radius * self.last_params.native_ring[3]).clamp(8.0, 200.0)
+        } else {
+            near_radius
+        };
         // Must mirror cs_place's `near_spacing` (near_placement_spacing in grass.wgsl).
-        let near_spacing =
+        let near_spacing = if native_tufts {
+            1.0 / self.last_params.native_tuft2[2].clamp(0.25, 64.0).sqrt() / coverage_grid_scale(params.density, 1.0)
+        } else {
             near_placement_spacing(spacing, clump_renderer, cards_near, self.card_spacing)
-                / coverage_grid_scale(params.density, 1.0);
+                / coverage_grid_scale(params.density, 1.0)
+        };
         // The grid has to span the whole disc, so its edge is the diameter. Round
         // up to the workgroup size and cap.
         let want = (2.0 * near_radius / near_spacing).ceil().max(0.0) as u32;
@@ -2628,6 +2709,9 @@ impl Grass {
             tuft_set_aspect: self.last_params.tuft_set_aspect,
             tuft_set_scale: self.last_params.tuft_set_scale,
             card_skip: self.last_params.card_skip,
+            native_look: self.last_params.native_look,
+            native_look2: self.last_params.native_look2,
+            native_ring: self.last_params.native_ring,
         };
         self.near_grid_dim = near_grid_dim;
         self.mid_grid_dim = mid_grid_dim;

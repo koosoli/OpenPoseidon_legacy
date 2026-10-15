@@ -57,8 +57,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -o pipefail
-          cargo test -p wgpu_renderer --lib --no-fail-fast 2>&1 | tee test.txt || true
+          # The runner's bash is -e -o pipefail: a grep that finds nothing would end the step
+          # before the log is published.
+          set +e +o pipefail
+          cargo test -p wgpu_renderer --lib --no-fail-fast 2>&1 | tee test.txt
           # GitHub keeps 10 annotations per step: one line with the count and the names, and
           # the whole log as a release asset (the testing session cannot read job logs).
           failed=$(grep -E "^test .* FAILED$" test.txt | sed -E 's/^test (.*) \.\.\. FAILED$/\1/' | tr '\n' ' ')
@@ -108,7 +110,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cmake --build "$CWR_BUILD_DIR" --target PoseidonGame --parallel 2 -- -k 0 > build-errors.txt 2>&1 || true
+          set +e +o pipefail
+          cmake --build "$CWR_BUILD_DIR" --target PoseidonGame --parallel 2 -- -k 0 > build-errors.txt 2>&1
           grep -E "error( [A-Z]+[0-9]+)?:|error\[|undefined symbol|LNK[0-9]+" build-errors.txt | head -10 | while IFS= read -r line; do
             echo "::error::${line//%/%25}"
           done

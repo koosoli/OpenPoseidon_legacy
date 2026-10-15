@@ -2126,6 +2126,25 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
             if (!DecodeEdds(mount, StripGuid(*maskKey), 2048, mw, mh, satMask) || mw <= 0 || mh <= 0)
                 satMask.clear();
         anyMask = anyMask || !satMask.empty();
+        // RFG-159: the PlantMat's NTOMap (R = normal along the image's u, G = normal down its v,
+        // B = transmission, A = occlusion; BC7). Its normal goes into G/B of each layer's mask twin
+        // below (R stays the mask), cut from the same rectangle; native_tuft_shade lights the card
+        // with it. WGR_NATIVE_TUFT_NTO=0 leaves it out (flat cards, the RFG-117 normal).
+        int nw = 0, nh = 0;
+        std::vector<uint8_t> nto;
+        {
+            static const bool ntoOn = []
+            {
+                const char* env = std::getenv("WGR_NATIVE_TUFT_NTO");
+                return !(env != nullptr && env[0] == '0');
+            }();
+            const std::string* ntoKey = mat.Key("NTOMap");
+            if (ntoKey == nullptr || ntoKey->empty())
+                ntoKey = mat.Key("NTCMap");
+            if (ntoOn && ntoKey != nullptr && !ntoKey->empty())
+                if (!DecodeEdds(mount, StripGuid(*ntoKey), 2048, nw, nh, nto) || nw <= 0 || nh <= 0)
+                    nto.clear();
+        }
         uint8_t* setBase = layers.data() + set * 2u * Layers * LayerBytes;
         float* aspect = _enfusionBladeSetAspect + set * Layers;
         float* scale = _enfusionBladeSetScale + set * Layers;
@@ -2195,6 +2214,35 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
             {
                 std::memset(mdst, 255, LayerBytes);
             }
+            // RFG-159: G/B = the NTO normal (128 = along the card's own normal where there is none).
+            if (!nto.empty())
+            {
+                const int nx0 = std::clamp(static_cast<int>(r.u0 * nw), 0, nw - 1);
+                const int nx1 = std::clamp(static_cast<int>(r.u1 * nw), nx0 + 1, nw);
+                const int ny0 = std::clamp(static_cast<int>(r.v0 * nh), 0, nh - 1);
+                const int ny1 = std::clamp(static_cast<int>(r.v1 * nh), ny0 + 1, nh);
+                const int qw = nx1 - nx0, qh = ny1 - ny0;
+                std::vector<uint8_t> ntoCrop(static_cast<size_t>(qw) * qh * 4u);
+                for (int y = 0; y < qh; ++y)
+                    std::memcpy(ntoCrop.data() + static_cast<size_t>(y) * qw * 4,
+                                nto.data() + (static_cast<size_t>(ny0 + y) * nw + nx0) * 4, static_cast<size_t>(qw) * 4);
+                std::vector<uint8_t> ntoLayer(LayerBytes);
+                stbir_resize_uint8_linear(ntoCrop.data(), qw, qh, qw * 4, ntoLayer.data(), LayerW, LayerH, LayerW * 4,
+                                          STBIR_RGBA);
+                for (size_t i = 0; i < static_cast<size_t>(LayerW) * LayerH; ++i)
+                {
+                    mdst[i * 4 + 1] = ntoLayer[i * 4 + 0];
+                    mdst[i * 4 + 2] = ntoLayer[i * 4 + 1];
+                }
+            }
+            else
+            {
+                for (size_t i = 0; i < static_cast<size_t>(LayerW) * LayerH; ++i)
+                {
+                    mdst[i * 4 + 1] = 128;
+                    mdst[i * 4 + 2] = 128;
+                }
+            }
             char line[96];
             std::snprintf(line, sizeof(line), "%s%d:[%.2f-%.2f,%.2f-%.2f]w%.0f a%.2f s%.2f", layer ? " " : "", layer,
                           r.u0, r.u1, r.v0, r.v1, r.weight, aspect[layer], scale[layer]);
@@ -2221,13 +2269,18 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
         }();
         params[5] = std::clamp(mat.Number("Plants", 8.0f) * plantsScale, 0.25f, 64.0f);
         params[6] = std::clamp(mat.Number("SatMapLerp", 0.8f), 0.0f, 1.0f);
-        params[7] = satMask.empty() ? 0.0f : 1.0f;
+        // RFG-159: 16 x Occlusion + NormalPower (0 = no NTOMap); grass.wgsl native_tuft_shade. The
+        // has-mask flag that sat here was never read per set (native_tuft2.w is the global one).
+        const float occlusion = std::clamp(std::floor(mat.Number("Occlusion", 0.0f)), 0.0f, 63.0f);
+        const float normalPower = nto.empty() ? 0.0f : std::clamp(mat.Number("NormalPower", 1.0f), 0.05f, 15.9f);
+        params[7] = occlusion * 16.0f + normalPower;
         LOG_INFO(Graphics,
                  "Wgpu grass: RFG-138 blade set {} = '{}' (surface '{}'{}): {} cards, Zenith {:.0f}+-{:.0f}, "
-                 "height {:.2f} m +-{:.0f}%, {:.0f} plants/m2, SatMapLerp {:.2f}, mask {} [{}]",
+                 "height {:.2f} m +-{:.0f}%, {:.0f} plants/m2, SatMapLerp {:.2f}, mask {}, NTO {} (NormalPower "
+                 "{:.2f}), Occlusion {:.0f} [{}]",
                  set, plantMat, _enfusionBladeSetSurfaces[set], crop ? ", blades only: authored height" : "",
                  params[0], params[1], params[2], params[3], params[4] * 100.0f, params[5], params[6],
-                 satMask.empty() ? "none" : "yes", report);
+                 satMask.empty() ? "none" : "yes", nto.empty() ? "none" : "yes", normalPower, occlusion, report);
         ++setsBuilt;
         if (set == 0)
         {

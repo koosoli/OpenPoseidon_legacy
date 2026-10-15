@@ -156,6 +156,16 @@ struct GrassParams {
     // .x = bit per atlas layer whose run grows blades only (no cards); .y = bit per layer whose
     // cards are drawn at full coverage (RFG-143 crop distance cards). .zw spare.
     card_skip: vec4<u32>,
+    // RFG-159 (native_tuft_shade): .x on, .y root occlusion strength, .z translucency, .w the
+    // NTOMap green sign (-1 DirectX, 0 = no per-texel normal).
+    native_look: vec4<f32>,
+    // .x receive cascade shadows, .y up-bend of the shading normal, .z NormalPower multiplier,
+    // .w cascade fade-out distance (m).
+    native_look2: vec4<f32>,
+    // RFG-160 (native near ring): .x distance past which plants thin as d0/d, .y the widening
+    // exponent of the survivors, .z height floor in the outer dissolve, .w radius multiplier
+    // (applied by grass/mod.rs to near_radius).
+    native_ring: vec4<f32>,
 };
 
 // 32 bytes. `pos_seed` stays f32 for world precision; everything the compute
@@ -561,6 +571,27 @@ fn lod_height_scale(packed_z: u32) -> f32 {
     // margin blades come down to a quarter, which is what makes the edge read as a fade.
     let f = unpack2x16unorm(packed_z);
     return mix(0.45, 1.0, f.x) * (1.0 - 0.75 * f.y);
+}
+
+// RFG-160: a native world's tufts keep (most of) their height into the ring's outer dissolve --
+// shrinking them to 0.45 there flattened the meadow from 20 m on -- and past native_ring.x metres
+// they thin as d0/d, so the plants per unit of screen stay about constant out to the larger ring,
+// the survivors widened by (d/d0)^native_ring.y so the meadow keeps its cover. The thinning hash
+// has a salt of its own (see lod_dissolve on why salts must differ).
+fn native_lod_height_scale(packed_z: u32) -> f32 {
+    let f = unpack2x16unorm(packed_z);
+    return mix(clamp(grass.native_ring.z, 0.0, 1.0), 1.0, f.x) * (1.0 - 0.75 * f.y);
+}
+fn native_tuft_keep(distance: f32) -> f32 {
+    let d0 = grass.native_ring.x;
+    if (d0 <= 0.5 || distance <= d0) { return 1.0; }
+    return d0 / distance;
+}
+fn native_tuft_thinned(cell_id: vec2<i32>, distance: f32) -> bool {
+    return hash_cell01(cell_id, 0x2b7e1516u) > native_tuft_keep(distance);
+}
+fn native_tuft_widen(distance: f32) -> f32 {
+    return pow(1.0 / native_tuft_keep(distance), clamp(grass.native_ring.y, 0.0, 1.0));
 }
 
 // Which photographed atlas layer a clump uses. Layer 0 is the primary clump and
@@ -1257,6 +1288,11 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     let jitter = (hash_cell2(cell_id, 0x19a8b437u) - vec2<f32>(0.5)) * (near_spacing * 1.85);
     let world_xz = cell_world + jitter;
     let delta = world_xz - frame.cam_pos.xz;
+    // RFG-160: a native world's tufts thin with distance (native_tuft_thinned) before anything
+    // costlier is evaluated; past the ring nothing survives the dissolve below anyway.
+    if (native_tufts_on()) {
+        if (length(delta) > grass.near_radius || native_tuft_thinned(cell_id, length(delta))) { return; }
+    }
     let coverage = min(grass.density, 1.0) * clamp(grass.lod_density.x, 0.0, 1.0) * density_field(world_xz);
     if (seed > coverage) { return; }
     // Dissolve out over the last `band` metres instead of stopping dead on the
@@ -1535,7 +1571,9 @@ fn native_tuft_geometry(inst: vec4<f32>, inst_packed: vec4<u32>, card: u32, t: f
     }
     let jitter = hash11(inst.xz + vec2<f32>(f32(card) * 7.0 + 1.0, 41.0)) - 0.5;
     let height = max(p0.w, 0.01) * scale *
-        (1.0 + jitter * 2.0 * clamp(p1.x, 0.0, 1.0)) * lod_height_scale(inst_packed.z);
+        (1.0 + jitter * 2.0 * clamp(p1.x, 0.0, 1.0)) * native_lod_height_scale(inst_packed.z);
+    // RFG-160: thinned with distance in cs_place, widened here by the same distance.
+    let widen = native_tuft_widen(length(inst.xz - frame.cam_pos.xz));
     let crush_dir = unpack2x16snorm(inst_packed.x);
     let crush = unpack2x16unorm(inst_packed.y).x;
     let depth = imprint_depth();
@@ -1555,7 +1593,7 @@ fn native_tuft_geometry(inst: vec4<f32>, inst_packed: vec4<u32>, card: u32, t: f
     let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * sway *
         (0.035 + 0.21 * wind.gust + wind.turbulence) * (1.0 - depth * crush);
     g.u = select(1.0, 0.0, left);
-    g.local = g.axis * ((g.u - 0.5) * height * aspect) + g.up * (crushed_height * t) +
+    g.local = g.axis * ((g.u - 0.5) * height * aspect * widen) + g.up * (crushed_height * t) +
         (wind_bend + crush_bend) * (t * t);
     // RFG-138: set s owns array layers 16s..16s+7 (colour) and 16s+8.. (its SatMapBlendMask), so
     // native_sat_mask's +8 stays inside the set.
@@ -2752,16 +2790,135 @@ fn native_tuft_facing(in: VsOut, front: bool) -> VsOut {
     o.normal = normalize(mix(select(-in.normal, in.normal, front), vec3<f32>(0.0, 1.0, 0.0), 0.5));
     return o;
 }
+
+// RFG-159: a Reforger PlantMat tuft lit as a tuft, not as a sheet of paper.
+//
+// The RFG-117 shading lit every card with one normal -- the card's, bent half way to upright,
+// then another quarter -- and no occlusion: every texel of a tuft took the same light, so the
+// meadow read as flat painted cards (the owner's "grass looks flat next to Reforger"). What gives
+// Reforger's tufts their volume is in the PlantMat: its NTOMap carries a per-texel normal for the
+// atlas (R = along the card, G = down the image, DirectX convention; measured on cp_grass_01: the
+// covered texels' normals average 34 degrees off the card, the tuft tops lean image-up), scaled by
+// `NormalPower`; `Occlusion` darkens the base (wheat 21, grass_03 8, grass_01 0). The loader puts
+// the NTO normal in the G/B channels of each colour layer's SatMapBlendMask twin (R stays the
+// mask), and the set's Occlusion and NormalPower in tuft_sets[2s+1].w (16 x Occlusion +
+// NormalPower; NormalPower 0 = the set has no NTOMap). On top: the tufts receive the cascade
+// shadows (buildings and trees shade the meadow; RFG-117 cards took only the terrain's own
+// shadow) and transmit sun through the blades when backlit.
+fn native_srgb_encode(m: f32) -> f32 {
+    return select(1.055 * pow(m, 1.0 / 2.4) - 0.055, m * 12.92, m <= 0.0031308);
+}
+
+fn native_tuft_shade(in: VsOut, front: bool) -> vec4<f32> {
+    let world = in.world_rel + frame.cam_pos.xyz;
+    let dist = max(length(in.world_rel), 0.0001);
+    let view_dir = -in.world_rel / dist;
+    let up = vec3<f32>(0.0, 1.0, 0.0);
+    let luma = vec3<f32>(0.2126, 0.7152, 0.0722);
+    let shading_detail = blade_shading_detail(in.blade_uv.xy);
+    let layer = blade_layer(in.blade_uv.z);
+    let bset = min(u32(max(layer, 0)) / 16u, 7u);
+    let set_word = select(0.0, grass.tuft_sets[bset * 2u + 1u].w, blade_sets_on());
+    let occlusion = floor(max(set_word, 0.0) / 16.0);
+    let normal_power = max(set_word - occlusion * 16.0, 0.0);
+    // Derivatives first: uniform control flow (the shadow lookup below sits in a branch).
+    let dwx = dpdx(in.world_rel);
+    let dwy = dpdy(in.world_rel);
+
+    // Albedo: the atlas, leaning towards the ground colour by SatMapLerp x SatMapBlendMask (as
+    // grass_shade does for a native blade), the per-plant and field variation, the gust highlight.
+    let blade = textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, layer, frame.renscale.x);
+    let aux = textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, layer + 8, frame.renscale.x);
+    let field_tint = clump_noise(world.xz, 0.003, 0x5e3a91c7u);
+    let variation = mix(1.0, mix(0.78, 1.20, mix(in.seed, field_tint, 0.55)), grass.debug_flags.z);
+    let gust_highlight = 1.0 + in.wind_gust * clamp(grass.wind_strength, 0.0, 1.5) * (0.035 + 0.075 * in.height_t);
+    let mean_layer = u32(max(layer, 0));
+    let layer_mean = select(vec4<f32>(0.0), grass.blade_layer_means[min(mean_layer, 7u)], mean_layer < 8u);
+    let blade_colour = native_blade_colour(blade.rgb, layer_mean, shading_detail);
+    var albedo = blade_colour;
+    if (grass.native2.x > 0.0) {
+        let ground = grass_ground_colour(world.xz);
+        let recoloured = ground * (dot(blade_colour, luma) / max(dot(ground, luma), 0.02));
+        var lerp = grass.native2.x;
+        if (blade_sets_on()) {
+            lerp = grass.tuft_sets[bset * 2u + 1u].z;
+        }
+        let mask = select(1.0, native_srgb_encode(aux.r), grass.native_tuft2.w > 0.5);
+        albedo = mix(blade_colour, recoloured, clamp(lerp, 0.0, 1.0) * mask);
+    }
+    albedo *= variation * gust_highlight;
+
+    // The card's frame: u runs along the card's horizontal axis, the image's v runs down it.
+    let card_n = normalize(in.normal);
+    let tangent = normalize(vec3<f32>(card_n.z, 0.0, -card_n.x));
+    let card_up = cross(card_n, tangent);
+    let face = select(-card_n, card_n, front);
+    let nto = vec2<f32>(native_srgb_encode(aux.g), native_srgb_encode(aux.b)) * 2.0 - 1.0;
+    let k = normal_power * clamp(grass.native_look2.z, 0.0, 4.0) * select(0.0, 1.0, abs(grass.native_look.w) > 0.5);
+    let z0 = sqrt(max(1.0 - dot(nto, nto), 0.04));
+    let ts = normalize(vec3<f32>(nto.x * k, nto.y * k * grass.native_look.w, z0));
+    let bumped = normalize(tangent * ts.x + card_up * ts.y + face * ts.z);
+    let bent = normalize(mix(bumped, up, clamp(grass.native_look2.y, 0.0, 1.0)));
+    // Sub-pixel tufts: their texels average, so does their light -- towards upright.
+    let n = normalize(mix(up, bent, shading_detail));
+
+    let light_dir = grass_light_dir();
+    let ndl_raw = dot(n, light_dir);
+    let ndl = max(ndl_raw, 0.0);
+    let wrap = max((ndl_raw + 0.35) / 1.35, 0.0);
+    let terrain_shadow = max(terrain_sun_shadow(world.xz, world.y), canopy_sun_shadow(world));
+    let cloud_lit = cloud_sun_shadow(world.xz);
+    var cascade = 0.0;
+    if (grass.native_look2.x > 0.5) {
+        let reach = max(grass.native_look2.w, 10.0);
+        cascade = shadow_strength(in.world_rel, face, 1.0, dwx, dwy) *
+            (1.0 - smoothstep(reach * 0.6, reach, dist));
+    }
+    let sun_vis = (1.0 - max(terrain_shadow, cascade)) * cloud_lit;
+    // Occlusion towards the base: neighbours stand between it and the sky (all of it) and the
+    // sun (half of it).
+    let occ = clamp(occlusion / 20.0, 0.0, 1.0) * clamp(grass.native_look.y, 0.0, 1.0);
+    let root_ao = mix(1.0 - occ, 1.0, smoothstep(0.0, 0.75, in.height_t));
+    let direct = frame.sun_diffuse.rgb * mix(ndl, wrap, 0.25) * sun_vis * mix(1.0, root_ao, 0.5);
+    let ambient = grass_sky_fill(normalize(mix(n, up, 0.35)), view_dir, light_dir) * sky_vis_ao(world.xz) *
+        canopy_sky_ao(world) * root_ao;
+    // Sun through the blade: light arriving on the side the viewer does not see, strongest
+    // looking towards the sun. Tinted by the blade itself (leaf transmission is its own green).
+    let behind = max(-dot(face, light_dir), 0.0);
+    let forward = pow(max(dot(view_dir, -light_dir), 0.0), 3.0);
+    let transmission = frame.sun_diffuse.rgb * (behind * (0.35 + 0.65 * forward)) *
+        clamp(grass.native_look.z, 0.0, 2.0) * sun_vis * root_ao;
+    let tint = min(albedo * 1.8 / max(dot(albedo, luma), 0.02) * 0.5, vec3<f32>(1.5));
+    let lit = albedo * (ambient + direct) + albedo * tint * transmission;
+#ifdef GRASS_DEBUG_ALBEDO
+    return vec4<f32>(albedo, 1.0);
+#endif
+#ifdef GRASS_DEBUG_DIRECT
+    return vec4<f32>(direct * 0.25, 1.0);
+#endif
+#ifdef GRASS_DEBUG_AMBIENT
+    return vec4<f32>(ambient, 1.0);
+#endif
+    let fogged = apply_fog(lit, in.world_rel);
+    return vec4<f32>(select(lit, fogged, grass.render_flags.y >= 0.5), 1.0);
+}
+
+fn native_tuft_colour(in: VsOut, front: bool) -> vec4<f32> {
+    if (grass.native_look.x > 0.5) {
+        return native_tuft_shade(in, front);
+    }
+    return grass_shade(native_tuft_facing(in, front));
+}
 @fragment
 fn fs_grass_native_tuft(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     if (native_tuft_alpha(in) < tuft_alpha_cutoff()) { discard; }
-    return grass_shade(native_tuft_facing(in, front));
+    return native_tuft_colour(in, front);
 }
 @fragment
 fn fs_grass_native_tuft_a2c(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     let cov = a2c_coverage(native_tuft_alpha(in), tuft_alpha_cutoff());
     if (cov <= 0.0) { discard; }
-    return vec4<f32>(grass_shade(native_tuft_facing(in, front)).rgb, cov);
+    return vec4<f32>(native_tuft_colour(in, front).rgb, cov);
 }
 @fragment
 fn fs_grass_native_tuft_prepass(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec2<f32> {

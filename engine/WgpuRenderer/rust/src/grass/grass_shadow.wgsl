@@ -60,6 +60,10 @@ struct GrassParams {
     tuft_set_aspect: array<vec4<f32>, 16>,
     tuft_set_scale: array<vec4<f32>, 16>,
     card_skip: vec4<u32>,
+    // RFG-159: mirrors grass.wgsl (native tuft shading; unused here).
+    native_look: vec4<f32>,
+    native_look2: vec4<f32>,
+    native_ring: vec4<f32>,
 };
 // Must mirror grass.wgsl's 32-byte layout exactly: both shaders bind the same
 // instance buffer through the shared `data_layout`.
@@ -115,6 +119,17 @@ fn lod_height_scale(packed_z: u32) -> f32 {
     // margin blades come down to a quarter, which is what makes the edge read as a fade.
     let f = unpack2x16unorm(packed_z);
     return mix(0.45, 1.0, f.x) * (1.0 - 0.75 * f.y);
+}
+
+// RFG-160: mirrors grass.wgsl native_lod_height_scale / native_tuft_widen.
+fn native_lod_height_scale(packed_z: u32) -> f32 {
+    let f = unpack2x16unorm(packed_z);
+    return mix(clamp(grass.native_ring.z, 0.0, 1.0), 1.0, f.x) * (1.0 - 0.75 * f.y);
+}
+fn native_tuft_widen(distance: f32) -> f32 {
+    let d0 = grass.native_ring.x;
+    if (d0 <= 0.5 || distance <= d0) { return 1.0; }
+    return pow(distance / d0, clamp(grass.native_ring.y, 0.0, 1.0));
 }
 
 fn native_blade_height_scale() -> f32 {
@@ -508,7 +523,8 @@ fn vs_grass_native_tuft_shadow(@builtin(vertex_index) vertex_index: u32,
     }
     let jitter = hash11(inst.xz + vec2<f32>(f32(card) * 7.0 + 1.0, 41.0)) - 0.5;
     let height = max(p0.w, 0.01) * scale *
-        (1.0 + jitter * 2.0 * clamp(p1.x, 0.0, 1.0)) * lod_height_scale(inst_packed.z);
+        (1.0 + jitter * 2.0 * clamp(p1.x, 0.0, 1.0)) * native_lod_height_scale(inst_packed.z);
+    let widen = native_tuft_widen(length(inst.xz - shadow.cam_pos.xz));
     let crush_dir = unpack2x16snorm(inst_packed.x);
     let crush = unpack2x16unorm(inst_packed.y).x;
     let depth = clamp(grass.photo_mix.w, 0.0, 0.95);
@@ -525,7 +541,7 @@ fn vs_grass_native_tuft_shadow(@builtin(vertex_index) vertex_index: u32,
     let wind_bend = vec3<f32>(wind.x, 0.0, wind.y) * max(grass.wind_strength, 0.8) * (height / 0.6) *
         (0.035 + 0.21 * wind.z + wind.w) * (1.0 - depth * crush);
     let u = select(1.0, 0.0, left);
-    let local = axis * ((u - 0.5) * height * aspect) + up * (crushed_height * t) + (wind_bend + crush_bend) * (t * t);
+    let local = axis * ((u - 0.5) * height * aspect * widen) + up * (crushed_height * t) + (wind_bend + crush_bend) * (t * t);
     out.clip = shadow.light_vp * vec4<f32>(inst.xyz + local - shadow.cam_pos.xyz, 1.0);
     out.uv = vec3<f32>(u, 1.0 - t, f32(bset * 16u + layer));
     return out;
