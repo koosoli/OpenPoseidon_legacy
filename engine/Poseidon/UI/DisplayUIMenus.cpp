@@ -945,6 +945,7 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
             LOG_INFO(Core, "ARMA1-TEST mission runtime entered ({}.{})", (const char*)Glob.header.filename,
                      (const char*)Glob.header.worldname);
             Poseidon::Arma1Compat::LogAssetCensus();
+            Poseidon::Arma1Compat::LogUnitMotion(true);
         }
         else if (now - testStart >= static_cast<DWORD>(testSeconds * 1000.0f))
         {
@@ -958,6 +959,8 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
                          p.Z(), p.Y(), GLandscape->SurfaceY(p.X(), p.Z()),
                          in && in != who ? " in a vehicle" : "");
             }
+            Poseidon::Arma1Compat::LogUnitMotion(false);
+            Poseidon::Arma1Compat::LogSoundCensus();
             LOG_INFO(Core, "ARMA1-TEST PASS ({}.{}) played {} s", (const char*)Glob.header.filename,
                      (const char*)Glob.header.worldname, testSeconds);
             testStart = 0xFFFFFFFF;

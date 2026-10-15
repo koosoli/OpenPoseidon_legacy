@@ -202,4 +202,9 @@ void LogAssetCensus();
 // The player's position and the map models around him (part of the census; logged again
 // at the first test screenshot, once streamed objects have arrived).
 void LogPlayerSurroundings();
+// Test runs: positions of every soldier at the start, and at the end which AI soldiers did
+// not move and what their AI was doing (Arma2Census.cpp).
+void LogUnitMotion(bool atStart);
+// Test runs: the sounds requested, failed and played (Audio/SoundTestLog.hpp).
+void LogSoundCensus();
 } // namespace Poseidon::Arma1Compat

@@ -6,6 +6,7 @@
 #include <Poseidon/Audio/Core/WaveLogic.hpp>
 #include <Poseidon/Audio/Shared/AudioMath.hpp>
 #include <Poseidon/Audio/Shared/DX8Reference.hpp>
+#include <Poseidon/Audio/SoundTestLog.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/ScopedTimer.hpp>
 #include <Poseidon/Core/TaskPool.hpp>
@@ -44,10 +45,12 @@ WaveOAL::WaveOAL(SoundSystemOAL* sys, RString name, bool is3D) : IWave(name), _s
         // Empty sound name — a config slot with no sound assigned (common for
         // some weapons/vehicles). Nothing to load; not an error. Logging it trips
         // --strict during mass combat where many such slots are touched.
+        Audio::SoundTestLog::NoteRequest(nameStr, false);
         _loadError = true;
         return;
     }
     _stream = SoundLoadFile(nameStr);
+    Audio::SoundTestLog::NoteRequest(nameStr, _stream != nullptr);
     if (!_stream)
     {
         _loadError = true;
@@ -1116,6 +1119,7 @@ void WaveOAL::DoPlay()
 
     LOG_DEBUG(Audio, "Play: {} (vol={} adj={} {})", static_cast<const char*>(Name()), _volume, _volumeAdjust,
               _state.looping ? "loop" : "once");
+    Audio::SoundTestLog::NotePlay(static_cast<const char*>(Name()));
     OnPlayOnce();
 }
 
