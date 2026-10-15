@@ -1358,6 +1358,29 @@ void DisplayIntro::OnSimulate(EntityAI* vehicle)
 {
     DisplayCutscene::OnSimulate(vehicle);
 
+    // --arma1-test-seconds on a mission that has only an intro (an Arma 3 scene: Eden's
+    // ScenarioData with an Intro and no Mission). DisplayMission keeps the timer for real
+    // missions; without this one the run never ended and the harness timed out.
+    if (const float testSeconds = AppConfig::Instance().GetArma1TestSeconds(); testSeconds > 0.0f)
+    {
+        static DWORD introTestStart = 0;
+        const DWORD now = Poseidon::Foundation::GlobalTickCount();
+        if (introTestStart == 0)
+        {
+            introTestStart = now;
+            LOG_INFO(Core, "ARMA1-TEST intro runtime entered ({}.{}) -- the mission has only an intro",
+                     (const char*)Glob.header.filename, (const char*)Glob.header.worldname);
+        }
+        else if (introTestStart != 0xFFFFFFFF && now - introTestStart >= static_cast<DWORD>(testSeconds * 1000.0f))
+        {
+            LOG_INFO(Core, "ARMA1-TEST PASS ({}.{}) played {} s (intro only)", (const char*)Glob.header.filename,
+                     (const char*)Glob.header.worldname, testSeconds);
+            introTestStart = 0xFFFFFFFF;
+            GApp->m_exitCode = 0;
+            GApp->m_closeRequest = true;
+        }
+    }
+
     if (AppConfig::Instance().IsMissionSmokeCheck() && !_missionSmokeReported)
     {
         _missionSmokeReported = true;
