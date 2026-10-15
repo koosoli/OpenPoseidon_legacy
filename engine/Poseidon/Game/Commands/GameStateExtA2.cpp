@@ -29,6 +29,7 @@
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICenter.hpp>
 #include <Poseidon/AI/AIGroup.hpp>
+#include <Poseidon/Audio/DynSound.hpp>
 #include <Poseidon/Audio/Streaming/WaveStream.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -44,6 +45,8 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Detection/Detector.hpp>
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
+
+#include <Random/randomGen.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -1978,6 +1981,64 @@ GameValue A2CreateVehicleArray(const GameState* state, GameValuePar oper1)
     return created;
 }
 
+GameValue MarkerGetPos(const GameState* state, GameValuePar oper1);
+
+// createSoundSource [type, position, markers, placement] (C4_BitterChill's burning houses):
+// a CfgVehicles class whose `sound` names a CfgSFX entry, played where it is put -- the
+// object a mission.sqm sound source becomes (AICenter's CreateSoundSource), placed the same
+// way: one of the markers or the position, then within `placement` metres of it.
+GameValue A2CreateSoundSource(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& args = oper1;
+    if (args.Size() < 2 || args[0].GetType() != GameString)
+        return GameValueExt((Object*)nullptr);
+    const RString type = args[0];
+    const ParamEntry* cls = (Pars >> "CfgVehicles").FindEntry(type);
+    if (!cls || !cls->IsClass())
+        cls = Arma1Compat::FindConfigClass("CfgVehicles", type);
+    const ParamEntry* soundEntry = cls && cls->IsClass() ? cls->FindEntry("sound") : nullptr;
+    const RString sound = soundEntry ? RString(*soundEntry) : RString();
+    if (sound.GetLength() == 0)
+    {
+        LOG_WARN(Script, "createSoundSource: '{}' names no sound", (const char*)type);
+        return GameValueExt((Object*)nullptr);
+    }
+    Vector3 pos(VZero);
+    if (!GetPos(state, pos, args[1]))
+        return GameValueExt((Object*)nullptr);
+    if (args.Size() >= 3 && args[2].GetType() == GameArray)
+    {
+        const GameArrayType& markers = args[2];
+        const int n = markers.Size();
+        const int i = n > 0 ? toIntFloor((n + 1) * GRandGen.RandomValue()) : n;
+        if (i < n && markers[i].GetType() == GameString)
+        {
+            Vector3 markerPos;
+            if (GetPos(state, markerPos, MarkerGetPos(state, markers[i])))
+                pos = markerPos;
+        }
+    }
+    const float placement = args.Size() >= 4 && args[3].GetType() == GameScalar ? (float)args[3] : 0.0f;
+    if (placement > 0)
+    {
+        float xr, zr;
+        do
+        {
+            xr = (2.0f * GRandGen.RandomValue() - 1.0f) * placement;
+            zr = (2.0f * GRandGen.RandomValue() - 1.0f) * placement;
+        } while (Square(xr) + Square(zr) > placement * placement);
+        pos[0] += xr;
+        pos[2] += zr;
+    }
+    pos[1] = GLandscape->SurfaceYAboveWater(pos[0], pos[2]);
+    DynSoundSource* source = new DynSoundSource(sound);
+    source->SetPosition(pos);
+    GWorld->AddBuilding(source);
+    LOG_INFO(Script, "createSoundSource '{}': sound '{}' at {:.1f},{:.1f}", (const char*)type, (const char*)sound,
+             pos.X(), pos.Z());
+    return GameValueExt(source);
+}
+
 // unit moveInCargo [vehicle, cargoIndex]
 GameValue A2MoveInCargoIndex(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
@@ -2659,6 +2720,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameString, "nearestLocation", A2NearestLocation, GameArray),
     GameFunction(GameObject, "createVehicle", A2CreateVehicleArray, GameArray),
     GameFunction(GameObject, "createVehicleLocal", A2CreateVehicleArray, GameArray),
+    GameFunction(GameObject, "createSoundSource", A2CreateSoundSource, GameArray),
     GameFunction(GameBool, "simulationEnabled", A2TrueUnary, GameObject),
     GameFunction(GameNothing, "cutFadeOut", A2NothingUnary, GameScalar),
     GameFunction(GameObject, "hcLeader", A2ObjNullUnary, GameGroup),

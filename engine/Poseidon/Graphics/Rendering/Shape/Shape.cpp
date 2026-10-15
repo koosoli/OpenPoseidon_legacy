@@ -1788,6 +1788,11 @@ void Shape::RegisterTexture(Texture* texture, int selection)
     const Selection& faceSel = sel.Faces();
     if (faceSel.Size() < 1)
     {
+        // An Arma 2 ODOL selection names its sections and keeps no face list (the heads'
+        // `osobnost`). Without this the face texture an Arma 2 head wears was never
+        // registered: no area, so it stayed at its smallest mip -- a blurred, violet face.
+        if (sel.NSections() > 0)
+            RegisterTexture(texture, GetSection(sel.GetSection(0)).properties.GetTexture());
         return; // empty selection
     }
     int faceIndex = faceSel[0];
