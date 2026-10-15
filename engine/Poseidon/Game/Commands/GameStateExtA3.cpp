@@ -479,6 +479,32 @@ GameValue A3Insert(const GameState* state, GameValuePar oper1, GameValuePar oper
     return NOTHING;
 }
 
+// try {code} catch {code}: the code runs where it stands (its _this is the caller's, which
+// `params` inside it reads). throw has no unwinding to go with it here: it is accepted and the
+// code goes on, and catch hands on what try returned -- Arma 3's own functions throw only on
+// their error paths.
+GameValue A3Try(const GameState* state, GameValuePar oper1)
+{
+    GameVarSpace local(state->GetContext());
+    state->BeginContext(&local);
+    const RString code = oper1;
+    const GameValue ret = state->EvaluateMultiple(code);
+    state->EndContext();
+    return ret;
+}
+
+GameValue A3Catch(const GameState* state, GameValuePar oper1, GameValuePar)
+{
+    return oper1;
+}
+
+GameValue A3Throw(const GameState* state, GameValuePar oper1)
+{
+    LOG_DEBUG(Script, "Arma 3: throw {} (no exception handling here; the script goes on)",
+              (const char*)oper1.GetText());
+    return NOTHING;
+}
+
 GameValue A3Reverse(const GameState* state, GameValuePar oper1)
 {
     if (!Writable(state, oper1))
@@ -1978,6 +2004,8 @@ const Macro kMacros2[] = {
     {"setSkill", 'b', GameNothing, GameObject, GameArray, ""},
     // addMagazine [name, rounds]: the magazine (a full one)
     {"addMagazine", 'b', GameNothing, GameObject, GameArray, "(_this select 0) addMagazine ((_this select 1) select 0)"},
+    // reveal [target, knowledge]: the knowledge level has no counterpart, the target is revealed
+    {"reveal", 'b', GameNothing, GameObject | GameGroup, GameArray, "(_this select 0) reveal ((_this select 1) select 0)"},
     {"setFog", 'b', GameNothing, GameScalar, GameArray, "(_this select 0) setFog ((_this select 1) select 0)"},
     {"cutText", 'b', GameNothing, GameString | GameScalar, GameArray, "cutText (_this select 1)"},
     {"titleText", 'b', GameNothing, GameString | GameScalar, GameArray, "titleText (_this select 1)"},
@@ -2037,6 +2065,8 @@ const GameFunction A3Unary[] = {
     GameFunction(GameBool, "params", A3Params, GameArray),
     GameFunction(GameAny, "param", A3Param, GameArray | GameScalar),
     GameFunction(GameNothing, "reverse", A3Reverse, GameArray),
+    GameFunction(GameAny, "try", A3Try, GameString),
+    GameFunction(GameNothing, "throw", A3Throw, GameVoid),
     GameFunction(GameAny, "selectRandom", A3SelectRandom, GameArray),
     GameFunction(GameAny, "selectRandomWeighted", A3SelectRandomWeighted, GameArray),
     GameFunction(GameAny, "selectMax", A3SelectMax, GameArray),
@@ -2086,6 +2116,7 @@ GameValue A3HashIndex(const GameState* state, GameValuePar oper1, GameValuePar o
 const GameOperator A3Binary[] = {
     GameOperator(GameAny, "#", mocnina, A3HashIndex, GameArray | GameString, GameScalar),
     GameOperator(GameBool, "params", function, A3ParamsBinary, GameVoid, GameArray),
+    GameOperator(GameAny, "catch", function, A3Catch, GameVoid, GameString),
     GameOperator(GameBool, "&&", logicAnd, A3LazyAnd, GameBool, GameString),
     GameOperator(GameBool, "and", logicAnd, A3LazyAnd, GameBool, GameString),
     GameOperator(GameBool, "||", logicOr, A3LazyOr, GameBool, GameString),

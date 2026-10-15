@@ -1183,6 +1183,24 @@ GameValue A2EmptyArrayUnary(const GameState* state, GameValuePar)
     return state->CreateGameValue(GameArray);
 }
 
+// getGroupIconParams: no group icons are drawn here, so every group has the neutral ones --
+// [colour, text, scale, visible] -- rather than an empty array that scripts index into
+// ((getGroupIconParams _grp) select 2 is the scale).
+GameValue A2GroupIconParams(const GameState* state, GameValuePar)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& a = value;
+    GameValue colour = state->CreateGameValue(GameArray);
+    GameArrayType& c = colour;
+    for (int i = 0; i < 4; i++)
+        c.Add(GameValue(1.0f));
+    a.Add(colour);
+    a.Add(GameValue(RString("")));
+    a.Add(GameValue(1.0f));
+    a.Add(GameValue(true));
+    return value;
+}
+
 GameValue A2EmptyArrayBinary(const GameState* state, GameValuePar, GameValuePar)
 {
     return state->CreateGameValue(GameArray);
@@ -2657,7 +2675,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameScalar, "ctrlMapScale", A2OneUnary, GameScalar),
     GameFunction(GameString, "createDiaryLink", A2TextLogEmpty, GameArray),
     GameFunction(GameString, "waypointDescription", A2TextLogEmpty, GameArray),
-    GameFunction(GameArray, "getGroupIconParams", A2EmptyArrayUnary, GameGroup),
+    GameFunction(GameArray, "getGroupIconParams", A2GroupIconParams, GameGroup),
     GameFunction(GameScalar, "lnbSize", A2ZeroUnary, GameScalar | GameArray),
 };
 
