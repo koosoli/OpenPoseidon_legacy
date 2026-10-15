@@ -55,6 +55,8 @@
 
 using namespace Poseidon;
 
+GameValue SideResistance(const GameState* state); // GameStateExtUi.cpp
+
 GameValue A1TypeName(const GameState* state, GameValuePar oper1); // GameStateExtA1Config.cpp
 GameValue ObjGetVectorDir(const GameState* state, GameValuePar oper1);
 GameValue ObjGetVectorUp(const GameState* state, GameValuePar oper1);
@@ -2047,6 +2049,8 @@ const GameNular A3Nular[] = {
     GameNular(GameHashMap, "createHashMap", A3CreateHashMap),
     GameNular(GameString, "endl", A3Endl),
     GameNular(GameScalar, "scriptNull", A3ScriptNull),
+    // Arma 3's name for the resistance side (BIS_fnc_sideColor, BIS_fnc_sideID, ...)
+    GameNular(GameSide, "independent", SideResistance),
     GameNular(GameBool, "canSuspend", A3CanSuspend),
     GameNular(GameBool, "hasInterface", A3True),
     GameNular(GameBool, "isDedicated", A3False),
