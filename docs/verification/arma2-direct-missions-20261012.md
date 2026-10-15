@@ -132,6 +132,7 @@ and are not counted.
 | focus 20 | `6e89b47` | T01, C2B, TE02, C4_BitterChill, MP_Superpowers, laptop gl33, `OP_A2_EVAL` `createSoundSource ["Sound_Fire", getPos player, [], 0]` | 5 | 5 | 0; census 614 Arma, 0 CWA. Default heads now sharp (skin, brows, stubble; `3e4dc87`). `createSoundSource` created the `fire` sound source in all 5 (heard: not checked). Shadow patches on faces unchanged (not touched) |
 | wgpu 3 | `6e89b47` | T01, C2B, TE02, laptop **WGPU, DX12** | 0 | 0 | No stderr panic any more: the renderer is created in all three (~60 s), then no simulation step until the watchdog (180 s, exit 3) |
 | wgpu 4 | `6e89b47` | T01, laptop **WGPU, Vulkan** | 1 | 1 | Renderer created in 60 s, mission entered and played to the end (exit 0, 154 s) -- but at a few frames per second, and no screenshots were written |
+| 22 | `6e89b47` | 98, laptop gl33, face pictures | 98 | 97 | 0; the one script error is MP_Paradrop's own (as in run 21); census 13049 Arma, 0 CWA. No regression from the heads, faces and `createSoundSource`. Face pictures sampled (8 missions): sharp faces; the shadow patches remain; several default heads look as if their eyes were shut (the face's own bones are not posed -- open). SP_Counterattack's face shots show the road (player seated), CE5A's are dark (night) |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
