@@ -152,6 +152,9 @@ RString GetUserParams()
 RString GetCampaignDirectory(RString campaign)
 {
     PoseidonAssert(campaign.GetLength() > 0);
+    // an Arma 2 campaign lives inside its archive ("ca/missions/campaign/")
+    if (const std::string base = Arma1Compat::CampaignBase((const char*)campaign); !base.empty())
+        return RString(base.c_str());
     return RString("campaigns/") + campaign + RString("/");
 }
 
@@ -159,6 +162,8 @@ RString GetCampaignMissionDirectory(RString campaign, RString mission)
 {
     PoseidonAssert(campaign.GetLength() > 0);
     PoseidonAssert(mission.GetLength() > 0);
+    if (const std::string base = Arma1Compat::CampaignBase((const char*)campaign); !base.empty())
+        return RString(base.c_str()) + RString("missions/") + mission + RString("/");
     return RString("campaigns/") + campaign + RString("/missions/") + mission + RString("/");
 }
 

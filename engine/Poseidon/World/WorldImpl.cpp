@@ -2028,10 +2028,11 @@ void SetCampaign(RString name);
 // debriefing and the following missions run as in the campaign.
 static bool StartArma1CampaignMission(const char* missionFile)
 {
-    const std::string base = Arma1Compat::CampaignBaseForMission(missionFile); // "campaigns/ca/"
-    if (base.size() < 12)
+    // "campaigns/ca/" (Arma 1) or "ca/missions/campaign/" (Arma 2, inside its archive)
+    const std::string base = Arma1Compat::CampaignBaseForMission(missionFile);
+    const std::string campaign = base.empty() ? std::string() : Arma1Compat::CampaignName(base);
+    if (campaign.empty())
         return false;
-    const std::string campaign = base.substr(10, base.size() - 11);
     std::string file = missionFile;
     std::replace(file.begin(), file.end(), '\\', '/');
     const size_t end = file.rfind('/');
