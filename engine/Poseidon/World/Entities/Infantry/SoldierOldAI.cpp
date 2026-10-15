@@ -2709,6 +2709,14 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
         minPos = ManPosWeapon;
         maxPos = ManPosWeapon;
     }
+    else if (_forceFireWeapon >= 0 && _forceFireWeapon == _currentWeapon && LauncherSelected() && LauncherReady())
+    {
+        // A scripted `fire` of a launcher (unit fire "LAWLauncher"): raise it as an AT soldier
+        // in combat would. Without this a soldier out of combat stayed in his rifle move,
+        // where FireWeapon refuses a missile, and the shot never left (CWA and Arma alike).
+        minPos = ManPosWeapon;
+        maxPos = ManPosWeapon;
+    }
     else if (LauncherSelected() && LauncherReady() && fabs(speedWanted) < 0.5f && unit->GetCombatMode() >= CMCombat &&
              LauncherWanted())
     {

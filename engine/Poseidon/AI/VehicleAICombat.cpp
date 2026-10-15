@@ -978,7 +978,10 @@ void EntityAI::SimulateWeaponActivity(float deltaT, SimulationImportance prec)
         }
         if (_forceFireWeapon == SelectedWeapon())
         {
-            bool aimed = AimWeaponForceFire(_currentWeapon);
+            // The player's own unit aims where the player aims: a scripted `fire` on it
+            // (player fire "M16") goes off in that direction instead of waiting for an AI
+            // aim the player's input never lets settle -- it never fired before.
+            bool aimed = QIsManual() ? true : AimWeaponForceFire(_currentWeapon);
             if (logNow)
                 LOG_INFO(AI, "force fire {}: aimed {}", (const char*)GetDebugName(), aimed ? 1 : 0);
             if (GetWeaponLoaded(_currentWeapon) && (GetWeaponDirection(_currentWeapon).Y() >= 0.7 || aimed))
