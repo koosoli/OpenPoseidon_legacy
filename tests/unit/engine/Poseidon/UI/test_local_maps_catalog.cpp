@@ -144,7 +144,7 @@ TEST_CASE("Local mission scan finds campaign missions and marks the playable one
     REQUIRE(catalog.missions.size() == 2);
     for (const auto& mission : catalog.missions)
     {
-        REQUIRE(mission.collection == "ca");
+        REQUIRE(mission.collection == "Campaign: Armed Assault");
         REQUIRE(mission.installRoot == root.string());
         REQUIRE(mission.virtualPath == "campaigns\\ca\\missions\\" + mission.name);
         // A local folder is not an Arma 1 install, so nothing it holds is playable.
@@ -193,4 +193,21 @@ TEST_CASE("Content scan probe", "[.content-probe]")
                     mission.virtualPath.c_str());
     for (const auto& line : catalog.diagnostics)
         std::printf("DIAG %s\n", line.c_str());
+}
+
+TEST_CASE("Campaign missions are grouped under their campaign", "[ui][localmaps]")
+{
+    using Poseidon::LocalMissionCampaign;
+    REQUIRE(LocalMissionCampaign(R"(campaigns\ca\missions\m01.sara)") == "Campaign: Armed Assault");
+    REQUIRE(LocalMissionCampaign(R"(ca\missions\campaign\missions\C1_IntoTheStorm.Chernarus)") ==
+            "Campaign: Harvest Red");
+    REQUIRE(LocalMissionCampaign(R"(a3\missions_f_epa\Campaign\Missions\A_m01.Stratis)") ==
+            "Campaign: The East Wind");
+    REQUIRE(LocalMissionCampaign(R"(a3\missions_f_tacops\Campaign_2\Missions\to_c02m01.Malden)") ==
+            "Campaign: Tac-Ops: Stepping Stone");
+    REQUIRE(LocalMissionCampaign(R"(a3\missions_f_exp\Campaign\Cutscenes\breach.Tanoa)") == "Campaign: Apex Protocol");
+    // An unknown campaign is named by its archive; a scenario is no campaign.
+    REQUIRE(LocalMissionCampaign(R"(mymod\missions_x\campaign\missions\m1.altis)") == "Campaign: missions_x");
+    REQUIRE(LocalMissionCampaign(R"(ca\missions\MPScenarios\MP_CivilWar.Chernarus)").empty());
+    REQUIRE(LocalMissionCampaign(R"(a3\missions_f\showcases\Showcase_Infantry.Stratis)").empty());
 }

@@ -42,4 +42,8 @@ bool LocalMapRevisionSupported(int revision);
 // missions run through the --arma1 compatibility profile on the terrains it registers. Otherwise
 // `reason` says why not.
 bool LocalMissionSupported(const std::string& game, const std::string& world, std::string& reason);
+// The browser group a mission belongs to when it is part of a campaign ("Campaign: Harvest Red"),
+// from its virtual path: Arma 1's campaigns\<name>\missions\..., Arma 2/3's
+// <archive>\campaign[_n]\missions|cutscenes\.... Empty for a mission outside any campaign.
+std::string LocalMissionCampaign(const std::string& virtualPath);
 } // namespace Poseidon

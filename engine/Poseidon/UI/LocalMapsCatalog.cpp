@@ -177,6 +177,10 @@ void ScanPbo(const fs::path& path, const std::string& game, const std::vector<st
         mission.collection = Lower(prefix).starts_with("campaigns\\") ? prefix.substr(10)
                              : folder.empty()                         ? path.parent_path().filename().string()
                                                                       : path.stem().string();
+        // Campaigns get a group of their own, named, ahead of the archive's other missions: Arma 2
+        // and 3 keep theirs inside add-on archives beside scenarios and MP templates.
+        if (const std::string campaign = LocalMissionCampaign(mission.virtualPath); !campaign.empty())
+            mission.collection = campaign;
         mission.installRoot = missionRoot;
         mission.supported = LocalMissionSupported(game, mission.world, mission.reason);
         result.missions.push_back(std::move(mission));
@@ -295,6 +299,63 @@ bool LocalMissionSupported(const std::string& game, const std::string& world, st
         return true;
     reason = world.empty() ? "no terrain named" : "terrain '" + world + "' is not registered yet";
     return false;
+}
+std::string LocalMissionCampaign(const std::string& virtualPath)
+{
+    std::string path = Lower(virtualPath);
+    std::replace(path.begin(), path.end(), '/', '\\');
+    std::string key, fallback;
+    if (path.rfind("campaigns\\", 0) == 0)
+    {
+        // Arma 1 (and OFP-style) campaigns: campaigns\<name>\missions\<mission>.
+        const size_t end = path.find('\\', 10);
+        fallback = path.substr(10, end == std::string::npos ? std::string::npos : end - 10);
+        key = "campaigns\\" + fallback;
+    }
+    else
+    {
+        // Arma 2 / 3: <archive prefix>\campaign[_n]\missions|cutscenes\<mission>.
+        std::vector<std::string> parts;
+        for (size_t from = 0; from <= path.size();)
+        {
+            const size_t to = std::min(path.find('\\', from), path.size());
+            parts.push_back(path.substr(from, to - from));
+            from = to + 1;
+        }
+        for (size_t i = 1; i + 1 < parts.size(); ++i)
+        {
+            if (parts[i].rfind("campaign", 0) != 0 || (parts[i + 1] != "missions" && parts[i + 1] != "cutscenes"))
+                continue;
+            for (size_t j = 0; j <= i; ++j)
+                key += (j ? "\\" : "") + parts[j];
+            fallback = parts[i - 1] + (parts[i] == "campaign" ? "" : " " + parts[i].substr(8));
+            break;
+        }
+    }
+    if (key.empty())
+        return {};
+    // The official campaigns by their own names; anything else by its archive.
+    static const std::map<std::string, std::string> names = {
+        {R"(campaigns\ca)", "Armed Assault"},
+        {R"(campaigns\ra)", "Rahmadi Conflict"},
+        {R"(campaigns\merc)", "Queen's Gambit"},
+        {R"(ca\missions\campaign)", "Harvest Red"},
+        {R"(ca\missions_e\campaign)", "Operation Arrowhead"},
+        {R"(ca\missions_ew\campaign)", "Eagle Wing"},
+        {R"(ca\missions_baf\campaign)", "British Armed Forces"},
+        {R"(ca\missions_pmc\campaign)", "Private Military Company"},
+        {R"(a3\missions_f_bootcamp\campaign)", "Bootcamp"},
+        {R"(a3\missions_f_epa\campaign)", "The East Wind"},
+        {R"(a3\missions_f_exp\campaign)", "Apex Protocol"},
+        {R"(a3\missions_f_oldman\campaign)", "Old Man"},
+        {R"(a3\missions_f_orange\campaign)", "Laws of War: The Remnants of War"},
+        {R"(a3\missions_f_tacops\campaign_1)", "Tac-Ops: Beyond Hope"},
+        {R"(a3\missions_f_tacops\campaign_2)", "Tac-Ops: Stepping Stone"},
+        {R"(a3\missions_f_tacops\campaign_3)", "Tac-Ops: Steel Pegasus"},
+        {R"(a3\missions_f_tank\campaign)", "Tanks: Tank Destroyers"},
+    };
+    const auto known = names.find(key);
+    return "Campaign: " + (known != names.end() ? known->second : fallback);
 }
 bool LocalMapRevisionSupported(int revision)
 {
@@ -441,8 +502,11 @@ LocalMapsCatalog ScanLocalMaps(const std::string& extraFolder)
     std::sort(result.missions.begin(), result.missions.end(),
               [](const auto& a, const auto& b)
               {
-                  return std::tuple(!a.supported, a.game, Lower(a.collection), Lower(a.name)) <
-                         std::tuple(!b.supported, b.game, Lower(b.collection), Lower(b.name));
+                  // ... and within a game its campaigns ahead of its other collections.
+                  const bool ca = a.collection.rfind("Campaign: ", 0) == 0;
+                  const bool cb = b.collection.rfind("Campaign: ", 0) == 0;
+                  return std::tuple(!a.supported, a.game, !ca, Lower(a.collection), Lower(a.name)) <
+                         std::tuple(!b.supported, b.game, !cb, Lower(b.collection), Lower(b.name));
               });
     return result;
 }
