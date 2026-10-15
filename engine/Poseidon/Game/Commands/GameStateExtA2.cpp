@@ -58,6 +58,10 @@
 #include <unordered_map>
 #include <vector>
 
+// The cut effects without the Arma 3 display layer handling (GameStateExtUi.cpp).
+GameValue CutTextEffect(const GameState* state, GameValuePar oper1);
+GameValue CutRscEffect(const GameState* state, GameValuePar oper1);
+
 using namespace Poseidon;
 
 bool PreprocessScriptFile(const char* name, std::string& out); // GameStateExtWorldConfig.cpp
@@ -1852,19 +1856,16 @@ GameValue A2MoveInCargoIndex(const GameState* state, GameValuePar oper1, GameVal
 }
 
 // layer cutText / cutRsc / cutObj [...]: CWA has a single layer
-GameValue CutTextEffect(const GameState* state, GameValuePar oper1); // GameStateExtUi.cpp
-GameValue CutRscEffect(const GameState* state, GameValuePar oper1);  // GameStateExtUi.cpp
-
 GameValue A2CutTextLayer(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     Poseidon::Arma3Rsc::CloseLayer(Poseidon::Arma3Rsc::LayerKey(oper1));
-    return CutTextEffect(state, oper2);
+    return ::CutTextEffect(state, oper2);
 }
 
 GameValue A2CutRscLayer(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     Poseidon::Arma3Rsc::Open(Poseidon::Arma3Rsc::LayerKey(oper1), oper2);
-    return CutRscEffect(state, oper2);
+    return ::CutRscEffect(state, oper2);
 }
 
 GameValue A2CutObjLayer(const GameState* state, GameValuePar, GameValuePar oper2)
