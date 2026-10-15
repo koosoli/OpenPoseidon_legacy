@@ -75,6 +75,12 @@ keys = _db dbKeys "players.UID123";
 
 Lists are zero-indexed.
 
+Explicit indices must be finite, nonnegative whole numbers smaller than the
+list size. Fractional values, NaN, infinities and out-of-range values are
+rejected without modifying the list. `dbListGet` and `dbListPop` return the
+fallback for an invalid index; `dbListSet` and `dbListRemove` return `false`.
+Omitting the index from `dbListPop` still removes the last item.
+
 ### Append one or many values
 
 ```sqf

@@ -34,8 +34,7 @@ existing `PoseidonTests` target includes the updated test source.
 
 ## Findings in the imported implementation
 
-The save-replacement and memory-retention findings are fixed on this branch.
-The list-index finding remains open.
+All three findings below are fixed on this branch.
 
 - **Fixed — High: saving could lose the previous database.** `DatabaseSave` removed the
   destination before renaming the temporary file. A crash between those
@@ -56,14 +55,17 @@ The list-index finding remains open.
   self-assignment, replacement assignment, empty reused slots, preservation of
   other live databases and repeated creation/loading. Both new handle-lifetime
   tests failed against the previous implementation and passed with the fix.
-- **Medium: list indices are converted before validation.** List get/set/remove
-  cast script floats to `int`; pop casts to `size_t`. Non-finite or out-of-range
-  values can cause undefined floating-to-integer conversions. Negative fractional
-  indices can truncate to zero in get/set/remove. Check finiteness, integrality
-  and range before conversion, with regression coverage for each operation.
+- **Fixed — Medium: list indices were converted before validation.** All four
+  indexed list operations now share a validator that checks scalar type,
+  finiteness, integrality and bounds before converting to `size_t`. Invalid
+  indices preserve the list and return the existing fallback/failure result.
+  Regression coverage includes negative fractions, positive fractions, NaN,
+  both infinities, extreme floats, integer-conversion boundaries, nonnumeric
+  values, empty/missing/non-list keys and valid boundary operations. The new
+  regression test fails against the previous implementation because `-0.5`
+  reads the first element instead of returning the fallback.
 
-After the lifetime fix, the focused native tests passed **512 assertions in 11 test
+After the list-index fix, the focused native tests passed **643 assertions in 12 test
 cases** on Windows. Compilation and linking succeeded; the existing missing-font
 fixture-copy failure still makes the overall build command return failure.
-The POSIX replacement path has not been runtime-tested here. The remaining
-list-index failure cases still need regression coverage.
+The POSIX replacement path has not been runtime-tested here.

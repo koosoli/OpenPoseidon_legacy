@@ -3,6 +3,7 @@
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -664,6 +665,18 @@ GameValue DatabaseListPushMany(const GameState* /*state*/, GameValuePar oper1, G
     return (float)list.list.size();
 }
 
+static bool GetListIndex(const DatabaseValue* list, GameValuePar value, size_t& index)
+{
+    if (!list || value.GetType() != GameScalar)
+        return false;
+    const double number = static_cast<float>(value);
+    if (!std::isfinite(number) || number < 0 || std::trunc(number) != number ||
+        number >= static_cast<double>(list->list.size()))
+        return false;
+    index = static_cast<size_t>(number);
+    return true;
+}
+
 GameValue DatabaseListPop(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     DatabaseEntry* database = GetDatabaseEntry(oper1);
@@ -678,10 +691,7 @@ GameValue DatabaseListPop(const GameState* state, GameValuePar oper1, GameValueP
     size_t index = list->list.size() - 1;
     if (arguments.Size() > 1)
     {
-        if (arguments[1].GetType() != GameScalar || (float)arguments[1] < 0)
-            return DefaultValue(arguments, 2);
-        index = static_cast<size_t>((float)arguments[1]);
-        if (index >= list->list.size())
+        if (!GetListIndex(list, arguments[1], index))
             return DefaultValue(arguments, 2);
     }
     DatabaseValue result = std::move(list->list[index]);
@@ -698,9 +708,9 @@ GameValue DatabaseListGet(const GameState* state, GameValuePar oper1, GameValueP
     if (arguments.Size() < 2 || arguments[0].GetType() != GameString || arguments[1].GetType() != GameScalar)
         return DefaultValue(arguments, 2);
     DatabaseValue* list = GetList(database, ToString(arguments[0]));
-    const int index = (int)(float)arguments[1];
-    return list && index >= 0 && index < (int)list->list.size() ? ToGameValue(state, list->list[index])
-                                                               : DefaultValue(arguments, 2);
+    size_t index;
+    return GetListIndex(list, arguments[1], index) ? ToGameValue(state, list->list[index])
+                                                 : DefaultValue(arguments, 2);
 }
 
 GameValue DatabaseListSet(const GameState* /*state*/, GameValuePar oper1, GameValuePar oper2)
@@ -712,9 +722,9 @@ GameValue DatabaseListSet(const GameState* /*state*/, GameValuePar oper1, GameVa
     if (arguments.Size() != 3 || arguments[0].GetType() != GameString || arguments[1].GetType() != GameScalar)
         return false;
     DatabaseValue* list = GetList(database, ToString(arguments[0]));
-    const int index = (int)(float)arguments[1];
+    size_t index;
     DatabaseValue item;
-    if (!list || index < 0 || index >= (int)list->list.size() || !ToDatabaseValue(arguments[2], item))
+    if (!GetListIndex(list, arguments[1], index) || !ToDatabaseValue(arguments[2], item))
         return false;
     list->list[index] = std::move(item);
     return true;
@@ -729,8 +739,8 @@ GameValue DatabaseListRemove(const GameState* /*state*/, GameValuePar oper1, Gam
     if (arguments.Size() != 2 || arguments[0].GetType() != GameString || arguments[1].GetType() != GameScalar)
         return false;
     DatabaseValue* list = GetList(database, ToString(arguments[0]));
-    const int index = (int)(float)arguments[1];
-    if (!list || index < 0 || index >= (int)list->list.size())
+    size_t index;
+    if (!GetListIndex(list, arguments[1], index))
         return false;
     list->list.erase(list->list.begin() + index);
     return true;

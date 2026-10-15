@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <initializer_list>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -945,6 +946,66 @@ TEST_CASE("DATABASE failed replacement preserves the previous saved data", "[gam
                                MakeConfigAssignment(GGameState, "score", GameValue(-1.0f))) == 20.0f);
 }
 #endif
+
+TEST_CASE("DATABASE list indices reject invalid values without changing data", "[game][gameStateExt][database]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+    auto args = [](std::initializer_list<GameValue> values) {
+        GameValue result = GGameState.CreateGameValue(GameArray);
+        GameArrayType& array = result;
+        for (const GameValue& value : values)
+            array.Add(value);
+        return result;
+    };
+    GameValue database = DatabaseNew(&GGameState);
+    REQUIRE((bool)DatabaseSet(&GGameState, database,
+                              args({RString("items"), args({GameValue(10.0f), GameValue(20.0f)})})));
+    REQUIRE((bool)DatabaseSet(&GGameState, database,
+                              args({RString("empty"), args({})})));
+    REQUIRE((bool)DatabaseSet(&GGameState, database,
+                              args({RString("scalar"), GameValue(30.0f)})));
+
+    const GameValue invalidIndices[] = {
+        GameValue(-0.5f), GameValue(0.5f), GameValue(1.5f), GameValue(-1.0f), GameValue(2.0f),
+        GameValue(std::numeric_limits<float>::max()), GameValue(std::numeric_limits<float>::lowest()),
+        GameValue(std::numeric_limits<float>::infinity()), GameValue(-std::numeric_limits<float>::infinity()),
+        GameValue(std::numeric_limits<float>::quiet_NaN()), GameValue(std::numeric_limits<float>::denorm_min()),
+        GameValue(2147483648.0f), GameValue(18446744073709551616.0f),
+        GameValue(RString("0")), GameValue(true), args({})
+    };
+    for (const GameValue& index : invalidIndices)
+    {
+        REQUIRE((float)DatabaseListGet(&GGameState, database,
+                                       args({RString("items"), index, GameValue(-7.0f)})) == -7.0f);
+        REQUIRE_FALSE((bool)DatabaseListSet(&GGameState, database,
+                                            args({RString("items"), index, GameValue(99.0f)})));
+        REQUIRE_FALSE((bool)DatabaseListRemove(&GGameState, database, args({RString("items"), index})));
+        REQUIRE((float)DatabaseListPop(&GGameState, database,
+                                       args({RString("items"), index, GameValue(-7.0f)})) == -7.0f);
+        REQUIRE((float)DatabaseListSize(&GGameState, database, RString("items")) == 2.0f);
+        REQUIRE((float)DatabaseListGet(&GGameState, database,
+                                       args({RString("items"), GameValue(0.0f)})) == 10.0f);
+        REQUIRE((float)DatabaseListGet(&GGameState, database,
+                                       args({RString("items"), GameValue(1.0f)})) == 20.0f);
+    }
+    for (const char* key : {"empty", "missing", "scalar"})
+    {
+        REQUIRE((float)DatabaseListGet(&GGameState, database,
+                                       args({RString(key), GameValue(0.0f), GameValue(-7.0f)})) == -7.0f);
+        REQUIRE_FALSE((bool)DatabaseListSet(&GGameState, database,
+                                            args({RString(key), GameValue(0.0f), GameValue(99.0f)})));
+        REQUIRE_FALSE((bool)DatabaseListRemove(&GGameState, database, args({RString(key), GameValue(0.0f)})));
+        REQUIRE((float)DatabaseListPop(&GGameState, database,
+                                       args({RString(key), GameValue(0.0f), GameValue(-7.0f)})) == -7.0f);
+    }
+    REQUIRE((bool)DatabaseListSet(&GGameState, database,
+                                  args({RString("items"), GameValue(-0.0f), GameValue(11.0f)})));
+    REQUIRE((float)DatabaseListPop(&GGameState, database,
+                                   args({RString("items"), GameValue(1.0f)})) == 20.0f);
+    REQUIRE((float)DatabaseListPop(&GGameState, database, args({RString("items")})) == 11.0f);
+    REQUIRE((float)DatabaseListSize(&GGameState, database, RString("items")) == 0.0f);
+}
 
 TEST_CASE("DATABASE supports mutable lists and hashes", "[game][gameStateExt][database]")
 {
