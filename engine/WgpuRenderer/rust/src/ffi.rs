@@ -3957,7 +3957,15 @@ pub unsafe extern "C" fn wgr_grass_set_blade_atlas(
     layers: u32,
     rgba: *const u8,
 ) {
-    if renderer.is_null() || rgba.is_null() || width == 0 || height == 0 || layers == 0 {
+    if renderer.is_null() {
+        return;
+    }
+    // No image (null pixels, zero layers): restore the built-in procedural atlas.
+    if rgba.is_null() && layers == 0 {
+        let _ = catch_unwind(AssertUnwindSafe(|| unsafe { &mut *renderer }.grass_clear_blade_atlas()));
+        return;
+    }
+    if rgba.is_null() || width == 0 || height == 0 || layers == 0 {
         return;
     }
     let _ = catch_unwind(AssertUnwindSafe(|| {

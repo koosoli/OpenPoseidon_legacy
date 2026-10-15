@@ -2049,6 +2049,36 @@ impl Grass {
         self.far_data_bind = rebuild(&self.far_instances, &self.far_placement_count);
     }
 
+    /// Back to the built-in procedural near-blade atlas (as at startup): a world that must not
+    /// draw the previous world's photo blades -- a native Reforger world whose own PlantMat atlas
+    /// is not up -- drops them here rather than keeping whatever was bound last.
+    pub fn clear_blade_atlas(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        if !self.have_blade_atlas {
+            return;
+        }
+        eprintln!("[wgr] grass blade atlas: cleared to the built-in procedural layers");
+        self.blade_view = blade_atlas::create(device, queue);
+        self.have_blade_atlas = false;
+        self.last_params.blade_layer_means = [0.0; 32];
+        queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&self.last_params));
+        let rebuild = |instances: &wgpu::Buffer, count: &wgpu::Buffer| {
+            make_data_bind(
+                device,
+                &self.data_layout,
+                &self.grass_params,
+                instances,
+                count,
+                &self.blade_view,
+                &self.blade_sampler,
+                &self.tuft_view,
+                &self.frag_counts,
+            )
+        };
+        self.data_bind = rebuild(&self.instances, &self.placement_count);
+        self.mid_data_bind = rebuild(&self.mid_instances, &self.mid_placement_count);
+        self.far_data_bind = rebuild(&self.far_instances, &self.far_placement_count);
+    }
+
     /// Replace the procedural near-blade surface atlas with supplied opaque
     /// photo layers. A bind group captures its texture view, so all LOD binds
     /// must be rebuilt even though only the near shader samples this texture.

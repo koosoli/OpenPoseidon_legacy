@@ -3102,7 +3102,28 @@ void TerrainWgpu::UploadGeography(const Landscape& land, bool reuseClutterDefini
     // stock meadow atlas.
     if (!(_enfusionBladesEnabled && UploadEnfusionBladeAtlas(land)))
     {
-        UploadGrassBladeAtlas(atlasKey);
+        // A native world never draws the stock meadow photo blades: they are not Reforger's
+        // grass, and over Everon's fields they read as neon yellow-green tufts (mean sRGB of the
+        // brightest layers ~145,163,39). Without its own PlantMat atlas it gets the built-in
+        // procedural layers -- including when the photo atlas is still bound from the menu
+        // world. WGR_NATIVE_STOCK_BLADES=1 restores the photo fallback.
+        static const bool stockOnNative = [] {
+            const char* value = std::getenv("WGR_NATIVE_STOCK_BLADES");
+            return value && value[0] == '1';
+        }();
+        if (land.GetEnfusionSurfaceCount() > 0 && !stockOnNative)
+        {
+            if (_renderer && _grassBladeAtlasWorld != "native:procedural")
+            {
+                EngineWgpu::AcquireProducerWindow("grass blade atlas");
+                wgr_grass_set_blade_atlas(_renderer, 0, 0, 0, nullptr);
+                _grassBladeAtlasWorld = "native:procedural";
+                LOG_INFO(Graphics, "Wgpu grass: native world without its PlantMat blade atlas -- near blades use "
+                         "the built-in layers, not the stock meadow photos (WGR_NATIVE_STOCK_BLADES=1 = photos)");
+            }
+        }
+        else
+            UploadGrassBladeAtlas(atlasKey);
     }
 }
 

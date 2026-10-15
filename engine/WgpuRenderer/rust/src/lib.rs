@@ -7796,6 +7796,10 @@ impl Renderer {
             .set_blade_atlas(&self.device, &self.queue, width, height, layers, rgba);
     }
 
+    fn grass_clear_blade_atlas(&mut self) {
+        self.grass.clear_blade_atlas(&self.device, &self.queue);
+    }
+
     // AO march resolution (wgr_set_gtao_scale / wgr_get_gtao_scale). Lives on Gfx3d next to the
     // pass it configures; see `Gfx3d::set_gtao_scale` for why it is not part of GtaoSettings.
     fn set_gtao_scale(&mut self, scale: u32) {
