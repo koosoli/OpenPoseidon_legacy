@@ -78,6 +78,7 @@ namespace Poseidon
 
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
+#include <Poseidon/Game/Commands/GameStateExtA3Rsc.hpp>
 
 namespace Poseidon
 {
@@ -1793,6 +1794,7 @@ static TitEffectName TitEffectFromString(const GameStringType& str)
 
 GameValue GameTitleText(const GameState* state, GameValuePar oper1)
 {
+    Poseidon::Arma3Rsc::CloseLayer("title");
     TITLE_PREFIX
 
     GWorld->SetTitleEffect(CreateTitleEffect(name, effect, speed));
@@ -1801,6 +1803,7 @@ GameValue GameTitleText(const GameState* state, GameValuePar oper1)
 
 GameValue GameTitleRsc(const GameState* state, GameValuePar oper1)
 {
+    Poseidon::Arma3Rsc::Open("title", oper1);
     TITLE_PREFIX
 
     const ParamEntry* cls = FindRscTitle(effect);
@@ -1819,7 +1822,9 @@ GameValue GameTitleObj(const GameState* state, GameValuePar oper1)
     return NOTHING;
 }
 
-GameValue CutText(const GameState* state, GameValuePar oper1)
+// The cut effect alone; cutText / cutRsc below also end or open an Arma 3 stand-in display
+// on the layer (GameStateExtA3Rsc.cpp), the layered forms on their own layer.
+GameValue CutTextEffect(const GameState* state, GameValuePar oper1)
 {
     TITLE_PREFIX
 
@@ -1827,7 +1832,7 @@ GameValue CutText(const GameState* state, GameValuePar oper1)
     return NOTHING;
 }
 
-GameValue CutRsc(const GameState* state, GameValuePar oper1)
+GameValue CutRscEffect(const GameState* state, GameValuePar oper1)
 {
     TITLE_PREFIX
 
@@ -1837,6 +1842,18 @@ GameValue CutRsc(const GameState* state, GameValuePar oper1)
         GWorld->SetCutEffect(CreateTitleEffectRsc(name, *cls));
     }
     return NOTHING;
+}
+
+GameValue CutText(const GameState* state, GameValuePar oper1)
+{
+    Poseidon::Arma3Rsc::CloseLayer("0");
+    return CutTextEffect(state, oper1);
+}
+
+GameValue CutRsc(const GameState* state, GameValuePar oper1)
+{
+    Poseidon::Arma3Rsc::Open("0", oper1);
+    return CutRscEffect(state, oper1);
 }
 
 GameValue CutObj(const GameState* state, GameValuePar oper1)

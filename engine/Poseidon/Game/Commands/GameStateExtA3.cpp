@@ -25,6 +25,7 @@
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
+#include <Poseidon/Game/Commands/GameStateExtA3Rsc.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 
 #include <Poseidon/AI/AI.hpp>
@@ -2256,5 +2257,6 @@ void Arma3RegisterScriptCommands()
     RegisterMacros2(std::make_index_sequence<sizeof(kMacros2) / sizeof(kMacros2[0])>{});
     RegisterArma3ConfigCommands();
     RegisterArma3Stubs();
+    Poseidon::Arma3Rsc::Register();
     LOG_INFO(Script, "Arma 3: script commands registered");
 }

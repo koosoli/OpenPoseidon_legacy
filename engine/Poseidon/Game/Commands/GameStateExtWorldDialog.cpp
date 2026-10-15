@@ -15,6 +15,7 @@
 #include <Poseidon/Foundation/Framework/AppFrame.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 
 using namespace Poseidon;
 namespace Poseidon
@@ -953,6 +954,12 @@ std::map<int, float>& PendingFade()
 
 GameValue A1FindDisplay(const GameState* state, GameValuePar oper1)
 {
+    // The mission's own display (46 in Arma 2 and 3: RscDisplayMission) is there while a
+    // mission runs. Arma 3 waits for it before anything else of its user interface
+    // (BIS_fnc_displayMission: the showcases' title card and establishing shot, every
+    // displayAddEventHandler "KeyDown"); as -1 it kept those scripts waiting for good.
+    if (toInt((float)oper1) == 46 && GWorld && Poseidon::Arma1Compat::Generation() >= 2)
+        return GameValue(46.0f);
     // The topmost user dialog stands for any IDD asked for; -1 (displayNull) when none
     // is open, which no control lookup matches.
     return GameValue(GetUserDialog() ? (float)oper1 : -1.0f);

@@ -59,6 +59,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <Poseidon/Game/Commands/GameStateExtA3Rsc.hpp>
 #include <unordered_map>
 #include <vector>
 
@@ -1509,7 +1510,8 @@ GameValue A2MinusOne(const GameState*)
 // isNull display/control: those are numbers here, -1 for none
 GameValue A2IsNullHandle(const GameState*, GameValuePar oper1)
 {
-    return GameValue(static_cast<float>(oper1) < 0);
+    // an Arma 3 stand-in display that has closed is null too (GameStateExtA3Rsc.cpp)
+    return GameValue(static_cast<float>(oper1) < 0 || Poseidon::Arma3Rsc::IsClosedDisplay(static_cast<float>(oper1)));
 }
 
 // ctrlShown control: a control handle that exists is taken as shown.
@@ -2160,14 +2162,19 @@ GameValue A2MoveInCargoIndex(const GameState* state, GameValuePar oper1, GameVal
 }
 
 // layer cutText / cutRsc / cutObj [...]: CWA has a single layer
-GameValue A2CutTextLayer(const GameState* state, GameValuePar, GameValuePar oper2)
+GameValue CutTextEffect(const GameState* state, GameValuePar oper1); // GameStateExtUi.cpp
+GameValue CutRscEffect(const GameState* state, GameValuePar oper1);  // GameStateExtUi.cpp
+
+GameValue A2CutTextLayer(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
-    return CutText(state, oper2);
+    Poseidon::Arma3Rsc::CloseLayer(Poseidon::Arma3Rsc::LayerKey(oper1));
+    return CutTextEffect(state, oper2);
 }
 
-GameValue A2CutRscLayer(const GameState* state, GameValuePar, GameValuePar oper2)
+GameValue A2CutRscLayer(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
-    return CutRsc(state, oper2);
+    Poseidon::Arma3Rsc::Open(Poseidon::Arma3Rsc::LayerKey(oper1), oper2);
+    return CutRscEffect(state, oper2);
 }
 
 GameValue A2CutObjLayer(const GameState* state, GameValuePar, GameValuePar oper2)

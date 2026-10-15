@@ -1821,6 +1821,18 @@ MoveInfo::MoveInfo(MotionType* motion, const ParamEntry& entry)
     _soundOverride = entry >> "soundOverride"; // default - no override
     _soundEdge1 = entry >> "soundEdge1";       // default - no override
     _soundEdge2 = entry >> "soundEdge2";       // default - no override
+    // Arma 1 and later write the step times as one array, soundEdge[] = {0.5, 1} (Arma 3
+    // walks: four entries, one per footfall of the cycle). With only soundEdge1/2 read, an
+    // Arma move had both at 0 and no soldier ever made a step sound. The first two edges
+    // are what the CWA step logic plays.
+    if (!entry.FindEntry("soundEdge1"))
+    {
+        if (const ParamEntry* edges = entry.FindEntry("soundEdge"); edges && edges->IsArray() && edges->GetSize() > 0)
+        {
+            _soundEdge1 = (*edges)[0];
+            _soundEdge2 = edges->GetSize() > 1 ? (float)(*edges)[1] : _soundEdge1;
+        }
+    }
 
     _relSpeedMin = entry >> "relSpeedMin";
     _relSpeedMax = entry >> "relSpeedMax";
