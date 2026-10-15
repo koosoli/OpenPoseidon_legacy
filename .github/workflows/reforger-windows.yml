@@ -11,6 +11,7 @@ on:
   push:
     branches:
       - MrDudeX-reforger
+      - 'MrDudeX-reforger-**'
 
 # Only the newest push is worth a build.
 concurrency:
@@ -30,6 +31,33 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  # The renderer's own unit tests on Linux: they compose and validate every WGSL module with naga
+  # (no GPU needed for that part), so a shader error shows up here as an annotation instead of as
+  # a panic at the first frame on the test PC. Informational: it never blocks the Windows build.
+  renderer-tests:
+    name: wgpu_renderer tests (Linux)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+      - name: Test
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p wgpu_renderer --lib --no-fail-fast 2>&1 | tee test.txt || true
+          grep -E "^test .* FAILED|panicked at|error(\[E[0-9]+\])?:|^test result" test.txt | head -60 | while IFS= read -r line; do
+            echo "::warning::${line//%/%25}"
+          done
+          if grep -q "^test result: FAILED\|error\[E" test.txt; then exit 1; fi
+
   build-windows:
     name: Windows game (RelWithDebInfo)
     runs-on: windows-2022
@@ -94,12 +122,15 @@ jobs:
           path: out/*
           if-no-files-found: error
 
-      - name: Publish as the rolling pre-release reforger-ci
+      - name: Publish as the rolling pre-release reforger-ci[-<feature>]
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete reforger-ci -y --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
-          gh release create reforger-ci out/* -R "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+          # MrDudeX-reforger -> reforger-ci; a feature branch MrDudeX-reforger-<x> -> reforger-ci-<x>.
+          TAG=reforger-ci
+          if [ "$GITHUB_REF_NAME" != "MrDudeX-reforger" ]; then TAG="reforger-ci-${GITHUB_REF_NAME#MrDudeX-reforger-}"; fi
+          gh release delete "$TAG" -y --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create "$TAG" out/* -R "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
             --title "Reforger parity test build ${GITHUB_REF_NAME} ${GITHUB_SHA::7}" \
             --notes "OpenPoseidon.exe + wgpu_renderer.dll (+ pdbs) of ${GITHUB_REF_NAME} at ${GITHUB_SHA}, run ${GITHUB_RUN_ID}. Replaced by every build; not a release."
