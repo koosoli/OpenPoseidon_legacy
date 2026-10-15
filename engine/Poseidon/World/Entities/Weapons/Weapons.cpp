@@ -463,6 +463,8 @@ void MuzzleType::Init(const ParamEntry& cls, const WeaponType* weapon)
     _displayName.Bind(cls >> "displayName");
     _magazineReloadTime = cls >> "magazineReloadTime";
     GetValue(_sound, cls >> "drySound");
+    if (const ParamEntry* shot = cls.FindEntry("a3SoundShot"); shot && shot->IsArray())
+        GetValue(_shotSound, *shot);
     _soundContinuous = cls >> "soundContinuous";
     GetValue(_reloadSound, cls >> "reloadSound");
     GetValue(_reloadMagazineSound, cls >> "reloadMagazineSound");

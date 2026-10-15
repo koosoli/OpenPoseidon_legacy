@@ -302,6 +302,39 @@ std::string Arma3EngineSound(const ParamEntry& vehicle, bool helicopter)
     return pick;
 }
 
+// The shot of an Arma 3 weapon as one file: its first fire mode's sound class (sounds[]:
+// StandardSound) -- the first sample of its first soundSetShot[] set, else its begin1[] --
+// or the mode's own sound[]. Empty when the install has none of it.
+std::string Arma3WeaponShotSound(const ParamEntry& weapon)
+{
+    const ParamEntry* modes = weapon.FindEntry("modes");
+    const ParamEntry* mode = &weapon;
+    if (modes && modes->IsArray() && modes->GetSize() > 0)
+    {
+        const std::string first = (const char*)(*modes)[0].GetValue();
+        if (Lower(first) != "this")
+            if (const ParamEntry* m = weapon.FindEntry(first.c_str()); m && m->IsClass())
+                mode = m;
+    }
+    std::vector<const ParamEntry*> candidates;
+    if (const ParamEntry* sounds = mode->FindEntry("sounds"); sounds && sounds->IsArray() && sounds->GetSize() > 0)
+        if (const ParamEntry* s = mode->FindEntry((const char*)(*sounds)[0].GetValue()); s && s->IsClass())
+            candidates.push_back(s);
+    candidates.push_back(mode);
+    for (const ParamEntry* c : candidates)
+    {
+        if (const ParamEntry* sets = c->FindEntry("soundSetShot"); sets && sets->IsArray())
+            for (int i = 0; i < sets->GetSize(); i++)
+                if (std::string f = ExistingSoundFile(SoundSetSample((const char*)(*sets)[i].GetValue())); !f.empty())
+                    return f;
+        for (const char* key : {"begin1", "sound"})
+            if (const ParamEntry* a = c->FindEntry(key); a && a->IsArray() && a->GetSize() > 0)
+                if (std::string f = ExistingSoundFile((const char*)(*a)[0].GetValue()); !f.empty())
+                    return f;
+    }
+    return std::string();
+}
+
 RString Arma3HeadForProxy(const char* proxyModel)
 {
     if (Generation() != 3 || !proxyModel)
