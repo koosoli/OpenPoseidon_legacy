@@ -2172,6 +2172,12 @@ GameValue A2CutTextLayer(const GameState* state, GameValuePar oper1, GameValuePa
     return ::CutTextEffect(state, oper2);
 }
 
+GameValue A2CutFadeOutLayer(const GameState*, GameValuePar oper1, GameValuePar)
+{
+    Poseidon::Arma3Rsc::CloseLayer(Poseidon::Arma3Rsc::LayerKey(oper1));
+    return NOTHING;
+}
+
 GameValue A2CutRscLayer(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     Poseidon::Arma3Rsc::Open(Poseidon::Arma3Rsc::LayerKey(oper1), oper2);
@@ -3091,7 +3097,7 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "cutText", function, A2CutTextLayer, GameScalar, GameArray),
     GameOperator(GameNothing, "cutRsc", function, A2CutRscLayer, GameScalar, GameArray),
     GameOperator(GameNothing, "cutObj", function, A2CutObjLayer, GameScalar, GameArray),
-    GameOperator(GameNothing, "cutFadeOut", function, A2NothingBinary, GameScalar, GameScalar),
+    GameOperator(GameNothing, "cutFadeOut", function, A2CutFadeOutLayer, GameScalar, GameScalar),
     GameOperator(GameNothing, "setVehicleInit", function, A2SetVehicleInit, GameObject, GameString),
     GameOperator(GameNothing, "attachTo", function, A2AttachTo, GameObject, GameArray),
     GameOperator(GameNothing, "copyWaypoints", function, A2NothingBinary, GameGroup, GameGroup),

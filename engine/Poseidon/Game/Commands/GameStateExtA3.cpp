@@ -1773,7 +1773,6 @@ const Macro kMacros[] = {
     {"getHitPointDamage", 'b', GameScalar, GameObject, GameString, "damage (_this select 0)"},
     {"getHitIndex", 'b', GameScalar, GameObject, GameScalar, "damage (_this select 0)"},
     {"cursorObject", 'n', GameObject, 0, 0, "cursorTarget"},
-    {"allCutLayers", 'n', GameArray, 0, 0, "[]"},
     {"allPlayers", 'n', GameArray, 0, 0, "if (isNull player) then {[]} else {[player]}"},
     {"allDeadMen", 'n', GameArray, 0, 0, "[]"},
     {"allDead", 'n', GameArray, 0, 0, "[]"},
@@ -2253,10 +2252,10 @@ void Arma3RegisterScriptCommands()
         GGameState.NewFunction(f);
     for (const GameOperator& o : A3Binary)
         GGameState.NewOperator(o);
+    Poseidon::Arma3Rsc::Register();
     RegisterMacros(std::make_index_sequence<kMacroCount>{});
     RegisterMacros2(std::make_index_sequence<sizeof(kMacros2) / sizeof(kMacros2[0])>{});
     RegisterArma3ConfigCommands();
     RegisterArma3Stubs();
-    Poseidon::Arma3Rsc::Register();
     LOG_INFO(Script, "Arma 3: script commands registered");
 }
