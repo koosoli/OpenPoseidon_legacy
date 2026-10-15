@@ -5,6 +5,9 @@
 // Reforger a river is a clear film over its gravel bed (HalfLightDistance 30 m, Fresnel 0.02)
 // whose ripples run downstream (FlowSpeed), reflecting the sky and the banks.
 //
+// Ponds (RFG-163, a LakeGeneratorEntity on a closed polyline) come through the same mesh as flat
+// polygons at their lowest shore point, flagged still (half width -1): gentler, drifting ripples.
+//
 // This draws the river's own ribbon (built by the loader from the spline, level across its width
 // at the authored water level; the banks hide its edges) in the water pass, with OUR water's
 // optics: the frozen scene behind it refracted through the ripples, absorbed along the real path
@@ -53,6 +56,7 @@ struct VsOut {
     @location(1) flow_uv: vec2<f32>,   // (along, across) metres
     @location(2) flow_dir: vec2<f32>,
     @location(3) edge: f32,            // |across| / half width
+    @location(4) still: f32,           // 1 = a pond (RFG-163): its ripples drift, they do not run
 };
 
 @vertex
@@ -64,6 +68,7 @@ fn vs_river(v: VsIn) -> VsOut {
     o.flow_uv = vec2<f32>(v.along, v.across);
     o.flow_dir = v.flow;
     o.edge = abs(v.across) / max(v.half_width, 0.01);
+    o.still = select(0.0, 1.0, v.half_width < 0.0);
     return o;
 }
 
@@ -94,9 +99,9 @@ fn gnoise(p: vec2<f32>) -> vec3<f32> {
 
 // Ripple slope in flow space (d height / d along, d height / d across): two layers advected
 // downstream at different speeds, stretched along the flow, plus a slow cross-flow wobble.
-fn ripple_slope(uv: vec2<f32>, t: f32) -> vec2<f32> {
+fn ripple_slope(uv: vec2<f32>, t: f32, speed_scale: f32) -> vec2<f32> {
     let k = max(rp.flow.y, 0.05);
-    let speed = rp.flow.x;
+    let speed = rp.flow.x * speed_scale;
     let a = gnoise(vec2<f32>((uv.x - t * speed) * k * 0.55, uv.y * k * 1.1));
     let b = gnoise(vec2<f32>((uv.x - t * speed * 1.6) * k * 1.3 + 17.0, uv.y * k * 2.2 + 5.0));
     let c = gnoise(vec2<f32>((uv.x - t * speed * 0.6) * k * 0.21 + 3.0, uv.y * k * 0.35 - 11.0 + t * 0.05));
@@ -164,7 +169,8 @@ fn fs_river(in: VsOut) -> @location(0) vec4<f32> {
     let t = rp.flow.w;
 
     // Ripple normal: flow-space slope rotated into world xz (along = flow_dir, across = its left).
-    let slope = ripple_slope(in.flow_uv, t) * (1.0 - smoothstep(60.0, 220.0, dist));
+    let slope = ripple_slope(in.flow_uv, t, mix(1.0, 0.12, in.still)) * mix(1.0, 0.5, in.still) *
+        (1.0 - smoothstep(60.0, 220.0, dist));
     let fwd = normalize(vec2<f32>(in.flow_dir.x, in.flow_dir.y) + vec2<f32>(1e-6, 0.0));
     let side = vec2<f32>(-fwd.y, fwd.x);
     let grad = fwd * slope.x + side * slope.y;

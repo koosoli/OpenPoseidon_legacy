@@ -416,6 +416,8 @@ class Reader
                 _riverActive = true;
                 _carrier->isRiver = true;
             }
+            else if (placement.className == "LakeGeneratorEntity" && _carrier != nullptr)
+                _carrier->isLake = true; // RFG-163
 
             Declaration pass;
             pass.name = placement.className;
@@ -450,7 +452,9 @@ class Reader
                 child.scale *= parentScale;
             }
             // RFG-134: a carrier that held a river hands it over with its own composed transform.
-            if (IsSplineCarrierClass(placement.className) && pendingRiver.isRiver && pendingRiver.points.size() >= 6)
+            if (IsSplineCarrierClass(placement.className) &&
+                ((pendingRiver.isRiver && pendingRiver.points.size() >= 6) ||
+                 (pendingRiver.isLake && !pendingRiver.isRiver && pendingRiver.points.size() >= 9)))
             {
                 const EbinPlacement& carrier = _world.placements[index];
                 pendingRiver.position[0] = carrier.position[0];

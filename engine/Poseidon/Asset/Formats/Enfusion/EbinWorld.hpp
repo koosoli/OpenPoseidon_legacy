@@ -140,13 +140,18 @@ struct EbinRiver
     float splineOffsetUp = 0.0f;
     bool reverseFlow = false;
     bool isRiver = false;                   //!< a RiverEntity generator was found inside
+    //! RFG-163: a `LakeGeneratorEntity` inside a closed `PolylineShapeEntity` -- a pond or pool
+    //! (Everon has 62). `points` is then the shore polygon; the water stands at its lowest point
+    //! (the generator's m_bFlattenByBottomPlane).
+    bool isLake = false;
     std::string materialGuid;
 };
 
 //! RFG-134: the spline carrier whose `Points` a child generator (a river) builds on.
 inline bool IsSplineCarrierClass(const std::string& className)
 {
-    return className == "SplineShapeEntity";
+    // RFG-163: ponds are a LakeGeneratorEntity on a closed PolylineShapeEntity.
+    return className == "SplineShapeEntity" || className == "PolylineShapeEntity";
 }
 
 //! Whether a class name is one whose f32[3] arrays are a spline centreline.

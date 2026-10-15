@@ -1069,6 +1069,7 @@ struct PlacementSummary
     size_t yRuleToAbsolute = 0; //!< ...and to absolute
     size_t yRuleUnknown = 0;    //!< ...and whose prefab chain declares no Flags (heuristic kept)
     size_t rivers = 0;          //!< RFG-134: SplineShapeEntity carriers with a RiverEntity
+    size_t lakes = 0;           //!< RFG-163: PolylineShapeEntity carriers with a LakeGeneratorEntity
     // RFG-064, the attachment side. Counted separately from the mesh totals above
     // because "the houses are missing" and "the houses have no doors" are different
     // failures and the placement histogram cannot tell them apart.
@@ -1277,6 +1278,9 @@ struct ResolvedRoad
     //! (RiverSurface_01's values when the material does not say).
     bool reverseFlow = false;
     float riverLook[9] = {0.035f, 0.04f, 0.019f, 30.0f, 0.2f, 0.02f, 1024.0f, 0.025f, 0.3f};
+    //! RFG-163: a pond -- `points` is its shore polygon, `river` is false. Only ever drawn as
+    //! water (never as a ribbon); its level is its lowest shore point.
+    bool lake = false;
 };
 
 //! The parts of a road's `.emat` its strip is built from (see ResolvedRoad).
@@ -1940,6 +1944,21 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         ++out.rivers;
         roads.push_back(std::move(river));
     }
+    // RFG-163: ponds. Water only (the river renderer); nothing was drawn for them before.
+    for (const Enf::EbinRiver& source : world.rivers)
+    {
+        if (!riversOn || !source.isLake || source.isRiver || source.points.size() < 9)
+            continue;
+        ResolvedRoad lake;
+        lake.lake = true;
+        lake.origin[0] = source.position[0];
+        lake.origin[1] = source.position[1];
+        lake.origin[2] = source.position[2];
+        lake.points = source.points;
+        lake.yawDeg = source.yawDeg;
+        ++out.lakes;
+        roads.push_back(std::move(lake));
+    }
 
     for (const Enf::EbinPlacement& placement : world.placements)
     {
@@ -2368,6 +2387,80 @@ void AppendRiverWater(const ResolvedRoad& road, std::vector<float>& vertices, st
         const uint32_t a = base + 2 * i, b = a + 1, c = a + 2, d = a + 3;
         indices.insert(indices.end(), {a, c, b, b, c, d});
     }
+}
+
+//! RFG-163: one pond's water surface for the renderer: its shore polygon (yaw folded in by the
+//! road pass, local to `origin`) ear-clipped flat at its lowest point -- the generator's
+//! m_bFlattenByBottomPlane. Still water: the vertex's half width is -1, which the water shader
+//! reads as "no current" (the ripples drift, they do not run); along/across are world x/z.
+bool AppendLakeWater(const ResolvedRoad& road, std::vector<float>& vertices, std::vector<uint32_t>& indices)
+{
+    size_t count = road.points.size() / 3;
+    if (count < 3)
+        return false;
+    std::vector<float> x(count), z(count);
+    float level = 1e30f;
+    for (size_t i = 0; i < count; ++i)
+    {
+        x[i] = road.origin[0] + road.points[i * 3 + 0];
+        z[i] = road.origin[2] + road.points[i * 3 + 2];
+        level = std::min(level, road.origin[1] + road.points[i * 3 + 1]);
+    }
+    // A closing point that repeats the first one would make a zero-length edge.
+    if (count > 3 && std::fabs(x[0] - x[count - 1]) < 1e-3f && std::fabs(z[0] - z[count - 1]) < 1e-3f)
+        --count;
+    double area = 0.0;
+    for (size_t i = 0; i < count; ++i)
+    {
+        const size_t j = (i + 1) % count;
+        area += static_cast<double>(x[i]) * z[j] - static_cast<double>(x[j]) * z[i];
+    }
+    if (std::fabs(area) < 1e-3)
+        return false;
+    const float orientation = area > 0.0 ? 1.0f : -1.0f;
+    const uint32_t base = static_cast<uint32_t>(vertices.size() / 8);
+    for (size_t i = 0; i < count; ++i)
+        vertices.insert(vertices.end(), {x[i], level, z[i], x[i], 1.0f, 0.0f, z[i], -1.0f});
+    // Ear clipping: n is a few dozen at most.
+    std::vector<uint32_t> ring(count);
+    for (size_t i = 0; i < count; ++i)
+        ring[i] = static_cast<uint32_t>(i);
+    const auto cross = [&](uint32_t a, uint32_t b, uint32_t c)
+    { return (x[b] - x[a]) * (z[c] - z[a]) - (z[b] - z[a]) * (x[c] - x[a]); };
+    const auto inside = [&](uint32_t p, uint32_t a, uint32_t b, uint32_t c)
+    {
+        const float d1 = cross(a, b, p) * orientation, d2 = cross(b, c, p) * orientation, d3 = cross(c, a, p) * orientation;
+        return d1 >= 0.0f && d2 >= 0.0f && d3 >= 0.0f;
+    };
+    size_t guard = count * count + 8;
+    while (ring.size() > 3 && guard-- > 0)
+    {
+        bool clipped = false;
+        for (size_t i = 0; i < ring.size(); ++i)
+        {
+            const uint32_t a = ring[(i + ring.size() - 1) % ring.size()], b = ring[i], c = ring[(i + 1) % ring.size()];
+            if (cross(a, b, c) * orientation <= 0.0f)
+                continue; // reflex (or straight) corner
+            bool ear = true;
+            for (const uint32_t p : ring)
+                if (p != a && p != b && p != c && inside(p, a, b, c))
+                {
+                    ear = false;
+                    break;
+                }
+            if (!ear)
+                continue;
+            indices.insert(indices.end(), {base + a, base + b, base + c});
+            ring.erase(ring.begin() + static_cast<ptrdiff_t>(i));
+            clipped = true;
+            break;
+        }
+        if (!clipped)
+            break; // a self-touching shore: what is left is not drawn rather than drawn wrong
+    }
+    if (ring.size() == 3)
+        indices.insert(indices.end(), {base + ring[0], base + ring[1], base + ring[2]});
+    return true;
 }
 
 //! The model half of a road: the draped ribbon, through the MLOD round trip. Pure (the ground
@@ -3247,8 +3340,9 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                      "terrain-relative, {} to absolute, {} prefab chains declare no Flags (|Y|<2 heuristic kept) "
                      "(POSEIDON_Y_RULE_FLAGS=0 = heuristic only)",
                      summary.yRuleToRelative, summary.yRuleToAbsolute, summary.yRuleUnknown);
-            LOG_INFO(World, "Enfusion native load: RFG-134 {} rivers (spline + RiverEntity, MatRiver) "
-                            "built as water ribbons (POSEIDON_ENFUSION_RIVERS=0 = off)", summary.rivers);
+            LOG_INFO(World, "Enfusion native load: RFG-134 {} rivers (spline + RiverEntity, MatRiver), RFG-163 {} "
+                            "ponds (polyline + LakeGeneratorEntity) (POSEIDON_ENFUSION_RIVERS=0 = off)",
+                     summary.rivers, summary.lakes);
 
             // RFG-013: build the meshes and put their placements in the world.
             //
@@ -4105,6 +4199,9 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     ResolvedRoad& road = roads[r];
                     if (road.points.size() < 6)
                         continue;
+                    // RFG-163: a pond keeps its shore polygon as authored (rotated below) and its
+                    // points' own heights -- the water stands at the lowest of them.
+                    const bool lake = road.lake;
 
                     // Subdivide before draping. Everon's centrelines average one point
                     // every 16 m (26,271 points over 419.8 km) and run much longer than
@@ -4114,6 +4211,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     // That is exactly what the first draped capture showed, and it is
                     // a sampling artefact rather than a height-rule one -- the rule was
                     // right, the ribbon simply had nowhere to bend.
+                    if (!lake)
                     {
                         std::vector<float> dense;
                         std::vector<float> denseWidths; // RFG-134: rivers only
@@ -4198,7 +4296,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     // than as a road. Draping costs the smooth profile -- the road
                     // now follows every 12.5 m step of the coarse terrain -- and that
                     // is the cheaper defect until the terrain carries the road cut.
-                    for (size_t i = 0; i < pointCount; ++i)
+                    for (size_t i = 0; i < pointCount && !lake; ++i)
                     {
                         const float worldX = road.origin[0] + road.points[i * 3 + 0];
                         const float worldZ = road.origin[2] + road.points[i * 3 + 2];
@@ -4240,12 +4338,12 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                 std::vector<float> riverVertices;
                 std::vector<uint32_t> riverIndices;
                 const float* riverLook = nullptr;
-                size_t riversAsWaterCount = 0;
+                size_t riversAsWaterCount = 0, lakesAsWater = 0;
                 std::vector<std::shared_ptr<Poseidon::Model::Model>> roadModels(roads.size());
                 {
                     const auto buildRoad = [&](size_t r)
                     {
-                        if (!roadReady[r] || (riversAsWater && roads[r].river))
+                        if (!roadReady[r] || roads[r].lake || (riversAsWater && roads[r].river))
                             return;
                         const ResolvedRoad& road = roads[r];
                         // Each strip vertex sits on the engine's own terrain, 8 cm up, whatever the
@@ -4302,6 +4400,12 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                         continue;
                     ResolvedRoad& road = roads[r];
                     const size_t pointCount = road.points.size() / 3;
+                    if (road.lake)
+                    {
+                        if (riversAsWater && AppendLakeWater(road, riverVertices, riverIndices))
+                            ++lakesAsWater;
+                        continue;
+                    }
                     const bool asWater = riversAsWater && road.river;
                     LODShapeWithShadow* shape = nullptr;
                     if (!asWater)
@@ -4393,8 +4497,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     Poseidon::GEngine->SetRiverSurfaces(riverVertices.data(), riverVertices.size(), riverIndices.data(),
                                               riverIndices.size(), riverLook, riverLook ? 9u : 0u);
                     _riversUploaded = !riverVertices.empty();
-                    LOG_INFO(World, "Enfusion native load: RFG-162 {} rivers drawn as water ({} vertices)",
-                             riversAsWaterCount, riverVertices.size() / 8);
+                    LOG_INFO(World, "Enfusion native load: RFG-162 {} rivers, RFG-163 {} ponds drawn as water ({} vertices)",
+                             riversAsWaterCount, lakesAsWater, riverVertices.size() / 8);
                 }
                 roadTextures.reset();
                 for (const auto& [path, count] : textureUse)
