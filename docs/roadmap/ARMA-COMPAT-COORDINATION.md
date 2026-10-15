@@ -60,6 +60,19 @@ folder (nothing copied into the CWA install). They share one compat layer
     with Generation 3.
   - Picked from `MrDudeX-arma2`: `341a466` (hiddenSelectionsTextures), gate widened to
     `Generation() >= 2`; `RegisterWorldClasses` carries latitude/longitude for Generation 3.
+- **Shared code touched (2026-10-15, third round)** -- worth taking on the Arma 1 / 2 branches:
+  - **`dyn_cast` class ids** (`a82fa18`, engine-wide, all game modes): `StreetLamp`,
+    `Airplane`, `Car`, `Tank`, `HelicopterAuto`, `Explosion` and `ObjectDestructed` had no
+    `USE_CASTING`, so `dyn_cast<T>` answered yes for every object of the base. Crash found on
+    an Arma 3 mission (`this switchLight "OFF"` on a UGV freed a "lamp light" in the car's
+    memory); latent: `vehicle setDammage 0` called `Airplane::RepairGear` on any Transport.
+    Every `dyn_cast` target in the tree now has an id.
+  - `PreprocC.cpp`: `#include "\a3\..."` (leading separator = file-system root).
+  - `GameStateExtGrp.cpp` `addAction`: Generation >= 2 strips structured-text tags from the
+    title. `GameStateExtA2.cpp` `getGroupIconParams` answers `[[1,1,1,1],"",1,true]`.
+  - `DisplayIntro::OnSimulate`: `--arma1-test-seconds` also ends an intro-only mission;
+    `DisplayMission` logs the player's final position before `ARMA1-TEST PASS`.
+  - `GameStateExtObj.cpp` `EngineMuzzleName`: a weapon's name stands for its first muzzle.
 - **Foreign commits on this branch.** On 2026-10-15 09:54 another session pushed an upstream
   follow-up (`22d6461`, `58f1fe3`, `c479cde`, CWR-CE main) onto `MrDudeX-arma3` as onto the
   Arma 1 and Arma 2 branches; this branch was rebased onto it, not merged.
