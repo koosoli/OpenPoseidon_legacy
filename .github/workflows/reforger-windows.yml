@@ -12,6 +12,10 @@ on:
     branches:
       - MrDudeX-reforger
       - 'MrDudeX-reforger-**'
+    # A harness or docs commit builds nothing -- and must not cancel the build in flight.
+    paths-ignore:
+      - 'scripts/reforger-pc/**'
+      - 'docs/**'
 
 # Only the newest push is worth a build.
 concurrency:
