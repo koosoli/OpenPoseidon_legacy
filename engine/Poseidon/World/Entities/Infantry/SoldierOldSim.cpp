@@ -1307,6 +1307,19 @@ void Man::SetFace(RString name, const PlayerIdentityKey& player)
         a2Face.GetLength() > 0)
     {
         _head.SetFaceTexture(Type()->_head, _shape, a2Face);
+        // ... on the head model that face comes with (the body has none)
+        const std::string head = Poseidon::Arma1Compat::Arma2HeadModel(Type()->GetName(), _shape->GetName(), name);
+        const RString headShape = head.empty() ? RString() : ::GetShapeName(RString(head.c_str()));
+        if (headShape.GetLength() > 0 && (!_a2Head || stricmp(_a2Head->GetName(), headShape) != 0))
+        {
+            _a2Head = QIFStreamB::FileExist(headShape) ? Shapes.New(headShape, false, true) : nullptr;
+            if (_a2Head)
+                _a2HeadFace.Init(_a2Head, "osobnost", nullptr);
+            else
+                LOG_WARN(Physics, "Arma 2 head model {} not found", (const char*)headShape);
+        }
+        if (_a2Head && _head._texture)
+            _a2Head->RegisterTexture(_head._texture, _a2HeadFace);
         return;
     }
     _head.SetFace(Type()->_head, IsWoman(), _shape, name, playerKey);

@@ -3310,6 +3310,20 @@ RString Arma2FaceTexture(const char* unitClass, const char* shapeName, const cha
     return RString(Arma2FaceTextureOf(*f).c_str());
 }
 
+std::string Arma2HeadModel(const char* unitClass, const char* shapeName, const char* face)
+{
+    const ParamEntry* man = Arma2ManInOwnModel(unitClass, shapeName);
+    const ParamEntry* faces = man ? Arma2FaceType(*man) : nullptr;
+    if (!faces)
+        return {};
+    const ParamEntry* f = face && *face ? faces->FindEntry(face) : nullptr;
+    if (!f || !f->IsClass() || StringValue(*f, "head").empty())
+        f = faces->FindEntry("Default");
+    const std::string head = f && f->IsClass() ? StringValue(*f, "head") : std::string();
+    const ParamEntry* cls = head.empty() ? nullptr : FindConfigClass("CfgHeads", head.c_str());
+    return cls && cls->IsClass() ? StringValue(*cls, "model") : std::string();
+}
+
 RString Arma2RandomFace(const char* unitClass, const char* shapeName, uint32_t seed)
 {
     const ParamEntry* man = Arma2ManInOwnModel(unitClass, shapeName);

@@ -398,6 +398,7 @@ class ManType: public EntityAIType, public MotionType
 	int _rpgMatIndex;
 	int _handMatIndex;
 	int _rightHandMatIndex;
+	int _headMatIndex = -1; // the head bone: an Arma 2 man's head model follows it
 
 	int _stepLIndex,_stepRIndex; // index in memory LOD
 	// Sinkhole W3: the bones the swim splashes come from (SoldierOldSwim.cpp): lruka, pruka, lprsty, pprsty;
@@ -755,6 +756,11 @@ class Man: public Person
 	UnitPosition _unitPos;
 
 	Head _head;
+	// --arma2: the head model (CfgHeads, by face) Arma 2 draws where the body carries only
+	// its "heads\bysta" placeholder, and its face section
+	Ref<LODShapeWithShadow> _a2Head;
+	AnimationSection _a2HeadFace;
+	void DrawArma2Head(int level, const Matrix4 &transform, float dist2, float z2, const LightList &lights);
 
 	public:
 	Man(VehicleType *name, bool fullCreate=true);
