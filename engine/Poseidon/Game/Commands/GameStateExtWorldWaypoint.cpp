@@ -71,7 +71,9 @@ GameValue GuardedPointCreate(const GameState* state, GameValuePar oper1)
 GameValue TriggerCreate(const GameState* state, GameValuePar oper1)
 {
     const GameArrayType& array = oper1;
-    if (!CheckSize(state, array, 2))
+    // [type, position] -- Arma 3 adds a third element (make the trigger global), which a
+    // single game has no use for.
+    if (array.Size() != 3 && !CheckSize(state, array, 2))
     {
         return OBJECT_NULL;
     }

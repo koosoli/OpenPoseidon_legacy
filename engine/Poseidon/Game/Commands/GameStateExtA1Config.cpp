@@ -382,6 +382,40 @@ GameValue A3ConfigClasses(const GameState* state, GameValuePar oper1, GameValueP
     return FilterEntries(state, oper2, (RString)oper1, true, true);
 }
 
+// configClasses [config, depth, inherit, allTiers] (the form BIS_fnc_returnChildren uses):
+// the classes of a config class, and with depth > 0 theirs too, down `depth` more levels;
+// allTiers false keeps only the deepest tier.
+GameValue A3ConfigClassesTiers(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& a = oper1;
+    GameArrayType out;
+    if (a.Size() < 1)
+        return GameValue(out);
+    const int depth = a.Size() > 1 && a[1].GetType() == GameScalar ? toInt((float)a[1]) : 0;
+    const bool inherit = a.Size() > 2 && a[2].GetType() == GameBool ? (bool)a[2] : true;
+    const bool allTiers = a.Size() > 3 && a[3].GetType() == GameBool ? (bool)a[3] : true;
+    GameArrayType tier;
+    tier.Add(a[0]);
+    for (int level = 0; level <= depth && level < 32; level++)
+    {
+        GameArrayType next;
+        for (int i = 0; i < tier.Size(); i++)
+        {
+            const GameValue children = FilterEntries(state, tier[i], RString(), inherit, true);
+            const GameArrayType& list = children;
+            for (int j = 0; j < list.Size(); j++)
+                next.Add(list[j]);
+        }
+        if (allTiers || level == depth)
+            for (int j = 0; j < next.Size(); j++)
+                out.Add(next[j]);
+        if (next.Size() == 0)
+            break;
+        tier = next;
+    }
+    return GameValue(out);
+}
+
 // configProperties [config, condition, inherit]
 GameValue A3ConfigProperties(const GameState* state, GameValuePar oper1)
 {
@@ -475,6 +509,7 @@ GameValue A3ConfigSourceAddonList(const GameState*, GameValuePar)
 void RegisterArma3ConfigCommands()
 {
     GGameState.NewOperator(GameOperator(GameArray, "configClasses", function, A3ConfigClasses, GameString, GameString));
+    GGameState.NewFunction(GameFunction(GameArray, "configClasses", A3ConfigClassesTiers, GameArray));
     GGameState.NewFunction(GameFunction(GameArray, "configProperties", A3ConfigProperties, GameArray));
     GGameState.NewFunction(GameFunction(GameArray, "configHierarchy", A3ConfigHierarchy, GameString));
     GGameState.NewNularOp(GameNular(GameString, "configNull", A3ConfigNull));
