@@ -1746,6 +1746,7 @@ const Macro kMacros[] = {
     {"getHitPointDamage", 'b', GameScalar, GameObject, GameString, "damage (_this select 0)"},
     {"getHitIndex", 'b', GameScalar, GameObject, GameScalar, "damage (_this select 0)"},
     {"cursorObject", 'n', GameObject, 0, 0, "cursorTarget"},
+    {"allCutLayers", 'n', GameArray, 0, 0, "[]"},
     {"allPlayers", 'n', GameArray, 0, 0, "if (isNull player) then {[]} else {[player]}"},
     {"allDeadMen", 'n', GameArray, 0, 0, "[]"},
     {"allDead", 'n', GameArray, 0, 0, "[]"},
@@ -1972,6 +1973,13 @@ const Macro kMacros2[] = {
     {"getGroupIcon", 'b', GameArray, GameGroup, GameScalar, "[]"},
     // position nearRoads radius: the road network is not exposed to scripts yet
     {"nearRoads", 'b', GameArray, GameArray | GameObject, GameScalar, "[]"},
+    // forms Arma 3 adds to older commands (seen in the showcases): a skill by name (the
+    // engine has one skill per unit), fog with decay and base, a named or numbered cut layer
+    {"setSkill", 'b', GameNothing, GameObject, GameArray, ""},
+    {"setFog", 'b', GameNothing, GameScalar, GameArray, "(_this select 0) setFog ((_this select 1) select 0)"},
+    {"cutText", 'b', GameNothing, GameString | GameScalar, GameArray, "cutText (_this select 1)"},
+    {"titleText", 'b', GameNothing, GameString | GameScalar, GameArray, "titleText (_this select 1)"},
+    {"enableWeaponDisassembly", 'b', GameNothing, GameObject, GameBool, ""},
 };
 
 template <size_t I>
@@ -2055,7 +2063,26 @@ const GameFunction A3Unary[] = {
     GameFunction(GameString, "markerBrush", A3MarkerBrush, GameString),
 };
 
+// array # index: select with the highest precedence (Arma 3 2.x); a string gives its
+// character; out of range gives nil
+GameValue A3HashIndex(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    const int i = toIntFloor((float)oper2 + 0.5f);
+    if (oper1.GetType() == GameString)
+    {
+        const RString s = oper1;
+        if (i < 0 || i >= s.GetLength())
+            return GameValue(RString());
+        return GameValue(RString(s.Data() + i, 1));
+    }
+    const GameArrayType& a = oper1;
+    if (i < 0 || i >= a.Size())
+        return GameValue();
+    return a[i];
+}
+
 const GameOperator A3Binary[] = {
+    GameOperator(GameAny, "#", mocnina, A3HashIndex, GameArray | GameString, GameScalar),
     GameOperator(GameBool, "params", function, A3ParamsBinary, GameVoid, GameArray),
     GameOperator(GameBool, "&&", logicAnd, A3LazyAnd, GameBool, GameString),
     GameOperator(GameBool, "and", logicAnd, A3LazyAnd, GameBool, GameString),
