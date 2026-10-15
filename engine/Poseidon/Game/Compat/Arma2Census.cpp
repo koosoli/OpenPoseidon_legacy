@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -516,5 +517,37 @@ void LogSoundCensus()
     for (const auto& [name, e] : entries)
         if (e.failed > 0 && listed++ < 40)
             LOG_INFO(Mission, "{}: sound failed {} ({}x)", Label(), name, e.failed);
+}
+// Test runs: a few script values at the end, to see where a mission's scripted opening stood
+// (Arma 3: did the title card finish, did the establishing shot start the mission). More
+// expressions with OP_A3_PROBE="expr;;expr".
+void LogScriptProbe()
+{
+    if (Generation() != 3 || !GWorld || !GWorld->GetGameState())
+        return;
+    std::vector<std::string> exprs = {"isNil 'BIS_fnc_titlecard_finished'", "isNil 'BIS_missionStarted'",
+                                      "isNil 'BIS_fnc_establishingShot_skip'", "str allCutLayers"};
+    if (const char* extra = std::getenv("OP_A3_PROBE"))
+    {
+        std::string all = extra;
+        for (size_t start = 0; start < all.size();)
+        {
+            size_t end = all.find(";;", start);
+            if (end == std::string::npos)
+                end = all.size();
+            if (end > start)
+                exprs.push_back(all.substr(start, end - start));
+            start = end + 2;
+        }
+    }
+    GameState* gs = GWorld->GetGameState();
+    for (const std::string& e : exprs)
+    {
+        GameVarSpace local(gs->GetContext());
+        gs->BeginContext(&local);
+        const GameValue v = gs->EvaluateMultiple(e.c_str());
+        gs->EndContext();
+        LOG_INFO(Mission, "{}: probe {} = {}", Label(), e, (const char*)v.GetText());
+    }
 }
 } // namespace Poseidon::Arma1Compat

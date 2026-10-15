@@ -271,4 +271,6 @@ void EndFaceCamera();
 void LogUnitMotion(bool atStart);
 // Test runs: the sounds requested, failed and played (Audio/SoundTestLog.hpp).
 void LogSoundCensus();
+// Test runs: script values at the end (Arma 3; more with OP_A3_PROBE).
+void LogScriptProbe();
 } // namespace Poseidon::Arma1Compat
