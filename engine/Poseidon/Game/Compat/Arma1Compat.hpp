@@ -65,6 +65,13 @@ bool ProxyKind(const char* modelName, std::string& simulation, int& crewPosition
 // class of that simulation and side, else any CWA ancestor. Empty when none.
 RString FallbackCwaClass(const RString& a1Name);
 
+// Arma 1: the CWA class to carry an armed Arma 1 car whose name resolved to `cwaClass`.
+// A car whose main gun fires bullets (HMMWV M2, UAZ DShKM, pickups with a PK) on one of
+// CWA's unarmed light cars goes to CWA's JeepMG, so its gunner has a seat and an M2.
+// Grenade launchers, missiles, trucks and every other case keep `cwaClass`.
+// OP_A1_ARMED_CARS=0 turns it off.
+RString Arma1ArmedCarCarrier(const RString& a1Name, const RString& cwaClass);
+
 // An Arma 1 binarised config FILE (mission.sqm, description.ext, ...) as config
 // text the engine's parser reads. False when the file is not in Arma 1's layout
 // (OFP/CWA's own binarised files keep their reader). Works without --arma1.

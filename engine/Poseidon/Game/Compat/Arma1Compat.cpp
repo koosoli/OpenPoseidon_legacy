@@ -794,6 +794,10 @@ RString ResolveVehicleClass(const RString& className)
             LOG_WARN(Mission, "{}: CfgVehicles '{}' has no CWA counterpart", Label(), className.Data());
         }
     }
+    // Arma 1: an armed car (HMMWV M2, UAZ DShKM, PK pickups) rides CWA's armed jeep rather
+    // than the unarmed jeep its name resolved to, so its gunner has a gun.
+    if (Generation() == 1)
+        cwa = Arma1ArmedCarCarrier(className, cwa);
     return Arma1ModelClass(className, cwa);
 }
 

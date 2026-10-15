@@ -995,6 +995,64 @@ bool IsKindOf(const ParamEntry* cls, const char* base)
     const ParamClass* b = baseEntry ? baseEntry->GetClassInterface() : nullptr;
     return c && b && (c == b || c->IsDerivedFrom(*b));
 }
+
+// An Arma 1 vehicle's main gun: the first real weapon on one of its turrets, else on the
+// vehicle itself (horns, smoke and flare launchers, FakeWeapon and the searchlight are no
+// weapons), in `weaponName`, and the lower-case simulation of the ammunition its first
+// magazine holds: "shotbullet" for a machine gun (M2, DShKM, PK), "shotshell" for a grenade
+// launcher or a cannon (MK19, AGS-30, D-30), "shotmissile" for a missile (TOW). Empty with
+// an empty weaponName when there is no real weapon; empty with the name when its ammunition
+// does not resolve.
+std::string Arma1MainGunAmmo(const ParamEntry& vehicle, std::string& weaponName)
+{
+    weaponName.clear();
+    const auto real = [](const std::string& lower) {
+        return !lower.empty() && lower.find("horn") == std::string::npos && lower.find("smoke") == std::string::npos &&
+               lower.find("flare") == std::string::npos && lower.find("fake") == std::string::npos &&
+               lower.find("searchlight") == std::string::npos;
+    };
+    const auto firstReal = [&](const ParamEntry* weapons) -> std::string {
+        if (!weapons || !weapons->IsArray())
+            return {};
+        for (int i = 0; i < weapons->GetSize(); i++)
+        {
+            const std::string w = (const char*)(RStringB)(*weapons)[i];
+            if (real(Lower(w)))
+                return w;
+        }
+        return {};
+    };
+    std::function<std::string(const ParamEntry&, int)> turrets = [&](const ParamEntry& c, int depth) -> std::string {
+        const ParamEntry* t = depth < 4 ? c.FindEntry("Turrets") : nullptr;
+        if (!t || !t->IsClass())
+            return {};
+        for (int i = 0; i < t->GetEntryCount(); i++)
+        {
+            const ParamEntry& turret = t->GetEntry(i);
+            if (!turret.IsClass())
+                continue;
+            if (std::string w = firstReal(turret.FindEntry("weapons")); !w.empty())
+                return w;
+            if (std::string w = turrets(turret, depth + 1); !w.empty())
+                return w;
+        }
+        return {};
+    };
+    weaponName = turrets(vehicle, 0);
+    if (weaponName.empty())
+        weaponName = firstReal(vehicle.FindEntry("weapons"));
+    if (weaponName.empty())
+        return {};
+    const ParamEntry* weapon = FindConfigClass("CfgWeapons", weaponName.c_str());
+    const ParamEntry* magazines = weapon ? weapon->FindEntry("magazines") : nullptr;
+    if (!magazines || !magazines->IsArray() || magazines->GetSize() == 0)
+        return {};
+    const std::string magazine = (const char*)(RStringB)(*magazines)[0];
+    const ParamEntry* mag = FindConfigClass("CfgMagazines", magazine.c_str());
+    const std::string ammo = mag ? StringValue(*mag, "ammo") : std::string();
+    const ParamEntry* ammoClass = ammo.empty() ? nullptr : FindConfigClass("CfgAmmo", ammo.c_str());
+    return ammoClass ? Lower(StringValue(*ammoClass, "simulation")) : std::string();
+}
 } // namespace
 
 void LoadConfig()
@@ -1375,6 +1433,15 @@ RString FallbackCwaClass(const RString& a1Name)
             c = next ? next->GetClassInterface() : nullptr;
         }
     }
+    // Arma 1 static weapons are simulation "tank", so the defaults below made the AGS-30 a
+    // T-72 and the searchlight an M1A1, both with an engine and a main gun (131-mission run,
+    // 79badd0). They stand on CWA's static machine gun of their side instead.
+    if (Generation() == 1 && IsKindOf(a1, "StaticWeapon"))
+    {
+        const char* staticGun = side == 0 && CwaVehicle("M2StaticMGE") ? "M2StaticMGE" : "M2StaticMG";
+        if (CwaVehicle(staticGun))
+            return RString(staticGun);
+    }
     // 2. a CWA class by simulation and side
     struct Default
     {
@@ -1417,6 +1484,48 @@ RString FallbackCwaClass(const RString& a1Name)
         c = next ? next->GetClassInterface() : nullptr;
     }
     return RString();
+}
+
+RString Arma1ArmedCarCarrier(const RString& a1Name, const RString& cwaClass)
+{
+    if (!Active() || Generation() != 1 || !ConfigLoaded())
+        return cwaClass;
+    static const bool enabled = [] {
+        const char* e = std::getenv("OP_A1_ARMED_CARS");
+        return !(e && *e == '0');
+    }();
+    // Only CWA's unarmed light cars are swapped: a truck (Truck5tMG) or the BRDM would lose
+    // its seats or its armour on the jeep.
+    static const char* const lightCars[] = {"HMMWV", "Jeep", "UAZ", "UAZG", "GJeep",
+                                            "Skoda", "SkodaBlue", "SkodaRed", "SkodaGreen"};
+    bool light = false;
+    for (const char* car : lightCars)
+        light = light || _stricmp(cwaClass.Data(), car) == 0;
+    if (!enabled || !light || !CwaVehicle("JeepMG"))
+        return cwaClass;
+    const ParamEntry* a1 = FindConfigClass("CfgVehicles", a1Name);
+    if (!a1 || !a1->IsClass() || Lower(StringValue(*a1, "simulation")) != "car" || IsKindOf(a1, "Truck"))
+        return cwaClass;
+    std::string weapon;
+    const std::string ammo = Arma1MainGunAmmo(*a1, weapon);
+    if (weapon.empty())
+        return cwaClass;
+    static std::set<std::string> reported;
+    const bool first = reported.insert(Lower(a1Name.Data())).second;
+    if (ammo != "shotbullet")
+    {
+        // A grenade launcher (MK19, AGS-30) or a missile (TOW) has no CWA car to carry it;
+        // swapping it for the M2 would be a different vehicle. Left for the owner to decide.
+        if (first)
+            LOG_INFO(Mission, "{}: '{}' mounts '{}' ({}); no CWA car carries that, it stays on the unarmed CWA '{}'",
+                     Label(), a1Name.Data(), weapon, ammo.empty() ? "ammunition not resolved" : ammo.c_str(),
+                     cwaClass.Data());
+        return cwaClass;
+    }
+    if (first)
+        LOG_INFO(Mission, "{}: '{}' mounts the machine gun '{}': carried by CWA 'JeepMG' (M2) instead of the unarmed '{}'",
+                 Label(), a1Name.Data(), weapon, cwaClass.Data());
+    return RString("JeepMG");
 }
 
 // Arma 1 soldiers carry their own weapons with the Arma 1 models unless OP_A1_WEAPONS=0.
@@ -2067,6 +2176,24 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
             if (n > 0)
                 text += "\t\thiddenSelections[]={" + names + "};\r\n\t\thiddenSelectionsTextures[]={" + textures +
                         "};\r\n";
+        }
+    }
+    if (!man && useModel && Generation() == 1)
+    {
+        // An armed Arma 1 car moved onto CWA's JeepMG (Arma1ArmedCarCarrier) keeps its own
+        // seats: JeepMG seats one passenger, the HMMWV M2 and the PK pickups three.
+        if (_stricmp(cwaClass.Data(), "JeepMG") == 0)
+            if (const ParamEntry* seats = a1->FindEntry("transportSoldier");
+                seats && !seats->IsClass() && !seats->IsArray() && (int)*seats >= 0 && (int)*seats < 64)
+                text += "\t\ttransportSoldier=" + std::to_string((int)*seats) + ";\r\n";
+        // A static without a real weapon (the searchlight) on CWA's static M2 drops the M2.
+        if (IsKindOf(a1, "StaticWeapon"))
+        {
+            std::string weapon;
+            Arma1MainGunAmmo(*a1, weapon);
+            const ParamEntry* cwaWeapons = cwa->FindEntry("weapons");
+            if (weapon.empty() && cwaWeapons && cwaWeapons->IsArray() && cwaWeapons->GetSize() > 0)
+                text += "\t\tweapons[]={};\r\n\t\tmagazines[]={};\r\n";
         }
     }
     if (!man && useModel && Generation() == 2)
