@@ -205,15 +205,33 @@ std::string ShaderSample(const std::string& shader)
     return std::string((const char*)first.GetValue());
 }
 
-// The first sample of an Arma 3 sound set (its first shader).
+// The sample of an Arma 3 sound set: of its shaders, the close shot when there is one (a
+// weapon's set lists the bolt's click -- "Closure" -- first, then close, mid and distant
+// shots), else the first shader that has a sample.
 std::string SoundSetSample(const std::string& set)
 {
     const ParamEntry* cls = FindConfigClass("CfgSoundSets", set.c_str());
     const ParamEntry* shaders = cls ? cls->FindEntry("soundShaders") : nullptr;
     if (!shaders || !shaders->IsArray())
         return std::string();
+    std::vector<std::string> names;
     for (int i = 0; i < shaders->GetSize(); i++)
-        if (std::string sample = ShaderSample((const char*)(*shaders)[i].GetValue()); !sample.empty())
+        names.push_back((const char*)(*shaders)[i].GetValue());
+    const auto rank = [](const std::string& name) {
+        const std::string n = Lower(name);
+        if (n.find("closure") != std::string::npos || n.find("tail") != std::string::npos ||
+            n.find("dist") != std::string::npos)
+            return 3;
+        if (n.find("closeshot") != std::string::npos || n.find("close_shot") != std::string::npos)
+            return 0;
+        if (n.find("shot") != std::string::npos)
+            return 1;
+        return 2;
+    };
+    std::stable_sort(names.begin(), names.end(),
+                     [&](const std::string& a, const std::string& b) { return rank(a) < rank(b); });
+    for (const std::string& shader : names)
+        if (std::string sample = ShaderSample(shader); !sample.empty())
             return sample;
     return std::string();
 }
