@@ -1160,11 +1160,13 @@ GameValue ObjUnitLoadout(const GameState* state, GameValuePar oper1)
         {
             continue;
         }
-        weaponArray.Add(weapon->GetName());
+        // Arma 1/2 units report their Arma names, as `weapons` does (identity otherwise).
+        weaponArray.Add(Poseidon::Arma1Compat::ScriptClassName(weapon->GetName()));
     }
 
     GameValue magazines = state->CreateGameValue(GameArray);
     GameArrayType& magazineArray = magazines;
+    const RString unitClass = ai->GetType() ? RString(ai->GetType()->GetName()) : RString();
     for (int i = 0; i < ai->NMagazines(); i++)
     {
         const Magazine* magazine = ai->GetMagazine(i);
@@ -1172,7 +1174,7 @@ GameValue ObjUnitLoadout(const GameState* state, GameValuePar oper1)
         {
             continue;
         }
-        magazineArray.Add(magazine->_type->GetName());
+        magazineArray.Add(Poseidon::Arma1Compat::ScriptMagazineName(unitClass, magazine->_type->GetName()));
         magazineArray.Add(static_cast<float>(magazine->_ammo));
     }
 
@@ -1249,7 +1251,11 @@ GameValue ObjSetUnitLoadout(const GameState* state, GameValuePar oper1, GameValu
 
     for (int i = 0; i < magazines.Size(); i += 2)
     {
-        GameStringType magazineName = magazines[i];
+        // Names as addMagazine takes them: Arma 1/2 names resolve to their CWA carriers, and an
+        // unknown class is skipped under the compat layer (its config reads would fail).
+        GameStringType magazineName = Poseidon::Arma1Compat::ResolveMagazineClass(GameStringType(magazines[i]));
+        if (Poseidon::Arma1Compat::Active() && !(Pars >> "CfgWeapons").FindEntry(magazineName))
+            continue;
         const int ammo = toInt(static_cast<float>(magazines[i + 1]));
         Ref<MagazineType> magazineType = MagazineTypes.New(magazineName);
         if (!magazineType)
@@ -1263,7 +1269,9 @@ GameValue ObjSetUnitLoadout(const GameState* state, GameValuePar oper1, GameValu
 
     for (int i = 0; i < weapons.Size(); ++i)
     {
-        GameStringType weaponName = weapons[i];
+        GameStringType weaponName = Poseidon::Arma1Compat::ResolveWeaponClass(GameStringType(weapons[i]));
+        if (Poseidon::Arma1Compat::Active() && !(Pars >> "CfgWeapons").FindEntry(weaponName))
+            continue;
         ai->AddWeapon(weaponName);
     }
 
