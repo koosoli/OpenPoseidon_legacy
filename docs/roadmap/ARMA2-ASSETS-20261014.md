@@ -135,13 +135,15 @@ modelled yet.
 7 missions, all entered, census 608 Arma, 0 CWA. The Skin fix holds (MP_Superpowers'
 hands natural by day, MP_Paradrop's dark at night), TE02's Takistan bushes draw leaves
 (`_can`), and the aiming view now engages: MP_Superpowers and C2B look over CWA's M16
-iron-sight overlay. Three findings, fixed after the run:
+iron-sight overlay. Findings, fixed after the run:
 
 | Commit | Finding | Fix |
 |--------|---------|-----|
 | `8e1af97` | the M107's own 2D scope (`\ca\weapons\2dscope_mildot_14`, copied by `31df49c`) drew as a small black box with an ellipse in a screen of flat red-brown, no scene | Arma 2's 2D scopes are authored for its own screen mapping; the weapon keeps the CWA weapon's scope (M21) until that is handled. `OP_A2_SCOPES=1` takes them anyway |
 | `949ee53` | under GL33 the HMMWV came out a striped light grey with no camouflage, the M1A1 and MTVR slate blue, the deck crew glossy gold (C2B, T03, C0) | Super's `specular[]` is the ceiling the SMDI green channel scales per texel; GL33 lights per vertex and has no SMDI, so it applied 0.69 everywhere -- the HMMWV's SMDI averages 8/255. `TexMaterial` records the SpecularDetail map and GL33 scales the specular by its TAGG AVGC green (or a procedural `color()`'s g). WGPU binds the map and is unchanged; `OP_GL33_SPEC_MEAN=0` for A/B |
 | `fa764b4` | an Arma 2 rifle aimed through CWA's 2D sight: TE02's SCAR with its EOTech showed the M16 rear-sight mask | Arma 2 sights are part of the weapon model (`modelOptics="-"`, Rifle/Pistol/Launcher bases): the import writes `optics3D=1` and Arma 2's `opticsZoomMin/Max/Init`, `distanceZoom*`; the aiming view then draws the soldier as in first person and puts the camera at the weapon model's `eye` memory point along the barrel, with the weapon placed exactly as the first-person LOD draws it, near plane 0.07 m. A model without `eye` keeps the CWA overlay. `OP_A2_SIGHTS=0` turns it off |
+| `56ba7d3` | the C-130J (on CWA's UH-60) carried ZuniLauncher38, the fishing boat (on the armed BoatW) a Browning (run 19 census) | an Arma 2 vehicle with no real weapon on itself or any turret (horn, smoke and flare launchers aside) gets `weapons[]={}`, `magazines[]={}` when its CWA class is armed; the seats stay |
+| `33b7181` | why the 2D scope was a small box: an Arma 2 `2Dscope_*` frames its 4:3 scope image with black triangles out to +-20 x +-15, and `Object::Draw2D` fitted every vertex (and skipped triangles with a `Fail` per frame) | Draw2D fits the frame's inner edge to the screen height, square, sides blacked out; OFP optics (all quads) unchanged. Measured inner edges: +-3.94 x 2.95 (MilDot), +-5.5 x 4.12 (ACOG), +-4.52 x 3.39 (Hunter), +-6.56 x 4.92 (M1 gunner), all 4:3. Arma 2 scopes are on again by default (`OP_A2_SCOPES=0` for CWA's) |
 
 Measured for `949ee53`: `hmmwv_body_co.paa` (A2 `wheeled.pbo`) averages RGB 81/78/67, a
 dull woodland; `hmmwv_body_1_smdi.paa` (OA `wheeled_e.pbo`, Stage5 of `hmmwv_body_2.rvmat`)
