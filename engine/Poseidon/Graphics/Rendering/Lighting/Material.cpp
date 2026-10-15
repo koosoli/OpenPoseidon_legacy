@@ -82,6 +82,16 @@ TexMaterial::TexMaterial(const char* name)
             _ambient = color(source.ambient);
             _diffuse = color(source.diffuse);
             _forcedDiffuse = color(source.forcedDiffuse);
+            // Arma's "Skin" shader (hands, faces: hhl.rvmat) reads emmisive and
+            // forcedDiffuse as its own parameters -- subsurface tint and translucency,
+            // emmisive[]={1,0.6,0.05,0.6}, forcedDiffuse[]={2.8,0.22,0.12,0.22} -- not as
+            // colours. Taken as colours, every Arma 2 hand lit itself a flat salmon by day
+            // and glowed orange at night (MP_Paradrop, run 19).
+            if (Asset::Material::detail::EqualsNoCase(source.pixelShaderId, "Skin"))
+            {
+                _emmisive = HBlack;
+                _forcedDiffuse = HBlack;
+            }
             _specular = color(source.specular);
             _specularPower = source.specularPower;
             _bumpmapFactor = 1;
