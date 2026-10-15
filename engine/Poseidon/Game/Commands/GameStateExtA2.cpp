@@ -187,6 +187,30 @@ struct Runtime
     std::map<const void*, std::map<std::string, std::string>> topics;            // speaker -> topic -> file
     std::map<std::string, KbSentence> said;                                      // speaker|receiver|topic|id
     int soundSerial = 0;
+    // kbAddTopic's reactions of a unit to a line it hears: an FSM (an AI's) and code (the
+    // player's conversation menu), per unit and topic
+    struct KbReaction
+    {
+        std::string fsm;
+        GameValue code;
+    };
+    std::map<const void*, std::map<std::string, KbReaction>> reactions;
+    // lines told: a speaker says one line after another, and the one he told it to reacts
+    // once it has been said
+    struct KbLine
+    {
+        OLink<Object> who;
+        OLink<Object> to;
+        std::string topic;
+        std::string id;
+        std::string wave; // the recording, "" for none
+        std::string shown;
+        float start = 0;
+        float end = 0;
+        bool spoken = false;
+    };
+    std::vector<KbLine> lines;
+    std::map<const void*, float> speakingUntil;
     // FSMs
     std::vector<std::unique_ptr<Fsm>> fsms;
     int nextFsm = 0;
@@ -636,7 +660,16 @@ GameValue A2KbAddTopic(const GameState*, GameValuePar oper1, GameValuePar oper2)
     const std::string file = (const char*)RString(args[1]);
     RT().topics[obj][topic] = file;
     LoadBikb(file);
-    LOG_INFO(Mission, "Arma 2: kbAddTopic '{}' ({}) for {}", topic, file, (const char*)obj->GetDebugName());
+    // [topic, bikb, AI reaction FSM, player event handler]: the FSM runs when an AI hears a
+    // line of the topic, the code when the player does (it builds his conversation menu)
+    Runtime::KbReaction reaction;
+    if (args.Size() > 2 && args[2].GetType() == GameString)
+        reaction.fsm = (const char*)RString(args[2]);
+    if (args.Size() > 3 && !args[3].GetNil())
+        reaction.code = args[3];
+    RT().reactions[obj][topic] = reaction;
+    LOG_INFO(Mission, "Arma 2: kbAddTopic '{}' ({}{}{}) for {}", topic, file, reaction.fsm.empty() ? "" : ", fsm ",
+             reaction.fsm, (const char*)obj->GetDebugName());
     return NOTHING;
 }
 
@@ -707,6 +740,23 @@ RString SpeechSoundClass(const char* file, const char* text)
     return RString(name.c_str());
 }
 
+// A line starts: its recording is played, its text shown in the group chat.
+void KbSpeak(const GameState* state, Runtime::KbLine& line)
+{
+    line.spoken = true;
+    Object* who = line.who;
+    if (!who)
+        return;
+    const GameValue speaker = GameValueExt(who);
+    if (!line.wave.empty())
+    {
+        const RString cls = SpeechSoundClass(line.wave.c_str(), line.shown.c_str());
+        if (cls.GetLength() > 0)
+            ObjSay(state, speaker, GameValue(cls));
+    }
+    ObjGroupChat(state, speaker, GameValue(RString(line.shown.c_str())));
+}
+
 GameValue A2KbTell(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     Object* who = GetObject(oper1);
@@ -716,9 +766,10 @@ GameValue A2KbTell(const GameState* state, GameValuePar oper1, GameValuePar oper
     Object* to = args[0].GetType() == GameObject ? GetObject(args[0]) : nullptr;
     const std::string topic = (const char*)RString(args[1]);
     const std::string id = (const char*)RString(args[2]);
+    Runtime& rt = RT();
     std::string file;
     {
-        const auto& mine = RT().topics[who];
+        const auto& mine = rt.topics[who];
         const auto it = mine.find(Lower(topic));
         if (it != mine.end())
             file = it->second;
@@ -726,6 +777,7 @@ GameValue A2KbTell(const GameState* state, GameValuePar oper1, GameValuePar oper
     float duration = 2.0f;
     float spoken = -1.0f; // length of the recorded line, when there is one
     std::string shown;
+    std::string wave;
     if (!file.empty())
     {
         if (const std::shared_ptr<ParamFile> cfg = LoadBikb(file))
@@ -738,15 +790,12 @@ GameValue A2KbTell(const GameState* state, GameValuePar oper1, GameValuePar oper
                     shown = (const char*)LocalizeText((const char*)(RStringB)*text);
                 if (const ParamEntry* speech = sentence->FindEntry("speech"); speech && speech->IsArray() && speech->GetSize() > 0)
                 {
-                    std::string wave = (const char*)(RStringB)(*speech)[0];
-                    std::string bank = wave;
+                    std::string bank = (const char*)(RStringB)(*speech)[0];
                     while (!bank.empty() && (bank[0] == '\\' || bank[0] == '/'))
                         bank.erase(0, 1);
                     if (!bank.empty() && QIFStreamB::FileExist(bank.c_str()))
                     {
-                        const RString cls = SpeechSoundClass(wave.c_str(), shown.c_str());
-                        if (cls.GetLength() > 0)
-                            ObjSay(state, oper1, GameValue(cls));
+                        wave = (const char*)(RStringB)(*speech)[0];
                         // kbWasSaid answers once the line has been spoken, and the
                         // conversation FSMs of Arma 2's missions start the next line on it.
                         // The recording's own length is that moment; a length guessed from
@@ -772,14 +821,34 @@ GameValue A2KbTell(const GameState* state, GameValuePar oper1, GameValuePar oper
     // estimated from its length.
     if (spoken <= 0.0f)
         duration = std::max(duration, 0.06f * static_cast<float>(shown.size()) + 1.0f);
-    LOG_INFO(Mission, "Arma 2: kbTell '{}' / '{}' by {}: {} {:.1f} s", topic, id, (const char*)who->GetDebugName(),
-             spoken > 0.0f ? "speech" : "text only", duration);
-    ObjGroupChat(state, oper1, GameValue(RString(shown.c_str())));
+
+    // One line after another: Arma 2's conversation FSMs tell several lines of one speaker in
+    // a single state ("_this kbTell [_from, _topic, ""..._G_0""]; _this kbTell [... _G_1]"),
+    // which he says in turn. A line told while he is still speaking starts when he is done.
+    Runtime::KbLine line;
+    line.who = who;
+    line.to = to;
+    line.topic = topic;
+    line.id = id;
+    line.wave = wave;
+    line.shown = shown;
+    const float now = Now();
+    float& busy = rt.speakingUntil[who];
+    line.start = std::max(now, busy);
+    line.end = line.start + duration;
+    busy = line.end;
+    LOG_INFO(Mission, "Arma 2: kbTell '{}' / '{}' by {}: {} {:.1f} s{}", topic, id, (const char*)who->GetDebugName(),
+             spoken > 0.0f ? "speech" : "text only", duration,
+             line.start > now ? " (after his line before, in " + std::to_string(line.start - now).substr(0, 4) + " s)"
+                              : std::string());
+    if (line.start <= now)
+        KbSpeak(state, line);
     KbSentence s;
-    s.start = Now();
-    s.end = s.start + duration;
-    RT().said[SaidKey(who, to, topic, id)] = s;
-    RT().said[SaidKey(who, nullptr, topic, id)] = s;
+    s.start = line.start;
+    s.end = line.end;
+    rt.said[SaidKey(who, to, topic, id)] = s;
+    rt.said[SaidKey(who, nullptr, topic, id)] = s;
+    rt.lines.push_back(std::move(line));
     return NOTHING;
 }
 
@@ -893,9 +962,8 @@ Fsm* FindFsm(GameValuePar v)
     return nullptr;
 }
 
-GameValue A2ExecFSM(const GameState*, GameValuePar oper1, GameValuePar oper2)
+std::unique_ptr<Fsm> LoadFsm(const std::string& file)
 {
-    const std::string file = (const char*)RString(oper2);
     auto fsm = std::make_unique<Fsm>();
     fsm->handle = ++RT().nextFsm;
     fsm->file = file;
@@ -922,10 +990,84 @@ GameValue A2ExecFSM(const GameState*, GameValuePar oper1, GameValuePar oper2)
             fsm->done = true;
         }
     }
+    return fsm;
+}
+
+GameValue A2ExecFSM(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    std::unique_ptr<Fsm> fsm = LoadFsm((const char*)RString(oper2));
     fsm->vars.VarSet("_this", oper1.GetNil() ? GameValue() : oper1, true);
     const int handle = fsm->handle;
     RT().fsms.push_back(std::move(fsm));
     return GameValue(static_cast<float>(handle));
+}
+
+// A line has been said: the one it was told to reacts -- an AI by the topic's FSM, the
+// player by its event handler (Arma 2 builds his conversation menu from what it returns;
+// there is no such menu here, so only what the handler does itself happens).
+void KbReact(const Runtime::KbLine& line)
+{
+    Object* who = line.who;
+    Object* to = line.to;
+    if (!who || !to || who == to)
+        return;
+    Runtime& rt = RT();
+    const auto unit = rt.reactions.find(to);
+    if (unit == rt.reactions.end())
+        return;
+    const auto topic = unit->second.find(Lower(line.topic));
+    if (topic == unit->second.end())
+        return;
+    const Runtime::KbReaction reaction = topic->second; // the reaction may add topics
+    const bool player = GWorld && to == static_cast<Object*>(GWorld->PlayerOn());
+    const auto setVars = [&](GameVarSpace& vars) {
+        vars.VarSet("_this", GameValueExt(to), true);
+        vars.VarSet("_from", GameValueExt(who), true);
+        vars.VarSet("_sentenceId", GameValue(RString(line.id.c_str())), true);
+        vars.VarSet("_topic", GameValue(RString(line.topic.c_str())), true);
+    };
+    if (!player && !reaction.fsm.empty())
+    {
+        std::unique_ptr<Fsm> fsm = LoadFsm(reaction.fsm);
+        setVars(fsm->vars);
+        LOG_INFO(Mission, "Arma 2: kb '{}' / '{}' reaches {}: FSM {}", line.topic, line.id,
+                 (const char*)to->GetDebugName(), reaction.fsm);
+        rt.fsms.push_back(std::move(fsm));
+    }
+    else if (reaction.code.GetType() == GameString && RString(reaction.code).GetLength() > 0)
+    {
+        GameVarSpace vars;
+        setVars(vars);
+        LOG_INFO(Mission, "Arma 2: kb '{}' / '{}' reaches {}{}: event handler", line.topic, line.id,
+                 (const char*)to->GetDebugName(), player ? " (player)" : "");
+        GameState* gstate = GWorld->GetGameState();
+        gstate->BeginContext(&vars);
+        gstate->EvaluateMultiple((const char*)RString(reaction.code));
+        gstate->EndContext();
+    }
+}
+
+// Lines whose turn has come are spoken; lines said out reach their listener.
+void KbStep(Runtime& rt)
+{
+    const float now = Now();
+    GameState* gstate = GWorld->GetGameState();
+    std::vector<Runtime::KbLine> said;
+    for (size_t i = 0; i < rt.lines.size();)
+    {
+        Runtime::KbLine& line = rt.lines[i];
+        if (!line.spoken && now >= line.start)
+            KbSpeak(gstate, line);
+        if (line.spoken && now >= line.end)
+        {
+            said.push_back(std::move(line));
+            rt.lines.erase(rt.lines.begin() + static_cast<std::ptrdiff_t>(i));
+            continue;
+        }
+        i++;
+    }
+    for (const Runtime::KbLine& line : said)
+        KbReact(line);
 }
 
 GameValue A2ExecFSMUnary(const GameState* state, GameValuePar oper1)
@@ -2358,6 +2500,7 @@ void Arma2RuntimeSimulate()
     if (Arma1Compat::Generation() != 2 || !GWorld || !GWorld->GetGameState())
         return;
     Runtime& rt = RT();
+    KbStep(rt);
     for (size_t i = 0; i < rt.fsms.size(); i++) // FSMs may start FSMs
         FsmStep(*rt.fsms[i]);
     UpdateAttachments(rt);
