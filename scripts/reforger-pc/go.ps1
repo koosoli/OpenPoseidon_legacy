@@ -13,7 +13,7 @@ $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $cwa = Split-Path $here -Parent
 $game = Join-Path $cwa 'Remastered'
-$job = @{ MODE='poses'; WAIT='600'; QUIET='60'; DEPLOY='0'; POSES='poses.txt'; ONLY=''; TAG='';
+$job = @{ MODE='poses'; WAIT='7200'; QUIET='60'; DEPLOY='0'; ZIP=''; POSES='poses.txt'; ONLY=''; TAG='';
           HOUR='11'; WIDTH='1920'; HEIGHT='1080'; FIRST='75'; SETTLE='15'; RENDER='wgpu'; EXTRA='';
           EXE='bin'; FOV='0.7'; FOVY='55.4'; KEEPBMP='0'; WBTIMEOUT='2700';
           REFORGER='H:\SteamLibrary\steamapps\common\Arma Reforger\addons';
@@ -61,6 +61,17 @@ function Read-Poses {
   return ,$list
 }
 
+# Queue: queue\*.txt are further requests. Whatever way this run ends, the oldest of them becomes
+# request.txt, which the watcher then runs -- so several runs can be lined up at once.
+function Advance-Queue {
+  $q = Get-ChildItem (Join-Path $here 'queue') -Filter '*.txt' -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -First 1
+  if ($q -and -not (Test-Path (Join-Path $here 'request.txt'))) {
+    Move-Item $q.FullName (Join-Path $here 'request.txt') -Force
+    St "queued next: $($q.Name)"
+  }
+}
+
+try {
 $tag = if ($job.TAG -ne '') { $job.TAG } else { Get-Date -Format 'MMdd-HHmm' }
 $poses = Read-Poses
 if ($poses.Count -eq 0) { St 'NO POSES'; exit 1 }
@@ -118,17 +129,19 @@ if ($job.MODE -eq 'workbench') {
 }
 
 Wait-GameFree
-# DEPLOY=1: unpack the newest incoming\OpenPoseidon-Reforger-*.zip into bin\ first.
+# DEPLOY=1: unpack incoming\<ZIP> (default: the newest OpenPoseidon-Reforger-*.zip) into the EXE
+# folder (default bin\) first. Builds of different branches go to different folders (EXE=bin-grass).
 if ($job.DEPLOY -eq '1') {
-  $zipItem = Get-ChildItem (Join-Path $here 'incoming') -Filter 'OpenPoseidon-Reforger-*.zip' -ErrorAction SilentlyContinue |
+  $zipFilter = if ($job.ZIP -ne '') { $job.ZIP } else { 'OpenPoseidon-Reforger-*.zip' }
+  $zipItem = Get-ChildItem (Join-Path $here 'incoming') -Filter $zipFilter -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
-  if (-not $zipItem) { St 'NO ZIP (incoming\OpenPoseidon-Reforger-*.zip)'; exit 1 }
+  if (-not $zipItem) { St "NO ZIP (incoming\$zipFilter)"; exit 1 }
   $ex = Join-Path $here 'bin.new'
   Remove-Item $ex -Recurse -Force -ErrorAction SilentlyContinue
   St "deploy $($zipItem.FullName)"
   Expand-Archive $zipItem.FullName $ex -Force
   if (-not (Test-Path "$ex\OpenPoseidon.exe") -or -not (Test-Path "$ex\wgpu_renderer.dll")) { St 'ZIP INCOMPLETE'; exit 1 }
-  $bin = Join-Path $here 'bin'
+  $bin = Join-Path $here $job.EXE
   New-Item -ItemType Directory -Force $bin | Out-Null
   $t = Get-Date
   foreach ($f in Get-ChildItem $ex -File) { Copy-Item $f.FullName (Join-Path $bin $f.Name) -Force; (Get-Item (Join-Path $bin $f.Name)).LastWriteTime = $t }
@@ -213,3 +226,6 @@ $code = if ($timedOut) { 'TIMEOUT' } else { $proc.ExitCode }
 if ($job.KEEPBMP -ne '1') { Get-ChildItem $out -Filter '*.bmp' | Remove-Item -ErrorAction SilentlyContinue }
 "exit=$code seconds=$([int]$sw.Elapsed.TotalSeconds) commit=$commit" | Set-Content (Join-Path $out 'result.txt')
 St "DONE exit $code after $([int]$sw.Elapsed.TotalSeconds) s -> $out"
+} finally {
+  Advance-Queue
+}
