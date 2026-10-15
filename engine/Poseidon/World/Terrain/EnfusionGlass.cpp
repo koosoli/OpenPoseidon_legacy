@@ -4,6 +4,7 @@
 #include <Poseidon/World/Terrain/EnfusionGlass.hpp>
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp> // _modernObjectLightOwners holds Ref<LightPoint>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
 #include <Poseidon/Audio/SoundScene.hpp>

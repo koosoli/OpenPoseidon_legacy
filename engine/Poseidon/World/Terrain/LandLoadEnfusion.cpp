@@ -1390,7 +1390,7 @@ Enf::PrefabSlots PrefabSlotsOf(const AttachWorkspace& ws, const std::string& etP
 
 Enf::PrefabDoor PrefabDoorOf(const AttachWorkspace& ws, const std::string& etPath)
 {
-    if (!EnfusionDoorRegistry::Enabled())
+    if (!Poseidon::EnfusionDoorRegistry::Enabled())
         return {};
     if (const PrefabPrepass::Answers* pre = ws.prepass ? ws.prepass->Find(etPath) : nullptr)
         return pre->door;
@@ -1399,7 +1399,7 @@ Enf::PrefabDoor PrefabDoorOf(const AttachWorkspace& ws, const std::string& etPat
 
 Enf::PrefabGlass PrefabGlassOf(const AttachWorkspace& ws, const std::string& etPath)
 {
-    if (!EnfusionGlassRegistry::Enabled())
+    if (!Poseidon::EnfusionGlassRegistry::Enabled())
         return {};
     if (const PrefabPrepass::Answers* pre = ws.prepass ? ws.prepass->Find(etPath) : nullptr)
         return pre->glass;
@@ -1448,9 +1448,9 @@ void BuildPrefabPrepass(const EnfusionMount& mount, const std::vector<std::strin
                          a.model = Enf::ResolvePrefabModel(mount, round[i]);
                          a.slots = Enf::ResolvePrefabSlots(mount, round[i]);
                          a.children = Enf::ResolvePrefabChildren(mount, round[i]);
-                         if (EnfusionDoorRegistry::Enabled())
+                         if (Poseidon::EnfusionDoorRegistry::Enabled())
                              a.door = Enf::ResolvePrefabDoor(mount, round[i]);
-                         if (EnfusionGlassRegistry::Enabled())
+                         if (Poseidon::EnfusionGlassRegistry::Enabled())
                              a.glass = Enf::ResolvePrefabGlass(mount, round[i]);
                          if (level == 0)
                          {
@@ -3494,14 +3494,14 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
             const auto registerDoorPart = [&](const AttachSet& set, size_t partIndex, int objectId,
                                               const Matrix4& frame)
             {
-                if (!EnfusionDoorRegistry::Enabled())
+                if (!Poseidon::EnfusionDoorRegistry::Enabled())
                     return;
                 if (partIndex == 0)
                     doorOfPart.assign(set.parts.size(), -1);
                 const MeshAttachment& part = set.parts[partIndex];
                 if (part.doorAngle != 0.0f)
                 {
-                    EnfusionDoorRegistry::Spec spec;
+                    Poseidon::EnfusionDoorRegistry::Spec spec;
                     spec.angleDeg = part.doorAngle;
                     for (int i = 0; i < 3; ++i)
                         spec.action[i] = part.doorAction[i];
@@ -3670,7 +3670,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                                                 partOrientation);
                             registerDoorPart(set, partIndex, _modernObjectPlacements.back().id,
                                              frameOf(partPosition, partOrientation));
-                            if (part.glassBroken != 0xffffffffu && EnfusionGlassRegistry::Enabled())
+                            if (part.glassBroken != 0xffffffffu && Poseidon::EnfusionGlassRegistry::Enabled())
                                 _enfusionGlass.AddPane(static_cast<uint32_t>(_modernObjectPlacements.size() - 1),
                                                        _modernObjectPlacements.back().id,
                                                        static_cast<uint32_t>(meshes.size() + part.glassBroken),
@@ -3777,7 +3777,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                         for (size_t partIndex = 0; partIndex < set.parts.size(); ++partIndex)
                         {
                             const MeshAttachment& part = set.parts[partIndex];
-                            if (partIndex == 0 && EnfusionDoorRegistry::Enabled())
+                            if (partIndex == 0 && Poseidon::EnfusionDoorRegistry::Enabled())
                                 doorOfPart.assign(set.parts.size(), -1);
                             const auto partShape = attachShapes.find(part.mesh);
                             if (partShape == attachShapes.end())
@@ -3795,7 +3795,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                             }
                             attached->SetOrientation(orientation * part.basis);
                             registerDoorPart(set, partIndex, attached->ID(), attached->Transform());
-                            if (part.glassBroken != 0xffffffffu && EnfusionGlassRegistry::Enabled())
+                            if (part.glassBroken != 0xffffffffu && Poseidon::EnfusionGlassRegistry::Enabled())
                                 _enfusionGlass.AddPane(0xffffffffu, attached->ID(), 0xffffffffu, here);
                             ++attachPlaced;
                         }
@@ -3983,13 +3983,13 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                      "parts ({} DoorComponents not WholeEntity, skipped); {} doors registered with {} parts "
                      "(POSEIDON_ENFUSION_DOORS={})",
                      summary.doorLeaves, summary.slotPrefabs, summary.doorMembers, summary.doorSkipped,
-                     _enfusionDoors.Count(), _enfusionDoors.MemberCount(), EnfusionDoorRegistry::Enabled() ? 1 : 0);
+                     _enfusionDoors.Count(), _enfusionDoors.MemberCount(), Poseidon::EnfusionDoorRegistry::Enabled() ? 1 : 0);
             LOG_INFO(World,
                      "Enfusion native load: RFG-158 glass: {} destructible pane parts with a broken-phase model ({} "
                      "without one, left whole) per building prefab; {} panes registered "
                      "(POSEIDON_ENFUSION_GLASS_BREAK={})",
                      summary.glassPanes, summary.glassNoPhase, _enfusionGlass.Count(),
-                     EnfusionGlassRegistry::Enabled() ? 1 : 0);
+                     Poseidon::EnfusionGlassRegistry::Enabled() ? 1 : 0);
 
             // RFG-027: the road network. One shape per road rather than one shared
             // shape placed many times, because every road is a different length and
