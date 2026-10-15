@@ -2968,7 +2968,11 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     // Arma 1 weapons[] and magazines[], shown with the Arma 1 weapon models (OP_A1_WEAPONS=0
     // keeps the CWA soldier's loadout).
     const bool loadout = man && (Generation() >= 2 || (Generation() == 1 && useModel && Arma1OwnWeapons()));
-    if (!useModel && !loadout)
+    // Arma 3 modules (logics: race checkpoints and finish, sectors, ...) keep their own class
+    // name on the CWA logic, so typeOf, isKindOf and allMissionObjects find them by it (the
+    // karts' race ended at once: no "ModuleObjectiveRaceFinish_F" was ever found).
+    const bool module = Generation() == 3 && !man && !useModel && IsKindOf(a1, "Logic");
+    if (!useModel && !loadout && !module)
         return cwaClass;
 
     const std::string generated = "A1x_" + std::string(missionClass.Data());
@@ -3252,6 +3256,9 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     if (cargoItems > 0)
         LOG_INFO(Mission, "{}: '{}' carries its own cargo ({} weapon/magazine entries)", Label(), missionClass.Data(),
                  cargoItems);
+    else if (module)
+        LOG_INFO(Mission, "{}: module '{}' is a CWA '{}' under its own name", Label(), missionClass.Data(),
+                 cwaClass.Data());
     else
         LOG_INFO(Mission, "{}: '{}' is the CWA soldier '{}' with its own weapons", Label(), missionClass.Data(),
                  cwaClass.Data());

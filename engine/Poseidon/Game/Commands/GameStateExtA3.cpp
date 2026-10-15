@@ -1579,6 +1579,25 @@ GameValue A3CompileFinal(const GameState*, GameValuePar oper1)
     return oper1;
 }
 
+// Every entity of the mission -- units, vehicles, objects, logics -- for allMissionObjects
+// (allUnits leaves out logics and empty objects).
+GameValue A3AllEntities(const GameState* state)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& array = result;
+    if (!GWorld)
+        return result;
+    const auto add = [&](Entity* e) {
+        if (e && !e->IsDammageDestroyed() && dyn_cast<EntityAI>(e))
+            array.Add(GameValueExt(static_cast<Object*>(e)));
+    };
+    for (int i = 0; i < GWorld->NVehicles(); i++)
+        add(GWorld->GetVehicle(i));
+    for (int i = 0; i < GWorld->NOutVehicles(); i++)
+        add(GWorld->GetOutVehicle(i));
+    return result;
+}
+
 GameValue A3ScriptNull(const GameState*)
 {
     // script handles are numbers here; -1 is no script (scriptDone -1 is true)
@@ -1843,7 +1862,7 @@ const Macro kMacros[] = {
      "private _t = (_this select 0) apply {_x}; private _r = []; {_r pushBackUnique vehicle _x; _r pushBackUnique _x} forEach allUnits; "
      "if (count _t == 0) then {_r} else {_r select {private _o = _x; _t findIf {_o isKindOf _x} >= 0}}"},
     {"allMissionObjects", 'u', GameArray, 0, GameString,
-     "private _t = _this; private _r = []; {_r pushBackUnique vehicle _x; _r pushBackUnique _x} forEach allUnits; if (_t == '') then {_r} else {_r select {_x isKindOf _t}}"},
+     "private _t = _this; private _r = opA3AllEntities; {_r pushBackUnique vehicle _x; _r pushBackUnique _x} forEach allUnits; if (_t == '') then {_r} else {_r select {_x isKindOf _t}}"},
     {"nearestTerrainObjects", 'u', GameArray, 0, GameArray, "[]"},
     {"nearestTerrainObjects", 'b', GameArray, GameObject | GameArray, GameArray, "[]"},
     {"findEmptyPosition", 'b', GameArray, GameArray | GameObject, GameArray,
@@ -2049,6 +2068,7 @@ const GameNular A3Nular[] = {
     GameNular(GameHashMap, "createHashMap", A3CreateHashMap),
     GameNular(GameString, "endl", A3Endl),
     GameNular(GameScalar, "scriptNull", A3ScriptNull),
+    GameNular(GameArray, "opA3AllEntities", A3AllEntities),
     // Arma 3's name for the resistance side (BIS_fnc_sideColor, BIS_fnc_sideID, ...)
     GameNular(GameSide, "independent", SideResistance),
     GameNular(GameBool, "canSuspend", A3CanSuspend),
