@@ -216,7 +216,9 @@ conversion masked those bits off. `4646571` keeps them.
 Focus 14 (`4646571`): T07, C2B, TE02, T03, C0, SP_TrialByFire -- 6 of 6 clean, census 600
 Arma, 0 CWA. T07's camouflage net is see-through; C2B's and TE02's HMMWV show their
 woodland/desert camouflage with no stripes; C2B's M4 and TE02's SCAR look through the EOTech.
-C0's view through the sights came out black (as SP_WarWelcome's in run 20); not explained.
+C0 wrote no picture through the sights (the sheet shows the gap as black): the test's
+screenshot steps run in the in-game display's update, and after the third-person shot at
+14 s it logged nothing more, so something covered that display -- not checked further.
 
 ### Sounds, music and conversations: inventory, 2026-10-15
 
@@ -276,6 +278,43 @@ the campaign name is cut from the path as if it began with `campaigns/` (Arma 1)
 campaign `description.ext`, no next mission after the end. The test harness never takes this
 path (test runs skip the briefing and play the mission alone).
 
+### Focus run 15 (build `fb88b7c`), 2026-10-15
+
+C0, SP_Counterattack, T01, CE0, C1, C3, 90 s each, with `OP_A2_EVAL` playing a Counterattack
+radio line and an Eagle Wing sound every 80 s: 6 of 6 clean, census 838 Arma, 0 CWA, no
+"not found in any CfgSounds". The log shows both sound rules at work
+(`Eag_cdfrun.wss` read as `.ogg`, `credits_boom_1.wss` as its archive path). C1's opening
+radio conversation now runs at the pace of its recordings: each next line starts 0.0-0.6 s
+after the one before ends (O_0 1.8 s -> M_0 2.3 s later, M_1 6.1 s -> M_2 6.7 s later). CE0
+told four lines of one speaker in the same millisecond -- see below.
+
+### Faces, identities, conversations, procedural textures, 2026-10-15
+
+- **Identities never applied.** `setIdentity` looked only in the mission's and the campaign's
+  `description.ext`; Arma 2 keeps Cooper, Miles, Sykes, O'Hara, Rodriguez, Shaftoe, Armstrong
+  and Zemanek in `ca\missions\config.bin` (`CfgIdentities`), and its missions call
+  `setIdentity` 91 times in 25 missions. `fc9f077` looks there too. An Arma 2 voice
+  (`Male01EN_A2`) is not in CWA's `CfgVoice`: the man keeps his own voice instead of CWA's
+  first one (deviation: no Arma 2 voices).
+- **Faces.** A man drawn with his Arma 2 model wore a CWA face texture (CWA's `CfgFaces`) on
+  the Arma 2 head's `osobnost` section (from the code; the face screenshots of focus 16 show
+  it). Arma 2: `CfgFaces >> <class faceType> >> <face>` -- 12 faceTypes (Man with 765 faces,
+  CooperHead, MilesHead, SykesHead, OharaHead, RodriguezHead, HeadMask1Black, WomanHead, ...),
+  and a man without an identity gets a random face matching his class's `identityTypes`
+  (`Head_USMC`, `Head_RU`, `Cooper`, ...). `fc9f077` does both; `OP_A2_FACES=0` restores CWA's
+  faces. Not done: glasses (Arma 2's `CfgGlasses` are models), face wounds, face materials
+  beyond the head's own.
+- **Conversations.** `kbAddTopic`'s third and fourth arguments were dropped: the FSM an AI
+  runs when it hears a line of the topic, and the player's event handler (his conversation
+  menu). 1135 of the missions' 1297 `kbAddTopic` calls pass both, 158 the FSM alone; the
+  conversation editor's FSMs make the listeners reply through them. Those FSMs also tell
+  several lines of one speaker in one state, which Arma 2 says in turn. `ce961ea`: a
+  speaker's lines queue, and the listener reacts once a line has been said (an AI by the FSM,
+  the player by the handler). There is no conversation menu: choices the player makes in
+  Arma 2 are still not offered (deviation).
+- **Procedural textures** (`#(argb,8,8,3)color(...)`) named in configs got `data\` and
+  `.paa` added (run 21: MPE_SectorControl's UI). `9872760` passes them through.
+
 ## Steps
 
 1. **Measure first.** Per mission: an asset census in the log (every class created, what it
@@ -301,6 +340,13 @@ path (test runs skip the briefing and play the mission alone).
    in pieces), destruction (`destrType`, ruins).
 7. **Play it.** Per mission the start scene with the right people, weapons and vehicles,
    no script errors, and a few minutes played by hand on the laptop.
+8. **Sound.** Conversations paced by their recordings (`9e46264`) and config sounds found
+   (`fb88b7c`) -- confirm both in game logs; then `createSoundSource` (C4, MPE_SectorControl),
+   lip sync from the `.lip` files next to the recordings, and music/sound timing over a
+   whole mission.
+9. **Campaign flow.** Start an Arma 2 campaign mission inside its campaign
+   (`StartArma1CampaignMission` cuts the name as if it were Arma 1's `campaigns/<name>/`),
+   so the campaign `description.ext` applies and the next mission follows the end.
 
 ## Test setup on the laptop
 
