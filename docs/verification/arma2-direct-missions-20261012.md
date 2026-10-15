@@ -120,7 +120,9 @@ and are not counted.
 | 20 | `33b7181` | 21 of 98 (stopped for `faad391`), laptop gl33 | 21 | 20 | 0; the one script error is MP_Paradrop's own; census 2357 Arma, 0 CWA |
 | 20b | `faad391` | 48 more of the 98 (runs 20 + 20b: 69), laptop gl33 | 48 | 48 | 0; census 5663 Arma, 0 CWA |
 | focus 13 | `d508f9e` | 6 (C2B, T06, T07, T03, TE02, MP_WarWelcome), laptop gl33 | 6 | 6 | 0; census 452 Arma, 0 CWA. The new object census shows camouflage nets drawn without their holes: ODOL section alpha bits were masked (fixed `4646571`) |
-| focus 14 | `4646571` | 6 (T07, C2B, TE02, T03, C0, SP_TrialByFire), laptop gl33 | 6 | 6 | 0; census 600 Arma, 0 CWA. Camouflage net see-through, HMMWV camouflaged with no stripes, EOTech sights; C0's sight view black (unexplained) |
+| focus 14 | `4646571` | 6 (T07, C2B, TE02, T03, C0, SP_TrialByFire), laptop gl33 | 6 | 6 | 0; census 600 Arma, 0 CWA. Camouflage net see-through, HMMWV camouflaged with no stripes, EOTech sights; C0 wrote no sight screenshot (its in-game display stopped updating after 14 s) |
+| 21 | `4646571` | 98, laptop gl33 | 98 | 97 | 0; the one script error is MP_Paradrop's own; census 13038 Arma, 0 CWA -- the ODOL alpha change regresses nothing. Only texture names that failed: CWA's `biscamel\icamel2.paa` (every mission) and a procedural UI colour in MPE_SectorControl (fixed `9872760`) |
+| focus 15 | `fb88b7c` | 6 (C0, SP_Counterattack, T01, CE0, C1, C3), 90 s, `OP_A2_EVAL` radio + sound | 6 | 6 | 0; census 838 Arma, 0 CWA. Conversation lines follow their recordings (C1: next line 0.0-0.6 s after the last ends); Counterattack's radio `.wss` read as `.ogg`, Eagle Wing's sounds by archive path; no missing CfgSounds |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
