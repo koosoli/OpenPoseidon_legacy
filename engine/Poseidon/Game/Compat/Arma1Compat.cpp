@@ -608,6 +608,10 @@ void RegisterWorldClasses()
         std::string name;
         std::string wrp;
         std::string description;
+        // Arma 3: where the world lies, for the sun and the stars (Eden's are Everon's)
+        bool located = false;
+        float latitude = 0.0f;
+        float longitude = 0.0f;
     };
     std::vector<World> worlds;
     if (Generation() >= 2)
@@ -638,7 +642,17 @@ void RegisterWorldClasses()
                     name = (Generation() == 3 ? "A3_" : "A2_") + name;
             }
             std::string description = std::string(Label()) + " / " + (const char*)w.GetName();
-            worlds.push_back({name, wrp, description});
+            World world{name, wrp, description};
+            const ParamEntry* lat = w.FindEntry("latitude");
+            const ParamEntry* lon = w.FindEntry("longitude");
+            if (Generation() >= 3 && lat && lon && !lat->IsClass() && !lat->IsArray() && !lon->IsClass() &&
+                !lon->IsArray())
+            {
+                world.located = true;
+                world.latitude = static_cast<float>(*lat);
+                world.longitude = static_cast<float>(*lon);
+            }
+            worlds.push_back(world);
         }
     }
     else
@@ -677,6 +691,13 @@ void RegisterWorldClasses()
         cls->Add("opArma1World", 1);
         cls->Add("worldName", RString(world.wrp.c_str()));
         cls->Add("description", RString(world.description.c_str()));
+        // Stratis and Altis lie at 35 N, Tanoa at 18 S (Arma's sign: negative is north);
+        // left at Eden's, a Tanoa dawn came up with Everon's sun.
+        if (world.located)
+        {
+            cls->Add("latitude", world.latitude);
+            cls->Add("longitude", world.longitude);
+        }
         if (ParamClass* names = cls->AddClass("Names"))
         {
             names->SetBase(nullptr);
