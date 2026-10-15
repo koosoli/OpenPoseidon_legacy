@@ -10,6 +10,8 @@
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
+#include <Evaluator/express.hpp>
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
 #include <Poseidon/World/World.hpp>
@@ -26,6 +28,34 @@ namespace Poseidon::Arma1Compat
 {
 namespace
 {
+// The player's man (which = 0) or the man nearest him (which = 1), alive, within 30 m.
+Man* FaceTarget(int which)
+{
+    Person* player = GWorld ? GWorld->PlayerOn() : nullptr;
+    if (which == 0)
+        return dyn_cast<Man>(player);
+    if (!player)
+        return nullptr;
+    Man* best = nullptr;
+    float bestDistance = 30.0f;
+    const auto consider = [&](Entity* e) {
+        Man* man = dyn_cast<Man>(e);
+        if (!man || man == player || man->IsDammageDestroyed())
+            return;
+        const float d = man->Position().Distance(player->Position());
+        if (d < bestDistance)
+        {
+            bestDistance = d;
+            best = man;
+        }
+    };
+    for (int i = 0; i < GWorld->NVehicles(); i++)
+        consider(GWorld->GetVehicle(i));
+    for (int i = 0; i < GWorld->NOutVehicles(); i++)
+        consider(GWorld->GetOutVehicle(i));
+    return best;
+}
+
 std::string TypeName(const Entity* e)
 {
     const EntityType* t = e ? e->GetNonAIType() : nullptr;
@@ -188,6 +218,29 @@ void LogPlayerSurroundings()
             closeBy(GWorld->GetVehicle(i));
         for (int i = 0; i < GWorld->NOutVehicles(); i++)
             closeBy(GWorld->GetOutVehicle(i));
+        // faces: the player and the men within 25 m -- identity, face and the texture the head
+        // draws with (an Arma 2 head must wear an Arma 2 face, ca\characters\hhl\...)
+        {
+            std::vector<std::pair<float, Man*>> men;
+            const auto man = [&](Entity* e) {
+                if (Man* m = dyn_cast<Man>(e))
+                    if (const float d = m->Position().Distance(p); d < 25.0f)
+                        men.emplace_back(d, m);
+            };
+            for (int i = 0; i < GWorld->NVehicles(); i++)
+                man(GWorld->GetVehicle(i));
+            for (int i = 0; i < GWorld->NOutVehicles(); i++)
+                man(GWorld->GetOutVehicle(i));
+            std::sort(men.begin(), men.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+            for (size_t i = 0; i < men.size() && i < 8; i++)
+            {
+                Man* m = men[i].second;
+                const AIUnitInfo& info = m->GetInfo();
+                LOG_INFO(Mission, "{}: census face {} at {:.1f} m: '{}' face '{}' glasses '{}' texture {}", Label(),
+                         TypeName(m), men[i].first, (const char*)info._name, (const char*)info._face,
+                         (const char*)info._glasses, (const char*)m->GetFaceTextureName());
+            }
+        }
         // the mission's own objects nearest the player (a watchtower, a vehicle), with what
         // their first level draws with: T07's camouflage net showed its holes black
         {
@@ -249,5 +302,47 @@ void LogPlayerSurroundings()
             }
         LOG_INFO(Mission, "{}: census {} map models within 150 m of the player", Label(), near.size());
     }
+}
+
+bool AimFaceCamera(int which)
+{
+    if (!Active() || !GWorld || !GLandscape)
+        return false;
+    Man* man = FaceTarget(which);
+    if (!man)
+    {
+        LOG_INFO(Mission, "{}: face shot {}: no man to look at", Label(), which);
+        return false;
+    }
+    const Vector3 headModel = man->GetHeadCenter();
+    const Vector3 head = headModel.SquareSize() > 0 ? man->PositionModelToWorld(headModel)
+                                                    : man->Position() + VUp * 1.6f;
+    Vector3 forward = man->Direction();
+    forward[1] = 0;
+    if (forward.SquareSize() < 1e-6f)
+        forward = VForward;
+    forward.Normalize();
+    const Vector3 eye = head + forward * 0.9f + VUp * 0.03f;
+    // script positions are [x, z, height above the surface]
+    const auto aboveSurface = [](Vector3Par v) { return v.Y() - GLandscape->SurfaceYAboveWater(v.X(), v.Z()); };
+    char script[768];
+    snprintf(script, sizeof(script),
+             "if (isNil \"OP_faceCam\") then {OP_faceCam = \"camera\" camCreate [0,0,0]}; "
+             "OP_faceCam camSetPos [%.3f,%.3f,%.3f]; OP_faceCam camSetTarget [%.3f,%.3f,%.3f]; "
+             "OP_faceCam camSetFov 0.3; OP_faceCam cameraEffect [\"internal\",\"back\"]; OP_faceCam camCommit 0;",
+             eye.X(), eye.Z(), aboveSurface(eye), head.X(), head.Z(), aboveSurface(head));
+    GWorld->GetGameState()->EvaluateMultiple(script);
+    const AIUnitInfo& info = man->GetInfo();
+    LOG_INFO(Mission, "{}: face shot {}: {} '{}' face '{}' texture {}", Label(), which, TypeName(man),
+             (const char*)info._name, (const char*)info._face, (const char*)man->GetFaceTextureName());
+    return true;
+}
+
+void EndFaceCamera()
+{
+    if (!Active() || !GWorld)
+        return;
+    GWorld->GetGameState()->EvaluateMultiple(
+        "if (!isNil \"OP_faceCam\") then {OP_faceCam cameraEffect [\"terminate\",\"back\"]; camDestroy OP_faceCam};");
 }
 } // namespace Poseidon::Arma1Compat

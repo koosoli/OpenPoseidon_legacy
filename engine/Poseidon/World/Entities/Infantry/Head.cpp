@@ -1119,6 +1119,21 @@ void Head::SetFace(const HeadType& type, bool women, LODShape* lShape, RString n
     }
 }
 
+void Head::SetFaceTexture(const HeadType& type, LODShape* lShape, RString textureName)
+{
+    RString name = GetPictureName(textureName);
+    Ref<Texture> text = GlobLoadTexture(name);
+    if (!text)
+    {
+        LOG_ERROR(Physics, "Cannot find texture: {}", (const char*)name);
+        return;
+    }
+    _texture = text;
+    // CWA's CfgFaceWounds pairs CWA face textures; an Arma 2 face has no entry there.
+    _textureWounded = nullptr;
+    lShape->RegisterTexture(_texture, type._personality);
+}
+
 RString Head::GetFaceTextureName() const
 {
     return _texture ? RString(_texture->GetName()) : RString();
