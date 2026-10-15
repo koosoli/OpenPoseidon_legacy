@@ -206,6 +206,27 @@ void Open(const std::string& layer, GameValuePar resource)
         return;
     const int display = NextDisplay()++;
     Displays()[display] = OpenDisplay{(const char*)name, layer, onUnload};
+    // Arma 3 compiles each display's script before the game starts (BIS_fnc_initDisplay with
+    // no arguments, at preStart) and BIS_fnc_initDisplay later calls uiNamespace's
+    // "<class>_script"; there is no preStart here, so the script is compiled on first use.
+    const std::string scriptName = Text(*cls, "scriptName");
+    const std::string scriptPath = Text(*cls, "scriptPath");
+    if (!scriptName.empty() && !scriptPath.empty())
+    {
+        const ParamEntry* root = Arma1Compat::ConfigRoot();
+        const ParamEntry* paths = root ? root->FindEntry("CfgScriptPaths") : nullptr;
+        const ParamEntry* folder = paths ? paths->FindEntry(scriptPath.c_str()) : nullptr;
+        if (folder && !folder->IsClass() && !folder->IsArray())
+        {
+            const std::string file = std::string((const char*)(RStringB)*folder) + scriptName + ".sqf";
+            const std::string var = Quoted(scriptName + "_script");
+            Run(gs,
+                "if (isNil {uiNamespace getVariable " + var + "}) then {uiNamespace setVariable [" + var +
+                    ", compile (" + Quoted("scriptName '" + scriptName + "'; _fnc_scriptName = '" + scriptName + "'; ") +
+                    " + preprocessFileLineNumbers " + Quoted(file) + ")]};",
+                display);
+        }
+    }
     Run(gs, onLoad, display);
     const std::string clsName = (const char*)name;
     std::string code = "if (isNil {uiNamespace getVariable " + Quoted(clsName) + "}) then {uiNamespace setVariable [" +
