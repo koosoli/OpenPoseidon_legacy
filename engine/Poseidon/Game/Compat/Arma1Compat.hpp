@@ -266,4 +266,9 @@ void LogPlayerSurroundings();
 // (which = 0) or of the man nearest him (1), until EndFaceCamera. False when there is none.
 bool AimFaceCamera(int which);
 void EndFaceCamera();
+// Test runs: positions of every soldier at the start, and at the end which AI soldiers did
+// not move and what their AI was doing (Arma2Census.cpp).
+void LogUnitMotion(bool atStart);
+// Test runs: the sounds requested, failed and played (Audio/SoundTestLog.hpp).
+void LogSoundCensus();
 } // namespace Poseidon::Arma1Compat

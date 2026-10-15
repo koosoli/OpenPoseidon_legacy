@@ -6,7 +6,12 @@
 // test run says which Arma 2 assets are really in the game and which are stand-ins.
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 
+#include <Poseidon/AI/AICenter.hpp>
+#include <Poseidon/AI/AIGroup.hpp>
+#include <Poseidon/AI/AIUnit.hpp>
 #include <Poseidon/AI/EntityAI.hpp>
+#include <Poseidon/Audio/IAudioSystem.hpp>
+#include <Poseidon/Audio/SoundTestLog.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
@@ -21,6 +26,7 @@
 #include <cctype>
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
@@ -344,5 +350,161 @@ void EndFaceCamera()
         return;
     GWorld->GetGameState()->EvaluateMultiple(
         "if (!isNil \"OP_faceCam\") then {OP_faceCam cameraEffect [\"terminate\",\"back\"]; camDestroy OP_faceCam};");
+}
+
+namespace
+{
+const char* UnitStateName(int s)
+{
+    static const char* names[] = {"Wait", "Init", "Busy", "Completed", "Delay", "InCargo", "Stopping", "Replan",
+                                  "Stopped", "Sending"};
+    return s >= 0 && s < static_cast<int>(sizeof(names) / sizeof(names[0])) ? names[s] : "?";
+}
+
+const char* CommandName(int m)
+{
+    static const char* names[] = {"none", "Wait", "Attack", "Hide", "Move", "Heal", "Repair", "Refuel", "Rearm",
+                                  "Support", "Join", "GetIn", "Fire", "GetOut", "Stop", "Expect", "Action"};
+    return m >= 0 && m < static_cast<int>(sizeof(names) / sizeof(names[0])) ? names[m] : "?";
+}
+
+// where each unit stood when the test began (by pointer; a unit that dies and is replaced
+// in the same memory is a rare false reading in a diagnostic)
+std::unordered_map<const void*, Vector3>& StartPositions()
+{
+    static std::unordered_map<const void*, Vector3> positions;
+    return positions;
+}
+
+template <class F> void ForEachMan(F&& f)
+{
+    const auto visit = [&](Entity* e) {
+        if (auto* man = dyn_cast<Man>(e))
+            f(man, false);
+        if (auto* tr = dyn_cast<Transport>(e))
+            for (Person* p : {tr->Driver(), tr->Gunner(), tr->Commander()})
+                if (auto* crew = dyn_cast<Man>(p))
+                    f(crew, true);
+    };
+    for (int i = 0; i < GWorld->NVehicles(); i++)
+        visit(GWorld->GetVehicle(i));
+}
+} // namespace
+
+// Units that stand still for a whole test run are a failure the screenshots cannot show:
+// a soldier who should walk to his waypoint looks the same as one who is told to wait.
+// At the start every man's position is taken; at the end each AI soldier on foot is
+// counted as moved or not, and for the ones that did not move the log says what his AI
+// was doing -- unit state, the group's command, waypoints, the move he is in, disabled AI.
+void LogUnitMotion(bool atStart)
+{
+    if (!Active() || !GWorld)
+        return;
+    if (atStart)
+    {
+        StartPositions().clear();
+        ForEachMan([](Man* man, bool) { StartPositions()[man] = man->Position(); });
+        Audio::SoundTestLog::Enable(true);
+        return;
+    }
+    int onFoot = 0, moved = 0, crew = 0, dead = 0, players = 0, listed = 0;
+    std::map<std::string, int> stillBy; // why-key -> count
+    const Object* player = GWorld->GetRealPlayer();
+    ForEachMan([&](Man* man, bool inVehicle) {
+        if (inVehicle)
+        {
+            crew++;
+            return;
+        }
+        if (man == player)
+        {
+            players++;
+            return;
+        }
+        if (man->IsDammageDestroyed())
+        {
+            dead++;
+            return;
+        }
+        onFoot++;
+        const auto it = StartPositions().find(man);
+        const float d = it == StartPositions().end() ? -1.0f : it->second.Distance(man->Position());
+        if (d > 2.0f)
+        {
+            moved++;
+            return;
+        }
+        AIUnit* unit = man->Brain();
+        AIGroup* group = unit ? unit->GetGroup() : nullptr;
+        AISubgroup* sub = unit ? unit->GetSubgroup() : nullptr;
+        const Command* cmd = sub ? sub->GetCommand() : nullptr;
+        const int disabled = unit ? unit->GetAIDisabled() : 0;
+        const std::string key = std::string(unit ? UnitStateName(unit->GetState()) : "no-brain") + " cmd=" +
+                                (cmd ? CommandName(static_cast<int>(cmd->_message)) : "none") +
+                                " wps=" + std::to_string(group ? group->NWaypoints() : -1) +
+                                (disabled & AIUnit::DAMove ? " disableAI-MOVE" : "") +
+                                (unit && unit->IsSubgroupLeader() ? " leader" : "");
+        stillBy[key]++;
+        if (listed++ < 12)
+        {
+            LOG_INFO(Mission,
+                     "{}: motion still {} moved {:.1f} m: {} move={} speed {:.2f} path={} mode={} planning={} "
+                     "disabledAI={}",
+                     Label(), TypeName(man), d, key, (const char*)man->GetPrimaryMoveName(),
+                     man->Speed().Size(), unit ? unit->GetPath().Size() : -1, unit ? int(unit->GetMode()) : -1,
+                     unit ? int(unit->GetPlanningMode()) : -1, disabled);
+        }
+    });
+    LOG_INFO(Mission, "{}: motion AI soldiers on foot {} moved {} still {}; crew {}, dead {}, player {}", Label(), onFoot,
+             moved, onFoot - moved, crew, dead, players);
+    for (const auto& [key, count] : stillBy)
+        LOG_INFO(Mission, "{}: motion still {}x {}", Label(), count, key);
+    int vehicles = 0, vehiclesMoved = 0;
+    for (int i = 0; i < GWorld->NVehicles(); i++)
+        if (auto* tr = dyn_cast<Transport>(GWorld->GetVehicle(i)); tr && tr->Driver() && tr->Driver() != player)
+        {
+            vehicles++;
+            if (tr->Speed().Size() > 0.5f)
+                vehiclesMoved++;
+        }
+    LOG_INFO(Mission, "{}: motion vehicles with an AI driver {}, moving at the end {}", Label(), vehicles,
+             vehiclesMoved);
+}
+
+// What the game asked the sound system for during the run (SoundTestLog.hpp).
+void LogSoundCensus()
+{
+    if (!Active())
+        return;
+    using namespace Audio::SoundTestLog;
+    std::vector<std::pair<std::string, Entry>> entries;
+    {
+        std::lock_guard<std::mutex> lock(Mutex());
+        entries.assign(Entries().begin(), Entries().end());
+    }
+    int requested = 0, failed = 0, played = 0;
+    for (const auto& [name, e] : entries)
+    {
+        requested += e.requested;
+        failed += e.failed;
+        played += e.played;
+    }
+    LOG_INFO(Mission,
+             "{}: sound census {} distinct files, {} requests, {} failed, {} plays, {} empty names; volumes fx {:.2f} "
+             "speech {:.2f} music {:.2f}",
+             Label(), entries.size(), requested, failed, played, EmptyRequests().load(),
+             GSoundsys ? GSoundsys->GetWaveVolume() : -1.0f, GSoundsys ? GSoundsys->GetSpeechVolume() : -1.0f,
+             GSoundsys ? GSoundsys->GetCDVolume() : -1.0f);
+    std::sort(entries.begin(), entries.end(),
+              [](const auto& a, const auto& b) { return a.second.requested > b.second.requested; });
+    int listed = 0;
+    for (const auto& [name, e] : entries)
+        if (listed++ < 40)
+            LOG_INFO(Mission, "{}: sound {} requested {} failed {} played {}", Label(), name, e.requested, e.failed,
+                     e.played);
+    listed = 0;
+    for (const auto& [name, e] : entries)
+        if (e.failed > 0 && listed++ < 40)
+            LOG_INFO(Mission, "{}: sound failed {} ({}x)", Label(), name, e.failed);
 }
 } // namespace Poseidon::Arma1Compat
