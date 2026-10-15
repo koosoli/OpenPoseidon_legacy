@@ -150,6 +150,12 @@ RString GetDefaultName(RString baseName, const char* dDir, const char* dExt)
     {
         return "";
     }
+    // A procedural texture ("#(argb,8,8,3)color(0,0,0,1)", Arma 2 UI and models) is no file:
+    // no folder before it, no extension after it (it became "data\#(argb...).paa").
+    if (baseName[0] == '#')
+    {
+        return baseName;
+    }
     char buf[256];
     *buf = 0;
 
