@@ -2386,15 +2386,41 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     }
     if (!man && useModel && Generation() == 1)
     {
-        // An armed Arma 1 car moved onto CWA's JeepMG (Arma1ArmedCarCarrier) keeps its own
-        // seats: JeepMG seats one passenger, the HMMWV M2 and the PK pickups three.
+        // Its own seats, top speed and fuel (OP_A1_VEHICLE_VALUES=0: the CWA carrier's), as
+        // Arma 2 vehicles have: an Arma 1 M113 seats 11, CWA's 8; the HMMWV M2 on JeepMG 3,
+        // JeepMG 1. Armour stays CWA's: the rounds are CWA's, and Arma 1
+        // armour values against them would change how many hits a vehicle takes.
+        static const bool ownValues = [] {
+            const char* e = std::getenv("OP_A1_VEHICLE_VALUES");
+            return !(e && *e == '0');
+        }();
+        const std::string sim = Lower(StringValue(*a1, "simulation"));
+        const bool vehicle = sim == "car" || sim == "tank" || sim == "helicopter" || sim == "airplane" ||
+                             sim == "ship" || sim == "motorcycle";
+        if (vehicle && !IsKindOf(a1, "StaticWeapon") &&
+            (ownValues || _stricmp(cwaClass.Data(), "JeepMG") == 0))
+        {
+            for (const char* key : {"maxSpeed", "fuelCapacity", "transportSoldier"})
+            {
+                const bool seats = strcmp(key, "transportSoldier") == 0;
+                if (!ownValues && !seats)
+                    continue;
+                const ParamEntry* e = a1->FindEntry(key);
+                if (!e || e->IsClass() || e->IsArray())
+                    continue;
+                const float value = (float)*e;
+                if ((value > 0.0f || (value == 0.0f && seats)) && value < (seats ? 64.0f : 1e6f))
+                {
+                    char line[96];
+                    std::snprintf(line, sizeof(line), "\t\t%s=%g;\r\n", key, seats ? std::floor(value) : value);
+                    text += line;
+                }
+            }
+        }
         if (_stricmp(cwaClass.Data(), "JeepMG") == 0)
         {
-            if (const ParamEntry* seats = a1->FindEntry("transportSoldier");
-                seats && !seats->IsClass() && !seats->IsArray() && (int)*seats >= 0 && (int)*seats < 64)
-                text += "\t\ttransportSoldier=" + std::to_string((int)*seats) + ";\r\n";
-            // And its own crew: JeepMG's is SoldierWB, which put West soldiers into an East
-            // UAZ (a1vehArm census). Resolved like any mission class, as for Arma 2 vehicles.
+            // An armed car moved onto CWA's JeepMG (Arma1ArmedCarCarrier) also keeps its own
+            // crew: JeepMG's is SoldierWB, which put West soldiers into an East UAZ (a1vehArm census). Resolved like any mission class, as for Arma 2 vehicles.
             if (const std::string crew = StringValue(*a1, "crew"); !crew.empty())
             {
                 const RString resolved = ResolveVehicleClass(RString(crew.c_str()));
