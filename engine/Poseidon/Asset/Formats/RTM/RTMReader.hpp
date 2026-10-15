@@ -367,6 +367,10 @@ inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
     // aimed behind himself (turned) or looked out of the back of his head (unturned; the
     // first-person camera saw his backpack). Without a known skeleton
     // (BmtrSkeletonParents empty for these bones) the transforms stay as stored.
+    // Arma 3's version 5 is the same reading: measured offline on b_soldier_01 (kneeling
+    // walk, pistol walk, prone to standing) the mean edge stretch is 0.08-0.12 this way
+    // against 0.22-0.28 with the bones taken as model space -- once the model is posed
+    // around its own bounding centre (ODOL 73 keeps it apart; see ODOLLoader).
     static const bool xMirror = [] {
         const char* e = std::getenv("OP_A2_MAN_XMIRROR");
         return e && *e == '1';

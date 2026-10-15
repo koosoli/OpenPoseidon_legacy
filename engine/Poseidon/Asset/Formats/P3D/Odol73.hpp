@@ -141,6 +141,12 @@ struct Odol73LodDirectory
     std::vector<uint32_t> starts;
     std::vector<uint32_t> ends;
     std::vector<bool> permanent;
+    // The binariser's bounding centre as revision 73 stores it (the vertices are stored
+    // around it). Kept apart from model.boundingCenter, which stays zero for revision 73:
+    // the runtime draws and places these models around the stored centre. Only an Arma 3
+    // man (and his gear and head) uses it: his binarised moves pose the source model's
+    // space (see ODOLLoader).
+    Vector3 storedBoundingCenter;
 };
 
 // An attachment point: another model placed into this one at a named selection.
@@ -598,10 +604,11 @@ inline Odol73LodDirectory ReadOdol73StaticDirectory(BinaryReader& reader, int fi
     skipVec();
     skipVec(); // visual bounds
     // Bounding centre and geometry centre are read but deliberately NOT surfaced
-    // yet: the runtime has been drawing these models with a zero bounding centre
-    // and every proxy / grounding offset is measured against that. Centre of
-    // mass and the inertia rows are physics-only (COL-001).
-    skipVec();
+    // as model.boundingCenter: the runtime has been drawing these models with a zero
+    // bounding centre and every proxy / grounding offset is measured against that.
+    // The bounding centre is kept as storedBoundingCenter for the skinned-man path.
+    // Centre of mass and the inertia rows are physics-only (COL-001).
+    reader.readBytes(&result.storedBoundingCenter, sizeof(result.storedBoundingCenter));
     skipVec();
     reader.readBytes(&result.model.centerOfMass, sizeof(result.model.centerOfMass));
     for (int i = 0; i < 3; ++i)
