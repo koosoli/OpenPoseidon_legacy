@@ -2173,6 +2173,10 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
                 if (const ParamEntry* now = Pars.FindEntry("CfgVehicles"); resolved.GetLength() > 0 && now && now->FindEntry(resolved))
                     text += "\t\tcrew=\"" + std::string(resolved.Data()) + "\";\r\n";
             }
+            // Arma 3: its own engine (or rotor) instead of the CWA carrier's
+            if (Generation() == 3)
+                if (const std::string engine = Arma3EngineSound(*a1, sim == "helicopter"); !engine.empty())
+                    text += "\t\tsoundEngine[]={\"" + engine + "\",0.5,1};\r\n";
             for (const char* key : {"maxSpeed", "armor", "fuelCapacity", "transportSoldier"})
             {
                 const ParamEntry* e = a1->FindEntry(key);
