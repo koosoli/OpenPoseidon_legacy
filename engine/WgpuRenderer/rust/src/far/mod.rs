@@ -408,12 +408,15 @@ impl Far {
         near_cutoff_m: f32,
         far_distance_m: f32,
         pixel_limit: f32,
-        enabled: bool,
+        enabled: u32,
     ) {
         self.params.cfg[0] = near_cutoff_m.max(0.0);
         self.params.cfg[1] = far_distance_m.max(0.0);
         self.params.cfg[2] = pixel_limit;
-        self.params.tune[1] = if enabled { 1.0 } else { 0.0 };
+        self.params.tune[1] = if enabled != 0 { 1.0 } else { 0.0 };
+        // enabled == 2: pure-distance start rule from `near_cutoff_m` (a native world whose real
+        // models end at a known reach -- the authored far window -- rather than at the cull).
+        self.params.tune[3] = if enabled == 2 { 1.0 } else { mode_from_env() };
         self.upload_params(queue);
     }
 

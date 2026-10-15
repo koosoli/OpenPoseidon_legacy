@@ -3548,6 +3548,10 @@ class Engine : public IGraphicsEngine
     virtual void SceneClutterObjectRemoved(uint32_t) {}
     // RFG-153: once per frame on the producer side, beside UpdateNativeFarResidency.
     virtual void UpdateNativeClutter(const Vector3& /*camera*/) {}
+    // FAR-002: a native world's far proxies start where its authored far window's real models
+    // end -- a distance, not the cull complement. Negative = the ordinary far-tier start rule.
+    // APPENDED at the class end (vtable-slot note above).
+    virtual void SetNativeFarProxyStart(float /*metres*/) {}
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy

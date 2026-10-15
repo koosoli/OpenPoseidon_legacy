@@ -5506,6 +5506,100 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     }
 }
 
+void Landscape::NoteNativeProxyModel(uint32_t modelIndex, const LODShapeWithShadow& shape)
+{
+    if (_nativeProxyModels.size() < _modernObjectModels.size())
+        _nativeProxyModels.resize(_modernObjectModels.size());
+    if (modelIndex >= _nativeProxyModels.size() || _nativeProxyModels[modelIndex].valid)
+        return;
+    NativeProxyModel& proxy = _nativeProxyModels[modelIndex];
+    const Vector3 lo = shape.Min(), hi = shape.Max();
+    proxy.height = hi.Y() - lo.Y();
+    proxy.baseY = lo.Y();
+    proxy.radius = 0.5f * std::max(hi.X() - lo.X(), hi.Z() - lo.Z());
+    // Colour: the mean of the first LOD's section textures (their own average colours).
+    float r = 0, g = 0, b = 0;
+    int n = 0;
+    if (const Shape* lod = shape.NLevels() > 0 ? shape.LevelOpaque(0) : nullptr)
+        for (int i = 0; i < lod->NSections(); ++i)
+            if (Texture* texture = lod->GetSection(i).properties.GetTexture())
+            {
+                const Color c = texture->GetColor();
+                r += c.R(); g += c.G(); b += c.B();
+                ++n;
+            }
+    // Texture averages are sRGB-encoded; far.wgsl multiplies the colour as LINEAR albedo (the
+    // OFP worlds' ModelInfo colours were tuned that way), so a native proxy is decoded here:
+    // undecoded, a spruce at sRGB 0x50 (0.31) drew at ~4x its brightness -- pale ghost forests.
+    const auto linear = [](float v) { return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f); };
+    proxy.colour = n > 0 ? static_cast<uint32_t>(PackedColor(Color(linear(r / n), linear(g / n), linear(b / n), 1.0f)))
+                         : 0xFF404040u;
+    proxy.flags = FarProxyIsPrism(static_cast<const char*>(_modernObjectModels[modelIndex])) ? 1u : 0u;
+    proxy.valid = proxy.height > 0.05f && proxy.radius > 0.05f;
+    _nativeProxyDirty |= proxy.valid;
+    _nativeProxyModelCount += proxy.valid ? 1u : 0u;
+}
+
+void Landscape::UploadNativeProxies()
+{
+    if (!GEngine)
+        return;
+    const auto start = std::chrono::steady_clock::now();
+    std::vector<Engine::FarProxyInstance> instances;
+    instances.reserve(_modernObjectPlacements.size());
+    size_t prisms = 0;
+    for (size_t index = 0; index < _modernObjectPlacements.size(); ++index)
+    {
+        const ModernObjectPlacement& placement = _modernObjectPlacements[index];
+        if (placement.modelIndex >= _nativeProxyModels.size() || !_nativeProxyModels[placement.modelIndex].valid ||
+            (index < _nativeFarWanted.size() && (_nativeFarWanted[index] & 2)))
+            continue;
+        const NativeProxyModel& proxy = _nativeProxyModels[placement.modelIndex];
+        const float scale = std::sqrt(placement.rows[0] * placement.rows[0] + placement.rows[1] * placement.rows[1] +
+                                      placement.rows[2] * placement.rows[2]);
+        Engine::FarProxyInstance instance;
+        instance.x = placement.rows[9];
+        instance.y = placement.rows[10] + proxy.baseY * scale;
+        instance.z = placement.rows[11];
+        instance.height = proxy.height * scale;
+        instance.radius = proxy.radius * scale;
+        instance.colour = proxy.colour;
+        instance.flags = proxy.flags;
+        prisms += proxy.flags != 0;
+        instances.push_back(instance);
+    }
+    GEngine->SetFarProxyInstances(instances.data(), instances.size());
+    static uint32_t proxyReports = 0;
+    if (proxyReports++ < 12)
+    {
+        // The first uploads name the commonest proxies and their colours: a wrong colour on a
+        // forest-sized model is visible from every hill.
+        std::vector<std::pair<uint32_t, uint32_t>> counts; // (count, model)
+        std::vector<uint32_t> perModel(_nativeProxyModels.size(), 0);
+        for (const ModernObjectPlacement& placement : _modernObjectPlacements)
+            if (placement.modelIndex < perModel.size() && _nativeProxyModels[placement.modelIndex].valid)
+                ++perModel[placement.modelIndex];
+        for (uint32_t m = 0; m < perModel.size(); ++m)
+            if (perModel[m])
+                counts.push_back({perModel[m], m});
+        std::sort(counts.begin(), counts.end(), std::greater<>());
+        for (size_t i = 0; i < counts.size() && i < 8; ++i)
+        {
+            const NativeProxyModel& proxy = _nativeProxyModels[counts[i].second];
+            LOG_INFO(World, "Native far proxy #{}: {} x{} colour {:08x} h={:.1f} r={:.1f} {}", i,
+                     static_cast<const char*>(_modernObjectModels[counts[i].second]), counts[i].first, proxy.colour,
+                     proxy.height, proxy.radius, proxy.flags ? "prism" : "card");
+        }
+    }
+    _nativeProxyUploaded = !instances.empty();
+    _nativeProxyDirty = false;
+    _nativeProxyModelsAtUpload = _nativeProxyModelCount;
+    _nativeProxyUploadMs = Poseidon::Foundation::GlobalTickCount();
+    LOG_INFO(World, "Native far proxies: {} ({} prisms) from {} placements, {:.1f} ms", instances.size(), prisms,
+             _modernObjectPlacements.size(),
+             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+}
+
 void Landscape::ClearNativeFarResidency()
 {
     // Unconditional: the engine also holds the near clutter (RFG-153), which the far set says
@@ -5523,6 +5617,16 @@ void Landscape::ClearNativeFarResidency()
     _nativeFarRejectRebuild = false;
     _nativeFarCells.clear();
     _nativeFarFillCell = _nativeFarFillEntry = 0;
+    _nativeProxyModels.clear();
+    _nativeProxyDirty = false;
+    _nativeProxyModelCount = _nativeProxyModelsAtUpload = 0;
+    _nativeProxyReach = -1.0f;
+    if (_nativeProxyUploaded && GEngine)
+    {
+        GEngine->SetFarProxyInstances(nullptr, 0);
+        GEngine->SetNativeFarProxyStart(-1.0f);
+    }
+    _nativeProxyUploaded = false;
     _nativeFarCenterX = _nativeFarCenterZ = -0x3fffffff;
 }
 
@@ -5540,8 +5644,15 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         return;
     if (!std::isfinite(cameraPosition.X()) || !std::isfinite(cameraPosition.Z()) || _landGrid <= 0)
         return;
-    constexpr float range = 3000.0f;
-    constexpr size_t candidateBudget = 200000;
+    // WGR_NATIVE_FAR_RANGE (m) / WGR_NATIVE_FAR_CAP (placements): the far window's reach and size.
+    static const float range = [] {
+        const char* value = std::getenv("WGR_NATIVE_FAR_RANGE");
+        return value && *value ? std::clamp(static_cast<float>(std::atof(value)), 500.0f, 12000.0f) : 3000.0f;
+    }();
+    static const size_t candidateBudget = [] {
+        const char* value = std::getenv("WGR_NATIVE_FAR_CAP");
+        return value && *value ? static_cast<size_t>(std::clamp(std::atol(value), 1000L, 2000000L)) : size_t(200000);
+    }();
     // WGR_NATIVE_FAR_SKIP_REJECTED=0: rejected models keep their candidate slots (the old list).
     static const bool farSkipRejected = [] {
         const char* value = std::getenv("WGR_NATIVE_FAR_SKIP_REJECTED");
@@ -5666,9 +5777,13 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
             PreserveModernSourceDiagnosticRequests(epochs, _modernObjectPrefetchEpoch);
             _modernObjectPreparer->DropStale(epochs.data(), epochs.size(), _modernObjectPrefetchEpoch);
         }
-        LOG_INFO(World, "Native authored far window: candidates={} active={} models={} radius={}m cap={} | "
+        // How far the list actually reaches: the cap can run out before `range` in forest.
+        const float reachM = _nativeFarFillCell < _nativeFarCells.size()
+                                 ? std::sqrt(static_cast<float>(_nativeFarCells[_nativeFarFillCell].distance2)) * _landGrid
+                                 : range;
+        LOG_INFO(World, "Native authored far window: candidates={} active={} models={} radius={}m reach={:.0f}m cap={} | "
                  "build {:.1f} ms (cells {:.1f}, list {:.1f}, active {:.1f})",
-                 _nativeFarCandidates.size(), _nativeFarActive.size(), _nativeFarModels.size(), range,
+                 _nativeFarCandidates.size(), _nativeFarActive.size(), _nativeFarModels.size(), range, reachM,
                  candidateBudget, sinceBuild(), cellsMs, listMs - cellsMs, activeMs - listMs);
     }
     if (_nativeFarCandidates.empty())
@@ -5784,6 +5899,7 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                 continue;
             }
             found = _nativeFarModels.emplace(modelIndex, shape).first;
+            NoteNativeProxyModel(modelIndex, *shape);
         }
         Matrix4 transform;
         transform.SetDirectionAside(Vector3(placement.rows[0], placement.rows[1], placement.rows[2]));
@@ -5848,6 +5964,31 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                      st.calls, st.callMs, st.callMaxMs, st.slowCalls, st.installs, st.installMs, st.installMaxMs,
                      st.ready, st.readyMs, st.rebuilds, st.rebuildMs);
             _nativeFarStats = {};
+        }
+    }
+    // FAR-002: proxies beyond the window. WGR_NATIVE_FAR_PROXIES=0 = none (the bare far hills).
+    static const bool farProxies = [] {
+        const char* value = std::getenv("WGR_NATIVE_FAR_PROXIES");
+        return !(value && value[0] == '0');
+    }();
+    if (farProxies)
+    {
+        const float reach = _nativeFarFillCell < _nativeFarCells.size()
+                                ? std::sqrt(static_cast<float>(_nativeFarCells[_nativeFarFillCell].distance2)) * _landGrid
+                                : range;
+        if (std::fabs(reach - _nativeProxyReach) > 1.0f)
+        {
+            _nativeProxyReach = reach;
+            GEngine->SetNativeFarProxyStart(reach);
+        }
+        // A rebuild walks every placement and re-uploads ~1M proxies (~60 ms), so it waits for
+        // the known-model set to grow by 15% (the first ones arrive in bursts), or 30 s for any.
+        if (_nativeProxyDirty)
+        {
+            const uint32_t since = Poseidon::Foundation::GlobalTickCount() - _nativeProxyUploadMs;
+            const bool grown = _nativeProxyModelCount >= _nativeProxyModelsAtUpload + std::max(5u, _nativeProxyModelsAtUpload * 15 / 100);
+            if ((grown && since >= 3000u) || since >= 30000u || !_nativeProxyUploaded)
+                UploadNativeProxies();
         }
     }
     if (added && (_nativeFarActive.size() / 10000 != (_nativeFarActive.size() - added) / 10000))

@@ -780,6 +780,22 @@ public:
     };
   protected:
     NativeFarStats _nativeFarStats;
+    // FAR-002: cheap far-tier proxies (cards/prisms) for every placement of a model the far
+    // window has loaded, drawn from where the window's real models end.
+    struct NativeProxyModel
+    {
+        float height = 0.0f, baseY = 0.0f, radius = 0.0f;
+        uint32_t colour = 0xFFFFFFFFu, flags = 0;
+        bool valid = false;
+    };
+    std::vector<NativeProxyModel> _nativeProxyModels;
+    bool _nativeProxyDirty = false;
+    bool _nativeProxyUploaded = false;
+    uint32_t _nativeProxyUploadMs = 0;
+    float _nativeProxyReach = -1.0f;
+    uint32_t _nativeProxyModelCount = 0, _nativeProxyModelsAtUpload = 0;
+    void NoteNativeProxyModel(uint32_t modelIndex, const LODShapeWithShadow& shape);
+    void UploadNativeProxies();
     // The far window's cells, nearest first, and where the candidate fill stopped in them.
     std::vector<ModernObjectCellCandidate> _nativeFarCells;
     size_t _nativeFarFillCell = 0;

@@ -459,6 +459,8 @@ class EngineWgpu : public EngineDummy
     // authored placement rows (Landscape::LoadOprwModern). Everything past the object
     // residency window is invisible without it; nothing here ever becomes an Object.
     void SetFarProxyInstances(const FarProxyInstance* data, size_t count) override;
+    void SetNativeFarProxyStart(float metres) override { _nativeFarProxyStart = metres; }
+    float _nativeFarProxyStart = -1.0f;
 
     // GRS-A — grass instance counts, read back from wgr_get_grass_stats.
     bool GetGrassStats(GrassStatsOut& out) const override;

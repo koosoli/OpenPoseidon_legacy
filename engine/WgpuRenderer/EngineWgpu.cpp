@@ -7551,6 +7551,13 @@ void EngineWgpu::PushSceneCamera()
             _pendingSet.farDistance = farTier.distance;
             _pendingSet.farPixelLimit = farTier.pixelLimit;
             _pendingSet.farEnabled = farTier.enabled ? 1u : 0u;
+            // FAR-002: on a native world the proxies start at the far window's reach (2 = the
+            // pure-distance rule from farNearCutoff).
+            if (_nativeFarProxyStart >= 0.0f && farTier.enabled)
+            {
+                _pendingSet.farNearCutoff = _nativeFarProxyStart;
+                _pendingSet.farEnabled = 2u;
+            }
             _pendingSet.farParamsDirty = true;
         }
     }

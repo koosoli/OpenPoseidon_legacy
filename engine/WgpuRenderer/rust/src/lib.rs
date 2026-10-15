@@ -7582,7 +7582,7 @@ impl Renderer {
         near_cutoff_m: f32,
         far_distance_m: f32,
         pixel_limit: f32,
-        enabled: bool,
+        enabled: u32,
     ) {
         self.far.set_params(
             &self.queue,

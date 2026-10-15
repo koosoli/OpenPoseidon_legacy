@@ -3248,7 +3248,7 @@ pub unsafe extern "C" fn wgr_far_set_params(
     }
     let _ = catch_unwind(AssertUnwindSafe(|| {
         let renderer = unsafe { &mut *renderer };
-        renderer.far_set_params(near_cutoff_m, far_distance_m, pixel_limit, enabled != 0);
+        renderer.far_set_params(near_cutoff_m, far_distance_m, pixel_limit, enabled);
     }));
 }
 
