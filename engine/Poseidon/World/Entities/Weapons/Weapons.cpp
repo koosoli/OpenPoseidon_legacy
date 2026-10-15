@@ -802,6 +802,24 @@ void WeaponType::Init(const char* name)
             _muzzles[i]->Init(cls >> muzzle, this);
         }
     }
+    // An Arma 2 weapon on a CWA weapon with several muzzles (the M4A1 HWS GL on
+    // M16GrenadeLauncher, C2B) declares its 3D sights on itself, where the inherited
+    // muzzle classes do not see them: the first muzzle, the rifle, looks through them.
+    if (n > 1 && stricmp((RStringB)(cls >> "muzzles")[0], "this") != 0)
+        if (const ParamEntry* optics3D = cls.FindEntry("optics3D"); optics3D && (int)*optics3D != 0)
+        {
+            MuzzleType* rifle = _muzzles[0];
+            rifle->_optics3D = true;
+            const auto take = [&](const char* key, float& value) {
+                if (const ParamEntry* e = cls.FindEntry(key); e && !e->IsClass() && !e->IsArray())
+                    value = (float)*e;
+            };
+            take("opticsZoomMin", rifle->_opticsZoomMin);
+            take("opticsZoomMax", rifle->_opticsZoomMax);
+            take("opticsZoomInit", rifle->_opticsZoomInit);
+            take("distanceZoomMin", rifle->_distanceZoomMin);
+            take("distanceZoomMax", rifle->_distanceZoomMax);
+        }
 }
 
 LSError WeaponType::Serialize(ParamArchive& ar)
