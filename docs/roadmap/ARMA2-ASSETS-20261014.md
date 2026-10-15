@@ -182,6 +182,22 @@ SPE1_Vehicles_US), all entered, **all 8 without a script error**, census 693 Arm
   the sides are black (SPE1_OneShotOneKill opens at dawn, so the zoomed view is red sky).
 - C-130J and the fishing boat carry no weapons any more (`56ba7d3`).
 
+### Focus run 12 (build `faad391`), 2026-10-15
+
+6 missions (C2B, TE02, T03, T06, SP_TrialByFire, MP_Superpowers). C2B's M4A1 HWS GL now
+looks through its EOTech (`7fe3564` holds). The 1.5-texel normal offset lightened the
+HMMWV and brought part of its camouflage back, **but the stripes stayed**: a side turned
+from the sun is its own stored back face, and at a grazing angle one texel spans more
+depth than an offset covers. `e0bbaac` adds the rule that settles it -- for a receiver
+turned from the light a stored surface up to ~1 m behind it shadows it
+(`POSEIDON_GL33_SHADOW_SELF=0` turns it off). T06's view through the same M4 came out
+entirely black; `964ec29` logs where the 3D-sight camera goes (in T06 the player stands
+half a metre behind another soldier, whose back may simply fill the view) and no longer
+builds the camera from a zero muzzle direction.
+
+Full run 20 (`33b7181`) was stopped after 21 missions for this build: 21 entered, 20 clean
+(MP_Paradrop's own error), census 2357 Arma, 0 CWA. It continues on `faad391` as run 20b.
+
 Offline check: a small program built from the repo's own ODOL and RTM readers poses
 `USMC_Soldier_Light` with a move and scores the result by how much the mesh's edges stretch.
 
