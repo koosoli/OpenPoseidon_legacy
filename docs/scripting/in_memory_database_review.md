@@ -25,12 +25,20 @@ existing `PoseidonTests` target includes the updated test source.
   build command therefore returned failure, despite producing the executable.
 - Running that executable with filter
   `[database],GameType constants*,VBS-derived functions remain registered in GGameState`
-  passed **99 assertions in 7 test cases**. This covers database persistence,
-  list/hash mutations, handle defaults, the data factory, type constants and
-  command registration. The full asset-dependent suite was not run.
-- `git diff --check` passed. Source comparison confirmed exact matches for the
-  imported implementation, header, tests and guide; command registration merged
-  with OpenPoseidon's existing commands. All 21 database commands occur once.
+  passed **645 assertions in 12 test cases** on `feature/integrated-features`
+  after all three fixes and the CLI11 startup correction. This covers database
+  persistence, replacement failures, handle lifetime and slot reuse, list-index
+  validation, list/hash mutations, type constants and command registration,
+  including the two loadout commands. The full asset-dependent suite was not run.
+- The game build and content staging succeeded. The
+  [smoke-test mission](../../dev-missions/database-loadout.Intro/README.md)
+  passed on Windows with WGPU: the player's loadout was saved to disk, cleared,
+  reloaded and restored with matching weapons, ammunition, grenades and selected
+  muzzle. This check required locally installed proprietary Remastered assets;
+  no such assets are included in the contribution. Multiplayer was not tested.
+- `git diff --check` passed. The original import matched the upstream feature;
+  the fixes below intentionally change that implementation. All 21 database
+  commands remain registered once.
 
 ## Findings in the imported implementation
 
@@ -65,7 +73,7 @@ All three findings below are fixed on this branch.
   regression test fails against the previous implementation because `-0.5`
   reads the first element instead of returning the fallback.
 
-After the list-index fix, the focused native tests passed **643 assertions in 12 test
-cases** on Windows. Compilation and linking succeeded; the existing missing-font
-fixture-copy failure still makes the overall build command return failure.
+The isolated `feature/in-memory-database` branch passed 643 assertions in 12
+test cases after these fixes. The integrated branch adds two loadout-command
+registration assertions, producing the 645-assertion result above.
 The POSIX replacement path has not been runtime-tested here.

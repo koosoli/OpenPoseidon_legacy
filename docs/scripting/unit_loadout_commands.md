@@ -26,14 +26,24 @@ Arma 3 equipment-array format. It does not capture clothing or inventory grids.
 Imported source commit `04145d371be5ae59dded612fb73a28a3ed6254bf` from
 `jschmidt92/cwr_ce_source`, whose `feature/unit-loadout-commands` branch was
 synchronized to `ef884f9757b80081fa6376e328e95eddf7accb05`.
-OpenPoseidon's `feature/unit-loadout-commands` branch builds on the existing
-in-memory database integration. See [CREDITS.md](../../CREDITS.md) for attribution.
+OpenPoseidon's `feature/unit-loadout-commands` branch is based on `main` and
+contains only the loadout feature. `feature/in-memory-database` contains the
+database feature and its fixes. `feature/integrated-features` combines both.
+See [CREDITS.md](../../CREDITS.md) for attribution.
 
 The native implementation and tests compiled and linked with
 `win-x64-clang-rwdi`. The build command then failed at the existing fixture-copy
 step because this source release omits `tests/fixtures/font`.
 Running the linked `PoseidonTests.exe` with filter
 `[database],GameType constants*,VBS-derived functions remain registered in GGameState`
-passed 101 assertions across 7 test cases, including registration of both
-loadout commands and the database regression tests. This does not verify
-in-game loadout round-trips or multiplayer behavior. `git diff --check` passed.
+passed 645 assertions across 12 test cases on `feature/integrated-features`,
+including registration of both loadout commands and the database regression
+tests. `git diff --check` passed.
+
+The game build and content staging also succeeded. The
+[smoke-test mission](../../dev-missions/database-loadout.Intro/README.md) passed
+on Windows with WGPU: a loadout was saved to disk, cleared, loaded into a new
+database snapshot and restored with matching weapons, magazine ammunition,
+grenades and selected muzzle. This runtime check required locally installed
+proprietary Remastered assets; none are included in this contribution.
+Multiplayer behavior was not tested.

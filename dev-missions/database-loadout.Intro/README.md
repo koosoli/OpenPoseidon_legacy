@@ -17,6 +17,8 @@ reports `INTEGRATED_TEST: PASS` or `INTEGRATED_TEST: FAIL` in the log and an
 in-game hint. On failure it attempts to restore the original loadout.
 The mission stays open for manual movement and firing tests.
 
-Validated on Windows with WGPU and local Remastered data: the M16, magazine
-ammunition, grenades and selected muzzle matched after the round trip.
+Validated on Windows with WGPU and locally installed proprietary Remastered
+data: the M16, magazine ammunition, grenades and selected muzzle matched after
+the round trip. The mission scripts and placement are authored test fixtures;
+the required game models, textures and other proprietary assets are not included.
 This is a single-player smoke test, not multiplayer coverage.
