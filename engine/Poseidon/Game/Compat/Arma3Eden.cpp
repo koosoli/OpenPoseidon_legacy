@@ -676,6 +676,52 @@ std::string FillFor(const std::string& fill)
 // SQF from Eden attribute values
 // ---------------------------------------------------------------------------------------
 
+// A group's init code names its group `this` (Arma 3 runs it with `this` = the group). Here
+// it runs from the leader's init line, where `this` is the leader and cannot be assigned, so
+// the code is given the group as _this and every `this` of its own reads _this instead
+// (strings and longer names such as thisList are left alone).
+std::string GroupInitCode(const std::string& code)
+{
+    std::string out;
+    out.reserve(code.size() + 16);
+    const auto ident = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+    for (size_t i = 0; i < code.size();)
+    {
+        const char c = code[i];
+        if (c == '"' || c == '\'')
+        {
+            // a string runs to its closing quote; a doubled quote stays inside it
+            size_t j = i + 1;
+            while (j < code.size())
+            {
+                if (code[j] == c)
+                {
+                    if (j + 1 < code.size() && code[j + 1] == c)
+                    {
+                        j += 2;
+                        continue;
+                    }
+                    break;
+                }
+                j++;
+            }
+            out.append(code, i, std::min(code.size(), j + 1) - i);
+            i = j + 1;
+            continue;
+        }
+        if ((c == 't' || c == 'T') && (i == 0 || !ident(code[i - 1])) && code.size() - i >= 4 &&
+            _strnicmp(code.c_str() + i, "this", 4) == 0 && (i + 4 == code.size() || !ident(code[i + 4])))
+        {
+            out += "_this";
+            i += 4;
+            continue;
+        }
+        out.push_back(c);
+        i++;
+    }
+    return out;
+}
+
 std::string SqfString(const std::string& s)
 {
     std::string q = "\"";
@@ -1301,7 +1347,7 @@ class EdenConverter
                     if (const std::string v = a->S(key); !v.empty())
                         l.prefix.push_back(std::string("group this ") + cmd + " " + SqfString(v));
                 if (const std::string init = a->S("init"); !init.empty())
-                    l.prefix.push_back("[group this] call {private _this = _this select 0; this = _this; " + init + "}");
+                    l.prefix.push_back("[group this] call {private _this = _this select 0; " + GroupInitCode(init) + "}");
             }
         }
     }
@@ -1369,6 +1415,19 @@ class EdenConverter
             w.Arr("markers", list + "}");
         }
         std::vector<std::string> parts = u.prefix;
+        // Arma 3 keeps a soldier's height -- on an upper floor, on a carrier's deck. CWA stands
+        // every soldier on the ground (or the sea) at the start, so one the file holds above
+        // the terrain (atlOffset) is put back at his height from his own init line, if that is
+        // more than 1.5 m above the terrain or the sea: by then the objects he stands on exist
+        // (the carrier's deck is built by its base's init line), and he drops onto them.
+        if (_env.kind && !emptyVehicle && n.D("atlOffset", 0.0) > 1.0 && _env.kind(type) == EdenKind::Man)
+            if (const std::vector<double> p = Floats(*pos, "position"); p.size() >= 3)
+            {
+                const std::string x = Num(p[0]), y = Num(p[2]), h = Num(p[1]);
+                parts.insert(parts.begin(), "if (" + h + " - ((getTerrainHeightASL [" + x + "," + y +
+                                                "]) max 0) > 1.5) then {this setPosASL [" + x + "," + y + "," + h +
+                                                "]}");
+            }
         if (a)
         {
             if (const Node* inv = a->Class("Inventory"))
