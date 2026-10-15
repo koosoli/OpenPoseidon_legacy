@@ -13,6 +13,10 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace Poseidon
 {
 RString GetUserDirectory();
@@ -528,7 +532,9 @@ GameValue DatabaseSave(const GameState* /*state*/, GameValuePar oper1, GameValue
         return false;
 
     Poseidon::CreatePath(filename);
-    const std::string temp = std::string((const char*)filename) + ".tmp";
+    const auto destination = std::filesystem::path((const char*)filename);
+    auto temp = destination;
+    temp += ".tmp";
     std::ofstream output(temp, std::ios::binary | std::ios::trunc);
     const char magic[] = "PDB1";
     const std::uint32_t version = 1;
@@ -544,12 +550,17 @@ GameValue DatabaseSave(const GameState* /*state*/, GameValuePar oper1, GameValue
     }
 
     std::error_code error;
-    std::filesystem::remove(std::filesystem::path((const char*)filename), error);
-    error.clear();
-    std::filesystem::rename(temp, std::filesystem::path((const char*)filename), error);
+#ifdef _WIN32
+    // Windows rename does not replace existing files; keep the old file until replacement succeeds.
+    if (!::MoveFileExW(temp.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING))
+        error = std::error_code(static_cast<int>(::GetLastError()), std::system_category());
+#else
+    std::filesystem::rename(temp, destination, error);
+#endif
     if (error)
     {
-        std::filesystem::remove(temp, error);
+        std::error_code ignored;
+        std::filesystem::remove(temp, ignored);
         LOG_ERROR(Core, "[DATABASE] Save failed for '{}' (filesystem error {})", (const char*)filename, error.value());
         return false;
     }

@@ -33,6 +33,11 @@ Returns `true` when the database is successfully written and `false` on failure.
 
 Saving writes a temporary file and then replaces the destination. Existing files are overwritten. The file is binary and should not be edited as a text config file.
 
+The previous file is not deleted before replacement. If replacement fails, the
+previous database is retained and `dbSave` returns `false`; temporary-file cleanup
+does not overwrite the reported replacement error. This does not guarantee
+durability across a power loss.
+
 ## General keys and values
 
 Keys may use dotted paths. Intermediate components are hashes and are created by `dbSet` as needed.

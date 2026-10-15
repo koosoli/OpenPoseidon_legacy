@@ -28,6 +28,9 @@
 #include <cstdio>
 #include <iterator>
 #include <system_error>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
@@ -804,6 +807,72 @@ TEST_CASE("DATABASE commands persist mutable nested data", "[game][gameStateExt]
 
     std::filesystem::remove(path, ec);
 }
+
+TEST_CASE("DATABASE save preserves a directory at the destination", "[game][gameStateExt][database]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+
+    const char* filename = "unit_test_database_save_directory.db";
+    const auto path = ConfigStoragePath(filename);
+    REQUIRE(std::filesystem::create_directories(path));
+    struct Cleanup
+    {
+        std::filesystem::path path;
+        ~Cleanup() { std::error_code ignored; std::filesystem::remove(path, ignored); }
+    } cleanup{path};
+
+    GameValue database = DatabaseNew(&GGameState);
+    REQUIRE_FALSE((bool)DatabaseSave(&GGameState, database, RString(filename)));
+    REQUIRE(std::filesystem::is_directory(path));
+    REQUIRE_FALSE(std::filesystem::exists(path.string() + ".tmp"));
+}
+
+#ifdef _WIN32
+TEST_CASE("DATABASE failed replacement preserves the previous saved data", "[game][gameStateExt][database]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+
+    const char* filename = "unit_test_database_save_locked.db";
+    const auto path = ConfigStoragePath(filename);
+    struct Cleanup
+    {
+        std::filesystem::path path;
+        HANDLE handle = INVALID_HANDLE_VALUE;
+        ~Cleanup()
+        {
+            if (handle != INVALID_HANDLE_VALUE)
+                ::CloseHandle(handle);
+            std::error_code ignored;
+            std::filesystem::remove(path, ignored);
+        }
+    } cleanup{path};
+
+    GameValue database = DatabaseNew(&GGameState);
+    REQUIRE((bool)DatabaseSet(&GGameState, database, MakeConfigAssignment(GGameState, "score", GameValue(10.0f))));
+    REQUIRE((bool)DatabaseSave(&GGameState, database, RString(filename)));
+    // Permit reads but deny replacement while the existing database is open.
+    cleanup.handle = ::CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                   FILE_ATTRIBUTE_NORMAL, nullptr);
+    REQUIRE(cleanup.handle != INVALID_HANDLE_VALUE);
+    REQUIRE((bool)DatabaseSet(&GGameState, database, MakeConfigAssignment(GGameState, "score", GameValue(20.0f))));
+    REQUIRE_FALSE((bool)DatabaseSave(&GGameState, database, RString(filename)));
+    REQUIRE_FALSE(std::filesystem::exists(path.string() + ".tmp"));
+
+    GameValue loaded = DatabaseLoad(&GGameState, RString(filename));
+    REQUIRE(ExtractDatabase(loaded).GetIndex() >= 0);
+    REQUIRE((float)DatabaseGet(&GGameState, loaded,
+                               MakeConfigAssignment(GGameState, "score", GameValue(-1.0f))) == 10.0f);
+
+    ::CloseHandle(cleanup.handle);
+    cleanup.handle = INVALID_HANDLE_VALUE;
+    REQUIRE((bool)DatabaseSave(&GGameState, database, RString(filename)));
+    loaded = DatabaseLoad(&GGameState, RString(filename));
+    REQUIRE((float)DatabaseGet(&GGameState, loaded,
+                               MakeConfigAssignment(GGameState, "score", GameValue(-1.0f))) == 20.0f);
+}
+#endif
 
 TEST_CASE("DATABASE supports mutable lists and hashes", "[game][gameStateExt][database]")
 {

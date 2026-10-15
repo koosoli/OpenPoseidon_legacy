@@ -34,14 +34,19 @@ existing `PoseidonTests` target includes the updated test source.
 
 ## Findings in the imported implementation
 
-These findings remain present in the source feature and this faithful port.
+The save-replacement finding is fixed on this branch. The memory-retention and
+list-index findings remain open.
 
-- **High: saving can lose the previous database.** `DatabaseSave` removes the
+- **Fixed — High: saving could lose the previous database.** `DatabaseSave` removed the
   destination before renaming the temporary file. A crash between those
   operations, or a failed rename, leaves no previous database. The failure path
   also deletes the temporary file and overwrites the original error code during
-  cleanup. Use an operating-system replacement operation that preserves the
-  previous file if replacement fails, and retain the original failure code.
+  cleanup. It now uses `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING` on Windows
+  and rename on POSIX, without deleting the destination first. Cleanup uses a
+  separate error code. Regression tests cover a destination directory remaining
+  intact and, on Windows, a blocked replacement preserving the old data followed
+  by a successful retry. The existing test covers successful initial saves and
+  overwrites. Power-loss durability is not guaranteed.
 - **Medium: released databases retain memory.** `ReleaseDatabaseRef` decrements
   the reference count without clearing the root; `NewDatabaseHandle` always
   appends another entry. Repeated creation or loading retains all database
@@ -53,6 +58,8 @@ These findings remain present in the source feature and this faithful port.
   indices can truncate to zero in get/set/remove. Check finiteness, integrality
   and range before conversion, with regression coverage for each operation.
 
-The port preserves upstream behavior so that these corrections can be reviewed
-separately from the import. Existing tests cover ordinary persistence and list/
-hash operations; they do not establish correctness for these failure cases.
+After the save fix, the focused native tests passed **114 assertions in 9 test
+cases** on Windows. Compilation and linking succeeded; the existing missing-font
+fixture-copy failure still makes the overall build command return failure.
+The POSIX replacement path has not been runtime-tested here. The remaining
+memory-retention and list-index failure cases still need regression coverage.
