@@ -948,6 +948,16 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
         }
         else if (now - testStart >= static_cast<DWORD>(testSeconds * 1000.0f))
         {
+            // where the player ended up: a player standing in the sea or under the ground is a
+            // failed placement even when the mission ran
+            if (const Object* who = GWorld->GetRealPlayer(); who && GLandscape)
+            {
+                const Vector3 p = who->Position();
+                const Object* in = GWorld->CameraOn();
+                LOG_INFO(Core, "ARMA1-TEST player at {:.1f} {:.1f}, {:.2f} m (ground {:.2f} m, sea level 0){}", p.X(),
+                         p.Z(), p.Y(), GLandscape->SurfaceY(p.X(), p.Z()),
+                         in && in != who ? " in a vehicle" : "");
+            }
             LOG_INFO(Core, "ARMA1-TEST PASS ({}.{}) played {} s", (const char*)Glob.header.filename,
                      (const char*)Glob.header.worldname, testSeconds);
             testStart = 0xFFFFFFFF;

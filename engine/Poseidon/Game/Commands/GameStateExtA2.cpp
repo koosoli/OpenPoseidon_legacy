@@ -2135,6 +2135,15 @@ GameValue A2SelectionPosition(const GameState* state, GameValuePar oper1, GameVa
             break;
         }
     }
+    static int logged = 0;
+    if (obj && logged < 40)
+    {
+        logged++;
+        const Vector3 world = obj->PositionModelToWorld(centre);
+        LOG_INFO(Mission, "selectionPosition '{}' on {}: model {:.2f},{:.2f},{:.2f} world {:.1f},{:.1f},{:.1f} (object at {:.1f},{:.1f},{:.1f})",
+                 (const char*)name, shape ? (const char*)shape->Name() : "?", centre.X(), centre.Y(), centre.Z(),
+                 world.X(), world.Y(), world.Z(), obj->Position().X(), obj->Position().Y(), obj->Position().Z());
+    }
     a.Add(GameValue(centre.X()));
     a.Add(GameValue(centre.Z()));
     a.Add(GameValue(centre.Y()));
