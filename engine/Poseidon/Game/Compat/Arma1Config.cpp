@@ -2021,7 +2021,15 @@ RString Arma2ModuleInit(const RString& className)
     if (Generation() < 2 || !ConfigLoaded() || className.GetLength() == 0)
         return RString();
     const ParamEntry* cls = FindConfigClass("CfgVehicles", className);
-    if (!cls || !cls->IsClass() || !IsKindOf(cls, "Logic"))
+    if (!cls || !cls->IsClass())
+        return RString();
+    // Arma 3 also assembles its multi-part ships from the base's init event handler: the
+    // carrier and the destroyer are a blank base whose BIS_fnc_Carrier01Init /
+    // Destroyer01Init creates the hull parts at its memory points (multiStructureParts).
+    // Without it the jets showcase's pilot stood in the open sea where USS Freedom lies.
+    const ParamEntry* parts = Generation() >= 3 ? cls->FindEntry("multiStructureParts") : nullptr;
+    const bool multiPart = parts && parts->IsArray() && parts->GetSize() > 0;
+    if (!multiPart && !IsKindOf(cls, "Logic"))
         return RString();
     const ParamEntry* handlers = cls->FindEntry("EventHandlers");
     if (!handlers || !handlers->IsClass())
