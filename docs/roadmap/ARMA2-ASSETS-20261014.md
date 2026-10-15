@@ -150,6 +150,38 @@ dull woodland; `hmmwv_body_1_smdi.paa` (OA `wheeled_e.pbo`, Stage5 of `hmmwv_bod
 TAGG AVGC `7f08ffff` (green 8), `hmmwv_body_1_as.paa` green 130. The HMMWV in C2B is OA's
 `ca\wheeled_e\hmmwv\hmmwv.p3d` with Arma 2's woodland texture.
 
+**Correction (focus run 11):** `949ee53` did not change a single pixel of the HMMWV
+(C2B third-person crop identical to run 10, mean 67.3/61.9/54.1 both times). The grey and
+the stripes are the GL33 shadow map, measured by A/B on the same build (`33b7181`):
+
+| Run | Change | HMMWV / MTVR |
+|-----|--------|--------------|
+| 11b | `WGR_IGNORE_LODNOSHADOW=1` (cast from the drawn LOD) | still striped |
+| 11c | `triShadowSetDarkness 1` (no shadow darkening) | woodland camouflage, no stripe |
+| 11d | `triShadowSetBias 0.0002` (10x depth bias) | still striped, slightly fewer |
+
+The depth pass stores back faces (front-face cull), so a surface turned from the sun is
+its own stored depth and compares against itself: fine stripes, half shadowed. `faad391`
+gives the GL33 receiver a normal offset (1.5 texels of the tier,
+`POSEIDON_GL33_SHADOW_NORMAL_OFFSET`); the 18 vertex/pixel shader pairs compile and link
+on Mesa llvmpipe. `949ee53` stays (it matches what WGPU does for an unmapped specular) but
+fixed nothing visible.
+
+### Focus run 11 (build `33b7181`), 2026-10-15
+
+8 missions (C2B, TE02, MP_CivilWar, MP_Superpowers, T03, C0, SPE1_OneShotOneKill,
+SPE1_Vehicles_US), all entered, **all 8 without a script error**, census 693 Arma, 0 CWA.
+
+- **3D sights work.** TE02's SCAR looks through its EOTech (reticle in the window),
+  MP_CivilWar's AK-74 through its own front-sight hood, MP_Superpowers' M16A4 through its
+  ACOG -- logged `3D sights yes`, camera at the weapon's `eye`.
+- C2B's M4A1 HWS GL still aimed over CWA's M16 mask (`3D sights no`): it rides CWA's
+  two-muzzle `M16GrenadeLauncher`, whose inherited muzzle classes never saw `optics3D`.
+  Fixed `7fe3564` (the first muzzle takes the weapon's sights and zoom).
+- **The M107's Arma 2 scope draws right:** the round mil-dot scope fills the screen height,
+  the sides are black (SPE1_OneShotOneKill opens at dawn, so the zoomed view is red sky).
+- C-130J and the fishing boat carry no weapons any more (`56ba7d3`).
+
 Offline check: a small program built from the repo's own ODOL and RTM readers poses
 `USMC_Soldier_Light` with a move and scores the result by how much the mesh's edges stretch.
 
