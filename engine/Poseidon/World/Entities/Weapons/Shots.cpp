@@ -1087,6 +1087,17 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                 for (int i = 0; i < surface.Size(); ++i) collision.Append() = surface[i];
             }
         }
+        // RFG-158: native Enfusion window panes on this tick's path, up to the first solid
+        // contact, break. They are not in the collision world and never stop the round.
+        if (GLandscape->EnfusionGlass().Count() > 0)
+        {
+            float solidT = 1.0f;
+            for (int i = 0; i < collision.Size(); ++i)
+                if (collision[i].object && collision[i].under < solidT)
+                    solidT = std::max(0.0f, collision[i].under);
+            const Vector3 from = Position();
+            GLandscape->BreakNativeGlassAlongSegment(from, from + (position - from) * solidT, Type());
+        }
         Vector3 probeHit, probeNormal;
         if (IsLocal() && ShowcaseContactBeforeScenery(Position(), position, collision, probeHit, probeNormal))
         {

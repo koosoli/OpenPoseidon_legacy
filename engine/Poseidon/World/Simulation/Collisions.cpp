@@ -1175,6 +1175,18 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
         return;
     }
 
+    // RFG-158: native Enfusion window panes inside the blast break (every client runs this).
+    if (type->explosive && type->indirectHit > 0 && type->indirectHitRange > 0 && _enfusionGlass.Count() > 0)
+    {
+        static const float blastScale = []
+        {
+            const char* env = std::getenv("POSEIDON_ENFUSION_GLASS_BLAST");
+            const float v = env ? static_cast<float>(std::atof(env)) : 1.5f;
+            return v > 0.0f ? v : 1.5f;
+        }();
+        BreakNativeGlassInRadius(pos, std::min(type->indirectHitRange * blastScale, 30.0f), type);
+    }
+
     // TW-WATER W8a: an explosion on open water tells the water renderers so, with the ammo's blast
     // (indirectHit, indirectHitRange) for the Tidewater plume. Submitted here rather than where the
     // round meets the sea because every client runs this (the shooter's machine, and the others

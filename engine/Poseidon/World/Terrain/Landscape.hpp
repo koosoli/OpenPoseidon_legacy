@@ -11,6 +11,7 @@
 #include <Poseidon/World/Terrain/SimulationResidency.hpp>
 #include <Poseidon/World/Terrain/StaticPlainRouteProbe.hpp>
 #include <Poseidon/World/Terrain/EnfusionDoors.hpp>
+#include <Poseidon/World/Terrain/EnfusionGlass.hpp>
 
 namespace Poseidon::Asset::Material
 {
@@ -742,6 +743,8 @@ class Landscape : public SerializeClass
     std::vector<ModernObjectPlacement> _modernObjectPlacements;
     //! RFG-157: the doors of native Enfusion buildings (EnfusionDoors.hpp).
     EnfusionDoorRegistry _enfusionDoors;
+    //! RFG-158: the destructible window panes of native Enfusion buildings (EnfusionGlass.hpp).
+    EnfusionGlassRegistry _enfusionGlass;
     int AuthoredObjectIDFloor() const;
     std::vector<std::vector<uint32_t>> _modernObjectCells;
     // One non-empty cell inside the residency window, with its squared cell distance from the
@@ -1271,6 +1274,12 @@ public:
     //! RFG-157: the doors of native Enfusion buildings that open and close.
     EnfusionDoorRegistry& EnfusionDoors() { return _enfusionDoors; }
     const EnfusionDoorRegistry& EnfusionDoors() const { return _enfusionDoors; }
+    //! RFG-158: native Enfusion window panes; bullets and blasts break them (EnfusionGlass.cpp).
+    EnfusionGlassRegistry& EnfusionGlass() { return _enfusionGlass; }
+    const EnfusionGlassRegistry& EnfusionGlass() const { return _enfusionGlass; }
+    bool BreakNativeGlassPane(uint32_t index, const AmmoType* type);
+    int BreakNativeGlassAlongSegment(Vector3Par from, Vector3Par to, const AmmoType* type);
+    int BreakNativeGlassInRadius(Vector3Par centre, float radius, const AmmoType* type);
     // Owner-only, instance-only observation of EXISTING constructed objects.
     // No resolution, required pin, shape load or persistent group certification.
     Streaming::InstanceCoverageObservation ObserveConstructedObjectCoverage(

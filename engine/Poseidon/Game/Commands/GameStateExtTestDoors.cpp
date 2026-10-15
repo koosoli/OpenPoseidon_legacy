@@ -56,3 +56,45 @@ GameValue TriEnfusionDoorCensus(const GameState*)
                   GLandscape ? GLandscape->EnfusionDoors().MemberCount() : size_t(0));
     return GameValue(text);
 }
+
+// RFG-158: test commands for the native Enfusion window panes (World/Terrain/EnfusionGlass.hpp).
+//
+//   triEnfusionGlass [x, z, y, radius] -> "index id broken x y z" of the pane nearest, or "NONE"
+//   triEnfusionGlassBreak index        -> "OK" / "REFUSED"
+//   triEnfusionGlassCensus             -> "panes N broken M"
+GameValue TriEnfusionGlass(const GameState*, GameValuePar arg)
+{
+    const GameArrayType& args = arg;
+    if (!GLandscape || args.Size() < 3 || args[0].GetType() != GameScalar || args[1].GetType() != GameScalar ||
+        args[2].GetType() != GameScalar)
+        return GameValue("REFUSED");
+    const float radius = args.Size() >= 4 && args[3].GetType() == GameScalar ? static_cast<float>(args[3]) : 20.0f;
+    const Vector3 pos(static_cast<float>(args[0]), static_cast<float>(args[2]), static_cast<float>(args[1]));
+    const EnfusionGlassRegistry& glass = GLandscape->EnfusionGlass();
+    const int index = glass.Nearest(pos, std::max(radius, 1.0f));
+    if (index < 0)
+        return GameValue("NONE");
+    const EnfusionGlassRegistry::Pane& pane = glass.Get(static_cast<uint32_t>(index));
+    char text[200];
+    std::snprintf(text, sizeof(text), "%d %d %d %.3f %.3f %.3f", index, pane.id, pane.broken ? 1 : 0, pane.position[0],
+                  pane.position[1], pane.position[2]);
+    return GameValue(text);
+}
+
+GameValue TriEnfusionGlassBreak(const GameState*, GameValuePar arg)
+{
+    if (!GLandscape || arg.GetType() != GameScalar)
+        return GameValue("REFUSED");
+    const int index = static_cast<int>(static_cast<float>(arg));
+    if (index < 0)
+        return GameValue("REFUSED");
+    return GameValue(GLandscape->BreakNativeGlassPane(static_cast<uint32_t>(index), nullptr) ? "OK" : "REFUSED");
+}
+
+GameValue TriEnfusionGlassCensus(const GameState*)
+{
+    char text[96];
+    std::snprintf(text, sizeof(text), "panes %zu broken %zu", GLandscape ? GLandscape->EnfusionGlass().Count() : size_t(0),
+                  GLandscape ? GLandscape->EnfusionGlass().BrokenCount() : size_t(0));
+    return GameValue(text);
+}

@@ -301,6 +301,7 @@ void Landscape::Init()
     _modernObjectPlacements.clear();
     _modernObjectCells.clear();
     _enfusionDoors.Clear();
+    _enfusionGlass.Clear();
     _modernObjectModels.clear();
     _modernObjectCellActive.clear();
     _modernObjectCellDesired.clear();

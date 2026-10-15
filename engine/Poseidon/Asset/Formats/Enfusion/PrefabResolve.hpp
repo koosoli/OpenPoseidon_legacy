@@ -1074,4 +1074,96 @@ inline PrefabDoor ResolvePrefabDoor(const EnfusionMount& mount, const std::strin
     return out;
 }
 
+
+//! RFG-158: a destructible window pane (Prefabs/Structures/Core/DestructibleGlass_Base.et and its
+//! children): its root entity carries an SCR_DestructionMultiPhaseComponent with an
+//! `SCR_WindowHitZone`, and the derived pane names the model of its broken phase:
+//!
+//!   SCR_DestructionMultiPhaseComponent { "Additional hit zones" { SCR_WindowHitZone Default {..} }
+//!       m_aDamagePhases { SCR_DamagePhaseData { m_PhaseModel "{..}Glass_01_76x63_dst.xob" } } }
+//!
+//! (`m_PhaseModel` exactly: a tree's `m_sPhaseModel` is a different thing.)
+struct PrefabGlass
+{
+    bool windowHitZone = false; //!< the chain declares SCR_WindowHitZone on its root
+    std::string phaseModel;     //!< the broken pane's `.xob`, GUID stripped; empty = none named
+    bool Destructible() const { return windowHitZone; }
+};
+
+//! One `.et` body's own pane declarations (root entity only). Fills what is still unset.
+inline void FindGlassDeclarations(const std::vector<uint8_t>& blob, PrefabGlass& io)
+{
+    const char* data = reinterpret_cast<const char*>(blob.data());
+    const size_t size = blob.size();
+    int depth = 0;
+    int childDepth = -1;
+    int destructionDepth = -1;
+    size_t at = 0;
+    while (at < size)
+    {
+        size_t lineEnd = at;
+        while (lineEnd < size && data[lineEnd] != '\n')
+            ++lineEnd;
+        size_t cursor = at;
+        while (cursor < lineEnd && static_cast<unsigned char>(data[cursor]) <= ' ')
+            ++cursor;
+        size_t trimmedEnd = lineEnd;
+        while (trimmedEnd > cursor && static_cast<unsigned char>(data[trimmedEnd - 1]) <= ' ')
+            --trimmedEnd;
+        if (childDepth < 0 && depth >= 1)
+        {
+            std::string quoted;
+            const std::string_view line(data + cursor, trimmedEnd - cursor);
+            if (depth == 1 && line == "{")
+                childDepth = depth;
+            else if (line.find(" : ") != std::string_view::npos && line.find(".et\"") != std::string_view::npos &&
+                     PrefabDetail::ChildHeader(data, cursor, lineEnd, quoted))
+                childDepth = depth;
+            else if (PrefabDetail::Keyword(data, cursor, lineEnd, "SCR_DestructionMultiPhaseComponent"))
+                destructionDepth = depth;
+            else if (destructionDepth >= 0 && PrefabDetail::Keyword(data, cursor, lineEnd, "SCR_WindowHitZone"))
+                io.windowHitZone = true;
+            else if (destructionDepth >= 0 && io.phaseModel.empty() &&
+                     PrefabDetail::Keyword(data, cursor, lineEnd, "m_PhaseModel"))
+            {
+                std::string path;
+                if (PrefabDetail::QuotedReference(data, cursor, lineEnd, path) &&
+                    PrefabDetail::EndsWith(PrefabDetail::LowerCopy(path), ".xob"))
+                    io.phaseModel = path;
+            }
+        }
+        depth += PrefabDetail::NetBraces(data, cursor, lineEnd);
+        if (childDepth >= 0 && depth <= childDepth)
+            childDepth = -1;
+        if (destructionDepth >= 0 && depth <= destructionDepth)
+            destructionDepth = -1;
+        at = lineEnd + 1;
+    }
+}
+
+//! RFG-158: the pane a prefab chain resolves to. Child first, nearest declaration wins.
+inline PrefabGlass ResolvePrefabGlass(const EnfusionMount& mount, const std::string& etPath, int depthLimit = 8)
+{
+    PrefabGlass out;
+    std::string current = etPath;
+    std::vector<std::string> seen;
+    for (int depth = 0; depth <= depthLimit && !current.empty(); ++depth)
+    {
+        bool cycle = false;
+        for (const std::string& before : seen)
+            cycle = cycle || PrefabDetail::LowerCopy(before) == PrefabDetail::LowerCopy(current);
+        if (cycle)
+            break;
+        seen.push_back(current);
+        std::vector<uint8_t> blob;
+        if (!mount.Read(current, blob))
+            break;
+        FindGlassDeclarations(blob, out);
+        current = Poseidon::Asset::Material::ParseEmat(
+                      std::string_view(reinterpret_cast<const char*>(blob.data()), blob.size()))
+                      .parentPath;
+    }
+    return out;
+}
+
 } // namespace Poseidon::Asset::Formats::Enfusion

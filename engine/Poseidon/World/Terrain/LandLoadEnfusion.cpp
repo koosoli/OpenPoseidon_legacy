@@ -1082,6 +1082,8 @@ struct PlacementSummary
     size_t doorLeaves = 0;     //!< RFG-157: door leaves found, per distinct building prefab
     size_t doorMembers = 0;    //!< RFG-157: parts riding on them (glass, handles)
     size_t doorSkipped = 0;    //!< RFG-157: DoorComponents that do not turn as a whole entity
+    size_t glassPanes = 0;     //!< RFG-158: destructible panes with a broken-phase model (per prefab)
+    size_t glassNoPhase = 0;   //!< RFG-158: destructible panes naming no broken-phase model
     std::string slotFailure;
     std::string firstFailure;
     std::string error;
@@ -1152,6 +1154,8 @@ struct MeshAttachment
     //! RFG-157: index in the set's parts of the door leaf this part rides on (its glass, its
     //! handle), or -1.
     int32_t doorLeaf = -1;
+    //! RFG-158: a destructible pane: the attachment mesh of its broken phase, or none.
+    uint32_t glassBroken = 0xffffffffu;
 };
 
 //! Everything one building prefab hangs on itself. Keyed per prefab, not per mesh:
@@ -1306,6 +1310,7 @@ struct PrefabPrepass
         std::string placement;
         Enf::PrefabEntityFlags flags;
         Enf::PrefabDoor door; //!< RFG-157
+        Enf::PrefabGlass glass; //!< RFG-158
     };
     struct Bones
     {
@@ -1392,6 +1397,15 @@ Enf::PrefabDoor PrefabDoorOf(const AttachWorkspace& ws, const std::string& etPat
     return Enf::ResolvePrefabDoor(*ws.mount, etPath);
 }
 
+Enf::PrefabGlass PrefabGlassOf(const AttachWorkspace& ws, const std::string& etPath)
+{
+    if (!EnfusionGlassRegistry::Enabled())
+        return {};
+    if (const PrefabPrepass::Answers* pre = ws.prepass ? ws.prepass->Find(etPath) : nullptr)
+        return pre->glass;
+    return Enf::ResolvePrefabGlass(*ws.mount, etPath);
+}
+
 std::vector<Enf::PrefabChild> PrefabChildrenOf(const AttachWorkspace& ws, const std::string& etPath)
 {
     if (const PrefabPrepass::Answers* pre = ws.prepass ? ws.prepass->Find(etPath) : nullptr)
@@ -1436,6 +1450,8 @@ void BuildPrefabPrepass(const EnfusionMount& mount, const std::vector<std::strin
                          a.children = Enf::ResolvePrefabChildren(mount, round[i]);
                          if (EnfusionDoorRegistry::Enabled())
                              a.door = Enf::ResolvePrefabDoor(mount, round[i]);
+                         if (EnfusionGlassRegistry::Enabled())
+                             a.glass = Enf::ResolvePrefabGlass(mount, round[i]);
                          if (level == 0)
                          {
                              a.topLevel = true;
@@ -1608,6 +1624,29 @@ void CollectAttachments(AttachWorkspace& ws, PlacementSummary& summary, const st
         }
         else if (door.isDoor)
             ++summary.doorSkipped;
+        // RFG-158: a destructible pane keeps the model of its broken phase beside it (the same
+        // material override, the phase's own .xob), as one more attachment mesh with no placements.
+        if (const Enf::PrefabGlass glass = PrefabGlassOf(ws, partEt); glass.Destructible() && !glass.phaseModel.empty())
+        {
+            const std::string& intact = cached->second;
+            std::string broken = glass.phaseModel;
+            if (intact.compare(0, 5, "enfm|") == 0)
+            {
+                const size_t bar = intact.find('|', 5);
+                if (bar != std::string::npos)
+                    broken = intact.substr(0, bar + 1) + glass.phaseModel;
+            }
+            auto brokenSlot = ws.index.find(broken);
+            if (brokenSlot == ws.index.end())
+            {
+                brokenSlot = ws.index.emplace(broken, static_cast<uint32_t>(ws.counts.size())).first;
+                ws.counts.push_back(0);
+            }
+            part.glassBroken = brokenSlot->second;
+            ++summary.glassPanes;
+        }
+        else if (glass.Destructible())
+            ++summary.glassNoPhase;
         const size_t partIndex = out.size();
         out.push_back(part);
 
@@ -3450,6 +3489,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
             size_t attachSkipped = 0;
             // RFG-157: the doors of these buildings, registered as their parts are placed.
             _enfusionDoors.Clear();
+            _enfusionGlass.Clear(); // RFG-158
             std::vector<int> doorOfPart; // per part of the current building: its door index, or -1
             const auto registerDoorPart = [&](const AttachSet& set, size_t partIndex, int objectId,
                                               const Matrix4& frame)
@@ -3630,6 +3670,11 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                                                 partOrientation);
                             registerDoorPart(set, partIndex, _modernObjectPlacements.back().id,
                                              frameOf(partPosition, partOrientation));
+                            if (part.glassBroken != 0xffffffffu && EnfusionGlassRegistry::Enabled())
+                                _enfusionGlass.AddPane(static_cast<uint32_t>(_modernObjectPlacements.size() - 1),
+                                                       _modernObjectPlacements.back().id,
+                                                       static_cast<uint32_t>(meshes.size() + part.glassBroken),
+                                                       partPosition);
                             ++streamedParts;
                         }
                     }
@@ -3750,6 +3795,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                             }
                             attached->SetOrientation(orientation * part.basis);
                             registerDoorPart(set, partIndex, attached->ID(), attached->Transform());
+                            if (part.glassBroken != 0xffffffffu && EnfusionGlassRegistry::Enabled())
+                                _enfusionGlass.AddPane(0xffffffffu, attached->ID(), 0xffffffffu, here);
                             ++attachPlaced;
                         }
                     }
@@ -3937,6 +3984,12 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                      "(POSEIDON_ENFUSION_DOORS={})",
                      summary.doorLeaves, summary.slotPrefabs, summary.doorMembers, summary.doorSkipped,
                      _enfusionDoors.Count(), _enfusionDoors.MemberCount(), EnfusionDoorRegistry::Enabled() ? 1 : 0);
+            LOG_INFO(World,
+                     "Enfusion native load: RFG-158 glass: {} destructible pane parts with a broken-phase model ({} "
+                     "without one, left whole) per building prefab; {} panes registered "
+                     "(POSEIDON_ENFUSION_GLASS_BREAK={})",
+                     summary.glassPanes, summary.glassNoPhase, _enfusionGlass.Count(),
+                     EnfusionGlassRegistry::Enabled() ? 1 : 0);
 
             // RFG-027: the road network. One shape per road rather than one shared
             // shape placed many times, because every road is a different length and
