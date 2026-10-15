@@ -264,6 +264,33 @@ class ODOLLoader
             lod.sourceWinding = Poseidon::Model::DescribeWinding(lod.basis.winding, lod.basis.windingConfidence);
             lod.uvSetCount     = static_cast<int32_t>(source.lods[i].rest.uvSetCount);
             lod.mesh           = convertOdol73Mesh(source.lods[i]);
+            // The alpha the binariser derived from each section's texture, which
+            // convertOdol73Mesh masks away (MAT-046 passes only the hidden bits): the raw
+            // OFP special bits IsAlpha 0x100 (blended: glass) and IsTransparent 0x200
+            // (alpha-tested: camouflage nets, fences), with IsAlphaOrdered when blended.
+            // ShapeAdapter otherwise only knows alpha from the *_ca naming rule -- its
+            // header check never runs on the canonical route, which always passes bank
+            // tables -- so T07's camonet_nato_co.paa (DXT1, TAGG FLAG 2, section flags
+            // 0x2200) drew its holes black. Arma 1/2/OA revisions only;
+            // OP_ODOL_AUTHORED_ALPHA=0 turns it off.
+            static const bool authoredAlpha = [] {
+                const char* e = std::getenv("OP_ODOL_AUTHORED_ALPHA");
+                return !(e && *e == '0');
+            }();
+            if (authoredAlpha && sourceVersion >= 40 && sourceVersion <= 50 &&
+                lod.mesh.sections.size() == source.lods[i].sections.size())
+            {
+                constexpr uint32_t kIsAlpha = 0x100, kIsTransparent = 0x200, kIsAlphaOrdered = 0x20000;
+                for (size_t s = 0; s < lod.mesh.sections.size(); ++s)
+                {
+                    const uint32_t raw = static_cast<uint32_t>(source.lods[i].sections[s].commonFaceFlags);
+                    uint32_t add = raw & (kIsAlpha | kIsTransparent);
+                    if (raw & kIsAlpha)
+                        add |= raw & kIsAlphaOrdered;
+                    lod.mesh.sections[s].hints =
+                        static_cast<RenderHints>(static_cast<uint32_t>(lod.mesh.sections[s].hints) | add);
+                }
+            }
             // AST-016/017 stage 2: give the 2001 animation machinery its named
             // selections back. From ODOL 48 onward BI moved skinning out of the
             // selections into per-vertex bone references; the selection NAMES
