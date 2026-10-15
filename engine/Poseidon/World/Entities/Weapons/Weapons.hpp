@@ -208,6 +208,9 @@ public:
 	LocalizedString _displayName;
 	float _magazineReloadTime;
 	SoundPars _sound;
+	// The shot of this weapon whatever magazine it fires (a3SoundShot[]): an Arma 3 weapon on a
+	// CWA carrier fires the carrier's magazines, whose modes hold the CWA shot sound.
+	SoundPars _shotSound;
 	SoundPars _reloadSound;
 	SoundPars _reloadMagazineSound;
 	float _reloadSoundDuration;

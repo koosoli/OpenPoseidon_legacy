@@ -2424,7 +2424,7 @@ void EntityAI::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI*
     if (mType && slot._mode >= 0 && slot._mode < mType->_modes.Size())
     {
         mode = mType->_modes[slot._mode];
-        sound = &mode->_sound;
+        sound = muzzle && muzzle->_shotSound.name.GetLength() > 0 ? &muzzle->_shotSound : &mode->_sound;
         continuous = mode->_soundContinuous;
         // sound only on first shot in burst
         if (magazine->_burstLeft > 0)

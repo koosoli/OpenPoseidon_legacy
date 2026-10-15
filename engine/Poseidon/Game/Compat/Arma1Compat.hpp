@@ -185,6 +185,8 @@ std::string SimKind(const std::string& simulation);
 RString Arma3VehicleCarrier(const RString& className);
 // The looped engine (helicopter: rotor) sound of an Arma 3 vehicle, "\path.wss"; empty if none.
 std::string Arma3EngineSound(const ParamEntry& vehicle, bool helicopter);
+// The shot of an Arma 3 weapon (first fire mode), "\\path.wss"; empty if none.
+std::string Arma3WeaponShotSound(const ParamEntry& weapon);
 
 // Arma 3: true for animals (Animal_Base_F), which are left out like Arma 2's.
 bool Arma3IsAnimal(const RString& className);

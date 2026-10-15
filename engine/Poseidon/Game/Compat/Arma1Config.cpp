@@ -1701,6 +1701,10 @@ RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
     }
     if (const ParamEntry* scope = cwa->FindEntry("scope"); !scope || (int)*scope < 1)
         text += "\t\tscope=1;\r\n";
+    // Arma 3: the weapon's own shot instead of the CWA carrier magazine's
+    if (Generation() == 3)
+        if (const std::string shot = Arma3WeaponShotSound(*a2); !shot.empty())
+            text += "\t\ta3SoundShot[]={\"" + shot + "\",1,1};\r\n";
     // OFP weapons often list magazines[]={this}: the magazine is the weapon class itself
     // (M60, RPGLauncher, LAWLauncher). Inherited, "this" would name the generated class,
     // which no soldier carries -- the weapon stayed empty (A1x_M240 with M60 belts: 0
