@@ -713,7 +713,39 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
         GEngine->SetPassKindHint(savedHint);
     }
 
+    DrawArma2Head(level, transform, dist2, z2, lights);
+
     _mGunFireFrames--;
+}
+
+// An Arma 2 head model is skinned to the same skeleton as the body and modelled in the
+// body's source coordinates. It is drawn moved by the head bone as one piece: the face does
+// not move its own bones (no grimaces, no lip sync) and the neck seam follows the head.
+void Man::DrawArma2Head(int level, const Matrix4& transform, float dist2, float z2, const LightList& lights)
+{
+    const ManType* type = Type();
+    if (!_a2Head || !_showHead || type->_headMatIndex < 0 || level == type->_insideView ||
+        _shape->Resolution(level) >= 900.0f)
+        return;
+    MATRIX_4_ARRAY(matrix, 128);
+    PrepareCorrectedPose(level, matrix);
+    const Matrix4 bone = type->_headMatIndex < matrix.Size() ? matrix[type->_headMatIndex] : Matrix4(MIdentity);
+    // head-model stored coordinates -> body stored coordinates: both are stored around their
+    // own bounding centre, AnimationOrigin is where their common source origin lies
+    const Matrix4 toBody(MTranslation, _shape->AnimationOrigin() - _a2Head->AnimationOrigin());
+    const Matrix4 pTransform = transform * bone * toBody;
+    const int pLevel = GScene->LevelFromDistance2(_a2Head, dist2, pTransform.Scale(), pTransform.Direction(),
+                                                  GScene->GetCamera()->Direction());
+    if (pLevel < 0 || pLevel == LOD_INVISIBLE)
+        return;
+    if (_head._texture)
+        _a2HeadFace.SetTexture(_a2Head, pLevel, _head._texture);
+    Shape* shape = _a2Head->LevelOpaque(pLevel);
+    if (!shape)
+        return;
+    int spec = shape->Special();
+    shape->PrepareTextures(z2, spec);
+    shape->Draw(this, lights, ClipAll, spec, pTransform, pTransform.InverseScaled());
 }
 
 void Man::DrawNVOptics()
@@ -1949,6 +1981,7 @@ void ManType::InitShape()
         _rpgMatIndex = _moveType->GetSkeleton()->FindBone(ManNameOr(par, "boneLauncher", "roura"));
         _handMatIndex = _moveType->GetSkeleton()->FindBone(ManNameOr(par, "boneLeftHand", "lruka"));
         _rightHandMatIndex = _moveType->GetSkeleton()->FindBone(ManNameOr(par, "boneRightHand", "pruka"));
+        _headMatIndex = _moveType->GetSkeleton()->FindBone(ManNameOr(par, "boneHead", "head"));
         if (_gunMatIndex < 0)
         {
             LOG_ERROR(Physics, "Bone 'zbran' not found in {}", (const char*)_shape->GetName());

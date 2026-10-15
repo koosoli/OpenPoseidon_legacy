@@ -101,6 +101,10 @@ RString Arma2FaceTexture(const char* unitClass, const char* shapeName, const cha
 // A face for a man Arma 2 would give a random one: of his faceType, matching one of his
 // class's identityTypes, chosen by `seed`. "" when he is no Arma 2 man (as above).
 RString Arma2RandomFace(const char* unitClass, const char* shapeName, uint32_t seed);
+// The head model an Arma 2 man wears with `face` (CfgFaces >> faceType >> face >> head, then
+// CfgHeads >> head >> model): his body model only carries the "heads\bysta" placeholder
+// where Arma 2 draws it. "" for any other man, or with OP_A2_FACES=0.
+std::string Arma2HeadModel(const char* unitClass, const char* shapeName, const char* face);
 
 // Arma 2: the EventHandlers >> init code of a module (a class derived from Logic, such
 // as FunctionsManager or the first-aid modules) that a mission places; empty otherwise.
