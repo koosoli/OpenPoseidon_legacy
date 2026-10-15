@@ -262,6 +262,36 @@ Left as they are, for the owner to decide (each would change what the vehicle is
   `A10`, `MH6`/`AH6` on `OH58`;
 - Arma 1 vehicles keep CWA's speed, armour and fuel (Arma 2 vehicles take their own).
 
+## Vehicle values, global scripts, .wss names (2026-10-15 evening; a317aa05 from `dist`)
+
+| commit | what was wrong | now | checked |
+|---|---|---|---|
+| 7af6acf0 | Arma 1 vehicles kept the seats, top speed and fuel of their CWA carrier | `transportSoldier`, `maxSpeed`, `fuelCapacity` from the Arma 1 config, as Arma 2 vehicles already do; armour stays CWA's on purpose (CWA rounds); `OP_A1_VEHICLE_VALUES=0` keeps the CWA values | `a1vehSeats`: 12 x `moveInCargo` into an Arma 1 M113 -> 11 aboard (8 with `OP_A1_VEHICLE_VALUES=0`); UH-60 12 either way |
+| fb732033 | MP missions call `timing.sqs`, `Area.sqf`, `GlobRunning.sqs` by bare name without shipping them -- they are Arma 1's own, in `ca.pbo` under `data\scripts`; 13 missions of the 131-mission run logged them not found | `FindScript` also tries `ca\data\scripts\` with `--arma1` | mp07, mp16, m10armoredfist: "script not found" 3/3/2 -> 0 |
+| a317aa05 | sounds named `.wss` in configs ship as `.ogg` (mp04cleansweep: CfgSounds `sound\m04r01.wss`, archive `Sound\M04r01.ogg`): "Load failed", no radio line | with `--arma1`/`--arma2`, a missing `.wss` loads the `.ogg` of the same name | mp04cleansweep: "Load failed" 1 -> 0 |
+
+Regression: the 20-mission subset ran clean on 7af6acf0 (all 20 logs shut down normally,
+0 script errors) and on a317aa05 (20/20 exit 0, 0 script errors); a1vehArm unchanged on 7af6acf0.
+
+### What the missions use (static census, `tools\a1census.py` on the build machine, read-only)
+
+All 131 mission archives, 212 mission folders, 2621 script/config files (none packed):
+`exec` in 183 folders, `camCreate` 161, `titleText` 151, `enableRadio` 123, `forceEnd` 109,
+`playMusic` 59, `sideRadio` 54 (1116 calls), `fadeMusic` 50, `execVM` 47, `saveGame` 44,
+`say` 35 (1797 calls), `playSound` 33, `setRadioMsg` 30, `setIdentity` 13, `createDialog` 11,
+`setFace`/`setMimic` 6, `saveStatus`/`loadStatus` 5/3, `endMission` 4. The archives hold
+3191 `.ogg` and 790 `.wss` files.
+
+**FSMs matter little for Arma 1:** one `.fsm` file in all of them
+(`armory1.intro\...\opponentAI.fsm`) and one `doFSM` call -- the Armory only. Spoken radio
+and `say` conversations, music and camera work are what most missions are made of; their
+timing is not covered by any test yet.
+
+Audio problems seen in the run logs and still open: AI radio words load as
+`voice\Rob\.wss` (an empty word -- Arma 1 voices against CWA's word table, 8 missions);
+`x09quickupdate` asks for CfgSounds `09v50`, which no CfgSounds defines;
+`m09convoyattack_s06` asks for `ca\sounds\missions\m09r06.ogg`, which is not in the AddOns.
+
 ## Known gaps (honest list)
 
 - Missions needing third-party addons (`un-impossible_mission.cain`: `BBB006`) cannot run.
