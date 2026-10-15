@@ -2535,7 +2535,7 @@ void StallMonitor()
                 expr.push_back(GLastExpression[i] == '\n' || GLastExpression[i] == '\r' ? ' ' : GLastExpression[i]);
         }
         LOG_WARN(Script, "Arma 2 stall: no simulation step for {} s; evaluator last started: {}", stalled, expr);
-        if (stalled == 10 || stalled == 30)
+        if (stalled == 10 || stalled == 30 || stalled == 90 || stalled == 170)
             Poseidon::Foundation::LogStallThreadStack();
         if (stalled >= (simulating ? 60 : 180))
         {
