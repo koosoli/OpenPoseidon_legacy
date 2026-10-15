@@ -17608,6 +17608,15 @@ void EngineWgpu::SetTemporalTuning(const TemporalSettings& t)
     // > 0 is the renderer's "auto" sentinel (real biases are <= 0).
     w.mip_bias = t.mipBiasAuto ? 1.0f : std::clamp(t.mipBias, -4.0f, 0.0f);
     w.reactive_sky = std::clamp(t.reactiveSky, 0.0f, 1.0f);
+    // WGR_REACTIVE_SKY (also read by the renderer's own default) must survive this push, or an
+    // A/B of the sky/cloud history control silently measures the panel value.
+    static const float reactiveSkyEnv = []
+    {
+        const char* v = std::getenv("WGR_REACTIVE_SKY");
+        return v && *v ? static_cast<float>(std::atof(v)) : -1.0f;
+    }();
+    if (reactiveSkyEnv >= 0.0f)
+        w.reactive_sky = std::clamp(reactiveSkyEnv, 0.0f, 1.0f);
     w.reactive_water = std::clamp(t.reactiveWater, 0.0f, 1.0f);
     w.flags = (t.dlssAutoExposure ? 1u : 0u) | (t.jitterYFlip ? 2u : 0u) |
               (t.mvRenderSpace ? 4u : 0u) | (t.mvFlip ? 8u : 0u) | (t.fsrOn ? 16u : 0u) |
@@ -21919,7 +21928,9 @@ void EngineWgpu::PushSkyRuntime()
     // fixed time so the cloud shell holds at the same world offset as the test frame (the wind
     // formula is otherwise driven by Glob.time, which freezes in lockstep via the freezeTime bit).
     constexpr double kWindWrap = 100000.0; // m
-    const double cloudT = (WaterLook().freeze.freezeClouds || WaterLook().freeze.freezeTime)
+    // WGR_FREEZE_CLOUDS=1: the Water tab's "Freeze clouds" from the command line (captures, A/Bs).
+    static const bool freezeCloudsEnv = POSEIDON_GETENV_ONCE("WGR_FREEZE_CLOUDS") != nullptr;
+    const double cloudT = (freezeCloudsEnv || WaterLook().freeze.freezeClouds || WaterLook().freeze.freezeTime)
                               ? static_cast<double>(WaterLook().freeze.fixedTime)
                               : static_cast<double>(render::frame::GPresentationSnapshot().timeSeconds);
     // The deck's scroll velocity. Driven by the world's wind authority when

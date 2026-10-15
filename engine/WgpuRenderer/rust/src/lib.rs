@@ -2668,6 +2668,23 @@ impl Renderer {
         s.night_params[3] = rt.fog_color[3]; // fog far-range
         s.cloud1[0] = rt.misc[2]; // cloud wind world offset x (m, CPU-wrapped)
         s.cloud1[1] = rt.misc[3]; // cloud wind world offset z (m, CPU-wrapped)
+        // Cloud motion vectors (temporal.wgsl fs_velocity): the deck's middle, planet-centred.
+        // WGR_CLOUD_MOTION_VECTORS=0 hands DLSS the old zero vectors over the sky.
+        static CLOUD_MV: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let deck = s.cloud0[0] > 0.0
+            && *CLOUD_MV.get_or_init(|| std::env::var("WGR_CLOUD_MOTION_VECTORS").as_deref() != Ok("0"));
+        let planet = s.params[2];
+        // Where in the deck the vectors are taken: 0 = its base (default: seen from below, the base is
+        // what shows -- measured cleanest of base/middle/top), 1 = its top (WGR_CLOUD_MV_HEIGHT).
+        static CLOUD_MV_HEIGHT: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+        let h = *CLOUD_MV_HEIGHT.get_or_init(|| {
+            std::env::var("WGR_CLOUD_MV_HEIGHT").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0).clamp(0.0, 1.0)
+        });
+        self.temporal.set_cloud_motion(
+            [rt.misc[2], rt.misc[3]],
+            if deck { planet + s.cloud0[2] + h * (s.cloud0[3] - s.cloud0[2]) } else { 0.0 },
+            planet + rt.misc[1],
+        );
         s.cloud4 = rt.cloud_evolve; // shape / detail / weather drift offsets (m, CPU-wrapped)
         s.moon_params = rt.moon_params; // radius / illuminated fraction / radiance / draw
         s.moon_sun = rt.moon_sun; // sub-solar direction + earthshine
