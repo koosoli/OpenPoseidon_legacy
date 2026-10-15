@@ -155,6 +155,28 @@ What the runs found, and what changed for it:
   file-system root (every Contact mission's `description.ext` failed to preprocess);
   `reveal [obj, n]`; `getGroupIconParams` (50,000 errors a run in `VR.VR`); action titles
   without their structured-text tags; a weapon's name as its own muzzle.
+- **Motion and sound census (test runs).** Before `ARMA1-TEST PASS` a run now logs which AI
+  soldiers on foot never moved and what their AI was doing (unit state, the group's command,
+  waypoints, current move, disabled AI), and what the sound system was asked for (files,
+  requests, failures, plays, what plays at the end, fadeSound/fadeMusic), plus a few script
+  values (`OP_A3_PROBE` for more). The first census (`b898168`): the AI walks (Tanks: 72 of 89
+  soldiers moved), but every unit a mission held back with `disableAI "MOVE"` stayed --
+  `enableAI` was an ignored command; and the showcases opened engines, helicopters and
+  footfalls without ever starting a wave, while Contact's `Intro1` played 134 sounds.
+- **Why the showcases were silent.** Each opens with `0 fadeSound 0` and fades the sound
+  back in when `BIS_fnc_titlecard` / `BIS_fnc_establishingShot` are done. Those waited for
+  the mission display (`findDisplay 46` answered displayNull), for title resources to
+  register themselves from onLoad (never run; Arma 3's own RscTitles did not exist for the
+  engine), for a named cut layer (`"name" cutFadeOut 0` was a type error) and for
+  `RscStatic_display`, which RscStatic's script sets -- a script Arma 3 compiles at preStart.
+  Each now has a stand-in (`GameStateExtA3Rsc.cpp`): a cutRsc'd class runs onLoad on a
+  numbered stand-in display, compiles its script on first use, and closes after its duration
+  (onUnload; isNull then reads it null). With `0fb326d` the title card finishes and every
+  showcase ends at fadeSound 1 with waves playing.
+- **Step sounds.** Arma moves give the step times as `soundEdge[]`; only `soundEdge1/2` were
+  read, so no Arma soldier ever made a step sound.
+- **Vehicle sounds.** An Arma 3 vehicle with its own model takes its outside engine (a
+  helicopter: its rotor) from its sound sets as `soundEngine[]` instead of the CWA carrier's.
 - **Known, open.** A soldier in some Contact sites (`s_dolnik_00`) is drawn stretched, with
   long panels round him -- not yet explained; Arma 3 config noise ("Undefined base class
   'Components'" in a few CfgAmmo sensor classes); `nearestTerrainObjects [obj, ...] #0` in
