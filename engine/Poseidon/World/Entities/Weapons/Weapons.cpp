@@ -2,6 +2,7 @@
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/AI.hpp>
@@ -513,12 +514,78 @@ void MuzzleType::Init(const ParamEntry& cls, const WeaponType* weapon)
             _magazines[i] = MagazineTypes.New(magazine);
         }
     }
+    // --arma1: the Arma 1 magazines generated on a CWA magazine this muzzle takes
+    // (A1x_5Rnd_762x51_M24 on M21) fit it as well. Nothing without --arma1.
+    for (int i = 0, listed = _magazines.Size(); i < listed; i++)
+    {
+        if (!_magazines[i])
+        {
+            continue;
+        }
+        for (const RString& extra : Arma1Compat::GeneratedMagazinesFor(_magazines[i]->GetName()))
+        {
+            if (weapon && !Arma1Compat::GeneratedMagazineFits(weapon->GetName(), extra))
+            {
+                continue;
+            }
+            bool present = false;
+            for (int k = 0; k < _magazines.Size() && !present; k++)
+            {
+                present = _magazines[k] && stricmp(_magazines[k]->GetName(), extra) == 0;
+            }
+            if (!present)
+            {
+                _magazines.Add(MagazineTypes.New(extra));
+            }
+        }
+    }
     if (_magazines.Size() > 0)
     {
         _typicalMagazine = _magazines[0];
     }
 
     _nModes = (cls >> "modes").GetSize();
+}
+
+void Poseidon::AddMagazineToMuzzlesTaking(const char* baseMagazine, const char* magazine)
+{
+    Ref<MagazineType> added;
+    for (int w = 0; w < WeaponTypes.Size(); w++)
+    {
+        WeaponType* weapon = WeaponTypes.Get(w);
+        if (!weapon)
+        {
+            continue;
+        }
+        for (int m = 0; m < weapon->_muzzles.Size(); m++)
+        {
+            MuzzleType* muzzle = weapon->_muzzles[m];
+            if (!muzzle)
+            {
+                continue;
+            }
+            bool takesBase = false;
+            bool takesNew = false;
+            for (int k = 0; k < muzzle->_magazines.Size(); k++)
+            {
+                const MagazineType* type = muzzle->_magazines[k];
+                if (!type)
+                {
+                    continue;
+                }
+                takesBase = takesBase || stricmp(type->GetName(), baseMagazine) == 0;
+                takesNew = takesNew || stricmp(type->GetName(), magazine) == 0;
+            }
+            if (takesBase && !takesNew && Arma1Compat::GeneratedMagazineFits(weapon->GetName(), magazine))
+            {
+                if (!added)
+                {
+                    added = MagazineTypes.New(magazine);
+                }
+                muzzle->_magazines.Add(added);
+            }
+        }
+    }
 }
 
 void MuzzleType::InitShape(const WeaponType* weapon)
