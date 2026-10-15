@@ -1583,7 +1583,15 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
                 fres = GLASS_FRESNEL_BIAS + (1.0 - GLASS_FRESNEL_BIAS) * pow(1.0 - cos_vn, GLASS_FRESNEL_POWER);
             }
             let f = fres * clamp(in.fog, 0.0, 1.0) * daylight;
-            let env = sky_env_sample(reflect(-view_dir, n));
+            let refl_dir = reflect(-view_dir, n);
+            var env = sky_env_sample(refl_dir);
+            if ((material_flags(material) & MATFLAG_GLASS) != 0u) {
+                // RFG-168: a window mirrors the street, not open sky: near the horizon its
+                // reflection meets houses, trees and ground, which the sky map does not hold.
+                // The first build mirrored a clean horizon gradient in every pane (bright blue
+                // windows; Reforger's read dark with a soft sheen).
+                env = env * mix(0.25, 1.0, smoothstep(0.05, 0.6, refl_dir.y));
+            }
             let a = clamp(out_a, 0.0, 1.0);
             let a_out = 1.0 - (1.0 - f) * (1.0 - a);
             out_rgb = (env * f + (1.0 - f) * a * out_rgb) / max(a_out, 1e-4);

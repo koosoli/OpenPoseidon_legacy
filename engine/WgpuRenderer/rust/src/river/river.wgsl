@@ -109,14 +109,19 @@ fn gnoise(p: vec2<f32>) -> vec3<f32> {
 
 // Ripple slope in flow space (d height / d along, d height / d across): two layers advected
 // downstream at different speeds, stretched along the flow, plus a slow cross-flow wobble.
-fn ripple_slope(uv: vec2<f32>, t: f32, speed_scale: f32) -> vec2<f32> {
+fn ripple_slope(uv: vec2<f32>, t: f32, speed_scale: f32, still: f32) -> vec2<f32> {
     let k = max(rp.flow.y, 0.05);
     let speed = rp.flow.x * speed_scale;
-    let a = gnoise(vec2<f32>((uv.x - t * speed) * k * 0.55, uv.y * k * 1.1));
-    let b = gnoise(vec2<f32>((uv.x - t * speed * 1.6) * k * 1.3 + 17.0, uv.y * k * 2.2 + 5.0));
-    let c = gnoise(vec2<f32>((uv.x - t * speed * 0.6) * k * 0.21 + 3.0, uv.y * k * 0.35 - 11.0 + t * 0.05));
-    return (a.yz * vec2<f32>(0.55, 1.1) + b.yz * vec2<f32>(1.3, 2.2) * 0.5 + c.yz * vec2<f32>(0.21, 0.35) * 1.5) * k *
-        rp.flow.z * 0.05;
+    // RFG-168: a river's ripples are drawn out along the flow (along 0.55 x across 1.1); a pond has
+    // no flow, and the same stretch along its arbitrary +x laid long streaks down the view across
+    // Lake_Center. Still water takes round ripples.
+    let sa = mix(vec2<f32>(0.55, 1.1), vec2<f32>(0.9, 0.9), still);
+    let sb = mix(vec2<f32>(1.3, 2.2), vec2<f32>(1.8, 1.8), still);
+    let sc = mix(vec2<f32>(0.21, 0.35), vec2<f32>(0.3, 0.3), still);
+    let a = gnoise(vec2<f32>((uv.x - t * speed) * k * sa.x, uv.y * k * sa.y));
+    let b = gnoise(vec2<f32>((uv.x - t * speed * 1.6) * k * sb.x + 17.0, uv.y * k * sb.y + 5.0));
+    let c = gnoise(vec2<f32>((uv.x - t * speed * 0.6) * k * sc.x + 3.0, uv.y * k * sc.y - 11.0 + t * 0.05));
+    return (a.yz * sa + b.yz * sb * 0.5 + c.yz * sc * 1.5) * k * rp.flow.z * 0.05;
 }
 
 fn sky_env_sample(dir: vec3<f32>) -> vec3<f32> {
@@ -179,7 +184,7 @@ fn fs_river(in: VsOut) -> @location(0) vec4<f32> {
     let t = rp.flow.w;
 
     // Ripple normal: flow-space slope rotated into world xz (along = flow_dir, across = its left).
-    let slope = ripple_slope(in.flow_uv, t, mix(1.0, 0.12, in.still)) * mix(1.0, 0.5, in.still) *
+    let slope = ripple_slope(in.flow_uv, t, mix(1.0, 0.12, in.still), in.still) * mix(1.0, 0.5, in.still) *
         (1.0 - smoothstep(60.0, 220.0, dist));
     let fwd = normalize(vec2<f32>(in.flow_dir.x, in.flow_dir.y) + vec2<f32>(1e-6, 0.0));
     let side = vec2<f32>(-fwd.y, fwd.x);
@@ -208,7 +213,14 @@ fn fs_river(in: VsOut) -> @location(0) vec4<f32> {
         refr_uv = uv;
     }
     let dry = textureSampleLevel(scene_color, scene_samp, refr_uv, 0.0).rgb;
-    let behind = dry * (1.0 - clamp(rp.bed.x, 0.0, 0.9) * smoothstep(0.0, 0.05, column));
+    // RFG-168: inside a river's ribbon the water is there even where our terrain has (almost) no
+    // channel under it -- Reforger carves the bed (AdjustHeightMap) that our heightfield only
+    // partly carries, and a column of a few centimetres faded the whole stream into the dry bed
+    // (the parity pose river1). The look takes at least 0.3 m of water away from the ribbon's
+    // edges; the path through the water (refraction, absorption) stays the measured one.
+    let interior = (1.0 - in.still) * (1.0 - smoothstep(0.6, 1.0, in.edge));
+    let look_column = max(column, 0.3 * interior);
+    let behind = dry * (1.0 - clamp(rp.bed.x, 0.0, 0.9) * smoothstep(0.0, 0.05, look_column));
 
     // Absorption along the path through the column (the extinction the sea uses: the colour's
     // hue, its strength from the half-light distance -- ln 2 / HalfLightDistance per metre).
@@ -223,7 +235,7 @@ fn fs_river(in: VsOut) -> @location(0) vec4<f32> {
     let inscatter = rp.colour.rgb * light * rp.misc.z * (vec3<f32>(1.0) - transmit);
     var refracted = behind * transmit + inscatter;
     // RFG-166: the water's own body colour over a shallow bed (bed.y per metre of column).
-    let body = (1.0 - exp(-column * max(rp.bed.y, 0.0))) * 0.85;
+    let body = (1.0 - exp(-look_column * max(rp.bed.y, 0.0))) * 0.9;
     refracted = mix(refracted, rp.colour.rgb * light, body);
 
     // Reflection: sky, then the screen-space scene where the reflected ray finds it.
@@ -251,7 +263,7 @@ fn fs_river(in: VsOut) -> @location(0) vec4<f32> {
 
     var colour = mix(refracted, reflected, fresnel) + glint;
     // Shore: where the film runs out the bed shows unaltered.
-    let shore = smoothstep(0.0, max(rp.misc.x, 0.005), column);
+    let shore = smoothstep(0.0, max(rp.misc.x, 0.005), look_column);
     colour = mix(dry, colour, shore);
     if (rp.misc.w > 0.5) {
         colour = vec3<f32>(fresnel, clamp(path / 10.0, 0.0, 1.0), shore);

@@ -2260,11 +2260,12 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
         // (GrassLawn_01 albedo; PlantMat cp_grass_01/02, whose clutter is clover, plantain and
         // hawkbit, nothing tall), and in Reforger they read as a short carpet with low flowers --
         // the parity poses houseFar and pond1 showed ours knee-high. Their cards take the lawn look
-        // (WGR_NATIVE_LAWN_HEIGHT, default 0.22 m; 0 = the meadow look as before).
+        // (WGR_NATIVE_LAWN_HEIGHT, default 0.35 m; 0 = the meadow look as before). 0.22 was
+        // too short on the open Grass_01 slopes (parity pose meadowOpen: Reforger lush mid-height).
         static const float lawnHeight = []
         {
             const char* v = std::getenv("WGR_NATIVE_LAWN_HEIGHT");
-            const float f = v != nullptr ? std::strtof(v, nullptr) : 0.22f;
+            const float f = v != nullptr ? std::strtof(v, nullptr) : 0.35f;
             return std::clamp(f, 0.0f, 3.0f);
         }();
         const auto lowerName = [](std::string n)
