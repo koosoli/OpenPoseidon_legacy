@@ -1418,18 +1418,24 @@ class EdenConverter
             w.Arr("markers", list + "}");
         }
         std::vector<std::string> parts = u.prefix;
-        // Arma 3 keeps a soldier's height -- on an upper floor, on a carrier's deck. CWA stands
-        // every soldier on the ground (or the sea) at the start, so one the file holds above
-        // the terrain (atlOffset) is put back at his height from his own init line, if that is
-        // more than 1.5 m above the terrain or the sea: by then the objects he stands on exist
-        // (the carrier's deck is built by its base's init line), and he drops onto them.
-        if (_env.kind && !emptyVehicle && n.D("atlOffset", 0.0) > 1.0 && _env.kind(type) == EdenKind::Man)
-            if (const std::vector<double> p = Floats(*pos, "position"); p.size() >= 3)
+        // Arma 3 keeps a unit's height -- on an upper floor, on a carrier's deck. CWA stands
+        // every unit and vehicle on the ground (or the sea) at the start, so one the file holds
+        // more than 1.5 m above the terrain or the sea is put back at its height from its own
+        // init line: by then the objects it stands on exist (the carrier's deck is built by its
+        // base's init line), and it settles onto them. The file's height is that of a soldier's
+        // feet and of a vehicle's or object's model origin (a jet on the jets showcase's deck at
+        // 26.09 against the deck crew's 23.66) -- in both cases where this engine has the
+        // object's origin, so it goes straight to setPosASL. Not for crew (their vehicle places
+        // them; setPosASL would get them out), ships or aircraft that start flying. atlOffset is
+        // no gate: on a carrier's deck it is a few centimetres, the deck being the surface.
+        const EdenKind kind = _env.kind ? _env.kind(type) : EdenKind::Unknown;
+        if (!u.logic && !fly && u.seat.vehicle < 0 && kind != EdenKind::Unknown && kind != EdenKind::Ship)
+            if (const std::vector<double> p = Floats(*pos, "position"); p.size() >= 3 && p[1] > 1.5)
             {
                 const std::string x = Num(p[0]), y = Num(p[2]), h = Num(p[1]);
-                parts.insert(parts.begin(), "if (" + h + " - ((getTerrainHeightASL [" + x + "," + y +
-                                                "]) max 0) > 1.5) then {this setPosASL [" + x + "," + y + "," + h +
-                                                "]}");
+                const std::string surface = "((getTerrainHeightASL [" + x + "," + y + "]) max 0)";
+                parts.insert(parts.begin(), "if (" + h + " - " + surface + " > 1.5) then {this setPosASL [" + x +
+                                                "," + y + "," + h + "]}");
             }
         if (a)
         {
