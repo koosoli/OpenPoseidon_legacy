@@ -1,3 +1,21 @@
+// The game is a GUI-subsystem program, so its stderr and stdout may be closed or unwritable
+// (a launcher, a test harness's redirect), and std's eprintln!/println! panic when the write
+// fails: on the laptop's DX12 adapter renderer creation died of "failed printing to stderr:
+// Zugriff verweigert (os error 5)". A diagnostic line must never take the renderer down.
+// Defined before every `mod`, these shadow the std macros in the whole crate.
+macro_rules! eprintln {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stderr(), $($arg)*);
+    }};
+}
+macro_rules! println {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stdout(), $($arg)*);
+    }};
+}
+
 mod bloom;
 #[cfg(feature = "dlss")]
 mod dlss;
