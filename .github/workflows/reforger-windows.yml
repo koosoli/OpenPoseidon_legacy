@@ -48,14 +48,27 @@ jobs:
         with:
           workspaces: |
             . -> target
+      # The *_actual_gpu tests need an adapter: lavapipe (Mesa's software Vulkan) is one.
+      - name: Software Vulkan
+        shell: bash
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mesa-vulkan-drivers libvulkan1 > /dev/null
       - name: Test
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -o pipefail
           cargo test -p wgpu_renderer --lib --no-fail-fast 2>&1 | tee test.txt || true
-          grep -E "^test .* FAILED|panicked at|error(\[E[0-9]+\])?:|^test result" test.txt | head -60 | while IFS= read -r line; do
-            echo "::warning::${line//%/%25}"
-          done
+          # GitHub keeps 10 annotations per step: one line with the count and the names, and
+          # the whole log as a release asset (the testing session cannot read job logs).
+          failed=$(grep -E "^test .* FAILED$" test.txt | sed -E 's/^test (.*) \.\.\. FAILED$/\1/' | tr '\n' ' ')
+          echo "::warning::$(grep -E '^test result' test.txt | tail -1) | failed: ${failed:-none}"
+          grep -E "error(\[E[0-9]+\])?:" test.txt | head -8 | while IFS= read -r line; do echo "::warning::${line//%/%25}"; done
+          TAG=reforger-ci-tests
+          if [ "$GITHUB_REF_NAME" != "MrDudeX-reforger" ]; then TAG="reforger-ci-tests-${GITHUB_REF_NAME#MrDudeX-reforger-}"; fi
+          gh release delete "$TAG" -y --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create "$TAG" test.txt -R "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+            --title "Reforger renderer test log ${GITHUB_REF_NAME} ${GITHUB_SHA::7}" --notes "cargo test -p wgpu_renderer --lib, run ${GITHUB_RUN_ID}." || true
           if grep -q "^test result: FAILED\|error\[E" test.txt; then exit 1; fi
 
   build-windows:
@@ -92,11 +105,19 @@ jobs:
       - name: Report compiler errors
         if: failure()
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           cmake --build "$CWR_BUILD_DIR" --target PoseidonGame --parallel 2 -- -k 0 > build-errors.txt 2>&1 || true
-          grep -E "error( [A-Z]+[0-9]+)?:|error\[|undefined symbol|LNK[0-9]+" build-errors.txt | head -40 | while IFS= read -r line; do
+          grep -E "error( [A-Z]+[0-9]+)?:|error\[|undefined symbol|LNK[0-9]+" build-errors.txt | head -10 | while IFS= read -r line; do
             echo "::error::${line//%/%25}"
           done
+          # All of it as a release asset: annotations stop at 10 per step.
+          TAG=reforger-ci-errors
+          if [ "$GITHUB_REF_NAME" != "MrDudeX-reforger" ]; then TAG="reforger-ci-errors-${GITHUB_REF_NAME#MrDudeX-reforger-}"; fi
+          gh release delete "$TAG" -y --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create "$TAG" build-errors.txt -R "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+            --title "Reforger build errors ${GITHUB_REF_NAME} ${GITHUB_SHA::7}" --notes "run ${GITHUB_RUN_ID}" || true
           exit 1
 
       - name: Collect game files
