@@ -187,6 +187,9 @@ class Airplane: public Transport
 	LSError Serialize(ParamArchive &ar) override;
 
 	void RepairGear() { _gearDammage = false; }
+
+	// its own class id: without one dyn_cast<Airplane> answers yes for every object of its base
+	USE_CASTING(base)
 };
 
 enum AirplaneState

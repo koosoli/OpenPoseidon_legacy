@@ -351,6 +351,9 @@ class HelicopterAuto: public Helicopter
 	float CalculateError(NetworkMessageContext &ctx) override;
 protected:
 	void UpdateStopMode(AIUnit *unit);
+
+	// its own class id: without one dyn_cast<HelicopterAuto> answers yes for every object of its base
+	USE_CASTING(base)
 };
 
 }  // namespace Poseidon

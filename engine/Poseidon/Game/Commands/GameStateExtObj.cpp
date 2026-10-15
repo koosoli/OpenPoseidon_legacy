@@ -106,6 +106,15 @@ RString EngineMuzzleName(const EntityAI* ai, const RString& scriptName)
                     return muzzle->GetName();
             }
     }
+    // Arma 3 names a weapon's own muzzle after the weapon ("arifle_MX_GL_F" beside its "GL_3GL_F"):
+    // a weapon of the unit's, by that name, stands for its first muzzle.
+    for (int i = 0; i < ai->NWeaponSystems(); i++)
+    {
+        const WeaponType* weapon = ai->GetWeaponSystem(i);
+        if (weapon && weapon->_muzzles.Size() > 0 && weapon->_muzzles[0] &&
+            Poseidon::Arma1Compat::ScriptWeaponMatches(weapon->GetName(), scriptName))
+            return weapon->_muzzles[0]->GetName();
+    }
     // Nothing matched: say once per name which muzzles the unit has, so a script's
     // weapon name the mapping misses shows up in the log instead of silently doing nothing.
     static std::set<std::string> reported;

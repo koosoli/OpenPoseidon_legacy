@@ -265,6 +265,9 @@ class Car: public TankOrCar
 	);
 	TMError TransferMsg(NetworkMessageContext &ctx) override;
 	float CalculateError(NetworkMessageContext &ctx) override;
+
+	// its own class id: without one dyn_cast<Car> answers yes for every object of its base
+	USE_CASTING(base)
 };
 
 }  // namespace Poseidon

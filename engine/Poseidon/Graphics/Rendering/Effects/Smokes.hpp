@@ -666,6 +666,9 @@ class Explosion: public Vehicle
 	TMError TransferMsg(NetworkMessageContext &ctx) override;
 
 	USE_FAST_ALLOCATOR;
+
+	// its own class id: without one dyn_cast<Explosion> answers yes for every object of its base
+	USE_CASTING(base)
 };
 
 class Crater: public Smoke
@@ -856,6 +859,9 @@ class ObjectDestructed: public Vehicle
 	TMError TransferMsg(NetworkMessageContext &ctx) override;
 
 	USE_FAST_ALLOCATOR;
+
+	// its own class id: without one dyn_cast<ObjectDestructed> answers yes for every object of its base
+	USE_CASTING(base)
 };
 
 

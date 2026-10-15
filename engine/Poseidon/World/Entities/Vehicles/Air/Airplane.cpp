@@ -43,6 +43,8 @@
 
 namespace Poseidon
 {
+DEFINE_CASTING(Airplane)
+
 Airplane::Airplane(VehicleType* name, Person* pilot)
     : Transport(name, pilot),
 

@@ -42,6 +42,8 @@
 
 namespace Poseidon
 {
+DEFINE_CASTING(Tank)
+
 Tank::Tank(VehicleType* name, Person* driver)
     : base(name, driver),
 
