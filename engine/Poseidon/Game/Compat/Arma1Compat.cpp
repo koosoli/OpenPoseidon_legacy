@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
 #include <vector>
@@ -896,5 +897,38 @@ std::string CampaignBaseForMission(const std::string& missionFile)
             return base;
     }
     return {};
+}
+
+RString FindArmaSoundFile(const char* configName)
+{
+    if (!Active() || !configName)
+        return RString();
+    std::string name = Lower(configName);
+    std::replace(name.begin(), name.end(), '/', '\\');
+    const size_t start = name.find_first_not_of("@\\");
+    if (start == std::string::npos)
+        return RString();
+    name.erase(0, start);
+    const size_t slash = name.rfind('\\');
+    const size_t dot = name.rfind('.');
+    const bool hasExt = dot != std::string::npos && (slash == std::string::npos || dot > slash);
+    const std::string stem = hasExt ? name.substr(0, dot) : name;
+    // The name as an archive path ("ca\sounds\ambient\forest\forest-day-2" + ".wss"), then
+    // the same with .ogg for .wss.
+    std::vector<std::string> candidates{hasExt ? name : stem + ".wss"};
+    if (!hasExt || name.compare(dot, std::string::npos, ".wss") == 0)
+        candidates.push_back(stem + ".ogg");
+    for (const std::string& candidate : candidates)
+    {
+        if (!QIFStreamB::FileExist(candidate.c_str()))
+            continue;
+        static std::mutex reportedLock;
+        static std::set<std::string> reported;
+        std::lock_guard<std::mutex> lock(reportedLock);
+        if (reported.size() < 64 && reported.insert(name).second)
+            LOG_INFO(Mission, "{}: sound '{}' is read from {}", Label(), configName, candidate);
+        return RString(candidate.c_str());
+    }
+    return RString();
 }
 } // namespace Poseidon::Arma1Compat
