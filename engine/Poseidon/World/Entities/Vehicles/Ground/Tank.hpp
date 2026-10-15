@@ -237,6 +237,9 @@ class Tank: public TankOrCar
 	void AIPilot(AIUnit *unit, float deltaT ) override{}
 
 	bool HasHUD() const override {return true;}
+
+	// its own class id: without one dyn_cast<Tank> answers yes for every object of its base
+	USE_CASTING(base)
 };
 
 class TankWithAI: public Tank

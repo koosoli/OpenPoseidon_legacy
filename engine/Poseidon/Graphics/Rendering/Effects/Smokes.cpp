@@ -445,6 +445,8 @@ DEFINE_FAST_ALLOCATOR(ObjectDestructed)
 
 const float DestroyerTimeToLive = 2;
 
+DEFINE_CASTING(ObjectDestructed)
+
 ObjectDestructed::ObjectDestructed(LODShapeWithShadow* shape)
     : Vehicle(shape, VehicleTypes.New("ObjectDestructed"), -1), _destroy(nullptr), _anim(0),
       _speed(1.0 / DestroyerTimeToLive), _dust(GLOB_SCENE->Preloaded(CloudletBasic), 2.0, 0.5)
@@ -2305,6 +2307,8 @@ static const RStringB& GetExplosionName()
     static const RStringB ExplosionName = "Explosion";
     return ExplosionName;
 }
+
+DEFINE_CASTING(Explosion)
 
 Explosion::Explosion(LODShapeWithShadow* shape, Vehicle* owner, float duration)
     : Vehicle(nullptr, VehicleTypes.New(GetExplosionName()), -1), _soundDone(false), _exSize(duration), _owner(owner)

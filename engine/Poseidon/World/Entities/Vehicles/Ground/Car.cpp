@@ -316,6 +316,8 @@ void CarType::InitShape()
 
 int GetTemplateSeed();
 
+DEFINE_CASTING(Car)
+
 Car::Car(VehicleType* name, Person* driver)
     : base(name, driver), _thrustWanted(0), _thrust(0), _turnWanted(0), _turn(0), _turnIncreaseSpeed(1),
       _turnDecreaseSpeed(1), _reverseTimeLeft(0), _forwardTimeLeft(0), _wheelPhase(0), _track(_shape), _scudState(0)
