@@ -41,7 +41,7 @@ sheets are compared by eye, not per pixel.
 | RFG-161 far forest | far proxies lit by sky alone | take the real sun | `WGR_NATIVE_FAR_SUN=0` |
 | RFG-162/163 rivers, ponds | opaque olive ribbons / nothing | drawn as water (refraction, absorption, Fresnel sky + screen-space reflection, flow ripples) | `WGR_RIVERS=0` |
 | RFG-165 lakes | Lake_Center (0.9 x 0.45 km) 7 m too high: dry bed at its shore | the generator's own offset (`coords 0 -7 0`) applied | -- |
-| RFG-166/168 water look | a pale sky sheen over pale gravel | MatRiver Color covers a shallow bed (`WGR_RIVER_BODY`), grazing reflections meet the banks (`WGR_RIVER_BANK`), wet bed >= 0.38 darker, >= 0.3 m look column inside a river ribbon, round ripples on still water | `WGR_RIVER_*` |
+| RFG-166/168/169 water look | a pale sky sheen over pale gravel; streaks over Lake_Center | MatRiver Color covers a shallow bed (`WGR_RIVER_BODY`) at 0.5 x `WGR_RIVER_SCATTER` of the sky+sun light (dark olive, was pale sand), grazing reflections meet the banks (`WGR_RIVER_BANK`), wet bed >= 0.38 darker, >= 0.3 m look column inside a river ribbon, round ripples on still water, the bed lookup at most 0.25 m deep (the streaks) | `WGR_RIVER_*` |
 
 Trees: Oli's FAR-002 (forests to the horizon) is in the base. A/B of the foliage lighting knobs
 (`WGR_FOLIAGE_AMBIENT_BOOST=0.75`, `WGR_FOLIAGE_WRAP=0`, `WGR_FOLIAGE_TRANS_SCALE=0.5`) at the forest
@@ -57,6 +57,13 @@ remaining look difference to Reforger at these poses is framing (field of view),
   windows reflect (too brightly -- fixed in RFG-168, `181a1f8`).
 - Not covered yet: the multiplayer synchronisation of doors and panes (local per client; panes
   break on every client from the same shot), Reforger's door sounds (its audio is not decoded).
+
+A/B on the house poses with `WGR_GI_RSM_GAIN=3` and `WGR_SKY_AMBIENT=2.2` left the shaded
+facades almost unchanged: their darkness is not those two knobs.
+
+Harness fixes found on the way: each pose is set again 2 s before its shot (a late freefly camera or
+stray input moved it), and a start that dies within 30 s (stderr access denied at renderer
+creation) is retried.
 
 ## Still different from Reforger (seen in the sheets, not addressed)
 
