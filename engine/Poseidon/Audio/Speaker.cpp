@@ -13,6 +13,9 @@
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Memory/FastAlloc.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
+#include <set>
+#include <string>
 #include <Poseidon/Foundation/Time/Time.hpp>
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 
@@ -50,6 +53,18 @@ BasicSpeaker::BasicSpeaker(const ParamEntry& cfg)
 IWave* BasicSpeaker::Say(RString id, float pitch, bool loop)
 {
     RString dir = ENGINE_CONFIG.singleVoice ? _directories[1] : _directories[0];
+    const ParamEntry* words = (Pars >> "CfgVoice").FindEntry("Words");
+    const ParamEntry* wordEntry = words ? words->FindEntry(id) : nullptr;
+    if (!wordEntry || !wordEntry->IsArray() || wordEntry->GetSize() == 0 ||
+        RString((*wordEntry)[0].GetValue()).GetLength() == 0)
+    {
+        // A word CfgVoice does not define loads "voice\Rob\.wss" and fails (8 Arma 1
+        // missions). Name the word once so the gap can be traced; the radio carries on as
+        // before (the failed wave still ends and passes the message on).
+        static std::set<std::string> reported;
+        if (reported.insert((const char*)id).second)
+            LOG_WARN(Audio, "Radio word '{}' is not in CfgVoice >> Words", (const char*)id);
+    }
     const ParamEntry& word = Pars >> "CfgVoice" >> "Words" >> id;
     RString name = dir + word[0].GetValue() + RString(".wss");
 
