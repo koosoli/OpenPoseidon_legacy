@@ -7,6 +7,8 @@
 // no trace in the log. Here every wave the game asks for is counted -- requested, empty,
 // failed to load, played -- and the test prints the totals and the names when it ends.
 
+#include <Poseidon/Foundation/Platform/AppConfig.hpp>
+
 #include <atomic>
 #include <map>
 #include <mutex>
@@ -28,7 +30,18 @@ inline std::atomic<int>& EnabledFlag()
 }
 
 inline void Enable(bool on) { EnabledFlag().store(on ? 1 : 0); }
-inline bool Enabled() { return EnabledFlag().load() == 1; }
+// On from the first sound of a test run (loading included: the world's ambient loops and a
+// soldier's breath are opened before the mission runs and only replayed afterwards).
+inline bool Enabled()
+{
+    int flag = EnabledFlag().load();
+    if (flag < 0)
+    {
+        flag = Foundation::AppConfig::Instance().GetArma1TestSeconds() > 0.0f ? 1 : 0;
+        EnabledFlag().store(flag);
+    }
+    return flag == 1;
+}
 
 inline std::mutex& Mutex()
 {
