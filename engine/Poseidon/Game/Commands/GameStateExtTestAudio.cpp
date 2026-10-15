@@ -215,6 +215,8 @@ GameValue TriEnfusionDoorCensus(const GameState*);
 GameValue TriEnfusionGlass(const GameState*, GameValuePar);
 GameValue TriEnfusionGlassBreak(const GameState*, GameValuePar);
 GameValue TriEnfusionGlassCensus(const GameState*);
+GameValue TriEnfusionDoorsAll(const GameState*, GameValuePar);
+GameValue TriEnfusionGlassBreakAll(const GameState*, GameValuePar);
 GameValue TriDevPanelSelectShadows(const GameState*);
 GameValue TriDevPanelSelectMemory(const GameState*);
 GameValue TriShadowSunFactor(const GameState*);
@@ -3292,6 +3294,8 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameScalar, "triTerrainHeight", TriTerrainHeight, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triEnfusionDoor", TriEnfusionDoor, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triEnfusionDoorSet", TriEnfusionDoorSet, GameArray));
+    GGameState.NewFunction(GameFunction(GameScalar, "triEnfusionDoorsAll", TriEnfusionDoorsAll, GameArray));
+    GGameState.NewFunction(GameFunction(GameScalar, "triEnfusionGlassBreakAll", TriEnfusionGlassBreakAll, GameArray));
     GGameState.NewNularOp(GameNular(GameString, "triEnfusionDoorCensus", TriEnfusionDoorCensus));
     GGameState.NewFunction(GameFunction(GameString, "triEnfusionGlass", TriEnfusionGlass, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triEnfusionGlassBreak", TriEnfusionGlassBreak, GameScalar));

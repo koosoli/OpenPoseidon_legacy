@@ -5,6 +5,7 @@
 //                                        of the door nearest (x, z), or "NONE"
 //   triEnfusionDoorSet [index, open] -> "OK" / "REFUSED"; opens (1) or closes (0) one door
 //   triEnfusionDoorCensus            -> "doors N parts M"
+//   triEnfusionDoorsAll [x, z, r, open] -> how many doors within r of (x, z) were sent to that state
 
 #include <Evaluator/express.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -49,6 +50,29 @@ GameValue TriEnfusionDoorSet(const GameState*, GameValuePar arg)
     return GameValue("OK");
 }
 
+GameValue TriEnfusionDoorsAll(const GameState*, GameValuePar arg)
+{
+    const GameArrayType& args = arg;
+    if (!GLandscape || args.Size() < 4 || args[0].GetType() != GameScalar || args[1].GetType() != GameScalar ||
+        args[2].GetType() != GameScalar || args[3].GetType() != GameScalar)
+        return GameValue(-1.0f);
+    EnfusionDoorRegistry& doors = GLandscape->EnfusionDoors();
+    const float x = args[0], z = args[1];
+    const float r = std::max(static_cast<float>(args[2]), 1.0f);
+    const bool open = static_cast<float>(args[3]) > 0.5f;
+    int sent = 0;
+    for (size_t i = 0; i < doors.Count(); ++i)
+    {
+        const Vector3 hinge = doors.Hinge(static_cast<int>(i));
+        const float dx = hinge.X() - x, dz = hinge.Z() - z;
+        if (dx * dx + dz * dz > r * r)
+            continue;
+        doors.RequestState(static_cast<int>(i), open);
+        ++sent;
+    }
+    return GameValue(static_cast<float>(sent));
+}
+
 GameValue TriEnfusionDoorCensus(const GameState*)
 {
     char text[96];
@@ -62,6 +86,7 @@ GameValue TriEnfusionDoorCensus(const GameState*)
 //   triEnfusionGlass [x, z, y, radius] -> "index id broken x y z" of the pane nearest, or "NONE"
 //   triEnfusionGlassBreak index        -> "OK" / "REFUSED"
 //   triEnfusionGlassCensus             -> "panes N broken M"
+//   triEnfusionGlassBreakAll [x, z, y, r] -> how many intact panes within r broke
 GameValue TriEnfusionGlass(const GameState*, GameValuePar arg)
 {
     const GameArrayType& args = arg;
@@ -89,6 +114,17 @@ GameValue TriEnfusionGlassBreak(const GameState*, GameValuePar arg)
     if (index < 0)
         return GameValue("REFUSED");
     return GameValue(GLandscape->BreakNativeGlassPane(static_cast<uint32_t>(index), nullptr) ? "OK" : "REFUSED");
+}
+
+GameValue TriEnfusionGlassBreakAll(const GameState*, GameValuePar arg)
+{
+    const GameArrayType& args = arg;
+    if (!GLandscape || args.Size() < 4 || args[0].GetType() != GameScalar || args[1].GetType() != GameScalar ||
+        args[2].GetType() != GameScalar || args[3].GetType() != GameScalar)
+        return GameValue(-1.0f);
+    const Vector3 centre(static_cast<float>(args[0]), static_cast<float>(args[2]), static_cast<float>(args[1]));
+    return GameValue(static_cast<float>(
+        GLandscape->BreakNativeGlassInRadius(centre, std::max(static_cast<float>(args[3]), 1.0f), nullptr)));
 }
 
 GameValue TriEnfusionGlassCensus(const GameState*)
