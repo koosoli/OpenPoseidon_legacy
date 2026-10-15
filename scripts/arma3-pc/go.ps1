@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $game = 'H:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered'
 $a3   = 'F:\SteamLibrary\steamapps\common\Arma 3'
-$job = @{ WAIT='480'; QUIET='90'; DEPLOY='0'; LIST='missions_first.txt'; OUT='tests'; SECONDS='40'; RENDER=''; EXTRA=''; WINDOW='1'; SHOTS='1'; EXE='bin' }
+$job = @{ WAIT='480'; QUIET='90'; DEPLOY='0'; LIST='missions_first.txt'; OUT='tests'; SECONDS='40'; RENDER=''; EXTRA=''; WINDOW='1'; SHOTS='1'; EXE='bin'; ERR='0' }
 $jobPath = if ([IO.Path]::IsPathRooted($JobFile)) { $JobFile } else { Join-Path $here $JobFile }
 if (Test-Path $jobPath) {
   Get-Content $jobPath | ForEach-Object { if ($_ -match '^\s*([A-Z0-9_]+)\s*=(.*)$') { $job[$matches[1]] = $matches[2].Trim() } }
@@ -86,7 +86,11 @@ foreach ($m in $missions) {
   # (the redirected stderr file), which says nothing about the mission.
   for ($try = 1; $try -le 2; $try++) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $p = Start-Process -FilePath $exe -ArgumentList $al -WorkingDirectory $game -PassThru -RedirectStandardError $err
+    # stderr is not redirected (ERR=1 does): the renderer's diagnostics are in the log, the
+    # stderr files were always empty, and writing to one failed with 'Zugriff verweigert'.
+    $sp = @{ FilePath = $exe; ArgumentList = $al; WorkingDirectory = $game; PassThru = $true }
+    if ($job.ERR -eq '1') { $sp.RedirectStandardError = $err }
+    $p = Start-Process @sp
     $null = $p.Handle
     $limit = $secs + 300
     $timedOut = -not $p.WaitForExit($limit * 1000)
