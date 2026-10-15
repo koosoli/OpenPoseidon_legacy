@@ -998,10 +998,17 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
                         EntityAI* ai = dyn_cast<EntityAI>(GWorld->CameraOn());
                         Person* player = GWorld->PlayerOn();
                         LODShapeWithShadow* optics = ai && player ? ai->GetOpticsModel(player) : nullptr;
-                        LOG_INFO(Mission, "Arma 2: optics shot: camera type {}, optics model {}, 3D sights {}",
+                        const Camera* cam = GScene ? GScene->GetCamera() : nullptr;
+                        const Vector3 cp = cam ? cam->Position() : VZero;
+                        const Vector3 cd = cam ? cam->Direction() : VZero;
+                        const Vector3 pp = ai ? ai->Position() : VZero;
+                        LOG_INFO(Mission,
+                                 "Arma 2: optics shot: camera type {}, optics model {}, 3D sights {}, camera "
+                                 "{:.2f},{:.2f},{:.2f} (from the soldier {:.2f},{:.2f},{:.2f}) looking {:.2f},{:.2f},{:.2f}",
                                  static_cast<int>(GWorld->GetCameraType()),
                                  optics ? (const char*)optics->GetName() : "(none)",
-                                 ai && player && ai->LooksThroughSights(player) ? "yes" : "no");
+                                 ai && player && ai->LooksThroughSights(player) ? "yes" : "no", cp.X(), cp.Y(), cp.Z(),
+                                 cp.X() - pp.X(), cp.Y() - pp.Y(), cp.Z() - pp.Z(), cd.X(), cd.Y(), cd.Z());
                     }
                     GEngine->Screenshot((shot + "_optic.png").c_str());
                     shotStep = 5;

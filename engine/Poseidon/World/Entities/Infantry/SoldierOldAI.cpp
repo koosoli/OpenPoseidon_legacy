@@ -820,10 +820,32 @@ Matrix4 Man::GetWeaponRelTransform(int weapon) const
     {
         const MagazineSlot& slot = GetMagazineSlot(weapon);
         Matrix4 held;
-        if (HeldWeaponTransform(Type()->_insideView, slot._weapon, held))
+        const bool found = HeldWeaponTransform(Type()->_insideView, slot._weapon, held);
+        Vector3 dir = found ? held.Rotate(slot._muzzle->_muzzleDir) : VZero;
+        const float len = dir.Size();
+        // The first few per process: where the sights put the camera (T06's view through
+        // the M4's EOTech came out black where C2B's, the same weapon, did not).
+        static int logged = 0;
+        if (logged < 3)
         {
-            Vector3 dir = held.Rotate(slot._muzzle->_muzzleDir);
-            dir.Normalize();
+            logged++;
+            const Vector3 eye = found ? held.FastTransform(slot._weapon->_eyePos) : VZero;
+            LOG_INFO(Graphics,
+                     "A2 3D sights: proxy {} eye {:.3f},{:.3f},{:.3f} dir {:.3f},{:.3f},{:.3f} (|muzzle dir| {:.3f}) up "
+                     "{:.3f},{:.3f},{:.3f} model eye {:.3f},{:.3f},{:.3f} move {}",
+                     found ? "found" : "MISSING", eye.X(), eye.Y(), eye.Z(), dir.X(), dir.Y(), dir.Z(),
+                     slot._muzzle->_muzzleDir.Size(), held.DirectionUp().X(), held.DirectionUp().Y(),
+                     held.DirectionUp().Z(), slot._weapon->_eyePos.X(), slot._weapon->_eyePos.Y(),
+                     slot._weapon->_eyePos.Z(), (const char*)Type()->GetMoveName(_primaryMove.id));
+        }
+        // A muzzle without its two memory points has no direction: aim along the weapon
+        // proxy instead of building a camera from a zero vector.
+        if (found && !(len > 1e-3f))
+            dir = held.Direction(), dir.Normalize();
+        else if (found)
+            dir = dir * (1.0f / len);
+        if (found && dir.SquareSize() > 0.5f)
+        {
             Matrix4 trans;
             trans.SetDirectionAndUp(dir, held.DirectionUp());
             trans.SetPosition(held.FastTransform(slot._weapon->_eyePos));
