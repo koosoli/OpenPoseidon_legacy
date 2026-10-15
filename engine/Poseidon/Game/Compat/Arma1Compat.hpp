@@ -170,6 +170,11 @@ bool IsArma1MissionDirectory(const char* missionDirectory);
 // CWA's default folder ("anim\", "data\", "sound\").
 bool IsArmaBankPath(const char* name);
 
+// Arma 3 draws a man's head through a placeholder proxy (\a3\characters_f\heads\bysta)
+// that it replaces with the head of the unit's identity. Here: the model of CfgHeads
+// Default_A3 for that proxy, "" for every other proxy.
+RString Arma3HeadForProxy(const char* proxyModel);
+
 // The CfgWorlds class an Arma 1 mission's world name means: "intro" in an Arma 1
 // archive is Arma 1's desert (A1_Intro), not CWA's Intro island.
 RString WorldClassForMission(const RString& world, const char* missionDirectory);

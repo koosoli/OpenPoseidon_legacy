@@ -641,6 +641,14 @@ void CreateAdapterProxies(LODShapeWithShadow* shape, const Poseidon::Model::Mode
                 // name only a seat. Stand a CWA crew proxy of the same seat in for them, so
                 // the vehicle gets its driver/gunner/commander/cargo positions and the crew
                 // is drawn where Arma 1 seats it instead of not at all.
+                // --arma3: the head placeholder every Arma 3 man carries is drawn with the
+                // default Arma 3 head (Arma 3 puts the identity's head there).
+                if (!proxyHasConfigClass && Arma1Compat::Active())
+                {
+                    const RString head = Arma1Compat::Arma3HeadForProxy(modelName);
+                    if (head.GetLength() > 0 && QIFStreamB::FileExist(GetShapeName(head)))
+                        modelName = head;
+                }
                 if (!proxyHasConfigClass && Arma1Compat::Active() && !QIFStreamB::FileExist(GetShapeName(modelName)))
                 {
                     RString substitute = Arma1CrewProxyStandIn(modelName);

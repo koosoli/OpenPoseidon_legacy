@@ -1118,28 +1118,21 @@ class EdenConverter
         return nullptr;
     }
 
-    bool AddSync(long edenId, int sync)
+    // The list an entity's synchronisations go into (a group's are its leader's); null for
+    // entities that cannot be synchronised here (markers, logics left out, ...).
+    std::vector<int>* SyncList(long edenId)
     {
         const auto it = _refs.find(edenId);
         if (it == _refs.end())
-            return false;
+            return nullptr;
         const Ref& r = it->second;
         if (r.kind == Ref::Waypoint)
-        {
-            _groups[static_cast<size_t>(r.a)].waypointSyncs[static_cast<size_t>(r.b)].push_back(sync);
-            return true;
-        }
+            return &_groups[static_cast<size_t>(r.a)].waypointSyncs[static_cast<size_t>(r.b)];
         if (r.kind == Ref::Trigger)
-        {
-            _triggers[static_cast<size_t>(r.a)].syncs.push_back(sync);
-            return true;
-        }
+            return &_triggers[static_cast<size_t>(r.a)].syncs;
         if (UnitOut* u = UnitFor(r))
-        {
-            u->syncs.push_back(sync);
-            return true;
-        }
-        return false;
+            return &u->syncs;
+        return nullptr;
     }
 
     void ApplyConnections(const Node* connections)
@@ -1154,12 +1147,17 @@ class EdenConverter
             const std::string type = Lower(cd ? cd->S("type") : std::string());
             if (type == "sync" || type == "waypointactivation")
             {
-                const auto ra = _refs.find(a), rb = _refs.find(b);
-                if (ra == _refs.end() || rb == _refs.end())
+                // Both ends or neither: a synchronisation the engine sees with one member is
+                // an error in its mission loader (ArcadeTemplate: "syncCounts >= 2"). A group
+                // linked to its own leader is one item too.
+                std::vector<int>* la = SyncList(a);
+                std::vector<int>* lb = SyncList(b);
+                if (!la || !lb || la == lb)
                     continue;
                 const int sync = _nextSync++;
-                if (AddSync(a, sync) && AddSync(b, sync))
-                    _report.links++;
+                la->push_back(sync);
+                lb->push_back(sync);
+                _report.links++;
             }
             else if (type == "triggerowner")
             {
