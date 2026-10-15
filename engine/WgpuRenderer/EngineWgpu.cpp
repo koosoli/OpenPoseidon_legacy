@@ -9441,6 +9441,19 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                                                             st.pctClear, st.pctPartial, st.aMean);
         }
     }
+    // RFG-164: native Enfusion window glass (an authored-glass pane whose .emat is glass) takes
+    // the same sky-mirror treatment: reflective + glass. Head-on against a dark room the pane was
+    // a black hole (owner comparison with Reforger, where the panes mirror the sky and the yard).
+    // WGR_ENFUSION_GLASS_SHEEN=0 restores the plain translucent pane.
+    if (!glassSheen && authoredGlass && GpuEmatIsGlass(debugSection.surfMat))
+    {
+        static const bool enfusionSheen = []
+        {
+            const char* v = std::getenv("WGR_ENFUSION_GLASS_SHEEN");
+            return !(v && std::strcmp(v, "0") == 0);
+        }();
+        glassSheen = enfusionSheen;
+    }
     // DZ-003, resolved above (see reflectiveMaterial).
     if (reflectiveMaterial || glassSheen)
     {

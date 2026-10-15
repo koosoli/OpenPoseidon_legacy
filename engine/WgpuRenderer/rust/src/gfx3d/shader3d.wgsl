@@ -227,6 +227,9 @@ const MATFLAG_NIGHT_EMITTER: u32 = 4u;
 // otherwise vanish from the pilot seat. 0.18 is the retail tint's own average (46/255).
 const MATFLAG_GLASS: u32 = 8u;
 const GLASS_MIN_ALPHA: f32 = 0.18;
+// RFG-164: the Fresnel curve of Reforger's window_glass.emat (FresnelBias, FresnelPower).
+const GLASS_FRESNEL_BIAS: f32 = 0.05;
+const GLASS_FRESNEL_POWER: f32 = 1.333;
 // MAT-052 second half (WGR_DRAW3D_COCKPIT): a first-person cockpit draw. shade() takes the
 // FLAT scene ambient for these instead of the sky-dome irradiance -- an interior plate lit
 // by the full outdoor sky washes to near-sky brightness and reads as a TRANSPARENT cockpit
@@ -1441,7 +1444,10 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // world-space sample of the same normal map; see water_ripple_normal. Kept in step with
     // gpu_driven.wgsl's copy on purpose: DayZ water reaches the retained path in practice, but
     // the two paths must not disagree about what a water surface looks like.
+    // RFG-164: a reflective GLASS pane (native Enfusion window glass) is a flat mirror, not water:
+    // it takes no ripple.
     if ((material_flags(material) & MATFLAG_REFLECTIVE) != 0u && frame.wateranim.y > 0.0
+        && (material_flags(material) & MATFLAG_GLASS) == 0u
         && !matdbg_flag(MATDBG_DISABLE_FRESNEL_ENV)) {
         let t = frame.wateranim.x;
         shading_normal = water_ripple_normal(
@@ -1567,7 +1573,16 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             let view_dir = normalize(-in.world_pos);
             let n = select(-shading_normal, shading_normal, dot(shading_normal, view_dir) >= 0.0);
             let daylight = cave_daylight(in.world_pos + frame.cam_pos.xyz);
-            let f = env_fresnel(clamp(dot(n, view_dir), 0.0, 1.0)) * clamp(in.fog, 0.0, 1.0) * daylight;
+            // RFG-164: glass (MATFLAG_GLASS on a reflective draw) reflects by the curve Reforger's
+            // window_glass.emat authors -- FresnelBias 0.05, FresnelPower 1.333 -- read as
+            // bias + (1 - bias) * (1 - cos)^power. Far stronger off-axis than water's Schlick:
+            // 0.24 at 45 degrees, which is why Reforger's panes read as sky mirrors.
+            let cos_vn = clamp(dot(n, view_dir), 0.0, 1.0);
+            var fres = env_fresnel(cos_vn);
+            if ((material_flags(material) & MATFLAG_GLASS) != 0u) {
+                fres = GLASS_FRESNEL_BIAS + (1.0 - GLASS_FRESNEL_BIAS) * pow(1.0 - cos_vn, GLASS_FRESNEL_POWER);
+            }
+            let f = fres * clamp(in.fog, 0.0, 1.0) * daylight;
             let env = sky_env_sample(reflect(-view_dir, n));
             let a = clamp(out_a, 0.0, 1.0);
             let a_out = 1.0 - (1.0 - f) * (1.0 - a);
