@@ -1003,9 +1003,16 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
                                  optics ? (const char*)optics->GetName() : "(none)");
                     }
                     GEngine->Screenshot((shot + "_optic.png").c_str());
+                    shotStep = 5;
+                }
+                // back to first person a little later: the screenshot is written from a
+                // later frame, and switching in the same tick captured the first-person
+                // view instead of the optics (run 19)
+                else if (shotStep == 5 && played >= 21000)
+                {
                     if (Object* on = GWorld->CameraOn())
                         GWorld->SwitchCameraTo(on, CamInternal);
-                    shotStep = 5;
+                    shotStep = 6;
                 }
             }
         }
