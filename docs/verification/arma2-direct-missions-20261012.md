@@ -57,7 +57,7 @@ trailing `;` keeps a code block's value; spawned code keeps a reassigned `_this`
 Commands: `setVariable`/`getVariable` (objects, groups, `missionNamespace`,
 `uiNamespace`), simple tasks and the diary (shown in the map notebook as *Plan* and
 *Main*), the conversation system (`kbAddTopic` reads the `.bikb`, `kbTell` shows the line
-and plays the recorded speech, `kbWasSaid`), scripted FSMs (`execFSM`, one transition
+and plays the recorded speech, `kbWasSaid` true once the recording has played out, `9e46264`), scripted FSMs (`execFSM`, one transition
 per simulation step; FSM-editor `"..." \n "..."` strings joined), locations
 (`createLocation`, `nearestLocation(s)`, `locationPosition`, `text`, `setText`, ...),
 `createVehicle [..]`, `group createUnit [..]`, `isKindOf` on class names,
@@ -116,6 +116,11 @@ and are not counted.
 | 19 | `f77d01a` | 98, laptop gl33 | 98 | 97 | 0; the one script error is MP_Paradrop's own; census **13042 entities with the Arma model, 0 CWA**. Only shotgun slugs and laser batteries still find no CWA round (fixed `4562178` for the shotguns). MP_Detector and MPE1_Dogfighters end with the player killed: the enemy now carries rounds, and the A-10 nobody flies |
 | focus 10 | `e783482` | 7 (MP_Superpowers, SPE1_OneShotOneKill, MP_Paradrop, C2B, MP_CivilWar, C0, TE02), laptop gl33 | 7 | 6 | 0; the one script error is MP_Paradrop's own; census 608 Arma, 0 CWA. Hands natural by day and dark at night, TE02's bushes have leaves, the aiming view engages (M16 iron-sight overlay). Found: the M107's Arma 2 2D scope drawn as a box in flat colour (`8e1af97` keeps CWA's scope), Arma 2 vehicles washed grey under GL33 (`949ee53`), Arma 2 rifles aiming through CWA's M16 sight (`fa764b4`, 3D sights) |
 | focus 11 | `33b7181` | 8 (C2B, TE02, MP_CivilWar, MP_Superpowers, T03, C0, SPE1_OneShotOneKill, SPE1_Vehicles_US), laptop gl33 | 8 | 8 | 0; census 693 Arma, 0 CWA. Arma 2 3D sights (SCAR EOTech, AK irons, M16A4 ACOG) and the M107's 2D mil-dot scope work; C2B's M4 GL still over CWA's mask (fixed `7fe3564`); A/B runs 11b-d trace the grey striped vehicles to GL33 shadow self-comparison (fixed `faad391`) |
+| focus 12 | `faad391` | 6 (C2B, TE02, T03, T06, SP_TrialByFire, MP_Superpowers), laptop gl33 | 6 | 6 | 0; census 547 Arma, 0 CWA. The normal offset alone left the HMMWV's stripes (rule for back faces `e0bbaac`); T06's view through the sights black (`964ec29` logs the camera) |
+| 20 | `33b7181` | 21 of 98 (stopped for `faad391`), laptop gl33 | 21 | 20 | 0; the one script error is MP_Paradrop's own; census 2357 Arma, 0 CWA |
+| 20b | `faad391` | 48 more of the 98 (runs 20 + 20b: 69), laptop gl33 | 48 | 48 | 0; census 5663 Arma, 0 CWA |
+| focus 13 | `d508f9e` | 6 (C2B, T06, T07, T03, TE02, MP_WarWelcome), laptop gl33 | 6 | 6 | 0; census 452 Arma, 0 CWA. The new object census shows camouflage nets drawn without their holes: ODOL section alpha bits were masked (fixed `4646571`) |
+| focus 14 | `4646571` | 6 (T07, C2B, TE02, T03, C0, SP_TrialByFire), laptop gl33 | 6 | 6 | 0; census 600 Arma, 0 CWA. Camouflage net see-through, HMMWV camouflaged with no stripes, EOTech sights; C0's sight view black (unexplained) |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's

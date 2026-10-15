@@ -201,6 +201,81 @@ Full run 20 (`33b7181`) was stopped after 21 missions for this build: 21 entered
 Offline check: a small program built from the repo's own ODOL and RTM readers poses
 `USMC_Soldier_Light` with a move and scores the result by how much the mesh's edges stretch.
 
+Run 20b (`faad391`) played the remaining 48: 48 entered, 48 clean, census 5663 Arma, 0 CWA.
+Runs 20 + 20b together: 69 of 98 missions, 68 clean, 8020 Arma, 0 CWA.
+
+### Focus runs 13 and 14 (builds `d508f9e`, `4646571`), 2026-10-15
+
+Focus 13 (`d508f9e`, with the shadow rule `e0bbaac`): 6 of 6 clean, census 452 Arma, 0 CWA.
+The census now lists the mission's own objects within 25 m of the player with each section's
+texture and flags; it showed the camouflage nets of T07 and C2B drawn without their holes
+(black where the net is open). Cause: an Arma 2 ODOL section keeps its alpha in the raw
+`commonFaceFlags` (0x100 alpha, 0x200 transparent, 0x20000 alpha-ordered), and the
+conversion masked those bits off. `4646571` keeps them.
+
+Focus 14 (`4646571`): T07, C2B, TE02, T03, C0, SP_TrialByFire -- 6 of 6 clean, census 600
+Arma, 0 CWA. T07's camouflage net is see-through; C2B's and TE02's HMMWV show their
+woodland/desert camouflage with no stripes; C2B's M4 and TE02's SCAR look through the EOTech.
+C0's view through the sights came out black (as SP_WarWelcome's in run 20); not explained.
+
+### Sounds, music and conversations: inventory, 2026-10-15
+
+Read-only scan of exactly the archives the engine mounts (`AddOns`, `Expansion\AddOns`,
+`Missions`, `MPMissions` of Arma 2 and the Arrowhead folders; OA's `Common\` is not mounted,
+so its stripped `missions.pbo` does not hide Arma 2's). 92 archives, 143 mission folders.
+
+| Command in mission scripts | Uses | Missions |
+|---|---|---|
+| `kbTell` (conversation lines) | 2501 | 50 |
+| `fadeMusic` / `fadeSound` | 94 / 76 | 35 / 36 |
+| `setIdentity` | 91 | 25 |
+| `playMusic` | 55 | 35 |
+| `playSound` / `say` / `say2D` | 34 / 32 / 14 | 10 / 8 / 2 |
+| `sideRadio` / `groupRadio` | 8 / 3 | 2 / 1 |
+| `createSoundSource` | 2 | 2 (C4_BitterChill, MPE_SectorControl) -- **not implemented** |
+| `say3D`, `playSound3D` | 0 | -- |
+
+Trigger and waypoint effects add music tracks (`track`, 12 missions), sound effects
+(`soundDet`, 9) and environment sounds (`soundEnv`, 2).
+
+What resolves, measured against the data:
+
+- Every name a mission uses resolves to a class in its `description.ext` (with its
+  `#include`s), the campaign's or the merged config, except 12: `playMusic "longdark"` (C0's
+  `onPlayerKilled.sqf`), `"EP1_Track_03/05/08"` (SPE1_Vehicles_*), `say "expl"/"door"` (C2,
+  C3), `say2D "pain06"` (CE0), `groupRadio "BIS_EW_sentcheering"` (STR_EW2), `say "hi"` (C3),
+  and three the scan should not have counted (`say "plastic"` and
+  `playSound "placeholderShhh"` are commented out, one is chat text). No class of these
+  names exists in the scanned configs or descriptions, so the original plays nothing there
+  either (not checked in the original game).
+- **Conversations:** 4800 recorded lines are named in the missions' `.bikb` files, 4611 exist
+  (189 missing in the data, e.g. T05 names T04's recordings).
+- **Conversation timing was wrong.** `kbWasSaid` reported a line said after a time guessed
+  from its text, and the conversation FSMs start the next line on it. Of 4495 recorded lines,
+  2032 run more than 1 s past the guess (438 by more than 5 s; C3's radio news 66 s against
+  2.3 s), 945 end more than 1 s before it. `9e46264` uses the recording's own length;
+  each `kbTell` is logged with which of the two it used.
+- **Config sounds the CWA path rule missed.** `GetSoundName` puts `sound\` before a relative
+  name and `.wss` after one without extension. All 55 `CfgRadio` entries (45 of them
+  SP_Counterattack's radio dialogue), 31 `CfgSounds`, 47 `CfgEnvSounds` and 2 `CfgSFX`
+  entries found no file: their configs name the archive path without the leading backslash,
+  or say `.wss` where the Steam data holds `.ogg`. `fb88b7c` looks such a name up again as
+  the archive path and with `.ogg` -- only under `--arma2`, only when nothing was found. That
+  the original reads these files the same way is a conclusion from the data (it ships only
+  the `.ogg`), not checked against the original game.
+- `CfgMusic`: all 67 entries resolve.
+
+Not checked yet: whether music and sounds start at the right moment in game, volume and
+distance of `say`, the radio protocol (Arma 2's `CfgVoice` words; CWA's own radio voices
+speak), and `createSoundSource`.
+
+**Campaign flow (from the code, not run):** `--arma2-mission` with a campaign mission is
+meant to start the campaign at that mission (`StartArma1CampaignMission`, WorldImpl.cpp), but
+the campaign name is cut from the path as if it began with `campaigns/` (Arma 1). For Arma 2's
+`ca/missions/campaign/` that gives `s/campaign`, so the mission plays on its own: no
+campaign `description.ext`, no next mission after the end. The test harness never takes this
+path (test runs skip the briefing and play the mission alone).
+
 ## Steps
 
 1. **Measure first.** Per mission: an asset census in the log (every class created, what it
