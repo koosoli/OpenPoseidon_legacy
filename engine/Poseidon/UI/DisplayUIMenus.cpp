@@ -961,6 +961,7 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
             }
             Poseidon::Arma1Compat::LogUnitMotion(false);
             Poseidon::Arma1Compat::LogSoundCensus();
+            Poseidon::Arma1Compat::LogScriptProbe();
             LOG_INFO(Core, "ARMA1-TEST PASS ({}.{}) played {} s", (const char*)Glob.header.filename,
                      (const char*)Glob.header.worldname, testSeconds);
             testStart = 0xFFFFFFFF;
