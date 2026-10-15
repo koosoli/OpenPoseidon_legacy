@@ -212,6 +212,12 @@ RString WorldClassForMission(const RString& world, const char* missionDirectory)
 // For a virtual campaign mission path, the campaign base directory
 // ("campaigns/ca/") so the campaign stringtable/description apply. Empty otherwise.
 std::string CampaignBaseForMission(const std::string& missionFile);
+// The campaign name the stock campaign flow uses for a campaign that lives inside an archive
+// (Arma 2: "ca/missions/campaign/" -> "ca_missions_campaign"), registered so that
+// CampaignBase gives the folder back. A base under "campaigns/" (Arma 1) keeps its name.
+std::string CampaignName(const std::string& base);
+// The folder of a campaign CampaignName registered, "" for any other name.
+std::string CampaignBase(const std::string& name);
 
 // The file of a sound an Arma 1/2 config names, where CWA's rule (GetSoundName: "sound\"
 // before a relative name, ".wss" after one without extension) finds none. Arma 2's

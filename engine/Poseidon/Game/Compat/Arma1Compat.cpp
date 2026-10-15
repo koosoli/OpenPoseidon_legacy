@@ -1217,6 +1217,35 @@ std::string CampaignBaseForMission(const std::string& missionFile)
     return {};
 }
 
+namespace
+{
+std::map<std::string, std::string>& CampaignBases()
+{
+    static std::map<std::string, std::string> bases; // name -> folder
+    return bases;
+}
+} // namespace
+
+std::string CampaignName(const std::string& base)
+{
+    const std::string path = ForwardSlashes(base);
+    if (Lower(path).rfind("campaigns/", 0) == 0) // Arma 1: campaigns/<name>/
+        return path.size() > 11 ? path.substr(10, path.size() - 11) : std::string();
+    std::string name = Lower(path);
+    while (!name.empty() && name.back() == '/')
+        name.pop_back();
+    std::replace(name.begin(), name.end(), '/', '_');
+    if (!name.empty())
+        CampaignBases()[name] = path.back() == '/' ? path : path + "/";
+    return name;
+}
+
+std::string CampaignBase(const std::string& name)
+{
+    const auto it = CampaignBases().find(Lower(name));
+    return it != CampaignBases().end() ? it->second : std::string();
+}
+
 RString FindArmaSoundFile(const char* configName)
 {
     if (!Active() || !configName)
