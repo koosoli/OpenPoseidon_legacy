@@ -116,10 +116,15 @@ inline ProceduralTexture Parse(const char* name)
         out.height = out.height < 1 ? 1 : (out.height > 256 ? 256 : out.height);
     }
 
-    if (out.generator != "color")
+    // `r2t(rendertarget0,1.0)` is Arma 3's picture-in-picture: a screen or mirror that
+    // shows another camera. Nothing renders into it here; it is drawn as a dark, switched
+    // off screen rather than refused as a file name.
+    const bool renderTarget = out.generator == "r2t";
+    if (out.generator != "color" && !renderTarget)
         return out; // recognised, not generated
 
-    const auto args = detail::Split(text.substr(argsBegin + 1, argsEnd - argsBegin - 1), ',');
+    const auto args = renderTarget ? std::vector<std::string>{"0.03", "0.03", "0.03", "1"}
+                                   : detail::Split(text.substr(argsBegin + 1, argsEnd - argsBegin - 1), ',');
     if (args.size() < 3)
         return out;
     if (detail::IsTag(args.back()))

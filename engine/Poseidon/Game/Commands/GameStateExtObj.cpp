@@ -1095,6 +1095,56 @@ GameValue ObjAmmo(const GameState* state, GameValuePar oper1, GameValuePar oper2
         }
         return float(slot._magazine->_ammo);
     }
+    // Arma 3: a vehicle runs on the CWA vehicle it stands in for, with that vehicle's
+    // weapons, while the mission asks after its own ("missiles_DAGR", "LMG_Minigun").
+    // Count the rounds of the CWA weapons that fire the same kind of shot -- the Arma
+    // weapon's first magazine's ammo simulation -- so a mission that divides by them
+    // (the helicopter showcase's ammo monitor) is not dividing by zero.
+    if (Poseidon::Arma1Compat::Active() && Poseidon::Arma1Compat::Generation() >= 3 && !dyn_cast<Man>(ai))
+    {
+        const ParamEntry* armaWeapon = Poseidon::Arma1Compat::FindConfigClass("CfgWeapons", RString(oper2));
+        const ParamEntry* mags = armaWeapon ? armaWeapon->FindEntry("magazines") : nullptr;
+        const ParamEntry* mag = mags && mags->IsArray() && mags->GetSize() > 0
+                                    ? Poseidon::Arma1Compat::FindConfigClass("CfgMagazines", (RStringB)(*mags)[0])
+                                    : nullptr;
+        const ParamEntry* ammoName = mag ? mag->FindEntry("ammo") : nullptr;
+        const ParamEntry* ammo = ammoName && !ammoName->IsClass() && !ammoName->IsArray()
+                                     ? Poseidon::Arma1Compat::FindConfigClass("CfgAmmo", (RStringB)*ammoName)
+                                     : nullptr;
+        const ParamEntry* sim = ammo ? ammo->FindEntry("simulation") : nullptr;
+        if (sim && !sim->IsClass() && !sim->IsArray())
+        {
+            const RStringB simulation = *sim;
+            // Arma's shotSubmunitions and shotCM have no CWA kind; rockets and missiles are one
+            const AmmoSimulation kind = !strcmpi(simulation, "shotBullet") || !strcmpi(simulation, "shotSpread")
+                                            ? AmmoShotBullet
+                                        : !strcmpi(simulation, "shotShell") ? AmmoShotShell
+                                        : !strcmpi(simulation, "shotMissile") || !strcmpi(simulation, "shotRocket")
+                                            ? AmmoShotMissile
+                                            : AmmoNone;
+            float total = 0.0f;
+            for (int i = 0; kind != AmmoNone && i < ai->NMagazineSlots(); i++)
+            {
+                const MagazineSlot& slot = ai->GetMagazineSlot(i);
+                const Magazine* magazine = slot._magazine;
+                if (!magazine || !magazine->_type || magazine->_type->_modes.Size() <= 0)
+                    continue;
+                const AmmoType* cwaAmmo = magazine->_type->_modes[0]->_ammo;
+                if (!cwaAmmo)
+                    continue;
+                AmmoSimulation cwaKind = cwaAmmo->_simulation;
+                if (cwaKind == AmmoShotRocket)
+                    cwaKind = AmmoShotMissile;
+                // a magazine shared by two muzzles is counted once
+                bool seen = false;
+                for (int j = 0; j < i && !seen; j++)
+                    seen = ai->GetMagazineSlot(j)._magazine == magazine;
+                if (cwaKind == kind && !seen)
+                    total += float(magazine->_ammo);
+            }
+            return total;
+        }
+    }
     return 0.0f;
 }
 

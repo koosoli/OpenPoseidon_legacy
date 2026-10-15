@@ -1157,7 +1157,9 @@ GameValue ObjAnimate(const GameState* state, GameValuePar oper1, GameValuePar op
     }
 
     const GameArrayType& array = oper2;
-    if (array.Size() != 2)
+    // [name, phase] -- Arma 2 and 3 add a third element (instant, or a speed), which is
+    // accepted and not used: the phase is reached the OFP way.
+    if (array.Size() < 2 || array.Size() > 3)
     {
         state->SetError(EvalDim, array.Size(), 2);
         return NOTHING;
