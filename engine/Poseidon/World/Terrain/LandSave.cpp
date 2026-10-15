@@ -2366,6 +2366,34 @@ bool Landscape::LoadOprwModern(const char* path)
             _tex(x, z) = static_cast<short>(world.materialIndex[landIndex]);
         }
     }
+    // The ambient-sound map (which loop a cell plays: sea, trees, meadow, highland wind) was
+    // never filled for these worlds, so every cell read "no sound" and an Arma world was
+    // silent but for the units in it. It is made as InitSoundMap makes it for an OFP world,
+    // from what the Arma 3 grid says directly: the forest bit (OFP counted tree models by
+    // name, and these are streamed in later and named otherwise), the sea depth, the height.
+    {
+        const auto setAround = [&](int cx, int cz, int r, int sound) {
+            for (int zz = -r; zz <= r; ++zz)
+                for (int xx = -r; xx <= r; ++xx)
+                    SetSound(cx + xx, cz + zz, sound);
+        };
+        for (int z = 0; z < land; ++z)
+            for (int x = 0; x < land; ++x)
+                SetSound(x, z, 2); // meadow
+        for (int z = 0; z < land; ++z)
+            for (int x = 0; x < land; ++x)
+                if (Fmt::World::Oprw25Geography{world.geography[static_cast<size_t>(z) * land + x]}.Forest())
+                    setAround(x, z, 1, 1); // trees: birds
+        for (int z = 0; z < land; ++z)
+            for (int x = 0; x < land; ++x)
+                if (GetLandData(x, z) > 170)
+                    SetSound(x, z, 3); // wind on highlands
+        for (int z = 0; z < land; ++z)
+            for (int x = 0; x < land; ++x)
+                if (_geography(x, z).u.waterDepth > 0)
+                    setAround(x, z, 2, 0); // sea
+    }
+
     LOG_INFO(World,
              "Modern world dual grid: land {}x{} at {}m, terrain {}x{} at {}m; semantic cells reduced {}x "
              "versus the compatibility bridge",
