@@ -190,6 +190,118 @@ RString Arma3VehicleCarrier(const RString& className)
     return RString();
 }
 
+namespace
+{
+// The first sample of an Arma 3 sound shader (samples[] = {{"path", weight}, ...}).
+std::string ShaderSample(const std::string& shader)
+{
+    const ParamEntry* cls = FindConfigClass("CfgSoundShaders", shader.c_str());
+    const ParamEntry* samples = cls ? cls->FindEntry("samples") : nullptr;
+    if (!samples || !samples->IsArray() || samples->GetSize() < 1)
+        return std::string();
+    const IParamArrayValue& first = (*samples)[0];
+    if (first.IsArrayValue() && first.GetItemCount() > 0)
+        return std::string((const char*)first[0].GetValue());
+    return std::string((const char*)first.GetValue());
+}
+
+// The first sample of an Arma 3 sound set (its first shader).
+std::string SoundSetSample(const std::string& set)
+{
+    const ParamEntry* cls = FindConfigClass("CfgSoundSets", set.c_str());
+    const ParamEntry* shaders = cls ? cls->FindEntry("soundShaders") : nullptr;
+    if (!shaders || !shaders->IsArray())
+        return std::string();
+    for (int i = 0; i < shaders->GetSize(); i++)
+        if (std::string sample = ShaderSample((const char*)(*shaders)[i].GetValue()); !sample.empty())
+            return sample;
+    return std::string();
+}
+
+// A sound file Arma names without its extension: .wss, else .ogg, else .wav.
+std::string ExistingSoundFile(std::string path)
+{
+    if (path.empty())
+        return path;
+    const std::string bare = path[0] == '\\' ? path.substr(1) : path;
+    const size_t slash = bare.find_last_of("\\/");
+    if (bare.find('.', slash == std::string::npos ? 0 : slash) != std::string::npos)
+        return QIFStreamB::FileExist(bare.c_str()) ? "\\" + bare : std::string();
+    for (const char* ext : {".wss", ".ogg", ".wav"})
+        if (QIFStreamB::FileExist((bare + ext).c_str()))
+            return "\\" + bare + ext;
+    return std::string();
+}
+
+// How well a sound's name says "the engine heard from outside, under load".
+int EngineScore(const std::string& lowerName, bool helicopter)
+{
+    if (lowerName.find("int") != std::string::npos && lowerName.find("ext") == std::string::npos)
+        return -100;
+    for (const char* bad : {"start", "stop", "tires", "rattl", "stress", "rain", "damage", "alarm", "siren",
+                            "brake", "turn", "gear", "distant", "wind", "scrub", "slipping", "noise", "water",
+                            "servo", "horn", "crash", "land", "transmission", "gun", "missile"})
+        if (lowerName.find(bad) != std::string::npos)
+            return -100;
+    int score = 0;
+    if (lowerName.find("engine") != std::string::npos)
+        score += 4;
+    if (helicopter && lowerName.find("rotor") != std::string::npos)
+        score += 6;
+    if (lowerName.find("ext") != std::string::npos)
+        score += 2;
+    if (lowerName.find("rpm2") != std::string::npos || lowerName.find("rpm1") != std::string::npos)
+        score += 1;
+    if (lowerName.find("idle") != std::string::npos)
+        score -= 2;
+    return score;
+}
+} // namespace
+
+// The engine sound of an Arma 3 vehicle as one looped file, for CWA's soundEngine[] (the
+// engine loops it and bends its pitch with speed). Arma 3 mixes engines from expressions
+// over several samples (class Sounds: soundSetsExt[] of sound sets, or subclasses with a
+// sound[] each); the one taken is the outside engine under load -- for a helicopter the
+// rotor. Empty when the vehicle names nothing this install has.
+std::string Arma3EngineSound(const ParamEntry& vehicle, bool helicopter)
+{
+    const ParamEntry* sounds = vehicle.FindEntry("Sounds");
+    if (!sounds || !sounds->IsClass())
+        return std::string();
+    int best = 0;
+    std::string pick;
+    const auto consider = [&](const std::string& name, const std::string& sample) {
+        if (sample.empty())
+            return;
+        const int score = EngineScore(Lower(name), helicopter);
+        if (score > best)
+        {
+            if (std::string file = ExistingSoundFile(sample); !file.empty())
+            {
+                best = score;
+                pick = file;
+            }
+        }
+    };
+    if (const ParamEntry* sets = sounds->FindEntry("soundSetsExt"); sets && sets->IsArray())
+        for (int i = 0; i < sets->GetSize(); i++)
+        {
+            const std::string set = (const char*)(*sets)[i].GetValue();
+            if (!set.empty())
+                consider(set, SoundSetSample(set));
+        }
+    for (int i = 0; i < sounds->GetEntryCount(); i++)
+    {
+        const ParamEntry& e = sounds->GetEntry(i);
+        if (!e.IsClass())
+            continue;
+        const ParamEntry* sound = e.FindEntry("sound");
+        if (sound && sound->IsArray() && sound->GetSize() > 0)
+            consider((const char*)e.GetName(), (const char*)(*sound)[0].GetValue());
+    }
+    return pick;
+}
+
 RString Arma3HeadForProxy(const char* proxyModel)
 {
     if (Generation() != 3 || !proxyModel)

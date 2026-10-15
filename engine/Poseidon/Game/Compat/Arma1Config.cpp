@@ -3174,6 +3174,10 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
             if (const ParamEntry* cwaWeapons = cwa->FindEntry("weapons");
                 cwaWeapons && cwaWeapons->IsArray() && cwaWeapons->GetSize() > 0 && !Arma2VehicleArmed(*a1))
                 text += "\t\tweapons[]={};\r\n\t\tmagazines[]={};\r\n";
+            // Arma 3: its own engine (or rotor) instead of the CWA carrier's
+            if (Generation() == 3)
+                if (const std::string engine = Arma3EngineSound(*a1, sim == "helicopter"); !engine.empty())
+                    text += "\t\tsoundEngine[]={\"" + engine + "\",0.5,1};\r\n";
             for (const char* key : {"maxSpeed", "armor", "fuelCapacity", "transportSoldier"})
             {
                 const ParamEntry* e = a1->FindEntry(key);

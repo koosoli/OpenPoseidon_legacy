@@ -243,6 +243,8 @@ std::string SimKind(const std::string& simulation);
 // Helicopter attack / transport / light, Plane, Ship, StaticWeapon, ParachuteBase) and
 // its side. Empty for anything else (men, things) and outside Arma 3. (Arma3Compat.cpp)
 RString Arma3VehicleCarrier(const RString& className);
+// The looped engine (helicopter: rotor) sound of an Arma 3 vehicle, "\path.wss"; empty if none.
+std::string Arma3EngineSound(const ParamEntry& vehicle, bool helicopter);
 
 // Arma 3: true for animals (Animal_Base_F), which are left out like Arma 2's.
 bool Arma3IsAnimal(const RString& className);
