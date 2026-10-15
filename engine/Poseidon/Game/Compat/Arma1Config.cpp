@@ -1604,11 +1604,16 @@ RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
                 text += "\t\tmagazines[]={\"" + std::string(cwaWeapon.Data()) + "\"};\r\n";
                 break;
             }
-    // A scoped Arma 2 weapon looks through its own scope: modelOptics is a 2D scope model
-    // ("\ca\weapons\2Dscope_Acog_4x32", the SVD's optika_snpiere, the Pecheneg's), drawn
-    // in front of the camera as CWA's optics are, with its own zoom. Open sights ("-") keep
-    // the CWA weapon's view. Only the weapon's own (first) muzzle is covered.
-    if (const std::string optics = StringValue(*a2, "modelOptics"); optics.size() > 1 && optics[0] == '\\')
+    // A scoped Arma 2 weapon keeps the CWA weapon's sight for now. Arma 2's 2D scopes
+    // (modelOptics "\ca\weapons\2Dscope_*") are authored for its own screen mapping:
+    // drawn by CWA's Draw2D the M107's 2dscope_mildot_14 came out as a small box in a
+    // screen of flat colour, with no scene (focus run 10). OP_A2_SCOPES=1 takes them anyway.
+    static const bool a2Scopes = [] {
+        const char* e = std::getenv("OP_A2_SCOPES");
+        return e && *e == '1';
+    }();
+    if (const std::string optics = StringValue(*a2, "modelOptics");
+        a2Scopes && optics.size() > 1 && optics[0] == '\\')
     {
         std::string shape = optics;
         if (shape.size() < 4 || Lower(shape.substr(shape.size() - 4)) != ".p3d")
