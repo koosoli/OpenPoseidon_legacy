@@ -81,13 +81,25 @@ foreach ($m in $missions) {
   if ($job.RENDER -ne '') { $al += @('--render', $job.RENDER) }
   if ($job.EXTRA -ne '') { $al += $job.EXTRA.Split(' ') }
   if ($job.SHOTS -eq '1') { $env:OP_A2_SHOT = Join-Path $out $name } else { Remove-Item env:OP_A2_SHOT -ErrorAction SilentlyContinue }
-  $sw = [Diagnostics.Stopwatch]::StartNew()
-  $p = Start-Process -FilePath $exe -ArgumentList $al -WorkingDirectory $game -PassThru -RedirectStandardError $err
-  $null = $p.Handle
-  $limit = $secs + 300
-  $timedOut = -not $p.WaitForExit($limit * 1000)
-  if ($timedOut) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; Start-Sleep 2 }
-  $code = if ($timedOut) { 'TIMEOUT' } else { $p.ExitCode }
+  # A start that fails within seconds is tried once more: on 2026-10-15 three missions of a
+  # run lost the renderer at creation to 'failed printing to stderr: Zugriff verweigert'
+  # (the redirected stderr file), which says nothing about the mission.
+  for ($try = 1; $try -le 2; $try++) {
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $p = Start-Process -FilePath $exe -ArgumentList $al -WorkingDirectory $game -PassThru -RedirectStandardError $err
+    $null = $p.Handle
+    $limit = $secs + 300
+    $timedOut = -not $p.WaitForExit($limit * 1000)
+    if ($timedOut) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; Start-Sleep 2 }
+    $code = if ($timedOut) { 'TIMEOUT' } else { $p.ExitCode }
+    if ($try -eq 1 -and -not $timedOut -and $code -ne 0 -and $sw.Elapsed.TotalSeconds -lt 30) {
+      St "  exit $code after $([int]$sw.Elapsed.TotalSeconds) s, trying once more"
+      Copy-Item $log "$log.try1" -ErrorAction SilentlyContinue
+      Start-Sleep 5
+      continue
+    }
+    break
+  }
   "$m`t$code`t$([int]$sw.Elapsed.TotalSeconds)" | Add-Content (Join-Path $out 'exitcodes.txt')
   Start-Sleep 2
 }
