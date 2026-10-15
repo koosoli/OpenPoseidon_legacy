@@ -145,7 +145,9 @@ briefing path) and runs 25 s with no script error, crash or hang. What it does n
   Arma 1 weapons in hand, in crates and in the briefing pool, with Arma 1 magazine sizes.
 - **Vehicles and animations.** Driving (HMMWV), flying (UH-60, OH-58 incl. AI), boarding
   and the Arma 1 soldier animations were checked with dedicated test missions; not every
-  vehicle type and crew position was checked individually.
+  vehicle type and crew position was checked individually. Which CWA class carries which
+  Arma 1 vehicle, and what is still wrong about it: see
+  [Vehicles, 2026-10-15](#vehicles-2026-10-15-f58cb9b9-tested-from-dista1-vs18-the-game-folder-keeps-ef440e9).
 
 ## Weapons, 2026-10-14/15 (binary 9d545a7, stamped in the game folder)
 
@@ -209,6 +211,56 @@ Known limits, by design or not Arma 1 specific:
   generated again before the pool is read (they are, when the mission's units load).
 - `weapons` leaves out Throw/Put, as OFP did (`hasWeapon "Throw"` is true).
 - Weapons without a CWA counterpart are left out of loadouts and crates (logged once).
+
+## Vehicles, 2026-10-15 (f58cb9b9, tested from `dist\a1-vs18`; the game folder keeps ef440e9)
+
+Every Arma 1 vehicle draws its Arma 1 model, but on a CWA class whose simulation, weapons,
+armour, speed and crew it keeps (`Arma1ModelClass`; unlike Arma 2, Arma 1 vehicles do not
+take their own speed/armour/fuel yet). The 131-mission logs of 79badd0 (`*_g.log`, lines
+`'X' uses the Arma 1 model ... on CWA 'Y'`) list which CWA class carries which Arma 1 class.
+Two kinds were wrong and are fixed (64e75fc7, f58cb9b9):
+
+| Arma 1 class (missions in the run) | carried by before | now |
+|---|---|---|
+| `AGS` (2), `SearchLight` (3) -- static weapons, simulation "tank" | `T72`, `M1Abrams` (engine, tank gun) | `M2StaticMGE` / `M2StaticMG` by side; the searchlight without the M2 |
+| `HMMWV50` (35), `UAZMG` (30), `DATSUN_PK1` (7), `HILUX_PK1` (5), `HILUX_DSHKM2` (4), `MAA_DATSUN_PK2` (3), `HILUX_PK2` (3), `HILUX_DSHKM1` (2), `DATSUN_DSHKM1` (1) -- cars whose turret gun fires bullets | the unarmed `HMMWV` / `UAZ`: a driver, no gunner, no gun | `JeepMG` (M2), with the Arma 1 seat count and the Arma 1 crew class |
+
+The rule is data-driven: the first real weapon on a turret, its first magazine's ammo, and
+that ammo's `simulation` (`shotBullet`) in the Arma 1 config; only CWA's unarmed light cars
+are swapped. `OP_A1_ARMED_CARS=0` restores the old carriers. Two trunk commits the fix builds
+on were taken over unchanged (38d3181a, ecbca155; Arma 2 only).
+
+**Deviation, by design:** the gun is CWA's M2 (Browning) also where Arma 1 mounts a DShKM or
+a PK, and the AGS-30 fires M2 rounds (as the D-30 and M119 already did on `M2StaticMG`).
+
+Test mission `tests\missions\a1vehArm.Sara` (build machine), f58cb9b9 against the same build
+with `OP_A1_ARMED_CARS=0`:
+
+| check | without the fix | with it |
+|---|---|---|
+| `HMMWV50` / `UAZMG` / `DATSUN_PK1` weapons, gunner | `CarHorn`, no gunner | `Browning`, gunner in place to the end |
+| crew of `UAZMG` / `DATSUN_PK1` | CWA `SoldierEB` driver | Arma 1 `SoldierEB` / `soldierPB` (EAST) -- the first build, 64e75fc7, had JeepMG's West crew in them; fixed in f58cb9b9 |
+| 3 x `moveInCargo` into `HMMWV50` | 4 aboard (driver + 3) | 5 aboard (driver, gunner, 3) |
+| scripted `fire` with v1..v4 | -- | ammo 500 -> 499 on each |
+| `AGS`, `SearchLight` | -- | gunner only, speed 0, did not move |
+| `HMMWVMK`, `UAZ_AGS30`, `Truck5tMG` | unchanged | unchanged, logged |
+
+Regression: the 20-mission subset (`tests\missions_weap.txt`) ran clean on 64e75fc7 and on
+f58cb9b9 (20/20, no script error, crash or hang).
+
+Not shown by the test: the AI gunners did not open fire on their own within 20 s, with or
+without `reveal` (CWA's own `JeepMG` was not run as a control). Passengers in the Arma 1
+HMMWV are drawn sitting on the ground beside it -- with and without the fix, so it is the
+cargo-proxy placement of Arma 1 vehicles, not this change.
+
+Left as they are, for the owner to decide (each would change what the vehicle is):
+
+- grenade launchers and missiles on cars: `HMMWVMK` (MK19, 9 missions), `UAZ_AGS30` (15),
+  `HMMWVTOW` (8), `BRDM2_ATGM` (8) -- unarmed;
+- `Truck5tMG` (M2, 13) on the unarmed truck; `BRDM2` (KPVT/PKT, 20) on CWA's unarmed BRDM;
+- `Stryker_*` on `M113`, `RHIB2Turret` (MK19) on `BoatW` (M2), `KA50` on `Mi24`, `AV8B` on
+  `A10`, `MH6`/`AH6` on `OH58`;
+- Arma 1 vehicles keep CWA's speed, armour and fuel (Arma 2 vehicles take their own).
 
 ## Known gaps (honest list)
 
