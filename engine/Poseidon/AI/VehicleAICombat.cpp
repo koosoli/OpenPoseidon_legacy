@@ -19,6 +19,8 @@
 #include <Poseidon/Foundation/Containers/StaticArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
+#include <cstdlib>
+#include <map>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Math/Math3DP.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
@@ -951,9 +953,34 @@ void EntityAI::SimulateWeaponActivity(float deltaT, SimulationImportance prec)
 
     if (_forceFireWeapon >= 0 && !_isDead)
     {
+        // OP_FORCEFIRE_LOG=1: why a scripted `fire` does or does not go off, twice a second
+        // per unit (selected weapon, loaded, weapon elevation, aimed).
+        static const bool forceFireLog = [] {
+            const char* e = std::getenv("OP_FORCEFIRE_LOG");
+            return e && *e == '1';
+        }();
+        static std::map<const EntityAI*, float> forceFireLogged;
+        bool logNow = false;
+        if (forceFireLog)
+        {
+            float& last = forceFireLogged[this];
+            logNow = Glob.time.toFloat() - last >= 0.5f || Glob.time.toFloat() < last;
+            if (logNow)
+                last = Glob.time.toFloat();
+        }
+        if (logNow)
+        {
+            const int w = _currentWeapon;
+            LOG_INFO(AI, "force fire {}: wanted {} selected {} loaded {} dirY {:.2f}",
+                     (const char*)GetDebugName(), _forceFireWeapon, w,
+                     w >= 0 && w < NMagazineSlots() ? (GetWeaponLoaded(w) ? 1 : 0) : -1,
+                     w >= 0 && w < NMagazineSlots() ? GetWeaponDirection(w).Y() : 0.0f);
+        }
         if (_forceFireWeapon == SelectedWeapon())
         {
             bool aimed = AimWeaponForceFire(_currentWeapon);
+            if (logNow)
+                LOG_INFO(AI, "force fire {}: aimed {}", (const char*)GetDebugName(), aimed ? 1 : 0);
             if (GetWeaponLoaded(_currentWeapon) && (GetWeaponDirection(_currentWeapon).Y() >= 0.7 || aimed))
             {
                 const WeaponModeType* mode = GetWeaponMode(_currentWeapon);
@@ -972,7 +999,10 @@ void EntityAI::SimulateWeaponActivity(float deltaT, SimulationImportance prec)
                 }
                 else
                 {
-                    if (FireWeapon(_currentWeapon, nullptr))
+                    const bool fired = FireWeapon(_currentWeapon, nullptr);
+                    if (logNow)
+                        LOG_INFO(AI, "force fire {}: FireWeapon {}", (const char*)GetDebugName(), fired ? 1 : 0);
+                    if (fired)
                     {
                         _forceFireWeapon = -1;
                     }

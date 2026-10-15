@@ -1536,6 +1536,18 @@ bool Soldier::FireWeapon(int weapon, TargetType* target)
         {
             if (!EnableMissile())
             {
+                // OP_FORCEFIRE_LOG=1 (see EntityAI::SimulateWeapons): a scripted launcher shot
+                // waits here while the soldier's move does not allow a missile.
+                static const bool forceFireLog = [] {
+                    const char* e = std::getenv("OP_FORCEFIRE_LOG");
+                    return e && *e == '1';
+                }();
+                if (forceFireLog && _forceFireWeapon >= 0)
+                {
+                    LOG_INFO(AI, "force fire {}: missile not enabled in move {} (factor {:.2f})",
+                             (const char*)GetDebugName(), (const char*)Type()->GetMoveName(_primaryMove.id),
+                             _primaryFactor);
+                }
                 return false;
             }
             // check relative missile direction
