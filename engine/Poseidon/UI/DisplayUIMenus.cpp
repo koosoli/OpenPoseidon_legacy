@@ -963,6 +963,7 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
                 return std::string(e ? e : "");
             }();
             static int shotStep = 0;
+            static bool faceShot = false;
             const DWORD played = now - testStart;
             if (!shot.empty() && GEngine && GWorld)
             {
@@ -1021,6 +1022,24 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
                     if (Object* on = GWorld->CameraOn())
                         GWorld->SwitchCameraTo(on, CamInternal);
                     shotStep = 6;
+                }
+                // ... and the faces, from 0.9 m in front: the player's man at 23.5 s, the man
+                // nearest him at 26.5 s (identity, face texture), the normal view at 27 s
+                else if ((shotStep == 6 && played >= 22000) || (shotStep == 8 && played >= 25000))
+                {
+                    faceShot = Poseidon::Arma1Compat::AimFaceCamera(shotStep == 6 ? 0 : 1);
+                    shotStep++;
+                }
+                else if ((shotStep == 7 && played >= 23500) || (shotStep == 9 && played >= 26500))
+                {
+                    if (faceShot)
+                        GEngine->Screenshot((shot + (shotStep == 7 ? "_face.png" : "_face2.png")).c_str());
+                    shotStep++;
+                }
+                else if (shotStep == 10 && played >= 27000)
+                {
+                    Poseidon::Arma1Compat::EndFaceCamera();
+                    shotStep = 11;
                 }
             }
         }

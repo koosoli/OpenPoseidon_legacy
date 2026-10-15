@@ -1942,4 +1942,122 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
                  cwaClass.Data());
     return RString(generated.c_str());
 }
+
+namespace
+{
+bool Arma2FacesOn()
+{
+    static const bool on = [] {
+        const char* e = std::getenv("OP_A2_FACES");
+        return !(e && *e == '0');
+    }();
+    return on;
+}
+
+// The Arma 2 class an A1x_ man stands for, when he is drawn with that class's own model.
+const ParamEntry* Arma2ManInOwnModel(const char* unitClass, const char* shapeName)
+{
+    if (Generation() != 2 || !ConfigLoaded() || !Arma2FacesOn() || !unitClass || !shapeName ||
+        _strnicmp(unitClass, "A1x_", 4) != 0)
+        return nullptr;
+    const ParamEntry* man = FindConfigClass("CfgVehicles", unitClass + 4);
+    if (!man || !man->IsClass())
+        return nullptr;
+    const auto path = [](std::string s) {
+        s = Lower(s);
+        std::replace(s.begin(), s.end(), '/', '\\');
+        while (!s.empty() && s[0] == '\\')
+            s.erase(0, 1);
+        if (s.size() > 4 && s.compare(s.size() - 4, 4, ".p3d") == 0)
+            s.resize(s.size() - 4);
+        return s;
+    };
+    return path(StringValue(*man, "model")) == path(shapeName) ? man : nullptr;
+}
+
+// CfgFaces >> <faceType of the man> (Arma 2's default faceType is Man).
+const ParamEntry* Arma2FaceType(const ParamEntry& man)
+{
+    std::string faceType = StringValue(man, "faceType");
+    if (faceType.empty())
+        faceType = "Man";
+    const ParamEntry* faces = FindConfigClass("CfgFaces", faceType.c_str());
+    return faces && faces->IsClass() ? faces : nullptr;
+}
+
+// A face class usable as a texture ("custom" is a procedural colour, a disabled face is
+// the camouflage-paint variant Arma 2 only gives on purpose).
+std::string Arma2FaceTextureOf(const ParamEntry& face)
+{
+    const std::string texture = StringValue(face, "texture");
+    return texture.empty() || texture[0] == '#' ? std::string() : texture;
+}
+} // namespace
+
+RString Arma2FaceTexture(const char* unitClass, const char* shapeName, const char* face)
+{
+    const ParamEntry* man = Arma2ManInOwnModel(unitClass, shapeName);
+    const ParamEntry* faces = man ? Arma2FaceType(*man) : nullptr;
+    if (!faces)
+        return RString();
+    const ParamEntry* f = face && *face ? faces->FindEntry(face) : nullptr;
+    if (!f || !f->IsClass() || Arma2FaceTextureOf(*f).empty())
+        f = faces->FindEntry("Default");
+    if (!f || !f->IsClass())
+        return RString();
+    return RString(Arma2FaceTextureOf(*f).c_str());
+}
+
+RString Arma2RandomFace(const char* unitClass, const char* shapeName, uint32_t seed)
+{
+    const ParamEntry* man = Arma2ManInOwnModel(unitClass, shapeName);
+    const ParamEntry* faces = man ? Arma2FaceType(*man) : nullptr;
+    if (!faces)
+        return RString();
+    // the faces his class allows, by class (Arma 2 picks among them for every man it makes)
+    static std::map<std::string, std::vector<std::string>> cache;
+    std::vector<std::string>& choice = cache[Lower(unitClass)];
+    if (choice.empty())
+    {
+        std::set<std::string> wanted;
+        if (const ParamEntry* types = man->FindEntry("identityTypes"); types && types->IsArray())
+            for (int i = 0; i < types->GetSize(); i++)
+                wanted.insert(Lower((const char*)(RStringB)(*types)[i]));
+        std::vector<std::string> matching, any;
+        std::set<std::string> seen;
+        const ParamEntry* root = Arma1Pars().FindEntry("CfgFaces");
+        const ParamEntry* faceType = faces;
+        for (int depth = 0; faceType && depth < 8; depth++) // the faceType and its bases
+        {
+            for (int i = 0; i < faceType->GetEntryCount(); i++)
+            {
+                const ParamEntry& f = faceType->GetEntry(i);
+                const std::string name = (const char*)f.GetName();
+                if (!f.IsClass() || !seen.insert(Lower(name)).second || Arma2FaceTextureOf(f).empty())
+                    continue;
+                if (const ParamEntry* off = f.FindEntry("disabled");
+                    off && !off->IsClass() && !off->IsArray() && (int)*off != 0)
+                    continue;
+                any.push_back(name);
+                if (const ParamEntry* types = f.FindEntry("identityTypes"); types && types->IsArray())
+                    for (int j = 0; j < types->GetSize(); j++)
+                        if (wanted.count(Lower((const char*)(RStringB)(*types)[j])))
+                        {
+                            matching.push_back(name);
+                            break;
+                        }
+            }
+            const ParamClass* c = faceType->GetClassInterface();
+            const char* base = c ? c->GetBaseName() : nullptr;
+            faceType = base && root ? root->FindEntry(base) : nullptr;
+        }
+        choice = !matching.empty() ? matching : any;
+        LOG_INFO(Mission, "{}: '{}' wears faces of '{}': {} match its identityTypes, {} in all", Label(),
+                 unitClass + 4, (const char*)faces->GetName(), matching.size(), any.size());
+        if (choice.empty())
+            choice.push_back(std::string()); // remembered: nothing to choose from
+    }
+    const std::string& face = choice[seed % choice.size()];
+    return RString(face.c_str());
+}
 } // namespace Poseidon::Arma1Compat

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <functional>
 #include <cmath>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Core/Application.hpp>
@@ -478,6 +479,16 @@ void AIUnit::Load(const ParamEntry& cls)
         info._name = DecodeLegacyTextToRString(cls >> "name", GLanguage);
         info._face = cls >> "face";
         info._glasses = cls >> "glasses";
+        // --arma2: Arma 2 gives every man it creates a face of his own kind (his class's
+        // identityTypes); this identity is CWA's next generic one, its face a CWA face.
+        if (const RString a2Face = Arma1Compat::Arma2RandomFace(
+                soldier->GetType()->GetName(), soldier->GetShape() ? soldier->GetShape()->GetName() : "",
+                static_cast<uint32_t>(std::hash<std::string>{}(std::string((const char*)info._name) + "|" +
+                                                                (const char*)info._face)));
+            a2Face.GetLength() > 0)
+        {
+            info._face = a2Face;
+        }
         soldier->SetFace(info._face);
         soldier->SetGlasses(info._glasses);
         info._speaker = cls >> "speaker";

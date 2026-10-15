@@ -1,4 +1,5 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/AI/AICombatPace.hpp> // AI-AIM-001
 #include <Poseidon/World/Entities/Infantry/BodyWaterResponse.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
@@ -1299,6 +1300,14 @@ void Man::SetFace(RString name, const PlayerIdentityKey& player)
     if (stricmp(name, "custom") == 0 && player.playerId > 1)
     {
         playerKey = Poseidon::BuildNetworkPlayerStorageKey(player.playerId);
+    }
+    // --arma2: a man drawn with his Arma 2 model wears Arma 2's face of that name (CfgFaces
+    // >> his faceType), not a CWA face texture laid on a head it was not painted for.
+    if (const RString a2Face = Poseidon::Arma1Compat::Arma2FaceTexture(Type()->GetName(), _shape->GetName(), name);
+        a2Face.GetLength() > 0)
+    {
+        _head.SetFaceTexture(Type()->_head, _shape, a2Face);
+        return;
     }
     _head.SetFace(Type()->_head, IsWoman(), _shape, name, playerKey);
 }

@@ -272,6 +272,8 @@ public:
 	void SetFaceAnimation(int phase) {_forceWinkPhase = phase;}
 
 	void SetFace(const HeadType &type, bool women, LODShape *lShape, RString name, RString player = "");
+	// A face given as its texture (Arma 2's CfgFaces name the texture, not a CWA face class).
+	void SetFaceTexture(const HeadType &type, LODShape *lShape, RString textureName);
 	RString GetFaceTextureName() const;
 	void SetGlasses(const HeadType &type, LODShape *lShape, RString name);
 	void SetForceMimic(RStringB name);

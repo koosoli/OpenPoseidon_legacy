@@ -15,6 +15,7 @@
 #include <Poseidon/Foundation/Containers/RStringArray.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -91,6 +92,16 @@ RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon);
 // launcher) -- the kind that carries a model of its own in the soldier's hands.
 bool Arma2IsHandWeapon(const RString& name);
 
+// Faces of an Arma 2 man wearing his Arma 2 model (an A1x_ class): Arma 2 keeps them in
+// CfgFaces >> <the class's faceType> (Man, CooperHead, HeadMask1Black, ...), each with a
+// texture for the head's "osobnost" section and the identityTypes it suits.
+// The texture of `face` there, or of that faceType's Default when it has no such face; ""
+// for any other man, or with OP_A2_FACES=0.
+RString Arma2FaceTexture(const char* unitClass, const char* shapeName, const char* face);
+// A face for a man Arma 2 would give a random one: of his faceType, matching one of his
+// class's identityTypes, chosen by `seed`. "" when he is no Arma 2 man (as above).
+RString Arma2RandomFace(const char* unitClass, const char* shapeName, uint32_t seed);
+
 // Arma 2: the EventHandlers >> init code of a module (a class derived from Logic, such
 // as FunctionsManager or the first-aid modules) that a mission places; empty otherwise.
 RString Arma2ModuleInit(const RString& className);
@@ -136,4 +147,8 @@ void LogAssetCensus();
 // The player's position and the map models around him (part of the census; logged again
 // at the first test screenshot, once streamed objects have arrived).
 void LogPlayerSurroundings();
+// Test screenshots of faces: a camera 0.9 m in front of the head of the player's man
+// (which = 0) or of the man nearest him (1), until EndFaceCamera. False when there is none.
+bool AimFaceCamera(int which);
+void EndFaceCamera();
 } // namespace Poseidon::Arma1Compat

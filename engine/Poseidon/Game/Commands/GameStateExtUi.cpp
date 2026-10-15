@@ -13,6 +13,7 @@
 #include <Poseidon/World/Scene/Fireplace.hpp>
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/UI/OptionsUI.hpp>
 
@@ -198,7 +199,14 @@ const ParamEntry* FindIdentity(RString name)
     // find in campaign
     cls = ExtParsCampaign.FindEntry("CfgIdentities");
     entry = cls ? cls->FindEntry(name) : nullptr;
-    return entry;
+    if (entry)
+    {
+        return entry;
+    }
+
+    // --arma1/--arma2: the game's own config (Arma 2 keeps its campaign characters --
+    // Cooper, Miles, Sykes, O'Hara, Rodriguez, Shaftoe, Armstrong -- in ca\missions' config)
+    return Poseidon::Arma1Compat::FindConfigClass("CfgIdentities", name);
 }
 
 GameValue ObjSetIdentity(const GameState* state, GameValuePar oper1, GameValuePar oper2)
@@ -224,14 +232,28 @@ GameValue ObjSetIdentity(const GameState* state, GameValuePar oper1, GameValuePa
         info._name = DecodeLegacyTextToRString((*entry) >> "name", GLanguage);
         info._face = (*entry) >> "face";
         info._glasses = (*entry) >> "glasses";
-        info._speaker = (*entry) >> "speaker";
-        info._pitch = (*entry) >> "pitch";
+        // An Arma 2 identity names an Arma 2 voice ("Male01EN_A2") that CWA's CfgVoice does
+        // not have; SetSpeaker would put CWA's first voice in its place. The man keeps the
+        // voice he has instead.
+        const RString speaker = (*entry) >> "speaker";
+        const bool voiceKnown = (Pars >> "CfgVoice").FindEntry(speaker) != nullptr;
+        if (voiceKnown || !Poseidon::Arma1Compat::Active())
+        {
+            info._speaker = speaker;
+            info._pitch = (*entry) >> "pitch";
+        }
 
         person->SetFace(info._face);
         person->SetGlasses(info._glasses);
-        if (person->Brain())
+        if (person->Brain() && (voiceKnown || !Poseidon::Arma1Compat::Active()))
         {
             person->Brain()->SetSpeaker(info._speaker, info._pitch);
+        }
+        if (Poseidon::Arma1Compat::Active())
+        {
+            LOG_INFO(Script, "setIdentity '{}': name '{}', face '{}', glasses '{}', voice '{}'{}", (const char*)name,
+                     (const char*)info._name, (const char*)info._face, (const char*)info._glasses,
+                     (const char*)speaker, voiceKnown ? "" : " (not in CWA, kept his own)");
         }
     }
 
