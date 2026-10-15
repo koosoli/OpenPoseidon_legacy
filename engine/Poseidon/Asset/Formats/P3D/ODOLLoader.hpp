@@ -316,11 +316,40 @@ class ODOLLoader
         // RTM animations are authored in the source model's space. The centre is not
         // applied to drawing (every proxy and grounding offset assumes zero); it is
         // carried for the animation code, which needs it to pose a skinned man.
-        if (info.boundingCenter.x != 0.0f || info.boundingCenter.y != 0.0f || info.boundingCenter.z != 0.0f)
+        // Revision 73 keeps it out of ModelInfo's boundingCenter (see Odol73LodDirectory);
+        // an Arma 3 man -- and his head and gear, built on the same skeleton -- takes it
+        // here: his moves pose the source model's space exactly as an Arma 2 man's do.
+        // Measured offline on b_soldier_01 (0.305, 0.836, -0.401) with three moves: posed
+        // around it the mean edge stretch is 0.08-0.12, posed around the stored centre
+        // (what the game did) it is 4-5 -- the crumpled, knotted soldiers of the first runs.
+        Vector3 boundingCenter(info.boundingCenter.x, info.boundingCenter.y, info.boundingCenter.z);
+        if (sourceVersion == 73 && boundingCenter.x == 0.0f && boundingCenter.y == 0.0f && boundingCenter.z == 0.0f)
+        {
+            bool pelvis = false, spine = false, head = false;
+            for (const auto& b : source.directory.bones)
+            {
+                std::string n = b.name;
+                for (char& c : n)
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                pelvis |= n == "pelvis";
+                spine |= n == "spine";
+                head |= n == "head";
+            }
+            static const bool keepZero = [] {
+                const char* e = std::getenv("OP_A3_MAN_NO_CENTRE");
+                return e && *e == '1';
+            }();
+            if (pelvis && spine && head && !keepZero)
+            {
+                const auto& c = source.directory.storedBoundingCenter;
+                boundingCenter = Vector3(c.x, c.y, c.z);
+            }
+        }
+        if (boundingCenter.x != 0.0f || boundingCenter.y != 0.0f || boundingCenter.z != 0.0f)
         {
             char centre[96];
-            std::snprintf(centre, sizeof(centre), "%.6f %.6f %.6f", info.boundingCenter.x, info.boundingCenter.y,
-                          info.boundingCenter.z);
+            std::snprintf(centre, sizeof(centre), "%.6f %.6f %.6f", boundingCenter.x, boundingCenter.y,
+                          boundingCenter.z);
             model.metadata["odolBoundingCenter"] = centre;
         }
         // An Arma 2 man (the skeleton has pelvis, spine and head) is modelled with its
@@ -364,8 +393,8 @@ class ODOLLoader
                         const char* e = std::getenv("OP_A2_MAN_NO_CENTRE");
                         return e && *e == '1';
                     }();
-                    const float sx = keepAside ? 0.0f : info.boundingCenter.x;
-                    const float sz = keepAside ? 0.0f : info.boundingCenter.z;
+                    const float sx = keepAside ? 0.0f : boundingCenter.x;
+                    const float sz = keepAside ? 0.0f : boundingCenter.z;
                     for (auto& lod : model.lodLevels)
                     {
                         for (auto& v : lod.mesh.vertices)
@@ -403,8 +432,8 @@ class ODOLLoader
                     model.centerOfMass.y += lift;
                     model.centerOfMass.z += sz;
                     char centre[96];
-                    std::snprintf(centre, sizeof(centre), "%.6f %.6f %.6f", info.boundingCenter.x - sx,
-                                  info.boundingCenter.y - lift, info.boundingCenter.z - sz);
+                    std::snprintf(centre, sizeof(centre), "%.6f %.6f %.6f", boundingCenter.x - sx,
+                                  boundingCenter.y - lift, boundingCenter.z - sz);
                     model.metadata["odolBoundingCenter"] = centre;
                     // Its land-contact LOD is a single point at the hip (model y=0): Arma 2
                     // grounds a man by his animated feet, this engine by that point. Put it at
