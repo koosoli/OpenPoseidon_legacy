@@ -11,6 +11,7 @@
 #include <Poseidon/AI/AIUnit.hpp>
 #include <Poseidon/AI/EntityAI.hpp>
 #include <Poseidon/Audio/IAudioSystem.hpp>
+#include <Poseidon/Audio/SoundScene.hpp>
 #include <Poseidon/Audio/SoundTestLog.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
@@ -404,7 +405,6 @@ void LogUnitMotion(bool atStart)
     {
         StartPositions().clear();
         ForEachMan([](Man* man, bool) { StartPositions()[man] = man->Position(); });
-        Audio::SoundTestLog::Enable(true);
         return;
     }
     int onFoot = 0, moved = 0, crew = 0, dead = 0, players = 0, listed = 0;
@@ -495,6 +495,16 @@ void LogSoundCensus()
              Label(), entries.size(), requested, failed, played, EmptyRequests().load(),
              GSoundsys ? GSoundsys->GetWaveVolume() : -1.0f, GSoundsys ? GSoundsys->GetSpeechVolume() : -1.0f,
              GSoundsys ? GSoundsys->GetCDVolume() : -1.0f);
+    if (GSoundsys)
+    {
+        const AudioCounters c = GSoundsys->GetCounters();
+        LOG_INFO(Mission,
+                 "{}: sound playing at the end: 2D {} 3D {} paused {} voices {} alloc failures {}; fadeSound {:.2f} "
+                 "fadeMusic {:.2f}",
+                 Label(), c.active2D, c.active3D, c.paused, c.liveVoices, c.allocFailures,
+                 GSoundScene ? GSoundScene->GetSoundVolume() : -1.0f,
+                 GSoundScene ? GSoundScene->GetMusicVolume() : -1.0f);
+    }
     std::sort(entries.begin(), entries.end(),
               [](const auto& a, const auto& b) { return a.second.requested > b.second.requested; });
     int listed = 0;

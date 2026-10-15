@@ -801,6 +801,7 @@ GameValue ObjChangeModel(const GameState* state, GameValuePar oper1, GameValuePa
 GameValue ObjCmpE(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjCmpNE(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjDisableAI(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjEnableAI(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjDistance(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjFire(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjFireEx(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -2064,7 +2065,7 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "joinSilent", function, ListJoin, GameArray, GameObjectOrGroup),
         GameOperator(GameNothing, "hintC", function, A1HintC, GameString, GameString | GameArray),
         GameOperator(GameNothing, "setRank", function, A1IgnoredBinary, GameObject, GameString),
-        GameOperator(GameNothing, "enableAI", function, A1IgnoredBinary, GameObject, GameString),
+        GameOperator(GameNothing, "enableAI", function, ObjEnableAI, GameObject, GameString),
         GameOperator(GameNothing, "selectLeader", function, A1SelectLeader, GameGroup, GameObject),
         GameOperator(GameArray, "modelToWorld", function, A1ModelToWorld, GameObject, GameArray),
         GameOperator(GameNothing, "addVehicle", function, A1AddVehicle, GameGroup, GameObject),

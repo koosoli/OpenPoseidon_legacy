@@ -2512,6 +2512,22 @@ GameValue ObjStop(const GameState* state, GameValuePar oper1, GameValuePar oper2
     return NOTHING;
 }
 
+// The AI bits a disableAI/enableAI name stands for. CWA knows TARGET, AUTOTARGET, MOVE and
+// ANIM; Arma 3 adds PATH (stand, but still turn and shoot -- here the same as MOVE) and ALL.
+// Arma 3's other features (AUTOCOMBAT, COVER, SUPPRESSION, FSM, ...) have no counterpart in
+// this AI and read as no bit at all, as before.
+static int DisabledAIBits(const char* name)
+{
+    if (!name)
+        return 0;
+    if (!_stricmp(name, "PATH"))
+        return AIUnit::DAMove;
+    if (!_stricmp(name, "ALL"))
+        return AIUnit::DATarget | AIUnit::DAMove | AIUnit::DAAutoTarget | AIUnit::DAAnim;
+    const int s = GetEnumValue<AIUnit::DisabledAI>(name);
+    return s == INT_MIN ? 0 : s;
+}
+
 GameValue ObjDisableAI(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     Object* obj = GetObject(oper1);
@@ -2530,14 +2546,23 @@ GameValue ObjDisableAI(const GameState* state, GameValuePar oper1, GameValuePar 
         return NOTHING;
     }
     GameStringType str = oper2;
-    const char* ss = str;
-    AIUnit::DisabledAI s = GetEnumValue<AIUnit::DisabledAI>(ss);
-    int dai = unit->GetAIDisabled();
-    if (s == INT_MIN)
+    unit->SetAIDisabled(unit->GetAIDisabled() | DisabledAIBits(str));
+    return NOTHING;
+}
+
+// enableAI (Arma 1 and later) undoes disableAI. It used to be ignored, so a unit an Arma 3
+// mission holds back with disableAI "MOVE" until the player arrives never moved again.
+GameValue ObjEnableAI(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* obj = GetObject(oper1);
+    EntityAI* veh = obj ? dyn_cast<EntityAI>(obj) : nullptr;
+    AIUnit* unit = veh ? veh->CommanderUnit() : nullptr;
+    if (!unit)
     {
-        s = (AIUnit::DisabledAI)0;
+        return NOTHING;
     }
-    unit->SetAIDisabled(dai | s);
+    GameStringType str = oper2;
+    unit->SetAIDisabled(unit->GetAIDisabled() & ~DisabledAIBits(str));
     return NOTHING;
 }
 
