@@ -1312,7 +1312,9 @@ void Man::SetFace(RString name, const PlayerIdentityKey& player)
         const RString headShape = head.empty() ? RString() : ::GetShapeName(RString(head.c_str()));
         if (headShape.GetLength() > 0 && (!_a2Head || stricmp(_a2Head->GetName(), headShape) != 0))
         {
-            _a2Head = QIFStreamB::FileExist(headShape) ? Shapes.New(headShape, false, true) : nullptr;
+            // turned at load like the body (an Arma 2 man is a reversed model), or the face
+            // looks out of the back of the head
+            _a2Head = QIFStreamB::FileExist(headShape) ? Shapes.New(headShape, Type()->_shapeReversed, true) : nullptr;
             if (_a2Head)
                 _a2HeadFace.Init(_a2Head, "osobnost", nullptr);
             else
