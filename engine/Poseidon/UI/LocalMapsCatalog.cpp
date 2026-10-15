@@ -276,9 +276,17 @@ bool LocalMissionSupported(const std::string& game, const std::string& world, st
         reason = "experimental: Arma 2 missions may fail to start or play";
         return true;
     }
+    // Arma 3 the same way (owner, 2026-10-15: "make them testable, even if the game crashes"):
+    // started through --arma3 (MrDudeX-arma3's bridge) in their own process, so a mission that
+    // fails or crashes takes only that process with it.
+    if (game == "Arma 3")
+    {
+        reason = "experimental: Arma 3 missions may fail to start, play wrongly or crash";
+        return true;
+    }
     if (game != "Arma 1")
     {
-        reason = "only Arma 1 missions are playable so far (Arma 2 experimentally)";
+        reason = "only Arma 1 missions are playable so far (Arma 2 and Arma 3 experimentally)";
         return false;
     }
     // The terrains Arma1Compat::RegisterWorldClasses generates a CfgWorlds class for.

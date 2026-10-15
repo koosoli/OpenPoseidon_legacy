@@ -166,7 +166,10 @@ TEST_CASE("Local mission scan finds campaign missions and marks the playable one
     REQUIRE(Poseidon::LocalMissionSupported("Arma 1", "Sara_DBE1", reason));
     REQUIRE_FALSE(Poseidon::LocalMissionSupported("Arma 1", "intro", reason));
     REQUIRE_FALSE(reason.empty());
-    REQUIRE_FALSE(Poseidon::LocalMissionSupported("Arma 3", "altis", reason));
+    // Arma 3 missions too, experimentally; other games' missions stay refused.
+    REQUIRE(Poseidon::LocalMissionSupported("Arma 3", "altis", reason));
+    REQUIRE_FALSE(reason.empty());
+    REQUIRE_FALSE(Poseidon::LocalMissionSupported("DayZ", "chernarusplus", reason));
     // Arma 2 and OA missions are offered experimentally, on any terrain, with the reason shown
     REQUIRE(Poseidon::LocalMissionSupported("Arma 2", "chernarus", reason));
     REQUIRE_FALSE(reason.empty());

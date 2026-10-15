@@ -323,7 +323,12 @@ class LocalMapsDisplay : public Display
                                          "--render=" + Foundation::AppConfig::Instance().GetRenderBackend(),
                                          "--wait-for-parent",
                                          std::to_string(GetCurrentProcessId())};
-        if (localMission && localMission->game.rfind("Arma 2", 0) == 0)
+        if (localMission && localMission->game == "Arma 3")
+            // Experimental: the Arma 3 bridge mounts the install and its DLC folders read-only
+            // (Arma3Compat, --arma3). A separate process: a crash ends that mission only.
+            args.insert(args.end(), {"--arma3", localMission->installRoot, "--arma3-mission",
+                                     localMission->virtualPath});
+        else if (localMission && localMission->game.rfind("Arma 2", 0) == 0)
             // Experimental: the Arma 2 bridge mounts the install read-only (Arma1Compat, --arma2)
             args.insert(args.end(), {"--arma2", localMission->installRoot, "--arma2-mission",
                                      localMission->virtualPath});
