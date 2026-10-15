@@ -580,9 +580,28 @@ class ODOLLoader
             if (bone < 0)
             {
                 std::string model = lowered(proxy.model);
-                if (model.find("\\heads\\") != std::string::npos || model.find("/heads/") != std::string::npos)
-                    if (const auto head = boneByName.find("head"); head != boneByName.end())
-                        bone = static_cast<int32_t>(head->second);
+                for (char& c : model)
+                    if (c == '/')
+                        c = '\\';
+                const auto boneNamed = [&](const char* name) {
+                    const auto found = boneByName.find(name);
+                    return found == boneByName.end() ? int32_t(-1) : static_cast<int32_t>(found->second);
+                };
+                const size_t slash = model.find_last_of('\\');
+                const std::string leaf = slash == std::string::npos ? model : model.substr(slash + 1);
+                if (model.find("\\heads\\") != std::string::npos)
+                    bone = boneNamed("head");
+                // Arma 3's gear placeholders (\a3\characters_f\proxies\headgear, equipment,
+                // backpack, ...) carry no bone either: the gear they stand for is skinned to the
+                // whole man. Held rigidly, a helmet, goggles and hair follow the head, a vest and
+                // a pack the upper back.
+                else if (model.find("\\proxies\\") != std::string::npos)
+                {
+                    if (leaf == "headgear" || leaf == "glasses" || leaf == "hair" || leaf == "hmd" || leaf == "nvg")
+                        bone = boneNamed("head");
+                    else if (leaf == "equipment" || leaf.rfind("backpack", 0) == 0 || leaf == "radio")
+                        bone = boneNamed("spine3");
+                }
             }
             if (bone < 0 || static_cast<size_t>(bone) >= bones.size() || bestVertex[static_cast<size_t>(bone)].first < 0)
                 continue;

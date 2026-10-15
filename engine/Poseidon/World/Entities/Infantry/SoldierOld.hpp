@@ -9,6 +9,7 @@
 
 #include <Poseidon/Core/DynEnum.hpp>
 #include <string>
+#include <vector>
 
 #include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
 #include <Poseidon/World/Simulation/Animation/CorpsePose.hpp>
@@ -428,6 +429,27 @@ class ManType: public EntityAIType, public MotionType
 	int _cameraPoint;
 
 	int _nvGogglesProxyIndex[MAX_LOD_LEVELS];
+
+	public:
+	// Arma 3 dresses a man through placeholder proxies on his model: the identity's head
+	// (the proxy model itself), the class's headgear, vest and backpack (a3Headgear, a3Vest,
+	// a3Backpack, written by the Arma 3 import from linkedItems[] and backpack).
+	enum A3GearSlot { A3GearHead, A3GearHeadgear, A3GearVest, A3GearBackpack, A3GearN };
+	struct A3GearColour
+	{
+		AnimationSection selection;
+		Ref<Texture> texture;
+	};
+	int A3GearSlotOf(int level, int proxy) const
+	{
+		if (level < 0 || level >= MAX_LOD_LEVELS || proxy < 0 || proxy >= static_cast<int>(_a3GearProxySlot[level].size()))
+			return -1;
+		return _a3GearProxySlot[level][proxy];
+	}
+	protected:
+	Ref<LODShapeWithShadow> _a3Gear[A3GearN];
+	std::vector<A3GearColour> _a3GearColours[A3GearN];
+	std::vector<signed char> _a3GearProxySlot[MAX_LOD_LEVELS];
 
 	int _aimPoint;
 	Vector3 _aimPoint0;

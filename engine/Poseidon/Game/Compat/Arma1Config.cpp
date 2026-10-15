@@ -1931,6 +1931,89 @@ std::string Arma1Cargo(const ParamEntry& cls, int& items)
     }
     return out;
 }
+
+// An Arma 3 soldier is dressed by his class, not by his model: linkedItems[] names the
+// headgear and the vest (CfgWeapons items whose ItemInfo type is 605 and 701, drawn
+// with ItemInfo's uniformModel), backpack the bag (a CfgVehicles class). The man model
+// carries one placeholder proxy per slot, at the man's own origin, and the gear models
+// are built in the man's space. Written as a3Headgear/a3Vest/a3Backpack plus the
+// selections and textures that colour them, for ManType to draw at those proxies.
+std::string Arma3Gear(const ParamEntry& soldier)
+{
+    if (Generation() < 3)
+        return {};
+    std::string out;
+    const auto shapeExists = [](std::string model) {
+        if (model.empty())
+            return false;
+        if (model.size() < 4 || Lower(model.substr(model.size() - 4)) != ".p3d")
+            model += ".p3d";
+        return QIFStreamB::FileExist(model[0] == '\\' ? model.c_str() + 1 : model.c_str());
+    };
+    const auto strings = [](const ParamEntry* arr) {
+        std::vector<std::string> v;
+        if (arr && arr->IsArray())
+            for (int i = 0; i < arr->GetSize(); i++)
+                v.push_back((const char*)(RStringB)(*arr)[i]);
+        return v;
+    };
+    const auto emit = [&](const char* key, const std::string& model, const ParamEntry* selsFrom,
+                          const ParamEntry& texsFrom, const char* source) {
+        if (!shapeExists(model))
+        {
+            LOG_INFO(Mission, "{}: {} '{}' has no model this install has ({})", Label(), key, source, model);
+            return;
+        }
+        out += std::string("\t\t") + key + "=\"" + model + "\";\r\n";
+        const std::vector<std::string> sels =
+            strings(selsFrom ? selsFrom->FindEntry("hiddenSelections") : texsFrom.FindEntry("hiddenSelections"));
+        const std::vector<std::string> texs = strings(texsFrom.FindEntry("hiddenSelectionsTextures"));
+        std::string names, textures;
+        int n = 0;
+        for (size_t i = 0; i < sels.size() && i < texs.size(); i++)
+        {
+            const std::string& tex = texs[i];
+            if (sels[i].empty() || tex.empty())
+                continue;
+            if (tex[0] != '#' && !QIFStreamB::FileExist(tex[0] == '\\' ? tex.c_str() + 1 : tex.c_str()))
+                continue;
+            names += std::string(n ? "," : "") + "\"" + Lower(sels[i]) + "\"";
+            textures += std::string(n ? "," : "") + "\"" + tex + "\"";
+            n++;
+        }
+        if (n > 0)
+            out += std::string("\t\t") + key + "Selections[]={" + names + "};\r\n\t\t" + key + "Textures[]={" +
+                   textures + "};\r\n";
+    };
+
+    bool headgear = false, vest = false;
+    for (const std::string& item : strings(soldier.FindEntry("linkedItems")))
+    {
+        const ParamEntry* cls = FindConfigClass("CfgWeapons", item.c_str());
+        const ParamEntry* info = cls && cls->IsClass() ? cls->FindEntry("ItemInfo") : nullptr;
+        if (!info || !info->IsClass())
+            continue;
+        const ParamEntry* type = info->FindEntry("type");
+        const int kind = type && !type->IsClass() && !type->IsArray() ? (int)*type : 0;
+        if ((kind == 605 && !headgear) || (kind == 701 && !vest))
+        {
+            std::string model = StringValue(*info, "uniformModel");
+            if (model.empty())
+                model = StringValue(*cls, "model");
+            const bool isHeadgear = kind == 605;
+            emit(isHeadgear ? "a3Headgear" : "a3Vest", model, info->FindEntry("hiddenSelections") ? info : cls, *cls,
+                 item.c_str());
+            (isHeadgear ? headgear : vest) = true;
+        }
+    }
+    const std::string backpack = StringValue(soldier, "backpack");
+    if (!backpack.empty())
+    {
+        if (const ParamEntry* bag = FindConfigClass("CfgVehicles", backpack.c_str()); bag && bag->IsClass())
+            emit("a3Backpack", StringValue(*bag, "model"), nullptr, *bag, backpack.c_str());
+    }
+    return out;
+}
 } // namespace
 
 RString Arma2ModuleInit(const RString& className)
@@ -2029,6 +2112,8 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         text += "\t\tdisplayName=\"" + displayName + "\";\r\n";
     if (loadout)
         text += Arma2Loadout(*a1);
+    if (man && useModel)
+        text += Arma3Gear(*a1);
     // Arma 1 crates and vehicles hand out Arma 1 weapons (OP_A1_WEAPONS=0: CWA's cargo).
     int cargoItems = 0;
     if (!man && useModel && Generation() == 1 && Arma1OwnWeapons())
