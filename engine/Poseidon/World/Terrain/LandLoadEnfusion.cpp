@@ -1952,7 +1952,8 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         ResolvedRoad lake;
         lake.lake = true;
         lake.origin[0] = source.position[0];
-        lake.origin[1] = source.position[1];
+        // RFG-165: plus the generator's own offset (Lake_Center: 7 m below its spline).
+        lake.origin[1] = source.position[1] + source.lakeOffsetY;
         lake.origin[2] = source.position[2];
         lake.points = source.points;
         lake.yawDeg = source.yawDeg;

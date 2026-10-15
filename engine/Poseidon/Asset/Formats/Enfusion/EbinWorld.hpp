@@ -144,6 +144,11 @@ struct EbinRiver
     //! (Everon has 62). `points` is then the shore polygon; the water stands at its lowest point
     //! (the generator's m_bFlattenByBottomPlane).
     bool isLake = false;
+    //! RFG-165: the LakeGeneratorEntity's own local `coords` Y. The water stands this far from the
+    //! shore spline: Lake_Center (Everon's largest lake) draws its spline 7 m above the surface
+    //! (`coords 0 -7 0`), so without it the lake sat 7 m high and the camera at its shore saw
+    //! only the dry bed.
+    float lakeOffsetY = 0.0f;
     std::string materialGuid;
 };
 

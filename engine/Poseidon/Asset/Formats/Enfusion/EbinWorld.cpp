@@ -423,6 +423,11 @@ class Reader
             pass.name = placement.className;
             pass.prefab = placement.prefabGuid;
             const bool ok = Records(end, pass, depth + 1);
+            // RFG-165: the lake generator's own offset from its shore spline, read while its
+            // `coords` are still local (the parent transform is composed just below).
+            if (placement.className == "LakeGeneratorEntity" && _carrier != nullptr &&
+                _world.placements[index].hasPosition)
+                _carrier->lakeOffsetY = _world.placements[index].position[1];
 
             // push_back may have reallocated, so the entry is addressed by index.
             // RFG-027: a spline entity that declares no `coords` of its own sits AT
