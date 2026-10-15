@@ -57,6 +57,7 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -2499,7 +2500,10 @@ bool Arma2RunUserAction(EntityAI* veh, Person* caller, int id, const RString& sc
 // ---------------------------------------------------------------------------
 namespace
 {
-std::atomic<const char*> GLastExpression{nullptr};
+// a copy, not the evaluator's pointer: the expression's text may be freed by the time the
+// monitor reads it (the WGPU runs logged garbage there)
+std::mutex GLastExpressionLock;
+char GLastExpression[256] = {};
 std::atomic<unsigned> GSimulateTick{0};
 
 void StallMonitor()
@@ -2525,10 +2529,10 @@ void StallMonitor()
         if (++stalled % 10 != 0)
             continue;
         std::string expr;
-        if (const char* e = GLastExpression.load())
         {
-            for (int i = 0; i < 400 && e[i]; i++)
-                expr.push_back(e[i] == '\n' || e[i] == '\r' ? ' ' : e[i]);
+            std::lock_guard<std::mutex> lock(GLastExpressionLock);
+            for (int i = 0; i < (int)sizeof(GLastExpression) && GLastExpression[i]; i++)
+                expr.push_back(GLastExpression[i] == '\n' || GLastExpression[i] == '\r' ? ' ' : GLastExpression[i]);
         }
         LOG_WARN(Script, "Arma 2 stall: no simulation step for {} s; evaluator last started: {}", stalled, expr);
         if (stalled == 10 || stalled == 30)
@@ -2544,7 +2548,14 @@ void StallMonitor()
 
 void TraceExpression(const char* expression)
 {
-    GLastExpression.store(expression, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(GLastExpressionLock);
+    if (!expression)
+    {
+        GLastExpression[0] = 0;
+        return;
+    }
+    std::strncpy(GLastExpression, expression, sizeof(GLastExpression) - 1);
+    GLastExpression[sizeof(GLastExpression) - 1] = 0;
 }
 } // namespace
 
