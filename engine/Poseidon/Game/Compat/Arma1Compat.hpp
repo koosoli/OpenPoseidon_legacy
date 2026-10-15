@@ -170,6 +170,13 @@ RString WorldClassForMission(const RString& world, const char* missionDirectory)
 // ("campaigns/ca/") so the campaign stringtable/description apply. Empty otherwise.
 std::string CampaignBaseForMission(const std::string& missionFile);
 
+// The file of a sound an Arma 1/2 config names, where CWA's rule (GetSoundName: "sound\"
+// before a relative name, ".wss" after one without extension) finds none. Arma 2's
+// configs name many sounds by their archive path without the leading backslash, and its
+// Steam release holds .ogg files where the configs still say .wss. "" when nothing is
+// found, or outside --arma1/--arma2.
+RString FindArmaSoundFile(const char* configName);
+
 // Logs what every entity of the running mission became: class (A1x_ = the Arma model on a
 // CWA base), model, LOD count, crew and weapons, grouped by kind (Arma2Census.cpp).
 void LogAssetCensus();

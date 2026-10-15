@@ -223,7 +223,15 @@ RString GetPictureName(RString baseName)
 }
 RString GetSoundName(RString baseName)
 {
-    return GetDefaultName(baseName, "sound\\", ".wss");
+    RString name = GetDefaultName(baseName, "sound\\", ".wss");
+    // --arma1/--arma2: a config sound the rule above misses (Arma1Compat::FindArmaSoundFile).
+    // Only a name that finds no file is looked at again.
+    if (name.GetLength() > 0 && Arma1Compat::Active() && !QIFStreamB::FileExist(name))
+    {
+        if (RString found = Arma1Compat::FindArmaSoundFile(baseName); found.GetLength() > 0)
+            return found;
+    }
+    return name;
 }
 
 #ifndef ACCESS_ONLY
