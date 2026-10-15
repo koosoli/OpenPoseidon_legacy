@@ -123,6 +123,8 @@ and are not counted.
 | focus 14 | `4646571` | 6 (T07, C2B, TE02, T03, C0, SP_TrialByFire), laptop gl33 | 6 | 6 | 0; census 600 Arma, 0 CWA. Camouflage net see-through, HMMWV camouflaged with no stripes, EOTech sights; C0 wrote no sight screenshot (its in-game display stopped updating after 14 s) |
 | 21 | `4646571` | 98, laptop gl33 | 98 | 97 | 0; the one script error is MP_Paradrop's own; census 13038 Arma, 0 CWA -- the ODOL alpha change regresses nothing. Only texture names that failed: CWA's `biscamel\icamel2.paa` (every mission) and a procedural UI colour in MPE_SectorControl (fixed `9872760`) |
 | focus 15 | `fb88b7c` | 6 (C0, SP_Counterattack, T01, CE0, C1, C3), 90 s, `OP_A2_EVAL` radio + sound | 6 | 6 | 0; census 838 Arma, 0 CWA. Conversation lines follow their recordings (C1: next line 0.0-0.6 s after the last ends); Counterattack's radio `.wss` read as `.ogg`, Eagle Wing's sounds by archive path; no missing CfgSounds |
+| focus 16 | `d15a573` | 8 (T01, C2B, C1, C0, TE02, CE0, MP_Superpowers, SP_EyeForEye), laptop gl33, face pictures | 8 | 8 | 0; census 658 Arma, 0 CWA. Identities apply (Cooper hhl_27, O'Hara hhl_04, USMC soldiers random Arma 2 faces), CE0's listeners react (event handler, FSM). The face pictures show Arma 2 soldiers without heads -- old (run 19 the same); fixed `e01cf5c`, `b5727b2` |
+| wgpu 1 | `d15a573` | 3 (T01, C2B, TE02), laptop **WGPU, DX12** | 0 | 0 | T01: renderer creation panicked writing to stderr (exit 1); C2B, TE02: ended by the test watchdog during the renderer's start-up (exit 3; it now allows 180 s, `4bf48c7`) |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's

@@ -315,6 +315,40 @@ told four lines of one speaker in the same millisecond -- see below.
 - **Procedural textures** (`#(argb,8,8,3)color(...)`) named in configs got `data\` and
   `.paa` added (run 21: MPE_SectorControl's UI). `9872760` passes them through.
 
+### Heads: Arma 2 soldiers had none, 2026-10-15
+
+Focus 16 (`d15a573`, 8 missions, 8 clean, census 658 Arma, 0 CWA) added face pictures from
+0.9 m in front of the player and the man nearest him: **no head at all** -- cap or helmet,
+headset and collar, nothing between. Run 19's pictures (`f77d01a`) show the same, so this is
+old, not from the face work. Offline (`diag35`/`diag36`/`diag37`, the repo's ODOL reader):
+
+- `ca\characters2\blufor\soldier.p3d` LOD 0 has no head: its `hhl` skin section holds only
+  the hands. FR Rodriguez's body is the same.
+- Both carry a proxy `\ca\characters\heads\bysta`, bound to **no bone**, at the model's
+  source origin. `Man::DrawProxies` only draws proxies on a bone (weapons, NV goggles), so
+  it was never drawn -- and `bysta.p3d` is only a placeholder bust anyway.
+- Arma 2 draws the head model of the man's face there: `CfgFaces >> faceType >> face >>
+  head` -> `CfgHeads >> <head> >> model` (`DefaultHead`, `Cooper`, ...). Those models are
+  skinned to the same 132-bone skeleton (head, neck, jaw, lips, brows, eyes ...) and modelled
+  in the body's source coordinates (head-bone vertices centre at y 0.717 in DefaultHead,
+  0.672 in the soldier's helmet).
+
+`e01cf5c` loads that head model with the face and draws it moved by the man's head bone
+(face texture on its `osobnost` section). Focus 17 (`4bf48c7`) showed the heads -- turned
+round: the face looked out of the back of the head. The body is a reversed model (turned at
+load); `b5727b2` loads the head the same way. Deviation: the head moves as one piece -- no
+grimaces, no lip sync (the face's own bones are not posed), the neck follows the head.
+
+### WGPU on the laptop (Intel Iris Xe), 2026-10-15
+
+`WGPU_BACKEND=dx12` (`d15a573`, T01, C2B, TE02): the adapter is found (Intel Iris Xe, Dx12).
+T01: renderer creation panicked ("failed printing to stderr: Zugriff verweigert (os error
+5)") and the game refused the automatic GL33 fallback (exit 1). C2B and TE02: after the
+renderer's start-up log nothing more, the test watchdog ended them after 60 s without a
+simulation step (exit 3) -- it counted the loading. `4bf48c7` gives a test 180 s to load
+before the first step. Still open: whether the DX12 start-up finishes at all, and the stderr
+panic (149 `eprintln!` in the renderer; Rust panics when stderr cannot be written).
+
 ## Steps
 
 1. **Measure first.** Per mission: an asset census in the log (every class created, what it
