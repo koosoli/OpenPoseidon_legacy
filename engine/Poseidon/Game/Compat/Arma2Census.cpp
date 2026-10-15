@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -187,6 +188,43 @@ void LogPlayerSurroundings()
             closeBy(GWorld->GetVehicle(i));
         for (int i = 0; i < GWorld->NOutVehicles(); i++)
             closeBy(GWorld->GetOutVehicle(i));
+        // the mission's own objects nearest the player (a watchtower, a vehicle), with what
+        // their first level draws with: T07's camouflage net showed its holes black
+        {
+            std::vector<std::pair<float, Entity*>> objects;
+            const auto collect = [&](Entity* e) {
+                if (e && e != on && e->GetShape())
+                    if (const float d = e->Position().Distance(p); d < 25.0f)
+                        objects.emplace_back(d, e);
+            };
+            for (int i = 0; i < GWorld->NVehicles(); i++)
+                collect(GWorld->GetVehicle(i));
+            for (int i = 0; i < GWorld->NOutVehicles(); i++)
+                collect(GWorld->GetOutVehicle(i));
+            std::sort(objects.begin(), objects.end(),
+                      [](const auto& a, const auto& b) { return a.first < b.first; });
+            std::set<std::string> shown;
+            for (const auto& [d, e] : objects)
+            {
+                const std::string model = (const char*)e->GetShape()->Name();
+                if (shown.size() >= 6 || !shown.insert(model).second)
+                    continue;
+                LOG_INFO(Mission, "{}: census object near player {} at {:.1f} m, model {}", Label(), Describe(e), d,
+                         model);
+                const Shape* lod0 = e->GetShape()->Level(0);
+                for (int i = 0; lod0 && i < lod0->NSections() && i < 10; i++)
+                {
+                    const ShapeSection& sec = lod0->GetSection(i);
+                    const Texture* tex = sec.properties.GetTexture();
+                    LOG_INFO(Mission, "{}: census   section {}: {} special {:x}{}", Label(), i,
+                             tex ? (const char*)tex->GetName() : "(none)", sec.properties.Special(),
+                             tex ? (const_cast<Texture*>(tex)->IsTransparent() ? " (texture transparent)"
+                                    : const_cast<Texture*>(tex)->IsAlpha()     ? " (texture alpha)"
+                                                                               : "")
+                                 : "");
+                }
+            }
+        }
         // nearest first: the 40 the player can actually see, not the first 40 by name (a fence
         // 3 m away was cut off behind a page of roads and bushes)
         std::vector<std::pair<std::string, Near>> byDistance(near.begin(), near.end());
