@@ -1638,7 +1638,12 @@ RString Arma2WeaponFallback(const RString& name)
     if (!w)
         return RString();
     if (const ParamEntry* mags = w->FindEntry("magazines"); mags && mags->IsArray() && mags->GetSize() > 0)
-        return RString((const char*)(RStringB)(*mags)[0]);
+    {
+        // magazines[]={this}: the weapon is its own magazine (CWA's HK, M60, PK); "this" is
+        // no class, and every pistol, SMG and machine-gun magazine of Arma 3 went unloaded.
+        const RString first = (const char*)(RStringB)(*mags)[0];
+        return _stricmp(first.Data(), "this") == 0 ? RString(weapon) : first;
+    }
     return RString(weapon);
 }
 

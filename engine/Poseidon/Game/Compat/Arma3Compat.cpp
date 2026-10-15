@@ -190,6 +190,29 @@ RString Arma3VehicleCarrier(const RString& className)
     return RString();
 }
 
+RString Arma3HeadForProxy(const char* proxyModel)
+{
+    if (Generation() != 3 || !proxyModel)
+        return RString();
+    std::string name = Lower(proxyModel);
+    std::replace(name.begin(), name.end(), '/', '\\');
+    if (name.size() >= 4 && name.compare(name.size() - 4, 4, ".p3d") == 0)
+        name.resize(name.size() - 4);
+    static const std::string bust = "\\heads\\bysta";
+    if (name.size() < bust.size() || name.compare(name.size() - bust.size(), bust.size(), bust) != 0)
+        return RString();
+    static RString head;
+    static bool looked = false;
+    if (!looked)
+    {
+        looked = true;
+        if (const ParamEntry* cls = FindConfigClass("CfgHeads", "Default_A3"); cls && cls->IsClass())
+            head = RString(StringEntry(*cls, "model").c_str());
+        LOG_INFO(Mission, "Arma 3: a man's head proxy is drawn with {}", head.GetLength() ? head.Data() : "(nothing)");
+    }
+    return head;
+}
+
 namespace
 {
 EdenKind KindOf(const std::string& className)
