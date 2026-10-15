@@ -1,3 +1,4 @@
+#include <Poseidon/Dev/Diag/FixedStepStats.hpp>
 #include <Poseidon/UI/LocalMapWorlds.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/World/Terrain/TerrainPreviewStart.hpp>
@@ -2493,10 +2494,25 @@ void GameApplication::RunMainLoop()
             }
         }
 
-        // POSEIDON_FREEFLY_DRIFT: one fixed step per frame (see where the freefly camera is made).
+        // POSEIDON_FREEFLY_DRIFT: one fixed step per SIMULATION TICK this frame ran -- how the
+        // free-fly camera moves under the keyboard, so the drawn camera's per-frame motion shows
+        // the same tick judder (and its fix) a person flying does. POSEIDON_FREEFLY_DRIFT_PER_FRAME=1
+        // = the old one step per frame.
         if (s_driftStartMs >= 0 && static_cast<int>(elapsedMs) >= s_driftStartMs)
             if (s_driftCamera)
-                s_driftCamera->Move(s_driftCamera->Position() + s_driftStep);
+            {
+                static const bool perFrame = [] {
+                    const char* value = std::getenv("POSEIDON_FREEFLY_DRIFT_PER_FRAME");
+                    return value && value[0] == '1';
+                }();
+                if (perFrame)
+                    s_driftCamera->Move(s_driftCamera->Position() + s_driftStep);
+                else
+                {
+                    s_driftCamera->SetHarnessDrift(s_driftStep * 60.0f); // inside the camera's own ticks
+                    s_driftCamera = nullptr;
+                }
+            }
 
         // Auto-screenshot: capture at specified frame/time triggers
         if (nextAutoScreenshot < autoScreenshots.size() &&

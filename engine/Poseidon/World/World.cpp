@@ -1405,6 +1405,18 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 fov = object ? object->CamEffectFOV() : 0.7f;
             }
             transform = _cameraEffect->GetTransform();
+            // REN-INTERP-001 for camera effects: the effect follows its object at TICK time, so
+            // the dev free-fly camera (a CameraVehicle behind an "Internal" effect) moved one
+            // tick on some frames and two on others at ~35 fps against 60 Hz -- the owner's
+            // "33 fps but not fluid". The vehicle branch below already rides the drawn frame;
+            // this maps the effect's view the same way. POSEIDON_CAMEFFECT_INTERP=0 = tick time.
+            static const bool camEffectInterp = [] {
+                const char* value = std::getenv("POSEIDON_CAMEFFECT_INTERP");
+                return !(value && value[0] == '0');
+            }();
+            if (camEffectInterp)
+                if (const Object* followed = _cameraEffect->GetObject())
+                    transform = followed->RenderDelta() * transform;
 
             if (_cameraEffect->IsInside())
             {

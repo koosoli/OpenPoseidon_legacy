@@ -301,6 +301,8 @@ void CameraVehicle::ResetTargets()
 
 void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
 {
+    if (_harnessDrift.SquareSize() > 0.0f)
+        Move(Position() + _harnessDrift * deltaT);
     if (!GetManual())
     {
         if (_movePos.SquareSize() > 0.5)
