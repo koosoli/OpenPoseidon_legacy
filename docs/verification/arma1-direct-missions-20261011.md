@@ -383,6 +383,29 @@ them, so no LOD swap moves them. Two causes, both fixed and deployed:
 build, previous binaries in `Remastered\backup-before-3b5a0c81`). d974050d only adds the
 seat direction to the diagnostic (all HMMWV seats face +z) and is not deployed.
 
+## Gunners hold fire (2026-10-16 noon; 51a79bf9, bd7a23ce)
+
+`a1gunfire`: an HMMWV M2 (West) and a UAZ DShKM (East) 65-70 m apart with infantry, nobody
+captive. Before: both gunners knew their targets (knowsAbout 4) and **never fired**, with Arma 1
+or CWA weapons alike (`a1gunfire0`); CWA's own JeepMG with the same Arma 1 crew did fire
+(`a1gunfire1`). Diagnostics (5dfd5f23, 8d55f768): the turret slewed onto the target (yRot =
+wanted), but the computed gun direction stayed straight ahead, so the aim error (9.4 m at
+65 m) never fell below the allowed 1.5 m.
+
+Cause: OFP models put every gun point into the turret selection, and the turret transform
+reaches the gun through it. Arma models chain gun to turret through their skeleton; the
+HMMWV's muzzle is in the memory LOD's gun selection but not the turret's, so the gun only
+elevated. **51a79bf9**: `Turret::AnimatePoint/AnimateMatrix` also apply the turret transform
+to what the gun transform moved and the turret's did not -- a case OFP models cannot produce.
+
+| a1gunfire | before | 51a79bf9 |
+|---|---|---|
+| HMMWV M2 | 100 rounds left after 28 s, aim error 1.97-3.42 m | fires from the first seconds (76, 49, 22, reload, 96 ...), aim error 0.10-0.25 m of 1.77 |
+| UAZ DShKM | 50 rounds, error 9.4-15.5 m | fires (40 left); its gunner killed by the M2 |
+
+`weaponDirection` returned the body's heading for every weapon (an Arma 2 stub); **bd7a23ce**
+returns the named weapon's barrel direction.
+
 ## Known gaps (honest list)
 
 - Missions needing third-party addons (`un-impossible_mission.cain`: `BBB006`) cannot run.
