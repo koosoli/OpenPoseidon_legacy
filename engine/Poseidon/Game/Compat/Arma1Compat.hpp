@@ -80,6 +80,17 @@ RString Arma1ArmedCarCarrier(const RString& a1Name, const RString& cwaClass);
 // 1; ammunition CWA's). Cars, boats and static weapons; OP_A1_VEHICLE_WEAPONS=0 turns it off.
 bool Arma1VehicleWeapons();
 
+// Arma 1 vehicles seat their crew in their own crew poses (driverAction, cargoAction[],
+// the turrets' gunnerAction): HMMWV_Cargo01 rather than the CWA carrier's jeep pose mapped
+// to the nearest Arma 1 state. Each such state becomes a vehicle action "ManActA1_<state>".
+// OP_A1_CREW_ACTIONS=0 turns it off (the carrier's actions, mapped as before).
+bool Arma1CrewActions();
+
+// For a vehicle action this file added ("ManActA1_..."), the CWA action of the same seat
+// (driver, gunner, commander, cargo): a man whose moves predate the Arma 1 actions (a CWA
+// soldier in an Arma 1 vehicle) sits in that instead. -1 when none.
+int Arma1CrewActionFallback(int action);
+
 // An Arma 1 binarised config FILE (mission.sqm, description.ext, ...) as config
 // text the engine's parser reads. False when the file is not in Arma 1's layout
 // (OFP/CWA's own binarised files keep their reader). Works without --arma1.
