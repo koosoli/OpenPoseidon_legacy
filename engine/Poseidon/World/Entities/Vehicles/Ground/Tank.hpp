@@ -3,6 +3,10 @@
 #include <Poseidon/World/Entities/Vehicles/TankOrCar.hpp>
 #include <Poseidon/World/Weather/MudWheelTrail.hpp>
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
+#include <Poseidon/World/Entities/Vehicles/MudClods.hpp>
+#include <Poseidon/World/Weather/MudCoat.hpp>
+#include <Poseidon/World/Weather/MudVehiclePrototype.hpp>
+#include <Poseidon/World/Weather/MudWheelTrail.hpp>
 
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 
@@ -97,8 +101,6 @@ class Tank: public TankOrCar
 	float _phaseL,_phaseR; // texture animation
 	
 	TrackOptimized _track;
-	// (MUD-RUNNER) ruts behind each track, sampled by distance like a wheel's
-	MudWheelTrail _mudTrackL, _mudTrackR;
 
 	Turret _mainTurret;
 	Turret _comTurret;
@@ -108,6 +110,17 @@ class Tank: public TankOrCar
 	// thrust is relative, in range (-1.0,1.0)
 	float _thrustLWanted,_thrustRWanted; // accelerate (left), accelerate (right)
 	float _thrustL,_thrustR; // accelerate (left), accelerate (right)
+
+	// Mud (same model as Car, MudTraction.hpp), per track where it matters:
+	// 0 = left, 1 = right. Grip/spin/soft are carried from the previous step.
+	MudWheelTrail _mudTracks[2];
+	MudClodEmitter _mudClods[2];
+	MudCoat _mudCoat;              // running gear ("wheels") and hull ("body")
+	float _mudGrip = 1.0f;
+	float _mudSpin = 0.0f;
+	float _mudSoft = 0.0f;
+	const EntityType* _mudFamilyType = nullptr;
+	bool _mudTracked = false;      // a Tank-family class (tanks and APCs)
 
 	public:
 	Tank( VehicleType *name, Person *driver );
@@ -155,6 +168,7 @@ class Tank: public TankOrCar
 	void SimulateOptimized( float deltaT, SimulationImportance prec ) override;
 	void PlaceOnSurface(Matrix4 &trans) override;
 	void Simulate( float deltaT, SimulationImportance prec ) override;
+	bool GetMudCoat(float& encoded, float& planeD, float& upPacked) const override;
 
 	float GetEngineVol( float &freq ) const override;
 	float GetEnvironVol( float &freq ) const override;

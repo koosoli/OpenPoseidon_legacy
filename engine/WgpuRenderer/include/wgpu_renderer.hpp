@@ -2728,6 +2728,11 @@ extern "C"
     WGR_API void wgr_terrain_set_snow(WgrRenderer* renderer, const float* data, uint32_t count);
     // Separate signed 12.5cm mud height view; the snow data and public byte layouts remain intact.
     WGR_API void wgr_terrain_set_mud(WgrRenderer* renderer, const float* data, uint32_t count);
+    // Far mud view: same packing as wgr_terrain_set_mud with 0.5 m cells (256 m window),
+    // ruts only (values in [-limit, 0]). Shading only, no geometry.
+    WGR_API void wgr_terrain_set_mud_far(WgrRenderer* renderer, const float* data, uint32_t count);
+    // How full of standing water the mud ruts are, [0,1] (MudRutWaterLevel); terrain shading only.
+    WGR_API void wgr_terrain_set_mud_water(WgrRenderer* renderer, float level);
     // Separate signed sand view; positive loose rims are preserved.
     WGR_API void wgr_terrain_set_sand(WgrRenderer* renderer, const float* data, uint32_t count);
     /* Sinkhole W1: terrain holes for this frame. `edges` = n_edges x {nx, nz, d, last} in world X/Z; a point

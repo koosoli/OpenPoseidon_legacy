@@ -7,7 +7,9 @@
 #include <Poseidon/World/Weather/MudContact.hpp>
 #include <Poseidon/World/Weather/MudVehiclePrototype.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
-#include <Poseidon/World/Effects/MudSpray.hpp>
+#include <Poseidon/World/Weather/MudTraction.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
+#include <cstring>
 #include <Poseidon/AI/AI.hpp>
 
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
@@ -473,6 +475,12 @@ void Tank::LandFriction(Vector3& friction, Vector3& torqueFriction, Vector3& tor
     else
     {
         pForce[2] = fSpeed[2] * 100 + fSign(fSpeed[2]) * 2000;
+    }
+    // Mud: the belts hold less along (drive and brakes) and slide sideways more.
+    if (_mudGrip < 1.0f)
+    {
+        pForce[0] *= MudSideGrip(_mudGrip);
+        pForce[2] *= _mudGrip;
     }
 
 #if ARROWS
@@ -964,6 +972,43 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
         Vector3 pForce(NoInit);  // partial force
         Vector3 pCenter(NoInit); // partial force application point
 
+        // ---- Mud: tracks press wide flat ruts, lose some grip, churn when they
+        // slip (same model as the wheeled vehicles, MudTraction.hpp). Single
+        // player only; POSEIDON_MUD_TRACKED=0 turns it off.
+        static const bool mudTrackedEnabled = [] {
+            const char* value = std::getenv("POSEIDON_MUD_TRACKED");
+            return !value || std::strcmp(value, "0") != 0;
+        }();
+        if (_mudFamilyType != Type())
+        {
+            _mudFamilyType = Type();
+            RString names[16];
+            const char* chain[16];
+            int count = 0;
+            for (const EntityType* t = Type(); t && count < 16; t = t->_parentType)
+            {
+                names[count] = t->GetName();
+                chain[count] = names[count];
+                ++count;
+            }
+            _mudTracked = ClassifyMudVehicle(chain, count, GetMass()) == MudVehicleFamily::Tracked;
+            LOG_INFO(Physics, "MUD_FAMILY class={} family={} tracks={} halfWidth={:.2f}/{:.2f} mass={:.0f} parent={}",
+                     Type()->GetName().Data(), _mudTracked ? "tracked" : "none", _track.HasBelts() ? 2 : 0,
+                     _track.LeftHalfWidth(), _track.RightHalfWidth(), GetMass(),
+                     count > 1 ? static_cast<const char*>(names[1]) : "");
+        }
+        const bool mudSinglePlayer = GWorld && GWorld->GetMode() != GModeNetware;
+        const MudWheelProfile mudProfile = _mudTracked && mudTrackedEnabled && _track.HasBelts()
+                                               ? SelectMudTrackProfile(GetMass(), mudSinglePlayer)
+                                               : MudWheelProfile{};
+        const bool mudActive = IsLocal() && mudProfile.enabled && GMud().ContactActive() && DirectionUp().Y() >= 0.3f;
+        if (!mudActive)
+        {
+            _mudGrip = 1.0f;
+            _mudSoft = 0.0f;
+            _mudSpin = MudSpinApproach(_mudSpin, 0.0f, deltaT);
+        }
+
         Vector3 wCenter(VFastTransform, ModelToWorld(), GetCenterOfMass());
 
         // apply left/right thrust
@@ -1021,6 +1066,10 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
 
                 rAccel *= 1 - GetHit(Type()->_trackRHit);
                 lAccel *= 1 - GetHit(Type()->_trackLHit);
+
+                // Mud: the tracks slip, so less of the engine's push gets through.
+                lAccel *= _mudGrip;
+                rAccel *= _mudGrip;
 
                 pForce = Vector3(0, 0, lAccel * GetMass());
                 force += pForce;
@@ -1405,36 +1454,59 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
                     LocalDammage(nullptr, this, VZero, dammage * deltaT, GetRadius());
                 }
             }
+
+            // Mud under the two belts: drag, grip and slip for the next step.
+            if (mudActive && _landContact && !_waterContact)
+            {
+                int admitted = 0;
+                float sink = 0.0f;
+                for (int k = 0; k < 2; ++k)
+                {
+                    Vector3 p = PositionModelToWorld(k == 0 ? _track.LeftPos() : _track.RightPos());
+                    p[1] = GLandscape->SurfaceY(p.X(), p.Z());
+                    if (AdmitMudWheelContact(*GLOB_LAND, *this, p))
+                    {
+                        ++admitted;
+                        sink += std::max(0.0f, -GMud().HeightOffsetAt(p.X(), p.Z()));
+                    }
+                }
+                if (admitted > 0) sink /= float(admitted);
+                const float layer = GMud().LayerDepth();
+                float deceleration = MudRollingDeceleration(speed.Z(), GMud().ContactDepth(), GMud().Wetness(),
+                    deltaT, admitted, mudProfile.wheels) * MudSinkResistanceScale(sink, layer);
+                deceleration = MudLimitRollingDeceleration(deceleration);
+                if (deltaT > 0)
+                    deceleration = std::copysign(std::min(std::abs(deceleration), std::abs(speed.Z()) / deltaT), deceleration);
+                friction += DirectionModelToWorld(Vector3(0, 0, deceleration * GetMass()));
+                _mudGrip = MudGrip(GMud().Wetness(), sink, layer, admitted, mudProfile.wheels, mudProfile.gripLoss);
+                _mudSoft = admitted > 0 ? MudSoftness(GMud().Wetness()) : 0.0f;
+                const float thrust = std::abs(_thrustL) > std::abs(_thrustR) ? _thrustL : _thrustR;
+                _mudSpin = MudSpinApproach(_mudSpin,
+                    MudWheelSpinTarget(_mudGrip, thrust, speed.Z(), Type()->GetMaxSpeedMs()), deltaT);
+                static const bool mudTrace = [] {
+                    const char* value = std::getenv("POSEIDON_MUD_TRACE");
+                    return value && std::strcmp(value, "1") == 0;
+                }();
+                if (mudTrace && admitted > 0 && std::fmod(Glob.time.toFloat(), 1.0f) < deltaT)
+                    LOG_INFO(Physics, "MUD_TRACTION class={} tracks={}/2 speed={:.3f} deceleration={:.3f} sink={:.3f} grip={:.3f} spin={:.3f} thrust={:.2f}/{:.2f}",
+                             Type()->GetName().Data(), admitted, speed.Z(), deceleration, sink, _mudGrip, _mudSpin,
+                             _thrustL, _thrustR);
+            }
+            else if (mudActive)
+            {
+                _mudGrip = 1.0f;
+                _mudSoft = 0.0f;
+                _mudSpin = MudSpinApproach(_mudSpin, 0.0f, deltaT);
+            }
+            // Mud caked on the running gear and hull; washed off when fording.
+            AdvanceMudCoat(_mudCoat, deltaT, mudActive ? _mudSoft : 0.0f, speed.Z(), mudActive ? _mudSpin : 0.0f,
+                           _waterContact ? maxUnderWater : 0.0f, GLandscape ? GLandscape->GetRainDensity() : 0.0f,
+                           mudProfile.enabled ? mudProfile.coatRate : 1.0f);
         }
 
         if (_objectContact)
         {
             _turretFrontUntil = Glob.time + 30;
-        }
-        // (MUD-RUNNER, 2026-10-14) deep soft ground drags at the tracks as it does at wheels (Car.cpp),
-        // at half the rate: a track spreads the hull's weight over a long footprint, so it sinks and
-        // bogs less than a wheel of the same load. POSEIDON_MUD_TRACKS=0 turns it off with the ruts.
-        {
-            static const bool tracksMud = [] {
-                const char* value = std::getenv("POSEIDON_MUD_TRACKS");
-                return !value || std::strcmp(value, "0") != 0;
-            }();
-            const bool singlePlayer = GWorld && GWorld->GetMode() != GModeNetware;
-            const auto profile = SelectMudWheelProfileByMass(Type()->GetName(), GetMass(), 2, singlePlayer);
-            if (tracksMud && profile.enabled && singlePlayer && IsLocal() && _landContact && !_waterContact &&
-                GMud().ContactActive() && DirectionUp().Y() >= 0.3f && GLOB_LAND)
-            {
-                int admitted = 0;
-                for (Vector3Par model : {_track.LeftPos(), _track.RightPos()})
-                {
-                    Vector3 p = PositionModelToWorld(model);
-                    p[1] = GLOB_LAND->SurfaceY(p.X(), p.Z());
-                    if (AdmitMudWheelContact(*GLOB_LAND, *this, p)) ++admitted;
-                }
-                const float deceleration = 0.5f * MudRollingDeceleration(ModelSpeed()[2], GMud().ContactDepth(),
-                    GMud().Wetness(), deltaT, admitted, 2);
-                friction += DirectionModelToWorld(Vector3(0, 0, deceleration * GetMass()));
-            }
         }
         // apply all forces
         // handle special case: brake is on, speed is very low and total forces are low
@@ -1475,11 +1547,13 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
         {
             if (DirectionUp().Y() >= 0.3f)
             {
-                _track.Update(*this, deltaT, !_landContact);
+                // The flat track decal is replaced by real ruts in soft mud.
+                _track.Update(*this, deltaT, !_landContact || _mudSoft > 0.2f);
             }
             if (_landContact)
             {
                 float dust = texture ? texture->Dustness() * 0.7f : 0.1f;
+                dust *= 1.0f - _mudSoft; // wet mud does not raise dust
                 // check texture under
                 Vector3 lPos = PositionModelToWorld(_track.LeftPos() + Vector3(+0.5f, 0.1f, 0));
                 Vector3 rPos = PositionModelToWorld(_track.RightPos() + Vector3(-0.5f, 0.1f, 0));
@@ -1564,71 +1638,67 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
 
         Move(moveTrans);
         DirectionWorldToModel(_modelSpeed, _speed);
+
+        // Ruts under each belt by distance travelled, churning where a belt slips,
+        // and clods thrown off the back of the tracks.
+        const float thrustMax = std::max(std::abs(_thrustL), std::abs(_thrustR));
+        for (int k = 0; k < 2; ++k)
+        {
+            if (!mudActive || !_landContact || _waterContact)
+            {
+                _mudTracks[k].Reset();
+                _mudClods[k].carry = 0.0f;
+                continue;
+            }
+            const Vector3 belt = k == 0 ? _track.LeftPos() : _track.RightPos();
+            const float halfWidth = k == 0 ? _track.LeftHalfWidth() : _track.RightHalfWidth();
+            Vector3 point = PositionModelToWorld(belt);
+            point[1] = GLandscape->SurfaceY(point.X(), point.Z());
+            _mudTracks[k].Update(point.X(), point.Y(), point.Z(), true, [&](float x, float y, float z) {
+                return StampMudTrackContact(*GLOB_LAND, *this, Vector3(x, y, z), halfWidth, mudProfile);
+            });
+            if (!AdmitMudWheelContact(*GLOB_LAND, *this, point))
+            {
+                _mudClods[k].carry = 0.0f;
+                continue;
+            }
+            // Each belt slips in proportion to how hard it is driven.
+            const float beltThrust = std::abs(k == 0 ? _thrustL : _thrustR);
+            const float beltSpin = thrustMax > 0.01f ? _mudSpin * beltThrust / thrustMax : 0.0f;
+            if (beltSpin > 0.15f)
+                DigMudTrack(*this, point, halfWidth,
+                            MudDigDepth(beltSpin, GMud().ContactDepth(), mudProfile.digMax), beltSpin, deltaT);
+            if (_mudSoft > 0.05f && EnableVisualEffects(prec))
+            {
+                // A belt is several wheels' worth of tread; the clods leave its rear end.
+                const float rate = MudClodRate(beltSpin, speed.Z(), _mudSoft) * 1.5f;
+                const int count = _mudClods[k].Take(rate, deltaT);
+                if (count > 0)
+                {
+                    const LODShape* shape = GetShape();
+                    const float rearZ = shape ? std::min(belt.Z(), shape->Min().Z() + 0.5f) : belt.Z();
+                    Vector3 rear = PositionModelToWorld(Vector3(belt.X(), belt.Y(), rearZ));
+                    rear[1] = GLandscape->SurfaceY(rear.X(), rear.Z());
+                    const float drive = (k == 0 ? _thrustL : _thrustR) != 0.0f ? (k == 0 ? _thrustL : _thrustR) : speed.Z();
+                    SpawnMudClods(rear, Direction(), _speed, drive < 0.0f ? -1.0f : 1.0f, speed.Z(), beltSpin, count);
+                }
+            }
+            else
+            {
+                _mudClods[k].carry = 0.0f;
+            }
+        }
     } // if (!GetStopped() && !isStatic)
 
     // A resting hull still keeps new snowfall out of its occupied volume.
     _track.UpdateTrackedSnow(*this, isStatic || !_landContact || DirectionUp().Y() < 0.3f, deltaT);
 
-    // (MUD-RUNNER, 2026-10-14) tracks churn soft ground too: a trough under each track, by weight
-    {
-        const bool singlePlayer = GWorld && GWorld->GetMode() != GModeNetware;
-        const auto profile = SelectMudWheelProfileByMass(Type()->GetName(), GetMass(), 2, singlePlayer);
-        // POSEIDON_MUD_TRACKS=0 keeps tanks out of the mud field (A/B against the legacy track decals)
-        static const bool tracksDig = [] {
-            const char* value = std::getenv("POSEIDON_MUD_TRACKS");
-            return !value || std::strcmp(value, "0") != 0;
-        }();
-        const bool dig = tracksDig && IsLocal() && profile.enabled && GMud().ContactActive() && _landContact &&
-                         !_waterContact && DirectionUp().Y() >= 0.3f && GLOB_LAND;
-        const auto trackPoint = [&](Vector3Par model) {
-            Vector3 p = PositionModelToWorld(model);
-            p[1] = GLOB_LAND->SurfaceY(p.X(), p.Z());
-            return p;
-        };
-        const Vector3 l = trackPoint(_track.LeftPos()), r = trackPoint(_track.RightPos());
-        static const bool trace = [] {
-            const char* value = std::getenv("POSEIDON_MUD_TRACE");
-            return value && value[0] == '1';
-        }();
-        if (trace && std::fmod(Glob.time.toFloat(), 1.0f) < std::max(deltaT, 0.02f))
-            LOG_INFO(Physics, "MUD_TANK {} dig={} enabled={} active={} land={} water={} up={:.2f} l=({:.1f},{:.1f}) r=({:.1f},{:.1f})",
-                     static_cast<const char*>(Type()->GetName()), dig, profile.enabled, GMud().ContactActive(),
-                     _landContact, _waterContact, DirectionUp().Y(), l.X(), l.Z(), r.X(), r.Z());
-        _mudTrackL.Update(l.X(), l.Y(), l.Z(), dig, [&](float x, float y, float z) {
-            return StampMudTrackContact(*GLOB_LAND, *this, Vector3(x, y, z), profile);
-        });
-        _mudTrackR.Update(r.X(), r.Y(), r.Z(), dig, [&](float x, float y, float z) {
-            return StampMudTrackContact(*GLOB_LAND, *this, Vector3(x, y, z), profile);
-        });
-        // MUD-001 for tracks: the run of track coming off the rear sprocket throws the mud it picked
-        // up back and up, like a wheel's tread (Car.cpp), from the rear of each track
-        if (dig && MudSprayEnabled())
-        {
-            const Vector3 v = Speed();
-            const float ground = std::min(v.SizeXZ(), 15.0f);
-            if (ground > 1.0f)
-            {
-                const Vector3 fwd = Direction();
-                const float sign = v * fwd >= 0.0f ? 1.0f : -1.0f;
-                const float rearZ = sign >= 0.0f ? GetShape()->Min().Z() : GetShape()->Max().Z();
-                for (Vector3Par model : {_track.LeftPos(), _track.RightPos()})
-                {
-                    Vector3 p = PositionModelToWorld(Vector3(model.X(), model.Y(), rearZ));
-                    p[1] = GLOB_LAND->SurfaceY(p.X(), p.Z());
-                    if (!AdmitMudWheelContact(*GLOB_LAND, *this, p)) continue;
-                    MudSprayReport spray;
-                    spray.pos = p + VUp * 0.15f;
-                    spray.vel = v * 0.3f - fwd * (sign * ground * 0.5f) + VUp * (1.4f + 0.2f * ground);
-                    spray.count = ground * 30.0f * deltaT * GMud().Wetness();
-                    spray.velSpread = 0.9f + 0.08f * ground;
-                    spray.size = 0.035f;
-                    spray.posSpread = 0.35f;
-                    ReportMudSpray(spray);
-                }
-            }
-        }
-    }
     base::Simulate(deltaT, prec);
+}
+
+bool Tank::GetMudCoat(float& encoded, float& planeD, float& upPacked) const
+{
+    return MudCoatRenderLanes(*this, _mudCoat, encoded, planeD, upPacked);
 }
 
 inline Matrix4 Tank::TurretTransform() const

@@ -233,6 +233,11 @@ class TerrainWgpu : public ITerrainRenderer
     int _mudWindowX = 0, _mudWindowZ = 0;
     bool _mudUploaded = false;
     bool _mudWasEnabled = false;
+    // Far mud view (MudField::SnapshotFar): distant ruts, refreshed a few times a second.
+    uint64_t _mudFarRevision = 0;
+    int _mudFarWindowX = 0, _mudFarWindowZ = 0;
+    double _mudFarUploadWallTime = 0.0;
+    bool _mudFarUploaded = false;
     uint64_t _sandRevision = 0;
     int _sandWindowX = 0, _sandWindowZ = 0;
     bool _sandUploaded = false;

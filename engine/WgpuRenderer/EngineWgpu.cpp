@@ -3363,6 +3363,16 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
         wgr_terrain_set_mud(_renderer, p.mudData.data(), static_cast<uint32_t>(p.mudData.size()));
         p.mudData.clear();
     }
+    if (!p.mudFarData.empty())
+    {
+        wgr_terrain_set_mud_far(_renderer, p.mudFarData.data(), static_cast<uint32_t>(p.mudFarData.size()));
+        p.mudFarData.clear();
+    }
+    if (p.mudWater >= 0.0f)
+    {
+        wgr_terrain_set_mud_water(_renderer, p.mudWater);
+        p.mudWater = -1.0f;
+    }
     if (!p.sandData.empty())
     {
         wgr_terrain_set_sand(_renderer, p.sandData.data(), static_cast<uint32_t>(p.sandData.size()));
@@ -9688,6 +9698,23 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                          buf->cpuPosed, _currentPaletteSlot, (d.flags & WGR_DRAW3D_COCKPIT) != 0,
                          debugMaterialPath ? debugMaterialPath : "<none>", reason);
             }
+        }
+    }
+    // Mud caked on a vehicle (Weather/MudCoat.hpp): the ambient/diffuse/sun-diffuse
+    // alpha lanes are never read by the shaders, so they carry the coat, the plane
+    // mud is measured from and the vehicle's up axis. shader3d.wgsl vehicle_mud_cover decodes them (negative = mud).
+    {
+        static const bool vehicleMudEnabled = [] {
+            const char* value = std::getenv("WGR_VEHICLE_MUD");
+            return !(value && value[0] == '0');
+        }();
+        float mudEncoded = 0.0f, mudPlaneD = 0.0f, mudUp = 0.0f;
+        const Object* mudOwner = static_cast<const Object*>(GetDrawObject());
+        if (vehicleMudEnabled && mudOwner && mudOwner->GetMudCoat(mudEncoded, mudPlaneD, mudUp))
+        {
+            d.mat_light_ambient.w = mudEncoded;
+            d.mat_light_diffuse.w = mudPlaneD;
+            d.mat_sun_diffuse.w = mudUp; // only .rgb of sun_diffuse is read by the shader
         }
     }
     // The real zasleh animation controls whether these sections draw at all.

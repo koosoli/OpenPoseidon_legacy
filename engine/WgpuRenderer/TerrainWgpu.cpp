@@ -4468,6 +4468,10 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
                  _puddleWetness.value, _params._pad1);
         lastPuddleDiagnosticTime = weather.timeSeconds;
     }
+    // Standing water in mud ruts (terrain.wgsl mud_water_level, one float after the mud views):
+    // how full the ruts are, from the mud field's soil wetness. WGR_MUD_RUT_WATER=0 turns it off.
+    static const bool rutWaterEnabled = EnvFloat("WGR_MUD_RUT_WATER", 1.0f) > 0.5f;
+    _engine.QueueMudWater(rutWaterEnabled && GMud().enabled ? MudRutWaterLevel(GMud().Wetness()) : 0.0f);
     _engine.QueueTerrainParams(_params); // REN-THR-013: queued, applied before wgr_render_frame
     const auto& snow = GSnow();
     // The GPU window is presentation state. Paused freefly, deposit commands
@@ -4490,14 +4494,32 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     if (camera && std::isfinite(camera->Position().X()) && std::isfinite(camera->Position().Z()))
     {
         // Chunk-aligned camera residency changes only the displayed window, never the store.
-        const int mx = int(std::floor(camera->Position().X() / 2.0f));
-        const int mz = int(std::floor(camera->Position().Z() / 2.0f));
+        // The window sits ahead of the camera (MudWindowCentre) so ruts reach further out.
+        const MudViewCentre mudCentre = MudWindowCentre(camera->Position().X(), camera->Position().Z(),
+                                                        camera->Direction().X(), camera->Direction().Z());
+        const int mx = int(std::floor(mudCentre.x / 2.0f));
+        const int mz = int(std::floor(mudCentre.z / 2.0f));
         if (!_mudUploaded || uploaded || _mudWasEnabled != mud.enabled || _mudRevision != mud.Revision() || mx != _mudWindowX || mz != _mudWindowZ)
         {
-            auto snapshot = mud.Snapshot(camera->Position().X(), camera->Position().Z());
+            auto snapshot = mud.Snapshot(mudCentre.x, mudCentre.z);
             if (mud.Chunks() == 0) snapshot[3] = 0.0f;
             _engine.QueueMud(std::move(snapshot));
             _mudRevision = mud.Revision(); _mudWindowX = mx; _mudWindowZ = mz; _mudUploaded = true; _mudWasEnabled = mud.enabled;
+        }
+        // Far view for ruts beyond the 64 m window: 0.5 m cells over 256 m, same
+        // centre. Rebuilt at most four times a second (it covers 16x the area).
+        const int fx = int(std::floor(mudCentre.x / 8.0f));
+        const int fz = int(std::floor(mudCentre.z / 8.0f));
+        const double farWall = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        const bool farStale = !_mudFarUploaded || uploaded || fx != _mudFarWindowX || fz != _mudFarWindowZ ||
+                              _mudFarRevision != mud.Revision();
+        if (farStale && (!_mudFarUploaded || uploaded || farWall - _mudFarUploadWallTime >= 0.25))
+        {
+            auto farView = mud.SnapshotFar(mudCentre.x, mudCentre.z);
+            if (mud.Chunks() == 0) farView[3] = 0.0f;
+            _engine.QueueMudFar(std::move(farView));
+            _mudFarRevision = mud.Revision(); _mudFarWindowX = fx; _mudFarWindowZ = fz;
+            _mudFarUploadWallTime = farWall; _mudFarUploaded = true;
         }
     }
     const auto& sand = GSand();
@@ -4610,6 +4632,9 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         std::abs(snowCamera.Y() - land.SurfaceY(snowCamera.X(), snowCamera.Z())) < 15.0f;
     const bool refineSand = sand.enabled && sand.Chunks() > 0 &&
         std::abs(snowCamera.Y() - land.SurfaceY(snowCamera.X(), snowCamera.Z())) < 15.0f;
+    // Same centre as the uploaded mud window, so the fine mesh stays inside it.
+    const MudViewCentre mudRefineCentre = MudWindowCentre(snowCamera.X(), snowCamera.Z(),
+                                                          camera->Direction().X(), camera->Direction().Z());
     std::array<CdlodContactFocus,2> reliefFocus{};
     size_t reliefFocusCount=0;
     if (refineSnow || refineMud || refineSand)
@@ -4641,7 +4666,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
                     for (int x=-4;x<=4 && !localRelief;++x)
                     {
                         const float fx=pos.X()+x*0.25f, fz=pos.Z()+z*0.25f;
-                        localRelief=(mud.enabled && mud.Chunks()>0 && mud.HeightOffsetAt(fx,fz)<-0.001f) ||
+                        localRelief=(mud.enabled && mud.Chunks()>0 && std::abs(mud.HeightOffsetAt(fx,fz))>0.001f) ||
                             (sand.enabled && sand.Chunks()>0 && sand.HeightOffsetAt(fx,fz)<-0.001f) ||
                             (snow.CoverActive() && snow.detailedGeometry && snow.BaseDepthAt(fx,fz)>0.002f &&
                                 snow.DeficitAt(int(std::floor(fx/SnowField::CellSize)),
@@ -4654,7 +4679,12 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     }
     auto emit = [&](const CdlodSelection& s)
     {
-        if (reliefFocusCount>0)
+        // Mud ruts also get a wider, slightly coarser fine mesh so they stay visible
+        // beyond the 8 m contact window (RefineCdlodContactWide).
+        if (refineMud)
+            RefineCdlodContactWide(s,reliefFocus,reliefFocusCount,mudRefineCentre.x,mudRefineCentre.z,
+                                   CdlodWideReliefMaxRadius,emitNode);
+        else if (reliefFocusCount>0)
             RefineCdlodContactUnion(s,reliefFocus,reliefFocusCount,emitNode);
         else
             emitNode(s);

@@ -317,8 +317,8 @@ fn mud_height_offset(world_xz: vec2<f32>) -> f32 {
     let offset = mix(mix(snow.deficits[i], snow.deficits[i + 1u], f.x),
                      mix(snow.deficits[i + 512u], snow.deficits[i + 513u], f.x), f.y);
     let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
-    // (MUD-RUNNER) up to 9 cm of ridge beside a rut (MudField::MaxRidge)
-    return clamp(offset, -limit, 0.09) * smoothstep(0.0, 24.0, edge);
+    // Negative: ruts/footprints. Positive: soil heaped beside ruts (MudField::MaxRim).
+    return clamp(offset, -limit, 0.1) * smoothstep(0.0, 24.0, edge);
 }
 
 // Third signed view: sand compaction and positive loose-grain rims.
@@ -500,6 +500,279 @@ fn sample_mud_normals(world_xz: vec2<f32>, step: f32, footprint: f32) -> GroundN
 }
 fn sample_mud_normal(world_xz: vec2<f32>, step: f32, footprint: f32) -> vec3<f32> {
     return sample_mud_normals(world_xz, step, footprint).fine;
+}
+
+// ---- Mud ruts: shading and tyre-tread relief inside wheel ruts -------------
+// Inputs are only the signed mud field above, so the look follows the physics:
+// where a wheel pressed the soil, the rut darkens, stays wet and carries a tread
+// imprint. Untouched ground (rut depth 0) returns exactly what it had before.
+fn mud_rut_depth(world_xz: vec2<f32>) -> f32 {
+    return max(0.0, -mud_height_offset(world_xz));
+}
+
+// Far mud view (fourth signed view, MudField::SnapshotFar): 0.5 m cells over a
+// 256 m window, ruts only. Lets ruts read well beyond the fine 64 m window.
+// Standing water in mud ruts [0,1] (MudRutWaterLevel), one float after the four views.
+fn mud_water_level() -> f32 {
+    if (arrayLength(&snow.deficits) < 1048589u) { return 0.0; }
+    return clamp(snow.deficits[1048588u], 0.0, 1.0);
+}
+
+fn mud_far_depth(world_xz: vec2<f32>) -> f32 {
+    if (arrayLength(&snow.deficits) < 1048588u) { return 0.0; }
+    let origin = vec2<f32>(snow.deficits[786440u], snow.deficits[786441u]);
+    let cell = snow.deficits[786442u];
+    let limit = snow.deficits[786443u];
+    if (limit <= 0.0 || cell != 0.5) { return 0.0; }
+    let t = (world_xz - origin) / cell - vec2<f32>(0.5);
+    if (any(t < vec2<f32>(0.0)) || any(t >= vec2<f32>(511.0))) { return 0.0; }
+    let b = vec2<u32>(floor(t));
+    let f = fract(t);
+    let i = 786444u + b.y * 512u + b.x;
+    let offset = mix(mix(snow.deficits[i], snow.deficits[i + 1u], f.x),
+                     mix(snow.deficits[i + 512u], snow.deficits[i + 513u], f.x), f.y);
+    let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
+    return clamp(-offset, 0.0, limit) * smoothstep(0.0, 16.0, edge);
+}
+
+// Distant ruts from the far view: the same darker, wetter compacted soil as up
+// close plus a gentle normal from the coarse rut shape (the far terrain mesh is
+// too coarse to carry the dip itself). `far` blends it in where the fine view's
+// detail has faded; never darkens twice where both are present.
+fn mud_far_surface(world_xz: vec2<f32>, far: f32, base: MudRutSurface) -> MudRutSurface {
+    var out = base;
+    if (far <= 0.0) { return out; }
+    let e = 0.5;
+    let depth = mud_far_depth(world_xz);
+    let px = mud_far_depth(world_xz + vec2<f32>(e, 0.0));
+    let nx = mud_far_depth(world_xz - vec2<f32>(e, 0.0));
+    let pz = mud_far_depth(world_xz + vec2<f32>(0.0, e));
+    let nz = mud_far_depth(world_xz - vec2<f32>(0.0, e));
+    let near_rut = smoothstep(0.004, 0.035, max(max(depth, max(px, nx)), max(pz, nz))) * far;
+    if (near_rut <= 0.0) { return out; }
+    let rut = smoothstep(0.004, 0.035, depth) * far;
+    // Tested in game: the near ruts' "dark and wet" read at 50-100 m as a smooth
+    // pale band mirroring the sky -- a puddle, not a rut. Far off, a rut is churned
+    // soil: darker and broken up (clumps ~1 m and ~0.3 m), only a little damp.
+    let clump = 0.6 * mud_rut_noise(world_xz * 1.1) + 0.4 * mud_rut_noise(world_xz * 3.3 + vec2<f32>(17.0, 5.0));
+    out.albedo = min(out.albedo, mix(1.0, mix(0.75, 1.0, clump), rut));
+    out.wet = max(out.wet, 0.25 * rut);
+    out.mud = max(out.mud, rut * 0.9);
+    // Height is -depth, so the surface tilts towards the rut centre, rut walls included.
+    let slope = clamp(vec2<f32>(nx - px, nz - pz) / (2.0 * e), vec2<f32>(-0.5), vec2<f32>(0.5)) * near_rut;
+    out.normal = normalize(base.normal - vec3<f32>(slope.x, 0.0, slope.y));
+    return out;
+}
+
+// 0 on untouched ground, 1 in a rut of ~4.5 cm or deeper.
+fn mud_rut_amount(depth: f32) -> f32 {
+    return smoothstep(0.004, 0.045, depth);
+}
+
+// Curvature (second derivatives) of the rut field at spacing h: (hxx, hzz, hxz).
+fn mud_rut_hessian(world_xz: vec2<f32>, h: f32) -> vec3<f32> {
+    let c = mud_height_offset(world_xz);
+    let px = mud_height_offset(world_xz + vec2<f32>(h, 0.0));
+    let nx = mud_height_offset(world_xz - vec2<f32>(h, 0.0));
+    let pz = mud_height_offset(world_xz + vec2<f32>(0.0, h));
+    let nz = mud_height_offset(world_xz - vec2<f32>(0.0, h));
+    let pp = mud_height_offset(world_xz + vec2<f32>(h, h));
+    let pn = mud_height_offset(world_xz + vec2<f32>(h, -h));
+    let np = mud_height_offset(world_xz + vec2<f32>(-h, h));
+    let nn = mud_height_offset(world_xz + vec2<f32>(-h, -h));
+    return vec3<f32>((px - 2.0 * c + nx) / (h * h), (pz - 2.0 * c + nz) / (h * h),
+                     (pp - pn - np + nn) / (4.0 * h * h));
+}
+
+// Rut direction from the curvature of the rut field: across a rut the soil
+// bends sharply, along it barely at all. Two scales are combined so lumps in
+// an uneven rut bottom do not swing the direction around. xy = unit direction
+// of travel along the rut, z = confidence 0..1 (low in pits, lumps, flat ground).
+fn mud_rut_along(world_xz: vec2<f32>) -> vec3<f32> {
+    let k = mud_rut_hessian(world_xz, 0.125) * 0.4 + mud_rut_hessian(world_xz, 0.3) * 0.6;
+    let hxx = k.x;
+    let hzz = k.y;
+    let hxz = k.z;
+    let spread = sqrt((hxx - hzz) * (hxx - hzz) + 4.0 * hxz * hxz);
+    let mean = 0.5 * (hxx + hzz);
+    // Axis of the strongest bend (by magnitude) is "across"; travel is perpendicular.
+    var theta = 0.5 * atan2(2.0 * hxz, hxx - hzz);
+    if (abs(mean - 0.5 * spread) > abs(mean + 0.5 * spread)) {
+        theta = theta + 1.5707963;
+    }
+    let across = vec2<f32>(cos(theta), sin(theta));
+    var along = vec2<f32>(-across.y, across.x);
+    // Canonical sign so neighbouring pixels agree and the tread pattern stays continuous.
+    if (along.x < 0.0 || (along.x == 0.0 && along.y < 0.0)) {
+        along = -along;
+    }
+    let anisotropy = clamp(spread / max(abs(hxx) + abs(hzz), 1e-4), 0.0, 1.0);
+    let confidence = smoothstep(0.55, 0.9, anisotropy) * smoothstep(0.2, 0.9, spread);
+    return vec3<f32>(along, confidence);
+}
+
+fn mud_rut_hash(p: vec2<f32>) -> f32 {
+    return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
+}
+
+fn mud_rut_noise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mud_rut_hash(i), mud_rut_hash(i + vec2<f32>(1.0, 0.0)), u.x),
+               mix(mud_rut_hash(i + vec2<f32>(0.0, 1.0)), mud_rut_hash(i + vec2<f32>(1.0, 1.0)), u.x), u.y);
+}
+
+// Small relief inside a rut, metres (<= 0): chevron tyre-lug imprints (angled
+// away from the rut's centre seam, like an off-road tread), broken up and smeared
+// by the soil, plus squeezed clumps. `side_sign` is +1/-1 for the two halves of
+// the rut; `crisp` 1 = fresh rut with a clear tread, 0 = deep churned slop. Purely visual (a few mm); collision keeps the physical rut depth.
+fn mud_rut_detail_height(p: vec2<f32>, along: vec3<f32>, side_sign: f32, rut: f32, crisp: f32) -> f32 {
+    let dir = along.xy;
+    let side = vec2<f32>(-dir.y, dir.x);
+    let travel = dot(p, dir) * 7.0 + side_sign * dot(p, side) * 2.6;  // ~7 lugs/m, chevron
+    let w = fract(travel);
+    let lug = smoothstep(0.0, 0.12, w) * (1.0 - smoothstep(0.38, 0.55, w));
+    // Mud smears and fills the imprint unevenly.
+    let smear = 0.35 + 0.65 * smoothstep(0.2, 0.65, mud_rut_noise(p * 2.5 + vec2<f32>(7.3, 1.9)));
+    let clumps = mud_rut_noise(p * 11.0);
+    // Churned slop: fist-sized lumps and smeared ribs where the tread is gone
+    // (second pass after in-game test: the floor read as a smooth even band).
+    let churn = mud_rut_noise(p * 4.5 + vec2<f32>(3.7, 9.1)) * 0.6 + mud_rut_noise(p * 9.5 + vec2<f32>(1.3, 4.4)) * 0.4;
+    return -rut * (0.008 * lug * smear * along.z * crisp + 0.005 * clumps + 0.011 * churn * (1.0 - 0.7 * crisp));
+}
+
+struct MudRutSurface {
+    normal: vec3<f32>,
+    albedo: f32,   // multiplier for the ground colour
+    wet: f32,      // minimum soil wetness inside the rut
+    mud: f32,      // 0..1 how much the ground colour is replaced by bare wet mud
+    water: f32,    // 0..1 standing water in the rut floor
+};
+
+// Tested in game: a rut that only darkened the ground texture read as "pressed
+// dark grass" on meadows. A wheel tears the turf: the rut floor is bare wet
+// mud, the ridges churned soil with tufts of grass, the edge ragged. The mud
+// colour is grey-brown clay, linear; tone 0 = dark wet floor, 1 = lighter slick.
+fn mud_soil_colour(world_xz: vec2<f32>, tone: f32) -> vec3<f32> {
+    let n = 0.6 * mud_rut_noise(world_xz * 1.7) + 0.4 * mud_rut_noise(world_xz * 6.3 + vec2<f32>(5.3, 1.9));
+    let t = clamp(0.55 * tone + 0.45 * n, 0.0, 1.0);
+    return mix(vec3<f32>(0.040, 0.031, 0.022), vec3<f32>(0.105, 0.085, 0.064), t);
+}
+
+// Soil a tyre pushed aside: churned, clumpy, wet ridges beside the rut (positive
+// mud offset). Identity where the ground was never heaped.
+fn mud_ridge_surface(world_xz: vec2<f32>, n: vec3<f32>, fade: f32, base: MudRutSurface) -> MudRutSurface {
+    var out = base;
+    let offset = mud_height_offset(world_xz);
+    let heap = max(0.0, offset);
+    let ridge = smoothstep(0.003, 0.035, heap);
+    // Mud smeared over the turf at the very edge of the disturbance (the rut lip
+    // and the toe of the ridge): no hard line between bare mud and grass.
+    let smear_n = mud_rut_noise(world_xz * 5.0 + vec2<f32>(6.0, 2.0));
+    let disturbed = smoothstep(0.0006, 0.005, abs(offset)) * (1.0 - ridge);
+    out.mud = disturbed * mix(0.25, 0.75, smear_n);
+    out.wet = max(out.wet, 0.4 * disturbed);
+    if (ridge <= 0.0) {
+        return out;
+    }
+    out.albedo = mix(1.0, 0.9, ridge);
+    out.wet = 0.55 * ridge;
+    // Churned soil with tufts of torn turf left in it: mostly mud, broken up.
+    let tufts = mud_rut_noise(world_xz * 7.0 + vec2<f32>(11.0, 3.0));
+    out.mud = max(out.mud, ridge * mix(0.45, 0.9, smoothstep(0.35, 0.65, tufts)));
+    if (fade <= 0.0) {
+        return out;
+    }
+    // Lumpy clods: two octaves of noise, a few mm to ~1.5 cm.
+    let e = 0.01;
+    let p = world_xz;
+    let h = mud_ridge_lumps(p, ridge);
+    let dhx = (mud_ridge_lumps(p + vec2<f32>(e, 0.0), ridge) - h) / e;
+    let dhz = (mud_ridge_lumps(p + vec2<f32>(0.0, e), ridge) - h) / e;
+    let slope = clamp(vec2<f32>(dhx, dhz), vec2<f32>(-0.8), vec2<f32>(0.8)) * fade;
+    out.normal = normalize(n - vec3<f32>(slope.x, 0.0, slope.y));
+    // Clod tops catch light, the gaps between them are dark and wet.
+    out.albedo = out.albedo * (0.72 + 0.4 * clamp(h / 0.02, 0.0, 1.0));
+    return out;
+}
+
+// Second pass (in game the ridges read as a plain stripe): chunky broken clods,
+// ~10-20 cm across and up to ~2.5 cm proud, over the finer crumbs.
+fn mud_ridge_lumps(p: vec2<f32>, ridge: f32) -> f32 {
+    let clod = smoothstep(0.35, 0.8, mud_rut_noise(p * 6.0 + vec2<f32>(4.2, 0.6)));
+    return ridge * (0.016 * clod + 0.006 * mud_rut_noise(p * 9.0) + 0.004 * mud_rut_noise(p * 23.0 + vec2<f32>(3.1, 7.7)));
+}
+
+// view: unit vector from the surface towards the camera. fade: 1 near, 0 far.
+fn mud_rut_surface(world_xz: vec2<f32>, n: vec3<f32>, view: vec3<f32>, fade: f32) -> MudRutSurface {
+    var out: MudRutSurface;
+    out.normal = n;
+    out.albedo = 1.0;
+    out.wet = 0.0;
+    out.mud = 0.0;
+    out.water = 0.0;
+    let depth = mud_rut_depth(world_xz);
+    let rut = mud_rut_amount(depth);
+    if (rut <= 0.0) {
+        return mud_ridge_surface(world_xz, n, fade, out);
+    }
+    // Compacted, water-squeezed soil: wet even after the rain stops. The turf is
+    // torn off the floor (bare mud); a shallow fresh rut keeps a ragged fringe of
+    // flattened grass at its edge.
+    let ragged = mud_rut_noise(world_xz * 9.0 + vec2<f32>(2.0, 8.0)) - 0.5;
+    out.mud = smoothstep(0.004, 0.022, depth + ragged * 0.012) * 0.92;
+    out.albedo = mix(1.0, 0.9, rut);
+    out.wet = 0.8 * rut;
+    // Standing water in the deepest stretches of the rut while the soil is soaked
+    // (mud_water_level(), from the mud field's wetness): the fuller, the shallower the
+    // ruts that hold it. Broken into pools along the rut by the floor's low spots.
+    // Tested in game: one even water line along every deep rut. Now pools come and
+    // go: stretches of a few metres stay dry however deep, others are low spots
+    // that hold water even in shallower ruts, and the edge of each pool wanders.
+    let level = mud_water_level();
+    if (level > 0.0) {
+        let pool = mud_rut_noise(world_xz * 0.33 + vec2<f32>(7.0, 19.0));
+        let low = mud_rut_noise(world_xz * 1.2 + vec2<f32>(13.0, 4.0)) - 0.5;
+        let fill = mix(0.11, 0.045, level) + (0.5 - pool) * 0.08;
+        out.water = smoothstep(fill, fill + 0.015, depth + low * 0.03) * level
+                  * smoothstep(0.36, 0.5, pool);
+    }
+    if (fade <= 0.0) {
+        return out;
+    }
+    let along = mud_rut_along(world_xz);
+    // Which half of the rut this is: the rut field rises away from its centre.
+    let g = 0.125;
+    let rise = vec2<f32>(mud_height_offset(world_xz + vec2<f32>(g, 0.0)) - mud_height_offset(world_xz - vec2<f32>(g, 0.0)),
+                         mud_height_offset(world_xz + vec2<f32>(0.0, g)) - mud_height_offset(world_xz - vec2<f32>(0.0, g)));
+    let side_sign = select(-1.0, 1.0, dot(rise, vec2<f32>(-along.y, along.x)) >= 0.0);
+    // Single-step parallax: shift the detail lookup along the view ray by the
+    // relief depth, so lug imprints read as recessed rather than painted on.
+    // Deep, repeatedly churned ruts are smeared slop: the tread fades out with depth.
+    // Tread prints sit on the rut floor; the steep walls are smeared, not printed.
+    let wall = length(rise) / (2.0 * g);
+    let crisp = (1.0 - smoothstep(0.10, 0.17, depth)) * smoothstep(0.3, 0.7, along.z)
+              * (1.0 - smoothstep(0.12, 0.35, wall));
+    let h0 = mud_rut_detail_height(world_xz, along, side_sign, rut, crisp);
+    let p = world_xz + view.xz * h0 / max(view.y, 0.3);
+    let e = 0.01;
+    let h = mud_rut_detail_height(p, along, side_sign, rut, crisp);
+    let dhx = (mud_rut_detail_height(p + vec2<f32>(e, 0.0), along, side_sign, rut, crisp) - h) / e;
+    let dhz = (mud_rut_detail_height(p + vec2<f32>(0.0, e), along, side_sign, rut, crisp) - h) / e;
+    let slope = clamp(vec2<f32>(dhx, dhz), vec2<f32>(-0.7), vec2<f32>(0.7)) * fade;
+    out.normal = normalize(n - vec3<f32>(slope.x, 0.0, slope.y));
+    // Cavity: the bottoms of lug imprints catch less light.
+    out.albedo = out.albedo * (1.0 + clamp(h / 0.02, -1.0, 0.0) * 0.25 * fade);
+    // Not one even colour: darker water-logged patches and lighter slick streaks
+    // drawn out along the direction of travel (smeared by the tyres).
+    let dir = along.xy;
+    let q = vec2<f32>(dot(world_xz, dir) * 0.8, dot(world_xz, vec2<f32>(-dir.y, dir.x)) * 5.0);
+    let streak = smoothstep(0.55, 0.85, mud_rut_noise(q + vec2<f32>(2.0, 7.0))) * along.z;
+    let soak = smoothstep(0.45, 0.75, mud_rut_noise(world_xz * 1.3 + vec2<f32>(8.0, 3.0)));
+    out.albedo = out.albedo * mix(1.0, mix(0.78, 1.0, 1.0 - soak) * (1.0 + 0.22 * streak), rut * fade);
+    out.wet = out.wet * mix(1.0, 0.85 + 0.15 * soak, fade);
+    return out;
 }
 
 // Index-map entry for a land cell, clamped to the map (row = z, column = x;
@@ -1763,6 +2036,9 @@ override blend_width: f32 = 0.15;
 // TexGen. Height comes from `_nopx` red (MAT-040); `_nohq` holds that channel at zero, so
 // a surface without one simply does not displace. Tunable via WGR_TERRAIN_PARALLAX.
 override terrain_parallax: f32 = 0.02;
+// Gloss of wet soil and rain puddles: scales the sky reflection, sun glint and
+// puddle film (1 = the original look, 0 = matte). Tunable via WGR_TERRAIN_WET_SHINE.
+override terrain_wet_shine: f32 = 0.6;
 override a3_surface_blend: f32 = 0.0;
 // Distance band (metres from the CAMERA -- WLD-019 amendment) over which the authored
 // surface stack's colour gain eases back to neutral and the ground becomes the bare
@@ -2087,20 +2363,29 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
 
     // Fine-surface world height, sampled once and shared by the snow cover
     // below and the terrain-shadow test further down (LOD/morph-independent).
+    // Mud ruts: darker compacted soil and a tyre-tread imprint where wheels pressed
+    // the mud field (identity on untouched ground). Detail fades out by 42 m (the
+    // mud window reaches ~46 m ahead of the camera).
+    let mud_view_dist = length(in.world_pos);
+    let mud_near = mud_rut_surface(in.world_xz, n, normalize(-in.world_pos),
+                                   1.0 - smoothstep(18.0, 42.0, mud_view_dist));
+    // Beyond the fine detail (and the fine mesh), the far view keeps ruts visible
+    // out to ~130 m ahead; it fades in as the near detail fades out.
+    let mud_rut = mud_far_surface(in.world_xz,
+        smoothstep(38.0, 48.0, mud_view_dist) * (1.0 - smoothstep(110.0, 140.0, mud_view_dist)), mud_near);
+    n = mud_rut.normal;
+    if (mud_rut.mud > 0.0) {
+        // Bare mud replaces the ground texture (grass included) in ruts and ridges.
+        let facing = clamp(dot(mud_rut.normal, vec3<f32>(0.0, 1.0, 0.0)) * 2.0 - 1.0, 0.0, 1.0);
+        var soil = mud_soil_colour(in.world_xz, mix(0.55, facing, 0.35));
+        if (linear <= 0.5) { soil = ground_linear_to_srgb(soil); }
+        rgb = mix(rgb, soil, mud_rut.mud);
+    }
+    rgb *= mud_rut.albedo;
     let world_y = sample_height(in.world_xz);
     let line_depth = snowline_depth(in.world_xz, world_y);
     let initial_soil_wet = soil_wet_amount(mud, tp.rain_wetness, snow_cover(in.world_xz, world_y));
     var soil_wet = initial_soil_wet;
-    // (MUD-RUNNER, 2026-10-14) a rut is churned, wet mud: darker, browner and wet-glossy along its
-    // floor; the ridge beside it is churned soil, a little darker than the untouched ground
-    let mud_dig = -mud_height_offset(in.world_xz);
-    if (mud_dig > 0.003) {
-        let rutK = smoothstep(0.004, 0.06, mud_dig);
-        rgb = mix(rgb, rgb * vec3<f32>(0.5, 0.44, 0.38), rutK * 0.75);
-        soil_wet = max(soil_wet, rutK * 0.85);
-    } else if (mud_dig < -0.003) {
-        rgb = rgb * (1.0 - smoothstep(0.003, 0.04, -mud_dig) * 0.18);
-    }
     var rain_puddle = 0.0;
     if (tp.rain_wetness > 0.0) {
         rain_puddle = ground_puddle_mask(in.world_xz, puddle_footprint, tp.rain_wetness)
@@ -2288,6 +2573,10 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     }
     // Proven wet soil absorbs through the authored substrate and uses the
     // rough moist-soil coat below. Keep the smooth film on the hard fraction.
+    // Water squeezed into a rut keeps it wet after the rain has stopped.
+    // Rut wetness is rough wet soil, not standing water: at a distance (grazing
+    // view, high Fresnel) it must not turn into a sky mirror.
+    soil_wet = max(soil_wet, mud_rut.wet * (1.0 - 0.65 * smoothstep(15.0, 45.0, mud_view_dist)));
     let wet_surface = soil_wet_surface(mud, soil_wet, rain_puddle);
     // Render-only classification after actual source/snow/rain admission and
     // film partition. Water overlay stays present and marks its own survivors.
@@ -2298,6 +2587,14 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     if (wet_debug == 4u) { return vec4<f32>(0.08, 0.08, 0.08, 1.0); }
     rain_puddle = wet_surface.y;
     rgb *= wet_surface.x;
+    // Water standing in mud ruts: murky (darker underneath, a little less mirror
+    // than clean rain water) and near only -- far off it would read as the shiny
+    // strips the far ruts were cured of.
+    let rut_water = mud_rut.water * (1.0 - smoothstep(28.0, 40.0, mud_view_dist));
+    if (rut_water > 0.0) {
+        rgb *= mix(1.0, 0.7, rut_water);
+        rain_puddle = max(rain_puddle, rut_water * 0.85);
+    }
     sun_ambient *= sky_vis_ao(in.world_xz)
         * canopy_sky_ao(vec3<f32>(in.world_xz.x, world_y, in.world_xz.y))
         * gtao_ao(in.clip.xy)
@@ -2352,7 +2649,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
             reflected = select(rgb, rough_reflected, reflection_weight > 0.0);
         }
         let half_vector = normalize(view - frame.sun_dir_world.xyz + vec3<f32>(0.0, 1e-4, 0.0));
-        rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel, coat);
+        rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel, coat * terrain_wet_shine);
         // Direct GGX already contains dielectric Fresnel; add after the sky mix.
         // Only the admitted moist fraction smooths its broad slope width;
         // geometric derivatives still widen it at unresolved pixel footprints.
@@ -2364,7 +2661,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
             clamp(dot(moist_n, half_vector), 0.0, 1.0),
             clamp(dot(view, half_vector), 0.0, 1.0),
             moist_normal_variation, coat, solar_visibility);
-        rgb += sun_diffuse * 3.14159265359 * solar_coat;
+        rgb += sun_diffuse * 3.14159265359 * solar_coat * terrain_wet_shine;
     }
     if (rain_puddle > 0.0) {
         // Reflect actual directional sky/cloud radiance. Diffuse SH erased
@@ -2383,7 +2680,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         reflected += sun_diffuse * sun_lobe * (1.0 - shadow) * cloud_sun_shadow(in.world_xz)
             * local_sky_visibility;
         // Raw roof admission above suppresses both the film and its reflected sky.
-        rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel, rain_puddle);
+        rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel, rain_puddle * terrain_wet_shine);
     }
 
     // Debug: output the contrast-shaped sky-view factor as greyscale (unfogged) to inspect/tune the
