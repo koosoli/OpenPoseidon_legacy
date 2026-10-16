@@ -77,7 +77,8 @@ RString Arma1ArmedCarCarrier(const RString& a1Name, const RString& cwaClass);
 
 // Arma 1 vehicles get their own gunner weapons, rebuilt as generated A1v_<weapon> classes on
 // CWA weapons of their kind (rounds, rate of fire, muzzle velocity, sound and name from Arma
-// 1; ammunition CWA's). Cars, boats and static weapons; OP_A1_VEHICLE_WEAPONS=0 turns it off.
+// 1; ammunition CWA's). Cars, boats, tanks (main turret; a cannon keeps its SABOT and HE apart)
+// and static weapons; OP_A1_VEHICLE_WEAPONS=0 turns it off.
 bool Arma1VehicleWeapons();
 
 // Arma 1 vehicles seat their crew in their own crew poses (driverAction, cargoAction[],
