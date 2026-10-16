@@ -232,6 +232,15 @@ void ReportEncryptedArchives(const fs::path& folder)
 // `missionRoot`: single/multiplayer mission archives declare only "M09ConvoyAttack"
 // as their prefix, while the mission loader needs the world suffix that is in the
 // FILE name ("m09convoyattack.sara"). They are mounted as <missionRoot>\<file stem>\.
+// Whether one of the --arma1 roots is the Cold War Rearmed mod folder (@CWR).
+bool CwrModMounted()
+{
+    for (const fs::path& r : Roots())
+        if (Lower(r.filename().string()).rfind("@cwr", 0) == 0)
+            return true;
+    return false;
+}
+
 void MountFolder(const fs::path& folder, bool missionBanks, const char* remountPrefix = nullptr,
                  const char* missionRoot = nullptr)
 {
@@ -246,9 +255,10 @@ void MountFolder(const fs::path& folder, bool missionBanks, const char* remountP
             it.disable_recursion_pending();
         if (!it->is_regular_file(ec) || Lower(it->path().extension().string()) != ".pbo")
             continue;
-        // CWR_* are the bundled Cold War Rearmed conversions (they need the @CWR mod,
-        // which is not mounted), not Arma 1 content.
-        if (Lower(it->path().filename().string()).rfind("cwr_", 0) == 0)
+        // CWR_* are the bundled Cold War Rearmed conversions: they need the @CWR mod, so
+        // they are offered only when it is mounted (--arma1 "<Arma 1>;<Arma 1>\@CWR", as
+        // Arma 1's own cwr.bat starts the game with -mod=@CWR).
+        if (Lower(it->path().filename().string()).rfind("cwr_", 0) == 0 && !CwrModMounted())
             continue;
         pbos.push_back(it->path());
     }
