@@ -483,29 +483,71 @@ GameValue A3Insert(const GameState* state, GameValuePar oper1, GameValuePar oper
 }
 
 // try {code} catch {code}: the code runs where it stands (its _this is the caller's, which
-// `params` inside it reads). throw has no unwinding to go with it here: it is accepted and the
-// code goes on, and catch hands on what try returned -- Arma 3's own functions throw only on
-// their error paths.
+// `params` inside it reads). Each try names its scope, and throw -- "throw value" or "if
+// (cond) throw value" -- leaves the innermost try through it (as breakOut does, across the
+// calls in between); catch then runs its code with _exception set to the value. A throw
+// outside any try is ignored, as before.
+namespace
+{
+thread_local int tls_tryDepth = 0;
+thread_local bool tls_thrown = false;     // the try that just ended was left by a throw
+thread_local GameValue tls_thrownValue;
+
+std::string TryScopeName(int depth)
+{
+    return "__op_a3_try_" + std::to_string(depth);
+}
+} // namespace
+
 GameValue A3Try(const GameState* state, GameValuePar oper1)
 {
+    const int depth = ++tls_tryDepth;
+    tls_thrown = false;
     GameVarSpace local(state->GetContext());
     state->BeginContext(&local);
-    const RString code = oper1;
-    const GameValue ret = state->EvaluateMultiple(code);
+    const RString code = RString(("scopeName \"" + TryScopeName(depth) + "\";\n").c_str()) + RString(oper1);
+    GameValue ret = state->EvaluateMultiple(code);
+    state->EndContext();
+    --tls_tryDepth;
+    // a throw to this try unwound to here; anything else breaking further keeps going
+    return ret;
+}
+
+GameValue A3Catch(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    if (!tls_thrown)
+        return oper1;
+    tls_thrown = false;
+    GameVarSpace local(state->GetContext());
+    state->BeginContext(&local);
+    local.VarSet("_exception", tls_thrownValue);
+    tls_thrownValue = GameValue();
+    const GameValue ret = state->EvaluateMultiple(RString(oper2));
     state->EndContext();
     return ret;
 }
 
-GameValue A3Catch(const GameState* state, GameValuePar oper1, GameValuePar)
-{
-    return oper1;
-}
-
 GameValue A3Throw(const GameState* state, GameValuePar oper1)
 {
-    LOG_DEBUG(Script, "Arma 3: throw {} (no exception handling here; the script goes on)",
-              (const char*)oper1.GetText());
+    if (tls_tryDepth <= 0)
+    {
+        LOG_DEBUG(Script, "Arma 3: throw {} outside try (ignored; the script goes on)",
+                  (const char*)oper1.GetText());
+        return NOTHING;
+    }
+    tls_thrown = true;
+    tls_thrownValue = oper1;
+    state->BreakOutWithValue(TryScopeName(tls_tryDepth).c_str(), GameValue(NOTHING));
     return NOTHING;
+}
+
+// if (cond) throw value
+GameValue A3IfThrow(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    const bool test = oper1;
+    if (!test)
+        return NOTHING;
+    return A3Throw(state, oper2);
 }
 
 GameValue A3Reverse(const GameState* state, GameValuePar oper1)
@@ -2154,6 +2196,7 @@ const GameOperator A3Binary[] = {
     GameOperator(GameAny, "#", mocnina, A3HashIndex, GameArray | GameString, GameScalar),
     GameOperator(GameBool, "params", function, A3ParamsBinary, GameVoid, GameArray),
     GameOperator(GameAny, "catch", function, A3Catch, GameVoid, GameString),
+    GameOperator(GameNothing, "throw", function, A3IfThrow, GameIf, GameVoid),
     GameOperator(GameBool, "&&", logicAnd, A3LazyAnd, GameBool, GameString),
     GameOperator(GameBool, "and", logicAnd, A3LazyAnd, GameBool, GameString),
     GameOperator(GameBool, "||", logicOr, A3LazyOr, GameBool, GameString),
