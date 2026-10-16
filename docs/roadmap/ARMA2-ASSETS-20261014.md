@@ -398,6 +398,12 @@ then never reaches a simulation step (watchdog after 180 s). Vulkan on the same 
 created it in 60 s, entered T01 and played it to the end -- at a few frames per second, with
 no screenshots written. The stall report now also takes stacks at 90 and 170 s.
 
+### Decisions (owner, 2026-10-16)
+
+- **C-130J stays carried by the UH-60** (helicopter stand-in, deviation kept).
+- **GL33 shadows stay global** (normal offset and the self-shadow rule for all content), and
+  **heads are not exempted from self-shadowing**: the patches on faces are accepted as they are.
+
 ## Steps
 
 1. **Measure first.** Per mission: an asset census in the log (every class created, what it
