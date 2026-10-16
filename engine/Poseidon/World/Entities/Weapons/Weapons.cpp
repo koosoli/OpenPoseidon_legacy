@@ -545,6 +545,24 @@ void MuzzleType::Init(const ParamEntry& cls, const WeaponType* weapon)
             }
         }
     }
+    // --arma1: the main muzzle of a generated A1x_ weapon takes the magazines its Arma 1
+    // weapon lists, whatever CWA magazine they ride on (A1x_15Rnd_9x19_M9 on the Beretta,
+    // whose muzzle takes BerettaMag). Other muzzles (M203) keep the carrier's list.
+    if (weapon && stricmp(cls.GetName(), weapon->GetName()) == 0)
+    {
+        for (const RString& extra : Arma1Compat::ListedGeneratedMagazines(weapon->GetName()))
+        {
+            bool present = false;
+            for (int k = 0; k < _magazines.Size() && !present; k++)
+            {
+                present = _magazines[k] && stricmp(_magazines[k]->GetName(), extra) == 0;
+            }
+            if (!present)
+            {
+                _magazines.Add(MagazineTypes.New(extra));
+            }
+        }
+    }
     if (_magazines.Size() > 0)
     {
         _typicalMagazine = _magazines[0];
@@ -582,7 +600,10 @@ void Poseidon::AddMagazineToMuzzlesTaking(const char* baseMagazine, const char* 
                 takesBase = takesBase || stricmp(type->GetName(), baseMagazine) == 0;
                 takesNew = takesNew || stricmp(type->GetName(), magazine) == 0;
             }
-            if (takesBase && !takesNew && Arma1Compat::GeneratedMagazineFits(weapon->GetName(), magazine))
+            // the main muzzle of an A1x_ weapon also takes what its Arma 1 weapon lists
+            const bool listed = !takesBase && stricmp(muzzle->GetName(), weapon->GetName()) == 0 &&
+                                Arma1Compat::WeaponListsGeneratedMagazine(weapon->GetName(), magazine);
+            if ((takesBase || listed) && !takesNew && Arma1Compat::GeneratedMagazineFits(weapon->GetName(), magazine))
             {
                 if (!added)
                 {

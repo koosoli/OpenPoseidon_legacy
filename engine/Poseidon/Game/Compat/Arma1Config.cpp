@@ -2639,6 +2639,35 @@ bool GeneratedMagazineFits(const char* weaponClass, const char* magazine)
     return listed || !any;
 }
 
+std::vector<RString> ListedGeneratedMagazines(const char* weaponClass)
+{
+    std::vector<RString> out;
+    if (!Active() || !weaponClass || _strnicmp(weaponClass, "A1x_", 4) != 0)
+        return out;
+    const ParamEntry* a1 = FindConfigClass("CfgWeapons", weaponClass + 4);
+    const ParamEntry* cwaWeapons = Pars.FindEntry("CfgWeapons");
+    if (!a1 || !a1->IsClass() || !cwaWeapons)
+        return out;
+    const ParamEntry* mags = a1->FindEntry("magazines");
+    for (int i = 0; mags && mags->IsArray() && i < mags->GetSize(); i++)
+    {
+        const std::string generated = "A1x_" + std::string(((RStringB)(*mags)[i]).Data());
+        if (cwaWeapons->FindEntry(generated.c_str()))
+            out.emplace_back(generated.c_str());
+    }
+    return out;
+}
+
+bool WeaponListsGeneratedMagazine(const char* weaponClass, const char* magazine)
+{
+    if (!magazine)
+        return false;
+    for (const RString& m : ListedGeneratedMagazines(weaponClass))
+        if (_stricmp(m.Data(), magazine) == 0)
+            return true;
+    return false;
+}
+
 RString Arma1MagazineClass(const RString& name, const RString& cwaMagazine)
 {
     if (Generation() != 1 || !ConfigLoaded() || !Arma1OwnWeapons() || name.GetLength() == 0 ||
