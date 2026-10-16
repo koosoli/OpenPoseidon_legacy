@@ -1,5 +1,8 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
+#include <string>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Weapons/ProxyWeapon.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
@@ -2224,6 +2227,27 @@ void TransportType::InitShape()
                 RptF("%s: old crew proxy %s", (const char*)GetName(), shortname);
             }
         }
+    }
+
+    // --arma1/--arma2 diagnostic: where an Arma model seats its crew in LOD 0, so a crew
+    // member drawn outside the vehicle (Arma 1 HMMWV passengers sitting on the ground) can be
+    // traced to its proxy. Logged once per vehicle type.
+    if (Arma1Compat::Active() && _shape->NLevels() > 0)
+    {
+        const LevelProxies& p0 = _proxies[0];
+        const auto at = [](const ManProxy& m) {
+            char buf[96];
+            const ::Vector3 pos = m.transform.Position();
+            snprintf(buf, sizeof(buf), "%s(%.2f %.2f %.2f)", m.Present() ? "" : "absent", pos.X(), pos.Y(), pos.Z());
+            return std::string(buf);
+        };
+        std::string cargo;
+        for (int i = 0; i < p0._cargoProxy.Size(); i++)
+            cargo += " " + at(p0._cargoProxy[i]);
+        const ::Vector3 mn = _shape->Min(), mx = _shape->Max();
+        LOG_INFO(Graphics, "Crew seats {} ({}): box ({:.2f} {:.2f} {:.2f})..({:.2f} {:.2f} {:.2f}) driver {} gunner {} commander {} cargo[{}]{}",
+                 (const char*)GetName(), _shape->Name(), mn.X(), mn.Y(), mn.Z(), mx.X(), mx.Y(), mx.Z(),
+                 at(p0._driverProxy), at(p0._gunnerProxy), at(p0._commanderProxy), p0._cargoProxy.Size(), cargo);
     }
 
     Shape* memory = _shape->MemoryLevel();
