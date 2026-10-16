@@ -404,6 +404,35 @@ no screenshots written. The stall report now also takes stacks at 90 and 170 s.
 - **GL33 shadows stay global** (normal offset and the self-shadow rule for all content), and
   **heads are not exempted from self-shadowing**: the patches on faces are accepted as they are.
 
+### Run 22 follow-ups, 2026-10-16
+
+- **Campaign flow, played mode** (`27737ef`, C0 without `--arma2-test-seconds`): the log names
+  the mission `'C0_FirstToFight.Utes' of campaign 'ca_missions_campaign'`, and the campaign's
+  intro scene ran (`c0introshaftoe`). The screen itself could not be seen from here (the game
+  window is outside what the test session may capture); the end of the mission and the next
+  one are still unchecked.
+- **WGPU DX12** (`27737ef`, T01): the stacks at 90 and 170 s are all `<unknown>` frames --
+  the main thread is inside code without symbols (the GPU driver) for minutes after the
+  renderer was created. Not an Arma 2 matter; left there.
+- **"Closed eyes" on default heads:** offline (`diag37`), the upper-lid vertices of
+  `defaulthead.p3d` sit at the eye centre's height (0.693 vs 0.694), as in Cooper's head
+  (0.673 vs 0.677), whose eyes look open in the pictures. The rest pose is not closed; the
+  pictures look down on the faces from above. Nothing changed.
+- **Face materials:** the only enabled faces with a material of their own (`hhl_black.rvmat`)
+  use `BlackHead`, whose model already carries that material. Nothing missing.
+- **Glasses** (`CfgGlasses`): 4 identities wear them (Miles: BlackSun, Maddox: Sunglasses,
+  two in the armory) and Arma 2 would also give random ones by weighted `identityTypes`
+  (`USMC_Glasses`: Tactical 100, Sunglasses 30, Spectacles 20, None 825). The glasses
+  models carry no bones and no proxy marks their place on the head, so where Arma 2 puts
+  them could not be established from the data. Not done.
+- **MP_Paradrop's script error is the mission's own:** `spawnunits.sqf` passes
+  `_targetmarkerdir`, which it never assigns (it sets `_Markerdir`).
+- **Backpacks** (`574ee4a`): 40 Arrowhead soldier classes carry one by config
+  (`TK_RPG_Backpack_EP1`, `US_Patrol_Pack_Specops_EP1`, ...); the body only has an unbound
+  `us_bag` placeholder, so none was drawn. The pack models are skinned to the skeleton
+  (spine..spine3) in the body's source coordinates; they are now posed with the man's bone
+  matrices. Not yet measured.
+
 ## Steps
 
 1. **Measure first.** Per mission: an asset census in the log (every class created, what it
