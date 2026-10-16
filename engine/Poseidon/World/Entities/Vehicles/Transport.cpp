@@ -2348,6 +2348,23 @@ void TransportType::InitShape()
             snprintf(buf, sizeof(buf), "%d (%.2f %.2f %.2f)", a.Size(), a[0].X(), a[0].Y(), a[0].Z());
             return std::string(buf);
         };
+        // and the named selections of LOD 0 and the memory LOD (OP_A1_SELECTIONS=1), to map an
+        // Arma model's animated parts (gear, doors, rotors) onto what the CWA class animates
+        static const bool selections = [] {
+            const char* e = std::getenv("OP_A1_SELECTIONS");
+            return e && *e == '1';
+        }();
+        if (selections)
+            for (Shape* lod : {_shape->LevelOpaque(0), _shape->MemoryLevel()})
+            {
+                if (!lod)
+                    continue;
+                std::string names;
+                for (int i = 0; i < lod->NNamedSel(); i++)
+                    names += std::string(i ? "|" : "") + lod->NamedSel(i).Name();
+                LOG_INFO(Graphics, "Selections {} {}: {}", (const char*)GetName(),
+                         lod == _shape->MemoryLevel() ? "memory" : "lod0", names);
+            }
         LOG_INFO(Graphics, "Get-in points {}: driver {} gunner {} commander {} cargo {} radius {:.1f}",
                  (const char*)GetName(), first(_driverGetInPos), first(_gunnerGetInPos), first(_commanderGetInPos),
                  first(_cargoGetInPos), _getInRadius);
