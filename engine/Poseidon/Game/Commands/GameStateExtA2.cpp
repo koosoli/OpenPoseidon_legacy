@@ -934,6 +934,22 @@ GameValue A2GetFSMVariable(const GameState*, GameValuePar oper1, GameValuePar op
     return v;
 }
 
+// fsm getFSMVariable [name, default] (Arma 3): the default when the FSM or the variable
+// is not there -- also when the handle itself is nil (an FSM that never started), which a
+// trigger condition polls every frame.
+GameValue A3GetFSMVariableDefault(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& args = oper2;
+    GameValue fallback = args.Size() >= 2 ? args[1] : GameValue();
+    if (args.Size() < 1 || args[0].GetType() != GameString || oper1.GetType() != GameScalar)
+        return fallback;
+    Fsm* fsm = FindFsm(oper1);
+    GameValue v;
+    if (fsm && fsm->vars.VarGet(RString(args[0]), v) && !v.GetNil())
+        return v;
+    return fallback;
+}
+
 GameValue A2SetFSMVariable(const GameState*, GameValuePar oper1, GameValuePar oper2)
 {
     Fsm* fsm = FindFsm(oper1);
@@ -2687,6 +2703,7 @@ const GameOperator A2Binary[] = {
     GameOperator(GameScalar, "execFSM", function, A2ExecFSM, GameVoid, GameString),
     GameOperator(GameAny, "getFSMVariable", function, A2GetFSMVariable, GameScalar, GameString),
     GameOperator(GameNothing, "setFSMVariable", function, A2SetFSMVariable, GameScalar, GameArray),
+    GameOperator(GameAny, "getFSMVariable", function, A3GetFSMVariableDefault, GameAny, GameArray),
     GameOperator(GameNothing, "ppEffectAdjust", function, A2NothingBinary, GameString | GameScalar, GameArray),
     GameOperator(GameNothing, "ppEffectCommit", function, A2NothingBinary, GameString | GameScalar | GameArray, GameScalar),
     GameOperator(GameNothing, "ppEffectEnable", function, A2NothingBinary, GameString | GameScalar | GameArray, GameBool),
