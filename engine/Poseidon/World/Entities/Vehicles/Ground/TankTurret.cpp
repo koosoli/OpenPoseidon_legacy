@@ -551,6 +551,7 @@ Vector3 Turret::GetCenter(const TurretType& type) const
 void Turret::AnimatePoint(const TurretType& type, Vector3& pos, const Object* obj, int level, int index) const
 {
     Shape* shape = obj->GetShape()->Level(level);
+    bool onGun = false;
     int selI = type._gun.GetSelection(level);
     if (selI >= 0)
     {
@@ -560,9 +561,11 @@ void Turret::AnimatePoint(const TurretType& type, Vector3& pos, const Object* ob
             // apply gun transformation
             Matrix4Val gunTransform = GunTransform(type);
             pos = gunTransform.FastTransform(pos);
+            onGun = true;
         }
     }
 
+    bool onBody = false;
     selI = type._body.GetSelection(level);
     if (selI >= 0)
     {
@@ -572,8 +575,15 @@ void Turret::AnimatePoint(const TurretType& type, Vector3& pos, const Object* ob
             // apply turret transformation
             Matrix4Val turTransform = TurretTransform(type);
             pos = turTransform.FastTransform(pos);
+            onBody = true;
         }
     }
+    // The gun rides on the turret. OFP models say so by selection (every gun point is a
+    // turret point too); Arma models through their skeleton instead, so a gun point need not
+    // be in the turret selection -- the HMMWV M2's muzzle in the memory LOD -- and the gun
+    // then only elevated, never traversed: its gunner saw his target and never fired.
+    if (onGun && !onBody)
+        pos = TurretTransform(type).FastTransform(pos);
 }
 
 void Turret::AnimateMatrix(const TurretType& type, Matrix4& mat, const Object* obj, int level, int selection) const
@@ -585,6 +595,7 @@ void Turret::AnimateMatrix(const TurretType& type, Matrix4& mat, const Object* o
     Shape* shape = obj->GetShape()->Level(level);
     const NamedSelection& sel = shape->NamedSel(selection);
 
+    bool onGun = false;
     int selI = type._gun.GetSelection(level);
     if (selI >= 0)
     {
@@ -595,8 +606,10 @@ void Turret::AnimateMatrix(const TurretType& type, Matrix4& mat, const Object* o
             // apply turret animation to this proxy
             Matrix4Val transform = GunTransform(type);
             mat = transform * mat;
+            onGun = true;
         }
     }
+    bool onBody = false;
     selI = type._body.GetSelection(level);
     if (selI >= 0)
     {
@@ -607,8 +620,13 @@ void Turret::AnimateMatrix(const TurretType& type, Matrix4& mat, const Object* o
             // apply turret animation to this proxy
             Matrix4Val transform = TurretTransform(type);
             mat = transform * mat;
+            onBody = true;
         }
     }
+    // The gun rides on the turret even where its selection is not inside the turret's (Arma
+    // models, see AnimatePoint).
+    if (onGun && !onBody)
+        mat = TurretTransform(type) * mat;
 }
 
 void Turret::Stabilize(const Object* obj, const TurretType& type, Matrix3Val oldTrans, Matrix3Val newTrans)
