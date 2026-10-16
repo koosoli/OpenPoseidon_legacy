@@ -750,6 +750,26 @@ void Man::DrawArma2Head(int level, const Matrix4& transform, float dist2, float 
     {
         const Skeleton* skeleton = type->_moveType->GetSkeleton();
         const Matrix4 fromBody(MTranslation, -d);
+        // Lip sync: the speech's .lip track (Head::AttachWave, from `say` and the conversation
+        // lines) opens the mouth -- the jaw, chin and lower lip drop by up to 12 mm in the
+        // head's own frame, the mouth corners by half of that.
+        float mouth = 0.0f;
+        if (_head._lipInfo)
+        {
+            const float phase = _head._lipInfo->GetPhase();
+            if (phase > 0.0f)
+                mouth = std::min(phase, 1.0f);
+            static int reported = 0;
+            static const void* lastTrack = nullptr;
+            if (mouth > 0.3f && lastTrack != static_cast<const ManLipInfo*>(_head._lipInfo) && reported < 40)
+            {
+                lastTrack = static_cast<const ManLipInfo*>(_head._lipInfo);
+                ++reported;
+                LOG_INFO(Graphics, "Arma 2 lip sync: {} opens the mouth ({:.2f})", (const char*)GetDebugName(), mouth);
+            }
+        }
+        const Matrix4 jawOpen(MTranslation, Vector3(0, -0.012f * mouth, 0));
+        const Matrix4 cornerOpen(MTranslation, Vector3(0, -0.006f * mouth, 0));
         headMatrix.Resize(matrix.Size());
         for (int i = 0; i < matrix.Size(); i++)
         {
@@ -758,6 +778,13 @@ void Man::DrawArma2Head(int level, const Matrix4& transform, float dist2, float 
             const bool own = name && (_strnicmp(name, "spine", 5) == 0 || _strnicmp(name, "neck", 4) == 0 ||
                                       stricmp(name, "head") == 0 || stricmp(name, "pelvis") == 0);
             headMatrix[i] = fromBody * (own ? matrix[i] : bone) * toBody;
+            if (mouth > 0.0f && name && !own)
+            {
+                if (_strnicmp(name, "jaw", 3) == 0 || stricmp(name, "chin") == 0 || _strnicmp(name, "lip_lw", 6) == 0)
+                    headMatrix[i] = headMatrix[i] * jawOpen;
+                else if (stricmp(name, "lip_lc") == 0 || stricmp(name, "lip_rc") == 0)
+                    headMatrix[i] = headMatrix[i] * cornerOpen;
+            }
         }
     }
     const Matrix4 pTransform = skinned ? transform * toBody : transform * bone * toBody;
