@@ -105,3 +105,22 @@ folder (nothing copied into the CWA install). They share one compat layer
 - **Delivery of CI builds to the PC.** The cloud session cannot download Actions artifacts
   (the artifact storage host is not reachable from it); a build reaches the PC as the zip
   the owner downloads, which `go.ps1` (`DEPLOY=1`) unpacks from `Downloads` or `incoming`.
+
+## For the renderer owners (2026-10-16, from the Arma 3 session)
+
+- **Open, not touched by the Arma 3 session:** on Livonia (Enoch), `Sites\s_dolnik_00` third person
+  shows a dark structure of flat panels with "branches" between the camera and the player. It is
+  not a mission object: no entity is within 3 m of the player or reaches him with its bounding
+  sphere (census `model reaching the player`, build `49c46aa`), nothing is attached, the alien
+  drone stands 380 m away. The nearest map models are spruce bushes (`b_piceaabies_1f`, 3 m,
+  leaves `t_piceaabies_leaves_ca.paa` special 0x200) and a small spruce (`t_piceaabies_1sb`, 5 m),
+  both on the per-draw path ("GpuModel foliage bail ... retained=0"). Likely their finest LOD's
+  leaf cards drawn without the alpha cut-out close to the camera. Same player and loadout in
+  `s_polana_19` / `s_kulno_06` look right. Not changed by the Arma 3 session: the shared WGPU
+  vegetation path belongs to the renderer owners.
+- **Shared-layer changes from the Arma 3 session today**, all additive:
+  - `FilePreprocessor` (script `#include`) looks beside the INCLUDING file first, then as before
+    (`08420ec3`).
+  - Mission `CfgSounds`/`CfgSFX`/`CfgMusic`/`CfgEnvSounds` names from the game root (`\a3\...`,
+    `@a3\...`) are found; a name that exists in the mission still wins (`1569fcf3`).
+  - `GetDefaultName` treats a leading `@` like a leading backslash (`1569fcf3`).
