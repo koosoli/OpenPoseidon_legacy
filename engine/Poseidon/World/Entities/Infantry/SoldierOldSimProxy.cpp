@@ -735,6 +735,7 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
     }
 
     DrawArma2Head(level, transform, dist2, z2, lights);
+    DrawArma2Backpack(level, transform, dist2, z2, lights);
 
     _mGunFireFrames--;
 }
@@ -764,6 +765,63 @@ void Man::DrawArma2Head(int level, const Matrix4& transform, float dist2, float 
     Shape* shape = _a2Head->LevelOpaque(pLevel);
     if (!shape)
         return;
+    int spec = shape->Special();
+    shape->PrepareTextures(z2, spec);
+    shape->Draw(this, lights, ClipAll, spec, pTransform, pTransform.InverseScaled());
+}
+
+// An Arrowhead backpack (CfgVehicles >> man >> backpack >> model) is skinned to the man's
+// skeleton (spine..spine3) in the body's source coordinates; the body only carries an
+// unbound "us_bag" placeholder proxy for it. Posed with the man's own bone matrices,
+// moved from the body's stored coordinates into the pack's.
+void Man::DrawArma2Backpack(int level, const Matrix4& transform, float dist2, float z2, const LightList& lights)
+{
+    const ManType* type = Type();
+    if (!_a2BackpackLooked)
+    {
+        _a2BackpackLooked = true;
+        const std::string model = Poseidon::Arma1Compat::Arma2BackpackModel(type->GetName(), _shape->GetName());
+        const RString name = model.empty() ? RString() : ::GetShapeName(RString(model.c_str()));
+        if (name.GetLength() > 0 && QIFStreamB::FileExist(name))
+        {
+            _a2Backpack = Shapes.New(name, type->_shapeReversed, true);
+            if (_a2Backpack && type->_moveType && type->_moveType->GetSkeleton())
+            {
+                WeightInfoName wname;
+                wname.shape = _a2Backpack.GetRef();
+                wname.skeleton = type->_moveType->GetSkeleton();
+                _a2BackpackWeights = WeigthBank.New(wname);
+                type->_moveType->GetSkeleton()->Prepare(_a2Backpack, *_a2BackpackWeights);
+            }
+            else
+                _a2Backpack = nullptr;
+        }
+        else if (name.GetLength() > 0)
+            LOG_WARN(Physics, "Arma 2 backpack model {} not found", (const char*)name);
+    }
+    if (!_a2Backpack || !_a2BackpackWeights || level == type->_insideView || _shape->Resolution(level) >= 900.0f)
+        return;
+    MATRIX_4_ARRAY(matrix, 128);
+    PrepareCorrectedPose(level, matrix);
+    if (matrix.Size() <= 0)
+        return;
+    // pack stored coordinates -> body stored coordinates, as for the head
+    const Vector3 d = _shape->AnimationOrigin() - _a2Backpack->AnimationOrigin();
+    const Matrix4 toBody(MTranslation, d);
+    const Matrix4 fromBody(MTranslation, -d);
+    MATRIX_4_ARRAY(packMatrix, 128);
+    packMatrix.Resize(matrix.Size());
+    for (int i = 0; i < matrix.Size(); i++)
+        packMatrix[i] = fromBody * matrix[i] * toBody;
+    const Matrix4 pTransform = transform * toBody;
+    const int pLevel = GScene->LevelFromDistance2(_a2Backpack, dist2, pTransform.Scale(), pTransform.Direction(),
+                                                  GScene->GetCamera()->Direction());
+    if (pLevel < 0 || pLevel == LOD_INVISIBLE)
+        return;
+    Shape* shape = _a2Backpack->LevelOpaque(pLevel);
+    if (!shape)
+        return;
+    AnimationRT::ApplyMatrices(*_a2BackpackWeights, _a2Backpack, pLevel, packMatrix);
     int spec = shape->Special();
     shape->PrepareTextures(z2, spec);
     shape->Draw(this, lights, ClipAll, spec, pTransform, pTransform.InverseScaled());

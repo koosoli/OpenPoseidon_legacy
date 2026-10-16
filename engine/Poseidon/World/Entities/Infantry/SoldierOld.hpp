@@ -761,6 +761,11 @@ class Man: public Person
 	Ref<LODShapeWithShadow> _a2Head;
 	AnimationSection _a2HeadFace;
 	void DrawArma2Head(int level, const Matrix4 &transform, float dist2, float z2, const LightList &lights);
+	// --arma2: the backpack his class carries (Arrowhead), skinned to his skeleton
+	Ref<LODShapeWithShadow> _a2Backpack;
+	Ref<WeightInfo> _a2BackpackWeights;
+	bool _a2BackpackLooked = false;
+	void DrawArma2Backpack(int level, const Matrix4 &transform, float dist2, float z2, const LightList &lights);
 
 	public:
 	Man(VehicleType *name, bool fullCreate=true);
