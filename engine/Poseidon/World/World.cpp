@@ -2056,6 +2056,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
     markInitProbe(activeLightsMs);
     perf.Mark(Dev::FrameProfiler::PhaseDrawInit);
 
+    // Optics and other screen overlays drawn from inside the world pass are queued and
+    // drawn display-referred right after the scene resolve below (Object::FlushDeferredOverlays).
+    Object::BeginDeferredOverlays();
+
     if (_scene.GetLandscape())
     {
         // remove all vehicles that should be removed
@@ -2288,6 +2292,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
     // UI composites display-referred. No-op on GL33.
     if (GEngine)
         GEngine->ResolveSceneToDisplay();
+    Object::FlushDeferredOverlays();
 
     if (enableDraw)
     {

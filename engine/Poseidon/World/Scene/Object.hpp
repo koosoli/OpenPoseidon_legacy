@@ -537,6 +537,13 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	// intro camera effects stay full-width.
 	static void DrawWidescreenPillarbox(bool requireGameplayActive = true);
 	static void DrawWidescreenPillarbox(bool requireGameplayActive, bool force);
+	// Screen overlays drawn from inside the 3D scene (weapon/vehicle optics, their
+	// pillarbox bars, camera-effect overlays) are display-referred images. On the HDR
+	// renderer anything drawn before the scene resolve is tonemapped with the world, which
+	// washed a near-black optic texture out to light grey. World::Draw queues them while the
+	// world is drawn and replays them right after ResolveSceneToDisplay, before the HUD.
+	static void BeginDeferredOverlays();
+	static void FlushDeferredOverlays();
 	
 	// Draw given shape as 3D lines
 	void DrawLines( int level, ClipFlags clipFlags, const FrameBase &pos );

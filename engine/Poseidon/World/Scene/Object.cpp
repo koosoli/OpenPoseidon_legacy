@@ -1,3 +1,4 @@
+#include <vector>
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/World/Scene/Object.hpp>
@@ -1574,8 +1575,55 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
     Deanimate(forceLOD);
 }
 
+namespace
+{
+struct DeferredOverlay
+{
+    bool pillarbox = false;
+    LODShape* shape = nullptr;
+    int lod = 0;
+    PackedColor color;
+    bool preserveAspect4x3 = false;
+    bool requireGameplayActive = true;
+    bool force = false;
+};
+bool GDeferOverlays = false;
+std::vector<DeferredOverlay> GDeferredOverlays;
+} // namespace
+
+void Object::BeginDeferredOverlays()
+{
+    GDeferredOverlays.clear();
+    GDeferOverlays = true;
+}
+
+void Object::FlushDeferredOverlays()
+{
+    GDeferOverlays = false;
+    std::vector<DeferredOverlay> pending;
+    pending.swap(GDeferredOverlays);
+    for (const DeferredOverlay& o : pending)
+    {
+        if (o.pillarbox)
+            DrawWidescreenPillarbox(o.requireGameplayActive, o.force);
+        else
+            Draw2D(o.shape, o.lod, o.color, o.preserveAspect4x3);
+    }
+}
+
 void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserveAspect4x3)
 {
+    if (GDeferOverlays)
+    {
+        // Same frame, same shape state (hidden muzzle-flash faces etc.); see FlushDeferredOverlays.
+        DeferredOverlay o;
+        o.shape = lShape;
+        o.lod = lod;
+        o.color = cColor;
+        o.preserveAspect4x3 = preserveAspect4x3;
+        GDeferredOverlays.push_back(o);
+        return;
+    }
     LightSun* sun = GScene->MainLight();
     TLMaterial mat;
     mat.ambient = HWhite;
@@ -1772,6 +1820,15 @@ void Object::DrawWidescreenPillarbox(bool requireGameplayActive)
 
 void Object::DrawWidescreenPillarbox(bool requireGameplayActive, bool force)
 {
+    if (GDeferOverlays)
+    {
+        DeferredOverlay o;
+        o.pillarbox = true;
+        o.requireGameplayActive = requireGameplayActive;
+        o.force = force;
+        GDeferredOverlays.push_back(o);
+        return;
+    }
     if (!force && !AspectRatio::ArePillarboxBarsEnabled())
         return;
     // The pillarbox treatment exists for 4:3-designed dark-around
