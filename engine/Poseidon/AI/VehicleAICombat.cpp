@@ -2,6 +2,7 @@
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/AI/AIDangerList.hpp> // AI-XRAY-004: typed dangers
 #include <Poseidon/AI/VehicleAI.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
 #include <Poseidon/World/World.hpp>
@@ -1471,22 +1472,48 @@ void EntityAI::Deanimate(int level)
     base::Deanimate(level);
 }
 
+// --arma1 diagnostic: why a gunner of an Arma 1 vehicle (generated A1x_ class) holds fire --
+// the HMMWV M2 and UAZ DShKM gunners never fired at known enemies (a1gunfire), CWA's own
+// JeepMG with the same crew did. At most one line per vehicle every 2 s.
+static bool A1AimDiagDue(const EntityAI* self)
+{
+    if (!Arma1Compat::Active() || self->GetType()->IsKindOf(GWorld->Preloaded(VTypeMan)))
+        return false;
+    const char* name = self->GetType()->GetName();
+    if (!name || _strnicmp(name, "A1x_", 4) != 0)
+        return false;
+    static std::map<const void*, float> last;
+    float& t = last[self];
+    if (t > 0 && Glob.time.toFloat() - t < 2.0f)
+        return false;
+    t = Glob.time.toFloat();
+    return true;
+}
+
 float EntityAI::GetAimed(int weapon, Target* target) const
 {
+    const auto why = [&](const char* reason) {
+        if (A1AimDiagDue(this))
+            LOG_INFO(AI, "A1 aim {}: weapon {} holds fire: {}", (const char*)GetType()->GetName(), weapon, reason);
+    };
     if (weapon < 0 || weapon >= NMagazineSlots())
     {
+        why("no such weapon slot");
         return 0;
     }
     if (!target)
     {
+        why("no target");
         return 0;
     }
     if (!target->idExact)
     {
+        why("target not identified");
         return 0;
     }
     if (target->lastSeen < Glob.time - 5)
     {
+        why("target not seen for 5 s");
         return 0;
     }
 
@@ -1502,6 +1529,7 @@ float EntityAI::GetAimed(int weapon, Target* target) const
     }
     if (target->posError.SquareSize() > Square(ammo->indirectHitRange * 2))
     {
+        why("target position error too large");
         return 0;
     }
 
@@ -1546,6 +1574,12 @@ float EntityAI::GetAimed(int weapon, Target* target) const
             GlobalShowMessage(2000, "Error %.1f, tgtSize %.1f, maxError %.1f", error, tgtSize, maxError);
         }
 #endif
+        if (A1AimDiagDue(this))
+            LOG_INFO(AI,
+                     "A1 aim {}: weapon {} error {:.2f} max {:.2f} visible {:.2f} dist {:.0f} wPos {:.1f} {:.1f} {:.1f} "
+                     "wDir {:.2f} {:.2f} {:.2f} target {:.1f} {:.1f} {:.1f}",
+                     (const char*)GetType()->GetName(), weapon, error, maxError, visible, dist, wPos.X(), wPos.Y(),
+                     wPos.Z(), wDir.X(), wDir.Y(), wDir.Z(), estPos.X(), estPos.Y(), estPos.Z());
         return (error < maxError) * visible;
     }
     else

@@ -308,6 +308,11 @@ void TurretType::InitShape(const ParamEntry& cfg, LODShape* shape)
              (const char*)shape->GetName(), (const char*)turretAxis, _yAxis.X(), _yAxis.Y(), _yAxis.Z(),
              (const char*)gunAxis, _xAxis.X(), _xAxis.Y(), _xAxis.Z(), (const char*)gunBeg, _pos.X(), _pos.Y(), _pos.Z());
 
+    LOG_WARN(Graphics, "TurretType::InitShape {}: gunBeg '{}' {} gunEnd '{}' {} dir {} {} {} turn {:.0f}..{:.0f} elev {:.0f}..{:.0f}",
+             (const char*)shape->GetName(), (const char*)gunBeg, shape->MemoryPointExists(gunBeg) ? "found" : "MISSING",
+             (const char*)gunEnd, shape->MemoryPointExists(gunEnd) ? "found" : "MISSING", _dir.X(), _dir.Y(), _dir.Z(),
+             _minTurn * (180 / H_PI), _maxTurn * (180 / H_PI), _minElev * (180 / H_PI), _maxElev * (180 / H_PI));
+
     RString bodyName = cfg >> "body";
     RString gunName = cfg >> "gun";
 
