@@ -253,6 +253,14 @@ bool IsClosedDisplay(float value)
 // layer cutFadeOut time: ends what the layer shows; a named layer answers its number (which
 // BIS_fnc_rscLayer returns -- as a type error it returned nothing, and every title the
 // showcases show went to no layer).
+// "layer" cutRsc [class, type, ...]: a named layer (BIS_fnc_showSubtitle, ...)
+GameValue CutRscEffectA3(const GameState* state, GameValuePar oper1); // below
+GameValue A3CutRscNamed(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Open(LayerKey(oper1), oper2);
+    return CutRscEffectA3(state, oper2);
+}
+
 GameValue A3CutFadeOutNamed(const GameState*, GameValuePar oper1, GameValuePar)
 {
     const std::string key = LayerKey(oper1);
@@ -264,10 +272,12 @@ GameValue A3CutFadeOutNamed(const GameState*, GameValuePar oper1, GameValuePar)
 // Arma 3's user-interface scripts keep their state on them (BIS_fnc_initDisplay stores its
 // class, BIS_fnc_playVideo its video control). Without the forms the first such line
 // stopped the script.
+// Never destroyed: the values are script values, and at exit the evaluator is gone before
+// static maps are torn down (Showcase_Night crashed after "Shutdown complete").
 std::map<int, std::map<std::string, GameValue>>& HandleVars()
 {
-    static std::map<int, std::map<std::string, GameValue>> vars;
-    return vars;
+    static auto* vars = new std::map<int, std::map<std::string, GameValue>>();
+    return *vars;
 }
 
 std::string LowerName(const char* s)
@@ -321,8 +331,19 @@ void Register()
     GGameState.NewFunction(GameFunction(GameNothing, "opA3RscClose", A3RscClose, GameScalar));
     GGameState.NewNularOp(GameNular(GameArray, "allCutLayers", A3AllCutLayers));
     GGameState.NewOperator(GameOperator(GameScalar, "cutFadeOut", function, A3CutFadeOutNamed, GameString, GameScalar));
+    GGameState.NewOperator(GameOperator(GameNothing, "cutRsc", function, A3CutRscNamed, GameString, GameArray));
     GGameState.NewOperator(GameOperator(GameNothing, "setVariable", function, A3HandleSetVariable, GameScalar, GameArray));
     GGameState.NewOperator(
         GameOperator(GameAny, "getVariable", function, A3HandleGetVariable, GameScalar, GameString | GameArray));
+}
+} // namespace Poseidon::Arma3Rsc
+
+GameValue CutRscEffect(const GameState* state, GameValuePar oper1); // GameStateExtUi.cpp
+
+namespace Poseidon::Arma3Rsc
+{
+GameValue CutRscEffectA3(const GameState* state, GameValuePar oper1)
+{
+    return ::CutRscEffect(state, oper1);
 }
 } // namespace Poseidon::Arma3Rsc

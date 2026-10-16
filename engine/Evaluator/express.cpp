@@ -764,6 +764,7 @@ static GameValue ListSet(const GameState* state, GameValuePar oper1, GameValuePa
 // Set by StringExitWith when the condition is true; read and cleared
 // by loop handlers (ForDoOp, StringRepeat) to propagate the exit value.
 static thread_local GameValue tls_exitWithValue;
+static GameValue TakeBreakOutValue(); // after GameState::BreakOutWithValue
 
 // exitWith in a called function leaves that function only: its value is the call's
 // value, and the caller carries on with its next statement.
@@ -2888,7 +2889,10 @@ GameValue GameState::EvaluateMultiple(const char* expression, bool localOnly) co
                 {
                     ret = NOTHING;
                     if (leaveScope)
+                    {
+                        ret = TakeBreakOutValue();
                         break;
+                    }
                     goto NextStatement;
                 }
                 // exitWith gives the scope its value (the statement itself stops before
@@ -3252,6 +3256,25 @@ void GameState::EndContext() const
 void GameState::SetScopeName(const char* name) const
 {
     _e->_scopeName = name;
+}
+
+static thread_local GameValue tls_breakOutValue;
+static thread_local bool tls_breakOutHasValue = false;
+
+void GameState::BreakOutWithValue(const char* name, const GameValue& value) const
+{
+    tls_breakOutValue = value;
+    tls_breakOutHasValue = true;
+    BreakToScope(name, true);
+}
+
+// The value a scope left by "value breakOut name" gives (taken once).
+static GameValue TakeBreakOutValue()
+{
+    GameValue v = tls_breakOutHasValue ? tls_breakOutValue : GameValue(NOTHING);
+    tls_breakOutValue = GameValue();
+    tls_breakOutHasValue = false;
+    return v;
 }
 
 void GameState::BreakToScope(const char* name, bool out) const
