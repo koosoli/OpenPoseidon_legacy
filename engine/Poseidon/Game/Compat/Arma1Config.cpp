@@ -1097,6 +1097,57 @@ const ParamEntry* Arma1WeaponModeEntry(const ParamEntry& weapon, const char* key
     return weapon.FindEntry(key);
 }
 
+// Arma 1 ballistics (OP_A1_BALLISTICS=0: CWA's). The owner's decision of 2026-10-15: Arma 1
+// armour only together with Arma 1 ammunition, so both go on and off together.
+bool Arma1BallisticsOn()
+{
+    static const bool on = [] {
+        const char* e = std::getenv("OP_A1_BALLISTICS");
+        return !(e && *e == '0');
+    }();
+    return on && Generation() == 1;
+}
+
+// A generated CfgAmmo class A1a_<ammo> on the CWA ammunition `cwaAmmo` of the same kind
+// (simulation, model, sounds, guidance), with the damage of the Arma 1 ammunition: hit,
+// indirectHit, indirectHitRange. Returns cwaAmmo when ballistics are off or the Arma 1
+// ammunition does not resolve.
+std::string Arma1AmmoClass(const std::string& a1Ammo, const std::string& cwaAmmo)
+{
+    if (!Arma1BallisticsOn() || a1Ammo.empty() || cwaAmmo.empty())
+        return cwaAmmo;
+    const ParamEntry* a1 = FindConfigClass("CfgAmmo", a1Ammo.c_str());
+    const ParamEntry* cwaRoot = Pars.FindEntry("CfgAmmo");
+    if (!a1 || !a1->IsClass() || !cwaRoot || !cwaRoot->FindEntry(cwaAmmo.c_str()))
+        return cwaAmmo;
+    const std::string generated = "A1a_" + a1Ammo;
+    if (cwaRoot->FindEntry(generated.c_str()))
+        return generated;
+    std::string text = "class CfgAmmo\r\n{\r\n\tclass " + cwaAmmo + ";\r\n\tclass " + generated + ": " + cwaAmmo +
+                       "\r\n\t{\r\n";
+    int values = 0;
+    for (const char* key : {"hit", "indirectHit", "indirectHitRange"})
+    {
+        const ParamEntry* e = a1->FindEntry(key);
+        if (!e || e->IsClass() || e->IsArray())
+            continue;
+        const float v = (float)*e;
+        if (v < 0.0f || v > 100000.0f)
+            continue;
+        char line[96];
+        std::snprintf(line, sizeof(line), "\t\t%s=%g;\r\n", key, v);
+        text += line;
+        values++;
+    }
+    text += "\t};\r\n};\r\n";
+    if (values == 0)
+        return cwaAmmo;
+    ImportIntoPars(text, generated.c_str());
+    if (!(Pars >> "CfgAmmo").FindEntry(generated.c_str()))
+        return cwaAmmo;
+    return generated;
+}
+
 // Arma 1 vehicle weapons rebuilt on CWA ones (OP_A1_VEHICLE_WEAPONS=0: the CWA carrier's).
 // For the gunner's weapons (the first turret that has a real one) a generated CfgWeapons
 // class A1v_<weapon> per Arma 1 weapon: its Arma 1 name, rounds per magazine, rate of fire,
@@ -1223,7 +1274,7 @@ std::string Arma1VehicleWeaponsText(const ParamEntry& vehicle, std::string& summ
             QuoteConfigString(text, magDisplay.empty() ? mags[0].c_str() : magDisplay.c_str());
             text += ";\r\n\t\tshortNameMagazine=";
             QuoteConfigString(text, magDisplay.empty() ? mags[0].c_str() : magDisplay.c_str());
-            text += ";\r\n\t\tammo=\"" + std::string(cwaAmmo) + "\";\r\n";
+            text += ";\r\n\t\tammo=\"" + Arma1AmmoClass(ammoName, cwaAmmo) + "\";\r\n";
             char line[128];
             if (const ParamEntry* count = mag->FindEntry("count"); count && !count->IsClass() && !count->IsArray())
             {
@@ -2248,7 +2299,12 @@ RString Arma1MagazineClass(const RString& name, const RString& cwaMagazine)
         return cwaMagazine;
     const int count = static_cast<int>(std::lround((float)*a1Count));
     const int carrierCount = static_cast<int>(std::lround((float)*cwaCount));
-    if (count <= 0 || count > 10000 || count == carrierCount)
+    // Its own ammunition (Arma1AmmoClass) also makes a magazine of the carrier's size one
+    // of its own: an Arma 1 5.56 round hits like Arma 1's, not like CWA's M16 round.
+    const std::string cwaAmmo = StringValue(*cwa, "ammo");
+    const std::string ammo = Arma1AmmoClass(StringValue(*a1, "ammo"), cwaAmmo);
+    const bool ownAmmo = !ammo.empty() && _stricmp(ammo.c_str(), cwaAmmo.c_str()) != 0;
+    if (count <= 0 || count > 10000 || (count == carrierCount && !ownAmmo))
         return cwaMagazine;
 
     const std::string generated = "A1x_" + std::string(name.Data());
@@ -2257,6 +2313,8 @@ RString Arma1MagazineClass(const RString& name, const RString& cwaMagazine)
         std::string text = "class CfgWeapons\r\n{\r\n\tclass " + std::string(cwaMagazine.Data()) + ";\r\n\tclass " +
                            generated + ": " + std::string(cwaMagazine.Data()) + "\r\n\t{\r\n";
         text += "\t\tcount=" + std::to_string(count) + ";\r\n";
+        if (ownAmmo)
+            text += "\t\tammo=\"" + ammo + "\";\r\n";
         const std::string displayName = StringValue(*a1, "displayName");
         if (!displayName.empty())
             text += "\t\tdisplayNameMagazine=\"" + displayName + "\";\r\n";
@@ -2271,8 +2329,8 @@ RString Arma1MagazineClass(const RString& name, const RString& cwaMagazine)
         // Muzzles built before this magazine existed learn it now; later ones read it
         // through GeneratedMagazinesFor when they are built.
         AddMagazineToMuzzlesTaking(cwaMagazine, RString(generated.c_str()));
-        LOG_INFO(Mission, "{}: magazine '{}' holds {} rounds on CWA '{}' ({})", Label(), name.Data(), count,
-                 cwaMagazine.Data(), carrierCount);
+        LOG_INFO(Mission, "{}: magazine '{}' holds {} rounds on CWA '{}' ({}){}{}", Label(), name.Data(), count,
+                 cwaMagazine.Data(), carrierCount, ownAmmo ? ", ammunition " : "", ownAmmo ? ammo : std::string());
     }
     return RString(generated.c_str());
 }
@@ -2605,10 +2663,13 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         if (vehicle && !IsKindOf(a1, "StaticWeapon") &&
             (ownValues || _stricmp(cwaClass.Data(), "JeepMG") == 0))
         {
-            for (const char* key : {"maxSpeed", "fuelCapacity", "transportSoldier"})
+            for (const char* key : {"maxSpeed", "fuelCapacity", "transportSoldier", "armor"})
             {
                 const bool seats = strcmp(key, "transportSoldier") == 0;
                 if (!ownValues && !seats)
+                    continue;
+                // Arma 1 armour only with Arma 1 ammunition (Arma1BallisticsOn).
+                if (strcmp(key, "armor") == 0 && !Arma1BallisticsOn())
                     continue;
                 const ParamEntry* e = a1->FindEntry(key);
                 if (!e || e->IsClass() || e->IsArray())
