@@ -31,13 +31,15 @@ class Preprocessor : public Preproc
     QIStream* OnEnterInclude(const char* filename) override
     {
         std::string resolved = filename;
-        // "\a3\missions_f_contact\missions\description.inc": a leading separator names the
-        // root of the game's file system, where every archive is mounted under its prefix
-        // (no prefix starts with one). Arma 3 missions include their shared files this way.
-        if (!QIFStreamB::FileExist(resolved.c_str()) && (resolved[0] == '\\' || resolved[0] == '/') &&
-            QIFStreamB::FileExist(resolved.c_str() + 1))
+        // An absolute include ("\CA\Missions_e\campaign\loadingscreen.ext", every Arrowhead
+        // campaign description.ext) names an archive path from the root; the banks know it
+        // without the leading separator. Unresolved, the whole description.ext failed.
+        if (!QIFStreamB::FileExist(resolved.c_str()) && (resolved[0] == '\\' || resolved[0] == '/'))
         {
-            resolved.erase(0, 1);
+            const size_t start = resolved.find_first_not_of("\\/");
+            const std::string rooted = start == std::string::npos ? std::string() : resolved.substr(start);
+            if (!rooted.empty() && QIFStreamB::FileExist(rooted.c_str()))
+                resolved = rooted;
         }
         if (!QIFStreamB::FileExist(resolved.c_str()) && !_includeStack.empty())
         {
