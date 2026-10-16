@@ -256,6 +256,8 @@ void World::InitGeneral(const ParamEntry& cfg)
     _nearImportanceDistributionTime = Poseidon::Foundation::Time(0);
     _farImportanceDistributionTime = Poseidon::Foundation::Time(0);
     _firstFrame = true;
+    // Overcast mission: start with ground already soaked (deep ruts from the start).
+    GMud().SeedWeather(_actualOvercast);
 
     RString time = cfg >> "startTime";
     RString date = cfg >> "startDate";
@@ -290,6 +292,8 @@ void World::InitGeneral(ArcadeIntel& intel)
     _nextWeatherChange = 30 * 60;
     _nearImportanceDistributionTime = Poseidon::Foundation::Time(0);
     _farImportanceDistributionTime = Poseidon::Foundation::Time(0);
+    // Overcast mission: start with ground already soaked (deep ruts from the start).
+    GMud().SeedWeather(_actualOvercast);
 
     int day = intel.day - 1;
     int year = intel.year;

@@ -3610,6 +3610,31 @@ pub unsafe extern "C" fn wgr_terrain_set_mud(renderer: *mut WgrRenderer, data: *
     }));
 }
 
+/// Upload the far mud view (0.5 m cells, 256 m window, ruts only): distant ruts.
+/// # Safety
+/// `data` must address `count` floats; renderer must be live and exclusively owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_mud_far(renderer: *mut WgrRenderer, data: *const f32, count: u32) {
+    if renderer.is_null() || data.is_null() || count != 4 + 512 * 512 { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        let values = unsafe { std::slice::from_raw_parts(data, count as usize) };
+        r.terrain.set_mud_far(&r.queue, values);
+    }));
+}
+
+/// How full of standing water the mud ruts are, [0,1]; non-finite = 0.
+/// # Safety
+/// renderer must be live and exclusively owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_mud_water(renderer: *mut WgrRenderer, level: f32) {
+    if renderer.is_null() { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        r.terrain.set_mud_water(&r.queue, level);
+    }));
+}
+
 /// Upload a signed sand view, including positive displaced-grain rims.
 /// # Safety
 /// `data` must address `count` floats; renderer must be live and exclusively owned.

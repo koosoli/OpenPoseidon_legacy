@@ -204,17 +204,20 @@ fn ground_weather_params(wetness: f32, rain: f32, sea_level: f32, time: f32) -> 
     [bounded(wetness), bounded(rain), sea_level, time]
 }
 
-// (MUD-RUNNER) MudField::MaxRidge: the churned shoulder beside a rut is a positive offset. Both
-// limits here lagged the MUD-RUNNER store, so every mud view after it was refused and the terrain
-// never showed a rut (WGR_MUD_UPLOAD_TRACE=1 prints accepted=false with the header).
-const MUD_MAX_RIDGE: f32 = 0.09;
-// MudField::MaxDepth (0.40 since MUD-RUNNER; this said 0.35 and refused every upload after it)
-const MUD_MAX_DEPTH: f32 = 0.40;
-
+// Signed mud: negative = ruts/footprints (down to -limit), positive = soil heaped
+// beside ruts (up to MUD_MAX_RIM, MudField::MaxRim). A disabled view (limit 0) is flat.
+const MUD_MAX_RIM: f32 = 0.10;
 fn valid_mud_view(data: &[f32]) -> bool {
     data.len() == 4 + 512 * 512 && data.iter().all(|v| v.is_finite())
-        && data[2] == 0.125 && data[3] >= 0.0 && data[3] <= MUD_MAX_DEPTH
-        && data[4..].iter().all(|v| *v <= MUD_MAX_RIDGE && *v >= -data[3])
+        && data[2] == 0.125 && data[3] >= 0.0 && data[3] <= 0.35
+        && data[4..].iter().all(|v| *v >= -data[3] && *v <= if data[3] > 0.0 { MUD_MAX_RIM } else { 0.0 })
+}
+
+// Far mud view: 0.5 m cells, ruts only (never positive). Shading, not geometry.
+fn valid_mud_far_view(data: &[f32]) -> bool {
+    data.len() == 4 + 512 * 512 && data.iter().all(|v| v.is_finite())
+        && data[2] == 0.5 && data[3] >= 0.0 && data[3] <= 0.35
+        && data[4..].iter().all(|v| *v >= -data[3] && *v <= 0.0)
 }
 
 fn valid_sand_view(data: &[f32]) -> bool {
@@ -259,14 +262,31 @@ fn mud_upload_rejects_nonfinite_positive_and_excess_depth_without_touching_snow(
     let mut data = vec![0.0; 4 + 512 * 512];
     data[2] = 0.125; data[3] = 0.06; data[4] = -0.03;
     assert!(valid_mud_view(&data));
-    data[4] = 0.01; assert!(valid_mud_view(&data));
-    data[4] = 0.091; assert!(!valid_mud_view(&data));
+    // Ridges beside ruts are positive, bounded by MudField::MaxRim.
+    data[5] = 0.10; assert!(valid_mud_view(&data));
+    data[5] = 0.101; assert!(!valid_mud_view(&data));
+    data[5] = 0.0;
+    data[3] = 0.0; data[4] = 0.0; data[6] = 0.01; assert!(!valid_mud_view(&data)); // disabled view stays flat
+    data[6] = 0.0; data[3] = 0.06; data[4] = -0.03;
+    data[4] = 0.11; assert!(!valid_mud_view(&data));
     data[4] = -0.061; assert!(!valid_mud_view(&data));
     data[4] = f32::NAN; assert!(!valid_mud_view(&data));
     data[4] = 0.0; data[2] = 0.25; assert!(!valid_mud_view(&data));
     data[2] = 0.125; data[3] = 0.35; data[4] = -0.24; assert!(valid_mud_view(&data));
     data[3] = 0.401; assert!(!valid_mud_view(&data));
     assert!(!valid_mud_view(&data[..data.len()-1]));
+}
+
+#[test]
+fn mud_far_upload_accepts_only_coarse_ruts() {
+    let mut data = vec![0.0; 4 + 512 * 512];
+    data[2] = 0.5; data[3] = 0.35; data[4] = -0.2;
+    assert!(valid_mud_far_view(&data));
+    data[5] = 0.01; assert!(!valid_mud_far_view(&data));      // no ridges in the far view
+    data[5] = 0.0; data[2] = 0.125; assert!(!valid_mud_far_view(&data));
+    data[2] = 0.5; data[4] = -0.36; assert!(!valid_mud_far_view(&data));
+    data[4] = f32::NAN; assert!(!valid_mud_far_view(&data));
+    assert!(!valid_mud_far_view(&data[..data.len() - 1]));
 }
 
 #[test]
@@ -692,9 +712,11 @@ impl Terrain {
         });
         let snow_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_experimental_snow"),
-            // Snow occupies the first view, signed mud the second, sand the third. Reusing
-            // the storage binding keeps colour, depth and conformed meshes aligned.
-            size: 3 * (4 + 512 * 512) * 4,
+            // Snow occupies the first view, signed mud the second, sand the third, the far
+            // (0.5 m) mud view the fourth. Reusing the storage binding keeps colour, depth
+            // and conformed meshes aligned.
+            // Four views, then one vec4 for the mud rut water level (set_mud_water).
+            size: (4 * (4 + 512 * 512) + 4) * 4,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -930,6 +952,14 @@ impl Terrain {
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(0.02);
+        // Gloss of wet soil and rain puddles (terrain.wgsl `terrain_wet_shine`):
+        // 1 = original, 0 = matte. Default 0.6 tones down the rain look.
+        let terrain_wet_shine = std::env::var("WGR_TERRAIN_WET_SHINE")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite())
+            .map(|v| v.clamp(0.0, 1.0))
+            .unwrap_or(0.6);
         // Authored-detail distance bands (see terrain.wgsl). Two bands, not one: the
         // COLOUR reaches far because the satellite it modulates is ~1 texel per metre and
         // is therefore being magnified over the whole mid field, while the per-surface
@@ -979,6 +1009,7 @@ impl Terrain {
             ("blend_width", blend_width),
             ("a3_surface_blend", a3_surface_blend),
             ("terrain_parallax", terrain_parallax),
+            ("terrain_wet_shine", terrain_wet_shine),
             ("detail_fade_start", detail_fade_start),
             ("detail_fade_end", detail_fade_end),
             ("detail_normal_start", detail_normal_start),
@@ -1228,6 +1259,18 @@ impl Terrain {
             let nonzero = body.iter().filter(|v| **v != 0.0).count();
             eprintln!("MUD_UPLOAD accepted={accepted} count={} header={:?} nonzero={nonzero} min={min:.4} max={max:.4}",
                 data.len(), data.get(..4).unwrap_or(&[]));
+        }
+    }
+
+    // Standing water in mud ruts [0,1], read by terrain.wgsl mud_water_level().
+    pub fn set_mud_water(&mut self, queue: &wgpu::Queue, level: f32) {
+        let v = if level.is_finite() { level.clamp(0.0, 1.0) } else { 0.0 };
+        queue.write_buffer(&self.snow_buffer, 4 * (4 + 512 * 512) * 4, bytemuck::cast_slice(&[v, 0.0, 0.0, 0.0]));
+    }
+
+    pub fn set_mud_far(&mut self, queue: &wgpu::Queue, data: &[f32]) {
+        if valid_mud_far_view(data) {
+            queue.write_buffer(&self.snow_buffer, 3 * (4 + 512 * 512) * 4, bytemuck::cast_slice(data));
         }
     }
 

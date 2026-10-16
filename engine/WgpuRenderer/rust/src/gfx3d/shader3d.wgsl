@@ -98,6 +98,90 @@ fn uniform_cloth_color(rgb: vec3<f32>, encoded: f32, uv: vec2<f32>, footprint: v
 }
 // END_UNIFORM_CLOTH_HELPERS
 
+// BEGIN_VEHICLE_MUD_HELPERS
+// Mud caked on vehicles (engine Weather/MudCoat.hpp). The per-draw material's
+// light_ambient.w is the material ambient alpha (never negative) except on a
+// muddy vehicle, where it is -(1 + round(wheels*127) + body); light_diffuse.w is
+// then the world height of the vehicle's lowest point. Mud is laid on the lower
+// part of the model by height above that point -- wheels and sills first,
+// creeping up the body as `body` grows -- and broken up by noise in UV space,
+// so the patches and flecks stay put on the panels as the vehicle moves.
+fn vmud_hash(p: vec2<f32>) -> f32 {
+    let q = fract(p * vec2<f32>(0.1031, 0.1030));
+    let r = q + dot(q, q.yx + vec2<f32>(33.33, 33.33));
+    return fract((r.x + r.y) * r.x);
+}
+
+fn vmud_noise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (vec2<f32>(3.0, 3.0) - 2.0 * f);
+    let a = mix(vmud_hash(i), vmud_hash(i + vec2<f32>(1.0, 0.0)), u.x);
+    let b = mix(vmud_hash(i + vec2<f32>(0.0, 1.0)), vmud_hash(i + vec2<f32>(1.0, 1.0)), u.x);
+    return mix(a, b, u.y);
+}
+
+// Height of a world point above the vehicle's lowest point, measured along the
+// vehicle's own up axis (packed as in MudCoat.hpp PackMudUp), so the mud line
+// stays on the panels when the vehicle pitches or rolls.
+fn vehicle_mud_height(world_abs: vec3<f32>, packed_up: f32, plane_d: f32) -> f32 {
+    let qx = floor(packed_up / 4096.0);
+    let qz = packed_up - qx * 4096.0;
+    let ux = qx / 4095.0 * 2.0 - 1.0;
+    let uz = qz / 4095.0 * 2.0 - 1.0;
+    let up = vec3<f32>(ux, sqrt(max(0.0, 1.0 - ux * ux - uz * uz)), uz);
+    return dot(world_abs, up) - plane_d;
+}
+
+// x = mud cover 0..1, y = how fresh/wet that mud is 0..1. h: vehicle_mud_height.
+fn vehicle_mud_cover(encoded: f32, h: f32, uv: vec2<f32>, normal: vec3<f32>,
+                     footprint: vec2<f32>) -> vec2<f32> {
+    if (!(encoded <= -1.0)) { return vec2<f32>(0.0, 0.0); }
+    let t = -encoded - 1.0;
+    let whole = floor(t + 0.0001);
+    let wheels = clamp(whole / 127.0, 0.0, 1.0);
+    let body = clamp(t - whole, 0.0, 1.0);
+    // Fine detail fades where one pixel covers a lot of texture (distant or grazing).
+    let detail = 1.0 - smoothstep(0.003, 0.012, max(footprint.x, footprint.y));
+    let n1 = vmud_noise(uv * 18.0);
+    let n2 = vmud_noise(uv * 70.0 + vec2<f32>(17.3, 5.1));
+    let n = mix(n1, n1 * 0.6 + n2 * 0.4, detail);
+    let jitter = (n - 0.5) * 0.45;
+    // Wheels turn, so a tyre is caked all the way round, not only below its hub:
+    // the wheel band reaches past the top of a truck tyre (~1.1 m) at full strength,
+    // taking the frame rails and other low parts along with it.
+    let low = wheels * (1.0 - smoothstep(1.35, 1.75, h + jitter * 0.5));
+    let reach = mix(0.8, 2.3, body);
+    let high = body * (1.0 - smoothstep(reach * 0.55, reach, h + jitter));
+    // On the body, faces pointing down or sideways catch the spray; tops collect less.
+    // Not in the wheel band: a turning tyre's tread faces every way in turn.
+    let facing = 1.0 - 0.45 * clamp(normal.y, 0.0, 1.0);
+    // Below the top of the tyres the wheel coat decides (it is never lower than
+    // the body coat while mud builds up), so a wheel-deep ford visibly washes the
+    // tyres and frame while the mud higher up stays.
+    let above_wheels = smoothstep(1.25, 1.6, h + jitter * 0.5);
+    let amount = mix(low, max(low, high * facing), above_wheels);
+    // Soft, partial coverage (thin smears blend into the paint); the hard-edged
+    // patch threshold tried in step 20 read as plastic in game.
+    var cover = clamp(amount * 1.35 - (1.0 - n) * 0.55, 0.0, 1.0);
+    // Flecks flung higher than the coat itself.
+    let fleck = step(0.8, vmud_noise(uv * 140.0 + vec2<f32>(3.7, 9.2))) * detail
+              * (1.0 - smoothstep(reach, reach * 1.6, h))
+              * mix(wheels * 0.5, max(body, wheels * 0.5), above_wheels);
+    cover = max(cover, fleck * 0.85);
+    // Low down it stays wet and dark; higher splashes dry lighter.
+    let wet = clamp(1.0 - h / max(reach, 0.5), 0.0, 1.0);
+    return vec2<f32>(cover, wet);
+}
+
+fn vehicle_mud_albedo(uv: vec2<f32>, wet: f32) -> vec3<f32> {
+    let v = vmud_noise(uv * 31.0 + vec2<f32>(1.3, 7.1));
+    let wet_mud = vec3<f32>(0.17, 0.12, 0.08);
+    let dry_mud = vec3<f32>(0.40, 0.33, 0.24);
+    return mix(dry_mud, wet_mud, clamp(wet * 0.8 + v * 0.3, 0.0, 1.0)) * (0.85 + 0.3 * v);
+}
+// END_VEHICLE_MUD_HELPERS
+
 struct Object {
     world: mat4x4<f32>,
     // Terrain-conform plane, published per instance by the CPU (ForestPlain).
@@ -1178,6 +1262,11 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // Uniform derivatives before cutout discard. RGB only: depth, alpha,
     // shadow coverage and the prepass retain their authored values.
     base = vec4<f32>(uniform_cloth_color(base.rgb, material.local_specular.w, in.uv, uniform_uv_footprint), base.a);
+    // Mud caked on vehicles (MudCoat.hpp): replaces the paint where it covers it.
+    let vehicle_mud = vehicle_mud_cover(material.light_ambient.w,
+        vehicle_mud_height(in.world_pos + frame.cam_pos.xyz, material.sun_diffuse.w, material.light_diffuse.w),
+        in.uv, in.normal, uniform_uv_footprint);
+    base = vec4<f32>(mix(base.rgb, vehicle_mud_albedo(in.uv, vehicle_mud.y), vehicle_mud.x), base.a);
     if ((material_flags(material) & 32u) != 0u && linear > 0.5) {
         let dims = vec2<f32>(textureDimensions(monitor_scene));
         let screen_uv = in.clip.xy / dims;
@@ -1301,6 +1390,8 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // The per-draw path carries no specular map: this is the ~7 sections a frame that reach
     // DrawSectionTL, not the retained set. 1.0 leaves the flat constant exactly as before.
     m.spec_mask = 1.0;
+    // Caked mud is matte where it has dried and only dully glossy where wet.
+    m.spec_mask = 1.0 - vehicle_mud.x * (0.9 - 0.4 * vehicle_mud.y);
     // The direct path has no retained SMDI binding. Show the constant specular lane and its
     // normalized power, with blue = 0 to make the absence of a texel map explicit.
     let specular_debug = vec3<f32>(

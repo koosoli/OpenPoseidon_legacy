@@ -767,7 +767,7 @@ void World::SimulateCloudlets(float deltaT)
     if (GLandscape)
     {
         GMud().Advance(deltaT, UniformWettingDensity(GLandscape->GetRainDensity(),
-            GRain.EffectiveDensity(), GRain.Params().snowflakes));
+            GRain.EffectiveDensity(), GRain.Params().snowflakes), _actualOvercast);
         GSand().Advance(deltaT, UniformWettingDensity(GLandscape->GetRainDensity(),
             GRain.EffectiveDensity(), GRain.Params().snowflakes));
         softCost.Stop();
@@ -1725,6 +1725,11 @@ void World::SwitchLandscape(const char* name)
     else
     {
         land->ResetState();
+        // Same island again (mission restart, editor preview, next mission):
+        // wheel ruts and sand tracks belong to the previous mission, so clear
+        // them like a fresh island load does (InitLandscape).
+        GMud().Reset();
+        GSand().Reset();
         Reset();
         land->FlushCache();
         if (!_map)

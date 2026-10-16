@@ -78,6 +78,8 @@ class TrackDraw: public RefCount
 	Vector3Val LeftPos() const {return _lOffset;}
 	bool HasOffsets() const {return _offsets;}
 	Vector3Val RightPos() const {return _rOffset;}
+	// Half the belt width (the two "Stopa" points mark its edges); 0 without them.
+	float HalfWidth() const {return _offsets ? (_lOffset-_rOffset).Size()*0.5f : 0.0f;}
 	const Vector3 CenterPos() const
 	{
 		Vector3 sum = _lOffset+_rOffset;
@@ -137,6 +139,10 @@ class TrackOptimized: public TrackAccumulator
 
 	Vector3 LeftPos() const {return _left.CenterPos();}
 	Vector3 RightPos() const {return _right.CenterPos();}
+	// Mud ruts: both belts located by their memory points.
+	bool HasBelts() const {return _left.HasOffsets() && _right.HasOffsets();}
+	float LeftHalfWidth() const {return _left.HalfWidth();}
+	float RightHalfWidth() const {return _right.HalfWidth();}
 };
 
 class TrackOptimizedFour: public TrackAccumulator

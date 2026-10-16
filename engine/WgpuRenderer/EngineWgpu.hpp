@@ -1369,6 +1369,8 @@ class EngineWgpu : public EngineDummy
         bool terrainParamsDirty = false;
         std::vector<float> snowData;
         std::vector<float> mudData;
+        std::vector<float> mudFarData;
+        float mudWater = -1.0f; // standing water in mud ruts [0,1]; < 0 = no update queued
         std::vector<float> sandData;
         // Sinkhole W1: this frame's terrain hole edges (n x {nx, nz, d, last}); applied with the rest so the
         // landscape draw never touches the renderer itself.
@@ -1827,6 +1829,8 @@ class EngineWgpu : public EngineDummy
     void QueueTerrainParams(const WgrTerrainParams& p);
     void QueueSnow(std::vector<float> data) { _pendingSet.snowData = std::move(data); }
     void QueueMud(std::vector<float> data) { _pendingSet.mudData = std::move(data); }
+    void QueueMudFar(std::vector<float> data) { _pendingSet.mudFarData = std::move(data); }
+    void QueueMudWater(float level) { _pendingSet.mudWater = level; }
     void QueueSand(std::vector<float> data) { _pendingSet.sandData = std::move(data); }
     void QueueWaterParams(const WgrWaterParams& p);
     void QueueRainWater(const WgrRainWaterParams& p, uint64_t revision, std::vector<WgrVec4> cells);

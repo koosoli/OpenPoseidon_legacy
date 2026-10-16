@@ -610,6 +610,11 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 
 	virtual void SetConstantColor( PackedColor color ) {}
 	virtual PackedColor GetConstantColor() const;
+	// Mud caked on a vehicle, for the renderer (Weather/MudCoat.hpp): `encoded` is
+	// EncodeMudCoat; mud is measured along the vehicle's up axis (`upPacked`,
+	// PackMudUp) from the plane dot(p, up) = `planeD` through its lowest point.
+	// False when clean or not a vehicle that collects mud.
+	virtual bool GetMudCoat( float &/*encoded*/, float &/*planeD*/, float &/*upPacked*/ ) const {return false;}
 
 	// IAnimator interface implementation
 	void GetMaterial(TLMaterial &mat, int index) const override;

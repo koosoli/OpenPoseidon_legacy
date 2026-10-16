@@ -91,5 +91,30 @@ int main()
         const float start=std::floor(camera/2)*2-32;
         assert(camera+20+8<start+64 && camera-20-8>start);
     }
+    // Wide mud relief: exact partition, 8 m patches across the 28 m window, the
+    // 8 m contact windows still at 4 m, bounded count, invalid radius = old path.
+    for (float cx:{0.f,13.f,-37.f,790.f})
+    {
+        const std::array<CdlodContactFocus,2> f{{{cx,0,8},{cx+6,0,8}}};
+        std::vector<CdlodSelection> wide;
+        RefineCdlodContactWide(parent,f,2,cx,0,CdlodWideReliefMaxRadius,[&](const auto&s){wide.push_back(s);});
+        partition(parent,wide);
+        assert(wide.size()<400);
+        for (const auto&s:wide)
+        {
+            const bool inOuter=s.originX<cx+28 && s.originZ<28 && s.originX+s.size>cx-28 && s.originZ+s.size>-28;
+            if (inOuter && s.originX>=parent.originX && s.originX+s.size<=parent.originX+parent.size) assert(s.size<=8);
+            for (const auto& point:f)
+                if (s.originX<point.x+8 && s.originZ<point.z+8 && s.originX+s.size>point.x-8 && s.originZ+s.size>point.z-8)
+                    assert(s.size<=4);
+        }
+        std::vector<CdlodSelection> off, base;
+        RefineCdlodContactWide(parent,f,2,cx,0,29.0f,[&](const auto&s){off.push_back(s);});
+        RefineCdlodContactUnion(parent,f,2,[&](const auto&s){base.push_back(s);});
+        assert(off.size()==base.size());
+        for (size_t i=0;i<off.size();++i) assert(same(off[i],base[i]));
+    }
+    // The 28 m mud window plus margin fits the camera-centred 64 m upload.
+    assert(CdlodWideReliefMaxRadius+2.0f<=32.0f);
     std::cout<<"PASS actual CDLOD focus equivalence, union, overlap, cap, partition, terrain bounds, upload margin and target gates\n";
 }

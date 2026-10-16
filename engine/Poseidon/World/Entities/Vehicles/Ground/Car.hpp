@@ -9,6 +9,9 @@
 
 #include <Poseidon/World/Entities/Infantry/Wounds.hpp>
 #include <Poseidon/World/Weather/MudWheelTrail.hpp>
+#include <Poseidon/World/Entities/Vehicles/MudClods.hpp>
+#include <Poseidon/World/Weather/MudCoat.hpp>
+#include <Poseidon/World/Weather/MudVehiclePrototype.hpp>
 
 namespace Poseidon
 {
@@ -134,7 +137,21 @@ class Car: public TankOrCar
 	float _wheelPhase;
 	float _dampers[MaxWheels];
 	MudWheelTrail _mudWheels[MaxWheels];
-	
+	// Mud traction (MudTraction.hpp), carried from the previous physics step:
+	// _mudGrip scales drive/brake force, _mudSpin is visible wheelspin 0..1,
+	// _mudSoft is how soft the ground under the wheels is (spray colour/amount).
+	float _mudGrip = 1.0f;
+	float _mudSpin = 0.0f;
+	float _mudSoft = 0.0f;
+	// Mud clods thrown off the wheels: small, dark, falling particles
+	// (the dust sources rise like smoke, which reads wrong for wet mud).
+	MudClodEmitter _mudClods[MaxWheels]; // mud thrown off each tyre (MudClods)
+	MudCoat _mudCoat;                    // mud caked on wheels and body (MudCoat.hpp)
+	float _waterDepth = 0.0f;            // deepest land-contact point under water, metres
+	const EntityType* _mudFamilyType = nullptr; // type _mudFamily was worked out for
+	MudVehicleFamily _mudFamily = MudVehicleFamily::None;
+	int _mudWheelCount = 0;
+
 	float _reverseTimeLeft; // force reverse state
 	float _forwardTimeLeft; // force forward state
 
@@ -226,6 +243,7 @@ class Car: public TankOrCar
 
 	void PerformFF(FFEffects &eff) override;
 	void Eject(AIUnit *unit) override;
+	bool GetMudCoat(float& encoded, float& planeD, float& upPacked) const override;
 	void JoystickPilot( float deltaT );
 	void SuspendedPilot(AIUnit *unit, float deltaT ) override;
 	void KeyboardPilot(AIUnit *unit, float deltaT ) override;
