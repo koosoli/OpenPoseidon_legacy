@@ -734,8 +734,33 @@ void Man::DrawArma2Head(int level, const Matrix4& transform, float dist2, float 
     const Matrix4 bone = type->_headMatIndex < matrix.Size() ? matrix[type->_headMatIndex] : Matrix4(MIdentity);
     // head-model stored coordinates -> body stored coordinates: both are stored around their
     // own bounding centre, AnimationOrigin is where their common source origin lies
-    const Matrix4 toBody(MTranslation, _shape->AnimationOrigin() - _a2Head->AnimationOrigin());
-    const Matrix4 pTransform = transform * bone * toBody;
+    const Vector3 d = _shape->AnimationOrigin() - _a2Head->AnimationOrigin();
+    const Matrix4 toBody(MTranslation, d);
+    // Skinned (OP_A2_HEAD_SKIN=0: one piece on the head bone): the neck and the collar follow
+    // the man's neck and spine bones; every face bone (jaw, lips, brows, eyes) moves with the
+    // head -- the face's own bones are not posed, the moves carry none.
+    static const bool skin = [] {
+        const char* e = std::getenv("OP_A2_HEAD_SKIN");
+        return !(e && *e == '0');
+    }();
+    const bool skinned = skin && _a2HeadWeights && matrix.Size() > 0 && type->_moveType &&
+                         type->_moveType->GetSkeleton() && matrix.Size() <= type->_moveType->GetSkeleton()->NBones();
+    MATRIX_4_ARRAY(headMatrix, 128);
+    if (skinned)
+    {
+        const Skeleton* skeleton = type->_moveType->GetSkeleton();
+        const Matrix4 fromBody(MTranslation, -d);
+        headMatrix.Resize(matrix.Size());
+        for (int i = 0; i < matrix.Size(); i++)
+        {
+            const RStringB boneName = skeleton->GetBone(i);
+            const char* name = boneName;
+            const bool own = name && (_strnicmp(name, "spine", 5) == 0 || _strnicmp(name, "neck", 4) == 0 ||
+                                      stricmp(name, "head") == 0 || stricmp(name, "pelvis") == 0);
+            headMatrix[i] = fromBody * (own ? matrix[i] : bone) * toBody;
+        }
+    }
+    const Matrix4 pTransform = skinned ? transform * toBody : transform * bone * toBody;
     const int pLevel = GScene->LevelFromDistance2(_a2Head, dist2, pTransform.Scale(), pTransform.Direction(),
                                                   GScene->GetCamera()->Direction());
     if (pLevel < 0 || pLevel == LOD_INVISIBLE)
@@ -745,6 +770,8 @@ void Man::DrawArma2Head(int level, const Matrix4& transform, float dist2, float 
     Shape* shape = _a2Head->LevelOpaque(pLevel);
     if (!shape)
         return;
+    if (skinned)
+        AnimationRT::ApplyMatrices(*_a2HeadWeights, _a2Head, pLevel, headMatrix);
     int spec = shape->Special();
     shape->PrepareTextures(z2, spec);
     shape->Draw(this, lights, ClipAll, spec, pTransform, pTransform.InverseScaled());
