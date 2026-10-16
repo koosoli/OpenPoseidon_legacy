@@ -95,6 +95,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 
 #include <Poseidon/World/WorldShared.hpp>
 AbstractOptionsUI* CreateChannelUI();
+void Arma2CampaignAutoStep(); // Game/Compat/Arma2CampaignAuto.cpp
 
 namespace Poseidon
 {
@@ -1902,6 +1903,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
         {
             _options->SimulateHUD(nullptr);
         }
+        Arma2CampaignAutoStep(); // OP_A2_CAMPAIGN only: walk a campaign unattended
         if (!HasOptions() && _cameraOn != nullptr && !_userDlg)
         {
             if (_ui && IsUIEnabled())
