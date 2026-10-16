@@ -460,7 +460,12 @@ aircraft on an armed CWA one drops its weapons. Left out: the Camel's dropped gr
 a1tank and a1gunfire unchanged (M1A1 SABOT kills the T-72; M2 and DShKM fire); 22-mission gate
 22/22 exit 0 -- **deployed** 2026-10-16 16:10 (stamped; exe, PoseidonGame.exe and DLL
 md5-identical to `dist`; previous binaries in `Remastered\backup-before-85943a89`). Full
-131-mission run on it queued.
+131-mission run (16:14-17:07): **131/131 exit 0**.
+
+`a1heli` (85943a89, 150 s, `A1_SHOTS` for later screenshots): an AH-1W against a T-72, a BMP-2
+and a UAZ at ~800 m. Within 20 s it fires two Hellfires (8 -> 6): T-72 and BMP-2 destroyed
+(damage 1 each). It then hovers at 48 m and 770 m for the rest; the UAZ is left alone (M197
+and FFAR unused at that range).
 
 
 ## Known gaps (honest list)
