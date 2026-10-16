@@ -2311,6 +2311,16 @@ void Transport::DrawCameraCockpit()
     GEngine->Draw2D(mip, color, Rect2DAbs(0, 0, w, h));
 }
 
+// Where a crew member's model goes relative to his seat proxy, which places his SOURCE
+// origin. OFP/CWA models are drawn around their bounding centre; an Arma ODOL man is
+// stored around the binariser's centre instead and records where his source origin lies
+// in those coordinates (LODShape::AnimationOrigin, zero for OFP models) -- without it an
+// Arma 1 soldier sat a whole centre (~0.9 m) below his seat, under the HMMWV (a1cargo).
+static Vector3 CrewSeatOffset(const LODShapeWithShadow* manShape)
+{
+    return manShape->BoundingCenter() - manShape->AnimationOrigin();
+}
+
 void Transport::DrawCrewMember(int level, ClipFlags clipFlags, const Matrix4& transform, const Matrix4& invTransform,
                                float dist2, float z2, const LightList& lights, const ManProxy& proxy, Person* man,
                                bool hideWeapons)
@@ -2321,7 +2331,7 @@ void Transport::DrawCrewMember(int level, ClipFlags clipFlags, const Matrix4& tr
 
     AnimateManProxyMatrix(level, proxy, proxyTransform);
 
-    proxyTransform.SetPosition(proxyTransform.FastTransform(manShape->BoundingCenter()));
+    proxyTransform.SetPosition(proxyTransform.FastTransform(CrewSeatOffset(manShape)));
     Matrix4Val pTransform = transform * proxyTransform;
 
     int pLevel;
@@ -2376,7 +2386,7 @@ int Transport::GetCrewMemberComplexity(int level, const FrameBase& pos, float di
 
     AnimateManProxyMatrix(level, proxy, proxyTransform);
 
-    proxyTransform.SetPosition(proxyTransform.FastTransform(manShape->BoundingCenter()));
+    proxyTransform.SetPosition(proxyTransform.FastTransform(CrewSeatOffset(manShape)));
     Matrix4Val pTransform = pos.Transform() * proxyTransform;
 
     int pLevel;
@@ -2532,7 +2542,7 @@ Object* Transport::GetProxy(LODShapeWithShadow*& shape, int level, Matrix4& tran
 
     AnimateManProxyMatrix(level, *proxy, proxyTransform);
 
-    proxyTransform.SetPosition(proxyTransform.FastTransform(manShape->BoundingCenter()));
+    proxyTransform.SetPosition(proxyTransform.FastTransform(CrewSeatOffset(manShape)));
     transform = parentPos.Transform() * proxyTransform;
     invTransform = transform.InverseScaled();
 
@@ -2891,7 +2901,7 @@ bool Transport::GetProxyCamera(Matrix4& transf, CameraType camType) const
     LODShapeWithShadow* manShape = man->GetShape();
     transf = proxy->transform;
     Vector3 pos = man->GetPilotPosition(camType);
-    transf.SetPosition(transf.FastTransform(manShape->BoundingCenter()));
+    transf.SetPosition(transf.FastTransform(CrewSeatOffset(manShape)));
     transf.SetPosition(transf.FastTransform(pos));
     AnimateMatrix(transf, level, proxy->selection);
     // MAT-053 diagnostic (temporary): the bridged-vehicle interior camera comes through
