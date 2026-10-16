@@ -449,7 +449,7 @@ const Stub kStubs[] = {
     {"lockedCargo", 'b', GameNothing, GameAny, GameAny, ""},
     {"lockedDriver", 'u', GameNothing, 0, GameAny, ""},
     {"lockedTurret", 'b', GameNothing, GameAny, GameAny, ""},
-    {"lockIdentity", 'b', GameNothing, GameAny, GameAny, ""},
+    {"lockIdentity", 'u', GameBool, 0, GameAny, "true"},
     {"lockInventory", 'b', GameNothing, GameAny, GameAny, ""},
     {"magazineCargo", 'u', GameAny, 0, GameAny, "[]"},
     {"magazinesAllTurrets", 'u', GameAny, 0, GameAny, "nil"},
