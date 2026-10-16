@@ -71,7 +71,7 @@ void Transport::PlaceOnSurface(Matrix4& trans)
     float dx, dz;
     pos[1] = GLandscape->RoadSurfaceYAboveWater(pos, &dx, &dz);
 
-    if (!Type()->HasDriver())
+    if (!Type()->HasDriver() && GetShape()->AnimationOrigin().SquareSize() <= 1e-8f)
     {
         pos += orient * GetShape()->BoundingCenter();
     }
