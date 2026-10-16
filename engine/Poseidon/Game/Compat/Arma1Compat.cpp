@@ -424,6 +424,10 @@ const std::map<std::string, std::vector<const char*>>& MagazineAliases()
 {
     static const std::map<std::string, std::vector<const char*>> table = {
         {"30rnd_556x45_stanag", {"M16"}},   {"30rnd_556x45_stanagsd", {"M16"}},
+        // G36 rounds on CWA's own G36a (its magazine, by the weapon-carrier rule in
+        // ResolveMagazineClass): on M16 rounds the G36a stayed empty -- two modes, the
+        // G36a muzzle has three. The G36K and G36C on M16 take them through their listing.
+        {"30rnd_556x45_g36", {"G36a", "M16"}}, {"30rnd_556x45_g36sd", {"G36a", "M16"}},
         {"200rnd_556x45_m249", {"M60"}},    {"100rnd_762x51_m240", {"M60"}},
         {"5rnd_762x51_m24", {"M21"}},       {"10rnd_127x99_m107", {"M21"}},
         {"30rnd_9x19_mp5", {"HK", "M16"}},  {"30rnd_9x19_mp5sd", {"HK", "M16"}},
