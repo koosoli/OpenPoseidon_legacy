@@ -431,7 +431,8 @@ no screenshots written. The stall report now also takes stacks at 90 and 170 s.
   (`TK_RPG_Backpack_EP1`, `US_Patrol_Pack_Specops_EP1`, ...); the body only has an unbound
   `us_bag` placeholder, so none was drawn. The pack models are skinned to the skeleton
   (spine..spine3) in the body's source coordinates; they are now posed with the man's bone
-  matrices. Not yet measured.
+  matrices. Focus 21 (`574ee4a`): DumSpiroSpero's player wears his pack on his back, posed
+  with him; 5 of 5 missions clean.
 
 ## Steps
 

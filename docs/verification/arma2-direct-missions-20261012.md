@@ -133,6 +133,7 @@ and are not counted.
 | wgpu 3 | `6e89b47` | T01, C2B, TE02, laptop **WGPU, DX12** | 0 | 0 | No stderr panic any more: the renderer is created in all three (~60 s), then no simulation step until the watchdog (180 s, exit 3) |
 | wgpu 4 | `6e89b47` | T01, laptop **WGPU, Vulkan** | 1 | 1 | Renderer created in 60 s, mission entered and played to the end (exit 0, 154 s) -- but at a few frames per second, and no screenshots were written |
 | 22 | `6e89b47` | 98, laptop gl33, face pictures | 98 | 97 | 0; the one script error is MP_Paradrop's own (as in run 21); census 13049 Arma, 0 CWA. No regression from the heads, faces and `createSoundSource`. Face pictures sampled (8 missions): sharp faces; the shadow patches remain; several default heads look as if their eyes were shut (the face's own bones are not posed -- open). SP_Counterattack's face shots show the road (player seated), CE5A's are dark (night) |
+| focus 21 | `574ee4a` | MPE1_HuntersHunted, SPE1_DumSpiroSpero, CE2, TE11, T01, laptop gl33 | 5 | 5 | 0; census 1274 Arma, 0 CWA. Backpacks: 9 classes named theirs (CZ vest pouches, ACR and US assault packs, ALICE, civil assault pack); DumSpiroSpero's player (CZ_Special_Forces_TL_DES_EP1) wears his `backpack_acr_small` on his back in the posed third-person view (run 22 without it). HuntersHunted is at night -- not visible |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
