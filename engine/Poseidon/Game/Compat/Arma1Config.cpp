@@ -1321,9 +1321,11 @@ std::string Arma1AmmoClass(const std::string& a1Ammo, const std::string& cwaAmmo
 // class A1v_<weapon> per Arma 1 weapon: its Arma 1 name, rounds per magazine, rate of fire,
 // muzzle velocity and sound, on the CWA weapon and ammunition of its kind -- bullets on
 // CWA's 7.62 / 12.7 / 30 mm machine guns, 30/40 mm grenades on the M203 grenade, shells on
-// CWA's tank shells, missiles on the AT-3. Returns the vehicle's weapons[]/magazines[]
+// CWA's tank shells, rockets on the Zuni or 57 mm rocket, anti-armour missiles on the AT-3
+// (aircraft: the Hellfire), bombs on the laser-guided bomb, anti-aircraft missiles on CWA's AA
+// launcher. Returns the vehicle's weapons[]/magazines[]
 // lines (empty when there is nothing to rebuild) and what was done in `summary`.
-std::string Arma1VehicleWeaponsText(const ParamEntry& vehicle, std::string& summary)
+std::string Arma1VehicleWeaponsText(const ParamEntry& vehicle, std::string& summary, bool air)
 {
     summary.clear();
     const ParamEntry* turret = nullptr;
@@ -1355,16 +1357,22 @@ std::string Arma1VehicleWeaponsText(const ParamEntry& vehicle, std::string& summ
         return nullptr;
     };
     turret = find(vehicle, 0);
-    if (!turret)
-        return {};
-    const ParamEntry* weapons = turret->FindEntry("weapons");
-    const ParamEntry* turretMags = turret->FindEntry("magazines");
+    // An aircraft's own weapons are its pilot's (the A-10's GAU-8, the UH-60's FFAR); a turret
+    // with weapons is its gunner's (the AH-1W's M197). CWA has one weapons list per vehicle, so
+    // an aircraft carries both; a ground vehicle the turret's.
+    std::vector<std::pair<const ParamEntry*, const ParamEntry*>> sources;
+    if (air)
+        sources.emplace_back(vehicle.FindEntry("weapons"), vehicle.FindEntry("magazines"));
+    if (turret)
+        sources.emplace_back(turret->FindEntry("weapons"), turret->FindEntry("magazines"));
     const ParamEntry* cwaWeapons = Pars.FindEntry("CfgWeapons");
-    if (!weapons || !weapons->IsArray() || !cwaWeapons)
+    const ParamEntry* cwaAmmoRoot = Pars.FindEntry("CfgAmmo");
+    if (!cwaWeapons || !cwaAmmoRoot)
         return {};
 
     std::string weaponList, magazineList;
-    for (int i = 0; i < weapons->GetSize(); i++)
+    for (const auto& [weapons, turretMags] : sources)
+    for (int i = 0; weapons && weapons->IsArray() && i < weapons->GetSize(); i++)
     {
         const std::string name = (const char*)(RStringB)(*weapons)[i];
         const std::string lower = Lower(name);
@@ -1534,8 +1542,43 @@ std::string Arma1VehicleWeaponsText(const ParamEntry& vehicle, std::string& summ
             else
                 base = "MachineGun7_6", cwaAmmo = (has("120") || has("122") || has("125")) ? "Shell120" : "Shell73";
         }
+        else if (sim == "shotrocket")
+        {
+            // unguided rockets: 57 mm on CWA's Rocket57x64, FFAR (70 mm) and S-8 (80 mm) on the
+            // Zuni; the Camel's dropped grenades have no CWA kind
+            if (Lower(ammoName).rfind("g_", 0) != 0)
+            {
+                if (has("57mm") || has("_57"))
+                    base = "Rocket57x64", cwaAmmo = "Rocket57";
+                else
+                    base = "ZuniLauncher38", cwaAmmo = "Zuni";
+            }
+        }
         else if (sim == "shotmissile")
-            base = "AT3Launcher", cwaAmmo = "AT3";
+        {
+            const ParamEntry* lock = ammo ? ammo->FindEntry("airLock") : nullptr;
+            const bool antiAir = lock && !lock->IsClass() && !lock->IsArray() && (int)*lock == 1;
+            if (antiAir)
+            {
+                // Sidewinder, R-73, Stinger: CWA's own anti-aircraft launcher, not an AT missile
+                for (const auto& [w, am] : {std::pair<const char*, const char*>{"AALauncher", "AA"},
+                                            std::pair<const char*, const char*>{"9K32Launcher", "AA"},
+                                            std::pair<const char*, const char*>{"StingerLauncher", "Stinger"}})
+                    if (cwaWeapons->FindEntry(w) && cwaAmmoRoot->FindEntry(am))
+                    {
+                        base = w, cwaAmmo = am;
+                        break;
+                    }
+            }
+            else if (Lower(ammoName).rfind("bo_", 0) == 0)
+                base = "LaserGuidedBombLauncher", cwaAmmo = "LaserGuidedBomb"; // GBU-12
+            else if (air)
+                base = "HellfireLauncherCobra", cwaAmmo = "Hellfire"; // Hellfire, Maverick, Vikhr, Ch-29
+            else
+                base = "AT3Launcher", cwaAmmo = "AT3";
+        }
+        if (base && !cwaAmmoRoot->FindEntry(cwaAmmo))
+            base = nullptr;
         if (!base || !cwaWeapons->FindEntry(base))
         {
             summary += " '" + name + "' (" + (sim.empty() ? "unknown" : sim) + ": no CWA kind)";
@@ -3003,15 +3046,17 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         // Its own gunner's weapons, rebuilt on CWA ones: cars, boats, tanks and static weapons
         // on a CWA carrier with a gunner -- the weapons of the first turret that has any (the
         // tank's main turret; a commander's own gun, the M1A1's M2, has no seat in CWA's tank
-        // and is left out). Helicopters and planes keep CWA's for now.
+        // and is left out). Aircraft carry their own (pilot's) weapons and their gunner's.
         bool rebuilt = false;
-        if (Arma1VehicleWeapons() && (sim == "car" || sim == "ship" || sim == "tank" || IsKindOf(a1, "StaticWeapon")))
+        const bool air = sim == "helicopter" || sim == "airplane";
+        if (Arma1VehicleWeapons() &&
+            (sim == "car" || sim == "ship" || sim == "tank" || air || IsKindOf(a1, "StaticWeapon")))
         {
             const ParamEntry* gunner = cwa->FindEntry("hasGunner");
-            if (gunner && !gunner->IsClass() && !gunner->IsArray() && (int)*gunner == 1)
+            if (air || (gunner && !gunner->IsClass() && !gunner->IsArray() && (int)*gunner == 1))
             {
                 std::string summary;
-                const std::string lines = Arma1VehicleWeaponsText(*a1, summary);
+                const std::string lines = Arma1VehicleWeaponsText(*a1, summary, air);
                 if (!lines.empty())
                 {
                     text += lines;
@@ -3021,8 +3066,9 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
                     LOG_INFO(Mission, "{}: '{}' weapons:{}", Label(), missionClass.Data(), summary);
             }
         }
-        // A static without a real weapon (the searchlight) on CWA's static M2 drops the M2.
-        if (!rebuilt && IsKindOf(a1, "StaticWeapon"))
+        // A static without a real weapon (the searchlight) on CWA's static M2 drops the M2; an
+        // unarmed aircraft (MH-6, C-130 ...) on an armed CWA one drops its rockets.
+        if (!rebuilt && (IsKindOf(a1, "StaticWeapon") || (air && Arma1VehicleWeapons())))
         {
             std::string weapon;
             Arma1MainGunAmmo(*a1, weapon);
