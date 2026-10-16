@@ -417,6 +417,27 @@ between them), both fire their main gun (M1A1 2 rounds, T-72 1), the T-72 is at 
 after two hits, the M1A1 at 0 after one (Arma 1 armour 900). Main guns are still CWA's
 (`Gun120` on both -- see Known gaps).
 
+## Tanks fire their own main guns (2026-10-16 afternoon; 7e00850f, deployed)
+
+Owner's decision 2026-10-15 ("original weapons everywhere"): tanks now join cars, boats and
+statics. The main turret's weapons are rebuilt; a cannon keeps SABOT and HE apart the way CWA
+builds `Gun120` (CWA config, `a1cfgdump`: `Gun120` magazines `Heat120`/`Shell120`, each a
+CfgWeapons class with ammo, count, reload): `A1v_<gun>` on `Gun120` (120/122/125 mm) or `Gun73`
+with `magazines[]` naming generated `A1m_<magazine>` classes, each on CWA's anti-armour
+(`Heat120/73`) or high-explosive (`Shell120/73`) round with the Arma 1 name, rounds, muzzle
+velocity, reload time, sound and damage. The commander's own weapon (M1A1 M2, T-72 DShKM) has
+no seat in CWA's tank and is left out (deviation).
+
+| a1tank (7e00850f) | result |
+|---|---|
+| M1A1 | `M256` -> Gun120 with `20Rnd_120mmSABOT_M1A2` (Heat120) and `20Rnd_120mmHE_M1A2` (Shell120), `M240_veh` on MachineGun7_6 |
+| T-72 | `D81` -> Gun120 with `23Rnd_125mmSABOT_T72` and `22Rnd_125mmHE_T72`, `PKT` |
+| fight at 140 m | M1A1 fires 2 SABOT (20 -> 18), T-72 destroyed (damage 1); T-72 fires 1, M1A1 at 0.68 |
+| a1gunfire, a1vehArm, 22-mission gate | exit 0, gate 22/22 |
+
+Deployed 2026-10-16 14:58 (stamped; exe, PoseidonGame.exe and DLL md5-identical to `dist`;
+previous binaries in `Remastered\backup-before-7e00850f`). Full 131-mission run queued.
+
 ## Known gaps (honest list)
 
 - Missions needing third-party addons (`un-impossible_mission.cain`: `BBB006`) cannot run.
