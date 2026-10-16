@@ -290,6 +290,18 @@ RString GetMissionSaveDirectory(RString mission)
     return dir;
 }
 
+// A mission's sound file: beside the mission, unless the name is a path from the root of
+// the game's file system that only exists there ("\\a3\\sounds_f\\...", or Arma 3's
+// "@a3\\..." -- GetDefaultName drops the leading marker), which mission-relative lookup
+// would turn into "<mission>\\a3\\..." and never find.
+static RString MissionSoundPath(const RString& name)
+{
+    const RString inMission = GetMissionDirectory() + name;
+    if (!QIFStreamB::FileExist(inMission) && QIFStreamB::FileExist(name))
+        return name;
+    return inMission;
+}
+
 void FindEnvSound(RString name, SoundPars& day, SoundPars& night)
 {
     // ignore @ - not used now
@@ -306,12 +318,12 @@ void FindEnvSound(RString name, SoundPars& day, SoundPars& night)
         GetValue(day, (*entry) >> "sound");
         if (day.name.GetLength() > 0)
         {
-            day.name = GetMissionDirectory() + day.name;
+            day.name = MissionSoundPath(day.name);
         }
         GetValue(night, (*entry) >> "soundNight");
         if (night.name.GetLength() > 0)
         {
-            night.name = GetMissionDirectory() + night.name;
+            night.name = MissionSoundPath(night.name);
         }
         return;
     }
@@ -374,7 +386,7 @@ void FindSFX(RString name, SoundEntry& emptySound, AutoArray<SoundEntry>& sounds
         emptySound = DynSound::LoadEntry((*entry) >> "empty");
         if (emptySound.name.GetLength() > 0)
         {
-            emptySound.name = GetMissionDirectory() + emptySound.name;
+            emptySound.name = MissionSoundPath(emptySound.name);
         }
         // load sound scheme
         const ParamEntry& list = (*entry) >> "sounds";
@@ -387,7 +399,7 @@ void FindSFX(RString name, SoundEntry& emptySound, AutoArray<SoundEntry>& sounds
             sound = DynSound::LoadEntry((*entry) >> name);
             if (sound.name.GetLength() > 0)
             {
-                sound.name = GetMissionDirectory() + sound.name;
+                sound.name = MissionSoundPath(sound.name);
                 PreferExistingVoiceLanguageOverride(sound);
             }
         }
@@ -489,7 +501,7 @@ const ParamEntry* FindSound(RString name, SoundPars& pars)
         GetValue(pars, (*entry) >> "sound");
         if (pars.name.GetLength() > 0)
         {
-            pars.name = GetMissionDirectory() + pars.name;
+            pars.name = MissionSoundPath(pars.name);
             // Per-language voice override: prefer "<base>.<voiceLang>.<ext>" if it exists.
             // Resolved at play time so a runtime voice-language switch picks up the new
             // file on the next say/playSound — currently-playing audio is unaffected.
@@ -549,7 +561,7 @@ const ParamEntry* FindMusic(RString name, SoundPars& pars)
         GetValue(pars, (*entry) >> "sound");
         if (pars.name.GetLength() > 0)
         {
-            pars.name = GetMissionDirectory() + pars.name;
+            pars.name = MissionSoundPath(pars.name);
         }
         return entry;
     }
@@ -596,7 +608,7 @@ const ParamEntry* FindRadio(RString name, SoundPars& pars)
         GetValue(pars, (*entry) >> "sound");
         if (pars.name.GetLength() > 0)
         {
-            pars.name = GetMissionDirectory() + pars.name;
+            pars.name = MissionSoundPath(pars.name);
             PreferExistingVoiceLanguageOverride(pars);
         }
         return entry;
