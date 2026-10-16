@@ -406,6 +406,11 @@ to what the gun transform moved and the turret's did not -- a case OFP models ca
 `weaponDirection` returned the body's heading for every weapon (an Arma 2 stub); **bd7a23ce**
 returns the named weapon's barrel direction.
 
+bd7a23ce: a1gunfire (M2 fires, `weaponDirection` follows the turret: 0.15, 0.29 east), a1crew3,
+22-mission gate 22/22 exit 0 -- **deployed** (stamped 2026-10-16 12:33; exe, PoseidonGame.exe
+and DLL md5-identical to `dist`; previous binaries in `Remastered\backup-before-bd7a23ce`).
+Full 131-mission run on it queued.
+
 ## Known gaps (honest list)
 
 - Missions needing third-party addons (`un-impossible_mission.cain`: `BBB006`) cannot run.
