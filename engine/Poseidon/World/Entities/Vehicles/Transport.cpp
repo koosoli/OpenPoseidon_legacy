@@ -2232,22 +2232,29 @@ void TransportType::InitShape()
     // --arma1/--arma2 diagnostic: where an Arma model seats its crew in LOD 0, so a crew
     // member drawn outside the vehicle (Arma 1 HMMWV passengers sitting on the ground) can be
     // traced to its proxy. Logged once per vehicle type.
-    if (Arma1Compat::Active() && _shape->NLevels() > 0)
+    if (Arma1Compat::Active() && _shape->NLevels() > 0 && _strnicmp((const char*)GetName(), "A1x_", 4) == 0)
     {
-        const LevelProxies& p0 = _proxies[0];
         const auto at = [](const ManProxy& m) {
             char buf[96];
             const ::Vector3 pos = m.transform.Position();
-            snprintf(buf, sizeof(buf), "%s(%.2f %.2f %.2f)", m.Present() ? "" : "absent", pos.X(), pos.Y(), pos.Z());
+            if (!m.Present())
+                return std::string("-");
+            snprintf(buf, sizeof(buf), "(%.2f %.2f %.2f)", pos.X(), pos.Y(), pos.Z());
             return std::string(buf);
         };
-        std::string cargo;
-        for (int i = 0; i < p0._cargoProxy.Size(); i++)
-            cargo += " " + at(p0._cargoProxy[i]);
         const ::Vector3 mn = _shape->Min(), mx = _shape->Max();
-        LOG_INFO(Graphics, "Crew seats {} ({}): box ({:.2f} {:.2f} {:.2f})..({:.2f} {:.2f} {:.2f}) driver {} gunner {} commander {} cargo[{}]{}",
-                 (const char*)GetName(), _shape->Name(), mn.X(), mn.Y(), mn.Z(), mx.X(), mx.Y(), mx.Z(),
-                 at(p0._driverProxy), at(p0._gunnerProxy), at(p0._commanderProxy), p0._cargoProxy.Size(), cargo);
+        LOG_INFO(Graphics, "Crew seats {} ({}): box ({:.2f} {:.2f} {:.2f})..({:.2f} {:.2f} {:.2f}), {} levels",
+                 (const char*)GetName(), _shape->Name(), mn.X(), mn.Y(), mn.Z(), mx.X(), mx.Y(), mx.Z(), _shape->NLevels());
+        for (int level = 0; level < _shape->NLevels(); level++)
+        {
+            const LevelProxies& p = _proxies[level];
+            std::string cargo;
+            for (int i = 0; i < p._cargoProxy.Size(); i++)
+                cargo += " " + at(p._cargoProxy[i]);
+            LOG_INFO(Graphics, "Crew seats {} level {} (resolution {:g}): driver {} gunner {} commander {} cargo[{}]{}",
+                     (const char*)GetName(), level, _shape->Resolution(level), at(p._driverProxy), at(p._gunnerProxy),
+                     at(p._commanderProxy), p._cargoProxy.Size(), cargo);
+        }
     }
 
     Shape* memory = _shape->MemoryLevel();
