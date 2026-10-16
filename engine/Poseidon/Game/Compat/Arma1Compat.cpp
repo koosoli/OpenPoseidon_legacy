@@ -950,7 +950,27 @@ std::map<std::string, std::string>& ResolvedMagazineNames()
 RString ResolveMagazineClass(const RString& className)
 {
     // OFP/CWA keeps magazines in CfgWeapons as well.
-    const RString cwa = ResolveFrom("CfgWeapons", className, MagazineAliases());
+    RString cwa = ResolveFrom("CfgWeapons", className, MagazineAliases());
+    // A carrier that is a weapon with magazines of its own (CWA's Beretta and Tokarev take
+    // BerettaMag and TokarevMag) is no magazine: its first magazine carries the round. A
+    // magazine built on the pistol class itself had no ammunition mode, and once loaded
+    // the AI's fire evaluation read a null mode (x05warreporter, 24175174).
+    if (Active() && cwa.GetLength() > 0 && _stricmp(cwa.Data(), className.Data()) != 0)
+        if (const ParamEntry* weapons = Pars.FindEntry("CfgWeapons"))
+            if (const ParamEntry* carrier = weapons->FindEntry(cwa); carrier && carrier->IsClass())
+                if (const ParamEntry* mags = carrier->FindEntry("magazines");
+                    mags && mags->IsArray() && mags->GetSize() > 0)
+                {
+                    bool own = false;
+                    for (int i = 0; i < mags->GetSize() && !own; i++)
+                    {
+                        const RString m = (RStringB)(*mags)[i];
+                        own = _stricmp(m.Data(), "this") == 0 || _stricmp(m.Data(), cwa.Data()) == 0;
+                    }
+                    const RString first = (RStringB)(*mags)[0];
+                    if (!own && weapons->FindEntry(first))
+                        cwa = first;
+                }
     if (Active() && cwa.GetLength() > 0 && className.GetLength() > 0 && _stricmp(cwa.Data(), className.Data()) != 0)
     {
         // An Arma 1 magazine of another size than its carrier gets a class of its own.

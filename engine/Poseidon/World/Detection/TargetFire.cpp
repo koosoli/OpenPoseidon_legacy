@@ -1259,7 +1259,8 @@ bool EntityAI::WhatFireResult(FireResult& result, const Target& target, float ti
         }
         const WeaponModeType* mode = GetWeaponMode(w);
         PoseidonAssert(mode);
-        const AmmoType* ammo = mode->_ammo;
+        // a magazine with fewer modes than its muzzle has no mode for this slot
+        const AmmoType* ammo = mode ? mode->_ammo : nullptr;
         if (!ammo)
         {
             continue;

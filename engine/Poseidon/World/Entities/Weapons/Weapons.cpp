@@ -557,9 +557,16 @@ void MuzzleType::Init(const ParamEntry& cls, const WeaponType* weapon)
             {
                 present = _magazines[k] && stricmp(_magazines[k]->GetName(), extra) == 0;
             }
-            if (!present)
+            if (present)
             {
-                _magazines.Add(MagazineTypes.New(extra));
+                continue;
+            }
+            // a magazine needs a mode for every mode of the muzzle (a magazine on M16
+            // rounds has two, CWA's G36a muzzle three): the slot would read none
+            Ref<MagazineType> type = MagazineTypes.New(extra);
+            if (type && type->_modes.Size() >= (cls >> "modes").GetSize())
+            {
+                _magazines.Add(type);
             }
         }
     }
@@ -608,6 +615,10 @@ void Poseidon::AddMagazineToMuzzlesTaking(const char* baseMagazine, const char* 
                 if (!added)
                 {
                     added = MagazineTypes.New(magazine);
+                }
+                if (listed && (!added || added->_modes.Size() < muzzle->_nModes))
+                {
+                    continue; // no mode for every slot of this muzzle
                 }
                 muzzle->_magazines.Add(added);
             }
