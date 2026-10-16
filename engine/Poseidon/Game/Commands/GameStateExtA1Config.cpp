@@ -446,6 +446,27 @@ GameValue A3ConfigHierarchy(const GameState*, GameValuePar oper1)
     return GameValue(out);
 }
 
+// configHierarchy [config, ...flags, returnNames] -- the form BIS_fnc_returnParents uses:
+// the class and its base classes, the class first (configName of each with returnNames).
+GameValue A3ConfigHierarchyArray(const GameState* state, GameValuePar oper1)
+{
+    GameArrayType out;
+    const GameArrayType& args = oper1;
+    if (args.Size() < 1 || !IsConfigValue(args[0]))
+        return GameValue(out);
+    const bool names = args.Size() >= 5 && args[4].GetType() == GameBool && (bool)args[4];
+    GameValue cur = args[0];
+    for (int guard = 0; guard < 64; guard++)
+    {
+        const RString path = cur;
+        if (path.GetLength() == 0 || !Resolve(cur))
+            break;
+        out.Add(names ? A1ConfigName(state, cur) : cur);
+        cur = A1InheritsFrom(state, cur);
+    }
+    return GameValue(out);
+}
+
 GameValue A3ConfigNull(const GameState*)
 {
     return GameValue(RString("::CFG::\x01null"));
@@ -512,6 +533,7 @@ void RegisterArma3ConfigCommands()
     GGameState.NewFunction(GameFunction(GameArray, "configClasses", A3ConfigClassesTiers, GameArray));
     GGameState.NewFunction(GameFunction(GameArray, "configProperties", A3ConfigProperties, GameArray));
     GGameState.NewFunction(GameFunction(GameArray, "configHierarchy", A3ConfigHierarchy, GameString));
+    GGameState.NewFunction(GameFunction(GameArray, "configHierarchy", A3ConfigHierarchyArray, GameArray));
     GGameState.NewNularOp(GameNular(GameString, "configNull", A3ConfigNull));
     GGameState.NewFunction(GameFunction(GameAny, "getMissionConfigValue", A3GetMissionConfigValue, GameString | GameArray));
     GGameState.NewFunction(GameFunction(GameString, "getMissionConfig", A3GetMissionConfig, GameString));
