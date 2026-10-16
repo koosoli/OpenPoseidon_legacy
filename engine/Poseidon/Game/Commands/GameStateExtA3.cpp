@@ -1789,6 +1789,10 @@ const Macro kMacros[] = {
     {"animationSourcePhase", 'b', GameScalar, GameObject, GameString, "(_this select 0) animationPhase (_this select 1)"},
     {"doorPhase", 'b', GameScalar, GameObject, GameString, "(_this select 0) animationPhase (_this select 1)"},
     {"objectParent", 'u', GameObject, 0, GameObject, "if (vehicle _this == _this) then {objNull} else {vehicle _this}"},
+    // enableEnvironment [ambient life, ambient sound] (Arma 3's array form); one switch here
+    {"enableEnvironment", 'u', GameNothing, 0, GameArray, "enableEnvironment ((_this select 0) || (_this select 1))"},
+    // "enableWeaponDisassembly false" without its object (seen in Eden init lines): nothing to do
+    {"enableWeaponDisassembly", 'u', GameNothing, 0, GameBool, ""},
     {"lifeState", 'u', GameString, 0, GameObject, "if (alive _this) then {'HEALTHY'} else {'DEAD'}"},
     {"incapacitatedState", 'u', GameString, 0, GameObject, "''"},
     {"getHitPointDamage", 'b', GameScalar, GameObject, GameString, "damage (_this select 0)"},
@@ -2036,6 +2040,8 @@ const Macro kMacros2[] = {
     {"cutText", 'b', GameNothing, GameString | GameScalar, GameArray, "cutText (_this select 1)"},
     {"titleText", 'b', GameNothing, GameString | GameScalar, GameArray, "titleText (_this select 1)"},
     {"enableWeaponDisassembly", 'b', GameNothing, GameObject, GameBool, ""},
+    // vehicle lock 0..3 (Arma 3: unlocked, default, locked, locked for the player)
+    {"lock", 'b', GameNothing, GameObject, GameScalar, "(_this select 0) lock ((_this select 1) >= 2)"},
 };
 
 template <size_t I>

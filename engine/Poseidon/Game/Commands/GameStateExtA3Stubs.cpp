@@ -319,7 +319,10 @@ const Stub kStubs[] = {
     {"get3DENMissionAttribute", 'b', GameAny, GameAny, GameAny, "nil"},
     {"get3DENMouseOver", 'n', GameAny, 0, 0, "nil"},
     {"get3DENSelected", 'u', GameAny, 0, GameAny, "nil"},
-    {"getAllHitPointsDamage", 'u', GameAny, 0, GameAny, "[[],[],[]]"},
+    // [names, selections, damages]: the vehicle's overall damage for each of 64 hit points
+    // (scripts index it directly: "getAllHitPointsDamage BIS_Ifrit select 2 select 27")
+    {"getAllHitPointsDamage", 'u', GameAny, 0, GameAny,
+     "private _d = []; _d resize 64; private _v = if (typeName _this == 'OBJECT') then {damage _this} else {0}; [_d apply {''}, _d apply {''}, _d apply {_v}]"},
     {"getAllOwnedMines", 'u', GameAny, 0, GameAny, "nil"},
     {"getAllPylonsInfo", 'u', GameAny, 0, GameAny, "[]"},
     {"getArtilleryAmmo", 'u', GameAny, 0, GameAny, "[]"},
