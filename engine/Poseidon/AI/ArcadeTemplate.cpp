@@ -831,8 +831,12 @@ void ArcadeMarkerInfo::OnColorChanged()
 {
     if (markerType == MTIcon && stricmp(colorName, "Default") == 0)
     {
-        const ParamEntry& cls = Pars >> "CfgMarkers" >> type;
-        color = GetPackedColor(cls >> "color");
+        // the icon's own colour; an icon type the config lacks (or none at all -- Arma 3
+        // missions of the older layout leave it empty) is drawn black
+        const ParamEntry* markers = Pars.FindEntry("CfgMarkers");
+        const ParamEntry* cls = markers && type.GetLength() > 0 ? markers->FindEntry(type) : nullptr;
+        const ParamEntry* value = cls && cls->IsClass() ? cls->FindEntry("color") : nullptr;
+        color = value && value->IsArray() && value->GetSize() == 4 ? GetPackedColor(*value) : PackedBlack;
     }
     else
     {
@@ -840,7 +844,7 @@ void ArcadeMarkerInfo::OnColorChanged()
         // ColorWEST, ColorCIV ... in a mission of the older layout) is drawn in its nearest CWA
         // colour, else black: looking it up regardless failed the whole mission load.
         const ParamEntry* colors = Pars.FindEntry("CfgMarkerColors");
-        const ParamEntry* cls = colors ? colors->FindEntry(colorName) : nullptr;
+        const ParamEntry* cls = colors && colorName.GetLength() > 0 ? colors->FindEntry(colorName) : nullptr;
         if (!cls || !cls->IsClass() || !cls->FindEntry("color"))
         {
             static const char* const kNearest[][2] = {
@@ -864,7 +868,7 @@ void ArcadeMarkerInfo::OnColorChanged()
 void ArcadeMarkerInfo::OnFillChanged()
 {
     const ParamEntry* brushes = Pars.FindEntry("CfgMarkerBrushes");
-    const ParamEntry* cls = brushes ? brushes->FindEntry(fillName) : nullptr;
+    const ParamEntry* cls = brushes && fillName.GetLength() > 0 ? brushes->FindEntry(fillName) : nullptr;
     // a brush this config lacks (Arma 3's "SolidBorder", "DiagGrid" ...) fills as none
     RString brush = cls && cls->IsClass() && cls->FindEntry("texture") ? RString((*cls) >> "texture") : RString();
     if (brush.GetLength() == 0)
@@ -884,7 +888,7 @@ void ArcadeMarkerInfo::OnTypeChanged()
         // an icon type this config lacks (an Arma 3 marker in an older-layout mission) is drawn
         // as the plain dot rather than failing the mission load
         const ParamEntry* markers = Pars.FindEntry("CfgMarkers");
-        const ParamEntry* cls = markers ? markers->FindEntry(type) : nullptr;
+        const ParamEntry* cls = markers && type.GetLength() > 0 ? markers->FindEntry(type) : nullptr;
         if ((!cls || !cls->IsClass()) && markers)
             cls = markers->FindEntry("Dot");
         if (!cls || !cls->IsClass() || !cls->FindEntry("icon") || !cls->FindEntry("size"))
