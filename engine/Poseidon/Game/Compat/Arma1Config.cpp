@@ -14,6 +14,7 @@
 //     under the private name A1_CfgMovesMaleSdr).
 
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <Poseidon/Core/DynEnum.hpp>
 
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
@@ -40,6 +41,8 @@ namespace Poseidon
 {
 // Weapons.cpp: every muzzle already built that takes baseMagazine also takes magazine.
 void AddMagazineToMuzzlesTaking(const char* baseMagazine, const char* magazine);
+// SoldierOldSimProxy.cpp: the vehicle actions ("ManAct<name>") crew seats name.
+extern DynEnum GActionVehNames;
 } // namespace Poseidon
 
 namespace Poseidon::Arma1Compat
@@ -864,6 +867,8 @@ void ReplaceFirst(std::string& text, const std::string& from, const std::string&
         text.replace(at, from.size(), to);
 }
 
+void RegisterCrewActions(const ParamEntry& states, std::string& actions); // below
+
 bool MovesImported()
 {
     static int state = 0; // 0 untried, 1 ok, -1 failed
@@ -956,6 +961,8 @@ bool MovesImported()
             actions += name + "=\"" + pick + "\";\r\n";
         }
     }
+    if (Arma1CrewActions())
+        RegisterCrewActions(states, actions);
     actions += "};\r\n";
 
     ImportIntoPars(basicText + maleText + actions, "CfgMovesMaleSdr as A1_CfgMovesMaleSdr");
@@ -1022,6 +1029,167 @@ bool IsKindOf(const ParamEntry* cls, const char* base)
     const ParamClass* c = cls ? cls->GetClassInterface() : nullptr;
     const ParamClass* b = baseEntry ? baseEntry->GetClassInterface() : nullptr;
     return c && b && (c == b || c->IsDerivedFrom(*b));
+}
+
+// The Arma 1 crew poses of a vehicle class, seat by seat: driverAction, cargoAction[],
+// and from its turrets the gunner's (MainTurret) and the commander's (a turret with
+// primaryObserver=1, or one named like a commander) gunnerAction. Empty where it names none.
+struct CrewPoses
+{
+    std::string driver, driverIn, gunner, gunnerIn, commander, commanderIn;
+    std::vector<std::string> cargo;
+};
+
+const ParamEntry* CommanderTurret(const ParamEntry& turrets, int depth)
+{
+    for (int i = 0; i < turrets.GetEntryCount(); i++)
+    {
+        const ParamEntry& t = turrets.GetEntry(i);
+        if (!t.IsClass())
+            continue;
+        const ParamEntry* observer = t.FindEntry("primaryObserver");
+        if ((observer && !observer->IsClass() && !observer->IsArray() && (int)*observer == 1) ||
+            Lower((const char*)t.GetName()).find("commander") != std::string::npos)
+            return &t;
+        if (depth < 2)
+            if (const ParamEntry* sub = t.FindEntry("Turrets"); sub && sub->IsClass())
+                if (const ParamEntry* found = CommanderTurret(*sub, depth + 1))
+                    return found;
+    }
+    return nullptr;
+}
+
+CrewPoses CrewPosesOf(const ParamEntry& cls)
+{
+    CrewPoses p;
+    p.driver = StringValue(cls, "driverAction");
+    p.driverIn = StringValue(cls, "driverInAction");
+    if (const ParamEntry* cargo = cls.FindEntry("cargoAction"); cargo && cargo->IsArray())
+        for (int i = 0; i < cargo->GetSize(); i++)
+            p.cargo.push_back((const char*)(RStringB)(*cargo)[i]);
+    const ParamEntry* turrets = cls.FindEntry("Turrets");
+    if (!turrets || !turrets->IsClass())
+        return p;
+    const ParamEntry* main = turrets->FindEntry("MainTurret");
+    if (main && !main->IsClass())
+        main = nullptr;
+    if (main)
+    {
+        p.gunner = StringValue(*main, "gunnerAction");
+        p.gunnerIn = StringValue(*main, "gunnerInAction");
+    }
+    if (const ParamEntry* commander = CommanderTurret(*turrets, 0); commander && commander != main)
+    {
+        p.commander = StringValue(*commander, "gunnerAction");
+        p.commanderIn = StringValue(*commander, "gunnerInAction");
+    }
+    return p;
+}
+
+std::map<int, int>& CrewActionFallbacks()
+{
+    static std::map<int, int> fallbacks;
+    return fallbacks;
+}
+
+// The first CWA vehicle action whose name holds `role` ("Cargo", "Gunner", ...), among the
+// `cwaCount` CWA defines; -1 when none.
+int CwaRoleAction(const char* role, int cwaCount)
+{
+    const std::string want = Lower(role);
+    for (int i = 0; i < cwaCount; i++)
+        if (Lower((const char*)GActionVehNames.GetName(i)).find(want) != std::string::npos)
+            return i;
+    return -1;
+}
+
+// Every crew pose an Arma 1 vehicle names and A1_CfgMovesMaleSdr has becomes a vehicle
+// action "ManActA1_<state>" played as that state (`actions` is A1_CfgVehicleActions' body).
+// Called once, before any Arma 1 man loads his moves (ActionVehMap sizes itself by the
+// actions registered so far).
+void RegisterCrewActions(const ParamEntry& states, std::string& actions)
+{
+    const ParamEntry* vehicles = Arma1Pars().FindEntryNoInheritance("CfgVehicles");
+    if (!vehicles)
+        return;
+    const int cwaCount = GActionVehNames.FirstInvalidValue();
+    const int roles[4] = {CwaRoleAction("Driver", cwaCount), CwaRoleAction("Gunner", cwaCount),
+                          CwaRoleAction("Commander", cwaCount), CwaRoleAction("Cargo", cwaCount)};
+    int added = 0;
+    const auto add = [&](const std::string& state, int role) {
+        if (state.empty() || !states.FindEntry(state.c_str()))
+            return;
+        const std::string action = "ManActA1_" + state;
+        if (GActionVehNames.GetValue(action.c_str()) >= 0)
+            return;
+        const int id = GActionVehNames.AddValue(action.c_str());
+        actions += "A1_" + state + "=\"" + state + "\";\r\n";
+        CrewActionFallbacks()[id] = roles[role];
+        added++;
+    };
+    for (int i = 0; i < vehicles->GetEntryCount(); i++)
+    {
+        const ParamEntry& cls = vehicles->GetEntry(i);
+        if (!cls.IsClass())
+            continue;
+        const CrewPoses p = CrewPosesOf(cls);
+        add(p.driver, 0);
+        add(p.driverIn, 0);
+        add(p.gunner, 1);
+        add(p.gunnerIn, 1);
+        add(p.commander, 2);
+        add(p.commanderIn, 2);
+        for (const std::string& c : p.cargo)
+            add(c, 3);
+    }
+    LOG_INFO(Mission, "{}: {} Arma 1 crew poses registered as vehicle actions (ManActA1_<state>)", Label(), added);
+}
+
+// A crew pose as the vehicle action RegisterCrewActions made of it; empty when it made none.
+std::string CrewActionName(const std::string& state)
+{
+    if (state.empty())
+        return {};
+    const std::string action = "ManActA1_" + state;
+    return GActionVehNames.GetValue(action.c_str()) >= 0 ? action : std::string();
+}
+
+// The generated vehicle class's crew actions: its own Arma 1 poses, seat by seat. A seat
+// whose pose is not registered keeps the CWA carrier's action; cargo only as a whole.
+std::string CrewActionsText(const ParamEntry& a1, std::string& summary)
+{
+    const CrewPoses p = CrewPosesOf(a1);
+    std::string text;
+    const auto one = [&](const char* key, const std::string& state) {
+        const std::string action = CrewActionName(state);
+        if (action.empty())
+            return;
+        text += std::string("\t\t") + key + "=\"" + action + "\";\r\n";
+        summary += std::string(" ") + key + "=" + state;
+    };
+    one("driverAction", p.driver);
+    one("driverInAction", p.driverIn);
+    one("gunnerAction", p.gunner);
+    one("gunnerInAction", p.gunnerIn);
+    one("commanderAction", p.commander);
+    one("commanderInAction", p.commanderIn);
+    if (!p.cargo.empty())
+    {
+        std::string list;
+        bool all = true;
+        for (size_t i = 0; i < p.cargo.size() && all; i++)
+        {
+            const std::string action = CrewActionName(p.cargo[i]);
+            all = !action.empty();
+            list += std::string(i ? "," : "") + "\"" + action + "\"";
+        }
+        if (all)
+        {
+            text += "\t\tcargoAction[]={" + list + "};\r\n";
+            summary += " cargo=" + std::to_string(p.cargo.size()) + "x" + p.cargo[0];
+        }
+    }
+    return text;
 }
 
 // An Arma 1 vehicle's main gun: the first real weapon on one of its turrets, else on the
@@ -1833,6 +2001,22 @@ bool Arma1VehicleWeapons()
         return !(e && *e == '0');
     }();
     return on && Generation() == 1;
+}
+
+bool Arma1CrewActions()
+{
+    static const bool on = [] {
+        const char* e = std::getenv("OP_A1_CREW_ACTIONS");
+        return !(e && *e == '0');
+    }();
+    return on && Generation() == 1;
+}
+
+int Arma1CrewActionFallback(int action)
+{
+    const auto& fallbacks = CrewActionFallbacks();
+    const auto it = fallbacks.find(action);
+    return it == fallbacks.end() ? -1 : it->second;
 }
 
 // Arma 1 soldiers carry their own weapons with the Arma 1 models unless OP_A1_WEAPONS=0.
@@ -2694,6 +2878,15 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
                     resolved.GetLength() > 0 && now && now->FindEntry(resolved))
                     text += "\t\tcrew=\"" + std::string(resolved.Data()) + "\";\r\n";
             }
+        }
+        // Its crew sits in its own Arma 1 poses (OP_A1_CREW_ACTIONS=0: the carrier's, mapped to
+        // the nearest Arma 1 state -- HMMWV passengers in UAZ_Cargo01 under the car, a1cargo).
+        if (vehicle && Arma1CrewActions() && MovesImported())
+        {
+            std::string summary;
+            text += CrewActionsText(*a1, summary);
+            if (!summary.empty())
+                LOG_INFO(Mission, "{}: '{}' crew poses:{}", Label(), missionClass.Data(), summary);
         }
         // Its own gunner's weapons, rebuilt on CWA ones: cars, boats and static weapons on a
         // CWA carrier with a gunner. Tanks, helicopters and planes keep CWA's for now (several

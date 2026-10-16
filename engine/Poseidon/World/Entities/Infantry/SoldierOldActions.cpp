@@ -1,4 +1,5 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <stdio.h>
@@ -660,6 +661,14 @@ MoveId Man::GetVehMove(ManVehAction action) const
     {
         Fail("Vehicle action ManVehActNone used");
         return MoveIdNone;
+    }
+    // An Arma 1 crew pose (ManActA1_<state>, --arma1) a man's moves do not have -- his moves
+    // loaded before it was registered, or they are CWA's -- plays the CWA pose of that seat.
+    if (action >= map.GetMaxAction() || map.GetAction(action) == MoveIdNone)
+    {
+        const int fallback = Arma1Compat::Arma1CrewActionFallback(action);
+        if (fallback >= 0 && fallback < map.GetMaxAction())
+            return map.GetAction(ManVehAction(fallback));
     }
     if (action >= map.GetMaxAction())
     {
