@@ -448,9 +448,12 @@ no screenshots written. The stall report now also takes stacks at 90 and 170 s.
   mission and SPE scenario, Eagle Wing) lost their whole description.ext to an include
   written `\CA\Missions_e\...`. Fixed; focus 23 shows none failing.
 - `bd086fc`: ODOL LODs without skin references no longer report a bone layout.
-- Still open from the logs: `corepatch\corepatch_javelin\javelin_optic.p3d` (ODOL 49,
-  2.5 kB) is refused as "Bad version"; one mission's FSM has a state class named
-  `No__sir_.`, which the config parser rejects.
+- `131160c`: CE7B's listener FSMs put a value's `;` on a later line behind the editor's
+  markers; the config parser read it as an entry name (`'/FSM/States/No__sir_.': ';'
+  encountered instead of '='`) and the FSM never loaded. The `;` is pulled up now (checked
+  offline on that text; not yet in game).
+- Still open: `corepatch\corepatch_javelin\javelin_optic.p3d` (`ODOL` version 49, 2.5 kB,
+  a layout neither ODOL reader knows) is refused as "Bad version".
 
 ## Steps
 
