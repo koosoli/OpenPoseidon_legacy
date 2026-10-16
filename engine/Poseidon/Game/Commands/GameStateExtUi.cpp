@@ -61,6 +61,7 @@
 
 using namespace Poseidon;
 void WhatUnits(RefArray<NetworkObject>& units, ChatChannel channel, NetworkObject* object);
+bool Arma2CampaignAutoActive(); // Game/Compat/Arma2CampaignAuto.cpp (OP_A2_CAMPAIGN)
 
 namespace Poseidon
 {
@@ -2418,7 +2419,7 @@ GameValue ShowHintC(const GameState* state, GameValuePar oper1)
     // An unattended test (--arma1/--arma2-test-seconds) has nobody to press "Continue":
     // the modal hint would stop the mission (and the test clock) for good, as it did in
     // SP_WarWelcome. Show it as an ordinary hint instead.
-    if (AppConfig::Instance().GetArma1TestSeconds() > 0.0f)
+    if (AppConfig::Instance().GetArma1TestSeconds() > 0.0f || ::Arma2CampaignAutoActive())
     {
         LOG_INFO(Mission, "[hintC] shown without pausing (test mode): {}", (const char*)oper1.GetText());
         if (GWorld->UI())

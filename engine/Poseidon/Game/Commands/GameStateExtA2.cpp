@@ -1150,7 +1150,7 @@ GameValue A2GetFSMVariable(const GameState*, GameValuePar oper1, GameValuePar op
     Fsm* fsm = FindFsm(oper1);
     GameValue v;
     if (fsm)
-        fsm->vars.VarGet(RString(oper2), v);
+        fsm->vars.VarGet(RString(Lower((const char*)RString(oper2)).c_str()), v); // keys are lower case
     return v;
 }
 
@@ -1159,7 +1159,7 @@ GameValue A2SetFSMVariable(const GameState*, GameValuePar oper1, GameValuePar op
     Fsm* fsm = FindFsm(oper1);
     const GameArrayType& args = oper2;
     if (fsm && args.Size() >= 2 && args[0].GetType() == GameString)
-        fsm->vars.VarSet(RString(args[0]), args[1]);
+        fsm->vars.VarSet(RString(Lower((const char*)RString(args[0])).c_str()), args[1]); // as the FSM reads it
     return NOTHING;
 }
 
