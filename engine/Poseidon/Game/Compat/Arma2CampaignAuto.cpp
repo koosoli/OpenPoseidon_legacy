@@ -5,7 +5,8 @@
 // OP_A2_CAMPAIGN="<seconds>[,<end>[,<missions>]]", with --arma2-test-seconds 0 (played mode):
 //   - intros, outros and award cutscenes are skipped after a few seconds,
 //   - the briefing is confirmed,
-//   - each mission is ended with endMission "<end>" (default END1) after <seconds> s,
+//   - each mission is ended with endMission "<end>" (default END1) after <seconds> s
+//     (wall clock, from the moment the mission display opens),
 //   - the debriefing is confirmed, and the campaign goes on to its next mission,
 //   - after <missions> missions (default 2) the game quits.
 // Each step is logged ("Arma 2 campaign auto: ..."). Nothing here runs without the variable.
@@ -115,7 +116,6 @@ void Arma2CampaignAutoStep()
     static Display* seen = nullptr;
     static int seenIdd = -1;
     static DWORD since = 0;
-    static float missionStart = 0.0f;
     static bool ended = false;
     static int missionsPlayed = 0;
     const DWORD now = Poseidon::Foundation::GlobalTickCount();
@@ -129,7 +129,6 @@ void Arma2CampaignAutoStep()
         if (idd == IDD_MISSION)
         {
             GWorld->ForceEnd(false); // set by this mode to end the previous mission
-            missionStart = Glob.time - Poseidon::Foundation::Time(0);
             if (missionsPlayed >= s.missions)
             {
                 LOG_INFO(Core, "Arma 2 campaign auto: {} missions played, quitting before '{}.{}'", missionsPlayed,
@@ -178,11 +177,12 @@ void Arma2CampaignAutoStep()
             break;
         case IDD_MISSION:
         {
-            const float played = (Glob.time - Poseidon::Foundation::Time(0)) - missionStart;
+            // wall-clock seconds: a mission that simulates slowly (C0 at ~1 tick/s) still ends
+            const float played = static_cast<float>(shown) / 1000.0f;
             if (played >= s.seconds && GWorld->GetEndMode() == EMContinue)
             {
                 ended = true;
-                LOG_INFO(Core, "Arma 2 campaign auto: endMission \"{}\" after {:.0f} s of '{}.{}'", s.endName, played,
+                LOG_INFO(Core, "Arma 2 campaign auto: endMission \"{}\" after {:.0f} s (wall clock) of '{}.{}'", s.endName, played,
                          (const char*)Glob.header.filename, (const char*)Glob.header.worldname);
                 GWorld->SetEndMode(s.end);
                 GWorld->ForceEnd(true); // through a running camera or title effect
