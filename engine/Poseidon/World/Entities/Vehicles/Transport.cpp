@@ -2307,66 +2307,50 @@ void TransportType::InitShape()
     _cargoGetInPos.Resize(0);
     if (memory)
     {
-        int index = memory->FindNamedSel("pos driver");
-        if (index >= 0)
-        {
+        // The memory selection a seat is boarded from. OFP names it "pos driver"; Arma names
+        // it in the config (memoryPointsGetInDriver ...), and some models differ -- the Arma 1
+        // AH-1Z boards from "pos_driver", so without the config name it had no get-in point
+        // at all and nobody could board it.
+        const auto fill = [&](AutoArray<Vector3>& out, const char* key, const char* fallback) {
+            RStringB name = fallback;
+            if (const ParamEntry* e = par.FindEntry(key); e && !e->IsClass() && !e->IsArray())
+            {
+                const RStringB value = *e;
+                if (value.GetLength() > 0)
+                    name = value;
+            }
+            int index = memory->FindNamedSel(name);
+            if (index < 0 && strcmp(name, fallback) != 0)
+                index = memory->FindNamedSel(fallback);
+            if (index < 0)
+                return;
             const Selection& sel = memory->NamedSel(index);
             for (int i = 0; i < sel.Size(); i++)
             {
                 if (sel[i] >= 0)
                 {
-                    _driverGetInPos.Add(memory->Pos(sel[i]));
+                    out.Add(memory->Pos(sel[i]));
                 }
             }
-        }
-        index = memory->FindNamedSel("pos commander");
-        if (index >= 0)
-        {
-            const Selection& sel = memory->NamedSel(index);
-            for (int i = 0; i < sel.Size(); i++)
-            {
-                if (sel[i] >= 0)
-                {
-                    _commanderGetInPos.Add(memory->Pos(sel[i]));
-                }
-            }
-        }
-        index = memory->FindNamedSel("pos gunner");
-        if (index >= 0)
-        {
-            const Selection& sel = memory->NamedSel(index);
-            for (int i = 0; i < sel.Size(); i++)
-            {
-                if (sel[i] >= 0)
-                {
-                    _gunnerGetInPos.Add(memory->Pos(sel[i]));
-                }
-            }
-        }
-        index = memory->FindNamedSel("pos cargo");
-        if (index >= 0)
-        {
-            const Selection& sel = memory->NamedSel(index);
-            for (int i = 0; i < sel.Size(); i++)
-            {
-                if (sel[i] >= 0)
-                {
-                    _cargoGetInPos.Add(memory->Pos(sel[i]));
-                }
-            }
-        }
-        index = memory->FindNamedSel("pos codriver");
-        if (index >= 0)
-        {
-            const Selection& sel = memory->NamedSel(index);
-            for (int i = 0; i < sel.Size(); i++)
-            {
-                if (sel[i] >= 0)
-                {
-                    _coDriverGetInPos.Add(memory->Pos(sel[i]));
-                }
-            }
-        }
+        };
+        fill(_driverGetInPos, "memoryPointsGetInDriver", "pos driver");
+        fill(_commanderGetInPos, "memoryPointsGetInCommander", "pos commander");
+        fill(_gunnerGetInPos, "memoryPointsGetInGunner", "pos gunner");
+        fill(_cargoGetInPos, "memoryPointsGetInCargo", "pos cargo");
+        fill(_coDriverGetInPos, "memoryPointsGetInCoDriver", "pos codriver");
+    }
+    if (Arma1Compat::Active() && _strnicmp((const char*)GetName(), "A1x_", 4) == 0)
+    {
+        const auto first = [](const AutoArray<Vector3>& a) {
+            char buf[64];
+            if (a.Size() == 0)
+                return std::string("-");
+            snprintf(buf, sizeof(buf), "%d (%.2f %.2f %.2f)", a.Size(), a[0].X(), a[0].Y(), a[0].Z());
+            return std::string(buf);
+        };
+        LOG_INFO(Graphics, "Get-in points {}: driver {} gunner {} commander {} cargo {} radius {:.1f}",
+                 (const char*)GetName(), first(_driverGetInPos), first(_gunnerGetInPos), first(_commanderGetInPos),
+                 first(_cargoGetInPos), _getInRadius);
     }
     if (_driverGetInPos.Size() == 0)
     {

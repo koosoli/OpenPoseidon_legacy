@@ -2350,6 +2350,15 @@ void Transport::DrawCrewMember(int level, ClipFlags clipFlags, const Matrix4& tr
     if (insidePlayer)
     {
         pLevel = 0;
+        // An Arma man seen from his own eyes is drawn in his first-person LOD (no head, no
+        // helmet), as on foot: LOD 0 put the inside of his own helmet in front of the camera
+        // of every Arma 1 pilot, driver and gunner. OFP men keep LOD 0 with the head hidden.
+        if (manShape->AnimationOrigin().SquareSize() > 1e-8f)
+        {
+            const int inside = man->InsideLOD(camType);
+            if (inside >= 0 && inside < manShape->NLevels())
+                pLevel = inside;
+        }
     }
     else
     {

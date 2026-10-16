@@ -3043,6 +3043,34 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
             if (!summary.empty())
                 LOG_INFO(Mission, "{}: '{}' crew poses:{}", Label(), missionClass.Data(), summary);
         }
+        // Where its crew boards: the Arma 1 memory points (the AH-1Z's "pos_driver") and radius.
+        if (vehicle)
+        {
+            const auto copy = [&](const ParamEntry& from, const char* key, const char* as) {
+                const std::string v = StringValue(from, key);
+                if (!v.empty())
+                {
+                    text += std::string("\t\t") + as + "=";
+                    QuoteConfigString(text, v.c_str());
+                    text += ";\r\n";
+                }
+            };
+            copy(*a1, "memoryPointsGetInDriver", "memoryPointsGetInDriver");
+            copy(*a1, "memoryPointsGetInCargo", "memoryPointsGetInCargo");
+            if (const ParamEntry* turrets = a1->FindEntry("Turrets"); turrets && turrets->IsClass())
+            {
+                if (const ParamEntry* main = turrets->FindEntry("MainTurret"); main && main->IsClass())
+                    copy(*main, "memoryPointsGetInGunner", "memoryPointsGetInGunner");
+                if (const ParamEntry* commander = CommanderTurret(*turrets, 0); commander)
+                    copy(*commander, "memoryPointsGetInGunner", "memoryPointsGetInCommander");
+            }
+            if (const ParamEntry* r = a1->FindEntry("getInRadius"); r && !r->IsClass() && !r->IsArray() && (float)*r > 0)
+            {
+                char line[64];
+                std::snprintf(line, sizeof(line), "\t\tgetInRadius=%g;\r\n", (float)*r);
+                text += line;
+            }
+        }
         // Its own gunner's weapons, rebuilt on CWA ones: cars, boats, tanks and static weapons
         // on a CWA carrier with a gunner -- the weapons of the first turret that has any (the
         // tank's main turret; a commander's own gun, the M1A1's M2, has no seat in CWA's tank
