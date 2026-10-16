@@ -74,6 +74,7 @@ namespace Poseidon
 #include <Poseidon/Foundation/Platform/VersionNo.h>
 
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
+#include <vector>
 
 namespace Poseidon
 {
@@ -1164,6 +1165,12 @@ class FilePreprocessor : public Preproc
     // given relative to it. Arma 2 scripts include both ways.
     std::string baseDir;
 
+  private:
+    // Folders of the files being read, innermost last: an included file's own includes
+    // resolve beside IT first (Old Man's commonDefines.inc, in Systems\\defines, includes
+    // "profilingDefines.inc" next to itself, not next to the script that included it).
+    std::vector<std::string> _dirs;
+
   protected:
     QIStream* OnEnterInclude(const char* filename) override
     {
@@ -1171,6 +1178,14 @@ class FilePreprocessor : public Preproc
         // Arma 2 names bank paths with a leading backslash ("\\ca\\modules\\...").
         while (!name.empty() && (name[0] == '\\' || name[0] == '/'))
             name.erase(0, 1);
+        for (auto dir = _dirs.rbegin(); !QIFStreamB::FileExist(name.c_str()) && dir != _dirs.rend(); ++dir)
+        {
+            if (dir->empty())
+                continue;
+            const std::string relative = CollapseDots(*dir + name);
+            if (QIFStreamB::FileExist(relative.c_str()))
+                name = relative;
+        }
         if (!QIFStreamB::FileExist(name.c_str()) && !baseDir.empty())
         {
             const std::string relative = CollapseDots(baseDir + name);
@@ -1183,10 +1198,14 @@ class FilePreprocessor : public Preproc
         }
         QIFStreamB* stream = new QIFStreamB();
         stream->AutoOpen(name.c_str());
+        const size_t slash = name.find_last_of("\\/");
+        _dirs.push_back(slash == std::string::npos ? std::string() : name.substr(0, slash + 1));
         return stream;
     }
     void OnExitInclude(QIStream* stream) override
     {
+        if (!_dirs.empty())
+            _dirs.pop_back();
         if (stream)
         {
             delete (QIFStreamB*)stream;
