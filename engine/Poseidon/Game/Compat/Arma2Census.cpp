@@ -174,6 +174,19 @@ void LogPlayerSurroundings()
             if (d < 3.0f)
                 LOG_INFO(Mission, "{}: census within 3 m of the player: {} at {:.2f} m (dy {:.2f})", Label(),
                          Describe(e), d, e->Position().Y() - p.Y());
+            // or whose model reaches him from farther away (a model drawn off its origin -- the
+            // s_dolnik_00 player wore a structure of dark panels that nothing within 3 m explains)
+            else if (const LODShape* shape = e->GetShape(); shape && shape->BoundingSphere() < 200.0f)
+            {
+                const Vector3 centre = e->PositionModelToWorld(shape->BoundingCenter());
+                const float reach = centre.Distance(p) - shape->BoundingSphere();
+                if (reach < 0.5f && d < 60.0f)
+                    LOG_INFO(Mission,
+                             "{}: census model reaching the player: {} origin {:.1f} m away, sphere {:.1f} m "
+                             "round a centre {:.1f} m away, model {}",
+                             Label(), Describe(e), d, shape->BoundingSphere(), centre.Distance(p),
+                             (const char*)shape->Name());
+            }
         };
         for (int i = 0; i < GWorld->NVehicles(); i++)
             closeBy(GWorld->GetVehicle(i));
