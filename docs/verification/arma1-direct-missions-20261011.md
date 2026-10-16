@@ -351,6 +351,19 @@ cargo (0.53 -1.57 0.23) (0.61 -1.59 -0.70) (-0.90 -1.54 -0.71) -- the passengers
 driver's height, so the seats themselves are in the car; why the passengers are drawn on
 the ground is still open (their Arma 1 cargo move is the next suspect).
 
+**All 131 missions on 01192861 with Arma 1 ballistics** (go22, 09:29-10:21, from `dist`):
+131/131 entered and exited 0 (`summary_01192861_full.txt` on the build machine).
+
+**Passengers on the ground** (go23, 0bc7f406): the seats are identical on every LOD that has
+them (levels 0-4, 6-8, 15, 17), so no LOD swap moves them. The close-up (`a1cargo-b`) shows
+the three passengers drawn under the car at ground level. Arma 1's own HMMWV M2 seats its
+crew in `HMMWV_Driver`, `HMMWV_Gunner01` and `HMMWV_Cargo01`/`HMMWV_Cargo01`/`UAZ_Cargo01`;
+ours sat in the CWA jeep's actions mapped to the nearest Arma 1 state by name. **0e52494c**
+gives every Arma 1 vehicle its own crew poses (`ManActA1_<state>`, `OP_A1_CREW_ACTIONS=0`
+off); a man whose moves lack one plays the CWA pose of the same seat. Test pending
+(go24: crew states on 0bc7f406 via `animationState`; go25: 0e52494c, a1crew, a1cargo,
+22-mission gate).
+
 ## Known gaps (honest list)
 
 - Missions needing third-party addons (`un-impossible_mission.cain`: `BBB006`) cannot run.
