@@ -92,6 +92,10 @@ bool Arma1CrewActions();
 // soldier in an Arma 1 vehicle) sits in that instead. -1 when none.
 int Arma1CrewActionFallback(int action);
 
+// The mission editor (--arma1): every class Arma 1 lists (scope 2) is generated once, so the
+// unit dialog offers the Arma 1 soldiers, vehicles and objects under "Arma 1 ..." headings.
+void PrepareEditorClasses();
+
 // An Arma 1 binarised config FILE (mission.sqm, description.ext, ...) as config
 // text the engine's parser reads. False when the file is not in Arma 1's layout
 // (OFP/CWA's own binarised files keep their reader). Works without --arma1.

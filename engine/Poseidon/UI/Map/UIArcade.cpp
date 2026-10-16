@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/UI/Map/UIMap.hpp>
 #include <Poseidon/Foundation/Common/Win.h>
 
@@ -241,6 +242,7 @@ static int CmpClass(const RStringB* a, const RStringB* b)
 
 void DisplayArcadeUnit::UpdateClasses(CCombo* combo, const char* vehicle)
 {
+    Arma1Compat::PrepareEditorClasses();
     CCombo* combo2 = dynamic_cast<CCombo*>(GetCtrl(IDC_ARCUNIT_SIDE));
     if (!combo2)
     {
@@ -356,6 +358,7 @@ void DisplayArcadeUnit::UpdateClasses(CCombo* combo, const char* vehicle)
 
 void DisplayArcadeUnit::UpdateVehicles(CCombo* combo, const char* vehicle)
 {
+    Arma1Compat::PrepareEditorClasses();
     bool isVehicle = vehicle && *vehicle;
 
     CCombo* combo2 = dynamic_cast<CCombo*>(GetCtrl(IDC_ARCUNIT_SIDE));
