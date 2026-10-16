@@ -582,6 +582,33 @@ std::string JoinConfigStrings(const std::string& in)
             i = stop;
             continue;
         }
+        if (c == '=')
+        {
+            // A value that starts on the next line, behind the editor's markers
+            // (init = /*%FSM<STATEINIT>*/\n\t"..."): CWA's parser takes the line break as
+            // the end of an empty value. Pull the string up to the '='.
+            out.push_back(c);
+            i++;
+            size_t k = i;
+            while (k < n)
+            {
+                if (space(in[k]))
+                    k++;
+                else if (in[k] == '/' && k + 1 < n && in[k + 1] == '*')
+                {
+                    const size_t end = in.find("*/", k + 2);
+                    k = end == std::string::npos ? n : end + 2;
+                }
+                else
+                    break;
+            }
+            if (k < n && in[k] == '"' && in.find('\n', i) < k)
+            {
+                out.push_back(' ');
+                i = k;
+            }
+            continue;
+        }
         if (c != '"')
         {
             out.push_back(c);
