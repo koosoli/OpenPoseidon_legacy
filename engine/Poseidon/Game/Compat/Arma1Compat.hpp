@@ -187,6 +187,9 @@ RString Arma3VehicleCarrier(const RString& className);
 std::string Arma3EngineSound(const ParamEntry& vehicle, bool helicopter);
 // The shot of an Arma 3 weapon (first fire mode), "\\path.wss"; empty if none.
 std::string Arma3WeaponShotSound(const ParamEntry& weapon);
+// The Arma 3 ambient loop for CWA's EnvSounds slot (0 sea, 1 trees, 2 meadows, 3 hills,
+// 4 rain), "\\path"; empty outside Arma 3 or when the install has none. (Arma3Compat.cpp)
+std::string Arma3EnvSound(int slot, bool night);
 
 // Arma 3: true for animals (Animal_Base_F), which are left out like Arma 2's.
 bool Arma3IsAnimal(const RString& className);

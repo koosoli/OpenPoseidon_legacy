@@ -353,6 +353,35 @@ std::string Arma3WeaponShotSound(const ParamEntry& weapon)
     return std::string();
 }
 
+// The ambient loop of the Arma 3 sound environment (CfgEnvSounds' soundSetEnvironment[]) that
+// plays in CWA's EnvSounds slot: 0 sea, 1 trees, 2 meadows, 3 hills, 4 rain. Arma 3 mixes
+// these sets by expressions over forest, houses, sea, wind and height; CWA's sound map
+// names one slot per place, so each slot takes the set closest to it -- birds over forest
+// and meadow by day, crickets on the meadow and the quiet forest by night, the high wind
+// on hills. Empty when the install has none of the candidates (the world's own loop stays).
+std::string Arma3EnvSound(int slot, bool night)
+{
+    if (Generation() != 3 || slot < 0 || slot > 4)
+        return std::string();
+    static const char* const kDay[5][3] = {
+        {"Sea_SoundSet", "Coast_SoundSet", nullptr},
+        {"Birds_Forest_Day_SoundSet", "Forest_Low_SoundSet", "Forest_High_SoundSet"},
+        {"Birds_Meadows_Day_SoundSet", "Meadows_Low_SoundSet", "Meadows_High_SoundSet"},
+        {"Wind_High_SoundSet", "Wind_Low_SoundSet", nullptr},
+        {"Stratis_RainMeadows_Medium_SoundSet", "Stratis_RainMeadows_Low_SoundSet", nullptr}};
+    static const char* const kNight[5][3] = {
+        {"Sea_SoundSet", "Coast_SoundSet", nullptr},
+        {"Forest_Low_SoundSet", "Forest_High_SoundSet", nullptr},
+        {"Greek_Crickets_Night_SoundSet", "Meadows_Low_SoundSet", nullptr},
+        {"Wind_High_SoundSet", "Wind_Low_SoundSet", nullptr},
+        {"Stratis_RainMeadows_Medium_SoundSet", "Stratis_RainMeadows_Low_SoundSet", nullptr}};
+    for (const char* set : night ? kNight[slot] : kDay[slot])
+        if (set)
+            if (std::string file = ExistingSoundFile(SoundSetSample(set)); !file.empty())
+                return file;
+    return std::string();
+}
+
 RString Arma3HeadForProxy(const char* proxyModel)
 {
     if (Generation() != 3 || !proxyModel)

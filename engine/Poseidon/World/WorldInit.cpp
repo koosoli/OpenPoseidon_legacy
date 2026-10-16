@@ -18,6 +18,7 @@
 #include <Poseidon/Graphics/Cursor/GameCursorOverlay.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/EnvSoundRegions.hpp> // OFP Fusion: ambient loops per island
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
@@ -402,6 +403,28 @@ static void InitEnvSounds(const ParamEntry& cfg)
     GetValue(EnvSoundParsNight[3], cfg >> "Hills" >> "soundNight");
     GetValue(EnvSoundParsNight[4], cfg >> "Rain" >> "soundNight");
     GetValue(EnvSoundParsNight[5], cfg >> "Default" >> "sound");
+
+    // Arma 3 (--arma3): its own ambience (birds, forest, crickets, wind, sea, rain) in place
+    // of CWA's loops, at the CWA slot's loudness; a slot the install cannot fill keeps CWA's.
+    if (Arma1Compat::Active() && Arma1Compat::Generation() >= 3)
+    {
+        static const char* const kSlot[5] = {"sea", "trees", "meadows", "hills", "rain"};
+        for (int slot = 0; slot < 5; slot++)
+            for (int night = 0; night < 2; night++)
+            {
+                const std::string file = Arma1Compat::Arma3EnvSound(slot, night != 0);
+                if (file.empty())
+                    continue;
+                SoundPars& pars = night ? EnvSoundParsNight[slot] : EnvSoundPars[slot];
+                pars.name = GetSoundName(RString(file.c_str()));
+                if (pars.vol <= 0)
+                    pars.vol = 0.1f;
+                if (pars.freq <= 0)
+                    pars.freq = 1.0f;
+                LOG_INFO(Mission, "Arma 3: ambient {} ({}) plays {}", kSlot[slot], night ? "night" : "day",
+                         (const char*)pars.name);
+            }
+    }
 }
 
 SRef<EntityAI> GDummyVehicle;
