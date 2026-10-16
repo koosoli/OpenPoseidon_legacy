@@ -160,8 +160,9 @@ RString GetDefaultName(RString baseName, const char* dDir, const char* dExt)
     *buf = 0;
 
     const char* name = baseName;
-    // Leading slash: caller already supplied a fully-qualified path
-    if (name[0] == '\\' || name[0] == '/')
+    // Leading slash: caller already supplied a fully-qualified path ("@a3\\..." is Arma 3's
+    // way of saying the same in a mission's CfgSounds: from the game's root, not the mission)
+    if (name[0] == '\\' || name[0] == '/' || name[0] == '@')
     {
         name++;
     }
