@@ -2042,6 +2042,8 @@ const Macro kMacros2[] = {
     {"enableWeaponDisassembly", 'b', GameNothing, GameObject, GameBool, ""},
     // vehicle lock 0..3 (Arma 3: unlocked, default, locked, locked for the player)
     {"lock", 'b', GameNothing, GameObject, GameScalar, "(_this select 0) lock ((_this select 1) >= 2)"},
+    // setDamage [damage, useEffects]: the effects flag has no counterpart
+    {"setDamage", 'b', GameNothing, GameObject, GameArray, "(_this select 0) setDamage ((_this select 1) select 0)"},
 };
 
 template <size_t I>
