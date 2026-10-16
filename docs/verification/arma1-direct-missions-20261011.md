@@ -436,7 +436,27 @@ no seat in CWA's tank and is left out (deviation).
 | a1gunfire, a1vehArm, 22-mission gate | exit 0, gate 22/22 |
 
 Deployed 2026-10-16 14:58 (stamped; exe, PoseidonGame.exe and DLL md5-identical to `dist`;
-previous binaries in `Remastered\backup-before-7e00850f`). Full 131-mission run queued.
+previous binaries in `Remastered\backup-before-7e00850f`). **All 131 missions on 7e00850f**
+(15:01-15:53): 131/131 exit 0.
+
+## Helicopters and planes carry their own weapons (85943a89)
+
+The pilot's weapons (the vehicle's own `weapons[]`) and the gunner's (first turret) are rebuilt
+into CWA's single weapons list. CWA kinds (CWA config, `a1cfgdump2`): unguided rockets on the
+Zuni (`ZuniLauncher38`, FFAR 70 mm, S-8 80 mm) or `Rocket57x64` (57 mm); anti-armour missiles
+from aircraft on `HellfireLauncherCobra` (Hellfire, Maverick, Vikhr, Ch-29); bombs on
+`LaserGuidedBombLauncher` (GBU-12); anti-aircraft missiles (`airLock`: Sidewinder, R-73,
+Stinger) on CWA's AA launcher -- the Stinger pods rode the AT-3 before. An unarmed Arma 1
+aircraft on an armed CWA one drops its weapons. Left out: the Camel's dropped grenades.
+
+| a1air (85943a89) | weapons (log) | in 25 s |
+|---|---|---|
+| AH-1W | M197 (MachineGun30), FFAR (Zuni), Hellfire | did not fire |
+| A-10 | GAU-8 (MachineGun30), Maverick (Hellfire), FFAR | fired 22 GAU-8 rounds; then destroyed (crashed or shot down, not determined) |
+| AH-6 | FFAR, TwinM134 (MachineGun7_6) | did not fire |
+| Mi-17 | 57 mm rockets (Rocket57x64) | destroyed |
+| ground | UAZ DShKM destroyed, T-72 damage 0.10 | |
+
 
 ## Known gaps (honest list)
 
