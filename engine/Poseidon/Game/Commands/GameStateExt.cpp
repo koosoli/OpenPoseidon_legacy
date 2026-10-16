@@ -1117,6 +1117,13 @@ static GameValue A1BreakOut(const GameState* state, GameValuePar oper1)
     return NOTHING;
 }
 
+// value breakOut "scope" (Arma 3): leave the scope with that value as its result
+static GameValue A1BreakOutWith(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    state->BreakOutWithValue(RString(oper2), oper1);
+    return NOTHING;
+}
+
 // for [{init}, {condition}, {step}] do {body}
 static GameValue A1ForArray(const GameState*, GameValuePar oper1)
 {
@@ -2001,7 +2008,11 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "ctrlSetForegroundColor", function, A1CtrlIgnored, GameScalar, GameArray),
         GameOperator(GameObject, "nearestObject", function, A1NearestObject, GameArray, GameScalar | GameString),
         GameOperator(GameArray, "nearObjects", function, A1NearObjects, GameArray | GameObject, GameArray | GameScalar),
-        GameOperator(GameString, ">>", function, A1ConfigChild, GameString, GameString),
+        // Config paths bind looser than other binary commands: Arma 3's own functions write
+        // `configFile >> "CfgWorlds" >> worldName >> "Armory" >> ["a", "b"] select _this` and
+        // `... >> SIDE_COLORS param [_side, "colorUnknown"]`, the select/param first.
+        GameOperator(GameString, ">>", comparison, A1ConfigChild, GameString, GameString),
+        GameOperator(GameNothing, "breakOut", function, A1BreakOutWith, GameAny, GameString),
         GameOperator(GameString, "select", function, A1ConfigSelect, GameString, GameScalar),
         GameOperator(GameScalar, "min", function, A1Min, GameScalar, GameScalar),
         GameOperator(GameScalar, "max", function, A1Max, GameScalar, GameScalar),

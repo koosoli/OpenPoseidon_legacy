@@ -913,6 +913,8 @@ struct GameTypeType : public Poseidon::Foundation::EnumName
     static inline bool s_breakOut = false;
     void SetScopeName(const char* name) const;
     void BreakToScope(const char* name, bool out) const;
+    // value breakOut "scope" (Arma 3): the scope left gives this value as its result.
+    void BreakOutWithValue(const char* name, const GameValue& value) const;
     // A statement loop stopped by EvalBreak: true if this scope is the break's target
     // (the break is then over: the statement is skipped, or the scope left for breakOut).
     bool CatchBreak(bool& leaveScope) const;
