@@ -1464,12 +1464,29 @@ GameValue A2SideKnowsAbout(const GameState* state, GameValuePar oper1, GameValue
     return GameValue(best);
 }
 
-GameValue A2WeaponDirection(const GameState* state, GameValuePar oper1, GameValuePar)
+// unit/vehicle weaponDirection "weapon": where that weapon's barrel points, in world space
+// ([x, z, y] like every script position). Was the body's direction for every weapon, so a
+// traversed turret read straight ahead (a1gunfire). Falls back to the body's direction for
+// an unknown weapon.
+GameValue A2WeaponDirection(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     GameValue result = state->CreateGameValue(GameArray);
     GameArrayType& a = result;
     Object* obj = GetObject(oper1);
-    const Vector3 d = obj ? obj->Direction() : Vector3(0, 0, 1);
+    Vector3 d = obj ? obj->Direction() : Vector3(0, 0, 1);
+    if (EntityAI* ai = dyn_cast<EntityAI>(obj))
+    {
+        const RString name = oper2;
+        for (int i = 0; i < ai->NMagazineSlots(); i++)
+        {
+            const WeaponType* weapon = ai->GetMagazineSlot(i)._weapon;
+            if (weapon && Poseidon::Arma1Compat::ScriptWeaponMatches(weapon->GetName(), name))
+            {
+                d = ai->GetWeaponDirection(i);
+                break;
+            }
+        }
+    }
     a.Add(GameValue(d.X()));
     a.Add(GameValue(d.Z()));
     a.Add(GameValue(d.Y()));
