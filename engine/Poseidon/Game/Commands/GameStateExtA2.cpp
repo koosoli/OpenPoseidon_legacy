@@ -1085,7 +1085,9 @@ void KbReact(const Runtime::KbLine& line)
     const auto setVars = [&](GameVarSpace& vars) {
         vars.VarSet("_this", GameValueExt(to), true);
         vars.VarSet("_from", GameValueExt(who), true);
-        vars.VarSet("_sentenceId", GameValue(RString(line.id.c_str())), true);
+        // GameVarSpace keys are lower case (GameState::VarGet lowers the name it seeks):
+        // a "_sentenceId" key is never found, and every listener FSM took its fallback link.
+        vars.VarSet("_sentenceid", GameValue(RString(line.id.c_str())), true);
         vars.VarSet("_topic", GameValue(RString(line.topic.c_str())), true);
     };
     if (!player && !reaction.fsm.empty())
