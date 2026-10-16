@@ -321,6 +321,36 @@ Arma 1 ammunition and Arma 1 armour are to come together (owner, 2026-10-15); a 
 two gunners (RHIB2Turret's rear MK19) gets the first one's weapon only; tanks, helicopters
 and planes keep CWA's weapons; the Arma 1 sounds of the rebuilt weapons were not listened to.
 
+## Full run after the rebase, Arma 1 ballistics (2026-10-16)
+
+**All 131 missions on d3ac4c62** (07:56-08:50, from `dist`): 130 entered and ran 25 s clean;
+`fos_lament.eden` crashed (0xC0000005) in `FileCache::Maintain`, called from
+`SoundSystemSteam::PreloadWave` on a pool worker -- the trunk's new Steam Audio backend
+repeats the FileCache race the OpenAL backend had (fixed there in d8f2e36). 01192861 makes
+it preload on the calling thread, as OpenAL does: on 01192861 the 22-mission gate (the
+20-mission subset, fos_lament, s03dolores) ran 22/22 clean, and that build was deployed
+(stamped 2026-10-16 09:27).
+
+**0927bf7a, Arma 1 ammunition and armour together** (owner's decision): generated
+`A1a_<ammo>` CfgAmmo classes on the CWA ammunition of the same kind take Arma 1's hit,
+indirectHit and indirectHitRange; the rebuilt vehicle weapons and every Arma 1 magazine
+whose round differs from the carrier's (now generated even when the size matches) fire
+them; Arma 1 vehicles take their Arma 1 armour (T-72 690 vs CWA 400, M1A1 900 = 900,
+UAZ/HMMWV 40 vs 20, M113 105 vs 150, UH-60 30 vs 60). `OP_A1_BALLISTICS=0` turns both off.
+
+| check (0927bf7a) | result |
+|---|---|
+| a1weapAT, with / without `OP_A1_BALLISTICS` | T-72 destroyed by the M136/LAW salvo in both; M1A1 after the RPG-7V: damage 0.80 (Arma 1) vs 0.66 (CWA) |
+| magazines (log) | e.g. `100Rnd_762x51_M240` on CWA's M60 (same size) fires `A1a_B_762x51_Ball`; `15Rnd_9x19_M9` on the Beretta fires `A1a_B_9x19_Ball` |
+| a1vehArm, a1weapMag | unchanged (vehicle weapons fire; M24 5 rounds, M107 refuses M24 rounds) |
+| 20-mission subset (`_b1`) | 20/20 exit 0 |
+
+Crew-seat diagnostic (4b3970af), Arma 1 HMMWV M2 on JeepMG, LOD 0, model box
+(-1.70 -2.51 -2.56)..(1.70 2.51 2.56): driver (-0.93 -1.58 0.28), gunner (-0.15 -1.43 -0.15),
+cargo (0.53 -1.57 0.23) (0.61 -1.59 -0.70) (-0.90 -1.54 -0.71) -- the passengers sit at the
+driver's height, so the seats themselves are in the car; why the passengers are drawn on
+the ground is still open (their Arma 1 cargo move is the next suspect).
+
 ## Known gaps (honest list)
 
 - Missions needing third-party addons (`un-impossible_mission.cain`: `BBB006`) cannot run.
