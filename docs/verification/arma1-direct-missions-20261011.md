@@ -292,6 +292,35 @@ Audio problems seen in the run logs and still open: AI radio words load as
 `x09quickupdate` asks for CfgSounds `09v50`, which no CfgSounds defines;
 `m09convoyattack_s06` asks for `ca\sounds\missions\m09r06.ogg`, which is not in the AddOns.
 
+## Rebased on the trunk, vehicle weapons, faces (2026-10-16; d3ac4c62, stamped in the game folder)
+
+**Rebase.** The trunk `perf/optimization-20261014` had taken over the Arma 1 work up to
+92ce7531 already (cherry-picked under other hashes). `MrDudeX-arma1` now is the trunk at
+ed011a90 plus the commits it lacked (vehicle values, Arma 1's script folder, .wss->.ogg,
+docs, radio-word diag) and the two below; the old history is kept as
+`archive/MrDudeX-arma1-pre-rebase-20261015` (7adae3e3). The rebased build (12088873) was
+built on the build machine (new vcpkg ports: Steam Audio, libmysofa, pffft) and boots the
+Arma 1 test missions.
+
+| commit | what was wrong | now |
+|---|---|---|
+| 0abfb465 | the owner decided every vehicle gets its original weapons; MK19, AGS-30, TOW, AT-5, KPVT, the gun truck and the BRDM-2 were unarmed, DShKM/PK cars fired CWA's 500-round M2 | the gunner's Arma 1 weapons (first turret with a real one) become generated `A1v_<weapon>` classes: Arma 1 name, rounds per magazine, rate of fire, full-auto, muzzle velocity, sound; on CWA's 7.62/12.7/30 mm MG, the M203 grenade, tank shells or the AT-3 by kind; the turret's number of magazines. All armed cars ride JeepMG for the gunner's seat. Cars, boats, statics; `OP_A1_VEHICLE_WEAPONS=0` turns it off |
+| d3ac4c62 | Arma 1 heads (selection `osobnost`, 593 times in characters.pbo) wore CWA's face textures, laid out for OFP's head: a smeared face | Arma 1's `CfgFaces >> Man >> FaceN` (`ca\characters\hhl\hhl_NN_CO.paa`) for heads of Arma 1 models, random faces and `setFace`/`setIdentity` alike; `OP_A1_FACES=0` turns it off |
+
+Checked on d3ac4c62 (from `dist`, then deployed):
+
+| check | result |
+|---|---|
+| a1vehArm: weapons and one scripted shot each | HMMWV M2 100 -> 99 (6 magazines), UAZ DShKM 50 -> 49, Datsun PK 100 -> 99, AGS-30 29 -> 28; HMMWV MK19, UAZ AGS-30, M2 truck armed (were unarmed) |
+| 20-mission subset (`_p2`) | 20/20 exit 0, 0 script errors; rebuilt weapons logged for M2StaticMG, HMMWV50, UAZMG, Stryker_ICV_M2/MK19/TOW, Truck5tMG, RHIB, RHIB2Turret, DSHKM, D30, M119, BRDM2 (KPVT + PKT), BRDM2_ATGM, LandroverMG, HMMWVTOW, HMMWVMK, UAZ_AGS30 |
+| a1face against `OP_A1_FACES=0` (screenshots) | Arma 1 face on the Arma 1 head; before, CWA's texture smeared across it |
+| a1vehSeats, a1weapMag | unchanged: M113 11 aboard; M24 5 / M249 200 / M107 10 rounds |
+
+Deviations and limits, by design for now: the ammunition is CWA's (damage, splash) --
+Arma 1 ammunition and Arma 1 armour are to come together (owner, 2026-10-15); a vehicle with
+two gunners (RHIB2Turret's rear MK19) gets the first one's weapon only; tanks, helicopters
+and planes keep CWA's weapons; the Arma 1 sounds of the rebuilt weapons were not listened to.
+
 ## Known gaps (honest list)
 
 - Missions needing third-party addons (`un-impossible_mission.cain`: `BBB006`) cannot run.
