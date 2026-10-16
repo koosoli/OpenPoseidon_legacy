@@ -141,6 +141,8 @@ and are not counted.
 | 25 | `27903ad` | 98, laptop gl33 | 98 | 97 | 0; MP_Paradrop's own error as before; census 13056 Arma, 0 CWA, every exit code 0. No description.ext fails to preprocess (run 24: 21 missions) and the description.ext now read add no script error. 25 lip-sync openings logged |
 | focus 24 | `131160c` | CE7B, CE0, T01, 60 s, laptop gl33 | 3 | 2 | CE7B's listener FSM loads (no parser error); its intro conversation now runs on to the HALO jump, whose script calls `expectedDestination` -- unknown, 178166 errors in 60 s (added `6c666cb`). CE0, T01 clean |
 | focus 24b | `6c666cb` | CE7B, CE0, T01, 60 s, laptop gl33 | 3 | 3 | 0; census 162 Arma, 0 CWA. CE7B runs its intro conversation into the HALO jump (`time_to_halo` P_0, G_0-G_4) with no script error. The listener's `No, sir!` (O_0) was not told within 60 s -- not followed further |
+| 26 | `6c666cb` | 98, laptop gl33 | 98 | 97 | 0; MP_Paradrop's own error as before; census 13017 Arma, 0 CWA, every exit code 0 -- `expectedDestination` and the FSM string joins regress nothing |
+| focus 24c | `577755f` | CE7B, CE0, T01, 60 s, laptop gl33, FSM state log | 3 | 3 | 0; census 161 Arma, 0 CWA. All 4 CE7B listener FSMs go `React` -> `END`: the `_sentenceId in [...]` link never held. Cause: `_sentenceId` was stored under its mixed-case name, and variable lookup lowers the name -- the listener saw nil (fixed `e4ad2d5`) |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
