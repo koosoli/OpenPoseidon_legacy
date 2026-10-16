@@ -140,6 +140,7 @@ and are not counted.
 | focus 23 | `27903ad` | T01, C2B, C1, CE0, CE1, CE2, 60 s, laptop gl33 | 6 | 6 | 0; census 1304 Arma, 0 CWA. **Lip sync works:** the log names speakers opening the mouth by their .lip track (`Arma 2 lip sync: WEST Alpha Schwarz:1 opens the mouth (0.87)`, also CIVL speakers). No description.ext fails to preprocess any more (run 24: CE0-CE2 each failed). The 'Lip: NO MATCH' lines left are `say` sounds without a track in the data (weeping, a drunk) |
 | 25 | `27903ad` | 98, laptop gl33 | 98 | 97 | 0; MP_Paradrop's own error as before; census 13056 Arma, 0 CWA, every exit code 0. No description.ext fails to preprocess (run 24: 21 missions) and the description.ext now read add no script error. 25 lip-sync openings logged |
 | focus 24 | `131160c` | CE7B, CE0, T01, 60 s, laptop gl33 | 3 | 2 | CE7B's listener FSM loads (no parser error); its intro conversation now runs on to the HALO jump, whose script calls `expectedDestination` -- unknown, 178166 errors in 60 s (added `6c666cb`). CE0, T01 clean |
+| focus 24b | `6c666cb` | CE7B, CE0, T01, 60 s, laptop gl33 | 3 | 3 | 0; census 162 Arma, 0 CWA. CE7B runs its intro conversation into the HALO jump (`time_to_halo` P_0, G_0-G_4) with no script error. The listener's `No, sir!` (O_0) was not told within 60 s -- not followed further |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
