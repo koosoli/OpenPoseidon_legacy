@@ -713,6 +713,14 @@ class ODOLLoader
             }
             return total == 0 ? 0.0 : static_cast<double>(valid) / static_cast<double>(total);
         };
+        // A LOD whose reference records carry no (index, weight) pair at all (the geometry,
+        // shadow and memory LODs of Arrowhead's cars and the C-130J) has nothing to bind:
+        // skip it quietly instead of reporting a layout that does not exist.
+        size_t pairCount = 0;
+        for (const auto& r : refs)
+            pairCount += static_cast<size_t>(std::min<int>(r.count, 4));
+        if (pairCount == 0)
+            return;
         const double indexFirstScore  = validCount(true);
         const double weightFirstScore = validCount(false);
         if (indexFirstScore < 0.999 && weightFirstScore < 0.999)
