@@ -409,7 +409,13 @@ returns the named weapon's barrel direction.
 bd7a23ce: a1gunfire (M2 fires, `weaponDirection` follows the turret: 0.15, 0.29 east), a1crew3,
 22-mission gate 22/22 exit 0 -- **deployed** (stamped 2026-10-16 12:33; exe, PoseidonGame.exe
 and DLL md5-identical to `dist`; previous binaries in `Remastered\backup-before-bd7a23ce`).
-Full 131-mission run on it queued.
+**All 131 missions on bd7a23ce** (12:34-13:26, from `dist`): 131/131 exit 0.
+
+`a1tank` (bd7a23ce): Arma 1 M1A1 against T-72 at 140 m, full crews, nobody captive. Both
+turrets traverse onto each other (`weaponDirection` 0.16/0.97 and -0.16/-0.98, the bearing
+between them), both fire their main gun (M1A1 2 rounds, T-72 1), the T-72 is at damage 0.85
+after two hits, the M1A1 at 0 after one (Arma 1 armour 900). Main guns are still CWA's
+(`Gun120` on both -- see Known gaps).
 
 ## Known gaps (honest list)
 
