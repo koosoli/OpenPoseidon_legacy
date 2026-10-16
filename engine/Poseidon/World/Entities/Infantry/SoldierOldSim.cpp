@@ -1315,8 +1315,19 @@ void Man::SetFace(RString name, const PlayerIdentityKey& player)
             // turned at load like the body (an Arma 2 man is a reversed model), or the face
             // looks out of the back of the head
             _a2Head = QIFStreamB::FileExist(headShape) ? Shapes.New(headShape, Type()->_shapeReversed, true) : nullptr;
+            _a2HeadWeights = nullptr;
             if (_a2Head)
+            {
                 _a2HeadFace.Init(_a2Head, "osobnost", nullptr);
+                if (Type()->_moveType && Type()->_moveType->GetSkeleton())
+                {
+                    WeightInfoName wname;
+                    wname.shape = _a2Head.GetRef();
+                    wname.skeleton = Type()->_moveType->GetSkeleton();
+                    _a2HeadWeights = WeigthBank.New(wname);
+                    Type()->_moveType->GetSkeleton()->Prepare(_a2Head, *_a2HeadWeights);
+                }
+            }
             else
                 LOG_WARN(Physics, "Arma 2 head model {} not found", (const char*)headShape);
         }

@@ -760,6 +760,7 @@ class Man: public Person
 	// its "heads\bysta" placeholder, and its face section
 	Ref<LODShapeWithShadow> _a2Head;
 	AnimationSection _a2HeadFace;
+	Ref<WeightInfo> _a2HeadWeights; // its skinning against the man's skeleton
 	void DrawArma2Head(int level, const Matrix4 &transform, float dist2, float z2, const LightList &lights);
 	// --arma2: the backpack his class carries (Arrowhead), skinned to his skeleton
 	Ref<LODShapeWithShadow> _a2Backpack;
