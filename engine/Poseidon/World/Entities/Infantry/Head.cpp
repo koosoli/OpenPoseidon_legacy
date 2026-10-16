@@ -3,6 +3,7 @@
 
 #include <Poseidon/World/Entities/Infantry/Head.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Filesystem/Utf8Paths.hpp>
@@ -965,8 +966,48 @@ void Head::Simulate(const HeadType& type, float deltaT, SimulationImportance pre
     }
 }
 
+// An Arma 1 head (a soldier drawn with the Arma 1 model, under ca\) wears Arma 1's own face
+// textures: Arma 1's CfgFaces >> Man names the same Face1..Face55 as CWA, but CWA's textures
+// are laid out for OFP's head and look wrong on Arma 1's. Null when it is no Arma 1 head.
+// OP_A1_FACES=0: CWA's faces, as before.
+static Ref<Texture> Arma1FaceTexture(LODShape* lShape, RString name)
+{
+    static const bool on = [] {
+        const char* e = std::getenv("OP_A1_FACES");
+        return !(e && *e == '0');
+    }();
+    if (!on || Arma1Compat::Generation() != 1 || !lShape)
+        return nullptr;
+    const char* shape = lShape->GetName();
+    if (!shape || _strnicmp(shape[0] == '\\' ? shape + 1 : shape, "ca\\", 3) != 0)
+        return nullptr;
+    const ParamEntry* faces = Arma1Compat::FindConfigClass("CfgFaces", "Man");
+    if (!faces || !faces->IsClass())
+        return nullptr;
+    const ParamEntry* face = faces->FindEntry(name);
+    if (!face || !face->IsClass())
+        face = faces->FindEntry("Default");
+    const ParamEntry* tex = face ? face->FindEntry("texture") : nullptr;
+    if (!tex || tex->IsClass() || tex->IsArray())
+        return nullptr;
+    RString file = (RStringB)*tex;
+    if (file.GetLength() > 0 && file[0] == '\\')
+        file = (const char*)file + 1;
+    if (file.GetLength() == 0 || file[0] == '#')
+        return nullptr;
+    return GlobLoadTexture(file);
+}
+
 void Head::SetFace(const HeadType& type, bool women, LODShape* lShape, RString name, RString player)
 {
+    if (stricmp(name, "custom") != 0)
+        if (Ref<Texture> a1Face = Arma1FaceTexture(lShape, name))
+        {
+            _texture = a1Face;
+            _textureWounded = nullptr;
+            lShape->RegisterTexture(_texture, type._personality);
+            return;
+        }
     const ParamEntry* cls = (Pars >> "CfgFaces").FindEntry(name);
     if (!cls)
     {
