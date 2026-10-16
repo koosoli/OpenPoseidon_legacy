@@ -2167,6 +2167,36 @@ bool Arma1CrewActions()
     return on && Generation() == 1;
 }
 
+void PrepareEditorClasses()
+{
+    static bool done = false;
+    if (done || !Active() || Generation() != 1)
+        return;
+    done = true;
+    LoadConfig();
+    if (!ConfigLoaded())
+        return;
+    const ParamEntry* vehicles = Arma1Pars().FindEntryNoInheritance("CfgVehicles");
+    if (!vehicles)
+        return;
+    int listed = 0, generated = 0;
+    for (int i = 0; i < vehicles->GetEntryCount(); i++)
+    {
+        const ParamEntry& cls = vehicles->GetEntry(i);
+        if (!cls.IsClass())
+            continue;
+        const ParamEntry* scope = cls.FindEntry("scope");
+        if (!scope || scope->IsClass() || scope->IsArray() || (int)*scope != 2)
+            continue;
+        listed++;
+        const RString resolved = ResolveVehicleClass(RString((const char*)cls.GetName()));
+        if (_strnicmp(resolved.Data(), "A1x_", 4) == 0)
+            generated++;
+    }
+    LOG_INFO(Mission, "{}: editor -- {} Arma 1 classes listed by Arma 1, {} generated with their own model", Label(),
+             listed, generated);
+}
+
 int Arma1CrewActionFallback(int action)
 {
     const auto& fallbacks = CrewActionFallbacks();
@@ -2948,6 +2978,22 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     const std::string displayName = StringValue(*a1, "displayName");
     if (!displayName.empty())
         text += "\t\tdisplayName=\"" + displayName + "\";\r\n";
+    // The mission editor lists an Arma 1 class under its own heading ("Arma 1 Men", "Arma 1
+    // Armored", ...) when Arma 1 lists it (scope 2). Sounds and mines keep the carrier's
+    // vehicleClass, which the engine reads for what they are.
+    if (Generation() == 1)
+    {
+        const std::string carrierClass = Lower(StringValue(*cwa, "vehicleClass"));
+        const ParamEntry* a1Scope = a1->FindEntry("scope");
+        const bool listed = a1Scope && !a1Scope->IsClass() && !a1Scope->IsArray() && (int)*a1Scope == 2;
+        std::string a1Class = StringValue(*a1, "vehicleClass");
+        if (listed && carrierClass != "sounds" && carrierClass != "mines")
+        {
+            if (a1Class.empty())
+                a1Class = man ? "Men" : "Objects";
+            text += "\t\tvehicleClass=\"Arma 1 " + a1Class + "\";\r\n\t\tscope=2;\r\n";
+        }
+    }
     if (loadout)
         text += Arma2Loadout(*a1);
     if (man && useModel)
