@@ -144,6 +144,7 @@ and are not counted.
 | 26 | `6c666cb` | 98, laptop gl33 | 98 | 97 | 0; MP_Paradrop's own error as before; census 13017 Arma, 0 CWA, every exit code 0 -- `expectedDestination` and the FSM string joins regress nothing |
 | focus 24c | `577755f` | CE7B, CE0, T01, 60 s, laptop gl33, FSM state log | 3 | 3 | 0; census 161 Arma, 0 CWA. All 4 CE7B listener FSMs go `React` -> `END`: the `_sentenceId in [...]` link never held. Cause: `_sentenceId` was stored under its mixed-case name, and variable lookup lowers the name -- the listener saw nil (fixed `e4ad2d5`) |
 | focus 25 | `e4ad2d5` | CE7B, CE0, T01, 60 s, laptop gl33 | 3 | 3 | 0; census 162 Arma, 0 CWA, every exit code 0. **CE7B's listener answers:** on `beginning_in_hercules_G_3` its FSM goes `React` -> `No__sir_` and tells `beginning_in_hercules_O_0` (0.9 s), which reaches the player's event handler; G_0-G_2 still go to `END`, as their link condition says |
+| 27 | `e4ad2d5` | 98, laptop gl33 | 98 | 97 | 0; MP_Paradrop's own error as before; census 13056 Arma, 0 CWA, every exit code 0 -- the `_sentenceId` fix regresses nothing. CE7B's listener answers here too (`No__sir_` once); 40 lip-sync openings logged |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
