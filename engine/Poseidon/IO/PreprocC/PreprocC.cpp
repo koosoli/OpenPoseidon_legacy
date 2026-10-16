@@ -31,6 +31,16 @@ class Preprocessor : public Preproc
     QIStream* OnEnterInclude(const char* filename) override
     {
         std::string resolved = filename;
+        // An absolute include ("\CA\Missions_e\campaign\loadingscreen.ext", every Arrowhead
+        // campaign description.ext) names an archive path from the root; the banks know it
+        // without the leading separator. Unresolved, the whole description.ext failed.
+        if (!QIFStreamB::FileExist(resolved.c_str()) && (resolved[0] == '\\' || resolved[0] == '/'))
+        {
+            const size_t start = resolved.find_first_not_of("\\/");
+            const std::string rooted = start == std::string::npos ? std::string() : resolved.substr(start);
+            if (!rooted.empty() && QIFStreamB::FileExist(rooted.c_str()))
+                resolved = rooted;
+        }
         if (!QIFStreamB::FileExist(resolved.c_str()) && !_includeStack.empty())
         {
             std::string dir = DirectoryOf(_includeStack.back().c_str());
