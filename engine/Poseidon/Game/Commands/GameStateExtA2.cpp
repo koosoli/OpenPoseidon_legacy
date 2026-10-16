@@ -2222,6 +2222,37 @@ AIGroup* GroupOf(GameValuePar v)
     return nullptr;
 }
 
+// expectedDestination unit: [position, planningMode, forceReplan] -- where the unit's AI
+// is heading (CE7B's HALO script steers each parachute towards it). Without a plan the
+// unit's own position and "DoNotPlan", as Arma 2 answers for a unit that is not moving.
+GameValue A2ExpectedDestination(const GameState* state, GameValuePar oper1)
+{
+    Object* obj = GetObject(oper1);
+    Vector3 pos = obj ? obj->Position() : VZero;
+    const char* mode = "DoNotPlan";
+    if (EntityAI* e = dyn_cast<EntityAI>(obj))
+        if (AIUnit* u = e->CommanderUnit())
+        {
+            const Vector3 wanted = u->GetWantedPosition();
+            if (wanted.SquareSize() > 0.0f && wanted.Distance2(pos) > 1.0f)
+            {
+                pos = wanted;
+                mode = "LEADER PLANNED";
+            }
+        }
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& array = result;
+    GameValue p = state->CreateGameValue(GameArray);
+    GameArrayType& pa = p;
+    pa.Add(GameValue(pos.X()));
+    pa.Add(GameValue(pos.Z()));
+    pa.Add(GameValue(pos.Y() - GLandscape->SurfaceY(pos.X(), pos.Z())));
+    array.Add(p);
+    array.Add(GameValue(RString(mode)));
+    array.Add(GameValue(false));
+    return result;
+}
+
 GameValue A2CurrentWaypoint(const GameState*, GameValuePar oper1)
 {
     AIGroup* grp = GroupOf(oper1);
@@ -2752,6 +2783,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameObject, "createVehicle", A2CreateVehicleArray, GameArray),
     GameFunction(GameObject, "createVehicleLocal", A2CreateVehicleArray, GameArray),
     GameFunction(GameObject, "createSoundSource", A2CreateSoundSource, GameArray),
+    GameFunction(GameArray, "expectedDestination", A2ExpectedDestination, GameObject),
     GameFunction(GameBool, "simulationEnabled", A2TrueUnary, GameObject),
     GameFunction(GameNothing, "cutFadeOut", A2NothingUnary, GameScalar),
     GameFunction(GameObject, "hcLeader", A2ObjNullUnary, GameGroup),
