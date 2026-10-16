@@ -635,6 +635,27 @@ std::string JoinConfigStrings(const std::string& in)
             }
             out.push_back('"');
             i++;
+            // The value's ';' may stand on a later line, behind the editor's markers
+            // ("..."\n\t/*%FSM</STATEINIT""">*/;, CE7B's listener FSMs). CWA's parser ends a
+            // value at the line break and then reads that ';' as an entry name: pull it up.
+            size_t k = i;
+            while (k < n)
+            {
+                if (space(in[k]))
+                    k++;
+                else if (in[k] == '/' && k + 1 < n && in[k + 1] == '*')
+                {
+                    const size_t end = in.find("*/", k + 2);
+                    k = end == std::string::npos ? n : end + 2;
+                }
+                else
+                    break;
+            }
+            if (k < n && in[k] == ';' && in.find('\n', i) < k)
+            {
+                out.push_back(';');
+                i = k + 1;
+            }
             break;
         }
     }
