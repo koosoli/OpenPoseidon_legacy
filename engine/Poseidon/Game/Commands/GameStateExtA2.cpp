@@ -971,6 +971,15 @@ void FsmEnter(Fsm& fsm, const std::string& name)
 {
     fsm.state = name;
     const ParamEntry* st = fsm.states ? fsm.states->FindEntry(name.c_str()) : nullptr;
+    // which states the conversation FSMs walk through (a listener that never answers)
+    static int reported = 0;
+    if (reported < 300 && fsm.file.find("bikb") != std::string::npos)
+    {
+        ++reported;
+        const std::string init = EntryText(st, "init");
+        LOG_INFO(Mission, "Arma 2: FSM {} enters '{}'{} (init {} chars)", fsm.file, name, st ? "" : " (no such state)",
+                 init.size());
+    }
     FsmRun(fsm, EntryText(st, "init"));
     for (const std::string& f : fsm.finals)
         if (_stricmp(f.c_str(), name.c_str()) == 0)
