@@ -457,6 +457,11 @@ aircraft on an armed CWA one drops its weapons. Left out: the Camel's dropped gr
 | Mi-17 | 57 mm rockets (Rocket57x64) | destroyed |
 | ground | UAZ DShKM destroyed, T-72 damage 0.10 | |
 
+a1tank and a1gunfire unchanged (M1A1 SABOT kills the T-72; M2 and DShKM fire); 22-mission gate
+22/22 exit 0 -- **deployed** 2026-10-16 16:10 (stamped; exe, PoseidonGame.exe and DLL
+md5-identical to `dist`; previous binaries in `Remastered\backup-before-85943a89`). Full
+131-mission run on it queued.
+
 
 ## Known gaps (honest list)
 
