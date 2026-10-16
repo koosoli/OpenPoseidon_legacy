@@ -15,6 +15,8 @@
 #include <Poseidon/World/Effects/MudSpray.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/Game/OperMap.hpp>
+#include <map>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
 
@@ -618,6 +620,21 @@ void Car::MoveWeapons(float deltaT)
     }
 
     AIUnit* unit = GunnerUnit();
+    // --arma1 diagnostic (a1gunfire): car turrets that know their target never slew. Once per
+    // vehicle every 2 s for generated Arma 1 classes: is there a gunner unit, where does the
+    // turret point, where does it want to.
+    if (Arma1Compat::Active() && _strnicmp(Type()->GetName(), "A1x_", 4) == 0)
+    {
+        static std::map<const void*, float> last;
+        float& t = last[this];
+        if (t <= 0 || Glob.time.toFloat() - t >= 2.0f)
+        {
+            t = Glob.time.toFloat();
+            LOG_INFO(AI, "A1 turret {}: gunner unit {} yRot {:.3f} wanted {:.3f} xRot {:.3f} wanted {:.3f} stopped {} fireTarget {}",
+                     (const char*)Type()->GetName(), unit ? "yes" : "NO", _turret._yRot, _turret._yRotWanted,
+                     _turret._xRot, _turret._xRotWanted, _isStopped, GetFireTarget() ? "yes" : "no");
+        }
+    }
     if (!unit)
     {
         _turret.Stop(Type()->_turret);
