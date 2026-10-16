@@ -355,14 +355,33 @@ the ground is still open (their Arma 1 cargo move is the next suspect).
 131/131 entered and exited 0 (`summary_01192861_full.txt` on the build machine).
 
 **Passengers on the ground** (go23, 0bc7f406): the seats are identical on every LOD that has
-them (levels 0-4, 6-8, 15, 17), so no LOD swap moves them. The close-up (`a1cargo-b`) shows
-the three passengers drawn under the car at ground level. Arma 1's own HMMWV M2 seats its
-crew in `HMMWV_Driver`, `HMMWV_Gunner01` and `HMMWV_Cargo01`/`HMMWV_Cargo01`/`UAZ_Cargo01`;
-ours sat in the CWA jeep's actions mapped to the nearest Arma 1 state by name. **0e52494c**
-gives every Arma 1 vehicle its own crew poses (`ManActA1_<state>`, `OP_A1_CREW_ACTIONS=0`
-off); a man whose moves lack one plays the CWA pose of the same seat. Test pending
-(go24: crew states on 0bc7f406 via `animationState`; go25: 0e52494c, a1crew, a1cargo,
-22-mission gate).
+them, so no LOD swap moves them. Two causes, both fixed and deployed:
+
+- **The seat placement** (3b5a0c81): a crew proxy places the man's *source* origin, but an
+  Arma ODOL man is stored around the binariser's bounding centre (`AnimationOrigin`), and the
+  crew code only added `BoundingCenter()` (zero for drawing). Every Arma 1 crew member sat
+  ~0.9 m below his seat -- the HMMWV driver, gunner and passengers under the car. The seat,
+  the crew proxy, its complexity and the in-vehicle camera now add `BoundingCenter() -
+  AnimationOrigin()`, as the shape adapter already does for proxied models (zero for
+  OFP/CWA models).
+- **The pose** (0e52494c): the crew sat in the CWA jeep's actions mapped to the nearest
+  Arma 1 state by name (`uaz_driver`, `uaz_gunner01`, `uaz_cargo01`). Every crew pose an
+  Arma 1 vehicle names (driverAction, cargoAction[], the turrets' gunnerAction and their
+  *InAction) is now a vehicle action `ManActA1_<state>` (117 registered); the generated
+  class names them. `OP_A1_CREW_ACTIONS=0` turns it off; a man whose moves lack a pose plays
+  the CWA pose of that seat.
+
+| check | result |
+|---|---|
+| a1crew (go24, 0bc7f406) | `uaz_driver`, `uaz_gunner01`, `uaz_cargo01(_v1)`; everyone under the car |
+| a1crew (go26, 3b5a0c81) | `hmmwv_driver`, `hmmwv_gunner01`, `hmmwv_cargo01`; nobody under the car |
+| a1crew3 (camera, d974050d) | HMMWV M2 gunner in the hatch behind the M2, facing forward (front and rear views); UAZ DShKM gunner in the ring at the gun, driver seated |
+| a1cargo, a1vehSeats, a1vehArm | exit 0; a1vehArm gunner on the HMMWV roof |
+| 22-mission gate g50 (0e52494c) and g51 (3b5a0c81) | 22/22 exit 0 each |
+
+**3b5a0c81 deployed** (stamped 2026-10-16 11:34; exe, PoseidonGame.exe and DLL from one
+build, previous binaries in `Remastered\backup-before-3b5a0c81`). d974050d only adds the
+seat direction to the diagnostic (all HMMWV seats face +z) and is not deployed.
 
 ## Known gaps (honest list)
 
