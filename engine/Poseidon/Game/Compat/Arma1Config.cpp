@@ -2022,6 +2022,21 @@ std::string Arma2HeadModel(const char* unitClass, const char* shapeName, const c
     return cls && cls->IsClass() ? StringValue(*cls, "model") : std::string();
 }
 
+std::string Arma2BackpackModel(const char* unitClass, const char* shapeName)
+{
+    const ParamEntry* man = Arma2ManInOwnModel(unitClass, shapeName);
+    if (!man)
+        return {};
+    const std::string backpack = StringValue(*man, "backpack");
+    if (backpack.empty())
+        return {};
+    const ParamEntry* cls = FindConfigClass("CfgVehicles", backpack.c_str());
+    const std::string model = cls && cls->IsClass() ? StringValue(*cls, "model") : std::string();
+    LOG_INFO(Mission, "{}: '{}' carries backpack '{}' ({})", Label(), unitClass + 4, backpack,
+             model.empty() ? "no model" : model);
+    return model;
+}
+
 RString Arma2RandomFace(const char* unitClass, const char* shapeName, uint32_t seed)
 {
     const ParamEntry* man = Arma2ManInOwnModel(unitClass, shapeName);

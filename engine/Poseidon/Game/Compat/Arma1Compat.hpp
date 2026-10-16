@@ -105,6 +105,10 @@ RString Arma2RandomFace(const char* unitClass, const char* shapeName, uint32_t s
 // CfgHeads >> head >> model): his body model only carries the "heads\bysta" placeholder
 // where Arma 2 draws it. "" for any other man, or with OP_A2_FACES=0.
 std::string Arma2HeadModel(const char* unitClass, const char* shapeName, const char* face);
+// The model of the backpack an Arma 2 man's class carries (CfgVehicles >> class >> backpack,
+// an Arrowhead pack such as TK_RPG_Backpack_EP1), drawn where his body has the "us_bag"
+// placeholder; skinned to the man's skeleton like the head. "" when none (as above).
+std::string Arma2BackpackModel(const char* unitClass, const char* shapeName);
 
 // Arma 2: the EventHandlers >> init code of a module (a class derived from Logic, such
 // as FunctionsManager or the first-aid modules) that a mission places; empty otherwise.
