@@ -2235,11 +2235,13 @@ void TransportType::InitShape()
     if (Arma1Compat::Active() && _shape->NLevels() > 0 && _strnicmp((const char*)GetName(), "A1x_", 4) == 0)
     {
         const auto at = [](const ManProxy& m) {
-            char buf[96];
+            char buf[160];
             const ::Vector3 pos = m.transform.Position();
             if (!m.Present())
                 return std::string("-");
-            snprintf(buf, sizeof(buf), "(%.2f %.2f %.2f)", pos.X(), pos.Y(), pos.Z());
+            const ::Vector3 dir = m.transform.Direction(), up = m.transform.DirectionUp();
+            snprintf(buf, sizeof(buf), "(%.2f %.2f %.2f dir %.2f %.2f %.2f up %.2f %.2f %.2f)", pos.X(), pos.Y(),
+                     pos.Z(), dir.X(), dir.Y(), dir.Z(), up.X(), up.Y(), up.Z());
             return std::string(buf);
         };
         const ::Vector3 mn = _shape->Min(), mx = _shape->Max();
