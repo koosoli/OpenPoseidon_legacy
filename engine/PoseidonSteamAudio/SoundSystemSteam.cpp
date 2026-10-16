@@ -763,10 +763,11 @@ void SoundSystemSteam::PreloadWave(const char* name)
         _pcmCache.Insert(path.c_str(), std::move(entry));
     };
 
-    if (auto* pool = GetGlobalTaskPool())
-        pool->Submit(work);
-    else
-        work();
+    // Loading goes through the FileCache, which is main-thread only: from a pool worker it
+    // raced the main thread and crashed in FileCache::Maintain (Arma 1 fos_lament, 131-mission
+    // run on d3ac4c62) -- the race the OpenAL backend fixed the same way (d8f2e36). The waves
+    // preloaded here are short effects, so they are read and decoded right here.
+    work();
 }
 
 void SoundSystemSteam::StartCategoryPreview(WaveKind kind)
