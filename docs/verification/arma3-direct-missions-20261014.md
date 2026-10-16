@@ -177,6 +177,10 @@ What the runs found, and what changed for it:
   read, so no Arma soldier ever made a step sound.
 - **Vehicle sounds.** An Arma 3 vehicle with its own model takes its outside engine (a
   helicopter: its rotor) from its sound sets as `soundEngine[]` instead of the CWA carrier's.
+- **`caaaac7` (smoke 13 + karts, 70 s each): 14/14 exit 0.** All 186 Arma 3 weapons of these
+  missions fire with their own close-shot sample (Contact's `Intro1`: the MSBS shot played 81
+  times); birds, surf and thunder play on Arma worlds; every showcase plays sound (25-935
+  waves); the karts' race runs the whole test instead of ending after 25 s.
 - **Known, open.** A soldier in some Contact sites (`s_dolnik_00`) is drawn stretched, with
   long panels round him -- not yet explained; Arma 3 config noise ("Undefined base class
   'Components'" in a few CfgAmmo sensor classes); `nearestTerrainObjects [obj, ...] #0` in
