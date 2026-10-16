@@ -434,6 +434,24 @@ no screenshots written. The stall report now also takes stacks at 90 and 170 s.
   matrices. Focus 21 (`574ee4a`): DumSpiroSpero's player wears his pack on his back, posed
   with him; 5 of 5 missions clean.
 
+### Lip sync, skinned heads, description.ext includes, 2026-10-16
+
+- **Skinned heads** (`e412bd6`): the head model is posed with the man's own spine, neck and
+  head matrices; every face bone takes the head's (the moves carry none). Focus 22: faces
+  intact; run 24: 98/97, 13032 Arma, 0 CWA.
+- **Lip sync** (`f84d494`): Arma 2 ships a `.lip` track beside every recorded line (51937 in
+  the dubbing archives); the CWA head already loads it when a man speaks. The jaw, chin and
+  lower lip of an Arma 2 head now drop by up to 12 mm by that track (mouth corners 6 mm).
+  Focus 23: speakers in T01, C2B and the CE missions open their mouths by it (logged). The
+  amount is chosen, not taken from Arma 2 -- its own face rig is not in the data.
+- **description.ext includes from the archive root** (`27903ad`): 21 missions (every CE
+  mission and SPE scenario, Eagle Wing) lost their whole description.ext to an include
+  written `\CA\Missions_e\...`. Fixed; focus 23 shows none failing.
+- `bd086fc`: ODOL LODs without skin references no longer report a bone layout.
+- Still open from the logs: `corepatch\corepatch_javelin\javelin_optic.p3d` (ODOL 49,
+  2.5 kB) is refused as "Bad version"; one mission's FSM has a state class named
+  `No__sir_.`, which the config parser rejects.
+
 ## Steps
 
 1. **Measure first.** Per mission: an asset census in the log (every class created, what it
