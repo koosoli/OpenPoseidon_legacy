@@ -390,6 +390,13 @@ struct WgrDraw3D
     /* Raw local-light specular RGB, independent of sun radiance; w reserved.
      * Appended ABI extension: 272 -> 288 bytes, covered by the layout handshake. */
     WgrVec4 mat_local_specular;
+    /* REFLECT-001 surface class (ReflectMaterial.hpp). All-zero when WGR_REFLECT is off,
+     * which the shader treats as "not classified" -- today's image unchanged.
+     * reflect0 = roughness, F0, metal, clear coat
+     * reflect1 = class id, clear-coat roughness, source id, debug view (0 = off)
+     * Appended ABI extension: 288 -> 320 bytes, covered by the layout handshake. */
+    WgrVec4 mat_reflect0;
+    WgrVec4 mat_reflect1;
 };
 
 /* One frame-global point or spot light, shared by every 3D draw + terrain (bound
@@ -2382,7 +2389,7 @@ static_assert(sizeof(WgrBlend) == 4, "WgrBlend must be 4 bytes to match the Rust
 static_assert(sizeof(WgrVertex2D) == 32, "WgrVertex2D layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrMeshVertex) == 68, "WgrMeshVertex must match the engine SVertex layout");
 static_assert(sizeof(WgrDraw2DBatch) == 32, "WgrDraw2DBatch layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrDraw3D) == 288, "WgrDraw3D layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrDraw3D) == 320, "WgrDraw3D layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrLight) == 64, "WgrLight layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTonemap) == 64, "WgrTonemap layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrExposure) == 32, "WgrExposure layout must match the Rust #[repr(C)] struct");

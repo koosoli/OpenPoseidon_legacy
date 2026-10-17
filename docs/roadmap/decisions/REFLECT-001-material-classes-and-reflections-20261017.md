@@ -51,5 +51,23 @@ E. Only if measured: object SSR from `rain_water_reflections.wgsl` or one dynami
 5. Peugeot 406: keep the v4 paints; new paint textures only if needed, first on one colour,
    then all 21 once the reflection is right.
 
+## Phase B (implemented, off by default)
+
+- `engine/WgpuRenderer/ReflectMaterial.hpp`: pure rule table (no engine types), tested by
+  `tests/unit/engine/WgpuRenderer/test_reflect_material.cpp` (`scripts/Test-ReflectMaterial.ps1`).
+  Chain: CfgOpMaterials > RVMAT (Glass shader, `fresnelGlass`, env map) > part names
+  (glass/sklo, mirror/zrcatko, chrome, light/svetl by era, tyre/guma, interior) > body
+  (military `PaintMatt`, civil `PaintGloss`, civil + env map `PaintMetallic`) > Blinn default.
+- `TexMaterial` keeps `_pixelShaderId`, `_fresnelStage`, `_hasEnvMap` from the RVMAT.
+- `EngineWgpuReflect.cpp` gathers owner (Transport, typical side), texture and material per
+  section, memoised per thread, and reads `CfgOpMaterials` once (format in the file header).
+- ABI: `WgrDraw3D` 288 -> 320 (`mat_reflect0` roughness/F0/metal/coat, `mat_reflect1`
+  class/coat roughness/source/debug view); `MaterialUbo` 128 -> 160; layout hash covers it.
+- Switches: `WGR_REFLECT=1` fills the lanes (nothing shades with them until phase C);
+  `WGR_REFLECT_DEBUG=1..5` shows class / roughness / F0+metal / clear coat / source.
+  Both unset: lanes zero, no shader path reads them -- the frame is unchanged.
+- GL33: no change (owner asked 2026-10-17 whether GL33 should be retired; see the reply in
+  the session -- decision 4 is on hold until that is settled).
+
 Risks: baked highlights in old textures (double highlight), atlases, auto-exposure on bright
 ground (the Intro desert overexposes front-3/4 shots), GL33 gets roughness only.

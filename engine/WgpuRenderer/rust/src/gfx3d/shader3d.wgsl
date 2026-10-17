@@ -221,6 +221,9 @@ struct Material {
     // w retains the small BITFIELD (see MATFLAG_* below), not a bool.
     normal_map: vec4<f32>,
     local_specular: vec4<f32>, // w = admitted uniform wetness/mask category (0..1, 2..3, 4..5)
+    // REFLECT-001 (ReflectMaterial.hpp). All zero = not classified, nothing below reads it.
+    reflect0: vec4<f32>, // roughness, F0, metal, clear coat
+    reflect1: vec4<f32>, // class id, clear-coat roughness, source id, debug view (0 = off)
 };
 
 // Material.normal_map.w bits.
@@ -782,6 +785,46 @@ fn vs_skinned(
 // The colour-pass fragment. Depth is fixed-function (no frag_depth), so early-Z stays on for
 // every ordinary draw; the OnSurface variant below (fs_surface) shares this body and adds
 // only a depth output.
+// REFLECT-001 debug colours. View 1 = surface class (fixed palette), 2 = roughness (grey),
+// 3 = F0 / metal (red = F0 x 10, green = metal), 4 = clear coat (blue = strength, green =
+// 1 - coat roughness), 5 = source (declared / RVMAT / part rule / body rule / default).
+fn reflect_class_color(cls: u32) -> vec3<f32> {
+    switch cls {
+        case 1u: { return vec3<f32>(0.35, 0.35, 0.35); }   // matt
+        case 2u: { return vec3<f32>(0.25, 0.40, 0.15); }   // paint matt (military)
+        case 3u: { return vec3<f32>(0.90, 0.20, 0.20); }   // paint gloss
+        case 4u: { return vec3<f32>(1.00, 0.55, 0.10); }   // paint metallic
+        case 5u: { return vec3<f32>(0.95, 0.95, 1.00); }   // chrome
+        case 6u: { return vec3<f32>(0.20, 0.60, 1.00); }   // glass
+        case 7u: { return vec3<f32>(0.00, 1.00, 1.00); }   // mirror
+        case 8u: { return vec3<f32>(1.00, 1.00, 0.30); }   // lamp, glass cover
+        case 9u: { return vec3<f32>(0.80, 1.00, 0.30); }   // lamp, plastic cover
+        case 10u: { return vec3<f32>(0.05, 0.05, 0.05); }  // rubber
+        case 11u: { return vec3<f32>(0.55, 0.30, 0.65); }  // plastic
+        case 12u: { return vec3<f32>(0.60, 0.70, 0.75); }  // bare metal
+        default: { }
+    }
+    return vec3<f32>(1.0, 0.0, 1.0); // unclassified: magenta
+}
+
+fn reflect_debug_color(r0: vec4<f32>, r1: vec4<f32>, view: u32) -> vec3<f32> {
+    if (view == 1u) {
+        return reflect_class_color(u32(r1.x + 0.5));
+    }
+    if (view == 2u) {
+        return vec3<f32>(r0.x);
+    }
+    if (view == 3u) {
+        return vec3<f32>(clamp(r0.y * 10.0, 0.0, 1.0), r0.z, 0.0);
+    }
+    if (view == 4u) {
+        return vec3<f32>(0.0, r0.w * (1.0 - r1.y), r0.w);
+    }
+    let src = u32(r1.z + 0.5);
+    return vec3<f32>(select(0.0, 1.0, src == 1u || src == 4u), select(0.0, 1.0, src == 2u || src == 4u),
+                     select(0.0, 1.0, src == 3u || src == 5u)) * select(1.0, 0.5, src == 5u);
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     census(0u);
@@ -1468,6 +1511,12 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             water_drift(WATER_DRIFT_DIR_A, WATER_DRIFT_SPEED_A, WATER_RIPPLE_PERIOD_A, t),
             water_drift(WATER_DRIFT_DIR_B, WATER_DRIFT_SPEED_B, WATER_RIPPLE_PERIOD_B, t),
             frame.wateranim.y);
+    }
+    // REFLECT-001 phase B debug views (WGR_REFLECT_DEBUG on the CPU side writes reflect1.w).
+    // Zero for every draw unless that switch is set, so this branch never changes a normal frame.
+    let reflect_view = u32(material.reflect1.w + 0.5);
+    if (reflect_view != 0u) {
+        return vec4<f32>(reflect_debug_color(material.reflect0, material.reflect1, reflect_view), 1.0);
     }
     // Debug views are before shared lighting, fog and environment reflection. That keeps the
     // outputs useful for isolating source/material mistakes instead of mixing them with exposure.
