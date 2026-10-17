@@ -996,18 +996,18 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
                         {
                             const Object* o = collision[i].object;
                             const Shape* og = o && o->GetShape() ? o->GetShape()->GeometryLevel() : nullptr;
-                            hits += fmt::format(" [{} comp {} hier {} geom {} faces]",
+                            hits += fmt::format(" [{} comp {} hier {} geom {} faces r {:.1f}]",
                                                 o && o->GetShape() ? (const char*)o->GetShape()->GetName() : "-",
                                                 collision[i].component, collision[i].hierLevel,
-                                                og ? og->NFaces() : -1);
+                                                og ? og->NFaces() : -1, o ? o->GetRadius() : -1.0f);
                         }
                         const Shape* geom = _shape ? _shape->GeometryLevel() : nullptr;
                         const int comps = geom ? _shape->GetGeomComponents().Size() : -1;
                         LOG_INFO(World,
-                                 "Man::Simulate slow ObjectCollision {:.1f} ms: {} ({}), geometry {} faces / {} "
+                                 "Man::Simulate slow ObjectCollision {:.1f} ms: {} ({}), radius {:.1f}, geometry {} faces / {} "
                                  "components, onlyVehicles={}, {} hits:{}",
                                  ms, (const char*)GetDebugName(), _shape ? (const char*)_shape->GetName() : "-",
-                                 geom ? geom->NFaces() : -1, comps, onlyVehicles,
+                                 GetRadius(), geom ? geom->NFaces() : -1, comps, onlyVehicles,
                                  collision.Size(), hits);
                     }
                 }
