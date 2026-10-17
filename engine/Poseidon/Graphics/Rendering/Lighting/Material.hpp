@@ -40,6 +40,12 @@ class TexMaterial: public RefCountWithLinks
 	std::string _specularMapName;
 	mutable float _specularMapLevel = -1.0f; // resolved on first use; -1 = not yet
 
+	// REFLECT-001: what an Arma RVMAT says about reflection, kept for the WGPU surface
+	// classifier (engine/WgpuRenderer/ReflectMaterial.hpp). Empty/false for OFP materials.
+	std::string _pixelShaderId;   // PixelShaderID, e.g. "Super", "Glass", "NormalMapSpecularMap"
+	std::string _fresnelStage;    // the Fresnel stage's texture text: `#(ai,64,64,1)fresnel(N,K)` / `fresnelGlass()`
+	bool _hasEnvMap = false;      // an environment-map stage is present
+
 	TexMaterial();
 	TexMaterial(const char *name);
 	void Combine(TLMaterial &dst, const TLMaterial &src);
