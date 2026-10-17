@@ -137,6 +137,9 @@ pub enum WgrDepthMode {
     // and only while the Smoke tab's soft-particle lever is on. `WgrDraw2DBatch.depth` is a
     // plain u32, so this adds no ABI size and an older exe simply never sends it.
     TestSoft = 3,
+    // Test + write with an alpha cutout (fs_cutout): underwater bubbles, which the
+    // underwater compositor fogs by depth. Plain u32 lane, no ABI size.
+    TestWriteCutout = 4,
 }
 
 #[repr(C)]

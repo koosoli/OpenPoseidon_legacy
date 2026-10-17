@@ -288,6 +288,8 @@ class EngineWgpu : public EngineDummy
     void DrawDecalRotated(Vector3Par screen, float rhw, float sizeX, float sizeY, PackedColor color,
                           const MipInfo& mip, int specFlags, float dirX, float dirY,
                           float radianceScale = 1.0f) override;
+    void SetDecalDepthCutout(bool enabled) override { _decalDepthCutout = enabled; }
+    bool _decalDepthCutout = false;
     // World-space line / point primitives, fed by the same software-T&L mesh as
     // DrawSection above (Object::DrawLines / Object::DrawPoints). Without these the
     // base EngineDummy body is empty, so every world diagnostic line -- ballistics

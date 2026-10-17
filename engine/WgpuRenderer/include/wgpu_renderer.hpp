@@ -167,7 +167,12 @@ enum WgrDepthMode : uint32_t
        wgr_set_soft_particles has been called with enabled != 0 -- with the path off the
        renderer treats this exactly as WGR_DEPTH_TEST, so it is always safe to send.
        Adds no struct and no size: WgrDraw2DBatch.depth is a plain uint32. */
-    WGR_DEPTH_TEST_SOFT = 3
+    WGR_DEPTH_TEST_SOFT = 3,
+    /* Test + write, but fragments where the TEXTURE alpha is below 0.3 are discarded, so
+       only a sprite's solid shape lands in the depth buffer. For sprites a later full-screen pass fogs
+       by depth (underwater bubbles under the underwater compositor): without depth they
+       take the murk of whatever is behind them and vanish. No size change, as above. */
+    WGR_DEPTH_TEST_WRITE_CUTOUT = 4
 };
 
 /* Selects what a WgrCmd does when the frame's command stream is replayed. */

@@ -54,6 +54,9 @@ using Poseidon::Foundation::MStorage;
 #include <Poseidon/World/Scene/Thing.hpp>
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/UnderwaterBubbles.hpp>
+#include <Poseidon/World/Entities/Infantry/SwimView.hpp>
+#include <Poseidon/World/Entities/Weapons/UnderwaterBallistics.hpp>
 #define PROFILE_COLLISIONS 1
 
 #if PROFILE_COLLISIONS
@@ -1215,6 +1218,24 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
         }
     }
 
+    // UNDERWATER: the blast's flash, gas bubble and bubble cloud. Here rather than in the
+    // shot so every client sees it (this runs for replicated explosions too).
+    if (type->explosive && Underwater::Enabled())
+    {
+        const float waterY = SwimMeanWaterLevel(pos.X(), pos.Z());
+        if (pos.Y() < waterY - 0.3f)
+        {
+            static std::uint32_t blasts = 0;
+            render::BubbleBlast blast;
+            blast.centre = {pos.X(), pos.Y(), pos.Z()};
+            blast.radius = std::clamp(type->indirectHitRange * 0.25f, 0.4f, 2.5f);
+            blast.surfaceY = waterY;
+            blast.birthMs = Glob.time.toInt();
+            blast.seed = ++blasts * 2654435761u ^ std::uint32_t(blast.birthMs);
+            render::RecordBubbleBlast(blast);
+        }
+    }
+
     if (GSnow().CoverActive() && type->explosive)
     {
         const float surface = SurfaceY(pos.X(), pos.Z());
@@ -1452,7 +1473,7 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
     const float impulseExplScale = 600;
     if (directHit)
     {
-        float hitVal = type->hit - type->indirectHit;
+        float hitVal = (type->hit - type->indirectHit) * (shot ? shot->DamageScale() : 1.0f);
 
         directHit->DirectDammage(shot, owner, pos, hitVal);
         // if directHit is vehicle, add force impulse
@@ -1488,7 +1509,11 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
             veh->AddImpulseNetAware(force, torque);
         }
     }
-    const float maxRadius = type->indirectHitRange * 4;
+    // UNDERWATER: a charge below the surface reaches submerged bodies over twice the
+    // range (water carries the shock) and hits what is above the surface far less.
+    const float blastWaterY = SwimMeanWaterLevel(pos.X(), pos.Z());
+    const float blastDepth = Underwater::Enabled() && type->explosive ? blastWaterY - pos.Y() : 0.0f;
+    const float maxRadius = type->indirectHitRange * 4 * (blastDepth > 0.3f ? 2.0f : 1.0f);
     const float hit = type->indirectHit;
     // terrainHole5: the object hit is normally left out of the shielding test (the explosion sits on its surface).
     // When it cuts a terrain hole (a cellar roof or floor), it still shields the other side of the ground: a shell on
@@ -1559,8 +1584,17 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
                     }
                 }
                 float unshieldedHit = hit * unshielded;
+                float hitRange = type->indirectHitRange;
+                Underwater::BlastShaping shaping;
+                // A body counts as in the water when its middle is under the surface (a swimmer is).
+                const bool submerged = obj->Position().Y() + 0.9f < SwimMeanWaterLevel(obj->Position().X(), obj->Position().Z());
+                if (Underwater::ShapeUnderwaterBlast(blastDepth, submerged, shaping))
+                {
+                    unshieldedHit *= shaping.hitScale;
+                    hitRange *= shaping.rangeScale;
+                }
 
-                obj->IndirectDammage(shot, owner, pos, unshieldedHit, type->indirectHitRange);
+                obj->IndirectDammage(shot, owner, pos, unshieldedHit, hitRange);
                 Vehicle* veh = dyn_cast<Vehicle>(obj);
                 if (veh && shot)
                 {

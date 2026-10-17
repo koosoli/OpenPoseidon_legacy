@@ -1,5 +1,6 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Graphics/Rendering/Effects/MuzzleBurst.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/UnderwaterBubbles.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Foundation/Algorithms/RadixSort.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -756,6 +757,7 @@ void Scene::ObjectsDrawn()
         GRain.UpdateAndDraw();
     }
     render::DrawMuzzleBursts();
+    render::DrawUnderwaterBubbles();
 
     DrawObjectsAndShadowsPass3();
 

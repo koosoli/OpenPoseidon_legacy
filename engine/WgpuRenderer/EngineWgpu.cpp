@@ -22384,8 +22384,9 @@ void EngineWgpu::DrawDecalRotated(Vector3Par screen, float rhw, float sizeX, flo
     const WgrVertex2D v3 = corner(-sizeY, +sizeX, 0.0f, 1.0f);
     const WgrVertex2D quad[6] = {v0, v1, v2, v0, v2, v3};
 
-    const WgrDepthMode decalDepth = render::SelectDecalDepth(specFlags, false) == render::DecalDepth::None
-                                       ? WGR_DEPTH_NONE : WGR_DEPTH_TEST;
+    WgrDepthMode decalDepth = render::SelectDecalDepth(specFlags, false) == render::DecalDepth::None
+                                  ? WGR_DEPTH_NONE : WGR_DEPTH_TEST;
+    if (_decalDepthCutout && decalDepth == WGR_DEPTH_TEST) decalDepth = WGR_DEPTH_TEST_WRITE_CUTOUT;
     AppendTriangles(ResolveTexture(mip), BlendForSpec(specFlags), SamplerForSpec(specFlags), decalDepth, quad);
 }
 
