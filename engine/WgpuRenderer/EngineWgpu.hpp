@@ -155,6 +155,8 @@ class EngineWgpu : public EngineDummy
     bool CanBeWindowed() const override;
 
     AbstractTextBank* TextBank() override;
+    void ResetForRemount() override;
+    void NoteDetailTextureLoad();
 
     void InitDraw(bool clear, PackedColor color) override;
     void FinishDraw() override;

@@ -2542,6 +2542,23 @@ AbstractTextBank* EngineWgpu::TextBank()
     return _wbank;
 }
 
+void EngineWgpu::ResetForRemount()
+{
+    EngineDummy::ResetForRemount();
+    if (_terrain)
+    {
+        _terrain->ResetForRemount();
+    }
+}
+
+void EngineWgpu::NoteDetailTextureLoad()
+{
+    if (_wbank)
+    {
+        _wbank->NoteDetailTextureLoad();
+    }
+}
+
 RString EngineWgpu::GetDebugName() const
 {
     return "Wgpu";

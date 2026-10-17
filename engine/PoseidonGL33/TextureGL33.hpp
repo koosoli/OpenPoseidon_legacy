@@ -259,6 +259,7 @@ class TextBankGL33 : public AbstractTextBank
     Ref<TextureGL33> _specular;
     Ref<TextureGL33> _grass;
     Ref<TextureGL33> _waterBump;
+    int _detailTextureLoads = 0;
 
     AutoArray<SurfaceInfoGL33> _freeTextures;
 
@@ -295,6 +296,8 @@ class TextBankGL33 : public AbstractTextBank
   public:
     int NTextures() const override { return _texture.Size(); }
     Texture* GetTexture(int i) const override { return _texture[i]; }
+    int NDetailTextureLoads() const override { return _detailTextureLoads; }
+    void ReleaseDetailTextures();
 
     void Compact() override;
 

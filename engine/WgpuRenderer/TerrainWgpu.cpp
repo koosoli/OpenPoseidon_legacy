@@ -3577,15 +3577,26 @@ void TerrainWgpu::UploadJitterMap(const Landscape& land)
     wgr_terrain_set_jitter_map(_renderer, static_cast<uint32_t>(n), static_cast<uint32_t>(n), offsets.data());
 }
 
+void TerrainWgpu::ResetForRemount()
+{
+    // A Landscape reallocated at the same address with the same name would otherwise read as
+    // sameMap and skip the upload, and `*_uploaded` is dangling until the next upload either way.
+    _uploaded = nullptr;
+    _uploadedName.clear();
+    // The reload replaces CfgDetailTextures; a mod may name its own detail texture.
+    _detailNoiseTried = false;
+}
+
 void TerrainWgpu::UploadDetailNoise()
 {
-    // Global config-driven texture; load once for the renderer's lifetime,
+    // Global config-driven texture; load once per content load (ResetForRemount re-arms it),
     // through the shared texture bank like any other texture.
     if (_detailNoiseTried)
     {
         return;
     }
     _detailNoiseTried = true;
+    _engine.NoteDetailTextureLoad();
 
     const ParamEntry& names = Remaster >> "CfgDetailTextures";
     RStringB detailName = names >> "detail";

@@ -64,6 +64,7 @@ class TextureBankWgpu : public AbstractTextBank
     };
     std::unordered_map<std::string, LegacyMaterial> _legacyMaterials;
     bool _legacyMaterialsLoaded = false;
+    int _detailTextureLoads = 0;
     const LegacyMaterial* ResolveLegacyMaterial(const char* name);
 
     WgrRenderer* _renderer;
@@ -145,6 +146,10 @@ class TextureBankWgpu : public AbstractTextBank
 
     int NTextures() const override { return _texture.Size(); }
     Texture* GetTexture(int i) const override { return _texture[i]; }
+    // The terrain loads CfgDetailTextures (TerrainWgpu::UploadDetailNoise); it counts here so
+    // triDetailTextureLoads reads the same on every backend.
+    int NDetailTextureLoads() const override { return _detailTextureLoads; }
+    void NoteDetailTextureLoad() { ++_detailTextureLoads; }
 
     void FlushTextures() override {}
     // The only path that removes entries from _texture; the name index has to go with it.

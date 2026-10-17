@@ -125,6 +125,9 @@ class TerrainWgpu : public ITerrainRenderer
     bool HasEnfusionSurfaces() const { return _hasEnfusionSurfaces; }
     bool EnfusionClutterEnabled() const { return _enfusionClutterEnabled; }
     void SetEnfusionClutterEnabled(bool enabled);
+    // In-process re-mount: the Landscape `_uploaded` points at has been freed and the config
+    // replaced, so the next upload must take the new-map path and reload the detail layer.
+    void ResetForRemount();
     // RFG-065: the native Enfusion GROUND material (TerrainWgpuEnfusionSurface.cpp) --
     // the `.emat`'s own ScaleUV tiling and its middle-distance map, instead of one
     // image stretched over each 12.5 m land cell. A per-frame uniform weight, so this
