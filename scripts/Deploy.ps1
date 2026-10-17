@@ -288,6 +288,15 @@ function Get-ContentPayloadHash([string]$Path) {
 foreach ($item in $contentPayload) {
     $destination = Join-Path $GameDir $item.Relative
     New-Item -ItemType Directory -Force (Split-Path $destination -Parent) | Out-Null
+    # An identical installed file is left alone: re-copying it fails while another program
+    # holds it open (Blender's PBO add-on had op_ground_materials.pbo open on 2026-10-17 and
+    # stopped the deploy after the binaries were already copied, so the stamp below was never
+    # written and named an older commit than the one installed).
+    if ((Test-Path -LiteralPath $destination) -and
+        (Get-ContentPayloadHash $item.Source) -eq (Get-ContentPayloadHash $destination)) {
+        Write-Host "  = $($item.Relative)"
+        continue
+    }
     Copy-Item -LiteralPath $item.Source -Destination $destination -Force
     if ((Get-ContentPayloadHash $item.Source) -ne (Get-ContentPayloadHash $destination)) {
         throw "Default content verification failed: $destination"
