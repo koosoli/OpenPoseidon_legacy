@@ -1,0 +1,9 @@
+tags = ["units", "water", "retail-data"]
+binary = "PoseidonGame"
+mission = "dev-missions/swim-underfire.Eden"
+timeout = 180
+assert_timeout = 30
+# Needs the retail data (Everon) and the swim pack (Deploy.ps1 installs it), as swim_dive does.
+# --no-strict: an AI target check asks a shape-less object for its aiming position (Object::AimingPosition logs it
+# once, harmless in play) at a random moment of the fight; strict mode turns that log line into exit 3.
+extra_args = ["--dev", "--no-splash", "--no-strict"]

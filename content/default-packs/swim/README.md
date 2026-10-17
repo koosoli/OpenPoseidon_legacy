@@ -66,7 +66,7 @@ starts on `SwimUnder`'s and ends on `tread`'s (exactly). The engine blends to `S
 it as swimming.
 
 `scripts/Build-Swim.ps1` packs them as `Mods/@OP_Swim/AddOns/swim.pbo` (prefix `swim`), with the
-missions `dev-missions/swim-bay.Eden` and `dev-missions/swim-squad.Eden`. `Build-DefaultContent.ps1`
+missions `dev-missions/swim-bay.Eden`, `dev-missions/swim-squad.Eden` and `dev-missions/swim-underfire.Eden` (god mode in 5.5 m of water under rifle fire and grenades, for the underwater ballistics). `Build-DefaultContent.ps1`
 calls it, and `Deploy.ps1` installs the result.
 
 ## Provenance: made by Claude

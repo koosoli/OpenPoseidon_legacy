@@ -27,7 +27,7 @@ foreach ($file in Get-ChildItem -LiteralPath $stage -Force) {
 if ($LASTEXITCODE -ne 0) {throw 'Swim packaging failed'}
 Copy-Item -LiteralPath "$source/mod.json" -Destination "$pack/mod.json" -Force
 New-Item -ItemType Directory -Force "$pack/Missions/OpenPoseidon" | Out-Null
-foreach ($mission in @('swim-bay.Eden','swim-squad.Eden')) {
+foreach ($mission in @('swim-bay.Eden','swim-squad.Eden','swim-underfire.Eden')) {
     Copy-Item -LiteralPath "$root/dev-missions/$mission" -Destination "$pack/Missions/OpenPoseidon" -Recurse -Force
 }
 Write-Host "Staged swim moves: $pack"
