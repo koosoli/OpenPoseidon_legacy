@@ -630,6 +630,8 @@ class Man: public Person
 	bool _diving = false;      // under the water (from the dive until surfacing)
 	float _diveVy = 0;         // vertical speed under water (m/s)
 	float _swimVertWanted = 0; // the player's up (+) / down (-) keys while swimming
+	bool _diveRequest = false;    // move down was pressed at the surface (latched: a tap must not be missed)
+	bool _surfaceRequest = false; // move up was tapped under water: rise until surfaced (move down cancels)
 	float _breath = -1;        // seconds of breath left (< 0: not set yet, i.e. full)
 	Vector3 _diveOffset = VZero; // added to the position so the dive pitch turns the body about its middle
 	// Sinkhole W3: falling (SoldierOldSwim.cpp), with the swim pack's Fall / FallLand / SwimIn moves
@@ -1088,7 +1090,7 @@ class Man: public Person
 	bool IsSwimMove(MoveId id) const;
 	bool IsSwimming() const override {return _swimming;}
 	bool IsDiving() const {return _swimming && _diving;}
-	void SetSwimVerticalWanted(float v) {_swimVertWanted = v;}
+	void SetSwimVerticalWanted(float v);
 	bool UpdateSwimming();
 	void SimSwimMovement(float deltaT, SimulationImportance prec);
 	void SimDive(float deltaT, float surface, Vector3& pos);

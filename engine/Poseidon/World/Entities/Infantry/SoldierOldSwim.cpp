@@ -437,6 +437,8 @@ bool Man::UpdateSwimming()
         }
         _swimming = true;
         _diving = false;
+        _diveRequest = false;
+        _surfaceRequest = false;
         _diveVy = 0;
         _swimVy = vy;
         // fallen in: the body plunges with its speed (soft heave) and comes up in SwimIn; a fall from height hurts
@@ -467,6 +469,8 @@ bool Man::UpdateSwimming()
         // on dry land. Above deep water the normal falling path can take over.
         _swimming = false;
         _diving = false;
+        _diveRequest = false;
+        _surfaceRequest = false;
         _diveOffset = VZero;
         _swimEntrySoft = 0;
         if (IsDead())
@@ -548,10 +552,15 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
         _swimVy = _diveVy;
         _swimTargetValid = false;
     }
-    if (!_diving && !IsDead() && _swimVertWanted < -0.5f && _swimDiveMove != MoveIdNone && _swimEntrySoft <= 0 &&
-        _primaryMove.id != _swimInMove && _primaryMove.id != _swimSurfaceMove &&
-        level - GLandscape->SurfaceY(pos.X(), pos.Z()) >= DiveMinDepth)
+    if (_diveRequest && (_diving || IsDead() || _swimDiveMove == MoveIdNone ||
+                         level - GLandscape->SurfaceY(pos.X(), pos.Z()) < DiveMinDepth))
     {
+        _diveRequest = false; // too shallow (or nothing to dive with): the press is dropped, not kept for later
+    }
+    if (_diveRequest && _swimEntrySoft <= 0 && _primaryMove.id != _swimInMove && _primaryMove.id != _swimSurfaceMove)
+    {
+        _diveRequest = false;
+        _surfaceRequest = false;
         _diving = true;
         _diveVy = std::min(_swimVy, 0.0f);
         BlendToMove(_swimDiveMove);
@@ -618,8 +627,8 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
                 next = Glob.time.toFloat() + 0.25f;
                 const int mem = _shape->FindMemoryLevel();
                 const float eyeY = Type()->_cameraPoint >= 0 && mem >= 0 ? PositionModelToWorld(AnimatePoint(mem, Type()->_cameraPoint)).Y() : 0.0f;
-                LOG_INFO(World, "Swim: level={:.2f} surface={:.2f} c={:.2f} y={:.2f} target={:.2f} vy={:.2f} bed={:.2f} water=({:.2f},{:.2f}) move={} eye-origin={:.2f} eye-surface={:.2f} chin-surface={:.2f} limbs=({:.2f},{:.2f},{:.2f},{:.2f})",
-                         level, surface, c.height, y, target, _swimVy, bed + 0.3f, waterVX, waterVZ,
+                LOG_INFO(World, "Swim: keys={:.2f} dive-req={} level={:.2f} surface={:.2f} c={:.2f} y={:.2f} target={:.2f} vy={:.2f} bed={:.2f} water=({:.2f},{:.2f}) move={} eye-origin={:.2f} eye-surface={:.2f} chin-surface={:.2f} limbs=({:.2f},{:.2f},{:.2f},{:.2f})",
+                         _swimVertWanted, _diveRequest ? 1 : 0, level, surface, c.height, y, target, _swimVy, bed + 0.3f, waterVX, waterVZ,
                          (const char*)Type()->GetMoveName(_primaryMove.id), eyeY - y, eyeY - c.height,
                          _swimChinValid ? y + _swimChin - c.height : 0.0f, _swimLimbRel[0], _swimLimbRel[1], _swimLimbRel[2], _swimLimbRel[3]);
                 if (GScene && GScene->GetCamera())
@@ -692,11 +701,35 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
     EmitSwimSplashes(deltaT);
 }
 
+void Man::SetSwimVerticalWanted(float v)
+{
+    // the presses are latched: the keys are read in KeyboardPilot and acted on in the swim step, which need not run
+    // on the same frame, and a tap (as for going prone) can last one
+    const bool down = v < -0.1f, up = v > 0.1f;
+    if (_swimming && !_diving && down)
+    {
+        _diveRequest = true;
+    }
+    if (_swimming && _diving && up && _swimVertWanted <= 0.1f)
+    {
+        _surfaceRequest = true;
+    }
+    if (down)
+    {
+        _surfaceRequest = false;
+    }
+    _swimVertWanted = v;
+}
+
 void Man::SimDive(float deltaT, float surface, Vector3& pos)
 {
     // the dive move sinks him; after it the keys take him up and down, and he holds his depth otherwise
     const bool entering = _primaryMove.id == _swimDiveMove;
     float want = _swimVertWanted * DiveVerticalSpeed;
+    if (_surfaceRequest)
+    {
+        want = std::max(want, DiveVerticalSpeed); // a tap of move up: on up to the surface
+    }
     if (entering)
     {
         want = std::min(want, -DiveEntrySink);
@@ -708,6 +741,7 @@ void Man::SimDive(float deltaT, float surface, Vector3& pos)
     {
         // up at the surface: into treading, the heave taking him from here softly
         _diving = false;
+        _surfaceRequest = false;
         _swimVy = _diveVy;
         _swimTargetValid = false;
         _swimChinValid = false;
@@ -736,8 +770,8 @@ void Man::SimDive(float deltaT, float surface, Vector3& pos)
         if (Glob.time.toFloat() >= next)
         {
             next = Glob.time.toFloat() + 0.25f;
-            LOG_INFO(World, "Dive: surface={:.2f} mid={:.2f} depth={:.2f} vy={:.2f} want={:.2f} bed={:.2f} breath={:.1f} move={}",
-                     surface, y + DiveBodyMid, surface - (y + DiveBodyMid), _diveVy, want, bed, _breath,
+            LOG_INFO(World, "Dive: surface={:.2f} mid={:.2f} depth={:.2f} vy={:.2f} want={:.2f} keys={:.2f} up-req={} bed={:.2f} breath={:.1f} move={}",
+                     surface, y + DiveBodyMid, surface - (y + DiveBodyMid), _diveVy, want, _swimVertWanted, _surfaceRequest ? 1 : 0, bed, _breath,
                      (const char*)Type()->GetMoveName(_primaryMove.id));
         }
     }

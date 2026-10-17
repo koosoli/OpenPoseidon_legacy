@@ -29,7 +29,9 @@ of piking, a rigid stroke with a third of the cycle dead, and every joint stoppi
 * **Camera:** a camera on a diver may go under the sea, held only above the bed (`SwimmerDiving`, World.cpp); on
   a swimmer at the surface it is as before.
 * **Keys:** while swimming, move up / move down no longer go to the stance actions (they did nothing in the
-  water anyway).
+  water anyway). The presses are latched (`SetSwimVerticalWanted`): a tap of Z dives and a tap of Q rises all the
+  way to the surface (Z cancels it). The keys are read in KeyboardPilot and acted on in the swim step, which need
+  not run on the same frame, and the owner's first try (tapping Z, as for prone) did nothing.
 
 ## Not done
 
