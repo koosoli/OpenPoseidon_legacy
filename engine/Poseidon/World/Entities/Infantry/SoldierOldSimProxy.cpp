@@ -1444,6 +1444,11 @@ static RStringB ActionMove(const ParamEntry& map, const char* action)
         if (_stricmp(action, alias[0]) == 0)
             if (const ParamEntry* entry = map.FindEntry(alias[1]))
                 return *entry;
+    // diag: an action the move set does not map leaves the man without a move for it
+    // (the owner's freeze after taking an M4 with the M136 in hands)
+    static std::set<std::string> reported;
+    if (reported.insert(std::string(map.GetName().Data()) + "/" + action).second)
+        LOG_INFO(Graphics, "Action map {} has no '{}'", map.GetName().Data(), action);
     return map >> action;
 }
 
