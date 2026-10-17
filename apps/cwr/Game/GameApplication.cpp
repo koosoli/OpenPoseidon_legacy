@@ -1,3 +1,4 @@
+#include <Poseidon/UI/ArmaContentMenu.hpp>
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp>
 #include <Poseidon/UI/LocalMapWorlds.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
@@ -2023,6 +2024,7 @@ void GameApplication::RunMainLoop()
                 break;
         }
 
+        Poseidon::TickMenuClickHook(); // POSEIDON_MENU_CLICKS (captures only)
         // Inject auto-key events via SDL (scancodes)
         DWORD elapsedMs = GetTickCount() - loopStartTick;
         ReleaseHeldAutoKeys(autoKeyEvents, elapsedMs);
@@ -2638,6 +2640,7 @@ void GameApplication::RunMainLoop()
 
         DWORD elapsedMs = Poseidon::Foundation::GlobalTickCount() - loopStartTick;
 
+        Poseidon::TickMenuClickHook(); // POSEIDON_MENU_CLICKS (captures only)
         // Inject auto-key events for this frame / time
         ReleaseHeldAutoKeys(autoKeyEvents, static_cast<uint32_t>(elapsedMs));
         for (auto& ak : autoKeyEvents)

@@ -790,10 +790,10 @@ public:
 
 
 	void ShowHint(RString hint);
+	void OpenInterrupt(); // the pause menu (Esc); public for the capture click hook
 
 protected:
 	void InitUI();
-	void OpenInterrupt();
 	void OpenInventory();
 	bool RetryMission();
 //	bool RestartMission();

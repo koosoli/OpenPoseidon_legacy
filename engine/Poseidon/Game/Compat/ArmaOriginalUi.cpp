@@ -11,6 +11,7 @@
 #include <string>
 #include <iterator>
 #include <map>
+#include <utility>
 #include <vector>
 
 namespace Poseidon::ArmaOriginalUi
@@ -48,12 +49,49 @@ bool Listed(const char* name, const char* const* begin, const char* const* end)
 }
 
 // A copy of `source`'s own members (and its base) as class `name` of `parent`.
-void CopyClass(ParamClass& parent, const char* name, const ParamClass& source)
+ParamClass* CopyClass(ParamClass& parent, const char* name, const ParamClass& source)
 {
     ParamClass* copy = parent.AddClass(name);
     if (const ParamClass* base = source.GetBase())
         copy->SetBase(base);
     copy->Update(source);
+    return copy;
+}
+
+// The CWA copies ListToClass made for Arma controls, with the Arma control each stands for.
+std::vector<std::pair<ParamClass*, const ParamClass*>>& Copies()
+{
+    static std::vector<std::pair<ParamClass*, const ParamClass*>> copies;
+    return copies;
+}
+
+// A copied CWA member is the copy's own, so it beat what Arma's base class says: Arma 1's mission
+// list (MissionsList: RscListBox) kept CWA's `type` and became a 3D list box. Where the Arma
+// control names a base that defines the member and does not set it itself, the base's value is
+// Arma's: the copy gives way. The idc stays -- Arma's bases carry none worth having (-1).
+int YieldToArmaBases()
+{
+    int removed = 0;
+    for (const auto& [copy, arma] : Copies())
+    {
+        const ParamClass* base = copy->GetBase();
+        if (!base || !arma->GetBaseName())
+            continue;
+        std::vector<RStringB> shadowing;
+        for (int i = 0; i < copy->GetEntryCount(); i++)
+        {
+            const ParamEntry& e = copy->GetEntry(i);
+            if (e.IsClass() || _stricmp(e.GetName(), "idc") == 0 || arma->FindEntryNoInheritance(e.GetName()))
+                continue;
+            if (base->FindEntry(e.GetName()))
+                shadowing.push_back(e.GetName());
+        }
+        for (const RStringB& name : shadowing)
+            copy->Delete(name);
+        removed += static_cast<int>(shadowing.size());
+    }
+    Copies().clear();
+    return removed;
 }
 
 // CWA's `controls[]={"Player",...}` names sibling classes of the display; Arma 1's `class
@@ -80,7 +118,7 @@ void ListToClass(ParamClass& display, const ParamEntry& list, const ParamClass& 
         const ParamEntry& child = armaList.GetEntry(i);
         if (child.IsClass())
             if (const ParamClass* cwa = sibling(child.GetName()))
-                CopyClass(*nested, child.GetName(), *cwa);
+                Copies().emplace_back(CopyClass(*nested, child.GetName(), *cwa), child.GetClassInterface());
     }
     if (_stricmp(listName, "objects") == 0)
         for (const RStringB& name : cwaNames)
@@ -265,6 +303,18 @@ bool Built()
         MergeTop(UiRes(), *e.GetClassInterface(), replaced, conflicts);
         merged++;
     }
+    // Screens drawn whole from Arma's layout (ArmaContentMenu): CWA's 3D notebook (objects[]) has
+    // no place in them -- it covered Arma 1's mission list and answered its idc 101 first.
+    for (const char* screen : {"RscDisplaySingleMission", "RscDisplayCampaignSelect", "RscDisplayCampaignLoad"})
+    {
+        ParamEntry* merged = UiRes().FindEntryNoInheritance(screen);
+        const ParamEntry* own = arma->FindEntryNoInheritance(screen);
+        if (merged && own && merged->IsClass() && !own->FindEntry("objects") &&
+            merged->FindEntryNoInheritance("objects"))
+            merged->GetClassInterface()->Delete("objects");
+    }
+    const int yielded = YieldToArmaBases();
+    LOG_INFO(Mission, "Original UI: {} copied CWA members gave way to Arma's base classes", yielded);
     const int areaObjects = RestoreAreaObjects(UiRes());
     if (areaObjects > 0)
         LOG_INFO(Mission, "Original UI: {} map objects laid out in Arma's Areas kept as CWA's", areaObjects);
@@ -358,6 +408,23 @@ bool Switched(const char* name)
             }
         }
     return it->second;
+}
+
+const ParamEntry* NativeScreen(const char* name, int keyIdc)
+{
+    if (!Enabled() || !Built())
+        return nullptr;
+    const ParamEntry* screen = UiRes().FindEntryNoInheritance(name);
+    if (!screen || !screen->IsClass())
+        return nullptr;
+    const int type = ControlType(*screen, keyIdc);
+    if (type != kButton && type != kActiveText)
+    {
+        LOG_INFO(Mission, "Original UI: {}'s {} has no usable control {} (type {}); drawn plain", Arma1Compat::Label(),
+                 name, keyIdc, type);
+        return nullptr;
+    }
+    return screen;
 }
 
 const ParamEntry& Resource(const char* name)

@@ -1,4 +1,5 @@
 #include <Poseidon/Game/Compat/ArmaOriginalUi.hpp>
+#include <Poseidon/UI/ArmaContentMenu.hpp>
 #include <Poseidon/UI/LocalMapsDisplay.hpp>
 #include <Poseidon/UI/WholeWorldDisplay.hpp>
 #include <Poseidon/UI/LocalMapEditor.hpp>
@@ -606,10 +607,52 @@ void __cdecl CreateOutro(Display* disp, EndMode end)
     disp->CreateChild(new DisplayOutro(disp, end));
 }
 
+bool ProcessFullName(RString name); // UIArcadeWaypoint.cpp: a mission.sqm path, archive or folder
+
 void DisplayMain::OnChildDestroyed(int idd, int exit)
 {
     switch (idd)
     {
+        case ArmaContentIdd: // the mounted Arma game's campaign or mission (ArmaContentMenu)
+        {
+            bool campaign = false;
+            std::string value;
+            const bool chosen = exit == IDC_OK && ArmaContentChoice(_child, campaign, value);
+            Display::OnChildDestroyed(idd, exit);
+            if (!chosen)
+                break;
+            CurrentTemplate.Clear();
+            if (GWorld->UI())
+                GWorld->UI()->Init();
+            CurrentBattle = "";
+            CurrentMission = "";
+            if (campaign)
+            {
+                LOG_INFO(UI, "Arma content: campaign {}", value);
+                StartCampaign(RString(value.c_str()), this);
+                // StartCampaign returns quietly when the campaign's description.ext names no first
+                // battle or mission (Arma 3's Apex, for one): say so instead of doing nothing.
+                if (CurrentBattle.GetLength() == 0 || CurrentMission.GetLength() == 0)
+                {
+                    LOG_WARN(UI, "Arma content: campaign {} has no first battle/mission this engine can start", value);
+                    CreateMsgBox(MB_BUTTON_OK, RString("This campaign cannot be started yet: its description.ext "
+                                                       "names no first battle or mission this engine reads."));
+                }
+                break;
+            }
+            CurrentCampaign = "";
+            SetCampaign("");
+            LOG_INFO(UI, "Arma content: mission {}", value);
+            if (!ProcessFullName(RString(value.c_str())))
+            {
+                CreateMsgBox(MB_BUTTON_OK, RString(("This mission could not be loaded: " + value).c_str()));
+                break;
+            }
+            GStats.ClearAll();
+            ApplyCurrentMissionViewDistance();
+            CreateChild(new DisplayIntro(this));
+            break;
+        }
         case IDD_CAMPAIGN_LOAD: // Campaign
             if (exit == IDC_OK)
             {
@@ -2374,6 +2417,20 @@ void DisplayMain::OnButtonClicked(int idc)
             CreateMsgBox(MB_BUTTON_OK, RString(error.c_str()));
         return;
     }
+    // An Arma game is mounted: Campaign / Missions / Tutorials list that game's content, Arma 1's
+    // Options shortcuts open Options, and what cannot work here says so instead of doing nothing.
+    if (ArmaContentKind kind; ArmaMenuContentKind(idc, kind))
+    {
+        CreateChild(CreateArmaContentDisplay(this, kind));
+        return;
+    }
+    if (const char* unavailable = ArmaMenuUnavailable(idc))
+    {
+        CreateMsgBox(MB_BUTTON_OK, RString(unavailable));
+        return;
+    }
+    if (ArmaMenuOpensOptions(idc))
+        idc = IDC_MAIN_OPTIONS;
     // Dispatch registered game module buttons via registry
     if (auto* mod = GameModuleRegistry::FindByIDC(idc))
     {

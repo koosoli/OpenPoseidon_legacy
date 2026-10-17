@@ -196,6 +196,11 @@ void CListBoxContainer::Check()
 CListBox::CListBox(ControlsContainer* parent, int idc, const ParamEntry& cls)
     : Control(parent, CT_LISTBOX, idc, cls), CListBoxContainer(cls)
 {
+    if (const ParamEntry* selBg = cls.FindEntry("colorSelectBackground"); selBg && selBg->IsArray())
+    {
+        _hasSelBg = true;
+        _selBgColor = GetPackedColor(*selBg);
+    }
     _font = GLOB_ENGINE->LoadFont(GetFontID(cls >> "font"));
     const ParamEntry* entry = cls.FindEntry("size");
     if (entry)
@@ -449,7 +454,8 @@ void CListBox::DrawItem(float alpha, int i, bool selected, float top, Rect2DFloa
     if (selected && _showSelected)
     {
         MipInfo mip = GLOB_ENGINE->TextBank()->UseMipmap(nullptr, 0, 0);
-        GLOB_ENGINE->Draw2D(mip, ftColor, Rect2DPixel(rect.x * w, top * h, rect.w * w, _rowHeight * h),
+        GLOB_ENGINE->Draw2D(mip, _hasSelBg ? ModAlpha(_selBgColor, alpha) : ftColor,
+                            Rect2DPixel(rect.x * w, top * h, rect.w * w, _rowHeight * h),
                             Rect2DPixel(rect.x * w, rect.y * h, rect.w * w, rect.h * h));
         color = selColor;
     }
