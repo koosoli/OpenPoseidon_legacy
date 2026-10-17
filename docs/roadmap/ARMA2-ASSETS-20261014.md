@@ -455,6 +455,35 @@ no screenshots written. The stall report now also takes stacks at 90 and 170 s.
 - Still open: `corepatch\corepatch_javelin\javelin_optic.p3d` (`ODOL` version 49, 2.5 kB,
   a layout neither ODOL reader knows) is refused as "Bad version".
 
+### Conversations, campaign flow, C0's slowness, 2026-10-16/17
+
+- **Listener FSMs never answered** (`e4ad2d5`): `KbReact` stored `_sentenceId` in the FSM's
+  variable space under its mixed-case name, and variable lookup lowers the name it seeks, so
+  every listener saw nil and took its fallback link to `END`. Focus 25: CE7B's listener now
+  says `No, sir!`. `getFSMVariable`/`setFSMVariable` had the same fault (`397bef5`).
+- **Campaign flow, unattended** (`397bef5`, `07b033b`): `OP_A2_CAMPAIGN="<s>,<end>,<n>"` in
+  played mode skips intros/outros, confirms briefing and debriefing, ends each mission with
+  `<end>` after `<s>` wall-clock seconds and quits after `<n>` missions. Campaign run 1:
+  **CE0 -> CE1 -> CE2** as Operation Arrowhead's description.ext says, exit 0, no script error.
+- **C0 at about one simulation tick per second** (every run since run 13, also in test mode):
+  after ~10 s the vehicles stage takes 600-800 ms per tick. Narrowed down step by step
+  (`POSEIDON_SIM_VEHICLE_COST=1`): it is `man.base`, i.e. `Man::Simulate` (13 ms per soldier);
+  within it the collision testing (12 ms per man, up to 344 ms per call, 0 hits); with CWA
+  soldiers (`OP_A2_SOLDIERS=0`) the same mission costs 0.3 ms per tick for all men. The
+  soldiers' geometry is small (54 faces, 1 component, radius 3.7 m); each pair test poses both
+  men, and posing reads their moves through the RTM cache, which held only 32000 bone matrices
+  -- about eight Arma 2 moves (keyframes x 132 bones). With more moves in use the cache
+  evicted and decoded moves on every pose. Limit raised to 1M matrices (`439492f`);
+  `POSEIDON_ANIM_CACHE_MATRICES` sets another for comparison. **Measured with one binary
+  (`439492f`, C0, 60 s):** new limit -- vehicles stage at most 8 ms per tick, collision
+  0.011 ms per man, no cache reload message; old limit 32000 -- back to 826 ms per tick and
+  2000 reloads logged within the minute. The old-limit log shows 17 cached moves holding
+  ~3 million matrices (~180,000 each): Arma 2 moves decode far larger than expected, so a
+  mission using many long moves could still exceed 1M; the "Animation cache: N loads" line
+  shows it if it does.
+- **Campaign run 2** (`439492f`): **C0 -> C1** (Harvest Red; C0 has no debriefing and goes
+  straight to its outro) and again CE0 -> CE1; both exit 0, no script error.
+
 ## Steps
 
 1. **Measure first.** Per mission: an asset census in the log (every class created, what it
