@@ -42,6 +42,6 @@ bool ArmaContentChoice(ControlsContainer* display, bool& campaign, std::string& 
 
 // POSEIDON_MENU_CLICKS="120,1": a test hook for captures. Called once per frame by the main loop:
 // every 2 s, presses the next listed idc on the top-most display (-1: opens the pause menu
-// in a running mission). Does nothing without the variable.
+// in a running mission, -2: switches the player to the aiming view). Does nothing without the variable.
 void TickMenuClickHook();
 } // namespace Poseidon

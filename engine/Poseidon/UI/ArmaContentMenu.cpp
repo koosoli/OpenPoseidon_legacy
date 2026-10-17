@@ -433,6 +433,13 @@ void TickMenuClickHook()
     while (top->Child())
         top = top->Child();
     LOG_INFO(UI, "POSEIDON_MENU_CLICKS: pressing idc {} on display {}", clicks[next], top->IDD());
+    if (clicks[next] == -2) // -2: V in a mission, the player's aiming (gunner) view
+    {
+        if (Object* on = GWorld->CameraOn())
+            GWorld->SwitchCameraTo(on, CamGunner);
+        next++;
+        return;
+    }
     if (clicks[next] == -1) // -1: Esc in a mission, the pause menu
     {
         if (auto* mission = dynamic_cast<DisplayMission*>(top))

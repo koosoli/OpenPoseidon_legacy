@@ -2546,7 +2546,12 @@ RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
         const char* e = std::getenv("OP_A2_SIGHTS");
         return !(e && *e == '0');
     }();
-    if (a2Sights && StringValue(*a2, "modelOptics") == "-")
+    // Arma 1 rifles inherit modelOptics "-" from the base config (Dta\bin.pbo), which Bohemia's
+    // ALDP packages do not ship: there the value reads empty and every rifle kept CWA's 2D sight
+    // (the owner, pressing V in Arma 1). With no optics of its own, an Arma 1 weapon has Arma's
+    // default, its iron sight; a model without an "eye" point still falls back to CWA's sight.
+    const std::string ownOptics = StringValue(*a2, "modelOptics");
+    if (a2Sights && (ownOptics == "-" || (ownOptics.empty() && Generation() == 1)))
     {
         text += "\t\toptics3D=1;\r\n";
         for (const char* key : {"opticsZoomMin", "opticsZoomMax", "opticsZoomInit", "distanceZoomMin", "distanceZoomMax"})
