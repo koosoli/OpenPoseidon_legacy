@@ -305,20 +305,30 @@ fn fog_local_incident(p:vec3<f32>, rel:vec3<f32>, ray:vec3<f32>)->vec3<f32> {
     }
     return source;
 }
-// Reuse the incoming-light field instead of marching the same sun path
-// for every camera participant. Separate passes prohibit read/write aliasing.
-fn fog_cached_solar(p:vec3<f32>,ground:f32,density:f32)->f32 {
+// The world-static medium for one participant: x = incoming solar transmission,
+// y = density (patch noise x valley pooling). Both are read from the cached
+// incoming-light field (cs_solar bakes pooling into .g and patch noise into .b
+// at the same world texel), so the 4-tap valley search (16 height loads) and
+// the two-octave noise (16 hashes) run once per field texel instead of four
+// times per ray interval. Outside the field's domain they are evaluated exactly.
+fn fog_cached_medium(p:vec3<f32>,ground:f32)->vec2<f32> {
     let uv=(p.xz-params.solar_domain.xy)*params.solar_domain.z;
     let agl=max(p.y-ground,0.0);
-    var cached=1.0;var confidence=0.0;
+    var cached=vec3<f32>(1.0);var confidence=0.0;
     if(all(uv>=vec2<f32>(0.0)) && all(uv<=vec2<f32>(1.0)) && agl<params.solar_domain.w){
         let dims=textureDimensions(solar_read);
         let z=(sqrt(agl/params.solar_domain.w)*f32(dims.z-1u)+0.5)/f32(dims.z);
-        cached=clamp(textureSampleLevel(solar_read,filter_samp,vec3<f32>(uv,z),0.0).r,0.0,1.0);
+        cached=textureSampleLevel(solar_read,filter_samp,vec3<f32>(uv,z),0.0).rgb;
+        cached.x=clamp(cached.x,0.0,1.0);
         let edge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
         confidence=smoothstep(0.0,2.0/f32(dims.x),edge);
-        if(confidence>=1.0){return cached;}
+        if(confidence>=1.0){return vec2<f32>(cached.x,cached.y*cached.z);}
     }
+    let density=fog_patch_density(p,params.patchiness)*fog_pooling(p,ground);
+    let solar=fog_cached_solar_fallback(p,ground,density,cached.x,confidence);
+    return vec2<f32>(solar,mix(density,cached.y*cached.z,confidence));
+}
+fn fog_cached_solar_fallback(p:vec3<f32>,ground:f32,density:f32,cached:f32,confidence:f32)->f32 {
     // Leaving the camera-centred cache must not switch solar attenuation off.
     // The certified local column is an analytic fallback, with no ray samples.
     // Interior cache hits above keep their original work budget.
@@ -355,7 +365,20 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
     var colour=vec3<f32>(0.0);
     var trans=1.0;
     var previous=0.0;
+    // Sun phase is constant along the ray: hoisted out of the participant loop.
+    let sun_phase=fog_phase(dot(ray,params.light.xyz),params.control.y);
+    // Each interval's end tap is the next interval's start tap (start+step of
+    // interval s is exactly start of s+1, and the last one is end_distance):
+    // carry it instead of re-evaluating the same native/shelter lookups.
+    var carried=fog_outdoor_sample(params.camera.xyz);
     for(var z=0u;z<dims.z;z=z+1u) {
+        // Beer-Lambert has closed the ray: no remaining slice can add 1e-4 of
+        // its own source. Store the converged result without marching.
+        if(trans<1e-4) {
+            textureStore(result,vec3<i32>(i32(id.x),i32(id.y),i32(z)),
+                vec4<f32>(fog_neutral_radiance(colour,0.85*min(params.control.z*4.0,1.0)),trans));
+            continue;
+        }
         let w=(f32(z)+0.5)/f32(dims.z);
         let end_distance=ray_far*w*w;
         let step=(end_distance-previous)*0.25;
@@ -364,9 +387,10 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
             let midpoint=start+step*0.5;
             let rel=ray*midpoint;
             let p=params.camera.xyz+rel;
-            let before=fog_outdoor_sample(params.camera.xyz+ray*start);
+            let before=carried;
             let centre=fog_outdoor_sample(p);
             let after=fog_outdoor_sample(params.camera.xyz+ray*(start+step));
+            carried=after;
             // A ray interval crossing the coverage/ground boundary contains
             // valid air. Reject only an entirely excluded interval, and weight
             // each analytic participant at its own certified world position.
@@ -400,11 +424,11 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
                     // linear-half estimate must not light an actually empty slab.
                     let sample_height=sample_pos.y-params.terrain.x*(outdoor.x-params.terrain.y);
                     if(fog_height_density(sample_height,params.layers[i])<=0.0){continue;}
-                    let density=fog_patch_density(sample_pos,params.patchiness)*fog_pooling(sample_pos,outdoor.x);
-                    let weight=participant.y*params.layers[i].w*params.control.z*density*outdoor.y;
+                    let medium=fog_cached_medium(sample_pos,outdoor.x);
+                    let weight=participant.y*params.layers[i].w*params.control.z*medium.y*outdoor.y;
                     if(weight<=0.0){continue;}
-                    let direct=params.radiance.rgb*fog_phase(dot(ray,params.light.xyz),params.control.y)
-                        *fog_light_visibility(sample_pos,sample_rel)*fog_cached_solar(sample_pos,outdoor.x,density);
+                    let direct=params.radiance.rgb*sun_phase
+                        *fog_light_visibility(sample_pos,sample_rel)*medium.x;
                     tau+=weight;
                     source+=weight*(ambient+direct+fog_local_incident(sample_pos,sample_rel,ray));
                 }
@@ -433,7 +457,7 @@ fn cs_solar(@builtin(global_invocation_id) id:vec3<u32>) {
     let uv=(vec2<f32>(id.xy)+0.5)/vec2<f32>(dims.xy);
     let xz=params.solar_domain.xy+uv/params.solar_domain.z;
     let native=fog_native_ground(xz);
-    var solar=1.0;
+    var solar=1.0;var pooling=1.0;var patch_density=1.0;
     if(native.y>=0.5){
         var top=-1e10;
         for(var i=0u;i<2u;i=i+1u){if(params.layers[i].w>0.0){top=max(top,params.layers[i].y+params.layers[i].z);}}
@@ -441,6 +465,8 @@ fn cs_solar(@builtin(global_invocation_id) id:vec3<u32>) {
         let w=f32(id.z)/f32(dims.z-1u);
         let p=vec3<f32>(xz.x,native.x+max(0.1,max_agl*w*w),xz.y);
         solar=fog_solar_transmission(p);
+        pooling=fog_pooling(p,native.x);
+        patch_density=fog_patch_density(p,params.patchiness);
     }
-    textureStore(solar_result,vec3<i32>(id),vec4<f32>(solar,0.0,0.0,1.0));
+    textureStore(solar_result,vec3<i32>(id),vec4<f32>(solar,pooling,patch_density,1.0));
 }
