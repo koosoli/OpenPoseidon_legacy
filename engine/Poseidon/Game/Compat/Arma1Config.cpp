@@ -2957,6 +2957,24 @@ bool ProxyKind(const char* modelName, std::string& simulation, int& crewPosition
     if (!cls || !cls->IsClass())
         return false;
     simulation = Lower(StringValue(*cls, "simulation"));
+    // Arma 1 defines ProxyWeapon, ProxySecWeapon, ProxyHandGun... in its base config
+    // (Dta\bin.pbo). Bohemia's ALDP data packages do not ship it, so there the addons'
+    // `class ProxyWeapon;` stays an empty declaration, every weapon placeholder
+    // (ProxyAK_47_v58_Proxy : ProxyWeapon) inherits no simulation, and soldiers were drawn
+    // with empty hands. CWA defines the same base classes, so take the simulation from
+    // CWA's class of the first base name it knows.
+    const ParamEntry* a1Proxies = Arma1Pars().FindEntry("CfgNonAIVehicles");
+    int depth = 0;
+    for (const ParamEntry* c = cls; simulation.empty() && c && c->IsClass() && depth < 8; depth++)
+    {
+        const ParamClass* pc = c->GetClassInterface();
+        const char* base = pc ? pc->GetBaseName() : nullptr;
+        if (!base || !*base)
+            break;
+        if (const ParamEntry* cwa = (Pars >> "CfgNonAIVehicles").FindEntry(base); cwa && cwa->IsClass())
+            simulation = Lower(StringValue(*cwa, "simulation"));
+        c = a1Proxies ? a1Proxies->FindEntry(base) : nullptr;
+    }
     if (simulation == "proxycrew")
     {
         const std::string pos = Lower(StringValue(*cls, "crewPosition"));
