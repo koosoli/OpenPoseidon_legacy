@@ -813,12 +813,24 @@ RString ResolveVehicleClass(const RString& className)
     // dogs, snakes, rabbits, fish) derive from Man; carried by a CWA class they became
     // walking civilians in the fields. Until animal models and moves are in, they are left
     // out -- Arma 3's first, then Arma 2's.
+    // Arma 3's are now placed with their own model as a still object (a static CWA thing
+    // carries it, so it does not walk the fields as a civilian); their moves are not in yet.
     if (Arma3IsAnimal(className))
     {
+        const ParamEntry* vehicles = Pars.FindEntry("CfgVehicles");
+        const char* still = vehicles && vehicles->FindEntry("House") ? "House" : nullptr;
         static std::set<std::string> reported;
-        if (reported.insert(Lower(className.Data())).second)
-            LOG_INFO(Mission, "{}: animal '{}' left out (no animal models yet)", Label(), className.Data());
-        return RString();
+        const bool first = reported.insert(Lower(className.Data())).second;
+        if (!still)
+        {
+            if (first)
+                LOG_INFO(Mission, "{}: animal '{}' left out (no animal models yet)", Label(), className.Data());
+            return RString();
+        }
+        if (first)
+            LOG_INFO(Mission, "{}: animal '{}' stands still with its own model on CWA '{}' (no animal moves yet)",
+                     Label(), className.Data(), still);
+        return Arma1ModelClass(className, RString(still));
     }
     if (Generation() == 2)
     {

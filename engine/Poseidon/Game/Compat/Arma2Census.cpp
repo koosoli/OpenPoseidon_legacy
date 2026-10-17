@@ -32,6 +32,8 @@
 #include <string>
 #include <vector>
 
+void LogArma3StubCensus(); // GameStateExtA3Stubs.cpp
+
 namespace Poseidon::Arma1Compat
 {
 namespace
@@ -553,6 +555,7 @@ void LogScriptProbe()
             start = end + 2;
         }
     }
+    ::LogArma3StubCensus();
     GameState* gs = GWorld->GetGameState();
     for (const std::string& e : exprs)
     {

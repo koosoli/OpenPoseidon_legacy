@@ -18,8 +18,13 @@
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 
+#include <Poseidon/Foundation/Logging/Logging.hpp>
+
+#include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -777,9 +782,15 @@ const Stub kStubs[] = {
     {"windStr", 'n', GameAny, 0, 0, "0"},
 };
 
+// How often each stub ran: the test census lists the busiest, which says which commands
+// the missions lean on that still do nothing here.
+constexpr size_t kStubCount = sizeof(kStubs) / sizeof(kStubs[0]);
+std::atomic<int> g_stubHits[kStubCount];
+
 template <size_t I>
 GameValue StubNular(const GameState* state)
 {
+    g_stubHits[I]++;
     GameVarSpace local(state->GetContext());
     state->BeginContext(&local);
     const GameValue r = state->EvaluateMultiple(kStubs[I].code);
@@ -790,6 +801,7 @@ GameValue StubNular(const GameState* state)
 template <size_t I>
 GameValue StubUnary(const GameState* state, GameValuePar oper1)
 {
+    g_stubHits[I]++;
     GameVarSpace local(state->GetContext());
     state->BeginContext(&local);
     state->VarSetLocal("_this", oper1, false, true);
@@ -801,6 +813,7 @@ GameValue StubUnary(const GameState* state, GameValuePar oper1)
 template <size_t I>
 GameValue StubBinary(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
+    g_stubHits[I]++;
     GameVarSpace local(state->GetContext());
     state->BeginContext(&local);
     GameArrayType args;
@@ -837,4 +850,18 @@ void RegisterStubs(std::index_sequence<I...>)
 void RegisterArma3Stubs()
 {
     RegisterStubs(std::make_index_sequence<sizeof(kStubs) / sizeof(kStubs[0])>{});
+}
+
+// Test census (--arma3-test-seconds): the stub commands the mission called, busiest first.
+void LogArma3StubCensus()
+{
+    std::vector<std::pair<int, size_t>> hits;
+    for (size_t i = 0; i < kStubCount; i++)
+        if (const int n = g_stubHits[i].load(); n > 0)
+            hits.emplace_back(n, i);
+    std::sort(hits.begin(), hits.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+    std::string line;
+    for (size_t k = 0; k < hits.size() && k < 30; k++)
+        line += std::string(k ? ", " : "") + kStubs[hits[k].second].name + " " + std::to_string(hits[k].first);
+    LOG_INFO(Script, "Arma 3: stub census {} of {} stub commands called: {}", hits.size(), kStubCount, line);
 }
