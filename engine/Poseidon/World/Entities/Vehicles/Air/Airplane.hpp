@@ -37,6 +37,13 @@ class AirplaneType: public TransportType
 	AnimationSection _rotorStill, _rotorMove;
 
 	AnimationWithCenter _fWheel,_rWheel,_lWheel;
+	// Arma 1 models name the gear by the model.cfg skeleton (gear_1..3 with gear_N_axis,
+	// wheel_N, struts) instead of "predni kolo"/"levy kolo": every part of one leg turns
+	// with that leg about its axis. _a1GearFront: the forward-most leg (the nose gear).
+	enum {MaxA1GearParts=32};
+	AnimationWithCenter _a1Gear[MaxA1GearParts];
+	bool _a1GearFront[MaxA1GearParts];
+	int _nA1Gear = 0;
 
 	Indicator _altRadarIndicator;
 	Indicator _altRadarIndicator2;
