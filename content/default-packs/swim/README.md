@@ -21,7 +21,7 @@ The animations and move states that make soldiers swim. The engine side is
 | Path | What |
 | --- | --- |
 | `config.cpp` | `CfgPatches swim`; the `CfgMovesMC` action maps (`SwimActions`, `SwimForwardActions`, `SwimDeadActions`, `SwimOutActions`, `SwimUnderActions`, `FallActions`, `FallLandActions`) and 25 states |
-| `rtm/*.rtm` | 23 animations for the CWA `MC` skeleton (`tread`, `swim`, `swimb/l/r/lb/rb/lf/rf`, `swimturnl/r`, `swimstart`, `swimstop`, `swimout`, `swimdead`, `swimdeadf`, `fall`, `fallland`, `swimin`; diving: `swimdive`, `swimunder`, `swimunderidle`, `swimsurface`) |
+| `rtm/*.rtm` | 24 animations for the CWA `MC` skeleton (`tread`, `swim`, `swimfast`, `swimb/l/r/lb/rb/lf/rf`, `swimturnl/r`, `swimstart`, `swimstop`, `swimout`, `swimdead`, `swimdeadf`, `fall`, `fallland`, `swimin`; diving: `swimdive`, `swimunder`, `swimunderidle`, `swimsurface`) |
 | `mod.json` | Default content pack manifest (`defaultContentApi` 1) |
 
 ## The surface stroke
@@ -30,6 +30,14 @@ The animations and move states that make soldiers swim. The engine side is
 insweep with the breath, hands together under the chin and forward, heels drawn up, whip kick into the glide. They
 are made in Blender by `scripts/swim/surface_moves.py` (on `dive_moves.py`'s tools); steps, phase counts and the
 `config.cpp` timings are the old moves', so speeds are unchanged.
+
+The sprint (`SwimFastF`, forward with the fast/turbo key) is a heads-up front crawl, `swimfast` (2026-10-17, owner:
+"use the crawl animation for swimming when the player uses the running option" -- the pack had none; the sprint was
+the breaststroke played faster): the arms in turn, each recovering over the water with the elbow high, the body
+rolling toward the recovering arm, a six-beat flutter kick; 1.1 s and 1.5 m a cycle (both arms), the sprint's old
+timing. `surface_moves.py` sets the arms on every frame from a hand path (`CRAWL_ARM`) rather than blending
+shoulder angles, and slings the rifle along the spine for this move only (`crawl_sling`): where the other moves
+sling it, up behind the right shoulder, the recovering right arm swept through it.
 
 ## Diving (W4)
 

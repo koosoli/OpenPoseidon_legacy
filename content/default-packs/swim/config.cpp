@@ -203,7 +203,7 @@ class CfgMovesMC
 			relSpeedMax=1.1;
 			interpolateTo[]={"SwimStop",0.05,"SwimSlowF",0.1,"SwimFastF",0.1,"SwimLF",0.1,"SwimRF",0.1,"SwimDeadF",0.1};
 		};
-		// same stroke, slower (walk speed) and faster (sprint)
+		// the same stroke slower (walk speed); the sprint is the front crawl (heads-up, both arms in turn)
 		class SwimSlowF: SwimF
 		{
 			speed=-2.4;
@@ -214,6 +214,7 @@ class CfgMovesMC
 		};
 		class SwimFastF: SwimF
 		{
+			file="\swim\swimfast.rtm";
 			speed=-1.1;
 			duty=0.6;
 			relSpeedMin=0.8;

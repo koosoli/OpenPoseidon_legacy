@@ -29,7 +29,8 @@ bake, bones, sample, _fill, tread_pose = dm['bake'], dm['bones'], dm['sample'], 
 
 LOOPED = {'swim': (1.43, 41, (0.0, 0.0, -1.5)),
           'swimlf': (1.6, 41, (1.06, 0.0, -1.06)),
-          'swimrf': (1.6, 41, (-1.06, 0.0, -1.06))}
+          'swimrf': (1.6, 41, (-1.06, 0.0, -1.06)),
+          'swimfast': (1.1, 41, (0.0, 0.0, -1.5))}
 ONESHOT = {'swimstart': (1.83, 33, (-0.018342, 0.0, -0.098314)),
            'swimstop': (1.1, 25, (0.012962, 0.0, -0.60875))}
 
@@ -95,6 +96,8 @@ def make_all():
     acts['swim'] = bake('swim', stroke_keys(), LOOPED['swim'][0], True)
     acts['swimlf'] = bake('swimlf', stroke_keys(-25.0), LOOPED['swimlf'][0], True)
     acts['swimrf'] = bake('swimrf', stroke_keys(25.0), LOOPED['swimrf'][0], True)
+    # baked on one frame a phase: the arms are set per frame, and a sample between frames would blend their angles
+    acts['swimfast'] = crawl_sling(crawl_arms(bake('swimfast', crawl_keys(), CRAWL_FRAMES / dm['FPS'], True)))
     tread = tread_pose(0)
     glide = bones(sample(_fill(stroke_keys()), 0.0, True))  # the stroke's first pose, trailing limbs included
     acts['swimstart'] = bake('swimstart', start_keys(), ONESHOT['swimstart'][0], False,
@@ -110,3 +113,174 @@ def export_all(out_dir):
     for name, (_, phases, step) in {**LOOPED, **ONESHOT}.items():
         done[name] = rig['export_rtm'](name, os.path.join(out_dir, name + '.rtm'), phases=phases, step=step)
     return done
+
+
+# ---- the front crawl (SwimFastF, the sprint) ----------------------------------------------------------------------
+# Owner, 2026-10-17: "use the crawl animation for swimming when the player uses the running option". A heads-up front
+# crawl -- the face stays out, as a soldier sprinting with his kit swims it: one arm pulls under the body while the
+# other recovers over the water with the elbow high, the body rolls toward the recovering arm, a six-beat flutter
+# kick. One cycle is two strokes (right, then left), 1.1 s and 1.5 m, the sprint's old timing.
+# The arm channels are shoulder Euler angles, and the crawl arm turns a full circle about the shoulder: no blend of
+# those angles follows it (between the arm at the thigh and the arm reaching ahead it swings the hand through the
+# water, or wraps). So the arms are set on every frame from where the upper arm and forearm point (crawl_arms), on
+# top of the channel bake, and exported on every frame (41 frames for 41 phases).
+CRAWL_PITCH = 75
+CRAWL_FRAMES = 40
+# (u, upper arm, forearm plane, elbow bend) for the right arm, the directions in the body frame (x out to his right
+# negative, y toward his feet, z up -- the body at CRAWL_PITCH, unrolled); the left arm mirrors it half a cycle later
+CRAWL_ARM = [
+    (0.00, (-0.12, -1.00, +0.05), (+0.00, -1.00, -0.30), 10),   # entry, reaching
+    (0.10, (-0.15, -0.90, -0.35), (+0.00, -0.30, -1.00), 45),   # catch: the forearm drops, elbow high
+    (0.20, (-0.40, -0.35, -0.85), (+0.35, +0.35, -0.85), 85),   # the pull under the chest
+    (0.30, (-0.35, +0.25, -0.90), (+0.15, +0.75, -0.65), 65),
+    (0.40, (-0.30, +0.75, -0.60), (-0.05, +0.95, -0.30), 30),   # the push past the hip
+    (0.48, (-0.35, +0.90, -0.05), (-0.15, +0.90, +0.20), 20),   # out at the thigh
+    (0.56, (-0.55, +0.50, +0.65), (-0.20, +0.80, -0.30), 75),   # the elbow lifts it out
+    (0.66, (-0.70, +0.00, +0.75), (-0.20, +0.30, -0.60), 95),  # recovery: elbow high, the hand hanging
+    (0.76, (-0.60, -0.45, +0.65), (+0.00, -0.60, -0.60), 90),
+    (0.86, (-0.40, -0.80, +0.45), (+0.00, -0.90, -0.30), 55),
+    (0.94, (-0.20, -0.97, +0.15), (+0.00, -0.97, -0.20), 25),   # the hand goes in ahead of the shoulder
+]
+
+
+def _crawl_at(u, mirror):
+    """(upper, forearm, bend) of one arm at phase u: periodic Catmull-Rom through CRAWL_ARM."""
+    from mathutils import Vector
+    u %= 1.0
+    n = len(CRAWL_ARM)
+    for i in range(n):
+        u1 = CRAWL_ARM[(i + 1) % n][0] + (1.0 if i + 1 == n else 0.0)
+        if CRAWL_ARM[i][0] <= u < u1:
+            break
+    t = (u - CRAWL_ARM[i][0]) / (u1 - CRAWL_ARM[i][0])
+    pts = [CRAWL_ARM[(i + k) % n] for k in (-1, 0, 1, 2)]
+    out = []
+    for field in (1, 2, 3):
+        vals = [p[field] for p in pts]
+        if field == 3:
+            out.append(dm['_catmull'](*vals, t))
+            continue
+        v = Vector([dm['_catmull'](*(x[c] for x in vals), t) for c in range(3)]).normalized()
+        if mirror:
+            v.x = -v.x
+        out.append(v)
+    return out
+
+
+def crawl_arms(act):
+    """Set both arms of <act> on every frame from CRAWL_ARM, relative to the pelvis as it rolls."""
+    import bpy
+    from mathutils import Matrix, Vector
+    ob = bpy.data.objects['MC_Rig']
+    sc = bpy.context.scene
+    ob.animation_data.action = act
+    wi = ob.matrix_world.to_3x3().inverted()
+    # the pelvis frame the directions are written in: the crawl's pitch, unrolled
+    sc.frame_set(0)
+    pel = ob.pose.bones['pzadek']
+    keep = pel.rotation_euler.copy()
+    pel.rotation_euler = dm['R'](CRAWL_PITCH, 0, 0)
+    bpy.context.view_layer.update()
+    p0inv = pel.matrix.to_3x3().inverted()
+    pel.rotation_euler = keep
+    last = int(act.frame_range[1])
+    prev = {}
+    for f in range(last + 1):
+        sc.frame_set(f)
+        u = f / last
+        pmat = ob.pose.bones['pzadek'].matrix.to_3x3()
+        for s, ph in (('p', 0.0), ('l', 0.5)):
+            upper, fore, bend = _crawl_at(u + ph, s == 'l')
+            up = (pmat @ p0inv @ wi @ upper).normalized()
+            fp = pmat @ p0inv @ wi @ fore
+            fp = (fp - up * fp.dot(up)).normalized()
+            bi, lo = ob.pose.bones[s + 'biceps'], ob.pose.bones[s + 'loket']
+            # the way this elbow bends, in the upper arm's own axes
+            rel = bi.bone.matrix_local.to_3x3().inverted() @ lo.bone.matrix_local.to_3x3()
+            b = rel @ Vector((0, 0, 1))
+            b = (b - Vector((0, 1, 0)) * b.y).normalized()
+            src = Matrix((Vector((0, 1, 0)), b, Vector((0, 1, 0)).cross(b))).transposed()
+            dst = Matrix((up, fp, up.cross(fp))).transposed()
+            m = bi.matrix.copy()
+            rot = (dst @ src.inverted()).to_4x4()
+            rot.translation = m.translation
+            bi.matrix = rot
+            bpy.context.view_layer.update()
+            e = bi.matrix_basis.to_euler(bi.rotation_mode, prev[s]) if s in prev else bi.matrix_basis.to_euler(bi.rotation_mode)
+            prev[s] = e
+            bi.rotation_euler = e
+            bi.keyframe_insert('rotation_euler', frame=f)
+            lo.rotation_euler = dm['R'](max(bend, 2.0))
+            lo.keyframe_insert('rotation_euler', frame=f)
+            bpy.context.view_layer.update()
+    return act
+
+
+def crawl_keys():
+    keys = []
+    for i in range(24):
+        u = i / 24
+        p = P(pitch=CRAWL_PITCH, fwd=0.32, height=1.44, neck=-30, head=-14, spine=-4,
+              roll=20 * math.cos(2 * math.pi * (u - 0.22)))  # the recovering arm's shoulder up
+        for s, ph in (('p', 0.0), ('l', 0.5)):
+            # the shoulder girdle as for a reach; the arm itself is set by crawl_arms
+            p.update({s + 'flex': 120.0, s + 'abd': 30.0, s + 'twist': 0.0, s + 'elbow': 40.0, s + 'wrist': 0.0})
+            k = math.sin(6 * math.pi * u + (0.0 if s == 'p' else math.pi))  # six beats a cycle, the legs in turn
+            p.update({s + 'hip': 4 + 14 * k, s + 'hipabd': 3, s + 'hiptwist': 4, s + 'knee': 14 + 12 * max(0.0, -k),
+                      s + 'ankle': -48})
+        keys.append((u, p))
+    return keys
+
+
+def _proxy_frame(points):
+    """The engine's frame for a proxy triangle (ShapeLOD.cpp): p0 the corner of the two shortest edges, the
+    direction along the shortest, up along the second -- as (origin, direction, up)."""
+    p0, p1, p2 = points
+    d = lambda a, b: (a - b).length_squared
+    if d(p0, p1) > d(p0, p2):
+        p1, p2 = p2, p1
+    if d(p0, p1) > d(p1, p2):
+        p0, p2 = p2, p0
+    if d(p0, p2) > d(p1, p2):
+        p0, p1 = p1, p0
+    return p0, (p1 - p0).normalized(), (p2 - p0).normalized()
+
+
+def crawl_sling(act):
+    """The crawl's recovering right arm swept through the rifle where the other moves sling it (up behind the right
+    shoulder, measured in game). For the crawl the rifle lies along the spine on his back, muzzle to his feet,
+    between the arms: the 'zbran' bone is set on every frame so the weapon proxy lands there."""
+    import bpy
+    from mathutils import Matrix, Vector
+    ob = bpy.data.objects['MC_Rig']
+    mesh = bpy.data.objects['MC_Soldier']
+    sc = bpy.context.scene
+    grp = mesh.vertex_groups['zbran'].index
+    to_arm = ob.matrix_world.inverted() @ mesh.matrix_world
+    tri = [to_arm @ v.co for v in mesh.data.vertices if any(g.group == grp and g.weight > 0.5 for g in v.groups)]
+    o, fwd, up = _proxy_frame(tri)
+    side = fwd.cross(up)
+    rest = Matrix((side, fwd, up)).transposed().to_4x4()  # columns: the proxy's axes, as the rest weapon frame
+    rest.translation = o
+    pb = ob.pose.bones['zbran']
+    ob.animation_data.action = act
+    for f in range(int(act.frame_range[1]) + 1):
+        sc.frame_set(f)
+        h = ob.pose.bones['hrudnik'].matrix
+        spine = h.to_3x3() @ Vector((0, 1, 0))           # the chest bone runs up the spine
+        back = spine.cross(ob.pose.bones['pbiceps'].matrix.translation - ob.pose.bones['lbiceps'].matrix.translation)
+        back.normalize()
+        if back.dot(ob.matrix_world.inverted().to_3x3() @ Vector((0, 0, 1))) < 0:
+            back = -back
+        # the rifle model's barrel lies along the proxy's side axis (measured in game: with the direction along the
+        # spine it lay across his shoulders)
+        barrel = spine  # muzzle to his feet
+        rdir = back.cross(barrel)
+        want = Matrix((barrel, rdir, back)).transposed().to_4x4()
+        want.translation = h.translation + back * 0.13 - spine * 0.05
+        deform = want @ rest.inverted()                  # the weapon's deform: rest frame -> wanted frame
+        pb.matrix = deform @ pb.bone.matrix_local
+        bpy.context.view_layer.update()
+        pb.keyframe_insert('location', frame=f)
+        pb.keyframe_insert('rotation_euler', frame=f)
+    return act
