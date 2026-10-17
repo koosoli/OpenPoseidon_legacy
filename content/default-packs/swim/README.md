@@ -20,8 +20,21 @@ The animations and move states that make soldiers swim. The engine side is
 
 | Path | What |
 | --- | --- |
-| `config.cpp` | `CfgPatches swim`; the `CfgMovesMC` action maps (`SwimActions`, `SwimForwardActions`, `SwimDeadActions`, `SwimOutActions`, `FallActions`, `FallLandActions`) and 22 states |
-| `rtm/*.rtm` | 19 animations for the CWA `MC` skeleton (`tread`, `swim`, `swimb/l/r/lb/rb/lf/rf`, `swimturnl/r`, `swimstart`, `swimstop`, `swimout`, `swimdead`, `swimdeadf`, `fall`, `fallland`, `swimin`) |
+| `config.cpp` | `CfgPatches swim`; the `CfgMovesMC` action maps (`SwimActions`, `SwimForwardActions`, `SwimDeadActions`, `SwimOutActions`, `SwimUnderActions`, `FallActions`, `FallLandActions`) and 25 states |
+| `rtm/*.rtm` | 23 animations for the CWA `MC` skeleton (`tread`, `swim`, `swimb/l/r/lb/rb/lf/rf`, `swimturnl/r`, `swimstart`, `swimstop`, `swimout`, `swimdead`, `swimdeadf`, `fall`, `fallland`, `swimin`; diving: `swimdive`, `swimunder`, `swimunderidle`, `swimsurface`) |
+
+## Diving moves (W4, not wired yet)
+
+`SwimDive` (duck-dive from treading into the glide, 1.5 s), `SwimUnder` (the underwater breaststroke:
+long pull to the thighs, glide, frog kick; 2.2 s, 1.6 m a stroke), `SwimUnderIdle` (holding still: flat,
+sculling, an easy kick) and `SwimSurface` (up from the glide into treading, 1.3 s). `SwimDive` starts on
+`tread`'s first pose and `SwimSurface` ends on it exactly; `SwimDive` ends on `SwimUnder`'s first pose.
+
+Nothing reaches them yet: no existing state or action map leads to them, so swimming is unchanged. The
+engine side of diving (W4: going under, depth, breath, the camera) is still to do. It should blend to them
+with `BlendToMove`, and add `SwimUnderActions` to what `Man::IsSwimMove` counts as swimming. In model space
+their head rides about 0.5 m lower than treading's (the body lies flat), so the swimmer's water line must
+not follow the eyes under water.
 | `mod.json` | Default content pack manifest (`defaultContentApi` 1) |
 
 `scripts/Build-Swim.ps1` packs them as `Mods/@OP_Swim/AddOns/swim.pbo` (prefix `swim`), with the
@@ -45,6 +58,12 @@ calls it, and `Deploy.ps1` installs the result.
   (`G:\Malprave\tools\swimanim\v3`, September 2026).
 * All 19 animations are Claude-made: the owner holds that in writing (confirmed 2026-10-10) and has
   cleared them for the repository. They are original work of this project, released with it.
+* The four diving moves were made by Claude in Blender (2026-10-17, owner: "make with blender ... also a
+  diving animation"). They were keyed on a rig of the `MC` skeleton (`scripts/swim/blender_swim_rig.py`), whose
+  joint pivots `fit_mc_joints.py` fits from the stock animations into `mc_joints.json`. The keys come from
+  `scripts/swim/dive_moves.py`, and its `export_all` writes the RTMs. The actions are ordinary Blender keyframes,
+  so they can be reworked by hand and exported again. The rig's RTM import and export round-trips `tread`/`swim`
+  to 1e-6. The soldier mesh used for previewing is the game's `mc vojakw2.p3d` and is not in this repo.
 
 ## Repair of Malprave's moves (2026-10-04)
 

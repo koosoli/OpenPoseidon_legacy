@@ -77,6 +77,25 @@ class CfgMovesMC
 			Die="SwimDeadF";
 			upDegree="manposstand";
 		};
+		// under water (W4, diving): the underwater stroke forward, holding still otherwise. Not reachable yet: no
+		// map above leads here, and IsSwimMove does not count this map until the engine's diving lands
+		class SwimUnderActions: NoActions
+		{
+			Stop="SwimUnderIdle";
+			StopRelaxed="SwimUnderIdle";
+			TurnL="SwimUnderIdle";
+			TurnR="SwimUnderIdle";
+			TurnLRelaxed="SwimUnderIdle";
+			TurnRRelaxed="SwimUnderIdle";
+			WalkF="SwimUnder";
+			SlowF="SwimUnder";
+			FastF="SwimUnder";
+			Default="SwimUnderIdle";
+			Die="SwimDeadF";
+			upDegree="manposstand";
+			turnSpeed=1.0;
+			limitFast=1.2;
+		};
 		// falling (the engine holds it while the man drops; killed in the air he dies as in combat)
 		class FallActions: NoActions
 		{
@@ -243,6 +262,49 @@ class CfgMovesMC
 			looped=0;
 			interpolateTo[]={"SwimDead",0.1};
 			connectTo[]={"Swim",0.05,"SwimB",0.05,"SwimL",0.05,"SwimR",0.05,"SwimLB",0.05,"SwimRB",0.05,"SwimTurnL",0.05,"SwimTurnR",0.05,"SwimStart",0.05};
+		};
+		// diving (W4; made in Blender, scripts/swim/dive_moves.py). Defined for the engine's diving to blend to
+		// (BlendToMove); nothing here leads into them yet, so swimming is unchanged.
+		// duck-dive from treading: reach, pike head-down, the legs over, into the glide (1.5 s)
+		class SwimDive: Swim
+		{
+			actions="SwimUnderActions";
+			file="\swim\swimdive.rtm";
+			speed=-1.5;
+			looped=0;
+			duty=0.3;
+			interpolateTo[]={"SwimDeadF",0.1};
+			connectTo[]={"SwimUnder",0.05,"SwimUnderIdle",0.05,"SwimSurface",0.1};
+		};
+		// the underwater breaststroke: long pull to the thighs, glide, frog kick (2.2 s, 1.6 m a stroke)
+		class SwimUnder: Swim
+		{
+			actions="SwimUnderActions";
+			file="\swim\swimunder.rtm";
+			speed=-2.2;
+			duty=0.3;
+			relSpeedMin=0.7;
+			relSpeedMax=1.1;
+			interpolateTo[]={"SwimUnderIdle",0.2,"SwimSurface",0.1,"SwimDeadF",0.1};
+		};
+		// holding still under water: flat, sculling, an easy kick (2.4 s)
+		class SwimUnderIdle: Swim
+		{
+			actions="SwimUnderActions";
+			file="\swim\swimunderidle.rtm";
+			speed=-2.4;
+			duty=0.0;
+			interpolateTo[]={"SwimUnder",0.2,"SwimSurface",0.1,"SwimDeadF",0.1};
+		};
+		// up from the glide into treading: head and chest lift, a pull down and a kick (1.3 s)
+		class SwimSurface: Swim
+		{
+			file="\swim\swimsurface.rtm";
+			speed=-1.3;
+			looped=0;
+			duty=0.3;
+			interpolateTo[]={"SwimDead",0.1};
+			connectTo[]={"Swim",0.05,"SwimStart",0.05,"SwimB",0.05,"SwimL",0.05,"SwimR",0.05,"SwimTurnL",0.05,"SwimTurnR",0.05};
 		};
 		// falling: upright, the rifle held lowered in both hands, legs loose (the engine plays it once a man has
 		// been dropping for a moment, keeps him upright, and leaves it when he lands or reaches the water)

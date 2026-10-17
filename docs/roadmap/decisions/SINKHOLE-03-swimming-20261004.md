@@ -71,7 +71,9 @@ Note for Malprave's maintainers: `M:\ForestClaude\malprave-swim-animation-fixes.
 
 ## Open
 
-* No diving, breath or drowning (W4). Weapons are disabled in the water.
+* No diving, breath or drowning (W4) in the engine yet. The W4 animations exist (`SwimDive`, `SwimUnder`,
+  `SwimUnderIdle`, `SwimSurface`, made in Blender 2026-10-17, see the swim pack README) but nothing reaches them.
+  Weapons are disabled in the water.
 * Swimmers pass through each other. `swimAvoid` only stops the spinning.
 * AI planning uses the coarse geography water classes (sea-based); lakes are not routed.
 * Swimmers outside the camera's probe grid ride the predictor, so AI heads can dip under drawn
