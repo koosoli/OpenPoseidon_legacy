@@ -475,6 +475,24 @@ class MLODLoader
             }
         }
 
+        // In the point LODs (memory, land contact, hit points ... resolution 1e15 on) points no face uses -- the memory
+        // LOD's eye and weapon points beside its proxy triangles -- become vertices of their own, as in a LOD with no
+        // faces at all (above) and as the binarized form keeps them. Built from the faces alone, a LOD with both lost
+        // them, and every named selection on them came out empty. Visual and geometry LODs keep only face corners: a
+        // stray unused point there is an editing leftover, and the controlled MLOD path refuses unused vertices.
+        const bool keepLoosePoints = taggData.resolution >= 1e15f;
+        for (size_t pointIdx = 0; keepLoosePoints && pointIdx < pointToVertices.size(); ++pointIdx)
+        {
+            if (!pointToVertices[pointIdx].empty())
+                continue;
+            const auto& point = vertexTable.points[pointIdx];
+            Vertex v;
+            v.position = Vector3(point.position.x, point.position.y, point.position.z);
+            v.flags    = static_cast<VertexFlags>(convertPointFlagsToClipFlags(static_cast<uint32_t>(point.flags)));
+            pointToVertices[pointIdx].push_back(static_cast<uint32_t>(mesh.vertices.size()));
+            mesh.vertices.push_back(v);
+        }
+
         std::vector<int32_t> vertexToPoint(mesh.vertices.size(), -1);
         for (int32_t pointIdx = 0; pointIdx < static_cast<int32_t>(pointToVertices.size()); ++pointIdx)
         {
