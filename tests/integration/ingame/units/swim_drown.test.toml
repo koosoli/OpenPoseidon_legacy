@@ -1,0 +1,8 @@
+tags = ["units", "water", "retail-data"]
+binary = "PoseidonGame"
+mission = "dev-missions/swim-bay.Eden"
+timeout = 240
+assert_timeout = 30
+# Needs the retail data (Everon) and the swim pack with the diving moves in its Mods\@OP_Swim, as Deploy.ps1
+# installs it (Build-Swim.ps1 stages it); an older pack has no SwimDive and the dive never starts.
+extra_args = ["--dev", "--no-splash"]

@@ -29,7 +29,7 @@ The animations and move states that make soldiers swim. The engine side is
 Swimming, the player dives with **move down (Z)**, a tap is enough, where the water is at least 2.2 m deep. Under
 water **Z** held sinks, **Q** (move up) held rises, and a tap of **Q** takes him all the way up; forward swims the underwater stroke, otherwise he holds still at his depth. Going up
 near the surface, he surfaces into treading. He has 40 s of air under water (a hint at 10 s left), then drowns
-slowly; at the surface the air comes back. The camera follows him under. AI swimmers do not dive. Engine:
+within 12 s; at the surface the air comes back. The camera follows him under. AI swimmers do not dive. Engine:
 `SoldierOldSwim.cpp` (`SimDive`, `UpdateBreath`), decision record
 `docs/roadmap/decisions/SINKHOLE-04-diving-20261017.md`.
 

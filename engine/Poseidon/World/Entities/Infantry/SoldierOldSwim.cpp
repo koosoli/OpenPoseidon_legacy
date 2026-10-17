@@ -123,11 +123,12 @@ constexpr float DiveBedClear = 0.25f;
 constexpr float DiveSurfaceAt = 0.6f;
 // the body pitches up to this much (rad) with the vertical speed, about its middle
 constexpr float DivePitchMax = 0.35f;
-// air: seconds under water (a loaded soldier, breath held), refilled this many times faster at the surface;
-// out of air he takes DiveDrownRate damage per second
+// air: seconds under water (a loaded soldier, breath held), refilled this many times faster at the surface; out
+// of air he drowns: his damage rises to death over DiveDrownTime whatever his armour (a hit-point rate did not kill
+// him in two minutes -- owner, 2026-10-17: "at one point he needs to drown")
 constexpr float DiveBreath = 40.0f;
 constexpr float DiveBreathRefill = 4.0f;
-constexpr float DiveDrownRate = 0.12f;
+constexpr float DiveDrownTime = 12.0f;
 
 bool EnvOn(const char* name)
 {
@@ -803,7 +804,7 @@ void Man::UpdateBreath(float deltaT, float headDepth)
                 GWorld->UI()->ShowHint("Out of air!");
             }
             _breath = 0;
-            LocalDammage(nullptr, this, VZero, DiveDrownRate * deltaT, 1.0f);
+            SetDammage(std::min(1.0f, GetTotalDammage() + deltaT / DiveDrownTime));
         }
     }
     else

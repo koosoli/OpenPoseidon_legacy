@@ -24,8 +24,9 @@ of piking, a rigid stroke with a third of the cycle dead, and every joint stoppi
   middle (the flat moves lie 1.05 m over the model origin), and the offset eases back out after surfacing.
 * **Out:** going up within 0.6 m of the surface: `SwimSurface`, and the surface heave takes him again, softly. A
   dead diver floats up face down like any dead swimmer. Shallow water stands him up as before.
-* **Breath:** 40 s with the head under, a hint at 10 s ("Running out of air"), then 0.12 damage a second; at the
-  surface it refills four times as fast.
+* **Breath:** 40 s with the head under, a hint at 10 s ("Running out of air"), then he drowns: his damage rises
+  to death over 12 s whatever his armour (a 0.12 hit-point rate first did not kill the owner in two minutes under);
+  at the surface the air refills four times as fast. No air bar on the HUD (owner: the hints are enough).
 * **Camera:** a camera on a diver may go under the sea, held only above the bed (`SwimmerDiving`, World.cpp); on
   a swimmer at the surface it is as before.
 * **Keys:** while swimming, move up / move down no longer go to the stance actions (they did nothing in the
@@ -55,7 +56,8 @@ the game folder was not deployed to -- another agent owns it): **passed** (16.5 
 | breath | 40 s counting down under water |
 | Q (move up) | rises at 0.9 m/s (2.4 -> 0.7 m in 2.5 s), `SwimSurface`, then treading with the heave |
 
-Not exercised in game yet: running out of air (the hint at 10 s, the drowning damage); the runs used ~6 s of it.
+`swim_drown.test.sqf` (same setup): unhurt after 30 s under, 90% damage between 48 and 56 s, then dead in the
+`SwimDeadF` float -- passes.
 
 Screenshots: treading; the pike head-down with the camera following under water (the underwater compositor
 takes over); the hover over the sea bed; back to treading.
