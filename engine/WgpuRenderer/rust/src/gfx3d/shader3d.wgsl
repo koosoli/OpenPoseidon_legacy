@@ -23,9 +23,17 @@
 #import conform::{surface_y, surface_grad, surface_y_raster, hm_params, snow_depth, snow_deficit, rigid_ground_fragment, cave_daylight}
 
 // BEGIN_MUZZLE_FLASH_HELPERS (actual helper exercised by the GPU probe)
+// The warmed sheet encodes its heat in chroma (MuzzleFlashAppearance.hpp: blue/red =
+// 0.07 + 0.73*hot), so the hot core can be recovered here without a new material lane.
+// The core is HDR radiance well above the bloom knee (a real flash outshines the scene
+// by orders of magnitude, day or night); the cooler petals stay a modest orange.
+const MUZZLE_EDGE_GAIN: f32 = 1.8;
+const MUZZLE_CORE_GAIN: f32 = 9.0;
 fn stock_muzzle_flash_radiance(srgb: vec3<f32>, linear: f32) -> vec3<f32> {
     let bounded = clamp(srgb, vec3<f32>(0.0), vec3<f32>(1.0));
-    return select(bounded, srgb_to_linear(bounded) * 1.25, linear > 0.5);
+    let heat = clamp((bounded.b / max(bounded.r, 1e-4) - 0.07) / 0.73, 0.0, 1.0);
+    let gain = MUZZLE_EDGE_GAIN + (MUZZLE_CORE_GAIN - MUZZLE_EDGE_GAIN) * heat * heat;
+    return select(bounded, srgb_to_linear(bounded) * gain, linear > 0.5);
 }
 // END_MUZZLE_FLASH_HELPERS
 

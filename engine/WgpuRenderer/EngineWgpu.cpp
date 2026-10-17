@@ -9797,7 +9797,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
             static std::unordered_set<std::string> traced;
             const Texture* source = sMesh.GetSection(beg).properties.GetTexture();
             if (traced.insert(source->Name()).second)
-                LOG_INFO(Graphics, "MUZZLE_FLASH_MATERIAL texture={} width={} height={} enabled={} admitted=true animated=true noShadow=true orderedAlpha=true blend=true encoded={:.1f} radiancePeak=1.25 timing=existing-zasleh",
+                LOG_INFO(Graphics, "MUZZLE_FLASH_MATERIAL texture={} width={} height={} enabled={} admitted=true animated=true noShadow=true orderedAlpha=true blend=true encoded={:.1f} radianceEdge=1.8 radianceCore=9.0 timing=existing-zasleh",
                          source->Name(), source->AWidth(0), source->AHeight(0), enabled,
                          d.mat_local_specular.w);
         }

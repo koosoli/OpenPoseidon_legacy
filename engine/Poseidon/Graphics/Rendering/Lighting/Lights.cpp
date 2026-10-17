@@ -994,7 +994,7 @@ void LightPoint::GetDescription(LightDescription& desc) const
     desc.endAttenScale = _endAttenScale; // LGT-014
 }
 
-MuzzleFlashLight::MuzzleFlashLight() : LightPoint(Color(2.0f, 1.55f, 0.9f), Color(0.12f, 0.085f, 0.035f))
+MuzzleFlashLight::MuzzleFlashLight() : LightPoint(Color(3.2f, 2.3f, 1.1f), Color(0.15f, 0.10f, 0.04f))
 {
     SetBrightness(MuzzleFlashPulse::CoreMetres / 50.0f);
     SetEndAttenScale(MuzzleFlashPulse::EndScale);

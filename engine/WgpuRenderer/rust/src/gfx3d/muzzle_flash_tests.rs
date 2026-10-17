@@ -178,14 +178,17 @@ fn muzzle_actual_gpu_srgb_transfer_and_bounded_self_emission() {
     for (i, (input, row)) in cases.iter().zip(actual).enumerate() {
         for channel in 0..3 {
             let bounded = input[channel].clamp(0.0, 1.0);
+            let (r, b) = (input[0].clamp(0.0, 1.0), input[2].clamp(0.0, 1.0));
+            let heat = ((b / r.max(1e-4) - 0.07) / 0.73).clamp(0.0, 1.0);
+            let gain = 1.8 + (9.0 - 1.8) * heat * heat;
             let expected = if input[3] > 0.5 {
-                decode(bounded) * 1.25
+                decode(bounded) * gain
             } else {
                 bounded
             };
-            assert!(row[channel].is_finite() && row[channel] >= 0.0 && row[channel] <= 1.25001);
+            assert!(row[channel].is_finite() && row[channel] >= 0.0 && row[channel] <= 9.0001);
             assert!(
-                (row[channel] - expected).abs() < 0.00005,
+                (row[channel] - expected).abs() < 0.0005,
                 "case{i} channel{channel}: {row:?} expected{expected}"
             );
         }

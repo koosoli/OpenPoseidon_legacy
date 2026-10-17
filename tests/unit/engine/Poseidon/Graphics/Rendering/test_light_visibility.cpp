@@ -80,7 +80,7 @@ TEST_CASE("Actual muzzle point light expires through base dispatch without an AI
     REQUIRE(light->IsOn());
     light->GetDescription(peak);
     REQUIRE(peak.pos.X() == -1);
-    REQUIRE(peak.diffuse.R() == 2); // no burst accumulation or new light instance
+    REQUIRE(peak.diffuse.R() == 3.2f); // no burst accumulation or new light instance
     light->Switch(false);
     REQUIRE_FALSE(light->IsOn());
     light->GetDescription(expired);

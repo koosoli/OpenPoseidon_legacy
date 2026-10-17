@@ -55,7 +55,8 @@ inline bool StockMuzzleDrawAdmitted(StockMuzzleSheet sheet, bool animated, bool 
 // The retail envelope remains the hard coverage bound: only remove coverage.
 // A compact hot centre and phase-fixed uneven taper keep the broad six-petal
 // source from reading as a uniformly white flower. Clear RGB stays warm for
-// filtered edges; no geometry, phase timing or additive energy is introduced.
+// filtered edges; no geometry or phase timing is introduced. The heat written
+// into the chroma here becomes HDR core radiance in shader3d.
 // This runs once on actual decoded sheets, never as per-frame texture noise.
 inline bool WarmStockMuzzleSheet(std::string_view name, int width, int height,
                                 std::uint8_t* rgba, std::size_t bytes, bool enabled)
@@ -100,7 +101,9 @@ inline bool WarmStockMuzzleSheet(std::string_view name, int width, int height,
         const float hot = smooth(0.35f,1.0f,a)*core;
         const float authored = std::max({rgba[i], rgba[i + 1], rgba[i + 2]}) / 255.0f;
         const float brightness = authored * (0.78f + 0.22f * hot);
-        const float warm[3] = {1.0f, 0.40f + 0.56f * hot, 0.07f + 0.73f * hot};
+        // Blue/red = 0.07 + 0.73*hot is decoded by shader3d's stock_muzzle_flash_radiance
+        // to drive the HDR core: keep the two in step. Petals are orange-yellow, not red.
+        const float warm[3] = {1.0f, 0.52f + 0.44f * hot, 0.07f + 0.73f * hot};
         for (int channel = 0; channel < 3; ++channel)
             rgba[i + channel] = std::uint8_t(std::lround(255.0f * brightness * warm[channel]));
         // Rounding cannot add coverage: the multiplier is in [0,1]. Authored
