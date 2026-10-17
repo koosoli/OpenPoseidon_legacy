@@ -85,37 +85,39 @@ const std::unordered_map<std::string, Declared>& DeclaredTable()
 {
     static std::unordered_map<std::string, Declared> table;
     static std::once_flag once;
-    std::call_once(once, [] {
-        const ParamEntry* root = Pars.FindEntry("CfgOpMaterials");
-        if (!root || !root->IsClass())
-            return;
-        for (int i = 0; i < root->GetEntryCount(); ++i)
-        {
-            const ParamEntry& entry = root->GetEntry(i);
-            if (!entry.IsClass())
-                continue;
-            const ParamEntry* surface = entry.FindEntry("surface");
-            const ParamEntry* textures = entry.FindEntry("textures");
-            if (!surface || !textures || !textures->IsArray())
-                continue;
-            Declared declared;
-            declared.cls = RM::ClassFromName(static_cast<RStringB>(*surface).Data());
-            if (declared.cls == RM::SurfaceClass::None)
-            {
-                LOG_WARN(Graphics, "CfgOpMaterials {}: unknown surface '{}'", entry.GetName().Data(),
-                         static_cast<RStringB>(*surface).Data());
-                continue;
-            }
-            declared.roughness = OptionalFloat(entry, "roughness");
-            declared.f0 = OptionalFloat(entry, "f0");
-            declared.metal = OptionalFloat(entry, "metal");
-            declared.clearCoat = OptionalFloat(entry, "clearCoat");
-            declared.coatRoughness = OptionalFloat(entry, "clearCoatRoughness");
-            for (int t = 0; t < textures->GetSize(); ++t)
-                table[TextureKey((*textures)[t].GetValue().Data())] = declared;
-        }
-        LOG_INFO(Graphics, "REFLECT: {} texture(s) declared in CfgOpMaterials", table.size());
-    });
+    std::call_once(once,
+                   []
+                   {
+                       const ParamEntry* root = Pars.FindEntry("CfgOpMaterials");
+                       if (!root || !root->IsClass())
+                           return;
+                       for (int i = 0; i < root->GetEntryCount(); ++i)
+                       {
+                           const ParamEntry& entry = root->GetEntry(i);
+                           if (!entry.IsClass())
+                               continue;
+                           const ParamEntry* surface = entry.FindEntry("surface");
+                           const ParamEntry* textures = entry.FindEntry("textures");
+                           if (!surface || !textures || !textures->IsArray())
+                               continue;
+                           Declared declared;
+                           declared.cls = RM::ClassFromName(static_cast<RStringB>(*surface).Data());
+                           if (declared.cls == RM::SurfaceClass::None)
+                           {
+                               LOG_WARN(Graphics, "CfgOpMaterials {}: unknown surface '{}'", entry.GetName().Data(),
+                                        static_cast<RStringB>(*surface).Data());
+                               continue;
+                           }
+                           declared.roughness = OptionalFloat(entry, "roughness");
+                           declared.f0 = OptionalFloat(entry, "f0");
+                           declared.metal = OptionalFloat(entry, "metal");
+                           declared.clearCoat = OptionalFloat(entry, "clearCoat");
+                           declared.coatRoughness = OptionalFloat(entry, "clearCoatRoughness");
+                           for (int t = 0; t < textures->GetSize(); ++t)
+                               table[TextureKey((*textures)[t].GetValue().Data())] = declared;
+                       }
+                       LOG_INFO(Graphics, "REFLECT: {} texture(s) declared in CfgOpMaterials", table.size());
+                   });
     return table;
 }
 
