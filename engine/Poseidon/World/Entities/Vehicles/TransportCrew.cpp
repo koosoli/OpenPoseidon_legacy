@@ -21,6 +21,7 @@
 #include <float.h>
 #include <cmath>
 #include <utility>
+#include <map>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
@@ -488,12 +489,13 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
         }
 
         // --arma1 diag: why an Arma 1 vehicle offers no "Get in" (the AH-1W does not)
-        if (now && _strnicmp(GetType()->GetName(), "A1x_", 4) == 0)
+        if (now && _strnicmp(GetType()->GetName(), "A1x_", 4) == 0 && personPos.Distance2(Position()) < Square(12))
         {
-            static float nextLog = 0;
-            if (Glob.time.toFloat() >= nextLog)
+            static std::map<const void*, float> nextLog;
+            float& next = nextLog[this];
+            if (Glob.time.toFloat() >= next)
             {
-                nextLog = Glob.time.toFloat() + 2;
+                next = Glob.time.toFloat() + 2;
                 const Vector3 drv = GetDriverGetInPos(person, personPos);
                 const Vector3 gnr = GetGunnerGetInPos(person, personPos);
                 LOG_INFO(Graphics,
