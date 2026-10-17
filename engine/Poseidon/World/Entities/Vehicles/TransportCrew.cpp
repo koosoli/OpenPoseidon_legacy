@@ -21,11 +21,9 @@
 #include <float.h>
 #include <cmath>
 #include <utility>
-#include <map>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
-#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Math/Math3DP.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
@@ -488,25 +486,6 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
             personPos[1] = SwimWaterSurfaceY(personPos.X(), personPos.Z());
         }
 
-        // --arma1 diag: why an Arma 1 vehicle offers no "Get in" (the AH-1W does not)
-        if (now && _strnicmp(GetType()->GetName(), "A1x_", 4) == 0 && personPos.Distance2(Position()) < Square(12))
-        {
-            static std::map<const void*, float> nextLog;
-            float& next = nextLog[this];
-            if (Glob.time.toFloat() >= next)
-            {
-                next = Glob.time.toFloat() + 2;
-                const Vector3 drv = GetDriverGetInPos(person, personPos);
-                const Vector3 gnr = GetGunnerGetInPos(person, personPos);
-                LOG_INFO(Graphics,
-                         "Get-in check {}: speed {:.2f} relZ {:.2f} radius {:.1f} driver {} d {:.2f} gunner {} d {:.2f} "
-                         "working {} upside {} person ({:.1f} {:.1f} {:.1f}) drvPos ({:.1f} {:.1f} {:.1f})",
-                         GetType()->GetName().Data(), Speed().Size(), person->PositionWorldToModel(Position()).Z(),
-                         GetGetInRadius(), QCanIGetIn(person), drv.Distance(personPos), QCanIGetInGunner(person),
-                         gnr.Distance(personPos), IsWorking(), _isUpsideDown, personPos.X(), personPos.Y(),
-                         personPos.Z(), drv.X(), drv.Y(), drv.Z());
-            }
-        }
         float maxDist2 = 0;
         float invMaxDist2 = 0;
         if (now)
