@@ -17,6 +17,10 @@ namespace Poseidon::ArmaOriginalUi
 // --arma-original-ui was given and an Arma 1 or Arma 2 install is mounted.
 bool Enabled();
 
+// Whether screen `name` is drawn from the Arma UI: the feature is on, the screen is one of the
+// switched ones, and its essential button is a control type this engine can create.
+bool Switched(const char* name);
+
 // The Arma version of resource class `name` (RscInGameUI, RscDisplayMain, ...) when it is
 // one of the switched screens and the feature is on; otherwise Res >> name.
 const ParamEntry& Resource(const char* name);

@@ -205,13 +205,13 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
     // menu and lose its branding.
     // --arma-original-ui: the mounted Arma game's own menu (ArmaOriginalUi), not the remaster's.
     const char* mainRsc =
-        (!ArmaOriginalUi::Enabled() && !IsMenuOverriddenByMod() && Res.FindEntry("RscDisplayMainRemaster"))
+        (!ArmaOriginalUi::Switched("RscDisplayMain") && !IsMenuOverriddenByMod() && Res.FindEntry("RscDisplayMainRemaster"))
             ? "RscDisplayMainRemaster"
             : "RscDisplayMain";
     const ParamEntry& menuCls = ArmaOriginalUi::Resource(mainRsc);
     Load(mainRsc);
     // The original Arma menu is shown as that game drew it: no OpenPoseidon logo, no added entries.
-    const bool armaMenu = ArmaOriginalUi::Enabled();
+    const bool armaMenu = ArmaOriginalUi::Switched("RscDisplayMain");
     if (!armaMenu && QIFStreamB::FileExist("assets\\ui\\openposeidon_logo.paa"))
     {
         for (int i = 0; i < _controlsForeground.Size(); ++i)

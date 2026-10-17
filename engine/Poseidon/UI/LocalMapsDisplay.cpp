@@ -32,8 +32,8 @@ namespace Poseidon
 namespace
 {
 constexpr int ListId = 62001, FolderId = 62002, ScanId = 62003, OpenId = 62004, StatusId = 62005, BackId = 62006,
-              MapsId = 62008, VehiclesId = 62009, MissionsId = 62011, BrowseId = 62012, OriginalUiId = 62013;
-enum class BrowserMode { Maps, Vehicles, Missions };
+              MapsId = 62008, VehiclesId = 62009, MissionsId = 62011, BrowseId = 62012, OriginalUiId = 62013, GamesId = 62014;
+enum class BrowserMode { Games, Maps, Vehicles, Missions };
 class LocalBrowserButton : public CButton
 {
   public:
@@ -52,7 +52,29 @@ class LocalMapsDisplay : public Display
     std::future<LocalMapsCatalog> _scan;
     LocalMapsCatalog _catalog;
     std::vector<LocalVehicle> _vehicles;
-    BrowserMode _mode = BrowserMode::Maps;
+    // Run game is the first tab: a found Arma install starts in that game's own main menu.
+    BrowserMode _mode = BrowserMode::Games;
+    struct InstalledGame
+    {
+        std::string game; // "Arma 1", "Arma 2 OA", ...
+        std::string root; // what --arma1/2/3 mounts (an ALDP game's parts joined with ';')
+        int missions = 0;
+    };
+    std::vector<InstalledGame> _games;
+    // One row per install the scan found missions in, in the catalog's order.
+    void CollectGames()
+    {
+        _games.clear();
+        for (const LocalMission& mission : _catalog.missions)
+        {
+            auto it = std::find_if(_games.begin(), _games.end(), [&](const InstalledGame& g)
+                                   { return g.game == mission.game && g.root == mission.installRoot; });
+            if (it == _games.end())
+                _games.push_back({mission.game, mission.installRoot, 1});
+            else
+                it->missions++;
+        }
+    }
     // Missions tab as a collapsible tree in the list box: game -> campaign/collection -> mission.
     // One row per visible list line; a header row toggles, a mission row opens.
     struct MissionRow
@@ -259,6 +281,7 @@ class LocalMapsDisplay : public Display
         const int index = list ? list->GetCurSel() : -1;
         const size_t count = _mode == BrowserMode::Vehicles   ? _vehicles.size()
                              : _mode == BrowserMode::Missions ? _missionRows.size()
+                             : _mode == BrowserMode::Games    ? _games.size()
                                                               : _catalog.maps.size();
         if (index < 0 || index >= static_cast<int>(count))
             return;
@@ -268,6 +291,7 @@ class LocalMapsDisplay : public Display
         const LocalVehicle* vehicle = _mode == BrowserMode::Vehicles ? &_vehicles[index] : nullptr;
         const LocalMission* localMission =
             _mode == BrowserMode::Missions ? &_catalog.missions[_missionRows[index].mission] : nullptr;
+        const InstalledGame* installed = _mode == BrowserMode::Games ? &_games[index] : nullptr;
         if ((map && !map->supported) || (vehicle && !vehicle->ready))
         {
             Status("This selected content is not supported or its local bridge is incomplete.");
@@ -295,7 +319,7 @@ class LocalMapsDisplay : public Display
         std::filesystem::create_directories(mission, ec);
         // A found mission is played from its own archive (--arma1-mission); only maps and vehicles
         // get a generated preview mission.
-        if (!localMission)
+        if (!localMission && !installed)
         {
             std::ofstream sqm(mission / "mission.sqm");
             if (vehicle)
@@ -335,21 +359,23 @@ class LocalMapsDisplay : public Display
                                          "--render=" + Foundation::AppConfig::Instance().GetRenderBackend(),
                                          "--wait-for-parent",
                                          std::to_string(GetCurrentProcessId())};
-        if (localMission && localMission->game == "Arma 3")
-            // Experimental: the Arma 3 bridge mounts the install and its DLC folders read-only
-            // (Arma3Compat, --arma3). A separate process: a crash ends that mission only.
-            args.insert(args.end(), {"--arma3", localMission->installRoot, "--arma3-mission",
-                                     localMission->virtualPath});
-        else if (localMission && localMission->game.rfind("Arma 2", 0) == 0)
-            // Experimental: the Arma 2 bridge mounts the install read-only (Arma1Compat, --arma2)
-            args.insert(args.end(), {"--arma2", localMission->installRoot, "--arma2-mission",
-                                     localMission->virtualPath});
-        else if (localMission)
-            // The game's own archives are mounted read-only; nothing is extracted (Arma1Compat).
-            args.insert(args.end(), {"--arma1", localMission->installRoot, "--arma1-mission",
-                                     localMission->virtualPath});
-        if (localMission && _originalUi && localMission->game != "Arma 3")
-            args.push_back("--arma-original-ui");
+        // A game (Run game tab) or a mission of it: the install is mounted read-only (Arma1Compat /
+        // Arma3Compat); a mission is played from its own archive, a game boots to its main menu.
+        const std::string* game = installed ? &installed->game : localMission ? &localMission->game : nullptr;
+        const std::string* root = installed ? &installed->root : localMission ? &localMission->installRoot : nullptr;
+        if (game)
+        {
+            // Experimental bridges for Arma 2 (--arma2) and Arma 3 (--arma3); a separate process,
+            // so a crash ends that game only.
+            const char* generation = *game == "Arma 3" ? "3" : game->rfind("Arma 2", 0) == 0 ? "2" : "1";
+            args.insert(args.end(), {std::string("--arma") + generation, *root});
+            if (localMission)
+                args.insert(args.end(),
+                            {std::string("--arma") + generation + "-mission", localMission->virtualPath});
+            // A game started from Run game always uses its own menus; a mission when chosen.
+            if ((installed || _originalUi) && *game != "Arma 3")
+                args.push_back("--arma-original-ui");
+        }
         else
             args.insert(args.end(), {"--test-mission", mission.string()});
         if (GEngine)
@@ -458,10 +484,11 @@ class LocalMapsDisplay : public Display
     {
         _idd = LocalMapsMenuId;
         AddControl("RscText", "Panel", 62010, "", 0.04f, 0.13f, 0.92f, 0.72f);
-        AddControl("RscText", "Title", 62007, "ARMA CONTENT", 0.06f, 0.15f, 0.30f, 0.05f);
-        AddControl("RscButton", "MapsTab", MapsId, "Maps", 0.38f, 0.15f, 0.18f, 0.05f);
-        AddControl("RscButton", "VehiclesTab", VehiclesId, "Vehicles", 0.57f, 0.15f, 0.18f, 0.05f);
-        AddControl("RscButton", "MissionsTab", MissionsId, "Missions", 0.76f, 0.15f, 0.18f, 0.05f);
+        AddControl("RscText", "Title", 62007, "ARMA CONTENT", 0.06f, 0.15f, 0.26f, 0.05f);
+        AddControl("RscButton", "GamesTab", GamesId, "Run game", 0.30f, 0.15f, 0.16f, 0.05f);
+        AddControl("RscButton", "MapsTab", MapsId, "Maps", 0.47f, 0.15f, 0.15f, 0.05f);
+        AddControl("RscButton", "VehiclesTab", VehiclesId, "Vehicles", 0.63f, 0.15f, 0.15f, 0.05f);
+        AddControl("RscButton", "MissionsTab", MissionsId, "Missions", 0.79f, 0.15f, 0.15f, 0.05f);
         AddControl("RscEdit", "Folder", FolderId, "", 0.06f, 0.22f, 0.50f, 0.05f);
         AddControl("RscButton", "Browse", BrowseId, "Browse...", 0.57f, 0.22f, 0.15f, 0.05f);
         AddControl("RscButton", "Scan", ScanId, "Search / refresh", 0.73f, 0.22f, 0.21f, 0.05f);
@@ -495,7 +522,16 @@ class LocalMapsDisplay : public Display
         if (auto* list = dynamic_cast<CListBox*>(GetCtrl(ListId)))
         {
             list->RemoveAll();
-            if (_mode == BrowserMode::Vehicles)
+            if (_mode == BrowserMode::Games)
+            {
+                CollectGames();
+                for (const auto& g : _games)
+                    list->AddString((g.game + (g.game == "Arma 3" ? " -- OpenPoseidon menu (Arma 3's own is not supported yet)"
+                                                                  : " -- its own main menu, HUD and map") +
+                                     " | " + std::to_string(g.missions) + " missions")
+                                        .c_str());
+            }
+            else if (_mode == BrowserMode::Vehicles)
                 for (const auto& vehicle : _vehicles)
                     list->AddString((vehicle.label + (vehicle.ready ? " (local bridge)" : " (incomplete)")).c_str());
             else if (_mode == BrowserMode::Missions)
@@ -511,7 +547,13 @@ class LocalMapsDisplay : public Display
                 }
             list->SetCurSel(0);
         }
-        if (_mode == BrowserMode::Vehicles)
+        if (_mode == BrowserMode::Games)
+            Status(_games.empty()
+                       ? std::string("No Arma game found yet. Search / refresh, or Browse... to its folder (an "
+                                     "ALDP data package folder works).")
+                       : "Open runs the selected game in the OpenPoseidon engine, starting in its own main "
+                         "menu (its archives are mounted read-only; nothing is copied). Open restarts engine.");
+        else if (_mode == BrowserMode::Vehicles)
             Status("Local vehicle bridges use inherited OFP physics; original animations/features may differ. Open "
                    "restarts engine.");
         else if (_mode == BrowserMode::Missions)
@@ -548,10 +590,11 @@ class LocalMapsDisplay : public Display
                                  "ui.pbo over CWA's). Arma 3 keeps CWA's for now."
                                : "Arma missions will use CWA's HUD and menus.");
         }
-        else if (idc == MapsId || idc == VehiclesId || idc == MissionsId)
+        else if (idc == GamesId || idc == MapsId || idc == VehiclesId || idc == MissionsId)
         {
             _mode = idc == VehiclesId   ? BrowserMode::Vehicles
                     : idc == MissionsId ? BrowserMode::Missions
+                    : idc == GamesId    ? BrowserMode::Games
                                         : BrowserMode::Maps;
             Fill();
         }
@@ -575,7 +618,7 @@ class LocalMapsDisplay : public Display
                 picked.ready = false;
                 if (auto* edit = dynamic_cast<CEdit*>(GetCtrl(FolderId)))
                     edit->SetText(picked.path.c_str());
-                _mode = BrowserMode::Missions;
+                _mode = BrowserMode::Games; // a picked folder is usually a game install
                 Scan();
             }
         }

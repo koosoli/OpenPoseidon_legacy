@@ -10,6 +10,7 @@
 #include <cstring>
 #include <string>
 #include <iterator>
+#include <map>
 #include <vector>
 
 namespace Poseidon::ArmaOriginalUi
@@ -189,6 +190,52 @@ void MergeTop(ParamFile& file, const ParamClass& src, int& replaced, int& confli
     dst->Update(src);
 }
 
+// The control a screen cannot work without: Quit on the main menu, Abort in the pause menu, Continue
+// on the briefing. Arma 2 builds its menus from shortcut buttons (type 16), which this engine cannot
+// create; such a screen would have nothing to press, so it stays CWA's. -1: no such control.
+constexpr int kButton = 1, kActiveText = 11;
+int KeyControl(const char* screen)
+{
+    if (_stricmp(screen, "RscDisplayMain") == 0)
+        return 106; // IDC_MAIN_QUIT
+    if (_stricmp(screen, "RscDisplayInterrupt") == 0 || _stricmp(screen, "RscDisplayMPInterrupt") == 0)
+        return 104; // IDC_INT_ABORT
+    if (_strnicmp(screen, "RscDisplay", 10) == 0 && strstr(screen, "GetReady"))
+        return 1; // IDC_OK
+    return -1;
+}
+
+// The type of the control with `idc` in a screen (class or list form, foreground or background), or
+// -1 when the screen has none.
+int ControlType(const ParamEntry& screen, int idc)
+{
+    for (const char* listName : {"controls", "controlsBackground"})
+    {
+        const ParamEntry* list = screen.FindEntry(listName);
+        if (!list)
+            continue;
+        const auto check = [&](const ParamEntry* ctrl) -> int
+        {
+            if (!ctrl || !ctrl->IsClass())
+                return -1;
+            const ParamEntry* id = ctrl->FindEntry("idc");
+            const ParamEntry* type = ctrl->FindEntry("type");
+            return id && type && !id->IsClass() && !type->IsClass() && int(*id) == idc ? int(*type) : -1;
+        };
+        if (list->IsClass())
+            for (int i = 0; i < list->GetEntryCount(); i++)
+            {
+                if (const int type = check(&list->GetEntry(i)); type >= 0)
+                    return type;
+            }
+        else
+            for (int i = 0; i < list->GetSize(); i++)
+                if (const int type = check(screen.FindEntry((*list)[i].GetValue())); type >= 0)
+                    return type;
+    }
+    return -1;
+}
+
 bool Built()
 {
     static bool built = false;
@@ -280,9 +327,42 @@ bool Enabled()
     return enabled;
 }
 
+bool Switched(const char* name)
+{
+    if (!Enabled() || !Listed(name, std::begin(kScreens), std::end(kScreens)) || !Built())
+        return false;
+    const ParamEntry* screen = UiRes().FindEntryNoInheritance(name);
+    if (!screen || !screen->IsClass())
+        return false;
+    static std::map<std::string, bool> usable;
+    const auto [it, inserted] = usable.try_emplace(name, true);
+    // Arma 2 rebuilt its menus, map and briefing (diary panels, shortcut buttons) around script
+    // and controls this engine does not have; captured, its briefing came out as empty panels.
+    // Only its HUD is drawn from it.
+    if (inserted && Arma1Compat::Generation() >= 2 && _stricmp(name, "RscInGameUI") != 0)
+    {
+        it->second = false;
+        LOG_INFO(Mission, "Original UI: {} stays CWA's under {} (only the HUD is switched there)", name,
+                 Arma1Compat::Label());
+    }
+    else if (inserted)
+        if (const int idc = KeyControl(name); idc >= 0)
+        {
+            const int type = ControlType(*screen, idc);
+            if (type != kButton && type != kActiveText)
+            {
+                it->second = false;
+                LOG_WARN(Mission, "Original UI: {}'s {} uses control type {} for idc {}, which this engine cannot "
+                                  "create; that screen stays CWA's",
+                         Arma1Compat::Label(), name, type, idc);
+            }
+        }
+    return it->second;
+}
+
 const ParamEntry& Resource(const char* name)
 {
-    if (Enabled() && Listed(name, std::begin(kScreens), std::end(kScreens)) && Built())
+    if (Switched(name))
         if (const ParamEntry* e = UiRes().FindEntryNoInheritance(name))
             return *e;
     return Res >> name;
