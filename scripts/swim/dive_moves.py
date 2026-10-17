@@ -69,7 +69,7 @@ def legs(hip, abd=0.0, twist=0.0, knee=0.0, ankle=0.0):
 
 
 # ---- the moves' key poses -----------------------------------------------------------------------------------------
-GLIDE = P(pitch=90, fwd=0.3, height=1.15, neck=-8, head=-4, arm=arms(172, 6, 0, 6, -5), leg=legs(-4, 2, 0, 4, -45))
+GLIDE = P(pitch=90, fwd=0.3, height=1.15, neck=-8, head=-4, arm=arms(172, -6, 0, 6, -5), leg=legs(-4, 2, 0, 4, -45))
 
 
 def under_keys():
@@ -82,7 +82,7 @@ def under_keys():
         (0.50, P(pitch=90, fwd=0.40, height=1.15, neck=-6, head=-2, arm=arms(22, 12, 10, 10, -15), leg=legs(-4, 2, 0, 4, -45))),
         (0.64, P(pitch=84, fwd=0.32, height=1.12, neck=-16, head=-6, spine=6, arm=arms(50, 12, -10, 135, 10), leg=legs(46, 28, 25, 112, 20))),
         (0.76, P(pitch=93, fwd=0.27, height=1.17, neck=-10, head=-4, arm=arms(140, 10, 0, 40, 0), leg=legs(16, 30, 10, 40, -15))),
-        (0.88, P(pitch=91, fwd=0.29, height=1.16, neck=-8, head=-4, arm=arms(168, 7, 0, 10, -5), leg=legs(-2, 6, 0, 8, -40))),
+        (0.88, P(pitch=91, fwd=0.29, height=1.16, neck=-8, head=-4, arm=arms(168, -2, 0, 10, -5), leg=legs(-2, 6, 0, 8, -40))),
     ]
 
 
@@ -94,7 +94,7 @@ def idle_keys():
         u = i / 8
         w = math.cos(4 * math.pi * u)
         p = P(pitch=80 + 3 * math.sin(2 * math.pi * u), fwd=0.3, height=1.15 + 0.02 * math.sin(2 * math.pi * u + 1),
-              neck=-22, head=-10, spine=-4, arm=arms(125, 32 + 16 * w, -22 * w, 65 - 12 * w, 8 * w))
+              neck=-22, head=-10, spine=-4, arm=arms(125, 44 + 14 * w, -22 * w, 65 - 12 * w, 8 * w))
         for s, ph in (('p', 0.0), ('l', 0.5)):
             c = math.cos(2 * math.pi * (u + ph))
             p.update({s + 'hip': 8 + 8 * c, s + 'hipabd': 8, s + 'hiptwist': 6, s + 'knee': 28 + 18 * c, s + 'ankle': -38 + 8 * c})
@@ -112,8 +112,8 @@ def dive_keys():
         # the pull back to the hips; the legs come up
         (0.50, P(pitch=168, fwd=-0.10, height=1.18, neck=10, head=4, spine=8, arm=arms(25, 40, -25, 55, 15), leg=legs(45, 4, 0, 8, -45))),
         # straight, head-down, legs overhead; their weight takes him under
-        (0.66, P(pitch=178, fwd=-0.05, height=1.05, neck=4, head=0, arm=arms(165, 10, 0, 12, 0), leg=legs(0, 2, 0, 4, -45))),
-        (0.84, P(pitch=128, fwd=0.15, height=1.07, neck=-4, head=-2, arm=arms(170, 8, 0, 8, -5), leg=legs(-4, 2, 0, 4, -45))),
+        (0.66, P(pitch=178, fwd=-0.05, height=1.05, neck=4, head=0, arm=arms(165, 0, 0, 12, 0), leg=legs(0, 2, 0, 4, -45))),
+        (0.84, P(pitch=128, fwd=0.15, height=1.07, neck=-4, head=-2, arm=arms(170, -3, 0, 8, -5), leg=legs(-4, 2, 0, 4, -45))),
         (1.00, GLIDE),
     ]
 

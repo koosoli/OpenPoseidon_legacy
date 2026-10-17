@@ -48,6 +48,13 @@ def _joints():
     return d['parent'], J
 
 
+def rotation_mode(bone):
+    """Upper arms and thighs turn about their own length first (Y), then out to the side (Z), then forward (X), so
+    "out" stays out whatever the swing: with X first, an arm raised past the horizontal swung inward on a positive Z
+    and the arms crossed (owner, 2026-10-17). Every other bone: XYZ."""
+    return 'YZX' if bone.endswith(('biceps', 'stehno')) else 'XYZ'
+
+
 def _bl(p):
     return (Pr @ Vector((p[0], p[1], p[2], 1.0))).xyz
 
@@ -99,7 +106,7 @@ def build(mesh=None, dll=None, textures=None):
         e.align_roll(Vector((0, -1, 0)))
     bpy.ops.object.mode_set(mode='POSE')
     for pb in ob.pose.bones:
-        pb.rotation_mode = 'XYZ'
+        pb.rotation_mode = rotation_mode(pb.name)
     bpy.ops.object.mode_set(mode='OBJECT')
     if mesh:
         _build_mesh(ob, mesh, dll, textures)
@@ -219,7 +226,8 @@ def import_rtm(path, name=None, frame_step=1):
             else:
                 basis = bone.matrix_local.inverted() @ pose[b]
             loc, rot, _ = basis.decompose()
-            eul = rot.to_euler('XYZ', prev[b]) if b in prev else rot.to_euler('XYZ')
+            mode = pb.rotation_mode
+            eul = rot.to_euler(mode, prev[b]) if b in prev else rot.to_euler(mode)
             prev[b] = eul
             pb.location = loc
             pb.rotation_euler = eul
