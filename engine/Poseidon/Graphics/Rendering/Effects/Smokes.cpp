@@ -955,8 +955,15 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
     }
     else
     {
-        Friction(_speed[0], _xFriction, 0, deltaT);
-        Friction(_speed[2], _zFriction, 0, deltaT);
+        // Brake towards the side speed the source asked for (SetSideSpeed). Every legacy
+        // source asks for 0, 0, so for them this is the original braking to a standstill;
+        // rifle smoke asks for the wind at the muzzle and drifts off with it.
+        float relX = _speed[0] - _xSpeed0;
+        float relZ = _speed[2] - _zSpeed0;
+        Friction(relX, _xFriction, 0, deltaT);
+        Friction(relZ, _zFriction, 0, deltaT);
+        _speed[0] = _xSpeed0 + relX;
+        _speed[2] = _zSpeed0 + relZ;
     }
     Limit(_speed[1], _minYSpeed, _maxYSpeed);
     // SMK-030: keep the step inside the room it started in. Outdoors this costs one
@@ -1586,6 +1593,28 @@ void WeaponCloudsSource::Start(float time)
     _timeToLive = time;
 }
 
+bool WeaponCloudsSource::RifleSmokeEnabled()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("POSEIDON_RIFLE_SMOKE");
+        return !(value && value[0] == '0');
+    }();
+    return enabled;
+}
+
+void WeaponCloudsSource::SetRifleSmoke()
+{
+    SetTimes(1.4f, 1.0f);           // retail: 0.05 s
+    SetFades(0.6f, 0.02f, 0.8f);    // swell over 0.6 s, thin out towards the end
+    SetAlpha(0.28f);                // several overlapping thin puffs per shot
+    SetSize(0.30f, 0.03f);
+    SetColor(Color(0.80f, 0.80f, 0.78f));
+    SetClimbRate(0.25f, 0.0f, 0.5f);
+    _sideFriction = 10.0f;          // the (halved) muzzle blast stops within ~1 m, even at 5 Hz
+    _windDrift = true;
+    _windCoef = 0.6f;
+}
+
 void WeaponCloudsSource::Simulate(Vector3Par pos, Vector3Par speed, float density, float deltaT)
 {
     if (_timeToLive < 0)
@@ -1636,7 +1665,15 @@ void WeaponCloudsSource::Simulate(Vector3Par pos, Vector3Par speed, float densit
         cloudlet->SetSpeed(speed + speed2 * dir);
 
         cloudlet->SetClimbRate(_cloudletAccY * density * 1.5, _cloudletMinYSpeed, _cloudletMaxYSpeed);
-        cloudlet->SetSideSpeed(0, 0, 1.5, 1.5);
+        if (_windDrift)
+        {
+            Vector3Val wind = LegacySmokeWind(pos, _windCoef); // SMK-033
+            cloudlet->SetSideSpeed(wind.X(), wind.Z(), _sideFriction, _sideFriction);
+        }
+        else
+        {
+            cloudlet->SetSideSpeed(0, 0, 1.5, 1.5);
+        }
         GLOB_WORLD->AddCloudlet(cloudlet);
     }
 }

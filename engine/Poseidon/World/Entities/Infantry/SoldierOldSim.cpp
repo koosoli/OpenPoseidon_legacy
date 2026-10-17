@@ -1356,7 +1356,9 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
         Vector3 gunPos = PositionModelToWorld(GetWeaponPoint(_currentWeapon));
         Vector3 dir = GetWeaponDirection(_currentWeapon);
         _mGunFire.Simulate(gunPos, deltaT);
-        _mGunClouds.Simulate(gunPos, Speed() * 0.7f + dir * 5.0f, 0.35f, deltaT);
+        // Rifle smoke (WeaponCloudsSource::SetRifleSmoke) leaves at half the legacy blast speed.
+        const float blast = WeaponCloudsSource::RifleSmokeEnabled() ? 2.5f : 5.0f;
+        _mGunClouds.Simulate(gunPos, Speed() * 0.7f + dir * blast, 0.35f, deltaT);
         _gunClouds.Simulate(gunPos, Speed() * 0.7f + dir * 2.0f, 0.35f, deltaT);
     }
 

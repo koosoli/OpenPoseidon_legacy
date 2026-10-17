@@ -493,11 +493,21 @@ class WeaponCloudsSource: public DustSource
 
 	protected:
 	float _timeToLive;
+	//! Deceleration (m/s^2) of a puff's sideways blast speed towards its drift target, and
+	//! whether that target is the wind (rifle smoke) or still air (the legacy 0, 0).
+	float _sideFriction = 1.5f;
+	bool _windDrift = false;
 
 	private:
 	void Init();
 
 	public:
+	//! Rifle smoke: the retail config gives infantry a 50 ms puff, which never reads as
+	//! smoke. This makes it a thin grey puff that brakes from the muzzle blast within
+	//! ~1.5 m, swells, rises slowly and drifts with the wind for ~1.4 s. The emission
+	//! interval is left as configured, so the shared RNG is drawn exactly as before.
+	void SetRifleSmoke();
+	static bool RifleSmokeEnabled();
 	WeaponCloudsSource( float interval=0.05 ); // basic shape
 	WeaponCloudsSource( LODShapeWithShadow *shape, float interval );
 	void Simulate
