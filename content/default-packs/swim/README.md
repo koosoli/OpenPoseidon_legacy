@@ -24,6 +24,13 @@ The animations and move states that make soldiers swim. The engine side is
 | `rtm/*.rtm` | 23 animations for the CWA `MC` skeleton (`tread`, `swim`, `swimb/l/r/lb/rb/lf/rf`, `swimturnl/r`, `swimstart`, `swimstop`, `swimout`, `swimdead`, `swimdeadf`, `fall`, `fallland`, `swimin`; diving: `swimdive`, `swimunder`, `swimunderidle`, `swimsurface`) |
 | `mod.json` | Default content pack manifest (`defaultContentApi` 1) |
 
+## The surface stroke
+
+`swim`, `swimlf`, `swimrf`, `swimstart` and `swimstop` are a heads-up breaststroke (2026-10-17): glide, outsweep,
+insweep with the breath, hands together under the chin and forward, heels drawn up, whip kick into the glide. They
+are made in Blender by `scripts/swim/surface_moves.py` (on `dive_moves.py`'s tools); steps, phase counts and the
+`config.cpp` timings are the old moves', so speeds are unchanged.
+
 ## Diving (W4)
 
 Swimming, the player dives with **move down (Z)**, a tap is enough, where the water is at least 2.2 m deep. Under
