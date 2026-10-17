@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <vector>
 #include <algorithm>
 #include <Poseidon/Network/NetworkImpl.hpp>
@@ -1735,7 +1736,10 @@ GameValue ObjSwitchCamera(const GameState* state, GameValuePar oper1, GameValueP
 bool ParseEffect(const GameState* state, GameStringType& effect, GameStringType& str, float& speed, GameValuePar oper1)
 {
     const GameArrayType& array = oper1;
-    if (array.Size() < 2 || array.Size() > 3)
+    // Arma 2/3 add trailing fields (speed, showInMap, structured text / drawOverHUD) that
+    // have no counterpart here; the first three are what CWA reads
+    const bool armaTail = Poseidon::Arma1Compat::Active() && Poseidon::Arma1Compat::Generation() >= 2;
+    if (array.Size() < 2 || (array.Size() > 3 && !armaTail))
     {
         state->SetError(EvalDim, array.Size(), 2);
         return false;
@@ -1754,7 +1758,7 @@ bool ParseEffect(const GameState* state, GameStringType& effect, GameStringType&
     effect = array[0];
     str = array[1];
     speed = 1;
-    if (array.Size() == 3)
+    if (array.Size() >= 3)
     {
         if (array[2].GetType() != GameScalar)
         {
