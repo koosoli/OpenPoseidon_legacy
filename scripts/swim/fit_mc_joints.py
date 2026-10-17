@@ -1,7 +1,8 @@
-# Fit the CWA MC soldier's joint pivots (rest model space) from the stock animations, for the Blender rig
-# (blender_swim_rig.py). A joint between parent a and child b is the point both bones carry to the same place
-# in every frame: D_a p = D_b p, solved by least squares over all of DTA\Anim.pbo.
-# Usage: python fit_mc_joints.py <extracted DTA\Anim.pbo dir> [out json, default mc_joints.json beside this]
+# Fit the CWA MC soldier's joint pivots (rest model space) from the stock animations, for the Blender add-on's soldier
+# rig (apps/tools/BlenderAddon/io_import_p3d/rig.py, which reads mc_joints.json beside it). A joint between parent a
+# and child b is the point both bones carry to the same place in every frame: D_a p = D_b p, solved by least squares
+# over all of DTA\Anim.pbo.
+# Usage: python fit_mc_joints.py <extracted DTA\Anim.pbo dir> [out json, default the add-on's mc_joints.json]
 import json
 import os
 import sys
@@ -21,7 +22,8 @@ for s in 'pl':
 
 def main():
     src = sys.argv[1]
-    out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mc_joints.json')
+    out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'apps',
+                                                             'tools', 'BlenderAddon', 'io_import_p3d', 'mc_joints.json')
     rows = {c: ([], []) for c in PARENT}
     used = 0
     for name in sorted(os.listdir(src)):

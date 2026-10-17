@@ -69,7 +69,7 @@ def legs(hip, abd=0.0, twist=0.0, knee=0.0, ankle=0.0):
 
 
 # ---- the moves' key poses -----------------------------------------------------------------------------------------
-GLIDE = P(pitch=90, fwd=0.3, height=1.15, neck=-8, head=-4, arm=arms(172, -6, 0, 6, -5), leg=legs(-4, 2, 0, 4, -45))
+GLIDE = P(pitch=90, fwd=0.3, height=1.15, neck=-8, head=-4, arm=arms(172, -2, 0, 6, -5), leg=legs(-4, 2, 0, 4, -45))
 
 
 def under_keys():
@@ -82,7 +82,7 @@ def under_keys():
         (0.50, P(pitch=90, fwd=0.40, height=1.15, neck=-6, head=-2, arm=arms(22, 12, 10, 10, -15), leg=legs(-4, 2, 0, 4, -45))),
         (0.64, P(pitch=84, fwd=0.32, height=1.12, neck=-16, head=-6, spine=6, arm=arms(50, 12, -10, 135, 10), leg=legs(46, 28, 25, 112, 20))),
         (0.76, P(pitch=93, fwd=0.27, height=1.17, neck=-10, head=-4, arm=arms(140, 10, 0, 40, 0), leg=legs(16, 30, 10, 40, -15))),
-        (0.88, P(pitch=91, fwd=0.29, height=1.16, neck=-8, head=-4, arm=arms(168, -2, 0, 10, -5), leg=legs(-2, 6, 0, 8, -40))),
+        (0.88, P(pitch=91, fwd=0.29, height=1.16, neck=-8, head=-4, arm=arms(168, 1, 0, 10, -5), leg=legs(-2, 6, 0, 8, -40))),
     ]
 
 
@@ -112,8 +112,8 @@ def dive_keys():
         # the pull back to the hips; the legs come up
         (0.50, P(pitch=168, fwd=-0.10, height=1.18, neck=10, head=4, spine=8, arm=arms(25, 40, -25, 55, 15), leg=legs(45, 4, 0, 8, -45))),
         # straight, head-down, legs overhead; their weight takes him under
-        (0.66, P(pitch=178, fwd=-0.05, height=1.05, neck=4, head=0, arm=arms(165, 0, 0, 12, 0), leg=legs(0, 2, 0, 4, -45))),
-        (0.84, P(pitch=128, fwd=0.15, height=1.07, neck=-4, head=-2, arm=arms(170, -3, 0, 8, -5), leg=legs(-4, 2, 0, 4, -45))),
+        (0.66, P(pitch=178, fwd=-0.05, height=1.05, neck=4, head=0, arm=arms(165, 3, 0, 12, 0), leg=legs(0, 2, 0, 4, -45))),
+        (0.84, P(pitch=128, fwd=0.15, height=1.07, neck=-4, head=-2, arm=arms(170, 0, 0, 8, -5), leg=legs(-4, 2, 0, 4, -45))),
         (1.00, GLIDE),
     ]
 
@@ -181,6 +181,7 @@ def bones(c):
         m = 1 if s == 'l' else -1
         flex, abd = c[s + 'flex'], c[s + 'abd']
         lift = max(0.0, flex - 90) * 0.3 + max(0.0, abd - 40) * 0.25  # the collarbone rises with an overhead reach
+        # the shoulder girdle turns up and out under an overhead reach; without it raised arms swing in and cross
         b[s + 'rameno'] = ((0, 0, 0), R(min(flex, 120) * 0.12, 0, -m * lift))
         b[s + 'biceps'] = ((0, 0, 0), R(flex - min(flex, 120) * 0.12, m * c[s + 'twist'], m * abd))
         b[s + 'loket'] = ((0, 0, 0), R(max(c[s + 'elbow'], 2.0)))  # the curves must not bend an elbow backwards
