@@ -857,3 +857,184 @@ PF_API int pf_material_other_class_count(PF_HANDLE mat)
     auto* m = AsMaterial(mat);
     return m ? static_cast<int>(m->source.otherClasses.size()) : 0;
 }
+
+// ── MLOD writing ───────────────────────────────────────────────────────────
+
+#include <Poseidon/Asset/Formats/P3D/MLODWriter.hpp>
+#include <Poseidon/Graphics/Textures/Image.hpp>
+#include <Poseidon/Graphics/Textures/PAAEncoder.hpp>
+
+namespace
+{
+namespace MLODW = Poseidon::Asset::Formats::MLOD;
+struct PFMlod
+{
+    MLODW::WriteModel model;
+};
+using WriteVector3 = decltype(MLODW::WritePoint::position);
+
+MLODW::WriteLod* MlodLod(PF_HANDLE h, int lod)
+{
+    auto* m = static_cast<PFMlod*>(h);
+    if (!m || lod < 0 || lod >= static_cast<int>(m->model.lods.size()))
+    {
+        SetError("pf_mlod: no such LOD");
+        return nullptr;
+    }
+    return &m->model.lods[lod];
+}
+} // namespace
+
+PF_API PF_HANDLE pf_mlod_new(void)
+{
+    ClearError();
+    return new PFMlod;
+}
+
+PF_API void pf_mlod_free(PF_HANDLE mlod) { delete static_cast<PFMlod*>(mlod); }
+
+PF_API int pf_mlod_add_lod(PF_HANDLE mlod, float resolution, int point_count, const float* xyz,
+                           const int32_t* point_flags, int normal_count, const float* normals_xyz)
+{
+    auto* m = static_cast<PFMlod*>(mlod);
+    if (!m || point_count < 0 || (point_count > 0 && !xyz) || normal_count < 0 || (normal_count > 0 && !normals_xyz))
+    {
+        SetError("pf_mlod_add_lod: bad arguments");
+        return -1;
+    }
+    MLODW::WriteLod lod;
+    lod.resolution = resolution;
+    lod.points.resize(point_count);
+    for (int i = 0; i < point_count; i++)
+    {
+        lod.points[i].position = WriteVector3{xyz[i * 3], xyz[i * 3 + 1], xyz[i * 3 + 2]};
+        lod.points[i].flags = point_flags ? point_flags[i] : 0;
+    }
+    lod.normals.reserve(normal_count);
+    for (int i = 0; i < normal_count; i++)
+        lod.normals.push_back(WriteVector3{normals_xyz[i * 3], normals_xyz[i * 3 + 1], normals_xyz[i * 3 + 2]});
+    m->model.lods.push_back(std::move(lod));
+    return static_cast<int>(m->model.lods.size()) - 1;
+}
+
+PF_API int pf_mlod_set_faces(PF_HANDLE mlod, int lod, int face_count, const int32_t* vertex_counts,
+                             const int32_t* points, const int32_t* normals, const float* uvs, const uint32_t* flags,
+                             const int32_t* texture_index, const char* const* textures, int texture_count,
+                             const int32_t* material_index, const char* const* materials, int material_count)
+{
+    MLODW::WriteLod* l = MlodLod(mlod, lod);
+    if (!l)
+        return 0;
+    if (face_count < 0 || (face_count > 0 && (!vertex_counts || !points || !uvs)))
+    {
+        SetError("pf_mlod_set_faces: bad arguments");
+        return 0;
+    }
+    l->faces.clear();
+    l->faces.resize(face_count);
+    for (int f = 0; f < face_count; f++)
+    {
+        MLODW::WriteFace& face = l->faces[f];
+        face.vertexCount = vertex_counts[f];
+        for (int k = 0; k < 4; k++)
+        {
+            face.vertices[k].point = points[f * 4 + k];
+            face.vertices[k].normal = normals ? normals[f * 4 + k] : -1;
+            face.vertices[k].u = uvs[f * 8 + k * 2];
+            face.vertices[k].v = uvs[f * 8 + k * 2 + 1];
+        }
+        face.flags = flags ? flags[f] : 0;
+        const int t = texture_index ? texture_index[f] : -1;
+        if (t >= 0 && t < texture_count && textures && textures[t])
+            face.texture = textures[t];
+        const int mi = material_index ? material_index[f] : -1;
+        if (mi >= 0 && mi < material_count && materials && materials[mi])
+            face.material = materials[mi];
+    }
+    return 1;
+}
+
+PF_API int pf_mlod_add_selection(PF_HANDLE mlod, int lod, const char* name, int point_count, const int32_t* points,
+                                 const uint8_t* weights, int face_count, const int32_t* faces)
+{
+    MLODW::WriteLod* l = MlodLod(mlod, lod);
+    if (!l)
+        return 0;
+    if (!name || point_count < 0 || face_count < 0 || (point_count > 0 && !points) || (face_count > 0 && !faces))
+    {
+        SetError("pf_mlod_add_selection: bad arguments");
+        return 0;
+    }
+    MLODW::WriteNamedSelection sel;
+    sel.name = name;
+    sel.points.assign(points, points + point_count);
+    if (weights)
+        sel.pointWeights.assign(weights, weights + point_count);
+    sel.faces.assign(faces, faces + face_count);
+    l->selections.push_back(std::move(sel));
+    return 1;
+}
+
+PF_API int pf_mlod_add_property(PF_HANDLE mlod, int lod, const char* name, const char* value)
+{
+    MLODW::WriteLod* l = MlodLod(mlod, lod);
+    if (!l)
+        return 0;
+    if (!name || !value)
+    {
+        SetError("pf_mlod_add_property: bad arguments");
+        return 0;
+    }
+    l->properties.push_back(MLODW::WriteProperty{name, value});
+    return 1;
+}
+
+PF_API int pf_mlod_set_mass(PF_HANDLE mlod, int lod, const float* mass)
+{
+    MLODW::WriteLod* l = MlodLod(mlod, lod);
+    if (!l)
+        return 0;
+    l->mass.assign(mass, mass + l->points.size());
+    return 1;
+}
+
+PF_API int pf_mlod_write(PF_HANDLE mlod, const char* path)
+{
+    auto* m = static_cast<PFMlod*>(mlod);
+    if (!m || !path)
+    {
+        SetError("pf_mlod_write: bad arguments");
+        return 0;
+    }
+    try
+    {
+        Poseidon::Asset::Formats::MLODWriter::write(m->model, path);
+    }
+    catch (const std::exception& e)
+    {
+        SetError(std::string("pf_mlod_write: ") + e.what());
+        return 0;
+    }
+    ClearError();
+    return 1;
+}
+
+// ── PAA writing ────────────────────────────────────────────────────────────
+
+PF_API int pf_paa_write_rgba(const uint8_t* rgba, int width, int height, const char* path)
+{
+    if (!rgba || width <= 0 || height <= 0 || !path)
+    {
+        SetError("pf_paa_write_rgba: bad arguments");
+        return 0;
+    }
+    std::vector<uint8_t> data(rgba, rgba + static_cast<size_t>(width) * height * 4);
+    const Poseidon::Image img = Poseidon::Image::FromRGBA(width, height, std::move(data));
+    if (!Poseidon::PAAEncoder::WritePAA(path, img))
+    {
+        SetError("pf_paa_write_rgba: the encoder refused the image (PAA needs power-of-two sides)");
+        return 0;
+    }
+    ClearError();
+    return 1;
+}

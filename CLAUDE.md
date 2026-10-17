@@ -134,6 +134,7 @@ Formatting and static analysis are wired as CMake custom targets (build them lik
 - `Format` / `FormatFix` — clang-format check / apply (config in `.clang-format`: 4-space indent, Allman braces, 120 cols).
 - `Tidy` / `TidyFix` — clang-tidy (config in `.clang-tidy`).
 - `PythonLint` / `PythonLintFix` — ruff (via `uv`) for the Blender addon, only if `uv` is present.
+  Editing models, textures or animations in Blender (the add-on, the Blender MCP, the conventions): `.claude/skills/ofp-blender/SKILL.md`.
 - `Lint` / `LintFix` — combined C++ (+ Python) convenience targets.
 - `FileSize` — warns at >3000 lines, errors at >5000.
 

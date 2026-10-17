@@ -24,4 +24,7 @@ float SwimWaterSurfaceY(float x, float z);
 // The player's camera is held above the flat mean sea everywhere else; on a swimmer that lifted the first
 // person view out of his eyes into his head in every trough, and let a 3rd person view sink under the crests.
 bool SwimmerCameraWater(const Object* obj, float x, float z, float& waterY);
+// Sinkhole W4: obj is a man diving (under the water); a camera on him may go under too. SwimmerCameraWater is false
+// for him.
+bool SwimmerDiving(const Object* obj);
 } // namespace Poseidon

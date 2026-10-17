@@ -502,3 +502,4 @@ class POSEIDON_PT_animations(bpy.types.Panel):
                     r.label(text=bname, icon="CHECKMARK" if matched else "CANCEL")
 
             layout.operator(POSEIDON_OT_load_animation.bl_idname, text="Load Animation", icon="ARMATURE_DATA")
+            layout.operator("poseidon.rtm_to_rig", text="Load onto Soldier Rig (editable)", icon="POSE_HLT")

@@ -133,6 +133,36 @@ PF_API const char* pf_rtm_bone_name(PF_HANDLE rtm, int bone);
 PF_API float       pf_rtm_phase_time(PF_HANDLE rtm, int phase);
 PF_API void        pf_rtm_bone_matrix(PF_HANDLE rtm, int phase, int bone, float* mat4x4); // [16] 4x4
 
+// ── MLOD writing (the engine's MLODWriter, P3DM 28.256) ───────────────────────
+// Build a model LOD by LOD, then write it. Positions and normals are model space (x, y up, z). Faces are given in
+// FILE order: the loader reverses each face's winding on the way in (0<->1, and 2<->3 on quads), so a face read back
+// through pf_lod_get_faces must be turned back the same way before it is written. Every call returns 0 (or -1) on
+// failure with pf_last_error set; pf_mlod_write refuses anything the reader would reject or misread.
+
+PF_API PF_HANDLE   pf_mlod_new(void);
+PF_API void        pf_mlod_free(PF_HANDLE mlod);
+// returns the new LOD's index, or -1. point_flags and normals_xyz may be NULL.
+PF_API int         pf_mlod_add_lod(PF_HANDLE mlod, float resolution, int point_count, const float* xyz,
+                                   const int32_t* point_flags, int normal_count, const float* normals_xyz);
+// per face: vertex_counts[f] (3 or 4); points / normals [4 per face] (normals may be NULL: none); uvs [8 per face];
+// flags (may be NULL); texture_index / material_index into the string tables (-1 or NULL: none)
+PF_API int         pf_mlod_set_faces(PF_HANDLE mlod, int lod, int face_count, const int32_t* vertex_counts,
+                                     const int32_t* points, const int32_t* normals, const float* uvs,
+                                     const uint32_t* flags, const int32_t* texture_index,
+                                     const char* const* textures, int texture_count,
+                                     const int32_t* material_index, const char* const* materials,
+                                     int material_count);
+// weights: one O2 byte per point (1 = fully selected), may be NULL (all 1)
+PF_API int         pf_mlod_add_selection(PF_HANDLE mlod, int lod, const char* name, int point_count,
+                                         const int32_t* points, const uint8_t* weights, int face_count,
+                                         const int32_t* faces);
+PF_API int         pf_mlod_add_property(PF_HANDLE mlod, int lod, const char* name, const char* value);
+PF_API int         pf_mlod_set_mass(PF_HANDLE mlod, int lod, const float* mass); // one per point
+PF_API int         pf_mlod_write(PF_HANDLE mlod, const char* path);
+
+// ── PAA writing (the engine's PAAEncoder; it picks the format from the alpha) ──
+PF_API int         pf_paa_write_rgba(const uint8_t* rgba, int width, int height, const char* path);
+
 #ifdef __cplusplus
 }
 #endif

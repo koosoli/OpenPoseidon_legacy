@@ -28,8 +28,7 @@ test: ## Run pytest (pass DLL=path to override)
 
 test-blender: ## Run Blender integration tests (requires blender in PATH)
 	@command -v blender >/dev/null 2>&1 || { echo "blender not found — skipping"; exit 0; }
-	LD_PRELOAD=$(DLL) blender --background --python $(TEST_DIR)/test_rest_pose_invariant.py
-	LD_PRELOAD=$(DLL) blender --background --python $(TEST_DIR)/blender_animation_integration.py
+	LD_PRELOAD=$(DLL) POSEIDON_FORMATS_DLL=$(DLL) blender --background --factory-startup 		--python $(TEST_DIR)/blender_rig_check.py
 
 clean: ## Remove caches and build artifacts
 	rm -rf $(ADDON_DIR)/__pycache__ $(TEST_DIR)/__pycache__ .ruff_cache .pytest_cache

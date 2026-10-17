@@ -324,7 +324,10 @@ void Soldier::KeyboardPilot(float deltaT, SimulationImportance prec)
         wantSlow = _walkToggle || GWorld->GetCameraTypeWanted() == CamGunner;
     }
 
-    if (input.GetMoveUp() > 0.1f)
+    // Sinkhole W4: swimming, the stance keys dive, rise and sink instead (SoldierOldSwim.cpp)
+    const bool swimming = IsSwimming();
+    SetSwimVerticalWanted(swimming ? input.GetMoveUp() - input.GetMoveDown() : 0.0f);
+    if (!swimming && input.GetMoveUp() > 0.1f)
     {
         selAction = ManActUp;
         forceAction = true;
@@ -341,7 +344,7 @@ void Soldier::KeyboardPilot(float deltaT, SimulationImportance prec)
             }
         }
     }
-    else if (input.GetMoveDown() > 0.1f)
+    else if (!swimming && input.GetMoveDown() > 0.1f)
     {
         selAction = ManActDown;
         forceAction = true;

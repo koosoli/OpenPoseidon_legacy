@@ -1,17 +1,18 @@
 bl_info = {
-    "name": "Poseidon P3D Model Importer",
+    "name": "Poseidon P3D Tools",
     "author": "CWR Project",
-    "version": (1, 0, 0),
+    "version": (1, 1, 0),
     "blender": (3, 6, 0),
-    "location": "File > Import > Poseidon P3D (.p3d)",
-    "description": "Import Poseidon engine P3D models (MLOD & ODOL)",
+    "location": "File > Import / Export > Poseidon; sidebar > Poseidon",
+    "description": "Import Poseidon engine P3D models (MLOD & ODOL), export MLOD; RTM animation on a soldier rig",
     "category": "Import-Export",
 }
 
 import bpy
 from bpy.props import CollectionProperty, IntProperty, PointerProperty, StringProperty
 
-from . import p3d_lib
+from . import p3d_lib, rig_ops
+from .export_p3d import ExportP3D
 from .import_p3d import ImportP3D
 from .operators import (
     POSEIDON_OT_activate_material,
@@ -113,6 +114,8 @@ _classes = (
     POSEIDON_PT_textures,
     POSEIDON_PT_animations,
     ImportP3D,
+    ExportP3D,
+    *rig_ops.CLASSES,
 )
 
 
@@ -121,9 +124,13 @@ def register():
         bpy.utils.register_class(cls)
     bpy.types.Scene.poseidon = PointerProperty(type=PoseidonSceneProperties)
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
+    bpy.types.TOPBAR_MT_file_import.append(rig_ops.menu_import)
+    bpy.types.TOPBAR_MT_file_export.append(rig_ops.menu_export)
 
 
 def unregister():
+    bpy.types.TOPBAR_MT_file_export.remove(rig_ops.menu_export)
+    bpy.types.TOPBAR_MT_file_import.remove(rig_ops.menu_import)
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)
