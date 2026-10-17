@@ -81,7 +81,7 @@ class MixVoice
     // --- source setup (main thread, before Mixer::Add) ---------------------
     void SetResident(std::shared_ptr<const std::vector<uint8_t>> pcm, const VoiceFormat& fmt);
     // `stream` must outlive the voice's registration with the mixer.
-    void SetStreamed(Audio::StreamingBuffers* stream, const VoiceFormat& fmt);
+    void SetStreamed(Audio::Steam::StreamingBuffers* stream, const VoiceFormat& fmt);
     void SetExternal(int sampleRate);
     SourceKind Kind() const { return _kind; }
     const VoiceFormat& Format() const { return _fmt; }
@@ -140,8 +140,8 @@ class MixVoice
     int64_t _totalFrames = 0;
     int64_t _cursor = 0; // next resident frame to read (mixer thread)
 
-    Audio::StreamingBuffers* _stream = nullptr; // Streamed
-    Audio::DecodedChunk _chunk;
+    Audio::Steam::StreamingBuffers* _stream = nullptr; // Streamed
+    Audio::Steam::DecodedChunk _chunk;
     size_t _chunkPos = 0;
 
     mutable std::mutex _ringMutex; // External

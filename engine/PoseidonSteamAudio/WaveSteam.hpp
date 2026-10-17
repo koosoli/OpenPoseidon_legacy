@@ -51,7 +51,7 @@ class WaveSteam : public IWave
     std::vector<uint8_t> _pendingPcm;
 
     // OGG sources play from chunks decoded by the streaming pump.
-    ::Poseidon::Audio::StreamingBuffers _streaming;
+    ::Poseidon::Audio::Steam::StreamingBuffers _streaming;
     // Format cached by OpenStreaming so the main thread never queries the
     // (non-thread-safe) Vorbis decoder while the pump is reading it.
     WAVEFORMATEX _streamFormat{};
@@ -117,8 +117,8 @@ class WaveSteam : public IWave
 
     LoadState GetLoadState() const { return static_cast<LoadState>(_loadState.load(std::memory_order_acquire)); }
 
-    ::Poseidon::Audio::StreamingBuffers& StreamingState() { return _streaming; }
-    const ::Poseidon::Audio::StreamingBuffers& StreamingState() const { return _streaming; }
+    ::Poseidon::Audio::Steam::StreamingBuffers& StreamingState() { return _streaming; }
+    const ::Poseidon::Audio::Steam::StreamingBuffers& StreamingState() const { return _streaming; }
 
 
     bool IsStreamed() const { return _isStreamed; }

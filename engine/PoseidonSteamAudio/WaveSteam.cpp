@@ -236,7 +236,7 @@ void WaveSteam::OpenStreaming()
         return;
     }
     const int bytesPerSec = static_cast<int>(_streamFormat.nSamplesPerSec) * sampleStride;
-    int chunkBytes = (bytesPerSec * ::Poseidon::Audio::StreamingBuffers::kChunkMs) / 1000;
+    int chunkBytes = (bytesPerSec * ::Poseidon::Audio::Steam::StreamingBuffers::kChunkMs) / 1000;
     chunkBytes -= (chunkBytes % sampleStride); // end chunks on a frame boundary
     if (chunkBytes <= 0)
         chunkBytes = sampleStride;
@@ -277,7 +277,7 @@ bool WaveSteam::PumpDrainUpload(bool kickDecode)
     if (_streaming.aborted.load(std::memory_order_acquire))
         return false;
     const bool needMore = !_streaming.eofReached.load(std::memory_order_acquire) &&
-                          static_cast<int>(_streaming.queue.Size()) < ::Poseidon::Audio::StreamingBuffers::kNumBuffers;
+                          static_cast<int>(_streaming.queue.Size()) < ::Poseidon::Audio::Steam::StreamingBuffers::kNumBuffers;
     if (!needMore)
         return false;
     bool expected = false;
@@ -332,7 +332,7 @@ void WaveSteam::DecodeOneChunk()
             isLast = true;
     }
 
-    ::Poseidon::Audio::DecodedChunk chunk;
+    ::Poseidon::Audio::Steam::DecodedChunk chunk;
     chunk.pcm.assign(static_cast<size_t>(wantBytes), 0);
     chunk.streamOffset = offset;
     const int gotBytes = _stream->GetData(chunk.pcm.data(), static_cast<int>(offset), wantBytes);

@@ -13,6 +13,12 @@ namespace Poseidon
 {
 namespace Audio
 {
+// Steam Audio's own streaming types. The OpenAL backend defines Poseidon::Audio::DecodedChunk,
+// ChunkQueue and StreamingBuffers too, with another layout, and both backends link into the game: one
+// definition of each inline member won, so chunks lost their generation and the mixer dropped every one
+// as stale -- all streamed (.ogg) music and speech was silent. A namespace of their own keeps them apart.
+namespace Steam
+{
 
 // One slice of decoded PCM (raw bytes in the stream's native format).
 struct DecodedChunk
@@ -97,5 +103,6 @@ struct StreamingBuffers
     std::atomic<uint32_t> generation{0};
 };
 
+} // namespace Steam
 } // namespace Audio
 } // namespace Poseidon

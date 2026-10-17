@@ -121,7 +121,7 @@ void MixVoice::SetResident(std::shared_ptr<const std::vector<uint8_t>> pcm, cons
     Rewind(0);
 }
 
-void MixVoice::SetStreamed(Audio::StreamingBuffers* stream, const VoiceFormat& fmt)
+void MixVoice::SetStreamed(Audio::Steam::StreamingBuffers* stream, const VoiceFormat& fmt)
 {
     _kind = SourceKind::Streamed;
     _fmt = fmt;
@@ -159,7 +159,7 @@ void MixVoice::Rewind(int64_t frame)
     _cursor = frame;
     _consumed.store(frame, std::memory_order_release);
     _finished.store(false, std::memory_order_release);
-    _chunk = Audio::DecodedChunk{};
+    _chunk = Audio::Steam::DecodedChunk{};
     _chunkPos = 0;
     _blockFrames = 0;
     _blockPos = 0;
@@ -243,7 +243,7 @@ MixVoice::FetchStatus MixVoice::FillBlock()
             const int fb = _fmt.FrameBytes();
             while (_chunkPos >= _chunk.pcm.size())
             {
-                Audio::DecodedChunk next;
+                Audio::Steam::DecodedChunk next;
                 if (!_stream->queue.TryPop(next))
                 {
                     const bool ended = _stream->eofReached.load(std::memory_order_acquire) &&
