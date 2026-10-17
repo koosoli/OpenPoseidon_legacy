@@ -1733,16 +1733,16 @@ DisplayMissionEnd::DisplayMissionEnd(ControlsContainer* parent /*, bool editor*/
     _quotation = toIntFloor(quotations * GRandGen.RandomValue());
     Load("RscDisplayMissionEnd");
 
-    GetCtrl(IDC_ME_LOAD)->ShowCtrl(false);
-    GetCtrl(IDC_ME_RETRY)->ShowCtrl(false);
+    if (IControl* ctrl = GetCtrl(IDC_ME_LOAD)) ctrl->ShowCtrl(false);
+    if (IControl* ctrl = GetCtrl(IDC_ME_RETRY)) ctrl->ShowCtrl(false);
     if (GWorld->GetMode() != GModeNetware)
     {
         RString name = GetSaveDirectory() + RString("save.fps");
         if (QIFStream::FileExists(name))
         {
-            GetCtrl(IDC_ME_LOAD)->ShowCtrl(true);
+            if (IControl* ctrl = GetCtrl(IDC_ME_LOAD)) ctrl->ShowCtrl(true);
         }
-        GetCtrl(IDC_ME_RETRY)->ShowCtrl(true);
+        if (IControl* ctrl = GetCtrl(IDC_ME_RETRY)) ctrl->ShowCtrl(true);
     }
     InputSubsystem::Instance().ChangeGameFocus(+1);
 }

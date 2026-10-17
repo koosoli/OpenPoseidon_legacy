@@ -543,6 +543,9 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                                 "Test an --arma3-mission: skip the briefing, play N seconds, log and exit");
         configGroup->add_option("--arma3-campaign", _arma3Campaign,
                                 "Play an Arma 3 campaign from the --arma3 archives");
+        configGroup->add_flag("--arma-original-ui", _armaOriginalUi,
+                              "With --arma1/--arma2: use that game's own HUD, main, pause, map and debriefing "
+                              "screens instead of CWA's");
         configGroup->add_option("--wait-for-parent", _waitForParent, "Wait for the map-browser parent process before starting");
         configGroup->add_option("--reforger-world", _reforgerWorld, "Native Enfusion world virtual directory");
 

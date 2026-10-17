@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/ArmaOriginalUi.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/AI/AI.hpp>
@@ -520,7 +521,7 @@ Control* DisplayUnitInfo::OnCreateCtrl(int type, int idc, const ParamEntry& cls)
 DisplayHint::DisplayHint(ControlsContainer* parent) : Display(parent)
 {
     SetCursor(nullptr);
-    Load(Res >> "RscInGameUI" >> "RscHint");
+    Load(ArmaOriginalUi::Resource("RscInGameUI") >> "RscHint");
     if (!_background || !_hint)
     {
         LOG_WARN(UI, "DisplayHint: missing RscHint controls in RscInGameUI");
@@ -1047,7 +1048,7 @@ InGameUI::InGameUI() : _mode(UIFire), _modeAuto(UIFire), _groundPointValid(false
     piName = "";
     uiName = "";
 
-    const ParamEntry* mainCfg = &(Pars >> "CfgInGameUI");
+    const ParamEntry* mainCfg = &(ArmaOriginalUi::Config("CfgInGameUI"));
     bgColor = GetPackedColor((*mainCfg) >> "colorBackground");
     bgColorCmd = GetPackedColor((*mainCfg) >> "colorBackgroundCommand");
     bgColorHelp = GetPackedColor((*mainCfg) >> "colorBackgroundHelp");

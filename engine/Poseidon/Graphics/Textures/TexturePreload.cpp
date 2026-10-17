@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/ArmaOriginalUi.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
@@ -54,14 +55,14 @@ void PreloadedTextures::Preload(bool all)
     _data[TrackTexture] = loadTex("trackTexture");
     _data[TrackTextureFour] = loadTex("trackTextureFour");
 
-    _data[Corner] = GlobLoadTexture(GetPictureName(Pars >> "CfgInGameUI" >> "imageCornerElement"));
+    _data[Corner] = GlobLoadTexture(GetPictureName(ArmaOriginalUi::Config("CfgInGameUI") >> "imageCornerElement"));
 
     const ParamEntry& wrapper = Pars >> "CfgWrapperUI";
     _data[DialogBackground] = GlobLoadTexture(GetPictureName(wrapper >> "Background" >> "texture"));
     _data[DialogTitle] = GlobLoadTexture(GetPictureName(wrapper >> "TitleBar" >> "texture"));
     _data[DialogGroup] = GlobLoadTexture(GetPictureName(wrapper >> "GroupBox2" >> "texture"));
 
-    const ParamEntry& cursor = Pars >> "CfgInGameUI" >> "Cursor";
+    const ParamEntry& cursor = ArmaOriginalUi::Config("CfgInGameUI") >> "Cursor";
     _data[CursorLocked] = GlobLoadTexture(GetPictureName(cursor >> "lock_target"));
     _data[CursorTarget] = GlobLoadTexture(GetPictureName(cursor >> "select_target"));
     _data[CursorAim] = GlobLoadTexture(GetPictureName(cursor >> "aim"));

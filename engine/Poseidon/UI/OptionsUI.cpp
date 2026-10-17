@@ -2148,11 +2148,17 @@ DisplayInterrupt::DisplayInterrupt(ControlsContainer* parent) : Display(parent)
             RefreshLanguage();
         });
 
+    // A layout without one of these (--arma-original-ui draws Arma's) must not crash the menu.
+    const auto hide = [this](int idc)
+    {
+        if (IControl* ctrl = GetCtrl(idc))
+            ctrl->ShowCtrl(false);
+    };
     if (GWorld->GetMode() == GModeNetware)
     {
-        GetCtrl(IDC_INT_SAVE)->ShowCtrl(false);
-        GetCtrl(IDC_INT_LOAD)->ShowCtrl(false);
-        GetCtrl(IDC_INT_RETRY)->ShowCtrl(false);
+        hide(IDC_INT_SAVE);
+        hide(IDC_INT_LOAD);
+        hide(IDC_INT_RETRY);
         //		GetCtrl(IDC_INT_RESTART)->ShowCtrl(false);
     }
     else
@@ -2160,11 +2166,11 @@ DisplayInterrupt::DisplayInterrupt(ControlsContainer* parent) : Display(parent)
         RString name = GetSaveDirectory() + RString("save.fps");
         if (QIFStream::FileExists(name))
         {
-            GetCtrl(IDC_INT_SAVE)->ShowCtrl(false);
+            hide(IDC_INT_SAVE);
         }
         else
         {
-            GetCtrl(IDC_INT_LOAD)->ShowCtrl(false);
+            hide(IDC_INT_LOAD);
         }
     }
     InputSubsystem::Instance().ChangeGameFocus(+1);

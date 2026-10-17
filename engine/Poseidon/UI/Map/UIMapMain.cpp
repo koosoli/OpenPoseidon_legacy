@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/ArmaOriginalUi.hpp>
 #include <Poseidon/UI/Map/UIMap.hpp>
 #include <Poseidon/UI/Map/UIMapCommon.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -66,7 +67,7 @@ CStaticMapMain::CStaticMapMain(ControlsContainer* parent, int idc, const ParamEn
     _colorActiveMarker = GetPackedColor(cls >> "ActiveMarker" >> "color");
     _sizeActiveMarker = cls >> "ActiveMarker" >> "size";
 
-    _iconPosition = GEngine->TextBank()->Load(GetPictureName(Pars >> "CfgInGameUI" >> "Cursor" >> "mission"));
+    _iconPosition = GEngine->TextBank()->Load(GetPictureName(ArmaOriginalUi::Config("CfgInGameUI") >> "Cursor" >> "mission"));
 
     GMainMapInfo.Clear();
 }

@@ -196,6 +196,9 @@ class AppConfig
                : _arma2TestSeconds > 0.0f ? _arma2TestSeconds
                                           : _arma1TestSeconds;
     }
+    /// --arma-original-ui: draw the mounted Arma game's own HUD and menus (its ui.pbo
+    /// patched over CWA's resource) instead of CWA's. Off by default.
+    bool GetArmaOriginalUi() const { return _armaOriginalUi; }
     /// --arma{1,2,3}-campaign: start a campaign from its mounted archive.
     const std::string& GetArma1Campaign() const
     {
@@ -543,6 +546,7 @@ class AppConfig
     std::string _arma3Mission;
     float _arma3TestSeconds = 0.0f;
     std::string _arma3Campaign;
+    bool _armaOriginalUi = false;
     uint32_t _waitForParent = 0;
     std::string _reforgerWorld;
     RString _modsDir;     // resolved --mods-dir base ("" if unset)

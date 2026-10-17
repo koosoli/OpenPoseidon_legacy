@@ -1,4 +1,5 @@
 
+#include <Poseidon/Game/Compat/ArmaOriginalUi.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <SDL3/SDL_scancode.h>
 #include <Poseidon/Core/Config/UserConfig.hpp>
@@ -1210,6 +1211,21 @@ void InGameUI::DrawCompass(EntityAI* vehicle)
     }
 }
 
+namespace
+{
+// --arma-original-ui: Arma 1 colours the weapon and ammo text from RscInGameUI -- ready, reloading,
+// empty (white, orange, red) -- where CWA uses its bar colours. `color` is the CWA choice.
+PackedColor WeaponTextColor(PackedColor color, PackedColor ready, PackedColor prepare)
+{
+    if (!ArmaOriginalUi::Enabled())
+        return color;
+    static const ParamEntry& rsc = ArmaOriginalUi::Resource("RscInGameUI");
+    const char* name = color == ready ? "colorReady" : color == prepare ? "colorPrepare" : "colorUnload";
+    const ParamEntry* entry = rsc.FindEntry(name);
+    return entry ? GetPackedColor(*entry) : color;
+}
+} // namespace
+
 void InGameUI::DrawUnitInfo(EntityAI* vehicle)
 {
     if (!_unitInfo)
@@ -1245,8 +1261,8 @@ void InGameUI::DrawUnitInfo(EntityAI* vehicle)
     if (unitInfoType != _lastUnitInfoType)
     {
         PoseidonAssert(unitInfoType >= 0);
-        RString name = (Res >> "RscInGameUI" >> "unitInfoTypes")[unitInfoType];
-        _unitInfo->Reload(Res >> "RscInGameUI" >> name);
+        RString name = (ArmaOriginalUi::Resource("RscInGameUI") >> "unitInfoTypes")[unitInfoType];
+        _unitInfo->Reload(ArmaOriginalUi::Resource("RscInGameUI") >> name);
         _lastUnitInfoType = unitInfoType;
     }
 
@@ -1578,6 +1594,7 @@ void InGameUI::DrawUnitInfo(EntityAI* vehicle)
                 color = barRedColor;
             }
 
+            color = WeaponTextColor(color, barGreenColor, barYellowColor);
             if (_unitInfo->weapon)
             {
                 _unitInfo->weapon->ShowCtrl(true);
@@ -1612,7 +1629,7 @@ void InGameUI::DrawUnitInfo(EntityAI* vehicle)
             if (_unitInfo->weapon)
             {
                 _unitInfo->weapon->ShowCtrl(true);
-                _unitInfo->weapon->SetFtColor(barGreenColor);
+                _unitInfo->weapon->SetFtColor(WeaponTextColor(barGreenColor, barGreenColor, barYellowColor));
                 if (_unitInfo->weapon->SetText(displayName))
                 {
                     dirty = true;

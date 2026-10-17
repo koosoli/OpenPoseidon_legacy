@@ -32,7 +32,7 @@ namespace Poseidon
 namespace
 {
 constexpr int ListId = 62001, FolderId = 62002, ScanId = 62003, OpenId = 62004, StatusId = 62005, BackId = 62006,
-              MapsId = 62008, VehiclesId = 62009, MissionsId = 62011, BrowseId = 62012;
+              MapsId = 62008, VehiclesId = 62009, MissionsId = 62011, BrowseId = 62012, OriginalUiId = 62013;
 enum class BrowserMode { Maps, Vehicles, Missions };
 class LocalBrowserButton : public CButton
 {
@@ -174,6 +174,18 @@ class LocalMapsDisplay : public Display
     static std::filesystem::path FolderMemory()
     {
         return std::filesystem::path(Foundation::GamePaths::Instance().UserDir()) / "ArmaContentFolder.txt";
+    }
+    // "Original game UI": Arma 1 / Arma 2 missions start with that game's own HUD and menus
+    // (--arma-original-ui). Off unless chosen; the choice is remembered beside the folder.
+    bool _originalUi = false;
+    static std::filesystem::path OriginalUiMemory()
+    {
+        return std::filesystem::path(Foundation::GamePaths::Instance().UserDir()) / "ArmaContentOriginalUi.txt";
+    }
+    void ShowOriginalUi()
+    {
+        if (auto* button = dynamic_cast<CButton*>(GetCtrl(OriginalUiId)))
+            button->SetText(_originalUi ? "Original game UI: ON" : "Original game UI: OFF");
     }
     void Status(const std::string& text)
     {
@@ -336,6 +348,8 @@ class LocalMapsDisplay : public Display
             // The game's own archives are mounted read-only; nothing is extracted (Arma1Compat).
             args.insert(args.end(), {"--arma1", localMission->installRoot, "--arma1-mission",
                                      localMission->virtualPath});
+        if (localMission && _originalUi && localMission->game != "Arma 3")
+            args.push_back("--arma-original-ui");
         else
             args.insert(args.end(), {"--test-mission", mission.string()});
         if (GEngine)
@@ -454,6 +468,7 @@ class LocalMapsDisplay : public Display
         AddControl("RscListBox", "Maps", ListId, "", 0.06f, 0.29f, 0.88f, 0.38f);
         AddControl("RscText", "Status", StatusId, "", 0.06f, 0.69f, 0.88f, 0.08f);
         AddControl("RscButton", "Open", OpenId, "Open selected", 0.06f, 0.78f, 0.35f, 0.05f);
+        AddControl("RscButton", "OriginalUi", OriginalUiId, "", 0.42f, 0.78f, 0.31f, 0.05f);
         AddControl("RscButton", "Back", BackId, "Back", 0.74f, 0.78f, 0.20f, 0.05f);
         _vehicles = ScanLocalVehicles(std::filesystem::current_path());
         if (Foundation::GamePaths::Instance().IsInitialized())
@@ -462,7 +477,11 @@ class LocalMapsDisplay : public Display
             std::getline(std::ifstream(FolderMemory()), remembered);
             if (auto* edit = dynamic_cast<CEdit*>(GetCtrl(FolderId)); edit && !remembered.empty())
                 edit->SetText(remembered.c_str());
+            std::string originalUi;
+            std::getline(std::ifstream(OriginalUiMemory()), originalUi);
+            _originalUi = originalUi == "1";
         }
+        ShowOriginalUi();
         Scan(false); // opening the screen is not a choice of folder; keep the remembered one
     }
     Control* OnCreateCtrl(int type, int idc, const ParamEntry& cls) override
@@ -519,6 +538,16 @@ class LocalMapsDisplay : public Display
             Browse();
         else if (idc == OpenId)
             Open();
+        else if (idc == OriginalUiId)
+        {
+            _originalUi = !_originalUi;
+            ShowOriginalUi();
+            if (Foundation::GamePaths::Instance().IsInitialized())
+                std::ofstream(OriginalUiMemory(), std::ios::trunc) << (_originalUi ? "1" : "0");
+            Status(_originalUi ? "Arma 1 and Arma 2 missions will use that game's own HUD, menus and map (its "
+                                 "ui.pbo over CWA's). Arma 3 keeps CWA's for now."
+                               : "Arma missions will use CWA's HUD and menus.");
+        }
         else if (idc == MapsId || idc == VehiclesId || idc == MissionsId)
         {
             _mode = idc == VehiclesId   ? BrowserMode::Vehicles

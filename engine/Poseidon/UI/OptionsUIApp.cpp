@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/ArmaOriginalUi.hpp>
 #include <Poseidon/UI/LocalMapsDisplay.hpp>
 #include <Poseidon/UI/WholeWorldDisplay.hpp>
 #include <Poseidon/UI/LocalMapEditor.hpp>
@@ -202,11 +203,16 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
     // menu. Without this the base RscDisplayMainRemaster — restored by
     // MergeBaseResourceExtra so the Options screen works — would replace the mod's
     // menu and lose its branding.
-    const char* mainRsc = (!IsMenuOverriddenByMod() && Res.FindEntry("RscDisplayMainRemaster"))
-                              ? "RscDisplayMainRemaster"
-                              : "RscDisplayMain";
+    // --arma-original-ui: the mounted Arma game's own menu (ArmaOriginalUi), not the remaster's.
+    const char* mainRsc =
+        (!ArmaOriginalUi::Enabled() && !IsMenuOverriddenByMod() && Res.FindEntry("RscDisplayMainRemaster"))
+            ? "RscDisplayMainRemaster"
+            : "RscDisplayMain";
+    const ParamEntry& menuCls = ArmaOriginalUi::Resource(mainRsc);
     Load(mainRsc);
-    if (QIFStreamB::FileExist("assets\\ui\\openposeidon_logo.paa"))
+    // The original Arma menu is shown as that game drew it: no OpenPoseidon logo, no added entries.
+    const bool armaMenu = ArmaOriginalUi::Enabled();
+    if (!armaMenu && QIFStreamB::FileExist("assets\\ui\\openposeidon_logo.paa"))
     {
         for (int i = 0; i < _controlsForeground.Size(); ++i)
         {
@@ -253,10 +259,10 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
     // row. idc=119 dispatches through GameModuleRegistry (DisplayMain::OnButtonClicked)
     // to the Mods screen, so wiring it is automatic. Heuristic finds Quit by its
     // standard class name; extend as more community menus are tested.
-    if (GetCtrl(IDC_MAIN_MODS) == nullptr && GameModuleRegistry::FindByIDC(IDC_MAIN_MODS) != nullptr)
+    if (!armaMenu && GetCtrl(IDC_MAIN_MODS) == nullptr && GameModuleRegistry::FindByIDC(IDC_MAIN_MODS) != nullptr)
     {
         Control* quit = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_QUIT));
-        ParamEntry* quitCls = Res.FindEntry(mainRsc) ? (Res >> mainRsc).FindEntry("Quit") : nullptr;
+        ParamEntry* quitCls = menuCls.FindEntry("Quit");
         if (quit != nullptr && quitCls != nullptr && quitCls->IsClass())
         {
             static ParamFile s_modsInjectCfg; // outlives the control (it back-references the class)
@@ -299,15 +305,15 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
     // large pictures and lines, and treating those as occupied once pushed both entries onto one spot.
     const auto injectEntry = [&](ParamFile& resource, const char* className, int idc, const char* label)
     {
-        const bool menu = Res.FindEntry(mainRsc) != nullptr;
+        const bool menu = menuCls.IsClass();
         Control* anchor = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_MULTIPLAYER));
-        ParamEntry* source = menu ? (Res >> mainRsc).FindEntry("Multiplayer") : nullptr;
+        ParamEntry* source = menu ? menuCls.FindEntry("Multiplayer") : nullptr;
         if (!anchor || !source || !source->IsClass())
         {
             anchor = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_QUIT));
-            source = menu ? (Res >> mainRsc).FindEntry("Quit") : nullptr;
+            source = menu ? menuCls.FindEntry("Quit") : nullptr;
         }
-        if (!anchor || !source || !source->IsClass())
+        if (armaMenu || !anchor || !source || !source->IsClass())
             return;
         resource.Clear();
         ParamClass* cls = resource.AddClass(className);

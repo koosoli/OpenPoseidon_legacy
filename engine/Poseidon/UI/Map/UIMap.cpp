@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/ArmaOriginalUi.hpp>
 #include <Poseidon/UI/LocalMapWorlds.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Input/CheatCode.hpp>
@@ -352,7 +353,7 @@ CStaticMap::CStaticMap(ControlsContainer* parent, int idc, const ParamEntry& cls
 
     EnableCtrl(true);
 
-    const ParamEntry& cfgMap = Pars >> "CfgInGameUI" >> "IslandMap";
+    const ParamEntry& cfgMap = ArmaOriginalUi::Config("CfgInGameUI") >> "IslandMap";
     _iconPlayer = GlobLoadTexture(GetPictureName(cfgMap >> "iconPlayer"));
     _iconSelect = GlobLoadTexture(GetPictureName(cfgMap >> "iconSelect"));
     _iconCamera = GlobLoadTexture(GetPictureName(cfgMap >> "iconCamera"));
