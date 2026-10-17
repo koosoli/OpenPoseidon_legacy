@@ -981,7 +981,36 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
 #define MAX_IN 0.05f
                 CollisionBuffer collision;
                 bool onlyVehicles = !QIsManual() && !freeFall;
+                const std::uint64_t collideT0 = probe.on ? SimVehCost::NowNs() : 0;
                 GLandscape->ObjectCollision(collision, this, moveTrans, onlyVehicles);
+                if (probe.on)
+                {
+                    // POSEIDON_SIM_VEHICLE_COST: name the slow ones (C0: up to 344 ms per man)
+                    const double ms = static_cast<double>(SimVehCost::NowNs() - collideT0) * 1.0e-6;
+                    static int slowReported = 0;
+                    if (ms > 20.0 && slowReported < 40)
+                    {
+                        ++slowReported;
+                        std::string hits;
+                        for (int i = 0; i < collision.Size() && i < 4; i++)
+                        {
+                            const Object* o = collision[i].object;
+                            const Shape* og = o && o->GetShape() ? o->GetShape()->GeometryLevel() : nullptr;
+                            hits += fmt::format(" [{} comp {} hier {} geom {} faces]",
+                                                o && o->GetShape() ? (const char*)o->GetShape()->GetName() : "-",
+                                                collision[i].component, collision[i].hierLevel,
+                                                og ? og->NFaces() : -1);
+                        }
+                        const Shape* geom = _shape ? _shape->GeometryLevel() : nullptr;
+                        const int comps = geom ? _shape->GetGeomComponents().Size() : -1;
+                        LOG_INFO(World,
+                                 "Man::Simulate slow ObjectCollision {:.1f} ms: {} ({}), geometry {} faces / {} "
+                                 "components, onlyVehicles={}, {} hits:{}",
+                                 ms, (const char*)GetDebugName(), _shape ? (const char*)_shape->GetName() : "-",
+                                 geom ? geom->NFaces() : -1, comps, onlyVehicles,
+                                 collision.Size(), hits);
+                    }
+                }
 
                 Vector3 offset = VZero;
 
