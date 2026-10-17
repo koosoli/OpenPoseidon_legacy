@@ -672,6 +672,9 @@ void Mixer::RenderFrame()
     }
 }
 
+// Closer than this to the listener a 3D source has no usable direction (see MixVoiceFrame).
+constexpr float kAtListener = 1.0f;
+
 void Mixer::MixVoiceFrame(MixVoice& v, float* sendBuf)
 {
     const MixVoice::Params p = v.GetParams();
@@ -690,7 +693,7 @@ void Mixer::MixVoiceFrame(MixVoice& v, float* sendBuf)
     {
         float toListener[3] = {lis.pos[0] - p.pos[0], lis.pos[1] - p.pos[1], lis.pos[2] - p.pos[2]};
         dist = std::sqrt(Dot(toListener, toListener));
-        if (dist > 1e-4f)
+        if (dist >= kAtListener)
         {
             // Doppler (factor 1): f' = f (c - vLS) / (c - vSS), velocities
             // projected on the source->listener axis, clamped below c.
@@ -706,10 +709,18 @@ void Mixer::MixVoiceFrame(MixVoice& v, float* sendBuf)
     float* src = _tmp.data();
     v.Resample(src, kFrameSize, step);
 
-    if (!p.is3D)
+    // A source at the listener -- Arma's `_camera say`, a line spoken by the camera itself -- has no
+    // direction. HRTF and panning then flip between the ears from block to block (the owner heard
+    // the outside lines of the Queen's Gambit intro at a different pitch in each ear, and a recording
+    // had the line on the left only), and its Doppler came from the camera's own velocity estimate.
+    // Played as 2D, as the DX8 engine effectively did: centred, in the file's own stereo, at the
+    // distance gain it has right there.
+    const bool atListener = p.is3D && dist < kAtListener;
+    if (!p.is3D || atListener)
     {
         // 2D: straight into the mix with a per-frame gain ramp (no zipper).
-        const float g1 = p.gain;
+        const float g1 =
+            atListener ? std::min(p.gain, 1.f) * InverseDistanceClamped(dist, p.refDist, p.maxDist, p.rolloff) : p.gain;
         const float g0 = v._lastGain < 0.f ? g1 : v._lastGain;
         const float dg = (g1 - g0) / kFrameSize;
         for (int i = 0; i < kFrameSize; i++)
