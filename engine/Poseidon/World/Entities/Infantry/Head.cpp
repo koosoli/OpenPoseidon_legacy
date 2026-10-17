@@ -267,6 +267,33 @@ void HeadType::Load(const ParamEntry& cfg)
     _rMouthRandom.Load(micro >> "rMouth");
 }
 
+// Arma 1 and later name the same face selections in English: the eyelids, the lower lip ("llip"), the
+// mouth corners and the brows. Asked only for OFP's Czech names, every Arma head kept a still mouth
+// while it spoke (the owner, Queen's Gambit intro). The OFP name wins where a model has it.
+static const char* FaceSelName(LODShape* shape, const char* ofp)
+{
+    static const struct
+    {
+        const char* ofp;
+        const char* arma;
+    } kArma[] = {{"vicka", "eyelids"}, {"spodni ret", "llip"}, {"lkoutek", "lmouth"}, {"skoutek", "mmouth"},
+                 {"pkoutek", "rmouth"}, {"loboci", "lbrow"}, {"soboci", "mbrow"}, {"poboci", "rbrow"}};
+    const char* arma = nullptr;
+    for (const auto& n : kArma)
+        if (strcmp(n.ofp, ofp) == 0)
+            arma = n.arma;
+    if (!arma || !shape)
+        return ofp;
+    bool hasOfp = false, hasArma = false;
+    for (int level = 0; level < shape->NLevels(); level++)
+        if (Shape* lod = shape->Level(level))
+        {
+            hasOfp = hasOfp || lod->FindNamedSel(RStringB(ofp)) >= 0;
+            hasArma = hasArma || lod->FindNamedSel(RStringB(arma)) >= 0;
+        }
+    return !hasOfp && hasArma ? arma : ofp;
+}
+
 void HeadType::InitShape(const ParamEntry& cfg, LODShape* shape)
 {
     _personality.Init(shape, "osobnost", nullptr);
@@ -274,15 +301,15 @@ void HeadType::InitShape(const ParamEntry& cfg, LODShape* shape)
 
     _glasses.Init(shape, "brejle", nullptr);
 
-    _lBrow.Init(shape, "loboci", nullptr);
-    _mBrow.Init(shape, "soboci", nullptr);
-    _rBrow.Init(shape, "poboci", nullptr);
-    _lMouth.Init(shape, "lkoutek", nullptr);
-    _mMouth.Init(shape, "skoutek", nullptr);
-    _rMouth.Init(shape, "pkoutek", nullptr);
+    _lBrow.Init(shape, FaceSelName(shape, "loboci"), nullptr);
+    _mBrow.Init(shape, FaceSelName(shape, "soboci"), nullptr);
+    _rBrow.Init(shape, FaceSelName(shape, "poboci"), nullptr);
+    _lMouth.Init(shape, FaceSelName(shape, "lkoutek"), nullptr);
+    _mMouth.Init(shape, FaceSelName(shape, "skoutek"), nullptr);
+    _rMouth.Init(shape, FaceSelName(shape, "pkoutek"), nullptr);
 
-    _eyelid.Init(shape, "vicka", nullptr);
-    _lip.Init(shape, "spodni ret", nullptr);
+    _eyelid.Init(shape, FaceSelName(shape, "vicka"), nullptr);
+    _lip.Init(shape, FaceSelName(shape, "spodni ret"), nullptr);
 }
 
 Head::Head(const HeadType& type, LODShape* lShape)
@@ -462,7 +489,7 @@ void SetupFaceBoneRig(Skeleton* skeleton, LODShapeWithShadow* lShape, WeightInfo
         }
         for (int g = 0; g < NFaceGroups; g++)
         {
-            const int selIndex = shape->FindNamedSel(RStringB(GFaceSelNames[g]));
+            const int selIndex = shape->FindNamedSel(RStringB(FaceSelName(lShape, GFaceSelNames[g])));
             if (selIndex < 0)
             {
                 continue;
