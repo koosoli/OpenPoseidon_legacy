@@ -118,6 +118,7 @@ GameValue TriRemount(const GameState*);
 GameValue TriLoadedShapeCount(const GameState*);
 GameValue TriScenePreloadCount(const GameState*);
 GameValue TriDetailTextureLoads(const GameState*);
+GameValue TriTextureBankReleases(const GameState*);
 GameValue TriClick(const GameState*, GameValuePar);
 GameValue TriClickAt(const GameState*, GameValuePar);
 GameValue TriInvokeButton(const GameState*, GameValuePar);
@@ -2200,6 +2201,15 @@ GameValue TriDetailTextureLoads(const GameState* /*state*/)
     return GameValue(static_cast<float>(GEngine->TextBank()->NDetailTextureLoads()));
 }
 
+/// triTextureBankReleases - how many times the active texture bank has dropped its loaded set.
+/// A re-mount must add one, or textures a mod replaces under the same path stay the old ones.
+GameValue TriTextureBankReleases(const GameState* /*state*/)
+{
+    if (GEngine == nullptr || GEngine->TextBank() == nullptr)
+        return GameValue(0.0f);
+    return GameValue(static_cast<float>(GEngine->TextBank()->NReleases()));
+}
+
 /// triFontTune ["prefix", renderPx, widthScale]
 /// triFontTune ["prefix", renderPx, widthScale, baselineOffset]
 /// triFontTune ["prefix", renderPx, widthScale, baselineOffset, syntheticBold]
@@ -3164,6 +3174,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewNularOp(GameNular(GameScalar, "triLoadedShapeCount", TriLoadedShapeCount));
     GGameState.NewNularOp(GameNular(GameScalar, "triScenePreloadCount", TriScenePreloadCount));
     GGameState.NewNularOp(GameNular(GameScalar, "triDetailTextureLoads", TriDetailTextureLoads));
+    GGameState.NewNularOp(GameNular(GameScalar, "triTextureBankReleases", TriTextureBankReleases));
     GGameState.NewNularOp(GameNular(GameScalar, "triIsEndForced", TriIsEndForced));
     GGameState.NewNularOp(GameNular(GameString, "triCheatStorePosition", TriCheatStorePosition));
     GGameState.NewNularOp(GameNular(GameString, "triCheatSaveGame", TriCheatSaveGame));

@@ -65,6 +65,7 @@ class TextureBankWgpu : public AbstractTextBank
     std::unordered_map<std::string, LegacyMaterial> _legacyMaterials;
     bool _legacyMaterialsLoaded = false;
     int _detailTextureLoads = 0;
+    int _releases = 0;
     const LegacyMaterial* ResolveLegacyMaterial(const char* name);
 
     WgrRenderer* _renderer;
@@ -150,11 +151,13 @@ class TextureBankWgpu : public AbstractTextBank
     // triDetailTextureLoads reads the same on every backend.
     int NDetailTextureLoads() const override { return _detailTextureLoads; }
     void NoteDetailTextureLoad() { ++_detailTextureLoads; }
+    int NReleases() const override { return _releases; }
 
     void FlushTextures() override {}
     // The only path that removes entries from _texture; the name index has to go with it.
     void ReleaseAllTextures() override
     {
+        ++_releases;
         _texture.Clear();
         _textureByName.clear();
         _legacyMaterials.clear();

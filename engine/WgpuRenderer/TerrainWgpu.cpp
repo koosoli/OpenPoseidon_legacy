@@ -3585,6 +3585,12 @@ void TerrainWgpu::ResetForRemount()
     _uploadedName.clear();
     // The reload replaces CfgDetailTextures; a mod may name its own detail texture.
     _detailNoiseTried = false;
+    // Raw pointers the next upload would dereference (EvictGpu on the old page set) or match
+    // against new textures by address; the bank is about to release what they point at.
+    _terrainPageTextures.clear();
+    _twGroundBaked.clear();
+    _twGroundWorld.clear();
+    _twGround.Reset();
 }
 
 void TerrainWgpu::UploadDetailNoise()

@@ -197,6 +197,9 @@ class AbstractTextBank
     // set from `CfgDetailTextures`. One per content load, since a re-mount swaps that
     // config under the bank.
     virtual int NDetailTextureLoads() const { return 0; }
+    // How many times the bank has dropped its loaded set (ReleaseAllTextures). A re-mount
+    // must, or a mod that replaces a texture under the same path draws the old one.
+    virtual int NReleases() const { return 0; }
 
     void PrepareMipmap(Texture* texture, int level, int levelTop)
     {

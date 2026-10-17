@@ -436,6 +436,9 @@ class Scene
     // GPU-driven variant (Engine::UsesGpuShadowCasters): submits caster meshes +
     // transforms via AddShadowCaster instead of collecting a CPU triangle soup.
     void RenderShadowMapDepthPassGpu(int nDraw);
+    // Drops the static-caster cache (SceneShadowPass.cpp). It is keyed by Object* and holds raw
+    // Texture*; a re-mount reloading the same world can put a new object at a cached address.
+    static void ResetStaticShadowCasterCache();
     void DrawObjectsAndShadowsPass3(); // last draw cockpits
     void ObjectsDrawn();               // release all temporary information
 

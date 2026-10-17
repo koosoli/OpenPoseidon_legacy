@@ -49,6 +49,15 @@ class TidewaterGround
     // Learn the pure surfaces' mean colours from the world's layers (decodes the 2-letter ones), once
     // per world.
     void Prepare(const Landscape& land);
+    // Forget the per-world means and recoloured images (an in-process re-mount can swap the
+    // layer files under an unchanged world name).
+    void Reset()
+    {
+        _means.clear();
+        _world.clear();
+        _cache.clear();
+        _cacheWorld.clear();
+    }
     // Recolour a decoded layer image in place; false when the layer is not one this touches.
     bool Recolour(const std::string& base, DecodedImage& image) const;
     // The recoloured layer as a new mipmapped texture, or null (not sand / field, or no source).

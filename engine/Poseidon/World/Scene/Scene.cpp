@@ -261,6 +261,7 @@ void Scene::CleanUp()
 
 Scene::~Scene()
 {
+    ResetStaticShadowCasterCache();
     SaveConfig();
     ResetLights();
     _aLights.Clear();

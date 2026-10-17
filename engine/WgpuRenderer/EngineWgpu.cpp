@@ -2544,11 +2544,23 @@ AbstractTextBank* EngineWgpu::TextBank()
 
 void EngineWgpu::ResetForRemount()
 {
-    EngineDummy::ResetForRemount();
+    // Terrain first: it holds raw TextureWgpu pointers (terrain pages, Tidewater bakes) that
+    // must be forgotten before the bank lets those textures die.
     if (_terrain)
     {
         _terrain->ResetForRemount();
     }
+    // The base class releases EngineDummy's own bank, which nothing under WGPU loads into;
+    // the real bank is _wbank. Without this every texture survived a re-mount by name, so a
+    // mod replacing a file under the same path drew the old image. Textures still referenced
+    // elsewhere (a shape the content reload kept) stay alive through their Refs; the rest are
+    // destroyed here, and their destructors touch the renderer, hence the window.
+    if (_wbank)
+    {
+        AcquireProducerWindow("remount texture release");
+        _wbank->ReleaseAllTextures();
+    }
+    EngineDummy::ResetForRemount();
 }
 
 void EngineWgpu::NoteDetailTextureLoad()
