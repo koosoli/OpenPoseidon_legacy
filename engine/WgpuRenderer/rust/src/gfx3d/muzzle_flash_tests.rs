@@ -73,7 +73,9 @@ fn muzzle_actual_helper_retains_material_abi_and_explicit_negative_lane() {
         std::mem::offset_of!(super::MaterialUbo, local_specular)
     );
     assert_eq!(tail.offset, 112);
-    assert_eq!(*span, 128); // existing scalar byte124; no new public layout
+    // 128 until REFLECT-001 appended reflect0/reflect1 behind local_specular (128 -> 160);
+    // local_specular itself stays at byte 112, its .w scalar at 124.
+    assert_eq!(*span, 160);
     let source = include_str!("shader3d.wgsl");
     assert!(
         source.contains("if (!(encoded > 0.0)) { return 0.0; }") &&
