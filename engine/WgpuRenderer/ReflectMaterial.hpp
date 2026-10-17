@@ -1,0 +1,313 @@
+#pragma once
+
+// REFLECT-001 phase B: which kind of surface a draw section is, and the physical
+// parameters that kind stands for (roughness, F0, metal, clear coat).
+//
+// Pure functions of names and parsed material values -- no engine types -- so the rule
+// table is unit-testable on its own (tests/unit/engine/WgpuRenderer/test_reflect_material.cpp)
+// and the renderer only has to gather the inputs. Nothing here is read from game data
+// beyond what the caller passes in.
+//
+// Source chain, first hit wins (docs/roadmap/decisions/REFLECT-001-...md, owner decision 1):
+//   1. Declared  -- an addon's CfgOpMaterials entry for this texture (own addons only).
+//   2. RVMAT     -- Arma pixel shader id, fresnelGlass, an environment-map stage.
+//   3. Part rule -- glass, mirror, chrome, lamp, rubber, interior... read from the names.
+//   4. Body rule -- vehicle paint: military matt, civil gloss (owner decision 2).
+//   5. Default   -- the legacy Blinn exponent converted to a roughness, else matt.
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <initializer_list>
+#include <string>
+#include <string_view>
+#include <utility>
+
+namespace Poseidon::ReflectMaterial
+{
+
+enum class SurfaceClass : uint8_t
+{
+    None = 0,      // not classified (switch off): the lanes stay zero
+    Matt,          // generic dull surface
+    PaintMatt,     // military paint: no clear coat
+    PaintGloss,    // civil solid paint under a clear coat
+    PaintMetallic, // civil metallic / pearl paint under a clear coat
+    Chrome,        // polished trim, bumpers, hub caps, reflector bowls
+    Glass,         // windows, windscreens, visors
+    Mirror,        // rear-view mirror glass
+    LampGlass,     // headlight with a glass cover (older vehicles) over a chrome reflector
+    LampPlastic,   // headlight with a polycarbonate cover (modern vehicles) over a chrome reflector
+    Rubber,        // tyres, seals
+    Plastic,       // trim, interior, dashboard
+    BareMetal,     // unpainted metal: rifle steel, tracks, exhausts
+    Count
+};
+
+enum class Source : uint8_t
+{
+    None = 0,
+    Declared,
+    Rvmat,
+    PartRule,
+    BodyRule,
+    Default,
+};
+
+enum class Era : uint8_t
+{
+    Old,    // CWA / OFP data (2001)
+    Mid,    // Arma 1 / Arma 2 (`ca\` prefix)
+    Modern, // Arma 3 (`a3\` prefix)
+};
+
+struct Params
+{
+    float roughness = 0.0f;   // perceptual; GGX alpha = roughness^2
+    float f0 = 0.0f;          // dielectric reflectance at normal incidence (metal: see `metal`)
+    float metal = 0.0f;       // 0 dielectric, 1 conductor (F0 taken from the albedo)
+    float clearCoat = 0.0f;   // strength of a second, smooth dielectric layer
+    float coatRoughness = 0.0f;
+    SurfaceClass cls = SurfaceClass::None;
+    Source source = Source::None;
+};
+
+struct Inputs
+{
+    std::string_view texture;     // section texture path (any case, either slash)
+    std::string_view material;    // RVMAT path or `#CfgMaterials` name, may be empty
+    std::string_view model;       // model path, for the era
+    std::string_view pixelShader; // RVMAT PixelShaderID, empty for OFP materials
+    float specular = 0.0f;        // max(rgb) of the material's specular colour
+    float specularPower = 0.0f;   // Blinn exponent, 0 = no highlight
+    bool hasEnvMap = false;       // RVMAT names an environment-map stage
+    bool fresnelGlass = false;    // RVMAT Fresnel stage is `fresnelGlass`
+    bool isVehicle = false;       // the owner is a Transport (car, truck, tank, boat, aircraft)
+    bool military = false;        // the vehicle type's typical side is not civilian
+    // Declared (CfgOpMaterials) -- only used when `declared` is not None.
+    SurfaceClass declared = SurfaceClass::None;
+    float declaredRoughness = -1.0f; // < 0: keep the class preset
+    float declaredF0 = -1.0f;
+    float declaredMetal = -1.0f;
+    float declaredClearCoat = -1.0f;
+    float declaredCoatRoughness = -1.0f;
+};
+
+inline Params Preset(SurfaceClass cls)
+{
+    Params p;
+    p.cls = cls;
+    switch (cls)
+    {
+    case SurfaceClass::None: break;
+    case SurfaceClass::Matt: p.roughness = 0.85f; p.f0 = 0.04f; break;
+    case SurfaceClass::PaintMatt: p.roughness = 0.6f; p.f0 = 0.04f; break;
+    case SurfaceClass::PaintGloss:
+        p.roughness = 0.45f; p.f0 = 0.04f; p.clearCoat = 1.0f; p.coatRoughness = 0.06f; break;
+    case SurfaceClass::PaintMetallic:
+        p.roughness = 0.35f; p.f0 = 0.08f; p.clearCoat = 1.0f; p.coatRoughness = 0.05f; break;
+    case SurfaceClass::Chrome: p.roughness = 0.08f; p.f0 = 0.04f; p.metal = 1.0f; break;
+    case SurfaceClass::Glass: p.roughness = 0.03f; p.f0 = 0.04f; break;
+    case SurfaceClass::Mirror: p.roughness = 0.02f; p.f0 = 0.04f; p.metal = 1.0f; break;
+    case SurfaceClass::LampGlass: p.roughness = 0.03f; p.f0 = 0.04f; p.clearCoat = 1.0f; break;
+    case SurfaceClass::LampPlastic: p.roughness = 0.06f; p.f0 = 0.05f; p.clearCoat = 1.0f; break;
+    case SurfaceClass::Rubber: p.roughness = 0.9f; p.f0 = 0.03f; break;
+    case SurfaceClass::Plastic: p.roughness = 0.6f; p.f0 = 0.04f; break;
+    case SurfaceClass::BareMetal: p.roughness = 0.45f; p.f0 = 0.04f; p.metal = 1.0f; break;
+    case SurfaceClass::Count: break;
+    }
+    return p;
+}
+
+// Lower-case, forward slashes: the one form every name is matched in.
+inline std::string Normalise(std::string_view s)
+{
+    std::string out(s);
+    for (char& c : out)
+        c = c == '\\' ? '/' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return out;
+}
+
+// The file name without directory and extension: matching on it keeps a token in a
+// folder name (`\cars\glassworks\`) from classifying every texture under it.
+inline std::string_view Stem(std::string_view path)
+{
+    if (const auto slash = path.find_last_of('/'); slash != std::string_view::npos)
+        path.remove_prefix(slash + 1);
+    if (const auto dot = path.find_last_of('.'); dot != std::string_view::npos)
+        path = path.substr(0, dot);
+    return path;
+}
+
+inline bool HasAny(std::string_view s, std::initializer_list<std::string_view> tokens)
+{
+    for (auto t : tokens)
+        if (s.find(t) != std::string_view::npos)
+            return true;
+    return false;
+}
+
+inline Era EraOf(std::string_view modelOrTexture)
+{
+    const std::string p = Normalise(modelOrTexture);
+    std::string_view v = p;
+    while (!v.empty() && v.front() == '/')
+        v.remove_prefix(1);
+    if (v.rfind("a3/", 0) == 0)
+        return Era::Modern;
+    if (v.rfind("ca/", 0) == 0)
+        return Era::Mid;
+    return Era::Old;
+}
+
+// Blinn-Phong exponent -> perceptual roughness. alpha^2 = 2/(n+2) is the usual
+// equivalence of a Blinn lobe and a Beckmann/GGX lobe; roughness = sqrt(alpha).
+inline float RoughnessFromBlinn(float n)
+{
+    if (n <= 0.0f)
+        return 0.85f;
+    const float alpha = std::sqrt(2.0f / (n + 2.0f));
+    return std::clamp(std::sqrt(alpha), 0.05f, 0.95f);
+}
+
+// Rule 3: the part a texture or material name says it is. Czech tokens because the
+// original data is Czech-authored (sklo = glass, zrcatko = mirror, svetlo = light,
+// kolo = wheel, guma = rubber). None when no part token is present.
+inline SurfaceClass PartFromNames(std::string_view texStem, std::string_view matStem, Era era)
+{
+    for (std::string_view s : {texStem, matStem})
+    {
+        if (s.empty())
+            continue;
+        if (HasAny(s, {"mirror", "zrcatk", "zrcadl", "spiegel"}))
+            return SurfaceClass::Mirror;
+        if (HasAny(s, {"chrom", "chrome"}))
+            return SurfaceClass::Chrome;
+        if (HasAny(s, {"headlight", "light", "lamp", "svetl", "reflektor", "lights"}))
+            return era == Era::Modern ? SurfaceClass::LampPlastic : SurfaceClass::LampGlass;
+        if (HasAny(s, {"glass", "sklo", "skla", "okno", "okna", "window", "windshield", "windscreen", "canopy"}))
+            return SurfaceClass::Glass;
+        if (HasAny(s, {"tyre", "tire", "pneu", "guma", "rubber", "wheel", "kolo", "kola"}))
+            return SurfaceClass::Rubber;
+        if (HasAny(s, {"interior", "dashboard", "palubn", "sedack", "seat", "cockpit"}))
+            return SurfaceClass::Plastic;
+    }
+    return SurfaceClass::None;
+}
+
+inline Params Classify(const Inputs& in)
+{
+    // 1. Declared by the addon.
+    if (in.declared != SurfaceClass::None && in.declared < SurfaceClass::Count)
+    {
+        Params p = Preset(in.declared);
+        if (in.declaredRoughness >= 0.0f) p.roughness = std::clamp(in.declaredRoughness, 0.0f, 1.0f);
+        if (in.declaredF0 >= 0.0f) p.f0 = std::clamp(in.declaredF0, 0.0f, 1.0f);
+        if (in.declaredMetal >= 0.0f) p.metal = std::clamp(in.declaredMetal, 0.0f, 1.0f);
+        if (in.declaredClearCoat >= 0.0f) p.clearCoat = std::clamp(in.declaredClearCoat, 0.0f, 1.0f);
+        if (in.declaredCoatRoughness >= 0.0f) p.coatRoughness = std::clamp(in.declaredCoatRoughness, 0.0f, 1.0f);
+        p.source = Source::Declared;
+        return p;
+    }
+
+    const std::string tex = Normalise(in.texture);
+    const std::string mat = Normalise(in.material);
+    const std::string_view texStem = Stem(tex);
+    const std::string_view matStem = Stem(mat);
+    const Era era = EraOf(in.model.empty() ? std::string_view(tex) : in.model);
+    const std::string shader = Normalise(in.pixelShader);
+
+    // 2. What an Arma RVMAT says outright. Glass shaders and fresnelGlass are glass;
+    //    the named-part rule still decides between a pane, a mirror and a lamp.
+    if (in.fresnelGlass || shader.rfind("glass", 0) == 0)
+    {
+        const SurfaceClass part = PartFromNames(texStem, matStem, era);
+        Params p = Preset(part == SurfaceClass::Mirror || part == SurfaceClass::LampGlass ||
+                                  part == SurfaceClass::LampPlastic
+                              ? part
+                              : SurfaceClass::Glass);
+        p.source = Source::Rvmat;
+        return p;
+    }
+
+    // 3. The part, by name -- on military and civil vehicles alike (owner decision 2).
+    if (const SurfaceClass part = PartFromNames(texStem, matStem, era); part != SurfaceClass::None)
+    {
+        Params p = Preset(part);
+        p.source = Source::PartRule;
+        return p;
+    }
+
+    // An environment map on an otherwise unnamed part is the authors' own "this shines".
+    if (in.hasEnvMap && in.specularPower >= 60.0f && !in.military)
+    {
+        Params p = Preset(SurfaceClass::Chrome);
+        p.roughness = std::max(RoughnessFromBlinn(in.specularPower), 0.06f);
+        p.source = Source::Rvmat;
+        return p;
+    }
+
+    // 4. Vehicle body: military matt, civil gloss. Metallic only where the authoring says
+    //    so (a declared entry or an RVMAT env map); stock CWA cannot tell, so solid gloss.
+    if (in.isVehicle)
+    {
+        Params p = Preset(in.military ? SurfaceClass::PaintMatt
+                                      : (in.hasEnvMap ? SurfaceClass::PaintMetallic : SurfaceClass::PaintGloss));
+        p.source = Source::BodyRule;
+        return p;
+    }
+
+    // 5. Everything else keeps what its legacy highlight implied.
+    Params p = Preset(SurfaceClass::Matt);
+    if (in.specular > 0.02f && in.specularPower > 0.0f)
+        p.roughness = RoughnessFromBlinn(in.specularPower);
+    p.source = Source::Default;
+    return p;
+}
+
+// Parse a CfgOpMaterials `surface` string. Unknown names give None (= not declared).
+inline SurfaceClass ClassFromName(std::string_view name)
+{
+    const std::string n = Normalise(name);
+    static constexpr std::array<std::pair<std::string_view, SurfaceClass>, 13> table{{
+        {"matt", SurfaceClass::Matt},
+        {"paint_matt", SurfaceClass::PaintMatt},
+        {"paint_gloss", SurfaceClass::PaintGloss},
+        {"paint_metallic", SurfaceClass::PaintMetallic},
+        {"chrome", SurfaceClass::Chrome},
+        {"glass", SurfaceClass::Glass},
+        {"mirror", SurfaceClass::Mirror},
+        {"lamp_glass", SurfaceClass::LampGlass},
+        {"lamp_plastic", SurfaceClass::LampPlastic},
+        {"rubber", SurfaceClass::Rubber},
+        {"plastic", SurfaceClass::Plastic},
+        {"bare_metal", SurfaceClass::BareMetal},
+        {"paint_pearl", SurfaceClass::PaintMetallic},
+    }};
+    for (const auto& [key, cls] : table)
+        if (n == key)
+            return cls;
+    return SurfaceClass::None;
+}
+
+// `fresnel(N,K)` / `#(ai,64,64,1)fresnel(1.3,7)` -> N, K. False when it is not one.
+inline bool ParseFresnel(std::string_view text, float& n, float& k)
+{
+    const std::string t = Normalise(text);
+    const auto at = t.find("fresnel(");
+    if (at == std::string::npos)
+        return false;
+    const char* s = t.c_str() + at + 8;
+    char* end = nullptr;
+    n = std::strtof(s, &end);
+    if (end == s || *end != ',')
+        return false;
+    s = end + 1;
+    k = std::strtof(s, &end);
+    return end != s;
+}
+
+} // namespace Poseidon::ReflectMaterial
