@@ -27,8 +27,8 @@
 // 0.07 + 0.73*hot), so the hot core can be recovered here without a new material lane.
 // The core is HDR radiance well above the bloom knee (a real flash outshines the scene
 // by orders of magnitude, day or night); the cooler petals stay a modest orange.
-const MUZZLE_EDGE_GAIN: f32 = 1.8;
-const MUZZLE_CORE_GAIN: f32 = 9.0;
+const MUZZLE_EDGE_GAIN: f32 = 1.5;
+const MUZZLE_CORE_GAIN: f32 = 16.0;
 fn stock_muzzle_flash_radiance(srgb: vec3<f32>, linear: f32) -> vec3<f32> {
     let bounded = clamp(srgb, vec3<f32>(0.0), vec3<f32>(1.0));
     let heat = clamp((bounded.b / max(bounded.r, 1e-4) - 0.07) / 0.73, 0.0, 1.0);
@@ -1537,12 +1537,13 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         // Evaluate shade uniformly first: its texture derivatives stay valid.
         // The flame itself is radiance, not diffuse geometry receiving sun/SH.
         rgb = stock_muzzle_flash_radiance(base.rgb, linear);
+        // The flash draws ADDITIVELY (EngineWgpu): the air between it and the camera
+        // is already in the destination, so fog may only attenuate the emission.
+        // fog(rgb) - fog(0) is exactly rgb * transmittance for either fog model.
         if (frame.params.fog_enabled >= 1.5) {
-            rgb = apply_fog(rgb, in.world_pos);
+            rgb = max(apply_fog(rgb, in.world_pos) - apply_fog(vec3<f32>(0.0), in.world_pos), vec3<f32>(0.0));
         } else {
-            var fog_rgb = frame.fog_color.rgb;
-            if (linear > 0.5) { fog_rgb = srgb_to_linear(fog_rgb); }
-            rgb = mix(fog_rgb, rgb, in.fog);
+            rgb = rgb * in.fog;
         }
     }
     // REN-ATM-001: the per-draw twin of gpu_driven.wgsl's atmosphere census -- same words, same

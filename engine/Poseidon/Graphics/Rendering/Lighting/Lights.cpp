@@ -1033,10 +1033,11 @@ Color MuzzleFlashLight::Apply(Vector3Par point, Vector3Par normal)
     return LightPoint::Apply(point, normal) * _pulse.Energy(Glob.time.toInt());
 }
 
-float MuzzleFlashLight::FlareIntensity(Vector3Par camPos, Vector3Par camDir) const
+float MuzzleFlashLight::FlareIntensity(Vector3Par, Vector3Par) const
 {
-    if (!IsOn()) return 0;
-    return LightPoint::FlareIntensity(camPos, camDir) * _pulse.Energy(Glob.time.toInt());
+    // No lens-flare sprite: it drew a flat grey-blue disc round every shot. The
+    // flash sheet's HDR core blooms by itself, which is what a camera sees.
+    return 0;
 }
 
 Color MuzzleFlashLight::GetObjectColor() const

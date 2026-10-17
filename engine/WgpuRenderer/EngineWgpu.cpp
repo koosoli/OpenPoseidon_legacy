@@ -9787,6 +9787,9 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
             // Negative reserved scalar cannot enter the positive cloth encoding.
             // shader3d overrides lighting only for this explicit admission.
             d.mat_local_specular.w = -1.0f;
+            // A flash is emitted light: it adds to what is behind it and never
+            // darkens it (alpha-over drew dark fringes round the soft edges).
+            if (d.blend == WGR_BLEND_ALPHA) d.blend = WGR_BLEND_ADDITIVE;
         }
         static const bool trace = [] {
             const char* value = std::getenv("POSEIDON_MUZZLE_FLASH_TRACE");
@@ -9797,7 +9800,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
             static std::unordered_set<std::string> traced;
             const Texture* source = sMesh.GetSection(beg).properties.GetTexture();
             if (traced.insert(source->Name()).second)
-                LOG_INFO(Graphics, "MUZZLE_FLASH_MATERIAL texture={} width={} height={} enabled={} admitted=true animated=true noShadow=true orderedAlpha=true blend=true encoded={:.1f} radianceEdge=1.8 radianceCore=9.0 timing=existing-zasleh",
+                LOG_INFO(Graphics, "MUZZLE_FLASH_MATERIAL texture={} width={} height={} enabled={} admitted=true animated=true noShadow=true orderedAlpha=true blend=true encoded={:.1f} radianceEdge=1.5 radianceCore=16.0 blend=additive sheet=procedural timing=existing-zasleh",
                          source->Name(), source->AWidth(0), source->AHeight(0), enabled,
                          d.mat_local_specular.w);
         }
