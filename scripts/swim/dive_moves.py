@@ -7,212 +7,244 @@
 #   dm['make_all']()                              # (re)keys the four actions
 #   dm['export_all'](r'<repo>\content\default-packs\swim\rtm')
 #
-# The actions stay ordinary keyframes: they can be reworked by hand in Blender and exported again with export_all.
+# The actions are baked to a key on every frame, so they can be reworked by hand in Blender (or the key poses below
+# changed and make_all run again) and exported again with export_all.
 #
 # The technique: a loaded soldier without fins swims under water with the underwater breaststroke (the long pull to
 # the thighs and a glide, the frog kick on the recovery), body flat, head in line, the rifle slung on the chest.
-#   swimdive       duck-dive from treading water: reach forward, pike head-down at the hips, the arms pull back and
-#                  the legs lift over, ending in the glide (one-shot, 1.5 s)
-#   swimunder      the underwater stroke, 2.2 s a cycle, 1.6 m (looped)
-#   swimunderidle  holding still under water: flat, the hands sculling under the chest, a slow easy kick (looped)
-#   swimsurface    up from the glide: the head and chest lift, a big pull down and a kick, into treading (one-shot)
+#   swimdive       surface dive (pike): lean onto the water, bend at the hips so the trunk points down while the hips
+#                  stay up, pull, lift the legs straight overhead so their weight drives him under, level out into
+#                  the glide (one-shot, 1.6 s)
+#   swimunder      the underwater stroke, 2.2 s a cycle, 1.6 m: the body surges on the pull and drags on the
+#                  recovery, the hips and head rise and dip through the cycle (looped)
+#   swimunderidle  holding still under water: flat, the hands sculling ahead of the face, an easy kick (looped)
+#   swimsurface    up from the glide: head and chest lift, a big pull down and a kick, into treading (one-shot)
 #
-# Angles are degrees on the rig's own axes (see blender_swim_rig.py): flex is about local X (+ forward for the
-# spine, arms, thighs, forearms; the knee bends with -), abd swings a limb out to its side, twist turns it about
-# its length; the left side's abd and twist are mirrored here so both sides read the same.
+# A pose is a set of channels (degrees, metres) on the rig's own axes (see blender_swim_rig.py). Between key poses
+# every channel runs on a Catmull-Rom curve (periodic for the loops), and the hands, feet and head trail the body
+# by a few hundredths of a cycle, so the limbs follow through instead of every joint stopping on the same frame.
 import math
 
 import bpy
 
 FPS = 24
 LOOPED = {'swimunder': (2.2, 41, (0.0, 0.0, -1.6)), 'swimunderidle': (2.4, 41, (0.0, 0.0, 0.0))}
-ONESHOT = {'swimdive': (1.5, 31, (0.0, 0.0, -0.4)), 'swimsurface': (1.3, 27, (0.0, 0.0, -0.2))}
+ONESHOT = {'swimdive': (1.6, 33, (0.0, 0.0, -0.4)), 'swimsurface': (1.3, 27, (0.0, 0.0, -0.2))}
 SPINE = ('bricho', 'zebra', 'hrudnik')
 LIMB_BONES = [s + b for s in 'pl' for b in ('rameno', 'biceps', 'loket', 'ruka', 'stehno', 'holen', 'chodidlo', 'prsty')]
 ALL = ['pzadek', 'krk', 'hlava', *SPINE, *LIMB_BONES]
+SLING = ('zbran', 'roura', 'lzadek')
+
+# channel defaults; fwd is how far forward of the rest pelvis the pelvis is, height is the pelvis bone's own height
+# (treading has it at 0.96), both in metres
+DEFAULT = {'pitch': 90.0, 'roll': 0.0, 'yaw': 0.0, 'fwd': 0.3, 'height': 1.15, 'spine': 0.0, 'neck': 0.0, 'head': 0.0}
+for _s in 'pl':
+    DEFAULT.update({_s + k: 0.0 for k in ('flex', 'abd', 'twist', 'elbow', 'wrist', 'hip', 'hipabd', 'hiptwist',
+                                           'knee', 'ankle')})
+# how far each channel trails the body, as a fraction of the move
+LAG = {'neck': 0.02, 'head': 0.04}
+for _s in 'pl':
+    LAG.update({_s + 'elbow': 0.025, _s + 'wrist': 0.05, _s + 'knee': 0.02, _s + 'ankle': 0.05, _s + 'twist': 0.015})
 
 
+def P(**kw):
+    """A key pose: arm=/leg= set both sides (dicts), the rest are channels."""
+    out = {}
+    for side_key, prefix in (('arm', ('flex', 'abd', 'twist', 'elbow', 'wrist')), ('leg', None)):
+        d = kw.pop(side_key, None)
+        if d:
+            for s in 'pl':
+                for k, v in d.items():
+                    out[s + k] = v
+    out.update(kw)
+    return out
+
+
+def arms(flex, abd=0.0, twist=0.0, elbow=0.0, wrist=0.0):
+    return dict(flex=flex, abd=abd, twist=twist, elbow=elbow, wrist=wrist)
+
+
+def legs(hip, abd=0.0, twist=0.0, knee=0.0, ankle=0.0):
+    return dict(hip=hip, hipabd=abd, hiptwist=twist, knee=knee, ankle=ankle)
+
+
+# ---- the moves' key poses -----------------------------------------------------------------------------------------
+GLIDE = P(pitch=90, fwd=0.3, height=1.15, neck=-8, head=-4, arm=arms(172, 6, 0, 6, -5), leg=legs(-4, 2, 0, 4, -45))
+
+
+def under_keys():
+    """One cycle of the underwater breaststroke (fwd: the surge about the steady swim speed the engine adds)."""
+    return [
+        (0.00, GLIDE),
+        (0.12, P(pitch=91, fwd=0.31, height=1.15, neck=-9, head=-4, arm=arms(160, 38, -25, 12, 10), leg=legs(-4, 2, 0, 4, -45))),
+        (0.27, P(pitch=95, fwd=0.34, height=1.13, neck=-12, head=-6, spine=5, arm=arms(96, 55, -35, 95, 15), leg=legs(-2, 3, 0, 8, -45))),
+        (0.40, P(pitch=91, fwd=0.40, height=1.14, neck=-6, head=-2, arm=arms(24, 14, 10, 8, -20), leg=legs(-4, 2, 0, 5, -45))),
+        (0.50, P(pitch=90, fwd=0.40, height=1.15, neck=-6, head=-2, arm=arms(22, 12, 10, 10, -15), leg=legs(-4, 2, 0, 4, -45))),
+        (0.64, P(pitch=84, fwd=0.32, height=1.12, neck=-16, head=-6, spine=6, arm=arms(50, 12, -10, 135, 10), leg=legs(46, 28, 25, 112, 20))),
+        (0.76, P(pitch=93, fwd=0.27, height=1.17, neck=-10, head=-4, arm=arms(140, 10, 0, 40, 0), leg=legs(16, 30, 10, 40, -15))),
+        (0.88, P(pitch=91, fwd=0.29, height=1.16, neck=-8, head=-4, arm=arms(168, 7, 0, 10, -5), leg=legs(-2, 6, 0, 8, -40))),
+    ]
+
+
+def idle_keys():
+    """Holding position under water: flat with the head up a little, hands sculling ahead of the face out and in twice a
+    cycle, an alternating easy kick."""
+    keys = []
+    for i in range(8):
+        u = i / 8
+        w = math.cos(4 * math.pi * u)
+        p = P(pitch=80 + 3 * math.sin(2 * math.pi * u), fwd=0.3, height=1.15 + 0.02 * math.sin(2 * math.pi * u + 1),
+              neck=-22, head=-10, spine=-4, arm=arms(125, 32 + 16 * w, -22 * w, 65 - 12 * w, 8 * w))
+        for s, ph in (('p', 0.0), ('l', 0.5)):
+            c = math.cos(2 * math.pi * (u + ph))
+            p.update({s + 'hip': 8 + 8 * c, s + 'hipabd': 8, s + 'hiptwist': 6, s + 'knee': 28 + 18 * c, s + 'ankle': -38 + 8 * c})
+        keys.append((u, p))
+    return keys
+
+
+def dive_keys():
+    """The surface dive. The first key is where the blend out of treading lands (see TREAD_IN)."""
+    return [
+        (0.00, P(pitch=20, fwd=0.0, height=0.98, neck=8, head=4, spine=6, arm=arms(70, 30, 0, 50, 0), leg=legs(35, 18, 10, 70, -10))),
+        (0.16, P(pitch=70, fwd=0.05, height=1.10, neck=-6, head=-2, arm=arms(150, 18, 0, 15, 0), leg=legs(-2, 8, 0, 30, -30))),
+        # the pike: the trunk swings down past vertical while the hips stay at the surface, legs still trailing
+        (0.34, P(pitch=150, fwd=-0.12, height=1.22, neck=12, head=6, spine=14, arm=arms(170, 15, 0, 10, 0), leg=legs(95, 6, 0, 15, -35))),
+        # the pull back to the hips; the legs come up
+        (0.50, P(pitch=168, fwd=-0.10, height=1.18, neck=10, head=4, spine=8, arm=arms(25, 40, -25, 55, 15), leg=legs(45, 4, 0, 8, -45))),
+        # straight, head-down, legs overhead; their weight takes him under
+        (0.66, P(pitch=178, fwd=-0.05, height=1.05, neck=4, head=0, arm=arms(165, 10, 0, 12, 0), leg=legs(0, 2, 0, 4, -45))),
+        (0.84, P(pitch=128, fwd=0.15, height=1.07, neck=-4, head=-2, arm=arms(170, 8, 0, 8, -5), leg=legs(-4, 2, 0, 4, -45))),
+        (1.00, GLIDE),
+    ]
+
+
+def surface_keys():
+    return [
+        (0.00, GLIDE),
+        (0.25, P(pitch=62, fwd=0.2, height=1.12, neck=-32, head=-14, spine=-8, arm=arms(140, 58, -25, 25, 10), leg=legs(46, 26, 20, 100, 15))),
+        (0.50, P(pitch=32, fwd=0.08, height=1.00, neck=-14, head=-6, arm=arms(35, 50, -10, 70, 10), leg=legs(18, 28, 0, 40, -20))),
+        (0.72, P(pitch=16, fwd=0.02, height=0.97, neck=-2, head=0, arm=arms(45, 40, 10, 70, 0), leg=legs(40, 22, 10, 80, -5))),
+    ]
+
+
+# ---- curves -------------------------------------------------------------------------------------------------------
+def _fill(keys):
+    """Every key gets every channel: a channel a key leaves out keeps the previous key's value."""
+    cur = dict(DEFAULT)
+    out = []
+    for u, p in keys:
+        cur = dict(cur); cur.update(p)
+        out.append((u, cur))
+    return out
+
+
+def _catmull(p0, p1, p2, p3, t):
+    t2, t3 = t * t, t * t * t
+    return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3)
+
+
+def channel(keys, ch, u, cyclic):
+    us = [k[0] for k in keys]
+    vs = [k[1][ch] for k in keys]
+    n = len(keys)
+    if cyclic:
+        u %= 1.0
+        i = max(j for j in range(n) if us[j] <= u)
+        u0, u1 = us[i], (us[i + 1] if i + 1 < n else 1.0)
+        get = lambda j: vs[j % n]
+    else:
+        u = min(max(u, 0.0), 1.0)
+        i = min(max(j for j in range(n) if us[j] <= u), n - 2)
+        u0, u1 = us[i], us[i + 1]
+        get = lambda j: vs[min(max(j, 0), n - 1)]
+    t = 0.0 if u1 <= u0 else (u - u0) / (u1 - u0)
+    return _catmull(get(i - 1), get(i), get(i + 1), get(i + 2), t)
+
+
+def sample(keys, u, cyclic):
+    return {ch: channel(keys, ch, u - LAG.get(ch, 0.0), cyclic) for ch in DEFAULT}
+
+
+# ---- channels -> bones --------------------------------------------------------------------------------------------
 def R(x=0.0, y=0.0, z=0.0):
     return (math.radians(x), math.radians(y), math.radians(z))
 
 
-def body(pitch=90.0, height=1.15, fwd=-0.3, roll=0.0, spine=0.0, neck=0.0, head=0.0):
-    """The root and the trunk. pitch: 0 upright, 90 lying flat face down, more is head-down. height and fwd: where
-    the pelvis is (world Z, and how far behind the treading pelvis it sits, + backwards)."""
-    p = {'pzadek': ((0.0, height - 0.0, -fwd), R(pitch, 0, roll))}
-    for b, share in zip(SPINE, (0.4, 0.3, 0.3)):
-        p[b] = ((0, 0, 0), R(spine * share))
-    p['krk'] = ((0, 0, 0), R(neck))
-    p['hlava'] = ((0, 0, 0), R(head))
-    return p
+def bones(c):
+    """{bone: (location, euler)} for a set of channels."""
+    b = {'pzadek': ((0.0, c['height'], c['fwd']), R(c['pitch'], c['yaw'], c['roll']))}
+    for name, share in zip(SPINE, (0.4, 0.3, 0.3)):
+        b[name] = ((0, 0, 0), R(c['spine'] * share))
+    b['krk'] = ((0, 0, 0), R(c['neck']))
+    b['hlava'] = ((0, 0, 0), R(c['head']))
+    for s in 'pl':
+        m = 1 if s == 'l' else -1
+        flex, abd = c[s + 'flex'], c[s + 'abd']
+        lift = max(0.0, flex - 90) * 0.3 + max(0.0, abd - 40) * 0.25  # the collarbone rises with an overhead reach
+        b[s + 'rameno'] = ((0, 0, 0), R(min(flex, 120) * 0.12, 0, -m * lift))
+        b[s + 'biceps'] = ((0, 0, 0), R(flex - min(flex, 120) * 0.12, m * c[s + 'twist'], m * abd))
+        b[s + 'loket'] = ((0, 0, 0), R(max(c[s + 'elbow'], 2.0)))  # the curves must not bend an elbow backwards
+        b[s + 'ruka'] = ((0, 0, 0), R(c[s + 'wrist']))
+        b[s + 'stehno'] = ((0, 0, 0), R(c[s + 'hip'], m * c[s + 'hiptwist'], m * c[s + 'hipabd']))
+        b[s + 'holen'] = ((0, 0, 0), R(-max(c[s + 'knee'], 2.0)))
+        b[s + 'chodidlo'] = ((0, 0, 0), R(c[s + 'ankle']))
+        b[s + 'prsty'] = ((0, 0, 0), R())
+    return b
 
 
-def arm(p, s, flex, abd=0.0, twist=0.0, elbow=0.0, wrist=0.0):
-    """Shoulder flex (0 hanging, 90 straight forward, 180 overhead along the body's line), abd out to the side."""
-    m = 1 if s == 'l' else -1
-    lift = max(0.0, flex - 90) * 0.3 + max(0.0, abd - 40) * 0.25  # the collarbone rises with an overhead reach
-    p[s + 'rameno'] = ((0, 0, 0), R(min(flex, 120) * 0.12, 0, -m * lift))
-    p[s + 'biceps'] = ((0, 0, 0), R(flex - min(flex, 120) * 0.12, m * twist, m * abd))
-    p[s + 'loket'] = ((0, 0, 0), R(elbow))
-    p[s + 'ruka'] = ((0, 0, 0), R(wrist))
+def _ease(t):
+    t = min(max(t, 0.0), 1.0)
+    return t * t * (3 - 2 * t)
 
 
-def leg(p, s, hip, abd=0.0, twist=0.0, knee=0.0, ankle=0.0):
-    """Hip flex (+ thigh forward), knee bend (positive here, applied as -X), ankle (- points the toes)."""
-    m = 1 if s == 'l' else -1
-    p[s + 'stehno'] = ((0, 0, 0), R(hip, m * twist, m * abd))
-    p[s + 'holen'] = ((0, 0, 0), R(-knee))
-    p[s + 'chodidlo'] = ((0, 0, 0), R(ankle))
-    p[s + 'prsty'] = ((0, 0, 0), R(0))
+def _mix(a, b, f):
+    return tuple(x * (1 - f) + y * f for x, y in zip(a, b))
 
 
-def both_arms(p, **kw):
-    arm(p, 'p', **kw); arm(p, 'l', **kw)
-
-
-def both_legs(p, **kw):
-    leg(p, 'p', **kw); leg(p, 'l', **kw)
-
-
-# ---- key poses ---------------------------------------------------------------------------------------------------
-def glide():
-    """Streamlined: flat, arms reaching ahead, legs long together, toes pointed."""
-    p = body(pitch=90, neck=-8, head=-4)
-    both_arms(p, flex=172, abd=6, elbow=6, wrist=-5)
-    both_legs(p, hip=-4, abd=2, knee=4, ankle=-45)
-    return p
-
-
-def under_keys():
-    """One cycle of the underwater breaststroke: (u, pose)."""
-    k = [(0.0, glide())]
-    p = body(pitch=92, neck=-10, head=-4)                      # outsweep: hands part, palms out
-    both_arms(p, flex=160, abd=40, twist=-25, elbow=12, wrist=10)
-    both_legs(p, hip=-4, abd=2, knee=5, ankle=-45)
-    k.append((0.14, p))
-    p = body(pitch=93, neck=-12, head=-6, spine=4)              # catch and insweep: elbows high, hands under the chest
-    both_arms(p, flex=95, abd=55, twist=-35, elbow=95, wrist=15)
-    both_legs(p, hip=-2, abd=3, knee=8, ankle=-45)
-    k.append((0.30, p))
-    p = body(pitch=91, neck=-6, head=-2)                        # push: hands past the hips to the thighs
-    both_arms(p, flex=-15, abd=12, twist=10, elbow=8, wrist=-20)
-    both_legs(p, hip=-3, abd=2, knee=6, ankle=-45)
-    k.append((0.46, p))
-    p = body(pitch=90, neck=-6, head=-2)                        # glide with the arms at the sides
-    both_arms(p, flex=-12, abd=10, twist=10, elbow=10, wrist=-15)
-    both_legs(p, hip=-4, abd=2, knee=4, ankle=-45)
-    k.append((0.58, p))
-    p = body(pitch=86, neck=-10, head=-4, spine=6)              # recovery: hands slide up under the body, knees draw up
-    both_arms(p, flex=55, abd=10, twist=-10, elbow=135, wrist=10)
-    both_legs(p, hip=48, abd=28, twist=25, knee=115, ankle=20)
-    k.append((0.72, p))
-    p = body(pitch=92, neck=-8, head=-4)                        # kick: the hands shoot forward, the feet push back
-    both_arms(p, flex=150, abd=8, elbow=35, wrist=0)
-    both_legs(p, hip=14, abd=32, twist=10, knee=35, ankle=-20)
-    k.append((0.84, p))
-    k.append((1.0, glide()))
-    return k
-
-
-def idle_keys():
-    """Holding position under water: flat with the head up a little, sculling, a slow alternating kick."""
-    k = []
-    for i in range(5):
-        u = i / 4
-        p = body(pitch=80 + 3 * math.sin(2 * math.pi * u), neck=-22, head=-10, spine=-4)
-        w = 1 if i % 2 == 0 else -1                             # the hands sweep out and in, twice a cycle
-        # the hands ahead of the face, forearms level, sweeping out and in
-        both_arms(p, flex=125, abd=32 + 16 * w, twist=-22 * w, elbow=65 - 12 * w, wrist=8 * w)
-        for s, ph in (('p', 0.0), ('l', 0.5)):
-            c = math.cos(2 * math.pi * (u + ph))
-            leg(p, s, hip=8 + 8 * c, abd=8, twist=6, knee=28 + 18 * c, ankle=-38 + 8 * c)
-        k.append((u, p))
-    return k
-
-
-def dive_keys(tread0):
-    k = [(0.0, tread0)]
-    p = body(pitch=35, height=1.05, fwd=0.0, neck=12, head=8, spine=10)        # reach forward, take a breath
-    both_arms(p, flex=125, abd=18, elbow=20)
-    both_legs(p, hip=30, abd=14, knee=55, ankle=-10)
-    k.append((0.2, p))
-    p = body(pitch=118, height=1.25, fwd=0.05, neck=28, head=14, spine=22)    # pike: head down, the hips over
-    both_arms(p, flex=150, abd=25, twist=-20, elbow=25)
-    both_legs(p, hip=95, abd=6, knee=20, ankle=-35)
-    k.append((0.42, p))
-    p = body(pitch=128, height=1.3, fwd=0.2, neck=18, head=8, spine=14)       # the arms pull back, the legs rise
-    both_arms(p, flex=40, abd=45, twist=-30, elbow=60, wrist=15)
-    both_legs(p, hip=45, abd=4, knee=12, ankle=-45)
-    k.append((0.62, p))
-    p = body(pitch=112, height=1.22, fwd=0.28, neck=4, head=0)                # straight, head-down, arms forward again
-    both_arms(p, flex=155, abd=12, elbow=20)
-    both_legs(p, hip=4, abd=2, knee=6, ankle=-45)
-    k.append((0.82, p))
-    k.append((1.0, glide()))
-    return k
-
-
-def surface_keys(tread0):
-    k = [(0.0, glide())]
-    p = body(pitch=62, height=1.15, fwd=0.15, neck=-30, head=-15, spine=-8)   # head and chest lift, arms wide
-    both_arms(p, flex=150, abd=55, twist=-25, elbow=20, wrist=10)
-    both_legs(p, hip=40, abd=25, twist=20, knee=100, ankle=15)
-    k.append((0.3, p))
-    p = body(pitch=30, height=1.0, fwd=0.05, neck=-12, head=-6)               # the pull down and the kick
-    both_arms(p, flex=35, abd=50, twist=-10, elbow=70, wrist=10)
-    both_legs(p, hip=15, abd=30, knee=40, ankle=-20)
-    k.append((0.6, p))
-    k.append((1.0, tread0))
-    return k
-
-
-# ---- keying ------------------------------------------------------------------------------------------------------
+# ---- keying -------------------------------------------------------------------------------------------------------
 def _rig():
     return bpy.data.objects['MC_Rig']
 
 
 def tread_pose(frame=0):
-    """The tread action's pose at <frame> as {bone: (location, rotation)} (the dive starts there, surfacing ends)."""
+    """The tread action's pose at <frame> as {bone: (location, rotation)}."""
     ob = _rig()
     ob.animation_data.action = bpy.data.actions['tread']
     bpy.context.scene.frame_set(frame)
-    return {b: (tuple(ob.pose.bones[b].location), tuple(ob.pose.bones[b].rotation_euler)) for b in ALL}
+    return {b: (tuple(ob.pose.bones[b].location), tuple(ob.pose.bones[b].rotation_euler)) for b in ALL + list(SLING)}
 
 
-def _sling():
+def bake(name, keys, seconds, cyclic, join_in=None, join_out=None):
+    """Key <name> on every frame. join_in=(pose, u0, u1): blend from <pose> ({bone: (location, rotation)}) over u0..u1;
+    join_out the same into it -- so a transition starts and ends exactly on the moves it joins."""
     ob = _rig()
-    ob.animation_data.action = bpy.data.actions['tread']
-    bpy.context.scene.frame_set(0)
-    return {b: (tuple(ob.pose.bones[b].location), tuple(ob.pose.bones[b].rotation_euler)) for b in ('zbran', 'roura', 'lzadek')}
-
-
-def key_action(name, keys, seconds, cyclic):
-    ob = _rig()
+    tread = tread_pose(0)
+    keys = _fill(keys)
     act = bpy.data.actions.get(name)
     if act:
         bpy.data.actions.remove(act)
     act = bpy.data.actions.new(name)
     act.use_fake_user = True
-    ob.animation_data_create()
     ob.animation_data.action = act
-    sling = _sling()
-    ob.animation_data.action = act
-    last = seconds * FPS
-    for u, pose in keys:
-        f = round(u * last)
-        full = dict(sling)
-        full.update(pose)
-        for b in ALL + ['zbran', 'roura', 'lzadek']:
+    last = int(round(seconds * FPS))
+    for f in range(last + 1):
+        u = f / last
+        pose = bones(sample(keys, u, cyclic))
+        blends = []
+        if join_in:
+            blends.append((join_in[0], 1.0 - _ease((u - join_in[1]) / (join_in[2] - join_in[1]))))
+        if join_out:
+            blends.append((join_out[0], _ease((u - join_out[1]) / (join_out[2] - join_out[1]))))
+        for b in ALL + list(SLING):
             pb = ob.pose.bones[b]
-            loc, rot = full.get(b, ((0, 0, 0), (0, 0, 0)))
-            pb.location = loc
-            pb.rotation_euler = rot
+            loc, rot = pose.get(b, tread[b])
+            for target, w in blends:
+                if w > 0 and b in target:
+                    loc, rot = _mix(loc, target[b][0], w), _mix(rot, target[b][1], w)
+            pb.location, pb.rotation_euler = loc, rot
             pb.keyframe_insert('location', frame=f)
             pb.keyframe_insert('rotation_euler', frame=f)
     for fc in _fcurves(act):
-        for kp in fc.keyframe_points:
-            kp.interpolation = 'BEZIER'
-            kp.handle_left_type = kp.handle_right_type = 'AUTO_CLAMPED'
         if cyclic:
             fc.modifiers.new('CYCLES')
         fc.update()
@@ -232,12 +264,15 @@ def _fcurves(act):
 
 
 def make_all():
-    tread0 = tread_pose(0)
     acts = {}
-    acts['swimunder'] = key_action('swimunder', under_keys(), LOOPED['swimunder'][0], True)
-    acts['swimunderidle'] = key_action('swimunderidle', idle_keys(), LOOPED['swimunderidle'][0], True)
-    acts['swimdive'] = key_action('swimdive', dive_keys(tread0), ONESHOT['swimdive'][0], False)
-    acts['swimsurface'] = key_action('swimsurface', surface_keys(tread0), ONESHOT['swimsurface'][0], False)
+    acts['swimunder'] = bake('swimunder', under_keys(), LOOPED['swimunder'][0], True)
+    acts['swimunderidle'] = bake('swimunderidle', idle_keys(), LOOPED['swimunderidle'][0], True)
+    tread = tread_pose(0)
+    stroke = bones(sample(_fill(under_keys()), 0.0, True))  # the stroke's first pose, its trailing limbs included
+    acts['swimdive'] = bake('swimdive', dive_keys(), ONESHOT['swimdive'][0], False,
+                            join_in=(tread, 0.0, 0.16), join_out=(stroke, 0.85, 1.0))
+    acts['swimsurface'] = bake('swimsurface', surface_keys(), ONESHOT['swimsurface'][0], False,
+                               join_in=(stroke, 0.0, 0.1), join_out=(tread, 0.6, 1.0))
     return acts
 
 

@@ -2,7 +2,8 @@
 # Run inside Blender (Blender 4.2+; made on 5.3), e.g. from the Scripting tab or the Blender MCP:
 #
 #   import runpy; rig = runpy.run_path(r'<repo>\scripts\swim\blender_swim_rig.py')
-#   rig['build'](mesh=r'<extracted Data3D.pbo>\mc vojakw2.p3d', dll=r'<repo>\dist\x64-win-rwdi\PoseidonFormats.dll')
+#   rig['build'](mesh=r'<extracted Data3D.pbo>\mc vojakw2.p3d', dll=r'<repo>\dist\x64-win-rwdi\PoseidonFormats.dll',
+#                textures=r'<folder holding merged\00007mc_vojakw2.paa, data\xicht_a.paa, ...>')  # textures optional
 #   rig['import_rtm'](r'<repo>\content\default-packs\swim\rtm\tread.rtm')      # an existing move as an action
 #   rig['export_rtm']('swimunder', r'<out>\swimunder.rtm', phases=41, step=(0, 0, 0))
 #
@@ -51,7 +52,7 @@ def _bl(p):
     return (Pr @ Vector((p[0], p[1], p[2], 1.0))).xyz
 
 
-def build(mesh=None, dll=None, rest_pose=True):
+def build(mesh=None, dll=None, textures=None):
     """Make the armature MC_Rig (and, given the model, the skinned preview mesh MC_Soldier)."""
     parent, J = _joints()
     if ARM in bpy.data.objects:
@@ -101,11 +102,11 @@ def build(mesh=None, dll=None, rest_pose=True):
         pb.rotation_mode = 'XYZ'
     bpy.ops.object.mode_set(mode='OBJECT')
     if mesh:
-        _build_mesh(ob, mesh, dll)
+        _build_mesh(ob, mesh, dll, textures)
     return ob
 
 
-def _build_mesh(arm_ob, path, dll):
+def _build_mesh(arm_ob, path, dll, textures=None):
     if dll:
         os.environ['POSEIDON_FORMATS_DLL'] = dll
     addon = os.path.join(HERE, '..', '..', 'apps', 'tools', 'BlenderAddon', 'io_import_p3d')
@@ -129,10 +130,12 @@ def _build_mesh(arm_ob, path, dll):
     if MESH in bpy.data.objects:
         bpy.data.objects.remove(bpy.data.objects[MESH])
     me = bpy.data.meshes.new(MESH)
-    me.from_pydata(P, [], F[keep].tolist())
+    kept = F[keep][:, ::-1]  # the rest -> Blender mapping is a mirror, so the winding turns round with it
+    me.from_pydata(P, [], kept.tolist())
     me.update()
     ob = bpy.data.objects.new(MESH, me)
     bpy.context.scene.collection.objects.link(ob)
+    _texture(m, ob, kept, np.array(m.get_face_materials(0))[keep], textures, p3d_lib)
     for n, (idx, wg) in W.items():
         vg = ob.vertex_groups.new(name=n)
         for i, w in zip(idx, wg):
@@ -141,6 +144,40 @@ def _build_mesh(arm_ob, path, dll):
     mod.object = arm_ob
     ob.parent = arm_ob
     return ob
+
+
+def _texture(m, ob, faces, face_mats, root, p3d_lib):
+    """The model's UVs, and a material per texture loaded from <root> (a folder holding the game's texture paths,
+    e.g. merged\\00007mc_vojakw2.paa and data\\xicht_a.paa extracted from DTA\\Merged.pbo and Data.pbo)."""
+    uvs = m.get_uvs(0)
+    uv = ob.data.uv_layers.new(name='UVMap')
+    loops = ob.data.loops
+    for li in range(len(loops)):
+        u, v = uvs[loops[li].vertex_index]
+        uv.data[li].uv = (u, 1.0 - v)
+    for mi in range(m.material_count(0)):
+        tex = m.material_texture(0, mi)
+        name = os.path.splitext(os.path.basename(tex))[0] if tex else f'mat{mi}'
+        mat = bpy.data.materials.get('MC_' + name) or bpy.data.materials.new('MC_' + name)
+        mat.use_nodes = True
+        nt = mat.node_tree
+        bsdf = nt.nodes.get('Principled BSDF')
+        path = os.path.join(root, tex) if (root and tex) else None
+        if path and os.path.isfile(path) and bsdf and not any(n.type == 'TEX_IMAGE' for n in nt.nodes):
+            img = p3d_lib.PAAImage(path)
+            w, h, rgba = img.width, img.height, np.frombuffer(bytes(img.get_rgba()), np.uint8)
+            img.close()
+            bl = bpy.data.images.new('MC_' + name, width=w, height=h, alpha=True)
+            bl.pixels[:] = (rgba.reshape(h, w, 4)[::-1].astype(np.float32) / 255.0).ravel()
+            bl.pack()
+            node = nt.nodes.new('ShaderNodeTexImage')
+            node.image = bl
+            nt.links.new(node.outputs['Color'], bsdf.inputs['Base Color'])
+            nt.links.new(node.outputs['Alpha'], bsdf.inputs['Alpha'])
+            bsdf.inputs['Roughness'].default_value = 0.8
+        ob.data.materials.append(mat)
+    for poly, mi in zip(ob.data.polygons, face_mats):
+        poly.material_index = int(mi)
 
 
 # ---- RTM <-> action ---------------------------------------------------------------------------------------------

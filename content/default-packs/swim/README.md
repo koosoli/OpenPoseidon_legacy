@@ -25,10 +25,10 @@ The animations and move states that make soldiers swim. The engine side is
 
 ## Diving moves (W4, not wired yet)
 
-`SwimDive` (duck-dive from treading into the glide, 1.5 s), `SwimUnder` (the underwater breaststroke:
-long pull to the thighs, glide, frog kick; 2.2 s, 1.6 m a stroke), `SwimUnderIdle` (holding still: flat,
+`SwimDive` (surface dive from treading: pike at the hips, the legs up overhead, into the glide; 1.6 s), `SwimUnder` (the underwater breaststroke:
+long pull to the thighs, glide, frog kick, the body surging on the pull; 2.2 s, 1.6 m a stroke), `SwimUnderIdle` (holding still: flat,
 sculling, an easy kick) and `SwimSurface` (up from the glide into treading, 1.3 s). `SwimDive` starts on
-`tread`'s first pose and `SwimSurface` ends on it exactly; `SwimDive` ends on `SwimUnder`'s first pose.
+`tread`'s first pose and ends on `SwimUnder`'s; `SwimSurface` starts on `SwimUnder`'s and ends on `tread`'s (exactly).
 
 Nothing reaches them yet: no existing state or action map leads to them, so swimming is unchanged. The
 engine side of diving (W4: going under, depth, breath, the camera) is still to do. It should blend to them
@@ -60,8 +60,8 @@ calls it, and `Deploy.ps1` installs the result.
   cleared them for the repository. They are original work of this project, released with it.
 * The four diving moves were made by Claude in Blender (2026-10-17, owner: "make with blender ... also a
   diving animation"). They were keyed on a rig of the `MC` skeleton (`scripts/swim/blender_swim_rig.py`), whose
-  joint pivots `fit_mc_joints.py` fits from the stock animations into `mc_joints.json`. The keys come from
-  `scripts/swim/dive_moves.py`, and its `export_all` writes the RTMs. The actions are ordinary Blender keyframes,
+  joint pivots `fit_mc_joints.py` fits from the stock animations into `mc_joints.json`. The key poses are in
+  `scripts/swim/dive_moves.py` (curves through them, the hands, feet and head trailing, baked to every frame), and its `export_all` writes the RTMs. The actions are ordinary Blender keyframes,
   so they can be reworked by hand and exported again. The rig's RTM import and export round-trips `tread`/`swim`
   to 1e-6. The soldier mesh used for previewing is the game's `mc vojakw2.p3d` and is not in this repo.
 

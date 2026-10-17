@@ -265,12 +265,12 @@ class CfgMovesMC
 		};
 		// diving (W4; made in Blender, scripts/swim/dive_moves.py). Defined for the engine's diving to blend to
 		// (BlendToMove); nothing here leads into them yet, so swimming is unchanged.
-		// duck-dive from treading: reach, pike head-down, the legs over, into the glide (1.5 s)
+		// surface dive from treading: lean onto the water, pike at the hips, the legs up overhead, level into the glide (1.6 s)
 		class SwimDive: Swim
 		{
 			actions="SwimUnderActions";
 			file="\swim\swimdive.rtm";
-			speed=-1.5;
+			speed=-1.6;
 			looped=0;
 			duty=0.3;
 			interpolateTo[]={"SwimDeadF",0.1};
