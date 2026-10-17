@@ -22,20 +22,24 @@ The animations and move states that make soldiers swim. The engine side is
 | --- | --- |
 | `config.cpp` | `CfgPatches swim`; the `CfgMovesMC` action maps (`SwimActions`, `SwimForwardActions`, `SwimDeadActions`, `SwimOutActions`, `SwimUnderActions`, `FallActions`, `FallLandActions`) and 25 states |
 | `rtm/*.rtm` | 23 animations for the CWA `MC` skeleton (`tread`, `swim`, `swimb/l/r/lb/rb/lf/rf`, `swimturnl/r`, `swimstart`, `swimstop`, `swimout`, `swimdead`, `swimdeadf`, `fall`, `fallland`, `swimin`; diving: `swimdive`, `swimunder`, `swimunderidle`, `swimsurface`) |
-
-## Diving moves (W4, not wired yet)
-
-`SwimDive` (surface dive from treading: pike at the hips, the legs up overhead, into the glide; 1.6 s), `SwimUnder` (the underwater breaststroke:
-long pull to the thighs, glide, frog kick, the body surging on the pull; 2.2 s, 1.6 m a stroke), `SwimUnderIdle` (holding still: flat,
-sculling, an easy kick) and `SwimSurface` (up from the glide into treading, 1.3 s). `SwimDive` starts on
-`tread`'s first pose and ends on `SwimUnder`'s; `SwimSurface` starts on `SwimUnder`'s and ends on `tread`'s (exactly).
-
-Nothing reaches them yet: no existing state or action map leads to them, so swimming is unchanged. The
-engine side of diving (W4: going under, depth, breath, the camera) is still to do. It should blend to them
-with `BlendToMove`, and add `SwimUnderActions` to what `Man::IsSwimMove` counts as swimming. In model space
-their head rides about 0.5 m lower than treading's (the body lies flat), so the swimmer's water line must
-not follow the eyes under water.
 | `mod.json` | Default content pack manifest (`defaultContentApi` 1) |
+
+## Diving (W4)
+
+Swimming, the player dives with **move down (Z)** where the water is at least 2.2 m deep. Under water **Z** sinks
+and **Q** (move up) rises; forward swims the underwater stroke, otherwise he holds still at his depth. Going up
+near the surface, he surfaces into treading. He has 40 s of air under water (a hint at 10 s left), then drowns
+slowly; at the surface the air comes back. The camera follows him under. AI swimmers do not dive. Engine:
+`SoldierOldSwim.cpp` (`SimDive`, `UpdateBreath`), decision record
+`docs/roadmap/decisions/SINKHOLE-04-diving-20261017.md`.
+
+The moves: `SwimDive` (surface dive from treading: pike at the hips, the legs up overhead, into the glide; 1.6 s),
+`SwimUnder` (the underwater breaststroke: long pull to the thighs, glide, frog kick, the body surging on the pull;
+2.2 s, 1.6 m a stroke), `SwimUnderIdle` (holding still: flat, sculling, an easy kick) and `SwimSurface` (up from
+the glide into treading, 1.3 s). `SwimDive` starts on `tread`'s first pose and ends on `SwimUnder`'s; `SwimSurface`
+starts on `SwimUnder`'s and ends on `tread`'s (exactly). The engine blends to `SwimDive` and `SwimSurface`
+(`BlendToMove`); under water the `SwimUnderActions` map picks the stroke or the hover, and `Man::IsSwimMove` counts
+it as swimming.
 
 `scripts/Build-Swim.ps1` packs them as `Mods/@OP_Swim/AddOns/swim.pbo` (prefix `swim`), with the
 missions `dev-missions/swim-bay.Eden` and `dev-missions/swim-squad.Eden`. `Build-DefaultContent.ps1`

@@ -1778,11 +1778,13 @@ void World::Simulate(float deltaT, bool& enableDraw)
             // Sinkhole W3: on a swimmer the floor is the waves, not the flat mean sea -- in first person none
             // at all (the swim keeps his eyes over the water; a trough lifted the view into his head), in 3rd
             // person the wave surface under the camera, so it rides over the crests.
+            // Sinkhole W4: on a diver the view goes under with him, held only above the bed.
             float swimWaterY = 0;
+            const bool diverView = SwimmerDiving(cameraVehicle.GetLink());
             const bool swimView =
                 !mayDive && SwimmerCameraWater(cameraVehicle.GetLink(), camPos.X(), camPos.Z(), swimWaterY);
             float minCamY = _scene.GetLandscape()->CameraFloorY(camPos, camFocusObj ? &camFocus : nullptr,
-                                                                !mayDive && !swimView);
+                                                                !mayDive && !swimView && !diverView);
             if (swimView && _camType != CamInternal)
             {
                 minCamY = std::max(minCamY, swimWaterY + 0.15f);

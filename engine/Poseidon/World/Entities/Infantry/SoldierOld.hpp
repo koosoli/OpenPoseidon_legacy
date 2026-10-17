@@ -623,6 +623,15 @@ class Man: public Person
 	Vector3 _swimLimbPos[4];
 	float _swimLimbCool[4] = {};
 	float _swimEntrySoft = 0; // seconds of the soft heave after falling in: the body plunges, then bobs up
+	// Sinkhole W4: diving (SoldierOldSwim.cpp), with the swim pack's SwimDive / SwimUnder / SwimUnderIdle / SwimSurface
+	mutable MoveId _swimDiveMove = MoveIdNone;
+	mutable MoveId _swimUnderIdleMove = MoveIdNone;
+	mutable MoveId _swimSurfaceMove = MoveIdNone;
+	bool _diving = false;      // under the water (from the dive until surfacing)
+	float _diveVy = 0;         // vertical speed under water (m/s)
+	float _swimVertWanted = 0; // the player's up (+) / down (-) keys while swimming
+	float _breath = -1;        // seconds of breath left (< 0: not set yet, i.e. full)
+	Vector3 _diveOffset = VZero; // added to the position so the dive pitch turns the body about its middle
 	// Sinkhole W3: falling (SoldierOldSwim.cpp), with the swim pack's Fall / FallLand / SwimIn moves
 	mutable MoveId _fallMove = MoveIdNone;
 	mutable MoveId _fallLandMove = MoveIdNone;
@@ -1078,8 +1087,12 @@ class Man: public Person
 	bool CanSwim() const;
 	bool IsSwimMove(MoveId id) const;
 	bool IsSwimming() const override {return _swimming;}
+	bool IsDiving() const {return _swimming && _diving;}
+	void SetSwimVerticalWanted(float v) {_swimVertWanted = v;}
 	bool UpdateSwimming();
 	void SimSwimMovement(float deltaT, SimulationImportance prec);
+	void SimDive(float deltaT, float surface, Vector3& pos);
+	void UpdateBreath(float deltaT, float headDepth);
 	void EmitSwimSplashes(float deltaT);
 	void UpdateFalling(float deltaT);
 	float SwimGearLoad() const;

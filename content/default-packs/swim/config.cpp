@@ -77,8 +77,8 @@ class CfgMovesMC
 			Die="SwimDeadF";
 			upDegree="manposstand";
 		};
-		// under water (W4, diving): the underwater stroke forward, holding still otherwise. Not reachable yet: no
-		// map above leads here, and IsSwimMove does not count this map until the engine's diving lands
+		// under water (W4, diving): the underwater stroke forward, holding still otherwise. The engine enters it with
+		// SwimDive and leaves it with SwimSurface (SoldierOldSwim.cpp); Man::IsSwimMove counts this map as swimming
 		class SwimUnderActions: NoActions
 		{
 			Stop="SwimUnderIdle";
@@ -263,8 +263,8 @@ class CfgMovesMC
 			interpolateTo[]={"SwimDead",0.1};
 			connectTo[]={"Swim",0.05,"SwimB",0.05,"SwimL",0.05,"SwimR",0.05,"SwimLB",0.05,"SwimRB",0.05,"SwimTurnL",0.05,"SwimTurnR",0.05,"SwimStart",0.05};
 		};
-		// diving (W4; made in Blender, scripts/swim/dive_moves.py). Defined for the engine's diving to blend to
-		// (BlendToMove); nothing here leads into them yet, so swimming is unchanged.
+		// diving (W4; made in Blender, scripts/swim/dive_moves.py). The engine blends to SwimDive on the player's
+		// move-down key and to SwimSurface at the surface (BlendToMove); no swim state leads to them by itself.
 		// surface dive from treading: lean onto the water, pike at the hips, the legs up overhead, level into the glide (1.6 s)
 		class SwimDive: Swim
 		{
