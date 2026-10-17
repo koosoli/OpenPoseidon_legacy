@@ -2333,6 +2333,13 @@ float Landscape::VisibleStrategic(Vector3Par from, Vector3Par to) const
 #if 1
     float dist = to.Distance(from);
     int samples = toIntFloor(dist * _invTerrainGrid * 2);
+    // Two samples per terrain cell is ~40 for a kilometre of CWA terrain (50 m grid) but
+    // 1600 on an Arma 3 world's 1.25 m heightmap, and the AI exposure map asks this for every
+    // dirty field against every armed target in range: on Tanoa (Apex) one simulation step
+    // took minutes. Strategic visibility is a coarse estimate; 256 samples (a CWA line of
+    // 6.4 km) are plenty, and nothing shorter than that changes.
+    if (samples > 256)
+        samples = 256;
     if (samples <= 0)
     {
         return 1;
