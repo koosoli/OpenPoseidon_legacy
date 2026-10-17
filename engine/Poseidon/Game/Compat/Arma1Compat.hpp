@@ -190,6 +190,17 @@ std::vector<RString> ListedGeneratedMagazines(const char* weaponClass);
 // Whether `weaponClass`'s Arma 1 weapon lists the generated magazine `magazine` itself.
 bool WeaponListsGeneratedMagazine(const char* weaponClass, const char* magazine);
 
+// The generated magazines (A1x_<magazine>) the Arma 1 weapon behind the generated weapon
+// class `weaponClass` lists in its own magazines[] -- what its main muzzle takes whatever
+// CWA carrier they ride on. The M9's 15Rnd_9x19_M9 rides on CWA's Beretta, whose muzzle
+// takes BerettaMag; the G36a's on M16 rounds, which CWA's own G36a does not take. Without
+// this every pistol and both marksman rifles of the play test stayed empty. Empty for
+// anything not A1x_. Only names generated already: building a weapon generates nothing.
+std::vector<RString> ListedGeneratedMagazines(const char* weaponClass);
+
+// Whether `weaponClass`'s Arma 1 weapon lists the generated magazine `magazine` itself.
+bool WeaponListsGeneratedMagazine(const char* weaponClass, const char* magazine);
+
 // Arma 2: the EventHandlers >> init code of a module (a class derived from Logic, such
 // as FunctionsManager or the first-aid modules) that a mission places; empty otherwise.
 RString Arma2ModuleInit(const RString& className);
