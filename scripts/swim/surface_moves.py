@@ -91,18 +91,37 @@ def stop_keys():
     ]
 
 
+# Owner, 2026-10-17: the breaststroke's hands looked "partly transparent" in first person -- they rode 0..0.28 m over
+# the mean surface, so the waves cut across them and the half under the water showed through it. They now pull and
+# glide under it, as a real breaststroke does: the shoulder flex comes down by ARM_DROP through the stroke.
+ARM_DROP = 25.0
+
+
+def drop_arms(keys, amount=ARM_DROP, ramp=None):
+    """Lower both arms by <amount> degrees of shoulder flex; ramp=(u0, u1) eases it in over a one-shot."""
+    out = []
+    for u, p in keys:
+        w = 1.0 if ramp is None else min(1.0, max(0.0, (u - ramp[0]) / (ramp[1] - ramp[0])))
+        q = dict(p)
+        for s in 'pl':
+            if s + 'flex' in q:
+                q[s + 'flex'] = q[s + 'flex'] - amount * w
+        out.append((u, q))
+    return out
+
+
 def make_all():
     acts = {}
-    acts['swim'] = bake('swim', stroke_keys(), LOOPED['swim'][0], True)
-    acts['swimlf'] = bake('swimlf', stroke_keys(-25.0), LOOPED['swimlf'][0], True)
-    acts['swimrf'] = bake('swimrf', stroke_keys(25.0), LOOPED['swimrf'][0], True)
+    acts['swim'] = bake('swim', drop_arms(stroke_keys()), LOOPED['swim'][0], True)
+    acts['swimlf'] = bake('swimlf', drop_arms(stroke_keys(-25.0)), LOOPED['swimlf'][0], True)
+    acts['swimrf'] = bake('swimrf', drop_arms(stroke_keys(25.0)), LOOPED['swimrf'][0], True)
     # baked on one frame a phase: the arms are set per frame, and a sample between frames would blend their angles
     acts['swimfast'] = crawl_sling(crawl_arms(bake('swimfast', crawl_keys(), CRAWL_FRAMES / dm['FPS'], True)))
     tread = tread_pose(0)
-    glide = bones(sample(_fill(stroke_keys()), 0.0, True))  # the stroke's first pose, trailing limbs included
-    acts['swimstart'] = bake('swimstart', start_keys(), ONESHOT['swimstart'][0], False,
+    glide = bones(sample(_fill(drop_arms(stroke_keys())), 0.0, True))  # the stroke's first pose, trailing limbs included
+    acts['swimstart'] = bake('swimstart', drop_arms(start_keys(), ramp=(0.3, 0.8)), ONESHOT['swimstart'][0], False,
                              join_in=(tread, 0.0, 0.2), join_out=(glide, 0.82, 1.0))
-    acts['swimstop'] = bake('swimstop', stop_keys(), ONESHOT['swimstop'][0], False,
+    acts['swimstop'] = bake('swimstop', drop_arms(stop_keys(), ramp=(0.7, 0.2)), ONESHOT['swimstop'][0], False,
                             join_in=(glide, 0.0, 0.12), join_out=(tread, 0.65, 1.0))
     return acts
 
