@@ -6,6 +6,7 @@
 #include <Poseidon/Asset/Formats/RTM/RTMReader.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/Foundation/Types/ScopeLock.hpp>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -474,11 +475,26 @@ float AnimationRTCache::Priority()
 }
 
 const int MaxAnimationRTItemCount = 4 * 1024;
-const int MaxAnimationRTMatrixCount = 32000;
+// Bone matrices kept decoded (64 bytes each). OFP's 32000 (2 MB) held its 20-bone moves
+// many times over, but an Arma 2 move is keyframes x 132 bones (~4000 matrices for 30
+// keys): about eight of them fit. With more moves in use than that (C0's 59 soldiers on
+// the LHD after ~10 s), every pose -- each collision test poses both men -- evicted one
+// move and decoded another from its archive again: ~13 ms per man per tick. 1M matrices
+// (64 MB) holds a mission's working set; FreeOnDemand still reclaims it under pressure.
+// POSEIDON_ANIM_CACHE_MATRICES=<n> sets another limit (32000 = the old one, for comparison).
+static int AnimationRTMatrixLimit()
+{
+    static const int limit = [] {
+        const char* e = std::getenv("POSEIDON_ANIM_CACHE_MATRICES");
+        const long v = e ? std::strtol(e, nullptr, 10) : 0;
+        return v > 0 ? static_cast<int>(v) : 1000000;
+    }();
+    return limit;
+}
 
 size_t AnimationRTCache::BudgetBytes() const
 {
-    return (size_t)MaxAnimationRTMatrixCount * sizeof(Matrix4);
+    return (size_t)AnimationRTMatrixLimit() * sizeof(Matrix4);
 }
 
 AnimationRTCache::AnimationRTCache()
@@ -520,7 +536,7 @@ void AnimationRTCache::Load(AnimationRT* anim)
     }
     else
     {
-        if (_count > MaxAnimationRTItemCount || _countMatrices > MaxAnimationRTMatrixCount)
+        if (_count > MaxAnimationRTItemCount || _countMatrices > AnimationRTMatrixLimit())
         {
             if (_loaded.Last())
             {
@@ -529,6 +545,12 @@ void AnimationRTCache::Load(AnimationRT* anim)
         }
 
         anim->AddLoadCount();
+
+        // a cache too small for the moves in use reloads them over and over: say so
+        static long long loads = 0;
+        if (++loads % 2000 == 0)
+            LOG_INFO(Core, "Animation cache: {} loads so far ({} held, {} matrices of {})", loads, _count,
+                     _countMatrices, AnimationRTMatrixLimit());
 
         _loaded.Insert(anim);
 
