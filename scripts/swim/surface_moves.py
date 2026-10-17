@@ -34,7 +34,7 @@ ONESHOT = {'swimstart': (1.83, 33, (-0.018342, 0.0, -0.098314)),
            'swimstop': (1.1, 25, (0.012962, 0.0, -0.60875))}
 
 # head up and looking ahead throughout (neck/head negative lift the face)
-GLIDE = P(pitch=70, fwd=0.32, height=1.10, neck=-30, head=-14, spine=-4,
+GLIDE = P(pitch=70, fwd=0.32, height=1.44, neck=-30, head=-14, spine=-4,
           arm=arms(170, 3, 0, 6, -5), leg=legs(-4, 3, 0, 6, -42))
 
 
@@ -43,24 +43,24 @@ def stroke_keys(yaw=0.0):
     keys = [
         (0.00, GLIDE),
         # outsweep: hands apart, palms out
-        (0.12, P(pitch=69, fwd=0.33, height=1.10, neck=-30, head=-14, arm=arms(166, 34, -30, 10, 10),
+        (0.12, P(pitch=69, fwd=0.33, height=1.44, neck=-30, head=-14, arm=arms(166, 34, -30, 10, 10),
                  leg=legs(-4, 3, 0, 6, -42))),
         # insweep with high elbows; the shoulders rise for the breath
-        (0.27, P(pitch=60, fwd=0.36, height=1.15, neck=-34, head=-16, spine=-8, arm=arms(112, 54, -38, 88, 15),
+        (0.27, P(pitch=64, fwd=0.36, height=1.49, neck=-34, head=-16, spine=-8, arm=arms(118, 54, -38, 78, 15),
                  leg=legs(4, 4, 0, 18, -38))),
         # hands meet under the chin; the heels start up
-        (0.39, P(pitch=55, fwd=0.37, height=1.16, neck=-30, head=-14, spine=-10, arm=arms(52, 26, 18, 132, -10),
+        (0.39, P(pitch=60, fwd=0.37, height=1.50, neck=-30, head=-14, spine=-10, arm=arms(74, 24, 18, 108, -10),
                  leg=legs(22, 12, 14, 72, -5))),
         # the hands shoot forward; the legs fully drawn up, knees hip width, feet out and flexed
-        (0.51, P(pitch=61, fwd=0.32, height=1.13, neck=-30, head=-14, spine=-6, arm=arms(122, 6, 4, 72, -5),
+        (0.51, P(pitch=64, fwd=0.32, height=1.47, neck=-30, head=-14, spine=-6, arm=arms(122, 6, 4, 72, -5),
                  leg=legs(42, 20, 32, 118, 24))),
         # the whip: feet sweep out and back
-        (0.63, P(pitch=67, fwd=0.30, height=1.11, neck=-30, head=-14, spine=-4, arm=arms(160, 3, 0, 24, -5),
+        (0.63, P(pitch=67, fwd=0.30, height=1.45, neck=-30, head=-14, spine=-4, arm=arms(160, 3, 0, 24, -5),
                  leg=legs(16, 34, 22, 62, 12))),
         # legs snap together; the surge into the glide
-        (0.75, P(pitch=71, fwd=0.35, height=1.10, neck=-30, head=-14, spine=-4, arm=arms(170, 2, 0, 6, -5),
+        (0.75, P(pitch=71, fwd=0.35, height=1.44, neck=-30, head=-14, spine=-4, arm=arms(170, 2, 0, 6, -5),
                  leg=legs(-4, 5, 0, 8, -40))),
-        (0.88, P(pitch=71, fwd=0.34, height=1.10, neck=-30, head=-14, spine=-4, arm=arms(170, 3, 0, 6, -5),
+        (0.88, P(pitch=71, fwd=0.34, height=1.44, neck=-30, head=-14, spine=-4, arm=arms(170, 3, 0, 6, -5),
                  leg=legs(-4, 3, 0, 6, -42))),
     ]
     if yaw:
@@ -73,9 +73,9 @@ def start_keys():
     """From treading into the stroke's glide: lean onto the water, reach forward, one kick."""
     return [
         (0.00, P(pitch=18, fwd=0.0, height=0.97, neck=-4, head=-2, arm=arms(45, 40, 10, 70, 0), leg=legs(40, 22, 10, 80, -5))),
-        (0.30, P(pitch=40, fwd=0.08, height=1.02, neck=-20, head=-10, arm=arms(80, 30, 10, 100, -5), leg=legs(45, 20, 30, 115, 22))),
-        (0.55, P(pitch=58, fwd=0.20, height=1.08, neck=-28, head=-14, arm=arms(140, 6, 2, 50, -5), leg=legs(16, 34, 22, 62, 12))),
-        (0.80, P(pitch=68, fwd=0.30, height=1.10, neck=-30, head=-14, arm=arms(168, 3, 0, 8, -5), leg=legs(-4, 5, 0, 8, -40))),
+        (0.30, P(pitch=40, fwd=0.08, height=1.14, neck=-20, head=-10, arm=arms(80, 30, 10, 100, -5), leg=legs(45, 20, 30, 115, 22))),
+        (0.55, P(pitch=58, fwd=0.20, height=1.32, neck=-28, head=-14, arm=arms(140, 6, 2, 50, -5), leg=legs(16, 34, 22, 62, 12))),
+        (0.80, P(pitch=68, fwd=0.30, height=1.43, neck=-30, head=-14, arm=arms(168, 3, 0, 8, -5), leg=legs(-4, 5, 0, 8, -40))),
         (1.00, GLIDE),
     ]
 
@@ -84,8 +84,8 @@ def stop_keys():
     """From the glide up into treading: the hands sweep down, the legs drop under him."""
     return [
         (0.00, GLIDE),
-        (0.35, P(pitch=48, fwd=0.22, height=1.06, neck=-24, head=-12, arm=arms(95, 45, -20, 50, 10), leg=legs(30, 18, 10, 70, -10))),
-        (0.70, P(pitch=24, fwd=0.06, height=0.99, neck=-8, head=-4, arm=arms(50, 40, 10, 70, 0), leg=legs(38, 22, 10, 80, -5))),
+        (0.35, P(pitch=48, fwd=0.22, height=1.32, neck=-24, head=-12, arm=arms(95, 45, -20, 50, 10), leg=legs(30, 18, 10, 70, -10))),
+        (0.70, P(pitch=24, fwd=0.06, height=1.05, neck=-8, head=-4, arm=arms(50, 40, 10, 70, 0), leg=legs(38, 22, 10, 80, -5))),
         (1.00, P(pitch=18, fwd=0.0, height=0.97, neck=-4, head=-2, arm=arms(45, 40, 10, 70, 0), leg=legs(40, 22, 10, 80, -5))),
     ]
 

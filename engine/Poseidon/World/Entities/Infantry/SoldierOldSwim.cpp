@@ -61,6 +61,8 @@ namespace
 // model without the head bone) floats at SwimWaterLine.
 constexpr float SwimChinAbove = 0.02f;
 constexpr float SwimChinTime = 0.6f;
+// The player in first person rides this much higher (m), so the drawn crests stay under his eyes.
+constexpr float SwimEyeLift = 0.15f;
 // The head bone's neck joint in the men's rest (model) space -- the chin line (the CWA skeleton, as below).
 const Vector3 SwimHeadRest(0.011f, 0.516f, 0.003f);
 // Heave: spring (1/s^2) and damping (1/s) pulling the water line onto the surface. A 1.2 s natural
@@ -607,6 +609,15 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
             _swimChin = _swimChinValid ? _swimChin + (chin - _swimChin) * std::min(1.0f, deltaT / SwimChinTime) : chin;
             _swimChinValid = true;
             waterLine = _swimChin - (SwimChinAbove - SwimGearSink * (1.0f - gear)); // a heavy load rides lower
+            // Seen through his own eyes he rides SwimEyeLift higher: at the chin line the eyes stood 0-0.25 m over
+            // the surface, the crests a metre ahead washed over the view, and the hands showed through the water
+            // as if transparent (owner, 2026-10-17). The camera cannot be lifted instead -- it leaves his eyes for
+            // the inside of his head (W3). The heave spring eases the change when the view switches.
+            if (GWorld && GWorld->CameraOn() == this &&
+                (GWorld->GetCameraType() == CamInternal || GWorld->GetCameraType() == CamGunner))
+            {
+                waterLine -= SwimEyeLift;
+            }
         }
         float target = surface - waterLine;
         if (_swimTargetValid && deltaT > 0)
