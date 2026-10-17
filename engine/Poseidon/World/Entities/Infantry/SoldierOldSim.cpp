@@ -554,7 +554,11 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             pForce[0] = 0;
             pForce[1] = -G_CONST * GetMass();
             pForce[2] = 0;
-            if (!EarthStreaming::Enabled() && playerControlled && !IsDead() && _waterBuoyancyContact)
+            // The player's float spring from before swimming existed. With the swim system on, deep water is
+            // the swim simulation's and shallow water is for standing in: this spring held a man in 0.8 m of
+            // surf ~0.4 m over the water and bounced him in a fall for as long as he stood there.
+            if (!EarthStreaming::Enabled() && playerControlled && !IsDead() && _waterBuoyancyContact &&
+                !SwimSystemActive())
             {
                 const float waveTime = Glob.time.toFloat();
                 const float seaLevel = GLOB_LAND->GetSeaLevel();

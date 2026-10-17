@@ -1087,6 +1087,8 @@ class Man: public Person
 	void BlendToMove(MoveId id);
 	void InitSwimMoves() const;
 	bool CanSwim() const;
+	// the swim moves are loaded and the swim simulation is on (not POSEIDON_SWIM=0)
+	bool SwimSystemActive() const;
 	bool IsSwimMove(MoveId id) const;
 	bool IsSwimming() const override {return _swimming;}
 	bool IsDiving() const {return _swimming && _diving;}

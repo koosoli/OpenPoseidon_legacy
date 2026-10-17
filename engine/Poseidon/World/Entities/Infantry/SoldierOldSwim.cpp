@@ -373,6 +373,11 @@ bool Man::CanSwim() const
     return _swimMoves[0] != MoveIdNone;
 }
 
+bool Man::SwimSystemActive() const
+{
+    return SwimEnabled() && CanSwim();
+}
+
 bool Man::IsSwimMove(MoveId id) const
 {
     InitSwimMoves();
@@ -485,6 +490,21 @@ bool Man::UpdateSwimming()
         upright.SetUpAndDirection(VUp, dir.SquareSize() > 1e-4f ? dir : Vector3(VForward));
         Frame trans = *this;
         trans.SetOrientation(upright);
+        if (!liftedClear)
+        {
+            // Wading out: stand him on the bottom. The swimmer's body rides ~0.3 m under where his feet
+            // stand at the 1.2 m exit depth, so the ground contact used to throw him up to 1.6 m out of
+            // the surf at 3.5 m/s into a fall -- on a steep beach or in surf the owner "flew around and
+            // died" (2026-10-17).
+            Vector3 standing = trans.Position();
+            standing[1] = ground;
+            trans.SetPosition(standing);
+            Move(trans);
+            _speed = VZero;
+            _landContact = true;
+            _freeFallUntil = Glob.time;
+            return false;
+        }
         Move(trans);
         _landContact = false;
         return false;
