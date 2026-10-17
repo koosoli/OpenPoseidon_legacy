@@ -433,6 +433,16 @@ void TickMenuClickHook()
     while (top->Child())
         top = top->Child();
     LOG_INFO(UI, "POSEIDON_MENU_CLICKS: pressing idc {} on display {}", clicks[next], top->IDD());
+    if (clicks[next] == -3) // -3: run POSEIDON_MENU_SCRIPT (e.g. arm the player for a capture)
+    {
+        if (const char* script = std::getenv("POSEIDON_MENU_SCRIPT"); script && *script && GWorld->GetGameState())
+        {
+            LOG_INFO(UI, "POSEIDON_MENU_CLICKS: running {}", script);
+            GWorld->GetGameState()->EvaluateMultiple(script);
+        }
+        next++;
+        return;
+    }
     if (clicks[next] == -2) // -2: V in a mission, the player's aiming (gunner) view
     {
         if (Object* on = GWorld->CameraOn())
