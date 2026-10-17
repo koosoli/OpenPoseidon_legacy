@@ -1302,6 +1302,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
     // the accumulator's leftover fraction into the last tick. Set once per frame, here,
     // so every draw of this frame -- objects, shadows, camera -- agrees on the same time.
     Object::SetRenderInterpAlpha(stepFrame.running ? stepFrame.alpha : 1.0f);
+    Object::SetRenderInterpStep(stepFrame.stepSeconds);
 
     if (IsSimulationEnabled())
     {

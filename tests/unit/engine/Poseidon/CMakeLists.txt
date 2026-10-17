@@ -722,6 +722,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Simulation/test_cloth.cpp
     World/Simulation/test_uniform_wetness.cpp
     Graphics/Rendering/test_muzzle_flash_appearance.cpp
+    Graphics/Rendering/test_muzzle_burst.cpp
     World/Simulation/test_remote_interp.cpp
 
     # Tools shared library tests

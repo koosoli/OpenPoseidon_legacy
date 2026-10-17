@@ -60,6 +60,7 @@ namespace Poseidon
 namespace
 {
 float g_renderInterpAlpha = 1.0f;
+float g_renderInterpStepSeconds = 0.0f;
 constexpr float kRenderInterpMaxJump = 40.0f;
 bool RenderInterpEnabledFromEnv()
 {
@@ -82,6 +83,17 @@ void Object::SetRenderInterpAlpha(float alpha)
 float Object::RenderInterpAlpha()
 {
     return g_renderInterpAlpha;
+}
+
+void Object::SetRenderInterpStep(float stepSeconds)
+{
+    g_renderInterpStepSeconds = std::isfinite(stepSeconds) && stepSeconds > 0.0f ? stepSeconds : 0.0f;
+}
+
+double Object::RenderTimeMs()
+{
+    const double behind = RenderInterpEnabled() ? (1.0 - double(g_renderInterpAlpha)) * g_renderInterpStepSeconds : 0.0;
+    return double(Glob.time.toInt()) - behind * 1000.0;
 }
 
 Matrix4 Object::RenderTransform() const

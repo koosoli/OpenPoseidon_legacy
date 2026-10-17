@@ -28,6 +28,7 @@
 #include <Poseidon/AI/AIHunt.hpp>
 #include <Poseidon/AI/AICombatPace.hpp> // AI-AIM-001
 #include <Poseidon/World/Weather/WindModel.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/MuzzleBurst.hpp>
 
 namespace Poseidon
 {
@@ -1776,6 +1777,21 @@ void Soldier::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI* 
             const Vector3 muzzleWorld = GetHierachyParent() ? WorldTransform().FastTransform(muzzleModel)
                                                           : PositionModelToWorld(muzzleModel);
             _mGunFire.StartMuzzle(muzzleWorld);
+            {
+                // Cosmetic particle burst. Its seed is a private counter mixed with
+                // the shooter and the clock -- never the gameplay RNG.
+                static std::uint32_t shots = 0;
+                const Vector3 barrel = GetWeaponDirection(weapon);
+                const Vector3 carrier = WorldSpeed();
+                Poseidon::render::MuzzleBurstShot shot;
+                shot.muzzle = {muzzleWorld.X(), muzzleWorld.Y(), muzzleWorld.Z()};
+                shot.forward = {barrel.X(), barrel.Y(), barrel.Z()};
+                shot.carrier = {carrier.X(), carrier.Y(), carrier.Z()};
+                shot.birthMs = Glob.time.toInt();
+                shot.seed = ++shots * 2654435761u ^ std::uint32_t(reinterpret_cast<std::uintptr_t>(this) >> 4) ^
+                            std::uint32_t(shot.birthMs);
+                Poseidon::render::RecordMuzzleBurst(shot);
+            }
             _mGunFireFrames = 1;
             _mGunFireTime = Glob.uiTime;
             int newPhase;

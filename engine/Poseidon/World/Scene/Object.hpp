@@ -379,6 +379,11 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	/// Per-frame render interpolation state, set by World after its tick loop.
 	static void SetRenderInterpAlpha(float alpha);
 	static float RenderInterpAlpha();
+	/// Game time the drawn frame shows, in ms: Glob.time minus the part of the last tick the
+	/// interpolation has not reached yet. Effects that are a pure function of time (muzzle
+	/// bursts) use it so they move every frame instead of once per tick.
+	static void SetRenderInterpStep(float stepSeconds);
+	static double RenderTimeMs();
 	static bool RenderInterpEnabled();
 
 	// Perform any animation of object shape. May transform vertices or change face
