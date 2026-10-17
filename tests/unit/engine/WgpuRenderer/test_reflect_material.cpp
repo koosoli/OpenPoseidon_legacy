@@ -4,7 +4,10 @@
 
 using namespace Poseidon::ReflectMaterial;
 
-static SurfaceClass ClassOf(Inputs in) { return Classify(in).cls; }
+static SurfaceClass ClassOf(Inputs in)
+{
+    return Classify(in).cls;
+}
 
 int main()
 {
@@ -93,7 +96,8 @@ int main()
     assert(RoughnessFromBlinn(2000.0f) < RoughnessFromBlinn(20.0f));
 
     float n = 0, k = 0;
-    assert(ParseFresnel("#(ai,64,64,1)fresnel(1.3,7)", n, k) && std::fabs(n - 1.3f) < 1e-5f && std::fabs(k - 7.0f) < 1e-5f);
+    assert(ParseFresnel("#(ai,64,64,1)fresnel(1.3,7)", n, k) && std::fabs(n - 1.3f) < 1e-5f &&
+           std::fabs(k - 7.0f) < 1e-5f);
     assert(!ParseFresnel("#(ai,64,64,1)fresnelGlass()", n, k));
     return 0;
 }
