@@ -129,22 +129,24 @@ CRAWL_FRAMES = 40
 # (u, upper arm, forearm plane, elbow bend) for the right arm, the directions in the body frame (x out to his right
 # negative, y toward his feet, z up -- the body at CRAWL_PITCH, unrolled); the left arm mirrors it half a cycle later
 CRAWL_ARM = [
-    (0.00, (-0.12, -1.00, +0.05), (+0.00, -1.00, -0.30), 10),   # entry, reaching
-    (0.10, (-0.15, -0.90, -0.35), (+0.00, -0.30, -1.00), 45),   # catch: the forearm drops, elbow high
-    (0.20, (-0.40, -0.35, -0.85), (+0.35, +0.35, -0.85), 85),   # the pull under the chest
-    (0.30, (-0.35, +0.25, -0.90), (+0.15, +0.75, -0.65), 65),
-    (0.40, (-0.30, +0.75, -0.60), (-0.05, +0.95, -0.30), 30),   # the push past the hip
-    (0.48, (-0.35, +0.90, -0.05), (-0.15, +0.90, +0.20), 20),   # out at the thigh
-    (0.56, (-0.55, +0.50, +0.65), (-0.20, +0.80, -0.30), 75),   # the elbow lifts it out
-    (0.66, (-0.70, +0.00, +0.75), (-0.20, +0.30, -0.60), 95),  # recovery: elbow high, the hand hanging
-    (0.76, (-0.60, -0.45, +0.65), (+0.00, -0.60, -0.60), 90),
-    (0.86, (-0.40, -0.80, +0.45), (+0.00, -0.90, -0.30), 55),
-    (0.94, (-0.20, -0.97, +0.15), (+0.00, -0.97, -0.20), 25),   # the hand goes in ahead of the shoulder
+    # u,    upper arm,               forearm plane,          bend, palm (the hand's -Z; owner: the crawl's hands
+    #                                                               were "turned the wrong way around" -- palm up)
+    (0.00, (-0.12, -1.00, +0.05), (+0.00, -1.00, -0.30), 10, (-0.30, +0.00, -1.00)),   # entry, palm down and out
+    (0.10, (-0.15, -0.90, -0.35), (+0.00, -0.30, -1.00), 45, (+0.00, +0.60, -0.80)),   # catch
+    (0.20, (-0.40, -0.35, -0.85), (+0.35, +0.35, -0.85), 85, (+0.10, +1.00, -0.30)),   # the pull, palm back
+    (0.30, (-0.35, +0.25, -0.90), (+0.15, +0.75, -0.65), 65, (+0.10, +1.00, +0.00)),
+    (0.40, (-0.30, +0.75, -0.60), (-0.05, +0.95, -0.30), 30, (+0.20, +1.00, +0.30)),   # the push past the hip
+    (0.48, (-0.35, +0.90, -0.05), (-0.15, +0.90, +0.20), 20, (+0.60, +0.60, +0.50)),   # out at the thigh, palm in
+    (0.56, (-0.55, +0.50, +0.65), (-0.20, +0.80, -0.30), 75, (+0.30, +1.00, +0.00)),   # the elbow lifts it out
+    (0.66, (-0.70, +0.00, +0.75), (-0.20, +0.30, -0.60), 95, (+0.20, +1.00, -0.20)),   # recovery, palm back
+    (0.76, (-0.60, -0.45, +0.65), (+0.00, -0.60, -0.60), 90, (+0.00, +0.30, -1.00)),
+    (0.86, (-0.40, -0.80, +0.45), (+0.00, -0.90, -0.30), 55, (-0.20, +0.00, -1.00)),
+    (0.94, (-0.20, -0.97, +0.15), (+0.00, -0.97, -0.20), 25, (-0.30, +0.00, -1.00)),   # in ahead of the shoulder
 ]
 
 
 def _crawl_at(u, mirror):
-    """(upper, forearm, bend) of one arm at phase u: periodic Catmull-Rom through CRAWL_ARM."""
+    """(upper, forearm, bend, palm) of one arm at phase u: periodic Catmull-Rom through CRAWL_ARM."""
     from mathutils import Vector
     u %= 1.0
     n = len(CRAWL_ARM)
@@ -155,7 +157,7 @@ def _crawl_at(u, mirror):
     t = (u - CRAWL_ARM[i][0]) / (u1 - CRAWL_ARM[i][0])
     pts = [CRAWL_ARM[(i + k) % n] for k in (-1, 0, 1, 2)]
     out = []
-    for field in (1, 2, 3):
+    for field in (1, 2, 3, 4):
         vals = [p[field] for p in pts]
         if field == 3:
             out.append(dm['_catmull'](*vals, t))
@@ -190,7 +192,7 @@ def crawl_arms(act):
         u = f / last
         pmat = ob.pose.bones['pzadek'].matrix.to_3x3()
         for s, ph in (('p', 0.0), ('l', 0.5)):
-            upper, fore, bend = _crawl_at(u + ph, s == 'l')
+            upper, fore, bend, palm = _crawl_at(u + ph, s == 'l')
             up = (pmat @ p0inv @ wi @ upper).normalized()
             fp = pmat @ p0inv @ wi @ fore
             fp = (fp - up * fp.dot(up)).normalized()
@@ -212,6 +214,24 @@ def crawl_arms(act):
             bi.keyframe_insert('rotation_euler', frame=f)
             lo.rotation_euler = dm['R'](max(bend, 2.0))
             lo.keyframe_insert('rotation_euler', frame=f)
+            bpy.context.view_layer.update()
+            # the palm (the hand's -Z, as the breaststroke's hands have it): roll the hand about its own long axis
+            # onto the wanted palm -- the rig has no forearm twist, and the elbow plane alone left the palm up
+            hd = ob.pose.bones[s + 'ruka']
+            hm = hd.matrix.copy()
+            axis = (hm.to_3x3() @ Vector((0, 1, 0))).normalized()
+            have = -(hm.to_3x3() @ Vector((0, 0, 1)))
+            want = pmat @ p0inv @ wi @ palm
+            have = (have - axis * have.dot(axis)).normalized()
+            want = (want - axis * want.dot(axis)).normalized()
+            ang = math.atan2(axis.dot(have.cross(want)), have.dot(want))
+            spin = Matrix.Translation(hm.translation) @ Matrix.Rotation(ang, 4, axis) @ Matrix.Translation(-hm.translation)
+            hd.matrix = spin @ hm
+            bpy.context.view_layer.update()
+            e = hd.matrix_basis.to_euler(hd.rotation_mode, prev.get(s + 'h')) if (s + 'h') in prev else hd.matrix_basis.to_euler(hd.rotation_mode)
+            prev[s + 'h'] = e
+            hd.rotation_euler = e
+            hd.keyframe_insert('rotation_euler', frame=f)
             bpy.context.view_layer.update()
     return act
 
