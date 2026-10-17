@@ -1,0 +1,134 @@
+{
+ "source": "fitted from the stock CWA animations (DTA\\Anim.pbo) by fit_mc_joints.py",
+ "space": "rest model space of the MC soldier (x, y up, z), metres",
+ "parent": {
+  "bricho": "pzadek",
+  "zebra": "bricho",
+  "hrudnik": "zebra",
+  "krk": "hrudnik",
+  "hlava": "krk",
+  "prameno": "hrudnik",
+  "pbiceps": "prameno",
+  "ploket": "pbiceps",
+  "pruka": "ploket",
+  "pstehno": "pzadek",
+  "pholen": "pstehno",
+  "pchodidlo": "pholen",
+  "pprsty": "pchodidlo",
+  "lrameno": "hrudnik",
+  "lbiceps": "lrameno",
+  "lloket": "lbiceps",
+  "lruka": "lloket",
+  "lstehno": "pzadek",
+  "lholen": "lstehno",
+  "lchodidlo": "lholen",
+  "lprsty": "lchodidlo"
+ },
+ "joints": {
+  "bricho": [
+   0.00433,
+   0.03709,
+   0.00654
+  ],
+  "zebra": [
+   0.01924,
+   0.22372,
+   -0.00149
+  ],
+  "hrudnik": [
+   0.01196,
+   0.33823,
+   0.00306
+  ],
+  "krk": [
+   0.00266,
+   0.46669,
+   0.00611
+  ],
+  "hlava": [
+   0.01015,
+   0.51798,
+   0.00443
+  ],
+  "prameno": [
+   -0.00099,
+   0.44593,
+   0.00629
+  ],
+  "pbiceps": [
+   0.00429,
+   0.34655,
+   -0.10767
+  ],
+  "ploket": [
+   0.00604,
+   0.03612,
+   -0.16176
+  ],
+  "pruka": [
+   0.00725,
+   -0.22637,
+   -0.20558
+  ],
+  "pstehno": [
+   -0.00362,
+   -0.12247,
+   -0.07178
+  ],
+  "pholen": [
+   -0.00291,
+   -0.56281,
+   -0.16911
+  ],
+  "pchodidlo": [
+   -0.00524,
+   -0.99663,
+   -0.22856
+  ],
+  "pprsty": [
+   0.12637,
+   -1.06329,
+   -0.22284
+  ],
+  "lrameno": [
+   -0.00157,
+   0.44527,
+   0.00635
+  ],
+  "lbiceps": [
+   -0.00442,
+   0.3504,
+   0.11642
+  ],
+  "lloket": [
+   -0.0046,
+   0.04,
+   0.18293
+  ],
+  "lruka": [
+   -0.00309,
+   -0.22503,
+   0.21966
+  ],
+  "lstehno": [
+   -0.00439,
+   -0.12348,
+   0.08576
+  ],
+  "lholen": [
+   -0.00313,
+   -0.57111,
+   0.13888
+  ],
+  "lchodidlo": [
+   -0.0048,
+   -0.99835,
+   0.23879
+  ],
+  "lprsty": [
+   0.12941,
+   -1.05927,
+   0.23334
+  ]
+ }
+}

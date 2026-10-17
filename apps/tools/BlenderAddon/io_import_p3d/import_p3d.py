@@ -154,22 +154,39 @@ def _create_material(name, tex_path, search_dirs):
     return mat
 
 
-def _clean_faces(faces_raw):
-    """Remove degenerate and duplicate faces. Returns (clean_faces, index_map)
-    where index_map[i] is the original face index of clean_faces[i]."""
-    seen = set()
+def _clean_faces(faces_raw, vertex_count=0):
+    """Remove degenerate and duplicate faces. Returns (clean_faces, index_map, extra) where index_map[i] is the
+    original face index of clean_faces[i]. A face on the same points as an earlier one but wound the other way is the
+    back of a double-sided face: a Blender mesh cannot hold both on the same vertices, so the back gets copies of its
+    vertices, numbered from vertex_count on; extra[k] is the original vertex copy k stands for."""
+    seen = {}
     clean = []
     index_map = []
+    extra = []
+
+    def turn(f):
+        i = f.index(min(f))
+        return tuple(f[i:]) + tuple(f[:i])
+
     for orig_idx, f in enumerate(faces_raw):
         if len(f) != len(set(f)):
             continue  # degenerate: repeated vertex in same face
         key = tuple(sorted(f))
         if key in seen:
-            continue  # duplicate face
-        seen.add(key)
+            if turn(list(f)) in seen[key]:
+                continue  # an exact duplicate
+            seen[key].add(turn(list(f)))
+            copied = []
+            for vi in f:
+                copied.append(vertex_count + len(extra))
+                extra.append(vi)
+            clean.append(tuple(copied))
+            index_map.append(orig_idx)
+            continue
+        seen[key] = {turn(list(f))}
         clean.append(f)
         index_map.append(orig_idx)
-    return clean, index_map
+    return clean, index_map, extra
 
 
 def import_lod(context, model, lod_idx, collection, options):
@@ -214,8 +231,15 @@ def import_lod(context, model, lod_idx, collection, options):
         verts_raw = [
             (x - center_offset_cwr[0], y - center_offset_cwr[1], z - center_offset_cwr[2]) for x, y, z in verts_raw
         ]
+    faces, face_map, extra = _clean_faces(faces_raw, len(verts_raw))
+    if extra:  # the backs of double-sided faces, on their own copies of the vertices
+        verts_raw = list(verts_raw) + [verts_raw[i] for i in extra]
+        uvs_raw = list(uvs_raw) + [uvs_raw[i] for i in extra] if uvs_raw else uvs_raw
+        normals_raw = list(normals_raw) + [normals_raw[i] for i in extra] if normals_raw else normals_raw
+    copies_of = {}
+    for k, vi in enumerate(extra):
+        copies_of.setdefault(vi, []).append(nv + k)
     verts = [_convert_coord(*v) for v in verts_raw]
-    faces, face_map = _clean_faces(faces_raw)
     mesh = bpy.data.meshes.new(lod_name)
     mesh.from_pydata(verts, [], faces)
     mesh.update()
@@ -308,6 +332,7 @@ def import_lod(context, model, lod_idx, collection, options):
 
     # Named selections → vertex groups (also collect proxy selection geometry)
     proxy_sel_data = []  # (sel_name, vertex_indices) for proxy:* selections
+    sel_sets = {}  # every other selection's points, to record which ones a proxy belongs to (export puts it back)
     if options.get("import_selections", True):
         sel_count = model.selection_count(lod_idx)
         for si in range(sel_count):
@@ -315,11 +340,13 @@ def import_lod(context, model, lod_idx, collection, options):
             if not sel_name:
                 sel_name = f"Selection_{si}"
             indices, weights = model.get_selection_vertices(lod_idx, si)
+            if indices and not sel_name.startswith("proxy:"):
+                sel_sets[sel_name] = set(indices)
             if indices:
                 vg = obj.vertex_groups.new(name=sel_name)
                 for idx, wgt in zip(indices, weights):
                     if 0 <= idx < nv:
-                        vg.add([idx], wgt, "REPLACE")
+                        vg.add([idx, *copies_of.get(idx, [])], wgt, "REPLACE")
                 # Store centroid before proxy stripping removes vertices
                 if not sel_name.startswith("proxy:"):
                     valid = [i for i in indices if 0 <= i < nv]
@@ -372,6 +399,15 @@ def import_lod(context, model, lod_idx, collection, options):
                     prx_obj.matrix_world = _convert_matrix(mat16)
 
                 prx_obj["cwr_proxy_path"] = prx_path
+                if pi < len(proxy_sel_data):
+                    # the selections the proxy's triangle is in (a rifle proxy is in its bone's, so it follows the
+                    # hands): export_p3d.py writes them back
+                    tri = set(proxy_sel_data[pi][1])
+                    prx_obj["cwr_proxy_selections"] = [n for n, pts in sel_sets.items() if tri and tri <= pts]
+                    # and per corner, in the mesh's vertex order (a hit zone can hold one corner of a proxy)
+                    prx_obj["cwr_proxy_corner_selections"] = [
+                        "|".join(n for n, pts in sel_sets.items() if vi in pts) for vi in proxy_sel_data[pi][1]
+                    ]
                 prx_col.objects.link(prx_obj)
                 prx_obj.parent = obj
 
@@ -402,6 +438,8 @@ def import_lod(context, model, lod_idx, collection, options):
                 obj[f"cwr_{pname}"] = pvalue
     obj["cwr_lod_index"] = lod_idx
     obj["cwr_lod_resolution"] = res
+    # a binarized (ODOL) model keeps its points about its bounding centre: export_p3d.py adds it back
+    obj["cwr_bounding_center"] = tuple(model.bounding_center())
     obj["cwr_format"] = model.format
 
     return obj

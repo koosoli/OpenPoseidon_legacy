@@ -1,6 +1,6 @@
 import ctypes
 import os
-from ctypes import POINTER, c_char_p, c_float, c_int, c_uint8, c_uint32, c_void_p
+from ctypes import POINTER, c_char_p, c_float, c_int, c_int32, c_uint8, c_uint32, c_void_p
 
 _dll = None
 
@@ -160,6 +160,61 @@ def _setup_dll(dll):
     dll.pf_rtm_phase_time.argtypes = [c_void_p, c_int]
     dll.pf_rtm_bone_matrix.restype = None
     dll.pf_rtm_bone_matrix.argtypes = [c_void_p, c_int, c_int, POINTER(c_float)]
+
+    # Writing (MLOD, PAA): newer DLLs only -- an older PoseidonFormats.dll simply has no export
+    try:
+        dll.pf_mlod_new.restype = c_void_p
+        dll.pf_mlod_new.argtypes = []
+        dll.pf_mlod_free.restype = None
+        dll.pf_mlod_free.argtypes = [c_void_p]
+        dll.pf_mlod_add_lod.restype = c_int
+        dll.pf_mlod_add_lod.argtypes = [
+            c_void_p,
+            c_float,
+            c_int,
+            POINTER(c_float),
+            POINTER(c_int32),
+            c_int,
+            POINTER(c_float),
+        ]
+        dll.pf_mlod_set_faces.restype = c_int
+        dll.pf_mlod_set_faces.argtypes = [
+            c_void_p,
+            c_int,
+            c_int,
+            POINTER(c_int32),
+            POINTER(c_int32),
+            POINTER(c_int32),
+            POINTER(c_float),
+            POINTER(c_uint32),
+            POINTER(c_int32),
+            POINTER(c_char_p),
+            c_int,
+            POINTER(c_int32),
+            POINTER(c_char_p),
+            c_int,
+        ]
+        dll.pf_mlod_add_selection.restype = c_int
+        dll.pf_mlod_add_selection.argtypes = [
+            c_void_p,
+            c_int,
+            c_char_p,
+            c_int,
+            POINTER(c_int32),
+            POINTER(c_uint8),
+            c_int,
+            POINTER(c_int32),
+        ]
+        dll.pf_mlod_add_property.restype = c_int
+        dll.pf_mlod_add_property.argtypes = [c_void_p, c_int, c_char_p, c_char_p]
+        dll.pf_mlod_set_mass.restype = c_int
+        dll.pf_mlod_set_mass.argtypes = [c_void_p, c_int, POINTER(c_float)]
+        dll.pf_mlod_write.restype = c_int
+        dll.pf_mlod_write.argtypes = [c_void_p, c_char_p]
+        dll.pf_paa_write_rgba.restype = c_int
+        dll.pf_paa_write_rgba.argtypes = [POINTER(c_uint8), c_int, c_int, c_char_p]
+    except AttributeError:
+        pass
 
 
 def load():
@@ -575,3 +630,131 @@ class RTMAnimation:
         buf = (c_float * 16)()
         self._dll.pf_rtm_bone_matrix(self._handle, phase, bone, buf)
         return list(buf)
+
+
+def can_write():
+    """True when the loaded PoseidonFormats DLL has the writers (MLOD, PAA)."""
+    return hasattr(get(), "pf_mlod_write") and get().pf_mlod_write.restype is c_int
+
+
+def _err(dll):
+    msg = dll.pf_last_error()
+    return msg.decode("utf-8", "replace") if msg else "unknown error"
+
+
+class MLODWriter:
+    """Builds an MLOD P3D through the engine's own MLODWriter (P3DM 28.256).
+
+    Positions and normals are model space (x, y up, z). Faces are in FILE order: the loader turns each face's winding
+    round on the way in (0<->1, and 2<->3 on quads), so geometry read back through P3DModel must be turned back the
+    same way before it is written here.
+    """
+
+    def __init__(self):
+        self._dll = get()
+        self._handle = self._dll.pf_mlod_new()
+
+    def __del__(self):
+        self.close()
+
+    def close(self):
+        if getattr(self, "_handle", None):
+            self._dll.pf_mlod_free(self._handle)
+            self._handle = None
+
+    def add_lod(self, resolution, points, normals=(), point_flags=None):
+        """points / normals: sequences of (x, y, z). Returns the LOD index."""
+        n = len(points)
+        xyz = (c_float * (n * 3))(*[c for p in points for c in p])
+        flags = (c_int32 * n)(*point_flags) if point_flags else None
+        nn = len(normals)
+        nxyz = (c_float * (nn * 3))(*[c for p in normals for c in p]) if nn else None
+        lod = self._dll.pf_mlod_add_lod(self._handle, float(resolution), n, xyz, flags, nn, nxyz)
+        if lod < 0:
+            raise RuntimeError(_err(self._dll))
+        return lod
+
+    def set_faces(self, lod, faces):
+        """faces: dicts with points (3 or 4 indices), uvs ((u, v) per corner), and optionally normals, flags,
+        texture, material."""
+        n = len(faces)
+        counts = (c_int32 * n)()
+        pts = (c_int32 * (n * 4))()
+        nrm = (c_int32 * (n * 4))()
+        uvs = (c_float * (n * 8))()
+        flg = (c_uint32 * n)()
+        tex_idx = (c_int32 * n)()
+        mat_idx = (c_int32 * n)()
+        textures, materials = {}, {}
+        any_normals = False
+        for f, face in enumerate(faces):
+            p = face["points"]
+            counts[f] = len(p)
+            for k in range(4):
+                pts[f * 4 + k] = p[k] if k < len(p) else 0
+                nk = face.get("normals")
+                nrm[f * 4 + k] = nk[k] if nk and k < len(nk) else -1
+                any_normals = any_normals or bool(nk)
+                u, v = face["uvs"][k] if k < len(p) else (0.0, 0.0)
+                uvs[f * 8 + k * 2], uvs[f * 8 + k * 2 + 1] = u, v
+            flg[f] = face.get("flags", 0)
+            t, m = face.get("texture") or "", face.get("material") or ""
+            tex_idx[f] = textures.setdefault(t, len(textures)) if t else -1
+            mat_idx[f] = materials.setdefault(m, len(materials)) if m else -1
+        tex_tab = (c_char_p * max(1, len(textures)))(*[k.encode("utf-8") for k in textures])
+        mat_tab = (c_char_p * max(1, len(materials)))(*[k.encode("utf-8") for k in materials])
+        ok = self._dll.pf_mlod_set_faces(
+            self._handle,
+            lod,
+            n,
+            counts,
+            pts,
+            nrm if any_normals else None,
+            uvs,
+            flg,
+            tex_idx,
+            tex_tab,
+            len(textures),
+            mat_idx,
+            mat_tab,
+            len(materials),
+        )
+        if not ok:
+            raise RuntimeError(_err(self._dll))
+
+    def add_selection(self, lod, name, points, weights=None, faces=()):
+        """weights: O2 bytes per point (1 = fully selected), or None for all fully selected."""
+        n, nf = len(points), len(faces)
+        pts = (c_int32 * max(1, n))(*points)
+        w = (c_uint8 * max(1, n))(*weights) if weights is not None else None
+        fcs = (c_int32 * max(1, nf))(*faces)
+        if not self._dll.pf_mlod_add_selection(self._handle, lod, name.encode("utf-8"), n, pts, w, nf, fcs):
+            raise RuntimeError(_err(self._dll))
+
+    def add_property(self, lod, name, value):
+        if not self._dll.pf_mlod_add_property(self._handle, lod, name.encode("utf-8"), str(value).encode("utf-8")):
+            raise RuntimeError(_err(self._dll))
+
+    def set_mass(self, lod, mass):
+        buf = (c_float * len(mass))(*mass)
+        if not self._dll.pf_mlod_set_mass(self._handle, lod, buf):
+            raise RuntimeError(_err(self._dll))
+
+    def write(self, path):
+        if not self._dll.pf_mlod_write(self._handle, path.encode("utf-8")):
+            raise RuntimeError(_err(self._dll))
+
+
+def o2_weight(w):
+    """A selection weight (0..1) as O2 stores it in an MLOD: 1 is fully selected, w < 1 is 256 - 255 * w."""
+    if w >= 0.999:
+        return 1
+    return max(2, min(255, round(256 - 255 * w)))
+
+
+def write_paa(rgba, width, height, path):
+    """rgba: bytes-like, width * height * 4, top row first. PAA needs power-of-two sides."""
+    dll = get()
+    buf = (c_uint8 * len(rgba)).from_buffer_copy(bytes(rgba))
+    if not dll.pf_paa_write_rgba(buf, width, height, path.encode("utf-8")):
+        raise RuntimeError(_err(dll))
