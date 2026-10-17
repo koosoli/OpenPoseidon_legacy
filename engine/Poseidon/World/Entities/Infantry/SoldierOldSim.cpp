@@ -31,6 +31,9 @@
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 #include <Random/randomGen.hpp>
+#include <Poseidon/World/SimVehicleCost.hpp>
+#include <cstdint>
+#include <string>
 
 namespace Poseidon
 {
@@ -355,8 +358,68 @@ void Man::OnAddImpulse(Vector3Par force, Vector3Par torque)
     }
 }
 
+namespace
+{
+// POSEIDON_SIM_VEHICLE_COST=1: where Man::Simulate spends its time, by section, logged every
+// 3000 calls (ms per call, average and slowest). Off: one bool test per mark.
+struct ManSimProbe
+{
+    static constexpr int N = 9;
+    struct Accum
+    {
+        double ms[N] = {};
+        double maxMs[N] = {};
+        long long calls = 0;
+    };
+    static Accum& Totals()
+    {
+        static Accum a;
+        return a;
+    }
+    bool on;
+    std::uint64_t last = 0;
+    ManSimProbe() : on(SimVehCost::Enabled())
+    {
+        if (on)
+            last = SimVehCost::NowNs();
+    }
+    void Mark(int i)
+    {
+        if (!on)
+            return;
+        const std::uint64_t now = SimVehCost::NowNs();
+        const double ms = static_cast<double>(now - last) * 1.0e-6;
+        last = now;
+        Accum& a = Totals();
+        a.ms[i] += ms;
+        if (ms > a.maxMs[i])
+            a.maxMs[i] = ms;
+    }
+    ~ManSimProbe()
+    {
+        if (!on)
+            return;
+        Accum& a = Totals();
+        if (++a.calls < 3000)
+            return;
+        static const char* const names[N] = {"pre", "anim", "core", "land", "collide", "settle", "move", "after", "base"};
+        const double inv = 1.0 / static_cast<double>(a.calls);
+        std::string line;
+        char part[64];
+        for (int i = 0; i < N; i++)
+        {
+            std::snprintf(part, sizeof(part), " %s=%.3f/%.1f", names[i], a.ms[i] * inv, a.maxMs[i]);
+            line += part;
+        }
+        LOG_INFO(World, "Man::Simulate ms/call (avg/max) over {} calls:{}", a.calls, line);
+        a = Accum();
+    }
+};
+} // namespace
+
 void Man::Simulate(float deltaT, SimulationImportance prec)
 {
+    ManSimProbe probe;
     // Every man, not only the player: a planned Whole World mission places AI too, all spawned at the fixture's
     // height and only later given streamed ground.
     if (EarthStreaming::Enabled() && !_isDead && IsInLandscape() && GWorld &&
@@ -442,7 +505,9 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
 
     float turn, moveX, moveZ;
 
+    probe.Mark(0);
     bool change = SimulateAnimations(turn, moveX, moveZ, deltaT, prec);
+    probe.Mark(1);
 
     if (_objectContact)
     {
@@ -450,6 +515,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
     }
 
     BasicSimulationCore(deltaT, prec);
+    probe.Mark(2);
 
     // if object is frozen, do not simulate it
     if (!CheckPredictionFrozen())
@@ -828,6 +894,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             moveTrans.SetPosition(position);
         }
 
+        probe.Mark(3);
         // collision testing
         if (deltaT > 0 && (change || prec <= SimulateVisibleNear))
         {
@@ -1018,6 +1085,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             }
         }
 
+        probe.Mark(4);
         if (change && !GetHierachyParent())
         {
             float legDX = landDX;
@@ -1142,6 +1210,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             _snowBodyStampTime = 0;
             _snowWalkingValid = false;
         }
+        probe.Mark(5);
         Move(moveTrans);
         DirectionWorldToModel(_modelSpeed, _speed);
 
@@ -1247,6 +1316,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             _hydroWaterDepth = 0.0f;
         }
     } // if (!CheckPredictionFrozen())
+    probe.Mark(6);
 
     if (_mGunClouds.Active() || _mGunFire.Active() || _gunClouds.Active())
     {
@@ -1279,8 +1349,10 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
     }
 
     MoveWeapons(deltaT, change);
+    probe.Mark(7);
 
     base::Simulate(deltaT, prec);
+    probe.Mark(8);
 }
 
 void Man::SetFace(RString name, RString player)
