@@ -149,6 +149,7 @@ and are not counted.
 | c0 prof | `397bef5`-`7cf3234` | C0, 60 s, `POSEIDON_SIM_VEHICLE_COST=1` | 1 | 1 | Vehicles stage up to 780 ms/tick, all in `man.base`; with `OP_A2_SOLDIERS=0` 0.3 ms/tick. Section timing: collision testing 12 ms per man (max 344 ms), 0 hits; soldiers radius 3.7 m, geometry 54 faces / 1 component |
 | c0 cache | `439492f` | C0, 60 s, A: new RTM cache limit, B: `POSEIDON_ANIM_CACHE_MATRICES=32000` | 2 | 2 | A: vehicles max **8 ms/tick**, collision 0.011 ms per man, no reload line. B: 826 ms/tick, 2000 cache loads logged. Exit 0 both |
 | camp 2 | `439492f` | C0, CE0 played, `OP_A2_CAMPAIGN=30,end1,2` | 2 | 2 | **C0 -> C1** and CE0 -> CE1 as the campaigns' description.ext say; exit 0, no script error |
+| 28 | `439492f` | 98, laptop gl33 | 98 | 97 | 0; MP_Paradrop's own error as before; census 13033 Arma, 0 CWA, every exit code 0. No `Animation cache` reload line in any mission. Highest vehicles stage per mission: C0 6.5 ms (run 27: 616), MPE_SectorControl 30 (278), MP_Detector 108 (142; 15 samples over 50 ms -- not the cache, open), CE8 73 (run 27 logged no simulation sample for CE8) |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
