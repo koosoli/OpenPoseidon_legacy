@@ -112,13 +112,17 @@ def drop_arms(keys, amount=ARM_DROP, ramp=None):
 
 def make_all():
     acts = {}
-    acts['swim'] = bake('swim', drop_arms(stroke_keys()), LOOPED['swim'][0], True)
-    acts['swimlf'] = bake('swimlf', drop_arms(stroke_keys(-25.0)), LOOPED['swimlf'][0], True)
-    acts['swimrf'] = bake('swimrf', drop_arms(stroke_keys(25.0)), LOOPED['swimrf'][0], True)
+    mocap = os.path.exists(MOCAP_TABLE)
+    for name, yaw in (('swim', 0.0), ('swimlf', -25.0), ('swimrf', 25.0)):
+        if mocap:  # the arms from motion capture, on every frame (one frame a phase)
+            acts[name] = mocap_arms(bake(name, drop_arms(stroke_keys(yaw)), MOCAP_FRAMES / dm['FPS'], True))
+        else:
+            acts[name] = bake(name, drop_arms(stroke_keys(yaw)), LOOPED[name][0], True)
     # baked on one frame a phase: the arms are set per frame, and a sample between frames would blend their angles
     acts['swimfast'] = crawl_sling(crawl_arms(bake('swimfast', crawl_keys(), CRAWL_FRAMES / dm['FPS'], True)))
     tread = tread_pose(0)
-    glide = bones(sample(_fill(drop_arms(stroke_keys())), 0.0, True))  # the stroke's first pose, trailing limbs included
+    # the stroke's first pose, trailing limbs included: the start ends on it and the stop begins on it
+    glide = action_pose(acts['swim'], 0) if mocap else bones(sample(_fill(drop_arms(stroke_keys())), 0.0, True))
     acts['swimstart'] = bake('swimstart', drop_arms(start_keys(), ramp=(0.3, 0.8)), ONESHOT['swimstart'][0], False,
                              join_in=(tread, 0.0, 0.2), join_out=(glide, 0.82, 1.0))
     acts['swimstop'] = bake('swimstop', drop_arms(stop_keys(), ramp=(0.7, 0.2)), ONESHOT['swimstop'][0], False,
@@ -188,6 +192,48 @@ def _crawl_at(u, mirror):
     return out
 
 
+def _pose_arm(ob, s, f, upper, fore, bend, palm, prev):
+    """Key side <s>'s arm on frame <f>: the upper arm along <upper>, the elbow bent <bend> degrees toward <fore>, the
+    hand rolled about its own axis so its palm (the hand's -Z, as the breaststroke's hands have it) faces <palm>; all
+    three in armature space. The rig has no forearm twist, so the palm is the hand's roll."""
+    import bpy
+    from mathutils import Matrix, Vector
+    up = upper.normalized()
+    fp = (fore - up * fore.dot(up)).normalized()
+    bi, lo = ob.pose.bones[s + 'biceps'], ob.pose.bones[s + 'loket']
+    # the way this elbow bends, in the upper arm's own axes
+    rel = bi.bone.matrix_local.to_3x3().inverted() @ lo.bone.matrix_local.to_3x3()
+    b = rel @ Vector((0, 0, 1))
+    b = (b - Vector((0, 1, 0)) * b.y).normalized()
+    src = Matrix((Vector((0, 1, 0)), b, Vector((0, 1, 0)).cross(b))).transposed()
+    dst = Matrix((up, fp, up.cross(fp))).transposed()
+    rot = (dst @ src.inverted()).to_4x4()
+    rot.translation = bi.matrix.translation
+    bi.matrix = rot
+    bpy.context.view_layer.update()
+    e = bi.matrix_basis.to_euler(bi.rotation_mode, prev[s]) if s in prev else bi.matrix_basis.to_euler(bi.rotation_mode)
+    prev[s] = e
+    bi.rotation_euler = e
+    bi.keyframe_insert('rotation_euler', frame=f)
+    lo.rotation_euler = dm['R'](max(bend, 2.0))
+    lo.keyframe_insert('rotation_euler', frame=f)
+    bpy.context.view_layer.update()
+    hd = ob.pose.bones[s + 'ruka']
+    hm = hd.matrix.copy()
+    axis = (hm.to_3x3() @ Vector((0, 1, 0))).normalized()
+    have = -(hm.to_3x3() @ Vector((0, 0, 1)))
+    have = (have - axis * have.dot(axis)).normalized()
+    want = (palm - axis * palm.dot(axis)).normalized()
+    ang = math.atan2(axis.dot(have.cross(want)), have.dot(want))
+    hd.matrix = Matrix.Translation(hm.translation) @ Matrix.Rotation(ang, 4, axis) @ Matrix.Translation(-hm.translation) @ hm
+    bpy.context.view_layer.update()
+    e = hd.matrix_basis.to_euler(hd.rotation_mode, prev.get(s + 'h')) if (s + 'h') in prev else hd.matrix_basis.to_euler(hd.rotation_mode)
+    prev[s + 'h'] = e
+    hd.rotation_euler = e
+    hd.keyframe_insert('rotation_euler', frame=f)
+    bpy.context.view_layer.update()
+
+
 def crawl_arms(act):
     """Set both arms of <act> on every frame from CRAWL_ARM, relative to the pelvis as it rolls."""
     import bpy
@@ -212,46 +258,8 @@ def crawl_arms(act):
         pmat = ob.pose.bones['pzadek'].matrix.to_3x3()
         for s, ph in (('p', 0.0), ('l', 0.5)):
             upper, fore, bend, palm = _crawl_at(u + ph, s == 'l')
-            up = (pmat @ p0inv @ wi @ upper).normalized()
-            fp = pmat @ p0inv @ wi @ fore
-            fp = (fp - up * fp.dot(up)).normalized()
-            bi, lo = ob.pose.bones[s + 'biceps'], ob.pose.bones[s + 'loket']
-            # the way this elbow bends, in the upper arm's own axes
-            rel = bi.bone.matrix_local.to_3x3().inverted() @ lo.bone.matrix_local.to_3x3()
-            b = rel @ Vector((0, 0, 1))
-            b = (b - Vector((0, 1, 0)) * b.y).normalized()
-            src = Matrix((Vector((0, 1, 0)), b, Vector((0, 1, 0)).cross(b))).transposed()
-            dst = Matrix((up, fp, up.cross(fp))).transposed()
-            m = bi.matrix.copy()
-            rot = (dst @ src.inverted()).to_4x4()
-            rot.translation = m.translation
-            bi.matrix = rot
-            bpy.context.view_layer.update()
-            e = bi.matrix_basis.to_euler(bi.rotation_mode, prev[s]) if s in prev else bi.matrix_basis.to_euler(bi.rotation_mode)
-            prev[s] = e
-            bi.rotation_euler = e
-            bi.keyframe_insert('rotation_euler', frame=f)
-            lo.rotation_euler = dm['R'](max(bend, 2.0))
-            lo.keyframe_insert('rotation_euler', frame=f)
-            bpy.context.view_layer.update()
-            # the palm (the hand's -Z, as the breaststroke's hands have it): roll the hand about its own long axis
-            # onto the wanted palm -- the rig has no forearm twist, and the elbow plane alone left the palm up
-            hd = ob.pose.bones[s + 'ruka']
-            hm = hd.matrix.copy()
-            axis = (hm.to_3x3() @ Vector((0, 1, 0))).normalized()
-            have = -(hm.to_3x3() @ Vector((0, 0, 1)))
-            want = pmat @ p0inv @ wi @ palm
-            have = (have - axis * have.dot(axis)).normalized()
-            want = (want - axis * want.dot(axis)).normalized()
-            ang = math.atan2(axis.dot(have.cross(want)), have.dot(want))
-            spin = Matrix.Translation(hm.translation) @ Matrix.Rotation(ang, 4, axis) @ Matrix.Translation(-hm.translation)
-            hd.matrix = spin @ hm
-            bpy.context.view_layer.update()
-            e = hd.matrix_basis.to_euler(hd.rotation_mode, prev.get(s + 'h')) if (s + 'h') in prev else hd.matrix_basis.to_euler(hd.rotation_mode)
-            prev[s + 'h'] = e
-            hd.rotation_euler = e
-            hd.keyframe_insert('rotation_euler', frame=f)
-            bpy.context.view_layer.update()
+            to_arm = pmat @ p0inv @ wi
+            _pose_arm(ob, s, f, to_arm @ upper, to_arm @ fore, bend, to_arm @ palm, prev)
     return act
 
 
@@ -323,3 +331,66 @@ def crawl_sling(act):
         pb.keyframe_insert('location', frame=f)
         pb.keyframe_insert('rotation_euler', frame=f)
     return act
+
+
+# ---- arms from motion capture (CMU) --------------------------------------------------------------------------------
+# Owner, 2026-10-17: try "real motion captures" (mocap.cs.cmu.edu) -- "only for the arms". The swim takes are prone
+# captures (the spine level, the back up); the arms are carried across as directions in the chest's own frame
+# (cmu_mocap.py) and set on our breaststroke body every frame, so the body, head and legs stay ours.
+# The capture's cleanest stroke, as arm targets per phase (cmu_mocap.write_table: CMU subject 126, trial 4, frames
+# 965..1147). Owner, 2026-10-17, comparing it with the keyed arms side by side: "i prefer mocap". Without the table
+# the keyed arms are used.
+MOCAP_TABLE = os.path.join(HERE, 'mocap_breaststroke.json')
+MOCAP_FRAMES = 40
+# Where in our cycle the captured arms reach furthest (the capture's cycle starts there): the end of our whip kick,
+# as a breaststroke times it -- the hands shoot forward while the heels come up, the kick lands as they reach full
+# stretch. Unshifted, the hands were still under the chin through the kick.
+MOCAP_REACH_AT = 0.68
+
+
+def _chest(ob):
+    """Our chest frame in armature space, as cmu_mocap.chest_frame builds it: x to the right shoulder, y up the spine,
+    z = x cross y (out of the back)."""
+    pb = ob.pose.bones
+    x = (pb['pbiceps'].head - pb['lbiceps'].head).normalized()
+    y = pb['krk'].head - pb['bricho'].head
+    y = (y - x * y.dot(x)).normalized()
+    return x, y, x.cross(y)
+
+
+def mocap_arms(act, table=MOCAP_TABLE):
+    """Replace both arms of <act> (baked on MOCAP_FRAMES frames) with the captured stroke; the body, head and legs
+    stay as keyed."""
+    import json
+    import bpy
+    doc = json.load(open(table))
+    arms, n = doc['arms'], doc['phases'] - 1
+    ob = bpy.data.objects['MC_Rig']
+    sc = bpy.context.scene
+    ob.animation_data.action = act
+    last = int(act.frame_range[1])
+    prev = {}
+    for f in range(last + 1):
+        sc.frame_set(f)
+        x, y, z = _chest(ob)
+        conv = lambda v: x * v[0] + y * v[1] + z * v[2]
+        t = ((f / last - MOCAP_REACH_AT) % 1.0) * n
+        k0 = int(t)
+        w = t - k0
+        for s in 'pl':
+            vs = []
+            for j in range(3):
+                a, b = arms[s][k0][j], arms[s][min(k0 + 1, n)][j]
+                vs.append(conv([a[c] * (1 - w) + b[c] * w for c in range(3)]).normalized())
+            u, fo, palm = vs
+            _pose_arm(ob, s, f, u, fo, math.degrees(u.angle(fo)), palm, prev)
+    return act
+
+
+def action_pose(act, frame=0):
+    """<act>'s pose at <frame> as {bone: (location, rotation)} -- a join target, as dive_moves.tread_pose."""
+    import bpy
+    ob = bpy.data.objects['MC_Rig']
+    ob.animation_data.action = act
+    bpy.context.scene.frame_set(frame)
+    return {b: (tuple(ob.pose.bones[b].location), tuple(ob.pose.bones[b].rotation_euler)) for b in dm['ALL'] + list(dm['SLING'])}

@@ -31,6 +31,15 @@ insweep with the breath, hands together under the chin and forward, heels drawn 
 are made in Blender by `scripts/swim/surface_moves.py` (on `dive_moves.py`'s tools); steps, phase counts and the
 `config.cpp` timings are the old moves', so speeds are unchanged.
 
+The stroke's **arms are motion capture** (owner, 2026-10-17, compared side by side with the keyed arms: "i prefer
+mocap"; "only for the arms"): the cleanest breaststroke cycle of the CMU Graphics Lab Motion Capture Database,
+subject 126 trial 4 (mocap.cs.cmu.edu -- "The motion capture data may be copied, modified, or redistributed without
+permission"; with thanks to CMU). `scripts/swim/cmu_mocap.py` reads the ASF/AMC take, finds the cleanest cycle and
+writes the arms as directions in the chest's own frame to `scripts/swim/mocap_breaststroke.json`; `surface_moves.py`
+sets them on our breaststroke body every frame (the body, head and legs stay keyed), timed so the hands reach full
+stretch as the whip kick lands. The capture is a prone swimmer on dry land; its right arm sweeps ~20 deg wider than
+the left, and is kept as recorded.
+
 The sprint (`SwimFastF`, forward with the fast/turbo key) is a heads-up front crawl, `swimfast` (2026-10-17, owner:
 "use the crawl animation for swimming when the player uses the running option" -- the pack had none; the sprint was
 the breaststroke played faster): the arms in turn, each recovering over the water with the elbow high, the body
