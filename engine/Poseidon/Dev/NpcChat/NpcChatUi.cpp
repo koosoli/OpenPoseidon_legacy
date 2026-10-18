@@ -831,6 +831,40 @@ void DrawTab()
             // his role; whatever is typed here replaces it.
             if (ImGui::TreeNode("Personas (how each soldier talks)"))
             {
+                static const char* const kChatter[] = {"off", "rare", "normal", "chatty"};
+                int chatter = s.eventChatter;
+                if (Dev::SliderInt("Reactions to events", &chatter, 0, 3, kChatter[std::clamp(chatter, 0, 3)]))
+                {
+                    s.eventChatter = chatter;
+                    dirty = true;
+                }
+                ImGui::TextDisabled("Hits, deaths, new contacts, kills: one short remark at most (one request each).");
+                std::string jokerLabel = s.jokerSlot < 0 ? "automatic" : s.jokerSlot == 0 ? "nobody"
+                                                                                           : std::to_string(s.jokerSlot);
+                if (Dev::BeginCombo("Squad joker", jokerLabel.c_str()))
+                {
+                    if (ImGui::Selectable("automatic (second squad mate)", s.jokerSlot < 0))
+                    {
+                        s.jokerSlot = -1;
+                        dirty = true;
+                    }
+                    if (ImGui::Selectable("nobody", s.jokerSlot == 0))
+                    {
+                        s.jokerSlot = 0;
+                        dirty = true;
+                    }
+                    for (const SquadSlot& slot : squad)
+                        if (!slot.isPlayer)
+                        {
+                            const std::string text = std::to_string(slot.id) + " " + slot.name;
+                            if (ImGui::Selectable(text.c_str(), s.jokerSlot == slot.id))
+                            {
+                                s.jokerSlot = slot.id;
+                                dirty = true;
+                            }
+                        }
+                    ImGui::EndCombo();
+                }
                 for (const SquadSlot& slot : squad)
                 {
                     if (slot.isPlayer)

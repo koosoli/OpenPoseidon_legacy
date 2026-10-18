@@ -25,6 +25,7 @@
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <set>
 
 std::string Arma2BriefingHtml(const std::string& html); // GameStateExtA2.cpp (global namespace)
 
@@ -471,6 +472,8 @@ ReportResult BuildSituationReport(const Settings& settings)
             const std::string label =
                 std::to_string(unit->ID()) + (sign.empty() ? std::string() : " (call sign \"" + sign + "\")");
             extra += " -- persona: " + CurrentSettings().PersonaFor(unit->ID(), std::string(person->GetDisplayName()));
+            if (unit->ID() == JokerSlot())
+                extra += " -- THE SQUAD JOKER: sarcastic one-liners when something happens";
             std::snprintf(line, sizeof(line), " %s: %s, %s, %s, %s%s\n", label.c_str(), PersonName(person).c_str(),
                           std::string(person->GetDisplayName()).c_str(), DescribeOffset(pp, person->Position()).c_str(),
                           dead ? "DEAD" : Health(person).c_str(), extra.c_str());
@@ -750,6 +753,94 @@ SpeakerInfo ResolveSpeaker(int registryId, const std::string& id)
         h = (h ^ static_cast<unsigned char>(c)) * 16777619u;
     info.voiceSeed = info.inSquad ? std::atoi(info.id.c_str()) : static_cast<int>(h & 0x7fffffff);
     return info;
+}
+
+int JokerSlot()
+{
+    const int chosen = CurrentSettings().jokerSlot;
+    if (chosen >= 0)
+        return chosen;
+    // Automatic: the second squad mate (the first is usually the senior one).
+    int seen = 0;
+    for (const SquadSlot& slot : CurrentSquad())
+        if (!slot.isPlayer && !slot.dead && ++seen == 2)
+            return slot.id;
+    return 0;
+}
+
+std::vector<std::string> PollSquadEvents()
+{
+    // What the squad looked like at the last poll: damage per squad number, and the enemy
+    // contacts the group knows about (by target pointer, never ground truth).
+    static std::string s_mission;
+    static std::map<int, float> s_damage;
+    static std::map<int, bool> s_dead;
+    static std::set<const void*> s_contacts;
+    static std::set<const void*> s_destroyed;
+
+    std::vector<std::string> events;
+    if (!GameAvailable())
+        return events;
+    const std::string mission = MissionKey();
+    const bool firstLook = mission != s_mission;
+    if (firstLook)
+    {
+        s_mission = mission;
+        s_damage.clear();
+        s_dead.clear();
+        s_contacts.clear();
+        s_destroyed.clear();
+    }
+
+    Person* player = PlayerPerson();
+    AIUnit* me = player->Brain();
+    AIGroup* grp = me ? me->GetGroup() : nullptr;
+    if (!grp)
+        return events;
+
+    for (int i = 1; i <= MAX_UNITS_PER_GROUP; ++i)
+    {
+        AIUnit* unit = grp->UnitWithID(i);
+        if (!unit || !unit->GetPerson())
+            continue;
+        Person* person = unit->GetPerson();
+        const bool dead = unit->GetLifeState() == AIUnit::LSDead || person->IsDammageDestroyed();
+        const float damage = static_cast<float>(EvalAbout(person, "damage _u"));
+        const std::string who = unit == me ? std::string("The player (squad leader)")
+                                           : std::to_string(i) + " " + PersonName(person);
+        if (!firstLook)
+        {
+            if (dead && !s_dead[i])
+                events.push_back(who + " was killed.");
+            else if (!dead && damage > s_damage[i] + 0.05f)
+                events.push_back(who + " was hit (" + (damage < 0.5f ? "lightly wounded" : "badly wounded") + ").");
+        }
+        s_dead[i] = dead;
+        s_damage[i] = damage;
+    }
+
+    AICenter* center = grp->GetCenter();
+    const TargetList& list = grp->GetTargetList();
+    const Vector3 pp = player->Position();
+    for (int i = 0; i < list.Size(); ++i)
+    {
+        Target* t = list[i];
+        if (!t || !t->type || !center || !center->IsEnemy(t->side))
+            continue;
+        const void* id = t;
+        if (t->destroyed)
+        {
+            if (s_contacts.count(id) && s_destroyed.insert(id).second && !firstLook)
+                events.push_back("Enemy " + std::string(t->type->GetDisplayName()) + " destroyed.");
+            continue;
+        }
+        if (!t->IsKnown() || t->vanished)
+            continue;
+        if (s_contacts.insert(id).second && !firstLook)
+            events.push_back("New enemy contact: " + std::string(t->type->GetDisplayName()) + ", " +
+                             DescribeOffset(pp, t->position) + ".");
+    }
+    return events;
 }
 
 std::vector<SquadSlot> CurrentSquad()

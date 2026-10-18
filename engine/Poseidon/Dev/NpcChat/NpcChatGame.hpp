@@ -68,6 +68,13 @@ struct SquadSlot
 /// The player's squad right now (for the call-sign editor); empty without a mission.
 std::vector<SquadSlot> CurrentSquad();
 
+/// Things worth a spontaneous remark since the last call ("2 Bobby Bruning was hit (lightly
+/// wounded)", "New contact: BMP, 300 m north"). Polled from the game thread; the first call after a
+/// mission starts only takes stock and reports nothing.
+std::vector<std::string> PollSquadEvents();
+/// The squad number of the joker for the current squad (0 = none).
+int JokerSlot();
+
 /// Strip mission briefing HTML to plain text (pure; unit-tested).
 std::string HtmlToText(const std::string& html);
 } // namespace Poseidon::NpcChat

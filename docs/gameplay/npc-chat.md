@@ -125,3 +125,10 @@ contract and order whitelist), `NpcChatGame` (situation report, speakers, order 
 * **Settings:** export / import to a file (never contains keys); compact chat-only dev panel;
   push-to-talk on Caps Lock by default.
 * **Dev panel Home tab:** every page grouped, with one-click jumps and the panel's shortcuts.
+* **Reactions to events:** a squad mate hit or killed, a new enemy contact, a contact destroyed
+  (only what the squad knows) can draw one short remark, never an order. One soldier is the squad
+  joker (automatic: the second squad mate; or pick one / nobody) for wisecracks; a death gets a
+  serious line, never a joke. Chattiness: off / rare (90 s) / normal (40 s) / chatty (15 s) between
+  remarks; a death skips the wait. Each remark is one model request and counts against the rate limit.
+  The default squad is a mixed bunch (Brooklyn, Chicago, Iowa, Georgia, Detroit riflemen; a Texan
+  grenadier; a Pittsburgh machine gunner; a Bostonian medic).

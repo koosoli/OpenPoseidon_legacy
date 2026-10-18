@@ -271,21 +271,35 @@ std::string DefaultPersona(int slot, const std::string& role)
     for (char& c : r)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     if (r.find("medic") != std::string::npos)
-        return "Calm and caring; always checks who is hurt.";
+        return "Doc. Calm Bostonian, worries about everyone, hates being shot at.";
     if (r.find("machine") != std::string::npos || r.find("mg") != std::string::npos)
-        return "Big, loud and proud of his gun.";
+        return "Big Polish-American from Pittsburgh, loud, talks to his gun.";
     if (r.find("grenadier") != std::string::npos)
-        return "Dry humour, never in a hurry.";
+        return "Texan, slow drawl, unflappable, dry humour.";
     if (r.find("anti") != std::string::npos || r.find("at ") != std::string::npos)
-        return "Quiet, patient, waits for armour.";
+        return "Quiet Navajo from Arizona, patient, best eyes in the squad.";
     if (r.find("sniper") != std::string::npos)
-        return "Few words, very precise.";
+        return "Few words, very precise, from rural Maine.";
     if (r.find("officer") != std::string::npos || r.find("leader") != std::string::npos)
-        return "Experienced and steady.";
-    static const char* const riflemen[] = {"Young, eager, a bit nervous.", "Old hand who has seen it all.",
-                                           "Joker of the squad.", "Farm boy, homesick, reliable.",
-                                           "City kid, talks fast."};
+        return "Experienced and steady, been in since Vietnam.";
+    static const char* const riflemen[] = {
+        "Brooklyn kid, talks fast, never shuts up about the Mets.",
+        "Puerto Rican from Chicago, warm, quick with a comeback.",
+        "Farm boy from Iowa, homesick, utterly reliable.",
+        "Old hand from Georgia who has seen it all.",
+        "Detroit kid, eager, writes letters to his girl every night."};
     return riflemen[(slot < 0 ? 0 : slot) % 5];
+}
+
+double EventCooldownSeconds(int eventChatter)
+{
+    switch (eventChatter)
+    {
+        case 1: return 90.0;
+        case 2: return 40.0;
+        case 3: return 15.0;
+        default: return 0.0;
+    }
 }
 
 std::string Settings::PersonaFor(int slot, const std::string& role) const
@@ -395,6 +409,8 @@ std::string SettingsToJson(const Settings& s)
     for (const auto& [slot, voice] : s.squadVoices)
         if (!voice.empty())
             cJSON_AddStringToObject(voices, std::to_string(slot).c_str(), voice.c_str());
+    cJSON_AddNumberToObject(root, "eventChatter", s.eventChatter);
+    cJSON_AddNumberToObject(root, "jokerSlot", s.jokerSlot);
     cJSON* personas = cJSON_AddObjectToObject(root, "personas");
     for (const auto& [slot, persona] : s.personas)
         if (!persona.empty())
@@ -468,6 +484,9 @@ bool SettingsFromJson(const std::string& json, Settings& s)
             if (item->string && cJSON_IsString(item) && item->valuestring && item->valuestring[0])
                 s.squadVoices[std::atoi(item->string)] = item->valuestring;
     }
+    ReadInt(root, "eventChatter", s.eventChatter);
+    s.eventChatter = s.eventChatter < 0 ? 0 : s.eventChatter > 3 ? 3 : s.eventChatter;
+    ReadInt(root, "jokerSlot", s.jokerSlot);
     if (const cJSON* personas = cJSON_GetObjectItemCaseSensitive(root, "personas"); cJSON_IsObject(personas))
     {
         s.personas.clear();

@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -814,7 +815,7 @@ TEST_CASE("NpcChat: moderation models are not offered and their verdicts are nev
 
 TEST_CASE("NpcChat personas: a short default per role, replaced by the player's text, saved", "[npcchat]")
 {
-    CHECK_THAT(DefaultPersona(4, "Medic"), ContainsSubstring("caring"));
+    CHECK_THAT(DefaultPersona(4, "Medic"), ContainsSubstring("worries about everyone"));
     CHECK_THAT(DefaultPersona(2, "Machine Gunner"), ContainsSubstring("gun"));
     CHECK(DefaultPersona(5, "Soldier").size() < 60); // one line, not an essay
     Settings s;
@@ -853,4 +854,34 @@ TEST_CASE("NpcChat speech model lists: filtered per provider; an unavailable mod
     privacy.status = 404;
     privacy.body = R"({"error":{"message":"0 endpoints out of 1 requested are available matching your guardrail restrictions and data policy."}})";
     CHECK_THAT(DescribeHttpFailure("OpenRouter", privacy), ContainsSubstring("openrouter.ai/settings/privacy"));
+}
+
+TEST_CASE("NpcChat events: a mixed default squad, one joker, reactions with a cooldown", "[npcchat]")
+{
+    std::set<std::string> personas;
+    for (int slot = 2; slot <= 6; ++slot)
+        personas.insert(DefaultPersona(slot, "Soldier"));
+    CHECK(personas.size() == 5); // five riflemen, five different men
+    CHECK(DefaultPersona(3, "Grenadier") != DefaultPersona(3, "Medic"));
+
+    CHECK(EventCooldownSeconds(0) == 0.0);
+    CHECK(EventCooldownSeconds(1) > EventCooldownSeconds(2));
+    CHECK(EventCooldownSeconds(2) > EventCooldownSeconds(3));
+    Settings s;
+    CHECK(s.eventChatter == 2);
+    CHECK(s.jokerSlot == -1);
+    s.eventChatter = 3;
+    s.jokerSlot = 4;
+    Settings back;
+    REQUIRE(SettingsFromJson(SettingsToJson(s), back));
+    CHECK(back.eventChatter == 3);
+    CHECK(back.jokerSlot == 4);
+    Settings wild;
+    REQUIRE(SettingsFromJson(R"({"eventChatter":9})", wild));
+    CHECK(wild.eventChatter == 3);
+
+    const std::string rules = ResponseFormatInstructions(true);
+    CHECK_THAT(rules, ContainsSubstring("[GAME EVENT]"));
+    CHECK_THAT(rules, ContainsSubstring("SQUAD JOKER"));
+    CHECK_THAT(rules, ContainsSubstring("never a joke"));
 }

@@ -485,7 +485,7 @@ void TrimHistory(const Settings& s)
 
 /// The model's answer arrives (game thread).
 void HandleReply(const Settings& s, int registryId, const std::string& defaultSpeaker, const std::string& text,
-                 bool remember)
+                 bool remember, bool eventTurn = false)
 {
     if (remember)
     {
@@ -523,7 +523,7 @@ void HandleReply(const Settings& s, int registryId, const std::string& defaultSp
         PostChatLine(registryId, speaker, line.text, false);
         Speak(s, registryId, speaker, line.text);
     }
-    if (s.allowOrders)
+    if (s.allowOrders && !eventTurn) // a remark about an event never moves anyone
     {
         for (const std::string& summary : ExecuteOrders(registryId, reply.orders))
             AddLine(LineKind::Order, "order", summary);
@@ -542,7 +542,7 @@ void HandleReply(const Settings& s, int registryId, const std::string& defaultSp
 }
 
 void SendToModel(const Settings& s, const std::string& system, const std::vector<ChatMessage>& messages,
-                 int registryId, const std::string& defaultSpeaker, bool remember = true)
+                 int registryId, const std::string& defaultSpeaker, bool remember = true, bool eventTurn = false)
 {
     const std::string key = GetKey(LlmKeySlot(s.llm));
     if (key.empty() && s.llm != LlmProvider::Ollama && s.llm != LlmProvider::Custom)
@@ -557,7 +557,7 @@ void SendToModel(const Settings& s, const std::string& system, const std::vector
     s_thinkingSince = Now();
     const double started = Now();
     TheWorker().Post(
-        [s, system, messages, key, registryId, defaultSpeaker, remember, started]
+        [s, system, messages, key, registryId, defaultSpeaker, remember, started, eventTurn]
         {
             const HttpRequest request = BuildLlmRequest(s, key, system, messages);
             HttpResponse response;
@@ -593,7 +593,7 @@ void SendToModel(const Settings& s, const std::string& system, const std::vector
                 (!response.error.empty() && response.error.find("Timeout") == std::string::npos &&
                  response.error != "cancelled");
             PostResult(
-                [s, registryId, defaultSpeaker, text, error, remember, started, connectionFailed]
+                [s, registryId, defaultSpeaker, text, error, remember, started, connectionFailed, eventTurn]
                 {
                     --s_inFlight;
                     char took[96];
@@ -623,7 +623,7 @@ void SendToModel(const Settings& s, const std::string& system, const std::vector
                         ReportError(error);
                         return;
                     }
-                    HandleReply(s, registryId, defaultSpeaker, text, remember);
+                    HandleReply(s, registryId, defaultSpeaker, text, remember, eventTurn);
                 });
         });
 }
@@ -665,6 +665,59 @@ void UpdateCapture()
 
 // ---------------------------------------------------------------- public API
 
+// Spontaneous reactions: events are gathered twice a second and, when the model is free, the
+// cooldown has passed and the rate limit allows, sent as one [GAME EVENT] turn.
+std::vector<std::string> s_pendingEvents;
+double s_lastEventPoll = 0.0;
+double s_lastEventTurn = -1000.0;
+
+void UpdateEvents()
+{
+    const Settings& s = CurrentSettings();
+    const double now = Now();
+    if (!s.enabled || now - s_lastEventPoll < 0.5)
+        return;
+    s_lastEventPoll = now;
+    const std::vector<std::string> events = PollSquadEvents(); // keeps its baseline even when muted
+    if (s.eventChatter <= 0)
+    {
+        s_pendingEvents.clear();
+        return;
+    }
+    s_pendingEvents.insert(s_pendingEvents.end(), events.begin(), events.end());
+    if (s_pendingEvents.size() > 4)
+        s_pendingEvents.erase(s_pendingEvents.begin(), s_pendingEvents.end() - 4);
+    if (s_pendingEvents.empty() || s_inFlight > 0 || s_talking)
+        return;
+    const bool death = std::any_of(s_pendingEvents.begin(), s_pendingEvents.end(),
+                                   [](const std::string& e) { return e.find("was killed") != std::string::npos; });
+    if (!death && now - s_lastEventTurn < EventCooldownSeconds(s.eventChatter))
+    {
+        // Too soon: keep only the latest few, and drop stale news after a while.
+        if (now - s_lastEventTurn > 120.0)
+            s_pendingEvents.clear();
+        return;
+    }
+    const std::string key = GetKey(LlmKeySlot(s.llm));
+    if (key.empty() && s.llm != LlmProvider::Ollama && s.llm != LlmProvider::Custom)
+        return; // not set up yet: say nothing rather than an error per event
+    if (RateLimited(s))
+        return;
+    ReportResult report = BuildSituationReport(s);
+    if (!report.ok)
+        return;
+    std::string text = "[GAME EVENT]";
+    for (const std::string& e : s_pendingEvents)
+        text += " " + e;
+    s_pendingEvents.clear();
+    s_lastEventTurn = now;
+    AddLine(LineKind::System, "event", text.substr(13));
+    s_history.push_back({"user", text});
+    TrimHistory(s);
+    const std::string speaker = JokerSlot() > 0 ? std::to_string(JokerSlot()) : report.defaultSpeaker;
+    SendToModel(s, SystemPrompt(s, report.text), s_history, report.registryId, speaker, true, true);
+}
+
 void Update()
 {
     {
@@ -686,6 +739,7 @@ void Update()
         fn();
     UpdateCapture();
     UpdateSpeech();
+    UpdateEvents();
 }
 
 void Shutdown()

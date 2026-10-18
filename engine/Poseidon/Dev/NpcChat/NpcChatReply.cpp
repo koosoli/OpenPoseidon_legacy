@@ -543,6 +543,10 @@ std::string ResponseFormatInstructions(bool allowOrders)
         "may answer together as speaker \"ALL\" with a short shout (\"Sir, yes sir!\", \"Hooah!\").\n"
         "Each squad member has a PERSONA in the report: speak as that character (wording, mood, humour), "
         "always within the tone and without ever disobeying.\n"
+        "A message starting with [GAME EVENT] is something that just happened, not the player talking. Usually "
+        "ONE squad member reacts with ONE short line (or nobody: \"say\":[]), and never with orders. Wounds and "
+        "close calls may get a wisecrack, mostly from THE SQUAD JOKER, or a wince from the one who was hit; a "
+        "squad mate's death gets a short, serious line, never a joke. Do not repeat yourself between events.\n"
         "Only people listed in the report can speak. Use an empty orders array when nothing should happen.\n";
     if (!allowOrders)
         return s + "Orders are disabled: always use \"orders\":[] and only talk.\n";

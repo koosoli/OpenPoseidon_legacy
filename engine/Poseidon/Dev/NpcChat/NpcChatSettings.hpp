@@ -72,8 +72,11 @@ std::string DefaultTtsBaseUrl(TtsProvider p);
 std::string DefaultTtsVoices(TtsProvider p);
 std::string DefaultSystemPrompt();
 
-/// A one-line persona from the soldier's role ("Medic", "Machine Gunner"...), varied by squad slot.
+/// A one-line persona from the soldier's role ("Medic", "Machine Gunner"...), varied by squad slot so
+/// a default squad is a mixed bunch rather than five copies of one man.
 std::string DefaultPersona(int slot, const std::string& role);
+/// Seconds between two spontaneous reactions for a chattiness level (0 = never).
+double EventCooldownSeconds(int eventChatter);
 
 constexpr int kToneCount = 4;
 const char* ToneName(int tone);
@@ -139,6 +142,12 @@ struct Settings
     // Per-soldier persona ("2" -> "Gruff Texan, hates the cold"). Empty -> DefaultPersona(slot, role).
     std::map<int, std::string> personas;
     std::string PersonaFor(int slot, const std::string& role) const;
+
+    // Spontaneous reactions to what happens (a squad mate hit or killed, a new contact, a kill):
+    // 0 off, 1 rare, 2 normal, 3 chatty. Each reaction is one model request, so it has a cooldown.
+    int eventChatter = 2;
+    // The squad joker: -1 = automatic (the second squad mate), 0 = nobody, else a squad number.
+    int jokerSlot = -1;
 
     std::string EffectiveLlmModel() const;
     std::string EffectiveLlmBaseUrl() const;
