@@ -173,6 +173,9 @@ fn cs_sky_sh(@builtin(local_invocation_index) lane: u32) {
         // Sky irradiance on level ground from the upper-sky coefficients (frame::sky_irradiance
         // at n = +y, before its 1/pi).
         for (var i = 0; i < 9; i = i + 1) { full[i] = full[i] * ground.phys.x; }
+        // RFG-215: the factor the native lift below applies, published in sh.c[0].w for the
+        // interior floor (frame.wgsl interior_sky_ao); 1 where nothing is lifted.
+        var lifted = 1.0;
         let u = partial[0];
         var e_sky = ground.phys.x * max(-0.429043 * u[8] + 0.886227 * u[0] - 0.247708 * u[6] + 2.0 * 0.511664 * u[1],
                         vec3<f32>(0.0));
@@ -186,6 +189,7 @@ fn cs_sky_sh(@builtin(local_invocation_index) lane: u32) {
                 let lift = clamp(ground.norm.x * e_sun_beam / e_sky_lum, 1.0, max(ground.norm.z, 1.0));
                 // Desaturation is linear, so it applies per coefficient and keeps the SH a projection.
                 let k = lift - 1.0;
+                lifted = lift;
                 for (var i = 0; i < 9; i = i + 1) {
                     let c = full[i];
                     full[i] = c + k * mix(c, vec3<f32>(dot(c, lum)), ground.norm.w);
@@ -203,5 +207,6 @@ fn cs_sky_sh(@builtin(local_invocation_index) lane: u32) {
             full[1] = full[1] - lg * (0.488603 * PI);
         }
         for (var i = 0; i < 9; i = i + 1) { sh.c[i] = vec4<f32>(full[i], 0.0); }
+        sh.c[0].w = lifted;
     }
 }

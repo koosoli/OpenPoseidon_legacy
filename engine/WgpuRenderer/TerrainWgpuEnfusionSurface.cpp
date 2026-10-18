@@ -482,8 +482,15 @@ void TerrainWgpu::ApplyEnfusionAmbientOcclusion(bool native)
     // the panes black with the glass sheen off). At 2/10 the room appears as Reforger shows it
     // (walls, wardrobe, the round mirror in the left window), and the 17 outdoor parity poses do
     // not move (RMS 0.43 vs 0.44 EV).
-    if (intensity > 0.0f)
-        ao.strength = std::clamp(intensity / 10.0f, 0.05f, 1.0f);
+    // RFG-216: not the strength, the REACH. Cutting the strength to Intensity/10 (RFG-208) let the
+    // rooms show through the windows but took every contact shadow out of the interiors with it
+    // (the owner, upstairs at 5086.9,3995.6: "interiors have no shadows whatsoever"). The cause is
+    // the radius: HBAO's 8.5 m in our screen-space GTAO spans a whole room, so a room seen through
+    // a window counted as occluded wall to wall. At 1.5 m and full strength the sofa, armchair and
+    // table sit in their own shadows again AND the rooms behind the glass read as in Reforger
+    // (houseNear). WGR_ENFUSION_AO_RADIUS / _STRENGTH still override.
+    ao.radius = std::min(ao.radius, 1.5f);
+    (void)intensity;
     // Calibration levers: WGR_ENFUSION_AO_RADIUS / WGR_ENFUSION_AO_STRENGTH.
     if (const char* v = std::getenv("WGR_ENFUSION_AO_RADIUS"); v && *v)
         ao.radius = std::max(0.1f, static_cast<float>(std::atof(v)));

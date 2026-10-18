@@ -1226,7 +1226,14 @@ fn interior_sky_ao(world_abs: vec3<f32>, n: vec3<f32>) -> f32 {
         return 1.0;
     }
     let occ = 1.0 - interior_sky_reach_n(world_abs, n);
-    return max(1.0 - frame.skyvis.z * occ, frame.skyvis.w);
+    // RFG-215: the floor is the light an enclosed room keeps -- of the PHYSICAL sky. A native
+    // world's sky is lifted to Lighting_Eden's outdoor indirect share (RFG-196, sh.c[0].w = the
+    // factor, ~10x), and the floor applied to the lifted sky lit every room at a tenth of
+    // outdoor shade, evenly: no falloff from the windows, no contact shadow, no visible GI (the
+    // owner at 5086.9,3995.6 upstairs). Reforger's interior probes author LVDiffuseBrightness -4.8
+    // (1/28 of outdoor). Divided back out, an interior gets exactly the pre-lift floor.
+    let lifted = max(sky_sh.c[0].w, 1.0);
+    return max(1.0 - frame.skyvis.z * occ, frame.skyvis.w / lifted);
 }
 
 // The direction the sky actually reaches this point FROM, world space — the sampled directions
