@@ -425,7 +425,21 @@ void CollectPlants(const EnfusionMount& mount, const std::string& setPath, std::
             continue;
         }
         ++collectionIndex;
-        const float maskWeight = haveMask && collectionIndex < 3 ? channelMean[collectionIndex] : 1.0f;
+        // RFG-210: the FIRST collection reads G and the second R. The set masks are BC5 -- two
+        // channels; "B = 0" was only the empty third -- and Workbench decides it: Grass_02's mask is
+        // G = 1.0 everywhere, R in 12% patches, and with its second collection's hawkbit overridden
+        // to magenta, Everon's Grass_02 meadow showed 0.016% magenta pixels (base 0.000%), i.e. the
+        // second collection grows only in the R patches. Read R-first, hawkbit carpeted every Grass_02
+        // meadow (the owner's "yellow flowers" vs Reforger's plantain and clover).
+        // WGR_CLUTTER_CMASK_ORDER=rgb restores R-first.
+        static const bool greenFirst = []
+        {
+            const char* env = std::getenv("WGR_CLUTTER_CMASK_ORDER");
+            return !(env != nullptr && std::string(env) == "rgb");
+        }();
+        static constexpr int kGreenFirst[3] = {1, 0, 2};
+        const int channel = collectionIndex < 3 ? (greenFirst ? kGreenFirst[collectionIndex] : collectionIndex) : 0;
+        const float maskWeight = haveMask && collectionIndex < 3 ? channelMean[channel] : 1.0f;
         if (maskWeight <= 0.0f)
             continue;
         ConfNode collection;
