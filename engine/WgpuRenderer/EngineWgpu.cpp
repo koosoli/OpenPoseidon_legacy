@@ -19629,6 +19629,24 @@ void EngineWgpu::LogObjectPerfRow()
             line += std::string(k ? " | " : "") + GetWaterGpuTimingName(top[k]) + "=" +
                     std::to_string(gpu[top[k]]).substr(0, 5);
         LOG_INFO(Graphics, "Frame top regions: {}", line);
+        // WGR_GPU_REGIONS_ALL=1: every region >= 0.05 ms, nested ones included (prefixed '>').
+        static const bool allRegions = []
+        {
+            const char* v = std::getenv("WGR_GPU_REGIONS_ALL");
+            return v != nullptr && v[0] == '1';
+        }();
+        if (allRegions)
+        {
+            std::string all;
+            for (int r = 0; r < kGpuRegionEnd; ++r)
+            {
+                if (r == kFrameGpuRegionTotal || pos(gpu[r]) < 0.05f)
+                    continue;
+                all += std::string(all.empty() ? "" : " | ") + (GpuTimerContainedBy(r) != kNoGpuRegion ? ">" : "") +
+                       GetWaterGpuTimingName(r) + "=" + std::to_string(gpu[r]).substr(0, 5);
+            }
+            LOG_INFO(Graphics, "Frame all regions: {}", all);
+        }
     }
 
     LOG_INFO(Graphics,

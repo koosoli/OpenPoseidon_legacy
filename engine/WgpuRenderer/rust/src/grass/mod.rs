@@ -1087,7 +1087,7 @@ impl Grass {
             ],
         });
         let satellite_view = create_satellite_placeholder(device, queue);
-        let road_cells = create_road_cells_buffer(device, &[]);
+        let road_cells = create_road_cells_buffer(device, queue, &[]);
         let holes = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_grass_terrain_holes"),
             size: crate::terrain::TERRAIN_HOLES_BYTES,
@@ -2194,8 +2194,8 @@ impl Grass {
 
     /// RFG-107: the native world's road segments per land cell (see `road_edge_distance` in
     /// grass.wgsl for the layout); empty restores "no roads". Rebinds group 1.
-    pub fn set_road_cells(&mut self, device: &wgpu::Device, data: &[u32]) {
-        self.road_cells = create_road_cells_buffer(device, data);
+    pub fn set_road_cells(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, data: &[u32]) {
+        self.road_cells = create_road_cells_buffer(device, queue, data);
         self.terrain_generation = u64::MAX;
     }
 
@@ -3485,17 +3485,22 @@ fn make_terrain_bind(
 
 /// RFG-107: the road-cell buffer (layout in grass.wgsl, `road_edge_distance`). Empty data gives
 /// the 16-byte placeholder whose header (range 0) means "no roads".
-fn create_road_cells_buffer(device: &wgpu::Device, data: &[u32]) -> wgpu::Buffer {
-    use wgpu::util::DeviceExt;
+// PERF-RFG-209: a plain device-local buffer filled by queue.write_buffer, NOT create_buffer_init
+// (mapped at creation), which can place a STORAGE buffer in host-visible memory -- the far tier's
+// identical source buffer cost 5-7 ms a frame read across the bus. Every placed blade reads this.
+fn create_road_cells_buffer(device: &wgpu::Device, queue: &wgpu::Queue, data: &[u32]) -> wgpu::Buffer {
     let mut words: Vec<u32> = data.to_vec();
     if words.len() < 4 {
         words = vec![0; 4];
     }
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("wgr_grass_road_cells"),
-        contents: bytemuck::cast_slice(&words),
-        usage: wgpu::BufferUsages::STORAGE,
-    })
+        size: (words.len() * 4) as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&words));
+    buffer
 }
 
 /// The 1x1 satellite the grass binds when the world has none (grass.wgsl tests its size).
