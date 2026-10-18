@@ -68,7 +68,7 @@ MapEditorAction DrawMapEditorTab()
     ImGui::EndDisabled();
     if (ImGui::BeginPopupModal("Restore terrain?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
     {
-        ImGui::TextUnformatted("Restore terrain to before the first edit in this mission?\n"
+        ImGui::Text("%s", "Restore terrain to before the first edit in this mission?\n"
                                "This removes brush edits, rocket craters and the LAB crater.\n"
                                "It may pause briefly. Objects and settings are not reset.");
         if (Button("Restore all terrain edits"))

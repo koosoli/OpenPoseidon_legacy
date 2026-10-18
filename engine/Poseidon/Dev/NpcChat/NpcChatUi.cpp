@@ -216,7 +216,7 @@ bool LocalPresetRow(const char* id, std::string& value, const LocalPreset* prese
             value = presets[i].url;
             changed = true;
         }
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("%s\n%s", presets[i].url, presets[i].note);
     }
     return changed;

@@ -208,7 +208,7 @@ void DrawSmokeSystemSection()
         {
             if (Dev::RadioButton(choice.label, vol.mode == choice.mode))
                 vol.mode = choice.mode;
-            if (ImGui::IsItemHovered())
+            if (Dev::PanelItemHovered())
                 ImGui::SetTooltip("%s\n\nPOSEIDON_SMOKE_SYSTEM=%d at start-up.", choice.what, static_cast<int>(choice.mode));
             if (choice.mode == SmokeSystemMode::FirePro)
                 Dev::PanelSameLine();
@@ -223,7 +223,7 @@ void DrawSmokeSystemSection()
         {
             ImGui::SetNextItemWidth(110.0f);
             Dev::SliderFloat("Froxel cell m", &vol.cellSize, 0.25f, 4.0f, "%.2f");
-            if (ImGui::IsItemHovered())
+            if (Dev::PanelItemHovered())
                 ImGui::SetTooltip("POSEIDON_SMOKE_VOL_CELL. Metres per grid cell. The grid is a fixed\n"
                                   "128 x 64 x 128 CELLS, so this alone sets both the detail and the reach:\n"
                                   "1 m gives a 128 m box with metre-scale detail, 2 m gives 256 m and half\n"
@@ -231,13 +231,13 @@ void DrawSmokeSystemSection()
             Dev::PanelSameLine();
             ImGui::SetNextItemWidth(110.0f);
             Dev::SliderInt("March steps", &vol.marchSteps, 8, 128);
-            if (ImGui::IsItemHovered())
+            if (Dev::PanelItemHovered())
                 ImGui::SetTooltip("POSEIDON_SMOKE_VOL_STEPS. Samples along each view ray. This is the single\n"
                                   "biggest cost term; the integration is analytic per step, so lowering it\n"
                                   "loses detail rather than changing the plume's overall opacity.");
             ImGui::SetNextItemWidth(110.0f);
             Dev::SliderInt("Sun march steps", &vol.sunSteps, 0, 12);
-            if (ImGui::IsItemHovered())
+            if (Dev::PanelItemHovered())
                 ImGui::SetTooltip("POSEIDON_SMOKE_VOL_SUN_STEPS. The SECOND march, from each sample toward\n"
                                   "the sun, which is the self-shadow. 0 makes the plume uniformly lit and is\n"
                                   "the cheapest ablation for measuring what it costs. Steps widen\n"
@@ -245,7 +245,7 @@ void DrawSmokeSystemSection()
             Dev::PanelSameLine();
             ImGui::SetNextItemWidth(110.0f);
             Dev::SliderFloat("Self-shadow", &vol.selfShadow, 0.0f, 1.0f, "%.2f");
-            if (ImGui::IsItemHovered())
+            if (Dev::PanelItemHovered())
                 ImGui::SetTooltip("POSEIDON_SMOKE_VOL_SELFSHADOW. Blends between a flat plume and the full\n"
                                   "sun march. Unlike the step count this costs nothing to change -- the march\n"
                                   "still runs -- so it is the LOOK knob and the step count is the COST knob.");
@@ -254,27 +254,27 @@ void DrawSmokeSystemSection()
             Dev::PanelSameLine();
             ImGui::SetNextItemWidth(110.0f);
             Dev::SliderFloat("Extinction x", &vol.extinction, 0.0f, 8.0f, "%.2f");
-            if (ImGui::IsItemHovered())
+            if (Dev::PanelItemHovered())
                 ImGui::SetTooltip("POSEIDON_SMOKE_VOL_DENSITY scales what is written INTO the field;\n"
                                   "POSEIDON_SMOKE_VOL_EXTINCTION scales how much the march is absorbed by it.\n"
                                   "They look similar and are not: density also feeds the sun march, so raising\n"
                                   "it darkens the plume's core, while extinction alone just makes it opaquer.");
             ImGui::SetNextItemWidth(110.0f);
             Dev::SliderFloat("Albedo", &vol.albedo, 0.0f, 1.0f, "%.2f");
-            if (ImGui::IsItemHovered())
+            if (Dev::PanelItemHovered())
                 ImGui::SetTooltip("POSEIDON_SMOKE_VOL_ALBEDO. Single-scattering albedo: how much of what the\n"
                                   "medium takes out of a ray it scatters rather than absorbs. Sooty diesel\n"
                                   "smoke is low and dark; steam and white smoke grenades are near 1.");
             Dev::PanelSameLine();
             ImGui::SetNextItemWidth(110.0f);
             Dev::SliderFloat("Forward scatter g", &vol.anisotropy, -0.9f, 0.9f, "%.2f");
-            if (ImGui::IsItemHovered())
+            if (Dev::PanelItemHovered())
                 ImGui::SetTooltip("POSEIDON_SMOKE_VOL_G. Henyey-Greenstein asymmetry. Positive throws light\n"
                                   "forward, which is what makes a backlit plume glow at its rim; 0 is\n"
                                   "isotropic and reads flat.");
             ImGui::SetNextItemWidth(110.0f);
             Dev::SliderInt("March scale", &vol.scale, 1, 4);
-            if (ImGui::IsItemHovered())
+            if (Dev::PanelItemHovered())
                 ImGui::SetTooltip("POSEIDON_SMOKE_VOL_SCALE. 1 marches at render resolution, 2 at half and\n"
                                   "upsamples with a nearest-DEPTH pick (not bilinear -- bilinear bleeds smoke\n"
                                   "that marched past a foreground silhouette back over it). Half resolution is\n"
@@ -300,7 +300,7 @@ void DrawGameSmokeLevers()
     {
         SmokeSoftParticles& soft = GSmokeSoftParticles();
         Dev::Checkbox("Soft particles: smoke fades into geometry (SMK-037)", &soft.enabled);
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_SOFT=0 turns it off; ON is the shipped default.\n"
                               "Every cloudlet is a flat screen-space quad depth-tested against the world, so\n"
                               "where its plane crosses the ground, a wall or a soldier the test kills one half\n"
@@ -315,7 +315,7 @@ void DrawGameSmokeLevers()
                               "also sample it.");
         ImGui::SetNextItemWidth(110.0f);
         Dev::SliderFloat("Contact fade m", &soft.fade, 0.05f, 4.0f, "%.2f");
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_SOFT_FADE. Metres of separation at which the sprite reaches full\n"
                               "opacity. 0.5 m is the measured default, and a puff RADIUS (1.5 m) is the wrong\n"
                               "instinct: looking down a lawn at a shallow angle puts the ground a metre or two\n"
@@ -328,7 +328,7 @@ void DrawGameSmokeLevers()
     {
         LegacySmokeContainment& contain = GLegacySmokeContainment();
         Dev::Checkbox("Game smoke stays in its room (SMK-030)", &contain.enabled);
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_CONTAIN_LEGACY=0 turns it off. Every cloudlet asks ONCE, at its\n"
                               "first step, whether it started inside a room; outdoor smoke never asks again.\n"
                               "An indoor cloudlet is kept inside by the room walk (no geometry sweep) and\n"
@@ -336,11 +336,11 @@ void DrawGameSmokeLevers()
                               "indoor particles.");
         ImGui::SetNextItemWidth(110.0f);
         Dev::SliderFloat("Wall slide", &contain.slide, 0.0f, 1.0f, "%.2f");
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_CONTAIN_SLIDE. How much speed a blocked particle keeps ALONG the\n"
                               "wall: 0 stops it dead, higher values let it curl and spread over the surface.");
         Dev::Checkbox("Outdoor smoke cannot drift into a house (SMK-031, costly)", &contain.blockOutsideIn);
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("OFF by default; POSEIDON_SMOKE_CONTAIN_OUTSIDE_IN=1 turns it on. Measured at\n"
                               "21-24 ms of cloudlet simulation in a village against 0.25 ms for the rest of the\n"
                               "containment: the room query behind it runs two full Landscape::IsInside passes\n"
@@ -348,14 +348,14 @@ void DrawGameSmokeLevers()
                               "(cell holds a solid object, then once every quarter second) do not help in a\n"
                               "village, where every cell does.");
         Dev::Checkbox("Clamp the drawn puff to the room (SMK-032)", &contain.clampDraw);
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_CONTAIN_DRAW=0 turns it off. A billboard beside a wall paints\n"
                               "through it whatever the particle centre does. Indoors the sprite is clamped to\n"
                               "the room clearance plus a 10 cm soft edge, as SmokeVolume::Draw already does.");
         ImGui::TextDisabled("asked %lld  indoors %lld  steps %lld  blocked %lld", contain.spawnQueries,
                             contain.indoor, contain.stepQueries, contain.blocked);
         Dev::Checkbox("No wind indoors (SMK-033)", &contain.windOutdoorsOnly);
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_WIND_INDOORS=1 restores the old behaviour. Legacy smoke bakes the\n"
                               "wind into a particle's speed at the moment it is dropped and never consults the\n"
                               "wind again, so a plume lit INSIDE a house was blown across the room by the\n"
@@ -371,7 +371,7 @@ void DrawGameSmokeLevers()
         // SMK-034: the look multipliers. Applied when a cloudlet class is LOADED, so a change
         // here reaches shots at the next mission start, like the lifetime scale below.
         Dev::Checkbox("Denser, softer game smoke (SMK-034)", &scale.look);
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_LOOK=0 restores the authored CfgCloudlets values exactly.");
         ImGui::SetNextItemWidth(110.0f);
         Dev::SliderFloat("Particles x", &scale.density, 0.25f, 6.0f, "%.2f");
@@ -385,14 +385,14 @@ void DrawGameSmokeLevers()
         Dev::SliderFloat("Fade/grow x", &scale.grow, 0.25f, 4.0f, "%.2f");
         ImGui::SetNextItemWidth(110.0f);
         Dev::SliderFloat("Game smoke lifetime x", &scale.lifetime, 0.1f, 10.0f, "%.2f");
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_LIFETIME_SCALE. Multiplies every CfgCloudlets particle life and\n"
                               "source emission time. Applies to cloudlet classes loaded from now on:\n"
                               "for shots that is the next mission start.");
         Dev::PanelSameLine();
         ImGui::SetNextItemWidth(110.0f);
         Dev::SliderFloat("Game smoke rise x", &scale.rise, 0.1f, 5.0f, "%.2f");
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_RISE_SCALE. Multiplies the cloudlet vertical speed; wind drift\n"
                               "already scales with the longer life.");
     }
@@ -401,7 +401,7 @@ void DrawGameSmokeLevers()
     {
         LegacySmokeShading& shading = GLegacySmokeShading();
         Dev::Checkbox("Lit, self-shadowing game smoke (SMK-035)", &shading.enabled);
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_SHADE=0 restores the flat 2001 colour. Cloudlets are lit by\n"
                               "nothing at all: the colour is the authored cloudletColor times a temperature\n"
                               "ramp, identical for every particle in a plume, at every hour of the day. This\n"
@@ -411,14 +411,14 @@ void DrawGameSmokeLevers()
                               "left exactly as authored.");
         ImGui::SetNextItemWidth(110.0f);
         Dev::SliderFloat("Self-shadow", &shading.selfShadow, 0.0f, 1.0f, "%.2f");
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_SHADE_SELFSHADOW. How dark the inside of a plume gets. 0 is a\n"
                               "uniformly lit plume; high values give a near-black core with bright fringes,\n"
                               "which is what a dense sooty column actually looks like.");
         Dev::PanelSameLine();
         ImGui::SetNextItemWidth(110.0f);
         Dev::SliderFloat("Translucency", &shading.wrap, 0.0f, 4.0f, "%.2f");
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_SHADE_WRAP. How far light wraps around the puff. 0 is a hard\n"
                               "surface lighting term that makes the away side black; higher is lit through,\n"
                               "and flatter.");
@@ -427,19 +427,19 @@ void DrawGameSmokeLevers()
         Dev::PanelSameLine();
         ImGui::SetNextItemWidth(110.0f);
         Dev::SliderFloat("Ambient x", &shading.ambient, 0.0f, 3.0f, "%.2f");
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_SHADE_DIFFUSE / _AMBIENT scale the scene's own two light terms.\n"
                               "Both at 1.0 means smoke is lit exactly like the rest of the world, so it goes\n"
                               "warm at dusk and dark at night instead of staying white.");
         ImGui::SetNextItemWidth(110.0f);
         Dev::SliderFloat("Emissive above K", &shading.emissiveT, 0.0f, 3000.0f, "%.0f");
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_SHADE_EMISSIVE_T. Particles hotter than this make their own\n"
                               "light and are not shaded at all; the shading fades in over the 400 K below it.\n"
                               "CfgCloudlets tracks a real temperature per particle, so this separates a\n"
                               "fireball from the smoke it leaves behind.");
         Dev::Checkbox("Game smoke shadows the ground (SMK-036)", &shading.groundShadow);
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_GROUND_SHADOW_LEGACY=0 turns it off. The renderer already had\n"
                               "this pass and the dev SmokeVolume fed it, which is why dev smoke darkened the\n"
                               "grass under it and a thrown smoke grenade did not: the game's own cloudlets\n"
@@ -448,7 +448,7 @@ void DrawGameSmokeLevers()
         Dev::PanelSameLine();
         ImGui::SetNextItemWidth(110.0f);
         Dev::SliderFloat("Ground x", &shading.groundWeight, 0.0f, 4.0f, "%.2f");
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_GROUND_SHADOW_LEGACY_WEIGHT. Multiplies the particle's own\n"
                               "drawn opacity to get the shadow it casts.");
         ImGui::TextDisabled("shaded %lld  left emissive %lld  ground blobs %lld", shading.shaded, shading.emissive,
@@ -459,7 +459,7 @@ void DrawGameSmokeLevers()
     {
         LegacySmokeDisperse& disperse = GLegacySmokeDisperse();
         Dev::Checkbox("Plumes disperse instead of winking out (SMK-039)", &disperse.enabled);
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_DISPERSE=0 restores the authored behaviour. CfgCloudlets grows a\n"
                               "puff to full size and then HOLDS it there for the rest of its life, fading it out\n"
                               "on a timer -- so a plume ends as a clump of still-solid blobs that wink out. Real\n"
@@ -468,19 +468,19 @@ void DrawGameSmokeLevers()
                               "that a particle should be INVISIBLE before it is deleted.");
         ImGui::SetNextItemWidth(110.0f);
         Dev::SliderFloat("Expand to x", &disperse.expand, 1.0f, 6.0f, "%.2f");
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_DISPERSE_EXPAND. How much bigger a puff is at death than at the\n"
                               "end of its grow-up. 1.0 = the authored behaviour, hold size and wink out.");
         Dev::PanelSameLine();
         ImGui::SetNextItemWidth(110.0f);
         Dev::SliderFloat("Thin with size", &disperse.thin, 0.0f, 2.0f, "%.2f");
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_DISPERSE_THIN. The density the expansion implies: a puff k times\n"
                               "wider holds the same smoke over k^2 more area, so opacity falls as k^-2 at 1.0.\n"
                               "0 swells the puff without thinning it, which looks like an inflating balloon.");
         ImGui::SetNextItemWidth(110.0f);
         Dev::SliderFloat("Drift apart", &disperse.spread, 0.0f, 5.0f, "%.2f");
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_DISPERSE_SPREAD. Outward acceleration away from the plume's axis,\n"
                               "ramped with the particle's age, so a column opens out as it rises instead of\n"
                               "staying the width it was born. Horizontal only -- the vertical is what the\n"
