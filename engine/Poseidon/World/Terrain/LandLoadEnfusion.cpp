@@ -2747,9 +2747,10 @@ bool AppendLakeWater(const ResolvedRoad& road, std::vector<float>& vertices, std
 //! The model half of a road: the draped ribbon, through the MLOD round trip. Pure (the ground
 //! is read through `groundY`), so the loader builds every road's on the task pool and only
 //! registers the shapes on the main thread.
-std::shared_ptr<Poseidon::Model::Model> BuildRoadModel(const ResolvedRoad& road,
-                                                       const std::function<float(float, float)>& groundY,
-                                                       size_t variantSeed, const std::string& name)
+//! PERF-DECAL-MERGE: the strip's geometry alone (BuildRoadModel wraps it into a Model), so several
+//! decal strips can be concatenated into ONE model. False when there is nothing to build.
+bool BuildRoadLod(const ResolvedRoad& road, const std::function<float(float, float)>& groundY, size_t variantSeed,
+                  Poseidon::Asset::Formats::MLOD::WriteLod& lodOut)
 {
     namespace Fmt = Poseidon::Asset::Formats;
 
@@ -2761,7 +2762,7 @@ std::shared_ptr<Poseidon::Model::Model> BuildRoadModel(const ResolvedRoad& road,
         const std::vector<float>& source = road.points;
         const size_t sourceCount = source.size() / 3;
         if (sourceCount < 2)
-            return nullptr;
+            return false;
         const float defaultWidth = (road.width > 0.1f) ? road.width : 6.0f;
         const bool perPoint = road.pointWidths.size() == sourceCount;
         const auto widthAt = [&](size_t i)
@@ -2966,7 +2967,14 @@ std::shared_ptr<Poseidon::Model::Model> BuildRoadModel(const ResolvedRoad& road,
                 lod.faces.push_back(face);
             }
     }
+    lodOut = std::move(lod);
+    return true;
+}
 
+std::shared_ptr<Poseidon::Model::Model> ModelFromRoadLod(Poseidon::Asset::Formats::MLOD::WriteLod&& lod,
+                                                         const std::string& name)
+{
+    namespace Fmt = Poseidon::Asset::Formats;
     Fmt::MLOD::WriteModel model;
     model.lods.push_back(std::move(lod));
 
@@ -2978,6 +2986,16 @@ std::shared_ptr<Poseidon::Model::Model> BuildRoadModel(const ResolvedRoad& road,
     if (parsed->lodLevels.empty())
         return nullptr;
     return parsed;
+}
+
+std::shared_ptr<Poseidon::Model::Model> BuildRoadModel(const ResolvedRoad& road,
+                                                       const std::function<float(float, float)>& groundY,
+                                                       size_t variantSeed, const std::string& name)
+{
+    Poseidon::Asset::Formats::MLOD::WriteLod lod;
+    if (!BuildRoadLod(road, groundY, variantSeed, lod))
+        return nullptr;
+    return ModelFromRoadLod(std::move(lod), name);
 }
 
 /// RFG-013: one `.xob` in the archives -> one shape the engine can draw.
@@ -4530,7 +4548,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
             if (std::getenv("POSEIDON_REFORGER_NO_ROADS") == nullptr)
             {
                 const DWORD roadStart = Poseidon::Foundation::GlobalTickCount();
-                size_t roadsBuilt = 0, roadsFailed = 0, roadTextured = 0;
+                size_t roadsBuilt = 0, roadsFailed = 0, roadTextured = 0, decalsMerged = 0;
                 std::map<std::string, size_t> textureUse;
                 double roadKm = 0.0;
                 // The land cells under the tarmac, for the clutter bake. A road is a
@@ -4696,12 +4714,89 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                 const float* riverLook = nullptr;
                 size_t riversAsWaterCount = 0, lakesAsWater = 0;
                 std::vector<std::shared_ptr<Poseidon::Model::Model>> roadModels(roads.size());
+                // PERF-DECAL-MERGE: Everon's ~4,000 terrain decals (RFG-194) were each their own
+                // blended object -- hundreds of separate draws in the transparent pass (~0.4 ms
+                // GPU at the village pose, A/B with POSEIDON_ENFUSION_DECALS=0). Decals whose
+                // origins share a 64 m cell are now concatenated into the first one's model
+                // (vertices rebased to its origin); faces keep their own texture, so a mixed
+                // cell is one object with a few sections. The others are skipped below.
+                // POSEIDON_ENFUSION_DECAL_MERGE=0 keeps one object per decal.
+                std::vector<std::vector<size_t>> decalGroups;   // leader -> members (incl. leader)
+                std::vector<int64_t> decalLeader(roads.size(), -1);
+                {
+                    static const bool decalMerge = []
+                    {
+                        const char* v = std::getenv("POSEIDON_ENFUSION_DECAL_MERGE");
+                        return !(v && v[0] == '0');
+                    }();
+                    if (decalMerge)
+                    {
+                        std::unordered_map<uint64_t, size_t> cellGroup;
+                        for (size_t r = 0; r < roads.size(); ++r)
+                        {
+                            if (!roadReady[r] || !roads[r].decal || roads[r].lake || roads[r].river)
+                                continue;
+                            const int64_t cx = static_cast<int64_t>(std::floor(roads[r].origin[0] / 64.0f));
+                            const int64_t cz = static_cast<int64_t>(std::floor(roads[r].origin[2] / 64.0f));
+                            const uint64_t key = (static_cast<uint64_t>(cx) << 32) ^ static_cast<uint64_t>(cz & 0xffffffff);
+                            auto [it, fresh] = cellGroup.try_emplace(key, decalGroups.size());
+                            if (fresh)
+                                decalGroups.push_back({});
+                            decalGroups[it->second].push_back(r);
+                            decalLeader[r] = static_cast<int64_t>(decalGroups[it->second].front());
+                        }
+                    }
+                }
+                std::vector<int64_t> groupOfLeader(roads.size(), -1);
+                for (size_t g = 0; g < decalGroups.size(); ++g)
+                    groupOfLeader[decalGroups[g].front()] = static_cast<int64_t>(g);
                 {
                     const auto buildRoad = [&](size_t r)
                     {
                         if (!roadReady[r] || roads[r].lake || (riversAsWater && roads[r].river))
                             return;
+                        if (decalLeader[r] >= 0 && decalLeader[r] != static_cast<int64_t>(r))
+                            return; // merged into its cell's leader
                         const ResolvedRoad& road = roads[r];
+                        if (groupOfLeader[r] >= 0 && decalGroups[static_cast<size_t>(groupOfLeader[r])].size() > 1)
+                        {
+                            namespace Fmt = Poseidon::Asset::Formats;
+                            Fmt::MLOD::WriteLod merged;
+                            merged.resolution = 1.0f;
+                            for (const size_t m : decalGroups[static_cast<size_t>(groupOfLeader[r])])
+                            {
+                                const ResolvedRoad& member = roads[m];
+                                const auto groundM = [this, &member](float x, float z)
+                                { return SurfaceY(member.origin[0] + x, member.origin[2] + z) + 0.08f - member.origin[1]; };
+                                Fmt::MLOD::WriteLod part;
+                                if (!BuildRoadLod(member, groundM, m, part))
+                                    continue;
+                                const float ox = member.origin[0] - road.origin[0];
+                                const float oy = member.origin[1] - road.origin[1];
+                                const float oz = member.origin[2] - road.origin[2];
+                                const int32_t base = static_cast<int32_t>(merged.points.size());
+                                for (auto point : part.points)
+                                {
+                                    point.position.x += ox;
+                                    point.position.y += oy;
+                                    point.position.z += oz;
+                                    merged.points.push_back(point);
+                                }
+                                merged.normals.insert(merged.normals.end(), part.normals.begin(), part.normals.end());
+                                for (auto face : part.faces)
+                                {
+                                    for (int c = 0; c < face.vertexCount; ++c)
+                                    {
+                                        face.vertices[c].point += base;
+                                        face.vertices[c].normal += base;
+                                    }
+                                    merged.faces.push_back(face);
+                                }
+                            }
+                            if (!merged.faces.empty())
+                                roadModels[r] = ModelFromRoadLod(std::move(merged), "enfusion_road_" + std::to_string(r));
+                            return;
+                        }
                         // Each strip vertex sits on the engine's own terrain, 8 cm up, whatever the
                         // centreline's height (see BuildRoadModel: a strip draped by its centre
                         // alone sinks its uphill edge).
@@ -4754,6 +4849,11 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                 {
                     if (!roadReady[r])
                         continue;
+                    if (decalLeader[r] >= 0 && decalLeader[r] != static_cast<int64_t>(r))
+                    {
+                        ++decalsMerged;
+                        continue; // PERF-DECAL-MERGE: drawn by its cell's leader
+                    }
                     ResolvedRoad& road = roads[r];
                     const size_t pointCount = road.points.size() / 3;
                     if (road.lake)
@@ -4865,9 +4965,9 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                 LOG_INFO(World, "Enfusion native load: {} objects more than 50 m above the terrain{}",
                      floatingObjects, firstFloating.empty() ? "" : ("; first: " + firstFloating));
             LOG_INFO(World,
-                     "Enfusion native load: {} roads built ({} failed, {} textured), {:.1f} km, {} of {} land cells "
-                     "under roads ({:.2f}%), {} ms",
-                     roadsBuilt, roadsFailed, roadTextured, roadKm, roadCells, _enfusionRoadCells.size(),
+                     "Enfusion native load: {} roads built ({} failed, {} textured, {} decals merged into their "
+                     "cell's object), {:.1f} km, {} of {} land cells under roads ({:.2f}%), {} ms",
+                     roadsBuilt, roadsFailed, roadTextured, decalsMerged, roadKm, roadCells, _enfusionRoadCells.size(),
                      _enfusionRoadCells.empty() ? 0.0 : 100.0 * double(roadCells) / double(_enfusionRoadCells.size()),
                      Poseidon::Foundation::GlobalTickCount() - roadStart);
             }
