@@ -151,6 +151,8 @@ pub struct Far {
     card_pipeline: wgpu::RenderPipeline,
     prism_pipeline: wgpu::RenderPipeline,
     data: Option<FarData>,
+    /// The last `set_params` came from a native (Enfusion) world: `enabled == 2`.
+    native_world: bool,
 }
 
 impl Far {
@@ -303,6 +305,7 @@ impl Far {
         let prism_pipeline = make_pipeline("wgr_far_prisms", "vs_prism", "fs_prism");
         Self {
             params,
+            native_world: false,
             params_buffer,
             layout,
             cull_pipeline,
@@ -421,6 +424,7 @@ impl Far {
         self.params.cfg[1] = far_distance_m.max(0.0);
         self.params.cfg[2] = pixel_limit;
         self.params.tune[1] = if enabled != 0 { 1.0 } else { 0.0 };
+        self.native_world = enabled == 2;
         // enabled == 2: pure-distance start rule from `near_cutoff_m` (a native world whose real
         // models end at a known reach -- the authored far window -- rather than at the cull).
         self.params.tune[3] = if enabled == 2 { 1.0 } else { mode_from_env() };
@@ -428,6 +432,11 @@ impl Far {
         // tuned without it and keeps that.
         self.params.cull[2] = if enabled == 2 && native_far_sun() { 1.0 } else { 0.0 };
         self.upload_params(queue);
+    }
+
+    /// RFG-196: whether the world is a native Reforger one (the far tier is told so by its mode).
+    pub fn native_world(&self) -> bool {
+        self.native_world
     }
 
     /// The REAL object cull's coefficients for this frame, straight from `Gfx3d::cull_inputs()`

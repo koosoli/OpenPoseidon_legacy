@@ -57,6 +57,49 @@ int DecodedMaxEdge()
     return parsed >= 64 && parsed <= 8192 ? parsed : 1024;
 }
 
+// RFG-184: the edge cap for `enfa|` leaf composites. Reforger authors needle and leaf coverage
+// at up to 2048 (polyplane_pinus_sylvestris_A is 1024x2048 over a 512x1024 colour), and the
+// silhouette IS that coverage: at the shared 1024 cap every conifer card drew as soft blobs
+// where Reforger shows needles. POSEIDON_LEAF_MAX_EDGE (64..8192) overrides; 0/unset = 2048.
+int LeafCompositeMaxEdge(int sharedCap)
+{
+    const char* value = POSEIDON_GETENV_ONCE("POSEIDON_LEAF_MAX_EDGE");
+    const int parsed = value && *value ? std::atoi(value) : 0;
+    return std::max(sharedCap, parsed >= 64 && parsed <= 8192 ? parsed : 2048);
+}
+
+// Bilinear 2x-per-step upsample of a B,G,R,A level to (w, h). Used only to bring a leaf's
+// colour up to its coverage map's size; the alpha written here is replaced by the merge.
+static DDSMipLevel UpsampleLevelBGRA(const DDSMipLevel& src, int w, int h)
+{
+    DDSMipLevel out;
+    out.width = w;
+    out.height = h;
+    out.data.resize(static_cast<size_t>(w) * h * 4);
+    for (int y = 0; y < h; ++y)
+    {
+        const float fy = std::max(0.0f, (y + 0.5f) * src.height / h - 0.5f);
+        const int y0 = std::min(static_cast<int>(fy), src.height - 1), y1 = std::min(y0 + 1, src.height - 1);
+        const float ty = fy - y0;
+        for (int x = 0; x < w; ++x)
+        {
+            const float fx = std::max(0.0f, (x + 0.5f) * src.width / w - 0.5f);
+            const int x0 = std::min(static_cast<int>(fx), src.width - 1), x1 = std::min(x0 + 1, src.width - 1);
+            const float tx = fx - x0;
+            const auto at = [&](int xx, int yy, int c)
+            { return static_cast<float>(src.data[(static_cast<size_t>(yy) * src.width + xx) * 4 + c]); };
+            for (int c = 0; c < 4; ++c)
+            {
+                const float top = at(x0, y0, c) + (at(x1, y0, c) - at(x0, y0, c)) * tx;
+                const float bot = at(x0, y1, c) + (at(x1, y1, c) - at(x0, y1, c)) * tx;
+                out.data[(static_cast<size_t>(y) * w + x) * 4 + c] =
+                    static_cast<uint8_t>(std::clamp(top + (bot - top) * ty + 0.5f, 0.0f, 255.0f));
+            }
+        }
+    }
+    return out;
+}
+
 // Diagnostic only: separate CPU preparation from later GPU upload. No scheduling changes.
 struct DdsPreparationTrace
 {
@@ -901,6 +944,11 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     float paintRgb[3] = {1.0f, 1.0f, 1.0f};
     const bool paintComposite = composite && SplitEnfusionColourName(compositeColour.c_str(), paintRgb);
 
+    // RFG-184: leaf composites decode at their own, larger edge cap (colour and coverage alike).
+    DdsPreparationOptions leafOptions = options;
+    if (composite)
+        leafOptions.decodedMaxEdge = LeafCompositeMaxEdge(options.decodedMaxEdge);
+
     std::vector<uint8_t> buffer;
     if (!reader(composite ? (paintComposite ? compositeCoverage.c_str() : compositeColour.c_str()) : name, buffer) ||
         buffer.empty())
@@ -947,7 +995,8 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     if (!trace.reusedDecode)
     {
         if (!InitFromMemoryWithOptions(buffer.data(), buffer.size(), name,
-                                       /*forceDecode=*/composite || tinted || constantAlpha >= 0.0f, options))
+                                       /*forceDecode=*/composite || tinted || constantAlpha >= 0.0f,
+                                       composite ? leafOptions : options))
             return false;
         if (reusable) prepared.PutDdsDecode(reuseKey, buffer, *this);
     }
@@ -974,9 +1023,42 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
         trace.Mark(trace.coverageRead);
         const bool coverageDecoded = coverageRead &&
             coverage.InitFromMemoryWithOptions(coverageBytes.data(), coverageBytes.size(), compositeCoverage.c_str(),
-                                               /*forceDecode=*/true, options) &&
+                                               /*forceDecode=*/true, leafOptions) &&
             !coverage._levels.empty();
         trace.Mark(trace.coverageDecode);
+        // RFG-184: a coverage map authored LARGER than its colour (pinus: 1024x2048 over
+        // 512x1024) sets the composite's size. The colour is upsampled to each coverage level so
+        // the silhouette keeps every authored texel and every authored coverage mip; nearest-
+        // sampling the coverage down to the colour aliased the needles and halved them.
+        static const bool upsampleColour = []
+        {
+            const char* env = std::getenv("POSEIDON_LEAF_COVERAGE_SIZE");
+            return !(env && env[0] == '0');
+        }();
+        if (coverageDecoded && upsampleColour && !paintComposite && _format == PixelFormat::ARGB8888 &&
+            !_levels.empty() && coverage._levels[0].width > _levels[0].width &&
+            coverage._levels[0].height > _levels[0].height)
+        {
+            std::vector<DDSMipLevel> grown;
+            grown.reserve(coverage._levels.size());
+            for (const DDSMipLevel& target : coverage._levels)
+            {
+                // The colour level closest in size at or above the target, else the top one.
+                size_t pick = 0;
+                for (size_t k = 0; k < _levels.size(); ++k)
+                    if (_levels[k].width >= target.width && _levels[k].height >= target.height)
+                        pick = k;
+                const DDSMipLevel& from = _levels[pick];
+                if (from.width == target.width && from.height == target.height)
+                    grown.push_back(from);
+                else
+                    grown.push_back(UpsampleLevelBGRA(from, target.width, target.height));
+            }
+            _levels = std::move(grown);
+            _w = _levels[0].width;
+            _h = _levels[0].height;
+            _mipmaps = static_cast<int>(_levels.size());
+        }
         if (coverageDecoded)
         {
             // Both are 32-bit here: InitFromMemory decodes BC4/BC5/BC7 and leaves raw

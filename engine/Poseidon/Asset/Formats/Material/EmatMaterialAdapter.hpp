@@ -1017,6 +1017,26 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     const bool hasColour = emat.Vec4Of("Color", colour);
     if (hasColour)
         out.diffuse = {colour[0], colour[1], colour[2], colour[3]};
+    // RFG-199: `Diffuse` is a separate class property of every PBR material (Workbench defaults
+    // dump: Color, DiffuseIBL, SpecularIBL, Diffuse, Ambient, all 1 1 1 1) -- the surface's
+    // diffuse response, on top of the albedo. 370 of 10,312 Reforger materials author it, mostly
+    // to darken a shared atlas: window_brown is window_white's beige wood at `Diffuse 0.223`,
+    // which is the whole of why Everon's village window frames are dark brown and ours were
+    // pale grey. Folded into the tint (rgb only; Color's alpha stays the opacity), which leaves
+    // specular untouched. POSEIDON_EMAT_DIFFUSE=0 ignores it.
+    static const bool ematDiffuse = []
+    {
+        const char* v = std::getenv("POSEIDON_EMAT_DIFFUSE");
+        return !(v != nullptr && v[0] == '0');
+    }();
+    float diffuseResponse[4] = {};
+    if (ematDiffuse && emat.Vec4Of("Diffuse", diffuseResponse))
+    {
+        if (!hasColour)
+            out.diffuse = {1.0f, 1.0f, 1.0f, 1.0f};
+        for (int c = 0; c < 3; ++c)
+            out.diffuse[c] *= std::max(diffuseResponse[c], 0.0f);
+    }
 
     // A river or a pond authors NO albedo texture -- its whole appearance is that one
     // constant. Left there, the surface reaches the renderer with no base colour and
@@ -1096,6 +1116,22 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         out.crownAoHeight = aoHeight;
         out.crownAoWidth = aoWidth;
         out.crownAoIntensity = aoIntensity < 1.0f ? aoIntensity : 1.0f;
+    }
+    // RFG-180: an authored zero turns the occlusion off, baked colours included.
+    if (float authored = 0.0f; emat.FloatOf("GeometryAOIntensity", authored) && authored <= 0.0f)
+        out.crownAoOff = true;
+    // RFG-181: camera-facing far-billboard normals (see TranslatedMaterial::normalsToCamera).
+    // RFG-185: every crown carries the FarLOD offsets and its back-scattering.
+    if (EmatMaterial::NameMatches(emat.className, "MatPBRTreeCrown"))
+    {
+        out.treeCrown = true;
+        if (float ntc = 0.0f; emat.FloatOf("NormalsToCamera", ntc) && ntc > 0.0f)
+            out.normalsToCamera = true;
+        if (float d = 0.0f; emat.FloatOf("FarLODDistanceOffset", d) && d >= 0.0f)
+            out.farLodDistanceOffset = d; // else the class default (10)
+        emat.FloatOf("FarLODHeightOffset", out.farLodHeightOffset);
+        if (float b = 0.0f; emat.FloatOf("SSSBackScattering", b) && b >= 0.0f)
+            out.sssBackScattering = b;
     }
     // RFG-144: the edge-on card fade (see TranslatedMaterial::fadeFaces).
     float fadeFaces = 0.0f;

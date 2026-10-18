@@ -58,6 +58,39 @@ class MDX_ParityCamEntity : GenericEntity
 		}
 	}
 
+	protected TimeAndWeatherManagerEntity m_TW;
+
+	// The sun and the calendar the shot was taken under, so the other engine can be set to the
+	// same light (BaseWeatherManagerEntity.GetCurrentSunMoonDirAndPhase / GetDate / latitude).
+	protected void LogSun(string poseName)
+	{
+		if (!m_TW)
+			return;
+		vector sunDir, moonDir;
+		float moonPhase;
+		m_TW.GetCurrentSunMoonDirAndPhase(sunDir, moonDir, moonPhase);
+		int y, mo, d;
+		m_TW.GetDate(y, mo, d);
+		Log(string.Format("sun %1: dir %2 date %3-%4-%5 tod %6 lat %7 lon %8 tz %9", poseName, sunDir, y, mo, d,
+			m_TW.GetTimeOfTheDay(), m_TW.GetCurrentLatitude(), m_TW.GetCurrentLongitude(), m_TW.GetTimeZoneOffset()));
+	}
+
+	// The water surface under the camera (SCR_WorldTools.GetWaterSurfaceY), so lake and river
+	// levels can be compared with the other engine's.
+	protected void LogWater(MDX_ParityPose pose)
+	{
+		WorldEditorAPI api = _WB_GetEditorAPI();
+		if (!api)
+			return;
+		float ground = api.GetTerrainSurfaceY(pose.m_fX, pose.m_fZ);
+		vector at = Vector(pose.m_fX, ground + 0.01, pose.m_fZ);
+		EWaterSurfaceType type;
+		float lakeArea;
+		float waterY = SCR_WorldTools.GetWaterSurfaceY(GetWorld(), at, type, lakeArea);
+		Log(string.Format("water %1: x %2 z %3 ground %4 water %5 type %6 lakeArea %7", pose.m_sName, pose.m_fX,
+			pose.m_fZ, ground, waterY, type, lakeArea));
+	}
+
 	protected void Setup()
 	{
 		m_aPoses = {};
@@ -83,6 +116,7 @@ class MDX_ParityCamEntity : GenericEntity
 				tw.SetRainIntensityOverride(true, 0);
 				tw.SetFogAmountOverride(true, 0);
 				tw.SetWindSpeedOverride(true, 2);
+				m_TW = tw;
 				Log(string.Format("time of day %1 set", m_fHour));
 			}
 			else
@@ -144,6 +178,8 @@ class MDX_ParityCamEntity : GenericEntity
 			if (m_fClock >= settle)
 			{
 				string path = m_sOut + "/" + pose.m_sName;
+				LogSun(pose.m_sName);
+				LogWater(pose);
 				bool ok = System.MakeScreenshot(path);
 				Log(string.Format("shot %1 -> %2 (%3)", pose.m_sName, path, ok));
 				m_iPhase = 2;

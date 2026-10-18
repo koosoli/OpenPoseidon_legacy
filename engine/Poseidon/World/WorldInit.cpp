@@ -1196,6 +1196,15 @@ void World::ParseCfgWorld()
 
     _latitude = LoadValue(cls, "latitude", -40) * (H_PI / 180); // -40 - Croatia, -90 - north pole;
     _longitude = LoadValue(cls, "longitude", +15) * (H_PI / 180);
+    // RFG-187: a native Reforger world sits where its own TimeAndWeatherManager says (north is
+    // negative here, as in the CfgWorlds convention above).
+    if (float lat = 0.0f, lon = 0.0f;
+        GLandscape != nullptr && GLandscape->GetEnfusionSurfaceCount() > 0 && GetEnfusionWorldGeo(lat, lon))
+    {
+        _latitude = -lat * (H_PI / 180);
+        _longitude = lon * (H_PI / 180);
+        LOG_INFO(Core, "World geo: native world at latitude {:.3f}, longitude {:.3f} (RFG-187)", lat, lon);
+    }
 
     const ParamEntry& clsGrid = cls >> "Grid";
     _gridOffsetX = clsGrid >> "offsetX";

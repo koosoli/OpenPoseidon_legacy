@@ -542,6 +542,9 @@ pub struct Tidewater {
     rotor: rotor_wash::RotorWash,
     detail_offset: [f32; 2],
     rotor_trace: rotor_wash::RotorTrace,
+    /// RFG-191: the camera is in a lake: (level, absorption, scattering) for the underwater view,
+    /// which then stands on that flat, calm surface instead of the sea's.
+    lake: Option<(f32, [f32; 3], [f32; 3])>,
     gens: [u64; 4], // depth, env, scene, heightmap
     // W3a shore field
     shore_t_view: wgpu::TextureView,
@@ -594,6 +597,11 @@ pub struct Tidewater {
 }
 
 impl Tidewater {
+    /// RFG-191: see [`Tidewater::lake`]. Set every frame before `prepare`.
+    pub fn set_lake(&mut self, lake: Option<(f32, [f32; 3], [f32; 3])>) {
+        self.lake = lake;
+    }
+
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -892,6 +900,7 @@ impl Tidewater {
             rotor: Default::default(),
             detail_offset: [0.0; 2],
             rotor_trace: Default::default(),
+            lake: None,
             gens: [u64::MAX; 4],
             shore_t_view,
             shore_dir_view,
@@ -1239,6 +1248,14 @@ impl Tidewater {
             // W9a: the drawn surface around the camera (the grid is drawn in `update`, before the
             // composite reads it; until the first one exists the composite uses the FFT alone)
             uwp.probe = if self.probe.ready || !self.bind_dirty { probe::Probe::lanes(cp) } else { [0.0; 4] };
+            // RFG-191: under a lake the medium's surface is the lake's -- flat (no FFT, no probe of
+            // the SEA's drawn grid) and its own murky water.
+            if let Some((level, absorption, scattering)) = self.lake {
+                uwp.scattering = [scattering[0], scattering[1], scattering[2], level];
+                uwp.absorption = [absorption[0], absorption[1], absorption[2], uwp.absorption[3]];
+                uwp.ocean[0] = 0.0;
+                uwp.probe = [0.0; 4];
+            }
             self.probe_lanes = probe::Probe::lanes(cp);
             self.probe.set_camera(cp);
             self.query.prepare(queue);

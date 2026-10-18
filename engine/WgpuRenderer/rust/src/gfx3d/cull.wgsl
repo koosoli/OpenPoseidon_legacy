@@ -291,8 +291,10 @@ fn count_sections(idx: u32, level: u32) {
     for (var s = 0u; s < lod.section_count; s++) {
         atomicAdd(&sec_count[lod.section_base + s], 1u);
     }
-    atomicAdd(&counters[STAT_BASE + 0u], 1u);
-    atomicAdd(&counters[STAT_BASE + 8u + min(level, 7u)], 1u);
+    // PERF-RFG-206: per-workgroup, published once by whatif_flush (STAT 0 and the 8-bin level
+    // histogram at STAT 8..15 were two more same-word global atomics per surviving instance).
+    atomicAdd(&wg_whatif[4], 1u);
+    atomicAdd(&wg_whatif[5u + min(level, 7u)], 1u);
     // COUNT sees the surviving instance and its exact model together. A zero-section
     // LOD still counts as present, conservatively, for any future retirement.
     if (cull.target_count_enabled != 0u &&
@@ -336,14 +338,20 @@ fn level_for(lod_base: u32, lod_count: u32, resol2: f32) -> u32 {
 // detail multipliers. Sub-pixel and distance culls are not re-evaluated -- the question is
 // what the SAME survivors would cost one step finer or coarser, which is the governor's
 // question. Costs four LOD walks and four section sums per surviving instance.
+// PERF-RFG-206: the what-if sums go through a per-workgroup accumulator and ONE global add per
+// workgroup (whatif_flush). Four global atomics on the same four words for every surviving
+// instance in every view serialised the COUNT passes (Everon: cull_total 3.4 ms of a 20 ms frame).
+// [0..3] what-if sums (STAT 16..19), [4] survivors (STAT 0), [5..12] level histogram (STAT 8..15).
+var<workgroup> wg_whatif: array<atomic<u32>, 13>;
+
 fn whatif_triangles(idx: u32, dist2: f32) {
     let inst = instances[idx];
     let model = models[inst.model];
     if ((inst.flags & 16u) != 0u) {
         let level = level_for(model.lod_base, model.lod_count, 1.0e30);
         let tris = lod_triangles(model.lod_base, level);
-        for (var i = 16u; i < 20u; i++) {
-            atomicAdd(&counters[STAT_BASE + i], tris);
+        for (var i = 0u; i < 4u; i++) {
+            atomicAdd(&wg_whatif[i], tris);
         }
         return;
     }
@@ -357,10 +365,33 @@ fn whatif_triangles(idx: u32, dist2: f32) {
     let t1 = lod_triangles(model.lod_base, level_for(model.lod_base, model.lod_count, base_detail2 * f1 * f1 * scale2));
     let t2 = lod_triangles(model.lod_base, level_for(model.lod_base, model.lod_count, base_detail2 * f2 * f2 * scale2));
     let t3 = lod_triangles(model.lod_base, level_for(model.lod_base, model.lod_count, base_detail2 * f3 * f3 * scale2));
-    atomicAdd(&counters[STAT_BASE + 16u], t0);
-    atomicAdd(&counters[STAT_BASE + 17u], t1);
-    atomicAdd(&counters[STAT_BASE + 18u], t2);
-    atomicAdd(&counters[STAT_BASE + 19u], t3);
+    atomicAdd(&wg_whatif[0], t0);
+    atomicAdd(&wg_whatif[1], t1);
+    atomicAdd(&wg_whatif[2], t2);
+    atomicAdd(&wg_whatif[3], t3);
+}
+
+// Thread 0 of the workgroup publishes the workgroup's what-if sums. Call from uniform control
+// flow after a barrier that follows every whatif_triangles of the group.
+fn whatif_flush(local: u32) {
+    if (local == 0u) {
+        for (var i = 0u; i < 4u; i++) {
+            let v = atomicLoad(&wg_whatif[i]);
+            if (v != 0u) {
+                atomicAdd(&counters[STAT_BASE + 16u + i], v);
+            }
+        }
+        let survivors = atomicLoad(&wg_whatif[4]);
+        if (survivors != 0u) {
+            atomicAdd(&counters[STAT_BASE + 0u], survivors);
+        }
+        for (var l = 0u; l < 8u; l++) {
+            let v = atomicLoad(&wg_whatif[5u + l]);
+            if (v != 0u) {
+                atomicAdd(&counters[STAT_BASE + 8u + l], v);
+            }
+        }
+    }
 }
 
 // Pass SCATTER (1 thread / surviving instance): append this instance's record into each of its
@@ -456,36 +487,41 @@ fn occluded(center: vec3<f32>, radius: f32) -> bool {
 
 // Frustum + distance + LOD only (prepass / occluder set, and every shadow cascade). No Hi-Z.
 @compute @workgroup_size(64)
-fn count(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn count(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation_index) local: u32) {
+    if (local < 13u) {
+        atomicStore(&wg_whatif[local], 0u);
+    }
+    workgroupBarrier();
     let idx = gid.x;
-    if (idx >= cull.instance_count) {
-        return;
+    if (idx < cull.instance_count) {
+        let res = classify(idx);
+        if (!res.culled) {
+            count_sections(idx, res.level);
+            whatif_triangles(idx, res.dist2);
+        }
     }
-    let res = classify(idx);
-    if (res.culled) {
-        return;
-    }
-    count_sections(idx, res.level);
-    whatif_triangles(idx, res.dist2);
+    workgroupBarrier();
+    whatif_flush(local);
 }
 
 // Frustum + distance + LOD + Hi-Z occlusion (color pass). COUNT half; must agree with the
 // occlusion-view SCATTER (classify + occluded are pure, so both passes see the same survivors).
 @compute @workgroup_size(64)
-fn count_occlude(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn count_occlude(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation_index) local: u32) {
+    if (local < 13u) {
+        atomicStore(&wg_whatif[local], 0u);
+    }
+    workgroupBarrier();
     let idx = gid.x;
-    if (idx >= cull.instance_count) {
-        return;
+    if (idx < cull.instance_count) {
+        let res = classify(idx);
+        if (!res.culled && !(cull.occlusion != 0u && occluded(res.center, res.radius))) {
+            count_sections(idx, res.level);
+            whatif_triangles(idx, res.dist2);
+        }
     }
-    let res = classify(idx);
-    if (res.culled) {
-        return;
-    }
-    if (cull.occlusion != 0u && occluded(res.center, res.radius)) {
-        return;
-    }
-    count_sections(idx, res.level);
-    whatif_triangles(idx, res.dist2);
+    workgroupBarrier();
+    whatif_flush(local);
 }
 
 // EMIT (1 thread / GLOBAL section): allocate the section's contiguous out_records run and emit

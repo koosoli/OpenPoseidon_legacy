@@ -40,6 +40,9 @@ pub struct RiverLook {
     pub sun_power: f32,
     pub sun_influence: f32,
     pub wet_floor: f32,
+    /// RFG-190: `WaterVisibility` (m) -- how far one sees through the water (5% contrast left);
+    /// Reforger's pools and rivers author 1. Still water takes its view extinction from it.
+    pub visibility: f32,
 }
 
 impl Default for RiverLook {
@@ -53,6 +56,7 @@ impl Default for RiverLook {
             sun_power: 1024.0,
             sun_influence: 0.025,
             wet_floor: 0.3,
+            visibility: 1.0,
         }
     }
 }
@@ -74,6 +78,7 @@ impl RiverLook {
         if let Some(x) = get(6) { look.sun_power = x.clamp(8.0, 8192.0); }
         if let Some(x) = get(7) { look.sun_influence = x.clamp(0.0, 4.0); }
         if let Some(x) = get(8) { look.wet_floor = x.clamp(0.0, 0.9); }
+        if let Some(x) = get(9) { look.visibility = x.clamp(0.05, 100.0); }
         look
     }
 }
@@ -162,6 +167,9 @@ pub struct River {
     visible: Vec<(u32, u32)>,
     bind: Option<(wgpu::BindGroup, (u64, u64))>,
     start: std::time::Instant,
+    /// RFG-191: the ponds' triangles on the CPU (x, z of three corners + the level), so the frame
+    /// can ask which lake, if any, the camera stands in -- the underwater gate for lakes.
+    still_tris: Vec<[f32; 7]>,
 }
 
 impl River {
@@ -297,6 +305,7 @@ impl River {
             visible: Vec::new(),
             bind: None,
             start: std::time::Instant::now(),
+            still_tris: Vec::new(),
         };
         river.set_look(RiverLook::default());
         river
@@ -332,7 +341,9 @@ impl River {
             env_f32("WGR_RIVER_WET_FLOOR", look.wet_floor.max(0.38), 0.0, 0.9),
             env_f32("WGR_RIVER_BODY", 2.5, 0.0, 20.0),
             env_f32("WGR_RIVER_BANK", 1.0, 0.0, 1.0),
-            0.0,
+            // RFG-190: w = WaterVisibility (m) for still water; 0 (WGR_POND_VISIBILITY=0) keeps
+            // ponds on the HalfLightDistance extinction the rivers use.
+            if std::env::var("WGR_POND_VISIBILITY").map(|v| v.trim() == "0").unwrap_or(false) { 0.0 } else { look.visibility },
         ];
     }
 
@@ -340,12 +351,19 @@ impl River {
     pub fn set_mesh(&mut self, device: &wgpu::Device, vertices: &[RiverVertex], indices: &[u32]) -> u32 {
         use wgpu::util::DeviceExt;
         self.mesh = None;
+        self.still_tris.clear();
         let count = vertices.len() as u32;
         // Every index must name a vertex: a bad index is a GPU fault, not a bad picture.
         if vertices.is_empty() || indices.len() < 3 || indices.iter().any(|&i| i >= count) {
             return 0;
         }
         let usable = indices.len() / 3 * 3;
+        for tri in indices[..usable].chunks_exact(3) {
+            let (a, b, c) = (&vertices[tri[0] as usize], &vertices[tri[1] as usize], &vertices[tri[2] as usize]);
+            if a.half_width < 0.0 && b.half_width < 0.0 && c.half_width < 0.0 {
+                self.still_tris.push([a.pos[0], a.pos[2], b.pos[0], b.pos[2], c.pos[0], c.pos[2], a.pos[1]]);
+            }
+        }
         let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("wgr_river_vertices"),
             contents: bytemuck::cast_slice(vertices),
@@ -363,6 +381,39 @@ impl River {
         });
         self.visible.clear();
         (usable / 3) as u32
+    }
+
+    /// RFG-191: the level of the pond whose surface covers (x, z), if any.
+    pub fn still_level_at(&self, x: f32, z: f32) -> Option<f32> {
+        let edge = |ax: f32, az: f32, bx: f32, bz: f32| (bx - ax) * (z - az) - (bz - az) * (x - ax);
+        self.still_tris.iter().find_map(|t| {
+            if x < t[0].min(t[2]).min(t[4]) || x > t[0].max(t[2]).max(t[4]) ||
+                z < t[1].min(t[3]).min(t[5]) || z > t[1].max(t[3]).max(t[5]) {
+                return None;
+            }
+            let (e0, e1, e2) = (edge(t[0], t[1], t[2], t[3]), edge(t[2], t[3], t[4], t[5]), edge(t[4], t[5], t[0], t[1]));
+            ((e0 >= 0.0 && e1 >= 0.0 && e2 >= 0.0) || (e0 <= 0.0 && e1 <= 0.0 && e2 <= 0.0)).then_some(t[6])
+        })
+    }
+
+    /// RFG-191: the lake water's (absorption, scattering) per metre for the underwater view, from
+    /// the authored colour and WaterVisibility: extinction 3 / visibility (5% contrast left there),
+    /// split by the water's colour -- a dark olive pond scatters little and absorbs the rest.
+    pub fn lake_water(&self) -> ([f32; 3], [f32; 3]) {
+        let c = [self.params.colour[0], self.params.colour[1], self.params.colour[2]];
+        let vis = if self.params.bed[3] > 0.0 { self.params.bed[3] } else { 1.0 };
+        let sigma_t = 2.9957 / vis.max(0.05);
+        let peak = c[0].max(c[1]).max(c[2]).max(1e-4);
+        let albedo = 0.12; // a murky pond: mostly absorption
+        let mut absorption = [0.0; 3];
+        let mut scattering = [0.0; 3];
+        for i in 0..3 {
+            // Channels the water reflects least are absorbed most (the colour's own hue).
+            let keep = (c[i] / peak).clamp(0.05, 1.0);
+            scattering[i] = sigma_t * albedo * keep;
+            absorption[i] = sigma_t * (1.0 - albedo * keep);
+        }
+        (absorption, scattering)
     }
 
     /// Per frame, before the water pass: which stretches are near enough and in front.

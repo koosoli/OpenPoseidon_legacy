@@ -544,7 +544,10 @@ struct WgrModelMaterial
      * (encoded colour), bit 1 = GlobalMCRMode Multiply (else Overlay), bit 2 = UVSrcGlobalMaps
      * "UV set 2" (else the first set, Enfusion's default). */
     uint32_t global_overlay_mode{};
-    uint32_t global_overlay_pad{};
+    /* RFG-181/185 (was a pad word): a native MatPBRTreeCrown. Bits 0-12 FarLODDistanceOffset (dm),
+     * bit 13 = crown, bit 15 = NormalsToCamera, bits 16-25 FarLODHeightOffset (dm, signed
+     * 10-bit), bits 26-31 SSSBackScattering x 63. 0 = every other material. */
+    uint32_t far_normals{};
 };
 
 /* One drawable LOD level: its FindSqrtLevel resolution threshold (_resolutions[i]) +

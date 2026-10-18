@@ -163,6 +163,20 @@ namespace
 bool GpuSectionMaterialUsesLeafCards(const Ref<TexMaterial>& surfMat);
 bool GpuSectionMaterialIsCutout(const Ref<TexMaterial>& surfMat, TextureWgpu* texture);
 bool GpuEmatIsOpaqueSolid(const Ref<TexMaterial>& surfMat);
+
+// RFG-200: how much brighter a native world's sky DOME is drawn than the physical atmosphere
+// (Reforger's pale sky, Atmosphere.emat SkyIntensityLV). WGR_NATIVE_SKY_SCALE; 1 = physical.
+// Mirrored by sky/mod.rs, which undoes it for the sky's light.
+static float NativeSkyDomeScale()
+{
+    static const float scale = []
+    {
+        const char* v = std::getenv("WGR_NATIVE_SKY_SCALE");
+        const float f = v != nullptr ? std::strtof(v, nullptr) : 0.0f;
+        return f > 0.0f ? f : 2.5f;
+    }();
+    return scale;
+}
 bool GpuEmatCullNone(const Ref<TexMaterial>& surfMat);
 std::string GpuEmatFamily(const Ref<TexMaterial>& surfMat);
 bool GpuEmatIsGlass(const Ref<TexMaterial>& surfMat);
@@ -5813,6 +5827,34 @@ void EngineWgpu::NextFrame()
         if (_hdrEnabled && _sky.enabled && fogEnabled > 0.5f)
         {
             fogEnabled = 2.0f;
+        }
+        // RFG-192: a native Reforger world always has aerial perspective, weather fog or not --
+        // its Atmosphere.emat scales the atmosphere's in-scatter by AerialPerspectiveStrength 5.735,
+        // which is the blue-grey distance in every Workbench frame; ours had none at fog 0 (the
+        // parity captures' crisp 5 km). Carried as 2 + k, k = extinction x 1e3 per metre (every
+        // reader tests fog_enabled against 0.5 / 1.5 only): frame.wgsl adds 1 - exp(-d sigma)
+        // toward the full airlight. WGR_NATIVE_AERIAL=0 off; WGR_NATIVE_AERIAL_STRENGTH scales.
+        static const float nativeAerialStrength = []
+        {
+            const char* v = std::getenv("WGR_NATIVE_AERIAL");
+            if (v && v[0] == '0')
+                return 0.0f;
+            const char* s = std::getenv("WGR_NATIVE_AERIAL_STRENGTH");
+            const float f = s ? std::strtof(s, nullptr) : 0.0f;
+            return f > 0.0f ? f : 5.735f;
+        }();
+        if (snap.hasScene && _hdrEnabled && _sky.enabled && nativeAerialStrength > 0.0f && GLandscape != nullptr &&
+            GLandscape->GetEnfusionSurfaceCount() > 0 && fogInvRange > 0.0f)
+        {
+            // Green-channel Rayleigh plus Mie extinction (Mie extinction ~1.1 x scattering).
+            const float sigma = (_sky.rayleigh[1] + _sky.mie * 1.1f) * nativeAerialStrength;
+            // RFG-202: the airlight is read from the atmosphere, which RFG-200 brightens 2.5x for the
+            // dome. Brightened, the haze laid a blue-grey veil over the mid-distance forest
+            // (forestOwner +1.13 EV, blue 51 vs Reforger 30; aerial off: +0.80, 39) -- so the haze
+            // takes the physical airlight: its scale (x100) rides the tens of the code, the
+            // extinction the fraction (frame.wgsl apply_fog_receiver).
+            const float airScale = std::clamp(1.0f / NativeSkyDomeScale(), 0.01f, 9.99f);
+            fogEnabled = 2.0f + 10.0f * std::round(airScale * 100.0f) + std::clamp(sigma * 1000.0f, 0.0f, 0.999f);
         }
 
         // Sun light for GPU-lit terrain, matching GL33's material upload:
@@ -13534,6 +13576,36 @@ float EngineWgpu::ResolveMaterialNormalPower(const ShapeSection& section)
     return cached->second.normalPower;
 }
 
+uint32_t EngineWgpu::ResolveMaterialFarNormals(const ShapeSection& section)
+{
+    // WGR_FOLIAGE_FAR_NORMALS=0 leaves the far billboards on their authored normals (the A/B).
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_FOLIAGE_FAR_NORMALS");
+        return !v || v[0] != '0';
+    }();
+    if (!enabled || !section.surfMat)
+        return 0;
+    const char* materialPath = section.surfMat->GetName().Data();
+    if (!materialPath || !*materialPath)
+        return 0;
+    const auto cached = _materialBindings.find(materialPath);
+    if (cached == _materialBindings.end() || !cached->second.treeCrown)
+        return 0; // ResolveMaterialBaseColour fills the cache first
+    const auto& translated = cached->second;
+    // RFG-185 layout: bits 0-12 FarLODDistanceOffset (dm), bit 13 = a crown, bit 15 =
+    // NormalsToCamera, bits 16-25 FarLODHeightOffset (dm, signed 10-bit), bits 26-31
+    // SSSBackScattering x 63.
+    const uint32_t distance = static_cast<uint32_t>(
+        std::clamp(std::lround(translated.farLodDistanceOffset * 10.0f), 0L, 0x1FFFL));
+    const int32_t height = static_cast<int32_t>(
+        std::clamp(std::lround(translated.farLodHeightOffset * 10.0f), -512L, 511L));
+    const uint32_t sss = static_cast<uint32_t>(
+        std::clamp(std::lround(translated.sssBackScattering * 63.0f), 0L, 63L));
+    return distance | 0x2000u | (translated.normalsToCamera ? 0x8000u : 0u) |
+           ((static_cast<uint32_t>(height) & 0x3FFu) << 16) | (sss << 26);
+}
+
 // The mean colour of a vegetation colorize map (`WorldColorizeMap`), as packed RGB8 (r in the low
 // byte), from its smallest mip at or above 4x4. Cached per path; 0 when unreadable.
 uint32_t EngineWgpu::ResolveColorizeMean(const std::string& path)
@@ -13623,7 +13695,10 @@ void EngineWgpu::ResolveMaterialCrownAo(const ShapeSection& section, float aoP0[
             const uint32_t distance =
                 static_cast<uint32_t>(std::clamp(translated.colorizeLerpDistance, 0.0f, 255.0f));
             const uint32_t word = channel(0) | (channel(8) << 8) | (channel(16) << 16) | (distance << 24);
-            aoP1[2] = translated.colorizeLerp;
+            // RFG-183: z = lerp + 2 * round(255 * LerpAtCamera). The lerp is in [0, 1], so
+            // floor(z / 2) recovers the at-camera byte and z - 2k the lerp (no ABI word left).
+            const float atCamera = std::round(std::clamp(translated.colorizeLerpAtCamera, 0.0f, 1.0f) * 255.0f);
+            aoP1[2] = translated.colorizeLerp + 2.0f * atCamera;
             std::memcpy(&aoP1[3], &word, sizeof(word));
         }
     }
@@ -13637,6 +13712,13 @@ void EngineWgpu::ResolveMaterialCrownAo(const ShapeSection& section, float aoP0[
     }();
     if (fadeFaces)
         aoP1[0] = translated.fadeFaces;
+    // RFG-180: -1 = "authored off", which the shader's baked-occlusion path honours (0 there
+    // still means "no intensity named", full baked occlusion, as RFG-106 fitted it).
+    if (enabled && translated.crownAoOff)
+    {
+        aoP0[3] = -1.0f;
+        return;
+    }
     if (!enabled || translated.crownAoIntensity <= 0.0f || translated.crownAoWidth <= 0.0f)
         return;
     aoP0[0] = translated.crownAoCenter[0];
@@ -13868,6 +13950,19 @@ bool EngineWgpu::ResolveMaterialLayers(const ShapeSection& section, WgrModelMate
     {
         auto* face = static_cast<TextureWgpu*>(section.properties.GetTexture());
         skip("section has no surfMat", face && face->GetName().Data() ? face->GetName().Data() : "(no face texture)");
+        // RFG-203: an `enft|r,g,b|tile` face with no material. By default (layerTintInShader) that
+        // texture draws THROUGH its untinted tile and leaves the multiply to layer_colour[0] -- which
+        // only a resolved material ever filled, so every such section lost its tint outright
+        // (Everon: "layers SKIPPED (section has no surfMat) for enft|0.2120,0.1570,0.1390|...wood...").
+        // The tint is in the name; take it from there.
+        float rgb[3];
+        const char* inner = nullptr;
+        if (face && face->GetName().Data() && Poseidon::Dev::GResidencyLevers().layerTintInShader &&
+            Poseidon::Enfusion::SplitLayerTintName(face->GetName().Data(), rgb, &inner))
+        {
+            for (int c = 0; c < 3; ++c)
+                material.layer_colour[0][c] = rgb[c];
+        }
         return false;
     }
     const char* materialPath = section.surfMat->GetName().Data();
@@ -13972,6 +14067,18 @@ bool EngineWgpu::ResolveMaterialLayers(const ShapeSection& section, WgrModelMate
                 material.layer_colour[i][c] = entry->tint[c];
             if (firstSeen && i == 0)
                 ++GMultiLayerCensus.composedTinted;
+        }
+        // RFG-199: the material's own `Color` x `Diffuse` (the adapter folds both into
+        // `diffuse`) multiply every layer. Only Color_N reached this path, so Everon's window
+        // frames (pale wood tile, Color_1 0.286, Diffuse 0.223 -> dark brown in Reforger) drew
+        // as the bare tile. The direct path's per-draw tint already carried it; this is the
+        // retained one. POSEIDON_EMAT_DIFFUSE=0 makes `diffuse` plain Color again.
+        if (Asset::Material::IsEmatPath(materialPath))
+        {
+            const auto& global = cached->second.diffuse;
+            for (size_t i = 0; i < 4; ++i)
+                for (int c = 0; c < 3; ++c)
+                    material.layer_colour[i][c] *= global[c];
         }
     }
 
@@ -15791,6 +15898,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadC
             // Authored normal intensity rides the same record; the 1.0 default keeps
             // every material that names none exactly where it was.
             mat.normal_power = ResolveMaterialNormalPower(s->GetSection(i));
+            mat.far_normals = ResolveMaterialFarNormals(s->GetSection(i));
             // Crown self-occlusion volume; zero lanes when unnamed (no-op).
             {
                 float aoP0[4], aoP1[4];
@@ -19496,6 +19604,32 @@ void EngineWgpu::LogObjectPerfRow()
     const float frame = pos(gpu[WGR_GPU_TIMER_FRAME_TOTAL]);
     LOG_INFO(Graphics, "Frame accounting: attributed={:.3f} of frame={:.3f} ms | residual={:.3f} ms ({:.1f}%)",
              outerSum, frame, frame - outerSum, frame > 0.0f ? (frame - outerSum) / frame * 100.0f : 0.0f);
+    // PERF-RFG-207: the attribution named, not just summed. A Durras frame swung 19 <-> 28 ms
+    // between runs of the same binary with every region printed below unchanged -- the extra
+    // 8 ms was attributed to an outer region these lines never name. The six largest, >= 0.3 ms.
+    {
+        int top[6] = {-1, -1, -1, -1, -1, -1};
+        for (int r = 0; r < kGpuRegionEnd; ++r)
+        {
+            if (r == kFrameGpuRegionTotal || GpuTimerContainedBy(r) != kNoGpuRegion || pos(gpu[r]) < 0.3f)
+                continue;
+            for (int k = 0; k < 6; ++k)
+            {
+                if (top[k] < 0 || pos(gpu[r]) > pos(gpu[top[k]]))
+                {
+                    for (int j = 5; j > k; --j)
+                        top[j] = top[j - 1];
+                    top[k] = r;
+                    break;
+                }
+            }
+        }
+        std::string line;
+        for (int k = 0; k < 6 && top[k] >= 0; ++k)
+            line += std::string(k ? " | " : "") + GetWaterGpuTimingName(top[k]) + "=" +
+                    std::to_string(gpu[top[k]]).substr(0, 5);
+        LOG_INFO(Graphics, "Frame top regions: {}", line);
+    }
 
     LOG_INFO(Graphics,
              "Objects GPU ms: cull_main={:.3f} cull_shadow={:.3f} cull_hiz={:.3f} cull_total={:.3f} | "
@@ -20936,6 +21070,20 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     params.blade_width_scale = std::clamp(settings.bladeWidth, 0.25f, 6.0f);
     params.saturation = std::clamp(settings.saturation, 0.0f, 2.0f);
     params.dry_patches = std::clamp(settings.dryPatches, 0.0f, 1.0f);
+    // RFG-198: the meadow look sliders (saturation 0.72, dry patches 0.08) are this renderer's OFP
+    // palette. A native world's blades take their colour from the PlantMat atlas and SatMapLerp,
+    // which author neither: at 0.72 Everon's green carpet read as straw (groundDown, G/R 1.00 vs
+    // Reforger's 1.18). WGR_NATIVE_GRASS_LOOK=0 keeps the sliders on native worlds too.
+    static const bool nativeGrassLook = []
+    {
+        const char* v = std::getenv("WGR_NATIVE_GRASS_LOOK");
+        return !(v != nullptr && v[0] == '0');
+    }();
+    if (nativeGrassLook && GLandscape != nullptr && GLandscape->GetEnfusionSurfaceCount() > 0)
+    {
+        params.saturation = 1.0f;
+        params.dry_patches = 0.0f;
+    }
     params.dry_patch_scale = std::clamp(settings.dryPatchScale, 0.002f, 0.3f);
     params.shape_variety = std::clamp(settings.shapeVariety, 0.0f, 1.0f);
     params.taper_jitter = std::clamp(settings.taperJitter, 0.0f, 1.0f);
@@ -21249,6 +21397,21 @@ void EngineWgpu::UpdateAutoSky()
     _sky.rayleigh[0] = k.rayleigh[0];
     _sky.rayleigh[1] = k.rayleigh[1];
     _sky.rayleigh[2] = k.rayleigh[2];
+    // RFG-193: a native Reforger world keeps each key's green coefficient but takes Reforger's
+    // SPECTRUM, Atmosphere.emat RayleighScattering 0.198 / 0.407 / 0.991 (standard air). Our noon
+    // key runs 1 : 2.44 : 8.4 (blue 1.48x standard), which bleeds the blue out of the sunlight:
+    // white plaster read beige and every crown olive beside Reforger's neutral plaster and green
+    // leaves at matched poses. WGR_NATIVE_RAYLEIGH=0 keeps the presets' own ratio.
+    static const bool nativeRayleigh = []
+    {
+        const char* v = std::getenv("WGR_NATIVE_RAYLEIGH");
+        return !(v && v[0] == '0');
+    }();
+    if (nativeRayleigh && GLandscape != nullptr && GLandscape->GetEnfusionSurfaceCount() > 0)
+    {
+        _sky.rayleigh[0] = k.rayleigh[1] * (0.198f / 0.407f);
+        _sky.rayleigh[2] = k.rayleigh[1] * (0.991f / 0.407f);
+    }
     _sky.mie = k.mie;
     _sky.mieG = k.mieG;
     _sky.ozone = k.ozone;
@@ -21366,11 +21529,16 @@ void EngineWgpu::PushRenderParams()
     // than lifting them, so the ceiling eases back to the legacy one between sun +5 and -6 deg.
     // WGR_NATIVE_EXPOSURE=0 restores the legacy meter; WGR_NATIVE_EXPOSURE_KEY / _COMPENSATION /
     // _MAX tune it.
+    //
+    // RFG-196 re-centred the key to 0.084 (-1 EV): once the native sky is lifted to Lighting_Eden's
+    // indirect share (half the sun), every one of the 17 reference poses came out ~+1 EV bright
+    // at 0.168 (mean +0.99, the spread around it only 0.45). At 0.084: mean +0.09 EV, 0.46 EV RMS
+    // over all 17, sun matched (RFG-195) -- the old 0.73 EV was partly the too-dark shade.
     static const float nativeExposureKey = []
     {
         const char* v = std::getenv("WGR_NATIVE_EXPOSURE_KEY");
         const float f = v != nullptr ? std::strtof(v, nullptr) : 0.0f;
-        return f > 0.0f ? f : 0.168f;
+        return f > 0.0f ? f : 0.084f;
     }();
     static const float nativeExposureCompensation = []
     {
@@ -21428,7 +21596,18 @@ void EngineWgpu::PushRenderParams()
     p.sky.rayleigh = {_sky.rayleigh[0], _sky.rayleigh[1], _sky.rayleigh[2], _sky.rayleighHeight};
     p.sky.mie = {_sky.mie, _sky.mieG, _sky.mieHeight, _sky.turbidity};
     p.sky.ground_sun = {_sky.ground[0], _sky.ground[1], _sky.ground[2], _sky.sunIntensity};
-    p.sky.params = {_sky.sunAngularRadius, _sky.exposure, _sky.planetRadius, _sky.atmosphereHeight};
+    // RFG-200: a native world's sky dome is authored separately from the light it casts --
+    // Atmosphere.emat `SkyIntensityLV 8` beside Lighting_Eden's Direct/IndirectLightLV -- and
+    // Reforger's reads far paler and brighter than our physical one at the same sun: matched
+    // poses at the RFG-196 exposure, top sky rows 163/205/230 (Reforger) vs 109/131/164, i.e.
+    // ~2.5x in linear. Scaled HERE only (the dome, clouds, aerial light, sky SH, reflections);
+    // the ground's sun reads _sky.exposure separately, and the native SH lift (RFG-196) holds the
+    // sky's light at half the sun whatever the dome's radiance. WGR_NATIVE_SKY_SCALE overrides
+    // (1 = the physical sky).
+    const float nativeSkyScale = NativeSkyDomeScale();
+    const bool nativeSky = GLandscape != nullptr && GLandscape->GetEnfusionSurfaceCount() > 0;
+    p.sky.params = {_sky.sunAngularRadius, _sky.exposure * (nativeSky ? nativeSkyScale : 1.0f), _sky.planetRadius,
+                    _sky.atmosphereHeight};
     p.sky.control = {_sky.enabled ? 1.0f : 0.0f, static_cast<float>(_sky.viewSamples),
                      static_cast<float>(_sky.lightSamples), _sky.ozone};
     p.sky.night_zenith = {_sky.nightZenith[0], _sky.nightZenith[1], _sky.nightZenith[2], haze};

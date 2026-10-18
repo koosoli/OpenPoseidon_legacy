@@ -1725,13 +1725,25 @@ void ReadAtlasRects(const std::string& text, std::vector<AtlasRect>& out)
         numbers.push_back(v);
         at = static_cast<size_t>(end - body.c_str());
     }
+    // RFG-204: Enfusion's atlas V runs from the BOTTOM of the image. Measured in Workbench at
+    // matched poses with cp_grass_03 overridden so every rectangle is `0 0.65 0 0.35`: Everon's
+    // meadow grows the dense broad blades of the atlas's bottom-left region, not the top-left
+    // tufts. Read top-down, every rectangle landed on the wrong plant -- five of the meadow's
+    // eight blade layers were the rosette weeds and the broad green carpet never appeared (the
+    // "straw" near grass). Converted to image rows here, once, for every consumer.
+    // POSEIDON_PLANTMAT_V_FLIP=0 reads them top-down again.
+    static const bool flipV = []
+    {
+        const char* v = std::getenv("POSEIDON_PLANTMAT_V_FLIP");
+        return !(v != nullptr && v[0] == '0');
+    }();
     for (size_t i = 0; i + 3 < numbers.size(); i += 4)
     {
         AtlasRect r;
         r.u0 = numbers[i];
         r.u1 = numbers[i + 1];
-        r.v0 = numbers[i + 2];
-        r.v1 = numbers[i + 3];
+        r.v0 = flipV ? 1.0f - numbers[i + 3] : numbers[i + 2];
+        r.v1 = flipV ? 1.0f - numbers[i + 2] : numbers[i + 3];
         const size_t index = i / 4;
         r.weight = index < weights.size() ? weights[index] : 1.0f;
         r.scale = index < scales.size() && scales[index] > 0.0f ? scales[index] : 1.0f;

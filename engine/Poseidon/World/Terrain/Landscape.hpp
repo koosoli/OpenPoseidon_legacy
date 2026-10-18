@@ -540,6 +540,10 @@ struct A3TerrainMaterial
 
 // terrain and scene database storage
 
+//! RFG-187: the loaded native (Enfusion) world's latitude/longitude in degrees, from its
+//! TimeAndWeatherManager prefab; false when none was read. See LandLoadEnfusion.cpp.
+bool GetEnfusionWorldGeo(float& latitudeDeg, float& longitudeDeg);
+
 class Landscape : public SerializeClass
 {
     friend class ::EditCursor;

@@ -366,7 +366,9 @@ pub struct WgrModelMaterial {
     // production (encoded colour), bit 1 = GlobalMCRMode Multiply (else Overlay),
     // bit 2 = UVSrcGlobalMaps "UV set 2" (else the first set, Enfusion's default).
     pub global_overlay_mode: u32,
-    pub global_overlay_pad: u32,
+    // RFG-181 (was a pad word): Enfusion NormalsToCamera, packed as EngineWgpu::
+    // ResolveMaterialFarNormals writes it. 0 = authored normals.
+    pub far_normals: u32,
 }
 
 // One drawable LOD level of a model: its FindSqrtLevel resolution threshold (`_resolutions[i]`)

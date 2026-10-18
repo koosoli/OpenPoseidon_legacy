@@ -2247,6 +2247,16 @@ fn grass_light_dir() -> vec3<f32> {
 
 // RFG-PBR: the ground colour a native blade leans towards (SatMapLerp): the satellite under it
 // when the world has one -- what Reforger's PlantMat names -- else the surface's mean albedo.
+// RFG-201: whether a real satellite is bound. Everon's satellite is PAGED, so the grass gets the
+// 1x1 placeholder and grass_ground_colour fell back to the surface's mean albedo -- a straw
+// average Reforger never uses -- and SatMapLerp 0.8 pulled the green carpet 80% of the way to it
+// (groundDown G/R 1.00 vs Reforger's 1.18). Workbench, cp_grass_03 overridden at matched poses:
+// SatMapLerp 0 vs 0.8 leaves Reforger's carpet at G/R 1.17 vs 1.18 -- the atlas carries the green.
+// So without a satellite, the atlas colour stands.
+fn grass_has_satellite() -> bool {
+    return textureDimensions(grass_satellite).x > 1u;
+}
+
 fn grass_ground_colour(world_xz: vec2<f32>) -> vec3<f32> {
     if (textureDimensions(grass_satellite).x > 1u) {
         let extent = terrain.land_grid * f32(terrain.land_range);
@@ -2324,7 +2334,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // the procedural root shade on top, so the Blade root shade slider governs
     // the textured near field too instead of going inert inside 35 m.
     var textured = blade_colour * variation * gust_highlight * mix(1.0, root, 0.75);
-    if (grass.native.x > 0.0 && grass.native2.x > 0.0) {
+    if (grass.native.x > 0.0 && grass.native2.x > 0.0 && grass_has_satellite()) {
         // RFG-091: Reforger's blade layer is authored grey-green and takes its colour from
         // the satellite map (`SatMapLerp 0.8`). With no satellite pages on the native path,
         // the ground's mean albedo stands in: the atlas keeps its luminance structure, the
@@ -2836,7 +2846,7 @@ fn native_tuft_shade(in: VsOut, front: bool) -> vec4<f32> {
     let layer_mean = select(vec4<f32>(0.0), grass.blade_layer_means[min(mean_layer, 7u)], mean_layer < 8u);
     let blade_colour = native_blade_colour(blade.rgb, layer_mean, shading_detail);
     var albedo = blade_colour;
-    if (grass.native2.x > 0.0) {
+    if (grass.native2.x > 0.0 && grass_has_satellite()) {
         let ground = grass_ground_colour(world.xz);
         let recoloured = ground * (dot(blade_colour, luma) / max(dot(ground, luma), 0.02));
         var lerp = grass.native2.x;

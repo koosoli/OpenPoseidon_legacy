@@ -209,6 +209,12 @@ struct PrefabResolution
     //! (CarpetFrame_01_green over a model whose slot `CarpetFrame_01` defaults to Red; door,
     //! window-frame and roof variants the same way). Slot name -> `.emat`, child first.
     std::vector<std::pair<std::string, std::string>> materialRemap;
+    //! RFG-182: `MeshObject { LODFactors { f0 f1 ... } }`, child first (inherited like every
+    //! mesh-object parameter). Each multiplies its level's triangle count for SWITCHING only, so a
+    //! factor above 1 retires that level sooner (BI wiki "Arma Reforger:Level Of Detail", Manual
+    //! Override). Empty = all 1. Everon's conifers carry e.g. `200 70 15 25 1`: the detailed levels
+    //! leave early and the atlas billboard holds the distance.
+    std::vector<float> lodFactors;
 
     //! The mesh key the loader lists: the `.xob` itself, or `enfm|slot=emat;...|<xob>` when the
     //! prefab remaps materials, so each colour variant is its own model and the key still ends
@@ -216,16 +222,18 @@ struct PrefabResolution
     std::string MeshKey() const;
 };
 
-//! Splits a mesh key from PrefabResolution::MeshKey back into the `.xob` and its remap.
+//! Splits a mesh key from PrefabResolution::MeshKey back into the `.xob`, its remap and (RFG-182)
+//! its LOD factors -- the `@lod=f0,f1,...` entry, which is not a material slot.
 inline std::string SplitRemappedMeshKey(const std::string& key,
-                                        std::vector<std::pair<std::string, std::string>>* remap = nullptr)
+                                        std::vector<std::pair<std::string, std::string>>* remap = nullptr,
+                                        std::vector<float>* lodFactors = nullptr)
 {
     if (key.compare(0, 5, "enfm|") != 0)
         return key;
     const size_t bar = key.find('|', 5);
     if (bar == std::string::npos)
         return key;
-    if (remap != nullptr)
+    if (remap != nullptr || lodFactors != nullptr)
     {
         const std::string spec = key.substr(5, bar - 5);
         size_t at = 0;
@@ -236,7 +244,22 @@ inline std::string SplitRemappedMeshKey(const std::string& key,
                 semi = spec.size();
             const std::string entry = spec.substr(at, semi - at);
             const size_t eq = entry.find('=');
-            if (eq != std::string::npos && eq > 0)
+            if (entry.compare(0, 5, "@lod=") == 0)
+            {
+                if (lodFactors != nullptr)
+                {
+                    size_t f = 5;
+                    while (f < entry.size())
+                    {
+                        size_t comma = entry.find(',', f);
+                        if (comma == std::string::npos)
+                            comma = entry.size();
+                        lodFactors->push_back(static_cast<float>(std::atof(entry.substr(f, comma - f).c_str())));
+                        f = comma + 1;
+                    }
+                }
+            }
+            else if (remap != nullptr && eq != std::string::npos && eq > 0)
                 remap->emplace_back(entry.substr(0, eq), entry.substr(eq + 1));
             at = semi + 1;
         }
@@ -246,12 +269,55 @@ inline std::string SplitRemappedMeshKey(const std::string& key,
 
 inline std::string PrefabResolution::MeshKey() const
 {
-    if (materialRemap.empty() || xobPath.empty())
+    bool factored = false;
+    for (float f : lodFactors)
+        factored = factored || f != 1.0f;
+    if ((materialRemap.empty() && !factored) || xobPath.empty())
         return xobPath;
     std::string key = "enfm|";
     for (size_t i = 0; i < materialRemap.size(); ++i)
         key += (i ? ";" : "") + materialRemap[i].first + "=" + materialRemap[i].second;
+    if (factored)
+    {
+        key += materialRemap.empty() ? "@lod=" : ";@lod=";
+        for (size_t i = 0; i < lodFactors.size(); ++i)
+        {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%s%g", i ? "," : "", lodFactors[i]);
+            key += buf;
+        }
+    }
     return key + "|" + xobPath;
+}
+
+//! RFG-182: the numbers of the first `LODFactors { ... }` block in one `.et` body. Its values
+//! sit on the lines between the opening brace and the closing one.
+inline bool FindLodFactors(const std::vector<uint8_t>& blob, std::vector<float>& out)
+{
+    const std::string_view text(reinterpret_cast<const char*>(blob.data()), blob.size());
+    const size_t key = text.find("LODFactors {");
+    if (key == std::string_view::npos)
+        return false;
+    const size_t open = text.find('{', key);
+    const size_t close = text.find('}', open);
+    if (close == std::string_view::npos)
+        return false;
+    const std::string body(text.substr(open + 1, close - open - 1));
+    const char* p = body.c_str();
+    char* end = nullptr;
+    std::vector<float> values;
+    for (;;)
+    {
+        const float v = std::strtof(p, &end);
+        if (end == p)
+            break;
+        values.push_back(v);
+        p = end;
+    }
+    if (values.empty())
+        return false;
+    out = std::move(values);
+    return true;
 }
 
 //! RFG-121: the root entity's own MaterialAssignClass pairs in one `.et` body (defined below,
@@ -310,12 +376,29 @@ inline PrefabResolution ResolvePrefabModel(const EnfusionMount& mount, const std
                 }
             }
         }
+        // RFG-182: LOD factors, child first. POSEIDON_PREFAB_LOD_FACTORS=0 ignores them.
+        static const bool lodFactorsOn = []
+        {
+            const char* env = std::getenv("POSEIDON_PREFAB_LOD_FACTORS");
+            return !(env && env[0] == '0');
+        }();
+        if (lodFactorsOn && out.lodFactors.empty())
+            FindLodFactors(blob, out.lodFactors);
         const std::string object = FindObjectReference(blob);
         if (!object.empty())
         {
             out.xobPath = object;
             out.via = current;
             out.depth = depth;
+            // The factors may still be inherited from above the file that names the mesh.
+            for (int up = depth; lodFactorsOn && out.lodFactors.empty() && up < depthLimit; ++up)
+            {
+                const auto parsedUp = Poseidon::Asset::Material::ParseEmat(
+                    std::string_view(reinterpret_cast<const char*>(blob.data()), blob.size()));
+                if (parsedUp.parentPath.empty() || !mount.Read(parsedUp.parentPath, blob))
+                    break;
+                FindLodFactors(blob, out.lodFactors);
+            }
             return out;
         }
         const auto parsed = Poseidon::Asset::Material::ParseEmat(

@@ -243,7 +243,9 @@ pub struct SectionMaterialGpu {
     // Trailing scalar: WGSL rounds the array stride to 16, so the pad is explicit and
     // both sides agree on 272.
     pub normal_power: f32,
-    pub _pad_np: [u32; 3],
+    // RFG-181: Enfusion NormalsToCamera (WgrModelSection::far_normals), 0 = off.
+    pub far_normals: u32,
+    pub _pad_np: [u32; 2],
     // Crown self-occlusion volume (xyz = trunk-axis centre in model space,
     // w = intensity; second lane x = height reserved, y = radius). 32 bytes,
     // 16-aligned on both sides, so the stride stays a multiple of 16.
@@ -4438,6 +4440,10 @@ pub fn build_gpu_pipeline(
     // fragment entry. Only for the prepassed main-view draw; the reflection and prepass
     // builders pass false. Callers must have checked shaders::early_depth_supported().
     early_z: bool,
+    // RFG-188: Some(Back) for the solid variant (and everything else); None for the cutout
+    // variant's double-sided twin -- Reforger draws a crown's cards from both sides (see
+    // gpu_driven.wgsl cutout_back_face_rejected).
+    cull: Option<wgpu::Face>,
 ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
     let module = crate::shaders::make_module(
         device,
@@ -4527,6 +4533,22 @@ pub fn build_gpu_pipeline(
     // the previous behaviour for an A/B; it is read once at pipeline build, so an arm is two
     // runs of the same binary differing in exactly one term.
     let prepass_match = prepass_match_from_env();
+    // RFG-197 (gpu_driven.wgsl `crown_ao_ambient`): WGR_CROWN_AO_AMBIENT=1 moves native crown
+    // occlusion from the albedo to the ambient only (measured worse; off by default).
+    fn crown_ao_ambient_from_env() -> f64 {
+        static V: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+        *V.get_or_init(|| match std::env::var("WGR_CROWN_AO_AMBIENT") {
+            Ok(v) if v.trim() == "1" => 1.0,
+            _ => 0.0,
+        })
+    }
+    // RFG-189 strength (gpu_driven.wgsl `native_leaf_transmission`), WGR_LEAF_TRANSMISSION.
+    fn leaf_transmission_from_env() -> f64 {
+        static V: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+        *V.get_or_init(|| std::env::var("WGR_LEAF_TRANSMISSION").ok()
+            .and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite() && *v >= 0.0)
+            .unwrap_or(0.1))
+    }
     let constants = [
         ("linear", linear),
         ("a2c", if foliage_a2c { 1.0 } else { 0.0 }),
@@ -4539,6 +4561,8 @@ pub fn build_gpu_pipeline(
         // reached the path that draws Everon's trees) and why the prepass census words stayed 0.
         ("foliage_screen_ao", super::foliage_screen_ao() as f64),
         ("count_fragments", super::count_fragments() as f64),
+        ("crown_ao_ambient", crown_ao_ambient_from_env()),
+        ("native_leaf_transmission", leaf_transmission_from_env()),
     ];
     let depth_stencil = wgpu::DepthStencilState {
         format: super::depth_format(device),
@@ -4550,7 +4574,13 @@ pub fn build_gpu_pipeline(
     let primitive = wgpu::PrimitiveState {
         topology: wgpu::PrimitiveTopology::TriangleList,
         front_face,
-        cull_mode: Some(wgpu::Face::Back),
+        // WGR_NO_CULL=1 (diagnostic, as on the per-draw pipelines in mod.rs) reaches the
+        // GPU-driven set too: the native trees are drawn here, not there.
+        cull_mode: if std::env::var("WGR_NO_CULL").map(|v| v != "0").unwrap_or(false) {
+            None
+        } else {
+            cull
+        },
         ..Default::default()
     };
     let vbuffers = [vbuf_layout];

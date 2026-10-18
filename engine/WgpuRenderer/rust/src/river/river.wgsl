@@ -144,31 +144,78 @@ fn opaque_at(uv: vec2<f32>) -> vec4<f32> {
 }
 
 // The physically reflected ray against the opaque depth snapshot (as water.wgsl's
-// reflected_scene, shortened for a river: banks and trees within ~60 m).
+// reflected_scene). RFG-205: a GEOMETRIC march to ~290 m, then a 4-step bisection on the first
+// crossing. The old 16 x 4 m march gave up at 60 m, so a pond mirrored the trunks at its edge and
+// pale sky everywhere else, where Reforger's mirrors the whole dark tree line of the far bank
+// (meadowNear: ours 81/85/74, +0.7 EV, Reforger 65/72/49). One loop, textureLoad inline: naga
+// rejects a depth read in a helper called from a loop (hybrid-gi-probe-volume trap).
 fn reflected_scene(surface_rel: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
     let dims = vec2<i32>(textureDimensions(scene_depth));
-    for (var i = 0; i < 16; i = i + 1) {
-        let ray_distance = 1.0 + f32(i) * 4.0;
+    var march = 0;      // geometric step index
+    var bisect = -1;    // < 0 marching; 0..3 bisecting
+    var lo = 0.0;
+    var hi = 0.0;
+    var hit_uv = vec2<f32>(0.0);
+    var hit_gap = -1.0;
+    for (var iter = 0; iter < 26; iter = iter + 1) {
+        var ray_distance = 1.5 * pow(1.32, f32(march));
+        if (bisect >= 0) {
+            ray_distance = 0.5 * (lo + hi);
+        }
         let ray_pos = surface_rel + dir * ray_distance;
         let clip = frame.proj * frame.view * vec4<f32>(ray_pos, 1.0);
-        if (clip.w <= 1e-5) {
-            break;
+        var behind = false;
+        var gap = 0.0;
+        var uv = vec2<f32>(0.0);
+        var on_screen = clip.w > 1e-5;
+        if (on_screen) {
+            let ndc = clip.xyz / clip.w;
+            uv = ndc.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
+            on_screen = all(uv > vec2<f32>(0.001)) && all(uv < vec2<f32>(0.999)) && ndc.z > 0.0 && ndc.z < 1.0;
+            if (on_screen) {
+                let texel = clamp(vec2<i32>(uv * vec2<f32>(dims)), vec2<i32>(0), dims - vec2<i32>(1));
+                let opaque_depth = textureLoad(scene_depth, texel, 0);
+                if (opaque_depth > 1e-6 && opaque_depth >= 1.0 - ndc.z) {
+                    let h = frame.inv_view_proj * vec4<f32>(ndc.xy, 1.0 - opaque_depth, 1.0);
+                    let opaque_rel = h.xyz / h.w;
+                    if (length(opaque_rel) > 3.0) {
+                        behind = true;
+                        gap = length(opaque_rel - ray_pos);
+                    }
+                }
+            }
         }
-        let ndc = clip.xyz / clip.w;
-        let uv = ndc.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
-        if (any(uv <= vec2<f32>(0.001)) || any(uv >= vec2<f32>(0.999)) || ndc.z <= 0.0 || ndc.z >= 1.0) {
-            break;
-        }
-        let texel = clamp(vec2<i32>(uv * vec2<f32>(dims)), vec2<i32>(0), dims - vec2<i32>(1));
-        let opaque_depth = textureLoad(scene_depth, texel, 0);
-        let ray_depth = 1.0 - ndc.z;
-        if (opaque_depth > 1e-6 && opaque_depth >= ray_depth) {
-            let h = frame.inv_view_proj * vec4<f32>(ndc.xy, 1.0 - opaque_depth, 1.0);
-            let opaque_rel = h.xyz / h.w;
-            if (length(opaque_rel) > 3.0 && length(opaque_rel - ray_pos) <= 1.0 + ray_distance * 0.05) {
-                let edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
-                let fade = smoothstep(0.0, 0.08, edge) * (1.0 - smoothstep(40.0, 64.0, ray_distance));
-                return vec4<f32>(textureSampleLevel(scene_color, scene_samp, uv, 0.0).rgb, fade);
+        if (bisect < 0) {
+            if (!on_screen || march >= 19) {
+                break;
+            }
+            if (behind) {
+                bisect = 0;
+                hi = ray_distance;
+                lo = select(0.0, 1.5 * pow(1.32, f32(march - 1)), march > 0);
+                hit_uv = uv;
+                hit_gap = gap;
+            } else {
+                march = march + 1;
+            }
+        } else {
+            if (on_screen && behind) {
+                hi = ray_distance;
+                hit_uv = uv;
+                hit_gap = gap;
+            } else {
+                lo = ray_distance;
+            }
+            bisect = bisect + 1;
+            if (bisect >= 4) {
+                if (hit_gap >= 0.0 && hit_gap <= 1.0 + hi * 0.06) {
+                    let edge = min(min(hit_uv.x, hit_uv.y), min(1.0 - hit_uv.x, 1.0 - hit_uv.y));
+                    let fade = smoothstep(0.0, 0.08, edge) * (1.0 - smoothstep(220.0, 300.0, hi));
+                    return vec4<f32>(textureSampleLevel(scene_color, scene_samp, hit_uv, 0.0).rgb, fade);
+                }
+                // A thin occluder in front, not the surface: keep marching past it.
+                bisect = -1;
+                march = march + 1;
             }
         }
     }
@@ -230,7 +277,14 @@ fn fs_river(in: VsOut) -> @location(0) vec4<f32> {
     // hue, its strength from the half-light distance -- ln 2 / HalfLightDistance per metre).
     let half_light = max(rp.colour.w, 0.5);
     let hue = normalize(max(vec3<f32>(1.0) - rp.colour.rgb * 6.0, vec3<f32>(0.05))) * 1.7320508;
-    let sigma = hue * (0.6931472 / half_light);
+    var sigma = hue * (0.6931472 / half_light);
+    // RFG-190: still water sees through as far as its WaterVisibility (bed.w, m): 5% contrast
+    // left there. HalfLightDistance (30) is the SUN's fall-off with depth, not the view's; as the
+    // view extinction it made Everon's Lake_Center glass over its bed 1.25 m down (parity pose
+    // meadowNear), where Reforger shows near-opaque olive water. WaterVisibility 1 -> 3/m.
+    if (in.still > 0.5 && rp.bed.w > 0.0) {
+        sigma = hue * (2.9957 / max(rp.bed.w, 0.05));
+    }
     let transmit = water_transmittance(sigma, path);
     // What the water itself scatters back: its colour under the sky and the sun.
     let sun_l = -frame.sun_dir_world.xyz;
@@ -258,7 +312,10 @@ fn fs_river(in: VsOut) -> @location(0) vec4<f32> {
     // RFG-166: a grazing reflection that found nothing on screen would mirror open sky; in a
     // channel it meets the banks and their vegetation. Take the dimmed scene behind the water
     // instead, fading in below ~20 degrees of reflected elevation.
-    let bank = (1.0 - smoothstep(0.06, 0.35, r_up.y)) * (1.0 - ssr_hit) * clamp(rp.bed.z, 0.0, 1.0);
+    // RFG-190: rivers only. An open lake's grazing reflection is the sky (Workbench, meadowNear:
+    // bright sky across the far half of Lake_Center); the bank stand-in painted its lakebed there.
+    let bank = (1.0 - smoothstep(0.06, 0.35, r_up.y)) * (1.0 - ssr_hit) * clamp(rp.bed.z, 0.0, 1.0) *
+        (1.0 - in.still);
     reflected = mix(reflected, dry * 0.55, bank);
     let cos_v = clamp(dot(n, v), 0.0, 1.0);
     let f0 = clamp(rp.optics.x, 0.0, 1.0);
@@ -269,6 +326,19 @@ fn fs_river(in: VsOut) -> @location(0) vec4<f32> {
         step(0.0, sun_l.y);
 
     var colour = mix(refracted, reflected, fresnel) + glint;
+    // RFG-191: a pond seen from BELOW (the camera under its surface; the Tidewater underwater
+    // composite fogs the rest): Snell's window -- the sky refracted through the surface inside the
+    // critical angle (48.6 deg from straight up), the water's own dark body mirrored outside it.
+    if (in.still > 0.5 && in.world_rel.y > 0.0) {
+        let up = -v; // eye -> surface, pointing up
+        // Water (1.333) into air: the normal faces the incident (water) side, i.e. down.
+        let t = refract(up, -n, 1.333);
+        let inside = dot(t, t) > 0.01;
+        let sky_through = sky_env_sample(select(vec3<f32>(0.0, 1.0, 0.0), normalize(t), inside));
+        let deep = rp.colour.rgb * light * 0.25;
+        let f_under = select(1.0, 0.02 + 0.98 * pow(1.0 - clamp(dot(up, vec3<f32>(0.0, 1.0, 0.0)), 0.0, 1.0), 5.0), inside);
+        colour = mix(sky_through, deep, f_under);
+    }
     // Shore: where the film runs out the bed shows unaltered.
     let shore = smoothstep(0.0, max(rp.misc.x, 0.005), look_column);
     colour = mix(dry, colour, shore);

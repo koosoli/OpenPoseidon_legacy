@@ -100,116 +100,112 @@ fn unpack_argb(c: u32) -> vec3<f32> {
     return vec3<f32>(r, g, b);
 }
 
-@compute @workgroup_size(64, 1, 1)
-fn cs_cull(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (far.tune.y < 0.5) {
-        return;
-    }
-    // A world can hold more placements than one dispatch dimension addresses (65,535
-    // workgroups x 64 = 4,194,240 invocations), so the sweep is dispatched as a 2D grid and
-    // the row stride comes down in the uniform. Chernarus alone is 2.97M rows; the limit is
-    // not hypothetical headroom.
-    let i = gid.y * u32(far.tune.z) + gid.x;
-    if (i >= u32(far.cfg.w)) {
-        return;
-    }
+// PERF-RFG-207: the visible list is compacted per WORKGROUP -- one global atomicAdd per kind per
+// group reserves a block, each accepted thread writes its own slot in it. Every accepted proxy
+// used to add 1 to one of two global words: with Everon's far window full (~200k placements) the
+// sweep serialised on them and cost 3-7 ms, in runs where it was full, against < 0.3 ms where it
+// was not (Durras, same binary, "Far tier: cull (compute)"). The decision logic is unchanged.
+var<workgroup> wg_far_n: array<atomic<u32>, 2>;
+var<workgroup> wg_far_base: array<u32, 2>;
 
+fn far_accept(i: u32) -> u32 {
+    // 0 = rejected, 1 = card, 2 = prism.
+    if (i >= u32(far.cfg.w)) {
+        return 0u;
+    }
     let s = src[i];
     // CAMERA-RELATIVE, always. At kilometre-scale world coordinates an absolute frustum
     // test shifts the frustum by cam_pos, which passes a spot check near the origin and
     // fails everywhere else on the map.
     let rel = s.pos - frame.cam_pos.xyz;
     let d = length(rel);
-    // The far distance is the fog wall. The near cutoff is a HARD FLOOR and nothing more:
-    // whatever the start rule below concludes, never put a crude box this close to the eye,
-    // where it would be compared against the real model standing beside it.
+    // The far distance is the fog wall. The near cutoff is a HARD FLOOR and nothing more.
     if (d > far.cfg.y || d < far.cfg.x) {
-        return;
+        return 0u;
     }
-
-    // START RULE — THE COMPLEMENT OF THE REAL OBJECT CULL, not a distance.
-    //
-    // No distance can be right, and this was measured rather than argued (see
-    // experiments/farfield/cutoff_analysis.py against the real 1.2M Everon placement set with
-    // exact per-model bounds). At the governor's coarse rail, a cutoff at the fog edge left
-    // 36.2% of the placements inside the fog radius drawn by NOTHING — that is the reported
-    // pop-in — while a cutoff tuned to close that gap put a proxy on top of a real model for
-    // 46.8% of them. The trade exists because the real cull is SIZE-dependent and its
-    // coefficient moves with the framerate governor, so any fixed metre value is wrong in
-    // both directions at once and wrong by a different amount each frame.
-    //
-    // So this tier accepts EXACTLY what the object cull drops. gfx3d/cull.wgsl drops an
-    // instance when either the radial test fails (dist2 > objects_z2) or the sub-pixel test
-    // does (diameter^2 < (pixel_limit*lod_scale)^2 * dist2 * lod_inv_width^2); with k folding
-    // pixel_limit * lod_scale * lod_inv_width, that second one is diameter < k * d. Accept is
-    // the negation of both, which is 0% overlap and 0% gap by construction, at every rail.
-    //
-    // Deliberately NOT replicated: cull.wgsl's legacy near-clamp (a sphere large relative to
-    // its distance is measured from its near surface). It only ever SHRINKS the distance, so
-    // omitting it can only make this tier think the real object was dropped when it was
-    // drawn — i.e. it errs toward a redundant proxy, never toward a hole — and it can only
-    // fire within a few radii of the camera, which the hard floor above already owns.
-    //
-    // The proxy's size term is its own drawn width, 2 * radius (radius is
-    // ModelProxyBounds::horizontalExtent * 0.5, so this is the model's horizontal extent) —
-    // the same quantity the offline analysis swept, and the analogue of cull.wgsl's
-    // `model.bounding_sphere * 2.0 * scale`: a stored half-size doubled into a diameter.
+    // START RULE -- THE COMPLEMENT OF THE REAL OBJECT CULL, not a distance (see the measured
+    // rationale this replaced: cutoff_analysis.py; accept exactly what gfx3d/cull.wgsl drops).
     if (far.tune.w < 0.5) {
         let k = far.cull.x;
         let objects_z = far.cull.y;
         let proxy_diameter = max(s.radius, MIN_PROXY_RADIUS) * 2.0;
         let real_drawn = (d <= objects_z) && (proxy_diameter >= k * d);
         if (real_drawn) {
-            return;
+            return 0u;
         }
     }
-
     let h = max(s.height, 0.01);
-
-    // Sub-pixel rejection — the test that decides whether the tier is affordable at all.
-    // px_limit <= 0 disables it, so the A/B is one uniform apart.
+    // Sub-pixel rejection. px_limit <= 0 disables it.
     if (far.cfg.z > 0.0 && far.tune.x > 0.0) {
         let px = h / max(d, 1.0) * far.tune.x;
         if (px < far.cfg.z) {
-            return;
+            return 0u;
         }
     }
-
     // Frustum reject on the bounding sphere, still camera-relative.
     let centre = rel + vec3<f32>(0.0, h * 0.5, 0.0);
     let clip = frame.proj * frame.view * vec4<f32>(centre, 1.0);
     let r = max(h * 0.9, s.radius);
     if (clip.w < -r) {
-        return;
+        return 0u;
     }
     let m = max(abs(clip.w), 1.0) + r * 2.0;
     if (abs(clip.x) > m || abs(clip.y) > m) {
+        return 0u;
+    }
+    return select(1u, 2u, (s.flags & 1u) != 0u);
+}
+
+@compute @workgroup_size(64, 1, 1)
+fn cs_cull(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation_index) local: u32) {
+    if (far.tune.y < 0.5) {
         return;
     }
-
-    var slot: u32 = 0u;
-    if ((s.flags & 1u) != 0u) {
-        let n = atomicAdd(&counts[1], 1u);
+    // A world can hold more placements than one dispatch dimension addresses (65,535
+    // workgroups x 64 = 4,194,240 invocations), so the sweep is dispatched as a 2D grid and
+    // the row stride comes down in the uniform. Chernarus alone is 2.97M rows.
+    let i = gid.y * u32(far.tune.z) + gid.x;
+    if (local < 2u) {
+        atomicStore(&wg_far_n[local], 0u);
+    }
+    workgroupBarrier();
+    let kind = far_accept(i);
+    var local_slot = 0u;
+    if (kind != 0u) {
+        local_slot = atomicAdd(&wg_far_n[kind - 1u], 1u);
+    }
+    workgroupBarrier();
+    if (local < 2u) {
+        let n = atomicLoad(&wg_far_n[local]);
+        var base = 0u;
+        if (n > 0u) {
+            base = atomicAdd(&counts[local], n);
+            // Pin at the cap so the indirect draw never asks for instances the buffer lacks
+            // (whichever reservation runs last, its min follows it: the settled value is the cap).
+            let cap = select(CARD_CAP, PRISM_CAP, local == 1u);
+            if (base + n > cap) {
+                atomicMin(&counts[local], cap);
+            }
+        }
+        wg_far_base[local] = base;
+    }
+    workgroupBarrier();
+    if (kind == 0u) {
+        return;
+    }
+    let n = wg_far_base[kind - 1u] + local_slot;
+    var slot: u32 = n;
+    if (kind == 2u) {
         if (n >= PRISM_CAP) {
-            // Pin the counter at the cap so the indirect draw cannot ask for instances the
-            // buffer does not hold. Every overflowing invocation does this AFTER its own
-            // add, so whichever atomic runs last, a min follows it in that thread's program
-            // order and the settled value is exactly PRISM_CAP.
-            atomicMin(&counts[1], PRISM_CAP);
             return;
         }
         slot = CARD_CAP + n;
-    } else {
-        let n = atomicAdd(&counts[0], 1u);
-        if (n >= CARD_CAP) {
-            atomicMin(&counts[0], CARD_CAP);
-            return;
-        }
-        slot = n;
+    } else if (n >= CARD_CAP) {
+        return;
     }
-
+    let s = src[i];
     visible[slot].pos = s.pos;
-    visible[slot].height = h;
+    visible[slot].height = max(s.height, 0.01);
     visible[slot].radius = max(s.radius, MIN_PROXY_RADIUS);
     visible[slot].colour = s.colour;
     visible[slot].seed = hash01(i ^ 0x9e3779b9u);

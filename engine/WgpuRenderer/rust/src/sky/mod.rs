@@ -1148,6 +1148,8 @@ pub struct Sky {
     sh_pipeline: wgpu::ComputePipeline,
     sh_bind: wgpu::BindGroup,
     sh_buf: wgpu::Buffer,
+    // RFG-186: the ground-bounce inputs of the SH projection (sky_sh.wgsl `Ground`).
+    sh_ground_buf: wgpu::Buffer,
     // LUT build pipelines (target LUT_FORMAT) + their target views/binds.
     transmittance_pipeline: wgpu::RenderPipeline,
     transmittance_bind: wgpu::BindGroup,
@@ -1529,9 +1531,24 @@ impl Sky {
                 | wgpu::BufferUsages::UNIFORM
                 | wgpu::BufferUsages::COPY_DST,
         });
+        let sh_ground_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("wgr_sky_sh_ground"),
+            contents: &[0u8; 64],
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let sh_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_sky_sh_layout"),
             entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -1565,6 +1582,10 @@ impl Sky {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: sh_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: sh_ground_buf.as_entire_binding(),
                 },
             ],
         });
@@ -2295,6 +2316,7 @@ impl Sky {
             sh_pipeline,
             sh_bind,
             sh_buf,
+            sh_ground_buf,
             transmittance_pipeline,
             transmittance_bind,
             transmittance_view,
@@ -2929,6 +2951,53 @@ impl Sky {
     // Project the env map into SH-9 diffuse sky irradiance for this frame. Must run after render_env
     // (reads the freshly-baked env) and before the lit-mesh / terrain passes read `sh_buf`. One tiny
     // dispatch. Recorded on the same encoder so wgpu barriers env-write -> read and sh-write -> read.
+    /// RFG-186: this frame's ground-bounce inputs for the SH projection. `sun` is the main
+    /// camera's sun_diffuse (E/pi, already cloud-dimmed), `sun_up` the sun direction's y.
+    /// WGR_GROUND_BOUNCE=0 restores the horizon-continued lower hemisphere;
+    /// WGR_GROUND_BOUNCE_ALBEDO=r,g,b (linear) replaces the default ground.
+    /// RFG-196: `native` = a native Reforger world, whose sky is lifted to its authored indirect
+    /// share (WGR_NATIVE_INDIRECT=0 off; WGR_NATIVE_INDIRECT_RATIO overrides Lighting_Eden's 0.5).
+    pub fn set_ground_bounce(&self, queue: &wgpu::Queue, sun: [f32; 3], sun_up: f32, native: bool) {
+        static CFG: std::sync::OnceLock<(bool, [f32; 3])> = std::sync::OnceLock::new();
+        let (on, albedo) = *CFG.get_or_init(|| {
+            let on = std::env::var("WGR_GROUND_BOUNCE").map(|v| v.trim() != "0").unwrap_or(true);
+            // An ESTIMATE of open European ground (grass, soil): green-brown, ~0.15 broadband.
+            // Not measured; tune against the parity poses with the env var.
+            let mut albedo = [0.14f32, 0.16, 0.09];
+            if let Ok(v) = std::env::var("WGR_GROUND_BOUNCE_ALBEDO") {
+                let parts: Vec<f32> = v.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+                if parts.len() == 3 {
+                    albedo = [parts[0], parts[1], parts[2]];
+                }
+            }
+            (on, albedo)
+        });
+        static NORM: std::sync::OnceLock<(bool, f32)> = std::sync::OnceLock::new();
+        static NEUTRAL: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+        let neutral = *NEUTRAL.get_or_init(|| {
+            std::env::var("WGR_NATIVE_INDIRECT_NEUTRAL").ok().and_then(|v| v.trim().parse::<f32>().ok())
+                .filter(|v| v.is_finite()).map(|v| v.clamp(0.0, 1.0)).unwrap_or(1.0)
+        });
+        let (norm_on, ratio) = *NORM.get_or_init(|| {
+            let on = std::env::var("WGR_NATIVE_INDIRECT").map(|v| v.trim() != "0").unwrap_or(true);
+            let ratio = std::env::var("WGR_NATIVE_INDIRECT_RATIO").ok().and_then(|v| v.trim().parse::<f32>().ok())
+                .filter(|v| v.is_finite() && *v > 0.0).unwrap_or(0.5);
+            (on, ratio)
+        });
+        // RFG-200: the native dome scale, mirrored from EngineWgpu (WGR_NATIVE_SKY_SCALE, default
+        // 2.5) -- undone for the SH so the sky's LIGHT stays the physical sky's.
+        static DOME: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+        let dome = *DOME.get_or_init(|| {
+            std::env::var("WGR_NATIVE_SKY_SCALE").ok().and_then(|v| v.trim().parse::<f32>().ok())
+                .filter(|v| v.is_finite() && *v > 0.0).unwrap_or(2.5)
+        });
+        let phys = if native { 1.0 / dome } else { 1.0 };
+        let data: [f32; 16] = [sun[0], sun[1], sun[2], sun_up, albedo[0], albedo[1], albedo[2],
+            if on { 1.0 } else { 0.0 }, ratio, if norm_on && native { 1.0 } else { 0.0 }, 24.0, neutral,
+            phys, 0.0, 0.0, 0.0];
+        queue.write_buffer(&self.sh_ground_buf, 0, bytemuck::cast_slice(&data));
+    }
+
     pub fn render_sh(&self, encoder: &mut wgpu::CommandEncoder) {
         encoder.push_debug_group("wgr_sky_sh");
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {

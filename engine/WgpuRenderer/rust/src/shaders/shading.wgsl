@@ -114,6 +114,13 @@ struct ShadeMaterial {
     spec_mask: f32,
     native_cavity: f32,
     native_ao: f32,
+    // RFG-185: per-material scale on the leaf back-light (Enfusion SSSBackScattering / its 0.15
+    // class default); 1.0 for everything that is not a native crown.
+    foliage_trans: f32,
+    // RFG-189: how much of the sun a leaf in an object's shadow still receives THROUGH the leaves
+    // in front of it (diffuse, forward-scattered). 0 = an opaque shadow, as every caster was; native
+    // crowns set it (gpu_driven.wgsl).
+    leaf_transmission: f32,
     // Shader-local material value, never a public buffer/ABI field.
     // Nonzero only after exact primary cloth admission and filtered UV masking.
     wet_cloth: f32,
@@ -362,7 +369,11 @@ fn shade(
     // max() above. The others are binary occluders answering "is something between me and the
     // sun"; cloud shadow is a partial transmittance, and a thin deck under a ridge should darken
     // what the ridge already left, not compete with it for the same slot.
-    let sun_vis = (1.0 - sun_occ) * cloud_sun_shadow(world_abs.xz) * fog_sun_reach(world_pos);
+    let sun_open = cloud_sun_shadow(world_abs.xz) * fog_sun_reach(world_pos);
+    let sun_vis = (1.0 - sun_occ) * sun_open;
+    // RFG-189: the share of the sun that ONLY the cascade casters (objects: other leaves, the
+    // crown's own branches) take away. Terrain and cloud shadow stay opaque.
+    let sun_csm_blocked = max((1.0 - terrain_s) * sun_open - sun_vis, 0.0);
     // Ambient occlusion on the ambient term (both paths), orthogonal to sun_occ (direct sun).
     // Two independent occluders, so they MULTIPLY (plan §6): sky-visibility is the baked far /
     // km-scale term keyed on the object's terrain column, GTAO the screen-space near/mid term
@@ -637,12 +648,22 @@ fn shade(
             // the backlit / shadow side, ~0 on the sunlit side, so it lifts the dark side without
             // doubling the lit side or painting a flat view-only sheet across a billboard.
             let lt = normalize(sl + nrm * k.y);
-            let trans = pow(clamp(dot(vdir, -lt), 0.0, 1.0), max(k.z, 1.0)) * k.x;
+            let trans = pow(clamp(dot(vdir, -lt), 0.0, 1.0), max(k.z, 1.0)) * k.x * mat.foliage_trans;
             // The SSS fill is a NEAR-FIELD effect (per-leaf translucency shouldn't read as a glow at
             // distance, and low-LOD billboards otherwise flatten into a bright sheet), so it shares
             // the distance fade above; the base Lambert stays so far foliage matches terrain.
             let fill = (wrap_fill + trans) * fade * (1.0 - tree_snow_cover);
-            sun = m_emissive + ambient + frame.sun_diffuse.rgb * (front + fill) * sun_vis * leaf_cavity;
+            // RFG-189: a crown is not a solid. A leaf in its neighbours' shadow is still lit by the
+            // sun that came through them -- diffusely, so it does not depend on this leaf's own
+            // facing. Without it every shadowed leaf held sky light only, and a crown seen against
+            // the sun read black where Reforger's glows green.
+            // Transmitted light leaves a leaf on its FAR side: it is what you see looking toward the
+            // sun, little of it from the sun's own side, where the leaves show reflected light. A
+            // quarter stays everywhere -- light already scattered around inside the crown.
+            let toward_sun = smoothstep(-0.3, 0.8, dot(vdir, -sl));
+            let through = sun_csm_blocked * mat.leaf_transmission * mix(0.25, 1.0, toward_sun) *
+                (1.0 - tree_snow_cover);
+            sun = m_emissive + ambient + frame.sun_diffuse.rgb * ((front + fill) * sun_vis + through) * leaf_cavity;
         } else {
             sun = m_emissive + ambient + frame.sun_diffuse.rgb * ndotl * sun_vis;
         }

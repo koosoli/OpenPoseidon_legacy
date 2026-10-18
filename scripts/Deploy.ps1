@@ -117,10 +117,21 @@ $commit = (& git -C $repoRoot rev-parse --short HEAD 2>$null)
 # A warning, not a refusal: deploying a local build to test it is legitimate and common.
 # What is not legitimate is doing it WITHOUT KNOWING, which is the same principle as the
 # provenance line further down.
+# Windows PowerShell 5.1 turns ANY native stderr line into a terminating error under 'Stop', even
+# with 2>$null -- so a local branch with no upstream, or an upstream of another name, aborted the
+# whole deploy here instead of reaching the warning below. These probes are advisory: let git
+# complain and read its exit code.
+$savedPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 $upstream = (& git -C $repoRoot rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null)
-if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($upstream))
+$upstreamFound = $LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($upstream)
+if ($upstreamFound)
 {
-    & git -C $repoRoot fetch --quiet ($upstream -split '/')[0] $branch 2>$null
+    & git -C $repoRoot fetch --quiet ($upstream -split '/')[0] 2>$null
+}
+$ErrorActionPreference = $savedPreference
+if ($upstreamFound)
+{
     $behind = (& git -C $repoRoot rev-list --count "HEAD..$upstream" 2>$null)
     if ($LASTEXITCODE -eq 0 -and [int]$behind -gt 0)
     {

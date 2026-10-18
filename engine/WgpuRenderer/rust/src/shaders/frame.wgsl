@@ -630,9 +630,9 @@ fn atmo_applied() -> bool {
     return g_atmo_amount >= 0.0;
 }
 
-fn apply_fog_receiver(rgb: vec3<f32>, world_pos_rel: vec3<f32>, receiver: bool) -> vec3<f32> {
+fn apply_fog_receiver(rgb_in: vec3<f32>, world_pos_rel: vec3<f32>, receiver: bool) -> vec3<f32> {
     if (frame.params.fog_enabled <= 0.5 || frame.params.fog_inv_range <= 0.0) {
-        return rgb;
+        return rgb_in;
     }
     let dist = length(world_pos_rel);
     // max_dist = fogStart + 1/fogInvRange = the scene fog-max range, which the engine also
@@ -677,6 +677,19 @@ fn apply_fog_receiver(rgb: vec3<f32>, world_pos_rel: vec3<f32>, receiver: bool) 
     let uv = (clip.xy / clip.w) * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
     let inscat = textureSampleLevel(froxel_tex, froxel_samp, vec3<f32>(uv, sqrt(u)), 0.0).rgb;
     g_atmo_amount = amount; // REN-ATM-001 census witness; see g_atmo_amount.
+    // RFG-192: native worlds' aerial perspective (fog_enabled = 2 + extinction x 1e3, EngineWgpu):
+    // exponential haze toward this direction's full airlight (the far froxel), UNDER the distance
+    // ramp above, which still closes the horizon. 0 everywhere else (fog_enabled <= 2).
+    var rgb = rgb_in;
+    if (frame.params.fog_enabled > 2.0) {
+        // RFG-202: code = 10 x round(airlight scale x 100) + extinction x 1e3 (< 1); tens 0 = 1.
+        let code = frame.params.fog_enabled - 2.0;
+        let tens = floor(code / 10.0);
+        let sigma = (code - tens * 10.0) * 1.0e-3;
+        let air_scale = select(1.0, tens / 100.0, tens > 0.5);
+        let airlight = air_scale * textureSampleLevel(froxel_tex, froxel_samp, vec3<f32>(uv, 1.0), 0.0).rgb;
+        rgb = mix(rgb, airlight, 1.0 - exp(-dist * sigma));
+    }
     let background = mix(rgb, inscat, amount);
     if (!fog_camera_matches(layer_fog_packet, frame.view, frame.proj, frame.cam_pos.xyz)) { return background; }
     let absolute = world_pos_rel + frame.cam_pos.xyz;

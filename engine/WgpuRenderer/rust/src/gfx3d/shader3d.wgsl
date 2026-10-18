@@ -1376,6 +1376,8 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     m.wet_cloth = uniform_cloth_wetness(material.local_specular.w, in.uv, uniform_uv_footprint);
     m.native_cavity = 1.0;
     m.native_ao = 1.0;
+    m.foliage_trans = 1.0;
+    m.leaf_transmission = 0.0;
 #ifdef NATIVE_LEAF_CAVITY
     if ((material_flags(material) & 1024u) != 0u && material.normal_map.z > 0.5) {
         m.native_cavity = clamp(normal_sample.a, 0.0, 1.0);

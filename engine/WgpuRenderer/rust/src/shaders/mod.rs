@@ -546,7 +546,9 @@ mod tests {
         let pipelines = gfx[start..].split("let cull_debug_layout").next().unwrap();
         // The far weather-depth pipeline also uses the vertex/compute-only
         // conform layout; adding it must not expose storage to fragments.
-        assert_eq!(pipelines.matches("&conform.gpu_layout").count(), 8);
+        // RFG-188: +3 for the cutout variant's double-sided twins (colour/prepass, early-Z colour,
+        // planar reflection), all on the same vertex/compute-only conform layout.
+        assert_eq!(pipelines.matches("&conform.gpu_layout").count(), 11);
         assert!(!pipelines.contains("&conform.layout"));
         assert_eq!(gfx.matches("self.conform.gpu_bind.as_ref()").count(), 4);
     }

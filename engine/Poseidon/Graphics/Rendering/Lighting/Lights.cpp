@@ -586,6 +586,14 @@ void LightSun::Recalculate(World* world)
         // drawn/lighting sun is the legacy one: a moon whose phase is right but whose
         // terminator is tilted wrong looks worse than a moon with no phase at all.
         sunToDirection = HorizonToDirection(sky.sun.azimuthRad, sky.sun.altitudeRad);
+        // RFG-195: a native Reforger world puts the sun on the other side east-west. At 11:00 on
+        // 1989-08-14 Workbench lights Everon from the WEST (a village house's east wall in shade,
+        // its shadow across the pavement, matched pose shadowProbe), where this ephemeris -- right
+        // for a world whose +x is east -- put it in the east. Reforger's own sun vector
+        // (GetCurrentSunMoonDirAndPhase) matches ours only with x negated, which says its world x
+        // runs the other way for the sky. Mirrored so the same clock time gives the same light.
+        // POSEIDON_ENFUSION_SUN_MIRROR=0 keeps the plain ephemeris.
+        // (applied below, after every sun path -- see the override block)
 
         if (celestial.sunRealistic)
         {
@@ -640,6 +648,49 @@ void LightSun::Recalculate(World* world)
     // correct when the ephemeris is driving.
     float moonHaloIntensity = _moonIllumination;
     float moonIntensity = floatMin(_moonIllumination * 2.0f, 1.0f);
+
+    // RFG-195 (see the note at the ephemeris): mirror east-west on a native Reforger world, after
+    // whichever sun path ran (the ephemeris or the legacy orbit model).
+    {
+        static const bool enfusionMirror = []
+        {
+            const char* v = std::getenv("POSEIDON_ENFUSION_SUN_MIRROR");
+            return !(v && v[0] == '0');
+        }();
+        if (enfusionMirror && GLandscape != nullptr && GLandscape->GetEnfusionSurfaceCount() > 0)
+        {
+            _direction[0] = -_direction[0];
+            _moonDirection[0] = -_moonDirection[0];
+            _moonSunDirection[0] = -_moonSunDirection[0];
+            _moonDirectionUp[0] = -_moonDirectionUp[0];
+        }
+    }
+    // RFG-187 (parity harness only): POSEIDON_TEST_SUN_DIR=x,y,z puts the sun exactly where a
+    // reference frame had it -- the light's TRAVEL direction, as Reforger's
+    // GetCurrentSunMoonDirAndPhase reports it (same axes as ours: x east, y up, z north). Two
+    // ephemerides that agree on azimuth can still differ by degrees of elevation, and a matched
+    // pose compares lighting only when the light is the same.
+    {
+        struct SunOverride
+        {
+            bool on;
+            Vector3 dir;
+        };
+        static const SunOverride sunOverride = []
+        {
+            const char* v = std::getenv("POSEIDON_TEST_SUN_DIR");
+            float x = 0.0f, y = 0.0f, z = 0.0f;
+            if (v && std::sscanf(v, "%f,%f,%f", &x, &y, &z) == 3 && x * x + y * y + z * z > 1e-6f)
+            {
+                Vector3 d(x, y, z);
+                d.Normalize();
+                return SunOverride{true, d};
+            }
+            return SunOverride{false, Vector3(0.0f, -1.0f, 0.0f)};
+        }();
+        if (sunOverride.on)
+            _direction = sunOverride.dir;
+    }
 
     float sinSun = -_direction.Y();
     float absSinSun = fabs(sinSun);

@@ -1185,6 +1185,10 @@ class EngineWgpu : public EngineDummy
     // fills, so this shares its ordering dependency. WGR_MATERIAL_NORMAL_POWER=0 forces
     // 1.0 everywhere (the pre-support picture) for the A/B.
     float ResolveMaterialNormalPower(const ShapeSection& section);
+    // RFG-181/185: a native crown's far-normal word for WgrModelSection::far_normals -- bits 0-12
+    // FarLODDistanceOffset (dm), bit 13 crown, bit 15 NormalsToCamera, bits 16-25 FarLODHeightOffset
+    // (dm, signed 10-bit), bits 26-31 SSSBackScattering x 63. 0 for every other material.
+    uint32_t ResolveMaterialFarNormals(const ShapeSection& section);
     // A section's crown self-occlusion volume, packed for the GPU record:
     // ao_p0 = trunk-axis centre (model space) + intensity, ao_p1 = height,
     // radius, 0, 0. All-zero when the material names no volume. Shares the

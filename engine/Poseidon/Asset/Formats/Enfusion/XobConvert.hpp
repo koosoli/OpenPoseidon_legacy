@@ -212,6 +212,9 @@ struct ConvertOptions
     //! 2,456-triangle adult carries 0.5 / 0.15 / 0.02 / 0.005 / 0.001. The value is K, triangles
     //! per pixel of sphere area at 1080 lines; 0 keeps the RFG-103 threshold reading.
     float lodTrianglesPerPixel = 0.0f;
+    //! RFG-182: the placing prefab's `LODFactors`, indexed by the `.xob`'s LOD number: each
+    //! multiplies that level's triangle count in the rule above (switching only). Missing = 1.
+    std::vector<float> lodFactors;
     TextureOptions textures;
 };
 
@@ -565,7 +568,10 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                     uint64_t tris = 0;
                     for (const XobPartDesc& part : header.lods[lodOrder[level]].parts)
                         tris += part.triangleCount;
-                    const double area = static_cast<double>(std::max<uint64_t>(tris, 1)) / options.lodTrianglesPerPixel;
+                    double weighted = static_cast<double>(std::max<uint64_t>(tris, 1));
+                    if (lodOrder[level] < options.lodFactors.size() && options.lodFactors[lodOrder[level]] > 0.0f)
+                        weighted *= options.lodFactors[lodOrder[level]];
+                    const double area = weighted / options.lodTrianglesPerPixel;
                     return static_cast<float>(2.0 * std::sqrt(area / 3.14159265358979) / 1080.0);
                 };
                 finest = coverageOf(0);

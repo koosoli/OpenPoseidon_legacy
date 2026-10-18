@@ -51,6 +51,27 @@ override emissive_night: f32 = 0.0;
 // gbuffer.wgsl mip_alpha_boost: without it Arma 2 canopies dissolve to speckle past ~15 m
 // while their shadows stay full (owner: "leaves only render when one comes extremely close").
 override cutout_mip_alpha: f32 = 0.0;
+// RFG-185: how far a native crown's card normals go onto the FarLOD radial field at distance
+// (0 = authored normals at every distance, the pre-185 look; a pipeline override, default 1).
+override far_lod_normal_blend: f32 = 1.0;
+// RFG-189: the sun a native crown's shadowed leaf receives through the leaves in front of it.
+// A green leaf transmits ~10-20% and a crown point sees through one to a few of them, diffusely;
+// 0.3 was a start value against the Workbench backlit pose (roadVillageSun), set while the native
+// sky was ~3% of the sun. With it lifted to half (RFG-196) the 0.3 double-counted the fill: the
+// backlit forest (forestOwner) read +1.6 EV over Reforger; 0.1 measured +1.2, 0 +1.0, and 0.1 with
+// the albedo crown AO below +0.9 (treeNear +0.41). WGR_LEAF_TRANSMISSION overrides.
+override native_leaf_transmission: f32 = 0.1;
+// RFG-197: a native crown's occlusion darkens its AMBIENT only, as Reforger's does (Workbench,
+// MatPBRTreeCrown Geometry/Ellipsoid AO: "affects ambient only", reforger-workbench-measurements).
+// Applied to the albedo it also dimmed every sunlit leaf tip; with the native sky lifted to half
+// the sun (RFG-196) that flattened whole crowns. 0 = the old albedo multiply (WGR_CROWN_AO_AMBIENT=0).
+// MEASURED OFF BY DEFAULT: ambient-only made forestOwner +1.60 EV vs +0.91 on the albedo (same
+// transmission), treeNear +0.70 vs +0.41 -- our baked/volume occlusion is weaker than Reforger's,
+// and on the albedo it stands in for the crown self-shadowing we do not yet render.
+// WGR_CROWN_AO_AMBIENT=1 selects ambient-only.
+override crown_ao_ambient: f32 = 0.0;
+const FAR_LOD_NORMAL_NEAR: f32 = 20.0;
+const FAR_LOD_NORMAL_FAR: f32 = 80.0;
 
 // InstanceGpu / RecordGpu / SectionMaterialGpu (cull.rs). conform0/1/2 is the terrain-conform
 // plane (WgrDraw3D::conform* parity); conform2.z = mode (0 rigid, 1 ForestPlain plane, 2
@@ -108,7 +129,8 @@ struct SectionMaterial {
     // decoded tangent-space XY, renormalised after. 1.0 = no-op default. Trailing
     // scalar with explicit pads so the array stride stays 16 on both sides (272).
     normal_power: f32,
-    _pad_np0: u32,
+    // RFG-181: Enfusion NormalsToCamera (bit 15 on, 0-14 distance dm, 16-31 height dm i16).
+    far_normals: u32,
     _pad_np1: u32,
     _pad_np2: u32,
     // Crown self-occlusion volume (xyz = trunk-axis centre in model space,
@@ -795,6 +817,31 @@ fn vs_gpu(
             }
         }
     }
+    // RFG-181: Enfusion `NormalsToCamera` -- the far MLOD cross-billboards shade with normals
+    // facing the viewer (RV's TreeAdvModNormals), radiating from a point FarLODDistanceOffset
+    // metres behind the crown centre and FarLODHeightOffset metres up. Their authored normals
+    // are the cards' own planes, so half of every billboard faced away from the sun and the
+    // far forests drew near-black. world_pos is camera-relative: the camera is the origin.
+    // RFG-185: EVERY crown names those offsets (class default 10 m / 0 m), not only the
+    // billboards -- the "FarLOD" look. Past ~20 m a crown's card normals ease onto the same
+    // radial field, so a mid-distance canopy shades as a rounded volume instead of a heap of
+    // flat facets (forestHill against Workbench). The ramp is NOT measured (FAR_LOD_NORMAL_*).
+    let far_normals = section_materials[rec.section].far_normals;
+    if ((far_normals & 0x2000u) != 0u && (inst.flags & INST_CANOPY_FOREST) == 0u) {
+        let centre = inst.center.xyz - frame.cam_pos.xyz;
+        let centre_dist = length(centre);
+        let away = centre / max(centre_dist, 1e-3);
+        let dist = f32(far_normals & 0x1FFFu) * 0.1;
+        let height = f32(bitcast<i32>(far_normals << 6u) >> 22u) * 0.1;
+        let origin = centre + away * dist + vec3<f32>(0.0, height, 0.0);
+        let d = world_pos - origin;
+        let dl = length(d);
+        if (dl > 1e-3) {
+            var w = smoothstep(FAR_LOD_NORMAL_NEAR, FAR_LOD_NORMAL_FAR, centre_dist) * far_lod_normal_blend;
+            if ((far_normals & 0x8000u) != 0u) { w = 1.0; }
+            normal_ws = normalize(mix(normal_ws, d / dl, w));
+        }
+    }
     // Crown self-occlusion (Enfusion `GeometryAO*`): a radial cylinder about the
     // trunk axis in MODEL space -- the runtime form of the baked vertex colours
     // the .xob colour stream carries (alnus crown: openness fit R=0.74 against
@@ -810,8 +857,11 @@ fn vs_gpu(
     // too, where the model-space volume below cannot be evaluated. Intensity from GeometryAO
     // when the material gives one.
     if (canopy != 0u && section_materials[rec.section].alpha_ref > 0.0 && uv1.y < -6.5) {
+        // RFG-180: a negative intensity is an authored `GeometryAOIntensity 0` -- no occlusion.
         let ao_w = section_materials[rec.section].crown_ao_p0.w;
-        crown_ao = clamp(mix(1.0 - select(1.0, ao_w, ao_w > 0.0), 1.0, clamp(uv1.x, 0.0, 1.0)), 0.0, 1.0);
+        if (ao_w >= 0.0) {
+            crown_ao = clamp(mix(1.0 - select(1.0, ao_w, ao_w > 0.0), 1.0, clamp(uv1.x, 0.0, 1.0)), 0.0, 1.0);
+        }
     } else if (canopy != 0u && (canopy & INST_CANOPY_FOREST) == 0u &&
         section_materials[rec.section].alpha_ref > 0.0) {
         let ao = section_materials[rec.section].crown_ao_p0;
@@ -1019,13 +1069,21 @@ fn native_pbr_ordered_weights(mask: vec3<f32>) -> vec4<f32> {
                      mask.y * remaining.z, mask.z);
 }
 
-fn fs_gpu_body(in: VsOut
-#ifdef NATIVE_PBR_TANGENTS
-    , front: bool
-#endif
-) -> vec4<f32> {
+// RFG-188: the cutout variant is drawn double-sided (cull.rs build_gpu_pipeline, its `None` twin)
+// because Reforger draws a crown's cards from both sides -- culled, half of every crown's cards
+// vanished from any viewpoint and a full lime tree read as bare branches beside Reforger's. Only
+// native crowns (far_normals bit 13) keep their back faces; every other cutout section (OFP and
+// Arma foliage, fences, nets) rejects them here, exactly as the culled pipeline did.
+fn cutout_back_face_rejected(front: bool, section: u32) -> bool {
+    return !front && (section_materials[section].far_normals & 0x2000u) == 0u;
+}
+
+fn fs_gpu_body(in: VsOut, front: bool) -> vec4<f32> {
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
+    if (cutout_back_face_rejected(front, in.section)) {
+        discard;
+    }
     census(0u); // every rasterised colour fragment; word 1 (cutout survivors) is counted after the alpha test
     // AST-012A: the raw UV derivatives, taken HERE because derivative builtins need uniform
     // control flow and everything below this point is conditional. The layer transform is
@@ -1084,19 +1142,27 @@ fn fs_gpu_body(in: VsOut
         let colorize = unpack4x8unorm(bitcast<u32>(sm.crown_ao_p1.w));
         let ramp_m = colorize.a * 255.0;
         let ramp = select(1.0, clamp(length(in.world_pos) / max(ramp_m, 1.0), 0.0, 1.0), ramp_m > 0.0);
+        // RFG-183: lane z = lerp + 2 * at-camera byte (EngineWgpu::ResolveMaterialCrownAo). The
+        // amount runs from ColorizeMapLerpAtCamera at the eye to ColorizeMapLerp at the distance.
+        let packed_lerp = sm.crown_ao_p1.z;
+        let at_byte = floor(packed_lerp * 0.5);
+        let far_lerp = packed_lerp - 2.0 * at_byte;
+        let amount = mix(at_byte / 255.0, far_lerp, ramp);
         var colorize_linear = false;
 #ifdef NATIVE_PBR_PREVIEW
         colorize_linear = bcr_linear;
 #endif
         let target_colour = select(colorize.rgb, srgb_to_linear(colorize.rgb), colorize_linear);
-        base = vec4<f32>(mix(base.rgb, target_colour, sm.crown_ao_p1.z * ramp), base.a);
+        base = vec4<f32>(mix(base.rgb, target_colour, amount), base.a);
     }
     // Crown self-occlusion (the model's baked occlusion, else the GeometryAO volume), applied to
     // the albedo like the baked vertex colour it is -- and AFTER the colorize lerp. Before it, a
     // ColorizeMapLerp of 0.8 replaced 80% of the occluded albedo with the flat world colour, so
     // the crowns' authored dark cores never reached the picture (RFG-106). 1.0 for every section
     // without either, a no-op everywhere else.
-    base = vec4<f32>(base.rgb * retained_crown_ao(in), base.a);
+    let crown_occ = retained_crown_ao(in);
+    let crown_occ_ambient = crown_ao_ambient > 0.5 && (sm.far_normals & 0x2000u) != 0u;
+    base = vec4<f32>(base.rgb * select(crown_occ, 1.0, crown_occ_ambient), base.a);
     // The final per-layer mask weights, hoisted out of the block below so the NORMAL blend
     // (MAT-048, further down) uses exactly the weights the colour blend used — one mask
     // sample, one set of weights, colours and normals agreeing per fragment by construction.
@@ -1256,6 +1322,14 @@ fn fs_gpu_body(in: VsOut
     m.wet_cloth = 0.0;
     m.native_cavity = 1.0;
     m.native_ao = 1.0;
+    // RFG-185: a native crown's back-light follows its SSSBackScattering (bits 26-31 of the crown
+    // word, x63; the class default 0.15 is the reference 1.0). Far atlases author 0.05.
+    m.foliage_trans = 1.0;
+    m.leaf_transmission = 0.0;
+    if ((sm.far_normals & 0x2000u) != 0u) {
+        m.foliage_trans = clamp(f32(sm.far_normals >> 26u) / 63.0 / 0.15, 0.0, 3.0);
+        m.leaf_transmission = native_leaf_transmission;
+    }
     // Imported OFP/A3 materials use the legacy emissive lane for a mixture of
     // real signal lamps and fixed-function brightness compensation. The latter
     // was baked into plant materials to survive OFP's old lighting model; in
@@ -1633,6 +1707,7 @@ fn fs_gpu_body(in: VsOut
     if (dbg_view == MATDBG_VIEW_LIGHTING) {
         base = vec4<f32>(1.0, 1.0, 1.0, base.a);
     }
+    if (crown_occ_ambient) { m.native_ao = m.native_ao * crown_occ; }
     let rgb = shade(
         // `geometric_normal` rides along beside the shading normal so the directional sky
         // ambient can recover how far the normal map turned this pixel; see shade()'s
@@ -1716,15 +1791,9 @@ fn prepass_clipped(world_pos: vec3<f32>) -> bool {
 // applies the SAME discard as fs_gpu so prepass coverage matches the colour pass.
 @fragment
 fn fs_gpu(in: VsOut
-#ifdef NATIVE_PBR_TANGENTS
     , @builtin(front_facing) front: bool
-#endif
 ) -> @location(0) vec4<f32> {
-    return fs_gpu_body(in
-#ifdef NATIVE_PBR_TANGENTS
-        , front
-#endif
-    );
+    return fs_gpu_body(in, front);
 }
 
 #ifdef EARLY_DEPTH
@@ -1738,22 +1807,19 @@ fn fs_gpu(in: VsOut
 @fragment
 @early_depth_test(force)
 fn fs_gpu_early(in: VsOut
-#ifdef NATIVE_PBR_TANGENTS
     , @builtin(front_facing) front: bool
-#endif
 ) -> @location(0) vec4<f32> {
-    return fs_gpu_body(in
-#ifdef NATIVE_PBR_TANGENTS
-        , front
-#endif
-    );
+    return fs_gpu_body(in, front);
 }
 #endif
 
 @fragment
-fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
+fn fs_gpu_prepass(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec2<f32> {
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
+    if (cutout_back_face_rejected(front, in.section)) {
+        discard;
+    }
     let surface_n = surface_normal(in.normal, in.world_pos, dwx, dwy);
     let snow_cover = object_snow_coverage(in.world_pos, surface_n, retained_snow_receiver(in) && linear > 0.5, retained_snow_exposure(in));
     let snow_surface_n = object_snow_normal(in.world_pos, surface_n, surface_n, dwx, dwy, snow_cover);
@@ -1818,9 +1884,12 @@ fn fs_gpu_weather_depth(in: VsOut) {
 // terrain fills the rest (no edge halo). The whole set goes through this pipeline, hence the
 // per-fragment opaque/cutout split rather than a pipeline override.
 @fragment
-fn fs_gpu_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
+fn fs_gpu_prepass_a2c(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
+    if (cutout_back_face_rejected(front, in.section)) {
+        discard;
+    }
     let surface_n = surface_normal(in.normal, in.world_pos, dwx, dwy);
     let snow_cover = object_snow_coverage(in.world_pos, surface_n, retained_snow_receiver(in) && linear > 0.5, retained_snow_exposure(in));
     let snow_surface_n = object_snow_normal(in.world_pos, surface_n, surface_n, dwx, dwy, snow_cover);

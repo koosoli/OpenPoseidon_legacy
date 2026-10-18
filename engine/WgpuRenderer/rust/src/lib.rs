@@ -4528,6 +4528,24 @@ impl Renderer {
         if let Some(tw) = self.water.tidewater_mut() {
             tw.set_lights(lights);
         }
+        // RFG-191: a camera standing in a pond (native worlds: the river module's still water) is
+        // under or over THAT surface, not the sea's. WGR_LAKE_UNDERWATER=0 = the sea only.
+        let lake_under_camera: Option<f32> = if std::env::var("WGR_LAKE_UNDERWATER").map(|v| v.trim() == "0").unwrap_or(false) {
+            None
+        } else {
+            prepared_cameras.get(water_camera).and_then(|cam| {
+                self.river.still_level_at(cam.cam_pos[0], cam.cam_pos[2])
+            })
+        };
+        {
+            let water = lake_under_camera.map(|level| {
+                let (a, s) = self.river.lake_water();
+                (level, a, s)
+            });
+            if let Some(tw) = self.water.tidewater_mut() {
+                tw.set_lake(water);
+            }
+        }
         self.water.prepare(
             &self.device,
             &self.queue,
@@ -4595,13 +4613,14 @@ impl Renderer {
         // the surface drawn in that mode: at the beach they put the eye metres under water while
         // it stood above it), decides the gate there.
         let cam_surface = self.water.camera_surface_height();
-        let underwater_state =
-            self.water
-                .underwater_params()
-                .map(|(sea_level, time, submersion)| match cam_surface {
-                    Some(h) => (h, time, 0.0),
-                    None => (sea_level, time, submersion),
-                })
+        let sea_state = self.water.underwater_params().map(|(sea_level, time, submersion)| match cam_surface {
+            Some(h) => (h, time, 0.0),
+            None => (sea_level, time, submersion),
+        });
+        // RFG-191: inside a pond its flat level decides (the time lane only animates caustics).
+        let underwater_state = lake_under_camera
+            .map(|level| (level, sea_state.map(|s| s.1).unwrap_or(0.0), 0.0))
+            .or(sea_state)
                 .and_then(|(sea_level, time, submersion)| {
                     let player_submerged = submersion > 0.0;
                     // Use the water draw camera, not an unrelated terrain/scene batch. The visual
@@ -5530,6 +5549,12 @@ impl Renderer {
             // Project the env map into SH-9 diffuse sky irradiance (object + terrain ambient). Reads
             // the fresh env; the camera group already binds the resulting buffer (frame binding 9).
             self.gpu_timers.begin(&mut encoder, TimerRegion::SkySh);
+            // RFG-186: the ground the lower hemisphere stands for is lit by THIS frame's sun.
+            if let Some(cam) = prepared_cameras.get(main_scene_cam) {
+                let physical = cam.sun_diffuse[3] > 0.5;
+                let sun = if physical { [cam.sun_diffuse[0], cam.sun_diffuse[1], cam.sun_diffuse[2]] } else { [0.0; 3] };
+                self.sky.set_ground_bounce(&self.queue, sun, -cam.sun_dir_world[1], self.far.native_world());
+            }
             self.sky.render_sh(&mut encoder);
             self.gpu_timers.end(&mut encoder, TimerRegion::SkySh);
             let fog_cam=terrain_batches.first().map(|b|b.camera as usize)

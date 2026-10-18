@@ -4754,6 +4754,11 @@ pub struct Gfx3d {
     /// writes off; Some only under WGR_OBJECT_EARLY_Z=1 on a device that supports it, and then
     /// it replaces gpu_pipeline for the prepassed main-view draw only.
     gpu_pipeline_early: Option<wgpu::RenderPipeline>,
+    // RFG-188: double-sided twins for the cutout variant (None = WGR_CROWN_DOUBLE_SIDED=0).
+    gpu_pipeline_cutout: Option<wgpu::RenderPipeline>,
+    gpu_pipeline_early_cutout: Option<wgpu::RenderPipeline>,
+    gpu_prepass_pipeline_cutout: Option<wgpu::RenderPipeline>,
+    gpu_reflection_pipeline_cutout: Option<wgpu::RenderPipeline>,
     // Mirrored-view variant of gpu_pipeline. Reflection reverses triangle winding, so it
     // deliberately uses the opposite front face while retaining back-face culling.
     gpu_reflection_pipeline: wgpu::RenderPipeline,
@@ -5307,7 +5312,31 @@ impl Gfx3d {
             foliage_a2c,
             wgpu::FrontFace::Cw,
             false,
+            Some(wgpu::Face::Back),
         );
+        // RFG-188: the cutout variant's double-sided twins (colour + its prepass, early-Z colour,
+        // planar reflection). WGR_CROWN_DOUBLE_SIDED=0 keeps every cutout single-sided.
+        let crown_double_sided = std::env::var("WGR_CROWN_DOUBLE_SIDED").map(|v| v.trim() != "0").unwrap_or(true);
+        let (gpu_pipeline_cutout, gpu_prepass_pipeline_cutout) = if crown_double_sided {
+            let (c, p) = cull::build_gpu_pipeline(
+                device,
+                composer,
+                &cameras.layout,
+                &gpu_group1_layout,
+                &textures.bindless_layout,
+                &textures.sampler_array_layout,
+                &conform.gpu_layout,
+                surface_format,
+                sample_count,
+                foliage_a2c,
+                wgpu::FrontFace::Cw,
+                false,
+                None,
+            );
+            (Some(c), Some(p))
+        } else {
+            (None, None)
+        };
         let weather_gpu_pipeline = weather_cover::retained_pipeline(device, composer,
             &cameras.layout, &gpu_group1_layout, &textures.bindless_layout,
             &textures.sampler_array_layout, &conform.gpu_layout, false);
@@ -5329,6 +5358,29 @@ impl Gfx3d {
                     foliage_a2c,
                     wgpu::FrontFace::Cw,
                     true,
+                    Some(wgpu::Face::Back),
+                )
+                .0,
+            )
+        } else {
+            None
+        };
+        let gpu_pipeline_early_cutout = if object_early_z() && crown_double_sided {
+            Some(
+                cull::build_gpu_pipeline(
+                    device,
+                    composer,
+                    &cameras.layout,
+                    &gpu_group1_layout,
+                    &textures.bindless_layout,
+                    &textures.sampler_array_layout,
+                    &conform.gpu_layout,
+                    surface_format,
+                    sample_count,
+                    foliage_a2c,
+                    wgpu::FrontFace::Cw,
+                    true,
+                    None,
                 )
                 .0,
             )
@@ -5351,7 +5403,30 @@ impl Gfx3d {
             false,
             wgpu::FrontFace::Ccw,
             false,
+            Some(wgpu::Face::Back),
         );
+        let gpu_reflection_pipeline_cutout = if crown_double_sided {
+            Some(
+                cull::build_gpu_pipeline(
+                    device,
+                    composer,
+                    &cameras.layout,
+                    &gpu_group1_layout,
+                    &textures.bindless_layout,
+                    &textures.sampler_array_layout,
+                    &conform.gpu_layout,
+                    surface_format,
+                    1,
+                    false,
+                    wgpu::FrontFace::Ccw,
+                    false,
+                    None,
+                )
+                .0,
+            )
+        } else {
+            None
+        };
         // GPU-driven cascade shadow depth pipeline (§6 multi-view): the retained set cast into
         // each cascade's depth map. Group 0 is the shadow pass UBO (light-VP), so it shares the
         // gpu_group1/bindless/conform layouts with the colour path.
@@ -5622,6 +5697,10 @@ impl Gfx3d {
             cull,
             gpu_pipeline,
             gpu_pipeline_early,
+            gpu_pipeline_cutout,
+            gpu_pipeline_early_cutout,
+            gpu_prepass_pipeline_cutout,
+            gpu_reflection_pipeline_cutout,
             gpu_reflection_pipeline,
             gpu_prepass_pipeline,
             gpu_velocity_pipeline,
@@ -9816,7 +9895,8 @@ impl Gfx3d {
                     layer_uv: m.layer_uv,
                     layer_colour: m.layer_colour,
                     normal_power: m.normal_power,
-                    _pad_np: [0; 3],
+                    far_normals: m.far_normals,
+                    _pad_np: [0; 2],
                     crown_ao_p0: m.crown_ao_p0,
                     crown_ao_p1: m.crown_ao_p1,
                     native_pbr_scales: m.native_pbr_scales,
@@ -12436,6 +12516,11 @@ impl Gfx3d {
             textures,
             cam_off,
             self.gpu_pipeline_early.as_ref().unwrap_or(&self.gpu_pipeline),
+            if self.gpu_pipeline_early.is_some() {
+                self.gpu_pipeline_early_cutout.as_ref()
+            } else {
+                self.gpu_pipeline_cutout.as_ref()
+            },
             args,
             group1,
             counters,
@@ -12462,6 +12547,7 @@ impl Gfx3d {
             textures,
             cam_off,
             &self.gpu_reflection_pipeline,
+            self.gpu_reflection_pipeline_cutout.as_ref(),
             self.cull.reflection_out_args(),
             self.gpu_reflection_group1_bind.as_ref(),
             self.cull
@@ -12487,6 +12573,7 @@ impl Gfx3d {
             textures,
             cam_off,
             &self.gpu_prepass_pipeline,
+            self.gpu_prepass_pipeline_cutout.as_ref(),
             self.cull.out_args(),
             self.gpu_group1_bind.as_ref(),
             self.cull.counter_buf(),
@@ -12595,6 +12682,8 @@ impl Gfx3d {
         textures: &SharedTextures,
         cam_off: u32,
         pipeline: &wgpu::RenderPipeline,
+        // RFG-188: the cutout variant's double-sided twin; None draws it with `pipeline`.
+        cutout_pipeline: Option<&wgpu::RenderPipeline>,
         args: Option<&wgpu::Buffer>,
         group1: Option<&wgpu::BindGroup>,
         counters: &wgpu::Buffer,
@@ -12634,6 +12723,11 @@ impl Gfx3d {
             // full conservative capacity of instance_count = 0 no-ops each frame.
             for v in 0..cull::CULL_VARIANT_COUNT {
                 let offset = v as u64 * cap as u64 * INDIRECT_ARG_SIZE;
+                if v == 1 {
+                    if let Some(cp) = cutout_pipeline {
+                        pass.set_pipeline(cp);
+                    }
+                }
                 let r = regions.and_then(|(t, rs)| rs.get(v as usize).map(|r| (t, *r)));
                 if let Some((t, r)) = r {
                     t.cpu_begin(r);
@@ -12651,6 +12745,11 @@ impl Gfx3d {
             // no-ops.
             for v in 0..cull::CULL_VARIANT_COUNT {
                 let offset = v as u64 * cap as u64 * INDIRECT_ARG_SIZE;
+                if v == 1 {
+                    if let Some(cp) = cutout_pipeline {
+                        pass.set_pipeline(cp);
+                    }
+                }
                 let r = regions.and_then(|(t, rs)| rs.get(v as usize).map(|r| (t, *r)));
                 if let Some((t, r)) = r {
                     t.cpu_begin(r);
@@ -12910,7 +13009,7 @@ fn multi_layer_normals_keep_every_layout_in_step() {
             "{name} must mirror SectionMaterialGpu::normal_power"
         );
         for pad in [
-            "_pad_np0: u32,",
+            "far_normals: u32,",
             "_pad_np1: u32,",
             "_pad_np2: u32,",
         ] {

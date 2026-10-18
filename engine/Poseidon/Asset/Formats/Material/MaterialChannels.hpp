@@ -281,6 +281,24 @@ struct TranslatedMaterial
     float                crownAoHeight = 0.0f;
     float                crownAoWidth = 0.0f;
     float                crownAoIntensity = 0.0f;
+    // RFG-180: the material SAYS `GeometryAOIntensity 0` (as opposed to naming none). The far
+    // MLOD crowns (`*_atlas_MLOD.emat`) all do; their meshes still carry the baked occlusion of
+    // the near levels in the colour stream, which must then not darken them.
+    bool                 crownAoOff = false;
+    // RFG-181: Enfusion `NormalsToCamera 1` (the far MLOD cross-billboards, `*_atlas_MLOD.emat`
+    // and some grasses -- 38 of 409 crowns): shading normals face the viewer, the RV
+    // `TreeAdvModNormals` idea. `FarLODDistanceOffset` / `FarLODHeightOffset` place the point
+    // they radiate from: that many metres behind the crown centre, away from the camera, and
+    // that many metres up (negative = below, which tips the normals skyward). Unnamed = the
+    // Workbench class defaults, 10 m and 0 m.
+    bool                 normalsToCamera = false;
+    // RFG-185: a MatPBRTreeCrown at all (the FarLOD offsets and SSS below apply to every crown,
+    // not only the NormalsToCamera billboards), and its `SSSBackScattering` (class default 0.15,
+    // read from Workbench), which scales the renderer's leaf back-light per material.
+    bool                 treeCrown = false;
+    float                sssBackScattering = 0.15f;
+    float                farLodDistanceOffset = 10.0f; // Workbench class default
+    float                farLodHeightOffset = 0.0f;
     // RFG-144: Enfusion `FadeFaces` (MatPBRTreeCrown; default 0 = off, range 0..1, both read from
     // Workbench): leaf cards whose face turns edge-on to the viewer fade out below this |N.V|.
     // 114 of 468 crowns author it (0.15..1, 0.3 commonest).
@@ -292,8 +310,12 @@ struct TranslatedMaterial
     // over the distance. Lerp 0 (every material that names none) disables it.
     std::string          colorizeMap;
     float                colorizeLerp = 0.0f;
-    float                colorizeLerpAtCamera = 0.0f;
-    float                colorizeLerpDistance = 0.0f;
+    // RFG-183: the class defaults, read from Workbench (BaseContainerTools.CreateContainer
+    // ("MatPBRTreeCrown").GetDefaultAsString): LerpAtCamera 1, LerpDistance 50 m. An unnamed
+    // distance used to mean "full lerp at every distance", which flattened near crowns into
+    // the colorize colour.
+    float                colorizeLerpAtCamera = 1.0f;
+    float                colorizeLerpDistance = 50.0f;
     float                colorizeBrightness = 0.5f;
     // Enfusion's global normal map (`GlobalNMOMap`, `UVSrcGlobNormal`) lives
     // in the object's own unwrap rather than the tiling frame: sample it
