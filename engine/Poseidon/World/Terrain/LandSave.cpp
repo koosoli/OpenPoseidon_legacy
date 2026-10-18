@@ -3287,6 +3287,18 @@ static size_t ObjectStreamShapeCacheLimit()
 // lead those extra frames are frames in which the objects are already needed and missing.
 // (b) and (c) are a pair; (b) alone moves the same synchronous cost earlier without shrinking
 // it, and (c) alone trades a stall for pop-in.
+// PERF-STREAM-HYSTERESIS lever (see UpdateModernObjectResidency): 0 = recentre on the bare
+// quantised block, as before.
+static bool ObjectStreamCentreHysteresis()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_HYSTERESIS");
+        return !(v && v[0] == '0');
+    }();
+    return on;
+}
+
 static float ObjectStreamPrefetchSeconds()
 {
     static const float seconds = []
@@ -3928,6 +3940,27 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     int centerZ = std::clamp(static_cast<int>(std::floor(effectivePosition.Z() * _invLandGrid)), 0, _landRange - 1);
     centerX = (centerX / QuantizeCells) * QuantizeCells;
     centerZ = (centerZ / QuantizeCells) * QuantizeCells;
+    // PERF-STREAM-HYSTERESIS: the quantised centre had no hysteresis, and the prefetch lead is
+    // not steady -- it jitters by a metre or two as the smoothed velocity follows the tick
+    // cadence. Near a block edge the lead-shifted position crossed it and back within a few
+    // frames: a 15 m/s Everon flight logged centre 700 -> 696 -> 700 inside 100 ms, and every
+    // flip released and re-created ~1,250 objects (created=1286 released=1285, then 1266/1289,
+    // then 1285/1266) -- each a frame of 50-100 ms. Hold the current block while the position
+    // stays within one cell of it on either side; a real move passes that margin a cell later,
+    // well inside the lead, and a teleport is far outside it. Off for the residency smoke-test
+    // sweep, which moves the centre by design. WGR_OBJECT_STREAM_HYSTERESIS=0 = no margin.
+    if (sweepCells == nullptr && _modernObjectCenterX > -0x3fffffff && ObjectStreamCentreHysteresis())
+    {
+        constexpr float MarginCells = 1.0f;
+        const float fx = effectivePosition.X() * _invLandGrid;
+        const float fz = effectivePosition.Z() * _invLandGrid;
+        if (centerX != _modernObjectCenterX && fx >= _modernObjectCenterX - MarginCells &&
+            fx < _modernObjectCenterX + QuantizeCells + MarginCells)
+            centerX = _modernObjectCenterX;
+        if (centerZ != _modernObjectCenterZ && fz >= _modernObjectCenterZ - MarginCells &&
+            fz < _modernObjectCenterZ + QuantizeCells + MarginCells)
+            centerZ = _modernObjectCenterZ;
+    }
     const bool centerChanged = centerX != _modernObjectCenterX || centerZ != _modernObjectCenterZ;
 
     // PRELOAD MODE. Off by default; WGR_OBJECT_STREAM_PRELOAD=1 turns it on.
