@@ -3376,6 +3376,12 @@ fn water_ripple_strength_from_env() -> f32 {
 ///
 /// Read through `env_f32`, which caches per name, so the value is fixed for the run — an A/B
 /// must be two runs of the same binary differing in exactly one term.
+/// PERF-SHADOW-CULL-SKIP: skip the GPU cull of kept far cascades (WGR_SHADOW_CULL_SKIP=0 = cull all).
+pub(crate) fn shadow_cull_skip() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_SHADOW_CULL_SKIP").map(|v| v.trim() != "0").unwrap_or(true))
+}
+
 /// PERF-R3: the shadow-caster loop's state tracking (WGR_SHADOW_STATE_TRACK=0 = re-set every bucket).
 pub(crate) fn shadow_state_track() -> bool {
     static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -4528,6 +4534,10 @@ pub struct Gfx3d {
     // Fixture-only dispatch witness; reset before the frame and consumed after a closed
     // shadow depth pass. A prepared view alone is not proof that its cull ran.
     geometry_shadow_cull_mask: std::cell::Cell<u32>,
+    // PERF-SHADOW-CULL-SKIP: this frame's kept far cascades (WgrShadowPass::cascade_keep_mask,
+    // stored by prepare_shadows) and the cascades whose cull cull_dispatch_shadows skipped.
+    shadow_keep_mask: std::cell::Cell<u32>,
+    shadow_cull_skipped_mask: std::cell::Cell<u32>,
     // One opt-in cascade-0 depth-draw closure. A prepared view or cull dispatch
     // alone cannot authorize an absence readback.
     shadow_target_draw_closed_mask: std::cell::Cell<u32>,
@@ -5575,6 +5585,8 @@ impl Gfx3d {
                 Some(Box::new(std::cell::Cell::new(geometry_pass_facts::WgrGeometryPassFacts::new())))
             } else {None},
             geometry_shadow_cull_mask: std::cell::Cell::new(0),
+            shadow_keep_mask: std::cell::Cell::new(0),
+            shadow_cull_skipped_mask: std::cell::Cell::new(0),
             shadow_target_draw_closed_mask: std::cell::Cell::new(0),
             local0_target_draw_closed: std::cell::Cell::new(false),
             gi_target_draw_closed: std::cell::Cell::new(false),
@@ -7838,6 +7850,7 @@ impl Gfx3d {
         grass: &Grass,
     ) {
         let count = pass.count.min(MAX_CASCADES);
+        self.shadow_keep_mask.set(if count > 0 { pass.cascade_keep_mask } else { 0 });
         // LGT-010: local views are work too. At night the sun has no cascades (count == 0)
         // and this used to return immediately -- so a spot light's shadow was impossible for
         // exactly the hours a spot light exists for.
@@ -8119,6 +8132,11 @@ impl Gfx3d {
             if !is_local && c < 32 && (pass.cascade_keep_mask >> c) & 1 != 0 &&
                 self.shadow_gen_rendered.get() == self.shadow_gen {
                 continue;
+            }
+            // PERF-SHADOW-CULL-SKIP guard: this cascade renders, so its args must be this frame's.
+            if !is_local && c < 32 && (self.shadow_cull_skipped_mask.get() >> c) & 1 != 0 {
+                self.cull.dispatch_shadow(encoder, c);
+                self.shadow_cull_skipped_mask.set(self.shadow_cull_skipped_mask.get() & !(1 << c));
             }
             // LGT-026: and so a local view can no longer CLEAR THE LAYER, because the tiles it
             // would wipe are the cached ones it is being run beside. Every local view loads and
@@ -12403,6 +12421,7 @@ impl Gfx3d {
         encoder: &mut wgpu::CommandEncoder,
         timers: &crate::gpu_timers::GpuTimers,
     ) {
+        self.shadow_cull_skipped_mask.set(0);
         if !self.gpu_driven_enabled {
             return;
         }
@@ -12420,8 +12439,24 @@ impl Gfx3d {
             .cull
             .shadow_view_count()
             .saturating_sub(self.local_shadow_count);
+        // PERF-SHADOW-CULL-SKIP: the same holds for a far sun cascade the engine KEPT from an
+        // earlier frame (UpdateShadowCascadeCache) -- render_shadow_passes skips its depth pass
+        // under exactly this test, so its cull's args were computed and never read. The cull has
+        // no other output (no demand/residency writes). render_shadow_passes re-dispatches a
+        // skipped cull itself should a skipped cascade render after all, so the two cannot
+        // disagree. WGR_SHADOW_CULL_SKIP=0 culls every cascade every frame.
+        let keep = if shadow_cull_skip() && self.shadow_gen_rendered.get() == self.shadow_gen {
+            self.shadow_keep_mask.get()
+        } else {
+            0
+        };
+        let mut skipped = 0u32;
         for c in 0..self.cull.shadow_view_count() {
             if c >= n_cascades && !self.local_view_refresh.contains(&(c - n_cascades)) {
+                continue;
+            }
+            if c < n_cascades && c < 32 && (keep >> c) & 1 != 0 {
+                skipped |= 1 << c;
                 continue;
             }
             let dispatched = self.cull.dispatch_shadow(encoder, c);
@@ -12441,6 +12476,7 @@ impl Gfx3d {
                 self.geometry_shadow_cull_mask.set(self.geometry_shadow_cull_mask.get() | (1 << c));
             }
         }
+        self.shadow_cull_skipped_mask.set(skipped);
         timers.end(encoder, crate::gpu_timers::Region::ObjCullShadow);
         timers.cpu_end(crate::gpu_timers::Region::ObjCullShadow);
     }
