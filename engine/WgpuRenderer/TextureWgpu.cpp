@@ -2034,10 +2034,13 @@ int TextureMipBias()
 
 bool TextureWgpu::AdaptiveMipCandidate()
 {
-    static const bool enabled = [] { const char* v = std::getenv("WGR_ADAPTIVE_TEXTURE_DETAIL"); return v && v[0] == '1'; }();
+    // PERF-RFG-213: ON by default (WGR_ADAPTIVE_TEXTURE_DETAIL=0 = off), and for every native
+    // block-compressed image -- colour, normals, masks, cutouts -- not only untinted opaque _bcr.
+    // Everon holds 2,387 such textures (1.98 GB) in a process ~2.4 GB over the OS's VRAM budget,
+    // where WDDM demotes a random allocation to system memory each run (5-10 ms frame swings).
+    // Still excluded: composites (decoded RGBA), dynamic/UI images and borrowed tint views.
+    static const bool enabled = [] { const char* v = std::getenv("WGR_ADAPTIVE_TEXTURE_DETAIL"); return !(v && v[0] == '0'); }();
     if (!enabled) return false;
-    // Narrow prototype: immutable in-memory DDS BCR sources, opaque object colour only.
-    // No archive reads, composites, cutouts, normals, dynamic/UI images or borrowed tint views.
     if (!_gpuHandle || !_slotLease || _dynamic || _tintDelegate || _cpuTintView || !_src ||
         !dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(_src)) ||
         _nMipmaps < 2 || TextureMipBias() != 0)
@@ -2049,8 +2052,7 @@ bool TextureWgpu::AdaptiveMipCandidate()
         const size_t n = std::strlen(ending);
         return length >= n && strcmpi(name + length - n, ending) == 0;
     };
-    return (suffix("_bcr.edds") || suffix("_bcr.dds")) &&
-        BcFormatFor(_mipmaps[0].DstFormat()) >= 0 && GetAlphaClass() == AlphaStats::Opaque;
+    return (suffix(".edds") || suffix(".dds")) && BcFormatFor(_mipmaps[0].DstFormat()) >= 0;
 }
 
 bool TextureWgpu::ReplaceMipTail(int firstLevel, uint64_t frame)
@@ -2070,10 +2072,14 @@ bool TextureWgpu::ReplaceMipTail(int firstLevel, uint64_t frame)
     // overlap; trackedBytes also includes submitted old textures awaiting completion.
     constexpr size_t maxUpload = 4 * 1024 * 1024;
     WgrMemoryStats memory{};
-    if (bytes == 0 || bytes > maxUpload || !EngineWgpu::LastMemoryStats(memory) ||
-        !memory.budget_bytes || memory.tracked_bytes >= memory.budget_bytes ||
-        bytes * 2 > memory.budget_bytes - memory.tracked_bytes)
+    if (bytes == 0 || bytes > maxUpload || !EngineWgpu::LastMemoryStats(memory) || !memory.budget_bytes)
         return false;
+    // PERF-RFG-213: a DEMOTION (firstLevel above the current one) shrinks the image, so it is the
+    // way out of an over-budget state and must never be refused for being over budget -- the
+    // prototype's gate refused every replacement there, which on Everon is always. A promotion
+    // is asked for by fresh GPU feedback (the texture is seen up close), so it is honoured too;
+    // the per-pass caps in UpdateAdaptiveTextureDetail bound the churn.
+    (void)memory;
     std::vector<uint8_t> blocks(bytes);
     std::vector<MipmapRead> reads(static_cast<size_t>(count));
     for (int i = 0; i < count; ++i)
@@ -2093,8 +2099,11 @@ bool TextureWgpu::ReplaceMipTail(int firstLevel, uint64_t frame)
     _mipDemand.Replaced(frame);
     wgr_texture_destroy(renderer, previous);
     GTextureStreamStats.frameUploadBytes.fetch_add(bytes, std::memory_order_relaxed);
-    LOG_INFO(Graphics, "Adaptive texture detail: mip {} -> {} bytes={} slot={} source='{}'",
-        oldBias, firstLevel, bytes, _slotLease, SourceName());
+    static std::atomic<uint32_t> adaptiveLogged{0};
+    const uint32_t nth = adaptiveLogged.fetch_add(1, std::memory_order_relaxed);
+    if (nth < 12 || nth % 100 == 0)
+        LOG_INFO(Graphics, "Adaptive texture detail #{}: mip {} -> {} bytes={} slot={} source='{}'", nth,
+            oldBias, firstLevel, bytes, _slotLease, SourceName());
     return true;
 }
 

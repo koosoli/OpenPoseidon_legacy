@@ -12,11 +12,20 @@ struct MipDemand
     uint64_t replaced = 0;
     bool awaitingObservation = false;
 
+    // `pressure` (PERF-RFG-213): the process is over its VRAM budget. Then a texture with no
+    // fresh observation is one nothing is sampling, and goes to its smallest allowed level
+    // instead of back to full detail.
     int Choose(int current, unsigned observed, unsigned age, unsigned groups,
-               uint64_t frame, bool viewChanged, int maxBias)
+               uint64_t frame, bool viewChanged, int maxBias, bool pressure = false)
     {
         if (viewChanged) { candidate = -1; return 0; }
         const bool fresh = groups != 0 && observed != 255 && age <= groups * 2 + 8;
+        if (pressure && !fresh && !awaitingObservation && groups != 0)
+        {
+            if (maxBias <= current) { candidate = -1; return current; }
+            if (candidate != maxBias) { candidate = maxBias; since = frame; }
+            return frame - since >= std::max<uint64_t>(120, groups * 3) ? maxBias : current;
+        }
         // A replacement changes the shader's mip coordinate system. Allow a complete
         // sampling rotation before interpreting the cleared observation as missing demand.
         if (awaitingObservation && !fresh && frame - replaced < groups * 2 + 8) return current;

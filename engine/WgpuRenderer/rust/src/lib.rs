@@ -2790,6 +2790,42 @@ impl Renderer {
         let counters = self.device.get_internal_counters().hal;
         let backend_allocation_bytes = (counters.buffer_memory.read().max(0) as u64)
             .saturating_add(counters.texture_memory.read().max(0) as u64);
+        // PERF-RFG-212: WGR_VRAM_REPORT=1 -- who holds the VRAM. On Everon the process allocates
+        // ~5.7 GB against a ~3.3 GB OS budget and WDDM demotes a different allocation each run (the
+        // 5-10 ms frame swings); this names the allocations, grouped by label, every 20th call.
+        static VRAM_REPORT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *VRAM_REPORT.get_or_init(|| std::env::var("WGR_VRAM_REPORT").map(|v| v.trim() == "1").unwrap_or(false)) {
+            static CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 20 == 0 {
+                const MB: f64 = 1024.0 * 1024.0;
+                eprintln!(
+                    "[wgr] VRAM report: buffers {:.0} MB, textures {:.0} MB",
+                    counters.buffer_memory.read().max(0) as f64 / MB,
+                    counters.texture_memory.read().max(0) as f64 / MB
+                );
+                if let Some(report) = self.device.generate_allocator_report() {
+                    let mut by_label: std::collections::HashMap<String, (u64, u32)> = std::collections::HashMap::new();
+                    for a in &report.allocations {
+                        // Group numbered/variant labels together: digits stripped.
+                        let key: String = a.name.chars().filter(|c| !c.is_ascii_digit()).collect();
+                        let e = by_label.entry(key).or_insert((0, 0));
+                        e.0 += a.size;
+                        e.1 += 1;
+                    }
+                    let mut rows: Vec<_> = by_label.into_iter().collect();
+                    rows.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+                    eprintln!(
+                        "[wgr] VRAM report: allocator total {:.0} MB reserved {:.0} MB in {} allocations",
+                        report.total_allocated_bytes as f64 / MB,
+                        report.total_reserved_bytes as f64 / MB,
+                        report.allocations.len()
+                    );
+                    for (label, (bytes, n)) in rows.iter().take(40) {
+                        eprintln!("[wgr] VRAM report:   {:8.1} MB  x{:<5} {}", *bytes as f64 / MB, n, label);
+                    }
+                }
+            }
+        }
         // REN-RES-004: at most twice a second, follow the driver's live budget (WGR_VRAM_PRESSURE=0
         // keeps the static one). Lowering budget_bytes is all it takes: the engine's free-on-demand
         // probe ("WGPU.Dynamic") evicts object textures toward it, as it does for the static budget.

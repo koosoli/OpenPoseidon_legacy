@@ -227,7 +227,7 @@ void TextureBankWgpu::UpdateAdaptiveTextureDetail()
 {
     static const bool enabled = [] {
         const char* value = std::getenv("WGR_ADAPTIVE_TEXTURE_DETAIL");
-        return value && value[0] == '1';
+        return !(value && value[0] == '0'); // PERF-RFG-213: on by default
     }();
     if (!enabled || !_renderer || (_residencyFrame % 8) != 0 || !GScene || !GScene->GetCamera()) return;
     const auto position = GScene->GetCamera()->Position();
@@ -245,31 +245,63 @@ void TextureBankWgpu::UpdateAdaptiveTextureDetail()
         _adaptiveProjectionX = projectionX; _adaptiveProjectionY = projectionY;
     }
     if (_mipDesired.size() < 65536) { _mipDesired.resize(65536); _mipAge.resize(65536); }
-    if (!EngineWgpu::TryAcquireProducerWindow()) return; // optional work must not serialize render overlap
+    // PERF-RFG-213: under VRAM pressure the work is no longer optional. On a GPU-bound frame the
+    // render thread is never idle, so the try-acquire below failed nearly every time (12 images
+    // replaced in a 3-minute Everon run). Every 64th residency frame over budget takes the window
+    // with a blocking acquire -- one short wait a second -- and may replace up to 32 images.
+    WgrMemoryStats windowStats{};
+    const bool overBudget = EngineWgpu::LastMemoryStats(windowStats) && windowStats.budget_bytes != 0 &&
+                            windowStats.tracked_bytes > windowStats.budget_bytes;
+    const bool forced = overBudget && (_residencyFrame % 64) == 0;
+    if (forced)
+        EngineWgpu::AcquireProducerWindow("adaptive texture detail");
+    else if (!EngineWgpu::TryAcquireProducerWindow())
+        return; // optional work must not serialize render overlap
     WgrMipFeedbackStats feedback{};
     const uint32_t slots = wgr_get_mip_feedback(_renderer, &feedback, _mipDesired.data(), _mipAge.data(), 65536);
     if (!slots) return;
     const size_t count = static_cast<size_t>(_texture.Size());
+    // PERF-RFG-213: under budget pressure, a camera move no longer forces full detail (fresh
+    // feedback still promotes what is seen up close), and a pass may replace up to 8 images /
+    // 16 MB instead of one: one per eight frames took minutes to settle 2,400 textures.
+    WgrMemoryStats pressureStats{};
+    const bool pressure = EngineWgpu::LastMemoryStats(pressureStats) && pressureStats.budget_bytes != 0 &&
+                          pressureStats.tracked_bytes > pressureStats.budget_bytes;
+    int replaced = 0;
+    // Diagnostic tallies, logged every ~600 calls: where the textures fall out of the scan.
+    static uint64_t nScanned = 0, nCandidates = 0, nSlot = 0, nSame = 0, nWant = 0, nOk = 0, nCalls = 0;
     // Round-robin prevents one frequently changing texture from starving the others.
-    for (size_t scanned = 0; scanned < count; ++scanned) {
+    const int replaceCap = forced ? 32 : 8;
+    for (size_t scanned = 0; scanned < count && replaced < replaceCap; ++scanned) {
         _adaptiveCursor %= count;
         TextureWgpu* texture = _texture[static_cast<int>(_adaptiveCursor++)];
+        ++nScanned;
         if (!texture || IsTerrainOwnedTexture(texture) || !texture->AdaptiveMipCandidate()) continue;
+        ++nCandidates;
         const uint32_t slot = texture->_slotLease;
-        if (slot >= slots) continue;
-        const bool moved = texture->_adaptiveViewEpoch != _adaptiveViewEpoch;
+        if (slot >= slots) { ++nSlot; continue; }
+        const bool moved = !pressure && texture->_adaptiveViewEpoch != _adaptiveViewEpoch;
         int maxBias = std::min(3, texture->_nMipmaps - 1);
         while (maxBias > 0 && (texture->_mipmaps[maxBias]._w < 128 || texture->_mipmaps[maxBias]._h < 128)) --maxBias;
         const int target = texture->_mipDemand.Choose(texture->_uploadedFirstLevel, _mipDesired[slot],
-            _mipAge[slot], feedback.groups, _residencyFrame, moved, maxBias);
+            _mipAge[slot], feedback.groups, _residencyFrame, moved, maxBias, pressure);
         if (target == texture->_uploadedFirstLevel) {
             if (target == 0) texture->_adaptiveViewEpoch = _adaptiveViewEpoch;
+            ++nSame;
             continue;
         }
+        ++nWant;
         if (texture->ReplaceMipTail(target, _residencyFrame)) {
             texture->_adaptiveViewEpoch = _adaptiveViewEpoch;
-            break; // at most one image / 4 MiB per eight frames
+            ++replaced;
+            ++nOk;
         }
+    }
+    if ((++nCalls % 600) == 0) {
+        LOG_INFO(Graphics, "Adaptive texture detail scan: calls={} scanned={} candidates={} slotMiss={} unchanged={} "
+            "wanted={} replaced={} pressure={} feedbackSlots={} groups={} harvests={}",
+            nCalls, nScanned, nCandidates, nSlot, nSame, nWant, nOk, pressure ? 1 : 0, slots, feedback.groups,
+            feedback.harvests);
     }
 }
 
