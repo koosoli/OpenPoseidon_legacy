@@ -329,7 +329,11 @@ impl River {
         self.params.misc = [
             env_f32("WGR_RIVER_SHORE", 0.04, 0.001, 1.0),
             env_f32("WGR_RIVER_SSR", 1.0, 0.0, 1.0),
-            env_f32("WGR_RIVER_SCATTER", 0.6, 0.0, 4.0),
+            // RFG-211: 0.6 -> 0.3. The scattered light is Color x (sky + sun), and the native sky
+            // now carries Lighting_Eden's indirect share (RFG-196): at 0.6 Everon's Lake_Center
+            // read +0.81 EV over Reforger (meadowNear); 0.3 measures +0.42, 0.15 no better (the
+            // rest is the sky's reflection), river1 unchanged at every value.
+            env_f32("WGR_RIVER_SCATTER", 0.3, 0.0, 4.0),
             env_f32("WGR_RIVER_DEBUG", 0.0, 0.0, 1.0),
         ];
         // RFG-166: y = the water body's own colour per metre of column (Reforger's rivers read dark
