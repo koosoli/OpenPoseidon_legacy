@@ -476,6 +476,14 @@ void TerrainWgpu::ApplyEnfusionAmbientOcclusion(bool native)
     // Exponent 1 (GTAO's physical result) measures 0.21 there, and Morton's conifers and meadow
     // do not move (48 vs 49, 143 vs 143). `intensity` stays read so the log says what was there.
     ao.strength = 1.0f;
+    // RFG-208: and not even 1. Intensity is a scale against that class default of 10, so Everon's
+    // 2 is a fifth of the effect. At full strength our GTAO, reaching Reforger's 8.5 m, spans a
+    // whole room from wall to wall and blacked out every interior seen through a window (houseNear:
+    // the panes black with the glass sheen off). At 2/10 the room appears as Reforger shows it
+    // (walls, wardrobe, the round mirror in the left window), and the 17 outdoor parity poses do
+    // not move (RMS 0.43 vs 0.44 EV).
+    if (intensity > 0.0f)
+        ao.strength = std::clamp(intensity / 10.0f, 0.05f, 1.0f);
     // Calibration levers: WGR_ENFUSION_AO_RADIUS / WGR_ENFUSION_AO_STRENGTH.
     if (const char* v = std::getenv("WGR_ENFUSION_AO_RADIUS"); v && *v)
         ao.radius = std::max(0.1f, static_cast<float>(std::atof(v)));

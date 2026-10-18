@@ -1602,6 +1602,10 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
                 // The first build mirrored a clean horizon gradient in every pane (bright blue
                 // windows; Reforger's read dark with a soft sheen).
                 env = env * mix(0.25, 1.0, smoothstep(0.05, 0.6, refl_dir.y));
+                // RFG-208: and desaturated by half, as Reforger's environment probes author it
+                // (ProbeHouse_Base: ReflectionDesaturation 0.5). The sky map alone tinted every
+                // pane blue; Reforger's read neutral grey (houseNear).
+                env = mix(env, vec3<f32>(dot(env, vec3<f32>(0.2126, 0.7152, 0.0722))), 0.5);
             }
             let a = clamp(out_a, 0.0, 1.0);
             let a_out = 1.0 - (1.0 - f) * (1.0 - a);
