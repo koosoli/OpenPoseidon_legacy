@@ -4691,6 +4691,27 @@ impl Renderer {
                     })
                 });
         let underwater_engaged = underwater_state.is_some();
+        // PERF-TW-CAUSTICS-GATE: the caustics (0.13 ms) are read only by the water surface and the
+        // underwater composite. When the depth-tested water query has seen no water sample for two
+        // results running and the camera is neither in nor near the water, nothing on screen can
+        // show them, so the splats are skipped. Turning back to the sea re-enables them as soon as
+        // a result sees water (the query keeps running with the draw): at most the query's ~3
+        // frames of readback latency with the previous pattern. WGR_TW_CAUSTICS_GATE=0 = always.
+        {
+            static GATE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let gate = *GATE.get_or_init(|| {
+                std::env::var("WGR_TW_CAUSTICS_GATE").map(|v| v.trim() != "0").unwrap_or(true)
+            });
+            let skip = gate
+                && self.water_visibility.zero_streak() >= 2
+                && !underwater_engaged
+                && lake_under_camera.is_none()
+                && cam_surface.zip(prepared_cameras.get(water_camera))
+                    .is_some_and(|(h, cam)| cam.cam_pos[1] > h + 1.0);
+            if let Some(tw) = self.water.tidewater_mut() {
+                tw.set_caustics_skip(skip);
+            }
+        }
         {
             static GATE_N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             let n = GATE_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

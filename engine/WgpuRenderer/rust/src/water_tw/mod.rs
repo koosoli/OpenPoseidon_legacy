@@ -529,6 +529,8 @@ pub struct Tidewater {
     layout: wgpu::BindGroupLayout,
     bind: wgpu::BindGroup,
     bind_dirty: bool,
+    // PERF-TW-CAUSTICS-GATE: this frame's caustics are not needed (set_caustics_skip).
+    caustics_skip: bool,
     pipeline: wgpu::RenderPipeline,
     grid_vbuf: wgpu::Buffer,
     grid_ibuf: wgpu::Buffer,
@@ -888,6 +890,7 @@ impl Tidewater {
             heightmap_view,
             layout,
             bind_dirty: true,
+            caustics_skip: false,
             pipeline,
             grid_vbuf,
             grid_ibuf,
@@ -1287,7 +1290,7 @@ impl Tidewater {
             self.fft.dispatch(encoder, timers);
             if self.last_params.as_ref().is_some_and(earth_preview) { return; }
             // W5b: the caustics follow this frame's FFT (W7h: timed)
-            if !self.bind_dirty {
+            if !self.bind_dirty && !self.caustics_skip {
                 timers.begin(encoder, crate::gpu_timers::Region::TwCaustics);
                 self.caustics.dispatch(encoder);
                 timers.end(encoder, crate::gpu_timers::Region::TwCaustics);
@@ -1321,6 +1324,11 @@ impl Tidewater {
                 self.query.record(encoder, &self.bind);
             }
         }
+    }
+
+    /// PERF-TW-CAUSTICS-GATE: skip the caustic splats this frame (see lib.rs, where it is decided).
+    pub fn set_caustics_skip(&mut self, skip: bool) {
+        self.caustics_skip = skip;
     }
 
     /// W9a: the drawn surface's height under the camera (absolute m), read back from the probe
