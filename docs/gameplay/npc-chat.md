@@ -52,6 +52,22 @@ panel's keyboard shortcuts.
 | Speech to text | OpenAI, Groq Whisper (free tier), Google Cloud Speech, any OpenAI-compatible server (e.g. local whisper.cpp) |
 | Text to speech | Windows voices (free, offline, no key), OpenAI, Google Cloud TTS, any OpenAI-compatible server (e.g. local Kokoro) |
 
+### Fully local (offline, no key)
+
+All three services can run on your own computer:
+
+| | Choose | Then |
+|---|---|---|
+| Language model | **Ollama** | `ollama pull qwen3:8b` (or any chat model). The panel lists what you have installed and uses one of them if the Model field names one you don't. Talks to Ollama's own API so it can set the **Context window** (default 8192 tokens): one request is 3-5k tokens, and Ollama's own 2-4k default silently drops the instructions. |
+| | **Custom** + a preset button | LM Studio (`:1234`), llama.cpp `llama-server` (`:8080`), KoboldCpp (`:5001`), Jan (`:1337`), vLLM (`:8000`). Load the model with a context of 8192 or more; hover a preset for the command. |
+| Speech to text | **Custom** + a preset | speaches / faster-whisper-server (`:8000`), whisper.cpp `whisper-server --port 8081 --inference-path /v1/audio/transcriptions`, LocalAI. |
+| Text to speech | **Windows voices** | nothing to install; or **Custom** + Kokoro-FastAPI (`:8880`, voices load from the server), openedai-speech (Piper voices, `:8000`), LocalAI. |
+
+A 7-8B model on a GPU answers in a few seconds; on the CPU, raise *Answer timeout*. Small models
+follow the reply format less reliably: the game copes with prose around the JSON and with cut-off
+answers, but a 3B model will miss orders more often than an 8B one. If nothing answers at the
+address, the error says to start the server first.
+
 ElevenLabs works for both speech directions (voices: `text-to-speech`, input: Scribe). Every provider's
 address is pre-filled; only Ollama and Custom servers show the address field openly.
 

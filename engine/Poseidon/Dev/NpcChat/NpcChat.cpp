@@ -1083,6 +1083,7 @@ void CheckLlm()
                     keyNote = DescribeKeyCheck(r.body);
             }
             std::vector<ModelInfo> models;
+            std::string pick;
             if (status.state == LinkState::Ok)
             {
                 const HttpResponse r = HttpPost(BuildModelListRequest(s, key), &TheWorker().cancel);
@@ -1100,14 +1101,32 @@ void CheckLlm()
                 status.message = std::string("Connected to ") + LlmProviderName(s.llm) +
                                  (keyNote.empty() ? std::string() : " (" + keyNote + ")") + " -- " +
                                  std::to_string(models.size()) + " models available";
-                if (!known && !model.empty())
+                // A local server lists exactly what is installed: use one of those rather than a
+                // default name the player never downloaded.
+                const bool local = s.llm == LlmProvider::Ollama || s.llm == LlmProvider::Custom;
+                if (!known && local)
+                    for (const ModelInfo& m : models)
+                        if (m.id.find("embed") == std::string::npos)
+                        {
+                            pick = m.id;
+                            break;
+                        }
+                if (!pick.empty())
+                    status.message += ". Using \"" + pick + "\"" +
+                                      (model.empty() ? std::string() : " (\"" + model + "\" is not installed)") + ".";
+                else if (!known && !model.empty())
                     status.message += ". WARNING: \"" + model + "\" is not one of them; pick one from the list.";
             }
             PostResult(
-                [gen, status, models = std::move(models)]() mutable
+                [gen, status, pick, models = std::move(models)]() mutable
                 {
                     if (gen != s_llmGen)
                         return;
+                    if (!pick.empty())
+                    {
+                        CurrentSettings().llmModel = pick;
+                        SaveSettings();
+                    }
                     s_llmLink = status;
                     if (!models.empty())
                         s_models = std::move(models);

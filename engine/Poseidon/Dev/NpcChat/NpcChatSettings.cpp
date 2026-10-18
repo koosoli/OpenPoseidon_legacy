@@ -157,7 +157,7 @@ std::string DefaultSttBaseUrl(SttProvider p)
         case SttProvider::OpenAI: return "https://api.openai.com/v1";
         case SttProvider::Groq: return "https://api.groq.com/openai/v1";
         case SttProvider::Google: return "https://speech.googleapis.com/v1";
-        case SttProvider::Custom: return "http://localhost:8080/v1";
+        case SttProvider::Custom: return "http://localhost:8000/v1"; // speaches; 8080 is llama-server's
         case SttProvider::ElevenLabs: return "https://api.elevenlabs.io/v1";
         case SttProvider::Gemini: return "https://generativelanguage.googleapis.com/v1beta";
         default: return "";
@@ -403,6 +403,7 @@ std::string SettingsToJson(const Settings& s)
     cJSON_AddNumberToObject(root, "talkKey", s.talkKey);
     cJSON_AddNumberToObject(root, "maxRequestsPerMinute", s.maxRequestsPerMinute);
     cJSON_AddNumberToObject(root, "requestTimeoutSeconds", s.requestTimeoutSeconds);
+    cJSON_AddNumberToObject(root, "localContextTokens", s.localContextTokens);
     cJSON_AddBoolToObject(root, "rememberKeys", s.rememberKeys);
     cJSON_AddNumberToObject(root, "squadVoicesProvider", static_cast<int>(s.squadVoicesProvider));
     cJSON* voices = cJSON_AddObjectToObject(root, "squadVoices");
@@ -467,6 +468,7 @@ bool SettingsFromJson(const std::string& json, Settings& s)
     ReadInt(root, "talkKey", s.talkKey);
     ReadInt(root, "maxRequestsPerMinute", s.maxRequestsPerMinute);
     ReadInt(root, "requestTimeoutSeconds", s.requestTimeoutSeconds);
+    ReadInt(root, "localContextTokens", s.localContextTokens);
     int version = 1;
     ReadInt(root, "version", version);
     if (version < 2 && s.requestTimeoutSeconds == 45)

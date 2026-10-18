@@ -224,7 +224,12 @@ std::string DescribeHttpFailure(const char* who, const HttpResponse& response)
         if (response.error.find("Timeout") != std::string::npos || response.error.find("timed out") != std::string::npos)
             text += "\nFIX: the connection worked but no answer came in time. Free models are often queued and "
                     "\"thinking\" models reason before they answer. Pick a faster model (filter: free, then try "
-                    "another), or raise \"Answer timeout\" in the Language model section.";
+                    "another), or raise \"Answer timeout\" in the Language model section. A local model on a "
+                    "slow GPU or the CPU can need a minute for its first reply while it loads.";
+        else if (response.error.find("onnect") != std::string::npos) // curl: "Couldn't connect to server"
+            text += "\nFIX: nothing answers at that address. For a local server, start it first (Ollama: run "
+                    "\"ollama serve\" or open the Ollama app; LM Studio: Developer -> Start Server) and check the "
+                    "port in the address.";
         return text;
     }
     std::string message;
@@ -268,8 +273,11 @@ std::string DescribeHttpFailure(const char* who, const HttpResponse& response)
     else if (response.status == 404 && (has("guardrail") || has("data policy")))
         text += "\nFIX: your OpenRouter privacy settings exclude every provider of this model. Allow more "
                 "providers at openrouter.ai/settings/privacy, or pick another model.";
+    else if (has("try pulling"))
+        text += "\nFIX: this model is not downloaded in Ollama. Run \"ollama pull <model>\" with the name in the "
+                "Model field, or pick one from the loaded list (\"ollama list\" shows what you have).";
     else if (response.status == 404)
-        text += "\nFIX: unknown model or address. Pick a model from the loaded list.";
+        text +="\nFIX: unknown model or address. Pick a model from the loaded list.";
     else if (response.status == 429)
         text += "\nFIX: rate limited by the provider. Wait a moment; free models are limited per minute.";
     return RedactSecrets(text);

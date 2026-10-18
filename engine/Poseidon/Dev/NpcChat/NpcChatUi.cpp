@@ -196,6 +196,50 @@ bool AddressRow(const char* label, std::string& value, const std::string& fallba
     return changed;
 }
 
+struct LocalPreset
+{
+    const char* name;
+    const char* url;
+    const char* note; // how to start it so it answers there
+};
+
+/// One-click addresses for the common local servers (all OpenAI-compatible, no key).
+bool LocalPresetRow(const char* id, std::string& value, const LocalPreset* presets, size_t count)
+{
+    bool changed = false;
+    ImGui::TextDisabled("Local server:");
+    for (size_t i = 0; i < count; ++i)
+    {
+        Dev::PanelSameLine();
+        if (Dev::Button((std::string(presets[i].name) + "##" + id).c_str()))
+        {
+            value = presets[i].url;
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s\n%s", presets[i].url, presets[i].note);
+    }
+    return changed;
+}
+
+constexpr LocalPreset kLlmPresets[] = {
+    {"LM Studio", "http://localhost:1234/v1", "Developer tab -> Start Server. Set Context Length to 8192 or more when loading the model."},
+    {"llama.cpp", "http://localhost:8080/v1", "llama-server -m model.gguf -c 8192"},
+    {"KoboldCpp", "http://localhost:5001/v1", "koboldcpp --contextsize 8192"},
+    {"Jan", "http://localhost:1337/v1", "Settings -> Local API Server -> Start."},
+    {"vLLM", "http://localhost:8000/v1", "vllm serve <model> --max-model-len 8192"},
+};
+constexpr LocalPreset kSttPresets[] = {
+    {"speaches", "http://localhost:8000/v1", "speaches / faster-whisper-server (Docker). Model e.g. Systran/faster-whisper-small."},
+    {"whisper.cpp", "http://localhost:8081/v1", "whisper-server -m ggml-base.en.bin --port 8081 --inference-path /v1/audio/transcriptions"},
+    {"LocalAI", "http://localhost:8080/v1", "LocalAI with a whisper model installed."},
+};
+constexpr LocalPreset kTtsPresets[] = {
+    {"Kokoro", "http://localhost:8880/v1", "Kokoro-FastAPI (Docker). Voices load from the server."},
+    {"openedai-speech", "http://localhost:8000/v1", "openedai-speech: Piper voices behind OpenAI's API (tts-1 = Piper)."},
+    {"LocalAI", "http://localhost:8080/v1", "LocalAI with a TTS model installed."},
+};
+
 /// A model field with the provider's list beside it: pick from the list or type any name.
 bool SpeechModelPicker(const char* label, std::string& value, const std::string& fallback,
                        const std::vector<ModelInfo>& offered)
@@ -456,6 +500,21 @@ void DrawTab()
             CheckLlm();
         }
         dirty |= AddressRow("##llmaddr", s.llmBaseUrl, DefaultLlmBaseUrl(s.llm), !keyless);
+        if (s.llm == LlmProvider::Custom && LocalPresetRow("llm", s.llmBaseUrl, kLlmPresets, std::size(kLlmPresets)))
+        {
+            dirty = true;
+            s.llmModel.clear();
+            CheckLlm();
+        }
+        if (s.llm == LlmProvider::Ollama)
+        {
+            dirty |= Dev::SliderInt("Context window (tokens)", &s.localContextTokens, 4096, 32768);
+            ImGui::TextDisabled("One request is about 3-5k tokens. Below that Ollama silently drops the instructions. "
+                                "More costs memory; 8192 suits an 8B model on an 8 GB GPU.");
+        }
+        else if (s.llm == LlmProvider::Custom)
+            ImGui::TextDisabled("Load the model with a context of 8192 tokens or more (hover a preset for how); a "
+                                "smaller window cuts off the instructions. No key needed for a local server.");
         StatusLight("Model provider", LlmStatus());
         if (Dev::Button("Check key and load models"))
             CheckLlm();
@@ -502,8 +561,8 @@ void DrawTab()
         dirty |= Dev::SliderInt("Max answer tokens", &s.maxTokens, 100, 2000);
         dirty |= Dev::SliderInt("Conversation memory (exchanges)", &s.historyTurns, 1, 40);
         ImGui::TextDisabled("Free to start: Google Gemini with an AI Studio key (aistudio.google.com/apikey); the same "
-                            "key also drives Gemini voices and voice input. Or OpenRouter (filter: free); Ollama runs "
-                            "locally without a key.");
+                            "key also drives Gemini voices and voice input. Or OpenRouter (filter: free). Offline and "
+                            "keyless: Ollama, or Custom for LM Studio / llama.cpp / KoboldCpp.");
     }
 
     // ---- prompt and context
@@ -577,6 +636,11 @@ void DrawTab()
                 CheckStt();
             }
             dirty |= AddressRow("##sttaddr", s.sttBaseUrl, DefaultSttBaseUrl(s.stt), !keyless);
+            if (keyless && LocalPresetRow("stt", s.sttBaseUrl, kSttPresets, std::size(kSttPresets)))
+            {
+                dirty = true;
+                CheckStt();
+            }
             StatusLight("Speech to text", SttStatus());
             if (Dev::Button("Check##stt"))
                 CheckStt();
@@ -598,7 +662,8 @@ void DrawTab()
             if (IsTalking())
                 ImGui::ProgressBar(std::clamp(MicLevel(), 0.0f, 1.0f), ImVec2(200, 0), "mic");
         }
-        ImGui::TextDisabled("Free options: Groq (free tier) or a local whisper.cpp server via Custom.");
+        ImGui::TextDisabled("Free options: Groq (free tier), or fully offline: Custom with a local Whisper server (speaches, "
+                            "whisper.cpp).");
     }
 
     // ---- text to speech
@@ -621,6 +686,14 @@ void DrawTab()
                 if (KeyRow(TtsKeySlot(s.tts), "voices"))
                     CheckTts();
                 dirty |= AddressRow("##ttsaddr", s.ttsBaseUrl, DefaultTtsBaseUrl(s.tts), s.tts != TtsProvider::Custom);
+                if (s.tts == TtsProvider::Custom &&
+                    LocalPresetRow("tts", s.ttsBaseUrl, kTtsPresets, std::size(kTtsPresets)))
+                {
+                    dirty = true;
+                    s.ttsModel.clear();
+                    s.ttsVoices.clear();
+                    CheckTts();
+                }
                 if (s.tts != TtsProvider::Google)
                     dirty |= SpeechModelPicker("Model##tts", s.ttsModel, DefaultTtsModel(s.tts), TtsModels());
             }

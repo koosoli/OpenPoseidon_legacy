@@ -95,6 +95,9 @@ struct Settings
     float temperature = 0.7f;
     int maxTokens = 500;
     int historyTurns = 12; // user+assistant exchanges kept as conversation memory
+    // Ollama's own default window (2-4k tokens) is smaller than one request here, and it silently
+    // drops the START of the prompt -- the instructions. Sent as options.num_ctx on Ollama's native API.
+    int localContextTokens = 8192;
     std::string systemPrompt;
     int tone = 1; // how casual the squad is with the player: 0 strict .. 3 buddies (ToneInstructions)
 

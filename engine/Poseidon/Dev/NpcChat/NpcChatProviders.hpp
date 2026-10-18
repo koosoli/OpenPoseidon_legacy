@@ -93,6 +93,8 @@ std::string MakeWav(const int16_t* samples, size_t count, int sampleRate);
 std::string ApplyRadioFilter(const std::string& wav);
 /// Join a base URL and a path with exactly one slash.
 std::string JoinUrl(const std::string& base, const std::string& path);
+/// "http://host:11434/v1" -> "http://host:11434": the root of Ollama's native API.
+std::string OllamaNativeBase(const std::string& base);
 /// Split "a, b ,c" -> {"a","b","c"}.
 std::vector<std::string> SplitList(const std::string& list);
 } // namespace Poseidon::NpcChat

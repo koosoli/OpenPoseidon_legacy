@@ -61,6 +61,16 @@ std::string JoinUrl(const std::string& base, const std::string& path)
     return b + "/" + path.substr(start);
 }
 
+std::string OllamaNativeBase(const std::string& base)
+{
+    std::string b = base;
+    while (!b.empty() && b.back() == '/')
+        b.pop_back();
+    if (b.size() >= 3 && b.compare(b.size() - 3, 3, "/v1") == 0)
+        b.resize(b.size() - 3);
+    return b;
+}
+
 std::vector<std::string> SplitList(const std::string& list)
 {
     std::vector<std::string> out;
@@ -89,6 +99,36 @@ HttpRequest BuildLlmRequest(const Settings& s, const std::string& key, const std
     req.timeoutSeconds = s.requestTimeoutSeconds;
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "model", s.EffectiveLlmModel().c_str());
+    if (s.llm == LlmProvider::Ollama)
+    {
+        // Ollama's native /api/chat, not its OpenAI layer: only here can the context window be set
+        // (options.num_ctx). With the default 2-4k window Ollama silently cuts the START of a request
+        // this size, which is the instructions. format=json constrains the output to a JSON object.
+        req.url = JoinUrl(OllamaNativeBase(s.EffectiveLlmBaseUrl()), "api/chat");
+        if (!key.empty()) // an Ollama behind an authenticating proxy
+            req.headers.emplace_back("Authorization", "Bearer " + key);
+        cJSON_AddBoolToObject(root, "stream", false);
+        cJSON_AddStringToObject(root, "format", "json");
+        cJSON_AddStringToObject(root, "keep_alive", "30m"); // no reload between radio calls
+        cJSON* options = cJSON_AddObjectToObject(root, "options");
+        cJSON_AddNumberToObject(options, "num_ctx", std::clamp(s.localContextTokens, 2048, 131072));
+        cJSON_AddNumberToObject(options, "num_predict", s.maxTokens + 2000);
+        cJSON_AddNumberToObject(options, "temperature", s.temperature);
+        cJSON* msgs = cJSON_AddArrayToObject(root, "messages");
+        cJSON* sys = cJSON_CreateObject();
+        cJSON_AddStringToObject(sys, "role", "system");
+        cJSON_AddStringToObject(sys, "content", systemPrompt.c_str());
+        cJSON_AddItemToArray(msgs, sys);
+        for (const ChatMessage& m : messages)
+        {
+            cJSON* item = cJSON_CreateObject();
+            cJSON_AddStringToObject(item, "role", m.role.c_str());
+            cJSON_AddStringToObject(item, "content", m.content.c_str());
+            cJSON_AddItemToArray(msgs, item);
+        }
+        req.body = Print(root);
+        return req;
+    }
     // Thinking models (Gemini 2.5+/3, Nemotron, o-series...) count their hidden reasoning against
     // max_tokens: without headroom the budget goes on thinking and the reply is cut off -- seen as an
     // empty reply, or JSON that stops before its "orders". Anthropic does not think unless asked.
@@ -125,7 +165,7 @@ HttpRequest BuildLlmRequest(const Settings& s, const std::string& key, const std
         }
         // Ask for a JSON object where the API understands it; the prompt asks for it anyway, and
         // ParseReply copes with prose around the object for the servers that ignore this.
-        if (s.llm == LlmProvider::OpenAI || s.llm == LlmProvider::Gemini || s.llm == LlmProvider::Ollama)
+        if (s.llm == LlmProvider::OpenAI || s.llm == LlmProvider::Gemini)
         {
             cJSON* fmt = cJSON_AddObjectToObject(root, "response_format");
             cJSON_AddStringToObject(fmt, "type", "json_object");
@@ -176,7 +216,25 @@ bool ParseLlmResponse(LlmProvider provider, const std::string& body, std::string
         return false;
     }
     bool ok = false;
-    if (IsOpenAiCompatible(provider))
+    const cJSON* native = cJSON_GetObjectItemCaseSensitive(root, "message");
+    if (provider == LlmProvider::Ollama && cJSON_IsObject(native))
+    {
+        // Ollama /api/chat: {"message":{"content":..},"done_reason":"stop"}
+        if (const char* t = StringField(native, "content"))
+            text = t;
+        ok = text.find_first_not_of(" \t\r\n") != std::string::npos;
+        if (!ok)
+        {
+            const char* reason = StringField(root, "done_reason");
+            error = reason && std::string(reason) == "length"
+                        ? "the local model used its whole token budget and wrote no reply. Raise \"Max answer "
+                          "tokens\" or pick a model without \"thinking\"."
+                        : "the local model returned an empty reply. Try again or pick another model.";
+            cJSON_Delete(root);
+            return false;
+        }
+    }
+    else if (IsOpenAiCompatible(provider))
     {
         const cJSON* choices = cJSON_GetObjectItemCaseSensitive(root, "choices");
         const cJSON* first = cJSON_GetArrayItem(choices, 0);
@@ -228,7 +286,7 @@ bool ParseLlmResponse(LlmProvider provider, const std::string& body, std::string
     if (!ok)
     {
         const cJSON* err = cJSON_GetObjectItemCaseSensitive(root, "error");
-        const char* msg = StringField(err, "message");
+        const char* msg = cJSON_IsString(err) ? err->valuestring : StringField(err, "message"); // Ollama: a string
         error = msg ? msg : "LLM answer has no text";
     }
     cJSON_Delete(root);

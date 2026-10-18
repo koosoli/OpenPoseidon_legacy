@@ -175,11 +175,12 @@ TEST_CASE("NpcChat LLM request: OpenAI-compatible providers", "[npcchat]")
     CHECK(std::string(cJSON_GetObjectItem(root, "model")->valuestring) == DefaultLlmModel(LlmProvider::OpenRouter));
     cJSON_Delete(root);
 
-    s.llm = LlmProvider::Ollama;
-    s.llmBaseUrl = "http://localhost:11434/v1/";
+    s.llm = LlmProvider::Custom;
+    s.llmBaseUrl = "http://localhost:1234/v1/";
     const HttpRequest local = BuildLlmRequest(s, "", "S", {{"user", "hi"}});
-    CHECK(local.url == "http://localhost:11434/v1/chat/completions");
+    CHECK(local.url == "http://localhost:1234/v1/chat/completions");
     CHECK(Header(local, "Authorization").empty());
+    CHECK(local.body.find("response_format") == std::string::npos); // LM Studio refuses json_object
 
     std::string text, error;
     REQUIRE(ParseLlmResponse(LlmProvider::OpenAI, R"({"choices":[{"message":{"content":"{\"say\":[]}"}}]})", text,
@@ -884,4 +885,50 @@ TEST_CASE("NpcChat events: a mixed default squad, one joker, reactions with a co
     CHECK_THAT(rules, ContainsSubstring("[GAME EVENT]"));
     CHECK_THAT(rules, ContainsSubstring("SQUAD JOKER"));
     CHECK_THAT(rules, ContainsSubstring("never a joke"));
+}
+
+TEST_CASE("NpcChat local models: Ollama's native API with a context window big enough for the prompt", "[npcchat]")
+{
+    CHECK(OllamaNativeBase("http://localhost:11434/v1/") == "http://localhost:11434");
+    CHECK(OllamaNativeBase("http://gpu-box:11434") == "http://gpu-box:11434");
+
+    Settings s;
+    s.llm = LlmProvider::Ollama;
+    s.llmBaseUrl = "http://localhost:11434/v1/";
+    const HttpRequest r = BuildLlmRequest(s, "", "SYSTEM", {{"user", "hi"}});
+    CHECK(r.url == "http://localhost:11434/api/chat");
+    CHECK(Header(r, "Authorization").empty());
+    cJSON* root = cJSON_Parse(r.body.c_str());
+    REQUIRE(root);
+    CHECK(cJSON_IsFalse(cJSON_GetObjectItem(root, "stream")));
+    CHECK(std::string(cJSON_GetObjectItem(root, "format")->valuestring) == "json");
+    const cJSON* options = cJSON_GetObjectItem(root, "options");
+    CHECK(cJSON_GetObjectItem(options, "num_ctx")->valueint == 8192);
+    CHECK(cJSON_GetArraySize(cJSON_GetObjectItem(root, "messages")) == 2);
+    cJSON_Delete(root);
+
+    std::string text, error;
+    REQUIRE(ParseLlmResponse(LlmProvider::Ollama,
+                             R"({"model":"llama3.1:8b","message":{"role":"assistant","content":"{\"say\":[]}"},"done":true})",
+                             text, error));
+    CHECK(text == "{\"say\":[]}");
+    CHECK_FALSE(ParseLlmResponse(LlmProvider::Ollama, R"({"message":{"content":""},"done_reason":"length"})", text, error));
+    CHECK_THAT(error, ContainsSubstring("token budget"));
+    CHECK_FALSE(ParseLlmResponse(LlmProvider::Ollama, R"({"error":"model \"x\" not found, try pulling it first"})", text, error));
+    CHECK_THAT(error, ContainsSubstring("try pulling"));
+
+    HttpResponse missing;
+    missing.status = 404;
+    missing.body = R"({"error":"model \"llama3.1:8b\" not found, try pulling it first"})";
+    CHECK_THAT(DescribeHttpFailure("Ollama", missing), ContainsSubstring("ollama pull"));
+    HttpResponse down;
+    down.error = "Couldn't connect to server";
+    CHECK_THAT(DescribeHttpFailure("Ollama", down), ContainsSubstring("start it first"));
+
+    // The settings survive; the local speech-to-text default no longer collides with llama-server's 8080.
+    s.localContextTokens = 16384;
+    Settings back;
+    REQUIRE(SettingsFromJson(SettingsToJson(s), back));
+    CHECK(back.localContextTokens == 16384);
+    CHECK(DefaultSttBaseUrl(SttProvider::Custom) != DefaultLlmBaseUrl(LlmProvider::Custom));
 }
