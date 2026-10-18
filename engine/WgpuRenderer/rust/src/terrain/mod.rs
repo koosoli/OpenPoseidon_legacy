@@ -25,6 +25,12 @@ fn wet_soil_debug_padding_refuses_non_enum_values_and_resets_normal() {
     for mode in [-1.0,0.5,5.0,f32::NAN,f32::INFINITY] { assert_eq!(wet_soil_debug_mode(mode),0.0); }
 }
 
+/// PERF-CANOPY-BAND lever (WGR_CANOPY_BAND=0 = every canopy update re-uploads the whole map).
+fn canopy_band_enabled() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_CANOPY_BAND").map(|v| v.trim() != "0").unwrap_or(true))
+}
+
 fn terrain_resource_reuse() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     // Installed edit A/B did not reduce stalls; retain only as an explicit experiment.
@@ -1655,10 +1661,60 @@ impl Terrain {
     /// `n` 0 clears it.
     pub fn set_canopy(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, n: u32, top: &[f32], cover: &[f32]) {
         let cells = (n as usize) * (n as usize);
-        self.canopy = if n == 0 || top.len() < cells || cover.len() < cells {
-            None
-        } else {
+        let valid = n != 0 && top.len() >= cells && cover.len() >= cells;
+        // PERF-CANOPY-BAND: streaming trees in and out re-sends the whole n x n grid (2048^2 on
+        // Everon) every ~1.5 s of travel, and this recomposed and re-uploaded the whole sky-view
+        // texture (32 MB) on the render thread each time -- 20-56 ms worker frames, felt as
+        // stutter while moving. A change from streaming is local, so when the grid keeps its size
+        // and the texture is updated in place, only the band of rows that differs is recomposed
+        // and written. The texture object is the same, so no bind group (and no consumer keyed
+        // on mask_gen, layered fog's cache included) needs to rebuild. Texel for texel what the
+        // full path writes. WGR_CANOPY_BAND=0 always uploads the whole map.
+        if valid && canopy_band_enabled()
+            && same_texture_size((self.skyvis_mask.width(), self.skyvis_mask.height()), (n, n))
+        {
+            if let (Some((old_n, old_top, old_cover)), Some((sv_w, sv_h, sv))) = (&self.canopy, &self.skyvis_last) {
+                if *old_n == n {
+                    let (top, cover) = (&top[..cells], &cover[..cells]);
+                    let t0 = std::time::Instant::now();
+                    let Some((z0, z1)) = canopy_dirty_rows(n, (old_top, old_cover), (top, cover)) else {
+                        return; // identical: nothing to recompose or upload
+                    };
+                    {
+                        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                        if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 8 == 0 {
+                            eprintln!("[wgr] terrain canopy band: rows {z0}..={z1} of {n} (diff {:.1} ms)",
+                                t0.elapsed().as_secs_f64() * 1000.0);
+                        }
+                    }
+                    let (sv_w, sv_h) = (*sv_w, *sv_h);
+                    // Only the band changed: copy those rows into the retained grid in place
+                    // rather than cloning both 16 MB arrays.
+                    let band = (z0 as usize * n as usize)..((z1 as usize + 1) * n as usize);
+                    let mut next = self.canopy.take().expect("checked above");
+                    next.1[band.clone()].copy_from_slice(&top[band.clone()]);
+                    next.2[band.clone()].copy_from_slice(&cover[band]);
+                    let texels = compose_skyvis_rows(sv_w, sv_h, sv, Some(&next), n, n, z0..z1 + 1,
+                                                     skyvis_compose_threads());
+                    let mut copy = texel_copy(&self.skyvis_mask);
+                    copy.origin = wgpu::Origin3d { x: 0, y: z0, z: 0 };
+                    queue.write_texture(
+                        copy,
+                        bytemuck::cast_slice(&texels),
+                        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(n * 8), rows_per_image: Some(z1 - z0 + 1) },
+                        wgpu::Extent3d { width: n, height: z1 - z0 + 1, depth_or_array_layers: 1 },
+                    );
+                    self.canopy = Some(next);
+                    return;
+                }
+            }
+        }
+        eprintln!("[wgr] terrain canopy: full upload (n {n}, valid {valid}, band {}, reuse {}, tex {}x{})",
+            canopy_band_enabled(), terrain_resource_reuse(), self.skyvis_mask.width(), self.skyvis_mask.height());
+        self.canopy = if valid {
             Some((n, top[..cells].to_vec(), cover[..cells].to_vec()))
+        } else {
+            None
         };
         self.upload_skyvis(device, queue);
     }
@@ -2136,9 +2192,26 @@ fn compose_skyvis_texels_on(
         Some((n, _, _)) => (*n, *n),
         None => (sv_w, sv_h),
     };
+    (w, h, compose_skyvis_rows(sv_w, sv_h, sv, canopy, w, h, 0..h, threads))
+}
+
+/// Rows `rows` of the composed sky-visibility image (w x h, 4 x f16 per texel), row-major. The
+/// whole image is rows 0..h; PERF-CANOPY-BAND recomposes only the band a canopy update changed.
+#[allow(clippy::too_many_arguments)]
+fn compose_skyvis_rows(
+    sv_w: u32,
+    sv_h: u32,
+    sv: &[f32],
+    canopy: Option<&(u32, Vec<f32>, Vec<f32>)>,
+    w: u32,
+    h: u32,
+    rows: std::ops::Range<u32>,
+    threads: usize,
+) -> Vec<u16> {
     let one = f32_to_f16_bits(1.0);
     let no_top = f32_to_f16_bits(-60000.0);
-    let mut out = vec![0u16; (w as usize) * (h as usize) * 4];
+    let band = rows.end.saturating_sub(rows.start);
+    let mut out = vec![0u16; (w as usize) * (band as usize) * 4];
     let row_len = (w as usize) * 4;
     let compose_row = |z: u32, row: &mut [u16]| {
         for x in 0..w {
@@ -2179,12 +2252,12 @@ fn compose_skyvis_texels_on(
     // 2048^2 texels on a native world, ~160 ms a time while objects stream in. Rows are
     // independent, so a large map is split across a few scoped threads; each texel gets the
     // same value either way. WGR_SKYVIS_COMPOSE_THREADS=1 composes on the calling thread.
-    if threads > 1 && h >= 256 && row_len > 0 {
-        let rows_per_chunk = (h as usize).div_ceil(threads);
+    if threads > 1 && band >= 256 && row_len > 0 {
+        let rows_per_chunk = (band as usize).div_ceil(threads);
         std::thread::scope(|scope| {
             for (chunk_index, chunk) in out.chunks_mut(rows_per_chunk * row_len).enumerate() {
                 let compose_row = &compose_row;
-                let first_row = (chunk_index * rows_per_chunk) as u32;
+                let first_row = rows.start + (chunk_index * rows_per_chunk) as u32;
                 scope.spawn(move || {
                     for (i, row) in chunk.chunks_mut(row_len).enumerate() {
                         compose_row(first_row + i as u32, row);
@@ -2194,15 +2267,53 @@ fn compose_skyvis_texels_on(
         });
     } else {
         for (z, row) in out.chunks_mut(row_len.max(1)).enumerate() {
-            compose_row(z as u32, row);
+            compose_row(rows.start + z as u32, row);
         }
     }
-    (w, h, out)
+    let _ = h;
+    out
+}
+
+/// PERF-CANOPY-BAND: the first and last row (inclusive) in which two n x n canopy grids differ,
+/// compared bit for bit; None when they are identical.
+fn canopy_dirty_rows(n: u32, old: (&[f32], &[f32]), new: (&[f32], &[f32])) -> Option<(u32, u32)> {
+    let row = n as usize;
+    let differs = |z: usize| {
+        let r = z * row..(z + 1) * row;
+        bytemuck::cast_slice::<f32, u32>(&old.0[r.clone()]) != bytemuck::cast_slice::<f32, u32>(&new.0[r.clone()])
+            || bytemuck::cast_slice::<f32, u32>(&old.1[r.clone()]) != bytemuck::cast_slice::<f32, u32>(&new.1[r])
+    };
+    let first = (0..n as usize).find(|&z| differs(z))?;
+    let last = (first..n as usize).rev().find(|&z| differs(z)).unwrap_or(first);
+    Some((first as u32, last as u32))
 }
 
 #[cfg(test)]
 mod skyvis_compose_tests {
     use super::compose_skyvis_texels_on;
+
+    // PERF-CANOPY-BAND: a recomposed band is exactly those rows of the full image, threaded or not,
+    // and the dirty-row finder brackets exactly the rows that changed.
+    #[test]
+    fn band_compose_matches_full_rows() {
+        let (sv_w, sv_h) = (173u32, 211u32);
+        let sv: Vec<f32> = (0..sv_w * sv_h).map(|i| (i.wrapping_mul(2654435761) % 1000) as f32 / 999.0).collect();
+        let n = 300u32;
+        let top: Vec<f32> = (0..n * n).map(|i| (i.wrapping_mul(40503) % 5000) as f32 * 0.1 - 50.0).collect();
+        let cover: Vec<f32> = (0..n * n).map(|i| ((i.wrapping_mul(7919) % 13) as f32 - 4.0) / 8.0).collect();
+        let canopy = (n, top.clone(), cover.clone());
+        let (_, _, full) = compose_skyvis_texels_on(sv_w, sv_h, &sv, Some(&canopy), 1);
+        for threads in [1usize, 4] {
+            let band = super::compose_skyvis_rows(sv_w, sv_h, &sv, Some(&canopy), n, n, 17..290, threads);
+            let row = (n as usize) * 4;
+            assert_eq!(band.as_slice(), &full[17 * row..290 * row]);
+        }
+        let mut top2 = top.clone();
+        top2[(40 * n + 7) as usize] += 1.0;
+        top2[(123 * n + 299) as usize] -= 2.0;
+        assert_eq!(super::canopy_dirty_rows(n, (&top, &cover), (&top2, &cover)), Some((40, 123)));
+        assert_eq!(super::canopy_dirty_rows(n, (&top, &cover), (&top, &cover)), None);
+    }
 
     // The threaded composition is the serial one, texel for texel, on a grid that takes the
     // bilinear path (sky-view and canopy grids of different sizes) and has empty cells.

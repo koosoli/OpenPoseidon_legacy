@@ -3240,6 +3240,21 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
 {
     if (!_renderer)
         return;
+    // PERF-HITCH: which setting push is slow. A moving camera showed 27-35 ms in this function on
+    // one frame in three (Wgpu slow block "settings="), and the block log cannot say which call.
+    // Each wrapped call over 4 ms is named, at most one line a second.
+    const auto timed = [](const char* what, auto&& call)
+    {
+        const auto t0 = std::chrono::steady_clock::now();
+        call();
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        static auto nextLog = std::chrono::steady_clock::time_point{};
+        if (ms >= 4.0 && std::chrono::steady_clock::now() >= nextLog)
+        {
+            nextLog = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+            LOG_INFO(Graphics, "Wgpu slow setting: {} {:.1f} ms", what, ms);
+        }
+    };
     if (p.suppressWorldDirty)
     {
         wgr_set_suppress_world_objects(_renderer, p.suppressWorld);
@@ -3335,7 +3350,7 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
     }
     if (p.grassParamsDirty)
     {
-        wgr_grass_set_params(_renderer, &p.grassParams);
+        timed("grass params", [&] { wgr_grass_set_params(_renderer, &p.grassParams); });
         p.grassParamsDirty = false;
     }
     if (p.cullParamsDirty)
@@ -3345,19 +3360,19 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
     }
     if (p.farParamsDirty)
     {
-        wgr_far_set_params(_renderer, p.farNearCutoff, p.farDistance, p.farPixelLimit, p.farEnabled);
+        timed("far params", [&] { wgr_far_set_params(_renderer, p.farNearCutoff, p.farDistance, p.farPixelLimit, p.farEnabled); });
         p.farParamsDirty = false;
     }
     if (p.canopyDirty)
     {
-        wgr_terrain_set_canopy(_renderer, p.canopyN, p.canopyTop.empty() ? nullptr : p.canopyTop.data(),
-                               p.canopyCover.empty() ? nullptr : p.canopyCover.data());
+        timed("canopy", [&] { wgr_terrain_set_canopy(_renderer, p.canopyN, p.canopyTop.empty() ? nullptr : p.canopyTop.data(),
+                               p.canopyCover.empty() ? nullptr : p.canopyCover.data()); });
         p.canopyDirty = false;
     }
     // REN-THR-013
     if (p.renderParamsDirty)
     {
-        wgr_set_render_params(_renderer, &p.renderParams);
+        timed("render params", [&] { wgr_set_render_params(_renderer, &p.renderParams); });
         p.renderParamsDirty = false;
     }
     if (p.skyExtrasDirty)
@@ -3388,27 +3403,27 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
     }
     if (p.skyRuntimeDirty)
     {
-        wgr_set_sky_runtime(_renderer, &p.skyRuntime);
+        timed("sky runtime", [&] { wgr_set_sky_runtime(_renderer, &p.skyRuntime); });
         p.skyRuntimeDirty = false;
     }
     if (p.terrainParamsDirty)
     {
-        wgr_terrain_set_params(_renderer, &p.terrainParams);
+        timed("terrain params", [&] { wgr_terrain_set_params(_renderer, &p.terrainParams); });
         p.terrainParamsDirty = false;
     }
     if (!p.snowData.empty())
     {
-        wgr_terrain_set_snow(_renderer, p.snowData.data(), static_cast<uint32_t>(p.snowData.size()));
+        timed("snow", [&] { wgr_terrain_set_snow(_renderer, p.snowData.data(), static_cast<uint32_t>(p.snowData.size())); });
         p.snowData.clear();
     }
     if (!p.mudData.empty())
     {
-        wgr_terrain_set_mud(_renderer, p.mudData.data(), static_cast<uint32_t>(p.mudData.size()));
+        timed("mud", [&] { wgr_terrain_set_mud(_renderer, p.mudData.data(), static_cast<uint32_t>(p.mudData.size())); });
         p.mudData.clear();
     }
     if (!p.mudFarData.empty())
     {
-        wgr_terrain_set_mud_far(_renderer, p.mudFarData.data(), static_cast<uint32_t>(p.mudFarData.size()));
+        timed("mud far", [&] { wgr_terrain_set_mud_far(_renderer, p.mudFarData.data(), static_cast<uint32_t>(p.mudFarData.size())); });
         p.mudFarData.clear();
     }
     if (p.mudWater >= 0.0f)
@@ -3418,7 +3433,7 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
     }
     if (!p.sandData.empty())
     {
-        wgr_terrain_set_sand(_renderer, p.sandData.data(), static_cast<uint32_t>(p.sandData.size()));
+        timed("sand", [&] { wgr_terrain_set_sand(_renderer, p.sandData.data(), static_cast<uint32_t>(p.sandData.size())); });
         p.sandData.clear();
     }
     if (p.terrainHolesDirty)
@@ -3466,7 +3481,7 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
     }
     if (p.waterParamsDirty)
     {
-        wgr_water_set_params(_renderer, &p.waterParams);
+        timed("water params", [&] { wgr_water_set_params(_renderer, &p.waterParams); });
         p.waterParamsDirty = false;
     }
     if (p.rainWaterDirty)
