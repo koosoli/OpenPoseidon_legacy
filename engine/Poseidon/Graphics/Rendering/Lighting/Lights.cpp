@@ -651,11 +651,18 @@ void LightSun::Recalculate(World* world)
 
     // RFG-195 (see the note at the ephemeris): mirror east-west on a native Reforger world, after
     // whichever sun path ran (the ephemeris or the legacy orbit model).
+    // RFG-214: OFF by default -- the mirror was wrong. Forcing Reforger's own logged sun vector
+    // AS LOGGED (POSEIDON_TEST_SUN_DIR) lights Everon's village facades exactly as Workbench does
+    // (sunlit, full plaster relief, parity pose "village"); x-negated it shades them, the owner's
+    // "facades have no detail, no normals". The unmirrored ephemeris is within 1.5 degrees of
+    // Reforger's azimuth at 11:00. The time mismatch that prompted RFG-195 was the harness date
+    // (--test-world-hour hard-codes 1985-05-11), fixed separately; mirrored, the sun also rose in
+    // the west. POSEIDON_ENFUSION_SUN_MIRROR=1 restores the mirror.
     {
         static const bool enfusionMirror = []
         {
             const char* v = std::getenv("POSEIDON_ENFUSION_SUN_MIRROR");
-            return !(v && v[0] == '0');
+            return v != nullptr && v[0] == '1';
         }();
         if (enfusionMirror && GLandscape != nullptr && GLandscape->GetEnfusionSurfaceCount() > 0)
         {
