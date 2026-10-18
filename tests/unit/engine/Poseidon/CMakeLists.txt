@@ -510,6 +510,9 @@ list(APPEND POSEIDON_TEST_SOURCES
     # DIAG-001: diagnostics ported from Malprave (JSON helpers, stuck detector, event writer, diag_step)
     Dev/Diag/test_op_diag.cpp
 
+    # NPC chat: reply contract, order whitelist, provider wire formats, key hygiene
+    Dev/NpcChat/test_npc_chat.cpp
+
     # Mission introspection
     Game/Mission/test_mission_info.cpp
 

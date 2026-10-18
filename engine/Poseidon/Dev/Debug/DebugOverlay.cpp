@@ -62,6 +62,9 @@
 #include <Poseidon/Dev/Diag/WeatherTab.hpp>
 #include <Poseidon/Dev/Diag/SmokeTab.hpp>
 #include <Poseidon/Dev/Diag/AudioTab.hpp>
+#include <Poseidon/Dev/Debug/DevPanelHome.hpp>
+#include <Poseidon/Dev/NpcChat/NpcChat.hpp>
+#include <Poseidon/Dev/NpcChat/NpcChatUi.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 3D overlay (--diag-draw)
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/UI/Settings/AspectRatio.hpp>
@@ -7448,6 +7451,13 @@ void DrawMouseTab()
 
 void DrawMainWindow()
 {
+    // NPC chat's "Compact: chat only" replaces the whole panel with its chat window until
+    // "Full dev panel" is pressed there.
+    if (Poseidon::NpcChat::CompactPanel())
+    {
+        Poseidon::NpcChat::DrawCompactPanel();
+        return;
+    }
     ImGui::SetNextWindowSize(ImVec2(560, 480), ImGuiCond_FirstUseEver);
     ImGui::Begin("Poseidon Dev Panel");
 
@@ -7505,8 +7515,14 @@ void DrawMainWindow()
         ImGui::EndPopup();
     }
 
-    if (ImGui::BeginTabBar("DevPanelTabs"))
+    if (ImGui::BeginTabBar("DevPanelTabs", ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_TabListPopupButton))
     {
+        // Index of every other tab, grouped, with one-click jumps (DevPanelHome.cpp).
+        if (Dev::PanelTabItem("Home"))
+        {
+            Poseidon::Dev::DrawHomeTab();
+            ImGui::EndTabItem();
+        }
         if (Dev::PanelTabItem("Zeus"))
         {
             DrawZeusTab();
@@ -7677,6 +7693,12 @@ void DrawMainWindow()
         if (Dev::PanelTabItem("Audio")) // the audio engine (Steam Audio / OpenAL) and HRTF (AudioTab.cpp)
         {
             Poseidon::Dev::DrawAudioTab();
+            ImGui::EndTabItem();
+        }
+        // EXPERIMENTAL: talk to / command NPCs through a language model (Dev/NpcChat).
+        if (Dev::PanelTabItem("NPC Chat"))
+        {
+            Poseidon::NpcChat::DrawTab();
             ImGui::EndTabItem();
         }
         if (Dev::PanelTabItem("Particles")) // smoke, fire and the emitters (SmokeTab.cpp)
@@ -7957,6 +7979,7 @@ void Shutdown()
 {
     if (!s_initialized)
         return;
+    Poseidon::NpcChat::Shutdown(); // joins the network worker; forgets in-memory API keys
     if (s_backend == RenderBackend::OpenGL3)
     {
         ImGui_ImplOpenGL3_Shutdown();
@@ -8165,6 +8188,14 @@ void ProcessEvent(const SDL_Event& event)
     }
     ImGui_ImplSDL3_ProcessEvent(&event);
 
+    // NPC chat hotkeys (open the chat box, hold to talk) work with the panel closed; while its
+    // chat box is open it owns the keyboard.
+    if (Poseidon::NpcChat::ProcessEvent(event))
+    {
+        s_zeusConsumeKeyboardEvent = true;
+        return;
+    }
+
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)
     {
         // Ctrl+Grave + F5 are dev-only hotkeys (toggle dev panel +
@@ -8297,6 +8328,7 @@ void NewFrame()
     // hands: without this the search could only ever be checked by a person.
     if (s_visible || Dev::PanelSearchPreseeded())
         DrawMainWindow();
+    Poseidon::NpcChat::DrawOverlay(s_visible);
 }
 
 void Render()
@@ -8379,6 +8411,8 @@ bool WantsKeyboard()
 {
     if (MultiplayerSession())
         return false;
+    if (s_initialized && Poseidon::NpcChat::WantsKeyboard())
+        return true;
     if (!s_initialized || (!s_visible && !s_zeusConsumeKeyboardEvent))
         return false;
     if (s_zeusConsumeKeyboardEvent)

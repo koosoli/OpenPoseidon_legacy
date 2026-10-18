@@ -4,6 +4,7 @@
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/Audio/Speaker.hpp>
+#include <Poseidon/Audio/GameVoiceMute.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Random/randomGen.hpp>
@@ -72,6 +73,8 @@ IWave* BasicSpeaker::Say(RString id, float pitch, bool loop)
     if (wave)
     {
         wave->SetKind(WaveSpeech);
+        if (GameVoicesMuted())
+            wave->SetVolume(0.0f); // still plays (the radio queue times on it), just silent
         if (loop)
         {
             wave->Repeat(1000);

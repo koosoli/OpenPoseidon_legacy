@@ -603,6 +603,7 @@ __attribute__((used)) static void (*_forceLinkGameStateExtTest)() = &InitModuleG
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Dev/Harness/HarnessServer.hpp>
 #include <Poseidon/Dev/Harness/HarnessBuiltins.hpp>
+#include <Poseidon/Dev/NpcChat/NpcChatHarness.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
 #include <Poseidon/Dev/Harness/HarnessPlayerTracker.hpp>
 #include <Poseidon/Dev/Harness/HarnessMissionStateTracker.hpp>
@@ -1396,6 +1397,8 @@ static std::unique_ptr<HarnessServer> CreateGameHarness()
     // Multiplayer PTT tests (triHoldKey / triReleaseKey) drive VoN
     // transmission via these commands.
     HarnessBuiltins::RegisterKeyInjection(*hs);
+    // NPC chat (experimental): npc_chat_configure / _say / _transcript / _report.
+    Poseidon::NpcChat::RegisterHarness(*hs);
 #if POSEIDON_DIAG
     // DIAG-001: diag_inspect, diag_pause, diag_step, diag_camera, ... (Dev/Diag/OpDiagHarness.cpp)
     Poseidon::Dev::OpDiag::RegisterHarness(*hs);

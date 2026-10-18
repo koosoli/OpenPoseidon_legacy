@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string>
+#include <vector>
+
 // PANEL SEARCH — a filter over the dev panel's controls, within the open tab.
 //
 // The design constraint that shapes everything here: a new setting must be
@@ -88,6 +91,11 @@ bool InputInt(const char* label, int* v, int step = 1, int stepFast = 100, int f
 /// a tab, so without this the search could only ever be photographed on
 /// whichever tab happens to be first.
 bool PanelTabItem(const char* label, bool* open = nullptr, int flags = 0);
+
+/// Select the tab with this label on the next frame (the Home tab's shortcuts).
+void RequestPanelTab(const char* label);
+/// Every tab label PanelTabItem has been asked for, in tab-bar order (filled as the bar draws).
+const std::vector<std::string>& PanelTabLabels();
 
 /// Pairs with ImGui::EndCombo exactly as ImGui::BeginCombo does: a filtered-out
 /// combo returns false, so the body -- and the EndCombo inside it -- is skipped.

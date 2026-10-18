@@ -15,6 +15,8 @@
 #include <imgui.h>
 
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
+#include <vector>
+#include <algorithm>
 #include <Poseidon/Dev/Diag/TerrainBrush.hpp>
 
 #include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
@@ -371,8 +373,31 @@ void PanelHeading(const char* text)
         ImGui::TextUnformatted(text);
 }
 
+namespace
+{
+std::string g_requestedTab;
+std::vector<std::string> g_tabLabels;
+} // namespace
+
+void RequestPanelTab(const char* label)
+{
+    g_requestedTab = label ? label : "";
+}
+
+const std::vector<std::string>& PanelTabLabels()
+{
+    return g_tabLabels;
+}
+
 bool PanelTabItem(const char* label, bool* open, int flags)
 {
+    if (std::find(g_tabLabels.begin(), g_tabLabels.end(), label) == g_tabLabels.end())
+        g_tabLabels.emplace_back(label);
+    if (!g_requestedTab.empty() && EqualsNoCase(label, g_requestedTab.c_str()))
+    {
+        flags |= ImGuiTabItemFlags_SetSelected;
+        g_requestedTab.clear();
+    }
     // One shot: after the first frame the user's clicks own the selection, so
     // this must not keep dragging them back to the requested tab. Any flags the
     // caller already passes (the Shadows/Memory jump-to one-shots) are kept.
