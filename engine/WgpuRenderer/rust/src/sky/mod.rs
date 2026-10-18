@@ -782,6 +782,25 @@ struct SkyUniform {
 // dirties the LUTs; per-frame celestial pushes do not.
 type LutKey = [f32; 14];
 
+fn sky_lut_tolerance() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("WGR_SKY_LUT_TOLERANCE").ok().and_then(|v| v.trim().parse::<f32>().ok())
+            .filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(0.002)
+    })
+}
+
+/// Whether any key component moved more than `tol` relative to the built one (exact when 0).
+fn lut_key_moved(built: &LutKey, now: &LutKey, tol: f32) -> bool {
+    built.iter().zip(now.iter()).any(|(a, b)| {
+        if tol <= 0.0 {
+            a != b
+        } else {
+            (a - b).abs() > tol * a.abs().max(b.abs()).max(1e-12)
+        }
+    })
+}
+
 fn lut_key(sky: &WgrSky) -> LutKey {
     [
         sky.rayleigh[0],
@@ -2594,7 +2613,12 @@ impl Sky {
         if earth_preview { adjusted_sky.params[2] = 6_378_137.0; }
         let sky = &adjusted_sky;
         let key = lut_key(sky);
-        if self.last_lut != Some(key) {
+        // PERF-SKY-LUT: the key is auto-derived from the sun's elevation every frame, so as game
+        // time runs it drifts by millionths and an EXACT compare rebuilt both LUTs every frame
+        // (0.28 ms GPU, Durras and village alike). Rebuilt now when any component has moved more
+        // than WGR_SKY_LUT_TOLERANCE (relative, default 0.002) from what the LUTs were built
+        // with -- a few seconds of game time apart, far below anything visible. 0 = exact.
+        if self.last_lut.is_none_or(|last| lut_key_moved(&last, &key, sky_lut_tolerance())) {
             self.last_lut = Some(key);
             self.lut_dirty = true;
         }

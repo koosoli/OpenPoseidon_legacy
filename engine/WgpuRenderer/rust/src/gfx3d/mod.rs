@@ -3376,6 +3376,12 @@ fn water_ripple_strength_from_env() -> f32 {
 ///
 /// Read through `env_f32`, which caches per name, so the value is fixed for the run — an A/B
 /// must be two runs of the same binary differing in exactly one term.
+/// PERF-R3: the shadow-caster loop's state tracking (WGR_SHADOW_STATE_TRACK=0 = re-set every bucket).
+pub(crate) fn shadow_state_track() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_SHADOW_STATE_TRACK").map(|v| v.trim() != "0").unwrap_or(true))
+}
+
 pub(crate) fn ambient_normal_mapped() -> f32 {
     env_f32("WGR_AMBIENT_NORMAL_MAPPED", 1.0).clamp(0.0, 1.0)
 }
@@ -8192,6 +8198,22 @@ impl Gfx3d {
             if let (Some((pipes, caster_bind)), Some(conform_bind), Some(plan)) =
                 (cpu, self.conform.bind.as_ref(), self.shadow_plan.get(c))
             {
+                // PERF-R3/R4 (docs/perf/AUDIT-20261017.md): the loop set the pipeline, four bind
+                // groups and both buffers for EVERY bucket. With state tracking a call is skipped
+                // when it would re-set what is already bound (wgpu state persists within the
+                // pass), and a rigid/baked caster binds its WHOLE vertex buffer and offsets by
+                // base_vertex instead of slicing per mesh (shadow_depth.wgsl reads no
+                // vertex_index), so consecutive casters share one binding. The VS-skinned fallback
+                // keeps its per-mesh slice (its slot-1 skin buffer is indexed from the mesh's own
+                // first vertex). Exact by construction; WGR_SHADOW_STATE_TRACK=0 = the old loop.
+                let track = shadow_state_track();
+                let mut last_pipe: *const wgpu::RenderPipeline = std::ptr::null();
+                let mut last_b1: (*const wgpu::BindGroup, u64) = (std::ptr::null(), u64::MAX);
+                let mut last_b2: *const wgpu::BindGroup = std::ptr::null();
+                let mut last_b3: *const wgpu::BindGroup = std::ptr::null();
+                let mut b4_set = false;
+                let mut ibuf_set = false;
+                let mut last_v0: (*const wgpu::Buffer, u64) = (std::ptr::null(), u64::MAX);
                 for bucket in plan {
                     let caster = &casters[bucket.repr as usize];
                     let Some(mesh) = self.meshes.get(KeyData::from_ffi(caster.mesh).into()) else {
@@ -8210,29 +8232,44 @@ impl Gfx3d {
                     } else {
                         None
                     };
-                    rp.set_pipeline(pipes.get(skin.is_some(), alpha));
+                    let pipe = pipes.get(skin.is_some(), alpha);
+                    if !track || !std::ptr::eq(pipe, last_pipe) {
+                        rp.set_pipeline(pipe);
+                        last_pipe = pipe;
+                    }
                     if let Some(skin) = skin {
                         let Some(palette_bind) = self.palette.bind.as_ref() else {
                             continue;
                         };
-                        rp.set_bind_group(
-                            1,
-                            palette_bind,
-                            &[(caster.palette_slot as u64 * self.palette.stride) as u32],
-                        );
+                        let off = caster.palette_slot as u64 * self.palette.stride;
+                        if !track || !std::ptr::eq(palette_bind, last_b1.0) || off != last_b1.1 {
+                            rp.set_bind_group(1, palette_bind, &[off as u32]);
+                            last_b1 = (palette_bind, off);
+                        }
                         rp.set_vertex_buffer(1, skin.slice(..));
                     } else {
                         // Whole-buffer storage bound once; each instance's slot travels as
                         // base_instance (read via @builtin(instance_index)) — no dynamic offset.
-                        rp.set_bind_group(1, caster_bind, &[]);
+                        let cb: &wgpu::BindGroup = caster_bind;
+                        if !track || !std::ptr::eq(cb, last_b1.0) || last_b1.1 != u64::MAX - 1 {
+                            rp.set_bind_group(1, cb, &[]);
+                            last_b1 = (cb, u64::MAX - 1);
+                        }
                     }
-                    rp.set_bind_group(
-                        2,
-                        textures.texture_bind(device, if alpha { caster.texture_id } else { 0 }),
-                        &[],
-                    );
-                    rp.set_bind_group(3, textures.sampler_bind(caster.sampler.index()), &[]);
-                    rp.set_bind_group(4, conform_bind, &[]);
+                    let b2 = textures.texture_bind(device, if alpha { caster.texture_id } else { 0 });
+                    if !track || !std::ptr::eq(b2, last_b2) {
+                        rp.set_bind_group(2, b2, &[]);
+                        last_b2 = b2;
+                    }
+                    let b3 = textures.sampler_bind(caster.sampler.index());
+                    if !track || !std::ptr::eq(b3, last_b3) {
+                        rp.set_bind_group(3, b3, &[]);
+                        last_b3 = b3;
+                    }
+                    if !track || !b4_set {
+                        rp.set_bind_group(4, conform_bind, &[]);
+                        b4_set = true;
+                    }
                     // Baked casters pull baked verts from the shared skinned buffer at the
                     // baked slice offset; rigid/VS-skinned pull from the geometry pool at the
                     // mesh's vbase. Sliced to that byte offset with base_vertex 0 (as in
@@ -8245,12 +8282,24 @@ impl Gfx3d {
                         ),
                         _ => (self.pool.vbuf(), mesh.alloc.vbase as u64 * BAKED_VERT_SIZE),
                     };
-                    rp.set_vertex_buffer(0, vbuf.slice(vert_off..));
-                    rp.set_index_buffer(self.pool.ibuf().slice(..), wgpu::IndexFormat::Uint32);
+                    // Whole buffer + base_vertex when tracking (and not the VS-skin fallback);
+                    // the old per-mesh slice otherwise.
+                    let whole = track && skin.is_none();
+                    let (bind_off, base_vertex) =
+                        if whole { (0u64, (vert_off / BAKED_VERT_SIZE) as i32) } else { (vert_off, 0i32) };
+                    let vb: &wgpu::Buffer = vbuf;
+                    if !track || !std::ptr::eq(vb, last_v0.0) || bind_off != last_v0.1 {
+                        rp.set_vertex_buffer(0, vb.slice(bind_off..));
+                        last_v0 = (vb, bind_off);
+                    }
+                    if !track || !ibuf_set {
+                        rp.set_index_buffer(self.pool.ibuf().slice(..), wgpu::IndexFormat::Uint32);
+                        ibuf_set = true;
+                    }
                     let first = mesh.alloc.ibase + caster.index_begin;
                     rp.draw_indexed(
                         first..(first + caster.index_count),
-                        0,
+                        base_vertex,
                         bucket.base..(bucket.base + bucket.count),
                     );
                 }
