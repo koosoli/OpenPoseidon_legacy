@@ -159,6 +159,7 @@ using namespace Dev;
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 
 #include <Poseidon/Core/resincl.hpp>
+#include <Poseidon/World/SeaSoundscape.hpp>
 
 namespace Poseidon
 {
@@ -1529,6 +1530,8 @@ void World::PerformSound(Entity* inside, float deltaT)
     {
         GSoundScene->SetEnvSound(envNames[i], envVols[i]);
     }
+    // (OP) Tidewater's surf and distant-surf bed (@OP_TidewaterWildlife; silent without it)
+    UpdateSeaSoundscape(camPos, 0.0f);
     GSoundScene->AdvanceEnvSounds();
 #endif
 }

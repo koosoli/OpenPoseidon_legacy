@@ -138,6 +138,12 @@ class Ship: public Transport
 	OLinkArray<Vehicle> _riders;
 	void CarryRiders(const Matrix4& before);
 
+	// (OP) Tidewater's boat sounds (SeaSoundscape.hpp): water lapping the hull at rest, rushing past it under way,
+	// chop slapping it
+	Ref<IWave> _twLap, _twRush, _twEngine;
+	float _twSlapT = 0;
+	float _twEngineOn = 0; // Tidewater's engine spool (0 off .. 1 running)
+
 	bool _hasDeck = false; // its model has a roadway LOD (counted in DeckShips)
 
 	public:

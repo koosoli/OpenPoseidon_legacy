@@ -35,6 +35,23 @@ MODEL = "humpback.p3d"
 SKIN = "whale_skin"
 FLESH = "whale_flesh"
 CHUNKS = 3  # whale_chunk1..3.p3d: what an explosion tears off (Whale.cpp)
+# Tidewater's mixer (SoundScape.js MIX): each sound's loudness (LUFS, momentary) in its reference situation
+SOUND_TARGETS = {  # name: (LUFS, at this distance in m)
+    "surf_crash": (-15, 10),  # a wave breaking 10 m away
+    "surf_wash": (-20, 5),  # the bore running up the sand, 5 m away
+    "surf_backwash": (-23, 5),  # the swash draining back down, 5 m away
+    "surf_far": (-31, 50),  # distant roar 50 m from the shore
+    "boat_engine": (-22, 3),  # the diesel at full rpm, at the helm (idle: -30, Ship.cpp)
+    "boat_rush": (-27, 3),  # water past the hull at ~9 m/s, at the helm
+    "boat_lap": (-34, 3),  # lapping on the hull, boat at rest, at the helm
+    "hull_slap": (-24, 3),  # a hard slam, at the helm
+    "whale_song": (-26, 30),  # underwater, 30 m from the whale
+    "whale_blow": (-20, 10),  # the blow at 10 m
+    "big_splash": (-11, 12),  # a breach coming down, at 12 m
+    "emerge": (-30, 8),  # water sheeting off the raised flukes, at 8 m
+    "gull": (-21, 10),  # a gull calling at 10 m (they call from 25-80 m)
+    "tern": (-25, 10),  # a tern at 10 m
+}
 MASS = 30000.0  # kg, an adult humpback
 # visual LOD resolutions (Tidewater switches at 48 m and 170 m)
 RESOLUTIONS = (1.0, 4.0, 14.0)
@@ -216,7 +233,23 @@ def chunk_model(seed, back_uv):
     return b"MLOD" + bytes([1, 1, 0, 0]) + struct.pack("<I", len(blobs)) + b"".join(blobs)
 
 
-def config(rig):
+def sound_classes(sounds):
+    """CfgTidewaterSounds (SeaSoundscape.cpp): each sound's files, their measured loudness and its mixer target."""
+    out = []
+    for name, s in sounds.items():
+        files = ", ".join(f'"\{PREFIX}\sound\{f}"' for f in s["files"])
+        out.append(f"""	class {name}
+	{{
+		files[] = {{{files}}};
+		lufs[] = {{{fmt(s["lufs"])}}};
+		target = {SOUND_TARGETS[name][0]};
+		distance = {SOUND_TARGETS[name][1]};
+	}};
+""")
+    return "".join(out)
+
+
+def config(rig, sounds):
     chunk_classes = "".join(f"""	class OP_TidewaterWhaleChunk{i + 1}: FxExploArmor1
 	{{
 		scope = 1;
@@ -273,6 +306,13 @@ class CfgVehicles
 	// pieces of a whale blown apart: the stock explosion debris' simulation (thrown, they splash and sink)
 	class FxExploArmor1;
 {chunk_classes}}};
+// Tidewater's sea sounds (CC0 field recordings, sound/CREDITS.md): SeaSoundscape.cpp, Ship.cpp, Whale.cpp. Each
+// sound's level at `distance` is target - lufs + reference (dB), Tidewater's mixer; SeaSoundscape.cpp turns it into
+// OFP's 3D volume (which is a reference distance: 30 m x sqrt(volume), falling off as 1/d beyond it)
+class CfgTidewaterSounds
+{{
+	reference = 0;
+{sound_classes(sounds)}}};
 """
 
 
@@ -292,7 +332,8 @@ def main():
     for i in range(CHUNKS):
         (args.out / f"whale_chunk{i + 1}.p3d").write_bytes(chunk_model(i + 1, back))
     (args.out / "textures.json").write_text(json.dumps({"DXT1": [SKIN, FLESH], "DXT5": []}, indent=1))
-    (args.out / "config.cpp").write_text(config(rig), newline="\n")
+    sounds = json.loads((args.source / "sound" / "sounds.json").read_text())
+    (args.out / "config.cpp").write_text(config(rig, sounds), newline="\n")
     print(f"{MODEL}: visual levels {[len(ix) for _, ix in levels]} triangles, K {rig['K']}, root {rig['root']}")
 
 

@@ -1,0 +1,194 @@
+{
+ "surf_far": {
+  "loop": true,
+  "files": [
+   "surf_far.ogg"
+  ],
+  "lufs": [
+   -23.0
+  ]
+ },
+ "boat_engine": {
+  "loop": true,
+  "files": [
+   "boat_engine.ogg"
+  ],
+  "lufs": [
+   -23.0
+  ]
+ },
+ "boat_lap": {
+  "loop": true,
+  "files": [
+   "boat_lap.ogg"
+  ],
+  "lufs": [
+   -32.2
+  ]
+ },
+ "boat_rush": {
+  "loop": true,
+  "files": [
+   "boat_rush.ogg"
+  ],
+  "lufs": [
+   -23.4
+  ]
+ },
+ "whale_song": {
+  "loop": true,
+  "files": [
+   "whale_song.ogg"
+  ],
+  "lufs": [
+   -25.5
+  ]
+ },
+ "surf_crash": {
+  "loop": false,
+  "files": [
+   "surf_crash_1.ogg",
+   "surf_crash_2.ogg",
+   "surf_crash_3.ogg",
+   "surf_crash_4.ogg",
+   "surf_crash_5.ogg",
+   "surf_crash_6.ogg",
+   "surf_crash_7.ogg"
+  ],
+  "lufs": [
+   -13,
+   -13.4,
+   -14.1,
+   -17,
+   -13,
+   -14,
+   -12.7
+  ]
+ },
+ "surf_wash": {
+  "loop": false,
+  "files": [
+   "surf_wash_1.ogg",
+   "surf_wash_2.ogg",
+   "surf_wash_3.ogg",
+   "surf_wash_4.ogg",
+   "surf_wash_5.ogg",
+   "surf_wash_6.ogg"
+  ],
+  "lufs": [
+   -12.4,
+   -11.3,
+   -16.5,
+   -13.7,
+   -14.5,
+   -22.3
+  ]
+ },
+ "surf_backwash": {
+  "loop": false,
+  "files": [
+   "surf_backwash_1.ogg",
+   "surf_backwash_2.ogg",
+   "surf_backwash_3.ogg",
+   "surf_backwash_4.ogg",
+   "surf_backwash_5.ogg",
+   "surf_backwash_6.ogg"
+  ],
+  "lufs": [
+   -13.1,
+   -17.7,
+   -22.1,
+   -16.6,
+   -14.4,
+   -15.9
+  ]
+ },
+ "hull_slap": {
+  "loop": false,
+  "files": [
+   "hull_slap_1.ogg",
+   "hull_slap_2.ogg",
+   "hull_slap_3.ogg",
+   "hull_slap_4.ogg",
+   "hull_slap_5.ogg"
+  ],
+  "lufs": [
+   -20.7,
+   -18.4,
+   -20.2,
+   -17.7,
+   -16.4
+  ]
+ },
+ "whale_blow": {
+  "loop": false,
+  "files": [
+   "whale_blow_1.ogg",
+   "whale_blow_2.ogg",
+   "whale_blow_3.ogg"
+  ],
+  "lufs": [
+   -13.3,
+   -14.2,
+   -14.4
+  ]
+ },
+ "big_splash": {
+  "loop": false,
+  "files": [
+   "big_splash_1.ogg",
+   "big_splash_2.ogg"
+  ],
+  "lufs": [
+   -15.6,
+   -18.7
+  ]
+ },
+ "emerge": {
+  "loop": false,
+  "files": [
+   "emerge_1.ogg"
+  ],
+  "lufs": [
+   -18.8
+  ]
+ },
+ "gull": {
+  "loop": false,
+  "files": [
+   "gull_1.ogg",
+   "gull_2.ogg",
+   "gull_3.ogg",
+   "gull_4.ogg",
+   "gull_5.ogg",
+   "gull_6.ogg"
+  ],
+  "lufs": [
+   -15.9,
+   -16.2,
+   -18.1,
+   -11.8,
+   -12.8,
+   -12.8
+  ]
+ },
+ "tern": {
+  "loop": false,
+  "files": [
+   "tern_1.ogg",
+   "tern_2.ogg",
+   "tern_3.ogg",
+   "tern_4.ogg",
+   "tern_5.ogg",
+   "tern_6.ogg"
+  ],
+  "lufs": [
+   -9.8,
+   -10.7,
+   -12.4,
+   -12,
+   -9,
+   -12.9
+  ]
+ }
+}

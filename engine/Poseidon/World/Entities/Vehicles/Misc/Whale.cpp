@@ -29,6 +29,8 @@
 #include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/World/Entities/Infantry/SwimView.hpp>
+#include <Poseidon/World/SeaSoundscape.hpp>
+#include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/World.hpp>
 
@@ -1138,6 +1140,10 @@ void Whale::Effects(float deltaT)
             e.velocityKind[3] = HydroWaterInteractionWhaleBlow;
             e.timeLifeFoamMass[3] = 4.2f;
             SubmitWaterInteraction(e);
+            // (Tidewater: a cetacean's breath pitched down as the humpback's)
+            if (Heard(p))
+                PlaySeaSound("whale_blow", p + VUp * 0.6f, VZero, (GRandGen.RandomValue() - 0.5f) * 3,
+                             0.72f + GRandGen.RandomValue() * 0.12f);
             if (WhaleDiag())
                 LOG_INFO(World, "Whale blow at {:.1f},{:.1f},{:.1f} (water {:.2f})", p.X(), p.Y(), p.Z(), b.water);
         }
@@ -1151,13 +1157,68 @@ void Whale::Effects(float deltaT)
         const Vector3 r = _rig->flipperRoot[b.slapSide];
         Vector3 p = Mirror(b.ToWorld(Vector3(r.X() + (b.slapSide == 0 ? 3.2f : -3.2f), r.Y(), r.Z() - 1.2f)));
         Splash(p, b.water, 6.0f, 2.0f, 2.5f);
+        if (Heard(p))
+            PlaySeaSound("big_splash", p, VZero, -8, 0.8f + GRandGen.RandomValue() * 0.1f);
     }
-    // a breach coming down on its side
+    // a breach: bursting clear of the surface, then coming down on its side (Tidewater's sounds for both)
+    const Vector3 root = Mirror(b.position);
+    const Vector3 surface(root.X(), b.water, root.Z());
+    if (b.breaches != _breachesSeen)
+    {
+        _breachesSeen = b.breaches;
+        if (Heard(root))
+            PlaySeaSound("big_splash", surface + VUp, VZero, -6, 0.6f + GRandGen.RandomValue() * 0.1f);
+    }
     if (b.splashes != _splashesSeen)
     {
         _splashesSeen = b.splashes;
-        Splash(Mirror(b.position), b.water, 90.0f, 4.0f, 6.0f);
+        Splash(root, b.water, 90.0f, 4.0f, 6.0f);
+        if (Heard(root))
+        {
+            PlaySeaSound("big_splash", surface + VUp * 0.5f, VZero, 0, 0.5f + GRandGen.RandomValue() * 0.08f);
+            PlaySeaSound("surf_crash", surface + VUp * 0.5f, VZero, 0, 0.72f + GRandGen.RandomValue() * 0.08f);
+        }
     }
+    // the fluke-up dive: water sheeting off the raised flukes, then the flukes slipping under
+    const Vector3 tail = Mirror(b.ToWorld(Vector3(0, 0, _rig->notchZ)));
+    if (b.flukeUp > 0.05f && _flukeSeen <= 0.05f && Heard(tail))
+        PlaySeaSound("emerge", Vector3(tail.X(), b.water + 2, tail.Z()), VZero, 0, 0.7f + GRandGen.RandomValue() * 0.1f);
+    if (b.flukeUp == 0 && _flukeSeen > 0.8f && Heard(tail))
+        PlaySeaSound("big_splash", Vector3(tail.X(), b.water, tail.Z()), VZero, -11, 0.78f + GRandGen.RandomValue() * 0.1f);
+    _flukeSeen = b.flukeUp;
+}
+
+// Tidewater plays the whale's one-shots only within 100 m of it
+bool Whale::Heard(Vector3Par at) const
+{
+    return GScene && GScene->GetCamera() && GScene->GetCamera()->Position().Distance2(at) < Square(100.0f);
+}
+
+// Its song: sung at depth while cruising (it stops to breathe), clear underwater, faint and dull from above, and only
+// near the whale (Tidewater's SoundScape._whale)
+void Whale::Sound(bool inside, float deltaT)
+{
+    if (!_brain || !GScene || !GScene->GetCamera())
+        return;
+    const Brain& b = *_brain;
+    const Vector3 cam = GScene->GetCamera()->Position();
+    const float d = cam.Distance(Position());
+    _sing += ((b.seq || b.dead ? (b.dead ? 0.0f : 0.1f) : 1.0f) - _sing) * (1 - std::exp(-deltaT / 4));
+    const float fade = 1 - std::clamp((d - 70) / 30, 0.0f, 1.0f);
+    if (fade <= 0 && !_song)
+        return;
+    if (!_song)
+        _song = OpenSeaLoop("whale_song", Position());
+    if (!_song)
+        return;
+    const bool under = cam.Y() < WaterAt(cam.X(), cam.Z()) - 0.2f;
+    _song->SetVolume(SeaSoundVolume("whale_song", _sing * fade * (under ? 1.0f : 0.1f)), 1.0f);
+    _song->SetPosition(Position(), Speed());
+}
+
+void Whale::UnloadSound()
+{
+    _song.Free();
 }
 
 void Whale::Simulate(float deltaT, SimulationImportance prec)

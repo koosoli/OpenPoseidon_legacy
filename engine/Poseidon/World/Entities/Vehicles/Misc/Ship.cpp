@@ -32,6 +32,8 @@
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <cstdint>
+#include <Poseidon/World/SeaSoundscape.hpp>
+#include <Random/randomGen.hpp>
 
 #pragma warning(disable : 4355)
 #pragma warning(disable : 4065)
@@ -261,16 +263,78 @@ void Ship::Sound(bool inside, float deltaT)
 {
     _turret.Sound(Type()->_turret, inside, deltaT, *this, Speed());
     base::Sound(inside, deltaT);
+    // (OP) Tidewater's hull sounds for the boat that carries its hull (SoundScape.js: lapping at rest, water rushing
+    // past with speed, chop slapping the hull while running)
+    if (Type()->GetTidewaterHull().valid)
+    {
+        const auto smooth = [](float a, float b, float x)
+        {
+            const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
+            return t * t * (3 - 2 * t);
+        };
+        const bool afloat = !_isDead && _sink <= 0.5f;
+        const float sp = Speed().Size();
+        // the engine: one recording of a marine diesel, pitched and opened up with rpm (Tidewater: -30 LUFS idle,
+        // -22 at full rpm at the helm; spooling up in ~1/3 s, down in ~1 s) -- in place of OFP's ship engine
+        // (GetEngineVol is 0 while this plays)
+        const bool on = !_engineOff && !_isDead;
+        _twEngineOn += ((on ? 1.0f : 0.0f) - _twEngineOn) * (1 - std::exp(-deltaT * (on ? 3.0f : 1.2f)));
+        if (!_twEngine)
+            _twEngine = OpenSeaLoop("boat_engine", Position());
+        if (_twEngine)
+        {
+            const float rpm = std::clamp(_tw.rpm, 0.0f, 1.0f);
+            const float db = (-30.0f + 8.0f * std::pow(rpm, 0.8f)) - (-22.0f); // relative to the full-rpm level
+            _twEngine->SetVolume(SeaSoundVolume("boat_engine", std::pow(10.0f, db / 20.0f) * _twEngineOn),
+                                 (0.8f + 0.85f * rpm) * (0.75f + 0.25f * _twEngineOn));
+            _twEngine->SetPosition(Position(), Speed());
+        }
+        if (!_twLap)
+            _twLap = OpenSeaLoop("boat_lap", Position());
+        if (!_twRush)
+            _twRush = OpenSeaLoop("boat_rush", Position());
+        if (_twLap)
+        {
+            _twLap->SetVolume(afloat ? SeaSoundVolume("boat_lap", 1 - smooth(1.5f, 5.0f, sp)) : 0.0f, 1.0f);
+            _twLap->SetPosition(Position(), Speed());
+        }
+        if (_twRush)
+        {
+            _twRush->SetVolume(afloat ? SeaSoundVolume("boat_rush", smooth(0.4f, 9.0f, sp)) : 0.0f,
+                               0.85f + 0.02f * std::min(sp, 12.0f));
+            _twRush->SetPosition(Position(), Speed());
+        }
+        if (afloat && sp > 1.2f)
+        {
+            _twSlapT -= deltaT;
+            if (_twSlapT <= 0)
+            {
+                const float k = smooth(1.2f, 9.0f, sp);
+                _twSlapT = 0.3f + GRandGen.RandomValue() * (2.2f - 1.6f * k);
+                PlaySeaSound("hull_slap", Position(), Speed(), -14 + 8 * k + (GRandGen.RandomValue() - 0.5f) * 4,
+                             0.85f + GRandGen.RandomValue() * 0.3f);
+            }
+        }
+    }
 }
 
 void Ship::UnloadSound()
 {
     base::UnloadSound();
     _turret.UnloadSound();
+    _twLap.Free();
+    _twRush.Free();
+    _twEngine.Free();
 }
 
 float Ship::GetEngineVol(float& freq) const
 {
+    // (OP) Tidewater's boat runs its own diesel (Ship::Sound)
+    if (_twEngine)
+    {
+        freq = 1;
+        return 0;
+    }
     float thrust = (fabs(_thrustL) + fabs(_thrustR)) * 0.5;
     freq = _randFrequency * 1.2 * (thrust * 0.7 + 0.5);
     return fabs(thrust) * 0.5 + 0.5;

@@ -41,3 +41,18 @@ skin and `config.cpp` with `scripts/default-content/generate_tidewater_whale.py`
 
 Tidewater's other wildlife (fish schools, reef life, seabirds, shorebirds, crabs) is already drawn by the
 renderer's Tidewater ocean and needs no pack.
+
+## Sea sounds
+
+`source/sound/` holds Tidewater's sea recordings: 42 field recordings from Freesound in Tidewater, all
+CC0 1.0; the ones used here and their recordists are in `source/sound/CREDITS.md` (shipped in the PBO
+too). `scripts/default-content/export_tidewater_sounds.py` cuts Tidewater's sprite sheets into one file
+per slice and re-encodes its Opus loops as Vorbis (the engine decodes Vorbis only). Played by
+`SeaSoundscape.cpp`, `Ship.cpp` and `Whale.cpp` at Tidewater's mixer levels (config `CfgTidewaterSounds`):
+
+* surf wave by wave on the nearest shores (crash where it breaks, wash, backwash) and the distant surf as
+  3D loops on the nearest shore, so the sea is heard from where it is;
+* gulls and terns calling over the shore by day;
+* the lobster boat's diesel (pitched with rpm, in place of OFP's ship engine), water lapping and rushing
+  past the hull, chop slapping it;
+* the humpback's blow, breach, splash, fluke-up dive and its song (clear underwater, faint above).

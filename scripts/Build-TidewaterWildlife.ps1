@@ -34,8 +34,15 @@ foreach ($format in @('DXT1','DXT5')) {
         $expected+="$name.paa"
     }
 }
+# Tidewater's sea sounds (CC0 field recordings; their credits go along)
+New-Item -ItemType Directory -Force "$stage/sound" | Out-Null
+foreach ($sound in Get-ChildItem -LiteralPath "$source/source/sound" -File) {
+    if ($sound.Extension -notin @('.ogg', '.md')) {continue}
+    Copy-Item -LiteralPath $sound.FullName -Destination "$stage/sound/$($sound.Name)"
+}
+$expected+='sound'
 foreach ($file in Get-ChildItem -LiteralPath $stage -Force) {
-    if ($file.PSIsContainer -or $file.Name -notin $expected) {throw "Unexpected Tidewater wildlife staging file: $($file.FullName)"}
+    if (($file.PSIsContainer -and $file.Name -ne 'sound') -or $file.Name -notin $expected) {throw "Unexpected Tidewater wildlife staging file: $($file.FullName)"}
 }
 & $tools pbo pack $stage "$pack/AddOns/op_tidewater_wildlife.pbo" --prefix op_tidewater_wildlife
 if ($LASTEXITCODE -ne 0) {throw 'Tidewater wildlife packaging failed'}

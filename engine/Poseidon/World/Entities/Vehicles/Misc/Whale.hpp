@@ -33,8 +33,8 @@ class Whale: public Thing
 	void Animate(int level) override;
 	void Deanimate(int level) override;
 
-	void Sound(bool inside, float deltaT) override {}
-	void UnloadSound() override {}
+	void Sound(bool inside, float deltaT) override;
+	void UnloadSound() override;
 
 	USE_CASTING(base)
 
@@ -57,6 +57,12 @@ class Whale: public Thing
 	void TearChunks(Vector3Par at, float val);
 	float _bleed = 0; // blood the wounds still lose (stain amount a second), dying away
 	float _bleedClock = 0;
+	// (OP) Tidewater's whale sounds (SeaSoundscape.hpp)
+	bool Heard(Vector3Par at) const;
+	int _breachesSeen = 0;
+	float _flukeSeen = 0;
+	float _sing = 0;
+	Ref<IWave> _song;
 };
 
 } // namespace Poseidon
