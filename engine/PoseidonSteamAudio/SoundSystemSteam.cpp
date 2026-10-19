@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <string.h>
 
 // Global config singleton (defined in Foundation/Platform/Globals.cpp).
@@ -106,6 +107,47 @@ const char* PresetForEnvironment(SoundEnvironmentType type)
             return "room";
     }
     return "generic";
+}
+
+float EnvFloat(const char* name, float fallback, float lo, float hi)
+{
+    const char* v = std::getenv(name);
+    return v && *v ? std::clamp(static_cast<float>(std::atof(v)), lo, hi) : fallback;
+}
+
+// The environment's scaled reverb, as the OpenAL backend computes it (ComputeEFXTarget in
+// SoundSystemOAL.cpp). The port took only the DX8 size scaling, which multiplies the preset
+// decay by size/defaultSize: "city" (authored for 7.5) at the classifier's 45 for a village
+// cell is x6 -- an 8.9 s tail on every shot -- and a forest cell (city preset, size 38) is
+// 7.5 s. AUD-010 had capped exactly that on OpenAL on 2026-09-06 ("alles klingt nach Echo");
+// Steam Audio, made the default on 2026-10-12, brought the uncapped scaling back (owner:
+// strange echoes). Outdoors the tail is capped and the reflection/late energy halved, with
+// the same levers as OpenAL (POSEIDON_EAX_OUTDOOR_DECAY_MAX seconds, POSEIDON_EAX_OUTDOOR_GAIN,
+// 0 = no outdoor reverb); interiors keep the preset's authored density.
+// POSEIDON_STEAM_REVERB_UNCAPPED=1 restores the port's uncapped scaling.
+EFXEAXREVERBPROPERTIES EnvironmentReverb(const EFX::PresetEntry& entry, SoundEnvironmentType type, float size)
+{
+    EFXEAXREVERBPROPERTIES p = EFX::ScaledPreset(entry, size);
+    static const bool uncapped = []
+    {
+        const char* v = std::getenv("POSEIDON_STEAM_REVERB_UNCAPPED");
+        return v != nullptr && v[0] != '\0' && v[0] != '0';
+    }();
+    if (uncapped)
+        return p;
+    if (type == SERoom)
+    {
+        // The room size lives in the "room" preset's own scale (2..8), not the outdoor 2..100
+        // one, so size/100 would hand the reverb a near-zero density.
+        p.flDensity = entry.props.flDensity;
+        return p;
+    }
+    static const float outdoorDecayMax = EnvFloat("POSEIDON_EAX_OUTDOOR_DECAY_MAX", 1.5f, 0.1f, 20.0f);
+    static const float outdoorGain = EnvFloat("POSEIDON_EAX_OUTDOOR_GAIN", 0.5f, 0.0f, 1.0f);
+    p.flDecayTime = std::min(p.flDecayTime, outdoorDecayMax);
+    p.flReflectionsGain *= outdoorGain;
+    p.flLateReverbGain *= outdoorGain;
+    return p;
 }
 } // namespace
 
@@ -382,9 +424,10 @@ void SoundSystemSteam::ApplyReverb()
     const EFX::PresetEntry* entry = EFX::FindPreset(PresetForEnvironment(_env.type));
     if (!entry)
         return;
-    const EFXEAXREVERBPROPERTIES props = EFX::ScaledPreset(*entry, _env.size);
+    const EFXEAXREVERBPROPERTIES props = EnvironmentReverb(*entry, _env.type, _env.size);
     _mixer->SetReverb(&props);
-    LOG_DEBUG(Audio, "Reverb: environment type={} size={}", static_cast<int>(_env.type), _env.size);
+    LOG_DEBUG(Audio, "Reverb: environment type={} size={} decay={:.2f}s late={:.3f}", static_cast<int>(_env.type),
+              _env.size, props.flDecayTime, props.flLateReverbGain);
 }
 
 void SoundSystemSteam::SetEnvironment(const SoundEnvironment& env)
