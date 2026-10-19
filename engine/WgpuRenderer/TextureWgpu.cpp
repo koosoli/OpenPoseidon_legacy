@@ -1039,13 +1039,17 @@ TextureWgpu::~TextureWgpu()
 // FLY-001: create this texture's GPU image without waiting for the render thread when the
 // producer window is closed (the render thread mid-frame): through the renderer's texture
 // ingress, with a lease from its pool. Window open, no ingress, or a refusal: the ordinary
-// call, which opens the window first. Opt-in until measured: WGR_TEXTURE_INGRESS=1.
+// call, which opens the window first.
+// ON by default since 2026-10-19 (WGR_TEXTURE_INGRESS=0 = always the window). Measured on a
+// 15 m/s Everon flight, two runs per arm: slow shape installs (>= 30 ms, almost all of it
+// waiting for the window) 84/95 -> 44/40, slow swaps 24/28 -> 21/21, GPU frame unchanged,
+// capture crops identical and the same fallback-texture count in both logs.
 uint64_t TextureWgpu::CreateGpuTexture(WgrRenderer* r, uint32_t w, uint32_t h, int32_t format, uint32_t mips,
                                        uint32_t flags, const uint8_t* data, uint32_t size)
 {
     static const bool ingressOn = [] {
         const char* value = std::getenv("WGR_TEXTURE_INGRESS");
-        return value && value[0] == '1';
+        return !(value && value[0] == '0');
     }();
     static WgrRenderer* ingressOwner = nullptr;
     static const WgrTextureIngress* ingress = nullptr;
