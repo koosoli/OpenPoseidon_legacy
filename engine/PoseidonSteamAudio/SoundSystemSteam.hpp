@@ -6,6 +6,7 @@
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
+#include <PoseidonSteamAudio/Occlusion.hpp>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -106,6 +107,18 @@ class SoundSystemSteam : public IAudioSystem
     int _occlQueries = 0;
     int _occlCommits = 0;
     uint32_t _occlReportMs = 0;
+    int _occlCacheHits = 0;
+    double _occlSlowestMs = 0.0;
+    float _occlSlowestDist = 0.f;
+    struct OcclusionCacheEntry
+    {
+        int32_t k[6] = {};
+        uint32_t timeMs = 0;
+        SteamAudio::OcclusionResult result;
+        bool valid = false;
+    };
+    OcclusionCacheEntry _occlCache[32];
+    unsigned _occlCacheNext = 0;
     void ApplyListenerGain();
     void UpdateDeviceState();
     void ProcessPreview();

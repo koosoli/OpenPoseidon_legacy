@@ -380,6 +380,7 @@ void SoundSystemSteam::UpdateOcclusion()
     if (!SteamAudio::OcclusionEnabled())
         return;
     constexpr int kOcclusionPerCommit = 24;
+    constexpr double kOcclusionBudgetMs = 0.15;
     constexpr uint32_t kOcclusionPeriodMs = 100;
     static const bool logChanges = []
     {
@@ -387,20 +388,60 @@ void SoundSystemSteam::UpdateOcclusion()
         return v && *v && v[0] != '0';
     }();
 
-    const auto t0 = std::chrono::steady_clock::now();
+    using Clock = std::chrono::steady_clock;
+    const auto t0 = Clock::now();
     const uint32_t now = GlobalTickCount();
+    // One soldier's footsteps, breath and shots are separate waves at almost the same place:
+    // answers are shared between sources within 2 m (listener within 1 m) for 150 ms.
+    auto key = [](float v, float cell) { return static_cast<int32_t>(std::floor(v / cell)); };
+    const int32_t lx = key(_listenerPos.X(), 1.f), ly = key(_listenerPos.Y(), 1.f), lz = key(_listenerPos.Z(), 1.f);
     int queries = 0;
     for (auto* wave : _waves)
     {
-        if (queries >= kOcclusionPerCommit)
-            break;
         if (!wave || !wave->_is3D || !wave->_state.posValid || !(wave->_playing || wave->_wantPlaying))
             continue;
-        // A wave about to start is always answered now; a playing one at its own ~10 Hz.
-        if (!wave->_wantPlaying && static_cast<int32_t>(now - wave->_occlNextMs) < 0)
-            continue;
-        const SteamAudio::OcclusionResult r = SteamAudio::ComputeOcclusion(_listenerPos, wave->_position);
-        ++queries;
+        // A wave about to start is always answered now; a playing one at its own ~10 Hz, within
+        // the frame's time budget (the rest wait for the next frame).
+        if (!wave->_wantPlaying)
+        {
+            if (static_cast<int32_t>(now - wave->_occlNextMs) < 0)
+                continue;
+            if (queries >= kOcclusionPerCommit ||
+                std::chrono::duration<double, std::milli>(Clock::now() - t0).count() > kOcclusionBudgetMs)
+                continue;
+        }
+        const int32_t sx = key(wave->_position.X(), 2.f), sy = key(wave->_position.Y(), 2.f),
+                      sz = key(wave->_position.Z(), 2.f);
+        SteamAudio::OcclusionResult r;
+        OcclusionCacheEntry* hit = nullptr;
+        for (auto& e : _occlCache)
+        {
+            if (e.valid && static_cast<int32_t>(now - e.timeMs) < 150 && e.k[0] == sx && e.k[1] == sy &&
+                e.k[2] == sz && e.k[3] == lx && e.k[4] == ly && e.k[5] == lz)
+            {
+                hit = &e;
+                break;
+            }
+        }
+        if (hit)
+        {
+            r = hit->result;
+            ++_occlCacheHits;
+        }
+        else
+        {
+            const auto q0 = Clock::now();
+            r = SteamAudio::ComputeOcclusion(_listenerPos, wave->_position);
+            const double qms = std::chrono::duration<double, std::milli>(Clock::now() - q0).count();
+            if (qms > _occlSlowestMs)
+            {
+                _occlSlowestMs = qms;
+                _occlSlowestDist = _listenerPos.Distance(wave->_position);
+            }
+            ++queries;
+            OcclusionCacheEntry& e = _occlCache[_occlCacheNext++ % std::size(_occlCache)];
+            e = OcclusionCacheEntry{{sx, sy, sz, lx, ly, lz}, now, r, true};
+        }
         // Spread the refreshes so a volley of shots does not re-query in the same frame.
         wave->_occlNextMs = now + kOcclusionPeriodMs + (reinterpret_cast<uintptr_t>(wave) >> 4) % 23;
         if (logChanges && (r.building != wave->_occlBuilding || std::fabs(r.terrain - wave->_occlTerrain) > 0.2f))
@@ -430,12 +471,15 @@ void SoundSystemSteam::UpdateOcclusion()
     {
         if (_occlReportMs != 0 && _occlCommits > 0)
         {
-            LOG_INFO(Audio, "Occlusion: {} queries in {} frames, main thread {:.3f} ms/frame avg, {:.3f} ms max",
-                     _occlQueries, _occlCommits, _occlCostMs / _occlCommits, _occlMaxMs);
+            LOG_INFO(Audio,
+                     "Occlusion: {} queries (+{} cached) in {} frames, main thread {:.3f} ms/frame avg, {:.3f} ms "
+                     "max; slowest query {:.3f} ms at {:.0f} m",
+                     _occlQueries, _occlCacheHits, _occlCommits, _occlCostMs / _occlCommits, _occlMaxMs,
+                     _occlSlowestMs, _occlSlowestDist);
         }
         _occlReportMs = now;
-        _occlCostMs = _occlMaxMs = 0.0;
-        _occlQueries = _occlCommits = 0;
+        _occlCostMs = _occlMaxMs = _occlSlowestMs = 0.0;
+        _occlQueries = _occlCommits = _occlCacheHits = 0;
     }
 }
 
