@@ -293,9 +293,34 @@ struct TwSurface {
     rotor_domain: [f32; 4],
     rotor_control: [f32; 4],
     rotor_sources: [[f32; 4]; rotor_wash::SOURCES],
+    // the hulls that keep the sea out (Tidewater's boat), 4 lanes per wake boat: waterline origin xyz +
+    // half beam, forward xyz + stern, up xyz + bow, sheer aft / bow + on (hull_mask_lanes)
+    hulls: [[f32; 4]; wake::SLOTS * 4],
 }
 
-const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (20 + cdlod::LEVELS + wake::SLOTS * 4 + impacts::SURFACE_SLOTS * 2 + rotor_wash::SOURCES));
+const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (20 + cdlod::LEVELS + wake::SLOTS * 4 + impacts::SURFACE_SLOTS * 2 + rotor_wash::SOURCES + wake::SLOTS * 4));
+
+/// The water mask of the wake boats whose producer flagged one (`tidewater_wake` flags bit 2): no sea
+/// surface is drawn inside these hulls (tw_water.wgsl `insideHull`). Lanes per boat as `TwSurface::hulls`.
+fn hull_mask_lanes(p: &WgrWaterParams) -> [[f32; 4]; wake::SLOTS * 4] {
+    let mut out = [[0.0f32; 4]; wake::SLOTS * 4];
+    for i in 0..wake::SLOTS {
+        let l = &p.tidewater_wake[i * 8..i * 8 + 8];
+        let flags = l[2][3] as u32;
+        if flags & 1 == 0 || flags & 4 == 0 || !l.iter().flatten().all(|v| v.is_finite()) {
+            continue;
+        }
+        let (stern, bow) = (l[4][3], l[5][3]);
+        if !(bow > stern) || !(l[2][0] > 0.0) {
+            continue;
+        }
+        out[i * 4] = [l[0][0], l[3][0], l[0][1], l[2][0]];
+        out[i * 4 + 1] = [l[4][0], l[4][1], l[4][2], stern];
+        out[i * 4 + 2] = [l[5][0], l[5][1], l[5][2], bow];
+        out[i * 4 + 3] = [l[7][2], l[7][3], 1.0, 0.0];
+    }
+    out
+}
 
 /// Whether the shore simulation runs (Water tab, and only once the shore waves have a field).
 /// Breaker spray on (W4a): emission gain and sprite intensity above zero (the caller also needs
@@ -442,6 +467,7 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         rotor_domain: f.rotor.domain,
         rotor_control: f.rotor.control,
         rotor_sources: f.rotor.sources,
+        hulls: hull_mask_lanes(p),
     }
 }
 
@@ -1698,7 +1724,8 @@ mod tests {
         assert_eq!(std::mem::offset_of!(TwSurface, rotor_domain), 800);
         assert_eq!(std::mem::offset_of!(TwSurface, rotor_control), 816);
         assert_eq!(std::mem::offset_of!(TwSurface, rotor_sources), 832);
-        assert_eq!(std::mem::size_of::<TwSurface>(), 960);
+        assert_eq!(std::mem::offset_of!(TwSurface, hulls), 960);
+        assert_eq!(std::mem::size_of::<TwSurface>(), 1088);
     }
 
     #[test]

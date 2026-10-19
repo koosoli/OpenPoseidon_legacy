@@ -490,13 +490,16 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
         float invMaxDist2 = 0;
         if (now)
         {
-            if (Speed().SquareSize() > Square(1.5))
+            // (a man standing on this vehicle's own deck boards it under way, facing any way: Ship::CarryRiders)
+            const Man* rider = dyn_cast<const Man>(person);
+            const bool aboard = rider && rider->PlatformObject() == this;
+            if (!aboard && Speed().SquareSize() > Square(1.5))
             {
                 return;
             }
             // require soldier to be in front of the vehicle
             Vector3Val relPos = person->PositionWorldToModel(Position());
-            if (relPos.Z() <= 0)
+            if (!aboard && relPos.Z() <= 0)
             {
                 return;
             }

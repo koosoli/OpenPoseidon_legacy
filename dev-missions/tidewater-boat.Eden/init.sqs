@@ -1,0 +1,9 @@
+; Tidewater's lobster boat (@OP_TidewaterBoat) off the Everon bay beach. The player starts at the helm.
+; W/S throttle (E full ahead), A/D rudder. Action menu: get out onto the deck, walk it, get back in.
+setViewDistance 1500
+boat = "OP_TidewaterBoat" createVehicle [9950, 1330, 0]
+boat setDir 180
+player moveInDriver boat
+~2
+hint "Tidewater boat: W/S throttle, E full ahead, A/D rudder. Action menu: get out onto the deck, get back in at the helm."
+exit

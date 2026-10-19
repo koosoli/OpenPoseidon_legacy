@@ -29,6 +29,7 @@ DEFINE_ENUM_END(MoveId)
 
 class MotionType;
 class AIGroup;
+class Ship;
 struct CargoWeaponSeat;
 
 float SoldierStealthStanceExposure(AIGroup* group, bool holdingFire, int x, int z);
@@ -695,6 +696,8 @@ class Man: public Person
 	bool _showHead;
 	
 	OLink<Building> _ladderBuilding;
+	// the boat whose deck (roadway LOD) he stands on: it carries him as it moves (Ship::CarryRiders)
+	OLink<Vehicle> _platform;
 	int _ladderIndex;
 	float _ladderPosition; // 0..1 on ladder, 0 = bottom
 	int _ladderAIDir;
@@ -1121,6 +1124,12 @@ class Man: public Person
 	bool IsDiving() const {return _swimming && _diving;}
 	void SetSwimVerticalWanted(float v);
 	bool UpdateSwimming();
+	// standing on a moving deck: register with its boat, or leave it (SoldierOldSim.cpp)
+	void UpdatePlatform();
+	// the boat moved by delta with him on its deck; false once he no longer rides it
+	bool CarryOnPlatform(Ship* ship, const Matrix4& delta);
+	bool OnPlatform() const {return _platform.GetLink() != nullptr;}
+	const Object *PlatformObject() const {return _platform.GetLink();}
 	void SimSwimMovement(float deltaT, SimulationImportance prec);
 	void SimDive(float deltaT, float surface, Vector3& pos);
 	void UpdateBreath(float deltaT, float headDepth);

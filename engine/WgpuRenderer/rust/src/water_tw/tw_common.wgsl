@@ -33,6 +33,7 @@ struct TwSurface {
     rotorDomain: vec4<f32>,       // camera interaction domain: min XZ, size, reciprocal
     rotorControl: vec4<f32>,      // frozen water clock, source count, reserved
     rotorSources: array<vec4<f32>, 8>, // actual rotor-only world XZ, radius, strength
+    hulls: array<vec4<f32>, 8>,   // hulls that keep the sea out, 4 lanes each (mod.rs hull_mask_lanes)
 };
 
 struct ConformParams {

@@ -240,7 +240,10 @@ constexpr std::array<const char*, 4> kZeusSideNames = {"West", "East", "Resistan
 constexpr std::array<TargetSide, 4> kZeusSides = {TWest, TEast, TGuerrila, TCivilian};
 constexpr std::array<const char*, 6> kZeusUnitPresets = {"SoldierWB", "SoldierEB", "SoldierGB",
                                                          "OfficerW",  "OfficerE",  "Civilian"};
-constexpr std::array<const char*, 7> kZeusVehiclePresets = {"Jeep", "UAZ", "M1A1", "T72", "BMP", "UH60", "Mi17"};
+constexpr std::array<const char*, 9> kZeusVehiclePresets = {"Jeep", "UAZ", "M1A1", "T72", "BMP", "UH60", "Mi17",
+                                                            "BoatW", "OP_TidewaterBoat"};
+// Tidewater's lobster boat (@OP_TidewaterBoat, generate_tidewater_boat.py)
+constexpr const char* kTidewaterBoatClass = "OP_TidewaterBoat";
 
 bool ZeusWorldAvailable()
 {
@@ -1033,6 +1036,43 @@ void SpawnZeusSelection()
     s_zeusStatus = "Spawned " + std::to_string(spawned) + " / " + std::to_string(count) + " " + s_zeusClassName + ".";
 }
 
+// The Tidewater boat on the sea in front of the camera (the free-fly camera, else the player): the first point
+// along the view, 12 m out or more, with 2 m of water under the whole hull, its bow pointing away.
+void SpawnTidewaterBoatAhead()
+{
+    if (!ZeusWorldAvailable())
+    {
+        s_zeusStatus = "Spawning requires a loaded world.";
+        return;
+    }
+    Object* source = s_zeusCamera ? static_cast<Object*>(s_zeusCamera) : GWorld->CameraOn();
+    Vector3 dir = source->Direction();
+    dir[1] = 0;
+    if (dir.SquareSize() < 1e-4f)
+        dir = VForward;
+    dir.Normalize();
+    const Vector3 aside(dir.Z(), 0, -dir.X());
+    const float sea = GLandscape->GetSeaLevel();
+    const auto deep = [&](Vector3Par p) { return sea - GLandscape->SurfaceY(p.X(), p.Z()) >= 2.0f; };
+    for (float d = 12.0f; d <= 400.0f; d += 4.0f)
+    {
+        Vector3 p = source->Position() + dir * d;
+        if (!deep(p) || !deep(p + dir * 5.0f) || !deep(p - dir * 5.0f) || !deep(p + aside * 2.5f) || !deep(p - aside * 2.5f))
+            continue;
+        p[1] = sea;
+        const float heading = std::atan2(dir.X(), dir.Z()) * (180.0f / H_PI);
+        const bool spawned = SpawnZeusVehicle(kTidewaterBoatClass, p, heading < 0 ? heading + 360.0f : heading);
+        char buf[160];
+        if (spawned)
+            std::snprintf(buf, sizeof(buf), "Tidewater boat placed %.0f m ahead.", d);
+        else
+            std::snprintf(buf, sizeof(buf), "Could not create %s (is @OP_TidewaterBoat installed?)", kTidewaterBoatClass);
+        s_zeusStatus = buf;
+        return;
+    }
+    s_zeusStatus = "No open sea within 400 m in front of the camera.";
+}
+
 void SpawnZeusAtClick()
 {
     Vector3 position;
@@ -1802,6 +1842,10 @@ void DrawZeusTab()
     if (ImGui::CollapsingHeader("Spawn at camera aim##zeus", ImGuiTreeNodeFlags_DefaultOpen))
     {
     ImGui::BeginDisabled(!worldAvailable);
+    if (Dev::Button("Spawn Tidewater boat ahead"))
+        Defer([] { SpawnTidewaterBoatAhead(); });
+    Dev::PanelTooltip("Tidewater's lobster boat on the sea in front of the camera (the first spot with 2 m of\n"
+                      "water under the hull, bow away from you). Get in at the helm; step out onto the deck.");
     if (Dev::RadioButton("Unit", s_zeusSpawnKind == 0))
     {
         s_zeusSpawnKind = 0;
@@ -8380,6 +8424,25 @@ void Render()
     else
     {
         RenderDrawDataEngine(ImGui::GetDrawData());
+    }
+
+    // Harness seed: POSEIDON_ZEUS_BOAT_AHEAD=<mission seconds> presses the Zeus tab's "Spawn Tidewater boat
+    // ahead" once, so a capture can prove the button's path without a hand on the panel.
+    {
+        static const float boatAt = []
+        {
+            const char* v = std::getenv("POSEIDON_ZEUS_BOAT_AHEAD");
+            return v && *v ? static_cast<float>(std::atof(v)) : -1.0f;
+        }();
+        static bool boatDone = false;
+        if (boatAt >= 0.0f && !boatDone && ZeusWorldAvailable() && Glob.time.toFloat() >= boatAt)
+        {
+            boatDone = true;
+            Defer([] {
+                SpawnTidewaterBoatAhead();
+                LOG_INFO(Core, "Zeus harness: {}", s_zeusStatus);
+            });
+        }
     }
 
     // Drain deferred actions queued by UI click handlers.  See the

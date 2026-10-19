@@ -159,6 +159,12 @@ struct PresentationSnapshot
         float freeboard = 0.8f;
         float hwContact[6] = {};
         float hwProp = 0.0f;
+        // A hull that keeps the sea out (ShipType's TidewaterHull waterMask): x/z/originY are then its
+        // design-waterline origin exactly and halfBeam its beam at the sheer; stern / bow are the hull's
+        // ends along the forward axis from that origin, sheer the gunwale height above the waterline
+        // aft and at the bow. The water renderer draws no sea surface inside it.
+        bool waterMask = false;
+        float maskStern = 0.0f, maskBow = 0.0f, maskSheerAft = 0.0f, maskSheerBow = 0.0f;
     };
     static constexpr int kMaxWakeBoats = 2;
     int wakeBoatCount = 0;

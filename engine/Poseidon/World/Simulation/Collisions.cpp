@@ -981,6 +981,16 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
                         {
                             continue;
                         }
+                        // A vessel's deck (the roadway of something that moves: a boat) is dry: its hull keeps the
+                        // sea off it. A wave crest standing higher than the deck at this point read as deeper
+                        // "ground" and threw the deck's contact away, and the man on it dropped half a metre
+                        // through it (2026-10-19, Tidewater's boat in a swell).
+                        if (pInfo.type == GroundWater && !obj->Static())
+                        {
+                            retVal.Delete(p);
+                            nLands--;
+                            break;
+                        }
                         // prefer road: delete land info already present if road is higher
                         if (pInfo.under <= underLevel + preferRoad)
                         {

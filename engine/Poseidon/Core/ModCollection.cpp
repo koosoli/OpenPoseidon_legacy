@@ -393,6 +393,7 @@ DefaultContentResolveResult ResolveDefaultContentPacks(const std::string& gameDi
     static constexpr Pack packs[] = {{"@OP_VisualUpgrade", "op_ground_materials.pbo"},
                                      {"@OP_VehicleActions", "op_jeep_actions.pbo"},
                                      {"@OP_Swim", "swim.pbo"}, // Sinkhole W3: swim moves (SWIM-W3-001)
+                                     {"@OP_TidewaterBoat", "op_tidewater_boat.pbo"}, // Tidewater's lobster boat
                                      {"@OP_Fusion", "fusion_ofp.pbo"},
                                      {"@OP_Showcase", "showcase_lab.pbo"},
                                      {"@OP_SizeProbe", "fusion_size_probe.pbo"}};

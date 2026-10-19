@@ -384,6 +384,22 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
                 boat.velY = vel.Y();
                 boat.originY = pos.Y() + mn.Y() + designDraft;
                 boat.freeboard = std::clamp(pos.Y() + mx.Y() - boat.originY, 0.3f, std::max(0.3f, 0.3f * boat.halfLength));
+                // A hull that describes itself (Tidewater's boat): its real waterline origin and outline, and the
+                // mask that keeps the drawn sea out of it -- a 0.35 m cockpit sole is under every swell's crest.
+                const ShipType::TidewaterHull& own = ship->Type()->GetTidewaterHull();
+                if (own.valid && own.waterMask)
+                {
+                    const Vector3 origin = pose.FastTransform(own.origin);
+                    boat.x = origin.X();
+                    boat.z = origin.Z();
+                    boat.originY = origin.Y();
+                    boat.halfBeam = own.maskHalfBeam;
+                    boat.waterMask = true;
+                    boat.maskStern = own.maskStern;
+                    boat.maskBow = own.maskBow;
+                    boat.maskSheerAft = own.maskSheerAft;
+                    boat.maskSheerBow = own.maskSheerBow;
+                }
                 {
                     // x axis = up x forward, written out (the same formula as boat_spray.rs)
                     const float ax = up.Y() * fwd.Z() - up.Z() * fwd.Y();

@@ -438,7 +438,8 @@ bool Man::UpdateSwimming()
         // standing on anything and not already dropping fast -- he swims at once, with no fall
         const float vy = Speed().Y();
         const bool placed = !_objectContact && pos.Y() < level + SwimPlacedAbove && vy < 0.5f && vy > -FallStartSpeed;
-        if (IsDead() || _ladderBuilding || depth < SwimStartDepth ||
+        // (a man standing on a boat's deck is neither: the deck is his ground, however low over the sea)
+        if (IsDead() || _ladderBuilding || depth < SwimStartDepth || OnPlatform() ||
             (level - pos.Y() < SwimStartDepth - 0.1f && !placed) || GLandscape->InTerrainHole(pos.X(), pos.Z()))
         {
             return false;

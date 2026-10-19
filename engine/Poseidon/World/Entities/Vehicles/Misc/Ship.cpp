@@ -42,6 +42,12 @@ using Foundation::EnumName;
 
 #define ARROWS 0
 
+namespace
+{
+// ships alive whose model has a deck (Ship::DeckShips); simulation is single-threaded
+int GDeckShips = 0;
+} // namespace
+
 ShipType::ShipType(const ParamEntry* param) : base(param)
 {
     _scopeLevel = 1;
@@ -132,6 +138,78 @@ void ShipType::InitShape()
     _gunPos = _turret._pos;
 
     _animFire.Init(_shape, "zasleh", nullptr);
+
+    LoadTidewaterHull(par);
+}
+
+// class TidewaterHull (generate_tidewater_boat.py): Tidewater's boat frame (+X port, +Z forward, +Y up, y = 0
+// the design waterline) placed at the memory point "origin" names. OFP's model space is +X starboard.
+void ShipType::LoadTidewaterHull(const ParamEntry& par)
+{
+    _twHull = TidewaterHull();
+    const ParamEntry* hull = par.FindEntry("TidewaterHull");
+    if (!hull || !hull->IsClass() || !_shape)
+        return;
+    const Shape* memory = _shape->MemoryLevel();
+    const RString originName = (*hull) >> "origin";
+    const int originIndex = memory ? memory->PointIndex(originName) : -1;
+    if (originIndex < 0)
+    {
+        LOG_WARN(Physics, "{}: TidewaterHull has no memory point '{}'; the generic hull is used", (const char*)GetName(),
+                 (const char*)originName);
+        return;
+    }
+    const Vector3 origin = memory->Pos(originIndex);
+    const auto toModel = [&](float x, float y, float z) { return origin + Vector3(-x, y, z); };
+    const auto vec = [&](const char* name)
+    {
+        const ParamEntry& e = (*hull) >> name;
+        return Vector3(float(e[0]), float(e[1]), float(e[2]));
+    };
+    TidewaterHull h;
+    h.origin = origin;
+    const ParamEntry& samples = (*hull) >> "samples";
+    h.samples = std::min(samples.GetSize() / 4, TidewaterHull::MaxSamples);
+    for (int i = 0; i < h.samples; ++i)
+    {
+        const float x = samples[i * 4], y = samples[i * 4 + 1], z = samples[i * 4 + 2];
+        h.sample[i] = toModel(x, y, z);
+        h.area[i] = samples[i * 4 + 3];
+        h.depth[i] = std::max(-y, 0.05f);
+    }
+    h.inertia = vec("inertia");
+    h.maxThrust = (*hull) >> "maxThrust";
+    h.pitchSpeed = (*hull) >> "pitchSpeed";
+    h.reverseFactor = (*hull) >> "reverseFactor";
+    const Vector3 prop = vec("propeller"), rudder = vec("rudder");
+    h.propeller = toModel(prop.X(), prop.Y(), prop.Z());
+    h.rudder = toModel(rudder.X(), rudder.Y(), rudder.Z());
+    const ParamEntry& stations = (*hull) >> "stations";
+    h.stations = std::min(stations.GetSize() / 2, 8);
+    for (int i = 0; i < h.stations; ++i)
+    {
+        h.stationZ[i] = origin.Z() + float(stations[i * 2]);
+        h.stationArea[i] = stations[i * 2 + 1];
+    }
+    h.lateralY = origin.Y() + float((*hull) >> "lateralY");
+    const ParamEntry& contacts = (*hull) >> "contacts";
+    h.contacts = std::min(contacts.GetSize() / 3, 8);
+    for (int i = 0; i < h.contacts; ++i)
+        h.contact[i] = toModel(contacts[i * 3], contacts[i * 3 + 1], contacts[i * 3 + 2]);
+    if (const ParamEntry* mask = hull->FindEntry("waterMask"); mask && mask->GetSize() >= 5)
+    {
+        h.waterMask = true;
+        h.maskHalfBeam = (*mask)[0];
+        h.maskStern = (*mask)[1];
+        h.maskBow = (*mask)[2];
+        h.maskSheerAft = (*mask)[3];
+        h.maskSheerBow = (*mask)[4];
+    }
+    h.valid = h.samples >= 4 && h.inertia.X() > 0 && h.maxThrust > 0 && h.pitchSpeed > 0;
+    _twHull = h;
+    if (_twHull.valid)
+        LOG_INFO(Physics, "{}: Tidewater hull, {} waterplane patches, waterline at model y {:.2f}", (const char*)GetName(),
+                 h.samples, origin.Y());
 }
 
 Ship::Ship(VehicleType* name, Person* driver)
@@ -161,6 +239,21 @@ Ship::Ship(VehicleType* name, Person* driver)
     _mGunFireFrames = 0;
     _mGunFireTime = UITIME_MIN;
     _mGunFirePhase = 0;
+
+    _hasDeck = GetShape() && GetShape()->FindRoadwayLevel() >= 0;
+    if (_hasDeck)
+        ++GDeckShips;
+}
+
+Ship::~Ship()
+{
+    if (_hasDeck)
+        --GDeckShips;
+}
+
+int Ship::DeckShips()
+{
+    return GDeckShips;
 }
 
 void Ship::Sound(bool inside, float deltaT)
@@ -1194,7 +1287,9 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
 
         _turret.Stabilize(this, Type()->_turret, Transform().Orientation(), moveTrans.Orientation());
 
+        const Matrix4 before = Transform();
         Move(moveTrans);
+        CarryRiders(before);
         DirectionWorldToModel(_modelSpeed, _speed);
     } // if (!frozen)
 
@@ -1348,6 +1443,60 @@ void Ship::Eject(AIUnit* unit)
     base::Eject(unit);
 }
 
+void Ship::AddRider(Vehicle* rider)
+{
+    for (int i = 0; i < _riders.Size(); ++i)
+        if (_riders[i] == rider)
+            return;
+    _riders.Add(rider);
+}
+
+void Ship::RemoveRider(Vehicle* rider)
+{
+    for (int i = 0; i < _riders.Size();)
+    {
+        if (!_riders[i] || _riders[i] == rider)
+            _riders.Delete(i);
+        else
+            ++i;
+    }
+}
+
+// Everyone standing on the deck moves with the hull: the same rigid move (the hull's new transform times the
+// inverse of its old one) applied to each rider's position, and its turn about the vertical to his heading --
+// he stays upright, his own simulation tilts him to the deck. Whichever of the two simulates first in a frame,
+// he keeps his place on the deck: before his own step he is carried from where he stood, after it from where he
+// walked to.
+void Ship::CarryRiders(const Matrix4& before)
+{
+    if (_riders.Size() == 0)
+        return;
+    const Matrix4 delta = Transform() * before.InverseGeneral();
+    for (int i = 0; i < _riders.Size();)
+    {
+        Man* man = _riders[i] ? dyn_cast<Man>(_riders[i].GetLink()) : nullptr;
+        if (!man || !man->CarryOnPlatform(this, delta))
+        {
+            _riders.Delete(i);
+            continue;
+        }
+        static const bool diag = std::getenv("POSEIDON_BOAT_DIAG") != nullptr;
+        if (diag)
+        {
+            static float next = 0;
+            if (Glob.time.toFloat() >= next)
+            {
+                next = Glob.time.toFloat() + 1.0f;
+                const Vector3 local = PositionWorldToModel(man->Position());
+                LOG_INFO(Physics, "Boat deck: t={:.1f} riders={} rider model pos={:.2f},{:.2f},{:.2f} boat speed={:.1f} m/s pos={:.1f},{:.1f}",
+                         Glob.time.toFloat(), _riders.Size(), local.X(), local.Y(), local.Z(), Speed().Size(),
+                         Position().X(), Position().Z());
+            }
+        }
+        ++i;
+    }
+}
+
 // Where a crewman leaves the boat, or where someone climbs aboard. The classic rule
 // takes the model's get-in memory point and, because soldiers could not enter deep
 // water, pushes it to the nearest walkable field: in open water that is often 10 m
@@ -1362,6 +1511,19 @@ Vector3 Ship::PlaceGetInPos(Person* person, Vector3Par memPos, Vector3Par upos) 
     Man* man = person ? dyn_cast<Man>(person) : nullptr;
     bool swims = man && man->CanSwim();
     bool swimming = person && person->IsSwimming();
+    // A boat with a deck (a roadway LOD): whoever is not swimming boards from and steps out onto the deck
+    // at the door, which moves with the boat; a swimmer still climbs in from where he is in the water.
+    if (!swimming && GLandscape && _shape && _shape->FindRoadwayLevel() >= 0)
+    {
+        Object* deck = nullptr;
+        const float y = GLandscape->RoadSurfaceY(Vector3(memPos) + VUp * 0.5f, nullptr, nullptr, nullptr, &deck);
+        if (deck == this)
+        {
+            Vector3 pos = memPos;
+            pos[1] = y;
+            return pos;
+        }
+    }
     if (swims && GLandscape && _shape)
     {
         // a swimmer boards where he is; anyone else leaves by the door

@@ -720,10 +720,43 @@ fn _waterSSR(posV: vec3<f32>, Rv: vec3<f32>, y0: f32, ry: f32) -> vec4<f32> {
 
 // ------------------------------------------------------------------ the material
 
+// (OP) Tidewater draws no sea inside its boat's hull (SceneRenderer hull mask: a pre-pass of the hull volume,
+// and the surface behind its nearest face discarded). Here the hull volume is tested directly: a point of the
+// surface inside a masked hull's open cockpit and wheelhouse (Tidewater's lobster boat, below its gunwale) is not
+// drawn -- from any camera, the cockpit included. Its cockpit sole stands 0.35 m over the waterline, under
+// every swell's crest. Lanes: mod.rs hull_mask_lanes.
+fn insideHull(p: vec3<f32>) -> bool {
+    for (var i = 0; i < 2; i++) {
+        let h3 = tw.hulls[i * 4 + 3];
+        if (h3.z < 0.5) { continue; }
+        let h0 = tw.hulls[i * 4];
+        let h1 = tw.hulls[i * 4 + 1];
+        let h2 = tw.hulls[i * 4 + 2];
+        let d = p - h0.xyz;
+        let lz = dot(d, h1.xyz);
+        if (lz <= h1.w || lz >= h2.w) { continue; }
+        let ly = dot(d, h2.xyz);
+        let t = (lz - h1.w) / (h2.w - h1.w);
+        let sheer = mix(h3.x, h3.y, t);
+        if (ly < -0.8 || ly > sheer) { continue; }
+        // The mask spans the open cockpit and the wheelhouse only (transom to house front, where the hull is
+        // still near its full breadth: HullLines.sheerX 0.88 of the beam at the transom, 0.92 at the house
+        // front); forward of it the foredeck closes the hull over the water. The flare: the waterline is 0.83
+        // of the sheer's breadth (2.42 m against 2.9 m), the bottom narrower still. Kept well inside the shell,
+        // so the sea just outside the hull is never cut.
+        let plan = mix(0.88, 0.92, t);
+        let flare = select(mix(0.83, 0.3, clamp(-ly / 0.5, 0.0, 1.0)), mix(0.83, 1.0, clamp(ly / sheer, 0.0, 1.0)), ly >= 0.0);
+        let lx = abs(dot(d, cross(h2.xyz, h1.xyz)));
+        if (lx < h0.w * plan * flare - 0.08) { return true; }
+    }
+    return false;
+}
+
 @fragment
 fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     let rel = in.rel;
     let pos = rel + frame.cam_pos.xyz;
+    if (insideHull(pos)) { discard; }
     let screenUV = in.clip.xy / vec2<f32>(textureDimensions(waterSceneDepth));
     let posV = twView(vec4<f32>(rel, 1.0));
     let lagXZ = in.lagXZ;

@@ -1360,13 +1360,13 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
             const render::frame::PresentationSnapshot::WakeBoat& b = boatSnap.wakeBoats[i];
             lanes[0] = {b.x, b.z, b.fwdX, b.fwdZ};
             lanes[1] = {b.velX, b.velZ, b.thrust, static_cast<float>(b.id)};
-            lanes[2] = {b.halfBeam, b.halfLength, b.draft, b.driven ? 3.0f : 1.0f};
+            lanes[2] = {b.halfBeam, b.halfLength, b.draft, (b.driven ? 3.0f : 1.0f) + (b.waterMask ? 4.0f : 0.0f)};
             // W6i: the bow spray's pose and sea
             lanes[3] = {b.originY, b.velY, b.freeboard, b.hwProp};
-            lanes[4] = {b.fwdX, b.fwdY, b.fwdZ, 0.0f};
-            lanes[5] = {b.upX, b.upY, b.upZ, 0.0f};
+            lanes[4] = {b.fwdX, b.fwdY, b.fwdZ, b.maskStern};
+            lanes[5] = {b.upX, b.upY, b.upZ, b.maskBow};
             lanes[6] = {b.hwContact[0], b.hwContact[1], b.hwContact[2], b.hwContact[3]};
-            lanes[7] = {b.hwContact[4], b.hwContact[5], 0.0f, 0.0f};
+            lanes[7] = {b.hwContact[4], b.hwContact[5], b.maskSheerAft, b.maskSheerBow};
         }
     }
     _params.sea_params = {look.seaStateCoupling ? 1.0f : 0.0f,

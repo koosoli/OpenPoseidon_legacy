@@ -1656,13 +1656,16 @@ struct WgrWaterParams
      * the camera; read only by that backend). Per boat i, eight lanes from [8i]:
      * [+0] x, z = hull centre (world), z/w = heading (world XZ of the model forward)
      * [+1] x, z = world velocity, z = thrust 0..1, w = stable id (float-exact, >= 2)
-     * [+2] x = half beam m, y = half length m, z = design draft m, w = flags (1 present, 2 driven)
+     * [+2] x = half beam m, y = half length m, z = design draft m, w = flags (1 present, 2 driven,
+     *      4 water mask: no sea is drawn inside the hull; x, z and [+3].x are then the hull's own
+     *      design-waterline origin and x its beam at the sheer)
      * [+3] (W6i) x = design waterline height at the hull centre (world y), y = vertical velocity,
      *      z = freeboard m, w = CPU sea height at the propeller
-     * [+4] (W6i) the model forward axis xyz (world, unit), w unused
-     * [+5] (W6i) the model up axis xyz (world, unit), w unused
+     * [+4] (W6i) the model forward axis xyz (world, unit), w = water mask: stern (m along forward)
+     * [+5] (W6i) the model up axis xyz (world, unit), w = water mask: bow (m along forward)
      * [+6] (W6i) CPU sea height at bow contacts 0-3, [+7] xy = contacts 4-5 (see
-     *      PresentationSnapshot.cpp WakeSprayContactPoint), zw unused
+     *      PresentationSnapshot.cpp WakeSprayContactPoint), zw = water mask: sheer height above the
+     *      waterline aft and at the bow
      * sizeof 1216 -> 1472 with the Rust side (W6h: 1312). */
     WgrVec4 tidewater_wake[16];
 };
