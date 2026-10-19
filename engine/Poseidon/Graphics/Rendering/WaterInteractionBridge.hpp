@@ -18,6 +18,10 @@ enum HydroWaterInteractionKind : uint32_t
     // velocityKind = (limb vx, vz, vy over the water, kind), timeLifeFoamMass[3] = splash height (m).
     // Drawn by the Tidewater water (water_tw/impacts.rs); the Current OP water ignores the kind.
     HydroWaterInteractionSwimSplash = 6,
+    // (OP) a whale's blow (Whale.cpp): a column of spray and mist thrown up for ~1.4 s. positionRadius = (x, z,
+    // radius, the blowholes' y), velocityKind = (drift vx, vz, 0, kind), timeLifeFoamMass[3] = column height (m).
+    // Drawn by the Tidewater water (water_tw/impacts.rs).
+    HydroWaterInteractionWhaleBlow = 7,
 };
 
 enum HydroWaterInteractionFlags : uint32_t

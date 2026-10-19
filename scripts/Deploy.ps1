@@ -238,7 +238,8 @@ foreach ($pack in @(
     @{Folder='Mods/@OP_VisualUpgrade'; Archive='op_ground_materials.pbo'},
     @{Folder='Mods/@OP_VehicleActions'; Archive='op_jeep_actions.pbo'},
     @{Folder='Mods/@OP_Swim'; Archive='swim.pbo'},
-    @{Folder='Mods/@OP_TidewaterBoat'; Archive='op_tidewater_boat.pbo'})) {
+    @{Folder='Mods/@OP_TidewaterBoat'; Archive='op_tidewater_boat.pbo'},
+    @{Folder='Mods/@OP_TidewaterWildlife'; Archive='op_tidewater_wildlife.pbo'})) {
     $sourcePack = Join-Path $distDir $pack.Folder
     if (!(Test-Path -LiteralPath $sourcePack)) { continue }
     $metadata = Join-Path $sourcePack 'mod.json'

@@ -11,6 +11,7 @@
 #include <Poseidon/Network/Network.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/AllVehicles.hpp>
+#include <Poseidon/World/Entities/Vehicles/Misc/Whale.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <string.h>
@@ -366,6 +367,10 @@ int VehicleTypeBank::Load(const char* name)
             {
                 type = new ThingType(par);
             }
+            else if (!strcmp(simulation, "whale"))
+            {
+                type = new ThingType(par); // (OP) Tidewater's humpback, Whale.cpp
+            }
             else if (!strcmp(simulation, "cameratarget"))
             {
                 Fail("cameratarget obsolete");
@@ -628,6 +633,10 @@ EntityAI* NewVehicle(EntityAIType* type, RString shapeName, bool fullCreate)
     else if (!stricmp(simName, "thing"))
     {
         v = new Thing(type);
+    }
+    else if (!stricmp(simName, "whale"))
+    {
+        v = new Whale(type);
     }
     else if (!stricmp(simName, "invisible"))
     {

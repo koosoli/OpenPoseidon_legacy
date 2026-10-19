@@ -244,6 +244,8 @@ constexpr std::array<const char*, 9> kZeusVehiclePresets = {"Jeep", "UAZ", "M1A1
                                                             "BoatW", "OP_TidewaterBoat"};
 // Tidewater's lobster boat (@OP_TidewaterBoat, generate_tidewater_boat.py)
 constexpr const char* kTidewaterBoatClass = "OP_TidewaterBoat";
+// Tidewater's humpback whale (@OP_TidewaterWildlife, Whale.cpp)
+constexpr const char* kTidewaterWhaleClass = "OP_TidewaterHumpback";
 
 bool ZeusWorldAvailable()
 {
@@ -1073,6 +1075,45 @@ void SpawnTidewaterBoatAhead()
     s_zeusStatus = "No open sea within 400 m in front of the camera.";
 }
 
+// The humpback in front of the camera: the first point along the view, 40 m out or more, over 12 m of water (it
+// finds its own loop through the deepest water near there and surfaces to blow at once).
+void SpawnTidewaterWhaleAhead()
+{
+    if (!ZeusWorldAvailable())
+    {
+        s_zeusStatus = "Spawning requires a loaded world.";
+        return;
+    }
+    Object* source = s_zeusCamera ? static_cast<Object*>(s_zeusCamera) : GWorld->CameraOn();
+    Vector3 dir = source->Direction();
+    dir[1] = 0;
+    if (dir.SquareSize() < 1e-4f)
+        dir = VForward;
+    dir.Normalize();
+    const float sea = GLandscape->GetSeaLevel();
+    for (const float need : {12.0f, 6.0f})
+    {
+        for (float d = 40.0f; d <= 800.0f; d += 10.0f)
+        {
+            Vector3 p = source->Position() + dir * d;
+            if (sea - GLandscape->SurfaceY(p.X(), p.Z()) < need)
+                continue;
+            p[1] = sea - 5.0f;
+            const float heading = std::atan2(dir.X(), dir.Z()) * (180.0f / H_PI);
+            const bool spawned = SpawnZeusVehicle(kTidewaterWhaleClass, p, heading < 0 ? heading + 360.0f : heading);
+            char buf[160];
+            if (spawned)
+                std::snprintf(buf, sizeof(buf), "Humpback whale placed %.0f m ahead.", d);
+            else
+                std::snprintf(buf, sizeof(buf), "Could not create %s (is @OP_TidewaterWildlife installed?)",
+                              kTidewaterWhaleClass);
+            s_zeusStatus = buf;
+            return;
+        }
+    }
+    s_zeusStatus = "No deep water within 800 m in front of the camera.";
+}
+
 void SpawnZeusAtClick()
 {
     Vector3 position;
@@ -1846,6 +1887,10 @@ void DrawZeusTab()
         Defer([] { SpawnTidewaterBoatAhead(); });
     Dev::PanelTooltip("Tidewater's lobster boat on the sea in front of the camera (the first spot with 2 m of\n"
                       "water under the hull, bow away from you). Get in at the helm; step out onto the deck.");
+    if (Dev::Button("Spawn humpback whale ahead"))
+        Defer([] { SpawnTidewaterWhaleAhead(); });
+    Dev::PanelTooltip("Tidewater's humpback whale in the deep water in front of the camera (12 m of water or more).\n"
+                      "It loops through the deepest water near there and comes up to blow at once.");
     if (Dev::RadioButton("Unit", s_zeusSpawnKind == 0))
     {
         s_zeusSpawnKind = 0;
@@ -8440,6 +8485,24 @@ void Render()
             boatDone = true;
             Defer([] {
                 SpawnTidewaterBoatAhead();
+                LOG_INFO(Core, "Zeus harness: {}", s_zeusStatus);
+            });
+        }
+    }
+
+    // Harness seed: POSEIDON_ZEUS_WHALE_AHEAD=<mission seconds> presses "Spawn humpback whale ahead" once.
+    {
+        static const float whaleAt = []
+        {
+            const char* v = std::getenv("POSEIDON_ZEUS_WHALE_AHEAD");
+            return v && *v ? static_cast<float>(std::atof(v)) : -1.0f;
+        }();
+        static bool whaleDone = false;
+        if (whaleAt >= 0.0f && !whaleDone && ZeusWorldAvailable() && Glob.time.toFloat() >= whaleAt)
+        {
+            whaleDone = true;
+            Defer([] {
+                SpawnTidewaterWhaleAhead();
                 LOG_INFO(Core, "Zeus harness: {}", s_zeusStatus);
             });
         }

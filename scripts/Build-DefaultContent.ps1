@@ -51,6 +51,7 @@ Write-Host "Staged road and terrain integration package: $pack"
 & "$PSScriptRoot/Build-VehicleActions.ps1" -Preset $Preset -Python $Python
 & "$PSScriptRoot/Build-Swim.ps1" -Preset $Preset
 & "$PSScriptRoot/Build-TidewaterBoat.ps1" -Preset $Preset -Python $Python
+& "$PSScriptRoot/Build-TidewaterWildlife.ps1" -Preset $Preset -Python $Python
 & "$PSScriptRoot/Build-InventoryIcons.ps1" -Preset $Preset
 $menuStage = Join-Path $dist 'assets/menu/RoughSea.Intro'
 New-Item -ItemType Directory -Force $menuStage | Out-Null
