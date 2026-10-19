@@ -5122,6 +5122,7 @@ impl Renderer {
                         .begin(&mut encoder, TimerRegion::PlanarClouds);
                     self.sky.render_cloud(
                         &self.device,
+                        &self.queue,
                         &mut encoder,
                         &planar.depth_sample_view,
                         planar.size.0,
@@ -6721,6 +6722,7 @@ impl Renderer {
                     self.gpu_timers.begin(&mut encoder, TimerRegion::CloudMarch);
                     self.sky.render_cloud(
                         &self.device,
+                        &self.queue,
                         &mut encoder,
                         &depth_view,
                         self.render_size().0,
