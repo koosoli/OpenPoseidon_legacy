@@ -542,6 +542,9 @@ def build(header, meshes):
     # hub at the bottom of the view (owner: "the steering wheel is missing").
     EYE_OFFSET = np.array([-0.32, 1.34, 0.16])  # Tidewater's frame (its +x is the helmsman's left)
     feet = helm - EYE_OFFSET
+    # ... but sideways on the wheel's centre line: the body behind the wheel, not half a metre to port of it with the
+    # eye over the hub (owner, 2026-10-19: "make sure the player is behind the wheel when he is driving")
+    feet[0] = a["wheelCenter"][0]
     # (a proxy's frame is taken from the file's points without the loader's half turn: its forward edge points to
     # the file's +z, which is Tidewater's -z -- measured with WGR_PROXYCAM_TRACE, the helmsman faced aft)
     def crew_proxy(at, forward):
