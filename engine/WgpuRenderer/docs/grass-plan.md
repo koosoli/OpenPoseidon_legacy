@@ -206,10 +206,34 @@ What ships instead:
   in the Grass tab; flower default 0.08 -> ~0.12. Weeds are already 0.37, so the
   original "raise to 15-20%" would have *lowered* them -- left as is. Dry bias where
   `dry_patches` is high.
-* **Phase 3 -- real heads at no vertex cost.** A flower clump's last blade is
-  re-shaped into two crossed head quads at the first blade's tip (rows 0-1 and 4-5;
-  rows 2-3 collapse onto a corner so the strip between is degenerate). Same vertex
-  count, same index buffer, same function in colour/prepass/velocity/shadow. Adding
-  head slots to every clump instead would cost every near instance ~6-11% more
-  vertex work in a vertex-bound pass.
+* **Phase 3 -- real heads at no vertex cost.** A disc-flower clump's last one or two
+  blades (head share >= 0.5 gives two) are not drawn as blades: their twelve vertices
+  become one round disc, each of the six rows a chord of the circle, on the tip of
+  stem blade 0 or 1 under that stem's wind, crush and LOD fade, tilted 25-50 degrees
+  off the stem. Same vertex count, same index buffer, no discard (early-Z kept). The
+  colour, prepass and velocity passes share `ofp_near_vertex`; the shadow pass
+  collapses those blade slots (a 2-4 cm head is below a cascade texel). Adding head
+  slots to every clump instead would have cost every near instance ~6-11% more
+  vertex work in a vertex-bound pass. Spikes (foxtail, fescue, dock, thistle, yarrow)
+  and the whole mid ring keep painted tips.
 * **Phase 4** stays deferred (photo layers, GRS-GATE-1).
+
+### Measured (2026-10-19, Everon perf_field, eye level, 1920x1080, one run each)
+
+| | near verts | Grass prepass | Grass colour | Grass shadow |
+|---|---|---|---|---|
+| variety off | 1 887 120 | 2.665 ms | 4.437 ms | 0.047 ms |
+| shipped defaults | 1 887 120 | 2.910 ms | 4.232 ms | 0.044 ms |
+| flowers forced to 60% | 1 887 120 | 2.897 ms | 4.879 ms | 0.032 ms |
+
+Single runs; this box's run-to-run spread is ~1 ms, so the default's +0.04 ms over
+prepass + colour is unresolved, and the forced flower drift's +0.7 ms is an upper
+bound. Vertex counts are identical by construction. No VRAM was added.
+
+Native worlds: `variety_on()` is false when `native.x > 0` or `native2.w > 0.5`, and
+EngineWgpu clears `variety[0]` when the terrain has Enfusion surfaces, so every look
+id there is 0 and every new branch is skipped. Not captured on native Everon.
+
+Levers: `WGR_GRASS_VARIETY=0/1`, `WGR_GRASS_SPECIES_MIX=weed,flower`,
+`WGR_GRASS_HEAD_SHARE`, `WGR_GRASS_HEAD_BRIGHTNESS`, `WGR_GRASS_LOOK_DRIFT`; the Grass
+tab has the same under "Meadow variety".

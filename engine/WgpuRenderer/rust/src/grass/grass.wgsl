@@ -1259,6 +1259,8 @@ fn species_transmission(species: u32) -> vec4<f32> {
 // look_shape is mirrored literally by grass_shadow.wgsl (the tests compare the two).
 const LOOK_SHIFT: u32 = 12u;
 const LOOK_HEAD_BIT: u32 = 16u;
+// GRS-VAR phase 3: this vertex belongs to a real flower head (ofp_near_vertex), not a blade.
+const LOOK_HEAD_GEOM: u32 = 32u;
 
 fn variety_on() -> bool {
     return grass.variety.x > 0.5 && grass.native.x <= 0.0 && grass.native2.w < 0.5;
@@ -1391,17 +1393,21 @@ fn look_head(look: u32) -> LookHead {
 // The flat varying a blade carries: its clump's look, plus LOOK_HEAD_BIT when this blade of the
 // clump bears the head (a variety.z share of them -- every blade of a flower clump flowering
 // reads as a bouquet, not a meadow).
-fn blade_look(inst: vec4<f32>, inst_packed: vec4<u32>, blade: u32) -> u32 {
+fn blade_look(inst: vec4<f32>, inst_packed: vec4<u32>, blade: u32, near: bool) -> u32 {
     let look = instance_look(inst_packed.w);
     if (look == 0u || look_head(look).fraction <= 0.0) { return look; }
+    // Near-ring disc flowers carry real heads (ofp_near_vertex); their stems stay green.
+    if (near && near_head_count(look) > 0u) { return look; }
     let h = hash11(inst.xz + vec2<f32>(f32(blade) * 37.0 + 2.0, f32(blade) * 5.0 + 61.0));
     return look | select(0u, LOOK_HEAD_BIT, h < clamp(grass.variety.z, 0.0, 1.0));
 }
 
 // Applied to the finished OFP albedo, after the green-pivot grading (which would turn a petal
 // muddy). `uv_x` runs 0..1 across the ribbon, `t` 0 at the root and 1 at the tip.
-fn look_albedo(albedo: vec3<f32>, look_word: u32, uv_x: f32, t: f32, seed: f32) -> vec3<f32> {
+fn look_albedo(albedo: vec3<f32>, look_word: u32, uv: vec2<f32>, t: f32, seed: f32) -> vec3<f32> {
     let look = look_word & 15u;
+    if ((look_word & LOOK_HEAD_GEOM) != 0u) { return head_disc_albedo(look, uv, seed); }
+    let uv_x = uv.x;
     let tinted = albedo * look_tint(look);
     if ((look_word & LOOK_HEAD_BIT) == 0u) { return tinted; }
     let head = look_head(look);
@@ -1906,15 +1912,15 @@ fn vs_ofp_blade_velocity(vertex_index: u32, instance_index: u32) -> GrassVelOut 
     let inst_packed = instances[instance_index].packed;
     let blade = vertex_index / VERTS_PER_NEAR_BLADE_UNIQUE;
     let packed = vertex_index % VERTS_PER_NEAR_BLADE_UNIQUE;
-    let t = f32(packed / 2u) / f32(BLADE_SEGMENTS);
+    let row = packed / 2u;
     let left = (packed % 2u) == 0u;
-    let cur = ofp_blade(inst, inst_packed, blade, t, left, wind_lanes_now());
+    let cur = ofp_near_vertex(inst, inst_packed, blade, row, left, wind_lanes_now()).b;
     var prev_lanes: WindLanes;
     prev_lanes.strength = gvel.prev_wind.x;
     prev_lanes.direction = gvel.prev_wind.y;
     prev_lanes.advection = gvel.prev_advection;
     prev_lanes.flutter = gvel.prev_flutter;
-    let prev = ofp_blade(inst, inst_packed, blade, t, left, prev_lanes);
+    let prev = ofp_near_vertex(inst, inst_packed, blade, row, left, prev_lanes).b;
     let base = inst.xyz - frame.cam_pos.xyz;
     let cur_pos = vec4<f32>(base + cur.local, 1.0);
     let prev_pos = vec4<f32>(base + gvel.cam_delta.xyz + prev.local, 1.0);
@@ -1969,7 +1975,8 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     if (native_tufts_on()) {
         return vs_native_tuft(inst, inst_packed, blade, t, left);
     }
-    let b = ofp_blade(inst, inst_packed, blade, t, left, wind_lanes_now());
+    let v = ofp_near_vertex(inst, inst_packed, blade, row, left, wind_lanes_now());
+    let b = v.b;
     let world = inst.xyz + b.local;
     let rel = world - frame.cam_pos.xyz;
     var out: VsOut;
@@ -1982,7 +1989,13 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     out.blade_uv = vec4<f32>(select(1.0, 0.0, left), 1.0 - t, f32(inst_packed.w & 7u),
                              blade_texture_strength(rel));
     out.blade_taper = b.taper_exp;
-    out.look = blade_look(inst, inst_packed, blade);
+    out.look = blade_look(inst, inst_packed, blade, true);
+    if (v.head) {
+        // The whole head is "tip" for the ramp, and it samples no leaf texture.
+        out.height_t = 1.0;
+        out.blade_uv = vec4<f32>(v.uv, f32(inst_packed.w & 7u), 0.0);
+        out.look = instance_look(inst_packed.w) | LOOK_HEAD_GEOM;
+    }
     return out;
 }
 
@@ -2062,6 +2075,114 @@ fn ofp_blade(inst: vec4<f32>, inst_packed: vec4<u32>, blade: u32, t: f32, left: 
     return o;
 }
 
+// GRS-VAR phase 3: which looks draw a real head on the near ring, and how many of a clump's
+// blades become heads (its LAST blades; each sits on the tip of stem blade 0 or 1). Mirrored
+// literally by grass_shadow.wgsl, which collapses those blades (tests compare the two).
+fn look_has_disc_head(look: u32) -> bool { return (look >= 6u && look <= 11u) || look == 13u; }
+
+fn near_head_count(look: u32) -> u32 {
+    let share = clamp(grass.variety.z, 0.0, 1.0);
+    if (!look_has_disc_head(look) || share <= 0.0) { return 0u; }
+    return select(1u, 2u, share >= 0.5);
+}
+
+// Head radius (m): roughly the real flower, x1.25 so it still reads at a few metres.
+fn look_head_radius(look: u32) -> f32 {
+    switch (look) {
+        case 6u: { return 0.026; }
+        case 7u: { return 0.042; }
+        case 8u: { return 0.026; }
+        case 9u: { return 0.022; }
+        case 10u: { return 0.016; }
+        case 11u: { return 0.017; }
+        default: { return 0.020; }
+    }
+}
+
+// Petal count for head_disc_albedo; 0 = a clover-type floret ball.
+fn look_petals(look: u32) -> f32 {
+    switch (look) {
+        case 6u: { return 16.0; }
+        case 7u: { return 4.0; }
+        case 8u: { return 28.0; }
+        case 9u: { return 9.0; }
+        case 10u: { return 5.0; }
+        case 11u: { return 0.0; }
+        default: { return 5.0; }
+    }
+}
+
+struct OfpVertex {
+    b: OfpBlade,
+    uv: vec2<f32>,
+    head: bool,
+};
+
+// One near-ring vertex. A disc flower clump's last near_head_count() blades are not drawn as
+// blades: their twelve vertices (six rows x two sides) become one round disc -- each row a chord
+// of the circle -- on the tip of stem blade 0 or 1, under that stem's wind, crush and LOD fade.
+// Same vertex count, same index buffer, no discard (the near pass keeps early-Z). The colour,
+// prepass and velocity passes all come through here, so the head moves with its stem.
+fn ofp_near_vertex(inst: vec4<f32>, inst_packed: vec4<u32>, blade: u32, row: u32, left: bool,
+                   lanes: WindLanes) -> OfpVertex {
+    var o: OfpVertex;
+    let t = f32(row) / f32(BLADE_SEGMENTS);
+    o.uv = vec2<f32>(select(1.0, 0.0, left), 1.0 - t);
+    o.head = false;
+    let look = instance_look(inst_packed.w);
+    let heads = near_head_count(look);
+    let count = select(6u, 12u, grass.renderer.x > 0.5);
+    if (heads == 0u || blade + heads < count) {
+        o.b = ofp_blade(inst, inst_packed, blade, t, left, lanes);
+        return o;
+    }
+    let stem = blade + heads - count;
+    // At t = 1 the blade's lateral offset is zero, so local is the stem's centre-line tip.
+    let tip = ofp_blade(inst, inst_packed, stem, 1.0, true, lanes);
+    let jitter = hash11(inst.xz + vec2<f32>(f32(stem) * 41.0 + 7.0, 23.0));
+    let yaw = jitter * 6.2831853;
+    let tilt = mix(0.45, 1.1, hash11(inst.xz + vec2<f32>(f32(stem) * 13.0 + 3.0, 89.0)));
+    // Facing up the stem, turned 25-50 degrees to one side so the head reads from eye height.
+    let n = normalize(normalize(tip.tangent) + vec3<f32>(cos(yaw), 0.0, sin(yaw)) * tilt);
+    var u_axis = cross(vec3<f32>(0.0, 1.0, 0.0), n);
+    u_axis = select(normalize(u_axis), vec3<f32>(1.0, 0.0, 0.0), length(u_axis) < 1e-4);
+    let v_axis = cross(n, u_axis);
+    let y = -cos(3.14159265 * t);
+    let half_w = sqrt(max(1.0 - y * y, 0.0));
+    let x = select(half_w, -half_w, left);
+    let radius = look_head_radius(look) * mix(0.8, 1.2, jitter) * lod_height_scale(inst_packed.z);
+    o.b = tip;
+    o.b.local = tip.local + (u_axis * x + v_axis * y) * radius;
+    // vs_grass's normal is cross(blade_axis, tangent) = cross(u, v) = n.
+    o.b.blade_axis = u_axis;
+    o.b.tangent = v_axis;
+    o.uv = vec2<f32>(0.5 + 0.5 * x, 0.5 + 0.5 * y);
+    o.head = true;
+    return o;
+}
+
+// The head's own albedo: petals with darker gaps towards the rim, the disc floret in the middle
+// (or a floret ball for clover). Replaces the blade colour outright.
+fn head_disc_albedo(look: u32, uv: vec2<f32>, seed: f32) -> vec3<f32> {
+    let head = look_head(look);
+    let p = uv * 2.0 - 1.0;
+    let r = length(p);
+    let petals = look_petals(look);
+    var shade = 1.0;
+    var centre = 0.0;
+    if (petals > 0.5) {
+        let lobe = abs(cos(atan2(p.y, p.x) * petals * 0.5));
+        shade = mix(1.0, mix(0.55, 1.0, lobe), smoothstep(0.35, 0.95, r));
+        centre = 1.0 - smoothstep(0.24, 0.36, r);
+    } else {
+        let cell = floor(p * 5.0);
+        shade = 0.8 + 0.25 * fract(sin(dot(cell, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+    }
+    shade = shade * (1.0 - 0.25 * smoothstep(0.75, 1.0, r));
+    let colour = mix(head.colour * shade, head.centre, centre);
+    return colour * clamp(grass.variety.y, 0.0, 2.0) * (0.9 + 0.2 * seed);
+}
+
 @vertex
 fn vs_grass_mid(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VsOut {
     let inst = instances[instance_index].pos_seed;
@@ -2117,7 +2238,7 @@ fn vs_grass_mid(@builtin(vertex_index) vertex_index: u32, @builtin(instance_inde
     out.blade_uv = vec4<f32>(select(1.0, 0.0, left), 1.0 - t, f32(inst_packed.w & 7u),
                              blade_texture_strength(rel));
     out.blade_taper = shape.z;
-    out.look = blade_look(inst, inst_packed, blade);
+    out.look = blade_look(inst, inst_packed, blade, false);
     return out;
 }
 
@@ -2600,7 +2721,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     var albedo = grass.tint_procedural.rgb *
         max((hued - pivot) * blade_contrast() + pivot, vec3<f32>(0.0));
     if (in.look != 0u) {
-        albedo = look_albedo(albedo, in.look, in.blade_uv.x, in.height_t, in.seed);
+        albedo = look_albedo(albedo, in.look, in.blade_uv.xy, in.height_t, in.seed);
     }
     if (grass.native.x > 0.0) {
         // RFG-091: the grading chain above (saturation, dry patches, hue drift, contrast

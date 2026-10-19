@@ -3727,6 +3727,14 @@ mod tests {
             src[start..end].to_string()
         };
         assert_eq!(fn_body(SHADER, "look_shape"), fn_body(SHADOW, "look_shape"));
+        // Phase 3: the blades a head replaces are the same in colour, velocity and shadow.
+        assert_eq!(fn_body(SHADER, "near_head_count"), fn_body(SHADOW, "near_head_count"));
+        assert!(SHADER.contains("fn look_has_disc_head(look: u32) -> bool { return (look >= 6u && look <= 11u) || look == 13u; }"));
+        assert!(SHADOW.contains("fn look_has_disc_head(look: u32) -> bool { return (look >= 6u && look <= 11u) || look == 13u; }"));
+        for entry in ["vs_grass", "vs_ofp_blade_velocity"] {
+            let body = fn_body(SHADER, entry);
+            assert!(body.contains("ofp_near_vertex(") && !body.contains("ofp_blade("), "{entry}");
+        }
         assert!(SHADER.contains("const LOOK_SHIFT: u32 = 12u;"));
         assert!(SHADER.contains("fn instance_look(packed_w: u32) -> u32 { return (packed_w >> LOOK_SHIFT) & 15u; }"));
         assert!(SHADOW.contains("look_shape((instances[instance_index].packed.w >> 12u) & 15u)"));

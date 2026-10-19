@@ -271,6 +271,17 @@ fn rotor_flutter_direction(world_xz: vec2<f32>, seed: f32) -> vec2<f32> {
     return select(vec2<f32>(1.0, 0.0), normalize(direction), dot(direction, direction) > 0.0001);
 }
 
+// GRS-VAR phase 3: which looks draw a real head on the near ring, and how many of a clump's
+// blades become heads (its LAST blades; each sits on the tip of stem blade 0 or 1). Mirrored
+// literally by grass_shadow.wgsl, which collapses those blades (tests compare the two).
+fn look_has_disc_head(look: u32) -> bool { return (look >= 6u && look <= 11u) || look == 13u; }
+
+fn near_head_count(look: u32) -> u32 {
+    let share = clamp(grass.variety.z, 0.0, 1.0);
+    if (!look_has_disc_head(look) || share <= 0.0) { return 0u; }
+    return select(1u, 2u, share >= 0.5);
+}
+
 // GRS-VAR: mirrors grass.wgsl look_shape (packed.w bits 12-15) literally.
 // (width scale, height scale) on top of species_shape_mixed. (1, 1) for look 0.
 fn look_shape(look: u32) -> vec2<f32> {
@@ -345,6 +356,11 @@ fn vs_grass_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_i
     let stride = max(u32(grass.card_look.w + 0.5), 1u);
     let blade = (vertex_index / 12u) * stride;
     let blade_count = select(6.0, 12.0, grass.renderer.x > 0.5);
+    // GRS-VAR phase 3: a flower head's blade slots draw the head, not a blade; a 2-4 cm head's
+    // shadow is below a cascade texel, so it casts none rather than a phantom blade's.
+    if (blade + near_head_count((instances[instance_index].packed.w >> 12u) & 15u) >= u32(blade_count)) {
+        return vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    }
 
     let packed = vertex_index % 12u;
     let row = packed / 2u;
