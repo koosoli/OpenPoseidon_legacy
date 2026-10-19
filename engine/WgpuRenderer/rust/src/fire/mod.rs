@@ -132,7 +132,16 @@ struct MarchParams {
     ambient: [f32; 4],
     smoke: [f32; 4],
     fire: [f32; 4],
+    /// BOOM-005: muzzle flashes, two vec4 each: (muzzle camera-relative, age s), (barrel dir, size)
+    flashes: [[f32; 4]; 2 * MAX_FLASHES],
+    /// x: flash count, y: seed salt of the first flash's frame, z: flash gain, w: unused
+    flash_info: [f32; 4],
 }
+
+/// BOOM-005: the volumetric muzzle flashes drawn in the march, nearest first.
+pub const MAX_FLASHES: usize = 8;
+/// The upload: per flash (world x, y, z, age s), (barrel x, y, z, size); size 1 = a rifle.
+pub const FLASH_FLOATS: usize = 8;
 
 type Tex = (wgpu::Texture, wgpu::TextureView);
 
@@ -227,10 +236,15 @@ pub struct FireSystem {
     last: Option<Instant>,
     acc: f32,
     clock: f32,
+    // the step being taken: STEP, or up to 2 STEP when the frame took longer (see `simulate`)
+    step_dt: f32,
     pub steps: u64,
     pub frames_drawn: u64,
     gain: f32,
     smoke_scale: f32,
+    // BOOM-005: this frame's live muzzle flashes (world), FLASH_FLOATS each
+    flashes: Vec<[f32; FLASH_FLOATS]>,
+    flash_gain: f32,
 }
 
 impl FireSystem {
@@ -491,10 +505,26 @@ impl FireSystem {
             last: None,
             acc: 0.0,
             clock: 0.0,
+            step_dt: STEP,
             steps: 0,
             frames_drawn: 0,
             gain,
             smoke_scale,
+            flashes: Vec::new(),
+            flash_gain: std::env::var("WGR_MUZZLE_FLASH_GAIN").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0),
+        }
+    }
+
+    /// BOOM-005: the muzzle flashes alive this frame (FLASH_FLOATS each, see MAX_FLASHES).
+    pub fn set_muzzle_flashes(&mut self, data: &[f32]) {
+        self.flashes.clear();
+        if !self.enabled { return; }
+        for f in data.chunks_exact(FLASH_FLOATS).take(MAX_FLASHES) {
+            if f.iter().all(|v| v.is_finite()) && f[3] >= 0.0 && f[7] > 0.0 {
+                let mut a = [0.0; FLASH_FLOATS];
+                a.copy_from_slice(f);
+                self.flashes.push(a);
+            }
         }
     }
 
@@ -507,7 +537,7 @@ impl FireSystem {
     }
 
     pub fn active(&self) -> bool {
-        self.enabled && (!self.sources.is_empty() || !self.grids.is_empty())
+        self.enabled && (!self.sources.is_empty() || !self.grids.is_empty() || !self.flashes.is_empty())
     }
 
     pub fn grid_count(&self) -> usize {
@@ -528,7 +558,18 @@ impl FireSystem {
             })
             .filter(|(d, s)| *d < RANGE && s.params[0] > 0.0)
             .collect();
-        near.sort_by(|a, b| a.0.total_cmp(&b.0));
+        // (owner, 2026-10-19: "the fire of a burning vehicle should be alive longer") -- with
+        // only the nearest MAX_FIRES drawn, a barrage's short dirt bursts nearer the camera took
+        // the burning car's flames and column away. A long fire (a wreck's flames, its column)
+        // ranks at half its distance, and a fire that already has a box keeps it before a new one.
+        let rank = |d: f32, s: &FireSource, grids: &[Grid]| {
+            let kind = s.params[3];
+            let long = (kind > 0.5 && kind < 1.5) || (kind > 3.5 && kind < 4.5);
+            let has = grids.iter().any(|g| g.key == s.params[2].to_bits());
+            d * if long { 0.5 } else { 1.0 } * if has { 0.6 } else { 1.0 }
+        };
+        let grids = &self.grids;
+        near.sort_by(|a, b| rank(a.0, &a.1, grids).total_cmp(&rank(b.0, &b.1, grids)));
         near.truncate(MAX_FIRES);
         for (_, s) in near {
             let key = s.params[2].to_bits();
@@ -554,7 +595,9 @@ impl FireSystem {
                 // smoke it already put in the air has had its time (smoke-only plumes, see `linger`)
                 g.src.params[0] = 0.0;
                 if g.linger < 0.0 {
-                    g.linger = if g.src.params[3] > 3.5 {
+                    g.linger = if g.src.params[3] > 4.5 {
+                        smoke_linger() * 0.45 // thrown earth's dust hangs, then settles
+                    } else if g.src.params[3] > 3.5 {
                         smoke_linger() * 1.5
                     } else if g.src.params[3] > 2.5 {
                         smoke_linger()
@@ -605,8 +648,11 @@ impl FireSystem {
         let smoke_only = s.params[3] > 2.5;
         // FIRE-002: a wreck's black column (kind 4, Fire Pro's smoke stack) and a wreck's flames
         // (kind 1, Fire Pro's delayed ignition); see FireVolumeKind on the engine side
-        let stack = s.params[3] > 3.5;
+        let stack = s.params[3] > 3.5 && s.params[3] < 4.5;
         let wreck = s.params[3] > 0.5 && s.params[3] < 1.5;
+        // BOOM-001: a ground burst's thrown earth (kind 5): no flame, a burst of heavy brown soil
+        // thrown up and out in jets (the crown), falling back, its fine dust hanging and drifting
+        let dirt = s.params[3] > 4.5;
         // Froude scaling from the campfire the preset was tuned on (a 0.8 m bed): a fire twice
         // the size has flames twice as tall, rising and living sqrt(2) longer and faster. Big
         // beds also burn patchily (Fire Pro's burst variation), which breaks one tall tongue
@@ -616,7 +662,10 @@ impl FireSystem {
         // the delayed-ignition preset's source is a 0.65 m sphere
         let froude_di = (radius / 0.65).clamp(0.4, 5.0).sqrt();
         // Per kind: (emitter lift, source heat, source rise, flame life, expansion, buoyancy).
-        let (lift, heat, rise, life, expand, buoy) = if explosion {
+        let (lift, heat, rise, life, expand, buoy) = if dirt {
+            // the column of thrown earth stands on the ground: its emitter is 3.2 radii tall
+            (3.0, 1.0, 0.0, 0.65, 0.3, 4.7)
+        } else if explosion {
             // FIRE-002 (owner, 2026-10-13: "the fireball does not look real"): Fire Pro's fuel
             // fireball as a BURST, not a jet -- a charge that blows outward for a fraction of a
             // second, expands as it burns (6.23 in the preset) and rolls up on its own buoyancy
@@ -626,8 +675,11 @@ impl FireSystem {
             // Fire Pro's delayed-ignition preset (editor/presets/delayed-ignition.json) instead of
             // the campfire: a weak source (heat 1.5) whose flame lives long (1.2 s), keeps heating
             // as it burns (4) and rises lazily (buoyancy 1.6), so a burning hull rolls up in big
-            // slow tongues under dark smoke rather than flickering like a small flame
-            (0.5, 1.5, 0.5 * froude_di, 1.2 * froude_di, 1.0, 1.6)
+            // slow tongues under dark smoke rather than flickering like a small flame.
+            // (owner, 2026-10-19: "have the flames be faster") -- livelier than the preset: a
+            // hotter source rising twice as fast, shorter-lived tongues and buoyancy 2.8, so a
+            // burning car licks upward instead of rolling (it also ran in slow motion, see STEP)
+            (0.5, 2.2, 1.0 * froude_di, 0.85 * froude_di, 1.0, 2.8)
         } else {
             (0.5, 10.0, 0.92 * froude, 0.65 * froude, 0.3, 4.7)
         };
@@ -638,7 +690,10 @@ impl FireSystem {
         // a grenade's cloud rolls along a few metres up rather than climbing to the box's lid.
         // A wreck's column (stack) is the preset as a stack: hot enough to climb out of the box
         // and so dense it stands black against the sky (owner, 2026-10-13: "thick black smoke").
-        let (heat, smoke_rate, rise, buoy) = if stack {
+        let (heat, smoke_rate, rise, buoy) = if dirt {
+            // a short, dense charge: the earth leaves the ground at ~25 m/s scaled to the crater
+            (0.5, 90.0 * intensity.max(0.05), 70.0, 0.6)
+        } else if stack {
             (5.0, 10.0 * intensity.max(0.05), 2.5 * froude, 1.6)
         } else if smoke_only {
             (3.0, 4.0 * intensity.max(0.05), 1.2 * froude, 1.8)
@@ -658,8 +713,15 @@ impl FireSystem {
         // the burst: the charge burns for its first ~0.6 s (the box's own clock; Fire Pro's charge
         // carries fuel that keeps it burning, this solver has none), then the fireball lives on
         // what it already holds. A 0.4 s charge was torn apart before it was ever seen.
-        let burst = if explosion { 1.0 - smooth01(0.3, 0.8, g.time) } else { 1.0 };
-        let emit_strength = if explosion { burst } else { intensity };
+        let burst = if explosion {
+            1.0 - smooth01(0.3, 0.8, g.time)
+        } else if dirt {
+            // the earth is thrown in the first few tenths of a second, then only falls and drifts
+            1.0 - smooth01(0.08, 0.3, g.time)
+        } else {
+            1.0
+        };
+        let emit_strength = if explosion || dirt { burst } else { intensity };
         // a flame leans in the wind but stands on its fuel: the gas takes up at most 6 m/s of it
         // (at the weather's 30 m/s the whole flame lay down along the ground and ran into the
         // side of its box -- the owner's "invisible wall"); smoke takes all of it
@@ -671,16 +733,27 @@ impl FireSystem {
             origin_cell: [g.origin[0], g.origin[1], g.origin[2], g.cell],
             dims: [g.dims[0], g.dims[1], g.dims[2], 1],
             // w: the solids' column size (the box width / 10)
-            step: [STEP, g.time, (g.key % 97) as f32 * 1.7, g.width / 10.0],
+            step: [self.step_dt, g.time, (g.key % 97) as f32 * 1.7, g.width / 10.0],
             // the bed's flattened sphere stands on the ground (its half-height is 0.45 r)
             emitter: [s.pos_radius[0], s.pos_radius[1] + radius * lift, s.pos_radius[2], radius],
             emit: [emit_strength, heat, smoke_rate, rise],
             flame: [life, flame_smoke, if wreck { 4.0 } else { 3.0 }, expand],
             // the fireball's soot is heavy (the preset's smoke weight 1.45: it curls down round
             // the rising ball, the mushroom) and its eddies few and big (vorticity 1.08)
-            motion: if explosion { [buoy, 0.6, 0.1, 1.5] } else { [buoy, 0.12, 0.1, 3.2] },
+            // thrown earth is heavy (it falls back round the column: the reference photos' crown
+            // and curtain) and the air brakes it hard; its dust billows
+            motion: if dirt {
+                [buoy, 0.12, 0.12, 2.4]
+            } else if explosion {
+                [buoy, 0.6, 0.1, 1.5]
+            } else {
+                [buoy, 0.12, 0.1, 3.2]
+            },
             // turbulence: stronger for a bigger fire, its eddies a metre or so whatever the size
-            losses: if stack {
+            losses: if dirt {
+                // the heavy soil settles out over seconds; the dust that stays thins slowly
+                [0.6, 0.16, 0.7 * froude, 1.4]
+            } else if stack {
                 // a column cools slower than a grenade's cloud (it climbs) and thins slower still:
                 // at 0.02/s its smoke is still half there 35 s on, at the far end of its box
                 [0.4, 0.02, 0.5 * froude, 1.6]
@@ -693,7 +766,7 @@ impl FireSystem {
                 [0.62, 0.04, 0.5 * froude, 1.6]
             } else if wreck {
                 // delayed ignition: cooling 0.62, its smoke thinning at 0.35/s, turbulence 0.6
-                [0.62 / froude_di, 0.35, 0.6 * froude_di, 1.1]
+                [0.62 / froude_di, 0.35, 0.85 * froude_di, 1.1]
             } else if explosion {
                 // the fuel fireball cools slowly (0.26) and rolls in big eddies
                 [0.3, 0.3, 1.0 * froude, 1.6]
@@ -718,11 +791,20 @@ impl FireSystem {
                 if smoke_only { 0.0 } else { 1.0 },
                 if smoke_only { 1.0 } else { 0.7 },
                 g.yaw,
-                if explosion { 4.0 * froude.sqrt() * burst } else { 0.0 },
+                if explosion {
+                    4.0 * froude.sqrt() * burst
+                } else if dirt {
+                    60.0 * burst
+                } else {
+                    0.0
+                },
             ],
             // the column a third grey on average, swinging between near all-black and mostly grey
             // puffs; the flames' own soot mostly black
-            tint: if stack {
+            // dirt: a share of fine, pale dust among the dark clods (w: the crown's jets, fire_sim)
+            tint: if dirt {
+                [0.55, 0.35, 0.0, 1.0]
+            } else if stack {
                 [0.32, 0.4, 0.0, 0.0]
             } else if wreck {
                 [0.15, 0.25, 0.0, 0.0]
@@ -774,11 +856,18 @@ impl FireSystem {
             ..none()
         });
         // 6-8. divergence, pressure, projection back into vel[n]
-        run(&self.divergence, Binds { vel: Some(&g.vel[c].1), d: Some(&g.expansion.1), out_r: Some(&g.div.1), ..none() });
+        // BOOM-001: thrown earth is not a gas. While a dirt burst is in the air its jets fly on
+        // their own (no pressure: a zero field projects the velocity through unchanged, walls
+        // still enforced); incompressibility would round the crown of spikes into one ball.
         let mut pc = g.pcur;
-        for _ in 0..JACOBI {
-            run(&self.jacobi, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
-            pc = 1 - pc;
+        if dirt && g.time < 2.5 {
+            run(&self.clear, Binds { out_r: Some(&g.pres[pc].1), ..none() });
+        } else {
+            run(&self.divergence, Binds { vel: Some(&g.vel[c].1), d: Some(&g.expansion.1), out_r: Some(&g.div.1), ..none() });
+            for _ in 0..JACOBI {
+                run(&self.jacobi, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
+                pc = 1 - pc;
+            }
         }
         run(&self.project, Binds { vel: Some(&g.vel[c].1), p: Some(&g.pres[pc].1), out_rgba: Some(&g.vel[n].1), ..none() });
         drop(pass);
@@ -820,13 +909,19 @@ impl FireSystem {
             g.fade += (target - g.fade).clamp(-dt, rise);
         }
         self.grids.retain(|g| g.seen || g.fade > 0.0);
-        if self.grids.is_empty() {
+        if self.grids.is_empty() && self.flashes.is_empty() {
             return;
         }
+        // One solver step per frame, as long as the frame took: at most one step was ever taken
+        // and it was always 1/60 s, so below 60 fps every fire ran in slow motion -- two thirds
+        // speed at 40 fps, half at 30 (owner, 2026-10-19: "have the flames be faster"). Now the
+        // step covers the real frame time up to 1/30 s (semi-Lagrangian advection stays stable
+        // at that), same GPU cost; only below 30 fps does it fall behind again.
         self.acc = (self.acc + dt).min(STEP * 2.0);
-        if self.acc >= STEP {
-            self.acc -= STEP;
-            self.clock += STEP;
+        if self.acc >= STEP && !self.grids.is_empty() {
+            self.step_dt = self.acc;
+            self.acc = 0.0;
+            self.clock += self.step_dt;
             encoder.push_debug_group("wgr_fire_sim");
             for gi in 0..self.grids.len() {
                 let (n, pc) = self.step_grid(device, queue, encoder, gi);
@@ -834,7 +929,7 @@ impl FireSystem {
                 g.cur = n;
                 g.pcur = pc;
                 g.needs_clear = false;
-                g.time += STEP;
+                g.time += self.step_dt;
             }
             encoder.pop_debug_group();
             self.steps += 1;
@@ -860,11 +955,14 @@ impl FireSystem {
                 // glowing, cooler (2630 K)
                 look: match g.src.params[3] {
                     k if k > 1.5 && k < 2.5 => [3.0, 3.0, 1.0, 2630.0],
+                    // thrown earth does not glow
+                    k if k > 4.5 => [0.0, 0.0, 0.0, 1000.0],
                     k if k > 0.5 && k < 1.5 => [1.4, 1.0, 1.0, 3200.0],
                     _ => [0.9, 1.0, 1.0, 3200.0],
                 },
                 // a burning vehicle's smoke is black and grey by turns (owner, 2026-10-13)
-                grey: [0.16, 0.16, 0.165, 0.0],
+                // thrown earth's fine share is pale, dry dust
+                grey: if g.src.params[3] > 4.5 { [0.30, 0.245, 0.18, 0.0] } else { [0.16, 0.16, 0.165, 0.0] },
                 // the source's colour; Fire Pro's campfire density 7.11 / m for soot, its
                 // industrial smoke's 6 for a plume
                 smoke: [
@@ -885,6 +983,16 @@ impl FireSystem {
             // Fire Pro's smoke colour #25292e (linear), its campfire density 7.11 / m
             smoke: [0.0185, 0.0212, 0.0273, 7.11 * self.smoke_scale],
             fire: [3200.0, 0.9, 1.0, self.gain],
+            flashes: {
+                // nearest first; camera-relative so the march stays in centimetre precision
+                let mut f = [[0.0f32; 4]; 2 * MAX_FLASHES];
+                for (i, s) in self.flashes.iter().enumerate() {
+                    f[2 * i] = [s[0] - cam[0], s[1] - cam[1], s[2] - cam[2], s[3]];
+                    f[2 * i + 1] = [s[4], s[5], s[6], s[7]];
+                }
+                f
+            },
+            flash_info: [self.flashes.len() as f32, 0.0, self.flash_gain * self.gain.abs(), 0.0],
         };
         queue.write_buffer(&self.march_params, 0, bytemuck::bytes_of(&mp));
         let field = |slot: usize| -> wgpu::TextureView {
@@ -929,6 +1037,8 @@ impl FireSystem {
         drop(pass);
         self.last_bind = Some(bg);
         self.frames_drawn += 1;
+        // BOOM-005: flashes are sent every frame; drawn once, forgotten
+        self.flashes.clear();
     }
 
     /// The fire's coverage into the upscalers' reactive mask (R8, render size), after the
@@ -975,6 +1085,15 @@ impl Grid {
         // upwind end: the upright box's downwind side was the "invisible wall" the leaning
         // flames ran into (owner, 2026-10-13)
         let wreck = src.params[3] > 0.5 && src.params[3] < 1.5;
+        // BOOM-001: a ground burst's thrown earth (kind 5) stands in the upright box, centred, 1.8
+        // widths tall: it climbs before it drifts. It used to fall into the wreck-column branches
+        // below (kind > 3.5) and got a wind-turned plume box that held it in a low dome.
+        if src.params[3] > 4.5 {
+            let size = (NX, NY, NZ);
+            let cell = width / NX as f32;
+            let origin = [pivot[0] - width * 0.5, pivot[1] - 2.0 * cell, pivot[2] - width * 0.5];
+            return Grid::build(device, key, src, size, origin, cell, width, 0.0, pivot);
+        }
         if wreck && wlen > 2.0 {
             let size = (WRECK_X, WRECK_Y, WRECK_Z);
             let cell = width / size.2 as f32;

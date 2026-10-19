@@ -1,0 +1,3 @@
+; 20 m east of the garage row's solid side wall, facing it (west): the verified breach target
+player setPos [9768, 4002, 0]
+player setDir 270

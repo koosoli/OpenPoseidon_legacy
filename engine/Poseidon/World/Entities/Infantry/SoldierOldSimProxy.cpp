@@ -1,6 +1,7 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/MuzzleBurst.hpp> // BOOM-005
 #include <Poseidon/World/Weather/SandField.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
@@ -664,7 +665,9 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
 
         if (animFire)
         {
-            if (weapon == _mGunFireWeapon && (_mGunFireFrames > 0 || Glob.uiTime < _mGunFireTime + 0.05f))
+            // BOOM-005: with the volumetric flash on, the retail flash sheet stays hidden
+            if (weapon == _mGunFireWeapon && (_mGunFireFrames > 0 || Glob.uiTime < _mGunFireTime + 0.05f) &&
+                !Poseidon::render::VolumetricMuzzleFlashEnabled())
             {
                 animFire->Unhide(pshape, pLevel);
                 animFire->SetPhase(pshape, pLevel, _mGunFirePhase);

@@ -470,6 +470,10 @@ fn default_layer_pick() -> [f32; 128] {
 /// is ~0.19 cards/m^2, or one card every ~2.3 m on average.
 pub const CARD_COVERAGE_DEFAULT: f32 = 0.24;
 
+/// BOOM-001: grass placement's crater list (GrassCraters in grass.wgsl).
+pub const GRASS_CRATER_MAX: usize = 64;
+const GRASS_CRATER_BYTES: u64 = ((4 + GRASS_CRATER_MAX * 4) * 4) as u64;
+
 /// Mirrors `GrassInstance` in grass.wgsl and grass_shadow.wgsl (32 B). `packed`
 /// carries what the compute placement pass resolves once per blade -- currently
 /// the flattening direction/strength that both vertex shaders used to rebuild
@@ -603,6 +607,7 @@ pub struct Grass {
     earth_gen: u64,
     // Sinkhole W1: the placement's own copy of the terrain hole edges, refreshed when the terrain's changes.
     holes: wgpu::Buffer,
+    craters: wgpu::Buffer,
     holes_gen: u64,
     have_heightmap: bool,
     place_pipeline: wgpu::ComputePipeline,
@@ -1084,10 +1089,27 @@ impl Grass {
                     },
                     count: None,
                 },
+                // BOOM-001: explosion craters near the camera; placement grows nothing on their soil.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(GRASS_CRATER_BYTES),
+                    },
+                    count: None,
+                },
             ],
         });
         let satellite_view = create_satellite_placeholder(device, queue);
         let road_cells = create_road_cells_buffer(device, queue, &[]);
+        let craters = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_grass_craters"),
+            size: GRASS_CRATER_BYTES,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let holes = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_grass_terrain_holes"),
             size: crate::terrain::TERRAIN_HOLES_BYTES,
@@ -1307,6 +1329,7 @@ impl Grass {
             &holes,
             &satellite_view,
             &road_cells,
+            &craters,
         );
         let data_bind = make_data_bind(
             device,
@@ -1848,6 +1871,7 @@ impl Grass {
             earth: None,
             earth_gen: 0,
             holes,
+            craters,
             holes_gen: 0,
             have_heightmap: false,
             place_pipeline,
@@ -2194,6 +2218,18 @@ impl Grass {
 
     /// RFG-107: the native world's road segments per land cell (see `road_edge_distance` in
     /// grass.wgsl for the layout); empty restores "no roads". Rebinds group 1.
+    /// BOOM-001: the craters nearest the camera, `[count, 0, 0, 0]` then up to GRASS_CRATER_MAX
+    /// `(x, z, soil radius, seed)`; placement skips their fresh soil. Anything malformed clears them.
+    pub fn set_craters(&mut self, queue: &wgpu::Queue, data: &[f32]) {
+        let mut buf = vec![0.0f32; 4 + GRASS_CRATER_MAX * 4];
+        let n = data.first().copied().unwrap_or(0.0);
+        if n.is_finite() && n >= 0.0 && n <= GRASS_CRATER_MAX as f32 && n.fract() == 0.0
+            && data.len() == 4 + n as usize * 4 && data.iter().all(|v| v.is_finite()) {
+            buf[..data.len()].copy_from_slice(data);
+        }
+        queue.write_buffer(&self.craters, 0, bytemuck::cast_slice(&buf));
+    }
+
     pub fn set_road_cells(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, data: &[u32]) {
         self.road_cells = create_road_cells_buffer(device, queue, data);
         self.terrain_generation = u64::MAX;
@@ -2359,6 +2395,7 @@ impl Grass {
             &self.holes,
             &self.satellite_view,
             &self.road_cells,
+            &self.craters,
         );
     }
 
@@ -2820,6 +2857,7 @@ impl Grass {
                 &self.holes,
                 &self.satellite_view,
                 &self.road_cells,
+                &self.craters,
             );
         }
     }
@@ -3450,6 +3488,7 @@ fn make_terrain_bind(
     holes: &wgpu::Buffer,
     satellite: &wgpu::TextureView,
     road_cells: &wgpu::Buffer,
+    craters: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("wgr_grass_terrain_bind"),
@@ -3478,6 +3517,10 @@ fn make_terrain_bind(
             wgpu::BindGroupEntry {
                 binding: 5,
                 resource: road_cells.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: craters.as_entire_binding(),
             },
         ],
     })

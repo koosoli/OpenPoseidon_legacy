@@ -49,6 +49,9 @@ struct Params {
 @group(0) @binding(4) var bloom_samp: sampler;
 // 1x1 auto-exposure scale from the eye-adaptation module (1.0 when disabled).
 @group(0) @binding(5) var exposure_tex: texture_2d<f32>;
+// BOOM-006: every 4th pixel each way counts itself (slot 64 + i) and whether it left the curve
+// burnt out (slot i); the auto-exposure closes the iris on that (exposure.wgsl CLIP_ALLOWED).
+@group(0) @binding(6) var<storage, read_write> clip_counts: array<atomic<u32>, 128>;
 
 // Fixed Hable / Uncharted 2 filmic curve (original constants).
 const HABLE_A: f32 = 0.15;
@@ -228,6 +231,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
 
     color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
+    // BOOM-006: the clip count for the auto-exposure (the picture as shown, before the HUD)
+    let px = vec2<u32>(in.clip.xy);
+    if ((px.x & 3u) == 0u && (px.y & 3u) == 0u) {
+        let slot = (px.x / 4u + (px.y / 4u) * 7u) % 64u;
+        atomicAdd(&clip_counts[64u + slot], 1u);
+        if (max(color.r, max(color.g, color.b)) >= 0.97) { atomicAdd(&clip_counts[slot], 1u); }
+    }
     if (params.encode > 0.5) {
         color = linear_to_srgb(color);
     }

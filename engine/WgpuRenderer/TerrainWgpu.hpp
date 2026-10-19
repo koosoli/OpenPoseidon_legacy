@@ -241,6 +241,15 @@ class TerrainWgpu : public ITerrainRenderer
     int _mudFarWindowX = 0, _mudFarWindowZ = 0;
     double _mudFarUploadWallTime = 0.0;
     bool _mudFarUploaded = false;
+    // BOOM-001: explosion crater views (CraterField), near (0.25 m) and far (1 m), and the
+    // grass placement's nearest-crater list. Re-sent on a new crater or a window move.
+    uint64_t _craterNearRevision = 0, _craterFarRevision = 0, _grassCraterRevision = 0;
+    int _craterNearX = 0, _craterNearZ = 0, _craterFarX = 0, _craterFarZ = 0, _grassCraterX = 0, _grassCraterZ = 0;
+    bool _craterNearUploaded = false, _craterFarUploaded = false, _grassCraterUploaded = false;
+    // BOOM-004: sharp snow bullet holes, re-picked on a new mark or an 8 m camera move.
+    uint64_t _snowMarksRevision = 0;
+    int _snowMarksX = 0, _snowMarksZ = 0;
+    bool _snowMarksUploaded = false;
     uint64_t _sandRevision = 0;
     int _sandWindowX = 0, _sandWindowZ = 0;
     bool _sandUploaded = false;

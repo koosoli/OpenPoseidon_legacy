@@ -7,7 +7,8 @@
 // Spatial metering: the first reduction weights each pixel so the bright sky (top of
 // frame) doesn't drag the average up and over-darken the ground. Each texel carries
 // (weighted log-luminance, weight); the pyramid averages both channels and the adapt
-// pass divides R/G to recover the weighted mean. So the pyramid is Rg16Float.
+// pass divides R/G to recover the weighted mean. B/A carry the highlight cap (fs_lum_first),
+// so the pyramid is Rgba16Float.
 
 const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 
@@ -38,13 +39,15 @@ struct ExpParams {
     // RFG-150: the share of a metered brightness change the iris compensates (1 = all of it,
     // key/avg; <= 0 also means 1). Native Enfusion worlds use 0.55 -- see EngineWgpu.
     compensation: f32,
-    meter_mode: f32, // 0 = sky_weight by screen height; 1 = Reforger's centre-weighted mask
+    meter_mode: f32, // 1 = Reforger's centre-weighted mask; else sky_weight by screen height, and
+                     // < 0 carries -(tonemap exposure) for the highlight cap (stock worlds)
 };
 
 // ---- Reduction (src + sampler + params at group 0) ---------------------------
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var src_samp: sampler;
 @group(0) @binding(2) var<uniform> ep: ExpParams;
+@group(0) @binding(3) var reduce_prev: texture_2d<f32>; // 1x1 last frame's exposure scale
 
 // Metering weight by vertical screen position: uv.y = 0 is the top of the frame (sky,
 // down-weighted toward ep.sky_weight), uv.y = 1 is the bottom (ground, full weight).
@@ -69,14 +72,13 @@ fn fs_lum_first(in: VsOut) -> @location(0) vec4<f32> {
     let c = textureSampleLevel(src, src_samp, in.uv, 0.0).rgb;
     let lum = max(dot(max(c, vec3<f32>(0.0)), LUMA), 1e-5);
     let w = meter_weight(in.uv);
-    return vec4<f32>(log2(lum) * w, w, 0.0, 1.0);
+    return vec4<f32>(log2(lum) * w, w, 0.0, 0.0);
 }
 
 // Subsequent steps: average both channels (the linear tap = 2x2 mean of R and G).
 @fragment
 fn fs_lum_down(in: VsOut) -> @location(0) vec4<f32> {
-    let s = textureSampleLevel(src, src_samp, in.uv, 0.0).rg;
-    return vec4<f32>(s, 0.0, 1.0);
+    return textureSampleLevel(src, src_samp, in.uv, 0.0);
 }
 
 // ---- Adapt (1x1: current weighted avg + previous scale + params) -------------
@@ -84,9 +86,16 @@ fn fs_lum_down(in: VsOut) -> @location(0) vec4<f32> {
 @group(0) @binding(1) var prev_tex: texture_2d<f32>; // 1x1 previous exposure scale
 // ep is declared above at binding 2 and reused here.
 
+// BOOM-006: the share of the picture allowed to clip (sampled every 4th pixel by the tonemap),
+// and the counters' layout: CLIP_SLOTS clipped counts, then CLIP_SLOTS sampled counts.
+const CLIP_ALLOWED: f32 = 0.015;
+const CLIP_SLOTS: u32 = 64u;
+@group(0) @binding(4) var<storage, read> clip_counts: array<u32, 128>;
+
 @fragment
 fn fs_adapt(in: VsOut) -> @location(0) vec4<f32> {
-    let acc = textureLoad(lum_tex, vec2<i32>(0, 0), 0).rg;
+    let full = textureLoad(lum_tex, vec2<i32>(0, 0), 0);
+    let acc = full.rg;
     let avg_lum = exp2(acc.r / max(acc.g, 1e-5));
     var prev = textureLoad(prev_tex, vec2<i32>(0, 0), 0).r;
     // Guard uninitialised / NaN history so the loop can't get stuck off-screen.
@@ -99,8 +108,31 @@ fn fs_adapt(in: VsOut) -> @location(0) vec4<f32> {
         if (ep.compensation > 0.0 && ep.compensation != 1.0) {
             raw = ep.key * pow(max(avg_lum, 1e-4), -ep.compensation);
         }
+        // BOOM-006 (owner, 2026-10-19: "ground and buildings must never get overexposed -- that
+        // is what auto exposure is for"; "if i look into the sun it even gets brighter"). The
+        // log average cannot see clipping: a backlit frame meters dark and opened the iris
+        // into the sun. The tonemap counts, every 4th pixel, how many leave it burnt out (any
+        // channel >= 0.97 on screen, after bloom and the grade). While more than CLIP_ALLOWED
+        // of the picture clips, the iris closes -- a sunlit wall, snow, the glare round the sun
+        // alike; between half that and CLIP_ALLOWED it may not open further (no hunting).
+        var clipped = 0u;
+        var sampled = 0u;
+        for (var i = 0u; i < CLIP_SLOTS; i++) {
+            clipped += clip_counts[i];
+            sampled += clip_counts[CLIP_SLOTS + i];
+        }
+        if (sampled > 64u) {
+            let frac = f32(clipped) / f32(sampled);
+            if (frac > CLIP_ALLOWED) {
+                raw = min(raw, prev * exp2(-min((frac - CLIP_ALLOWED) * 12.0, 1.5)));
+            } else if (frac > 0.5 * CLIP_ALLOWED) {
+                raw = min(raw, prev);
+            }
+        }
         tgt = clamp(raw, ep.min_scale, ep.max_scale);
     }
-    let scale = mix(prev, tgt, clamp(ep.rate, 0.0, 1.0));
+    // closing the iris on a bright view runs twice as fast as opening it again
+    let rate = select(ep.rate, min(ep.rate * 2.0, 1.0), tgt < prev);
+    let scale = mix(prev, tgt, clamp(rate, 0.0, 1.0));
     return vec4<f32>(scale, 0.0, 0.0, 1.0);
 }

@@ -16,7 +16,7 @@
 #import lighting::lights_contrib
 #import color::srgb_to_linear
 #import gbuffer::oct_encode
-#import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage}
+#import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage, snow_glitter, snow_wind_relief}
 
 struct TerrainParams {
     world_origin: vec2<f32>,
@@ -160,9 +160,11 @@ fn snow_gradient(xz: vec2<f32>, world_y: f32, footprint: f32) -> vec3<f32> {
     return vec3<f32>(-dx, 0.0, -dz);
 }
 
+// `wind`: snow_wind_relief(xz, footprint).yz -- the caller evaluates it once and shares it
 fn terrain_snow_normal(xz: vec2<f32>, world_y: f32, geometric: vec3<f32>,
-    footprint: f32, dry: f32) -> vec3<f32> {
-    let shape = normalize(geometric + snow_gradient(xz, world_y, footprint) * geometric.y * dry);
+    footprint: f32, dry: f32, wind: vec2<f32>) -> vec3<f32> {
+    // the wind's drifts and ripples (snow_wind_relief) on top of the deposited depth's own slope
+    let shape = normalize(geometric + (snow_gradient(xz, world_y, footprint) - vec3<f32>(wind.x, 0.0, wind.y)) * geometric.y * dry);
     let powder = snow_powder_normal(vec3<f32>(xz.x, world_y, xz.y), shape, footprint);
     return powder;
 }
@@ -390,6 +392,259 @@ fn mud_height_gradient(world_xz: vec2<f32>, footprint: f32) -> vec2<f32> {
         mud_height_offset(world_xz + vec2<f32>(0.0, h)) - mud_height_offset(world_xz - vec2<f32>(0.0, h))) / (2.0 * h);
 }
 
+// BOOM-001: explosion craters (CraterField). Two views in the shared storage buffer after the
+// mud/sand views: near 0.25 m cells over 128 m, far 1 m cells over 512 m; each a header
+// [originX, originZ, cell, limit] + 512*512 signed heights, then a material view of the same
+// shape (soil + 256 * scorch, 0..255 each). Same cell-centre bilinear rule as CraterField::
+// HeightOffsetAt, so the drawn crater is the one men and vehicles stand in. Returns
+// (height, coverage): coverage fades over the window's last 24 cells.
+const CRATER_NEAR: u32 = 1048592u; // deficits[] starts after the vec4 header: (4 views + rut-water vec4) - 4
+const CRATER_FAR: u32 = 1572888u;
+const CRATER_VIEW: u32 = 262148u;
+const CRATER_END: u32 = 2097184u;
+fn crater_view(base: u32, cell: f32, world_xz: vec2<f32>) -> vec2<f32> {
+    let limit = snow.deficits[base + 3u];
+    if (limit <= 0.0 || snow.deficits[base + 2u] != cell) { return vec2<f32>(0.0); }
+    let origin = vec2<f32>(snow.deficits[base], snow.deficits[base + 1u]);
+    let t = (world_xz - origin) / cell - vec2<f32>(0.5);
+    if (any(t < vec2<f32>(0.0)) || any(t >= vec2<f32>(511.0))) { return vec2<f32>(0.0); }
+    let b = vec2<u32>(floor(t));
+    let f = fract(t);
+    let i = base + 4u + b.y * 512u + b.x;
+    let h = mix(mix(snow.deficits[i], snow.deficits[i + 1u], f.x),
+                mix(snow.deficits[i + 512u], snow.deficits[i + 513u], f.x), f.y);
+    let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
+    return vec2<f32>(clamp(h, -limit, 1.5), smoothstep(0.0, 24.0, edge));
+}
+// One load: the 512 m far view holds every crater the near view can (it contains it), so an
+// empty far view means nothing to look up. sample_height runs many times per terrain pixel
+// (snow cover, normals); without this gate a crater-free snowy map paid ~3 ms of buffer reads.
+fn crater_active() -> bool {
+    return arrayLength(&snow.deficits) >= CRATER_END && snow.deficits[CRATER_FAR + 3u] > 0.0;
+}
+// BOOM-004 (owner, 2026-10-19: "you replaced it with a texture instead of doing a real groove"):
+// a bullet's track through the snow, ray-traced. Each track is a straight cylinder of the hole's
+// radius along the round's flight, from just above the snow surface down to where it struck the
+// ground (SnowField::NearestBulletMarks). The snow surface is open wherever that cylinder breaks
+// through it -- round for a steep shot, a long oval for a grazing one -- and a pixel there shows
+// what the view ray really meets inside: the far wall of the track (its own normal, lit or in the
+// shadow of the near rim depending on where the sun's ray from that point leaves the track) or,
+// at the bottom, the earth the round stopped in. The 12.5 cm snow grid cannot carve a 5 cm hole;
+// the drawn surface is interpolated between vertices metres apart, so no separate mesh could meet
+// it -- solving the geometry where the surface is drawn is what makes the opening and the walls
+// line up exactly from every side.
+// [count, originX, originZ, 0] then per track (top - origin (y absolute), radius), (dir, length),
+// (snowfall since, 0, 0, 0).
+const SNOW_MARKS: u32 = 2097184u;
+const SNOW_MARKS_END: u32 = 2097956u;
+struct SnowTrack {
+    open: f32,       // how much of this pixel is opening (anti-aliased edge)
+    albedo: vec3<f32>, // what is seen down the track (its colour times its occlusion)
+    normal: vec3<f32>, // that surface's normal
+    rim: f32,        // the lip of broken crust round the opening
+    slope: vec2<f32>, // the lip's outward tilt
+};
+// exit distance of a ray (origin inside the cylinder) from the cylinder axis A + D t, radius r
+fn track_exit(o: vec3<f32>, v: vec3<f32>, A: vec3<f32>, D: vec3<f32>, r: f32) -> f32 {
+    let m = o - A;
+    let vd = dot(v, D);
+    let md = dot(m, D);
+    let qa = max(1.0 - vd * vd, 1e-6);
+    let qb = 2.0 * (dot(m, v) - md * vd);
+    let qc = dot(m, m) - md * md - r * r;
+    let disc = max(qb * qb - 4.0 * qa * qc, 0.0);
+    return (-qb + sqrt(disc)) / (2.0 * qa);
+}
+fn snow_bullet_tracks(world_abs: vec3<f32>, view: vec3<f32>, footprint: f32, to_sun: vec3<f32>) -> SnowTrack {
+    var o: SnowTrack;
+    o.albedo = vec3<f32>(1.0);
+    o.normal = vec3<f32>(0.0, 1.0, 0.0);
+    if (arrayLength(&snow.deficits) < SNOW_MARKS_END) { return o; }
+    let count = min(u32(snow.deficits[SNOW_MARKS]), 64u);
+    if (count == 0u) { return o; }
+    let P = world_abs - vec3<f32>(snow.deficits[SNOW_MARKS + 1u], 0.0, snow.deficits[SNOW_MARKS + 2u]);
+    let w = max(footprint, 0.001);
+    for (var k = 0u; k < count; k = k + 1u) {
+        let b = SNOW_MARKS + 4u + k * 12u;
+        let A = vec3<f32>(snow.deficits[b], snow.deficits[b + 1u], snow.deficits[b + 2u]);
+        let r = snow.deficits[b + 3u];
+        let D = vec3<f32>(snow.deficits[b + 4u], snow.deficits[b + 5u], snow.deficits[b + 6u]);
+        let L = snow.deficits[b + 7u];
+        let m = P - A;
+        // cheap reject: farther from the segment's bounding sphere than its radius + lip
+        let mid = m - D * (L * 0.5);
+        let reach = L * 0.5 + r * 3.0 + w * 2.0;
+        if (dot(mid, mid) > reach * reach) { continue; }
+        // fresh snow fills a track: gone after ~3 cm of new snowfall
+        let fresh = 1.0 - smoothstep(0.0, 0.03, snow.deficits[b + 8u]);
+        if (fresh <= 0.0) { continue; }
+        let t = dot(m, D);
+        if (t < -r || t > L + r) { continue; }
+        let q = m - D * t;
+        let dist = length(q);
+        // the lip: crust broken and pushed up round the opening
+        let lip = (1.0 - smoothstep(r, r * 2.2 + w, dist)) * smoothstep(r - w, r + w, dist) * fresh;
+        o.rim = max(o.rim, lip);
+        o.slope += select(vec2<f32>(0.0), q.xz / max(dist, 1e-5), dist > 1e-5) * lip;
+        // the opening: this surface point lies inside the cylinder (between its ends)
+        let inside = clamp((r - dist) / w + 0.5, 0.0, 1.0) * step(0.0, t) * step(t, L) * fresh;
+        if (inside <= 0.0 || inside < o.open) { continue; }
+        // the view ray from the surface on into the snow, to the track's far wall or its bottom
+        var s = track_exit(P, view, A, D, r);
+        var H = P + view * s;
+        var tH = dot(H - A, D);
+        var nrm = vec3<f32>(0.0);
+        var earth = 0.0;
+        if (tH > L) {
+            // past the ground end: the bottom, where the round went into the earth
+            let vd = dot(view, D);
+            if (vd > 1e-4) { s = (L - t) / vd; H = P + view * s; }
+            nrm = -D;
+            earth = 1.0;
+        } else {
+            let radial = (H - A) - D * tH;
+            nrm = -radial / max(length(radial), 1e-5); // the wall faces the axis
+        }
+        // the sun from that point: lit only if its ray leaves the track above the surface
+        var lit = 0.0;
+        if (dot(nrm, to_sun) > 0.0 && to_sun.y > 0.0) {
+            let s2 = track_exit(H + nrm * 1e-4, to_sun, A, D, r);
+            let Q = H + to_sun * s2;
+            lit = smoothstep(-0.004, 0.004, Q.y - P.y);
+        }
+        // sky reaching down a narrow shaft: less the deeper
+        let depth = max(P.y - H.y, 0.0);
+        let sky = clamp(1.0 - depth / (8.0 * r), 0.2, 1.0);
+        let snowCol = vec3<f32>(0.80, 0.86, 0.95); // packed snow walls take the blue of light through snow
+        let soil = vec3<f32>(0.10, 0.08, 0.06);
+        // direct sun is applied later from the normal; here: the share it does not get (shadowed)
+        // and the sky the shaft hides
+        let base = mix(snowCol, soil, earth);
+        o.albedo = base * sky * mix(0.4, 1.0, lit);
+        o.normal = nrm;
+        o.open = inside;
+    }
+    return o;
+}
+fn crater_height_offset(world_xz: vec2<f32>) -> f32 {
+    if (!crater_active()) { return 0.0; }
+    let near = crater_view(CRATER_NEAR, 0.25, world_xz);
+    if (near.y >= 1.0) { return near.x; }
+    let far = crater_view(CRATER_FAR, 1.0, world_xz);
+    return mix(far.x * far.y, near.x, near.y);
+}
+fn crater_unpack(v: f32) -> vec2<f32> {
+    let scorch = floor(v / 256.0);
+    return vec2<f32>(v - scorch * 256.0, scorch) / 255.0;
+}
+fn crater_material_view(base: u32, cell: f32, world_xz: vec2<f32>) -> vec3<f32> {
+    let mb = base + CRATER_VIEW;
+    if (snow.deficits[mb + 3u] <= 0.0 || snow.deficits[mb + 2u] != cell) { return vec3<f32>(0.0); }
+    let origin = vec2<f32>(snow.deficits[mb], snow.deficits[mb + 1u]);
+    let t = (world_xz - origin) / cell - vec2<f32>(0.5);
+    if (any(t < vec2<f32>(0.0)) || any(t >= vec2<f32>(511.0))) { return vec3<f32>(0.0); }
+    let b = vec2<u32>(floor(t));
+    let f = fract(t);
+    let i = mb + 4u + b.y * 512u + b.x;
+    let m = mix(mix(crater_unpack(snow.deficits[i]), crater_unpack(snow.deficits[i + 1u]), f.x),
+                mix(crater_unpack(snow.deficits[i + 512u]), crater_unpack(snow.deficits[i + 513u]), f.x), f.y);
+    let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
+    return vec3<f32>(m, smoothstep(0.0, 24.0, edge));
+}
+// (soil, scorch) 0..1 at a point.
+fn crater_material(world_xz: vec2<f32>) -> vec2<f32> {
+    if (!crater_active()) { return vec2<f32>(0.0); }
+    let near = crater_material_view(CRATER_NEAR, 0.25, world_xz);
+    if (near.z >= 1.0) { return near.xy; }
+    let far = crater_material_view(CRATER_FAR, 1.0, world_xz);
+    return mix(far.xy * far.z, near.xy, near.z);
+}
+fn crater_height_gradient(world_xz: vec2<f32>, footprint: f32) -> vec2<f32> {
+    if (!crater_active()) { return vec2<f32>(0.0); }
+    // two cells wide: a one-cell difference of the bilinear field shows its 0.25 m facets
+    let h = max(0.5, footprint);
+    return vec2<f32>(crater_height_offset(world_xz + vec2<f32>(h, 0.0)) - crater_height_offset(world_xz - vec2<f32>(h, 0.0)),
+        crater_height_offset(world_xz + vec2<f32>(0.0, h)) - crater_height_offset(world_xz - vec2<f32>(0.0, h))) / (2.0 * h);
+}
+
+// BOOM-001: freshly thrown soil (linear albedo) and its micro relief, procedural: churned loam in
+// three scales of clods, damp dark crevices between them, a pale dry crust on the up-facing tops,
+// streaks of earth running down the slopes (`radial`: the crater's height gradient), small
+// stones, and soot over the bowl (`scorch`). `p`: local metres (see the caller).
+struct CraterSoil {
+    rgb: vec3<f32>,
+    bump: vec2<f32>,
+    cover_noise: f32,
+};
+// Integer hash (owner, 2026-10-19: "i still saw the crater texture instead of a real crater"):
+// mud_rut_hash is fract(sin(dot(p, ..)) * 43758), and the clod octaves reach p ~ 15000, where
+// sin() of an argument in the millions has no precision left on the GPU -- the soil came out in
+// hard-edged square blocks that read as a pasted texture. Bit mixing has no such limit.
+fn crater_hash(cell: vec2<i32>) -> f32 {
+    var h = bitcast<u32>(cell.x) * 1597334677u ^ bitcast<u32>(cell.y) * 3812015801u;
+    h = (h ^ (h >> 16u)) * 2246822519u;
+    h = (h ^ (h >> 13u)) * 3266489917u;
+    h = h ^ (h >> 16u);
+    return f32(h & 0x00ffffffu) / 16777215.0;
+}
+fn crater_noise(p: vec2<f32>) -> f32 {
+    let i = vec2<i32>(floor(p));
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(crater_hash(i), crater_hash(i + vec2<i32>(1, 0)), u.x),
+               mix(crater_hash(i + vec2<i32>(0, 1)), crater_hash(i + vec2<i32>(1, 1)), u.x), u.y);
+}
+fn crater_fbm(p: vec2<f32>) -> f32 {
+    return 0.5 * crater_noise(p) + 0.25 * crater_noise(p * 2.03 + vec2<f32>(5.1, 1.7))
+         + 0.15 * crater_noise(p * 4.1 + vec2<f32>(2.3, 9.4)) + 0.1 * crater_noise(p * 8.3 + vec2<f32>(7.7, 3.3));
+}
+fn crater_soil(p: vec2<f32>, radial: vec2<f32>, up: f32, scorch: f32) -> CraterSoil {
+    var o: CraterSoil;
+    // clods: lumps ~25 cm and ~8 cm; crevices where the fine field is low
+    let big = crater_fbm(p * 2.2);
+    let clod = crater_fbm(p * 7.0 + vec2<f32>(big * 1.5));
+    let crevice = smoothstep(0.45, 0.22, clod);
+    // streaks along the slope: noise stretched down the fall line
+    let slope = length(radial);
+    let dir = select(vec2<f32>(1.0, 0.0), radial / max(slope, 1e-4), slope > 1e-3);
+    let along = vec2<f32>(dot(p, dir), dot(p, vec2<f32>(-dir.y, dir.x)));
+    let streak = crater_noise(vec2<f32>(along.x * 0.8, along.y * 9.0)) * smoothstep(0.05, 0.4, slope);
+    // palette: dark damp loam -> mid brown -> dry tan crust
+    let damp = vec3<f32>(0.045, 0.032, 0.022);
+    let loam = vec3<f32>(0.098, 0.071, 0.048);
+    let dry = vec3<f32>(0.215, 0.168, 0.118);
+    var c = mix(damp, loam, smoothstep(0.25, 0.65, big));
+    c = mix(c, dry, smoothstep(0.5, 0.95, clod) * up * (0.3 + 0.5 * big));
+    c = mix(c, damp * 0.8, crevice * 0.6);
+    c = mix(c, c * 0.72, streak * 0.6);
+    // stones: one chance per 14 cm cell, a pale grey-beige pebble with a dark rim
+    let cell = floor(p * 7.0);
+    let h1 = crater_hash(vec2<i32>(cell));
+    let h2 = crater_hash(vec2<i32>(cell) + vec2<i32>(7919, 104729));
+    let centre = (cell + vec2<f32>(0.25 + 0.5 * h1, 0.25 + 0.5 * h2)) / 7.0;
+    // (rare, small, earthy, irregular: a few stones in the soil, not eggs on it)
+    let rad = (0.006 + 0.018 * h2) * step(0.86, h1);
+    let dp = p - centre;
+    let lumpy = length(dp) * (1.0 + 0.35 * sin(atan2(dp.y, dp.x) * 3.0 + h1 * 20.0));
+    let stone = (1.0 - smoothstep(rad * 0.6, rad, lumpy)) * 0.85;
+    let stoneCol = mix(vec3<f32>(0.085, 0.078, 0.068), vec3<f32>(0.15, 0.135, 0.115), h2);
+    c = mix(c, stoneCol, stone);
+    // soot: blotchy black over the bowl
+    let soot = vec3<f32>(0.020, 0.018, 0.017) * (0.8 + 0.5 * big);
+    c = mix(c, soot, clamp(scorch * (0.6 + 0.7 * big), 0.0, 0.95));
+    o.rgb = c;
+    // relief: clods up, crevices down, stones domed
+    let e = 0.03;
+    let h0 = clod - 0.6 * crevice;
+    let hx = crater_fbm((p + vec2<f32>(e, 0.0)) * 7.0 + vec2<f32>(big * 1.5)) - h0 - 0.6 * crevice;
+    let hz = crater_fbm((p + vec2<f32>(0.0, e)) * 7.0 + vec2<f32>(big * 1.5)) - h0 - 0.6 * crevice;
+    var bump = vec2<f32>(hx, hz) * 0.9;
+    if (stone > 0.0) { bump += dp / max(rad, 1e-3) * stone * 0.5; }
+    o.bump = bump;
+    o.cover_noise = big;
+    return o;
+}
+
 // (OP, 2026-10-14) Beyond the map edge the heightfield clamps to its edge texels: an endless flat
 // shelf at the edge's depth. The sea above it is drawn as open ocean (tw_water.wgsl
 // materialTerrainHeightAt sinks the bed to sea level - 200 m over 400 m), so in a storm the wave
@@ -416,9 +671,9 @@ fn sample_height(world_xz: vec2<f32>) -> f32 {
     let y11 = hm_load(ix + 1, iz + 1);
     if (f.x <= 1.0 - f.y)
     {
-        return offmap_bed(world_xz, y00 + (y10 - y00) * f.y + (y01 - y00) * f.x) + mud_height_offset(world_xz) + sand_height_offset(world_xz);
+        return offmap_bed(world_xz, y00 + (y10 - y00) * f.y + (y01 - y00) * f.x) + mud_height_offset(world_xz) + sand_height_offset(world_xz) + crater_height_offset(world_xz);
     }
-    return offmap_bed(world_xz, y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y) + mud_height_offset(world_xz) + sand_height_offset(world_xz);
+    return offmap_bed(world_xz, y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y) + mud_height_offset(world_xz) + sand_height_offset(world_xz) + crater_height_offset(world_xz);
 }
 
 // Central-difference normal at a fixed heightmap step. Taken per-fragment (not
@@ -476,12 +731,16 @@ fn sample_mud_normals(world_xz: vec2<f32>, step: f32, footprint: f32) -> GroundN
     let s_nx = sand_height_offset(nx);
     let s_pz = sand_height_offset(pz);
     let s_nz = sand_height_offset(nz);
+    let c_px = crater_height_offset(px);
+    let c_nx = crater_height_offset(nx);
+    let c_pz = crater_height_offset(pz);
+    let c_nz = crater_height_offset(nz);
     var base: vec3<f32>;
     if (hs == step) {
-        let hx0 = grid_height(nx) + m_nx + s_nx;
-        let hx1 = grid_height(px) + m_px + s_px;
-        let hz0 = grid_height(nz) + m_nz + s_nz;
-        let hz1 = grid_height(pz) + m_pz + s_pz;
+        let hx0 = grid_height(nx) + m_nx + s_nx + c_nx;
+        let hx1 = grid_height(px) + m_px + s_px + c_px;
+        let hz0 = grid_height(nz) + m_nz + s_nz + c_nz;
+        let hz1 = grid_height(pz) + m_pz + s_pz + c_pz;
         base = normalize(vec3<f32>(-(hx1 - hx0), 2.0 * step, -(hz1 - hz0)));
     } else {
         base = sample_normal(world_xz, step);
@@ -493,8 +752,10 @@ fn sample_mud_normals(world_xz: vec2<f32>, step: f32, footprint: f32) -> GroundN
     } else {
         sand_step = sand_height_gradient(world_xz, step);
     }
+    let crater_step = vec2<f32>(c_px - c_nx, c_pz - c_nz) / (2.0 * hs);
     let delta = mud_height_gradient(world_xz, footprint) - mud_step
-        + sand_height_gradient(world_xz, footprint) - sand_step;
+        + sand_height_gradient(world_xz, footprint) - sand_step
+        + crater_height_gradient(world_xz, footprint) - crater_step;
     let fine = normalize(vec3<f32>(base.x - delta.x * base.y, base.y, base.z - delta.y * base.y));
     return GroundNormalPair(base, fine);
 }
@@ -2382,6 +2643,20 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         rgb = mix(rgb, soil, mud_rut.mud);
     }
     rgb *= mud_rut.albedo;
+    // BOOM-001: a crater's fresh soil and scorch replace the ground texture (grass included).
+    let crater_mat = crater_material(in.world_xz);
+    if (crater_mat.x + crater_mat.y > 0.004) {
+        // (local coordinates: at Malden's x ~ 9700 the fine noise ran on ~126000, where f32 has
+        // no fraction left to interpolate and the soil came out in square tiles)
+        let cxz = in.world_xz - floor(in.world_xz / 256.0) * 256.0;
+        let radial = crater_height_gradient(in.world_xz, 0.5);
+        let cs = crater_soil(cxz, radial, clamp(n.y, 0.0, 1.0), crater_mat.y);
+        let cover = smoothstep(0.15, 0.55, crater_mat.x * (0.65 + 0.7 * cs.cover_noise));
+        var earth = cs.rgb;
+        if (linear <= 0.5) { earth = ground_linear_to_srgb(earth); }
+        rgb = mix(rgb, earth, cover);
+        n = normalize(n - vec3<f32>(cs.bump.x, 0.0, cs.bump.y) * cover);
+    }
     let world_y = sample_height(in.world_xz);
     let line_depth = snowline_depth(in.world_xz, world_y);
     let initial_soil_wet = soil_wet_amount(mud, tp.rain_wetness, snow_cover(in.world_xz, world_y));
@@ -2401,6 +2676,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         rain_puddle = mix(rain_puddle, pool, rain_flow.z);
         soil_wet = max(soil_wet, smoothstep(0.0002, 0.0015, rain_flow.x) * rain_flow.z * snowless);
     }
+    var snow_glint_cover = 0.0;
     if (snow.info.w > 0.0 || line_depth > 0.0) {
         let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, world_y);
         let snow_h = snow_cover(in.world_xz, world_y) * dry;
@@ -2410,10 +2686,31 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         let snow_ref = max(snow.info.w, line_depth);
         let compacted = clamp(1.0 - snow_h / max(snow_ref, 0.001), 0.0, 1.0);
         var snow_rgb = snow_powder_albedo(vec3<f32>(in.world_xz.x, world_y, in.world_xz.y), snow_footprint, compacted);
+        // wind-shaped snow: the hollows between drifts and ripples sit in their own shade and
+        // look a little darker and bluer, the crests a touch brighter
+        let wind_relief = snow_wind_relief(in.world_xz, snow_footprint);
+        let relief = wind_relief.x;
+        snow_rgb = snow_rgb * (1.0 + 0.035 * relief) * mix(vec3<f32>(1.0), vec3<f32>(0.90, 0.95, 1.02), max(-relief, 0.0) * 0.7);
         if (linear <= 0.5) { snow_rgb = ground_linear_to_srgb(snow_rgb); }
         rgb = mix(rgb, snow_rgb, coverage);
+        // BOOM-003: crystals glint on loose powder; a pressed track has lost them
+        snow_glint_cover = coverage * (1.0 - 0.8 * compacted);
         authored_ao = mix(authored_ao, 1.0, coverage);
-        n = normalize(mix(n, terrain_snow_normal(in.world_xz, world_y, geometric_n, snow_footprint, dry), coverage));
+        n = normalize(mix(n, terrain_snow_normal(in.world_xz, world_y, geometric_n, snow_footprint, dry, wind_relief.yz), coverage));
+        // BOOM-004: bullet tracks, ray-traced (snow_bullet_tracks). Only within 60 m: beyond that
+        // a 5 cm opening is a fraction of a pixel.
+        if (dot(in.world_pos, in.world_pos) < 3600.0) {
+            let sun_dir = -frame.sun_dir_world.xyz;
+            let track = snow_bullet_tracks(in.world_pos + frame.cam_pos.xyz, normalize(in.world_pos), snow_footprint, sun_dir);
+            if (track.open + track.rim > 0.0) {
+                var trackRgb = track.albedo;
+                if (linear <= 0.5) { trackRgb = ground_linear_to_srgb(trackRgb); }
+                rgb = mix(rgb, trackRgb, track.open * coverage);
+                n = normalize(mix(n, track.normal, track.open * coverage));
+                n = normalize(n + vec3<f32>(track.slope.x, 0.0, track.slope.y) * 0.8 * coverage * (1.0 - track.open));
+                snow_glint_cover *= 1.0 - min(track.open * 2.0 + track.rim * 0.5, 1.0);
+            }
+        }
     }
     if (cost_stage == 2u) { return vec4<f32>(rgb * (0.5 + 0.5 * n.y) * authored_ao + vec3<f32>(soil_wet * 0.01), 1.0); }
 
@@ -2683,6 +2980,15 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel, rain_puddle * terrain_wet_shine);
     }
 
+    // BOOM-003: ice glitter -- only where the sun actually reaches the snow
+    if (snow_glint_cover > 0.0) {
+        let glint = snow_glitter(in.world_xz, normalize(-in.world_pos), -frame.sun_dir_world.xyz, snow_footprint);
+        if (max(glint.x, max(glint.y, glint.z)) > 0.0) {
+            rgb += sun_diffuse * glint * snow_glint_cover * (1.0 - shadow) * cloud_sun_shadow(in.world_xz)
+                * local_sky_visibility;
+        }
+    }
+
     // Debug: output the contrast-shaped sky-view factor as greyscale (unfogged) to inspect/tune the
     // mask — responds to radius/azimuths/downsample/contrast.
     if (sky_vis_debug_on() > 0.5) {
@@ -2728,7 +3034,7 @@ fn fs_terrain_prepass(in: VsOut) -> @location(0) vec2<f32> {
     if (snow.info.w > 0.0 || snowline_depth(in.world_xz, py) > 0.0) {
         let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, py);
         let coverage = snow_surface_coverage(snow_cover(in.world_xz, py) * dry, n.y, 1.0);
-        n = normalize(mix(n, terrain_snow_normal(in.world_xz, py, n, footprint, dry), coverage));
+        n = normalize(mix(n, terrain_snow_normal(in.world_xz, py, n, footprint, dry, snow_wind_relief(in.world_xz, footprint).yz), coverage));
     }
     let n_view = (frame.view * vec4<f32>(n, 0.0)).xyz;
     return oct_encode(normalize(n_view));

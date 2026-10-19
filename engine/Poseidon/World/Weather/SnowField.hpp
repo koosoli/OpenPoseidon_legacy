@@ -90,6 +90,65 @@ public:
         _depth = 0.0f;
         _precipitation = 0.0;
         _rejected = 0;
+        _marks.clear();
+        _marksHead = 0;
+        ++_marksRevision;
+    }
+
+    // BOOM-004 (owner, 2026-10-19: "in real life would it not be a sharp hole in the snow?"): the
+    // sharp part of a bullet's mark. The deficit cells are 0.125 m, far coarser than the 1.5-2 cm
+    // hole a rifle round leaves, so every impact is ALSO kept here exactly -- where it entered the
+    // snow, the way it flew, how long the slit runs -- and the terrain shader draws it crisp.
+    // A ring of the most recent marks; new snowfall fills a hole (the shader compares the
+    // precipitation at its birth with now).
+    // steep: sin of the round's angle to the snow surface (1 = straight down)
+    // BOOM-004 (owner, 2026-10-19: "you replaced it with a texture instead of doing a real groove"):
+    // each round's actual track through the snow -- a straight cylinder of the hole's radius from
+    // just above where it entered the surface down to where it struck the ground. The terrain
+    // shader ray-traces it: the surface is open where the cylinder breaks through, and through
+    // the opening one sees its real walls (lit, self-shadowed) and the earth at the bottom.
+    struct BulletMark { float x, y, z, dirX, dirY, dirZ, length, radius; double precipitation; };
+    static constexpr size_t MaxBulletMarks = 1024;
+    static constexpr int MarkFloats = 12;
+    void AddBulletTrack(float topX, float topY, float topZ, float dirX, float dirY, float dirZ, float length, float radius)
+    {
+        for (float v : {topX, topY, topZ, dirX, dirY, dirZ, length, radius})
+            if (!std::isfinite(v)) return;
+        const float n = std::sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
+        if (radius <= 0.0f || n < 1e-4f || length <= 0.0f) return;
+        const BulletMark mark{topX, topY, topZ, dirX / n, dirY / n, dirZ / n, std::clamp(length, 0.0f, 16.0f),
+                              std::clamp(radius, 0.004f, 0.05f), _precipitation};
+        if (_marks.size() < MaxBulletMarks) _marks.push_back(mark);
+        else { _marks[_marksHead] = mark; _marksHead = (_marksHead + 1) % MaxBulletMarks; }
+        ++_marksRevision;
+    }
+    size_t BulletMarks() const { return _marks.size(); }
+    uint64_t BulletMarksRevision() const { return _marksRevision; }
+    double Precipitation() const { return _precipitation; }
+    // Shader packing: [count, originX, originZ, 0] then per track (topX - originX, topY, topZ - originZ,
+    // radius), (dirX, dirY, dirZ, length), (snowfall since it was made, 0, 0, 0): the `maxCount`
+    // nearest within `range` m. Positions relative to (originX, originZ) keep millimetres on a 10 km map.
+    std::vector<float> NearestBulletMarks(float x, float z, float originX, float originZ, int maxCount, float range) const
+    {
+        std::vector<std::pair<float, size_t>> nearby;
+        for (size_t i = 0; i < _marks.size(); ++i)
+        {
+            const float d = std::hypot(_marks[i].x - x, _marks[i].z - z);
+            if (d < range) nearby.emplace_back(d, i);
+        }
+        const size_t keep = std::min(nearby.size(), size_t(std::max(maxCount, 0)));
+        std::partial_sort(nearby.begin(), nearby.begin() + keep, nearby.end());
+        std::vector<float> out(4 + keep * MarkFloats, 0.0f);
+        out[0] = float(keep); out[1] = originX; out[2] = originZ;
+        for (size_t k = 0; k < keep; ++k)
+        {
+            const BulletMark& m = _marks[nearby[k].second];
+            float* o = out.data() + 4 + k * MarkFloats;
+            o[0] = m.x - originX; o[1] = m.y; o[2] = m.z - originZ; o[3] = m.radius;
+            o[4] = m.dirX; o[5] = m.dirY; o[6] = m.dirZ; o[7] = m.length;
+            o[8] = float(_precipitation - m.precipitation);
+        }
+        return out;
     }
     void Advance(float seconds)
     {
@@ -176,10 +235,10 @@ public:
     {
         if (!std::isfinite(radius) || radius <= 0 || !std::isfinite(depth) || depth <= 0 ||
             !std::isfinite(directionX) || !std::isfinite(directionZ) || !std::isfinite(length) ||
-            length < 0 || length > 0.8f) return false;
+            length < 0 || length > 3.0f) return false;
         const float directionLength = std::hypot(directionX, directionZ);
         if (length > 0 && (!std::isfinite(directionLength) || std::abs(directionLength - 1.0f) > 0.001f)) return false;
-        return ModifyDisc(x, z, std::clamp(radius, CellSize, 0.35f), std::min(depth, 0.16f),
+        return ModifyDisc(x, z, std::clamp(radius, CellSize, 0.35f), std::min(depth, 0.2f),
             true, true, directionX, directionZ, length);
     }
     // Rate-integrated removal, unlike a footprint's absolute compression depth.
@@ -230,6 +289,14 @@ private:
                     r = std::hypot(outside, across) / radius;
                 }
                 if (r >= 1.0f) continue;
+                // A furrow deepens from where the round entered the snow (upstream, shallow)
+                // to where it ends (the terrain hit, full depth).
+                float ramp = 1.0f;
+                if (bowl && length > 0)
+                {
+                    const float along = dx * directionX + dz * directionZ;
+                    ramp = 0.3f + 0.7f * std::clamp((along + halfLength) / length, 0.0f, 1.0f);
+                }
                 const int cx = FloorChunk(ix), cz = FloorChunk(iz);
                 const auto key = Key(cx, cz);
                 auto it = _chunks.find(key);
@@ -249,7 +316,7 @@ private:
                     }
                 }
                 Cell& cell = it->second.cells[(iz - cz * ChunkSize) * ChunkSize + ix - cx * ChunkSize];
-                const float edge = bowl ? (1.0f-r*r)*(1.0f-r*r) : std::clamp((1.0f - r) * 4.0f, 0.0f, 1.0f);
+                const float edge = (bowl ? (1.0f-r*r)*(1.0f-r*r) : std::clamp((1.0f - r) * 4.0f, 0.0f, 1.0f)) * ramp;
                 const float remaining = Remaining(cell);
                 cell.deficit = additive ? std::min(base, remaining + strength * edge)
                     : std::max(remaining, base * std::clamp(strength, 0.0f, 1.0f) * edge);
@@ -385,6 +452,9 @@ private:
     std::vector<uint64_t> _chunkKeys;
     size_t _reclaimCursor = 0;
     double _precipitation = 0.0;
+    std::vector<BulletMark> _marks;
+    size_t _marksHead = 0;
+    uint64_t _marksRevision = 1;
     float _depth = 0.0f;
     size_t _rejected = 0;
 };

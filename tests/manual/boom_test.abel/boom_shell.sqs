@@ -1,0 +1,5 @@
+; one 120 mm shell straight down, 40 m in the direction you face
+_d = getDir player
+_p = getPos player
+_s = "Shell120" camCreate [(_p select 0) + 40 * sin _d, (_p select 1) + 40 * cos _d, 60]
+_s setVelocity [0, 0, -300]

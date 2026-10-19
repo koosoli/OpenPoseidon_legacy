@@ -33,6 +33,7 @@
 #include <Poseidon/World/Entities/Weapons/UnderwaterBallistics.hpp>
 #include <Poseidon/World/Entities/Infantry/SwimView.hpp>
 #include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
+#include <Poseidon/World/Effects/BuildingBreach.hpp> // BOOM-007
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
@@ -147,8 +148,24 @@ void SnowBulletTerrainImpact(Object* projectile, Object* owner, const Vector3& p
         }
         cut = SnowBulletImpactPolicy(speed,damage,remaining,normal.Y(),incoming*normal,
                                      point.Y()-ground,local,explosive,water,roadway,sheltered);
+        // the faint disturbance round the hole: half a metre of it at most (see SnowBulletVisibleLength)
         if (cut.depth > 0) changed = GSnow().BulletImpact(x,z,cut.radius,cut.depth,
-            groove.directionX,groove.directionZ,groove.length);
+            groove.directionX,groove.directionZ,std::min(groove.length,0.5f));
+        // BOOM-004: the crisp hole/slit itself, from where the round entered the snow to here.
+        if (changed)
+        {
+            // BOOM-004: the round's track through the snow, from the surface down to this ground
+            // point along its own flight direction; started a hole's width above the surface so
+            // the shader's cylinder breaks through wherever the drawn surface lies
+            const float hole = SnowBulletHoleRadius(damage);
+            // the whole path up to the surface: a 1-degree round climbs 25 cm of snow over ~15 m
+            // (capped at 3 m the track began under the surface and never broke through it)
+            const float through = std::clamp(remaining / std::max(-(incoming*normal), 0.012f), 0.0f, 15.0f);
+            const float above = 2.0f * hole;
+            const Vector3 top = point - incoming * (through + above);
+            GSnow().AddBulletTrack(top.X(), top.Y(), top.Z(), incoming.X(), incoming.Y(), incoming.Z(),
+                                   through + above, hole);
+        }
     }
     if (SnowBulletTraceEnabled())
         LOG_INFO(World, "SNOW_BULLET terrain=1 changed={} x={:.3f} y={:.3f} z={:.3f} speed={:.2f} base={:.4f} remaining={:.4f} radius={:.4f} depth={:.4f} before={:.4f} after={:.4f} roadway={} sheltered={} land={} budget={} up={:.4f} incidence={:.4f} supportError={:.4f} directionX={:.5f} directionZ={:.5f} grooveLength={:.5f}",
@@ -1312,6 +1329,14 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                     }
                     _hitScaleNow = _underwater ? UnderwaterHitScale(pos) : 1.0f;
                     GLandscape->ExplosionDammage(_parent, this, info.object, pos, info.dirOut, Type());
+                    // BOOM-007: the round marks the wall it struck
+                    if (!Type()->explosive && info.object && info.object->Static())
+                    {
+                        Vector3 normal = info.surfaceNormal.SquareSize() > 1e-6f
+                                             ? info.object->WorldTransform().Rotate(info.surfaceNormal)
+                                             : VZero;
+                        BuildingBreach::BulletImpact(info.object, pos, normal, _speed, Type()->hit, info.texture);
+                    }
                 }
 
                 // PENETRATION. The round has already damaged what it hit -- a bullet
@@ -1939,6 +1964,15 @@ void Missile::Simulate(float deltaT, SimulationImportance prec)
             {
                 const CollisionInfo& info = collision[minI];
                 Point3 pos = info.object->PositionModelToWorld(info.pos);
+                static const bool breachTrace = [] { const char* v = std::getenv("POSEIDON_BREACH_TRACE"); return v && v[0] == '1'; }();
+                if (breachTrace)
+                {
+                    for (int i = 0; i < collision.Size(); i++)
+                        LOG_INFO(World, "Shell impact trace: [{}] {} model pos [{:.2f},{:.2f},{:.2f}] under {:.3f} component {} shell at [{:.1f},{:.1f},{:.1f}]",
+                                 i, collision[i].object ? static_cast<const char*>(collision[i].object->GetDebugName()) : "-",
+                                 collision[i].pos.X(), collision[i].pos.Y(), collision[i].pos.Z(), collision[i].under,
+                                 collision[i].component, Position().X(), Position().Y(), Position().Z());
+                }
                 float size = Type()->hit * 0.003;
                 saturate(size, MinExplosion, MaxExplosion);
                 Explosion* explosion = new Explosion(nullptr, _parent, size);

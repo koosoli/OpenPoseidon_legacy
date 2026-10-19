@@ -43,6 +43,7 @@ struct MuzzleBurstShot
     MuzzleBurstVec carrier; // shooter velocity, m/s: the gas leaves with it
     std::int64_t birthMs = 0;
     std::uint32_t seed = 0;
+    float size = 1.0f; // BOOM-005: the flash's size, a rifle = 1 (a pistol less, an MG more)
 };
 
 enum class MuzzleParticleKind { Jet, Plume, Spark };
@@ -212,6 +213,15 @@ private:
 };
 
 bool MuzzleBurstEnabled();
+// BOOM-005 (owner, 2026-10-19: "it must not look like a cartoony texture but should be
+// calculated"): the flash itself as a volume the renderer ray-marches -- the gas leaving the
+// muzzle, the hider's port jets and the secondary flash -- instead of the retail flash sheet
+// and the burst's gas sprites (its sparks stay). POSEIDON_MUZZLE_FLASH_VOLUME=0: the old flash.
+bool VolumetricMuzzleFlashEnabled();
+constexpr int MuzzleFlashVolumeLifetimeMs = 60;
+// The flashes alive at `nowMs`, nearest the camera first, at most `maxCount`, packed for the
+// renderer: (world x, y, z, age s), (barrel x, y, z, size).
+void CollectMuzzleFlashes(std::vector<float>& out, double nowMs, float camX, float camY, float camZ, int maxCount);
 // Record a rifle shot (called from the shooter's fire effects).
 void RecordMuzzleBurst(const MuzzleBurstShot& shot);
 // Draw every live burst into the current scene (called once per frame from Scene).

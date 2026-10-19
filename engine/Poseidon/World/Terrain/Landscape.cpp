@@ -1,3 +1,4 @@
+#include <Poseidon/World/Terrain/CraterField.hpp>
 #include <chrono>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -1692,10 +1693,11 @@ float Landscape::BumpySurfaceY(float xC, float zC, float& rdX, float& rdY, Textu
     texture = rTexture;
     auto mudGradient = GMud().HeightGradientAt(xC, zC);
     const auto sandGradient = GSand().HeightGradientAt(xC, zC);
-    mudGradient[0] += sandGradient[0]; mudGradient[1] += sandGradient[1];
+    const auto craterGradient = GCraters().HeightGradientAt(xC, zC);
+    mudGradient[0] += sandGradient[0] + craterGradient[0]; mudGradient[1] += sandGradient[1] + craterGradient[1];
     rdX += mudGradient[0];
     rdY += mudGradient[1];
-    return y + GMud().HeightOffsetAt(xC, zC) + GSand().HeightOffsetAt(xC, zC);
+    return y + GMud().HeightOffsetAt(xC, zC) + GSand().HeightOffsetAt(xC, zC) + GCraters().HeightOffsetAt(xC, zC);
 }
 
 void Landscape::SurfacePlane(Plane& plane, float xC, float zC) const
@@ -1754,8 +1756,9 @@ void Landscape::SurfacePlane(Plane& plane, float xC, float zC) const
     Vector3 point((x + 1) * _terrainGrid, y01, z * _terrainGrid);
     auto mudGradient = GMud().HeightGradientAt(xC, zC);
     const auto sandGradient = GSand().HeightGradientAt(xC, zC);
-    mudGradient[0] += sandGradient[0]; mudGradient[1] += sandGradient[1];
-    const float mudHeight = GMud().HeightOffsetAt(xC, zC) + GSand().HeightOffsetAt(xC, zC);
+    const auto craterGradient = GCraters().HeightGradientAt(xC, zC);
+    mudGradient[0] += sandGradient[0] + craterGradient[0]; mudGradient[1] += sandGradient[1] + craterGradient[1];
+    const float mudHeight = GMud().HeightOffsetAt(xC, zC) + GSand().HeightOffsetAt(xC, zC) + GCraters().HeightOffsetAt(xC, zC);
     if (mudHeight != 0 || mudGradient[0] != 0 || mudGradient[1] != 0)
     {
         normal[0] -= mudGradient[0];
@@ -1812,14 +1815,14 @@ float Landscape::SurfaceY(float x, float z) const
     { // triangle 00,01,10
         float d1000 = y10 - y00;
         float d0100 = y01 - y00;
-        return y00 + d1000 * zIn + d0100 * xIn + GMud().HeightOffsetAt(x, z) + GSand().HeightOffsetAt(x, z);
+        return y00 + d1000 * zIn + d0100 * xIn + GMud().HeightOffsetAt(x, z) + GSand().HeightOffsetAt(x, z) + GCraters().HeightOffsetAt(x, z);
     }
     else
     {
         // triangle 01,10,11
         float d1011 = y10 - y11;
         float d0111 = y01 - y11;
-        return y10 + d0111 - d1011 * xIn - d0111 * zIn + GMud().HeightOffsetAt(x, z) + GSand().HeightOffsetAt(x, z);
+        return y10 + d0111 - d1011 * xIn - d0111 * zIn + GMud().HeightOffsetAt(x, z) + GSand().HeightOffsetAt(x, z) + GCraters().HeightOffsetAt(x, z);
     }
 }
 
@@ -1882,10 +1885,11 @@ float Landscape::SurfaceY(float x, float z, float* rdX, float* rdY, Texture** te
             *rdY = d1000 * _invTerrainGrid;
             auto mudGradient = GMud().HeightGradientAt(x, z);
             const auto sandGradient = GSand().HeightGradientAt(x, z);
-            mudGradient[0] += sandGradient[0]; mudGradient[1] += sandGradient[1];
+            const auto craterGradient = GCraters().HeightGradientAt(x, z);
+            mudGradient[0] += sandGradient[0] + craterGradient[0]; mudGradient[1] += sandGradient[1] + craterGradient[1];
             *rdX += mudGradient[0]; *rdY += mudGradient[1];
         }
-        return y00 + d1000 * zIn + d0100 * xIn + GMud().HeightOffsetAt(x, z) + GSand().HeightOffsetAt(x, z);
+        return y00 + d1000 * zIn + d0100 * xIn + GMud().HeightOffsetAt(x, z) + GSand().HeightOffsetAt(x, z) + GCraters().HeightOffsetAt(x, z);
     }
     else
     {
@@ -1898,10 +1902,11 @@ float Landscape::SurfaceY(float x, float z, float* rdX, float* rdY, Texture** te
             *rdY = d0111 * -_invTerrainGrid;
             auto mudGradient = GMud().HeightGradientAt(x, z);
             const auto sandGradient = GSand().HeightGradientAt(x, z);
-            mudGradient[0] += sandGradient[0]; mudGradient[1] += sandGradient[1];
+            const auto craterGradient = GCraters().HeightGradientAt(x, z);
+            mudGradient[0] += sandGradient[0] + craterGradient[0]; mudGradient[1] += sandGradient[1] + craterGradient[1];
             *rdX += mudGradient[0]; *rdY += mudGradient[1];
         }
-        return y10 + d0111 - d1011 * xIn - d0111 * zIn + GMud().HeightOffsetAt(x, z) + GSand().HeightOffsetAt(x, z);
+        return y10 + d0111 - d1011 * xIn - d0111 * zIn + GMud().HeightOffsetAt(x, z) + GSand().HeightOffsetAt(x, z) + GCraters().HeightOffsetAt(x, z);
     }
 }
 

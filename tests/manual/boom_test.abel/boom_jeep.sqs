@@ -1,0 +1,6 @@
+; a jeep 12 m ahead, set on fire: the wreck's fireball, black column and burning (4 minutes)
+_d = getDir player
+_p = getPos player
+_j = "Jeep" createVehicle [(_p select 0) + 12 * sin _d, (_p select 1) + 12 * cos _d, 0]
+~0.5
+_j setDammage 1

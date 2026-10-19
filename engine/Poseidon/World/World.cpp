@@ -1,3 +1,4 @@
+#include <Poseidon/World/Effects/BuildingBreach.hpp>
 #include <SDL3/SDL_scancode.h>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 
@@ -2046,6 +2047,8 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // outside BeginObjects/EndObjects silently draws nothing, which reads as
         // "the ball does not exist" while the physics log shows it rolling.
         Dev::DrawPhysicsProbes();
+        // BOOM-002: chunks of breached walls (Box3D bodies), same window.
+        BuildingBreach::DrawDebris();
     }
 
     markInitProbe(beginObjectsMs);

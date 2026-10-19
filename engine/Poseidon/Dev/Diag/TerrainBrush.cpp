@@ -86,7 +86,7 @@ RocketCraterSettings& RocketCraters() { return rocketSettings; }
 void ResetRocketCraters() { rocketSettings = RocketCraterSettings{}; }
 bool RocketTerrainImpact(float x, float y, float z, float indirectHit)
 {
-    if (!rocketSettings.enabled || !GLandscape || !GWorld || GWorld->GetMode() == GModeNetware ||
+    if (!rocketSettings.enabled || !rocketSettings.coarse || !GLandscape || !GWorld || GWorld->GetMode() == GModeNetware ||
         !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
     const float ground = GLandscape->SurfaceY(x,z);
     if (!RocketCraterGroundContact(y,ground,GLandscape->GetSeaLevel())) return false;

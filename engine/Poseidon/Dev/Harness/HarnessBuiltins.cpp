@@ -1517,6 +1517,8 @@ void RegisterScreenshot(HarnessServer& hs)
             const int gpuCount = std::clamp(GEngine->GetWaterGpuTimings(gpu, cap), 0, cap);
             const int cpuCount = std::clamp(GEngine->GetCpuTimings(cpu, cap), 0, cap);
             cJSON_AddBoolToObject(result, "gpuTimestampsAvailable", gpuCount > 0);
+            // the eye-adaptation iris (1.0 = off / neutral); a blocking 1x1 readback, harness only
+            cJSON_AddNumberToObject(result, "exposureScale", GEngine->GetAutoExposureScale());
             auto* rows = cJSON_AddArrayToObject(result, "regions");
             for (int i = 0; i < std::max(gpuCount, cpuCount); ++i) {
                 auto* row = cJSON_CreateObject();

@@ -1,0 +1,4 @@
+; a hand grenade on the ground 12 m ahead (a small scoop and a dust puff, not a shell crater)
+_d = getDir player
+_p = getPos player
+_g = "Grenade" camCreate [(_p select 0) + 12 * sin _d, (_p select 1) + 12 * cos _d, 0.3]

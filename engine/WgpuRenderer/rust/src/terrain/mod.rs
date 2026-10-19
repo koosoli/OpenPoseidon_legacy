@@ -226,6 +226,62 @@ fn valid_mud_far_view(data: &[f32]) -> bool {
         && data[4..].iter().all(|v| *v >= -data[3] && *v <= 0.0)
 }
 
+// BOOM-001: crater views, after the four views and the rut-water vec4 (floats). Each upload is a
+// height view and a material view back to back; terrain.wgsl crater_* reads them at these offsets.
+pub const CRATER_BASE: usize = 4 * (4 + 512 * 512) + 4;
+/// BOOM-004: snow bullet tracks after the crater views: [count, originX, originZ, 0] then 64
+/// tracks of three vec4: (top x - originX, top y, top z - originZ, radius), (unit direction, length),
+/// (snowfall since, 0, 0, 0). terrain.wgsl ray-traces each as a cylinder through the snow.
+pub const SNOW_MARKS_BASE: usize = CRATER_BASE + 4 * (4 + 512 * 512);
+pub const SNOW_MARKS_MAX: usize = 64;
+pub const SNOW_MARK_STRIDE: usize = 12;
+pub const SNOW_MARKS_FLOATS: usize = 4 + SNOW_MARKS_MAX * SNOW_MARK_STRIDE;
+
+pub fn valid_snow_marks(data: &[f32]) -> bool {
+    if data.len() < 4 || data.len() > SNOW_MARKS_FLOATS || data.iter().any(|v| !v.is_finite()) { return false; }
+    let count = data[0];
+    count >= 0.0 && count.fract() == 0.0 && data.len() == 4 + count as usize * SNOW_MARK_STRIDE
+}
+const CRATER_MAX_DEPTH: f32 = 6.0; // CraterField::MaxDepth
+const CRATER_MAX_RISE: f32 = 1.5;  // CraterField::MaxRise
+fn valid_crater_views(data: &[f32], far: bool) -> bool {
+    const S: usize = 4 + 512 * 512;
+    let cell = if far { 1.0 } else { 0.25 };
+    if data.len() != 2 * S || !data.iter().all(|v| v.is_finite()) { return false; }
+    let (h, m) = data.split_at(S);
+    h[2] == cell && m[2] == cell && h[0] == m[0] && h[1] == m[1]
+        && (h[3] == 0.0 || h[3] == CRATER_MAX_DEPTH) && m[3] == h[3]
+        && h[4..].iter().all(|v| *v >= -CRATER_MAX_DEPTH && *v <= CRATER_MAX_RISE)
+        && m[4..].iter().all(|v| *v >= 0.0 && *v <= 65535.0 && v.fract() == 0.0)
+}
+
+#[test]
+fn crater_upload_accepts_bowls_and_lips_and_rejects_the_rest() {
+    let mut data = vec![0.0; 2 * (4 + 512 * 512)];
+    let s = 4 + 512 * 512;
+    data[2] = 0.25; data[s + 2] = 0.25; data[3] = 6.0; data[s + 3] = 6.0;
+    data[4] = -0.42; data[5] = 0.16; data[s + 4] = 255.0 + 256.0 * 90.0;
+    assert!(valid_crater_views(&data, false));
+    assert!(!valid_crater_views(&data, true));               // wrong cell for the far view
+    data[5] = 1.6; assert!(!valid_crater_views(&data, false)); // above MaxRise
+    data[5] = 0.0; data[s + 4] = 0.5; assert!(!valid_crater_views(&data, false)); // material not packed
+    data[s + 4] = 0.0; data[s + 3] = 0.0; assert!(!valid_crater_views(&data, false)); // headers disagree
+    assert!(!valid_crater_views(&data[..data.len() - 1], false));
+}
+
+#[test]
+fn snow_marks_upload_checks_count_and_size() {
+    assert!(valid_snow_marks(&[0.0, 9728.0, 3968.0, 0.0]));
+    let mut one = vec![1.0, 9728.0, 3968.0, 0.0, 12.5, 41.2, 30.25, 0.012, 0.95, -0.31, 0.0, 0.8, 0.0, 0.0, 0.0, 0.0];
+    assert!(valid_snow_marks(&one));
+    one[0] = 2.0; assert!(!valid_snow_marks(&one));             // count says more than was sent
+    one[0] = 1.0; one[5] = f32::NAN; assert!(!valid_snow_marks(&one));
+    assert!(!valid_snow_marks(&vec![65.0; 4 + 65 * SNOW_MARK_STRIDE])); // over the 64-track section
+    // The section ends the buffer; the shader indexes it at SNOW_MARKS_BASE - 4 (header vec4).
+    assert_eq!(SNOW_MARKS_BASE - 4, 2097184);
+    assert_eq!(SNOW_MARKS_BASE - 4 + SNOW_MARKS_FLOATS, 2097956);
+}
+
 fn valid_sand_view(data: &[f32]) -> bool {
     data.len() == 4 + 512 * 512 && data.iter().all(|v| v.is_finite())
         && data[2] == 0.125 && data[3] >= 0.0 && data[3] <= 0.15
@@ -721,8 +777,9 @@ impl Terrain {
             // Snow occupies the first view, signed mud the second, sand the third, the far
             // (0.5 m) mud view the fourth. Reusing the storage binding keeps colour, depth
             // and conformed meshes aligned.
-            // Four views, then one vec4 for the mud rut water level (set_mud_water).
-            size: (4 * (4 + 512 * 512) + 4) * 4,
+            // Four views, then one vec4 for the mud rut water level (set_mud_water), then the
+            // BOOM-001 crater views (near heights, near materials, far heights, far materials).
+            size: ((SNOW_MARKS_BASE + SNOW_MARKS_FLOATS) * 4) as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1277,6 +1334,19 @@ impl Terrain {
     pub fn set_mud_far(&mut self, queue: &wgpu::Queue, data: &[f32]) {
         if valid_mud_far_view(data) {
             queue.write_buffer(&self.snow_buffer, 3 * (4 + 512 * 512) * 4, bytemuck::cast_slice(data));
+        }
+    }
+
+    pub fn set_craters(&mut self, queue: &wgpu::Queue, data: &[f32], far: bool) {
+        if valid_crater_views(data, far) {
+            let offset = CRATER_BASE + if far { 2 * (4 + 512 * 512) } else { 0 };
+            queue.write_buffer(&self.snow_buffer, (offset * 4) as u64, bytemuck::cast_slice(data));
+        }
+    }
+
+    pub fn set_snow_marks(&mut self, queue: &wgpu::Queue, data: &[f32]) {
+        if valid_snow_marks(data) {
+            queue.write_buffer(&self.snow_buffer, (SNOW_MARKS_BASE * 4) as u64, bytemuck::cast_slice(data));
         }
     }
 

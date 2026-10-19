@@ -2739,6 +2739,15 @@ extern "C"
     // Far mud view: same packing as wgr_terrain_set_mud with 0.5 m cells (256 m window),
     // ruts only (values in [-limit, 0]). Shading only, no geometry.
     WGR_API void wgr_terrain_set_mud_far(WgrRenderer* renderer, const float* data, uint32_t count);
+    // BOOM-001: explosion craters (CraterField::Snapshot). Two views packed back to back, each
+    // [originX, originZ, cell, limit] + 512*512: signed heights, then packed materials (soil + 256 *
+    // scorch, 0..255 each). far = 0: 0.25 m cells (128 m window); far = 1: 1 m cells (512 m).
+    WGR_API void wgr_terrain_set_craters(WgrRenderer* renderer, const float* data, uint32_t count, uint32_t farView);
+    /// BOOM-004: sharp snow bullet holes, [count, originX, originZ, 0] + count * 8 floats (count <= 64).
+    WGR_API void wgr_terrain_set_snow_marks(WgrRenderer* renderer, const float* data, uint32_t count);
+    // BOOM-001: the craters nearest the camera for grass placement (CraterField::NearestDiscs):
+    // [count, 0, 0, 0] then count (<= 64) x (x, z, soil radius, seed).
+    WGR_API void wgr_grass_set_craters(WgrRenderer* renderer, const float* data, uint32_t count);
     // How full of standing water the mud ruts are, [0,1] (MudRutWaterLevel); terrain shading only.
     WGR_API void wgr_terrain_set_mud_water(WgrRenderer* renderer, float level);
     // Separate signed sand view; positive loose rims are preserved.
@@ -3234,6 +3243,9 @@ typedef struct WgrFireSource
 static_assert(sizeof(WgrFireSource) == 864, "WgrFireSource ABI mismatch (fire/mod.rs FireSource)");
 #endif
 WGR_API void wgr_set_fire_sources(WgrRenderer* renderer, const WgrFireSource* sources, uint32_t count);
+/* BOOM-005: this frame's muzzle flashes for the volumetric march, 8 floats each: (world x, y, z,
+ * age s), (barrel x, y, z, size); at most 8. Drawn once, then forgotten. */
+WGR_API void wgr_fire_set_muzzle_flashes(WgrRenderer* renderer, const float* data, uint32_t count);
 /* Boxes in use (low 32) and solver steps taken (high 32). */
 WGR_API uint64_t wgr_get_fire_stats(const WgrRenderer* renderer);
 

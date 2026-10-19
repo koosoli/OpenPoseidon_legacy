@@ -558,6 +558,15 @@ class Shape: public Poseidon::VertexTable
 		_face.Delete(offset);
 	}
 
+	// BOOM-002 (wall breaches): append `count` vertices, vertex k a copy of vertex sources[k]
+	// in EVERY per-vertex array (clip, normal, tangents, UVs, the second UV set, saved
+	// originals, the point mapping) so the tables stay the same length; returns the first
+	// new index. The caller then moves them with SetPos/SetNorm/SetUV.
+	int AppendVertexCopies( const int *sources, int count );
+	// The copy constructor leaves _proxy empty (its loop runs over the new, empty array):
+	// a clone that must keep its proxies takes them from the source here.
+	void CopyProxiesFrom( const Shape &src );
+
 	// maintain named selections (points and faces)
 	int PointIndex( const char *name ) const;
 	int FindNamedSel( const char *name ) const;
@@ -1047,6 +1056,9 @@ class LODShape: public RefCountWithLinks
 	Vector3Val GeometryCenter() const {return _geometryCenter;}
 	Vector3Val AimingCenter() const {return _aimingCenter;}
 	const char *Name() const {return _name;}
+	// BOOM-002: a per-object clone (the copy constructor leaves the name empty) is named after
+	// its source so logs and the renderer's census can still tell what it is.
+	void SetName( const char *name ) {_name = name;}
 
 	const RStringB &GetName() const {return _name;}
 

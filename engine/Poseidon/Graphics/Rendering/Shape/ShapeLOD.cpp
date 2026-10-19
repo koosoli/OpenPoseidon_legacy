@@ -732,6 +732,10 @@ void LODShape::DoConstruct(const LODShape& src, bool copyAnimations)
     _minMax[0] = src._minMax[0], _minMax[1] = src._minMax[1];
     _boundingCenter = src._boundingCenter;
     _boundingSphere = src._boundingSphere;
+    // BOOM-002: the collision code clamps a hit point to 2x this radius; a copy that left it
+    // unset put every hit on a copied (breached) building at its centre
+    _geometryCenter = src._geometryCenter;
+    _geometrySphere = src._geometrySphere;
     _special = src._special;
     _remarks = src._remarks;
     _andHints = src._andHints;

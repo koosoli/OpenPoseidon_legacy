@@ -1,3 +1,5 @@
+#include <Poseidon/World/Terrain/CraterField.hpp>
+#include <Poseidon/World/Effects/BuildingBreach.hpp>
 #include <Poseidon/Core/Game/GameLoop.hpp> // LockstepPacingActive (SIM-815)
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
@@ -953,6 +955,8 @@ void World::InitLandscape(Landscape* landscape)
     GSnow().Reset();
     GMud().Reset();
     GSand().Reset();
+    GCraters().Reset();
+    BuildingBreach::Reset();
     GRainWater().Reset();
     GSnowFlakes.ClearParticles();
     GSnow().enabled = false;

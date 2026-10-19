@@ -1,3 +1,4 @@
+#include <Poseidon/World/Terrain/CraterField.hpp>
 #include <Poseidon/Dev/Diag/MapEditorTab.hpp>
 #include <Poseidon/Dev/Diag/TerrainBrush.hpp>
 #include <Poseidon/Dev/Diag/CaveEditor.hpp>
@@ -199,7 +200,13 @@ MapEditorAction DrawMapEditorTab()
         ResetTerrainBrush();
     ImGui::SeparatorText("Ballistic impact craters");
     auto& craters = RocketCraters();
-    Checkbox("Rockets / tank shells create terrain craters", &craters.enabled);
+    Checkbox("Explosions dig craters in the ground", &craters.enabled);
+    ImGui::TextWrapped("Fine craters: a bowl, a raised lip and thrown soil at 0.25 m, sized by the ammo's blast "
+                       "(LAW / 120 mm shell: 0.85 m radius, 0.42 m deep). Soldiers and vehicles stand in them. "
+                       "Craters so far: %d.", int(GCraters().Craters()));
+    if (Button("Fill all craters"))
+        GCraters().Reset();
+    Checkbox("Also dent the terrain heightmap (coarse, old look)", &craters.coarse);
     SliderFloat("Reference crater radius (LAW)", &craters.radius, 8.0f, 100.0f, "%.1f m");
     SliderFloat("Reference crater depth (LAW)", &craters.depth, 0.1f, 8.0f, "%.1f m");
     ImGui::TextWrapped("Radius and depth scale with ammo blast damage (cube root, 0.25x to 2x). "

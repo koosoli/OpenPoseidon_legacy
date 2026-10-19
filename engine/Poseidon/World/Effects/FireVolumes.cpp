@@ -52,6 +52,12 @@ float BoxWidth(const FireVolumeReport& r)
     // its box is FireStackLengthRatio widths long downwind (fire/mod.rs STACK_*)
     if (r.kind == FireKindSmokeStack)
         return std::max(r.radius * 12.0f, 16.0f);
+    if (r.kind == FireKindDirt)
+        // the thrown earth climbs ~1.8 box widths (the box is 72 cells tall to 40 wide) and
+        // spreads at its foot into a skirt several crater radii out
+        // (owner, 2026-10-18: "dust and debris needs to go far higher"): a 120 mm shell's box is
+        // ~14 m wide, so the column has ~25 m to climb
+        return std::max(r.radius * 10.0f, 14.0f);
     if (r.kind == FireKindSmoke)
         // a cloud spreads wider than its source; the box's cells (width / 48) must stay small enough
         // for its billows, so the length downwind comes from the wind-turned box, not the width
@@ -74,7 +80,7 @@ void ProbeSolids(FireVolumeReport& r)
     // (a wreck's column starts on top of its hull, so the probes see the buildings, not the hull)
     bool walls = r.kind == FireKindBed || r.kind == FireKindSmoke || r.kind == FireKindSmokeStack ||
                  r.kind == FireKindWreck;
-    if (r.kind == FireKindExplosion)
+    if (r.kind == FireKindExplosion || r.kind == FireKindDirt)
         walls = q.IsSheltered(bed, 12.0f);
     // FIRE-002: a wreck's hull footprint (its bed is 0.35 of the hull's radius): over it the flames
     // are open, beyond it a wall or a roof stops them like any fire's (they burned through houses)
@@ -195,7 +201,7 @@ void ReportFireVolume(const void* owner, Vector3Par base, float radius, float in
         ProbeSolids(r);
 }
 
-void SpawnFireVolume(Vector3Par base, float radius, float smoke, float duration, int kind)
+void SpawnFireVolume(Vector3Par base, float radius, float smoke, float duration, int kind, const float* color)
 {
     if (!FireVolumesEnabled())
         return;
@@ -205,20 +211,22 @@ void SpawnFireVolume(Vector3Par base, float radius, float smoke, float duration,
     t.report.smoke = std::clamp(smoke, 0.0f, 1.0f);
     t.report.kind = kind;
     t.report.key = NextTimedKey();
+    if (color)
+        std::copy(color, color + 4, t.report.color);
     t.start = Glob.time.toFloat();
     t.duration = duration;
     ProbeSolids(t.report);
     auto& timed = Timed();
     // a barrage must not starve the steady fires of boxes: keep the newest few bursts
-    if (kind == FireKindExplosion)
+    if (kind == FireKindExplosion || kind == FireKindDirt)
     {
         int bursts = 0;
         for (auto it = timed.rbegin(); it != timed.rend(); ++it)
-            bursts += it->report.kind == FireKindExplosion;
+            bursts += it->report.kind == kind;
         if (bursts >= 6)
         {
             auto oldest = std::find_if(timed.begin(), timed.end(),
-                                       [](const TimedFire& f) { return f.report.kind == FireKindExplosion; });
+                                       [kind](const TimedFire& f) { return f.report.kind == kind; });
             if (oldest != timed.end())
                 timed.erase(oldest);
         }
@@ -269,7 +277,9 @@ void CollectFireVolumes(std::vector<FireVolumeReport>& out, Vector3Par camera)
         if (f.duration > 0)
         {
             const float u = std::clamp(age / f.duration, 0.0f, 1.0f);
-            intensity = f.report.kind == FireKindExplosion ? std::sqrt(1.0f - u) : std::min(1.0f, (1.0f - u) * 5.0f);
+            intensity = f.report.kind == FireKindExplosion || f.report.kind == FireKindDirt
+                            ? std::sqrt(1.0f - u)
+                            : std::min(1.0f, (1.0f - u) * 5.0f);
         }
         FireVolumeReport r = f.report;
         r.intensity = intensity;

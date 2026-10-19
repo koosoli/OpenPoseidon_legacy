@@ -1,3 +1,5 @@
+#include <Poseidon/World/Terrain/CraterField.hpp>
+#include <Poseidon/World/Effects/BuildingBreach.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
@@ -1730,6 +1732,8 @@ void World::SwitchLandscape(const char* name)
         // them like a fresh island load does (InitLandscape).
         GMud().Reset();
         GSand().Reset();
+        GCraters().Reset();
+        BuildingBreach::Reset();
         Reset();
         land->FlushCache();
         if (!_map)
@@ -2119,6 +2123,11 @@ LSError World::Save(const char* name, int message) const
 bool World::LoadBin(const char* name, int message)
 {
     LOG_DEBUG(World, "LoadBin: Start - Total allocated: {} MB", Foundation::MemoryUsed() / (1024 * 1024));
+    // A mission retry loads the start-of-mission autosave instead of switching the landscape, and
+    // never reached the resets there: breached houses kept their holes and craters stayed (owner,
+    // 2026-10-19: "when i reset the map the holes are there"). Neither is in the save.
+    GCraters().Reset();
+    BuildingBreach::Reset();
     LSError err;
     {
         GDebugger.NextAliveExpected(15 * 60 * 1000);

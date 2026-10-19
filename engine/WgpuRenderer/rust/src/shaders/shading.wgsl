@@ -16,7 +16,7 @@
 #import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
 #import tree_snow::tree_snow_albedo
 #import frame::ground_sky_reflection
-#import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage}
+#import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage, snow_noise}
 
 // Cosmetic coating uses the actual raised surface, never terrain snow_depth / ground shelter
 // deficits. Baked exposure is raw known-volume proof (0 if missing); active zenith wins nearby.
@@ -358,6 +358,29 @@ fn shade(
             rain_puddle *= ground_puddle_rain_factor(interior_rain_reach(world_abs), interior_rain_coverage(world_abs));
         }
         albedo *= 1.0 - rain_puddle * 0.38;
+    }
+    // BOOM-003 (owner, 2026-10-19: "icy roads"): a road (a ground surface) in a snowy world is
+    // packed, dirty snow in patches and smooth black ice between them, not dry asphalt. Ice is
+    // darker and mirror-glossy (a tight sun highlight); packed snow is grey-white and matt.
+    // World-anchored noise at 0.7-3.7 m, local coordinates; nothing at all outside winter.
+    if (ground_surface && linear > 0.5 && !is_foliage && !is_cockpit && snow_cover == 0.0) {
+        var winter = smoothstep(0.0, 0.01, frame.snow_surface.x);
+        if (frame.snow_surface.y >= 0.0 && frame.snow_surface.z > 0.0 && frame.snow_surface.w > 0.001) {
+            winter = max(winter, smoothstep(frame.snow_surface.y - frame.snow_surface.z, frame.snow_surface.y, world_abs.y));
+        }
+        if (winter > 0.0) {
+            let lp = world_abs.xz - floor(world_abs.xz / 512.0) * 512.0;
+            let packed_n = snow_noise(lp / 2.3).x * 0.6 + snow_noise(lp / 0.7 + vec2<f32>(5.0, 9.0)).x * 0.4;
+            let ice_n = snow_noise(lp / 3.7 + vec2<f32>(-13.0, 4.0)).x;
+            let packed = smoothstep(-0.1, 0.45, packed_n) * winter;
+            let ice = smoothstep(0.1, 0.5, ice_n) * winter * (1.0 - 0.7 * packed);
+            albedo = mix(albedo, vec3<f32>(0.52, 0.54, 0.57) * (0.85 + 0.15 * packed_n), packed);
+            albedo = mix(albedo, albedo * vec3<f32>(0.5, 0.54, 0.6), ice);
+            m_specular = mix(m_specular, mat.sun_diffuse * 0.9, ice);
+            m_spec_power = mix(m_spec_power, 240.0, ice);
+            m_spec_mask = mix(m_spec_mask, 1.0, ice);
+            m_specular *= 1.0 - 0.8 * packed;
+        }
     }
     // Sinkhole W1/W1b: a fragment under the terrain surface (a cave, a cellar, a tunnel) is lit only by what
     // comes in through the terrain's openings. The heightfield is never a shadow caster for objects, and the

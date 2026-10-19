@@ -217,6 +217,29 @@ struct TerrainHoles {
 };
 @group(1) @binding(3) var<storage, read> holes: TerrainHoles;
 
+// BOOM-001: explosion craters near the camera (TerrainWgpu uploads the nearest 64): no grass grows
+// on a crater's fresh soil. discs[i] = (x, z, soil radius, seed); the edge is ragged like the
+// thrown soil the terrain draws there.
+struct GrassCraters {
+    info: vec4<f32>,
+    discs: array<vec4<f32>, 64>,
+};
+@group(1) @binding(6) var<storage, read> grass_craters: GrassCraters;
+fn on_crater_soil(xz: vec2<f32>) -> bool {
+    let n = min(u32(max(grass_craters.info.x, 0.0)), 64u);
+    for (var i = 0u; i < n; i = i + 1u) {
+        let c = grass_craters.discs[i];
+        let d = xz - c.xy;
+        let d2 = dot(d, d);
+        if (d2 > c.z * c.z * 1.44) { continue; }
+        let a = atan2(d.y, d.x);
+        let ragged = 0.88 + 0.12 * sin(5.0 * a + c.w) + 0.08 * sin(11.0 * a + c.w * 1.7)
+                   + 0.10 * fract(sin(dot(floor(xz * 3.0), vec2<f32>(12.9898, 78.233))) * 43758.5453);
+        if (d2 < c.z * c.z * ragged * ragged) { return true; }
+    }
+    return false;
+}
+
 fn in_terrain_hole(world: vec3<f32>) -> bool {
     let xz = world.xz;
     let n = min(u32(max(holes.info.x, 0.0)), 64u);
@@ -1332,6 +1355,7 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (!cards_on_near() && cell_skips_blades(geo)) { return; }
     let y = sample_height(world_xz);
     if (in_terrain_hole(vec3<f32>(world_xz.x, y, world_xz.y))) { return; } // preserve ground above a bounded cave mouth
+    if (on_crater_soil(world_xz)) { return; }
     if (y <= terrain.sea_level + 0.35) { return; }
     let normal = sample_normal(world_xz);
     if (normal.y < 0.70) { return; }
@@ -1414,6 +1438,7 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (cards_on_mid() && card_thinned(cell_id, geo)) { return; }
     if (cards_on_mid() && card_yields_to_mesh(world_xz, distance, geo)) { return; }
     if (in_terrain_hole(vec3<f32>(world_xz.x, y, world_xz.y))) { return; } // preserve ground above a bounded cave mouth
+    if (on_crater_soil(world_xz)) { return; }
     if (y <= terrain.sea_level + 0.35 || sample_normal(world_xz).y < 0.70) { return; }
     let out_index = atomicAdd(&placement_count[0], 1u);
     if (out_index >= MAX_MID_INSTANCES) {
@@ -1495,6 +1520,7 @@ fn cs_place_far(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (authored_thinned(cell_id, geo)) { return; }
     let y = sample_height(world_xz);
     if (in_terrain_hole(vec3<f32>(world_xz.x, y, world_xz.y))) { return; } // preserve ground above a bounded cave mouth
+    if (on_crater_soil(world_xz)) { return; }
     if (y <= terrain.sea_level + 0.35) { return; }
     let normal = sample_normal(world_xz);
     if (normal.y < 0.70) { return; }

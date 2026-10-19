@@ -627,7 +627,7 @@ mod tests {
         ep.max_scale = 2.;
         exposure.upload_params(&queue, &ep);
         let mut tone = crate::tonemap::Tonemap::new(&device, wgpu::TextureFormat::Rgba8Unorm);
-        tone.set_source(&device, &hdr, &bloom, exposure.scale_view());
+        tone.set_source(&device, &hdr, &bloom, exposure.scale_view(), Some(exposure.clip_buffer()));
         let mut tp = crate::ffi::WgrTonemap::default();
         tp.exposure = 2.;
         tp.bloom_intensity = 0.4;

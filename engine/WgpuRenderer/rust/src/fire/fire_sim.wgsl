@@ -188,10 +188,22 @@ fn cs_evolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     let transported = max(corrected, vec4<f32>(0.0));
 
     // the emitter: a flattened sphere at the base (fluid-sources.wgsl emitterWeight)
-    let d = (p - S.emitter.xyz) / max(vec3<f32>(S.emitter.w, S.emitter.w * 0.45, S.emitter.w), vec3<f32>(0.03));
+    // BOOM-001: a burst (extra.w > 0) blows from a near-round charge, not a flat bed: a flattened
+    // emitter made the fireball a lens
+    // (a ground burst's thrown earth, tint.w: a tall column of soil, ~3 radii high)
+    let flat = select(0.45, select(0.9, 3.2, S.tint.w > 0.5), S.extra.w > 0.0);
+    let d = (p - S.emitter.xyz) / max(vec3<f32>(S.emitter.w, S.emitter.w * flat, S.emitter.w), vec3<f32>(0.03));
     let r = length(d);
     var weight = 0.0;
     if (r < 1.0) { weight = 1.0 - smoothstep(0.5, 1.0, r); }
+    if (S.tint.w > 0.5 && weight > 0.0) {
+        // BOOM-001: thrown earth leaves in separate jets (the crown of spikes in the reference
+        // photos) and a central column, not as one ball: emit only where the crown has a jet
+        let a = atan2(d.z, d.x);
+        let jets = abs(sin(a * 3.5 + S.step.z) * sin(a * 2.3 + S.step.z * 1.7 + 1.3));
+        let core = 1.0 - smoothstep(0.2, 0.4, length(d.xz));
+        weight *= max(smoothstep(0.3, 0.75, jets), core);
+    }
     var lifetime = transported.z;
     var sourceProducts = vec2<f32>(0.0);
     if (weight > 0.0) {
@@ -341,12 +353,40 @@ fn cs_forces(@builtin(global_invocation_id) gid: vec3<u32>) {
         let rq = length(dq);
         if (rq < 1.6) {
             let w = 1.0 - smoothstep(0.6, 1.6, rq);
-            let outward = (p - S.emitter.xyz) / max(length(p - S.emitter.xyz), 1e-3);
-            v = mix(v, outward * S.extra.w, 1.0 - exp(-12.0 * w * dt));
+            var outward = (p - S.emitter.xyz) / max(length(p - S.emitter.xyz), 1e-3);
+            var speed = S.extra.w;
+            if (S.tint.w > 0.5) {
+                // BOOM-001: a ground burst throws its earth UP and out in a crown of jets: steep
+                // in the middle, flatter towards the rim, a skirt along the ground at its foot;
+                // the speed varies round the crown so it breaks into separate spikes of soil
+                let a = atan2(dq.z, dq.x);
+                let seed = S.step.z;
+                let jets = abs(sin(a * 3.5 + seed) * sin(a * 2.3 + seed * 1.7 + 1.3));
+                let up = 1.6 + 1.2 * jets - 0.9 * smoothstep(0.4, 1.4, length(dq.xz));
+                outward = normalize(vec3<f32>(dq.x, max(dq.y, 0.0) + up, dq.z));
+                speed = S.extra.w * (0.3 + 1.1 * pow(jets, 1.2));
+                // the central column goes straight up, fastest of all
+                let core = 1.0 - smoothstep(0.2, 0.4, length(dq.xz));
+                outward = normalize(mix(outward, vec3<f32>(0.0, 1.0, 0.0), core));
+                speed = mix(speed, S.extra.w * 1.3, core);
+                // the skirt: what starts at ground level runs out along it
+                if (dq.y < 0.15) {
+                    outward = normalize(vec3<f32>(dq.x, 0.25, dq.z));
+                    speed = S.extra.w * 0.45;
+                }
+            }
+            // a charge's kick is near-instant for thrown earth (12/s eased the jets in over ~10
+            // steps, and the burst was over before they reached speed)
+            let kick = select(12.0, 90.0, S.tint.w > 0.5);
+            v = mix(v, outward * speed, 1.0 - exp(-kick * w * dt));
         }
     }
     // the source's own velocity (sourceVelocity): a rise out of the bed
-    let d = (p - S.emitter.xyz) / max(vec3<f32>(S.emitter.w, S.emitter.w * 0.45, S.emitter.w), vec3<f32>(0.03));
+    // BOOM-001: a burst (extra.w > 0) blows from a near-round charge, not a flat bed: a flattened
+    // emitter made the fireball a lens
+    // (a ground burst's thrown earth, tint.w: a tall column of soil, ~3 radii high)
+    let flat = select(0.45, select(0.9, 3.2, S.tint.w > 0.5), S.extra.w > 0.0);
+    let d = (p - S.emitter.xyz) / max(vec3<f32>(S.emitter.w, S.emitter.w * flat, S.emitter.w), vec3<f32>(0.03));
     let r = length(d);
     if (r < 1.0 && S.emit.w > 0.0) {
         let w = 1.0 - smoothstep(0.5, 1.0, r);
@@ -399,7 +439,10 @@ fn cs_project(@builtin(global_invocation_id) gid: vec3<u32>) {
     var v = textureLoad(velIn, id, 0).xyz - grad;
     if (id.y == 0 && S.dims.w == 1u) { v.y = max(v.y, 0.0); }
     // keep the gas inside the box finite: a runaway cell would smear the whole field
+    // (BOOM-001: thrown earth leaves at up to ~70 m/s -- at the gas's 25 m/s cap the dirt
+    // burst never rose above ~8 m)
     let speed = length(v);
-    if (speed > 25.0) { v = v * (25.0 / speed); }
+    let cap = select(25.0, 90.0, S.tint.w > 0.5);
+    if (speed > cap) { v = v * (cap / speed); }
     textureStore(outRgba, id, vec4<f32>(enforce(id, v), 0.0));
 }

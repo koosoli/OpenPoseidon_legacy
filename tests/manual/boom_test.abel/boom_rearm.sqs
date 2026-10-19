@@ -1,0 +1,6 @@
+player removeMagazines "HandGrenade"
+player addMagazine "LAWLauncher"
+player addMagazine "LAWLauncher"
+player addMagazine "LAWLauncher"
+player addMagazine "PipeBomb"
+player addMagazine "PipeBomb"

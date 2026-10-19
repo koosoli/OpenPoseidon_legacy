@@ -3628,6 +3628,47 @@ pub unsafe extern "C" fn wgr_terrain_set_mud_far(renderer: *mut WgrRenderer, dat
     }));
 }
 
+/// BOOM-001: upload one crater view pair (heights + materials), near (far = 0) or far (far = 1).
+/// # Safety
+/// `data` must address `count` floats; renderer must be live and exclusively owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_craters(renderer: *mut WgrRenderer, data: *const f32, count: u32, far: u32) {
+    if renderer.is_null() || data.is_null() || count != 2 * (4 + 512 * 512) { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        let values = unsafe { std::slice::from_raw_parts(data, count as usize) };
+        r.terrain.set_craters(&r.queue, values, far != 0);
+    }));
+}
+
+/// BOOM-005: this frame's muzzle flashes (fire::FLASH_FLOATS each), drawn once by the fire march.
+/// # Safety
+/// `data` must address `count` floats; renderer must be live and exclusively owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_fire_set_muzzle_flashes(renderer: *mut WgrRenderer, data: *const f32, count: u32) {
+    if renderer.is_null() || data.is_null() || count as usize > crate::fire::FLASH_FLOATS * crate::fire::MAX_FLASHES {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        let values = unsafe { std::slice::from_raw_parts(data, count as usize) };
+        r.fire.set_muzzle_flashes(values);
+    }));
+}
+
+/// BOOM-004: upload the sharp snow bullet holes ([count, originX, originZ, 0] + count * 8 floats).
+/// # Safety
+/// `data` must address `count` floats; renderer must be live and exclusively owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_snow_marks(renderer: *mut WgrRenderer, data: *const f32, count: u32) {
+    if renderer.is_null() || data.is_null() || count < 4 || count as usize > crate::terrain::SNOW_MARKS_FLOATS { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        let values = unsafe { std::slice::from_raw_parts(data, count as usize) };
+        r.terrain.set_snow_marks(&r.queue, values);
+    }));
+}
+
 /// How full of standing water the mud ruts are, [0,1]; non-finite = 0.
 /// # Safety
 /// renderer must be live and exclusively owned.
@@ -3930,6 +3971,21 @@ pub unsafe extern "C" fn wgr_grass_set_blade_skip(renderer: *mut WgrRenderer, ma
     let _ = catch_unwind(AssertUnwindSafe(|| {
         let renderer = unsafe { &mut *renderer };
         renderer.grass_set_blade_skip(mask);
+    }));
+}
+
+/// BOOM-001: the explosion craters nearest the camera for the grass placement: `[count, 0, 0, 0]`
+/// then `count` x `(x, z, soil radius, seed)`, count <= 64. Malformed data clears the list.
+///
+/// # Safety
+/// `renderer` must be live; `data` must point to `count` readable floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_craters(renderer: *mut WgrRenderer, data: *const f32, count: u32) {
+    if renderer.is_null() || data.is_null() || count < 4 { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        let values = unsafe { std::slice::from_raw_parts(data, count as usize) };
+        r.grass.set_craters(&r.queue, values);
     }));
 }
 

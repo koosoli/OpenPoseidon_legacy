@@ -1,4 +1,6 @@
 #include "TerrainWgpu.hpp"
+#include <Poseidon/World/Terrain/CraterField.hpp>
+#include <functional>
 #include "TerrainWgpuTidewaterDetail.hpp"
 #include "FishSchools.hpp"
 #include "BirdFlocks.hpp"
@@ -4539,6 +4541,51 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
             _mudFarUploadWallTime = farWall; _mudFarUploaded = true;
         }
     }
+    // BOOM-001: crater views. Near: 128 m ahead-centred like the mud window, moved in 4 m chunk
+    // steps; far: 512 m, moved in 16 m steps. Grass gets the 64 craters nearest the camera.
+    const auto& craters = GCraters();
+    if (camera && std::isfinite(camera->Position().X()) && std::isfinite(camera->Position().Z()))
+    {
+        const MudViewCentre centre = MudWindowCentre(camera->Position().X(), camera->Position().Z(),
+                                                     camera->Direction().X(), camera->Direction().Z());
+        const int nx = int(std::floor(centre.x / 4.0f)), nz = int(std::floor(centre.z / 4.0f));
+        if (!_craterNearUploaded || uploaded || _craterNearRevision != craters.Revision() ||
+            (craters.Chunks() > 0 && (nx != _craterNearX || nz != _craterNearZ)))
+        {
+            _engine.QueueCraters(craters.Snapshot(centre.x, centre.z, false), false);
+            _craterNearRevision = craters.Revision(); _craterNearX = nx; _craterNearZ = nz; _craterNearUploaded = true;
+        }
+        const int fx = int(std::floor(centre.x / 16.0f)), fz = int(std::floor(centre.z / 16.0f));
+        if (!_craterFarUploaded || uploaded || _craterFarRevision != craters.Revision() ||
+            (craters.Chunks() > 0 && (fx != _craterFarX || fz != _craterFarZ)))
+        {
+            _engine.QueueCraters(craters.Snapshot(centre.x, centre.z, true), true);
+            _craterFarRevision = craters.Revision(); _craterFarX = fx; _craterFarZ = fz; _craterFarUploaded = true;
+        }
+        const int gx = int(std::floor(camera->Position().X() / 16.0f)), gz = int(std::floor(camera->Position().Z() / 16.0f));
+        if (!_grassCraterUploaded || _grassCraterRevision != craters.Revision() ||
+            (craters.Craters() > 64 && (gx != _grassCraterX || gz != _grassCraterZ)))
+        {
+            _engine.QueueGrassCraters(craters.NearestDiscs(camera->Position().X(), camera->Position().Z(), 64));
+            _grassCraterRevision = craters.Revision(); _grassCraterX = gx; _grassCraterZ = gz; _grassCraterUploaded = true;
+        }
+    }
+    // BOOM-004: the 64 sharp snow bullet holes nearest the camera (80 m), re-picked on a new
+    // mark or after an 8 m move. Origin snapped to 64 m keeps the packed offsets small.
+    if (camera && std::isfinite(camera->Position().X()) && std::isfinite(camera->Position().Z()))
+    {
+        const auto& snowField = GSnow();
+        const float cx = camera->Position().X(), cz = camera->Position().Z();
+        const int mx = int(std::floor(cx / 8.0f)), mz = int(std::floor(cz / 8.0f));
+        if (!_snowMarksUploaded || uploaded || _snowMarksRevision != snowField.BulletMarksRevision() ||
+            (snowField.BulletMarks() > 0 && (mx != _snowMarksX || mz != _snowMarksZ)))
+        {
+            _engine.QueueSnowMarks(snowField.NearestBulletMarks(cx, cz, std::floor(cx / 64.0f) * 64.0f,
+                                                                std::floor(cz / 64.0f) * 64.0f, 64, 80.0f));
+            _snowMarksRevision = snowField.BulletMarksRevision(); _snowMarksX = mx; _snowMarksZ = mz;
+            _snowMarksUploaded = true;
+        }
+    }
     const auto& sand = GSand();
     if (camera && std::isfinite(camera->Position().X()) && std::isfinite(camera->Position().Z()))
     {
@@ -4707,6 +4754,51 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
             emitNode(s);
     };
 
+    // BOOM-001: the terrain mesh is only as fine as the heightmap (6.25 m on the stock islands), so
+    // a crater a few metres across falls between its vertices -- its depth reached the physics and
+    // the lighting but not the drawn ground. Patches over a crater near the camera are split
+    // (children tile the parent exactly, as RefineCdlodSnow) down to 8 m (0.25 m vertices, the
+    // CraterField cell) close by, coarser with distance. The crater's offset is zero at its
+    // edge, so a refined patch meets its unrefined neighbour on the same heightmap plane.
+    const std::vector<float> craterDiscs = GCraters().Chunks() > 0
+        ? GCraters().NearestDiscs(snowCamera.X(), snowCamera.Z(), 64) : std::vector<float>{0.0f, 0, 0, 0};
+    const int craterCount = int(craterDiscs[0]);
+    std::function<void(const CdlodSelection&)> craterRefine = [&](const CdlodSelection& s)
+    {
+        bool hit = false;
+        float nearest = 1e30f;
+        for (int i = 0; i < craterCount; ++i)
+        {
+            const float cx = craterDiscs[4 + i * 4], cz = craterDiscs[5 + i * 4];
+            const float r = craterDiscs[6 + i * 4] * 1.5f; // soil radius -> the whole bowl, lip and heap
+            const float dx = std::max({s.originX - cx, 0.0f, cx - (s.originX + s.size)});
+            const float dz = std::max({s.originZ - cz, 0.0f, cz - (s.originZ + s.size)});
+            if (dx * dx + dz * dz < r * r)
+            {
+                hit = true;
+                nearest = std::min(nearest, std::hypot(cx - snowCamera.X(), cz - snowCamera.Z()));
+            }
+        }
+        // (owner: "higher poly crater") 4 m patches = 0.125 m vertices close by
+        const float target = nearest < 60.0f ? 4.0f : nearest < 140.0f ? 8.0f : nearest < 280.0f ? 16.0f
+                           : nearest < 450.0f ? 32.0f : 1e9f;
+        if (!hit || s.size <= target)
+        {
+            emit(s);
+            return;
+        }
+        for (int child = 0; child < 4; ++child)
+        {
+            auto patch = s;
+            patch.size *= 0.5f;
+            patch.originX += (child & 1) * patch.size;
+            patch.originZ += (child >> 1) * patch.size;
+            patch.morphStart = 1.0e10f; // finer than the LOD ladder: never snap back to its lattice
+            patch.morphEnd = 2.0e10f;
+            craterRefine(patch);
+        }
+    };
+
     _selected.clear();
     // Off-map terrain draws in full, seabed included — NOT just above-water land. The
     // water is transparent, so the seabed shows through it; pruning below-sea off-map
@@ -4717,8 +4809,8 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     // extent so seabed always underlies the ocean.)
     SelectVisibleCdlod(
         _tree, _rootIndex, _numLevels, _ranges, _morphRegion, *camera, rx0, rz0, rx1, rz1,
-        [](const CdlodNode&) { return true; }, emit,
-        (snow.CoverActive() ? snowEffDepth : 0.0f) + (mud.enabled && mud.Chunks() > 0 ? MudField::MaxDepth : 0.0f)
+        [](const CdlodNode&) { return true; }, craterRefine,
+        (GCraters().Chunks() > 0 ? CraterField::MaxDepth : 0.0f) + (snow.CoverActive() ? snowEffDepth : 0.0f) + (mud.enabled && mud.Chunks() > 0 ? MudField::MaxDepth : 0.0f)
             + (sand.enabled && sand.Chunks() > 0 ? SandField::MaxDepth : 0.0f),
         _backgroundCoverage);
 

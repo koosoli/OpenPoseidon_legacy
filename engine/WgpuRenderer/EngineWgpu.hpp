@@ -1378,6 +1378,10 @@ class EngineWgpu : public EngineDummy
         std::vector<float> snowData;
         std::vector<float> mudData;
         std::vector<float> mudFarData;
+        std::vector<float> craterNearData; // BOOM-001: CraterField::Snapshot(near), heights + materials
+        std::vector<float> craterFarData;
+        std::vector<float> snowMarkData; // BOOM-004: SnowField::NearestBulletMarks
+        std::vector<float> grassCraterData;
         float mudWater = -1.0f; // standing water in mud ruts [0,1]; < 0 = no update queued
         std::vector<float> sandData;
         // Sinkhole W1: this frame's terrain hole edges (n x {nx, nz, d, last}); applied with the rest so the
@@ -1396,6 +1400,7 @@ class EngineWgpu : public EngineDummy
         bool smokeVolumeDirty = false;
         // FIRE-001: this frame's fires for the volumetric fire
         std::vector<WgrFireSource> fireSources;
+        std::vector<float> muzzleFlashData; // BOOM-005: render::CollectMuzzleFlashes
         bool fireDirty = false;
         // MUD-001: this frame's mud sprays (accumulated if a frame is skipped)
         std::vector<WgrMudEmitter> mudEmitters;
@@ -1838,6 +1843,9 @@ class EngineWgpu : public EngineDummy
     void QueueSnow(std::vector<float> data) { _pendingSet.snowData = std::move(data); }
     void QueueMud(std::vector<float> data) { _pendingSet.mudData = std::move(data); }
     void QueueMudFar(std::vector<float> data) { _pendingSet.mudFarData = std::move(data); }
+    void QueueGrassCraters(std::vector<float> data) { _pendingSet.grassCraterData = std::move(data); }
+    void QueueSnowMarks(std::vector<float> data) { _pendingSet.snowMarkData = std::move(data); }
+    void QueueCraters(std::vector<float> data, bool farView) { (farView ? _pendingSet.craterFarData : _pendingSet.craterNearData) = std::move(data); }
     void QueueMudWater(float level) { _pendingSet.mudWater = level; }
     void QueueSand(std::vector<float> data) { _pendingSet.sandData = std::move(data); }
     void QueueWaterParams(const WgrWaterParams& p);

@@ -298,6 +298,18 @@ void SmokeSourceVehicle::SimulateExplosion()
     if (!_exploded && _explosionTime <= Glob.time)
     {
         _exploded = true;
+        {
+            // FIRE-002: with Fire Pro drawing it, a wreck burns and smokes for ten minutes and
+            // takes three more to die down -- a real car fire burns 10-20 minutes (the 2001 wreck:
+            // 40 s and 40 s). Every wreck: this was inside the "big fuel explosion" branch below,
+            // so a jeep (little fuel, hit <= 50) kept the config's ~10 s and went out in seconds
+            // (owner, 2026-10-19: "the burning jeep ... is only burning for several seconds").
+            const float rndTime = GRandGen.RandomValue() * 0.4f + 0.8f;
+            if (FireProSmokeActive() && FireVolumesEnabled())
+                SetSourceTimes(0, 600 * rndTime, 180 * rndTime);
+            else
+                SetSourceTimes(0, 40 * rndTime, 40 * rndTime);
+        }
         VehicleNonAIType* vType = VehicleTypes.New("FuelExplosion");
         AmmoType* aType = dynamic_cast<AmmoType*>(vType);
         if (!aType)
@@ -336,13 +348,6 @@ void SmokeSourceVehicle::SimulateExplosion()
             _darkFire.SetSize(fireSize);
             _fire.Start(fireTime);
             _darkFire.Start(fireTime);
-            float rndTime = GRandGen.RandomValue() * 0.4 + 0.8;
-            // FIRE-002: with Fire Pro drawing it, a wreck burns and smokes for a minute and a half
-            // and takes another minute to go out (the 2001 wreck: 40 s and 40 s)
-            if (FireProSmokeActive() && FireVolumesEnabled())
-                SetSourceTimes(0, 90 * rndTime, 60 * rndTime);
-            else
-                SetSourceTimes(0, 40 * rndTime, 40 * rndTime);
             // sound of explosion
             const ParamEntry& par = Pars >> "CfgDestroy" >> "EngineHit";
             SoundPars soundPars;
@@ -2441,8 +2446,17 @@ void Explosion::Simulate(float deltaT, SimulationImportance prec)
             const Vector3 p = Position();
             const float ground = GLandscape ? GLandscape->SurfaceY(p.X(), p.Z()) : p.Y();
             const float size = std::min(_exSize, 1.0f);
-            SpawnFireVolume(Vector3(p.X(), std::max(ground, p.Y() - 1.5f), p.Z()), 0.6f + 1.8f * size, 0.6f,
-                            0.6f + 0.8f * size, FireKindExplosion);
+            // BOOM-001: a burst at the ground is a ball sitting on it, not a ring flattened
+            // against it: the ball's centre half a radius up
+            // (owner, 2026-10-18: "the fireball needs to be bigger") -- free: the solver box is a
+            // fixed cell count whatever its size, so a bigger ball costs the same to simulate
+            const float radius = 1.2f + 2.8f * size;
+            // a burst against a wall or in the air is a ball where it went off (owner, 2026-10-19:
+            // "when i shoot at a wall, the fireball can not come from the ground"); one at the
+            // ground sits on it
+            const bool raised = p.Y() - ground > 1.0f;
+            const float baseY = raised ? p.Y() : std::max(ground + 0.5f * radius, p.Y() - 1.5f);
+            SpawnFireVolume(Vector3(p.X(), baseY, p.Z()), radius, 0.6f, 0.6f + 0.8f * size, FireKindExplosion);
         }
     }
 

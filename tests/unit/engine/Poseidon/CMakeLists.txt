@@ -440,6 +440,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/test_terrain.cpp
     World/Terrain/test_water_surface_query.cpp
     World/Terrain/test_water_bodies.cpp
+    World/Terrain/test_crater_field.cpp
     World/Terrain/test_terrain_surface_catalog.cpp
     World/test_terrain_gpu_interp.cpp
     World/test_terrain_cdlod.cpp

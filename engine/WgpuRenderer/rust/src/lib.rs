@@ -3383,11 +3383,13 @@ impl Renderer {
                 .as_ref()
                 .map(|e| e.scale_view())
                 .unwrap_or(&post_source);
+            let clip = self.exposure.as_ref().map(|e| e.clip_buffer());
             self.tonemap.as_mut().expect("tonemap").set_source(
                 &self.device,
                 &post_source,
                 bloom_view,
                 scale_view,
+                clip,
             );
             if let Some(bloom) = self.bloom.as_mut() {
                 bloom.set_source(&self.device, &post_source);
@@ -3793,7 +3795,8 @@ impl Renderer {
                 .as_ref()
                 .map(|e| e.scale_view())
                 .unwrap_or(&post_view);
-            tonemap.set_source(&self.device, &post_view, bloom_view, scale_view);
+            let clip = self.exposure.as_ref().map(|e| e.clip_buffer());
+            tonemap.set_source(&self.device, &post_view, bloom_view, scale_view, clip);
         }
         self.hdr = Some((texture, view));
         self.hdr_resolve = resolve;

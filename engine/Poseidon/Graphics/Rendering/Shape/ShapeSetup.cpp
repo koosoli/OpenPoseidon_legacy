@@ -80,6 +80,9 @@ Shape::Shape(const Shape& src, bool copyAnimations)
       _prop(src._prop),                             // copy named properties
       _sel(src._sel),                               // copy named selections
       _level(src._level), _textures(src._textures), // copy texture list
+      // BOOM-002: the per-texture areas belong with the texture list -- PrepareTextures indexes
+      // _areaOTex by texture, and a copy without them read past an empty array on its first draw
+      _areaOTex(src._areaOTex), _colorTop(src._colorTop),
       _pointToVertex(src._pointToVertex), _vertexToPoint(src._vertexToPoint),
       //_sections(src._sections),
       _faceNormalsValid(src._faceNormalsValid)
@@ -98,6 +101,42 @@ Shape::Shape(const Shape& src, bool copyAnimations)
 #ifdef _MSC_VER
 #pragma warning(default : 4355)
 #endif
+
+int Shape::AppendVertexCopies(const int* sources, int count)
+{
+    const int first = _pos.Size();
+    const bool tangents = _tangent.Size() == first, binormals = _binormal.Size() == first;
+    const bool tex1 = _tex1.Size() == first && first > 0, authored = _authoredTangentVertices.Size() == first;
+    const bool orig = _orig.Size() == first, origNorm = _origNorm.Size() == first, origClip = _origClip.Size() == first;
+    const bool v2p = _vertexToPoint.Size() == first;
+    for (int k = 0; k < count; ++k)
+    {
+        const int s = sources[k];
+        _pos.Add(Vector3(_pos[s]));
+        _clip.Add(ClipFlags(_clip[s]));
+        _norm.Add(Vector3(_norm[s]));
+        _tex.Add(UVPair(_tex[s]));
+        if (tangents) _tangent.Add(Vector3(_tangent[s]));
+        if (binormals) _binormal.Add(Vector3(_binormal[s]));
+        if (tex1) _tex1.Add(UVPair(_tex1[s]));
+        if (authored) _authoredTangentVertices.Add((unsigned char)_authoredTangentVertices[s]);
+        if (orig) _orig.Add(Vector3(_orig[s]));
+        if (origNorm) _origNorm.Add(Vector3(_origNorm[s]));
+        if (origClip) _origClip.Add(ClipFlags(_origClip[s]));
+        if (v2p) _vertexToPoint.Add(VertexIndex(_vertexToPoint[s]));
+    }
+    InvalidateBuffer();
+    return first;
+}
+
+void Shape::CopyProxiesFrom(const Shape& src)
+{
+    _proxy.Clear();
+    for (int i = 0; i < src._proxy.Size(); i++)
+    {
+        _proxy.Add(new ProxyObject(*src._proxy[i]));
+    }
+}
 
 struct MTextureItem
 {

@@ -114,6 +114,7 @@
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/World/Effects/SmokeSystem.hpp>                // the one wind authority (grass sway, cloud drift)
 #include <Poseidon/World/Effects/FireVolumes.hpp>                // FIRE-001
+#include <Poseidon/Graphics/Rendering/Effects/MuzzleBurst.hpp>   // BOOM-005
 #include <Poseidon/World/Effects/MudSpray.hpp>                   // MUD-001
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
 #include <Poseidon/Graphics/Shared/ScreenshotWriter.hpp>
@@ -3288,6 +3289,11 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
         p.mudEmitters.clear();
         p.mudDirty = false;
     }
+    if (!p.muzzleFlashData.empty())
+    {
+        wgr_fire_set_muzzle_flashes(_renderer, p.muzzleFlashData.data(), static_cast<uint32_t>(p.muzzleFlashData.size()));
+        p.muzzleFlashData.clear();
+    }
     if (p.fireDirty)
     {
         wgr_set_fire_sources(_renderer, p.fireSources.empty() ? nullptr : p.fireSources.data(),
@@ -3425,6 +3431,26 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
     {
         timed("mud far", [&] { wgr_terrain_set_mud_far(_renderer, p.mudFarData.data(), static_cast<uint32_t>(p.mudFarData.size())); });
         p.mudFarData.clear();
+    }
+    if (!p.craterNearData.empty())
+    {
+        wgr_terrain_set_craters(_renderer, p.craterNearData.data(), static_cast<uint32_t>(p.craterNearData.size()), 0);
+        p.craterNearData.clear();
+    }
+    if (!p.craterFarData.empty())
+    {
+        wgr_terrain_set_craters(_renderer, p.craterFarData.data(), static_cast<uint32_t>(p.craterFarData.size()), 1);
+        p.craterFarData.clear();
+    }
+    if (!p.snowMarkData.empty())
+    {
+        wgr_terrain_set_snow_marks(_renderer, p.snowMarkData.data(), static_cast<uint32_t>(p.snowMarkData.size()));
+        p.snowMarkData.clear();
+    }
+    if (!p.grassCraterData.empty())
+    {
+        wgr_grass_set_craters(_renderer, p.grassCraterData.data(), static_cast<uint32_t>(p.grassCraterData.size()));
+        p.grassCraterData.clear();
     }
     if (p.mudWater >= 0.0f)
     {
@@ -20487,16 +20513,18 @@ void EngineWgpu::UpdateSunGlareExposure()
     view.Normalize();
     sun.Normalize();
 
-    // Begins within ~14 degrees and peaks only in the central ~2 degrees. Sun below
-    // the horizon never triggers accommodation, even if the camera faces that way.
+    // Begins within ~25 degrees and peaks in the central ~3 degrees. Sun below the horizon
+    // never triggers accommodation, even if the camera faces that way. (Owner, 2026-10-19: "if i
+    // look into the sun it even gets brighter, but it should do the opposite" -- 7 % was too
+    // little to see; the clip-counting iris (exposure.wgsl, BOOM-006) closes the rest.)
     float focus = 0.0f;
     if (sun.Y() > 0.0f)
     {
         const float dot = std::clamp(view.DotProduct(sun), -1.0f, 1.0f);
-        const float t = std::clamp((dot - 0.970f) / (0.9994f - 0.970f), 0.0f, 1.0f);
+        const float t = std::clamp((dot - 0.906f) / (0.9986f - 0.906f), 0.0f, 1.0f);
         focus = t * t * (3.0f - 2.0f * t);
     }
-    const float target = 1.0f - 0.07f * focus;
+    const float target = 1.0f - 0.25f * focus;
 
     // Frame-rate-independent temporal response: darker over ~0.8 s, and recovers
     // more gradually (~1.8 s), avoiding an exposure pop while panning.
@@ -21633,7 +21661,9 @@ void EngineWgpu::PushRenderParams()
         _autoExposureRate > 0.0f ? _autoExposureRate : _exposure.rate,
         _exposure.skyWeight,
         nativeExposure ? nativeExposureCompensation : 1.0f,
-        nativeExposure ? 1.0f : 0.0f,
+        // stock worlds: -(tonemap exposure), which the meter's highlight cap needs to know where
+        // a pixel lands on the curve (exposure.wgsl fs_lum_first); native: Reforger's mask
+        nativeExposure ? 1.0f : -std::max(p.tonemap.exposure, 1e-3f),
     };
 
     // Authored sky look (no celestial/runtime — that rides WgrSkyRuntime in PushSkyRuntime).
@@ -21825,6 +21855,11 @@ void EngineWgpu::PushRenderParams()
                     std::memcpy(w.ceiling, f.ceiling, sizeof w.ceiling);
                 }
                 _pendingSet.fireDirty = true;
+                // BOOM-005: the volumetric muzzle flashes alive this frame (sent every frame:
+                // the renderer forgets them once drawn)
+                render::CollectMuzzleFlashes(_pendingSet.muzzleFlashData, Object::RenderTimeMs(),
+                                             cam ? cam->Position().X() : 0.0f, cam ? cam->Position().Y() : 0.0f,
+                                             cam ? cam->Position().Z() : 0.0f, 8);
             }
             // The sun the smoke is lit by is the one SMK-035 already shades the billboards
             // with, so the two systems cannot disagree about the time of day.

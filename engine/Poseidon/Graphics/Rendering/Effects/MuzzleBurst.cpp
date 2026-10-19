@@ -9,6 +9,7 @@
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <algorithm>
 #include <cstdlib>
 #include <vector>
 
@@ -62,6 +63,40 @@ bool MuzzleBurstEnabled()
     return enabled;
 }
 
+bool VolumetricMuzzleFlashEnabled()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("POSEIDON_MUZZLE_FLASH_VOLUME");
+        return !(value && value[0] == '0');
+    }();
+    return enabled && MuzzleBurstEnabled();
+}
+
+void CollectMuzzleFlashes(std::vector<float>& out, double nowMs, float camX, float camY, float camZ, int maxCount)
+{
+    out.clear();
+    if (!VolumetricMuzzleFlashEnabled() || maxCount <= 0) return;
+    struct Live { float d2; const MuzzleBurstShot* shot; double age; };
+    std::vector<Live> live;
+    Ring().ForEachLive(nowMs, [&](const MuzzleBurstShot& shot) {
+        const double age = nowMs - double(shot.birthMs);
+        if (age < 0 || age >= MuzzleFlashVolumeLifetimeMs) return;
+        const float dx = shot.muzzle.x - camX, dy = shot.muzzle.y - camY, dz = shot.muzzle.z - camZ;
+        const float d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 > 400.0f * 400.0f) return;
+        live.push_back({d2, &shot, age});
+    });
+    std::sort(live.begin(), live.end(), [](const Live& a, const Live& b) { return a.d2 < b.d2; });
+    for (std::size_t i = 0; i < live.size() && int(i) < maxCount; ++i)
+    {
+        const MuzzleBurstShot& s = *live[i].shot;
+        // (the march seeds each flash's shape from its muzzle position: every shot stands elsewhere)
+        const float v[8] = {s.muzzle.x, s.muzzle.y, s.muzzle.z, float(live[i].age * 0.001),
+                            s.forward.x, s.forward.y, s.forward.z, std::clamp(s.size, 0.3f, 3.0f)};
+        out.insert(out.end(), v, v + 8);
+    }
+}
+
 void RecordMuzzleBurst(const MuzzleBurstShot& shot)
 {
     if (!MuzzleBurstEnabled()) return;
@@ -99,7 +134,10 @@ void DrawMuzzleBursts()
         if (distance2 > maxDistance * maxDistance) return;
         const float fog = GScene->Fog8(distance2) * (1.0f / 255.0f);
         if (fog >= 0.99f) return;
+        const bool volume = VolumetricMuzzleFlashEnabled();
         MuzzleBurstParticles(shot, now, 9.81f, [&](const MuzzleParticle& p) {
+            // the volumetric flash is the gas; the burst keeps only its sparks
+            if (volume && p.kind != MuzzleParticleKind::Spark) return;
             const Vector3 head(p.head.x, p.head.y, p.head.z);
             const Vector3 tail(p.tail.x, p.tail.y, p.tail.z);
             const Vector3 headView = toView * head;

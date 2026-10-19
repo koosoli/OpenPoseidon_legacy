@@ -1102,6 +1102,10 @@ class Man: public Person
 	float SwimGearLoad() const;
 	Matrix3 GetHeadRelOrientation() const;
 	Vector3 GetWeaponPoint( int weapon ) const override;
+	// BOOM-005: the weapon model's own barrel axis (muzzleEnd -> muzzlePos), animated with the
+	// weapon proxy, model space; VZero when the weapon has no proxy. The aiming direction
+	// (GetWeaponRelDirection) is where the soldier looks, not where the barrel points.
+	Vector3 GetWeaponBarrelDirection( int weapon ) const;
 	bool GetWeaponCartridgePos
 	(
 		int weapon, Matrix4 &pos, Vector3 &vel

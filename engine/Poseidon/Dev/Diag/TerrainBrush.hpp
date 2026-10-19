@@ -26,7 +26,8 @@ bool RestoreEditedTerrain();
 void ClearTerrainEditBaseline();
 struct RocketCraterSettings
 {
-    bool enabled = true;
+    bool enabled = true;  // BOOM-001: fine ground craters (CraterField) from explosions
+    bool coarse = false;  // also dent the heightmap itself (one 6.25 m+ cell wide: the old look)
     float radius = 12.0f;
     float depth = 1.0f;
 };
