@@ -53,12 +53,12 @@ fn contact_disk(i: u32) -> vec2<f32> {
 // to 100 m separation; casters beyond that bound are an explicit prototype limit.
 fn contact_filter(uv: vec2<f32>, layer: i32, reference: f32,
                   gradient: vec2<f32>, world_to_uv: vec2<f32>,
-                  depth_per_metre: f32) -> f32 {
+                  depth_per_metre: f32, force_budget: bool) -> f32 {
     let slope = max(frame.shadow.sun_dir.w, 0.0);
     if (slope <= 0.0) {
         return contact_reconstruct(uv, layer, reference, gradient);
     }
-    let budget = frame.shadow.cam_fwd.w > 1.5;
+    let budget = frame.shadow.cam_fwd.w > 1.5 || force_budget;
     let taps = select(16u, 8u, budget);
     let stride = select(1u, 2u, budget);
     let size = vec2<i32>(textureDimensions(shadow_map));
@@ -174,6 +174,14 @@ fn contact_reconstruct(uv: vec2<f32>, layer: i32, reference: f32,
 // call it so they self-shadow identically.
 fn shadow_strength(world_pos: vec3<f32>, normal_ws: vec3<f32>, fog: f32,
                    dwx: vec3<f32>, dwy: vec3<f32>) -> f32 {
+    return shadow_strength_lod(world_pos, normal_ws, fog, dwx, dwy, 0u);
+}
+
+// PERF-FAR-CROWN: `lod` 0 = the configured receiver filter (shadow_strength); 1 = the contact
+// (PCSS) filter in its 8-tap budget mode -- the same penumbra model at half the taps; 2 = the
+// plane-corrected 3x3 tent, no blocker search. shading.wgsl picks 1/2 for distant leaf cards.
+fn shadow_strength_lod(world_pos: vec3<f32>, normal_ws: vec3<f32>, fog: f32,
+                       dwx: vec3<f32>, dwy: vec3<f32>, lod: u32) -> f32 {
     let n_cascades = i32(frame.shadow.ctl.x);
     if (n_cascades <= 0) {
         return 0.0;
@@ -271,10 +279,10 @@ fn shadow_strength(world_pos: vec3<f32>, normal_ws: vec3<f32>, fog: f32,
             let ref_z = sc.z - bias;
             var lit: f32;
             let pcf = frame.shadow.ctlb.w;
-            if (frame.shadow.cam_fwd.w > 0.5) {
+            if (frame.shadow.cam_fwd.w > 0.5 && lod < 2u) {
                 let sy = length(vec3<f32>(vp[0][1], vp[1][1], vp[2][1]));
                 let sz = length(vec3<f32>(vp[0][2], vp[1][2], vp[2][2]));
-                lit = contact_filter(suv, c, ref_z, dz_duv, vec2<f32>(sx, sy) * 0.5, sz);
+                lit = contact_filter(suv, c, ref_z, dz_duv, vec2<f32>(sx, sy) * 0.5, sz, lod >= 1u);
             } else {
 #ifdef COALESCED_PCF
             let dimensions = textureDimensions(shadow_map);

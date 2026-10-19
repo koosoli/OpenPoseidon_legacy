@@ -9,7 +9,7 @@
 #define_import_path shading
 
 #import frame::{frame, gi_irradiance, terrain_sun_shadow, apply_fog_receiver, fog_sun_reach, cloud_sun_shadow, sky_irradiance, sky_vis_ao, canopy_sky_ao, canopy_sun_shadow, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, sky_specular_split, spec_power_to_gloss}
-#import shadow::shadow_strength
+#import shadow::{shadow_strength, shadow_strength_lod}
 #import lighting::lights_material_contrib
 #import color::srgb_to_linear
 #import frame::{interior_rain_reach, interior_rain_coverage, snow_receiver_reach}
@@ -240,6 +240,8 @@ fn shade(
     tree_snow_cover: f32,
     ground_surface: bool,
     ground_snow_depth: f32,
+    // PERF-FAR-CROWN: (budget-filter from m, tent-filter from m) for leaf cards; x 0 = off.
+    foliage_shadow_lite: vec2<f32>,
 ) -> vec3<f32> {
     var albedo = albedo_in;
     var m_emissive = mat.emissive;
@@ -330,7 +332,19 @@ fn shade(
 
     // CSM shadow (near contact). Folded into the sun removal on the sky-lit path, kept as a
     // final multiply on the legacy path — exactly as the original fs_main did.
-    let csm_s = shadow_strength(world_pos, nrm, fog, dwx, dwy);
+    // PERF-FAR-CROWN: distant leaf cards take a cheaper receiver filter (see shadow_strength_lod).
+    // A crown fragment is the single most numerous shaded pixel in a forest view, and the
+    // contact filter's 17-tap blocker search + 16-24 compares is a large share of its lighting;
+    // past 40 m the 8-tap budget disk resolves the same penumbra, past 120 m a 3x3 tent shows
+    // what the far cascades can hold. Measured (owner profile): alpha-test pass -0.2..0.35 ms at
+    // Durras / forestOwner, crops equal within wind-sway noise. (budget-from m, tent-from m);
+    // x 0 = off (WGR_FAR_CROWN_SHADOW=0, or =<budget>,<tent>).
+    var csm_lod = 0u;
+    if (is_foliage && foliage_shadow_lite.x > 0.0) {
+        let crown_dist = length(world_pos);
+        csm_lod = select(select(0u, 1u, crown_dist > foliage_shadow_lite.x), 2u, crown_dist > foliage_shadow_lite.y);
+    }
+    let csm_s = shadow_strength_lod(world_pos, nrm, fog, dwx, dwy, csm_lod);
     // Long-range terrain sun-shadow: removes direct sun (diffuse+specular), keeps ambient/
     // emissive/local, sampled by absolute world position (world_pos is camera-relative).
     let world_abs = world_pos + frame.cam_pos.xyz;

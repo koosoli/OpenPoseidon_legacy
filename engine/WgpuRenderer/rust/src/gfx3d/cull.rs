@@ -4560,6 +4560,8 @@ pub fn build_gpu_pipeline(
         // which is how an A/B of WGR_FOLIAGE_SCREEN_AO read "no difference" (the flag never
         // reached the path that draws Everon's trees) and why the prepass census words stayed 0.
         ("foliage_screen_ao", super::foliage_screen_ao() as f64),
+        ("far_crown_shadow_budget", super::far_crown_shadow().0 as f64),
+        ("far_crown_shadow_tent", super::far_crown_shadow().1 as f64),
         ("count_fragments", super::count_fragments() as f64),
         ("crown_ao_ambient", crown_ao_ambient_from_env()),
         ("native_leaf_transmission", leaf_transmission_from_env()),

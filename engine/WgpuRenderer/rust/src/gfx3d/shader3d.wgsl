@@ -498,6 +498,9 @@ override is_shadow: f32 = 0.0;   // 1 = output black + shadow-strength alpha
 // MSAA; the prepass twin (fs_prepass_a2c) emits the same coverage so the masks match.
 override a2c: f32 = 0.0;
 override foliage_screen_ao: f32 = 0.0; // REN-OBJ-001, as in gpu_driven.wgsl
+// PERF-FAR-CROWN (as in gpu_driven.wgsl): leaf-card shadow filter distances, m; budget 0 = off.
+override far_crown_shadow_budget: f32 = 40.0;
+override far_crown_shadow_tent: f32 = 120.0;
 override blend_section_screen_ao: f32 = 0.0; // RFG-129
 override count_fragments: f32 = 0.0;   // REN-OBJ-003, as in gpu_driven.wgsl (colour pass only here)
 // 1 = an alpha-blended (glass) pipeline: the shared shading damps its diffuse sky-irradiance
@@ -1533,6 +1536,7 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         direct_tree_snow_cover(in),
         ground_surface,
         select(0.0, snow_depth(in.world_pos.xz + frame.cam_pos.xz), ground_surface),
+        vec2<f32>(far_crown_shadow_budget, far_crown_shadow_tent),
     );
     if (material.local_specular.w == -1.0) {
         // Only exact authored animated stock muzzle sections receive this value.

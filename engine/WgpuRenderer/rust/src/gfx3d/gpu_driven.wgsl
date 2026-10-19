@@ -31,6 +31,11 @@ override a2c: f32 = 0.0;
 // REN-OBJ-001: 1 = vegetation cutouts also sample GTAO + the interior-sky volume (the pre-2026-09-02
 // behaviour, WGR_FOLIAGE_SCREEN_AO=1); 0 = they take only their canopy term. See shade().
 override foliage_screen_ao: f32 = 0.0;
+// PERF-FAR-CROWN: distance (m) past which leaf cards take the 8-tap budget shadow filter, and
+// past which the 3x3 tent (shadow::shadow_strength_lod), 40 / 120 m. Budget 0 = off (WGR_FAR_CROWN_SHADOW=0);
+// WGR_FAR_CROWN_SHADOW=<budget>,<tent> moves them. Supplied by BOTH pipeline families.
+override far_crown_shadow_budget: f32 = 40.0;
+override far_crown_shadow_tent: f32 = 120.0;
 override count_fragments: f32 = 0.0; // REN-OBJ-003 object fragment census, see census()
 // 1 = the depth+normal PREPASS fragment applies the colour pass' FULL discard set, so the depth
 // it lays down covers exactly the pixels fs_gpu will shade. 0 restores the pre-fix behaviour
@@ -1730,6 +1735,7 @@ fn fs_gpu_body(in: VsOut, front: bool) -> vec4<f32> {
         retained_tree_snow_cover(in),
         retained_ground_receiver(in),
         frame.snow_surface.x,
+        vec2<f32>(far_crown_shadow_budget, far_crown_shadow_tent),
     );
     // REN-ATM-001: read back what shade()'s apply_fog actually did to THIS fragment and bin it by
     // shader family. Placed immediately after shade() so nothing between the fog and the count can
