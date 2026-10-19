@@ -36,6 +36,7 @@ class ShipType: public TransportType
 	// Tidewater's helm wheel ("tw_wheel" about the memory axis "osa volantu"): the 2001 "volant" takes its axis from
 	// points in the pilot-view LOD, which a generated model cannot keep (faceless points), and drew the wheel away
 	AnimationRotation _twWheel;
+	Animation _twFlag; // (OP) Tidewater's ensign, flown in the apparent wind (Ship::Animate)
 
 	HitPoint _turretHit,_gunHit;
 
@@ -143,6 +144,10 @@ class Ship: public Transport
 	Ref<IWave> _twLap, _twRush, _twEngine;
 	float _twSlapT = 0;
 	float _twEngineOn = 0; // Tidewater's engine spool (0 off .. 1 running)
+	// (OP) Tidewater's flag: the apparent wind's direction in model space and its strength 0..1 (BoatModel.update)
+	Vector3 _twFlagDir = Vector3(0, 0, -1);
+	float _twFlagWind = 0.5f;
+	void FlyFlag(int level, bool restore);
 
 	bool _hasDeck = false; // its model has a roadway LOD (counted in DeckShips)
 

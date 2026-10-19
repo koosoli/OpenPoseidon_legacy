@@ -34,6 +34,7 @@ MODEL = "tidewater_boat.p3d"
 PALETTE = "boat_palette"
 HULL = "boat_hull"
 DISPLAYS = "boat_displays"
+PROPS = "boat_props"
 # Tidewater draws these double-sided (the trap mesh, the glass): every triangle gets a back face with the opposite
 # normal
 DOUBLE_SIDED = ("trap", "glass")
@@ -242,6 +243,206 @@ def display_atlas():
     return Image.fromarray((srgb(np.clip(img, 0, 1)) * 255 + 0.5).astype(np.uint8))
 
 
+def _lstep(a, b, x):
+    return np.clip((x - a) / (b - a), 0, 1)
+
+
+def _hash21(x, y):
+    return np.modf(np.abs(np.sin(x * 127.1 + y * 311.7) * 43758.5453))[0]
+
+
+def props_atlas():
+    """The wheelhouse's printed things and the ensign (BoatMaterials.createFittings patterns 2 and 5-8, which Tidewater
+    draws in its fragment shader), baked as 256 x 256 tiles of a 1024 x 512 atlas: flag, tide-table page, folded
+    chart, two photo prints, label tape. Tidewater's noise is stood in for by _fractal / _value_noise."""
+    n = 256
+    img = np.zeros((512, 1024, 3))
+    y, x = np.mgrid[0:n, 0:n]
+    u, v = (x + 0.5) / n, 1 - (y + 0.5) / n  # Tidewater's uv, v up
+
+    def put(tile, rgb):
+        tx, ty = tile % 4, tile // 4
+        img[ty * n:(ty + 1) * n, tx * n:(tx + 1) * n] = rgb
+
+    # 0: the ensign -- 13 stripes and the canton with its stars
+    stripe = np.floor(np.clip(v, 0, 1) * 12.999)
+    red = (1 - (stripe - 2 * np.floor(stripe / 2)))[..., None]
+    canton = ((u <= 0.4) & (v >= 6 / 13))[..., None]
+    sx = np.modf(u / 0.4 * 6.0)[0] - 0.5
+    sy = np.modf((v - 6 / 13) / (7 / 13) * 5.0 + 5)[0] - 0.5
+    star = (1 - _lstep(0.16, 0.24, np.hypot(sx, sy)))[..., None]
+    stripes = hexlin(0xf4f1ea) * (1 - red) + hexlin(0xb3172a) * red
+    put(0, np.where(canton, hexlin(0x1c2a5c) * (1 - star) + hexlin(0xf4f1ea) * star, stripes))
+    # 1: printed page -- margins, a header block, rows of type, a table grid, a coffee ring
+    row = np.modf(v * 34.0)[0]
+    word = _hash21(np.floor(u * 16.0), np.floor(v * 34.0))
+    in_text = (u > 0.08) & (u < 0.92) & (v > 0.06) & (v < 0.82)
+    type_k = _lstep(0.35, 0.45, row) * (1 - _lstep(0.7, 0.8, row)) * (word > 0.18) * in_text
+    header = ((v > 0.86) & (v < 0.93) & (u > 0.08) & (u < 0.6)).astype(float)
+    grid = _lstep(0.478, 0.49, np.abs(np.modf(u * 4.0)[0] - 0.5)) * in_text
+    ring = (1 - _lstep(0.0, 0.02, np.abs(np.hypot(u - 0.7, v - 0.3) - 0.16))) * 0.5
+    ink = np.maximum(np.maximum(type_k * 0.7, header * 0.85), grid * 0.5)[..., None]
+    paper = np.array([0.86, 0.84, 0.78]) * (1 - ink) + np.array([0.1, 0.1, 0.12]) * ink
+    put(1, paper * (1 - ring[..., None]) + np.array([0.45, 0.3, 0.18]) * ring[..., None])
+    # 2: folded paper chart -- sea and land, depth contours, fold creases, a pencilled course
+    shore = _fractal((n, n), 41) * 2 - 1 + (u - 0.55) * 1.4
+    land = _lstep(0.0, 0.02, shore)[..., None]
+    contour = ((1 - _lstep(0.03, 0.06, np.abs(np.modf(np.abs(shore) * 7.0)[0] - 0.5))) * (1 - land[..., 0]))[..., None]
+    crease = ((1 - _lstep(0, 0.006, np.abs(u - 0.5))) + (1 - _lstep(0, 0.006, np.abs(v - 0.5))))[..., None]
+    course = ((1 - _lstep(0.001, 0.004, np.abs(v - 0.2 - u * 0.45))) * (u > 0.1) * (u < 0.7))[..., None]
+    chart = np.array([0.72, 0.8, 0.84]) * (1 - land) + np.array([0.86, 0.78, 0.58]) * land
+    chart = chart * (1 - contour * 0.25) * (1 - crease * 0.2)
+    put(2, chart * (1 - course * 0.8) + np.array([0.2, 0.2, 0.22]) * course * 0.8)
+    # 3, 4: photo prints -- a white border round a red boat on the sea under the sky (Tidewater's two seeds)
+    for tile, w in ((3, 0.15), (4, 0.7)):
+        in_pic = ((u > 0.07) & (u < 0.93) & (v > 0.07) & (v < 0.8))[..., None]
+        horizon = 0.45 + np.sin(u * 3.0 + w * 6.0) * 0.03
+        sky = (v >= horizon)[..., None]
+        pic = np.array([0.08, 0.22, 0.35]) * (1 - sky) + np.array([0.45, 0.65, 0.85]) * sky
+        hull = (1 - _lstep(0.06, 0.08, np.hypot(u - (0.4 + w * 0.2), (v - horizon) * 3.0)))[..., None]
+        pic = pic * (1 - hull) + np.array([0.85, 0.25, 0.12]) * hull
+        pic = pic * (_value_noise((n, n), 20, int(w * 100))[..., None] * 0.15 + 0.9)
+        put(tile, np.where(in_pic, pic, np.array([0.92, 0.9, 0.86])))
+    # 5: label tape over Tidewater's uv 0..0.3 -- white with blocks of black type
+    lu, lv = u * 0.3, v * 0.3
+    lt = (np.modf(lu * 7.0)[0] > 0.3) & (_hash21(np.floor(lu * 28.0), 3.0) > 0.3) & (lv > 0.075) & (lv < 0.225)
+    put(5, np.where(lt[..., None], np.array([0.05, 0.05, 0.05]), np.array([0.85, 0.85, 0.82])))
+    return Image.fromarray((srgb(np.clip(img, 0, 1)) * 255 + 0.5).astype(np.uint8))
+
+
+# fittings pattern -> atlas tile (the two photo prints told apart by their seed, aux.w)
+PROP_TILE = {2: 0, 5: 1, 6: 2, 7: 3, 8: 5}
+PROP_UV_SCALE = {8: 1 / 0.3}
+
+
+def prop_uv(pattern, uv, seed):
+    tile = 4 if pattern == 7 and seed > 0.4 else PROP_TILE[pattern]
+    k = PROP_UV_SCALE.get(pattern, 1.0)
+    pad = 2 / 256
+    u = np.clip(uv[0] * k, 0, 1) * (1 - 2 * pad) + pad
+    v = (1 - np.clip(uv[1] * k, 0, 1)) * (1 - 2 * pad) + pad
+    return ((tile % 4 + u) / 4, (tile // 4 + v) / 2)
+
+
+# ---- surface relief (Tidewater draws it per pixel: BoatMaterials.createGelcoat / createWood) ------------------------
+# OFP's boat has no normal maps (a face samples one palette cell, so a tiling normal map would have no uv to tile on);
+# the relief is baked into tiling albedo textures with real uvs instead, shaded from a light up and to the left, one per
+# kind and face colour: molded non-skid (gelcoat 1), the wheelhouse's painted panels with screwed seams (gelcoat 2),
+# the perforated quilted headliner (gelcoat 3), varnished wood grain (wood 0) and the teak-and-holly sole (wood 2).
+
+RELIEF_TILE = {  # kind: (texture w, h, metres across u, metres across v)
+    "nonskid": (256, 256, 16 / 55, 16 / 55),
+    "panel": (128, 256, 0.61, 1.4),
+    "headliner": (256, 256, 0.5, 1.0),
+    "wood": (256, 256, 1.25, 5 * 2 * np.pi / 150),
+    "teak": (256, 256, 1.8, 0.4),
+}
+
+
+def _periodic_noise(h, w, cells_x, cells_y, seed):
+    """Smooth value noise in [0, 1] that wraps at the tile's edges (a tiling texture has no seam)."""
+    rng = np.random.default_rng(seed)
+    g = rng.random((cells_y, cells_x))
+    y = np.linspace(0, cells_y, h, endpoint=False)[:, None]
+    x = np.linspace(0, cells_x, w, endpoint=False)[None, :]
+    x0, y0 = np.floor(x).astype(int), np.floor(y).astype(int)
+    fx, fy = x - x0, y - y0
+    fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+    x1, y1 = (x0 + 1) % cells_x, (y0 + 1) % cells_y
+    a, b, c, d = g[y0, x0], g[y0, x1], g[y1, x0], g[y1, x1]
+    return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy
+
+
+def _relief_shade(height, scale):
+    """Light from up and to the left across a height field (pixels): a baked bump."""
+    gy, gx = np.gradient(height)
+    return np.clip(1 + (-gx - gy) * scale, 0.6, 1.4)
+
+
+def relief_image(kind, rgb):
+    """Tidewater's pattern for `kind` over its tile, times the face colour (linear rgb)."""
+    w, h, su, sv = RELIEF_TILE[kind]
+    y, x = np.mgrid[0:h, 0:w]
+    u, v = (x + 0.5) / w * su, (y + 0.5) / h * sv  # metres
+    rgb = np.asarray(rgb, dtype=np.float64)
+    if kind == "nonskid":
+        q = np.stack([u * 55, v * 55], -1)
+        c = np.floor(q)
+        f = q - c - 0.5
+        jx = (_hash21(c[..., 0] % 16, c[..., 1] % 16) - 0.5) * 0.3
+        jy = (_hash21(c[..., 0] % 16 + 17.31, c[..., 1] % 16 + 17.31) - 0.5) * 0.3
+        pebble = 1 - _lstep(0.16, 0.36, np.hypot(f[..., 0] - jx, f[..., 1] - jy))
+        dirt = _periodic_noise(h, w, 4, 4, 3) * 0.22 * 0.6
+        out = rgb * ((1 - pebble * 0.07) * (1 - dirt))[..., None] * _relief_shade(pebble, 1.6)[..., None]
+    elif kind == "panel":
+        # one 0.61 m panel from the seam at its left edge; v from 0.9 m up to 2.3 m (seams at 1.17 m and 1.52 m)
+        y_m = 0.9 + v
+        seam_d = np.minimum(np.minimum(u, su - u), np.minimum(np.abs(y_m - 1.17), np.abs(y_m - 1.52)))
+        seam = 1 - _lstep(0.0015, 0.004, seam_d)
+        sv_ = np.hypot((np.modf(y_m / 0.15)[0] - 0.5) * 0.15, np.minimum(u, su - u) - 0.012)
+        sh_ = np.hypot((np.modf(u / 0.15)[0] - 0.5) * 0.15, np.minimum(np.abs(y_m - 1.17), np.abs(y_m - 1.52)) - 0.012)
+        screw = 1 - _lstep(0.0035, 0.0055, np.minimum(sv_, sh_))
+        mottle = _periodic_noise(h, w, 2, 4, 11)
+        low = 1 - _lstep(1.15, 1.6, y_m)
+        grime = np.clip(low * (0.35 + mottle * 0.3) + (1 - _lstep(0, 0.035, seam_d)) * 0.18 + mottle * 0.08, 0, 1)
+        pc = rgb * np.array([0.97, 0.94, 0.87])
+        pc = pc * (1 - grime * 0.6)[..., None]
+        pc = pc * (1 - seam * 0.7)[..., None]
+        pc = pc * (1 - screw[..., None]) + np.array([0.55, 0.55, 0.53]) * screw[..., None]
+        out = pc * _relief_shade(screw - seam, 1.2)[..., None]
+    elif kind == "headliner":
+        perf = (1 - _lstep(0.12, 0.3, np.hypot(np.modf(u / 0.006)[0] - 0.5, np.modf(v / 0.006)[0] - 0.5))) * 0.5
+        quilt = np.sin((v + 0.1) / 0.5 * np.pi) * 0.5 + 0.5
+        mottle = _periodic_noise(h, w, 3, 6, 21)
+        out = (np.array([0.72, 0.69, 0.63]) * ((1 - perf * 0.18) * (quilt * 0.12 + 0.88) * (mottle * 0.08 + 0.96))[..., None]
+               * _relief_shade(quilt * 8, 0.5)[..., None])
+    else:
+        g1 = _periodic_noise(h, w, 1, 6, 31)  # Tidewater: noise(u * 0.8, v * 30)
+        g2 = _periodic_noise(h, w, 12, 36, 32)
+        rings = np.sin(v * 150 + g1 * 5 + u * 0.6 * 0) * 0.5 + 0.5
+        grain = np.clip(rings * 0.45 + g2 * 0.22 + g1 * 0.22 + 0.28, 0, 1)[..., None]
+        if kind == "wood":
+            out = (hexlin(0x4a230f) * (1 - grain) + hexlin(0x9c5b2b) * grain) * rgb
+        else:
+            pv = v / 0.1
+            plank = np.floor(pv)
+            pf = np.abs(np.modf(pv)[0] - 0.5)
+            holly = _lstep(0.5 - 0.06 - 0.01, 0.5 - 0.06, pf)[..., None]
+            caulk = _lstep(0.5 - 0.012 - 0.008, 0.5 - 0.012, pf)
+            butt = 1 - _lstep(0, 0.006, np.abs(np.modf(u / 1.8 + _hash21(plank, 3.0))[0] - 0.5) * 1.8)
+            tone = (_hash21(plank, 7.0) * 0.25 + 0.85)[..., None]
+            teak = (hexlin(0x6b3f1d) * (1 - grain) + hexlin(0xa87445) * grain) * tone
+            teak = teak * (1 - holly * (1 - caulk[..., None])) + hexlin(0xd9c9a6) * holly * (1 - caulk[..., None])
+            dark = np.maximum(caulk, butt)[..., None]
+            out = (teak * (1 - dark) + hexlin(0x1c140e) * dark) * rgb * _relief_shade(-dark[..., 0], 1.5)[..., None]
+    return Image.fromarray((srgb(np.clip(out, 0, 1)) * 255 + 0.5).astype(np.uint8))
+
+
+relief_textures = {}
+
+
+def relief_texture(kind, rgb8):
+    key = (kind, tuple(int(c) for c in rgb8))
+    if key not in relief_textures:
+        relief_textures[key] = f"boat_{kind}_{len([k for k in relief_textures if k[0] == kind])}"
+    return relief_textures[key]
+
+
+RELIEF_KIND = {("gelcoat", 1): "nonskid", ("gelcoat", 2): "panel", ("gelcoat", 3): "headliner", ("wood", 0): "wood",
+               ("wood", 2): "teak"}
+
+
+def relief_uv(kind, uv, pos, nrm):
+    """The face's uv on its relief tile: Tidewater's uv (metres) for the non-skid and the wood, the model position for
+    the panels (along the wall, up) and the headliner (across, along)."""
+    w, h, su, sv = RELIEF_TILE[kind]
+    if kind == "panel":
+        along = pos[2] if abs(nrm[0]) >= abs(nrm[2]) else pos[0]
+        return ((along + 0.13) / su, (pos[1] - 0.9) / sv)
+    if kind == "headliner":
+        return (pos[0] / su, pos[2] / sv)
+    return (uv[0] / su, uv[1] / sv)
+
 # display uv rectangles in the atlas (u0, v0, size); Tidewater's uv has v up
 DISPLAY_RECT = {1: (0.0, 0.0, 0.5), 2: (0.5, 0.0, 0.5), 3: (0.0, 0.5, 0.25)}
 
@@ -411,9 +612,16 @@ def add_mesh(lod, name, m, keep, palette, hull_frame):
                 tex, uvs = f"{PREFIX}\\{PALETTE}_glass.paa", [(0.5, 0.5)] * 3
             elif name == "glow" and pat in DISPLAY_RECT:
                 tex, uvs = f"{PREFIX}\\{DISPLAYS}.paa", [display_uv(pat, m["uv"][i]) for i in order]
+            elif name == "fittings" and pat in PROP_TILE:
+                tex = f"{PREFIX}\\{PROPS}.paa"
+                uvs = [prop_uv(pat, m["uv"][i], m["aux"][i][3]) for i in order]
             elif name == "trap":
                 tex = f"{PREFIX}\\{trap_texture(col, pat, trap_textures)}.paa"
                 uvs = [(m["uv"][i][0] / TRAP_TILE[min(pat, 1)], m["uv"][i][1] / TRAP_TILE[min(pat, 1)]) for i in order]
+            elif (name, int(pat)) in RELIEF_KIND:
+                kind = RELIEF_KIND[(name, int(pat))]
+                tex = f"{PREFIX}\\{relief_texture(kind, col)}.paa"
+                uvs = [relief_uv(kind, m["uv"][i], mirror(m["pos"][i]) * [1, 1, -1], m["nrm"][i]) for i in order]
             else:
                 tex, uvs = f"{PREFIX}\\{PALETTE}.paa", [palette.uv(col)] * 3
             pidx = [remap[i] for i in order]
@@ -425,6 +633,12 @@ def add_mesh(lod, name, m, keep, palette, hull_frame):
     sel = {"wheel": "tw_wheel", "radar": "radar"}.get(name)
     if sel:
         lod.select(sel, range(base, base + count), range(first_face, len(lod.faces)))
+    if name == "fittings":
+        # the ensign (pattern 2): Ship.cpp flies it in the apparent wind as Tidewater's vertex shader does
+        flag = np.rint(m["aux"][tris[:, 0], 2]).astype(int) == 2
+        if flag.any():
+            pts = sorted({int(remap[i]) for t in tris[flag] for i in t})
+            lod.select("tw_flag", pts, [first_face + k for k in np.nonzero(flag)[0]])
 
 
 def small_parts(m, limit):
@@ -618,6 +832,7 @@ def build(header, meshes):
     # ---- memory
     mem = Lod()
     add_named_points(mem, memory_points(header))
+    add_named_points(mem, nav_lights(meshes))
     lods.append((mem, RES_MEMORY, {}))
 
     # Written already centred on the box of every LOD's points, which is where the engine puts the model
@@ -641,6 +856,21 @@ def add_named_points(lod, named):
 def view_points(a):
     c, ax = np.array(a["wheelCenter"]), np.array(a["wheelAxis"])
     return {"pilot": [a["helmEye"]], "osaVolantZac": [c - ax * 0.15], "osaVolantKon": [c]}
+
+
+def nav_lights(meshes):
+    """The navigation lights' lenses (Tidewater's glow parts of pattern 0, coloured per light): red to port, green to
+    starboard, white at the masthead and on the stern -- the engine's marker lights (memory "cerveny / zeleny / bily
+    pozicni", VehicleAI.cpp), lit with the boat's lights (an AI skipper at night, the player's lights action)."""
+    gl = meshes["glow"]
+    nav = np.rint(gl["aux"][:, 2]).astype(int) == 0
+    pos, col = gl["pos"][nav], gl["col"][nav]
+    red = pos[(col[:, 0] > 0.8) & (col[:, 1] < 0.3)]
+    green = pos[(col[:, 1] > 0.8) & (col[:, 0] < 0.3)]
+    white = pos[(col[:, 0] > 0.8) & (col[:, 1] > 0.8)]
+    mast, stern = white[white[:, 1] > white[:, 1].max() - 0.2], white[white[:, 2] < white[:, 2].min() + 0.2]
+    return {"cerveny pozicni": [red.mean(axis=0)], "zeleny pozicni": [green.mean(axis=0)],
+            "bily pozicni": [mast.mean(axis=0), stern.mean(axis=0)]}
 
 
 def memory_points(header):
@@ -718,6 +948,9 @@ class CfgVehicles
 		magazines[] = {{}};
 		driverAction = "ManActShipDriver";
 		class Reflectors {{}};
+		// the nav lights (memory cerveny / zeleny / bily pozicni) are real lamps: they light the deck and the water
+		// round the boat (VehicleAI.cpp); on with the boat's lights
+		markerLightScale = 15;
 		class TransportMagazines {{}};
 		class TidewaterHull
 		{{
@@ -756,10 +989,14 @@ def main():
         args.out / f"{PALETTE}_glass.png")
     hull_image().save(args.out / f"{HULL}.png")
     display_atlas().save(args.out / f"{DISPLAYS}.png")
+    props_atlas().save(args.out / f"{PROPS}.png")
     for (rgb8, pattern), name in trap_textures.items():
         trap_tile(rgb8, pattern).save(args.out / f"{name}.png")
+    for (kind, rgb8), name in relief_textures.items():
+        lin = hexlin((rgb8[0] << 16) | (rgb8[1] << 8) | rgb8[2])
+        relief_image(kind, lin).save(args.out / f"{name}.png")
     (args.out / "textures.json").write_text(json.dumps(
-        {"DXT1": [PALETTE, HULL, DISPLAYS], "DXT5": [f"{PALETTE}_glass"] + sorted(trap_textures.values())}, indent=1))
+        {"DXT1": [PALETTE, HULL, DISPLAYS, PROPS] + sorted(relief_textures.values()), "DXT5": [f"{PALETTE}_glass"] + sorted(trap_textures.values())}, indent=1))
     (args.out / "config.cpp").write_text(config(header), newline="\n")
     print(f"{MODEL}: visual LOD faces {counts}, {len(boxes)} collision boxes, {len(palette.cols)} colours, "
           f"mass {mass.sum():.0f} kg, Tidewater origin at model {np.round(-centre, 3)}")

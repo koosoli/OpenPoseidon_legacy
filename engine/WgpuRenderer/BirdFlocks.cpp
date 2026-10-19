@@ -21,6 +21,13 @@
 //                  water is the shore waves' own run-up (water_tw/swash.rs, read back like
 //                  Tidewater's SwashProbe); the beaches are wherever those waves run.
 //
+// (OP, owner 2026-10-19) European birds for OFP's islands: Tidewater's species are American and tropical. The same
+// meshes fly as their nearest European counterparts -- the laughing gull's as a black-headed gull (the same size;
+// pale grey mantle, chocolate hood, white leading edge to the wing), the royal tern's as a Sandwich tern (the same
+// genus; black bill with a yellow tip), the brown pelican's as a northern gannet (short dagger bill, no pouch; white
+// with black wingtips and a buff head; gannets also fly in lines low over the swell). Frigatebirds do not occur in
+// Europe and are not placed. Sanderlings winter on European beaches and stay.
+//
 // What OP changes: the wing poses are baked into meshes (16 phases of the flap cycle and the glide
 // pose per species) instead of skinned in a vertex shader; the plumage is painted into a small
 // per-species atlas on the CPU from the same rules; the birds are placed around the camera wherever
@@ -91,7 +98,7 @@ enum
 };
 // BirdShapes.js SPECIES (the four that fly here)
 const Species SpeciesTable[SpeciesCount] = {
-    {"laughing gull", 0.42f, 1.03f,
+    {"black-headed gull", 0.42f, 1.03f,
      {{-0.125f, 0.012f, 0.017f, 0.01f, 0.01f}, {-0.095f, 0.007f, 0.033f, 0.024f, 0.027f}, {-0.045f, 0, 0.049f, 0.038f, 0.045f},
       {0.01f, 0, 0.054f, 0.042f, 0.049f}, {0.055f, 0.005f, 0.049f, 0.039f, 0.045f}, {0.088f, 0.014f, 0.036f, 0.033f, 0.033f},
       {0.108f, 0.022f, 0.029f, 0.03f, 0.027f}, {0.132f, 0.027f, 0.028f, 0.03f, 0.024f}, {0.154f, 0.025f, 0.021f, 0.025f, 0.018f},
@@ -103,7 +110,7 @@ const Species SpeciesTable[SpeciesCount] = {
       {{0, 0.045f}, {0.23f, 0.052f}, {0.47f, 0.046f}, {0.7f, 0.008f}, {0.87f, -0.042f}, {1, -0.1f}},
       {{0, 0.165f}, {0.23f, 0.165f}, {0.47f, 0.15f}, {0.7f, 0.112f}, {0.87f, 0.072f}, {1, 0.014f}}},
      {0.142f, 0.034f, 0.0036f}},
-    {"royal tern", 0.47f, 1.3f,
+    {"Sandwich tern", 0.47f, 1.3f,
      {{-0.12f, 0.012f, 0.016f, 0.009f, 0.009f}, {-0.09f, 0.006f, 0.03f, 0.021f, 0.023f}, {-0.045f, 0, 0.043f, 0.033f, 0.037f},
       {0.01f, 0, 0.046f, 0.036f, 0.04f}, {0.055f, 0.004f, 0.04f, 0.033f, 0.036f}, {0.088f, 0.013f, 0.027f, 0.027f, 0.026f},
       {0.11f, 0.021f, 0.022f, 0.03f, 0.021f}, {0.133f, 0.025f, 0.022f, 0.028f, 0.019f}, {0.155f, 0.023f, 0.017f, 0.02f, 0.015f},
@@ -115,13 +122,13 @@ const Species SpeciesTable[SpeciesCount] = {
       {{0, 0.04f}, {0.2f, 0.05f}, {0.43f, 0.045f}, {0.7f, 0.0f}, {0.88f, -0.06f}, {1, -0.13f}},
       {{0, 0.15f}, {0.2f, 0.15f}, {0.43f, 0.135f}, {0.7f, 0.1f}, {0.88f, 0.06f}, {1, 0.012f}}},
      {0.142f, 0.031f, 0.0034f}},
-    {"brown pelican", 1.25f, 2.1f,
+    {"northern gannet", 1.0f, 1.75f,
      {{-0.31f, 0.03f, 0.045f, 0.028f, 0.028f}, {-0.245f, 0.02f, 0.09f, 0.068f, 0.07f}, {-0.12f, 0, 0.13f, 0.1f, 0.11f},
       {0.02f, 0, 0.14f, 0.11f, 0.12f}, {0.12f, 0.012f, 0.125f, 0.105f, 0.11f}, {0.19f, 0.05f, 0.088f, 0.095f, 0.09f},
       {0.225f, 0.105f, 0.058f, 0.066f, 0.068f}, {0.255f, 0.135f, 0.046f, 0.05f, 0.042f}, {0.28f, 0.139f, 0.039f, 0.044f, 0.034f},
       {0.302f, 0.131f, 0.026f, 0.029f, 0.024f}},
      {0.13f, 0.215f},
-     {0.288f, 0.126f, 0.33f, -0.3f, 0.027f, 0.013f, 0.012f, 0.013f, 0, 0.05f},
+     {0.288f, 0.126f, 0.11f, -0.05f, 0.02f, 0.012f, 0.011f, 0.004f, 0, 0}, // (a gannet's dagger bill, no pouch)
      {-0.3f, 0.03f, 0.045f, {0.145f, 0.143f, 0.138f, 0.128f}, 0.36f},
      {{0.1f, 0.07f, 0.08f}, 0.95f, 0.28f, 0.55f, {0.14f, 0.08f, 0.035f},
       {{0, 0.11f}, {0.28f, 0.11f}, {0.55f, 0.09f}, {0.8f, 0.035f}, {0.93f, -0.02f}, {1, -0.085f}},
@@ -768,17 +775,17 @@ Rgb Plumage(const Species& sp, int s, float tu, float tv)
     Rgb c{0.5f, 0.5f, 0.5f};
     if (s == Gull)
     {
-        // laughing gull (breeding): slate mantle and upperwing, black primaries with a white
-        // trailing edge, white body and tail, black hood, dark red bill
-        const Rgb white{0.93f, 0.93f, 0.92f}, slate{0.38f, 0.4f, 0.43f}, black{0.05f, 0.05f, 0.055f};
+        // black-headed gull (breeding): pale grey mantle and upperwing, a white leading edge to the outer wing
+        // and black tips, white body and tail, chocolate-brown hood, dark red bill
+        const Rgb white{0.93f, 0.93f, 0.92f}, slate{0.69f, 0.71f, 0.74f}, black{0.2f, 0.13f, 0.09f};
         const float mantle = Smooth01(0.1f, 0.45f, N.y) * Smooth01(-0.1f, -0.07f, P.z) * (1 - Smooth01(0.075f, 0.1f, P.z));
         const float head = Smooth01(0.1f, 0.115f, P.z);
         const float eyeArc = (1 - Smooth01(0.004f, 0.006f, std::hypot(P.z - 0.139f, P.y - 0.037f))) *
                              Smooth01(0.002f, 0.004f, std::hypot(P.z - 0.141f, P.y - 0.032f));
         const Rgb body = MixC(MixC(white, slate, mantle), black, head * (1 - eyeArc));
-        const float tipK = Smooth01(0.68f, 0.76f, u);
-        const float edge = Smooth01(0.9f, 0.97f, v) * (1 - tipK);
-        const Rgb wingTop = MixC(MixC(slate, white, edge), black, tipK);
+        const float tipK = Smooth01(0.86f, 0.93f, u) * Smooth01(0.3f, 0.6f, v);
+        const float edge = std::max(Smooth01(0.9f, 0.97f, v) * (1 - tipK), Smooth01(0.55f, 0.65f, u) * (1 - Smooth01(0.25f, 0.4f, v)));
+        const Rgb wingTop = MixC(MixC(slate, white, edge), Rgb{0.05f, 0.05f, 0.055f}, tipK);
         const Rgb wingBot = MixC(MixC(white, Rgb{0.72f, 0.73f, 0.75f}, Smooth01(0.3f, 0.9f, u) * 0.6f), black, Smooth01(0.78f, 0.9f, u));
         c = isWing ? (top ? wingTop : wingBot) : part == TailP ? white : body;
         if (part == BillP)
@@ -786,8 +793,8 @@ Rgb Plumage(const Species& sp, int s, float tu, float tv)
     }
     else if (s == Tern)
     {
-        // royal tern: pale grey mantle and upperwing with a dusky primary wedge, white body,
-        // black crest behind a white forehead, orange bill
+        // Sandwich tern: pale grey mantle and upperwing with a dusky primary wedge, white body,
+        // black crest behind a white forehead, black bill with a yellow tip
         const Rgb white{0.95f, 0.95f, 0.94f}, grey{0.74f, 0.77f, 0.8f};
         const float mantle = Smooth01(0.15f, 0.5f, N.y) * Smooth01(-0.095f, -0.07f, P.z) * (1 - Smooth01(0.075f, 0.1f, P.z));
         const float cap = Smooth01(0.108f, 0.12f, P.z) * (1 - Smooth01(0.145f, 0.158f, P.z)) * Smooth01(0.028f, 0.033f, P.y);
@@ -797,29 +804,19 @@ Rgb Plumage(const Species& sp, int s, float tu, float tv)
         const Rgb wingBot = MixC(white, Rgb{0.55f, 0.56f, 0.58f}, Smooth01(0.82f, 0.95f, u) * Smooth01(0.4f, 1.0f, v));
         c = isWing ? (top ? wingTop : wingBot) : part == TailP ? MixC(white, grey, 0.3f) : body;
         if (part == BillP)
-            c = {0.95f, 0.45f, 0.1f};
+            c = MixC(Rgb{0.04f, 0.04f, 0.045f}, Rgb{0.9f, 0.78f, 0.25f}, Smooth01(0.82f, 0.9f, u));
     }
     else if (s == Pelican)
     {
-        // brown pelican: silvery grey-brown back, dark belly, cream-white head and neck, dark
-        // flight feathers, grey bill with a dark pouch
-        const Rgb back = MixC(Rgb{0.44f, 0.42f, 0.38f}, Rgb{0.68f, 0.67f, 0.63f}, Smooth01(0, 0.6f, fnz) * Smooth01(0, 0.6f, N.y));
-        const Rgb belly{0.24f, 0.22f, 0.2f};
-        const float neckZone = Smooth01(0.12f, 0.17f, P.z);
-        const Rgb head = MixC(Rgb{0.92f, 0.9f, 0.82f}, Rgb{0.95f, 0.86f, 0.55f}, Smooth01(0.27f, 0.3f, P.z) * Smooth01(0.13f, 0.15f, P.y));
-        const Rgb neckCol = MixC(Rgb{0.9f, 0.88f, 0.82f}, head, Smooth01(0.2f, 0.235f, P.z));
-        const Rgb body = MixC(MixC(belly, back, Smooth01(-0.35f, 0.25f, N.y)), MixC(neckCol, head, Smooth01(0.22f, 0.25f, P.z)), neckZone);
-        const float flight = std::max(Smooth01(0.52f, 0.6f, u), Smooth01(0.45f, 0.62f, v));
-        const Rgb wingTop = MixC(MixC(Rgb{0.56f, 0.55f, 0.51f}, Rgb{0.72f, 0.71f, 0.67f}, (fnz * 0.5f + 0.5f) * 0.6f),
-                                 Rgb{0.1f, 0.09f, 0.085f}, flight);
-        const Rgb wingBot = MixC(Rgb{0.2f, 0.19f, 0.18f}, Rgb{0.45f, 0.44f, 0.42f},
-                                 Smooth01(0.2f, 0.35f, v) * (1 - Smooth01(0.4f, 0.6f, v)) * (1 - Smooth01(0.3f, 0.6f, u)));
-        c = isWing ? (top ? wingTop : wingBot) : part == TailP ? Rgb{0.2f, 0.19f, 0.18f} : body;
+        // northern gannet (adult): white, black primaries, a buff-yellow head and nape, a pale blue-grey bill
+        const Rgb white{0.94f, 0.94f, 0.92f}, black{0.05f, 0.05f, 0.055f};
+        const Rgb body = MixC(white, Rgb{0.93f, 0.82f, 0.55f}, Smooth01(0.2f, 0.24f, P.z) * Smooth01(-0.2f, 0.3f, N.y + 0.3f));
+        const float primaries = Smooth01(0.6f, 0.66f, u);
+        const Rgb wingTop = MixC(white, black, primaries);
+        const Rgb wingBot = MixC(white, black, primaries * Smooth01(0.2f, 0.5f, v));
+        c = isWing ? (top ? wingTop : wingBot) : part == TailP ? white : body;
         if (part == BillP)
-        {
-            const float pouch = Smooth01(0.3f, 0.38f, v) * (1 - Smooth01(0.62f, 0.7f, v));
-            c = MixC(MixC(Rgb{0.58f, 0.54f, 0.5f}, Rgb{0.75f, 0.55f, 0.45f}, Smooth01(0.6f, 1.0f, u)), Rgb{0.22f, 0.21f, 0.2f}, pouch);
-        }
+            c = {0.62f, 0.66f, 0.7f};
     }
     else if (s == Sanderling)
     {
@@ -856,7 +853,7 @@ Rgb Plumage(const Species& sp, int s, float tu, float tv)
         const float ed = std::hypot(P.z - sp.eye[0], P.y - sp.eye[1]);
         const float iris = 1 - Smooth01(sp.eye[2] * 0.8f, sp.eye[2], ed);
         const float pupil = 1 - Smooth01(sp.eye[2] * 0.45f, sp.eye[2] * 0.6f, ed);
-        c = MixC(MixC(c, s == Pelican ? Rgb{0.8f, 0.75f, 0.55f} : Rgb{0.05f, 0.03f, 0.02f}, iris), Rgb{0.01f, 0.01f, 0.01f}, pupil);
+        c = MixC(MixC(c, s == Pelican ? Rgb{0.75f, 0.8f, 0.85f} : Rgb{0.05f, 0.03f, 0.02f}, iris), Rgb{0.01f, 0.01f, 0.01f}, pupil);
     }
     // fine feather texture, darker feather bases toward the trailing edge
     const float k = (fnz * 0.06f + 1.0f) * (isWing ? 1.0f - 0.08f * Smooth01(0.5f, 1.0f, v) : 1.0f);
@@ -1088,7 +1085,8 @@ void BirdFlocks::Spawn(const Vector3& camera)
         }
     }
     // frigatebirds: circling high on the wind
-    while (count(Frigate) < Wildlife::Scaled(2) && pick(r0, r1 + 100, false, x, z))
+    // (OP: none in Europe -- not placed; the code stays for a world where they belong)
+    while (false && count(Frigate) < Wildlife::Scaled(2) && pick(r0, r1 + 100, false, x, z))
     {
         Flyer f = make(Frigate);
         f.mode = 3;

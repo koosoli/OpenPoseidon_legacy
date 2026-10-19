@@ -83,6 +83,7 @@ void ShipType::InitShape()
     // radar
     _radar.Init(_shape, "radar", nullptr, "osa radaru");
     _twWheel.Init(_shape, "tw_wheel", nullptr, "osa volantu");
+    _twFlag.Init(_shape, "tw_flag", nullptr);
 
     // camera positions
     level = _shape->FindLevel(VIEW_PILOT);
@@ -453,8 +454,75 @@ void Ship::MoveWeapons(float deltaT)
     }
 }
 
+// Tidewater's ensign (BoatMaterials.createFittings vertex animation, BoatModel.update): the cloth streams from the
+// hoist down the apparent wind, drooping as the wind falls away and fluttering toward the fly. The model's flag flies
+// aft (-z) from its hoist; each vertex keeps its height on the hoist and its distance out along the fly.
+void Ship::FlyFlag(int level, bool restore)
+{
+    const int si = Type()->_twFlag.GetSelection(level);
+    Shape* shape = _shape->Level(level);
+    if (si < 0 || !shape)
+        return;
+    const NamedSelection& sel = shape->NamedSel(si);
+    if (sel.Size() == 0)
+        return;
+    shape->SaveOriginalPos();
+    if (restore)
+    {
+        for (int i = 0; i < sel.Size(); i++)
+            shape->SetPos(sel[i]) = shape->OrigPos(sel[i]);
+        shape->InvalidateBuffer();
+        return;
+    }
+    // the hoist: the flag's forward edge
+    float hoistZ = -1e9f, flyZ = 1e9f, hoistX = 0;
+    for (int i = 0; i < sel.Size(); i++)
+    {
+        const Vector3& p = shape->OrigPos(sel[i]);
+        hoistZ = std::max(hoistZ, p.Z());
+        flyZ = std::min(flyZ, p.Z());
+    }
+    int nx = 0;
+    for (int i = 0; i < sel.Size(); i++)
+        if (shape->OrigPos(sel[i]).Z() > hoistZ - 0.02f)
+            hoistX += shape->OrigPos(sel[i]).X(), nx++;
+    hoistX /= std::max(nx, 1);
+    const float len = std::max(hoistZ - flyZ, 0.05f);
+    const float t = Glob.time.toFloat(), w = _twFlagWind;
+    const Vector3 dir = _twFlagDir;
+    const Vector3 lat(dir.Z(), 0, -dir.X());
+    for (int i = 0; i < sel.Size(); i++)
+    {
+        const Vector3& p = shape->OrigPos(sel[i]);
+        const float along = std::max(hoistZ - p.Z(), 0.0f);
+        const float fu = along / len; // 0 at the hoist .. 1 at the fly
+        const float droop = (1 - w) * 1.15f * (fu * 0.5f + 0.5f);
+        const float flutter = std::sin(fu * 9 - t * (w * 9 + 4) + p.Y() * 4) * fu * (w * 0.05f + 0.015f);
+        shape->SetPos(sel[i]) = Vector3(hoistX, p.Y() - along * std::sin(droop), hoistZ) +
+                                dir * (along * std::cos(droop)) + lat * flutter;
+    }
+    shape->InvalidateBuffer();
+}
+
 void Ship::Simulate(float deltaT, SimulationImportance prec)
 {
+    // (OP) Tidewater's flag: the apparent wind (the wind less the boat's own motion) in model space, eased
+    if (Type()->GetTidewaterHull().valid && GLandscape && deltaT > 0)
+    {
+        Vector3 app = DirectionWorldToModel(GLandscape->GetWind() - Speed());
+        app[1] = 0;
+        const float speed = app.Size();
+        if (speed > 1e-3f)
+        {
+            const float k = 1 - std::exp(-deltaT * 3);
+            Vector3 d = _twFlagDir + (app / speed - _twFlagDir) * k;
+            if (d.SquareSize() < 1e-4f)
+                d = app / speed;
+            _twFlagDir = d.Normalized();
+        }
+        _twFlagWind += (std::clamp(speed / 9.0f, 0.0f, 1.0f) - _twFlagWind) * (1 - std::exp(-deltaT * 2));
+    }
+
     if (_isDead)
     {
         SmokeSourceVehicle* smoke = dyn_cast<SmokeSourceVehicle>(GetSmoke());
@@ -1466,6 +1534,7 @@ void Ship::Animate(int level)
     // Tidewater's wheel: three quarters of a turn each way from the centre, with the rudder (BoatModel.setSteering)
     if (Type()->_twWheel.GetSelection(level) >= 0)
         Type()->_twWheel.Rotate(_shape, -_tw.rudder * 0.75f * 2.0f * H_PI, level);
+    FlyFlag(level, false);
 
     if (_mGunFireFrames > 0 || Glob.uiTime < _mGunFireTime + 0.05)
     {
@@ -1504,6 +1573,7 @@ void Ship::Deanimate(int level)
     Type()->_radar.Restore(_shape, level);
     if (Type()->_twWheel.GetSelection(level) >= 0)
         Type()->_twWheel.Restore(_shape, level);
+    FlyFlag(level, true);
 }
 
 bool Ship::AnimateTexture(int level, float phaseL, float phaseR, float speedL, float speedR)
