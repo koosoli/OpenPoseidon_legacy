@@ -376,12 +376,22 @@ void FishSchools::EnsureMeshes()
     LOG_INFO(Graphics, "Fish: {} species x {} levels x {} swim phases baked", SpeciesCount, Lods, Phases);
 }
 
+// LAKE-FISH-001: the water surface over (x, z) -- a native world's pond or lake where one covers
+// the point (the river module's still water), else the sea. The same species school in both.
+static float WaterLevel(float x, float z)
+{
+    float lake = 0;
+    if (wgr_still_water_level_at(x, z, &lake))
+        return lake;
+    return Wildlife::SeaLevel(x, z);
+}
+
 bool FishSchools::SpawnGroup(const Vector3& camera)
 {
     std::uniform_real_distribution<float> unit(0.0f, 1.0f);
-    const float sea = Wildlife::SeaLevel(camera.X(), camera.Z());
     const float angle = Tau * unit(_rng), radius = 3.0f + 25.0f * unit(_rng);
     const Vector3 home(camera.X() + std::cos(angle) * radius, 0, camera.Z() + std::sin(angle) * radius);
+    const float sea = WaterLevel(home.X(), home.Z());
     const float floor = Wildlife::Ground(home.X(), home.Z());
     const float depth = sea - floor;
     if (depth < 1.5f)
@@ -410,6 +420,7 @@ bool FishSchools::SpawnGroup(const Vector3& camera)
     Group g;
     g.behaviour = chosen;
     g.home = home;
+    g.surface = sea;
     g.wanderAngle = Tau * unit(_rng);
     const float ceiling = sea - 0.7f, column = std::max(ceiling - (floor + 0.3f), 0.2f);
     g.homeY = floor + 0.3f + column * (b.depthMin + (b.depthMax - b.depthMin) * unit(_rng));
@@ -433,7 +444,7 @@ bool FishSchools::SpawnGroup(const Vector3& camera)
 void FishSchools::Step(Group& g, const Vector3& camera, float dt)
 {
     const Behaviour& b = Behaviours[g.behaviour];
-    const float sea = Wildlife::SeaLevel(camera.X(), camera.Z());
+    const float sea = g.surface; // LAKE-FISH-001: the group's own water (a lake's level, or the sea)
     g.wanderAngle += dt * 0.08f;
     const Vector3 goal(g.home.X() + std::cos(g.wanderAngle) * b.homeRadius * 0.6f, g.homeY,
                        g.home.Z() + std::sin(g.wanderAngle) * b.homeRadius * 0.6f);
@@ -528,8 +539,9 @@ void FishSchools::Update(const Vector3& camera, float time)
     if (!enabled || !GLandscape || !_renderer)
         return;
     const float sea = Wildlife::SeaLevel(camera.X(), camera.Z());
-    // Only near the sea: no simulation for a camera high above it or far inland.
-    if (camera.Y() > sea + 60.0f)
+    // Only near the sea or a lake: no simulation for a camera high above both. LAKE-FISH-001: a
+    // camera near the ground keeps trying -- a spawn on land fails at once, one in a pond succeeds.
+    if (camera.Y() > sea + 60.0f && camera.Y() > Wildlife::Ground(camera.X(), camera.Z()) + 60.0f)
         return;
     EnsureMeshes();
     float dt = _lastTime < 0 ? 0.0f : time - _lastTime;

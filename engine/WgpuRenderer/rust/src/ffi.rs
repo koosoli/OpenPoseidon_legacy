@@ -3851,6 +3851,25 @@ pub unsafe extern "C" fn wgr_grass_set_native_tufts(renderer: *mut WgrRenderer, 
 
 /// RFG-140: reserve the shared geometry pool (bytes) now and keep it as a shrink floor.
 ///
+/// LAKE-FISH-001: the surface level of the still water (pond / lake) covering world (x, z).
+/// Returns 1 and writes `level` when there is one, else 0. Thread-safe; needs no renderer.
+///
+/// # Safety
+/// `level` must be null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_still_water_level_at(x: f32, z: f32, level: *mut f32) -> u32 {
+    catch_unwind(AssertUnwindSafe(|| match crate::river::shared_still_level_at(x, z) {
+        Some(l) => {
+            if !level.is_null() {
+                unsafe { *level = l };
+            }
+            1
+        }
+        None => 0,
+    }))
+    .unwrap_or(0)
+}
+
 /// # Safety
 /// `renderer` must be null or live.
 #[unsafe(no_mangle)]

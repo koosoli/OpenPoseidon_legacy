@@ -83,6 +83,41 @@ impl RiverLook {
     }
 }
 
+/// LAKE-UW-001: minimum underwater visibility (m) in still water; see `River::lake_water`.
+fn lake_underwater_visibility() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| env_f32("WGR_LAKE_UNDERWATER_VIS", 6.0, 0.0, 50.0))
+}
+
+fn level_in(tris: &[[f32; 7]], x: f32, z: f32) -> Option<f32> {
+    let edge = |ax: f32, az: f32, bx: f32, bz: f32| (bx - ax) * (z - az) - (bz - az) * (x - ax);
+    tris.iter().find_map(|t| {
+        if x < t[0].min(t[2]).min(t[4]) || x > t[0].max(t[2]).max(t[4]) ||
+            z < t[1].min(t[3]).min(t[5]) || z > t[1].max(t[3]).max(t[5]) {
+            return None;
+        }
+        let (e0, e1, e2) = (edge(t[0], t[1], t[2], t[3]), edge(t[2], t[3], t[4], t[5]), edge(t[4], t[5], t[0], t[1]));
+        ((e0 >= 0.0 && e1 >= 0.0 && e2 >= 0.0) || (e0 <= 0.0 && e1 <= 0.0 && e2 <= 0.0)).then_some(t[6])
+    })
+}
+
+/// LAKE-FISH-001: a copy of the ponds' triangles the engine's main thread may query without the
+/// renderer (wildlife runs on the game thread while the worker owns `River`). Written only when
+/// the world's rivers are replaced; read a few times a second.
+static STILL_TRIS: std::sync::RwLock<Vec<[f32; 7]>> = std::sync::RwLock::new(Vec::new());
+
+fn publish_still_tris(tris: &[[f32; 7]]) {
+    if let Ok(mut g) = STILL_TRIS.write() {
+        g.clear();
+        g.extend_from_slice(tris);
+    }
+}
+
+/// LAKE-FISH-001: the level of the pond covering (x, z), from any thread.
+pub fn shared_still_level_at(x: f32, z: f32) -> Option<f32> {
+    STILL_TRIS.read().ok().and_then(|g| level_in(&g, x, z))
+}
+
 fn env_f32(key: &str, default: f32, lo: f32, hi: f32) -> f32 {
     std::env::var(key)
         .ok()
@@ -356,6 +391,7 @@ impl River {
         use wgpu::util::DeviceExt;
         self.mesh = None;
         self.still_tris.clear();
+        publish_still_tris(&[]);
         let count = vertices.len() as u32;
         // Every index must name a vertex: a bad index is a GPU fault, not a bad picture.
         if vertices.is_empty() || indices.len() < 3 || indices.iter().any(|&i| i >= count) {
@@ -368,6 +404,7 @@ impl River {
                 self.still_tris.push([a.pos[0], a.pos[2], b.pos[0], b.pos[2], c.pos[0], c.pos[2], a.pos[1]]);
             }
         }
+        publish_still_tris(&self.still_tris);
         let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("wgr_river_vertices"),
             contents: bytemuck::cast_slice(vertices),
@@ -389,23 +426,22 @@ impl River {
 
     /// RFG-191: the level of the pond whose surface covers (x, z), if any.
     pub fn still_level_at(&self, x: f32, z: f32) -> Option<f32> {
-        let edge = |ax: f32, az: f32, bx: f32, bz: f32| (bx - ax) * (z - az) - (bz - az) * (x - ax);
-        self.still_tris.iter().find_map(|t| {
-            if x < t[0].min(t[2]).min(t[4]) || x > t[0].max(t[2]).max(t[4]) ||
-                z < t[1].min(t[3]).min(t[5]) || z > t[1].max(t[3]).max(t[5]) {
-                return None;
-            }
-            let (e0, e1, e2) = (edge(t[0], t[1], t[2], t[3]), edge(t[2], t[3], t[4], t[5]), edge(t[4], t[5], t[0], t[1]));
-            ((e0 >= 0.0 && e1 >= 0.0 && e2 >= 0.0) || (e0 <= 0.0 && e1 <= 0.0 && e2 <= 0.0)).then_some(t[6])
-        })
+        level_in(&self.still_tris, x, z)
     }
 
     /// RFG-191: the lake water's (absorption, scattering) per metre for the underwater view, from
     /// the authored colour and WaterVisibility: extinction 3 / visibility (5% contrast left there),
     /// split by the water's colour -- a dark olive pond scatters little and absorbs the rest.
+    ///
+    /// LAKE-UW-001: the authored visibility is for the surface (looking INTO a pond from above),
+    /// and Reforger authors 1 m. Used as the underwater medium it left ~0.3% of the light 2 m
+    /// down -- a diver in Everon's big lake (4632/5970) saw a black screen (mean RGB 0.8/0.9/0.3).
+    /// Underwater it is floored at WGR_LAKE_UNDERWATER_VIS (default 6 m: a little murkier than the sea's
+    /// ~7 m temperate water, still a lake one can see in). 0 = the authored value as before.
     pub fn lake_water(&self) -> ([f32; 3], [f32; 3]) {
         let c = [self.params.colour[0], self.params.colour[1], self.params.colour[2]];
         let vis = if self.params.bed[3] > 0.0 { self.params.bed[3] } else { 1.0 };
+        let vis = vis.max(lake_underwater_visibility());
         let sigma_t = 2.9957 / vis.max(0.05);
         let peak = c[0].max(c[1]).max(c[2]).max(1e-4);
         let albedo = 0.12; // a murky pond: mostly absorption

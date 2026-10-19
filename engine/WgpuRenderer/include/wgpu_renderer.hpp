@@ -2933,6 +2933,9 @@ extern "C"
     /* RFG-140: grow the shared geometry pool to these sizes now and keep them as a floor the
        shrink never crosses -- a mid-flight growth keeps old and new buffers alive together. */
     WGR_API void wgr_geo_pool_reserve(WgrRenderer* renderer, uint64_t vertBytes, uint64_t indexBytes);
+    /* LAKE-FISH-001: surface level of the pond/lake covering world (x, z): 1 + *level, or 0 when
+       there is none. Thread-safe, no renderer needed. */
+    WGR_API uint32_t wgr_still_water_level_at(float x, float z, float* level);
     /* RFG-138: per-surface PlantMat blade sets. setWords = 3 words, 3 bits per atlas layer (layer L
        at bit 3L across the words) naming the set the run starting on L draws its tufts from;
        cardSkip = bit per layer whose run grows blades only (no cards); cardFull = bit per layer whose
