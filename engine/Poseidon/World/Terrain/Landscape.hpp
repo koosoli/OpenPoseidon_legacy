@@ -781,12 +781,21 @@ class Landscape : public SerializeClass
     // PERF-FAR-ASYNC-PREP: far models handed over by the preparer whose native textures are being
     // decoded off the main thread; their bank tables are built and conversion submitted once the
     // decode has finished (UpdateNativeFarResidency).
+    // Shared by the near window (UpdateModernObjectResidency) and the far tier: whichever path
+    // finds the decode finished submits the conversion, with the flavour that parked it.
     struct NativeFarTexPrep
     {
         std::shared_ptr<Model::Model> model;
         std::future<void> decode;
+        bool ownerAdmission = false; // the near window's cold visual admission (SubmitConvert flag)
     };
     std::unordered_map<uint32_t, NativeFarTexPrep> _nativeFarTexPrep;
+    //! PERF-FAR-ASYNC-PREP: collect `model`'s native texture names (main thread), decode them in
+    //! the background and park the model until FinishStreamTexPrep.
+    void ParkStreamTexPrep(uint32_t modelIndex, std::shared_ptr<Model::Model> model, bool ownerAdmission);
+    //! The parked model's second half once its decode is done: bank tables from the prepared
+    //! sources, then the conversion. Returns false (and does nothing) while still decoding.
+    bool FinishStreamTexPrep(uint32_t modelIndex);
     size_t _nativeFarCursor = 0;
     // Models rejected for the far tier (too small, failed) when the candidate list was last
     // built; more since then means the list wasted slots on them and is rebuilt without them.

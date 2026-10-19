@@ -3753,6 +3753,46 @@ static void BuildStreamedBankTables(const Model::Model& model, Model::ShapeAdapt
     Model::ShapeAdapter::BuildAdapterBankTables(model, tables);
 }
 
+void Landscape::ParkStreamTexPrep(uint32_t modelIndex, std::shared_ptr<Model::Model> model, bool ownerAdmission)
+{
+    AbstractTextBank* bank = GEngine ? GEngine->TextBank() : nullptr;
+    std::unordered_set<std::string> claims;
+    std::vector<std::string> keys = CollectNativeInstallTextureKeys(
+        {model.get()}, claims, [bank](const char* n) { return bank && bank->IsLoaded(RStringB(n)); });
+    NativeFarTexPrep pending;
+    pending.model = std::move(model);
+    pending.ownerAdmission = ownerAdmission;
+    pending.decode = std::async(std::launch::async, [keys = std::move(keys)] { DecodeNativeInstallTextureKeys(keys, nullptr); });
+    _nativeFarTexPrep.insert_or_assign(modelIndex, std::move(pending));
+}
+
+bool Landscape::FinishStreamTexPrep(uint32_t modelIndex)
+{
+    const auto found = _nativeFarTexPrep.find(modelIndex);
+    if (found == _nativeFarTexPrep.end() ||
+        found->second.decode.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return false;
+    std::shared_ptr<Model::Model> model = std::move(found->second.model);
+    const bool ownerAdmission = found->second.ownerAdmission;
+    found->second.decode.get();
+    _nativeFarTexPrep.erase(found);
+    if (!model || !_modernObjectPreparer)
+        return true;
+    auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
+    {
+        const NativeInstallTextureScope takePrepared;
+        Model::ShapeAdapter::BuildAdapterBankTables(*model, *tables);
+    }
+    const auto radiusToken = _modernObjectPreparer->QueryRadius(modelIndex);
+    const bool submitted = ownerAdmission
+        ? _modernObjectPreparer->SubmitConvert(modelIndex, std::move(model), std::move(tables), &radiusToken, nullptr, true,
+              [](void*, const char* key, WarmTextureRead& out) { return GEngine && GEngine->CaptureWarmRapStageRead(key, out); })
+        : _modernObjectPreparer->SubmitConvert(modelIndex, std::move(model), std::move(tables), &radiusToken);
+    if (!submitted)
+        _modernObjectPreparer->Request(modelIndex); // workers gone: start over, never parse here
+    return true;
+}
+
 void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
 {
     if (!_modernObjectStreaming || _modernObjectCells.empty())
@@ -4767,6 +4807,26 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 preparsed = std::move(pending.model);
                 _modernPendingOwnerPrimaryTextures.reset();
             }
+            else if (cold && asyncOn && _nativeFarTexPrep.count(placement.modelIndex))
+            {
+                // PERF-FAR-ASYNC-PREP (near window): this model's textures are decoding in the
+                // background. Once they are done the conversion goes out (under the same per-update
+                // table limit the synchronous hand-off obeyed); the placement waits either way and
+                // is admitted when the conversion lands, exactly as after a synchronous hand-off.
+                if (!(tableLimit > 0 && tablesPrepared >= tableLimit))
+                {
+                    const auto tableStart = std::chrono::steady_clock::now();
+                    if (FinishStreamTexPrep(placement.modelIndex))
+                    {
+                        ++tablesPrepared;
+                        tablePrepareMs += std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - tableStart).count();
+                    }
+                }
+                ++waited;
+                ++scan;
+                continue;
+            }
             else if (cold && asyncOn)
             {
                 const ObjectStreamPreparer::State state = _modernObjectPreparer->Query(placement.modelIndex);
@@ -4868,6 +4928,23 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                             if (c >= 'A' && c <= 'Z')
                                 c = static_cast<char>(c - 'A' + 'a');
                         preparsed->sourcePath = low;
+                        // PERF-FAR-ASYNC-PREP (near window): the synchronous hand-off below waited
+                        // for the native texture decode on the main thread -- table prep up to
+                        // 160-300 ms per model on a 15 m/s Everon flight. Park it instead; the
+                        // branch above submits it once decoded. The DayZ tenement pilot keeps its
+                        // own scoped synchronous path.
+                        if (AbstractTextBank* nearBank = GEngine ? GEngine->TextBank() : nullptr;
+                            NativeFarAsyncPrep() && NativeTexturePrepApplies(nearBank) &&
+                            low != R"(dz\structures\residential\tenements\tenement_small.p3d)")
+                        {
+                            const auto tableStart = std::chrono::steady_clock::now();
+                            ParkStreamTexPrep(placement.modelIndex, std::move(preparsed), true);
+                            tablePrepareMs += std::chrono::duration<double, std::milli>(
+                                std::chrono::steady_clock::now() - tableStart).count();
+                            ++waited;
+                            ++scan;
+                            continue;
+                        }
                         auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
                         const auto tableStart = std::chrono::steady_clock::now();
                         TenementPhysicalPaaScope physicalPaaTables(
@@ -5904,24 +5981,17 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                 // the main thread. Until they are, the model waits here (and is not re-requested);
                 // once they are, the bank tables take the prepared sources and the conversion is
                 // submitted -- the same calls the synchronous hand-off made, in the same order.
-                if (auto pending = _nativeFarTexPrep.find(modelIndex); pending != _nativeFarTexPrep.end())
+                if (_nativeFarTexPrep.count(modelIndex))
                 {
-                    if (modelWork || pending->second.decode.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+                    if (modelWork)
                         continue;
-                    ++modelWork;
                     const auto tTables = std::chrono::steady_clock::now();
-                    std::shared_ptr<Model::Model> prepared = std::move(pending->second.model);
-                    pending->second.decode.get();
-                    _nativeFarTexPrep.erase(pending);
-                    auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
+                    if (FinishStreamTexPrep(modelIndex))
                     {
-                        const NativeInstallTextureScope takePrepared;
-                        Model::ShapeAdapter::BuildAdapterBankTables(*prepared, *tables);
+                        ++modelWork;
+                        _nativeFarStats.readyMs += std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - tTables).count();
                     }
-                    const auto radiusToken = _modernObjectPreparer->QueryRadius(modelIndex);
-                    _modernObjectPreparer->SubmitConvert(modelIndex, std::move(prepared), std::move(tables), &radiusToken);
-                    _nativeFarStats.readyMs += std::chrono::duration<double, std::milli>(
-                        std::chrono::steady_clock::now() - tTables).count();
                     continue;
                 }
                 if (_modernPendingOwnerPrimaryTextures &&
@@ -5968,17 +6038,7 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                         // WGR_NATIVE_FAR_ASYNC_PREP=0 = the synchronous hand-off.
                         AbstractTextBank* bank = GEngine ? GEngine->TextBank() : nullptr;
                         if (NativeFarAsyncPrep() && NativeTexturePrepApplies(bank))
-                        {
-                            std::unordered_set<std::string> claims;
-                            std::vector<std::string> keys = CollectNativeInstallTextureKeys(
-                                {model.get()}, claims, [bank](const char* n) { return bank->IsLoaded(RStringB(n)); });
-                            NativeFarTexPrep pending;
-                            pending.model = std::move(model);
-                            pending.decode = std::async(std::launch::async, [keys = std::move(keys)] {
-                                DecodeNativeInstallTextureKeys(keys, nullptr);
-                            });
-                            _nativeFarTexPrep.emplace(modelIndex, std::move(pending));
-                        }
+                            ParkStreamTexPrep(modelIndex, std::move(model), false);
                         else
                         {
                             auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
