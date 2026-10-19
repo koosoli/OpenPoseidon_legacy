@@ -1130,6 +1130,8 @@ class Man: public Person
 	bool CarryOnPlatform(Ship* ship, const Matrix4& delta);
 	bool OnPlatform() const {return _platform.GetLink() != nullptr;}
 	const Object *PlatformObject() const {return _platform.GetLink();}
+	// out of the water over a boat's side onto its deck at `deck` (ATClimbAboard, SoldierOldSwim.cpp)
+	void ClimbOntoDeck(Ship* ship, Vector3Par deck);
 	void SimSwimMovement(float deltaT, SimulationImportance prec);
 	void SimDive(float deltaT, float surface, Vector3& pos);
 	void UpdateBreath(float deltaT, float headDepth);

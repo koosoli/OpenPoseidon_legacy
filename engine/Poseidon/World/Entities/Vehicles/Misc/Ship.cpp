@@ -80,6 +80,7 @@ void ShipType::InitShape()
 
     // radar
     _radar.Init(_shape, "radar", nullptr, "osa radaru");
+    _twWheel.Init(_shape, "tw_wheel", nullptr, "osa volantu");
 
     // camera positions
     level = _shape->FindLevel(VIEW_PILOT);
@@ -410,9 +411,10 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
         if (Glob.time.toFloat() >= next)
         {
             next = Glob.time.toFloat() + 1.0f;
-            LOG_INFO(Physics, "Boat response: t={:.1f} object={} pos={:.1f},{:.1f},{:.1f} forward={:.3f} thrust={:.2f},{:.2f} brake={}",
+            LOG_INFO(Physics, "Boat response: t={:.1f} object={} pos={:.1f},{:.1f},{:.1f} forward={:.3f} thrust={:.2f},{:.2f} brake={} dead={} destroyed={} phase={} smoke={} canSmoke={} destr={} sink={:.2f}",
                      Glob.time.toFloat(), RenderId(), Position().X(), Position().Y(), Position().Z(), speed.Z(),
-                     _thrustL, _thrustR, static_cast<bool>(_pilotBrake));
+                     _thrustL, _thrustR, static_cast<bool>(_pilotBrake), _isDead, IsDestroyed(), GetDestroyed(),
+                     GetSmoke() != nullptr, CanSmoke(), (int)GetDestructType(), _sink);
         }
     }
 
@@ -1394,7 +1396,12 @@ void Ship::Animate(int level)
             _shape, Type()->_toIndicatorSpeedAxis * Matrix4(MRotationZ, angle) * fromIndicatorSpeedAxis, level);
     }
 
-    Type()->_radar.Rotate(_shape, 0.5 * Glob.time.toFloat(), level);
+    // (Tidewater's radar turns at 24 rpm, BoatModel RADAR_RPM; OFP's at 0.5 rad/s looked stopped)
+    const bool twHull = Type()->GetTidewaterHull().valid;
+    Type()->_radar.Rotate(_shape, (twHull ? 2.513f : 0.5f) * Glob.time.toFloat(), level);
+    // Tidewater's wheel: three quarters of a turn each way from the centre, with the rudder (BoatModel.setSteering)
+    if (Type()->_twWheel.GetSelection(level) >= 0)
+        Type()->_twWheel.Rotate(_shape, -_tw.rudder * 0.75f * 2.0f * H_PI, level);
 
     if (_mGunFireFrames > 0 || Glob.uiTime < _mGunFireTime + 0.05)
     {
@@ -1431,6 +1438,8 @@ void Ship::Deanimate(int level)
     }
 
     Type()->_radar.Restore(_shape, level);
+    if (Type()->_twWheel.GetSelection(level) >= 0)
+        Type()->_twWheel.Restore(_shape, level);
 }
 
 bool Ship::AnimateTexture(int level, float phaseL, float phaseR, float speedL, float speedR)
@@ -1441,6 +1450,112 @@ bool Ship::AnimateTexture(int level, float phaseL, float phaseR, float speedL, f
 void Ship::Eject(AIUnit* unit)
 {
     base::Eject(unit);
+}
+
+// A swimmer reaches over the side: within 3 m of the deck's outline (the hull's flare and
+// the walls' collision hold him ~1 m off it) and no more than 3.5 m below the sole (his
+// origin hangs ~1.5 m under the surface, and a trough drops him another metre).
+// The deck point is the sole straight inboard of him (the first spot, from the side toward the centre line, where
+// the roadway under it is the sole and not the foredeck or the roof above it), so he comes over the gunwale where
+// he is rather than at a door.
+bool Ship::DeckPointNear(Vector3Par worldPos, Vector3& deck) const
+{
+    if (!_hasDeck || !GLandscape || !_shape || !_shape->RoadwayLevel())
+        return false;
+    // the deck's outline from the roadway's own points (the LOD's cached box is not kept for a roadway)
+    const Shape* road = _shape->RoadwayLevel();
+    if (road->NPos() <= 0)
+        return false;
+    Vector3 lo = road->Pos(0), hi = road->Pos(0);
+    for (int i = 1; i < road->NPos(); ++i)
+    {
+        SaturateMin(lo, road->Pos(i));
+        SaturateMax(hi, road->Pos(i));
+    }
+    const Vector3 m = PositionWorldToModel(worldPos);
+    static const bool diag = std::getenv("POSEIDON_BOAT_DIAG") != nullptr;
+    if (diag)
+    {
+        static float next = 0;
+        if (Glob.time.toFloat() >= next)
+        {
+            next = Glob.time.toFloat() + 1.0f;
+            LOG_INFO(Physics, "Deck reach: swimmer model {:.2f},{:.2f},{:.2f} deck box {:.2f},{:.2f},{:.2f} .. {:.2f},{:.2f},{:.2f}",
+                     m.X(), m.Y(), m.Z(), lo.X(), lo.Y(), lo.Z(), hi.X(), hi.Y(), hi.Z());
+        }
+    }
+    const float ox = std::max({lo.X() - m.X(), m.X() - hi.X(), 0.0f});
+    const float oz = std::max({lo.Z() - m.Z(), m.Z() - hi.Z(), 0.0f});
+    if (ox * ox + oz * oz > Square(3.0f) || m.Y() < lo.Y() - 3.5f || m.Y() > lo.Y() + 1.0f)
+        return false;
+    const float cx = 0.5f * (lo.X() + hi.X());
+    const float sx = std::clamp(m.X(), lo.X() + 0.4f, hi.X() - 0.4f);
+    for (const float dz : {0.0f, -0.8f, 0.8f, -1.6f, -2.4f, 1.6f})
+    {
+        const float z = std::clamp(m.Z() + dz, lo.Z() + 0.4f, hi.Z() - 0.4f);
+        for (const float s : {0.85f, 0.6f, 0.35f, 0.1f})
+        {
+            const Vector3 sole = PositionModelToWorld(Vector3(cx + (sx - cx) * s, lo.Y(), z));
+            Object* support = nullptr;
+            const float y = GLandscape->RoadSurfaceY(sole + VUp * 0.5f, nullptr, nullptr, nullptr, &support);
+            if (support == this && std::fabs(y - sole.Y()) < 0.25f)
+            {
+                deck = Vector3(sole.X(), y, sole.Z());
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void Ship::GetActions(UIActions& actions, AIUnit* unit, bool now)
+{
+    base::GetActions(actions, unit, now);
+    if (!now || !unit || !_hasDeck)
+        return;
+    // Aboard a boat with a deck, the seats and the deck are a step apart: the engine offers the seat changes and
+    // getting out only to a stopped vehicle, and a boat in a swell is never stopped. Under way the helmsman
+    // can take a passenger seat, a passenger the empty helm, and either can step out onto the deck.
+    if (unit->GetVehicleIn() == this && (!unit->IsPlayer() || GetLock() != LSLocked))
+    {
+        // (stopped, the engine adds Get out itself, and the seat changes for a commander turned out)
+        const bool stopped = IsStopped();
+        const bool baseSeats = stopped && _effCommander && unit == _effCommander->Brain() &&
+                               (IsPersonHidden(unit->GetPerson()) || unit->IsInCargo());
+        if (!stopped)
+            actions.Add(ATGetOut, this, 0.9f, 0, true);
+        if (!baseSeats && unit == PilotUnit() && GetManCargo().Size() > 0)
+            actions.Add(ATMoveToCargo, this, 0.01f);
+        else if (!baseSeats && unit->IsInCargo() && Type()->HasDriver() && !PilotUnit())
+            actions.Add(ATMoveToDriver, this, 0.04f);
+        return;
+    }
+    if (!unit->IsFreeSoldier())
+        return;
+    Person* person = unit->GetPerson();
+    Vector3 deck;
+    if (person && person->IsSwimming() && DeckPointNear(person->WorldPosition(), deck))
+        actions.Add(ATClimbAboard, this, 0.95f, 0, true, true);
+}
+
+RString Ship::GetActionName(const UIAction& action)
+{
+    if (action.type == ATClimbAboard)
+        return RString("Climb aboard");
+    return base::GetActionName(action);
+}
+
+void Ship::PerformAction(const UIAction& action, AIUnit* unit)
+{
+    if (action.type != ATClimbAboard)
+    {
+        base::PerformAction(action, unit);
+        return;
+    }
+    Man* man = unit ? dyn_cast<Man>(unit->GetPerson()) : nullptr;
+    Vector3 deck;
+    if (man && man->IsSwimming() && DeckPointNear(man->WorldPosition(), deck))
+        man->ClimbOntoDeck(this, deck);
 }
 
 void Ship::AddRider(Vehicle* rider)

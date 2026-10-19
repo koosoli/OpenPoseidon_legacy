@@ -75,4 +75,5 @@ DEFINE_ENUM_BEG(UIActionType)
 	ATCargoWeaponStow,
 	ATOpenDoor,  /* RFG-157: a native Enfusion door (param = door index) */
 	ATCloseDoor,
+	ATClimbAboard, /* a swimmer climbs over a boat's side onto its deck (Ship::GetActions) */
 DEFINE_ENUM_END(UIActionType)

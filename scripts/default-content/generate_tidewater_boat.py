@@ -422,7 +422,7 @@ def add_mesh(lod, name, m, keep, palette, hull_frame):
                 back = [pidx[0], pidx[2], pidx[1]]
                 back = [i + len(used) for i in back]
                 lod.faces.append((back, back, [uvs[0], uvs[2], uvs[1]], tex))
-    sel = {"wheel": "volant", "radar": "radar"}.get(name)
+    sel = {"wheel": "tw_wheel", "radar": "radar"}.get(name)
     if sel:
         lod.select(sel, range(base, base + count), range(first_face, len(lod.faces)))
 
@@ -474,19 +474,19 @@ def geometry_boxes(header, thick=True):
             continue
         ctr, half = np.array(c["center"]), np.array(c["half"])
         lo0, hi0 = ctr - half, ctr + half
-        # The walls that hold a man on the deck reach far outboard (their inner faces stay): Tidewater's are
+        # The walls that hold a man on the deck reach 0.4 m outboard (their inner faces stay): Tidewater's are
         # its character controller's thin boxes (bulwarks 0.26 m, house walls 0.04 m), and OFP's man, running
         # at 3.8 m/s, passed the middle of one in a few frames and was pushed out of its far side -- overboard
-        # (2026-10-19).
+        # (2026-10-19). Not further: they also hold a swimmer off the hull (0.8 m kept him a hand's reach away).
         if not thick:
             pass
         elif c["tag"] in ("bulwark", "houseWall"):
             if ctr[0] > 0:
-                hi0[0] += 0.8
+                hi0[0] += 0.4
             else:
-                lo0[0] -= 0.8
+                lo0[0] -= 0.4
         elif c["tag"] == "transom":
-            lo0[2] -= 0.8
+            lo0[2] -= 0.4
         lo, hi = mirror(lo0), mirror(hi0)
         out.append((c["tag"], np.minimum(lo, hi), np.maximum(lo, hi)))
     for z0, z1, hx, y0 in [(-3.86, -1.0, 1.24, -0.75), (-1.0, 1.5, 1.22, -0.75), (1.5, 3.0, 0.95, -0.55), (3.0, 4.1, 0.5, -0.25)]:
@@ -536,12 +536,28 @@ def build(header, meshes):
     # ---- the driver proxy: at the helm, standing on the sole facing forward (p0 origin, p0->p1 the
     # shortest edge = forward, p0->p2 = up)
     helm = np.array(a["helmEye"])
-    # (raised 0.15 m: OFP's ship-driver pose puts the eye 1.34 m over the proxy, Tidewater's helm eye is 1.5 m
-    # over the sole)
-    feet = np.array([helm[0], header["dimensions"]["deckHeight"] + 0.15, 0.45])
+    # OFP's ship-driver pose (ManActShipDriver) puts the eye 0.32 m to the helmsman's right, 1.34 m up and 0.16 m
+    # forward of the proxy (WGR_PROXYCAM_TRACE pilotPos). The proxy goes where that eye lands on Tidewater's helm
+    # eye: with the proxy on the helm itself the eye hung straight over the wheel, which then showed only as its
+    # hub at the bottom of the view (owner: "the steering wheel is missing").
+    EYE_OFFSET = np.array([-0.32, 1.34, 0.16])  # Tidewater's frame (its +x is the helmsman's left)
+    feet = helm - EYE_OFFSET
     # (a proxy's frame is taken from the file's points without the loader's half turn: its forward edge points to
     # the file's +z, which is Tidewater's -z -- measured with WGR_PROXYCAM_TRACE, the helmsman faced aft)
-    proxy = [mirror(feet), mirror(feet - [0, 0, 0.1]), mirror(feet + [0, 0.2, 0])]
+    def crew_proxy(at, forward):
+        """p0 at `at`, the forward edge along `forward` and the up edge, Tidewater's frame. Measured: the proxy's
+        frame is built from the file's points without the loader's half turn, so its edges are written as the
+        engine should read them -- a file +z edge is forward (Tidewater's -z), a file +x edge is engine +x
+        (Tidewater's -x, inboard from the port side)."""
+        at = np.asarray(at, dtype=np.float64)
+        f = np.asarray(forward, dtype=np.float64) * 0.1
+        return [mirror(at), mirror(at) + np.array([f[0], 0.0, f[2]]), mirror(at + [0, 0.2, 0])]
+
+    proxies = {"proxy:Driver.01": crew_proxy(feet, [0, 0, 1])}
+    # Passengers (driver -> passenger with the engine's "move to cargo"): on the bench along the port side,
+    # facing inboard, and on the bait barrel's lid aft of it
+    for i, z in enumerate((0.25, 0.65, -0.8)):
+        proxies[f"proxy:Cargo.{i + 1:02d}"] = crew_proxy([0.86, header["dimensions"]["deckHeight"], z], [1, 0, 0])
 
     def visual(level_keep, resolution, with_view_points=False):
         lod = Lod()
@@ -550,10 +566,11 @@ def build(header, meshes):
             if keep is None:
                 continue
             add_mesh(lod, name, m, keep, palette, hull_frame)
-        base = lod.add_points(proxy)
-        lod.normals.extend([(0, 1, 0)] * 3)
-        lod.faces.append(([base, base + 1, base + 2], [base, base + 1, base + 2], [(0, 0)] * 3, ""))
-        lod.select("proxy:Driver.01", [base, base + 1, base + 2], [len(lod.faces) - 1])
+        for pname, tri in proxies.items():
+            base = lod.add_points(tri)
+            lod.normals.extend([(0, 1, 0)] * 3)
+            lod.faces.append(([base, base + 1, base + 2], [base, base + 1, base + 2], [(0, 0)] * 3, ""))
+            lod.select(pname, [base, base + 1, base + 2], [len(lod.faces) - 1])
         if with_view_points:
             add_named_points(lod, view_points(a))
         lods.append((lod, resolution, {}))
@@ -635,6 +652,8 @@ def memory_points(header):
         "pos driver": [board], "pos driver dir": [board + [0, 0, 0.7]],
         "pos cargo": [board], "pos cargo dir": [board + [0, 0, 0.7]],
         "osa radaru": [radar, radar + [0, 0.3, 0]],
+        # the helm wheel's axle, for its own rotation (Ship::_twWheel)
+        "osa volantu": [np.array(a["wheelCenter"]) - np.array(a["wheelAxis"]) * 0.15, a["wheelCenter"]],
         "propeller": [a["propeller"]], "rudder": [a["rudder"]],
     })
     return out
@@ -690,7 +709,8 @@ class CfgVehicles
 		hasGunner = 0;
 		hasCommander = 0;
 		driverIsCommander = 1;
-		transportSoldier = 0;
+		transportSoldier = 3;
+		cargoAction[] = {{"ManActCargo"}};
 		weapons[] = {{}};
 		magazines[] = {{}};
 		driverAction = "ManActShipDriver";

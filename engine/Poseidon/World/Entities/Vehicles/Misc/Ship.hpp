@@ -33,6 +33,9 @@ class ShipType: public TransportType
 	AnimationWithCenter _indicatorSpeed;
 
 	AnimationRotation _radar;
+	// Tidewater's helm wheel ("tw_wheel" about the memory axis "osa volantu"): the 2001 "volant" takes its axis from
+	// points in the pilot-view LOD, which a generated model cannot keep (faceless points), and drew the wheel away
+	AnimationRotation _twWheel;
 
 	HitPoint _turretHit,_gunHit;
 
@@ -215,6 +218,13 @@ class Ship: public Transport
 	void FireWeaponEffects(int weapon, const Magazine *magazine,EntityAI *target) override;
 
 	void Eject(AIUnit *unit) override;
+
+	// A boat with a deck: a swimmer within reach of its side climbs aboard (ATClimbAboard)
+	void GetActions(UIActions &actions, AIUnit *unit, bool now) override;
+	RString GetActionName(const UIAction &action) override;
+	void PerformAction(const UIAction &action, AIUnit *unit) override;
+	// the point of the deck's lowest walkable level beside `worldPos`, if a swimmer there can reach it
+	bool DeckPointNear(Vector3Par worldPos, Vector3 &deck) const;
 
 	Vector3 GetDriverGetInPos(Person *person, Vector3Par pos) const override;
 	Vector3 GetCommanderGetInPos(Person *person, Vector3Par pos) const override;

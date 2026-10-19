@@ -44,6 +44,7 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/WaterBodies.hpp>
 #include <Poseidon/World/Terrain/WaterSurfaceQuery.hpp>
+#include <Poseidon/World/Entities/Vehicles/Misc/Ship.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -708,6 +709,39 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
     _diveOffset += (offset - _diveOffset) * std::min(1.0f, deltaT / SwimLeanTime);
     moveTrans.SetPosition(pos + _diveOffset);
 
+    // Hulls are solid to a swimmer: the vehicles' geometry pushes him out sideways, as it does a man on foot
+    // (the swim step never asked: he swam through a boat, owner 2026-10-19). Only the horizontal part -- the
+    // water holds his height.
+    if (GLandscape)
+    {
+        CollisionBuffer collision;
+        GLandscape->ObjectCollision(collision, this, moveTrans, true);
+        Vector3 push(VZero);
+        for (int i = 0; i < collision.Size(); i++)
+        {
+            const CollisionInfo& info = collision[i];
+            if (!info.object || info.object == this || info.object->IsPassable() || dyn_cast<Man, Object>(info.object))
+                continue;
+            Vector3 out = info.object->DirectionModelToWorld(info.dirOut);
+            out[1] = 0;
+            const float len = out.Size();
+            if (len < 1e-3f || info.under <= 0.02f)
+                continue;
+            out = out * (1.0f / len);
+            const float along = push * out;
+            if (info.under - 0.02f > along)
+                push += out * (info.under - 0.02f - along);
+        }
+        if (push.SquareSize() > 1e-6f)
+        {
+            moveTrans.SetPosition(moveTrans.Position() + push);
+            static const bool diag = std::getenv("POSEIDON_BOAT_DIAG") != nullptr;
+            if (diag && Brain() && Brain()->IsPlayer())
+                LOG_INFO(World, "Swim hull push: t={:.2f} push={:.2f} m at {:.1f},{:.1f}", Glob.time.toFloat(), push.Size(),
+                         moveTrans.Position().X(), moveTrans.Position().Z());
+        }
+    }
+
     const Vector3 oldPos = Position();
     _speed = deltaT > 0 ? (moveTrans.Position() - oldPos) * (1.0f / deltaT) : VZero;
     _angMomentum = VZero;
@@ -732,6 +766,40 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
     }
     UpdateBreath(deltaT, _diving ? c.height - (pos.Y() + DiveHeadMid) : -1.0f);
     EmitSwimSplashes(deltaT);
+}
+
+void Man::ClimbOntoDeck(Ship* ship, Vector3Par deck)
+{
+    // out of the swim moves, as the lift out of the water in UpdateSwimming does
+    _swimming = false;
+    _diving = false;
+    _diveRequest = false;
+    _surfaceRequest = false;
+    _diveOffset = VZero;
+    _swimEntrySoft = 0;
+    _falling = false;
+    BlendToMove(GetDefaultMove());
+    // standing on the sole, facing inboard
+    Vector3 dir = ship->Position() - deck;
+    dir[1] = 0;
+    Matrix3 upright;
+    upright.SetUpAndDirection(VUp, dir.SquareSize() > 1e-4f ? dir.Normalized() : Vector3(VForward));
+    Matrix4 trans;
+    trans.SetOrientation(upright);
+    trans.SetPosition(deck);
+    Move(trans);
+    _speed = VZero;
+    _landContact = true;
+    _freeFallUntil = Glob.time;
+    _waterDepth = 0;
+    if (Brain() && Brain()->IsPlayer())
+        SetPlayerWaterDepth(0);
+    // and on board: the deck carries him from now on
+    if (Ship* old = _platform ? dyn_cast<Ship>(_platform.GetLink()) : nullptr)
+        old->RemoveRider(this);
+    ship->AddRider(this);
+    _platform = ship;
+    LOG_INFO(World, "{} climbed aboard {}", (const char*)GetDebugName(), (const char*)ship->GetDebugName());
 }
 
 void Man::SetSwimVerticalWanted(float v)
