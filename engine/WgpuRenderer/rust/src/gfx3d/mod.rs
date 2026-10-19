@@ -1435,13 +1435,14 @@ fn resolve_registered_section(meshes: &SlotMap<MeshKey, Mesh>, src: &GpuSectionS
     match meshes.get(key) {
         // Bound WHOLE under indirect: base_vertex = the mesh's pool vbase, first_index =
         // its ibase + the section's mesh-local start (indices are 0-based mesh-local).
-        Some(mesh) => cull::SectionGpu {
+        // LOD-STREAM: an evicted mesh (counts zeroed) draws nothing, like a missing one.
+        Some(mesh) if mesh.vert_count != 0 => cull::SectionGpu {
             first_index: mesh.alloc.ibase + src.index_begin,
             index_count: src.index_count,
             base_vertex: mesh.alloc.vbase,
             variant: src.variant,
         },
-        None => cull::SectionGpu {
+        _ => cull::SectionGpu {
             first_index: 0,
             index_count: 0,
             base_vertex: 0,
@@ -4765,6 +4766,10 @@ pub struct Gfx3d {
     // buffer generation changes. A live allocation never moves; updates/skinning rewrite only
     // content. Clean frames retain the exact previous resolution, including missing handles.
     gpu_section_src: Vec<GpuSectionSrc>,
+    /// LOD-STREAM: meshes whose pool storage is evicted (handle kept, vert/index count 0).
+    evicted_meshes: rustc_hash::FxHashSet<u64>,
+    lod_residency_flags_set: bool,
+    pool_split_tick: u64,
     // Address validity only: fixed source descriptors + generational mesh map.
     // 16 bytes of scalar state; no allocation, clock, per-source bit or frame scan.
     gpu_section_refresh: section_refresh::SectionRefreshValidity,
@@ -5722,6 +5727,9 @@ impl Gfx3d {
             indirect_args_cap: 0,
             gpu_driven_enabled,
             gpu_section_src: Vec::new(),
+            evicted_meshes: Default::default(),
+            lod_residency_flags_set: false,
+            pool_split_tick: 0,
             gpu_section_refresh: section_refresh::SectionRefreshValidity::from_setting(
                 std::env::var("WGR_CULL_SECTION_REFRESH").ok().as_deref()),
             gpu_dbg_stale: u32::MAX,
@@ -6250,6 +6258,72 @@ impl Gfx3d {
         key.data().as_ffi()
     }
 
+    /// LOD-STREAM: give a static, unshared, rigid mesh's pool ranges back while keeping its
+    /// handle. Sections naming it resolve to nothing and their LOD rows are flagged not resident,
+    /// so the cull draws the next coarser level. Refused (false) for skinned meshes and for an
+    /// allocation another mesh shares by content (RFG-127).
+    pub fn mesh_evict(&mut self, handle: u64) -> bool {
+        let key: MeshKey = KeyData::from_ffi(handle).into();
+        let Some(mesh) = self.meshes.get(key) else { return false };
+        if mesh.vert_count == 0 || mesh.skin.is_some() {
+            return false;
+        }
+        if let Some(content) = self.shared_meshes.of_mesh.get(&key).copied() {
+            match self.shared_meshes.by_content.get(&content) {
+                Some((_, refs)) if *refs > 1 => return false,
+                _ => {
+                    self.shared_meshes.by_content.remove(&content);
+                    self.shared_meshes.of_mesh.remove(&key);
+                }
+            }
+        }
+        let mesh = self.meshes.get_mut(key).unwrap();
+        self.pool.free(&mesh.alloc, mesh.vert_count, mesh.index_count);
+        mesh.vert_count = 0;
+        mesh.index_count = 0;
+        self.evicted_meshes.insert(handle);
+        self.bake_bind_cache.remove(&key);
+        self.bake_bind_cache_prev.remove(&key);
+        self.gpu_section_refresh.invalidate();
+        true
+    }
+
+    /// LOD-STREAM: upload an evicted mesh's geometry again under the same handle.
+    pub fn mesh_restore(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, handle: u64,
+                        verts: &[WgrMeshVertex], indices: &[u32]) -> bool {
+        if !self.evicted_meshes.contains(&handle) {
+            return false;
+        }
+        let key: MeshKey = KeyData::from_ffi(handle).into();
+        if !self.meshes.contains_key(key) {
+            self.evicted_meshes.remove(&handle);
+            return false;
+        }
+        let gen_before = self.pool.generation();
+        let Some(alloc) = self.pool.alloc(device, queue, verts, indices) else { return false };
+        if self.pool.generation() != gen_before {
+            self.bake_bind_cache.clear();
+            self.bake_bind_cache_prev.clear();
+        }
+        let mesh = self.meshes.get_mut(key).unwrap();
+        mesh.alloc = alloc;
+        mesh.vert_count = verts.len() as u32;
+        mesh.index_count = indices.len() as u32;
+        self.evicted_meshes.remove(&handle);
+        self.gpu_section_refresh.invalidate();
+        true
+    }
+
+    /// LOD-STREAM: see cull::CullState::lod_distance_demand.
+    pub fn lod_distance_demand(&self, margin: u32, out: &mut Vec<u8>) {
+        self.cull.lod_distance_demand(margin, out);
+    }
+
+    /// LOD-STREAM: evicted mesh count, for the residency log line.
+    pub fn evicted_mesh_count(&self) -> usize {
+        self.evicted_meshes.len()
+    }
+
     // RFG-127: `mesh_create` for geometry that is never rewritten in place. Byte-identical
     // content reuses the live allocation of its first copy (see SharedMeshes).
     pub fn mesh_create_shared(
@@ -6587,10 +6661,12 @@ impl Gfx3d {
                     },
                     None => true,
                 };
-                if free_now {
+                // LOD-STREAM: an evicted mesh already gave its ranges back.
+                if free_now && mesh.vert_count != 0 {
                     self.pool
                         .free(&mesh.alloc, mesh.vert_count, mesh.index_count);
                 }
+                self.evicted_meshes.remove(&handle);
             }
             // Drop any cached skin-bake bind that referenced this mesh's skin buffer.
             self.bake_bind_cache.remove(&key);
@@ -9822,6 +9898,13 @@ impl Gfx3d {
                 self.gpu_dbg_stale = stale;
             }
             self.cull.set_sections(&resolved);
+            // LOD-STREAM: rows naming an evicted mesh step to a coarser resident level.
+            if !self.evicted_meshes.is_empty() || self.lod_residency_flags_set {
+                let evicted = &self.evicted_meshes;
+                let sources = &self.gpu_section_src;
+                self.cull.apply_lod_residency(|s| sources.get(s).is_some_and(|src| evicted.contains(&src.mesh)));
+                self.lod_residency_flags_set = !evicted.is_empty();
+            }
         });
         // Callback completion only: panic/allocation failure leaves the original live
         // dirty state (or different pool generation) intact for the next attempt.
@@ -11390,6 +11473,11 @@ impl Gfx3d {
     /// Drain completed stats readbacks (after queue.submit, alongside GpuTimers::harvest).
     pub fn harvest_object_stats(&mut self, device: &wgpu::Device) {
         self.cull.harvest_stats(device);
+        // LOD-STREAM: every ~10 s at 60 fps, the pool's live/prefix/capacity per buffer.
+        self.pool_split_tick = self.pool_split_tick.wrapping_add(1);
+        if self.pool_split_tick % 600 == 0 {
+            self.queued_log.push(format!("{} ({} evicted LOD meshes)", self.pool.split_line(), self.evicted_meshes.len()));
+        }
         if lod_usage::enabled() {
             // PERF-LOD-USAGE: pool bytes per mesh, keyed by its vbase (what a section names).
             let by_vbase: FxHashMap<u32, u64> = self.meshes.values()

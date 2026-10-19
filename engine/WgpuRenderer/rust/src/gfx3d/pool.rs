@@ -583,6 +583,17 @@ impl GeometryPool {
         self.epoch
     }
 
+    /// LOD-STREAM: one line on how the pool is used -- live vs capacity per buffer, and the
+    /// occupied prefix (what a tail shrink could keep), in MB.
+    pub fn split_line(&self) -> String {
+        const MB: f64 = 1048576.0;
+        let v = |units: u32| units as f64 * VERT_SIZE as f64 / MB;
+        let i = |units: u32| units as f64 * INDEX_SIZE as f64 / MB;
+        format!("geometry pool split: vertex live {:.0} / prefix {:.0} / capacity {:.0} MB, index live {:.0} / prefix {:.0} / capacity {:.0} MB",
+                v(self.valloc.used()), v(self.valloc.occupied_prefix_units()), v(self.valloc.cap),
+                i(self.ialloc.used()), i(self.ialloc.occupied_prefix_units()), i(self.ialloc.cap))
+    }
+
     pub fn residency(&self) -> GeometryResidency {
         GeometryResidency {
             live_bytes: self.valloc.used() as u64 * VERT_SIZE
@@ -661,7 +672,16 @@ impl GeometryPool {
     }
 
     fn growth_capacity(&self, device: &wgpu::Device, cap: u32, n: u32, unit: u64) -> u32 {
-        let ordinary = grown_cap(cap, n);
+        // LOD-STREAM: a reserved pool (native worlds, RFG-140) is sized near its working set, so
+        // outgrowing it means a little more, not twice as much -- and a growth keeps old and new
+        // alive together. 1.25x keeps that overlap small; WGR_GEO_POOL_GROWTH still overrides.
+        let reserved = self.reserve_verts > 0 || self.reserve_indices > 0;
+        let ordinary = if reserved && std::env::var_os("WGR_GEO_POOL_GROWTH").is_none() {
+            let scaled = (u64::from(cap) * 5).div_ceil(4).min(u64::from(u32::MAX)) as u32;
+            scaled.max(cap.saturating_add(n))
+        } else {
+            grown_cap(cap, n)
+        };
         if self.pressure_budget == 0 { return ordinary; }
         let counters = device.get_internal_counters().hal;
         let allocated = (counters.buffer_memory.read().max(0) as u64)

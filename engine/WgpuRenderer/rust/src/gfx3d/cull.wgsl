@@ -76,7 +76,9 @@ struct Lod {
     resolution: f32,         // _resolutions[i]
     section_base: u32,       // first entry in sections[]
     section_count: u32,
-    is_decal: u32,           // 1 = decal LOD (stepped past by the noDecal rule)
+    is_decal: u32,           // bit 0: decal LOD (stepped past by the noDecal rule); bit 1: LOD-STREAM
+                             // not resident (its meshes are evicted) -- classify takes the next
+                             // coarser resident level instead
 };
 
 struct Section {
@@ -249,10 +251,16 @@ fn classify(idx: u32) -> CullResult {
         }
         i -= 1u;
         loop {
-            if (i == 0u || lods[model.lod_base + i].is_decal == 0u) { break; }
+            if (i == 0u || (lods[model.lod_base + i].is_decal & 1u) == 0u) { break; }
             i--;
         }
         level = i;
+    }
+    // LOD-STREAM: a level whose geometry is evicted draws the nearest coarser resident one
+    // until it is restored (the CPU keeps the coarsest level resident, always).
+    loop {
+        if (level + 1u >= model.lod_count || (lods[model.lod_base + level].is_decal & 2u) == 0u) { break; }
+        level++;
     }
 
     // Visual-only authored far tier, shared by colour and shadow culls. Never
@@ -260,7 +268,7 @@ fn classify(idx: u32) -> CullResult {
     if ((inst.flags & 16u) != 0u && model.lod_count > 0u) {
         var far_level = model.lod_count - 1u;
         loop {
-            if (far_level == 0u || lods[model.lod_base + far_level].is_decal == 0u) { break; }
+            if (far_level == 0u || (lods[model.lod_base + far_level].is_decal & 1u) == 0u) { break; }
             far_level--;
         }
         level = far_level;
@@ -328,7 +336,7 @@ fn level_for(lod_base: u32, lod_count: u32, resol2: f32) -> u32 {
     }
     i -= 1u;
     loop {
-        if (i == 0u || lods[lod_base + i].is_decal == 0u) { break; }
+        if (i == 0u || (lods[lod_base + i].is_decal & 1u) == 0u) { break; }
         i--;
     }
     return i;

@@ -2636,6 +2636,17 @@ extern "C"
     /* Retire a model registration after removing its owners. IDs are never reused.
        Mesh storage has a separate lifetime and is released by wgr_mesh_destroy. */
     WGR_API void wgr_model_retire(WgrRenderer* renderer, uint32_t model);
+    /* LOD-STREAM: evict a static, unshared mesh's pool storage, keeping its handle (1 = evicted,
+       0 = refused); sections naming it stop drawing and their LOD falls back to the next coarser
+       resident level. wgr_mesh_restore uploads the same content again under the same handle. */
+    WGR_API uint32_t wgr_mesh_evict(WgrRenderer* renderer, uint64_t mesh);
+    WGR_API uint32_t wgr_mesh_restore(WgrRenderer* renderer, uint64_t mesh, WgrSlice<WgrMeshVertex> verts,
+                                      WgrSlice<uint32_t> indices);
+    /* LOD-STREAM: per registered model id, the finest LOD index (into its registered LOD list)
+       any instance needs by distance alone, minus `margin`; 255 = no live instance. Writes
+       min(models, capacity) bytes, returns the model count. */
+    WGR_API uint32_t wgr_lod_distance_demand(WgrRenderer* renderer, uint32_t margin, uint8_t* out,
+                                             uint32_t capacity);
     WGR_API uint32_t wgr_model_register(WgrRenderer* renderer, float bounding_sphere, WgrSlice<WgrModelLod> lods,
                                         WgrSlice<WgrModelSection> sections, WgrSlice<WgrModelMaterial> materials,
                                         const char* name);

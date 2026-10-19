@@ -7650,6 +7650,28 @@ impl Renderer {
             .mesh_set_skin(&self.device, handle, bones, weights);
     }
 
+    /// LOD-STREAM: evict a static mesh's pool storage, keeping its handle.
+    fn mesh_evict(&mut self, handle: u64) -> bool {
+        let ok = self.gfx3d.mesh_evict(handle);
+        if ok {
+            // Its ranges are free for other meshes now: an off-handle update must not land there.
+            self.uploader.forget_mesh(handle);
+        }
+        ok
+    }
+
+    /// LOD-STREAM: upload an evicted mesh again under the same handle.
+    fn mesh_restore(&mut self, handle: u64, verts: &[WgrMeshVertex], indices: &[u32]) -> bool {
+        let ok = self.gfx3d.mesh_restore(&self.device, &self.queue, handle, verts, indices);
+        if ok {
+            self.publish_pool_to_uploader();
+            if let Some((vbase, vert_count)) = self.gfx3d.mesh_upload_meta(handle) {
+                self.uploader.register_mesh(handle, uploader::MeshUpload { vbase, vert_count });
+            }
+        }
+        ok
+    }
+
     fn mesh_destroy(&mut self, handle: u64) {
         // Keep the uploader's metadata table from outliving the mesh, so a stale handle
         // reaching `wgr_uploader_mesh_update` is ignored rather than writing into ranges a

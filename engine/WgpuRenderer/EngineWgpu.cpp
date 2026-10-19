@@ -3171,6 +3171,114 @@ void EngineWgpu::InitDraw(bool clear, PackedColor color)
         _wbank->StartFrame();
         _wbank->UpdateAdaptiveTextureDetail();
     }
+    UpdateLodStreaming();
+}
+
+// LOD-STREAM: keep in the geometry pool only the LOD levels some instance needs at its distance.
+//
+// Measured on native Everon at the owner's pose (PERF-LOD-USAGE, 2026-10-19): 542 MB of retained
+// meshes resident, 12 MB of them drawn, 25 MB with one finer margin level. The process sat over
+// the Windows VRAM budget and WDDM demoted memory (GPU passes 10-20x slower). Every registered
+// level used to stay resident for the model's whole life.
+//
+// The renderer computes, per model, the finest level any instance needs by DISTANCE (no frustum,
+// so turning never finds a level missing) minus one margin level. A level finer than that for
+// WGR_LOD_STREAM_GRACE_S (10 s) is evicted -- its pool ranges freed, handle kept -- and the cull
+// draws the next coarser resident level. A level needed again is rebuilt from the shape (still in
+// RAM) and restored at once. WGR_LOD_STREAM=0 = everything stays resident (the old behaviour).
+void EngineWgpu::UpdateLodStreaming()
+{
+    static const bool enabled = [] { const char* v = std::getenv("WGR_LOD_STREAM"); return !(v && v[0] == '0'); }();
+    static const double grace = [] { const char* v = std::getenv("WGR_LOD_STREAM_GRACE_S"); return v ? std::max(1.0, std::atof(v)) : 10.0; }();
+    if (!enabled || !_renderer || _gpuModelLodMeshes.empty()) return;
+    if ((++_lodStreamFrame % 15) != 0) return;
+    {
+        ResourceOp tick;
+        tick.kind = ResourceOp::LodStreamTick;
+        _resourceOps.push_back(std::move(tick));
+    }
+    std::vector<uint8_t> demand;
+    {
+        std::lock_guard lock(_lodStreamMutex);
+        if (_lodStreamDemandSerial == _lodStreamSeenSerial) return;
+        _lodStreamSeenSerial = _lodStreamDemandSerial;
+        demand = _lodStreamDemand;
+    }
+    const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    // Restores are bounded per tick by bytes rebuilt (BuildVertices is CPU work on this thread).
+    uint64_t restoreBudget = 48ull << 20;
+    uint32_t evictBudget = 256;
+    uint64_t evictedNow = 0, restoredNow = 0;
+    for (auto& [shape, levels] : _gpuModelLodMeshes)
+    {
+        const auto model = _gpuModels.find(shape);
+        if (model == _gpuModels.end() || model->second == WGR_INVALID_MODEL || model->second >= demand.size()) continue;
+        const uint8_t need = demand[model->second];
+        if (need == 255) continue; // no live instance: parked or streaming out, leave it be
+        for (LodLevelMesh& lm : levels)
+        {
+            if (lm.lodIndex < 0 || !lm.streamable) continue;
+            const bool needed = lm.lodIndex >= int(need);
+            if (needed)
+            {
+                lm.unneededSince = 0;
+                if (lm.evicted && restoreBudget >= lm.bytes)
+                {
+                    const Shape* s = lm.src;
+                    const int nv = s->NVertex();
+                    const int ni = render::mesh::CountIndices(*s);
+                    if (nv <= 0 || ni <= 0) continue;
+                    ResourceOp op;
+                    op.kind = ResourceOp::MeshRestore;
+                    op.mesh = lm.mesh;
+                    op.verts.resize(size_t(nv));
+                    op.indices.resize(size_t(ni));
+                    render::mesh::BuildVertices(*s, op.verts.data());
+                    render::mesh::BuildIndices(*s, op.indices.data());
+                    _resourceOps.push_back(std::move(op));
+                    lm.evicted = false;
+                    _retainedMeshOfLevel[s] = lm.mesh; // CPU buffers may share it again
+                    restoreBudget -= lm.bytes;
+                    restoredNow += lm.bytes;
+                    ++_lodStreamRestores;
+                    _lodStreamEvictedBytes -= std::min(_lodStreamEvictedBytes, lm.bytes);
+                }
+                continue;
+            }
+            if (lm.evicted) continue;
+            if (lm.unneededSince == 0) { lm.unneededSince = now; continue; }
+            if (now - lm.unneededSince < grace || evictBudget == 0) continue;
+            // Never evict under a CPU buffer that shares this mesh (RFG-088): it would draw freed ranges.
+            {
+                std::lock_guard lock(_sharedMeshLifetimeMutex);
+                if (const auto found = _sharedMeshLifetime.find(lm.mesh); found != _sharedMeshLifetime.end() &&
+                    found->second->SnapshotBorrowers() != 0)
+                    continue;
+            }
+            if (const auto shared = _retainedMeshOfLevel.find(lm.src);
+                shared != _retainedMeshOfLevel.end() && shared->second == lm.mesh)
+                _retainedMeshOfLevel.erase(shared); // a CPU buffer made from now on builds its own copy
+            ResourceOp op;
+            op.kind = ResourceOp::MeshEvict;
+            op.mesh = lm.mesh;
+            _resourceOps.push_back(std::move(op));
+            lm.evicted = true;
+            --evictBudget;
+            evictedNow += lm.bytes;
+            ++_lodStreamEvictions;
+            _lodStreamEvictedBytes += lm.bytes;
+        }
+    }
+    static double lastLog = 0;
+    if (now - lastLog >= 10.0)
+    {
+        lastLog = now;
+        LOG_INFO(Graphics, "LOD streaming: {:.0f} MB of LOD levels evicted ({} evictions, {} restores, {} refused by "
+                           "the renderer as shared) (WGR_LOD_STREAM)",
+                 _lodStreamEvictedBytes / 1048576.0, _lodStreamEvictions, _lodStreamRestores,
+                 _lodStreamEvictRefused.load(std::memory_order_relaxed));
+    }
+    (void)evictedNow; (void)restoredNow;
 }
 
 void EngineWgpu::Clear(bool clearZ, bool clearColor, PackedColor color)
@@ -4107,6 +4215,37 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             }
             wgr_mesh_update(_renderer, op.cpu->renderer, AsMeshVerts(op.verts));
             wgr_mesh_set_skin(_renderer, op.cpu->renderer, op.bones, op.weights);
+            break;
+        }
+        case ResourceOp::MeshEvict:
+        {
+            const auto it = _meshIdOf.find(op.mesh);
+            if (it != _meshIdOf.end() && it->second && !wgr_mesh_evict(_renderer, it->second))
+                _lodStreamEvictRefused.fetch_add(1, std::memory_order_relaxed);
+            break;
+        }
+        case ResourceOp::MeshRestore:
+        {
+            const auto it = _meshIdOf.find(op.mesh);
+            if (it != _meshIdOf.end() && it->second)
+                wgr_mesh_restore(_renderer, it->second, AsMeshVerts(op.verts),
+                    WgrSlice<uint32_t>{reinterpret_cast<const uint32_t*>(op.indices.data()), U32(op.indices.size())});
+            break;
+        }
+        case ResourceOp::LodStreamTick:
+        {
+            // Renderer ids are drain-side; translate to producer handles here.
+            const uint32_t n = wgr_lod_distance_demand(_renderer, 1, nullptr, 0);
+            std::vector<uint8_t> byRenderer(n, 255);
+            if (n) wgr_lod_distance_demand(_renderer, 1, byRenderer.data(), n);
+            uint32_t maxProducer = 0;
+            for (const auto& [producer, rid] : _modelIdOf) maxProducer = std::max(maxProducer, producer);
+            std::vector<uint8_t> byProducer(size_t(maxProducer) + 1, 255);
+            for (const auto& [producer, rid] : _modelIdOf)
+                if (rid < n) byProducer[producer] = byRenderer[rid];
+            std::lock_guard lock(_lodStreamMutex);
+            _lodStreamDemand = std::move(byProducer);
+            ++_lodStreamDemandSerial;
             break;
         }
         case ResourceOp::ModelRetire:
@@ -15242,6 +15381,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadC
     } birthObservationReport{birthObserver.get()};
     std::vector<TextureWgpu*> modelTextures;
     std::vector<uint64_t> modelMeshes;
+    std::vector<LodLevelMesh> levelMeshes; // LOD-STREAM bookkeeping, kept on registration
     if (_wbank)
         _wbank->BeginModelTextureCapture(modelTextures);
     struct TextureCaptureScope
@@ -15625,6 +15765,18 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadC
         }
         _gpuMeshes.insert(mesh);
         modelMeshes.push_back(mesh);
+        {
+            // LOD-STREAM: a level can be evicted and rebuilt later only if this exact build
+            // reproduces it -- BuildVertices from the level as it stands, no forest crown patch,
+            // no conform original positions, no church snow proof.
+            LodLevelMesh lm;
+            lm.src = s;
+            lm.mesh = mesh;
+            lm.level = level;
+            lm.streamable = !isForest && !levelConform && shape->GetMapType() != MapChurch;
+            lm.bytes = uint64_t(nv) * sizeof(SVertex) + uint64_t(ni) * sizeof(uint32_t);
+            levelMeshes.push_back(lm);
+        }
         // RFG-088: this level's retained mesh holds exactly the bytes CreateVertexBuffer
         // would build for it, unless it was conformed (BuildOrigVertices) or crown-patched.
         if (!isForest && !(levelConform && s->OriginalPosValid()))
@@ -16548,6 +16700,8 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadC
         if (count > 0)
         {
             lods.push_back(WgrModelLod{shape->Resolution(level), base, count, 0});
+            if (!levelMeshes.empty() && levelMeshes.back().level == level)
+                levelMeshes.back().lodIndex = int(lods.size()) - 1;
         }
     }
 
@@ -16576,6 +16730,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadC
         op.name = static_cast<const char*>(shape->Name());
         model = op.model;
         _resourceOps.push_back(std::move(op));
+        _gpuModelLodMeshes[shape] = std::move(levelMeshes);
     }
     // The census's shape-level verdict. `eligible` with nothing to draw is its OWN reason and
     // the one most likely to be the answer on imported content: every bail above is narrow and
@@ -17092,6 +17247,7 @@ uint32_t EngineWgpu::InvalidateStaleGpuModels()
 
 uint32_t EngineWgpu::DestroyGpuModelMeshes(const LODShapeWithShadow* shape)
 {
+    _gpuModelLodMeshes.erase(shape); // LOD-STREAM: its level meshes die with it
     // All callers destroy this registration; retire its lighting allocation too.
     // FIFO ordering covers registrations that have not reached the render thread yet.
     if (const auto it = _gpuModels.find(shape); _renderer && it != _gpuModels.end() && it->second != WGR_INVALID_MODEL)

@@ -3042,6 +3042,78 @@ impl CullState {
     // registration, only base_vertex/first_index may have moved). Marks the tables dirty for
     // re-upload only when something actually changed, so a quiet frame costs nothing. The LOD
     // section_base offsets index this table and are unaffected (order is preserved).
+    /// LOD-STREAM: per model, the finest LOD index any instance needs by DISTANCE alone (no
+    /// frustum, occlusion or sub-pixel test, so turning the camera never finds a level evicted),
+    /// minus `margin` levels. Same walk as classify(). 255 = no live instance. Dynamic instances
+    /// (vehicles, units) pin their model at 0: they move faster than the residency loop.
+    pub fn lod_distance_demand(&self, margin: u32, out: &mut Vec<u8>) {
+        out.clear();
+        out.resize(self.models.len(), 255);
+        let p = &self.params;
+        let cam = Vec3::new(p.cam_pos[0], p.cam_pos[1], p.cam_pos[2]);
+        for inst in &self.instances.slots {
+            if inst.model == INVALID_MODEL {
+                continue;
+            }
+            let m = inst.model as usize;
+            let Some(model) = self.models.get(m) else { continue };
+            if model.lod_count == 0 || out[m] == 0 {
+                continue;
+            }
+            let scale = inst.center[3];
+            let radius = model.bounding_sphere * scale;
+            let rel = Vec3::new(inst.center[0], inst.center[1], inst.center[2]) - cam;
+            let mut dist2 = rel.length_squared();
+            if radius * radius > dist2 * 0.0625 {
+                let dn = (dist2.sqrt() - radius).max(0.0);
+                dist2 = dn * dn;
+            }
+            let lod = |i: u32| self.lods.get((model.lod_base + i) as usize).copied();
+            let mut level = 0u32;
+            if (inst.flags & 16) != 0 {
+                level = model.lod_count - 1;
+                while level != 0 && lod(level).is_some_and(|l| l.is_decal & 1 != 0) { level -= 1; }
+            } else if model.lod_count >= 2 {
+                let resol2 = dist2 * p.lod_inv_width * p.lod_inv_width * p.lod_scale * p.lod_scale;
+                let mut i = 1u32;
+                while i < model.lod_count {
+                    let r = lod(i).map_or(f32::MAX, |l| l.resolution);
+                    if r * r > resol2 { break; }
+                    i += 1;
+                }
+                i -= 1;
+                while i != 0 && lod(i).is_some_and(|l| l.is_decal & 1 != 0) { i -= 1; }
+                level = i;
+            }
+            let need = level.saturating_sub(margin).min(254) as u8;
+            out[m] = out[m].min(need);
+        }
+        for inst in &self.dynamic {
+            if let Some(o) = out.get_mut(inst.model as usize) {
+                *o = 0;
+            }
+        }
+    }
+
+    /// LOD-STREAM: flag every LOD row whose sections touch an evicted mesh (is_decal bit 1), so
+    /// classify() steps past it. Called after each section refresh.
+    pub fn apply_lod_residency(&mut self, section_evicted: impl Fn(usize) -> bool) {
+        let mut changed = false;
+        for lod in &mut self.lods {
+            let base = lod.section_base as usize;
+            let evicted = (base..base + lod.section_count as usize).any(&section_evicted);
+            let next = (lod.is_decal & !2) | if evicted { 2 } else { 0 };
+            if next != lod.is_decal {
+                lod.is_decal = next;
+                changed = true;
+            }
+        }
+        if changed {
+            self.instances.advance_target_revision_with_kind(2);
+            self.table_uploads.mark(TableDomain::Lod);
+        }
+    }
+
     pub fn set_sections(&mut self, sections: &[SectionGpu]) {
         if resolved_sections_changed(&self.sections, sections, &mut self.instances) {
             // Resolved mesh ranges can change without an instance-table mutation.
@@ -4071,12 +4143,12 @@ impl CullState {
                     i += 1;
                 }
                 i -= 1;
-                while i != 0 && lod(i).is_some_and(|l| l.is_decal != 0) { i -= 1; }
+                while i != 0 && lod(i).is_some_and(|l| l.is_decal & 1 != 0) { i -= 1; }
                 level = i;
             }
             if (inst.flags & 16) != 0 && model.lod_count > 0 {
                 let mut far = model.lod_count - 1;
-                while far != 0 && lod(far).is_some_and(|l| l.is_decal != 0) { far -= 1; }
+                while far != 0 && lod(far).is_some_and(|l| l.is_decal & 1 != 0) { far -= 1; }
                 level = far;
             }
             let tris: u64 = lod(level).map_or(0, |l| {

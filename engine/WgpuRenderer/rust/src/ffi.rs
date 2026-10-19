@@ -2928,6 +2928,70 @@ pub unsafe extern "C" fn wgr_mesh_destroy(renderer: *mut WgrRenderer, id: u64) {
     }));
 }
 
+/// LOD-STREAM: give a static, unshared mesh's geometry-pool storage back while keeping its
+/// handle; sections naming it stop drawing and their LOD falls back to the next coarser resident
+/// level. Returns 1 when evicted, 0 when refused (unknown, skinned, already evicted, or content-
+/// shared with another mesh).
+///
+/// # Safety
+/// `renderer` must be live or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_mesh_evict(renderer: *mut WgrRenderer, id: u64) -> u32 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| u32::from(unsafe { &mut *renderer }.mesh_evict(id)))).unwrap_or(0)
+}
+
+/// LOD-STREAM: upload an evicted mesh's geometry again under the same handle (the same content
+/// it was created with). Returns 1 on success, 0 when the handle is not evicted.
+///
+/// # Safety
+/// `renderer` must be live or null; the slices must be valid for the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_mesh_restore(
+    renderer: *mut WgrRenderer,
+    id: u64,
+    verts: WgrSlice<WgrMeshVertex>,
+    indices: WgrSlice<u32>,
+) -> u32 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let verts = unsafe { verts.as_slice() };
+        let indices = unsafe { indices.as_slice() };
+        u32::from(renderer.mesh_restore(id, verts, indices))
+    }))
+    .unwrap_or(0)
+}
+
+/// LOD-STREAM: per registered model id, the finest LOD index (into the model's registered LOD
+/// list) any instance needs by distance alone, minus `margin` levels; 255 = no live instance.
+/// Writes min(models, capacity) bytes and returns the model count.
+///
+/// # Safety
+/// `renderer` must be live or null; `out` must hold `capacity` bytes or be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_lod_distance_demand(renderer: *mut WgrRenderer, margin: u32, out: *mut u8,
+                                                 capacity: u32) -> u32 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let mut demand = Vec::new();
+        renderer.gfx3d.lod_distance_demand(margin, &mut demand);
+        if !out.is_null() {
+            let n = demand.len().min(capacity as usize);
+            unsafe { std::ptr::copy_nonoverlapping(demand.as_ptr(), out, n) };
+        }
+        demand.len() as u32
+    }))
+    .unwrap_or(0)
+}
+
 // --- GPU-driven retained scene (docs/gpu-culling-and-depth-plan.md Stage 3b) ---
 
 /// Sentinel returned by `wgr_model_register` on failure.

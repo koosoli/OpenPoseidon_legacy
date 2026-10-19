@@ -917,6 +917,30 @@ class EngineWgpu : public EngineDummy
     // the expensive pool meshes and textures are released when the last streamed
     // instance leaves the working set, then rebuilt if that shape returns.
     std::unordered_map<const LODShapeWithShadow*, std::vector<uint64_t>> _gpuModelMeshes;
+    // LOD-STREAM: per registered shape, its level meshes in registration order. `lodIndex` is the
+    // level's index in the model's registered LOD list (-1 = built but not registered);
+    // `streamable` = the mesh can be rebuilt bit-exact from `src` (no conform/forest/church
+    // patching). Producer-thread only.
+    struct LodLevelMesh
+    {
+        const Shape* src = nullptr;
+        uint64_t mesh = 0;
+        int level = 0;
+        int lodIndex = -1;
+        bool streamable = false;
+        bool evicted = false;
+        double unneededSince = 0;
+        uint64_t bytes = 0;
+    };
+    std::unordered_map<const LODShapeWithShadow*, std::vector<LodLevelMesh>> _gpuModelLodMeshes;
+    // Filled by the drain (LodStreamTick): demand indexed by PRODUCER model handle, 255 = none.
+    std::mutex _lodStreamMutex;
+    std::vector<uint8_t> _lodStreamDemand;
+    uint64_t _lodStreamDemandSerial = 0, _lodStreamSeenSerial = 0;
+    uint64_t _lodStreamFrame = 0;
+    uint64_t _lodStreamEvictedBytes = 0, _lodStreamEvictions = 0, _lodStreamRestores = 0;
+    std::atomic<uint64_t> _lodStreamEvictRefused{0};
+    void UpdateLodStreaming();
     // RFG-088: level Shape -> the retained mesh (producer handle) built from exactly the
     // vertices CreateVertexBuffer would build, so a CPU-path buffer for that level can share
     // it. Conform levels (BuildOrigVertices) and forest levels (crown-patched conform words)
@@ -1562,7 +1586,10 @@ class EngineWgpu : public EngineDummy
             LodDemandCancel,
             SharedMeshFixtureObserve,
             GeometryPageFixtureObserve,
-            RetailPageRecordObserve // explicit non-instanced retail record cut only
+            RetailPageRecordObserve, // explicit non-instanced retail record cut only
+            MeshEvict,     // LOD-STREAM: give a level mesh's pool storage back, keep its handle
+            MeshRestore,   // LOD-STREAM: upload `verts`/`indices` again under `mesh`
+            LodStreamTick  // LOD-STREAM: read the renderer's distance demand into _lodStreamDemand
         };
         Kind kind = MeshCreate;
         uint64_t mesh = 0;  // MeshCreate: the producer handle being defined; MeshDestroy: the one dying
