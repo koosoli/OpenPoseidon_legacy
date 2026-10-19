@@ -548,6 +548,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     # Input tests (batch-14)
     Input/test_binding_conflict.cpp
     Input/test_combo_fire_regression.cpp
+    Input/test_lean_shared_keys.cpp
     Input/test_controls_category.cpp
     Input/test_input_codes.cpp
     Input/test_modifier_combos.cpp

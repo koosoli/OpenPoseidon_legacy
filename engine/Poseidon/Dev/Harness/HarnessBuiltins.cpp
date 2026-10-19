@@ -2042,6 +2042,44 @@ void RegisterSqf(HarnessServer& hs)
             }
             return HarnessProtocol::JsonResponse(resp);
         });
+    hs.RegisterCommand({"lean_state", "Player corner-peek state: lean, eye and muzzle in world space",
+                        {{"trails", "int", false}}},
+        [](const std::string&, cJSON* root) -> std::string {
+            const Man* man = GWorld ? dyn_cast<Man>(GWorld->PlayerOn()) : nullptr;
+            if (!man)
+                return HarnessProtocol::ErrorResponse("no player soldier");
+            const int trails = HarnessProtocol::GetInt(root, "trails", -1);
+            if (trails == 0 || trails == 1)
+            {
+                Ballistics::SetEnabled(trails == 1);
+                Ballistics::SetDrawTrails(trails == 1);
+            }
+            cJSON* resp = cJSON_CreateObject();
+            const auto vector = [&](const char* name, Vector3Par v) {
+                cJSON* a = cJSON_AddArrayToObject(resp, name);
+                for (int i = 0; i < 3; ++i) cJSON_AddItemToArray(a, cJSON_CreateNumber(v[i]));
+            };
+            cJSON_AddNumberToObject(resp, "lean", man->GetLean());
+            cJSON_AddNumberToObject(resp, "reachLeft", man->GetLeanReach(0));
+            cJSON_AddNumberToObject(resp, "reachRight", man->GetLeanReach(1));
+            for (int side = 0; side < 2; ++side)
+            {
+                int hits = 0;
+                const float reach = man->ProbeLeanReach(side, &hits);
+                cJSON_AddNumberToObject(resp, side ? "probeRight" : "probeLeft", reach);
+                cJSON_AddNumberToObject(resp, side ? "probeRightHits" : "probeLeftHits", hits);
+            }
+            vector("position", man->Position());
+            vector("direction", man->Direction());
+            vector("eye", man->PositionModelToWorld(man->GetPilotPosition(CamInternal)));
+            const int weapon = man->SelectedWeapon();
+            if (weapon >= 0)
+            {
+                vector("muzzle", man->PositionModelToWorld(man->GetWeaponPoint(weapon)));
+                vector("weaponDir", man->GetWeaponDirection(weapon));
+            }
+            return HarnessProtocol::JsonResponse(resp);
+        });
     hs.RegisterCommand({"crew_seat_status", "Read-only SP fixture seat lifecycle status", {}},
         [](const std::string&, cJSON*) -> std::string {
             if (!GWorld || GWorld->GetMode() == GModeNetware)

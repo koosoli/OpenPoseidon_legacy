@@ -1489,12 +1489,16 @@ void Man::PrepareCorrectedPose(int level, Matrix4Array& matrix) const
                                           headRes.Size());
         }
 
-        if (type->_aimingAxisPoint >= 0 && !_gunTransIdent)
+        // The collision LOD does not lean (see _gunTransNoLean); every other LOD, the fire
+        // geometry included, does.
+        const bool collisionLod = level == _shape->FindGeometryLevel();
+        const Matrix4& gunTrans = collisionLod ? _gunTransNoLean : _gunTrans;
+        if (type->_aimingAxisPoint >= 0 && !(collisionLod ? _gunTransNoLeanIdent : _gunTransIdent))
         {
             BLEND_ANIM(aiming);
             const BlendAnimSelections& aimingRes = GetAiming(aiming);
 
-            AnimationRT::CombineTransform(type->GetWeights(), _shape, memory, matrix, _gunTrans, aimingRes.Data(),
+            AnimationRT::CombineTransform(type->GetWeights(), _shape, memory, matrix, gunTrans, aimingRes.Data(),
                                           aimingRes.Size());
         }
 

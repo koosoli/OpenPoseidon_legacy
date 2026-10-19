@@ -27,6 +27,7 @@ UAMoveForward, UAMoveBack, UATurnLeft, UATurnRight, UAMoveUp, UAMoveDown, UAMove
 #endif
     // Append new actions so legacy action indices remain stable.
     UAInventory, UAInventoryEditToggle,
+    UALeanLeft, UALeanRight, // corner peeking (on foot)
     UAN // terminator
         DEFINE_ENUM_END(UserAction)
 } // namespace Poseidon

@@ -40,6 +40,16 @@ class InputSubsystem
     float GetMoveForward(InputContext ctx) const;
     float GetMoveFastForward(InputContext ctx) const;
 
+    // Corner peeking shares Q/E with stance-up, slow- and fast-forward (the OFP defaults).
+    // While the on-foot player can lean, the lean actions claim their keys in the infantry
+    // context: those actions then ignore any binding that is also a lean binding. Swimming,
+    // vehicles and menus release the claim, so Q still surfaces a diver.
+    void SetLeanClaimsSharedKeys(bool claim) { leanClaimsSharedKeys_ = claim; }
+    bool LeanClaimsSharedKeys() const { return leanClaimsSharedKeys_ && context_ == InputContext::Infantry; }
+    // The action's value from only the bindings that are not also bound to `excludeA`/`excludeB`.
+    float GetActionExcluding(UserAction action, UserAction excludeA, UserAction excludeB,
+                             bool checkFocus = true) const;
+
     // Computed movement state (set by Update())
     float GetMoveForward() const { return moveForward_; }
     float GetMoveFastForward() const { return moveFastForward_; }
@@ -260,6 +270,7 @@ class InputSubsystem
     float turnLeft_ = 0, turnRight_ = 0;
     bool fire_ = false, fireToDo_ = false;
     bool lookAroundEnabled_ = false, lookAroundToggled_ = false;
+    bool leanClaimsSharedKeys_ = false;
     bool freelookChanged_ = false;
 
     static constexpr int kNumContexts = static_cast<int>(InputContext::Count);

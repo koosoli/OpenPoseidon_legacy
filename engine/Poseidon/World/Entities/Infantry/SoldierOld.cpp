@@ -3012,6 +3012,9 @@ Matrix4 Man::InsideCamera(CameraType camType) const
     Matrix4 transform;
 
     Vector3 relUp = WorldToModel().DirectionUp();
+    // Corner peeking rolls the view with the head, a little less than the body rolls.
+    if (fabs(_lean) > 1e-4f)
+        relUp = Matrix3(MRotationZ, -_lean * 0.18f) * relUp;
 
     transform.SetDirectionAndUp(VForward, relUp);
     if (const auto* seat = GetActiveCargoWeaponSeat())

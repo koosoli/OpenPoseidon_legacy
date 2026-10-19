@@ -144,6 +144,8 @@ void Soldier::KeyboardPilot(float deltaT, SimulationImportance prec)
         }
     }
 
+    UpdateLeanInput();
+
     AdvanceExternalQueue();
     if (_externalMove.id != MoveIdNone)
     {
@@ -1866,7 +1868,15 @@ static Matrix3 CreateZRotation(float sinr, float cosr)
 
 void Man::RecalcGunTransform()
 {
+    // The axis as the move poses it, without the aim/lean transform on top: the aim rotates about
+    // it (a fixed point, so that never mattered), but the lean moves it and must not feed back.
+    const bool gunTransIdent = _gunTransIdent;
+    _gunTransIdent = true;
     Vector3 gunAxis = GetWeaponCenter(0);
+    _gunTransIdent = gunTransIdent;
+    // Corner peeking: the lean is applied first, so the barrel still points along the aim.
+    const bool leaning = fabs(_lean) > 1e-4f;
+    const Matrix4 lean = leaning ? LeanTransform(gunAxis, _lean) : Matrix4(MIdentity);
     if (const auto* seat = GetActiveCargoWeaponSeat())
     {
         const float azimuth = seat->azimuth * (H_PI / 180.0f);
@@ -1882,14 +1892,18 @@ void Man::RecalcGunTransform()
         correctBank.SetPosition(VZero);
         _gunTrans = (Matrix4(MTranslation, gunAxis) * Matrix4(MRotationY, _gunYRot) * Matrix4(MRotationX, -_gunXRot) *
                      correctBank * Matrix4(MTranslation, -gunAxis));
+        if (leaning)
+            _gunTrans = _gunTrans * lean;
         _gunTransIdent = false;
     }
     else
     {
-        if (fabs(_gunXRot) + fabs(_gunYRot) > 1e-6)
+        if (fabs(_gunXRot) + fabs(_gunYRot) > 1e-6 || leaning)
         {
             _gunTrans = (Matrix4(MTranslation, gunAxis) * Matrix4(MRotationY, _gunYRot) *
                          Matrix4(MRotationX, -_gunXRot) * Matrix4(MTranslation, -gunAxis));
+            if (leaning)
+                _gunTrans = _gunTrans * lean;
             _gunTransIdent = false;
         }
         else
@@ -1922,6 +1936,13 @@ void Man::RecalcGunTransform()
     {
         _recoil->ApplyRecoil(_recoilTime, _gunTrans, _recoilFactor);
         _gunTransIdent = false;
+    }
+    _gunTransNoLean = _gunTrans;
+    _gunTransNoLeanIdent = _gunTransIdent;
+    if (leaning)
+    {
+        // Undo the lean for the collision LOD: aim * lean * lean^-1 (recoil sits on the left).
+        _gunTransNoLean = _gunTrans * Matrix4(MInverseGeneral, lean);
     }
 }
 
@@ -2156,10 +2177,21 @@ void Man::MoveWeapons(float deltaT, bool forceRecalcMatrix)
     {
         forceRecalcMatrix = true;
     }
+    const bool leanMoved = MoveLean(deltaT);
+    if (leanMoved)
+    {
+        forceRecalcMatrix = true;
+    }
 
     if (forceRecalcMatrix)
     {
         RecalcGunTransform();
+    }
+    // The cached aiming/eye points otherwise refresh only when he moves: a peeking head has to be
+    // where AI looks for it (visibility) and where his voice comes from.
+    if (leanMoved && IsInLandscape())
+    {
+        RecalcPositions(*this);
     }
 }
 

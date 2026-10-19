@@ -15,7 +15,7 @@ namespace Poseidon
 {
 namespace
 {
-constexpr int kContextControlsVersion = 7;
+constexpr int kContextControlsVersion = 8;
 constexpr int kGamepadButtonA = 0;
 constexpr int kGamepadButtonB = 1;
 constexpr int kGamepadButtonX = 2;
@@ -189,6 +189,12 @@ void ApplyDriverGamepadDefaults(InputProfile& profile)
 void ApplyContextDefaults(InputContext ctx, InputProfile& profile)
 {
     ApplyCommonGamepadDefaults(profile);
+    // Leaning is on-foot only; elsewhere Q/E keep their single vehicle meaning.
+    if (ctx != InputContext::Infantry)
+    {
+        profile.ClearBindings(UALeanLeft);
+        profile.ClearBindings(UALeanRight);
+    }
 
     switch (ctx)
     {
@@ -370,6 +376,15 @@ bool ContextControlsConfig::Load(const std::string& path)
         }
         if (version < 7 && ctx == InputContext::Infantry)
             MigrateInfantryInventoryKey(profile);
+        // v8 added corner peeking. A saved v7 profile has no lean rows: give the on-foot
+        // profile the Q/E defaults unless the player already listed the actions.
+        if (version < 8 && ctx == InputContext::Infantry)
+        {
+            if (profile.GetBindingEntries(UALeanLeft).empty())
+                profile.Bind(UALeanLeft, InputCode::Key(SDL_SCANCODE_Q));
+            if (profile.GetBindingEntries(UALeanRight).empty())
+                profile.Bind(UALeanRight, InputCode::Key(SDL_SCANCODE_E));
+        }
     }
 
     return true;

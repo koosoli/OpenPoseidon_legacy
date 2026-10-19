@@ -551,6 +551,10 @@ class Man: public Person
 	Matrix4 _gunTrans;
 	Matrix4 _legTrans;
 	bool _headTransIdent,_gunTransIdent;
+	// _gunTrans without the corner-peek lean: the collision (geometry) LOD stays upright, so a
+	// lean into a wall is stopped by UpdateLeanReach instead of shoving the whole man sideways.
+	Matrix4 _gunTransNoLean{MIdentity};
+	bool _gunTransNoLeanIdent = true;
 
 	Vector3 _aimingPositionWorld;
 	Vector3 _cameraPositionWorld;
@@ -563,6 +567,20 @@ class Man: public Person
 	bool _snowWalkingValid = false;
 
 	void RecalcGunTransform(); // calculate _gunTrans from gunXRot ...
+
+	// Corner peeking (SoldierOldLean.cpp)
+	bool CanLean() const;
+	void UpdateLeanInput();             // the player's Q/E
+	bool MoveLean(float deltaT);        // eases _lean to the wanted, wall-limited value
+	void UpdateLeanReach();
+	Matrix4 LeanTransform(Vector3Par gunAxis, float lean) const;
+	public:
+	float GetLean() const {return _lean;}
+	float GetLeanReach(int side) const {return _leanReach[side];}
+	// How far a lean to `side` (0 left, 1 right) would get before the head or shoulder meets
+	// something (0..1); `hitCount` gets the contacts found. Diagnostics and UpdateLeanReach.
+	float ProbeLeanReach(int side, int* hitCount = nullptr) const;
+	protected:
 
 	Ref<WeaponType> _mGunFireWeapon;
 	int _mGunFireFrames;
@@ -588,6 +606,15 @@ class Man: public Person
 	bool _hasNVG;
 	bool _walkToggle;
 	bool _inBuilding;
+
+	// Corner peeking (SoldierOldLean.cpp). -1 full left .. +1 full right; folded into _gunTrans.
+	float _lean = 0.0f, _leanWanted = 0.0f;
+	float _leanReach[2] = {1.0f, 1.0f}; // how far a wall lets him lean left/right (0..1)
+	Foundation::UITime _leanPressTime[2]; // wall-clock: a tap is the player's, not the simulation's
+	bool _leanHeld[2] = {false, false};
+	bool _leanBlocked[2] = {false, false}; // pressed while the key still meant something else
+	bool _leanTapClears[2] = {false, false};
+	int _leanLatched = 0; // a tap latches the lean on that side; -1/0/+1
 	
 	bool _handGun;
 
