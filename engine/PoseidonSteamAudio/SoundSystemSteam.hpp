@@ -98,6 +98,14 @@ class SoundSystemSteam : public IAudioSystem
     std::string _selectedInputDevice;
 
     void UpdateMixer();
+    // Refresh the geometry occlusion of playing / starting 3D waves (Occlusion.hpp): each at
+    // ~10 Hz, at most kOcclusionPerCommit queries per Commit, main-thread cost logged every 10 s.
+    void UpdateOcclusion();
+    double _occlCostMs = 0.0;
+    double _occlMaxMs = 0.0;
+    int _occlQueries = 0;
+    int _occlCommits = 0;
+    uint32_t _occlReportMs = 0;
     void ApplyListenerGain();
     void UpdateDeviceState();
     void ProcessPreview();

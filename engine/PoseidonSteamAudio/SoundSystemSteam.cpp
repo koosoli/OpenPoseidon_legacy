@@ -3,6 +3,7 @@
 #include <PoseidonSteamAudio/WaveSteam.hpp>
 #include <PoseidonSteamAudio/Mixer.hpp>
 #include <PoseidonSteamAudio/EFXPresets.hpp>
+#include <PoseidonSteamAudio/Occlusion.hpp>
 #include <Poseidon/Audio/Streaming/WaveStream.hpp>
 #include <Poseidon/Audio/Shared/DX8Reference.hpp>
 #include <Poseidon/Audio/Core/WaveLifecycle.hpp>
@@ -21,6 +22,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <string.h>
@@ -359,6 +361,7 @@ void SoundSystemSteam::Commit()
         return;
 
     std::lock_guard<std::recursive_mutex> lk(_audioMutex);
+    UpdateOcclusion(); // before DoPlay: a starting shot behind a wall starts muffled
     for (auto* wave : _waves)
     {
         if (wave && wave->_wantPlaying)
@@ -370,6 +373,70 @@ void SoundSystemSteam::Commit()
         }
     }
     ProcessPreview();
+}
+
+void SoundSystemSteam::UpdateOcclusion()
+{
+    if (!SteamAudio::OcclusionEnabled())
+        return;
+    constexpr int kOcclusionPerCommit = 24;
+    constexpr uint32_t kOcclusionPeriodMs = 100;
+    static const bool logChanges = []
+    {
+        const char* v = std::getenv("POSEIDON_STEAM_OCCLUSION_LOG");
+        return v && *v && v[0] != '0';
+    }();
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const uint32_t now = GlobalTickCount();
+    int queries = 0;
+    for (auto* wave : _waves)
+    {
+        if (queries >= kOcclusionPerCommit)
+            break;
+        if (!wave || !wave->_is3D || !wave->_state.posValid || !(wave->_playing || wave->_wantPlaying))
+            continue;
+        // A wave about to start is always answered now; a playing one at its own ~10 Hz.
+        if (!wave->_wantPlaying && static_cast<int32_t>(now - wave->_occlNextMs) < 0)
+            continue;
+        const SteamAudio::OcclusionResult r = SteamAudio::ComputeOcclusion(_listenerPos, wave->_position);
+        ++queries;
+        // Spread the refreshes so a volley of shots does not re-query in the same frame.
+        wave->_occlNextMs = now + kOcclusionPeriodMs + (reinterpret_cast<uintptr_t>(wave) >> 4) % 23;
+        if (logChanges && (r.building != wave->_occlBuilding || std::fabs(r.terrain - wave->_occlTerrain) > 0.2f))
+        {
+            LOG_INFO(Audio, "Occlusion: {} dist={:.0f} m building={} terrain={:.2f} bands={:.2f}/{:.2f}/{:.2f}",
+                     static_cast<const char*>(wave->Name()), _listenerPos.Distance(wave->_position),
+                     r.building ? 1 : 0, r.terrain, r.bands[0], r.bands[1], r.bands[2]);
+        }
+        wave->_occlBuilding = r.building;
+        wave->_occlTerrain = r.terrain;
+        bool changed = false;
+        for (int b = 0; b < 3; b++)
+        {
+            changed = changed || std::fabs(wave->_occlBands[b] - r.bands[b]) > 1e-3f;
+            wave->_occlBands[b] = r.bands[b];
+        }
+        if (changed)
+            wave->Apply3D();
+    }
+
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    _occlCostMs += ms;
+    _occlMaxMs = std::max(_occlMaxMs, ms);
+    _occlQueries += queries;
+    ++_occlCommits;
+    if (static_cast<int32_t>(now - _occlReportMs) >= 10000)
+    {
+        if (_occlReportMs != 0 && _occlCommits > 0)
+        {
+            LOG_INFO(Audio, "Occlusion: {} queries in {} frames, main thread {:.3f} ms/frame avg, {:.3f} ms max",
+                     _occlQueries, _occlCommits, _occlCostMs / _occlCommits, _occlMaxMs);
+        }
+        _occlReportMs = now;
+        _occlCostMs = _occlMaxMs = 0.0;
+        _occlQueries = _occlCommits = 0;
+    }
 }
 
 void SoundSystemSteam::Activate(bool active)

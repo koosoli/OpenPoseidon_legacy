@@ -168,6 +168,7 @@ void MixVoice::Rewind(int64_t frame)
     _frac = 0.0;
     _lastGain = -1.f;
     _lastWet = 0.f;
+    _occlInit = false;
 }
 
 void MixVoice::ExternalPush(const int16_t* samples, int count)
@@ -782,22 +783,47 @@ void Mixer::MixVoiceFrame(MixVoice& v, float* sendBuf)
         v._lastWet = 0.f;
     }
 
+    // Geometry occlusion (computed on the main thread, Occlusion.cpp): smoothed over ~50 ms so a
+    // doorway edge crossing the line of sight does not click; a new playback starts at its target.
+    bool occluded = false;
+    for (int b = 0; b < 3; b++)
+    {
+        const float target = std::clamp(p.occlusion[b], 0.f, 1.f);
+        v._occl[b] = v._occlInit ? v._occl[b] + (target - v._occl[b]) * 0.2f : target;
+        occluded = occluded || v._occl[b] < 0.999f;
+    }
+    v._occlInit = true;
+
     const IPLVector3 srcPos = ToIPL(p.pos);
     const IPLVector3 lisPos = ToIPL(lis.pos);
     const float* dry = mono;
+    if (!effects && occluded)
+    {
+        // No Steam Audio EQ: the mid band as a broadband gain.
+        for (int i = 0; i < kFrameSize; i++)
+            mono[i] *= v._occl[1];
+    }
     if (effects)
     {
         // Air absorption (Steam Audio's default frequency-dependent model).
         IPLDirectEffectParams dp{};
         dp.flags = IPL_DIRECTEFFECTFLAGS_APPLYAIRABSORPTION;
+        if (occluded)
+        {
+            // Fully "occluded" with the band gains as transmission: the output per band is
+            // occlusion + (1 - occlusion) * transmission = transmission.
+            dp.flags = static_cast<IPLDirectEffectFlags>(dp.flags | IPL_DIRECTEFFECTFLAGS_APPLYOCCLUSION |
+                                                         IPL_DIRECTEFFECTFLAGS_APPLYTRANSMISSION);
+            dp.transmissionType = IPL_TRANSMISSIONTYPE_FREQDEPENDENT;
+        }
         IPLAirAbsorptionModel airModel{};
         airModel.type = IPL_AIRABSORPTIONTYPE_DEFAULT;
         iplAirAbsorptionCalculate(_ctx, srcPos, lisPos, &airModel, dp.airAbsorption);
         dp.distanceAttenuation = 1.f;
         dp.directivity = 1.f;
-        dp.occlusion = 1.f;
-        for (float& t : dp.transmission)
-            t = 1.f;
+        dp.occlusion = occluded ? 0.f : 1.f;
+        for (int b = 0; b < 3; b++)
+            dp.transmission[b] = occluded ? v._occl[b] : 1.f;
         iplDirectEffectApply(v._direct, &dp, &v._mono, &v._monoOut);
         dry = v._monoOut.data[0];
     }

@@ -505,6 +505,8 @@ void WaveSteam::Apply3D()
             [&](MixVoice::Params& p)
             {
                 p.is3D = true;
+                for (int b = 0; b < 3; b++)
+                    p.occlusion[b] = _occlBands[b];
                 p.pos[0] = pos[0];
                 p.pos[1] = pos[1];
                 p.pos[2] = pos[2];
@@ -523,7 +525,10 @@ void WaveSteam::Apply3D()
             {
                 p.is3D = false;
                 for (int i = 0; i < 3; i++)
+                {
                     p.pos[i] = p.vel[i] = 0.f;
+                    p.occlusion[i] = 1.f;
+                }
             });
     }
     ApplyReverbSend();

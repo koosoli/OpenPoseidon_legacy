@@ -4,6 +4,7 @@
 
 set(POSEIDON_STEAMAUDIO_SOURCES
     Mixer.cpp
+    Occlusion.cpp
     Reverb.cpp
     SoundSystemSteam.cpp
     WaveSteam.cpp
@@ -13,6 +14,7 @@ set(POSEIDON_STEAMAUDIO_SOURCES
 set(POSEIDON_STEAMAUDIO_HEADERS
     EFXPresets.hpp
     Mixer.hpp
+    Occlusion.hpp
     Reverb.hpp
     SoundSystemSteam.hpp
     StreamingChunks.hpp

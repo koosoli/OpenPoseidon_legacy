@@ -63,6 +63,8 @@ class MixVoice
         float maxDist = 1e9f;
         float rolloff = 1.f;
         bool reverbSend = false;
+        // Geometry occlusion per band (low / mid / high), 1 = clear (Occlusion.hpp).
+        float occlusion[3] = {1.f, 1.f, 1.f};
     };
 
     enum class SourceKind
@@ -169,6 +171,10 @@ class MixVoice
     // Gain ramp state (mixer thread).
     float _lastGain = -1.f;
     float _lastWet = 0.f;
+    // Occlusion band gains as applied (smoothed toward Params::occlusion); a new playback
+    // snaps to the target so a shot behind a wall does not start clear and fade.
+    float _occl[3] = {1.f, 1.f, 1.f};
+    bool _occlInit = false;
 
     // Steam Audio objects (mixer thread).
     IPLContext _ctx = nullptr;

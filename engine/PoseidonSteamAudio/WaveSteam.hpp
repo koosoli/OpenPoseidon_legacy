@@ -87,6 +87,13 @@ class WaveSteam : public IWave
     Vector3 _position;
     Vector3 _velocity;
 
+    // Geometry occlusion (Occlusion.hpp), refreshed by SoundSystemSteam::UpdateOcclusion and
+    // carried into the voice by Apply3D: per-band gain, 1 = clear.
+    float _occlBands[3] = {1.f, 1.f, 1.f};
+    uint32_t _occlNextMs = 0;
+    float _occlTerrain = 0.f;
+    bool _occlBuilding = false;
+
     // Queue chaining (radio callsign + message): the successor stays _queued
     // until this wave's IsTerminated() activates it.
     Ref<WaveSteam> _queueNext;
