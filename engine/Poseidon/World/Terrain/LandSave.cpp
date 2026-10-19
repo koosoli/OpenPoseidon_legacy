@@ -3716,15 +3716,32 @@ bool Landscape::SetObjectStreamTestBudget(uint32_t budget)
 // loads, minus what the bank already holds). The table build here was the main thread's cold
 // admission cost -- each new .edds read, LZ4'd, BC7-decoded and tinted in turn. Only with
 // Enfusion archives mounted; POSEIDON_STREAM_TEXTURE_PREP=0 is the A/B.
-static void BuildStreamedBankTables(const Model::Model& model, Model::ShapeAdapter::AdapterBankTables& tables)
+// Whether BuildStreamedBankTables prepares native textures ahead of the bank (its first branch).
+static bool NativeTexturePrepApplies(AbstractTextBank* bank)
 {
     static const bool enabled = []
     {
         const char* v = std::getenv("POSEIDON_STREAM_TEXTURE_PREP");
         return !(v && v[0] == '0');
     }();
+    return enabled && bank && Asset::Formats::Enfusion::EnfusionMount::Instance().ArchiveCount() > 0;
+}
+
+// PERF-FAR-ASYNC-PREP lever (see UpdateNativeFarResidency).
+static bool NativeFarAsyncPrep()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_NATIVE_FAR_ASYNC_PREP");
+        return !(v && v[0] == '0');
+    }();
+    return on;
+}
+
+static void BuildStreamedBankTables(const Model::Model& model, Model::ShapeAdapter::AdapterBankTables& tables)
+{
     AbstractTextBank* bank = GEngine ? GEngine->TextBank() : nullptr;
-    if (enabled && bank && Asset::Formats::Enfusion::EnfusionMount::Instance().ArchiveCount() > 0)
+    if (NativeTexturePrepApplies(bank))
     {
         std::unordered_set<std::string> claims;
         PrepareNativeInstallTextures({&model}, GetGlobalTaskPool(), claims,
@@ -5607,8 +5624,8 @@ void Landscape::UploadNativeProxies()
         return;
     const auto start = std::chrono::steady_clock::now();
     std::vector<Engine::FarProxyInstance> instances;
-    instances.reserve(_modernObjectPlacements.size());
     size_t prisms = 0;
+    instances.reserve(_modernObjectPlacements.size());
     for (size_t index = 0; index < _modernObjectPlacements.size(); ++index)
     {
         const ModernObjectPlacement& placement = _modernObjectPlacements[index];
@@ -5629,6 +5646,7 @@ void Landscape::UploadNativeProxies()
         prisms += proxy.flags != 0;
         instances.push_back(instance);
     }
+    const auto walked = std::chrono::steady_clock::now();
     GEngine->SetFarProxyInstances(instances.data(), instances.size());
     static uint32_t proxyReports = 0;
     if (proxyReports++ < 12)
@@ -5656,9 +5674,10 @@ void Landscape::UploadNativeProxies()
     _nativeProxyDirty = false;
     _nativeProxyModelsAtUpload = _nativeProxyModelCount;
     _nativeProxyUploadMs = Poseidon::Foundation::GlobalTickCount();
-    LOG_INFO(World, "Native far proxies: {} ({} prisms) from {} placements, {:.1f} ms", instances.size(), prisms,
-             _modernObjectPlacements.size(),
-             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+    LOG_INFO(World, "Native far proxies: {} ({} prisms) from {} placements, {:.1f} ms (walk {:.1f} ms)",
+             instances.size(), prisms, _modernObjectPlacements.size(),
+             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(),
+             std::chrono::duration<double, std::milli>(walked - start).count());
 }
 
 void Landscape::ClearNativeFarResidency()
@@ -5669,6 +5688,7 @@ void Landscape::ClearNativeFarResidency()
         GEngine->ClearFarObjects();
     _nativeFarActive.clear();
     _nativeFarModels.clear();
+    _nativeFarTexPrep.clear(); // each future waits for its decode
     _nativeFarCandidates.clear();
     _nativeFarWanted.clear();
     _nativeFarModelWanted.clear();
@@ -5856,6 +5876,10 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
     const auto start = std::chrono::steady_clock::now();
     uint32_t added = 0, modelWork = 0;
     bool completedSweep = false;
+    // PERF-HITCH: what a slow call spent its time on (logged below when >= 60 ms).
+    const double installMs0 = _nativeFarStats.installMs, readyMs0 = _nativeFarStats.readyMs;
+    double createMsCall = 0.0, createMaxMsCall = 0.0;
+    uint32_t createsCall = 0;
     for (size_t scan = 0; scan < std::min<size_t>(4096, _nativeFarCandidates.size()); ++scan)
     {
         if (scan > 0 && std::chrono::duration<double, std::milli>(
@@ -5876,6 +5900,30 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
             Ref<LODShapeWithShadow> shape = Shapes.Find(name, false, true);
             if (!shape)
             {
+                // PERF-FAR-ASYNC-PREP, second half: the model's textures were being decoded off
+                // the main thread. Until they are, the model waits here (and is not re-requested);
+                // once they are, the bank tables take the prepared sources and the conversion is
+                // submitted -- the same calls the synchronous hand-off made, in the same order.
+                if (auto pending = _nativeFarTexPrep.find(modelIndex); pending != _nativeFarTexPrep.end())
+                {
+                    if (modelWork || pending->second.decode.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+                        continue;
+                    ++modelWork;
+                    const auto tTables = std::chrono::steady_clock::now();
+                    std::shared_ptr<Model::Model> prepared = std::move(pending->second.model);
+                    pending->second.decode.get();
+                    _nativeFarTexPrep.erase(pending);
+                    auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
+                    {
+                        const NativeInstallTextureScope takePrepared;
+                        Model::ShapeAdapter::BuildAdapterBankTables(*prepared, *tables);
+                    }
+                    const auto radiusToken = _modernObjectPreparer->QueryRadius(modelIndex);
+                    _modernObjectPreparer->SubmitConvert(modelIndex, std::move(prepared), std::move(tables), &radiusToken);
+                    _nativeFarStats.readyMs += std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - tTables).count();
+                    continue;
+                }
                 if (_modernPendingOwnerPrimaryTextures &&
                     _modernPendingOwnerPrimaryTextures->modelIndex == modelIndex)
                     continue; // The near owner already holds this Converted shape.
@@ -5911,10 +5959,33 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                         for (char& c : low)
                             if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
                         model->sourcePath = low;
-                        auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
-                        BuildStreamedBankTables(*model, *tables);
-                        const auto radiusToken = _modernObjectPreparer->QueryRadius(modelIndex);
-                        _modernObjectPreparer->SubmitConvert(modelIndex, std::move(model), std::move(tables), &radiusToken);
+                        // PERF-FAR-ASYNC-PREP, first half. BuildStreamedBankTables decoded the
+                        // model's native textures on the task pool WITH THE MAIN THREAD WAITING:
+                        // 70-240 ms frames while flying (Native authored far slow call: ready
+                        // 160-180 ms). The names are still collected here (that asks the texture
+                        // bank, which is main-thread only), the decode runs in the background, and
+                        // the model waits in _nativeFarTexPrep for the second half above.
+                        // WGR_NATIVE_FAR_ASYNC_PREP=0 = the synchronous hand-off.
+                        AbstractTextBank* bank = GEngine ? GEngine->TextBank() : nullptr;
+                        if (NativeFarAsyncPrep() && NativeTexturePrepApplies(bank))
+                        {
+                            std::unordered_set<std::string> claims;
+                            std::vector<std::string> keys = CollectNativeInstallTextureKeys(
+                                {model.get()}, claims, [bank](const char* n) { return bank->IsLoaded(RStringB(n)); });
+                            NativeFarTexPrep pending;
+                            pending.model = std::move(model);
+                            pending.decode = std::async(std::launch::async, [keys = std::move(keys)] {
+                                DecodeNativeInstallTextureKeys(keys, nullptr);
+                            });
+                            _nativeFarTexPrep.emplace(modelIndex, std::move(pending));
+                        }
+                        else
+                        {
+                            auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
+                            BuildStreamedBankTables(*model, *tables);
+                            const auto radiusToken = _modernObjectPreparer->QueryRadius(modelIndex);
+                            _modernObjectPreparer->SubmitConvert(modelIndex, std::move(model), std::move(tables), &radiusToken);
+                        }
                     }
                 }
                 else if (state == ObjectStreamPreparer::State::Converted)
@@ -5974,7 +6045,15 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         const float scale = transform.Scale();
         transform.SetUpAndAside(transform.DirectionUp(), transform.DirectionAside());
         transform.SetScale(scale);
-        if (GEngine->SceneFarObjectCreated(index, found->second, transform))
+        const auto tCreate = std::chrono::steady_clock::now();
+        const bool created = GEngine->SceneFarObjectCreated(index, found->second, transform);
+        {
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tCreate).count();
+            createMsCall += ms;
+            createMaxMsCall = std::max(createMaxMsCall, ms);
+            ++createsCall;
+        }
+        if (created)
         {
             _nativeFarActive.insert(index);
             ++added;
@@ -6021,6 +6100,11 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         _nativeFarStats.callMaxMs = std::max(_nativeFarStats.callMaxMs, callMs);
         if (callMs >= 30.0)
             ++_nativeFarStats.slowCalls;
+        if (callMs >= 60.0)
+            LOG_INFO(World, "Native authored far slow call: {:.1f} ms | install {:.1f} ready {:.1f} | creates {} {:.1f} ms "
+                     "(max {:.1f}) | added {} modelWork {}",
+                     callMs, _nativeFarStats.installMs - installMs0, _nativeFarStats.readyMs - readyMs0, createsCall,
+                     createMsCall, createMaxMsCall, added, modelWork);
         if (_nativeFarStats.calls >= 600)
         {
             const auto& st = _nativeFarStats;

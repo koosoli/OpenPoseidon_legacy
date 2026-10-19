@@ -19,6 +19,7 @@ struct RvMaterialSource;
 }
 #include <array>
 #include <chrono>
+#include <future>
 #include <list>
 #include <memory>
 #include <unordered_map>
@@ -777,6 +778,15 @@ class Landscape : public SerializeClass
     std::vector<uint8_t> _nativeFarModelRejected;
     std::unordered_set<uint32_t> _nativeFarActive;
     std::unordered_map<uint32_t, Ref<LODShapeWithShadow>> _nativeFarModels;
+    // PERF-FAR-ASYNC-PREP: far models handed over by the preparer whose native textures are being
+    // decoded off the main thread; their bank tables are built and conversion submitted once the
+    // decode has finished (UpdateNativeFarResidency).
+    struct NativeFarTexPrep
+    {
+        std::shared_ptr<Model::Model> model;
+        std::future<void> decode;
+    };
+    std::unordered_map<uint32_t, NativeFarTexPrep> _nativeFarTexPrep;
     size_t _nativeFarCursor = 0;
     // Models rejected for the far tier (too small, failed) when the candidate list was last
     // built; more since then means the list wasted slots on them and is rebuilt without them.

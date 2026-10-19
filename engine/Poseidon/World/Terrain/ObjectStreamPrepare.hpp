@@ -495,6 +495,14 @@ struct NativeInstallTexturePrep
 NativeInstallTexturePrep PrepareNativeInstallTextures(const std::vector<const Model::Model*>& models, TaskPool* pool,
                                                       std::unordered_set<std::string>& claimed,
                                                       const std::function<bool(const char*)>& alreadyLoaded = {});
+//! PERF-FAR-ASYNC-PREP: the two halves of PrepareNativeInstallTextures. Collecting the names asks
+//! the texture bank (`alreadyLoaded`) and so belongs on the main thread; decoding them only
+//! touches the mount and the thread-safe PreparedTextureStore and may run anywhere. The whole
+//! function is exactly CollectNativeInstallTextureKeys followed by DecodeNativeInstallTextureKeys.
+std::vector<std::string> CollectNativeInstallTextureKeys(const std::vector<const Model::Model*>& models,
+                                                         std::unordered_set<std::string>& claimed,
+                                                         const std::function<bool(const char*)>& alreadyLoaded = {});
+NativeInstallTexturePrep DecodeNativeInstallTextureKeys(const std::vector<std::string>& keys, TaskPool* pool);
 
 //! While alive, TextureSourceDDSFactory takes prepared native sources even with the streaming
 //! experiment (WGR_NATIVE_DDS_PREPARE) off. Main thread; not reentrant.

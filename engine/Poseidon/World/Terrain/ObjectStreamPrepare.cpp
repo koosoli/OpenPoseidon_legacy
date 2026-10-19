@@ -3140,24 +3140,21 @@ NativeInstallTexturePrep PrepareNativeInstallTextures(const std::vector<const Mo
                                                       std::unordered_set<std::string>& claimed,
                                                       const std::function<bool(const char*)>& alreadyLoaded)
 {
-    NativeInstallTexturePrep out;
     if (models.empty() || !render::PreparedTextureStore::Enabled())
-        return out;
+        return {};
     const auto began = std::chrono::steady_clock::now();
-    const auto& mount = Asset::Formats::Enfusion::EnfusionMount::Instance();
-    const auto parallel = [&](size_t count, const std::function<void(size_t)>& body)
-    {
-        if (pool != nullptr && count > 1)
-            pool->ParallelFor(static_cast<uint32_t>(count),
-                              [&](uint32_t start, uint32_t end)
-                              {
-                                  for (uint32_t i = start; i < end; ++i)
-                                      body(i);
-                              });
-        else
-            for (size_t i = 0; i < count; ++i)
-                body(i);
-    };
+    const std::vector<std::string> keys = CollectNativeInstallTextureKeys(models, claimed, alreadyLoaded);
+    NativeInstallTexturePrep out = DecodeNativeInstallTextureKeys(keys, pool);
+    out.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+    return out;
+}
+
+std::vector<std::string> CollectNativeInstallTextureKeys(const std::vector<const Model::Model*>& models,
+                                                         std::unordered_set<std::string>& claimed,
+                                                         const std::function<bool(const char*)>& alreadyLoaded)
+{
+    if (models.empty() || !render::PreparedTextureStore::Enabled())
+        return {};
 
     // Exactly the names ShapeAdapter::BuildAdapterBankTables hands GlobLoadTexture: every
     // material's face texture in every level, lower-cased. A tinted name on the lazy route asks
@@ -3217,6 +3214,30 @@ NativeInstallTexturePrep PrepareNativeInstallTextures(const std::vector<const Mo
                     want(render::PreparedTextureStore::Key(name));
             }
     }
+    return keys;
+}
+
+NativeInstallTexturePrep DecodeNativeInstallTextureKeys(const std::vector<std::string>& keys, TaskPool* pool)
+{
+    NativeInstallTexturePrep out;
+    if (!render::PreparedTextureStore::Enabled())
+        return out;
+    const auto began = std::chrono::steady_clock::now();
+    const auto& mount = Asset::Formats::Enfusion::EnfusionMount::Instance();
+    render::PreparedTextureStore& store = render::PreparedTextureStore::Instance();
+    const auto parallel = [&](size_t count, const std::function<void(size_t)>& body)
+    {
+        if (pool != nullptr && count > 1)
+            pool->ParallelFor(static_cast<uint32_t>(count),
+                              [&](uint32_t start, uint32_t end)
+                              {
+                                  for (uint32_t i = start; i < end; ++i)
+                                      body(i);
+                              });
+        else
+            for (size_t i = 0; i < count; ++i)
+                body(i);
+    };
     out.names = keys.size();
 
     const uint64_t generation = store.Generation();
