@@ -598,6 +598,7 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
     Engine* engine = GEngine;
 
     bool tlAble = ((spec & OnSurface) == 0 || engine->GetTLOnSurface()) && (clip & ClipUser0) == 0;
+    TouchVBuffer(); // CPU-VB-STREAM: rebuild a released buffer before the T&L gate reads it
 
     if (engine->GetTL() && EnableHWTLState && tlAble && _buffer)
     {
@@ -1261,12 +1262,55 @@ void Shape::ConvertToVBuffer(VBType type)
     if (!_buffer)
     {
         _buffer = GEngine->CreateVertexBuffer(*this, type);
+        _vbType = int8_t(type);
+        _vbStreamReleased = false;
+        _vbLastUse = VbEpoch;
     }
 }
 
 void Shape::ReleaseVBuffer()
 {
     _buffer.Free();
+}
+
+uint32_t Shape::VbEpoch = 0;
+
+void Shape::TouchVBuffer() const
+{
+    _vbLastUse = VbEpoch;
+    if (_vbStreamReleased && !_buffer && _vbType >= 0)
+    {
+        Shape* self = const_cast<Shape*>(this);
+        self->_vbStreamReleased = false;
+        self->ConvertToVBuffer(VBType(_vbType));
+    }
+}
+
+uint64_t ShapeBank::ReleaseIdleVBuffers(uint32_t idleEpochs, uint32_t maxCount, uint32_t* released)
+{
+    uint64_t bytes = 0;
+    uint32_t count = 0;
+    ForEach(
+        [&](LODShapeWithShadow& shape)
+        {
+            for (int l = 0; l < shape.NLevels() && count < maxCount; l++)
+            {
+                Shape* level = shape.Level(l);
+                // Static only: a dynamic buffer is animated or carries a conform selector baked
+                // on its first in-plane update (roads), which a rebuild must not skip.
+                if (!level || !level->GetVertexBuffer() || level->_vbType != int8_t(VBStatic))
+                    continue;
+                if (Shape::VbEpoch - level->_vbLastUse < idleEpochs)
+                    continue;
+                bytes += uint64_t(level->NVertex()) * 36 + uint64_t(level->NFaces()) * 3 * 4;
+                level->ReleaseVBuffer();
+                level->_vbStreamReleased = true;
+                ++count;
+            }
+        });
+    if (released)
+        *released = count;
+    return bytes;
 }
 
 void ShapeBank::ReleaseAllVBuffers()

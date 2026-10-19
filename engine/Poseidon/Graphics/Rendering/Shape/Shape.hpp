@@ -543,6 +543,16 @@ class Shape: public Poseidon::VertexTable
 	void ConvertToVBuffer(VBType type);
 	void ReleaseVBuffer();
 
+	// CPU-VB-STREAM: a level's vertex buffer is built for every level when the shape loads and
+	// used to live as long as the shape. ShapeBank::ReleaseIdleVBuffers frees static ones no draw
+	// or shadow caster touched for a while; TouchVBuffer (every draw and shadow submission)
+	// marks use and rebuilds a released buffer before anything reads it.
+	void TouchVBuffer() const;
+	static uint32_t VbEpoch; // advanced about once a second by the renderer
+	mutable uint32_t _vbLastUse = 0;
+	int8_t _vbType = -1;          // the VBType ConvertToVBuffer last used, -1 = none
+	bool _vbStreamReleased = false;
+
 	void RecalculateAreas();
 	void RecalculateNormals( bool full );
 	
@@ -1321,6 +1331,9 @@ class ShapeBank
 	};
 	bool _worldModelScope = false;
 	void ReleaseAllVBuffers();
+	// CPU-VB-STREAM: free static level buffers untouched for `idleEpochs` (at most `maxCount`);
+	// returns the bytes released (vertices + indices as built).
+	uint64_t ReleaseIdleVBuffers(uint32_t idleEpochs, uint32_t maxCount, uint32_t* released = nullptr);
 
 	// Iterate every cached shape.  Order unspecified.  Skips entries
 	// whose weak Link has already auto-nulled (shape released).

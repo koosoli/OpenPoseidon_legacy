@@ -3186,10 +3186,28 @@ void EngineWgpu::InitDraw(bool clear, PackedColor color)
 // WGR_LOD_STREAM_GRACE_S (10 s) is evicted -- its pool ranges freed, handle kept -- and the cull
 // draws the next coarser resident level. A level needed again is rebuilt from the shape (still in
 // RAM) and restored at once. WGR_LOD_STREAM=0 = everything stays resident (the old behaviour).
+static uint64_t cpuVbReleasedBytes = 0, cpuVbReleases = 0; // CPU-VB-STREAM totals for the log
+
 void EngineWgpu::UpdateLodStreaming()
 {
     static const bool enabled = [] { const char* v = std::getenv("WGR_LOD_STREAM"); return !(v && v[0] == '0'); }();
     static const double grace = [] { const char* v = std::getenv("WGR_LOD_STREAM_GRACE_S"); return v ? std::max(1.0, std::atof(v)) : 10.0; }();
+    // CPU-VB-STREAM: the direct (CPU) path's level buffers -- built for every level at shape
+    // load and kept for the shape's life (measured: 7,894 buffers / 456 MB on native Everon).
+    // One epoch per second; static buffers untouched by any draw or shadow submission for
+    // WGR_CPU_VB_IDLE_S (30) are freed and rebuilt on their next use. WGR_CPU_VB_STREAM=0 = off.
+    static const bool cpuVbStream = [] { const char* v = std::getenv("WGR_CPU_VB_STREAM"); return !(v && v[0] == '0'); }();
+    static const uint32_t cpuVbIdle = [] { const char* v = std::getenv("WGR_CPU_VB_IDLE_S"); return v ? uint32_t(std::max(5, std::atoi(v))) : 30u; }();
+    const double cpuNow = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    static double lastEpoch = 0;
+    if (cpuVbStream && cpuNow - lastEpoch >= 1.0)
+    {
+        lastEpoch = cpuNow;
+        ++Shape::VbEpoch;
+        uint32_t n = 0;
+        cpuVbReleasedBytes += Shapes.ReleaseIdleVBuffers(cpuVbIdle, 512, &n);
+        cpuVbReleases += n;
+    }
     if (!enabled || !_renderer || _gpuModelLodMeshes.empty()) return;
     if ((++_lodStreamFrame % 15) != 0) return;
     {
@@ -3274,9 +3292,10 @@ void EngineWgpu::UpdateLodStreaming()
     {
         lastLog = now;
         LOG_INFO(Graphics, "LOD streaming: {:.0f} MB of LOD levels evicted ({} evictions, {} restores, {} refused by "
-                           "the renderer as shared) (WGR_LOD_STREAM)",
+                           "the renderer as shared); CPU-path buffers released: {} ({:.0f} MB as built) (WGR_LOD_STREAM, "
+                           "WGR_CPU_VB_STREAM)",
                  _lodStreamEvictedBytes / 1048576.0, _lodStreamEvictions, _lodStreamRestores,
-                 _lodStreamEvictRefused.load(std::memory_order_relaxed));
+                 _lodStreamEvictRefused.load(std::memory_order_relaxed), cpuVbReleases, cpuVbReleasedBytes / 1048576.0);
     }
     (void)evictedNow; (void)restoredNow;
 }
@@ -19012,6 +19031,7 @@ void EngineWgpu::AddShadowCaster(const Shape& sMesh, const Matrix4& modelToWorld
     {
         return;
     }
+    sMesh.TouchVBuffer(); // CPU-VB-STREAM: a shadow-only caster keeps (or rebuilds) its buffer
     auto* buf = static_cast<VertexBufferWgpu*>(sMesh.GetVertexBuffer());
     if (!buf || buf->sections.Size() == 0)
     {

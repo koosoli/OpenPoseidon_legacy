@@ -2786,7 +2786,9 @@ void TerrainWgpu::UploadGeography(const Landscape& land, bool reuseClutterDefini
     // indices at dense poses (Everon 5052/5312: 7,104 meshes, 1,089 MB). Growing the pool there
     // mid-flight keeps old + new alive beside ~5.3 GB of other allocations -- on an 8 GB card the
     // device was lost (TDR) in 1 of 2-3 runs. Reserve it once, now, while VRAM is nearly empty.
-    // WGR_GEO_POOL_RESERVE_MB="vertMB,indexMB" (default 1152,192; 0 = off).
+    // WGR_GEO_POOL_RESERVE_MB="vertMB,indexMB" (default 768,128; 0 = off). CPU-VB-STREAM (same day)
+    // unblocked evictions that CPU buffers had pinned: live then peaked at 625/101 MB during the
+    // load and settled at 150-420 MB over the same six poses, all inside a 634 MB prefix.
     // LOD-STREAM (2026-10-19): with unneeded LOD levels evicted the live set over six Everon poses
     // (Durras, forest, village, tree, the owner's two) peaked at 948 MB vertices / 148 MB indices,
     // packed (prefix = live). 1600/384 left ~640 MB reserved and never used while the owner's
@@ -2797,7 +2799,7 @@ void TerrainWgpu::UploadGeography(const Landscape& land, bool reuseClutterDefini
         if (!reserved)
         {
             reserved = true;
-            double vertMb = 1152.0, indexMb = 192.0;
+            double vertMb = 768.0, indexMb = 128.0;
             if (const char* env = std::getenv("WGR_GEO_POOL_RESERVE_MB"); env != nullptr && *env != '\0')
             {
                 vertMb = std::atof(env);
