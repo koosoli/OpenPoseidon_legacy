@@ -18,9 +18,13 @@ foreach ($dir in @($generated, $stage)) {if (Test-Path -LiteralPath $dir) {Remov
 New-Item -ItemType Directory -Force $generated, $stage, (Join-Path $pack 'AddOns') | Out-Null
 & $Python "$PSScriptRoot/default-content/generate_tidewater_whale.py" --source "$source/source" --out $generated
 if ($LASTEXITCODE -ne 0) {throw 'Tidewater wildlife generation failed'}
-$expected=@('config.cpp','humpback.p3d')
+$expected=@('config.cpp')
 Copy-Item -LiteralPath "$generated/config.cpp" -Destination "$stage/config.cpp"
-Copy-Item -LiteralPath "$generated/humpback.p3d" -Destination "$stage/humpback.p3d"
+# the whale and the pieces an explosion tears off it
+foreach ($model in Get-ChildItem -LiteralPath $generated -Filter '*.p3d') {
+    Copy-Item -LiteralPath $model.FullName -Destination "$stage/$($model.Name)"
+    $expected+=$model.Name
+}
 # the generator lists its textures by PAA format
 $textures=Get-Content -LiteralPath "$generated/textures.json" -Raw | ConvertFrom-Json
 foreach ($format in @('DXT1','DXT5')) {

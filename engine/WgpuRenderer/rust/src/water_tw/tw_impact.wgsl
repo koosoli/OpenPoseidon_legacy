@@ -77,3 +77,24 @@ fn impactFragment(xz: vec2<f32>) -> ImpactFrag {
     o.aeration = sat(o.aeration);
     return o;
 }
+
+// (OP) Blood in the water (a wounded whale, Whale.cpp; impacts.rs blood lanes: x, z, age, amount per
+// stain). A cloud that spreads out from the wound and thins over two minutes, its edge broken up by the
+// same fixed noise as the foam. 0..1: how much blood the water at xz holds near the surface.
+fn bloodAmount(xz: vec2<f32>) -> f32 {
+    var b = 0.0;
+    for (var s = 0; s < 16; s++) {
+        let l = tw.blood[s];
+        if (l.w <= 0.0) { continue; }
+        let age = l.z;
+        let R = (0.8 + 1.1 * sqrt(l.w)) * (1.0 + 0.55 * sqrt(age));
+        let d = length(xz - l.xy);
+        if (d > R * 1.4) { continue; }
+        let mottle = wakeRNoise(xz * 0.45 + 5.3) * 0.65 + wakeRNoise(xz * 1.3 + 1.7) * 0.35;
+        let edge = 1.0 - smoothstep(0.35 * R, R * (0.9 + 0.5 * mottle), d);
+        // the same blood spread over a wider patch, and slowly lost
+        let thin = exp(-age / 90.0) / (1.0 + 0.02 * age);
+        b += edge * min(l.w, 3.0) * 0.5 * thin * (0.7 + 0.6 * mottle);
+    }
+    return sat(b);
+}

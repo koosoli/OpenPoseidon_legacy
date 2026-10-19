@@ -345,6 +345,8 @@ struct WaterSurfaceFrag {
     aeration: f32,
     gust: f32,
     slick: f32,
+    // (OP) blood in the water, 0..1 (tw_impact.wgsl bloodAmount)
+    blood: f32,
     // the surf-zone foam look (SurfFoam, with the shore simulation on)
     foamInfo: SurfFoamInfo,
 };
@@ -569,6 +571,7 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     o.aeration = sat(aeration);
     o.gust = det.gust;
     o.slick = det.slick;
+    o.blood = bloodAmount(lagXZ);
     return o;
 }
 
@@ -1001,9 +1004,10 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let sandK = mix(1.0, sat(simState.x * 2.5) * 1.8 + 0.45, simIn);
         // surf zone: sand and bubbles stirred up by the breakers (see ShoreWaves.surfMedium)
         let surfMed = shoreSurfMedium(pos.xz, vDepth);
-        let sigA = tw.absorption.rgb + surfMed.absorb * sandK;
+        // (OP) a whale's blood: it takes the green and blue out of the light and scatters back a dark red
+        let sigA = tw.absorption.rgb + surfMed.absorb * sandK + surf.blood * vec3<f32>(0.25, 2.6, 2.3);
         // (bubble plumes are shallow and patchy: a moderate scatterer, milky turquoise rather than a glow)
-        let sigS = tw.scattering.rgb + surfMed.scatter * sandK + aer * 1.6;
+        let sigS = tw.scattering.rgb + surfMed.scatter * sandK + aer * 1.6 + surf.blood * vec3<f32>(0.1, 0.004, 0.004);
         let sigT = sigA + sigS;
 
         // (W3f) Light reaching what lies under the water. OP lights its sea bed (and anything else
@@ -1082,10 +1086,17 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         }
         var foamLit = (sunLight * (max(dot(N, L), 0.0) * 0.75 + 0.25) * INV_PI + foamSky * 0.95) * foamAlbedo;
         if (simOn) { foamLit = surfFoamLight(surf.foamInfo, foamGrad, N, L, V, sunLight, foamSky); }
-        let foamCol = foamLit * tw.material0.z;
+        // (foam on bloody water is pink)
+        let foamCol = foamLit * tw.material0.z * mix(vec3<f32>(1.0), vec3<f32>(0.95, 0.42, 0.4), surf.blood);
 
         let rim = smoothstep(0.0, 0.025, frontD) * smoothstep(0.1, 0.035, frontD) * uprush;
-        let water = mix(transmitted, reflCol, F) + sunSpec + skyRefl * (0.22 * rim);
+        var water = mix(transmitted, reflCol, F) + sunSpec + skyRefl * (0.22 * rim);
+        // (OP) blood at the surface: a dark red film over the water that dulls its reflection (the medium terms
+        // above only colour what is seen through the water, which at a grazing view is almost nothing)
+        if (surf.blood > 0.001) {
+            let bloodLit = (sunLight * (max(dot(N, L), 0.0) * 0.6 + 0.2) * INV_PI + skyIrr * 0.9) * vec3<f32>(0.055, 0.004, 0.0035);
+            water = mix(water, bloodLit + sunSpec * 0.5, surf.blood * 0.85);
+        }
         dbgRefl = reflCol * F + sunSpec;
         dbgTrans = sceneCol * Tview * (1.0 - F);
         dbgIn = (inSun + inAmb + sss) * glowK * (1.0 - F);

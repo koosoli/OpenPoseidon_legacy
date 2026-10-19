@@ -296,9 +296,11 @@ struct TwSurface {
     // the hulls that keep the sea out (Tidewater's boat), 4 lanes per wake boat: waterline origin xyz +
     // half beam, forward xyz + stern, up xyz + bow, sheer aft / bow + on (hull_mask_lanes)
     hulls: [[f32; 4]; wake::SLOTS * 4],
+    // (OP) blood in the water: per stain x, z, age, amount (impacts.rs blood_lanes, tw_impact.wgsl)
+    blood: [[f32; 4]; impacts::BLOOD_SLOTS],
 }
 
-const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (20 + cdlod::LEVELS + wake::SLOTS * 4 + impacts::SURFACE_SLOTS * 2 + rotor_wash::SOURCES + wake::SLOTS * 4));
+const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (20 + cdlod::LEVELS + wake::SLOTS * 4 + impacts::SURFACE_SLOTS * 2 + rotor_wash::SOURCES + wake::SLOTS * 4 + impacts::BLOOD_SLOTS));
 
 /// The water mask of the wake boats whose producer flagged one (`tidewater_wake` flags bit 2): no sea
 /// surface is drawn inside these hulls (tw_water.wgsl `insideHull`). Lanes per boat as `TwSurface::hulls`.
@@ -410,6 +412,7 @@ struct FrameInputs<'a> {
     // W6: the wake readers' lanes
     wake: [[f32; 4]; wake::SLOTS * 4],
     impacts: [[f32; 4]; impacts::SURFACE_SLOTS * 2],
+    blood: [[f32; 4]; impacts::BLOOD_SLOTS],
     // W9a: the probe grid, and the surface height under the camera read back from it
     probe: [f32; 4],
     cam_surface: Option<f32>,
@@ -468,6 +471,7 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         rotor_control: f.rotor.control,
         rotor_sources: f.rotor.sources,
         hulls: hull_mask_lanes(p),
+        blood: f.blood,
     }
 }
 
@@ -1244,6 +1248,7 @@ impl Tidewater {
             caustic_tiles: self.caustics.tiles,
             wake: self.wake_lanes,
             impacts: self.impacts.lanes(),
+            blood: self.impacts.blood_lanes(),
             probe: probe::Probe::lanes(cp),
             cam_surface: self.probe.camera_height(),
             rotor: self.rotor,
@@ -1725,7 +1730,8 @@ mod tests {
         assert_eq!(std::mem::offset_of!(TwSurface, rotor_control), 816);
         assert_eq!(std::mem::offset_of!(TwSurface, rotor_sources), 832);
         assert_eq!(std::mem::offset_of!(TwSurface, hulls), 960);
-        assert_eq!(std::mem::size_of::<TwSurface>(), 1088);
+        assert_eq!(std::mem::offset_of!(TwSurface, blood), 1088);
+        assert_eq!(std::mem::size_of::<TwSurface>(), 1344);
     }
 
     #[test]

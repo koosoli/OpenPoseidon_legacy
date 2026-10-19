@@ -29,6 +29,7 @@ const KIND_BULLET: f32 = 0.0;
 const KIND_EXPLOSION: f32 = 3.0;
 const KIND_SWIM_SPLASH: f32 = 6.0;
 const KIND_WHALE_BLOW: f32 = 7.0;
+const KIND_BLOOD: f32 = 8.0;
 // spray particle kinds (tw_spray_common.wgsl)
 const DROPLET: f32 = 0.0;
 const MIST: f32 = 1.0;
@@ -40,6 +41,9 @@ const GRAVITY: f32 = 9.81;
 pub const MAX_IMPACTS: usize = 24;
 /// Explosions shown in the water surface (the most recent).
 pub const SURFACE_SLOTS: usize = 4;
+/// Blood stains in the water (a wounded whale, Whale.cpp; kind 8): slots, and how long one stays (s).
+pub const BLOOD_SLOTS: usize = 16;
+pub const BLOOD_LIFE: f32 = 120.0;
 /// How long a whale's blow lasts (s; Tidewater's WhaleBrain).
 const BLOW_TIME: f32 = 1.4;
 /// How long an explosion stays in the water surface (s).
@@ -113,6 +117,8 @@ pub struct Impacts {
     list: Vec<Impact>,
     /// explosions for the water surface: (x, z, age, height, radius, range)
     surface: Vec<[f32; 6]>,
+    /// (OP) blood in the water: (x, z, age, amount)
+    blood: Vec<[f32; 4]>,
     /// splashes received since the last log line
     pub received: u32,
     /// particles thrown last frame
@@ -125,6 +131,10 @@ impl Impacts {
         for e in events {
             let kind = e.velocity_kind[3];
             let hit = e.time_life_foam_mass[3];
+            if kind == KIND_BLOOD && hit > 0.0 {
+                self.add_blood(e.position_radius[0], e.position_radius[1], hit);
+                continue;
+            }
             if hit <= 0.0
                 || !(kind == KIND_EXPLOSION || kind == KIND_BULLET || kind == KIND_SWIM_SPLASH || kind == KIND_WHALE_BLOW)
             {
@@ -173,6 +183,35 @@ impl Impacts {
         }
     }
 
+    /// A wound bleeding into the water at (x, z): `amount` adds to a fresh stain within 3 m, else starts one
+    /// (when every slot is taken the faintest goes: a running whale's trail of small ones must not push out the
+    /// pool where it was blown open).
+    fn add_blood(&mut self, x: f32, z: f32, amount: f32) {
+        if let Some(s) = self.blood.iter_mut().find(|s| s[2] < 30.0 && (s[0] - x).hypot(s[1] - z) < 3.0) {
+            s[3] = (s[3] + amount).min(8.0);
+            s[2] = s[2].min(5.0); // fed: it keeps spreading as a fresh one
+            return;
+        }
+        if self.blood.len() >= BLOOD_SLOTS {
+            // what is left of a stain, as tw_impact.wgsl thins it
+            let left = |s: &[f32; 4]| s[3].min(3.0) * (-s[2] / 90.0).exp() / (1.0 + 0.02 * s[2]);
+            let faintest = (0..self.blood.len()).min_by(|&a, &b| left(&self.blood[a]).total_cmp(&left(&self.blood[b])));
+            if let Some(i) = faintest {
+                self.blood.remove(i);
+            }
+        }
+        self.blood.push([x, z, 0.0, amount.min(8.0)]);
+    }
+
+    /// The blood lanes (tw_impact.wgsl `bloodAmount`): per slot (x, z, age, amount); amount 0 = unused.
+    pub fn blood_lanes(&self) -> [[f32; 4]; BLOOD_SLOTS] {
+        let mut out = [[0.0; 4]; BLOOD_SLOTS];
+        for (o, s) in out.iter_mut().zip(self.blood.iter()) {
+            *o = *s;
+        }
+        out
+    }
+
     /// Ages the splashes by `dt` and appends this frame's emit requests (at most `max` in all).
     /// `cam`: the camera (far splashes throw fewer particles).
     pub fn update(&mut self, dt: f32, cam: [f32; 3], out: &mut Vec<EmitRequest>, max: usize) {
@@ -184,6 +223,10 @@ impl Impacts {
             s[2] += dt;
         }
         self.surface.retain(|s| s[2] < SURFACE_LIFE);
+        for s in &mut self.blood {
+            s[2] += dt;
+        }
+        self.blood.retain(|s| s[2] < BLOOD_LIFE);
         let mut emitted = 0u32;
         for imp in &mut self.list {
             let d = ((imp.x - cam[0]).powi(2) + (imp.y - cam[1]).powi(2) + (imp.z - cam[2]).powi(2)).sqrt();
@@ -424,6 +467,23 @@ mod tests {
         // Tidewater: (7 + 10 + 12) per frame at full blow, under a sin^0.5 envelope
         assert!((1500..2500).contains(&total), "{total} particles");
         assert_eq!(im.lanes()[0][3], 0.0, "no surface mark");
+    }
+
+    #[test]
+    fn blood_pools_where_a_whale_bleeds_and_fades() {
+        let mut im = Impacts::default();
+        let mut e = event(KIND_BLOOD, 1.0, 0.0);
+        im.submit(&[e], 0.0);
+        e.position_radius[0] += 1.0;
+        im.submit(&[e], 0.0); // a second wound beside it feeds the same stain
+        e.position_radius[0] += 20.0;
+        im.submit(&[e], 0.0);
+        let l = im.blood_lanes();
+        assert_eq!((l[0][3], l[1][3], l[2][3]), (2.0, 1.0, 0.0));
+        assert_eq!(im.active(), 0, "no splash");
+        let mut out = Vec::new();
+        im.update(BLOOD_LIFE + 1.0, [0.0; 3], &mut out, 64);
+        assert_eq!(im.blood_lanes()[0][3], 0.0, "gone after {BLOOD_LIFE} s");
     }
 
     #[test]

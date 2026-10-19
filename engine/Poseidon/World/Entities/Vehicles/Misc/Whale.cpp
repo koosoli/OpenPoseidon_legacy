@@ -22,6 +22,9 @@
 #include <Poseidon/World/Entities/Vehicles/Misc/Whale.hpp>
 
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Core/Config/EngineConfig.hpp>
+#include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
@@ -977,6 +980,78 @@ void Whale::Start()
              at.Z(), b.water - FloorAt(-at.X(), at.Z()));
 }
 
+float Whale::WaterLevel() const
+{
+    return _brain ? _brain->water : (GLandscape ? GLandscape->GetSeaLevel() : 0.0f);
+}
+
+void Whale::Bleed(Vector3Par at, float amount)
+{
+    if (!ENGINE_CONFIG.blood || amount <= 0)
+        return;
+    HydroWaterInteractionEvent e{};
+    e.positionRadius[0] = at.X();
+    e.positionRadius[1] = at.Z();
+    e.positionRadius[3] = WaterLevel();
+    e.velocityKind[3] = HydroWaterInteractionBlood;
+    e.timeLifeFoamMass[3] = amount;
+    SubmitWaterInteraction(e);
+}
+
+// An explosion tears pieces of skin, blubber and meat off and throws them (config chunks[], the stock explosion
+// debris' simulation: they splash down and sink)
+void Whale::TearChunks(Vector3Par at, float val)
+{
+    const ParamEntry* list = GetType()->GetParamEntry().FindEntry("chunks");
+    if (!list || list->GetSize() <= 0 || !ENGINE_CONFIG.blood)
+        return;
+    const int n = std::clamp((int)(val / 40.0f), 1, 10);
+    for (int i = 0; i < n; i++)
+    {
+        const RString name = (*list)[(int)(GRandGen.RandomValue() * list->GetSize()) % list->GetSize()];
+        VehicleType* type = dynamic_cast<VehicleType*>(VehicleTypes.New(name));
+        if (!type)
+            continue;
+        const float a = GRandGen.RandomValue() * TAU;
+        const Vector3 out(std::sin(a), 0, std::cos(a));
+        Matrix4 trans;
+        trans.SetOrientation(Matrix3(MRotationY, GRandGen.RandomValue() * TAU));
+        // from the wound, above the water
+        trans.SetPosition(at + out * 0.8f + VUp * (std::max(WaterLevel() - at.Y(), 0.0f) + 0.6f));
+        const Vector3 vel = out * (2.0f + 5.0f * GRandGen.RandomValue()) + VUp * (5.0f + 8.0f * GRandGen.RandomValue());
+        CreateThing(type, trans, vel);
+    }
+}
+
+void Whale::DoDammage(EntityAI* owner, Vector3Par pos, float val, float valRange, RString ammo)
+{
+    base::DoDammage(owner, pos, val, valRange, ammo);
+    if (val <= 0)
+        return;
+    const Vector3 at = PositionModelToWorld(pos);
+    // (val arrives divided by the armor: the ammo's hit, scaled by distance for a blast)
+    const float hit = val * GetArmor();
+    // a rifle round (hit ~8) bleeds a little, a shell's blast a lot; the wounds go on bleeding
+    const float amount = std::clamp(hit / 25.0f, 0.2f, 3.0f);
+    Bleed(at, amount);
+    _bleed = std::min(_bleed + amount * 0.12f, 1.0f);
+    // where the hit is out of the water: OFP's spurt of blood
+    if (ENGINE_CONFIG.blood && at.Y() > WaterLevel() - 0.2f)
+    {
+        Crater* spurt = new Crater(nullptr, VehicleTypes.New("crater"), 1.0f, 0.3f, false, true, false);
+        Matrix4 trans(MIdentity);
+        trans.SetPosition(at);
+        spurt->SetTransform(trans);
+        GLOB_WORLD->AddAnimal(spurt);
+    }
+    // a blast (indirect hit) of a shell or more tears it open
+    if (valRange > 0 && hit >= 40.0f)
+        TearChunks(at, hit);
+    if (WhaleDiag())
+        LOG_INFO(World, "Whale hit: {} val {:.1f} range {:.1f} at {:.1f},{:.1f},{:.1f} (water {:.2f}): blood {:.2f}",
+                 (const char*)ammo, hit, valRange, at.X(), at.Y(), at.Z(), WaterLevel(), amount);
+}
+
 void Whale::HitBy(EntityAI* owner, float howMuch, RString ammo)
 {
     base::HitBy(owner, howMuch, ammo);
@@ -1138,6 +1213,17 @@ void Whale::Simulate(float deltaT, SimulationImportance prec)
     if (deltaT > 0)
         _speed = (trans.Position() - oldPos) * (1.0f / deltaT);
     Effects(deltaT);
+    // the wounds bleed on: a trail behind a whale running, a slick round a dead one
+    if (_bleed > 0.01f)
+    {
+        _bleedClock += deltaT;
+        if (_bleedClock >= 1.0f)
+        {
+            _bleedClock -= 1.0f;
+            Bleed(trans.Position(), _bleed);
+        }
+        _bleed *= std::exp(-deltaT / (b.dead ? 90.0f : 40.0f));
+    }
 
     if (WhaleDiag() && Glob.time.toFloat() >= _logNext)
     {

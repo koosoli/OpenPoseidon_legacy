@@ -25,6 +25,8 @@ class Whale: public Thing
 
 	void Simulate(float deltaT, SimulationImportance prec) override;
 	void HitBy(EntityAI *owner, float howMuch, RString ammo) override;
+	// (OP) a hit bleeds into the water where it struck; an explosion tears pieces off
+	void DoDammage(EntityAI *owner, Vector3Par pos, float val, float valRange, RString ammo) override;
 
 	bool IsAnimated(int level) const override {return true;}
 	bool IsAnimatedShadow(int level) const override {return true;}
@@ -38,6 +40,7 @@ class Whale: public Thing
 
 	private:
 	void Start();
+	float WaterLevel() const;
 	void Effects(float deltaT);
 	void Publish();
 
@@ -50,6 +53,10 @@ class Whale: public Thing
 	int _slapsSeen = 0, _splashesSeen = 0;
 	bool _blowSent = false;
 	float _logNext = 0;
+	void Bleed(Vector3Par at, float amount);
+	void TearChunks(Vector3Par at, float val);
+	float _bleed = 0; // blood the wounds still lose (stain amount a second), dying away
+	float _bleedClock = 0;
 };
 
 } // namespace Poseidon

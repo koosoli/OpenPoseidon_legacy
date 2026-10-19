@@ -22,6 +22,10 @@ enum HydroWaterInteractionKind : uint32_t
     // radius, the blowholes' y), velocityKind = (drift vx, vz, 0, kind), timeLifeFoamMass[3] = column height (m).
     // Drawn by the Tidewater water (water_tw/impacts.rs).
     HydroWaterInteractionWhaleBlow = 7,
+    // (OP) blood in the water (a wounded whale, Whale.cpp): positionRadius = (x, z, 0, surface y),
+    // timeLifeFoamMass[3] = amount (a rifle round ~0.3, a shell's blast 3). Pools into a red stain in the
+    // Tidewater water that spreads and fades over two minutes (water_tw/impacts.rs, tw_impact.wgsl).
+    HydroWaterInteractionBlood = 8,
 };
 
 enum HydroWaterInteractionFlags : uint32_t
