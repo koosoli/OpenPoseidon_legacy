@@ -305,7 +305,7 @@ impl Far {
         };
         let card_pipeline = make_pipeline("wgr_far_cards", "vs_card", "fs_card");
         let prism_pipeline = make_pipeline("wgr_far_prisms", "vs_prism", "fs_prism");
-        Self {
+        let mut far = Self {
             params,
             native_world: false,
             params_buffer,
@@ -314,7 +314,92 @@ impl Far {
             card_pipeline,
             prism_pipeline,
             data: None,
+        };
+        // PERF-FAR-RESIDENT: allocate the sweep's buffers NOW, with the renderer, while VRAM is
+        // still empty. Measured 2026-10-19 at the owner's 3440x1440 on Everon: the far window grew
+        // to 1.05M rows (33.6 MB), just past the old 32 MB first allocation, so the source was
+        // re-created late in the load with VRAM full -- WDDM placed it in system memory and the
+        // sweep read it over PCIe every frame: "Far tier: cull" 7.8 ms, linear in rows (3.4-4.5
+        // ms at half the rows), against 0.09 ms for the same pose at 1920x1080. 2M rows (64 MB)
+        // covers every native world measured; the buffers are kept across worlds.
+        // WGR_FAR_PREALLOC_MB (default 64; 0 = allocate on first use as before).
+        let mb = std::env::var("WGR_FAR_PREALLOC_MB").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(64);
+        if mb > 0 {
+            far.allocate(device, mb << 20);
         }
+        far
+    }
+
+    /// (Re)allocate the source rows with `capacity` bytes; the visible/count/indirect buffers
+    /// are allocated once and carried over.
+    fn allocate(&mut self, device: &wgpu::Device, capacity: u64) {
+        let src = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_far_src"),
+            size: capacity,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            // Not mapped_at_creation: a mapped-at-creation STORAGE buffer may be placed in
+            // host-visible memory, which the per-frame sweep then reads across the bus.
+            mapped_at_creation: false,
+        });
+        let previous = self.data.take();
+        let (visible, counts, indirect) = match previous {
+            Some(d) => (d.visible, d.counts, d.indirect),
+            None => (
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("wgr_far_visible"),
+                    size: VISIBLE_CAP as u64 * VISIBLE_STRIDE,
+                    usage: wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                }),
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("wgr_far_counts"),
+                    size: 8,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_SRC
+                        | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+                // Two 16-byte draw-indirect arg blocks: cards at 0, prisms at 16.
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("wgr_far_indirect"),
+                    size: 32,
+                    usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+            ),
+        };
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("wgr_far_bind"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: src.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: visible.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: counts.as_entire_binding(),
+                },
+            ],
+        });
+        self.data = Some(FarData {
+            src,
+            visible,
+            counts,
+            indirect,
+            bind,
+            groups_x: 0,
+            groups_y: 0,
+            src_capacity: capacity,
+        });
     }
 
     /// Replace the whole proxy set (a native world's far window refills it every ~30 s); an empty slice releases the
@@ -327,7 +412,8 @@ impl Far {
         instances: &[WgrFarInstance],
     ) -> (u32, u32) {
         if instances.is_empty() {
-            self.data = None;
+            // PERF-FAR-RESIDENT: the buffers stay (allocated while VRAM was free); only the
+            // rows go. A next world reuses them instead of allocating under pressure.
             self.params.cfg[3] = 0.0;
             self.upload_params(queue);
             return (0, 0);
@@ -348,77 +434,10 @@ impl Far {
             let data = self.data.as_ref().unwrap();
             queue.write_buffer(&data.src, 0, bytes);
         } else {
-            // At least ~1M rows (32 MB) on the first call, which lands early in the world load
-            // while VRAM is still free; past that, half again what is needed now.
+            // Outgrown (or never preallocated): half again what is needed now.
             let capacity = (need + need / 2).max(1u64 << 25).max(need);
-            let src = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("wgr_far_src"),
-                size: capacity,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                // Not mapped_at_creation: a mapped-at-creation STORAGE buffer may be placed in
-                // host-visible memory, which the per-frame sweep then reads across the bus.
-                mapped_at_creation: false,
-            });
-            queue.write_buffer(&src, 0, bytes);
-            let previous = self.data.take();
-            let (visible, counts, indirect) = match previous {
-                Some(d) => (d.visible, d.counts, d.indirect),
-                None => (
-                    device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("wgr_far_visible"),
-                        size: VISIBLE_CAP as u64 * VISIBLE_STRIDE,
-                        usage: wgpu::BufferUsages::STORAGE,
-                        mapped_at_creation: false,
-                    }),
-                    device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("wgr_far_counts"),
-                        size: 8,
-                        usage: wgpu::BufferUsages::STORAGE
-                            | wgpu::BufferUsages::COPY_SRC
-                            | wgpu::BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    }),
-                    // Two 16-byte draw-indirect arg blocks: cards at 0, prisms at 16.
-                    device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("wgr_far_indirect"),
-                        size: 32,
-                        usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    }),
-                ),
-            };
-            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("wgr_far_bind"),
-                layout: &self.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.params_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: src.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: visible.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: counts.as_entire_binding(),
-                    },
-                ],
-            });
-            self.data = Some(FarData {
-                src,
-                visible,
-                counts,
-                indirect,
-                bind,
-                groups_x: 0,
-                groups_y: 0,
-                src_capacity: capacity,
-            });
+            self.allocate(device, capacity);
+            queue.write_buffer(&self.data.as_ref().unwrap().src, 0, bytes);
         }
 
         let count = instances.len() as u32;
@@ -510,7 +529,7 @@ impl Far {
 
     /// True when there is a set to sweep and the game has not switched the tier off.
     pub fn active(&self) -> bool {
-        self.data.is_some() && self.params.tune[1] >= 0.5 && self.params.cfg[1] > 0.0
+        self.data.is_some() && self.params.cfg[3] > 0.0 && self.params.tune[1] >= 0.5 && self.params.cfg[1] > 0.0
     }
 
     /// One compute sweep over EVERY placement, compacted into the two indirect draws.
