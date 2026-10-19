@@ -501,7 +501,8 @@ void Motorcycle::PlaceOnSurface(Matrix4& trans)
     Matrix3 orient = trans.Orientation();
 
     float dx, dz;
-    pos[1] = GLandscape->RoadSurfaceYAboveWater(pos, &dx, &dz);
+    // Sinkhole W5: searched from no lower than the drawn terrain (Landscape::SurfacePlacementProbe)
+    pos[1] = GLandscape->RoadSurfaceYAboveWater(GLandscape->SurfacePlacementProbe(pos), &dx, &dz);
 
     Matrix3 vertical, invVertical;
     vertical.SetUpAndDirection(VUp, orient.Direction());

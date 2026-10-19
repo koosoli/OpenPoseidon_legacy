@@ -293,7 +293,8 @@ void Man::PlaceOnSurface(Matrix4& trans)
     Vector3 pos = trans.Position();
     Matrix3 orient = trans.Orientation();
 
-    pos[1] = GLOB_LAND->RoadSurfaceYAboveWater(pos + VUp * 0.5f);
+    // Sinkhole W5: searched from no lower than the drawn terrain (Landscape::SurfacePlacementProbe)
+    pos[1] = GLOB_LAND->RoadSurfaceYAboveWater(GLOB_LAND->SurfacePlacementProbe(pos) + VUp * 0.5f);
 
     trans.SetPosition(pos);
 }
@@ -726,6 +727,19 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             moveTrans.SetPosition(held);
             _speed[0] = 0;
             _speed[2] = 0;
+        }
+        // Sinkhole W5: the mirror case -- a man (or body) on the drawn hillside over a hidden cave footprint sinks no
+        // deeper than the hillside: a landing or a step that ends past the ceiling gap had tunnelled into the cave
+        // (The Forest's beach: a fall of 6 m went straight through to the cave 250 m below). He stays on the ground.
+        else if (GLOB_LAND->SinksIntoHiddenTerrainHole(Position(), moveTrans.Position()))
+        {
+            Vector3 held = moveTrans.Position();
+            held[1] = GLOB_LAND->SurfaceY(held.X(), held.Z());
+            moveTrans.SetPosition(held);
+            if (_speed[1] < 0)
+            {
+                _speed[1] = 0;
+            }
         }
 
         const MoveInfo* priInfo = Type()->GetMoveInfo(_primaryMove.id);

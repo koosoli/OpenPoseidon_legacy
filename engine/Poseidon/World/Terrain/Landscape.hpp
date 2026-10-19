@@ -1552,6 +1552,17 @@ public:
 	bool InTerrainHoleBelow(Vector3Par p, float depth) const;
 	// terrainHole5: moving from -> to leaves a terrain hole sideways under the ground (into the earth)
 	bool LeavesTerrainHoleUnderground(Vector3Par from, Vector3Par to) const;
+	// Sinkhole W5: moving from -> to, from on or above the drawn terrain and in no hole, sinks into a HIDDEN hole
+	// (a cave's footprint under a hillside) -- through ground that is drawn and must hold. A hidden cave is entered
+	// through its openings, never from above; a fall or a frame's step deeper than the ceiling gap tunnelled through.
+	bool SinksIntoHiddenTerrainHole(Vector3Par from, Vector3Par to) const;
+	// Sinkhole W5: (x, z) is inside a drawn terrain hole (an opening: the terrain is not drawn there), at any height
+	bool InDrawnTerrainHole(float x, float z) const;
+	// Sinkhole W5: the point to look for the ground from when an object is placed on the surface (setPos,
+	// createVehicle, mission placement). Their height is the one above the ground (0 on it), so the search started
+	// at sea level and, over a hidden cave, found the cave: the man fell from there. It starts no lower than just
+	// under the drawn terrain; outside holes nothing under the terrain counts as ground, so nothing else changes.
+	Vector3 SurfacePlacementProbe(Vector3Par pos) const;
 	// terrainHole5: obj's model cuts a terrain hole
 	static bool CutsTerrainHole(const Object *obj);
 	// terrainHole6: the height a ground decal (footprint, track, crater, shadow) at x, z is fitted to. refY = the decal's
