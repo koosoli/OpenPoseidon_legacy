@@ -1335,7 +1335,7 @@ fn look_head(look: u32) -> LookHead {
     switch (look) {
         case 1u: { h.colour = vec3<f32>(0.42, 0.37, 0.18); h.fraction = 0.24; h.kind = 1.0; }
         case 4u: { h.colour = vec3<f32>(0.40, 0.14, 0.40); h.fraction = 0.12; h.kind = 1.0; }
-        case 5u: { h.colour = vec3<f32>(0.34, 0.12, 0.06); h.fraction = 0.34; h.kind = 1.0; }
+        case 5u: { h.colour = vec3<f32>(0.20, 0.09, 0.05); h.fraction = 0.34; h.kind = 1.0; }
         case 6u: { h.colour = vec3<f32>(0.74, 0.74, 0.68); h.centre = vec3<f32>(0.78, 0.55, 0.06); h.fraction = 0.18; }
         case 7u: { h.colour = vec3<f32>(0.62, 0.06, 0.03); h.centre = vec3<f32>(0.04, 0.03, 0.03); h.fraction = 0.20; }
         case 8u: { h.colour = vec3<f32>(0.82, 0.60, 0.03); h.centre = vec3<f32>(0.78, 0.50, 0.02); h.fraction = 0.20; }

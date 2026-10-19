@@ -409,6 +409,17 @@ struct GrassParams {
     variety: [f32; 4],
 }
 
+/// GRS-VAR: `WGR_GRASS_SPECIES_MIX=weed,flower` overrides the Grass tab's species mix -- a fixed
+/// A/B lever for captures, read once.
+fn species_mix_override() -> Option<[f32; 2]> {
+    static MIX: std::sync::OnceLock<Option<[f32; 2]>> = std::sync::OnceLock::new();
+    *MIX.get_or_init(|| {
+        let v = std::env::var("WGR_GRASS_SPECIES_MIX").ok()?;
+        let mut it = v.split(',').map(|x| x.trim().parse::<f32>().ok().filter(|f| f.is_finite()));
+        Some([it.next()??, it.next()??])
+    })
+}
+
 /// GRS-VAR: the procedural meadow's per-clump looks (flower heads, weed tints, seeding grass).
 /// [on, flower/seed head brightness, share of a clump's blades that carry a head, spare].
 /// WGR_GRASS_VARIETY=0 is the image before it: every look id is 0 and nothing else changes.
@@ -2642,10 +2653,11 @@ impl Grass {
             density_noise_scale: params.density_noise_scale.clamp(0.002, 0.5),
             density_noise_strength: params.density_noise_strength.clamp(0.0, 1.0),
             // Clamp the pair so grass never goes negative if both are pushed up.
-            weed_percent: params.weed_percent.clamp(0.0, 1.0),
-            flower_percent: params
-                .flower_percent
-                .clamp(0.0, 1.0 - params.weed_percent.clamp(0.0, 1.0)),
+            weed_percent: species_mix_override().map_or(params.weed_percent, |m| m[0]).clamp(0.0, 1.0),
+            flower_percent: species_mix_override().map_or(params.flower_percent, |m| m[1]).clamp(
+                0.0,
+                1.0 - species_mix_override().map_or(params.weed_percent, |m| m[0]).clamp(0.0, 1.0),
+            ),
             blade_width_scale: params.blade_width_scale.clamp(0.25, 6.0),
             use_photo_tuft: if cards_mid { 1.0 } else { 0.0 },
             saturation: params.saturation.clamp(0.0, 2.0),
