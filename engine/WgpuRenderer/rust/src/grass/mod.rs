@@ -405,6 +405,28 @@ struct GrassParams {
     native_look2: [f32; 4],
     // RFG-160: the native near ring's reach (native_ring_from_env).
     native_ring: [f32; 4],
+    // GRS-VAR: OFP meadow variety (grass.wgsl `variety`, variety_from_env).
+    variety: [f32; 4],
+}
+
+/// GRS-VAR: the procedural meadow's per-clump looks (flower heads, weed tints, seeding grass).
+/// [on, flower/seed head brightness, share of a clump's blades that carry a head, spare].
+/// WGR_GRASS_VARIETY=0 is the image before it: every look id is 0 and nothing else changes.
+/// Never applies on a native (Reforger) world -- the shader gates it on the native lanes.
+fn variety_from_env() -> [f32; 4] {
+    let num = |key: &str, default: f32, lo: f32, hi: f32| -> f32 {
+        std::env::var(key)
+            .ok()
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .filter(|v| v.is_finite())
+            .map_or(default, |v| v.clamp(lo, hi))
+    };
+    [
+        num("WGR_GRASS_VARIETY", 1.0, 0.0, 1.0),
+        num("WGR_GRASS_HEAD_BRIGHTNESS", 0.8, 0.0, 2.0),
+        num("WGR_GRASS_HEAD_SHARE", 0.5, 0.0, 1.0),
+        0.0,
+    ]
 }
 
 /// RFG-160: how far a native world's PlantMat tufts reach and how they thin. [distance (m) past
@@ -957,6 +979,7 @@ impl Grass {
             native_look: native_look_from_env().0,
             native_look2: native_look_from_env().1,
             native_ring: native_ring_from_env(),
+            variety: variety_from_env(),
         };
         queue.write_buffer(&grass_params, 0, bytemuck::bytes_of(&params));
 
@@ -2749,6 +2772,7 @@ impl Grass {
             native_look: self.last_params.native_look,
             native_look2: self.last_params.native_look2,
             native_ring: self.last_params.native_ring,
+            variety: self.last_params.variety,
         };
         self.near_grid_dim = near_grid_dim;
         self.mid_grid_dim = mid_grid_dim;
@@ -3647,6 +3671,35 @@ mod tests {
                 );
             }
         }
+    }
+
+    // GRS-VAR: the look rides in packed.w bits 12-15 and must leave 0-11 (species, the atlas run
+    // the native card decode reads, the mid flag) alone; the shadow's shape table is a literal copy.
+    #[test]
+    fn variety_look_bits_and_shadow_shape_mirror() {
+        let fn_body = |src: &str, name: &str| -> String {
+            let src = src.replace("\r\n", "\n");
+            let start = src.find(&format!("fn {name}(")).unwrap_or_else(|| panic!("{name} missing"));
+            let end = start + src[start..].find("\n}\n").expect("unterminated fn");
+            src[start..end].to_string()
+        };
+        assert_eq!(fn_body(SHADER, "look_shape"), fn_body(SHADOW, "look_shape"));
+        assert!(SHADER.contains("const LOOK_SHIFT: u32 = 12u;"));
+        assert!(SHADER.contains("fn instance_look(packed_w: u32) -> u32 { return (packed_w >> LOOK_SHIFT) & 15u; }"));
+        assert!(SHADOW.contains("look_shape((instances[instance_index].packed.w >> 12u) & 15u)"));
+        // The fields below the look are unchanged.
+        for src in [SHADER, SHADOW] {
+            assert!(src.contains("return vec2<u32>((packed_w >> 3u) & 31u, (packed_w >> 8u) & 7u);"));
+        }
+        assert!(SHADER.contains("0u, (species & 7u) | (first << 3u) | (count << 8u));"));
+        assert!(SHADER.contains("(packed & (1u << 11u)) != 0u);"));
+        // Look 0 is today's blade in every group, and no native world picks another.
+        assert!(fn_body(SHADER, "look_shape").contains("default: { return vec2<f32>(1.0, 1.0); }"));
+        assert!(fn_body(SHADER, "look_tint").contains("default: { return vec3<f32>(1.0); }"));
+        assert!(SHADER.contains(
+            "return grass.variety.x > 0.5 && grass.native.x <= 0.0 && grass.native2.w < 0.5;"
+        ));
+        assert!(fn_body(SHADER, "pick_look").starts_with("fn pick_look(world_xz: vec2<f32>, species: u32) -> u32 {\n    if (!variety_on()) { return 0u; }"));
     }
 
     #[test]

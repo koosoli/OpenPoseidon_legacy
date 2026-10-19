@@ -166,6 +166,8 @@ struct GrassParams {
     // exponent of the survivors, .z height floor in the outer dissolve, .w radius multiplier
     // (applied by grass/mod.rs to near_radius).
     native_ring: vec4<f32>,
+    // GRS-VAR (grass/mod.rs variety_from_env): .x on, .y head brightness, .z head share, .w spare.
+    variety: vec4<f32>,
 };
 
 // 32 bytes. `pos_seed` stays f32 for world precision; everything the compute
@@ -1242,6 +1244,143 @@ fn species_transmission(species: u32) -> vec4<f32> {
     }
 }
 
+// GRS-VAR -- the meadow's per-clump LOOK, packed.w bits 12-15. Bits 0-2 (species), 3-10 (the
+// surface's atlas run, which the native card decode reads) and 11 (the mid-ring flag) do not
+// move. 0 is the look before GRS-VAR in every species group, so WGR_GRASS_VARIETY=0, which
+// writes 0, is the old image exactly, and a native world (variety_on() false) never sees one.
+//   grass  : 0 plain, 1 foxtail seed head, 2 short bent, 14 seeding fescue
+//   weed   : 0 clover/broadleaf, 3 nettle, 4 thistle, 5 dock/sorrel
+//   flower : 6 daisy, 7 poppy, 8 dandelion, 9 cornflower, 10 buttercup, 11 red clover,
+//            12 yarrow, 13 cranesbill; 15 spare
+// The colour comes from here, not from the blade atlas: on OFP the atlas is the photo leaf set
+// and grass_shade keeps only its luminance relief, so a coloured atlas layer would never show.
+// look_shape is mirrored literally by grass_shadow.wgsl (the tests compare the two).
+const LOOK_SHIFT: u32 = 12u;
+const LOOK_HEAD_BIT: u32 = 16u;
+
+fn variety_on() -> bool {
+    return grass.variety.x > 0.5 && grass.native.x <= 0.0 && grass.native2.w < 0.5;
+}
+
+fn instance_look(packed_w: u32) -> u32 { return (packed_w >> LOOK_SHIFT) & 15u; }
+
+fn pick_look(world_xz: vec2<f32>, species: u32) -> u32 {
+    if (!variety_on()) { return 0u; }
+    // A ~11 m field of its own, folded so each look forms drifts with a light sprinkle of its
+    // neighbours; the ~25 m group field in pick_species still decides grass / weed / flower.
+    let field = clump_noise(world_xz, 0.09, 0x3c6ef372u);
+    let h = fract(field * 3.0 + hash11(world_xz * 0.37 + vec2<f32>(5.3, 1.7)) * 0.3);
+    if (species >= SPECIES_WEED_END) {
+        return 6u + min(u32(h * 8.0), 7u);
+    }
+    if (species >= SPECIES_GRASS_END) {
+        // Clover keeps a quarter of the weed drifts: 0, 3, 4, 5.
+        let i = min(u32(h * 4.0), 3u);
+        return select(2u + i, 0u, i == 0u);
+    }
+    // Plain grass keeps half the meadow.
+    switch (min(u32(h * 6.0), 5u)) {
+        case 3u: { return 1u; }
+        case 4u: { return 2u; }
+        case 5u: { return 14u; }
+        default: { return 0u; }
+    }
+}
+
+// (width scale, height scale) on top of species_shape_mixed. (1, 1) for look 0.
+fn look_shape(look: u32) -> vec2<f32> {
+    switch (look) {
+        case 1u: { return vec2<f32>(0.80, 1.18); }
+        case 2u: { return vec2<f32>(0.80, 0.70); }
+        case 3u: { return vec2<f32>(0.95, 1.30); }
+        case 4u: { return vec2<f32>(1.15, 1.18); }
+        case 5u: { return vec2<f32>(0.85, 1.38); }
+        case 7u: { return vec2<f32>(1.00, 1.10); }
+        case 8u: { return vec2<f32>(1.00, 0.72); }
+        case 10u: { return vec2<f32>(1.00, 0.92); }
+        case 14u: { return vec2<f32>(0.85, 1.12); }
+        default: { return vec2<f32>(1.0, 1.0); }
+    }
+}
+
+// Whole-blade albedo multiplier: nettle darker and bluer, thistle grey-green, dock warm.
+fn look_tint(look: u32) -> vec3<f32> {
+    switch (look) {
+        case 2u: { return vec3<f32>(0.92, 1.02, 0.96); }
+        case 3u: { return vec3<f32>(0.72, 0.90, 0.80); }
+        case 4u: { return vec3<f32>(1.02, 1.00, 1.10); }
+        case 5u: { return vec3<f32>(1.08, 0.96, 0.84); }
+        default: { return vec3<f32>(1.0); }
+    }
+}
+
+struct LookHead {
+    colour: vec3<f32>,
+    // Disc floret colour (kind 0 only).
+    centre: vec3<f32>,
+    // Share of the blade, from the tip, the head occupies; 0 = no head.
+    fraction: f32,
+    // 0 = a disc flower seen side-on, 1 = a spike / panicle filling the head region.
+    kind: f32,
+};
+
+// Linear albedo before the head brightness lane (variety.y): real-world reflectance ratios
+// against the meadow's green ramp, muted by that lane.
+fn look_head(look: u32) -> LookHead {
+    var h: LookHead;
+    h.colour = vec3<f32>(0.0);
+    h.centre = vec3<f32>(0.0);
+    h.fraction = 0.0;
+    h.kind = 0.0;
+    switch (look) {
+        case 1u: { h.colour = vec3<f32>(0.42, 0.37, 0.18); h.fraction = 0.24; h.kind = 1.0; }
+        case 4u: { h.colour = vec3<f32>(0.40, 0.14, 0.40); h.fraction = 0.12; h.kind = 1.0; }
+        case 5u: { h.colour = vec3<f32>(0.34, 0.12, 0.06); h.fraction = 0.34; h.kind = 1.0; }
+        case 6u: { h.colour = vec3<f32>(0.74, 0.74, 0.68); h.centre = vec3<f32>(0.78, 0.55, 0.06); h.fraction = 0.18; }
+        case 7u: { h.colour = vec3<f32>(0.62, 0.06, 0.03); h.centre = vec3<f32>(0.04, 0.03, 0.03); h.fraction = 0.20; }
+        case 8u: { h.colour = vec3<f32>(0.82, 0.60, 0.03); h.centre = vec3<f32>(0.78, 0.50, 0.02); h.fraction = 0.20; }
+        case 9u: { h.colour = vec3<f32>(0.10, 0.18, 0.62); h.centre = vec3<f32>(0.20, 0.10, 0.40); h.fraction = 0.17; }
+        case 10u: { h.colour = vec3<f32>(0.86, 0.68, 0.04); h.centre = vec3<f32>(0.70, 0.62, 0.10); h.fraction = 0.15; }
+        case 11u: { h.colour = vec3<f32>(0.56, 0.14, 0.30); h.centre = vec3<f32>(0.48, 0.10, 0.26); h.fraction = 0.16; }
+        case 12u: { h.colour = vec3<f32>(0.64, 0.62, 0.54); h.fraction = 0.16; h.kind = 1.0; }
+        case 13u: { h.colour = vec3<f32>(0.36, 0.22, 0.58); h.centre = vec3<f32>(0.62, 0.52, 0.66); h.fraction = 0.16; }
+        case 14u: { h.colour = vec3<f32>(0.30, 0.19, 0.20); h.fraction = 0.30; h.kind = 1.0; }
+        default: {}
+    }
+    return h;
+}
+
+// The flat varying a blade carries: its clump's look, plus LOOK_HEAD_BIT when this blade of the
+// clump bears the head (a variety.z share of them -- every blade of a flower clump flowering
+// reads as a bouquet, not a meadow).
+fn blade_look(inst: vec4<f32>, inst_packed: vec4<u32>, blade: u32) -> u32 {
+    let look = instance_look(inst_packed.w);
+    if (look == 0u || look_head(look).fraction <= 0.0) { return look; }
+    let h = hash11(inst.xz + vec2<f32>(f32(blade) * 37.0 + 2.0, f32(blade) * 5.0 + 61.0));
+    return look | select(0u, LOOK_HEAD_BIT, h < clamp(grass.variety.z, 0.0, 1.0));
+}
+
+// Applied to the finished OFP albedo, after the green-pivot grading (which would turn a petal
+// muddy). `uv_x` runs 0..1 across the ribbon, `t` 0 at the root and 1 at the tip.
+fn look_albedo(albedo: vec3<f32>, look_word: u32, uv_x: f32, t: f32, seed: f32) -> vec3<f32> {
+    let look = look_word & 15u;
+    let tinted = albedo * look_tint(look);
+    if ((look_word & LOOK_HEAD_BIT) == 0u) { return tinted; }
+    let head = look_head(look);
+    let start = 1.0 - head.fraction;
+    if (t <= start) { return tinted; }
+    let hv = (t - start) / max(head.fraction, 0.01);
+    var cover = smoothstep(0.0, 0.25, hv);
+    var colour = head.colour;
+    if (head.kind < 0.5) {
+        // A disc seen side-on across the ribbon; its middle is the disc floret.
+        let d = length(vec2<f32>(uv_x * 2.0 - 1.0, (hv - 0.55) * 2.2));
+        cover = 1.0 - smoothstep(0.80, 1.0, d);
+        colour = mix(head.colour, head.centre, 1.0 - smoothstep(0.22, 0.40, d));
+    }
+    return mix(tinted, colour * clamp(grass.variety.y, 0.0, 2.0) * (0.9 + 0.2 * seed), cover);
+}
+
 // In daylight backlight, blue sky fill used to dominate the shaded grass side.
 // Move that fill towards neutral warm light at unchanged luminance; keep the
 // nighttime sky and the direct/transmitted sunlight untouched.
@@ -1371,7 +1510,9 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     instances[out_index].pos_seed = vec4<f32>(world_xz.x, y, world_xz.y, seed);
-    var packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz), geo);
+    let species = pick_species(world_xz);
+    var packed = pack_flatten(eval_flatten(world_xz), species, geo);
+    packed.w |= pick_look(world_xz, species) << LOOK_SHIFT;
     // The margin is shorter as well as sparser.
     packed.z = pack_lod_fade_edge(near_fade, presence);
     instances[out_index].packed = packed;
@@ -1446,9 +1587,10 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     instances[out_index].pos_seed = vec4<f32>(world_xz.x, y, world_xz.y, seed);
-    var packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz), geo);
+    let species = pick_species(world_xz);
+    var packed = pack_flatten(eval_flatten(world_xz), species, geo);
     packed.z = pack_lod_fade_edge(mid_fade, presence);
-    packed.w |= 1u << 11u;
+    packed.w |= (1u << 11u) | (pick_look(world_xz, species) << LOOK_SHIFT);
     instances[out_index].packed = packed;
 }
 
@@ -1550,6 +1692,8 @@ struct VsOut {
     @location(5) blade_uv: vec4<f32>,
     // Constant on each ribbon, including its near-ring taper jitter.
     @location(6) @interpolate(flat) blade_taper: f32,
+    // GRS-VAR: blade_look() -- the clump's look id | LOOK_HEAD_BIT. 0 everywhere else.
+    @location(7) @interpolate(flat) look: u32,
 };
 
 // RFG-142: native tufts sway visibly in calm weather too. The live wind strength is speed x 0.2 x
@@ -1800,6 +1944,7 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     out.blade_uv = vec4<f32>(select(1.0, 0.0, left), 1.0 - t, f32(inst_packed.w & 7u),
                              blade_texture_strength(rel));
     out.blade_taper = b.taper_exp;
+    out.look = blade_look(inst, inst_packed, blade);
     return out;
 }
 
@@ -1817,7 +1962,8 @@ struct OfpBlade {
 
 fn ofp_blade(inst: vec4<f32>, inst_packed: vec4<u32>, blade: u32, t: f32, left: bool, lanes: WindLanes) -> OfpBlade {
     let seed = inst.w;
-    let shape = species_shape_mixed(inst_packed.w & 7u, grass.shape_mix.x);
+    let shape = species_shape_mixed(inst_packed.w & 7u, grass.shape_mix.x) *
+        vec3<f32>(look_shape(instance_look(inst_packed.w)), 1.0);
     let crush_dir = unpack2x16snorm(inst_packed.x);
     let crush_data = unpack2x16unorm(inst_packed.y);
     let crush = crush_data.x;
@@ -1883,7 +2029,8 @@ fn vs_grass_mid(@builtin(vertex_index) vertex_index: u32, @builtin(instance_inde
     let inst = instances[instance_index].pos_seed;
     let seed = inst.w;
     let inst_packed = instances[instance_index].packed;
-    let shape = species_shape_mixed(inst_packed.w & 7u, grass.shape_mix.x);
+    let shape = species_shape_mixed(inst_packed.w & 7u, grass.shape_mix.x) *
+        vec3<f32>(look_shape(instance_look(inst_packed.w)), 1.0);
     let crush_dir = unpack2x16snorm(inst_packed.x);
     let crush_data = unpack2x16unorm(inst_packed.y);
     let crush = crush_data.x;
@@ -1932,6 +2079,7 @@ fn vs_grass_mid(@builtin(vertex_index) vertex_index: u32, @builtin(instance_inde
     out.blade_uv = vec4<f32>(select(1.0, 0.0, left), 1.0 - t, f32(inst_packed.w & 7u),
                              blade_texture_strength(rel));
     out.blade_taper = shape.z;
+    out.look = blade_look(inst, inst_packed, blade);
     return out;
 }
 
@@ -2413,6 +2561,9 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let pivot = mix(base, tip, 0.5) * 0.65;
     var albedo = grass.tint_procedural.rgb *
         max((hued - pivot) * blade_contrast() + pivot, vec3<f32>(0.0));
+    if (in.look != 0u) {
+        albedo = look_albedo(albedo, in.look, in.blade_uv.x, in.height_t, in.seed);
+    }
     if (grass.native.x > 0.0) {
         // RFG-091: the grading chain above (saturation, dry patches, hue drift, contrast
         // about a GREEN pivot, the procedural tint) was built for the procedural blades;

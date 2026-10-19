@@ -173,3 +173,43 @@ this behaviour be *preserved* — rotor speed, altitude, inertia, multi-helicopt
 visible deformation, and matching shadow response — before any of it is improved.
 Treat the current behaviour as the baseline to beat, and capture it before changing
 it (`TEST-GRS-001`).
+
+## 5. Species variety (GRS-VAR, 2026-10-19)
+
+The owner's plan asked for 16 procedural atlas layers, a 4-bit species field and
+blade heads. Reviewed against the code first. Three facts changed the plan:
+
+1. **No atlas colour reaches OFP grass.** OFP worlds upload the 8-layer photo blade
+   atlas (`assets/grass/meadow-grass-blade-*.png`, all grass leaves), and
+   `grass_shade` on the OFP path uses the layer only as *luminance relief*
+   (`mix(base, tip, t) * relief`, relief clamped 0.75..1.25). The colour is one fixed
+   green ramp for every species. So the shipped "flower" species are green stems with
+   a different shape, and new atlas layers would change nothing on screen.
+2. **`packed.w` bit 11 is taken** (the mid-ring flag, `mid_coverage_width_scale`).
+   The proposed `count` in bits 9-11 would collide with it.
+3. **`LAYERS = 8` is also the native PlantMat ABI** (8 colour + 8 SatMapBlendMask
+   per set, `layer + 8`, `bset * 16`, `layers % LAYERS`). Raising it breaks the
+   Reforger upload check, and native mid ribbons sample `species` as a PlantMat layer,
+   so a species above 7 would read a mask layer.
+
+What ships instead:
+
+* **Phase 1 -- visible variety, no ABI change.** A 4-bit *variant* in `packed.w` bits
+  12-15 (bits 0-11 untouched, so the native run decode cannot change). `cs_place` /
+  `cs_place_mid` pick it from the coarse group field; native worlds write 0. The
+  fragment shader gets it as a flat varying and, on the OFP path only, colours the
+  blade from a small WGSL palette: flower heads (daisy, poppy, dandelion, cornflower,
+  buttercup, clover pink...) in the top of the blade, weed tints (nettle, thistle,
+  dock), grass variants (foxtail seed-head tips, straw, short bent). Zero VRAM, zero
+  texture, a few ALU; `WGR_GRASS_VARIETY=0` restores today's image.
+* **Phase 2 -- distribution and defaults.** Per-group palette weights + drift scale
+  in the Grass tab; flower default 0.08 -> ~0.12. Weeds are already 0.37, so the
+  original "raise to 15-20%" would have *lowered* them -- left as is. Dry bias where
+  `dry_patches` is high.
+* **Phase 3 -- real heads at no vertex cost.** A flower clump's last blade is
+  re-shaped into two crossed head quads at the first blade's tip (rows 0-1 and 4-5;
+  rows 2-3 collapse onto a corner so the strip between is degenerate). Same vertex
+  count, same index buffer, same function in colour/prepass/velocity/shadow. Adding
+  head slots to every clump instead would cost every near instance ~6-11% more
+  vertex work in a vertex-bound pass.
+* **Phase 4** stays deferred (photo layers, GRS-GATE-1).

@@ -64,6 +64,8 @@ struct GrassParams {
     native_look: vec4<f32>,
     native_look2: vec4<f32>,
     native_ring: vec4<f32>,
+    // GRS-VAR (grass/mod.rs variety_from_env): .x on, .y head brightness, .z head share, .w spare.
+    variety: vec4<f32>,
 };
 // Must mirror grass.wgsl's 32-byte layout exactly: both shaders bind the same
 // instance buffer through the shared `data_layout`.
@@ -267,6 +269,23 @@ fn rotor_flutter_direction(world_xz: vec2<f32>, seed: f32) -> vec2<f32> {
     return select(vec2<f32>(1.0, 0.0), normalize(direction), dot(direction, direction) > 0.0001);
 }
 
+// GRS-VAR: mirrors grass.wgsl look_shape (packed.w bits 12-15) literally.
+// (width scale, height scale) on top of species_shape_mixed. (1, 1) for look 0.
+fn look_shape(look: u32) -> vec2<f32> {
+    switch (look) {
+        case 1u: { return vec2<f32>(0.80, 1.18); }
+        case 2u: { return vec2<f32>(0.80, 0.70); }
+        case 3u: { return vec2<f32>(0.95, 1.30); }
+        case 4u: { return vec2<f32>(1.15, 1.18); }
+        case 5u: { return vec2<f32>(0.85, 1.38); }
+        case 7u: { return vec2<f32>(1.00, 1.10); }
+        case 8u: { return vec2<f32>(1.00, 0.72); }
+        case 10u: { return vec2<f32>(1.00, 0.92); }
+        case 14u: { return vec2<f32>(0.85, 1.12); }
+        default: { return vec2<f32>(1.0, 1.0); }
+    }
+}
+
 @vertex
 fn vs_grass_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> @builtin(position) vec4<f32> {
     let inst = instances[instance_index].pos_seed;
@@ -290,7 +309,8 @@ fn vs_grass_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_i
         case 6u: { varied = vec3<f32>(0.85, 1.15, 0.12); }
         default: { varied = vec3<f32>(0.68, 1.32, 0.09); }
     }
-    let shape = mix(legacy, varied, clamp(grass.shape_mix.x, 0.0, 1.0));
+    let shape = mix(legacy, varied, clamp(grass.shape_mix.x, 0.0, 1.0)) *
+        vec3<f32>(look_shape((instances[instance_index].packed.w >> 12u) & 15u), 1.0);
     // Flattening cached by cs_place. Without this the shadow pass rebuilt an
     // upright blade, so grass a player had walked flat kept casting a full
     // standing shadow.
