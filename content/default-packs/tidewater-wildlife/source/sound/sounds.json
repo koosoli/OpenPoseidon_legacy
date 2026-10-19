@@ -44,6 +44,15 @@
    -25.5
   ]
  },
+ "under_reef": {
+  "loop": true,
+  "files": [
+   "under_reef.ogg"
+  ],
+  "lufs": [
+   -23.0
+  ]
+ },
  "surf_crash": {
   "loop": false,
   "files": [
@@ -151,6 +160,17 @@
   ],
   "lufs": [
    -18.8
+  ]
+ },
+ "submerge": {
+  "loop": false,
+  "files": [
+   "submerge_1.ogg",
+   "submerge_2.ogg"
+  ],
+  "lufs": [
+   -24.7,
+   -26.6
   ]
  },
  "gull": {

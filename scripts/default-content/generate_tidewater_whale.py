@@ -49,6 +49,8 @@ SOUND_TARGETS = {  # name: (LUFS, at this distance in m)
     "whale_blow": (-20, 10),  # the blow at 10 m
     "big_splash": (-11, 12),  # a breach coming down, at 12 m
     "emerge": (-30, 8),  # water sheeting off the raised flukes, at 8 m
+    "under_reef": (-43, 1),  # under water: snapping shrimp and a low rumble (hydrophone), in the background (2D)
+    "submerge": (-36, 1),  # going under (2D, at the listener)
     "gull": (-21, 10),  # a gull calling at 10 m (they call from 25-80 m)
     "tern": (-25, 10),  # a tern at 10 m
 }

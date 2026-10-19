@@ -83,6 +83,7 @@ class WaveSteam : public IWave
     // Audio-screen ducking: forces gain 0 while set (see SuppressMusicForPreview).
     bool _previewMute = false;
     WaveKind _kind = WaveEffect;
+    bool _unmuffled = false; // (OP) past the underwater filter
 
     Vector3 _position;
     Vector3 _velocity;
@@ -182,6 +183,11 @@ class WaveSteam : public IWave
     bool AccommodationEnabled() const override { return _accomEnabled; }
 
     void SetKind(WaveKind k) override;
+    void SetUnmuffled(bool unmuffled) override
+    {
+        _unmuffled = unmuffled;
+        ApplyVolume();
+    }
     WaveKind GetKind() const override { return _kind; }
     float GetVolumeAdjust() const { return _volumeAdjust; }
 

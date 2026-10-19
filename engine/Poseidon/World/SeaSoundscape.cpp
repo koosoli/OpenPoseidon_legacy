@@ -17,7 +17,9 @@
 
 #include <Poseidon/World/SeaSoundscape.hpp>
 
+#include <Poseidon/Audio/IAudioSystem.hpp>
 #include <Poseidon/Audio/SoundScene.hpp>
+#include <Poseidon/World/Entities/Infantry/SwimView.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
@@ -237,10 +239,57 @@ IWave* OpenSeaLoop(const char* name, Vector3Par pos)
     return GSoundScene->OpenAndPlay(s->files[0], pos, VZero, 0.0f, 1.0f);
 }
 
+// Under water (Tidewater's SoundScape._mix): the mixer muffles everything from above the surface (IAudioSystem::
+// SetUnderwater), a hydrophone bed -- snapping shrimp, a low rumble -- fades in, and going under and coming up splash.
+// The bed and the splashes are not muffled (Tidewater's `under` and `near` buses).
+void UpdateUnderwater(Vector3Par listener)
+{
+    static float wasUnder = 0;
+    static Ref<IWave>* const bed = new Ref<IWave>; // (never destroyed, see the surf beds)
+    const float water = SwimWaterSurfaceY(listener.X(), listener.Z());
+    const float depth = std::max(water - listener.Y(), 0.0f);
+    const float under = std::clamp((water - listener.Y()) / 0.15f, 0.0f, 1.0f);
+    if (GSoundsys)
+        GSoundsys->SetUnderwater(under, depth);
+    const auto play2D = [](const char* name, float gain)
+    {
+        const SeaSound* s = Find(name);
+        if (!s)
+            return;
+        const int i = std::min((int)(GRandGen.RandomValue() * s->files.size()), (int)s->files.size() - 1);
+        if (IWave* wave = GSoundScene->OpenAndPlayOnce2D(s->files[i], Level(*s, i) * gain, 0.95f + GRandGen.RandomValue() * 0.1f, false))
+        {
+            wave->SetUnmuffled(true);
+            GSoundScene->AddSound(wave);
+        }
+        static const bool diag = std::getenv("POSEIDON_SEA_SOUND_DIAG") != nullptr;
+        if (diag)
+            LOG_INFO(Audio, "Sea sound {} (2D, unmuffled): vol {:.3f}", name, Level(*s, i) * gain);
+    };
+    if (under > 0.5f && wasUnder <= 0.5f)
+        play2D("submerge", 1);
+    else if (under <= 0.5f && wasUnder > 0.5f)
+        play2D("emerge", std::pow(10.0f, (-38.0f - -30.0f) / 20.0f)); // (emerge's target is the whale's fluke drip)
+    wasUnder = under;
+    if (const SeaSound* reef = Find("under_reef"))
+    {
+        const float vol = Level(*reef, 0) * (0.8f + 0.3f * std::min(depth / 12.0f, 1.0f)) * under;
+        if (!*bed && vol > 0.001f)
+        {
+            *bed = GSoundScene->OpenAndPlay2D(reef->files[0], 0.0f, 1.0f, false);
+            if (*bed)
+                (*bed)->SetUnmuffled(true);
+        }
+        if (*bed)
+            (*bed)->SetVolume(vol, 1.0f);
+    }
+}
+
 void UpdateSeaSoundscape(Vector3Par listener, float deltaT)
 {
     if (!GLandscape || !GSoundScene || !Find("surf_crash"))
         return;
+    UpdateUnderwater(listener);
     Surf& s = GetSurf();
     const float now = Glob.time.toFloat();
     if (now >= s.nextScan || now < s.nextScan - 5.0f)
@@ -255,7 +304,9 @@ void UpdateSeaSoundscape(Vector3Par listener, float deltaT)
     // that way"): Tidewater's bed level 50 m from the shore, as 3D loops on the three nearest shore stations, which
     // OpenAL / Steam Audio place around the listener; their 1/d falloff is the bed fading inland
     {
-        static Ref<IWave> beds[3];
+        // (never destroyed: a static Ref released its wave at exit, after the sound system was gone -- a crash in
+        // Mtx_lock on every quit, owner's smoke test 2026-10-19)
+        static Ref<IWave>* const beds = new Ref<IWave>[3];
         const Station* near[3] = {};
         float nd[3] = {1e9f, 1e9f, 1e9f};
         for (const Station& st : s.stations)

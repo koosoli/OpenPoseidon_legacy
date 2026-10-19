@@ -151,6 +151,7 @@ class SoundSystemSteam : public IAudioSystem
     void Activate(bool active) override;
     void SetSimulationRunning(bool running) override;
     void SetEnvironment(const SoundEnvironment& env) override;
+    void SetUnderwater(float under, float depth) override;
     float ListenerGainForTest() const { return _listenerGain; }
     bool DeviceSuspendedForTest() const { return _deviceSuspended; }
 

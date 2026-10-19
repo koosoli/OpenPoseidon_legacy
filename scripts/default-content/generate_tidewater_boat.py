@@ -383,8 +383,9 @@ def relief_image(kind, rgb):
         sh_ = np.hypot((np.modf(u / 0.15)[0] - 0.5) * 0.15, np.minimum(np.abs(y_m - 1.17), np.abs(y_m - 1.52)) - 0.012)
         screw = 1 - _lstep(0.0035, 0.0055, np.minimum(sv_, sh_))
         mottle = _periodic_noise(h, w, 2, 4, 11)
-        low = 1 - _lstep(1.15, 1.6, y_m)
-        grime = np.clip(low * (0.35 + mottle * 0.3) + (1 - _lstep(0, 0.035, seam_d)) * 0.18 + mottle * 0.08, 0, 1)
+        # (Tidewater darkens the panels toward the sole; the tile repeats up the wall, so a height term would wrap to
+        # the ceiling as soot -- the grime here is the seams' and a light mottle only)
+        grime = np.clip((1 - _lstep(0, 0.035, seam_d)) * 0.18 + mottle * 0.1, 0, 1)
         pc = rgb * np.array([0.97, 0.94, 0.87])
         pc = pc * (1 - grime * 0.6)[..., None]
         pc = pc * (1 - seam * 0.7)[..., None]
@@ -833,6 +834,7 @@ def build(header, meshes):
     mem = Lod()
     add_named_points(mem, memory_points(header))
     add_named_points(mem, nav_lights(meshes))
+    add_named_points(mem, work_lights(meshes))
     lods.append((mem, RES_MEMORY, {}))
 
     # Written already centred on the box of every LOD's points, which is where the engine puts the model
@@ -871,6 +873,23 @@ def nav_lights(meshes):
     mast, stern = white[white[:, 1] > white[:, 1].max() - 0.2], white[white[:, 2] < white[:, 2].min() + 0.2]
     return {"cerveny pozicni": [red.mean(axis=0)], "zeleny pozicni": [green.mean(axis=0)],
             "bily pozicni": [mast.mean(axis=0), stern.mean(axis=0)]}
+
+
+def work_lights(meshes):
+    """Tidewater's two working lamps (glow pattern 4, Wheelhouse.js): the deck floodlight under the roof overhang aimed
+    down at the work deck, and the spotlight on the roof's front. Each a position and a point along its beam, for the
+    config's Reflectors (switched with the boat's lights: the "Lights on" action, an AI skipper at night)."""
+    gl = meshes["glow"]
+    lamp = np.rint(gl["aux"][:, 2]).astype(int) == 4
+    pos, nrm = gl["pos"][lamp], gl["nrm"][lamp]
+    out = {}
+    for name, sel in (("tw_flood", pos[:, 2] < 0), ("tw_spot", pos[:, 2] > 0)):
+        if sel.any():
+            p, n = pos[sel].mean(axis=0), nrm[sel].mean(axis=0)
+            n = n / max(np.linalg.norm(n), 1e-6)
+            out[name] = [p]
+            out[name + "_dir"] = [p + n]
+    return out
 
 
 def memory_points(header):
@@ -947,7 +966,32 @@ class CfgVehicles
 		weapons[] = {{}};
 		magazines[] = {{}};
 		driverAction = "ManActShipDriver";
-		class Reflectors {{}};
+		class Reflectors
+		{{
+			// Tidewater's working lamps (memory tw_flood / tw_spot): on with the boat's lights
+			class DeckFlood
+			{{
+				color[] = {{0.95, 0.9, 0.8, 1}};
+				ambient[] = {{0.1, 0.1, 0.09, 1}};
+				position = "tw_flood";
+				direction = "tw_flood_dir";
+				hitpoint = "tw_flood";
+				selection = "tw_flood";
+				size = 0.3;
+				brightness = 0.35;
+			}};
+			class Spotlight
+			{{
+				color[] = {{0.95, 0.95, 0.9, 1}};
+				ambient[] = {{0.05, 0.05, 0.05, 1}};
+				position = "tw_spot";
+				direction = "tw_spot_dir";
+				hitpoint = "tw_spot";
+				selection = "tw_spot";
+				size = 0.25;
+				brightness = 0.6;
+			}};
+		}};
 		// the nav lights (memory cerveny / zeleny / bily pozicni) are real lamps: they light the deck and the water
 		// round the boat (VehicleAI.cpp); on with the boat's lights
 		markerLightScale = 15;

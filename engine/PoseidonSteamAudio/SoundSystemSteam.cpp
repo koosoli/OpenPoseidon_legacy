@@ -550,6 +550,12 @@ void SoundSystemSteam::SetEnvironment(const SoundEnvironment& env)
     ApplyReverb();
 }
 
+void SoundSystemSteam::SetUnderwater(float under, float depth)
+{
+    if (_mixer)
+        _mixer->SetUnderwater(under, depth);
+}
+
 bool SoundSystemSteam::ApplyPresetByName(const char* presetName, float size)
 {
     const EFX::PresetEntry* entry = EFX::FindPreset(presetName);

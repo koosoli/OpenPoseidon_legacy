@@ -1896,6 +1896,10 @@ void Transport::Simulate(float deltaT, SimulationImportance prec)
                 GLOB_SCENE->AddLight(light);
             }
             _markersOn = Glob.time - GRandGen.RandomValue();
+            static const bool diag = std::getenv("POSEIDON_BOAT_DIAG") != nullptr;
+            if (diag)
+                LOG_INFO(World, "{}: marker lights on ({} steady, {} blinking)", (const char*)GetDebugName(),
+                         _markers.Size(), _markersBlink.Size());
         }
     }
     else

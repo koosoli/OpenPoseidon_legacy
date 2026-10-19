@@ -145,6 +145,9 @@ class IWave: public RefCountWithLinks
 	virtual bool AccommodationEnabled() const = 0;
 
 	virtual void SetKind( WaveKind kind ) = 0;
+	// (OP) not muffled when the listener is under water (SetUnderwater): the underwater sounds themselves -- the
+	// hydrophone bed, the splash of going under. Speech and music are never muffled.
+	virtual void SetUnmuffled( bool unmuffled ) {}
 	virtual WaveKind GetKind() const = 0;
 	
 	void SetSticky( bool sticky ){_sticky=sticky;}
@@ -247,6 +250,11 @@ class IAudioSystem // whole playing system
 	virtual void Activate( bool active ) = 0;
 	virtual void SetSimulationRunning( bool running ) {}
 	virtual void SetEnvironment( const SoundEnvironment &env ) {}
+	// (OP) The listener under water (Tidewater's SoundScape): `under` 0..1 (0 = above the surface), `depth` metres.
+	// Everything heard from above the surface goes through a steep low-pass (20 kHz above, ~500 Hz just under,
+	// ~260 Hz at 12 m) and loses level; sounds flagged SetUnmuffled and speech/music do not. Backends without a
+	// master filter ignore it.
+	virtual void SetUnderwater( float under, float depth ) {}
 	virtual bool IsReady() const { return true; }
 
 	// HRTF headphone rendering (ALC_SOFT_HRTF), roadmap Phase 1.4. `Auto` leaves the

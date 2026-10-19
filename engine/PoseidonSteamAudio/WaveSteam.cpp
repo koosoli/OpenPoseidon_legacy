@@ -486,7 +486,12 @@ void WaveSteam::ApplyVolume()
                   static_cast<const char*>(Name()), gain, gain > 0.f ? 2000.f * std::log10(gain) : -10000.f,
                   _is3D ? 1 : 0, static_cast<int>(_kind), _volume, _volumeAdjust);
     }
-    _voice->ModifyParams([gain](MixVoice::Params& p) { p.gain = gain; });
+    const bool unmuffled = _unmuffled || _kind != WaveEffect;
+    _voice->ModifyParams([gain, unmuffled](MixVoice::Params& p)
+                         {
+                             p.gain = gain;
+                             p.unmuffled = unmuffled;
+                         });
     _gainSet = gain;
 }
 

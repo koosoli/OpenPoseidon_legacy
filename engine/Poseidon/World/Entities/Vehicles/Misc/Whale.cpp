@@ -953,6 +953,10 @@ Whale::Whale(VehicleType* type) : base(type), _pose(std::make_unique<Pose>())
     _isStopped = false;
     _landContact = false;
     _objectContact = false;
+    // Its own copy of the model: Animate poses every vertex, and on a shape shared by several whales the renderer
+    // drew them all in one whale's pose (owner, 2026-10-19: "if there is more than one ... the whales glitch")
+    if (_shape)
+        _shape = new LODShapeWithShadow(*_shape);
     // Entity::SimulateOptimized steps by exactly this (0 handed Simulate no time at all)
     SetSimulationPrecision(1.0f / 30.0f);
 }

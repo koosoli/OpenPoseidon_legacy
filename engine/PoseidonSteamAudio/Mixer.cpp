@@ -440,6 +440,8 @@ Mixer::Mixer()
     _out.assign(kFrameSize * 2, 0.f);
     _mixL.assign(kFrameSize, 0.f);
     _mixR.assign(kFrameSize, 0.f);
+    _dryL.assign(kFrameSize, 0.f);
+    _dryR.assign(kFrameSize, 0.f);
     _send.assign(kFrameSize, 0.f);
     _tmp.assign(kFrameSize * 2, 0.f);
     _monoScratch.assign(kFrameSize, 0.f);
@@ -638,6 +640,8 @@ void Mixer::RenderFrame()
 {
     std::fill(_mixL.begin(), _mixL.end(), 0.f);
     std::fill(_mixR.begin(), _mixR.end(), 0.f);
+    std::fill(_dryL.begin(), _dryL.end(), 0.f);
+    std::fill(_dryR.begin(), _dryR.end(), 0.f);
     std::fill(_send.begin(), _send.end(), 0.f);
 
     {
@@ -663,14 +667,78 @@ void Mixer::RenderFrame()
         _reverb.Process(_send.data(), _mixL.data(), _mixR.data(), kFrameSize);
     }
 
+    Muffle(_mixL.data(), _mixR.data());
+
     const float master = _masterGain.load(std::memory_order_acquire);
     for (int i = 0; i < kFrameSize; i++)
     {
         // Gentle soft clip so stacked explosions saturate instead of wrapping.
         auto clip = [](float x) { return x > 1.f ? 1.f : (x < -1.f ? -1.f : x); };
-        _out[i * 2 + 0] = clip(_mixL[i] * master);
-        _out[i * 2 + 1] = clip(_mixR[i] * master);
+        _out[i * 2 + 0] = clip((_mixL[i] + _dryL[i]) * master);
+        _out[i * 2 + 1] = clip((_mixR[i] + _dryR[i]) * master);
     }
+}
+
+// (OP) Tidewater's SoundScape under water: everything from above the surface through two cascaded low-passes (Q
+// 0.707 and 0.54, the second at 1.4x the cutoff), the cutoff falling from 20 kHz to 520 Hz just under the surface and
+// 260 Hz at 12 m, and its level to 0.4 / (1 + depth / 5). Above water the filter is bypassed.
+void Mixer::Muffle(float* l, float* r)
+{
+    const float under = std::clamp(_uwUnder.load(std::memory_order_acquire), 0.f, 1.f);
+    const float deep = std::clamp(_uwDepth.load(std::memory_order_acquire) / 12.f, 0.f, 1.f);
+    const float gain1 = 1.f + (0.4f / (1.f + deep * 12.f / 5.f) - 1.f) * under;
+    if (under <= 0.001f && _uwGain >= 0.999f)
+    {
+        _uwCut = -1.f;
+        std::memset(_uwState, 0, sizeof(_uwState));
+        return;
+    }
+    const float lo = std::log(520.f + (260.f - 520.f) * deep);
+    const float cut = std::exp(std::log(20000.f) + (lo - std::log(20000.f)) * under);
+    if (std::fabs(cut - _uwCut) > 0.5f)
+    {
+        _uwCut = cut;
+        const float qs[2] = {0.707f, 0.54f};
+        const float fs[2] = {cut, std::min(20000.f, cut * 1.4f)};
+        for (int s = 0; s < 2; s++)
+        {
+            // RBJ low-pass
+            const float f = std::min(fs[s], kSampleRate * 0.45f);
+            const float w = 2.f * 3.14159265f * f / kSampleRate;
+            const float alpha = std::sin(w) / (2.f * qs[s]);
+            const float c = std::cos(w), a0 = 1.f + alpha;
+            _uwCoef[s][0] = (1.f - c) * 0.5f / a0;
+            _uwCoef[s][1] = (1.f - c) / a0;
+            _uwCoef[s][2] = (1.f - c) * 0.5f / a0;
+            _uwCoef[s][3] = -2.f * c / a0;
+            _uwCoef[s][4] = (1.f - alpha) / a0;
+        }
+    }
+    float* ch[2] = {l, r};
+    const float g0 = _uwGain, dg = (gain1 - g0) / kFrameSize;
+    for (int c = 0; c < 2; c++)
+        for (int s = 0; s < 2; s++)
+        {
+            float* st = _uwState[c][s];
+            const float* k = _uwCoef[s];
+            for (int i = 0; i < kFrameSize; i++)
+            {
+                const float x = ch[c][i];
+                const float y = k[0] * x + k[1] * st[0] + k[2] * st[1] - k[3] * st[2] - k[4] * st[3];
+                st[1] = st[0];
+                st[0] = x;
+                st[3] = st[2];
+                st[2] = y;
+                ch[c][i] = y;
+            }
+        }
+    for (int i = 0; i < kFrameSize; i++)
+    {
+        const float g = g0 + dg * i;
+        l[i] *= g;
+        r[i] *= g;
+    }
+    _uwGain = gain1;
 }
 
 // Closer than this to the listener a 3D source has no usable direction (see MixVoiceFrame).
@@ -729,8 +797,8 @@ void Mixer::MixVoiceFrame(MixVoice& v, float* sendBuf)
             const float g = g0 + dg * i;
             const float l = src[i * ch];
             const float r = ch > 1 ? src[i * ch + 1] : l;
-            _mixL[i] += l * g;
-            _mixR[i] += r * g;
+            (p.unmuffled ? _dryL : _mixL)[i] += l * g;
+            (p.unmuffled ? _dryR : _mixR)[i] += r * g;
         }
         v._lastGain = g1;
         return;
@@ -848,8 +916,8 @@ void Mixer::MixVoiceFrame(MixVoice& v, float* sendBuf)
         const float* r = v._stereo.data[1];
         for (int i = 0; i < kFrameSize; i++)
         {
-            _mixL[i] += l[i];
-            _mixR[i] += r[i];
+            (p.unmuffled ? _dryL : _mixL)[i] += l[i];
+            (p.unmuffled ? _dryR : _mixR)[i] += r[i];
         }
     }
     else
@@ -869,7 +937,7 @@ void Mixer::MixVoiceFrame(MixVoice& v, float* sendBuf)
         const float inv = 1.f / kFrameSize;
         for (int c = 0; c < 2; c++)
         {
-            float* outCh = c == 0 ? _mixL.data() : _mixR.data();
+            float* outCh = c == 0 ? (p.unmuffled ? _dryL : _mixL).data() : (p.unmuffled ? _dryR : _mixR).data();
             const float w0 = v._pan[c];
             const float dw = pan[c] - w0;
             for (int i = 0; i < kFrameSize; i++)

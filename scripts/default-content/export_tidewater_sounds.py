@@ -27,8 +27,8 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-LOOPS = ["surf_far", "boat_engine", "boat_lap", "boat_rush", "whale_song"]
-SPRITES = ["surf_crash", "surf_wash", "surf_backwash", "hull_slap", "whale_blow", "big_splash", "emerge", "gull", "tern"]
+LOOPS = ["surf_far", "boat_engine", "boat_lap", "boat_rush", "whale_song", "under_reef"]
+SPRITES = ["surf_crash", "surf_wash", "surf_backwash", "hull_slap", "whale_blow", "big_splash", "emerge", "submerge", "gull", "tern"]
 
 
 def bank(root):

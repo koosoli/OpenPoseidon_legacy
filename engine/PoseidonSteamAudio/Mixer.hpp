@@ -65,6 +65,8 @@ class MixVoice
         bool reverbSend = false;
         // Geometry occlusion per band (low / mid / high), 1 = clear (Occlusion.hpp).
         float occlusion[3] = {1.f, 1.f, 1.f};
+        // (OP) mixed past the underwater filter (Mixer::SetUnderwater)
+        bool unmuffled = false;
     };
 
     enum class SourceKind
@@ -214,6 +216,12 @@ class Mixer
 
     void SetListener(const float pos[3], const float vel[3], const float dir[3], const float up[3]);
     void SetMasterGain(float gain) { _masterGain.store(gain, std::memory_order_release); }
+    // (OP) the listener under water: 0..1 and the depth (m), Tidewater's muffling of everything from above
+    void SetUnderwater(float under, float depth)
+    {
+        _uwUnder.store(under, std::memory_order_release);
+        _uwDepth.store(depth, std::memory_order_release);
+    }
     void SetDevicePaused(bool paused);
 
     // Reverb: nullptr disables the wet bus.
@@ -256,6 +264,12 @@ class Mixer
     Listener _listener;
 
     std::atomic<float> _masterGain{1.f};
+    std::atomic<float> _uwUnder{0.f}, _uwDepth{0.f};
+    // the underwater low-pass: two cascaded biquads per channel (Tidewater's muffle LP x2), their state
+    float _uwState[2][2][4] = {};
+    float _uwCut = -1.f, _uwCoef[2][5] = {};
+    float _uwGain = 1.f;
+    void Muffle(float* l, float* r);
     std::atomic<bool> _headphones{false};
 
     std::mutex _reverbMutex;
@@ -271,6 +285,7 @@ class Mixer
     std::vector<float> _out;       // kFrameSize * 2, last rendered frame
     int _outPos = kFrameSize;      // consumed position in _out (frames)
     std::vector<float> _mixL, _mixR, _send, _tmp;
+    std::vector<float> _dryL, _dryR; // (OP) the unmuffled bus
     std::vector<float> _monoScratch; // 3D mono when a voice has no Steam Audio effects
     std::vector<std::shared_ptr<MixVoice>> _snapshot;
 };
