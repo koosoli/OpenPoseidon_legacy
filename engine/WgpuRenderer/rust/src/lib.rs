@@ -682,6 +682,30 @@ const RESIDENCY_BUDGET_FRACTION: f64 = 0.70;
 // fixed value, kept deliberately: an unprobed backend must behave exactly as it did before.
 const RESIDENCY_BUDGET_FALLBACK_MB: u64 = 2048;
 
+/// PERF-MEMBLOCK: the device-memory block size the allocator sub-allocates from.
+///
+/// wgpu's default (`MemoryHints::Performance`) takes VRAM from the driver in 128-256 MB blocks.
+/// A native Everon session at 3440x1440 (2026-10-19, owner pose 5011/5577) measured 4,996 MB
+/// allocated inside 6,144 MB reserved: 1.15 GB of half-empty blocks, left behind by ~2,400 object
+/// textures being evicted and re-uploaded. Windows charges the process for the reservation, not
+/// the allocation, so that slack is what pushed the owner past the OS budget (other apps leave
+/// ~5.5 GB) and into WDDM demotion -- GPU frames 15 -> 200 ms a few minutes in.
+/// 16-64 MB blocks bound the slack per partly used block to a quarter of that; resources larger
+/// than a block get their own allocation either way. WGR_MEMBLOCK_MB=0 = the old 128-256,
+/// =<min>,<max> overrides (clamped 4..256 by wgpu).
+pub(crate) fn device_memory_hints() -> wgpu::MemoryHints {
+    const MB: u64 = 1024 * 1024;
+    match std::env::var("WGR_MEMBLOCK_MB") {
+        Ok(v) if v.trim() == "0" => wgpu::MemoryHints::Performance,
+        Ok(v) => {
+            let p: Vec<u64> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+            let (lo, hi) = if p.len() == 2 && p[0] > 0 && p[1] >= p[0] { (p[0], p[1]) } else { (16, 64) };
+            wgpu::MemoryHints::Manual { suballocated_device_memory_block_size: lo * MB..hi * MB }
+        }
+        Err(_) => wgpu::MemoryHints::Manual { suballocated_device_memory_block_size: 16 * MB..64 * MB },
+    }
+}
+
 /// Read the largest DEVICE_LOCAL heap the adapter reports, in bytes.
 ///
 /// `Ok(bytes)` on success; `Err(reason)` names why not, and the reason is logged verbatim so a
@@ -1732,6 +1756,7 @@ impl Renderer {
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 required_features: requested_features,
                 required_limits,
+                memory_hints: device_memory_hints(),
                 ..Default::default()
             }))
             .map_err(|e| format!("request_device failed: {e}"))?
