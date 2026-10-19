@@ -1440,6 +1440,16 @@ struct WgrGrassParams
        atlas as the tint and the PlantMat's lerp as the amount. Zero = untinted. */
     float native_tint[3];
     float native_tint_lerp;
+    /* GRS-VAR: the procedural meadow's per-clump looks (flower heads, weed tints, seeding
+       grass). [on, head brightness, share of a clump's blades that bear a head, drift field
+       frequency 1/m]. on = 0 is the meadow before GRS-VAR exactly; the caller clears it on a
+       native (Reforger) world, and the shader gates it there too. */
+    float variety[4];
+    /* Relative weight of each look inside its species group, by slot: grass 0-3 (plain,
+       foxtail, short bent, seeding fescue), weed 4-7 (clover, nettle, thistle, dock), flower
+       8-15 (daisy, poppy, dandelion, cornflower, buttercup, red clover, yarrow, cranesbill).
+       A group whose weights sum to 0 keeps its plain look. */
+    float look_weights[16];
 };
 
 // --- Water (GPU CDLOD surface) -----------------------------------------------
@@ -2411,7 +2421,7 @@ static_assert(sizeof(WgrGrassTrack) == 16, "WgrGrassTrack layout must match the 
 static_assert(sizeof(WgrGrassDownwash) == 16, "WgrGrassDownwash layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSmokeShadowBlob) == 32, "WgrSmokeShadowBlob layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSmokeVolumeParams) == 96, "WgrSmokeVolumeParams layout must match the Rust #[repr(C)] struct");
-  static_assert(sizeof(WgrGrassParams) == 4784, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
+  static_assert(sizeof(WgrGrassParams) == 4864, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterParams) == 1472, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrRainWaterParams) == 48, "WgrRainWaterParams must match Rust");
 static_assert(sizeof(WgrRainWaterSourceKey)==32 && offsetof(WgrRainWaterSourceKey,terrain_range)==24);

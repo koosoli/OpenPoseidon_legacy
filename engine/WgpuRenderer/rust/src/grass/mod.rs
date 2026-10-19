@@ -405,8 +405,37 @@ struct GrassParams {
     native_look2: [f32; 4],
     // RFG-160: the native near ring's reach (native_ring_from_env).
     native_ring: [f32; 4],
-    // GRS-VAR: OFP meadow variety (grass.wgsl `variety`, variety_from_env).
+    // GRS-VAR: OFP meadow variety (grass.wgsl `variety`, resolve_variety): .x on, .y head
+    // brightness, .z head share, .w drift frequency; and the per-slot look weights.
     variety: [f32; 4],
+    look_weights: [f32; 16],
+}
+
+/// GRS-VAR: the shipped look weights (Engine.hpp GrassSettings::lookWeights mirrors them).
+const DEFAULT_LOOK_WEIGHTS: [f32; 16] =
+    [3.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+
+/// GRS-VAR: the caller's variety lanes, with the environment as the A/B lever on top:
+/// WGR_GRASS_VARIETY=0 forces the pre-GRS-VAR meadow, =1 forces it on; the other variables
+/// replace one lane each.
+fn resolve_variety(caller: [f32; 4]) -> [f32; 4] {
+    let env = variety_from_env();
+    let set = |key: &str| std::env::var(key).is_ok();
+    [
+        if set("WGR_GRASS_VARIETY") { env[0] } else if caller[0] > 0.5 { 1.0 } else { 0.0 },
+        if set("WGR_GRASS_HEAD_BRIGHTNESS") { env[1] } else { caller[1].clamp(0.0, 2.0) },
+        if set("WGR_GRASS_HEAD_SHARE") { env[2] } else { caller[2].clamp(0.0, 1.0) },
+        if set("WGR_GRASS_LOOK_DRIFT") { env[3] } else if caller[3] > 0.0 { caller[3].clamp(0.005, 1.0) } else { env[3] },
+    ]
+}
+
+fn resolve_look_weights(caller: [f32; 16]) -> [f32; 16] {
+    let mut w = caller.map(|v| if v.is_finite() { v.clamp(0.0, 100.0) } else { 0.0 });
+    // An unset block (every lane 0) is a caller that predates the weights: shipped defaults.
+    if w.iter().all(|&v| v == 0.0) {
+        w = DEFAULT_LOOK_WEIGHTS;
+    }
+    w
 }
 
 /// GRS-VAR: `WGR_GRASS_SPECIES_MIX=weed,flower` overrides the Grass tab's species mix -- a fixed
@@ -436,7 +465,7 @@ fn variety_from_env() -> [f32; 4] {
         num("WGR_GRASS_VARIETY", 1.0, 0.0, 1.0),
         num("WGR_GRASS_HEAD_BRIGHTNESS", 0.8, 0.0, 2.0),
         num("WGR_GRASS_HEAD_SHARE", 0.5, 0.0, 1.0),
-        0.0,
+        num("WGR_GRASS_LOOK_DRIFT", 0.09, 0.005, 1.0),
     ]
 }
 
@@ -991,6 +1020,7 @@ impl Grass {
             native_look2: native_look_from_env().1,
             native_ring: native_ring_from_env(),
             variety: variety_from_env(),
+            look_weights: DEFAULT_LOOK_WEIGHTS,
         };
         queue.write_buffer(&grass_params, 0, bytemuck::bytes_of(&params));
 
@@ -2784,7 +2814,8 @@ impl Grass {
             native_look: self.last_params.native_look,
             native_look2: self.last_params.native_look2,
             native_ring: self.last_params.native_ring,
-            variety: self.last_params.variety,
+            variety: resolve_variety(params.variety),
+            look_weights: resolve_look_weights(params.look_weights),
         };
         self.near_grid_dim = near_grid_dim;
         self.mid_grid_dim = mid_grid_dim;
@@ -3711,6 +3742,9 @@ mod tests {
         assert!(SHADER.contains(
             "return grass.variety.x > 0.5 && grass.native.x <= 0.0 && grass.native2.w < 0.5;"
         ));
+        // A caller that leaves the block zeroed gets the shipped weights, never an empty group.
+        assert_eq!(resolve_look_weights([0.0; 16]), DEFAULT_LOOK_WEIGHTS);
+        assert_eq!(resolve_look_weights([f32::NAN; 16])[0], DEFAULT_LOOK_WEIGHTS[0]);
         assert!(fn_body(SHADER, "pick_look").starts_with("fn pick_look(world_xz: vec2<f32>, species: u32) -> u32 {\n    if (!variety_on()) { return 0u; }"));
     }
 

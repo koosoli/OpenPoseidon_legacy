@@ -1359,7 +1359,21 @@ class Engine : public IGraphicsEngine
         float dryPatches = 0.08f;
         float dryPatchScale = 0.003f;
         float weedPercent = 0.37f;
-        float flowerPercent = 0.08f;
+        // GRS-VAR: 0.08 -> 0.12 once flower clumps carried visible heads.
+        float flowerPercent = 0.12f;
+        // GRS-VAR: per-clump looks inside each species group (flower heads, weed tints,
+        // seeding grass). Off = the meadow before GRS-VAR exactly. Never on a native world.
+        bool meadowVariety = true;
+        // Drift field frequency (1/m): ~11 m patches of one look at 0.09.
+        float lookDrift = 0.09f;
+        // Share of a flower / seeding clump's blades that carry the head.
+        float headShare = 0.5f;
+        float headBrightness = 0.8f;
+        // Weight of each look in its group, by slot (WgrGrassParams::look_weights):
+        // grass plain/foxtail/bent/fescue, weed clover/nettle/thistle/dock, flower
+        // daisy/poppy/dandelion/cornflower/buttercup/red clover/yarrow/cranesbill.
+        float lookWeights[16] = {3.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+                                 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
         // Blade silhouette variety. The four grass species shared ONE profile,
         // so a field read as the same blade repeated over and over -- the first
         // thing a tester notices standing in it. 0 reproduces that legacy look

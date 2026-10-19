@@ -166,8 +166,10 @@ struct GrassParams {
     // exponent of the survivors, .z height floor in the outer dissolve, .w radius multiplier
     // (applied by grass/mod.rs to near_radius).
     native_ring: vec4<f32>,
-    // GRS-VAR (grass/mod.rs variety_from_env): .x on, .y head brightness, .z head share, .w spare.
+    // GRS-VAR (grass/mod.rs resolve_variety): .x on, .y head brightness, .z head share, .w drift
+    // field frequency (1/m); look_weights = the per-slot weights pick_look draws from.
     variety: vec4<f32>,
+    look_weights: array<vec4<f32>, 4>,
 };
 
 // 32 bytes. `pos_seed` stays f32 for world precision; everything the compute
@@ -1264,27 +1266,63 @@ fn variety_on() -> bool {
 
 fn instance_look(packed_w: u32) -> u32 { return (packed_w >> LOOK_SHIFT) & 15u; }
 
+// Slot -> look id. Slots are what the weights index (a look id can sit in two groups: 0 is
+// plain grass and clover): grass 0-3, weed 4-7, flower 8-15.
+fn slot_look(slot: u32) -> u32 {
+    switch (slot) {
+        case 0u, 4u: { return 0u; }
+        case 1u: { return 1u; }
+        case 2u: { return 2u; }
+        case 3u: { return 14u; }
+        case 5u: { return 3u; }
+        case 6u: { return 4u; }
+        case 7u: { return 5u; }
+        default: { return slot - 2u; }
+    }
+}
+
+// The dry_patch mask at a point (same field and threshold, so the seed heads land where the
+// field browns).
+fn dry_patch_mask(world_xz: vec2<f32>) -> f32 {
+    let amount = clamp(grass.look.y, 0.0, 1.0);
+    if (amount <= 0.001) { return 0.0; }
+    let field = clump_noise(world_xz, max(grass.look.z, 0.002), 0x93b5e1a7u);
+    return smoothstep(1.0 - amount, 1.0 - amount * 0.05, field);
+}
+
+fn slot_weight(slot: u32, dry: f32) -> f32 {
+    let w = max(grass.look_weights[slot / 4u][slot % 4u], 0.0);
+    // Seeding grasses and dock take over where the meadow dries: x3 at the patch centre.
+    let seeding = slot == 1u || slot == 3u || slot == 7u;
+    return w * select(1.0, 1.0 + 2.0 * dry, seeding);
+}
+
 fn pick_look(world_xz: vec2<f32>, species: u32) -> u32 {
     if (!variety_on()) { return 0u; }
-    // A ~11 m field of its own, folded so each look forms drifts with a light sprinkle of its
-    // neighbours; the ~25 m group field in pick_species still decides grass / weed / flower.
-    let field = clump_noise(world_xz, 0.09, 0x3c6ef372u);
+    // A drift field of its own (variety.w, ~11 m by default), folded so each look forms drifts
+    // with a light sprinkle of its neighbours; the ~25 m group field in pick_species still
+    // decides grass / weed / flower.
+    let field = clump_noise(world_xz, clamp(grass.variety.w, 0.005, 1.0), 0x3c6ef372u);
     let h = fract(field * 3.0 + hash11(world_xz * 0.37 + vec2<f32>(5.3, 1.7)) * 0.3);
+    var first = 0u;
+    var count = 4u;
     if (species >= SPECIES_WEED_END) {
-        return 6u + min(u32(h * 8.0), 7u);
+        first = 8u;
+        count = 8u;
+    } else if (species >= SPECIES_GRASS_END) {
+        first = 4u;
     }
-    if (species >= SPECIES_GRASS_END) {
-        // Clover keeps a quarter of the weed drifts: 0, 3, 4, 5.
-        let i = min(u32(h * 4.0), 3u);
-        return select(2u + i, 0u, i == 0u);
+    let dry = dry_patch_mask(world_xz);
+    var total = 0.0;
+    for (var i = 0u; i < count; i = i + 1u) { total = total + slot_weight(first + i, dry); }
+    if (total <= 0.0) { return slot_look(first); }
+    let goal = h * total;
+    var acc = 0.0;
+    for (var i = 0u; i < count; i = i + 1u) {
+        acc = acc + slot_weight(first + i, dry);
+        if (goal < acc) { return slot_look(first + i); }
     }
-    // Plain grass keeps half the meadow.
-    switch (min(u32(h * 6.0), 5u)) {
-        case 3u: { return 1u; }
-        case 4u: { return 2u; }
-        case 5u: { return 14u; }
-        default: { return 0u; }
-    }
+    return slot_look(first + count - 1u);
 }
 
 // (width scale, height scale) on top of species_shape_mixed. (1, 1) for look 0.

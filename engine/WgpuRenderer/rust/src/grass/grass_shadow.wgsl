@@ -64,8 +64,10 @@ struct GrassParams {
     native_look: vec4<f32>,
     native_look2: vec4<f32>,
     native_ring: vec4<f32>,
-    // GRS-VAR (grass/mod.rs variety_from_env): .x on, .y head brightness, .z head share, .w spare.
+    // GRS-VAR (grass/mod.rs resolve_variety): .x on, .y head brightness, .z head share, .w drift
+    // field frequency (1/m); look_weights = the per-slot weights pick_look draws from.
     variety: vec4<f32>,
+    look_weights: array<vec4<f32>, 4>,
 };
 // Must mirror grass.wgsl's 32-byte layout exactly: both shaders bind the same
 // instance buffer through the shared `data_layout`.

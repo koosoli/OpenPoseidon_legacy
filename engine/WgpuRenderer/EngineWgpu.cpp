@@ -21450,6 +21450,13 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     params.blade_root_shade = std::clamp(settings.bladeRootShade, 0.0f, 0.95f);
     params.weed_percent = std::clamp(settings.weedPercent, 0.0f, 1.0f);
     params.flower_percent = std::clamp(settings.flowerPercent, 0.0f, 1.0f - params.weed_percent);
+    // GRS-VAR: the procedural meadow's looks; a native world keeps its own PlantMat cover.
+    params.variety[0] = (settings.meadowVariety && !HasEnfusionSurfaces()) ? 1.0f : 0.0f;
+    params.variety[1] = std::clamp(settings.headBrightness, 0.0f, 2.0f);
+    params.variety[2] = std::clamp(settings.headShare, 0.0f, 1.0f);
+    params.variety[3] = std::clamp(settings.lookDrift, 0.005f, 1.0f);
+    for (size_t i = 0; i < 16; ++i)
+        params.look_weights[i] = std::clamp(settings.lookWeights[i], 0.0f, 100.0f);
     // Everon/Eden's legacy geography marks normal terrain as excluded. The
     // terrain renderer identifies it from the actual uploaded WRP, so grass
     // works without requiring the user to discover a diagnostic checkbox.

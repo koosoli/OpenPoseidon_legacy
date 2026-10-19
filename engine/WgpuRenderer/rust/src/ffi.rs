@@ -1466,6 +1466,10 @@ pub struct WgrGrassParams {
     /// RFG-091: see `native_tint` in wgpu_renderer.h.
     pub native_tint: [f32; 3],
     pub native_tint_lerp: f32,
+    /// GRS-VAR: see `variety` in wgpu_renderer.hpp.
+    pub variety: [f32; 4],
+    /// GRS-VAR: see `look_weights` in wgpu_renderer.hpp.
+    pub look_weights: [f32; 16],
 }
 
 // Additive rainfall grid API. The ocean/backends retain their existing layout.
@@ -1807,7 +1811,7 @@ const _: () = assert!(std::mem::size_of::<WgrGrassDownwash>() == 16);
 // block and eight per-layer weights complete five further vec4s
 // (GrassParams.photo / .place / .photo_mix / .layer_weights[2]). 4736 + 32 for
 // the card-coverage / procedural-look pair (GrassParams.card_look / .blade_look).
-const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4784);
+const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4864);
 const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 1472);
 const _: () = assert!(std::mem::size_of::<WgrRainWaterParams>() == 48);
 const _: () = assert!(std::mem::size_of::<WgrRainWaterSourceKey>()==32 && std::mem::offset_of!(WgrRainWaterSourceKey,terrain_range)==24);

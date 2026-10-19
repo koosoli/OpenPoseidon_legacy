@@ -4224,6 +4224,30 @@ void DrawGrassTab()
                        "patches), so these are area fractions, not per-blade odds.",
                        (1.0f - weed - flower) * 100.0f, weed * 100.0f, flower * 100.0f);
     }
+    // GRS-VAR: which look each clump of a group takes.
+    changed |= Dev::Checkbox("Meadow variety", &grass.meadowVariety);
+    Dev::PanelHelp("Flower heads, weed tints and seeding grass per clump. Off = the meadow before it. "
+                   "Never applies on a native (Reforger) world. WGR_GRASS_VARIETY=0/1 overrides.");
+    if (grass.meadowVariety)
+    {
+        changed |= Dev::SliderFloat("Look drift size", &grass.lookDrift, 0.01f, 0.5f, "%.3f /m");
+        Dev::PanelHelp("Frequency of the field that groups one look into a drift: 0.09 = ~11 m patches.");
+        changed |= Dev::SliderFloat("Head share", &grass.headShare, 0.0f, 1.0f, "%.2f");
+        Dev::PanelHelp("Share of a flowering or seeding clump's blades that carry the head.");
+        changed |= Dev::SliderFloat("Head brightness", &grass.headBrightness, 0.0f, 2.0f, "%.2f");
+        if (ImGui::TreeNode("Look weights##grassVariety"))
+        {
+            static const char* const LookNames[16] = {
+                "Grass: plain",     "Grass: foxtail",   "Grass: short bent", "Grass: seeding fescue",
+                "Weed: clover",     "Weed: nettle",     "Weed: thistle",     "Weed: dock",
+                "Flower: daisy",    "Flower: poppy",    "Flower: dandelion", "Flower: cornflower",
+                "Flower: buttercup", "Flower: red clover", "Flower: yarrow",  "Flower: cranesbill"};
+            for (int i = 0; i < 16; ++i)
+                changed |= Dev::SliderFloat(LookNames[i], &grass.lookWeights[i], 0.0f, 10.0f, "%.1f");
+            Dev::PanelHelp("Relative odds inside each group. A group at all zeros keeps its plain look.");
+            ImGui::TreePop();
+        }
+    }
     changed |= Dev::SliderFloat("Blade height", &grass.height, 0.10f, 3.0f, "%.2fx");
     changed |= Dev::Checkbox("Use live world wind", &grass.useLiveWind);
     changed |= Dev::SliderFloat("Wind strength", &grass.windStrength, 0.0f, 3.0f, "%.2f");
