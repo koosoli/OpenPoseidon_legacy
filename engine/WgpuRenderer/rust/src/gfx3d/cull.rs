@@ -895,6 +895,8 @@ fn resolved_sections_changed(previous: &[SectionGpu], next: &[SectionGpu],
 pub struct CullState {
     // No heap/readback allocation until an enabled explicit request.
     lod_feedback: Option<RefCell<Box<super::lod_feedback::LodFeedback>>>,
+    /// PERF-LOD-USAGE (WGR_LOD_USAGE_REPORT=1): main-view section usage sampling.
+    lod_usage: Option<RefCell<super::lod_usage::LodUsage>>,
     // Instancing-collapse three-pass pipelines (§3.6), all over `layout`: COUNT (1/instance) ->
     // EMIT (1/section) -> SCATTER (1/instance). Shared by the main + every shadow view.
     count_pipeline: wgpu::ComputePipeline,
@@ -1434,6 +1436,27 @@ impl CullState {
         self.lod_feedback.as_ref().unwrap().borrow_mut().begin();
     }
     pub fn resolve_lod_demand(&self) { if let Some(s) = &self.lod_feedback { s.borrow_mut().resolve(); } }
+    /// PERF-LOD-USAGE: fold finished samples; every 10 s return the window's verdict (and reset).
+    pub fn harvest_lod_usage(&self, device: &wgpu::Device,
+                             mesh_bytes: impl Fn(u32) -> Option<u64>) -> Option<(super::lod_usage::UsageVerdict, u32)> {
+        let usage = self.lod_usage.as_ref()?;
+        let mut u = usage.borrow_mut();
+        u.harvest(device);
+        if u.window_start.elapsed().as_secs() < 10 || u.samples == 0 {
+            return None;
+        }
+        let models: Vec<(u32, u32)> = self.models.iter().map(|m| (m.lod_base, m.lod_count)).collect();
+        let lods: Vec<(u32, u32)> = self.lods.iter().map(|l| (l.section_base, l.section_count)).collect();
+        let verdict = super::lod_usage::verdict(&u.used, &models, &lods, |s| {
+            let sec = self.sections.get(s)?;
+            if sec.index_count == 0 { return None; }
+            Some((sec.base_vertex, mesh_bytes(sec.base_vertex)?))
+        });
+        let samples = u.samples;
+        u.reset_window();
+        Some((verdict, samples))
+    }
+
     pub fn harvest_lod_demand(&self, device: &wgpu::Device) { if let Some(s) = &self.lod_feedback { s.borrow_mut().harvest(device); } }
     pub fn lod_demand_report(&self, epoch: u64) -> Option<crate::ffi::WgrLodDemandReport> {
         self.lod_feedback.as_ref().and_then(|s| { let s = s.borrow(); (s.report.epoch == epoch).then_some(s.report) })
@@ -1714,6 +1737,7 @@ impl CullState {
             stats_readback,
             stats_latest: CullStats::default(),
             lod_feedback: None,
+            lod_usage: super::lod_usage::enabled().then(|| RefCell::new(super::lod_usage::LodUsage::new())),
         }
     }
 
@@ -3616,14 +3640,13 @@ impl CullState {
         // frame reports honest zeros rather than repeating its last dispatch's numbers — the
         // same stale-region trap the GPU timers already had to solve. `stats_view` is kept in the
         // signature so each dispatch site still states which slice it writes.
-        let _ = stats_view;
         let inst_groups = self.params.instance_count.div_ceil(64);
         // EMIT is one thread per GLOBAL section; a scene with no registered sections skips it.
         let sec_groups = (self.sections.len() as u32).div_ceil(64);
         // Each pass is its OWN begin_compute_pass: wgpu auto-inserts the storage barrier BETWEEN
         // compute passes (COUNT's sec_count writes -> EMIT reads; EMIT's writes -> SCATTER reads),
         // but NOT between dispatches within one pass (they'd race). Same as the terrain/sky computes.
-        let mut pass = |pl: &wgpu::ComputePipeline, groups: u32, name: &str| {
+        let pass = |encoder: &mut wgpu::CommandEncoder, pl: &wgpu::ComputePipeline, groups: u32, name: &str| {
             let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(name),
                 timestamp_writes: None,
@@ -3632,12 +3655,16 @@ impl CullState {
             cp.set_bind_group(0, bind, &[]);
             cp.dispatch_workgroups(groups, 1, 1);
         };
-        pass(count_pl, inst_groups, label);
-        if sec_groups > 0 {
-            pass(emit_pl, sec_groups, label);
+        pass(encoder, count_pl, inst_groups, label);
+        if stats_view == STATS_VIEW_MAIN && label == "wgr_cull" {
+            if let Some(usage) = &self.lod_usage {
+                usage.borrow_mut().capture(encoder, sec_count, self.sections.len());
+            }
         }
-        pass(scatter_pl, inst_groups, label);
-        drop(pass);
+        if sec_groups > 0 {
+            pass(encoder, emit_pl, sec_groups, label);
+        }
+        pass(encoder, scatter_pl, inst_groups, label);
         if let Some(feedback) = &self.lod_feedback {
             let category = if label.contains("shadow") { 4 } else if label.contains("reflection") { 8 }
                 else if label.contains("sky") { 16 } else if label.contains("color") { 2 } else { 1 };
@@ -4968,7 +4995,7 @@ fn ensure_view_outputs(
         *sec_count = Some(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_cull_sec_count"),
             size: sec_bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC, // COPY_SRC: PERF-LOD-USAGE sampling
             mapped_at_creation: false,
         }));
         *sec_count_cap = sec_bytes;

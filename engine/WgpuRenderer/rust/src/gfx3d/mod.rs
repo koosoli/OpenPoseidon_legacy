@@ -39,6 +39,7 @@ mod gi_rsm_cached_count;
 mod local_publication;
 pub(crate) mod geometry_pass_facts;
 mod lod_feedback;
+mod lod_usage;
 #[allow(dead_code)]
 pub(crate) mod view_reference_facts;
 use pool::{GeometryPool, MeshAlloc};
@@ -11389,6 +11390,21 @@ impl Gfx3d {
     /// Drain completed stats readbacks (after queue.submit, alongside GpuTimers::harvest).
     pub fn harvest_object_stats(&mut self, device: &wgpu::Device) {
         self.cull.harvest_stats(device);
+        if lod_usage::enabled() {
+            // PERF-LOD-USAGE: pool bytes per mesh, keyed by its vbase (what a section names).
+            let by_vbase: FxHashMap<u32, u64> = self.meshes.values()
+                .map(|m| (m.alloc.vbase, u64::from(m.vert_count) * std::mem::size_of::<WgrMeshVertex>() as u64
+                    + u64::from(m.index_count) * 4))
+                .collect();
+            if let Some((v, samples)) = self.cull.harvest_lod_usage(device, |vb| by_vbase.get(&vb).copied()) {
+                const MB: f64 = 1048576.0;
+                self.queued_log.push(format!(
+                    "LOD usage (main view, {samples} samples / 10 s): geometry {:.0} MB in {} models ({} drawn);                      drawn levels {:.0} MB, + one finer margin level + coarser fallbacks {:.0} MB,                      models not drawn at all {:.0} MB, finer-than-margin levels of drawn models {:.0} MB                      (WGR_LOD_USAGE_REPORT)",
+                    v.total as f64 / MB, v.models, v.models_drawn, v.drawn as f64 / MB,
+                    v.needed_with_margin as f64 / MB, v.undrawn_models as f64 / MB,
+                    (v.total - v.needed_with_margin - v.undrawn_models) as f64 / MB));
+            }
+        }
     }
 
     pub fn arm_main_target_count(&mut self, device: &wgpu::Device, token: u64,
