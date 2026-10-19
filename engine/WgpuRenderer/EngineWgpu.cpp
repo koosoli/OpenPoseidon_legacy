@@ -18724,6 +18724,25 @@ void EngineWgpu::SetShadowCascades(const shadow::CascadeSet& cascades, int resol
 // staleness: a moving object's far shadow, or a swaying crown 40+ m away, lags by one frame.
 //
 // WGR_SHADOW_CASCADE_CACHE=0 renders every cascade every frame, exactly as before.
+// PERF-SHADOW-FAR-PERIOD: whose turn it is to re-render. Cascade 2 keeps the every-other-frame
+// turn; the farthest cascade (3) now re-renders one frame in WGR_SHADOW_FAR_PERIOD (default 4,
+// 2 = the old alternation), on a frame cascade 2 sits out, so no frame renders both. Cascade 3
+// covers ~100-400 m, where a shadow texel is ~0.5 m: what can change there between refreshes
+// is a moving object's distant shadow, lagging at most three frames. A turn only ever skips a
+// re-render the coverage test has already allowed; a fast turn or a jump still re-renders.
+static bool CascadeRefreshTurn(int cascade, uint64_t tick)
+{
+    static const uint64_t farPeriod = []
+    {
+        const char* v = std::getenv("WGR_SHADOW_FAR_PERIOD");
+        const int n = v && *v ? std::atoi(v) : 4;
+        return static_cast<uint64_t>(n == 2 || n == 4 || n == 8 ? n : 4);
+    }();
+    if (cascade == 3 && farPeriod > 2)
+        return (tick % farPeriod) == 1; // an odd tick: cascade 2 renders on even ones
+    return ((tick + static_cast<uint64_t>(cascade)) & 1u) == 0; // every other frame
+}
+
 void EngineWgpu::UpdateShadowCascadeCache()
 {
     static const bool enabled = []
@@ -18773,7 +18792,7 @@ void EngineWgpu::UpdateShadowCascadeCache()
                     old.count == fresh.count && old.omniCount == fresh.omniCount &&
                     old.resolution == fresh.resolution && old.split == fresh.split &&
                     old.omniRadius == fresh.omniRadius && shadow::Dot(old.sunDir, fresh.sunDir) >= cosSunTolerance &&
-                    ((_smCacheTick + static_cast<uint64_t>(c)) & 1u) != 0; // this cascade's turn is every other frame
+                    !CascadeRefreshTurn(c, _smCacheTick);
         shadow::Mat4 carried;
         if (keep)
         {
