@@ -94,6 +94,8 @@ class TextureBankWgpu : public AbstractTextBank
     // REPORT is periodic, because the interesting quantity is a working set, and a working set
     // does not change meaningfully between two consecutive frames.
     uint64_t _mipReportDue = 0;
+    // PERF-TRIM-BACKOFF: no texture trim before this residency frame (see TrimResidency).
+    uint64_t _trimBackoffUntil = 0;
     // What the GPU says about the CPU's residency decisions. See ReportMipFeedback.
     void ReportMipFeedback();
     uint64_t _adaptiveViewEpoch = 1;

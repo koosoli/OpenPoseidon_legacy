@@ -6151,8 +6151,16 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                             render::GObjectAdmitProfile.active = true;
                         }
                         ShapeBank::WorldModelScope worldModel(Shapes);
+                        // STREAM-EMAT-PREP, far half: ParkStreamTexPrep decoded this model's face and
+                        // .emat maps in the background, but nothing here took them -- 964 of 1,379 ms of
+                        // far installs on a Durras flight were synchronous texture loads ("prepared 0"),
+                        // 60-85 ms main-thread frames inside swap.
+                        std::optional<NativeInstallTextureScope> takePrepared;
+                        if (NativeTexturePrepApplies(GEngine ? GEngine->TextBank() : nullptr))
+                            takePrepared.emplace();
                         shape = Shapes.NewFromModel(name, false, true, std::move(converted.model),
                                                     nullptr, converted.shape);
+                        takePrepared.reset();
                         const double newMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tNew).count();
                         ++_nativeFarStats.installs;
                         _nativeFarStats.installMs += newMs;

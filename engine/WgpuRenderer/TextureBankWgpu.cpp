@@ -340,6 +340,22 @@ void TextureBankWgpu::TrimResidency()
     const uint64_t textureBudget = TextureBudgetBytes(stats.budget_bytes);
     if (stats.object_texture_bytes <= textureBudget)
         return;
+    // PERF-TRIM-BACKOFF (2026-10-20). Over the TEXTURE budget with the whole VRAM budget still
+    // met is a soft overage. When the last trim could not get under it (everything still in use
+    // is exempt, see below), trying again next frame only repeats it: on a 15 m/s Reforger
+    // Durras flight the trim ran 48 times, 32 of them evicting ONE texture, and every run opened
+    // the producer window -- the main thread waiting 40-170 ms for the render thread, one slow
+    // frame per trim (textures 2.13 GB over a 1.74 GB texture budget, 3.3 of 3.5 GB in all).
+    // After such a trim the next waits ~10 s (WGR_TEXTURE_TRIM_BACKOFF_FRAMES, 0 = off). Real
+    // pressure -- tracked bytes past the whole budget -- never waits.
+    static const uint64_t trimBackoff = []
+    {
+        const char* v = std::getenv("WGR_TEXTURE_TRIM_BACKOFF_FRAMES");
+        return v ? static_cast<uint64_t>(std::clamp<long long>(std::strtoll(v, nullptr, 10), 0, 36000)) : 600ull;
+    }();
+    const bool hardPressure = stats.tracked_bytes > stats.budget_bytes;
+    if (!hardPressure && _residencyFrame < _trimBackoffUntil)
+        return;
 
     // NOTE on the ResidentPins() check below. A pin means "some REGISTERED model references
     // this", and while pins were unconditionally exempt this LRU starved to 1-31 candidates on
@@ -441,6 +457,10 @@ void TextureBankWgpu::TrimResidency()
             stats.object_texture_bytes <= target)
             break;
     }
+    // PERF-TRIM-BACKOFF: still over after evicting everything it was allowed to -- back off.
+    if (wgr_get_memory_stats(_renderer, &stats) && stats.object_texture_bytes > textureBudget &&
+        stats.tracked_bytes <= stats.budget_bytes)
+        _trimBackoffUntil = _residencyFrame + trimBackoff;
     if (evicted && wgr_get_memory_stats(_renderer, &stats))
         LOG_INFO(Graphics,
                  "Wgpu texture LRU: evicted={} (pinned={}) textureBytes={} textureBudget={} tracked={} budget={} "
