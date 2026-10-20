@@ -16,6 +16,7 @@ namespace Poseidon::Foundation
 {
 extern bool poSetMyPriority(int delta);
 }
+extern bool GUseFileBanks; // QBStream.cpp, global scope
 #include <Poseidon/World/Terrain/AuthoredObjectIds.hpp>
 #include <Poseidon/World/Terrain/TerrainSubdivision.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
@@ -57,6 +58,8 @@ extern bool poSetMyPriority(int delta);
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp> // ShapeBank::Find / NewFromModel (async admission)
 #include <Poseidon/World/Model/ShapeAdapter.hpp> // BuildAdapterBankTables (stage-3 async adapt)
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp> // the split of `create`
+#include <Poseidon/Graphics/Textures/PAADecoder.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamRapStageNames.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // worker-prepared texture store (clear + stats)
 #include <Poseidon/World/Model/Model.hpp>              // the IR handed over by ObjectStreamPreparer
 #include <Poseidon/World/Model/ModelMemory.hpp>        // conversion reservation estimate
@@ -3736,6 +3739,35 @@ static bool NativeTexturePrepApplies(AbstractTextBank* bank)
     return enabled && bank && Asset::Formats::Enfusion::EnfusionMount::Instance().ArchiveCount() > 0;
 }
 
+// STREAM-PAA-PREP (2026-10-20): the PBO-archive counterpart of NativeTexturePrepApplies. On a
+// DayZ Chernarus+ flight every cold model's PAAs were read from their PBO and LZO-decompressed on
+// the main thread at upload (Nsight: Lzo1x::Decompress 27% of the main thread in frames > 50 ms;
+// "texprep worker=0chains", 0 of 2,398 uploads prepared). POSEIDON_STREAM_PAA_PREP=0 = off.
+static bool PaaTexturePrepApplies(AbstractTextBank* bank)
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("POSEIDON_STREAM_PAA_PREP");
+        return !(v && v[0] == '0');
+    }();
+    return enabled && bank && GUseFileBanks && render::PreparedTextureStore::Enabled() &&
+           Asset::Formats::Enfusion::EnfusionMount::Instance().ArchiveCount() == 0;
+}
+
+// The background texture tasks of parked models: one per model, at most a quarter of the cores
+// (2..6, POSEIDON_STREAM_PREP_THREADS) at a time, below normal priority.
+static std::counting_semaphore<64>& StreamPrepGate()
+{
+    static std::counting_semaphore<64> gate([]
+    {
+        const char* v = std::getenv("POSEIDON_STREAM_PREP_THREADS");
+        const long want = v ? std::strtol(v, nullptr, 10)
+                            : static_cast<long>(std::thread::hardware_concurrency() / 4);
+        return static_cast<std::ptrdiff_t>(std::clamp<long>(want, v ? 1 : 2, v ? 64 : 6));
+    }());
+    return gate;
+}
+
 // PERF-FAR-ASYNC-PREP lever (see UpdateNativeFarResidency).
 static bool NativeFarAsyncPrep()
 {
@@ -3762,9 +3794,120 @@ static void BuildStreamedBankTables(const Model::Model& model, Model::ShapeAdapt
     Model::ShapeAdapter::BuildAdapterBankTables(model, tables);
 }
 
+// STREAM-PAA-PREP: capture one PAA's immutable archive member for a background read (main thread:
+// the bank lookup is). Skips what is loaded, prepared/claimed, or not a plain PBO member.
+static void CapturePaaRead(AbstractTextBank* bank, const std::string& raw,
+                           std::vector<std::pair<std::string, BankReadRequest>>& reads)
+{
+    static std::unordered_set<std::string> claimed; // main thread only
+    if (raw.empty() || reads.size() >= 64)
+        return;
+    std::string key = render::PreparedTextureStore::Key(raw);
+    if (key.size() < 4 || (key.compare(key.size() - 4, 4, ".paa") != 0 && key.compare(key.size() - 4, 4, ".pac") != 0))
+        return;
+    if (claimed.count(key) || bank->IsLoaded(RStringB(key.c_str())) ||
+        !render::PreparedTextureStore::Instance().ShouldPrepare(key))
+        return;
+    QFBank* archive = QIFStreamB::AutoBank(key.c_str());
+    if (!archive || archive->GetPrefix().GetLength() >= static_cast<int>(key.size()))
+        return;
+    auto read = archive->CaptureReadRequest(key.c_str() + archive->GetPrefix().GetLength());
+    if (!read || read->bytes == 0 || read->bytes > 16u * 1024 * 1024)
+        return;
+    claimed.insert(key);
+    reads.emplace_back(std::move(key), std::move(*read));
+}
+
+// STREAM-PAA-PREP, background half: read and LZO-decode the captured PAAs into the prepared store.
+static void DecodePaaReads(std::vector<std::pair<std::string, BankReadRequest>>& reads, uint64_t generation)
+{
+    render::PreparedTextureStore& prepared = render::PreparedTextureStore::Instance();
+    std::vector<char> bytes;
+    for (auto& [key, read] : reads)
+    {
+        try
+        {
+            PAABlockChain chain;
+            if (read.Read(bytes) &&
+                ReadPAABlockChainBuffer(bytes.data(), bytes.size(), chain, nullptr, 64u * 1024 * 1024) &&
+                chain.valid())
+                prepared.Put(key, std::move(chain), generation);
+        }
+        catch (...)
+        {
+            // The upload reads it itself, as before.
+        }
+    }
+}
+
 void Landscape::ParkStreamTexPrep(uint32_t modelIndex, std::shared_ptr<Model::Model> model, bool ownerAdmission)
 {
     AbstractTextBank* bank = GEngine ? GEngine->TextBank() : nullptr;
+    if (PaaTexturePrepApplies(bank))
+    {
+        // STREAM-PAA-PREP: name the model's PAAs here (the bank and the mounted PBOs are main-
+        // thread state), capture each one's immutable archive member, and read + LZO-decode them
+        // on the background task into the prepared store, where the upload's ordinary Take finds
+        // them (it checks every level against the header it parsed itself before using a byte).
+        // A texture that is loaded, already prepared or not a plain stored PBO member is left to
+        // the main thread exactly as before.
+        std::vector<std::pair<std::string, BankReadRequest>> reads;
+        // The .rvmat files too: their stage maps (normal, specular, masks) are resolved only at GPU
+        // registration. The background task reads each material and names its stage PAAs; they are
+        // captured and decoded in FinishStreamTexPrep, while the model converts.
+        static std::unordered_set<std::string> rvmatSeen; // main thread only
+        std::vector<std::pair<std::string, BankReadRequest>> rvmats;
+        if (model)
+            for (const auto& level : model->lodLevels)
+                for (const auto& material : level.mesh.materials)
+                {
+                    CapturePaaRead(bank, material.texturePath, reads);
+                    for (const auto& stage : material.embeddedStages)
+                        CapturePaaRead(bank, stage.texturePath, reads);
+                    std::string rv = render::PreparedTextureStore::Key(material.materialPath);
+                    if (rv.size() > 6 && rv.compare(rv.size() - 6, 6, ".rvmat") == 0 && rvmats.size() < 32 &&
+                        rvmatSeen.insert(rv).second)
+                        if (QFBank* archive = QIFStreamB::AutoBank(rv.c_str());
+                            archive && archive->GetPrefix().GetLength() < static_cast<int>(rv.size()))
+                            if (auto read = archive->CaptureReadRequest(rv.c_str() + archive->GetPrefix().GetLength());
+                                read && read->bytes > 0 && read->bytes <= 256u * 1024)
+                                rvmats.emplace_back(std::move(rv), std::move(*read));
+                }
+        NativeFarTexPrep pending;
+        pending.model = std::move(model);
+        pending.ownerAdmission = ownerAdmission;
+        pending.stageNames = std::make_shared<std::vector<std::string>>();
+        const uint64_t generation = render::PreparedTextureStore::Instance().Generation();
+        pending.decode = std::async(std::launch::async,
+            [reads = std::move(reads), rvmats = std::move(rvmats), stageNames = pending.stageNames, generation]() mutable
+        {
+            std::counting_semaphore<64>& gate = StreamPrepGate();
+            gate.acquire();
+            struct Release { std::counting_semaphore<64>& g; ~Release() { g.release(); } } release{gate};
+            Foundation::poSetMyPriority(-1);
+            DecodePaaReads(reads, generation);
+            std::vector<char> bytes;
+            for (const auto& [path, read] : rvmats)
+            {
+                try
+                {
+                    if (!read.Read(bytes))
+                        continue;
+                    const auto stages = Streaming::ExtractOwnedRapStageNames(std::span<const char>(bytes.data(), bytes.size()), path);
+                    static std::atomic<int> diagRows{0};
+                    if (diagRows.fetch_add(1) < 12)
+                        LOG_INFO(World, "PAA stage prep: {} status={} names={}", path, int(stages.status), stages.names.size());
+                    if (stages.status == Streaming::RapStageNamesStatus::Complete)
+                        stageNames->insert(stageNames->end(), stages.names.begin(), stages.names.end());
+                }
+                catch (...)
+                {
+                }
+            }
+        });
+        _nativeFarTexPrep.insert_or_assign(modelIndex, std::move(pending));
+        return;
+    }
     std::unordered_set<std::string> claims;
     std::vector<std::string> keys = CollectNativeInstallTextureKeys(
         {model.get()}, claims, [bank](const char* n) { return bank && bank->IsLoaded(RStringB(n)); });
@@ -3795,13 +3938,7 @@ void Landscape::ParkStreamTexPrep(uint32_t modelIndex, std::shared_ptr<Model::Mo
         // STREAM-EMAT-PREP: one task per parked model, and a recentre parks hundreds at once.
         // Unbounded, they all decoded together and competed with the main and render threads;
         // at most POSEIDON_STREAM_PREP_THREADS (default: a quarter of the cores, 2..6) run.
-        static std::counting_semaphore<64> gate([]
-        {
-            const char* v = std::getenv("POSEIDON_STREAM_PREP_THREADS");
-            const long want = v ? std::strtol(v, nullptr, 10)
-                                : static_cast<long>(std::thread::hardware_concurrency() / 4);
-            return static_cast<std::ptrdiff_t>(std::clamp<long>(want, v ? 1 : 2, v ? 64 : 6));
-        }());
+        std::counting_semaphore<64>& gate = StreamPrepGate();
         gate.acquire();
         struct Release { std::counting_semaphore<64>& g; ~Release() { g.release(); } } release{gate};
         // Below normal, as the object-stream workers: this decode/encode must never win a core from
@@ -3869,6 +4006,34 @@ bool Landscape::FinishStreamTexPrep(uint32_t modelIndex)
     std::shared_ptr<Model::Model> model = std::move(found->second.model);
     const bool ownerAdmission = found->second.ownerAdmission;
     found->second.decode.get();
+    // STREAM-PAA-PREP: the rvmat stage PAAs the background task named -- captured here (main
+    // thread) and decoded while the model converts. Not waited for: one that is not ready by the
+    // install is read there, as before.
+    if (const auto stageNames = found->second.stageNames; stageNames && !stageNames->empty())
+    {
+        AbstractTextBank* bank = GEngine ? GEngine->TextBank() : nullptr;
+        std::vector<std::pair<std::string, BankReadRequest>> reads;
+        if (bank)
+            for (const std::string& name : *stageNames)
+                CapturePaaRead(bank, name, reads);
+        static int diagFinish = 0;
+        if (diagFinish++ < 12)
+            LOG_INFO(World, "PAA stage prep: model {} stage names {} captured {}", modelIndex, stageNames->size(), reads.size());
+        if (!reads.empty())
+        {
+            const uint64_t generation = render::PreparedTextureStore::Instance().Generation();
+            _paaStageTasks.push_back(std::async(std::launch::async, [reads = std::move(reads), generation]() mutable
+            {
+                std::counting_semaphore<64>& gate = StreamPrepGate();
+                gate.acquire();
+                struct Release { std::counting_semaphore<64>& g; ~Release() { g.release(); } } release{gate};
+                Foundation::poSetMyPriority(-1);
+                DecodePaaReads(reads, generation);
+            }));
+        }
+        std::erase_if(_paaStageTasks, [](const std::future<void>& f)
+                      { return f.wait_for(std::chrono::seconds(0)) == std::future_status::ready; });
+    }
     _nativeFarTexPrep.erase(found);
     if (!model || !_modernObjectPreparer)
         return true;
@@ -5028,7 +5193,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         // branch above submits it once decoded. The DayZ tenement pilot keeps its
                         // own scoped synchronous path.
                         if (AbstractTextBank* nearBank = GEngine ? GEngine->TextBank() : nullptr;
-                            NativeFarAsyncPrep() && NativeTexturePrepApplies(nearBank) &&
+                            NativeFarAsyncPrep() && (NativeTexturePrepApplies(nearBank) || PaaTexturePrepApplies(nearBank)) &&
                             low != R"(dz\structures\residential\tenements\tenement_small.p3d)")
                         {
                             const auto tableStart = std::chrono::steady_clock::now();
@@ -6166,7 +6331,7 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                         // the model waits in _nativeFarTexPrep for the second half above.
                         // WGR_NATIVE_FAR_ASYNC_PREP=0 = the synchronous hand-off.
                         AbstractTextBank* bank = GEngine ? GEngine->TextBank() : nullptr;
-                        if (NativeFarAsyncPrep() && NativeTexturePrepApplies(bank))
+                        if (NativeFarAsyncPrep() && (NativeTexturePrepApplies(bank) || PaaTexturePrepApplies(bank)))
                             ParkStreamTexPrep(modelIndex, std::move(model), false);
                         else
                         {

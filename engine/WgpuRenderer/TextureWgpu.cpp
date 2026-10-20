@@ -2446,6 +2446,41 @@ uint64_t TextureWgpu::EnsureUploaded()
             ok = _src->GetMipmapChain(reads.data(), levelCount);
             if (terrainTiming.enabled) terrainTiming.blockReadMs += (NowUs() - sourceReadBegan) / 1000.0;
         }
+        // STREAM-PAA-PREP verify (WGR_PAA_PREPARED_VERIFY=1): read the chain the ordinary way too and
+        // compare it with the worker-prepared one byte for byte.
+        static const bool verifyPrepared = [] {
+            const char* value = std::getenv("WGR_PAA_PREPARED_VERIFY");
+            return value && value[0] == '1';
+        }();
+        // STREAM-PAA-PREP diagnostic (WGR_PAA_UNPREPARED_LOG=1): the first 200 PAA uploads that were
+        // NOT prepared off the main thread, by name -- which population the background path misses.
+        static const bool logUnprepared = [] {
+            const char* value = std::getenv("WGR_PAA_UNPREPARED_LOG");
+            return value && value[0] == '1';
+        }();
+        if (logUnprepared && !fromPrepared && profiled)
+        {
+            static std::atomic<uint32_t> rows{0};
+            if (rows.fetch_add(1, std::memory_order_relaxed) < 200)
+                LOG_INFO(Graphics, "PAA unprepared upload: {} loaded={} admit={}", Name(),
+                         render::PreparedTextureStore::Instance().HasAlphaFacts(render::PreparedTextureStore::Key(SourceName())),
+                         profiled ? 1 : 0);
+        }
+        if (verifyPrepared && fromPrepared && ok)
+        {
+            std::vector<uint8_t> reference(total, 0);
+            std::vector<MipmapRead> reads(static_cast<size_t>(levelCount));
+            for (int i = 0; i < levelCount; i++)
+                reads[i] = MipmapRead{reference.data() + offsets[i], &_mipmaps[firstLevel + i], firstLevel + i};
+            const bool readOk = _src->GetMipmapChain(reads.data(), levelCount);
+            static std::atomic<uint32_t> identical{0}, mismatched{0};
+            const bool same = readOk && reference.size() == blocks.size() &&
+                              std::memcmp(reference.data(), blocks.data(), blocks.size()) == 0;
+            const uint32_t n = (same ? identical : mismatched).fetch_add(1, std::memory_order_relaxed) + 1;
+            if (!same || n % 100 == 1)
+                LOG_INFO(Graphics, "PAA prepared verify: {} {} (identical={} mismatched={})", same ? "identical" : "MISMATCH",
+                         Name(), identical.load(), mismatched.load());
+        }
         if (terrainTiming.enabled) terrainTiming.preparedUsed = fromPrepared;
         if (warmPreparedSource && !fromPrepared)
             render::PreparedTextureStore::Instance().NoteWarmUpload(false, 0);

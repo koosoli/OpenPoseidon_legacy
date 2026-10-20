@@ -1779,7 +1779,11 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
     std::vector<std::optional<BankReadRequest>> packedReads(modelCount);
     const char* packedFlag = std::getenv("WGR_OBJECT_STREAM_PBO");
     const char* treeFlag = std::getenv("WGR_OBJECT_STREAM_PBO_TREE_FIXTURE");
-    const bool broadPacked = packedFlag && packedFlag[0] == '1';
+    // STREAM-PAA-PREP: on by default (2026-10-20). Parsing packed .p3d models on the workers is
+    // what lets a DayZ cold model take the parked, background texture path at all (without it
+    // every one was "mode=sync-fallback", parsed and textured on the main thread). Only modern
+    // streamed worlds reach this (DayZ, substituted Arma worlds); WGR_OBJECT_STREAM_PBO=0 = off.
+    const bool broadPacked = !(packedFlag && packedFlag[0] == '0');
     const bool narrowTree = !broadPacked && treeFlag && std::strcmp(treeFlag, "1") == 0;
     size_t packedCount = 0;
     uint8_t attemptedTree = 0;
