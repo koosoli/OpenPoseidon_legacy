@@ -1,0 +1,4 @@
+; deep water off the bay beach (the swim pack's swim-bay start)
+smokePlayer setPos [9950, 1430, 0]
+smokePlayer setDir 180
+exit
