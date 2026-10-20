@@ -22,6 +22,9 @@
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
+#include <future>
+#include <string>
+#include <Poseidon/IO/Streams/QBStream.hpp>
 
 class LODShapeWithShadow;
 
@@ -340,6 +343,24 @@ class TerrainWgpu : public ITerrainRenderer
     // may legitimately reference the same Texture object.
     std::vector<TextureWgpu*> _terrainPageTextures;
     bool _pagedGroundMaterials = false;
+    // PERF-TERRAIN-TILE-PREP: page tiles (s_*_lco and friends) a re-centre needs that are not on the
+    // GPU yet are read + LZO-decoded in the background instead of in the update; their layers use the
+    // fallback until the batch is done, then the page is rebound once and takes the prepared chains.
+    bool _terrainPageDeferUploads = false;
+    bool _terrainPageRebindPending = false;
+    std::unordered_set<std::string> _terrainTilePendingKeys;
+    std::vector<std::pair<std::string, BankReadRequest>> _terrainTileBatch;
+    std::vector<std::future<void>> _terrainTileTasks;
+    // The deferred textures themselves: uploaded a few per update once decoded (each GPU texture
+    // create is ~5-8 ms of the main thread), and the page rebound when they are all resident.
+    std::vector<Ref<Texture>> _terrainTileTextures;
+    // PERF-TERRAIN-QUEUED-BIND: an ordinary re-centre's bind runs on the render thread (queued), so
+    // the pages it unbinds are evicted a few updates later, when the window is free.
+    std::vector<Ref<Texture>> _terrainPendingEvict;
+    uint32_t _terrainPendingEvictAge = 0;
+    bool _terrainPageQueuedBindAllowed = false;
+    bool _terrainPageCenterSet = false;
+    bool QueueTerrainTilePrep(TextureWgpu* texture);
     int _terrainPageCenterX = -0x3fffffff;
     int _terrainPageCenterZ = -0x3fffffff;
     int _terrainPageRadius = 64;

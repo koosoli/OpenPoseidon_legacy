@@ -4251,6 +4251,10 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                     WgrSlice<uint32_t>{reinterpret_cast<const uint32_t*>(op.indices.data()), U32(op.indices.size())});
             break;
         }
+        case ResourceOp::Callback:
+            if (op.callback)
+                op.callback(_renderer);
+            break;
         case ResourceOp::LodStreamTick:
         {
             // Renderer ids are drain-side; translate to producer handles here.

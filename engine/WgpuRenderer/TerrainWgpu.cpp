@@ -39,6 +39,8 @@
 #include <stb_image.h>
 #include <stb_image_resize2.h>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
+#include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
+#include <Poseidon/Foundation/Threads/PoThread.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
@@ -826,6 +828,11 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             return 0;
         }
         auto* texture = static_cast<TextureWgpu*>(raw);
+        if (_terrainPageDeferUploads && !texture->IsGpuResident() && QueueTerrainTilePrep(texture))
+        {
+            ++dropped;
+            return 0; // fallback until its background decode is in and the page is rebound
+        }
         const auto ensureStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
         const uint64_t handle = texture->EnsureUploaded();
         if (timings) { ensureMs += TerrainPageElapsedMs(ensureStart); ++ensureCalls; }
@@ -841,6 +848,10 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
 
     std::vector<WgrTerrainMaterial> materials(static_cast<size_t>(materialCount));
     _a3TerrainTextures.clear();
+    // PERF-TERRAIN-TILE-PREP: thousands of descriptors name the same few hundred images (a DayZ
+    // re-centre made 20-40k GlobLoadTexture calls, 60 ms). One bank lookup per interned name.
+    std::unordered_map<const char*, Ref<Texture>> loaded;
+    loaded.reserve(4096);
     const auto bindTexture = [&](const RStringB& name, uint32_t fallback, bool& resolved,
                                  bool terrainPage) -> uint32_t
     {
@@ -848,7 +859,14 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
         if (name.GetLength() == 0)
             return fallback;
         const auto loadStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
-        Ref<Texture> texture = GlobLoadTexture(name);
+        Ref<Texture> texture;
+        if (const auto hit = loaded.find(static_cast<const char*>(name)); hit != loaded.end())
+            texture = hit->second;
+        else
+        {
+            texture = GlobLoadTexture(name);
+            loaded.emplace(static_cast<const char*>(name), texture);
+        }
         if (timings) { loadMs += TerrainPageElapsedMs(loadStart); ++loadCalls; }
         Texture* raw = texture;
         if (raw == nullptr)
@@ -1221,14 +1239,41 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
     // previous group. Shared texture views then release cleanly on the Rust side.
     const double descriptorTotalMs = timings ? TerrainPageElapsedMs(timingStart) : 0.0;
     const auto acquireStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
+    // PERF-TERRAIN-QUEUED-BIND (2026-10-20): a paged re-centre waited here for the render thread
+    // (5-80 ms on DayZ). It now queues the bind to run on the render thread itself, in order with
+    // the frame's resource operations, and evicts the unbound pages a few updates later, once the
+    // queued bind has certainly run. The world-load build keeps the synchronous path.
+    // POSEIDON_TERRAIN_QUEUED_BIND=0 = always synchronous.
+    static const bool queuedBindEnabled = [] {
+        const char* v = std::getenv("POSEIDON_TERRAIN_QUEUED_BIND");
+        return !(v && v[0] == '0');
+    }();
+    const bool queuedBind = queuedBindEnabled && paged && _terrainPageQueuedBindAllowed;
+    const size_t layerCount = handles.size(); // before a queued bind takes the array
+    size_t evicted = 0;
+    double acquireMs = 0.0, bindMs = 0.0;
+    const auto evictionStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
+    if (queuedBind)
+    {
+        _engine.QueueRendererCallback([handles = std::move(handles), materials = std::move(materials)](WgrRenderer* r)
+        {
+            wgr_terrain_set_ground_layers(r, handles.data(), static_cast<uint32_t>(handles.size()));
+            wgr_terrain_set_materials(r, materials.data(), static_cast<uint32_t>(materials.size()));
+        });
+        for (TextureWgpu* old : oldPageTextures)
+            if (old != nullptr && std::find(boundTextures.begin(), boundTextures.end(), old) == boundTextures.end() &&
+                IsTerrainPageTextureName(old->Name()))
+                _terrainPendingEvict.emplace_back(old);
+        _terrainPendingEvictAge = 0;
+    }
+    else
+    {
     EngineWgpu::AcquireProducerWindow("terrain ground layers");
-    const double acquireMs = timings ? TerrainPageElapsedMs(acquireStart) : 0.0;
+    acquireMs = timings ? TerrainPageElapsedMs(acquireStart) : 0.0;
     const auto bindStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
     wgr_terrain_set_ground_layers(_renderer, handles.data(), static_cast<uint32_t>(handles.size()));
     wgr_terrain_set_materials(_renderer, materials.data(), static_cast<uint32_t>(materials.size()));
-    const double bindMs = timings ? TerrainPageElapsedMs(bindStart) : 0.0;
-    const auto evictionStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
-    size_t evicted = 0;
+    bindMs = timings ? TerrainPageElapsedMs(bindStart) : 0.0;
     for (TextureWgpu* old : oldPageTextures)
     {
         if (old != nullptr && std::find(boundTextures.begin(), boundTextures.end(), old) == boundTextures.end() &&
@@ -1237,6 +1282,7 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             old->EvictGpu();
             ++evicted;
         }
+    }
     }
 
     if (timings)
@@ -1249,14 +1295,14 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             "Wgpu terrain page timings: mode={} descriptors={} candidates={} layers={} evictions={} "
             "loadCalls={} ensureCalls={} descriptorMs={:.3f} loadOwnerMs={:.3f} ensureOwnerMs={:.3f} "
             "finalAcquireMs={:.3f} bindMs={:.3f} evictionMs={:.3f} uploadTotalMs={:.3f}",
-            paged ? "paged" : "eager", materialCount, ids.size(), handles.size(), evicted,
+            paged ? "paged" : "eager", materialCount, ids.size(), layerCount, evicted,
             loadCalls, ensureCalls, std::max(0.0, descriptorTotalMs - loadMs - ensureMs), loadMs, ensureMs,
             acquireMs, bindMs, evictionMs, TerrainPageElapsedMs(timingStart));
     }
     LOG_INFO(Graphics,
              "Wgpu terrain material pages: mode={} candidates={} authored={} complete={} layers={}/{} dropped={} "
              "evicted={}",
-             paged ? "paged" : "eager", ids.size(), authored, complete, handles.size(), layerLimit, dropped,
+             paged ? "paged" : "eager", ids.size(), authored, complete, layerCount, layerLimit, dropped,
              evicted);
 }
 
@@ -3677,10 +3723,75 @@ void TerrainWgpu::ReportGrassScreenMetric(Scene& scene) const
              width, height, cTop, 1.0f / cTop, pxPerRadian, bladeWidth * pxPerRadian);
 }
 
+// PERF-TERRAIN-TILE-PREP: capture a non-resident page tile's PBO member (main thread) for the
+// background batch. False = upload it in place, as before (not a plain member, store full, ...).
+bool TerrainWgpu::QueueTerrainTilePrep(TextureWgpu* texture)
+{
+    const std::string key = render::PreparedTextureStore::Key(texture->SourceName());
+    if (key.size() < 4 || (key.compare(key.size() - 4, 4, ".paa") != 0 && key.compare(key.size() - 4, 4, ".pac") != 0))
+        return false;
+    if (_terrainTilePendingKeys.count(key))
+        return true;
+    if (!render::PreparedTextureStore::Instance().ShouldPrepare(key))
+        return false;
+    QFBank* archive = QIFStreamB::AutoBank(key.c_str());
+    if (!archive || archive->GetPrefix().GetLength() >= static_cast<int>(key.size()))
+        return false;
+    const char* member = key.c_str() + archive->GetPrefix().GetLength();
+    auto read = archive->CaptureReadRequest(member, true);
+    if (!read)
+        read = archive->CaptureReadRequest(member);
+    if (!read || read->bytes == 0 || read->bytes > 32u * 1024 * 1024)
+        return false;
+    _terrainTilePendingKeys.insert(key);
+    _terrainTileBatch.emplace_back(key, std::move(*read));
+    _terrainTileTextures.emplace_back(texture);
+    return true;
+}
+
 void TerrainWgpu::UpdateGroundTexturePages(const Landscape& land, const Camera& camera, bool force)
 {
     if (!_pagedGroundMaterials)
         return;
+    // PERF-TERRAIN-QUEUED-BIND: evict the pages the last queued bind dropped, once it has run (a few
+    // updates later) and when the window is free -- or anyway after ~60 tries. A page that is bound
+    // again by now is kept.
+    if (!_terrainPendingEvict.empty() && ++_terrainPendingEvictAge >= 3 &&
+        (EngineWgpu::TryAcquireProducerWindow() ||
+         (_terrainPendingEvictAge >= 60 && (EngineWgpu::AcquireProducerWindow("terrain page eviction"), true))))
+    {
+        for (const Ref<Texture>& old : _terrainPendingEvict)
+            if (auto* page = static_cast<TextureWgpu*>(old.GetRef());
+                page && std::find(_terrainPageTextures.begin(), _terrainPageTextures.end(), page) == _terrainPageTextures.end())
+                page->EvictGpu();
+        _terrainPendingEvict.clear();
+    }
+    // PERF-TERRAIN-TILE-PREP: the deferred tiles are decoded -- rebind the page once to take them.
+    if (_terrainPageRebindPending &&
+        std::all_of(_terrainTileTasks.begin(), _terrainTileTasks.end(), [](const std::future<void>& f)
+                    { return f.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }))
+    {
+        // Upload the decoded textures a few per update (POSEIDON_TERRAIN_TILE_UPLOAD_MS, default 3),
+        // then rebind once -- by then every texture is resident and the rebind is cheap.
+        static const double budgetMs = [] {
+            const char* v = std::getenv("POSEIDON_TERRAIN_TILE_UPLOAD_MS");
+            return v ? std::max(0.5, std::atof(v)) : 3.0;
+        }();
+        const auto began = std::chrono::steady_clock::now();
+        while (!_terrainTileTextures.empty() &&
+               std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count() < budgetMs)
+        {
+            if (auto* tile = static_cast<TextureWgpu*>(_terrainTileTextures.back().GetRef()))
+                tile->EnsureUploaded();
+            _terrainTileTextures.pop_back();
+        }
+        if (!_terrainTileTextures.empty())
+            return; // more next update; the current page binding stays as it is
+        _terrainTileTasks.clear();
+        _terrainTilePendingKeys.clear();
+        _terrainPageRebindPending = false;
+        force = true; // every deferred texture is resident now
+    }
     const float grid = std::max(land.GetLandGrid(), 0.001f);
     Vector3 pos = camera.Position();
     // Deterministic out-and-back page-cache diagnostic. The camera and final
@@ -3756,7 +3867,54 @@ void TerrainWgpu::UpdateGroundTexturePages(const Landscape& land, const Camera& 
         materials.push_back(id);
     }
     const double candidateScanMs = timings ? TerrainPageElapsedMs(timingStart) : 0.0;
+    // PERF-TERRAIN-TILE-PREP: an ordinary re-centre defers its new tiles; the world-load build and
+    // the rebind after a deferred batch upload in place. POSEIDON_TERRAIN_TILE_PREP=0 = always in place.
+    static const bool tilePrep = [] {
+        const char* v = std::getenv("POSEIDON_TERRAIN_TILE_PREP");
+        return !(v && v[0] == '0');
+    }();
+    _terrainPageDeferUploads = tilePrep && !force && render::PreparedTextureStore::Enabled();
+    _terrainPageQueuedBindAllowed = _terrainPageCenterSet; // not the world-load build
     UploadGroundTextures(land, &materials);
+    _terrainPageDeferUploads = false;
+    _terrainPageQueuedBindAllowed = false;
+    _terrainPageCenterSet = true;
+    if (!_terrainTileBatch.empty())
+    {
+        const uint64_t generation = render::PreparedTextureStore::Instance().Generation();
+        _terrainTileTasks.push_back(std::async(std::launch::async,
+            [batch = std::move(_terrainTileBatch), generation]() mutable
+        {
+            Foundation::poSetMyPriority(-1);
+            render::PreparedTextureStore& store = render::PreparedTextureStore::Instance();
+            std::vector<char> bytes;
+            for (auto& [key, read] : batch)
+            {
+                try
+                {
+                    PAABlockChain chain;
+                    if (read.Read(bytes) &&
+                        ReadPAABlockChainBuffer(bytes.data(), bytes.size(), chain, nullptr, 64u * 1024 * 1024) &&
+                        chain.valid())
+                    {
+                        std::unique_ptr<render::PreparedAlphaFacts> facts;
+                        if (read.HasArchiveIdentity())
+                            facts = render::PreparedTextureStore::BuildAlphaFacts(chain, read);
+                        const bool put = store.Put(key, std::move(chain), generation, std::move(facts));
+                        static const bool tileLog = [] { const char* v = std::getenv("WGR_TERRAIN_TILE_LOG"); return v && v[0] == '1'; }();
+                        static std::atomic<int> rows{0};
+                        if (tileLog && rows.fetch_add(1) < 12)
+                            LOG_INFO(Graphics, "Terrain tile prep: {} put={}", key, put);
+                    }
+                }
+                catch (...)
+                {
+                }
+            }
+        }));
+        _terrainTileBatch.clear();
+        _terrainPageRebindPending = true;
+    }
     if (timings)
         LOG_INFO(Graphics,
             "Wgpu terrain page update timings: centre=({}, {}) candidateCells={} candidates={} "

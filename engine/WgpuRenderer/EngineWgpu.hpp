@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 
 #include <Poseidon/Graphics/Core/MatrixConversion.hpp>
 #include <Poseidon/Graphics/Core/MeshVertex.hpp> // SVertex, for the queued mesh-create payloads (REN-THR-008)
@@ -1589,9 +1590,11 @@ class EngineWgpu : public EngineDummy
             RetailPageRecordObserve, // explicit non-instanced retail record cut only
             MeshEvict,     // LOD-STREAM: give a level mesh's pool storage back, keep its handle
             MeshRestore,   // LOD-STREAM: upload `verts`/`indices` again under `mesh`
-            LodStreamTick  // LOD-STREAM: read the renderer's distance demand into _lodStreamDemand
+            LodStreamTick, // LOD-STREAM: read the renderer's distance demand into _lodStreamDemand
+            Callback       // run `callback` on the render thread at the drain (renderer calls, no window wait)
         };
         Kind kind = MeshCreate;
+        std::function<void(WgrRenderer*)> callback; // Callback
         uint64_t mesh = 0;  // MeshCreate: the producer handle being defined; MeshDestroy: the one dying
         uint32_t model = 0; // ModelRegister: the producer handle being defined
         float sphereRadius = 0.0f;
@@ -1858,6 +1861,15 @@ class EngineWgpu : public EngineDummy
     static bool ProducerMayTouchRenderer();
     // Optional streaming work may acquire an already idle renderer, never wait for one.
     static bool TryAcquireProducerWindow();
+    //! Queue renderer calls to run on the render thread at its next resource drain, in order with
+    //! the other resource operations -- for producer work that must not wait for the window.
+    void QueueRendererCallback(std::function<void(WgrRenderer*)> callback)
+    {
+        ResourceOp op;
+        op.kind = ResourceOp::Callback;
+        op.callback = std::move(callback);
+        _resourceOps.push_back(std::move(op));
+    }
     // REN-THR-013: the lazy producer window. Every remaining direct renderer call on the
     // producer side goes through this instead of relying on InitDraw having waited: it returns
     // at once while the worker is idle, and otherwise waits for it -- and records who asked, so

@@ -1542,7 +1542,9 @@ bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
                         store.CopyAlphaFacts(key, *current, magic, w, h, static_cast<size_t>(bytes), _mipmaps[0]._start, facts))
                     {
                         _alphaStats = facts.histogram;
-                        // WGR_PAA_PREPARED_VERIFY=1: the histogram the ordinary block read gives, too.
+                        AlphaProfilePhase shapePhase(&render::ObjectAdmitProfile::alphaShapeMs);
+                        RefineAlphaClassByShape(_alphaStats, nullptr, w, h, Name(), 1, 0, &facts.shape);
+                        // WGR_PAA_PREPARED_VERIFY=1: the verdict the ordinary block read gives (histogram + shape refinement), too.
                         static const bool verifyFacts = [] {
                             const char* v = std::getenv("WGR_PAA_PREPARED_VERIFY");
                             return v && v[0] == '1';
@@ -1561,11 +1563,13 @@ bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
                             static std::atomic<uint32_t> identical{0}, mismatched{0};
                             const uint32_t n = (same ? identical : mismatched).fetch_add(1) + 1;
                             if (!same || n % 50 == 1)
-                                LOG_INFO(Graphics, "PAA alpha facts verify: {} {} (identical={} mismatched={})",
-                                         same ? "identical" : "MISMATCH", Name(), identical.load(), mismatched.load());
+                                LOG_INFO(Graphics, "PAA alpha facts verify: {} {} (identical={} mismatched={}) facts kind={} min={} max={} mean={} clear={:.3f} opaque={:.3f} partial={:.3f} mid={:.3f} | read kind={} min={} max={} mean={} clear={:.3f} opaque={:.3f} partial={:.3f} mid={:.3f} fmt={} {}x{}",
+                                         same ? "identical" : "MISMATCH", Name(), identical.load(), mismatched.load(),
+                                         int(_alphaStats.kind), _alphaStats.aMin, _alphaStats.aMax, _alphaStats.aMean, _alphaStats.pctClear,
+                                         _alphaStats.pctOpaque, _alphaStats.pctPartial, _alphaStats.pctMid,
+                                         int(reference.kind), reference.aMin, reference.aMax, reference.aMean, reference.pctClear,
+                                         reference.pctOpaque, reference.pctPartial, reference.pctMid, int(fmt), w, h);
                         }
-                        AlphaProfilePhase shapePhase(&render::ObjectAdmitProfile::alphaShapeMs);
-                        RefineAlphaClassByShape(_alphaStats, nullptr, w, h, Name(), 1, 0, &facts.shape);
                         path = AlphaScanPath::PreparedFacts;
                         return true;
                     }
