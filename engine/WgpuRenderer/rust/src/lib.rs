@@ -17,6 +17,7 @@ macro_rules! println {
 }
 
 mod bloom;
+mod upload_stats;
 mod water_zbuf;
 #[cfg(feature = "dlss")]
 mod dlss;
@@ -5550,6 +5551,7 @@ impl Renderer {
             .cpu_begin(crate::gpu_timers::Region::WorkerEncShadow);
         encoder.push_debug_group("wgr_shadow_cascades");
         frame_lap.mark("early:cull+rest"); frame_lap.report(&self.log);
+        crate::upload_stats::frame_end();
         self.gfx3d.render_shadow_passes(
             &self.device,
             &mut encoder,

@@ -635,6 +635,7 @@ impl GeometryPool {
                 ));
             }
         }
+        crate::upload_stats::add(crate::upload_stats::Kind::Pool, std::mem::size_of_val(verts) + std::mem::size_of_val(indices));
         queue.write_buffer(
             &self.vbuf,
             vbase as u64 * VERT_SIZE,

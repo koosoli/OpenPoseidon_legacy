@@ -3440,10 +3440,12 @@ impl CullState {
             let legacy = *FULL.get_or_init(|| std::env::var("WGR_INSTANCE_FULL_UPLOAD").as_deref() == Ok("1"));
             let full_static = instance_buf_new || (legacy && self.uploaded_static_len != static_len);
             if full_static && static_len > 0 {
+                crate::upload_stats::add(crate::upload_stats::Kind::Instances, std::mem::size_of_val(self.instances.as_slice()));
                 queue.write_buffer(buf, 0, bytemuck::cast_slice(self.instances.as_slice()));
             } else {
                 for &(lo, hi) in &dirty {
                     let range = &self.instances.as_slice()[lo as usize..=hi as usize];
+                    crate::upload_stats::add(crate::upload_stats::Kind::Instances, std::mem::size_of_val(range));
                     queue.write_buffer(buf, lo as u64 * stride, bytemuck::cast_slice(range));
                 }
             }
@@ -5138,6 +5140,7 @@ fn upload_model_rows(device: &wgpu::Device, queue: &wgpu::Queue,
     let selection = *rows;
     selection.run(data.len(), grew, |range| {
         let first = range.start; let count = range.len();
+        crate::upload_stats::add(crate::upload_stats::Kind::Tables, count * std::mem::size_of::<ModelGpu>());
         queue.write_buffer(arr.buf.as_ref().unwrap(),
             (first * std::mem::size_of::<ModelGpu>()) as u64,
             bytemuck::cast_slice(&data[range]));
@@ -5158,6 +5161,7 @@ fn upload_slice<T: bytemuck::Pod>(
     let bytes = std::mem::size_of_val(data).max(1) as u64;
     let grew = arr.ensure(device, bytes);
     if !data.is_empty() {
+        crate::upload_stats::add(crate::upload_stats::Kind::Tables, std::mem::size_of_val(data));
         queue.write_buffer(arr.buf.as_ref().unwrap(), 0, bytemuck::cast_slice(data));
     }
     grew

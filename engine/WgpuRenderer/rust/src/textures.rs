@@ -1067,6 +1067,7 @@ fn write_mip(
     format: TextureFormat,
     data: &[u8],
 ) {
+    crate::upload_stats::add(crate::upload_stats::Kind::Texture, data.len());
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture,
@@ -1117,6 +1118,7 @@ pub(crate) fn write_rgba8_mip_chain(
     let mut level = base.to_vec();
     let (mut lw, mut lh) = (width, height);
     for mip in 0..mip_level_count {
+        crate::upload_stats::add(crate::upload_stats::Kind::Texture, level.len());
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture,

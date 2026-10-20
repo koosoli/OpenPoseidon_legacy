@@ -570,7 +570,7 @@ impl GpuTimers {
                                 .filter(|&(i, ms)| ms > 0.0 && i != Region::FrameTotal as usize).collect();
                             top.sort_by(|a, b| b.1.total_cmp(&a.1));
                             let parts: Vec<String> = top.iter().take(8).map(|(i, ms)| format!("{i}={ms:.1}")).collect();
-                            eprintln!("GPU_SPIKE total={total:.1} {}", parts.join(" "));
+                            eprintln!("GPU_SPIKE t={:.0} total={total:.1} {}", crate::upload_stats::clock_ms(), parts.join(" "));
                         }
                     }
                 }
