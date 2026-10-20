@@ -8,7 +8,7 @@ $root=Split-Path $PSScriptRoot -Parent
 $suffix=($Preset -split '-')[-1]
 $source=Join-Path $root 'content/default-packs/swim'
 $stage=Join-Path $root 'build/swim/pack-source'
-$pack=Join-Path $root "dist/x64-win-$suffix/Mods/@OP_Swim"
+$pack=Join-Path $root "dist/x64-win-$suffix/assets/Mods/@OP_Swim"
 $tools=Join-Path $root "dist/x64-win-$suffix/PoseidonTools.exe"
 if (!(Test-Path -LiteralPath $tools)) {throw 'Build PoseidonTools before packaging Swim'}
 if (Test-Path -LiteralPath $stage) {Remove-Item -LiteralPath $stage -Recurse -Force}

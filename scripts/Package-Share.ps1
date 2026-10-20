@@ -103,15 +103,20 @@ if ($retail -and (Test-Path -LiteralPath (Join-Path $retail 'assets'))) {
     $installed = Join-Path $retail 'assets'
     foreach ($file in Get-ChildItem -LiteralPath $installed -Recurse -File) {
         $rest = $file.FullName.Substring($installed.Length).TrimStart('\', '/')
+        # The clump plate is local scratch with no recorded origin (docs/assets/source-registry.yaml:
+        # "never shippable"); the blade layers are registered CC0 and come with the build anyway.
+        if ($rest -like 'grass\meadow-grass-clump-*' -or $rest -like 'grass\more_grass\*') { continue }
         if (-not (Test-Path -LiteralPath (Join-Path $assets $rest))) { Copy-Into $file.FullName $rest; $n++ }
     }
     Write-Host "  + assets\ (from the installed game, not staged by the build)  $n files"
 }
 
-# 3. the default content packs, as assets\Mods\@OP_*
-$n = 0
+# 3. the default content packs, as assets\Mods\@OP_* -- the build stages them there (step 2 copied
+#    them); an older dist\Mods staging is still picked up.
+$n = @(Get-ChildItem -LiteralPath (Join-Path $assets 'Mods') -Recurse -File -ErrorAction SilentlyContinue).Count
 foreach ($pack in Get-ChildItem -LiteralPath (Join-Path $distDir 'Mods') -Directory -ErrorAction SilentlyContinue) {
     if (-not (Test-Path -LiteralPath (Join-Path $pack.FullName 'mod.json'))) { continue }
+    if (Test-Path -LiteralPath (Join-Path $assets ('Mods\' + $pack.Name))) { continue }
     $n += Copy-Tree $pack.FullName (Join-Path 'Mods' $pack.Name)
 }
 Write-Host "  + assets\Mods (default packs)        $n files"

@@ -11,7 +11,7 @@ $suffix=($Preset -split '-')[-1]
 $source=Join-Path $root 'content/default-packs/tidewater-wildlife'
 $generated=Join-Path $root 'build/tidewater-wildlife/generated'
 $stage=Join-Path $root 'build/tidewater-wildlife/pack-source'
-$pack=Join-Path $root "dist/x64-win-$suffix/Mods/@OP_TidewaterWildlife"
+$pack=Join-Path $root "dist/x64-win-$suffix/assets/Mods/@OP_TidewaterWildlife"
 $tools=Join-Path $root "dist/x64-win-$suffix/PoseidonTools.exe"
 if (!(Test-Path -LiteralPath $tools)) {throw 'Build PoseidonTools before packaging the Tidewater wildlife'}
 foreach ($dir in @($generated, $stage)) {if (Test-Path -LiteralPath $dir) {Remove-Item -LiteralPath $dir -Recurse -Force}}

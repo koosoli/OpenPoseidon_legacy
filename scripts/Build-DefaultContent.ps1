@@ -9,7 +9,8 @@ if (!(Test-Path -LiteralPath $tools)) { throw 'Build PoseidonTools before packag
 $source = Join-Path $root 'content/default-packs/visual'
 $generated = Join-Path $root 'build/default-content/generated'
 $stage = Join-Path $root 'build/default-content/pbo-source'
-$pack = Join-Path $dist 'Mods/@OP_VisualUpgrade'
+# Engine feature packs are staged under assets\Mods (the game ships as exe + dll + assets\).
+$pack = Join-Path $dist 'assets/Mods/@OP_VisualUpgrade'
 New-Item -ItemType Directory -Force $stage, (Join-Path $pack 'AddOns') | Out-Null
 & $Python "$PSScriptRoot/default-content/generate_materials.py" --spec "$source/materials.json" --out $generated --size 1024
 if ($LASTEXITCODE -ne 0) { throw 'Material generation failed' }

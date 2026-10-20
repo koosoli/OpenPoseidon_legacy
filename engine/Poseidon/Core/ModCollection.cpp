@@ -389,15 +389,20 @@ DefaultContentResolveResult ResolveDefaultContentPacks(const std::string& gameDi
     {
         const char* folder;
         const char* archive;
+        // Engine feature content (materials, vehicle actions, swimming, Tidewater boat and
+        // wildlife) lives in assets\Mods: the game is OpenPoseidon.exe + wgpu_renderer.dll + assets\
+        // (owner, 2026-10-20). Maps stay in Mods. Each is still found in the other place, so an
+        // install from before the move keeps working until the next deploy relocates it.
+        bool feature;
     };
-    static constexpr Pack packs[] = {{"@OP_VisualUpgrade", "op_ground_materials.pbo"},
-                                     {"@OP_VehicleActions", "op_jeep_actions.pbo"},
-                                     {"@OP_Swim", "swim.pbo"}, // Sinkhole W3: swim moves (SWIM-W3-001)
-                                     {"@OP_TidewaterBoat", "op_tidewater_boat.pbo"}, // Tidewater's lobster boat
-                                     {"@OP_TidewaterWildlife", "op_tidewater_wildlife.pbo"}, // Tidewater's humpback
-                                     {"@OP_Fusion", "fusion_ofp.pbo"},
-                                     {"@OP_Showcase", "showcase_lab.pbo"},
-                                     {"@OP_SizeProbe", "fusion_size_probe.pbo"}};
+    static constexpr Pack packs[] = {{"@OP_VisualUpgrade", "op_ground_materials.pbo", true},
+                                     {"@OP_VehicleActions", "op_jeep_actions.pbo", true},
+                                     {"@OP_Swim", "swim.pbo", true}, // Sinkhole W3: swim moves (SWIM-W3-001)
+                                     {"@OP_TidewaterBoat", "op_tidewater_boat.pbo", true}, // Tidewater's lobster boat
+                                     {"@OP_TidewaterWildlife", "op_tidewater_wildlife.pbo", true}, // Tidewater's humpback
+                                     {"@OP_Fusion", "fusion_ofp.pbo", false},
+                                     {"@OP_Showcase", "showcase_lab.pbo", false},
+                                     {"@OP_SizeProbe", "fusion_size_probe.pbo", false}};
     const ModCollection users = ActiveModsFromMountPath(userMountPath);
     for (const Pack& pack : packs)
     {
@@ -415,11 +420,13 @@ DefaultContentResolveResult ResolveDefaultContentPacks(const std::string& gameDi
             report("explicit user mod owns this identity; automatic mount skipped");
             continue;
         }
-        // One canonical content root. Do not silently revive obsolete root packs.
-        std::string path = AbsoluteResolvedModPath(std::filesystem::path(gameDir) / "Mods" / pack.folder);
-        // The shareable build (exe + dll + assets) carries the default packs in assets\Mods.
+        // Two content roots, in order: a feature pack's home is assets\Mods, a map's is Mods.
+        // Never the obsolete game-root location.
+        const std::filesystem::path assetsPath = std::filesystem::path(gameDir) / "assets" / "Mods" / pack.folder;
+        const std::filesystem::path modsPath = std::filesystem::path(gameDir) / "Mods" / pack.folder;
+        std::string path = AbsoluteResolvedModPath(pack.feature ? assetsPath : modsPath);
         if (path.empty())
-            path = AbsoluteResolvedModPath(std::filesystem::path(gameDir) / "assets" / "Mods" / pack.folder);
+            path = AbsoluteResolvedModPath(pack.feature ? modsPath : assetsPath);
         if (path.empty())
         {
             report("not installed; using original content");

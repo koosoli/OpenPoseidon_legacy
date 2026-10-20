@@ -53,7 +53,7 @@ $distDir  = Join-Path $repoRoot "dist\x64-win-$suffix"
 
 # A direct CMake engine build does not regenerate the managed visual PBO.
 # Reject stale staged content before any game-folder mutation or new source stamp.
-$visualStage = Join-Path $distDir 'Mods/@OP_VisualUpgrade'
+$visualStage = Join-Path $distDir 'assets/Mods/@OP_VisualUpgrade'
 if (Test-Path -LiteralPath $visualStage) {
     & "$PSScriptRoot/Assert-DefaultMaterialPackage.ps1" `
         -Archive (Join-Path $visualStage 'AddOns/op_ground_materials.pbo') `
@@ -234,12 +234,21 @@ foreach ($name in @('m16','rifle','ak_rifle','scoped_rifle','smg','machinegun','
     }
     $contentPayload += @{Source=$source; Relative=$relative}
 }
+# The near grass blade layers (CC0, docs/assets/source-registry.yaml) -- staged from the repo's
+# assets\grass by the build; the renderer falls back to procedural blades without them.
+foreach ($file in Get-ChildItem -LiteralPath (Join-Path $distDir 'assets/grass') -File -Filter 'meadow-grass-blade-*.png' -ErrorAction SilentlyContinue) {
+    $contentPayload += @{Source=$file.FullName; Relative=('assets/grass/' + $file.Name)}
+}
+# Engine feature packs live in assets\Mods (owner 2026-10-20: the game is exe + dll + assets\);
+# maps stay in Mods. A pack still installed at its old Mods\ location is removed after the copy.
+$relocatedPacks = @()
 foreach ($pack in @(
-    @{Folder='Mods/@OP_VisualUpgrade'; Archive='op_ground_materials.pbo'},
-    @{Folder='Mods/@OP_VehicleActions'; Archive='op_jeep_actions.pbo'},
-    @{Folder='Mods/@OP_Swim'; Archive='swim.pbo'},
-    @{Folder='Mods/@OP_TidewaterBoat'; Archive='op_tidewater_boat.pbo'},
-    @{Folder='Mods/@OP_TidewaterWildlife'; Archive='op_tidewater_wildlife.pbo'})) {
+    @{Folder='assets/Mods/@OP_VisualUpgrade'; Archive='op_ground_materials.pbo'},
+    @{Folder='assets/Mods/@OP_VehicleActions'; Archive='op_jeep_actions.pbo'},
+    @{Folder='assets/Mods/@OP_Swim'; Archive='swim.pbo'},
+    @{Folder='assets/Mods/@OP_TidewaterBoat'; Archive='op_tidewater_boat.pbo'},
+    @{Folder='assets/Mods/@OP_TidewaterWildlife'; Archive='op_tidewater_wildlife.pbo'})) {
+    $relocatedPacks += ($pack.Folder -replace '^assets/', '')
     $sourcePack = Join-Path $distDir $pack.Folder
     if (!(Test-Path -LiteralPath $sourcePack)) { continue }
     $metadata = Join-Path $sourcePack 'mod.json'
@@ -315,6 +324,32 @@ foreach ($item in $contentPayload) {
         throw "Default content verification failed: $destination"
     }
     Write-Host "  + $($item.Relative)"
+}
+
+# Feature packs moved to assets\Mods: retire their old Mods\ copies, but only the files a deploy
+# put there (mod.json, the pack archive, and missions the new pack ships too). Anything else -- a
+# mission someone added -- is kept and reported, never deleted.
+foreach ($old in $relocatedPacks) {
+    $oldDir = Join-Path $GameDir $old
+    $newDir = Join-Path $GameDir ('assets/' + $old)
+    if (!(Test-Path -LiteralPath $oldDir) -or !(Test-Path -LiteralPath (Join-Path $newDir 'mod.json'))) { continue }
+    $oldManifest = Join-Path $oldDir 'mod.json'
+    if (!(Test-Path -LiteralPath $oldManifest)) { Write-Warning "Not removing unmanaged $oldDir"; continue }
+    if ((Get-Content -LiteralPath $oldManifest -Raw | ConvertFrom-Json).defaultContentApi -cne '1') { Write-Warning "Not removing unmanaged $oldDir"; continue }
+    foreach ($file in Get-ChildItem -LiteralPath $oldDir -Recurse -File) {
+        $rel = $file.FullName.Substring($oldDir.Length + 1)
+        $managed = ($rel -eq 'mod.json') -or ($rel -like 'AddOns\*.pbo') -or
+                   (($rel -like 'Missions\*') -and (Test-Path -LiteralPath (Join-Path $newDir $rel)))
+        if ($managed) { Remove-Item -LiteralPath $file.FullName -Force }
+    }
+    Get-ChildItem -LiteralPath $oldDir -Recurse -Directory | Sort-Object { $_.FullName.Length } -Descending |
+        Where-Object { @(Get-ChildItem -LiteralPath $_.FullName -Force).Count -eq 0 } | Remove-Item -Force
+    if (@(Get-ChildItem -LiteralPath $oldDir -Recurse -File).Count -eq 0) {
+        Remove-Item -LiteralPath $oldDir -Recurse -Force
+        Write-Host "  - $old (moved to assets\$old)"
+    } else {
+        Write-Warning "$old kept files a deploy did not put there; the engine now loads assets\$old instead."
+    }
 }
 
 if ($PruneStale)
