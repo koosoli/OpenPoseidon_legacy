@@ -53,6 +53,24 @@
 >    *Why this is separate from 0c:* the branch guard answers "am I starting from the right place". Nothing answers "did I just commit half a change, or someone else's". Those are the failures that cost this project a redeploy, a force-push and a backout commit in a single day.
 > 1. **Use the scripts — do not hand-roll build/install/launch.** `scripts/Build.ps1`, `scripts/Install.ps1`, `scripts/Start.ps1` are the supported path (see [Build, install, run](#build-install-run) below). **`Install.ps1` must be run once per game install**: the retail game is missing files the remaster needs, and hand-copying only the two binaries leaves an install that boots but has a *dead Options menu* and missing UI art — a failure with no error message. Run it before assuming anything is a code bug.
 > 1b. **Dual Binary Deployment**: if you do deploy by hand, you MUST copy **BOTH** `OpenPoseidon.exe` AND `wgpu_renderer.dll` to `D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\`. Copying only one binary causes an instant `Entry Point Not Found` crash on launch.
+> 1c. **ENGINE CONTENT GOES IN `assets\`, NEVER IN `Mods\`.** The game a player receives is `OpenPoseidon.exe` +
+>    `wgpu_renderer.dll` + `assets\`, and nothing else (`scripts\Package-Share.ps1` builds exactly that, for someone who
+>    has Cold War Assault installed). Anything an OpenPoseidon feature needs to work goes under `assets\`. That covers
+>    feature packs (`assets\Mods\@OP_*`: VisualUpgrade, VehicleActions, Swim, TidewaterBoat, TidewaterWildlife), UI,
+>    menu, inventory icons, grass blades, and any new pack you add. **Deleting the game folder's `Mods\`
+>    must not remove a single engine feature.**
+>    - `Mods\` is for maps (`@OP_Fusion`, `@OP_Showcase`, `@OP_SizeProbe`) and the player's own mods only.
+>    - A new pack builder writes to `dist\<preset>\assets\Mods\@OP_<Name>`. Deploy installs it, and `ResolveDefaultContentPacks`
+>      (`ModCollection.cpp`) finds it there without a `-mod` parameter. Add it to `Deploy.ps1` and `Package-Share.ps1` too.
+>    - Loose runtime files the repo ships go under `assets\<area>\`. `/assets/` is gitignored, so add them with
+>      `git add -f` and check `git show --stat` for them.
+>    - **Verify on a clean copy:** a game folder whose `Mods\` holds no `@OP_*` feature pack must still boot with every
+>      feature. A pack that only works from `Mods\` cannot reach a player who received the shared package.
+>    - Never ship content from another game in `assets\` (no Reforger/Arma/DayZ/The Forest files). Only own, CC0 or
+>      compatibly licensed work, with its source recorded.
+>
+>    *Why:* on 2026-10-20 the owner wanted to hand a friend just the exe, the dll and `assets\`. Half the features lived
+>    in `Mods\@OP_*` and would silently have been missing.
 > 2. **WGSL Shader Rules**: Review [.agents/WGSL_CODING_RULES.md](.agents/WGSL_CODING_RULES.md). No 4-component swizzles on `vec2` (`.xxyy` / `.xyxy`), all variables must be explicitly declared in scope.
 > 3. **Startup Diagnostics**: If the game exits instantly, ALWAYS test with
 >    `cmd /c ".\OpenPoseidon.exe --render wgpu --window --dev --log-file cwr.log"` to read the panic traceback.
