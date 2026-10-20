@@ -792,14 +792,13 @@ class Landscape : public SerializeClass
         std::shared_ptr<Model::Model> model;
         std::future<void> decode;
         bool ownerAdmission = false; // the near window's cold visual admission (SubmitConvert flag)
-        // STREAM-PAA-PREP: the .rvmat stage PAAs the background task found (DayZ/Arma). Their
-        // archive members are captured once it is done, on the main thread, and decoded while the
-        // model converts.
-        std::shared_ptr<std::vector<std::string>> stageNames;
+        // STREAM-PAA-PREP: names the last background round found (stage PAAs of .rvmat materials,
+        // PAAs and materials of proxy models) -- captured on the main thread for the next round;
+        // the model stays parked until a round finds nothing new (at most 3).
+        std::shared_ptr<std::vector<std::string>> foundPaa, foundRvmat;
+        int paaRounds = 0;
     };
     std::unordered_map<uint32_t, NativeFarTexPrep> _nativeFarTexPrep;
-    //! STREAM-PAA-PREP: background decodes of rvmat stage PAAs nobody waits for (pruned when done).
-    std::vector<std::future<void>> _paaStageTasks;
     //! PERF-FAR-ASYNC-PREP: collect `model`'s native texture names (main thread), decode them in
     //! the background and park the model until FinishStreamTexPrep.
     void ParkStreamTexPrep(uint32_t modelIndex, std::shared_ptr<Model::Model> model, bool ownerAdmission);

@@ -59,6 +59,7 @@ extern bool GUseFileBanks; // QBStream.cpp, global scope
 #include <Poseidon/World/Model/ShapeAdapter.hpp> // BuildAdapterBankTables (stage-3 async adapt)
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp> // the split of `create`
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
+#include <Poseidon/IO/ParamFileExt.hpp> // GetShapeName
 #include <Poseidon/World/Terrain/ObjectStreamRapStageNames.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // worker-prepared texture store (clear + stats)
 #include <Poseidon/World/Model/Model.hpp>              // the IR handed over by ObjectStreamPreparer
@@ -3796,25 +3797,49 @@ static void BuildStreamedBankTables(const Model::Model& model, Model::ShapeAdapt
 
 // STREAM-PAA-PREP: capture one PAA's immutable archive member for a background read (main thread:
 // the bank lookup is). Skips what is loaded, prepared/claimed, or not a plain PBO member.
+static uint32_t GPaaCaptureRefused[5] = {}; // diagnostics: loaded, store refused, no archive, no member
 static void CapturePaaRead(AbstractTextBank* bank, const std::string& raw,
                            std::vector<std::pair<std::string, BankReadRequest>>& reads)
 {
-    static std::unordered_set<std::string> claimed; // main thread only
-    if (raw.empty() || reads.size() >= 64)
+    // Claims expire: a prepared chain nobody took (TTL) or a texture evicted after its upload must be
+    // preparable again for the next model that names it. The store itself refuses a key it holds.
+    static std::unordered_map<std::string, std::chrono::steady_clock::time_point> claimed; // main thread only
+    if (raw.empty() || reads.size() >= 512)
         return;
     std::string key = render::PreparedTextureStore::Key(raw);
     if (key.size() < 4 || (key.compare(key.size() - 4, 4, ".paa") != 0 && key.compare(key.size() - 4, 4, ".pac") != 0))
         return;
-    if (claimed.count(key) || bank->IsLoaded(RStringB(key.c_str())) ||
-        !render::PreparedTextureStore::Instance().ShouldPrepare(key))
+    const auto now = std::chrono::steady_clock::now();
+    if (const auto it = claimed.find(key); it != claimed.end() && now - it->second < std::chrono::seconds(10))
+    {
+        ++GPaaCaptureRefused[4];
         return;
+    }
+    if (bank->IsLoaded(RStringB(key.c_str())))
+    {
+        ++GPaaCaptureRefused[0];
+        return;
+    }
+    if (!render::PreparedTextureStore::Instance().ShouldPrepare(key))
+    {
+        ++GPaaCaptureRefused[1];
+        return;
+    }
     QFBank* archive = QIFStreamB::AutoBank(key.c_str());
     if (!archive || archive->GetPrefix().GetLength() >= static_cast<int>(key.size()))
+    {
+        ++GPaaCaptureRefused[2];
         return;
+    }
     auto read = archive->CaptureReadRequest(key.c_str() + archive->GetPrefix().GetLength());
     if (!read || read->bytes == 0 || read->bytes > 16u * 1024 * 1024)
+    {
+        ++GPaaCaptureRefused[3];
         return;
-    claimed.insert(key);
+    }
+    claimed.insert_or_assign(key, now);
+    if (claimed.size() > 65536)
+        std::erase_if(claimed, [&](const auto& entry) { return now - entry.second > std::chrono::seconds(10); });
     reads.emplace_back(std::move(key), std::move(*read));
 }
 
@@ -3828,16 +3853,147 @@ static void DecodePaaReads(std::vector<std::pair<std::string, BankReadRequest>>&
         try
         {
             PAABlockChain chain;
-            if (read.Read(bytes) &&
-                ReadPAABlockChainBuffer(bytes.data(), bytes.size(), chain, nullptr, 64u * 1024 * 1024) &&
-                chain.valid())
-                prepared.Put(key, std::move(chain), generation);
+            const bool readOk = read.Read(bytes);
+            const bool decoded = readOk &&
+                ReadPAABlockChainBuffer(bytes.data(), bytes.size(), chain, nullptr, 64u * 1024 * 1024) && chain.valid();
+            const bool put = decoded && prepared.Put(key, std::move(chain), generation);
+            static const bool putLog = [] { const char* v = std::getenv("WGR_PAA_PUT_LOG"); return v && v[0] == '1'; }();
+            static std::atomic<int> putRows{0};
+            if (putLog && key.find("furniture") != std::string::npos && putRows.fetch_add(1) < 60)
+                LOG_INFO(World, "PAA put: {} read={} decoded={} put={}", key, readOk, decoded, put);
         }
         catch (...)
         {
             // The upload reads it itself, as before.
         }
     }
+}
+
+// STREAM-PAA-PREP: NUL-terminated .paa/.pac/.rvmat path strings in a P3D's bytes (texture and
+// material names are stored uncompressed). A speculative scan: a false positive costs one
+// skipped capture, a miss leaves the texture to the main thread as before.
+static void ScanP3dTextureNames(std::span<const char> bytes, std::vector<std::string>& paa, std::vector<std::string>& rvmat)
+{
+    if (bytes.size() < 8 || (std::string_view(bytes.data(), 4) != "ODOL" && std::string_view(bytes.data(), 4) != "MLOD"))
+        return;
+    const auto pathByte = [](unsigned char c)
+    {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' ||
+               c == '.' || c == '\\' || c == '/';
+    };
+    const auto endsWith = [](std::string_view s, std::string_view suffix)
+    {
+        if (s.size() < suffix.size())
+            return false;
+        for (size_t i = 0; i < suffix.size(); ++i)
+        {
+            char c = s[s.size() - suffix.size() + i];
+            if (c >= 'A' && c <= 'Z')
+                c = static_cast<char>(c - 'A' + 'a');
+            if (c != suffix[i])
+                return false;
+        }
+        return true;
+    };
+    for (size_t i = 8; i < bytes.size() && paa.size() + rvmat.size() < 4096;)
+    {
+        if (!pathByte(static_cast<unsigned char>(bytes[i])))
+        {
+            ++i;
+            continue;
+        }
+        const size_t start = i;
+        do
+            ++i;
+        while (i < bytes.size() && pathByte(static_cast<unsigned char>(bytes[i])));
+        const size_t length = i - start;
+        if (length < 7 || length > 240 || i == bytes.size() || bytes[i] != '\0')
+            continue;
+        const std::string_view token(bytes.data() + start, length);
+        if (endsWith(token, ".paa") || endsWith(token, ".pac"))
+            paa.emplace_back(token);
+        else if (endsWith(token, ".rvmat"))
+            rvmat.emplace_back(token);
+    }
+}
+
+// STREAM-PAA-PREP, background half of one round: decode the captured PAAs; name the stage PAAs
+// of the captured .rvmat materials and the PAAs/materials of the captured proxy models.
+static void RunPaaRound(std::vector<std::pair<std::string, BankReadRequest>>& paaReads,
+                        const std::vector<std::pair<std::string, BankReadRequest>>& rvmatReads,
+                        const std::vector<std::pair<std::string, BankReadRequest>>& p3dReads, uint64_t generation,
+                        std::vector<std::string>& foundPaa, std::vector<std::string>& foundRvmat)
+{
+    DecodePaaReads(paaReads, generation);
+    std::vector<char> bytes;
+    for (const auto& [path, read] : rvmatReads)
+    {
+        try
+        {
+            if (!read.Read(bytes))
+                continue;
+            const auto canonical = Asset::VirtualPath::Parse(path).canonical();
+            const auto stages = Streaming::ExtractOwnedRapStageNames(std::span<const char>(bytes.data(), bytes.size()), canonical);
+            if (stages.status == Streaming::RapStageNamesStatus::Complete)
+                foundPaa.insert(foundPaa.end(), stages.names.begin(), stages.names.end());
+        }
+        catch (...)
+        {
+        }
+    }
+    for (const auto& [path, read] : p3dReads)
+    {
+        try
+        {
+            if (read.Read(bytes))
+                ScanP3dTextureNames(std::span<const char>(bytes.data(), bytes.size()), foundPaa, foundRvmat);
+        }
+        catch (...)
+        {
+        }
+    }
+}
+
+// STREAM-PAA-PREP: capture a .rvmat or .p3d member (main thread), once per process.
+static void CaptureOnce(const std::string& raw, size_t limit, std::vector<std::pair<std::string, BankReadRequest>>& out,
+                        size_t cap)
+{
+    static std::unordered_map<std::string, std::chrono::steady_clock::time_point> seen; // main thread only
+    if (out.size() >= cap)
+        return;
+    std::string key = render::PreparedTextureStore::Key(raw);
+    const auto now = std::chrono::steady_clock::now();
+    if (key.empty())
+        return;
+    if (const auto it = seen.find(key); it != seen.end() && now - it->second < std::chrono::seconds(60))
+        return;
+    seen.insert_or_assign(key, now);
+    QFBank* archive = QIFStreamB::AutoBank(key.c_str());
+    if (!archive || archive->GetPrefix().GetLength() >= static_cast<int>(key.size()))
+        return;
+    if (auto read = archive->CaptureReadRequest(key.c_str() + archive->GetPrefix().GetLength());
+        read && read->bytes > 0 && read->bytes <= limit)
+        out.emplace_back(std::move(key), std::move(*read));
+}
+
+// Start one background round for a parked model.
+static std::future<void> StartPaaRound(std::vector<std::pair<std::string, BankReadRequest>> paaReads,
+                                       std::vector<std::pair<std::string, BankReadRequest>> rvmatReads,
+                                       std::vector<std::pair<std::string, BankReadRequest>> p3dReads,
+                                       std::shared_ptr<std::vector<std::string>> foundPaa,
+                                       std::shared_ptr<std::vector<std::string>> foundRvmat)
+{
+    const uint64_t generation = render::PreparedTextureStore::Instance().Generation();
+    return std::async(std::launch::async,
+        [paaReads = std::move(paaReads), rvmatReads = std::move(rvmatReads), p3dReads = std::move(p3dReads),
+         foundPaa, foundRvmat, generation]() mutable
+    {
+        std::counting_semaphore<64>& gate = StreamPrepGate();
+        gate.acquire();
+        struct Release { std::counting_semaphore<64>& g; ~Release() { g.release(); } } release{gate};
+        Foundation::poSetMyPriority(-1);
+        RunPaaRound(paaReads, rvmatReads, p3dReads, generation, *foundPaa, *foundRvmat);
+    });
 }
 
 void Landscape::ParkStreamTexPrep(uint32_t modelIndex, std::shared_ptr<Model::Model> model, bool ownerAdmission)
@@ -3851,60 +4007,41 @@ void Landscape::ParkStreamTexPrep(uint32_t modelIndex, std::shared_ptr<Model::Mo
         // them (it checks every level against the header it parsed itself before using a byte).
         // A texture that is loaded, already prepared or not a plain stored PBO member is left to
         // the main thread exactly as before.
-        std::vector<std::pair<std::string, BankReadRequest>> reads;
-        // The .rvmat files too: their stage maps (normal, specular, masks) are resolved only at GPU
-        // registration. The background task reads each material and names its stage PAAs; they are
-        // captured and decoded in FinishStreamTexPrep, while the model converts.
-        static std::unordered_set<std::string> rvmatSeen; // main thread only
-        std::vector<std::pair<std::string, BankReadRequest>> rvmats;
+        // The model's own PAAs, its .rvmat materials (whose stage maps -- normal, specular, masks --
+        // are resolved only at GPU registration) and its proxy models (a building's furniture,
+        // loaded inside its install) are all captured here; the rounds that follow (FinishStream
+        // TexPrep) chase what the materials and proxies name before the model may convert.
+        std::vector<std::pair<std::string, BankReadRequest>> reads, rvmats, p3ds;
         if (model)
             for (const auto& level : model->lodLevels)
+            {
                 for (const auto& material : level.mesh.materials)
                 {
                     CapturePaaRead(bank, material.texturePath, reads);
                     for (const auto& stage : material.embeddedStages)
                         CapturePaaRead(bank, stage.texturePath, reads);
-                    std::string rv = render::PreparedTextureStore::Key(material.materialPath);
-                    if (rv.size() > 6 && rv.compare(rv.size() - 6, 6, ".rvmat") == 0 && rvmats.size() < 32 &&
-                        rvmatSeen.insert(rv).second)
-                        if (QFBank* archive = QIFStreamB::AutoBank(rv.c_str());
-                            archive && archive->GetPrefix().GetLength() < static_cast<int>(rv.size()))
-                            if (auto read = archive->CaptureReadRequest(rv.c_str() + archive->GetPrefix().GetLength());
-                                read && read->bytes > 0 && read->bytes <= 256u * 1024)
-                                rvmats.emplace_back(std::move(rv), std::move(*read));
+                    if (!material.materialPath.empty())
+                        CaptureOnce(material.materialPath, 256u * 1024, rvmats, 256);
                 }
+                if (level.purpose == Model::LodPurpose::Visual)
+                    for (const auto& proxy : level.mesh.proxies)
+                    {
+                        const auto normalized = Model::ShapeAdapter::normalizeProxyModelName(proxy.name);
+                        if (!normalized.modelName.empty())
+                            CaptureOnce(static_cast<const char*>(GetShapeName(RString(normalized.modelName.c_str()))),
+                                        4u * 1024 * 1024, p3ds, 256);
+                    }
+            }
+        static const bool roundLog = [] { const char* v = std::getenv("WGR_PAA_ROUND_LOG"); return v && v[0] == '1'; }();
+        if (roundLog && model)
+            LOG_INFO(World, "PAA round 0: {} paa={} rvmat={} p3d={}", model->sourcePath, reads.size(), rvmats.size(), p3ds.size());
         NativeFarTexPrep pending;
         pending.model = std::move(model);
         pending.ownerAdmission = ownerAdmission;
-        pending.stageNames = std::make_shared<std::vector<std::string>>();
-        const uint64_t generation = render::PreparedTextureStore::Instance().Generation();
-        pending.decode = std::async(std::launch::async,
-            [reads = std::move(reads), rvmats = std::move(rvmats), stageNames = pending.stageNames, generation]() mutable
-        {
-            std::counting_semaphore<64>& gate = StreamPrepGate();
-            gate.acquire();
-            struct Release { std::counting_semaphore<64>& g; ~Release() { g.release(); } } release{gate};
-            Foundation::poSetMyPriority(-1);
-            DecodePaaReads(reads, generation);
-            std::vector<char> bytes;
-            for (const auto& [path, read] : rvmats)
-            {
-                try
-                {
-                    if (!read.Read(bytes))
-                        continue;
-                    const auto stages = Streaming::ExtractOwnedRapStageNames(std::span<const char>(bytes.data(), bytes.size()), path);
-                    static std::atomic<int> diagRows{0};
-                    if (diagRows.fetch_add(1) < 12)
-                        LOG_INFO(World, "PAA stage prep: {} status={} names={}", path, int(stages.status), stages.names.size());
-                    if (stages.status == Streaming::RapStageNamesStatus::Complete)
-                        stageNames->insert(stageNames->end(), stages.names.begin(), stages.names.end());
-                }
-                catch (...)
-                {
-                }
-            }
-        });
+        pending.foundPaa = std::make_shared<std::vector<std::string>>();
+        pending.foundRvmat = std::make_shared<std::vector<std::string>>();
+        pending.decode = StartPaaRound(std::move(reads), std::move(rvmats), std::move(p3ds), pending.foundPaa,
+                                       pending.foundRvmat);
         _nativeFarTexPrep.insert_or_assign(modelIndex, std::move(pending));
         return;
     }
@@ -4003,37 +4140,39 @@ bool Landscape::FinishStreamTexPrep(uint32_t modelIndex)
     if (found == _nativeFarTexPrep.end() ||
         found->second.decode.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
         return false;
-    std::shared_ptr<Model::Model> model = std::move(found->second.model);
-    const bool ownerAdmission = found->second.ownerAdmission;
     found->second.decode.get();
-    // STREAM-PAA-PREP: the rvmat stage PAAs the background task named -- captured here (main
-    // thread) and decoded while the model converts. Not waited for: one that is not ready by the
-    // install is read there, as before.
-    if (const auto stageNames = found->second.stageNames; stageNames && !stageNames->empty())
+    // STREAM-PAA-PREP: a round named more (material stage maps, proxy textures): capture them here
+    // and run another round before the model converts, so its install finds them prepared.
+    if (NativeFarTexPrep& parked = found->second; parked.foundPaa && parked.paaRounds < 3 &&
+        (!parked.foundPaa->empty() || !parked.foundRvmat->empty()))
     {
         AbstractTextBank* bank = GEngine ? GEngine->TextBank() : nullptr;
-        std::vector<std::pair<std::string, BankReadRequest>> reads;
+        std::vector<std::pair<std::string, BankReadRequest>> reads, rvmats;
         if (bank)
-            for (const std::string& name : *stageNames)
-                CapturePaaRead(bank, name, reads);
-        static int diagFinish = 0;
-        if (diagFinish++ < 12)
-            LOG_INFO(World, "PAA stage prep: model {} stage names {} captured {}", modelIndex, stageNames->size(), reads.size());
-        if (!reads.empty())
         {
-            const uint64_t generation = render::PreparedTextureStore::Instance().Generation();
-            _paaStageTasks.push_back(std::async(std::launch::async, [reads = std::move(reads), generation]() mutable
-            {
-                std::counting_semaphore<64>& gate = StreamPrepGate();
-                gate.acquire();
-                struct Release { std::counting_semaphore<64>& g; ~Release() { g.release(); } } release{gate};
-                Foundation::poSetMyPriority(-1);
-                DecodePaaReads(reads, generation);
-            }));
+            for (const std::string& name : *parked.foundPaa)
+                CapturePaaRead(bank, name, reads);
+            for (const std::string& name : *parked.foundRvmat)
+                CaptureOnce(name, 256u * 1024, rvmats, 256);
         }
-        std::erase_if(_paaStageTasks, [](const std::future<void>& f)
-                      { return f.wait_for(std::chrono::seconds(0)) == std::future_status::ready; });
+        static const bool roundLog = [] { const char* v = std::getenv("WGR_PAA_ROUND_LOG"); return v && v[0] == '1'; }();
+        if (roundLog)
+            LOG_INFO(World, "PAA round {}: {} found paa={} rvmat={} captured paa={} rvmat={} | refused so far loaded={} store={} archive={} member={} claimed={} | first={}", parked.paaRounds + 1,
+                     parked.model ? parked.model->sourcePath : std::string("?"), parked.foundPaa->size(),
+                     parked.foundRvmat->size(), reads.size(), rvmats.size(), GPaaCaptureRefused[0], GPaaCaptureRefused[1],
+                     GPaaCaptureRefused[2], GPaaCaptureRefused[3], GPaaCaptureRefused[4],
+                     parked.foundPaa->empty() ? std::string("-") : parked.foundPaa->front());
+        parked.foundPaa = std::make_shared<std::vector<std::string>>();
+        parked.foundRvmat = std::make_shared<std::vector<std::string>>();
+        ++parked.paaRounds;
+        if (!reads.empty() || !rvmats.empty())
+        {
+            parked.decode = StartPaaRound(std::move(reads), std::move(rvmats), {}, parked.foundPaa, parked.foundRvmat);
+            return false; // still parked; the next call sees the new round
+        }
     }
+    std::shared_ptr<Model::Model> model = std::move(found->second.model);
+    const bool ownerAdmission = found->second.ownerAdmission;
     _nativeFarTexPrep.erase(found);
     if (!model || !_modernObjectPreparer)
         return true;
@@ -5194,7 +5333,9 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         // own scoped synchronous path.
                         if (AbstractTextBank* nearBank = GEngine ? GEngine->TextBank() : nullptr;
                             NativeFarAsyncPrep() && (NativeTexturePrepApplies(nearBank) || PaaTexturePrepApplies(nearBank)) &&
-                            low != R"(dz\structures\residential\tenements\tenement_small.p3d)")
+                            // The tenement keeps its own synchronous path only while its pilot is on.
+                            !(TenementPhysicalPaaScope::Enabled() &&
+                              low == R"(dz\structures\residential\tenements\tenement_small.p3d)"))
                         {
                             const auto tableStart = std::chrono::steady_clock::now();
                             ParkStreamTexPrep(placement.modelIndex, std::move(preparsed), true);
