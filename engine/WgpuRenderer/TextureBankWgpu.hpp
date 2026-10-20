@@ -97,7 +97,8 @@ class TextureBankWgpu : public AbstractTextBank
     // PERF-TRIM-BACKOFF: no texture trim before this residency frame (see TrimResidency).
     uint64_t _trimBackoffUntil = 0;
     // What the GPU says about the CPU's residency decisions. See ReportMipFeedback.
-    void ReportMipFeedback();
+    // false = the producer window was busy and nothing was done; ask again next frame.
+    bool ReportMipFeedback();
     uint64_t _adaptiveViewEpoch = 1;
     bool _adaptiveViewValid = false;
     float _adaptiveViewX = 0, _adaptiveViewY = 0, _adaptiveViewZ = 0;

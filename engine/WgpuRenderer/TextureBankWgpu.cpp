@@ -143,10 +143,10 @@ static uint64_t TextureBudgetBytes(uint64_t budgetBytes)
 // It is a MEASUREMENT and nothing acts on it yet. Deliberately: a residency policy driven by
 // this signal has to answer what happens to a texture the GPU stops reporting because the LRU
 // already evicted it, and that question is not settled by the instrument that raises it.
-void TextureBankWgpu::ReportMipFeedback()
+bool TextureBankWgpu::ReportMipFeedback()
 {
     if (!_renderer)
-        return;
+        return true;
     WgrMipFeedbackStats fb{};
     // One allocation, sized past any plausible bindless cap (8,192 today). The call writes
     // min(this, the renderer's slot count) and reports which, so oversizing costs 96 KB once
@@ -156,19 +156,29 @@ void TextureBankWgpu::ReportMipFeedback()
         _mipDesired.resize(65536);
         _mipAge.resize(65536);
     }
-    EngineWgpu::AcquireProducerWindow("mip feedback");
+    // PERF-MIP-REPORT-NOWAIT (2026-10-20). This report is a log line, and it opened the producer
+    // window -- the main thread waiting 30-40 ms for the render thread's frame in flight, plus the
+    // texture walk: a 68-86 ms hitch every 600 frames (~20 s) on Everon and Stratis. By default it
+    // runs only when the window is free -- with the render thread overlapped that is rarely, so in
+    // practice the report is off. WGR_MIP_FEEDBACK_REPORT=1 = the old blocking report, for when the
+    // numbers are wanted.
+    static const bool forced = [] { const char* v = std::getenv("WGR_MIP_FEEDBACK_REPORT"); return v && v[0] == '1'; }();
+    if (forced)
+        EngineWgpu::AcquireProducerWindow("mip feedback");
+    else if (!EngineWgpu::TryAcquireProducerWindow())
+        return false;
     const uint32_t slots =
         wgr_get_mip_feedback(_renderer, &fb, _mipDesired.data(), _mipAge.data(),
                              static_cast<uint32_t>(_mipDesired.size()));
     if (slots == 0)
-        return;
+        return true;
     if (fb.harvests == 0)
     {
         // NOT the same statement as "nothing was sampled", and reporting it as one is exactly
         // the failure mode a counter that cannot say "did not run" produces. Say it plainly.
         LOG_INFO(Graphics, "Wgpu mip feedback: no readback has completed yet (slots={} groups={})",
                  slots, fb.groups);
-        return;
+        return true;
     }
 
     uint32_t resident = 0;      // resident, leased, evictable object textures
@@ -181,13 +191,12 @@ void TextureBankWgpu::ReportMipFeedback()
     for (int i = 0; i < _texture.Size(); ++i)
     {
         TextureWgpu* texture = _texture[i];
-        if (!texture || !texture->GpuHandle() || texture->IsDynamicTexture() ||
-            IsTerrainOwnedTexture(texture))
+        if (!texture || !texture->GpuHandle() || texture->IsDynamicTexture())
             continue;
         const uint32_t slot = texture->SlotLease();
         // Slot 0 means the bindless array was at cap and this texture samples through
         // per-upload slots, where no stable identity exists to report against.
-        if (slot == 0 || slot >= slots)
+        if (slot == 0 || slot >= slots || IsTerrainOwnedTexture(texture)) // the name scan last
             continue;
         ++resident;
         const uint8_t desired = _mipDesired[slot];
@@ -221,6 +230,7 @@ void TextureBankWgpu::ReportMipFeedback()
              "slots={} observed={} groups={} harvests={}",
              resident, resident - unsampled, unsampled, markedButUnsampled, stale, hist[0], hist[1],
              hist[2], hist[3], hist[4], slackPct, slots, fb.observed, fb.groups, fb.harvests);
+    return true;
 }
 
 void TextureBankWgpu::UpdateAdaptiveTextureDetail()
@@ -312,11 +322,8 @@ void TextureBankWgpu::TrimResidency()
         return;
     // Every 600 residency frames -- roughly ten seconds of play, and long enough that the
     // rotation (32 frames by default) has swept the table a dozen times over.
-    if (_residencyFrame >= _mipReportDue)
-    {
+    if (_residencyFrame >= _mipReportDue && ReportMipFeedback())
         _mipReportDue = _residencyFrame + 600;
-        ReportMipFeedback();
-    }
     // REN-THR-013: the on-budget frame (every frame on a stock world) reads the worker's
     // snapshot and never touches the renderer; only an over-budget frame opens the window,
     // re-reads the live figure and evicts as before.
