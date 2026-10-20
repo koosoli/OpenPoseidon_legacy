@@ -116,3 +116,20 @@ Quick DayZ A/B without Nsight: launch the same flight directly with a mission wh
 ends in `triEndGame` (the frame-trace CSVs are only written on a clean exit), and judge by frames
 > 80/100 ms -- DayZ's median frame at 3440x1440 is ~45 ms and run-to-run noise is +-0.3 s of
 time in frames > 80 ms.
+
+## Round 2 (2026-10-20): ns-a3 / ns-rf2 / ns-dayz2 on 1e4f72f9d
+
+- **Stratis**: few stutters (9 frames > 45 ms in the window). Steady frames are GPU-bound
+  (present / get_current_texture ~1/3 of the render thread). Stutter sources: draw-time
+  `EnsureUploaded` LZO decodes (`Shape::Draw`, legacy path) and rvmat stage-map resolution at install.
+- **Reforger**: grass exclusion table rebuilt whole every ~2 s (18% of the main thread in slow
+  frames) -- fixed, PERF-GRASS-CELLS-INCREMENTAL (0c1c322cb). DLSS `evaluate` CPU time shows up
+  under `run_tonemap`.
+- **DayZ**: console sink blocking (12%, mostly a Nsight artefact: stdout is a pipe there) -- fixed.
+  Install costs remain: rvmat material maps (~19%), proxy furniture (`CreateAdapterProxies` +
+  `EmitGpuProxies`, ~10%), texture creation (~7%). The prepared store (512 MB) overflows only in the
+  first minute of world load; backpressure and an expired-key block were tried and measured as no
+  better -- not kept.
+- **Render thread, all worlds**: `CommandEncoder::finish` is 34-47% -- in wgpu 29 this is where the
+  frame is actually encoded, so it is the cost of the draws themselves; bindless re-tracking
+  (`merge_single` / `register_init_action`) is ~8% of it, triggered by plain/skinned layout switches.
