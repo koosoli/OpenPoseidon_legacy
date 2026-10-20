@@ -6,6 +6,8 @@
 #include <chrono>
 #include <atomic>
 #include <optional>
+#include <semaphore>
+#include <thread>
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/AuthoredObjectIds.hpp>
@@ -38,6 +40,7 @@
 #include <Poseidon/Asset/Formats/World/Oprw24.hpp>
 #include <Poseidon/Asset/Formats/World/Oprw20.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
+#include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
 // FAR INSTANCE TIER — proxy dimensions read from a model's ModelInfo alone (no LOD body).
 #include <Poseidon/Asset/Formats/P3D/ModelProxyBounds.hpp>
@@ -3759,10 +3762,91 @@ void Landscape::ParkStreamTexPrep(uint32_t modelIndex, std::shared_ptr<Model::Mo
     std::unordered_set<std::string> claims;
     std::vector<std::string> keys = CollectNativeInstallTextureKeys(
         {model.get()}, claims, [bank](const char* n) { return bank && bank->IsLoaded(RStringB(n)); });
+    // STREAM-EMAT-PREP: the face textures above are only half of what a cold install loads. The
+    // .emat stage maps (BCR, NMO, masks) are resolved at GPU registration, on the main thread,
+    // and every one of them was a synchronous pak read + decode there: 689 textures / 4.3 s of
+    // the main thread on a 15 m/s Durras flight (2.6 s of it the read). The materials are read
+    // here too, on the same background task, and their maps prepared; the cold install takes
+    // them under NativeInstallTextureScope. A material is asked once per process (the bank keeps
+    // what it loaded). POSEIDON_STREAM_EMAT_PREP=0 = the face textures only.
+    static const bool ematPrep = []
+    {
+        const char* v = std::getenv("POSEIDON_STREAM_EMAT_PREP");
+        return !(v && v[0] == '0');
+    }();
+    static std::unordered_set<std::string> ematSeen;
+    std::vector<std::string> emats;
+    if (ematPrep && model)
+        for (const auto& level : model->lodLevels)
+            for (const auto& material : level.mesh.materials)
+                if (Asset::Material::IsEmatPath(material.materialPath) && ematSeen.insert(material.materialPath).second)
+                    emats.push_back(material.materialPath);
     NativeFarTexPrep pending;
     pending.model = std::move(model);
     pending.ownerAdmission = ownerAdmission;
-    pending.decode = std::async(std::launch::async, [keys = std::move(keys)] { DecodeNativeInstallTextureKeys(keys, nullptr); });
+    pending.decode = std::async(std::launch::async, [keys = std::move(keys), emats = std::move(emats)]() mutable
+    {
+        // STREAM-EMAT-PREP: one task per parked model, and a recentre parks hundreds at once.
+        // Unbounded, they all decoded together and competed with the main and render threads;
+        // at most POSEIDON_STREAM_PREP_THREADS (default: a quarter of the cores, 2..6) run.
+        static std::counting_semaphore<64> gate([]
+        {
+            const char* v = std::getenv("POSEIDON_STREAM_PREP_THREADS");
+            const long want = v ? std::strtol(v, nullptr, 10)
+                                : static_cast<long>(std::thread::hardware_concurrency() / 4);
+            return static_cast<std::ptrdiff_t>(std::clamp<long>(want, v ? 1 : 2, v ? 64 : 6));
+        }());
+        gate.acquire();
+        struct Release { std::counting_semaphore<64>& g; ~Release() { g.release(); } } release{gate};
+        if (!emats.empty())
+        {
+            const auto& mount = Asset::Formats::Enfusion::EnfusionMount::Instance();
+            const auto readText = [&mount](const std::string& path, std::string& text)
+            {
+                const auto request = mount.MakeReadRequest(path.c_str());
+                std::vector<uint8_t> bytes;
+                std::string error;
+                if (!request || !request->Read(bytes, error) || bytes.empty())
+                    return false;
+                text.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+                return true;
+            };
+            render::PreparedTextureStore& store = render::PreparedTextureStore::Instance();
+            std::unordered_set<std::string> claimed(keys.begin(), keys.end());
+            for (const std::string& path : emats)
+            {
+                try
+                {
+                    std::string text;
+                    if (!readText(path, text))
+                        continue;
+                    Asset::Material::EmatMaterial emat = Asset::Material::ParseEmat(text);
+                    if (!emat.valid())
+                        continue;
+                    Asset::Material::ResolveEmatInheritance(emat, readText);
+                    const Asset::Material::TranslatedMaterial translated =
+                        Asset::Material::TranslateEmat(emat, path, std::string());
+                    for (const auto& slot : translated.slots)
+                    {
+                        if (slot.texture.isProcedural || slot.texture.path.empty())
+                            continue;
+                        std::string key = render::PreparedTextureStore::Key(slot.texture.path.canonical().c_str());
+                        if ((key.ends_with(".edds") || key.ends_with(".dds")) && !claimed.count(key) &&
+                            store.ShouldPrepare(key))
+                        {
+                            claimed.insert(key);
+                            keys.push_back(std::move(key));
+                        }
+                    }
+                }
+                catch (...)
+                {
+                    // The main thread reads it again and caches the miss, as before.
+                }
+            }
+        }
+        DecodeNativeInstallTextureKeys(keys, nullptr);
+    });
     _nativeFarTexPrep.insert_or_assign(modelIndex, std::move(pending));
 }
 
@@ -5231,6 +5315,11 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             }
             // Same taken ConvertedShape, joined nonyielding owner operation through first GPU registration.
             render::ColdPaaAdmissionScope coldTextureScope(coldTexture.get());
+            // STREAM-EMAT-PREP: a cold install takes the face and .emat stage maps ParkStreamTexPrep
+            // decoded in the background instead of reading and decoding them here.
+            std::optional<NativeInstallTextureScope> takePreparedStages;
+            if (cold && NativeTexturePrepApplies(GEngine ? GEngine->TextBank() : nullptr))
+                takePreparedStages.emplace();
             TenementPhysicalPaaScope physicalPaaAdmission(cold &&
                 std::strcmp((const char*)modelName,
                     R"(dz\structures\residential\tenements\tenement_small.p3d)") == 0);

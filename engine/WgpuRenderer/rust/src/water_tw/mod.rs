@@ -583,6 +583,9 @@ pub struct Tidewater {
     shore_dir_view: wgpu::TextureView,
     shore_grid: Option<ShoreGrid>,
     shore_stamp: Option<shore_field::FieldStamp>,
+    /// PERF-SHORE-TIDE: the sea level the shore field is solved for -- the producer's level with
+    /// the wave bob averaged out (see update_shore_field), and when it was last advanced.
+    shore_sea: Option<(f32, std::time::Instant)>,
     shore_worker: shore_field::ShoreFieldWorker,
     terrain: Option<(Arc<[f32]>, crate::ffi::WgrTerrainParams, u64)>,
     // W3b shore simulation
@@ -939,6 +942,7 @@ impl Tidewater {
             shore_dir_view,
             shore_grid: None,
             shore_stamp: None,
+            shore_sea: None,
             shore_worker: Default::default(),
             terrain: None,
             sim,
@@ -1109,6 +1113,10 @@ impl Tidewater {
                 bytemuck::cast_slice(&field.dirs),
             );
             self.shore_grid = Some(ShoreGrid { origin: field.origin, cell: field.cell, centre: field.centre() });
+            if PrepLap::limit().is_some() {
+                eprintln!("TW_SHORE_FIELD {}x{} gen={} sea={:.3} heading={:.1}", w, h, field.stamp.terrain_gen,
+                          field.stamp.sea_level, field.stamp.heading_deg);
+            }
             self.shore_stamp = Some(field.stamp);
             self.coast = field.coast;
             self.rebuild_bind(device);
@@ -1117,13 +1125,36 @@ impl Tidewater {
         if tp.hm_width < 2 || tp.hm_height < 2 || tp.terrain_grid <= 0.0 {
             return;
         }
+        // PERF-SHORE-TIDE (2026-10-20): the producer's sea level is Landscape::GetSeaLevel, the
+        // tide PLUS the wave bob (_seaLevelWave). The bob swings ~0.25 m every few seconds, which
+        // is exactly the field's re-solve threshold: on a Reforger flight the 2048x2048 field was
+        // solved and re-uploaded 18 times in 80 s, 30-80 ms of the render thread each (the
+        // largest render-side hitch left). The field describes where swell arrives over the
+        // bathymetry, which follows the tide, not each wave; it now follows the level averaged
+        // over ~20 s, which a tide (hours) passes through unchanged. A jump (world load, setTide)
+        // snaps. WGR_TW_SHORE_RAW_SEA=1 = the instantaneous level.
+        let sea_level = {
+            static RAW: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let now = std::time::Instant::now();
+            let level = match self.shore_sea {
+                _ if *RAW.get_or_init(|| std::env::var("WGR_TW_SHORE_RAW_SEA").as_deref() == Ok("1")) => p.sea_level,
+                Some((avg, _)) if (p.sea_level - avg).abs() > 2.0 => p.sea_level,
+                Some((avg, last)) => {
+                    let k = ((now - last).as_secs_f32() / 20.0).min(1.0);
+                    avg + (p.sea_level - avg) * k
+                }
+                None => p.sea_level,
+            };
+            self.shore_sea = Some((level, now));
+            level
+        };
         let input = shore_field::ShoreFieldInput {
             heights: heights.clone(),
             hm_width: tp.hm_width,
             hm_height: tp.hm_height,
             origin: [tp.world_origin.x, tp.world_origin.y],
             grid: tp.terrain_grid,
-            sea_level: p.sea_level,
+            sea_level,
             swell_dir: swell_dir(p),
             terrain_gen: *generation,
         };
@@ -1175,6 +1206,7 @@ impl Tidewater {
     }
 
     fn prepare_inner(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, camera: Option<&WgrCamera>) {
+        let mut lap = PrepLap::new();
         if let Some(p) = self.last_params {
             if earth_preview(&p) {
                 // A rolling Earth height window has no authoritative bathymetry/coast sim.
@@ -1184,6 +1216,7 @@ impl Tidewater {
                 self.update_shore_field(device, queue, &p);
             }
         }
+        lap.mark("shore_field");
         let (Some(p), Some(cam)) = (self.last_params, camera) else {
             self.instance_count = 0;
             return;
@@ -1212,10 +1245,12 @@ impl Tidewater {
         } else {
             self.sim.regions = [None; shore_sim::K];
         }
+        lap.mark("shore_sim");
         self.brk.lips_on = p.tidewater_shore[2][3] > 0.0;
         let ts = std::time::Instant::now();
         self.update_stations(queue, p.sea_level);
         self.prep_stats[2] = self.prep_stats[2].max(ts.elapsed().as_secs_f32() * 1000.0);
+        lap.mark("stations");
         // W4a: the spray lives where the breakers are (the simulated regions)
         let spray_on = (spray_on(&p) || spray_override().is_some_and(|(g, i)| g > 0.0 && i > 0.0))
             && self.sim.any_active()
@@ -1237,7 +1272,9 @@ impl Tidewater {
         let bodies: Vec<spray::Body> = spray_boats.iter().flatten().map(|b| b.body()).collect();
         self.spray.set_frame(queue, dt, p.time, cp, gain, intensity, spray_on, &requests, &bodies);
         // W6: the boats' wakes (visual only; see wake.rs)
+        lap.mark("spray");
         self.wake_lanes = self.wake.update(queue, wake::WakeBoat::from_params(&p), dt, p.time, p.sea_level);
+        lap.mark("wake");
         let mut inputs = FrameInputs {
             detail_offset: self.detail_offset,
             morph: &self.cdlod.morph,
@@ -1295,7 +1332,9 @@ impl Tidewater {
             self.query.prepare(queue);
             self.uw.set_frame(queue, &uwp);
         }
+        lap.mark("surface+uw");
         self.fft.set_frame(queue, spec, p.tidewater[0][1], p.tidewater[0][0], p.tidewater_fx[3], p.time, dt);
+        lap.mark("fft");
 
         let cam_pos = glam::DVec3::new(cam.cam_pos[0] as f64, cam.cam_pos[1] as f64, cam.cam_pos[2] as f64);
         let clip = glam::Mat4::from_cols_array(&cam.proj) * glam::Mat4::from_cols_array(&cam.view);
@@ -1312,6 +1351,8 @@ impl Tidewater {
         if !nodes.is_empty() {
             queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&nodes));
         }
+        lap.mark("cdlod");
+        lap.report();
     }
 
     /// Per-frame compute before the water draw: the FFT and its mip chain.
@@ -1851,5 +1892,39 @@ mod tests {
         assert_eq!(p1, [1.0, 0.02, 0.016, 1.0]);
         p.tidewater_shore[2][1] = 0.0;
         assert!(!shore_sim_on(&p, Some(g)));
+    }
+}
+
+/// Diagnostic: the phases of one slow `prepare` (WGR_FRAME_LAP_MS, the render thread's lap
+/// threshold), on stderr as `TW_PREP_LAP`.
+struct PrepLap {
+    t0: Option<std::time::Instant>,
+    t: std::time::Instant,
+    laps: Vec<(&'static str, f32)>,
+}
+impl PrepLap {
+    fn limit() -> Option<f32> {
+        static LIMIT: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+        *LIMIT.get_or_init(|| std::env::var("WGR_FRAME_LAP_MS").ok().and_then(|v| v.parse().ok()))
+    }
+    fn new() -> Self {
+        let now = std::time::Instant::now();
+        Self { t0: Self::limit().map(|_| now), t: now, laps: Vec::new() }
+    }
+    fn mark(&mut self, name: &'static str) {
+        if self.t0.is_some() {
+            let now = std::time::Instant::now();
+            self.laps.push((name, (now - self.t).as_secs_f32() * 1e3));
+            self.t = now;
+        }
+    }
+    fn report(&self) {
+        if let (Some(t0), Some(limit)) = (self.t0, Self::limit()) {
+            let total = t0.elapsed().as_secs_f32() * 1e3;
+            if total >= limit * 0.5 {
+                let parts: Vec<String> = self.laps.iter().map(|(n, ms)| format!("{n}={ms:.1}")).collect();
+                eprintln!("TW_PREP_LAP {total:.1} ms: {}", parts.join(" "));
+            }
+        }
     }
 }

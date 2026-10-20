@@ -4711,6 +4711,7 @@ impl Renderer {
             water_nodes,
             prepared_cameras.get(water_camera),
         );
+        frame_lap.mark("water.prepare");
         // TW-WATER W3b: Tidewater's wet sand on the terrain (None: OP's own coast wet band).
         {
             let wet = self.water.shore_wetness();
@@ -4727,6 +4728,7 @@ impl Renderer {
                 }),
             );
         }
+        frame_lap.mark("shore_wet");
         // Arm only after retained-scene preparation, before prepare_cull uploads its
         // target-model uniform. A missing main camera leaves the request Unknown.
         let main_count_armed = if let (Some(&(token, model_id, source_generation)), Some(_)) =
@@ -4761,7 +4763,7 @@ impl Renderer {
         // Live from the Water tab ("Engage band"), no longer a constant — the band decides how
         // far into open air the pass keeps running, which is exactly the knob you want when
         // tuning how the effect behaves around the waterline.
-        frame_lap.mark("water.prepare");
+        frame_lap.mark("prepare_cull");
         let underwater_tuning = self.water.underwater_tuning();
         let underwater_near_surface_band = underwater_tuning.0;
         // The Water tab's checkbox. Without this the pass ran whatever the checkbox said: the
