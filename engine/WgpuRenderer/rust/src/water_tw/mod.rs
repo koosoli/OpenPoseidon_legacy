@@ -61,7 +61,7 @@ use std::sync::Arc;
 use crate::ffi::{WgrCamera, WgrWaterParams};
 
 /// The water shader: the material plus the shoreline-wave module appended to it (one module).
-const TW_WATER_WGSL: &str = concat!(
+pub(crate) const TW_WATER_WGSL: &str = concat!(
     include_str!("tw_water.wgsl"),
     "\n",
     include_str!("tw_common.wgsl"),

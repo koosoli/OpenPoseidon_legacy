@@ -242,6 +242,93 @@ pub fn build_composer() -> Composer {
     composer
 }
 
+// LOAD-SHADER-MEMO: composing an entry shader through naga_oil is the largest single start-up
+// cost (2026-10-20, OFP Everon from a clean install: 27 compositions, 944 ms, all on the main
+// thread; gpu_driven.wgsl alone composed five times with identical inputs at 38-97 ms each).
+// Composition is deterministic -- no @binding(auto) anywhere -- so a result is remembered under
+// everything that can change it: the entry source and path, the shader defs, the composer's
+// capabilities and every importable module it holds (name + sanitized source). prewarm_shaders()
+// composes the heaviest ones on background threads while the renderer builds everything else;
+// whoever asks first does the work and everyone else waits for it. WGR_SHADER_MEMO=0 = off.
+type ComposeCell = std::sync::Arc<std::sync::OnceLock<Result<naga::Module, String>>>;
+static COMPOSED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<u64, ComposeCell>>> =
+    std::sync::LazyLock::new(Default::default);
+
+fn memo_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_SHADER_MEMO").as_deref() != Ok("0"))
+}
+
+fn compose_key(composer: &Composer, source: &str, file_path: &str,
+               defs: &std::collections::HashMap<String, naga_oil::compose::ShaderDefValue>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut h);
+    file_path.hash(&mut h);
+    composer.capabilities.bits().hash(&mut h);
+    let mut d: Vec<String> = defs.iter().map(|(k, v)| format!("{k}={v:?}")).collect();
+    d.sort();
+    d.hash(&mut h);
+    let mut names: Vec<&String> = composer.module_sets.keys().collect();
+    names.sort();
+    for name in names {
+        name.hash(&mut h);
+        composer.module_sets[name].sanitized_source.hash(&mut h);
+    }
+    h.finish()
+}
+
+fn compose_memo(composer: &mut Composer, label: &str, source: &str, file_path: &str) -> naga::Module {
+    let defs = shader_defs();
+    let compose = |composer: &mut Composer, defs| {
+        composer
+            .make_naga_module(NagaModuleDescriptor { source, file_path, shader_defs: defs, ..Default::default() })
+            .map_err(|e| e.emit_to_string(composer))
+    };
+    if !memo_enabled() {
+        return compose(composer, defs).unwrap_or_else(|e| panic!("compose {label} ({file_path}): {e}"));
+    }
+    let key = compose_key(composer, source, file_path, &defs);
+    let cell = COMPOSED.lock().unwrap().entry(key).or_default().clone();
+    match cell.get_or_init(|| compose(composer, defs)) {
+        Ok(module) => module.clone(),
+        Err(e) => panic!("compose {label} ({file_path}): {e}"),
+    }
+}
+
+/// LOAD-SHADER-MEMO: start composing the heaviest entry shaders on background threads, each
+/// with its own standard composer. Call once, as early as the renderer starts; make_module then
+/// finds them ready (or waits for the one still in flight). Never needed for correctness.
+pub fn prewarm_shaders() {
+    if !memo_enabled() {
+        return;
+    }
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    STARTED.call_once(|| {
+        let jobs: [(&'static str, &'static str); 6] = [
+            (include_str!("../gfx3d/gpu_driven.wgsl"), "gfx3d/gpu_driven.wgsl"),
+            (crate::water_tw::TW_WATER_WGSL, "water_tw/tw_water.wgsl"),
+            (include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl"),
+            (include_str!("../terrain/terrain.wgsl"), "terrain/terrain.wgsl"),
+            (include_str!("../grass/grass.wgsl"), "grass/grass.wgsl"),
+            (include_str!("../layered_fog.wgsl"), "layered_fog.wgsl"),
+        ];
+        for (source, file_path) in jobs {
+            let _ = std::thread::Builder::new().name("wgr-shader-prewarm".into()).spawn(move || {
+                let mut composer = build_composer();
+                let defs = shader_defs();
+                let key = compose_key(&composer, source, file_path, &defs);
+                let cell = COMPOSED.lock().unwrap().entry(key).or_default().clone();
+                cell.get_or_init(|| {
+                    composer
+                        .make_naga_module(NagaModuleDescriptor { source, file_path, shader_defs: defs, ..Default::default() })
+                        .map_err(|e| e.emit_to_string(&composer))
+                });
+            });
+        }
+    });
+}
+
 /// Compose an entry-point shader source (which may `#import` the shared modules)
 /// into a wgpu shader module.
 pub fn make_module(
@@ -251,22 +338,18 @@ pub fn make_module(
     source: &str,
     file_path: &str,
 ) -> wgpu::ShaderModule {
-    let module = match composer.make_naga_module(NagaModuleDescriptor {
-        source,
-        file_path,
-        shader_defs: shader_defs(),
-        ..Default::default()
-    }) {
-        Ok(module) => module,
-        Err(e) => panic!(
-            "compose {label} ({file_path}): {}",
-            e.emit_to_string(composer)
-        ),
-    };
-    device.create_shader_module(wgpu::ShaderModuleDescriptor {
+    let t0 = std::time::Instant::now();
+    let module = compose_memo(composer, label, source, file_path);
+    let t1 = std::time::Instant::now();
+    let m = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(label),
         source: wgpu::ShaderSource::Naga(Cow::Owned(module)),
-    })
+    });
+    if std::env::var_os("WGR_SHADER_TIMING").is_some() {
+        eprintln!("[wgr] shader timing {label}: compose {:.1} ms, module {:.1} ms",
+                  (t1 - t0).as_secs_f64() * 1e3, t1.elapsed().as_secs_f64() * 1e3);
+    }
+    m
 }
 
 #[cfg(test)]

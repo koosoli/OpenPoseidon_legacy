@@ -1002,6 +1002,11 @@ pub struct Renderer {
     // [DLSS (dlss builds, when the NGX route came up), Bilinear]. All vendor state
     // (NGX objects, raw device handles, failure latches) lives inside the backends.
     upscalers: Vec<Box<dyn upscaler::TemporalUpscaler>>,
+    /// LOAD-NGX-DEFER: the DLSS start-up thread, still running when the renderer was handed
+    /// back. Joined without blocking once it has finished (poll_ngx_deferred, every frame); the
+    /// DLSS backend then goes to the front of `upscalers`.
+    #[cfg(feature = "dlss")]
+    ngx_deferred: Option<(dlss_device::NgxRawHandles, std::thread::JoinHandle<NgxOutcome>)>,
     // True when NGX came up at startup AND reported DLSS Super Sampling available
     // (feeds temporal_info's dlss_route).
     ngx_route: bool,
@@ -1195,6 +1200,12 @@ pub struct Renderer {
 // the GPU has finished with the last frame and before the device goes.
 impl Drop for Renderer {
     fn drop(&mut self) {
+        // LOAD-NGX-DEFER: a quit before the DLSS start-up thread finished must not tear the
+        // device down under it; its result (and NGX context) is dropped right here.
+        #[cfg(feature = "dlss")]
+        if let Some((_, handle)) = self.ngx_deferred.take() {
+            let _ = handle.join();
+        }
         if let Some(depth) = self.scene_depth.as_mut() { depth.invalidate(); }
         if !self.upscalers.is_empty() {
             let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
@@ -1325,6 +1336,9 @@ impl Renderer {
     }
 
     fn new(desc: &ffi::WgrSurfaceDesc, log: LogSink) -> Result<Self, String> {
+        // LOAD-SHADER-MEMO: compose the heaviest shaders on background threads while the device,
+        // surface and every other resource are created; make_module picks them up.
+        shaders::prewarm_shaders();
         // WGR_INIT_TIMING=1: where renderer start-up goes, one stderr line per phase
         let mut init_timer = InitTimer::new();
         let (raw_display_handle, raw_window_handle) = handles::build_handles(desc)?;
@@ -2275,6 +2289,23 @@ impl Renderer {
             | (if hdr_enabled { 1 << 6 } else { 0 })
             | (if sample_count > 1 { 1 << 7 } else { 0 });
 
+        // LOAD-NGX-DEFER (2026-10-20): with shader composition prewarmed, renderer start-up spent
+        // 1.16 s here waiting for NVIDIA's NGX initialisation (about 1.9 s from its start). Now the
+        // renderer comes back at once with the DLSS configuration it already speculated on, and
+        // the thread is joined later without blocking (poll_ngx_deferred); the first frames use
+        // the FSR/bilinear fallback until it lands. A late failure takes the runtime rollback a
+        // dying DLSS backend already has. WGR_NGX_JOIN_EARLY=1 = the old join-here.
+        #[cfg(feature = "dlss")]
+        let ngx_deferred = if ngx_pending.is_some() && std::env::var("WGR_NGX_JOIN_EARLY").as_deref() != Ok("1") {
+            init_timer.mark("ngx deferred");
+            ngx_pending.take()
+        } else {
+            None
+        };
+        #[cfg(feature = "dlss")]
+        let ngx_speculative = ngx_deferred.is_some();
+        #[cfg(not(feature = "dlss"))]
+        let ngx_speculative = false;
         // The speculative NGX probe, joined last so it overlapped everything above.
         #[cfg(feature = "dlss")]
         if let Some((raw, handle)) = ngx_pending.take() {
@@ -2355,7 +2386,7 @@ impl Renderer {
             temporal: {
                 let mut t = temporal::Temporal::from_env();
                 #[cfg(feature = "dlss")]
-                if ngx_raw.is_some() && std::env::var("WGR_TEMPORAL").is_err() {
+                if (ngx_raw.is_some() || ngx_speculative) && std::env::var("WGR_TEMPORAL").is_err() {
                     // The NGX route is up and nothing said otherwise: DLSS is the
                     // default experience, and it needs the temporal contract.
                     t.enabled = true;
@@ -2372,13 +2403,16 @@ impl Renderer {
             ngx_route: {
                 #[cfg(feature = "dlss")]
                 {
-                    ngx_raw.is_some()
+                    ngx_raw.is_some() || ngx_speculative
                 }
                 #[cfg(not(feature = "dlss"))]
                 {
+                    let _ = ngx_speculative;
                     false
                 }
             },
+            #[cfg(feature = "dlss")]
+            ngx_deferred,
             upscalers: {
                 let mut v: Vec<Box<dyn upscaler::TemporalUpscaler>> = Vec::new();
                 #[cfg(feature = "dlss")]
@@ -2960,6 +2994,41 @@ impl Renderer {
 
     // Tonemap the HDR scene target onto `dst` (the swapchain). No-op if the tonemap
     // pass doesn't exist (LDR-direct path).
+    /// LOAD-NGX-DEFER: take the DLSS start-up result once its thread has finished. Never blocks.
+    #[cfg(feature = "dlss")]
+    fn poll_ngx_deferred(&mut self) {
+        if !self.ngx_deferred.as_ref().is_some_and(|(_, h)| h.is_finished()) {
+            return;
+        }
+        let (raw, handle) = self.ngx_deferred.take().unwrap();
+        let outcome = handle.join().unwrap_or_else(|_| NgxOutcome {
+            lines: vec![(log_level::WARN, "DLSS start-up thread panicked".to_owned())],
+            result: Err("DLSS start-up thread panicked".to_owned()),
+        });
+        for (level, line) in &outcome.lines {
+            self.log.log(*level, line);
+        }
+        match outcome.result {
+            Ok(ngx) => {
+                self.upscalers.insert(0, Box::new(upscaler::DlssUpscaler::new(raw, ngx)));
+                self.log.log(log_level::INFO, "DLSS ready (joined after start-up, LOAD-NGX-DEFER)");
+            }
+            Err(reason) => {
+                // The renderer was built for DLSS; fall back exactly as a dying backend does.
+                self.log.log(log_level::INFO, &format!("DLSS status: inactive - {reason}"));
+                self.dlss_status.latch(reason);
+                self.ngx_route = false;
+                if self.temporal_auto && self.temporal.enabled {
+                    self.temporal.enabled = false;
+                }
+                if self.render_scale_auto && (self.render_scale - 1.0).abs() > 1e-3 {
+                    self.render_scale = 1.0;
+                    self.temporal.notify_reset("DLSS start-up failed: render scale back to 100%");
+                }
+            }
+        }
+    }
+
     fn run_tonemap(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -2971,6 +3040,8 @@ impl Renderer {
         if self.tonemap.is_none() {
             return;
         }
+        #[cfg(feature = "dlss")]
+        self.poll_ngx_deferred();
         // REN-TEMP-001F: static-world velocity, computed here because every 3D depth write
         // is done by the Resolve op. Reads the frame-final far-reduce depth resolve (the
         // same freshness machinery the god rays use); the DLSS stage may later prefer the
