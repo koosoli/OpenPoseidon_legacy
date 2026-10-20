@@ -48,6 +48,10 @@ For Arma 3 Stratis add `-World Arma3` (`packages\a3-compat\world\stratis\stratis
 checkout, Arma 3's `Addons`, pose 1700,5050 flying east). The `DestructionEffects` / `Weather`
 base-class errors at start are the same config mismatch.
 
+For Arma 2 Chernarus / Arma 1 Sahrani add `-World Arma2` / `-World Arma1` (ALDP packs from the main
+checkout's `inspiration\officialarma`, every inner PBO directory `;`-joined; Chernarus flies DayZ's
+coastal pose for comparison, Sahrani flies east into Corazol).
+
 It refuses to start while any OpenPoseidon is running -- **do not launch a test game while waiting
 for the owner** (a harness run of ours made the owner's run fail once). It copies the build to
 `bin-nsys`, flies Durras for ~2 min with nsys recording 45..95 s, then exports (~3 min, the report

@@ -2,6 +2,7 @@
 # to SQLite for scripts/reforger-pc/nsys_long_frames.py.
 #
 #   -World Reforger (default): Arma Reforger Everon, the Durras pose, through the go.ps1 harness.
+#   -World Arma2 | Arma1: Arma 2 Chernarus (DayZ's coastal pose) | Arma 1 Sahrani (into Corazol), ALDP data.
 #   -World DayZ: DayZ Chernarus+ (packages\dayz-compat\world\chernarusplus\chernarusplus.wrp in the
 #                main checkout + the DayZ install's Addons), the Test-DayZStreamingLatency pose
 #                flying west, launched directly.
@@ -15,7 +16,7 @@
 # Takes ~5 minutes: ~2 min flight, ~3 min report + SQLite export (3-4 GB). Changes nothing
 # permanent; the graphics.cfg VSync tweak is restored. Full recipe: .agents/PROFILING-WITH-NSIGHT.md
 param(
-    [ValidateSet('Reforger', 'DayZ', 'Arma3')][string]$World = 'Reforger',
+    [ValidateSet('Reforger', 'DayZ', 'Arma3', 'Arma2', 'Arma1')][string]$World = 'Reforger',
     [string]$Harness = (Join-Path $env:LOCALAPPDATA 'Temp\rfh\_OpenPoseidon-Reforger'),
     [string]$Build = '',
     [string]$Tag = '',
@@ -24,7 +25,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $h = $Harness
-if (-not $Tag) { $Tag = @{ DayZ = 'ns-dayz'; Arma3 = 'ns-arma3'; Reforger = 'ns-flight' }[$World] }
+if (-not $Tag) { $Tag = @{ DayZ = 'ns-dayz'; Arma3 = 'ns-arma3'; Arma2 = 'ns-arma2'; Arma1 = 'ns-arma1'; Reforger = 'ns-flight' }[$World] }
 if (-not (Test-Path (Join-Path $h 'go.ps1'))) { throw "No harness at $h (see .agents/PROFILING-WITH-NSIGHT.md, setup)" }
 
 # Newest Nsight Systems on C: or D:. 2022.x needed admin even to start and is not supported here.
@@ -95,12 +96,18 @@ if ($World -eq 'Reforger') {
                    Pose = @('5704.58', '2523.37', '150', '260.9', '-8'); Drift = '-15,0,60'; Name = 'Chernarus+' }
         Arma3 = @{ Wrp = 'packages\a3-compat\world\stratis\stratis.wrp'; Addons = 'D:\SteamLibrary\steamapps\common\Arma 3\Addons';
                    Pose = @('1700', '5050', '150', '90', '-8'); Drift = '15,0,60'; Name = 'Stratis' }
+        # Arma 1/2: Bohemia's ALDP packs in the main checkout's inspiration\officialarma (repo-relative,
+        # ';'-separated -- every inner PBO directory). Chernarus flies DayZ's coastal pose for comparison.
+        Arma2 = @{ Wrp = 'packages\a2-compat\world\chernarus\chernarus.wrp'; Addons = 'inspiration\officialarma\ALDP_A2_PBOs_ADPL-SA_APL-SA_part1\ALDP_A2_PBOs_APL-SA_part1;inspiration\officialarma\ALDP_A2_PBOs_ADPL-SA_APL-SA_part2\ALDP_A2_PBOs_APL-SA_part2;inspiration\officialarma\ALDP_A2_PBOs_ADPL-SA_APL-SA_part3\ALDP_A2_PBOs_APL-SA_part3;inspiration\officialarma\ALDP_A2_PBOs_DPL_APL_part1\ALDP_A2_PBOs_APL_part1;inspiration\officialarma\ALDP_A2_PBOs_DPL_APL_part2\ALDP_A2_PBOs_APL_part2;inspiration\officialarma\ALDP_A2_PBOs_DPL_APL_part3\ALDP_A2_PBOs_APL_part3'; RepoAddons = $true;
+                   Pose = @('5704.58', '2523.37', '150', '260.9', '-8'); Drift = '-15,0,60'; Name = 'Chernarus' }
+        Arma1 = @{ Wrp = 'packages\a1-compat\world\sara\sara.wrp'; Addons = 'inspiration\officialarma\ALDP_A1_PBOs_ADPL-SA_APL-SA_part1\ALDP_A1_PBOs_APL-SA_part1;inspiration\officialarma\ALDP_A1_PBOs_ADPL-SA_APL-SA_part2\ALDP_A1_PBOs_APL-SA_part2;inspiration\officialarma\ALDP_A1_PBOs_DPL_APL_part1\ALDP_A1_PBOs_APL_part1;inspiration\officialarma\ALDP_A1_PBOs_DPL_APL_part2\ALDP_A1_PBOs_APL_part2'; RepoAddons = $true;
+                   Pose = @('12400', '8794', '150', '90', '-8'); Drift = '15,0,60'; Name = 'Sahrani' }
     }
     $w = $worlds[$World]
     $wrp = Join-Path $repo $w.Wrp
-    $addons = $w.Addons
+    $addons = if ($w.RepoAddons) { ($w.Addons -split ';' | ForEach-Object { Join-Path $repo $_ }) -join ';' } else { $w.Addons }
     if (-not (Test-Path $wrp)) { throw "$($w.Name) world not found at $wrp" }
-    if (-not (Test-Path $addons)) { throw "$World addons not found at $addons" }
+    foreach ($a in $addons -split ';') { if (-not (Test-Path $a)) { throw "$World addons not found at $a" } }
     $profile = Join-Path $out 'user'
     $mission = Join-Path $out 'flight.eden'
     New-Item -ItemType Directory -Force $profile, $mission | Out-Null
