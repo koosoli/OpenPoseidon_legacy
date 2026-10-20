@@ -1519,9 +1519,12 @@ bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
 
     // Only the explicit PBO-texture experiment performs a lookup/native capture.
     // Facts are usable before upload; the raw chain remains available to upload.
+    // STREAM-PAA-ALPHA: the parked-model PAA preparation (POSEIDON_STREAM_PAA_PREP, default on)
+    // publishes these facts too, so they are looked up whenever it is on.
     static const bool pboTextures = [] {
         const char* value = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
-        return value && value[0] == '1';
+        const char* paaPrep = std::getenv("POSEIDON_STREAM_PAA_PREP");
+        return (value && value[0] == '1') || !(paaPrep && paaPrep[0] == '0');
     }();
     if (pboTextures && GUseFileBanks && render::PreparedTextureStore::Enabled())
     {
@@ -1539,6 +1542,28 @@ bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
                         store.CopyAlphaFacts(key, *current, magic, w, h, static_cast<size_t>(bytes), _mipmaps[0]._start, facts))
                     {
                         _alphaStats = facts.histogram;
+                        // WGR_PAA_PREPARED_VERIFY=1: the histogram the ordinary block read gives, too.
+                        static const bool verifyFacts = [] {
+                            const char* v = std::getenv("WGR_PAA_PREPARED_VERIFY");
+                            return v && v[0] == '1';
+                        }();
+                        if (verifyFacts)
+                        {
+                            std::vector<uint8_t> blocks(static_cast<size_t>(bytes));
+                            const MipmapRead topRead{blocks.data(), &_mipmaps[0], 0};
+                            AlphaStats reference;
+                            const bool same = _src->GetMipmapChain(&topRead, 1) &&
+                                ClassifyAlphaFromBlocks(blocks.data(), blocks.size(), w, h, fmt, reference, Name()) &&
+                                reference.kind == _alphaStats.kind && reference.aMin == _alphaStats.aMin &&
+                                reference.aMax == _alphaStats.aMax && reference.aMean == _alphaStats.aMean &&
+                                reference.pctClear == _alphaStats.pctClear && reference.pctOpaque == _alphaStats.pctOpaque &&
+                                reference.pctPartial == _alphaStats.pctPartial && reference.pctMid == _alphaStats.pctMid;
+                            static std::atomic<uint32_t> identical{0}, mismatched{0};
+                            const uint32_t n = (same ? identical : mismatched).fetch_add(1) + 1;
+                            if (!same || n % 50 == 1)
+                                LOG_INFO(Graphics, "PAA alpha facts verify: {} {} (identical={} mismatched={})",
+                                         same ? "identical" : "MISMATCH", Name(), identical.load(), mismatched.load());
+                        }
                         AlphaProfilePhase shapePhase(&render::ObjectAdmitProfile::alphaShapeMs);
                         RefineAlphaClassByShape(_alphaStats, nullptr, w, h, Name(), 1, 0, &facts.shape);
                         path = AlphaScanPath::PreparedFacts;

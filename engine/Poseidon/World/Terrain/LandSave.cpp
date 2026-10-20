@@ -3831,7 +3831,16 @@ static void CapturePaaRead(AbstractTextBank* bank, const std::string& raw,
         ++GPaaCaptureRefused[2];
         return;
     }
-    auto read = archive->CaptureReadRequest(key.c_str() + archive->GetPrefix().GetLength());
+    // With the archive identity (a lease on the exact mounted member) the worker can also publish
+    // the texture's alpha facts, which the alpha classification takes only for that same member.
+    static const bool withIdentity = [] {
+        const char* v = std::getenv("POSEIDON_STREAM_PAA_IDENTITY");
+        return !(v && v[0] == '0');
+    }();
+    auto read = withIdentity ? archive->CaptureReadRequest(key.c_str() + archive->GetPrefix().GetLength(), true)
+                             : std::optional<BankReadRequest>{};
+    if (!read)
+        read = archive->CaptureReadRequest(key.c_str() + archive->GetPrefix().GetLength());
     if (!read || read->bytes == 0 || read->bytes > 16u * 1024 * 1024)
     {
         ++GPaaCaptureRefused[3];
@@ -3856,7 +3865,12 @@ static void DecodePaaReads(std::vector<std::pair<std::string, BankReadRequest>>&
             const bool readOk = read.Read(bytes);
             const bool decoded = readOk &&
                 ReadPAABlockChainBuffer(bytes.data(), bytes.size(), chain, nullptr, 64u * 1024 * 1024) && chain.valid();
-            const bool put = decoded && prepared.Put(key, std::move(chain), generation);
+            // STREAM-PAA-ALPHA: the alpha classification's facts (histogram + shape) from the same
+            // chain, so the cold install's GetAlphaClass need not read and decode the top mip again.
+            std::unique_ptr<render::PreparedAlphaFacts> facts;
+            if (decoded && read.HasArchiveIdentity())
+                facts = render::PreparedTextureStore::BuildAlphaFacts(chain, read);
+            const bool put = decoded && prepared.Put(key, std::move(chain), generation, std::move(facts));
             static const bool putLog = [] { const char* v = std::getenv("WGR_PAA_PUT_LOG"); return v && v[0] == '1'; }();
             static std::atomic<int> putRows{0};
             if (putLog && key.find("furniture") != std::string::npos && putRows.fetch_add(1) < 60)
