@@ -1430,6 +1430,13 @@ struct GpuSectionSrc {
     variant: u32,
 }
 
+/// PERF-SECTION-INCREMENTAL lever: WGR_SECTION_REFRESH_INCREMENTAL=0 = every structural change
+/// re-resolves every section (the old behaviour).
+fn section_incremental_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_SECTION_REFRESH_INCREMENTAL").as_deref() != Ok("0"))
+}
+
 fn resolve_registered_section(meshes: &SlotMap<MeshKey, Mesh>, src: &GpuSectionSrc) -> cull::SectionGpu {
     let key: MeshKey = KeyData::from_ffi(src.mesh).into();
     match meshes.get(key) {
@@ -4770,6 +4777,13 @@ pub struct Gfx3d {
     gpu_section_src: Vec<GpuSectionSrc>,
     /// LOD-STREAM: meshes whose pool storage is evicted (handle kept, vert/index count 0).
     evicted_meshes: rustc_hash::FxHashSet<u64>,
+    // PERF-SECTION-INCREMENTAL: mesh handle -> section rows naming it (built by a full refresh,
+    // appended by register_model; validated against gpu_section_src on use), the meshes whose
+    // resolution may have changed since, and rows registered since.
+    section_mesh_rows: rustc_hash::FxHashMap<u64, Vec<u32>>,
+    section_mesh_rows_valid: bool,
+    section_dirty_meshes: rustc_hash::FxHashSet<u64>,
+    section_dirty_rows: Vec<u32>,
     lod_residency_flags_set: bool,
     pool_split_tick: u64,
     // Address validity only: fixed source descriptors + generational mesh map.
@@ -4945,6 +4959,20 @@ fn required_pipelines(d: &WgrDraw3D, skinned: bool) -> ([Option<PipelineKey>; 2]
 // fixed. They now compile on two background threads; a draw whose set is not ready yet is
 // simply not drawn (a newly streamed object appears a few frames later instead of freezing the
 // frame). The pipelines built are the same ones. WGR_PIPELINE_ASYNC=0 = compile in place.
+/// Background pipeline compiles must not take a core from the main or render thread.
+fn below_normal_priority() {
+    #[cfg(windows)]
+    {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetCurrentThread() -> *mut core::ffi::c_void;
+            fn SetThreadPriority(thread: *mut core::ffi::c_void, priority: i32) -> i32;
+        }
+        // THREAD_PRIORITY_BELOW_NORMAL
+        unsafe { SetThreadPriority(GetCurrentThread(), -1) };
+    }
+}
+
 fn pipe_async_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("WGR_PIPELINE_ASYNC").as_deref() != Ok("0"))
@@ -4977,7 +5005,9 @@ impl PipeWorker {
         for _ in 0..2 {
             let job_rx = job_rx.clone();
             let done_tx = done_tx.clone();
-            let _ = std::thread::Builder::new().name("wgr-pipeline".into()).spawn(move || loop {
+            let _ = std::thread::Builder::new().name("wgr-pipeline".into()).spawn(move || {
+                below_normal_priority();
+                loop {
                 // The lock is held only to take a job; the channel closing (renderer gone) ends it.
                 let job = match job_rx.lock() {
                     Ok(rx) => rx.recv(),
@@ -4994,6 +5024,7 @@ impl PipeWorker {
                 };
                 if done_tx.send(done).is_err() {
                     return;
+                }
                 }
             });
         }
@@ -6222,6 +6253,10 @@ impl Gfx3d {
             gpu_driven_enabled,
             gpu_section_src: Vec::new(),
             evicted_meshes: Default::default(),
+            section_mesh_rows: Default::default(),
+            section_mesh_rows_valid: false,
+            section_dirty_meshes: Default::default(),
+            section_dirty_rows: Vec::new(),
             lod_residency_flags_set: false,
             pool_split_tick: 0,
             gpu_section_refresh: section_refresh::SectionRefreshValidity::from_setting(
@@ -6450,8 +6485,9 @@ impl Gfx3d {
             aabb_max,
         });
         // New full-generational identity can change a formerly missing source.
-        self.gpu_section_refresh.invalidate();
-        key.data().as_ffi()
+        let created = key.data().as_ffi();
+        self.note_section_mesh(created);
+        created
     }
 
     /// LOD-STREAM: give a static, unshared, rigid mesh's pool ranges back while keeping its
@@ -6480,7 +6516,7 @@ impl Gfx3d {
         self.evicted_meshes.insert(handle);
         self.bake_bind_cache.remove(&key);
         self.bake_bind_cache_prev.remove(&key);
-        self.gpu_section_refresh.invalidate();
+        self.note_section_mesh(handle);
         true
     }
 
@@ -6506,7 +6542,7 @@ impl Gfx3d {
         mesh.vert_count = verts.len() as u32;
         mesh.index_count = indices.len() as u32;
         self.evicted_meshes.remove(&handle);
-        self.gpu_section_refresh.invalidate();
+        self.note_section_mesh(handle);
         true
     }
 
@@ -6564,8 +6600,9 @@ impl Gfx3d {
                     s.saved_bytes as f64 / 1048576.0
                 );
             }
-            self.gpu_section_refresh.invalidate();
-            return key.data().as_ffi();
+            let created = key.data().as_ffi();
+            self.note_section_mesh(created);
+            return created;
         }
         let id = self.mesh_create(device, queue, verts, indices);
         if id != 0 {
@@ -6842,7 +6879,7 @@ impl Gfx3d {
             let key: MeshKey = KeyData::from_ffi(handle).into();
             // Return the mesh's pool ranges to the free-list so a later load reuses them.
             if let Some(mesh) = self.meshes.remove(key) {
-                self.gpu_section_refresh.invalidate();
+                self.note_section_mesh(handle);
                 // RFG-127: a shared allocation is freed by its last user only.
                 let free_now = match self.shared_meshes.of_mesh.remove(&key) {
                     Some(content) => match self.shared_meshes.by_content.get_mut(&content) {
@@ -10052,18 +10089,82 @@ impl Gfx3d {
     // skin-bake writes do not alter this function's inputs. Pool growth/tail shrink preserve
     // live offsets too, but generation changes conservatively force the original full refresh.
     // This skips no mutation/cull/upload work outside the section-address refresh itself.
+    /// PERF-SECTION-INCREMENTAL: a mesh's resolution may have changed (created, evicted,
+    /// restored, destroyed). Recorded for the incremental refresh, or a full one when there is
+    /// no reverse index yet / WGR_SECTION_REFRESH_INCREMENTAL=0.
+    fn note_section_mesh(&mut self, handle: u64) {
+        if self.section_mesh_rows_valid && section_incremental_enabled() {
+            self.section_dirty_meshes.insert(handle);
+        } else {
+            self.gpu_section_refresh.invalidate();
+        }
+    }
+
+    /// PERF-SECTION-INCREMENTAL: re-resolve only the rows naming a changed mesh (and the rows
+    /// registered since), and re-derive LOD residency only for the LODs owning them. Same
+    /// resolve_section and the same residency rule as the full refresh.
+    fn refresh_cull_sections_incremental(&mut self) {
+        if self.section_dirty_meshes.is_empty() && self.section_dirty_rows.is_empty() {
+            return;
+        }
+        let mut rows = std::mem::take(&mut self.section_dirty_rows);
+        for mesh in self.section_dirty_meshes.drain() {
+            if let Some(list) = self.section_mesh_rows.get_mut(&mesh) {
+                // Drop rows that no longer name this mesh (retired / reused spans) on the way.
+                list.retain(|&r| self.gpu_section_src.get(r as usize).is_some_and(|s| s.mesh == mesh));
+                rows.extend_from_slice(list);
+            }
+        }
+        rows.sort_unstable();
+        rows.dedup();
+        let updates: Vec<(usize, cull::SectionGpu)> = rows
+            .iter()
+            .filter_map(|&r| self.gpu_section_src.get(r as usize).map(|s| (r as usize, self.resolve_section(s))))
+            .collect();
+        let evicted = &self.evicted_meshes;
+        let sources = &self.gpu_section_src;
+        self.cull.update_sections_incremental(&updates, |s| sources.get(s).is_some_and(|src| evicted.contains(&src.mesh)));
+        self.lod_residency_flags_set |= !evicted.is_empty();
+        // WGR_SECTION_REFRESH_VERIFY=1: compare against what a full refresh would produce.
+        static VERIFY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *VERIFY.get_or_init(|| std::env::var("WGR_SECTION_REFRESH_VERIFY").as_deref() == Ok("1")) {
+            let (table, lods) = self.cull.verify_view();
+            let mut bad_rows = 0usize;
+            for (row, src) in self.gpu_section_src.iter().enumerate() {
+                if table.get(row).is_some_and(|t| *t != self.resolve_section(src)) {
+                    bad_rows += 1;
+                }
+            }
+            let mut bad_lods = 0usize;
+            for (base, count, flag) in lods {
+                let evicted = (base..base + count).any(|s| {
+                    self.gpu_section_src.get(s).is_some_and(|src| self.evicted_meshes.contains(&src.mesh))
+                });
+                if evicted != flag && (evicted || self.lod_residency_flags_set) {
+                    bad_lods += 1;
+                }
+            }
+            eprintln!("SECTION_VERIFY rows={} updated={} badRows={} badLods={}", self.gpu_section_src.len(), updates.len(), bad_rows, bad_lods);
+        }
+    }
+
     fn refresh_cull_sections(&mut self) {
         if let Some(line) = self.cull.take_section_reuse_notice() { self.queued_log.push(line); }
         if let Some(line) = self.cull.take_lod_reuse_notice() { self.queued_log.push(line); }
         self.cull.validate_source_table_length(self.gpu_section_src.len());
         let sources = &mut self.gpu_section_src;
+        let incremental = self.section_mesh_rows_valid && section_incremental_enabled();
         if self.cull.clear_retired_sections(|span| {
             sources[span.base..span.base + span.count].fill(GpuSectionSrc {
                 mesh: 0, index_begin: 0, index_count: 0, variant: 0 });
-        }) { self.gpu_section_refresh.invalidate(); }
+        }) && !incremental { self.gpu_section_refresh.invalidate(); }
 
         let pool_generation = self.pool.generation();
         let validity = self.gpu_section_refresh;
+        if incremental && !validity.needs_refresh(pool_generation) {
+            self.refresh_cull_sections_incremental();
+            return;
+        }
         let refreshed = validity.run_if_needed(pool_generation, || {
             if self.gpu_section_src.is_empty() {
                 return;
@@ -10091,6 +10192,16 @@ impl Gfx3d {
                 self.gpu_dbg_stale = stale;
             }
             self.cull.set_sections(&resolved);
+            // PERF-SECTION-INCREMENTAL: the reverse index the next frames refresh through.
+            self.section_mesh_rows.clear();
+            for (row, s) in self.gpu_section_src.iter().enumerate() {
+                if s.mesh != 0 {
+                    self.section_mesh_rows.entry(s.mesh).or_default().push(row as u32);
+                }
+            }
+            self.section_mesh_rows_valid = true;
+            self.section_dirty_meshes.clear();
+            self.section_dirty_rows.clear();
             // LOD-STREAM: rows naming an evicted mesh step to a coarser resident level.
             if !self.evicted_meshes.is_empty() || self.lod_residency_flags_set {
                 let evicted = &self.evicted_meshes;
@@ -10179,8 +10290,14 @@ impl Gfx3d {
         }
         let gpu_sections: Vec<cull::SectionGpu> =
             srcs.iter().map(|s| self.resolve_section(s)).collect();
-        // Invalidate before append, including any exceptional partial mutation.
-        self.gpu_section_refresh.invalidate();
+        // Invalidate before append, including any exceptional partial mutation. Incremental
+        // (PERF-SECTION-INCREMENTAL): the rows below are resolved right here, so only they are
+        // recorded -- a full refresh of every section in the world per registered model was
+        // 10-230 ms of the render thread while streaming.
+        let incremental = self.section_mesh_rows_valid && section_incremental_enabled();
+        if !incremental {
+            self.gpu_section_refresh.invalidate();
+        }
 
         // `materials` is parallel to `sections` (one material per section), so the
         // section's flags word rides across here in WgrModelSection::flags.
@@ -10292,6 +10409,13 @@ impl Gfx3d {
         let (model, span) = self.cull
             .register_model_span(bounding_sphere, &gpu_lods, &gpu_sections, &gpu_materials);
         section_span_pool::write_span(&mut self.gpu_section_src, span, &srcs);
+        if incremental {
+            for (i, s) in srcs.iter().enumerate() {
+                let row = (span.base + i) as u32;
+                self.section_mesh_rows.entry(s.mesh).or_default().push(row);
+                self.section_dirty_rows.push(row);
+            }
+        }
         // Positive proof is queued only AFTER all three arrays and immutable birth IDs commit.
         if let Some(line) = self.cull.note_committed_section_reuse(model, span, previous_source_len) {
             self.queued_log.push(line);
@@ -10514,7 +10638,10 @@ impl Gfx3d {
     }
 
     pub fn retire_model(&mut self, model: u32) {
-        self.gpu_section_refresh.invalidate();
+        // Retired rows are zeroed in both tables by clear_retired_sections; no other row moves.
+        if !(self.section_mesh_rows_valid && section_incremental_enabled() && self.cull.section_reuse_active()) {
+            self.gpu_section_refresh.invalidate();
+        }
         self.cull.retire_model(model);
         // A completed readback of a dead model must not consume its slot again.
         self.sky_bakes_pending.retain(|(id, _, _)| *id != model);

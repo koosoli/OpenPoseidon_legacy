@@ -3259,6 +3259,14 @@ NativeInstallTexturePrep DecodeNativeInstallTextureKeys(const std::vector<std::s
                              return request && request->Read(bytes, error);
                          },
                          options);
+                     // PERF-BC3-PREP (Nsight ns-2): an `enfa|` leaf composite decodes to 32-bit and was
+                     // BC3-encoded at upload, on the main thread -- EncodeAuthoredBc3 was half of
+                     // EnsureUploaded inside far-model registration. Encode it here, off the main
+                     // thread, with the same encoder and the same authored mips; the upload takes it
+                     // (TakeCompositeBc3) and falls back to encoding itself when it is not there.
+                     if (loaded)
+                         if (const size_t reservation = source->CompositeBc3Reservation())
+                             source->PrepareCompositeBc3(reservation, nullptr);
                      if (loaded && store.PutDdsPrepared(keys[i], std::move(source), options, generation))
                          ++prepared;
                      else

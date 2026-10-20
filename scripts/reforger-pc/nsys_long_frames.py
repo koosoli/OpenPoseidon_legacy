@@ -84,6 +84,7 @@ def main():
     ap.add_argument('--skip-s', type=float, default=0.0, help='ignore long frames before this many seconds')
     ap.add_argument('--top', type=int, default=40)
     ap.add_argument('--process', default='OpenPoseidon.exe')
+    ap.add_argument('--focus', action='append', help='break this function down by its direct callees (repeatable)')
     a = ap.parse_args()
     c = sqlite3.connect(a.db)
     S = dict(c.execute('select id, value from StringIds'))
@@ -185,6 +186,21 @@ def main():
         print('  -- leaf')
         for lab, k in leaf.most_common(15):
             print(f'{k:7d} {100 * k / max(n, 1):5.1f}%  {lab[:170]}')
+        for focus in a.focus or []:
+            # What `focus` spends its samples in: the frame directly below it (its callee), or
+            # "(self)" when the sample's leaf is focus itself.
+            callees, hits = collections.Counter(), 0
+            for frames in st.values():
+                labs = [label(name, mod) for _, name, mod in frames]  # leaf first
+                for i, lab in enumerate(labs):
+                    if focus in lab:
+                        hits += 1
+                        callees[labs[i - 1] if i > 0 else '(self)'] += 1
+                        break
+            if hits:
+                print(f'  -- inside {focus}: {hits} samples ({100 * hits / max(n, 1):.1f}%)')
+                for lab, k in callees.most_common(12):
+                    print(f'{k:7d} {100 * k / hits:5.1f}%  {lab[:170]}')
 
     print('\n==== Vulkan calls, whole capture (count, total ms)')
     for name, k, ms in c.execute(

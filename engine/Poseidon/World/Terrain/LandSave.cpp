@@ -10,6 +10,12 @@
 #include <thread>
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
+// Foundation/Threads/PoThread.hpp drags in windows.h, whose GetObject macro renames
+// Landscape::GetObject in this file; the one function needed is declared here instead.
+namespace Poseidon::Foundation
+{
+extern bool poSetMyPriority(int delta);
+}
 #include <Poseidon/World/Terrain/AuthoredObjectIds.hpp>
 #include <Poseidon/World/Terrain/TerrainSubdivision.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
@@ -3798,6 +3804,10 @@ void Landscape::ParkStreamTexPrep(uint32_t modelIndex, std::shared_ptr<Model::Mo
         }());
         gate.acquire();
         struct Release { std::counting_semaphore<64>& g; ~Release() { g.release(); } } release{gate};
+        // Below normal, as the object-stream workers: this decode/encode must never win a core from
+        // the main or render thread (a CPU-contended flight showed render-thread stalls of 10-230 ms
+        // in work that costs under a millisecond).
+        Foundation::poSetMyPriority(-1);
         if (!emats.empty())
         {
             const auto& mount = Asset::Formats::Enfusion::EnfusionMount::Instance();

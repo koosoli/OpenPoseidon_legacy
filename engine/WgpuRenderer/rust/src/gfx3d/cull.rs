@@ -950,6 +950,9 @@ pub struct CullState {
     section_spans: Option<Box<super::section_span_pool::SectionSpanPool>>,
     lod_spans: Option<Box<super::section_span_pool::SectionSpanPool>>,
     sections: Vec<SectionGpu>,
+    /// PERF-SECTION-INCREMENTAL: section row -> owning LOD index (u32::MAX = unknown), written at
+    /// registration, so one row's residency change re-derives one LOD, not all of them.
+    row_lod: Vec<u32>,
     // Per-section shading, parallel to `sections` (same global index). Draw-side only —
     // not a compute input; bound in the GPU-driven draw pass (3b-2b).
     section_materials: Vec<SectionMaterialGpu>,
@@ -1698,6 +1701,7 @@ impl CullState {
             section_spans: (std::env::var("WGR_CULL_SECTION_REUSE").ok().as_deref() == Some("1"))
                 .then(|| Box::new(super::section_span_pool::SectionSpanPool::new())),
             sections: Vec::new(),
+            row_lod: Vec::new(),
             section_materials: Vec::new(),
             crown_centres: Vec::new(),
             table_uploads: TableUploads::NONE,
@@ -2975,6 +2979,11 @@ impl CullState {
         for (i, lod) in lods.iter().enumerate() {
             let mut l = *lod;
             l.section_base += section_offset;
+            let (lo, hi) = (l.section_base as usize, l.section_base as usize + l.section_count as usize);
+            if self.row_lod.len() < hi {
+                self.row_lod.resize(hi, u32::MAX);
+            }
+            self.row_lod[lo..hi].fill((lod_span.base + i) as u32);
             if lod_span.base == lod_append { self.lods.push(l); }
             else { self.lods[lod_span.base + i] = l; }
         }
@@ -3155,6 +3164,58 @@ impl CullState {
     }
 
     pub fn last_upload_summary(&self) -> &str { &self.last_upload_summary }
+
+    /// PERF-SECTION-INCREMENTAL: write the re-resolved rows, re-derive LOD residency (the rule of
+    /// apply_lod_residency) for the LODs that own them, and mark exactly what set_sections and
+    /// apply_lod_residency would have marked for the same change.
+    pub fn update_sections_incremental(&mut self, updates: &[(usize, SectionGpu)], section_evicted: impl Fn(usize) -> bool) {
+        let mut changed = false;
+        let mut lods: Vec<u32> = Vec::new();
+        for &(row, section) in updates {
+            let Some(slot) = self.sections.get_mut(row) else { continue };
+            if *slot != section {
+                *slot = section;
+                changed = true;
+            }
+            if let Some(&li) = self.row_lod.get(row) {
+                if li != u32::MAX {
+                    lods.push(li);
+                }
+            }
+        }
+        lods.sort_unstable();
+        lods.dedup();
+        let mut lod_changed = false;
+        for li in lods {
+            let Some(lod) = self.lods.get_mut(li as usize) else { continue };
+            let base = lod.section_base as usize;
+            let evicted = (base..base + lod.section_count as usize).any(&section_evicted);
+            let next = (lod.is_decal & !2) | if evicted { 2 } else { 0 };
+            if next != lod.is_decal {
+                lod.is_decal = next;
+                lod_changed = true;
+            }
+        }
+        if changed || lod_changed {
+            self.instances.advance_target_revision_with_kind(2);
+        }
+        if changed {
+            self.table_uploads.mark(TableDomain::Section);
+        }
+        if lod_changed {
+            self.table_uploads.mark(TableDomain::Lod);
+        }
+    }
+
+    /// PERF-SECTION-INCREMENTAL verify: the resolved table and each LOD's residency bit.
+    pub(super) fn verify_view(&self) -> (&[SectionGpu], Vec<(usize, usize, bool)>) {
+        (&self.sections, self.lods.iter().map(|l| (l.section_base as usize, l.section_count as usize, l.is_decal & 2 != 0)).collect())
+    }
+
+    /// Retired section spans are zeroed and reused (clear_retired_sections).
+    pub(super) fn section_reuse_active(&self) -> bool {
+        self.section_spans.as_ref().is_some_and(|p| p.enabled())
+    }
 
     pub fn set_sections(&mut self, sections: &[SectionGpu]) {
         if resolved_sections_changed(&self.sections, sections, &mut self.instances) {

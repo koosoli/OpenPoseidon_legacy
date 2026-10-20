@@ -1372,8 +1372,19 @@ impl Renderer {
         // rwdi/release builds, so a profiling build shows an unlabelled, ungrouped
         // command stream. Force DEBUG on so captures stay legible; opt into the
         // validation layers separately via WGR_GPU_VALIDATION (they are expensive).
+        //
+        // PERF-DEBUG-LABELS (2026-10-20): no longer by default. Nsight (ns-2, Durras flight) counted
+        // 1.2 M vkSetDebugUtilsObjectNameEXT calls in 95 s -- every buffer, texture and command
+        // buffer named, ~0.5 s of driver calls plus wgpu's label work, all on the render thread.
+        // WGR_GPU_DEBUG_LABELS=1 (or WGR_GPU_VALIDATION) turns them back on for a RenderDoc capture.
         let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
-        instance_desc.flags |= wgpu::InstanceFlags::DEBUG;
+        if std::env::var("WGR_GPU_DEBUG_LABELS").is_ok_and(|v| v.trim() == "1")
+            || std::env::var("WGR_GPU_VALIDATION").is_ok()
+        {
+            instance_desc.flags |= wgpu::InstanceFlags::DEBUG;
+        } else {
+            instance_desc.flags.remove(wgpu::InstanceFlags::DEBUG);
+        }
         // A/B lever: wgpu validates every indirect draw/dispatch argument with a compute pass
         // (VALIDATION_INDIRECT_CALL, on by default in all build types). WGR_INDIRECT_VALIDATION=0
         // drops it.
