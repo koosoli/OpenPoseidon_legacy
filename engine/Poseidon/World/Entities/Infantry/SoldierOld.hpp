@@ -671,6 +671,41 @@ class Man: public Person
 	float _airTime = 0;        // seconds without ground or object contact
 	float _fallSpeed = 0;      // the fastest drop of this fall (m/s, positive down)
 	float _fallTumble = 0;     // seconds left of free tumbling after a blast or a hit
+	// Jumping (SoldierOldJump.cpp), with the swim pack's Jump / JumpAir moves
+	mutable MoveId _jumpMove = MoveIdNone;
+	mutable MoveId _jumpAirMove = MoveIdNone;
+	bool _jumping = false;          // launched and not landed yet
+	float _jumpTime = 0;            // seconds since the launch
+	float _sinceJumpLanded = 10.0f; // seconds since the last jump landed
+	bool CanJump() const;
+	bool TryJump();                 // the player's jump key: launch if he can
+	bool JumpLiftingOff() const;    // just launched: ground contact does not count yet
+	void KeepJumpMoves();           // airborne in a jump: the take-off, then the in-air pose
+	void PlayJumpSound(float loudness); // the surface's step sound, for a push-off or a landing
+	// The landing layer (SoldierOldUpperBody.cpp): a soft touchdown bends the knees and dips the hips for a moment
+	mutable MoveId _jumpLandMove = MoveIdNone;
+	float _landAge = -1;  // seconds since the touchdown, < 0: none
+	float _landPeak = 0;  // how far toward the absorb pose at most (0..1)
+	void StartLandingLayer(float touchdownSpeed);
+	float LandingWeight() const;
+	void ApplyLandingLayer(Matrix4Array& matrices) const;
+	// The upper-body action layer (SoldierOldUpperBody.cpp): an action's move on the trunk and arms over the legs'
+	MoveId _upperMove = MoveIdNone;
+	float _upperTime = 0;   // 0..1 through the action's move
+	float _upperFactor = 0; // its blend weight
+	Ref<ActionContextBase> _upperContext;
+	mutable std::vector<Matrix4> _upperPalette;
+	mutable float _upperPaletteKey[6] = {};
+	mutable MoveId _upperPaletteMoves[2] = {MoveIdNone, MoveIdNone};
+	mutable bool _upperPaletteValid = false;
+	bool StartUpperBodyAction(MoveId move, ActionContextBase* context);
+	void SimulateUpperBodyAction(float deltaT);
+	bool UpperBodyLayerActive() const {return _upperMove != MoveIdNone && _upperFactor > 0.001f;}
+	bool PoseLayersActive() const {return UpperBodyLayerActive() || _landAge >= 0;}
+	void ApplyUpperBodyLayer(Matrix4Array& matrices) const;
+	const std::vector<Matrix4>* UpperBodyPalette() const;
+	bool UpperBodyPoint(int level, int index, Vector3& res) const;
+	bool UpperBodyMatrix(Matrix4& mat, const AnimationRTWeight& wgt) const;
 
 	Foundation::Time _whenKilled;
 	Foundation::Time _lastMovementTime;

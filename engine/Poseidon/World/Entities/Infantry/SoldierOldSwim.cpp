@@ -101,6 +101,8 @@ constexpr float FallStartSpeed = 3.0f;
 constexpr float FallRightTime = 0.3f;
 constexpr float FallLandSpeed = 4.0f;
 constexpr float FallTumbleTime = 1.5f;
+// A jump (SoldierOldJump.cpp) turns into Fall only after this long in the air (s): off a ledge, not a hop.
+constexpr float JumpFallAfter = 0.9f;
 // Put on the water: a man this close over a deep spot (m) starts swimming with no fall.
 constexpr float SwimPlacedAbove = 1.0f;
 // Splashes: only for swimmers this close to the camera (m).
@@ -272,6 +274,9 @@ void Man::InitSwimMoves() const
     _swimDiveMove = Type()->GetMoveId("SwimDive");
     _swimUnderIdleMove = Type()->GetMoveId("SwimUnderIdle");
     _swimSurfaceMove = Type()->GetMoveId("SwimSurface");
+    _jumpMove = Type()->GetMoveId("Jump");
+    _jumpAirMove = Type()->GetMoveId("JumpAir");
+    _jumpLandMove = Type()->GetMoveId("JumpLand");
 }
 
 float Man::SwimGearLoad() const
@@ -309,12 +314,24 @@ void Man::UpdateFalling(float deltaT)
     }
     AIUnit* unit = Brain();
     const bool inVehicle = unit && unit->GetVehicleIn();
-    const bool airborne = !_landContact && !_objectContact;
+    const bool airborne = (!_landContact && !_objectContact) || JumpLiftingOff();
+    if (_jumping)
+        _jumpTime += deltaT;
+    else
+        _sinceJumpLanded += deltaT;
     if (IsDead() || _ladderBuilding || inVehicle || !airborne)
     {
-        if (_falling && !IsDead() && !inVehicle)
+        const bool jumped = _jumping;
+        if (_jumping)
         {
-            // touchdown: a hard one crouches, a soft one goes straight back to the normal moves
+            _jumping = false;
+            _sinceJumpLanded = 0;
+        }
+        if ((_falling || jumped) && !IsDead() && !inVehicle)
+        {
+            // touchdown: a hard one crouches, a soft one goes back to the normal moves with the knees giving for a
+            // moment (the landing layer); both are heard
+            PlayJumpSound(std::clamp(0.9f + 0.12f * _fallSpeed, 0.9f, 1.8f));
             if (_fallSpeed > FallLandSpeed && _fallLandMove != MoveIdNone)
             {
                 BlendToMove(_fallLandMove);
@@ -323,6 +340,7 @@ void Man::UpdateFalling(float deltaT)
             else
             {
                 BlendToMove(GetDefaultMove());
+                StartLandingLayer(_fallSpeed);
             }
         }
         _falling = false;
@@ -339,17 +357,25 @@ void Man::UpdateFalling(float deltaT)
         _fallTumble = FallTumbleTime;
     }
     _fallTumble = std::max(0.0f, _fallTumble - deltaT);
-    if (!_falling)
+    if (_jumping && !_falling && !(_airTime > JumpFallAfter && vy < -FallStartSpeed))
     {
-        if (_airTime < FallStartTime || vy > -FallStartSpeed)
-        {
-            return;
-        }
-        _falling = true;
+        // a jump plays its own moves; it turns into Fall only if it lasts (off a ledge), not at every hop's end
+        KeepJumpMoves();
     }
-    if (_primaryMove.id != _fallMove)
+    else
     {
-        BlendToMove(_fallMove);
+        if (!_falling)
+        {
+            if (_airTime < FallStartTime || vy > -FallStartSpeed)
+            {
+                return;
+            }
+            _falling = true;
+        }
+        if (_primaryMove.id != _fallMove)
+        {
+            BlendToMove(_fallMove);
+        }
     }
     if (_fallTumble > 0)
     {

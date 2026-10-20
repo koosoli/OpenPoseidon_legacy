@@ -2070,6 +2070,7 @@ void RegisterSqf(HarnessServer& hs)
                 cJSON_AddNumberToObject(resp, side ? "probeRightHits" : "probeLeftHits", hits);
             }
             vector("position", man->Position());
+            vector("speed", man->Speed());
             vector("direction", man->Direction());
             vector("eye", man->PositionModelToWorld(man->GetPilotPosition(CamInternal)));
             const int weapon = man->SelectedWeapon();

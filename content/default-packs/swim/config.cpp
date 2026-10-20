@@ -104,6 +104,14 @@ class CfgMovesMC
 			Die="CombatDying";
 			upDegree="manposstand";
 		};
+		// a jump in the air (SoldierOldJump.cpp): the engine holds Jump, then JumpAir, until he lands
+		class JumpActions: NoActions
+		{
+			Stop="JumpAir";
+			Default="JumpAir";
+			Die="CombatDying";
+			upDegree="manposstand";
+		};
 		// touchdown on land; the engine goes back to the normal moves after it
 		class FallLandActions: NoActions
 		{
@@ -334,6 +342,34 @@ class CfgMovesMC
 			speed=-1.4;
 			looped=0;
 			interpolationSpeed=6;
+		};
+		// jumping (Space on foot, SoldierOldJump.cpp): the take-off and rise, then the pose in the air until he lands.
+		// Legs from Quaternius' Jump_Start / Jump_Loop (Universal Animation Library, CC0), retargeted onto the MC rig
+		// (io_import_p3d/retarget.py); the trunk, arms and rifle as in Fall
+		class Jump: Fall
+		{
+			actions="JumpActions";
+			file="\swim\jump.rtm";
+			speed=-0.5;
+			looped=0;
+			interpolationSpeed=10;
+		};
+		class JumpAir: Fall
+		{
+			actions="JumpActions";
+			file="\swim\jumpair.rtm";
+			speed=-2.5;
+			looped=1;
+			interpolationSpeed=6;
+		};
+		// a soft touchdown's give at the knees: never played as a move, the engine blends its hips and legs in and out
+		// over whatever he does next (the landing layer, SoldierOldUpperBody.cpp). Quaternius' Jump_Land, CC0.
+		class JumpLand: Fall
+		{
+			actions="FallLandActions";
+			file="\swim\jumpland.rtm";
+			speed=-0.8;
+			looped=0;
 		};
 		// killed while treading water / while swimming: goes limp and floats face down
 		class SwimDead: DefaultDie

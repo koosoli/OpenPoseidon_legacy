@@ -1491,6 +1491,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
         }
     }
 
+    SimulateUpperBodyAction(deltaT);
     MoveWeapons(deltaT, change);
     probe.Mark(7);
 

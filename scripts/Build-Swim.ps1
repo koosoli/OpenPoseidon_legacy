@@ -13,7 +13,7 @@ $tools=Join-Path $root "dist/x64-win-$suffix/PoseidonTools.exe"
 if (!(Test-Path -LiteralPath $tools)) {throw 'Build PoseidonTools before packaging Swim'}
 if (Test-Path -LiteralPath $stage) {Remove-Item -LiteralPath $stage -Recurse -Force}
 New-Item -ItemType Directory -Force $stage, (Join-Path $pack 'AddOns') | Out-Null
-$expected=@('swim','swimb','swiml','swimr','swimlb','swimrb','swimlf','swimrf','swimturnl','swimturnr','swimstart','swimstop','swimout','swimdead','swimdeadf','tread','fall','fallland','swimin','swimdive','swimunder','swimunderidle','swimsurface','swimfast') | ForEach-Object {"$_.rtm"}
+$expected=@('swim','swimb','swiml','swimr','swimlb','swimrb','swimlf','swimrf','swimturnl','swimturnr','swimstart','swimstop','swimout','swimdead','swimdeadf','tread','fall','fallland','swimin','swimdive','swimunder','swimunderidle','swimsurface','swimfast','jump','jumpair','jumpland') | ForEach-Object {"$_.rtm"}
 foreach ($name in $expected) {
     $rtm=Join-Path $source "rtm/$name"
     if (!(Test-Path -LiteralPath $rtm)) {throw "Missing swim animation: $rtm"}
