@@ -123,6 +123,10 @@ class CameraVehicle : public CameraHolder
     //! per simulation tick exactly as keyboard flight moves the camera.
     void SetHarnessDrift(Vector3Par metresPerSecond) { _harnessDrift = metresPerSecond; }
     Vector3 _harnessDrift = VZero;
+    // Test harness: turn about the vertical at this many radians per second (pans, for temporal
+    // upscaler/grass motion probes a translating camera cannot reproduce).
+    void SetHarnessYawRate(float radiansPerSecond) { _harnessYawRate = radiansPerSecond; }
+    float _harnessYawRate = 0.0f;
     // Debug free-fly can opt into Game Master-style speed scaling.
     void SetAltitudeSpeedScaling(bool enabled) { _altitudeSpeedScaling = enabled; }
     void SetMouseLookRequiresRightButton(bool enabled) { _mouseLookRequiresRightButton = enabled; }

@@ -1225,6 +1225,7 @@ static std::string HarnessHandleQuery(const char* what, cJSON* root)
 // POSEIDON_FREEFLY_DRIFT state: the freefly camera, its per-frame step, and when it starts.
 static OLink<CameraVehicle> s_driftCamera;
 static Vector3 s_driftStep;
+static float s_driftYawRate = 0.0f;
 static int s_driftStartMs = -1;
 
 struct TimedTrigger
@@ -2215,10 +2216,12 @@ void GameApplication::RunMainLoop()
                     // grass/foliage flicker probes, which a still camera cannot reproduce.
                     if (const char* drift = std::getenv("POSEIDON_FREEFLY_DRIFT"); drift != nullptr && *drift != 0)
                     {
-                        float vx = 0.0f, vz = 0.0f, start = 0.0f;
-                        if (std::sscanf(drift, "%f,%f,%f", &vx, &vz, &start) >= 2)
+                        float vx = 0.0f, vz = 0.0f, start = 0.0f, yawDegPerS = 0.0f;
+                        // Optional 4th value: a pan in degrees per second (grass/DLSS motion probes).
+                        if (std::sscanf(drift, "%f,%f,%f,%f", &vx, &vz, &start, &yawDegPerS) >= 2)
                         {
                             s_driftCamera = camera;
+                            s_driftYawRate = yawDegPerS * 3.14159265f / 180.0f;
                             s_driftStep = Vector3(vx / 60.0f, 0.0f, vz / 60.0f);
                             s_driftStartMs = static_cast<int>(start * 1000.0f);
                             LOG_INFO(Core, "--test-world-freefly: drift {} {} m/s from {} s (POSEIDON_FREEFLY_DRIFT)", vx,
@@ -2515,6 +2518,7 @@ void GameApplication::RunMainLoop()
                 else
                 {
                     s_driftCamera->SetHarnessDrift(s_driftStep * 60.0f); // inside the camera's own ticks
+                    s_driftCamera->SetHarnessYawRate(s_driftYawRate);
                     s_driftCamera = nullptr;
                 }
             }

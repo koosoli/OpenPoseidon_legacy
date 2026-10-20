@@ -303,6 +303,16 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
 {
     if (_harnessDrift.SquareSize() > 0.0f)
         Move(Position() + _harnessDrift * deltaT);
+    if (_harnessYawRate != 0.0f)
+    {
+        // Rotate the look target about the camera's vertical; the direction follows it.
+        const Vector3 rel = GetTarget() - Position();
+        const float a = _harnessYawRate * deltaT, c = std::cos(a), s = std::sin(a);
+        const Vector3 turned(rel.X() * c - rel.Z() * s, rel.Y(), rel.X() * s + rel.Z() * c);
+        _target = Position() + turned;
+        _oldTarget = nullptr;
+        _lastTgtPos = _target._pos;
+    }
     if (!GetManual())
     {
         if (_movePos.SquareSize() > 0.5)
