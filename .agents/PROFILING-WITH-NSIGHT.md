@@ -92,3 +92,24 @@ rows; join through a temp table.
 `command_encoder_finish` (encode bookkeeping), 19% upscaler evaluate, 12% submit. Whole capture:
 534k `vkBeginCommandBuffer` (~270 per frame, 2.2 s), 1.2 M `vkSetDebugUtilsObjectNameEXT`,
 249k `vkCreateBuffer`.
+
+## What the DayZ trace showed (ns-dayz, 2026-10-20) and what was done
+
+39 frames > 50 ms in 60 s. Main thread in those frames: 51% cold-model install, 27% of it
+`Lzo1x::Decompress` -- every PAA read from its PBO and decompressed at upload (0 of 2,398 prepared).
+Fixed by STREAM-PAA-PREP (b9d4a4458, 4ba857857, ca7c45ff1): packed .p3d parsing on workers on by
+default, the parked-model background step decodes PAAs (own, .rvmat stage maps, proxy/furniture
+models in up to three rounds) and publishes alpha facts. Cold-install main-thread total 13.1 ->
+10.1 s per flight, frames > 100 ms 20-21 -> 9-13. Verify: `WGR_PAA_PREPARED_VERIFY=1`.
+
+Not done (measured, recorded): render-thread wgpu overhead -- ~93 render passes, ~127 staging
+buffers and ~272 Vulkan command buffers per frame (~1.5 ms of driver calls, a steady cost, not a
+stutter); terrain satellite tiles (`s_*_lco.paa`) still decode on the main thread outside model
+admission; part of the furniture still misses (scan names textures never used, which also fill
+the store -- a longer TTL made it worse). An NVIDIA driver thread compiles shaders heavily during
+DayZ's long frames (`nvgpucomp64`), outside our threads.
+
+Quick DayZ A/B without Nsight: launch the same flight directly with a mission whose `init.sqs`
+ends in `triEndGame` (the frame-trace CSVs are only written on a clean exit), and judge by frames
+> 80/100 ms -- DayZ's median frame at 3440x1440 is ~45 ms and run-to-run noise is +-0.3 s of
+time in frames > 80 ms.
