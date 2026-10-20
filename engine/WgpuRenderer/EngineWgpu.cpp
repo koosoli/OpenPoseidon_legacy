@@ -7706,6 +7706,29 @@ void EngineWgpu::SetFarProxyInstances(const FarProxyInstance* data, size_t count
                           WgrSlice<WgrFarInstance>{reinterpret_cast<const WgrFarInstance*>(data), U32(count)});
 }
 
+// PERF-FAR-PROXY-ASYNC (2026-10-20): the far-proxy set (~1M instances, ~32 MB on Everon) is
+// rebuilt as more far models become known -- nine times in the first 80 s of a Durras flight.
+// SetFarProxyInstances waits for the render thread to go idle and uploads in the caller; this
+// hands the vector to the render thread's next resource drain instead, so the main thread does
+// not wait. Same upload, same order relative to the frame's other resource operations.
+void EngineWgpu::SetFarProxyInstancesOwned(std::vector<FarProxyInstance>&& instances)
+{
+    static const bool queued = [] {
+        const char* v = std::getenv("WGR_FAR_PROXY_QUEUED");
+        return !(v && v[0] == '0');
+    }();
+    if (!queued || !_renderer || !FarSettings().enabled || instances.empty())
+    {
+        SetFarProxyInstances(instances.data(), instances.size());
+        return;
+    }
+    auto owned = std::make_shared<std::vector<FarProxyInstance>>(std::move(instances));
+    QueueRendererCallback([owned](WgrRenderer* r) {
+        wgr_far_set_instances(r, WgrSlice<WgrFarInstance>{reinterpret_cast<const WgrFarInstance*>(owned->data()),
+                                                          static_cast<uint32_t>(owned->size())});
+    });
+}
+
 // RFG-162: rivers as water (river/mod.rs). WGR_RIVERS=0 at load keeps the opaque ribbons.
 bool EngineWgpu::SupportsRiverSurfaces() const
 {

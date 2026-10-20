@@ -843,6 +843,13 @@ public:
     uint32_t _nativeProxyUploadMs = 0;
     float _nativeProxyReach = -1.0f;
     uint32_t _nativeProxyModelCount = 0, _nativeProxyModelsAtUpload = 0;
+    // PERF-FAR-PROXY-ASYNC: the placement walk runs on a worker over snapshots of the proxy models
+    // and the wanted flags; the main thread only starts it and hands the result to the engine.
+    struct NativeProxyBuild; // LandSave.cpp (holds Engine::FarProxyInstance rows)
+    std::future<std::shared_ptr<NativeProxyBuild>> _nativeProxyBuild;
+    uint32_t _nativeProxyBuildModels = 0; // _nativeProxyModelCount when the running build started
+    void StartNativeProxyBuild();
+    bool FinishNativeProxyBuild(); // true when a finished build was uploaded
     void NoteNativeProxyModel(uint32_t modelIndex, const LODShapeWithShadow& shape);
     void UploadNativeProxies();
     // The far window's cells, nearest first, and where the candidate fill stopped in them.

@@ -464,6 +464,7 @@ class EngineWgpu : public EngineDummy
     // authored placement rows (Landscape::LoadOprwModern). Everything past the object
     // residency window is invisible without it; nothing here ever becomes an Object.
     void SetFarProxyInstances(const FarProxyInstance* data, size_t count) override;
+    void SetFarProxyInstancesOwned(std::vector<FarProxyInstance>&& instances) override;
     bool SupportsRiverSurfaces() const override;
     bool _riverSurfaces = false; //!< RFG-162: the renderer draws rivers as water (HDR on)
     void SetRiverSurfaces(const float* vertices, size_t floatCount, const uint32_t* indices, size_t indexCount,

@@ -6214,6 +6214,109 @@ void Landscape::NoteNativeProxyModel(uint32_t modelIndex, const LODShapeWithShad
     _nativeProxyModelCount += proxy.valid ? 1u : 0u;
 }
 
+// PERF-FAR-PROXY-ASYNC (2026-10-20). UploadNativeProxies walked all 1.38M Everon placements and
+// then waited for the render thread to upload ~1M instances: 55-95 ms of the main thread, nine
+// times in the first 80 s of a Durras flight (the slow swaps marked "native far"). The walk now
+// runs on a worker over snapshots (the proxy models, the wanted flags; placements' rows and
+// models do not change after load) and the upload is queued to the render thread.
+// WGR_FAR_PROXY_ASYNC=0 = the synchronous rebuild below.
+struct Landscape::NativeProxyBuild
+{
+    std::vector<Engine::FarProxyInstance> instances;
+    size_t prisms = 0;
+    double walkMs = 0.0;
+};
+
+void Landscape::StartNativeProxyBuild()
+{
+    _nativeProxyBuildModels = _nativeProxyModelCount;
+    _nativeProxyDirty = false; // models noted while it runs mark it dirty again
+    auto models = std::make_shared<std::vector<NativeProxyModel>>(_nativeProxyModels);
+    auto wanted = std::make_shared<std::vector<uint8_t>>(_nativeFarWanted);
+    const std::vector<ModernObjectPlacement>* placements = &_modernObjectPlacements;
+    // The first build also names the commonest proxies and their colours (a wrong colour on a
+    // forest-sized model is visible from every hill) -- a second pass, so on the worker too.
+    static bool reported = false;
+    const bool report = !reported;
+    reported = true;
+    std::shared_ptr<std::vector<std::string>> names;
+    if (report)
+    {
+        names = std::make_shared<std::vector<std::string>>();
+        names->reserve(_modernObjectModels.size());
+        for (size_t m = 0; m < _modernObjectModels.size(); ++m)
+            names->emplace_back(static_cast<const char*>(_modernObjectModels[m]));
+    }
+    _nativeProxyBuild = std::async(std::launch::async, [models, wanted, placements, names]() {
+        Foundation::poSetMyPriority(-1);
+        const auto start = std::chrono::steady_clock::now();
+        auto result = std::make_shared<NativeProxyBuild>();
+        NativeProxyBuild& out = *result;
+        out.instances.reserve(placements->size());
+        for (size_t index = 0; index < placements->size(); ++index)
+        {
+            const ModernObjectPlacement& placement = (*placements)[index];
+            if (placement.modelIndex >= models->size() || !(*models)[placement.modelIndex].valid ||
+                (index < wanted->size() && ((*wanted)[index] & 2)))
+                continue;
+            const NativeProxyModel& proxy = (*models)[placement.modelIndex];
+            const float scale = std::sqrt(placement.rows[0] * placement.rows[0] + placement.rows[1] * placement.rows[1] +
+                                          placement.rows[2] * placement.rows[2]);
+            Engine::FarProxyInstance instance;
+            instance.x = placement.rows[9];
+            instance.y = placement.rows[10] + proxy.baseY * scale;
+            instance.z = placement.rows[11];
+            instance.height = proxy.height * scale;
+            instance.radius = proxy.radius * scale;
+            instance.colour = proxy.colour;
+            instance.flags = proxy.flags;
+            out.prisms += proxy.flags != 0;
+            out.instances.push_back(instance);
+        }
+        out.walkMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        if (names)
+        {
+            std::vector<uint32_t> perModel(models->size(), 0);
+            for (const ModernObjectPlacement& placement : *placements)
+                if (placement.modelIndex < perModel.size() && (*models)[placement.modelIndex].valid)
+                    ++perModel[placement.modelIndex];
+            std::vector<std::pair<uint32_t, uint32_t>> counts; // (count, model)
+            for (uint32_t m = 0; m < perModel.size(); ++m)
+                if (perModel[m])
+                    counts.push_back({perModel[m], m});
+            std::sort(counts.begin(), counts.end(), std::greater<>());
+            for (size_t i = 0; i < counts.size() && i < 8; ++i)
+            {
+                const NativeProxyModel& proxy = (*models)[counts[i].second];
+                LOG_INFO(World, "Native far proxy #{}: {} x{} colour {:08x} h={:.1f} r={:.1f} {}", i,
+                         counts[i].second < names->size() ? (*names)[counts[i].second] : std::string("?"),
+                         counts[i].first, proxy.colour, proxy.height, proxy.radius, proxy.flags ? "prism" : "card");
+            }
+        }
+        return result;
+    });
+}
+
+bool Landscape::FinishNativeProxyBuild()
+{
+    if (!_nativeProxyBuild.valid() ||
+        _nativeProxyBuild.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return false;
+    const auto start = std::chrono::steady_clock::now();
+    const std::shared_ptr<NativeProxyBuild> result = _nativeProxyBuild.get();
+    NativeProxyBuild& built = *result;
+    const size_t count = built.instances.size();
+    if (GEngine)
+        GEngine->SetFarProxyInstancesOwned(std::move(built.instances));
+    _nativeProxyUploaded = count != 0;
+    _nativeProxyModelsAtUpload = _nativeProxyBuildModels;
+    _nativeProxyUploadMs = Poseidon::Foundation::GlobalTickCount();
+    LOG_INFO(World, "Native far proxies: {} ({} prisms) from {} placements, walk {:.1f} ms on a worker, "
+             "hand-off {:.1f} ms", count, built.prisms, _modernObjectPlacements.size(), built.walkMs,
+             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+    return true;
+}
+
 void Landscape::UploadNativeProxies()
 {
     if (!GEngine)
@@ -6245,7 +6348,7 @@ void Landscape::UploadNativeProxies()
     const auto walked = std::chrono::steady_clock::now();
     GEngine->SetFarProxyInstances(instances.data(), instances.size());
     static uint32_t proxyReports = 0;
-    if (proxyReports++ < 12)
+    if (proxyReports++ < 1) // a second pass over every placement: the first upload only
     {
         // The first uploads name the commonest proxies and their colours: a wrong colour on a
         // forest-sized model is visible from every hill.
@@ -6278,6 +6381,9 @@ void Landscape::UploadNativeProxies()
 
 void Landscape::ClearNativeFarResidency()
 {
+    if (_nativeProxyBuild.valid())
+        _nativeProxyBuild.wait(); // its worker reads this world's placements
+    _nativeProxyBuild = {};
     // Unconditional: the engine also holds the near clutter (RFG-153), which the far set says
     // nothing about. Cheap when there is nothing to clear.
     if (GEngine)
@@ -6749,12 +6855,24 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         }
         // A rebuild walks every placement and re-uploads ~1M proxies (~60 ms), so it waits for
         // the known-model set to grow by 15% (the first ones arrive in bursts), or 30 s for any.
-        if (_nativeProxyDirty)
+        static const bool proxyAsync = [] {
+            const char* v = std::getenv("WGR_FAR_PROXY_ASYNC");
+            return !(v && v[0] == '0');
+        }();
+        const bool building = proxyAsync && _nativeProxyBuild.valid();
+        if (building)
+            FinishNativeProxyBuild();
+        else if (_nativeProxyDirty)
         {
             const uint32_t since = Poseidon::Foundation::GlobalTickCount() - _nativeProxyUploadMs;
             const bool grown = _nativeProxyModelCount >= _nativeProxyModelsAtUpload + std::max(5u, _nativeProxyModelsAtUpload * 15 / 100);
             if ((grown && since >= 3000u) || since >= 30000u || !_nativeProxyUploaded)
-                UploadNativeProxies();
+            {
+                if (proxyAsync)
+                    StartNativeProxyBuild();
+                else
+                    UploadNativeProxies();
+            }
         }
     }
     if (added && (_nativeFarActive.size() / 10000 != (_nativeFarActive.size() - added) / 10000))

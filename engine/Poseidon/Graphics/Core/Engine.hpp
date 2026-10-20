@@ -3157,6 +3157,12 @@ class Engine : public IGraphicsEngine
     };
     // Replace the whole far-proxy set. Called ONCE per world load. Empty releases it.
     virtual void SetFarProxyInstances(const FarProxyInstance* /*data*/, size_t /*count*/) {}
+    // The same, taking ownership: a backend may hand the vector to its render thread instead of
+    // waiting for it (PERF-FAR-PROXY-ASYNC). The default is the copying call.
+    virtual void SetFarProxyInstancesOwned(std::vector<FarProxyInstance>&& instances)
+    {
+        SetFarProxyInstances(instances.data(), instances.size());
+    }
 
     // RFG-162: a native world's rivers as water. `vertices` = 8 floats per vertex (absolute
     // world x, y, z; metres along the spline downstream; downstream direction x, z; signed
