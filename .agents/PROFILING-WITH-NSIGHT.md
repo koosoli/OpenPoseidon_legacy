@@ -41,9 +41,12 @@ agent cannot elevate. Ask the owner to open **Terminal (Admin)** and run:
 
 For DayZ Chernarus+ add `-World DayZ` (world file from the main checkout's
 `packages\dayz-compat\world\chernarusplus\chernarusplus.wrp`, DayZ's `Addons`, the
-Test-DayZStreamingLatency pose flying west; output `shots
-s-dayz`). Its `CfgWorlds ... Cannot find
+Test-DayZStreamingLatency pose flying west; output `shots\ns-dayz`). Its `CfgWorlds ... Cannot find
 base class 'Weather'` errors at start are the known DayZ-config mismatch, not a failure.
+
+For Arma 3 Stratis add `-World Arma3` (`packages\a3-compat\world\stratis\stratis.wrp` from the main
+checkout, Arma 3's `Addons`, pose 1700,5050 flying east). The `DestructionEffects` / `Weather`
+base-class errors at start are the same config mismatch.
 
 It refuses to start while any OpenPoseidon is running -- **do not launch a test game while waiting
 for the owner** (a harness run of ours made the owner's run fail once). It copies the build to
