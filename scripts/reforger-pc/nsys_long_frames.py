@@ -102,7 +102,18 @@ def main():
     busiest = c.execute(
         'select globalTid, count(*) from COMPOSITE_EVENTS where (globalTid >> 24) & 16777215 = ? '
         'group by globalTid order by 2 desc limit 12', (pid,)).fetchall()
-    main_tid = next(g for g, _ in busiest if g not in names)
+    # The main thread is the unnamed thread whose stacks reach the game exe straight from
+    # kernel32 (its startup frame) -- not merely the busiest unnamed one: on DayZ that was an
+    # NVIDIA driver shader-compile thread.
+    def starts_in_exe(tid):
+        row = c.execute(
+            'select s.id from COMPOSITE_EVENTS e join SAMPLING_CALLCHAINS s on s.id = e.id '
+            'join StringIds m on s.module = m.id where e.globalTid = ? and m.value like ? limit 1',
+            (tid, '%' + a.process)).fetchone()
+        return row is not None
+    unnamed = [g for g, _ in busiest if g not in names]
+    main_tid = next((g for g in unnamed if starts_in_exe(g)), unnamed[0])
+    driver_heavy = [g for g in unnamed if g != main_tid]
     render_tid = next((g for g, _ in busiest if names.get(g) == 'wgr-render'), None)
 
     c.execute('create temp table win(a integer, b integer)')
