@@ -780,6 +780,10 @@ class Landscape : public SerializeClass
     // PERF-FAR-SWEEP: the active set as of the last window rebuild, swept a slice per call.
     std::vector<uint32_t> _nativeFarSweep;
     size_t _nativeFarSweepPos = 0;
+    // PERF-FAR-RELEASE: far models no longer wanted, released a slice per call (their shapes'
+    // destruction is what costs: 179 at once took 97 ms at Durras).
+    std::vector<uint32_t> _nativeFarRelease;
+    size_t _nativeFarReleasePos = 0;
     void SweepNativeFarActive(bool rebuildFrame);
     std::unordered_map<uint32_t, Ref<LODShapeWithShadow>> _nativeFarModels;
     // PERF-FAR-ASYNC-PREP: far models handed over by the preparer whose native textures are being

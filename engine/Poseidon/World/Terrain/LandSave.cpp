@@ -6391,6 +6391,8 @@ void Landscape::ClearNativeFarResidency()
     _nativeFarActive.clear();
     _nativeFarSweep.clear();
     _nativeFarSweepPos = 0;
+    _nativeFarRelease.clear();
+    _nativeFarReleasePos = 0;
     _nativeFarModels.clear();
     _nativeFarTexPrep.clear(); // each future waits for its decode
     _nativeFarCandidates.clear();
@@ -6428,28 +6430,75 @@ void Landscape::SweepNativeFarActive(bool rebuildFrame)
         const char* value = std::getenv("WGR_NATIVE_FAR_SWEEP_MS");
         return value && *value ? std::clamp(std::atof(value), 0.0, 100.0) : 2.0;
     }();
+    const auto start = std::chrono::steady_clock::now();
+    // PERF-FAR-RELEASE (2026-10-20): the far models the last sweep left unwanted, released a slice
+    // at a time within the same budget. Releasing them all at the end of the sweep was one 97 ms
+    // frame at Durras (179 models: the shapes' destruction). A model wanted again meanwhile stays.
+    if (_nativeFarReleasePos < _nativeFarRelease.size())
+    {
+        if (rebuildFrame && budgetMs > 0.0)
+            return;
+        while (_nativeFarReleasePos < _nativeFarRelease.size())
+        {
+            const uint32_t model = _nativeFarRelease[_nativeFarReleasePos++];
+            if (model < _nativeFarModelWanted.size() && !_nativeFarModelWanted[model])
+                _nativeFarModels.erase(model);
+            if (budgetMs > 0.0 && std::chrono::duration<double, std::milli>(
+                                      std::chrono::steady_clock::now() - start).count() >= budgetMs)
+                return;
+        }
+        _nativeFarRelease.clear();
+        _nativeFarReleasePos = 0;
+        return;
+    }
     if (_nativeFarSweepPos >= _nativeFarSweep.size())
         return;
     if (rebuildFrame && budgetMs > 0.0)
         return; // the slices start next call; the rebuild frame already paid for the list
-    const auto start = std::chrono::steady_clock::now();
     while (_nativeFarSweepPos < _nativeFarSweep.size())
     {
         const uint32_t index = _nativeFarSweep[_nativeFarSweepPos++];
         if (((_nativeFarWanted[index] & 1) == 0 || _modernObjectPlacements[index].resident) &&
             _nativeFarActive.erase(index) && GEngine)
             GEngine->SceneFarObjectRemoved(index);
-        if (budgetMs > 0.0 && (_nativeFarSweepPos & 255) == 0 &&
+        // Every 16th: a removal that drops a model's last far instance can cost milliseconds, and
+        // checking every 256th let one call run to 123 ms (Durras, 2026-10-20).
+        if (budgetMs > 0.0 && (_nativeFarSweepPos & 15) == 0 &&
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() >= budgetMs)
             return;
     }
     _nativeFarSweep.clear();
     _nativeFarSweepPos = 0;
+    static const bool sliceRelease = [] {
+        const char* v = std::getenv("WGR_NATIVE_FAR_RELEASE_SLICED");
+        return !(v && v[0] == '0');
+    }();
+    const auto releaseStart = std::chrono::steady_clock::now();
+    size_t released = 0;
+    _nativeFarRelease.clear();
+    _nativeFarReleasePos = 0;
     for (auto it = _nativeFarModels.begin(); it != _nativeFarModels.end();)
         if (!_nativeFarModelWanted[it->first])
-            it = _nativeFarModels.erase(it);
+        {
+            if (sliceRelease && budgetMs > 0.0)
+            {
+                _nativeFarRelease.push_back(it->first); // released by the next calls, a slice each
+                ++it;
+            }
+            else
+            {
+                it = _nativeFarModels.erase(it);
+                ++released;
+            }
+        }
         else
             ++it;
+    const auto end = std::chrono::steady_clock::now();
+    const double totalMs = std::chrono::duration<double, std::milli>(end - start).count();
+    if (totalMs >= 20.0)
+        LOG_INFO(World, "Native far sweep: {:.1f} ms | removals {:.1f} ms, model release {:.1f} ms ({} models, {} queued)",
+                 totalMs, std::chrono::duration<double, std::milli>(releaseStart - start).count(),
+                 std::chrono::duration<double, std::milli>(end - releaseStart).count(), released, _nativeFarRelease.size());
 }
 
 void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
@@ -6466,6 +6515,7 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         return;
     if (!std::isfinite(cameraPosition.X()) || !std::isfinite(cameraPosition.Z()) || _landGrid <= 0)
         return;
+    const auto farT0 = std::chrono::steady_clock::now(); // PERF-HITCH phase row (end of function)
     // WGR_NATIVE_FAR_RANGE (m) / WGR_NATIVE_FAR_CAP (placements): the far window's reach and size.
     static const float range = [] {
         const char* value = std::getenv("WGR_NATIVE_FAR_RANGE");
@@ -6602,7 +6652,9 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                  _nativeFarCandidates.size(), _nativeFarActive.size(), _nativeFarModels.size(), range, reachM,
                  candidateBudget, sinceBuild(), cellsMs, listMs - cellsMs, activeMs - listMs);
     }
+    const auto farTWindow = std::chrono::steady_clock::now();
     SweepNativeFarActive(false);
+    const auto farTSweep = std::chrono::steady_clock::now();
     if (_nativeFarCandidates.empty())
         return;
     const auto start = std::chrono::steady_clock::now();
@@ -6769,12 +6821,31 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         transform.SetUpAndAside(transform.DirectionUp(), transform.DirectionAside());
         transform.SetScale(scale);
         const auto tCreate = std::chrono::steady_clock::now();
+        const bool createProfWas = render::GObjectAdmitProfile.active;
+        if (!createProfWas)
+        {
+            render::GObjectAdmitProfile.Reset();
+            render::GObjectAdmitProfile.active = true;
+        }
         const bool created = GEngine->SceneFarObjectCreated(index, found->second, transform);
+        if (!createProfWas)
+            render::GObjectAdmitProfile.active = false;
         {
             const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tCreate).count();
             createMsCall += ms;
             createMaxMsCall = std::max(createMaxMsCall, ms);
             ++createsCall;
+            if (ms >= 30.0)
+            {
+                const auto& ap = render::GObjectAdmitProfile;
+                LOG_INFO(World, "Native far slow create: {:.1f} ms | {} (LODs {}, far models {}) | register {:.1f} "
+                         "meshBuild {:.1f} meshCreate {:.1f} section {:.1f} modelRegister {:.1f} | texRead {:.1f} "
+                         "texCreate {:.1f} winWait {:.1f} fallback {:.1f} alpha {:.1f} | uploads {} prepared {}", ms,
+                         static_cast<const char*>(_modernObjectModels[modelIndex]), found->second->NLevels(),
+                         _nativeFarModels.size(), ap.registerMs, ap.meshBuildMs, ap.meshCreateMs, ap.sectionMs,
+                         ap.modelRegisterMs, ap.textureReadMs, ap.textureCreateMs, ap.textureWindowWaitMs,
+                         ap.textureFallbackMs, ap.alphaScanMs, ap.textureUploads, ap.texturePrepared);
+            }
         }
         if (created)
         {
@@ -6838,6 +6909,7 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
             _nativeFarStats = {};
         }
     }
+    const auto farTLoop = std::chrono::steady_clock::now();
     // FAR-002: proxies beyond the window. WGR_NATIVE_FAR_PROXIES=0 = none (the bare far hills).
     static const bool farProxies = [] {
         const char* value = std::getenv("WGR_NATIVE_FAR_PROXIES");
@@ -6874,6 +6946,18 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                     UploadNativeProxies();
             }
         }
+    }
+    {
+        // PERF-HITCH: the whole call by phase when it is slow -- the slow-call row above covers only
+        // the create loop, and a 117 ms "native far" swap at Durras had no row at all.
+        const auto farTEnd = std::chrono::steady_clock::now();
+        const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+        if (ms(farT0, farTEnd) >= 50.0)
+            LOG_INFO(World, "Native far update: {:.1f} ms | window {:.1f} sweep {:.1f} loop {:.1f} (creates {} {:.1f} max {:.1f}, "
+                     "install {:.1f} ready {:.1f}) proxies {:.1f}",
+                     ms(farT0, farTEnd), ms(farT0, farTWindow), ms(farTWindow, farTSweep), ms(farTSweep, farTLoop),
+                     createsCall, createMsCall, createMaxMsCall, _nativeFarStats.installMs - installMs0,
+                     _nativeFarStats.readyMs - readyMs0, ms(farTLoop, farTEnd));
     }
     if (added && (_nativeFarActive.size() / 10000 != (_nativeFarActive.size() - added) / 10000))
         LOG_INFO(World, "Native authored far progress: active={} sharedModels={} near={}",
