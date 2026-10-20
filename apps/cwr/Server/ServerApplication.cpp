@@ -178,6 +178,7 @@ int ServerApplication::RunServerStages()
     if (ENGINE_CONFIG.checkInitAndExit && !AppConfig::Instance().IsSimulateSmokeCheck())
     {
         LOG_INFO(Core, "Server initialization check complete - exiting");
+        Poseidon::Foundation::DrainLogFileQueue(1000); // the log file's writer thread (PERF-LOG-FILE-QUEUE)
         _exit(0);
     }
 
@@ -462,6 +463,7 @@ void ServerApplication::DedicatedServerLoop()
                 GetNetworkManager().Close(); // notify clients before exit
                 CleanupSimulateMission();
                 Sleep(100);
+                Poseidon::Foundation::DrainLogFileQueue(1000); // the log file's writer thread (PERF-LOG-FILE-QUEUE)
                 _exit(2);
             }
         }
@@ -476,6 +478,7 @@ void ServerApplication::DedicatedServerLoop()
             if (simulateMode)
                 CleanupSimulateMission();
             Sleep(100);
+            Poseidon::Foundation::DrainLogFileQueue(1000); // the log file's writer thread (PERF-LOG-FILE-QUEUE)
             _exit(m_exitCode);
         }
 

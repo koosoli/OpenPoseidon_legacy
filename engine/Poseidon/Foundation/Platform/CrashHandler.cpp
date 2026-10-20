@@ -187,6 +187,9 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep)
         }
     }
     fflush(stderr);
+    // The log file is written by its own thread (PERF-LOG-FILE-QUEUE): let it write the lines
+    // above before the process ends.
+    DrainLogFileQueue(2000);
 
     if (g_crashNotify)
         g_crashNotify(static_cast<unsigned>(code), addr, g_crashDump, g_crashStack);

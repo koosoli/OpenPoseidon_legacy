@@ -235,6 +235,11 @@ class TerrainWgpu : public ITerrainRenderer
     float _snowUploadTime = -1.0f;
     double _snowUploadWallTime = -1.0;
     bool _snowWasEnabled = false;
+    // PERF-FIELD-EMPTY-SKIP: the last upload of each field was an empty window (no chunks), whose
+    // content does not depend on where the window sits.
+    bool _snowUploadedEmpty = false, _mudUploadedEmpty = false, _mudFarUploadedEmpty = false,
+         _sandUploadedEmpty = false;
+    float _snowUploadX = 0.0f, _snowUploadZ = 0.0f; // camera at the last snow upload
     uint64_t _mudRevision = 0;
     int _mudWindowX = 0, _mudWindowZ = 0;
     bool _mudUploaded = false;

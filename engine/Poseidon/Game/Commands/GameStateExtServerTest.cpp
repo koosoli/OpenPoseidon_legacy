@@ -35,6 +35,7 @@ GameValue TriEndTest(const GameState* /*state*/)
     }
     else
     {
+        Poseidon::Foundation::DrainLogFileQueue(1000); // the log file's writer thread (PERF-LOG-FILE-QUEUE)
         _exit(0);
     }
     return GameValue();

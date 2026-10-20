@@ -1567,6 +1567,7 @@ int GameApplication::RunAfterArgumentParsing()
             return 3;
         }
 #ifdef _WIN32
+        Poseidon::Foundation::DrainLogFileQueue(1000); // the log file's writer thread (PERF-LOG-FILE-QUEUE)
         ExitProcess(0); // bypass static destructors and CRT assertions
 #else
         return 0;
@@ -1944,6 +1945,7 @@ void GameApplication::RunMainLoop()
             LOG_INFO(Core, "Capture metrics {}: {}", WriteCaptureMetrics(captureMetricsPath) ? "saved" : "failed",
                      captureMetricsPath);
         LOG_INFO(Core, "Screenshot saved to: {}", screenshotPath);
+        Poseidon::Foundation::DrainLogFileQueue(1000); // the log file's writer thread (PERF-LOG-FILE-QUEUE)
         _exit(0);
     }
 
@@ -2858,6 +2860,7 @@ void GameApplication::ShutdownRuntime()
         networkManager.Close();
         Sleep(100);
         LOG_INFO(Core, "MP auto-test: exiting with code {}", m_exitCode);
+        Poseidon::Foundation::DrainLogFileQueue(1000); // the log file's writer thread (PERF-LOG-FILE-QUEUE)
         _exit(m_exitCode);
     }
 

@@ -3,6 +3,8 @@
 #include <spdlog/async_logger.h>
 #include <spdlog/details/thread_pool.h>
 #include <spdlog/sinks/sink.h>
+#include <chrono>
+#include <thread>
 
 namespace Poseidon::Foundation
 {
@@ -45,4 +47,52 @@ public:
     void set_formatter(std::unique_ptr<spdlog::formatter> formatter) override
     { _worker->set_formatter(std::move(formatter)); }
 };
+
+// PERF-LOG-FILE-QUEUE (2026-10-20). The log file was written and flushed on the thread that
+// logged: on Arma 1 Sahrani the render thread sat 300-940 ms inside Ntfs/FLTMGR (a file-system
+// filter holding the write) while appending its statistics block, nine times in one minute
+// (Nsight ns-a1). The lines now go through a queue to one writer thread, which still flushes
+// every line, so the file is as complete as before on an abrupt exit once the queue has drained
+// (the crash handler drains it: DrainLogFileQueue). Nothing is dropped: a full queue (65536
+// lines) blocks the caller, as the direct write did. POSEIDON_SYNC_LOG_FILE=1 = the old path.
+class QueuedFileSink final : public spdlog::sinks::sink
+{
+    std::shared_ptr<spdlog::details::thread_pool> _pool;
+    std::shared_ptr<spdlog::async_logger> _worker;
+public:
+    explicit QueuedFileSink(std::shared_ptr<spdlog::sinks::sink> output)
+        : _pool(std::make_shared<spdlog::details::thread_pool>(65536, 1)),
+          _worker(std::make_shared<spdlog::async_logger>("file-worker", std::move(output), _pool,
+              spdlog::async_overflow_policy::block))
+    {
+        _worker->set_level(spdlog::level::trace);
+        _worker->flush_on(spdlog::level::trace); // the writer flushes every line, off the game's threads
+    }
+    ~QueuedFileSink() override
+    {
+        // The pool joins after writing every queued line.
+        _pool.reset();
+    }
+    void log(const spdlog::details::log_msg& message) override
+    {
+        _pool->post_log(std::shared_ptr<spdlog::async_logger>(_worker), message, spdlog::async_overflow_policy::block);
+    }
+    // Every message asks for a flush (flush_on(trace)); the writer already flushes each line.
+    void flush() override {}
+    void set_pattern(const std::string& pattern) override { _worker->set_pattern(pattern); }
+    void set_formatter(std::unique_ptr<spdlog::formatter> formatter) override
+    { _worker->set_formatter(std::move(formatter)); }
+    // Wait (bounded) until the writer has taken every queued line, plus a moment for the last
+    // write. For the crash handler, before the process ends.
+    void Drain(int timeoutMs)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+        while (_pool && _pool->queue_size() > 0 && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+};
+
+// The live queued file sink, if any (one per process), for DrainLogFileQueue.
+inline QueuedFileSink* GQueuedFileSink = nullptr;
 }

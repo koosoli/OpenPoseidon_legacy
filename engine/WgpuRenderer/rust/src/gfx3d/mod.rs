@@ -9863,13 +9863,19 @@ impl Gfx3d {
             return;
         }
 
-        // A plain<->skinned switch changes the group-1 pipeline layout, which invalidates
-        // bind groups 1..=4 in wgpu; drop their tracked state so they are re-bound.
+        // A plain<->skinned switch changes the group-1 layout, so group 1 is re-bound. Groups 2..=4
+        // are NOT: their layouts are the same in both pipeline layouts, wgpu-core keeps them
+        // assigned across set_pipeline and re-sends them itself (Binder::change_pipeline_layout ->
+        // update_expectations). Re-setting them here re-merged every bindless texture into the
+        // pass's usage scope on each switch -- merge_single/register_init_action were ~6% of the
+        // render thread in Arma 2 Chernarus (Nsight ns-a2). WGR_REBIND_ON_SKIN_SWITCH=1 = old.
         if st.last_skinned.is_some() && st.last_skinned != Some(skinned) {
             st.group1_plain = false;
             st.skinned_off = None;
-            st.bindless = false;
-            st.conform = false;
+            if rebind_on_skin_switch() {
+                st.bindless = false;
+                st.conform = false;
+            }
         }
         st.last_skinned = Some(skinned);
 
@@ -10017,8 +10023,10 @@ impl Gfx3d {
         if st.last_skinned.is_some() && st.last_skinned != Some(false) {
             st.group1_plain = false;
             st.skinned_off = None;
-            st.bindless = false;
-            st.conform = false;
+            if rebind_on_skin_switch() {
+                st.bindless = false;
+                st.conform = false;
+            }
         }
         st.last_skinned = Some(false);
 
@@ -14798,4 +14806,11 @@ mod sky_atlas_tests {
         assert!(values[4..1024].iter().all(|&x| x == 0.0));
         assert!(values[1028..].iter().all(|&x| x == 0.0));
     }
+}
+
+/// WGR_REBIND_ON_SKIN_SWITCH=1: re-set bind groups 2..=4 after a plain<->skinned switch (the
+/// behaviour before 2026-10-20).
+fn rebind_on_skin_switch() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| std::env::var("WGR_REBIND_ON_SKIN_SWITCH").map(|v| v == "1").unwrap_or(false))
 }

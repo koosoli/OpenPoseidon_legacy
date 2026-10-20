@@ -4661,13 +4661,30 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     // and roof edits must still refresh it without advancing retained snow.
     const double snowWallTime = std::chrono::duration<double>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
-    if (camera && (snow.CoverActive() || _snowWasEnabled || uploaded) &&
+    // PERF-FIELD-EMPTY-SKIP (2026-10-20). Snow, mud and sand re-took their 512x512 window every
+    // 0.1 s (snow) or every 2 m the camera moved (mud, sand) even with nothing in them -- the
+    // copies, the shelter mask and the allocations were ~7% of the main thread in Arma 2
+    // Chernarus's frames (summer, snowline cover only; Nsight ns-a2). An empty mud/sand window
+    // (no chunks) is all zeros wherever it sits: once one is uploaded it is not taken again until
+    // the field gains chunks or changes state. An empty snow window still carries the roof
+    // shelters of snowline cover, so it follows the camera -- but every 8 m or 1 s, not every
+    // 0.1 s (the 64 m window keeps >= 24 m around the camera). WGR_FIELD_EMPTY_SKIP=0 = always.
+    static const bool fieldEmptySkip = EnvFloat("WGR_FIELD_EMPTY_SKIP", 1.0f) > 0.5f;
+    const bool snowEmptyHeld = fieldEmptySkip && camera && !uploaded && _snowUploadedEmpty && !snow.enabled &&
+                               snow.Chunks() == 0 && snow.CoverActive() == _snowWasEnabled &&
+                               snowWallTime - _snowUploadWallTime < 1.0 &&
+                               std::abs(camera->Position().X() - _snowUploadX) < 8.0f &&
+                               std::abs(camera->Position().Z() - _snowUploadZ) < 8.0f;
+    if (camera && !snowEmptyHeld && (snow.CoverActive() || _snowWasEnabled || uploaded) &&
         (snow.CoverActive() != _snowWasEnabled || uploaded || _params.time < _snowUploadTime ||
          _params.time - _snowUploadTime >= 0.1f || snowWallTime - _snowUploadWallTime >= 0.1))
     {
         auto snapshot = snow.Snapshot(camera->Position().X(), camera->Position().Z());
         MaskSnowShelters(land, snapshot);
         _engine.QueueSnow(snapshot);
+        _snowUploadedEmpty = !snow.enabled && snow.Chunks() == 0;
+        _snowUploadX = camera->Position().X();
+        _snowUploadZ = camera->Position().Z();
         _snowUploadTime = _params.time;
         _snowUploadWallTime = snowWallTime;
         _snowWasEnabled = snow.CoverActive();
@@ -4682,11 +4699,14 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
                                                         camera->Direction().X(), camera->Direction().Z());
         const int mx = int(std::floor(mudCentre.x / 2.0f));
         const int mz = int(std::floor(mudCentre.z / 2.0f));
-        if (!_mudUploaded || uploaded || _mudWasEnabled != mud.enabled || _mudRevision != mud.Revision() || mx != _mudWindowX || mz != _mudWindowZ)
+        const bool mudMoved = (mx != _mudWindowX || mz != _mudWindowZ) &&
+                              !(fieldEmptySkip && _mudUploadedEmpty && mud.Chunks() == 0);
+        if (!_mudUploaded || uploaded || _mudWasEnabled != mud.enabled || _mudRevision != mud.Revision() || mudMoved)
         {
             auto snapshot = mud.Snapshot(mudCentre.x, mudCentre.z);
             if (mud.Chunks() == 0) snapshot[3] = 0.0f;
             _engine.QueueMud(std::move(snapshot));
+            _mudUploadedEmpty = mud.Chunks() == 0;
             _mudRevision = mud.Revision(); _mudWindowX = mx; _mudWindowZ = mz; _mudUploaded = true; _mudWasEnabled = mud.enabled;
         }
         // Far view for ruts beyond the 64 m window: 0.5 m cells over 256 m, same
@@ -4694,13 +4714,15 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         const int fx = int(std::floor(mudCentre.x / 8.0f));
         const int fz = int(std::floor(mudCentre.z / 8.0f));
         const double farWall = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-        const bool farStale = !_mudFarUploaded || uploaded || fx != _mudFarWindowX || fz != _mudFarWindowZ ||
-                              _mudFarRevision != mud.Revision();
+        const bool farMoved = (fx != _mudFarWindowX || fz != _mudFarWindowZ) &&
+                              !(fieldEmptySkip && _mudFarUploadedEmpty && mud.Chunks() == 0);
+        const bool farStale = !_mudFarUploaded || uploaded || farMoved || _mudFarRevision != mud.Revision();
         if (farStale && (!_mudFarUploaded || uploaded || farWall - _mudFarUploadWallTime >= 0.25))
         {
             auto farView = mud.SnapshotFar(mudCentre.x, mudCentre.z);
             if (mud.Chunks() == 0) farView[3] = 0.0f;
             _engine.QueueMudFar(std::move(farView));
+            _mudFarUploadedEmpty = mud.Chunks() == 0;
             _mudFarRevision = mud.Revision(); _mudFarWindowX = fx; _mudFarWindowZ = fz;
             _mudFarUploadWallTime = farWall; _mudFarUploaded = true;
         }
@@ -4755,11 +4777,14 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     {
         const int sx = int(std::floor(camera->Position().X() / 2.0f));
         const int sz = int(std::floor(camera->Position().Z() / 2.0f));
+        const bool sandMoved = (sx != _sandWindowX || sz != _sandWindowZ) &&
+                               !(fieldEmptySkip && _sandUploadedEmpty && sand.Chunks() == 0);
         if (!_sandUploaded || uploaded || _sandWasEnabled != sand.enabled || _sandRevision != sand.Revision() ||
-            sx != _sandWindowX || sz != _sandWindowZ)
+            sandMoved)
         {
             auto snapshot = sand.Snapshot(camera->Position().X(), camera->Position().Z());
             if (sand.Chunks() == 0) snapshot[3] = 0.0f;
+            _sandUploadedEmpty = sand.Chunks() == 0;
             static const bool sandUploadTrace=[] {
 #ifdef _WIN32
                 char* value=nullptr;size_t length=0;

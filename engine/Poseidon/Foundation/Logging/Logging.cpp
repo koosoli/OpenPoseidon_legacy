@@ -42,6 +42,19 @@ namespace Poseidon::Foundation
 {
 namespace
 {
+bool EnvFlagEnabled(const char* name);
+
+// PERF-LOG-FILE-QUEUE: the file sink behind its writer thread (QueuedConsoleSink.hpp), unless
+// POSEIDON_SYNC_LOG_FILE=1.
+static std::shared_ptr<spdlog::sinks::sink> QueueFileSink(std::shared_ptr<spdlog::sinks::sink> fileSink)
+{
+    if (EnvFlagEnabled("POSEIDON_SYNC_LOG_FILE"))
+        return fileSink;
+    auto queued = std::make_shared<QueuedFileSink>(std::move(fileSink));
+    GQueuedFileSink = queued.get();
+    return queued;
+}
+
 bool EnvFlagEnabled(const char* name)
 {
     const char* value = std::getenv(name);
@@ -50,6 +63,12 @@ bool EnvFlagEnabled(const char* name)
     return strcmp(value, "0") != 0 && strcmp(value, "false") != 0 && strcmp(value, "off") != 0;
 }
 } // namespace
+
+void DrainLogFileQueue(int timeoutMs)
+{
+    if (QueuedFileSink* sink = GQueuedFileSink)
+        sink->Drain(timeoutMs);
+}
 
 static std::atomic<int> g_errorCount{0};
 // Strict mode (--strict): set once at init. When on, the first err-level message
@@ -573,9 +592,10 @@ void LoggingSystem::Initialize(const char* logLevel, const char* categoryFilter,
             formatter->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %*%v");
             console_sink->set_formatter(std::move(formatter));
             if (EnvFlagEnabled("POSEIDON_SYNC_CONSOLE"))
-                sinks.push_back(console_sink);
+                m_consoleSink = console_sink;
             else
-                sinks.push_back(std::make_shared<QueuedConsoleSink>(console_sink));
+                m_consoleSink = std::make_shared<QueuedConsoleSink>(console_sink);
+            sinks.push_back(m_consoleSink);
         }
     }
 
@@ -603,7 +623,7 @@ void LoggingSystem::Initialize(const char* logLevel, const char* categoryFilter,
             formatter->add_flag<PoseidonFormatter>('*', this, /*colored=*/false);
             formatter->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %*%v");
             file_sink->set_formatter(std::move(formatter));
-            sinks.push_back(file_sink);
+            sinks.push_back(QueueFileSink(file_sink));
             m_hasFileSink = true;
             snprintf(m_logFilePath, sizeof(m_logFilePath), "%s", logFile);
         }
@@ -616,6 +636,9 @@ void LoggingSystem::Initialize(const char* logLevel, const char* categoryFilter,
     // Flush policy: flush every message when writing to file (game may exit abruptly),
     // otherwise flush only on warnings and above.
     auto flushLevel = m_hasFileSink ? spdlog::level::trace : spdlog::level::warn;
+
+    if (m_hasFileSink)
+        QuietConsoleForFile();
 
     // Create one spdlog logger per category, all sharing the same sink(s).
     // Logger name = category name → accessible via %n, no string parsing.
@@ -659,6 +682,7 @@ void LoggingSystem::AttachFileSink(const char* path)
         formatter->add_flag<PoseidonFormatter>('*', this, /*colored=*/false);
         formatter->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %*%v");
         file_sink->set_formatter(std::move(formatter));
+        const std::shared_ptr<spdlog::sinks::sink> queuedFile = QueueFileSink(file_sink);
 
         // Runs single-threaded at boot, before any worker logs, so appending to each
         // live logger's own sink vector in place is safe. Flush every line.
@@ -667,23 +691,39 @@ void LoggingSystem::AttachFileSink(const char* path)
         {
             if (m_categoryLoggers[i])
             {
-                m_categoryLoggers[i]->sinks().push_back(file_sink);
+                m_categoryLoggers[i]->sinks().push_back(queuedFile);
                 m_categoryLoggers[i]->flush_on(spdlog::level::trace);
             }
         }
         if (m_logger)
         {
-            m_logger->sinks().push_back(file_sink);
+            m_logger->sinks().push_back(queuedFile);
             m_logger->flush_on(spdlog::level::trace);
         }
 
         m_hasFileSink = true;
         snprintf(m_logFilePath, sizeof(m_logFilePath), "%s", path);
+        QuietConsoleForFile();
     }
     catch (const std::exception& e)
     {
         LOG_WARN(Core, "Could not open log file {}: {}", path, e.what());
     }
+}
+
+// PERF-CONSOLE-LEVEL (2026-10-20). Every log line also went to the console sink: ~90 lines a
+// second, each ~0.3 ms in spdlog's queue -- 10.7% of the main thread and 3.6% of the render
+// thread in Arma 2 Chernarus's frames (Nsight ns-a2), on top of the file that already has every
+// line. With a log file open the console shows warnings and errors only.
+// POSEIDON_CONSOLE_LEVEL=info|debug|trace keeps the full console.
+void LoggingSystem::QuietConsoleForFile()
+{
+    if (!m_consoleSink)
+        return;
+    spdlog::level::level_enum consoleLevel = spdlog::level::warn;
+    if (const char* v = std::getenv("POSEIDON_CONSOLE_LEVEL"); v && *v)
+        consoleLevel = spdlog::level::from_str(v);
+    m_consoleSink->set_level(consoleLevel);
 }
 
 bool WantsRunLogFile(bool logFileRequested, bool logFileOpened, bool noLogFile)

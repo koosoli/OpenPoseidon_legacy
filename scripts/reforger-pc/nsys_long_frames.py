@@ -64,16 +64,20 @@ def image_base_of(path):
     return int.from_bytes(data[pe + 24 + 24:pe + 24 + 32], 'little'), int.from_bytes(data[pe + 24 + 56:pe + 24 + 60], 'little')
 
 
-def find_base(tool, obj, addr, size, want):
-    """The 64 KB-aligned load address at which `addr` lands in a function containing `want`."""
+def find_base(tool, obj, addr, size, want, also=None):
+    """The 64 KB-aligned load address at which `addr` lands in a function containing `want`.
+    `also` = (addr2, want2): a second anchor that must agree at the same base (for anchors whose
+    name is not unique in the image)."""
     pref, _ = image_base_of(obj)
     lo = (addr - size) & ~0xffff
     cands = list(range(lo, addr, 0x10000))
     names = symbolize(tool, obj, pref, [pref + addr - b for b in cands])
-    for b, n in zip(cands, names):
-        if want in n:
-            return b
-    return None
+    hits = [b for b, n in zip(cands, names) if want in n]
+    if also and hits:
+        addr2, want2 = also
+        names2 = symbolize(tool, obj, pref, [pref + addr2 - b for b in hits])
+        hits = [b for b, n in zip(hits, names2) if want2 in n]
+    return hits[0] if hits else None
 
 
 def main():
@@ -101,15 +105,20 @@ def main():
 
     busiest = c.execute(
         'select globalTid, count(*) from COMPOSITE_EVENTS where (globalTid >> 24) & 16777215 = ? '
-        'group by globalTid order by 2 desc limit 12', (pid,)).fetchall()
+        'group by globalTid order by 2 desc limit 40', (pid,)).fetchall()
     # The main thread is the unnamed thread whose stacks reach the game exe straight from
     # kernel32 (its startup frame) -- not merely the busiest unnamed one: on DayZ that was an
     # NVIDIA driver shader-compile thread.
+    # (Only the main thread's root is an exe frame called by kernel32 -- std::threads start in
+    # ucrtbase. "Any exe frame at all" picked the Steam audio streamer on Arma 1 Sahrani.)
     def starts_in_exe(tid):
         row = c.execute(
             'select s.id from COMPOSITE_EVENTS e join SAMPLING_CALLCHAINS s on s.id = e.id '
-            'join StringIds m on s.module = m.id where e.globalTid = ? and m.value like ? limit 1',
-            (tid, '%' + a.process)).fetchone()
+            'join StringIds m on s.module = m.id '
+            'join SAMPLING_CALLCHAINS k on k.id = s.id and k.stackDepth = s.stackDepth + 1 '
+            'join StringIds km on k.module = km.id '
+            'where e.globalTid = ? and m.value like ? and lower(km.value) like ? limit 1',
+            (tid, '%' + a.process, '%kernel32.dll')).fetchone()
         return row is not None
     unnamed = [g for g, _ in busiest if g not in names]
     main_tid = next((g for g in unnamed if starts_in_exe(g)), unnamed[0])
@@ -141,7 +150,7 @@ def main():
         mods = {'openposeidon.exe': os.path.join(a.bin, 'OpenPoseidon.exe'),
                 'wgpu_renderer.dll': os.path.join(a.bin, 'wgpu_renderer.dll')}
         addrs = collections.defaultdict(set)
-        exe_anchor = dll_anchor = None
+        exe_anchor = dll_anchor = thread_anchor = dll_caller = None
         for st in stacks.values():
             for frames in st.values():
                 for i, (_, n, m) in enumerate(frames):
@@ -149,16 +158,25 @@ def main():
                         addrs[m].add(int(n, 16))
                         if m == 'openposeidon.exe' and i + 1 < len(frames) and frames[i + 1][2] == 'kernel32.dll':
                             exe_anchor = int(n, 16)
+                        # Fallback when no main-thread root was sampled: a std::thread entry (the
+                        # exe frame a ucrtbase thread start calls) resolves to std::thread::_Invoke.
+                        if (m == 'openposeidon.exe' and i + 1 < len(frames) and frames[i + 1][2] == 'ucrtbase.dll'
+                                and thread_anchor is None):
+                            thread_anchor = int(n, 16)
                         if (m == 'wgpu_renderer.dll' and i + 1 < len(frames) and frames[i + 1][2] == 'openposeidon.exe'
                                 and dll_anchor is None):
                             dll_anchor = int(n, 16)
+                            if frames[i + 1][1].startswith('0x'):
+                                dll_caller = int(frames[i + 1][1], 16)  # the exe code that calls the renderer
         bases = {}
-        for m, anchor, want in (('openposeidon.exe', exe_anchor, '__scrt_common_main'),
+        exe_pick = (exe_anchor, '__scrt_common_main') if exe_anchor is not None else (thread_anchor, '_Invoke')
+        for m, anchor, want in (('openposeidon.exe',) + exe_pick,
                                 ('wgpu_renderer.dll', dll_anchor, 'ffi::wgr_')):
             if anchor is None or not os.path.exists(mods[m]):
                 continue
             _, size = image_base_of(mods[m])
-            bases[m] = find_base(tool, mods[m], anchor, size, want)
+            also = (dll_caller, 'Wgpu') if (m == 'openposeidon.exe' and exe_anchor is None and dll_caller) else None
+            bases[m] = find_base(tool, mods[m], anchor, size, want, also)
             print(f'{m}: load address {hex(bases[m]) if bases[m] else "NOT FOUND"}')
         for m, base in bases.items():
             if not base:
