@@ -1056,6 +1056,7 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
     // normal-map smoke tests) from silently producing an empty mesh.
     LODShapeWithShadow* shape = nullptr;
     double installTailMs = 0.0, installRegisterMs = 0.0, installOptimizeMs = 0.0;
+    double syncParseMs = 0.0, syncAdaptMs = 0.0; // the main-thread load (not preadapted), for its slow-load row
     std::shared_ptr<const ModelCompressedSourceBirth> parsedSourceBirth;
     bool freshCanonicalAdapter = false;
     if (preadapted)
@@ -1090,10 +1091,11 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
             Poseidon::ModelCache cache;
             model = cache.load(lowName, &parsedSourceBirth);
         }
+        syncParseMs = arrivedPreparsed ? 0.0 : ::Poseidon::Dev::Perf::ElapsedMs(parseStart);
         if (timing)
         {
             timing->preparsed = arrivedPreparsed;
-            timing->parseMs = arrivedPreparsed ? 0.0 : ::Poseidon::Dev::Perf::ElapsedMs(parseStart);
+            timing->parseMs = syncParseMs;
         }
         const auto adaptStart = ::Poseidon::Dev::Perf::Now();
         // OFP MLODs (every LOD "SP3X") go through the original loader, as they do in Malprave and
@@ -1155,8 +1157,9 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
             shape = new LODShapeWithShadow(lowName, reversed);
             ownedShape.reset(shape);
         }
+        syncAdaptMs = ::Poseidon::Dev::Perf::ElapsedMs(adaptStart);
         if (timing)
-            timing->adaptMs = ::Poseidon::Dev::Perf::ElapsedMs(adaptStart);
+            timing->adaptMs = syncAdaptMs;
     }
     if (!shape)
     {
@@ -1234,6 +1237,11 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
     }
 
     const double _perfShapeLoadMs = ::Poseidon::Dev::Perf::ElapsedMs(_perfShapeLoadStart);
+    // A whole model loaded on the main thread (a building's furniture proxy, NewObject inside its
+    // install tail): what the parse, the conversion and the registration each cost.
+    if (!preadapted && _perfShapeLoadMs >= 10.0)
+        LOG_INFO(Graphics, "Slow sync shape load: {} {:.1f} ms | parse {:.1f} adapt {:.1f} register {:.1f} optimize {:.1f}",
+                 lowName, _perfShapeLoadMs, syncParseMs, syncAdaptMs, installRegisterMs, installOptimizeMs);
     if (preadapted && _perfShapeLoadMs >= 30.0)
         LOG_INFO(Graphics, "Slow shape install: {} {:.1f} ms | tail {:.1f} register {:.1f} optimize {:.1f} ({} LODs)",
                  lowName, _perfShapeLoadMs, installTailMs, installRegisterMs, installOptimizeMs, shape->NLevels());

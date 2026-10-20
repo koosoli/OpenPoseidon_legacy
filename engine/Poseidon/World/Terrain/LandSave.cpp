@@ -3809,6 +3809,27 @@ static void CapturePaaRead(AbstractTextBank* bank, const std::string& raw,
     std::string key = render::PreparedTextureStore::Key(raw);
     if (key.size() < 4 || (key.compare(key.size() - 4, 4, ".paa") != 0 && key.compare(key.size() - 4, 4, ".pac") != 0))
         return;
+    // PERF-PAA-PREP-KINDS (2026-10-20). Measured on a Chernarus flight (prepared puts vs puts that
+    // expired untaken, by name suffix): _mc 97%, _as 93%, _mca 98%, _ads 93%, _dt 85%, _sm 89%,
+    // _ext/_int/_detail 100% -- maps the renderer does not bind, ~500 MB of the store's intake, a
+    // third of it. They kept the 512 MB store full through the opening burst, so the textures the
+    // installs DID need (a school's furniture: one install tail of 1 s) were refused and decoded
+    // on the main thread. They are not prepared; whatever does bind one still loads it as before.
+    // _co/_nohq/_smdi (7-19%) and _ca (44%) stay. POSEIDON_PAA_PREP_ALL_KINDS=1 = prepare all.
+    static const bool allKinds = [] { const char* v = std::getenv("POSEIDON_PAA_PREP_ALL_KINDS"); return v && v[0] == '1'; }();
+    if (!allKinds)
+    {
+        const size_t dot = key.size() - 4;
+        const size_t underscore = key.rfind('_', dot);
+        const size_t slash = key.find_last_of("\\/", dot);
+        if (underscore != std::string::npos && (slash == std::string::npos || underscore > slash))
+        {
+            const std::string_view kind(key.data() + underscore + 1, dot - underscore - 1);
+            for (const char* skip : {"mc", "as", "mca", "ads", "dt", "sm", "ext", "int", "detail"})
+                if (kind == skip)
+                    return;
+        }
+    }
     const auto now = std::chrono::steady_clock::now();
     if (const auto it = claimed.find(key); it != claimed.end() && now - it->second < std::chrono::seconds(10))
     {
@@ -4158,10 +4179,16 @@ void Landscape::ParkStreamTexPrep(uint32_t modelIndex, std::shared_ptr<Model::Mo
 bool Landscape::FinishStreamTexPrep(uint32_t modelIndex)
 {
     const auto found = _nativeFarTexPrep.find(modelIndex);
-    if (found == _nativeFarTexPrep.end() ||
-        found->second.decode.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+    if (found == _nativeFarTexPrep.end())
         return false;
-    found->second.decode.get();
+    // `decode` is consumed once; a model kept parked after that (PERF-PROXY-WARM) comes back here
+    // with no task to wait for.
+    if (found->second.decode.valid())
+    {
+        if (found->second.decode.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            return false;
+        found->second.decode.get();
+    }
     // STREAM-PAA-PREP: a round named more (material stage maps, proxy textures): capture them here
     // and run another round before the model converts, so its install finds them prepared.
     if (NativeFarTexPrep& parked = found->second; parked.foundPaa && parked.paaRounds < 3 &&
@@ -4192,6 +4219,63 @@ bool Landscape::FinishStreamTexPrep(uint32_t modelIndex)
             return false; // still parked; the next call sees the new round
         }
     }
+    // PERF-PROXY-WARM (2026-10-20). A building's furniture is loaded inside its install tail
+    // (CreateAdapterProxies -> NewObject -> Shapes.New): every proxy model not yet in the bank is
+    // parsed, converted and registered there, in one frame -- DayZ's city school took 835-1010 ms,
+    // dozens of 1-40 ms furniture loads (2.9-3.2 s of install tails per Chernarus flight). They
+    // are loaded here instead, while the building is still parked, at most
+    // POSEIDON_PROXY_WARM_MS (default 4) of main-thread time per update across all parked
+    // models, with the same Shapes.New call the install makes, so the install finds them
+    // cached. The building converts once its list is done. 0 = off.
+    if (NativeFarTexPrep& parked = found->second; parked.foundPaa && parked.model)
+    {
+        static const double warmBudgetMs = []
+        {
+            const char* v = std::getenv("POSEIDON_PROXY_WARM_MS");
+            return v ? std::clamp(std::strtod(v, nullptr), 0.0, 1000.0) : 4.0;
+        }();
+        if (warmBudgetMs > 0.0)
+        {
+            if (!parked.proxiesListed)
+            {
+                parked.proxiesListed = true;
+                std::unordered_set<std::string> seen;
+                for (const auto& level : parked.model->lodLevels)
+                    for (const auto& proxy : level.mesh.proxies)
+                    {
+                        const auto normalized = Model::ShapeAdapter::normalizeProxyModelName(proxy.name);
+                        if (normalized.modelName.empty() || !seen.insert(normalized.modelName).second)
+                            continue;
+                        const RString modelName(normalized.modelName.c_str());
+                        // A proxy with a CfgNonAIVehicles class is created through its vehicle
+                        // type, not this call; an absent file is skipped by the install.
+                        if ((Pars >> "CfgNonAIVehicles").FindEntry(RString("Proxy") + modelName) != nullptr)
+                            continue;
+                        const RString shapeName = GetShapeName(modelName);
+                        if (Shapes.Find(shapeName, false, true) || !QIFStreamB::FileExist(shapeName))
+                            continue;
+                        parked.proxyShapes.emplace_back(static_cast<const char*>(shapeName));
+                    }
+            }
+            while (parked.proxyNext < parked.proxyShapes.size())
+            {
+                if (_proxyWarmSpentMs >= warmBudgetMs)
+                    return false; // still parked; the next update continues the list
+                const auto began = std::chrono::steady_clock::now();
+                const RString shapeName(parked.proxyShapes[parked.proxyNext++].c_str());
+                if (!Shapes.Find(shapeName, false, true))
+                {
+                    // The install loads its proxies inside its WorldModelScope (RFG-099), which
+                    // registers them with the retained renderer; so does this.
+                    ShapeBank::WorldModelScope worldModel(Shapes);
+                    if (Ref<LODShapeWithShadow> shape = Shapes.New(shapeName, false, true))
+                        _proxyWarmHold.emplace_back(std::move(shape), began);
+                }
+                _proxyWarmSpentMs +=
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+            }
+        }
+    }
     std::shared_ptr<Model::Model> model = std::move(found->second.model);
     const bool ownerAdmission = found->second.ownerAdmission;
     _nativeFarTexPrep.erase(found);
@@ -4214,8 +4298,17 @@ bool Landscape::FinishStreamTexPrep(uint32_t modelIndex)
 
 void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
 {
+    // PERF-PROXY-WARM: a new update's budget; a warmed shape is held for a minute -- the install
+    // that wants it follows within a few updates, and from then on its proxies hold it.
+    _proxyWarmSpentMs = 0.0;
+    if (!_proxyWarmHold.empty())
+    {
+        const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(60);
+        std::erase_if(_proxyWarmHold, [&](const auto& held) { return held.second < cutoff; });
+    }
     if (!_modernObjectStreaming || _modernObjectCells.empty())
     {
+        _proxyWarmHold.clear(); // never let a dead world's shapes outlive it
         _modernPendingOwnerPrimaryTextures.reset();
         // (d) Same teardown argument as the cache below: a preparer still holding a dead
         // world's IRs, or a queue of its models, must be flushed. Reset only bumps a

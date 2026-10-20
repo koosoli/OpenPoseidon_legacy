@@ -797,7 +797,16 @@ class Landscape : public SerializeClass
         // the model stays parked until a round finds nothing new (at most 3).
         std::shared_ptr<std::vector<std::string>> foundPaa, foundRvmat;
         int paaRounds = 0;
+        // PERF-PROXY-WARM: the proxy models (furniture) this model's install will load, loaded
+        // ahead a few milliseconds per update while it is still parked.
+        bool proxiesListed = false;
+        std::vector<std::string> proxyShapes;
+        size_t proxyNext = 0;
     };
+    // PERF-PROXY-WARM: shapes loaded ahead, held until the install that wants them has run
+    // (ShapeBank keeps only weak links), and the main-thread time spent on them this update.
+    std::vector<std::pair<Ref<LODShapeWithShadow>, std::chrono::steady_clock::time_point>> _proxyWarmHold;
+    double _proxyWarmSpentMs = 0.0;
     std::unordered_map<uint32_t, NativeFarTexPrep> _nativeFarTexPrep;
     //! PERF-FAR-ASYNC-PREP: collect `model`'s native texture names (main thread), decode them in
     //! the background and park the model until FinishStreamTexPrep.

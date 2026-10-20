@@ -15,6 +15,9 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <string.h>
+#include <mutex>
+#include <string>
+#include <unordered_set>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Framework/GlobalAlive.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -137,6 +140,32 @@ EntityType* VehicleTypeBank::New(const char* name)
             return cached;
         }
     }
+    // PERF-TYPE-MISS (2026-10-20). A name with no class missed the cache above every time and
+    // paid the linear scan plus the config lookups again. NewObject asks for "Proxy<model>" for
+    // every proxy of every LOD of a building, and DayZ furniture has no such class: a school's
+    // install spent ~600 ms of its tail here once its furniture models were already loaded. A
+    // miss is remembered, keyed to the live CfgVehicles class (address and entry count) so a
+    // config reload starts the list again.
+    static std::mutex missMutex;
+    static std::unordered_set<std::string> missed;
+    static const void* missedConfig = nullptr;
+    static int missedEntries = -1;
+    const ParamEntry* config = Pars.FindEntry(RStringB("CfgVehicles"));
+    const int configEntries = config ? config->GetEntryCount() : -1;
+    std::string missKey(name);
+    for (char& c : missKey)
+        c = static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
+    {
+        std::lock_guard<std::mutex> lock(missMutex);
+        if (config != missedConfig || configEntries != missedEntries)
+        {
+            missed.clear();
+            missedConfig = config;
+            missedEntries = configEntries;
+        }
+        if (missed.count(missKey))
+            return nullptr;
+    }
     int index = Find(name);
     if (index < 0)
     {
@@ -144,6 +173,9 @@ EntityType* VehicleTypeBank::New(const char* name)
     }
     if (index < 0)
     {
+        std::lock_guard<std::mutex> lock(missMutex);
+        if (missed.size() < 65536)
+            missed.insert(std::move(missKey));
         return nullptr;
     }
     slot = index;
