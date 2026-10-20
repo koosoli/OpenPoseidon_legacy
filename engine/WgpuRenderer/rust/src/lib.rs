@@ -1198,6 +1198,27 @@ pub struct Renderer {
 // before `upscalers`, so a backend that must release a vendor context against a live
 // VkDevice (DLSS: ReleaseFeature + NGX Shutdown1) needs the chain cleared HERE, after
 // the GPU has finished with the last frame and before the device goes.
+/// STREAM-HITCH probe: named laps through render_frame's setup and early encode; one log line when
+/// the frame's total passes WGR_FRAME_LAP_MS (unset = off).
+struct FrameLap { t: std::time::Instant, laps: Vec<(&'static str, f32)> }
+impl FrameLap {
+    fn new() -> Self { Self { t: std::time::Instant::now(), laps: Vec::new() } }
+    fn mark(&mut self, name: &'static str) {
+        let now = std::time::Instant::now();
+        self.laps.push((name, (now - self.t).as_secs_f32() * 1e3));
+        self.t = now;
+    }
+    fn report(&self, log: &LogSink) {
+        static LIMIT: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+        let limit = *LIMIT.get_or_init(|| std::env::var("WGR_FRAME_LAP_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(f32::MAX));
+        let total: f32 = self.laps.iter().map(|l| l.1).sum();
+        if total >= limit {
+            let parts: Vec<String> = self.laps.iter().map(|(n, ms)| format!("{n}={ms:.1}")).collect();
+            log.log(log_level::INFO, &format!("frame lap {total:.1} ms: {}", parts.join(" ")));
+        }
+    }
+}
+
 impl Drop for Renderer {
     fn drop(&mut self) {
         // LOAD-NGX-DEFER: a quit before the DLSS start-up thread finished must not tear the
@@ -4199,6 +4220,7 @@ impl Renderer {
         // submitted no terrain and no 3D draws has no world in it, so its resident objects stay hidden too.
         let suppress_world_objects = self.suppress_world_objects || (terrain_batches.is_empty() && draws3d.is_empty());
         self.gfx3d.begin_geometry_pass_facts(shadow);
+        let mut frame_lap = FrameLap::new(); // STREAM-HITCH probe (WGR_FRAME_LAP_MS)
         let setup_t0 = std::time::Instant::now();
         // REN-THR-009 — before anything this frame reads `bake_bind_cache` or allocates
         // from the pool. This is the frame boundary a deferred mesh destroy waits for.
@@ -4594,6 +4616,7 @@ impl Renderer {
         self.sky.fog.invalidate(&self.queue);
         self.gfx3d.set_layer_fog_requested(layered_fog::requested(&self.layer_fog_settings,
             self.layer_fog_weather,self.hdr_enabled,self.cam_underground));
+        frame_lap.mark("setup:pre");
         self.gfx3d.begin_lod_demand(); // before model-table upload; disabled/no request is a no-op
         self.gfx3d.prepare(
             &self.device,
@@ -4681,6 +4704,7 @@ impl Renderer {
                 tw.set_lake(water);
             }
         }
+        frame_lap.mark("gfx3d.prepare");
         self.water.prepare(
             &self.device,
             &self.queue,
@@ -4737,6 +4761,7 @@ impl Renderer {
         // Live from the Water tab ("Engage band"), no longer a constant — the band decides how
         // far into open air the pass keeps running, which is exactly the knob you want when
         // tuning how the effect behaves around the waterline.
+        frame_lap.mark("water.prepare");
         let underwater_tuning = self.water.underwater_tuning();
         let underwater_near_surface_band = underwater_tuning.0;
         // The Water tab's checkbox. Without this the pass ran whatever the checkbox said: the
@@ -5019,6 +5044,7 @@ impl Renderer {
         // New encoder, and the depth target is about to be cleared and rewritten: nothing
         // resolved on a previous frame's encoder can be reused.
         self.far_depth_resolve_current = false;
+        frame_lap.mark("setup:rest");
         self.gpu_timers.begin_frame();
         self.gpu_timers
             .cpu_record(crate::gpu_timers::Region::WorkerAcquire, acquire_ms);
@@ -5353,11 +5379,13 @@ impl Renderer {
         // the shared skinned vertex buffer that the shadow cascades, the depth prepass, and
         // the forward pass all read, so it must precede them; wgpu inserts the storage->
         // vertex barrier. No-op when the bake is off or there is no skinned geometry.
+        frame_lap.mark("early:part1");
         self.gfx3d.skin_bake(&mut encoder);
 
         // GPU cull compute (Stage 3): culls + LOD-selects the retained scene into the
         // indirect args the colour pass consumes. Recorded before the render passes so
         // wgpu barriers its storage writes -> the indirect reads. No-op when disabled.
+        frame_lap.mark("skin_bake");
         self.gfx3d.cull_dispatch(&mut encoder, &self.gpu_timers);
         // One extra cull dispatch per shadow cascade (§6 multi-view): each produces that
         // cascade's depth-pass indirect args, consumed by the GPU-driven shadow draw inside
@@ -5517,6 +5545,7 @@ impl Renderer {
         self.gpu_timers
             .cpu_begin(crate::gpu_timers::Region::WorkerEncShadow);
         encoder.push_debug_group("wgr_shadow_cascades");
+        frame_lap.mark("early:cull+rest"); frame_lap.report(&self.log);
         self.gfx3d.render_shadow_passes(
             &self.device,
             &mut encoder,

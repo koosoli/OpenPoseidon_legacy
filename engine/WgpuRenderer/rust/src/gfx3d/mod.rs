@@ -4900,6 +4900,20 @@ fn mesh_content_key_separates_geometry_and_matches_copies() {
     assert_ne!(a, mesh_content_key(&[v(1.0), v(2.0), v(3.0)], &[0, 2, 1]));
 }
 
+/// STREAM-HITCH probe (WGR_PIPELINE_TIMING=1): a lazily created pipeline is compiled on the render
+/// thread mid-frame; log every creation with its cost.
+struct PipelineCreateTimer(&'static str, std::time::Instant);
+impl PipelineCreateTimer {
+    fn new(kind: &'static str) -> Self { Self(kind, std::time::Instant::now()) }
+}
+impl Drop for PipelineCreateTimer {
+    fn drop(&mut self) {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *ON.get_or_init(|| std::env::var_os("WGR_PIPELINE_TIMING").is_some()) {
+            eprintln!("[wgr] pipeline created at runtime: {} {:.1} ms", self.0, self.1.elapsed().as_secs_f64() * 1e3);
+        }
+    }
+}
 impl Gfx3d {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -5823,6 +5837,7 @@ impl Gfx3d {
         if self.pipelines.contains_key(&key) {
             return;
         }
+        let _pipe_timer = PipelineCreateTimer::new("main");
 
         let module = &self.shader;
         let (vs_entry, layout) = if key.skinned {
@@ -6096,6 +6111,7 @@ impl Gfx3d {
         if self.prepass_pipelines.contains_key(&key) {
             return;
         }
+        let _pipe_timer = PipelineCreateTimer::new("prepass");
         let module = &self.shader;
         let (vs_entry, layout) = if key.skinned {
             ("vs_skinned", &self.skinned_layout)
@@ -6199,6 +6215,7 @@ impl Gfx3d {
     fn ensure_weather_pipeline(&mut self, device: &wgpu::Device, key: PrepassKey) {
         if self.weather_pipelines.contains_key(&key) &&
             (self.weather_cover_far.view.is_none() || self.weather_far_pipelines.contains_key(&key)) {return;}
+        let _pipe_timer = PipelineCreateTimer::new("weather");
         let vertex = wgpu::VertexBufferLayout {array_stride: BAKED_VERT_SIZE,
             step_mode: wgpu::VertexStepMode::Vertex, attributes: &self.vbuf_attrs};
         let skin = wgpu::VertexBufferLayout {array_stride: 8,
@@ -11014,7 +11031,9 @@ impl Gfx3d {
         }
         // Re-resolve section pool addressing from the current mesh allocs (a mesh's vbase can
         // move when its VB is recreated), so the cull emits correct base_vertex/first_index.
+        let pc_t0 = std::time::Instant::now();
         self.refresh_cull_sections();
+        let pc_refresh = pc_t0.elapsed().as_secs_f32() * 1e3;
         if self.weather_cover.view.is_some() {
             self.weather_cover.identity.instance_epoch = self.cull.instance_epoch();
             self.weather_cover.publication.get_mut().plan(self.weather_cover.identity,
@@ -11187,7 +11206,18 @@ impl Gfx3d {
             self.sky_volumes_dirty = true;
         }
         let volumes_grew = self.upload_sky_volumes(device, queue);
+        let pc_t1 = std::time::Instant::now();
         let grew = self.cull.prepare(device, queue) || volumes_grew;
+        let pc_upload = pc_t1.elapsed().as_secs_f32() * 1e3;
+        {
+            static LIMIT: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+            let limit = *LIMIT.get_or_init(|| std::env::var("WGR_FRAME_LAP_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(f32::MAX));
+            let total = pc_t0.elapsed().as_secs_f32() * 1e3;
+            if total >= limit * 0.25 {
+                self.queued_log.push(format!("prepare_cull lap {total:.1} ms: refresh_sections={pc_refresh:.1} cull.prepare={pc_upload:.1} ({})",
+                    self.cull.last_upload_summary()));
+            }
+        }
         if let Some(line) = self.cull.take_model_row_activation() { self.queued_log.push(line); }
         if let Some(line) = self.cull.take_model_row_commit_notice() { self.queued_log.push(line); }
         let mipfb_grew = std::mem::take(&mut self.mip_feedback_grew);

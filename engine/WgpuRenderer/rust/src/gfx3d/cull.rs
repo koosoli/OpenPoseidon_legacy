@@ -363,6 +363,8 @@ const ARG_WORDS: u64 = super::INDIRECT_ARG_SIZE / 4;
 // 8-storage-buffer GPU for one saved indexing offset. Word 3 is spare padding so STAT_BASE_WORD
 // lands on a round number; keep in lockstep with STAT_BASE in cull.wgsl.
 const STAT_BASE_WORD: u64 = 4;
+/// STREAM-UPLOAD: instance slots per dirty page (256 x 176 B = 44 KB).
+const DIRTY_PAGE: u32 = 256;
 // Spare stats word +20; a future per-view async copy uses this byte offset.
 pub const TARGET_MODEL_COUNT_BYTE_OFFSET: u64 = (STAT_BASE_WORD + 20) * 4;
 pub const STATS_WORDS: usize = 24; // +16..+19 what-if triangles (see cull.wgsl word map)
@@ -510,8 +512,12 @@ pub(crate) struct InstanceTable {
     /// Every handle this table refused. Write-only until ID-3 gave it a reader: a rejection
     /// that nothing can count is a rejection no test can distinguish from a no-op.
     stale_ops: u64,
-    /// Inclusive min..=max slot changed since the last upload.
-    dirty: Option<(u32, u32)>,
+    /// STREAM-UPLOAD: changed slots since the last upload, one bit per DIRTY_PAGE slots. A single
+    /// min..=max range used to be kept: object streaming touches slots all over a 206k table, so
+    /// the range spanned half of it and every streaming frame re-sent ~12 MB (12-18 ms of the
+    /// render thread, measured on a 15 m/s Everon flight at 3440x1440).
+    dirty_pages: Vec<u64>,
+    dirty_any: bool,
     /// Retained scene-content change counter: add/update/remove, and drawable model
     /// retirement even when its instance remains. Cached images must observe both kinds.
     /// This is not a revision for arbitrary mesh vertices, dynamic tails or pose palettes.
@@ -768,10 +774,13 @@ impl InstanceTable {
 
     fn mark_dirty(&mut self, slot: u32, origin: StaticEpochOrigin) {
         self.invalidate_retained_content(origin);
-        self.dirty = Some(match self.dirty {
-            Some((lo, hi)) => (lo.min(slot), hi.max(slot)),
-            None => (slot, slot),
-        });
+        let page = (slot / DIRTY_PAGE) as usize;
+        let word = page / 64;
+        if self.dirty_pages.len() <= word {
+            self.dirty_pages.resize(word + 1, 0);
+        }
+        self.dirty_pages[word] |= 1u64 << (page % 64);
+        self.dirty_any = true;
     }
 
     /// Add an instance, recycling a free slot when one is available. Returns its handle.
@@ -838,8 +847,36 @@ impl InstanceTable {
         &self.slots
     }
 
-    fn take_dirty(&mut self) -> Option<(u32, u32)> {
-        self.dirty.take()
+    /// The dirty slots as inclusive (lo, hi) runs of whole pages, clamped to the table; clears them.
+    fn take_dirty(&mut self) -> Vec<(u32, u32)> {
+        let mut runs: Vec<(u32, u32)> = Vec::new();
+        if !self.dirty_any {
+            return runs;
+        }
+        let len = self.slots.len() as u32;
+        for (w, bits) in self.dirty_pages.iter_mut().enumerate() {
+            let mut b = std::mem::take(bits);
+            while b != 0 {
+                let page = (w * 64) as u32 + b.trailing_zeros();
+                b &= b - 1;
+                let lo = page * DIRTY_PAGE;
+                if lo >= len {
+                    continue;
+                }
+                let hi = (lo + DIRTY_PAGE - 1).min(len - 1);
+                match runs.last_mut() {
+                    Some(last) if last.1 + 1 == lo => last.1 = hi,
+                    _ => runs.push((lo, hi)),
+                }
+            }
+        }
+        self.dirty_any = false;
+        runs
+    }
+
+    #[cfg(test)]
+    fn dirty_is_empty(&self) -> bool {
+        !self.dirty_any
     }
 
     /// How many handles this table has refused. The only observable evidence that the
@@ -897,6 +934,8 @@ pub struct CullState {
     lod_feedback: Option<RefCell<Box<super::lod_feedback::LodFeedback>>>,
     /// PERF-LOD-USAGE (WGR_LOD_USAGE_REPORT=1): main-view section usage sampling.
     lod_usage: Option<RefCell<super::lod_usage::LodUsage>>,
+    /// STREAM-HITCH probe: what the last prepare() uploaded (prepare_cull lap line).
+    last_upload_summary: String,
     // Instancing-collapse three-pass pipelines (§3.6), all over `layout`: COUNT (1/instance) ->
     // EMIT (1/section) -> SCATTER (1/instance). Shared by the main + every shadow view.
     count_pipeline: wgpu::ComputePipeline,
@@ -1738,6 +1777,7 @@ impl CullState {
             stats_latest: CullStats::default(),
             lod_feedback: None,
             lod_usage: super::lod_usage::enabled().then(|| RefCell::new(super::lod_usage::LodUsage::new())),
+            last_upload_summary: String::new(),
         }
     }
 
@@ -3114,6 +3154,8 @@ impl CullState {
         }
     }
 
+    pub fn last_upload_summary(&self) -> &str { &self.last_upload_summary }
+
     pub fn set_sections(&mut self, sections: &[SectionGpu]) {
         if resolved_sections_changed(&self.sections, sections, &mut self.instances) {
             // Resolved mesh ranges can change without an instance-table mutation.
@@ -3361,6 +3403,8 @@ impl CullState {
             self.crown_centre_buf.buf.is_none()) {
             self.table_uploads = TableUploads::ALL;
         }
+        let upload_t0 = std::time::Instant::now();
+        let uploads_before = self.table_uploads.0;
         let (next_uploads, tables_grew) = self.table_uploads.run(|domain| match domain {
             TableDomain::Model => match &mut self.model_row_uploads {
                 Some(rows) => upload_model_rows(device, queue, &mut self.model_buf, &self.models, rows),
@@ -3381,20 +3425,27 @@ impl CullState {
         let static_len = self.instances.len() as u32;
         let total = static_len as u64 + self.dynamic.len() as u64;
         let inst_bytes = total.max(1) * std::mem::size_of::<InstanceGpu>() as u64;
-        grew |= self.instance_buf.ensure(device, inst_bytes);
+        let instance_buf_new = self.instance_buf.ensure(device, inst_bytes);
+        grew |= instance_buf_new;
         let stride = std::mem::size_of::<InstanceGpu>() as u64;
         // Cleared here, not inside the branch: the pre-ID-3 code cleared `static_dirty`
         // unconditionally at the end of prepare, including on the no-buffer path.
         let dirty = self.instances.take_dirty();
         if let Some(buf) = self.instance_buf.buf.as_ref() {
-            // A grown static region shifts the dynamic tail, so re-upload the whole static
-            // region (not just the dirty range) whenever static_len changed.
-            let full_static = self.uploaded_static_len != static_len;
+            // STREAM-UPLOAD: the whole static region only when the buffer was (re)created -- a new
+            // buffer starts empty. A grown table only appended slots, and every appended or changed
+            // slot is in the dirty pages; the dynamic tail is re-sent below at its new offset.
+            // WGR_INSTANCE_FULL_UPLOAD=1 = the old whole-table upload whenever the length changed.
+            static FULL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let legacy = *FULL.get_or_init(|| std::env::var("WGR_INSTANCE_FULL_UPLOAD").as_deref() == Ok("1"));
+            let full_static = instance_buf_new || (legacy && self.uploaded_static_len != static_len);
             if full_static && static_len > 0 {
                 queue.write_buffer(buf, 0, bytemuck::cast_slice(self.instances.as_slice()));
-            } else if let Some((lo, hi)) = dirty {
-                let range = &self.instances.as_slice()[lo as usize..=hi as usize];
-                queue.write_buffer(buf, lo as u64 * stride, bytemuck::cast_slice(range));
+            } else {
+                for &(lo, hi) in &dirty {
+                    let range = &self.instances.as_slice()[lo as usize..=hi as usize];
+                    queue.write_buffer(buf, lo as u64 * stride, bytemuck::cast_slice(range));
+                }
             }
             // Dynamic tail every frame at the (possibly new) static offset.
             if !self.dynamic.is_empty() {
@@ -3406,6 +3457,9 @@ impl CullState {
             }
         }
         self.uploaded_static_len = static_len;
+        self.last_upload_summary = format!("tables 0x{:x} {:.1} ms, instances {} new_buf={} dirty_runs={} slots={}",
+            uploads_before, upload_t0.elapsed().as_secs_f32() * 1e3, total, instance_buf_new, dirty.len(),
+            dirty.iter().map(|(lo, hi)| hi - lo + 1).sum::<u32>());
 
         // Shared-buffer growth (tables + instances) forces a rebuild of EVERY view's bind
         // group (all views reference these read-only buffers); a per-view output realloc only
@@ -7730,7 +7784,7 @@ pub(crate) mod tests {
         assert_eq!(instances.slot_of(handle), Some(0), "instance handle still valid");
         assert_eq!(bytemuck::cast_slice::<InstanceGpu, u8>(&instances.slots), slots.as_slice());
         assert_eq!(instances.generations, generations); assert_eq!(instances.free_slots, free);
-        assert!(instances.dirty.is_none(), "content epoch must not fabricate instance uploads");
+        assert!(instances.dirty_is_empty(), "content epoch must not fabricate instance uploads");
         uploads = TableUploads::NONE;
         for id in [0, 0, u32::MAX] {
             assert!(!retire_model_content(&models, &mut lods, id, &mut instances, &mut uploads));
