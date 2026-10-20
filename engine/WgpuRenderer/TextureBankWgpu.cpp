@@ -433,7 +433,15 @@ void TextureBankWgpu::TrimResidency()
     // (REN-RES-004): lazy wait 16 ms in 90% of frames, overlap reduced to lockstep, no LRU row.
     if (candidates.empty())
         return;
-    EngineWgpu::AcquireProducerWindow("texture residency trim");
+    // PERF-TRIM-NOWAIT: a soft overage (the whole budget still met) does not have to be trimmed on
+    // THIS frame, so it never waits for the render thread: it takes the window only if it is free
+    // now and otherwise tries again next frame. Seven backed-off trims still cost ~0.5 s of
+    // main-thread waits (35-60 ms each) on the Durras flight. Real pressure keeps the blocking
+    // acquire.
+    if (hardPressure)
+        EngineWgpu::AcquireProducerWindow("texture residency trim");
+    else if (!EngineWgpu::TryAcquireProducerWindow())
+        return;
     if (!wgr_get_memory_stats(_renderer, &stats) || stats.object_texture_bytes <= textureBudget)
         return;
     std::sort(candidates.begin(), candidates.end(), [](const TextureWgpu* a, const TextureWgpu* b)

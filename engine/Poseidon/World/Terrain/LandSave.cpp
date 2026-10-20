@@ -5853,6 +5853,8 @@ void Landscape::ClearNativeFarResidency()
     if (GEngine)
         GEngine->ClearFarObjects();
     _nativeFarActive.clear();
+    _nativeFarSweep.clear();
+    _nativeFarSweepPos = 0;
     _nativeFarModels.clear();
     _nativeFarTexPrep.clear(); // each future waits for its decode
     _nativeFarCandidates.clear();
@@ -5879,6 +5881,39 @@ void Landscape::ClearNativeFarResidency()
     if (_riversUploaded && GEngine)
         GEngine->SetRiverSurfaces(nullptr, 0, nullptr, 0, nullptr, 0);
     _riversUploaded = false;
+}
+
+// PERF-FAR-SWEEP: remove the far instances the last window rebuild no longer wants, a slice at a
+// time (WGR_NATIVE_FAR_SWEEP_MS per call, default 2; 0 = all of it in the rebuild frame), then
+// drop the models nothing wants any more.
+void Landscape::SweepNativeFarActive(bool rebuildFrame)
+{
+    static const double budgetMs = [] {
+        const char* value = std::getenv("WGR_NATIVE_FAR_SWEEP_MS");
+        return value && *value ? std::clamp(std::atof(value), 0.0, 100.0) : 2.0;
+    }();
+    if (_nativeFarSweepPos >= _nativeFarSweep.size())
+        return;
+    if (rebuildFrame && budgetMs > 0.0)
+        return; // the slices start next call; the rebuild frame already paid for the list
+    const auto start = std::chrono::steady_clock::now();
+    while (_nativeFarSweepPos < _nativeFarSweep.size())
+    {
+        const uint32_t index = _nativeFarSweep[_nativeFarSweepPos++];
+        if (((_nativeFarWanted[index] & 1) == 0 || _modernObjectPlacements[index].resident) &&
+            _nativeFarActive.erase(index) && GEngine)
+            GEngine->SceneFarObjectRemoved(index);
+        if (budgetMs > 0.0 && (_nativeFarSweepPos & 255) == 0 &&
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() >= budgetMs)
+            return;
+    }
+    _nativeFarSweep.clear();
+    _nativeFarSweepPos = 0;
+    for (auto it = _nativeFarModels.begin(); it != _nativeFarModels.end();)
+        if (!_nativeFarModelWanted[it->first])
+            it = _nativeFarModels.erase(it);
+        else
+            ++it;
 }
 
 void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
@@ -6001,21 +6036,15 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         const double cellsMs = sinceBuild();
         fillCandidates();
         const double listMs = sinceBuild();
-        for (auto it = _nativeFarActive.begin(); it != _nativeFarActive.end();)
-        {
-            if ((_nativeFarWanted[*it] & 1) == 0 || _modernObjectPlacements[*it].resident)
-            {
-                GEngine->SceneFarObjectRemoved(*it);
-                it = _nativeFarActive.erase(it);
-            }
-            else
-                ++it;
-        }
-        for (auto it = _nativeFarModels.begin(); it != _nativeFarModels.end();)
-            if (!_nativeFarModelWanted[it->first])
-                it = _nativeFarModels.erase(it);
-            else
-                ++it;
+        // PERF-FAR-SWEEP (2026-10-20): the instances that left the window used to be removed here,
+        // in one pass over the whole active set (~170k at Durras): 22-174 ms of the main thread at
+        // each re-centre (Nsight: UpdateNativeFarResidency 36% of the main thread in long frames).
+        // The set is snapshotted now and swept a few ms per call below (SweepNativeFarActive). A
+        // far instance outside the window lingers a few frames; one admitted near is still removed
+        // at once where it is admitted. WGR_NATIVE_FAR_SWEEP_MS=0 = the whole pass here.
+        _nativeFarSweep.assign(_nativeFarActive.begin(), _nativeFarActive.end());
+        _nativeFarSweepPos = 0;
+        SweepNativeFarActive(true);
         const double activeMs = sinceBuild();
         // Preserve near requests and retire old far work through the SAME queue.
         if (_modernObjectPreparer && _modernObjectModelPrefetchEpoch.size() == _nativeFarModelWanted.size())
@@ -6037,6 +6066,7 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                  _nativeFarCandidates.size(), _nativeFarActive.size(), _nativeFarModels.size(), range, reachM,
                  candidateBudget, sinceBuild(), cellsMs, listMs - cellsMs, activeMs - listMs);
     }
+    SweepNativeFarActive(false);
     if (_nativeFarCandidates.empty())
         return;
     const auto start = std::chrono::steady_clock::now();

@@ -777,6 +777,10 @@ class Landscape : public SerializeClass
     std::vector<uint8_t> _nativeFarModelWanted;
     std::vector<uint8_t> _nativeFarModelRejected;
     std::unordered_set<uint32_t> _nativeFarActive;
+    // PERF-FAR-SWEEP: the active set as of the last window rebuild, swept a slice per call.
+    std::vector<uint32_t> _nativeFarSweep;
+    size_t _nativeFarSweepPos = 0;
+    void SweepNativeFarActive(bool rebuildFrame);
     std::unordered_map<uint32_t, Ref<LODShapeWithShadow>> _nativeFarModels;
     // PERF-FAR-ASYNC-PREP: far models handed over by the preparer whose native textures are being
     // decoded off the main thread; their bank tables are built and conversion submitted once the
