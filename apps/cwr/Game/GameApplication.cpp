@@ -2146,6 +2146,13 @@ void GameApplication::RunMainLoop()
                 GWorld->SetWeather(overcast, -1, 0);
                 LOG_INFO(Core, "POSEIDON_TEST_OVERCAST: overcast {}", overcast);
             }
+            // POSEIDON_TEST_FOG=0..1: the weather fog (the Weather tab's "Fog amount"), applied at once.
+            if (const char* fogEnv = std::getenv("POSEIDON_TEST_FOG"); fogEnv != nullptr && *fogEnv)
+            {
+                const float fog = std::clamp(std::strtof(fogEnv, nullptr), 0.0f, 1.0f);
+                GWorld->SetWeather(-1, fog, 0);
+                LOG_INFO(Core, "POSEIDON_TEST_FOG: fog {}", fog);
+            }
             Object* cameraOn = GWorld->CameraOn();
             if (!freeFlyPose && (!cameraOn || !GLandscape))
             {

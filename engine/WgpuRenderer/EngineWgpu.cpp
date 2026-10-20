@@ -6042,11 +6042,24 @@ void EngineWgpu::NextFrame()
             const float f = s ? std::strtof(s, nullptr) : 0.0f;
             return f > 0.0f ? f : 5.735f;
         }();
-        if (snap.hasScene && _hdrEnabled && _sky.enabled && nativeAerialStrength > 0.0f && GLandscape != nullptr &&
-            GLandscape->GetEnfusionSurfaceCount() > 0 && fogInvRange > 0.0f)
+        // RFG-206 (owner, 2026-10-20: "reforger map has fog even when i set the fog all the way
+        // down"): the haze now follows the weather fog the player sets -- none at 0, rising to the
+        // full Workbench strength at NativeAerialFullFog and above. Fog 0 is a clear view on every
+        // world, as the line above already says for the weather fog itself.
+        // WGR_NATIVE_AERIAL=always = the RFG-192 behaviour (full haze at any fog; parity captures).
+        static const bool nativeAerialAlways = []
+        {
+            const char* v = std::getenv("WGR_NATIVE_AERIAL");
+            return v && std::strcmp(v, "always") == 0;
+        }();
+        constexpr float NativeAerialFullFog = 0.2f;
+        const float nativeAerialFog = nativeAerialAlways ? 1.0f
+            : std::clamp(snap.weatherFog / NativeAerialFullFog, 0.0f, 1.0f);
+        if (snap.hasScene && _hdrEnabled && _sky.enabled && nativeAerialStrength > 0.0f && nativeAerialFog > 0.0f &&
+            GLandscape != nullptr && GLandscape->GetEnfusionSurfaceCount() > 0 && fogInvRange > 0.0f)
         {
             // Green-channel Rayleigh plus Mie extinction (Mie extinction ~1.1 x scattering).
-            const float sigma = (_sky.rayleigh[1] + _sky.mie * 1.1f) * nativeAerialStrength;
+            const float sigma = (_sky.rayleigh[1] + _sky.mie * 1.1f) * nativeAerialStrength * nativeAerialFog;
             // RFG-202: the airlight is read from the atmosphere, which RFG-200 brightens 2.5x for the
             // dome. Brightened, the haze laid a blue-grey veil over the mid-distance forest
             // (forestOwner +1.13 EV, blue 51 vs Reforger 30; aerial off: +0.80, 39) -- so the haze
