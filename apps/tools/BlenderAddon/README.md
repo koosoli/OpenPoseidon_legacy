@@ -101,6 +101,15 @@ Sidebar > **Poseidon > Soldier Rig**:
 Import and export round-trip the game's moves to 1e-6. Bone axes for posing by hand: local X flexes (spine forward,
 limbs forward, forearm up, toes up; a knee bends with -X); upper arms and thighs rotate Y, Z (out to the side), X.
 
+Sidebar > **Poseidon > New Moves from Clips** (File > Import > Humanoid Clips for the Soldier):
+
+* **Import Clips (.glb)**: a humanoid clip library with UE-mannequin bone names (Quaternius' Universal Animation
+  Library, ActionForge); every clip becomes an action. Licences: CC0 and CMU mocap yes, Mixamo no.
+* **Retarget onto Soldier**: a clip as a soldier action (each bone along the clip's, root travel dropped, joints in their
+  limits); optionally the arms and rifle follow a reference move, for unarmed clips under a rifle.
+* **Add to Comparison**: the move in the game and a candidate (or a new move alone), each on its own soldier at its
+  in-game cycle time, labelled CURRENT / CANDIDATE / NEW; Space plays them.
+
 ## What Gets Imported
 
 - **Mesh**: Vertices, faces, UVs (V-flipped), normals, coordinate-converted (Y-up to Z-up)
@@ -139,6 +148,8 @@ PoseidonFormats.dll    C++ engine (P3D/PAA/PBO readers)
    import_p3d.py       Blender import operator
    export_p3d.py       MLOD export (the engine's MLODWriter through the DLL)
    rig.py / rig_ops.py the MC soldier rig, RTM import/export, joint limits, collision check
+   retarget.py         outside clips (UE-mannequin names) onto the soldier rig
+   compare.py          moves side by side for choosing; anim_ops.py their operators and panel
    rtm_io.py           RTM read/write (plain Python, also used by scripts/swim)
        |
    __init__.py          Addon registration

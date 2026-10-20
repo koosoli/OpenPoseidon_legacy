@@ -11,7 +11,7 @@ bl_info = {
 import bpy
 from bpy.props import CollectionProperty, IntProperty, PointerProperty, StringProperty
 
-from . import p3d_lib, rig_ops
+from . import anim_ops, p3d_lib, rig_ops
 from .export_p3d import ExportP3D
 from .import_p3d import ImportP3D
 from .operators import (
@@ -116,6 +116,7 @@ _classes = (
     ImportP3D,
     ExportP3D,
     *rig_ops.CLASSES,
+    *anim_ops.CLASSES,
 )
 
 
@@ -125,11 +126,13 @@ def register():
     bpy.types.Scene.poseidon = PointerProperty(type=PoseidonSceneProperties)
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
     bpy.types.TOPBAR_MT_file_import.append(rig_ops.menu_import)
+    bpy.types.TOPBAR_MT_file_import.append(anim_ops.menu_import)
     bpy.types.TOPBAR_MT_file_export.append(rig_ops.menu_export)
 
 
 def unregister():
     bpy.types.TOPBAR_MT_file_export.remove(rig_ops.menu_export)
+    bpy.types.TOPBAR_MT_file_import.remove(anim_ops.menu_import)
     bpy.types.TOPBAR_MT_file_import.remove(rig_ops.menu_import)
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
     for cls in reversed(_classes):
