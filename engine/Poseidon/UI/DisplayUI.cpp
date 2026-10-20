@@ -26,6 +26,7 @@
 #include <SDL3/SDL_scancode.h>
 #include <Poseidon/Foundation/Common/Win.h>
 #include <SDL3/SDL_keycode.h>
+#include <SDL3/SDL_keyboard.h>
 
 #include <ctype.h>
 #include <limits.h>
@@ -204,6 +205,16 @@ RString GetKeyName(int dikCode)
 {
     if (InputBindingIsDoubleTap(dikCode))
         return RString("2x ") + GetKeyName(InputBindingBaseCode(dikCode));
+
+    // Letter keys are bound by position (scancode); name them as the active keyboard layout prints them, so the
+    // key under QWERTY's Z reads "Y" on a German keyboard.
+    if (dikCode >= SDL_SCANCODE_A && dikCode <= SDL_SCANCODE_Z)
+    {
+        const SDL_Keycode key = SDL_GetKeyFromScancode(static_cast<SDL_Scancode>(dikCode), SDL_KMOD_NONE, false);
+        const char* name = key != SDLK_UNKNOWN ? SDL_GetKeyName(key) : nullptr;
+        if (name && *name)
+            return RString(name);
+    }
 
     switch (dikCode)
     {

@@ -15,6 +15,8 @@ const UserAction kOnFoot[] = {
     UAMoveFastForward, UAMoveSlowForward, UATurbo,
     UASlow, // "Walk" — the slow-movement toggle (label/default key live in UserActionDesc)
     UALeanLeft, UALeanRight, // corner peeking; Q/E shared with stance-up/fast-forward (see InputSubsystem)
+    UAJump,                  // Space: on foot it is the jump, weapon switching keeps Right Ctrl
+    UADive, UASurface,       // swimming; Q is also lean on land, Z also stance-down (one context each)
     // Weapons & combat
     UAFire, UAReloadMagazine, UAToggleWeapons, UAHandgun, UALockTarget, UALockTargets, UARevealTarget, UAOptics,
     UAZoomIn, UAZoomOut,

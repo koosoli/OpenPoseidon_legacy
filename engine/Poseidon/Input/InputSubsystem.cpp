@@ -1360,6 +1360,9 @@ UserActionDesc* InputSubsystem::GetUserActionDesc()
         UserActionDesc("InventoryEditMenu", IDS_USRACT_HELP, SDL_SCANCODE_K, -1),
         UserActionDesc("LeanLeft", IDS_USRACT_MOVE_LEFT, SDL_SCANCODE_Q, -1),
         UserActionDesc("LeanRight", IDS_USRACT_MOVE_RIGHT, SDL_SCANCODE_E, -1),
+        UserActionDesc("Jump", IDS_USRACT_MOVE_UP, SDL_SCANCODE_SPACE, -1),
+        UserActionDesc("SwimDive", IDS_USRACT_MOVE_DOWN, SDL_SCANCODE_Z, SDL_SCANCODE_PAGEDOWN, -1),
+        UserActionDesc("SwimSurface", IDS_USRACT_MOVE_UP, SDL_SCANCODE_Q, SDL_SCANCODE_PAGEUP, -1),
     };
     // The table is indexed by UserAction, and per-action arrays (bindings, KeyList
     // userKeys[UAN]) are sized by UAN. If a new action is added to the enum without
@@ -1389,6 +1392,12 @@ const char* InputSubsystem::GetUserActionLabel(UserAction action)
             return LocalizeStringWithFallback("STR_USRACT_LEAN_LEFT", "Lean left (tap: toggle)");
         case UALeanRight:
             return LocalizeStringWithFallback("STR_USRACT_LEAN_RIGHT", "Lean right (tap: toggle)");
+        case UAJump:
+            return LocalizeStringWithFallback("STR_USRACT_JUMP", "Jump");
+        case UADive:
+            return LocalizeStringWithFallback("STR_USRACT_SWIM_DIVE", "Dive / sink (swimming)");
+        case UASurface:
+            return LocalizeStringWithFallback("STR_USRACT_SWIM_SURFACE", "Rise / surface (swimming)");
         case UAChatHistoryDown:
             return LocalizeStringWithFallback("STR_USRACT_CHAT_HISTORY_DOWN", "Chat history down");
         default:
