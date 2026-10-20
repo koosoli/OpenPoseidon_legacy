@@ -2015,10 +2015,28 @@ void GameApplication::RunMainLoop()
     HarnessPlayerTracker harnessPlayerTracker;
     HarnessMissionStateTracker harnessMissionStateTracker;
 
+    // POSEIDON_DEV_CRASH_AFTER_S=<s>: crash on purpose (an access violation) that many seconds into
+    // the main loop, after logging a burst of lines -- to test that the crash handler's report and
+    // the lines before it reach the log file (PERF-LOG-FILE-QUEUE writes it from its own thread).
+    static const double devCrashAfterS = []
+    {
+        const char* v = std::getenv("POSEIDON_DEV_CRASH_AFTER_S");
+        return v ? std::strtod(v, nullptr) : 0.0;
+    }();
+    const auto devCrashStart = std::chrono::steady_clock::now();
     while (!m_closeRequest)
     {
         GDebugger.ProcessAlive(); // keep watchdog thread happy
         Poseidon::AppIdle();      // simulate + render one frame
+        if (devCrashAfterS > 0.0 &&
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - devCrashStart).count() >= devCrashAfterS)
+        {
+            for (int i = 0; i < 2000; ++i)
+                LOG_INFO(Core, "DEV CRASH TEST: burst line {} of 2000", i + 1);
+            LOG_ERROR(Core, "DEV CRASH TEST: crashing now (POSEIDON_DEV_CRASH_AFTER_S)");
+            volatile int* volatile nowhere = nullptr;
+            *nowhere = 1;
+        }
 
         PollStrictAbort(); // --strict: stop on any ERROR logged this frame
 
