@@ -304,6 +304,14 @@ class TerrainWgpu : public ITerrainRenderer
     std::vector<float> _grassShapes;                     // 6 floats per shape (see the .cpp)
     size_t _grassFootprintsBinned = 0;
     bool _grassRoadsBinned = false;
+    // PERF-GRASS-CELLS-INCREMENTAL: the flattened table kept between uploads -- new shapes go into
+    // the shape table's spare capacity, a changed cell's list is appended at the tail and its
+    // header word repointed, and only those ranges are sent.
+    std::vector<uint32_t> _grassWords;
+    size_t _grassShapeTable = 0;    // word offset of the shape table
+    size_t _grassShapeCapacity = 0; // shapes it has room for
+    size_t _grassTail = 0;          // first free word after the appended lists
+    size_t _grassGarbage = 0;       // words of lists that were superseded by an append
     // RFG-065: reads each palette entry's `.emat` and builds the mipped detail/middle
     // ground textures it names. Cached per world; returns false and leaves the table
     // empty on every world that is not a natively loaded Reforger one. Implemented in

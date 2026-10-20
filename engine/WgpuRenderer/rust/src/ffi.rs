@@ -4057,6 +4057,36 @@ pub unsafe extern "C" fn wgr_grass_set_craters(renderer: *mut WgrRenderer, data:
     }));
 }
 
+/// PERF-GRASS-CELLS-INCREMENTAL: the same table as `wgr_grass_set_road_cells`, of which only the
+/// word ranges in `ranges` (`range_count` pairs of start, length) changed since the last call.
+/// They are patched into the live buffer when it is big enough; otherwise the whole table is
+/// uploaded into a new one with spare capacity.
+///
+/// # Safety
+/// `renderer` must be live; `data` must point to `count` words and `ranges` to `2 * range_count`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_update_road_cells(
+    renderer: *mut WgrRenderer,
+    data: *const u32,
+    count: u32,
+    ranges: *const u32,
+    range_count: u32,
+) {
+    if renderer.is_null() || data.is_null() || count == 0 {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let words = unsafe { std::slice::from_raw_parts(data, count as usize) };
+        let ranges: &[u32] = if ranges.is_null() || range_count == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(ranges, range_count as usize * 2) }
+        };
+        renderer.grass_update_road_cells(words, ranges);
+    }));
+}
+
 /// RFG-107: the native world's road segments per land cell, for the grass placement (layout in
 /// grass.wgsl, `road_edge_distance`); null or zero `count` clears them.
 ///

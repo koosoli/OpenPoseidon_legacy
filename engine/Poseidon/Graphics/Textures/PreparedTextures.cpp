@@ -3,6 +3,7 @@
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 
 #include <algorithm>
@@ -140,6 +141,10 @@ struct PreparedTextureStore::Impl
             if (age < ttl)
                 break;
             auto it = byKey.find(head.key);
+            // WGR_PREPARED_PUT_LOG=1 also names what expired untaken.
+            static const bool expiryLog = [] { const char* v = std::getenv("WGR_PREPARED_PUT_LOG"); return v && v[0] == '1'; }();
+            if (expiryLog)
+                LOG_INFO(Graphics, "Prepared expired: {} bytes={}", head.key, EntryBytes(head));
             if (it != byKey.end())
                 EraseLocked(it, nullptr, nullptr, &retired, Streaming::WarmTextureProvenance::RetireReason::Expired);
             else
@@ -502,6 +507,11 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
         }
     }
     freeLater.clear(); // outside the lock
+    // WGR_PREPARED_PUT_LOG=1: every stored chain, for finding who fills the store.
+    static const bool putLog = [] { const char* v = std::getenv("WGR_PREPARED_PUT_LOG"); return v && v[0] == '1'; }();
+    if (putLog && stored)
+        LOG_INFO(Graphics, "Prepared put: {} bytes={} alphaFacts={} warm={} physical={}", key, retained,
+                 _impl->stats.alphaFactsPuts, boundWarm, physical);
     if (!stored)
         chain = PAABlockChain{};
     if (trace) Streaming::WarmTextureProvenance::Emit(trace->Stamp(traceToken, stored ?

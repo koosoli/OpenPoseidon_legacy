@@ -2299,6 +2299,34 @@ impl Grass {
         self.terrain_generation = u64::MAX;
     }
 
+    /// PERF-GRASS-CELLS-INCREMENTAL: patch only `ranges` (start, length word pairs) of `data` into
+    /// the live buffer. A table that outgrew it is uploaded whole into a new buffer with a quarter
+    /// spare, so the appends that follow patch in place. The rebuild every time objects streamed
+    /// in made a new 8.6 MB buffer each ~2 s on Everon (8-18 ms main thread, Nsight ns-rf2).
+    pub fn update_road_cells(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, data: &[u32], ranges: &[u32]) {
+        let need = (data.len() * 4) as u64;
+        if need > self.road_cells.size() || ranges.is_empty() {
+            let capacity = (need + need / 4).max(16).next_multiple_of(4);
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("wgr_grass_road_cells"),
+                size: capacity,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            queue.write_buffer(&buffer, 0, bytemuck::cast_slice(data));
+            self.road_cells = buffer;
+            self.terrain_generation = u64::MAX;
+            return;
+        }
+        for pair in ranges.chunks_exact(2) {
+            let start = (pair[0] as usize).min(data.len());
+            let end = start.saturating_add(pair[1] as usize).min(data.len());
+            if end > start {
+                queue.write_buffer(&self.road_cells, (start * 4) as u64, bytemuck::cast_slice(&data[start..end]));
+            }
+        }
+    }
+
     /// Per photo-card layer selection weight (within its surface's run) and max draw distance as
     /// a fraction of the card ring's reach. Empty slices restore the neutral pick (uniform, no
     /// limit). Takes effect with the next params upload.

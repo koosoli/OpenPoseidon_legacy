@@ -986,6 +986,11 @@ bool TerrainWgpu::UploadGrassRoadCells(const Landscape& land)
     }
 
     const auto started = std::chrono::steady_clock::now();
+    // PERF-GRASS-CELLS-INCREMENTAL: after the first upload, only the cells new shapes land in are
+    // re-listed (see below); `touched` records them.
+    const bool fresh = !_grassRoadUploaded || _grassWords.empty();
+    const size_t shapesBefore = _grassShapes.size() / 6;
+    std::vector<size_t> touched;
     const float grid = land.GetLandGrid();
     const float halfDiagonal = grid * 0.7072f;
     // Bins shape `index` into every cell whose centre is within half a diagonal of the
@@ -1003,8 +1008,10 @@ bool TerrainWgpu::UploadGrassRoadCells(const Landscape& land)
                 const float pz = (static_cast<float>(cz) + 0.5f) * grid;
                 if (distance(px, pz) > halfDiagonal)
                     continue;
-                _grassShapeCells[static_cast<size_t>(cz) * static_cast<size_t>(n) + static_cast<size_t>(cx)]
-                    .push_back(index);
+                const size_t cell = static_cast<size_t>(cz) * static_cast<size_t>(n) + static_cast<size_t>(cx);
+                _grassShapeCells[cell].push_back(index);
+                if (!fresh)
+                    touched.push_back(cell);
             }
     };
 
@@ -1051,46 +1058,116 @@ bool TerrainWgpu::UploadGrassRoadCells(const Landscape& land)
     }
     _grassFootprintsBinned = total;
 
-    // Flatten.
-    const size_t header = 2 + static_cast<size_t>(n) * static_cast<size_t>(n);
-    size_t listedTotal = 0;
-    for (const std::vector<uint32_t>& list : _grassShapeCells)
-        listedTotal += std::min<size_t>(list.size(), 255);
-    std::vector<uint32_t> words(header + listedTotal + _grassShapes.size(), 0u);
-    words[0] = static_cast<uint32_t>(n);
-    size_t capped = 0, cells = 0, maxList = 0, listed = 0;
-    size_t cursor = header;
-    for (size_t cell = 0; cell < _grassShapeCells.size(); ++cell)
+    // PERF-GRASS-CELLS-INCREMENTAL (2026-10-20): appending a few hundred footprints rebuilt and
+    // re-uploaded the whole 8.6 MB table every ~2 s on Everon -- 8-18 ms on the main thread each
+    // time, one slow frame each (Nsight ns-rf2: 18% of the main thread in slow frames). Now the
+    // new shapes go into the shape table's spare room, each touched cell's list is appended at
+    // the tail with its header word repointed, and only those ranges are uploaded. The full
+    // flatten still runs for a new world, when the shape table is full, when superseded lists
+    // would pass half the table, or when the tail would pass the 24-bit offset.
+    // POSEIDON_GRASS_CELLS_INCREMENTAL=0 = always the full flatten.
+    static const bool incrementalEnabled = [] {
+        const char* v = std::getenv("POSEIDON_GRASS_CELLS_INCREMENTAL");
+        return !(v && v[0] == '0');
+    }();
+    const size_t shapes = _grassShapes.size() / 6;
+    bool full = fresh || !incrementalEnabled || shapes > _grassShapeCapacity;
+    size_t appendWords = 0;
+    if (!full)
     {
-        const std::vector<uint32_t>& list = _grassShapeCells[cell];
-        if (list.empty())
-            continue;
-        const size_t count = std::min<size_t>(list.size(), 255);
-        capped += list.size() - count;
-        if (cursor >= (1u << 24))
-        {
-            capped += count;
-            continue;
-        }
-        std::memcpy(&words[cursor], list.data(), count * sizeof(uint32_t));
-        words[2 + cell] = (static_cast<uint32_t>(cursor) << 8) | static_cast<uint32_t>(count);
-        cursor += count;
-        ++cells;
-        listed += count;
-        maxList = std::max(maxList, count);
+        std::sort(touched.begin(), touched.end());
+        touched.erase(std::unique(touched.begin(), touched.end()), touched.end());
+        for (size_t cell : touched)
+            appendWords += std::min<size_t>(_grassShapeCells[cell].size(), 255);
+        if (_grassTail + appendWords >= (1u << 24) || (_grassGarbage + appendWords) * 2 > _grassWords.size())
+            full = true;
     }
-    words[1] = static_cast<uint32_t>(cursor);
-    words.resize(cursor + _grassShapes.size());
-    std::memcpy(&words[cursor], _grassShapes.data(), _grassShapes.size() * sizeof(float));
-    wgr_grass_set_road_cells(_renderer, words.data(), static_cast<uint32_t>(words.size()));
+    size_t capped = 0, cells = 0, maxList = 0, listed = 0;
+    std::vector<uint32_t> ranges;
+    if (full)
+    {
+        const size_t header = 2 + static_cast<size_t>(n) * static_cast<size_t>(n);
+        size_t listedTotal = 0;
+        for (const std::vector<uint32_t>& list : _grassShapeCells)
+            listedTotal += std::min<size_t>(list.size(), 255);
+        // Room for a quarter more shapes (at least 4096) before the next full flatten.
+        _grassShapeCapacity = shapes + std::max<size_t>(shapes / 4, 4096);
+        std::vector<uint32_t>& words = _grassWords;
+        words.assign(header + listedTotal + _grassShapeCapacity * 6, 0u);
+        words[0] = static_cast<uint32_t>(n);
+        size_t cursor = header;
+        for (size_t cell = 0; cell < _grassShapeCells.size(); ++cell)
+        {
+            const std::vector<uint32_t>& list = _grassShapeCells[cell];
+            if (list.empty())
+                continue;
+            const size_t count = std::min<size_t>(list.size(), 255);
+            capped += list.size() - count;
+            if (cursor >= (1u << 24))
+            {
+                capped += count;
+                continue;
+            }
+            std::memcpy(&words[cursor], list.data(), count * sizeof(uint32_t));
+            words[2 + cell] = (static_cast<uint32_t>(cursor) << 8) | static_cast<uint32_t>(count);
+            cursor += count;
+            ++cells;
+            listed += count;
+            maxList = std::max(maxList, count);
+        }
+        _grassShapeTable = cursor;
+        words[1] = static_cast<uint32_t>(cursor);
+        std::memcpy(&words[cursor], _grassShapes.data(), _grassShapes.size() * sizeof(float));
+        _grassTail = cursor + _grassShapeCapacity * 6;
+        words.resize(_grassTail);
+        _grassGarbage = 0;
+        // No ranges: the whole table goes up, into a buffer with spare room.
+    }
+    else
+    {
+        std::vector<uint32_t>& words = _grassWords;
+        const size_t oldTail = _grassTail;
+        words.resize(_grassTail + appendWords);
+        if (shapes > shapesBefore)
+        {
+            std::memcpy(&words[_grassShapeTable + shapesBefore * 6], &_grassShapes[shapesBefore * 6],
+                        (shapes - shapesBefore) * 6 * sizeof(float));
+            ranges.insert(ranges.end(), {static_cast<uint32_t>(_grassShapeTable + shapesBefore * 6),
+                                         static_cast<uint32_t>((shapes - shapesBefore) * 6)});
+        }
+        for (size_t cell : touched)
+        {
+            const std::vector<uint32_t>& list = _grassShapeCells[cell];
+            const size_t count = std::min<size_t>(list.size(), 255);
+            capped += list.size() - count;
+            _grassGarbage += words[2 + cell] & 0xffu;
+            std::memcpy(&words[_grassTail], list.data(), count * sizeof(uint32_t));
+            words[2 + cell] = (static_cast<uint32_t>(_grassTail) << 8) | static_cast<uint32_t>(count);
+            _grassTail += count;
+            ++cells;
+            listed += count;
+            maxList = std::max(maxList, count);
+        }
+        if (!touched.empty())
+        {
+            ranges.insert(ranges.end(), {static_cast<uint32_t>(2 + touched.front()),
+                                         static_cast<uint32_t>(touched.back() - touched.front() + 1)});
+            ranges.insert(ranges.end(), {static_cast<uint32_t>(oldTail), static_cast<uint32_t>(appendWords)});
+        }
+    }
+    const std::vector<uint32_t>& words = _grassWords;
+    if (full || !ranges.empty())
+        wgr_grass_update_road_cells(_renderer, words.data(), static_cast<uint32_t>(words.size()), ranges.data(),
+                                    static_cast<uint32_t>(ranges.size() / 2));
     _grassRoadUploaded = true;
     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
     LOG_INFO(Graphics,
              "Wgpu grass exclusions: {} road segments + {} object footprints (+{} new) over {} land cells "
-             "({} listed, longest {}, {} dropped at caps), {:.1f} MB, {:.0f} ms -- blades stop at the edge, the "
-             "cells keep growing",
+             "({} listed, longest {}, {} dropped at caps), {:.1f} MB, {:.1f} ms, {} -- blades stop at the edge, "
+             "the cells keep growing",
              roadKey / 5, total, newFootprints, cells, listed, maxList, capped,
-             static_cast<double>(words.size()) * 4.0 / (1024.0 * 1024.0), ms);
+             static_cast<double>(words.size()) * 4.0 / (1024.0 * 1024.0), ms,
+             full ? "full flatten" : "appended");
     return roads;
 }
 

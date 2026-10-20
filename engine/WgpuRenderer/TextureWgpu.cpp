@@ -2490,7 +2490,7 @@ uint64_t TextureWgpu::EnsureUploaded()
         if (logUnprepared && !fromPrepared && profiled)
         {
             static std::atomic<uint32_t> rows{0};
-            if (rows.fetch_add(1, std::memory_order_relaxed) < 200)
+            if (rows.fetch_add(1, std::memory_order_relaxed) < 5000)
                 LOG_INFO(Graphics, "PAA unprepared upload: {} loaded={} admit={}", Name(),
                          render::PreparedTextureStore::Instance().HasAlphaFacts(render::PreparedTextureStore::Key(SourceName())),
                          profiled ? 1 : 0);

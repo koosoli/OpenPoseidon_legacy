@@ -3873,8 +3873,15 @@ static void DecodePaaReads(std::vector<std::pair<std::string, BankReadRequest>>&
             const bool put = decoded && prepared.Put(key, std::move(chain), generation, std::move(facts));
             static const bool putLog = [] { const char* v = std::getenv("WGR_PAA_PUT_LOG"); return v && v[0] == '1'; }();
             static std::atomic<int> putRows{0};
-            if (putLog && key.find("furniture") != std::string::npos && putRows.fetch_add(1) < 60)
-                LOG_INFO(World, "PAA put: {} read={} decoded={} put={}", key, readOk, decoded, put);
+            // WGR_PAA_PUT_LOG=1: every REFUSED put, with the store counters that say why.
+            if (putLog && !put && putRows.fetch_add(1) < 5000)
+            {
+                const auto st = prepared.SnapshotStats();
+                LOG_INFO(World, "PAA put: {} read={} decoded={} put={} | store full={} dup={} stale={} uploaded={} "
+                         "cancelled={} entries={} MB={} puts={} takes={} misses={} expired={}", key, readOk, decoded,
+                         put, st.rejectedFull, st.rejectedDup, st.rejectedStale, st.skippedUploaded, st.paaCancelled,
+                         st.entries, st.bytes >> 20, st.puts, st.takes, st.misses, st.expired);
+            }
         }
         catch (...)
         {

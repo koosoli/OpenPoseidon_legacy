@@ -8111,6 +8111,10 @@ impl Renderer {
         self.grass.set_road_cells(&self.device, &self.queue, data);
     }
 
+    fn grass_update_road_cells(&mut self, data: &[u32], ranges: &[u32]) {
+        self.grass.update_road_cells(&self.device, &self.queue, data, ranges);
+    }
+
     fn grass_set_layer_pick(&mut self, weights: &[f32], far: &[f32]) {
         self.grass.set_layer_pick(&self.queue, weights, far);
     }

@@ -412,7 +412,7 @@ void TextureBankWgpu::TrimResidency()
     for (int i = 0; i < _texture.Size(); ++i)
     {
         TextureWgpu* texture = _texture[i];
-        if (!texture || !texture->GpuHandle() || texture->IsDynamicTexture() || IsTerrainOwnedTexture(texture))
+        if (!texture || !texture->GpuHandle() || texture->IsDynamicTexture())
             continue;
         if (texture->AdaptiveMipCandidate()) continue; // prototype retains a valid image; reports soft overage instead of white fallback
         const bool pinned = texture->ResidentPins() != 0;
@@ -422,7 +422,9 @@ void TextureBankWgpu::TrimResidency()
         // sweep-period old before it means anything. Unpinned (direct-draw) textures are marked
         // every frame they are used and keep the plain grace.
         const uint64_t effectiveGrace = pinned ? std::max(grace, _retainedLivenessMaxAgeFrames) : grace;
-        if (_residencyFrame < texture->LastUsedFrame() + effectiveGrace)
+        // The name test last: it scans the name four times, and on DayZ it was 76% of the trim
+        // (Nsight ns-dayz2) when it ran first, for every resident texture.
+        if (_residencyFrame < texture->LastUsedFrame() + effectiveGrace || IsTerrainOwnedTexture(texture))
             continue;
         candidates.push_back(texture);
     }

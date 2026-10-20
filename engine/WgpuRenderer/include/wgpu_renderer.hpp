@@ -2944,6 +2944,10 @@ extern "C"
     /* RFG-107: the native world's road segments per land cell for the grass placement (layout in
      * grass.wgsl, road_edge_distance); null / 0 clears them. */
     WGR_API void wgr_grass_set_road_cells(WgrRenderer* renderer, const uint32_t* data, uint32_t count);
+    /* PERF-GRASS-CELLS-INCREMENTAL: the same table, of which only the word ranges `ranges` (range_count
+     * pairs of start, length) changed; patched in place when the live buffer is big enough. */
+    WGR_API void wgr_grass_update_road_cells(WgrRenderer* renderer, const uint32_t* data, uint32_t count,
+                                             const uint32_t* ranges, uint32_t range_count);
     /* Per photo-card layer selection weight within its surface's run (all 0 = uniform) and max draw
      * distance as a fraction of the card ring's reach (0 = no limit); count <= 32, null resets. */
     WGR_API void wgr_grass_set_layer_pick(WgrRenderer* renderer, const float* weights, const float* far, uint32_t count);
