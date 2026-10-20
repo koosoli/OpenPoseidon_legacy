@@ -14,7 +14,7 @@ $here = $PSScriptRoot
 $cwa = Split-Path $here -Parent
 $game = Join-Path $cwa 'Remastered'
 $job = @{ MODE='poses'; WAIT='7200'; QUIET='60'; DEPLOY='0'; ZIP=''; POSES='poses.txt'; ONLY=''; TAG='';
-          HOUR='11'; WIDTH='1920'; HEIGHT='1080'; FIRST='75'; SETTLE='15'; RENDER='wgpu'; EXTRA='';
+          HOUR='11'; WIDTH='1920'; HEIGHT='1080'; WINDOW='1'; NSYS=''; NSYSDELAY='90'; NSYSDUR='20'; FIRST='75'; SETTLE='15'; RENDER='wgpu'; EXTRA='';
           EXE='bin'; FOV='0.7'; FOVY='55.4'; KEEPBMP='0'; WBTIMEOUT='2700';
           REFORGER='H:\SteamLibrary\steamapps\common\Arma Reforger\addons';
           TOOLS='H:\SteamLibrary\steamapps\common\Arma Reforger Tools' }
@@ -161,6 +161,11 @@ if ($job.DEPLOY -eq '1') {
 }
 $exe = if ($job.EXE -eq 'game') { Join-Path $game 'OpenPoseidon.exe' } else { Join-Path (Join-Path $here $job.EXE) 'OpenPoseidon.exe' }
 if (-not (Test-Path $exe)) { St "NO EXE: $exe"; exit 1 }
+# Nsight's launcher does not follow a directory junction (bin\ is one): hand it the real folder.
+if ($job.NSYS -ne '') {
+  $exeDir = Get-Item (Split-Path $exe -Parent)
+  if ($exeDir.LinkType -eq 'Junction') { $exe = Join-Path ([string]($exeDir.Target | Select-Object -First 1)) 'OpenPoseidon.exe' }
+}
 $built = Join-Path (Split-Path $exe -Parent) 'BUILT-FROM.txt'
 $commit = if (Test-Path $built) { ((Get-Content $built | Select-String 'commit=') -join ' ') } else { 'unknown' }
 St "exe $exe ($commit)"
@@ -228,10 +233,11 @@ foreach ($k in @($job.Keys)) { if ($k -like 'POSEIDON_*' -or $k -like 'WGR_*' -o
 $p0 = @($poses | Where-Object { $_.Raw -eq '' })[0]
 $log = Join-Path $out 'run.log'
 $err = Join-Path $out 'stderr.txt'
-$al = @("--render=$($job.RENDER)", '--window', "--width=$($job.WIDTH)", "--height=$($job.HEIGHT)",
+$al = @("--render=$($job.RENDER)", "--width=$($job.WIDTH)", "--height=$($job.HEIGHT)",
   '--test-mission', "`"$mission`"", '--test-world', "`"$($job.REFORGER)`"", '--reforger-world', 'worlds/eden',
   '--test-world-freefly', $p0.X, $p0.Z, '400', $p0.Az, $p0.El, '--test-world-hour', $job.HOUR,
   '--log-file', "`"$log`"", '--log-level', 'info')
+if ($job.WINDOW -ne '0') { $al = @('--window') + $al }
 if ($job.EXTRA -ne '') { $al += $job.EXTRA.Split(' ') }
 ($al -join ' ') | Set-Content (Join-Path $out 'args.txt')
 $limit = [int]$job.FIRST + $poses.Count * ([int]$job.SETTLE + 4) + 900
@@ -242,7 +248,15 @@ St "launch $($poses.Count) poses, limit $limit s -> $out"
 for ($try = 1; $try -le 3; $try++) {
   $errTry = if ($try -eq 1) { $err } else { Join-Path $out "stderr.try$try.txt" }
   $sw = [Diagnostics.Stopwatch]::StartNew()
+  if ($job.NSYS -ne '') {
+    $nsysArgs = @('profile', "--trace=$(if ($job.NSYSTRACE) { $job.NSYSTRACE } else { 'vulkan,wddm,nvtx' })", "--delay=$($job.NSYSDELAY)", "--duration=$($job.NSYSDUR)", '--force-overwrite=true', '-o', "`"$(Join-Path $out 'nsys')`"", $(if ($exe -match ' ') { "`"$exe`"" } else { $exe })) + $al  # nsys takes literal quotes as part of the program name
+    # Nsight cannot launch from a junction working directory (Remastered\ is one): "Executable ... not found".
+    $wd = Get-Item $game
+    $wd = if ($wd.LinkType -eq 'Junction') { [string]($wd.Target | Select-Object -First 1) } else { $game }
+    $proc = Start-Process -FilePath $job.NSYS -ArgumentList $nsysArgs -WorkingDirectory $wd -PassThru -RedirectStandardError $errTry
+  } else {
   $proc = Start-Process -FilePath $exe -ArgumentList $al -WorkingDirectory $game -PassThru -RedirectStandardError $errTry
+  }
   $null = $proc.Handle
   $timedOut = -not $proc.WaitForExit($limit * 1000)
   if ($timedOut) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue; Start-Sleep 2 }

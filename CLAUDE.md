@@ -71,6 +71,11 @@
 >
 >    *Why:* on 2026-10-20 the owner wanted to hand a friend just the exe, the dll and `assets\`. Half the features lived
 >    in `Mods\@OP_*` and would silently have been missing.
+> 1d. **PROFILING A STUTTER:** read [.agents/PROFILING-WITH-NSIGHT.md](.agents/PROFILING-WITH-NSIGHT.md) first. It lists the
+>    engine's own slow-frame logs (try them before Nsight), the one-command Nsight recording
+>    (`scriptseforger-pc\Run-NsysFlight.ps1`, needs the owner's admin terminal), the three launch traps that
+>    each look like "program not found", and `scriptseforger-pc
+sys_long_frames.py`, which symbolises the trace.
 > 2. **WGSL Shader Rules**: Review [.agents/WGSL_CODING_RULES.md](.agents/WGSL_CODING_RULES.md). No 4-component swizzles on `vec2` (`.xxyy` / `.xyxy`), all variables must be explicitly declared in scope.
 > 3. **Startup Diagnostics**: If the game exits instantly, ALWAYS test with
 >    `cmd /c ".\OpenPoseidon.exe --render wgpu --window --dev --log-file cwr.log"` to read the panic traceback.
