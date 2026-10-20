@@ -120,12 +120,12 @@ class CfgMovesMC
 	class DefaultDie;
 	class States
 	{
-		// treading water (2.4 s)
+		// treading water (3.3 s: the ActionForge/Quaternius treading cycle at its own pace)
 		class Swim: StandBase
 		{
 			actions="SwimActions";
 			file="\swim\tread.rtm";
-			speed=-2.38;
+			speed=-3.333;
 			looped=1;
 			soundEnabled=0;
 			duty=-0.2;

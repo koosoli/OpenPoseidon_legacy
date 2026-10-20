@@ -48,6 +48,22 @@ timing. `surface_moves.py` sets the arms on every frame from a hand path (`CRAWL
 shoulder angles, and slings the rifle along the spine for this move only (`crawl_sling`): where the other moves
 sling it, up behind the right shoulder, the recovering right arm swept through it.
 
+## Treading
+
+`tread` (2026-10-20, owner signed off side by side against the old one in Blender) is motion from **ActionForge**
+(actionforge.app, clip `swim_idle_loop`): Quaternius' treading-water cycle from the free Universal Animation Library,
+**CC0 1.0** (public domain, no attribution required; the GLB's own metadata says so). It is not game data and comes
+from no other game. `scripts/swim/retarget_glb.py` puts it on the `MC` rig: each soldier bone along the clip's bone
+(joint to next joint), the twist from the two rest poses, the pelvis' travel dropped and its height matched to the
+old tread, every joint held to the rig's limits except the upper arms; the rifle stays slung where the swim moves
+put it. 3.33 s a cycle (`config.cpp`), 81 phases, an exact loop; within the joint limits, no collisions.
+
+The four moves that start or end on treading were baked again on it, so they still join it exactly (to float
+rounding): `swimdive` and `swimsurface` (`dive_moves.py`), `swimstart` and `swimstop` (`surface_moves.py`). Run
+those two scripts in a fresh Blender session with the pack's `tread.rtm` imported as `tread`: a second `make_all`
+in the same session bakes `swimstart`'s end off the stroke's first pose by 0.43. The turns, the back and side
+sculling, `swimin` and `swimdead` are still `make_swim_rtms.py`'s and blend into the new tread rather than join it.
+
 ## Diving (W4)
 
 Swimming, the player dives with **move down (Z)**, a tap is enough, where the water is at least 2.2 m deep. Under
@@ -71,7 +87,8 @@ calls it, and `Deploy.ps1` installs the result.
 
 ## Provenance: made by Claude
 
-* 18 of the 19 moves are authored procedurally by `scripts/swim/make_swim_rtms.py` (Claude for Dec,
+* `tread` is now ActionForge/Quaternius motion (CC0, see Treading above). The other procedural moves are
+  authored by `scripts/swim/make_swim_rtms.py` (Claude for Dec,
   2026-10-04, owner: "look like real soldiers swimming with gear on"): forward kinematics on the CWA
   `MC` rest skeleton, each joint turned about its own pivot, in the technique of a loaded soldier --
   upright tread with a breaststroke/eggbeater kick and sculling hands, a heads-up combat breaststroke
