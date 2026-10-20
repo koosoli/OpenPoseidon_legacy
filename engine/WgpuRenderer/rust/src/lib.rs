@@ -4649,8 +4649,10 @@ impl Renderer {
             reflected_camera.zip(planar_sea),
             main_scene_cam,
         );
+        frame_lap.mark("gfx3d.prepare");
         self.terrain
             .prepare(&self.device, &self.queue, terrain_nodes);
+        frame_lap.mark("terrain.prepare");
         // TW-WATER W3i: the light the Tidewater water is lit with, logged every ~10 s while that
         // backend renders (colour calibration against Tidewater's units: sun E ~ 9, sky E/PI ~ 1).
         if self.water.tidewater().is_some() {
@@ -4704,7 +4706,7 @@ impl Renderer {
                 tw.set_lake(water);
             }
         }
-        frame_lap.mark("gfx3d.prepare");
+        frame_lap.mark("water.setup");
         self.water.prepare(
             &self.device,
             &self.queue,

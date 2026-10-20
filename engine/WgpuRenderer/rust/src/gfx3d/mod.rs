@@ -4404,6 +4404,8 @@ pub struct Gfx3d {
     // Depth+normal prepass variants (docs/depth-prepass-plan.md), built lazily
     // alongside the colour pipelines for every opaque draw the frame submits.
     prepass_pipelines: FxHashMap<PrepassKey, wgpu::RenderPipeline>,
+    // PERF-PIPE-ASYNC: the background compiler for the two maps above (None = synchronous).
+    pipe_worker: Option<PipeWorker>,
 
     depth: Option<(wgpu::Texture, wgpu::TextureView)>,
     // View-space normal G-buffer, allocated with (and to the same size as) the depth
@@ -4914,6 +4916,483 @@ impl Drop for PipelineCreateTimer {
         }
     }
 }
+
+/// The pipelines a draw's passes use: its colour key, the prepassed colour twin (write-off) or
+/// MAT-053's solid-texel write, and its prepass. The one list both the builder and the
+/// readiness gate read, so they cannot disagree.
+fn required_pipelines(d: &WgrDraw3D, skinned: bool) -> ([Option<PipelineKey>; 2], Option<PrepassKey>) {
+    let key = PipelineKey::from_draw(d, skinned);
+    if key.prepassed() {
+        (
+            [Some(key), Some(key.with_write_off())],
+            Some(PrepassKey { skinned, alpha_ref_bits: key.alpha_ref_bits, solid_blend: false }),
+        )
+    } else if draw_solid_blend_prepassed(d) {
+        (
+            [Some(key), Some(solid_blend_write_key(key))],
+            Some(PrepassKey { skinned, alpha_ref_bits: SOLID_BLEND_ALPHA.to_bits(), solid_blend: true }),
+        )
+    } else {
+        ([Some(key), None], None)
+    }
+}
+
+// PERF-PIPE-ASYNC (2026-10-20). Object pipelines are built lazily, one variant per new
+// (blend, depth, offset, cutout threshold, ...) combination, and the cutout threshold is a
+// pipeline constant -- so every Reforger material with its own AlphaTest value meant two or three
+// fresh compiles, 30-80 ms each, on the render thread in the middle of a frame: 16 of them
+// (405 ms) on one 15 m/s Durras flight, the largest render-side hitch once the shore field was
+// fixed. They now compile on two background threads; a draw whose set is not ready yet is
+// simply not drawn (a newly streamed object appears a few frames later instead of freezing the
+// frame). The pipelines built are the same ones. WGR_PIPELINE_ASYNC=0 = compile in place.
+fn pipe_async_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_PIPELINE_ASYNC").as_deref() != Ok("0"))
+}
+
+struct PipeJob {
+    ctx: PipeCtx,
+    device: wgpu::Device,
+    mains: Vec<PipelineKey>,
+    prepass: Vec<PrepassKey>,
+}
+
+struct PipeDone {
+    mains: Vec<(PipelineKey, wgpu::RenderPipeline)>,
+    prepass: Vec<(PrepassKey, wgpu::RenderPipeline)>,
+}
+
+struct PipeWorker {
+    job_tx: std::sync::mpsc::Sender<PipeJob>,
+    done_rx: std::sync::mpsc::Receiver<PipeDone>,
+    pending_main: rustc_hash::FxHashSet<PipelineKey>,
+    pending_prepass: rustc_hash::FxHashSet<PrepassKey>,
+}
+
+impl PipeWorker {
+    fn new() -> Self {
+        let (job_tx, job_rx) = std::sync::mpsc::channel::<PipeJob>();
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<PipeDone>();
+        let job_rx = std::sync::Arc::new(std::sync::Mutex::new(job_rx));
+        for _ in 0..2 {
+            let job_rx = job_rx.clone();
+            let done_tx = done_tx.clone();
+            let _ = std::thread::Builder::new().name("wgr-pipeline".into()).spawn(move || loop {
+                // The lock is held only to take a job; the channel closing (renderer gone) ends it.
+                let job = match job_rx.lock() {
+                    Ok(rx) => rx.recv(),
+                    Err(_) => return,
+                };
+                let Ok(job) = job else { return };
+                let done = PipeDone {
+                    mains: job.mains.iter().map(|&k| (k, build_main_pipeline(&job.ctx, &job.device, k))).collect(),
+                    prepass: job
+                        .prepass
+                        .iter()
+                        .map(|&k| (k, build_prepass_pipeline(&job.ctx, &job.device, k)))
+                        .collect(),
+                };
+                if done_tx.send(done).is_err() {
+                    return;
+                }
+            });
+        }
+        Self { job_tx, done_rx, pending_main: Default::default(), pending_prepass: Default::default() }
+    }
+
+    fn submit(&mut self, job: PipeJob) {
+        let _ = self.job_tx.send(job);
+    }
+}
+
+/// Everything the object pipeline builders read, cloned out of Gfx3d (wgpu handles are
+/// reference-counted) so a variant can also be compiled off the render thread (PERF-PIPE-ASYNC).
+#[derive(Clone)]
+struct PipeCtx {
+    shader: wgpu::ShaderModule,
+    plain_layout: wgpu::PipelineLayout,
+    skinned_layout: wgpu::PipelineLayout,
+    surface_format: wgpu::TextureFormat,
+    sample_count: u32,
+    foliage_a2c: bool,
+    vbuf_attrs: [wgpu::VertexAttribute; 6],
+    skin_attrs: [wgpu::VertexAttribute; 2],
+}
+
+fn build_main_pipeline(ctx: &PipeCtx, device: &wgpu::Device, key: PipelineKey) -> wgpu::RenderPipeline {
+    let _pipe_timer = PipelineCreateTimer::new("main");
+
+    let module = &ctx.shader;
+    let (vs_entry, layout) = if key.skinned {
+        ("vs_skinned", &ctx.skinned_layout)
+    } else {
+        ("vs_main", &ctx.plain_layout)
+    };
+
+    let vbuf_layout = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<WgrMeshVertex>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &ctx.vbuf_attrs,
+    };
+    let skin_layout = wgpu::VertexBufferLayout {
+        array_stride: 8,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &ctx.skin_attrs,
+    };
+    let plain_buffers = [vbuf_layout.clone()];
+    let skinned_buffers = [vbuf_layout, skin_layout];
+    let buffers: &[wgpu::VertexBufferLayout] = if key.skinned {
+        &skinned_buffers
+    } else {
+        &plain_buffers
+    };
+
+    // WgrDepthMode: 0 none, 1 test (no write), 2 test + write.
+    let (test, mut write) = match key.depth {
+        0 => (false, false),
+        1 => (true, false),
+        _ => (true, true),
+    };
+    // Prepassed opaque draws in the colour pass keep GreaterEqual but stop writing:
+    // the prepass already holds the frontmost depth (decision 2). GreaterEqual (not
+    // Equal) is robust to any sub-ULP VS drift; write-off just removes redundant writes.
+    if key.depth_write_off {
+        write = false;
+    }
+    // Shadows still use DepthBiasState (works well enough for them: drawn
+    // depth-test-no-write on the surface). Decal/ZBias overlays instead bias in
+    // the vertex shader (depth_bias below) — DepthBiasState's constant term is
+    // unreliable / a no-op on float depth formats, so it did nothing for close
+    // UI (notebook) and coplanar sign overlays.
+    // Reversed-Z: nearer = larger depth, so a toward-camera bias is positive
+    // (the forward-Z code used negatives). DepthBiasState's constant term is a
+    // no-op on this backend's float depth anyway, but keep the sign correct for
+    // formats/GPUs where it does apply.
+    let bias = match key.offset {
+        Offset::Shadow => wgpu::DepthBiasState {
+            constant: 64,
+            slope_scale: 1.0,
+            clamp: 0.0,
+        },
+        _ => wgpu::DepthBiasState::default(),
+    };
+
+    // Vertex-shader depth bias in [0,1] NDC depth. WGR_DECAL_SCALE / WGR_ZBIAS_SCALE
+    // multiply the base unit; ZBias also scales with its 1..3 level.
+    const DEPTH_BIAS_UNIT: f32 = 1.0e-5;
+
+    // DECAL is now a SEPARATE unit, because the ndc-squared fix silently rescaled it by four
+    // orders of magnitude and nobody adjusted the constant to match.
+    //
+    // The history: the bias used to be a constant NDC offset. Under reversed-Z, depth is
+    // near/z, so a constant NDC offset is a distance-DEPENDENT world pull — it dragged a road
+    // ~95 m forward at 1 km and 716 m at 3 km, which is why roads appeared through mountains.
+    // The fix multiplied by ndc squared, which is correct in SHAPE: it makes the pull a
+    // constant in WORLD space. But it changed the magnitude at the same time, and the constant
+    // was left at the value that had been tuned for the old meaning.
+    //
+    // With the ndc-squared form the world-space pull is `depth_bias * near`. This file's own
+    // calibration comment upstream uses near = 0.1 m, so 1.0e-5 buys 1.0e-6 m — ONE MICRON.
+    // That is not a small bias, it is no bias: the previous session traded a 716 m over-pull
+    // for zero, which is exactly why applying it did not fix the see-through and why the road
+    // agent's census found the mechanism still live.
+    //
+    // 5.0e-2 * 0.1 m = 0.005 m, which is ZRoadEpsilon (EngineWgpu.hpp:104) — the same
+    // world-space lift GL33 and the CPU path give a road at ClipShape.cpp:240, and which wgpu
+    // loses because GGpuTerrainConform makes the GPU conform pin the vertex flat
+    // (shader3d.wgsl:295 assigns world_pos.y and discards pos.y). So this is not a tuned
+    // magic number; it restores the documented parity value the wgpu path dropped.
+    //
+    // WGR_DECAL_SCALE still scales it, and now that env_f32 accepts 0 (see above) the
+    // ablation arm works for the first time: WGR_DECAL_SCALE=0 is genuinely no bias, and
+    // WGR_DECAL_SCALE=0.0002 reproduces the old 1e-5 behaviour for an A/B.
+    //
+    // ZBias is deliberately LEFT ALONE at the old unit even though the ndc-squared change
+    // nulled it by the same factor. It plausibly has the identical defect — but it is applied
+    // to coplanar geometry all over every world at three different levels, and correcting it
+    // 5000x blind, on a night with no way to check for z-fighting across that surface area,
+    // risks trading one reported bug for an unreported one on content nobody is looking at.
+    // It needs its own measurement. Recorded rather than fixed.
+    const DECAL_BIAS_UNIT: f32 = 5.0e-2;
+    let depth_bias = match key.offset {
+        Offset::Decal => decal_scale() * DECAL_BIAS_UNIT,
+        Offset::ZBias(level) => level as f32 * zbias_scale() * DEPTH_BIAS_UNIT,
+        _ => 0.0,
+    } as f64;
+
+    let alpha_ref = f32::from_bits(key.alpha_ref_bits) as f64;
+    let is_shadow = if key.blend == WgrBlend::Shadow as u8 {
+        1.0
+    } else {
+        0.0
+    };
+    // HDR path: the scene color target is Rgba16Float only when the HDR pipeline
+    // is on, so it doubles as the `linear` shading signal (decode + no clamp).
+    let linear = if ctx.surface_format == wgpu::TextureFormat::Rgba16Float {
+        1.0
+    } else {
+        0.0
+    };
+    // Alpha-to-coverage for this pipeline: cutout foliage (opaque blend, alpha_ref > 0), not
+    // the shadow-darken pass, and only under MSAA. Drives the shader's coverage path and the
+    // pipeline's alpha_to_coverage_enabled below.
+    let a2c = ctx.foliage_a2c && key.blend == WgrBlend::Opaque as u8 && alpha_ref > 0.0;
+    // Alpha-blended draws (glass canopies) are flagged so the shared shading damps their diffuse
+    // sky-irradiance ambient — a transparent surface isn't a diffuse reflector, and a full sky
+    // wash blows out cockpit glass (and spikes auto-exposure). Only Alpha; Additive effects and
+    // the opaque/cutout GPU-driven set stay at the default 0.
+    let translucent = if key.blend == WgrBlend::Alpha as u8 {
+        1.0
+    } else {
+        0.0
+    };
+    let constants = [
+        ("alpha_ref", alpha_ref),
+        ("is_shadow", is_shadow),
+        ("depth_bias", depth_bias),
+        ("linear", linear),
+        ("a2c", if a2c { 1.0 } else { 0.0 }),
+        ("foliage_screen_ao", foliage_screen_ao() as f64),
+        ("far_crown_shadow_budget", far_crown_shadow().0 as f64),
+        ("far_crown_shadow_tent", far_crown_shadow().1 as f64),
+        ("blend_section_screen_ao", blend_section_screen_ao() as f64),
+        ("count_fragments", count_fragments() as f64),
+        ("translucent", translucent),
+
+        ("emissive_night", emissive_night() as f64),
+        ("cutout_mip_alpha", cutout_mip_alpha() as f64),
+        ("pixel_lift", road_pixel_lift() as f64),
+        (
+            "alpha_kill_door",
+            if std::env::var("WGR_ALPHA_KILL_DOOR").map(|v| v != "0").unwrap_or(false) {
+                1.0
+            } else {
+                0.0
+            },
+        ),
+        (
+            "road_kill_door",
+            if std::env::var("WGR_ROAD_KILL_DOOR").map(|v| v != "0").unwrap_or(false) {
+                1.0
+            } else {
+                0.0
+            },
+        ),
+        ("pixel_lift_max_frac", road_pixel_lift_max_frac() as f64),
+        ("pixel_lift_per_m", road_pixel_lift_per_m() as f64),
+    ];
+    // OnSurface (Offset::Decal) draws on the plain path take the frag_depth-writing twin
+    // so the road hugs the terrain at every PIXEL (WGR_ROAD_PIXEL_CONFORM). Plain only:
+    // fs_surface reads `objects`-conformed varyings and the heightmap group, and the
+    // skinned pipeline binds the bone palette at that slot; roads are never skinned.
+    // Everything else keeps fs_main and its early-Z. Decal draws are never prepassed
+    // (PipelineKey::prepassed requires Offset::None), so no prepass twin has to agree.
+    let fs_entry = if key.offset == Offset::Decal && !key.skinned && road_pixel_conform() {
+        "fs_surface"
+    } else if !write && object_early_z() {
+        // REN-OBJ-004: prepassed (write-off) colour draws test depth before shading.
+        "fs_main_early"
+    } else {
+        "fs_main"
+    };
+
+    // Shadow draws exclude already-shadowed pixels via the stencil: test EQUAL
+    // 0 (stencil is cleared to 0 each segment; opaque geometry leaves it 0) and
+    // INCR on pass, so the first shadow polygon over a pixel darkens it and any
+    // overlapping ones fail the test. Non-shadow pipelines leave the stencil
+    // untouched (default = disabled).
+    let stencil = if key.blend == WgrBlend::Shadow as u8 {
+        let face = wgpu::StencilFaceState {
+            compare: wgpu::CompareFunction::Equal,
+            fail_op: wgpu::StencilOperation::Keep,
+            depth_fail_op: wgpu::StencilOperation::Keep,
+            pass_op: wgpu::StencilOperation::IncrementClamp,
+        };
+        wgpu::StencilState {
+            front: face,
+            back: face,
+            read_mask: 0xff,
+            write_mask: 0xff,
+        }
+    } else {
+        wgpu::StencilState::default()
+    };
+
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("wgr_3d_pipeline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: Some(vs_entry),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                ..Default::default()
+            },
+            buffers,
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Cw,
+            // WGR_NO_CULL=1 disables backface culling on the object pipelines.
+            // Diagnostic only: a single-sided face whose winding the loader got
+            // backwards is INVISIBLE, and from inside a cockpit that reads as a
+            // transparent airframe rather than as missing geometry. One run with
+            // this set separates "not drawn because culled" from every other
+            // reason a surface can fail to appear. Per-draw `double_sided`
+            // (Enfusion `Cull none`) takes the same no-cull variant.
+            cull_mode: if key.double_sided
+                || std::env::var("WGR_NO_CULL").map(|v| v != "0").unwrap_or(false) {
+                None
+            } else {
+                Some(wgpu::Face::Back)
+            },
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: depth_format(device),
+            depth_write_enabled: Some(write),
+            depth_compare: Some(if test {
+                // Reversed-Z (see shader3d.wgsl): nearer geometry has the larger
+                // depth value, so the "keep closer" test is GreaterEqual.
+                wgpu::CompareFunction::GreaterEqual
+            } else {
+                wgpu::CompareFunction::Always
+            }),
+            stencil,
+            bias,
+        }),
+        multisample: wgpu::MultisampleState {
+            count: ctx.sample_count,
+            alpha_to_coverage_enabled: a2c,
+            ..Default::default()
+        },
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some(fs_entry),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                ..Default::default()
+            },
+            targets: &[Some(wgpu::ColorTargetState {
+                format: ctx.surface_format,
+                blend: Gfx3d::blend_state(key.blend),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+    pipeline
+}
+
+
+// Create the depth+normal prepass pipeline for `key` if absent. Reuses the colour
+// pass' VS entry + pipeline layout + vertex buffers + override constants (VS parity
+// is load-bearing — see the plan's hazards), writes depth GreaterEqual/write-ON and
+// the view-space normal into NORMAL_FORMAT via fs_prepass. All prepassed draws have
+// offset None, so depth_bias is 0 here, matching their colour VS exactly.
+fn build_prepass_pipeline(ctx: &PipeCtx, device: &wgpu::Device, key: PrepassKey) -> wgpu::RenderPipeline {
+    let _pipe_timer = PipelineCreateTimer::new("prepass");
+    let module = &ctx.shader;
+    let (vs_entry, layout) = if key.skinned {
+        ("vs_skinned", &ctx.skinned_layout)
+    } else {
+        ("vs_main", &ctx.plain_layout)
+    };
+    let vbuf_layout = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<WgrMeshVertex>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &ctx.vbuf_attrs,
+    };
+    let skin_layout = wgpu::VertexBufferLayout {
+        array_stride: 8,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &ctx.skin_attrs,
+    };
+    let plain_buffers = [vbuf_layout.clone()];
+    let skinned_buffers = [vbuf_layout, skin_layout];
+    let buffers: &[wgpu::VertexBufferLayout] = if key.skinned {
+        &skinned_buffers
+    } else {
+        &plain_buffers
+    };
+    let alpha_ref = f32::from_bits(key.alpha_ref_bits) as f64;
+    // cutout_mip_alpha MUST match the colour pipeline's, or the prepass lays depth for
+    // texels the colour pass discards (gpu_driven.wgsl's prepass_match rationale). A
+    // blend-pass section (MAT-053) has no cutout in its colour pass, so no mip lift here.
+    let mip_alpha = if key.solid_blend { 0.0 } else { cutout_mip_alpha() as f64 };
+    let constants = [
+        ("alpha_ref", alpha_ref),
+        ("depth_bias", 0.0),
+        ("cutout_mip_alpha", mip_alpha),
+        ("count_fragments", count_fragments() as f64),
+    ];
+    // Cutout foliage under MSAA: the A2C prepass twin emits a vec4 whose .a carries coverage,
+    // and the pipeline enables alpha_to_coverage so it writes depth to exactly the samples the
+    // colour pass will shade. Pure-opaque prepass (alpha_ref == 0) keeps the vec2 fs_prepass,
+    // and so does MAT-053's hard solid-texel test (its colour pass blends, never covers).
+    let a2c = ctx.foliage_a2c && alpha_ref > 0.0 && !key.solid_blend;
+    let fs_entry = if a2c { "fs_prepass_a2c" } else { "fs_prepass" };
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("wgr_3d_prepass_pipeline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: Some(vs_entry),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                ..Default::default()
+            },
+            buffers,
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Cw,
+            // WGR_NO_CULL=1 disables backface culling on the object pipelines.
+            // Diagnostic only: a single-sided face whose winding the loader got
+            // backwards is INVISIBLE, and from inside a cockpit that reads as a
+            // transparent airframe rather than as missing geometry. One run with
+            // this set separates "not drawn because culled" from every other
+            // reason a surface can fail to appear.
+            cull_mode: if std::env::var("WGR_NO_CULL").map(|v| v != "0").unwrap_or(false) {
+                None
+            } else {
+                Some(wgpu::Face::Back)
+            },
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: depth_format(device),
+            depth_write_enabled: Some(true),
+            // Reversed-Z: nearer geometry has the larger depth value.
+            depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            count: ctx.sample_count,
+            alpha_to_coverage_enabled: a2c,
+            ..Default::default()
+        },
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some(fs_entry),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                ..Default::default()
+            },
+            targets: &[Some(wgpu::ColorTargetState {
+                format: NORMAL_FORMAT,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+    pipeline
+}
+
 impl Gfx3d {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -5556,6 +6035,7 @@ impl Gfx3d {
             skin_attrs,
             pipelines: FxHashMap::default(),
             prepass_pipelines: FxHashMap::default(),
+            pipe_worker: None,
             depth: None,
             normal: None,
             depth_size: (0, 0),
@@ -5833,383 +6313,82 @@ impl Gfx3d {
     }
 
     // Create the pipeline for `key` if it doesn't exist yet.
-    fn ensure_pipeline(&mut self, device: &wgpu::Device, key: PipelineKey) {
-        if self.pipelines.contains_key(&key) {
-            return;
+    fn pipe_ctx(&self) -> PipeCtx {
+        PipeCtx {
+            shader: self.shader.clone(),
+            plain_layout: self.plain_layout.clone(),
+            skinned_layout: self.skinned_layout.clone(),
+            surface_format: self.surface_format,
+            sample_count: self.sample_count,
+            foliage_a2c: self.foliage_a2c,
+            vbuf_attrs: self.vbuf_attrs,
+            skin_attrs: self.skin_attrs,
         }
-        let _pipe_timer = PipelineCreateTimer::new("main");
-
-        let module = &self.shader;
-        let (vs_entry, layout) = if key.skinned {
-            ("vs_skinned", &self.skinned_layout)
-        } else {
-            ("vs_main", &self.plain_layout)
-        };
-
-        let vbuf_layout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<WgrMeshVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &self.vbuf_attrs,
-        };
-        let skin_layout = wgpu::VertexBufferLayout {
-            array_stride: 8,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &self.skin_attrs,
-        };
-        let plain_buffers = [vbuf_layout.clone()];
-        let skinned_buffers = [vbuf_layout, skin_layout];
-        let buffers: &[wgpu::VertexBufferLayout] = if key.skinned {
-            &skinned_buffers
-        } else {
-            &plain_buffers
-        };
-
-        // WgrDepthMode: 0 none, 1 test (no write), 2 test + write.
-        let (test, mut write) = match key.depth {
-            0 => (false, false),
-            1 => (true, false),
-            _ => (true, true),
-        };
-        // Prepassed opaque draws in the colour pass keep GreaterEqual but stop writing:
-        // the prepass already holds the frontmost depth (decision 2). GreaterEqual (not
-        // Equal) is robust to any sub-ULP VS drift; write-off just removes redundant writes.
-        if key.depth_write_off {
-            write = false;
-        }
-        // Shadows still use DepthBiasState (works well enough for them: drawn
-        // depth-test-no-write on the surface). Decal/ZBias overlays instead bias in
-        // the vertex shader (depth_bias below) — DepthBiasState's constant term is
-        // unreliable / a no-op on float depth formats, so it did nothing for close
-        // UI (notebook) and coplanar sign overlays.
-        // Reversed-Z: nearer = larger depth, so a toward-camera bias is positive
-        // (the forward-Z code used negatives). DepthBiasState's constant term is a
-        // no-op on this backend's float depth anyway, but keep the sign correct for
-        // formats/GPUs where it does apply.
-        let bias = match key.offset {
-            Offset::Shadow => wgpu::DepthBiasState {
-                constant: 64,
-                slope_scale: 1.0,
-                clamp: 0.0,
-            },
-            _ => wgpu::DepthBiasState::default(),
-        };
-
-        // Vertex-shader depth bias in [0,1] NDC depth. WGR_DECAL_SCALE / WGR_ZBIAS_SCALE
-        // multiply the base unit; ZBias also scales with its 1..3 level.
-        const DEPTH_BIAS_UNIT: f32 = 1.0e-5;
-
-        // DECAL is now a SEPARATE unit, because the ndc-squared fix silently rescaled it by four
-        // orders of magnitude and nobody adjusted the constant to match.
-        //
-        // The history: the bias used to be a constant NDC offset. Under reversed-Z, depth is
-        // near/z, so a constant NDC offset is a distance-DEPENDENT world pull — it dragged a road
-        // ~95 m forward at 1 km and 716 m at 3 km, which is why roads appeared through mountains.
-        // The fix multiplied by ndc squared, which is correct in SHAPE: it makes the pull a
-        // constant in WORLD space. But it changed the magnitude at the same time, and the constant
-        // was left at the value that had been tuned for the old meaning.
-        //
-        // With the ndc-squared form the world-space pull is `depth_bias * near`. This file's own
-        // calibration comment upstream uses near = 0.1 m, so 1.0e-5 buys 1.0e-6 m — ONE MICRON.
-        // That is not a small bias, it is no bias: the previous session traded a 716 m over-pull
-        // for zero, which is exactly why applying it did not fix the see-through and why the road
-        // agent's census found the mechanism still live.
-        //
-        // 5.0e-2 * 0.1 m = 0.005 m, which is ZRoadEpsilon (EngineWgpu.hpp:104) — the same
-        // world-space lift GL33 and the CPU path give a road at ClipShape.cpp:240, and which wgpu
-        // loses because GGpuTerrainConform makes the GPU conform pin the vertex flat
-        // (shader3d.wgsl:295 assigns world_pos.y and discards pos.y). So this is not a tuned
-        // magic number; it restores the documented parity value the wgpu path dropped.
-        //
-        // WGR_DECAL_SCALE still scales it, and now that env_f32 accepts 0 (see above) the
-        // ablation arm works for the first time: WGR_DECAL_SCALE=0 is genuinely no bias, and
-        // WGR_DECAL_SCALE=0.0002 reproduces the old 1e-5 behaviour for an A/B.
-        //
-        // ZBias is deliberately LEFT ALONE at the old unit even though the ndc-squared change
-        // nulled it by the same factor. It plausibly has the identical defect — but it is applied
-        // to coplanar geometry all over every world at three different levels, and correcting it
-        // 5000x blind, on a night with no way to check for z-fighting across that surface area,
-        // risks trading one reported bug for an unreported one on content nobody is looking at.
-        // It needs its own measurement. Recorded rather than fixed.
-        const DECAL_BIAS_UNIT: f32 = 5.0e-2;
-        let depth_bias = match key.offset {
-            Offset::Decal => decal_scale() * DECAL_BIAS_UNIT,
-            Offset::ZBias(level) => level as f32 * zbias_scale() * DEPTH_BIAS_UNIT,
-            _ => 0.0,
-        } as f64;
-
-        let alpha_ref = f32::from_bits(key.alpha_ref_bits) as f64;
-        let is_shadow = if key.blend == WgrBlend::Shadow as u8 {
-            1.0
-        } else {
-            0.0
-        };
-        // HDR path: the scene color target is Rgba16Float only when the HDR pipeline
-        // is on, so it doubles as the `linear` shading signal (decode + no clamp).
-        let linear = if self.surface_format == wgpu::TextureFormat::Rgba16Float {
-            1.0
-        } else {
-            0.0
-        };
-        // Alpha-to-coverage for this pipeline: cutout foliage (opaque blend, alpha_ref > 0), not
-        // the shadow-darken pass, and only under MSAA. Drives the shader's coverage path and the
-        // pipeline's alpha_to_coverage_enabled below.
-        let a2c = self.foliage_a2c && key.blend == WgrBlend::Opaque as u8 && alpha_ref > 0.0;
-        // Alpha-blended draws (glass canopies) are flagged so the shared shading damps their diffuse
-        // sky-irradiance ambient — a transparent surface isn't a diffuse reflector, and a full sky
-        // wash blows out cockpit glass (and spikes auto-exposure). Only Alpha; Additive effects and
-        // the opaque/cutout GPU-driven set stay at the default 0.
-        let translucent = if key.blend == WgrBlend::Alpha as u8 {
-            1.0
-        } else {
-            0.0
-        };
-        let constants = [
-            ("alpha_ref", alpha_ref),
-            ("is_shadow", is_shadow),
-            ("depth_bias", depth_bias),
-            ("linear", linear),
-            ("a2c", if a2c { 1.0 } else { 0.0 }),
-            ("foliage_screen_ao", foliage_screen_ao() as f64),
-            ("far_crown_shadow_budget", far_crown_shadow().0 as f64),
-            ("far_crown_shadow_tent", far_crown_shadow().1 as f64),
-            ("blend_section_screen_ao", blend_section_screen_ao() as f64),
-            ("count_fragments", count_fragments() as f64),
-            ("translucent", translucent),
-
-            ("emissive_night", emissive_night() as f64),
-            ("cutout_mip_alpha", cutout_mip_alpha() as f64),
-            ("pixel_lift", road_pixel_lift() as f64),
-            (
-                "alpha_kill_door",
-                if std::env::var("WGR_ALPHA_KILL_DOOR").map(|v| v != "0").unwrap_or(false) {
-                    1.0
-                } else {
-                    0.0
-                },
-            ),
-            (
-                "road_kill_door",
-                if std::env::var("WGR_ROAD_KILL_DOOR").map(|v| v != "0").unwrap_or(false) {
-                    1.0
-                } else {
-                    0.0
-                },
-            ),
-            ("pixel_lift_max_frac", road_pixel_lift_max_frac() as f64),
-            ("pixel_lift_per_m", road_pixel_lift_per_m() as f64),
-        ];
-        // OnSurface (Offset::Decal) draws on the plain path take the frag_depth-writing twin
-        // so the road hugs the terrain at every PIXEL (WGR_ROAD_PIXEL_CONFORM). Plain only:
-        // fs_surface reads `objects`-conformed varyings and the heightmap group, and the
-        // skinned pipeline binds the bone palette at that slot; roads are never skinned.
-        // Everything else keeps fs_main and its early-Z. Decal draws are never prepassed
-        // (PipelineKey::prepassed requires Offset::None), so no prepass twin has to agree.
-        let fs_entry = if key.offset == Offset::Decal && !key.skinned && road_pixel_conform() {
-            "fs_surface"
-        } else if !write && object_early_z() {
-            // REN-OBJ-004: prepassed (write-off) colour draws test depth before shading.
-            "fs_main_early"
-        } else {
-            "fs_main"
-        };
-
-        // Shadow draws exclude already-shadowed pixels via the stencil: test EQUAL
-        // 0 (stencil is cleared to 0 each segment; opaque geometry leaves it 0) and
-        // INCR on pass, so the first shadow polygon over a pixel darkens it and any
-        // overlapping ones fail the test. Non-shadow pipelines leave the stencil
-        // untouched (default = disabled).
-        let stencil = if key.blend == WgrBlend::Shadow as u8 {
-            let face = wgpu::StencilFaceState {
-                compare: wgpu::CompareFunction::Equal,
-                fail_op: wgpu::StencilOperation::Keep,
-                depth_fail_op: wgpu::StencilOperation::Keep,
-                pass_op: wgpu::StencilOperation::IncrementClamp,
-            };
-            wgpu::StencilState {
-                front: face,
-                back: face,
-                read_mask: 0xff,
-                write_mask: 0xff,
-            }
-        } else {
-            wgpu::StencilState::default()
-        };
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("wgr_3d_pipeline"),
-            layout: Some(layout),
-            vertex: wgpu::VertexState {
-                module,
-                entry_point: Some(vs_entry),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &constants,
-                    ..Default::default()
-                },
-                buffers,
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                front_face: wgpu::FrontFace::Cw,
-                // WGR_NO_CULL=1 disables backface culling on the object pipelines.
-                // Diagnostic only: a single-sided face whose winding the loader got
-                // backwards is INVISIBLE, and from inside a cockpit that reads as a
-                // transparent airframe rather than as missing geometry. One run with
-                // this set separates "not drawn because culled" from every other
-                // reason a surface can fail to appear. Per-draw `double_sided`
-                // (Enfusion `Cull none`) takes the same no-cull variant.
-                cull_mode: if key.double_sided
-                    || std::env::var("WGR_NO_CULL").map(|v| v != "0").unwrap_or(false) {
-                    None
-                } else {
-                    Some(wgpu::Face::Back)
-                },
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: depth_format(device),
-                depth_write_enabled: Some(write),
-                depth_compare: Some(if test {
-                    // Reversed-Z (see shader3d.wgsl): nearer geometry has the larger
-                    // depth value, so the "keep closer" test is GreaterEqual.
-                    wgpu::CompareFunction::GreaterEqual
-                } else {
-                    wgpu::CompareFunction::Always
-                }),
-                stencil,
-                bias,
-            }),
-            multisample: wgpu::MultisampleState {
-                count: self.sample_count,
-                alpha_to_coverage_enabled: a2c,
-                ..Default::default()
-            },
-            fragment: Some(wgpu::FragmentState {
-                module,
-                entry_point: Some(fs_entry),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &constants,
-                    ..Default::default()
-                },
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: self.surface_format,
-                    blend: Self::blend_state(key.blend),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
-        self.pipelines.insert(key, pipeline);
     }
 
-    // Create the depth+normal prepass pipeline for `key` if absent. Reuses the colour
-    // pass' VS entry + pipeline layout + vertex buffers + override constants (VS parity
-    // is load-bearing — see the plan's hazards), writes depth GreaterEqual/write-ON and
-    // the view-space normal into NORMAL_FORMAT via fs_prepass. All prepassed draws have
-    // offset None, so depth_bias is 0 here, matching their colour VS exactly.
+    fn ensure_pipeline(&mut self, device: &wgpu::Device, key: PipelineKey) {
+        if !self.pipelines.contains_key(&key) {
+            let pipeline = build_main_pipeline(&self.pipe_ctx(), device, key);
+            self.pipelines.insert(key, pipeline);
+        }
+    }
+
     fn ensure_prepass_pipeline(&mut self, device: &wgpu::Device, key: PrepassKey) {
-        if self.prepass_pipelines.contains_key(&key) {
+        if !self.prepass_pipelines.contains_key(&key) {
+            let pipeline = build_prepass_pipeline(&self.pipe_ctx(), device, key);
+            self.prepass_pipelines.insert(key, pipeline);
+        }
+    }
+
+    /// PERF-PIPE-ASYNC: queue whatever this draw's variants still lack (one job per draw, so a
+    /// draw's set arrives together and not behind a whole frame's worth of compiles).
+    fn request_pipelines(&mut self, device: &wgpu::Device, d: &WgrDraw3D, skinned: bool) {
+        let (mains, prepass) = required_pipelines(d, skinned);
+        let mains: Vec<PipelineKey> =
+            mains.into_iter().flatten().filter(|k| !self.pipelines.contains_key(k)).collect();
+        let prepass: Vec<PrepassKey> =
+            prepass.into_iter().filter(|k| !self.prepass_pipelines.contains_key(k)).collect();
+        if mains.is_empty() && prepass.is_empty() {
             return;
         }
-        let _pipe_timer = PipelineCreateTimer::new("prepass");
-        let module = &self.shader;
-        let (vs_entry, layout) = if key.skinned {
-            ("vs_skinned", &self.skinned_layout)
-        } else {
-            ("vs_main", &self.plain_layout)
-        };
-        let vbuf_layout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<WgrMeshVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &self.vbuf_attrs,
-        };
-        let skin_layout = wgpu::VertexBufferLayout {
-            array_stride: 8,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &self.skin_attrs,
-        };
-        let plain_buffers = [vbuf_layout.clone()];
-        let skinned_buffers = [vbuf_layout, skin_layout];
-        let buffers: &[wgpu::VertexBufferLayout] = if key.skinned {
-            &skinned_buffers
-        } else {
-            &plain_buffers
-        };
-        let alpha_ref = f32::from_bits(key.alpha_ref_bits) as f64;
-        // cutout_mip_alpha MUST match the colour pipeline's, or the prepass lays depth for
-        // texels the colour pass discards (gpu_driven.wgsl's prepass_match rationale). A
-        // blend-pass section (MAT-053) has no cutout in its colour pass, so no mip lift here.
-        let mip_alpha = if key.solid_blend { 0.0 } else { cutout_mip_alpha() as f64 };
-        let constants = [
-            ("alpha_ref", alpha_ref),
-            ("depth_bias", 0.0),
-            ("cutout_mip_alpha", mip_alpha),
-            ("count_fragments", count_fragments() as f64),
-        ];
-        // Cutout foliage under MSAA: the A2C prepass twin emits a vec4 whose .a carries coverage,
-        // and the pipeline enables alpha_to_coverage so it writes depth to exactly the samples the
-        // colour pass will shade. Pure-opaque prepass (alpha_ref == 0) keeps the vec2 fs_prepass,
-        // and so does MAT-053's hard solid-texel test (its colour pass blends, never covers).
-        let a2c = self.foliage_a2c && alpha_ref > 0.0 && !key.solid_blend;
-        let fs_entry = if a2c { "fs_prepass_a2c" } else { "fs_prepass" };
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("wgr_3d_prepass_pipeline"),
-            layout: Some(layout),
-            vertex: wgpu::VertexState {
-                module,
-                entry_point: Some(vs_entry),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &constants,
-                    ..Default::default()
-                },
-                buffers,
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                front_face: wgpu::FrontFace::Cw,
-                // WGR_NO_CULL=1 disables backface culling on the object pipelines.
-                // Diagnostic only: a single-sided face whose winding the loader got
-                // backwards is INVISIBLE, and from inside a cockpit that reads as a
-                // transparent airframe rather than as missing geometry. One run with
-                // this set separates "not drawn because culled" from every other
-                // reason a surface can fail to appear.
-                cull_mode: if std::env::var("WGR_NO_CULL").map(|v| v != "0").unwrap_or(false) {
-                    None
-                } else {
-                    Some(wgpu::Face::Back)
-                },
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: depth_format(device),
-                depth_write_enabled: Some(true),
-                // Reversed-Z: nearer geometry has the larger depth value.
-                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: self.sample_count,
-                alpha_to_coverage_enabled: a2c,
-                ..Default::default()
-            },
-            fragment: Some(wgpu::FragmentState {
-                module,
-                entry_point: Some(fs_entry),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &constants,
-                    ..Default::default()
-                },
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: NORMAL_FORMAT,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
-        self.prepass_pipelines.insert(key, pipeline);
+        let Some(w) = self.pipe_worker.as_ref() else { return };
+        if mains.iter().all(|k| w.pending_main.contains(k)) && prepass.iter().all(|k| w.pending_prepass.contains(k)) {
+            return;
+        }
+        let ctx = self.pipe_ctx();
+        let Some(w) = self.pipe_worker.as_mut() else { return };
+        let mains: Vec<PipelineKey> = mains.into_iter().filter(|k| w.pending_main.insert(*k)).collect();
+        let prepass: Vec<PrepassKey> = prepass.into_iter().filter(|k| w.pending_prepass.insert(*k)).collect();
+        if !mains.is_empty() || !prepass.is_empty() {
+            w.submit(PipeJob { ctx, device: device.clone(), mains, prepass });
+        }
+    }
+
+    /// PERF-PIPE-ASYNC: install every variant the worker has finished.
+    fn poll_pipelines(&mut self) {
+        let Some(w) = self.pipe_worker.as_mut() else { return };
+        while let Ok(done) = w.done_rx.try_recv() {
+            for (k, p) in done.mains {
+                w.pending_main.remove(&k);
+                self.pipelines.insert(k, p);
+            }
+            for (k, p) in done.prepass {
+                w.pending_prepass.remove(&k);
+                self.prepass_pipelines.insert(k, p);
+            }
+        }
+    }
+
+    /// PERF-PIPE-ASYNC: every pipeline this draw's passes use exists. A draw whose set is still
+    /// compiling is left out of ALL its passes; drawn by some and not others, a prepass could
+    /// lay depth for a surface its colour pass never paints.
+    fn draw_ready(&self, d: &WgrDraw3D, skinned: bool) -> bool {
+        if self.pipe_worker.is_none() {
+            return true;
+        }
+        let (mains, prepass) = required_pipelines(d, skinned);
+        mains.into_iter().flatten().all(|k| self.pipelines.contains_key(&k))
+            && prepass.is_none_or(|k| self.prepass_pipelines.contains_key(&k))
     }
 
     fn ensure_weather_pipeline(&mut self, device: &wgpu::Device, key: PrepassKey) {
@@ -9294,6 +9473,11 @@ impl Gfx3d {
 
         // Build any pipeline variants this frame's draws need before the render
         // pass records them (pipeline creation needs &mut self; draw_one is &self).
+        // PERF-PIPE-ASYNC: or have them compiled off this thread (see PipeWorker).
+        if self.pipe_worker.is_none() && pipe_async_enabled() {
+            self.pipe_worker = Some(PipeWorker::new());
+        }
+        self.poll_pipelines();
         for d in draws {
             let has_skin = self
                 .meshes
@@ -9303,30 +9487,16 @@ impl Gfx3d {
             // so build the plain variant for it, not the skinned one.
             let baked = self.baked_draw_base(d.palette_slot, d.mesh).is_some() && has_skin;
             let skinned = d.palette_slot != NO_PALETTE && has_skin && !baked;
-            let key = PipelineKey::from_draw(d, skinned);
-            self.ensure_pipeline(device, key);
-            // Opaque draws are prepassed: also build their colour write-off variant (used
-            // in the prepassed segment) and their depth+normal prepass pipeline.
-            if key.prepassed() {
-                self.ensure_pipeline(device, key.with_write_off());
-                self.ensure_prepass_pipeline(
-                    device,
-                    PrepassKey {
-                        skinned,
-                        alpha_ref_bits: key.alpha_ref_bits,
-                        solid_blend: false,
-                    },
-                );
-            } else if draw_solid_blend_prepassed(d) {
-                self.ensure_prepass_pipeline(
-                    device,
-                    PrepassKey {
-                        skinned,
-                        alpha_ref_bits: SOLID_BLEND_ALPHA.to_bits(),
-                        solid_blend: true,
-                    },
-                );
-                self.ensure_pipeline(device, solid_blend_write_key(key));
+            if self.pipe_worker.is_some() {
+                self.request_pipelines(device, d, skinned);
+                continue;
+            }
+            let (mains, prepass) = required_pipelines(d, skinned);
+            for key in mains.into_iter().flatten() {
+                self.ensure_pipeline(device, key);
+            }
+            if let Some(key) = prepass {
+                self.ensure_prepass_pipeline(device, key);
             }
         }
         if self.weather_cover.view.is_some() {
@@ -9593,6 +9763,9 @@ impl Gfx3d {
         }
         let skinned = d.palette_slot != NO_PALETTE && mesh.skin.is_some() && baked.is_none();
         let base_key = PipelineKey::from_draw(d, skinned);
+        if !matches!(mode, Pass3dMode::Weather | Pass3dMode::WeatherFar) && !self.draw_ready(d, skinned) {
+            return;
+        }
         if matches!(mode, Pass3dMode::Color { .. }) && draw_solid_blend_prepassed(d) {
             self.draw_one(pass, textures, d, base, count, st, Pass3dMode::SolidBlendWrite);
         }
@@ -9769,6 +9942,9 @@ impl Gfx3d {
         // Eligible buckets are always plain opaque-rigid (see plan_3d): never skinned,
         // never baked, so pipeline + bind selection is the plain, non-skinned path.
         let base_key = PipelineKey::from_draw(d, false);
+        if !self.draw_ready(d, false) {
+            return;
+        }
         let pipeline = match mode {
             Pass3dMode::Weather | Pass3dMode::WeatherFar => return, // weather replays exact direct source slots
             Pass3dMode::Prepass => {
