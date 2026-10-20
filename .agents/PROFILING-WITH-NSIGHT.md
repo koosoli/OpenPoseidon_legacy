@@ -137,3 +137,19 @@ time in frames > 80 ms.
 - **Render thread, all worlds**: `CommandEncoder::finish` is 34-47% -- in wgpu 29 this is where the
   frame is actually encoded, so it is the cost of the draws themselves; bindless re-tracking
   (`merge_single` / `register_init_action`) is ~8% of it, triggered by plain/skinned layout switches.
+
+## Round 3 (2026-10-20): ns-a2 (Arma 2 Chernarus) / ns-a1 (Arma 1 Sahrani) on 14aa15cf6
+
+- **A stall with no CPU samples is a wait, not work.** On Sahrani the render thread went silent for
+  300-940 ms nine times; the last sample before each silence was inside `Ntfs.sys` / `FLTMGR.SYS` --
+  a file write held by a file-system filter. The only file I/O on that thread was the log. Find these
+  with the stall-stack approach (render-thread samples per 50 ms inside each long present gap, then
+  the stack of the sample before the longest silence); kernel frames can fill the whole callchain.
+- Fixed in eff379f5c: log file written by its own thread (PERF-LOG-FILE-QUEUE), console warnings-only
+  with a log file (PERF-CONSOLE-LEVEL), empty weather fields not re-copied (PERF-FIELD-EMPTY-SKIP),
+  no bind-group 2..4 re-set on skinned switches.
+- Chernarus (A2) is GPU-bound at ~55 ms everywhere (1.06M objects); its main thread is mostly the
+  legacy section walk of partial-coverage objects (`SectionGpuOwned` ~2%, `DrawSectionTL` ~8%).
+- `nsys_long_frames.py` fixes: main thread = kernel32-rooted exe thread; exe base fallback via a
+  std::thread entry cross-checked with the DLL's caller. Keep a copy of the traced binaries
+  (`bin-sym-<commit>`): rebuilding into `bin-nsys` makes a trace unreadable.
