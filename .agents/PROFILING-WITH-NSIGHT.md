@@ -39,6 +39,12 @@ agent cannot elevate. Ask the owner to open **Terminal (Admin)** and run:
 
     powershell -NoProfile -ExecutionPolicy Bypass -File <worktree>\scripts\reforger-pc\Run-NsysFlight.ps1
 
+For DayZ Chernarus+ add `-World DayZ` (world file from the main checkout's
+`packages\dayz-compat\world\chernarusplus\chernarusplus.wrp`, DayZ's `Addons`, the
+Test-DayZStreamingLatency pose flying west; output `shots
+s-dayz`). Its `CfgWorlds ... Cannot find
+base class 'Weather'` errors at start are the known DayZ-config mismatch, not a failure.
+
 It refuses to start while any OpenPoseidon is running -- **do not launch a test game while waiting
 for the owner** (a harness run of ours made the owner's run fail once). It copies the build to
 `bin-nsys`, flies Durras for ~2 min with nsys recording 45..95 s, then exports (~3 min, the report
