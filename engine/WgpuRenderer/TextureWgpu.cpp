@@ -1147,6 +1147,31 @@ int TextureWgpu::Init()
                 ledger->NoteImmediateFallback();
             }
         }
+        // PERF-PROCEDURAL-INGRESS (2026-10-20). InitDynamic opens the producer window, i.e. waits
+        // for the render thread to finish the frame in flight. DayZ rvmats name procedural maps
+        // (`#(argb,8,8,3)color(0,0,1,1,SMDI)` and the like) for constant specular/normal, so a
+        // cold install creating its first one waited 80-230 ms: 38 installs, 2.7 s of the main
+        // thread per Chernarus flight, each a hitch. With the window closed the image goes
+        // through the texture ingress instead (FLY-001), exactly as a file texture does; it is
+        // still a dynamic texture (no lease, never evicted). WGR_PROCEDURAL_INGRESS=0 = the window.
+        static const bool proceduralIngress = [] {
+            const char* value = std::getenv("WGR_PROCEDURAL_INGRESS");
+            return !(value && value[0] == '0');
+        }();
+        if (WgrRenderer* r = _bank ? _bank->Renderer() : nullptr;
+            proceduralIngress && r && !EngineWgpu::ProducerMayTouchRenderer())
+        {
+            _dynamic = true;
+            _uploadTried = true;
+            _w = generated.width;
+            _h = generated.height;
+            _nMipmaps = 1;
+            _gpuHandle = CreateGpuTexture(r, static_cast<uint32_t>(generated.width),
+                                          static_cast<uint32_t>(generated.height), WGR_TEXTURE_RGBA8, 1, 0u,
+                                          generated.rgba.data(), static_cast<uint32_t>(generated.rgba.size()));
+            if (_gpuHandle)
+                return 0;
+        }
         InitDynamic(generated.width, generated.height, generated.rgba.data(),
                     static_cast<uint32_t>(generated.rgba.size()));
         return _gpuHandle ? 0 : -1;
