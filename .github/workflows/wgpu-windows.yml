@@ -65,7 +65,9 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          cmake --build "$CWR_BUILD_DIR" --target PoseidonGame --parallel 2 -- -k 0 > build-errors.txt 2>&1 || true
+          CARGO_TERM_COLOR=never cmake --build "$CWR_BUILD_DIR" --target PoseidonGame --parallel 2 -- -k 0 > build-errors-raw.txt 2>&1 || true
+          # Colour codes would hide "error[E...]" from the anchors below.
+          sed 's/\x1b\[[0-9;]*[A-Za-z]//g' build-errors-raw.txt > build-errors.txt
           grep -E "error( [A-Z]+[0-9]+)?:|undefined symbol|LNK[0-9]+" build-errors.txt | head -40 | while IFS= read -r line; do
             echo "::error::${line//%/%25}"
           done
@@ -74,6 +76,10 @@ jobs:
           grep -E -A 8 "^error(\[E[0-9]+\])?: " build-errors.txt | head -120 | awk 'BEGIN{m=""} /^--$/ {if(m!="") print m; m=""; next} {gsub(/%/,"%25"); m = (m=="") ? $0 : m " | " $0} END{if(m!="") print m}' | head -15 | while IFS= read -r line; do
             echo "::error::${line}"
           done
+          # Nothing matched? The last lines say what stopped the build.
+          if ! grep -qE "error( [A-Z]+[0-9]+)?:|error\[E[0-9]+\]|LNK[0-9]+" build-errors.txt; then
+            grep -v '^\s*$' build-errors.txt | tail -12 | while IFS= read -r line; do echo "::error::tail: ${line//%/%25}"; done
+          fi
           exit 1
 
       - name: Collect game files
