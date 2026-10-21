@@ -508,7 +508,8 @@ no screenshots written. The stall report now also takes stacks at 90 and 170 s.
   END2/END4 through I3, C5B, C6B to C7D; a lost C5 played again, then END5 to C7C; OA's END3 to
   CE5B and END4 to CE7B; END3 to CE7A and a repeated CE7A -- each exactly as the campaigns'
   description.ext says, with no script error. Together with campaign run 3 every mission of
-  both campaigns has been entered from its campaign except C6, C7B, C7EF (reachable, not walked).
+  both campaigns has been reached from its campaign except C7B and C7EF (C6 END2 / END6, not
+  walked); C7C was reached, its mission not played.
 
 ## Steps
 
