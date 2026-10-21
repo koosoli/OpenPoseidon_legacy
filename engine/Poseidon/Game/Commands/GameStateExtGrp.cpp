@@ -1396,7 +1396,8 @@ DEFINE_COMMAND(Target)
 static UIActionType ResolveActionName(const char* name)
 {
     UIActionType type = GetEnumValue<UIActionType>(name);
-    if (type != INT_MIN || Poseidon::Arma1Compat::Generation() < 1 || !name)
+    // an unknown name comes back as -1 (f3eb88c2's log), not as INT_MIN
+    if (static_cast<int>(type) >= 0 || Poseidon::Arma1Compat::Generation() < 1 || !name)
         return type;
     const auto squash = [](const char* text) {
         std::string out;
@@ -1452,7 +1453,7 @@ GameValue VehProcessAction(const GameState* state, GameValuePar oper1, GameValue
         {
             GameStringType type = array[0];
             action.type = ResolveActionName((const char*)type);
-            if (action.type == INT_MIN)
+            if (action.type == INT_MIN || static_cast<int>(action.type) < 0)
             {
                 action.type = ATNone;
             }
