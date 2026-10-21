@@ -491,6 +491,18 @@ no screenshots written. The stall report now also takes stacks at 90 and 170 s.
   1 LOD, 61 vertices). Focus 26: loaded through the ODOL reader in C2, C3 and CE3, no
   `Bad version`; what it looks like through the optic is not checked.
 
+### Current state merged, 2026-10-21
+
+- `77d1d4b`: merge of `feat/jump-reload-lean` (= `MrDudeX-arma1`, 2026-10-20), the newest branch
+  containing the others (feat/arma-original-ui with this branch's work up to `3e4940b`,
+  perf/reforger-render-hitches, feat/reforger-trees): 4720 commits in. Merged, not rebased, so
+  the pushed history stays. One conflict, this branch's verification table (kept).
+- On that state every test process died after a clean shutdown (static effect textures
+  destroyed after the GL33 engine); fixed in `e99a7a3` for the muzzle burst and the underwater
+  bubbles (foreign code, named as such in the commit). Run 31 checks the merged state.
+- The CI artifact carries exe, dll and PDBs only, not the `assets\` feature packs; the
+  laptop's game folder has none either. The Arma 2 tests do not depend on them.
+
 ## Steps
 
 1. **Measure first.** Per mission: an asset census in the log (every class created, what it
