@@ -996,7 +996,8 @@ pub struct CullState {
     variant_capacity: u32,
     params: CullParamsGpu,
     // Debug flags written into CullParamsGpu.debug_flags each frame (cull.wgsl reads them). bit 0
-    // = WGR_CULL_NO_FRUSTUM (skip the frustum test — discriminates "culled" from "not drawn").
+    // = WGR_CULL_NO_FRUSTUM (skip the frustum test — discriminates "culled" from "not drawn");
+    // bit 3 = WGR_CULL_COOP=0 (one-thread section walks, WGPU-030).
     debug_flags: u32,
     // CPU diagnostic selection only; no readback or residency policy consumes it.
     target_model_id: Option<u32>,

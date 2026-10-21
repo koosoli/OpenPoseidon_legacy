@@ -29,6 +29,7 @@ class VertexBufferGL33 : public VertexBuffer
     GLuint _vbo = 0;
     GLuint _ibo = 0;
     bool _dynamic = false;
+    bool _updatedOnce = false; // WGPU-031: first Update of a dynamic buffer always copies
     int _vertexCount = 0;
     int _indexCount = 0;
     AutoArray<Poseidon::render::mesh::MeshSection> _sections;
@@ -165,7 +166,11 @@ static bool Gl33TrustDirty()
 
 void VertexBufferGL33::Update(const Shape& src, bool dynamic)
 {
-    const bool copy = Gl33TrustDirty() ? bufferDirty : (_dynamic || dynamic || bufferDirty);
+    // As VertexBufferWgpu::Update: the first Update of a dynamic buffer always copies, so a shape
+    // whose vertices changed between creation and its first draw without InvalidateBuffer is safe.
+    const bool copy = Gl33TrustDirty() ? (bufferDirty || (_dynamic && !_updatedOnce))
+                                       : (_dynamic || dynamic || bufferDirty);
+    _updatedOnce = true;
     if (copy)
     {
         CopyVertices(src);

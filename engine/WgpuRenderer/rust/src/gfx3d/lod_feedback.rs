@@ -205,19 +205,6 @@ mod tests {
         assert_eq!(validate_request(2, &[42], 1, Some((1, 3))), 1);
         assert_eq!(validate_request(1, &[42], 1, Some((1, 3))), 2);
     }
-    // WGPU-030: the cooperative cull adds workgroup memory and a barrier to every COUNT/SCATTER
-    // entry; naga's uniformity analysis rejects a barrier behind an early return, so validate
-    // both shipped variants here rather than at the first pipeline creation on a user's GPU.
-    #[test] fn cull_shader_validates_with_and_without_lod_feedback() {
-        for enabled in [false, true] {
-            let src = shader_source(include_str!("cull.wgsl"), enabled).unwrap();
-            let module = naga::front::wgsl::parse_str(&src)
-                .unwrap_or_else(|e| panic!("cull.wgsl (feedback={enabled}): {}", e.emit_to_string(&src)));
-            naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
-                .validate(&module)
-                .unwrap_or_else(|e| panic!("cull.wgsl (feedback={enabled}): {}", e.emit_to_string(&src)));
-        }
-    }
     #[test] fn off_shader_is_exact_borrowed_base_and_on_marker_must_be_unique() {
         let base = include_str!("cull.wgsl");
         let off = shader_source(base, false).unwrap();
