@@ -156,6 +156,7 @@ and are not counted.
 | camp 4 | `9ab0ef1` | CE3 played, `OP_A2_CAMPAIGN=30,end1,3` | 1 | 1 | CE3 -> CE4 -> CE5A, quit before CE6; exit 0, **no script error** (camp 3: 424 at CE4 -> CE5A). At each mission end its scripts ended with it (16, 2, 3) |
 | 29 | `9ab0ef1` | 70 of 98 (stopped for the merged build), laptop gl33 | 70 | 69 | 0; MP_Paradrop's own error as before; census 7937 Arma, 0 CWA, every exit code 0 |
 | 30 | `77d1d4b` (merge of feat/jump-reload-lean) | 39 of 98 (stopped for `e99a7a3`), laptop gl33 | 39 | 38 | MP_Paradrop's own error as before; census 5460 Arma, 0 CWA. **Every process crashed after 'Shutdown complete'** (0xC0000005 in TextureGL33::ReleaseMemory from the atexit destructor of a static Ref<Texture> in the new muzzle-burst and underwater-bubble effects) -- fixed `e99a7a3` |
+| 31 | `e99a7a3` (current state + exit-crash fix) | 98, laptop gl33 | 98 | 97 | 0; MP_Paradrop's own error as before; census 13059 Arma, 0 CWA, **every exit code 0**, no unhandled exception, no animation-cache reload. Highest vehicles stage: CE8 81 ms, MP_Detector 81, MPE_SectorControl 22, C0 under 15. The merged state regresses nothing in the Arma 2 missions |
 
 SP_EyeForEye (the owner's first pick), all eight Arma 2 Bootcamp missions and the
 Arma 2 campaign through I3 enter and run with no script error. Operation Arrowhead's
