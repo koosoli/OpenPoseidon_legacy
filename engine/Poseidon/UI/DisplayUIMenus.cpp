@@ -1125,6 +1125,16 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
         // end mission
         //		GStats.Update();
         GWorld->DestroyMap(IDC_OK);
+        // Arma 2 ends a mission's scripts with the mission. Here they ran on through the
+        // debriefing and outro into the next campaign mission's intro, until its world was
+        // cleaned up: CE4's UAV module loop reported 424 script errors against CE5A's fresh
+        // state. CWA missions keep their scripts as before.
+        if (Arma1Compat::Generation() == 2)
+        {
+            const int ended = GWorld->TerminateAllScripts();
+            if (ended > 0)
+                LOG_INFO(Mission, "Arma 2: mission ended, {} script(s) ended with it", ended);
+        }
         if (AutoTest)
         {
             LOG_INFO(Core, "AUTO-TEST mission ended: end mode {} ({}.{})", static_cast<int>(GWorld->GetEndMode()),
