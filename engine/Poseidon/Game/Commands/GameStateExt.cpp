@@ -59,6 +59,7 @@ GameValue ParticleDrop(const GameState* state, GameValuePar oper1);
 #include <Poseidon/Foundation/Platform/VersionNo.h>
 
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
+#include <Poseidon/World/Scene/ScriptLight.hpp>
 
 DEFINE_FAST_ALLOCATOR(GameDataObject)
 
@@ -1203,14 +1204,150 @@ static GameValue A1SwitchDo(const GameState* state, GameValuePar oper1, GameValu
     return sw.result;
 }
 
-// Arma 1 createVehicle(Local): "#particlesource"/"#lightpoint" engine objects have no
-// counterpart here; they come back as objNull and their set* commands are ignored.
+// Arma 1 createVehicle(Local): "#lightpoint" makes a script light (LGT-SCRIPT-001,
+// World/Scene/ScriptLight.hpp). "#particlesource" has no counterpart yet: objNull, and its
+// set* commands are ignored.
 static GameValue A1VehCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     const RString type = oper1;
     if (type.GetLength() > 0 && type[0] == '#')
+    {
+        if (stricmp(type, "#lightpoint") == 0)
+        {
+            Vector3 pos;
+            if (!GetPos(state, pos, oper2))
+                return GameValueExt((Object*)nullptr);
+            return GameValueExt(Poseidon::CreateScriptLight(pos));
+        }
         return GameValueExt((Object*)nullptr);
+    }
     return VehCreate(state, oper1, oper2);
+}
+
+// ---- LGT-SCRIPT-001: setLightColor / setLightAmbient / setLightBrightness /
+// lightAttachObject / lightDetachObject on a "#lightpoint" object.
+static Poseidon::ScriptLight* ScriptLightOf(GameValuePar oper)
+{
+    return dyn_cast<Poseidon::ScriptLight>(GetObject(oper));
+}
+
+static bool ScriptLightColor(const GameState* state, GameValuePar oper, Color& out)
+{
+    if (oper.GetType() != GameArray)
+        return false;
+    const GameArrayType& a = oper;
+    if (a.Size() < 3)
+    {
+        state->SetError(EvalDim, a.Size(), 3);
+        return false;
+    }
+    float c[3];
+    for (int i = 0; i < 3; i++)
+    {
+        if (a[i].GetType() != GameScalar)
+        {
+            state->TypeError(GameScalar, a[i].GetType());
+            return false;
+        }
+        c[i] = a[i];
+    }
+    out = Color(c[0], c[1], c[2], 1);
+    return true;
+}
+
+static GameValue ScriptLightSetColor(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Poseidon::ScriptLight* light = ScriptLightOf(oper1);
+    Color c;
+    if (light && ScriptLightColor(state, oper2, c))
+        light->SetColor(c);
+    return NOTHING;
+}
+
+static GameValue ScriptLightSetAmbient(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Poseidon::ScriptLight* light = ScriptLightOf(oper1);
+    Color c;
+    if (light && ScriptLightColor(state, oper2, c))
+        light->SetAmbient(c);
+    return NOTHING;
+}
+
+static GameValue ScriptLightSetBrightness(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Poseidon::ScriptLight* light = ScriptLightOf(oper1);
+    if (light)
+        light->SetBrightness(static_cast<float>(oper2));
+    return NOTHING;
+}
+
+// light lightAttachObject [object, [x,y,z]]  -- offset in the object's model space (Arma)
+// light lightAttachObject [object, "memory point"]  -- OpenPoseidon extension
+static GameValue ScriptLightAttach(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Poseidon::ScriptLight* light = ScriptLightOf(oper1);
+    if (!light)
+        return NOTHING;
+    const GameArrayType& a = oper2;
+    if (a.Size() < 2)
+    {
+        state->SetError(EvalDim, a.Size(), 2);
+        return NOTHING;
+    }
+    Object* target = a[0].GetType() == GameObject ? GetObject(a[0]) : nullptr;
+    if (!target)
+    {
+        light->Detach();
+        return NOTHING;
+    }
+    Vector3 offset = VZero;
+    if (a[1].GetType() == GameString)
+    {
+        const RString name = a[1];
+        LODShape* shape = target->GetShape();
+        Shape* memory = shape ? shape->MemoryLevel() : nullptr;
+        const int index = memory ? memory->PointIndex(name) : -1;
+        if (index < 0)
+        {
+            LOG_WARN(Script, "lightAttachObject: no memory point '{}' on {}", (const char*)name,
+                     shape ? (const char*)shape->GetName() : "<no shape>");
+            return NOTHING;
+        }
+        offset = memory->Pos(index);
+    }
+    else if (a[1].GetType() == GameArray)
+    {
+        const GameArrayType& p = a[1];
+        if (p.Size() < 3)
+        {
+            state->SetError(EvalDim, p.Size(), 3);
+            return NOTHING;
+        }
+        for (int i = 0; i < 3; i++)
+        {
+            if (p[i].GetType() != GameScalar)
+            {
+                state->TypeError(GameScalar, p[i].GetType());
+                return NOTHING;
+            }
+        }
+        offset = Vector3(static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(p[2]));
+    }
+    else
+    {
+        state->TypeError(GameArray, a[1].GetType());
+        return NOTHING;
+    }
+    light->AttachTo(target, offset);
+    return NOTHING;
+}
+
+static GameValue ScriptLightDetach(const GameState*, GameValuePar oper1)
+{
+    Poseidon::ScriptLight* light = ScriptLightOf(oper1);
+    if (light)
+        light->Detach();
+    return NOTHING;
 }
 
 // "title" hintC [texts] / "title" hintC "text": the texts as one hint
@@ -1604,6 +1741,7 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameBool, "isNil", A1IsNil, GameString),
         GameFunction(GameNothing, "doGetOut", A1DoGetOut, GameObjectOrArray),
         GameFunction(GameNothing, "enableEnvironment", A1IgnoredUnary, GameBool),
+        GameFunction(GameNothing, "lightDetachObject", ScriptLightDetach, GameObject),
         GameFunction(GameNothing, "reload", A1Reload, GameObject),
         GameFunction(GameNothing, "terminate", ScriptTerminate, GameScalar),
         GameFunction(GameBool, "scriptDone", ScriptIsDone, GameScalar),
@@ -2088,10 +2226,10 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "setParticleRandom", function, A1IgnoredBinary, GameObject, GameArray),
         GameOperator(GameNothing, "setParticleCircle", function, A1IgnoredBinary, GameObject, GameArray),
         GameOperator(GameNothing, "setDropInterval", function, A1IgnoredBinary, GameObject, GameScalar),
-        GameOperator(GameNothing, "setLightColor", function, A1IgnoredBinary, GameObject, GameArray),
-        GameOperator(GameNothing, "setLightAmbient", function, A1IgnoredBinary, GameObject, GameArray),
-        GameOperator(GameNothing, "setLightBrightness", function, A1IgnoredBinary, GameObject, GameScalar),
-        GameOperator(GameNothing, "lightAttachObject", function, A1IgnoredBinary, GameObject, GameArray),
+        GameOperator(GameNothing, "setLightColor", function, ScriptLightSetColor, GameObject, GameArray),
+        GameOperator(GameNothing, "setLightAmbient", function, ScriptLightSetAmbient, GameObject, GameArray),
+        GameOperator(GameNothing, "setLightBrightness", function, ScriptLightSetBrightness, GameObject, GameScalar),
+        GameOperator(GameNothing, "lightAttachObject", function, ScriptLightAttach, GameObject, GameArray),
         GameOperator(GameNothing, "createUnit", function, UnitCreate, GameString, GameArray),
         GameOperator(GameObject, "createUnit", function, A1UnitCreate, GameGroup, GameArray),
         GameOperator(GameNothing, "setVehicleVarName", function, A1IgnoredBinary, GameObject, GameString),
