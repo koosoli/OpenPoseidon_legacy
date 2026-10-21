@@ -44,6 +44,9 @@
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
+#include <cctype>
+#include <cstring>
+#include <string>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Math/Math3DP.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
@@ -1384,6 +1387,37 @@ GameValue VehTarget(const GameState* state, GameValuePar oper1, GameValuePar ope
 
 DEFINE_COMMAND(Target)
 
+// Arma 1 and later name the action command's actions in one word ("getInDriver",
+// "moveToPilot", "takeWeapon"); this engine's names are OFP's, some with spaces ("GETIN
+// DRIVER", "TAKE WEAPON"). Without Arma data nothing changes; with it, an unknown name is
+// matched again with spaces and case ignored, the pilot seat read as the driver's and a
+// turret as the gunner's (Arma 1's GetInTurret/MoveToTurret name a turret path this
+// engine does not have -- the gunner's seat stands in, a marked deviation).
+static UIActionType ResolveActionName(const char* name)
+{
+    UIActionType type = GetEnumValue<UIActionType>(name);
+    if (type != INT_MIN || Poseidon::Arma1Compat::Generation() < 1 || !name)
+        return type;
+    const auto squash = [](const char* text) {
+        std::string out;
+        for (const char* c = text; *c; c++)
+            if (*c != ' ' && *c != '_')
+                out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(*c))));
+        return out;
+    };
+    std::string want = squash(name);
+    const auto replace = [&](const char* from, const char* to) {
+        if (const size_t at = want.find(from); at != std::string::npos)
+            want.replace(at, strlen(from), to);
+    };
+    replace("pilot", "driver");
+    replace("turret", "gunner");
+    for (const EnumName* e = GetEnumNames(UIActionType()); e && e->name.GetLength() > 0; e++)
+        if (squash(e->name) == want)
+            return static_cast<UIActionType>(e->value);
+    return type;
+}
+
 GameValue VehProcessAction(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     EntityAI* veh = dyn_cast<EntityAI>(GetObject(oper1));
@@ -1417,7 +1451,7 @@ GameValue VehProcessAction(const GameState* state, GameValuePar oper1, GameValue
         case 1:
         {
             GameStringType type = array[0];
-            action.type = GetEnumValue<UIActionType>((const char*)type);
+            action.type = ResolveActionName((const char*)type);
             if (action.type == INT_MIN)
             {
                 action.type = ATNone;
