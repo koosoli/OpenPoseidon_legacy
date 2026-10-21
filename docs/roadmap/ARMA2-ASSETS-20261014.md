@@ -488,7 +488,8 @@ no screenshots written. The stall report now also takes stacks at 90 and 170 s.
   usual, declared - 4) runs to the end of the file. The reader now accepts a declared rest
   size past the LOD end when it fits the file and is consumed exactly. Offline on the laptop
   the old and new reader agree on 317 Arma 2/OA models; only this file changes (refused ->
-  1 LOD, 61 vertices). Not yet checked in game.
+  1 LOD, 61 vertices). Focus 26: loaded through the ODOL reader in C2, C3 and CE3, no
+  `Bad version`; what it looks like through the optic is not checked.
 
 ## Steps
 
