@@ -14,7 +14,6 @@
 #include <Poseidon/Graphics/Rendering/Lighting/Material.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
-#include <Poseidon/Foundation/Common/Filenames.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
@@ -432,13 +431,21 @@ std::vector<std::string> ResolveCfgModelSections(const std::string& sourcePath)
 {
     std::vector<std::string> names;
     const ParamEntry* models = Pars.FindEntry("CfgModels");
-    if (!models || sourcePath.empty() || sourcePath.size() >= 256)
+    if (!models || sourcePath.empty())
         return names;
-    char shortName[256];
-    GetFilename(shortName, sourcePath.c_str());
-    while (char* bad = strpbrk(shortName, " -/()"))
-        *bad = '_';
-    const ParamEntry* cls = models->FindEntry(shortName);
+    // GetFilename's rule (last separator, cut at the first '.'), on a std::string so a long
+    // path cannot overflow a fixed buffer.
+    std::string shortName = sourcePath;
+    if (const size_t cut = shortName.find_last_of("\\/"); cut != std::string::npos)
+        shortName.erase(0, cut + 1);
+    if (const size_t dot = shortName.find('.'); dot != std::string::npos)
+        shortName.resize(dot);
+    for (char& c : shortName)
+    {
+        if (c == ' ' || c == '-' || c == '/' || c == '(' || c == ')')
+            c = '_';
+    }
+    const ParamEntry* cls = models->FindEntry(shortName.c_str());
     if (!cls)
         cls = models->FindEntry("default");
     // `sectionsInherit` is a chain; a cycle in a broken addon must not hang the load.
@@ -484,6 +491,79 @@ static void MarkCfgModelSections(Shape* lod, const std::vector<std::string>& nam
         if (si >= 0)
             lod->NamedSel(si).SetNeedsSections(true);
     }
+}
+
+// WGPU-021: split an explicit section table wherever a face's membership in the section-aware
+// selections changes, so each such selection owns whole sections (what DefineSections and
+// FindShapeSections guarantee on the legacy path). Faces are not reordered: a selection whose faces
+// are scattered through a section simply gets several pieces. Every piece keeps the parent's
+// texture, special flags, material and surfMat, so the image is unchanged; only the number of
+// sections can grow. `facesPerSection` is parallel to `sections` on entry.
+static void SplitSectionsAtSectionSelections(Shape* lod, std::vector<ShapeSection>& sections,
+                                             const std::vector<int>& facesPerSection)
+{
+    if (!lod || sections.size() != facesPerSection.size())
+        return;
+    std::vector<int> aware;
+    for (int si = 0; si < lod->NNamedSel(); ++si)
+    {
+        const ::NamedSelection& sel = lod->NamedSel(si);
+        if (sel.GetNeedsSections() && sel.Faces().Size() > 0)
+            aware.push_back(si);
+    }
+    if (aware.empty())
+        return;
+
+    // Membership signature per face, one bit per section-aware selection. Past 64 selections the
+    // bits are shared, which can only leave two different memberships in one piece -- the old
+    // behaviour for that pair, never a wrong draw.
+    const int nFaces = lod->NFaces();
+    std::vector<uint64_t> signature(static_cast<size_t>(std::max(nFaces, 0)), 0);
+    for (size_t k = 0; k < aware.size(); ++k)
+    {
+        const uint64_t bit = uint64_t(1) << (k % 64);
+        const Selection& faces = lod->NamedSel(aware[k]).Faces();
+        for (int j = 0; j < faces.Size(); ++j)
+        {
+            const int f = faces[j];
+            if (f >= 0 && f < nFaces)
+                signature[static_cast<size_t>(f)] |= bit;
+        }
+    }
+
+    auto& faceStream = lod->Faces();
+    std::vector<ShapeSection> split;
+    split.reserve(sections.size());
+    int face = 0;
+    for (size_t s = 0; s < sections.size(); ++s)
+    {
+        const int count = facesPerSection[s];
+        if (count <= 0)
+        {
+            split.push_back(sections[s]);
+            continue;
+        }
+        ShapeSection piece = sections[s];
+        Offset pos = sections[s].beg;
+        uint64_t current = face < nFaces ? signature[static_cast<size_t>(face)] : 0;
+        for (int f = 0; f < count; ++f, ++face)
+        {
+            const uint64_t here = face < nFaces ? signature[static_cast<size_t>(face)] : 0;
+            if (f > 0 && here != current)
+            {
+                piece.end = pos;
+                split.push_back(piece);
+                piece = sections[s];
+                piece.beg = pos;
+                current = here;
+            }
+            faceStream.Next(pos);
+        }
+        piece.end = pos;
+        split.push_back(piece);
+    }
+    if (split.size() != sections.size())
+        sections.swap(split);
 }
 
 void BuildAdapterBankTables(const Poseidon::Model::Model& model, AdapterBankTables& tables)
@@ -1538,7 +1618,17 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
                     faceStream.Next(nativePos);
                 shapeSections[s].end = nativePos;
             }
-            faceStream.SetSections(shapeSections.data(), nSections);
+            // WGPU-021: an MLOD reaches this branch too (Model::compile generates its section
+            // table), so this is where the CfgModels section selections have to split it.
+            if (!isODOL)
+            {
+                if (tables)
+                    MarkCfgModelSections(shape->_lods[i], tables->cfgSections);
+                else if (Foundation::IsMainThread())
+                    MarkCfgModelSections(shape->_lods[i], ResolveCfgModelSections(model.sourcePath));
+                SplitSectionsAtSectionSelections(shape->_lods[i], shapeSections, facesPerSection);
+            }
+            faceStream.SetSections(shapeSections.data(), static_cast<int>(shapeSections.size()));
             faceMs += ::Poseidon::Dev::Perf::ElapsedMs(faceT0) - 0.0;
             // Pair the explicit WGPU material trace with its model/LOD origin.
             // Shape itself carries no source path at draw time, so this is the
