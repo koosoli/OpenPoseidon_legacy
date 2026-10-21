@@ -164,3 +164,24 @@ das nur für Läufe ohne Zwilling. Mit Zwilling müssten alle Zwillinge eines La
 gezeichnet werden; das verschiebt Farbe nur dort, wo ein späterer deckender Texel (Alpha ≥ 0,98) einen
 früheren halbtransparenten überdeckt, um höchstens (1 − a)² ≤ 0,04 %. Ziel: GPU-Rest im Farbpass
 (~14 ms) und Render-Thread-Zeit auf dem Deck deutlich senken.
+
+## Messung 3: Flug über die ganze Big Shell, Build `f9a7a1a`, 21.10. 21:20
+
+Mission `BigShellFlug.Intro` (nur auf dem PC des Eigentümers): Hinflug auf 60 m über die Ostseite
+(Strut A-F-E-D, Brücke D-G, Shell 2 L-K-J, ~40 s), Drehung über Strut J (9 s), Rückflug auf
+Deckhöhe 52 m über die Westseite (J-I-H, Brücken, C-B-A, ~40 s). Zeitgesteuert, für beide
+Renderer gleich; triPerfStats je halbem Abschnitt (42 Fenster). FPS = zeitgewichtetes Mittel.
+
+| Lauf | gesamt | Hinflug | Drehung | Rückflug | schlechtestes Fenster | Fenster mit p95 > 50 ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| WGPU `WGR_DIRECT_BATCH=0` | 39,6 | 31,2 | 75,9 | 47,5 | 12,6 | 28 von 42 |
+| WGPU Standard (`exact`) | 41,1 | 33,1 | 76,8 | 48,0 | 14,4 | 30 von 42 |
+| WGPU `all` | 45,1 | 35,2 | 80,4 | 55,4 | 15,0 | 28 von 42 |
+| GL33 | 68,5 | 64,2 | (Blick aufs Meer) | 62,1 | 37,1 | 0 von 42 |
+
+- `all` bündelt 2 650-2 930 Draws in ~200 Läufen (170-190 mit Zwilling); auf Deckhöhe +17-40 %
+  gegenüber `0`. `exact` bündelt nur ~240 Draws: fast alle Blend-Sektionen der Big Shell haben
+  einen MAT-053-Zwilling.
+- Die Einbrüche (12-17 fps zwischen Strut F, E und D) sind kein GPU- und kein Render-Worker-Problem:
+  GPU p50 17 ms, Worker ~11 ms, der Haupt-Thread wartet nicht auf den Worker (`wait=0`), aber
+  `land:gnd` braucht 40-60 ms je Bild (GL33: ~1 ms). PERF-030 zerlegt die Phase für den nächsten Lauf.
