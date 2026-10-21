@@ -307,6 +307,102 @@ fn vb_whole() -> bool {
     *ENABLED.get_or_init(|| std::env::var("WGR_VB_WHOLE").map(|v| v != "0").unwrap_or(true))
 }
 
+// WGPU-033 -- the colour pass drew every barrier draw (transparent sections, decals, ...) as
+// its own draw_indexed, and a MAT-053 blend section as TWO (solid-texel twin, then the blend),
+// each on its own pipeline. On the MGS2 Big Shell deck that is ~2,600 draws and ~5,000 pipeline
+// switches per frame, ~15 ms of GPU and most of the render worker's encode time. Consecutive
+// draws that share the pipeline, camera and every replay filter differ only in what the args of
+// an indirect draw carry (first_index, base_vertex, first_instance -> their world/material
+// slot), so a run of them becomes one multi_draw_indexed_indirect. Without twins that is the
+// same draw sequence on the GPU: draws in one multi-draw execute and blend in order.
+//
+// With twins it is not: a run draws all its twins, then all its blends, where it used to
+// alternate twin_i, blend_i. A blend draw can now fail the depth test against a LATER section's
+// solid texels, or be painted under a later section's twin instead of over it. Only texels a
+// twin draws are involved (alpha >= SOLID_BLEND_ALPHA); at alpha exactly 1 both orders give the
+// same colour, and for 0.98 <= alpha < 1 the colour differs by at most (1 - alpha) <= 2%, and
+// only where the two sections overlap on screen. That is the owner-approved trade (2026-10-21).
+//   WGR_DIRECT_BATCH=0      every draw on its own, as before
+//   WGR_DIRECT_BATCH=exact  batch only runs without twins (bit-identical image)
+//   default                 batch twin runs too
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DirectBatchMode {
+    Off,
+    Exact,
+    All,
+}
+
+fn direct_batch_mode() -> DirectBatchMode {
+    static MODE: std::sync::OnceLock<DirectBatchMode> = std::sync::OnceLock::new();
+    *MODE.get_or_init(|| parse_direct_batch_mode(std::env::var("WGR_DIRECT_BATCH").ok().as_deref()))
+}
+
+fn parse_direct_batch_mode(v: Option<&str>) -> DirectBatchMode {
+    match v.map(str::trim) {
+        Some("0") | Some("off") => DirectBatchMode::Off,
+        Some("exact") => DirectBatchMode::Exact,
+        _ => DirectBatchMode::All,
+    }
+}
+
+// What two consecutive Direct ops must share to be one multi-draw: the camera (group-0 dynamic
+// offset), the pipeline key, and every per-draw predicate a replay filters on, so a batch is
+// always kept or skipped whole by render_ops (prepassed / water filters, either cutout mode).
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct DirectBatchSig {
+    camera: u32,
+    pipeline: PipelineKey,
+    twin: bool,
+    replay: u8,
+}
+
+// Maximal runs (length >= 2) of consecutive equal `Some` signatures; `None` never joins a run.
+fn direct_batch_runs<T: PartialEq>(sigs: &[Option<T>]) -> Vec<std::ops::Range<usize>> {
+    let mut runs = Vec::new();
+    let mut i = 0;
+    while i < sigs.len() {
+        if sigs[i].is_none() {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        while j < sigs.len() && sigs[j] == sigs[i] {
+            j += 1;
+        }
+        if j - i >= 2 {
+            runs.push(i..j);
+        }
+        i = j;
+    }
+    runs
+}
+
+#[test]
+fn direct_batch_runs_join_only_equal_neighbours() {
+    let s = [None, Some(1), Some(1), Some(1), Some(2), None, Some(2), Some(2), Some(3), Some(1), Some(1)];
+    assert_eq!(direct_batch_runs(&s), vec![1..4, 6..8, 9..11]);
+    // a lone draw and a None in between stay single; equal values across a None never merge
+    assert_eq!(direct_batch_runs(&[Some(5), None, Some(5)]), Vec::<std::ops::Range<usize>>::new());
+    assert!(direct_batch_runs::<u8>(&[]).is_empty());
+    assert!(direct_batch_runs(&[None::<u8>, None]).is_empty());
+}
+
+#[test]
+fn direct_batch_mode_switch_parses() {
+    assert_eq!(parse_direct_batch_mode(None), DirectBatchMode::All);
+    assert_eq!(parse_direct_batch_mode(Some("1")), DirectBatchMode::All);
+    assert_eq!(parse_direct_batch_mode(Some("0")), DirectBatchMode::Off);
+    assert_eq!(parse_direct_batch_mode(Some("off")), DirectBatchMode::Off);
+    assert_eq!(parse_direct_batch_mode(Some(" exact ")), DirectBatchMode::Exact);
+}
+
+fn direct_batch_replay_bits(d: &WgrDraw3D) -> u8 {
+    (draw_replays_before_rays(d, false) as u8)
+        | ((draw_replays_before_rays(d, true) as u8) << 1)
+        | ((draw_replays_before_water(d) as u8) << 2)
+        | ((draw_is_prepassed(d) as u8) << 3)
+}
+
 fn solid_blend_candidate(d: &WgrDraw3D) -> bool {
     let key = PipelineKey::from_draw(d, false);
     d.flags & crate::ffi::WGR_DRAW3D_BLEND_SECTION != 0
@@ -4772,6 +4868,11 @@ pub struct Gfx3d {
     // Stage-3 compute writer).
     indirect_args: Option<wgpu::Buffer>,
     indirect_args_cap: u64,
+    // WGPU-033: this frame's DrawIndexedIndirectArgs for the colour pass's batched Direct runs
+    // (build_direct_batches), one per member in op order; same grow-only rule.
+    direct_batch_args: Option<wgpu::Buffer>,
+    direct_batch_args_cap: u64,
+    direct_batch_frames: u32,
 
     // GPU-driven rendering (docs/gpu-culling-and-depth-plan.md Stage 3): the cull compute +
     // retained scene, the GPU-driven opaque draw pipeline, and its group-1 bind group
@@ -6260,6 +6361,9 @@ impl Gfx3d {
             indirect_enabled,
             indirect_args: None,
             indirect_args_cap: 0,
+            direct_batch_args: None,
+            direct_batch_args_cap: 0,
+            direct_batch_frames: 0,
             gpu_driven_enabled,
             gpu_section_src: Vec::new(),
             evicted_meshes: Default::default(),
@@ -9763,6 +9867,110 @@ impl Gfx3d {
         self.indirect_args_cap = cap;
     }
 
+    // WGPU-033: the batching signature of one op, or None when it must stay a single draw.
+    // Only Direct ops whose draw_one would take the plain rigid path with the whole pool vertex
+    // buffer (no skin buffer, not baked) can share an args buffer; `mode` Exact keeps twin draws
+    // out. Mirrors draw_one's own guards so a batch never holds a draw draw_one would drop.
+    fn direct_batch_sig(&self, op: &Plan3dOp, draws: &[WgrDraw3D], mode: DirectBatchMode) -> Option<DirectBatchSig> {
+        let Plan3dOp::Draw3D { draw, count, kind: DrawKind::Direct, .. } = op else {
+            return None;
+        };
+        let d = draws.get(*draw as usize)?;
+        if d.index_count == 0 || *count == 0 {
+            return None;
+        }
+        let mesh = self.meshes.get(KeyData::from_ffi(d.mesh).into())?;
+        if mesh.skin.is_some() || d.index_begin + d.index_count > mesh.index_count {
+            return None;
+        }
+        let twin = draw_solid_blend_prepassed(d);
+        if twin && mode != DirectBatchMode::All {
+            return None;
+        }
+        Some(DirectBatchSig {
+            camera: d.camera,
+            pipeline: PipelineKey::from_draw(d, false),
+            twin,
+            replay: direct_batch_replay_bits(d),
+        })
+    }
+
+    // WGPU-033: fold runs of consecutive Direct ops with one signature into a DirectBatch op
+    // (see DirectBatchMode). Call after build_indirect, before the replay. Needs first_instance
+    // in indirect args (the same INDIRECT_FIRST_INSTANCE gate as build_indirect) and whole-buffer
+    // vertex binding (WGPU-032); otherwise, or with WGR_DIRECT_BATCH=0, it leaves `ops` alone.
+    pub fn build_direct_batches(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        draws: &[WgrDraw3D],
+        ops: &mut [Plan3dOp],
+    ) {
+        let mode = direct_batch_mode();
+        if mode == DirectBatchMode::Off || !self.indirect_enabled || !vb_whole() {
+            return;
+        }
+        let sigs: Vec<Option<DirectBatchSig>> =
+            ops.iter().map(|op| self.direct_batch_sig(op, draws, mode)).collect();
+        let runs_found = direct_batch_runs(&sigs);
+        let mut args: Vec<DrawIndexedIndirectArgs> = Vec::new();
+        let (mut runs, mut twin_runs) = (0u32, 0u32);
+        for run in runs_found {
+            let (i, j) = (run.start, run.end);
+            let twin = sigs[i].is_some_and(|s| s.twin);
+            let arg_offset = (args.len() as u64 * INDIRECT_ARG_SIZE) as u32;
+            for op in ops[i..j].iter_mut() {
+                let Plan3dOp::Draw3D { draw, base, count, kind } = op else {
+                    unreachable!("direct_batch_sig accepts Draw3D ops only");
+                };
+                let d = &draws[*draw as usize];
+                // direct_batch_sig resolved this mesh a moment ago; nothing ran in between.
+                let key: MeshKey = KeyData::from_ffi(d.mesh).into();
+                let mesh = &self.meshes[key];
+                args.push(DrawIndexedIndirectArgs {
+                    index_count: d.index_count,
+                    instance_count: *count,
+                    first_index: mesh.alloc.ibase + d.index_begin,
+                    base_vertex: mesh.alloc.vbase as i32,
+                    first_instance: *base,
+                });
+                *kind = DrawKind::Batched;
+            }
+            if let Plan3dOp::Draw3D { kind, .. } = &mut ops[i] {
+                *kind = DrawKind::DirectBatch { arg_offset, draws: (j - i) as u32 };
+            }
+            runs += 1;
+            twin_runs += twin as u32;
+        }
+        let singles = sigs.iter().filter(|s| s.is_some()).count() - args.len();
+        static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *TRACE.get_or_init(|| std::env::var("WGR_DIRECT_BATCH_TRACE").is_ok_and(|v| v != "0")) {
+            if self.direct_batch_frames % 300 == 0 {
+                self.queued_log.push(format!(
+                    "[wgr] WGPU-033 direct batches ({mode:?}): {runs} runs ({twin_runs} with twins) \
+                     hold {} draws; {singles} direct draws stay single",
+                    args.len()
+                ));
+            }
+            self.direct_batch_frames = self.direct_batch_frames.wrapping_add(1);
+        }
+        if args.is_empty() {
+            return;
+        }
+        let bytes = args.len() as u64 * INDIRECT_ARG_SIZE;
+        if self.direct_batch_args_cap < bytes || self.direct_batch_args.is_none() {
+            let cap = bytes.next_power_of_two().max(4096);
+            self.direct_batch_args = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("wgr_direct_batch_args"),
+                size: cap,
+                usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            self.direct_batch_args_cap = cap;
+        }
+        queue.write_buffer(self.direct_batch_args.as_ref().unwrap(), 0, bytemuck::cast_slice(&args));
+    }
+
     // Issue one (possibly instanced) indexed draw. `d` supplies the mesh, section,
     // texture, sampler, camera and pipeline shared by every instance; `base..base+count`
     // is the base_instance range, selecting each instance's world/conform/material slot
@@ -10035,6 +10243,26 @@ impl Gfx3d {
             }
         };
 
+        self.bind_plain_whole(pass, textures, d, pipeline, camera_bind, group1_plain, conform_bind, st);
+        pass.draw_indexed_indirect(args, arg_offset as u64);
+    }
+
+    // The plain rigid binding shared by draw_indirect and draw_direct_batch: pipeline, the
+    // frame-constant groups 0..=4 and the pool buffers bound WHOLE (offset 0) -- the args'
+    // base_vertex/first_index address each mesh, so nothing is sliced per sub-draw. Tracks
+    // `st` exactly like draw_one so all three interleave on one pass.
+    #[allow(clippy::too_many_arguments)]
+    fn bind_plain_whole(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        textures: &SharedTextures,
+        d: &WgrDraw3D,
+        pipeline: &wgpu::RenderPipeline,
+        camera_bind: &wgpu::BindGroup,
+        group1_plain: &wgpu::BindGroup,
+        conform_bind: &wgpu::BindGroup,
+        st: &mut Pass3dState,
+    ) {
         // A skinned->plain switch invalidated bind groups 1..=4 (different group-1 pipeline
         // layout); mirror draw_one so the shared Pass3dState stays coherent across paths.
         if st.last_skinned.is_some() && st.last_skinned != Some(false) {
@@ -10087,8 +10315,52 @@ impl Gfx3d {
             pass.set_index_buffer(ibuf.slice(..), wgpu::IndexFormat::Uint32);
             st.ibuf = Some(ibuf_id);
         }
+    }
 
-        pass.draw_indexed_indirect(args, arg_offset as u64);
+    // WGPU-033: submit one batched run of Direct ops (DrawKind::DirectBatch) in the colour pass:
+    // `draws` args from `arg_offset` in direct_batch_args, built by build_direct_batches from
+    // ops that share `d`'s pipeline, camera and twin flag. A twin run issues the MAT-053 solid
+    // twin for the whole run first, then the blends (the ordering change DirectBatchMode
+    // documents); otherwise it is the same draws draw_one would issue one by one.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_direct_batch(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        textures: &SharedTextures,
+        d: &WgrDraw3D,
+        arg_offset: u32,
+        draws: u32,
+        st: &mut Pass3dState,
+        mode: Pass3dMode,
+    ) {
+        let Pass3dMode::Color { depth_write_off } = mode else {
+            return;
+        };
+        let (Some(camera_bind), Some(conform_bind), Some(args), Some(group1_plain)) = (
+            self.cameras.bind.as_ref(),
+            self.conform.bind.as_ref(),
+            self.direct_batch_args.as_ref(),
+            self.group1_plain_bind.as_ref(),
+        ) else {
+            return;
+        };
+        let base_key = PipelineKey::from_draw(d, false);
+        if draw_solid_blend_prepassed(d) {
+            if let Some(p) = self.pipelines.get(&solid_blend_write_key(base_key)) {
+                self.bind_plain_whole(pass, textures, d, p, camera_bind, group1_plain, conform_bind, st);
+                pass.multi_draw_indexed_indirect(args, arg_offset as u64, draws);
+            }
+        }
+        let key = if depth_write_off && base_key.prepassed() {
+            base_key.with_write_off()
+        } else {
+            base_key
+        };
+        let Some(p) = self.pipelines.get(&key) else {
+            return;
+        };
+        self.bind_plain_whole(pass, textures, d, p, camera_bind, group1_plain, conform_bind, st);
+        pass.multi_draw_indexed_indirect(args, arg_offset as u64, draws);
     }
 
     // --- GPU-driven rendering (docs/gpu-culling-and-depth-plan.md Stage 3) ---
@@ -13368,11 +13640,17 @@ struct BucketKey {
 // args buffer (when GPU-driven indirect is on) or leaves it eligible (falls back to the
 // direct draw_one path in the replay). `Direct` is a barrier draw (transparent, decal,
 // skinned/baked, non-standard depth) that always goes through draw_one.
-#[derive(Clone, Copy)]
+// WGPU-033: build_direct_batches folds a run of consecutive `Direct` ops that the colour pass
+// would draw with the same pipeline into one multi_draw_indexed_indirect: the run's first op
+// becomes `DirectBatch` (args byte offset + member count), the rest `Batched`, which the colour
+// replay skips. Every other replay (prepass, stats) still treats both as one draw per op.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DrawKind {
     Direct,
     IndirectEligible,
     Indirect(u32),
+    DirectBatch { arg_offset: u32, draws: u32 },
+    Batched,
 }
 
 // One replayable step in the instancing plan (see plan_3d). Draw3D carries the repr
