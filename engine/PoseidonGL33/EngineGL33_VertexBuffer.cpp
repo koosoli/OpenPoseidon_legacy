@@ -16,6 +16,7 @@
 using namespace Poseidon::Dev;
 
 #include <glad/gl.h>
+#include <cstdlib>
 
 
 // Self-contained VBO/IBO/VAO per shape.
@@ -145,9 +146,27 @@ bool VertexBufferGL33::Init(const Shape& src, VBType type)
     return true;
 }
 
+// WGPU-031: GL33 re-copied every VBDynamic buffer on every draw. Every CfgVehicles shape is
+// VBDynamic (`animated` defaults to true), so a static building addon re-uploaded all of its
+// vertices each frame -- measured 2026-10-21 on a 615-object, 322k-triangle offshore rig: 13-17 ms
+// of the 22 ms GL33 frame in object drawing. The WGPU backend already trusts `bufferDirty`, which
+// InvalidateBuffer raises on every vertex-mutating path (Object deform, Animation, RtAnimation;
+// VertexBufferWgpu::Update), and skips a clean buffer. POSEIDON_GL33_VB_TRUST_DIRTY=1 gives GL33 the
+// same rule; off (default) keeps the old always-copy until it has been checked on animated vehicles.
+static bool Gl33TrustDirty()
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("POSEIDON_GL33_VB_TRUST_DIRTY");
+        return v && v[0] == '1';
+    }();
+    return enabled;
+}
+
 void VertexBufferGL33::Update(const Shape& src, bool dynamic)
 {
-    if (_dynamic || dynamic || bufferDirty)
+    const bool copy = Gl33TrustDirty() ? bufferDirty : (_dynamic || dynamic || bufferDirty);
+    if (copy)
     {
         CopyVertices(src);
         bufferDirty = false;
