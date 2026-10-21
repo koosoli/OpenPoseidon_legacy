@@ -3532,6 +3532,18 @@ bool Man::QueueExternalMove(bool enableVariants)
 
 void Man::AdvanceExternalQueue()
 {
+    // --arma1: an external move already playing as the primary, without a function to run
+    // when it ends, yields to a queued one. A looped Arma 1 stand set by SwitchMove never
+    // reports "finished", and every action queued behind it (boarding, taking a weapon)
+    // waited for good: a1getin7, 408b341e -- the player stood in AmovPercMstpSrasWrflDnon
+    // at the HMMWV, the M113 and the AH-1W and boarded none.
+    if (!_externalMoveFinished && _externalMove.id != MoveIdNone && _externalQueue.Size() > 0 &&
+        !_externalMove.context && _primaryMove.id == _externalMove.id && Arma1Compat::Active())
+    {
+        LOG_INFO(World, "Arma 1 move: {} yields to a queued {} for {}", NAME_T(Type(), _externalMove.id),
+                 NAME_T(Type(), _externalQueue[0].id), (const char*)GetDebugName());
+        _externalMoveFinished = true;
+    }
     if (_externalMoveFinished || _externalMove.id == MoveIdNone)
     {
         NextExternalQueue();
