@@ -726,6 +726,7 @@ class Man: public Person
 	MotionPathItem _externalMove; // some external move is forced
 
 	bool _externalMoveFinished;
+	float _externalStuckSince = -1; // Glob.time the external move first failed to queue (--arma1 fallback)
 	bool _showPrimaryWeapon;
 	bool _showSecondaryWeapon;
 	bool _showHead;
@@ -814,6 +815,8 @@ class Man: public Person
 
 	void NextExternalQueue();
 	void AdvanceExternalQueue();
+	// Queues _externalMove; with Arma 1 moves, starts it directly when no path reaches it (QueueExternalMove)
+	bool QueueExternalMove(bool enableVariants);
 	void GetRelSpeedRange( float &speedZ, float &minSpd, float &maxSpd );
 	// return true if anything has changed
 	bool AdvanceMoveQueue

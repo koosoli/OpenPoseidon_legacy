@@ -2530,7 +2530,7 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
     {
         _turnWanted = 0;
         _walkSpeedWanted = 0;
-        SetMoveQueue(_externalMove, prec <= SimulateVisibleFar);
+        QueueExternalMove(prec <= SimulateVisibleFar);
         return;
     }
 

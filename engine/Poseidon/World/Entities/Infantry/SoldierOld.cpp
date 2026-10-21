@@ -21,6 +21,7 @@
 #include <Poseidon/Foundation/Containers/StaticArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Math/Math3DP.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
@@ -3491,6 +3492,42 @@ void Man::NextExternalQueue()
         _externalMoveFinished = false;
         _externalQueue.Delete(0);
     }
+}
+
+// Arma 1 move sets connect some actions only from certain states: the vehicle boarding
+// moves (GetInLow/Medium/High) start from the weapon-lowered stand, and the path search
+// from a raised rifle can find none. The external move then stayed pending for good --
+// the player stood still, ignored every key, never boarded (test a1getin7: player at the
+// HMMWV, the M113 and the AH-1W, 0 of 4; an AI soldier running in boarded). With Arma 1
+// data a move that finds no path for 0.75 s is started directly, as a cut instead of a
+// blend; without --arma1 nothing changes.
+bool Man::QueueExternalMove(bool enableVariants)
+{
+    if (SetMoveQueue(_externalMove, enableVariants))
+    {
+        _externalStuckSince = -1;
+        return true;
+    }
+    if (!Arma1Compat::Active() || _externalMove.id == MoveIdNone || _primaryMove.id == _externalMove.id)
+        return false;
+    const float now = Glob.time.toFloat();
+    if (_externalStuckSince < 0 || _externalStuckSince > now)
+    {
+        _externalStuckSince = now;
+        return false;
+    }
+    if (now - _externalStuckSince < 0.75f)
+        return false;
+    LOG_INFO(World, "Arma 1 move: no path from {} to {} for {} -- started directly", NAME_T(Type(), _primaryMove.id),
+             NAME_T(Type(), _externalMove.id), (const char*)GetDebugName());
+    _externalStuckSince = -1;
+    _secondaryMove = _primaryMove;
+    SetPrimaryMove(_externalMove);
+    _queueMove.Clear();
+    _primaryFactor = 1;
+    _primaryTime = 0;
+    _secondaryTime = 0;
+    return true;
 }
 
 void Man::AdvanceExternalQueue()
