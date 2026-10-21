@@ -1,4 +1,5 @@
 #include "WaterWgpu.hpp"
+#include <Poseidon/Dev/Diag/PhaseSplit.hpp>
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/World/Terrain/WaterBodies.hpp>
 #include <Poseidon/World/Terrain/WaterSurfaceQuery.hpp>
@@ -927,8 +928,42 @@ void WaterWgpu::DrawEarthWater(Scene& scene, float originX, float originZ, float
     _engine.SubmitWater(std::span<const WgrWaterNode>(&marker, 1));
 }
 
+// PERF-030: the pieces of the WGPU water draw, the `water` slot of land:gnd's breakdown
+// (LandscapeRender.cpp). POSEIDON_WATER_DRAW_SLOW_MS (default 10 ms, 0 = off).
+namespace
+{
+enum WaterDrawSlot : size_t
+{
+    WdSetup, WdRebuild, WdParams, WdProbe, WdRest, WdSlotCount
+};
+Dev::PhaseSplit<WdSlotCount>& WaterDrawSplit()
+{
+    static Dev::PhaseSplit<WdSlotCount> split("water draw", {"setup", "rebuild", "params", "probe", "rest"},
+                                              "POSEIDON_WATER_DRAW_SLOW_MS", 10.0);
+    return split;
+}
+struct WaterDrawFrame
+{
+    size_t open = WdSetup; // the slot the time since the last lap belongs to
+    WaterDrawFrame() { WaterDrawSplit().Start(); }
+    void Lap(size_t done, size_t next)
+    {
+        WaterDrawSplit().Lap(done);
+        open = next;
+    }
+    ~WaterDrawFrame()
+    {
+        WaterDrawSplit().Lap(open);
+        std::string line;
+        if (WaterDrawSplit().EndFrame(line))
+            LOG_INFO(Graphics, "{}", line);
+    }
+};
+} // namespace
+
 void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
 {
+    WaterDrawFrame perfFrame;
     // The rolling Earth heightmap is presentation-only. The finite Landscape's
     // ocean/shoreline cannot describe it, so do not draw that unrelated water.
     if (EarthStreaming::Enabled()) return;
@@ -950,7 +985,9 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     }
 
     const Landscape& land = *GLandscape;
+    perfFrame.Lap(WdSetup, WdRebuild);
     RebuildIfNeeded(land);
+    perfFrame.Lap(WdRebuild, WdParams);
     if (_rootIndex < 0)
     {
         return;
@@ -1385,6 +1422,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         lastLoggedFftResolution = look.fftResolution;
     }
     _engine.QueueWaterParams(_params); // PERF-022: queued, applied before wgr_render_frame
+    perfFrame.Lap(WdParams, WdProbe);
 
     // WTR-001 — repeatable-camera-path foundation. When the Water tab sets a frame tag (>= 0),
     // log it with an FNV-1a digest of the exact UBO bytes just uploaded plus the camera pose,
@@ -1486,6 +1524,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
             SetWaterQueryResults(nullptr, nullptr, 0);
         }
     }
+    perfFrame.Lap(WdProbe, WdRest);
     std::array<HydroWaterInteractionEvent, HydroMaxWaterInteractions> submitted{};
     const uint32_t submittedCount = DrainWaterInteractions(submitted.data(), HydroMaxWaterInteractions);
     for (uint32_t i = 0; i < submittedCount && eventCount < WGR_MAX_WATER_INTERACTIONS; ++i)
