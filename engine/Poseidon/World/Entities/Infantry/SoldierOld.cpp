@@ -21,7 +21,6 @@
 #include <Poseidon/Foundation/Containers/StaticArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
-#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Math/Math3DP.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
@@ -3494,56 +3493,8 @@ void Man::NextExternalQueue()
     }
 }
 
-// Arma 1 move sets connect some actions only from certain states: the vehicle boarding
-// moves (GetInLow/Medium/High) start from the weapon-lowered stand, and the path search
-// from a raised rifle can find none. The external move then stayed pending for good --
-// the player stood still, ignored every key, never boarded (test a1getin7: player at the
-// HMMWV, the M113 and the AH-1W, 0 of 4; an AI soldier running in boarded). With Arma 1
-// data a move that finds no path for 0.75 s is started directly, as a cut instead of a
-// blend; without --arma1 nothing changes.
-bool Man::QueueExternalMove(bool enableVariants)
-{
-    if (SetMoveQueue(_externalMove, enableVariants))
-    {
-        _externalStuckSince = -1;
-        return true;
-    }
-    if (!Arma1Compat::Active() || _externalMove.id == MoveIdNone || _primaryMove.id == _externalMove.id)
-        return false;
-    const float now = Glob.time.toFloat();
-    if (_externalStuckSince < 0 || _externalStuckSince > now)
-    {
-        _externalStuckSince = now;
-        return false;
-    }
-    if (now - _externalStuckSince < 0.75f)
-        return false;
-    LOG_INFO(World, "Arma 1 move: no path from {} to {} for {} -- started directly", NAME_T(Type(), _primaryMove.id),
-             NAME_T(Type(), _externalMove.id), (const char*)GetDebugName());
-    _externalStuckSince = -1;
-    _secondaryMove = _primaryMove;
-    SetPrimaryMove(_externalMove);
-    _queueMove.Clear();
-    _primaryFactor = 1;
-    _primaryTime = 0;
-    _secondaryTime = 0;
-    return true;
-}
-
 void Man::AdvanceExternalQueue()
 {
-    // --arma1: an external move already playing as the primary, without a function to run
-    // when it ends, yields to a queued one. A looped Arma 1 stand set by SwitchMove never
-    // reports "finished", and every action queued behind it (boarding, taking a weapon)
-    // waited for good: a1getin7, 408b341e -- the player stood in AmovPercMstpSrasWrflDnon
-    // at the HMMWV, the M113 and the AH-1W and boarded none.
-    if (!_externalMoveFinished && _externalMove.id != MoveIdNone && _externalQueue.Size() > 0 &&
-        !_externalMove.context && _primaryMove.id == _externalMove.id && Arma1Compat::Active())
-    {
-        LOG_INFO(World, "Arma 1 move: {} yields to a queued {} for {}", NAME_T(Type(), _externalMove.id),
-                 NAME_T(Type(), _externalQueue[0].id), (const char*)GetDebugName());
-        _externalMoveFinished = true;
-    }
     if (_externalMoveFinished || _externalMove.id == MoveIdNone)
     {
         NextExternalQueue();

@@ -1,7 +1,5 @@
 
 #include <Poseidon/World/World.hpp>
-#include <Poseidon/Foundation/Framework/Log.hpp>
-#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
@@ -337,25 +335,18 @@ void UIAction::Process(AIUnit* unit) const
         case ATGetInGunner:
         case ATGetInCargo:
         {
-            // --arma1 diag: why a get-in the player asked for does not happen (a1getin6/7)
-            const bool diagGetIn = Arma1Compat::Active() && unit->IsPlayer();
-            const auto why = [&](const char* reason) {
-                if (diagGetIn)
-                    LOG_INFO(World, "Arma 1 get-in: player action {} on {} refused: {}", (int)type,
-                             veh ? (const char*)veh->GetDebugName() : "null", reason);
-            };
             if (!unit->IsFreeSoldier())
             {
-                why("not a free soldier"); return;
+                return;
             }
             Transport* trans = dyn_cast<Transport>(veh);
             if (!trans)
             {
-                why("target is no transport"); return;
+                return;
             }
             if (unit->IsPlayer() && trans->GetLock() == LSLocked)
             {
-                why("locked"); return;
+                return;
             }
             AIGroup* grp = unit->GetGroup();
             PoseidonAssert(grp);
@@ -364,15 +355,15 @@ void UIAction::Process(AIUnit* unit) const
             // avoid get in enemy vehicle
             if (trans->Commander() && center->IsEnemy(trans->Commander()->GetTargetSide()))
             {
-                why("enemy commander"); return;
+                return;
             }
             if (trans->Driver() && center->IsEnemy(trans->Driver()->GetTargetSide()))
             {
-                why("enemy driver"); return;
+                return;
             }
             if (trans->Gunner() && center->IsEnemy(trans->Gunner()->GetTargetSide()))
             {
-                why("enemy gunner"); return;
+                return;
             }
             for (int i = 0; i < trans->GetManCargo().Size(); i++)
             {
@@ -383,7 +374,7 @@ void UIAction::Process(AIUnit* unit) const
                 }
                 if (center->IsEnemy(man->GetTargetSide()))
                 {
-                    why("enemy cargo"); return;
+                    return;
                 }
             }
             switch (type)
@@ -421,9 +412,6 @@ void UIAction::Process(AIUnit* unit) const
             ActionContextBase* CreateGetInActionContext(Transport * veh, UIActionType pos);
             Ref<ActionContextBase> context = CreateGetInActionContext(trans, type);
             context->function = MFGetIn;
-            if (diagGetIn)
-                LOG_INFO(World, "Arma 1 get-in: player action {} on {} plays getInAction {}", (int)type,
-                         (const char*)veh->GetDebugName(), (int)trans->Type()->GetGetInAction());
             unit->GetPerson()->PlayAction(trans->Type()->GetGetInAction(), context);
             // unit->ProcessGetIn2();
         }

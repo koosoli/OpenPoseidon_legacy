@@ -41,7 +41,9 @@ void Soldier::SuspendedPilot(float deltaT, SimulationImportance prec)
 
     if (_externalMove.id != MoveIdNone)
     {
-        QueueExternalMove(prec <= SimulateVisibleFar);
+        if (SetMoveQueue(_externalMove, prec <= SimulateVisibleFar))
+        {
+        }
     }
     else
     {
@@ -148,7 +150,9 @@ void Soldier::KeyboardPilot(float deltaT, SimulationImportance prec)
     if (_externalMove.id != MoveIdNone)
     {
         _turnWanted = 0;
-        QueueExternalMove(prec <= SimulateVisibleFar);
+        if (SetMoveQueue(_externalMove, prec <= SimulateVisibleFar))
+        {
+        }
         return;
     }
 

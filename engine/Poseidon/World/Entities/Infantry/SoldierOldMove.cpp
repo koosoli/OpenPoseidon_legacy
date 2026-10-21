@@ -1,5 +1,4 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
-#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/AI/AICombatPace.hpp> // AI-AIM-001
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/World/Weather/SnowField.hpp>
@@ -573,10 +572,6 @@ bool Man::PlayAction(ManAction action, ActionContextBase* context)
         return false;
     }
     _externalQueue.Add(MotionPathItem(id, context));
-    if (Arma1Compat::Active() && QIsManual())
-        LOG_INFO(World, "Arma 1 move: player action {} -> {}; external {} finished {} primary {} queued {}",
-                 (int)action, NAME_T(Type(), id), NAME_T(Type(), _externalMove.id), _externalMoveFinished,
-                 NAME_T(Type(), _primaryMove.id), _externalQueue.Size());
     return true;
 }
 
