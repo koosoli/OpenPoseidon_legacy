@@ -95,8 +95,16 @@ Prio 4 und 5 helfen allen großen Modellen (Gebäude-Addons, Reforger) und sind 
 
 - `WGPU-020` (`cc6046c`): P3DM-Sicht-LODs behalten lose Punkte, die eine benannte Selektion hält
   (z. B. Lenkradachse `osaVolantZac`/`osaVolantKon`). `POSEIDON_MLOD_SELECTION_POINTS=0` = alt.
-- `WGPU-021` (`fb483b9`): MLOD-Adapter wendet CfgModels `sections[]` vor `FindSections` an, damit
-  `hiddenSelections` und `setObjectTexture` auf P3DM-Modellen wirken. `POSEIDON_MLOD_CFG_SECTIONS=0` = alt.
+- `WGPU-021` (`fb483b9`, wirksam erst mit `08868c7`): MLOD-Adapter teilt Sektionen an den CfgModels
+  `sections[]`-Selektionen, auch in der von `Model::compile` erzeugten Sektionstabelle (der Weg im Spiel),
+  damit `hiddenSelections` und `setObjectTexture` auf P3DM-Modellen wirken. Keine Fläche wird umsortiert,
+  jedes Stück behält Textur, Flags und RVMAT. `POSEIDON_MLOD_CFG_SECTIONS=0` = alt.
+
+Prüfung: Windows-Spiel-Build `08868c7` grün (Workflow `wgpu-windows.yml`, Artefakt
+`OpenPoseidon-Windows-MrDudeX-wgpu-08868c7`). Die neuen Unit-Tests (`test_mlod_writer.cpp` Ende,
+`test_shape_adapter_cfg_sections.cpp`) sind lokal mit clang 18 syntaxgeprüft; der Loader-Test lief in einem
+Harness (7 Vertices, Selektion mit genau dem Achspunkt). Die volle Testsuite baut in CI derzeit auf keinem
+Branch (auch `MrDudeX-arma2` scheitert dort an fremdem Code), daher kein CI-Testergebnis.
 
 ## Gelernt, bewusst nicht hier umgesetzt
 
