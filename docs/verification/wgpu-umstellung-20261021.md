@@ -115,3 +115,52 @@ Branch (auch `MrDudeX-arma2` scheitert dort an fremdem Code), daher kein CI-Test
   (Material-Overrides gehen denselben Weg wie `surfMat`).
 - Reflektoren: `VehicleAI.cpp:1179` gibt `size` als Winkel weiter, die Größe bleibt 1. Eine Korrektur
   ändert die Lichtkegel-Glow-Größe aller Fahrzeuge und braucht vorher ein Bild und eine Entscheidung.
+
+## Messung 1: Ausgangsstand (Spielordner, Build `59af2f9`), 21.10. 12:25
+
+RTX 3090 Ti, 1600×900 im Fenster, 8x MSAA, Renderskala 1,25, Vsync und FPS-Grenze aus, Mission
+`BigShellBench.Intro`.
+
+| Kamera | GL33 FPS (Bildzeit Mittel / p95) | WGPU FPS (Bildzeit Mittel / p95) |
+| --- | --- | --- |
+| 1 Gesamtansicht | 45,4 (22,0 / 23,0 ms) | 50,8 (19,7 / 49,0 ms) |
+| 2 Deck Strut A | 46,4 (21,6 / 22,8 ms) | 28,8 (34,7 / 71,2 ms) |
+| 3 Meeresspiegel | 43,0 (23,3 / 36,5 ms) | 46,9 (21,3 / 29,1 ms) |
+
+- GL33: Haupt-Thread, 13–17 ms Objektzeichnen, ~19 000 Draw-Aufrufe.
+- WGPU: Haupt-Thread 2 ms; Render-Thread ~22 ms (12 ms in `finish()`+`submit`, auf dem Deck 24 ms bei
+  2 340 Einzel-Draws); GPU 17–20 ms, davon Culling 3,7–4,1 ms, Objekte 1,5 ms, Schatten 0,4 ms.
+- `WGR_COVERAGE_TRACE`: genau 81 Module Partial, 305 Modelle Full (wie aus den Dateien vorhergesagt).
+
+## Messung 2: A/B mit `MrDudeX-wgpu` @ `9a43c0c` (Testordner, gleiche Spieldaten), 21.10. 17:25
+
+„alt“ = `WGR_CULL_COOP=0 WGR_VB_WHOLE=0 WGR_SHADOW_STATE_FILTER=0`, „neu“ = Standard. Gleiches Binary.
+
+| Kamera | WGPU alt FPS (Mittel / p95) | WGPU neu FPS (Mittel / p95) |
+| --- | --- | --- |
+| 1 Gesamtansicht | 54,8 (18,3 / 25,8 ms) | 53,4 (18,7 / 20,4 ms) |
+| 2 Deck Strut A | 36,7 (27,3 / 43,0 ms) | **43,8 (22,8 / 42,4 ms)** |
+| 3 Meeresspiegel | 52,4 (19,1 / 27,8 ms) | 51,4 (19,4 / 23,5 ms) |
+
+| Messgröße (über den ganzen Lauf) | alt | neu |
+| --- | --- | --- |
+| GPU-Culling `cull_total` | 2,5–3,5 ms (Spitzen 7 ms) | **0,7–1,1 ms** |
+| GPU-Bildzeit p50 (Mittel der 5-s-Fenster) | ≈ 22,6 ms | ≈ 19,5 ms |
+| Render-Thread `submit` | ≈ 9,0 ms (Spitzen 17,7) | ≈ 7,9 ms (Spitzen 10,4) |
+
+- Kein Absturz, keine Validierungsfehler im Log.
+- Auf dem Deck bleibt die GPU bei ~22 ms: `colour_pass` 16,8 ms, davon 14,8 ms außerhalb der
+  GPU-getriebenen Blätter, also die ~2 600 Einzel-Draws der halbtransparenten Teile (je Teil Zwilling
+  mit eigener Pipeline plus Blend-Draw). Zusätzlich wartet der Haupt-Thread in `land:gnd` 8–10 ms auf
+  den Render-Thread (Producer-Fenster), p95 39 ms.
+- GL33 mit `POSEIDON_GL33_VB_TRUST_DIRTY=1`: nicht eindeutig. Die Draw-Aufrufe der Läufe unterscheiden
+  sich (11 241 gegen 7 973 an Kamera 1), die Objektzeit pro Aufruf bleibt gleich. GL33 hängt an den
+  Draw-Aufrufen, nicht am Hochladen. Der Schalter bleibt aus.
+
+## Nächster Hebel (wartet auf Entscheidung)
+
+Aufeinanderfolgende Einzel-Draws gleicher Pipeline als ein `multi_draw_indexed_indirect`. Exakt geht
+das nur für Läufe ohne Zwilling. Mit Zwilling müssten alle Zwillinge eines Laufs vor dessen Blend-Draws
+gezeichnet werden; das verschiebt Farbe nur dort, wo ein späterer deckender Texel (Alpha ≥ 0,98) einen
+früheren halbtransparenten überdeckt, um höchstens (1 − a)² ≤ 0,04 %. Ziel: GPU-Rest im Farbpass
+(~14 ms) und Render-Thread-Zeit auf dem Deck deutlich senken.
