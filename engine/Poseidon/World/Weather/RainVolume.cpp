@@ -29,6 +29,33 @@ namespace Poseidon
 RainSystem GRain;
 RainSystem GSnowFlakes;
 
+namespace
+{
+// PERF-031: true when no terrain vertex under the snow window (plus one terrain cell all round)
+// reaches within a metre of `line`. Terrain is piecewise linear between those vertices, so no
+// terrain fragment in the window gets altitude cover (terrain.wgsl snowline_depth: smoothstep from
+// the line upwards, 0 at and below it). Any vertex off the map answers false: the off-map ring is
+// not ours to bound here, so the mask runs as before.
+bool SnowWindowBelowSnowline(const Landscape& land, float x0, float z0, float span, float line)
+{
+    const float grid = land.GetTerrainGrid();
+    const int range = land.GetTerrainRange();
+    if (!(grid > 0.0f) || range <= 0 || !std::isfinite(line))
+        return false;
+    const int xi0 = static_cast<int>(std::floor(x0 / grid)) - 1;
+    const int zi0 = static_cast<int>(std::floor(z0 / grid)) - 1;
+    const int xi1 = static_cast<int>(std::floor((x0 + span) / grid)) + 2;
+    const int zi1 = static_cast<int>(std::floor((z0 + span) / grid)) + 2;
+    if (xi0 < 0 || zi0 < 0 || xi1 >= range || zi1 >= range)
+        return false;
+    for (int z = zi0; z <= zi1; ++z)
+        for (int x = xi0; x <= xi1; ++x)
+            if (!(land.ClippedData(z, x) < line - 1.0f))
+                return false;
+    return true;
+}
+} // namespace
+
 void MaskSnowShelters(const Landscape& land, std::vector<float>& data)
 {
     constexpr int n = SnowField::WindowSize;
@@ -46,6 +73,23 @@ void MaskSnowShelters(const Landscape& land, std::vector<float>& data)
     const auto begin = std::chrono::steady_clock::now();
     size_t probes = 0, masked = 0;
     const float span = n * data[2];
+    // PERF-031 -- the shelter mask writes a deficit under every roof in the 64 m window, probing a
+    // 0.5 m grid against each building's interior voxels: 75 ms every 0.1 s on the main thread over
+    // the MGS2 Big Shell (its modules are buildings whose radius spans the whole window), and that
+    // on Desert Island, where no snow can lie at all -- the alpine snowline is on by default at
+    // ~645 m and nothing there is above 20 m. A deficit only ever subtracts from snow: with no
+    // snowfall deposit in the window (data[3]) the shaders read it only through terrain altitude
+    // cover (terrain.wgsl snow_cover; conform/shader3d snow_depth return 0 without deposit), which
+    // is 0 on every terrain fragment below the line. So when no deposit is present and the window's
+    // terrain stays under the snowline, the mask cannot change a pixel and is skipped.
+    // POSEIDON_SNOW_SHELTER_SKIP=0 masks anyway (for A/B).
+    static const bool skipWhenBare = [] {
+        const char* value = std::getenv("POSEIDON_SNOW_SHELTER_SKIP");
+        return !(value && value[0] == '0');
+    }();
+    if (skipWhenBare && data[3] <= 0.0f &&
+        (!GSnow().EffSnowlineEnabled() || SnowWindowBelowSnowline(land, data[0], data[1], span, GSnow().EffSnowlineHeight())))
+        return;
     const Vector3 centre(data[0] + span*0.5f, 0, data[1] + span*0.5f);
     std::vector<Building*> buildings;
     auto add = [&](Object* object)
