@@ -1423,6 +1423,12 @@ GameValue VehProcessAction(const GameState* state, GameValuePar oper1, GameValue
                 action.type = ATNone;
             }
         }
+            // --arma1 diag (a1getin6/7): what the action command resolves to
+            if (Poseidon::Arma1Compat::Active())
+                LOG_INFO(World, "Arma 1 action command: '{}' -> type {} on {} target {} unit {}",
+                         (const char*)(GameStringType)array[0], (int)action.type, (const char*)veh->GetDebugName(),
+                         action.target ? (const char*)action.target->GetDebugName() : "null",
+                         veh->CommanderUnit() ? "yes" : "none");
             veh->StartActionProcessing(action, veh->CommanderUnit());
             return NOTHING;
         default:
