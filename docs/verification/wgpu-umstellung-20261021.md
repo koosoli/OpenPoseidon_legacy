@@ -185,3 +185,30 @@ Renderer gleich; triPerfStats je halbem Abschnitt (42 Fenster). FPS = zeitgewich
 - Die Einbrüche (12-17 fps zwischen Strut F, E und D) sind kein GPU- und kein Render-Worker-Problem:
   GPU p50 17 ms, Worker ~11 ms, der Haupt-Thread wartet nicht auf den Worker (`wait=0`), aber
   `land:gnd` braucht 40-60 ms je Bild (GL33: ~1 ms). PERF-030 zerlegt die Phase für den nächsten Lauf.
+
+## Messung 4: PERF-030 findet die Einbrüche, PERF-031 behebt sie (21.10. 22:17 / 23:00)
+
+PERF-030 (Build `5d9730e`, ein WGPU-Lauf mit `all`): jedes langsame `land:gnd`-Bild war der
+Terrain-Draw, und darin ausschließlich der Schnee-Upload. `MaskSnowShelters` prüfte alle 0,1 s
+1 515 526 Punkte unter 240 Gebäuden (die Big-Shell-Module) gegen deren Innenraum-Voxel: 75 ms je
+Aufruf, obwohl auf Desert Island kein Schnee liegen kann (die alpine Schneegrenze ist standardmäßig
+an, 645 m). Mittel `land:gnd` 11-17 ms, davon `snow` 10-16 ms; alle 84 langsamen Terrain-Bilder `snow`.
+
+PERF-031 (`1b97cf4` + `b3f8c9c`): (1) ohne Schneefall und ohne Gelände an der Schneegrenze im
+64-m-Fenster entfällt die Maske (kann kein Pixel ändern); (2) mit Schnee merkt sich jedes Gebäude
+seine Prüfergebnisse auf dem globalen 0,5-m-Raster, ein Aufruf prüft nur Unbekanntes.
+
+Flug, WGPU `all`, gleiche Mission (zeitgewichtete fps):
+
+| Lauf | gesamt | Hinflug | Rückflug | schlechtester Abschnitt | Abschnitte mit p95 > 50 ms | max. p95 |
+| --- | --- | --- | --- | --- | --- | --- |
+| ohne Schnee, `5d9730e` | 44,9 | 34,7 | 56,0 | 13,2 | 28 von 42 | 104 ms |
+| ohne Schnee, `b3f8c9c` | **74,2** | 71,4 | 75,8 | **54,8** | **0** | 23 ms |
+| 30 cm Schnee, `5d9730e` | 43,2 | 34,1 | 52,4 | 14,5 | 29 von 42 | 105 ms |
+| 30 cm Schnee, `b3f8c9c` | **68,5** | 65,0 | 71,0 | 50,6 | 0 | 23 ms |
+| 30 cm Schnee, `b3f8c9c`, `POSEIDON_SNOW_SHELTER_CACHE=0` | 40,3 | 30,9 | 50,8 | 13,2 | 29 von 42 | 143 ms |
+| GL33 (Messung 3) | 68,5 | 64,2 | 62,1 | 37,1 | 0 | 28 ms |
+
+- Mit Schnee: neue Maske 2,7 ms statt 75 ms je Aufruf, 0 neue Prüfungen, 1 515 526 aus dem Cache,
+  **masked=91 280 in allen Läufen** -- dasselbe Ergebnis.
+- WGPU ist damit auf dem ganzen Flug schneller als GL33 und ohne Ruckler.
