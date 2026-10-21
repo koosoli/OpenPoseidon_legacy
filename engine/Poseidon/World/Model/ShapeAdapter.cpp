@@ -14,6 +14,7 @@
 #include <Poseidon/Graphics/Rendering/Lighting/Material.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
+#include <Poseidon/Foundation/Common/Filenames.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
@@ -427,6 +428,64 @@ static void SynthesizeBoxGeometryMass(LODShapeWithShadow* shape, Shape* geom, Au
 //   MLOD: MLODLoader converts raw POINT_* flags (data3d.h) to ClipFlags, encodes
 //         materials into ClipUserMask, then stores in vertex.flags.
 // Both paths are identical here — always cast vertex.flags to ClipFlags directly.
+std::vector<std::string> ResolveCfgModelSections(const std::string& sourcePath)
+{
+    std::vector<std::string> names;
+    const ParamEntry* models = Pars.FindEntry("CfgModels");
+    if (!models || sourcePath.empty() || sourcePath.size() >= 256)
+        return names;
+    char shortName[256];
+    GetFilename(shortName, sourcePath.c_str());
+    while (char* bad = strpbrk(shortName, " -/()"))
+        *bad = '_';
+    const ParamEntry* cls = models->FindEntry(shortName);
+    if (!cls)
+        cls = models->FindEntry("default");
+    // `sectionsInherit` is a chain; a cycle in a broken addon must not hang the load.
+    for (int depth = 0; cls && depth < 32; ++depth)
+    {
+        if (const ParamEntry* sections = cls->FindEntry("sections"); sections && sections->IsArray())
+        {
+            for (int i = 0; i < sections->GetSize(); ++i)
+            {
+                const RStringB name = (*sections)[i];
+                if (name.GetLength() > 0)
+                    names.emplace_back(static_cast<const char*>(name));
+            }
+        }
+        const ParamEntry* inherit = cls->FindEntry("sectionsInherit");
+        if (!inherit)
+            break;
+        const RStringB parent = *inherit;
+        if (parent.GetLength() <= 0)
+            break;
+        cls = models->FindEntry(parent);
+    }
+    return names;
+}
+
+// WGPU-021: mark the CfgModels section selections of one MLOD LOD before FindSections, as
+// Shape::DefineSections does on the legacy path. Without it a hidden selection that shares a
+// texture with the rest of the model owns no section of its own, and hiddenSelections,
+// setObjectTexture and the "hide" animations change nothing on the vertex-buffer draw path.
+// POSEIDON_MLOD_CFG_SECTIONS=0 restores the old behaviour.
+static void MarkCfgModelSections(Shape* lod, const std::vector<std::string>& names)
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("POSEIDON_MLOD_CFG_SECTIONS");
+        return !v || v[0] != '0';
+    }();
+    if (!enabled || !lod)
+        return;
+    for (const std::string& name : names)
+    {
+        const int si = lod->FindNamedSel(name.c_str());
+        if (si >= 0)
+            lod->NamedSel(si).SetNeedsSections(true);
+    }
+}
+
 void BuildAdapterBankTables(const Poseidon::Model::Model& model, AdapterBankTables& tables)
 {
     static const bool trace = [] {
@@ -441,6 +500,9 @@ void BuildAdapterBankTables(const Poseidon::Model::Model& model, AdapterBankTabl
     tables.surfMats.resize(lodCount);
     tables.mlodSurfMats.clear();
     tables.mlodSurfMats.resize(lodCount);
+    tables.cfgSections.clear();
+    if (!isODOL)
+        tables.cfgSections = ResolveCfgModelSections(model.sourcePath);
     for (int i = 0; i < lodCount; ++i)
     {
         const Mesh& mesh = model.lodLevels[i].mesh;
@@ -1499,6 +1561,12 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
         }
         else
         {
+            // WGPU-021: the section selections come from the config, which only the main
+            // thread may read. A worker conversion takes them from the bank tables.
+            if (tables)
+                MarkCfgModelSections(shape->_lods[i], tables->cfgSections);
+            else if (Foundation::IsMainThread())
+                MarkCfgModelSections(shape->_lods[i], ResolveCfgModelSections(model.sourcePath));
             shape->_lods[i]->FindSections();
             // RFG-040: an MLOD carries no section table, so the branch above never runs
             // and FindSections -- which groups faces by texture/special only -- leaves
