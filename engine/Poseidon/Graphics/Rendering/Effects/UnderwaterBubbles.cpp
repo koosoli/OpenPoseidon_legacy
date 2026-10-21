@@ -36,7 +36,10 @@ EventRing<BubbleBlast, 16>& Blasts()
 // sphere of air read as a bubble rather than as a white dot.
 Texture* BubbleTexture()
 {
-    static Ref<Texture> texture;
+    // Never destroyed: a static Ref's destructor runs at process exit, after the graphics
+    // engine is gone, and TextureGL33::ReleaseMemory then faults (0xC0000005 after
+    // 'Shutdown complete'). The engine's own shutdown releases the texture.
+    static Ref<Texture>& texture = *new Ref<Texture>();
     static bool tried = false;
     if (!tried && GEngine && GEngine->TextBank())
     {
@@ -64,7 +67,10 @@ Texture* BubbleTexture()
 // A soft disc for the cavity streak, the gas bubble and the flash.
 Texture* SoftTexture()
 {
-    static Ref<Texture> texture;
+    // Never destroyed: a static Ref's destructor runs at process exit, after the graphics
+    // engine is gone, and TextureGL33::ReleaseMemory then faults (0xC0000005 after
+    // 'Shutdown complete'). The engine's own shutdown releases the texture.
+    static Ref<Texture>& texture = *new Ref<Texture>();
     static bool tried = false;
     if (!tried && GEngine && GEngine->TextBank())
     {
@@ -91,7 +97,10 @@ Texture* SoftTexture()
 // A big gas bubble drawn with the small-bubble texture became a cartoon ring.
 Texture* GasTexture()
 {
-    static Ref<Texture> texture;
+    // Never destroyed: a static Ref's destructor runs at process exit, after the graphics
+    // engine is gone, and TextureGL33::ReleaseMemory then faults (0xC0000005 after
+    // 'Shutdown complete'). The engine's own shutdown releases the texture.
+    static Ref<Texture>& texture = *new Ref<Texture>();
     static bool tried = false;
     if (!tried && GEngine && GEngine->TextBank())
     {
