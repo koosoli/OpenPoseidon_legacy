@@ -23,6 +23,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace Poseidon
 {
@@ -54,6 +56,26 @@ bool SnowWindowBelowSnowline(const Landscape& land, float x0, float z0, float sp
                 return false;
     return true;
 }
+// PERF-031 (second half): the probe answers per building, kept between calls.
+//
+// With snow on, the mask still probed every 0.5 m lattice point under every roof in the window on
+// every call -- the same points, with the same answers, every 0.1 s, because buildings and terrain
+// do not move: 75 ms a call over the Big Shell. The probe points sit on one global lattice (the
+// window origin is a whole multiple of 2 m, the probes 0.25 m + 0.5 m k off it), so each building
+// keeps a byte per lattice point of its footprint: 0 not probed yet, 1 open, 2 covered. A call
+// probes only the points it has not seen and reads the rest. The answer depends on the building's
+// pose and interior and on the terrain height at the point, so a changed pose, radius or interior
+// resets that building, and a terrain height revision resets them all. POSEIDON_SNOW_SHELTER_CACHE=0
+// probes every point every call, as before.
+struct ShelterProbeCache
+{
+    const void* interior = nullptr;
+    Vector3 position, direction, up;
+    float radius = 0.0f;
+    int gx0 = 0, gz0 = 0, w = 0, h = 0; // footprint on the global 0.5 m lattice
+    std::vector<uint8_t> state;
+    uint64_t lastUse = 0;
+};
 } // namespace
 
 void MaskSnowShelters(const Landscape& land, std::vector<float>& data)
@@ -116,6 +138,27 @@ void MaskSnowShelters(const Landscape& land, std::vector<float>& data)
         for (int i = 0; i < GWorld->NFastVehicles(); ++i) add(GWorld->GetFastVehicle(i));
         for (int i = 0; i < GWorld->NOutVehicles(); ++i) add(GWorld->GetOutVehicle(i));
     }
+    static const bool cacheEnabled = [] {
+        const char* value = std::getenv("POSEIDON_SNOW_SHELTER_CACHE");
+        return !(value && value[0] == '0');
+    }();
+    static std::unordered_map<const Building*, ShelterProbeCache> probeCache;
+    static uint64_t cacheHeightRevision = ~0ull;
+    static uint64_t cacheCall = 0;
+    ++cacheCall;
+    if (cacheHeightRevision != land.HeightRevision())
+    {
+        probeCache.clear();
+        cacheHeightRevision = land.HeightRevision();
+    }
+    // Bounded: buildings that have not been in a window for a long while are dropped.
+    if (probeCache.size() > 2048)
+        for (auto it = probeCache.begin(); it != probeCache.end();)
+            it = (cacheCall - it->second.lastUse > 600) ? probeCache.erase(it) : std::next(it);
+    // The lattice mapping below holds only for the window SnowField hands over.
+    const bool latticeOk = cacheEnabled && data[2] == 0.125f && std::fmod(data[0], 2.0f) == 0.0f &&
+                           std::fmod(data[1], 2.0f) == 0.0f;
+    size_t cachedReads = 0;
     for (const Building* building : buildings)
     {
         const auto* interior = BuildingInterior::GetFor(building->GetBType());
@@ -123,6 +166,37 @@ void MaskSnowShelters(const Landscape& land, std::vector<float>& data)
         const auto p = building->Position();
         const float radius = building->GetRadius();
         const auto inv = building->GetInvTransform();
+        const bool tilted = building->DirectionUp().Y() < 0.999f;
+        const auto probe = [&](float wx, float wz)
+        {
+            const Vector3 point(wx, land.SurfaceY(wx, wz)+0.05f, wz);
+            ++probes;
+            bool covered = interior->CoveredFromAboveModel(inv * point);
+            if (tilted)
+                covered = interior->ClassifySegmentModel(inv*point, inv*(point+Vector3(0, radius*2, 0))) != -1;
+            return covered;
+        };
+        ShelterProbeCache* cache = nullptr;
+        if (latticeOk)
+        {
+            ShelterProbeCache& c = probeCache[building];
+            if (c.interior != interior || c.radius != radius || !(c.position == p) ||
+                !(c.direction == building->Direction()) || !(c.up == building->DirectionUp()))
+            {
+                c.interior = interior;
+                c.radius = radius;
+                c.position = p;
+                c.direction = building->Direction();
+                c.up = building->DirectionUp();
+                c.gx0 = static_cast<int>(std::floor((p.X() - radius - 0.25f) / 0.5f)) - 1;
+                c.gz0 = static_cast<int>(std::floor((p.Z() - radius - 0.25f) / 0.5f)) - 1;
+                c.w = static_cast<int>(std::ceil(2.0f * radius / 0.5f)) + 4;
+                c.h = c.w;
+                c.state.assign(static_cast<size_t>(c.w) * static_cast<size_t>(c.h), 0);
+            }
+            c.lastUse = cacheCall;
+            cache = &c;
+        }
         const int x0 = std::max(0, static_cast<int>(std::floor((p.X()-radius-data[0]) / (data[2]*step))) * step);
         const int z0 = std::max(0, static_cast<int>(std::floor((p.Z()-radius-data[1]) / (data[2]*step))) * step);
         const int x1 = std::min(n, static_cast<int>(std::ceil((p.X()+radius-data[0]) / data[2])));
@@ -132,11 +206,26 @@ void MaskSnowShelters(const Landscape& land, std::vector<float>& data)
             {
                 const float wx = data[0] + (x+step*0.5f)*data[2];
                 const float wz = data[1] + (z+step*0.5f)*data[2];
-                const Vector3 point(wx, land.SurfaceY(wx, wz)+0.05f, wz);
-                ++probes;
-                bool covered = interior->CoveredFromAboveModel(inv * point);
-                if (building->DirectionUp().Y() < 0.999f)
-                    covered = interior->ClassifySegmentModel(inv*point, inv*(point+Vector3(0, radius*2, 0))) != -1;
+                bool covered;
+                uint8_t* slot = nullptr;
+                if (cache)
+                {
+                    // wx = 0.25 + 0.5 * gx exactly: data[0] is a whole multiple of 2 m, x of 4 cells.
+                    const int gx = static_cast<int>(data[0] * 2.0f) + x / step - cache->gx0;
+                    const int gz = static_cast<int>(data[1] * 2.0f) + z / step - cache->gz0;
+                    if (gx >= 0 && gz >= 0 && gx < cache->w && gz < cache->h)
+                        slot = &cache->state[static_cast<size_t>(gz) * cache->w + gx];
+                }
+                if (slot && *slot != 0)
+                {
+                    covered = *slot == 2;
+                    ++cachedReads;
+                }
+                else
+                {
+                    covered = probe(wx, wz);
+                    if (slot) *slot = covered ? 2 : 1;
+                }
                 if (!covered) continue;
                 for (int dz = 0; dz < step && z+dz < n; ++dz)
                     for (int dx = 0; dx < step && x+dx < n; ++dx)
@@ -152,7 +241,7 @@ void MaskSnowShelters(const Landscape& land, std::vector<float>& data)
     {
         nextTrace = Glob.time.toFloat() + 2.0f;
         const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now()-begin).count();
-        LOG_INFO(World, "Snow shelter: buildings={} probes={} masked={} time={:.0f}us", buildings.size(), probes, masked, us);
+        LOG_INFO(World, "Snow shelter: buildings={} probes={} cached={} masked={} time={:.0f}us", buildings.size(), probes, cachedReads, masked, us);
     }
 }
 
