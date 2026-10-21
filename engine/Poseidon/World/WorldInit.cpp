@@ -1,3 +1,4 @@
+#include <Poseidon/World/Scene/ScriptLight.hpp>
 #include <Poseidon/World/Terrain/CraterField.hpp>
 #include <Poseidon/World/Effects/BuildingBreach.hpp>
 #include <Poseidon/Core/Game/GameLoop.hpp> // LockstepPacingActive (SIM-815)
@@ -1297,6 +1298,7 @@ void World::CleanUpDeinit()
 
     extern RefArray<Object> MapDiags;
     MapDiags.Clear();
+    Poseidon::ClearScriptLights(); // LGT-SCRIPT-001: "#lightpoint" lights end with the mission
 
     _engine->TextBank()->FlushTextures();
 }
