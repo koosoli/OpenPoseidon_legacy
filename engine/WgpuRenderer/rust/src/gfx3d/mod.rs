@@ -10350,6 +10350,12 @@ impl Gfx3d {
             return;
         };
         let base_key = PipelineKey::from_draw(d, false);
+        // PERF-PIPE-ASYNC: draw_one skips a draw whose pipeline set is still compiling. That set
+        // depends only on the pipeline key and the twin flag (required_pipelines), both part of
+        // the batch signature, so the representative answers for every member.
+        if !self.draw_ready(d, false) {
+            return;
+        }
         if draw_solid_blend_prepassed(d) {
             if let Some(p) = self.pipelines.get(&solid_blend_write_key(base_key)) {
                 self.bind_plain_whole(pass, textures, d, p, camera_bind, group1_plain, conform_bind, st);
