@@ -10,6 +10,10 @@ on:
     branches:
       - MrDudeX-wgpu
       - 'MrDudeX-wgpu-**'
+    # A docs-only push must not cancel a running game build (concurrency below).
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
 
 # Only the newest push is worth a build.
 concurrency:
