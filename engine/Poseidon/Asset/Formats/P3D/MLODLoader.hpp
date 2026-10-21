@@ -9,6 +9,7 @@
 #include <Poseidon/Core/Types.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <unordered_map>
 #include <vector>
@@ -480,10 +481,41 @@ class MLODLoader
         // faces at all (above) and as the binarized form keeps them. Built from the faces alone, a LOD with both lost
         // them, and every named selection on them came out empty. Visual and geometry LODs keep only face corners: a
         // stray unused point there is an editing leftover, and the controlled MLOD path refuses unused vertices.
-        const bool keepLoosePoints = taggData.resolution >= 1e15f;
+        //
+        // One exception in the visual LODs (WGPU-020): a loose point that a NAMED SELECTION holds is not
+        // a leftover, it is an axis or a marker the author placed on purpose. The engine reads several of those from
+        // a visual LOD -- the steering-wheel axis `osaVolantZac`/`osaVolantKon` comes from the pilot view LOD
+        // (Car.cpp, Motorcycle.cpp, Ship.cpp) -- and dropping the point left the selection empty ("No point in
+        // selection ...") and the wheel without an axis. The legacy SP3X loader keeps every point in every LOD
+        // (ShapeSetup.cpp), so keeping exactly the selected ones brings P3DM to the same answer. The extra vertices
+        // belong to no face, so nothing more is drawn. Geometry LODs (1e13 and the shadow/fire range below 1e15) are left
+        // alone: their selections feed the convex components, and a loose point there would widen a hull.
+        // POSEIDON_MLOD_SELECTION_POINTS=0 restores the old rule.
+        static const bool keepSelectedPoints = []
+        {
+            const char* v = std::getenv("POSEIDON_MLOD_SELECTION_POINTS");
+            return !v || v[0] != '0';
+        }();
+        std::vector<char> pointInSelection;
+        if (keepSelectedPoints && taggData.resolution < 1e13f)
+        {
+            pointInSelection.assign(pointToVertices.size(), 0);
+            for (const auto& sel : taggData.namedSelections)
+            {
+                const size_t n = std::min(sel.pointWeights.size(), pointInSelection.size());
+                for (size_t p = 0; p < n; ++p)
+                {
+                    if (sel.pointWeights[p] > 0)
+                        pointInSelection[p] = 1;
+                }
+            }
+        }
+        const bool keepLoosePoints = taggData.resolution >= 1e15f || !pointInSelection.empty();
         for (size_t pointIdx = 0; keepLoosePoints && pointIdx < pointToVertices.size(); ++pointIdx)
         {
             if (!pointToVertices[pointIdx].empty())
+                continue;
+            if (taggData.resolution < 1e15f && !pointInSelection[pointIdx])
                 continue;
             const auto& point = vertexTable.points[pointIdx];
             Vertex v;
