@@ -69,6 +69,11 @@ jobs:
           grep -E "error( [A-Z]+[0-9]+)?:|undefined symbol|LNK[0-9]+" build-errors.txt | head -40 | while IFS= read -r line; do
             echo "::error::${line//%/%25}"
           done
+          # rustc errors ("error[E0425]: ...") carry their location on the following "--> file:line"
+          # lines; emit each error with its next lines folded into one annotation.
+          grep -E -A 8 "^error(\[E[0-9]+\])?: " build-errors.txt | head -120 | awk 'BEGIN{m=""} /^--$/ {if(m!="") print m; m=""; next} {gsub(/%/,"%25"); m = (m=="") ? $0 : m " | " $0} END{if(m!="") print m}' | head -15 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
           exit 1
 
       - name: Collect game files
