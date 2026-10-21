@@ -318,13 +318,17 @@ fn vb_whole() -> bool {
 //
 // With twins it is not: a run draws all its twins, then all its blends, where it used to
 // alternate twin_i, blend_i. A blend draw can now fail the depth test against a LATER section's
-// solid texels, or be painted under a later section's twin instead of over it. Only texels a
-// twin draws are involved (alpha >= SOLID_BLEND_ALPHA); at alpha exactly 1 both orders give the
-// same colour, and for 0.98 <= alpha < 1 the colour differs by at most (1 - alpha) <= 2%, and
-// only where the two sections overlap on screen. That is the owner-approved trade (2026-10-21).
+// twin texels, or be painted under a later section's twin instead of over it -- only where two
+// sections of one run overlap on screen, and only on texels a twin draws. Those are NOT just
+// alpha >= SOLID_BLEND_ALPHA: the colour twin keeps the cutout mip lift (cutout_mip_alpha, 0.5;
+// shader3d.wgsl tests the lifted alpha, blends the plain one), so on a minified texture a twin
+// covers texels down to 0.98 / (1 + 0.5 * lod) -- 0.49 at lod 2 -- and the colour change reaches
+// ~15% for two overlapping sections (review of WGPU-033, 2026-10-21). With WGR_CUTOUT_MIP_ALPHA=0
+// it is at most (1 - alpha) <= 2%. The owner approved a small deviation, not that one, so twin
+// batching stays opt-in until they decide:
 //   WGR_DIRECT_BATCH=0      every draw on its own, as before
-//   WGR_DIRECT_BATCH=exact  batch only runs without twins (bit-identical image)
-//   default                 batch twin runs too
+//   default (or =exact)     batch only runs without twins (bit-identical image)
+//   WGR_DIRECT_BATCH=all    batch twin runs too (the deviation above)
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum DirectBatchMode {
     Off,
@@ -340,8 +344,8 @@ fn direct_batch_mode() -> DirectBatchMode {
 fn parse_direct_batch_mode(v: Option<&str>) -> DirectBatchMode {
     match v.map(str::trim) {
         Some("0") | Some("off") => DirectBatchMode::Off,
-        Some("exact") => DirectBatchMode::Exact,
-        _ => DirectBatchMode::All,
+        Some("all") => DirectBatchMode::All,
+        _ => DirectBatchMode::Exact,
     }
 }
 
@@ -389,8 +393,9 @@ fn direct_batch_runs_join_only_equal_neighbours() {
 
 #[test]
 fn direct_batch_mode_switch_parses() {
-    assert_eq!(parse_direct_batch_mode(None), DirectBatchMode::All);
-    assert_eq!(parse_direct_batch_mode(Some("1")), DirectBatchMode::All);
+    assert_eq!(parse_direct_batch_mode(None), DirectBatchMode::Exact);
+    assert_eq!(parse_direct_batch_mode(Some("1")), DirectBatchMode::Exact);
+    assert_eq!(parse_direct_batch_mode(Some("all")), DirectBatchMode::All);
     assert_eq!(parse_direct_batch_mode(Some("0")), DirectBatchMode::Off);
     assert_eq!(parse_direct_batch_mode(Some("off")), DirectBatchMode::Off);
     assert_eq!(parse_direct_batch_mode(Some(" exact ")), DirectBatchMode::Exact);
