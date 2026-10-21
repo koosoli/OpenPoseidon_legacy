@@ -483,6 +483,12 @@ no screenshots written. The stall report now also takes stacks at 90 and 170 s.
   shows it if it does.
 - **Campaign run 2** (`439492f`): **C0 -> C1** (Harvest Red; C0 has no debriefing and goes
   straight to its outro) and again CE0 -> CE1; both exit 0, no script error.
+- **Javelin optic** (`2c46a50`): CorePatch's `javelin_optic.p3d` (ODOL 49, 2.5 kB) was
+  refused -- its LOD directory ends the only LOD 22 bytes early, while the rest data (sized as
+  usual, declared - 4) runs to the end of the file. The reader now accepts a declared rest
+  size past the LOD end when it fits the file and is consumed exactly. Offline on the laptop
+  the old and new reader agree on 317 Arma 2/OA models; only this file changes (refused ->
+  1 LOD, 61 vertices). Not yet checked in game.
 
 ## Steps
 
