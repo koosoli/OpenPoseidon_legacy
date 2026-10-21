@@ -502,6 +502,13 @@ no screenshots written. The stall report now also takes stacks at 90 and 170 s.
   bubbles (foreign code, named as such in the commit). Run 31 checks the merged state.
 - The CI artifact carries exe, dll and PDBs only, not the `assets\` feature packs; the
   laptop's game folder has none either. The Arma 2 tests do not depend on them.
+- Run 31 (`e99a7a3`): 98/97, 13059 Arma, 0 CWA, every exit code 0 -- the merged state is clean.
+- **Campaign branches** (`1f07764`: `OP_A2_CAMPAIGN` takes one end per mission, `end2:end1:loser`;
+  the laptop harness takes `mission|KEY=value` per line). Campaign run 5 walked four branches --
+  END2/END4 through I3, C5B, C6B to C7D; a lost C5 played again, then END5 to C7C; OA's END3 to
+  CE5B and END4 to CE7B; END3 to CE7A and a repeated CE7A -- each exactly as the campaigns'
+  description.ext says, with no script error. Together with campaign run 3 every mission of
+  both campaigns has been entered from its campaign except C6, C7B, C7EF (reachable, not walked).
 
 ## Steps
 
