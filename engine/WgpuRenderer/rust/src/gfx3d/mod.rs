@@ -297,6 +297,16 @@ pub(crate) fn draw_solid_blend_prepassed(d: &WgrDraw3D) -> bool {
     enabled && solid_blend_candidate(d)
 }
 
+// WGPU-032: rigid direct draws bind the geometry pool (or the baked skin buffer) WHOLE and
+// address the mesh through base_vertex, as draw_indirect already does, instead of re-slicing the
+// vertex buffer at every mesh change. The object shaders never read @builtin(vertex_index), so
+// the fetched vertices are the same; only the VS-skinning fallback keeps the slice (its slot-1
+// skin buffer is per mesh and must stay aligned at base_vertex 0). `WGR_VB_WHOLE=0` = old slices.
+fn vb_whole() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("WGR_VB_WHOLE").map(|v| v != "0").unwrap_or(true))
+}
+
 fn solid_blend_candidate(d: &WgrDraw3D) -> bool {
     let key = PipelineKey::from_draw(d, false);
     d.flags & crate::ffi::WGR_DRAW3D_BLEND_SECTION != 0
@@ -8553,8 +8563,8 @@ impl Gfx3d {
                 let track = shadow_state_track();
                 let mut last_pipe: *const wgpu::RenderPipeline = std::ptr::null();
                 let mut last_b1: (*const wgpu::BindGroup, u64) = (std::ptr::null(), u64::MAX);
-                let mut last_b2: *const wgpu::BindGroup = std::ptr::null();
-                let mut last_b3: *const wgpu::BindGroup = std::ptr::null();
+                let mut last_b2 = None;
+                let mut last_b3 = None;
                 let mut b4_set = false;
                 let mut ibuf_set = false;
                 let mut last_v0: (*const wgpu::Buffer, u64) = (std::ptr::null(), u64::MAX);
@@ -8591,7 +8601,8 @@ impl Gfx3d {
                             last_b1 = (palette_bind, off);
                         }
                         rp.set_vertex_buffer(1, skin.slice(..));
-                    } else {
+                        bound_g1_plain = false;
+                    } else if !filter || !bound_g1_plain {
                         // Whole-buffer storage bound once; each instance's slot travels as
                         // base_instance (read via @builtin(instance_index)) — no dynamic offset.
                         let cb: &wgpu::BindGroup = caster_bind;
@@ -8600,15 +8611,18 @@ impl Gfx3d {
                             last_b1 = (cb, u64::MAX - 1);
                         }
                     }
-                    let b2 = textures.texture_bind(device, if alpha { caster.texture_id } else { 0 });
-                    if !track || !std::ptr::eq(b2, last_b2) {
-                        rp.set_bind_group(2, b2, &[]);
-                        last_b2 = b2;
+                    // Keyed by texture id / sampler index, not by bind-group address (WGPU-032 review):
+                    // texture_bind may create and cache groups as it goes, and a cache that grows can
+                    // move its entries, so a new group could sit where the last one was and be skipped.
+                    let tex_id = if alpha { caster.texture_id } else { 0 };
+                    if !track || last_b2 != Some(tex_id) {
+                        rp.set_bind_group(2, textures.texture_bind(device, tex_id), &[]);
+                        last_b2 = Some(tex_id);
                     }
-                    let b3 = textures.sampler_bind(caster.sampler.index());
-                    if !track || !std::ptr::eq(b3, last_b3) {
-                        rp.set_bind_group(3, b3, &[]);
-                        last_b3 = b3;
+                    let sampler_index = caster.sampler.index();
+                    if !track || last_b3 != Some(sampler_index) {
+                        rp.set_bind_group(3, textures.sampler_bind(sampler_index), &[]);
+                        last_b3 = Some(sampler_index);
                     }
                     if !track || !b4_set {
                         rp.set_bind_group(4, conform_bind, &[]);
@@ -8619,12 +8633,9 @@ impl Gfx3d {
                     // mesh's vbase. Sliced to that byte offset with base_vertex 0 (as in
                     // draw_one); the index buffer is always the pool's Uint32 ibuf, its range
                     // offset by the mesh's ibase.
-                    let (vbuf, vert_off) = match baked {
-                        Some(bv) if self.skinned_vbuf.is_some() => (
-                            self.skinned_vbuf.as_ref().unwrap(),
-                            bv as u64 * BAKED_VERT_SIZE,
-                        ),
-                        _ => (self.pool.vbuf(), mesh.alloc.vbase as u64 * BAKED_VERT_SIZE),
+                    let (vbuf, vert_base) = match baked {
+                        Some(bv) if self.skinned_vbuf.is_some() => (self.skinned_vbuf.as_ref().unwrap(), bv),
+                        _ => (self.pool.vbuf(), mesh.alloc.vbase),
                     };
                     // Whole buffer + base_vertex when tracking (and not the VS-skin fallback);
                     // the old per-mesh slice otherwise.
@@ -9927,19 +9938,24 @@ impl Gfx3d {
             st.conform = true;
         }
 
-        // Vertex source at slot 0: baked draws pull from the shared skinned output buffer
-        // at the baked slice offset; rigid/VS-skinned draws pull from the geometry pool
-        // at the mesh's vbase. Either way the buffer is SLICED to that byte offset and
-        // base_vertex is 0, so @builtin(vertex_index) stays mesh-local — attributes fetch
-        // exactly as with the old per-mesh buffers, and a slot-1 skin buffer (VS-skinning
-        // fallback) stays aligned at base_vertex 0. The index buffer is always the pool's
-        // Uint32 ibuf (bound once per run); the draw range is offset by the mesh's ibase.
-        let (vertex_buf, vert_off) = match baked {
-            Some(bv) => (
-                self.skinned_vbuf.as_ref().unwrap(),
-                bv as u64 * BAKED_VERT_SIZE,
-            ),
-            None => (self.pool.vbuf(), mesh.alloc.vbase as u64 * BAKED_VERT_SIZE),
+        // Vertex source at slot 0: baked draws pull from the shared skinned output buffer,
+        // rigid/VS-skinned draws from the geometry pool, starting at the baked base / the
+        // mesh's vbase. Since WGPU-032 the buffer is bound WHOLE and that start rides as
+        // base_vertex (shader3d.wgsl never reads @builtin(vertex_index), so the fetched
+        // attributes are the same). The VS-skinning fallback still SLICES to the byte offset
+        // with base_vertex 0, so its per-mesh slot-1 skin buffer stays aligned. The index
+        // buffer is always the pool's Uint32 ibuf (bound once per run); the draw range is
+        // offset by the mesh's ibase.
+        let (vertex_buf, vert_base) = match baked {
+            Some(bv) => (self.skinned_vbuf.as_ref().unwrap(), bv),
+            None => (self.pool.vbuf(), mesh.alloc.vbase),
+        };
+        // WGPU-032: whole buffer + base_vertex for every draw without a slot-1 skin buffer.
+        let whole = !skinned && vb_whole();
+        let (vert_off, base_vertex) = if whole {
+            (0u64, vert_base as i32)
+        } else {
+            (vert_base as u64 * BAKED_VERT_SIZE, 0i32)
         };
         let vbuf_id = (vertex_buf as *const wgpu::Buffer as usize, vert_off);
         if st.vbuf != Some(vbuf_id) {
@@ -9954,7 +9970,7 @@ impl Gfx3d {
         }
 
         let first = mesh.alloc.ibase + d.index_begin;
-        pass.draw_indexed(first..(first + d.index_count), 0, base..(base + count));
+        pass.draw_indexed(first..(first + d.index_count), base_vertex, base..(base + count));
     }
 
     // Submit one instanceable opaque-rigid bucket via the indirect args buffer (docs/
