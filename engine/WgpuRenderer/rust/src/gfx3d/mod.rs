@@ -8628,11 +8628,12 @@ impl Gfx3d {
                         rp.set_bind_group(4, conform_bind, &[]);
                         b4_set = true;
                     }
-                    // Baked casters pull baked verts from the shared skinned buffer at the
-                    // baked slice offset; rigid/VS-skinned pull from the geometry pool at the
-                    // mesh's vbase. Sliced to that byte offset with base_vertex 0 (as in
-                    // draw_one); the index buffer is always the pool's Uint32 ibuf, its range
-                    // offset by the mesh's ibase.
+                    // Baked casters pull baked verts from the shared skinned buffer, rigid and
+                    // VS-skinned ones from the geometry pool, starting at the baked base / the
+                    // mesh's vbase. Since WGPU-032 the buffer is bound whole and that start rides
+                    // as base_vertex (as in draw_one); only the VS-skinning fallback still slices
+                    // at the byte offset with base_vertex 0. The index buffer is always the
+                    // pool's Uint32 ibuf, its range offset by the mesh's ibase.
                     let (vbuf, vert_base) = match baked {
                         Some(bv) if self.skinned_vbuf.is_some() => (self.skinned_vbuf.as_ref().unwrap(), bv),
                         _ => (self.pool.vbuf(), mesh.alloc.vbase),
