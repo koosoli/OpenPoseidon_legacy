@@ -1,0 +1,106 @@
+name: Arma 3 / Windows game build
+
+# Builds only the Windows game (no tests) for a branch, on demand, and uploads
+# OpenPoseidon.exe with its wgpu_renderer.dll as one artifact. Used to get a build onto
+# a machine without a local toolchain. Compiler errors are re-emitted as annotations so
+# they can be read through the API.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - MrDudeX-arma3
+
+# Only the newest push is worth a build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  # write: the build is also published as the rolling pre-release "arma3-ci" (last step,
+  # agreed with the owner 2026-10-14); everything else only reads.
+  contents: write
+
+env:
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
+  CCACHE_NOHASHDIR: true
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build-windows:
+    name: Windows game (RelWithDebInfo)
+    runs-on: windows-2022
+    env:
+      CWR_PRESET: win-x64-clang-rwdi
+      CWR_BUILD_DIR: build/win-x64-clang-rwdi
+      CWR_DIST_DIR: dist/x64-win-rwdi
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build metadata
+        id: meta
+        shell: bash
+        run: echo "sha_short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      # Only the game: the tools and test programs would double the build time (the unit
+      # tests of the Arma 3 layer run on Linux, see tests/unit/.../test_arma3_eden.cpp).
+      - name: Build
+        continue-on-error: true
+        uses: ./.github/actions/build-cwr
+        with:
+          preset: ${{ env.CWR_PRESET }}
+          vcpkg-triplet: x64-windows-clang
+          build-dir: ${{ env.CWR_BUILD_DIR }}
+          run-tests: 'false'
+          build-target: PoseidonGame
+
+      - name: Build the game
+        shell: bash
+        run: cmake --build "$CWR_BUILD_DIR" --target PoseidonGame --parallel 2
+
+      - name: Report compiler errors
+        if: failure()
+        shell: bash
+        run: |
+          cmake --build "$CWR_BUILD_DIR" --target PoseidonGame --parallel 2 -- -k 0 > build-errors.txt 2>&1 || true
+          grep -E "error( [A-Z]+[0-9]+)?:|undefined symbol|LNK[0-9]+" build-errors.txt | head -40 | while IFS= read -r line; do
+            echo "::error::${line//%/%25}"
+          done
+          exit 1
+
+      - name: Collect game files
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "$CWR_DIST_DIR/OpenPoseidon.exe" out/
+          if [ -f "$CWR_DIST_DIR/wgpu_renderer.dll" ]; then cp "$CWR_DIST_DIR/wgpu_renderer.dll" out/; else cp "$CWR_BUILD_DIR/engine/WgpuRenderer/wgpu_renderer.dll" out/; fi
+          cp "$CWR_DIST_DIR/OpenAL32.dll" out/ 2>/dev/null || true
+          # Debug symbols next to the exe: the crash handler then prints function names
+          # and lines instead of bare addresses (the test machine has no toolchain).
+          for pdb in OpenPoseidon.pdb wgpu_renderer.pdb; do
+            f=$(find "$CWR_DIST_DIR" "$CWR_BUILD_DIR" -name "$pdb" -print -quit 2>/dev/null)
+            if [ -n "$f" ]; then cp "$f" out/; fi
+          done
+          printf 'branch=%s\ncommit=%s\nsource=GitHub Actions %s (%s)\n' "$GITHUB_REF_NAME" "${GITHUB_SHA::7}" "$GITHUB_RUN_ID" "$CWR_PRESET" > out/BUILT-FROM.txt
+          ls -la out
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenPoseidon-Windows-${{ github.ref_name }}-${{ steps.meta.outputs.sha_short }}
+          path: out/*
+          if-no-files-found: error
+
+      # The artifact store's download host is not reachable from the session that deploys
+      # to the test PC; release assets are. One rolling pre-release, replaced by every build.
+      - name: Publish as the rolling pre-release arma3-ci
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete arma3-ci -y --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create arma3-ci out/* -R "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+            --title "Arma 3 test build ${GITHUB_REF_NAME} ${GITHUB_SHA::7}" \
+            --notes "OpenPoseidon.exe + wgpu_renderer.dll (+ pdbs) of ${GITHUB_REF_NAME} at ${GITHUB_SHA}, run ${GITHUB_RUN_ID}. Replaced by every build; not a release."

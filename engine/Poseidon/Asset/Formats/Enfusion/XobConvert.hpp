@@ -43,6 +43,10 @@ namespace Poseidon::Asset::Formats::Enfusion
 //! RFG-096: what the second UV set of every converted part looked like (see XobConvert).
 struct XobUvCensus
 {
+    // ConvertXob runs on the load's task pool and on the streaming workers at the same time.
+    // The strings and the vector below are written from there, and two unlocked writers to one
+    // std::string corrupt the heap (a load crash in mimalloc under ConvertXob, 2026-10-15).
+    std::mutex  mutex;
     size_t      partsWithSecond = 0;
     size_t      partsOutOfRange = 0;
     size_t      partsDegenerate = 0;
@@ -85,6 +89,10 @@ struct XobMaterialSink
     virtual bool HideFaces(const std::string& materialSource) const = 0;
     virtual std::string TexturePath(const std::string& materialSource) const = 0;
     virtual std::string MaterialField(const std::string& materialSource) const = 0;
+    //! RFG-126: metres to lift a part off the surface it decorates, along its own outward
+    //! normal. Enfusion draws `MatPBRDecal` as a projected decal, so a mural authored a few
+    //! centimetres inside a wall still shows; drawn as a mesh it loses the depth test.
+    virtual float DecalLift(const std::string& /*materialSource*/) const { return 0.0f; }
 };
 
 struct TextureOptions
@@ -143,6 +151,9 @@ struct TextureOptions
 
 struct ConvertOptions
 {
+    //! RFG-121: the placing prefab's MaterialAssignClass list, material SLOT NAME (the `.xob`'s
+    //! string-table name, e.g. `CarpetFrame_01`) -> `.emat`. Empty = the model's own materials.
+    std::vector<std::pair<std::string, std::string>> materialRemap;
     float resolution = 1.0f;  //!< runtime detail value at which the first coarser LOD becomes active
     bool preserveTangentFrame = false; // optional UV0 render-frame import sidecar
     bool secondUv = false;    //!< emit both #UVSet# blocks when a part declares two sets
@@ -182,6 +193,28 @@ struct ConvertOptions
     //! behaviour is unchanged, and pushes the impostor back out to where it was
     //! authored to appear.
     bool lodFromThreshold = false;
+    //! RFG-103: with lodFromThreshold, read each threshold as what it is -- the fraction of
+    //! screen height the model's bounding sphere covers when the NEXT level takes over -- and
+    //! place the level where this engine's LOD metric reaches that coverage. The value is
+    //! resolution per metre of diameter per unit coverage at the engine's reference camera;
+    //! 0 keeps RFG-022's ratio ladder anchored at `resolution`.
+    //!
+    //! The ratio ladder kept the spacing but not the unit: anchored at 1.0, a spruce kept its
+    //! 3,216-triangle LOD 0 out to ~420 m and then fell straight to the 6-triangle card, so
+    //! levels 1-3 were never drawn and a forest view was ~13 M triangles at any LOD budget.
+    float lodCoverageScale = 0.0f;
+    //! RFG-111: with lodCoverageScale, place each level by Enfusion's OWN switching rule instead of
+    //! the `.xob` thresholds. Bohemia's LOD page says the system keeps a constant triangle/pixel
+    //! ratio; Workbench's model viewer (Runtime Stats: Cur. LOD, zoomed out step by step on
+    //! T_Carpinus_betulus_0) measured it -- each LOD leaves when its triangle count reaches ~0.8
+    //! per pixel of the projected bounding sphere (0.77 / 1.06 / 0.79 / 0.76 over four switches).
+    //! The thresholds are a template: every hornbeam from the 386-triangle sapling to the
+    //! 2,456-triangle adult carries 0.5 / 0.15 / 0.02 / 0.005 / 0.001. The value is K, triangles
+    //! per pixel of sphere area at 1080 lines; 0 keeps the RFG-103 threshold reading.
+    float lodTrianglesPerPixel = 0.0f;
+    //! RFG-182: the placing prefab's `LODFactors`, indexed by the `.xob`'s LOD number: each
+    //! multiplies that level's triangle count in the rule above (switching only). Missing = 1.
+    std::vector<float> lodFactors;
     TextureOptions textures;
 };
 
@@ -352,6 +385,23 @@ inline float VisualLodResolutionFromThreshold(size_t rank, float base, float fin
     return scaled > base ? scaled : VisualLodResolution(rank, base);
 }
 
+//! RFG-103: resolution from authored screen coverage. Level `rank` takes over where the
+//! model's diameter covers `previousThreshold` of the screen height, i.e. at
+//! resolution `scale * diameter / previousThreshold` in this engine's metric. Level 0 is never
+//! selected by its resolution (the walk starts at level 1), so it only has to stay below
+//! level 1's: it keeps `base` unless that would not.
+inline float VisualLodResolutionFromCoverage(size_t rank, float base, float scale, float diameter,
+                                             float finestThreshold, float previousThreshold)
+{
+    if (!(scale > 0.0f) || !(diameter > 0.0f) || !(finestThreshold > 0.0f))
+        return 0.0f;
+    if (rank == 0)
+        return std::min(base, 0.5f * scale * diameter / finestThreshold);
+    if (!(previousThreshold > 0.0f))
+        return 0.0f;
+    return scale * diameter / previousThreshold;
+}
+
 //! Face-UV scale/offset from a part material's `GlobalMapsUVTransform`
 //! (e.g. NetFence_Wire.emat TilingU/V 24: sampled at the face's raw UV the
 //! wire cutout is magnified 24x and the panel reads as an empty frame).
@@ -492,6 +542,49 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                 ? VisualLodResolutionFromThreshold(rank, options.resolution,
                                                    header.lods[lodOrder[0]].threshold, header.lods[lodIndex].threshold)
                 : VisualLodResolution(rank, options.resolution);
+        if (options.lodFromThreshold && options.lodCoverageScale > 0.0f)
+        {
+            float diameter = 2.0f * header.sphereRadius;
+            if (!(diameter > 0.0f) || !std::isfinite(diameter))
+            {
+                const float dx = header.bboxMax.x - header.bboxMin.x, dy = header.bboxMax.y - header.bboxMin.y,
+                            dz = header.bboxMax.z - header.bboxMin.z;
+                diameter = std::sqrt(dx * dx + dy * dy + dz * dz);
+            }
+            float finest = header.lods[lodOrder[0]].threshold;
+            float previous = rank > 0 ? header.lods[lodOrder[rank - 1]].threshold : 0.0f;
+            if (options.lodTrianglesPerPixel > 0.0f)
+            {
+                // RFG-111: the coverage (sphere diameter / 1080 lines) at which a level of T
+                // triangles reaches K triangles per pixel of sphere area: pi (c*1080/2)^2 = T/K.
+                // The diameter is the bounding-box diagonal, the size the measurement used.
+                const float dx = header.bboxMax.x - header.bboxMin.x, dy = header.bboxMax.y - header.bboxMin.y,
+                            dz = header.bboxMax.z - header.bboxMin.z;
+                const float diagonal = std::sqrt(dx * dx + dy * dy + dz * dz);
+                if (diagonal > 0.0f && std::isfinite(diagonal))
+                    diameter = diagonal;
+                auto coverageOf = [&](size_t level)
+                {
+                    uint64_t tris = 0;
+                    for (const XobPartDesc& part : header.lods[lodOrder[level]].parts)
+                        tris += part.triangleCount;
+                    double weighted = static_cast<double>(std::max<uint64_t>(tris, 1));
+                    if (lodOrder[level] < options.lodFactors.size() && options.lodFactors[lodOrder[level]] > 0.0f)
+                        weighted *= options.lodFactors[lodOrder[level]];
+                    const double area = weighted / options.lodTrianglesPerPixel;
+                    return static_cast<float>(2.0 * std::sqrt(area / 3.14159265358979) / 1080.0);
+                };
+                finest = coverageOf(0);
+                previous = rank > 0 ? coverageOf(rank - 1) : 0.0f;
+            }
+            const float coverage = VisualLodResolutionFromCoverage(rank, options.resolution, options.lodCoverageScale,
+                                                                   diameter, finest, previous);
+            // Only when it keeps the ladder ascending; otherwise the ratio value stands and the
+            // guards below place it.
+            if (coverage > 0.0f && std::isfinite(coverage) &&
+                (out.lods.empty() || coverage > out.lods.back().resolution))
+                writeLod.resolution = coverage;
+        }
         // RFG-029: an authored ladder whose ratio runs past the visual range falls
         // back to the rank convention for THAT level rather than refusing the model.
         //
@@ -556,7 +649,20 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
             // either, or they would sit in the file referenced by nothing.
             std::string materialSource;
             if (part.materialIndex < header.materials.size())
+            {
                 materialSource = header.materials[part.materialIndex].path;
+                // RFG-121: the prefab's colour variant replaces the slot's default material.
+                const std::string& slot = header.materials[part.materialIndex].name;
+                for (const auto& [name, assigned] : options.materialRemap)
+                    if (name.size() == slot.size() &&
+                        std::equal(name.begin(), name.end(), slot.begin(), [](char a, char b)
+                                   { return std::tolower(static_cast<unsigned char>(a)) ==
+                                            std::tolower(static_cast<unsigned char>(b)); }))
+                    {
+                        materialSource = assigned;
+                        break;
+                    }
+            }
             const XobMaterialSink* bakedPart = nullptr;
             if (baker && !materialSource.empty())
             {
@@ -567,6 +673,8 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                     continue;
                 }
             }
+
+            const float decalLift = bakedPart != nullptr ? bakedPart->DecalLift(materialSource) : 0.0f;
 
             // Only referenced source vertices become points. Every point must be
             // referenced for the round-trip check below to be an identity.
@@ -586,6 +694,11 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
 
                 Fmt::MLOD::WritePoint point;
                 point.position = {part.positions[v].x, part.positions[v].y, part.positions[v].z};
+                // RFG-126: the file's normals are OUTWARD (fact 6 below), so this is off the wall.
+                if (decalLift != 0.0f && v < part.normals.size())
+                    point.position = {part.positions[v].x + decalLift * part.normals[v].x,
+                                      part.positions[v].y + decalLift * part.normals[v].y,
+                                      part.positions[v].z + decalLift * part.normals[v].z};
                 point.flags = 0;
                 writeLod.points.push_back(point);
                 // Fact 6: `.xob` normals are outward, this engine's are inward. The
@@ -631,6 +744,7 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
             if (faceUvT.active)
             {
                 XobUvCensus& c = GXobUvCensus();
+                std::lock_guard<std::mutex> censusLock(c.mutex);
                 ++c.partsFaceUvScaled;
                 if (c.firstFaceUvScaled.empty())
                 {
@@ -642,7 +756,15 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
             }
 
             const bool hasSecond = part.uvSets.size() > 1 && part.uvSets[1].size() == part.positions.size();
-            anySecondSet = anySecondSet || hasSecond;
+            // RFG-106: the colour stream's third byte is the authored crown occlusion -- dark core
+            // to open rim (alnus: 18 levels over 0..255, fit R=0.74 against the GeometryAO volume;
+            // docs/roadmap/decisions/REFORGER-MATERIAL-SHADER-PARITY-20260914.md section 25). A
+            // one-UV-set part has no use for UV set 2, so it rides there as (occlusion, -7): the
+            // sentinel V says "this is occlusion, not a coordinate", and the renderer applies it to
+            // leaf cutout sections only.
+            const bool bakedOcclusion =
+                !hasSecond && options.secondUv && part.colours.size() == part.positions.size();
+            anySecondSet = anySecondSet || hasSecond || bakedOcclusion;
             if (!part.uvSets.empty() && part.uvSets[0].size() == part.positions.size())
             {
                 float u0 = 1e9f, u1 = -1e9f, v0 = 1e9f, v1 = -1e9f;
@@ -653,6 +775,7 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                 }
                 const float span = std::max(u1 - u0, v1 - v0);
                 XobUvCensus& c = GXobUvCensus();
+                std::lock_guard<std::mutex> censusLock(c.mutex);
                 ++c.set0Parts;
                 if (span <= 1.01f) ++c.set0SpanLe1;
                 else if (span <= 8.0f) ++c.set0SpanLe8;
@@ -681,6 +804,7 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                     v0 = std::min(v0, uv.v); v1 = std::max(v1, uv.v);
                 }
                 XobUvCensus& c = GXobUvCensus();
+                std::lock_guard<std::mutex> censusLock(c.mutex);
                 ++c.partsWithSecond;
                 if (u0 < -0.01f || v0 < -0.01f || u1 > 1.01f || v1 > 1.01f)
                     ++c.partsOutOfRange;
@@ -763,6 +887,11 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                     {
                         face.vertices[c].u1 = (renderUv && part.renderUvSets.size() > 1) ? part.renderUvSets[1][rcorner[c]].u : part.uvSets[1][corner[c]].u;
                         face.vertices[c].v1 = (renderUv && part.renderUvSets.size() > 1) ? part.renderUvSets[1][rcorner[c]].v : part.uvSets[1][corner[c]].v;
+                    }
+                    else if (bakedOcclusion)
+                    {
+                        face.vertices[c].u1 = static_cast<float>((part.colours[corner[c]] >> 16) & 0xFFu) / 255.0f;
+                        face.vertices[c].v1 = -7.0f;
                     }
                 }
                 if (preserveTangentFrame)

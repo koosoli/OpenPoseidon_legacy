@@ -14,6 +14,24 @@
 #
 # Escape hatch, deliberately awkward to type: SKIP_BRANCH_GUARD=1 git commit ...
 
+# ---- API-key scan (runs first; no skip flag) ----------------------------------------
+# The NPC chat feature takes LLM / speech API keys. Keys belong only on the player's computer
+# (DPAPI-encrypted under %APPDATA%), never in a repository -- not even a test key. Refuse any
+# commit whose ADDED lines contain something shaped like one.
+key_hits=$(git diff --cached -U0 --no-color --diff-filter=ACMR 2>/dev/null \
+    | grep -E '^\+' | grep -vE '^\+\+\+ ' \
+    | grep -nE 'sk-(proj-|ant-|or-v1-)?[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}|sk_[A-Za-z0-9]{30,}' \
+    | head -5)
+if [ -n "$key_hits" ]; then
+    echo "" >&2
+    echo "pre-commit REFUSED: the staged changes contain what looks like an API key:" >&2
+    echo "$key_hits" | sed -E 's/(sk-|sk_|AIza|gsk_|xai-)[A-Za-z0-9_-]{6}[A-Za-z0-9_-]*/\1******[redacted]/g' >&2
+    echo "" >&2
+    echo "  Remove it (and revoke it at the provider if it was real). Keys go in the dev panel" >&2
+    echo "  (NPC Chat tab) or an environment variable, never in a file in this repository." >&2
+    exit 1
+fi
+
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
 [ "$branch" = "HEAD" ] && exit 0   # detached: rebasing, bisecting, cherry-picking
 

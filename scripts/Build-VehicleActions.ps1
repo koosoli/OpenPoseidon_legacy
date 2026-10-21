@@ -4,7 +4,7 @@ if ($Preset -notmatch '^win-x64-clang-(rwdi|rel|dbg)$') {throw 'Unsupported cont
 $root=Split-Path $PSScriptRoot -Parent
 $suffix=($Preset -split '-')[-1]
 $stage=Join-Path $root 'build/jeep-ffv/animation-source'
-$pack=if ($Preview) {Join-Path $root 'build/jeep-ffv/animation-preview'} else {Join-Path $root "dist/x64-win-$suffix/Mods/@OP_VehicleActions"}
+$pack=if ($Preview) {Join-Path $root 'build/jeep-ffv/animation-preview'} else {Join-Path $root "dist/x64-win-$suffix/assets/Mods/@OP_VehicleActions"}
 $archive=if ($Preview) {'op_jeep_animation_preview.pbo'} else {'op_jeep_actions.pbo'}
 $source=Join-Path $root 'content/default-packs/vehicle-actions'
 $tools=Join-Path $root "dist/x64-win-$suffix/PoseidonTools.exe"

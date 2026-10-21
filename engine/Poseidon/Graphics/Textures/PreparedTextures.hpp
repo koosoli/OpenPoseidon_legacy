@@ -113,6 +113,11 @@ class PreparedTextureStore
     // (WGR_OBJECT_STREAM_TEXTURE_PREPARE, default 1); the others are the bounds above.
     static bool Enabled();
     static bool NativeDdsEnabled();
+    // Main thread: a load-time install batch (NativeInstallTextureScope) is consuming
+    // prepared native sources, so the DDS factory should look here even with the
+    // streaming experiment above off.
+    static void SetInstallBatchTake(bool on);
+    static bool InstallBatchTake();
     // Optional narrower native experiment. Default OFF; requires NativeDdsEnabled.
     static bool NativeDdsBc3Only(); // WGR_NATIVE_DDS_BC3_ONLY=1, read once
     static size_t ByteBudget();

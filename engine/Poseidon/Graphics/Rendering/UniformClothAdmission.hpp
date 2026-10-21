@@ -45,6 +45,31 @@ inline UniformCloth AdmitUniformCloth(std::string_view model, std::string_view t
     return UniformCloth::None;
 }
 
+// AdmitUniformCloth split in two, for a caller that memoises the texture half per texture
+// (the wgpu draw path asks per section of every soldier, per frame). The same answer for every
+// input: the texture tests below are exactly the ones above, and the model is checked only for
+// the two atlas textures, as above.
+inline bool UniformClothWestAtlasTexture(const char* texture)
+{
+    return texture && UniformAssetEquals(texture, "merged\\00007mc_vojakw2.paa");
+}
+inline bool UniformClothEastAtlasTexture(const char* texture)
+{
+    return texture && UniformAssetEquals(texture, "merged\\00008mc_vojake2.paa");
+}
+inline bool UniformClothPlainTexture(const char* texture)
+{
+    return texture && AdmitUniformCloth(std::string_view{}, texture) == UniformCloth::Plain;
+}
+inline UniformCloth AdmitUniformClothByTexture(std::string_view model, bool westAtlas, bool eastAtlas, bool plain)
+{
+    if (westAtlas && UniformAssetEquals(model, "data3d\\mc vojakw2.p3d"))
+        return UniformCloth::WestAtlas;
+    if (eastAtlas && UniformAssetEquals(model, "data3d\\mc vojake2.p3d"))
+        return UniformCloth::EastAtlas;
+    return plain ? UniformCloth::Plain : UniformCloth::None;
+}
+
 // The previously unused local-specular w lane contains wetness and a bounded
 // atlas-mask category, without changing WgrDraw3D/MaterialUbo layout. Dry is
 // always EXACTLY zero. shader3d.wgsl decodes the same ranges (0..1, 2..3, 4..5).

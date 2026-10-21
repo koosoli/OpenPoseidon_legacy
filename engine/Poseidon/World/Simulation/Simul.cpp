@@ -1350,7 +1350,8 @@ void Entity::PlaceOnSurface(Matrix4& trans)
     float dx, dz;
     Vector3 pos;
     pos = trans.Position();
-    pos[1] = GLandscape->RoadSurfaceYAboveWater(pos, &dx, &dz);
+    // Sinkhole W5: searched from no lower than the drawn terrain (Landscape::SurfacePlacementProbe)
+    pos[1] = GLandscape->RoadSurfaceYAboveWater(GLandscape->SurfacePlacementProbe(pos), &dx, &dz);
 
     LODShape* shape = GetShape();
 
@@ -1365,7 +1366,11 @@ void Entity::PlaceOnSurface(Matrix4& trans)
         Matrix4 newTransform;
         newTransform.SetUpAndDirection(up, trans.Direction());
     }
-    if (!Static())
+    // An Arma ODOL model (AnimationOrigin set: stored around its bounding centre) stands on its
+    // land contact / geometry like a vehicle, as Arma places objects: through its bounding
+    // centre alone the Arma 1 tents, MASH and houses a mission placed sat half in the ground.
+    const bool armaModel = shape->AnimationOrigin().SquareSize() > 1e-8f;
+    if (!Static() || armaModel)
     {
         Shape* geom = shape->LandContactLevel();
         if (!geom)

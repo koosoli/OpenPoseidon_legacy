@@ -157,15 +157,32 @@ class Reader
         switch (tag)
         {
             case 0x01: // i32
-                return Skip(4);
+            {
+                if (!_c.Has(4))
+                    return Refuse("i32 truncated");
+                const int32_t value = static_cast<int32_t>(_c.U32());
+                // RFG-134: a river point's width mode (2 = its own FixedWidth).
+                if (decl.name == "WidthOverride" && _carrier != nullptr && !_carrier->pointWidthModes.empty())
+                    _carrier->pointWidthModes.back() = value;
+                return true;
+            }
             case 0x02: // two u32 -- EIGHT bytes; four was the census's decisive error
                 // Only its PRESENCE is kept, and only on the entity that declares it:
                 // it is what tells an importer whether `coords` Y is absolute or an
                 // offset above the terrain. See EbinPlacement::hasFlags for the
                 // measurement that establishes this.
+                // RFG-130: and its two values, (bits set, bits cleared) over the prefab's own
+                // flags -- EntityFlags.RELATIVE_Y (0x80000) is what decides the Y reading.
                 if (decl.name == "Flags")
                     if (EbinPlacement* current = Current())
+                    {
+                        if (!_c.Has(8))
+                            return Refuse("Flags truncated");
                         current->hasFlags = true;
+                        current->flagsSet = _c.U32();
+                        current->flagsClear = _c.U32();
+                        return true;
+                    }
                 return Skip(8);
             case 0x05: // interned GUID as a value
             {
@@ -174,6 +191,8 @@ class Reader
                 const uint16_t index = _c.U16();
                 if (decl.name == "Material" && _roadIndex != kNoPlacement && index < _world.guids.size())
                     _world.placements[_roadIndex].materialGuid = _world.guids[index];
+                else if (decl.name == "Material" && _riverActive && _carrier != nullptr && index < _world.guids.size())
+                    _carrier->materialGuid = _world.guids[index];
                 return true;
             }
             case 0x06: // f32
@@ -186,6 +205,16 @@ class Reader
                         current->scale = value;
                 if (decl.name == "Width" && _roadIndex != kNoPlacement)
                     _world.placements[_roadIndex].width = value;
+                // RFG-134: the river generator's own values, onto its spline.
+                if (_riverActive && _carrier != nullptr)
+                {
+                    if (decl.name == "Width")
+                        _carrier->width = value;
+                    else if (decl.name == "SplineOffsetUp")
+                        _carrier->splineOffsetUp = value;
+                }
+                if (decl.name == "FixedWidth" && _carrier != nullptr && !_carrier->pointWidths.empty())
+                    _carrier->pointWidths.back() = value;
                 return true;
             }
             case 0x07: // f32[2]
@@ -232,6 +261,16 @@ class Reader
                     road.points.push_back(v[1]);
                     road.points.push_back(v[2]);
                 }
+                // RFG-134: a spline carrier's `Points { ShapePoint { Position } }`, kept for a
+                // generator child (a river) to build on. Its width slots start "default".
+                else if (decl.name == "Position" && _carrier != nullptr)
+                {
+                    _carrier->points.push_back(v[0]);
+                    _carrier->points.push_back(v[1]);
+                    _carrier->points.push_back(v[2]);
+                    _carrier->pointWidths.push_back(0.0f);
+                    _carrier->pointWidthModes.push_back(0);
+                }
                 return true;
             }
             case 0x09: // f32[4]
@@ -243,6 +282,8 @@ class Reader
                 const uint8_t value = _c.U8();
                 if (decl.name == "IsClosedSpline" && _roadIndex != kNoPlacement)
                     _world.placements[_roadIndex].closedSpline = value != 0;
+                if (decl.name == "ReverseFlow" && _riverActive && _carrier != nullptr)
+                    _carrier->reverseFlow = value != 0;
                 return true;
             }
             case 0x0C: // string
@@ -309,7 +350,22 @@ class Reader
             EbinPlacement placement;
             placement.className = decl.name.empty() ? inherited.name : decl.name;
             const bool isRoad = IsRoadSplineClass(placement.className);
-            placement.prefabGuid = decl.Prefab().empty() ? inherited.Prefab() : decl.Prefab();
+            // RFG-120: only an ANONYMOUS block (a `$grp` instance) takes the enclosing
+            // declaration's prefab. A NAMED child with no prefab of its own --
+            // `GenericEntity { ID "5622A975337C5640" coords 0 0 -0.443 }` inside a placed
+            // villa -- is an override of one of the PREFAB's own children, addressed by ID.
+            // Inheriting the parent's prefab drew the whole villa again, nudged by the
+            // override's offset: the doubled stair railings at 5009/3962, and 5,643 such
+            // duplicate buildings across Everon.
+            //
+            // RFG-139: except a road generator. `RoadGeneratorEntity` inside a road prefab is not an
+            // override of anything -- it draws from its own points -- and the enclosing prefab is
+            // where its material comes from (`.et` -> `.emat`). Skipping it left 2,199 of Everon's
+            // 2,398 roads on the flat fallback colour.
+            if (!decl.Prefab().empty())
+                placement.prefabGuid = decl.Prefab();
+            else if (decl.name.empty() || isRoad || !EbinPrefabChildOverridesSkipped())
+                placement.prefabGuid = inherited.Prefab();
 
             // A nested entity's transform is LOCAL to the entity that contains it,
             // so the enclosing one is captured BY VALUE here and composed onto the
@@ -346,11 +402,32 @@ class Reader
             const size_t subtreeStart = _world.placements.size();
             if (isRoad)
                 _roadIndex = index;
+            // RFG-134: rivers. A carrier's points belong to it; a RiverEntity inside one marks it.
+            EbinRiver* const outerCarrier = _carrier;
+            const bool outerRiver = _riverActive;
+            EbinRiver pendingRiver;
+            if (IsSplineCarrierClass(placement.className))
+            {
+                _carrier = &pendingRiver;
+                _riverActive = false;
+            }
+            else if (placement.className == "RiverEntity" && _carrier != nullptr)
+            {
+                _riverActive = true;
+                _carrier->isRiver = true;
+            }
+            else if (placement.className == "LakeGeneratorEntity" && _carrier != nullptr)
+                _carrier->isLake = true; // RFG-163
 
             Declaration pass;
             pass.name = placement.className;
             pass.prefab = placement.prefabGuid;
             const bool ok = Records(end, pass, depth + 1);
+            // RFG-165: the lake generator's own offset from its shore spline, read while its
+            // `coords` are still local (the parent transform is composed just below).
+            if (placement.className == "LakeGeneratorEntity" && _carrier != nullptr &&
+                _world.placements[index].hasPosition)
+                _carrier->lakeOffsetY = _world.placements[index].position[1];
 
             // push_back may have reallocated, so the entry is addressed by index.
             // RFG-027: a spline entity that declares no `coords` of its own sits AT
@@ -378,6 +455,18 @@ class Reader
                 child.position[2] = parentPos[2] - s * lx + c * lz;
                 child.angles[1] += parentYawDeg;
                 child.scale *= parentScale;
+            }
+            // RFG-134: a carrier that held a river hands it over with its own composed transform.
+            if (IsSplineCarrierClass(placement.className) &&
+                ((pendingRiver.isRiver && pendingRiver.points.size() >= 6) ||
+                 (pendingRiver.isLake && !pendingRiver.isRiver && pendingRiver.points.size() >= 9)))
+            {
+                const EbinPlacement& carrier = _world.placements[index];
+                pendingRiver.position[0] = carrier.position[0];
+                pendingRiver.position[1] = carrier.position[1];
+                pendingRiver.position[2] = carrier.position[2];
+                pendingRiver.yawDeg = carrier.angles[1];
+                _world.rivers.push_back(std::move(pendingRiver));
             }
             if (!_world.placements[index].hasPosition && _world.placements[index].points.empty())
                 _world.placements.erase(_world.placements.begin() + static_cast<ptrdiff_t>(index));
@@ -412,6 +501,8 @@ class Reader
                 }
             }
             _roadIndex = outerRoad;
+            _carrier = outerCarrier;
+            _riverActive = outerRiver;
             return ok;
         }
         if (first == 0x0D || first == 0x43 || first == 0x44 || first == 0x45 || first == 0x0E)
@@ -451,6 +542,8 @@ class Reader
     size_t _currentIndex = kNoPlacement;
     //! The road entity whose subtree is being walked, or kNoPlacement outside one.
     size_t _roadIndex = kNoPlacement;
+    EbinRiver* _carrier = nullptr;      //!< RFG-134: the enclosing SplineShapeEntity's pending river
+    bool _riverActive = false;           //!< RFG-134: inside its RiverEntity generator
 
     EbinPlacement* Current() { return _currentIndex == kNoPlacement ? nullptr : &_world.placements[_currentIndex]; }
 };

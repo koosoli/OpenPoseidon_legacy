@@ -231,6 +231,7 @@ Texture::Texture() : _inAnimation(nullptr)
 void Texture::SetName(RStringB name)
 {
     _name = name;
+    _nameMemo.store(0, std::memory_order_relaxed); // the name's answers go with it
     // use surface information to acquire roughness
     const SurfaceInfo& surface = GLOB_ENGINE->TextBank()->GetSurface(name);
     _roughness = surface._roughness;

@@ -5,6 +5,10 @@ pub const CULL_VIEW: usize = sky_vis::DIRECTION_COUNT + 1; // GI owns index5
 pub const RESOLUTION: u32 = 2048;
 pub const EXTENT: f32 = 640.0;
 pub const FAR_EXTENT: f32 = 1600.0;
+/// Half extent of the near map when only fog asks for it: fog kept out from under a roof
+/// 250 m away is still visible, at 600 m it is not, and the smaller box culls in a fraction
+/// of the geometry (see `prepare`).
+pub const FOG_EXTENT: f32 = 256.0;
 pub const FAR_CULL_VIEW: usize = CULL_VIEW + 1;
 pub const HEIGHT: f32 = 1024.0;
 pub const BIAS_METRES: f32 = 0.08;
@@ -16,6 +20,31 @@ fn cascade_enabled(master: Option<&str>, far: bool, override_value: Option<&str>
 fn physical_view(camera: glam::Vec3) -> sky_vis::SkyVisView {
     physical_view_extent(camera, EXTENT)
 }
+/// Tallest thing that can stand on the highest terrain and take snowline snow: a church tower
+/// or a mast. A snowline whose band starts above `world max + this` can reach no surface.
+pub const SNOWLINE_OBJECT_MARGIN: f32 = 80.0;
+
+/// The snow input the cover maps should react to. Snowline snow (snow[1] height, snow[2] band,
+/// snow[3] depth) counts only if its band reaches below the world's highest terrain plus
+/// SNOWLINE_OBJECT_MARGIN. Everon in August carries a 645 m snowline over terrain that never
+/// passes ~400 m, and that alone kept both cover maps drawing every frame: 4.2 ms of a 29.6 ms
+/// Durras frame for snow that cannot exist. A deposit (snow[0]) always counts; an unknown world
+/// height (NaN) changes nothing.
+pub fn snow_for_cover(snow: [f32; 4], world_max: f32) -> [f32; 4] {
+    if snow[0] > 0.0 || !world_max.is_finite() || !snow.iter().all(|v| v.is_finite()) {
+        return snow;
+    }
+    if snow[1] >= 0.0 && snow[1] - snow[2].max(0.0) > world_max + SNOWLINE_OBJECT_MARGIN {
+        return [snow[0], -1.0, 0.0, 0.0];
+    }
+    snow
+}
+
+fn far_for_fog() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_WEATHER_COVER_FAR_FOG").as_deref() == Ok("1"))
+}
+
 fn physical_view_extent(camera: glam::Vec3, extent: f32) -> sky_vis::SkyVisView {
     let settings = sky_vis::SkyVisSettings {
         extent,
@@ -46,6 +75,7 @@ pub struct Map {
     pub trace: bool,
     pub trace_rows: std::cell::Cell<u32>,
     pub trace_view: std::cell::Cell<Option<[f32;16]>>,
+    last_why: Option<(bool, bool, bool, bool, bool)>,
 }
 
 fn texture(
@@ -105,6 +135,7 @@ impl Map {
             trace: std::env::var("WGR_WEATHER_COVER_TRACE").as_deref() == Ok("1"),
             trace_rows: std::cell::Cell::new(0),
             trace_view: std::cell::Cell::new(None),
+            last_why: None,
         }
     }
     pub fn prepare(
@@ -124,7 +155,24 @@ impl Map {
         self.direct_complete = true;
         let enabled = cascade_enabled(std::env::var("WGR_WEATHER_COVER").ok().as_deref(), self.far,
             std::env::var("WGR_WEATHER_COVER_FAR").ok().as_deref());
-        if !(policy::active(enabled, snow, ground) || (enabled && layer_fog)) || !camera.is_finite() {
+        // Fog alone only needs the NEAR map: it keeps fog out from under roofs and bridges
+        // around the camera, and fog inside a house 800 m away is not something anyone sees.
+        // The far cascade (1600 m) was drawn for it anyway -- ~2.2 ms of a 29.6 ms Durras frame
+        // in dry weather with any landscape fog at all. Rain, wetness and snow keep both.
+        // WGR_WEATHER_COVER_FAR_FOG=1 restores the far map for fog.
+        let fog_wants_this = layer_fog && (!self.far || far_for_fog());
+        // Why the map is (not) drawn, on stderr once per change: "4 ms of weather cover in dry
+        // weather" is otherwise a question with no answer in the log.
+        let why = (enabled, snow[0] > 0.0, snow[1] >= 0.0 && snow[2] > 0.0 && snow[3] > 0.0, ground[0] > 0.03,
+            layer_fog);
+        if self.last_why != Some(why) {
+            self.last_why = Some(why);
+            eprintln!("[wgr] weather cover {}: enabled={} snow={:?} ground={:?} layerFog={} -> {}",
+                if self.far { "far" } else { "near" }, enabled, snow, ground, layer_fog,
+                if policy::active(enabled, snow, ground) { "ON (snow/wetness)" }
+                else if enabled && fog_wants_this { "ON (fog only)" } else { "off" });
+        }
+        if !(policy::active(enabled, snow, ground) || (enabled && fog_wants_this)) || !camera.is_finite() {
             if self.target.take().is_some() {
                 self.generation = self.generation.wrapping_add(1);
             }
@@ -136,7 +184,9 @@ impl Map {
             self.target = Some(texture(device, RESOLUTION, "wgr_physical_weather_cover"));
             self.generation = self.generation.wrapping_add(1);
         }
-        self.view = Some(physical_view_extent(camera, self.extent));
+        let fog_only = !policy::active(enabled, snow, ground);
+        let extent = if fog_only && !self.far && !far_for_fog() { FOG_EXTENT.min(self.extent) } else { self.extent };
+        self.view = Some(physical_view_extent(camera, extent));
         self.identity = policy::Identity {
             frame: self.frame,
             instance_epoch: epoch,
@@ -174,6 +224,18 @@ impl Map {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn snowline_above_every_surface_does_not_request_cover_maps() {
+        let everon = [0.0, 644.88, 25.0, 0.06];
+        assert_eq!(snow_for_cover(everon, 380.0), [0.0, -1.0, 0.0, 0.0]);
+        assert!(!policy::active(true, snow_for_cover(everon, 380.0), [0.0; 4]));
+        // Reachable by terrain, or by a tower within the margin: unchanged.
+        assert_eq!(snow_for_cover(everon, 640.0), everon);
+        assert_eq!(snow_for_cover(everon, 560.0), everon);
+        // A deposit always counts; unknown height changes nothing.
+        assert_eq!(snow_for_cover([0.2, 644.88, 25.0, 0.06], 10.0), [0.2, 644.88, 25.0, 0.06]);
+        assert_eq!(snow_for_cover(everon, f32::NAN), everon);
+    }
     #[test]
     fn weather_cover_far_defaults_on_and_obeys_exact_override_and_master_off() {
         assert!(cascade_enabled(None,true,None));

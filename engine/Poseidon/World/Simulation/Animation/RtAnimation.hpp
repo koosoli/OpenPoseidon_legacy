@@ -52,9 +52,9 @@ class AnimationRTWeights
 
 	void Init( Shape *shape );
 	void AddSelection( Shape *shape, int selIndex, int matrixIndex );
-	// FACE-002: move every vertex of a named selection ONTO `matrixIndex` at full weight,
-	// discarding whatever it was bound to. Unlike AddSelection this does not blend -- the
-	// face rig needs the whole offset, not a share of it. Returns the matrix index those
+	// FACE-002: move every vertex of a named selection ONTO `matrixIndex`: a vertex bound to
+	// one bone moves at full weight; a blended vertex moves only its parent bone's share and
+	// keeps its other bones (so a lip skinned to torso + neck still follows the neck). Returns the matrix index those
 	// vertices were bound to before (the most common one), or -1 if the selection is empty,
 	// unweighted, or does not agree on a single parent bone. Vertices whose bone already
 	// lies in [faceLo,faceHi) belong to an earlier face group and are left with it.

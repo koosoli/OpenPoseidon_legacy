@@ -222,6 +222,17 @@ const VEG_SWAY_HEIGHT_REF: f32 = 12.0;
 // its per-object phase for compatibility.
 const VEG_COHERENT_PHASE_CELL: f32 = 2.0;
 
+// (OP, 2026-10-13) The sway height of a BUSH vertex. OFP bushes are centred on their bounding box
+// (the lower half has negative model Y) and stand 1-3 m tall, so measured against a 12 m canopy
+// they bent by millimetres and the hedges stood still in a gale (owner: "hedge leaves are not yet
+// swaying with the wind"). A bush is taken from ~1 m below its centre and scaled so its top answers
+// like the upper third of a tree; the foot stays planted (y_eff ~ 0 there).
+const VEG_BUSH_FOOT: f32 = 1.0;
+const VEG_BUSH_SCALE: f32 = 3.0;
+fn veg_sway_height(model_y: f32, bush: bool) -> f32 {
+    return select(model_y, (model_y + VEG_BUSH_FOOT) * VEG_BUSH_SCALE, bush);
+}
+
 fn veg_sway_phase(phase_xz: vec2<f32>, leaf: f32) -> vec2<f32> {
     if (leaf < 0.0) {
         let cell = vec2<f32>(VEG_COHERENT_PHASE_CELL, VEG_COHERENT_PHASE_CELL);
@@ -619,9 +630,9 @@ fn atmo_applied() -> bool {
     return g_atmo_amount >= 0.0;
 }
 
-fn apply_fog_receiver(rgb: vec3<f32>, world_pos_rel: vec3<f32>, receiver: bool) -> vec3<f32> {
+fn apply_fog_receiver(rgb_in: vec3<f32>, world_pos_rel: vec3<f32>, receiver: bool) -> vec3<f32> {
     if (frame.params.fog_enabled <= 0.5 || frame.params.fog_inv_range <= 0.0) {
-        return rgb;
+        return rgb_in;
     }
     let dist = length(world_pos_rel);
     // max_dist = fogStart + 1/fogInvRange = the scene fog-max range, which the engine also
@@ -666,6 +677,19 @@ fn apply_fog_receiver(rgb: vec3<f32>, world_pos_rel: vec3<f32>, receiver: bool) 
     let uv = (clip.xy / clip.w) * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
     let inscat = textureSampleLevel(froxel_tex, froxel_samp, vec3<f32>(uv, sqrt(u)), 0.0).rgb;
     g_atmo_amount = amount; // REN-ATM-001 census witness; see g_atmo_amount.
+    // RFG-192: native worlds' aerial perspective (fog_enabled = 2 + extinction x 1e3, EngineWgpu):
+    // exponential haze toward this direction's full airlight (the far froxel), UNDER the distance
+    // ramp above, which still closes the horizon. 0 everywhere else (fog_enabled <= 2).
+    var rgb = rgb_in;
+    if (frame.params.fog_enabled > 2.0) {
+        // RFG-202: code = 10 x round(airlight scale x 100) + extinction x 1e3 (< 1); tens 0 = 1.
+        let code = frame.params.fog_enabled - 2.0;
+        let tens = floor(code / 10.0);
+        let sigma = (code - tens * 10.0) * 1.0e-3;
+        let air_scale = select(1.0, tens / 100.0, tens > 0.5);
+        let airlight = air_scale * textureSampleLevel(froxel_tex, froxel_samp, vec3<f32>(uv, 1.0), 0.0).rgb;
+        rgb = mix(rgb, airlight, 1.0 - exp(-dist * sigma));
+    }
     let background = mix(rgb, inscat, amount);
     if (!fog_camera_matches(layer_fog_packet, frame.view, frame.proj, frame.cam_pos.xyz)) { return background; }
     let absolute = world_pos_rel + frame.cam_pos.xyz;
@@ -785,6 +809,71 @@ fn sky_vis_ao(world_xz: vec2<f32>) -> f32 {
     let occ = 1.0 - pow(v, terrain_shadow_map.sky_vis_contrast);
     let ao = 1.0 - terrain_shadow_map.sky_vis_strength * occ;
     return max(ao, terrain_shadow_map.sky_vis_floor);
+}
+
+// Canopy sky occlusion at a WORLD-ABSOLUTE point [0,1], 1 = open. The terrain sky-visibility
+// texture carries the canopy top (G, absolute m) and coverage (B) of every canopy-classed object the
+// engine has drawn (EngineWgpu canopy map; trees, bushes, forests -- any world). A point below the
+// local canopy top loses sky light in proportion to coverage and depth: crown tops stay lit, crown
+// interiors, trunks and the floor under a forest go dark, as they do under a real canopy.
+const CANOPY_DEPTH_START: f32 = 0.5;
+const CANOPY_DEPTH_FULL: f32 = 6.0;
+const CANOPY_STRENGTH: f32 = 0.85;
+fn canopy_sky_ao(world_abs: vec3<f32>) -> f32 {
+    if (terrain_shadow_map.enabled < 0.5) {
+        return 1.0;
+    }
+    let uv = (world_abs.xz - terrain_shadow_map.origin) * terrain_shadow_map.inv_span;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        return 1.0;
+    }
+    let c = textureSampleLevel(terrain_skyvis_mask, terrain_shadow_samp, uv, 0.0);
+    if (c.b <= 0.002) {
+        return 1.0;
+    }
+    let occ = clamp(c.b, 0.0, 1.0) * smoothstep(CANOPY_DEPTH_START, CANOPY_DEPTH_FULL, c.g - world_abs.y);
+    // Near the camera the geometry-based terms (sky-visibility maps, GTAO) resolve the real crown;
+    // a 6.25 m canopy cell there blacked out the shaded side of a bush beside a lone tree with a
+    // straight cell edge (OFP Everon 4979/4057). Hand over the same way canopy_sun_shadow does.
+    let fade = smoothstep(25.0, 90.0, length(world_abs - frame.cam_pos.xyz));
+    return 1.0 - CANOPY_STRENGTH * occ * fade;
+}
+
+// Canopy SUN shadow at a world-absolute point [0,1], 1 = fully shadowed. Marches up the sun ray
+// through the same canopy height field: if the canopy at the ray's footprint rises above the ray,
+// the point is under foliage that the sun must pass through. The cascades cannot resolve this past a
+// few hundred metres (a texel is wider than a crown there), which is why a distant forest otherwise
+// takes full sun on every trunk and lower bough. Partial (CANOPY_SUN_OPACITY): foliage transmits
+// some light, and the cascades still draw the sharp near shadow on top through the caller's max().
+const CANOPY_SUN_OPACITY: f32 = 0.7;
+fn canopy_sun_shadow(world_abs: vec3<f32>) -> f32 {
+    if (terrain_shadow_map.enabled < 0.5) {
+        return 0.0;
+    }
+    let l = -frame.sun_dir_world.xyz;
+    if (l.y < 0.05) {
+        return 0.0;
+    }
+    // Near the camera the cascades draw the real crown shadow; a 6 m canopy cell drawn there is a
+    // hard square on the ground beside a lone tree. Fade in where the cascades stop resolving crowns.
+    // (PERF, 2026-10-14) Decided first: inside 60 m the four map taps below were multiplied by 0.
+    let fade = smoothstep(60.0, 160.0, length(world_abs - frame.cam_pos.xyz));
+    if (fade <= 0.0) {
+        return 0.0;
+    }
+    var shade = 0.0;
+    // From 6 m up the ray: a tree's OWN cell would otherwise shadow its whole crown below the top
+    // (self-shading is the crown AO's and n.l's job); the neighbours' canopy is what this adds.
+    for (var k = 2; k <= 5; k++) {
+        let p = world_abs + l * (f32(k) * 3.0 / l.y);
+        let uv = (p.xz - terrain_shadow_map.origin) * terrain_shadow_map.inv_span;
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+            continue;
+        }
+        let c = textureSampleLevel(terrain_skyvis_mask, terrain_shadow_samp, uv, 0.0);
+        shade = max(shade, clamp(c.b, 0.0, 1.0) * smoothstep(0.0, 2.0, c.g - p.y));
+    }
+    return CANOPY_SUN_OPACITY * shade * fade;
 }
 
 // Screen-space AO multiplier at this fragment [0,1], 1 = unoccluded. Returns 1 when the pass did
@@ -1137,7 +1226,14 @@ fn interior_sky_ao(world_abs: vec3<f32>, n: vec3<f32>) -> f32 {
         return 1.0;
     }
     let occ = 1.0 - interior_sky_reach_n(world_abs, n);
-    return max(1.0 - frame.skyvis.z * occ, frame.skyvis.w);
+    // RFG-215: the floor is the light an enclosed room keeps -- of the PHYSICAL sky. A native
+    // world's sky is lifted to Lighting_Eden's outdoor indirect share (RFG-196, sh.c[0].w = the
+    // factor, ~10x), and the floor applied to the lifted sky lit every room at a tenth of
+    // outdoor shade, evenly: no falloff from the windows, no contact shadow, no visible GI (the
+    // owner at 5086.9,3995.6 upstairs). Reforger's interior probes author LVDiffuseBrightness -4.8
+    // (1/28 of outdoor). Divided back out, an interior gets exactly the pre-lift floor.
+    let lifted = max(sky_sh.c[0].w, 1.0);
+    return max(1.0 - frame.skyvis.z * occ, frame.skyvis.w / lifted);
 }
 
 // The direction the sky actually reaches this point FROM, world space — the sampled directions

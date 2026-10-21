@@ -1,3 +1,4 @@
+#include <Poseidon/World/Effects/BuildingBreach.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 
@@ -366,6 +367,10 @@ void Object::DoDammage(EntityAI* owner, Vector3Par pos, float val, float valRang
 #if DAMMAGE_DIAGS
     LOG_DEBUG(Physics, "  Total {:.4f}", GetRawTotalDammage());
 #endif
+    // BOOM-002: a house that can still take holes comes down after several heavy hits, not one
+    const float capped = BuildingBreach::CapBlastDamage(this, oldDammage, GetRawTotalDammage());
+    if (capped < GetRawTotalDammage())
+        SetTotalDammage(capped);
     HitBy(owner, GetRawTotalDammage() - oldDammage, ammo);
     if (!oldDestroyed && IsDammageDestroyed())
     {

@@ -267,7 +267,8 @@ pub struct GeometryResidency {
     pub retired_bytes: u64,
 }
 
-// Where one mesh's geometry landed in the pool.
+// Where one mesh's geometry landed in the pool. Copy since RFG-127: shared meshes hold the same one.
+#[derive(Clone, Copy)]
 pub struct MeshAlloc {
     pub vbase: u32,
     pub ibase: u32,
@@ -308,6 +309,10 @@ pub struct GeometryPool {
     // growth, and by a shrink that actually fired.
     shrink_streak: u32,
     pressure_budget: u64,
+    // RFG-140: capacity floors from `reserve()` -- the shrink never goes below them, so a
+    // reservation made while VRAM is empty is not given back and re-grown under load.
+    reserve_verts: u32,
+    reserve_indices: u32,
 }
 
 impl GeometryPool {
@@ -363,7 +368,47 @@ impl GeometryPool {
             submitted_retired_bytes: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             shrink_streak: 0,
             pressure_budget: 0,
+            reserve_verts: 0,
+            reserve_indices: 0,
         }
+    }
+
+    /// RFG-140: grow the pool to at least these sizes NOW and keep them as a floor. A growth
+    /// keeps the old and the new buffer alive together; at Everon 5052/5312 that overlap
+    /// (1088 -> 2176 MB vertex pool beside 5.3 GB of other allocations on an 8 GB card) lost the
+    /// device, in 1 of 2-3 runs, at every pose dense enough to cross the 1088 MB step. Reserved at
+    /// world load, while VRAM is nearly empty, the same capacity costs a 17 MB overlap.
+    pub fn reserve(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vert_bytes: u64, index_bytes: u64) {
+        let to_units = |bytes: u64, unit: u64| (bytes / unit).min(u64::from(u32::MAX)) as u32;
+        let verts = to_units(vert_bytes, VERT_SIZE);
+        let indices = to_units(index_bytes, INDEX_SIZE);
+        self.reserve_verts = verts;
+        self.reserve_indices = indices;
+        let mut grew = false;
+        if verts > self.valloc.cap {
+            let new_buf = Self::make_vbuf(device, verts);
+            Self::copy_prefix(device, queue, &self.vbuf, &new_buf,
+                              u64::from(self.valloc.occupied_prefix_units()) * VERT_SIZE, "v");
+            let old = std::mem::replace(&mut self.vbuf, new_buf);
+            self.retire(old);
+            self.valloc.grow(verts);
+            grew = true;
+        }
+        if indices > self.ialloc.cap {
+            let new_buf = Self::make_ibuf(device, indices);
+            Self::copy_prefix(device, queue, &self.ibuf, &new_buf,
+                              u64::from(self.ialloc.occupied_prefix_units()) * INDEX_SIZE, "i");
+            let old = std::mem::replace(&mut self.ibuf, new_buf);
+            self.retire(old);
+            self.ialloc.grow(indices);
+            grew = true;
+        }
+        if grew {
+            self.epoch += 1;
+            self.shrink_streak = 0;
+        }
+        pool_event(&format!("reserve vbuf {:.1}MB ibuf {:.1}MB (grew {})",
+                            vert_bytes as f64 / 1048576.0, index_bytes as f64 / 1048576.0, grew));
     }
 
     // STORAGE on both: the vbuf is the compute skin-bake's rest-pose source, and a
@@ -488,7 +533,7 @@ impl GeometryPool {
         self.shrink_streak = 0;
 
         let mut shrank = false;
-        if let Some(new_cap) = Self::shrink_target(&self.valloc, Self::INIT_VERTS) {
+        if let Some(new_cap) = Self::shrink_target(&self.valloc, Self::INIT_VERTS.max(self.reserve_verts)) {
             let new_buf = Self::make_vbuf(device, new_cap);
             Self::copy_prefix(
                 device,
@@ -505,7 +550,7 @@ impl GeometryPool {
             self.valloc.shrink(new_cap);
             shrank = true;
         }
-        if let Some(new_cap) = Self::shrink_target(&self.ialloc, Self::INIT_INDICES) {
+        if let Some(new_cap) = Self::shrink_target(&self.ialloc, Self::INIT_INDICES.max(self.reserve_indices)) {
             let new_buf = Self::make_ibuf(device, new_cap);
             Self::copy_prefix(
                 device,
@@ -536,6 +581,17 @@ impl GeometryPool {
 
     pub fn generation(&self) -> u64 {
         self.epoch
+    }
+
+    /// LOD-STREAM: one line on how the pool is used -- live vs capacity per buffer, and the
+    /// occupied prefix (what a tail shrink could keep), in MB.
+    pub fn split_line(&self) -> String {
+        const MB: f64 = 1048576.0;
+        let v = |units: u32| units as f64 * VERT_SIZE as f64 / MB;
+        let i = |units: u32| units as f64 * INDEX_SIZE as f64 / MB;
+        format!("geometry pool split: vertex live {:.0} / prefix {:.0} / capacity {:.0} MB, index live {:.0} / prefix {:.0} / capacity {:.0} MB",
+                v(self.valloc.used()), v(self.valloc.occupied_prefix_units()), v(self.valloc.cap),
+                i(self.ialloc.used()), i(self.ialloc.occupied_prefix_units()), i(self.ialloc.cap))
     }
 
     pub fn residency(&self) -> GeometryResidency {
@@ -579,6 +635,7 @@ impl GeometryPool {
                 ));
             }
         }
+        crate::upload_stats::add(crate::upload_stats::Kind::Pool, std::mem::size_of_val(verts) + std::mem::size_of_val(indices));
         queue.write_buffer(
             &self.vbuf,
             vbase as u64 * VERT_SIZE,
@@ -616,7 +673,16 @@ impl GeometryPool {
     }
 
     fn growth_capacity(&self, device: &wgpu::Device, cap: u32, n: u32, unit: u64) -> u32 {
-        let ordinary = grown_cap(cap, n);
+        // LOD-STREAM: a reserved pool (native worlds, RFG-140) is sized near its working set, so
+        // outgrowing it means a little more, not twice as much -- and a growth keeps old and new
+        // alive together. 1.25x keeps that overlap small; WGR_GEO_POOL_GROWTH still overrides.
+        let reserved = self.reserve_verts > 0 || self.reserve_indices > 0;
+        let ordinary = if reserved && std::env::var_os("WGR_GEO_POOL_GROWTH").is_none() {
+            let scaled = (u64::from(cap) * 5).div_ceil(4).min(u64::from(u32::MAX)) as u32;
+            scaled.max(cap.saturating_add(n))
+        } else {
+            grown_cap(cap, n)
+        };
         if self.pressure_budget == 0 { return ordinary; }
         let counters = device.get_internal_counters().hal;
         let allocated = (counters.buffer_memory.read().max(0) as u64)

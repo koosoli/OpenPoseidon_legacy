@@ -126,13 +126,15 @@ pub fn capability_reason(
     }
 }
 
-// Where the snippet may be: the executable's folder first (Deploy.ps1 puts it there),
-// then WGR_NGX_SNIPPET_DIR (the headless tests run from target/debug/deps). Same list,
-// same order, as the FeatureCommonInfo path list handed to NGX at init.
+// Where the snippet may be: the executable's folder first (Deploy.ps1 puts it there), its
+// assets folder (the shareable exe + dll + assets build, Package-Share.ps1), then
+// WGR_NGX_SNIPPET_DIR (the headless tests run from target/debug/deps). Same list, same
+// order, as the FeatureCommonInfo path list handed to NGX at init (dlss.rs).
 pub fn snippet_search_dirs(exe_dir: Option<PathBuf>, extra: Option<String>) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(d) = exe_dir {
-        dirs.push(d);
+        dirs.push(d.join("assets"));
+        dirs.insert(0, d);
     }
     if let Some(e) = extra {
         dirs.push(PathBuf::from(e));
@@ -395,7 +397,7 @@ mod tests {
         std::fs::create_dir_all(&exe).unwrap();
         std::fs::create_dir_all(&extra).unwrap();
         let dirs = snippet_search_dirs(Some(exe.clone()), Some(extra.to_string_lossy().into_owned()));
-        assert_eq!(dirs, vec![exe.clone(), extra.clone()]);
+        assert_eq!(dirs, vec![exe.clone(), exe.join("assets"), extra.clone()]);
         assert_eq!(find_snippet(&dirs), None);
         let reason = snippet_missing_reason(&dirs);
         assert!(reason.starts_with("nvngx_dlss.dll not found next to the executable ("), "{reason}");
@@ -403,6 +405,10 @@ mod tests {
 
         std::fs::write(extra.join(SNIPPET_DLL), b"x").unwrap();
         assert_eq!(find_snippet(&dirs), Some(extra.join(SNIPPET_DLL)));
+        // the shareable build's assets folder comes before the override
+        std::fs::create_dir_all(exe.join("assets")).unwrap();
+        std::fs::write(exe.join("assets").join(SNIPPET_DLL), b"x").unwrap();
+        assert_eq!(find_snippet(&dirs), Some(exe.join("assets").join(SNIPPET_DLL)));
         std::fs::write(exe.join(SNIPPET_DLL), b"x").unwrap();
         assert_eq!(find_snippet(&dirs), Some(exe.join(SNIPPET_DLL)));
         let _ = std::fs::remove_dir_all(&tmp);

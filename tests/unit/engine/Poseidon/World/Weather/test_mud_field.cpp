@@ -97,16 +97,16 @@ int main()
 
     // Real pressure contacts: rain creates capacity but untouched soil stays put.
     MudField deep;
-    assert(deep.LayerDepth() == .24f && !deep.CompressBoot(.0625f, .0625f));
-    assert(!deep.SetLayerDepth(nan) && !deep.SetLayerDepth(.351f) && !deep.SetLayerDepth(.01f));
+    assert(deep.LayerDepth() == MudField::DefaultLayerDepth && !deep.CompressBoot(.0625f, .0625f));
+    assert(!deep.SetLayerDepth(nan) && !deep.SetLayerDepth(MudField::MaxDepth + .001f) && !deep.SetLayerDepth(.01f));
     deep.Advance(70, 1);
     assert(deep.Wetness() > .9f && deep.ContactDepth() > .23f && deep.HeightOffsetAt(0,0) == 0);
     assert(deep.CompressBoot(.0625f, .0625f));
     const float first = -deep.HeightOffsetAt(.0625f, .0625f);
-    assert(first >= .1f && first < .24f);
+    assert(first >= .1f && first < MudField::DefaultLayerDepth);
     for (int i=0; i<100; ++i) deep.CompressBoot(.0625f, .0625f);
     const float loaded = -deep.HeightOffsetAt(.0625f, .0625f);
-    assert(loaded > .2f && loaded <= .24f && loaded > first);
+    assert(loaded > .2f && loaded <= MudField::DefaultLayerDepth && loaded > first);
     // Different overlapping steps cannot produce a sharp unbounded physical rim.
     for (int i=0; i<40; ++i) deep.CompressBoot(.0625f+i*.027f, .0625f-i*.011f);
     for (int z=-100; z<=100; ++z) for (int x=-100; x<=100; ++x) {
@@ -114,7 +114,7 @@ int main()
         assert(std::isfinite(g[0]) && std::isfinite(g[1]));
         assert(std::abs(g[0]) <= MudField::MaxCellSlope+.00001f);
         assert(std::abs(g[1]) <= MudField::MaxCellSlope+.00001f);
-        assert(deep.HeightOffsetAt(x*.017f,z*.013f) >= -.24f);
+        assert(deep.HeightOffsetAt(x*.017f,z*.013f) >= -MudField::DefaultLayerDepth);
     }
     const auto retained = deep.Snapshot(0,0);
     assert(retained[3] == MudField::MaxDepth);

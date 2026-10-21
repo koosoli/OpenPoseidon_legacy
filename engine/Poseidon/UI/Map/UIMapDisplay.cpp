@@ -1,5 +1,6 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/UI/Map/UIMap.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/UI/Map/UIMapCommon.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
@@ -21,6 +22,7 @@
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <Poseidon/UI/Locale/MissionHtmlLocalization.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <string>
 
 std::string Arma2BriefingHtml(const std::string& html); // GameStateExtA2.cpp
@@ -36,6 +38,7 @@ int Arma2BriefingRevision();                           // GameStateExtA2.cpp
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Containers/BankArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
@@ -402,6 +405,21 @@ LSError WeaponsInfo::Serialize(ParamArchive& ar)
     return LSOK;
 }
 
+// A mission's gear pool names classes of the game it was written for. Map them through the Arma 1
+// stand-ins (inert unless --arma1), and skip any the config does not define: constructing a type
+// for a missing class latches a config error, and that one entry used to stop the whole mission
+// from starting (Arma 1's M02MinerConvoy pools an M4).
+static RString PoolClass(const RString& name, bool magazine)
+{
+    const RString resolved = magazine ? Poseidon::Arma1Compat::ResolveMagazineClass(name)
+                                      : Poseidon::Arma1Compat::ResolveWeaponClass(name);
+    const ParamEntry* weapons = Pars.FindEntry("CfgWeapons");
+    if (weapons && weapons->FindEntry(resolved))
+        return resolved;
+    LOG_WARN(Mission, "Gear pool: '{}' is not defined in CfgWeapons; skipped", name.Data());
+    return RString();
+}
+
 bool WeaponsInfo::Import(const ParamEntry& superclass)
 {
     const ParamEntry* cls = superclass.FindEntry("Weapons");
@@ -411,7 +429,10 @@ bool WeaponsInfo::Import(const ParamEntry& superclass)
         for (int i = 0; i < cls->GetEntryCount(); i++)
         {
             const ParamEntry& entry = cls->GetEntry(i);
-            Ref<WeaponType> weapon = WeaponTypes.New(entry.GetName());
+            const RString weaponName = PoolClass(entry.GetName(), false);
+            if (weaponName.GetLength() == 0)
+                continue;
+            Ref<WeaponType> weapon = WeaponTypes.New(weaponName);
             if (!weapon)
             {
                 continue;
@@ -438,7 +459,10 @@ bool WeaponsInfo::Import(const ParamEntry& superclass)
         for (int i = 0; i < cls->GetEntryCount(); i++)
         {
             const ParamEntry& entry = cls->GetEntry(i);
-            Ref<MagazineType> type = MagazineTypes.New(entry.GetName());
+            const RString magazineName = PoolClass(entry.GetName(), true);
+            if (magazineName.GetLength() == 0)
+                continue;
+            Ref<MagazineType> type = MagazineTypes.New(magazineName);
             if (!type)
             {
                 continue;
@@ -466,6 +490,11 @@ bool WeaponsInfo::Import(const ParamEntry& superclass)
                 _magazinesPool.Add(magazine);
             }
         }
+    }
+    if (Poseidon::Arma1Compat::Active())
+    {
+        LOG_INFO(Mission, "{}: briefing weapon pool {} weapons, {} magazines", Poseidon::Arma1Compat::Label(),
+                 _weaponsPool.Size(), _magazinesPool.Size());
     }
     return true;
 }
@@ -616,7 +645,7 @@ void DisplayMap::ReloadBriefingContent(RString activeSection)
     if (!_briefing)
         return;
 
-    if (Arma1Compat::Generation() == 2)
+    if (Arma1Compat::Generation() >= 2)
     {
         // Arma 2 briefs through the diary and simple tasks (Arma2BriefingHtml).
         const RString file = GetBriefingFile();

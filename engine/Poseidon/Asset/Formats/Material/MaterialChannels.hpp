@@ -215,6 +215,20 @@ struct EmatGlobalOverlayParameters
     float whitePower = 0.0f;
 };
 
+// RFG-118: Enfusion's `GlobalMCRMap` in production -- the object's own baked colour detail
+// (a rock's lichen and cracks, a wall's grime), blended over the composed MatPBRMulti layers.
+// Defaults are what Workbench's Material Editor shows for an unstated key (2026-10-11):
+// GlobalMCRMode Overlay, OverlayBlackPower 1, OverlayWhitePower 1, UVSrcGlobalMaps "UV set 1".
+struct EmatGlobalMcr
+{
+    bool present = false;
+    RvTextureRef texture;
+    float blackPower = 1.0f;
+    float whitePower = 1.0f;
+    bool multiply = false; // GlobalMCRMode Multiply (16 of 2,031 corpus materials)
+    bool uv1 = false;      // UVSrcGlobalMaps "UV set 2"
+};
+
 struct EmatPbrProvenance
 {
     // Index 0 is BCRMap (or BCR_1); indices 1..3 are BCR_2..4.
@@ -267,6 +281,42 @@ struct TranslatedMaterial
     float                crownAoHeight = 0.0f;
     float                crownAoWidth = 0.0f;
     float                crownAoIntensity = 0.0f;
+    // RFG-180: the material SAYS `GeometryAOIntensity 0` (as opposed to naming none). The far
+    // MLOD crowns (`*_atlas_MLOD.emat`) all do; their meshes still carry the baked occlusion of
+    // the near levels in the colour stream, which must then not darken them.
+    bool                 crownAoOff = false;
+    // RFG-181: Enfusion `NormalsToCamera 1` (the far MLOD cross-billboards, `*_atlas_MLOD.emat`
+    // and some grasses -- 38 of 409 crowns): shading normals face the viewer, the RV
+    // `TreeAdvModNormals` idea. `FarLODDistanceOffset` / `FarLODHeightOffset` place the point
+    // they radiate from: that many metres behind the crown centre, away from the camera, and
+    // that many metres up (negative = below, which tips the normals skyward). Unnamed = the
+    // Workbench class defaults, 10 m and 0 m.
+    bool                 normalsToCamera = false;
+    // RFG-185: a MatPBRTreeCrown at all (the FarLOD offsets and SSS below apply to every crown,
+    // not only the NormalsToCamera billboards), and its `SSSBackScattering` (class default 0.15,
+    // read from Workbench), which scales the renderer's leaf back-light per material.
+    bool                 treeCrown = false;
+    float                sssBackScattering = 0.15f;
+    float                farLodDistanceOffset = 10.0f; // Workbench class default
+    float                farLodHeightOffset = 0.0f;
+    // RFG-144: Enfusion `FadeFaces` (MatPBRTreeCrown; default 0 = off, range 0..1, both read from
+    // Workbench): leaf cards whose face turns edge-on to the viewer fade out below this |N.V|.
+    // 114 of 468 crowns author it (0.15..1, 0.3 commonest).
+    float                fadeFaces = 0.0f;
+    // Enfusion vegetation colorization (`EnableColorization`, `WorldColorizeMap`,
+    // `ColorizeMapLerp`, `ColorizeMapLerpAtCamera`, `ColorizeMapLerpDistance`,
+    // `ColorizeMapBrightness`): the crown's albedo is lerped toward a world-space
+    // colour map, by an amount that ramps from the at-camera value to the full lerp
+    // over the distance. Lerp 0 (every material that names none) disables it.
+    std::string          colorizeMap;
+    float                colorizeLerp = 0.0f;
+    // RFG-183: the class defaults, read from Workbench (BaseContainerTools.CreateContainer
+    // ("MatPBRTreeCrown").GetDefaultAsString): LerpAtCamera 1, LerpDistance 50 m. An unnamed
+    // distance used to mean "full lerp at every distance", which flattened near crowns into
+    // the colorize colour.
+    float                colorizeLerpAtCamera = 1.0f;
+    float                colorizeLerpDistance = 50.0f;
+    float                colorizeBrightness = 0.5f;
     // Enfusion's global normal map (`GlobalNMOMap`, `UVSrcGlobNormal`) lives
     // in the object's own unwrap rather than the tiling frame: sample it
     // with the second UV set. False for every material that names neither.
@@ -275,6 +325,8 @@ struct TranslatedMaterial
     // double-sided (wire mesh, glass panes). False for every material that
     // names no Cull key, and all legacy.
     bool                 doubleSided = false;
+    // RFG-118: the GlobalMCRMap overlay; `present` false for every material that names none.
+    EmatGlobalMcr        globalMcr;
     // Default-null diagnostic. No per-material provenance allocation in normal
     // gameplay and no GPU field or shading effect.
     std::shared_ptr<const EmatPbrProvenance> ematPbr;

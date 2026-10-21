@@ -27,9 +27,8 @@
 
 using Poseidon::TaskPool;
 
-// A CWA-era game's parallel work saturates well before a high-core machine's logical
-// processors, so the auto pool is capped at kDefaultMaxTaskThreads rather than
-// spawning one worker per core (the enkiTS default).
+// The auto pool is capped at kDefaultMaxTaskThreads rather than spawning one worker
+// per core on a very wide machine (the enkiTS default); see the constant for why 16.
 //
 // Broken-state delta: drop the cap and ResolveTaskPoolThreadCount(-1, 64) returns
 // 64, not kDefaultMaxTaskThreads.

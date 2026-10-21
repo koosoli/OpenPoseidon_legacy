@@ -22,6 +22,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -156,13 +158,172 @@ inline std::string ResolvePrefabMaterial(const EnfusionMount& mount, const std::
     return {};
 }
 
+//! RFG-114: the prefab's `placement` mode (`slopelandcontact`, `none`, ...), lowercase, from the
+//! first file down the inheritance chain that declares one at the ENTITY's top level (one
+//! leading space -- nested component blocks are indented further). Empty when none does.
+//! 205 of Reforger's wall/fence prefabs declare `slopelandcontact`, 8 `none`; a fence run in
+//! Eden.ent stores pitch 0 / roll 0 and stepped heights, so the tilt is the runtime's job.
+inline std::string ResolvePrefabPlacement(const EnfusionMount& mount, const std::string& etPath, int depthLimit = 8)
+{
+    std::string current = etPath;
+    for (int depth = 0; depth <= depthLimit; ++depth)
+    {
+        std::vector<uint8_t> blob;
+        if (!mount.Read(current, blob))
+            return {};
+        const char* data = reinterpret_cast<const char*>(blob.data());
+        const size_t size = blob.size();
+        size_t at = 0;
+        while (at < size)
+        {
+            size_t lineEnd = at;
+            while (lineEnd < size && data[lineEnd] != 0x0A)
+                ++lineEnd;
+            static constexpr char key[] = " placement ";
+            const size_t keyLen = sizeof(key) - 1;
+            if (lineEnd - at > keyLen && std::memcmp(data + at, key, keyLen) == 0)
+            {
+                size_t b = at + keyLen, e = b;
+                while (e < lineEnd && data[e] != ' ' && data[e] != 0x0D && data[e] != 0x09)
+                    ++e;
+                return PrefabDetail::LowerCopy(std::string(data + b, e - b));
+            }
+            at = lineEnd + 1;
+        }
+        const auto parsed = Poseidon::Asset::Material::ParseEmat(std::string_view(data, size));
+        if (parsed.parentPath.empty())
+            return {};
+        current = parsed.parentPath;
+    }
+    return {};
+}
+
 struct PrefabResolution
 {
     std::string xobPath;
     std::string via;    //!< the `.et` the mesh was finally found in
     int depth = 0;      //!< 0 when the placed prefab carried its own mesh
     std::string reason; //!< empty on success; names what failed
+    //! RFG-121: `MeshObject { Materials { MaterialAssignClass { SourceMaterial "<slot>"
+    //! AssignedMaterial "<.emat>" } } }` -- the prefab's own colour variant of a shared model
+    //! (CarpetFrame_01_green over a model whose slot `CarpetFrame_01` defaults to Red; door,
+    //! window-frame and roof variants the same way). Slot name -> `.emat`, child first.
+    std::vector<std::pair<std::string, std::string>> materialRemap;
+    //! RFG-182: `MeshObject { LODFactors { f0 f1 ... } }`, child first (inherited like every
+    //! mesh-object parameter). Each multiplies its level's triangle count for SWITCHING only, so a
+    //! factor above 1 retires that level sooner (BI wiki "Arma Reforger:Level Of Detail", Manual
+    //! Override). Empty = all 1. Everon's conifers carry e.g. `200 70 15 25 1`: the detailed levels
+    //! leave early and the atlas billboard holds the distance.
+    std::vector<float> lodFactors;
+
+    //! The mesh key the loader lists: the `.xob` itself, or `enfm|slot=emat;...|<xob>` when the
+    //! prefab remaps materials, so each colour variant is its own model and the key still ends
+    //! in `.xob` (the object stream recognises native models by that suffix).
+    std::string MeshKey() const;
 };
+
+//! Splits a mesh key from PrefabResolution::MeshKey back into the `.xob`, its remap and (RFG-182)
+//! its LOD factors -- the `@lod=f0,f1,...` entry, which is not a material slot.
+inline std::string SplitRemappedMeshKey(const std::string& key,
+                                        std::vector<std::pair<std::string, std::string>>* remap = nullptr,
+                                        std::vector<float>* lodFactors = nullptr)
+{
+    if (key.compare(0, 5, "enfm|") != 0)
+        return key;
+    const size_t bar = key.find('|', 5);
+    if (bar == std::string::npos)
+        return key;
+    if (remap != nullptr || lodFactors != nullptr)
+    {
+        const std::string spec = key.substr(5, bar - 5);
+        size_t at = 0;
+        while (at < spec.size())
+        {
+            size_t semi = spec.find(';', at);
+            if (semi == std::string::npos)
+                semi = spec.size();
+            const std::string entry = spec.substr(at, semi - at);
+            const size_t eq = entry.find('=');
+            if (entry.compare(0, 5, "@lod=") == 0)
+            {
+                if (lodFactors != nullptr)
+                {
+                    size_t f = 5;
+                    while (f < entry.size())
+                    {
+                        size_t comma = entry.find(',', f);
+                        if (comma == std::string::npos)
+                            comma = entry.size();
+                        lodFactors->push_back(static_cast<float>(std::atof(entry.substr(f, comma - f).c_str())));
+                        f = comma + 1;
+                    }
+                }
+            }
+            else if (remap != nullptr && eq != std::string::npos && eq > 0)
+                remap->emplace_back(entry.substr(0, eq), entry.substr(eq + 1));
+            at = semi + 1;
+        }
+    }
+    return key.substr(bar + 1);
+}
+
+inline std::string PrefabResolution::MeshKey() const
+{
+    bool factored = false;
+    for (float f : lodFactors)
+        factored = factored || f != 1.0f;
+    if ((materialRemap.empty() && !factored) || xobPath.empty())
+        return xobPath;
+    std::string key = "enfm|";
+    for (size_t i = 0; i < materialRemap.size(); ++i)
+        key += (i ? ";" : "") + materialRemap[i].first + "=" + materialRemap[i].second;
+    if (factored)
+    {
+        key += materialRemap.empty() ? "@lod=" : ";@lod=";
+        for (size_t i = 0; i < lodFactors.size(); ++i)
+        {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%s%g", i ? "," : "", lodFactors[i]);
+            key += buf;
+        }
+    }
+    return key + "|" + xobPath;
+}
+
+//! RFG-182: the numbers of the first `LODFactors { ... }` block in one `.et` body. Its values
+//! sit on the lines between the opening brace and the closing one.
+inline bool FindLodFactors(const std::vector<uint8_t>& blob, std::vector<float>& out)
+{
+    const std::string_view text(reinterpret_cast<const char*>(blob.data()), blob.size());
+    const size_t key = text.find("LODFactors {");
+    if (key == std::string_view::npos)
+        return false;
+    const size_t open = text.find('{', key);
+    const size_t close = text.find('}', open);
+    if (close == std::string_view::npos)
+        return false;
+    const std::string body(text.substr(open + 1, close - open - 1));
+    const char* p = body.c_str();
+    char* end = nullptr;
+    std::vector<float> values;
+    for (;;)
+    {
+        const float v = std::strtof(p, &end);
+        if (end == p)
+            break;
+        values.push_back(v);
+        p = end;
+    }
+    if (values.empty())
+        return false;
+    out = std::move(values);
+    return true;
+}
+
+//! RFG-121: the root entity's own MaterialAssignClass pairs in one `.et` body (defined below,
+//! after the line helpers it uses).
+inline void FindMaterialAssignments(const std::vector<uint8_t>& blob,
+                                    std::vector<std::pair<std::string, std::string>>& out);
 
 //! Follows a prefab's inheritance chain until a `MeshObject`'s `Object` appears.
 //!
@@ -192,12 +353,52 @@ inline PrefabResolution ResolvePrefabModel(const EnfusionMount& mount, const std
             out.reason = "prefab not in any .pak: " + current;
             return out;
         }
+        // RFG-121: the variant's material assignments, child first (the first file that names
+        // a slot decides it). POSEIDON_PREFAB_MATERIALS=0 ignores them (every variant draws the
+        // model's default materials, the pre-RFG-121 look).
+        {
+            static const bool remapOn = []
+            {
+                const char* env = std::getenv("POSEIDON_PREFAB_MATERIALS");
+                return !(env && env[0] == '0');
+            }();
+            if (remapOn)
+            {
+                std::vector<std::pair<std::string, std::string>> assigned;
+                FindMaterialAssignments(blob, assigned);
+                for (auto& pair : assigned)
+                {
+                    bool known = false;
+                    for (const auto& have : out.materialRemap)
+                        known = known || PrefabDetail::LowerCopy(have.first) == PrefabDetail::LowerCopy(pair.first);
+                    if (!known)
+                        out.materialRemap.push_back(std::move(pair));
+                }
+            }
+        }
+        // RFG-182: LOD factors, child first. POSEIDON_PREFAB_LOD_FACTORS=0 ignores them.
+        static const bool lodFactorsOn = []
+        {
+            const char* env = std::getenv("POSEIDON_PREFAB_LOD_FACTORS");
+            return !(env && env[0] == '0');
+        }();
+        if (lodFactorsOn && out.lodFactors.empty())
+            FindLodFactors(blob, out.lodFactors);
         const std::string object = FindObjectReference(blob);
         if (!object.empty())
         {
             out.xobPath = object;
             out.via = current;
             out.depth = depth;
+            // The factors may still be inherited from above the file that names the mesh.
+            for (int up = depth; lodFactorsOn && out.lodFactors.empty() && up < depthLimit; ++up)
+            {
+                const auto parsedUp = Poseidon::Asset::Material::ParseEmat(
+                    std::string_view(reinterpret_cast<const char*>(blob.data()), blob.size()));
+                if (parsedUp.parentPath.empty() || !mount.Read(parsedUp.parentPath, blob))
+                    break;
+                FindLodFactors(blob, out.lodFactors);
+            }
             return out;
         }
         const auto parsed = Poseidon::Asset::Material::ParseEmat(
@@ -252,6 +453,14 @@ struct PrefabSlot
     std::string bone;   //!< lower-cased exact bone name; empty when this is a prefix rule
     std::string prefix; //!< lower-cased bone-name prefix; empty when `bone` is set
     std::string prefab; //!< the `.et` of the part to attach
+    //! RFG-128: MaterialAssignClass pairs written inside this child's own block -- the parent's
+    //! override of the part (a door's glass child: window_glass -> window_glass_uneven_INT).
+    //! They outrank the part prefab's own assignments.
+    std::vector<std::pair<std::string, std::string>> materialRemap;
+    //! RFG-157: an `AngleRange` written inside this child's own block -- the parent's per-instance
+    //! override of the door it carries (a house turning one interior door the other way:
+    //! `{ GenericEntity { components { DoorComponent { AngleRange -100 } } } }`). NaN = none.
+    float doorAngle = NAN;
 };
 
 struct PrefabSlots
@@ -333,6 +542,53 @@ inline bool Keyword(const char* data, size_t begin, size_t end, const char* key)
 }
 } // namespace PrefabDetail
 
+//! RFG-121: the root entity's own MaterialAssignClass pairs in one `.et` body (child entities'
+//! assignments belong to them and are skipped).
+inline void FindMaterialAssignments(const std::vector<uint8_t>& blob,
+                                    std::vector<std::pair<std::string, std::string>>& out)
+{
+    const char* data = reinterpret_cast<const char*>(blob.data());
+    const size_t size = blob.size();
+    int depth = 0;
+    int childDepth = -1; // >= 0 while inside a child entity declared at that depth
+    std::string pendingSource;
+    size_t at = 0;
+    while (at < size)
+    {
+        size_t lineEnd = at;
+        while (lineEnd < size && data[lineEnd] != '\n')
+            ++lineEnd;
+        size_t cursor = at;
+        while (cursor < lineEnd && static_cast<unsigned char>(data[cursor]) <= ' ')
+            ++cursor;
+        std::string quoted;
+        if (childDepth < 0 && depth >= 1)
+        {
+            // A child entity header: `Class : "x.et" {` (MaterialAssignClass has no colon).
+            const size_t colon = std::string_view(data + cursor, lineEnd - cursor).find(" : ");
+            if (colon != std::string_view::npos && PrefabDetail::ChildHeader(data, cursor, lineEnd, quoted))
+                childDepth = depth;
+            else if (PrefabDetail::Keyword(data, cursor, lineEnd, "SourceMaterial"))
+            {
+                std::string source;
+                if (PrefabDetail::QuotedReference(data, cursor, lineEnd, source))
+                    pendingSource = source;
+            }
+            else if (PrefabDetail::Keyword(data, cursor, lineEnd, "AssignedMaterial") && !pendingSource.empty())
+            {
+                std::string assigned;
+                if (PrefabDetail::QuotedReference(data, cursor, lineEnd, assigned) && !assigned.empty())
+                    out.emplace_back(pendingSource, assigned);
+                pendingSource.clear();
+            }
+        }
+        depth += PrefabDetail::NetBraces(data, cursor, lineEnd);
+        if (childDepth >= 0 && depth <= childDepth)
+            childDepth = -1;
+        at = lineEnd + 1;
+    }
+}
+
 //! One `.et` body's own slot declarations, in file order.
 inline void FindSlotDeclarations(const std::vector<uint8_t>& blob, std::vector<PrefabSlot>& exact,
                                  std::vector<PrefabSlot>& prefixes)
@@ -344,10 +600,25 @@ inline void FindSlotDeclarations(const std::vector<uint8_t>& blob, std::vector<P
     // own header sits at depth 0 and names its PARENT, not a child, so it is never
     // pushed: attributing a pivot to it would hang the house's own doors off the
     // house's base prefab.
-    std::vector<std::pair<int, std::string>> stack;
+    struct ChildFrame
+    {
+        int depth = 0;
+        std::string prefab;
+        std::vector<std::pair<std::string, std::string>> remap; //!< RFG-128: its own assignments
+        std::string pendingSource;
+        int slot = -1; //!< index into `exact` once its PivotID is read
+    };
+    std::vector<ChildFrame> stack;
     std::string pendingPrefix;
     int depth = 0;
     size_t at = 0;
+    const auto popFrame = [&]()
+    {
+        ChildFrame& frame = stack.back();
+        if (frame.slot >= 0 && static_cast<size_t>(frame.slot) < exact.size())
+            exact[static_cast<size_t>(frame.slot)].materialRemap = std::move(frame.remap);
+        stack.pop_back();
+    };
     while (at < size)
     {
         size_t lineEnd = at;
@@ -360,12 +631,39 @@ inline void FindSlotDeclarations(const std::vector<uint8_t>& blob, std::vector<P
         std::string quoted;
         if (depth >= 1 && PrefabDetail::ChildHeader(data, cursor, lineEnd, quoted))
         {
-            stack.emplace_back(depth, quoted);
+            ChildFrame frame;
+            frame.depth = depth;
+            frame.prefab = quoted;
+            stack.push_back(std::move(frame));
         }
         else if (PrefabDetail::Keyword(data, cursor, lineEnd, "PivotID"))
         {
             if (!stack.empty() && PrefabDetail::QuotedReference(data, cursor, lineEnd, quoted) && !quoted.empty())
-                exact.push_back({PrefabDetail::LowerCopy(quoted), std::string(), stack.back().second});
+            {
+                exact.push_back({PrefabDetail::LowerCopy(quoted), std::string(), stack.back().prefab, {}});
+                stack.back().slot = static_cast<int>(exact.size()) - 1;
+            }
+        }
+        else if (!stack.empty() && PrefabDetail::Keyword(data, cursor, lineEnd, "SourceMaterial"))
+        {
+            PrefabDetail::QuotedReference(data, cursor, lineEnd, stack.back().pendingSource);
+        }
+        else if (!stack.empty() && PrefabDetail::Keyword(data, cursor, lineEnd, "AssignedMaterial"))
+        {
+            ChildFrame& frame = stack.back();
+            if (!frame.pendingSource.empty() && PrefabDetail::QuotedReference(data, cursor, lineEnd, quoted) &&
+                !quoted.empty())
+                frame.remap.emplace_back(frame.pendingSource, quoted);
+            frame.pendingSource.clear();
+        }
+        else if (!stack.empty() && stack.back().slot >= 0 && PrefabDetail::Keyword(data, cursor, lineEnd, "AngleRange"))
+        {
+            // RFG-157: the override sits after the instance's PivotID, so the frame's slot is set.
+            char* next = nullptr;
+            const std::string text(data + cursor + 10, lineEnd - cursor - 10);
+            const float value = std::strtof(text.c_str(), &next);
+            if (next != text.c_str() && std::isfinite(value) && static_cast<size_t>(stack.back().slot) < exact.size())
+                exact[static_cast<size_t>(stack.back().slot)].doorAngle = value;
         }
         else if (PrefabDetail::Keyword(data, cursor, lineEnd, "BonePrefix"))
         {
@@ -375,15 +673,17 @@ inline void FindSlotDeclarations(const std::vector<uint8_t>& blob, std::vector<P
         else if (PrefabDetail::Keyword(data, cursor, lineEnd, "Prefab") && !pendingPrefix.empty())
         {
             if (PrefabDetail::QuotedReference(data, cursor, lineEnd, quoted) && !quoted.empty())
-                prefixes.push_back({std::string(), pendingPrefix, quoted});
+                prefixes.push_back({std::string(), pendingPrefix, quoted, {}});
             pendingPrefix.clear();
         }
 
         depth += PrefabDetail::NetBraces(data, cursor, lineEnd);
-        while (!stack.empty() && depth <= stack.back().first)
-            stack.pop_back();
+        while (!stack.empty() && depth <= stack.back().depth)
+            popFrame();
         at = lineEnd + 1;
     }
+    while (!stack.empty())
+        popFrame();
 }
 
 //! Every slot a prefab declares or inherits. Child first; ancestors only add.
@@ -443,6 +743,24 @@ inline PrefabSlots ResolvePrefabSlots(const EnfusionMount& mount, const std::str
 //! The part a bone takes, or empty. Exact pivot first, then the LONGEST matching
 //! prefix -- `socket_win_130x142` and `socket_win_130x72` share nine characters, and
 //! a shortest-match rule would hang the wrong window on half a village.
+inline const PrefabSlot* SlotForBone(const PrefabSlots& slots, const std::string& boneName)
+{
+    const std::string lower = PrefabDetail::LowerCopy(boneName);
+    for (const PrefabSlot& slot : slots.exact)
+        if (slot.bone == lower)
+            return &slot;
+    const PrefabSlot* best = nullptr;
+    for (const PrefabSlot& slot : slots.prefixes)
+    {
+        if (slot.prefix.empty() || lower.size() < slot.prefix.size() ||
+            lower.compare(0, slot.prefix.size(), slot.prefix) != 0)
+            continue;
+        if (best == nullptr || slot.prefix.size() > best->prefix.size())
+            best = &slot;
+    }
+    return best;
+}
+
 inline std::string SlotPrefabForBone(const PrefabSlots& slots, const std::string& boneName)
 {
     const std::string lower = PrefabDetail::LowerCopy(boneName);
@@ -459,6 +777,476 @@ inline std::string SlotPrefabForBone(const PrefabSlots& slots, const std::string
             best = &slot;
     }
     return best != nullptr ? best->prefab : std::string();
+}
+
+// RFG-120: the children a prefab places by TRANSFORM rather than on a socket bone.
+//
+// A Reforger house's furniture is not in the world file and not on a bone: the building
+// prefab carries `GenericEntity : ".../Villa_E_2I01_furniture_01.et" { coords 0 0 0 }`, and
+// that composition is in turn 38 entries of `Class : "<prop>.et" { ID coords angles scale }`
+// and `$grp Class : "<prop>.et" { { ID coords ... } { ... } }`, every transform LOCAL to its
+// parent. The slot reader above only follows PivotID / BonePrefix, so every room came out
+// bare. Children that carry a PivotID stay the slot reader's (they hang on a bone).
+struct PrefabChild
+{
+    std::string prefab; //!< the child's `.et`
+    std::string id;     //!< its `ID`, the key a derived prefab overrides it by
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    float angles[3] = {0.0f, 0.0f, 0.0f}; //!< Enfusion order: pitch, yaw, roll (degrees)
+    float scale = 1.0f;
+};
+
+namespace PrefabDetail
+{
+inline bool Floats(const char* data, size_t begin, size_t end, float* out, int count)
+{
+    const std::string text(data + begin, end - begin);
+    const char* p = text.c_str();
+    for (int i = 0; i < count; ++i)
+    {
+        char* next = nullptr;
+        const float v = std::strtof(p, &next);
+        if (next == p)
+            return false;
+        out[i] = v;
+        p = next;
+    }
+    return true;
+}
+} // namespace PrefabDetail
+
+//! One `.et` body's own transform-placed children, in file order.
+inline void FindChildPlacements(const std::vector<uint8_t>& blob, std::vector<PrefabChild>& out)
+{
+    const char* data = reinterpret_cast<const char*>(blob.data());
+    const size_t size = blob.size();
+    struct Frame
+    {
+        int depth = 0;       //!< brace depth of the header line
+        bool group = false;  //!< `$grp`: its anonymous blocks are the instances
+        bool open = false;   //!< a group instance is being read
+        bool pivot = false;  //!< the current entry hangs on a bone: not ours
+        bool nested = false; //!< declared inside another child: its transform is relative to that one
+        PrefabChild entry;
+    };
+    std::vector<Frame> stack;
+    int depth = 0;
+    size_t at = 0;
+    const auto flush = [&](Frame& frame)
+    {
+        // Nested entries are tracked so their PivotID / coords cannot leak onto the outer
+        // entry, but not emitted: the outer child's own `.et` is expanded recursively by the
+        // caller, which is where its children belong.
+        if (!frame.pivot && !frame.nested && !frame.entry.prefab.empty())
+            out.push_back(frame.entry);
+        frame.pivot = false;
+        const std::string prefab = frame.entry.prefab;
+        frame.entry = PrefabChild{};
+        frame.entry.prefab = prefab;
+    };
+    while (at < size)
+    {
+        size_t lineEnd = at;
+        while (lineEnd < size && data[lineEnd] != '\n')
+            ++lineEnd;
+        size_t cursor = at;
+        while (cursor < lineEnd && static_cast<unsigned char>(data[cursor]) <= ' ')
+            ++cursor;
+        size_t trimmedEnd = lineEnd;
+        while (trimmedEnd > cursor && static_cast<unsigned char>(data[trimmedEnd - 1]) <= ' ')
+            --trimmedEnd;
+
+        std::string quoted;
+        if (depth >= 1 && PrefabDetail::ChildHeader(data, cursor, lineEnd, quoted))
+        {
+            Frame frame;
+            frame.depth = depth;
+            frame.group = lineEnd - cursor > 4 && std::memcmp(data + cursor, "$grp", 4) == 0;
+            frame.nested = !stack.empty();
+            frame.entry.prefab = quoted;
+            stack.push_back(frame);
+        }
+        else if (!stack.empty())
+        {
+            Frame& top = stack.back();
+            const bool bareOpen = trimmedEnd == cursor + 1 && data[cursor] == '{';
+            if (top.group && !top.open && bareOpen && depth == top.depth + 1)
+                top.open = true;
+            const int bodyDepth = top.group ? top.depth + 2 : top.depth + 1;
+            const bool ours = (!top.group || top.open) && depth == bodyDepth;
+            if (PrefabDetail::Keyword(data, cursor, lineEnd, "PivotID") && depth >= bodyDepth)
+                top.pivot = true;
+            else if (ours && PrefabDetail::Keyword(data, cursor, lineEnd, "coords"))
+                PrefabDetail::Floats(data, cursor + 6, lineEnd, top.entry.position, 3);
+            else if (ours && PrefabDetail::Keyword(data, cursor, lineEnd, "angles"))
+                PrefabDetail::Floats(data, cursor + 6, lineEnd, top.entry.angles, 3);
+            else if (ours && PrefabDetail::Keyword(data, cursor, lineEnd, "scale"))
+                PrefabDetail::Floats(data, cursor + 5, lineEnd, &top.entry.scale, 1);
+            else if (ours && PrefabDetail::Keyword(data, cursor, lineEnd, "ID"))
+                PrefabDetail::QuotedReference(data, cursor, lineEnd, top.entry.id);
+        }
+
+        depth += PrefabDetail::NetBraces(data, cursor, lineEnd);
+        while (!stack.empty())
+        {
+            Frame& top = stack.back();
+            if (top.group && top.open && depth <= top.depth + 1)
+            {
+                flush(top);
+                top.open = false;
+            }
+            if (depth > top.depth)
+                break;
+            if (!top.group)
+                flush(top);
+            stack.pop_back();
+        }
+        at = lineEnd + 1;
+    }
+}
+
+//! RFG-130: the root entity's own `Flags <set> <clear>` in one `.et` body (depth 1 only: a
+//! component block's `Flags` is the component's). False when the body declares none.
+inline bool FindEntityFlags(const std::vector<uint8_t>& blob, uint32_t& set, uint32_t& clear)
+{
+    const char* data = reinterpret_cast<const char*>(blob.data());
+    const size_t size = blob.size();
+    int depth = 0;
+    size_t at = 0;
+    while (at < size)
+    {
+        size_t lineEnd = at;
+        while (lineEnd < size && data[lineEnd] != '\n')
+            ++lineEnd;
+        size_t cursor = at;
+        while (cursor < lineEnd && static_cast<unsigned char>(data[cursor]) <= ' ')
+            ++cursor;
+        if (depth == 1 && PrefabDetail::Keyword(data, cursor, lineEnd, "Flags"))
+        {
+            const std::string text(data + cursor + 5, lineEnd - cursor - 5);
+            char* next = nullptr;
+            const unsigned long a = std::strtoul(text.c_str(), &next, 0);
+            if (next != text.c_str())
+            {
+                const char* second = next;
+                const unsigned long b = std::strtoul(second, &next, 0);
+                set = static_cast<uint32_t>(a);
+                clear = next != second ? static_cast<uint32_t>(b) : 0u;
+                return true;
+            }
+        }
+        depth += PrefabDetail::NetBraces(data, cursor, lineEnd);
+        at = lineEnd + 1;
+    }
+    return false;
+}
+
+//! RFG-130: the entity flags a prefab chain resolves to -- each level's (set, clear) applied
+//! from the root ancestor down. `known` is false when no level declares any.
+struct PrefabEntityFlags
+{
+    bool known = false;
+    uint32_t flags = 0;
+};
+
+inline PrefabEntityFlags ResolvePrefabEntityFlags(const EnfusionMount& mount, const std::string& etPath,
+                                                  int depthLimit = 8)
+{
+    std::vector<std::pair<uint32_t, uint32_t>> levels; // leaf first
+    std::string current = etPath;
+    std::vector<std::string> seen;
+    for (int depth = 0; depth <= depthLimit && !current.empty(); ++depth)
+    {
+        bool cycle = false;
+        for (const std::string& before : seen)
+            cycle = cycle || PrefabDetail::LowerCopy(before) == PrefabDetail::LowerCopy(current);
+        if (cycle)
+            break;
+        seen.push_back(current);
+        std::vector<uint8_t> blob;
+        if (!mount.Read(current, blob))
+            break;
+        uint32_t set = 0, clear = 0;
+        if (FindEntityFlags(blob, set, clear))
+            levels.emplace_back(set, clear);
+        current = Poseidon::Asset::Material::ParseEmat(
+                      std::string_view(reinterpret_cast<const char*>(blob.data()), blob.size()))
+                      .parentPath;
+    }
+    PrefabEntityFlags out;
+    for (auto it = levels.rbegin(); it != levels.rend(); ++it)
+    {
+        out.flags = (out.flags | it->first) & ~it->second;
+        out.known = true;
+    }
+    return out;
+}
+
+//! Every transform-placed child a prefab declares or inherits. Child first; an ancestor's
+//! entry with an ID the descendant already declared is the same child, and the descendant's
+//! version wins.
+inline std::vector<PrefabChild> ResolvePrefabChildren(const EnfusionMount& mount, const std::string& etPath,
+                                                      int depthLimit = 8)
+{
+    std::vector<PrefabChild> out;
+    std::string current = etPath;
+    std::vector<std::string> seen;
+    for (int depth = 0; depth <= depthLimit; ++depth)
+    {
+        for (const std::string& before : seen)
+            if (PrefabDetail::LowerCopy(before) == PrefabDetail::LowerCopy(current))
+                return out;
+        seen.push_back(current);
+        std::vector<uint8_t> blob;
+        if (!mount.Read(current, blob))
+            return out;
+        std::vector<PrefabChild> own;
+        FindChildPlacements(blob, own);
+        for (PrefabChild& child : own)
+        {
+            bool known = false;
+            if (!child.id.empty())
+                for (const PrefabChild& have : out)
+                    known = known || have.id == child.id;
+            if (!known)
+                out.push_back(std::move(child));
+        }
+        const auto parsed = Poseidon::Asset::Material::ParseEmat(
+            std::string_view(reinterpret_cast<const char*>(blob.data()), blob.size()));
+        if (parsed.parentPath.empty())
+            return out;
+        current = parsed.parentPath;
+    }
+    return out;
+}
+
+
+//! RFG-157: a door leaf, from the `DoorComponent` its prefab chain declares on the ROOT entity
+//! (`Prefabs/Structures/BuildingParts/Doors/Door_Base.et` and its children). Fields are NaN /
+//! empty until some level of the chain declares them; the nearest level wins.
+//!
+//!   DoorComponent { AngleRange 90  DoorAnimationType WholeEntity  SoundFilename "..acp" }
+//!   ActionsManagerComponent { ActionContexts { UserActionContext { Position PointInfo {
+//!       Offset 1.2 1.1 0 } Radius 0.65 } } }
+//!
+//! WholeEntity is the whole leaf turning about its own origin (the hinge) and its up axis.
+struct PrefabDoor
+{
+    bool isDoor = false;
+    bool wholeEntity = true;  //!< false once a level names another DoorAnimationType
+    bool animTypeKnown = false;
+    float angleDeg = NAN;     //!< AngleRange, degrees; the sign picks the swing direction
+    float offset[3] = {NAN, NAN, NAN}; //!< the action point, leaf space
+    float radius = NAN;       //!< the action's reach around that point
+};
+
+//! One `.et` body's own door declarations (root entity only; child entities -- the leaf's glass
+//! and handles, or an anonymous children block -- are skipped). Fills only what is still unset.
+inline void FindDoorDeclarations(const std::vector<uint8_t>& blob, PrefabDoor& io)
+{
+    const char* data = reinterpret_cast<const char*>(blob.data());
+    const size_t size = blob.size();
+    int depth = 0;
+    int childDepth = -1;   // >= 0 while inside a child entity (or the children block)
+    int doorDepth = -1;    // >= 0 while inside DoorComponent
+    int actionsDepth = -1; // >= 0 while inside ActionsManagerComponent
+    const auto number = [&](size_t from, size_t lineEnd, float* out, int count)
+    {
+        std::string text(data + from, lineEnd - from);
+        const char* p = text.c_str();
+        for (int i = 0; i < count; ++i)
+        {
+            char* next = nullptr;
+            const float v = std::strtof(p, &next);
+            if (next == p || !std::isfinite(v))
+                return false;
+            out[i] = v;
+            p = next;
+        }
+        return true;
+    };
+    size_t at = 0;
+    while (at < size)
+    {
+        size_t lineEnd = at;
+        while (lineEnd < size && data[lineEnd] != '\n')
+            ++lineEnd;
+        size_t cursor = at;
+        while (cursor < lineEnd && static_cast<unsigned char>(data[cursor]) <= ' ')
+            ++cursor;
+        size_t trimmedEnd = lineEnd;
+        while (trimmedEnd > cursor && static_cast<unsigned char>(data[trimmedEnd - 1]) <= ' ')
+            --trimmedEnd;
+        if (childDepth < 0 && depth >= 1)
+        {
+            std::string quoted;
+            const std::string_view line(data + cursor, trimmedEnd - cursor);
+            if (depth == 1 && line == "{")
+                childDepth = depth; // the root's anonymous children block
+            else if (line.find(" : ") != std::string_view::npos && PrefabDetail::ChildHeader(data, cursor, lineEnd, quoted))
+                childDepth = depth;
+            else if (PrefabDetail::Keyword(data, cursor, lineEnd, "DoorComponent"))
+            {
+                io.isDoor = true;
+                doorDepth = depth;
+            }
+            else if (PrefabDetail::Keyword(data, cursor, lineEnd, "ActionsManagerComponent"))
+                actionsDepth = depth;
+            else if (doorDepth >= 0 && PrefabDetail::Keyword(data, cursor, lineEnd, "AngleRange"))
+            {
+                float v = 0.0f;
+                if (std::isnan(io.angleDeg) && number(cursor + 10, lineEnd, &v, 1))
+                    io.angleDeg = v;
+            }
+            else if (doorDepth >= 0 && PrefabDetail::Keyword(data, cursor, lineEnd, "DoorAnimationType"))
+            {
+                if (!io.animTypeKnown)
+                {
+                    io.animTypeKnown = true;
+                    io.wholeEntity = std::string_view(data + cursor, trimmedEnd - cursor).find("WholeEntity") !=
+                                     std::string_view::npos;
+                }
+            }
+            else if (actionsDepth >= 0 && PrefabDetail::Keyword(data, cursor, lineEnd, "Offset"))
+            {
+                float v[3];
+                if (std::isnan(io.offset[0]) && number(cursor + 6, lineEnd, v, 3))
+                    for (int i = 0; i < 3; ++i)
+                        io.offset[i] = v[i];
+            }
+            else if (actionsDepth >= 0 && PrefabDetail::Keyword(data, cursor, lineEnd, "Radius"))
+            {
+                float v = 0.0f;
+                if (std::isnan(io.radius) && number(cursor + 6, lineEnd, &v, 1))
+                    io.radius = v;
+            }
+        }
+        depth += PrefabDetail::NetBraces(data, cursor, lineEnd);
+        if (childDepth >= 0 && depth <= childDepth)
+            childDepth = -1;
+        if (doorDepth >= 0 && depth <= doorDepth)
+            doorDepth = -1;
+        if (actionsDepth >= 0 && depth <= actionsDepth)
+            actionsDepth = -1;
+        at = lineEnd + 1;
+    }
+}
+
+//! RFG-157: the door a prefab chain resolves to. Child first, nearest declaration wins.
+inline PrefabDoor ResolvePrefabDoor(const EnfusionMount& mount, const std::string& etPath, int depthLimit = 8)
+{
+    PrefabDoor out;
+    std::string current = etPath;
+    std::vector<std::string> seen;
+    for (int depth = 0; depth <= depthLimit && !current.empty(); ++depth)
+    {
+        bool cycle = false;
+        for (const std::string& before : seen)
+            cycle = cycle || PrefabDetail::LowerCopy(before) == PrefabDetail::LowerCopy(current);
+        if (cycle)
+            break;
+        seen.push_back(current);
+        std::vector<uint8_t> blob;
+        if (!mount.Read(current, blob))
+            break;
+        FindDoorDeclarations(blob, out);
+        current = Poseidon::Asset::Material::ParseEmat(
+                      std::string_view(reinterpret_cast<const char*>(blob.data()), blob.size()))
+                      .parentPath;
+    }
+    return out;
+}
+
+
+//! RFG-158: a destructible window pane (Prefabs/Structures/Core/DestructibleGlass_Base.et and its
+//! children): its root entity carries an SCR_DestructionMultiPhaseComponent with an
+//! `SCR_WindowHitZone`, and the derived pane names the model of its broken phase:
+//!
+//!   SCR_DestructionMultiPhaseComponent { "Additional hit zones" { SCR_WindowHitZone Default {..} }
+//!       m_aDamagePhases { SCR_DamagePhaseData { m_PhaseModel "{..}Glass_01_76x63_dst.xob" } } }
+//!
+//! (`m_PhaseModel` exactly: a tree's `m_sPhaseModel` is a different thing.)
+struct PrefabGlass
+{
+    bool windowHitZone = false; //!< the chain declares SCR_WindowHitZone on its root
+    std::string phaseModel;     //!< the broken pane's `.xob`, GUID stripped; empty = none named
+    bool Destructible() const { return windowHitZone; }
+};
+
+//! One `.et` body's own pane declarations (root entity only). Fills what is still unset.
+inline void FindGlassDeclarations(const std::vector<uint8_t>& blob, PrefabGlass& io)
+{
+    const char* data = reinterpret_cast<const char*>(blob.data());
+    const size_t size = blob.size();
+    int depth = 0;
+    int childDepth = -1;
+    int destructionDepth = -1;
+    size_t at = 0;
+    while (at < size)
+    {
+        size_t lineEnd = at;
+        while (lineEnd < size && data[lineEnd] != '\n')
+            ++lineEnd;
+        size_t cursor = at;
+        while (cursor < lineEnd && static_cast<unsigned char>(data[cursor]) <= ' ')
+            ++cursor;
+        size_t trimmedEnd = lineEnd;
+        while (trimmedEnd > cursor && static_cast<unsigned char>(data[trimmedEnd - 1]) <= ' ')
+            --trimmedEnd;
+        if (childDepth < 0 && depth >= 1)
+        {
+            std::string quoted;
+            const std::string_view line(data + cursor, trimmedEnd - cursor);
+            if (depth == 1 && line == "{")
+                childDepth = depth;
+            else if (line.find(" : ") != std::string_view::npos && line.find(".et\"") != std::string_view::npos &&
+                     PrefabDetail::ChildHeader(data, cursor, lineEnd, quoted))
+                childDepth = depth;
+            else if (PrefabDetail::Keyword(data, cursor, lineEnd, "SCR_DestructionMultiPhaseComponent"))
+                destructionDepth = depth;
+            else if (destructionDepth >= 0 && PrefabDetail::Keyword(data, cursor, lineEnd, "SCR_WindowHitZone"))
+                io.windowHitZone = true;
+            else if (destructionDepth >= 0 && io.phaseModel.empty() &&
+                     PrefabDetail::Keyword(data, cursor, lineEnd, "m_PhaseModel"))
+            {
+                std::string path;
+                if (PrefabDetail::QuotedReference(data, cursor, lineEnd, path) &&
+                    PrefabDetail::EndsWith(PrefabDetail::LowerCopy(path), ".xob"))
+                    io.phaseModel = path;
+            }
+        }
+        depth += PrefabDetail::NetBraces(data, cursor, lineEnd);
+        if (childDepth >= 0 && depth <= childDepth)
+            childDepth = -1;
+        if (destructionDepth >= 0 && depth <= destructionDepth)
+            destructionDepth = -1;
+        at = lineEnd + 1;
+    }
+}
+
+//! RFG-158: the pane a prefab chain resolves to. Child first, nearest declaration wins.
+inline PrefabGlass ResolvePrefabGlass(const EnfusionMount& mount, const std::string& etPath, int depthLimit = 8)
+{
+    PrefabGlass out;
+    std::string current = etPath;
+    std::vector<std::string> seen;
+    for (int depth = 0; depth <= depthLimit && !current.empty(); ++depth)
+    {
+        bool cycle = false;
+        for (const std::string& before : seen)
+            cycle = cycle || PrefabDetail::LowerCopy(before) == PrefabDetail::LowerCopy(current);
+        if (cycle)
+            break;
+        seen.push_back(current);
+        std::vector<uint8_t> blob;
+        if (!mount.Read(current, blob))
+            break;
+        FindGlassDeclarations(blob, out);
+        current = Poseidon::Asset::Material::ParseEmat(
+                      std::string_view(reinterpret_cast<const char*>(blob.data()), blob.size()))
+                      .parentPath;
+    }
+    return out;
 }
 
 } // namespace Poseidon::Asset::Formats::Enfusion

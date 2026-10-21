@@ -281,6 +281,39 @@ int Landscape::GatherTerrainHoles(Vector3Par pos, float radius, TerrainHoleArea*
         for (int x = xMin; x <= xMax; x++)
         {
             const ObjectList& list = _objects(x, z);
+            if (list.Null())
+            {
+                continue;
+            }
+            // PERF (2026-10-14): every soldier asks this every tick (GroundCollision), and the
+            // walk below loaded the shape of every object in a 75-125 m square just to find
+            // that it has no roadway. Only roadway objects can hold a hole, and each cell
+            // already mirrors exactly those (ObjectListFull::GetRoadwayObject, which soldier
+            // ground contact relies on too). So ask the mirror, with the walk's own filters,
+            // whether this cell can contribute anything; only a cell that can is walked, and
+            // walked exactly as before, so hole order and RegisterHoleObject are unchanged.
+            // A stock world has no hole objects and now skips every cell.
+            bool mayHoldHole = false;
+            const ObjectListFull* full = list.GetList();
+            for (int i = 0; i < full->GetRoadwayObjectCount() && !mayHoldHole; i++)
+            {
+                const Object* obj = full->GetRoadwayObject(i);
+                const LODShape* shape = obj ? obj->GetShape() : nullptr;
+                if (!shape || shape->FindRoadwayLevel() < 0 || shape->FindMemoryLevel() < 0)
+                {
+                    continue;
+                }
+                const float r = shape->BoundingSphere() + radius;
+                if ((obj->Position() - pos).SquareSizeXZ() > r * r)
+                {
+                    continue;
+                }
+                mayHoldHole = !ShapeHolesOf(shape).empty();
+            }
+            if (!mayHoldHole)
+            {
+                continue;
+            }
             for (int i = 0; i < list.Size(); i++)
             {
                 const Object* obj = list[i];
@@ -523,6 +556,66 @@ bool Landscape::LeavesTerrainHoleUnderground(Vector3Par from, Vector3Par to) con
         return false; // no sideways movement
     }
     return InTerrainHoleBelow(from, 0.5f) && !InTerrainHole(to.X(), to.Z(), nullptr, to.Y()) && to.Y() < SurfaceY(to.X(), to.Z()) - 0.3f;
+}
+
+bool Landscape::SinksIntoHiddenTerrainHole(Vector3Par from, Vector3Par to) const
+{
+    if (GHoleShapeCount.load(std::memory_order_relaxed) == 0 || !(to.Y() < from.Y()))
+    {
+        return false;
+    }
+    // from: on or above the drawn ground (a contact a few cm under it included), and not already in a hole
+    if (from.Y() < SurfaceY(from.X(), from.Z()) - 0.05f || InTerrainHole(from.X(), from.Z(), nullptr, from.Y()))
+    {
+        return false;
+    }
+    return InTerrainHole(to.X(), to.Z(), nullptr, to.Y()) && !InDrawnTerrainHole(to.X(), to.Z());
+}
+
+bool Landscape::InDrawnTerrainHole(float x, float z) const
+{
+    if (GHoleShapeCount.load(std::memory_order_relaxed) == 0)
+    {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(GHoleMutex);
+    for (const Object* obj : GHoleObjects)
+    {
+        const LODShape* shape = obj ? obj->GetShape() : nullptr;
+        if (!shape)
+        {
+            continue;
+        }
+        const float r = shape->BoundingSphere();
+        const float dx = obj->Position().X() - x, dz = obj->Position().Z() - z;
+        if (dx * dx + dz * dz > r * r)
+        {
+            continue;
+        }
+        for (const ShapeHolePoly& poly : ShapeHolesOf(shape))
+        {
+            TerrainHoleArea area;
+            if (poly.draw && MakeHoleArea(obj, poly, area) && TerrainHoleIndex(&area, 1, x, z) == 0)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+Vector3 Landscape::SurfacePlacementProbe(Vector3Par pos) const
+{
+    if (GHoleShapeCount.load(std::memory_order_relaxed) == 0 || !std::isfinite(pos.X()) || !std::isfinite(pos.Z()))
+    {
+        return pos;
+    }
+    // 0.1 m under the terrain: above a hidden hole's terrain-following ceiling (its gap is more), still inside every
+    // drawn opening (no ceiling there, or one under the terrain only where it is bounded), and outside holes the
+    // search finds the same ground (nothing under the terrain is ground there)
+    Vector3 probe = pos;
+    probe[1] = std::max(pos.Y(), SurfaceY(pos.X(), pos.Z()) - 0.1f);
+    return probe;
 }
 
 bool Landscape::CutsTerrainHole(const Object* obj)

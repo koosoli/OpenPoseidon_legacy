@@ -22,6 +22,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <cmath>
+#include <string>
+#include <vector>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
@@ -43,6 +45,8 @@
 
 namespace Poseidon
 {
+DEFINE_CASTING(Airplane)
+
 Airplane::Airplane(VehicleType* name, Person* pilot)
     : Transport(name, pilot),
 
@@ -159,6 +163,66 @@ void AirplaneType::InitShape()
     _lWheel.Init(_shape, "levy kolo", nullptr, "osa leveho kola");
     _rWheel.Init(_shape, "pravy kolo", nullptr, "osa praveho kola");
     _fWheel.Init(_shape, "predni kolo", nullptr, "osa predniho kola");
+
+    // Arma 1 gear (the A-10): the OFP selections are absent, the legs are gear_1..3
+    _nA1Gear = 0;
+    if (Shape* lod0 = _shape->LevelOpaque(0); lod0 && lod0->FindNamedSel("predni kolo") < 0 &&
+                                               lod0->FindNamedSel("gear_1") >= 0)
+    {
+        struct Leg
+        {
+            int index;
+            Vector3 centre;
+        };
+        std::vector<Leg> legs;
+        for (int g = 1; g <= 9; g++)
+        {
+            char name[16];
+            snprintf(name, sizeof(name), "gear_%d", g);
+            const int sel = lod0->FindNamedSel(name);
+            if (sel >= 0 && lod0->NamedSel(sel).Size() > 0)
+                legs.push_back({g, lod0->CalculateCenter(lod0->NamedSel(sel))});
+        }
+        float frontZ = -1e10f;
+        for (const Leg& leg : legs)
+            frontZ = floatMax(frontZ, leg.centre.Z());
+        for (int i = 0; i < lod0->NNamedSel() && _nA1Gear < MaxA1GearParts; i++)
+        {
+            const auto& sel = lod0->NamedSel(i);
+            std::string name = sel.Name();
+            for (char& ch : name)
+                ch = (char)tolower((unsigned char)ch);
+            int leg = -1;
+            if (name.rfind("gear_", 0) == 0 && name.find("hatch") == std::string::npos &&
+                name.find("lock") == std::string::npos)
+            {
+                const int g = atoi(name.c_str() + 5);
+                for (size_t k = 0; k < legs.size(); k++)
+                    if (legs[k].index == g)
+                        leg = (int)k;
+            }
+            else if (name.rfind("wheel_", 0) == 0 && sel.Size() > 0)
+            {
+                // a wheel turns with the leg nearest to it
+                const Vector3 c = lod0->CalculateCenter(sel);
+                float best = 1e10f;
+                for (size_t k = 0; k < legs.size(); k++)
+                    if (const float d = c.Distance2(legs[k].centre); d < best)
+                    {
+                        best = d;
+                        leg = (int)k;
+                    }
+            }
+            if (leg < 0)
+                continue;
+            char axis[24];
+            snprintf(axis, sizeof(axis), "gear_%d_axis", legs[leg].index);
+            _a1Gear[_nA1Gear].Init(_shape, sel.Name(), nullptr, axis);
+            _a1GearFront[_nA1Gear] = legs[leg].centre.Z() >= frontZ - 0.01f;
+            _nA1Gear++;
+        }
+        LOG_INFO(Graphics, "{}: Arma 1 gear, {} legs, {} parts animated", (const char*)GetName(), legs.size(), _nA1Gear);
+    }
 
     _altRadarIndicator.Init(_shape, par >> "IndicatorAltRadar");
     _altRadarIndicator2.Init(_shape, par >> "IndicatorAltRadar2");
@@ -1327,6 +1391,12 @@ void Airplane::Animate(int level)
     Matrix4 bGear(MRotationX, -_gearsUp * (H_PI * 0.45));
     Type()->_rWheel.Apply(_shape, bGear, level);
     Type()->_lWheel.Apply(_shape, bGear, level);
+    // Arma 1 legs retract forward about their own axes (A-10); the nose leg like OFP's
+    // front wheel, the main legs like its rear ones
+    for (int i = 0; i < Type()->_nA1Gear; i++)
+    {
+        Type()->_a1Gear[i].Apply(_shape, Type()->_a1GearFront[i] ? fGear : bGear, level);
+    }
 
     if (_mGunFireFrames > 0 || Glob.uiTime < _mGunFireTime + 0.05)
     {
@@ -1403,6 +1473,10 @@ void Airplane::Deanimate(int level)
     Type()->_fWheel.Restore(_shape, level);
     Type()->_lWheel.Restore(_shape, level);
     Type()->_rWheel.Restore(_shape, level);
+    for (int i = 0; i < Type()->_nA1Gear; i++)
+    {
+        Type()->_a1Gear[i].Restore(_shape, level);
+    }
     base::Deanimate(level);
 }
 

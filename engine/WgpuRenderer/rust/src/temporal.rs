@@ -83,8 +83,12 @@ struct TemporalParams {
     prev_view_proj: [f32; 16],
     cam_delta: [f32; 4],
     misc: [f32; 4],
+    // Velocity pass: the cloud deck's motion (see fs_velocity). x/z = this frame's wind step in
+    // world metres, z = the deck's mid-shell radius, w = the camera's radius (planet-centred).
+    // z <= w (camera at or above the deck) or all zero = no cloud motion.
+    cloud: [f32; 4],
 }
-const _: () = assert!(std::mem::size_of::<TemporalParams>() == 160);
+const _: () = assert!(std::mem::size_of::<TemporalParams>() == 176);
 
 struct VelocityPass {
     target: wgpu::Texture,
@@ -167,6 +171,13 @@ pub struct Temporal {
     // WGR_REACTIVE_SKY / WGR_REACTIVE_WATER strengths (0 disables a term). Live-tunable.
     pub reactive_sky: f32,
     pub reactive_water: f32,
+    // Cloud deck motion vectors: the wind offset the sky samples the deck at (set every frame
+    // from the sky runtime), the one seen at the previous camera advance, and the step between.
+    cloud_wind: [f32; 2],
+    cloud_wind_prev: Option<[f32; 2]>,
+    cloud_step: [f32; 2],
+    cloud_shell_radius: f32,
+    cloud_camera_radius: f32,
     // 0 = auto (~8 x (out/render)^2). Live-tunable (dev panel).
     pub jitter_phase_override: u64,
     // REN-TEMP-001H: ABSOLUTE world matrices of identified rigid draws, this frame and
@@ -233,6 +244,11 @@ impl Temporal {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.3f32)
                 .clamp(0.0, 1.0),
+            cloud_wind: [0.0, 0.0],
+            cloud_wind_prev: None,
+            cloud_step: [0.0, 0.0],
+            cloud_shell_radius: 0.0,
+            cloud_camera_radius: 0.0,
             jitter_phase_override: std::env::var("WGR_JITTER_PHASES")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -296,6 +312,16 @@ impl Temporal {
             self.prev_worlds.clear();
             self.prev_skin_bases.clear();
         }
+        // The deck's step since the previous frame, taken once per frame here so a sky runtime
+        // that is not re-sent cannot count the same step twice. The offset wraps at 100 km.
+        self.cloud_step = match self.cloud_wind_prev {
+            Some(p) if !self.reset => {
+                let wrap = |d: f32| if d > 50_000.0 { d - 100_000.0 } else if d < -50_000.0 { d + 100_000.0 } else { d };
+                [wrap(self.cloud_wind[0] - p[0]), wrap(self.cloud_wind[1] - p[1])]
+            }
+            _ => [0.0, 0.0],
+        };
+        self.cloud_wind_prev = Some(self.cloud_wind);
         self.cur = Some(CameraSnap {
             view: cam.view,
             proj: cam.proj,
@@ -422,6 +448,16 @@ impl Temporal {
     }
 
     // The matrices the object-velocity pass needs, or None while history is invalid.
+    /// RFG-142: current camera minus previous (world metres), for passes that rebuild the
+    /// previous position relative to the previous camera.
+    pub fn camera_delta(&self) -> Option<[f32; 3]> {
+        if !self.enabled || self.reset {
+            return None;
+        }
+        let (cur, prev) = (self.cur.as_ref()?, self.prev.as_ref()?);
+        Some([cur.cam_pos[0] - prev.cam_pos[0], cur.cam_pos[1] - prev.cam_pos[1], cur.cam_pos[2] - prev.cam_pos[2]])
+    }
+
     pub fn object_velocity_uniform(&self) -> Option<ObjVelUniform> {
         if !self.enabled || self.reset {
             return None;
@@ -497,7 +533,9 @@ impl Temporal {
     // The swaying-vegetation subset: (draws3d index, leaf flag). Selection mirrors the
     // scene VS gate (1 = bush, 2 = legacy tree, 3 = coherent native tree).
     // A negative section value selects coherent wind, including on solid bark.
-    pub fn veg_velocity_subset(&self, draws: &[crate::ffi::WgrDraw3D]) -> Vec<(u32, f32)> {
+    // (draws3d index, wind section: -1 coherent / 0 solid / 1 leaf, 1.0 when the draw is a bush:
+    // frame.wgsl veg_sway_height)
+    pub fn veg_velocity_subset(&self, draws: &[crate::ffi::WgrDraw3D]) -> Vec<(u32, f32, f32)> {
         if !self.enabled || self.reset {
             return Vec::new();
         }
@@ -508,7 +546,8 @@ impl Temporal {
             }
             let wind_section = if d.mat_sun_ambient[3] > 2.5 { -1.0 }
                 else if d.alpha_ref > 0.0 { 1.0 } else { 0.0 };
-            out.push((i as u32, wind_section));
+            let bush = if d.mat_sun_ambient[3] < 1.5 { 1.0 } else { 0.0 };
+            out.push((i as u32, wind_section, bush));
             if out.len() >= 16384 {
                 break;
             }
@@ -680,6 +719,7 @@ impl Temporal {
                     prev_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
                     cam_delta: [0.0, 0.0, 0.0, 0.0],
                     misc: [0.0; 4],
+                    cloud: [0.0; 4],
                 };
             }
         };
@@ -708,7 +748,16 @@ impl Temporal {
                 0.0,
                 0.0,
             ],
+            cloud: [self.cloud_step[0], self.cloud_step[1], self.cloud_shell_radius, self.cloud_camera_radius],
         }
+    }
+
+    /// The sky's cloud wind offset (world metres, the `cloud1.xy` the deck is sampled at), the
+    /// deck's mid-shell radius and the camera's radius, both planet-centred. Shell 0 = no deck.
+    pub fn set_cloud_motion(&mut self, wind: [f32; 2], shell_radius: f32, camera_radius: f32) {
+        self.cloud_wind = wind;
+        self.cloud_shell_radius = shell_radius;
+        self.cloud_camera_radius = camera_radius;
     }
 
     fn ensure_shader(&mut self, device: &wgpu::Device) -> &wgpu::ShaderModule {
@@ -1547,8 +1596,10 @@ mod tests {
         // Non-vegetation and skinned objects are still excluded.
         draws[5].mat_sun_ambient[3] = 3.0;
         draws[5].palette_slot = 0;
+        // a bush (foliage kind 1) is flagged for frame.wgsl veg_sway_height
+        draws[4].mat_sun_ambient[3] = 1.0;
         assert_eq!(temporal.veg_velocity_subset(&draws),
-                   vec![(0, -1.0), (1, -1.0), (2, 0.0), (3, 1.0)]);
+                   vec![(0, -1.0, 0.0), (1, -1.0, 0.0), (2, 0.0, 0.0), (3, 1.0, 0.0), (4, 0.0, 1.0)]);
     }
 
     #[test]

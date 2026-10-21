@@ -80,6 +80,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <unordered_set>
+#include <functional>
 #include <Poseidon/World/Terrain/StaticSourceEnvelope.hpp>
 #include <Poseidon/World/Terrain/StaticPlainSourceSummary.hpp>
 
@@ -462,6 +464,54 @@ class ObjectStreamPreparer
     SourceEnvelopeRequest RequestInternal(uint32_t index, bool sourceEnvelope);
     struct Impl;
     std::unique_ptr<Impl> _impl;
+};
+
+namespace Model
+{
+struct Model;
+}
+class TaskPool;
+
+//! PERF (2026-10-14): the load-time half of native texture preparation. Registering a batch of
+//! native models (the world loader's part shapes and road ribbons) creates each new `.edds`
+//! source on the main thread, one after another -- read, LZ4, BC7 decode, tint -- which was
+//! ~40% of that registration. This prepares exactly those sources on `pool` first -- the names
+//! ShapeAdapter::BuildAdapterBankTables will load, in the store's keying and preparation
+//! options -- into the PreparedTextureStore; the DDS
+//! factory takes them while a NativeInstallTextureScope is alive. A name not prepared (or
+//! refused by the store) is created the ordinary way, so the outcome never depends on it.
+struct NativeInstallTexturePrep
+{
+    size_t names = 0;    //!< distinct .edds/.dds names the models' materials resolve to
+    size_t prepared = 0; //!< stored for the factory
+    size_t failed = 0;   //!< read/compose failed or the store refused (factory falls back)
+    double ms = 0;
+};
+//! `claimed` carries the names already prepared by an earlier batch of the same install: a
+//! texture the bank now holds is never asked of the factory again, so preparing it twice
+//! would only be thrown away.
+//! `alreadyLoaded(name)`, when given, answers whether the texture bank already holds `name`
+//! (AbstractTextBank::IsLoaded); such a name never reaches the factory, so it is not prepared.
+NativeInstallTexturePrep PrepareNativeInstallTextures(const std::vector<const Model::Model*>& models, TaskPool* pool,
+                                                      std::unordered_set<std::string>& claimed,
+                                                      const std::function<bool(const char*)>& alreadyLoaded = {});
+//! PERF-FAR-ASYNC-PREP: the two halves of PrepareNativeInstallTextures. Collecting the names asks
+//! the texture bank (`alreadyLoaded`) and so belongs on the main thread; decoding them only
+//! touches the mount and the thread-safe PreparedTextureStore and may run anywhere. The whole
+//! function is exactly CollectNativeInstallTextureKeys followed by DecodeNativeInstallTextureKeys.
+std::vector<std::string> CollectNativeInstallTextureKeys(const std::vector<const Model::Model*>& models,
+                                                         std::unordered_set<std::string>& claimed,
+                                                         const std::function<bool(const char*)>& alreadyLoaded = {});
+NativeInstallTexturePrep DecodeNativeInstallTextureKeys(const std::vector<std::string>& keys, TaskPool* pool);
+
+//! While alive, TextureSourceDDSFactory takes prepared native sources even with the streaming
+//! experiment (WGR_NATIVE_DDS_PREPARE) off. Main thread; not reentrant.
+struct NativeInstallTextureScope
+{
+    NativeInstallTextureScope();
+    ~NativeInstallTextureScope();
+    NativeInstallTextureScope(const NativeInstallTextureScope&) = delete;
+    NativeInstallTextureScope& operator=(const NativeInstallTextureScope&) = delete;
 };
 
 } // namespace Poseidon

@@ -8,6 +8,7 @@
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/UI/Locale/Stringtable/Stringtable.hpp>
 
 #include <algorithm>
 #include <cstdlib>
@@ -21,6 +22,8 @@
 #include <vector>
 
 void Arma2StartStallMonitor(); // GameStateExtA2.cpp (Arma 2 test mode only)
+void Arma3InstallFunctionLibrary(); // GameStateExtA3Functions.cpp
+void Arma3RegisterScriptCommands(); // GameStateExtA3.cpp
 
 namespace Poseidon::Arma1Compat
 {
@@ -55,26 +58,58 @@ std::vector<std::string>& AllBankPrefixesMutable()
     return prefixes;
 }
 
-const fs::path& RootPath()
+bool HasPbos(const fs::path& folder)
 {
-    static fs::path root;
+    std::error_code ec;
+    for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
+        if (it->is_regular_file(ec) && Lower(it->path().extension().string()) == ".pbo")
+            return true;
+    return false;
+}
+
+// Every configured root. --arma2 names one install folder. --arma1 names one Arma 1 folder or
+// several separated by ';': a retail install keeps its archives in AddOns\ and Campaigns\, while
+// Bohemia's licensed data packages (ALDP_A1_PBOs_*) split the same archives over several folders
+// with the add-on PBOs at each folder's top level (the ARMA CONTENT browser passes those).
+const std::vector<fs::path>& Roots()
+{
+    static std::vector<fs::path> roots;
     static bool resolved = false;
     if (!resolved)
     {
         resolved = true;
         const std::string& configured = Foundation::AppConfig::Instance().GetArma1Root();
-        if (!configured.empty())
+        const int generation = Foundation::AppConfig::Instance().GetArmaGeneration();
+        size_t start = 0;
+        while (start <= configured.size() && !configured.empty())
         {
+            // ';' joins the parts of a data package (Arma 1's and Arma 2's ALDP sets ship one game as
+            // several folders of PBOs); the ARMA CONTENT browser passes them that way.
+            const size_t end = std::min(configured.find(';', start), configured.size());
+            const std::string item = configured.substr(start, end - start);
+            start = end + 1;
+            if (item.empty())
+                continue;
             std::error_code ec;
-            fs::path candidate = fs::absolute(fs::path(configured), ec);
-            if (!ec && fs::is_directory(candidate / "AddOns", ec))
-                root = candidate;
+            const fs::path candidate = fs::absolute(fs::path(item), ec);
+            const bool ok = !ec && (fs::is_directory(candidate / "AddOns", ec) || HasPbos(candidate) ||
+                                    (generation != 2 && (fs::is_directory(candidate / "Campaigns", ec) ||
+                                                         fs::is_directory(candidate / "Missions", ec))));
+            if (ok)
+                roots.push_back(candidate);
             else
-                LOG_ERROR(Mission, "--arma{} '{}' is not an Arma folder (no AddOns subfolder)",
-                          Foundation::AppConfig::Instance().GetArmaGeneration(), configured);
+                LOG_ERROR(Mission, "--arma{} '{}' holds no Arma archives (AddOns, Campaigns, Missions or PBOs)",
+                          generation, item);
         }
     }
-    return root;
+    return roots;
+}
+
+// The first root: the install the Dta folder, Arma 2's sibling folders and the log line refer to.
+const fs::path& RootPath()
+{
+    static const fs::path none;
+    return Roots().empty() ? none : Roots().front();
 }
 
 // --arma2oa: the Operation Arrowhead folder, or empty. Its Expansion/BAF/PMC/ACR
@@ -110,8 +145,9 @@ const std::vector<fs::path>& Arma2Roots()
     if (resolved)
         return roots;
     resolved = true;
-    roots.push_back(RootPath());
-    if (!OaRootPath().empty() && OaRootPath() != RootPath())
+    // Every --arma2 part (a data package's folders), then the Arrowhead folders.
+    roots = Roots();
+    if (!OaRootPath().empty() && std::find(roots.begin(), roots.end(), OaRootPath()) == roots.end())
         roots.push_back(OaRootPath());
     // OP_A2_ONLY=1: plain Arma 2, without the Operation Arrowhead folders next to it.
     if (const char* only = std::getenv("OP_A2_ONLY"); only && *only == '1')
@@ -139,15 +175,72 @@ const std::vector<fs::path>& Arma2Roots()
 // are copy-protected ("hprotect") and only the original game unlocks them.
 std::vector<fs::path> Arma2AddonFolders(const fs::path& r)
 {
-    std::vector<fs::path> out{r / "AddOns"};
+    // A data package part keeps its PBOs at its top level (ALDP_A2_PBOs_*); an install in AddOns.
+    std::vector<fs::path> out{r, r / "AddOns"};
     for (const char* dlc : {"Expansion", "BAF", "PMC", "ACR"})
         out.push_back(r / dlc / "AddOns");
     return out;
 }
 
+// Arma 3: <root>\Addons plus every DLC folder beside it that holds an Addons folder of
+// its own (Expansion = Apex, Heli, Mark, Jets, Orange = Laws of War, Argo = Malden, Tacops,
+// Tank, Enoch + Contact, AoW, Kart, Curator = Zeus, ...). Steam installs them all into the
+// Arma 3 folder. Creator DLCs (GM, EF, RF, WS, ...) ship encrypted .ebo archives only the
+// original game opens: those are counted and logged, never read. Workshop and @mod folders
+// are not Arma 3's own content and are left alone.
+std::vector<fs::path> Arma3AddonFolders(const fs::path& r)
+{
+    std::vector<fs::path> out;
+    std::error_code ec;
+    if (fs::is_directory(r / "Addons", ec))
+        out.push_back(r / "Addons");
+    std::vector<fs::path> dlcs;
+    for (fs::directory_iterator it(r, ec), end; !ec && it != end; it.increment(ec))
+    {
+        if (!it->is_directory(ec))
+            continue;
+        const std::string name = Lower(it->path().filename().string());
+        if (name.empty() || name[0] == '@' || name[0] == '!' || name == "addons" || name == "dta" || name == "keys" ||
+            name == "missions" || name == "mpmissions" || name == "battleye" || name == "launcher" || name == "dll" ||
+            name == "logs" || name == "reshade-shaders")
+            continue;
+        for (const char* sub : {"Addons", "addons"})
+            if (fs::is_directory(it->path() / sub, ec))
+            {
+                dlcs.push_back(it->path() / sub);
+                break;
+            }
+    }
+    std::sort(dlcs.begin(), dlcs.end());
+    out.insert(out.end(), dlcs.begin(), dlcs.end());
+    return out;
+}
+
+// Encrypted archives (.ebo) in an Arma 3 folder: reported once, never opened.
+void ReportEncryptedArchives(const fs::path& folder)
+{
+    std::error_code ec;
+    int count = 0;
+    for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
+        if (it->is_regular_file(ec) && Lower(it->path().extension().string()) == ".ebo")
+            count++;
+    if (count > 0)
+        LOG_INFO(Mission, "Arma 3: {} holds {} encrypted .ebo archives (Creator DLC); they are not read",
+                 folder.string(), count);
+}
+
 // `missionRoot`: single/multiplayer mission archives declare only "M09ConvoyAttack"
 // as their prefix, while the mission loader needs the world suffix that is in the
 // FILE name ("m09convoyattack.sara"). They are mounted as <missionRoot>\<file stem>\.
+// Whether one of the --arma1 roots is the Cold War Rearmed mod folder (@CWR).
+bool CwrModMounted()
+{
+    for (const fs::path& r : Roots())
+        if (Lower(r.filename().string()).rfind("@cwr", 0) == 0)
+            return true;
+    return false;
+}
+
 void MountFolder(const fs::path& folder, bool missionBanks, const char* remountPrefix = nullptr,
                  const char* missionRoot = nullptr)
 {
@@ -155,20 +248,24 @@ void MountFolder(const fs::path& folder, bool missionBanks, const char* remountP
     if (!fs::is_directory(folder, ec))
         return;
     std::vector<fs::path> pbos;
-    for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
+    for (fs::recursive_directory_iterator it(folder, fs::directory_options::skip_permission_denied, ec), end;
+         !ec && it != end; it.increment(ec))
     {
+        if (it.depth() >= (missionBanks ? 1 : 0))
+            it.disable_recursion_pending();
         if (!it->is_regular_file(ec) || Lower(it->path().extension().string()) != ".pbo")
             continue;
-        // CWR_* are the bundled Cold War Rearmed conversions (they need the @CWR mod,
-        // which is not mounted), not Arma 1 content.
-        if (Lower(it->path().filename().string()).rfind("cwr_", 0) == 0)
+        // CWR_* are the bundled Cold War Rearmed conversions: they need the @CWR mod, so
+        // they are offered only when it is mounted (--arma1 "<Arma 1>;<Arma 1>\@CWR", as
+        // Arma 1's own cwr.bat starts the game with -mod=@CWR).
+        if (Lower(it->path().filename().string()).rfind("cwr_", 0) == 0 && !CwrModMounted())
             continue;
         pbos.push_back(it->path());
     }
     std::sort(pbos.begin(), pbos.end());
-    const std::string dir = folder.string() + "\\";
     for (const fs::path& pbo : pbos)
     {
+        const std::string dir = pbo.parent_path().string() + "\\";
         const int before = GFileBanks.Size();
         // emptyPrefix: the archive's declared prefix (ca\sara, campaigns\ca, ...) wins.
         // No config callback: Arma 1 configs are never parsed into the CWA config.
@@ -308,9 +405,9 @@ const std::map<std::string, std::vector<const char*>>& WeaponAliases()
         {"mp5a5", {"HK", "M16"}},    {"mp5sd", {"HK", "M16"}},
         {"m9", {"Beretta", "Revolver"}}, {"m9sd", {"Beretta", "Revolver"}},
         {"colt1911", {"Revolver"}},  {"makarov", {"Tokarev", "Revolver"}},
-        {"m136", {"LAWLauncher"}},   {"smaw", {"CarlGustavLauncher", "LAWLauncher"}},
+        {"m136", {"AT4Launcher", "LAWLauncher"}}, {"smaw", {"CarlGustavLauncher", "LAWLauncher"}},
         {"javelin", {"CarlGustavLauncher", "LAWLauncher"}},
-        {"stinger", {"Stinger"}},    {"strela", {"Strela"}},
+        {"stinger", {"AALauncher"}}, {"strela", {"9K32Launcher", "AALauncher"}},
         {"ak74", {"AK74"}},          {"ak74gl", {"AK74GrenadeLauncher", "AK74"}},
         {"aks74u", {"AK74SU", "AK74"}}, {"aks74un", {"AK74SU", "AK74"}},
         {"ak47", {"AK47"}},          {"aks74pso", {"AK74", "SVDDragunov"}},
@@ -327,17 +424,22 @@ const std::map<std::string, std::vector<const char*>>& MagazineAliases()
 {
     static const std::map<std::string, std::vector<const char*>> table = {
         {"30rnd_556x45_stanag", {"M16"}},   {"30rnd_556x45_stanagsd", {"M16"}},
+        // G36 rounds on CWA's own G36a (its magazine, by the weapon-carrier rule in
+        // ResolveMagazineClass): on M16 rounds the G36a stayed empty -- two modes, the
+        // G36a muzzle has three. The G36K and G36C on M16 take them through their listing.
+        {"30rnd_556x45_g36", {"G36a", "M16"}}, {"30rnd_556x45_g36sd", {"G36a", "M16"}},
         {"200rnd_556x45_m249", {"M60"}},    {"100rnd_762x51_m240", {"M60"}},
         {"5rnd_762x51_m24", {"M21"}},       {"10rnd_127x99_m107", {"M21"}},
         {"30rnd_9x19_mp5", {"HK", "M16"}},  {"30rnd_9x19_mp5sd", {"HK", "M16"}},
         {"15rnd_9x19_m9", {"Beretta", "Revolver"}}, {"15rnd_9x19_m9sd", {"Beretta", "Revolver"}},
         {"7rnd_45acp_1911", {"Revolver"}},  {"8rnd_9x18_makarov", {"Tokarev", "Revolver"}},
+        {"8rnd_9x18_makarovsd", {"Tokarev", "Revolver"}}, {"5rnd_127x108_ksvk", {"SVDDragunov", "M21"}},
         {"30rnd_545x39_ak", {"AK74"}},      {"30rnd_762x39_ak47", {"AK47"}},
         {"10rnd_762x54_svd", {"SVDDragunov"}}, {"100rnd_762x54_pk", {"PK"}},
-        {"m136", {"LAWLauncher"}},          {"smaw_he", {"CarlGustavLauncher", "LAWLauncher"}},
+        {"m136", {"AT4Launcher", "LAWLauncher"}}, {"smaw_he", {"CarlGustavLauncher", "LAWLauncher"}},
         {"smaw_hedp", {"CarlGustavLauncher", "LAWLauncher"}},
         {"javelin", {"CarlGustavLauncher", "LAWLauncher"}},
-        {"stinger", {"Stinger"}},           {"strela", {"Strela"}},
+        {"stinger", {"AALauncher"}},        {"strela", {"9K32Launcher", "AALauncher"}},
         {"pg7v", {"RPGLauncher"}},          {"pg7vr", {"RPGLauncher"}},
         {"handgrenade", {"HandGrenade"}},   {"handgrenade_west", {"HandGrenade"}},
         {"handgrenade_east", {"HandGrenade"}}, {"handgrenadetimed", {"HandGrenade"}}, {"smokeshell", {"SmokeShell"}},
@@ -350,8 +452,11 @@ const std::map<std::string, std::vector<const char*>>& MagazineAliases()
     return table;
 }
 
+// weaponModels: a resolved weapon gets the A1x_ class with the Arma model; a magazine
+// never does (its name must stay the CWA magazine the weapon's magazines[] lists).
 RString ResolveFrom(const char* configClass, const RString& name,
-                    const std::map<std::string, std::vector<const char*>>& table, bool warn = true)
+                    const std::map<std::string, std::vector<const char*>>& table, bool warn = true,
+                    bool weaponModels = false)
 {
     if (!Active() || name.GetLength() == 0)
         return name;
@@ -360,10 +465,11 @@ RString ResolveFrom(const char* configClass, const RString& name,
         return name;
     if (config->FindEntry(name))
     {
-        // A hand weapon both games name alike (PK, Strela, Stinger) keeps the CWA weapon's
-        // behaviour but is drawn with the Arma 2 model, like every other Arma 2 weapon:
-        // the CDF machine gunners carried CWA's PK.
-        if (Generation() == 2 && strcmp(configClass, "CfgWeapons") == 0 && Arma2IsHandWeapon(name))
+        // A weapon both games name alike (AK74, PK, M16A2 ...): CWA's class keeps the
+        // magazines and ballistics, the Arma model is drawn on it like for any other.
+        // Arma 2 hand weapons named like CWA's (PK, Strela, Stinger) take the Arma 2 model too.
+        if ((weaponModels && Generation() >= 1 && _strnicmp(name.Data(), "A1x_", 4) != 0) ||
+            (Generation() == 2 && strcmp(configClass, "CfgWeapons") == 0 && Arma2IsHandWeapon(name)))
             return Arma2WeaponModelClass(name, name);
         return name;
     }
@@ -378,15 +484,15 @@ RString ResolveFrom(const char* configClass, const RString& name,
             {
                 if (reported.insert(std::string(configClass) + key).second)
                     LOG_INFO(Mission, "{}: {} '{}' is represented by CWA '{}'", Label(), configClass, name.Data(), candidate);
-                if (Generation() == 2 && strcmp(configClass, "CfgWeapons") == 0)
+                if (weaponModels && Generation() >= 1)
                     return Arma2WeaponModelClass(name, RString(candidate));
                 return RString(candidate);
             }
         }
     }
-    // Arma 2 names hundreds of weapons and magazines; the ones not in the table are
+    // Arma 1 and 2 name hundreds of weapons and magazines; the ones not in the table are
     // carried by the CWA weapon of the same kind and calibre (Arma2WeaponFallback).
-    if (Generation() == 2 && strcmp(configClass, "CfgWeapons") == 0)
+    if (Generation() >= 1 && strcmp(configClass, "CfgWeapons") == 0)
     {
         const RString fallback = Arma2WeaponFallback(name);
         if (fallback.GetLength() > 0 && config->FindEntry(fallback))
@@ -394,7 +500,7 @@ RString ResolveFrom(const char* configClass, const RString& name,
             if (reported.insert(std::string(configClass) + key).second)
                 LOG_INFO(Mission, "{}: {} '{}' is carried by CWA '{}' (by kind and calibre)", Label(), configClass,
                          name.Data(), fallback.Data());
-            return Arma2WeaponModelClass(name, fallback);
+            return weaponModels ? Arma2WeaponModelClass(name, fallback) : fallback;
         }
     }
     if (warn && reported.insert(std::string(configClass) + key).second)
@@ -450,7 +556,7 @@ int Generation()
 
 const char* Label()
 {
-    return Generation() == 2 ? "Arma 2" : "Arma 1";
+    return Generation() == 3 ? "Arma 3" : Generation() == 2 ? "Arma 2" : "Arma 1";
 }
 
 std::vector<std::string> DtaFolders()
@@ -459,6 +565,13 @@ std::vector<std::string> DtaFolders()
     if (!Active())
         return out;
     out.push_back((RootPath() / "Dta").string());
+    if (Generation() == 3)
+    {
+        // Arma 3's DLC folders keep no Dta of their own; Contact adds one.
+        std::error_code ec;
+        if (fs::is_directory(RootPath() / "Contact" / "Dta", ec))
+            out.push_back((RootPath() / "Contact" / "Dta").string());
+    }
     if (Generation() == 2)
     {
         for (const fs::path& r : Arma2Roots())
@@ -478,12 +591,32 @@ void MountArchives()
     ::Arma2StartStallMonitor();
     MissionBankPrefixes().clear();
     AllBankPrefixesMutable().clear();
-    const fs::path& root = RootPath();
+    const fs::path root = RootPath();
     // Dta\bin.pbo / core.pbo are NOT mounted: their declared prefixes ("bin", "core")
     // would shadow CWA's own UI resources. Arma1Config reads bin.pbo privately.
-    GameState::s_singleQuoteStrings = Generation() == 2;
+    GameState::s_singleQuoteStrings = Generation() >= 2;
+    // Arma 3: {...} is code (typeName "CODE"), and the function library compiles on use.
+    GameState::s_codeValues = Generation() == 3;
+    if (Generation() == 3)
+    {
+        ::Arma3RegisterScriptCommands();
+        ::Arma3InstallFunctionLibrary();
+    }
     GameState::s_emptyStatementKeepsValue = true;
-    if (Generation() == 2)
+    if (Generation() == 3)
+    {
+        // Arma 3: every scenario, showcase, campaign and challenge sits in
+        // Addons\missions_f*.pbo (and the DLC folders' own); the player's missions in
+        // Missions / MPMissions are archives of their own.
+        for (const fs::path& folder : Arma3AddonFolders(root))
+        {
+            ReportEncryptedArchives(folder);
+            MountFolder(folder, false);
+        }
+        MountFolder(root / "Missions", true, nullptr, "arma3\\missions");
+        MountFolder(root / "MPMissions", true, nullptr, "arma3\\mpmissions");
+    }
+    else if (Generation() == 2)
     {
         // Arma 2 keeps its campaigns and scenarios inside AddOns\missions*.pbo. Operation
         // Arrowhead and its DLCs add folders of their own; later mounts are searched first.
@@ -499,17 +632,24 @@ void MountArchives()
     }
     else
     {
-        MountFolder(root / "AddOns", false);
-        MountFolder(root / "DBE1" / "AddOns", false);
-        MountFolder(root / "Campaigns", true);
-        MountFolder(root / "DBE1" / "Campaigns", true);
-        MountFolder(root / "Missions", true, nullptr, "arma1\\missions");
-        MountFolder(root / "MPMissions", true, nullptr, "arma1\\mpmissions");
+        for (const fs::path& r : Roots())
+        {
+            MountFolder(r, false); // a data package's add-on PBOs lie at its top level
+            MountFolder(r / "AddOns", false);
+            MountFolder(r / "DBE1" / "AddOns", false);
+            MountFolder(r / "Campaigns", true);
+            MountFolder(r / "DBE1" / "Campaigns", true);
+            MountFolder(r / "Missions", true, nullptr, "arma1\\missions");
+            MountFolder(r / "MPMissions", true, nullptr, "arma1\\mpmissions");
+        }
     }
     std::string from = root.string();
     if (Generation() == 2)
         for (size_t i = 1; i < Arma2Roots().size(); i++)
             from += " + " + Arma2Roots()[i].string();
+    else
+        for (size_t i = 1; i < Roots().size(); i++)
+            from += " + " + Roots()[i].string();
     LOG_INFO(Mission, "{}: mounted {} archives read-only from {} ({} mission archives)", Label(),
              AllBankPrefixesMutable().size(), from, MissionBankPrefixes().size());
 }
@@ -529,11 +669,15 @@ void RegisterWorldClasses()
         std::string name;
         std::string wrp;
         std::string description;
+        // Arma 3: where the world lies, for the sun and the stars (Eden's are Everon's)
+        bool located = false;
+        float latitude = 0.0f;
+        float longitude = 0.0f;
     };
     std::vector<World> worlds;
-    if (Generation() == 2)
+    if (Generation() >= 2)
     {
-        // Arma 2 / OA: every CfgWorlds class of the Arma 2 config whose world file is
+        // Arma 2 / OA / Arma 3: every CfgWorlds class of the Arma 2 config whose world file is
         // mounted (Chernarus, Utes, Takistan, Zargabad, Desert_E, Shapur_BAF, ...). A name
         // CWA already uses ("Intro") gets the private prefix A2_ and is chosen only for
         // missions from an Arma 2 archive (WorldClassForMission).
@@ -556,10 +700,20 @@ void RegisterWorldClasses()
             {
                 const ParamEntry* owned = existing->FindEntry("opArma1World");
                 if (!owned || static_cast<int>(*owned) != 1)
-                    name = "A2_" + name;
+                    name = (Generation() == 3 ? "A3_" : "A2_") + name;
             }
-            std::string description = std::string("Arma 2 / ") + (const char*)w.GetName();
-            worlds.push_back({name, wrp, description});
+            std::string description = std::string(Label()) + " / " + (const char*)w.GetName();
+            World world{name, wrp, description};
+            const ParamEntry* lat = w.FindEntry("latitude");
+            const ParamEntry* lon = w.FindEntry("longitude");
+            if (Generation() >= 3 && lat && lon && !lat->IsClass() && !lat->IsArray() && !lon->IsClass() &&
+                !lon->IsArray())
+            {
+                world.located = true;
+                world.latitude = static_cast<float>(*lat);
+                world.longitude = static_cast<float>(*lon);
+            }
+            worlds.push_back(world);
         }
     }
     else
@@ -598,6 +752,13 @@ void RegisterWorldClasses()
         cls->Add("opArma1World", 1);
         cls->Add("worldName", RString(world.wrp.c_str()));
         cls->Add("description", RString(world.description.c_str()));
+        // Stratis and Altis lie at 35 N, Tanoa at 18 S (Arma's sign: negative is north);
+        // left at Eden's, a Tanoa dawn came up with Everon's sun.
+        if (world.located)
+        {
+            cls->Add("latitude", world.latitude);
+            cls->Add("longitude", world.longitude);
+        }
         if (ParamClass* names = cls->AddClass("Names"))
         {
             names->SetBase(nullptr);
@@ -648,9 +809,29 @@ RString ResolveVehicleClass(const RString& className)
     // A class generated earlier for this mission keeps resolving to itself.
     if (_strnicmp(className.Data(), "A1x_", 4) == 0)
         return className;
-    // Arma 2 animals (sheep, cows, goats, dogs) derive from Man; carried by a CWA class
-    // they became walking civilians in the fields. Until animal models and moves are in,
-    // they are left out.
+    // Animals (Arma 2's sheep, cows, goats, dogs; Arma 3's Animal_Base_F: goats, sheep,
+    // dogs, snakes, rabbits, fish) derive from Man; carried by a CWA class they became
+    // walking civilians in the fields. Until animal models and moves are in, they are left
+    // out -- Arma 3's first, then Arma 2's.
+    // Arma 3's are now placed with their own model as a still object (a static CWA thing
+    // carries it, so it does not walk the fields as a civilian); their moves are not in yet.
+    if (Arma3IsAnimal(className))
+    {
+        const ParamEntry* vehicles = Pars.FindEntry("CfgVehicles");
+        const char* still = vehicles && vehicles->FindEntry("House") ? "House" : nullptr;
+        static std::set<std::string> reported;
+        const bool first = reported.insert(Lower(className.Data())).second;
+        if (!still)
+        {
+            if (first)
+                LOG_INFO(Mission, "{}: animal '{}' left out (no animal models yet)", Label(), className.Data());
+            return RString();
+        }
+        if (first)
+            LOG_INFO(Mission, "{}: animal '{}' stands still with its own model on CWA '{}' (no animal moves yet)",
+                     Label(), className.Data(), still);
+        return Arma1ModelClass(className, RString(still));
+    }
     if (Generation() == 2)
     {
         const ParamEntry* cls = FindConfigClass("CfgVehicles", className.Data());
@@ -667,6 +848,19 @@ RString ResolveVehicleClass(const RString& className)
     }
     RString cwa = ResolveFrom("CfgVehicles", className, VehicleAliases(), false);
     const ParamEntry* vehicles = Pars.FindEntry("CfgVehicles");
+    if (Generation() == 3 && vehicles && !vehicles->FindEntry(cwa))
+    {
+        // Arma 3: by the class's kind in the Arma 3 config (tank, APC, truck, attack
+        // helicopter, ...); men and things go on to the generic fallback below.
+        if (const RString carrier = Arma3VehicleCarrier(className); carrier.GetLength() > 0)
+        {
+            static std::set<std::string> reported;
+            if (reported.insert(Lower(className.Data())).second)
+                LOG_INFO(Mission, "{}: CfgVehicles '{}' is carried by CWA '{}' (by its Arma 3 kind)", Label(),
+                         className.Data(), carrier.Data());
+            cwa = carrier;
+        }
+    }
     if (Generation() == 2 && vehicles && !vehicles->FindEntry(cwa))
     {
         // Arma 2 vehicle names carry their type ("BRDM2_INS", "UralOpen_CDF",
@@ -704,7 +898,7 @@ RString ResolveVehicleClass(const RString& className)
         std::string sim;
         if (const ParamEntry* a2 = FindConfigClass("CfgVehicles", className.Data()))
             if (const ParamEntry* e = a2->FindEntry("simulation"); e && !e->IsClass() && !e->IsArray())
-                sim = Lower((const char*)(RStringB)*e);
+                sim = SimKind((const char*)(RStringB)*e);
         const bool vehicle = sim == "car" || sim == "tank" || sim == "helicopter" || sim == "airplane" ||
                              sim == "ship" || sim == "motorcycle" || sim == "bicycle" || sim == "parachute";
         // An armed Arma 2 car (HMMWV M2/Mk19/TOW, UAZ DShKM/AGS, Land Rover M2, pickups with
@@ -747,18 +941,160 @@ RString ResolveVehicleClass(const RString& className)
             LOG_WARN(Mission, "{}: CfgVehicles '{}' has no CWA counterpart", Label(), className.Data());
         }
     }
+    // Arma 1: an armed car (HMMWV M2, UAZ DShKM, PK pickups) rides CWA's armed jeep rather
+    // than the unarmed jeep its name resolved to, so its gunner has a gun.
+    if (Generation() == 1)
+        cwa = Arma1ArmedCarCarrier(className, cwa);
     return Arma1ModelClass(className, cwa);
 }
 
 RString ResolveWeaponClass(const RString& className)
 {
-    return ResolveFrom("CfgWeapons", className, WeaponAliases());
+    return ResolveFrom("CfgWeapons", className, WeaponAliases(), true, true);
 }
+
+namespace
+{
+// CWA magazine (lower case) -> the first Arma magazine name resolved to it this session.
+std::map<std::string, std::string>& ResolvedMagazineNames()
+{
+    static std::map<std::string, std::string> names;
+    return names;
+}
+} // namespace
 
 RString ResolveMagazineClass(const RString& className)
 {
     // OFP/CWA keeps magazines in CfgWeapons as well.
-    return ResolveFrom("CfgWeapons", className, MagazineAliases());
+    RString cwa = ResolveFrom("CfgWeapons", className, MagazineAliases());
+    // A carrier that is a weapon with magazines of its own (CWA's Beretta and Tokarev take
+    // BerettaMag and TokarevMag) is no magazine: its first magazine carries the round. A
+    // magazine built on the pistol class itself had no ammunition mode, and once loaded
+    // the AI's fire evaluation read a null mode (x05warreporter, 24175174).
+    if (Active() && cwa.GetLength() > 0 && _stricmp(cwa.Data(), className.Data()) != 0)
+        if (const ParamEntry* weapons = Pars.FindEntry("CfgWeapons"))
+            if (const ParamEntry* carrier = weapons->FindEntry(cwa); carrier && carrier->IsClass())
+                if (const ParamEntry* mags = carrier->FindEntry("magazines");
+                    mags && mags->IsArray() && mags->GetSize() > 0)
+                {
+                    bool own = false;
+                    for (int i = 0; i < mags->GetSize() && !own; i++)
+                    {
+                        const RString m = (RStringB)(*mags)[i];
+                        own = _stricmp(m.Data(), "this") == 0 || _stricmp(m.Data(), cwa.Data()) == 0;
+                    }
+                    const RString first = (RStringB)(*mags)[0];
+                    if (!own && weapons->FindEntry(first))
+                        cwa = first;
+                }
+    if (Active() && cwa.GetLength() > 0 && className.GetLength() > 0 && _stricmp(cwa.Data(), className.Data()) != 0)
+    {
+        // An Arma 1 magazine of another size than its carrier gets a class of its own.
+        const RString own = Arma1MagazineClass(className, cwa);
+        if (_stricmp(own.Data(), cwa.Data()) != 0)
+            return own;
+        ResolvedMagazineNames().try_emplace(Lower(cwa.Data()), std::string(className.Data()));
+    }
+    return cwa;
+}
+
+RString ScriptClassName(const RString& engineName)
+{
+    if (!Active() || (_strnicmp(engineName.Data(), "A1x_", 4) != 0 && _strnicmp(engineName.Data(), "A1v_", 4) != 0))
+        return engineName;
+    return RString(engineName.Data() + 4);
+}
+
+RString ScriptMagazineName(const RString& unitClass, const RString& cwaMagazine)
+{
+    // A generated magazine is shown under its Arma name on any unit.
+    if (Active() && _strnicmp(cwaMagazine.Data(), "A1x_", 4) == 0)
+        return RString(cwaMagazine.Data() + 4);
+    if (!Active() || cwaMagazine.GetLength() == 0 || _strnicmp(unitClass.Data(), "A1x_", 4) != 0)
+        return cwaMagazine;
+    // Per generated unit class: CWA magazine (lower case) -> the first Arma magazine of
+    // that class's own magazines[], then of its weapons' magazines[], that resolves to it.
+    static std::map<std::string, std::map<std::string, std::string>> cache;
+    auto [it, inserted] = cache.try_emplace(Lower(unitClass.Data()));
+    if (inserted)
+    {
+        std::map<std::string, std::string>& names = it->second;
+        const auto addList = [&](const ParamEntry* list)
+        {
+            if (!list || !list->IsArray())
+                return;
+            for (int i = 0; i < list->GetSize(); i++)
+            {
+                const RString name = (RStringB)(*list)[i];
+                if (name.GetLength() == 0 || _stricmp(name.Data(), "this") == 0)
+                    continue;
+                const RString cwa = ResolveFrom("CfgWeapons", name, MagazineAliases(), false);
+                if (cwa.GetLength() > 0)
+                    names.try_emplace(Lower(cwa.Data()), std::string(name.Data()));
+            }
+        };
+        if (const ParamEntry* cls = FindConfigClass("CfgVehicles", unitClass.Data() + 4); cls && cls->IsClass())
+        {
+            addList(cls->FindEntry("magazines"));
+            if (const ParamEntry* weapons = cls->FindEntry("weapons"); weapons && weapons->IsArray())
+                for (int i = 0; i < weapons->GetSize(); i++)
+                {
+                    const RString weapon = (RStringB)(*weapons)[i];
+                    if (const ParamEntry* w = FindConfigClass("CfgWeapons", weapon.Data()); w && w->IsClass())
+                        addList(w->FindEntry("magazines"));
+                }
+        }
+    }
+    const std::string key = Lower(cwaMagazine.Data());
+    if (const auto found = it->second.find(key); found != it->second.end())
+        return RString(found->second.c_str());
+    // A magazine outside the unit's own loadout (picked up, added by a script): the Arma
+    // name it was first resolved from.
+    if (const auto found = ResolvedMagazineNames().find(key); found != ResolvedMagazineNames().end())
+        return RString(found->second.c_str());
+    return cwaMagazine;
+}
+
+RString MagazineDisplayName(const RString& ownerClass, const RString& cwaMagazine)
+{
+    if (!Active() || cwaMagazine.GetLength() == 0)
+        return RString();
+    RString arma = ScriptMagazineName(ownerClass, cwaMagazine);
+    if (_strnicmp(ownerClass.Data(), "A1x_", 4) != 0)
+    {
+        const auto found = ResolvedMagazineNames().find(Lower(cwaMagazine.Data()));
+        if (found == ResolvedMagazineNames().end())
+            return RString();
+        arma = RString(found->second.c_str());
+    }
+    const ParamEntry* magazine = FindConfigClass("CfgMagazines", arma.Data());
+    const ParamEntry* name = magazine && magazine->IsClass() ? magazine->FindEntry("displayName") : nullptr;
+    if (!name || name->IsClass() || name->IsArray())
+        return RString();
+    const RString text = name->GetValue();
+    if (text.GetLength() > 1 && (text[0] == '$' || text[0] == '@'))
+        return Localize(text);
+    return text;
+}
+
+bool ScriptWeaponMatches(const char* engineName, const RString& scriptName)
+{
+    if (!engineName || scriptName.GetLength() == 0)
+        return false;
+    if (_stricmp(engineName, scriptName.Data()) == 0)
+        return true;
+    if (!Active())
+        return false;
+    if ((_strnicmp(engineName, "A1x_", 4) == 0 || _strnicmp(engineName, "A1v_", 4) == 0) &&
+        _stricmp(engineName + 4, scriptName.Data()) == 0)
+        return true;
+    // An Arma weapon carried by a CWA class without a model of its own ("M9" on CWA's
+    // pistol): the script's name resolves to it. Muzzle names (M203Muzzle) are no
+    // top-level weapons and are left alone, so this logs nothing for them.
+    if (!FindConfigClass("CfgWeapons", scriptName.Data()))
+        return false;
+    const RString resolved = ResolveFrom("CfgWeapons", scriptName, WeaponAliases(), false, true);
+    return _stricmp(engineName, resolved.Data()) == 0;
 }
 
 void FilterMissionAddons(FindArrayRStringCI& addOns)
@@ -851,6 +1187,33 @@ std::string ResolveMissionFile(const std::string& spec, std::string& error)
     return {};
 }
 
+bool IsArmaBankPath(const char* name)
+{
+    if (!Active() || !name || !*name)
+        return false;
+    const char* slash = name;
+    while (*slash && *slash != '\\' && *slash != '/')
+        slash++;
+    if (!*slash || slash == name)
+        return false;
+    static size_t knownBanks = 0;
+    static std::set<std::string> tops;
+    const auto& prefixes = AllBankPrefixesMutable();
+    if (knownBanks != prefixes.size())
+    {
+        knownBanks = prefixes.size();
+        tops.clear();
+        for (const std::string& prefix : prefixes)
+        {
+            std::string p = Lower(prefix);
+            const size_t cut = p.find_first_of("\\/");
+            if (cut != std::string::npos && cut > 0)
+                tops.insert(p.substr(0, cut));
+        }
+    }
+    return tops.count(Lower(std::string(name, slash))) > 0;
+}
+
 bool IsArma1MissionDirectory(const char* missionDirectory)
 {
     if (!Active() || !missionDirectory || !*missionDirectory)
@@ -870,7 +1233,8 @@ RString WorldClassForMission(const RString& world, const char* missionDirectory)
 {
     if (!IsArma1MissionDirectory(missionDirectory))
         return world;
-    const std::string alias = (Generation() == 2 ? "A2_" : "A1_") + std::string(world.Data());
+    const std::string alias =
+        (Generation() == 3 ? "A3_" : Generation() == 2 ? "A2_" : "A1_") + std::string(world.Data());
     const ParamEntry* worlds = Pars.FindEntry("CfgWorlds");
     const ParamEntry* entry = worlds ? worlds->FindEntry(alias.c_str()) : nullptr;
     return entry ? RString(alias.c_str()) : world;
@@ -890,7 +1254,7 @@ std::string CampaignBaseForMission(const std::string& missionFile)
     // Arma 2: <archive prefix>/campaign/missions/<mission>/mission.sqm, with the campaign's
     // description.ext next to that missions folder.
     const size_t missions = lower.rfind("/missions/");
-    if (Generation() == 2 && missions != std::string::npos && missions > 0)
+    if (Generation() >= 2 && missions != std::string::npos && missions > 0)
     {
         const std::string base = path.substr(0, missions + 1);
         if (QIFStreamB::FileExist((base + "description.ext").c_str()))

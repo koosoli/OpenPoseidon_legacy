@@ -61,6 +61,10 @@
 #include <Poseidon/Dev/Diag/PictureModeTab.hpp>
 #include <Poseidon/Dev/Diag/WeatherTab.hpp>
 #include <Poseidon/Dev/Diag/SmokeTab.hpp>
+#include <Poseidon/Dev/Diag/AudioTab.hpp>
+#include <Poseidon/Dev/Debug/DevPanelHome.hpp>
+#include <Poseidon/Dev/NpcChat/NpcChat.hpp>
+#include <Poseidon/Dev/NpcChat/NpcChatUi.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 3D overlay (--diag-draw)
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/UI/Settings/AspectRatio.hpp>
@@ -236,7 +240,12 @@ constexpr std::array<const char*, 4> kZeusSideNames = {"West", "East", "Resistan
 constexpr std::array<TargetSide, 4> kZeusSides = {TWest, TEast, TGuerrila, TCivilian};
 constexpr std::array<const char*, 6> kZeusUnitPresets = {"SoldierWB", "SoldierEB", "SoldierGB",
                                                          "OfficerW",  "OfficerE",  "Civilian"};
-constexpr std::array<const char*, 7> kZeusVehiclePresets = {"Jeep", "UAZ", "M1A1", "T72", "BMP", "UH60", "Mi17"};
+constexpr std::array<const char*, 9> kZeusVehiclePresets = {"Jeep", "UAZ", "M1A1", "T72", "BMP", "UH60", "Mi17",
+                                                            "BoatW", "OP_TidewaterBoat"};
+// Tidewater's lobster boat (@OP_TidewaterBoat, generate_tidewater_boat.py)
+constexpr const char* kTidewaterBoatClass = "OP_TidewaterBoat";
+// Tidewater's humpback whale (@OP_TidewaterWildlife, Whale.cpp)
+constexpr const char* kTidewaterWhaleClass = "OP_TidewaterHumpback";
 
 bool ZeusWorldAvailable()
 {
@@ -1029,6 +1038,82 @@ void SpawnZeusSelection()
     s_zeusStatus = "Spawned " + std::to_string(spawned) + " / " + std::to_string(count) + " " + s_zeusClassName + ".";
 }
 
+// The Tidewater boat on the sea in front of the camera (the free-fly camera, else the player): the first point
+// along the view, 12 m out or more, with 2 m of water under the whole hull, its bow pointing away.
+void SpawnTidewaterBoatAhead()
+{
+    if (!ZeusWorldAvailable())
+    {
+        s_zeusStatus = "Spawning requires a loaded world.";
+        return;
+    }
+    Object* source = s_zeusCamera ? static_cast<Object*>(s_zeusCamera) : GWorld->CameraOn();
+    Vector3 dir = source->Direction();
+    dir[1] = 0;
+    if (dir.SquareSize() < 1e-4f)
+        dir = VForward;
+    dir.Normalize();
+    const Vector3 aside(dir.Z(), 0, -dir.X());
+    const float sea = GLandscape->GetSeaLevel();
+    const auto deep = [&](Vector3Par p) { return sea - GLandscape->SurfaceY(p.X(), p.Z()) >= 2.0f; };
+    for (float d = 12.0f; d <= 400.0f; d += 4.0f)
+    {
+        Vector3 p = source->Position() + dir * d;
+        if (!deep(p) || !deep(p + dir * 5.0f) || !deep(p - dir * 5.0f) || !deep(p + aside * 2.5f) || !deep(p - aside * 2.5f))
+            continue;
+        p[1] = sea;
+        const float heading = std::atan2(dir.X(), dir.Z()) * (180.0f / H_PI);
+        const bool spawned = SpawnZeusVehicle(kTidewaterBoatClass, p, heading < 0 ? heading + 360.0f : heading);
+        char buf[160];
+        if (spawned)
+            std::snprintf(buf, sizeof(buf), "Tidewater boat placed %.0f m ahead.", d);
+        else
+            std::snprintf(buf, sizeof(buf), "Could not create %s (is @OP_TidewaterBoat installed?)", kTidewaterBoatClass);
+        s_zeusStatus = buf;
+        return;
+    }
+    s_zeusStatus = "No open sea within 400 m in front of the camera.";
+}
+
+// The humpback in front of the camera: the first point along the view, 40 m out or more, over 12 m of water (it
+// finds its own loop through the deepest water near there and surfaces to blow at once).
+void SpawnTidewaterWhaleAhead()
+{
+    if (!ZeusWorldAvailable())
+    {
+        s_zeusStatus = "Spawning requires a loaded world.";
+        return;
+    }
+    Object* source = s_zeusCamera ? static_cast<Object*>(s_zeusCamera) : GWorld->CameraOn();
+    Vector3 dir = source->Direction();
+    dir[1] = 0;
+    if (dir.SquareSize() < 1e-4f)
+        dir = VForward;
+    dir.Normalize();
+    const float sea = GLandscape->GetSeaLevel();
+    for (const float need : {12.0f, 6.0f})
+    {
+        for (float d = 40.0f; d <= 800.0f; d += 10.0f)
+        {
+            Vector3 p = source->Position() + dir * d;
+            if (sea - GLandscape->SurfaceY(p.X(), p.Z()) < need)
+                continue;
+            p[1] = sea - 5.0f;
+            const float heading = std::atan2(dir.X(), dir.Z()) * (180.0f / H_PI);
+            const bool spawned = SpawnZeusVehicle(kTidewaterWhaleClass, p, heading < 0 ? heading + 360.0f : heading);
+            char buf[160];
+            if (spawned)
+                std::snprintf(buf, sizeof(buf), "Humpback whale placed %.0f m ahead.", d);
+            else
+                std::snprintf(buf, sizeof(buf), "Could not create %s (is @OP_TidewaterWildlife installed?)",
+                              kTidewaterWhaleClass);
+            s_zeusStatus = buf;
+            return;
+        }
+    }
+    s_zeusStatus = "No deep water within 800 m in front of the camera.";
+}
+
 void SpawnZeusAtClick()
 {
     Vector3 position;
@@ -1597,7 +1682,7 @@ void DrawZeusTab()
         }
         Dev::PanelSameLine();
         ImGui::SetNextItemWidth(140.0f);
-        ImGui::InputText("class##zeusthrow", s_zeusThrowClass, sizeof(s_zeusThrowClass));
+        Dev::InputText("class##zeusthrow", s_zeusThrowClass, sizeof(s_zeusThrowClass));
         Dev::PanelTooltip("Any CfgAmmo class name: shells, missiles, rockets, bombs, grenades, mines.");
         ImGui::SetNextItemWidth(160.0f);
         Dev::SliderFloat("Speed (m/s)", &s_zeusThrowSpeed, 1.0f, 1000.0f, "%.0f");
@@ -1641,7 +1726,7 @@ void DrawZeusTab()
             ImGui::SetNextItemWidth(140.0f);
             Dev::SliderFloat("Torch reach m", &s_headlampRange, 2.0f, 60.0f, "%.0f");
             ImGui::SetNextItemWidth(160.0f);
-            ImGui::ColorEdit3("Torch colour", s_headlampColor, ImGuiColorEditFlags_NoInputs);
+            Dev::ColorEdit3("Torch colour", s_headlampColor, ImGuiColorEditFlags_NoInputs);
         }
 
     }
@@ -1798,6 +1883,14 @@ void DrawZeusTab()
     if (ImGui::CollapsingHeader("Spawn at camera aim##zeus", ImGuiTreeNodeFlags_DefaultOpen))
     {
     ImGui::BeginDisabled(!worldAvailable);
+    if (Dev::Button("Spawn Tidewater boat ahead"))
+        Defer([] { SpawnTidewaterBoatAhead(); });
+    Dev::PanelTooltip("Tidewater's lobster boat on the sea in front of the camera (the first spot with 2 m of\n"
+                      "water under the hull, bow away from you). Get in at the helm; step out onto the deck.");
+    if (Dev::Button("Spawn humpback whale ahead"))
+        Defer([] { SpawnTidewaterWhaleAhead(); });
+    Dev::PanelTooltip("Tidewater's humpback whale in the deep water in front of the camera (12 m of water or more).\n"
+                      "It loops through the deepest water near there and comes up to blow at once.");
     if (Dev::RadioButton("Unit", s_zeusSpawnKind == 0))
     {
         s_zeusSpawnKind = 0;
@@ -3930,7 +4023,7 @@ void DrawGrassTab()
         {
             changed = true;
         }
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
         {
             ImGui::SetTooltip("Reforger's own ground cover is a procedural PlantMat: a blade atlas plus the\n"
                               "rectangles it picks tufts from. On, the near ring's eight blade layers are cut\n"
@@ -4219,6 +4312,30 @@ void DrawGrassTab()
         Dev::PanelHelp("Effective mix: %.0f%% grass, %.0f%% weed, %.0f%% flower. Chosen per clump (~25 m "
                        "patches), so these are area fractions, not per-blade odds.",
                        (1.0f - weed - flower) * 100.0f, weed * 100.0f, flower * 100.0f);
+    }
+    // GRS-VAR: which look each clump of a group takes.
+    changed |= Dev::Checkbox("Meadow variety", &grass.meadowVariety);
+    Dev::PanelHelp("Flower heads, weed tints and seeding grass per clump. Off = the meadow before it. "
+                   "Never applies on a native (Reforger) world. WGR_GRASS_VARIETY=0/1 overrides.");
+    if (grass.meadowVariety)
+    {
+        changed |= Dev::SliderFloat("Look drift size", &grass.lookDrift, 0.01f, 0.5f, "%.3f /m");
+        Dev::PanelHelp("Frequency of the field that groups one look into a drift: 0.09 = ~11 m patches.");
+        changed |= Dev::SliderFloat("Head share", &grass.headShare, 0.0f, 1.0f, "%.2f");
+        Dev::PanelHelp("Share of a flowering or seeding clump's blades that carry the head.");
+        changed |= Dev::SliderFloat("Head brightness", &grass.headBrightness, 0.0f, 2.0f, "%.2f");
+        if (ImGui::TreeNode("Look weights##grassVariety"))
+        {
+            static const char* const LookNames[16] = {
+                "Grass: plain",     "Grass: foxtail",   "Grass: short bent", "Grass: seeding fescue",
+                "Weed: clover",     "Weed: nettle",     "Weed: thistle",     "Weed: dock",
+                "Flower: daisy",    "Flower: poppy",    "Flower: dandelion", "Flower: cornflower",
+                "Flower: buttercup", "Flower: red clover", "Flower: yarrow",  "Flower: cranesbill"};
+            for (int i = 0; i < 16; ++i)
+                changed |= Dev::SliderFloat(LookNames[i], &grass.lookWeights[i], 0.0f, 10.0f, "%.1f");
+            Dev::PanelHelp("Relative odds inside each group. A group at all zeros keeps its plain look.");
+            ImGui::TreePop();
+        }
     }
     changed |= Dev::SliderFloat("Blade height", &grass.height, 0.10f, 3.0f, "%.2fx");
     changed |= Dev::Checkbox("Use live world wind", &grass.useLiveWind);
@@ -4902,7 +5019,7 @@ void DrawGiTab()
         const char* kBasis[] = {"Ambient cube (6 faces)", "SH-1 (worse -- see REN-GI-008)",
                                 "SH-2 (default)"};
         int basis = std::clamp(gi.basis, 0, 2);
-        if (ImGui::Combo("Probe basis", &basis, kBasis, IM_ARRAYSIZE(kBasis)))
+        if (Dev::Combo("Probe basis", &basis, kBasis, IM_ARRAYSIZE(kBasis)))
         {
             gi.basis = basis;
             changed = true;
@@ -4910,31 +5027,31 @@ void DrawGiTab()
         Dev::PanelHelp("  how each probe stores the light it gathered, and what the shading can");
         Dev::PanelHelp("  read back out of it for a given surface normal");
     }
-    changed |= ImGui::SliderFloat("Weight", &gi.weight, 0.0f, 1.0f, "%.2f");
+    changed |= Dev::SliderFloat("Weight", &gi.weight, 0.0f, 1.0f, "%.2f");
     Dev::PanelHelp("  0 = the old ambient exactly, 1 = the probes alone");
-    changed |= ImGui::SliderFloat("Interior AO share", &gi.interiorMix, 0.0f, 1.0f, "%.2f");
+    changed |= Dev::SliderFloat("Interior AO share", &gi.interiorMix, 0.0f, 1.0f, "%.2f");
     Dev::PanelHelp("  how much of the per-pixel interior-sky darkening still applies on top");
-    changed |= ImGui::SliderFloat("Indoor sky occlusion", &gi.indoorSky, 0.0f, 1.0f, "%.2f");
+    changed |= Dev::SliderFloat("Indoor sky occlusion", &gi.indoorSky, 0.0f, 1.0f, "%.2f");
     Dev::PanelHelp("  REN-GI-010. A probe's rays are tested against the terrain and, going UP,");
     Dev::PanelHelp("  against the interior-sky dome maps -- never sideways against a wall. So a");
     Dev::PanelHelp("  probe in a room took full sky from every horizontal direction and lit the");
     Dev::PanelHelp("  interior almost as brightly as the field outside. This darkens each probe");
     Dev::PanelHelp("  by how much sky it can see at its own position. 0 = the old look exactly.");
-    changed |= ImGui::SliderFloat("Spacing (m)", &gi.spacing, 1.0f, 16.0f, "%.1f");
-    changed |= ImGui::SliderInt("Rays per probe update", &gi.rays, 8, 64);
-    changed |= ImGui::SliderFloat("Hysteresis", &gi.hysteresis, 0.05f, 1.0f, "%.2f");
+    changed |= Dev::SliderFloat("Spacing (m)", &gi.spacing, 1.0f, 16.0f, "%.1f");
+    changed |= Dev::SliderInt("Rays per probe update", &gi.rays, 8, 64);
+    changed |= Dev::SliderFloat("Hysteresis", &gi.hysteresis, 0.05f, 1.0f, "%.2f");
     Dev::PanelHelp("  per-update blend toward the fresh integral; low = smoother, slower");
-    changed |= ImGui::ColorEdit3("Ground albedo", gi.groundAlbedo);
-    changed |= ImGui::SliderFloat("Ground bounce gain", &gi.groundGain, 0.0f, 4.0f, "%.2f");
-    changed |= ImGui::SliderFloat("Wall/roof albedo", &gi.wallAlbedo, 0.0f, 1.0f, "%.2f");
-    changed |= ImGui::SliderFloat("Ray length (m)", &gi.rayLength, 8.0f, 256.0f, "%.0f");
+    changed |= Dev::ColorEdit3("Ground albedo", gi.groundAlbedo);
+    changed |= Dev::SliderFloat("Ground bounce gain", &gi.groundGain, 0.0f, 4.0f, "%.2f");
+    changed |= Dev::SliderFloat("Wall/roof albedo", &gi.wallAlbedo, 0.0f, 1.0f, "%.2f");
+    changed |= Dev::SliderFloat("Ray length (m)", &gi.rayLength, 8.0f, 256.0f, "%.0f");
     Dev::PanelSeparator();
     Dev::PanelHelp("Sun proxy (stage 2): a map of every sunlit surface seen from the sun, with");
     Dev::PanelHelp("colour; each probe gathers the first sun bounce from a disc of it.");
-    changed |= ImGui::SliderInt("Sun-proxy samples", &gi.rsmSamples, 0, 64);
+    changed |= Dev::SliderInt("Sun-proxy samples", &gi.rsmSamples, 0, 64);
     Dev::PanelHelp("  0 turns the sun bounce off");
-    changed |= ImGui::SliderFloat("Sun-proxy radius (m)", &gi.rsmRadius, 1.0f, 40.0f, "%.0f");
-    changed |= ImGui::SliderFloat("Sun-bounce gain", &gi.rsmGain, 0.0f, 4.0f, "%.2f");
+    changed |= Dev::SliderFloat("Sun-proxy radius (m)", &gi.rsmRadius, 1.0f, 40.0f, "%.0f");
+    changed |= Dev::SliderFloat("Sun-bounce gain", &gi.rsmGain, 0.0f, 4.0f, "%.2f");
     if (changed)
     {
         GEngine->SetGiSettings(gi);
@@ -7447,6 +7564,13 @@ void DrawMouseTab()
 
 void DrawMainWindow()
 {
+    // NPC chat's "Compact: chat only" replaces the whole panel with its chat window until
+    // "Full dev panel" is pressed there.
+    if (Poseidon::NpcChat::CompactPanel())
+    {
+        Poseidon::NpcChat::DrawCompactPanel();
+        return;
+    }
     ImGui::SetNextWindowSize(ImVec2(560, 480), ImGuiCond_FirstUseEver);
     ImGui::Begin("Poseidon Dev Panel");
 
@@ -7504,8 +7628,14 @@ void DrawMainWindow()
         ImGui::EndPopup();
     }
 
-    if (ImGui::BeginTabBar("DevPanelTabs"))
+    if (ImGui::BeginTabBar("DevPanelTabs", ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_TabListPopupButton))
     {
+        // Index of every other tab, grouped, with one-click jumps (DevPanelHome.cpp).
+        if (Dev::PanelTabItem("Home"))
+        {
+            Poseidon::Dev::DrawHomeTab();
+            ImGui::EndTabItem();
+        }
         if (Dev::PanelTabItem("Zeus"))
         {
             DrawZeusTab();
@@ -7671,6 +7801,17 @@ void DrawMainWindow()
         if (Dev::PanelTabItem("Weather"))
         {
             Poseidon::Dev::DrawWeatherTab();
+            ImGui::EndTabItem();
+        }
+        if (Dev::PanelTabItem("Audio")) // the audio engine (Steam Audio / OpenAL) and HRTF (AudioTab.cpp)
+        {
+            Poseidon::Dev::DrawAudioTab();
+            ImGui::EndTabItem();
+        }
+        // EXPERIMENTAL: talk to / command NPCs through a language model (Dev/NpcChat).
+        if (Dev::PanelTabItem("NPC Chat"))
+        {
+            Poseidon::NpcChat::DrawTab();
             ImGui::EndTabItem();
         }
         if (Dev::PanelTabItem("Particles")) // smoke, fire and the emitters (SmokeTab.cpp)
@@ -7951,6 +8092,7 @@ void Shutdown()
 {
     if (!s_initialized)
         return;
+    Poseidon::NpcChat::Shutdown(); // joins the network worker; forgets in-memory API keys
     if (s_backend == RenderBackend::OpenGL3)
     {
         ImGui_ImplOpenGL3_Shutdown();
@@ -8159,6 +8301,14 @@ void ProcessEvent(const SDL_Event& event)
     }
     ImGui_ImplSDL3_ProcessEvent(&event);
 
+    // NPC chat hotkeys (open the chat box, hold to talk) work with the panel closed; while its
+    // chat box is open it owns the keyboard.
+    if (Poseidon::NpcChat::ProcessEvent(event))
+    {
+        s_zeusConsumeKeyboardEvent = true;
+        return;
+    }
+
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)
     {
         // Ctrl+Grave + F5 are dev-only hotkeys (toggle dev panel +
@@ -8291,6 +8441,7 @@ void NewFrame()
     // hands: without this the search could only ever be checked by a person.
     if (s_visible || Dev::PanelSearchPreseeded())
         DrawMainWindow();
+    Poseidon::NpcChat::DrawOverlay(s_visible);
 }
 
 void Render()
@@ -8318,6 +8469,43 @@ void Render()
     else
     {
         RenderDrawDataEngine(ImGui::GetDrawData());
+    }
+
+    // Harness seed: POSEIDON_ZEUS_BOAT_AHEAD=<mission seconds> presses the Zeus tab's "Spawn Tidewater boat
+    // ahead" once, so a capture can prove the button's path without a hand on the panel.
+    {
+        static const float boatAt = []
+        {
+            const char* v = std::getenv("POSEIDON_ZEUS_BOAT_AHEAD");
+            return v && *v ? static_cast<float>(std::atof(v)) : -1.0f;
+        }();
+        static bool boatDone = false;
+        if (boatAt >= 0.0f && !boatDone && ZeusWorldAvailable() && Glob.time.toFloat() >= boatAt)
+        {
+            boatDone = true;
+            Defer([] {
+                SpawnTidewaterBoatAhead();
+                LOG_INFO(Core, "Zeus harness: {}", s_zeusStatus);
+            });
+        }
+    }
+
+    // Harness seed: POSEIDON_ZEUS_WHALE_AHEAD=<mission seconds> presses "Spawn humpback whale ahead" once.
+    {
+        static const float whaleAt = []
+        {
+            const char* v = std::getenv("POSEIDON_ZEUS_WHALE_AHEAD");
+            return v && *v ? static_cast<float>(std::atof(v)) : -1.0f;
+        }();
+        static bool whaleDone = false;
+        if (whaleAt >= 0.0f && !whaleDone && ZeusWorldAvailable() && Glob.time.toFloat() >= whaleAt)
+        {
+            whaleDone = true;
+            Defer([] {
+                SpawnTidewaterWhaleAhead();
+                LOG_INFO(Core, "Zeus harness: {}", s_zeusStatus);
+            });
+        }
     }
 
     // Drain deferred actions queued by UI click handlers.  See the
@@ -8373,6 +8561,8 @@ bool WantsKeyboard()
 {
     if (MultiplayerSession())
         return false;
+    if (s_initialized && Poseidon::NpcChat::WantsKeyboard())
+        return true;
     if (!s_initialized || (!s_visible && !s_zeusConsumeKeyboardEvent))
         return false;
     if (s_zeusConsumeKeyboardEvent)

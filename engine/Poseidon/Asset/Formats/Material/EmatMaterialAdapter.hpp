@@ -499,6 +499,31 @@ inline std::array<float, 3> NativePbrMultiMaskScales(const TranslatedMaterial& m
     return scales;
 }
 
+// RFG-131: MatPBRMulti defaults as Workbench itself reports them (a RfDump plugin over
+// BaseContainerTools.CreateContainer("MatPBRMulti"), GetDefaultAsString, 2026-10-12):
+//   Enabled_2..4 = 0, MaskSharpness_N = 0, MaskOffset_N = 0, MaskUVScale_N = 1,
+//   OverlayBlack/WhitePower = 1, DirtOpacity = 0, MudOpacity = 0.
+// Layer 1 is the base and has no switch. POSEIDON_EMAT_MEASURED_DEFAULTS=0 restores the old
+// assumptions (an absent Enabled_N is on; a missing MaskSharpness refuses the ordered path).
+inline bool EmatMaskDefaultsMeasured()
+{
+    static const bool on = []
+    {
+        const char* env = std::getenv("POSEIDON_EMAT_MEASURED_DEFAULTS");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
+
+inline bool EmatLayerEnabled(const EmatMaterial& emat, int layer)
+{
+    if (layer <= 1)
+        return true;
+    float v = EmatMaskDefaultsMeasured() ? 0.0f : 1.0f;
+    emat.FloatOf("Enabled_" + std::to_string(layer), v);
+    return v != 0.0f;
+}
+
 // Deliberately bounded standard blend contract. Unknown material switches are
 // rejected, rather than silently treated as standard interpolation. In particular
 // this preview has no fine masks, angle masks, alternate overlay or rotated UVs.
@@ -516,7 +541,7 @@ inline bool ReadNativePbrStandardMasks(const EmatMaterial& emat,
             "GlobalNMOMap", "GlobalNMOUVTransform", "MudOpacity", "MudColor", "MudMetalness",
             "MudDetNormal", "MudBCRMap", "MudNMOMap", "MudMaskMap", "MudUVTransform",
             "DirtOpacity", "DirtLayerSharpness", "DirtColor", "DirtRoughness", "DirtMaskMap",
-            "DirtUVTransform"};
+            "DirtUVTransform", "DirtBCRMap"}; // RFG-131: DirtBCRMap beside its already-allowed siblings
         for (const char* item : common)
             if (EmatMaterial::NameMatches(key, item)) return true;
         const char* layer[] = {"Enabled_", "Color_", "BCR_", "NMO_", "UVTransform_",
@@ -549,10 +574,15 @@ inline bool ReadNativePbrStandardMasks(const EmatMaterial& emat,
     {
         const std::string suffix = std::to_string(i + 2);
         if (emat.Has("Mask_" + suffix) && emat.TextureOf("Mask_" + suffix).empty()) return false;
-        if (emat.Has("Enabled_" + suffix) && emat.FloatOr("Enabled_" + suffix, 1.0f) != 0.0f &&
-            emat.TextureOf("BCR_" + suffix).empty()) return false;
-        if (!emat.TextureOf("BCR_" + suffix).empty() && emat.FloatOr("Enabled_" + suffix, 1.0f) != 0.0f &&
-            !emat.Has("MaskSharpness_" + suffix)) return false;
+        // RFG-131: an enabled layer with no BCR is a PAINT layer when it names a Color (RFG-122
+        // binds it); only one with neither is outside the contract. And a missing MaskSharpness /
+        // MaskOffset is no longer a refusal: Workbench's MatPBRMulti class reports both default
+        // to 0 (UVScale 1), where the detail term reduces to the plain mask channel. 3,201 corpus
+        // layers rely on that default; every one of their materials used to fall back.
+        if (EmatLayerEnabled(emat, static_cast<int>(i) + 2) && emat.TextureOf("BCR_" + suffix).empty() &&
+            !emat.Has("Color_" + suffix)) return false;
+        if (!EmatMaskDefaultsMeasured() && !emat.TextureOf("BCR_" + suffix).empty() &&
+            EmatLayerEnabled(emat, static_cast<int>(i) + 2) && !emat.Has("MaskSharpness_" + suffix)) return false;
         params[i] = {1.0f, 0.0f, 0.0f, 0.0f};
         const char* keys[] = {"MaskUVScale_", "MaskSharpness_", "MaskOffset_"};
         for (size_t p = 0; p < 3; ++p)
@@ -611,7 +641,7 @@ inline EmatMultiNormalParameters ReadNativePbrMultiNormals(const EmatMaterial& e
     for (size_t i = 0; i < 4; ++i)
     {
         const std::string suffix = std::to_string(i + 1);
-        float enabled = 1.0f;
+        float enabled = (i == 0 || !EmatMaskDefaultsMeasured()) ? 1.0f : 0.0f; // RFG-131 class default
         if (emat.Has("Enabled_" + suffix) && !emat.FloatOf("Enabled_" + suffix, enabled)) return result;
         if (emat.TextureOf("BCR_" + suffix).empty() || emat.TextureOf("NMO_" + suffix).empty() ||
             enabled != 1.0f)
@@ -685,6 +715,49 @@ inline EmatGlobalOverlayParameters ReadNativePbrGlobalOverlay(const EmatMaterial
         }
     }
     result.supported = true;
+    return result;
+}
+
+// RFG-118: the production GlobalMCRMap contract. Unlike ReadNativePbrGlobalOverlay (the linear
+// preview, which refuses any unstated key) this takes Enfusion's own defaults for what the
+// material leaves out -- read off Workbench's Material Editor, where an unstated property shows
+// its default in plain type: Overlay, black power 1, white power 1, UV set 1. Of the 2,031
+// corpus materials naming a GlobalMCRMap, 1,385 state no black power, 1,231 no white power and
+// 277 no UV source; the preview admitted none of the granite rocks for that reason.
+inline EmatGlobalMcr ReadEmatGlobalMcr(const EmatMaterial& emat)
+{
+    EmatGlobalMcr result;
+    const std::string path = emat.TextureOf("GlobalMCRMap");
+    if (path.empty())
+        return result;
+    result.texture = RvTextureRef::Parse(path);
+    if (result.texture.isProcedural)
+        return result;
+    if (emat.Has("GlobalMCRMode"))
+    {
+        const std::string mode = emat.WordOf("GlobalMCRMode");
+        if (EmatMaterial::NameMatches(mode, "Multiply"))
+            result.multiply = true;
+        else if (!EmatMaterial::NameMatches(mode, "Overlay"))
+            return result; // a mode this renderer does not know: draw without it
+    }
+    if (emat.Has("UVSrcGlobalMaps"))
+    {
+        const std::string uv = emat.WordOf("UVSrcGlobalMaps");
+        if (EmatMaterial::NameMatches(uv, "UV set 2"))
+            result.uv1 = true;
+        else if (!EmatMaterial::NameMatches(uv, "UV set 1"))
+            return result;
+    }
+    const auto power = [&](const char* key, float& value)
+    {
+        if (!emat.Has(key))
+            return true;
+        return emat.FloatOf(key, value) && std::isfinite(value) && value >= 0.0f && value <= 16.0f;
+    };
+    if (!power("OverlayBlackPower", result.blackPower) || !power("OverlayWhitePower", result.whitePower))
+        return result;
+    result.present = true;
     return result;
 }
 
@@ -762,12 +835,9 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     // it anyway paints a layer the author removed. Absent means on (layer 1
     // has no switch at all, and dozens of materials name a BCR_N with none),
     // so this only ever removes explicitly disabled layers.
-    const auto layerEnabled = [&](const char* key)
-    {
-        float v = 1.0f;
-        return !emat.FloatOf(key, v) || v != 0.0f;
-    };
-    const bool en2 = layerEnabled("Enabled_2"), en3 = layerEnabled("Enabled_3"), en4 = layerEnabled("Enabled_4");
+    // RFG-131: absent means OFF -- Workbench's class default for Enabled_2..4 is 0 (218 corpus
+    // layers name a BCR_N with no switch; 10,261 write `Enabled_N 1`). See EmatLayerEnabled.
+    const bool en2 = EmatLayerEnabled(emat, 2), en3 = EmatLayerEnabled(emat, 3), en4 = EmatLayerEnabled(emat, 4);
     if (en2)
     {
         // `MatPBR2Layers` spells its second layer `BCRMap2`/`NMOMap2`
@@ -788,7 +858,41 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         AddEmatSlot(out, emat, "BCR_4", MaterialSlot::LayerColour3);
         AddEmatSlot(out, emat, "NMO_4", MaterialSlot::LayerNormal3);
     }
+    // RFG-122: a layer with a `Color_N` and no `BCR_N` is a PAINT layer -- flat colour where
+    // the mask puts it (Door_Village_E_B_INT: cream layers 2 and 3 over bare wood; window
+    // frames the same way). Unbound, the paint vanished and the door drew as its wood base
+    // plus the wear bake: dark with white blotches. Bound as a flat white source that the
+    // layer's Color_N tint (below) turns into the paint. POSEIDON_EMAT_PAINT_LAYERS=0 = off.
+    {
+        static const bool paintLayers = []
+        {
+            const char* env = std::getenv("POSEIDON_EMAT_PAINT_LAYERS");
+            return !(env && env[0] == '0');
+        }();
+        const struct { bool enabled; const char* bcr; const char* colour; MaterialSlot slot; } paint[] = {
+            {en2, "BCR_2", "Color_2", MaterialSlot::LayerColour1},
+            {en3, "BCR_3", "Color_3", MaterialSlot::LayerColour2},
+            {en4, "BCR_4", "Color_4", MaterialSlot::LayerColour3},
+        };
+        float colour[4] = {};
+        // Only with a MaskMap: it is what puts the paint anywhere. A deployed copy keeps Color_N
+        // after the converter strips MaskMap and BCR_N, and must stay a plain BaseColour.
+        const bool masked = !emat.TextureOf("MaskMap").empty();
+        for (const auto& layer : paint)
+            if (paintLayers && masked && layer.enabled && emat.TextureOf(layer.bcr).empty() && !out.Find(layer.slot) &&
+                emat.Vec4Of(layer.colour, colour) && EmatMaterial::NameMatches(emat.className, "MatPBRMulti"))
+            {
+                TranslatedSlot entry;
+                entry.slot = layer.slot;
+                entry.present = true;
+                entry.sourceStage = -1;
+                entry.texture = RvTextureRef::Parse("enfc|1.0000,1.0000,1.0000");
+                entry.channels = ChannelsForSlot(layer.slot);
+                out.slots.push_back(std::move(entry));
+            }
+    }
     AddEmatSlot(out, emat, "EnvironmentMap", MaterialSlot::Environment);
+    out.globalMcr = ReadEmatGlobalMcr(emat);
 
     // Record authored PBR facts without silently converting them to legacy
     // Blinn-Phong constants. The first condition is deliberately strict:
@@ -913,6 +1017,26 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     const bool hasColour = emat.Vec4Of("Color", colour);
     if (hasColour)
         out.diffuse = {colour[0], colour[1], colour[2], colour[3]};
+    // RFG-199: `Diffuse` is a separate class property of every PBR material (Workbench defaults
+    // dump: Color, DiffuseIBL, SpecularIBL, Diffuse, Ambient, all 1 1 1 1) -- the surface's
+    // diffuse response, on top of the albedo. 370 of 10,312 Reforger materials author it, mostly
+    // to darken a shared atlas: window_brown is window_white's beige wood at `Diffuse 0.223`,
+    // which is the whole of why Everon's village window frames are dark brown and ours were
+    // pale grey. Folded into the tint (rgb only; Color's alpha stays the opacity), which leaves
+    // specular untouched. POSEIDON_EMAT_DIFFUSE=0 ignores it.
+    static const bool ematDiffuse = []
+    {
+        const char* v = std::getenv("POSEIDON_EMAT_DIFFUSE");
+        return !(v != nullptr && v[0] == '0');
+    }();
+    float diffuseResponse[4] = {};
+    if (ematDiffuse && emat.Vec4Of("Diffuse", diffuseResponse))
+    {
+        if (!hasColour)
+            out.diffuse = {1.0f, 1.0f, 1.0f, 1.0f};
+        for (int c = 0; c < 3; ++c)
+            out.diffuse[c] *= std::max(diffuseResponse[c], 0.0f);
+    }
 
     // A river or a pond authors NO albedo texture -- its whole appearance is that one
     // constant. Left there, the surface reaches the renderer with no base colour and
@@ -954,6 +1078,28 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         cull && !cull->values.empty() && !cull->values[0].isNumber)
         out.doubleSided = EmatMaterial::NameMatches(cull->values[0].text, "none");
 
+    // Vegetation colorization. Parsed as authored; the renderer resolves the map's colour.
+    // `EnableColorization` is an enum whose observed values are `Full` and absent; anything
+    // but an explicit off-spelling with a map and a positive lerp counts as enabled.
+    {
+        const std::string map = emat.TextureOf("WorldColorizeMap");
+        float lerp = 0.0f;
+        bool on = true;
+        if (const EmatProperty* enable = emat.Find("EnableColorization");
+            enable && !enable->values.empty() && !enable->values[0].isNumber)
+            on = !EmatMaterial::NameMatches(enable->values[0].text, "none") &&
+                 !EmatMaterial::NameMatches(enable->values[0].text, "off") &&
+                 !EmatMaterial::NameMatches(enable->values[0].text, "disabled");
+        if (on && !map.empty() && emat.FloatOf("ColorizeMapLerp", lerp) && lerp > 0.0f)
+        {
+            out.colorizeMap = map;
+            out.colorizeLerp = lerp > 1.0f ? 1.0f : lerp;
+            emat.FloatOf("ColorizeMapLerpAtCamera", out.colorizeLerpAtCamera);
+            emat.FloatOf("ColorizeMapLerpDistance", out.colorizeLerpDistance);
+            emat.FloatOf("ColorizeMapBrightness", out.colorizeBrightness);
+        }
+    }
+
     // Crown self-occlusion volume. Parsed whole or not at all: a center without
     // dimensions (or dimensions without an intensity) cannot evaluate, and a
     // half-read volume would darken the wrong leaves. Intensity clamps to
@@ -971,6 +1117,26 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         out.crownAoWidth = aoWidth;
         out.crownAoIntensity = aoIntensity < 1.0f ? aoIntensity : 1.0f;
     }
+    // RFG-180: an authored zero turns the occlusion off, baked colours included.
+    if (float authored = 0.0f; emat.FloatOf("GeometryAOIntensity", authored) && authored <= 0.0f)
+        out.crownAoOff = true;
+    // RFG-181: camera-facing far-billboard normals (see TranslatedMaterial::normalsToCamera).
+    // RFG-185: every crown carries the FarLOD offsets and its back-scattering.
+    if (EmatMaterial::NameMatches(emat.className, "MatPBRTreeCrown"))
+    {
+        out.treeCrown = true;
+        if (float ntc = 0.0f; emat.FloatOf("NormalsToCamera", ntc) && ntc > 0.0f)
+            out.normalsToCamera = true;
+        if (float d = 0.0f; emat.FloatOf("FarLODDistanceOffset", d) && d >= 0.0f)
+            out.farLodDistanceOffset = d; // else the class default (10)
+        emat.FloatOf("FarLODHeightOffset", out.farLodHeightOffset);
+        if (float b = 0.0f; emat.FloatOf("SSSBackScattering", b) && b >= 0.0f)
+            out.sssBackScattering = b;
+    }
+    // RFG-144: the edge-on card fade (see TranslatedMaterial::fadeFaces).
+    float fadeFaces = 0.0f;
+    if (emat.FloatOf("FadeFaces", fadeFaces) && fadeFaces > 0.0f)
+        out.fadeFaces = fadeFaces < 1.0f ? fadeFaces : 1.0f;
 
     return out;
 }
@@ -1181,7 +1347,10 @@ inline EmatMaterial MakeDeployedEmat(const EmatMaterial& resolved, const std::st
 // True for the shader family DayZ uses for every water surface it ships.
 inline bool IsCalmWater(const TranslatedMaterial& material)
 {
-    return EmatMaterial::NameMatches(material.shaderFamily, "CalmWater");
+    // RFG-134: Reforger's river surface (MatRiver) is the same thing -- a near-black base whose
+    // whole look is reflection -- and takes the same route.
+    return EmatMaterial::NameMatches(material.shaderFamily, "CalmWater") ||
+           EmatMaterial::NameMatches(material.shaderFamily, "MatRiver");
 }
 
 // DayZ's built-in water appearance, for a `CalmWater` surface that ships no `.emat`.

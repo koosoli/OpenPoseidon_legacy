@@ -299,8 +299,11 @@ fn native_filter_preserves_close_colour_and_empty_layers_and_converges_to_the_so
     // The shader applies the same ground-luminance recolouring to this filtered
     // RGB as to the resolved atlas; alpha is still the original sampled alpha.
     assert!(SHADER.contains("dot(blade_colour, luma)"));
-    assert!(SHADER.contains("mix(blade_colour, recoloured, clamp(grass.native2.x"));
-    assert!(SHADER.contains("grass.blade_layer_means[min(u32(in.blade_uv.z), 7u)]"));
+    // RFG-138: the lerp is per PlantMat set when sets are uploaded, native2.x otherwise.
+    assert!(SHADER.contains("var lerp = grass.native2.x;"));
+    assert!(SHADER.contains("mix(blade_colour, recoloured, clamp(lerp, 0.0, 1.0)"));
+    // RFG-138: set 0's means only (layers 0..7); other sets keep their sampled colour.
+    assert!(SHADER.contains("grass.blade_layer_means[min(mean_layer, 7u)], mean_layer < 8u)"));
 }
 
 #[test]
@@ -312,7 +315,9 @@ fn unresolved_ramps_keep_the_native_and_resolved_paths_and_actual_taper() {
         )
     );
     assert!(SHADER.contains("@location(6) @interpolate(flat) blade_taper: f32"));
-    assert!(SHADER.contains("out.blade_taper = max(shape.z * taper_jitter, 0.05);"));
+    // (the OFP blade's geometry lives in ofp_blade since the grass motion vectors)
+    assert!(SHADER.contains("o.taper_exp = max(shape.z * taper_jitter, 0.05);"));
+    assert!(SHADER.contains("out.blade_taper = b.taper_exp;"));
     assert!(SHADER.contains("out.blade_taper = shape.z;"));
     assert!(SHADER.contains("albedo = textured;"));
 }
@@ -378,9 +383,8 @@ fn medium_lighting_resolves_height_but_keeps_aerial_means_and_bounds_broad_sheen
 
 #[test]
 fn medium_sun_response_preserves_native_atlas_filter_and_all_coverage_consumers() {
-    assert!(
-        SHADER.contains("grass.blade_layer_means[min(u32(in.blade_uv.z), 7u)], shading_detail")
-    );
+    // RFG-138: the native filter still mixes towards the layer mean by shading_detail (set 0's).
+    assert!(SHADER.contains("native_blade_colour(blade.rgb, layer_mean_native, shading_detail)"));
     assert!(SHADER.contains("let n = normalize(mix(upright, resolved_normal, shading_detail));"));
     assert!(SHADER.contains("in.blade_taper, ramp_detail"));
     assert!(SHADER.contains("grass_medium_view_weight(view_vertical)"));

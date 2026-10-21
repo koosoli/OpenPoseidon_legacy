@@ -11,8 +11,11 @@ fn rain_water_impact_hash(cell: vec2<i32>, cycle: i32, salt: u32) -> f32 {
 // at the same rate in every cell. The 3x3 neighbourhood lets packets cross cell
 // boundaries continuously. Maximum radius .29m < .75m cell width bounds the
 // neighbourhood; an event is fully faded before its next centre is selected.
-fn rain_water_impact_normal(world_xz: vec2<f32>, time: f32, rain: f32, footprint: f32) -> vec3<f32> {
-    if (rain <= 0.0 || footprint >= 0.16) { return vec3<f32>(0.0, 1.0, 0.0); }
+// (2026-10-14) One layer of drop rings: the old single layer at its old strength read as nothing in
+// a downpour (owner: "no rain drop ripples in the puddles"). Rings now grow to 0.36 m with a fainter
+// second ring trailing inside the first, tilt the surface roughly twice as far, and a second,
+// offset layer of drops joins as the rain gets heavy.
+fn rain_water_impact_layer(world_xz: vec2<f32>, time: f32, rain: f32, footprint: f32, salt: u32) -> vec2<f32> {
     let cell = vec2<i32>(floor(world_xz / 0.75));
     let detail = 1.0 - smoothstep(0.035, 0.16, max(footprint, 0.0));
     let width = max(0.022, max(footprint, 0.0) * 1.5);
@@ -20,29 +23,41 @@ fn rain_water_impact_normal(world_xz: vec2<f32>, time: f32, rain: f32, footprint
     for (var y = -1; y <= 1; y += 1) {
         for (var x = -1; x <= 1; x += 1) {
             let source = cell + vec2<i32>(x, y);
-            let period = 1.4 + rain_water_impact_hash(source, 0, 11u) * 1.3;
-            let clock = time / period + rain_water_impact_hash(source, 0, 29u);
+            let period = 1.1 + rain_water_impact_hash(source, 0, 11u + salt) * 1.0;
+            let clock = time / period + rain_water_impact_hash(source, 0, 29u + salt);
             let cycle = i32(floor(clock));
-            let lifetime = 0.55 + rain_water_impact_hash(source, cycle, 47u) * 0.5;
+            let lifetime = 0.55 + rain_water_impact_hash(source, cycle, 47u + salt) * 0.5;
             let age = fract(clock) * period / lifetime;
             if (age >= 1.0) { continue; }
-            let jitter = vec2<f32>(rain_water_impact_hash(source, cycle, 71u),
-                                  rain_water_impact_hash(source, cycle, 97u));
+            let jitter = vec2<f32>(rain_water_impact_hash(source, cycle, 71u + salt),
+                                  rain_water_impact_hash(source, cycle, 97u + salt));
             let centre = (vec2<f32>(source) + vec2<f32>(0.1) + jitter * 0.8) * 0.75;
             let offset = world_xz - centre;
             let radius = length(offset);
-            if (radius >= 0.34) { continue; }
-            let delta = radius - mix(0.025, 0.29, age);
+            if (radius >= 0.40) { continue; }
+            let delta = radius - mix(0.025, 0.36, age);
+            let delta2 = radius - mix(0.01, 0.20, age);
             let pulse = exp(-delta * delta / (width * width));
-            let envelope = smoothstep(0.0, 0.10, age) * (1.0 - smoothstep(0.60, 1.0, age));
-            let radial = 1.0 - smoothstep(0.30, 0.34, radius);
-            let strength = 0.10 + rain_water_impact_hash(source, cycle, 131u) * 0.12;
+            let pulse2 = exp(-delta2 * delta2 / (width * width)) * 0.55;
+            let envelope = smoothstep(0.0, 0.08, age) * (1.0 - smoothstep(0.55, 1.0, age));
+            let radial = 1.0 - smoothstep(0.36, 0.40, radius);
+            let strength = 0.22 + rain_water_impact_hash(source, cycle, 131u + salt) * 0.20;
             // Width-compensated slope: unresolved rings fade instead of gaining
             // energy when widened by the pixel footprint.
-            let slope = delta / width * pulse * envelope * radial * strength
+            let slope = (delta * pulse + delta2 * pulse2) / width * envelope * radial * strength
                 * min(1.0, 0.022 / width) * detail * clamp(rain, 0.0, 1.0);
             gradient += offset / max(radius, 0.0001) * slope;
         }
+    }
+    return gradient;
+}
+
+fn rain_water_impact_normal(world_xz: vec2<f32>, time: f32, rain: f32, footprint: f32) -> vec3<f32> {
+    if (rain <= 0.0 || footprint >= 0.16) { return vec3<f32>(0.0, 1.0, 0.0); }
+    var gradient = rain_water_impact_layer(world_xz, time, rain, footprint, 0u);
+    let heavy = smoothstep(0.35, 0.8, rain);
+    if (heavy > 0.0) {
+        gradient += rain_water_impact_layer(world_xz + vec2<f32>(0.37, 0.61), time * 1.07, rain, footprint, 1000u) * heavy;
     }
     return normalize(vec3<f32>(-gradient.x, 1.0, -gradient.y));
 }

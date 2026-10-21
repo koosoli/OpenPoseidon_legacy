@@ -18,6 +18,14 @@ enum HydroWaterInteractionKind : uint32_t
     // velocityKind = (limb vx, vz, vy over the water, kind), timeLifeFoamMass[3] = splash height (m).
     // Drawn by the Tidewater water (water_tw/impacts.rs); the Current OP water ignores the kind.
     HydroWaterInteractionSwimSplash = 6,
+    // (OP) a whale's blow (Whale.cpp): a column of spray and mist thrown up for ~1.4 s. positionRadius = (x, z,
+    // radius, the blowholes' y), velocityKind = (drift vx, vz, 0, kind), timeLifeFoamMass[3] = column height (m).
+    // Drawn by the Tidewater water (water_tw/impacts.rs).
+    HydroWaterInteractionWhaleBlow = 7,
+    // (OP) blood in the water (a wounded whale, Whale.cpp): positionRadius = (x, z, 0, surface y),
+    // timeLifeFoamMass[3] = amount (a rifle round ~0.3, a shell's blast 3). Pools into a red stain in the
+    // Tidewater water that spreads and fades over two minutes (water_tw/impacts.rs, tw_impact.wgsl).
+    HydroWaterInteractionBlood = 8,
 };
 
 enum HydroWaterInteractionFlags : uint32_t
@@ -76,6 +84,26 @@ bool TidewaterWaterBurst(float x, float y, float z);
 // crest for crest; a swimmer near the camera, and the camera following him, ride this instead.
 // Presentation of the local view only. Safe from any thread.
 void SetDrawnWaterGrid(const float* xyz, int n, const float lanes[4]);
-bool DrawnWaterHeightAt(float x, float z, float& y);
+// `edgeWeight` (optional): 1 inside the grid, falling to 0 over its outer 2 m, so a caller can blend
+// to the predictor instead of stepping onto a different sea at the edge (a boat straddling it was
+// thrown about in a storm, owner 2026-10-13).
+bool DrawnWaterHeightAt(float x, float z, float& y, float* edgeWeight = nullptr);
+
+// (OP) Water height queries at the simulation's own points, anywhere on the sea (the renderer's
+// water_tw/query.rs; Tidewater's WaterQuery): a boat hands its hull samples every step, keyed by the
+// object; the renderer evaluates the drawn surface there and the results come back 1-3 frames late.
+// Presentation of the local view, as the drawn grid above: a server, another water mode or a stale
+// result answers false and the caller keeps the CPU predictor.
+constexpr int WaterQueryMaxPoints = 128;
+void RequestWaterQueries(uint64_t key, const float* xz, int n);
+// Render side: the requested points (x, z pairs, at most `cap`), clearing the requests.
+int TakeWaterQueryRequests(float* xz, int cap);
+// Render side: the latest results (n = 0: none), with the points they were asked at.
+void SetWaterQueryResults(const float* xz, const float* values, int n);
+// The drawn surface at (x, z) from the nearest result point within 1.5 m (its height carried along
+// its slope); `version` changes whenever a new set of results arrived and `seconds` is when (a steady
+// clock), so a caller can difference heights between results rather than between frames.
+bool DrawnWaterQuery(float x, float z, float& y, float& slopeX, float& slopeZ, uint32_t* version = nullptr,
+                     double* seconds = nullptr);
 
 } // namespace Poseidon

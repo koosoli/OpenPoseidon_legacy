@@ -60,6 +60,10 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    return shade_2d(in);
+}
+
+fn shade_2d(in: VsOut) -> vec4<f32> {
     let base = textureSample(tex, samp, in.uv) * in.color;
     if (in.glow > 0.0) {
         let p = in.uv * 2.0 - 1.0;
@@ -72,6 +76,21 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Blend toward the scene fog colour (matches GL33's mix(fogColor, r0, vFogTC)).
     let rgb = mix(globals.fog_color.rgb, base.rgb, clamp(in.fog, 0.0, 1.0));
     return vec4<f32>(rgb, base.a);
+}
+
+// WGR_DEPTH_TEST_WRITE_CUTOUT: fs_main, but the faint rim is discarded so only the
+// sprite's solid middle writes depth (underwater bubbles: the underwater compositor
+// fogs each pixel by its depth, and a sprite without depth takes the murk behind it).
+@fragment
+fn fs_cutout(in: VsOut) -> @location(0) vec4<f32> {
+    let out = shade_2d(in);
+    // Cut on the texture's SHAPE, not on the faded alpha: a sprite fading out must stay
+    // whole (just more transparent), not shrink to its brightest rim.
+    let shape = textureSample(tex, samp, in.uv).a;
+    if (shape < 0.3 || out.a <= 0.003) {
+        discard;
+    }
+    return out;
 }
 
 // SMK-037: the soft-particle variant, used only by batches the engine submitted with

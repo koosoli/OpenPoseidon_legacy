@@ -49,7 +49,7 @@ TEST_CASE("Default content packs require an explicit compatible contract", "[mod
     const auto vehicle = root / "Mods" / "@OP_VehicleActions";
     auto resolve = [&] { return ResolveDefaultContentPacks(root.string(), {}, ""); };
     CHECK(resolve().mountPath.empty());
-    REQUIRE(resolve().diagnostics.size() == 5);
+    REQUIRE(resolve().diagnostics.size() == 6); // one per default pack (ModCollection.cpp `packs`)
     // A leftover root copy must not override or resurrect canonical content.
     const auto obsolete = root / "@OP_VisualUpgrade";
     std::filesystem::create_directories(obsolete / "AddOns");

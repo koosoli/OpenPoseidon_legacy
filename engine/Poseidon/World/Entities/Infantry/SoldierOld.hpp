@@ -9,6 +9,7 @@
 
 #include <Poseidon/Core/DynEnum.hpp>
 #include <string>
+#include <vector>
 
 #include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
 #include <Poseidon/World/Simulation/Animation/CorpsePose.hpp>
@@ -28,6 +29,7 @@ DEFINE_ENUM_END(MoveId)
 
 class MotionType;
 class AIGroup;
+class Ship;
 struct CargoWeaponSeat;
 
 float SoldierStealthStanceExposure(AIGroup* group, bool holdingFire, int x, int z);
@@ -325,6 +327,13 @@ class MotionType
 
 	bool FindPath(MotionPath &path, MoveId from, MotionPathItem to) const;
 
+	private:
+	// FindPath's shortest-path tree depends only on `from` and the (static) graph, so the
+	// predecessor array of each start state is computed once and kept (PERF 2026-10-14).
+	// Emptied whenever the graph changes (Load, Unload, AddEdge, DeleteEdge).
+	const std::vector<int> &PredecessorsFrom(MoveId from) const;
+	void ClearPathCache();
+	mutable std::vector<std::vector<int>> _pathPredecessors;
 };
 
 struct MovesTypeName
@@ -430,6 +439,27 @@ class ManType: public EntityAIType, public MotionType
 
 	int _nvGogglesProxyIndex[MAX_LOD_LEVELS];
 
+	public:
+	// Arma 3 dresses a man through placeholder proxies on his model: the identity's head
+	// (the proxy model itself), the class's headgear, vest and backpack (a3Headgear, a3Vest,
+	// a3Backpack, written by the Arma 3 import from linkedItems[] and backpack).
+	enum A3GearSlot { A3GearHead, A3GearHeadgear, A3GearVest, A3GearBackpack, A3GearN };
+	struct A3GearColour
+	{
+		AnimationSection selection;
+		Ref<Texture> texture;
+	};
+	int A3GearSlotOf(int level, int proxy) const
+	{
+		if (level < 0 || level >= MAX_LOD_LEVELS || proxy < 0 || proxy >= static_cast<int>(_a3GearProxySlot[level].size()))
+			return -1;
+		return _a3GearProxySlot[level][proxy];
+	}
+	protected:
+	Ref<LODShapeWithShadow> _a3Gear[A3GearN];
+	std::vector<A3GearColour> _a3GearColours[A3GearN];
+	std::vector<signed char> _a3GearProxySlot[MAX_LOD_LEVELS];
+
 	int _aimPoint;
 	Vector3 _aimPoint0;
 	Ref<MovesType> _moveType;
@@ -522,6 +552,10 @@ class Man: public Person
 	Matrix4 _gunTrans;
 	Matrix4 _legTrans;
 	bool _headTransIdent,_gunTransIdent;
+	// _gunTrans without the corner-peek lean: the collision (geometry) LOD stays upright, so a
+	// lean into a wall is stopped by UpdateLeanReach instead of shoving the whole man sideways.
+	Matrix4 _gunTransNoLean{MIdentity};
+	bool _gunTransNoLeanIdent = true;
 
 	Vector3 _aimingPositionWorld;
 	Vector3 _cameraPositionWorld;
@@ -534,6 +568,20 @@ class Man: public Person
 	bool _snowWalkingValid = false;
 
 	void RecalcGunTransform(); // calculate _gunTrans from gunXRot ...
+
+	// Corner peeking (SoldierOldLean.cpp)
+	bool CanLean() const;
+	void UpdateLeanInput();             // the player's Q/E
+	bool MoveLean(float deltaT);        // eases _lean to the wanted, wall-limited value
+	void UpdateLeanReach();
+	Matrix4 LeanTransform(Vector3Par gunAxis, float lean) const;
+	public:
+	float GetLean() const {return _lean;}
+	float GetLeanReach(int side) const {return _leanReach[side];}
+	// How far a lean to `side` (0 left, 1 right) would get before the head or shoulder meets
+	// something (0..1); `hitCount` gets the contacts found. Diagnostics and UpdateLeanReach.
+	float ProbeLeanReach(int side, int* hitCount = nullptr) const;
+	protected:
 
 	Ref<WeaponType> _mGunFireWeapon;
 	int _mGunFireFrames;
@@ -559,6 +607,15 @@ class Man: public Person
 	bool _hasNVG;
 	bool _walkToggle;
 	bool _inBuilding;
+
+	// Corner peeking (SoldierOldLean.cpp). -1 full left .. +1 full right; folded into _gunTrans.
+	float _lean = 0.0f, _leanWanted = 0.0f;
+	float _leanReach[2] = {1.0f, 1.0f}; // how far a wall lets him lean left/right (0..1)
+	Foundation::UITime _leanPressTime[2]; // wall-clock: a tap is the player's, not the simulation's
+	bool _leanHeld[2] = {false, false};
+	bool _leanBlocked[2] = {false, false}; // pressed while the key still meant something else
+	bool _leanTapClears[2] = {false, false};
+	int _leanLatched = 0; // a tap latches the lean on that side; -1/0/+1
 	
 	bool _handGun;
 
@@ -594,6 +651,17 @@ class Man: public Person
 	Vector3 _swimLimbPos[4];
 	float _swimLimbCool[4] = {};
 	float _swimEntrySoft = 0; // seconds of the soft heave after falling in: the body plunges, then bobs up
+	// Sinkhole W4: diving (SoldierOldSwim.cpp), with the swim pack's SwimDive / SwimUnder / SwimUnderIdle / SwimSurface
+	mutable MoveId _swimDiveMove = MoveIdNone;
+	mutable MoveId _swimUnderIdleMove = MoveIdNone;
+	mutable MoveId _swimSurfaceMove = MoveIdNone;
+	bool _diving = false;      // under the water (from the dive until surfacing)
+	float _diveVy = 0;         // vertical speed under water (m/s)
+	float _swimVertWanted = 0; // the player's up (+) / down (-) keys while swimming
+	bool _diveRequest = false;    // move down was pressed at the surface (latched: a tap must not be missed)
+	bool _surfaceRequest = false; // move up was tapped under water: rise until surfaced (move down cancels)
+	float _breath = -1;        // seconds of breath left (< 0: not set yet, i.e. full)
+	Vector3 _diveOffset = VZero; // added to the position so the dive pitch turns the body about its middle
 	// Sinkhole W3: falling (SoldierOldSwim.cpp), with the swim pack's Fall / FallLand / SwimIn moves
 	mutable MoveId _fallMove = MoveIdNone;
 	mutable MoveId _fallLandMove = MoveIdNone;
@@ -603,6 +671,41 @@ class Man: public Person
 	float _airTime = 0;        // seconds without ground or object contact
 	float _fallSpeed = 0;      // the fastest drop of this fall (m/s, positive down)
 	float _fallTumble = 0;     // seconds left of free tumbling after a blast or a hit
+	// Jumping (SoldierOldJump.cpp), with the swim pack's Jump / JumpAir moves
+	mutable MoveId _jumpMove = MoveIdNone;
+	mutable MoveId _jumpAirMove = MoveIdNone;
+	bool _jumping = false;          // launched and not landed yet
+	float _jumpTime = 0;            // seconds since the launch
+	float _sinceJumpLanded = 10.0f; // seconds since the last jump landed
+	bool CanJump() const;
+	bool TryJump();                 // the player's jump key: launch if he can
+	bool JumpLiftingOff() const;    // just launched: ground contact does not count yet
+	void KeepJumpMoves();           // airborne in a jump: the take-off, then the in-air pose
+	void PlayJumpSound(float loudness); // the surface's step sound, for a push-off or a landing
+	// The landing layer (SoldierOldUpperBody.cpp): a soft touchdown bends the knees and dips the hips for a moment
+	mutable MoveId _jumpLandMove = MoveIdNone;
+	float _landAge = -1;  // seconds since the touchdown, < 0: none
+	float _landPeak = 0;  // how far toward the absorb pose at most (0..1)
+	void StartLandingLayer(float touchdownSpeed);
+	float LandingWeight() const;
+	void ApplyLandingLayer(Matrix4Array& matrices) const;
+	// The upper-body action layer (SoldierOldUpperBody.cpp): an action's move on the trunk and arms over the legs'
+	MoveId _upperMove = MoveIdNone;
+	float _upperTime = 0;   // 0..1 through the action's move
+	float _upperFactor = 0; // its blend weight
+	Ref<ActionContextBase> _upperContext;
+	mutable std::vector<Matrix4> _upperPalette;
+	mutable float _upperPaletteKey[6] = {};
+	mutable MoveId _upperPaletteMoves[2] = {MoveIdNone, MoveIdNone};
+	mutable bool _upperPaletteValid = false;
+	bool StartUpperBodyAction(MoveId move, ActionContextBase* context);
+	void SimulateUpperBodyAction(float deltaT);
+	bool UpperBodyLayerActive() const {return _upperMove != MoveIdNone && _upperFactor > 0.001f;}
+	bool PoseLayersActive() const {return UpperBodyLayerActive() || _landAge >= 0;}
+	void ApplyUpperBodyLayer(Matrix4Array& matrices) const;
+	const std::vector<Matrix4>* UpperBodyPalette() const;
+	bool UpperBodyPoint(int level, int index, Vector3& res) const;
+	bool UpperBodyMatrix(Matrix4& mat, const AnimationRTWeight& wgt) const;
 
 	Foundation::Time _whenKilled;
 	Foundation::Time _lastMovementTime;
@@ -628,6 +731,8 @@ class Man: public Person
 	bool _showHead;
 	
 	OLink<Building> _ladderBuilding;
+	// the boat whose deck (roadway LOD) he stands on: it carries him as it moves (Ship::CarryRiders)
+	OLink<Vehicle> _platform;
 	int _ladderIndex;
 	float _ladderPosition; // 0..1 on ladder, 0 = bottom
 	int _ladderAIDir;
@@ -1047,15 +1152,33 @@ class Man: public Person
 	void BlendToMove(MoveId id);
 	void InitSwimMoves() const;
 	bool CanSwim() const;
+	// the swim moves are loaded and the swim simulation is on (not POSEIDON_SWIM=0)
+	bool SwimSystemActive() const;
 	bool IsSwimMove(MoveId id) const;
 	bool IsSwimming() const override {return _swimming;}
+	bool IsDiving() const {return _swimming && _diving;}
+	void SetSwimVerticalWanted(float v);
 	bool UpdateSwimming();
+	// standing on a moving deck: register with its boat, or leave it (SoldierOldSim.cpp)
+	void UpdatePlatform();
+	// the boat moved by delta with him on its deck; false once he no longer rides it
+	bool CarryOnPlatform(Ship* ship, const Matrix4& delta);
+	bool OnPlatform() const {return _platform.GetLink() != nullptr;}
+	const Object *PlatformObject() const {return _platform.GetLink();}
+	// out of the water over a boat's side onto its deck at `deck` (ATClimbAboard, SoldierOldSwim.cpp)
+	void ClimbOntoDeck(Ship* ship, Vector3Par deck);
 	void SimSwimMovement(float deltaT, SimulationImportance prec);
+	void SimDive(float deltaT, float surface, Vector3& pos);
+	void UpdateBreath(float deltaT, float headDepth);
 	void EmitSwimSplashes(float deltaT);
 	void UpdateFalling(float deltaT);
 	float SwimGearLoad() const;
 	Matrix3 GetHeadRelOrientation() const;
 	Vector3 GetWeaponPoint( int weapon ) const override;
+	// BOOM-005: the weapon model's own barrel axis (muzzleEnd -> muzzlePos), animated with the
+	// weapon proxy, model space; VZero when the weapon has no proxy. The aiming direction
+	// (GetWeaponRelDirection) is where the soldier looks, not where the barrel points.
+	Vector3 GetWeaponBarrelDirection( int weapon ) const;
 	bool GetWeaponCartridgePos
 	(
 		int weapon, Matrix4 &pos, Vector3 &vel

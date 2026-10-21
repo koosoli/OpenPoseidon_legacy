@@ -4,6 +4,7 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/SmokeVolumetric.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -47,16 +48,27 @@ std::unordered_set<const void*>& Drawn()
 // The renderer's box for this fire (fire/mod.rs Grid::new uses the width it is sent).
 float BoxWidth(const FireVolumeReport& r)
 {
+    // a wreck's column: wide enough that a climbing plume bends over inside it, not at its wall;
+    // its box is FireStackLengthRatio widths long downwind (fire/mod.rs STACK_*)
+    if (r.kind == FireKindSmokeStack)
+        return std::max(r.radius * 12.0f, 16.0f);
+    if (r.kind == FireKindDirt)
+        // the thrown earth climbs ~1.8 box widths (the box is 72 cells tall to 40 wide) and
+        // spreads at its foot into a skirt several crater radii out
+        // (owner, 2026-10-18: "dust and debris needs to go far higher"): a 120 mm shell's box is
+        // ~14 m wide, so the column has ~25 m to climb
+        return std::max(r.radius * 10.0f, 14.0f);
     if (r.kind == FireKindSmoke)
         // a cloud spreads wider than its source; the box's cells (width / 48) must stay small enough
         // for its billows, so the length downwind comes from the wind-turned box, not the width
         return std::max(r.radius * 10.0f, 8.0f);
-    return r.kind == FireKindExplosion ? r.radius * 4.0f : std::max(r.radius * 5.0f, 2.4f);
+    // (a fireball rolls up on its own buoyancy: a taller box than a flame's, room to climb)
+    return r.kind == FireKindExplosion ? r.radius * 5.0f : std::max(r.radius * 5.0f, 2.4f);
 }
 
 // Probe the world around the fire once: floors everywhere; walls and ceilings where they can
 // matter (a fireplace anywhere -- it may stand against a wall or in a room; a burst only under
-// a roof). A wreck is skipped: the probes would find its own hull and wall the flames in.
+// a roof). A wreck's probes start outside its own hull, or they would wall the flames in.
 void ProbeSolids(FireVolumeReport& r)
 {
     const ISmokeWorldQuery& q = GSmokeWorldQuery();
@@ -65,9 +77,19 @@ void ProbeSolids(FireVolumeReport& r)
     const float col = r.boxWidth / n;
     const float height = r.boxWidth * 1.8f;
     const Vector3 bed = r.base + Vector3(0, 0.3f + 0.6f * std::min(r.radius, 1.0f), 0);
-    bool walls = r.kind == FireKindBed || r.kind == FireKindSmoke;
-    if (r.kind == FireKindExplosion)
+    // (a wreck's column starts on top of its hull, so the probes see the buildings, not the hull)
+    bool walls = r.kind == FireKindBed || r.kind == FireKindSmoke || r.kind == FireKindSmokeStack ||
+                 r.kind == FireKindWreck;
+    if (r.kind == FireKindExplosion || r.kind == FireKindDirt)
         walls = q.IsSheltered(bed, 12.0f);
+    // FIRE-002: a wreck's hull footprint (its bed is 0.35 of the hull's radius): over it the flames
+    // are open, beyond it a wall or a roof stops them like any fire's (they burned through houses)
+    // (the column of the same wreck, radius 0.25 of the hull's, rises from the same bed)
+    // (a fireball is spawned at 0.5 of the hull's radius: its probes too start outside it, or a
+    // wreck's own hull walled the burst in -- 76 wall columns in the FIRE-002 capture)
+    const float hull = r.kind == FireKindWreck ? r.radius / 0.35f * 0.7f
+                       : r.kind == FireKindSmokeStack ? r.radius / 0.25f * 0.7f
+                       : r.kind == FireKindExplosion ? r.radius * 1.4f : 0.0f;
     for (int j = 0; j < n; ++j)
     {
         for (int i = 0; i < n; ++i)
@@ -83,9 +105,24 @@ void ProbeSolids(FireVolumeReport& r)
             const float fl = overBed ? r.base.Y() : q.FloorHeightBelow(Vector3(cx, bed.Y() + 0.5f, cz));
             r.floor[k] = std::max(fl, r.base.Y() - 2.0f);
             r.ceiling[k] = 1e6f;
-            if (r.kind == FireKindWreck || !walls)
+            if (!walls)
                 continue;
             Vector3 hit;
+            if (hull > 0.0f)
+            {
+                const float d = std::sqrt(dx * dx + dz * dz);
+                if (d < hull + col * 0.5f)
+                    continue;
+                const Vector3 from = bed + Vector3(dx / d * hull, 0, dz / d * hull);
+                if (q.ProbeSegment(from, Vector3(cx, bed.Y(), cz), hit))
+                    r.ceiling[k] = -1e6f;
+                // (a "roof" lower than 3 m over a wreck is its own gun barrel or turret overhang)
+                else if (q.ProbeSegment(Vector3(cx, std::max(fl, r.base.Y()) + 0.3f, cz),
+                                        Vector3(cx, r.base.Y() + height, cz), hit) &&
+                         hit.Y() > r.base.Y() + 3.0f)
+                    r.ceiling[k] = hit.Y();
+                continue;
+            }
             if (!overBed && q.ProbeSegment(bed, Vector3(cx, bed.Y(), cz), hit))
             {
                 r.ceiling[k] = -1e6f; // behind a wall
@@ -111,10 +148,18 @@ void ProbeSolids(FireVolumeReport& r)
              r.kind, r.radius, r.boxWidth, r.base.X(), r.base.Z(), wallCols, roofCols, lo, hi);
 }
 
+// A hash of the whole address: one owner may report two fires a byte apart (a wreck's flames and
+// its column), and dropping the low bits gave both the same key -- one solver box that flipped
+// between the two every frame.
 uint32_t KeyOf(const void* owner)
 {
-    const auto bits = reinterpret_cast<std::uintptr_t>(owner);
-    return static_cast<uint32_t>((bits >> 4) ^ (bits >> 36)) | 1u;
+    uint64_t x = static_cast<uint64_t>(reinterpret_cast<std::uintptr_t>(owner));
+    x ^= x >> 33;
+    x *= 0xff51afd7ed558ccdull;
+    x ^= x >> 33;
+    x *= 0xc4ceb9fe1a85ec53ull;
+    x ^= x >> 33;
+    return static_cast<uint32_t>(x) | 1u;
 }
 } // namespace
 
@@ -133,6 +178,14 @@ void ReportFireVolume(const void* owner, Vector3Par base, float radius, float in
 {
     if (!FireVolumesEnabled())
         return;
+    // Smoke goes to the solver only when Fire Pro draws the game's smoke (the dev panel's smoke
+    // system); otherwise the selected system has it and the volume would draw it twice.
+    if (!FireProSmokeActive())
+    {
+        if (kind == FireKindSmoke || kind == FireKindSmokeStack)
+            return;
+        smoke = 0.0f; // a fire's flames stay volumetric; its smoke is the other system's
+    }
     FireVolumeReport& r = Live()[owner];
     if (r.key == 0)
         r.key = KeyOf(owner);
@@ -148,7 +201,7 @@ void ReportFireVolume(const void* owner, Vector3Par base, float radius, float in
         ProbeSolids(r);
 }
 
-void SpawnFireVolume(Vector3Par base, float radius, float smoke, float duration, int kind)
+void SpawnFireVolume(Vector3Par base, float radius, float smoke, float duration, int kind, const float* color)
 {
     if (!FireVolumesEnabled())
         return;
@@ -158,20 +211,22 @@ void SpawnFireVolume(Vector3Par base, float radius, float smoke, float duration,
     t.report.smoke = std::clamp(smoke, 0.0f, 1.0f);
     t.report.kind = kind;
     t.report.key = NextTimedKey();
+    if (color)
+        std::copy(color, color + 4, t.report.color);
     t.start = Glob.time.toFloat();
     t.duration = duration;
     ProbeSolids(t.report);
     auto& timed = Timed();
     // a barrage must not starve the steady fires of boxes: keep the newest few bursts
-    if (kind == FireKindExplosion)
+    if (kind == FireKindExplosion || kind == FireKindDirt)
     {
         int bursts = 0;
         for (auto it = timed.rbegin(); it != timed.rend(); ++it)
-            bursts += it->report.kind == FireKindExplosion;
+            bursts += it->report.kind == kind;
         if (bursts >= 6)
         {
             auto oldest = std::find_if(timed.begin(), timed.end(),
-                                       [](const TimedFire& f) { return f.report.kind == FireKindExplosion; });
+                                       [kind](const TimedFire& f) { return f.report.kind == kind; });
             if (oldest != timed.end())
                 timed.erase(oldest);
         }
@@ -222,7 +277,9 @@ void CollectFireVolumes(std::vector<FireVolumeReport>& out, Vector3Par camera)
         if (f.duration > 0)
         {
             const float u = std::clamp(age / f.duration, 0.0f, 1.0f);
-            intensity = f.report.kind == FireKindExplosion ? std::sqrt(1.0f - u) : std::min(1.0f, (1.0f - u) * 5.0f);
+            intensity = f.report.kind == FireKindExplosion || f.report.kind == FireKindDirt
+                            ? std::sqrt(1.0f - u)
+                            : std::min(1.0f, (1.0f - u) * 5.0f);
         }
         FireVolumeReport r = f.report;
         r.intensity = intensity;

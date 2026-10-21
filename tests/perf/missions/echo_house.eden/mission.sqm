@@ -1,0 +1,55 @@
+// Owner listen test (Steam Audio echo fix, 2026-10-19): the player stands inside the
+// enterable farmhouse (Dum09) on the open hill at Everon 7050/6500, with two more houses
+// beside it; an East squad 150 m north searches and destroys toward it. init.sqs makes
+// the player invulnerable.
+version=11;
+class Mission
+{
+	addOns[]={"bis_resistance"};
+	addOnsAuto[]={"bis_resistance"};
+	randomSeed=1234;
+	class Intel { year=1985; month=6; day=21; hour=12; minute=0; };
+	class Groups
+	{
+		items=2;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0 { position[]={7050.0,0.0,6500.0}; azimut=0.0; id=0; side="WEST"; vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=1.0; };
+			};
+		};
+		class Item1
+		{
+			side="EAST";
+			class Vehicles
+			{
+				items=6;
+				class Item0 { position[]={7040.0,0.0,6650.0}; azimut=180.0; id=1; side="EAST"; vehicle="OfficerE"; leader=1; skill=0.6; };
+				class Item1 { position[]={7045.0,0.0,6652.0}; azimut=180.0; id=2; side="EAST"; vehicle="SoldierEMG";  skill=0.6; };
+				class Item2 { position[]={7050.0,0.0,6654.0}; azimut=180.0; id=3; side="EAST"; vehicle="SoldierEB";  skill=0.6; };
+				class Item3 { position[]={7055.0,0.0,6652.0}; azimut=180.0; id=4; side="EAST"; vehicle="SoldierEB";  skill=0.6; };
+				class Item4 { position[]={7060.0,0.0,6650.0}; azimut=180.0; id=5; side="EAST"; vehicle="SoldierEG";  skill=0.6; };
+				class Item5 { position[]={7065.0,0.0,6648.0}; azimut=180.0; id=6; side="EAST"; vehicle="SoldierEB";  skill=0.6; };
+			};
+			class Waypoints
+			{
+				items=1;
+				class Item0 { position[]={7050.0,0.0,6510.0}; type="SAD"; combatMode="RED"; behaviour="COMBAT"; speed="NORMAL"; };
+			};
+		};
+	};
+	class Vehicles
+	{
+		items=3;
+		class Item0 { position[]={7050.0,0.0,6500.0}; azimut=0.0; id=10; side="EMPTY"; vehicle="Dum09"; skill=1.0; };
+		class Item1 { position[]={7025.0,0.0,6505.0}; azimut=90.0; id=11; side="EMPTY"; vehicle="Dum09"; skill=1.0; };
+		class Item2 { position[]={7075.0,0.0,6495.0}; azimut=270.0; id=12; side="EMPTY"; vehicle="Dum09"; skill=1.0; };
+	};
+	class Markers { items=0; };
+};
+class Intro { class Groups { items=0; }; class Markers { items=0; }; };
+class OutroWin { class Groups { items=0; }; class Markers { items=0; }; };
+class OutroLoose { class Groups { items=0; }; class Markers { items=0; }; };

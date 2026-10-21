@@ -1,0 +1,7 @@
+; a 120 mm HE round fired level from in front of your chest, the way you face: aim at a wall.
+; (a spawned "LAW" keeps its own motor and orientation and flies off; the shell has the same
+; blast, 150, and goes where it is pointed. Your own shouldered LAW also breaches on a hit.)
+_d = getDir player
+_p = getPos player
+_s = "Shell120" camCreate [(_p select 0) + 2 * sin _d, (_p select 1) + 2 * cos _d, 2.2]
+_s setVelocity [250 * sin _d, 250 * cos _d, 0]

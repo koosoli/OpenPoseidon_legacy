@@ -8,9 +8,33 @@
 #include <dbghelp.h>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
+#include <string>
 
 namespace Poseidon::Foundation
 {
+namespace
+{
+// DbgHelp looks for the .pdb in the working directory and the path the build recorded,
+// not beside the executable -- and the game runs with the game folder as its working
+// directory while the binaries (and their .pdb) sit elsewhere, so every frame of our own
+// code came out "<unknown>". The executable's folder goes first on the search path.
+void InitSymbols(HANDLE proc)
+{
+    char exe[MAX_PATH] = {};
+    std::string path;
+    if (GetModuleFileNameA(nullptr, exe, MAX_PATH) > 0)
+    {
+        path = exe;
+        const size_t slash = path.find_last_of("\\/");
+        path = slash == std::string::npos ? std::string() : path.substr(0, slash);
+    }
+    if (const char* env = getenv("_NT_SYMBOL_PATH"); env && *env)
+        path += (path.empty() ? "" : ";") + std::string(env);
+    SymSetOptions(SymGetOptions() | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+    SymInitialize(proc, path.empty() ? nullptr : path.c_str(), TRUE);
+}
+} // namespace
 namespace
 {
 char g_crashDir[MAX_PATH] = {}; // where to write the minidump; empty = beside the exe
@@ -108,7 +132,7 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep)
     fprintf(stderr, "\n=== UNHANDLED EXCEPTION 0x%08lX at %p ===\n", code, addr);
     LOG_ERROR(Core, "UNHANDLED EXCEPTION 0x{:08X} at {}", (unsigned)code, addr);
 
-    SymInitialize(proc, nullptr, TRUE);
+    InitSymbols(proc);
     CONTEXT walkContext = *ep->ContextRecord;
     CONTEXT* ctx = &walkContext;
     STACKFRAME64 frame = {};
@@ -163,6 +187,9 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep)
         }
     }
     fflush(stderr);
+    // The log file is written by its own thread (PERF-LOG-FILE-QUEUE): let it write the lines
+    // above before the process ends.
+    DrainLogFileQueue(2000);
 
     if (g_crashNotify)
         g_crashNotify(static_cast<unsigned>(code), addr, g_crashDump, g_crashStack);
@@ -212,7 +239,7 @@ void LogStallThreadStack()
     if (!symbols)
     {
         symbols = true;
-        SymInitialize(proc, nullptr, TRUE);
+        InitSymbols(proc);
     }
     if (SuspendThread(g_watchedThread) == (DWORD)-1)
         return;

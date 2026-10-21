@@ -811,6 +811,23 @@ void EntityAIType::InitShape()
             }
         }
 
+        // (OP) a steady white light (a boat's masthead and stern lights; OFP had white only blinking)
+        index = memory->FindNamedSel("bily pozicni");
+        if (index >= 0)
+        {
+            const NamedSelection& sel = memory->NamedSel(index);
+            for (int i = 0; i < sel.Size(); i++)
+            {
+                LightInfo& light = _lights.Set(_lights.Add());
+                light.type = LightTypeMarker;
+                light.position = memory->Pos(sel[i]);
+                light.direction = VUp;
+                light.color = MarkerWhiteColor;
+                light.ambient = MarkerWhiteAmbient;
+                light.brightness = MarkerWhiteBrightness;
+            }
+        }
+
         index = memory->FindNamedSel("bily pozicni blik");
         if (index >= 0)
         {
@@ -882,6 +899,15 @@ void EntityAIType::InitShape()
                 light.brightness = MarkerBlueBrightness;
             }
         }
+    }
+    // (OP) markerLightScale: a vehicle whose marker lights are real lamps rather than tell-tales scales their
+    // brightness (the stock 0.002 lights a tenth of a metre; Tidewater's boat's nav lights light its deck and the
+    // water round it). Default 1, the stock look.
+    if (const ParamEntry* scale = _par ? _par->FindEntry("markerLightScale") : nullptr)
+    {
+        const float k = *scale;
+        for (int i = 0; i < _lights.Size(); i++)
+            _lights[i].brightness *= k;
     }
     _hitPoints.Clear();
     // must be first of InitShape chain

@@ -422,7 +422,19 @@ LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.SerializeEnum("player", player, 1, APNonplayable))
     PARAM_CHECK(ar.Serialize("leader", leader, 1, 0))
     if (ar.IsSaving() || ar.GetArVersion() >= 11)
-        PARAM_CHECK(ar.SerializeEnum("lock", lock, 1, (LockState)LSDefault))
+    {
+        // Arma 3 adds LOCKEDPLAYER: locked for players, open to the AI -- what OFP's LOCKED is.
+        RString lockName;
+        if (!ar.IsSaving() && Arma1Compat::Active() && ar.Serialize("lock", lockName, 1, RString()) == LSOK &&
+            stricmp(lockName, "LOCKEDPLAYER") == 0)
+        {
+            lock = LSLocked;
+        }
+        else
+        {
+            PARAM_CHECK(ar.SerializeEnum("lock", lock, 1, (LockState)LSDefault))
+        }
+    }
     else
     {
         bool locked;
@@ -819,20 +831,46 @@ void ArcadeMarkerInfo::OnColorChanged()
 {
     if (markerType == MTIcon && stricmp(colorName, "Default") == 0)
     {
-        const ParamEntry& cls = Pars >> "CfgMarkers" >> type;
-        color = GetPackedColor(cls >> "color");
+        // the icon's own colour; an icon type the config lacks (or none at all -- Arma 3
+        // missions of the older layout leave it empty) is drawn black
+        const ParamEntry* markers = Pars.FindEntry("CfgMarkers");
+        const ParamEntry* cls = markers && type.GetLength() > 0 ? markers->FindEntry(type) : nullptr;
+        const ParamEntry* value = cls && cls->IsClass() ? cls->FindEntry("color") : nullptr;
+        color = value && value->IsArray() && value->GetSize() == 4 ? GetPackedColor(*value) : PackedBlack;
     }
     else
     {
-        const ParamEntry& cls = Pars >> "CfgMarkerColors" >> colorName;
-        color = GetPackedColor(cls >> "color");
+        // A colour this game's config does not define (Arma 3's side colours ColorGUER,
+        // ColorWEST, ColorCIV ... in a mission of the older layout) is drawn in its nearest CWA
+        // colour, else black: looking it up regardless failed the whole mission load.
+        const ParamEntry* colors = Pars.FindEntry("CfgMarkerColors");
+        const ParamEntry* cls = colors && colorName.GetLength() > 0 ? colors->FindEntry(colorName) : nullptr;
+        if (!cls || !cls->IsClass() || !cls->FindEntry("color"))
+        {
+            static const char* const kNearest[][2] = {
+                {"ColorGUER", "ColorGreen"},   {"ColorIndependent", "ColorGreen"}, {"ColorWEST", "ColorBlue"},
+                {"ColorBLUFOR", "ColorBlue"},  {"ColorEAST", "ColorRed"},          {"ColorOPFOR", "ColorRed"},
+                {"ColorCIV", "ColorYellow"},   {"ColorCivilian", "ColorYellow"},   {"ColorUNKNOWN", "ColorBlack"},
+                {"ColorGrey", "ColorBlack"},   {"ColorPink", "ColorRed"},          {"ColorBrown", "ColorOrange"},
+                {"ColorKhaki", "ColorOrange"}, {"ColorWhite", "ColorWhite"}};
+            cls = nullptr;
+            for (const auto& pair : kNearest)
+                if (colors && stricmp(colorName, pair[0]) == 0)
+                    cls = colors->FindEntry(pair[1]);
+            if ((!cls || !cls->IsClass()) && colors)
+                cls = colors->FindEntry("ColorBlack");
+        }
+        const ParamEntry* value = cls && cls->IsClass() ? cls->FindEntry("color") : nullptr;
+        color = value && value->IsArray() && value->GetSize() == 4 ? GetPackedColor(*value) : PackedBlack;
     }
 }
 
 void ArcadeMarkerInfo::OnFillChanged()
 {
-    const ParamEntry& cls = Pars >> "CfgMarkerBrushes" >> fillName;
-    RString brush = cls >> "texture";
+    const ParamEntry* brushes = Pars.FindEntry("CfgMarkerBrushes");
+    const ParamEntry* cls = brushes && fillName.GetLength() > 0 ? brushes->FindEntry(fillName) : nullptr;
+    // a brush this config lacks (Arma 3's "SolidBorder", "DiagGrid" ...) fills as none
+    RString brush = cls && cls->IsClass() && cls->FindEntry("texture") ? RString((*cls) >> "texture") : RString();
     if (brush.GetLength() == 0)
     {
         fill = nullptr;
@@ -847,9 +885,20 @@ void ArcadeMarkerInfo::OnTypeChanged()
 {
     if (markerType == MTIcon)
     {
-        const ParamEntry& cls = Pars >> "CfgMarkers" >> type;
-        icon = GlobLoadTexture(GetPictureName(cls >> "icon"));
-        size = cls >> "size";
+        // an icon type this config lacks (an Arma 3 marker in an older-layout mission) is drawn
+        // as the plain dot rather than failing the mission load
+        const ParamEntry* markers = Pars.FindEntry("CfgMarkers");
+        const ParamEntry* cls = markers && type.GetLength() > 0 ? markers->FindEntry(type) : nullptr;
+        if ((!cls || !cls->IsClass()) && markers)
+            cls = markers->FindEntry("Dot");
+        if (!cls || !cls->IsClass() || !cls->FindEntry("icon") || !cls->FindEntry("size"))
+        {
+            icon = nullptr;
+            size = 0;
+            return;
+        }
+        icon = GlobLoadTexture(GetPictureName((*cls) >> "icon"));
+        size = (*cls) >> "size";
     }
 }
 

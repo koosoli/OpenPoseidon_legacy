@@ -1,0 +1,42 @@
+Open Poseidon - Arma 1 Missionen (Branch MrDudeX-arma1)
+=======================================================
+
+INSTALLATION
+1. Den kompletten Inhalt dieses Ordners in den Cold-War-Assault-Ordner kopieren
+   (dorthin, wo bisher OpenPoseidon.exe liegt), auf dem dritten PC:
+       D:\Steam-Games\steamapps\common\ARMA Cold War Assault\Remastered
+   Vorhandene Dateien ueberschreiben. OpenPoseidon.exe und wgpu_renderer.dll
+   immer ZUSAMMEN kopieren - nur eine von beiden fuehrt zu "Entry Point Not Found".
+2. Arma1Start.exe starten.
+
+STARTEN
+Arma1Start.exe sucht die Arma-1-Installation (ArmA Gold) selbst:
+  - arma1-pfad.txt in diesem Ordner (falls vorhanden),
+  - ...\steamapps\common\ARMA Gold neben dem CWA-Ordner,
+  - alle Steam-Bibliotheken aus libraryfolders.vdf.
+Wird nichts gefunden, fragt es einmal nach dem Ordner und merkt ihn sich in
+arma1-pfad.txt. Danach waehlen: Kampagne ca / ra / merc, Mission M09 Convoy Attack,
+eine beliebige andere Mission (Name wie m09convoyattack.sara) oder nur das Hauptmenue.
+
+Es wird nichts aus Arma 1 kopiert; der Ordner wird nur schreibgeschuetzt eingebunden.
+
+Ohne Starter geht es auch per Hand, z. B.:
+  OpenPoseidon.exe --arma1 "D:\Steam-Games\steamapps\common\ARMA Gold" --arma1-mission m09convoyattack.sara
+  OpenPoseidon.exe --arma1 "D:\Steam-Games\steamapps\common\ARMA Gold" --arma1-campaign ca
+
+WENN ETWAS NICHT GEHT
+- Spiel schliesst sofort: in einer Eingabeaufforderung in diesem Ordner
+      OpenPoseidon.exe --render wgpu --window --dev --log-file cwr.log
+  starten und cwr.log ansehen.
+- Optionen-Menue leer / UI-Grafiken fehlen: einmalig Werkzeuge\Install.ps1 ausfuehren
+  (kopiert BIN, fonts, dtaExt und cwr_logo.pbo aus der Remastered-Demo; die Demo
+  muss dafuer in Steam installiert sein).
+
+BEKANNTE GRENZEN (siehe docs/verification/arma1-direct-missions-20261011.md)
+- Alle 131 Arma-1-Missionen starten und laufen fehlerfrei an; komplett durchgespielt
+  wurde keine. Mehrspieler nur allein getestet.
+- Armory funktioniert nicht. un-impossible_mission braucht ein fremdes Addon.
+- Einige Befehle ohne Wirkung (Partikel, Lichter, FSMs, Fading), Arma-1-Fahrzeuge,
+  Waffen und KI werden durch CWA-Gegenstuecke dargestellt.
+
+BUILT-FROM.txt nennt Branch und Commit dieses Builds.

@@ -8,6 +8,7 @@
 #include <Poseidon/Graphics/Textures/TextureReuseOnlyBinding.hpp>
 #include <Poseidon/Graphics/Textures/RetailPacPixelStage.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -26,6 +27,14 @@ class TextureWgpu : public Texture
 {
     friend class TextureBankWgpu;
 
+  private:
+    mutable std::atomic<uint32_t> _nameClassMemo{0}; //!< NameIs: two bits a class, known + value
+  public:
+    //! EngineWgpu::LegacyEnhancementNormal's answer for this texture's name. That cache is keyed
+    //! by name and never evicts, so its answer for an immutable name is fixed: the draw path asks
+    //! it per section per frame, and the string build + hash was ~1% of the firefight main thread.
+    mutable std::atomic<uint64_t> legacyNormalMemo{0};
+    mutable std::atomic<bool> legacyNormalKnown{false};
   private:
     // Declared before _src so a borrowed CPU tint view dies BEFORE its owner.
     // RFG-086: the inner image also supplies the existing GPU tint delegate.
@@ -86,8 +95,13 @@ class TextureWgpu : public Texture
     // clutter card and WRONG for anything that gets minified -- an Enfusion ground
     // layer tiled every few metres (RFG-065) is aliasing noise without it.
     void InitDynamic(int w, int h, const void* rgba, uint32_t size, bool genMips = false);
+    // Pre-compressed upload: `format` a WgrTextureFormat, `data` `mipCount` tightly packed levels.
+    bool InitCompressed(int w, int h, int32_t format, uint32_t mipCount, const void* data, uint32_t size);
     // Reserve _slotLease if not already held; returns it (0 = none available).
     uint32_t AcquireSlotLease();
+    // FLY-001: wgr_texture_create_in_slot, through the ingress when the producer window is closed.
+    uint64_t CreateGpuTexture(WgrRenderer* r, uint32_t w, uint32_t h, int32_t format, uint32_t mips, uint32_t flags,
+                              const uint8_t* data, uint32_t size);
 
     // How a needed alpha scan was served. The classification is identical across these
     // cases; only the work to reach it differs, and the split is what the streaming stats
@@ -208,6 +222,31 @@ class TextureWgpu : public Texture
     bool NormalIsRgPacked() const;
     bool NormalHasNativeCavity() const;
     bool NormalHasNativePbrChannels() const;
+    // PERF (2026-10-14): the NAME halves of the three answers above, memoised. Each lowercased
+    // a copy of the path on every call, and DrawSectionTL asks per section per frame. The
+    // name never changes; the uploaded form can, so only the name half is kept.
+    enum NameClass : uint32_t
+    {
+        NameRgNormal,   //!< IsEnfusionRgNormalName
+        NameNtcCavity,  //!< the name test inside NativeNtcCavityChannelAvailable
+        NameNmoChannels //!< the name test inside NativeNmoMaterialChannelsAvailable
+    };
+    bool NameIs(NameClass which) const;
+    // The same memo for pure name tests that live with their callers (EngineWgpu's per-section
+    // classifiers). `compute` must be a pure function of the name; each slot always takes the
+    // same function.
+    enum NameSlot : uint32_t
+    {
+        SlotBarkOrTrunk = 3,
+        SlotLegacyPlantCutout,
+        SlotEnfusionCoverage,
+        SlotClothPlain,
+        SlotClothWestAtlas,
+        SlotClothEastAtlas,
+        SlotEnfusionConstantAlpha,
+        SlotLldrMonitor
+    };
+    bool NameMemo(NameSlot slot, bool (*compute)(const char* name)) const;
     bool HasNativeLinearMask(bool singleChannel) const;
     bool HasNativeSrgbBcr() const;
 

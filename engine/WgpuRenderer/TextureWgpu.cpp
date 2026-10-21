@@ -345,6 +345,37 @@ bool AlphaShapeGuardEnabled()
 //
 // `WGR_ALPHA_MASK_DEMOTE=1` turns it on.  The counter and the trace below report it either
 // way, so a run can measure how many textures it WOULD move before anyone enables it.
+// A SOLID panel with an anti-aliased outline -- a town sign, a clock face, a flag, a dashboard
+// cut to shape -- is the opposite end of the mask family: almost every texel opaque, a few clear
+// ones outside the outline, and a one-or-two-texel partial rim between them. ARGB4444 quantises
+// that rim into partial alpha, 2-5% of the texture, which is over ClassifyAlpha's 2% blend cut,
+// so the whole sign went to the back-to-front pass with no depth write and the sky drew through
+// it (tester report 2026-10-04, "Ortsschilder sind transparent"; measured on the CWA corpus:
+// obec_old* 8.4% clear / 89.1% opaque / 2.5% partial, obec_reflex* 2.5-3.6% clear / 94-95.5%
+// opaque / 2.1-2.5% partial; Nogova's direction/town signs, ukazatel_smer.paa, 18% clear / 75.6%
+// opaque / 6.3% partial). Census of the stock corpus (7,103 textures, 1,354 Blend): 96 have this
+// body (>= 60% opaque, <= 10% partial, >= 1% clear), and the engine's own shape measure passes 80
+// of them -- wheels (every "kolo"), sights, signs, clock faces, cut-out dashboards, rotor blades.
+// The 16 it keeps blended are the ones whose partial texels are a WIDE band (gauge glass, lamp
+// lenses: band width 5-30 texels against 0.5-3.5 for an outline). Foliage cannot reach the rule
+// (leaf cards are ~77% clear, no opaque body) and neither can glass (no opaque body).
+// On by default; WGR_ALPHA_SILHOUETTE_DEMOTE=0 turns it off.
+bool AlphaSilhouetteDemoteEnabled()
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_ALPHA_SILHOUETTE_DEMOTE");
+        return !v || v[0] != '0';
+    }();
+    return enabled;
+}
+
+bool CouldBeSolidSilhouette(const AlphaStats& stats)
+{
+    return stats.kind == AlphaStats::Blend && stats.pctOpaque >= 60.0 && stats.pctPartial <= 10.0 &&
+           stats.pctClear >= 1.0;
+}
+
 bool AlphaMaskDemoteEnabled()
 {
     static const bool enabled = []
@@ -366,6 +397,7 @@ AlphaShape MeasureAlphaShape(const uint8_t* rgba, int w, int h, size_t stride, s
 // to be able to say about itself (MAT-048's lesson: a lever that cannot fire produces a null
 // that means nothing).
 std::atomic<uint64_t> GAlphaSpeckleDemotions{0}; // Cutout -> Opaque (dithered packed alpha)
+std::atomic<uint64_t> GAlphaSilhouetteDemotions{0}; // Blend -> Cutout (solid panel, anti-aliased outline)
 std::atomic<uint64_t> GAlphaMaskDemotions{0};    // Blend  -> Cutout (anti-aliased mask)
 
 bool AlphaShapeTraceEnabled()
@@ -392,7 +424,8 @@ AlphaShape RefineAlphaClassByShape(AlphaStats& stats, const uint8_t* rgba, int w
 
     const bool couldBeSpeckle = stats.kind == AlphaStats::Cutout && stats.pctClear > 0.0;
     const bool couldBeAntialiasedMask = stats.kind == AlphaStats::Blend && stats.pctClear >= 2.0;
-    if (!couldBeSpeckle && !couldBeAntialiasedMask)
+    const bool couldBeSilhouette = AlphaSilhouetteDemoteEnabled() && CouldBeSolidSilhouette(stats);
+    if (!couldBeSpeckle && !couldBeAntialiasedMask && !couldBeSilhouette)
     {
         return shape; // glass, solid colour, and every already-Opaque texture exit here
     }
@@ -411,6 +444,14 @@ AlphaShape RefineAlphaClassByShape(AlphaStats& stats, const uint8_t* rgba, int w
         // a wrongly-opaque surface looks wrong, a wrongly-perforated one looks broken.
         stats.kind = AlphaStats::Opaque;
         GAlphaSpeckleDemotions.fetch_add(1, std::memory_order_relaxed);
+    }
+    else if (couldBeSilhouette && shape.partialBandWidth <= bandWidthMax && shape.meanClearNeighbours >= 2.5)
+    {
+        // (2.5, not neighboursMin: a sign's clear area is its rounded corners, thin strips that
+        // measure 2.6-2.7 neighbours. Packed data in the alpha lane scatters below 2.)
+        // A solid panel with an anti-aliased outline (see AlphaSilhouetteDemoteEnabled): occlude.
+        stats.kind = AlphaStats::Cutout;
+        GAlphaSilhouetteDemotions.fetch_add(1, std::memory_order_relaxed);
     }
     else if (couldBeAntialiasedMask && shape.partialBandWidth <= bandWidthMax &&
              shape.meanClearNeighbours >= neighboursMin)
@@ -921,7 +962,7 @@ void ReportTextureStreamStats(uint64_t uploads)
     LOG_INFO(Graphics,
              "Wgpu texture stream stats: uploads={} mipOpens={} blockMB={:.1f} readMs={:.1f} "
              "createMs={:.1f} fallbacks={} fallbackMs={:.1f} alphaScans={} alphaBlockScans={} "
-             "alphaHandoffs={} alphaSpeckleDemotions={} alphaMaskDemotions={} formatAlphaDemotions={} "
+             "alphaHandoffs={} alphaSpeckleDemotions={} alphaSilhouetteDemotions={} alphaMaskDemotions={} formatAlphaDemotions={} "
              "alphaMs={:.1f} totalMs={:.1f}",
              uploads, TextureMipOpenCount(),
              static_cast<double>(GTextureStreamStats.blockBytes.load(std::memory_order_relaxed)) / (1024.0 * 1024.0),
@@ -930,6 +971,7 @@ void ReportTextureStreamStats(uint64_t uploads)
              GTextureStreamStats.alphaBlockScans.load(std::memory_order_relaxed),
              GTextureStreamStats.alphaHandoffs.load(std::memory_order_relaxed),
              GAlphaSpeckleDemotions.load(std::memory_order_relaxed),
+             GAlphaSilhouetteDemotions.load(std::memory_order_relaxed),
              GAlphaMaskDemotions.load(std::memory_order_relaxed),
              GFormatAlphaDemotions.load(std::memory_order_relaxed), alphaUs / 1000.0,
              (readUs + createUs + fallbackUs + alphaUs) / 1000.0);
@@ -992,6 +1034,42 @@ TextureWgpu::~TextureWgpu()
             }
         }
     }
+}
+
+// FLY-001: create this texture's GPU image without waiting for the render thread when the
+// producer window is closed (the render thread mid-frame): through the renderer's texture
+// ingress, with a lease from its pool. Window open, no ingress, or a refusal: the ordinary
+// call, which opens the window first.
+// ON by default since 2026-10-19 (WGR_TEXTURE_INGRESS=0 = always the window). Measured on a
+// 15 m/s Everon flight, two runs per arm: slow shape installs (>= 30 ms, almost all of it
+// waiting for the window) 84/95 -> 44/40, slow swaps 24/28 -> 21/21, GPU frame unchanged,
+// capture crops identical and the same fallback-texture count in both logs.
+uint64_t TextureWgpu::CreateGpuTexture(WgrRenderer* r, uint32_t w, uint32_t h, int32_t format, uint32_t mips,
+                                       uint32_t flags, const uint8_t* data, uint32_t size)
+{
+    static const bool ingressOn = [] {
+        const char* value = std::getenv("WGR_TEXTURE_INGRESS");
+        return !(value && value[0] == '0');
+    }();
+    static WgrRenderer* ingressOwner = nullptr;
+    static const WgrTextureIngress* ingress = nullptr;
+    if (ingressOn && r != nullptr && !EngineWgpu::ProducerMayTouchRenderer())
+    {
+        if (ingressOwner != r)
+        {
+            ingressOwner = r;
+            ingress = wgr_texture_ingress(r);
+        }
+        if (ingress != nullptr)
+        {
+            if (_slotLease == 0 && !_dynamic)
+                _slotLease = wgr_texture_ingress_slot_acquire(ingress);
+            if (const uint64_t handle = wgr_texture_ingress_create(ingress, w, h, format, mips, flags, data, size, _slotLease))
+                return handle;
+        }
+    }
+    CheckProducerMayTouchRenderer("texture create");
+    return wgr_texture_create_in_slot(r, w, h, format, mips, flags, data, size, AcquireSlotLease());
 }
 
 // Reserve this texture's bindless slot on first use. 0 (array at cap) is not an error:
@@ -1069,6 +1147,31 @@ int TextureWgpu::Init()
                 ledger->NoteImmediateFallback();
             }
         }
+        // PERF-PROCEDURAL-INGRESS (2026-10-20). InitDynamic opens the producer window, i.e. waits
+        // for the render thread to finish the frame in flight. DayZ rvmats name procedural maps
+        // (`#(argb,8,8,3)color(0,0,1,1,SMDI)` and the like) for constant specular/normal, so a
+        // cold install creating its first one waited 80-230 ms: 38 installs, 2.7 s of the main
+        // thread per Chernarus flight, each a hitch. With the window closed the image goes
+        // through the texture ingress instead (FLY-001), exactly as a file texture does; it is
+        // still a dynamic texture (no lease, never evicted). WGR_PROCEDURAL_INGRESS=0 = the window.
+        static const bool proceduralIngress = [] {
+            const char* value = std::getenv("WGR_PROCEDURAL_INGRESS");
+            return !(value && value[0] == '0');
+        }();
+        if (WgrRenderer* r = _bank ? _bank->Renderer() : nullptr;
+            proceduralIngress && r && !EngineWgpu::ProducerMayTouchRenderer())
+        {
+            _dynamic = true;
+            _uploadTried = true;
+            _w = generated.width;
+            _h = generated.height;
+            _nMipmaps = 1;
+            _gpuHandle = CreateGpuTexture(r, static_cast<uint32_t>(generated.width),
+                                          static_cast<uint32_t>(generated.height), WGR_TEXTURE_RGBA8, 1, 0u,
+                                          generated.rgba.data(), static_cast<uint32_t>(generated.rgba.size()));
+            if (_gpuHandle)
+                return 0;
+        }
         InitDynamic(generated.width, generated.height, generated.rgba.data(),
                     static_cast<uint32_t>(generated.rgba.size()));
         return _gpuHandle ? 0 : -1;
@@ -1078,17 +1181,10 @@ int TextureWgpu::Init()
 
     const auto loadSource = [&]()
     {
-        static const bool lazyTint = [] {
-            const char* v = std::getenv("WGR_LAZY_BCR_TINT");
-            // Exact mip/corpus tests and paired native routes preserve the GPU
-            // image while avoiding duplicate decoded CPU chains. 0 is the A/B control.
-            return !v || v[0] != '0';
-        }();
         float rgb[3];
         const char* innerName = nullptr;
-        if (lazyTint && _bank && Poseidon::Dev::GResidencyLevers().layerTintInShader &&
-            Enfusion::LayerTintLinearMultiply() && Enfusion::SplitLayerTintName(SourceName(), rgb, &innerName) &&
-            innerName && *innerName)
+        if (_bank && LazyBcrTintRoute() && Enfusion::SplitLayerTintName(SourceName(), rgb, &innerName) && innerName &&
+            *innerName)
         {
             Ref<Texture> inner = _bank->Load(innerName);
             auto* texture = inner ? static_cast<TextureWgpu*>(inner.GetRef()) : nullptr;
@@ -1448,9 +1544,12 @@ bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
 
     // Only the explicit PBO-texture experiment performs a lookup/native capture.
     // Facts are usable before upload; the raw chain remains available to upload.
+    // STREAM-PAA-ALPHA: the parked-model PAA preparation (POSEIDON_STREAM_PAA_PREP, default on)
+    // publishes these facts too, so they are looked up whenever it is on.
     static const bool pboTextures = [] {
         const char* value = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
-        return value && value[0] == '1';
+        const char* paaPrep = std::getenv("POSEIDON_STREAM_PAA_PREP");
+        return (value && value[0] == '1') || !(paaPrep && paaPrep[0] == '0');
     }();
     if (pboTextures && GUseFileBanks && render::PreparedTextureStore::Enabled())
     {
@@ -1470,6 +1569,32 @@ bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
                         _alphaStats = facts.histogram;
                         AlphaProfilePhase shapePhase(&render::ObjectAdmitProfile::alphaShapeMs);
                         RefineAlphaClassByShape(_alphaStats, nullptr, w, h, Name(), 1, 0, &facts.shape);
+                        // WGR_PAA_PREPARED_VERIFY=1: the verdict the ordinary block read gives (histogram + shape refinement), too.
+                        static const bool verifyFacts = [] {
+                            const char* v = std::getenv("WGR_PAA_PREPARED_VERIFY");
+                            return v && v[0] == '1';
+                        }();
+                        if (verifyFacts)
+                        {
+                            std::vector<uint8_t> blocks(static_cast<size_t>(bytes));
+                            const MipmapRead topRead{blocks.data(), &_mipmaps[0], 0};
+                            AlphaStats reference;
+                            const bool same = _src->GetMipmapChain(&topRead, 1) &&
+                                ClassifyAlphaFromBlocks(blocks.data(), blocks.size(), w, h, fmt, reference, Name()) &&
+                                reference.kind == _alphaStats.kind && reference.aMin == _alphaStats.aMin &&
+                                reference.aMax == _alphaStats.aMax && reference.aMean == _alphaStats.aMean &&
+                                reference.pctClear == _alphaStats.pctClear && reference.pctOpaque == _alphaStats.pctOpaque &&
+                                reference.pctPartial == _alphaStats.pctPartial && reference.pctMid == _alphaStats.pctMid;
+                            static std::atomic<uint32_t> identical{0}, mismatched{0};
+                            const uint32_t n = (same ? identical : mismatched).fetch_add(1) + 1;
+                            if (!same || n % 50 == 1)
+                                LOG_INFO(Graphics, "PAA alpha facts verify: {} {} (identical={} mismatched={}) facts kind={} min={} max={} mean={} clear={:.3f} opaque={:.3f} partial={:.3f} mid={:.3f} | read kind={} min={} max={} mean={} clear={:.3f} opaque={:.3f} partial={:.3f} mid={:.3f} fmt={} {}x{}",
+                                         same ? "identical" : "MISMATCH", Name(), identical.load(), mismatched.load(),
+                                         int(_alphaStats.kind), _alphaStats.aMin, _alphaStats.aMax, _alphaStats.aMean, _alphaStats.pctClear,
+                                         _alphaStats.pctOpaque, _alphaStats.pctPartial, _alphaStats.pctMid,
+                                         int(reference.kind), reference.aMin, reference.aMax, reference.aMean, reference.pctClear,
+                                         reference.pctOpaque, reference.pctPartial, reference.pctMid, int(fmt), w, h);
+                        }
                         path = AlphaScanPath::PreparedFacts;
                         return true;
                     }
@@ -1719,8 +1844,44 @@ bool TextureWgpu::NormalHasNativeCavity() const
         return false;
     const bool decodedDds = _mipmaps[0].DstFormat() == PacARGB8888 &&
         dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(_src)) != nullptr;
-    return NativeNtcCavityChannelAvailable(_mipmaps[0].DstFormat(), decodedDds,
-                                            NormalIsRgPacked(), Name());
+    // NativeNtcCavityChannelAvailable, with its name half memoised.
+    return NativeAuxChannelsSurvive(_mipmaps[0].DstFormat(), decodedDds, NormalIsRgPacked()) && NameIs(NameNtcCavity);
+}
+
+bool TextureWgpu::NameIs(NameClass which) const
+{
+    const uint32_t shift = static_cast<uint32_t>(which) * 2;
+    const uint32_t word = _nameClassMemo.load(std::memory_order_relaxed);
+    if (word & (1u << shift))
+        return (word >> (shift + 1)) & 1u;
+    const char* name = Name();
+    bool value = false;
+    switch (which)
+    {
+        case NameRgNormal:
+            value = IsEnfusionRgNormalName(name);
+            break;
+        case NameNtcCavity:
+            value = IsNativeNtcName(name);
+            break;
+        case NameNmoChannels:
+            value = IsNativeNmoName(name);
+            break;
+    }
+    // A race computes the same pure function of an immutable name twice; either write is right.
+    _nameClassMemo.fetch_or((1u | (value ? 2u : 0u)) << shift, std::memory_order_relaxed);
+    return value;
+}
+
+bool TextureWgpu::NameMemo(NameSlot slot, bool (*compute)(const char* name)) const
+{
+    const uint32_t shift = static_cast<uint32_t>(slot) * 2;
+    const uint32_t word = _nameClassMemo.load(std::memory_order_relaxed);
+    if (word & (1u << shift))
+        return (word >> (shift + 1)) & 1u;
+    const bool value = compute(Name());
+    _nameClassMemo.fetch_or((1u | (value ? 2u : 0u)) << shift, std::memory_order_relaxed);
+    return value;
 }
 
 bool TextureWgpu::HasNativeLinearMask(bool singleChannel) const
@@ -1738,8 +1899,8 @@ bool TextureWgpu::NormalHasNativePbrChannels() const
         return false;
     const bool decodedDds = _mipmaps[0].DstFormat() == PacARGB8888 &&
         dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(_src)) != nullptr;
-    return NativeNmoMaterialChannelsAvailable(_mipmaps[0].DstFormat(), decodedDds,
-                                               NormalIsRgPacked(), Name());
+    // NativeNmoMaterialChannelsAvailable, with its name half memoised.
+    return NativeAuxChannelsSurvive(_mipmaps[0].DstFormat(), decodedDds, NormalIsRgPacked()) && NameIs(NameNmoChannels);
 }
 
 bool TextureWgpu::HasNativeSrgbBcr() const
@@ -1771,7 +1932,7 @@ bool TextureWgpu::NormalIsRgPacked() const
     // R as POM height.
     const bool decodedDds =
         dst == PacARGB8888 && dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(_src)) != nullptr;
-    return (dst == PacBC7 || decodedDds) && IsEnfusionRgNormalName(Name());
+    return (dst == PacBC7 || decodedDds) && NameIs(NameRgNormal);
 }
 
 void TextureWgpu::InitDynamic(int w, int h, const void* rgba, uint32_t size, bool genMips)
@@ -1792,6 +1953,25 @@ void TextureWgpu::InitDynamic(int w, int h, const void* rgba, uint32_t size, boo
     {
         LOG_WARN(Graphics, "Wgpu: failed to upload dynamic texture {}x{} size={}", w, h, size);
     }
+}
+
+bool TextureWgpu::InitCompressed(int w, int h, int32_t format, uint32_t mipCount, const void* data, uint32_t size)
+{
+    _dynamic = true;
+    _uploadTried = true;
+    _w = w;
+    _h = h;
+    _nMipmaps = static_cast<int>(mipCount);
+    if (WgrRenderer* r = _bank ? _bank->Renderer() : nullptr)
+    {
+        CheckProducerMayTouchRenderer("texture create");
+        _gpuHandle = wgr_texture_create(r, static_cast<uint32_t>(w), static_cast<uint32_t>(h), format, mipCount, 0u,
+                                        static_cast<const uint8_t*>(data), size);
+    }
+    if (!_gpuHandle)
+        LOG_WARN(Graphics, "Wgpu: failed to upload compressed texture {}x{} format={} mips={} size={}", w, h, format,
+                 mipCount, size);
+    return _gpuHandle != 0;
 }
 
 void TextureWgpu::UpdateDynamic(const void* rgba, uint32_t size)
@@ -1912,10 +2092,13 @@ int TextureMipBias()
 
 bool TextureWgpu::AdaptiveMipCandidate()
 {
-    static const bool enabled = [] { const char* v = std::getenv("WGR_ADAPTIVE_TEXTURE_DETAIL"); return v && v[0] == '1'; }();
+    // PERF-RFG-213: ON by default (WGR_ADAPTIVE_TEXTURE_DETAIL=0 = off), and for every native
+    // block-compressed image -- colour, normals, masks, cutouts -- not only untinted opaque _bcr.
+    // Everon holds 2,387 such textures (1.98 GB) in a process ~2.4 GB over the OS's VRAM budget,
+    // where WDDM demotes a random allocation to system memory each run (5-10 ms frame swings).
+    // Still excluded: composites (decoded RGBA), dynamic/UI images and borrowed tint views.
+    static const bool enabled = [] { const char* v = std::getenv("WGR_ADAPTIVE_TEXTURE_DETAIL"); return !(v && v[0] == '0'); }();
     if (!enabled) return false;
-    // Narrow prototype: immutable in-memory DDS BCR sources, opaque object colour only.
-    // No archive reads, composites, cutouts, normals, dynamic/UI images or borrowed tint views.
     if (!_gpuHandle || !_slotLease || _dynamic || _tintDelegate || _cpuTintView || !_src ||
         !dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(_src)) ||
         _nMipmaps < 2 || TextureMipBias() != 0)
@@ -1927,8 +2110,7 @@ bool TextureWgpu::AdaptiveMipCandidate()
         const size_t n = std::strlen(ending);
         return length >= n && strcmpi(name + length - n, ending) == 0;
     };
-    return (suffix("_bcr.edds") || suffix("_bcr.dds")) &&
-        BcFormatFor(_mipmaps[0].DstFormat()) >= 0 && GetAlphaClass() == AlphaStats::Opaque;
+    return (suffix(".edds") || suffix(".dds")) && BcFormatFor(_mipmaps[0].DstFormat()) >= 0;
 }
 
 bool TextureWgpu::ReplaceMipTail(int firstLevel, uint64_t frame)
@@ -1948,10 +2130,14 @@ bool TextureWgpu::ReplaceMipTail(int firstLevel, uint64_t frame)
     // overlap; trackedBytes also includes submitted old textures awaiting completion.
     constexpr size_t maxUpload = 4 * 1024 * 1024;
     WgrMemoryStats memory{};
-    if (bytes == 0 || bytes > maxUpload || !EngineWgpu::LastMemoryStats(memory) ||
-        !memory.budget_bytes || memory.tracked_bytes >= memory.budget_bytes ||
-        bytes * 2 > memory.budget_bytes - memory.tracked_bytes)
+    if (bytes == 0 || bytes > maxUpload || !EngineWgpu::LastMemoryStats(memory) || !memory.budget_bytes)
         return false;
+    // PERF-RFG-213: a DEMOTION (firstLevel above the current one) shrinks the image, so it is the
+    // way out of an over-budget state and must never be refused for being over budget -- the
+    // prototype's gate refused every replacement there, which on Everon is always. A promotion
+    // is asked for by fresh GPU feedback (the texture is seen up close), so it is honoured too;
+    // the per-pass caps in UpdateAdaptiveTextureDetail bound the churn.
+    (void)memory;
     std::vector<uint8_t> blocks(bytes);
     std::vector<MipmapRead> reads(static_cast<size_t>(count));
     for (int i = 0; i < count; ++i)
@@ -1971,8 +2157,11 @@ bool TextureWgpu::ReplaceMipTail(int firstLevel, uint64_t frame)
     _mipDemand.Replaced(frame);
     wgr_texture_destroy(renderer, previous);
     GTextureStreamStats.frameUploadBytes.fetch_add(bytes, std::memory_order_relaxed);
-    LOG_INFO(Graphics, "Adaptive texture detail: mip {} -> {} bytes={} slot={} source='{}'",
-        oldBias, firstLevel, bytes, _slotLease, SourceName());
+    static std::atomic<uint32_t> adaptiveLogged{0};
+    const uint32_t nth = adaptiveLogged.fetch_add(1, std::memory_order_relaxed);
+    if (nth < 12 || nth % 100 == 0)
+        LOG_INFO(Graphics, "Adaptive texture detail #{}: mip {} -> {} bytes={} slot={} source='{}'", nth,
+            oldBias, firstLevel, bytes, _slotLease, SourceName());
     return true;
 }
 
@@ -2311,6 +2500,41 @@ uint64_t TextureWgpu::EnsureUploaded()
             ok = _src->GetMipmapChain(reads.data(), levelCount);
             if (terrainTiming.enabled) terrainTiming.blockReadMs += (NowUs() - sourceReadBegan) / 1000.0;
         }
+        // STREAM-PAA-PREP verify (WGR_PAA_PREPARED_VERIFY=1): read the chain the ordinary way too and
+        // compare it with the worker-prepared one byte for byte.
+        static const bool verifyPrepared = [] {
+            const char* value = std::getenv("WGR_PAA_PREPARED_VERIFY");
+            return value && value[0] == '1';
+        }();
+        // STREAM-PAA-PREP diagnostic (WGR_PAA_UNPREPARED_LOG=1): the first 200 PAA uploads that were
+        // NOT prepared off the main thread, by name -- which population the background path misses.
+        static const bool logUnprepared = [] {
+            const char* value = std::getenv("WGR_PAA_UNPREPARED_LOG");
+            return value && value[0] == '1';
+        }();
+        if (logUnprepared && !fromPrepared && profiled)
+        {
+            static std::atomic<uint32_t> rows{0};
+            if (rows.fetch_add(1, std::memory_order_relaxed) < 5000)
+                LOG_INFO(Graphics, "PAA unprepared upload: {} loaded={} admit={}", Name(),
+                         render::PreparedTextureStore::Instance().HasAlphaFacts(render::PreparedTextureStore::Key(SourceName())),
+                         profiled ? 1 : 0);
+        }
+        if (verifyPrepared && fromPrepared && ok)
+        {
+            std::vector<uint8_t> reference(total, 0);
+            std::vector<MipmapRead> reads(static_cast<size_t>(levelCount));
+            for (int i = 0; i < levelCount; i++)
+                reads[i] = MipmapRead{reference.data() + offsets[i], &_mipmaps[firstLevel + i], firstLevel + i};
+            const bool readOk = _src->GetMipmapChain(reads.data(), levelCount);
+            static std::atomic<uint32_t> identical{0}, mismatched{0};
+            const bool same = readOk && reference.size() == blocks.size() &&
+                              std::memcmp(reference.data(), blocks.data(), blocks.size()) == 0;
+            const uint32_t n = (same ? identical : mismatched).fetch_add(1, std::memory_order_relaxed) + 1;
+            if (!same || n % 100 == 1)
+                LOG_INFO(Graphics, "PAA prepared verify: {} {} (identical={} mismatched={})", same ? "identical" : "MISMATCH",
+                         Name(), identical.load(), mismatched.load());
+        }
         if (terrainTiming.enabled) terrainTiming.preparedUsed = fromPrepared;
         if (warmPreparedSource && !fromPrepared)
             render::PreparedTextureStore::Instance().NoteWarmUpload(false, 0);
@@ -2351,10 +2575,9 @@ uint64_t TextureWgpu::EnsureUploaded()
             // Into this texture's LEASED slot, so a re-upload after an eviction reclaims
             // the bindless index registered models already baked (REN-RES-001).
             const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
-            CheckProducerMayTouchRenderer("texture create");
-            _gpuHandle = wgr_texture_create_in_slot(r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), bcFormat,
+            _gpuHandle = CreateGpuTexture(r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), bcFormat,
                                                     static_cast<uint32_t>(levelCount), 0, blocks.data(),
-                                                    static_cast<uint32_t>(blocks.size()), AcquireSlotLease());
+                                                    static_cast<uint32_t>(blocks.size()));
             if (terrainTiming.enabled) terrainTiming.compressedCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
             if (_gpuHandle)
                 NoteUploadSize(_w, _h, blocks.size(), true);
@@ -2523,7 +2746,7 @@ uint64_t TextureWgpu::EnsureUploaded()
                 return value && value[0] == '1';
             }();
             if (trace)
-                LOG_INFO(Graphics, "MUZZLE_FLASH_SHEET texture={} source={} width={} height={} enabled={} remapped={} alpha=authored-bounded",
+                LOG_INFO(Graphics, "MUZZLE_FLASH_SHEET texture={} source={} width={} height={} enabled={} remapped={} sheet=procedural",
                          name, SourceName(), width, height, enabled, changed);
         };
         if (render::PreparedTextureStore::Enabled() &&
@@ -2537,11 +2760,10 @@ uint64_t TextureWgpu::EnsureUploaded()
                 encodeBc3(prepared.rgba.data(), prepared.width, prepared.height, bc3, bc3Offsets, bc3Levels))
             {
                 const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
-                CheckProducerMayTouchRenderer("texture create");
-                _gpuHandle = wgr_texture_create_in_slot(r, static_cast<uint32_t>(prepared.width),
+                _gpuHandle = CreateGpuTexture(r, static_cast<uint32_t>(prepared.width),
                                                         static_cast<uint32_t>(prepared.height), WGR_TEXTURE_BC3,
                                                         static_cast<uint32_t>(bc3Levels), 0, bc3.data(),
-                                                        static_cast<uint32_t>(bc3.size()), AcquireSlotLease());
+                                                        static_cast<uint32_t>(bc3.size()));
                 if (terrainTiming.enabled) terrainTiming.fallbackCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
                 if (_gpuHandle)
                 {
@@ -2622,17 +2844,24 @@ uint64_t TextureWgpu::EnsureUploaded()
                             admit.textureBc3PreparedBytes += bc3.size();
                         }
                     }
+                    else if (AuthoredCompositeMips() && preparedSource &&
+                             preparedSource->EncodeAuthoredBc3(preparedBc3))
+                    {
+                        // RFG-112: the composite's own (FoliageAlpha) mips, not box mips.
+                        bc3 = std::move(preparedBc3.blocks);
+                        bc3Offsets = std::move(preparedBc3.offsets);
+                        bc3Levels = preparedBc3.levels;
+                        encoded = true;
+                    }
                     else
                         encoded = encodeBc3(pixels.data(), _w, _h, bc3, bc3Offsets, bc3Levels);
                 }
                 if (encoded)
                 {
                     const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
-                    CheckProducerMayTouchRenderer("texture create");
-                    _gpuHandle = wgr_texture_create_in_slot(
+                    _gpuHandle = CreateGpuTexture(
                         r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), WGR_TEXTURE_BC3,
-                        static_cast<uint32_t>(bc3Levels), 0, bc3.data(), static_cast<uint32_t>(bc3.size()),
-                        AcquireSlotLease());
+                        static_cast<uint32_t>(bc3Levels), 0, bc3.data(), static_cast<uint32_t>(bc3.size()));
                     if (terrainTiming.enabled) terrainTiming.fallbackCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
                     if (_gpuHandle)
                         NoteUploadSize(_w, _h, bc3.size(), true);
@@ -2640,10 +2869,9 @@ uint64_t TextureWgpu::EnsureUploaded()
                 if (!_gpuHandle)
                 {
                     const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
-                    CheckProducerMayTouchRenderer("texture create");
-                    _gpuHandle = wgr_texture_create_in_slot(
+                    _gpuHandle = CreateGpuTexture(
                         r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), WGR_TEXTURE_RGBA8, 1,
-                        WGR_TEXTURE_GEN_MIPS, pixels.data(), static_cast<uint32_t>(pixels.size()), AcquireSlotLease());
+                        WGR_TEXTURE_GEN_MIPS, pixels.data(), static_cast<uint32_t>(pixels.size()));
                     if (terrainTiming.enabled) terrainTiming.fallbackCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
                     NoteUploadSize(_w, _h, pixels.size() * 4 / 3, false, Name());
                 }
@@ -2663,10 +2891,9 @@ uint64_t TextureWgpu::EnsureUploaded()
             {
                 warmMuzzle(img.rgba, img.width, img.height);
                 const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
-                CheckProducerMayTouchRenderer("texture create");
-                _gpuHandle = wgr_texture_create_in_slot(
+                _gpuHandle = CreateGpuTexture(
                     r, static_cast<uint32_t>(img.width), static_cast<uint32_t>(img.height), WGR_TEXTURE_RGBA8, 1,
-                    WGR_TEXTURE_GEN_MIPS, img.rgba.data(), static_cast<uint32_t>(img.rgba.size()), AcquireSlotLease());
+                    WGR_TEXTURE_GEN_MIPS, img.rgba.data(), static_cast<uint32_t>(img.rgba.size()));
                 if (terrainTiming.enabled) terrainTiming.fallbackCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
                 _w = img.width;
                 _h = img.height;

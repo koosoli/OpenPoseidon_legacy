@@ -2,6 +2,7 @@
 // thread-safety boundary; this file is the mechanism only.
 
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
 #include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamTextureNames.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamRapStageNames.hpp>
@@ -23,6 +24,7 @@
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // the worker->main-thread mip-chain store
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp>
+#include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/World/Model/ModelMemory.hpp>
@@ -49,6 +51,8 @@
 #include <new>
 #include <thread>
 #include <vector>
+#include <unordered_set>
+#include <functional>
 
 namespace Poseidon
 {
@@ -743,7 +747,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
     // created long after InitFPU, so the capture is always live by the time we get here.
     Foundation::ApplyMainFpEnvironment();
 
-    (void)workerIndex;
+    Foundation::SetCurrentThreadName(("obj-prep-" + std::to_string(workerIndex)).c_str());
 
     std::unique_lock<std::mutex> lock(mutex);
     for (;;)
@@ -1775,7 +1779,11 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
     std::vector<std::optional<BankReadRequest>> packedReads(modelCount);
     const char* packedFlag = std::getenv("WGR_OBJECT_STREAM_PBO");
     const char* treeFlag = std::getenv("WGR_OBJECT_STREAM_PBO_TREE_FIXTURE");
-    const bool broadPacked = packedFlag && packedFlag[0] == '1';
+    // STREAM-PAA-PREP: on by default (2026-10-20). Parsing packed .p3d models on the workers is
+    // what lets a DayZ cold model take the parked, background texture path at all (without it
+    // every one was "mode=sync-fallback", parsed and textured on the main thread). Only modern
+    // streamed worlds reach this (DayZ, substituted Arma worlds); WGR_OBJECT_STREAM_PBO=0 = off.
+    const bool broadPacked = !(packedFlag && packedFlag[0] == '0');
     const bool narrowTree = !broadPacked && treeFlag && std::strcmp(treeFlag, "1") == 0;
     size_t packedCount = 0;
     uint8_t attemptedTree = 0;
@@ -3130,6 +3138,163 @@ ObjectStreamPreparer::Stats ObjectStreamPreparer::SnapshotStats() const
     auto result = _impl->stats;
     result.warmTextureQueueBytes = _impl->WarmStorageBytes();
     return result;
+}
+
+NativeInstallTexturePrep PrepareNativeInstallTextures(const std::vector<const Model::Model*>& models, TaskPool* pool,
+                                                      std::unordered_set<std::string>& claimed,
+                                                      const std::function<bool(const char*)>& alreadyLoaded)
+{
+    if (models.empty() || !render::PreparedTextureStore::Enabled())
+        return {};
+    const auto began = std::chrono::steady_clock::now();
+    const std::vector<std::string> keys = CollectNativeInstallTextureKeys(models, claimed, alreadyLoaded);
+    NativeInstallTexturePrep out = DecodeNativeInstallTextureKeys(keys, pool);
+    out.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+    return out;
+}
+
+std::vector<std::string> CollectNativeInstallTextureKeys(const std::vector<const Model::Model*>& models,
+                                                         std::unordered_set<std::string>& claimed,
+                                                         const std::function<bool(const char*)>& alreadyLoaded)
+{
+    if (models.empty() || !render::PreparedTextureStore::Enabled())
+        return {};
+
+    // Exactly the names ShapeAdapter::BuildAdapterBankTables hands GlobLoadTexture: every
+    // material's face texture in every level, lower-cased. A tinted name on the lazy route asks
+    // the factory for its INNER image only (LazyBcrTintRoute), and many tints share one tile.
+    // Material stages (.emat maps) are resolved later, at GPU registration, and are not here.
+    render::PreparedTextureStore& store = render::PreparedTextureStore::Instance();
+    const bool lazyTint = LazyBcrTintRoute();
+    std::vector<std::string> keys;
+    for (const Model::Model* model : models)
+    {
+        if (model == nullptr)
+            continue;
+        for (const auto& level : model->lodLevels)
+            for (const auto& material : level.mesh.materials)
+            {
+                if (material.texturePath.empty())
+                    continue;
+                std::string name = material.texturePath;
+                for (char& c : name)
+                    if (c >= 'A' && c <= 'Z')
+                        c = static_cast<char>(c - 'A' + 'a');
+                float rgb[3];
+                const char* inner = nullptr;
+                const bool viaInner =
+                    lazyTint && Enfusion::SplitLayerTintName(name.c_str(), rgb, &inner) && inner && *inner;
+                // The bank answers first: a loaded name, or on the lazy route a loaded inner
+                // image, is never asked of the factory.
+                if (alreadyLoaded && (alreadyLoaded(name.c_str()) || (viaInner && alreadyLoaded(inner))))
+                    continue;
+                // What the factory is asked for. On the lazy route that is the inner image; and
+                // when the inner image cannot carry a tint view -- only a plain BC7 `_bcr` file
+                // can (TextureSourceDDS::CreateLinearTintView) -- the texture falls back to the
+                // FULL tinted name as well, which is then decoded on the calling thread unless it
+                // is here too. An alpha composite (`enfa|`, every road) is always that case.
+                const auto want = [&](std::string key)
+                {
+                    // A file, or an alpha composite painted with a constant colour
+                    // (`enfa|<coverage>|enfc|r,g,b`), which the DDS source also composes.
+                    const bool composable = key.ends_with(".edds") || key.ends_with(".dds") ||
+                                            (key.starts_with("enfa|") && key.find("|enfc|") != std::string::npos);
+                    if (key.size() >= 4 && composable && !claimed.count(key) && store.ShouldPrepare(key))
+                    {
+                        claimed.insert(key);
+                        keys.push_back(std::move(key));
+                    }
+                };
+                if (viaInner)
+                {
+                    const std::string innerName = inner;
+                    want(render::PreparedTextureStore::Key(inner));
+                    const bool viewable = innerName.find('|') == std::string::npos &&
+                                          (innerName.ends_with("_bcr.edds") || innerName.ends_with("_bcr.dds"));
+                    if (!viewable)
+                        want(render::PreparedTextureStore::Key(name));
+                }
+                else
+                    want(render::PreparedTextureStore::Key(name));
+            }
+    }
+    return keys;
+}
+
+NativeInstallTexturePrep DecodeNativeInstallTextureKeys(const std::vector<std::string>& keys, TaskPool* pool)
+{
+    NativeInstallTexturePrep out;
+    if (!render::PreparedTextureStore::Enabled())
+        return out;
+    const auto began = std::chrono::steady_clock::now();
+    const auto& mount = Asset::Formats::Enfusion::EnfusionMount::Instance();
+    render::PreparedTextureStore& store = render::PreparedTextureStore::Instance();
+    const auto parallel = [&](size_t count, const std::function<void(size_t)>& body)
+    {
+        if (pool != nullptr && count > 1)
+            pool->ParallelFor(static_cast<uint32_t>(count),
+                              [&](uint32_t start, uint32_t end)
+                              {
+                                  for (uint32_t i = start; i < end; ++i)
+                                      body(i);
+                              });
+        else
+            for (size_t i = 0; i < count; ++i)
+                body(i);
+    };
+    out.names = keys.size();
+
+    const uint64_t generation = store.Generation();
+    const auto options = CaptureDdsPreparationOptions();
+    std::atomic<size_t> prepared{0}, failed{0};
+    parallel(keys.size(),
+             [&](size_t i)
+             {
+                 try
+                 {
+                     auto source = std::make_unique<TextureSourceDDS>();
+                     PacLevelMem mips[16];
+                     const bool loaded = source->InitFromReader(
+                         keys[i].c_str(), mips, 16,
+                         [&](const char* name, std::vector<uint8_t>& bytes)
+                         {
+                             const auto request = mount.MakeReadRequest(name);
+                             std::string error;
+                             return request && request->Read(bytes, error);
+                         },
+                         options);
+                     // PERF-BC3-PREP (Nsight ns-2): an `enfa|` leaf composite decodes to 32-bit and was
+                     // BC3-encoded at upload, on the main thread -- EncodeAuthoredBc3 was half of
+                     // EnsureUploaded inside far-model registration. Encode it here, off the main
+                     // thread, with the same encoder and the same authored mips; the upload takes it
+                     // (TakeCompositeBc3) and falls back to encoding itself when it is not there.
+                     if (loaded)
+                         if (const size_t reservation = source->CompositeBc3Reservation())
+                             source->PrepareCompositeBc3(reservation, nullptr);
+                     if (loaded && store.PutDdsPrepared(keys[i], std::move(source), options, generation))
+                         ++prepared;
+                     else
+                         ++failed;
+                 }
+                 catch (...)
+                 {
+                     ++failed;
+                 }
+             });
+    out.prepared = prepared.load();
+    out.failed = failed.load();
+    out.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+    return out;
+}
+
+NativeInstallTextureScope::NativeInstallTextureScope()
+{
+    render::PreparedTextureStore::SetInstallBatchTake(true);
+}
+
+NativeInstallTextureScope::~NativeInstallTextureScope()
+{
+    render::PreparedTextureStore::SetInstallBatchTake(false);
 }
 
 } // namespace Poseidon

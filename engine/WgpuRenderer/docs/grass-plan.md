@@ -173,3 +173,67 @@ this behaviour be *preserved* — rotor speed, altitude, inertia, multi-helicopt
 visible deformation, and matching shadow response — before any of it is improved.
 Treat the current behaviour as the baseline to beat, and capture it before changing
 it (`TEST-GRS-001`).
+
+## 5. Species variety (GRS-VAR, 2026-10-19)
+
+The owner's plan asked for 16 procedural atlas layers, a 4-bit species field and
+blade heads. Reviewed against the code first. Three facts changed the plan:
+
+1. **No atlas colour reaches OFP grass.** OFP worlds upload the 8-layer photo blade
+   atlas (`assets/grass/meadow-grass-blade-*.png`, all grass leaves), and
+   `grass_shade` on the OFP path uses the layer only as *luminance relief*
+   (`mix(base, tip, t) * relief`, relief clamped 0.75..1.25). The colour is one fixed
+   green ramp for every species. So the shipped "flower" species are green stems with
+   a different shape, and new atlas layers would change nothing on screen.
+2. **`packed.w` bit 11 is taken** (the mid-ring flag, `mid_coverage_width_scale`).
+   The proposed `count` in bits 9-11 would collide with it.
+3. **`LAYERS = 8` is also the native PlantMat ABI** (8 colour + 8 SatMapBlendMask
+   per set, `layer + 8`, `bset * 16`, `layers % LAYERS`). Raising it breaks the
+   Reforger upload check, and native mid ribbons sample `species` as a PlantMat layer,
+   so a species above 7 would read a mask layer.
+
+What ships instead:
+
+* **Phase 1 -- visible variety, no ABI change.** A 4-bit *variant* in `packed.w` bits
+  12-15 (bits 0-11 untouched, so the native run decode cannot change). `cs_place` /
+  `cs_place_mid` pick it from the coarse group field; native worlds write 0. The
+  fragment shader gets it as a flat varying and, on the OFP path only, colours the
+  blade from a small WGSL palette: flower heads (daisy, poppy, dandelion, cornflower,
+  buttercup, clover pink...) in the top of the blade, weed tints (nettle, thistle,
+  dock), grass variants (foxtail seed-head tips, straw, short bent). Zero VRAM, zero
+  texture, a few ALU; `WGR_GRASS_VARIETY=0` restores today's image.
+* **Phase 2 -- distribution and defaults.** Per-group palette weights + drift scale
+  in the Grass tab; flower default 0.08 -> ~0.12. Weeds are already 0.37, so the
+  original "raise to 15-20%" would have *lowered* them -- left as is. Dry bias where
+  `dry_patches` is high.
+* **Phase 3 -- real heads at no vertex cost.** A disc-flower clump's last one or two
+  blades (head share >= 0.5 gives two) are not drawn as blades: their twelve vertices
+  become one round disc, each of the six rows a chord of the circle, on the tip of
+  stem blade 0 or 1 under that stem's wind, crush and LOD fade, tilted 25-50 degrees
+  off the stem. Same vertex count, same index buffer, no discard (early-Z kept). The
+  colour, prepass and velocity passes share `ofp_near_vertex`; the shadow pass
+  collapses those blade slots (a 2-4 cm head is below a cascade texel). Adding head
+  slots to every clump instead would have cost every near instance ~6-11% more
+  vertex work in a vertex-bound pass. Spikes (foxtail, fescue, dock, thistle, yarrow)
+  and the whole mid ring keep painted tips.
+* **Phase 4** stays deferred (photo layers, GRS-GATE-1).
+
+### Measured (2026-10-19, Everon perf_field, eye level, 1920x1080, one run each)
+
+| | near verts | Grass prepass | Grass colour | Grass shadow |
+|---|---|---|---|---|
+| variety off | 1 887 120 | 2.665 ms | 4.437 ms | 0.047 ms |
+| shipped defaults | 1 887 120 | 2.910 ms | 4.232 ms | 0.044 ms |
+| flowers forced to 60% | 1 887 120 | 2.897 ms | 4.879 ms | 0.032 ms |
+
+Single runs; this box's run-to-run spread is ~1 ms, so the default's +0.04 ms over
+prepass + colour is unresolved, and the forced flower drift's +0.7 ms is an upper
+bound. Vertex counts are identical by construction. No VRAM was added.
+
+Native worlds: `variety_on()` is false when `native.x > 0` or `native2.w > 0.5`, and
+EngineWgpu clears `variety[0]` when the terrain has Enfusion surfaces, so every look
+id there is 0 and every new branch is skipped. Not captured on native Everon.
+
+Levers: `WGR_GRASS_VARIETY=0/1`, `WGR_GRASS_SPECIES_MIX=weed,flower`,
+`WGR_GRASS_HEAD_SHARE`, `WGR_GRASS_HEAD_BRIGHTNESS`, `WGR_GRASS_LOOK_DRIFT`; the Grass
+tab has the same under "Meadow variety".

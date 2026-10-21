@@ -32,6 +32,17 @@ class BinaryReader
     // backed by the remaining input before it drives a huge allocation.
     int remaining() const { return stream_.rest(); }
 
+    // The unread bytes in place, for a scanner that would otherwise read them one at a
+    // time; valid for remaining() bytes and only until the next read. consume() advances
+    // past `n` of them exactly as reading them would, and refuses (changing nothing) when
+    // fewer than `n` are left.
+    const char* peek() const { return stream_.act(); }
+    bool consume(int n)
+    {
+        const char* span = nullptr;
+        return stream_.TryReadDisjointSpan(n, nullptr, 0, span);
+    }
+
     template<typename T>
     typename std::enable_if<std::is_arithmetic<T>::value, T>::type
     read()

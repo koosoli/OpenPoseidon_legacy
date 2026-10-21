@@ -1,6 +1,7 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/MuzzleBurst.hpp> // BOOM-005
 #include <Poseidon/World/Weather/SandField.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
@@ -435,7 +436,17 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
         const WeaponType* weapon = nullptr;
         LODShapeWithShadow* pshape = nullptr;
         const AnimationAnimatedTexture* animFire = nullptr;
-        if (matIndex == type->_rpgMatIndex)
+        const int gearSlot = type->A3GearSlotOf(level, i);
+        if (gearSlot >= 0)
+        {
+            // Arma 3: the head and what the class wears. In first person neither the head
+            // nor the helmet is drawn in front of the eye.
+            const bool onHead = gearSlot == ManType::A3GearHead || gearSlot == ManType::A3GearHeadgear;
+            if (onHead && (!_showHead || level == type->_insideView))
+                continue;
+            pshape = gearSlot == ManType::A3GearHead ? proxy.obj->GetShape() : type->_a3Gear[gearSlot].GetRef();
+        }
+        else if (matIndex == type->_rpgMatIndex)
         {
             if (!_showSecondaryWeapon)
             {
@@ -642,9 +653,21 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
             continue;
         }
 
+        if (gearSlot > ManType::A3GearHead)
+        {
+            // the colours of this class's item on a model several items share
+            for (const ManType::A3GearColour& colour : type->_a3GearColours[gearSlot])
+            {
+                colour.selection.Unhide(pshape, pLevel);
+                colour.selection.SetTexture(pshape, pLevel, colour.texture);
+            }
+        }
+
         if (animFire)
         {
-            if (weapon == _mGunFireWeapon && (_mGunFireFrames > 0 || Glob.uiTime < _mGunFireTime + 0.05f))
+            // BOOM-005: with the volumetric flash on, the retail flash sheet stays hidden
+            if (weapon == _mGunFireWeapon && (_mGunFireFrames > 0 || Glob.uiTime < _mGunFireTime + 0.05f) &&
+                !Poseidon::render::VolumetricMuzzleFlashEnabled())
             {
                 animFire->Unhide(pshape, pLevel);
                 animFire->SetPhase(pshape, pLevel, _mGunFirePhase);
@@ -1466,12 +1489,16 @@ void Man::PrepareCorrectedPose(int level, Matrix4Array& matrix) const
                                           headRes.Size());
         }
 
-        if (type->_aimingAxisPoint >= 0 && !_gunTransIdent)
+        // The collision LOD does not lean (see _gunTransNoLean); every other LOD, the fire
+        // geometry included, does.
+        const bool collisionLod = level == _shape->FindGeometryLevel();
+        const Matrix4& gunTrans = collisionLod ? _gunTransNoLean : _gunTrans;
+        if (type->_aimingAxisPoint >= 0 && !(collisionLod ? _gunTransNoLeanIdent : _gunTransIdent))
         {
             BLEND_ANIM(aiming);
             const BlendAnimSelections& aimingRes = GetAiming(aiming);
 
-            AnimationRT::CombineTransform(type->GetWeights(), _shape, memory, matrix, _gunTrans, aimingRes.Data(),
+            AnimationRT::CombineTransform(type->GetWeights(), _shape, memory, matrix, gunTrans, aimingRes.Data(),
                                           aimingRes.Size());
         }
 
@@ -1632,11 +1659,14 @@ MovesType::MovesType(const MovesTypeName& name)
             anim->SetLooped((*entry) >> "looped");
         }
     }
-    // The weights depend only on the skeleton's bone list, which the moves above have now
-    // completed, so one Prepare after the loop gives what the last per-move Prepare gave.
-    // Preparing after every move re-weighted every LOD hundreds of times: with Arma 2's
-    // ~2000 moves and 132-bone soldiers that alone took over a minute per soldier model on
-    // the laptop, and the stall watchdog ended the test before the mission started.
+    // PERF (2026-10-14): once, after the loop. This ran inside it, once per animated move --
+    // hundreds per soldier type at mission start, each a case-insensitive search of every
+    // selection for every bone on every level (~half of a ~1 s MovesType build). Prepare
+    // re-Inits the weights from scratch, so only the last call ever counted; the skeleton
+    // grows as each move's RTM loads (Skeleton::NewBone), and the last call already came after
+    // the last load. Nothing in the loop reads the weights. Same final weights, one pass.
+    // (MrDudeX-arma1 made the same fix independently: with Arma 2's ~2000 moves and 132-bone
+    // soldiers the per-move Prepare took over a minute per soldier model on the laptop.)
     if (anyAnimation)
         _name.motionType->GetSkeleton()->Prepare(shape, GetWeights());
 
@@ -1798,6 +1828,18 @@ MoveInfo::MoveInfo(MotionType* motion, const ParamEntry& entry)
     _soundOverride = entry >> "soundOverride"; // default - no override
     _soundEdge1 = entry >> "soundEdge1";       // default - no override
     _soundEdge2 = entry >> "soundEdge2";       // default - no override
+    // Arma 1 and later write the step times as one array, soundEdge[] = {0.5, 1} (Arma 3
+    // walks: four entries, one per footfall of the cycle). With only soundEdge1/2 read, an
+    // Arma move had both at 0 and no soldier ever made a step sound. The first two edges
+    // are what the CWA step logic plays.
+    if (!entry.FindEntry("soundEdge1"))
+    {
+        if (const ParamEntry* edges = entry.FindEntry("soundEdge"); edges && edges->IsArray() && edges->GetSize() > 0)
+        {
+            _soundEdge1 = (*edges)[0];
+            _soundEdge2 = edges->GetSize() > 1 ? (float)(*edges)[1] : _soundEdge1;
+        }
+    }
 
     _relSpeedMin = entry >> "relSpeedMin";
     _relSpeedMax = entry >> "relSpeedMax";
@@ -1986,6 +2028,75 @@ void ManType::InitShape()
             }
             _nvGogglesProxyIndex[l] = p;
             break;
+        }
+    }
+
+    // Arma 3 gear: the models the class wears (see _a3Gear) and, per LOD, which of the
+    // man's placeholder proxies draws which. Nothing for any other man.
+    const bool arma3 = Arma1Compat::Active() && Arma1Compat::Generation() >= 3;
+    static const char* const gearKeys[A3GearN] = {nullptr, "a3Headgear", "a3Vest", "a3Backpack"};
+    for (int g = 0; g < A3GearN; g++)
+    {
+        _a3Gear[g] = nullptr;
+        _a3GearColours[g].clear();
+        const ParamEntry* entry = arma3 && gearKeys[g] ? par.FindEntry(gearKeys[g]) : nullptr;
+        if (!entry || entry->IsClass() || entry->IsArray())
+            continue;
+        const RStringB model = *entry;
+        if (model.GetLength() == 0)
+            continue;
+        _a3Gear[g] = Shapes.New(::GetShapeName(model), false, true);
+        if (!_a3Gear[g])
+            continue;
+        _a3Gear[g]->SetAutoCenter(false);
+        _a3Gear[g]->CalculateMinMax();
+        const ParamEntry* sels = par.FindEntry(RString(gearKeys[g]) + RString("Selections"));
+        const ParamEntry* texs = par.FindEntry(RString(gearKeys[g]) + RString("Textures"));
+        if (!sels || !sels->IsArray() || !texs || !texs->IsArray())
+            continue;
+        for (int i = 0; i < sels->GetSize() && i < texs->GetSize(); i++)
+        {
+            RString path = (RStringB)(*texs)[i];
+            const char* p = path.Data();
+            if (*p == '\\')
+                p++;
+            RString lower = p;
+            lower.Lower();
+            Ref<Texture> texture = GlobLoadTexture(lower);
+            if (!texture)
+                continue;
+            A3GearColour& colour = _a3GearColours[g].emplace_back();
+            colour.selection.Init(_a3Gear[g], (RStringB)(*sels)[i], nullptr);
+            colour.texture = texture;
+        }
+    }
+    for (int l = 0; l < MAX_LOD_LEVELS; l++)
+    {
+        _a3GearProxySlot[l].clear();
+        Shape* shape = arma3 && l < _shape->NLevels() ? _shape->Level(l) : nullptr;
+        if (!shape)
+            continue;
+        _a3GearProxySlot[l].assign(shape->NProxies(), -1);
+        for (int p = 0; p < shape->NProxies(); p++)
+        {
+            std::string name = (const char*)shape->Proxy(p).name;
+            for (char& c : name)
+                c = c == '/' ? '\\' : static_cast<char>(tolower(static_cast<unsigned char>(c)));
+            const size_t slash = name.find_last_of('\\');
+            const std::string leaf = slash == std::string::npos ? name : name.substr(slash + 1);
+            const bool gearProxy = name.find("\\proxies\\") != std::string::npos;
+            int slot = -1;
+            if (name.find("\\heads\\") != std::string::npos)
+                slot = A3GearHead;
+            else if (gearProxy && leaf == "headgear")
+                slot = A3GearHeadgear;
+            else if (gearProxy && leaf == "equipment")
+                slot = A3GearVest;
+            else if (gearProxy && leaf == "backpack")
+                slot = A3GearBackpack;
+            if (slot > A3GearHead && !_a3Gear[slot])
+                slot = -1;
+            _a3GearProxySlot[l][p] = static_cast<signed char>(slot);
         }
     }
 

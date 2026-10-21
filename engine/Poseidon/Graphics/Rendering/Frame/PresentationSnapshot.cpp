@@ -243,7 +243,7 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
         }
     }
 
-    snap.timeSeconds = Glob.time.toFloat();
+    snap.timeSeconds = PresentationClockSeconds(); // between ticks, like the objects (REN-INTERP-001)
     snap.timeOfDay = Glob.clock.GetTimeOfDay();
 
     if (GLandscape)
@@ -311,7 +311,7 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
             if (dx * dx + dz * dz < farthestD2)
                 snap.rotorSources[farthest] = source;
         };
-        const Helicopter* cameraHeli = dynamic_cast<const Helicopter*>(cameraOn);
+        const Helicopter* cameraHeli = cameraOn ? cameraOn->AsHelicopter() : nullptr;
         if (cameraHeli)
         {
             addRotor(cameraHeli);
@@ -320,7 +320,8 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
         }
         for (int i = 0; i < GWorld->NVehicles(); ++i)
         {
-            const Helicopter* helicopter = dynamic_cast<const Helicopter*>(GWorld->GetVehicle(i));
+            const Entity* vehicle = GWorld->GetVehicle(i);
+            const Helicopter* helicopter = vehicle ? vehicle->AsHelicopter() : nullptr;
             if (helicopter && helicopter != cameraHeli)
                 addRotor(helicopter);
         }
@@ -383,6 +384,22 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
                 boat.velY = vel.Y();
                 boat.originY = pos.Y() + mn.Y() + designDraft;
                 boat.freeboard = std::clamp(pos.Y() + mx.Y() - boat.originY, 0.3f, std::max(0.3f, 0.3f * boat.halfLength));
+                // A hull that describes itself (Tidewater's boat): its real waterline origin and outline, and the
+                // mask that keeps the drawn sea out of it -- a 0.35 m cockpit sole is under every swell's crest.
+                const ShipType::TidewaterHull& own = ship->Type()->GetTidewaterHull();
+                if (own.valid && own.waterMask)
+                {
+                    const Vector3 origin = pose.FastTransform(own.origin);
+                    boat.x = origin.X();
+                    boat.z = origin.Z();
+                    boat.originY = origin.Y();
+                    boat.halfBeam = own.maskHalfBeam;
+                    boat.waterMask = true;
+                    boat.maskStern = own.maskStern;
+                    boat.maskBow = own.maskBow;
+                    boat.maskSheerAft = own.maskSheerAft;
+                    boat.maskSheerBow = own.maskSheerBow;
+                }
                 {
                     // x axis = up x forward, written out (the same formula as boat_spray.rs)
                     const float ax = up.Y() * fwd.Z() - up.Z() * fwd.Y();
@@ -415,9 +432,12 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
                     snap.wakeBoats[farthest] = boat;
             };
             for (int i = 0; i < GWorld->NVehicles(); ++i)
-                addBoat(dynamic_cast<const Ship*>(GWorld->GetVehicle(i)));
+            {
+                const Entity* vehicle = GWorld->GetVehicle(i);
+                addBoat(vehicle ? vehicle->AsShip() : nullptr);
+            }
             // the occupied boat is not always in the vehicle list (see the rotor walk above)
-            const Ship* cameraShip = dynamic_cast<const Ship*>(cameraOn);
+            const Ship* cameraShip = cameraOn ? cameraOn->AsShip() : nullptr;
             bool listed = false;
             for (int k = 0; k < snap.wakeBoatCount; ++k)
                 listed |= cameraShip && snap.wakeBoats[k].id ==

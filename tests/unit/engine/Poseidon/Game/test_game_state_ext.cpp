@@ -18,6 +18,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <initializer_list>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -27,6 +29,9 @@
 #include <cstdio>
 #include <iterator>
 #include <system_error>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
@@ -57,6 +62,27 @@ GameValue ClassOpen(const GameState* state, GameValuePar oper1, GameValuePar ope
 GameValue ClassAdd(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ValueGet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ValueAdd(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseNew(const GameState* state);
+GameValue DatabaseLoad(const GameState* state, GameValuePar oper1);
+GameValue DatabaseGet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseSet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseDelete(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseExists(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseKeys(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseSave(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListPush(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListPushMany(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListPop(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListGet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListSet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListRemove(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListSize(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashSet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashSetMany(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashGet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashDelete(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashExists(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashKeys(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 extern bool GUseFileBanks;
 
 namespace
@@ -227,6 +253,12 @@ GameFileType ExtractFile(GameValuePar value)
     return static_cast<GameDataFile*>(value.GetData())->GetFile();
 }
 
+GameDatabaseType ExtractDatabase(GameValuePar value)
+{
+    REQUIRE(value.GetType() == GameDatabase);
+    return static_cast<GameDataDatabase*>(value.GetData())->GetDatabase();
+}
+
 std::filesystem::path ConfigStoragePath(const char* filename)
 {
     return std::filesystem::path(static_cast<const char*>(GetUserDirectory())) / "Config" / filename;
@@ -288,6 +320,7 @@ TEST_CASE("GameType constants have expected values", "[game][gameStateExt]")
     REQUIRE(GameSide == GameType(0x1000));
     REQUIRE(GameGroup == GameType(0x2000));
     REQUIRE(GameFile == GameType(0x4000));
+    REQUIRE(GameDatabase == GameType(0x8000));
 }
 
 TEST_CASE("GameType constants are distinct", "[game][gameStateExt]")
@@ -298,6 +331,22 @@ TEST_CASE("GameType constants are distinct", "[game][gameStateExt]")
     REQUIRE(GameOrient != GameSide);
     REQUIRE(GameSide != GameGroup);
     REQUIRE(GameGroup != GameFile);
+    REQUIRE(GameFile != GameDatabase);
+}
+
+TEST_CASE("GameDatabaseType default state", "[game][gameStateExt][database]")
+{
+    GameDatabaseType database;
+    REQUIRE(database.GetIndex() == -1);
+}
+
+TEST_CASE("GameDataDatabase factory creates database-typed data", "[game][gameStateExt][database]")
+{
+    GameData* data = CreateGameDataDatabase();
+    REQUIRE(data != nullptr);
+    REQUIRE(data->GetType() == GameDatabase);
+    REQUIRE(std::string(data->GetTypeName()) == "database");
+    delete data;
 }
 
 TEST_CASE("GameFileType default state", "[game][gameStateExt]")
@@ -332,16 +381,25 @@ TEST_CASE("VBS-derived functions remain registered in GGameState", "[game][gameS
     REQUIRE(ContainsName(nulars, "newConfig"));
     REQUIRE_FALSE(ContainsName(nulars, "endGame"));
     REQUIRE_FALSE(ContainsName(nulars, "triEndGame"));
+    REQUIRE(ContainsName(nulars, "dbNew"));
     REQUIRE(ContainsName(functions, "loadConfig"));
+    REQUIRE(ContainsName(functions, "dbLoad"));
     REQUIRE(ContainsName(functions, "VBS_addHeader"));
     REQUIRE(ContainsName(functions, "VBS_addEvent"));
     REQUIRE(ContainsName(functions, "VBS_addFooter"));
     REQUIRE(ContainsName(functions, "VBS_kills"));
     REQUIRE(ContainsName(functions, "VBS_killed"));
     REQUIRE(ContainsName(functions, "VBS_injuries"));
+    REQUIRE(ContainsName(functions, "getUnitLoadout"));
     REQUIRE(ContainsName(functions, "createGuardedPoint"));
     REQUIRE(ContainsName(functions, "deleteWaypoint"));
     REQUIRE(ContainsName(operators, "saveConfig"));
+    REQUIRE(ContainsName(operators, "dbGet"));
+    REQUIRE(ContainsName(operators, "dbSet"));
+    REQUIRE(ContainsName(operators, "dbDelete"));
+    REQUIRE(ContainsName(operators, "dbExists"));
+    REQUIRE(ContainsName(operators, "dbKeys"));
+    REQUIRE(ContainsName(operators, "dbSave"));
     REQUIRE(ContainsName(operators, "openClass"));
     REQUIRE(ContainsName(operators, "addClass"));
     REQUIRE(ContainsName(operators, "getValue"));
@@ -349,6 +407,7 @@ TEST_CASE("VBS-derived functions remain registered in GGameState", "[game][gameS
     REQUIRE(ContainsName(operators, "triggerAttachObject"));
     REQUIRE(ContainsName(operators, "triggerAttachVehicle"));
     REQUIRE(ContainsName(operators, "setEffectCondition"));
+    REQUIRE(ContainsName(operators, "setUnitLoadout"));
     REQUIRE(ContainsName(operators, "addWaypoint"));
 }
 
@@ -659,6 +718,362 @@ TEST_CASE("FILE config commands can create mutate save and reload config trees",
     REQUIRE((float)missing == 7.0f);
 
     std::filesystem::remove(path, ec);
+}
+
+TEST_CASE("DATABASE commands persist mutable nested data", "[game][gameStateExt][database]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+
+    const char* filename = "unit_test_database_commands.cfg";
+    const auto path = ConfigStoragePath(filename);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+
+    GameValue database = DatabaseNew(&GGameState);
+    REQUIRE(ExtractDatabase(database).GetIndex() >= 0);
+
+    GameValue setName = DatabaseSet(&GGameState, database, MakeConfigAssignment(GGameState, "players.UID123.name",
+                                                                                   GameValue(RString("Simi"))));
+    REQUIRE(setName.GetType() == GameBool);
+    REQUIRE((bool)setName);
+    REQUIRE_FALSE((bool)DatabaseSet(&GGameState, database, MakeConfigAssignment(GGameState, "", GameValue(1.0f))));
+    REQUIRE((bool)DatabaseSet(&GGameState, database, MakeConfigAssignment(GGameState, "players.UID123.score",
+                                                                            GameValue(1250.0f))));
+
+    GameValue inventory = GGameState.CreateGameValue(GameArray);
+    GameArrayType& inventoryItems = inventory;
+    inventoryItems.Resize(3);
+    inventoryItems[0] = RString("rifle");
+    inventoryItems[1] = RString("medkit");
+    inventoryItems[2] = RString("radio");
+    DatabaseSet(&GGameState, database, MakeConfigAssignment(GGameState, "players.UID123.inventory", inventory));
+
+    GameValue name = DatabaseGet(&GGameState, database, MakeConfigAssignment(GGameState, "players.UID123.name",
+                                                                               GameValue(RString("missing"))));
+    REQUIRE(name.GetType() == GameString);
+    REQUIRE(std::string((const char*)(RString)name) == "Simi");
+
+    GameValue score = DatabaseGet(&GGameState, database, MakeConfigAssignment(GGameState, "players.UID123.score",
+                                                                                GameValue(0.0f)));
+    REQUIRE(score.GetType() == GameScalar);
+    REQUIRE((float)score == 1250.0f);
+
+    REQUIRE((bool)DatabaseExists(&GGameState, database, RString("players.UID123.inventory")));
+
+    GameValue keys = DatabaseKeys(&GGameState, database, RString("players.UID123"));
+    REQUIRE(keys.GetType() == GameArray);
+    const GameArrayType& keyItems = keys;
+    REQUIRE(keyItems.Size() == 3);
+
+    GameValue firstSave = DatabaseSave(&GGameState, database, RString(filename));
+    REQUIRE(firstSave.GetType() == GameBool);
+    REQUIRE((bool)firstSave);
+    REQUIRE(std::filesystem::exists(path));
+
+    GameValue loaded = DatabaseLoad(&GGameState, RString(filename));
+    REQUIRE(ExtractDatabase(loaded).GetIndex() >= 0);
+
+    GameValue loadedInventory = DatabaseGet(&GGameState, loaded,
+                                            MakeConfigAssignment(GGameState, "players.UID123.inventory",
+                                                                 GameValue(GGameState.CreateGameValue(GameArray))));
+    REQUIRE(loadedInventory.GetType() == GameArray);
+    const GameArrayType& loadedItems = loadedInventory;
+    REQUIRE(loadedItems.Size() == 3);
+    REQUIRE(std::string((const char*)(RString)loadedItems[0]) == "rifle");
+    REQUIRE(std::string((const char*)(RString)loadedItems[1]) == "medkit");
+    REQUIRE(std::string((const char*)(RString)loadedItems[2]) == "radio");
+
+    REQUIRE((bool)DatabaseDelete(&GGameState, loaded, RString("players.UID123.score")));
+    REQUIRE_FALSE((bool)DatabaseDelete(&GGameState, loaded, RString("players.UID123.score")));
+    REQUIRE(!(bool)DatabaseExists(&GGameState, loaded, RString("players.UID123.score")));
+
+    GameValue missing = DatabaseGet(&GGameState, loaded,
+                                    MakeConfigAssignment(GGameState, "players.UID123.score", GameValue(-1.0f)));
+    REQUIRE(missing.GetType() == GameScalar);
+    REQUIRE((float)missing == -1.0f);
+
+    DatabaseSet(&GGameState, loaded, MakeConfigAssignment(GGameState, "players.UID123.score",
+                                                           GameValue(4321.0f)));
+    GameValue overwriteSave = DatabaseSave(&GGameState, loaded, RString(filename));
+    REQUIRE(overwriteSave.GetType() == GameBool);
+    REQUIRE((bool)overwriteSave);
+
+    GameValue overwritten = DatabaseLoad(&GGameState, RString(filename));
+    GameValue overwrittenScore = DatabaseGet(&GGameState, overwritten,
+                                              MakeConfigAssignment(GGameState, "players.UID123.score",
+                                                                   GameValue(0.0f)));
+    REQUIRE(overwrittenScore.GetType() == GameScalar);
+    REQUIRE((float)overwrittenScore == 4321.0f);
+
+    int loadedIndex = -1;
+    for (int i = 0; i < 16; ++i)
+    {
+        GameValue snapshot = DatabaseLoad(&GGameState, RString(filename));
+        const int index = ExtractDatabase(snapshot).GetIndex();
+        REQUIRE(index >= 0);
+        if (loadedIndex >= 0)
+            REQUIRE(index == loadedIndex);
+        loadedIndex = index;
+        REQUIRE((float)DatabaseGet(&GGameState, snapshot,
+                                   MakeConfigAssignment(GGameState, "players.UID123.score", GameValue(-1.0f))) == 4321.0f);
+    }
+
+    std::filesystem::remove(path, ec);
+}
+
+TEST_CASE("DATABASE slots are reused only after all handles are released", "[game][gameStateExt][database]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+
+    GameValue database = DatabaseNew(&GGameState);
+    const int index = ExtractDatabase(database).GetIndex();
+    REQUIRE((bool)DatabaseSet(&GGameState, database,
+                              MakeConfigAssignment(GGameState, "nested.score", GameValue(42.0f))));
+    GameValue alias = database;
+    GameValue clone(database.GetData()->Clone());
+    GameDatabaseType handle = ExtractDatabase(database);
+    GameDatabaseType assigned;
+    assigned = handle;
+    assigned = assigned;
+    database = GameValue();
+    alias = GameValue();
+    handle.SetIndex(-1);
+
+    GameValue other = DatabaseNew(&GGameState);
+    REQUIRE(ExtractDatabase(other).GetIndex() != index);
+    REQUIRE((float)DatabaseGet(&GGameState, clone,
+                               MakeConfigAssignment(GGameState, "nested.score", GameValue(-1.0f))) == 42.0f);
+    clone = GameValue();
+    GameValue fromHandle = GameValueExt(assigned);
+    REQUIRE((bool)DatabaseExists(&GGameState, fromHandle, RString("nested.score")));
+    fromHandle = GameValue();
+    assigned.SetIndex(-1);
+
+    for (int i = 0; i < 64; ++i)
+    {
+        GameValue reused = DatabaseNew(&GGameState);
+        REQUIRE(ExtractDatabase(reused).GetIndex() == index);
+        REQUIRE_FALSE((bool)DatabaseExists(&GGameState, reused, RString("nested.score")));
+        REQUIRE((bool)DatabaseSet(&GGameState, reused,
+                                  MakeConfigAssignment(GGameState, "nested.score", GameValue(99.0f))));
+        REQUIRE_FALSE((bool)DatabaseExists(&GGameState, other, RString("nested.score")));
+    }
+}
+
+TEST_CASE("DATABASE handle assignment releases only the replaced database", "[game][gameStateExt][database]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+
+    GameDatabaseType replaced = ExtractDatabase(DatabaseNew(&GGameState));
+    const int releasedIndex = replaced.GetIndex();
+    GameValue survivor = DatabaseNew(&GGameState);
+    REQUIRE((bool)DatabaseSet(&GGameState, survivor,
+                              MakeConfigAssignment(GGameState, "score", GameValue(7.0f))));
+    replaced = ExtractDatabase(survivor);
+    survivor = GameValue();
+    GameValue reused = DatabaseNew(&GGameState);
+    REQUIRE(ExtractDatabase(reused).GetIndex() == releasedIndex);
+    REQUIRE(ExtractDatabase(reused).GetIndex() != replaced.GetIndex());
+    REQUIRE((float)DatabaseGet(&GGameState, GameValueExt(replaced),
+                               MakeConfigAssignment(GGameState, "score", GameValue(-1.0f))) == 7.0f);
+}
+
+TEST_CASE("DATABASE save preserves a directory at the destination", "[game][gameStateExt][database]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+
+    const char* filename = "unit_test_database_save_directory.db";
+    const auto path = ConfigStoragePath(filename);
+    REQUIRE(std::filesystem::create_directories(path));
+    struct Cleanup
+    {
+        std::filesystem::path path;
+        ~Cleanup() { std::error_code ignored; std::filesystem::remove(path, ignored); }
+    } cleanup{path};
+
+    GameValue database = DatabaseNew(&GGameState);
+    REQUIRE_FALSE((bool)DatabaseSave(&GGameState, database, RString(filename)));
+    REQUIRE(std::filesystem::is_directory(path));
+    REQUIRE_FALSE(std::filesystem::exists(path.string() + ".tmp"));
+}
+
+#ifdef _WIN32
+TEST_CASE("DATABASE failed replacement preserves the previous saved data", "[game][gameStateExt][database]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+
+    const char* filename = "unit_test_database_save_locked.db";
+    const auto path = ConfigStoragePath(filename);
+    struct Cleanup
+    {
+        std::filesystem::path path;
+        HANDLE handle = INVALID_HANDLE_VALUE;
+        ~Cleanup()
+        {
+            if (handle != INVALID_HANDLE_VALUE)
+                ::CloseHandle(handle);
+            std::error_code ignored;
+            std::filesystem::remove(path, ignored);
+        }
+    } cleanup{path};
+
+    GameValue database = DatabaseNew(&GGameState);
+    REQUIRE((bool)DatabaseSet(&GGameState, database, MakeConfigAssignment(GGameState, "score", GameValue(10.0f))));
+    REQUIRE((bool)DatabaseSave(&GGameState, database, RString(filename)));
+    // Permit reads but deny replacement while the existing database is open.
+    cleanup.handle = ::CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                   FILE_ATTRIBUTE_NORMAL, nullptr);
+    REQUIRE(cleanup.handle != INVALID_HANDLE_VALUE);
+    REQUIRE((bool)DatabaseSet(&GGameState, database, MakeConfigAssignment(GGameState, "score", GameValue(20.0f))));
+    REQUIRE_FALSE((bool)DatabaseSave(&GGameState, database, RString(filename)));
+    REQUIRE_FALSE(std::filesystem::exists(path.string() + ".tmp"));
+
+    GameValue loaded = DatabaseLoad(&GGameState, RString(filename));
+    REQUIRE(ExtractDatabase(loaded).GetIndex() >= 0);
+    REQUIRE((float)DatabaseGet(&GGameState, loaded,
+                               MakeConfigAssignment(GGameState, "score", GameValue(-1.0f))) == 10.0f);
+
+    ::CloseHandle(cleanup.handle);
+    cleanup.handle = INVALID_HANDLE_VALUE;
+    REQUIRE((bool)DatabaseSave(&GGameState, database, RString(filename)));
+    loaded = DatabaseLoad(&GGameState, RString(filename));
+    REQUIRE((float)DatabaseGet(&GGameState, loaded,
+                               MakeConfigAssignment(GGameState, "score", GameValue(-1.0f))) == 20.0f);
+}
+#endif
+
+TEST_CASE("DATABASE list indices reject invalid values without changing data", "[game][gameStateExt][database]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+    auto args = [](std::initializer_list<GameValue> values) {
+        GameValue result = GGameState.CreateGameValue(GameArray);
+        GameArrayType& array = result;
+        for (const GameValue& value : values)
+            array.Add(value);
+        return result;
+    };
+    GameValue database = DatabaseNew(&GGameState);
+    REQUIRE((bool)DatabaseSet(&GGameState, database,
+                              args({RString("items"), args({GameValue(10.0f), GameValue(20.0f)})})));
+    REQUIRE((bool)DatabaseSet(&GGameState, database,
+                              args({RString("empty"), args({})})));
+    REQUIRE((bool)DatabaseSet(&GGameState, database,
+                              args({RString("scalar"), GameValue(30.0f)})));
+
+    const GameValue invalidIndices[] = {
+        GameValue(-0.5f), GameValue(0.5f), GameValue(1.5f), GameValue(-1.0f), GameValue(2.0f),
+        GameValue(std::numeric_limits<float>::max()), GameValue(std::numeric_limits<float>::lowest()),
+        GameValue(std::numeric_limits<float>::infinity()), GameValue(-std::numeric_limits<float>::infinity()),
+        GameValue(std::numeric_limits<float>::quiet_NaN()), GameValue(std::numeric_limits<float>::denorm_min()),
+        GameValue(2147483648.0f), GameValue(18446744073709551616.0f),
+        GameValue(RString("0")), GameValue(true), args({})
+    };
+    for (const GameValue& index : invalidIndices)
+    {
+        REQUIRE((float)DatabaseListGet(&GGameState, database,
+                                       args({RString("items"), index, GameValue(-7.0f)})) == -7.0f);
+        REQUIRE_FALSE((bool)DatabaseListSet(&GGameState, database,
+                                            args({RString("items"), index, GameValue(99.0f)})));
+        REQUIRE_FALSE((bool)DatabaseListRemove(&GGameState, database, args({RString("items"), index})));
+        REQUIRE((float)DatabaseListPop(&GGameState, database,
+                                       args({RString("items"), index, GameValue(-7.0f)})) == -7.0f);
+        REQUIRE((float)DatabaseListSize(&GGameState, database, RString("items")) == 2.0f);
+        REQUIRE((float)DatabaseListGet(&GGameState, database,
+                                       args({RString("items"), GameValue(0.0f)})) == 10.0f);
+        REQUIRE((float)DatabaseListGet(&GGameState, database,
+                                       args({RString("items"), GameValue(1.0f)})) == 20.0f);
+    }
+    for (const char* key : {"empty", "missing", "scalar"})
+    {
+        REQUIRE((float)DatabaseListGet(&GGameState, database,
+                                       args({RString(key), GameValue(0.0f), GameValue(-7.0f)})) == -7.0f);
+        REQUIRE_FALSE((bool)DatabaseListSet(&GGameState, database,
+                                            args({RString(key), GameValue(0.0f), GameValue(99.0f)})));
+        REQUIRE_FALSE((bool)DatabaseListRemove(&GGameState, database, args({RString(key), GameValue(0.0f)})));
+        REQUIRE((float)DatabaseListPop(&GGameState, database,
+                                       args({RString(key), GameValue(0.0f), GameValue(-7.0f)})) == -7.0f);
+    }
+    REQUIRE((bool)DatabaseListSet(&GGameState, database,
+                                  args({RString("items"), GameValue(-0.0f), GameValue(11.0f)})));
+    REQUIRE((float)DatabaseListPop(&GGameState, database,
+                                   args({RString("items"), GameValue(1.0f)})) == 20.0f);
+    REQUIRE((float)DatabaseListPop(&GGameState, database, args({RString("items")})) == 11.0f);
+    REQUIRE((float)DatabaseListSize(&GGameState, database, RString("items")) == 0.0f);
+}
+
+TEST_CASE("DATABASE supports mutable lists and hashes", "[game][gameStateExt][database]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+
+    auto args = [](std::initializer_list<GameValue> values) {
+        GameValue result = GGameState.CreateGameValue(GameArray);
+        GameArrayType& array = result;
+        array.Resize((int)values.size());
+        int index = 0;
+        for (const GameValue& value : values)
+            array[index++] = value;
+        return result;
+    };
+
+    GameValue database = DatabaseNew(&GGameState);
+
+    REQUIRE((float)DatabaseListPush(&GGameState, database, args({RString("inventory"), RString("rifle")})) == 1.0f);
+    REQUIRE((float)DatabaseListPush(&GGameState, database, args({RString("inventory"), RString("medkit")})) == 2.0f);
+    GameValue batchItems = GGameState.CreateGameValue(GameArray);
+    GameArrayType& batchArray = batchItems;
+    batchArray.Resize(2);
+    batchArray[0] = RString("radio");
+    batchArray[1] = RString("map");
+    REQUIRE((float)DatabaseListPushMany(&GGameState, database,
+                                        args({RString("batchInventory"), batchItems})) == 2.0f);
+    REQUIRE((float)DatabaseListSize(&GGameState, database, RString("inventory")) == 2.0f);
+    REQUIRE((float)DatabaseListSize(&GGameState, database, RString("batchInventory")) == 2.0f);
+
+    GameValue listItem = DatabaseListGet(&GGameState, database,
+                                         args({RString("inventory"), GameValue(1.0f), RString("missing")}));
+    REQUIRE(std::string((const char*)(RString)listItem) == "medkit");
+
+    REQUIRE((bool)DatabaseListSet(&GGameState, database,
+                                  args({RString("inventory"), GameValue(1.0f), RString("bandage")})));
+    REQUIRE((bool)DatabaseListRemove(&GGameState, database,
+                                     args({RString("inventory"), GameValue(0.0f)})));
+    REQUIRE((float)DatabaseListSize(&GGameState, database, RString("inventory")) == 1.0f);
+
+    GameValue popped = DatabaseListPop(&GGameState, database, args({RString("inventory")}));
+    REQUIRE(std::string((const char*)(RString)popped) == "bandage");
+    REQUIRE((float)DatabaseListSize(&GGameState, database, RString("inventory")) == 0.0f);
+
+    REQUIRE((bool)DatabaseHashSet(&GGameState, database,
+                                  args({RString("stats"), RString("score"), GameValue(100.0f)})));
+    REQUIRE((bool)DatabaseHashSet(&GGameState, database,
+                                  args({RString("stats"), RString("rank"), RString("captain")})));
+    GameValue hashPairs = GGameState.CreateGameValue(GameArray);
+    GameArrayType& hashPairArray = hashPairs;
+    hashPairArray.Resize(2);
+    hashPairArray[0] = args({RString("missions"), GameValue(12.0f)});
+    hashPairArray[1] = args({RString("faction"), RString("NATO")});
+    REQUIRE((bool)DatabaseHashSetMany(&GGameState, database,
+                                      args({RString("stats"), hashPairs})));
+    REQUIRE((bool)DatabaseHashExists(&GGameState, database,
+                                     args({RString("stats"), RString("score")})));
+
+    GameValue hashScore = DatabaseHashGet(&GGameState, database,
+                                          args({RString("stats"), RString("score"), GameValue(0.0f)}));
+    REQUIRE((float)hashScore == 100.0f);
+
+    GameValue hashKeys = DatabaseHashKeys(&GGameState, database, RString("stats"));
+    REQUIRE(((const GameArrayType&)hashKeys).Size() == 4);
+    REQUIRE((bool)DatabaseHashDelete(&GGameState, database,
+                                     args({RString("stats"), RString("score")})));
+    REQUIRE_FALSE((bool)DatabaseHashExists(&GGameState, database,
+                                           args({RString("stats"), RString("score")})));
 }
 
 TEST_CASE("Advanced product PBO exposes metadata and config payload", "[game][gameStateExt][pbo][addons]")

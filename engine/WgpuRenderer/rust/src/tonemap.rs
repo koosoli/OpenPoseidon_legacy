@@ -19,6 +19,8 @@ pub struct Tonemap {
     probe_source: Option<wgpu::TextureView>,
     probe_scale: Option<wgpu::TextureView>,
     probe_epoch: u64,
+    // BOOM-006: bound at 6 when there is no auto-exposure to count clipping for
+    clip_dummy: wgpu::Buffer,
 }
 
 impl Tonemap {
@@ -82,6 +84,17 @@ impl Tonemap {
                         sample_type: wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
+                    },
+                    count: None,
+                },
+                // BOOM-006: the clip counters the auto-exposure reads (exposure::CLIP_SLOTS x 2)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
                     count: None,
                 },
@@ -179,7 +192,14 @@ impl Tonemap {
 
         let probe = crate::post_optics_probe::enabled()
             .then(|| crate::post_optics_probe::Gpu::new(device, &shader, &layout, &constants));
+        let clip_dummy = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_tonemap_clip_dummy"),
+            size: (2 * crate::exposure::CLIP_SLOTS * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
         Self {
+            clip_dummy,
             pipeline,
             layout,
             sampler,
@@ -201,6 +221,7 @@ impl Tonemap {
         hdr_view: &wgpu::TextureView,
         bloom_view: &wgpu::TextureView,
         exposure_view: &wgpu::TextureView,
+        clip_counts: Option<&wgpu::Buffer>,
     ) {
         if self.probe.is_some() {
             self.probe_source = Some(hdr_view.clone());
@@ -234,6 +255,10 @@ impl Tonemap {
                 wgpu::BindGroupEntry {
                     binding: 5,
                     resource: wgpu::BindingResource::TextureView(exposure_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: clip_counts.unwrap_or(&self.clip_dummy).as_entire_binding(),
                 },
             ],
         }));

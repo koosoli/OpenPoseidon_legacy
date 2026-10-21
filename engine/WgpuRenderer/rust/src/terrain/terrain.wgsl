@@ -7,8 +7,8 @@
 // Shares group(0) (the camera UBO + cascade shadow map) with the lit 3D
 // pipeline via the frame module, so terrain receives the same CSM shadows and
 // sun lighting.
-#import frame::{frame, reverse_z, fog_factor, apply_fog_terrain, fog_sun_reach, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_rain_coverage, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
-#import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
+#import frame::{frame, reverse_z, fog_factor, apply_fog_terrain, fog_sun_reach, sky_irradiance, sky_vis_ao, canopy_sky_ao, canopy_sun_shadow, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_rain_coverage, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
+#import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal, puddle_noise}
 #import frame::ground_sky_reflection
 #import frame::wet_soil_debug_mode
 #import ground_wet::{cultivated_soil_fraction, soil_wet_amount, soil_wet_surface, soil_wet_fresnel, soil_wet_sun_specular, soil_wet_ground_reflection, soil_wet_environment_samples}
@@ -16,7 +16,7 @@
 #import lighting::lights_contrib
 #import color::srgb_to_linear
 #import gbuffer::oct_encode
-#import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage}
+#import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage, snow_glitter, snow_wind_relief}
 
 struct TerrainParams {
     world_origin: vec2<f32>,
@@ -48,7 +48,8 @@ struct TerrainParams {
     rain_wetness: f32, // cosmetic rain history [0,1], former padding at offset 72
     rain_strength: f32, // effective liquid rain, former padding at offset 76
     _pad3: f32,
-    _pad4: f32,
+    // RFG-PBR: metres per texel of the native surface map (surface_map); 0 = the land-cell index
+    surface_grid: f32,
 };
 
 // Must match GRID_N in terrain/mod.rs.
@@ -159,9 +160,11 @@ fn snow_gradient(xz: vec2<f32>, world_y: f32, footprint: f32) -> vec3<f32> {
     return vec3<f32>(-dx, 0.0, -dz);
 }
 
+// `wind`: snow_wind_relief(xz, footprint).yz -- the caller evaluates it once and shares it
 fn terrain_snow_normal(xz: vec2<f32>, world_y: f32, geometric: vec3<f32>,
-    footprint: f32, dry: f32) -> vec3<f32> {
-    let shape = normalize(geometric + snow_gradient(xz, world_y, footprint) * geometric.y * dry);
+    footprint: f32, dry: f32, wind: vec2<f32>) -> vec3<f32> {
+    // the wind's drifts and ripples (snow_wind_relief) on top of the deposited depth's own slope
+    let shape = normalize(geometric + (snow_gradient(xz, world_y, footprint) - vec3<f32>(wind.x, 0.0, wind.y)) * geometric.y * dry);
     let powder = snow_powder_normal(vec3<f32>(xz.x, world_y, xz.y), shape, footprint);
     return powder;
 }
@@ -176,6 +179,8 @@ fn terrain_snow_normal(xz: vec2<f32>, world_y: f32, geometric: vec3<f32>,
 @group(2) @binding(5) var jitter_map: texture_2d<f32>;
 #import terrain_material::{TerrainUv, TerrainMaterial, TERRAIN_SURFACE_SLOTS}
 @group(2) @binding(6) var<storage, read> terrain_materials: array<TerrainMaterial>;
+// RFG-PBR: a native Reforger world's surface map (palette index per texel; see surface_grid)
+@group(2) @binding(7) var surface_map: texture_2d<u32>;
 
 // TW-WATER W3b — Tidewater Native's wet sand (bind group 3, see shore_wet.rs). In Tidewater mode
 // the coast's wetness comes from the shore simulation's wet channel, and the foam the draining
@@ -185,10 +190,36 @@ fn terrain_snow_normal(xz: vec2<f32>, world_y: f32, geometric: vec3<f32>,
 struct TwWet {
     regions: array<vec4<f32>, 2>, // per shore-simulation region: min xz, size (m), weight
     p: vec4<f32>,                 // x = on, y = sea level
+    rain: vec4<f32>,              // RAIN-FLOW window: min xz, size (m), weight (0 = not running)
 };
 @group(3) @binding(0) var<uniform> tww: TwWet;
 @group(3) @binding(1) var tw_sim_state: texture_2d_array<f32>;
 @group(3) @binding(2) var tw_sim_lace: texture_2d<f32>;
+// RAIN-FLOW (rain_flow.rs): r = water depth (m), g = flow speed (m/s); slot (x mod N, z mod N) holds
+// absolute cell (x, z) of the window around the camera
+@group(3) @binding(3) var rain_water: texture_2d<f32>;
+
+fn rain_water_load(c: vec2<i32>, n: i32) -> vec2<f32> {
+    return textureLoad(rain_water, ((c % n) + n) % n, 0).xy;
+}
+
+// (depth m, speed m/s, window weight) of the rain water at world xz; weight 0 outside the window
+fn rain_water_at(xz: vec2<f32>) -> vec3<f32> {
+    let w = tww.rain;
+    if (w.w <= 0.0) { return vec3<f32>(0.0); }
+    let rel = xz - w.xy;
+    let edge = min(min(rel.x, rel.y), min(w.z - rel.x, w.z - rel.y));
+    let weight = smoothstep(2.0, 12.0, edge) * w.w;
+    if (weight <= 0.0) { return vec3<f32>(0.0); }
+    let n = i32(textureDimensions(rain_water).x);
+    let t = xz / (w.z / f32(n)) - 0.5;
+    let b = floor(t);
+    let f = t - b;
+    let c = vec2<i32>(b);
+    let v = mix(mix(rain_water_load(c, n), rain_water_load(c + vec2<i32>(1, 0), n), f.x),
+                mix(rain_water_load(c + vec2<i32>(0, 1), n), rain_water_load(c + vec2<i32>(1, 1), n), f.x), f.y);
+    return vec3<f32>(v, weight);
+}
 
 const TW_SIM_RES: f32 = 768.0;
 const TW_LACE_TILE: f32 = 3.5;
@@ -288,7 +319,8 @@ fn mud_height_offset(world_xz: vec2<f32>) -> f32 {
     let offset = mix(mix(snow.deficits[i], snow.deficits[i + 1u], f.x),
                      mix(snow.deficits[i + 512u], snow.deficits[i + 513u], f.x), f.y);
     let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
-    return clamp(offset, -limit, 0.0) * smoothstep(0.0, 24.0, edge);
+    // Negative: ruts/footprints. Positive: soil heaped beside ruts (MudField::MaxRim).
+    return clamp(offset, -limit, 0.1) * smoothstep(0.0, 24.0, edge);
 }
 
 // Third signed view: sand compaction and positive loose-grain rims.
@@ -360,6 +392,273 @@ fn mud_height_gradient(world_xz: vec2<f32>, footprint: f32) -> vec2<f32> {
         mud_height_offset(world_xz + vec2<f32>(0.0, h)) - mud_height_offset(world_xz - vec2<f32>(0.0, h))) / (2.0 * h);
 }
 
+// BOOM-001: explosion craters (CraterField). Two views in the shared storage buffer after the
+// mud/sand views: near 0.25 m cells over 128 m, far 1 m cells over 512 m; each a header
+// [originX, originZ, cell, limit] + 512*512 signed heights, then a material view of the same
+// shape (soil + 256 * scorch, 0..255 each). Same cell-centre bilinear rule as CraterField::
+// HeightOffsetAt, so the drawn crater is the one men and vehicles stand in. Returns
+// (height, coverage): coverage fades over the window's last 24 cells.
+const CRATER_NEAR: u32 = 1048592u; // deficits[] starts after the vec4 header: (4 views + rut-water vec4) - 4
+const CRATER_FAR: u32 = 1572888u;
+const CRATER_VIEW: u32 = 262148u;
+const CRATER_END: u32 = 2097184u;
+fn crater_view(base: u32, cell: f32, world_xz: vec2<f32>) -> vec2<f32> {
+    let limit = snow.deficits[base + 3u];
+    if (limit <= 0.0 || snow.deficits[base + 2u] != cell) { return vec2<f32>(0.0); }
+    let origin = vec2<f32>(snow.deficits[base], snow.deficits[base + 1u]);
+    let t = (world_xz - origin) / cell - vec2<f32>(0.5);
+    if (any(t < vec2<f32>(0.0)) || any(t >= vec2<f32>(511.0))) { return vec2<f32>(0.0); }
+    let b = vec2<u32>(floor(t));
+    let f = fract(t);
+    let i = base + 4u + b.y * 512u + b.x;
+    let h = mix(mix(snow.deficits[i], snow.deficits[i + 1u], f.x),
+                mix(snow.deficits[i + 512u], snow.deficits[i + 513u], f.x), f.y);
+    let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
+    return vec2<f32>(clamp(h, -limit, 1.5), smoothstep(0.0, 24.0, edge));
+}
+// One load: the 512 m far view holds every crater the near view can (it contains it), so an
+// empty far view means nothing to look up. sample_height runs many times per terrain pixel
+// (snow cover, normals); without this gate a crater-free snowy map paid ~3 ms of buffer reads.
+fn crater_active() -> bool {
+    return arrayLength(&snow.deficits) >= CRATER_END && snow.deficits[CRATER_FAR + 3u] > 0.0;
+}
+// BOOM-004 (owner, 2026-10-19: "you replaced it with a texture instead of doing a real groove"):
+// a bullet's track through the snow, ray-traced. Each track is a straight cylinder of the hole's
+// radius along the round's flight, from just above the snow surface down to where it struck the
+// ground (SnowField::NearestBulletMarks). The snow surface is open wherever that cylinder breaks
+// through it -- round for a steep shot, a long oval for a grazing one -- and a pixel there shows
+// what the view ray really meets inside: the far wall of the track (its own normal, lit or in the
+// shadow of the near rim depending on where the sun's ray from that point leaves the track) or,
+// at the bottom, the earth the round stopped in. The 12.5 cm snow grid cannot carve a 5 cm hole;
+// the drawn surface is interpolated between vertices metres apart, so no separate mesh could meet
+// it -- solving the geometry where the surface is drawn is what makes the opening and the walls
+// line up exactly from every side.
+// [count, originX, originZ, 0] then per track (top - origin (y absolute), radius), (dir, length),
+// (snowfall since, 0, 0, 0).
+const SNOW_MARKS: u32 = 2097184u;
+const SNOW_MARKS_END: u32 = 2097956u;
+struct SnowTrack {
+    open: f32,       // how much of this pixel is opening (anti-aliased edge)
+    albedo: vec3<f32>, // what is seen down the track (its colour times its occlusion)
+    normal: vec3<f32>, // that surface's normal
+    rim: f32,        // the lip of broken crust round the opening
+    slope: vec2<f32>, // the lip's outward tilt
+};
+// exit distance of a ray (origin inside the cylinder) from the cylinder axis A + D t, radius r
+fn track_exit(o: vec3<f32>, v: vec3<f32>, A: vec3<f32>, D: vec3<f32>, r: f32) -> f32 {
+    let m = o - A;
+    let vd = dot(v, D);
+    let md = dot(m, D);
+    let qa = max(1.0 - vd * vd, 1e-6);
+    let qb = 2.0 * (dot(m, v) - md * vd);
+    let qc = dot(m, m) - md * md - r * r;
+    let disc = max(qb * qb - 4.0 * qa * qc, 0.0);
+    return (-qb + sqrt(disc)) / (2.0 * qa);
+}
+fn snow_bullet_tracks(world_abs: vec3<f32>, view: vec3<f32>, footprint: f32, to_sun: vec3<f32>) -> SnowTrack {
+    var o: SnowTrack;
+    o.albedo = vec3<f32>(1.0);
+    o.normal = vec3<f32>(0.0, 1.0, 0.0);
+    if (arrayLength(&snow.deficits) < SNOW_MARKS_END) { return o; }
+    let count = min(u32(snow.deficits[SNOW_MARKS]), 64u);
+    if (count == 0u) { return o; }
+    let P = world_abs - vec3<f32>(snow.deficits[SNOW_MARKS + 1u], 0.0, snow.deficits[SNOW_MARKS + 2u]);
+    let w = max(footprint, 0.001);
+    for (var k = 0u; k < count; k = k + 1u) {
+        let b = SNOW_MARKS + 4u + k * 12u;
+        let A = vec3<f32>(snow.deficits[b], snow.deficits[b + 1u], snow.deficits[b + 2u]);
+        let r = snow.deficits[b + 3u];
+        let D = vec3<f32>(snow.deficits[b + 4u], snow.deficits[b + 5u], snow.deficits[b + 6u]);
+        let L = snow.deficits[b + 7u];
+        let m = P - A;
+        // cheap reject: farther from the segment's bounding sphere than its radius + lip
+        let mid = m - D * (L * 0.5);
+        let reach = L * 0.5 + r * 3.0 + w * 2.0;
+        if (dot(mid, mid) > reach * reach) { continue; }
+        // fresh snow fills a track: gone after ~3 cm of new snowfall
+        let fresh = 1.0 - smoothstep(0.0, 0.03, snow.deficits[b + 8u]);
+        if (fresh <= 0.0) { continue; }
+        let t = dot(m, D);
+        if (t < -r || t > L + r) { continue; }
+        let q = m - D * t;
+        let dist = length(q);
+        // the lip: crust broken and pushed up round the opening
+        let lip = (1.0 - smoothstep(r, r * 2.2 + w, dist)) * smoothstep(r - w, r + w, dist) * fresh;
+        o.rim = max(o.rim, lip);
+        o.slope += select(vec2<f32>(0.0), q.xz / max(dist, 1e-5), dist > 1e-5) * lip;
+        // the opening: this surface point lies inside the cylinder (between its ends)
+        let inside = clamp((r - dist) / w + 0.5, 0.0, 1.0) * step(0.0, t) * step(t, L) * fresh;
+        if (inside <= 0.0 || inside < o.open) { continue; }
+        // the view ray from the surface on into the snow, to the track's far wall or its bottom
+        var s = track_exit(P, view, A, D, r);
+        var H = P + view * s;
+        var tH = dot(H - A, D);
+        var nrm = vec3<f32>(0.0);
+        var earth = 0.0;
+        if (tH > L) {
+            // past the ground end: the bottom, where the round went into the earth
+            let vd = dot(view, D);
+            if (vd > 1e-4) { s = (L - t) / vd; H = P + view * s; }
+            nrm = -D;
+            earth = 1.0;
+        } else {
+            let radial = (H - A) - D * tH;
+            nrm = -radial / max(length(radial), 1e-5); // the wall faces the axis
+        }
+        // the sun from that point: lit only if its ray leaves the track above the surface
+        var lit = 0.0;
+        if (dot(nrm, to_sun) > 0.0 && to_sun.y > 0.0) {
+            let s2 = track_exit(H + nrm * 1e-4, to_sun, A, D, r);
+            let Q = H + to_sun * s2;
+            lit = smoothstep(-0.004, 0.004, Q.y - P.y);
+        }
+        // sky reaching down a narrow shaft: less the deeper
+        let depth = max(P.y - H.y, 0.0);
+        let sky = clamp(1.0 - depth / (8.0 * r), 0.2, 1.0);
+        let snowCol = vec3<f32>(0.80, 0.86, 0.95); // packed snow walls take the blue of light through snow
+        let soil = vec3<f32>(0.10, 0.08, 0.06);
+        // direct sun is applied later from the normal; here: the share it does not get (shadowed)
+        // and the sky the shaft hides
+        let base = mix(snowCol, soil, earth);
+        o.albedo = base * sky * mix(0.4, 1.0, lit);
+        o.normal = nrm;
+        o.open = inside;
+    }
+    return o;
+}
+fn crater_height_offset(world_xz: vec2<f32>) -> f32 {
+    if (!crater_active()) { return 0.0; }
+    let near = crater_view(CRATER_NEAR, 0.25, world_xz);
+    if (near.y >= 1.0) { return near.x; }
+    let far = crater_view(CRATER_FAR, 1.0, world_xz);
+    return mix(far.x * far.y, near.x, near.y);
+}
+fn crater_unpack(v: f32) -> vec2<f32> {
+    let scorch = floor(v / 256.0);
+    return vec2<f32>(v - scorch * 256.0, scorch) / 255.0;
+}
+fn crater_material_view(base: u32, cell: f32, world_xz: vec2<f32>) -> vec3<f32> {
+    let mb = base + CRATER_VIEW;
+    if (snow.deficits[mb + 3u] <= 0.0 || snow.deficits[mb + 2u] != cell) { return vec3<f32>(0.0); }
+    let origin = vec2<f32>(snow.deficits[mb], snow.deficits[mb + 1u]);
+    let t = (world_xz - origin) / cell - vec2<f32>(0.5);
+    if (any(t < vec2<f32>(0.0)) || any(t >= vec2<f32>(511.0))) { return vec3<f32>(0.0); }
+    let b = vec2<u32>(floor(t));
+    let f = fract(t);
+    let i = mb + 4u + b.y * 512u + b.x;
+    let m = mix(mix(crater_unpack(snow.deficits[i]), crater_unpack(snow.deficits[i + 1u]), f.x),
+                mix(crater_unpack(snow.deficits[i + 512u]), crater_unpack(snow.deficits[i + 513u]), f.x), f.y);
+    let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
+    return vec3<f32>(m, smoothstep(0.0, 24.0, edge));
+}
+// (soil, scorch) 0..1 at a point.
+fn crater_material(world_xz: vec2<f32>) -> vec2<f32> {
+    if (!crater_active()) { return vec2<f32>(0.0); }
+    let near = crater_material_view(CRATER_NEAR, 0.25, world_xz);
+    if (near.z >= 1.0) { return near.xy; }
+    let far = crater_material_view(CRATER_FAR, 1.0, world_xz);
+    return mix(far.xy * far.z, near.xy, near.z);
+}
+fn crater_height_gradient(world_xz: vec2<f32>, footprint: f32) -> vec2<f32> {
+    if (!crater_active()) { return vec2<f32>(0.0); }
+    // two cells wide: a one-cell difference of the bilinear field shows its 0.25 m facets
+    let h = max(0.5, footprint);
+    return vec2<f32>(crater_height_offset(world_xz + vec2<f32>(h, 0.0)) - crater_height_offset(world_xz - vec2<f32>(h, 0.0)),
+        crater_height_offset(world_xz + vec2<f32>(0.0, h)) - crater_height_offset(world_xz - vec2<f32>(0.0, h))) / (2.0 * h);
+}
+
+// BOOM-001: freshly thrown soil (linear albedo) and its micro relief, procedural: churned loam in
+// three scales of clods, damp dark crevices between them, a pale dry crust on the up-facing tops,
+// streaks of earth running down the slopes (`radial`: the crater's height gradient), small
+// stones, and soot over the bowl (`scorch`). `p`: local metres (see the caller).
+struct CraterSoil {
+    rgb: vec3<f32>,
+    bump: vec2<f32>,
+    cover_noise: f32,
+};
+// Integer hash (owner, 2026-10-19: "i still saw the crater texture instead of a real crater"):
+// mud_rut_hash is fract(sin(dot(p, ..)) * 43758), and the clod octaves reach p ~ 15000, where
+// sin() of an argument in the millions has no precision left on the GPU -- the soil came out in
+// hard-edged square blocks that read as a pasted texture. Bit mixing has no such limit.
+fn crater_hash(cell: vec2<i32>) -> f32 {
+    var h = bitcast<u32>(cell.x) * 1597334677u ^ bitcast<u32>(cell.y) * 3812015801u;
+    h = (h ^ (h >> 16u)) * 2246822519u;
+    h = (h ^ (h >> 13u)) * 3266489917u;
+    h = h ^ (h >> 16u);
+    return f32(h & 0x00ffffffu) / 16777215.0;
+}
+fn crater_noise(p: vec2<f32>) -> f32 {
+    let i = vec2<i32>(floor(p));
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(crater_hash(i), crater_hash(i + vec2<i32>(1, 0)), u.x),
+               mix(crater_hash(i + vec2<i32>(0, 1)), crater_hash(i + vec2<i32>(1, 1)), u.x), u.y);
+}
+fn crater_fbm(p: vec2<f32>) -> f32 {
+    return 0.5 * crater_noise(p) + 0.25 * crater_noise(p * 2.03 + vec2<f32>(5.1, 1.7))
+         + 0.15 * crater_noise(p * 4.1 + vec2<f32>(2.3, 9.4)) + 0.1 * crater_noise(p * 8.3 + vec2<f32>(7.7, 3.3));
+}
+fn crater_soil(p: vec2<f32>, radial: vec2<f32>, up: f32, scorch: f32) -> CraterSoil {
+    var o: CraterSoil;
+    // clods: lumps ~25 cm and ~8 cm; crevices where the fine field is low
+    let big = crater_fbm(p * 2.2);
+    let clod = crater_fbm(p * 7.0 + vec2<f32>(big * 1.5));
+    let crevice = smoothstep(0.45, 0.22, clod);
+    // streaks along the slope: noise stretched down the fall line
+    let slope = length(radial);
+    let dir = select(vec2<f32>(1.0, 0.0), radial / max(slope, 1e-4), slope > 1e-3);
+    let along = vec2<f32>(dot(p, dir), dot(p, vec2<f32>(-dir.y, dir.x)));
+    let streak = crater_noise(vec2<f32>(along.x * 0.8, along.y * 9.0)) * smoothstep(0.05, 0.4, slope);
+    // palette: dark damp loam -> mid brown -> dry tan crust
+    let damp = vec3<f32>(0.045, 0.032, 0.022);
+    let loam = vec3<f32>(0.098, 0.071, 0.048);
+    let dry = vec3<f32>(0.215, 0.168, 0.118);
+    var c = mix(damp, loam, smoothstep(0.25, 0.65, big));
+    c = mix(c, dry, smoothstep(0.5, 0.95, clod) * up * (0.3 + 0.5 * big));
+    c = mix(c, damp * 0.8, crevice * 0.6);
+    c = mix(c, c * 0.72, streak * 0.6);
+    // stones: one chance per 14 cm cell, a pale grey-beige pebble with a dark rim
+    let cell = floor(p * 7.0);
+    let h1 = crater_hash(vec2<i32>(cell));
+    let h2 = crater_hash(vec2<i32>(cell) + vec2<i32>(7919, 104729));
+    let centre = (cell + vec2<f32>(0.25 + 0.5 * h1, 0.25 + 0.5 * h2)) / 7.0;
+    // (rare, small, earthy, irregular: a few stones in the soil, not eggs on it)
+    let rad = (0.006 + 0.018 * h2) * step(0.86, h1);
+    let dp = p - centre;
+    let lumpy = length(dp) * (1.0 + 0.35 * sin(atan2(dp.y, dp.x) * 3.0 + h1 * 20.0));
+    let stone = (1.0 - smoothstep(rad * 0.6, rad, lumpy)) * 0.85;
+    let stoneCol = mix(vec3<f32>(0.085, 0.078, 0.068), vec3<f32>(0.15, 0.135, 0.115), h2);
+    c = mix(c, stoneCol, stone);
+    // soot: blotchy black over the bowl
+    let soot = vec3<f32>(0.020, 0.018, 0.017) * (0.8 + 0.5 * big);
+    c = mix(c, soot, clamp(scorch * (0.6 + 0.7 * big), 0.0, 0.95));
+    o.rgb = c;
+    // relief: clods up, crevices down, stones domed
+    let e = 0.03;
+    let h0 = clod - 0.6 * crevice;
+    let hx = crater_fbm((p + vec2<f32>(e, 0.0)) * 7.0 + vec2<f32>(big * 1.5)) - h0 - 0.6 * crevice;
+    let hz = crater_fbm((p + vec2<f32>(0.0, e)) * 7.0 + vec2<f32>(big * 1.5)) - h0 - 0.6 * crevice;
+    var bump = vec2<f32>(hx, hz) * 0.9;
+    if (stone > 0.0) { bump += dp / max(rad, 1e-3) * stone * 0.5; }
+    o.bump = bump;
+    o.cover_noise = big;
+    return o;
+}
+
+// (OP, 2026-10-14) Beyond the map edge the heightfield clamps to its edge texels: an endless flat
+// shelf at the edge's depth. The sea above it is drawn as open ocean (tw_water.wgsl
+// materialTerrainHeightAt sinks the bed to sea level - 200 m over 400 m), so in a storm the wave
+// troughs off the map dipped below that shelf and showed it as flat pale patches between the
+// waves (Everon's south edge from 9975 470). The terrain follows the water's bed there -- only
+// where the edge is already under the sea, so land running into a map edge is unchanged.
+fn offmap_bed(world_xz: vec2<f32>, h: f32) -> f32 {
+    let size = vec2<f32>(f32(tp.hm_width - 1u), f32(tp.hm_height - 1u)) * tp.terrain_grid;
+    let r = world_xz - tp.world_origin;
+    let outside = length(max(max(-r, r - size), vec2<f32>(0.0)));
+    if (outside <= 0.0 || h >= tp.sea_level) { return h; }
+    return mix(h, min(h, tp.sea_level - 200.0), smoothstep(0.0, 400.0, outside));
+}
+
 fn sample_height(world_xz: vec2<f32>) -> f32 {
     let t = (world_xz - tp.world_origin) / tp.terrain_grid;
     let base = floor(t);
@@ -372,9 +671,9 @@ fn sample_height(world_xz: vec2<f32>) -> f32 {
     let y11 = hm_load(ix + 1, iz + 1);
     if (f.x <= 1.0 - f.y)
     {
-        return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x + mud_height_offset(world_xz) + sand_height_offset(world_xz);
+        return offmap_bed(world_xz, y00 + (y10 - y00) * f.y + (y01 - y00) * f.x) + mud_height_offset(world_xz) + sand_height_offset(world_xz) + crater_height_offset(world_xz);
     }
-    return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y + mud_height_offset(world_xz) + sand_height_offset(world_xz);
+    return offmap_bed(world_xz, y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y) + mud_height_offset(world_xz) + sand_height_offset(world_xz) + crater_height_offset(world_xz);
 }
 
 // Central-difference normal at a fixed heightmap step. Taken per-fragment (not
@@ -396,15 +695,345 @@ struct GroundNormalPair {
     broad: vec3<f32>,
     fine: vec3<f32>,
 };
+// The heightfield alone at a world-xz: sample_height without the mud and sand views.
+fn grid_height(world_xz: vec2<f32>) -> f32 {
+    let t = (world_xz - tp.world_origin) / tp.terrain_grid;
+    let base = floor(t);
+    let ix = i32(base.x);
+    let iz = i32(base.y);
+    let f = t - base;
+    let y00 = hm_load(ix, iz);
+    let y01 = hm_load(ix + 1, iz);
+    let y10 = hm_load(ix, iz + 1);
+    let y11 = hm_load(ix + 1, iz + 1);
+    if (f.x <= 1.0 - f.y)
+    {
+        return offmap_bed(world_xz, y00 + (y10 - y00) * f.y + (y01 - y00) * f.x);
+    }
+    return offmap_bed(world_xz, y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y);
+}
+
 fn sample_mud_normals(world_xz: vec2<f32>, step: f32, footprint: f32) -> GroundNormalPair {
-    let base = sample_normal(world_xz, step);
-    let delta = mud_height_gradient(world_xz, footprint) - mud_height_gradient(world_xz, step)
-        + sand_height_gradient(world_xz, footprint) - sand_height_gradient(world_xz, step);
+    // (PERF, 2026-10-14) The broad normal's four heights at +-step and the step-scale mud/sand
+    // gradients subtracted below read the SAME eight offsets; they were read twice (sample_normal,
+    // then the step-scale mud and sand gradients). Read once, same arithmetic in the same order, so the
+    // result is unchanged. 32 storage loads per terrain pixel.
+    let hs = max(0.125, step); // the gradients' h; equal to `step` for any real terrain grid
+    let px = world_xz + vec2<f32>(hs, 0.0);
+    let nx = world_xz - vec2<f32>(hs, 0.0);
+    let pz = world_xz + vec2<f32>(0.0, hs);
+    let nz = world_xz - vec2<f32>(0.0, hs);
+    let m_px = mud_height_offset(px);
+    let m_nx = mud_height_offset(nx);
+    let m_pz = mud_height_offset(pz);
+    let m_nz = mud_height_offset(nz);
+    let s_px = sand_height_offset(px);
+    let s_nx = sand_height_offset(nx);
+    let s_pz = sand_height_offset(pz);
+    let s_nz = sand_height_offset(nz);
+    let c_px = crater_height_offset(px);
+    let c_nx = crater_height_offset(nx);
+    let c_pz = crater_height_offset(pz);
+    let c_nz = crater_height_offset(nz);
+    var base: vec3<f32>;
+    if (hs == step) {
+        let hx0 = grid_height(nx) + m_nx + s_nx + c_nx;
+        let hx1 = grid_height(px) + m_px + s_px + c_px;
+        let hz0 = grid_height(nz) + m_nz + s_nz + c_nz;
+        let hz1 = grid_height(pz) + m_pz + s_pz + c_pz;
+        base = normalize(vec3<f32>(-(hx1 - hx0), 2.0 * step, -(hz1 - hz0)));
+    } else {
+        base = sample_normal(world_xz, step);
+    }
+    let mud_step = vec2<f32>(m_px - m_nx, m_pz - m_nz) / (2.0 * hs);
+    var sand_step: vec2<f32>;
+    if (step >= 0.125) {
+        sand_step = vec2<f32>(s_px - s_nx, s_pz - s_nz) / (2.0 * hs);
+    } else {
+        sand_step = sand_height_gradient(world_xz, step);
+    }
+    let crater_step = vec2<f32>(c_px - c_nx, c_pz - c_nz) / (2.0 * hs);
+    let delta = mud_height_gradient(world_xz, footprint) - mud_step
+        + sand_height_gradient(world_xz, footprint) - sand_step
+        + crater_height_gradient(world_xz, footprint) - crater_step;
     let fine = normalize(vec3<f32>(base.x - delta.x * base.y, base.y, base.z - delta.y * base.y));
     return GroundNormalPair(base, fine);
 }
 fn sample_mud_normal(world_xz: vec2<f32>, step: f32, footprint: f32) -> vec3<f32> {
     return sample_mud_normals(world_xz, step, footprint).fine;
+}
+
+// ---- Mud ruts: shading and tyre-tread relief inside wheel ruts -------------
+// Inputs are only the signed mud field above, so the look follows the physics:
+// where a wheel pressed the soil, the rut darkens, stays wet and carries a tread
+// imprint. Untouched ground (rut depth 0) returns exactly what it had before.
+fn mud_rut_depth(world_xz: vec2<f32>) -> f32 {
+    return max(0.0, -mud_height_offset(world_xz));
+}
+
+// Far mud view (fourth signed view, MudField::SnapshotFar): 0.5 m cells over a
+// 256 m window, ruts only. Lets ruts read well beyond the fine 64 m window.
+// Standing water in mud ruts [0,1] (MudRutWaterLevel), one float after the four views.
+fn mud_water_level() -> f32 {
+    if (arrayLength(&snow.deficits) < 1048589u) { return 0.0; }
+    return clamp(snow.deficits[1048588u], 0.0, 1.0);
+}
+
+fn mud_far_depth(world_xz: vec2<f32>) -> f32 {
+    if (arrayLength(&snow.deficits) < 1048588u) { return 0.0; }
+    let origin = vec2<f32>(snow.deficits[786440u], snow.deficits[786441u]);
+    let cell = snow.deficits[786442u];
+    let limit = snow.deficits[786443u];
+    if (limit <= 0.0 || cell != 0.5) { return 0.0; }
+    let t = (world_xz - origin) / cell - vec2<f32>(0.5);
+    if (any(t < vec2<f32>(0.0)) || any(t >= vec2<f32>(511.0))) { return 0.0; }
+    let b = vec2<u32>(floor(t));
+    let f = fract(t);
+    let i = 786444u + b.y * 512u + b.x;
+    let offset = mix(mix(snow.deficits[i], snow.deficits[i + 1u], f.x),
+                     mix(snow.deficits[i + 512u], snow.deficits[i + 513u], f.x), f.y);
+    let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
+    return clamp(-offset, 0.0, limit) * smoothstep(0.0, 16.0, edge);
+}
+
+// Distant ruts from the far view: the same darker, wetter compacted soil as up
+// close plus a gentle normal from the coarse rut shape (the far terrain mesh is
+// too coarse to carry the dip itself). `far` blends it in where the fine view's
+// detail has faded; never darkens twice where both are present.
+fn mud_far_surface(world_xz: vec2<f32>, far: f32, base: MudRutSurface) -> MudRutSurface {
+    var out = base;
+    if (far <= 0.0) { return out; }
+    let e = 0.5;
+    let depth = mud_far_depth(world_xz);
+    let px = mud_far_depth(world_xz + vec2<f32>(e, 0.0));
+    let nx = mud_far_depth(world_xz - vec2<f32>(e, 0.0));
+    let pz = mud_far_depth(world_xz + vec2<f32>(0.0, e));
+    let nz = mud_far_depth(world_xz - vec2<f32>(0.0, e));
+    let near_rut = smoothstep(0.004, 0.035, max(max(depth, max(px, nx)), max(pz, nz))) * far;
+    if (near_rut <= 0.0) { return out; }
+    let rut = smoothstep(0.004, 0.035, depth) * far;
+    // Tested in game: the near ruts' "dark and wet" read at 50-100 m as a smooth
+    // pale band mirroring the sky -- a puddle, not a rut. Far off, a rut is churned
+    // soil: darker and broken up (clumps ~1 m and ~0.3 m), only a little damp.
+    let clump = 0.6 * mud_rut_noise(world_xz * 1.1) + 0.4 * mud_rut_noise(world_xz * 3.3 + vec2<f32>(17.0, 5.0));
+    out.albedo = min(out.albedo, mix(1.0, mix(0.75, 1.0, clump), rut));
+    out.wet = max(out.wet, 0.25 * rut);
+    out.mud = max(out.mud, rut * 0.9);
+    // Height is -depth, so the surface tilts towards the rut centre, rut walls included.
+    let slope = clamp(vec2<f32>(nx - px, nz - pz) / (2.0 * e), vec2<f32>(-0.5), vec2<f32>(0.5)) * near_rut;
+    out.normal = normalize(base.normal - vec3<f32>(slope.x, 0.0, slope.y));
+    return out;
+}
+
+// 0 on untouched ground, 1 in a rut of ~4.5 cm or deeper.
+fn mud_rut_amount(depth: f32) -> f32 {
+    return smoothstep(0.004, 0.045, depth);
+}
+
+// Curvature (second derivatives) of the rut field at spacing h: (hxx, hzz, hxz).
+fn mud_rut_hessian(world_xz: vec2<f32>, h: f32) -> vec3<f32> {
+    let c = mud_height_offset(world_xz);
+    let px = mud_height_offset(world_xz + vec2<f32>(h, 0.0));
+    let nx = mud_height_offset(world_xz - vec2<f32>(h, 0.0));
+    let pz = mud_height_offset(world_xz + vec2<f32>(0.0, h));
+    let nz = mud_height_offset(world_xz - vec2<f32>(0.0, h));
+    let pp = mud_height_offset(world_xz + vec2<f32>(h, h));
+    let pn = mud_height_offset(world_xz + vec2<f32>(h, -h));
+    let np = mud_height_offset(world_xz + vec2<f32>(-h, h));
+    let nn = mud_height_offset(world_xz + vec2<f32>(-h, -h));
+    return vec3<f32>((px - 2.0 * c + nx) / (h * h), (pz - 2.0 * c + nz) / (h * h),
+                     (pp - pn - np + nn) / (4.0 * h * h));
+}
+
+// Rut direction from the curvature of the rut field: across a rut the soil
+// bends sharply, along it barely at all. Two scales are combined so lumps in
+// an uneven rut bottom do not swing the direction around. xy = unit direction
+// of travel along the rut, z = confidence 0..1 (low in pits, lumps, flat ground).
+fn mud_rut_along(world_xz: vec2<f32>) -> vec3<f32> {
+    let k = mud_rut_hessian(world_xz, 0.125) * 0.4 + mud_rut_hessian(world_xz, 0.3) * 0.6;
+    let hxx = k.x;
+    let hzz = k.y;
+    let hxz = k.z;
+    let spread = sqrt((hxx - hzz) * (hxx - hzz) + 4.0 * hxz * hxz);
+    let mean = 0.5 * (hxx + hzz);
+    // Axis of the strongest bend (by magnitude) is "across"; travel is perpendicular.
+    var theta = 0.5 * atan2(2.0 * hxz, hxx - hzz);
+    if (abs(mean - 0.5 * spread) > abs(mean + 0.5 * spread)) {
+        theta = theta + 1.5707963;
+    }
+    let across = vec2<f32>(cos(theta), sin(theta));
+    var along = vec2<f32>(-across.y, across.x);
+    // Canonical sign so neighbouring pixels agree and the tread pattern stays continuous.
+    if (along.x < 0.0 || (along.x == 0.0 && along.y < 0.0)) {
+        along = -along;
+    }
+    let anisotropy = clamp(spread / max(abs(hxx) + abs(hzz), 1e-4), 0.0, 1.0);
+    let confidence = smoothstep(0.55, 0.9, anisotropy) * smoothstep(0.2, 0.9, spread);
+    return vec3<f32>(along, confidence);
+}
+
+fn mud_rut_hash(p: vec2<f32>) -> f32 {
+    return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
+}
+
+fn mud_rut_noise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mud_rut_hash(i), mud_rut_hash(i + vec2<f32>(1.0, 0.0)), u.x),
+               mix(mud_rut_hash(i + vec2<f32>(0.0, 1.0)), mud_rut_hash(i + vec2<f32>(1.0, 1.0)), u.x), u.y);
+}
+
+// Small relief inside a rut, metres (<= 0): chevron tyre-lug imprints (angled
+// away from the rut's centre seam, like an off-road tread), broken up and smeared
+// by the soil, plus squeezed clumps. `side_sign` is +1/-1 for the two halves of
+// the rut; `crisp` 1 = fresh rut with a clear tread, 0 = deep churned slop. Purely visual (a few mm); collision keeps the physical rut depth.
+fn mud_rut_detail_height(p: vec2<f32>, along: vec3<f32>, side_sign: f32, rut: f32, crisp: f32) -> f32 {
+    let dir = along.xy;
+    let side = vec2<f32>(-dir.y, dir.x);
+    let travel = dot(p, dir) * 7.0 + side_sign * dot(p, side) * 2.6;  // ~7 lugs/m, chevron
+    let w = fract(travel);
+    let lug = smoothstep(0.0, 0.12, w) * (1.0 - smoothstep(0.38, 0.55, w));
+    // Mud smears and fills the imprint unevenly.
+    let smear = 0.35 + 0.65 * smoothstep(0.2, 0.65, mud_rut_noise(p * 2.5 + vec2<f32>(7.3, 1.9)));
+    let clumps = mud_rut_noise(p * 11.0);
+    // Churned slop: fist-sized lumps and smeared ribs where the tread is gone
+    // (second pass after in-game test: the floor read as a smooth even band).
+    let churn = mud_rut_noise(p * 4.5 + vec2<f32>(3.7, 9.1)) * 0.6 + mud_rut_noise(p * 9.5 + vec2<f32>(1.3, 4.4)) * 0.4;
+    return -rut * (0.008 * lug * smear * along.z * crisp + 0.005 * clumps + 0.011 * churn * (1.0 - 0.7 * crisp));
+}
+
+struct MudRutSurface {
+    normal: vec3<f32>,
+    albedo: f32,   // multiplier for the ground colour
+    wet: f32,      // minimum soil wetness inside the rut
+    mud: f32,      // 0..1 how much the ground colour is replaced by bare wet mud
+    water: f32,    // 0..1 standing water in the rut floor
+};
+
+// Tested in game: a rut that only darkened the ground texture read as "pressed
+// dark grass" on meadows. A wheel tears the turf: the rut floor is bare wet
+// mud, the ridges churned soil with tufts of grass, the edge ragged. The mud
+// colour is grey-brown clay, linear; tone 0 = dark wet floor, 1 = lighter slick.
+fn mud_soil_colour(world_xz: vec2<f32>, tone: f32) -> vec3<f32> {
+    let n = 0.6 * mud_rut_noise(world_xz * 1.7) + 0.4 * mud_rut_noise(world_xz * 6.3 + vec2<f32>(5.3, 1.9));
+    let t = clamp(0.55 * tone + 0.45 * n, 0.0, 1.0);
+    return mix(vec3<f32>(0.040, 0.031, 0.022), vec3<f32>(0.105, 0.085, 0.064), t);
+}
+
+// Soil a tyre pushed aside: churned, clumpy, wet ridges beside the rut (positive
+// mud offset). Identity where the ground was never heaped.
+fn mud_ridge_surface(world_xz: vec2<f32>, n: vec3<f32>, fade: f32, base: MudRutSurface) -> MudRutSurface {
+    var out = base;
+    let offset = mud_height_offset(world_xz);
+    let heap = max(0.0, offset);
+    let ridge = smoothstep(0.003, 0.035, heap);
+    // Mud smeared over the turf at the very edge of the disturbance (the rut lip
+    // and the toe of the ridge): no hard line between bare mud and grass.
+    let smear_n = mud_rut_noise(world_xz * 5.0 + vec2<f32>(6.0, 2.0));
+    let disturbed = smoothstep(0.0006, 0.005, abs(offset)) * (1.0 - ridge);
+    out.mud = disturbed * mix(0.25, 0.75, smear_n);
+    out.wet = max(out.wet, 0.4 * disturbed);
+    if (ridge <= 0.0) {
+        return out;
+    }
+    out.albedo = mix(1.0, 0.9, ridge);
+    out.wet = 0.55 * ridge;
+    // Churned soil with tufts of torn turf left in it: mostly mud, broken up.
+    let tufts = mud_rut_noise(world_xz * 7.0 + vec2<f32>(11.0, 3.0));
+    out.mud = max(out.mud, ridge * mix(0.45, 0.9, smoothstep(0.35, 0.65, tufts)));
+    if (fade <= 0.0) {
+        return out;
+    }
+    // Lumpy clods: two octaves of noise, a few mm to ~1.5 cm.
+    let e = 0.01;
+    let p = world_xz;
+    let h = mud_ridge_lumps(p, ridge);
+    let dhx = (mud_ridge_lumps(p + vec2<f32>(e, 0.0), ridge) - h) / e;
+    let dhz = (mud_ridge_lumps(p + vec2<f32>(0.0, e), ridge) - h) / e;
+    let slope = clamp(vec2<f32>(dhx, dhz), vec2<f32>(-0.8), vec2<f32>(0.8)) * fade;
+    out.normal = normalize(n - vec3<f32>(slope.x, 0.0, slope.y));
+    // Clod tops catch light, the gaps between them are dark and wet.
+    out.albedo = out.albedo * (0.72 + 0.4 * clamp(h / 0.02, 0.0, 1.0));
+    return out;
+}
+
+// Second pass (in game the ridges read as a plain stripe): chunky broken clods,
+// ~10-20 cm across and up to ~2.5 cm proud, over the finer crumbs.
+fn mud_ridge_lumps(p: vec2<f32>, ridge: f32) -> f32 {
+    let clod = smoothstep(0.35, 0.8, mud_rut_noise(p * 6.0 + vec2<f32>(4.2, 0.6)));
+    return ridge * (0.016 * clod + 0.006 * mud_rut_noise(p * 9.0) + 0.004 * mud_rut_noise(p * 23.0 + vec2<f32>(3.1, 7.7)));
+}
+
+// view: unit vector from the surface towards the camera. fade: 1 near, 0 far.
+fn mud_rut_surface(world_xz: vec2<f32>, n: vec3<f32>, view: vec3<f32>, fade: f32) -> MudRutSurface {
+    var out: MudRutSurface;
+    out.normal = n;
+    out.albedo = 1.0;
+    out.wet = 0.0;
+    out.mud = 0.0;
+    out.water = 0.0;
+    let depth = mud_rut_depth(world_xz);
+    let rut = mud_rut_amount(depth);
+    if (rut <= 0.0) {
+        return mud_ridge_surface(world_xz, n, fade, out);
+    }
+    // Compacted, water-squeezed soil: wet even after the rain stops. The turf is
+    // torn off the floor (bare mud); a shallow fresh rut keeps a ragged fringe of
+    // flattened grass at its edge.
+    let ragged = mud_rut_noise(world_xz * 9.0 + vec2<f32>(2.0, 8.0)) - 0.5;
+    out.mud = smoothstep(0.004, 0.022, depth + ragged * 0.012) * 0.92;
+    out.albedo = mix(1.0, 0.9, rut);
+    out.wet = 0.8 * rut;
+    // Standing water in the deepest stretches of the rut while the soil is soaked
+    // (mud_water_level(), from the mud field's wetness): the fuller, the shallower the
+    // ruts that hold it. Broken into pools along the rut by the floor's low spots.
+    // Tested in game: one even water line along every deep rut. Now pools come and
+    // go: stretches of a few metres stay dry however deep, others are low spots
+    // that hold water even in shallower ruts, and the edge of each pool wanders.
+    let level = mud_water_level();
+    if (level > 0.0) {
+        let pool = mud_rut_noise(world_xz * 0.33 + vec2<f32>(7.0, 19.0));
+        let low = mud_rut_noise(world_xz * 1.2 + vec2<f32>(13.0, 4.0)) - 0.5;
+        let fill = mix(0.11, 0.045, level) + (0.5 - pool) * 0.08;
+        out.water = smoothstep(fill, fill + 0.015, depth + low * 0.03) * level
+                  * smoothstep(0.36, 0.5, pool);
+    }
+    if (fade <= 0.0) {
+        return out;
+    }
+    let along = mud_rut_along(world_xz);
+    // Which half of the rut this is: the rut field rises away from its centre.
+    let g = 0.125;
+    let rise = vec2<f32>(mud_height_offset(world_xz + vec2<f32>(g, 0.0)) - mud_height_offset(world_xz - vec2<f32>(g, 0.0)),
+                         mud_height_offset(world_xz + vec2<f32>(0.0, g)) - mud_height_offset(world_xz - vec2<f32>(0.0, g)));
+    let side_sign = select(-1.0, 1.0, dot(rise, vec2<f32>(-along.y, along.x)) >= 0.0);
+    // Single-step parallax: shift the detail lookup along the view ray by the
+    // relief depth, so lug imprints read as recessed rather than painted on.
+    // Deep, repeatedly churned ruts are smeared slop: the tread fades out with depth.
+    // Tread prints sit on the rut floor; the steep walls are smeared, not printed.
+    let wall = length(rise) / (2.0 * g);
+    let crisp = (1.0 - smoothstep(0.10, 0.17, depth)) * smoothstep(0.3, 0.7, along.z)
+              * (1.0 - smoothstep(0.12, 0.35, wall));
+    let h0 = mud_rut_detail_height(world_xz, along, side_sign, rut, crisp);
+    let p = world_xz + view.xz * h0 / max(view.y, 0.3);
+    let e = 0.01;
+    let h = mud_rut_detail_height(p, along, side_sign, rut, crisp);
+    let dhx = (mud_rut_detail_height(p + vec2<f32>(e, 0.0), along, side_sign, rut, crisp) - h) / e;
+    let dhz = (mud_rut_detail_height(p + vec2<f32>(0.0, e), along, side_sign, rut, crisp) - h) / e;
+    let slope = clamp(vec2<f32>(dhx, dhz), vec2<f32>(-0.7), vec2<f32>(0.7)) * fade;
+    out.normal = normalize(n - vec3<f32>(slope.x, 0.0, slope.y));
+    // Cavity: the bottoms of lug imprints catch less light.
+    out.albedo = out.albedo * (1.0 + clamp(h / 0.02, -1.0, 0.0) * 0.25 * fade);
+    // Not one even colour: darker water-logged patches and lighter slick streaks
+    // drawn out along the direction of travel (smeared by the tyres).
+    let dir = along.xy;
+    let q = vec2<f32>(dot(world_xz, dir) * 0.8, dot(world_xz, vec2<f32>(-dir.y, dir.x)) * 5.0);
+    let streak = smoothstep(0.55, 0.85, mud_rut_noise(q + vec2<f32>(2.0, 7.0))) * along.z;
+    let soak = smoothstep(0.45, 0.75, mud_rut_noise(world_xz * 1.3 + vec2<f32>(8.0, 3.0)));
+    out.albedo = out.albedo * mix(1.0, mix(0.78, 1.0, 1.0 - soak) * (1.0 + 0.22 * streak), rut * fade);
+    out.wet = out.wet * mix(1.0, 0.85 + 0.15 * soak, fade);
+    return out;
 }
 
 // Index-map entry for a land cell, clamped to the map (row = z, column = x;
@@ -414,6 +1043,11 @@ fn sample_mud_normal(world_xz: vec2<f32>, step: f32, footprint: f32) -> vec3<f32
 // instead of tiling).
 const CELL_LAYER_MASK: u32 = 0x7fffu;
 const CELL_CLAMPED: u32 = 0x8000u;
+
+fn surface_entry(texel: vec2<i32>) -> u32 {
+    let dim = vec2<i32>(textureDimensions(surface_map));
+    return textureLoad(surface_map, clamp(texel, vec2<i32>(0), dim - vec2<i32>(1)), 0).x;
+}
 
 fn cell_entry(cell: vec2<i32>) -> u32 {
     let cx = clamp(cell.x, 0, i32(tp.land_range) - 1);
@@ -435,14 +1069,547 @@ fn cell_entry(cell: vec2<i32>) -> u32 {
 // boundary -- which is a candidate for the square lattice reported on Desert Island's sand.
 override jitter_scale: f32 = 1.0;
 
+// (PERF, 2026-10-14) the alpha of the last layer sample_cell read: on a legacy layer it carries the
+// Tidewater share (tw_cell), which took a second fetch of the same texel per cell before
+var<private> tw_last_alpha: f32 = 0.0;
+
 fn sample_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                ddx: vec2<f32>, ddy: vec2<f32>) -> vec3<f32> {
     let layer = entry & CELL_LAYER_MASK;
+    var t: vec4<f32>;
     if ((entry & CELL_CLAMPED) != 0u)
     {
-        return textureSampleGrad(ground[layer], ground_clamp_samp, tile_uv - cell, ddx, ddy).rgb;
+        t = textureSampleGrad(ground[layer], ground_clamp_samp, tile_uv - cell, ddx, ddy);
+    } else {
+        t = textureSampleGrad(ground[layer], ground_samp, tile_uv, ddx, ddy);
     }
-    return textureSampleGrad(ground[layer], ground_samp, tile_uv, ddx, ddy).rgb;
+    tw_last_alpha = t.a;
+    return t.rgb;
+}
+
+// --- (OP, 2026-10-13) Tidewater's beach sand, per pixel -------------------------------------------
+//
+// Owner: "the sand looks nothing like in tidewater" (matthewcosier/tidewater, island-expansion,
+// src/world/Terrain.js). The baked layer (TerrainWgpuTidewaterGround.cpp) only recoloured OFP's
+// sand image -- a 12.5 m photo stretched over the cell, its own grain blurred to nothing. Tidewater's
+// sand is built per pixel: pale coral sand in macro drifts, grain at two scales, wind ripples, shell
+// grit and a wrack line on the high-water band, damp sand below the berm, swash marks, ripple
+// fields on the seabed, and a micro relief that lights all of it. This is that, ported.
+//
+// The layer's alpha carries the sand share (1 on pure sand, per pixel on a transition), read only
+// where the material sets TWS_FLAG. Tidewater reads its noise from a baked detail texture; here it
+// is value noise at the same scales, the fine octaves on a 64 m wrapped lattice (f32 keeps
+// millimetres there), and every term finer than a few pixels fades to its mean by footprint --
+// the ripples and the grain must not alias (DLSS turns aliasing into drift).
+// (OP, 2026-10-13) Every OFP ground layer, not only sand and rock (owner: "could you do a do over of all
+// ofp ground textures this way?"). A legacy layer names up to two surface KINDS (bits 16..19 and
+// 20..23 of puddle_flags; TerrainWgpuTidewaterGround.cpp KindOf), the per-pixel share of the first in
+// its alpha, the first kind's OFP mean colour (linear) in middle_color and the second's in
+// (detail_scale, middle_scale, middle_blend), and Tidewater's detail heights as ground layer `middle`
+// -- all Enfusion-only fields, free on a legacy layer. Kind 0 keeps OFP's own image (roads, runways,
+// concrete, village ground).
+const TWK_SAND: u32 = 1u;
+const TWK_ROCK: u32 = 2u;
+const TWK_GRASS: u32 = 3u;
+const TWK_FOREST: u32 = 4u;
+const TWK_GRAVEL: u32 = 5u;
+const TWK_DIRT: u32 = 6u;
+const TWK_FIELD: u32 = 7u;
+const TWK_COUNT: u32 = 8u;
+
+struct TwCell {
+    ka: u32,
+    kb: u32,
+    a: f32,
+    ca: vec3<f32>,
+    cb: vec3<f32>,
+    det: u32,
+};
+
+fn tw_cell(entry: u32, alpha: f32) -> TwCell {
+    let material = terrain_materials[entry & CELL_LAYER_MASK];
+    var o: TwCell;
+    o.ka = (material.puddle_flags >> 16u) & 15u;
+    o.kb = (material.puddle_flags >> 20u) & 15u;
+    o.a = 0.0;
+    o.ca = material.middle_color;
+    o.cb = vec3<f32>(material.detail_scale, material.middle_scale, material.middle_blend);
+    o.det = material.middle;
+    if (o.ka == 0u) { return o; }
+    o.a = alpha;
+    return o;
+}
+
+// adds one cell's kinds, weighted by its cross-fade weight, to the per-kind weights / anchor sums
+// (PERF, 2026-10-14) The kinds present at a pixel, in TWO register slots (the heaviest two of up to
+// eight contributions from the four cross-faded cells). Per-kind arrays indexed by a runtime kind
+// spilled to local memory and cost more than the shading itself.
+struct TwSlots {
+    k0: u32,
+    w0: f32,
+    c0: vec3<f32>,
+    k1: u32,
+    w1: f32,
+    c1: vec3<f32>,
+    total: f32,
+};
+
+fn tw_slot_add(s: ptr<function, TwSlots>, kind: u32, w: f32, c: vec3<f32>) {
+    if (kind == 0u || w <= 0.0) { return; }
+    (*s).total += w;
+    if ((*s).k0 == kind || (*s).w0 <= 0.0) {
+        (*s).k0 = kind;
+        (*s).w0 += w;
+        (*s).c0 += c * w;
+    } else if ((*s).k1 == kind || (*s).w1 <= 0.0) {
+        (*s).k1 = kind;
+        (*s).w1 += w;
+        (*s).c1 += c * w;
+    } else if (w > (*s).w1) {
+        (*s).k1 = kind;
+        (*s).w1 = w;
+        (*s).c1 = c * w;
+    }
+}
+
+fn tw_acc(s: ptr<function, TwSlots>, t: TwCell, wc: f32) {
+    if (t.ka == 0u) { return; }
+    tw_slot_add(s, t.ka, wc * t.a, t.ca);
+    tw_slot_add(s, t.kb, wc * (1.0 - t.a), t.cb);
+}
+
+// Tidewater Terrain.js's per-pixel detail samples (dN 1.9 m, dM 6.7 m, dF 0.63 m, the 173 m / 47 m
+// macro), camera-relative like twr_tri
+struct TwIn {
+    dN: vec4<f32>,
+    dM: vec4<f32>,
+    dF: vec4<f32>,
+    macroA: f32,
+    macroB: f32,
+    mcr: f32,
+};
+
+fn tw_rel_uv(rel: vec2<f32>, cam: vec2<f32>, a: f32, s: f32) -> vec2<f32> {
+    return tws_rot(rel, a) / s + fract(tws_rot(cam, a) / s);
+}
+
+fn tw_inputs(det: u32, abs_p: vec3<f32>, rel: vec3<f32>, dwx: vec3<f32>, dwy: vec3<f32>) -> TwIn {
+    let cam = frame.cam_pos.xz;
+    var o: TwIn;
+    o.macroA = twd(det, tws_rot(abs_p.xz, 0.7) / 173.0, vec2<f32>(0.0), vec2<f32>(0.0)).w;
+    o.macroB = twd(det, tws_rot(abs_p.xz, 2.1) / 47.0, vec2<f32>(0.0), vec2<f32>(0.0)).w;
+    o.mcr = o.macroA * 0.6 + o.macroB * 0.4;
+    o.dN = twd(det, tw_rel_uv(rel.xz, cam, 0.0, 1.9), dwx.xz / 1.9, dwy.xz / 1.9);
+    o.dM = twd(det, tw_rel_uv(rel.xz, cam, 1.3, 6.7) + 0.21, tws_rot(dwx.xz, 1.3) / 6.7, tws_rot(dwy.xz, 1.3) / 6.7);
+    o.dF = twd(det, tw_rel_uv(rel.xz, cam, 2.4, 0.63) + 0.53, tws_rot(dwx.xz, 2.4) / 0.63, tws_rot(dwy.xz, 2.4) / 0.63);
+    return o;
+}
+
+// Tidewater's palette carries OFP's colour: scaled per channel so its reference tone becomes the
+// layer's own mean (Everon keeps its greens; only the structure is Tidewater's)
+// (first capture: per channel alone carried Tidewater's saturated tropical greens over, and Everon's
+// meadows went lime against the grass blades) -- the colour follows OFP's mean by luminance, and
+// only 30 % of Tidewater's hue variation (dry, straw, lush patches) rides on it
+fn tw_anchor(c: vec3<f32>, reference_srgb: vec3<f32>, anchor: vec3<f32>) -> vec3<f32> {
+    if (anchor.x + anchor.y + anchor.z <= 0.0) { return c; }
+    let reference = max(srgb_to_linear(reference_srgb), vec3<f32>(1e-4));
+    let lw = vec3<f32>(0.2126, 0.7152, 0.0722);
+    let toned = anchor * (dot(c, lw) / dot(reference, lw));
+    let tinted = c * clamp(anchor / reference, vec3<f32>(0.25), vec3<f32>(4.0));
+    return mix(toned, tinted, 0.3);
+}
+
+// TerrainShading.js terrainMeadowTone (MEADOW_* palette)
+fn tw_meadow_tone(mA: f32, mB: f32, slope: f32, south: f32, detail: f32) -> vec3<f32> {
+    let dd = detail - 0.5;
+    let m = mA * 0.55 + mB * 0.45 + slope * 0.25 + south * 0.04 + dd * 0.28;
+    let olive = smoothstep(0.52, 0.6, m);
+    let yellow = smoothstep(0.6, 0.67, m);
+    let straw = smoothstep(0.66, 0.73, m + (mB - 0.5) * 0.2);
+    let lush = smoothstep(0.46, 0.37, mB * 0.7 + mA * 0.3 + slope * 0.2 + dd * 0.2);
+    var c = mix(srgb_to_linear(vec3<f32>(0.25, 0.32, 0.1)), srgb_to_linear(vec3<f32>(0.36, 0.37, 0.14)), olive);
+    c = mix(c, srgb_to_linear(vec3<f32>(0.5, 0.46, 0.2)), yellow * 0.8);
+    c = mix(c, srgb_to_linear(vec3<f32>(0.62, 0.54, 0.33)), straw * 0.55);
+    c = mix(c, srgb_to_linear(vec3<f32>(0.13, 0.2, 0.05)), lush * 0.75);
+    return c;
+}
+
+// The land cover kinds (grass, forest floor, gravel, dirt, field), Terrain.js's land path: albedo
+// in sRGB (as the legacy ground before its decode) and a micro-relief slope.
+// anchor: the layer's OFP mean colour (linear); ofp: OFP's own blended colour here (sRGB, the field
+// keeps its furrows from it); n: ground normal; rel: camera-relative position
+fn tw_cover(kind: u32, det: u32, t: TwIn, anchor: vec3<f32>, ofp: vec3<f32>, abs_p: vec3<f32>, rel: vec3<f32>,
+            n: vec3<f32>, dwx: vec3<f32>, dwy: vec3<f32>, wind: vec2<f32>) -> TwSand {
+    let camDist = length(rel);
+    let px = max(length(dwx), length(dwy));
+    let cam = frame.cam_pos.xz;
+    var col = vec3<f32>(0.0);
+    var slope = vec2<f32>(0.0);
+    if (kind == TWK_GRASS) {
+        // tall-grass meadow: tone patches, clumps and tussocks, wind-combed streaks, soil between
+        // the clumps seen from above, trodden patches
+        var lawn = tw_meadow_tone(t.macroA, t.macroB, 1.0 - n.y, n.z, t.dM.w * 0.65 + t.dN.w * 0.35);
+        let clump = t.dM.w * 0.6 + t.dN.y * 0.4;
+        let clumpK = mix(0.34, 0.95, smoothstep(40.0, 140.0, camDist));
+        lawn = lawn * ((clump - 0.5) * clumpK + 1.0) * ((t.dF.y - 0.4) * 0.22 + 1.0);
+        lawn = lawn * mix(1.0, smoothstep(0.25, 0.55, t.dN.y * 0.5 + t.dM.y * 0.5) * 0.35 + 0.72, smoothstep(50.0, 160.0, camDist));
+        let perp = vec2<f32>(-wind.y, wind.x);
+        let combUV = vec2<f32>(dot(rel.xz, wind) / 7.5 + fract(dot(cam, wind) / 7.5),
+                               dot(rel.xz, perp) / 0.9 + fract(dot(cam, perp) / 0.9)) + vec2<f32>(0.31, 0.77);
+        let gx = vec2<f32>(dot(dwx.xz, wind) / 7.5, dot(dwx.xz, perp) / 0.9);
+        let gy = vec2<f32>(dot(dwy.xz, wind) / 7.5, dot(dwy.xz, perp) / 0.9);
+        let comb = twd(det, combUV, gx, gy).w;
+        lawn = lawn * ((comb - 0.5) * 0.3 + 1.0);
+        let NdV = clamp(dot(n, normalize(-rel)), 0.0, 1.0);
+        let gapK = smoothstep(0.3, 0.95, NdV) * smoothstep(0.62, 0.3, clump);
+        lawn = mix(lawn, srgb_to_linear(vec3<f32>(0.17, 0.13, 0.08)), gapK * 0.45);
+        lawn = mix(lawn, tws_sat(lawn * 1.12, 1.15), smoothstep(0.45, 0.1, NdV) * 0.6);
+        lawn = mix(lawn, srgb_to_linear(vec3<f32>(0.4, 0.33, 0.23)), smoothstep(0.72, 0.84, t.dN.y + (t.dM.y - 0.5) * 0.5) * 0.25);
+        col = tw_anchor(lawn, vec3<f32>(0.3, 0.34, 0.12), anchor);
+    } else if (kind == TWK_FOREST) {
+        // forest floor: leaf litter over dark humus, damp hollows, the greener cover from afar
+        let litter = mix(srgb_to_linear(vec3<f32>(0.2, 0.15, 0.09)), srgb_to_linear(vec3<f32>(0.34, 0.25, 0.13)), t.dF.y);
+        var floor_c = mix(srgb_to_linear(vec3<f32>(0.1, 0.16, 0.05)), litter, smoothstep(0.52, 0.7, t.dN.y));
+        let far = smoothstep(40.0, 160.0, camDist);
+        var cover = mix(srgb_to_linear(vec3<f32>(0.08, 0.13, 0.04)), srgb_to_linear(vec3<f32>(0.17, 0.24, 0.07)), smoothstep(0.3, 0.7, t.mcr));
+        cover = mix(cover, srgb_to_linear(vec3<f32>(0.27, 0.29, 0.12)), smoothstep(0.66, 0.84, t.macroB + t.dM.w * 0.2) * 0.45);
+        floor_c = mix(floor_c, cover, far * 0.8);
+        floor_c = floor_c * ((t.mcr - 0.5) * 0.3 + 1.0);
+        col = tw_anchor(floor_c, vec3<f32>(0.19, 0.18, 0.08), anchor);
+        // litter relief: Tidewater's groundH, the soil channel at 1.9 m
+        slope = tw_relief(det, rel.xz, cam, 1.9, 1, dwx, dwy) * 0.05;
+    } else if (kind == TWK_GRAVEL) {
+        // scree / shingle: stones of two tones, pale pebbles, a little moss between
+        var scree = mix(srgb_to_linear(vec3<f32>(0.16, 0.13, 0.1)), srgb_to_linear(vec3<f32>(0.27, 0.24, 0.2)),
+                        smoothstep(0.45, 0.75, t.dM.x + (t.dN.x - 0.5) * 0.3));
+        let pebK = 1.0 - smoothstep(0.01, 0.04, px);
+        scree = mix(scree, srgb_to_linear(vec3<f32>(0.5, 0.47, 0.42)), smoothstep(0.62, 0.8, t.dF.z) * 0.6 * pebK);
+        scree = mix(scree, srgb_to_linear(vec3<f32>(0.13, 0.18, 0.06)), smoothstep(0.62, 0.8, t.dM.y + (t.dN.y - 0.45) * 0.5) * 0.35);
+        scree = scree * ((t.dN.x - 0.5) * 0.3 + 1.0);
+        col = tw_anchor(scree, vec3<f32>(0.24, 0.21, 0.17), anchor);
+        slope = tw_relief(det, rel.xz, cam, 1.9, 0, dwx, dwy) * 0.04 + tw_relief(det, rel.xz, cam, 0.63, 2, dwx, dwy) * 0.01 * pebK;
+    } else {
+        // bare / trodden earth (sandy soil, the field): two soil tones, small stones
+        var dirt = mix(srgb_to_linear(vec3<f32>(0.38, 0.31, 0.23)), srgb_to_linear(vec3<f32>(0.5, 0.43, 0.32)), t.dM.w)
+                   * ((t.dN.y - 0.4) * 0.35 + 0.95);
+        dirt = mix(dirt, srgb_to_linear(vec3<f32>(0.56, 0.53, 0.48)), smoothstep(0.72, 0.82, t.dN.z) * 0.5);
+        dirt = dirt * ((t.mcr - 0.5) * 0.25 + 1.0);
+        col = tw_anchor(dirt, vec3<f32>(0.44, 0.37, 0.27), anchor);
+        if (kind == TWK_FIELD) {
+            // the field keeps OFP's furrows: its own luminance around the layer's mean
+            let lum_o = dot(srgb_to_linear(ofp), vec3<f32>(0.2126, 0.7152, 0.0722));
+            let lum_a = max(dot(anchor, vec3<f32>(0.2126, 0.7152, 0.0722)), 1e-4);
+            col = col * clamp(lum_o / lum_a, 0.6, 1.5);
+        }
+        slope = tw_relief(det, rel.xz, cam, 1.9, 1, dwx, dwy) * 0.03;
+    }
+    var o: TwSand;
+    o.albedo = ground_linear_to_srgb(max(col, vec3<f32>(0.0)));
+    o.slope = slope;
+    return o;
+}
+
+// (PERF, 2026-10-14) The far ground: past ~200 m every Tidewater term finer than its macro patches
+// is sub-pixel (and faded out by footprint anyway), so a kind's colour there is its macro tone
+// alone -- two detail taps instead of the 15-30 the near kinds take. Measured: the per-pixel ground
+// cost 2.4 ms of a 1600x900 aerial frame on Everon (terrain colour 6.78 vs 4.39 ms without it).
+fn tw_far_kind(kind: u32, macroA: f32, macroB: f32, anchor: vec3<f32>, n: vec3<f32>, h: f32) -> vec3<f32> {
+    let mcr = macroA * 0.6 + macroB * 0.4;
+    var col = vec3<f32>(0.0);
+    if (kind == TWK_SAND) {
+        let dryK = smoothstep(0.8, 3.0, h);
+        col = mix(srgb_to_linear(vec3<f32>(0.83, 0.75, 0.6)), srgb_to_linear(vec3<f32>(0.9, 0.84, 0.72)),
+                  smoothstep(0.3, 0.72, mcr + dryK * 0.2));
+        col = mix(col, srgb_to_linear(vec3<f32>(0.84, 0.72, 0.55)), smoothstep(0.55, 0.8, 0.5 + (macroB - 0.5) * 0.6) * 0.45);
+        let underW = smoothstep(0.12, -0.6, h);
+        col = mix(col, mix(srgb_to_linear(vec3<f32>(0.84, 0.78, 0.64)), srgb_to_linear(vec3<f32>(0.72, 0.7, 0.58)),
+                           smoothstep(1.0, 9.0, -h)), underW);
+    } else if (kind == TWK_ROCK) {
+        let rockMid = srgb_to_linear(vec3<f32>(0.3, 0.285, 0.265));
+        col = mix(srgb_to_linear(vec3<f32>(0.15, 0.145, 0.135)), rockMid, smoothstep(0.1, 0.5, 0.45 + (mcr - 0.5) * 0.7));
+        col = mix(col, srgb_to_linear(vec3<f32>(0.48, 0.455, 0.42)), smoothstep(0.5, 0.85, 0.45 + (mcr - 0.5) * 0.7));
+        let lum = dot(anchor, vec3<f32>(0.2126, 0.7152, 0.0722));
+        if (lum > 0.0) {
+            col = col * clamp(lum / dot(rockMid, vec3<f32>(0.2126, 0.7152, 0.0722)), 0.6, 2.2);
+        }
+    } else if (kind == TWK_GRASS) {
+        col = tw_anchor(tw_meadow_tone(macroA, macroB, 1.0 - n.y, n.z, 0.5), vec3<f32>(0.3, 0.34, 0.12), anchor);
+    } else if (kind == TWK_FOREST) {
+        var cover = mix(srgb_to_linear(vec3<f32>(0.08, 0.13, 0.04)), srgb_to_linear(vec3<f32>(0.17, 0.24, 0.07)), smoothstep(0.3, 0.7, mcr));
+        cover = mix(cover, srgb_to_linear(vec3<f32>(0.27, 0.29, 0.12)), smoothstep(0.66, 0.84, macroB + 0.1) * 0.45);
+        col = tw_anchor(cover * ((mcr - 0.5) * 0.3 + 1.0), vec3<f32>(0.19, 0.18, 0.08), anchor);
+    } else if (kind == TWK_GRAVEL) {
+        col = tw_anchor(srgb_to_linear(vec3<f32>(0.24, 0.21, 0.17)) * ((mcr - 0.5) * 0.3 + 1.0), vec3<f32>(0.24, 0.21, 0.17), anchor);
+    } else {
+        col = tw_anchor(srgb_to_linear(vec3<f32>(0.44, 0.37, 0.27)) * ((mcr - 0.5) * 0.25 + 1.0), vec3<f32>(0.44, 0.37, 0.27), anchor);
+    }
+    return ground_linear_to_srgb(max(col, vec3<f32>(0.0)));
+}
+
+// d/dx, d/dz of one detail channel (0 rock, 1 soil, 2 sand) on the top projection at `tile` m, by
+// finite differences (no screen-space derivatives in a branch); 0 once a texel is under a pixel
+fn tw_relief(det: u32, rel: vec2<f32>, cam: vec2<f32>, tile: f32, ch: i32, dwx: vec3<f32>, dwy: vec3<f32>) -> vec2<f32> {
+    let px = max(length(dwx), length(dwy));
+    let k = 1.0 - smoothstep(tile / 512.0, tile / 128.0, px);
+    if (k <= 0.0) { return vec2<f32>(0.0); }
+    let e = 1.0 / 512.0;
+    let q = rel / tile + fract(cam / tile);
+    let gx = dwx.xz / tile;
+    let gy = dwy.xz / tile;
+    let s0 = twd(det, q, gx, gy);
+    let sx = twd(det, q + vec2<f32>(e, 0.0), gx, gy);
+    let sz = twd(det, q + vec2<f32>(0.0, e), gx, gy);
+    var h0 = s0.x;
+    var hx = sx.x;
+    var hz = sz.x;
+    if (ch == 1) { h0 = s0.y; hx = sx.y; hz = sz.y; }
+    if (ch == 2) { h0 = s0.z; hx = sx.z; hz = sz.z; }
+    return vec2<f32>(hx - h0, hz - h0) / (e * tile) * k;
+}
+
+
+// value noise, 0..1; `period` > 0 wraps the lattice (cells)
+
+
+fn tws_rot(p: vec2<f32>, a: f32) -> vec2<f32> {
+    let c = cos(a);
+    let s = sin(a);
+    return vec2<f32>(c * p.x - s * p.y, s * p.x + c * p.y);
+}
+
+fn tws_sat(c: vec3<f32>, s: f32) -> vec3<f32> {
+    let l = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    return max(mix(vec3<f32>(l), c, s), vec3<f32>(0.0));
+}
+
+struct TwSand {
+    albedo: vec3<f32>, // sRGB, as the legacy ground before its decode
+    slope: vec2<f32>,  // d(micro height)/dx, /dz
+};
+
+// one detail sample with explicit gradients (branch safe)
+fn twd(det: u32, uv: vec2<f32>, gx: vec2<f32>, gy: vec2<f32>) -> vec4<f32> {
+    return textureSampleGrad(ground[det], ground_samp, uv, gx, gy);
+}
+
+// Tidewater terrainTriplanar, on camera-relative coordinates: rel / tile plus the camera's own
+// fractional tile (an absolute 10 km coordinate keeps only ~1/1000 of a tile in f32)
+fn twr_tri(det: u32, rel: vec3<f32>, cam: vec3<f32>, w: vec3<f32>, tile: f32, dwx: vec3<f32>, dwy: vec3<f32>) -> vec4<f32> {
+    let s = 1.0 / tile;
+    let q = rel * s + fract(cam * s);
+    let x = twd(det, q.zy, dwx.zy * s, dwy.zy * s);
+    let y = twd(det, q.xz + 0.37, dwx.xz * s, dwy.xz * s);
+    let z = twd(det, q.xy + 0.71, dwx.xy * s, dwy.xy * s);
+    return x * w.x + y * w.y + z * w.z;
+}
+
+// Tidewater TerrainShading.js terrainRockSurface (seed 0.5, moss 1), with OFP's brightness: the
+// palette is scaled so its mid tone meets the layer's own mean (pale granite stays pale).
+// abs_p/rel: absolute and camera-relative position; n: ground normal; h: height over the sea;
+// ofp_lum: the layer's mean linear luminance (0 = Tidewater's own)
+fn tw_rock(det: u32, abs_p: vec3<f32>, rel: vec3<f32>, n: vec3<f32>, h: f32, dwx: vec3<f32>, dwy: vec3<f32>,
+           ofp_lum: f32) -> TwSand {
+    let cam = frame.cam_pos.xyz;
+    let a2 = abs(n) * abs(n);
+    let a4 = a2 * a2;
+    let w = a4 / (a4.x + a4.y + a4.z);
+    let big = twr_tri(det, rel, cam, w, 27.0, dwx, dwy);
+    let mid = twr_tri(det, rel, cam, w, 6.1, dwx, dwy);
+    let fine = twr_tri(det, rel, cam, w, 1.3, dwx, dwy);
+    let macroA = twd(det, tws_rot(abs_p.xz, 0.7) / 173.0, vec2<f32>(0.0), vec2<f32>(0.0)).w;
+    let macroB = twd(det, tws_rot(abs_p.xz, 2.1) / 47.0, vec2<f32>(0.0), vec2<f32>(0.0)).w;
+    let mcr = macroA * 0.6 + macroB * 0.4;
+    let px = max(length(dwx), length(dwy));
+    let fineK = 1.0 - smoothstep(0.006, 0.02, px);
+    let midK = 1.0 - smoothstep(0.03, 0.1, px);
+    let hr = big.x * 0.45 + mid.x * 0.35 + ((fine.x - 0.5) * fineK + 0.5) * 0.2;
+    // bedding on steep faces, faded out once a band is thinner than a few pixels
+    let steep = 1.0 - smoothstep(0.55, 0.85, n.y);
+    let bandY = abs_p.y + mid.w * 2.5 + mcr * 6.0;
+    let fwY = abs(dwx.y) + abs(dwy.y);
+    let strata = twd(det, vec2<f32>(bandY / 14.0, 0.5 * 0.37 + 0.13), vec2<f32>(fwY / 14.0, 0.0), vec2<f32>(0.0)).w;
+    let strataAA = 1.0 - smoothstep(0.15, 0.6, fwY);
+    let tone = hr * 0.9 + (mcr - 0.5) * 0.7 + (strata - 0.5) * 0.8 * steep * strataAA;
+    let rockDark = srgb_to_linear(vec3<f32>(0.15, 0.145, 0.135));
+    let rockMid = srgb_to_linear(vec3<f32>(0.3, 0.285, 0.265));
+    let rockLight = srgb_to_linear(vec3<f32>(0.48, 0.455, 0.42));
+    var col = mix(rockDark, rockMid, smoothstep(0.1, 0.5, tone));
+    col = mix(col, rockLight, smoothstep(0.5, 0.85, tone));
+    col = mix(col, srgb_to_linear(vec3<f32>(0.44, 0.37, 0.30)), smoothstep(0.62, 0.8, mid.w + mcr * 0.3) * 0.18);
+    // joints between the big blocks, fainter between plates
+    // (OP: deeper joints than Tidewater's 0.35 / 0.15 -- its rock is cliff, lit edge-on; OFP's lies on
+    // gentle slopes under a high sun, where the cracks are what reads as stone)
+    col = col * (smoothstep(0.05, 0.25, big.x) * 0.5 + 0.5) * (smoothstep(0.05, 0.25, mid.x) * 0.28 + 0.72);
+    // rain streaks down steep faces
+    let sdiv = vec3<f32>(3.1, 41.0, 3.1);
+    let sq = rel / sdiv + fract(cam / sdiv);
+    let sa = twd(det, vec2<f32>(sq.z, sq.y), vec2<f32>(dwx.z / 3.1, dwx.y / 41.0), vec2<f32>(dwy.z / 3.1, dwy.y / 41.0));
+    let sb = twd(det, vec2<f32>(sq.x + 0.5, sq.y + 0.3), vec2<f32>(dwx.x / 3.1, dwx.y / 41.0), vec2<f32>(dwy.x / 3.1, dwy.y / 41.0));
+    let n2 = n.xz * n.xz;
+    let sw4 = n2 * n2;
+    let stainS = (sa.w * sw4.x + sb.w * sw4.y) / (sw4.x + sw4.y + 1e-5);
+    let stain = smoothstep(0.52, 0.72, stainS) * steep;
+    col = col * (1.0 - stain * 0.4) * (smoothstep(0.35, 0.2, stainS) * steep * 0.12 + 1.0);
+    // OFP's brightness for the stone itself, before lichen and moss (they keep their own colours)
+    if (ofp_lum > 0.0) {
+        let ref_lum = dot(rockMid, vec3<f32>(0.2126, 0.7152, 0.0722));
+        col = col * clamp(ofp_lum / ref_lum, 0.6, 2.2);
+    }
+    // lichens on the dry upper faces
+    let dry = smoothstep(2.6, 4.0, h);
+    let lichen = smoothstep(0.6, 0.78, mid.y) * smoothstep(0.2, 0.7, n.y) * dry * smoothstep(0.45, 0.65, mcr);
+    col = mix(col, srgb_to_linear(vec3<f32>(0.70, 0.70, 0.64)), lichen * 0.45);
+    col = mix(col, srgb_to_linear(vec3<f32>(0.78, 0.50, 0.20)), smoothstep(0.8, 0.88, mid.y) * dry * smoothstep(0.5, 0.8, n.y) * 0.3);
+    // moss / grass on ledges and tops
+    let ledge = smoothstep(0.55, 0.7, strata) * steep * strataAA * smoothstep(0.4, 0.6, mid.w + (mcr - 0.5) * 0.4);
+    // (OP) in patches: Tidewater's rock is cliff, where "up-facing" is a ledge; OFP lays its rock
+    // layers on gentle ground too, and moss on every up-facing texel turned a whole rock field green
+    let mossPatch = smoothstep(0.5, 0.72, mid.w + (mcr - 0.5) * 0.4 + (big.x - 0.5) * 0.3);
+    let moss = max(smoothstep(0.62, 0.9, n.y + (big.x - 0.5) * 0.5 + (mcr - 0.5) * 0.3) * mossPatch, ledge * 0.8)
+        * smoothstep(2.5, 5.0, h);
+    col = mix(col, mix(srgb_to_linear(vec3<f32>(0.19, 0.29, 0.08)), srgb_to_linear(vec3<f32>(0.3, 0.34, 0.14)), mid.w), moss * 0.9);
+    // shoreline zonation: black splash band, sun-bleached tops, barnacles and algae, wet foot
+    let splash = smoothstep(0.5, 1.0, h) * smoothstep(2.8, 1.8, h + mid.w * 1.2) * smoothstep(0.35, 0.6, mcr + mid.w * 0.3);
+    col = mix(col, srgb_to_linear(vec3<f32>(0.075, 0.075, 0.07)), splash * 0.55);
+    col = mix(col, rockLight, smoothstep(0.35, 0.95, n.y) * smoothstep(1.5, 3.0, h) * 0.3);
+    let inter = smoothstep(-0.7, -0.2, h) * smoothstep(0.7, 0.2, h);
+    let barn = smoothstep(0.62, 0.72, fine.z) * inter * fineK;
+    col = mix(col, srgb_to_linear(vec3<f32>(0.20, 0.27, 0.10)), inter * smoothstep(0.4, 0.6, mid.y) * 0.6);
+    col = mix(col, srgb_to_linear(vec3<f32>(0.78, 0.76, 0.70)), barn * 0.8);
+    let sub = smoothstep(-0.3, -1.2, h);
+    col = mix(col, mix(srgb_to_linear(vec3<f32>(0.20, 0.27, 0.10)), srgb_to_linear(vec3<f32>(0.62, 0.44, 0.46)),
+                       smoothstep(0.45, 0.7, mid.w)), sub * 0.55);
+    let wet = smoothstep(1.0, 0.25, h + mid.w * 0.3);
+    col = col * mix(1.0, 0.55, wet);
+
+    // relief: Tidewater's hd = big*0.25 + mid*0.07 (+ grain), differentiated on the top projection
+    // (finite differences of the detail field: no screen-space derivatives in this branch)
+    let e = 1.0 / 512.0;
+    let qb = rel.xz / 27.0 + fract(cam.xz / 27.0) + 0.37;
+    let qm = rel.xz / 6.1 + fract(cam.xz / 6.1) + 0.37;
+    let gb = dwx.xz / 27.0;
+    let hb = dwy.xz / 27.0;
+    let gm = dwx.xz / 6.1;
+    let hm = dwy.xz / 6.1;
+    let b0 = twd(det, qb, gb, hb).x;
+    let bx = twd(det, qb + vec2<f32>(e, 0.0), gb, hb).x;
+    let bz = twd(det, qb + vec2<f32>(0.0, e), gb, hb).x;
+    let m0 = twd(det, qm, gm, hm).x;
+    let mx = twd(det, qm + vec2<f32>(e, 0.0), gm, hm).x;
+    let mz = twd(det, qm + vec2<f32>(0.0, e), gm, hm).x;
+    // (x3 over Tidewater's hd: on gentle ground the plates' tilt is the relief that shows; owner, "i also
+    // do not really see the new rock texture")
+    let slope = (vec2<f32>(bx - b0, bz - b0) / (e * 27.0) * 0.25
+               + vec2<f32>(mx - m0, mz - m0) / (e * 6.1) * 0.07 * (midK * 0.6 + 0.4)) * w.y * 3.0;
+
+    var o: TwSand;
+    o.albedo = ground_linear_to_srgb(max(col, vec3<f32>(0.0)));
+    o.slope = slope;
+    return o;
+}
+
+// The sand's ripple direction: FIXED in the world. Tidewater's frame.windDir is a constant of its
+// scene; here the live wind turns with every gust, and ripples oriented by it rotated on the beach
+// under a still camera (owner: "the sand normals are moving around, even when dlss is turned off").
+// Sand ripples are the record of the prevailing wind, not of this second's gust.
+const TWS_RIPPLE_DIR: vec2<f32> = vec2<f32>(0.8, 0.6);
+const TWS_SWELL_DIR: vec2<f32> = vec2<f32>(0.6, -0.8);
+
+// One ripple field: phase and its d/dxz along `dir`, camera-relative (the camera's own phase from
+// the exact uniform, not from abs - rel: that difference is rounded per pixel at 10 km and made the
+// pattern crawl). Returns (pow(s, e), d/dx, d/dz) with the rate band-limited by the footprint.
+fn tws_ripple(rel: vec2<f32>, cam: vec2<f32>, dir: vec2<f32>, wavelength: f32, warp: f32, e: f32,
+              fp: f32, lo: f32, hi: f32) -> vec4<f32> {
+    let k = 6.2832 / wavelength;
+    let ph = dot(rel, dir) * k + fract(dot(cam, dir) / wavelength) * 6.2832 + warp;
+    let fade = 1.0 - smoothstep(lo, hi, fp * k);
+    let s = sin(ph) * 0.5 + 0.5;
+    let d = e * pow(max(s, 1e-4), e - 1.0) * 0.5 * cos(ph) * k;
+    return vec4<f32>(pow(s, e), dir * d, fade);
+}
+
+// Tidewater Terrain.js beach sand. t: the detail samples (tw_inputs: dN 1.9 m, dM 6.7 m, dF 0.63 m and
+// the macro); rel: camera-relative position; cam: the camera (frame.cam_pos.xz); h: height over the
+// sea; fp: footprint (m per pixel); grade: |grad h| of the ground
+fn tw_beach_sand(det: u32, t: TwIn, rel: vec3<f32>, cam: vec2<f32>, h: f32, fp: f32, grade: f32,
+                 dwx: vec3<f32>, dwy: vec3<f32>) -> TwSand {
+    let dMw = t.dM.w;
+    let dMy = t.dM.y;
+    let dMx = t.dM.x;
+    let dNw = t.dN.w;
+    let dNy = t.dN.y;
+    let macroB = t.macroB;
+    let mcr = t.mcr;
+    // Tidewater's grain: the detail tile's sand channel (its mips filter it: no aliasing to fade)
+    let grain = min(t.dN.z, 0.62);
+    let grainF = min(t.dF.z, 0.62);
+    let camDist = length(rel);
+
+    // ---- beach sand: pale coral sand, drifts of warmer / coarser sand, grain
+    let dryK = smoothstep(0.8, 3.0, h);
+    var sand = mix(srgb_to_linear(vec3<f32>(0.83, 0.75, 0.6)), srgb_to_linear(vec3<f32>(0.9, 0.84, 0.72)),
+                   smoothstep(0.3, 0.72, mcr + dryK * 0.2));
+    sand = mix(sand, srgb_to_linear(vec3<f32>(0.84, 0.72, 0.55)), smoothstep(0.55, 0.8, dMw + (macroB - 0.5) * 0.6) * 0.45);
+    sand = sand * ((dMw - 0.5) * 0.16 + 1.0) * ((dNw - 0.5) * 0.1 + 1.0);
+    sand = sand * ((grain - 0.45) * 0.3 + 0.97) * ((grainF - 0.45) * 0.2 + 1.0);
+    let trod = smoothstep(0.52, 0.7, dNy + (dMy - 0.5) * 0.6) * dryK;
+    sand = sand * (1.0 - trod * 0.07);
+    let hw = h + (dMw - 0.5) * 0.5;
+    let wrackBand = smoothstep(1.15, 1.4, hw) * smoothstep(2.1, 1.7, hw);
+    let landW = 1.0 - smoothstep(0.12, -0.6, h);
+    let pebDensity = smoothstep(0.62, 0.85, macroB + dMw * 0.3) * 0.2 + wrackBand * smoothstep(0.3, 0.6, dMy);
+    let pebW = smoothstep(0.66, 0.8, t.dN.z) * clamp(pebDensity, 0.0, 1.0) * landW * (1.0 - smoothstep(12.0, 35.0, camDist));
+    let pebCol = mix(mix(srgb_to_linear(vec3<f32>(0.86, 0.82, 0.74)), srgb_to_linear(vec3<f32>(0.78, 0.64, 0.6)),
+                         smoothstep(0.45, 0.75, dMx)),
+                     srgb_to_linear(vec3<f32>(0.36, 0.33, 0.3)), smoothstep(0.74, 0.82, dMy));
+    sand = mix(sand, pebCol, pebW * 0.75);
+    let wrack = wrackBand * smoothstep(0.58, 0.72, dNy) * smoothstep(0.4, 0.6, macroB);
+    sand = mix(sand, srgb_to_linear(vec3<f32>(0.24, 0.18, 0.11)), wrack * 0.8);
+
+    // wind ripples on the dry sand, ~10.5 cm, bent by the detail noise
+    let r1 = tws_ripple(rel.xz, cam, TWS_RIPPLE_DIR, 0.105, dMw * 24.0 + dNw * 7.0 + macroB * 30.0, 1.6, fp, 0.6, 2.2);
+    let windK = r1.w * smoothstep(1.5, 2.2, h) * (1.0 - trod * 0.7) * smoothstep(0.2, 0.5, macroB + dMw * 0.3);
+    sand = sand * ((r1.x - 0.5) * 0.12 * windK + 1.0);
+    var slope = r1.yz * 0.005 * windK;
+
+    // ---- seabed: lighter shallow sand, megaripple fields (~0.75 m) and wave ripples (~0.16 m)
+    let underW = smoothstep(0.12, -0.6, h);
+    let depth = -h;
+    if (underW > 0.0) {
+        var under = mix(srgb_to_linear(vec3<f32>(0.84, 0.78, 0.64)), srgb_to_linear(vec3<f32>(0.72, 0.7, 0.58)),
+                        smoothstep(1.0, 9.0, depth));
+        under = under * ((dMw - 0.5) * 0.14 + 1.0) * ((grain - 0.45) * 0.25 + 1.0);
+        let r2 = tws_ripple(rel.xz, cam, TWS_SWELL_DIR, 0.75, dMw * 16.0 + macroB * 24.0, 1.4, fp, 0.5, 2.0);
+        let r3 = tws_ripple(rel.xz, cam, TWS_SWELL_DIR, 0.16, dMw * 26.0 + dNw * 5.0, 1.5, fp, 0.6, 2.2);
+        let fieldW = smoothstep(0.42, 0.62, macroB + (dMw - 0.5) * 0.35) * smoothstep(0.9, 2.0, depth);
+        under = under * ((r2.x - 0.55) * 0.22 * fieldW * r2.w + 1.0);
+        sand = mix(sand, under, underW);
+        slope += (r3.yz * 0.012 * r3.w * smoothstep(-0.3, -0.9, h) + r2.yz * 0.035 * r2.w * fieldW) * underW;
+    }
+
+    // ---- damp sand below the berm, darker in mottled drying patches
+    let dampMottle = smoothstep(0.3, 0.7, dMw + (dNy - 0.45) * 0.6 + (macroB - 0.5) * 0.4);
+    // (the berm's height follows the slope, as the wet band's does: a steep OFP shore face is a few
+    // metres of beach, not 1.7 m of height)
+    let damp = smoothstep(clamp(grade * 5.0, 1.9, 3.0), 0.5, h + dMw * 0.3) * mix(0.3, 0.65, dampMottle) * landW;
+    sand = mix(sand, tws_sat(sand * 0.58, 1.15) * vec3<f32>(0.97, 0.98, 1.0), damp);
+    // swash marks: thin wavy lines of grit at the limits of earlier uprushes
+    let sl = (h + dMw * 0.18 + dNw * 0.05) / 0.13;
+    let slD = abs(fract(sl) - 0.5);
+    let slW = fp * grade / 0.13 + 1e-4;
+    let swashLine = smoothstep(slW * 1.5 + 0.04, 0.0, slD) * smoothstep(0.2, 0.4, h) * smoothstep(1.6, 1.2, h)
+        * smoothstep(0.45, 0.65, dMy + (macroB - 0.5) * 0.4) * (1.0 - smoothstep(0.8, 2.0, slW * 10.0));
+    sand = mix(sand * (1.0 - swashLine * 0.3), srgb_to_linear(vec3<f32>(0.9, 0.88, 0.84)),
+               swashLine * smoothstep(0.6, 0.75, grainF) * 0.5);
+
+    // grain relief: Tidewater's grain * 0.004 + grainF * 0.003 (+ pebbles), on the detail tiles
+    slope += (tw_relief(det, rel.xz, cam, 1.9, 2, dwx, dwy) * 0.004 + tw_relief(det, rel.xz, cam, 0.63, 2, dwx, dwy) * 0.003)
+             * (1.0 - underW * 0.5);
+
+    var o: TwSand;
+    o.albedo = ground_linear_to_srgb(max(sand, vec3<f32>(0.0)));
+    o.slope = slope;
+    return o;
 }
 
 fn terrain_uv(transform: TerrainUv, source_bit: u32, source_mask: u32,
@@ -758,12 +1925,34 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     // and needs Everon's 2,500 `_supertexture.edds` paged in, which is a build, not a
     // binding.
     if (material.enfusion != 0u && tp.enfusion_ground > 0.0) {
+#ifdef TERRAIN_DEBUG_NATIVE_RED
+        return AuthoredCell(vec3<f32>(0.5, 0.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), 1.0, 0.0);
+#endif
         let wxz = vec2<f32>(world_pos.x, world_pos.z);
         let duv = vec2<f32>(world_dwx.x, world_dwx.z);
         let dvv = vec2<f32>(world_dwy.x, world_dwy.z);
-        let d_uv = wxz * material.detail_scale;
+        var d_uv = wxz * material.detail_scale;
+        // RFG-110: `ParallaxScale` (satellite_uv.v.w; 37 of 51 surfaces author one, Grass_03
+        // 0.04) over the NHO's height channel -- Bohemia's texture table: NHO = normal X, normal
+        // -Y, HEIGHT, AO; "Height: used for parallax ... of decal or terrain surface". The same
+        // single-step offset as the legacy `_nopx` path, in detail-UV units, fading out with
+        // distance where a texel is smaller than the offset anyway.
+        let parallax_scale = select(0.0, material.satellite_uv.v.w, material.tile_normal != 0u);
+        if (parallax_scale > 0.0 && tp.enfusion_ground > 0.0) {
+            let near = 1.0 - smoothstep(10.0, 45.0, length(view_pos));
+            if (near > 0.0) {
+                let h = textureSampleGrad(ground[material.tile_normal], ground_samp, d_uv,
+                                          duv * material.detail_scale, dvv * material.detail_scale).b;
+                let to_eye = normalize(-view_pos);
+                let offset = (h - 0.5) * parallax_scale * near * to_eye.xz / max(to_eye.y, 0.25);
+                d_uv = d_uv + clamp(offset, vec2<f32>(-parallax_scale), vec2<f32>(parallax_scale));
+            }
+        }
         var rgb = textureSampleGrad(ground[material.legacy], ground_samp, d_uv,
                                     duv * material.detail_scale, dvv * material.detail_scale).rgb;
+#ifdef TERRAIN_DEBUG_DETAIL
+        return AuthoredCell(rgb, vec3<f32>(0.0, 0.0, 1.0), 1.0, 0.0);
+#endif
         var normal_ts = vec3<f32>(0.0, 0.0, 1.0);
         var authored_ao = 1.0;
         let detail_end = max(material.detail_max, 1.0);
@@ -810,6 +1999,36 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                                  max(material.detail_max, 1.0), length(view_pos));
             rgb = mix(rgb, mid, far * clamp(material.middle_blend, 0.0, 1.0));
         }
+        // RFG-PBR: the world's supertexture (TerrainWgpuEnfusionSurface BuildEnfusionSatmap),
+        // flagged by legacy_satellite_generated == 2; satellite_uv.u = (1/extent, SatMapBlend).
+        // Read as a LERP weight, the only reading a blend scalar in 0..1 admits: the material
+        // hands that share of its colour to the satellite past its own DetailMaxDistance (the
+        // band the middle map uses), and every material hands all of it over between 0.8 and
+        // 2.5 km, where a 4 m detail tile can only alias. Satellite alpha 0 -- under the road
+        // ribbons -- leaves the material's own colour.
+        if (material.legacy_satellite_generated == 2u && material.satellite != 0u) {
+            let dist = length(view_pos);
+#ifdef SATMAP_NEAR_EXPERIMENT
+            let near_band = 1.0;
+#else
+            let near_band = smoothstep(max(material.detail_max - material.detail_fade, 0.0),
+                                       max(material.detail_max, 1.0), dist);
+#endif
+            let w_sat = max(clamp(material.satellite_uv.u.y, 0.0, 1.0) * near_band,
+                            smoothstep(800.0, 2500.0, dist));
+            if (w_sat > 0.0) {
+                let s_scale = material.satellite_uv.u.x;
+                let sat = textureSampleGrad(ground[material.satellite], ground_clamp_samp,
+                                            (wxz - tp.world_origin) * s_scale, duv * s_scale, dvv * s_scale);
+                rgb = mix(rgb, sat.rgb, w_sat * clamp(sat.a, 0.0, 1.0));
+#ifdef TERRAIN_DEBUG_SATELLITE
+                return AuthoredCell(vec3<f32>(sat.rgb), vec3<f32>(0.0, 0.0, 1.0), 1.0, 0.0);
+#endif
+            }
+        }
+#ifdef TERRAIN_DEBUG_SATELLITE
+        return AuthoredCell(vec3<f32>(1.0, 0.0, 1.0), vec3<f32>(0.0, 0.0, 1.0), 1.0, 0.0);
+#endif
         // Blended, not switched, so the dev panel's A/B is a crossfade and 0 is
         // BIT-EXACT the legacy sample below. Full on costs ONE fetch (two with a
         // middle map): the legacy tap is only taken while the slider is between.
@@ -1078,6 +2297,9 @@ override blend_width: f32 = 0.15;
 // TexGen. Height comes from `_nopx` red (MAT-040); `_nohq` holds that channel at zero, so
 // a surface without one simply does not displace. Tunable via WGR_TERRAIN_PARALLAX.
 override terrain_parallax: f32 = 0.02;
+// Gloss of wet soil and rain puddles: scales the sky reflection, sun glint and
+// puddle film (1 = the original look, 0 = matte). Tunable via WGR_TERRAIN_WET_SHINE.
+override terrain_wet_shine: f32 = 0.6;
 override a3_surface_blend: f32 = 0.0;
 // Distance band (metres from the CAMERA -- WLD-019 amendment) over which the authored
 // surface stack's colour gain eases back to neutral and the ground becomes the bare
@@ -1108,6 +2330,9 @@ override detail_normal_end: f32 = 300.0;
 // for the feature: it toggles on ONE binary, so a before/after pair cannot drift on
 // anything but the tile normal.
 override tile_normal_strength: f32 = 1.0;
+// WGR_TERRAIN_COST_STAGE (profiling only, default 0 = off): fs_terrain returns after stage N so
+// the compiler drops the rest -- 1 ground colour, 2 + wet/mud/snow, 3 + shadows, 4 + lighting.
+override cost_stage: u32 = 0u;
 // How much of the authored surface's gain comes from its OWN measured average instead of
 // the assumed 0.5 behind the x2 (WGR_TERRAIN_SURFACE_NORMALISE). 0 = the shipped x2, exactly;
 // 1 = `surface / mean(surface)`, neutral by construction for any source albedo; between =
@@ -1194,17 +2419,34 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let dwy_tex = dwy * gscale;
     let cc = cell_pos - vec2<f32>(0.5);
     let base = floor(cc);
-    let f = cc - base;
+    var f = cc - base;
     let bi = vec2<i32>(i32(base.x), i32(base.y));
-    let e00 = cell_entry(bi + vec2<i32>(0, 0));
-    let e10 = cell_entry(bi + vec2<i32>(1, 0));
-    let e01 = cell_entry(bi + vec2<i32>(0, 1));
-    let e11 = cell_entry(bi + vec2<i32>(1, 1));
+    var e00 = cell_entry(bi + vec2<i32>(0, 0));
+    var e10 = cell_entry(bi + vec2<i32>(1, 0));
+    var e01 = cell_entry(bi + vec2<i32>(0, 1));
+    var e11 = cell_entry(bi + vec2<i32>(1, 1));
+    var bw = clamp(blend_width, 0.001, 0.5);
+    // RFG-PBR: on a native Reforger world the four entries come from the fine surface map (a few
+    // metres a texel, from the 1 m authored masks) instead of the land cells, whose single index is
+    // one 1 m sample at a 12.5 m cell's centre -- the staircase along every field edge. A full,
+    // smoothstepped bilinear blend over each texel turns the 3 m steps into soft edges. Native
+    // surfaces tile in world space, so the land-cell `base` stays the cell argument below (it only
+    // positions clamped transition tiles, which these never are).
+    if (tp.surface_grid > 0.0) {
+        let sp = (in.world_xz - tp.world_origin) / tp.surface_grid - vec2<f32>(0.5);
+        let sb = floor(sp);
+        f = sp - sb;
+        let si = vec2<i32>(sb);
+        e00 = surface_entry(si);
+        e10 = surface_entry(si + vec2<i32>(1, 0));
+        e01 = surface_entry(si + vec2<i32>(0, 1));
+        e11 = surface_entry(si + vec2<i32>(1, 1));
+        bw = 0.5;
+    }
 
     // Sharpen the fraction so the cross-fade concentrates in a band around the
     // cell boundary (f = 0.5) rather than ramping across the whole cell. Endpoints
     // stay 0/1, so neighbouring samples remain seamless.
-    let bw = clamp(blend_width, 0.001, 0.5);
     let fx = smoothstep(0.5 - bw, 0.5 + bw, f.x);
     let fy = smoothstep(0.5 - bw, 0.5 + bw, f.y);
     let w00 = (1.0 - fx) * (1.0 - fy);
@@ -1231,17 +2473,26 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // cell's own [0,1] frame, so the four taps genuinely differ even for one entry.
     // Those keep the full blend.
     let uniform_cell = e00 == e10 && e00 == e01 && e00 == e11 && (e00 & CELL_CLAMPED) == 0u;
+    var a00 = 0.0;
+    var a10 = 0.0;
+    var a01 = 0.0;
+    var a11 = 0.0;
     if (uniform_cell) {
         let c = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
+        a00 = tw_last_alpha;
         rgb = c.rgb;
         authored_normal_ts = c.normal_ts;
         authored_ao = c.ambient_occlusion;
         mud = c.mud;
     } else {
         let c00 = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
+        a00 = tw_last_alpha;
         let c10 = sample_authored_cell(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
+        a10 = tw_last_alpha;
         let c01 = sample_authored_cell(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
+        a01 = tw_last_alpha;
         let c11 = sample_authored_cell(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
+        a11 = tw_last_alpha;
         rgb = w00 * c00.rgb + w10 * c10.rgb + w01 * c01.rgb + w11 * c11.rgb;
         // The authored surface normal, blended across the same four cells as the colour so it
         // stays continuous over a cell boundary.
@@ -1251,20 +2502,88 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
                     + w01 * c01.ambient_occlusion + w11 * c11.ambient_occlusion;
         mud = w00 * c00.mud + w10 * c10.mud + w01 * c01.mud + w11 * c11.mud;
     }
+    // (OP) Tidewater's ground where the layer says so (tw_cell), blended across the cells as the
+    // colour is: a weight and an OFP anchor colour per surface kind; faded out where the satellite
+    // takes over the far ground
+    var tws: TwSlots;
+    tws.k0 = 0u; tws.w0 = 0.0; tws.c0 = vec3<f32>(0.0);
+    tws.k1 = 0u; tws.w1 = 0.0; tws.c1 = vec3<f32>(0.0);
+    tws.total = 0.0;
+    var tw_det = 0u;
+    if (uniform_cell) {
+        let t00 = tw_cell(e00, a00);
+        tw_acc(&tws, t00, 1.0);
+        tw_det = t00.det;
+    } else {
+        let t00 = tw_cell(e00, a00);
+        let t10 = tw_cell(e10, a10);
+        let t01 = tw_cell(e01, a01);
+        let t11 = tw_cell(e11, a11);
+        tw_acc(&tws, t00, w00);
+        tw_acc(&tws, t10, w10);
+        tw_acc(&tws, t01, w01);
+        tw_acc(&tws, t11, w11);
+        tw_det = max(max(t00.det, t10.det), max(t01.det, t11.det));
+    }
+    let tws_fade = 1.0 - smoothstep(800.0, 2400.0, length(in.world_pos));
 
     // High-frequency detail noise: alpha modulates around neutral (matches GL33's
     // r0.rgb *= t1.a * 2.0, detail UV = base UV * 32).
     let detail_a = textureSampleBias(detail, ground_samp, tile_uv * 32.0, frame.renscale.x).a;
     rgb *= detail_a * 2.0;
+    // Per-pixel normal at a fixed heightmap step (independent of patch LOD/morph).
+    let ground_normals = sample_mud_normals(in.world_xz, tp.terrain_grid, snow_footprint);
+    let geometric_n = ground_normals.fine;
+    var tws_slope = vec2<f32>(0.0);
+    let tw_total = tws.w0 + tws.w1;
+    if (tw_total * tws_fade > 0.001 && tw_det != 0u) {
+        let wind = normalize(frame.foliaged.zw + vec2<f32>(1e-4, 0.0));
+        let h_sea = absolute_world_pos.y - tp.sea_level;
+        let farK = smoothstep(130.0, 200.0, length(in.world_pos));
+        let macroA = twd(tw_det, tws_rot(absolute_world_pos.xz, 0.7) / 173.0, vec2<f32>(0.0), vec2<f32>(0.0)).w;
+        let macroB = twd(tw_det, tws_rot(absolute_world_pos.xz, 2.1) / 47.0, vec2<f32>(0.0), vec2<f32>(0.0)).w;
+        var tin: TwIn;
+        if (farK < 1.0) { tin = tw_inputs(tw_det, absolute_world_pos, in.world_pos, dwx, dwy); }
+        var acc = vec3<f32>(0.0);
+        for (var slot = 0u; slot < 2u; slot++) {
+            let k = select(tws.k1, tws.k0, slot == 0u);
+            let wk = select(tws.w1, tws.w0, slot == 0u);
+            if (wk < 0.001 || k == 0u) { continue; }
+            let anchor = select(tws.c1, tws.c0, slot == 0u) / wk;
+            var s: TwSand;
+            s.albedo = vec3<f32>(0.0);
+            s.slope = vec2<f32>(0.0);
+            if (farK > 0.0) {
+                s.albedo = tw_far_kind(k, macroA, macroB, anchor, geometric_n, h_sea);
+            }
+            if (farK >= 1.0) {
+                acc += s.albedo * wk;
+                continue;
+            }
+            let farAlbedo = s.albedo;
+            if (k == TWK_SAND) {
+                s = tw_beach_sand(tw_det, tin, in.world_pos, frame.cam_pos.xz, h_sea, snow_footprint,
+                                  length(geometric_n.xz) / max(geometric_n.y, 0.2), dwx, dwy);
+            } else if (k == TWK_ROCK) {
+                s = tw_rock(tw_det, absolute_world_pos, in.world_pos, geometric_n, h_sea, dwx, dwy,
+                            dot(anchor, vec3<f32>(0.2126, 0.7152, 0.0722)));
+            } else {
+                s = tw_cover(k, tw_det, tin, anchor, rgb, absolute_world_pos, in.world_pos, geometric_n, dwx, dwy, wind);
+            }
+            acc += mix(s.albedo, farAlbedo, farK) * wk;
+            tws_slope += s.slope * (1.0 - farK) * wk;
+        }
+        let share = min(tw_total, 1.0) * tws_fade * (tw_total / max(tws.total, 1e-5));
+        rgb = mix(rgb, acc / tw_total, share);
+        tws_slope = tws_slope / tw_total * share;
+    }
     // HDR path: decode the gamma-space ground albedo (blend + detail done in gamma,
     // the §5 pragmatic fold) to linear before lighting.
     if (linear > 0.5) {
         rgb = srgb_to_linear(rgb);
     }
+    if (cost_stage == 1u) { return vec4<f32>(rgb, 1.0); }
 
-    // Per-pixel normal at a fixed heightmap step (independent of patch LOD/morph).
-    let ground_normals = sample_mud_normals(in.world_xz, tp.terrain_grid, snow_footprint);
-    let geometric_n = ground_normals.fine;
     // Reuse the pre-existing broad normal: no additional height samples.
     // Keep actual horizon/pixel filtering outside material/admission branches.
     let moist_horizon = dot(reflect(-normalize(-in.world_pos), geometric_n), ground_normals.broad);
@@ -1298,9 +2617,46 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
                     + b_axis * authored_normal_ts.y
                     + geometric_n * max(authored_normal_ts.z, 1e-3));
     }
+    // the sand's micro relief (ripples, grain) on top: a height field's normal is (-dh/dx, 1, -dh/dz)
+    if (abs(tws_slope.x) + abs(tws_slope.y) > 1e-6) {
+        n = normalize(n - vec3<f32>(tws_slope.x, 0.0, tws_slope.y));
+    }
 
     // Fine-surface world height, sampled once and shared by the snow cover
     // below and the terrain-shadow test further down (LOD/morph-independent).
+    // Mud ruts: darker compacted soil and a tyre-tread imprint where wheels pressed
+    // the mud field (identity on untouched ground). Detail fades out by 42 m (the
+    // mud window reaches ~46 m ahead of the camera).
+    let mud_view_dist = length(in.world_pos);
+    let mud_near = mud_rut_surface(in.world_xz, n, normalize(-in.world_pos),
+                                   1.0 - smoothstep(18.0, 42.0, mud_view_dist));
+    // Beyond the fine detail (and the fine mesh), the far view keeps ruts visible
+    // out to ~130 m ahead; it fades in as the near detail fades out.
+    let mud_rut = mud_far_surface(in.world_xz,
+        smoothstep(38.0, 48.0, mud_view_dist) * (1.0 - smoothstep(110.0, 140.0, mud_view_dist)), mud_near);
+    n = mud_rut.normal;
+    if (mud_rut.mud > 0.0) {
+        // Bare mud replaces the ground texture (grass included) in ruts and ridges.
+        let facing = clamp(dot(mud_rut.normal, vec3<f32>(0.0, 1.0, 0.0)) * 2.0 - 1.0, 0.0, 1.0);
+        var soil = mud_soil_colour(in.world_xz, mix(0.55, facing, 0.35));
+        if (linear <= 0.5) { soil = ground_linear_to_srgb(soil); }
+        rgb = mix(rgb, soil, mud_rut.mud);
+    }
+    rgb *= mud_rut.albedo;
+    // BOOM-001: a crater's fresh soil and scorch replace the ground texture (grass included).
+    let crater_mat = crater_material(in.world_xz);
+    if (crater_mat.x + crater_mat.y > 0.004) {
+        // (local coordinates: at Malden's x ~ 9700 the fine noise ran on ~126000, where f32 has
+        // no fraction left to interpolate and the soil came out in square tiles)
+        let cxz = in.world_xz - floor(in.world_xz / 256.0) * 256.0;
+        let radial = crater_height_gradient(in.world_xz, 0.5);
+        let cs = crater_soil(cxz, radial, clamp(n.y, 0.0, 1.0), crater_mat.y);
+        let cover = smoothstep(0.15, 0.55, crater_mat.x * (0.65 + 0.7 * cs.cover_noise));
+        var earth = cs.rgb;
+        if (linear <= 0.5) { earth = ground_linear_to_srgb(earth); }
+        rgb = mix(rgb, earth, cover);
+        n = normalize(n - vec3<f32>(cs.bump.x, 0.0, cs.bump.y) * cover);
+    }
     let world_y = sample_height(in.world_xz);
     let line_depth = snowline_depth(in.world_xz, world_y);
     let initial_soil_wet = soil_wet_amount(mud, tp.rain_wetness, snow_cover(in.world_xz, world_y));
@@ -1311,6 +2667,16 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
             * ground_puddle_land_factor(geometric_n.y, world_y, tp.sea_level,
                                        snow_cover(in.world_xz, world_y));
     }
+    // RAIN-FLOW: inside the simulated window the puddles are the water that actually gathered
+    // there, and a running film wets the ground it flows over; the noise mask stays outside it
+    let rain_flow = rain_water_at(in.world_xz);
+    if (rain_flow.z > 0.0) {
+        let snowless = 1.0 - smoothstep(0.002, 0.02, snow_cover(in.world_xz, world_y));
+        let pool = smoothstep(0.003, 0.012, rain_flow.x) * snowless;
+        rain_puddle = mix(rain_puddle, pool, rain_flow.z);
+        soil_wet = max(soil_wet, smoothstep(0.0002, 0.0015, rain_flow.x) * rain_flow.z * snowless);
+    }
+    var snow_glint_cover = 0.0;
     if (snow.info.w > 0.0 || line_depth > 0.0) {
         let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, world_y);
         let snow_h = snow_cover(in.world_xz, world_y) * dry;
@@ -1320,11 +2686,33 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         let snow_ref = max(snow.info.w, line_depth);
         let compacted = clamp(1.0 - snow_h / max(snow_ref, 0.001), 0.0, 1.0);
         var snow_rgb = snow_powder_albedo(vec3<f32>(in.world_xz.x, world_y, in.world_xz.y), snow_footprint, compacted);
+        // wind-shaped snow: the hollows between drifts and ripples sit in their own shade and
+        // look a little darker and bluer, the crests a touch brighter
+        let wind_relief = snow_wind_relief(in.world_xz, snow_footprint);
+        let relief = wind_relief.x;
+        snow_rgb = snow_rgb * (1.0 + 0.035 * relief) * mix(vec3<f32>(1.0), vec3<f32>(0.90, 0.95, 1.02), max(-relief, 0.0) * 0.7);
         if (linear <= 0.5) { snow_rgb = ground_linear_to_srgb(snow_rgb); }
         rgb = mix(rgb, snow_rgb, coverage);
+        // BOOM-003: crystals glint on loose powder; a pressed track has lost them
+        snow_glint_cover = coverage * (1.0 - 0.8 * compacted);
         authored_ao = mix(authored_ao, 1.0, coverage);
-        n = normalize(mix(n, terrain_snow_normal(in.world_xz, world_y, geometric_n, snow_footprint, dry), coverage));
+        n = normalize(mix(n, terrain_snow_normal(in.world_xz, world_y, geometric_n, snow_footprint, dry, wind_relief.yz), coverage));
+        // BOOM-004: bullet tracks, ray-traced (snow_bullet_tracks). Only within 60 m: beyond that
+        // a 5 cm opening is a fraction of a pixel.
+        if (dot(in.world_pos, in.world_pos) < 3600.0) {
+            let sun_dir = -frame.sun_dir_world.xyz;
+            let track = snow_bullet_tracks(in.world_pos + frame.cam_pos.xyz, normalize(in.world_pos), snow_footprint, sun_dir);
+            if (track.open + track.rim > 0.0) {
+                var trackRgb = track.albedo;
+                if (linear <= 0.5) { trackRgb = ground_linear_to_srgb(trackRgb); }
+                rgb = mix(rgb, trackRgb, track.open * coverage);
+                n = normalize(mix(n, track.normal, track.open * coverage));
+                n = normalize(n + vec3<f32>(track.slope.x, 0.0, track.slope.y) * 0.8 * coverage * (1.0 - track.open));
+                snow_glint_cover *= 1.0 - min(track.open * 2.0 + track.rim * 0.5, 1.0);
+            }
+        }
     }
+    if (cost_stage == 2u) { return vec4<f32>(rgb * (0.5 + 0.5 * n.y) * authored_ao + vec3<f32>(soil_wet * 0.01), 1.0); }
 
     // Combined sun shadow: CSM (objects + near contact) and the long-range
     // heightfield mask (terrain-on-terrain) compose by max() — whichever occludes
@@ -1351,7 +2739,8 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // (world_y was sampled once above for the snow cover; reused here.)
     let lit = smoothstep(sm.r - sm.g, sm.r + sm.g + 1e-3, world_y);
     let terrain_s = clamp(sm.b * (1.0 - lit), 0.0, 1.0) * in.fog;
-    let shadow = max(csm_s, terrain_s);
+    let shadow = max(max(csm_s, terrain_s), canopy_sun_shadow(vec3<f32>(in.world_xz.x, world_y, in.world_xz.y)));
+    if (cost_stage == 3u) { return vec4<f32>(rgb * (0.5 + 0.5 * n.y) * authored_ao * (1.0 - 0.5 * shadow) + vec3<f32>(soil_wet * 0.01), 1.0); }
 
     // Coast wet band: near-flat terrain around the (swash-moved) sea level reads as damp sand —
     // darker albedo — strongest at the waterline, fading out over wet_height metres. Keyed on
@@ -1375,13 +2764,27 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
             if (inside > 0.0) { sim = tw_sim_state_at(in.world_xz, i32(pick.x)) * inside; }
         }
         // outside the simulated regions: Tidewater's static damp band
-        let band = smoothstep(0.45, 0.0, h);
+        // (OP, 2026-10-13) 0.8 m, not Tidewater's 0.45, and kept at 3/4 inside the simulated regions
+        // instead of switched off there: OFP's beaches are steeper than Tidewater's, and the sand the
+        // last waves and the tide left wet read as a hairline at the water's edge (owner, after the
+        // swash fix: the wet band too narrow)
+        // ... and measured in metres INLAND, not only of height: OFP's shore face rises steeply at the
+        // water and flattens into the beach (a 12.5 m grid smooths one into the other), so any height
+        // band was a hairline on the face (debug tint, 2026-10-13). The ground 2.5 m and 5 m downhill:
+        // where it is under water, this sand is that close to the waterline.
+        var band = smoothstep(0.8, 0.05, h);
+        if (h < 3.0 && h > -0.2) {
+            let down = normalize(geometric_n.xz + vec2<f32>(1e-5, 0.0));
+            let h25 = sample_height(in.world_xz + down * 2.5) - tww.p.y;
+            let h50 = sample_height(in.world_xz + down * 5.0) - tww.p.y;
+            band = max(band, max(smoothstep(0.3, -0.1, h25), smoothstep(0.3, -0.1, h50) * 0.7));
+        }
         // (Tidewater's landW: the seabed below the waterline is not the wet beach)
         let land = 1.0 - smoothstep(0.12, -0.6, h);
-        let tw_wet = max(sim.y, band * (1.0 - inside)) * flat * land;
+        let tw_wet = max(sim.y, band * (1.0 - inside * 0.25)) * flat * land;
         // Tidewater Terrain.js: wet sand is darker (wetDarken 0.58), a little more saturated and
         // a touch cooler
-        let wet_c = rgb * 0.58;
+        let wet_c = rgb * 0.5; // (Tidewater 0.58; OFP's pale coral sand read barely damp at it)
         let lum = dot(wet_c, vec3<f32>(0.2126, 0.7152, 0.0722));
         let wet_albedo = mix(vec3<f32>(lum), wet_c, 1.15) * vec3<f32>(0.97, 0.98, 1.0);
         rgb = mix(rgb, wet_albedo, tw_wet);
@@ -1467,6 +2870,10 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     }
     // Proven wet soil absorbs through the authored substrate and uses the
     // rough moist-soil coat below. Keep the smooth film on the hard fraction.
+    // Water squeezed into a rut keeps it wet after the rain has stopped.
+    // Rut wetness is rough wet soil, not standing water: at a distance (grazing
+    // view, high Fresnel) it must not turn into a sky mirror.
+    soil_wet = max(soil_wet, mud_rut.wet * (1.0 - 0.65 * smoothstep(15.0, 45.0, mud_view_dist)));
     let wet_surface = soil_wet_surface(mud, soil_wet, rain_puddle);
     // Render-only classification after actual source/snow/rain admission and
     // film partition. Water overlay stays present and marks its own survivors.
@@ -1477,7 +2884,16 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     if (wet_debug == 4u) { return vec4<f32>(0.08, 0.08, 0.08, 1.0); }
     rain_puddle = wet_surface.y;
     rgb *= wet_surface.x;
+    // Water standing in mud ruts: murky (darker underneath, a little less mirror
+    // than clean rain water) and near only -- far off it would read as the shiny
+    // strips the far ruts were cured of.
+    let rut_water = mud_rut.water * (1.0 - smoothstep(28.0, 40.0, mud_view_dist));
+    if (rut_water > 0.0) {
+        rgb *= mix(1.0, 0.7, rut_water);
+        rain_puddle = max(rain_puddle, rut_water * 0.85);
+    }
     sun_ambient *= sky_vis_ao(in.world_xz)
+        * canopy_sky_ao(vec3<f32>(in.world_xz.x, world_y, in.world_xz.y))
         * gtao_ao(in.clip.xy)
         * local_sky_visibility
         * normal_map_cavity(geometric_n, n) * authored_ao;
@@ -1489,18 +2905,30 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let local = lights_contrib(in.world_pos, n, vec3<f32>(1.0), vec3<f32>(1.0), linear);
     let light_sum = sun + local;
     rgb *= select(clamp(light_sum, vec3<f32>(0.0), vec3<f32>(1.0)), max(light_sum, vec3<f32>(0.0)), linear > 0.5);
+    if (cost_stage == 4u) { return vec4<f32>(rgb + vec3<f32>(soil_wet * 0.01), 1.0); }
     if (soil_wet > 0.0) {
         let view = normalize(-in.world_pos);
-        // Filter the disturbed-soil normal at the actual pixel footprint;
-        // never reflect the authored albedo grain or its fine normal map.
-        let moist_n = geometric_n;
+        // (2026-10-14) Wet mud is not an even film: water stands in its small hollows and the
+        // rest is dark, damp and dull. One coat over the whole field read as milky (owner). So the
+        // glossy share is patchy (two noise octaves, ~0.5 m and ~0.2 m, spreading as it wets) and
+        // the film is bumpy at mud scale, so the sky breaks into glints. The bump fades with the
+        // pixel footprint; never the authored albedo grain or its fine normal map.
+        let cov_field = puddle_noise(in.world_xz / 0.55) * 0.65 + puddle_noise(in.world_xz / 0.17) * 0.35;
+        let cov = smoothstep(mix(0.66, 0.46, soil_wet), mix(0.78, 0.58, soil_wet), cov_field);
+        let coat = soil_wet * (1.0 - rain_puddle) * mix(0.18, 1.0, cov);
+        let be = 0.02;
+        let bump = vec2<f32>(
+            puddle_noise((in.world_xz + vec2<f32>(be, 0.0)) / 0.23) - puddle_noise((in.world_xz - vec2<f32>(be, 0.0)) / 0.23),
+            puddle_noise((in.world_xz + vec2<f32>(0.0, be)) / 0.23) - puddle_noise((in.world_xz - vec2<f32>(0.0, be)) / 0.23))
+            / (2.0 * be) * 0.014 * (1.0 - smoothstep(0.04, 0.25, moist_normal_variation));
+        let moist_n = normalize(geometric_n + vec3<f32>(-bump.x, 0.0, -bump.y));
         let fresnel = soil_wet_fresnel(dot(moist_n, view));
         var reflected = sun_ambient;
         if (sky_lit) {
             // A wet soil coat reflects directional sky radiance. Diffuse SH
             // irradiance here washes the soil into a pale, cloudless coating.
             let samples = soil_wet_environment_samples(view, moist_n,
-                soil_wet * (1.0-rain_puddle), moist_normal_variation);
+                coat, moist_normal_variation);
             let sky_scale = frame.sun_ambient.w * sky_vis_ao(in.world_xz) * local_sky_visibility;
             var rough_reflected = vec3<f32>(0.0);
             var reflection_weight = 0.0;
@@ -1518,8 +2946,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
             reflected = select(rgb, rough_reflected, reflection_weight > 0.0);
         }
         let half_vector = normalize(view - frame.sun_dir_world.xyz + vec3<f32>(0.0, 1e-4, 0.0));
-        rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel,
-            soil_wet * (1.0 - rain_puddle));
+        rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel, coat * terrain_wet_shine);
         // Direct GGX already contains dielectric Fresnel; add after the sky mix.
         // Only the admitted moist fraction smooths its broad slope width;
         // geometric derivatives still widen it at unresolved pixel footprints.
@@ -1530,8 +2957,8 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
             clamp(dot(moist_n, -frame.sun_dir_world.xyz), 0.0, 1.0),
             clamp(dot(moist_n, half_vector), 0.0, 1.0),
             clamp(dot(view, half_vector), 0.0, 1.0),
-            moist_normal_variation, soil_wet * (1.0 - rain_puddle), solar_visibility);
-        rgb += sun_diffuse * 3.14159265359 * solar_coat;
+            moist_normal_variation, coat, solar_visibility);
+        rgb += sun_diffuse * 3.14159265359 * solar_coat * terrain_wet_shine;
     }
     if (rain_puddle > 0.0) {
         // Reflect actual directional sky/cloud radiance. Diffuse SH erased
@@ -1550,7 +2977,16 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         reflected += sun_diffuse * sun_lobe * (1.0 - shadow) * cloud_sun_shadow(in.world_xz)
             * local_sky_visibility;
         // Raw roof admission above suppresses both the film and its reflected sky.
-        rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel, rain_puddle);
+        rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel, rain_puddle * terrain_wet_shine);
+    }
+
+    // BOOM-003: ice glitter -- only where the sun actually reaches the snow
+    if (snow_glint_cover > 0.0) {
+        let glint = snow_glitter(in.world_xz, normalize(-in.world_pos), -frame.sun_dir_world.xyz, snow_footprint);
+        if (max(glint.x, max(glint.y, glint.z)) > 0.0) {
+            rgb += sun_diffuse * glint * snow_glint_cover * (1.0 - shadow) * cloud_sun_shadow(in.world_xz)
+                * local_sky_visibility;
+        }
     }
 
     // Debug: output the contrast-shaped sky-view factor as greyscale (unfogged) to inspect/tune the
@@ -1598,7 +3034,7 @@ fn fs_terrain_prepass(in: VsOut) -> @location(0) vec2<f32> {
     if (snow.info.w > 0.0 || snowline_depth(in.world_xz, py) > 0.0) {
         let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, py);
         let coverage = snow_surface_coverage(snow_cover(in.world_xz, py) * dry, n.y, 1.0);
-        n = normalize(mix(n, terrain_snow_normal(in.world_xz, py, n, footprint, dry), coverage));
+        n = normalize(mix(n, terrain_snow_normal(in.world_xz, py, n, footprint, dry, snow_wind_relief(in.world_xz, footprint).yz), coverage));
     }
     let n_view = (frame.view * vec4<f32>(n, 0.0)).xyz;
     return oct_encode(normalize(n_view));

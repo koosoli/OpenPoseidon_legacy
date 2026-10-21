@@ -13,6 +13,7 @@
     "zstd",
     { "name": "sdl3", "version>=": "3.4.10#1" },
     "openal-soft",
+    { "name": "steam-audio", "platform": "windows" },
     "opus",
     "libogg",
     "libvorbis",
@@ -21,6 +22,11 @@
     {
       "name": "imgui",
       "features": ["sdl3-binding", "sdl3-renderer-binding", "opengl3-binding", "freetype"]
+    },
+    {
+      "name": "imgui",
+      "features": ["dx12-binding"],
+      "platform": "windows"
     },
     {
       "name": "spdlog",

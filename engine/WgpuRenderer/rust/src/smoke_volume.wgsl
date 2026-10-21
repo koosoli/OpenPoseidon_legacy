@@ -45,7 +45,10 @@ struct Params {
 // Fixed-point density accumulator, one u32 per cell. See DENSITY_FIXED below.
 @group(0) @binding(1) var<storage, read_write> accum: array<atomic<u32>>;
 // The frame's particles, two vec4 each: (xyz world, w radius m) and (x optical density,
-// y height above ground, zw unused) -- the layout WgrSmokeShadowBlob already uses.
+// y height above ground, z scattering albedo (< 0: the tuning's), w unused) -- the layout
+// WgrSmokeShadowBlob already uses. The accumulator holds two lanes: density in the first
+// cell-count words, density x albedo in the second (FIRE-002: a wreck's soot black, a smoke
+// grenade's white, in one field).
 @group(0) @binding(2) var<storage, read> blobs: array<vec4<f32>>;
 // Rgba16Float, not the r16float the density alone would need: rgba16float is the widest
 // format that is BOTH storage-writable and filterable in core WebGPU, and the march samples
@@ -67,7 +70,7 @@ fn cell_index(c: vec3<i32>) -> u32 {
 fn cs_clear(@builtin(global_invocation_id) gid: vec3<u32>) {
     let d = vec3<u32>(P.dims_steps.xyz);
     let total = d.x * d.y * d.z;
-    if (gid.x >= total) {
+    if (gid.x >= total * 2u) {
         return;
     }
     atomicStore(&accum[gid.x], 0u);
@@ -95,6 +98,9 @@ fn cs_inject(
     if (sigma <= 0.0) {
         return;
     }
+    let albedo = select(P.cam_albedo.w, clamp(dn.z, 0.0, 1.0), dn.z >= 0.0);
+    let dims_u = vec3<u32>(P.dims_steps.xyz);
+    let total = dims_u.x * dims_u.y * dims_u.z;
 
     let cell = P.origin_cell.w;
     let inv_cell = 1.0 / cell;
@@ -120,7 +126,9 @@ fn cs_inject(
                     // at the rim, so a puff does not show its own bounding sphere as an edge.
                     let f = 1.0 - t * t;
                     let w = f * f;
-                    atomicAdd(&accum[cell_index(vec3<i32>(x, y, z))], u32(sigma * w * DENSITY_FIXED));
+                    let ci = cell_index(vec3<i32>(x, y, z));
+                    atomicAdd(&accum[ci], u32(sigma * w * DENSITY_FIXED));
+                    atomicAdd(&accum[total + ci], u32(sigma * w * albedo * DENSITY_FIXED));
                 }
                 x = x + 4;
             }
@@ -136,8 +144,11 @@ fn cs_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= d.x || gid.y >= d.y || gid.z >= d.z) {
         return;
     }
-    let v = f32(atomicLoad(&accum[cell_index(vec3<i32>(gid))])) / DENSITY_FIXED;
-    textureStore(field_out, vec3<i32>(gid), vec4<f32>(v, 0.0, 0.0, 0.0));
+    let ci = cell_index(vec3<i32>(gid));
+    let v = f32(atomicLoad(&accum[ci])) / DENSITY_FIXED;
+    let va = f32(atomicLoad(&accum[d.x * d.y * d.z + ci])) / DENSITY_FIXED;
+    let albedo = select(P.cam_albedo.w, va / max(v, 1e-6), v > 1e-4);
+    textureStore(field_out, vec3<i32>(gid), vec4<f32>(v, albedo, 0.0, 0.0));
 }
 
 // ---------------------------------------------------------------- march + composite
@@ -165,10 +176,15 @@ fn unproject(ndc: vec2<f32>, depth_rev: f32) -> vec3<f32> {
 }
 
 fn density_at(world: vec3<f32>) -> f32 {
+    return field_at(world).x;
+}
+
+// x: density (faded at the walls), y: the cell's scattering albedo
+fn field_at(world: vec3<f32>) -> vec2<f32> {
     let dims = P.dims_steps.xyz;
     let uvw = (world - P.origin_cell.xyz) / (dims * P.origin_cell.w);
     if (uvw.x < 0.0 || uvw.x > 1.0 || uvw.y < 0.0 || uvw.y > 1.0 || uvw.z < 0.0 || uvw.z > 1.0) {
-        return 0.0;
+        return vec2<f32>(0.0, P.cam_albedo.w);
     }
     // FADE OUT AT THE BOX WALLS. Without this the grid announces itself: a dense plume that
     // reaches a wall is cut off along a dead-straight line in mid-air, which is exactly what
@@ -178,7 +194,8 @@ fn density_at(world: vec3<f32>) -> f32 {
     let edge = min(min(uvw.x, uvw.y), uvw.z);
     let edge2 = min(min(1.0 - uvw.x, 1.0 - uvw.y), 1.0 - uvw.z);
     let fade = smoothstep(0.0, 0.06, min(edge, edge2));
-    return textureSampleLevel(field, field_samp, uvw, 0.0).r * fade;
+    let s = textureSampleLevel(field, field_samp, uvw, 0.0);
+    return vec2<f32>(s.r * fade, s.g);
 }
 
 // Slab test against the grid box, in camera-relative space.
@@ -265,8 +282,6 @@ fn fs_march(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let cos_t = dot(dir, P.sun_dir_steps.xyz);
     let phase = phase_hg(cos_t, P.tune.y);
     let ext = P.ambient_ext.a;
-    let albedo = P.cam_albedo.w;
-
     var transmittance: f32 = 1.0;
     var inscatter = vec3<f32>(0.0, 0.0, 0.0);
     var i: i32 = 0;
@@ -275,7 +290,9 @@ fn fs_march(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         let t = t_start + (f32(i) + jitter) * dt;
         let rel = dir * t;
         let world = rel + P.cam_albedo.xyz;
-        let d = density_at(world);
+        let fa = field_at(world);
+        let d = fa.x;
+        let albedo = fa.y;
         if (d > 1.0e-4) {
             let sigma_t = d * ext;
             let sun_t = mix(1.0, sun_transmittance(world), P.tune.w);

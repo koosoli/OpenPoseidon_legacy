@@ -105,8 +105,68 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
             defs.insert("NATIVE_PBR_TANGENTS".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
         }
     }
+    // Native-terrain diagnostics (terrain.wgsl, native Enfusion branch), to name what a ground
+    // pixel IS before reasoning about its colour: NATIVE_RED paints every native surface red (grass
+    // and objects stay as they are -- this is how the pale near meadow was shown to be grass
+    // blades, not terrain), DETAIL = the detail BCR alone, SATELLITE = the supertexture alone
+    // (magenta where a surface takes none). All flat-normal, AO 1. WGR_SATMAP_NEAR=1 applies the
+    // surface's SatMapBlend at every distance instead of past DetailMaxDistance -- an open
+    // question about Reforger's semantics, measured as a small change at the tree pose.
+    match std::env::var("WGR_OBJECT_DEBUG_VIEW").as_deref() {
+        Ok("albedo") => { defs.insert("OBJECT_DEBUG_ALBEDO".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        Ok("light") => { defs.insert("OBJECT_DEBUG_LIGHT".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        _ => {}
+    }
+    if std::env::var("WGR_TERRAIN_DEBUG_DETAIL").as_deref() == Ok("1") {
+        defs.insert("TERRAIN_DEBUG_DETAIL".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
+    if std::env::var("WGR_TERRAIN_DEBUG_SATELLITE").as_deref() == Ok("1") {
+        defs.insert("TERRAIN_DEBUG_SATELLITE".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
+    if std::env::var("WGR_TERRAIN_DEBUG_NATIVE_RED").as_deref() == Ok("1") {
+        defs.insert("TERRAIN_DEBUG_NATIVE_RED".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
+    // RFG-156 native leaf gloss: 1 = roughness 0.45, 2 = 0.3, 3 = 0.6 (gpu_driven.wgsl).
+    match std::env::var("WGR_NATIVE_LEAF_GLOSS").as_deref() {
+        Ok("1") | Ok("2") | Ok("3") => {
+            defs.insert("NATIVE_LEAF_GLOSS".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+            if std::env::var("WGR_NATIVE_LEAF_GLOSS").as_deref() == Ok("2") {
+                defs.insert("NATIVE_LEAF_GLOSS_SMOOTH".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+            }
+            if std::env::var("WGR_NATIVE_LEAF_GLOSS").as_deref() == Ok("3") {
+                defs.insert("NATIVE_LEAF_GLOSS_ROUGH".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+            }
+        }
+        _ => {}
+    }
+    if std::env::var("WGR_SATMAP_NEAR").as_deref() == Ok("1") {
+        defs.insert("SATMAP_NEAR_EXPERIMENT".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
     if std::env::var("WGR_NATIVE_GROUND_AO").as_deref() == Ok("0") {
         defs.insert("DISABLE_NATIVE_GROUND_AO".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
+    // Grass shading terms as colour, to split "the texture is dark" from "the light is":
+    // WGR_GRASS_DEBUG_VIEW=albedo|direct|ambient (cards and blades).
+    match std::env::var("WGR_GRASS_DEBUG_VIEW").as_deref() {
+        Ok("albedo") => { defs.insert("GRASS_DEBUG_ALBEDO".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        Ok("direct") => { defs.insert("GRASS_DEBUG_DIRECT".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        Ok("ambient") => { defs.insert("GRASS_DEBUG_AMBIENT".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        Ok("terms") => { defs.insert("GRASS_DEBUG_TERMS".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        _ => {}
+    }
+    // Grass / far-proxy sun sign (grass.wgsl grass_light_dir): unset = real sun on native worlds
+    // only, 1 = real sun everywhere, 0 = the old (sky-only) sign everywhere.
+    match std::env::var("WGR_GRASS_SUN").as_deref() {
+        Ok("1") => { defs.insert("GRASS_SUN_ALL".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        Ok("0") => { defs.insert("GRASS_LEGACY_SUN_SIGN".to_string(), naga_oil::compose::ShaderDefValue::Bool(true)); }
+        _ => {}
+    }
+    // Meadow margins fade across geography cells (grass.wgsl grass_edge_presence); 0 = square cells.
+    if std::env::var("WGR_GRASS_EDGE_FADE").as_deref() == Ok("0") {
+        defs.insert("GRASS_HARD_CELL_EDGES".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
+    if std::env::var("WGR_SURFACE_RAYS_FILTER").as_deref() == Ok("1") {
+        defs.insert("SURFACE_RAYS_RECEIVER_FILTER".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
     if std::env::var("WGR_COALESCED_PCF").as_deref() == Ok("1") {
         defs.insert("COALESCED_PCF".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
@@ -182,6 +242,93 @@ pub fn build_composer() -> Composer {
     composer
 }
 
+// LOAD-SHADER-MEMO: composing an entry shader through naga_oil is the largest single start-up
+// cost (2026-10-20, OFP Everon from a clean install: 27 compositions, 944 ms, all on the main
+// thread; gpu_driven.wgsl alone composed five times with identical inputs at 38-97 ms each).
+// Composition is deterministic -- no @binding(auto) anywhere -- so a result is remembered under
+// everything that can change it: the entry source and path, the shader defs, the composer's
+// capabilities and every importable module it holds (name + sanitized source). prewarm_shaders()
+// composes the heaviest ones on background threads while the renderer builds everything else;
+// whoever asks first does the work and everyone else waits for it. WGR_SHADER_MEMO=0 = off.
+type ComposeCell = std::sync::Arc<std::sync::OnceLock<Result<naga::Module, String>>>;
+static COMPOSED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<u64, ComposeCell>>> =
+    std::sync::LazyLock::new(Default::default);
+
+fn memo_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_SHADER_MEMO").as_deref() != Ok("0"))
+}
+
+fn compose_key(composer: &Composer, source: &str, file_path: &str,
+               defs: &std::collections::HashMap<String, naga_oil::compose::ShaderDefValue>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut h);
+    file_path.hash(&mut h);
+    composer.capabilities.bits().hash(&mut h);
+    let mut d: Vec<String> = defs.iter().map(|(k, v)| format!("{k}={v:?}")).collect();
+    d.sort();
+    d.hash(&mut h);
+    let mut names: Vec<&String> = composer.module_sets.keys().collect();
+    names.sort();
+    for name in names {
+        name.hash(&mut h);
+        composer.module_sets[name].sanitized_source.hash(&mut h);
+    }
+    h.finish()
+}
+
+fn compose_memo(composer: &mut Composer, label: &str, source: &str, file_path: &str) -> naga::Module {
+    let defs = shader_defs();
+    let compose = |composer: &mut Composer, defs| {
+        composer
+            .make_naga_module(NagaModuleDescriptor { source, file_path, shader_defs: defs, ..Default::default() })
+            .map_err(|e| e.emit_to_string(composer))
+    };
+    if !memo_enabled() {
+        return compose(composer, defs).unwrap_or_else(|e| panic!("compose {label} ({file_path}): {e}"));
+    }
+    let key = compose_key(composer, source, file_path, &defs);
+    let cell = COMPOSED.lock().unwrap().entry(key).or_default().clone();
+    match cell.get_or_init(|| compose(composer, defs)) {
+        Ok(module) => module.clone(),
+        Err(e) => panic!("compose {label} ({file_path}): {e}"),
+    }
+}
+
+/// LOAD-SHADER-MEMO: start composing the heaviest entry shaders on background threads, each
+/// with its own standard composer. Call once, as early as the renderer starts; make_module then
+/// finds them ready (or waits for the one still in flight). Never needed for correctness.
+pub fn prewarm_shaders() {
+    if !memo_enabled() {
+        return;
+    }
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    STARTED.call_once(|| {
+        let jobs: [(&'static str, &'static str); 6] = [
+            (include_str!("../gfx3d/gpu_driven.wgsl"), "gfx3d/gpu_driven.wgsl"),
+            (crate::water_tw::TW_WATER_WGSL, "water_tw/tw_water.wgsl"),
+            (include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl"),
+            (include_str!("../terrain/terrain.wgsl"), "terrain/terrain.wgsl"),
+            (include_str!("../grass/grass.wgsl"), "grass/grass.wgsl"),
+            (include_str!("../layered_fog.wgsl"), "layered_fog.wgsl"),
+        ];
+        for (source, file_path) in jobs {
+            let _ = std::thread::Builder::new().name("wgr-shader-prewarm".into()).spawn(move || {
+                let mut composer = build_composer();
+                let defs = shader_defs();
+                let key = compose_key(&composer, source, file_path, &defs);
+                let cell = COMPOSED.lock().unwrap().entry(key).or_default().clone();
+                cell.get_or_init(|| {
+                    composer
+                        .make_naga_module(NagaModuleDescriptor { source, file_path, shader_defs: defs, ..Default::default() })
+                        .map_err(|e| e.emit_to_string(&composer))
+                });
+            });
+        }
+    });
+}
+
 /// Compose an entry-point shader source (which may `#import` the shared modules)
 /// into a wgpu shader module.
 pub fn make_module(
@@ -191,22 +338,18 @@ pub fn make_module(
     source: &str,
     file_path: &str,
 ) -> wgpu::ShaderModule {
-    let module = match composer.make_naga_module(NagaModuleDescriptor {
-        source,
-        file_path,
-        shader_defs: shader_defs(),
-        ..Default::default()
-    }) {
-        Ok(module) => module,
-        Err(e) => panic!(
-            "compose {label} ({file_path}): {}",
-            e.emit_to_string(composer)
-        ),
-    };
-    device.create_shader_module(wgpu::ShaderModuleDescriptor {
+    let t0 = std::time::Instant::now();
+    let module = compose_memo(composer, label, source, file_path);
+    let t1 = std::time::Instant::now();
+    let m = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(label),
         source: wgpu::ShaderSource::Naga(Cow::Owned(module)),
-    })
+    });
+    if std::env::var_os("WGR_SHADER_TIMING").is_some() {
+        eprintln!("[wgr] shader timing {label}: compose {:.1} ms, module {:.1} ms",
+                  (t1 - t0).as_secs_f64() * 1e3, t1.elapsed().as_secs_f64() * 1e3);
+    }
+    m
 }
 
 #[cfg(test)]
@@ -486,7 +629,9 @@ mod tests {
         let pipelines = gfx[start..].split("let cull_debug_layout").next().unwrap();
         // The far weather-depth pipeline also uses the vertex/compute-only
         // conform layout; adding it must not expose storage to fragments.
-        assert_eq!(pipelines.matches("&conform.gpu_layout").count(), 8);
+        // RFG-188: +3 for the cutout variant's double-sided twins (colour/prepass, early-Z colour,
+        // planar reflection), all on the same vertex/compute-only conform layout.
+        assert_eq!(pipelines.matches("&conform.gpu_layout").count(), 11);
         assert!(!pipelines.contains("&conform.layout"));
         assert_eq!(gfx.matches("self.conform.gpu_bind.as_ref()").count(), 4);
     }

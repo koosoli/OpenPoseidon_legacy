@@ -105,3 +105,12 @@ docs/roadmap/evidence/a3-sample-*.png
 # CI run output committed by accident (Trident integration-test working dirs).
 .tmp-ci-*/
 .tmp-dlss-sdk/
+
+# NPC chat: settings and (encrypted) API keys live in the user profile / %APPDATA%, never here.
+# These patterns catch a copy that strays into the tree anyway.
+npcChat.json
+npc-chat/
+keys.dat
+*.apikey
+.env
+.env.*

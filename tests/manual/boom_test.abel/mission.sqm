@@ -1,0 +1,73 @@
+version=11;
+class Mission
+{
+	randomSeed=42;
+	class Intel
+	{
+		briefingName="BOOM test: explosions, craters, wall breaches, snow";
+		year=1985;
+		month=6;
+		day=21;
+		hour=9;
+		minute=30;
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={9730.0,39.3,3955.0};
+					azimut=0.0;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					rank="SERGEANT";
+					skill=1.0;
+					init="this exec ""boom_init.sqs""";
+				};
+			};
+		};
+	};
+	class Vehicles
+	{
+		items=1;
+		class Item0
+		{
+			position[]={9740.0,39.3,3950.0};
+			azimut=0.0;
+			id=1;
+			side="EMPTY";
+			vehicle="Jeep";
+			skill=0.6;
+		};
+	};
+};
+class Intro
+{
+	randomSeed=1;
+	class Intel
+	{
+	};
+};
+class OutroWin
+{
+	randomSeed=2;
+	class Intel
+	{
+	};
+};
+class OutroLoose
+{
+	randomSeed=3;
+	class Intel
+	{
+	};
+};

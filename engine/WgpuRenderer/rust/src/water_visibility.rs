@@ -31,6 +31,8 @@ pub struct WaterVisibility {
     slots: Vec<Slot>,
     written: Cell<bool>,
     latest_samples: Option<u64>,
+    // PERF-TW-CAUSTICS-GATE: consecutive harvested results that saw no water sample at all.
+    zero_streak: u32,
 }
 
 impl WaterVisibility {
@@ -63,6 +65,7 @@ impl WaterVisibility {
             slots,
             written: Cell::new(false),
             latest_samples: None,
+            zero_streak: 0,
         }
     }
 
@@ -120,9 +123,11 @@ impl WaterVisibility {
                 Ok(Ok(())) => {
                     {
                         let bytes = slot.buffer.slice(..).get_mapped_range();
-                        self.latest_samples = Some(u64::from_le_bytes(
+                        let samples = u64::from_le_bytes(
                             bytes[..8].try_into().expect("one occlusion query"),
-                        ));
+                        );
+                        self.latest_samples = Some(samples);
+                        self.zero_streak = if samples == 0 { self.zero_streak.saturating_add(1) } else { 0 };
                     }
                     slot.buffer.unmap();
                     slot.state = SlotState::Idle;
@@ -133,6 +138,12 @@ impl WaterVisibility {
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
+    }
+
+    /// How many harvested results in a row saw no water sample (0 = the latest saw some, or none
+    /// has arrived yet).
+    pub fn zero_streak(&self) -> u32 {
+        self.zero_streak
     }
 
     pub fn coverage(&self, width: u32, height: u32, samples: u32) -> Option<f32> {

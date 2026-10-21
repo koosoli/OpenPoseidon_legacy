@@ -97,6 +97,26 @@ informational and does not constitute any grant and/or waiver of rights.*
 
 ## Ported code
 
+### CWR-CE unit loadout commands
+
+The `getUnitLoadout` and `setUnitLoadout` scripting commands and registration
+tests were ported from
+[jschmidt92/cwr_ce_source](https://github.com/jschmidt92/cwr_ce_source), commit
+`04145d371be5ae59dded612fb73a28a3ed6254bf`, authored by **jschmidt92**.
+The source branch `feature/unit-loadout-commands` was synchronized to
+`ef884f9757b80081fa6376e328e95eddf7accb05`. This code is licensed under
+GPL-3.0-or-later with the additional Section 7 terms in [LICENSE](LICENSE).
+No game assets or binaries were imported.
+
+### CWR-CE in-memory database
+
+The database scripting commands, handle type, tests and scripting guide were
+ported from [jschmidt92/cwr_ce_source](https://github.com/jschmidt92/cwr_ce_source),
+commit `ed938b183cd5af91453b8df9b3236add57cd9e7f`, authored by **jschmidt92**.
+The feature was reviewed against branch `feature/in-memory-database` at
+`96bda9c`. It is licensed under GPL-3.0-or-later with the additional Section 7
+terms in [LICENSE](LICENSE). No game assets or binaries were imported.
+
 ### Malprave (Dec's Poseidon fork)
 
 The Sinkhole workstream (`docs/roadmap/decisions/SINKHOLE-*`) ports engine code from
@@ -110,6 +130,19 @@ port is listed here and in its decision record, with what was rewritten for this
 | Swimming engine, sea routes, boat boarding/exits and swimmer movement (wave following and drawn-water bridge adapted for this renderer; animation addon not included) | `swimming`, `swimBoatsAI`, `swimMoves`, `swimTurn`, `swimRoutes`, `swimAvoid`, `boatExits`; see `SINKHOLE-03-swimming-20261004.md` |
 | Infantry hearing/report/order/suppression fixes, convoy/tank/aircraft/parachutist fixes, and optional spotting/hunting/exposure mechanisms | Malprave AI patches listed in `AI-MALPRAVE-01-ai-port-plan-20261004.md`; selected behavior ideas were inspired by OpenXRay. The unavailable upstream patch set prevents independent verification of that earlier source chain; no STALKER assets are included. |
 | Diagnostics layer: `--diag` event log, `diag_*` harness commands, overlay (`engine/Poseidon/Dev/Diag/OpDiag*`, hooks in World / Shots / Collisions / Dammage / VehicleAICombat / SoldierOldMove / ExpressExt / SoundScene / VehicleTypes / OptionsUI / DebugOverlay / CrashHandler); Cry of Fear parts stripped, pause / step / camera / overlay rewritten for this tree (`docs/roadmap/decisions/DIAG-01-malprave-diagnostics-20261003.md`) | `engine/Poseidon/Dev/Diag/MwDiag.cpp`, `MwDiag2.cpp`, `MwDiag7.cpp`, `MwDiag9.cpp`, `MwDiagHarness.cpp`, `MwDiagHarness2.cpp`, `MwDiagOverlay.cpp` (mwDiag) |
+
+### EZ-Tree (dgreenheck/ez-tree)
+
+`engine/WgpuRenderer/ProceduralTrees.cpp` (the owner's procedural-tree test, Map editor tab) is a
+port of the tree generator in [EZ-Tree](https://github.com/dgreenheck/ez-tree), `src/lib/tree.js`,
+`rng.js` and the presets in `src/lib/presets/` (oak, ash, aspen, pine, bush), MIT-licensed
+(Copyright (c) 2024 Daniel Greenheck). Only code and preset numbers were ported; the bark and leaf
+textures are generated procedurally and no EZ-Tree image is used.
+
+The hedges of the visual pack (`scripts/default-content/generate_hedges.py`) are built from two
+EZ-Tree leaf sheets, `src/app/public/textures/leaves/oak.png` and `ash.png` at commit
+`dcf309bd86bd521083d9c70f01f2de45fdc7c457`, MIT-licensed, vendored unmodified with the licence in
+`content/default-packs/visual/third-party/ez-tree/`.
 
 ### Tidewater (dgreenheck/tidewater)
 
@@ -143,6 +176,8 @@ models, textures, cloud noise files) is used.
 | `BirdFlocks.cpp` (wgpu renderer, the seabirds around the camera) | `src/world/wildlife/BirdShapes.js` (species and the template), `BirdPose.js` (wing articulation), `Flight.js` (flight model), `BirdBatch.js` (plumage), `Birds.js` (behaviours) |
 | `EarthTreeDetail.cpp` (wgpu renderer, the whole-world trees near the camera) | `src/world/Vegetation.js` and `src/world/vegetation/PlantGeometry.js` (the broadleaf limbs, lobes and leaf-cluster cards, the conifer tiers, the outermost-first card order) |
 | `engine/Poseidon/World/Entities/Vehicles/Misc/ShipTidewater.cpp` (the small-boat float and drive model) | `src/player/BoatController.js` |
+| `BeachDebris.cpp` (wgpu renderer, shells, pebbles, driftwood and wrack on the beaches around the camera) | `src/world/debris/DebrisShapes.js` (shell, stone, driftwood and weed-mat shapes), `DebrisPlacement.js` (the wrack-line bands), `PebbleField.js` (the camera-following field) |
+| `scripts/default-content/generate_materials.py` (`tidewater` sand albedo) | `src/world/Terrain.js` (the beach-sand palette, drifts, grain, trodden patches, shell grit) |
 
 Written for OpenPoseidon, with no Tidewater counterpart (not ported; listed so the table above
 reads as complete): `water_tw/impacts.rs` and `water_tw/tw_impact.wgsl` (shells and bullets on
@@ -173,6 +208,17 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+### Particle Fluids (dgreenheck/threejs-particle-fluids)
+
+The particle mud (`engine/WgpuRenderer/rust/src/mud/`, MUD-001) is a clean-room position-based
+fluid written from the published methods (Macklin and Mueller, *Position Based Fluids*, 2013;
+XPBD compliance; an implicit, Jacobi-solved viscosity), following the approach and loop
+structure of [threejs-particle-fluids](https://github.com/dgreenheck/threejs-particle-fluids):
+substeps with two constraint iterations, the one-sided density constraint C = rho/rho0 - 1, and
+implicit viscosity in place of explicit XSPH (its `ViscositySolver`: x' = (b + rate sum w x) /
+(1 + rate sum w), rate = nu dt 10 / h^2, honey near nu = 20). No source or asset of it is copied.
+MIT License, Copyright (c) 2026 Daniel Greenheck (the full text is under Fire Pro below).
 
 ### Fire Pro (dgreenheck/threejs-fire-pro)
 
@@ -224,3 +270,15 @@ The 17 default inventory icons are original AI-generated equipment illustrations
 created from written descriptions without donor or retail-game image inputs.
 Source PNGs and runtime PAAs are versioned under assets/inventory; prompts and
 hashes are recorded in content/inventory-icons. They use the project licence.
+
+## Animation sources
+
+The swim pack (`content/default-packs/swim`) takes motion from two outside sources; everything else in it is
+keyed or generated by this project.
+
+| Move | Source | Licence |
+| --- | --- | --- |
+| `tread` (treading water) | **Quaternius**, Universal Animation Library (free edition), clip `swim_idle_loop` as served by **ActionForge** (actionforge.app); retargeted onto the `MC` skeleton by `scripts/swim/retarget_glb.py` | CC0 1.0 (public domain) |
+| the breaststroke's arms (`swim`, `swimlf`, `swimrf`) | **CMU Graphics Lab Motion Capture Database** (mocap.cs.cmu.edu), subject 126, trial 4 | free to copy, modify and redistribute (the database's terms) |
+
+Neither needs attribution; they are credited because the project knows where its motion came from.

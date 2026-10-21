@@ -33,8 +33,44 @@ class ShipType: public TransportType
 	AnimationWithCenter _indicatorSpeed;
 
 	AnimationRotation _radar;
+	// Tidewater's helm wheel ("tw_wheel" about the memory axis "osa volantu"): the 2001 "volant" takes its axis from
+	// points in the pilot-view LOD, which a generated model cannot keep (faceless points), and drew the wheel away
+	AnimationRotation _twWheel;
+	Animation _twFlag; // (OP) Tidewater's ensign, flown in the apparent wind (Ship::Animate)
 
 	HitPoint _turretHit,_gunHit;
+
+	public:
+	// A hull described in the config (class TidewaterHull, written by generate_tidewater_boat.py for
+	// Tidewater's own boat): its waterplane patches, inertia, propeller, rudder and keel, in model space.
+	// Without it ShipTidewater.cpp scales Tidewater's reference hull to the model's box.
+	struct TidewaterHull
+	{
+		static constexpr int MaxSamples = 32;
+		bool valid = false;
+		int samples = 0;
+		Vector3 sample[MaxSamples];
+		float area[MaxSamples] = {};
+		float depth[MaxSamples] = {}; // design depth under the waterline (Tidewater's -p.y)
+		Vector3 origin;               // Tidewater's boat-frame origin (the design waterline) in the model
+		Vector3 inertia;              // about x (pitch), y (yaw), z (roll)
+		float maxThrust = 0, pitchSpeed = 0, reverseFactor = 0.45f;
+		Vector3 propeller, rudder;
+		int stations = 0;
+		float stationZ[8] = {}, stationArea[8] = {};
+		float lateralY = 0;
+		int contacts = 0;
+		Vector3 contact[8];
+		// the hull's outline (waterMask[]: half beam at the sheer, stern and bow z, sheer height aft
+		// and at the bow, Tidewater's frame): the water renderer draws no sea inside it
+		bool waterMask = false;
+		float maskHalfBeam = 0, maskStern = 0, maskBow = 0, maskSheerAft = 0, maskSheerBow = 0;
+	};
+	const TidewaterHull &GetTidewaterHull() const {return _twHull;}
+
+	protected:
+	TidewaterHull _twHull;
+	void LoadTidewaterHull(const ParamEntry &par);
 
 	public:
 	ShipType( const ParamEntry *param );
@@ -49,6 +85,9 @@ float ShipDesignDraft(float length);
 class Ship: public Transport
 {
 	typedef Transport base;
+
+	public:
+	const Ship *AsShip() const override {return this;}
 	protected:
 	Vector3 _lastAngVelocity;
 	float _randFrequency;
@@ -74,20 +113,54 @@ class Ship: public Transport
 
 	// Tidewater boat model (ShipTidewater.cpp): its own 120 Hz integrator and the water under each hull
 	// sample from the previous frame (height, the water's vertical velocity, where it was asked, slope).
-	static constexpr int TwSamples = 21;
+	static constexpr int TwSamples = 21; // the generic hull's 7 x 3 grid
+	static constexpr int TwMaxSamples = ShipType::TidewaterHull::MaxSamples;
 	struct TidewaterState
 	{
 		float acc = 0;
 		bool hasWater = false;
 		float rudder = 0, throttle = 0, rpm = 0;
-		float waterH[TwSamples] = {}, waterV[TwSamples] = {}, qx[TwSamples] = {}, qz[TwSamples] = {},
-			gx[TwSamples] = {}, gz[TwSamples] = {};
+		float waterH[TwMaxSamples] = {}, waterV[TwMaxSamples] = {}, qx[TwMaxSamples] = {}, qz[TwMaxSamples] = {},
+			gx[TwMaxSamples] = {}, gz[TwMaxSamples] = {};
 		float heaveSpeed = 0; // last hull vertical speed relative to the water (ripples)
+		// (OP) the drawn sea from the renderer's queries (DrawnWaterQuery): the result set the samples'
+		// anchors came from, when it arrived, and each sample's height in it
+		bool fromQuery = false;
+		uint32_t qVersion = 0;
+		double qSeconds = 0;
+		float anchorH[TwMaxSamples] = {};
+		float switchOff[TwMaxSamples] = {}; // a source switch's height jump, fading out
+		bool settled = false;             // past its first step (placed at its draft if it began afloat)
 	} _tw;
 	bool SimulateTidewater(float deltaT, Frame& moveTrans);
 
+	// Men standing on this hull's roadway (decks): carried with every move the hull makes, so the deck
+	// does not slide out from under them (Man::UpdatePlatform registers them).
+	OLinkArray<Vehicle> _riders;
+	void CarryRiders(const Matrix4& before);
+
+	// (OP) Tidewater's boat sounds (SeaSoundscape.hpp): water lapping the hull at rest, rushing past it under way,
+	// chop slapping it
+	Ref<IWave> _twLap, _twRush, _twEngine;
+	float _twSlapT = 0;
+	float _twEngineOn = 0; // Tidewater's engine spool (0 off .. 1 running)
+	// (OP) Tidewater's flag: the apparent wind's direction in model space and its strength 0..1 (BoatModel.update)
+	Vector3 _twFlagDir = Vector3(0, 0, -1);
+	float _twFlagWind = 0.5f;
+	void FlyFlag(int level, bool restore);
+
+	bool _hasDeck = false; // its model has a roadway LOD (counted in DeckShips)
+
+	public:
+	void AddRider(Vehicle *rider);
+	void RemoveRider(Vehicle *rider);
+	// boats with a deck in the world: while there are none, no man looks for one under his feet
+	static int DeckShips();
+	protected:
+
 	public:
 	Ship( VehicleType *name, Person *driver );
+	~Ship() override;
 
 	const ShipType *Type() const
 	{
@@ -156,6 +229,13 @@ class Ship: public Transport
 	void FireWeaponEffects(int weapon, const Magazine *magazine,EntityAI *target) override;
 
 	void Eject(AIUnit *unit) override;
+
+	// A boat with a deck: a swimmer within reach of its side climbs aboard (ATClimbAboard)
+	void GetActions(UIActions &actions, AIUnit *unit, bool now) override;
+	RString GetActionName(const UIAction &action) override;
+	void PerformAction(const UIAction &action, AIUnit *unit) override;
+	// the point of the deck's lowest walkable level beside `worldPos`, if a swimmer there can reach it
+	bool DeckPointNear(Vector3Par worldPos, Vector3 &deck) const;
 
 	Vector3 GetDriverGetInPos(Person *person, Vector3Par pos) const override;
 	Vector3 GetCommanderGetInPos(Person *person, Vector3Par pos) const override;

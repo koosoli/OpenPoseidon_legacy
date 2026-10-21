@@ -109,7 +109,7 @@ struct VegVelParams {
 
 struct VegInst {
     world: mat4x4<f32>, // camera-relative current world (static objects: abs is shared)
-    params: vec4<f32>,  // x = leaf (alpha-cutout section: extra flutter), yzw unused
+    params: vec4<f32>,  // x = leaf (alpha-cutout section: extra flutter), y = 1 on a bush, zw unused
 };
 
 @group(0) @binding(5) var<uniform> veg: VegVelParams;
@@ -127,7 +127,12 @@ fn veg_sway_at(model_y: f32, phase_xz: vec2<f32>, leaf: f32, p: vec4<f32>, p2: v
     let hn = clamp(max(model_y, 0.0) / VEG_SWAY_HEIGHT_REF, 0.0, 3.0);
     let coherent_hs = model_y / VEG_SWAY_HEIGHT_REF * (1.6 / max(p2.z, 0.25));
     let hs = select(pow(hn, p2.z), coherent_hs, leaf < 0.0);
-    let ph = dot(phase_xz, vec2<f32>(0.37, 0.29));
+    // RFG-136: the coherent mode (leaf < 0, every native tree) snaps its phase to a 2 m cell
+    // (frame.wgsl veg_sway_phase). This copy used the raw phase, so the motion vectors described
+    // a different sway than the one drawn and DLSS smeared every native crown.
+    let cell = vec2<f32>(2.0, 2.0);
+    let ph_xz = select(phase_xz, floor(phase_xz / cell) * cell + cell * 0.5, leaf < 0.0);
+    let ph = dot(ph_xz, vec2<f32>(0.37, 0.29));
     let gust = 1.0 + 0.65 * p2.x;
     let s = sin(t * 0.9 + ph) * 0.65 + sin(t * 1.63 + ph * 1.7) * 0.35;
     var bend = dir * (amp * hs * s * gust);
@@ -148,8 +153,10 @@ fn vs_veg_velocity(@location(0) pos: vec3<f32>, @builtin(instance_index) inst: u
     // Same phase seed as the scene VS: object origin back to ABSOLUTE world xz.
     let phase = vi.world[3].xz + veg.cams.xy;
     let leaf = vi.params.x;
-    let s_cur = veg_sway_at(pos.y, phase, leaf, veg.sway_cur, veg.sway_cur2);
-    let s_prev = veg_sway_at(pos.y, phase, leaf, veg.sway_prev, veg.sway_prev2);
+    // bushes: frame.wgsl veg_sway_height (keep in sync)
+    let sway_y = select(pos.y, (pos.y + 1.0) * 3.0, vi.params.y > 0.5);
+    let s_cur = veg_sway_at(sway_y, phase, leaf, veg.sway_cur, veg.sway_cur2);
+    let s_prev = veg_sway_at(sway_y, phase, leaf, veg.sway_prev, veg.sway_prev2);
     let cur_pos = vec4<f32>(rel.xyz + s_cur, 1.0);
     // Previous-camera-relative: abs - prev_cam = rel + (cam_cur - cam_prev).
     let prev_pos = vec4<f32>(rel.xyz + veg.cam_delta.xyz + s_prev, 1.0);

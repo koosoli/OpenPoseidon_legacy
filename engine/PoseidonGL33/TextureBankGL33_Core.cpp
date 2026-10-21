@@ -280,6 +280,7 @@ Ref<Texture> TextBankGL33::LoadInterpolated(RStringB n1, RStringB n2, float fact
 
 void TextBankGL33::ReleaseAllTextures()
 {
+    _releases++;
     LOG_DEBUG(Graphics, "GL33: Allocated before ReleaseAllTextures {}", _totalAllocated);
     ReserveMemory(_previousUsed, 0);
     ReserveMemory(_lastFramePartialUsed, 0);

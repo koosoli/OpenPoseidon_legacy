@@ -1,8 +1,13 @@
 #include "TerrainWgpu.hpp"
+#include <Poseidon/World/Terrain/CraterField.hpp>
+#include <functional>
+#include "TerrainWgpuTidewaterDetail.hpp"
 #include "FishSchools.hpp"
 #include "BirdFlocks.hpp"
 #include "ReefLife.hpp"
 #include "BeachCritters.hpp"
+#include "BeachDebris.hpp"
+#include "ProceduralTrees.hpp"
 #include "EarthTreeDetail.hpp"
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/SnowShelter.hpp>
@@ -34,6 +39,8 @@
 #include <stb_image.h>
 #include <stb_image_resize2.h>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
+#include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
+#include <Poseidon/Foundation/Threads/PoThread.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
@@ -47,6 +54,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <unordered_set>
+#include <thread>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -105,7 +114,7 @@ double TerrainPageElapsedMs(TerrainPageClock::time_point start)
 //               for the surface that dominates the cell. NOTHING consumes it
 //               yet: it is what per-surface clutter VARIETY selects on, and it
 //               costs nothing to carry now that the mask is being decoded.
-//   bits 28-30  reserved, always 0.
+//   bits 28-30  run count, 1..7 atlas layers from `first` (0 = no run: global mix).
 //   bit  31     GrassTextureCell -- this cell can grow grass at all.
 // ---------------------------------------------------------------------------
 // Aliases: the values themselves live in TerrainWgpu.hpp so the Enfusion clutter
@@ -124,7 +133,8 @@ constexpr uint32_t GrassRunCountMask = GrassGeo::RunCountMask;
 // `first + hash*count` instead of walking a bitmask -- so the budget is the SUM
 // of the per-surface lists, not their distinct union: Stratis needs 28 slots
 // over 21 distinct classes, Takistan 25 over 10. 32 is also exactly what the
-// 5-bit `first` field can address, and 8 what the 3-bit `count` field can.
+// 5-bit `first` field can address, and 7 what the 3-bit `count` field can
+// (it said 8 until RFG-115: an 8-plant run packed to count 0, i.e. no run at all).
 //
 // 512 rather than 1024 square: this atlas feeds the MID ring only, the plates
 // are 54-89% empty so a cropped sub-image carries what a whole 1024 plate did,
@@ -466,6 +476,142 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
 // Mediterranean), at its natural size give or take 15%. False (and nothing placed) when the models
 // are unavailable -- Demo data, the GPU-driven path off, WGR_EARTH_TREE_MODELS=0 -- and the coarse
 // batch with the procedural detail tier carries the trees instead.
+// what UploadEarthGrass reads of a surface atlas (kept out of the header)
+struct EarthSurfaceStreamAtlasRef
+{
+    const EarthSurfaceStream::Window& window;
+    const std::vector<uint8_t>& pixels;
+};
+
+// Whole World grass. The grass stands on the near patch (its heights, its grid) and grows where the
+// satellite atlas shows meadow: green dominant and neither the dark green of a forest canopy nor the
+// grey of road, roof and rock, the blue of water or the white of snow; dry grass and stubble (yellow
+// green) count too. Read per 3 m cell from the near atlas through its own chart (NearUv), so the mask
+// lies exactly under the imagery the ground is drawn with. WGR_EARTH_GRASS=0 keeps the earth bare.
+bool TerrainWgpu::UploadEarthGrass(const EarthTerrainStream::Patch& patch, const EarthSurfaceStreamAtlasRef& atlas)
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_EARTH_GRASS");
+        return !(v && v[0] == '0');
+    }();
+    constexpr uint32_t HmN = 257, GeoN = 512;
+    const int size = EarthSurfaceStream::AtlasSize;
+    if (!enabled || patch.heights.size() != size_t(HmN) * HmN || atlas.pixels.size() != size_t(size) * size * 4 ||
+        !(patch.gridMetres > 0))
+        return false;
+    const float span = patch.gridMetres * float(HmN - 1), cell = span / float(GeoN);
+    std::vector<uint32_t> geography(size_t(GeoN) * GeoN, 0);
+    size_t grass = 0;
+    for (uint32_t j = 0; j < GeoN; ++j)
+        for (uint32_t i = 0; i < GeoN; ++i)
+        {
+            const double x = patch.x + (i + 0.5) * cell, z = patch.z + (j + 0.5) * cell;
+            const auto uv = EarthSurfaceStream::NearUv(EarthSurfaceStream::LocalUv(atlas.window, x, z));
+            if (!(uv.x >= 0 && uv.x < 1 && uv.y >= 0 && uv.y < 1))
+                continue;
+            const size_t k = (size_t(uv.y * size) * size + size_t(uv.x * size)) * 4;
+            const float r = atlas.pixels[k] / 255.0f, g = atlas.pixels[k + 1] / 255.0f, b = atlas.pixels[k + 2] / 255.0f;
+            const float lum = 0.299f * r + 0.587f * g + 0.114f * b;
+            const bool meadow = g >= r * 0.95f && g >= b * 1.12f && lum > 0.16f && lum < 0.75f;
+            const bool dry = r >= g && g >= b * 1.15f && r - g < 0.12f && lum > 0.28f && lum < 0.75f;
+            // diagnostic: WGR_EARTH_GRASS_ALL=1 grows grass on every cell, to tell the mask from the placement
+            static const bool all = std::getenv("WGR_EARTH_GRASS_ALL") != nullptr;
+            if (meadow || dry || all)
+            {
+                geography[size_t(j) * GeoN + i] = 0x80000000u;
+                ++grass;
+            }
+        }
+    EngineWgpu::AcquireProducerWindow("Earth grass ground");
+    wgr_grass_set_earth_ground(_renderer, patch.x, patch.z, patch.gridMetres, HmN, patch.heights.data(), cell, GeoN,
+                               geography.data(), 0.0f);
+    const auto [lo, hi] = std::minmax_element(patch.heights.begin(), patch.heights.end());
+    LOG_INFO(Graphics, "Earth grass: {:.0f}% of the near patch ({:.1f} km from {:.0f}, {:.0f}; {:.1f} m cells; ground {:.0f}..{:.0f} m) reads as meadow in the imagery",
+             100.0 * double(grass) / double(geography.size()), span / 1000.0f, patch.x, patch.z, cell, *lo, *hi);
+    return true;
+}
+
+// Forest where the satellite atlas shows it. OSM maps most big forests as multipolygon relations,
+// which the cached ways do not carry, so whole wooded slopes stood bare; the near atlas shows every
+// canopy. A tree every ~7 m (jittered by a geographic hash, so the stand is the same from any frame)
+// where the pixel is canopy: dark, green over red and blue, not water. Cliffs steeper than 45 degrees
+// stay bare. Nearest the patch centre first, at most MaxForestTrees.
+std::vector<EarthFeatureStream::TreeInstance> TerrainWgpu::EarthCanopyTrees(const EarthTerrainStream::Patch& patch,
+    const EarthSurfaceStream::Window& window, const std::vector<uint8_t>& pixels)
+{
+    std::vector<EarthFeatureStream::TreeInstance> trees;
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_EARTH_CANOPY_TREES");
+        return !(v && v[0] == '0');
+    }();
+    constexpr int HmN = 257;
+    const int size = EarthSurfaceStream::AtlasSize;
+    if (!enabled || patch.heights.size() != size_t(HmN) * HmN || pixels.size() != size_t(size) * size * 4 ||
+        !(patch.gridMetres > 0))
+        return trees;
+    const auto height = [&](double x, double z, double& slope)
+    {
+        const double fx = std::clamp((x - patch.x) / patch.gridMetres, 0.0, HmN - 1.001),
+                     fz = std::clamp((z - patch.z) / patch.gridMetres, 0.0, HmN - 1.001);
+        const int ix = int(fx), iz = int(fz);
+        const double tx = fx - ix, tz = fz - iz;
+        const auto at = [&](int i, int j) { return double(patch.heights[size_t(j) * HmN + i]); };
+        const double a = at(ix, iz), b = at(ix + 1, iz), c = at(ix, iz + 1), d = at(ix + 1, iz + 1);
+        slope = std::hypot((b - a) * (1 - tz) + (d - c) * tz, (c - a) * (1 - tx) + (d - b) * tx) / patch.gridMetres;
+        return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
+    };
+    const double span = patch.gridMetres * (HmN - 1), step = EarthFeatureStream::ForestSpacing;
+    const double cx = patch.x + span * 0.5, cz = patch.z + span * 0.5;
+    for (double z = patch.z + step * 0.5; z < patch.z + span; z += step)
+        for (double x = patch.x + step * 0.5; x < patch.x + span; x += step)
+        {
+            const auto geo = Earth::FromLocal(patch.originLatitude, patch.originLongitude, x, z);
+            const uint64_t cellSeed = EarthTrees::GeographicSeed(std::round(geo.latitude * 16000.0) / 16000.0,
+                                                                 std::round(geo.longitude * 16000.0) / 16000.0);
+            const double px = x + (double((cellSeed >> 8) & 0xffff) / 65535.0 - .5) * step * .8,
+                         pz = z + (double((cellSeed >> 24) & 0xffff) / 65535.0 - .5) * step * .8;
+            const auto uv = EarthSurfaceStream::NearUv(EarthSurfaceStream::LocalUv(window, px, pz));
+            if (!(uv.x >= 0 && uv.x < 1 && uv.y >= 0 && uv.y < 1))
+                continue;
+            const size_t k = (size_t(uv.y * size) * size + size_t(uv.x * size)) * 4;
+            const float r = pixels[k] / 255.0f, g = pixels[k + 1] / 255.0f, b = pixels[k + 2] / 255.0f;
+            const float lum = 0.299f * r + 0.587f * g + 0.114f * b;
+            const bool canopy = lum > 0.04f && lum < 0.2f && g >= r * 0.98f && g >= b * 0.98f && b < g * 1.05f;
+            if (!canopy)
+                continue;
+            double slope = 0;
+            const double y = height(px, pz, slope);
+            if (slope > 1.0)
+                continue;
+            const auto treeGeo = Earth::FromLocal(patch.originLatitude, patch.originLongitude, px, pz);
+            trees.push_back({float(px), float(y), float(pz), 9.0f, EarthTrees::GeographicSeed(treeGeo.latitude, treeGeo.longitude),
+                             treeGeo.latitude});
+        }
+    std::sort(trees.begin(), trees.end(), [&](const auto& a, const auto& b)
+              { return Square(a.x - cx) + Square(a.z - cz) < Square(b.x - cx) + Square(b.z - cz); });
+    if (trees.size() > EarthFeatureStream::MaxForestTrees)
+        trees.resize(EarthFeatureStream::MaxForestTrees);
+    LOG_INFO(Graphics, "Earth canopy: {} trees where the imagery shows forest on the near patch", trees.size());
+    return trees;
+}
+
+// The model tier's trees: single OSM trees always; the forest from the imagery when there is
+// one, else OSM's own forests (dense) -- never both, or a mapped forest would be planted twice.
+void TerrainWgpu::RefreshEarthTreeModels()
+{
+    std::vector<EarthFeatureStream::TreeInstance> placed;
+    const bool canopy = !_earthCanopyTrees.empty();
+    placed.reserve(_earthFeatureTreeSet.size() + (canopy ? _earthCanopyTrees.size() : _earthForestTreeSet.size()));
+    for (const auto& t : _earthFeatureTreeSet)
+        if (!t.forestSample || (!canopy && _earthForestTreeSet.empty()))
+            placed.push_back(t);
+    const auto& forest = canopy ? _earthCanopyTrees : _earthForestTreeSet;
+    placed.insert(placed.end(), forest.begin(), forest.end());
+    _earthTreeModels = PlaceEarthTreeModels(placed);
+}
+
 bool TerrainWgpu::PlaceEarthTreeModels(const std::vector<EarthFeatureStream::TreeInstance>& trees)
 {
     _engine.ClearEarthTreeObjects();
@@ -682,6 +828,11 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             return 0;
         }
         auto* texture = static_cast<TextureWgpu*>(raw);
+        if (_terrainPageDeferUploads && !texture->IsGpuResident() && QueueTerrainTilePrep(texture))
+        {
+            ++dropped;
+            return 0; // fallback until its background decode is in and the page is rebound
+        }
         const auto ensureStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
         const uint64_t handle = texture->EnsureUploaded();
         if (timings) { ensureMs += TerrainPageElapsedMs(ensureStart); ++ensureCalls; }
@@ -697,6 +848,10 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
 
     std::vector<WgrTerrainMaterial> materials(static_cast<size_t>(materialCount));
     _a3TerrainTextures.clear();
+    // PERF-TERRAIN-TILE-PREP: thousands of descriptors name the same few hundred images (a DayZ
+    // re-centre made 20-40k GlobLoadTexture calls, 60 ms). One bank lookup per interned name.
+    std::unordered_map<const char*, Ref<Texture>> loaded;
+    loaded.reserve(4096);
     const auto bindTexture = [&](const RStringB& name, uint32_t fallback, bool& resolved,
                                  bool terrainPage) -> uint32_t
     {
@@ -704,7 +859,14 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
         if (name.GetLength() == 0)
             return fallback;
         const auto loadStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
-        Ref<Texture> texture = GlobLoadTexture(name);
+        Ref<Texture> texture;
+        if (const auto hit = loaded.find(static_cast<const char*>(name)); hit != loaded.end())
+            texture = hit->second;
+        else
+        {
+            texture = GlobLoadTexture(name);
+            loaded.emplace(static_cast<const char*>(name), texture);
+        }
         if (timings) { loadMs += TerrainPageElapsedMs(loadStart); ++loadCalls; }
         Texture* raw = texture;
         if (raw == nullptr)
@@ -818,21 +980,53 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             // `legacy` slot, so with the dev switch off the ground is the same image at
             // the same UV as before -- only mipped.
             Texture* colour = enf != nullptr && enf->detail != nullptr ? enf->detail : land.GetTexture(i);
+            // OFP's own image, for the enhancement lookups below (they go by its name)
+            Texture* const source = colour;
+            if (enf == nullptr && land.GetA3TerrainMaterial(i) == nullptr)
+            {
+                colour = TidewaterGroundLayer(land, colour);
+                // Tidewater's sand per pixel (terrain.wgsl tw_beach_sand): its share is in the
+                // layer's alpha -- written by the bake on a transition, 1 on a pure sand image
+                const std::string base = source ? TidewaterGround::BaseName(source->Name()) : std::string();
+                // terrain.wgsl tw_cell: the share is in alpha where the bake wrote it, and on a pure
+                // layer (opaque: all of its one kind)
+                const TidewaterGround::Plan plan = TidewaterGround::PlanFor(base);
+                if (TidewaterGround::Enabled() && plan.kindA != 0 && (colour != source || plan.pure))
+                {
+                    if (_twDetail.GetRef() == nullptr)
+                    {
+                        const std::vector<uint8_t> detail = BuildTidewaterDetail();
+                        _twDetail = _engine.TextBank()->CreateDynamic(TidewaterDetailSize, TidewaterDetailSize, detail.data(),
+                                                                      uint32_t(detail.size()), true);
+                    }
+                    // Enfusion-only fields, free on a legacy layer: the detail layer and the rock's
+                    // OFP brightness
+                    material.middle = bindLayer(_twDetail.GetRef(), false);
+                    material.puddle_flags |= (uint32_t(plan.kindA) << 16) | (uint32_t(plan.kindB) << 20);
+                    const auto a = _twGround.AnchorLinear(plan.codeA);
+                    const auto b = _twGround.AnchorLinear(plan.codeB);
+                    for (int c = 0; c < 3; ++c)
+                        material.middle_color[c] = a[size_t(c)];
+                    material.detail_scale = b[0];
+                    material.middle_scale = b[1];
+                    material.middle_blend = b[2];
+                }
+            }
             material.legacy = bindLayer(colour, false);
             material.satellite = material.legacy;
             if (colour != nullptr && enf == nullptr && land.GetA3TerrainMaterial(i) == nullptr)
             {
                 auto* bank = static_cast<TextureBankWgpu*>(_engine.TextBank());
-                Ref<Texture> normal = bank->LoadLegacyEnhancementNormal(colour->Name());
+                Ref<Texture> normal = bank->LoadLegacyEnhancementNormal(source->Name());
                 if (normal.GetRef() != nullptr)
                 {
                     material.tile_normal = bindLayer(normal.GetRef(), false);
                     if (material.tile_normal != 0)
                     {
                         _a3TerrainTextures.push_back(normal);
-                        LOG_INFO(Graphics, "Wgpu legacy terrain: {} enhanced by {}", (const char*)colour->Name(),
+                        LOG_INFO(Graphics, "Wgpu legacy terrain: {} enhanced by {}", (const char*)source->Name(),
                                  (const char*)normal->Name());
-                        Ref<Texture> detail = bank->LoadLegacyTerrainDetailNormal(colour->Name(), material.legacy_detail_scale);
+                        Ref<Texture> detail = bank->LoadLegacyTerrainDetailNormal(source->Name(), material.legacy_detail_scale);
                         if (detail.GetRef() != nullptr)
                         {
                             material.legacy_detail_normal = bindLayer(detail.GetRef(), false);
@@ -840,7 +1034,7 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
                             {
                                 _a3TerrainTextures.push_back(detail);
                                 LOG_INFO(Graphics, "Wgpu legacy terrain detail: {} -> {} repeats/metre={}",
-                                         (const char*)colour->Name(), (const char*)detail->Name(), material.legacy_detail_scale);
+                                         (const char*)source->Name(), (const char*)detail->Name(), material.legacy_detail_scale);
                             }
                         }
                     }
@@ -859,8 +1053,73 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
                 if (enf->middle != nullptr)
                     material.middle = bindLayer(enf->middle, false);
                 if (enf->normal != nullptr)
+                {
                     material.tile_normal = bindLayer(enf->normal, false);
+                    // RFG-110: an otherwise unused lane on native worlds (terrain.wgsl reads it
+                    // only in the native branch, only with a tile_normal bound).
+                    material.satellite_uv.v[3] = enf->parallax;
+                }
+                // RFG-PBR: the composited supertexture (terrain.wgsl, native branch). _pad0 = 2 marks
+                // it; satellite_uv.u carries 1/extent and the material's SatMapBlend.
+                if (_enfusionSatmap && _enfusionSatmapExtent > 0.0f)
+                {
+                    const uint32_t sat = bindLayer(_enfusionSatmap.GetRef(), false);
+                    if (sat != 0)
+                    {
+                        material.satellite = sat;
+                        material._pad0 = 2;
+                        material.satellite_uv.u[0] = 1.0f / _enfusionSatmapExtent;
+                        material.satellite_uv.u[1] = enf->satBlend;
+                    }
+                }
             }
+        }
+        // Tidewater sand / rock (terrain.wgsl tw_beach_sand, tw_rock): how many layers, and where a
+        // pure rock cell is, to aim a capture at
+        if (_twDetail.GetRef() != nullptr)
+        {
+            int kinds[8] = {};
+            for (int i = 0; i < materialCount; ++i)
+                ++kinds[(materials[size_t(i)].puddle_flags >> 16) & 7u];
+            const int sandLayers = kinds[1], rockLayers = kinds[2];
+            const int range = land.GetLandRange();
+            int rockX = -1, rockZ = -1;
+            for (int z = 0; z < range && rockX < 0; ++z)
+                for (int x = 0; x < range; ++x)
+                {
+                    const int id = land.GetTexture(z, x);
+                    if (id < 0 || id >= materialCount || ((materials[size_t(id)].puddle_flags >> 16) & 15u) != 2u)
+                        continue;
+                    const std::string base = TidewaterGround::BaseName(land.GetTexture(id)->Name());
+                    if (base.size() == 2)
+                    {
+                        rockX = x;
+                        rockZ = z;
+                        break;
+                    }
+                }
+            // the pure field cell nearest the map's centre (capture aiming: mud, ruts)
+            int fieldX = -1, fieldZ = -1;
+            long best = -1;
+            for (int z = 0; z < range; ++z)
+                for (int x = 0; x < range; ++x)
+                {
+                    const int id = land.GetTexture(z, x);
+                    if (id < 0 || id >= materialCount || TidewaterGround::BaseName(land.GetTexture(id)->Name()) != "pol")
+                        continue;
+                    const long d = long(x - range / 2) * (x - range / 2) + long(z - range / 2) * (z - range / 2);
+                    if (best < 0 || d < best)
+                    {
+                        best = d;
+                        fieldX = x;
+                        fieldZ = z;
+                    }
+                }
+            LOG_INFO(Graphics, "Tidewater ground: layers per pixel by first kind: sand {} rock {} grass {} forest {} gravel {} "
+                     "dirt {} field {}, OFP image {}; first pure rock cell at {:.0f} {:.0f}; field cell nearest the centre at {:.0f} {:.0f}",
+                     sandLayers, rockLayers, kinds[3], kinds[4], kinds[5], kinds[6], kinds[7], kinds[0],
+                     (rockX + 0.5f) * land.GetLandGrid(), (rockZ + 0.5f) * land.GetLandGrid(),
+                     (fieldX + 0.5f) * land.GetLandGrid(), (fieldZ + 0.5f) * land.GetLandGrid());
         }
     }
     else
@@ -952,6 +1211,13 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             ++complete;
     }
 
+    // RFG-PBR: the grass leans its native blades towards the same satellite (SatMapLerp).
+    {
+        uint64_t satHandle = 0;
+        if (!paged && _enfusionSatmap && _enfusionSatmapExtent > 0.0f)
+            satHandle = static_cast<TextureWgpu*>(_enfusionSatmap.GetRef())->EnsureUploaded();
+        wgr_grass_set_satellite(_renderer, satHandle);
+    }
     Ref<Texture> previousSatmap = _automaticSatmap;
     if (!paged && authored == 0 && _enfusionGround.empty())
     {
@@ -973,14 +1239,41 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
     // previous group. Shared texture views then release cleanly on the Rust side.
     const double descriptorTotalMs = timings ? TerrainPageElapsedMs(timingStart) : 0.0;
     const auto acquireStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
+    // PERF-TERRAIN-QUEUED-BIND (2026-10-20): a paged re-centre waited here for the render thread
+    // (5-80 ms on DayZ). It now queues the bind to run on the render thread itself, in order with
+    // the frame's resource operations, and evicts the unbound pages a few updates later, once the
+    // queued bind has certainly run. The world-load build keeps the synchronous path.
+    // POSEIDON_TERRAIN_QUEUED_BIND=0 = always synchronous.
+    static const bool queuedBindEnabled = [] {
+        const char* v = std::getenv("POSEIDON_TERRAIN_QUEUED_BIND");
+        return !(v && v[0] == '0');
+    }();
+    const bool queuedBind = queuedBindEnabled && paged && _terrainPageQueuedBindAllowed;
+    const size_t layerCount = handles.size(); // before a queued bind takes the array
+    size_t evicted = 0;
+    double acquireMs = 0.0, bindMs = 0.0;
+    const auto evictionStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
+    if (queuedBind)
+    {
+        _engine.QueueRendererCallback([handles = std::move(handles), materials = std::move(materials)](WgrRenderer* r)
+        {
+            wgr_terrain_set_ground_layers(r, handles.data(), static_cast<uint32_t>(handles.size()));
+            wgr_terrain_set_materials(r, materials.data(), static_cast<uint32_t>(materials.size()));
+        });
+        for (TextureWgpu* old : oldPageTextures)
+            if (old != nullptr && std::find(boundTextures.begin(), boundTextures.end(), old) == boundTextures.end() &&
+                IsTerrainPageTextureName(old->Name()))
+                _terrainPendingEvict.emplace_back(old);
+        _terrainPendingEvictAge = 0;
+    }
+    else
+    {
     EngineWgpu::AcquireProducerWindow("terrain ground layers");
-    const double acquireMs = timings ? TerrainPageElapsedMs(acquireStart) : 0.0;
+    acquireMs = timings ? TerrainPageElapsedMs(acquireStart) : 0.0;
     const auto bindStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
     wgr_terrain_set_ground_layers(_renderer, handles.data(), static_cast<uint32_t>(handles.size()));
     wgr_terrain_set_materials(_renderer, materials.data(), static_cast<uint32_t>(materials.size()));
-    const double bindMs = timings ? TerrainPageElapsedMs(bindStart) : 0.0;
-    const auto evictionStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
-    size_t evicted = 0;
+    bindMs = timings ? TerrainPageElapsedMs(bindStart) : 0.0;
     for (TextureWgpu* old : oldPageTextures)
     {
         if (old != nullptr && std::find(boundTextures.begin(), boundTextures.end(), old) == boundTextures.end() &&
@@ -989,6 +1282,7 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             old->EvictGpu();
             ++evicted;
         }
+    }
     }
 
     if (timings)
@@ -1001,14 +1295,14 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             "Wgpu terrain page timings: mode={} descriptors={} candidates={} layers={} evictions={} "
             "loadCalls={} ensureCalls={} descriptorMs={:.3f} loadOwnerMs={:.3f} ensureOwnerMs={:.3f} "
             "finalAcquireMs={:.3f} bindMs={:.3f} evictionMs={:.3f} uploadTotalMs={:.3f}",
-            paged ? "paged" : "eager", materialCount, ids.size(), handles.size(), evicted,
+            paged ? "paged" : "eager", materialCount, ids.size(), layerCount, evicted,
             loadCalls, ensureCalls, std::max(0.0, descriptorTotalMs - loadMs - ensureMs), loadMs, ensureMs,
             acquireMs, bindMs, evictionMs, TerrainPageElapsedMs(timingStart));
     }
     LOG_INFO(Graphics,
              "Wgpu terrain material pages: mode={} candidates={} authored={} complete={} layers={}/{} dropped={} "
              "evicted={}",
-             paged ? "paged" : "eager", ids.size(), authored, complete, handles.size(), layerLimit, dropped,
+             paged ? "paged" : "eager", ids.size(), authored, complete, layerCount, layerLimit, dropped,
              evicted);
 }
 
@@ -1047,6 +1341,27 @@ void TerrainWgpu::UploadIndexMap(const Landscape& land)
     }
     EngineWgpu::AcquireProducerWindow("terrain index map");
     wgr_terrain_set_index_map(_renderer, static_cast<uint32_t>(n), static_cast<uint32_t>(n), indices.data());
+    // RFG-PBR: a native Reforger world's fine surface map for the blend (see terrain.wgsl
+    // surface_grid); WGR_TERRAIN_SURFACE_MAP=0 keeps the land-cell index.
+    {
+        static const bool enabled = []
+        {
+            const char* v = std::getenv("WGR_TERRAIN_SURFACE_MAP");
+            return !(v && v[0] == '0');
+        }();
+        int edge = 0;
+        const std::vector<uint8_t>& map = land.GetEnfusionSurfaceMap(edge);
+        _surfaceGrid = 0.0f;
+        if (enabled && edge > 0 && map.size() == static_cast<size_t>(edge) * edge)
+        {
+            wgr_terrain_set_surface_map(_renderer, static_cast<uint32_t>(edge), map.data());
+            _surfaceGrid = land.GetLandGrid() * static_cast<float>(n) / static_cast<float>(edge);
+            LOG_INFO(Graphics, "Wgpu terrain surface map: {}x{} native surface texels at {:.2f} m (land cells {:.2f} m)",
+                     edge, edge, _surfaceGrid, land.GetLandGrid());
+        }
+        else
+            wgr_terrain_set_surface_map(_renderer, 0, nullptr);
+    }
 }
 
 static bool StartsWithNoCase(const char* text, const char* prefix)
@@ -1130,6 +1445,61 @@ void BakeSatmapObjects(const Landscape& land, int size, std::vector<uint8_t>& pi
                                       dst.rgba.data(),64,64,64*4,STBIR_RGBA)) dst = {};
         return &dst;
     };
+    // (PERF, 2026-10-14) Decode every texture the bake will meet up front, in parallel: the
+    // serial decode of ~520 full PAA images was most of this bake's ~265 ms. Same models in the
+    // same first-sight order and the same caps as the loop below, which then only finds them.
+    {
+        struct Job { Texture* texture; std::vector<uint8_t> bytes; bool pac; };
+        std::vector<Job> jobs;
+        std::unordered_set<const LODShapeWithShadow*> seenModels;
+        for (int z=0; z<land.GetLandRange(); ++z) for (int x=0; x<land.GetLandRange(); ++x)
+        {
+            const auto& objects = land.GetObjects(z,x);
+            for (int i=0; i<objects.Size(); ++i)
+            {
+                Object* object = objects[i];
+                if (!object || (object->GetType() != Primary && object->GetType() != Network)) continue;
+                auto* lod = object->GetShape();
+                if (!lod || seenModels.count(lod) || seenModels.size() >= MaxModels) continue;
+                seenModels.insert(lod);
+                Shape* shape = nullptr;
+                for (int l=0; l<lod->NLevels(); ++l)
+                    if (lod->IsNormalLevel(l)) {shape=lod->Level(l); break;}
+                if (!shape) continue;
+                const float sx=shape->Max().X()-shape->Min().X(), sz=shape->Max().Z()-shape->Min().Z();
+                if (!(sx>0.05f && sz>0.05f && sx<1000 && sz<1000 && shape->NFaces()<100000)) continue;
+                for (Offset f=shape->BeginFaces(); f<shape->EndFaces(); shape->NextFace(f))
+                {
+                    Texture* texture = shape->Face(f).GetTexture();
+                    if (!texture || textures.count(texture) || textures.size() >= MaxTextures) continue;
+                    textures[texture]; // claimed; an unreadable file stays an empty image, as before
+                    const char* source = static_cast<TextureWgpu*>(texture)->SourceName();
+                    Job job{texture, ReadVfsFile(source), !ContainsNoCase(source,".pac")};
+                    if (!job.bytes.empty()) jobs.push_back(std::move(job));
+                }
+            }
+        }
+        const unsigned threads = std::clamp(std::thread::hardware_concurrency(), 1u, 16u);
+        std::vector<DecodedImage> decoded(jobs.size());
+        std::vector<std::thread> pool;
+        for (unsigned w = 0; w < threads; ++w)
+            pool.emplace_back([&, w]
+            {
+                for (size_t j = w; j < jobs.size(); j += threads)
+                {
+                    const auto src = DecodePAABuffer(jobs[j].bytes.data(), jobs[j].bytes.size(), jobs[j].pac);
+                    if (!src.valid()) continue;
+                    DecodedImage dst;
+                    dst.width = dst.height = 64;
+                    dst.rgba.resize(64*64*4);
+                    if (!stbir_resize_uint8_linear(src.rgba.data(),src.width,src.height,src.width*4,
+                                                  dst.rgba.data(),64,64,64*4,STBIR_RGBA)) dst = {};
+                    decoded[j] = std::move(dst);
+                }
+            });
+        for (std::thread& t : pool) t.join();
+        for (size_t j = 0; j < jobs.size(); ++j) textures[jobs[j].texture] = std::move(decoded[j]);
+    }
     for (int z=0; z<land.GetLandRange(); ++z) for (int x=0; x<land.GetLandRange(); ++x)
     {
         const auto& objects = land.GetObjects(z,x);
@@ -1250,6 +1620,29 @@ void BakeSatmapObjects(const Landscape& land, int size, std::vector<uint8_t>& pi
 }
 }
 
+Texture* TerrainWgpu::TidewaterGroundLayer(const Landscape& land, Texture* layer)
+{
+    if (layer == nullptr || !TidewaterGround::Enabled())
+        return layer;
+    const std::string world = land.GetName() ? land.GetName() : "";
+    if (world != _twGroundWorld)
+    {
+        _twGroundWorld = world;
+        _twGroundBaked.clear();
+    }
+    for (const auto& [from, to] : _twGroundBaked)
+        if (from == layer)
+            return to.GetRef() != nullptr ? to.GetRef() : layer;
+    _twGround.Prepare(land);
+    _twGround.Precompute(land);
+    EngineWgpu::AcquireProducerWindow("Tidewater ground layer");
+    Ref<Texture> baked = _twGround.Bake(layer, _engine.TextBank());
+    _twGroundBaked.emplace_back(layer, baked);
+    if (baked.GetRef() != nullptr)
+        LOG_INFO(Graphics, "Tidewater ground: {} recoloured", (const char*)layer->Name());
+    return baked.GetRef() != nullptr ? baked.GetRef() : layer;
+}
+
 Ref<Texture> TerrainWgpu::BuildAutomaticSatmap(const Landscape& land)
 {
     const char* enabled = std::getenv("WGR_OFP_SATMAP");
@@ -1292,6 +1685,18 @@ Ref<Texture> TerrainWgpu::BuildAutomaticSatmap(const Landscape& land)
         {
             LOG_WARN(Graphics,"OFP automatic satmap skipped: decode failed {}",texture->Name());
             return nullptr; // Never bake white missing tiles into a whole island.
+        }
+        // the far albedo agrees with the near ground: Tidewater's sand and soil here too
+        if (TidewaterGround::Enabled())
+        {
+            _twGround.Prepare(land);
+            _twGround.Precompute(land);
+            const std::string base = TidewaterGround::BaseName(sourceName);
+            DecodedImage cached;
+            if (_twGround.Cached(base, cached) && cached.width == image.width && cached.height == image.height)
+                image = std::move(cached);
+            else
+                _twGround.Recolour(base, image);
         }
         if (!stbir_resize_uint8_linear(image.rgba.data(),image.width,image.height,image.width*4,
                                       tiles[i].data(),tileSize,tileSize,tileSize*4,STBIR_RGBA)) return nullptr;
@@ -1716,6 +2121,7 @@ bool TerrainWgpu::BuildClutterAtlas(const std::vector<std::pair<std::string, RSt
     std::vector<CardJob> jobs;
     std::vector<std::string> platePaths;
     std::unordered_map<std::string, size_t> plateIds;
+    _clutterBladeSkip = 0; // RFG-116: a native-world answer; Arma clutter keeps its blades
 
     for (const auto& [surfaceKey, character] : surfaces)
     {
@@ -1724,7 +2130,7 @@ bool TerrainWgpu::BuildClutterAtlas(const std::vector<std::pair<std::string, RSt
             continue;
         }
         std::vector<TerrainSurfaceCatalog::Clutter> classes = _surfaceCatalog.ClutterFor(character.Data());
-        // Highest probability first, so a run truncated by the 8-layer cap keeps
+        // Highest probability first, so a run truncated by the run cap keeps
         // the plants that actually cover the ground.
         std::stable_sort(classes.begin(), classes.end(),
                          [](const TerrainSurfaceCatalog::Clutter& a, const TerrainSurfaceCatalog::Clutter& b)
@@ -2422,6 +2828,39 @@ void TerrainWgpu::UploadGeography(const Landscape& land, bool reuseClutterDefini
     // and the whole-world fallback does not fire because that stray 1 keeps
     // resolvedLayers non-zero. The native bake answers this world instead.
     _hasEnfusionSurfaces = land.GetEnfusionSurfaceCount() == layerCount && layerCount > 0;
+    // RFG-140: a native world's retained geometry reaches ~1.1 GB of vertices and ~256 MB of
+    // indices at dense poses (Everon 5052/5312: 7,104 meshes, 1,089 MB). Growing the pool there
+    // mid-flight keeps old + new alive beside ~5.3 GB of other allocations -- on an 8 GB card the
+    // device was lost (TDR) in 1 of 2-3 runs. Reserve it once, now, while VRAM is nearly empty.
+    // WGR_GEO_POOL_RESERVE_MB="vertMB,indexMB" (default 768,128; 0 = off). CPU-VB-STREAM (same day)
+    // unblocked evictions that CPU buffers had pinned: live then peaked at 625/101 MB during the
+    // load and settled at 150-420 MB over the same six poses, all inside a 634 MB prefix.
+    // LOD-STREAM (2026-10-19): with unneeded LOD levels evicted the live set over six Everon poses
+    // (Durras, forest, village, tree, the owner's two) peaked at 948 MB vertices / 148 MB indices,
+    // packed (prefix = live). 1600/384 left ~640 MB reserved and never used while the owner's
+    // process sat over the Windows budget. Growth past the reserve is now 1.25x (pool.rs).
+    if (_hasEnfusionSurfaces && _renderer)
+    {
+        static bool reserved = false;
+        if (!reserved)
+        {
+            reserved = true;
+            double vertMb = 768.0, indexMb = 128.0;
+            if (const char* env = std::getenv("WGR_GEO_POOL_RESERVE_MB"); env != nullptr && *env != '\0')
+            {
+                vertMb = std::atof(env);
+                const char* comma = std::strchr(env, ',');
+                indexMb = comma ? std::atof(comma + 1) : (vertMb > 0.0 ? indexMb : 0.0);
+            }
+            if (vertMb > 0.0 || indexMb > 0.0)
+            {
+                wgr_geo_pool_reserve(_renderer, static_cast<uint64_t>(std::max(vertMb, 0.0) * 1048576.0),
+                                     static_cast<uint64_t>(std::max(indexMb, 0.0) * 1048576.0));
+                LOG_INFO(Graphics, "Wgpu: RFG-140 native world -- geometry pool reserved {:.0f} MB vertices, {:.0f} MB "
+                                   "indices (WGR_GEO_POOL_RESERVE_MB)", vertMb, indexMb);
+            }
+        }
+    }
     const auto layerName = [&](int i) -> std::string
     {
         if (_hasEnfusionSurfaces)
@@ -2692,6 +3131,7 @@ void TerrainWgpu::UploadGeography(const Landscape& land, bool reuseClutterDefini
              authored ? "authored LCA surfaces" : "legacy per-layer", grassLayerCount, grassCellCount, geography.size(),
              grassRenderableCellCount, hardOnlyCells, grassLayerNames.empty() ? "none matched" : grassLayerNames);
     LOG_INFO(Graphics, "Wgpu terrain texture layers: [{}]", allLayerNames);
+    _clutterGeoCopy = geography; // RFG-153: the near-mesh ring places from the same words
     EngineWgpu::AcquireProducerWindow("grass geography");
     wgr_grass_set_geography(_renderer, static_cast<uint32_t>(n), static_cast<uint32_t>(n), geography.data());
 
@@ -2716,7 +3156,28 @@ void TerrainWgpu::UploadGeography(const Landscape& land, bool reuseClutterDefini
     // stock meadow atlas.
     if (!(_enfusionBladesEnabled && UploadEnfusionBladeAtlas(land)))
     {
-        UploadGrassBladeAtlas(atlasKey);
+        // A native world never draws the stock meadow photo blades: they are not Reforger's
+        // grass, and over Everon's fields they read as neon yellow-green tufts (mean sRGB of the
+        // brightest layers ~145,163,39). Without its own PlantMat atlas it gets the built-in
+        // procedural layers -- including when the photo atlas is still bound from the menu
+        // world. WGR_NATIVE_STOCK_BLADES=1 restores the photo fallback.
+        static const bool stockOnNative = [] {
+            const char* value = std::getenv("WGR_NATIVE_STOCK_BLADES");
+            return value && value[0] == '1';
+        }();
+        if (land.GetEnfusionSurfaceCount() > 0 && !stockOnNative)
+        {
+            if (_renderer && _grassBladeAtlasWorld != "native:procedural")
+            {
+                EngineWgpu::AcquireProducerWindow("grass blade atlas");
+                wgr_grass_set_blade_atlas(_renderer, 0, 0, 0, nullptr);
+                _grassBladeAtlasWorld = "native:procedural";
+                LOG_INFO(Graphics, "Wgpu grass: native world without its PlantMat blade atlas -- near blades use "
+                         "the built-in layers, not the stock meadow photos (WGR_NATIVE_STOCK_BLADES=1 = photos)");
+            }
+        }
+        else
+            UploadGrassBladeAtlas(atlasKey);
     }
 }
 
@@ -2936,10 +3397,33 @@ void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
             std::memcpy(_clutterAtlas.data() + static_cast<size_t>(layer) * LayerBytes, _clutterAtlas.data(),
                         LayerBytes);
         }
+        // POSEIDON_ENFUSION_BLADES_DUMP=<dir> also writes the card layers: texture or shading?
+        if (const char* dumpDir = std::getenv("POSEIDON_ENFUSION_BLADES_DUMP"); dumpDir != nullptr && *dumpDir != '\0')
+        {
+            for (uint32_t layer = 0; layer < _clutterAtlasLayers; ++layer)
+            {
+                char path[512];
+                std::snprintf(path, sizeof(path), "%s/enfusion_card_%02u.png", dumpDir, layer);
+                Poseidon::PNGWriter::WritePNG(path, GrassAtlasSize, GrassAtlasSize, 4,
+                                              _clutterAtlas.data() + static_cast<size_t>(layer) * LayerBytes);
+            }
+        }
         _grassPhotoFamilies.clear();
         _grassPhotoFamilies.emplace_back("map clutter (per surface)");
         EngineWgpu::AcquireProducerWindow("grass tufts");
         wgr_grass_set_tufts(_renderer, GrassAtlasSize, GrassAtlasSize, GrassAtlasLayers, _clutterAtlas.data());
+        wgr_grass_set_layer_pick(_renderer, _clutterLayerWeight, _clutterLayerFar, 32);
+        {
+            float sizes[32], spreads[32];
+            for (int i = 0; i < 32; ++i)
+            {
+                sizes[i] = _clutterLayerSize[i] * _clutterLayerScale[i][0];
+                spreads[i] = _clutterLayerScale[i][1];
+            }
+            wgr_grass_set_layer_size(_renderer, sizes, spreads, 32);
+        }
+        wgr_grass_set_blade_skip(_renderer, _clutterBladeSkip);
+        SendEnfusionBladeSets(); // RFG-138: card-free (crop) layers and the per-layer blade sets
         _grassTuftWorld = worldKey;
         LOG_INFO(Graphics, "Wgpu grass: uploaded the map's clutter atlas ({} of {} layers used, {}x{}, {:.1f} MB)",
                  _clutterAtlasLayers, GrassAtlasLayers, GrassAtlasSize, GrassAtlasSize,
@@ -3020,6 +3504,12 @@ void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
         }
         EngineWgpu::AcquireProducerWindow("grass tufts");
         wgr_grass_set_tufts(_renderer, TargetSize, TargetSize, MaxPhotoGrassFamilies + 1u, layers.data());
+        wgr_grass_set_layer_pick(_renderer, nullptr, nullptr, 0);
+        wgr_grass_set_layer_size(_renderer, nullptr, nullptr, 0);
+        wgr_grass_set_blade_skip(_renderer, 0);
+        _clutterCardSkip = 0; // RFG-138: no native runs on this world
+        _clutterCardFull = 0;
+        SendEnfusionBladeSets();
         _grassTuftWorld = worldKey;
         LOG_INFO(Graphics, "Wgpu grass: {} photographed clump families discovered ({} atlas layers)", named,
                  MaxPhotoGrassFamilies + 1u);
@@ -3076,6 +3566,9 @@ void TerrainWgpu::UploadGrassBladeAtlas(const std::string& worldKey)
     EngineWgpu::AcquireProducerWindow("grass blade atlas");
     wgr_grass_set_blade_atlas(_renderer, static_cast<uint32_t>(width), static_cast<uint32_t>(height),
                               static_cast<uint32_t>(BladePaths.size()), layers.data());
+    wgr_grass_set_native_tufts(_renderer, nullptr, nullptr, nullptr); // RFG-117: blades again
+    _enfusionBladeSetParamsReady = false; // RFG-138: and one set
+    SendEnfusionBladeSets();
     _grassBladeAtlasWorld = worldKey;
     LOG_INFO(Graphics, "Wgpu grass: near-LOD photo blade atlas uploaded ({} layers, {}x{})", BladePaths.size(), width,
              height);
@@ -3138,15 +3631,32 @@ void TerrainWgpu::UploadJitterMap(const Landscape& land)
     wgr_terrain_set_jitter_map(_renderer, static_cast<uint32_t>(n), static_cast<uint32_t>(n), offsets.data());
 }
 
+void TerrainWgpu::ResetForRemount()
+{
+    // A Landscape reallocated at the same address with the same name would otherwise read as
+    // sameMap and skip the upload, and `*_uploaded` is dangling until the next upload either way.
+    _uploaded = nullptr;
+    _uploadedName.clear();
+    // The reload replaces CfgDetailTextures; a mod may name its own detail texture.
+    _detailNoiseTried = false;
+    // Raw pointers the next upload would dereference (EvictGpu on the old page set) or match
+    // against new textures by address; the bank is about to release what they point at.
+    _terrainPageTextures.clear();
+    _twGroundBaked.clear();
+    _twGroundWorld.clear();
+    _twGround.Reset();
+}
+
 void TerrainWgpu::UploadDetailNoise()
 {
-    // Global config-driven texture; load once for the renderer's lifetime,
+    // Global config-driven texture; load once per content load (ResetForRemount re-arms it),
     // through the shared texture bank like any other texture.
     if (_detailNoiseTried)
     {
         return;
     }
     _detailNoiseTried = true;
+    _engine.NoteDetailTextureLoad();
 
     const ParamEntry& names = Remaster >> "CfgDetailTextures";
     RStringB detailName = names >> "detail";
@@ -3213,10 +3723,75 @@ void TerrainWgpu::ReportGrassScreenMetric(Scene& scene) const
              width, height, cTop, 1.0f / cTop, pxPerRadian, bladeWidth * pxPerRadian);
 }
 
+// PERF-TERRAIN-TILE-PREP: capture a non-resident page tile's PBO member (main thread) for the
+// background batch. False = upload it in place, as before (not a plain member, store full, ...).
+bool TerrainWgpu::QueueTerrainTilePrep(TextureWgpu* texture)
+{
+    const std::string key = render::PreparedTextureStore::Key(texture->SourceName());
+    if (key.size() < 4 || (key.compare(key.size() - 4, 4, ".paa") != 0 && key.compare(key.size() - 4, 4, ".pac") != 0))
+        return false;
+    if (_terrainTilePendingKeys.count(key))
+        return true;
+    if (!render::PreparedTextureStore::Instance().ShouldPrepare(key))
+        return false;
+    QFBank* archive = QIFStreamB::AutoBank(key.c_str());
+    if (!archive || archive->GetPrefix().GetLength() >= static_cast<int>(key.size()))
+        return false;
+    const char* member = key.c_str() + archive->GetPrefix().GetLength();
+    auto read = archive->CaptureReadRequest(member, true);
+    if (!read)
+        read = archive->CaptureReadRequest(member);
+    if (!read || read->bytes == 0 || read->bytes > 32u * 1024 * 1024)
+        return false;
+    _terrainTilePendingKeys.insert(key);
+    _terrainTileBatch.emplace_back(key, std::move(*read));
+    _terrainTileTextures.emplace_back(texture);
+    return true;
+}
+
 void TerrainWgpu::UpdateGroundTexturePages(const Landscape& land, const Camera& camera, bool force)
 {
     if (!_pagedGroundMaterials)
         return;
+    // PERF-TERRAIN-QUEUED-BIND: evict the pages the last queued bind dropped, once it has run (a few
+    // updates later) and when the window is free -- or anyway after ~60 tries. A page that is bound
+    // again by now is kept.
+    if (!_terrainPendingEvict.empty() && ++_terrainPendingEvictAge >= 3 &&
+        (EngineWgpu::TryAcquireProducerWindow() ||
+         (_terrainPendingEvictAge >= 60 && (EngineWgpu::AcquireProducerWindow("terrain page eviction"), true))))
+    {
+        for (const Ref<Texture>& old : _terrainPendingEvict)
+            if (auto* page = static_cast<TextureWgpu*>(old.GetRef());
+                page && std::find(_terrainPageTextures.begin(), _terrainPageTextures.end(), page) == _terrainPageTextures.end())
+                page->EvictGpu();
+        _terrainPendingEvict.clear();
+    }
+    // PERF-TERRAIN-TILE-PREP: the deferred tiles are decoded -- rebind the page once to take them.
+    if (_terrainPageRebindPending &&
+        std::all_of(_terrainTileTasks.begin(), _terrainTileTasks.end(), [](const std::future<void>& f)
+                    { return f.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }))
+    {
+        // Upload the decoded textures a few per update (POSEIDON_TERRAIN_TILE_UPLOAD_MS, default 3),
+        // then rebind once -- by then every texture is resident and the rebind is cheap.
+        static const double budgetMs = [] {
+            const char* v = std::getenv("POSEIDON_TERRAIN_TILE_UPLOAD_MS");
+            return v ? std::max(0.5, std::atof(v)) : 3.0;
+        }();
+        const auto began = std::chrono::steady_clock::now();
+        while (!_terrainTileTextures.empty() &&
+               std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count() < budgetMs)
+        {
+            if (auto* tile = static_cast<TextureWgpu*>(_terrainTileTextures.back().GetRef()))
+                tile->EnsureUploaded();
+            _terrainTileTextures.pop_back();
+        }
+        if (!_terrainTileTextures.empty())
+            return; // more next update; the current page binding stays as it is
+        _terrainTileTasks.clear();
+        _terrainTilePendingKeys.clear();
+        _terrainPageRebindPending = false;
+        force = true; // every deferred texture is resident now
+    }
     const float grid = std::max(land.GetLandGrid(), 0.001f);
     Vector3 pos = camera.Position();
     // Deterministic out-and-back page-cache diagnostic. The camera and final
@@ -3292,7 +3867,54 @@ void TerrainWgpu::UpdateGroundTexturePages(const Landscape& land, const Camera& 
         materials.push_back(id);
     }
     const double candidateScanMs = timings ? TerrainPageElapsedMs(timingStart) : 0.0;
+    // PERF-TERRAIN-TILE-PREP: an ordinary re-centre defers its new tiles; the world-load build and
+    // the rebind after a deferred batch upload in place. POSEIDON_TERRAIN_TILE_PREP=0 = always in place.
+    static const bool tilePrep = [] {
+        const char* v = std::getenv("POSEIDON_TERRAIN_TILE_PREP");
+        return !(v && v[0] == '0');
+    }();
+    _terrainPageDeferUploads = tilePrep && !force && render::PreparedTextureStore::Enabled();
+    _terrainPageQueuedBindAllowed = _terrainPageCenterSet; // not the world-load build
     UploadGroundTextures(land, &materials);
+    _terrainPageDeferUploads = false;
+    _terrainPageQueuedBindAllowed = false;
+    _terrainPageCenterSet = true;
+    if (!_terrainTileBatch.empty())
+    {
+        const uint64_t generation = render::PreparedTextureStore::Instance().Generation();
+        _terrainTileTasks.push_back(std::async(std::launch::async,
+            [batch = std::move(_terrainTileBatch), generation]() mutable
+        {
+            Foundation::poSetMyPriority(-1);
+            render::PreparedTextureStore& store = render::PreparedTextureStore::Instance();
+            std::vector<char> bytes;
+            for (auto& [key, read] : batch)
+            {
+                try
+                {
+                    PAABlockChain chain;
+                    if (read.Read(bytes) &&
+                        ReadPAABlockChainBuffer(bytes.data(), bytes.size(), chain, nullptr, 64u * 1024 * 1024) &&
+                        chain.valid())
+                    {
+                        std::unique_ptr<render::PreparedAlphaFacts> facts;
+                        if (read.HasArchiveIdentity())
+                            facts = render::PreparedTextureStore::BuildAlphaFacts(chain, read);
+                        const bool put = store.Put(key, std::move(chain), generation, std::move(facts));
+                        static const bool tileLog = [] { const char* v = std::getenv("WGR_TERRAIN_TILE_LOG"); return v && v[0] == '1'; }();
+                        static std::atomic<int> rows{0};
+                        if (tileLog && rows.fetch_add(1) < 12)
+                            LOG_INFO(Graphics, "Terrain tile prep: {} put={}", key, put);
+                    }
+                }
+                catch (...)
+                {
+                }
+            }
+        }));
+        _terrainTileBatch.clear();
+        _terrainPageRebindPending = true;
+    }
     if (timings)
         LOG_INFO(Graphics,
             "Wgpu terrain page update timings: centre=({}, {}) candidateCells={} candidates={} "
@@ -3588,6 +4210,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         _engine.ClearEarthWorldgenObjects();
         if(_earthTreeDetail)_earthTreeDetail->Clear();
         _engine.ClearEarthTreeObjects();_earthTreeModels=false;
+        _earthFeatureTreeSet.clear();_earthForestTreeSet.clear();_earthCanopyTrees.clear();
+        if(_earthGrass){EngineWgpu::AcquireProducerWindow("Earth grass relocate");wgr_grass_clear_earth_ground(_renderer);_earthGrass=false;}
         for(size_t i=0;i<_earthFeatureMeshes.size();++i)if(_earthFeatureMeshes[i]){EngineWgpu::AcquireProducerWindow("Earth features relocate");wgr_mesh_destroy(_renderer,_earthFeatureMeshes[i]);_earthFeatureMeshes[i]=0;_earthFeatureIndices[i]=0;}
 
         if(_earthBuildings)_earthBuildings->Relocate();
@@ -3714,6 +4338,9 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                 UploadEarthHorizon(*_earthPatch,true);
                 if(_earthSurfaceTexture)wgr_texture_destroy(_renderer,_earthSurfaceTexture);
                 _earthSurfaceTexture=texture;
+                _earthGrass=UploadEarthGrass(*_earthPatch,EarthSurfaceStreamAtlasRef{atlas->window,atlas->pixels});
+                _earthCanopyTrees=EarthCanopyTrees(*_earthPatch,atlas->window,atlas->pixels);
+                RefreshEarthTreeModels();
                 if(_earthFarTexture)wgr_texture_destroy(_renderer,_earthFarTexture);
                 _earthFarTexture=farTexture;
                 LOG_INFO(Graphics,"Earth local surface: near 2048 / far {} (warped) atlases, generation {}, revision {}; {}",
@@ -3761,7 +4388,9 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             _earthFeatureGeneration=mesh->generation;
             if(!_earthTreeDetail)_earthTreeDetail=std::make_unique<EarthTreeDetail>(_engine,_renderer);
             _earthTreeDetail->SetTrees(mesh->trees,_earthFeatureMeshes[EarthFeatureStream::Trees],std::move(treeVertices));
-            _earthTreeModels=PlaceEarthTreeModels(mesh->trees);
+            _earthFeatureTreeSet=mesh->trees;
+            _earthForestTreeSet=mesh->forestTrees;
+            RefreshEarthTreeModels();
             if(!mesh->error.empty())LOG_INFO(Graphics,"Earth cached features: {}",mesh->error);
         }
         if(_earthFeatureGeneration==_earthPatch->generation)
@@ -3916,6 +4545,20 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         if (camera)
         {
             DrawEarthTerrain(scene,*camera,land);
+            // grass on the near patch where the imagery shows meadow (UploadEarthGrass)
+            if (_earthGrass && camera->Position().Y() < 6000.0f)
+            {
+                _engine.SubmitGrass();
+                static float nextLog = 0;
+                Engine::GrassStatsOut stats;
+                if (Glob.time.toFloat() >= nextLog && _engine.GetGrassStats(stats))
+                {
+                    nextLog = Glob.time.toFloat() + 30.0f;
+                    LOG_INFO(Graphics, "Earth grass placed: near {} mid {} far {} (camera {:.0f}, {:.0f}, {:.0f})",
+                             stats.nearInstances, stats.midInstances, stats.farInstances, camera->Position().X(),
+                             camera->Position().Y(), camera->Position().Z());
+                }
+            }
             // Tidewater wildlife in whole-world mode (WildlifeWorld.hpp answers its sea and ground)
             if (!_fish)
                 _fish = std::make_unique<FishSchools>(_engine, _renderer);
@@ -3973,6 +4616,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     // checkbox is a live A/B with no re-upload. It reaches the shader as 0 on every
     // world whose materials do not set `enfusion`, so it is inert there by data.
     _params.enfusion_ground = _enfusionGroundEnabled ? 1.0f : 0.0f;
+    _params._pad4 = _surfaceGrid; // RFG-PBR: terrain.wgsl surface_grid
     // Alpine snowline (dev weather tab): permanent cover above a height, pushed
     // per frame like the wet band so the slider is live. Off = -1.
     _params.snowline_height =
@@ -4007,19 +4651,40 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
                  _puddleWetness.value, _params._pad1);
         lastPuddleDiagnosticTime = weather.timeSeconds;
     }
+    // Standing water in mud ruts (terrain.wgsl mud_water_level, one float after the mud views):
+    // how full the ruts are, from the mud field's soil wetness. WGR_MUD_RUT_WATER=0 turns it off.
+    static const bool rutWaterEnabled = EnvFloat("WGR_MUD_RUT_WATER", 1.0f) > 0.5f;
+    _engine.QueueMudWater(rutWaterEnabled && GMud().enabled ? MudRutWaterLevel(GMud().Wetness()) : 0.0f);
     _engine.QueueTerrainParams(_params); // REN-THR-013: queued, applied before wgr_render_frame
     const auto& snow = GSnow();
     // The GPU window is presentation state. Paused freefly, deposit commands
     // and roof edits must still refresh it without advancing retained snow.
     const double snowWallTime = std::chrono::duration<double>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
-    if (camera && (snow.CoverActive() || _snowWasEnabled || uploaded) &&
+    // PERF-FIELD-EMPTY-SKIP (2026-10-20). Snow, mud and sand re-took their 512x512 window every
+    // 0.1 s (snow) or every 2 m the camera moved (mud, sand) even with nothing in them -- the
+    // copies, the shelter mask and the allocations were ~7% of the main thread in Arma 2
+    // Chernarus's frames (summer, snowline cover only; Nsight ns-a2). An empty mud/sand window
+    // (no chunks) is all zeros wherever it sits: once one is uploaded it is not taken again until
+    // the field gains chunks or changes state. An empty snow window still carries the roof
+    // shelters of snowline cover, so it follows the camera -- but every 8 m or 1 s, not every
+    // 0.1 s (the 64 m window keeps >= 24 m around the camera). WGR_FIELD_EMPTY_SKIP=0 = always.
+    static const bool fieldEmptySkip = EnvFloat("WGR_FIELD_EMPTY_SKIP", 1.0f) > 0.5f;
+    const bool snowEmptyHeld = fieldEmptySkip && camera && !uploaded && _snowUploadedEmpty && !snow.enabled &&
+                               snow.Chunks() == 0 && snow.CoverActive() == _snowWasEnabled &&
+                               snowWallTime - _snowUploadWallTime < 1.0 &&
+                               std::abs(camera->Position().X() - _snowUploadX) < 8.0f &&
+                               std::abs(camera->Position().Z() - _snowUploadZ) < 8.0f;
+    if (camera && !snowEmptyHeld && (snow.CoverActive() || _snowWasEnabled || uploaded) &&
         (snow.CoverActive() != _snowWasEnabled || uploaded || _params.time < _snowUploadTime ||
          _params.time - _snowUploadTime >= 0.1f || snowWallTime - _snowUploadWallTime >= 0.1))
     {
         auto snapshot = snow.Snapshot(camera->Position().X(), camera->Position().Z());
         MaskSnowShelters(land, snapshot);
         _engine.QueueSnow(snapshot);
+        _snowUploadedEmpty = !snow.enabled && snow.Chunks() == 0;
+        _snowUploadX = camera->Position().X();
+        _snowUploadZ = camera->Position().Z();
         _snowUploadTime = _params.time;
         _snowUploadWallTime = snowWallTime;
         _snowWasEnabled = snow.CoverActive();
@@ -4029,14 +4694,82 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     if (camera && std::isfinite(camera->Position().X()) && std::isfinite(camera->Position().Z()))
     {
         // Chunk-aligned camera residency changes only the displayed window, never the store.
-        const int mx = int(std::floor(camera->Position().X() / 2.0f));
-        const int mz = int(std::floor(camera->Position().Z() / 2.0f));
-        if (!_mudUploaded || uploaded || _mudWasEnabled != mud.enabled || _mudRevision != mud.Revision() || mx != _mudWindowX || mz != _mudWindowZ)
+        // The window sits ahead of the camera (MudWindowCentre) so ruts reach further out.
+        const MudViewCentre mudCentre = MudWindowCentre(camera->Position().X(), camera->Position().Z(),
+                                                        camera->Direction().X(), camera->Direction().Z());
+        const int mx = int(std::floor(mudCentre.x / 2.0f));
+        const int mz = int(std::floor(mudCentre.z / 2.0f));
+        const bool mudMoved = (mx != _mudWindowX || mz != _mudWindowZ) &&
+                              !(fieldEmptySkip && _mudUploadedEmpty && mud.Chunks() == 0);
+        if (!_mudUploaded || uploaded || _mudWasEnabled != mud.enabled || _mudRevision != mud.Revision() || mudMoved)
         {
-            auto snapshot = mud.Snapshot(camera->Position().X(), camera->Position().Z());
+            auto snapshot = mud.Snapshot(mudCentre.x, mudCentre.z);
             if (mud.Chunks() == 0) snapshot[3] = 0.0f;
             _engine.QueueMud(std::move(snapshot));
+            _mudUploadedEmpty = mud.Chunks() == 0;
             _mudRevision = mud.Revision(); _mudWindowX = mx; _mudWindowZ = mz; _mudUploaded = true; _mudWasEnabled = mud.enabled;
+        }
+        // Far view for ruts beyond the 64 m window: 0.5 m cells over 256 m, same
+        // centre. Rebuilt at most four times a second (it covers 16x the area).
+        const int fx = int(std::floor(mudCentre.x / 8.0f));
+        const int fz = int(std::floor(mudCentre.z / 8.0f));
+        const double farWall = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        const bool farMoved = (fx != _mudFarWindowX || fz != _mudFarWindowZ) &&
+                              !(fieldEmptySkip && _mudFarUploadedEmpty && mud.Chunks() == 0);
+        const bool farStale = !_mudFarUploaded || uploaded || farMoved || _mudFarRevision != mud.Revision();
+        if (farStale && (!_mudFarUploaded || uploaded || farWall - _mudFarUploadWallTime >= 0.25))
+        {
+            auto farView = mud.SnapshotFar(mudCentre.x, mudCentre.z);
+            if (mud.Chunks() == 0) farView[3] = 0.0f;
+            _engine.QueueMudFar(std::move(farView));
+            _mudFarUploadedEmpty = mud.Chunks() == 0;
+            _mudFarRevision = mud.Revision(); _mudFarWindowX = fx; _mudFarWindowZ = fz;
+            _mudFarUploadWallTime = farWall; _mudFarUploaded = true;
+        }
+    }
+    // BOOM-001: crater views. Near: 128 m ahead-centred like the mud window, moved in 4 m chunk
+    // steps; far: 512 m, moved in 16 m steps. Grass gets the 64 craters nearest the camera.
+    const auto& craters = GCraters();
+    if (camera && std::isfinite(camera->Position().X()) && std::isfinite(camera->Position().Z()))
+    {
+        const MudViewCentre centre = MudWindowCentre(camera->Position().X(), camera->Position().Z(),
+                                                     camera->Direction().X(), camera->Direction().Z());
+        const int nx = int(std::floor(centre.x / 4.0f)), nz = int(std::floor(centre.z / 4.0f));
+        if (!_craterNearUploaded || uploaded || _craterNearRevision != craters.Revision() ||
+            (craters.Chunks() > 0 && (nx != _craterNearX || nz != _craterNearZ)))
+        {
+            _engine.QueueCraters(craters.Snapshot(centre.x, centre.z, false), false);
+            _craterNearRevision = craters.Revision(); _craterNearX = nx; _craterNearZ = nz; _craterNearUploaded = true;
+        }
+        const int fx = int(std::floor(centre.x / 16.0f)), fz = int(std::floor(centre.z / 16.0f));
+        if (!_craterFarUploaded || uploaded || _craterFarRevision != craters.Revision() ||
+            (craters.Chunks() > 0 && (fx != _craterFarX || fz != _craterFarZ)))
+        {
+            _engine.QueueCraters(craters.Snapshot(centre.x, centre.z, true), true);
+            _craterFarRevision = craters.Revision(); _craterFarX = fx; _craterFarZ = fz; _craterFarUploaded = true;
+        }
+        const int gx = int(std::floor(camera->Position().X() / 16.0f)), gz = int(std::floor(camera->Position().Z() / 16.0f));
+        if (!_grassCraterUploaded || _grassCraterRevision != craters.Revision() ||
+            (craters.Craters() > 64 && (gx != _grassCraterX || gz != _grassCraterZ)))
+        {
+            _engine.QueueGrassCraters(craters.NearestDiscs(camera->Position().X(), camera->Position().Z(), 64));
+            _grassCraterRevision = craters.Revision(); _grassCraterX = gx; _grassCraterZ = gz; _grassCraterUploaded = true;
+        }
+    }
+    // BOOM-004: the 64 sharp snow bullet holes nearest the camera (80 m), re-picked on a new
+    // mark or after an 8 m move. Origin snapped to 64 m keeps the packed offsets small.
+    if (camera && std::isfinite(camera->Position().X()) && std::isfinite(camera->Position().Z()))
+    {
+        const auto& snowField = GSnow();
+        const float cx = camera->Position().X(), cz = camera->Position().Z();
+        const int mx = int(std::floor(cx / 8.0f)), mz = int(std::floor(cz / 8.0f));
+        if (!_snowMarksUploaded || uploaded || _snowMarksRevision != snowField.BulletMarksRevision() ||
+            (snowField.BulletMarks() > 0 && (mx != _snowMarksX || mz != _snowMarksZ)))
+        {
+            _engine.QueueSnowMarks(snowField.NearestBulletMarks(cx, cz, std::floor(cx / 64.0f) * 64.0f,
+                                                                std::floor(cz / 64.0f) * 64.0f, 64, 80.0f));
+            _snowMarksRevision = snowField.BulletMarksRevision(); _snowMarksX = mx; _snowMarksZ = mz;
+            _snowMarksUploaded = true;
         }
     }
     const auto& sand = GSand();
@@ -4044,11 +4777,14 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     {
         const int sx = int(std::floor(camera->Position().X() / 2.0f));
         const int sz = int(std::floor(camera->Position().Z() / 2.0f));
+        const bool sandMoved = (sx != _sandWindowX || sz != _sandWindowZ) &&
+                               !(fieldEmptySkip && _sandUploadedEmpty && sand.Chunks() == 0);
         if (!_sandUploaded || uploaded || _sandWasEnabled != sand.enabled || _sandRevision != sand.Revision() ||
-            sx != _sandWindowX || sz != _sandWindowZ)
+            sandMoved)
         {
             auto snapshot = sand.Snapshot(camera->Position().X(), camera->Position().Z());
             if (sand.Chunks() == 0) snapshot[3] = 0.0f;
+            _sandUploadedEmpty = sand.Chunks() == 0;
             static const bool sandUploadTrace=[] {
 #ifdef _WIN32
                 char* value=nullptr;size_t length=0;
@@ -4149,6 +4885,9 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         std::abs(snowCamera.Y() - land.SurfaceY(snowCamera.X(), snowCamera.Z())) < 15.0f;
     const bool refineSand = sand.enabled && sand.Chunks() > 0 &&
         std::abs(snowCamera.Y() - land.SurfaceY(snowCamera.X(), snowCamera.Z())) < 15.0f;
+    // Same centre as the uploaded mud window, so the fine mesh stays inside it.
+    const MudViewCentre mudRefineCentre = MudWindowCentre(snowCamera.X(), snowCamera.Z(),
+                                                          camera->Direction().X(), camera->Direction().Z());
     std::array<CdlodContactFocus,2> reliefFocus{};
     size_t reliefFocusCount=0;
     if (refineSnow || refineMud || refineSand)
@@ -4180,7 +4919,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
                     for (int x=-4;x<=4 && !localRelief;++x)
                     {
                         const float fx=pos.X()+x*0.25f, fz=pos.Z()+z*0.25f;
-                        localRelief=(mud.enabled && mud.Chunks()>0 && mud.HeightOffsetAt(fx,fz)<-0.001f) ||
+                        localRelief=(mud.enabled && mud.Chunks()>0 && std::abs(mud.HeightOffsetAt(fx,fz))>0.001f) ||
                             (sand.enabled && sand.Chunks()>0 && sand.HeightOffsetAt(fx,fz)<-0.001f) ||
                             (snow.CoverActive() && snow.detailedGeometry && snow.BaseDepthAt(fx,fz)>0.002f &&
                                 snow.DeficitAt(int(std::floor(fx/SnowField::CellSize)),
@@ -4193,10 +4932,60 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     }
     auto emit = [&](const CdlodSelection& s)
     {
-        if (reliefFocusCount>0)
+        // Mud ruts also get a wider, slightly coarser fine mesh so they stay visible
+        // beyond the 8 m contact window (RefineCdlodContactWide).
+        if (refineMud)
+            RefineCdlodContactWide(s,reliefFocus,reliefFocusCount,mudRefineCentre.x,mudRefineCentre.z,
+                                   CdlodWideReliefMaxRadius,emitNode);
+        else if (reliefFocusCount>0)
             RefineCdlodContactUnion(s,reliefFocus,reliefFocusCount,emitNode);
         else
             emitNode(s);
+    };
+
+    // BOOM-001: the terrain mesh is only as fine as the heightmap (6.25 m on the stock islands), so
+    // a crater a few metres across falls between its vertices -- its depth reached the physics and
+    // the lighting but not the drawn ground. Patches over a crater near the camera are split
+    // (children tile the parent exactly, as RefineCdlodSnow) down to 8 m (0.25 m vertices, the
+    // CraterField cell) close by, coarser with distance. The crater's offset is zero at its
+    // edge, so a refined patch meets its unrefined neighbour on the same heightmap plane.
+    const std::vector<float> craterDiscs = GCraters().Chunks() > 0
+        ? GCraters().NearestDiscs(snowCamera.X(), snowCamera.Z(), 64) : std::vector<float>{0.0f, 0, 0, 0};
+    const int craterCount = int(craterDiscs[0]);
+    std::function<void(const CdlodSelection&)> craterRefine = [&](const CdlodSelection& s)
+    {
+        bool hit = false;
+        float nearest = 1e30f;
+        for (int i = 0; i < craterCount; ++i)
+        {
+            const float cx = craterDiscs[4 + i * 4], cz = craterDiscs[5 + i * 4];
+            const float r = craterDiscs[6 + i * 4] * 1.5f; // soil radius -> the whole bowl, lip and heap
+            const float dx = std::max({s.originX - cx, 0.0f, cx - (s.originX + s.size)});
+            const float dz = std::max({s.originZ - cz, 0.0f, cz - (s.originZ + s.size)});
+            if (dx * dx + dz * dz < r * r)
+            {
+                hit = true;
+                nearest = std::min(nearest, std::hypot(cx - snowCamera.X(), cz - snowCamera.Z()));
+            }
+        }
+        // (owner: "higher poly crater") 4 m patches = 0.125 m vertices close by
+        const float target = nearest < 60.0f ? 4.0f : nearest < 140.0f ? 8.0f : nearest < 280.0f ? 16.0f
+                           : nearest < 450.0f ? 32.0f : 1e9f;
+        if (!hit || s.size <= target)
+        {
+            emit(s);
+            return;
+        }
+        for (int child = 0; child < 4; ++child)
+        {
+            auto patch = s;
+            patch.size *= 0.5f;
+            patch.originX += (child & 1) * patch.size;
+            patch.originZ += (child >> 1) * patch.size;
+            patch.morphStart = 1.0e10f; // finer than the LOD ladder: never snap back to its lattice
+            patch.morphEnd = 2.0e10f;
+            craterRefine(patch);
+        }
     };
 
     _selected.clear();
@@ -4209,8 +4998,8 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     // extent so seabed always underlies the ocean.)
     SelectVisibleCdlod(
         _tree, _rootIndex, _numLevels, _ranges, _morphRegion, *camera, rx0, rz0, rx1, rz1,
-        [](const CdlodNode&) { return true; }, emit,
-        (snow.CoverActive() ? snowEffDepth : 0.0f) + (mud.enabled && mud.Chunks() > 0 ? MudField::MaxDepth : 0.0f)
+        [](const CdlodNode&) { return true; }, craterRefine,
+        (GCraters().Chunks() > 0 ? CraterField::MaxDepth : 0.0f) + (snow.CoverActive() ? snowEffDepth : 0.0f) + (mud.enabled && mud.Chunks() > 0 ? MudField::MaxDepth : 0.0f)
             + (sand.enabled && sand.Chunks() > 0 ? SandField::MaxDepth : 0.0f),
         _backgroundCoverage);
 
@@ -4263,6 +5052,13 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         if (!_crabs)
             _crabs = std::make_unique<BeachCritters>(_engine, _renderer);
         _crabs->Update(camera->Position(), Glob.time.toFloat());
+        if (!_debris)
+            _debris = std::make_unique<BeachDebris>(_engine, _renderer);
+        _debris->Update(camera->Position());
+        // the owner's ez-tree test (Map editor tab), inert while it is off
+        if (!_ezTrees)
+            _ezTrees = std::make_unique<ProceduralTrees>(_engine, _renderer);
+        _ezTrees->Update(camera->Position());
     }
 }
 

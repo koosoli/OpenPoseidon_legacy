@@ -1,3 +1,4 @@
+#include <Poseidon/Foundation/Platform/EnvOnce.hpp>
 #include <Poseidon/Graphics/Textures/Image.hpp>
 #include <Poseidon/Graphics/Textures/BlockCompression.hpp>
 #include <Poseidon/Core/TaskPool.hpp>
@@ -10,6 +11,7 @@
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // RFG-070 `enft|` layer tint
+#include <Poseidon/Dev/Diag/StreamingDiag.hpp>                // GResidencyLevers: LazyBcrTintRoute
 #include <Poseidon/IO/FileServer.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
@@ -50,9 +52,52 @@ bool Dxt1HasPunchThrough(const std::vector<uint8_t>& blocks)
 
 int DecodedMaxEdge()
 {
-    const char* value = std::getenv("POSEIDON_DECODED_MAX_EDGE");
+    const char* value = POSEIDON_GETENV_ONCE("POSEIDON_DECODED_MAX_EDGE"); // asked per texture
     const int parsed = value && *value ? std::atoi(value) : 0;
     return parsed >= 64 && parsed <= 8192 ? parsed : 1024;
+}
+
+// RFG-184: the edge cap for `enfa|` leaf composites. Reforger authors needle and leaf coverage
+// at up to 2048 (polyplane_pinus_sylvestris_A is 1024x2048 over a 512x1024 colour), and the
+// silhouette IS that coverage: at the shared 1024 cap every conifer card drew as soft blobs
+// where Reforger shows needles. POSEIDON_LEAF_MAX_EDGE (64..8192) overrides; 0/unset = 2048.
+int LeafCompositeMaxEdge(int sharedCap)
+{
+    const char* value = POSEIDON_GETENV_ONCE("POSEIDON_LEAF_MAX_EDGE");
+    const int parsed = value && *value ? std::atoi(value) : 0;
+    return std::max(sharedCap, parsed >= 64 && parsed <= 8192 ? parsed : 2048);
+}
+
+// Bilinear 2x-per-step upsample of a B,G,R,A level to (w, h). Used only to bring a leaf's
+// colour up to its coverage map's size; the alpha written here is replaced by the merge.
+static DDSMipLevel UpsampleLevelBGRA(const DDSMipLevel& src, int w, int h)
+{
+    DDSMipLevel out;
+    out.width = w;
+    out.height = h;
+    out.data.resize(static_cast<size_t>(w) * h * 4);
+    for (int y = 0; y < h; ++y)
+    {
+        const float fy = std::max(0.0f, (y + 0.5f) * src.height / h - 0.5f);
+        const int y0 = std::min(static_cast<int>(fy), src.height - 1), y1 = std::min(y0 + 1, src.height - 1);
+        const float ty = fy - y0;
+        for (int x = 0; x < w; ++x)
+        {
+            const float fx = std::max(0.0f, (x + 0.5f) * src.width / w - 0.5f);
+            const int x0 = std::min(static_cast<int>(fx), src.width - 1), x1 = std::min(x0 + 1, src.width - 1);
+            const float tx = fx - x0;
+            const auto at = [&](int xx, int yy, int c)
+            { return static_cast<float>(src.data[(static_cast<size_t>(yy) * src.width + xx) * 4 + c]); };
+            for (int c = 0; c < 4; ++c)
+            {
+                const float top = at(x0, y0, c) + (at(x1, y0, c) - at(x0, y0, c)) * tx;
+                const float bot = at(x0, y1, c) + (at(x1, y1, c) - at(x0, y1, c)) * tx;
+                out.data[(static_cast<size_t>(y) * w + x) * 4 + c] =
+                    static_cast<uint8_t>(std::clamp(top + (bot - top) * ty + 0.5f, 0.0f, 255.0f));
+            }
+        }
+    }
+    return out;
 }
 
 // Diagnostic only: separate CPU preparation from later GPU upload. No scheduling changes.
@@ -360,15 +405,15 @@ void ApplyEnfusionLayerTint(std::vector<DDSMipLevel>& levels, const float rgb[3]
 
 DdsPreparationOptions CaptureDdsPreparationOptions()
 {
-    const auto enabled = [](const char* key) {
-        const char* value = std::getenv(key);
-        return value && std::strcmp(value, "1") == 0;
-    };
+    // Asked per texture, so the switches are read once (the renderer's start-up defaults for the
+    // preview switches are set before any texture exists).
+    const auto enabled = [](const char* value) { return value && std::strcmp(value, "1") == 0; };
     return {DdsCompressedPassthrough(), Enfusion::LayerTintLinearMultiply(), DecodedMaxEdge(),
-            NativeGlobalOverlayDataSuffix(enabled("WGR_REFORGER_PBR_PREVIEW"),
-                enabled("WGR_REFORGER_LAYER_ORDER_PREVIEW"), enabled("WGR_REFORGER_SRGB_PREVIEW"),
-                enabled("WGR_REFORGER_GLOBAL_OVERLAY_PREVIEW"),
-                std::getenv("WGR_REFORGER_GLOBAL_OVERLAY_MATERIAL"))};
+            NativeGlobalOverlayDataSuffix(enabled(POSEIDON_GETENV_ONCE("WGR_REFORGER_PBR_PREVIEW")),
+                                          enabled(POSEIDON_GETENV_ONCE("WGR_REFORGER_LAYER_ORDER_PREVIEW")),
+                                          enabled(POSEIDON_GETENV_ONCE("WGR_REFORGER_SRGB_PREVIEW")),
+                                          enabled(POSEIDON_GETENV_ONCE("WGR_REFORGER_GLOBAL_OVERLAY_PREVIEW")),
+                                          POSEIDON_GETENV_ONCE("WGR_REFORGER_GLOBAL_OVERLAY_MATERIAL"))};
 }
 
 void SetDdsCompressedPassthrough(bool on)
@@ -404,6 +449,18 @@ bool IsEnfusionRgNormalName(const char* name)
     const size_t end = dot == std::string::npos || dot < start ? lower.size() : dot;
     if (end >= start + 4 && lower.compare(end - 4, 4, "_nho") == 0) return true;
     return !legacyNtc && end >= start + 4 && lower.compare(end - 4, 4, "_ntc") == 0;
+}
+
+bool LazyBcrTintRoute()
+{
+    static const bool lazyTint = []
+    {
+        const char* v = std::getenv("WGR_LAZY_BCR_TINT");
+        // Exact mip/corpus tests and paired native routes preserve the GPU
+        // image while avoiding duplicate decoded CPU chains. 0 is the A/B control.
+        return !v || v[0] != '0';
+    }();
+    return lazyTint && Dev::GResidencyLevers().layerTintInShader && Enfusion::LayerTintLinearMultiply();
 }
 
 TextureSourceDDS::TextureSourceDDS() = default;
@@ -523,10 +580,21 @@ bool TextureSourceDDS::InitFromMemoryWithOptions(const void* data, size_t size, 
         // retain the existing decoding/coverage behavior.
         const bool globalOverlayData = _format == PixelFormat::BC7 && !_bc7Srgb &&
             NativeGlobalOverlayDataName(who, options.globalOverlayDataSuffix);
+        // `_mcr` (Enfusion's GlobalMCRMap) joined on 2026-10-15: its only consumer is
+        // gpu_driven.wgsl global_mcr_apply, which reads `.rgb`, and BC7 uploads UNORM like the
+        // decoded RGBA8 it replaces, so the texels sampled are the same. Declined, every one was
+        // a 4 B/texel CPU decode on the main thread -- ~10 ms each at 1024, measured as most of
+        // the 20-120 ms far-model install hitches at Durras -- and 4x the VRAM.
+        // POSEIDON_DDS_MCR_PASSTHROUGH=0 restores the decode.
+        static const bool mcrPassthrough = [] {
+            const char* value = std::getenv("POSEIDON_DDS_MCR_PASSTHROUGH");
+            return !(value && value[0] == '0');
+        }();
         const bool dataInAlpha = globalOverlayData || roughnessInAlpha || lowerWho.find("_nmo") != std::string::npos ||
                                  lowerWho.find("_nho") != std::string::npos ||
                                  lowerWho.find("_ntc") != std::string::npos ||
-                                 lowerWho.find("_mask") != std::string::npos;
+                                 lowerWho.find("_mask") != std::string::npos ||
+                                 (mcrPassthrough && lowerWho.find("_mcr") != std::string::npos);
         // One decode, of the SMALLEST level -- typically 4x4 or 8x8. It answers two
         // questions the block data cannot: the average colour (the distant-LOD stand-in,
         // which AverageOfSmallest returns black for on a block format), and whether the
@@ -803,6 +871,21 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     if (tinted)
         name = inner;
 
+    // RFG-119: `enfk|<alpha>|<inner>` -- a CONSTANT coverage. Enfusion glass that blends
+    // (`BlendMode AlphaBlend`) with no OpacityMap is as transparent as its `AlphaMul` says:
+    // window_glass is 0.243 over a `_BCR` whose alpha is roughness. Without this the pane drew
+    // solid beige ("the window is not transparent"). Inner loads exactly as before, then alpha
+    // is overwritten; a name with a '|' never takes the BCR-roughness route downstream.
+    float constantAlpha = -1.0f;
+    if (std::strncmp(name, "enfk|", 5) == 0)
+    {
+        if (const char* bar = std::strchr(name + 5, '|'); bar != nullptr && bar[1] != '\0')
+        {
+            constantAlpha = std::clamp(std::strtof(name + 5, nullptr), 0.0f, 1.0f);
+            name = bar + 1;
+        }
+    }
+
     // RFG-039: a flat colour needs no file. Built at 4x4 rather than 1x1 because the
     // mip chain and the pitch arithmetic downstream both assume a real image.
     //
@@ -815,8 +898,11 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     {
         const auto channel = [](float v)
         { return static_cast<uint8_t>(v <= 0.0f ? 0.0f : (v >= 1.0f ? 255.0f : v * 255.0f + 0.5f)); };
-        // ARGB8888 in this engine means B,G,R,A in memory.
-        const uint8_t texel[4] = {channel(solid[2]), channel(solid[1]), channel(solid[0]), 255};
+        // ARGB8888 in this engine means B,G,R,A in memory. RFG-137: an `enfk|` constant
+        // coverage over a flat colour (the river film) keeps its alpha -- this branch returns
+        // before the overwrite below, so it has to be applied here.
+        const uint8_t alpha = constantAlpha >= 0.0f ? channel(constantAlpha) : 255;
+        const uint8_t texel[4] = {channel(solid[2]), channel(solid[1]), channel(solid[0]), alpha};
         DDSMipLevel level;
         level.width = 4;
         level.height = 4;
@@ -829,7 +915,7 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
         _pacFormat = ToPacFormat(_format);
         _w = 4;
         _h = 4;
-        _hasAlpha = false;
+        _hasAlpha = alpha < 255; // as the constant-coverage overwrite below states it
         _mipmaps = 1;
         _avgColor = AverageOfSmallest(_levels, _format);
         _isTransparent = false;
@@ -851,9 +937,21 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     std::string compositeColour;
     std::string compositeCoverage;
     const bool composite = SplitEnfusionAlphaName(name, compositeColour, compositeCoverage);
+    // RFG-125: `enfa|<coverage>|enfc|r,g,b` -- a decal whose whole albedo is its flat `Color`
+    // (Graffiti_02: no BCRMap, near-black paint through an OpacityMap). The coverage file is
+    // decoded as the image and its RGB painted over below, so the result has the coverage's
+    // own size and authored mips.
+    float paintRgb[3] = {1.0f, 1.0f, 1.0f};
+    const bool paintComposite = composite && SplitEnfusionColourName(compositeColour.c_str(), paintRgb);
+
+    // RFG-184: leaf composites decode at their own, larger edge cap (colour and coverage alike).
+    DdsPreparationOptions leafOptions = options;
+    if (composite)
+        leafOptions.decodedMaxEdge = LeafCompositeMaxEdge(options.decodedMaxEdge);
 
     std::vector<uint8_t> buffer;
-    if (!reader(composite ? compositeColour.c_str() : name, buffer) || buffer.empty())
+    if (!reader(composite ? (paintComposite ? compositeCoverage.c_str() : compositeColour.c_str()) : name, buffer) ||
+        buffer.empty())
         return false;
     trace.inputBytes = buffer.size();
     trace.Mark(trace.read);
@@ -865,7 +963,7 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
         const char* value = std::getenv("POSEIDON_DDS_TINT_REUSE");
         return value && std::strcmp(value, "1") == 0; // Experimental until byte/performance A/B acceptance.
     }();
-    const bool reusable = reuseTintDecode && tinted && !composite && !IsEnfusionRgNormalName(name);
+    const bool reusable = reuseTintDecode && tinted && !composite && constantAlpha < 0.0f && !IsEnfusionRgNormalName(name);
     const std::string reuseKey = reusable ? "dds-decode|" + std::to_string(options.decodedMaxEdge) + "|" +
                                            render::PreparedTextureStore::Key(name) : "";
     auto& prepared = render::PreparedTextureStore::Instance();
@@ -896,11 +994,25 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     }
     if (!trace.reusedDecode)
     {
-        if (!InitFromMemoryWithOptions(buffer.data(), buffer.size(), name, /*forceDecode=*/composite || tinted, options))
+        if (!InitFromMemoryWithOptions(buffer.data(), buffer.size(), name,
+                                       /*forceDecode=*/composite || tinted || constantAlpha >= 0.0f,
+                                       composite ? leafOptions : options))
             return false;
         if (reusable) prepared.PutDdsDecode(reuseKey, buffer, *this);
     }
     trace.Mark(trace.decode);
+
+    if (paintComposite && _format == PixelFormat::ARGB8888)
+    {
+        // ARGB8888 in this engine means B,G,R,A in memory; alpha is the merge's below.
+        const auto channel = [](float v)
+        { return static_cast<uint8_t>(v <= 0.0f ? 0.0f : (v >= 1.0f ? 255.0f : v * 255.0f + 0.5f)); };
+        const uint8_t bgr[3] = {channel(paintRgb[2]), channel(paintRgb[1]), channel(paintRgb[0])};
+        for (DDSMipLevel& level : _levels)
+            for (size_t i = 0; i + 3 < level.data.size(); i += 4)
+                std::memcpy(level.data.data() + i, bgr, 3);
+        _avgColor = AverageOfSmallest(_levels, _format);
+    }
 
     if (composite)
     {
@@ -911,9 +1023,42 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
         trace.Mark(trace.coverageRead);
         const bool coverageDecoded = coverageRead &&
             coverage.InitFromMemoryWithOptions(coverageBytes.data(), coverageBytes.size(), compositeCoverage.c_str(),
-                                               /*forceDecode=*/true, options) &&
+                                               /*forceDecode=*/true, leafOptions) &&
             !coverage._levels.empty();
         trace.Mark(trace.coverageDecode);
+        // RFG-184: a coverage map authored LARGER than its colour (pinus: 1024x2048 over
+        // 512x1024) sets the composite's size. The colour is upsampled to each coverage level so
+        // the silhouette keeps every authored texel and every authored coverage mip; nearest-
+        // sampling the coverage down to the colour aliased the needles and halved them.
+        static const bool upsampleColour = []
+        {
+            const char* env = std::getenv("POSEIDON_LEAF_COVERAGE_SIZE");
+            return !(env && env[0] == '0');
+        }();
+        if (coverageDecoded && upsampleColour && !paintComposite && _format == PixelFormat::ARGB8888 &&
+            !_levels.empty() && coverage._levels[0].width > _levels[0].width &&
+            coverage._levels[0].height > _levels[0].height)
+        {
+            std::vector<DDSMipLevel> grown;
+            grown.reserve(coverage._levels.size());
+            for (const DDSMipLevel& target : coverage._levels)
+            {
+                // The colour level closest in size at or above the target, else the top one.
+                size_t pick = 0;
+                for (size_t k = 0; k < _levels.size(); ++k)
+                    if (_levels[k].width >= target.width && _levels[k].height >= target.height)
+                        pick = k;
+                const DDSMipLevel& from = _levels[pick];
+                if (from.width == target.width && from.height == target.height)
+                    grown.push_back(from);
+                else
+                    grown.push_back(UpsampleLevelBGRA(from, target.width, target.height));
+            }
+            _levels = std::move(grown);
+            _w = _levels[0].width;
+            _h = _levels[0].height;
+            _mipmaps = static_cast<int>(_levels.size());
+        }
         if (coverageDecoded)
         {
             // Both are 32-bit here: InitFromMemory decodes BC4/BC5/BC7 and leaves raw
@@ -997,6 +1142,17 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     }
     trace.Mark(trace.merge);
 
+    // RFG-119: the constant coverage (see the `enfk|` strip above), on the decoded levels.
+    if (constantAlpha >= 0.0f && _format == PixelFormat::ARGB8888)
+    {
+        const uint8_t a = static_cast<uint8_t>(constantAlpha * 255.0f + 0.5f);
+        for (DDSMipLevel& level : _levels)
+            for (size_t i = 3; i < level.data.size(); i += 4)
+                level.data[i] = a;
+        _hasAlpha = a < 255;
+        _isTransparent = false;
+    }
+
     // RFG-070: and now the colour. AFTER the coverage merge, so the two orders cannot
     // interact -- the merge only writes alpha and the tint only reads and writes RGB, but
     // running the tint first would compute its mean over an alpha channel that is about to
@@ -1043,10 +1199,71 @@ size_t TextureSourceDDS::CompositeBc3Reservation() const
     return PreparedByteSize() + footprint.scratchBytes;
 }
 
+// RFG-112: an `enfa|` leaf composite keeps the coverage mips Enfusion authored. Bohemia's import
+// gives vegetation opacity a dedicated `FoliageAlpha` mip filter "so they keep better/denser
+// opacity also in smaller MIPs, which are drawn further away" (Arma Reforger:Textures), and the
+// composite above already merges those per level -- then the BC3 encode threw them away and
+// box-averaged new ones from the top level, which is exactly what thins a distant crown.
+bool AuthoredCompositeMips()
+{
+    // POSEIDON_AUTHORED_LEAF_MIPS=0 restores the regenerated box mips for the A/B.
+    static const bool on = []
+    {
+        const char* env = std::getenv("POSEIDON_AUTHORED_LEAF_MIPS");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
+
+bool TextureSourceDDS::EncodeAuthoredBc3(Bc3MipChain& out) const
+{
+    if (_levels.size() < 2 || _w < 4 || _h < 4)
+        return false;
+    Bc3MipChain chain;
+    int w = _w, h = _h;
+    for (size_t i = 0; i < _levels.size(); ++i)
+    {
+        if (_levels[i].width != w || _levels[i].height != h)
+            return false;
+        std::vector<uint8_t> rgba(static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
+        PacLevelMem mip;
+        mip._w = static_cast<short>(w);
+        mip._h = static_cast<short>(h);
+        mip._dFormat = PacARGB8888;
+        mip._pitch = w * 4;
+        if (!GetMipmapData(rgba.data(), mip, static_cast<int>(i)))
+            return false;
+        for (size_t p = 0; p + 2 < rgba.size(); p += 4)
+            std::swap(rgba[p], rgba[p + 2]);
+        chain.offsets.push_back(static_cast<uint32_t>(chain.blocks.size()));
+        AppendBc3LevelRGBA(rgba.data(), w, h, chain.blocks);
+        ++chain.levels;
+        if (w <= 4 && h <= 4)
+            break;
+        w = std::max(w / 2, 1);
+        h = std::max(h / 2, 1);
+    }
+    if (chain.levels < 2 || chain.blocks.size() > UINT32_MAX)
+        return false;
+    chain.width = _w;
+    chain.height = _h;
+    out = std::move(chain);
+    return true;
+}
+
 bool TextureSourceDDS::PrepareCompositeBc3(size_t reservedBytes, const Bc3EncodingObserver* observer)
 {
     const size_t required = CompositeBc3Reservation();
     if (!required || reservedBytes < required) return false;
+    if (AuthoredCompositeMips())
+    {
+        Bc3MipChain authored;
+        if (EncodeAuthoredBc3(authored))
+        {
+            _preparedBc3 = std::move(authored);
+            return true;
+        }
+    }
     Bc3EncodingFootprint footprint;
     if (!MeasureBc3EncodingFootprint(_w, _h, footprint)) return false;
     // Same top source pixels, channel swap, encoder and generated mips as wgpu's
@@ -1263,12 +1480,18 @@ bool TextureSourceDDSFactory::Check(const char* name)
     // QIFStreamB::FileExist verbatim, misses, and the section falls back to white -- the
     // exact defect the tint was added to fix, arriving through the factory instead.
     name = Enfusion::SkipLayerTint(name);
+    // RFG-119: the constant-coverage wrapper is the same kind of statement. Left on, the
+    // mount lookup missed every glass pane and they drew on the white fallback.
+    if (std::strncmp(name, "enfk|", 5) == 0)
+        if (const char* bar = std::strchr(name + 5, '|'); bar != nullptr && bar[1] != '\0')
+            name = bar + 1;
     float solid[3];
     if (SplitEnfusionColourName(name, solid))
         return true;
     std::string colour, coverage;
     if (SplitEnfusionAlphaName(name, colour, coverage))
-        name = colour.c_str();
+        // RFG-125: a flat-colour composite exists when its coverage does.
+        name = SplitEnfusionColourName(colour.c_str(), solid) ? coverage.c_str() : colour.c_str();
     const auto& mount = Poseidon::Asset::Formats::Enfusion::EnfusionMount::Instance();
     if (mount.IsOpen() && mount.Has(name))
         return true;
@@ -1283,7 +1506,7 @@ void TextureSourceDDSFactory::PreInit(const char* name)
 
 ITextureSource* TextureSourceDDSFactory::Create(const char* name, PacLevelMem* mips, int maxMips)
 {
-    if (render::PreparedTextureStore::NativeDdsEnabled())
+    if (render::PreparedTextureStore::NativeDdsEnabled() || render::PreparedTextureStore::InstallBatchTake())
     {
         auto prepared = render::PreparedTextureStore::Instance().TakeDdsPrepared(
             render::PreparedTextureStore::Key(name), CaptureDdsPreparationOptions());

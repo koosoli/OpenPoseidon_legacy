@@ -552,8 +552,12 @@ void InputSubsystem::ComputeMovementState()
         if (GetActionToDo(UALookAroundToggle, true, true))
             lookAroundToggled_ = !lookAroundToggled_;
 
-        moveSlowForward_ = GetAction(UAMoveSlowForward, true);
-        moveFastForward_ = GetAction(UAMoveFastForward, true);
+        // On foot the lean keys (Q/E by default) win over the OFP actions sharing them.
+        const bool leanClaims = LeanClaimsSharedKeys();
+        auto shared = [&](UserAction action)
+        { return leanClaims ? GetActionExcluding(action, UALeanLeft, UALeanRight, true) : GetAction(action, true); };
+        moveSlowForward_ = shared(UAMoveSlowForward);
+        moveFastForward_ = shared(UAMoveFastForward);
         moveBack_ += GetAction(UAMoveBack, true);
         if (turbo)
             moveFastForward_ += GetAction(UAMoveForward, true);
@@ -576,7 +580,7 @@ void InputSubsystem::ComputeMovementState()
                 GInput.cursor.aimDeltaX = GInput.cursor.aimDeltaY = GInput.cursor.aimDeltaZ = 0;
         }
 
-        moveUp_ += GetAction(UAMoveUp, true);
+        moveUp_ += shared(UAMoveUp);
         moveDown_ += GetAction(UAMoveDown, true);
         moveLeft_ += GetAction(UAMoveLeft, true);
         moveRight_ += GetAction(UAMoveRight, true);
@@ -624,6 +628,31 @@ float InputSubsystem::GetAction(InputContext ctx, UserAction action, bool checkF
     if (idx < 0 || idx >= kNumContexts)
         return 0.0f;
     return QueryProfileAction(GInput, profiles_[idx], action, checkFocus);
+}
+
+float InputSubsystem::GetActionExcluding(UserAction action, UserAction excludeA, UserAction excludeB,
+                                         bool checkFocus) const
+{
+    const int idx = static_cast<int>(context_);
+    if (idx < 0 || idx >= kNumContexts)
+        return 0.0f;
+    const InputProfile& profile = profiles_[idx];
+    auto claimed = [&](const InputBinding& binding)
+    {
+        for (UserAction other : {excludeA, excludeB})
+            for (const InputBinding& b : profile.GetBindingEntries(other))
+                if (b.code.valid() && b.code == binding.code && b.modifier == binding.modifier)
+                    return true;
+        return false;
+    };
+    float sum = 0.0f;
+    for (const InputBinding& binding : profile.GetBindingEntries(action))
+    {
+        if (claimed(binding) || !ProfileModifierHeld(GInput, binding.modifier, checkFocus))
+            continue;
+        sum += std::max(0.0f, QueryProfileCode(GInput, binding.code, checkFocus) * binding.scale);
+    }
+    return sum;
 }
 
 bool InputSubsystem::GetActionToDo(UserAction action, bool reset, bool checkFocus)
@@ -1329,6 +1358,11 @@ UserActionDesc* InputSubsystem::GetUserActionDesc()
 #endif
         UserActionDesc("Inventory", IDS_USRACT_MAP, SDL_SCANCODE_O, -1),
         UserActionDesc("InventoryEditMenu", IDS_USRACT_HELP, SDL_SCANCODE_K, -1),
+        UserActionDesc("LeanLeft", IDS_USRACT_MOVE_LEFT, SDL_SCANCODE_Q, -1),
+        UserActionDesc("LeanRight", IDS_USRACT_MOVE_RIGHT, SDL_SCANCODE_E, -1),
+        UserActionDesc("Jump", IDS_USRACT_MOVE_UP, SDL_SCANCODE_SPACE, -1),
+        UserActionDesc("SwimDive", IDS_USRACT_MOVE_DOWN, SDL_SCANCODE_Z, SDL_SCANCODE_PAGEDOWN, -1),
+        UserActionDesc("SwimSurface", IDS_USRACT_MOVE_UP, SDL_SCANCODE_Q, SDL_SCANCODE_PAGEUP, -1),
     };
     // The table is indexed by UserAction, and per-action arrays (bindings, KeyList
     // userKeys[UAN]) are sized by UAN. If a new action is added to the enum without
@@ -1354,6 +1388,16 @@ const char* InputSubsystem::GetUserActionLabel(UserAction action)
             return LocalizeStringWithFallback("STR_USRACT_CHAT_NEXT_CHANNEL", "Next chat channel");
         case UAChatHistoryUp:
             return LocalizeStringWithFallback("STR_USRACT_CHAT_HISTORY_UP", "Chat history up");
+        case UALeanLeft:
+            return LocalizeStringWithFallback("STR_USRACT_LEAN_LEFT", "Lean left (tap: toggle)");
+        case UALeanRight:
+            return LocalizeStringWithFallback("STR_USRACT_LEAN_RIGHT", "Lean right (tap: toggle)");
+        case UAJump:
+            return LocalizeStringWithFallback("STR_USRACT_JUMP", "Jump");
+        case UADive:
+            return LocalizeStringWithFallback("STR_USRACT_SWIM_DIVE", "Dive / sink (swimming)");
+        case UASurface:
+            return LocalizeStringWithFallback("STR_USRACT_SWIM_SURFACE", "Rise / surface (swimming)");
         case UAChatHistoryDown:
             return LocalizeStringWithFallback("STR_USRACT_CHAT_HISTORY_DOWN", "Chat history down");
         default:

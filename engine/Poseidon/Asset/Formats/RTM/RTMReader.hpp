@@ -152,11 +152,12 @@ inline bool readRTMFromFile(const char* path, RTMAnimation& anim)
 }
 
 
-// Binarised animation ("BMTR", Arma 2 / Operation Arrowhead), converted to the plain
+// Binarised animation ("BMTR", Arma 2 / Operation Arrowhead / Arma 3), converted to the plain
 // RTM_0101 layout the readers above take. Layout, as read from the Arma 2 data:
 //
-//   char[4] "BMTR"; u32 version (3); u8 flag; float step[3]; u32 phases; u32 (unused);
-//   u32 bones; u32 bone names; asciiz name[bones];
+//   char[4] "BMTR"; u32 version (3, 4; Arma 3: 5); u8 flag; float step[3]; u32 phases;
+//   u32 (unused); u32 bones; u32 bone names; asciiz name[bones];
+//   (version 5: u32, u32 -- both zero in Arma 3's data)
 //   u32 phases; float time[phases]          -- an "array" (see below)
 //   per phase: u32 bones; Transform t[bones] -- an "array"
 //   Transform = int16 quaternion x,y,z,w (1.0 = 16384) + half-float position x,y,z
@@ -228,12 +229,20 @@ struct BmtrCursor
             ok = false;
         return s;
     }
+    // Version 5 (Arma 3) puts an explicit flag before every non-empty array: 0 raw, else
+    // LZO -- the rule of the Arma 3 model format (ODOL 73).
+    bool flagged = false;
     bool array(size_t bytes, std::vector<uint8_t>& out)
     {
         out.resize(bytes);
         if (bytes == 0)
             return true;
-        if (bytes < 1024)
+        bool compressed = bytes >= 1024;
+        if (flagged)
+            compressed = u8() != 0;
+        if (!ok)
+            return false;
+        if (!compressed)
         {
             if (!need(bytes))
                 return false;
@@ -289,6 +298,25 @@ inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
     std::vector<std::string> boneNames(bones);
     for (auto& n : boneNames)
         n = c.asciiz();
+    if (version >= 5)
+    {
+        // Arma 3: a word (zero in every shipped move) and the move's events follow the names
+        // -- StepSound at 0.095, 0.309, ... in the walks and runs -- each a word, a name, a
+        // time and a value; and every array carries its compression flag. Checked on 139
+        // moves of anims_f_data: 16 have events, and every one then lands on its time count.
+        (void)c.u32();
+        const uint32_t events = c.u32();
+        if (!c.ok || events > 100000)
+            return false;
+        for (uint32_t e = 0; e < events && c.ok; e++)
+        {
+            (void)c.u32();
+            (void)c.asciiz();
+            (void)c.f32();
+            (void)c.asciiz();
+        }
+        c.flagged = true;
+    }
     const uint32_t timeCount = c.u32();
     if (!c.ok || timeCount != phases)
         return false;
@@ -339,6 +367,10 @@ inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
     // aimed behind himself (turned) or looked out of the back of his head (unturned; the
     // first-person camera saw his backpack). Without a known skeleton
     // (BmtrSkeletonParents empty for these bones) the transforms stay as stored.
+    // Arma 3's version 5 is the same reading: measured offline on b_soldier_01 (kneeling
+    // walk, pistol walk, prone to standing) the mean edge stretch is 0.08-0.12 this way
+    // against 0.22-0.28 with the bones taken as model space -- once the model is posed
+    // around its own bounding centre (ODOL 73 keeps it apart; see ODOLLoader).
     static const bool xMirror = [] {
         const char* e = std::getenv("OP_A2_MAN_XMIRROR");
         return e && *e == '1';

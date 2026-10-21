@@ -59,6 +59,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     var acc = vec4<f32>(0.0);
     var wsum = 0.0;
+    var best = 0.0; // the best depth match among the taps
     // A small spatial reconstruction kernel suppresses fixed march jitter.
     // It adds no ray-march steps, temporal lag or additional render target.
     for (var k = 0; k < 9; k = k + 1) {
@@ -76,11 +77,21 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let rel = abs(lin_ref - lin_lo) / max(max(lin_ref, lin_lo), 1e-6);
         let delta = tc - cf;
         let spatial = exp2(-2.0 * dot(delta, delta));
-        let w = spatial * max(exp(-rel * 24.0), 0.02);
+        let match_w = exp(-rel * 24.0);
+        best = max(best, match_w);
+        let w = spatial * max(match_w, 0.02);
         acc += cloud * w;
         wsum += w;
     }
-    let c = acc / max(wsum, 1e-6);
+    var c = acc / max(wsum, 1e-6);
+    // (OP, 2026-10-14) A thin sliver of GEOMETRY whose depth matches no tap -- a far wave crest
+    // standing a few pixels above the horizon, a distant ridge line -- took the sky's clouds through
+    // the 0.02 floor: with huge waves the clouds drew over the sea (owner: "clouds and anything else
+    // will draw over huge waves"; the clouds' own march stops at the crest, the upsample did not).
+    // Where nothing in the kernel was marched to this surface, it gets no cloud rather than the sky's.
+    if (d_ref > 0.0) {
+        c = mix(vec4<f32>(0.0, 0.0, 0.0, 1.0), c, smoothstep(0.05, 0.4, best));
+    }
     if (layer_control.x < 0.5 || layer_packet.control.x < 0.5) { return c; }
     // The finite layers are certified below the cloud deck. The background
     // already contains their L/T; transport cloud radiance through them once.

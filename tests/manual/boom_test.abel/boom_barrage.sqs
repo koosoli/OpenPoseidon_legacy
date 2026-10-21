@@ -1,0 +1,12 @@
+; six shells scattered 35..90 m ahead, a second apart
+_d = getDir player
+_p = getPos player
+_i = 0
+#loop
+_r = 35 + random 55
+_a = _d - 25 + random 50
+_s = "Shell120" camCreate [(_p select 0) + _r * sin _a, (_p select 1) + _r * cos _a, 60]
+_s setVelocity [0, 0, -300]
+~1
+_i = _i + 1
+? _i < 6 : goto "loop"

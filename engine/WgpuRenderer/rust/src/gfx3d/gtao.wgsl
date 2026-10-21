@@ -25,7 +25,7 @@ struct GtaoParams {
     // x = world-space radius (m), y = strength, z = slice count, w = steps per slice.
     tuning: vec4<f32>,
     // x = max screen radius in pixels (a sanity bound only — see px_radius below), y = thickness
-    // falloff, z/w unused.
+    // falloff, z = march scale, w = 1 for the pre-RFG-124 thickness fade.
     limits: vec4<f32>,
 };
 
@@ -251,6 +251,14 @@ fn cs_gtao(@builtin(global_invocation_id) gid: vec3<u32>) {
         // Horizon angles either side of the slice, as cosines against the view vector.
         var h1 = -1.0;
         var h2 = -1.0;
+        // RFG-124: what a sample faded out by the thickness heuristic falls back to -- the
+        // hemisphere's own edge on that side (gamma +/- PI/2), i.e. "nothing found here". The old
+        // `cosh * fade` fell back to 0, a horizon 90 degrees off the VIEW ray: an occluder far
+        // outside the radius still took half the hemisphere of a floor or side wall, which is a
+        // room seen through a window going black from outside. limits.w = 1 restores it.
+        let legacy_fade = params.limits.w > 0.5;
+        let low1 = cos(gamma + 0.5 * PI);
+        let low2 = cos(gamma - 0.5 * PI);
         for (var t = 1; t <= steps; t = t + 1) {
             // Offset the first tap by the same noise so neighbouring pixels do not all sample the
             // identical ring, which is what produces visible banding without a temporal term.
@@ -274,7 +282,7 @@ fn cs_gtao(@builtin(global_invocation_id) gid: vec3<u32>) {
                     // occludes everything behind it out to infinity — GTAO's classic "sky behind
                     // a thin pole goes black".
                     let fade = clamp(1.0 - (len - radius) / thickness, 0.0, 1.0);
-                    h1 = max(h1, cosh * fade);
+                    h1 = max(h1, select(mix(low1, cosh, fade), cosh * fade, legacy_fade));
                 }
             }
 
@@ -286,7 +294,7 @@ fn cs_gtao(@builtin(global_invocation_id) gid: vec3<u32>) {
                 if (len > 1e-4) {
                     let cosh = dot(sp / len, v);
                     let fade = clamp(1.0 - (len - radius) / thickness, 0.0, 1.0);
-                    h2 = max(h2, cosh * fade);
+                    h2 = max(h2, select(mix(low2, cosh, fade), cosh * fade, legacy_fade));
                 }
             }
         }

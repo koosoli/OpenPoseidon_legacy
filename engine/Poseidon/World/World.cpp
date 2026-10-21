@@ -1,3 +1,4 @@
+#include <Poseidon/World/Effects/BuildingBreach.hpp>
 #include <SDL3/SDL_scancode.h>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 
@@ -111,6 +112,29 @@ using Poseidon::Foundation::IsOutOfMemory;
 namespace Poseidon
 {
 extern int gPerfDrawCalls;
+}
+
+namespace
+{
+// The clock before and after the last tick (seconds), for PresentationClockSeconds().
+float s_clockBeforeLastTick = 0.0f;
+float s_clockAfterLastTick = 0.0f;
+
+void NoteClockTick(float before, float after)
+{
+    s_clockBeforeLastTick = before;
+    s_clockAfterLastTick = after;
+}
+} // namespace
+
+float Poseidon::PresentationClockSeconds()
+{
+    const float now = Glob.time.toFloat();
+    // A clock set from outside the tick (load, setDate, a test) is not interpolated.
+    if (!Object::RenderInterpEnabled() || now != s_clockAfterLastTick)
+        return now;
+    const float alpha = Object::RenderInterpAlpha();
+    return s_clockBeforeLastTick + (now - s_clockBeforeLastTick) * alpha;
 }
 
 namespace
@@ -1279,6 +1303,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
     // the accumulator's leftover fraction into the last tick. Set once per frame, here,
     // so every draw of this frame -- objects, shadows, camera -- agrees on the same time.
     Object::SetRenderInterpAlpha(stepFrame.running ? stepFrame.alpha : 1.0f);
+    Object::SetRenderInterpStep(stepFrame.stepSeconds);
 
     if (IsSimulationEnabled())
     {
@@ -1383,6 +1408,18 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 fov = object ? object->CamEffectFOV() : 0.7f;
             }
             transform = _cameraEffect->GetTransform();
+            // REN-INTERP-001 for camera effects: the effect follows its object at TICK time, so
+            // the dev free-fly camera (a CameraVehicle behind an "Internal" effect) moved one
+            // tick on some frames and two on others at ~35 fps against 60 Hz -- the owner's
+            // "33 fps but not fluid". The vehicle branch below already rides the drawn frame;
+            // this maps the effect's view the same way. POSEIDON_CAMEFFECT_INTERP=0 = tick time.
+            static const bool camEffectInterp = [] {
+                const char* value = std::getenv("POSEIDON_CAMEFFECT_INTERP");
+                return !(value && value[0] == '0');
+            }();
+            if (camEffectInterp)
+                if (const Object* followed = _cameraEffect->GetObject())
+                    transform = followed->RenderDelta() * transform;
 
             if (_cameraEffect->IsInside())
             {
@@ -1743,11 +1780,13 @@ void World::Simulate(float deltaT, bool& enableDraw)
             // Sinkhole W3: on a swimmer the floor is the waves, not the flat mean sea -- in first person none
             // at all (the swim keeps his eyes over the water; a trough lifted the view into his head), in 3rd
             // person the wave surface under the camera, so it rides over the crests.
+            // Sinkhole W4: on a diver the view goes under with him, held only above the bed.
             float swimWaterY = 0;
+            const bool diverView = SwimmerDiving(cameraVehicle.GetLink());
             const bool swimView =
                 !mayDive && SwimmerCameraWater(cameraVehicle.GetLink(), camPos.X(), camPos.Z(), swimWaterY);
             float minCamY = _scene.GetLandscape()->CameraFloorY(camPos, camFocusObj ? &camFocus : nullptr,
-                                                                !mayDive && !swimView);
+                                                                !mayDive && !swimView && !diverView);
             if (swimView && _camType != CamInternal)
             {
                 minCamY = std::max(minCamY, swimWaterY + 0.15f);
@@ -2008,6 +2047,8 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // outside BeginObjects/EndObjects silently draws nothing, which reads as
         // "the ball does not exist" while the physics log shows it rolling.
         Dev::DrawPhysicsProbes();
+        // BOOM-002: chunks of breached walls (Box3D bodies), same window.
+        BuildingBreach::DrawDebris();
     }
 
     markInitProbe(beginObjectsMs);
@@ -2022,6 +2063,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
     }
     markInitProbe(activeLightsMs);
     perf.Mark(Dev::FrameProfiler::PhaseDrawInit);
+
+    // Optics and other screen overlays drawn from inside the world pass are queued and
+    // drawn display-referred right after the scene resolve below (Object::FlushDeferredOverlays).
+    Object::BeginDeferredOverlays();
 
     if (_scene.GetLandscape())
     {
@@ -2081,12 +2126,31 @@ void World::Simulate(float deltaT, bool& enableDraw)
                         zMax = ObjRange - 1;
                     }
 #define RECT_CLIPPERS 1
+                    // PERF (2026-10-14): this walk touches every object of every cell in view,
+                    // and each first touch -- a virtual Invisible() through the vtable pointer --
+                    // was a cache miss: ~7% of a stock-Everon firefight's main thread sat on
+                    // those loads. The pointers are known ahead, so fetch the next cell's list
+                    // and the objects a few places ahead while this one is processed. Pure
+                    // hints: order and results are untouched. POSEIDON_DRAW_WALK_PREFETCH=0
+                    // turns them off for an A/B.
+                    static const bool walkPrefetch = []
+                    {
+                        const char* v = std::getenv("POSEIDON_DRAW_WALK_PREFETCH");
+                        return !(v && v[0] == '0');
+                    }();
                     for (z = zMin; z <= zMax; z++)
                     {
                         for (x = xMin; x <= xMax; x++)
                         {
                             // build if necessary
                             const ObjectList& list = GLandscape->GetObjects(z, x);
+                            if (walkPrefetch && x < xMax)
+                            {
+                                if (const ObjectListFull* next = GLandscape->GetObjects(z, x + 1).GetList())
+                                {
+                                    PrefetchT0(next);
+                                }
+                            }
                             if (list.Null())
                             {
                                 continue;
@@ -2104,10 +2168,24 @@ void World::Simulate(float deltaT, bool& enableDraw)
 #endif
                             ClipFlags orClip = cam.MayBeClipped(bCenter, bRadius, 1);
                             int n = list.Size();
+                            constexpr int kPrefetchAhead = 4;
+                            if (walkPrefetch)
+                            {
+                                for (int i = 0; i < n && i < kPrefetchAhead; i++)
+                                {
+                                    PrefetchT0(list[i]);
+                                    PrefetchT0Off(list[i], 64);
+                                }
+                            }
                             for (int i = 0; i < n; i++)
                             {
                                 Object* obj = list[i];
                                 PoseidonAssert(obj);
+                                if (walkPrefetch && i + kPrefetchAhead < n)
+                                {
+                                    PrefetchT0(list[i + kPrefetchAhead]);
+                                    PrefetchT0Off(list[i + kPrefetchAhead], 64);
+                                }
                                 if (obj->Invisible())
                                 {
                                     continue;
@@ -2222,6 +2300,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
     // UI composites display-referred. No-op on GL33.
     if (GEngine)
         GEngine->ResolveSceneToDisplay();
+    Object::FlushDeferredOverlays();
 
     if (enableDraw)
     {
@@ -2348,9 +2427,28 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // registration may acquire the exclusive renderer window; do it after
         // traversal so it cannot serialize the whole producer at InitDraw.
         // NextFrame still owns queue publication and GPU-side mutation ordering.
+        const auto tSwap0 = std::chrono::steady_clock::now();
         if (farResidencySupported && GLandscape && _scene.GetCamera())
             GLandscape->UpdateNativeFarResidency(_scene.GetCamera()->Position());
+        const auto tSwap1 = std::chrono::steady_clock::now();
+        if (farResidencySupported && GLandscape && _scene.GetCamera())
+            GEngine->UpdateNativeClutter(_scene.GetCamera()->Position());
+        const auto tSwap2 = std::chrono::steady_clock::now();
         GEngine->NextFrame();
+        // The swap phase is these three calls; a frame-trace spike in swap_ms says nothing about
+        // which. POSEIDON_SWAP_SLOW_MS (default 60, 0 = off) names the one that took the time.
+        static const double swapSlowMs = [] {
+            const char* v = std::getenv("POSEIDON_SWAP_SLOW_MS");
+            return (v != nullptr && v[0] != 0) ? std::atof(v) : 60.0;
+        }();
+        if (swapSlowMs > 0.0)
+        {
+            const auto tSwap3 = std::chrono::steady_clock::now();
+            const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+            if (ms(tSwap0, tSwap3) >= swapSlowMs)
+                LOG_INFO(World, "Slow swap: {:.1f} ms | native far {:.1f} clutter {:.1f} NextFrame {:.1f}",
+                         ms(tSwap0, tSwap3), ms(tSwap0, tSwap1), ms(tSwap1, tSwap2), ms(tSwap2, tSwap3));
+        }
     }
 
     perf.Mark(Dev::FrameProfiler::PhaseSwap);
@@ -2483,12 +2581,16 @@ void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicl
                                 switch (stage)
                                 {
                                 case Sim::SimStage::Clock:
+                                {
                                     // Keep the world clock, weather and wind in the same tick as the
                                     // vehicles that consume them. Rendering observes the most recently
                                     // completed tick.
+                                    const float before = Glob.time.toFloat();
                                     Glob.time += step.deltaT;
+                                    NoteClockTick(before, Glob.time.toFloat());
                                     world.SimulateLandscape(step.deltaT);
                                     break;
+                                }
 
                                 case Sim::SimStage::Scripts:
                                     // After the clock so a script observing `time` sees this tick's

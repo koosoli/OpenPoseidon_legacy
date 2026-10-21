@@ -17,6 +17,8 @@ macro_rules! println {
 }
 
 mod bloom;
+mod upload_stats;
+mod water_zbuf;
 #[cfg(feature = "dlss")]
 mod dlss;
 #[cfg(feature = "dlss")]
@@ -40,6 +42,7 @@ mod demand_view_snapshot;
 mod planar_mips;
 mod shaders;
 mod fire;
+mod mud;
 mod smoke_volume;
 mod soft_particles;
 mod sky;
@@ -56,6 +59,7 @@ mod water;
 mod rain_water;
 mod rain_water_medium;
 mod rain_water_reflections;
+mod river;
 // TW-WATER W1 — the selectable water backend (Current OP / Tidewater Native).
 mod water_backend;
 mod water_tw;
@@ -679,6 +683,30 @@ const RESIDENCY_BUDGET_FRACTION: f64 = 0.70;
 // fixed value, kept deliberately: an unprobed backend must behave exactly as it did before.
 const RESIDENCY_BUDGET_FALLBACK_MB: u64 = 2048;
 
+/// PERF-MEMBLOCK: the device-memory block size the allocator sub-allocates from.
+///
+/// wgpu's default (`MemoryHints::Performance`) takes VRAM from the driver in 128-256 MB blocks.
+/// A native Everon session at 3440x1440 (2026-10-19, owner pose 5011/5577) measured 4,996 MB
+/// allocated inside 6,144 MB reserved: 1.15 GB of half-empty blocks, left behind by ~2,400 object
+/// textures being evicted and re-uploaded. Windows charges the process for the reservation, not
+/// the allocation, so that slack is what pushed the owner past the OS budget (other apps leave
+/// ~5.5 GB) and into WDDM demotion -- GPU frames 15 -> 200 ms a few minutes in.
+/// 16-64 MB blocks bound the slack per partly used block to a quarter of that; resources larger
+/// than a block get their own allocation either way. WGR_MEMBLOCK_MB=0 = the old 128-256,
+/// =<min>,<max> overrides (clamped 4..256 by wgpu).
+pub(crate) fn device_memory_hints() -> wgpu::MemoryHints {
+    const MB: u64 = 1024 * 1024;
+    match std::env::var("WGR_MEMBLOCK_MB") {
+        Ok(v) if v.trim() == "0" => wgpu::MemoryHints::Performance,
+        Ok(v) => {
+            let p: Vec<u64> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+            let (lo, hi) = if p.len() == 2 && p[0] > 0 && p[1] >= p[0] { (p[0], p[1]) } else { (16, 64) };
+            wgpu::MemoryHints::Manual { suballocated_device_memory_block_size: lo * MB..hi * MB }
+        }
+        Err(_) => wgpu::MemoryHints::Manual { suballocated_device_memory_block_size: 16 * MB..64 * MB },
+    }
+}
+
 /// Read the largest DEVICE_LOCAL heap the adapter reports, in bytes.
 ///
 /// `Ok(bytes)` on success; `Err(reason)` names why not, and the reason is logged verbatim so a
@@ -741,6 +769,91 @@ fn probe_device_local_bytes(adapter: &wgpu::Adapter) -> Result<u64, &'static str
         }
         // GL/Metal/Noop and (on non-Windows) DX12 have no portable heap query here.
         _ => Err("backend exposes no device-memory query"),
+    }
+}
+
+/// REN-RES-004 -- the driver's LIVE view of this process's device-local heap (VK_EXT_memory_budget):
+/// what the process uses and what the OS will let it use right now, other applications included.
+///
+/// Why: the startup budget above is a fixed 70% of the whole card and counts only object textures
+/// and pool geometry. At 3440x1440 the untracked render targets alone came to ~2.5 GB, and with a
+/// browser open the process reached 7.8 of 8 GB on an RTX 3070. Past that point Windows demotes
+/// allocations to system memory: one measured Durras run went from 24 ms to 260 ms a frame
+/// (the cloud march, which reads its noise volumes every step, from 2 to 204 ms) and never recovered.
+struct VramBudgetProbe {
+    instance: ash::Instance,
+    physical: ash::vk::PhysicalDevice,
+    heap: usize,
+}
+
+impl VramBudgetProbe {
+    fn new(adapter: &wgpu::Adapter) -> Option<Self> {
+        if adapter.get_info().backend != wgpu::Backend::Vulkan {
+            return None;
+        }
+        // SAFETY: read-only queries; the ash::Instance clone is a handle plus function table and
+        // the wgpu instance that owns it outlives the renderer.
+        unsafe {
+            let hal = adapter.as_hal::<wgpu::hal::api::Vulkan>()?;
+            let instance = hal.shared_instance().raw_instance().clone();
+            let physical = hal.raw_physical_device();
+            let supported = instance
+                .enumerate_device_extension_properties(physical)
+                .ok()?
+                .iter()
+                .any(|e| e.extension_name_as_c_str().map(|n| n == ash::ext::memory_budget::NAME).unwrap_or(false));
+            if !supported {
+                return None;
+            }
+            let props = instance.get_physical_device_memory_properties(physical);
+            let count = (props.memory_heap_count as usize).min(props.memory_heaps.len());
+            let heap = (0..count)
+                .filter(|&i| props.memory_heaps[i].flags.contains(ash::vk::MemoryHeapFlags::DEVICE_LOCAL))
+                .max_by_key(|&i| props.memory_heaps[i].size)?;
+            Some(Self { instance, physical, heap })
+        }
+    }
+
+    /// (usage, budget) of the device-local heap, in bytes.
+    fn read(&self) -> Option<(u64, u64)> {
+        let mut budget = ash::vk::PhysicalDeviceMemoryBudgetPropertiesEXT::default();
+        let mut props = ash::vk::PhysicalDeviceMemoryProperties2::default().push_next(&mut budget);
+        // SAFETY: the extension was found on this physical device in new().
+        unsafe { self.instance.get_physical_device_memory_properties2(self.physical, &mut props) };
+        let usage = budget.heap_usage[self.heap];
+        let limit = budget.heap_budget[self.heap];
+        (limit > 0).then_some((usage, limit))
+    }
+}
+
+/// The effective residency budget under live pressure: what the tracked set may grow to so that
+/// the process's whole usage stays `headroom` under the OS budget. Never above the static budget,
+/// never below `floor` (evicting everything would only trade a slow frame for a stream of uploads).
+/// A cut applies at once; a raise moves at most `step` per call, so the set does not oscillate.
+fn pressured_budget(static_budget: u64, current: u64, tracked: u64, usage: u64, os_budget: u64,
+                    headroom: u64, floor: u64, step: u64) -> u64 {
+    let untracked = usage.saturating_sub(tracked);
+    let allowed = os_budget.saturating_sub(headroom).saturating_sub(untracked);
+    let target = allowed.clamp(floor.min(static_budget), static_budget);
+    if target < current { target } else { target.min(current.saturating_add(step)) }
+}
+
+#[cfg(test)]
+mod pressured_budget_tests {
+    use super::pressured_budget;
+    const MB: u64 = 1024 * 1024;
+    #[test]
+    fn cuts_at_once_raises_slowly_and_respects_the_bounds() {
+        // 8 GB card, 5.6 GB static budget, 4.1 GB tracked, 7.8 GB used, OS allows 7.9 GB.
+        let s = 5611 * MB;
+        let cut = pressured_budget(s, s, 4100 * MB, 7800 * MB, 7900 * MB, 512 * MB, 1024 * MB, 128 * MB);
+        assert_eq!(cut, 3688 * MB, "4.1 GB tracked, 3.7 GB untracked: 7.9 - 0.5 - 3.7");
+        // Pressure gone: back up by one step per call, never past the static budget.
+        let up = pressured_budget(s, cut, 3000 * MB, 4000 * MB, 7900 * MB, 512 * MB, 1024 * MB, 128 * MB);
+        assert_eq!(up, cut + 128 * MB);
+        assert_eq!(pressured_budget(s, s, 0, 0, 7900 * MB, 512 * MB, 1024 * MB, 128 * MB), s);
+        // Floor: an impossible budget does not evict everything.
+        assert_eq!(pressured_budget(s, s, 0, 9000 * MB, 7900 * MB, 512 * MB, 1024 * MB, 128 * MB), 1024 * MB);
     }
 }
 
@@ -815,12 +928,17 @@ pub struct Renderer {
     config: wgpu::SurfaceConfiguration,
     present_modes: Vec<wgpu::PresentMode>,
     textures: SharedTextures,
+    // FLY-001: producer-side texture creation (textures.rs TextureIngress), drained into
+    // `textures` at frame start and before any call that resolves a handle.
+    texture_ingress: std::sync::Arc<textures::TextureIngress>,
     gfx2d: Gfx2d,
     gfx3d: Gfx3d,
     terrain: Terrain,
     grass: Grass,
     // FAR INSTANCE TIER — one proxy per authored placement, beyond where real objects live.
     far: Far,
+    // RFG-162: a native world's rivers, drawn as water in the water pass (river/mod.rs).
+    river: river::River,
     // TW-WATER W1 — the active water backend. Owns the surface AND the underwater compositor
     // (Current OP: today's `Water` + `Underwater`, unchanged); see water_backend.rs.
     water: WaterBackend,
@@ -842,6 +960,10 @@ pub struct Renderer {
     // owner-managed pools implicated by the DayZ exhaustion: authored object
     // textures and merged model geometry. Zero means observability-only.
     residency_budget_bytes: u64,
+    // REN-RES-004: the budget actually handed out, lowered under live VRAM pressure (memory_stats).
+    vram_probe: Option<VramBudgetProbe>,
+    vram_effective_budget: std::cell::Cell<u64>,
+    vram_probe_at: std::cell::Cell<Option<std::time::Instant>>,
     // HDR pipeline (docs/hdr-pipeline-plan.md). When enabled, the 3D/terrain/2D
     // scene renders into `hdr` (linear once Stage 2 lands) and `tonemap` resolves it
     // to the swapchain; the dev overlay + (later) screen-space UI composite after.
@@ -881,6 +1003,11 @@ pub struct Renderer {
     // [DLSS (dlss builds, when the NGX route came up), Bilinear]. All vendor state
     // (NGX objects, raw device handles, failure latches) lives inside the backends.
     upscalers: Vec<Box<dyn upscaler::TemporalUpscaler>>,
+    /// LOAD-NGX-DEFER: the DLSS start-up thread, still running when the renderer was handed
+    /// back. Joined without blocking once it has finished (poll_ngx_deferred, every frame); the
+    /// DLSS backend then goes to the front of `upscalers`.
+    #[cfg(feature = "dlss")]
+    ngx_deferred: Option<(dlss_device::NgxRawHandles, std::thread::JoinHandle<NgxOutcome>)>,
     // True when NGX came up at startup AND reported DLSS Super Sampling available
     // (feeds temporal_info's dlss_route).
     ngx_route: bool,
@@ -971,6 +1098,8 @@ pub struct Renderer {
     pub(crate) smoke_volume: smoke_volume::SmokeVolume,
     // FIRE-001: volumetric fire (fire/mod.rs)
     pub(crate) fire: fire::FireSystem,
+    // MUD-001: thrown mud as a viscous particle fluid (mud/mod.rs)
+    pub(crate) mud: mud::MudSystem,
     smoke_sun_dir: [f32; 3],
     smoke_sun_radiance: [f32; 3],
     smoke_ambient: [f32; 3],
@@ -993,6 +1122,8 @@ pub struct Renderer {
     // and it is cleared by every pass that writes depth, which is what makes skipping provably
     // safe rather than a guess. See `ensure_far_depth_resolve`.
     far_depth_resolve_current: bool,
+    // (OP) the water pass's own depth buffer (water_zbuf.rs), built on first use
+    water_zbuf: Option<water_zbuf::WaterZBuf>,
     // Bloom pyramid, built alongside the tonemap on the HDR path; the resolve adds it.
     bloom: Option<Bloom>,
     // Eye adaptation / auto-exposure; produces a 1x1 exposure scale the resolve applies.
@@ -1068,12 +1199,150 @@ pub struct Renderer {
 // before `upscalers`, so a backend that must release a vendor context against a live
 // VkDevice (DLSS: ReleaseFeature + NGX Shutdown1) needs the chain cleared HERE, after
 // the GPU has finished with the last frame and before the device goes.
+/// STREAM-HITCH probe: named laps through render_frame's setup and early encode; one log line when
+/// the frame's total passes WGR_FRAME_LAP_MS (unset = off).
+struct FrameLap { t: std::time::Instant, laps: Vec<(&'static str, f32)> }
+impl FrameLap {
+    fn new() -> Self { Self { t: std::time::Instant::now(), laps: Vec::new() } }
+    fn mark(&mut self, name: &'static str) {
+        let now = std::time::Instant::now();
+        self.laps.push((name, (now - self.t).as_secs_f32() * 1e3));
+        self.t = now;
+    }
+    fn report(&self, log: &LogSink) {
+        static LIMIT: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+        let limit = *LIMIT.get_or_init(|| std::env::var("WGR_FRAME_LAP_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(f32::MAX));
+        let total: f32 = self.laps.iter().map(|l| l.1).sum();
+        if total >= limit {
+            let parts: Vec<String> = self.laps.iter().map(|(n, ms)| format!("{n}={ms:.1}")).collect();
+            log.log(log_level::INFO, &format!("frame lap {total:.1} ms: {}", parts.join(" ")));
+        }
+    }
+}
+
 impl Drop for Renderer {
     fn drop(&mut self) {
+        // LOAD-NGX-DEFER: a quit before the DLSS start-up thread finished must not tear the
+        // device down under it; its result (and NGX context) is dropped right here.
+        #[cfg(feature = "dlss")]
+        if let Some((_, handle)) = self.ngx_deferred.take() {
+            let _ = handle.join();
+        }
         if let Some(depth) = self.scene_depth.as_mut() { depth.invalidate(); }
         if !self.upscalers.is_empty() {
             let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
             self.upscalers.clear();
+        }
+    }
+}
+
+/// What the DLSS start-up probe found, and the log lines that say so in the order they
+/// happened. Built where the probe ran (possibly a thread) and logged by the caller.
+#[cfg(feature = "dlss")]
+struct NgxOutcome {
+    lines: Vec<(i32, String)>,
+    result: Result<dlss::Ngx, String>,
+}
+
+/// `Renderer::new` failed only because the speculative (threaded) NGX probe disagreed
+/// with the configuration built for it; `wgr_create` retries with the synchronous probe.
+#[cfg(feature = "dlss")]
+const ERR_NGX_SPECULATION: &str = "speculative DLSS start-up did not hold; rebuilding with the synchronous probe";
+
+#[cfg(feature = "dlss")]
+static NGX_FORCE_SYNC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the NGX probe may run on a thread while the renderer builds as if DLSS will be up.
+/// Only where the answer is near-certain -- an NVIDIA RTX adapter (every DLSS-capable GeForce,
+/// Quadro and workstation part carries "RTX"; GTX 16xx and older do not) -- because a wrong
+/// guess costs a second renderer build. WGR_DLSS_ASYNC_INIT=0 opts out.
+#[cfg(feature = "dlss")]
+fn ngx_speculation_allowed(adapter_name: &str, vendor: u32) -> bool {
+    !NGX_FORCE_SYNC.load(std::sync::atomic::Ordering::Relaxed)
+        && std::env::var("WGR_DLSS_ASYNC_INIT").map_or(true, |v| v != "0")
+        && vendor == 0x10DE
+        && adapter_name.to_ascii_uppercase().contains("RTX")
+}
+
+/// Ask the driver whether DLSS Super Sampling is supported, then bring NGX up.
+///
+/// NGX comes up at start-up, not at the first upscaled frame: the verdict ("snippet did not
+/// load", "driver too old") is then in the startup log and the panel before any frame is
+/// drawn, the temporal/67% defaults are never auto-enabled for a DLSS that will not run, and
+/// a machine without DLSS never has its first frame split around a raw command buffer that
+/// goes nowhere. Without the requirements gate an AMD/Intel box boots into the temporal
+/// defaults and shimmers through the bilinear fallback at 67% (tester reports, 2026-08-30).
+///
+/// Thread-safe: instance/device-level NGX calls only, no queue submission.
+#[cfg(feature = "dlss")]
+fn ngx_probe_and_init(
+    raw: &dlss_device::NgxRawHandles,
+    adapter_name: &str,
+    snippet: Option<&std::path::Path>,
+) -> NgxOutcome {
+    let mut lines = Vec::new();
+    let result = match dlss::feature_requirements(raw.instance, raw.physical_device) {
+        Ok(0) => {
+            lines.push((log_level::INFO, "driver reports DLSS Super Sampling supported".to_owned()));
+            match unsafe { dlss::Ngx::init(raw.instance, raw.physical_device, raw.device) } {
+                Ok(ngx) => {
+                    if ngx.supersampling_available() {
+                        lines.push((
+                            log_level::INFO,
+                            "NGX initialised; DLSS Super Resolution available".to_owned(),
+                        ));
+                        Ok(ngx)
+                    } else {
+                        let reason = ngx.availability_reason(snippet);
+                        lines.push((
+                            log_level::WARN,
+                            format!(
+                                "DLSS unavailable: {reason} ({}); native path",
+                                ngx.availability_diagnostics()
+                            ),
+                        ));
+                        ngx.release();
+                        Err(reason)
+                    }
+                }
+                Err(r) => {
+                    let reason = dlss_status::init_failed_reason(r);
+                    lines.push((log_level::WARN, format!("DLSS unavailable: {reason}; native path")));
+                    Err(reason)
+                }
+            }
+        }
+        Ok(bits) => {
+            let reason = dlss_status::requirements_reason(bits, adapter_name);
+            lines.push((
+                log_level::WARN,
+                format!("DLSS unsupported on this GPU/driver: {reason}; native path"),
+            ));
+            Err(reason)
+        }
+        Err(r) => {
+            let reason = format!("NGX GetFeatureRequirements failed ({})", dlss_status::ngx_code(r));
+            lines.push((log_level::WARN, format!("DLSS support probe failed: {reason}; native path")));
+            Err(reason)
+        }
+    };
+    NgxOutcome { lines, result }
+}
+
+struct InitTimer {
+    on: bool,
+    last: std::time::Instant,
+}
+
+impl InitTimer {
+    fn new() -> Self {
+        Self { on: std::env::var("WGR_INIT_TIMING").is_ok_and(|v| v == "1"), last: std::time::Instant::now() }
+    }
+    fn mark(&mut self, phase: &str) {
+        if self.on {
+            let now = std::time::Instant::now();
+            eprintln!("WGR_INIT {phase}: {:.1} ms", (now - self.last).as_secs_f64() * 1000.0);
+            self.last = now;
         }
     }
 }
@@ -1089,6 +1358,11 @@ impl Renderer {
     }
 
     fn new(desc: &ffi::WgrSurfaceDesc, log: LogSink) -> Result<Self, String> {
+        // LOAD-SHADER-MEMO: compose the heaviest shaders on background threads while the device,
+        // surface and every other resource are created; make_module picks them up.
+        shaders::prewarm_shaders();
+        // WGR_INIT_TIMING=1: where renderer start-up goes, one stderr line per phase
+        let mut init_timer = InitTimer::new();
         let (raw_display_handle, raw_window_handle) = handles::build_handles(desc)?;
 
         // wgpu only enables VK_EXT_debug_utils — and thus emits our
@@ -1098,8 +1372,25 @@ impl Renderer {
         // rwdi/release builds, so a profiling build shows an unlabelled, ungrouped
         // command stream. Force DEBUG on so captures stay legible; opt into the
         // validation layers separately via WGR_GPU_VALIDATION (they are expensive).
+        //
+        // PERF-DEBUG-LABELS (2026-10-20): no longer by default. Nsight (ns-2, Durras flight) counted
+        // 1.2 M vkSetDebugUtilsObjectNameEXT calls in 95 s -- every buffer, texture and command
+        // buffer named, ~0.5 s of driver calls plus wgpu's label work, all on the render thread.
+        // WGR_GPU_DEBUG_LABELS=1 (or WGR_GPU_VALIDATION) turns them back on for a RenderDoc capture.
         let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
-        instance_desc.flags |= wgpu::InstanceFlags::DEBUG;
+        if std::env::var("WGR_GPU_DEBUG_LABELS").is_ok_and(|v| v.trim() == "1")
+            || std::env::var("WGR_GPU_VALIDATION").is_ok()
+        {
+            instance_desc.flags |= wgpu::InstanceFlags::DEBUG;
+        } else {
+            instance_desc.flags.remove(wgpu::InstanceFlags::DEBUG);
+        }
+        // A/B lever: wgpu validates every indirect draw/dispatch argument with a compute pass
+        // (VALIDATION_INDIRECT_CALL, on by default in all build types). WGR_INDIRECT_VALIDATION=0
+        // drops it.
+        if std::env::var("WGR_INDIRECT_VALIDATION").map_or(false, |v| v == "0") {
+            instance_desc.flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
+        }
         if std::env::var("WGR_GPU_VALIDATION").is_ok() {
             instance_desc.flags |= wgpu::InstanceFlags::VALIDATION;
         }
@@ -1158,71 +1449,89 @@ impl Renderer {
         // building the GPU-driven pipelines (gpu_driven.wgsl) at start-up -- two testers, RX 6600 and
         // RX 6700 XT, identical fault offset, 2026-10-09. Prefer DX12 there unless the backend was
         // chosen explicitly (WGPU_BACKEND) or WGR_AMD_VULKAN=1 asks for Vulkan anyway.
+        // (PERF, 2026-10-14) Decided from the adapter actually chosen, rebuilding on DX12 only on an
+        // AMD Vulkan adapter. It was a separate probe instance + adapter before: ~170 ms of every
+        // start on every GPU, to change something only on AMD.
         #[cfg(windows)]
-        if std::env::var_os("WGPU_BACKEND").is_none()
-            && std::env::var("WGR_AMD_VULKAN").map(|v| v == "0").unwrap_or(true)
-        {
-            let mut probe_desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
-            probe_desc.backends = wgpu::Backends::VULKAN;
-            let probe = wgpu::Instance::new(probe_desc);
-            let amd = pollster::block_on(probe.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            }))
-            .map(|a| a.get_info().vendor == 0x1002)
-            .unwrap_or(false);
-            drop(probe);
-            if amd {
-                instance_desc.backends = wgpu::Backends::DX12;
-                log.log(
-                    log_level::WARN,
-                    "AMD GPU: using DX12 instead of Vulkan (the AMD Vulkan driver crashes compiling the \
-                     GPU-driven pipelines). WGR_AMD_VULKAN=1 or WGPU_BACKEND=vulkan forces Vulkan.",
-                );
-            }
-        }
+        let amd_dx12_allowed = std::env::var_os("WGPU_BACKEND").is_none()
+            && std::env::var("WGR_AMD_VULKAN").map(|v| v == "0").unwrap_or(true);
+        let instance_flags = instance_desc.flags;
+        let mut amd_dx12 = false;
+        let mut instance_desc = Some(instance_desc);
         #[cfg(feature = "dlss")]
         let mut dlss_instance_active = false;
-        let instance = 'inst: {
-            #[cfg(feature = "dlss")]
-            if dlss_requested {
-                match dlss_device::create_instance(instance_desc.flags) {
-                    Ok(i) => {
-                        log.log(
-                            log_level::INFO,
-                            "wgpu instance created via hal route with NGX extensions (WGR_DLSS)",
-                        );
-                        dlss_instance_active = true;
-                        break 'inst i;
-                    }
-                    Err(e) => {
-                        log.log(
-                            log_level::WARN,
-                            &format!("WGR_DLSS instance path failed ({e}); native path instead"),
-                        );
-                        dlss_status
-                            .latch(format!("Vulkan instance with the NGX extensions failed: {e}"));
+        let (_instance, surface, adapter) = loop {
+            let instance = 'inst: {
+                #[cfg(feature = "dlss")]
+                if dlss_requested && !amd_dx12 {
+                    match dlss_device::create_instance(instance_flags) {
+                        Ok(i) => {
+                            log.log(
+                                log_level::INFO,
+                                "wgpu instance created via hal route with NGX extensions (WGR_DLSS)",
+                            );
+                            dlss_instance_active = true;
+                            break 'inst i;
+                        }
+                        Err(e) => {
+                            log.log(
+                                log_level::WARN,
+                                &format!("WGR_DLSS instance path failed ({e}); native path instead"),
+                            );
+                            dlss_status
+                                .latch(format!("Vulkan instance with the NGX extensions failed: {e}"));
+                        }
                     }
                 }
+                let desc = instance_desc.take().unwrap_or_else(|| {
+                    let mut d = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+                    d.flags = instance_flags;
+                    d
+                });
+                let mut desc = desc;
+                if amd_dx12 {
+                    desc.backends = wgpu::Backends::DX12;
+                }
+                wgpu::Instance::new(desc)
+            };
+
+            let surface: wgpu::Surface<'static> = unsafe {
+                instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
+                    raw_display_handle: Some(raw_display_handle),
+                    raw_window_handle,
+                })
             }
-            wgpu::Instance::new(instance_desc)
+            .map_err(|e| format!("create_surface_unsafe failed: {e}"))?;
+
+            init_timer.mark("instance+surface");
+            let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            }))
+            .map_err(|e| format!("request_adapter failed: {e}"))?;
+
+            #[cfg(windows)]
+            {
+                let chosen = adapter.get_info();
+                if !amd_dx12 && amd_dx12_allowed && chosen.vendor == 0x1002 && chosen.backend == wgpu::Backend::Vulkan {
+                    log.log(
+                        log_level::WARN,
+                        "AMD GPU: using DX12 instead of Vulkan (the AMD Vulkan driver crashes compiling the                          GPU-driven pipelines). WGR_AMD_VULKAN=1 or WGPU_BACKEND=vulkan forces Vulkan.",
+                    );
+                    amd_dx12 = true;
+                    #[cfg(feature = "dlss")]
+                    {
+                        dlss_instance_active = false;
+                    }
+                    drop(adapter);
+                    drop(surface);
+                    drop(instance);
+                    continue;
+                }
+            }
+            break (instance, surface, adapter);
         };
-
-        let surface: wgpu::Surface<'static> = unsafe {
-            instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
-                raw_display_handle: Some(raw_display_handle),
-                raw_window_handle,
-            })
-        }
-        .map_err(|e| format!("create_surface_unsafe failed: {e}"))?;
-
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }))
-        .map_err(|e| format!("request_adapter failed: {e}"))?;
 
         let info = adapter.get_info();
         log.log(
@@ -1376,6 +1685,9 @@ impl Renderer {
                 .limits()
                 .max_sampled_textures_per_shader_stage
                 .clamp(16, 64),
+            // Whatever the adapter offers up to 16k (D3D12 / Vulkan desktop: 16,384); the
+            // 8,192 default refused the native world's full-resolution satellite map.
+            max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d.clamp(8192, 16384),
             // The geometry pool is one buffer for every resident mesh, and it is
             // bound as STORAGE (the skin-bake reads it) as well as VERTEX. The
             // defaults are 256 MB for a buffer and 128 MB for a storage binding,
@@ -1420,8 +1732,12 @@ impl Renderer {
         // the hal device route succeeded AND NGX reported DLSS available. Same
         // strict-fallback rule as the instance: any failure names itself and the
         // renderer continues on the plain path.
+        init_timer.mark("adapter+limits");
         #[cfg(feature = "dlss")]
         let mut ngx_raw: Option<(dlss_device::NgxRawHandles, dlss::Ngx)> = None;
+        // The speculative probe (see below): joined before the renderer struct is built.
+        #[cfg(feature = "dlss")]
+        let mut ngx_pending: Option<(dlss_device::NgxRawHandles, std::thread::JoinHandle<NgxOutcome>)> = None;
         let (device, queue) = 'dev: {
             #[cfg(feature = "dlss")]
             if dlss_instance_active {
@@ -1431,79 +1747,46 @@ impl Renderer {
                             log_level::INFO,
                             "wgpu device created via hal route with NGX extensions (WGR_DLSS)",
                         );
-                        // The extension route proves nothing about DLSS itself — the
-                        // NGX extensions are generic Vulkan, so an AMD/Intel box gets
-                        // this far too. Ask the driver NOW whether Super Sampling is
-                        // actually supported; without this gate such a box boots into
-                        // the temporal defaults and shimmers through the bilinear
-                        // fallback at 67% (tester reports, 2026-08-30).
-                        match dlss::feature_requirements(raw.instance, raw.physical_device)
-                        {
-                            Ok(0) => {
-                                log.log(
-                                    log_level::INFO,
-                                    "driver reports DLSS Super Sampling supported",
-                                );
-                                // NGX comes up HERE, not at the first upscaled frame:
-                                // the verdict ("snippet did not load", "driver too old")
-                                // is then in the startup log and the panel before any
-                                // frame is drawn, the temporal/67% defaults are never
-                                // auto-enabled for a DLSS that will not run, and a
-                                // machine without DLSS never has its first frame split
-                                // around a raw command buffer that goes nowhere.
-                                match unsafe {
-                                    dlss::Ngx::init(raw.instance, raw.physical_device, raw.device)
-                                } {
-                                    Ok(ngx) => {
-                                        if ngx.supersampling_available() {
-                                            log.log(
-                                                log_level::INFO,
-                                                "NGX initialised; DLSS Super Resolution available",
-                                            );
-                                            ngx_raw = Some((raw, ngx));
-                                        } else {
-                                            let reason =
-                                                ngx.availability_reason(dlss_snippet.as_deref());
-                                            log.log(
-                                                log_level::WARN,
-                                                &format!(
-                                                    "DLSS unavailable: {reason} ({}); native path",
-                                                    ngx.availability_diagnostics()
-                                                ),
-                                            );
-                                            ngx.release();
-                                            dlss_status.latch(reason);
-                                        }
-                                    }
-                                    Err(r) => {
-                                        let reason = dlss_status::init_failed_reason(r);
-                                        log.log(
-                                            log_level::WARN,
-                                            &format!("DLSS unavailable: {reason}; native path"),
-                                        );
-                                        dlss_status.latch(reason);
-                                    }
+                        // The extension route proves nothing about DLSS itself -- the NGX
+                        // extensions are generic Vulkan, so an AMD/Intel box gets this far too.
+                        // ngx_probe_and_init asks the driver whether Super Sampling is supported
+                        // and brings NGX up (see its note for why HERE and not at the first
+                        // upscaled frame).
+                        //
+                        // (PERF, 2026-10-14) On an NVIDIA RTX adapter that answer is the
+                        // overwhelmingly likely one, and finding it out costs ~2.8 s of start-up
+                        // (GetFeatureRequirements ~1.6 s + Init ~1.2 s, both driver-side). So the
+                        // probe runs on a thread while the rest of the renderer builds AS IF it
+                        // will succeed, and is joined before anything holds the NGX handle. If it
+                        // does not succeed, creation is redone with the synchronous probe
+                        // (ERR_NGX_SPECULATION): MSAA is chosen from the answer and cannot change
+                        // once pipelines exist. WGR_DLSS_ASYNC_INIT=0 keeps it synchronous.
+                        if ngx_speculation_allowed(&info.name, info.vendor) {
+                            let thread_raw = dlss_device::NgxRawHandles {
+                                instance: raw.instance,
+                                physical_device: raw.physical_device,
+                                device: raw.device,
+                            };
+                            let name = info.name.clone();
+                            let snippet = dlss_snippet.clone();
+                            match std::thread::Builder::new().name("wgr-ngx-init".into()).spawn(move || {
+                                let raw = thread_raw;
+                                ngx_probe_and_init(&raw, &name, snippet.as_deref())
+                            }) {
+                                Ok(handle) => {
+                                    ngx_pending = Some((raw, handle));
+                                    break 'dev (d, q);
                                 }
+                                Err(_) => {} // no thread: probe synchronously below
                             }
-                            Ok(bits) => {
-                                let reason = dlss_status::requirements_reason(bits, &info.name);
-                                log.log(
-                                    log_level::WARN,
-                                    &format!("DLSS unsupported on this GPU/driver: {reason}; native path"),
-                                );
-                                dlss_status.latch(reason);
-                            }
-                            Err(r) => {
-                                let reason = format!(
-                                    "NGX GetFeatureRequirements failed ({})",
-                                    dlss_status::ngx_code(r)
-                                );
-                                log.log(
-                                    log_level::WARN,
-                                    &format!("DLSS support probe failed: {reason}; native path"),
-                                );
-                                dlss_status.latch(reason);
-                            }
+                        }
+                        let outcome = ngx_probe_and_init(&raw, &info.name, dlss_snippet.as_deref());
+                        for (level, line) in &outcome.lines {
+                            log.log(*level, line);
+                        }
+                        match outcome.result {
+                            Ok(ngx) => ngx_raw = Some((raw, ngx)),
+                            Err(reason) => dlss_status.latch(reason),
                         }
                         break 'dev (d, q);
                     }
@@ -1520,6 +1803,7 @@ impl Renderer {
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 required_features: requested_features,
                 required_limits,
+                memory_hints: device_memory_hints(),
                 ..Default::default()
             }))
             .map_err(|e| format!("request_device failed: {e}"))?
@@ -1560,6 +1844,7 @@ impl Renderer {
         // than a backend-dependent black readback.
         config.usage |= wgpu::TextureUsages::COPY_SRC;
 
+        init_timer.mark("device");
         surface.configure(&device, &config);
 
         // HDR path (docs/hdr-pipeline-plan.md). Now the default for the wgpu backend —
@@ -1584,7 +1869,7 @@ impl Renderer {
                 .unwrap_or(false);
             #[cfg(feature = "dlss")]
             {
-                env_on || ngx_raw.is_some()
+                env_on || ngx_raw.is_some() || ngx_pending.is_some()
             }
             #[cfg(not(feature = "dlss"))]
             {
@@ -1622,7 +1907,9 @@ impl Renderer {
         let hdr_enabled = std::env::var("WGR_HDR").map(|v| v != "0").unwrap_or(true);
         // The one line a tester's log must carry: DLSS, and if not, why (dlss_status.rs).
         #[cfg(feature = "dlss")]
-        let dlss_up = ngx_raw.is_some();
+        // A pending speculative probe counts as up: everything below is built for it, and
+        // the join before the struct is built undoes the whole creation if it was wrong.
+        let dlss_up = ngx_raw.is_some() || ngx_pending.is_some();
         #[cfg(not(feature = "dlss"))]
         let dlss_up = false;
         if dlss_up && !hdr_enabled {
@@ -1734,7 +2021,7 @@ impl Renderer {
         // changes it live; a plain (non-dlss) build never reaches this.
         #[cfg(feature = "dlss")]
         let (render_scale, render_scale_auto) =
-            if ngx_raw.is_some() && hdr_enabled && std::env::var("WGR_RENDER_SCALE").is_err() {
+            if (ngx_raw.is_some() || ngx_pending.is_some()) && hdr_enabled && std::env::var("WGR_RENDER_SCALE").is_err() {
                 log.log(
                     log_level::INFO,
                     "wgpu render scale defaulting to 67% (DLSS route up; dev panel tunes it live)",
@@ -1769,6 +2056,17 @@ impl Renderer {
             );
         }
 
+        init_timer.mark("configure..textures");
+        // (PERF, 2026-10-14) The sky (its own composer, layered fog and ~16 pipelines) needs
+        // nothing from the other subsystems, so it builds on its own thread while gfx3d, terrain,
+        // grass and water build here: ~0.5 s of a ~2.8 s renderer start. Joined where it was built.
+        let sky_init = {
+            let (device, queue) = (device.clone(), queue.clone());
+            std::thread::Builder::new()
+                .name("wgr-sky-init".into())
+                .spawn(move || Sky::new(&device, &queue, color_format, sample_count))
+                .ok()
+        };
         let textures = SharedTextures::new(
             &device,
             &queue,
@@ -1779,9 +2077,11 @@ impl Renderer {
             // stderr, which this harness never captures. See announce_fallback_texel.
             &log,
         );
+        let texture_ingress = std::sync::Arc::new(textures.new_ingress(&device, &queue));
         // One composer, pre-loaded with the shared shader modules, shared by the
         // 3D subsystems that #import them.
         let mut composer = shaders::build_composer();
+        init_timer.mark("textures");
         let gfx2d = Gfx2d::new(
             &device,
             &textures,
@@ -1789,6 +2089,7 @@ impl Renderer {
             config.format,
             sample_count,
         );
+        init_timer.mark("gfx2d");
         let mut gfx3d = Gfx3d::new(
             &device,
             &textures,
@@ -1862,6 +2163,31 @@ impl Renderer {
                 );
             }
         }
+        init_timer.mark("gfx3d");
+        let fft_storage_supported = [
+            wgpu::TextureFormat::Rgba32Float,
+            wgpu::TextureFormat::Rgba16Float,
+        ]
+        .iter()
+        .all(|&format| {
+            adapter
+                .get_texture_format_features(format)
+                .allowed_usages
+                .contains(wgpu::TextureUsages::STORAGE_BINDING)
+        });
+        // (PERF, 2026-10-14) Water needs only the camera layout from here, so it builds on its own
+        // thread (with its own composer) while terrain, grass and the rest build on this one.
+        let water_init = {
+            let (device, queue, camera_layout) = (device.clone(), queue.clone(), gfx3d.camera_layout().clone());
+            std::thread::Builder::new()
+                .name("wgr-water-init".into())
+                .spawn(move || {
+                    let mut composer = shaders::build_composer();
+                    WaterBackend::new(&device, &queue, &camera_layout, color_format, sample_count,
+                        &mut composer, fft_storage_supported)
+                })
+                .ok()
+        };
         let terrain = Terrain::new(
             &device,
             &queue,
@@ -1872,6 +2198,7 @@ impl Renderer {
             textures.white_view().clone(),
             &mut composer,
         );
+        init_timer.mark("terrain");
         let grass = Grass::new(
             &device,
             &queue,
@@ -1885,6 +2212,7 @@ impl Renderer {
         // the world's source rows) are not allocated until a world actually pushes
         // placements, so a world with no far tier and a build launched with WGR_FAR_TIER=0
         // pay nothing but three shader compiles.
+        init_timer.mark("grass");
         let far = Far::new(
             &device,
             gfx3d.camera_layout(),
@@ -1892,22 +2220,24 @@ impl Renderer {
             sample_count,
             &mut composer,
         );
-        let fft_storage_supported = [
-            wgpu::TextureFormat::Rgba32Float,
-            wgpu::TextureFormat::Rgba16Float,
-        ]
-        .iter()
-        .all(|&format| {
-            adapter
-                .get_texture_format_features(format)
-                .allowed_usages
-                .contains(wgpu::TextureUsages::STORAGE_BINDING)
-        });
-        let tonemap = hdr_enabled.then(|| Tonemap::new(&device, config.format));
-        let water = WaterBackend::new(
-            &device, &queue, gfx3d.camera_layout(), color_format, sample_count,
-            &mut composer, fft_storage_supported,
+        init_timer.mark("far");
+        let river = river::River::new(
+            &device,
+            gfx3d.camera_layout(),
+            color_format,
+            sample_count,
+            &mut composer,
         );
+        let tonemap = hdr_enabled.then(|| Tonemap::new(&device, config.format));
+        init_timer.mark("tonemap");
+        let water = match water_init {
+            Some(handle) => handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+            None => WaterBackend::new(
+                &device, &queue, gfx3d.camera_layout(), color_format, sample_count,
+                &mut composer, fft_storage_supported,
+            ),
+        };
+        init_timer.mark("water");
         let rain_water = rain_water::RainWater::new(&device, gfx3d.camera_layout(), color_format, sample_count, &mut composer);
         log.log(log_level::INFO, &format!("Water backend: initial {}", water.kind().label()));
         if let Some(op) = water.current_op() {
@@ -1920,24 +2250,39 @@ impl Renderer {
                     "Hydro FFT ocean unavailable; using the analytic Gerstner fallback");
             }
         }
+        init_timer.mark("rain_water+");
         let bloom = hdr_enabled.then(|| Bloom::new(&device, HDR_FORMAT));
         // God rays composite into the HDR scene target, so like bloom they only exist on the
         // HDR path. Default ON; `WGR_GODRAYS=0` ablates it for an A/B capture.
+        init_timer.mark("bloom");
         let godrays = hdr_enabled.then(|| GodRays::new(&device, HDR_FORMAT, sample_count));
         // SMK-037: created unconditionally (one pipeline, no target until a frame asks).
+        init_timer.mark("godrays");
         let soft_particles = soft_particles::SoftParticles::new(&device);
         // SMK-038: same -- pipelines and the froxel texture, but no march target and no work
         // recorded until the mode is switched off Legacy.
+        init_timer.mark("soft_particles");
         let smoke_volume = smoke_volume::SmokeVolume::new(&device, color_format, sample_count);
+        init_timer.mark("smoke_volume");
         let fire = fire::FireSystem::new(&device, &queue, color_format, sample_count);
+        init_timer.mark("fire");
+        let mud = mud::MudSystem::new(&device, color_format, sample_count);
+        init_timer.mark("mud");
         let planar_mips = PlanarMips::new(&device, HDR_FORMAT);
+        init_timer.mark("planar_mips");
         let exposure = hdr_enabled.then(|| Exposure::new(&device, &queue));
         // The sky targets the scene color format (HDR target or swapchain), matching
         // the scene pipelines, and self-tonemaps when that is an LDR-direct swapchain.
-        let sky = Sky::new(&device, &queue, color_format, sample_count);
+        init_timer.mark("exposure+");
+        let sky = match sky_init {
+            Some(handle) => handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+            None => Sky::new(&device, &queue, color_format, sample_count),
+        };
         // WTR-002 — the timestamp query set + readback ring (inert when unsupported).
+        init_timer.mark("sky+");
         let gpu_timers = GpuTimers::new(&device, &queue, ts_enabled, ts_inside_passes);
         let water_visibility = WaterVisibility::new(&device);
+        init_timer.mark("gpu_timers+visibility");
         if gpu_timers.enabled() {
             log.log(
                 log_level::INFO,
@@ -1977,8 +2322,47 @@ impl Renderer {
             | (if hdr_enabled { 1 << 6 } else { 0 })
             | (if sample_count > 1 { 1 << 7 } else { 0 });
 
+        // LOAD-NGX-DEFER (2026-10-20): with shader composition prewarmed, renderer start-up spent
+        // 1.16 s here waiting for NVIDIA's NGX initialisation (about 1.9 s from its start). Now the
+        // renderer comes back at once with the DLSS configuration it already speculated on, and
+        // the thread is joined later without blocking (poll_ngx_deferred); the first frames use
+        // the FSR/bilinear fallback until it lands. A late failure takes the runtime rollback a
+        // dying DLSS backend already has. WGR_NGX_JOIN_EARLY=1 = the old join-here.
+        #[cfg(feature = "dlss")]
+        let ngx_deferred = if ngx_pending.is_some() && std::env::var("WGR_NGX_JOIN_EARLY").as_deref() != Ok("1") {
+            init_timer.mark("ngx deferred");
+            ngx_pending.take()
+        } else {
+            None
+        };
+        #[cfg(feature = "dlss")]
+        let ngx_speculative = ngx_deferred.is_some();
+        #[cfg(not(feature = "dlss"))]
+        let ngx_speculative = false;
+        // The speculative NGX probe, joined last so it overlapped everything above.
+        #[cfg(feature = "dlss")]
+        if let Some((raw, handle)) = ngx_pending.take() {
+            let outcome = handle.join().unwrap_or_else(|_| NgxOutcome {
+                lines: vec![(log_level::WARN, "DLSS start-up thread panicked".to_owned())],
+                result: Err("DLSS start-up thread panicked".to_owned()),
+            });
+            init_timer.mark("ngx join");
+            for (level, line) in &outcome.lines {
+                log.log(*level, line);
+            }
+            match outcome.result {
+                Ok(ngx) => ngx_raw = Some((raw, ngx)),
+                Err(_) => {
+                    // Everything above was built for DLSS (MSAA off, 67% scale): redo the
+                    // creation the slow way so the native path gets its own configuration.
+                    NGX_FORCE_SYNC.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return Err(ERR_NGX_SPECULATION.to_owned());
+                }
+            }
+        }
         #[allow(unused_mut)]
         let mut temporal_auto = false;
+        init_timer.mark("rest of new()");
         Ok(Self {
             // 1.35 by default: enough to push the reflection-target edge outside a normal
             // grazing view, without giving away more angular resolution than the mip-filtered
@@ -1998,11 +2382,13 @@ impl Renderer {
             config,
             present_modes,
             textures,
+            texture_ingress,
             gfx2d,
             gfx3d,
             terrain,
             grass,
             far,
+            river,
             water,
             rain_water,
             water_visibility,
@@ -2010,6 +2396,13 @@ impl Renderer {
             direct_draws: std::cell::Cell::new(DirectDrawStats::default()),
             runtime_capabilities,
             residency_budget_bytes,
+            vram_probe: if std::env::var("WGR_VRAM_PRESSURE").as_deref() == Ok("0") || residency_budget_bytes == 0 {
+                None
+            } else {
+                VramBudgetProbe::new(&adapter)
+            },
+            vram_effective_budget: std::cell::Cell::new(residency_budget_bytes),
+            vram_probe_at: std::cell::Cell::new(None),
             hdr_enabled,
             hdr: None,
             hdr_resolve: None,
@@ -2026,7 +2419,7 @@ impl Renderer {
             temporal: {
                 let mut t = temporal::Temporal::from_env();
                 #[cfg(feature = "dlss")]
-                if ngx_raw.is_some() && std::env::var("WGR_TEMPORAL").is_err() {
+                if (ngx_raw.is_some() || ngx_speculative) && std::env::var("WGR_TEMPORAL").is_err() {
                     // The NGX route is up and nothing said otherwise: DLSS is the
                     // default experience, and it needs the temporal contract.
                     t.enabled = true;
@@ -2043,13 +2436,16 @@ impl Renderer {
             ngx_route: {
                 #[cfg(feature = "dlss")]
                 {
-                    ngx_raw.is_some()
+                    ngx_raw.is_some() || ngx_speculative
                 }
                 #[cfg(not(feature = "dlss"))]
                 {
+                    let _ = ngx_speculative;
                     false
                 }
             },
+            #[cfg(feature = "dlss")]
+            ngx_deferred,
             upscalers: {
                 let mut v: Vec<Box<dyn upscaler::TemporalUpscaler>> = Vec::new();
                 #[cfg(feature = "dlss")]
@@ -2142,6 +2538,7 @@ impl Renderer {
             cam_underground: 0.0,
             smoke_volume,
             fire,
+            mud,
             smoke_sun_dir: [0.0, 1.0, 0.0],
             smoke_sun_radiance: [1.0, 1.0, 1.0],
             smoke_ambient: [0.2, 0.2, 0.24],
@@ -2152,6 +2549,7 @@ impl Renderer {
             godrays_composited: false,
             frame_depth_final_resolved: false,
             far_depth_resolve_current: false,
+            water_zbuf: None,
             bloom,
             exposure,
             exposure_params: ffi::WgrExposure::default(),
@@ -2396,6 +2794,23 @@ impl Renderer {
         s.night_params[3] = rt.fog_color[3]; // fog far-range
         s.cloud1[0] = rt.misc[2]; // cloud wind world offset x (m, CPU-wrapped)
         s.cloud1[1] = rt.misc[3]; // cloud wind world offset z (m, CPU-wrapped)
+        // Cloud motion vectors (temporal.wgsl fs_velocity): the deck's middle, planet-centred.
+        // WGR_CLOUD_MOTION_VECTORS=0 hands DLSS the old zero vectors over the sky.
+        static CLOUD_MV: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let deck = s.cloud0[0] > 0.0
+            && *CLOUD_MV.get_or_init(|| std::env::var("WGR_CLOUD_MOTION_VECTORS").as_deref() != Ok("0"));
+        let planet = s.params[2];
+        // Where in the deck the vectors are taken: 0 = its base (default: seen from below, the base is
+        // what shows -- measured cleanest of base/middle/top), 1 = its top (WGR_CLOUD_MV_HEIGHT).
+        static CLOUD_MV_HEIGHT: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+        let h = *CLOUD_MV_HEIGHT.get_or_init(|| {
+            std::env::var("WGR_CLOUD_MV_HEIGHT").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0).clamp(0.0, 1.0)
+        });
+        self.temporal.set_cloud_motion(
+            [rt.misc[2], rt.misc[3]],
+            if deck { planet + s.cloud0[2] + h * (s.cloud0[3] - s.cloud0[2]) } else { 0.0 },
+            planet + rt.misc[1],
+        );
         s.cloud4 = rt.cloud_evolve; // shape / detail / weather drift offsets (m, CPU-wrapped)
         s.moon_params = rt.moon_params; // radius / illuminated fraction / radiance / draw
         s.moon_sun = rt.moon_sun; // sub-solar direction + earthshine
@@ -2467,19 +2882,78 @@ impl Renderer {
         let counters = self.device.get_internal_counters().hal;
         let backend_allocation_bytes = (counters.buffer_memory.read().max(0) as u64)
             .saturating_add(counters.texture_memory.read().max(0) as u64);
+        // PERF-RFG-212: WGR_VRAM_REPORT=1 -- who holds the VRAM. On Everon the process allocates
+        // ~5.7 GB against a ~3.3 GB OS budget and WDDM demotes a different allocation each run (the
+        // 5-10 ms frame swings); this names the allocations, grouped by label, every 20th call.
+        static VRAM_REPORT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *VRAM_REPORT.get_or_init(|| std::env::var("WGR_VRAM_REPORT").map(|v| v.trim() == "1").unwrap_or(false)) {
+            static CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 20 == 0 {
+                const MB: f64 = 1024.0 * 1024.0;
+                eprintln!(
+                    "[wgr] VRAM report: buffers {:.0} MB, textures {:.0} MB",
+                    counters.buffer_memory.read().max(0) as f64 / MB,
+                    counters.texture_memory.read().max(0) as f64 / MB
+                );
+                if let Some(report) = self.device.generate_allocator_report() {
+                    let mut by_label: std::collections::HashMap<String, (u64, u32)> = std::collections::HashMap::new();
+                    for a in &report.allocations {
+                        // Group numbered/variant labels together: digits stripped.
+                        let key: String = a.name.chars().filter(|c| !c.is_ascii_digit()).collect();
+                        let e = by_label.entry(key).or_insert((0, 0));
+                        e.0 += a.size;
+                        e.1 += 1;
+                    }
+                    let mut rows: Vec<_> = by_label.into_iter().collect();
+                    rows.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+                    eprintln!(
+                        "[wgr] VRAM report: allocator total {:.0} MB reserved {:.0} MB in {} allocations",
+                        report.total_allocated_bytes as f64 / MB,
+                        report.total_reserved_bytes as f64 / MB,
+                        report.allocations.len()
+                    );
+                    for (label, (bytes, n)) in rows.iter().take(40) {
+                        eprintln!("[wgr] VRAM report:   {:8.1} MB  x{:<5} {}", *bytes as f64 / MB, n, label);
+                    }
+                }
+            }
+        }
+        // REN-RES-004: at most twice a second, follow the driver's live budget (WGR_VRAM_PRESSURE=0
+        // keeps the static one). Lowering budget_bytes is all it takes: the engine's free-on-demand
+        // probe ("WGPU.Dynamic") evicts object textures toward it, as it does for the static budget.
+        if let Some(probe) = &self.vram_probe {
+            let now = std::time::Instant::now();
+            let due = self.vram_probe_at.get().is_none_or(|t| now.duration_since(t).as_millis() >= 500);
+            if due {
+                self.vram_probe_at.set(Some(now));
+                if let Some((usage, os_budget)) = probe.read() {
+                    const MB: u64 = 1024 * 1024;
+                    let before = self.vram_effective_budget.get();
+                    let after = pressured_budget(self.residency_budget_bytes, before, tracked_bytes, usage,
+                                                 os_budget, 512 * MB, 1024 * MB, 128 * MB);
+                    self.vram_effective_budget.set(after);
+                    if after / (256 * MB) != before / (256 * MB) {
+                        eprintln!(
+                            "[wgr] VRAM pressure: process uses {} of {} MB the OS allows; residency budget {} -> {} MB \
+                             (tracked {} MB; WGR_VRAM_PRESSURE=0 = static)",
+                            usage / MB, os_budget / MB, before / MB, after / MB, tracked_bytes / MB
+                        );
+                    }
+                }
+            }
+        }
+        let budget_bytes = self.vram_effective_budget.get();
         ffi::WgrMemoryStats {
             backend_allocation_bytes,
             tracked_bytes,
-            budget_bytes: self.residency_budget_bytes,
+            budget_bytes,
             object_texture_bytes,
             geometry_live_bytes: geometry.live_bytes,
             geometry_capacity_bytes: geometry.capacity_bytes,
             geometry_retired_bytes: geometry.retired_bytes,
             object_texture_count,
             object_texture_retired_bytes,
-            over_budget: u32::from(
-                self.residency_budget_bytes != 0 && tracked_bytes > self.residency_budget_bytes,
-            ),
+            over_budget: u32::from(budget_bytes != 0 && tracked_bytes > budget_bytes),
         }
     }
 
@@ -2553,6 +3027,41 @@ impl Renderer {
 
     // Tonemap the HDR scene target onto `dst` (the swapchain). No-op if the tonemap
     // pass doesn't exist (LDR-direct path).
+    /// LOAD-NGX-DEFER: take the DLSS start-up result once its thread has finished. Never blocks.
+    #[cfg(feature = "dlss")]
+    fn poll_ngx_deferred(&mut self) {
+        if !self.ngx_deferred.as_ref().is_some_and(|(_, h)| h.is_finished()) {
+            return;
+        }
+        let (raw, handle) = self.ngx_deferred.take().unwrap();
+        let outcome = handle.join().unwrap_or_else(|_| NgxOutcome {
+            lines: vec![(log_level::WARN, "DLSS start-up thread panicked".to_owned())],
+            result: Err("DLSS start-up thread panicked".to_owned()),
+        });
+        for (level, line) in &outcome.lines {
+            self.log.log(*level, line);
+        }
+        match outcome.result {
+            Ok(ngx) => {
+                self.upscalers.insert(0, Box::new(upscaler::DlssUpscaler::new(raw, ngx)));
+                self.log.log(log_level::INFO, "DLSS ready (joined after start-up, LOAD-NGX-DEFER)");
+            }
+            Err(reason) => {
+                // The renderer was built for DLSS; fall back exactly as a dying backend does.
+                self.log.log(log_level::INFO, &format!("DLSS status: inactive - {reason}"));
+                self.dlss_status.latch(reason);
+                self.ngx_route = false;
+                if self.temporal_auto && self.temporal.enabled {
+                    self.temporal.enabled = false;
+                }
+                if self.render_scale_auto && (self.render_scale - 1.0).abs() > 1e-3 {
+                    self.render_scale = 1.0;
+                    self.temporal.notify_reset("DLSS start-up failed: render scale back to 100%");
+                }
+            }
+        }
+    }
+
     fn run_tonemap(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -2564,6 +3073,8 @@ impl Renderer {
         if self.tonemap.is_none() {
             return;
         }
+        #[cfg(feature = "dlss")]
+        self.poll_ngx_deferred();
         // REN-TEMP-001F: static-world velocity, computed here because every 3D depth write
         // is done by the Resolve op. Reads the frame-final far-reduce depth resolve (the
         // same freshness machinery the god rays use); the DLSS stage may later prefer the
@@ -2673,6 +3184,24 @@ impl Renderer {
                         &obj_uniform,
                         veg_uniform.as_ref(),
                     );
+                    // RFG-142: the native near ring's swaying tufts (grass had no motion at all).
+                    if let (Some(cam), Some(depth), Some(delta)) = (
+                        self.gfx3d.camera_bind(),
+                        self.gfx3d.water_depth_view(),
+                        self.temporal.camera_delta(),
+                    ) {
+                        self.grass.draw_velocity(
+                            &self.device,
+                            &self.queue,
+                            encoder,
+                            &vel_view,
+                            cam,
+                            self.main_cam_off,
+                            &obj_uniform,
+                            delta,
+                            depth,
+                        );
+                    }
                 }
             }
         }
@@ -2756,7 +3285,7 @@ impl Renderer {
             self.gpu_timers
                 .begin(encoder, TimerRegion::UnderwaterComposite);
             self.water
-                .render_underwater(&self.device, encoder, source, depth, target);
+                .render_underwater(&self.device, encoder, source, depth, target, self.sky.sh_buffer());
             self.gpu_timers
                 .end(encoder, TimerRegion::UnderwaterComposite);
             post_source_tex = self.underwater_target.as_ref().map(|(t, _)| t.clone());
@@ -2958,11 +3487,13 @@ impl Renderer {
                 .as_ref()
                 .map(|e| e.scale_view())
                 .unwrap_or(&post_source);
+            let clip = self.exposure.as_ref().map(|e| e.clip_buffer());
             self.tonemap.as_mut().expect("tonemap").set_source(
                 &self.device,
                 &post_source,
                 bloom_view,
                 scale_view,
+                clip,
             );
             if let Some(bloom) = self.bloom.as_mut() {
                 bloom.set_source(&self.device, &post_source);
@@ -3086,6 +3617,10 @@ impl Renderer {
         self.smoke_ambient = [p.ambient[0], p.ambient[1], p.ambient[2]];
     }
 
+    fn set_mud_emitters(&mut self, emitters: &[mud::MudEmitter]) {
+        self.mud.set_emitters(emitters);
+    }
+
     fn set_fire_sources(&mut self, sources: &[fire::FireSource]) {
         self.fire.set_sources(sources);
     }
@@ -3171,8 +3706,16 @@ impl Renderer {
         let requested = match interval {
             0 => wgpu::PresentMode::Immediate,
             1 => wgpu::PresentMode::Fifo,
+            // Adaptive: synced while frames are on time, presented at once (a tear, not a held
+            // frame) when one is late. FifoRelaxed is exactly that. Mailbox -- what this used to pick
+            // -- still waits for the next vblank, so at 38 fps on a 60 Hz screen every frame was held
+            // to 16.7 or 33.3 ms and the motion stuttered the moment the cap was missed (tester
+            // report, 2026-09-12). Mailbox, then Immediate, only where the backend has no
+            // FifoRelaxed (DX12).
             -1 => {
-                if self.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+                if self.present_modes.contains(&wgpu::PresentMode::FifoRelaxed) {
+                    wgpu::PresentMode::FifoRelaxed
+                } else if self.present_modes.contains(&wgpu::PresentMode::Mailbox) {
                     wgpu::PresentMode::Mailbox
                 } else {
                     wgpu::PresentMode::Immediate
@@ -3356,7 +3899,8 @@ impl Renderer {
                 .as_ref()
                 .map(|e| e.scale_view())
                 .unwrap_or(&post_view);
-            tonemap.set_source(&self.device, &post_view, bloom_view, scale_view);
+            let clip = self.exposure.as_ref().map(|e| e.clip_buffer());
+            tonemap.set_source(&self.device, &post_view, bloom_view, scale_view, clip);
         }
         self.hdr = Some((texture, view));
         self.hdr_resolve = resolve;
@@ -3677,6 +4221,7 @@ impl Renderer {
         mut call_timings: Option<&mut crate::gpu_timers::RenderCallCpuTimings>,
         main_count_request: Option<(u64, u32, u64)>,
     ) -> Result<bool, String> {
+        self.drain_texture_ingress();
         if let Some(probe)=self.post_optics_probe.as_mut(){probe.begin();}
         if let Some(tuple)=self.main_camera_tuple.as_mut(){tuple.begin();} // Failed calls invalidate old completion.
         // The GPU-resident (retained / GPU-driven) world objects are drawn by every presented frame unless
@@ -3687,6 +4232,7 @@ impl Renderer {
         // submitted no terrain and no 3D draws has no world in it, so its resident objects stay hidden too.
         let suppress_world_objects = self.suppress_world_objects || (terrain_batches.is_empty() && draws3d.is_empty());
         self.gfx3d.begin_geometry_pass_facts(shadow);
+        let mut frame_lap = FrameLap::new(); // STREAM-HITCH probe (WGR_FRAME_LAP_MS)
         let setup_t0 = std::time::Instant::now();
         // REN-THR-009 — before anything this frame reads `bake_bind_cache` or allocates
         // from the pool. This is the frame boundary a deferred mesh destroy waits for.
@@ -3802,6 +4348,18 @@ impl Renderer {
             terrain_batches.first().map(|b| b.camera as usize), draws3d.first().map(|d| d.camera as usize),
             water_batches.first().map(|b| b.camera as usize), grass_batches.first().map(|b| b.camera as usize));
         let main_scene_cam = main_selection.index; // Same existing front-entry priority, not a new camera policy.
+        // RFG-162: which river stretches this frame draws (and whether the water pass runs for them).
+        if let Some(camera) = cameras.get(main_scene_cam) {
+            let reach = if camera.params.fog_inv_range > 0.0 {
+                camera.params.fog_start + 1.0 / camera.params.fog_inv_range
+            } else {
+                3000.0
+            };
+            let fwd = camera.shadow.cam_fwd;
+            self.river.cull([camera.cam_pos[0], camera.cam_pos[1], camera.cam_pos[2]], [fwd[0], fwd[1], fwd[2]], reach);
+        } else {
+            self.river.cull([1.0e9; 3], [0.0; 3], 0.0); // no main camera: nothing in reach
+        }
         if let Some(camera) = cameras.get(main_scene_cam) {
             self.rain_water.prepare_medium(&self.device,&self.queue,self.terrain.rain_water_medium_resources());
             self.rain_water.prepare(&self.device, &self.queue, camera, &self.terrain.heightmap_view(),
@@ -3965,6 +4523,10 @@ impl Renderer {
             self.log.log(log_level::INFO, &line);
         }
         self.gfx3d.set_ground_weather(self.terrain.ground_weather_params());
+        let bounds = self.terrain.native_height_bounds();
+        // Unknown on a streamed Earth patch: its mountains are not in the island's heightmap.
+        self.gfx3d.set_world_max_height(if bounds[1] > bounds[0] && !self.grass.earth_active() { bounds[1] }
+            else { f32::NAN });
         let mut prepared_cameras = cameras.to_vec();
         // REN-TEMP-001E: temporal camera state + jitter. The UNJITTERED main camera is
         // snapshotted first (velocity and history math use it), then the jitter is folded
@@ -4066,6 +4628,7 @@ impl Renderer {
         self.sky.fog.invalidate(&self.queue);
         self.gfx3d.set_layer_fog_requested(layered_fog::requested(&self.layer_fog_settings,
             self.layer_fog_weather,self.hdr_enabled,self.cam_underground));
+        frame_lap.mark("setup:pre");
         self.gfx3d.begin_lod_demand(); // before model-table upload; disabled/no request is a no-op
         self.gfx3d.prepare(
             &self.device,
@@ -4098,8 +4661,10 @@ impl Renderer {
             reflected_camera.zip(planar_sea),
             main_scene_cam,
         );
+        frame_lap.mark("gfx3d.prepare");
         self.terrain
             .prepare(&self.device, &self.queue, terrain_nodes);
+        frame_lap.mark("terrain.prepare");
         // TW-WATER W3i: the light the Tidewater water is lit with, logged every ~10 s while that
         // backend renders (colour calibration against Tidewater's units: sun E ~ 9, sky E/PI ~ 1).
         if self.water.tidewater().is_some() {
@@ -4135,12 +4700,32 @@ impl Renderer {
         if let Some(tw) = self.water.tidewater_mut() {
             tw.set_lights(lights);
         }
+        // RFG-191: a camera standing in a pond (native worlds: the river module's still water) is
+        // under or over THAT surface, not the sea's. WGR_LAKE_UNDERWATER=0 = the sea only.
+        let lake_under_camera: Option<f32> = if std::env::var("WGR_LAKE_UNDERWATER").map(|v| v.trim() == "0").unwrap_or(false) {
+            None
+        } else {
+            prepared_cameras.get(water_camera).and_then(|cam| {
+                self.river.still_level_at(cam.cam_pos[0], cam.cam_pos[2])
+            })
+        };
+        {
+            let water = lake_under_camera.map(|level| {
+                let (a, s) = self.river.lake_water();
+                (level, a, s)
+            });
+            if let Some(tw) = self.water.tidewater_mut() {
+                tw.set_lake(water);
+            }
+        }
+        frame_lap.mark("water.setup");
         self.water.prepare(
             &self.device,
             &self.queue,
             water_nodes,
             prepared_cameras.get(water_camera),
         );
+        frame_lap.mark("water.prepare");
         // TW-WATER W3b: Tidewater's wet sand on the terrain (None: OP's own coast wet band).
         {
             let wet = self.water.shore_wetness();
@@ -4152,11 +4737,12 @@ impl Renderer {
                         w.state,
                         w.lace,
                         w.generation,
-                        crate::terrain::TwWetParams { regions: w.regions, p: [1.0, w.sea_level, 0.0, 0.0] },
+                        crate::terrain::TwWetParams { regions: w.regions, p: [1.0, w.sea_level, 0.0, 0.0], rain: [0.0; 4] },
                     )
                 }),
             );
         }
+        frame_lap.mark("shore_wet");
         // Arm only after retained-scene preparation, before prepare_cull uploads its
         // target-model uniform. A missing main camera leaves the request Unknown.
         let main_count_armed = if let (Some(&(token, model_id, source_generation)), Some(_)) =
@@ -4191,6 +4777,7 @@ impl Renderer {
         // Live from the Water tab ("Engage band"), no longer a constant — the band decides how
         // far into open air the pass keeps running, which is exactly the knob you want when
         // tuning how the effect behaves around the waterline.
+        frame_lap.mark("prepare_cull");
         let underwater_tuning = self.water.underwater_tuning();
         let underwater_near_surface_band = underwater_tuning.0;
         // The Water tab's checkbox. Without this the pass ran whatever the checkbox said: the
@@ -4202,13 +4789,14 @@ impl Renderer {
         // the surface drawn in that mode: at the beach they put the eye metres under water while
         // it stood above it), decides the gate there.
         let cam_surface = self.water.camera_surface_height();
-        let underwater_state =
-            self.water
-                .underwater_params()
-                .map(|(sea_level, time, submersion)| match cam_surface {
-                    Some(h) => (h, time, 0.0),
-                    None => (sea_level, time, submersion),
-                })
+        let sea_state = self.water.underwater_params().map(|(sea_level, time, submersion)| match cam_surface {
+            Some(h) => (h, time, 0.0),
+            None => (sea_level, time, submersion),
+        });
+        // RFG-191: inside a pond its flat level decides (the time lane only animates caustics).
+        let underwater_state = lake_under_camera
+            .map(|level| (level, sea_state.map(|s| s.1).unwrap_or(0.0), 0.0))
+            .or(sea_state)
                 .and_then(|(sea_level, time, submersion)| {
                     let player_submerged = submersion > 0.0;
                     // Use the water draw camera, not an unrelated terrain/scene batch. The visual
@@ -4243,17 +4831,66 @@ impl Renderer {
                     })
                 });
         let underwater_engaged = underwater_state.is_some();
+        // PERF-TW-CAUSTICS-GATE: the caustics (0.13 ms) are read only by the water surface and the
+        // underwater composite. When the depth-tested water query has seen no water sample for two
+        // results running and the camera is neither in nor near the water, nothing on screen can
+        // show them, so the splats are skipped. Turning back to the sea re-enables them as soon as
+        // a result sees water (the query keeps running with the draw): at most the query's ~3
+        // frames of readback latency with the previous pattern. WGR_TW_CAUSTICS_GATE=0 = always.
+        {
+            static GATE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let gate = *GATE.get_or_init(|| {
+                std::env::var("WGR_TW_CAUSTICS_GATE").map(|v| v.trim() != "0").unwrap_or(true)
+            });
+            let skip = gate
+                && self.water_visibility.zero_streak() >= 2
+                && !underwater_engaged
+                && lake_under_camera.is_none()
+                && cam_surface.zip(prepared_cameras.get(water_camera))
+                    .is_some_and(|(h, cam)| cam.cam_pos[1] > h + 1.0);
+            if let Some(tw) = self.water.tidewater_mut() {
+                tw.set_caustics_skip(skip);
+            }
+        }
+        {
+            static GATE_N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = GATE_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n % 120 == 0 && std::env::var("WGR_UW_GATE_TRACE").is_ok() {
+                eprintln!(
+                    "[wgr] uw gate trace: engaged={} cameras={} water_camera={} y={:?} measured={:?} engine={:?} enabled={}",
+                    underwater_engaged,
+                    prepared_cameras.len(),
+                    water_camera,
+                    prepared_cameras.get(water_camera).map(|c| c.cam_pos[1]),
+                    cam_surface,
+                    self.water.underwater_params().map(|(l, _, s)| (l, s)),
+                    underwater_enabled,
+                );
+            }
+        }
         // TW-WATER W5d: more than a metre under the surface (flat datum or measured submersion).
-        self.submerged_view = underwater_state.as_ref().is_some_and(|(_, above, _, _)| *above < -1.0);
+        // (OP, 2026-10-13) from 5 cm under the surface, not 1 m: the only reader is the cloud composite's
+        // gate below, and between 5 cm and 1 m it ran and painted the cloud deck over the underside of
+        // the surface (owner: plain clouds at 0.7 m under the water, gone at 2.5 m). The lens straddles
+        // the waterline within 5 cm (tw_underwater.wgsl UW_STRADDLE), where the sky above stays clouded.
+        self.submerged_view = underwater_state.as_ref().is_some_and(|(_, above, _, _)| *above < -0.05);
         if self.underwater_engaged_logged != Some(underwater_engaged) {
             self.underwater_engaged_logged = Some(underwater_engaged);
             // eprintln! rather than self.log, matching the other [wgr] renderer diagnostics —
             // it is what actually reaches the captured stderr in a harness run.
             eprintln!(
-                "[wgr] underwater compositor {} (enabled={} band={:.2}m)",
+                "[wgr] underwater compositor {} (enabled={} band={:.2}m, measured surface under the camera {:?}, engine level/submersion {:?})",
                 if underwater_engaged { "ENGAGED" } else { "off" },
                 underwater_enabled,
                 underwater_near_surface_band,
+                cam_surface,
+                self.water.underwater_params().map(|(l, _, s)| (l, s)),
+            );
+            eprintln!(
+                "[wgr] underwater gate camera: index {} of {}, y {:?}",
+                water_camera,
+                prepared_cameras.len(),
+                prepared_cameras.get(water_camera).map(|c| c.cam_pos[1]),
             );
         }
         let underwater_time = underwater_state.map(|(time, _, _, _)| time);
@@ -4423,6 +5060,7 @@ impl Renderer {
         // New encoder, and the depth target is about to be cleared and rewritten: nothing
         // resolved on a previous frame's encoder can be reused.
         self.far_depth_resolve_current = false;
+        frame_lap.mark("setup:rest");
         self.gpu_timers.begin_frame();
         self.gpu_timers
             .cpu_record(crate::gpu_timers::Region::WorkerAcquire, acquire_ms);
@@ -4625,6 +5263,7 @@ impl Renderer {
                         .begin(&mut encoder, TimerRegion::PlanarClouds);
                     self.sky.render_cloud(
                         &self.device,
+                        &self.queue,
                         &mut encoder,
                         &planar.depth_sample_view,
                         planar.size.0,
@@ -4756,11 +5395,13 @@ impl Renderer {
         // the shared skinned vertex buffer that the shadow cascades, the depth prepass, and
         // the forward pass all read, so it must precede them; wgpu inserts the storage->
         // vertex barrier. No-op when the bake is off or there is no skinned geometry.
+        frame_lap.mark("early:part1");
         self.gfx3d.skin_bake(&mut encoder);
 
         // GPU cull compute (Stage 3): culls + LOD-selects the retained scene into the
         // indirect args the colour pass consumes. Recorded before the render passes so
         // wgpu barriers its storage writes -> the indirect reads. No-op when disabled.
+        frame_lap.mark("skin_bake");
         self.gfx3d.cull_dispatch(&mut encoder, &self.gpu_timers);
         // One extra cull dispatch per shadow cascade (§6 multi-view): each produces that
         // cascade's depth-pass indirect args, consumed by the GPU-driven shadow draw inside
@@ -4920,6 +5561,8 @@ impl Renderer {
         self.gpu_timers
             .cpu_begin(crate::gpu_timers::Region::WorkerEncShadow);
         encoder.push_debug_group("wgr_shadow_cascades");
+        frame_lap.mark("early:cull+rest"); frame_lap.report(&self.log);
+        crate::upload_stats::frame_end();
         self.gfx3d.render_shadow_passes(
             &self.device,
             &mut encoder,
@@ -4949,6 +5592,8 @@ impl Renderer {
             // here would leave an empty group on the frames it skips.
             self.terrain
                 .render_shadow_mask(&self.queue, &mut encoder, sun_to_light);
+            // RAIN-FLOW: the rain water around the camera, before the terrain samples it
+            self.terrain.step_rain_flow(&self.device, &self.queue, &mut encoder, [cam.cam_pos[0], cam.cam_pos[2]]);
         }
 
         // Replay the instancing plan. It splits into a scene phase and a UI phase at
@@ -5107,6 +5752,12 @@ impl Renderer {
             // Project the env map into SH-9 diffuse sky irradiance (object + terrain ambient). Reads
             // the fresh env; the camera group already binds the resulting buffer (frame binding 9).
             self.gpu_timers.begin(&mut encoder, TimerRegion::SkySh);
+            // RFG-186: the ground the lower hemisphere stands for is lit by THIS frame's sun.
+            if let Some(cam) = prepared_cameras.get(main_scene_cam) {
+                let physical = cam.sun_diffuse[3] > 0.5;
+                let sun = if physical { [cam.sun_diffuse[0], cam.sun_diffuse[1], cam.sun_diffuse[2]] } else { [0.0; 3] };
+                self.sky.set_ground_bounce(&self.queue, sun, -cam.sun_dir_world[1], self.far.native_world());
+            }
             self.sky.render_sh(&mut encoder);
             self.gpu_timers.end(&mut encoder, TimerRegion::SkySh);
             let fog_cam=terrain_batches.first().map(|b|b.camera as usize)
@@ -5960,7 +6611,10 @@ impl Renderer {
             // (the world segment); the resolved MSAA depth that water samples is filled by the
             // depth-resolve run before this segment's colour pass.
             let has_water = seg_ops.iter().any(|o| matches!(o, Plan3dOp::Water(_)));
-            if has_water && !resolved {
+            // RFG-162: a native world's rivers ride this pass (its scene snapshot and resolved
+            // depth) whether or not any sea is in view -- only in the world segment.
+            let rivers_now = start == 0 && self.river.drawable() && self.hdr_enabled && self.water_scene.is_some();
+            if (has_water || rivers_now) && !resolved {
                 // Water reconstructs the seabed from the FARTHEST-sample depth resolve (not the
                 // Hi-Z near resolve): a nearest resolve reads A2C foliage/rotor edges as the seabed
                 // and rings them with foam. Record that resolve, then point water at it.
@@ -6024,6 +6678,19 @@ impl Renderer {
                     let scene_gen = self.hdr_size.0 as u64 ^ ((self.hdr_size.1 as u64) << 32);
                     self.water
                         .set_scene_view(&self.device, snapshot_view, scene_gen);
+                    if rivers_now {
+                        if let Some(depth_view) = self.gfx3d.water_depth_view() {
+                            self.river.prepare(
+                                &self.device,
+                                &self.queue,
+                                snapshot_view,
+                                scene_gen,
+                                depth_view,
+                                self.gfx3d.depth_gen(),
+                                self.sky.env_view(),
+                            );
+                        }
+                    }
                 }
                 // Lend Sky's reflection env map to water (Stage 4a). The env texture never resizes,
                 // so gen 0 binds it once; a no-op thereafter.
@@ -6043,7 +6710,37 @@ impl Renderer {
                     // (they are fragment work, not separable passes; see gpu_timers.rs).
                     self.gpu_timers.begin(&mut encoder, TimerRegion::WaterDraw);
                     encoder.push_debug_group("wgr_water");
-                    let visibility_query = self.water_visibility.claim();
+                    // A rivers-only frame (RFG-162) is not a sea frame: no sea query, no sea zbuf.
+                    let visibility_query = has_water && self.water_visibility.claim();
+                    // (OP) the water tests and writes a depth buffer of its own, initialised from the
+                    // scene depth (water_zbuf.rs): read-only, the far sea painted over the near sea
+                    let water_zview: Option<wgpu::TextureView> = match (
+                        water_zbuf::enabled() && has_water,
+                        self.gfx3d.depth_texture().cloned(),
+                        self.gfx3d.water_depth_view().cloned(),
+                    ) {
+                        (true, Some(tex), Some(src)) => {
+                            let device = &self.device;
+                            let zb = self.water_zbuf.get_or_insert_with(|| water_zbuf::WaterZBuf::new(device));
+                            Some(zb.prepare(device, &mut encoder, &tex, &src).clone())
+                        }
+                        _ => None,
+                    };
+                    let water_depth_attachment = match &water_zview {
+                        // Stored when the merge below reads it back: Discard left the merge reading an
+                        // undefined buffer, so no wave ever reached the scene depth and the cloud deck
+                        // was composited over every crest standing against the sky (the "see-through
+                        // huge waves", 2026-10-14).
+                        Some(v) => wgpu::RenderPassDepthStencilAttachment {
+                            view: v,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: if water_zbuf::merge_enabled() { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
+                            }),
+                            stencil_ops: None,
+                        },
+                        None => wgpu::RenderPassDepthStencilAttachment { view: seg_depth, depth_ops: None, stencil_ops: None },
+                    };
                     let mut wpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("wgr_water_pass"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -6055,11 +6752,7 @@ impl Renderer {
                                 store: wgpu::StoreOp::Store,
                             },
                         })],
-                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                            view: seg_depth,
-                            depth_ops: None,
-                            stencil_ops: None,
-                        }),
+                        depth_stencil_attachment: Some(water_depth_attachment),
                         timestamp_writes: None,
                         occlusion_query_set: visibility_query
                             .then_some(self.water_visibility.query_set()),
@@ -6080,7 +6773,22 @@ impl Renderer {
                     if visibility_query {
                         wpass.end_occlusion_query();
                     }
+                    // RFG-162: after the sea's occlusion query, which must count the sea alone.
+                    if rivers_now {
+                        let off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
+                        self.river.draw(&mut wpass, cam, off);
+                    }
                     drop(wpass);
+                    // (OP) the water's surface into the scene depth (water_zbuf.rs merge): the
+                    // depth-aware clouds, smoke and transparents after it see the sea, not the sky
+                    // or the seabed behind it
+                    if water_zview.is_some() && water_zbuf::merge_enabled() {
+                        if let Some(zb) = self.water_zbuf.as_mut() {
+                            zb.merge(&self.device, &mut encoder, seg_depth);
+                            self.far_depth_resolve_current = false;
+                            self.frame_depth_final_resolved = false;
+                        }
+                    }
                     if self.water.has_curling_breaker() {
                         // Folded sheets must occlude themselves. The dedicated bind group
                         // deliberately excludes scene depth, so this pass may write it safely.
@@ -6159,6 +6867,7 @@ impl Renderer {
                     self.gpu_timers.begin(&mut encoder, TimerRegion::CloudMarch);
                     self.sky.render_cloud(
                         &self.device,
+                        &self.queue,
                         &mut encoder,
                         &depth_view,
                         self.render_size().0,
@@ -6457,6 +7166,46 @@ impl Renderer {
                 self.gpu_timers.cpu_end(TimerRegion::ObjColorSegment);
             }
 
+            // MUD-001: thrown mud (opaque blobs tested against the scene depth). After the
+            // post-water objects, not with the smoke: vehicles are among the objects the classic
+            // sort submits after water, so the mud thrown off a truck's wheels was tested against a
+            // depth with no truck in it and drew over the truck (owner, 2026-10-14).
+            if start == 0 && !resolved && self.mud.active() {
+                // Re-resolved here: the post-water objects wrote depth after every earlier resolve.
+                // One extra full-screen depth resolve, only while mud is flying.
+                self.far_depth_resolve_current = false;
+                self.ensure_far_depth_resolve(&mut encoder);
+                if let (Some(depth_view), Some(frame)) = (
+                    self.gfx3d.water_depth_view().cloned(),
+                    self.godrays_frame,
+                ) {
+                    let (rw, rh) = self.render_size();
+                    let cam = [frame.cam_pos[0], frame.cam_pos[1], frame.cam_pos[2]];
+                    let m = frame.inv_view_proj;
+                    let mut ivp = [0.0f32; 16];
+                    for c in 0..4 {
+                        for r in 0..4 {
+                            ivp[c * 4 + r] = m[c][r];
+                        }
+                    }
+                    self.mud.record(
+                        &self.device,
+                        &self.queue,
+                        &mut encoder,
+                        &target,
+                        &depth_view,
+                        (rw, rh),
+                        cam,
+                        ivp,
+                        self.smoke_sun_dir,
+                        self.smoke_sun_radiance,
+                        self.smoke_ambient,
+                        &self.terrain,
+                    );
+                }
+            }
+
+
             // 2D sub-pass: the overlays, over the fogged colour, loading the 3D depth +
             // stencil so any depth-tested 2D still occludes and stencil state carries over.
             if has_2d {
@@ -6564,7 +7313,7 @@ impl Renderer {
                 self.gpu_timers
                     .begin(&mut encoder, TimerRegion::UnderwaterComposite);
                 self.water
-                    .render_underwater(&self.device, &mut encoder, &scene_view, depth, &color);
+                    .render_underwater(&self.device, &mut encoder, &scene_view, depth, &color, self.sky.sh_buffer());
                 self.gpu_timers
                     .end(&mut encoder, TimerRegion::UnderwaterComposite);
                 resolved = true;
@@ -6597,7 +7346,7 @@ impl Renderer {
             self.gpu_timers
                 .begin(&mut encoder, TimerRegion::UnderwaterComposite);
             self.water
-                .render_underwater(&self.device, &mut encoder, &scene_view, depth, &color);
+                .render_underwater(&self.device, &mut encoder, &scene_view, depth, &color, self.sky.sh_buffer());
             self.gpu_timers
                 .end(&mut encoder, TimerRegion::UnderwaterComposite);
         }
@@ -6860,6 +7609,7 @@ impl Renderer {
         gen_mips: bool,
         data: &[u8],
     ) -> u64 {
+        self.drain_texture_ingress();
         let handle = self.textures.create(
             &self.device,
             &self.queue,
@@ -6890,6 +7640,7 @@ impl Renderer {
         data: &[u8],
         slot: u32,
     ) -> u64 {
+        self.drain_texture_ingress();
         let handle = self.textures.create_in_slot(
             &self.device,
             &self.queue,
@@ -6910,6 +7661,19 @@ impl Renderer {
         handle
     }
 
+    /// FLY-001: fold the textures the producer made through the ingress into the registry.
+    fn drain_texture_ingress(&mut self) {
+        // As texture_create_in_slot: a slot that takes a new image drops its old mip feedback.
+        for slot in self.textures.drain_ingress(&self.texture_ingress) {
+            self.gfx3d.invalidate_texture_feedback(slot);
+        }
+    }
+
+    /// The ingress, for the producer (FFI `wgr_texture_ingress`); lives as long as the renderer.
+    fn texture_ingress_ptr(&self) -> *const textures::TextureIngress {
+        std::sync::Arc::as_ptr(&self.texture_ingress)
+    }
+
     fn texture_slot_acquire(&mut self) -> u32 {
         let slot = self.textures.slot_acquire();
         self.gfx3d.invalidate_texture_feedback(slot);
@@ -6917,21 +7681,42 @@ impl Renderer {
     }
 
     fn texture_slot_release(&mut self, slot: u32) {
+        self.drain_texture_ingress();
         if self.textures.slot_release(slot) {
             self.gfx3d.texture_content_changed();
         }
     }
 
     fn texture_update(&mut self, handle: u64, data: &[u8]) {
+        self.drain_texture_ingress();
         if self.textures.update_rgba(&self.queue, handle, data) {
             self.gfx3d.texture_content_changed();
         }
     }
 
     fn texture_destroy(&mut self, handle: u64) {
+        self.drain_texture_ingress();
         if self.textures.destroy(handle) {
             self.gfx3d.texture_content_changed();
         }
+    }
+
+    // RFG-127: the retained static path. Same pool republish as mesh_create; a shared mesh is
+    // never registered with the off-handle uploader, which exists to rewrite vertices in place.
+    fn mesh_create_shared(&mut self, verts: &[WgrMeshVertex], indices: &[u32]) -> u64 {
+        let id = self
+            .gfx3d
+            .mesh_create_shared(&self.device, &self.queue, verts, indices);
+        if id != 0 {
+            self.publish_pool_to_uploader();
+            if !self.gfx3d.mesh_is_shared(id) {
+                if let Some((vbase, vert_count)) = self.gfx3d.mesh_upload_meta(id) {
+                    self.uploader
+                        .register_mesh(id, uploader::MeshUpload { vbase, vert_count });
+                }
+            }
+        }
+        id
     }
 
     fn mesh_create(&mut self, verts: &[WgrMeshVertex], indices: &[u32]) -> u64 {
@@ -6982,6 +7767,28 @@ impl Renderer {
             .mesh_set_skin(&self.device, handle, bones, weights);
     }
 
+    /// LOD-STREAM: evict a static mesh's pool storage, keeping its handle.
+    fn mesh_evict(&mut self, handle: u64) -> bool {
+        let ok = self.gfx3d.mesh_evict(handle);
+        if ok {
+            // Its ranges are free for other meshes now: an off-handle update must not land there.
+            self.uploader.forget_mesh(handle);
+        }
+        ok
+    }
+
+    /// LOD-STREAM: upload an evicted mesh again under the same handle.
+    fn mesh_restore(&mut self, handle: u64, verts: &[WgrMeshVertex], indices: &[u32]) -> bool {
+        let ok = self.gfx3d.mesh_restore(&self.device, &self.queue, handle, verts, indices);
+        if ok {
+            self.publish_pool_to_uploader();
+            if let Some((vbase, vert_count)) = self.gfx3d.mesh_upload_meta(handle) {
+                self.uploader.register_mesh(handle, uploader::MeshUpload { vbase, vert_count });
+            }
+        }
+        ok
+    }
+
     fn mesh_destroy(&mut self, handle: u64) {
         // Keep the uploader's metadata table from outliving the mesh, so a stale handle
         // reaching `wgr_uploader_mesh_update` is ignored rather than writing into ranges a
@@ -7000,6 +7807,7 @@ impl Renderer {
         materials: &[WgrModelMaterial],
         name: Option<&str>,
     ) -> u32 {
+        self.drain_texture_ingress();
         self.gfx3d.register_model(
             &self.device,
             &self.queue,
@@ -7051,6 +7859,30 @@ impl Renderer {
         self.suppress_world_objects = suppress;
     }
 
+    // RFG-162 — rivers need the HDR scene snapshot (the water pass refracts through it).
+    fn river_supported(&self) -> bool {
+        self.hdr_enabled
+    }
+
+    // RFG-162 — a native world's rivers (river/mod.rs). Returns the triangle count drawn.
+    fn river_set_mesh(&mut self, vertices: &[f32], indices: &[u32], look: &[f32]) -> u32 {
+        let usable = vertices.len() / 8 * 8;
+        let Ok(rows) = bytemuck::try_cast_slice::<f32, river::RiverVertex>(&vertices[..usable]) else {
+            return 0;
+        };
+        self.river.set_look(river::RiverLook::from_floats(look));
+        let triangles = self.river.set_mesh(&self.device, rows, indices);
+        self.log.log(
+            log_level::INFO,
+            &format!(
+                "[wgr] rivers: {} vertices, {} triangles drawn as water (RFG-162; WGR_RIVERS=0 hides them)",
+                rows.len(),
+                triangles
+            ),
+        );
+        triangles
+    }
+
     // FAR INSTANCE TIER — the whole proxy set, uploaded once per world. Logged with the
     // card/prism split because the two have a measured ~4x draw-cost difference, so the
     // classifier's output is the number that predicts what this tier costs, not the total.
@@ -7088,7 +7920,7 @@ impl Renderer {
         near_cutoff_m: f32,
         far_distance_m: f32,
         pixel_limit: f32,
-        enabled: bool,
+        enabled: u32,
     ) {
         self.far.set_params(
             &self.queue,
@@ -7117,11 +7949,18 @@ impl Renderer {
         // event the renderer can see today without an ABI change. Camera history from the
         // previous world must not reproject into this one.
         self.temporal.notify_reset("world load");
+        let t0 = std::time::Instant::now();
         self.terrain
             .set_heightmap(&self.device, &self.queue, heights, params);
+        let t1 = std::time::Instant::now();
         // TW-WATER W3: Tidewater's shore field is computed from the heights (on a worker thread).
         self.water.set_terrain_heights(heights, params);
-        self.log.log(log_level::INFO, &format!("Terrain heightfield ready={}", self.terrain.has_heightmap()));
+        let t2 = std::time::Instant::now();
+        self.log.log(log_level::INFO, &format!(
+            "Terrain heightfield ready={} (terrain upload {:.0} ms, water heights {:.0} ms)",
+            self.terrain.has_heightmap(),
+            (t1 - t0).as_secs_f64() * 1000.0,
+            (t2 - t1).as_secs_f64() * 1000.0));
     }
 
     fn water_set_params(&mut self, params: WgrWaterParams) {
@@ -7211,11 +8050,20 @@ impl Renderer {
     }
 
     fn terrain_set_ground_layers(&mut self, handles: &[u64]) {
+        self.drain_texture_ingress();
         let views: Vec<wgpu::TextureView> = handles
             .iter()
             .map(|&h| self.textures.texture_view(h).clone())
             .collect();
         self.terrain.set_ground_layers(&self.device, views);
+    }
+
+    fn terrain_set_canopy(&mut self, n: u32, top: &[f32], cover: &[f32]) {
+        self.terrain.set_canopy(&self.device, &self.queue, n, top, cover);
+    }
+
+    fn terrain_set_surface_map(&mut self, edge: u32, data: &[u8]) {
+        self.terrain.set_surface_map(&self.device, &self.queue, edge, data);
     }
 
     fn terrain_set_index_map(&mut self, width: u32, height: u32, indices: &[u16]) {
@@ -7228,9 +8076,62 @@ impl Renderer {
             .set_materials(&self.device, &self.queue, materials);
     }
 
+    fn grass_set_satellite(&mut self, handle: u64) {
+        self.drain_texture_ingress();
+        let view = if handle != 0 { Some(self.textures.texture_view(handle).clone()) } else { None };
+        self.grass.set_satellite(&self.device, &self.queue, view);
+    }
+
+    fn grass_set_layer_size(&mut self, sizes: &[f32], spreads: &[f32]) {
+        self.grass.set_layer_size(&self.queue, sizes, spreads);
+    }
+
+    fn grass_set_native_tufts(&mut self, cfg: &[f32], aspect: &[f32], scale: &[f32]) {
+        self.grass.set_native_tufts(&self.queue, cfg, aspect, scale);
+    }
+
+    fn grass_set_blade_skip(&mut self, mask: u32) {
+        self.grass.set_blade_skip(&self.queue, mask);
+    }
+
+    fn grass_set_clutter_mesh_radius(&mut self, radius: f32) {
+        self.grass.set_clutter_mesh_radius(&self.queue, radius);
+    }
+
+    fn geo_pool_reserve(&mut self, vert_bytes: u64, index_bytes: u64) {
+        self.gfx3d.reserve_geometry(&self.device, &self.queue, vert_bytes, index_bytes);
+    }
+
+    fn grass_set_blade_sets(&mut self, words: &[u32], card_skip: u32, card_full: u32, sets: &[f32], aspect: &[f32],
+                            scale: &[f32]) {
+        self.grass.set_blade_sets(&self.queue, words, card_skip, card_full, sets, aspect, scale);
+    }
+
+    fn grass_set_road_cells(&mut self, data: &[u32]) {
+        self.grass.set_road_cells(&self.device, &self.queue, data);
+    }
+
+    fn grass_update_road_cells(&mut self, data: &[u32], ranges: &[u32]) {
+        self.grass.update_road_cells(&self.device, &self.queue, data, ranges);
+    }
+
+    fn grass_set_layer_pick(&mut self, weights: &[f32], far: &[f32]) {
+        self.grass.set_layer_pick(&self.queue, weights, far);
+    }
+
     fn grass_set_geography(&mut self, width: u32, height: u32, values: &[u32]) {
         self.grass
             .set_geography(&self.device, &self.queue, width, height, values);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn grass_set_earth_ground(&mut self, origin: [f32; 2], grid: f32, hm_n: u32, heights: &[f32], geo_cell: f32, geo_n: u32,
+                              geography: &[u32], sea_level: f32) {
+        self.grass.set_earth_ground(&self.device, &self.queue, origin, grid, hm_n, heights, geo_cell, geo_n, geography, sea_level);
+    }
+
+    fn grass_clear_earth_ground(&mut self) {
+        self.grass.clear_earth_ground();
     }
 
     // GRS-E — the game's decoded grass-tuft PAA for the mid LOD's crossed cards.
@@ -7262,6 +8163,10 @@ impl Renderer {
     fn grass_set_blade_atlas(&mut self, width: u32, height: u32, layers: u32, rgba: &[u8]) {
         self.grass
             .set_blade_atlas(&self.device, &self.queue, width, height, layers, rgba);
+    }
+
+    fn grass_clear_blade_atlas(&mut self) {
+        self.grass.clear_blade_atlas(&self.device, &self.queue);
     }
 
     // AO march resolution (wgr_set_gtao_scale / wgr_get_gtao_scale). Lives on Gfx3d next to the
@@ -7306,6 +8211,7 @@ impl Renderer {
     }
 
     fn terrain_set_detail_layer(&mut self, handle: u64) {
+        self.drain_texture_ingress();
         if handle == 0 {
             return;
         }

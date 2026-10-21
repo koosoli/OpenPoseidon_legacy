@@ -1,5 +1,8 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
+#include <string>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Weapons/ProxyWeapon.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
@@ -272,6 +275,9 @@ const EnumName* Foundation::GetEnumNames(UIActionType dummy)
                                              EnumName(ATGetOut, "GETOUT"),
                                              EnumName(ATCargoWeaponReady, "CARGO WEAPON READY"),
                                              EnumName(ATCargoWeaponStow, "CARGO WEAPON STOW"),
+                                             EnumName(ATOpenDoor, "OPEN DOOR"),
+                                             EnumName(ATCloseDoor, "CLOSE DOOR"),
+                                             EnumName(ATClimbAboard, "CLIMB ABOARD"),
                                              EnumName(ATLightOn, "LIGHT ON"),
                                              EnumName(ATLightOff, "LIGHT OFF"),
                                              EnumName(ATEngineOn, "ENGINE ON"),
@@ -2224,6 +2230,36 @@ void TransportType::InitShape()
         }
     }
 
+    // --arma1/--arma2 diagnostic: where an Arma model seats its crew in LOD 0, so a crew
+    // member drawn outside the vehicle (Arma 1 HMMWV passengers sitting on the ground) can be
+    // traced to its proxy. Logged once per vehicle type.
+    if (Arma1Compat::Active() && _shape->NLevels() > 0 && _strnicmp((const char*)GetName(), "A1x_", 4) == 0)
+    {
+        const auto at = [](const ManProxy& m) {
+            char buf[160];
+            const ::Vector3 pos = m.transform.Position();
+            if (!m.Present())
+                return std::string("-");
+            const ::Vector3 dir = m.transform.Direction(), up = m.transform.DirectionUp();
+            snprintf(buf, sizeof(buf), "(%.2f %.2f %.2f dir %.2f %.2f %.2f up %.2f %.2f %.2f)", pos.X(), pos.Y(),
+                     pos.Z(), dir.X(), dir.Y(), dir.Z(), up.X(), up.Y(), up.Z());
+            return std::string(buf);
+        };
+        const ::Vector3 mn = _shape->Min(), mx = _shape->Max();
+        LOG_INFO(Graphics, "Crew seats {} ({}): box ({:.2f} {:.2f} {:.2f})..({:.2f} {:.2f} {:.2f}), {} levels",
+                 (const char*)GetName(), _shape->Name(), mn.X(), mn.Y(), mn.Z(), mx.X(), mx.Y(), mx.Z(), _shape->NLevels());
+        for (int level = 0; level < _shape->NLevels(); level++)
+        {
+            const LevelProxies& p = _proxies[level];
+            std::string cargo;
+            for (int i = 0; i < p._cargoProxy.Size(); i++)
+                cargo += " " + at(p._cargoProxy[i]);
+            LOG_INFO(Graphics, "Crew seats {} level {} (resolution {:g}): driver {} gunner {} commander {} cargo[{}]{}",
+                     (const char*)GetName(), level, _shape->Resolution(level), at(p._driverProxy), at(p._gunnerProxy),
+                     at(p._commanderProxy), p._cargoProxy.Size(), cargo);
+        }
+    }
+
     Shape* memory = _shape->MemoryLevel();
     if (memory)
     {
@@ -2272,66 +2308,67 @@ void TransportType::InitShape()
     _cargoGetInPos.Resize(0);
     if (memory)
     {
-        int index = memory->FindNamedSel("pos driver");
-        if (index >= 0)
-        {
+        // The memory selection a seat is boarded from. OFP names it "pos driver"; Arma names
+        // it in the config (memoryPointsGetInDriver ...), and some models differ -- the Arma 1
+        // AH-1Z boards from "pos_driver", so without the config name it had no get-in point
+        // at all and nobody could board it.
+        const auto fill = [&](AutoArray<Vector3>& out, const char* key, const char* fallback) {
+            RStringB name = fallback;
+            if (const ParamEntry* e = par.FindEntry(key); e && !e->IsClass() && !e->IsArray())
+            {
+                const RStringB value = *e;
+                if (value.GetLength() > 0)
+                    name = value;
+            }
+            int index = memory->FindNamedSel(name);
+            if (index < 0 && strcmp(name, fallback) != 0)
+                index = memory->FindNamedSel(fallback);
+            if (index < 0)
+                return;
             const Selection& sel = memory->NamedSel(index);
             for (int i = 0; i < sel.Size(); i++)
             {
                 if (sel[i] >= 0)
                 {
-                    _driverGetInPos.Add(memory->Pos(sel[i]));
+                    out.Add(memory->Pos(sel[i]));
                 }
             }
-        }
-        index = memory->FindNamedSel("pos commander");
-        if (index >= 0)
-        {
-            const Selection& sel = memory->NamedSel(index);
-            for (int i = 0; i < sel.Size(); i++)
+        };
+        fill(_driverGetInPos, "memoryPointsGetInDriver", "pos driver");
+        fill(_commanderGetInPos, "memoryPointsGetInCommander", "pos commander");
+        fill(_gunnerGetInPos, "memoryPointsGetInGunner", "pos gunner");
+        fill(_cargoGetInPos, "memoryPointsGetInCargo", "pos cargo");
+        fill(_coDriverGetInPos, "memoryPointsGetInCoDriver", "pos codriver");
+    }
+    if (Arma1Compat::Active() && _strnicmp((const char*)GetName(), "A1x_", 4) == 0)
+    {
+        const auto first = [](const AutoArray<Vector3>& a) {
+            char buf[64];
+            if (a.Size() == 0)
+                return std::string("-");
+            snprintf(buf, sizeof(buf), "%d (%.2f %.2f %.2f)", a.Size(), a[0].X(), a[0].Y(), a[0].Z());
+            return std::string(buf);
+        };
+        // and the named selections of LOD 0 and the memory LOD (OP_A1_SELECTIONS=1), to map an
+        // Arma model's animated parts (gear, doors, rotors) onto what the CWA class animates
+        static const bool selections = [] {
+            const char* e = std::getenv("OP_A1_SELECTIONS");
+            return e && *e == '1';
+        }();
+        if (selections)
+            for (Shape* lod : {_shape->LevelOpaque(0), _shape->MemoryLevel()})
             {
-                if (sel[i] >= 0)
-                {
-                    _commanderGetInPos.Add(memory->Pos(sel[i]));
-                }
+                if (!lod)
+                    continue;
+                std::string names;
+                for (int i = 0; i < lod->NNamedSel(); i++)
+                    names += std::string(i ? "|" : "") + lod->NamedSel(i).Name();
+                LOG_INFO(Graphics, "Selections {} {}: {}", (const char*)GetName(),
+                         lod == _shape->MemoryLevel() ? "memory" : "lod0", names);
             }
-        }
-        index = memory->FindNamedSel("pos gunner");
-        if (index >= 0)
-        {
-            const Selection& sel = memory->NamedSel(index);
-            for (int i = 0; i < sel.Size(); i++)
-            {
-                if (sel[i] >= 0)
-                {
-                    _gunnerGetInPos.Add(memory->Pos(sel[i]));
-                }
-            }
-        }
-        index = memory->FindNamedSel("pos cargo");
-        if (index >= 0)
-        {
-            const Selection& sel = memory->NamedSel(index);
-            for (int i = 0; i < sel.Size(); i++)
-            {
-                if (sel[i] >= 0)
-                {
-                    _cargoGetInPos.Add(memory->Pos(sel[i]));
-                }
-            }
-        }
-        index = memory->FindNamedSel("pos codriver");
-        if (index >= 0)
-        {
-            const Selection& sel = memory->NamedSel(index);
-            for (int i = 0; i < sel.Size(); i++)
-            {
-                if (sel[i] >= 0)
-                {
-                    _coDriverGetInPos.Add(memory->Pos(sel[i]));
-                }
-            }
-        }
+        LOG_INFO(Graphics, "Get-in points {}: driver {} gunner {} commander {} cargo {} radius {:.1f}",
+                 (const char*)GetName(), first(_driverGetInPos), first(_gunnerGetInPos), first(_commanderGetInPos),
+                 first(_cargoGetInPos), _getInRadius);
     }
     if (_driverGetInPos.Size() == 0)
     {

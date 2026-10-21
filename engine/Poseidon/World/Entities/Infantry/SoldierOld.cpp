@@ -10,6 +10,7 @@
 #include <array>
 #include <chrono>
 #include <limits.h>
+#include <mutex>
 #include <utility>
 #include <cstdio>
 #include <cstring>
@@ -130,6 +131,7 @@ const MotionEdge& MotionType::Edge(MoveId a, MoveId b) const
 
 void MotionType::AddEdge(MoveId a, MoveId b, MotionEdgeType type, float cost)
 {
+    ClearPathCache();
     int iCost = toInt(cost * 50);
     if (iCost > SHRT_MAX || iCost < SHRT_MIN)
     {
@@ -153,6 +155,7 @@ void MotionType::AddEdge(MoveId a, MoveId b, MotionEdgeType type, float cost)
 
 void MotionType::DeleteEdge(MoveId a, MoveId b)
 {
+    ClearPathCache();
     MotionEdges& edges = _vertex[a];
     for (int i = 0; i < edges.Size(); i++)
     {
@@ -167,34 +170,43 @@ void MotionType::DeleteEdge(MoveId a, MoveId b)
 
 #define LOG_PATH 0
 
-bool MotionType::FindPath(MotionPath& path, MoveId from, MotionPathItem to) const
+namespace
 {
-    path.Resize(0);
-    int nVerts = _vertex.Size();
-    if (from < 0 || from >= nVerts || to.id < 0 || to.id >= nVerts)
-    {
-        return false;
-    }
+// Guards MotionType::_pathPredecessors. Simulation calls FindPath from one thread today; the
+// lock keeps the lazily filled cache safe if that ever changes, at ~20 ns uncontended.
+std::mutex GMotionPathCacheMutex;
+} // namespace
 
-    const MotionEdge& edge = Edge(from, to.id);
-    if ((MotionEdgeType)edge.type != MEdgeNone)
+void MotionType::ClearPathCache()
+{
+    std::lock_guard<std::mutex> lock(GMotionPathCacheMutex);
+    _pathPredecessors.clear();
+}
+
+// Dijkstra from `from` over the whole motion graph: an O(V^2) scan that FindPath used to run on
+// every indirect move change -- MotionType::FindPath was 4.7% of perf_combat's main-thread SELF
+// time. The algorithm below is the original, unchanged (including its tie-breaking), so the
+// cached predecessors are exactly what each call computed before.
+const std::vector<int>& MotionType::PredecessorsFrom(MoveId from) const
+{
+    std::lock_guard<std::mutex> lock(GMotionPathCacheMutex);
+    const int nVerts = _vertex.Size();
+    if (_pathPredecessors.size() != static_cast<size_t>(nVerts))
     {
-        path.Add(to);
-#if LOG_PATH
-        LOG_DEBUG(Physics, "Direct path from {} to {}", NAME(from), NAME(to.id));
-        LOG_DEBUG(Physics, "  insert {}, cost {}", NAME(to.id), edge.cost);
-#endif
-        return true;
+        _pathPredecessors.clear();
+        _pathPredecessors.resize(nVerts);
     }
+    std::vector<int>& p = _pathPredecessors[from];
+    if (!p.empty())
+        return p;
 
     AUTO_STATIC_ARRAY(int, vs, 1024);
     AUTO_STATIC_ARRAY(int, d, 1024);
-    AUTO_STATIC_ARRAY(int, p, 1024);
     d.Resize(nVerts);
-    p.Resize(nVerts);
+    p.assign(nVerts, -1);
     for (int i = 0; i < nVerts; i++)
     {
-        d[i] = INT_MAX, p[i] = -1;
+        d[i] = INT_MAX;
     }
     for (int i = 0; i < nVerts; i++)
     {
@@ -239,6 +251,30 @@ bool MotionType::FindPath(MotionPath& path, MoveId from, MotionPathItem to) cons
             }
         }
     }
+    return p;
+}
+
+bool MotionType::FindPath(MotionPath& path, MoveId from, MotionPathItem to) const
+{
+    path.Resize(0);
+    int nVerts = _vertex.Size();
+    if (from < 0 || from >= nVerts || to.id < 0 || to.id >= nVerts)
+    {
+        return false;
+    }
+
+    const MotionEdge& edge = Edge(from, to.id);
+    if ((MotionEdgeType)edge.type != MEdgeNone)
+    {
+        path.Add(to);
+#if LOG_PATH
+        LOG_DEBUG(Physics, "Direct path from {} to {}", NAME(from), NAME(to.id));
+        LOG_DEBUG(Physics, "  insert {}, cost {}", NAME(to.id), edge.cost);
+#endif
+        return true;
+    }
+
+    const std::vector<int>& p = PredecessorsFrom(from);
 
     if (p[to.id] < 0)
     {
@@ -404,6 +440,7 @@ void MotionType::Load(const ParamEntry& entry)
     _moveIds.Close();
 
     int moveIdN = MoveIdN();
+    ClearPathCache();
     _vertex.Realloc(moveIdN);
     _vertex.Resize(moveIdN);
 
@@ -641,6 +678,7 @@ void MotionType::Load(const ParamEntry& entry)
 
 void MotionType::Unload()
 {
+    ClearPathCache();
     _moveIds.Clear();
     _vertex.Clear();
     _entry = nullptr;
@@ -721,6 +759,8 @@ Man::Man(VehicleType* name, bool fullCreate)
     // Ordinary firearm sprites are visible effects, not dense shadow-casting
     // smoke. Keep the separate muzzle light and intentional smoke sources.
     _mGunClouds.SetSmokeShadow(false);
+    if (WeaponCloudsSource::RifleSmokeEnabled())
+        _mGunClouds.SetRifleSmoke();
     _gunClouds.Load((*Type()->_par) >> "GunClouds");
     _mGunFireFrames = 0;
     _mGunFireTime = UITIME_MIN;
@@ -777,8 +817,14 @@ bool StockCorpseCapability(LODShape* shape, Skeleton* skeleton, RString& refusal
 bool AutomaticRagdollEnabled()
 {
     if (g_automaticInfantryDeathsOverride >= 0) return g_automaticInfantryDeathsOverride != 0;
-    const char* enabled = std::getenv("POSEIDON_AUTOMATIC_RAGDOLL");
-    return !enabled || std::strcmp(enabled,"0") != 0;
+    // Read once: this runs several times per soldier per tick, and the CRT's getenv locks and
+    // scans the whole environment block -- 5% of the main thread in perf_combat (PERF 2026-10-14).
+    static const bool enabledByEnv = []
+    {
+        const char* enabled = std::getenv("POSEIDON_AUTOMATIC_RAGDOLL");
+        return !enabled || std::strcmp(enabled, "0") != 0;
+    }();
+    return enabledByEnv;
 }
 
 bool AutomaticRagdollTerrain(RString& refusal)
@@ -798,6 +844,21 @@ bool AutomaticRagdollTerrain(RString& refusal)
     if (width*width > 4u*1024u*1024u) { refusal = "bounded-terrain-allocation-refused"; return false; }
     const float spacing = grid;
     std::vector<float> heights(width*width);
+    // (PERF, 2026-10-14) At a grid vertex SurfaceY is that vertex's own height, so the vertex
+    // table is read directly: 4M SurfaceY calls were ~0.3 s of every mission start. A sampled
+    // subgrid is still checked against SurfaceY, and any disagreement (a later surface layer
+    // folded into SurfaceY) falls back to the full per-vertex query below.
+    bool direct = true;
+    for (size_t z = 0; z < width && direct; ++z) for (size_t x = 0; x < width; ++x)
+    {
+        const float y = GLandscape->ClippedData(int(z),int(x));
+        if (!std::isfinite(y)) { refusal = "nonfinite-map-terrain"; return false; }
+        heights[z*width+x] = y;
+    }
+    for (size_t z = 0; z+1 < width && direct; z += 31) for (size_t x = 0; x+1 < width; x += 29)
+        if (std::abs(GLandscape->SurfaceY(float(x)*spacing,float(z)*spacing) - heights[z*width+x]) > 1e-3f)
+        { direct = false; break; }
+    if (!direct)
     for (size_t z = 0; z < width; ++z) for (size_t x = 0; x < width; ++x)
     {
         // SurfaceY requires an entire cell and returns outside-map sea at the
@@ -808,10 +869,11 @@ bool AutomaticRagdollTerrain(RString& refusal)
         if (!std::isfinite(y)) { refusal = "nonfinite-map-terrain"; return false; }
         heights[z*width+x] = y;
     }
+    const double fillMs = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
     if (!world.SetTerrain(heights.data(),int(width),int(width),spacing,0,0))
     { refusal = "physics-terrain-registration-refused"; return false; }
-    LOG_INFO(World,"AUTORAGDOLL: registered shared actual terrain width={} spacing={} mapGrid={} landGrid={} bytes={} milliseconds={}",
-        width,spacing,grid,GLandscape->GetLandGrid(),heights.size()*sizeof(float),
+    LOG_INFO(World,"AUTORAGDOLL: registered shared actual terrain width={} spacing={} mapGrid={} landGrid={} bytes={} direct={} fillMs={:.1f} milliseconds={}",
+        width,spacing,grid,GLandscape->GetLandGrid(),heights.size()*sizeof(float),direct,fillMs,
         std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count());
     return true;
 }
@@ -1009,6 +1071,12 @@ void Man::PrepareBasePose(Matrix4Array& matrices) const
             if (held) _corpsePoseSecondary.PrepareMatrices(matrices, 1 - _primaryFactor);
             else anim->PrepareMatrices(matrices, _secondaryTime, 1 - _primaryFactor);
         }
+    }
+    // an action played on the upper body over the legs' move (a reload on the walk: SoldierOldUpperBody.cpp)
+    if (!held)
+    {
+        ApplyUpperBodyLayer(matrices);
+        ApplyLandingLayer(matrices); // a soft touchdown's give at the knees (SoldierOldUpperBody.cpp)
     }
     // The RTMs pose the source model's space; an Arma 1 model is stored around its
     // bounding centre (LODShape::AnimationOrigin). Pose about the source origin and
@@ -2103,9 +2171,13 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
     }
     std::vector<Matrix4> deltas;
     for (int part : state.boneParts) deltas.push_back(parts[part]);
-    CorrectedCorpsePose candidate = pose;
-    candidate.root = root;
-    if (!candidate.Apply(deltas)) return FallBackAutomaticRagdoll("invalid-affine-pose");
+    // Applied IN PLACE (PERF 2026-10-14). This used to compose a full copy of the pose -- every
+    // level's palettes, points and per-point bone/weight vectors, thousands of allocations per
+    // corpse per tick, ~4% of perf_combat's main thread -- so a failure would leave `pose`
+    // untouched. Every failure below ends in FallBackAutomaticRagdoll, which discards the pose
+    // (ClearCorpsePose) and reads only lastSpeed/lastAngularVelocity, already written above.
+    pose.root = root;
+    if (!pose.Apply(deltas)) return FallBackAutomaticRagdoll("invalid-affine-pose");
     bool first = true; float radius = 0;
     Vector3 lo = VZero, hi = VZero;
     const auto& weights = Type()->GetWeights();
@@ -2114,7 +2186,7 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
         Shape* shape = _shape->Level(level);
         MATRIX_4_ARRAY(palette,128);
         palette.Resize(33);
-        for (int bone = 0; bone < 33; ++bone) palette[bone] = candidate.levels[level].palette[bone];
+        for (int bone = 0; bone < 33; ++bone) palette[bone] = pose.levels[level].palette[bone];
         for (int p = 0; p < shape->NPos(); ++p)
         {
             const Vector3 point = AnimationRT::ApplyMatricesPoint(weights[level],_shape,level,palette,p);
@@ -2123,15 +2195,15 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
             for (int axis = 0; axis < 3; ++axis)
             { lo[axis] = std::min(lo[axis],point[axis]); hi[axis] = std::max(hi[axis],point[axis]); }
             radius = std::max(radius,point.Size());
-            const Vector3 cpu = candidate.levels[level].points[p];
+            const Vector3 cpu = pose.levels[level].points[p];
             for (int axis = 0; axis < 3; ++axis)
             { lo[axis] = std::min(lo[axis],cpu[axis]); hi[axis] = std::max(hi[axis],cpu[axis]); }
             radius = std::max(radius,cpu.Size());
         }
     }
     if (first) return FallBackAutomaticRagdoll("missing-render-bounds");
-    candidate.minimum = lo; candidate.maximum = hi; candidate.radius = radius;
-    pose = std::move(candidate); state.minimum = lo; state.maximum = hi; state.radius = radius;
+    pose.minimum = lo; pose.maximum = hi; pose.radius = radius;
+    state.minimum = lo; state.maximum = hi; state.radius = radius;
     if(state.wakeRecipe) for(int part=0;part<11;++part)
     {
         auto& retained=state.retainedTransforms[part]; retained=MIdentity;
@@ -2745,6 +2817,9 @@ void Man::AnimateMatrix(Matrix4& mat, const AnimationRTWeight& wgt) const
         ClearCorpsePose();
         held = false;
     }
+    // the upper-body action layer: the proxies (the rifle in his hands) follow the layered pose
+    if (!held && UpperBodyMatrix(mat, wgt))
+        return;
     const ManType* type = Type();
     // Arma 1 shapes: pose about the source origin (see PrepareBasePose).
     const Vector3 origin = held ? VZero : _shape->AnimationOrigin();
@@ -2896,6 +2971,13 @@ Vector3 Man::AnimatePoint(int level, int index) const
             res += point(_corpsePoseSecondary, anim, _secondaryTime) * (1 - _primaryFactor);
         }
     }
+    // the upper-body action layer moves the eye, the muzzle and the hands' points with the drawn body
+    if (!held)
+    {
+        Vector3 layered;
+        if (UpperBodyPoint(level, index, layered))
+            res = layered;
+    }
 
     if (type->_aimingAxisPoint >= 0 && !_gunTransIdent)
     {
@@ -2946,6 +3028,9 @@ Matrix4 Man::InsideCamera(CameraType camType) const
     Matrix4 transform;
 
     Vector3 relUp = WorldToModel().DirectionUp();
+    // Corner peeking rolls the view with the head, a little less than the body rolls.
+    if (fabs(_lean) > 1e-4f)
+        relUp = Matrix3(MRotationZ, -_lean * 0.18f) * relUp;
 
     transform.SetDirectionAndUp(VForward, relUp);
     if (const auto* seat = GetActiveCargoWeaponSeat())

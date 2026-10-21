@@ -4,6 +4,7 @@ use wgpu::util::DeviceExt;
 use crate::ffi::{WgrTerrainMaterial, WgrTerrainNode, WgrTerrainParams};
 use crate::gfx3d::{NORMAL_FORMAT, depth_format};
 
+mod rain_flow;
 mod shore_wet;
 mod skyvis;
 #[cfg(test)]
@@ -22,6 +23,12 @@ fn wet_soil_debug_padding_refuses_non_enum_values_and_resets_normal() {
     assert_eq!(std::mem::offset_of!(TerrainShadowMap,_pad2),44);
     for mode in [0.0,1.0,2.0,3.0,4.0] { assert_eq!(wet_soil_debug_mode(mode),mode); }
     for mode in [-1.0,0.5,5.0,f32::NAN,f32::INFINITY] { assert_eq!(wet_soil_debug_mode(mode),0.0); }
+}
+
+/// PERF-CANOPY-BAND lever (WGR_CANOPY_BAND=0 = every canopy update re-uploads the whole map).
+fn canopy_band_enabled() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_CANOPY_BAND").map(|v| v.trim() != "0").unwrap_or(true))
 }
 
 fn terrain_resource_reuse() -> bool {
@@ -203,10 +210,76 @@ fn ground_weather_params(wetness: f32, rain: f32, sea_level: f32, time: f32) -> 
     [bounded(wetness), bounded(rain), sea_level, time]
 }
 
+// Signed mud: negative = ruts/footprints (down to -limit), positive = soil heaped
+// beside ruts (up to MUD_MAX_RIM, MudField::MaxRim). A disabled view (limit 0) is flat.
+const MUD_MAX_RIM: f32 = 0.10;
 fn valid_mud_view(data: &[f32]) -> bool {
     data.len() == 4 + 512 * 512 && data.iter().all(|v| v.is_finite())
         && data[2] == 0.125 && data[3] >= 0.0 && data[3] <= 0.35
-        && data[4..].iter().all(|v| *v <= 0.0 && *v >= -data[3])
+        && data[4..].iter().all(|v| *v >= -data[3] && *v <= if data[3] > 0.0 { MUD_MAX_RIM } else { 0.0 })
+}
+
+// Far mud view: 0.5 m cells, ruts only (never positive). Shading, not geometry.
+fn valid_mud_far_view(data: &[f32]) -> bool {
+    data.len() == 4 + 512 * 512 && data.iter().all(|v| v.is_finite())
+        && data[2] == 0.5 && data[3] >= 0.0 && data[3] <= 0.35
+        && data[4..].iter().all(|v| *v >= -data[3] && *v <= 0.0)
+}
+
+// BOOM-001: crater views, after the four views and the rut-water vec4 (floats). Each upload is a
+// height view and a material view back to back; terrain.wgsl crater_* reads them at these offsets.
+pub const CRATER_BASE: usize = 4 * (4 + 512 * 512) + 4;
+/// BOOM-004: snow bullet tracks after the crater views: [count, originX, originZ, 0] then 64
+/// tracks of three vec4: (top x - originX, top y, top z - originZ, radius), (unit direction, length),
+/// (snowfall since, 0, 0, 0). terrain.wgsl ray-traces each as a cylinder through the snow.
+pub const SNOW_MARKS_BASE: usize = CRATER_BASE + 4 * (4 + 512 * 512);
+pub const SNOW_MARKS_MAX: usize = 64;
+pub const SNOW_MARK_STRIDE: usize = 12;
+pub const SNOW_MARKS_FLOATS: usize = 4 + SNOW_MARKS_MAX * SNOW_MARK_STRIDE;
+
+pub fn valid_snow_marks(data: &[f32]) -> bool {
+    if data.len() < 4 || data.len() > SNOW_MARKS_FLOATS || data.iter().any(|v| !v.is_finite()) { return false; }
+    let count = data[0];
+    count >= 0.0 && count.fract() == 0.0 && data.len() == 4 + count as usize * SNOW_MARK_STRIDE
+}
+const CRATER_MAX_DEPTH: f32 = 6.0; // CraterField::MaxDepth
+const CRATER_MAX_RISE: f32 = 1.5;  // CraterField::MaxRise
+fn valid_crater_views(data: &[f32], far: bool) -> bool {
+    const S: usize = 4 + 512 * 512;
+    let cell = if far { 1.0 } else { 0.25 };
+    if data.len() != 2 * S || !data.iter().all(|v| v.is_finite()) { return false; }
+    let (h, m) = data.split_at(S);
+    h[2] == cell && m[2] == cell && h[0] == m[0] && h[1] == m[1]
+        && (h[3] == 0.0 || h[3] == CRATER_MAX_DEPTH) && m[3] == h[3]
+        && h[4..].iter().all(|v| *v >= -CRATER_MAX_DEPTH && *v <= CRATER_MAX_RISE)
+        && m[4..].iter().all(|v| *v >= 0.0 && *v <= 65535.0 && v.fract() == 0.0)
+}
+
+#[test]
+fn crater_upload_accepts_bowls_and_lips_and_rejects_the_rest() {
+    let mut data = vec![0.0; 2 * (4 + 512 * 512)];
+    let s = 4 + 512 * 512;
+    data[2] = 0.25; data[s + 2] = 0.25; data[3] = 6.0; data[s + 3] = 6.0;
+    data[4] = -0.42; data[5] = 0.16; data[s + 4] = 255.0 + 256.0 * 90.0;
+    assert!(valid_crater_views(&data, false));
+    assert!(!valid_crater_views(&data, true));               // wrong cell for the far view
+    data[5] = 1.6; assert!(!valid_crater_views(&data, false)); // above MaxRise
+    data[5] = 0.0; data[s + 4] = 0.5; assert!(!valid_crater_views(&data, false)); // material not packed
+    data[s + 4] = 0.0; data[s + 3] = 0.0; assert!(!valid_crater_views(&data, false)); // headers disagree
+    assert!(!valid_crater_views(&data[..data.len() - 1], false));
+}
+
+#[test]
+fn snow_marks_upload_checks_count_and_size() {
+    assert!(valid_snow_marks(&[0.0, 9728.0, 3968.0, 0.0]));
+    let mut one = vec![1.0, 9728.0, 3968.0, 0.0, 12.5, 41.2, 30.25, 0.012, 0.95, -0.31, 0.0, 0.8, 0.0, 0.0, 0.0, 0.0];
+    assert!(valid_snow_marks(&one));
+    one[0] = 2.0; assert!(!valid_snow_marks(&one));             // count says more than was sent
+    one[0] = 1.0; one[5] = f32::NAN; assert!(!valid_snow_marks(&one));
+    assert!(!valid_snow_marks(&vec![65.0; 4 + 65 * SNOW_MARK_STRIDE])); // over the 64-track section
+    // The section ends the buffer; the shader indexes it at SNOW_MARKS_BASE - 4 (header vec4).
+    assert_eq!(SNOW_MARKS_BASE - 4, 2097184);
+    assert_eq!(SNOW_MARKS_BASE - 4 + SNOW_MARKS_FLOATS, 2097956);
 }
 
 fn valid_sand_view(data: &[f32]) -> bool {
@@ -251,13 +324,31 @@ fn mud_upload_rejects_nonfinite_positive_and_excess_depth_without_touching_snow(
     let mut data = vec![0.0; 4 + 512 * 512];
     data[2] = 0.125; data[3] = 0.06; data[4] = -0.03;
     assert!(valid_mud_view(&data));
-    data[4] = 0.01; assert!(!valid_mud_view(&data));
+    // Ridges beside ruts are positive, bounded by MudField::MaxRim.
+    data[5] = 0.10; assert!(valid_mud_view(&data));
+    data[5] = 0.101; assert!(!valid_mud_view(&data));
+    data[5] = 0.0;
+    data[3] = 0.0; data[4] = 0.0; data[6] = 0.01; assert!(!valid_mud_view(&data)); // disabled view stays flat
+    data[6] = 0.0; data[3] = 0.06; data[4] = -0.03;
+    data[4] = 0.11; assert!(!valid_mud_view(&data));
     data[4] = -0.061; assert!(!valid_mud_view(&data));
     data[4] = f32::NAN; assert!(!valid_mud_view(&data));
     data[4] = 0.0; data[2] = 0.25; assert!(!valid_mud_view(&data));
     data[2] = 0.125; data[3] = 0.35; data[4] = -0.24; assert!(valid_mud_view(&data));
-    data[3] = 0.351; assert!(!valid_mud_view(&data));
+    data[3] = 0.401; assert!(!valid_mud_view(&data));
     assert!(!valid_mud_view(&data[..data.len()-1]));
+}
+
+#[test]
+fn mud_far_upload_accepts_only_coarse_ruts() {
+    let mut data = vec![0.0; 4 + 512 * 512];
+    data[2] = 0.5; data[3] = 0.35; data[4] = -0.2;
+    assert!(valid_mud_far_view(&data));
+    data[5] = 0.01; assert!(!valid_mud_far_view(&data));      // no ridges in the far view
+    data[5] = 0.0; data[2] = 0.125; assert!(!valid_mud_far_view(&data));
+    data[2] = 0.5; data[4] = -0.36; assert!(!valid_mud_far_view(&data));
+    data[4] = f32::NAN; assert!(!valid_mud_far_view(&data));
+    assert!(!valid_mud_far_view(&data[..data.len() - 1]));
 }
 
 #[test]
@@ -334,6 +425,11 @@ pub struct Terrain {
     // Source heightfield kept so the ImGui-tuned scan options (radius/K/downsample) can re-run the
     // scan without a fresh heightmap upload. None until the first heightmap arrives.
     skyvis_src: Option<SkyvisSrc>,
+    // The last finished sky-view grid (w, h, values), kept so a canopy update can recompose the
+    // shared texture without re-running the scan.
+    skyvis_last: Option<(u32, u32, Vec<f32>)>,
+    // Canopy occlusion grid (see set_canopy): n x n over the same world span as the sky-view map.
+    canopy: Option<(u32, Vec<f32>, Vec<f32>)>,
 
     shadow_sweep_ubo: wgpu::Buffer,
     shadow_sweep_layout: wgpu::BindGroupLayout,
@@ -362,6 +458,8 @@ pub struct Terrain {
     pad_view: wgpu::TextureView,
     partially_bound: bool,
     index_map: wgpu::Texture,
+    // RFG-PBR: a native world's fine surface map (palette index per texel); 1x1 elsewhere
+    surface_map: wgpu::Texture,
     detail_view: wgpu::TextureView,
     jitter_map: wgpu::Texture,
     materials: wgpu::Buffer,
@@ -389,6 +487,8 @@ pub struct Terrain {
     max_dim: u32,
     // TW-WATER W3b: Tidewater's wet sand (group 3; a placeholder with Current OP).
     shore_wet: shore_wet::ShoreWet,
+    /// RAIN-FLOW: rain running off and gathering into puddles around the camera (rain_flow.rs)
+    rain_flow: rain_flow::RainFlow,
 }
 
 impl Terrain {
@@ -587,6 +687,17 @@ impl Terrain {
                     },
                     count: None,
                 },
+                // RFG-PBR: a native world's fine surface map (set_surface_map); 1x1 elsewhere
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -644,7 +755,7 @@ impl Terrain {
         let shadow_mask = create_shadow_mask(device, 1, 1);
         let shadow_mask_view = shadow_mask.create_view(&wgpu::TextureViewDescriptor::default());
         // 1x1 stand-in sky-visibility mask (fully visible = 255) until a heightmap loads.
-        let (skyvis_mask, skyvis_view) = create_skyvis(device, queue, 1, 1, &[255u8]);
+        let (skyvis_mask, skyvis_view) = create_skyvis(device, queue, 1, 1, &skyvis_texels_empty());
         // Default-ON with the user-tuned values (2026-07-12). Terrain params reach the renderer only
         // via the SetShadowMapTuning FFI push, so — like the sun-shadow sweep — the RENDERER default is
         // what makes it on out of the box; the C++ ShadowMapTuning defaults mirror these for ImGui.
@@ -663,9 +774,12 @@ impl Terrain {
         });
         let snow_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_experimental_snow"),
-            // Snow occupies the first view, signed mud the second, sand the third. Reusing
-            // the storage binding keeps colour, depth and conformed meshes aligned.
-            size: 3 * (4 + 512 * 512) * 4,
+            // Snow occupies the first view, signed mud the second, sand the third, the far
+            // (0.5 m) mud view the fourth. Reusing the storage binding keeps colour, depth
+            // and conformed meshes aligned.
+            // Four views, then one vec4 for the mud rut water level (set_mud_water), then the
+            // BOOM-001 crater views (near heights, near materials, far heights, far materials).
+            size: ((SNOW_MARKS_BASE + SNOW_MARKS_FLOATS) * 4) as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -838,6 +952,7 @@ impl Terrain {
             anisotropy_clamp: 16,
             ..Default::default()
         });
+        let surface_map = create_surface_map(device, 1);
         let group2_bind = make_group2(
             device,
             &group2_layout,
@@ -850,6 +965,7 @@ impl Terrain {
             &materials,
             &ground_sampler,
             &ground_clamp_sampler,
+            &surface_map,
         );
 
         let (grid_vbuf, grid_ibuf, grid_index_count) = build_grid(device);
@@ -899,6 +1015,14 @@ impl Terrain {
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(0.02);
+        // Gloss of wet soil and rain puddles (terrain.wgsl `terrain_wet_shine`):
+        // 1 = original, 0 = matte. Default 0.6 tones down the rain look.
+        let terrain_wet_shine = std::env::var("WGR_TERRAIN_WET_SHINE")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite())
+            .map(|v| v.clamp(0.0, 1.0))
+            .unwrap_or(0.6);
         // Authored-detail distance bands (see terrain.wgsl). Two bands, not one: the
         // COLOUR reaches far because the satellite it modulates is ~1 texel per metre and
         // is therefore being magnified over the whole mid field, while the per-surface
@@ -948,11 +1072,16 @@ impl Terrain {
             ("blend_width", blend_width),
             ("a3_surface_blend", a3_surface_blend),
             ("terrain_parallax", terrain_parallax),
+            ("terrain_wet_shine", terrain_wet_shine),
             ("detail_fade_start", detail_fade_start),
             ("detail_fade_end", detail_fade_end),
             ("detail_normal_start", detail_normal_start),
             ("detail_normal_end", detail_normal_end),
             ("tile_normal_strength", tile_normal_strength),
+            (
+                "cost_stage",
+                std::env::var("WGR_TERRAIN_COST_STAGE").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0),
+            ),
             ("surface_normalise", surface_normalise),
             ("linear", linear),
             // WGR_TERRAIN_MIP_FROM_TILE=1 restores mip selection from the JITTERED tiling UV,
@@ -967,7 +1096,8 @@ impl Terrain {
                     .clamp(0.0, 1.0),
             ),
         ];
-        let shore_wet = shore_wet::ShoreWet::new(device, queue);
+        let rain_flow = rain_flow::RainFlow::new(device);
+        let shore_wet = shore_wet::ShoreWet::new(device, queue, rain_flow.view().clone());
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("wgr_terrain_pipeline_layout"),
             bind_group_layouts: &[
@@ -1115,6 +1245,8 @@ impl Terrain {
                 ..skyvis::SkyvisOptions::default()
             },
             skyvis_src: None,
+            skyvis_last: None,
+            canopy: None,
             shadow_sweep_ubo,
             shadow_sweep_layout,
             shadow_sweep_bind,
@@ -1139,6 +1271,7 @@ impl Terrain {
             pad_view: white_view,
             partially_bound,
             index_map,
+            surface_map,
             detail_view,
             jitter_map,
             materials,
@@ -1157,6 +1290,7 @@ impl Terrain {
             planar_pipeline,
             max_dim: device.limits().max_texture_dimension_2d,
             shore_wet,
+            rain_flow,
         }
     }
 
@@ -1176,8 +1310,43 @@ impl Terrain {
     }
 
     pub fn set_mud(&mut self, queue: &wgpu::Queue, data: &[f32]) {
-        if valid_mud_view(data) {
+        let accepted = valid_mud_view(data);
+        if accepted {
             queue.write_buffer(&self.snow_buffer, (4 + 512 * 512) * 4, bytemuck::cast_slice(data));
+        }
+        static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *TRACE.get_or_init(|| std::env::var("WGR_MUD_UPLOAD_TRACE").is_ok_and(|v| v == "1")) {
+            let body = data.get(4..).unwrap_or(&[]);
+            let min = body.iter().copied().fold(0.0f32, f32::min);
+            let max = body.iter().copied().fold(0.0f32, f32::max);
+            let nonzero = body.iter().filter(|v| **v != 0.0).count();
+            eprintln!("MUD_UPLOAD accepted={accepted} count={} header={:?} nonzero={nonzero} min={min:.4} max={max:.4}",
+                data.len(), data.get(..4).unwrap_or(&[]));
+        }
+    }
+
+    // Standing water in mud ruts [0,1], read by terrain.wgsl mud_water_level().
+    pub fn set_mud_water(&mut self, queue: &wgpu::Queue, level: f32) {
+        let v = if level.is_finite() { level.clamp(0.0, 1.0) } else { 0.0 };
+        queue.write_buffer(&self.snow_buffer, 4 * (4 + 512 * 512) * 4, bytemuck::cast_slice(&[v, 0.0, 0.0, 0.0]));
+    }
+
+    pub fn set_mud_far(&mut self, queue: &wgpu::Queue, data: &[f32]) {
+        if valid_mud_far_view(data) {
+            queue.write_buffer(&self.snow_buffer, 3 * (4 + 512 * 512) * 4, bytemuck::cast_slice(data));
+        }
+    }
+
+    pub fn set_craters(&mut self, queue: &wgpu::Queue, data: &[f32], far: bool) {
+        if valid_crater_views(data, far) {
+            let offset = CRATER_BASE + if far { 2 * (4 + 512 * 512) } else { 0 };
+            queue.write_buffer(&self.snow_buffer, (offset * 4) as u64, bytemuck::cast_slice(data));
+        }
+    }
+
+    pub fn set_snow_marks(&mut self, queue: &wgpu::Queue, data: &[f32]) {
+        if valid_snow_marks(data) {
+            queue.write_buffer(&self.snow_buffer, (SNOW_MARKS_BASE * 4) as u64, bytemuck::cast_slice(data));
         }
     }
 
@@ -1518,6 +1687,7 @@ impl Terrain {
         };
         let previous = previous
             .filter(|old| old.w == src.w && old.h == src.h && old.terrain_grid == src.terrain_grid);
+        let t_sv = std::time::Instant::now();
         let (sv_w, sv_h, raw, sv) = skyvis::compute_cached(
             &src.heights,
             src.w,
@@ -1527,26 +1697,96 @@ impl Terrain {
             previous.map(|old| (old.heights.as_slice(), old.raw_visibility.as_slice())),
         );
         src.raw_visibility = raw;
-        let sv_bytes: Vec<u8> = sv
-            .iter()
-            .map(|v| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8)
-            .collect();
-        if terrain_resource_reuse() && same_texture_size(
-            (self.skyvis_mask.width(), self.skyvis_mask.height()), (sv_w, sv_h)) {
+        eprintln!("[wgr] terrain sky visibility: {sv_w}x{sv_h} in {:.0} ms", t_sv.elapsed().as_secs_f64() * 1000.0);
+        self.skyvis_last = Some((sv_w, sv_h, sv));
+        self.upload_skyvis(device, queue);
+    }
+
+    // Compose the shared sky-visibility texture: R = the terrain sky-view factor, G = canopy top
+    // height (absolute metres), B = canopy coverage [0,1]. At the canopy grid's resolution when one
+    // is set (the sky-view grid is coarse and is resampled bilinearly), else at the sky-view grid's.
+    fn upload_skyvis(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let Some((sv_w, sv_h, sv)) = &self.skyvis_last else {
+            return;
+        };
+        let (w, h, texels) = compose_skyvis_texels(*sv_w, *sv_h, sv, self.canopy.as_ref());
+        if terrain_resource_reuse() && same_texture_size((self.skyvis_mask.width(), self.skyvis_mask.height()), (w, h)) {
             queue.write_texture(
                 texel_copy(&self.skyvis_mask),
-                &sv_bytes,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0, bytes_per_row: Some(sv_w), rows_per_image: Some(sv_h),
-                },
-                wgpu::Extent3d { width: sv_w, height: sv_h, depth_or_array_layers: 1 },
+                bytemuck::cast_slice(&texels),
+                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 8), rows_per_image: Some(h) },
+                wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
             );
         } else {
-            let (skyvis_mask, skyvis_view) = create_skyvis(device, queue, sv_w, sv_h, &sv_bytes);
+            let (skyvis_mask, skyvis_view) = create_skyvis(device, queue, w, h, &texels);
             self.skyvis_mask = skyvis_mask;
             self.skyvis_view = skyvis_view;
         }
         self.mask_gen += 1;
+    }
+
+    /// Canopy occlusion: an `n` x `n` grid over the sky-view map's world span, row-major (z, x):
+    /// the highest canopy top (absolute metres) and the canopy coverage [0,1] in each cell. Ambient
+    /// sky light is reduced for points below the local canopy top (frame.wgsl canopy_sky_ao).
+    /// `n` 0 clears it.
+    pub fn set_canopy(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, n: u32, top: &[f32], cover: &[f32]) {
+        let cells = (n as usize) * (n as usize);
+        let valid = n != 0 && top.len() >= cells && cover.len() >= cells;
+        // PERF-CANOPY-BAND: streaming trees in and out re-sends the whole n x n grid (2048^2 on
+        // Everon) every ~1.5 s of travel, and this recomposed and re-uploaded the whole sky-view
+        // texture (32 MB) on the render thread each time -- 20-56 ms worker frames, felt as
+        // stutter while moving. A change from streaming is local, so when the grid keeps its size
+        // and the texture is updated in place, only the band of rows that differs is recomposed
+        // and written. The texture object is the same, so no bind group (and no consumer keyed
+        // on mask_gen, layered fog's cache included) needs to rebuild. Texel for texel what the
+        // full path writes. WGR_CANOPY_BAND=0 always uploads the whole map.
+        if valid && canopy_band_enabled()
+            && same_texture_size((self.skyvis_mask.width(), self.skyvis_mask.height()), (n, n))
+        {
+            if let (Some((old_n, old_top, old_cover)), Some((sv_w, sv_h, sv))) = (&self.canopy, &self.skyvis_last) {
+                if *old_n == n {
+                    let (top, cover) = (&top[..cells], &cover[..cells]);
+                    let t0 = std::time::Instant::now();
+                    let Some((z0, z1)) = canopy_dirty_rows(n, (old_top, old_cover), (top, cover)) else {
+                        return; // identical: nothing to recompose or upload
+                    };
+                    {
+                        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                        if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 8 == 0 {
+                            eprintln!("[wgr] terrain canopy band: rows {z0}..={z1} of {n} (diff {:.1} ms)",
+                                t0.elapsed().as_secs_f64() * 1000.0);
+                        }
+                    }
+                    let (sv_w, sv_h) = (*sv_w, *sv_h);
+                    // Only the band changed: copy those rows into the retained grid in place
+                    // rather than cloning both 16 MB arrays.
+                    let band = (z0 as usize * n as usize)..((z1 as usize + 1) * n as usize);
+                    let mut next = self.canopy.take().expect("checked above");
+                    next.1[band.clone()].copy_from_slice(&top[band.clone()]);
+                    next.2[band.clone()].copy_from_slice(&cover[band]);
+                    let texels = compose_skyvis_rows(sv_w, sv_h, sv, Some(&next), n, n, z0..z1 + 1,
+                                                     skyvis_compose_threads());
+                    let mut copy = texel_copy(&self.skyvis_mask);
+                    copy.origin = wgpu::Origin3d { x: 0, y: z0, z: 0 };
+                    queue.write_texture(
+                        copy,
+                        bytemuck::cast_slice(&texels),
+                        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(n * 8), rows_per_image: Some(z1 - z0 + 1) },
+                        wgpu::Extent3d { width: n, height: z1 - z0 + 1, depth_or_array_layers: 1 },
+                    );
+                    self.canopy = Some(next);
+                    return;
+                }
+            }
+        }
+        eprintln!("[wgr] terrain canopy: full upload (n {n}, valid {valid}, band {}, reuse {}, tex {}x{})",
+            canopy_band_enabled(), terrain_resource_reuse(), self.skyvis_mask.width(), self.skyvis_mask.height());
+        self.canopy = if valid {
+            Some((n, top[..cells].to_vec(), cover[..cells].to_vec()))
+        } else {
+            None
+        };
+        self.upload_skyvis(device, queue);
     }
 
     // Live sky-visibility tuning from the ImGui shadow tab (via wgr_terrain_set_sky_visibility).
@@ -1705,6 +1945,26 @@ impl Terrain {
         self.rebuild_group2(device);
     }
 
+    /// RFG-PBR: a native Reforger world's surface map, `edge` x `edge` palette indices (u8) over the
+    /// whole land; the terrain shader blends it instead of the one-sample-per-land-cell index when
+    /// the params' `surface_grid` (metres per texel) is above zero. Empty data clears it.
+    pub fn set_surface_map(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, edge: u32, data: &[u8]) {
+        if edge == 0 || edge > self.max_dim || data.len() < (edge as usize) * (edge as usize) {
+            self.surface_map = create_surface_map(device, 1);
+            self.rebuild_group2(device);
+            return;
+        }
+        let map = create_surface_map(device, edge);
+        queue.write_texture(
+            texel_copy(&map),
+            &data[..(edge as usize) * (edge as usize)],
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(edge), rows_per_image: Some(edge) },
+            wgpu::Extent3d { width: edge, height: edge, depth_or_array_layers: 1 },
+        );
+        self.surface_map = map;
+        self.rebuild_group2(device);
+    }
+
     pub fn set_materials(
         &mut self,
         device: &wgpu::Device,
@@ -1778,6 +2038,7 @@ impl Terrain {
             &self.materials,
             &self.ground_sampler,
             &self.ground_clamp_sampler,
+            &self.surface_map,
         );
     }
 
@@ -1803,6 +2064,20 @@ impl Terrain {
             self.instance_cap = cap;
         }
         queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(nodes));
+    }
+
+    /// RAIN-FLOW: one frame of the rain water around the camera (world xz), recorded into `encoder`
+    /// before the terrain draws sample it.
+    pub fn step_rain_flow(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        cam_xz: [f32; 2],
+    ) {
+        let hm_gen = self.heightmap_gen();
+        self.rain_flow.step(device, queue, encoder, &self.heightmap_view, hm_gen, &self.params, cam_xz);
+        self.shore_wet.set_rain(queue, self.rain_flow.window());
     }
 
     /// TW-WATER W3b: Tidewater's wet sand for this frame (state, lace, generation, params), or
@@ -1914,7 +2189,7 @@ fn create_skyvis(
     queue: &wgpu::Queue,
     w: u32,
     h: u32,
-    bytes: &[u8],
+    texels: &[u16],
 ) -> (wgpu::Texture, wgpu::TextureView) {
     let tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("wgr_terrain_skyvis_mask"),
@@ -1926,16 +2201,16 @@ fn create_skyvis(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R8Unorm,
+        format: wgpu::TextureFormat::Rgba16Float,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
     queue.write_texture(
         texel_copy(&tex),
-        bytes,
+        bytemuck::cast_slice(texels),
         wgpu::TexelCopyBufferLayout {
             offset: 0,
-            bytes_per_row: Some(w),
+            bytes_per_row: Some(w * 8),
             rows_per_image: Some(h),
         },
         wgpu::Extent3d {
@@ -1946,6 +2221,201 @@ fn create_skyvis(
     );
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
     (tex, view)
+}
+
+// IEEE half from f32 (round to nearest, overflow to inf, subnormals flushed). The sky-visibility
+// texture is Rgba16Float, and heights to a few hundred metres need the exponent a unorm lacks.
+fn f32_to_f16_bits(v: f32) -> u16 {
+    let x = v.to_bits();
+    let sign = ((x >> 16) & 0x8000) as u16;
+    let exp = ((x >> 23) & 0xff) as i32 - 127 + 15;
+    let mant = x & 0x7f_ffff;
+    if exp <= 0 {
+        return sign;
+    }
+    if exp >= 31 {
+        return sign | 0x7c00;
+    }
+    let half = sign | ((exp as u16) << 10) | ((mant >> 13) as u16);
+    // round to nearest
+    if (mant & 0x1000) != 0 { half.wrapping_add(1) } else { half }
+}
+
+// The 1x1 stand-in: open sky, no canopy.
+fn skyvis_texels_empty() -> [u16; 4] {
+    [f32_to_f16_bits(1.0), f32_to_f16_bits(-60000.0), 0, f32_to_f16_bits(1.0)]
+}
+
+// R = sky-view factor, G = canopy top, B = canopy cover, A = 1; see Terrain::upload_skyvis.
+fn compose_skyvis_texels(sv_w: u32, sv_h: u32, sv: &[f32], canopy: Option<&(u32, Vec<f32>, Vec<f32>)>) -> (u32, u32, Vec<u16>) {
+    compose_skyvis_texels_on(sv_w, sv_h, sv, canopy, skyvis_compose_threads())
+}
+
+fn compose_skyvis_texels_on(
+    sv_w: u32,
+    sv_h: u32,
+    sv: &[f32],
+    canopy: Option<&(u32, Vec<f32>, Vec<f32>)>,
+    threads: usize,
+) -> (u32, u32, Vec<u16>) {
+    let (w, h) = match canopy {
+        Some((n, _, _)) => (*n, *n),
+        None => (sv_w, sv_h),
+    };
+    (w, h, compose_skyvis_rows(sv_w, sv_h, sv, canopy, w, h, 0..h, threads))
+}
+
+/// Rows `rows` of the composed sky-visibility image (w x h, 4 x f16 per texel), row-major. The
+/// whole image is rows 0..h; PERF-CANOPY-BAND recomposes only the band a canopy update changed.
+#[allow(clippy::too_many_arguments)]
+fn compose_skyvis_rows(
+    sv_w: u32,
+    sv_h: u32,
+    sv: &[f32],
+    canopy: Option<&(u32, Vec<f32>, Vec<f32>)>,
+    w: u32,
+    h: u32,
+    rows: std::ops::Range<u32>,
+    threads: usize,
+) -> Vec<u16> {
+    let one = f32_to_f16_bits(1.0);
+    let no_top = f32_to_f16_bits(-60000.0);
+    let band = rows.end.saturating_sub(rows.start);
+    let mut out = vec![0u16; (w as usize) * (band as usize) * 4];
+    let row_len = (w as usize) * 4;
+    let compose_row = |z: u32, row: &mut [u16]| {
+        for x in 0..w {
+            // the sky-view value at this texel's centre, bilinear over its own grid
+            let vis = if w == sv_w && h == sv_h {
+                sv[(z * sv_w + x) as usize]
+            } else {
+                let fx = ((x as f32 + 0.5) / w as f32) * sv_w as f32 - 0.5;
+                let fz = ((z as f32 + 0.5) / h as f32) * sv_h as f32 - 0.5;
+                let x0 = fx.floor().clamp(0.0, (sv_w - 1) as f32) as u32;
+                let z0 = fz.floor().clamp(0.0, (sv_h - 1) as f32) as u32;
+                let x1 = (x0 + 1).min(sv_w - 1);
+                let z1 = (z0 + 1).min(sv_h - 1);
+                let tx = (fx - x0 as f32).clamp(0.0, 1.0);
+                let tz = (fz - z0 as f32).clamp(0.0, 1.0);
+                let at = |cx: u32, cz: u32| sv[(cz * sv_w + cx) as usize];
+                let a = at(x0, z0) + (at(x1, z0) - at(x0, z0)) * tx;
+                let b = at(x0, z1) + (at(x1, z1) - at(x0, z1)) * tx;
+                a + (b - a) * tz
+            };
+            let o = (x as usize) * 4;
+            row[o] = f32_to_f16_bits(vis.clamp(0.0, 1.0));
+            match canopy {
+                Some((n, top, cover)) => {
+                    let c = (z * n + x) as usize;
+                    row[o + 1] = if cover[c] > 0.0 { f32_to_f16_bits(top[c]) } else { no_top };
+                    row[o + 2] = f32_to_f16_bits(cover[c].clamp(0.0, 1.0));
+                }
+                None => {
+                    row[o + 1] = no_top;
+                    row[o + 2] = 0;
+                }
+            }
+            row[o + 3] = one;
+        }
+    };
+    // PERF (2026-10-14): every canopy update recomposes the whole map on the render thread --
+    // 2048^2 texels on a native world, ~160 ms a time while objects stream in. Rows are
+    // independent, so a large map is split across a few scoped threads; each texel gets the
+    // same value either way. WGR_SKYVIS_COMPOSE_THREADS=1 composes on the calling thread.
+    if threads > 1 && band >= 256 && row_len > 0 {
+        let rows_per_chunk = (band as usize).div_ceil(threads);
+        std::thread::scope(|scope| {
+            for (chunk_index, chunk) in out.chunks_mut(rows_per_chunk * row_len).enumerate() {
+                let compose_row = &compose_row;
+                let first_row = rows.start + (chunk_index * rows_per_chunk) as u32;
+                scope.spawn(move || {
+                    for (i, row) in chunk.chunks_mut(row_len).enumerate() {
+                        compose_row(first_row + i as u32, row);
+                    }
+                });
+            }
+        });
+    } else {
+        for (z, row) in out.chunks_mut(row_len.max(1)).enumerate() {
+            compose_row(rows.start + z as u32, row);
+        }
+    }
+    let _ = h;
+    out
+}
+
+/// PERF-CANOPY-BAND: the first and last row (inclusive) in which two n x n canopy grids differ,
+/// compared bit for bit; None when they are identical.
+fn canopy_dirty_rows(n: u32, old: (&[f32], &[f32]), new: (&[f32], &[f32])) -> Option<(u32, u32)> {
+    let row = n as usize;
+    let differs = |z: usize| {
+        let r = z * row..(z + 1) * row;
+        bytemuck::cast_slice::<f32, u32>(&old.0[r.clone()]) != bytemuck::cast_slice::<f32, u32>(&new.0[r.clone()])
+            || bytemuck::cast_slice::<f32, u32>(&old.1[r.clone()]) != bytemuck::cast_slice::<f32, u32>(&new.1[r])
+    };
+    let first = (0..n as usize).find(|&z| differs(z))?;
+    let last = (first..n as usize).rev().find(|&z| differs(z)).unwrap_or(first);
+    Some((first as u32, last as u32))
+}
+
+#[cfg(test)]
+mod skyvis_compose_tests {
+    use super::compose_skyvis_texels_on;
+
+    // PERF-CANOPY-BAND: a recomposed band is exactly those rows of the full image, threaded or not,
+    // and the dirty-row finder brackets exactly the rows that changed.
+    #[test]
+    fn band_compose_matches_full_rows() {
+        let (sv_w, sv_h) = (173u32, 211u32);
+        let sv: Vec<f32> = (0..sv_w * sv_h).map(|i| (i.wrapping_mul(2654435761) % 1000) as f32 / 999.0).collect();
+        let n = 300u32;
+        let top: Vec<f32> = (0..n * n).map(|i| (i.wrapping_mul(40503) % 5000) as f32 * 0.1 - 50.0).collect();
+        let cover: Vec<f32> = (0..n * n).map(|i| ((i.wrapping_mul(7919) % 13) as f32 - 4.0) / 8.0).collect();
+        let canopy = (n, top.clone(), cover.clone());
+        let (_, _, full) = compose_skyvis_texels_on(sv_w, sv_h, &sv, Some(&canopy), 1);
+        for threads in [1usize, 4] {
+            let band = super::compose_skyvis_rows(sv_w, sv_h, &sv, Some(&canopy), n, n, 17..290, threads);
+            let row = (n as usize) * 4;
+            assert_eq!(band.as_slice(), &full[17 * row..290 * row]);
+        }
+        let mut top2 = top.clone();
+        top2[(40 * n + 7) as usize] += 1.0;
+        top2[(123 * n + 299) as usize] -= 2.0;
+        assert_eq!(super::canopy_dirty_rows(n, (&top, &cover), (&top2, &cover)), Some((40, 123)));
+        assert_eq!(super::canopy_dirty_rows(n, (&top, &cover), (&top, &cover)), None);
+    }
+
+    // The threaded composition is the serial one, texel for texel, on a grid that takes the
+    // bilinear path (sky-view and canopy grids of different sizes) and has empty cells.
+    #[test]
+    fn threaded_compose_matches_serial() {
+        let (sv_w, sv_h) = (173u32, 211u32);
+        let sv: Vec<f32> = (0..sv_w * sv_h).map(|i| (i.wrapping_mul(2654435761) % 1000) as f32 / 999.0).collect();
+        let n = 300u32;
+        let top: Vec<f32> = (0..n * n).map(|i| (i.wrapping_mul(40503) % 5000) as f32 * 0.1 - 50.0).collect();
+        let cover: Vec<f32> = (0..n * n).map(|i| ((i.wrapping_mul(7919) % 13) as f32 - 4.0) / 8.0).collect();
+        let canopy = (n, top, cover);
+        let serial = compose_skyvis_texels_on(sv_w, sv_h, &sv, Some(&canopy), 1);
+        for threads in [2usize, 3, 8] {
+            let threaded = compose_skyvis_texels_on(sv_w, sv_h, &sv, Some(&canopy), threads);
+            assert_eq!(serial, threaded, "threads={threads}");
+        }
+        let plain_serial = compose_skyvis_texels_on(sv_w, sv_h, &sv, None, 1);
+        let plain_threaded = compose_skyvis_texels_on(sv_w, sv_h, &sv, None, 8);
+        assert_eq!(plain_serial, plain_threaded);
+    }
+}
+
+// Threads for compose_skyvis_texels: up to 8, WGR_SKYVIS_COMPOSE_THREADS to pin (1 = serial).
+fn skyvis_compose_threads() -> usize {
+    static THREADS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *THREADS.get_or_init(|| {
+        let pinned = std::env::var("WGR_SKYVIS_COMPOSE_THREADS").ok();
+        if let Some(n) = pinned.and_then(|v| v.parse::<usize>().ok()) {
+            return n.max(1);
+        }
+        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(8)
+    })
 }
 
 // Parse a float env var, falling back to `default` when unset or unparseable.
@@ -2025,6 +2495,19 @@ fn make_sweep_bind(
     })
 }
 
+fn create_surface_map(device: &wgpu::Device, edge: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("wgr_terrain_surface_map"),
+        size: wgpu::Extent3d { width: edge, height: edge, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R8Uint,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
+}
+
 fn create_index_map(device: &wgpu::Device, w: u32, h: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("wgr_terrain_index_map"),
@@ -2073,6 +2556,7 @@ fn make_group2(
     materials: &wgpu::Buffer,
     sampler: &wgpu::Sampler,
     clamp_sampler: &wgpu::Sampler,
+    surface_map: &wgpu::Texture,
 ) -> wgpu::BindGroup {
     // Without PARTIALLY_BOUND_BINDING_ARRAY every declared slot must be bound,
     // so pad the tail; the shader never indexes past the real layer count.
@@ -2082,6 +2566,7 @@ fn make_group2(
     }
     let index_view = index_map.create_view(&wgpu::TextureViewDescriptor::default());
     let jitter_view = jitter_map.create_view(&wgpu::TextureViewDescriptor::default());
+    let surface_view = surface_map.create_view(&wgpu::TextureViewDescriptor::default());
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("wgr_terrain_group2_bind"),
         layout,
@@ -2113,6 +2598,10 @@ fn make_group2(
             wgpu::BindGroupEntry {
                 binding: 6,
                 resource: materials.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::TextureView(&surface_view),
             },
         ],
     })

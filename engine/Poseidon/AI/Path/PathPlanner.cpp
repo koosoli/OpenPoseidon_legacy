@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include <Poseidon/AI/AIGroup.hpp>
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/AI/Path/PathPlanner.hpp>
@@ -796,6 +797,8 @@ bool AIPathPlanner::ProcessSearching()
 #endif
 
 #if USE_NEW_ASTAR
+    // The field cost's per-unit exposure terms hold for this whole batch (see the scope).
+    const AISubgroup::ExposureCacheScope exposureCache;
     _iterTotal += _algorithm->Process(ITER_PER_CYCLE);
 #if CHECK_PERFORMANCE
     _timeTotal += int(ReadTsc() - _perfStart);

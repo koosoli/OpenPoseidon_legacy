@@ -141,9 +141,332 @@ briefing path) and runs 25 s with no script error, crash or hang. What it does n
   ctrlSetFade shows/hides on commit (no fading). Structured text is shown as plain text.
 - **UI.** Arma 1 font families are drawn with tahomaB24. The strategic map's overview
   box stays empty (its text goes to a single-line control).
+- **Weapons.** See [Weapons, 2026-10-14](#weapons-2026-101415-binary-9d545a7-stamped-in-the-game-folder):
+  Arma 1 weapons in hand, in crates and in the briefing pool, with Arma 1 magazine sizes.
 - **Vehicles and animations.** Driving (HMMWV), flying (UH-60, OH-58 incl. AI), boarding
   and the Arma 1 soldier animations were checked with dedicated test missions; not every
-  vehicle type and crew position was checked individually.
+  vehicle type and crew position was checked individually. Which CWA class carries which
+  Arma 1 vehicle, and what is still wrong about it: see
+  [Vehicles, 2026-10-15](#vehicles-2026-10-15-f58cb9b9-tested-from-dista1-vs18-the-game-folder-keeps-ef440e9).
+
+## Weapons, 2026-10-14/15 (binary 9d545a7, stamped in the game folder)
+
+Arma 1 soldiers carry their own Arma 1 weapons (178de3d): each one is a generated
+`A1x_<weapon>` class with the Arma 1 model on a CWA weapon, which keeps the magazines,
+ballistics and sounds. Fixed since, in order:
+
+| commit | what was wrong | now |
+|---|---|---|
+| ab0d541 | weapons both games name alike (AK74, PK, M16A2) kept the CWA model | Arma 1 model on the CWA class |
+| b1cab8b | carriers with `magazines[]={this}` (M60, LAWLauncher, RPGLauncher): the generated class took itself as magazine -- M240 with 0 rounds, launchers empty | the generated class names the CWA magazines |
+| d044160 | scripts saw `A1x_M4AIM`; `hasWeapon "M4AIM"`, `removeWeapon`, `selectWeapon`, `fire`, `ammo` found nothing | `primaryWeapon`/`secondaryWeapon`/`weapons` report Arma names, the others accept them |
+| 204f9ec | Arma 1 crates and vehicles handed out CWA rifles (CWA cargo inherited) | their own `TransportWeapons`/`TransportMagazines`; `getWeaponCargo`, `getMagazineCargo` |
+| eabbeb3 | `Stinger`/`Strela` mapped to classes CWA does not have (AA soldiers unarmed) | `AALauncher` / `9K32Launcher`; the M136 is CWA's `AT4Launcher` |
+| b36be5d | the briefing weapon pool read Arma 1 names (`AK74GL`, `SVD`, `30rnd_545x39_AK`) straight from CWA's CfgWeapons (18 `ca` missions + `m02minerconvoy`) | resolved like `addWeapon` |
+| 13c0586 | `magazines` listed CWA names (`M16`) | Arma names (`30Rnd_556x45_Stanag`) |
+| 1dd7199, 6483a1a | `fire ["HandGrenadeMuzzle", ...]`, `selectWeapon "HandGrenadeMuzzle"`, mode names CWA lacks (`FullAuto`) | mapped to the CWA muzzle that takes the magazine |
+| 583f221 | gear/briefing pictures were the CWA carrier's | Arma 1 equipment picture |
+| 99b4cde | `reload` did nothing | loads empty weapons |
+| 1ab101c | HUD said `M16` over an M4 Aimpoint, actions offered to drop `AT4` | Arma weapon and magazine names |
+| d0cdd15 | `5Rnd_127x108_KSVK` (crate/vehicle cargo in 79 missions) and `8Rnd_9x18_MakarovSD` had no counterpart | SVDDragunov / Tokarev magazines; a muzzle name that maps to nothing is logged once with the unit's muzzles |
+| 87feff9 | magazines took the size of their CWA carrier: M24 20 rounds (Arma 1: 5), M249 100 (200), M107 20 (10), M9 10 (15), KSVK 10 (5) | a magazine of another size is a generated `A1x_<magazine>` with the Arma 1 count and name; every muzzle that takes the carrier takes it, but an Arma 1 weapon only the magazines its Arma 1 class lists. `OP_A1_MAGAZINES=0` turns it off |
+| 79badd0 | -- | diagnostic: `OP_FORCEFIRE_LOG=1` logs why a scripted `fire` does not go off |
+| 9d545a7 | `unit fire "LAWLauncher"` never fired -- CWA's own AT soldiers too: the soldier selected the launcher but stayed in his rifle move, where no missile may leave; `player fire` waited for an AI aim the player's input never let settle | a pending scripted launcher shot raises the launcher; the player's unit fires where the player aims |
+
+Test missions (`tests\missions\a1weap*.Sara` on the build machine), on 1ab101c, d0cdd15 and
+9d545a7 unless noted:
+
+| check | result |
+|---|---|
+| weapons in hand, 3rd person, West + East (a1weapW/E, 0994802) | correct Arma 1 models, M136 on the back |
+| first person, rifle and launcher (a1weap1st, a1weapP) | Arma 1 M4 Aimpoint / M136 models in hand |
+| AI `fire` with every primary weapon, 8 soldiers | ammo 30→29 / 100→99 / 20→19 for all |
+| player fires rifle and M136 by key (a1weapP) | 30→29, 1→0, rocket hits 80 m out |
+| player throws a grenade by key (a1weapP3) | 10→9 magazines |
+| AI throws a grenade by script, Arma names (a1weap, a1weapT2) | 10→9 (`fire ["HandGrenadeMuzzle", "HandGrenadeMuzzle", "HandGrenade_East"]` reaches CWA's `Throw` muzzle) |
+| AI anti-tank in combat (a1weapAT) | SoldierWAT kills a T72 with the M136 at 90 m; SoldierEAT hits an M1 with the RPG7V (damage 0.22) |
+| crates (a1weap) | WeaponBoxWest/SpecialBoxWest/AmmoBoxEast hold M4, M16A4, M249, G36, M107, Stinger, ... |
+| briefing pool (m02minerconvoy, m01sniper) | 4 / 5 weapons, 45 magazines, no config error |
+| script names (a1weap) | `hasWeapon (primaryWeapon x)` true for all; remove/add round trip |
+| HUD and action menu (a1weapP) | `M136 Granatwerfer`, `Waffe M4 Aimpoint`, `Nachladen M136`, `M136 ablegen` |
+| magazine sizes (a1weapMag, 79badd0 and 9d545a7) | M249 200, M107 10, M24 5, M9 15; the M24 shot empty 5→0 and reloaded to 5 with one magazine less; the M107 refuses M24 rounds (ammo 0); a CWA M21 magazine still fits the M24 (20) |
+| scripted launcher fire, out of combat (a1weapL2, 9d545a7) | LAW (CWA soldier), M136, RPG7V, Stinger all fire: magazines 7→6 (one round reloaded), Stinger 1→0 |
+| `player fire` (a1weap, a1weapL, 9d545a7) | Arma 1 player M4 30→29, CWA player M16 30→29 (before: no shot) |
+
+Regression: all 131 missions entered and ran 25 s with no script error, crash or hang on
+0994802 (2026-10-14 20:31-21:29), 1ab101c (22:46-23:44) and 79badd0 (2026-10-15 09:30-10:30,
+with the generated magazines: M249, KSVK, M24, M9, M107 and 20-round Stanag generated in
+44-84 missions each); the 20-mission subset (`tests\missions_weap.txt`) ran clean on
+eabbeb3, 99b4cde, d0cdd15 and 9d545a7.
+
+Known limits, by design or not Arma 1 specific:
+
+- **Magazines of the same size as their carrier stay CWA's** (Stanag on M16, M240 belt on
+  M60, AK on AK74); their Arma 1 names are shown. A weapon takes every magazine of its CWA
+  carrier, so an M249 also loads M240 belts. Ballistics and sounds are the carrier's.
+- **A scripted `fire` aims as before**: without a target it shoots into the air (a launcher
+  steeply up). CWA's grenade muzzle is `Throw`: `fire ["Throw", "HandGrenade", "HandGrenade"]`;
+  Arma 1's `HandGrenadeMuzzle` is mapped to it.
+- A campaign saved with generated `A1x_` weapons or magazines in its pool needs them
+  generated again before the pool is read (they are, when the mission's units load).
+- `weapons` leaves out Throw/Put, as OFP did (`hasWeapon "Throw"` is true).
+- Weapons without a CWA counterpart are left out of loadouts and crates (logged once).
+
+## Vehicles, 2026-10-15 (f58cb9b9, tested from `dist\a1-vs18`; the game folder keeps ef440e9)
+
+Every Arma 1 vehicle draws its Arma 1 model, but on a CWA class whose simulation, weapons,
+armour, speed and crew it keeps (`Arma1ModelClass`; unlike Arma 2, Arma 1 vehicles do not
+take their own speed/armour/fuel yet). The 131-mission logs of 79badd0 (`*_g.log`, lines
+`'X' uses the Arma 1 model ... on CWA 'Y'`) list which CWA class carries which Arma 1 class.
+Two kinds were wrong and are fixed (64e75fc7, f58cb9b9):
+
+| Arma 1 class (missions in the run) | carried by before | now |
+|---|---|---|
+| `AGS` (2), `SearchLight` (3) -- static weapons, simulation "tank" | `T72`, `M1Abrams` (engine, tank gun) | `M2StaticMGE` / `M2StaticMG` by side; the searchlight without the M2 |
+| `HMMWV50` (35), `UAZMG` (30), `DATSUN_PK1` (7), `HILUX_PK1` (5), `HILUX_DSHKM2` (4), `MAA_DATSUN_PK2` (3), `HILUX_PK2` (3), `HILUX_DSHKM1` (2), `DATSUN_DSHKM1` (1) -- cars whose turret gun fires bullets | the unarmed `HMMWV` / `UAZ`: a driver, no gunner, no gun | `JeepMG` (M2), with the Arma 1 seat count and the Arma 1 crew class |
+
+The rule is data-driven: the first real weapon on a turret, its first magazine's ammo, and
+that ammo's `simulation` (`shotBullet`) in the Arma 1 config; only CWA's unarmed light cars
+are swapped. `OP_A1_ARMED_CARS=0` restores the old carriers. Two trunk commits the fix builds
+on were taken over unchanged (38d3181a, ecbca155; Arma 2 only).
+
+**Deviation, by design:** the gun is CWA's M2 (Browning) also where Arma 1 mounts a DShKM or
+a PK, and the AGS-30 fires M2 rounds (as the D-30 and M119 already did on `M2StaticMG`).
+
+Test mission `tests\missions\a1vehArm.Sara` (build machine), f58cb9b9 against the same build
+with `OP_A1_ARMED_CARS=0`:
+
+| check | without the fix | with it |
+|---|---|---|
+| `HMMWV50` / `UAZMG` / `DATSUN_PK1` weapons, gunner | `CarHorn`, no gunner | `Browning`, gunner in place to the end |
+| crew of `UAZMG` / `DATSUN_PK1` | CWA `SoldierEB` driver | Arma 1 `SoldierEB` / `soldierPB` (EAST) -- the first build, 64e75fc7, had JeepMG's West crew in them; fixed in f58cb9b9 |
+| 3 x `moveInCargo` into `HMMWV50` | 4 aboard (driver + 3) | 5 aboard (driver, gunner, 3) |
+| scripted `fire` with v1..v4 | -- | ammo 500 -> 499 on each |
+| `AGS`, `SearchLight` | -- | gunner only, speed 0, did not move |
+| `HMMWVMK`, `UAZ_AGS30`, `Truck5tMG` | unchanged | unchanged, logged |
+
+Regression: the 20-mission subset (`tests\missions_weap.txt`) ran clean on 64e75fc7 and on
+f58cb9b9 (20/20, no script error, crash or hang).
+
+Not shown by the test: the AI gunners did not open fire on their own within 20 s, with or
+without `reveal` (CWA's own `JeepMG` was not run as a control). Passengers in the Arma 1
+HMMWV are drawn sitting on the ground beside it -- with and without the fix, so it is the
+cargo-proxy placement of Arma 1 vehicles, not this change.
+
+Left as they are, for the owner to decide (each would change what the vehicle is):
+
+- grenade launchers and missiles on cars: `HMMWVMK` (MK19, 9 missions), `UAZ_AGS30` (15),
+  `HMMWVTOW` (8), `BRDM2_ATGM` (8) -- unarmed;
+- `Truck5tMG` (M2, 13) on the unarmed truck; `BRDM2` (KPVT/PKT, 20) on CWA's unarmed BRDM;
+- `Stryker_*` on `M113`, `RHIB2Turret` (MK19) on `BoatW` (M2), `KA50` on `Mi24`, `AV8B` on
+  `A10`, `MH6`/`AH6` on `OH58`;
+- Arma 1 vehicles keep CWA's speed, armour and fuel (Arma 2 vehicles take their own).
+
+## Vehicle values, global scripts, .wss names (2026-10-15 evening; a317aa05 from `dist`)
+
+| commit | what was wrong | now | checked |
+|---|---|---|---|
+| 7af6acf0 | Arma 1 vehicles kept the seats, top speed and fuel of their CWA carrier | `transportSoldier`, `maxSpeed`, `fuelCapacity` from the Arma 1 config, as Arma 2 vehicles already do; armour stays CWA's on purpose (CWA rounds); `OP_A1_VEHICLE_VALUES=0` keeps the CWA values | `a1vehSeats`: 12 x `moveInCargo` into an Arma 1 M113 -> 11 aboard (8 with `OP_A1_VEHICLE_VALUES=0`); UH-60 12 either way |
+| fb732033 | MP missions call `timing.sqs`, `Area.sqf`, `GlobRunning.sqs` by bare name without shipping them -- they are Arma 1's own, in `ca.pbo` under `data\scripts`; 13 missions of the 131-mission run logged them not found | `FindScript` also tries `ca\data\scripts\` with `--arma1` | mp07, mp16, m10armoredfist: "script not found" 3/3/2 -> 0 |
+| a317aa05 | sounds named `.wss` in configs ship as `.ogg` (mp04cleansweep: CfgSounds `sound\m04r01.wss`, archive `Sound\M04r01.ogg`): "Load failed", no radio line | with `--arma1`/`--arma2`, a missing `.wss` loads the `.ogg` of the same name | mp04cleansweep: "Load failed" 1 -> 0 |
+
+Regression: the 20-mission subset ran clean on 7af6acf0 (all 20 logs shut down normally,
+0 script errors) and on a317aa05 (20/20 exit 0, 0 script errors); a1vehArm unchanged on 7af6acf0.
+
+### What the missions use (static census, `tools\a1census.py` on the build machine, read-only)
+
+All 131 mission archives, 212 mission folders, 2621 script/config files (none packed):
+`exec` in 183 folders, `camCreate` 161, `titleText` 151, `enableRadio` 123, `forceEnd` 109,
+`playMusic` 59, `sideRadio` 54 (1116 calls), `fadeMusic` 50, `execVM` 47, `saveGame` 44,
+`say` 35 (1797 calls), `playSound` 33, `setRadioMsg` 30, `setIdentity` 13, `createDialog` 11,
+`setFace`/`setMimic` 6, `saveStatus`/`loadStatus` 5/3, `endMission` 4. The archives hold
+3191 `.ogg` and 790 `.wss` files.
+
+**FSMs matter little for Arma 1:** one `.fsm` file in all of them
+(`armory1.intro\...\opponentAI.fsm`) and one `doFSM` call -- the Armory only. Spoken radio
+and `say` conversations, music and camera work are what most missions are made of; their
+timing is not covered by any test yet.
+
+Audio problems seen in the run logs and still open: AI radio words load as
+`voice\Rob\.wss` (an empty word -- Arma 1 voices against CWA's word table, 8 missions);
+`x09quickupdate` asks for CfgSounds `09v50`, which no CfgSounds defines;
+`m09convoyattack_s06` asks for `ca\sounds\missions\m09r06.ogg`, which is not in the AddOns.
+
+## Rebased on the trunk, vehicle weapons, faces (2026-10-16; d3ac4c62, stamped in the game folder)
+
+**Rebase.** The trunk `perf/optimization-20261014` had taken over the Arma 1 work up to
+92ce7531 already (cherry-picked under other hashes). `MrDudeX-arma1` now is the trunk at
+ed011a90 plus the commits it lacked (vehicle values, Arma 1's script folder, .wss->.ogg,
+docs, radio-word diag) and the two below; the old history is kept as
+`archive/MrDudeX-arma1-pre-rebase-20261015` (7adae3e3). The rebased build (12088873) was
+built on the build machine (new vcpkg ports: Steam Audio, libmysofa, pffft) and boots the
+Arma 1 test missions.
+
+| commit | what was wrong | now |
+|---|---|---|
+| 0abfb465 | the owner decided every vehicle gets its original weapons; MK19, AGS-30, TOW, AT-5, KPVT, the gun truck and the BRDM-2 were unarmed, DShKM/PK cars fired CWA's 500-round M2 | the gunner's Arma 1 weapons (first turret with a real one) become generated `A1v_<weapon>` classes: Arma 1 name, rounds per magazine, rate of fire, full-auto, muzzle velocity, sound; on CWA's 7.62/12.7/30 mm MG, the M203 grenade, tank shells or the AT-3 by kind; the turret's number of magazines. All armed cars ride JeepMG for the gunner's seat. Cars, boats, statics; `OP_A1_VEHICLE_WEAPONS=0` turns it off |
+| d3ac4c62 | Arma 1 heads (selection `osobnost`, 593 times in characters.pbo) wore CWA's face textures, laid out for OFP's head: a smeared face | Arma 1's `CfgFaces >> Man >> FaceN` (`ca\characters\hhl\hhl_NN_CO.paa`) for heads of Arma 1 models, random faces and `setFace`/`setIdentity` alike; `OP_A1_FACES=0` turns it off |
+
+Checked on d3ac4c62 (from `dist`, then deployed):
+
+| check | result |
+|---|---|
+| a1vehArm: weapons and one scripted shot each | HMMWV M2 100 -> 99 (6 magazines), UAZ DShKM 50 -> 49, Datsun PK 100 -> 99, AGS-30 29 -> 28; HMMWV MK19, UAZ AGS-30, M2 truck armed (were unarmed) |
+| 20-mission subset (`_p2`) | 20/20 exit 0, 0 script errors; rebuilt weapons logged for M2StaticMG, HMMWV50, UAZMG, Stryker_ICV_M2/MK19/TOW, Truck5tMG, RHIB, RHIB2Turret, DSHKM, D30, M119, BRDM2 (KPVT + PKT), BRDM2_ATGM, LandroverMG, HMMWVTOW, HMMWVMK, UAZ_AGS30 |
+| a1face against `OP_A1_FACES=0` (screenshots) | Arma 1 face on the Arma 1 head; before, CWA's texture smeared across it |
+| a1vehSeats, a1weapMag | unchanged: M113 11 aboard; M24 5 / M249 200 / M107 10 rounds |
+
+Deviations and limits, by design for now: the ammunition is CWA's (damage, splash) --
+Arma 1 ammunition and Arma 1 armour are to come together (owner, 2026-10-15); a vehicle with
+two gunners (RHIB2Turret's rear MK19) gets the first one's weapon only; tanks, helicopters
+and planes keep CWA's weapons; the Arma 1 sounds of the rebuilt weapons were not listened to.
+
+## Full run after the rebase, Arma 1 ballistics (2026-10-16)
+
+**All 131 missions on d3ac4c62** (07:56-08:50, from `dist`): 130 entered and ran 25 s clean;
+`fos_lament.eden` crashed (0xC0000005) in `FileCache::Maintain`, called from
+`SoundSystemSteam::PreloadWave` on a pool worker -- the trunk's new Steam Audio backend
+repeats the FileCache race the OpenAL backend had (fixed there in d8f2e36). 01192861 makes
+it preload on the calling thread, as OpenAL does: on 01192861 the 22-mission gate (the
+20-mission subset, fos_lament, s03dolores) ran 22/22 clean, and that build was deployed
+(stamped 2026-10-16 09:27).
+
+**0927bf7a, Arma 1 ammunition and armour together** (owner's decision): generated
+`A1a_<ammo>` CfgAmmo classes on the CWA ammunition of the same kind take Arma 1's hit,
+indirectHit and indirectHitRange; the rebuilt vehicle weapons and every Arma 1 magazine
+whose round differs from the carrier's (now generated even when the size matches) fire
+them; Arma 1 vehicles take their Arma 1 armour (T-72 690 vs CWA 400, M1A1 900 = 900,
+UAZ/HMMWV 40 vs 20, M113 105 vs 150, UH-60 30 vs 60). `OP_A1_BALLISTICS=0` turns both off.
+
+| check (0927bf7a) | result |
+|---|---|
+| a1weapAT, with / without `OP_A1_BALLISTICS` | T-72 destroyed by the M136/LAW salvo in both; M1A1 after the RPG-7V: damage 0.80 (Arma 1) vs 0.66 (CWA) |
+| magazines (log) | e.g. `100Rnd_762x51_M240` on CWA's M60 (same size) fires `A1a_B_762x51_Ball`; `15Rnd_9x19_M9` on the Beretta fires `A1a_B_9x19_Ball` |
+| a1vehArm, a1weapMag | unchanged (vehicle weapons fire; M24 5 rounds, M107 refuses M24 rounds) |
+| 20-mission subset (`_b1`) | 20/20 exit 0 |
+
+Crew-seat diagnostic (4b3970af), Arma 1 HMMWV M2 on JeepMG, LOD 0, model box
+(-1.70 -2.51 -2.56)..(1.70 2.51 2.56): driver (-0.93 -1.58 0.28), gunner (-0.15 -1.43 -0.15),
+cargo (0.53 -1.57 0.23) (0.61 -1.59 -0.70) (-0.90 -1.54 -0.71) -- the passengers sit at the
+driver's height, so the seats themselves are in the car; why the passengers are drawn on
+the ground is still open (their Arma 1 cargo move is the next suspect).
+
+**All 131 missions on 01192861 with Arma 1 ballistics** (go22, 09:29-10:21, from `dist`):
+131/131 entered and exited 0 (`summary_01192861_full.txt` on the build machine).
+
+**Passengers on the ground** (go23, 0bc7f406): the seats are identical on every LOD that has
+them, so no LOD swap moves them. Two causes, both fixed and deployed:
+
+- **The seat placement** (3b5a0c81): a crew proxy places the man's *source* origin, but an
+  Arma ODOL man is stored around the binariser's bounding centre (`AnimationOrigin`), and the
+  crew code only added `BoundingCenter()` (zero for drawing). Every Arma 1 crew member sat
+  ~0.9 m below his seat -- the HMMWV driver, gunner and passengers under the car. The seat,
+  the crew proxy, its complexity and the in-vehicle camera now add `BoundingCenter() -
+  AnimationOrigin()`, as the shape adapter already does for proxied models (zero for
+  OFP/CWA models).
+- **The pose** (0e52494c): the crew sat in the CWA jeep's actions mapped to the nearest
+  Arma 1 state by name (`uaz_driver`, `uaz_gunner01`, `uaz_cargo01`). Every crew pose an
+  Arma 1 vehicle names (driverAction, cargoAction[], the turrets' gunnerAction and their
+  *InAction) is now a vehicle action `ManActA1_<state>` (117 registered); the generated
+  class names them. `OP_A1_CREW_ACTIONS=0` turns it off; a man whose moves lack a pose plays
+  the CWA pose of that seat.
+
+| check | result |
+|---|---|
+| a1crew (go24, 0bc7f406) | `uaz_driver`, `uaz_gunner01`, `uaz_cargo01(_v1)`; everyone under the car |
+| a1crew (go26, 3b5a0c81) | `hmmwv_driver`, `hmmwv_gunner01`, `hmmwv_cargo01`; nobody under the car |
+| a1crew3 (camera, d974050d) | HMMWV M2 gunner in the hatch behind the M2, facing forward (front and rear views); UAZ DShKM gunner in the ring at the gun, driver seated |
+| a1cargo, a1vehSeats, a1vehArm | exit 0; a1vehArm gunner on the HMMWV roof |
+| 22-mission gate g50 (0e52494c) and g51 (3b5a0c81) | 22/22 exit 0 each |
+
+**3b5a0c81 deployed** (stamped 2026-10-16 11:34; exe, PoseidonGame.exe and DLL from one
+build, previous binaries in `Remastered\backup-before-3b5a0c81`). d974050d only adds the
+seat direction to the diagnostic (all HMMWV seats face +z) and is not deployed.
+
+## Gunners hold fire (2026-10-16 noon; 51a79bf9, bd7a23ce)
+
+`a1gunfire`: an HMMWV M2 (West) and a UAZ DShKM (East) 65-70 m apart with infantry, nobody
+captive. Before: both gunners knew their targets (knowsAbout 4) and **never fired**, with Arma 1
+or CWA weapons alike (`a1gunfire0`); CWA's own JeepMG with the same Arma 1 crew did fire
+(`a1gunfire1`). Diagnostics (5dfd5f23, 8d55f768): the turret slewed onto the target (yRot =
+wanted), but the computed gun direction stayed straight ahead, so the aim error (9.4 m at
+65 m) never fell below the allowed 1.5 m.
+
+Cause: OFP models put every gun point into the turret selection, and the turret transform
+reaches the gun through it. Arma models chain gun to turret through their skeleton; the
+HMMWV's muzzle is in the memory LOD's gun selection but not the turret's, so the gun only
+elevated. **51a79bf9**: `Turret::AnimatePoint/AnimateMatrix` also apply the turret transform
+to what the gun transform moved and the turret's did not -- a case OFP models cannot produce.
+
+| a1gunfire | before | 51a79bf9 |
+|---|---|---|
+| HMMWV M2 | 100 rounds left after 28 s, aim error 1.97-3.42 m | fires from the first seconds (76, 49, 22, reload, 96 ...), aim error 0.10-0.25 m of 1.77 |
+| UAZ DShKM | 50 rounds, error 9.4-15.5 m | fires (40 left); its gunner killed by the M2 |
+
+`weaponDirection` returned the body's heading for every weapon (an Arma 2 stub); **bd7a23ce**
+returns the named weapon's barrel direction.
+
+bd7a23ce: a1gunfire (M2 fires, `weaponDirection` follows the turret: 0.15, 0.29 east), a1crew3,
+22-mission gate 22/22 exit 0 -- **deployed** (stamped 2026-10-16 12:33; exe, PoseidonGame.exe
+and DLL md5-identical to `dist`; previous binaries in `Remastered\backup-before-bd7a23ce`).
+**All 131 missions on bd7a23ce** (12:34-13:26, from `dist`): 131/131 exit 0.
+
+`a1tank` (bd7a23ce): Arma 1 M1A1 against T-72 at 140 m, full crews, nobody captive. Both
+turrets traverse onto each other (`weaponDirection` 0.16/0.97 and -0.16/-0.98, the bearing
+between them), both fire their main gun (M1A1 2 rounds, T-72 1), the T-72 is at damage 0.85
+after two hits, the M1A1 at 0 after one (Arma 1 armour 900). Main guns are still CWA's
+(`Gun120` on both -- see Known gaps).
+
+## Tanks fire their own main guns (2026-10-16 afternoon; 7e00850f, deployed)
+
+Owner's decision 2026-10-15 ("original weapons everywhere"): tanks now join cars, boats and
+statics. The main turret's weapons are rebuilt; a cannon keeps SABOT and HE apart the way CWA
+builds `Gun120` (CWA config, `a1cfgdump`: `Gun120` magazines `Heat120`/`Shell120`, each a
+CfgWeapons class with ammo, count, reload): `A1v_<gun>` on `Gun120` (120/122/125 mm) or `Gun73`
+with `magazines[]` naming generated `A1m_<magazine>` classes, each on CWA's anti-armour
+(`Heat120/73`) or high-explosive (`Shell120/73`) round with the Arma 1 name, rounds, muzzle
+velocity, reload time, sound and damage. The commander's own weapon (M1A1 M2, T-72 DShKM) has
+no seat in CWA's tank and is left out (deviation).
+
+| a1tank (7e00850f) | result |
+|---|---|
+| M1A1 | `M256` -> Gun120 with `20Rnd_120mmSABOT_M1A2` (Heat120) and `20Rnd_120mmHE_M1A2` (Shell120), `M240_veh` on MachineGun7_6 |
+| T-72 | `D81` -> Gun120 with `23Rnd_125mmSABOT_T72` and `22Rnd_125mmHE_T72`, `PKT` |
+| fight at 140 m | M1A1 fires 2 SABOT (20 -> 18), T-72 destroyed (damage 1); T-72 fires 1, M1A1 at 0.68 |
+| a1gunfire, a1vehArm, 22-mission gate | exit 0, gate 22/22 |
+
+Deployed 2026-10-16 14:58 (stamped; exe, PoseidonGame.exe and DLL md5-identical to `dist`;
+previous binaries in `Remastered\backup-before-7e00850f`). **All 131 missions on 7e00850f**
+(15:01-15:53): 131/131 exit 0.
+
+## Helicopters and planes carry their own weapons (85943a89)
+
+The pilot's weapons (the vehicle's own `weapons[]`) and the gunner's (first turret) are rebuilt
+into CWA's single weapons list. CWA kinds (CWA config, `a1cfgdump2`): unguided rockets on the
+Zuni (`ZuniLauncher38`, FFAR 70 mm, S-8 80 mm) or `Rocket57x64` (57 mm); anti-armour missiles
+from aircraft on `HellfireLauncherCobra` (Hellfire, Maverick, Vikhr, Ch-29); bombs on
+`LaserGuidedBombLauncher` (GBU-12); anti-aircraft missiles (`airLock`: Sidewinder, R-73,
+Stinger) on CWA's AA launcher -- the Stinger pods rode the AT-3 before. An unarmed Arma 1
+aircraft on an armed CWA one drops its weapons. Left out: the Camel's dropped grenades.
+
+| a1air (85943a89) | weapons (log) | in 25 s |
+|---|---|---|
+| AH-1W | M197 (MachineGun30), FFAR (Zuni), Hellfire | did not fire |
+| A-10 | GAU-8 (MachineGun30), Maverick (Hellfire), FFAR | fired 22 GAU-8 rounds; then destroyed (crashed or shot down, not determined) |
+| AH-6 | FFAR, TwinM134 (MachineGun7_6) | did not fire |
+| Mi-17 | 57 mm rockets (Rocket57x64) | destroyed |
+| ground | UAZ DShKM destroyed, T-72 damage 0.10 | |
+
+a1tank and a1gunfire unchanged (M1A1 SABOT kills the T-72; M2 and DShKM fire); 22-mission gate
+22/22 exit 0 -- **deployed** 2026-10-16 16:10 (stamped; exe, PoseidonGame.exe and DLL
+md5-identical to `dist`; previous binaries in `Remastered\backup-before-85943a89`). Full
+131-mission run (16:14-17:07): **131/131 exit 0**.
+
+`a1heli` (85943a89, 150 s, `A1_SHOTS` for later screenshots): an AH-1W against a T-72, a BMP-2
+and a UAZ at ~800 m. Within 20 s it fires two Hellfires (8 -> 6): T-72 and BMP-2 destroyed
+(damage 1 each). It then hovers at 48 m and 770 m for the rest; the UAZ is left alone (M197
+and FFAR unused at that range).
+
 
 ## Known gaps (honest list)
 

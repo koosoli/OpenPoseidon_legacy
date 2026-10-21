@@ -1,0 +1,16 @@
+; Under fire (@OP_Swim, underwater ballistics): the player in ~5.5 m of water off the Everon bay beach, in god mode
+; (allowDamage false: no hit, blast or drowning hurts him); four East riflemen on the beach 24 m away fire into the
+; water around him and grenades drop in near him. Dive with Z to watch the rounds and the blasts from below.
+; The fire is scripted (fire.sqs, grenade.sqs): the AI would not shoot at a diver it cannot see.
+setViewDistance 1500
+player allowDamage false
+player setPos [9950, 1482, 0]
+player setDir 0
+player switchCamera "EXTERNAL"
+{_x disableAI "MOVE"; _x setUnitPos "UP"; [_x] exec "fire.sqs"} forEach [e1, e2, e3, e4]
+g1 disableAI "MOVE"
+g1 setUnitPos "UP"
+[g1] exec "grenade.sqs"
+~2
+hint "Under fire (god mode): riflemen on the beach shoot into the water around you and grenades drop in near you. Z dives, Q comes up, W swims."
+exit

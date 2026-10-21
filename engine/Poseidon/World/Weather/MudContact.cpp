@@ -1,5 +1,7 @@
 #include <Poseidon/World/Weather/MudContact.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
+#include <Poseidon/World/Weather/MudTraction.hpp>
+#include <Poseidon/World/Weather/MudCoat.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
@@ -17,12 +19,18 @@ static bool AdmitMudContact(const Landscape& land, Object& actor, Vector3Par foo
     // Native/A3 masks may mix soft and hard layers inside one palette tile.
     // Until their exact point-mask producer is available, fail closed rather
     // than repurpose an inherited dirt texture or a representative tile label.
-    if (land.GetEnfusionSurfaceCount() != 0) return false;
+    // Test switch: POSEIDON_MUD_ANY_SOIL=1 treats any natural ground as mud (roads,
+    // water, snow and roofed ground are still excluded below), e.g. on Desert Island.
+    static const bool anySoil = [] {
+        const char* v = std::getenv("POSEIDON_MUD_ANY_SOIL");
+        return v && v[0] == '1';
+    }();
+    if (land.GetEnfusionSurfaceCount() != 0 && !anySoil) return false;
     const float landGrid = land.GetLandGrid();
     if (!std::isfinite(landGrid) || landGrid <= 0.0f) return false;
     const float extent = land.GetLandRange() * landGrid;
     constexpr float guard = MudField::MaxContactRadius + 0.075f + MudField::CellSize;
-    for (int z = -1; z <= 1; ++z)
+    for (int z = -1; z <= 1 && !anySoil; ++z)
         for (int x = -1; x <= 1; ++x)
         {
             const float east = foot.X() + x * guard, north = foot.Z() + z * guard;
@@ -73,8 +81,20 @@ bool StampMudWheelContact(const Landscape& land, Object& actor, Vector3Par point
     // collision. Allow its penetration tolerance; still reject sea/roads/roofs.
     if (!profile.enabled || !AdmitMudWheelContact(land, actor, point)) return false;
     auto& mud = GMud();
-    const float depth = std::min(profile.maxDepth, mud.ContactDepth() * profile.depthScale);
-    const bool changed = mud.Stamp(point.X(), point.Z(), MudField::ContactRadius(depth), depth, 0.8f);
+    // A fresh pass already presses most of the way to the rut cap (MudFirstPassDepth);
+    // every later wheel over the same rut presses it a little deeper, up to the cap.
+    const float base = std::min(profile.maxDepth, mud.ContactDepth() * profile.depthScale);
+    const float cap = MudRutCap(profile.digMax, mud.ContactDepth(), base);
+    const float stored = std::max(0.0f, -mud.HeightOffsetAt(point.X(), point.Z()));
+    const float depth = MudRutPassDepth(stored, MudFirstPassDepth(base, cap), cap);
+    // Uneven rut: varied depth/width, wandering centre, and lumpy ridges of the
+    // soil the tyre pushed aside (PlanMudRutStamp).
+    const Vector3 dir = actor.Direction();
+    const MudRutStamp rut = PlanMudRutStamp(point.X(), point.Z(), dir.X(), dir.Z(),
+                                            MudWheelRutRadius(depth), depth);
+    bool changed = mud.Stamp(rut.x, rut.z, rut.radius, rut.depth, 0.8f);
+    for (int k = 0; k < 2; ++k)
+        changed = mud.Raise(rut.rimX[k], rut.rimZ[k], rut.rimRadius[k], rut.rimHeight[k]) || changed;
     static const bool trace = [] {
         const char* value = std::getenv("POSEIDON_MUD_TRACE");
         return value && value[0] == '1';
@@ -85,6 +105,57 @@ bool StampMudWheelContact(const Landscape& land, Object& actor, Vector3Par point
                  mud.HeightOffsetAt(point.X(), point.Z()), mud.Revision());
     // Admission, not mutation: a saturated rut remains a valid trail anchor.
     return true;
+}
+
+bool StampMudTrackContact(const Landscape& land, Object& actor, Vector3Par point, float halfWidth,
+                          MudWheelProfile profile)
+{
+    if (!profile.enabled || !AdmitMudWheelContact(land, actor, point)) return false;
+    auto& mud = GMud();
+    const float base = std::min(profile.maxDepth, mud.ContactDepth() * profile.depthScale);
+    const float cap = MudRutCap(profile.digMax, mud.ContactDepth(), base);
+    const float stored = std::max(0.0f, -mud.HeightOffsetAt(point.X(), point.Z()));
+    const float depth = MudRutPassDepth(stored, MudFirstPassDepth(base, cap, 0.5f), cap);
+    const Vector3 dir = actor.Direction();
+    const MudTrackStamp t = PlanMudTrackStamp(point.X(), point.Z(), dir.X(), dir.Z(), halfWidth, depth);
+    if (!t.valid) return true;
+    for (int k = 0; k < 3; ++k) mud.Stamp(t.x[k], t.z[k], t.radius, t.depth[k], 0.8f);
+    for (int k = 0; k < 2; ++k) mud.Raise(t.rimX[k], t.rimZ[k], t.rimRadius[k], t.rimHeight[k]);
+    return true;
+}
+
+void DigMudTrack(Object& actor, Vector3Par point, float halfWidth, float depth, float spin, float seconds)
+{
+    if (!(depth > 0.0f)) return;
+    auto& mud = GMud();
+    const Vector3 dir = actor.Direction();
+    const MudTrackStamp t = PlanMudTrackStamp(point.X(), point.Z(), dir.X(), dir.Z(), halfWidth, depth, spin);
+    if (!t.valid) return;
+    const float pressure = MudDigPressure(spin, seconds);
+    // A trough along the belt, not a pit: shallower ahead and behind.
+    for (float along : {0.0f, -0.6f, 0.6f})
+    {
+        const float scale = along == 0.0f ? 1.0f : 0.6f;
+        for (int k = 0; k < 3; ++k)
+            mud.Stamp(t.x[k] + dir.X() * along, t.z[k] + dir.Z() * along, t.radius, t.depth[k] * scale, pressure);
+    }
+    for (int k = 0; k < 2; ++k) mud.Raise(t.rimX[k], t.rimZ[k], t.rimRadius[k], t.rimHeight[k]);
+}
+
+bool MudCoatRenderLanes(const Object& vehicle, const MudCoat& coat, float& encoded, float& planeD, float& upPacked)
+{
+    if (std::max(coat.wheels, coat.body) < 0.01f) return false;
+    encoded = EncodeMudCoat(coat);
+    // Mud is measured along the vehicle's own up axis from its lowest point, so
+    // the mud line rides with the body over slopes and bumps.
+    const LODShape* shape = vehicle.GetShape();
+    const float minY = shape ? shape->Min().Y() : -1.0f;
+    const Vector3 bottom = vehicle.PositionModelToWorld(Vector3(0, minY, 0));
+    const Vector3 up = vehicle.DirectionUp();
+    upPacked = PackMudUp(up.X(), up.Y(), up.Z());
+    const MudUp q = UnpackMudUp(upPacked); // the exact axis the shader will use
+    planeD = bottom.X() * q.x + bottom.Y() * q.y + bottom.Z() * q.z;
+    return std::isfinite(encoded) && std::isfinite(planeD) && std::isfinite(upPacked);
 }
 
 bool StampMudFootstep(const Landscape& land, Object& actor,

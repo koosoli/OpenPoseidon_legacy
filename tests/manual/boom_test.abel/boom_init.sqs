@@ -1,0 +1,22 @@
+; BOOM test mission (feat/ground-explosions): sunny, a LAW on your back, and an action menu
+; for shells and rockets. The garage row north of you (about 9745,4002): its east side wall is the
+; verified breach target ("go to the garages" puts you there). Shoot walls with the rifle for marks.
+; invulnerable: a test mission ends (and the game exits) when the player dies
+_this allowDamage false
+0 setOvercast 0
+0 setFog 0
+; a rifleman's ten slots are full: drop the grenades so the rockets and satchels fit
+_this removeMagazines "HandGrenade"
+_this addMagazine "LAWLauncher"
+_this addMagazine "LAWLauncher"
+_this addMagazine "LAWLauncher"
+_this addWeapon "LAWLauncher"
+_this addMagazine "PipeBomb"
+_this addMagazine "PipeBomb"
+_this addAction ["BOOM: 120 mm shell 40 m ahead", "boom_shell.sqs"]
+_this addAction ["BOOM: barrage of 6 shells ahead", "boom_barrage.sqs"]
+_this addAction ["BOOM: HE round straight ahead (wall breach)", "boom_rocket.sqs"]
+_this addAction ["BOOM: rearm LAW + satchels", "boom_rearm.sqs"]
+_this addAction ["BOOM: hand grenade 12 m ahead", "boom_grenade.sqs"]
+_this addAction ["BOOM: set a jeep on fire 12 m ahead", "boom_jeep.sqs"]
+_this addAction ["BOOM: go to the garages", "boom_garages.sqs"]

@@ -227,7 +227,11 @@ std::string DlssRuntimeVersionString()
             {
                 std::string p(exe);
                 const size_t slash = p.find_last_of("\\/");
-                p = (slash == std::string::npos ? std::string() : p.substr(0, slash + 1)) + "nvngx_dlss.dll";
+                const std::string dir = slash == std::string::npos ? std::string() : p.substr(0, slash + 1);
+                p = dir + "nvngx_dlss.dll";
+                // the shareable build keeps the snippet in assets\ beside the exe
+                if (GetFileAttributesA(p.c_str()) == INVALID_FILE_ATTRIBUTES)
+                    p = dir + "assets\\nvngx_dlss.dll";
                 if (p.size() < MAX_PATH)
                     memcpy(path, p.c_str(), p.size() + 1);
             }

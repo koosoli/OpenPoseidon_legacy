@@ -1753,6 +1753,8 @@ void Helicopter::Draw(int level, ClipFlags clipFlags, const FrameBase& pos)
                         textColor, 0, text, 0, 0, x2c, 1);
 }
 
+DEFINE_CASTING(HelicopterAuto)
+
 HelicopterAuto::HelicopterAuto(VehicleType* name, Person* pilot)
     : Helicopter(name, pilot), _pilotHeading(0), _pilotSpeed(VZero), _pilotHeight(2.5), _pilotHeadingSet(false),
       _pilotDiveSet(false), _hoveringAutopilot(false), _dirCompensate(0.5), _defPilotHeight(50), _forceDive(1),

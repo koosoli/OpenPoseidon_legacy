@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -97,6 +98,12 @@ struct EbinPlacement
     //! height lives with the exporter that has a terrain to resolve against
     //! (`IsTerrainRelative` in XobCommand.cpp).
     bool hasFlags = false;
+    //! RFG-130: the `Flags` pair itself -- bits SET and bits CLEARED over the flags the
+    //! prefab chain declares (prefabs write `Flags 0x80403 0`, instances `Flags 0 0x80000`).
+    //! Bit 0x80000 is EntityFlags.RELATIVE_Y (public Enfusion script API: "The Y coordinate
+    //! stored in..."); the 870,021 instances that clear it sit on the terrain at absolute Y.
+    uint32_t flagsSet = 0;
+    uint32_t flagsClear = 0;
 
     //! RFG-027: the shape of a spline entity, in the entity's OWN local frame.
     //!
@@ -117,6 +124,41 @@ struct EbinPlacement
     std::string materialGuid;   //!< `Material`, resolvable through the resource database
 };
 
+//! RFG-134: one river. Everon's 28 rivers are a `SplineShapeEntity` whose `Points` carry the
+//! centreline (each point may carry a `RiverPointData`), with a child `RiverEntity` generator
+//! holding `Width`, `Material` (MatRiver), `ReverseFlow` and `SplineOffsetUp`. Kept in its own
+//! list rather than on EbinPlacement: 1.2 M placements grow in one vector, and widening that
+//! struct pushed its growth step past what the engine heap will hand out in one block.
+struct EbinRiver
+{
+    float position[3] = {0.0f, 0.0f, 0.0f}; //!< the carrier's composed `coords`
+    float yawDeg = 0.0f;
+    std::vector<float> points;              //!< x,y,z triples, local to `position`
+    std::vector<float> pointWidths;         //!< per point: `FixedWidth`, 0 when unset
+    std::vector<int> pointWidthModes;       //!< per point: `WidthOverride` (2 = fixed), 0 when unset
+    float width = 0.0f;
+    float splineOffsetUp = 0.0f;
+    bool reverseFlow = false;
+    bool isRiver = false;                   //!< a RiverEntity generator was found inside
+    //! RFG-163: a `LakeGeneratorEntity` inside a closed `PolylineShapeEntity` -- a pond or pool
+    //! (Everon has 62). `points` is then the shore polygon; the water stands at its lowest point
+    //! (the generator's m_bFlattenByBottomPlane).
+    bool isLake = false;
+    //! RFG-165: the LakeGeneratorEntity's own local `coords` Y. The water stands this far from the
+    //! shore spline: Lake_Center (Everon's largest lake) draws its spline 7 m above the surface
+    //! (`coords 0 -7 0`), so without it the lake sat 7 m high and the camera at its shore saw
+    //! only the dry bed.
+    float lakeOffsetY = 0.0f;
+    std::string materialGuid;
+};
+
+//! RFG-134: the spline carrier whose `Points` a child generator (a river) builds on.
+inline bool IsSplineCarrierClass(const std::string& className)
+{
+    // RFG-163: ponds are a LakeGeneratorEntity on a closed PolylineShapeEntity.
+    return className == "SplineShapeEntity" || className == "PolylineShapeEntity";
+}
+
 //! Whether a class name is one whose f32[3] arrays are a spline centreline.
 //!
 //! A closed set rather than a substring test: `PowerlineEntity` and `RiverEntity`
@@ -126,12 +168,26 @@ inline bool IsRoadSplineClass(const std::string& className)
     return className == "RoadGeneratorEntity" || className == "RoadEntity";
 }
 
+//! RFG-120: named child blocks with no prefab of their own are overrides of the parent
+//! prefab's children and place nothing. POSEIDON_EBIN_CHILD_OVERRIDES=1 restores the old
+//! inheritance (the parent's prefab drawn again at the override's offset) for an A/B.
+inline bool EbinPrefabChildOverridesSkipped()
+{
+    static const bool skipped = []
+    {
+        const char* env = std::getenv("POSEIDON_EBIN_CHILD_OVERRIDES");
+        return !(env && env[0] == '1');
+    }();
+    return skipped;
+}
+
 struct EbinWorld
 {
     uint32_t version = 0;
     std::vector<std::string> names;
     std::vector<std::string> guids; //!< uppercase hex
     std::vector<EbinPlacement> placements;
+    std::vector<EbinRiver> rivers; //!< RFG-134
     size_t blocks = 0;
     size_t entityBlocks = 0;
     size_t opaqueBlobs = 0;

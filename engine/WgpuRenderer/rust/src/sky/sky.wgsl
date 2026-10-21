@@ -2321,6 +2321,28 @@ fn fs_sky_env(in: VsOut) -> @location(0) vec4<f32> {
 // The resolved single-sample prepass depth (reversed-Z: 0 = far/sky) rides group(1) binding 6 —
 // binding 6 avoids the froxel's group(1) bindings 0-5.
 @group(1) @binding(6) var scene_depth: texture_depth_2d;
+// PERF-CLOUD-TEMPORAL (sky/mod.rs render_cloud): last frame's march and how to reuse it.
+struct CloudTemporal {
+    prev_vp: mat4x4<f32>, // last frame's camera-relative view-projection
+    params: vec4<f32>,    // x = reuse allowed, y = this frame's marched phase (0..3)
+};
+@group(1) @binding(7) var cloud_hist: texture_2d<f32>;
+@group(1) @binding(8) var<uniform> cloud_tc: CloudTemporal;
+
+// Whether the full-resolution depth around this low-res pixel is sky everywhere: a 3x3 probe
+// two full-res pixels apart, so a reused pixel keeps a margin from every terrain silhouette.
+fn cloud_sky_neighbourhood(uv: vec2<f32>, dd: vec2<f32>) -> bool {
+    let centre = vec2<i32>(clamp(uv, vec2<f32>(0.0), vec2<f32>(0.9999)) * dd);
+    let hi = vec2<i32>(dd) - vec2<i32>(1);
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            if (textureLoad(scene_depth, clamp(centre + vec2<i32>(x, y) * 2, vec2<i32>(0), hi), 0) > 0.0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
 
 @fragment
 fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
@@ -2340,6 +2362,23 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
     if (d > 0.0) {
         let wh = sky.inv_view_proj * vec4<f32>(ndc, 1.0 - d, 1.0);
         scene_dist = length(wh.xyz / wh.w);
+    }
+
+    // PERF-CLOUD-TEMPORAL: three pixels in four of an all-sky, upward neighbourhood take last
+    // frame's march at this direction; the fourth (the rotating phase) marches as always.
+    if (cloud_tc.params.x > 0.5 && d == 0.0 && dir.y > 0.02) {
+        let hp = vec2<u32>(in.clip.xy);
+        let phase = (hp.x & 1u) | ((hp.y & 1u) << 1u);
+        if (phase != u32(cloud_tc.params.y) && cloud_sky_neighbourhood(in.uv, dd)) {
+            let c = cloud_tc.prev_vp * vec4<f32>(dir * 1000.0, 1.0);
+            if (c.w > 1e-4) {
+                let puv = (c.xy / c.w) * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
+                if (all(puv > vec2<f32>(0.0)) && all(puv < vec2<f32>(1.0))) {
+                    let hd = vec2<f32>(textureDimensions(cloud_hist));
+                    return textureLoad(cloud_hist, vec2<i32>(puv * hd), 0);
+                }
+            }
+        }
     }
 
     // Water is depth-read-only. A ray missing the spherical ground can still hit

@@ -5,6 +5,11 @@
 #include <Poseidon/World/Physics/ProjectileImpulse.hpp>
 #include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 #include <Poseidon/Dev/Diag/TerrainBrush.hpp>
+#include <Poseidon/World/Terrain/CraterField.hpp>
+#include <Poseidon/World/Effects/FireVolumes.hpp>
+#include <Poseidon/World/Effects/BuildingBreach.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
+#include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
@@ -13,7 +18,12 @@
 #include <Poseidon/World/Terrain/WaterSurfaceQuery.hpp>
 #include <Poseidon/World/Terrain/WaterBodies.hpp>
 #include <stdlib.h>
+#include <algorithm>
+#include <atomic>
+#include <vector>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Containers/Array2D.hpp>
@@ -49,6 +59,9 @@ using Poseidon::Foundation::MStorage;
 #include <Poseidon/World/Scene/Thing.hpp>
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/UnderwaterBubbles.hpp>
+#include <Poseidon/World/Entities/Infantry/SwimView.hpp>
+#include <Poseidon/World/Entities/Weapons/UnderwaterBallistics.hpp>
 #define PROFILE_COLLISIONS 1
 
 #if PROFILE_COLLISIONS
@@ -272,43 +285,154 @@ void Landscape::ObjectCollision(CollisionBuffer& retVal, Object* with, Object* i
     if (boundingSphere < 50)
 #endif
     {
-        for (x = xMin; x <= xMax; x++)
+        // PERF (2026-10-14): the rectangle above spans the whole segment, so a long query
+        // walks O(length^2) cells -- the HUD's cursor ray (InGameUI::CheckCursorTarget, every
+        // frame, several hundred metres) was 11% of the Durras main thread, nearly all of it
+        // loading Objects this loop then threw away. A cell holding only static objects is
+        // skipped when the segment passes beyond its reach: nothing in it could survive
+        // Object::Intersect's own first test (LineQueryMaySkipCell has the proof). Cells with
+        // anything non-static are walked as before.
+        //   POSEIDON_OBJCOLL_CELL_CULL=0       the full walk, for an A/B
+        //   POSEIDON_OBJCOLL_CELL_CULL=verify  both, and log any query where they differ
+        static const int cellCull = []
         {
+            const char* v = std::getenv("POSEIDON_OBJCOLL_CELL_CULL");
+            if (v && std::strcmp(v, "verify") == 0)
+                return 2;
+            return (v && *v == '0') ? 0 : 1;
+        }();
+        int cellsSkipped = 0, cellsWalked = 0;
+        const auto visitCell = [&](const ObjectList& list, CollisionBuffer& out)
+        {
+            const int n = list.SizeNotEmpty();
+            for (int i = 0; i < n; i++)
+            {
+                Object* obj = list[i];
+                if (obj == with)
+                {
+                    continue;
+                }
+                if (obj == ignore)
+                {
+                    continue;
+                }
+                if (obj->GetType() == Network && obj->GetShape()->FindGeometryLevel() < 0)
+                {
+                    continue; // no collisions with roads
+                }
+                if (obj->GetType() == Temporary)
+                {
+                    continue; // no collisions with temporary
+                }
+                if (obj->GetType() == TypeTempVehicle)
+                {
+                    continue;
+                }
+                float dist2 = obj->Position().Distance2Inline(boundingCenter);
+                float maxDist2 = Square(boundingSphere + obj->GetRadius());
+                if (dist2 > maxDist2)
+                {
+                    continue;
+                }
+                obj->Intersect(out, beg, end, radius, type);
+            }
+        };
+        const auto walk = [&](CollisionBuffer& out, bool cull)
+        {
+            if (!cull)
+            {
+                for (x = xMin; x <= xMax; x++)
+                {
+                    for (z = zMin; z <= zMax; z++)
+                    {
+                        const ObjectList& list = _objects(x, z);
+                        if (!list.Null())
+                        {
+                            visitCell(list, out);
+                        }
+                    }
+                }
+                return;
+            }
+            // The cells are stored row by row (z * range + x), and the walk above goes down
+            // columns: on a 1024-cell native grid every step is a 16 KB stride, a cache and a
+            // TLB miss per cell, and a cursor ray out to tacticalZ spans tens of thousands of
+            // them. So scan rows, in memory order, keeping only cells the inline XZ summary
+            // cannot rule out -- then visit those in the column order above, so results come
+            // out exactly as the full walk orders them.
+            const int height = zMax - zMin + 1;
+            std::vector<int> keep;
+            keep.reserve(64);
             for (z = zMin; z <= zMax; z++)
             {
-                const ObjectList& list = _objects(x, z);
-                int n = list.Size();
-                for (int i = 0; i < n; i++)
+                const float cz = z * _landGrid + _landGrid * 0.5f;
+                for (x = xMin; x <= xMax; x++)
                 {
-                    Object* obj = list[i];
-                    if (obj == with)
+                    const ObjectList& list = _objects(x, z);
+                    if (list.Null())
                     {
                         continue;
                     }
-                    if (obj == ignore)
+                    const float cx = x * _landGrid + _landGrid * 0.5f;
+                    const float d2 = SegmentPointDistance2(beg.X(), 0, beg.Z(), end.X(), 0, end.Z(), cx, 0, cz);
+                    if (LineQueryMaySkipCell(d2, list.CullReachXZ()))
                     {
+                        ++cellsSkipped;
                         continue;
                     }
-                    if (obj->GetType() == Network && obj->GetShape()->FindGeometryLevel() < 0)
-                    {
-                        continue; // no collisions with roads
-                    }
-                    if (obj->GetType() == Temporary)
-                    {
-                        continue; // no collisions with temporary
-                    }
-                    if (obj->GetType() == TypeTempVehicle)
-                    {
-                        continue;
-                    }
-                    float dist2 = obj->Position().Distance2Inline(boundingCenter);
-                    float maxDist2 = Square(boundingSphere + obj->GetRadius());
-                    if (dist2 > maxDist2)
-                    {
-                        continue;
-                    }
-                    obj->Intersect(retVal, beg, end, radius, type);
+                    keep.push_back((x - xMin) * height + (z - zMin));
                 }
+            }
+            std::sort(keep.begin(), keep.end());
+            for (const int key : keep)
+            {
+                x = xMin + key / height;
+                z = zMin + key % height;
+                const ObjectList& list = _objects(x, z);
+                // Then in 3D against the cell's own sphere centre, which needs the list.
+                if (list->GetNonStaticCount() == 0)
+                {
+                    const Vector3 c = list->GetBSphereCenter();
+                    const float d2 = SegmentPointDistance2(beg.X(), beg.Y(), beg.Z(), end.X(), end.Y(), end.Z(), c.X(),
+                                                           c.Y(), c.Z());
+                    if (LineQueryMaySkipCell(d2, list->GetStaticReach()))
+                    {
+                        ++cellsSkipped;
+                        continue;
+                    }
+                }
+                ++cellsWalked;
+                visitCell(list, out);
+            }
+        };
+        walk(retVal, cellCull != 0);
+        if (cellCull == 2)
+        {
+            CollisionBuffer reference;
+            walk(reference, false);
+            const int got = retVal.Size() - firstContact;
+            bool equal = reference.Size() == got;
+            for (int i = 0; equal && i < got; ++i)
+            {
+                const CollisionInfo& a = retVal[firstContact + i];
+                const CollisionInfo& b = reference[i];
+                equal = a.object == b.object && a.under == b.under && a.pos == b.pos;
+            }
+            // The denominators say whether a 0 means anything: queries that hit something,
+            // and how many occupied cells the cull actually dropped.
+            static std::atomic<int64_t> queries{0}, mismatches{0}, hitting{0}, hits{0}, skipped{0}, walked{0};
+            const int64_t q = ++queries;
+            const int64_t m = equal ? mismatches.load() : ++mismatches;
+            hitting += reference.Size() > 0 ? 1 : 0;
+            hits += reference.Size();
+            skipped += cellsSkipped;
+            walked += cellsWalked;
+            if (!equal || (q & (q - 1)) == 0)
+            {
+                LOG_INFO(World,
+                         "ObjectCollision cell cull verify: {} queries ({} with hits, {} hits), {} mismatched{}; "
+                         "occupied cells skipped {} walked {}",
+                         q, hitting.load(), hits.load(), m, equal ? "" : " (this one)", skipped.load(), walked.load());
             }
         }
     }
@@ -857,6 +981,16 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
                         {
                             continue;
                         }
+                        // A vessel's deck (the roadway of something that moves: a boat) is dry: its hull keeps the
+                        // sea off it. A wave crest standing higher than the deck at this point read as deeper
+                        // "ground" and threw the deck's contact away, and the man on it dropped half a metre
+                        // through it (2026-10-19, Tidewater's boat in a swell).
+                        if (pInfo.type == GroundWater && !obj->Static())
+                        {
+                            retVal.Delete(p);
+                            nLands--;
+                            break;
+                        }
                         // prefer road: delete land info already present if road is higher
                         if (pInfo.under <= underLevel + preferRoad)
                         {
@@ -1049,6 +1183,112 @@ bool TidewaterWaterBurst(float x, float y, float z)
     const float sea = GLandscape->GetSeaLevel();
     return sea - GLandscape->SurfaceY(x, z) > 0.5f && y < sea + 1.5f;
 }
+
+namespace
+{
+float Rand01() { return GRandGen.RandomValue(); }
+
+// One billboard particle of the 1.85 particle system (the SQF `drop`): gravity, air drag
+// (rubbing), a size and colour curve over its life.
+// `hang`: neutrally buoyant (dust that stops where the air braked it) instead of falling.
+void DropBurstParticle(LODShapeWithShadow* shape, float life, Vector3Par at, Vector3Par vel, float weight,
+                       float rubbing, std::initializer_list<float> sizes, std::initializer_list<Color> colors,
+                       bool hang = false)
+{
+    AutoArray<float> size;
+    for (float s : sizes)
+        size.Add(s);
+    AutoArray<Color> color;
+    for (const Color& c : colors)
+        color.Add(c);
+    AutoArray<float> phase;
+    phase.Add(0.0f);
+    GLOB_WORLD->AddCloudlet(new CParticle(shape, "", PT_Billboard, 1000.0f, life, at, vel, Rand01() * 2.0f - 1.0f,
+                                          weight, hang ? weight / 1.275f : 0.0f, rubbing, size, color, phase, 1000.0f,
+                                          0.0f, "", ""));
+}
+} // namespace
+
+// BOOM-001: what a charge going off at the ground throws up (reference: photos of HE and
+// dirt bursts). The volumetric thrown earth (fire solver, FireKindDirt): a brown crown of
+// jets that falls back and a dust skirt that hangs; the 2001 game's 3D clods, thrown on
+// realistic arcs; a spray of soil chunks; and, for a high-explosive charge, hot fragments.
+// `ground` is the ground under the burst, `height` how far above it the charge went off.
+// Runs on every client (ExplosionDammageEffects).
+void GroundBurstEffects(Vector3Par ground, float height, const AmmoType& type)
+{
+    const float s = BlastScale(std::max(type.indirectHit, 1.0f)); // shell = 1, hand grenade ~0.2
+    const float coupling = std::clamp(1.0f - height / (2.5f * std::max(s, 0.4f)), 0.0f, 1.0f);
+    if (coupling <= 0.0f)
+        return;
+    const float k = std::sqrt(coupling);
+    // the earth's colour: loam, linear albedo; the solver's density scale in w
+    // (owner, 2026-10-18: no sprite smoke -- the volumetric one, and much more of it)
+    static const float soil[4] = {0.085f, 0.060f, 0.040f, 1.6f};
+    if (FireVolumesEnabled())
+        SpawnFireVolume(ground, (0.5f + 2.7f * s) * k, 1.0f, 1.0f + 2.5f * s, FireKindDirt, soil); // shell: 3.2 m, 3.5 s
+
+    const Camera* camera = GScene ? GScene->GetCamera() : nullptr;
+    if (!camera || camera->Position().Distance2(ground) > Square(700.0f))
+        return;
+    // every lump below is an entity: the full spray close by, a quarter of it far off where
+    // the lumps are a few pixels each (owner: "make sure the PC does not lag")
+    const float detail = std::clamp(1.0f - camera->Position().Distance(ground) / 600.0f, 0.25f, 1.0f);
+    // 3D clods (the game's own thrown-earth models), on ballistic arcs out of the crater
+    const int clods = std::clamp(int((10 + 100 * s) * k * detail), 3, 140); // shell 110, grenade ~30
+    for (int i = 0; i < clods; ++i)
+    {
+        const float a = Rand01() * 2.0f * H_PI;
+        const float elevation = (50.0f + 38.0f * Rand01()) * (H_PI / 180.0f);
+        const float speed = (12.0f + 18.0f * Rand01()) * std::sqrt(s) * k;
+        const Vector3 vel(std::cos(a) * std::cos(elevation) * speed, std::sin(elevation) * speed,
+                          std::sin(a) * std::cos(elevation) * speed);
+        Matrix4 at(MIdentity);
+        at.SetOrientation(Matrix3(MRotationX, Rand01() * 2.0f * H_PI) * Matrix3(MRotationY, Rand01() * 2.0f * H_PI));
+        at.SetPosition(ground + Vector3(std::cos(a) * 0.4f * s, 0.2f, std::sin(a) * 0.4f * s));
+        CreateThingEffect(TEGround, at, vel);
+    }
+    static LODShapeWithShadow* puff = Shapes.New(GetShapeName("cl_basic"), false, false);
+    if (!puff)
+        return;
+    // debris: lumps of soil and stone, dark, heavy, fast out of the crater in the crown's jets,
+    // falling back (small and opaque: specks of solid matter, not smoke)
+    const int chunks = std::clamp(int((40 + 420 * s) * k * detail), 10, 600); // shell 460, grenade ~120
+    const float jetPhase = Rand01() * 6.2831853f;
+    for (int i = 0; i < chunks; ++i)
+    {
+        float a = Rand01() * 2.0f * H_PI;
+        // bunch them into the crown's jets
+        a += 0.35f * std::sin(a * 3.5f + jetPhase);
+        const float elevation = (55.0f + 33.0f * Rand01()) * (H_PI / 180.0f);
+        const float speed = (16.0f + 34.0f * Rand01() * Rand01()) * std::sqrt(s) * k;
+        const Vector3 vel(std::cos(a) * std::cos(elevation) * speed, std::sin(elevation) * speed,
+                          std::sin(a) * std::cos(elevation) * speed);
+        const float tone = 0.6f + 0.6f * Rand01();
+        const Color c(0.11f * tone, 0.08f * tone, 0.055f * tone, 1.0f);
+        // lumps of every size: mostly fist-sized, some a spade's worth (visible at 50 m)
+        const float size = (0.12f + 0.45f * Rand01() * Rand01()) * std::sqrt(s);
+        DropBurstParticle(puff, 2.5f + 2.0f * Rand01(), ground + Vector3(0, 0.3f, 0), vel, 3.0f, 0.002f,
+                          {size, size, size}, {c, c, c, Color(c.R(), c.G(), c.B(), 0.0f)});
+    }
+    // hot fragments: high explosive only (a big indirect-hit range), bright, fast, short-lived
+    if (type.indirectHitRange >= 2.0f)
+    {
+        const int sparks = std::clamp(int((20 + 25 * s) * k), 8, 70);
+        for (int i = 0; i < sparks; ++i)
+        {
+            const float a = Rand01() * 2.0f * H_PI;
+            const float elevation = (8.0f + 70.0f * Rand01()) * (H_PI / 180.0f);
+            const float speed = (35.0f + 45.0f * Rand01()) * k;
+            const Vector3 vel(std::cos(a) * std::cos(elevation) * speed, std::sin(elevation) * speed,
+                              std::sin(a) * std::cos(elevation) * speed);
+            DropBurstParticle(puff, 0.25f + 0.5f * Rand01(), ground + Vector3(0, 0.5f, 0), vel, 0.05f, 0.0005f,
+                              {0.14f, 0.11f, 0.06f},
+                              {Color(1.0f, 0.92f, 0.65f, 1.0f), Color(1.0f, 0.62f, 0.22f, 0.9f),
+                               Color(0.8f, 0.3f, 0.08f, 0.0f)});
+        }
+    }
+}
 } // namespace Poseidon
 
 void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* directHit, Vector3Par pos, Vector3Par dir,
@@ -1057,6 +1297,32 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
     if (!type)
     {
         return;
+    }
+
+    // BOOM-002: a rocket or shell that hits a building punches a hole in the wall (every
+    // client runs this, and the hole's shape comes from the impact position).
+    if (directHit && type->explosive && type->indirectHit >= 40.0f)
+    {
+        static const bool breachTrace = [] { const char* v = std::getenv("POSEIDON_BREACH_TRACE"); return v && v[0] == '1'; }();
+        if (breachTrace)
+            LOG_INFO(World, "Breach call trace: pos [{:.2f},{:.2f},{:.2f}] shot {} at [{:.2f},{:.2f},{:.2f}] speed [{:.1f},{:.1f},{:.1f}] dir [{:.2f},{:.2f},{:.2f}]",
+                     pos.X(), pos.Y(), pos.Z(), shot ? "yes" : "no", shot ? shot->Position().X() : 0.0f,
+                     shot ? shot->Position().Y() : 0.0f, shot ? shot->Position().Z() : 0.0f,
+                     shot ? shot->Speed().X() : 0.0f, shot ? shot->Speed().Y() : 0.0f, shot ? shot->Speed().Z() : 0.0f,
+                     dir.X(), dir.Y(), dir.Z());
+        BuildingBreach::Breach(directHit, pos, dir, type->indirectHit, type->indirectHitRange);
+    }
+
+    // RFG-158: native Enfusion window panes inside the blast break (every client runs this).
+    if (type->explosive && type->indirectHit > 0 && type->indirectHitRange > 0 && _enfusionGlass.Count() > 0)
+    {
+        static const float blastScale = []
+        {
+            const char* env = std::getenv("POSEIDON_ENFUSION_GLASS_BLAST");
+            const float v = env ? static_cast<float>(std::atof(env)) : 1.5f;
+            return v > 0.0f ? v : 1.5f;
+        }();
+        BreakNativeGlassInRadius(pos, std::min(type->indirectHitRange * blastScale, 30.0f), type);
     }
 
     // TW-WATER W8a: an explosion on open water tells the water renderers so, with the ammo's blast
@@ -1084,6 +1350,24 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
             event.directionDepthFlags[2] = std::max(type->indirectHitRange, 0.1f);
             event.directionDepthFlags[3] = HydroWaterInteractionPendingImpulse;
             SubmitWaterInteraction(event);
+        }
+    }
+
+    // UNDERWATER: the blast's flash, gas bubble and bubble cloud. Here rather than in the
+    // shot so every client sees it (this runs for replicated explosions too).
+    if (type->explosive && Underwater::Enabled())
+    {
+        const float waterY = SwimMeanWaterLevel(pos.X(), pos.Z());
+        if (pos.Y() < waterY - 0.3f)
+        {
+            static std::uint32_t blasts = 0;
+            render::BubbleBlast blast;
+            blast.centre = {pos.X(), pos.Y(), pos.Z()};
+            blast.radius = std::clamp(type->indirectHitRange * 0.25f, 0.4f, 2.5f);
+            blast.surfaceY = waterY;
+            blast.birthMs = Glob.time.toInt();
+            blast.seed = ++blasts * 2654435761u ^ std::uint32_t(blast.birthMs);
+            render::RecordBubbleBlast(blast);
         }
     }
 
@@ -1231,7 +1515,25 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
         // under the sea. `surfY` is the sea bed there, so a vehicle exploding afloat left a burnt
         // disk -- and a dust column -- on the bottom beneath it, seen through the water.
         const bool underWater = surfY < GetSeaLevel();
-        if (y < maxY && !underWater)
+        // BOOM-001: the crater as ground geometry (CraterField, 0.25 m cells) instead of the
+        // 2001 flat crater decal. Every client runs this, and the seed comes from the impact
+        // position, so replicated explosions dig the same crater everywhere.
+        bool dug = false;
+        if (!directHit && !underWater && y < maxY)
+            GroundBurstEffects(Vector3(pos.X(), surfY, pos.Z()), y, *type);
+        if (!directHit && !underWater && Dev::RocketCraters().enabled)
+        {
+            const CraterShape shape = CraterShapeFor(type->indirectHit, type->indirectHitRange, y);
+            const uint32_t seed = uint32_t(int32_t(std::floor(pos.X() * 8.0f))) * 73856093u ^
+                                  uint32_t(int32_t(std::floor(pos.Z() * 8.0f))) * 19349663u;
+            dug = shape.Valid() && GCraters().Dig(pos.X(), pos.Z(), shape, seed);
+            if (dug)
+                LOG_INFO(World, "Crater: [{:.1f},{:.1f}] radius {:.2f} m depth {:.2f} m lip {:.2f} m (blast {} range {}, "
+                                "{:.2f} m above ground); {} craters, {} chunks",
+                         pos.X(), pos.Z(), shape.radius, shape.depth, shape.lip, type->indirectHit,
+                         type->indirectHitRange, y, GCraters().Craters(), GCraters().Chunks());
+        }
+        if (y < maxY && !underWater && !dug)
         {
             // place explosion crater on the ground
             float hit = floatMax(type->indirectHit * type->indirectHitRange, 5);
@@ -1324,7 +1626,9 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
     const float impulseExplScale = 600;
     if (directHit)
     {
-        float hitVal = type->hit - type->indirectHit;
+        float hitVal = (type->hit - type->indirectHit) * (shot ? shot->DamageScale() : 1.0f);
+        // BOOM-002: a hit that cuts a hole in a wall spends most of itself on the hole
+        hitVal *= BuildingBreach::StructureDamageShare(directHit, type->indirectHit, type->explosive);
 
         directHit->DirectDammage(shot, owner, pos, hitVal);
         // if directHit is vehicle, add force impulse
@@ -1360,7 +1664,11 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
             veh->AddImpulseNetAware(force, torque);
         }
     }
-    const float maxRadius = type->indirectHitRange * 4;
+    // UNDERWATER: a charge below the surface reaches submerged bodies over twice the
+    // range (water carries the shock) and hits what is above the surface far less.
+    const float blastWaterY = SwimMeanWaterLevel(pos.X(), pos.Z());
+    const float blastDepth = Underwater::Enabled() && type->explosive ? blastWaterY - pos.Y() : 0.0f;
+    const float maxRadius = type->indirectHitRange * 4 * (blastDepth > 0.3f ? 2.0f : 1.0f);
     const float hit = type->indirectHit;
     // terrainHole5: the object hit is normally left out of the shielding test (the explosion sits on its surface).
     // When it cuts a terrain hole (a cellar roof or floor), it still shields the other side of the ground: a shell on
@@ -1431,8 +1739,19 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
                     }
                 }
                 float unshieldedHit = hit * unshielded;
+                if (obj == directHit)
+                    unshieldedHit *= BuildingBreach::StructureDamageShare(directHit, type->indirectHit, type->explosive);
+                float hitRange = type->indirectHitRange;
+                Underwater::BlastShaping shaping;
+                // A body counts as in the water when its middle is under the surface (a swimmer is).
+                const bool submerged = obj->Position().Y() + 0.9f < SwimMeanWaterLevel(obj->Position().X(), obj->Position().Z());
+                if (Underwater::ShapeUnderwaterBlast(blastDepth, submerged, shaping))
+                {
+                    unshieldedHit *= shaping.hitScale;
+                    hitRange *= shaping.rangeScale;
+                }
 
-                obj->IndirectDammage(shot, owner, pos, unshieldedHit, type->indirectHitRange);
+                obj->IndirectDammage(shot, owner, pos, unshieldedHit, hitRange);
                 Vehicle* veh = dyn_cast<Vehicle>(obj);
                 if (veh && shot)
                 {
@@ -2333,6 +2652,13 @@ float Landscape::VisibleStrategic(Vector3Par from, Vector3Par to) const
 #if 1
     float dist = to.Distance(from);
     int samples = toIntFloor(dist * _invTerrainGrid * 2);
+    // Two samples per terrain cell is ~40 for a kilometre of CWA terrain (50 m grid) but
+    // 1600 on an Arma 3 world's 1.25 m heightmap, and the AI exposure map asks this for every
+    // dirty field against every armed target in range: on Tanoa (Apex) one simulation step
+    // took minutes. Strategic visibility is a coarse estimate; 256 samples (a CWA line of
+    // 6.4 km) are plenty, and nothing shorter than that changes.
+    if (samples > 256)
+        samples = 256;
     if (samples <= 0)
     {
         return 1;

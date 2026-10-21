@@ -8,21 +8,27 @@
 // a lifting surface in the propeller race, hull lift and cross-flow drag along the keel, running trim,
 // grounding. Tidewater tuned it for one 8.2 m, 3.2 t lobster boat; here every term is scaled from
 // that hull to each OFP boat's own mass, length and beam, and OFP's left/right thrust controls drive
-// the throttle and the rudder. The water heights come from the CPU sea as drawn near the camera
-// (SwimWaterSurfaceY), so servers and headless runs integrate the same sea.
+// the throttle and the rudder. The water heights come from the renderer's queries of the drawn sea at
+// the hull samples (DrawnWaterQuery, 1-3 frames late, as Tidewater's WaterQuery), else from the CPU
+// sea as drawn near the camera (SwimWaterSurfaceY), which servers and headless runs integrate.
 //
-// What OP changes: no GPU read-back latency to lead (the heights are the current frame's), the
+// What OP changes: the read-back latency is led and extrapolated for the queried heights only, the
 // mooring lines and pier capsules are OFP's object collision instead, and the hull samples are a
-// 7 x 3 grid over each model's footprint rather than an authored hull.
+// 7 x 3 grid over each model's footprint rather than an authored hull -- except for a ship whose config
+// describes its hull (class TidewaterHull: Tidewater's own boat, generate_tidewater_boat.py), which is
+// integrated with Tidewater's own waterplane patches, inertia, thrust, rudder and keel, unscaled.
 
 #include <Poseidon/World/Entities/Vehicles/Misc/Ship.hpp>
 #include <Poseidon/World/Entities/Infantry/SwimView.hpp>
+#include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 
 namespace Poseidon
@@ -64,8 +70,12 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
     const float length = std::max(hi.Z() - lo.Z(), 2.0f), beam = std::max(hi.X() - lo.X(), 1.0f),
                 height = std::max(hi.Y() - lo.Y(), 1.0f);
     const float m = std::max(GetMass(), 50.0f);
-    const float s = m / RefMass;                         // force scale against Tidewater's hull
-    const float lScale = std::sqrt(length / RefLength);  // Froude speed scale
+    // Tidewater's own hull (from the config) runs unscaled; any other is Tidewater's scaled to its size
+    const ShipType::TidewaterHull& own = Type()->GetTidewaterHull();
+    const bool ownHull = own.valid;
+    const int nSamples = ownHull ? own.samples : TwSamples;
+    const float s = ownHull ? 1.0f : m / RefMass;                         // force scale against Tidewater's hull
+    const float lScale = ownHull ? 1.0f : std::sqrt(length / RefLength);  // Froude speed scale
 
     // ---- the hull samples: an effective waterplane 0.79 of the beam and 0.9 of the length (Tidewater's
     // sx / sz), at keel level, centred on the centre of mass; waterplane coefficient 0.75
@@ -77,12 +87,29 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
     // 0.57 m), not from the bounding box: OFP models carry no displacement, and a box-derived waterplane
     // floated the PBR on 0.3 m, perched on the water (owner: "flies around").
     const float designDraft = ShipDesignDraft(length);
-    const float sampleArea = m / (Rho * designDraft) / float(TwSamples);
-    Vector3 sample[TwSamples];
-    for (int a = 0; a < Along; ++a)
-        for (int c = 0; c < Across; ++c)
-            sample[a * Across + c] = Vector3(comModel.X() + halfX * ((c + 0.5f) / Across * 2.0f - 1.0f), lo.Y(),
-                                             comModel.Z() + halfZ * ((a + 0.5f) / Along * 2.0f - 1.0f));
+    Vector3 sample[TwMaxSamples];
+    float sampleArea[TwMaxSamples], sampleDepth[TwMaxSamples];
+    if (ownHull)
+    {
+        for (int i = 0; i < nSamples; ++i)
+        {
+            sample[i] = own.sample[i];
+            sampleArea[i] = own.area[i];
+            sampleDepth[i] = own.depth[i];
+        }
+    }
+    else
+    {
+        for (int a = 0; a < Along; ++a)
+            for (int c = 0; c < Across; ++c)
+            {
+                const int i = a * Across + c;
+                sample[i] = Vector3(comModel.X() + halfX * ((c + 0.5f) / Across * 2.0f - 1.0f), lo.Y(),
+                                    comModel.Z() + halfZ * ((a + 0.5f) / Along * 2.0f - 1.0f));
+                sampleArea[i] = m / (Rho * designDraft) / float(TwSamples);
+                sampleDepth[i] = 0.35f * length / RefLength;
+            }
+    }
 
     // ---- this frame's water under each sample (where the hull is now), and the water's own vertical
     // velocity: the height change since the last frame minus what the sample's own move across the
@@ -90,26 +117,102 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
     const Matrix3 orient0 = Orientation();
     const Vector3 pos0 = Position();
     int overWater = 0;
-    for (int i = 0; i < TwSamples; ++i)
+    // the boat's very first step (see the settle below); a boat that starts beached never settles
+    const bool firstStep = !_tw.settled;
+    _tw.settled = true;
+
+    // (OP) The drawn sea, anywhere: the renderer evaluates the surface it draws at this hull's samples
+    // (asked here for the next frames, a latency ahead along the hull's motion, as Tidewater's
+    // queueQueries) and answers 1-3 frames late. Without it a boat outside the 16 m around the camera
+    // floated on the CPU predictor, which matches the drawn sea in scale but not crest for crest: in a
+    // storm it hung over drawn troughs and sank into crests (owner, 2026-10-13). All samples or none,
+    // so a hull never rides two seas; a server or another water mode has no results and keeps the
+    // predictor. POSEIDON_BOAT_QUERY=0: the predictor (and the grid near the camera) always.
+    static const bool useQuery = []
+    {
+        const char* v = std::getenv("POSEIDON_BOAT_QUERY");
+        return !(v && v[0] == '0');
+    }();
+    float qh[TwMaxSamples], qgx[TwMaxSamples], qgz[TwMaxSamples];
+    uint32_t qVersion = 0;
+    double qSeconds = 0;
+    bool fromQuery = useQuery;
+    if (useQuery)
+    {
+        float req[TwMaxSamples * 2];
+        constexpr float Lead = 0.05f;
+        for (int i = 0; i < nSamples && fromQuery; ++i)
+        {
+            const Vector3 w = pos0 + orient0 * sample[i];
+            req[i * 2] = w.X() + _speed.X() * Lead;
+            req[i * 2 + 1] = w.Z() + _speed.Z() * Lead;
+            fromQuery = DrawnWaterQuery(w.X(), w.Z(), qh[i], qgx[i], qgz[i], &qVersion, &qSeconds);
+        }
+        RequestWaterQueries(reinterpret_cast<uintptr_t>(this), req, nSamples);
+    }
+    const bool newResults = fromQuery && (!_tw.fromQuery || qVersion != _tw.qVersion);
+    const double nowSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    const float resultDt = float(qSeconds - _tw.qSeconds);
+    // Switching between the drawn sea and the predictor (the first results arriving, a boat leaving the
+    // query budget) jumps the water under every sample by up to 2 m in a storm; the jump is carried as
+    // an offset that fades over a few seconds. Instantly, a fresh boat fell at 6.5 m/s with its keel out
+    // of the water when the first results replaced the predictor's sea; faded over 0.5 s the water
+    // rose under it at 4 m/s and threw it 3 m up. At 2.5 s the water moves well under 1 m/s.
+    const bool switched = _tw.hasWater && fromQuery != _tw.fromQuery;
+    const float offsetFade = std::exp(-deltaT / 2.5f);
+
+    for (int i = 0; i < nSamples; ++i)
     {
         const Vector3 w = pos0 + orient0 * sample[i];
         if (GLandscape->SurfaceY(w.X(), w.Z()) < GLandscape->GetSeaLevel())
             ++overWater;
+        if (fromQuery)
+        {
+            // the water's vertical speed between two result sets (not between frames: a set is reused
+            // for 1-3 frames), less the part the sample's own move across the slope explains; the
+            // height is carried from the set's age to now along it
+            const float h = qh[i] - _sink;
+            if (newResults)
+            {
+                if (_tw.hasWater && _tw.fromQuery && resultDt > 1e-3f)
+                {
+                    const float dx = w.X() - _tw.qx[i], dz = w.Z() - _tw.qz[i];
+                    const float wv = (h - _tw.anchorH[i] - 0.5f * ((qgx[i] + _tw.gx[i]) * dx + (qgz[i] + _tw.gz[i]) * dz)) / resultDt;
+                    _tw.waterV[i] += (std::clamp(wv, -3.0f, 3.0f) - _tw.waterV[i]) * 0.5f;
+                }
+                _tw.anchorH[i] = h;
+                _tw.qx[i] = w.X();
+                _tw.qz[i] = w.Z();
+                _tw.gx[i] = qgx[i];
+                _tw.gz[i] = qgz[i];
+            }
+            const float base = h + _tw.waterV[i] * std::clamp(float(nowSeconds - qSeconds), 0.0f, 0.12f);
+            _tw.switchOff[i] = switched ? _tw.waterH[i] - base : _tw.switchOff[i] * offsetFade;
+            _tw.waterH[i] = base + _tw.switchOff[i];
+            continue;
+        }
         const float h = WaterAt(w.X(), w.Z()) - _sink;
         const float gx = (WaterAt(w.X() + 0.5f, w.Z()) - WaterAt(w.X() - 0.5f, w.Z())) * 1.0f;
         const float gz = (WaterAt(w.X(), w.Z() + 0.5f) - WaterAt(w.X(), w.Z() - 0.5f)) * 1.0f;
-        float wv = 0;
-        if (_tw.hasWater)
+        if (_tw.hasWater && !switched)
         {
+            // against last frame's height without its fading offset
             const float dx = w.X() - _tw.qx[i], dz = w.Z() - _tw.qz[i];
-            wv = (h - _tw.waterH[i] - 0.5f * ((gx + _tw.gx[i]) * dx + (gz + _tw.gz[i]) * dz)) / deltaT;
+            const float wv = (h - (_tw.waterH[i] - _tw.switchOff[i]) - 0.5f * ((gx + _tw.gx[i]) * dx + (gz + _tw.gz[i]) * dz)) / deltaT;
+            _tw.waterV[i] += (std::clamp(wv, -3.0f, 3.0f) - _tw.waterV[i]) * 0.5f;
         }
-        _tw.waterV[i] += (std::clamp(wv, -3.0f, 3.0f) - _tw.waterV[i]) * 0.5f;
-        _tw.waterH[i] = h;
+        _tw.switchOff[i] = switched ? _tw.waterH[i] - h : _tw.switchOff[i] * offsetFade;
+        _tw.waterH[i] = h + _tw.switchOff[i];
         _tw.qx[i] = w.X();
         _tw.qz[i] = w.Z();
         _tw.gx[i] = gx;
         _tw.gz[i] = gz;
+    }
+    _tw.fromQuery = fromQuery;
+    if (fromQuery)
+    {
+        _tw.qVersion = qVersion;
+        _tw.qSeconds = qSeconds;
     }
     if (overWater == 0)
     {
@@ -117,13 +220,31 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
         return false; // beached: the legacy land contact handles it
     }
     _tw.hasWater = true;
+    // (OP) A boat the mission placed sits where its weight is carried, not where its origin was put:
+    // created at the mean sea level under a 9 m storm crest its keel was 2 m deep and the first second
+    // threw it 3.5 m into the air. On its first step, if on the water, it is moved to its design draft
+    // under the local surface, at rest vertically -- on its first step only, so a boat driven off a
+    // beach into the sea is never moved.
+    // (where the patches' displaced volume equals the hull's weight)
+    float settle = 0.0f;
+    if (firstStep)
+    {
+        float volume = 0.0f, area = 0.0f;
+        for (int i = 0; i < nSamples; ++i)
+        {
+            volume += sampleArea[i] * (_tw.waterH[i] - (pos0 + orient0 * sample[i]).Y());
+            area += sampleArea[i];
+        }
+        settle = (volume - m / Rho) / std::max(area, 1e-3f);
+    }
 
     // ---- controls: OFP's two engines -> throttle lever and rudder (positive = the yaw the legacy
     // differential thrust gave for R > L)
     const float lever = _engineOff ? 0.0f : 0.5f * (_thrustL + _thrustR);
     const float steerIn = _engineOff ? 0.0f : 0.5f * (_thrustR - _thrustL);
     _tw.throttle += (lever - _tw.throttle) * (1.0f - std::exp(-deltaT * 2.2f));
-    _tw.rudder += (std::clamp(steerIn * 2.0f, -1.0f, 1.0f) - _tw.rudder) * (1.0f - std::exp(-deltaT * 3.0f));
+    // (Tidewater's rudder follows the wheel at 1.2/s; the scaled hulls kept OFP's quicker 3/s)
+    _tw.rudder += (std::clamp(steerIn * 2.0f, -1.0f, 1.0f) - _tw.rudder) * (1.0f - std::exp(-deltaT * (ownHull ? 1.2f : 3.0f)));
     const bool driven = !_engineOff && !_isDead;
     const float rpmTarget = std::max(std::fabs(_tw.throttle), driven ? 0.15f : 0.0f);
     _tw.rpm += (rpmTarget - _tw.rpm) * (1.0f - std::exp(-std::min(deltaT, 0.1f) / (rpmTarget > _tw.rpm ? 0.9f : 1.3f)));
@@ -136,29 +257,33 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
         const float a = au / lScale;
         return (40 * au + 22 * au * au + 3000 * Smooth(a, 2.8f, 5.4f) + 55 * au * au * Smooth(a, 7.0f, 11.0f)) * s * wetD;
     };
-    const float pitchSpeed = vMax * 1.25f;
-    const float maxThrust = resistance(vMax, 1.0f) / std::max(1.0f - vMax / pitchSpeed, 0.05f);
+    const float pitchSpeed = ownHull ? own.pitchSpeed : vMax * 1.25f;
+    const float maxThrust = ownHull ? own.maxThrust : resistance(vMax, 1.0f) / std::max(1.0f - vMax / pitchSpeed, 0.05f);
+    const float reverseFactor = ownHull ? own.reverseFactor : 0.45f;
 
     // inertia (boat frame: x pitch, y yaw, z roll), a box scaled to Tidewater's ratios
-    const Vector3 inertia(m * (length * length + height * height) / 12.0f * 0.75f,
-                          m * (length * length + beam * beam) / 12.0f * 0.77f,
-                          m * (beam * beam + height * height) / 12.0f * 0.86f * 1.24f);
+    const Vector3 inertia = ownHull ? own.inertia
+                                    : Vector3(m * (length * length + height * height) / 12.0f * 0.75f,
+                                              m * (length * length + beam * beam) / 12.0f * 0.77f,
+                                              m * (beam * beam + height * height) / 12.0f * 0.86f * 1.24f);
     const Vector3 addedMass(0.6f, 0.7f, 0.05f);    // sway, heave, surge
     const Vector3 addedInertia(1.0f, 0.4f, 0.2f);  // pitch, yaw, roll
     // lateral stations along the keel (Tidewater's, scaled to this length and draft)
     static const float StationZ[7] = {-3.4f, -2.3f, -1.2f, -0.1f, 1.0f, 2.1f, 3.2f};
     static const float StationA[7] = {0.73f, 0.78f, 0.80f, 0.77f, 0.62f, 0.33f, 0.14f};
-    const float zScale = length / RefLength, areaScale = s / zScale;
+    const float zScale = ownHull ? 1.0f : length / RefLength, areaScale = s / zScale;
     float pitchK = 0;
-    for (int i = 0; i < TwSamples; ++i)
-        pitchK += sampleArea * Square(sample[i].Z() - comModel.Z());
+    for (int i = 0; i < nSamples; ++i)
+        pitchK += sampleArea[i] * Square(sample[i].Z() - comModel.Z());
     const float pitchStiffness = Rho * Grav * pitchK;
 
     // impulses (explosions, collisions) from the engine's own queue
     Vector3 velocity = _speed;
     Vector3 angular = _angVelocity;
     Matrix3 orient = orient0;
-    Vector3 com = pos0 + orient0 * comModel;
+    Vector3 com = pos0 + orient0 * comModel + Vector3(0, settle, 0);
+    if (settle != 0.0f)
+        velocity[1] = 0.0f;
     {
         velocity += _impulseForce * (1.0f / m);
         const Vector3 tl = orient.InverseRotation() * _impulseTorque;
@@ -188,24 +313,24 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
 
         // ---- buoyancy + heave damping per patch
         float wetArea = 0, totalArea = 0, immersion = 0, heaveSum = 0;
-        for (int i = 0; i < TwSamples; ++i)
+        for (int i = 0; i < nSamples; ++i)
         {
             const Vector3 pw = toWorld(sample[i]);
             const float hw = _tw.waterH[i] + _tw.waterV[i] * age;
             const float depth = hw - pw.Y();
-            totalArea += sampleArea;
+            totalArea += sampleArea[i];
             if (depth <= 0)
                 continue;
             const float sub = std::min(depth, 1.6f * zScale);
-            wetArea += sampleArea * std::min(1.0f, depth / 0.3f);
-            immersion += sampleArea * std::min(sub / std::max(0.35f * zScale, 0.05f), 1.5f);
+            wetArea += sampleArea[i] * std::min(1.0f, depth / 0.3f);
+            immersion += sampleArea[i] * std::min(sub / std::max(sampleDepth[i], 0.05f), 1.5f);
             const Vector3 vp = velocity + angular.CrossProduct(pw - com);
             const float vy = vp.Y() - _tw.waterV[i] * 0.6f;
             heaveSum += vy;
-            const float wetK = std::min(1.0f, sub / 0.25f) * sampleArea;
-            addAt(Vector3(0, Rho * Grav * sampleArea * sub - (1800 * vy + 900 * vy * std::fabs(vy)) * wetK, 0), pw);
+            const float wetK = std::min(1.0f, sub / 0.25f) * sampleArea[i];
+            addAt(Vector3(0, Rho * Grav * sampleArea[i] * sub - (1800 * vy + 900 * vy * std::fabs(vy)) * wetK, 0), pw);
         }
-        heave = heaveSum / TwSamples;
+        heave = heaveSum / nSamples;
         wetFraction = totalArea > 0 ? wetArea / totalArea : 0;
         const float imm = totalArea > 0 ? std::clamp(immersion / totalArea, 0.0f, 1.0f) : 0;
         const float wetD = std::min(1.0f, wetFraction * 1.6f);
@@ -219,18 +344,20 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
         force += velocity * (-3.3f * s * velocity.Size()); // air drag
 
         // ---- hull lift and cross-flow drag along the keel
-        const float lateralY = lo.Y() + 0.06f * zScale + 0.75f * zScale;
-        for (int k = 0; k < 7; ++k)
+        const float lateralY = ownHull ? own.lateralY : lo.Y() + 0.06f * zScale + 0.75f * zScale;
+        const int stations = ownHull ? own.stations : 7;
+        for (int k = 0; k < stations; ++k)
         {
-            const float sz = comModel.Z() + StationZ[k] * zScale;
+            const float sz = ownHull ? own.stationZ[k] : comModel.Z() + StationZ[k] * zScale;
+            const float area = ownHull ? own.stationArea[k] : StationA[k] * areaScale;
             const float dz = sz - comModel.Z();
             const float vk = vs + aLoc.Y() * dz - aLoc.Z() * (lateralY - comModel.Y());
-            const float Y = -0.5f * Rho * StationA[k] * areaScale * (0.5f * au * vk + 1.1f * vk * std::fabs(vk)) * wetD;
+            const float Y = -0.5f * Rho * area * (0.5f * au * vk + 1.1f * vk * std::fabs(vk)) * wetD;
             addAt(side * Y, toWorld(Vector3(comModel.X(), lateralY, sz)));
         }
 
         // ---- propeller (at the stern, below the waterline) and rudder in its race
-        const Vector3 propLocal(comModel.X(), lo.Y() + 0.15f * zScale, lo.Z() + 0.08f * length);
+        const Vector3 propLocal = ownHull ? own.propeller : Vector3(comModel.X(), lo.Y() + 0.15f * zScale, lo.Z() + 0.08f * length);
         const Vector3 propW = toWorld(propLocal);
         const float propSub = _tw.waterH[(Along / 2) * Across + 1] * 0 + WaterAt(propW.X(), propW.Z()) - _sink - propW.Y();
         const float propWet = std::clamp(propSub / 0.3f + 0.5f, 0.0f, 1.0f);
@@ -239,14 +366,15 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
         if (_tw.throttle > 0.02f)
             thrust = maxThrust * n * n * std::max(0.0f, 1.0f - std::max(u, 0.0f) / (pitchSpeed * std::max(n, 0.2f)));
         else if (_tw.throttle < -0.02f)
-            thrust = -0.45f * maxThrust * n * n * std::max(0.0f, 1.0f - std::max(-u, 0.0f) / (pitchSpeed * 0.6f * std::max(n, 0.2f)));
+            thrust = -reverseFactor * maxThrust * n * n * std::max(0.0f, 1.0f - std::max(-u, 0.0f) / (pitchSpeed * 0.6f * std::max(n, 0.2f)));
         thrust *= propWet;
         addAt(fwd * thrust, propW);
-        const Vector3 rudW = toWorld(Vector3(comModel.X(), lo.Y() + 0.35f * zScale, propLocal.Z()));
+        const Vector3 rudLocal = ownHull ? own.rudder : Vector3(comModel.X(), lo.Y() + 0.35f * zScale, propLocal.Z());
+        const Vector3 rudW = toWorld(rudLocal);
         const float race = std::max(thrust, 0.0f) * 2.0f / (Rho * 0.14f * s);
         const float ur2 = u * std::fabs(u) + 0.9f * race;
         const float ur = std::sqrt(std::fabs(ur2)) * (ur2 >= 0 ? 1.0f : -1.0f);
-        const float vRud = vs + aLoc.Y() * (propLocal.Z() - comModel.Z());
+        const float vRud = vs + aLoc.Y() * (rudLocal.Z() - comModel.Z());
         const float delta = std::clamp(_tw.rudder * 0.6f + (std::fabs(ur) > 0.3f ? std::atan2(vRud, std::fabs(ur)) * (ur >= 0 ? 1.0f : -1.0f) : 0.0f), -0.7f, 0.7f);
         const float lift = 0.5f * Rho * 0.12f * s * std::fabs(ur2) * 2.8f * std::sin(delta) * std::cos(delta) * propWet * (ur2 >= 0 ? 1.0f : -1.0f);
         addAt(side * (-lift), rudW);
@@ -272,8 +400,10 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
             Vector3(hi.X() - 0.15f * beam, lo.Y() + 0.25f * height, comModel.Z() + 0.3f * length),
             Vector3(lo.X() + 0.15f * beam, lo.Y() + 0.25f * height, comModel.Z() - 0.3f * length),
             Vector3(hi.X() - 0.15f * beam, lo.Y() + 0.25f * height, comModel.Z() - 0.3f * length)};
-        for (const Vector3& lp : contactPoint)
+        const int contacts = ownHull ? own.contacts : 7;
+        for (int c = 0; c < contacts; ++c)
         {
+            const Vector3& lp = ownHull ? own.contact[c] : contactPoint[c];
             const Vector3 pw = toWorld(lp);
             const float pen = GLandscape->SurfaceY(pw.X(), pw.Z()) - pw.Y();
             if (pen <= 0)
@@ -326,10 +456,17 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
         if (Glob.time.toFloat() >= next)
         {
             next = Glob.time.toFloat() + 0.25f;
-            LOG_INFO(Physics, "Boat TW: t={:.2f} y={:.2f} keel-water={:.2f} wet={:.2f} vy={:.2f} heave-rel={:.2f} u={:.2f} pitch={:.3f} roll={:.3f} thrust={:.0f} rudder={:.2f} steps={}",
-                     Glob.time.toFloat(), com.Y(), _tw.waterH[TwSamples / 2] - (com + orient * (sample[TwSamples / 2] - comModel)).Y(),
+            LOG_INFO(Physics, "Boat TW: t={:.2f} y={:.2f} keel-water={:.2f} wet={:.2f} vy={:.2f} heave-rel={:.2f} u={:.2f} pitch={:.3f} roll={:.3f} thrust={:.0f} rudder={:.2f} steps={} water={}",
+                     Glob.time.toFloat(), com.Y(), _tw.waterH[nSamples / 2] - (com + orient * (sample[nSamples / 2] - comModel)).Y(),
                      wetFraction, velocity.Y(), heave, (orient.InverseRotation() * velocity).Z(), orient.Direction().Y(),
-                     orient.DirectionAside().Y(), 0.0f, _tw.rudder, steps);
+                     orient.DirectionAside().Y(), 0.0f, _tw.rudder, steps, _tw.fromQuery ? "drawn" : "predictor");
+            if (ownHull)
+            {
+                const Vector3 wl = com + orient * (own.origin - comModel);
+                LOG_INFO(Physics, "Boat TW hull: design waterline y={:.2f} surface there={:.2f} sea level={:.2f} origin y={:.2f} com model={:.2f},{:.2f},{:.2f}",
+                         wl.Y(), WaterAt(wl.X(), wl.Z()), GLandscape->GetSeaLevel(), (com - orient * comModel).Y(),
+                         comModel.X(), comModel.Y(), comModel.Z());
+            }
         }
     }
     return true;

@@ -11,9 +11,13 @@
 #include <Poseidon/Network/Network.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/AllVehicles.hpp>
+#include <Poseidon/World/Entities/Vehicles/Misc/Whale.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <string.h>
+#include <mutex>
+#include <string>
+#include <unordered_set>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Framework/GlobalAlive.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -109,6 +113,59 @@ EntityType* VehicleTypeBank::New(const char* name)
     {
         return nullptr;
     }
+    // PERF (2026-10-14): Find is a linear, case-insensitive scan of every type, and some
+    // callers ask per event -- every footprint Mark constructs its type by name, many a second
+    // in a firefight. A small direct-mapped cache of name -> index answers the repeat with one
+    // compare. It is validated against the bank's CURRENT entry at that index (types are
+    // removed automatically when unreferenced, so entries can go null or move), and names in
+    // the bank are unique -- New finds before it loads -- so a validated index is the one Find
+    // would return. Anything that fails validation takes the old path.
+    constexpr size_t kCacheSize = 64;
+    static int cache[kCacheSize] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+                                    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+                                    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+                                    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+    uint32_t hash = 2166136261u;
+    for (const char* c = name; *c; ++c)
+    {
+        const unsigned char lower = static_cast<unsigned char>(*c >= 'A' && *c <= 'Z' ? *c - 'A' + 'a' : *c);
+        hash = (hash ^ lower) * 16777619u;
+    }
+    int& slot = cache[hash & (kCacheSize - 1)];
+    if (slot >= 0 && slot < Size())
+    {
+        EntityType* cached = Get(slot);
+        if (cached && !BankTraits<EntityType>::CompareNames(cached->GetName(), name))
+        {
+            return cached;
+        }
+    }
+    // PERF-TYPE-MISS (2026-10-20). A name with no class missed the cache above every time and
+    // paid the linear scan plus the config lookups again. NewObject asks for "Proxy<model>" for
+    // every proxy of every LOD of a building, and DayZ furniture has no such class: a school's
+    // install spent ~600 ms of its tail here once its furniture models were already loaded. A
+    // miss is remembered, keyed to the live CfgVehicles class (address and entry count) so a
+    // config reload starts the list again.
+    static std::mutex missMutex;
+    static std::unordered_set<std::string> missed;
+    static const void* missedConfig = nullptr;
+    static int missedEntries = -1;
+    const ParamEntry* config = Pars.FindEntry(RStringB("CfgVehicles"));
+    const int configEntries = config ? config->GetEntryCount() : -1;
+    std::string missKey(name);
+    for (char& c : missKey)
+        c = static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
+    {
+        std::lock_guard<std::mutex> lock(missMutex);
+        if (config != missedConfig || configEntries != missedEntries)
+        {
+            missed.clear();
+            missedConfig = config;
+            missedEntries = configEntries;
+        }
+        if (missed.count(missKey))
+            return nullptr;
+    }
     int index = Find(name);
     if (index < 0)
     {
@@ -116,8 +173,12 @@ EntityType* VehicleTypeBank::New(const char* name)
     }
     if (index < 0)
     {
+        std::lock_guard<std::mutex> lock(missMutex);
+        if (missed.size() < 65536)
+            missed.insert(std::move(missKey));
         return nullptr;
     }
+    slot = index;
     return Get(index);
 }
 
@@ -337,6 +398,10 @@ int VehicleTypeBank::Load(const char* name)
             else if (!strcmp(simulation, "thingeffect"))
             {
                 type = new ThingType(par);
+            }
+            else if (!strcmp(simulation, "whale"))
+            {
+                type = new ThingType(par); // (OP) Tidewater's humpback, Whale.cpp
             }
             else if (!strcmp(simulation, "cameratarget"))
             {
@@ -600,6 +665,10 @@ EntityAI* NewVehicle(EntityAIType* type, RString shapeName, bool fullCreate)
     else if (!stricmp(simName, "thing"))
     {
         v = new Thing(type);
+    }
+    else if (!stricmp(simName, "whale"))
+    {
+        v = new Whale(type);
     }
     else if (!stricmp(simName, "invisible"))
     {

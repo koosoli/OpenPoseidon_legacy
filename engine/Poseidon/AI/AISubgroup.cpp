@@ -2505,12 +2505,74 @@ float AISubgroup::GetExposure(int x, int z)
     }
 }
 
+// 0 = no ExposureCacheScope open; otherwise the epoch of the open one.
+static uint32_t GExposureCacheEpoch = 0;
+static uint32_t GExposureCacheNext = 0;
+
+AISubgroup::ExposureCacheScope::ExposureCacheScope()
+{
+    if (++GExposureCacheNext == 0)
+        ++GExposureCacheNext; // never hand out 0, which means "closed"
+    GExposureCacheEpoch = GExposureCacheNext;
+}
+
+AISubgroup::ExposureCacheScope::~ExposureCacheScope()
+{
+    GExposureCacheEpoch = 0;
+}
+
 float AISubgroup::CalculateExposure(int x, int z)
 {
     // returns dammage (in $) per second
     float expField = GetExposure(x, z); // dammage per minute
     expField *= 1 / 60.0;
     float sumCost = 0;
+    if (GExposureCacheEpoch != 0)
+    {
+        // The same terms, gathered once per batch; the sum below repeats the uncached loop's
+        // arithmetic operation for operation, so the result is bit-identical.
+        if (_exposureTermsEpoch != GExposureCacheEpoch || _exposureTerms.size() != static_cast<size_t>(NUnits()))
+        {
+            _exposureTerms.assign(static_cast<size_t>(NUnits()), ExposureUnitTerm{});
+            for (int i = 0; i < NUnits(); i++)
+            {
+                AIUnit* unit = GetUnit(i);
+                if (!unit)
+                {
+                    continue;
+                }
+                EntityAI* veh = unit->GetVehicle();
+                ExposureUnitTerm& term = _exposureTerms[static_cast<size_t>(i)];
+                term.present = true;
+                term.invArmor = veh->GetType()->GetInvArmor();
+                float cost = unit->GetPerson()->GetType()->GetCost();
+                if (!unit->IsFreeSoldier())
+                {
+                    if (unit->IsUnit())
+                    {
+                        cost += veh->GetType()->GetCost();
+                    }
+                }
+                term.cost = cost;
+                term.ableToDefend = (veh->GetAmmoHit() > 50 && !unit->IsHoldingFire());
+            }
+            _exposureTermsEpoch = GExposureCacheEpoch;
+        }
+        for (const ExposureUnitTerm& term : _exposureTerms)
+        {
+            if (!term.present)
+            {
+                continue;
+            }
+            float dammage = expField * term.invArmor;
+            if (!term.ableToDefend)
+            {
+                dammage *= 4;
+            }
+            sumCost += dammage * term.cost;
+        }
+        return sumCost;
+    }
     for (int i = 0; i < NUnits(); i++)
     {
         AIUnit* unit = GetUnit(i);

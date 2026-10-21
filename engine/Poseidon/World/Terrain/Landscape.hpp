@@ -10,6 +10,8 @@
 #include <Poseidon/World/Terrain/SimulationObjectCoverage.hpp>
 #include <Poseidon/World/Terrain/SimulationResidency.hpp>
 #include <Poseidon/World/Terrain/StaticPlainRouteProbe.hpp>
+#include <Poseidon/World/Terrain/EnfusionDoors.hpp>
+#include <Poseidon/World/Terrain/EnfusionGlass.hpp>
 
 namespace Poseidon::Asset::Material
 {
@@ -17,6 +19,7 @@ struct RvMaterialSource;
 }
 #include <array>
 #include <chrono>
+#include <future>
 #include <list>
 #include <memory>
 #include <unordered_map>
@@ -114,6 +117,16 @@ class ObjectListFull : public SmallArray<Ref<Object>>
 
     Vector3 _bCenter; // bounding sphere of static objects
     float _bRadius;
+    /// PERF (2026-10-14): max over static objects of |pos - _bCenter| + 2 * radius, with no
+    /// floor. Only grows on Add, is recomputed by StaticChanged, and is never shrunk by
+    /// Delete, so it stays an upper bound. Line queries skip the cell past it (see
+    /// LineQueryMaySkipCell); `_bRadius` cannot serve, because its 50 m floor is four cells
+    /// wide on a native Reforger world's 12.5 m grid.
+    float _staticReach;
+    /// The same bound measured in XZ only, from the cell centre (which is `_bCenter`'s XZ:
+    /// SetBSphere(x,z) puts it there and nothing moves it). ObjectList caches it inline so a
+    /// line query can drop the cell without dereferencing this object at all.
+    float _staticReachXZ;
     int _nNonStatic;
     /// PERF-031: how many entries are `TypeVehicle`. `PredictCollision` skips a cell with
     /// none, which is the filter its own loop applies anyway -- and which `_nNonStatic`
@@ -131,6 +144,13 @@ class ObjectListFull : public SmallArray<Ref<Object>>
     // Visibility rejects TypeTempVehicle unconditionally. Preserve the full
     // list order while avoiding footprint traversal on every sight query.
     SmallArray<Object*> _visibilityObjects;
+    // PERF (2026-10-14): non-owning mirror of the objects with building paths
+    // (Object::GetIPaths() != null -- a Building, by class, so constant for the
+    // object's life). AILocker::LockPosition locks the path points of every such
+    // object near each soldier, every tick; it walked the whole cell to find them.
+    // A std::vector, not a SmallArray: most cells hold none, and an empty vector
+    // costs no inline storage.
+    std::vector<Object*> _pathObjects;
 
   private:
     int CountNonStatic() const;
@@ -147,6 +167,8 @@ class ObjectListFull : public SmallArray<Ref<Object>>
     Object* GetRoadwayObject(int index) const { return _roadwayObjects[index]; }
     int GetVisibilityObjectCount() const { return _visibilityObjects.Size(); }
     Object* GetVisibilityObject(int index) const { return _visibilityObjects[index]; }
+    int GetPathObjectCount() const { return static_cast<int>(_pathObjects.size()); }
+    Object* GetPathObject(int index) const { return _pathObjects[static_cast<size_t>(index)]; }
     void ChangeNonStaticCount(int val);
     void ChangeTypeVehicleCount(int val);
     void StaticChanged(); // recalculate what is neccessary
@@ -155,6 +177,10 @@ class ObjectListFull : public SmallArray<Ref<Object>>
 
     Vector3 GetBSphereCenter() const { return _bCenter; }
     float GetBSphereRadius() const { return _bRadius; }
+    float GetStaticReach() const { return _staticReach; }
+    //! XZ reach a line query may skip the cell beyond; unbounded while anything non-static is
+    //! in it, because those move within the cell and are walked object by object.
+    float CullReachXZ() const { return _nNonStatic > 0 ? 3.0e38f : _staticReachXZ; }
 
     // only add/remove methods
     int Add(Object* object, bool avoidRecalculation = false);
@@ -171,8 +197,16 @@ class ObjectListFull : public SmallArray<Ref<Object>>
 class ObjectList
 {
     SRef<ObjectListFull> _list;
+    /// ObjectListFull::CullReachXZ, refreshed after every mutation below -- they are the only
+    /// way a cell's list changes. Kept here, in the landscape's contiguous cell array, so a
+    /// line query skips an occupied cell for the price of reading the array it already walks
+    /// (PERF, 2026-10-14). Zero for an empty cell.
+    float _cullReachXZ = 0;
+
+    void SyncCull() { _cullReachXZ = _list ? _list->CullReachXZ() : 0; }
 
   public:
+    float CullReachXZ() const { return _cullReachXZ; }
     // check size, guranteed to be non-empty
     int SizeNotEmpty() const { return _list->Size(); }
     // check size, gurannteed to be non-empty
@@ -188,13 +222,16 @@ class ObjectList
     {
         if (!_list)
             _list = new ObjectListFull(x, z);
-        return _list->Add(object, avoidRecalculation);
+        const int index = _list->Add(object, avoidRecalculation);
+        SyncCull();
+        return index;
     }
     // recalculate what is neccessary
     void Recalculate()
     {
         if (_list)
             _list->StaticChanged();
+        SyncCull();
     }
     // delete given object
     void Delete(int index)
@@ -203,6 +240,7 @@ class ObjectList
         _list->Delete(index);
         if (_list->Size() == 0)
             _list.Free();
+        SyncCull();
     }
     // compact memory usage
     void Compact()
@@ -213,9 +251,14 @@ class ObjectList
             if (_list->Size() == 0)
                 _list.Free();
         }
+        SyncCull();
     }
     // release all memory
-    void Clear() { _list.Free(); }
+    void Clear()
+    {
+        _list.Free();
+        SyncCull();
+    }
 
     // get underlying object list
     ObjectListFull* GetList() const { return _list; }
@@ -498,6 +541,10 @@ struct A3TerrainMaterial
 
 // terrain and scene database storage
 
+//! RFG-187: the loaded native (Enfusion) world's latitude/longitude in degrees, from its
+//! TimeAndWeatherManager prefab; false when none was read. See LandLoadEnfusion.cpp.
+bool GetEnfusionWorldGeo(float& latitudeDeg, float& longitudeDeg);
+
 class Landscape : public SerializeClass
 {
     friend class ::EditCursor;
@@ -576,6 +623,22 @@ class Landscape : public SerializeClass
     // the native loader only; empty (Size 0) on every other world, which is what keeps
     // the clutter-clearing inert there. Cleared in Init() like _enfusionSurfaces.
     std::vector<uint8_t> _enfusionRoadCells;
+    // RFG-107: the same ribbons as segments, five floats each (world ax, az, bx, bz, half
+    // width), so the grass can stop at the ribbon's EDGE instead of at the 12.5 m cell
+    // around it. Filled and cleared with _enfusionRoadCells.
+    std::vector<float> _enfusionRoadSegments;
+    std::vector<float> _grassFootprints;           // RFG-109, see GetGrassFootprints
+    std::unordered_set<uint64_t> _grassFootprintKeys;
+    // RFG-PBR: the native surface map at a few metres a texel (row-major, z * edge + x; the palette
+    // index of _enfusionSurfaces), down from the 1 m TMAT masks. The land cell's single index is
+    // one 1 m sample at its centre -- a 12.5 m staircase along every field edge; the terrain
+    // shader blends this map instead. Empty on every world the native loader did not build.
+    std::vector<uint8_t> _enfusionSurfaceMap;
+    int _enfusionSurfaceEdge = 0;
+    // The native tile grid: `<dir>/.Data/<name>_` and tiles per edge, row-major like the
+    // `.ttile`s, for the per-tile pages a renderer may page in (the supertexture).
+    std::string _enfusionTilePrefix;
+    int _enfusionTilesX = 0;
     // Dev switch (Grass > "Clutter cleared under Enfusion roads"): whether the bake
     // honours _enfusionRoadCells. A process-wide flag rather than a GrassSettings field
     // because the mask is a WORLD fact that lives here; the terrain re-bakes when it moves.
@@ -683,6 +746,12 @@ class Landscape : public SerializeClass
     std::unordered_set<int> _modernLogicalOnlyObjects;
     void RegisterModernObjectVisual(Object* object);
     std::vector<ModernObjectPlacement> _modernObjectPlacements;
+    //! RFG-157: the doors of native Enfusion buildings (EnfusionDoors.hpp).
+    EnfusionDoorRegistry _enfusionDoors;
+    //! RFG-158: the destructible window panes of native Enfusion buildings (EnfusionGlass.hpp).
+    EnfusionGlassRegistry _enfusionGlass;
+    //! RFG-162: this world's rivers are with the renderer as water (released with the world).
+    bool _riversUploaded = false;
     int AuthoredObjectIDFloor() const;
     std::vector<std::vector<uint32_t>> _modernObjectCells;
     // One non-empty cell inside the residency window, with its squared cell distance from the
@@ -708,8 +777,89 @@ class Landscape : public SerializeClass
     std::vector<uint8_t> _nativeFarModelWanted;
     std::vector<uint8_t> _nativeFarModelRejected;
     std::unordered_set<uint32_t> _nativeFarActive;
+    // PERF-FAR-SWEEP: the active set as of the last window rebuild, swept a slice per call.
+    std::vector<uint32_t> _nativeFarSweep;
+    size_t _nativeFarSweepPos = 0;
+    // PERF-FAR-RELEASE: far models no longer wanted, released a slice per call (their shapes'
+    // destruction is what costs: 179 at once took 97 ms at Durras).
+    std::vector<uint32_t> _nativeFarRelease;
+    size_t _nativeFarReleasePos = 0;
+    void SweepNativeFarActive(bool rebuildFrame);
     std::unordered_map<uint32_t, Ref<LODShapeWithShadow>> _nativeFarModels;
+    // PERF-FAR-ASYNC-PREP: far models handed over by the preparer whose native textures are being
+    // decoded off the main thread; their bank tables are built and conversion submitted once the
+    // decode has finished (UpdateNativeFarResidency).
+    // Shared by the near window (UpdateModernObjectResidency) and the far tier: whichever path
+    // finds the decode finished submits the conversion, with the flavour that parked it.
+    struct NativeFarTexPrep
+    {
+        std::shared_ptr<Model::Model> model;
+        std::future<void> decode;
+        bool ownerAdmission = false; // the near window's cold visual admission (SubmitConvert flag)
+        // STREAM-PAA-PREP: names the last background round found (stage PAAs of .rvmat materials,
+        // PAAs and materials of proxy models) -- captured on the main thread for the next round;
+        // the model stays parked until a round finds nothing new (at most 3).
+        std::shared_ptr<std::vector<std::string>> foundPaa, foundRvmat;
+        int paaRounds = 0;
+        // PERF-PROXY-WARM: the proxy models (furniture) this model's install will load, loaded
+        // ahead a few milliseconds per update while it is still parked.
+        bool proxiesListed = false;
+        std::vector<std::string> proxyShapes;
+        size_t proxyNext = 0;
+    };
+    // PERF-PROXY-WARM: shapes loaded ahead, held until the install that wants them has run
+    // (ShapeBank keeps only weak links), and the main-thread time spent on them this update.
+    std::vector<std::pair<Ref<LODShapeWithShadow>, std::chrono::steady_clock::time_point>> _proxyWarmHold;
+    double _proxyWarmSpentMs = 0.0;
+    std::unordered_map<uint32_t, NativeFarTexPrep> _nativeFarTexPrep;
+    //! PERF-FAR-ASYNC-PREP: collect `model`'s native texture names (main thread), decode them in
+    //! the background and park the model until FinishStreamTexPrep.
+    void ParkStreamTexPrep(uint32_t modelIndex, std::shared_ptr<Model::Model> model, bool ownerAdmission);
+    //! The parked model's second half once its decode is done: bank tables from the prepared
+    //! sources, then the conversion. Returns false (and does nothing) while still decoding.
+    bool FinishStreamTexPrep(uint32_t modelIndex);
     size_t _nativeFarCursor = 0;
+    // Models rejected for the far tier (too small, failed) when the candidate list was last
+    // built; more since then means the list wasted slots on them and is rebuilt without them.
+    size_t _nativeFarRejectedAtBuild = 0;
+    size_t _nativeFarRejectedCount = 0;
+    bool _nativeFarRejectRebuild = false;
+public:
+    // Where the far tier's per-frame time goes, logged every 600 frames (UpdateNativeFarResidency).
+    struct NativeFarStats
+    {
+        uint32_t calls = 0, slowCalls = 0, installs = 0, ready = 0, rebuilds = 0;
+        double callMs = 0, callMaxMs = 0, installMs = 0, installMaxMs = 0, readyMs = 0, rebuildMs = 0;
+    };
+  protected:
+    NativeFarStats _nativeFarStats;
+    // FAR-002: cheap far-tier proxies (cards/prisms) for every placement of a model the far
+    // window has loaded, drawn from where the window's real models end.
+    struct NativeProxyModel
+    {
+        float height = 0.0f, baseY = 0.0f, radius = 0.0f;
+        uint32_t colour = 0xFFFFFFFFu, flags = 0;
+        bool valid = false;
+    };
+    std::vector<NativeProxyModel> _nativeProxyModels;
+    bool _nativeProxyDirty = false;
+    bool _nativeProxyUploaded = false;
+    uint32_t _nativeProxyUploadMs = 0;
+    float _nativeProxyReach = -1.0f;
+    uint32_t _nativeProxyModelCount = 0, _nativeProxyModelsAtUpload = 0;
+    // PERF-FAR-PROXY-ASYNC: the placement walk runs on a worker over snapshots of the proxy models
+    // and the wanted flags; the main thread only starts it and hands the result to the engine.
+    struct NativeProxyBuild; // LandSave.cpp (holds Engine::FarProxyInstance rows)
+    std::future<std::shared_ptr<NativeProxyBuild>> _nativeProxyBuild;
+    uint32_t _nativeProxyBuildModels = 0; // _nativeProxyModelCount when the running build started
+    void StartNativeProxyBuild();
+    bool FinishNativeProxyBuild(); // true when a finished build was uploaded
+    void NoteNativeProxyModel(uint32_t modelIndex, const LODShapeWithShadow& shape);
+    void UploadNativeProxies();
+    // The far window's cells, nearest first, and where the candidate fill stopped in them.
+    std::vector<ModernObjectCellCandidate> _nativeFarCells;
+    size_t _nativeFarFillCell = 0;
+    size_t _nativeFarFillEntry = 0;
     int _nativeFarCenterX = -0x3fffffff, _nativeFarCenterZ = -0x3fffffff;
     std::vector<uint8_t> _modernObjectCellActive;
     std::vector<uint8_t> _modernObjectCellDesired;
@@ -1131,6 +1281,14 @@ class Landscape : public SerializeClass
     // it -- a house that streamed out is still a house).
     void EnableGeographyAccumulation();
     void AccumulateGeographyForObject(Object* obj);
+    // RFG-109: the ground footprint of every object the accumulation counts as hard, six
+    // floats each: centre x, z; unit axis ux, uz; half extent along that axis and along its
+    // perpendicular. Append-only while the world streams (an object streamed back in is not
+    // added twice). The grass keeps its blades out of these boxes instead of out of the whole
+    // 12.5 m land cell the AI geography marks -- which on a native world is every cell with a
+    // fence post or a rock in it.
+    const std::vector<float>& GetGrassFootprints() const { return _grassFootprints; }
+    void AddGrassFootprint(const Object* obj, const LODShape* shape);
     bool _geoAccumEnabled = false;
     // Bumped whenever accumulation changed a cell; the terrain renderer re-uploads its
     // geography texture when it sees a new value (throttled there).
@@ -1167,6 +1325,15 @@ class Landscape : public SerializeClass
     Object* FindObjectNC(int id) const; // do not use cache
     Object* FindObject(int id) const;   // cache may be available
     Object* GetObject(int id) const;
+    //! RFG-157: the doors of native Enfusion buildings that open and close.
+    EnfusionDoorRegistry& EnfusionDoors() { return _enfusionDoors; }
+    const EnfusionDoorRegistry& EnfusionDoors() const { return _enfusionDoors; }
+    //! RFG-158: native Enfusion window panes; bullets and blasts break them (EnfusionGlass.cpp).
+    EnfusionGlassRegistry& EnfusionGlass() { return _enfusionGlass; }
+    const EnfusionGlassRegistry& EnfusionGlass() const { return _enfusionGlass; }
+    bool BreakNativeGlassPane(uint32_t index, const AmmoType* type);
+    int BreakNativeGlassAlongSegment(Vector3Par from, Vector3Par to, const AmmoType* type);
+    int BreakNativeGlassInRadius(Vector3Par centre, float radius, const AmmoType* type);
     // Owner-only, instance-only observation of EXISTING constructed objects.
     // No resolution, required pin, shape load or persistent group certification.
     Streaming::InstanceCoverageObservation ObserveConstructedObjectCoverage(
@@ -1208,6 +1375,14 @@ class Landscape : public SerializeClass
     // The Enfusion surface `.emat` this palette entry was bound from, or "" -- and 0 on
     // every world that is not a natively loaded Reforger one. See _enfusionSurfaces.
     int GetEnfusionSurfaceCount() const { return _enfusionSurfaces.Size(); }
+    // The native surface map (see _enfusionSurfaceMap): its texels and edge, or edge 0.
+    const std::string& GetEnfusionTilePrefix() const { return _enfusionTilePrefix; }
+    int GetEnfusionTilesX() const { return _enfusionTilesX; }
+    const std::vector<uint8_t>& GetEnfusionSurfaceMap(int& edge) const
+    {
+        edge = _enfusionSurfaceEdge;
+        return _enfusionSurfaceMap;
+    }
     const char* GetEnfusionSurface(int id) const
     {
         return id >= 0 && id < _enfusionSurfaces.Size() ? (const char*)_enfusionSurfaces[id] : "";
@@ -1222,6 +1397,9 @@ class Landscape : public SerializeClass
         const size_t cell = static_cast<size_t>(z) * static_cast<size_t>(_landRange) + static_cast<size_t>(x);
         return cell < _enfusionRoadCells.size() && _enfusionRoadCells[cell] != 0;
     }
+    // RFG-107: (ax, az, bx, bz, halfWidth) per centreline segment, world metres; empty on
+    // every world the native loader did not build.
+    const std::vector<float>& GetEnfusionRoadSegments() const { return _enfusionRoadSegments; }
     static bool EnfusionRoadClutterClear() { return s_enfusionRoadClutterClear; }
     static void SetEnfusionRoadClutterClear(bool clear) { s_enfusionRoadClutterClear = clear; }
 
@@ -1403,6 +1581,17 @@ class Landscape : public SerializeClass
 	bool InTerrainHoleBelow(Vector3Par p, float depth) const;
 	// terrainHole5: moving from -> to leaves a terrain hole sideways under the ground (into the earth)
 	bool LeavesTerrainHoleUnderground(Vector3Par from, Vector3Par to) const;
+	// Sinkhole W5: moving from -> to, from on or above the drawn terrain and in no hole, sinks into a HIDDEN hole
+	// (a cave's footprint under a hillside) -- through ground that is drawn and must hold. A hidden cave is entered
+	// through its openings, never from above; a fall or a frame's step deeper than the ceiling gap tunnelled through.
+	bool SinksIntoHiddenTerrainHole(Vector3Par from, Vector3Par to) const;
+	// Sinkhole W5: (x, z) is inside a drawn terrain hole (an opening: the terrain is not drawn there), at any height
+	bool InDrawnTerrainHole(float x, float z) const;
+	// Sinkhole W5: the point to look for the ground from when an object is placed on the surface (setPos,
+	// createVehicle, mission placement). Their height is the one above the ground (0 on it), so the search started
+	// at sea level and, over a hidden cave, found the cave: the man fell from there. It starts no lower than just
+	// under the drawn terrain; outside holes nothing under the terrain counts as ground, so nothing else changes.
+	Vector3 SurfacePlacementProbe(Vector3Par pos) const;
 	// terrainHole5: obj's model cuts a terrain hole
 	static bool CutsTerrainHole(const Object *obj);
 	// terrainHole6: the height a ground decal (footprint, track, crater, shadow) at x, z is fitted to. refY = the decal's

@@ -59,12 +59,19 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <Poseidon/Game/Commands/GameStateExtA3Rsc.hpp>
 #include <unordered_map>
 #include <vector>
+
+// The cut effects without the Arma 3 display layer handling (GameStateExtUi.cpp).
+GameValue CutTextEffect(const GameState* state, GameValuePar oper1);
+GameValue CutRscEffect(const GameState* state, GameValuePar oper1);
 
 using namespace Poseidon;
 
 bool PreprocessScriptFile(const char* name, std::string& out); // GameStateExtWorldConfig.cpp
+bool A1ConfigIsNull(GameValuePar v);                           // GameStateExtA1Config.cpp
+bool Arma3ResolveUiVariable(const char* lowerName, GameValue& value); // GameStateExtA3Functions.cpp
 
 void Arma2RuntimeSimulate(); // called from World::SimulateScripts
 
@@ -336,8 +343,18 @@ GameValue A2GetVariable(const GameState* state, GameValuePar oper1, GameValuePar
         if (strcmp(ns, kNsUi) == 0)
         {
             auto& vars = RT().uiVars;
-            const auto it = vars.find(Lower((const char*)name));
-            return it != vars.end() ? it->second : fallback;
+            const std::string key = Lower((const char*)name);
+            const auto it = vars.find(key);
+            if (it != vars.end())
+                return it->second;
+            // Arma 3 keeps its function library in uiNamespace as well
+            GameValue function;
+            if (Arma3ResolveUiVariable(key.c_str(), function))
+            {
+                vars[key] = function;
+                return function;
+            }
+            return fallback;
         }
         GameValue v = state->VarGet(name);
         return v.GetNil() ? fallback : v;
@@ -1154,6 +1171,22 @@ GameValue A2GetFSMVariable(const GameState*, GameValuePar oper1, GameValuePar op
     return v;
 }
 
+// fsm getFSMVariable [name, default] (Arma 3): the default when the FSM or the variable
+// is not there -- also when the handle itself is nil (an FSM that never started), which a
+// trigger condition polls every frame.
+GameValue A3GetFSMVariableDefault(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& args = oper2;
+    GameValue fallback = args.Size() >= 2 ? args[1] : GameValue();
+    if (args.Size() < 1 || args[0].GetType() != GameString || oper1.GetType() != GameScalar)
+        return fallback;
+    Fsm* fsm = FindFsm(oper1);
+    GameValue v;
+    if (fsm && fsm->vars.VarGet(RString(args[0]), v) && !v.GetNil())
+        return v;
+    return fallback;
+}
+
 GameValue A2SetFSMVariable(const GameState*, GameValuePar oper1, GameValuePar oper2)
 {
     Fsm* fsm = FindFsm(oper1);
@@ -1236,9 +1269,11 @@ GameValue A2LifeState(const GameState*, GameValuePar oper1)
     return GameValue(RString(obj && !obj->IsDammageDestroyed() ? "ALIVE" : "DEAD"));
 }
 
-GameValue A2VehicleVarName(const GameState*, GameValuePar)
+GameValue A2VehicleVarName(const GameState*, GameValuePar oper1)
 {
-    return GameValue(RString(""));
+    // the name the mission gave the object (its sqm "text"), else ""
+    Object* obj = GetObject(oper1);
+    return GameValue(obj ? obj->GetVarName() : RString(""));
 }
 
 GameValue A2NearestObjects(const GameState* state, GameValuePar oper1)
@@ -1375,6 +1410,24 @@ GameValue A2EmptyArrayUnary(const GameState* state, GameValuePar)
     return state->CreateGameValue(GameArray);
 }
 
+// getGroupIconParams: no group icons are drawn here, so every group has the neutral ones --
+// [colour, text, scale, visible] -- rather than an empty array that scripts index into
+// ((getGroupIconParams _grp) select 2 is the scale).
+GameValue A2GroupIconParams(const GameState* state, GameValuePar)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& a = value;
+    GameValue colour = state->CreateGameValue(GameArray);
+    GameArrayType& c = colour;
+    for (int i = 0; i < 4; i++)
+        c.Add(GameValue(1.0f));
+    a.Add(colour);
+    a.Add(GameValue(RString("")));
+    a.Add(GameValue(1.0f));
+    a.Add(GameValue(true));
+    return value;
+}
+
 GameValue A2EmptyArrayBinary(const GameState* state, GameValuePar, GameValuePar)
 {
     return state->CreateGameValue(GameArray);
@@ -1477,7 +1530,8 @@ GameValue A2MinusOne(const GameState*)
 // isNull display/control: those are numbers here, -1 for none
 GameValue A2IsNullHandle(const GameState*, GameValuePar oper1)
 {
-    return GameValue(static_cast<float>(oper1) < 0);
+    // an Arma 3 stand-in display that has closed is null too (GameStateExtA3Rsc.cpp)
+    return GameValue(static_cast<float>(oper1) < 0 || Poseidon::Arma3Rsc::IsClosedDisplay(static_cast<float>(oper1)));
 }
 
 // ctrlShown control: a control handle that exists is taken as shown.
@@ -1638,12 +1692,29 @@ GameValue A2SideKnowsAbout(const GameState* state, GameValuePar oper1, GameValue
     return GameValue(best);
 }
 
-GameValue A2WeaponDirection(const GameState* state, GameValuePar oper1, GameValuePar)
+// unit/vehicle weaponDirection "weapon": where that weapon's barrel points, in world space
+// ([x, z, y] like every script position). Was the body's direction for every weapon, so a
+// traversed turret read straight ahead (a1gunfire). Falls back to the body's direction for
+// an unknown weapon.
+GameValue A2WeaponDirection(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     GameValue result = state->CreateGameValue(GameArray);
     GameArrayType& a = result;
     Object* obj = GetObject(oper1);
-    const Vector3 d = obj ? obj->Direction() : Vector3(0, 0, 1);
+    Vector3 d = obj ? obj->Direction() : Vector3(0, 0, 1);
+    if (EntityAI* ai = dyn_cast<EntityAI>(obj))
+    {
+        const RString name = oper2;
+        for (int i = 0; i < ai->NMagazineSlots(); i++)
+        {
+            const WeaponType* weapon = ai->GetMagazineSlot(i)._weapon;
+            if (weapon && Poseidon::Arma1Compat::ScriptWeaponMatches(weapon->GetName(), name))
+            {
+                d = ai->GetWeaponDirection(i);
+                break;
+            }
+        }
+    }
     a.Add(GameValue(d.X()));
     a.Add(GameValue(d.Z()));
     a.Add(GameValue(d.Y()));
@@ -1738,9 +1809,12 @@ GameValue A2LocationNull(const GameState*)
 }
 
 // isNull on a location handle (other strings are not null).
+
 GameValue A2IsNullLocation(const GameState*, GameValuePar oper1)
 {
     const RString s = oper1;
+    if (strncmp(s, "::CFG::", 7) == 0 || strncmp(s, "::MCFG::", 8) == 0)
+        return GameValue(A1ConfigIsNull(oper1)); // Arma 3: isNull on a config entry
     if (strncmp(s, LocTag, strlen(LocTag)) != 0)
         return GameValue(false);
     return GameValue(LocationOf(oper1) == nullptr);
@@ -2108,14 +2182,22 @@ GameValue A2MoveInCargoIndex(const GameState* state, GameValuePar oper1, GameVal
 }
 
 // layer cutText / cutRsc / cutObj [...]: CWA has a single layer
-GameValue A2CutTextLayer(const GameState* state, GameValuePar, GameValuePar oper2)
+GameValue A2CutTextLayer(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
-    return CutText(state, oper2);
+    Poseidon::Arma3Rsc::CloseLayer(Poseidon::Arma3Rsc::LayerKey(oper1));
+    return ::CutTextEffect(state, oper2);
 }
 
-GameValue A2CutRscLayer(const GameState* state, GameValuePar, GameValuePar oper2)
+GameValue A2CutFadeOutLayer(const GameState*, GameValuePar oper1, GameValuePar)
 {
-    return CutRsc(state, oper2);
+    Poseidon::Arma3Rsc::CloseLayer(Poseidon::Arma3Rsc::LayerKey(oper1));
+    return NOTHING;
+}
+
+GameValue A2CutRscLayer(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Poseidon::Arma3Rsc::Open(Poseidon::Arma3Rsc::LayerKey(oper1), oper2);
+    return ::CutRscEffect(state, oper2);
 }
 
 GameValue A2CutObjLayer(const GameState* state, GameValuePar, GameValuePar oper2)
@@ -2376,6 +2458,55 @@ GameValue A2ZeroPos(const GameState* state, GameValuePar, GameValuePar)
         a.Add(GameValue(0.0f));
     return result;
 }
+
+// object selectionPosition "name" (or [name, lod]): the named selection's centre in model
+// space, [x, y, z] with z up, as modelToWorld takes it -- from the memory LOD, else the
+// first LOD. Was always [0, 0, 0]; Arma 3's carrier puts each hull part at its base's
+// memory point this way, so the whole ship was stacked on the base at sea level.
+GameValue A2SelectionPosition(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& a = result;
+    Vector3 centre = VZero;
+    Object* obj = GetObject(oper1);
+    RString name;
+    if (oper2.GetType() == GameString)
+        name = oper2;
+    else if (oper2.GetType() == GameArray && static_cast<const GameArrayType&>(oper2).Size() > 0 &&
+             static_cast<const GameArrayType&>(oper2)[0].GetType() == GameString)
+        name = static_cast<const GameArrayType&>(oper2)[0];
+    LODShape* shape = obj ? obj->GetShape() : nullptr;
+    if (shape && name.GetLength() > 0)
+    {
+        Shape* levels[2] = {shape->MemoryLevel(), shape->NLevels() > 0 ? shape->Level(0) : nullptr};
+        for (Shape* level : levels)
+        {
+            const int sel = level ? level->FindNamedSel(name) : -1;
+            if (sel < 0)
+                continue;
+            const NamedSelection& points = level->NamedSel(sel);
+            if (points.Size() <= 0)
+                continue;
+            for (int i = 0; i < points.Size(); i++)
+                centre += level->Pos(points[i]);
+            centre /= static_cast<float>(points.Size());
+            break;
+        }
+    }
+    static int logged = 0;
+    if (obj && logged < 40)
+    {
+        logged++;
+        const Vector3 world = obj->PositionModelToWorld(centre);
+        LOG_INFO(Mission, "selectionPosition '{}' on {}: model {:.2f},{:.2f},{:.2f} world {:.1f},{:.1f},{:.1f} (object at {:.1f},{:.1f},{:.1f})",
+                 (const char*)name, shape ? (const char*)shape->Name() : "?", centre.X(), centre.Y(), centre.Z(),
+                 world.X(), world.Y(), world.Z(), obj->Position().X(), obj->Position().Y(), obj->Position().Z());
+    }
+    a.Add(GameValue(centre.X()));
+    a.Add(GameValue(centre.Z()));
+    a.Add(GameValue(centre.Y()));
+    return result;
+}
 } // namespace
 
 // Arma 2 briefing: the diary and the simple tasks, as the HTML sections the CWA map
@@ -2447,12 +2578,12 @@ std::string ResolveLocalizedTags(const std::string& html)
 
 int Arma2BriefingRevision()
 {
-    return Arma1Compat::Generation() == 2 ? RT().revision : 0;
+    return Arma1Compat::Generation() >= 2 ? RT().revision : 0;
 }
 
 std::string Arma2BriefingHtml(const std::string& html)
 {
-    if (Arma1Compat::Generation() != 2)
+    if (Arma1Compat::Generation() < 2)
         return html;
     std::string out = ResolveLocalizedTags(html);
     const std::string lower = Lower(out);
@@ -2558,7 +2689,7 @@ GameValue ScriptExecVM(const GameState* state, GameValuePar oper1, GameValuePar 
 
 bool Arma2RunUserAction(EntityAI* veh, Person* caller, int id, const RString& script)
 {
-    if (Arma1Compat::Generation() != 2)
+    if (Arma1Compat::Generation() < 2)
         return false;
     GameState* gstate = GWorld->GetGameState();
     GameValue args = gstate->CreateGameValue(GameArray);
@@ -2605,11 +2736,13 @@ void StallMonitor()
     // on the laptop's Intel GPU under DX12 that alone ran past the 60 s). Up to then it gets
     // 180 s, afterwards 60 s without a step end a test run.
     bool simulating = false;
+    // Arma 3 mounts some 550 archives and its steps can be long (preInit compiles): 120 s per step.
+    const bool arma3 = Arma1Compat::Generation() >= 3;
     for (;;)
     {
         std::this_thread::sleep_for(std::chrono::seconds(1));
         const unsigned now = GSimulateTick.load();
-        if (now != last)
+        if (now != last || (arma3 && now == 0))
         {
             last = now;
             stalled = 0;
@@ -2624,13 +2757,14 @@ void StallMonitor()
             for (int i = 0; i < (int)sizeof(GLastExpression) && GLastExpression[i]; i++)
                 expr.push_back(GLastExpression[i] == '\n' || GLastExpression[i] == '\r' ? ' ' : GLastExpression[i]);
         }
-        LOG_WARN(Script, "Arma 2 stall: no simulation step for {} s; evaluator last started: {}", stalled, expr);
+        LOG_WARN(Script, "{} stall: no simulation step for {} s; evaluator last started: {}", Arma1Compat::Label(),
+                 stalled, expr);
         if (stalled == 10 || stalled == 30 || stalled == 90 || stalled == 170)
             Poseidon::Foundation::LogStallThreadStack();
-        if (stalled >= (simulating ? 60 : 180))
+        if (stalled >= (simulating ? (arma3 ? 120 : 60) : 180))
         {
             // a test run that cannot continue ends instead of holding the batch
-            LOG_ERROR(Script, "Arma 2 stall: giving up after {} s (test mode)", stalled);
+            LOG_ERROR(Script, "{} stall: giving up after {} s (test mode)", Arma1Compat::Label(), stalled);
             std::_Exit(3);
         }
     }
@@ -2652,7 +2786,7 @@ void TraceExpression(const char* expression)
 void Arma2StartStallMonitor()
 {
     static bool started = false;
-    if (started || Arma1Compat::Generation() != 2 ||
+    if (started || Arma1Compat::Generation() < 2 ||
         Poseidon::Foundation::AppConfig::Instance().GetArma1TestSeconds() <= 0.0f)
         return;
     started = true;
@@ -2661,10 +2795,13 @@ void Arma2StartStallMonitor()
     std::thread(StallMonitor).detach();
 }
 
+void Arma3RuntimeSimulate(); // GameStateExtA3.cpp
+
 void Arma2RuntimeSimulate()
 {
     GSimulateTick.fetch_add(1, std::memory_order_relaxed);
-    if (Arma1Compat::Generation() != 2 || !GWorld || !GWorld->GetGameState())
+    Arma3RuntimeSimulate();
+    if (Arma1Compat::Generation() < 2 || !GWorld || !GWorld->GetGameState())
         return;
     Runtime& rt = RT();
     KbStep(rt);
@@ -2894,7 +3031,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameScalar, "ctrlMapScale", A2OneUnary, GameScalar),
     GameFunction(GameString, "createDiaryLink", A2TextLogEmpty, GameArray),
     GameFunction(GameString, "waypointDescription", A2TextLogEmpty, GameArray),
-    GameFunction(GameArray, "getGroupIconParams", A2EmptyArrayUnary, GameGroup),
+    GameFunction(GameArray, "getGroupIconParams", A2GroupIconParams, GameGroup),
     GameFunction(GameScalar, "lnbSize", A2ZeroUnary, GameScalar | GameArray),
 };
 
@@ -2923,6 +3060,7 @@ const GameOperator A2Binary[] = {
     GameOperator(GameScalar, "execFSM", function, A2ExecFSM, GameVoid, GameString),
     GameOperator(GameAny, "getFSMVariable", function, A2GetFSMVariable, GameScalar, GameString),
     GameOperator(GameNothing, "setFSMVariable", function, A2SetFSMVariable, GameScalar, GameArray),
+    GameOperator(GameAny, "getFSMVariable", function, A3GetFSMVariableDefault, GameAny, GameArray),
     GameOperator(GameNothing, "ppEffectAdjust", function, A2NothingBinary, GameString | GameScalar, GameArray),
     GameOperator(GameNothing, "ppEffectCommit", function, A2NothingBinary, GameString | GameScalar | GameArray, GameScalar),
     GameOperator(GameNothing, "ppEffectEnable", function, A2NothingBinary, GameString | GameScalar | GameArray, GameBool),
@@ -2976,7 +3114,7 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "cutText", function, A2CutTextLayer, GameScalar, GameArray),
     GameOperator(GameNothing, "cutRsc", function, A2CutRscLayer, GameScalar, GameArray),
     GameOperator(GameNothing, "cutObj", function, A2CutObjLayer, GameScalar, GameArray),
-    GameOperator(GameNothing, "cutFadeOut", function, A2NothingBinary, GameScalar, GameScalar),
+    GameOperator(GameNothing, "cutFadeOut", function, A2CutFadeOutLayer, GameScalar, GameScalar),
     GameOperator(GameNothing, "setVehicleInit", function, A2SetVehicleInit, GameObject, GameString),
     GameOperator(GameNothing, "attachTo", function, A2AttachTo, GameObject, GameArray),
     GameOperator(GameNothing, "copyWaypoints", function, A2NothingBinary, GameGroup, GameGroup),
@@ -2987,7 +3125,7 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "displayRemoveEventHandler", function, A2NothingBinary, GameAny, GameArray),
     GameOperator(GameScalar, "ctrlAddEventHandler", function, A2ZeroBinary, GameAny, GameArray),
     GameOperator(GameNothing, "ctrlRemoveEventHandler", function, A2NothingBinary, GameAny, GameArray),
-    GameOperator(GameArray, "selectionPosition", function, A2ZeroPos, GameObject, GameString),
+    GameOperator(GameArray, "selectionPosition", function, A2SelectionPosition, GameObject, GameString | GameArray),
     GameOperator(GameNothing, "hcSelectGroup", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameNothing, "lnbSetColumnsPos", function, A2NothingBinary, GameScalar, GameArray),
     GameOperator(GameAny, "do", function, A2WithDo, GameString, GameString),

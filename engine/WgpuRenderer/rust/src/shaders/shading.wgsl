@@ -8,15 +8,15 @@
 
 #define_import_path shading
 
-#import frame::{frame, gi_irradiance, terrain_sun_shadow, apply_fog_receiver, fog_sun_reach, cloud_sun_shadow, sky_irradiance, sky_vis_ao, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, sky_specular_split, spec_power_to_gloss}
-#import shadow::shadow_strength
+#import frame::{frame, gi_irradiance, terrain_sun_shadow, apply_fog_receiver, fog_sun_reach, cloud_sun_shadow, sky_irradiance, sky_vis_ao, canopy_sky_ao, canopy_sun_shadow, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, sky_specular_split, spec_power_to_gloss}
+#import shadow::{shadow_strength, shadow_strength_lod}
 #import lighting::lights_material_contrib
 #import color::srgb_to_linear
 #import frame::{interior_rain_reach, interior_rain_coverage, snow_receiver_reach}
 #import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
 #import tree_snow::tree_snow_albedo
 #import frame::ground_sky_reflection
-#import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage}
+#import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage, snow_noise}
 
 // Cosmetic coating uses the actual raised surface, never terrain snow_depth / ground shelter
 // deficits. Baked exposure is raw known-volume proof (0 if missing); active zenith wins nearby.
@@ -114,6 +114,13 @@ struct ShadeMaterial {
     spec_mask: f32,
     native_cavity: f32,
     native_ao: f32,
+    // RFG-185: per-material scale on the leaf back-light (Enfusion SSSBackScattering / its 0.15
+    // class default); 1.0 for everything that is not a native crown.
+    foliage_trans: f32,
+    // RFG-189: how much of the sun a leaf in an object's shadow still receives THROUGH the leaves
+    // in front of it (diffuse, forward-scattered). 0 = an opaque shadow, as every caster was; native
+    // crowns set it (gpu_driven.wgsl).
+    leaf_transmission: f32,
     // Shader-local material value, never a public buffer/ABI field.
     // Nonzero only after exact primary cloth admission and filtered UV masking.
     wet_cloth: f32,
@@ -233,6 +240,8 @@ fn shade(
     tree_snow_cover: f32,
     ground_surface: bool,
     ground_snow_depth: f32,
+    // PERF-FAR-CROWN: (budget-filter from m, tent-filter from m) for leaf cards; x 0 = off.
+    foliage_shadow_lite: vec2<f32>,
 ) -> vec3<f32> {
     var albedo = albedo_in;
     var m_emissive = mat.emissive;
@@ -323,7 +332,19 @@ fn shade(
 
     // CSM shadow (near contact). Folded into the sun removal on the sky-lit path, kept as a
     // final multiply on the legacy path — exactly as the original fs_main did.
-    let csm_s = shadow_strength(world_pos, nrm, fog, dwx, dwy);
+    // PERF-FAR-CROWN: distant leaf cards take a cheaper receiver filter (see shadow_strength_lod).
+    // A crown fragment is the single most numerous shaded pixel in a forest view, and the
+    // contact filter's 17-tap blocker search + 16-24 compares is a large share of its lighting;
+    // past 40 m the 8-tap budget disk resolves the same penumbra, past 120 m a 3x3 tent shows
+    // what the far cascades can hold. Measured (owner profile): alpha-test pass -0.2..0.35 ms at
+    // Durras / forestOwner, crops equal within wind-sway noise. (budget-from m, tent-from m);
+    // x 0 = off (WGR_FAR_CROWN_SHADOW=0, or =<budget>,<tent>).
+    var csm_lod = 0u;
+    if (is_foliage && foliage_shadow_lite.x > 0.0) {
+        let crown_dist = length(world_pos);
+        csm_lod = select(select(0u, 1u, crown_dist > foliage_shadow_lite.x), 2u, crown_dist > foliage_shadow_lite.y);
+    }
+    let csm_s = shadow_strength_lod(world_pos, nrm, fog, dwx, dwy, csm_lod);
     // Long-range terrain sun-shadow: removes direct sun (diffuse+specular), keeps ambient/
     // emissive/local, sampled by absolute world position (world_pos is camera-relative).
     let world_abs = world_pos + frame.cam_pos.xyz;
@@ -337,6 +358,29 @@ fn shade(
             rain_puddle *= ground_puddle_rain_factor(interior_rain_reach(world_abs), interior_rain_coverage(world_abs));
         }
         albedo *= 1.0 - rain_puddle * 0.38;
+    }
+    // BOOM-003 (owner, 2026-10-19: "icy roads"): a road (a ground surface) in a snowy world is
+    // packed, dirty snow in patches and smooth black ice between them, not dry asphalt. Ice is
+    // darker and mirror-glossy (a tight sun highlight); packed snow is grey-white and matt.
+    // World-anchored noise at 0.7-3.7 m, local coordinates; nothing at all outside winter.
+    if (ground_surface && linear > 0.5 && !is_foliage && !is_cockpit && snow_cover == 0.0) {
+        var winter = smoothstep(0.0, 0.01, frame.snow_surface.x);
+        if (frame.snow_surface.y >= 0.0 && frame.snow_surface.z > 0.0 && frame.snow_surface.w > 0.001) {
+            winter = max(winter, smoothstep(frame.snow_surface.y - frame.snow_surface.z, frame.snow_surface.y, world_abs.y));
+        }
+        if (winter > 0.0) {
+            let lp = world_abs.xz - floor(world_abs.xz / 512.0) * 512.0;
+            let packed_n = snow_noise(lp / 2.3).x * 0.6 + snow_noise(lp / 0.7 + vec2<f32>(5.0, 9.0)).x * 0.4;
+            let ice_n = snow_noise(lp / 3.7 + vec2<f32>(-13.0, 4.0)).x;
+            let packed = smoothstep(-0.1, 0.45, packed_n) * winter;
+            let ice = smoothstep(0.1, 0.5, ice_n) * winter * (1.0 - 0.7 * packed);
+            albedo = mix(albedo, vec3<f32>(0.52, 0.54, 0.57) * (0.85 + 0.15 * packed_n), packed);
+            albedo = mix(albedo, albedo * vec3<f32>(0.5, 0.54, 0.6), ice);
+            m_specular = mix(m_specular, mat.sun_diffuse * 0.9, ice);
+            m_spec_power = mix(m_spec_power, 240.0, ice);
+            m_spec_mask = mix(m_spec_mask, 1.0, ice);
+            m_specular *= 1.0 - 0.8 * packed;
+        }
     }
     // Sinkhole W1/W1b: a fragment under the terrain surface (a cave, a cellar, a tunnel) is lit only by what
     // comes in through the terrain's openings. The heightfield is never a shadow caster for objects, and the
@@ -356,13 +400,17 @@ fn shade(
     let cave = cave_daylight2(cave_pos);
     let underground_s = 1.0 - cave.x; // direct sun: only through an opening's footprint
     let underground_amb_s = 1.0 - cave.y; // sky / bounce: fades with the reach from an opening
-    let terrain_s = max(terrain_sun_shadow(world_abs.xz, world_abs.y), underground_s);
+    let terrain_s = max(max(terrain_sun_shadow(world_abs.xz, world_abs.y), underground_s), canopy_sun_shadow(world_abs));
     let sun_occ = select(terrain_s, max(terrain_s, csm_s), sky_lit);
     // CLD-020: cloud transmittance MULTIPLIES the remaining direct sun rather than joining the
     // max() above. The others are binary occluders answering "is something between me and the
     // sun"; cloud shadow is a partial transmittance, and a thin deck under a ridge should darken
     // what the ridge already left, not compete with it for the same slot.
-    let sun_vis = (1.0 - sun_occ) * cloud_sun_shadow(world_abs.xz) * fog_sun_reach(world_pos);
+    let sun_open = cloud_sun_shadow(world_abs.xz) * fog_sun_reach(world_pos);
+    let sun_vis = (1.0 - sun_occ) * sun_open;
+    // RFG-189: the share of the sun that ONLY the cascade casters (objects: other leaves, the
+    // crown's own branches) take away. Terrain and cloud shadow stay opaque.
+    let sun_csm_blocked = max((1.0 - terrain_s) * sun_open - sun_vis, 0.0);
     // Ambient occlusion on the ambient term (both paths), orthogonal to sun_occ (direct sun).
     // Two independent occluders, so they MULTIPLY (plan §6): sky-visibility is the baked far /
     // km-scale term keyed on the object's terrain column, GTAO the screen-space near/mid term
@@ -402,7 +450,7 @@ fn shade(
     // static buildings it has rooms for; a soldier walking in a cave got the open-sky ambient (owner report:
     // "soldiers also illuminated and not dark"). The same ramp as the sun test, so a cave is one consistent dark.
     let underground_amb = mix(1.0, 0.03, underground_amb_s);
-    let amb_ao = sky_vis_ao(world_abs.xz) * gtao_t * interior_ao * clamp(baked_sky_vis, 0.0, 1.0)
+    let amb_ao = sky_vis_ao(world_abs.xz) * canopy_sky_ao(world_abs) * gtao_t * interior_ao * clamp(baked_sky_vis, 0.0, 1.0)
         * leaf_cavity * mix(mat.native_ao, 1.0, snow_cover) * underground_amb;
     // ...and a FOURTH, at a scale none of the three can reach: the normal map's own micro-
     // occlusion. Sky-vis is keyed on the terrain column (km), GTAO marches the depth buffer
@@ -637,12 +685,22 @@ fn shade(
             // the backlit / shadow side, ~0 on the sunlit side, so it lifts the dark side without
             // doubling the lit side or painting a flat view-only sheet across a billboard.
             let lt = normalize(sl + nrm * k.y);
-            let trans = pow(clamp(dot(vdir, -lt), 0.0, 1.0), max(k.z, 1.0)) * k.x;
+            let trans = pow(clamp(dot(vdir, -lt), 0.0, 1.0), max(k.z, 1.0)) * k.x * mat.foliage_trans;
             // The SSS fill is a NEAR-FIELD effect (per-leaf translucency shouldn't read as a glow at
             // distance, and low-LOD billboards otherwise flatten into a bright sheet), so it shares
             // the distance fade above; the base Lambert stays so far foliage matches terrain.
             let fill = (wrap_fill + trans) * fade * (1.0 - tree_snow_cover);
-            sun = m_emissive + ambient + frame.sun_diffuse.rgb * (front + fill) * sun_vis * leaf_cavity;
+            // RFG-189: a crown is not a solid. A leaf in its neighbours' shadow is still lit by the
+            // sun that came through them -- diffusely, so it does not depend on this leaf's own
+            // facing. Without it every shadowed leaf held sky light only, and a crown seen against
+            // the sun read black where Reforger's glows green.
+            // Transmitted light leaves a leaf on its FAR side: it is what you see looking toward the
+            // sun, little of it from the sun's own side, where the leaves show reflected light. A
+            // quarter stays everywhere -- light already scattered around inside the crown.
+            let toward_sun = smoothstep(-0.3, 0.8, dot(vdir, -sl));
+            let through = sun_csm_blocked * mat.leaf_transmission * mix(0.25, 1.0, toward_sun) *
+                (1.0 - tree_snow_cover);
+            sun = m_emissive + ambient + frame.sun_diffuse.rgb * ((front + fill) * sun_vis + through) * leaf_cavity;
         } else {
             sun = m_emissive + ambient + frame.sun_diffuse.rgb * ndotl * sun_vis;
         }
@@ -658,6 +716,15 @@ fn shade(
     let raw = sun + local.diffuse;
     let lit = select(clamp(raw, vec3<f32>(0.0), vec3<f32>(1.0)), max(raw, vec3<f32>(0.0)), linear > 0.5);
     var rgb = albedo * lit;
+    // Object lighting diagnostics (WGR_OBJECT_DEBUG_VIEW=albedo|light): the albedo alone, or the
+    // light it receives (sun + sky + local, before albedo) at 1/8 -- to tell a dark texture from a
+    // dark light before reasoning about either.
+#ifdef OBJECT_DEBUG_ALBEDO
+    rgb = albedo;
+#endif
+#ifdef OBJECT_DEBUG_LIGHT
+    rgb = lit * 0.125;
+#endif
     rgb += select(clamp(local.specular, vec3<f32>(0.0), vec3<f32>(1.0)),
                   max(local.specular, vec3<f32>(0.0)), linear > 0.5);
     // Sun-only Blinn-Phong specular (untextured, additive, before the shadow multiply). The

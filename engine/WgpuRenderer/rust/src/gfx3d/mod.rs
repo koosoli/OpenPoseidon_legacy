@@ -26,6 +26,8 @@ mod boot_relief_tests;
 mod native_pbr_tests;
 #[cfg(test)]
 mod earth_ground_detail_tests;
+#[cfg(test)]
+mod tidewater_pipeline_tests;
 mod interior_publication;
 mod weather_cover;
 mod weather_cover_policy;
@@ -37,6 +39,7 @@ mod gi_rsm_cached_count;
 mod local_publication;
 pub(crate) mod geometry_pass_facts;
 mod lod_feedback;
+mod lod_usage;
 #[allow(dead_code)]
 pub(crate) mod view_reference_facts;
 use pool::{GeometryPool, MeshAlloc};
@@ -79,7 +82,11 @@ fn direct_material_flags(flags: u32, misc: u32, late_surface: bool) -> u32 {
         | crate::ffi::WGR_DRAW3D_BOOT_RELIEF
         | crate::ffi::WGR_DRAW3D_EARTH_SURFACE
         | crate::ffi::WGR_DRAW3D_NORMAL_RG
-        | crate::ffi::WGR_DRAW3D_NATIVE_CAVITY;
+        | crate::ffi::WGR_DRAW3D_NATIVE_CAVITY
+        // RFG-129: a blend-pass section that is not on a surface (glass, nets). Its texels are
+        // not in the depth prepass, so the screen-space AO under it is the AO of whatever is
+        // BEHIND it: a pane over a dark room drew black. The shader skips GTAO for these.
+        | crate::ffi::WGR_DRAW3D_BLEND_SECTION;
     ((misc >> 8) & 1) | (flags & material_bits) | (u32::from(late_surface) << 6)
 }
 
@@ -93,8 +100,8 @@ fn direct_normal_channels_keep_flags_and_exclude_red_from_parallax() {
         direct_material_flags(DRAW3D_ON_SURFACE | DRAW3D_ZBIAS_MASK, 0, false),
         0
     );
-    assert_eq!(direct_material_flags(u32::MAX, 0, true), 56574);
-    assert_eq!(direct_material_flags(u32::MAX, 0xffff_0100, true), 56575);
+    assert_eq!(direct_material_flags(u32::MAX, 0, true), 56574 | crate::ffi::WGR_DRAW3D_BLEND_SECTION);
+    assert_eq!(direct_material_flags(u32::MAX, 0xffff_0100, true), 56575 | crate::ffi::WGR_DRAW3D_BLEND_SECTION);
     assert_eq!(direct_material_flags(crate::ffi::WGR_DRAW3D_NATIVE_CAVITY, 0, false), 1024);
     assert_eq!(direct_material_flags(crate::ffi::WGR_DRAW3D_GROUND_RECEIVER, 0, false), 4096);
     let src = include_str!("shader3d.wgsl");
@@ -415,10 +422,35 @@ pub(crate) fn emissive_night() -> f32 {
 // WGR_CUTOUT_MIP_ALPHA=0 restores the old behaviour for an A/B.
 // REN-OBJ-001: whether vegetation cutouts sample GTAO + the interior-sky volume per fragment.
 // Default OFF (they keep their canopy term); WGR_FOLIAGE_SCREEN_AO=1 is the A/B and the old look.
+/// PERF-FAR-CROWN: (budget-filter from, tent-filter from) metres for leaf-card shadows.
+/// WGR_FAR_CROWN_SHADOW=0 = off; =<budget>,<tent> overrides 40,120.
+pub(crate) fn far_crown_shadow() -> (f32, f32) {
+    static V: std::sync::OnceLock<(f32, f32)> = std::sync::OnceLock::new();
+    *V.get_or_init(|| match std::env::var("WGR_FAR_CROWN_SHADOW") {
+        Ok(v) if v.trim() == "0" => (0.0, 0.0),
+        Ok(v) => {
+            let p: Vec<f32> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+            if p.len() == 2 && p[0] > 0.0 && p[1] >= p[0] { (p[0], p[1]) } else { (40.0, 120.0) }
+        }
+        Err(_) => (40.0, 120.0),
+    })
+}
+
 pub(crate) fn foliage_screen_ao() -> f32 {
     static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
     *V.get_or_init(|| {
         std::env::var("WGR_FOLIAGE_SCREEN_AO")
+            .map(|v| if v.trim() == "1" { 1.0 } else { 0.0 })
+            .unwrap_or(0.0)
+    })
+}
+
+// RFG-129: whether blend-pass sections off any surface (glass) sample GTAO. Default OFF: what
+// they would read is the AO of the geometry behind them. WGR_BLEND_SECTION_SCREEN_AO=1 = old look.
+pub(crate) fn blend_section_screen_ao() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("WGR_BLEND_SECTION_SCREEN_AO")
             .map(|v| if v.trim() == "1" { 1.0 } else { 0.0 })
             .unwrap_or(0.0)
     })
@@ -474,6 +506,17 @@ fn is_power_of_ten(n: u64) -> bool {
         v /= 10;
     }
     v == 1
+}
+
+// WGR_LOD_CENSUS=1: log the main view's heaviest models every 600 frames (diagnostic only).
+fn lod_census_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_LOD_CENSUS").as_deref() == Ok("1"))
+}
+fn lod_census_names() -> &'static std::sync::Mutex<std::collections::HashMap<u32, String>> {
+    static NAMES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u32, String>>> =
+        std::sync::OnceLock::new();
+    NAMES.get_or_init(Default::default)
 }
 
 pub(crate) fn env_f32(name: &'static str, default: f32) -> f32 {
@@ -1387,18 +1430,26 @@ struct GpuSectionSrc {
     variant: u32,
 }
 
+/// PERF-SECTION-INCREMENTAL lever: WGR_SECTION_REFRESH_INCREMENTAL=0 = every structural change
+/// re-resolves every section (the old behaviour).
+fn section_incremental_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_SECTION_REFRESH_INCREMENTAL").as_deref() != Ok("0"))
+}
+
 fn resolve_registered_section(meshes: &SlotMap<MeshKey, Mesh>, src: &GpuSectionSrc) -> cull::SectionGpu {
     let key: MeshKey = KeyData::from_ffi(src.mesh).into();
     match meshes.get(key) {
         // Bound WHOLE under indirect: base_vertex = the mesh's pool vbase, first_index =
         // its ibase + the section's mesh-local start (indices are 0-based mesh-local).
-        Some(mesh) => cull::SectionGpu {
+        // LOD-STREAM: an evicted mesh (counts zeroed) draws nothing, like a missing one.
+        Some(mesh) if mesh.vert_count != 0 => cull::SectionGpu {
             first_index: mesh.alloc.ibase + src.index_begin,
             index_count: src.index_count,
             base_vertex: mesh.alloc.vbase,
             variant: src.variant,
         },
-        None => cull::SectionGpu {
+        _ => cull::SectionGpu {
             first_index: 0,
             index_count: 0,
             base_vertex: 0,
@@ -1725,10 +1776,11 @@ impl CameraGroup {
                     count: None,
                 },
                 // SH-9 sky-irradiance coefficients (Sky-owned, lent by buffer), for directional sky
-                // ambient on the lit-mesh + terrain fragment shaders (frame::sky_irradiance).
+                // ambient on the lit-mesh + terrain fragment shaders (frame::sky_irradiance); VERTEX for the
+                // Tidewater spray, which lights each particle in its vertex stage (tw_spray.wgsl).
                 wgpu::BindGroupLayoutEntry {
                     binding: 9,
-                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -3347,6 +3399,18 @@ fn water_ripple_strength_from_env() -> f32 {
 ///
 /// Read through `env_f32`, which caches per name, so the value is fixed for the run — an A/B
 /// must be two runs of the same binary differing in exactly one term.
+/// PERF-SHADOW-CULL-SKIP: skip the GPU cull of kept far cascades (WGR_SHADOW_CULL_SKIP=0 = cull all).
+pub(crate) fn shadow_cull_skip() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_SHADOW_CULL_SKIP").map(|v| v.trim() != "0").unwrap_or(true))
+}
+
+/// PERF-R3: the shadow-caster loop's state tracking (WGR_SHADOW_STATE_TRACK=0 = re-set every bucket).
+pub(crate) fn shadow_state_track() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_SHADOW_STATE_TRACK").map(|v| v.trim() != "0").unwrap_or(true))
+}
+
 pub(crate) fn ambient_normal_mapped() -> f32 {
     env_f32("WGR_AMBIENT_NORMAL_MAPPED", 1.0).clamp(0.0, 1.0)
 }
@@ -3452,6 +3516,14 @@ pub(crate) fn normal_relief_log_line() -> String {
                  both multiply/reallocate, neither adds energy",
         }
     )
+}
+
+// RFG-124: the GTAO thickness fade used to scale a receding sample's horizon cosine toward 0
+// (a horizon 90 degrees off the view ray) instead of toward the hemisphere's low horizon, so an
+// occluder far outside the radius still occluded. WGR_GTAO_FADE_LEGACY=1 restores it.
+fn gtao_fade_legacy() -> bool {
+    static LEGACY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *LEGACY.get_or_init(|| std::env::var("WGR_GTAO_FADE_LEGACY").as_deref() == Ok("1"))
 }
 
 /// WGR_GTAO=0 hard-disables screen-space AO (see `Gfx3d::gtao_force_off`). Read once at renderer
@@ -4339,6 +4411,8 @@ pub struct Gfx3d {
     // Depth+normal prepass variants (docs/depth-prepass-plan.md), built lazily
     // alongside the colour pipelines for every opaque draw the frame submits.
     prepass_pipelines: FxHashMap<PrepassKey, wgpu::RenderPipeline>,
+    // PERF-PIPE-ASYNC: the background compiler for the two maps above (None = synchronous).
+    pipe_worker: Option<PipeWorker>,
 
     depth: Option<(wgpu::Texture, wgpu::TextureView)>,
     // View-space normal G-buffer, allocated with (and to the same size as) the depth
@@ -4398,6 +4472,7 @@ pub struct Gfx3d {
     snow_surface: [f32; 4],
     ground_weather: [f32; 4],
     layer_fog_requested: bool,
+    world_max_height: f32,
     object_snow_enabled: bool,
     snow_surface_trace: bool,
     snow_surface_trace_rows: u8,
@@ -4484,6 +4559,10 @@ pub struct Gfx3d {
     // Fixture-only dispatch witness; reset before the frame and consumed after a closed
     // shadow depth pass. A prepared view alone is not proof that its cull ran.
     geometry_shadow_cull_mask: std::cell::Cell<u32>,
+    // PERF-SHADOW-CULL-SKIP: this frame's kept far cascades (WgrShadowPass::cascade_keep_mask,
+    // stored by prepare_shadows) and the cascades whose cull cull_dispatch_shadows skipped.
+    shadow_keep_mask: std::cell::Cell<u32>,
+    shadow_cull_skipped_mask: std::cell::Cell<u32>,
     // One opt-in cascade-0 depth-draw closure. A prepared view or cull dispatch
     // alone cannot authorize an absence readback.
     shadow_target_draw_closed_mask: std::cell::Cell<u32>,
@@ -4534,6 +4613,10 @@ pub struct Gfx3d {
     shadow_target: Option<ShadowTarget>,
     // Bumped on shadow-target recreation so the camera bind group refreshes.
     shadow_gen: u64,
+    // The shadow_gen the cascade layers were last rendered into. A kept cascade
+    // (WgrShadowPass::cascade_keep_mask) is honoured only while this still equals shadow_gen:
+    // a reallocated target holds nothing worth keeping.
+    shadow_gen_rendered: std::cell::Cell<u64>,
     // 1x1 stand-in bound while no shadow map exists (the layout always binds).
     dummy_shadow_view: wgpu::TextureView,
     // 1x1 stand-in for the GTAO target before the first ensure_depth (see its creation).
@@ -4692,6 +4775,17 @@ pub struct Gfx3d {
     // buffer generation changes. A live allocation never moves; updates/skinning rewrite only
     // content. Clean frames retain the exact previous resolution, including missing handles.
     gpu_section_src: Vec<GpuSectionSrc>,
+    /// LOD-STREAM: meshes whose pool storage is evicted (handle kept, vert/index count 0).
+    evicted_meshes: rustc_hash::FxHashSet<u64>,
+    // PERF-SECTION-INCREMENTAL: mesh handle -> section rows naming it (built by a full refresh,
+    // appended by register_model; validated against gpu_section_src on use), the meshes whose
+    // resolution may have changed since, and rows registered since.
+    section_mesh_rows: rustc_hash::FxHashMap<u64, Vec<u32>>,
+    section_mesh_rows_valid: bool,
+    section_dirty_meshes: rustc_hash::FxHashSet<u64>,
+    section_dirty_rows: Vec<u32>,
+    lod_residency_flags_set: bool,
+    pool_split_tick: u64,
     // Address validity only: fixed source descriptors + generational mesh map.
     // 16 bytes of scalar state; no allocation, clock, per-source bit or frame scan.
     gpu_section_refresh: section_refresh::SectionRefreshValidity,
@@ -4712,6 +4806,11 @@ pub struct Gfx3d {
     /// writes off; Some only under WGR_OBJECT_EARLY_Z=1 on a device that supports it, and then
     /// it replaces gpu_pipeline for the prepassed main-view draw only.
     gpu_pipeline_early: Option<wgpu::RenderPipeline>,
+    // RFG-188: double-sided twins for the cutout variant (None = WGR_CROWN_DOUBLE_SIDED=0).
+    gpu_pipeline_cutout: Option<wgpu::RenderPipeline>,
+    gpu_pipeline_early_cutout: Option<wgpu::RenderPipeline>,
+    gpu_prepass_pipeline_cutout: Option<wgpu::RenderPipeline>,
+    gpu_reflection_pipeline_cutout: Option<wgpu::RenderPipeline>,
     // Mirrored-view variant of gpu_pipeline. Reflection reverses triangle winding, so it
     // deliberately uses the opposite front face while retaining back-face culling.
     gpu_reflection_pipeline: wgpu::RenderPipeline,
@@ -4748,6 +4847,581 @@ pub struct Gfx3d {
     cull_debug_bind: Option<wgpu::BindGroup>,
 
     meshes: SlotMap<MeshKey, Mesh>,
+    // RFG-127: retained meshes with byte-identical geometry share one pool allocation.
+    shared_meshes: SharedMeshes,
+}
+
+// RFG-127: content-keyed sharing of static mesh geometry. A Reforger prefab's colour variants
+// (RFG-121, 402 on Everon) are each their own model with the SAME vertices and indices, and every
+// one used to take its own copy in the pool -- enough to push the vertex buffer from 1088 MB to
+// 2176 MB, whose doubling step (old + new live during the copy) then intermittently failed on an
+// 8 GB card: an invalid `wgr_geo_pool_vbuf` and a black frame. Only the retained static path
+// opts in (`mesh_create_shared`); a mesh that is ever rewritten in place (`mesh_update`) is
+// created unshared, and an update aimed at a shared one is refused rather than written into a
+// twin. WGR_MESH_DEDUP=0 turns it off.
+type MeshContentKey = [u64; 4];
+
+#[derive(Default)]
+struct SharedMeshes {
+    by_content: std::collections::HashMap<MeshContentKey, (MeshAlloc, u32)>,
+    of_mesh: std::collections::HashMap<MeshKey, MeshContentKey>,
+    hits: u64,
+    saved_bytes: u64,
+    reported_hits: u64,
+}
+
+fn mesh_dedup_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_MESH_DEDUP").as_deref() != Ok("0"))
+}
+
+// Two independent 64-bit word hashes plus both counts: a false match would draw one model's
+// triangles as another's, so the key is wide rather than fast-and-hopeful.
+fn mesh_content_key(verts: &[WgrMeshVertex], indices: &[u32]) -> MeshContentKey {
+    fn words(bytes: &[u8], mut f: impl FnMut(u64)) {
+        let mut chunks = bytes.chunks_exact(8);
+        for c in &mut chunks {
+            f(u64::from_le_bytes(c.try_into().unwrap()));
+        }
+        let rest = chunks.remainder();
+        if !rest.is_empty() {
+            let mut w = [0u8; 8];
+            w[..rest.len()].copy_from_slice(rest);
+            f(u64::from_le_bytes(w));
+        }
+    }
+    let (mut a, mut b) = (0x243f_6a88_85a3_08d3u64, 0x1319_8a2e_0370_7344u64);
+    for bytes in [bytemuck::cast_slice::<WgrMeshVertex, u8>(verts), bytemuck::cast_slice::<u32, u8>(indices)] {
+        words(bytes, |w| {
+            a = (a.rotate_left(5) ^ w).wrapping_mul(0x51_7cc1_b727_220a_95);
+            let mut z = w ^ b;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            b = (b.rotate_left(17) ^ z ^ (z >> 31)).wrapping_add(0x9e37_79b9_7f4a_7c15);
+        });
+    }
+    [a, b, verts.len() as u64, indices.len() as u64]
+}
+
+#[test]
+fn mesh_content_key_separates_geometry_and_matches_copies() {
+    let v = |x: f32| {
+        let mut m: WgrMeshVertex = bytemuck::Zeroable::zeroed();
+        m.pos.x = x;
+        m
+    };
+    let a = mesh_content_key(&[v(1.0), v(2.0), v(3.0)], &[0, 1, 2]);
+    assert_eq!(a, mesh_content_key(&[v(1.0), v(2.0), v(3.0)], &[0, 1, 2]));
+    assert_ne!(a, mesh_content_key(&[v(1.0), v(2.0), v(3.5)], &[0, 1, 2]));
+    assert_ne!(a, mesh_content_key(&[v(1.0), v(2.0), v(3.0)], &[0, 2, 1]));
+}
+
+/// STREAM-HITCH probe (WGR_PIPELINE_TIMING=1): a lazily created pipeline is compiled on the render
+/// thread mid-frame; log every creation with its cost.
+struct PipelineCreateTimer(&'static str, std::time::Instant);
+impl PipelineCreateTimer {
+    fn new(kind: &'static str) -> Self { Self(kind, std::time::Instant::now()) }
+}
+impl Drop for PipelineCreateTimer {
+    fn drop(&mut self) {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *ON.get_or_init(|| std::env::var_os("WGR_PIPELINE_TIMING").is_some()) {
+            eprintln!("[wgr] pipeline created at runtime: {} {:.1} ms", self.0, self.1.elapsed().as_secs_f64() * 1e3);
+        }
+    }
+}
+
+/// The pipelines a draw's passes use: its colour key, the prepassed colour twin (write-off) or
+/// MAT-053's solid-texel write, and its prepass. The one list both the builder and the
+/// readiness gate read, so they cannot disagree.
+fn required_pipelines(d: &WgrDraw3D, skinned: bool) -> ([Option<PipelineKey>; 2], Option<PrepassKey>) {
+    let key = PipelineKey::from_draw(d, skinned);
+    if key.prepassed() {
+        (
+            [Some(key), Some(key.with_write_off())],
+            Some(PrepassKey { skinned, alpha_ref_bits: key.alpha_ref_bits, solid_blend: false }),
+        )
+    } else if draw_solid_blend_prepassed(d) {
+        (
+            [Some(key), Some(solid_blend_write_key(key))],
+            Some(PrepassKey { skinned, alpha_ref_bits: SOLID_BLEND_ALPHA.to_bits(), solid_blend: true }),
+        )
+    } else {
+        ([Some(key), None], None)
+    }
+}
+
+// PERF-PIPE-ASYNC (2026-10-20). Object pipelines are built lazily, one variant per new
+// (blend, depth, offset, cutout threshold, ...) combination, and the cutout threshold is a
+// pipeline constant -- so every Reforger material with its own AlphaTest value meant two or three
+// fresh compiles, 30-80 ms each, on the render thread in the middle of a frame: 16 of them
+// (405 ms) on one 15 m/s Durras flight, the largest render-side hitch once the shore field was
+// fixed. They now compile on two background threads; a draw whose set is not ready yet is
+// simply not drawn (a newly streamed object appears a few frames later instead of freezing the
+// frame). The pipelines built are the same ones. WGR_PIPELINE_ASYNC=0 = compile in place.
+/// Background pipeline compiles must not take a core from the main or render thread.
+fn below_normal_priority() {
+    #[cfg(windows)]
+    {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetCurrentThread() -> *mut core::ffi::c_void;
+            fn SetThreadPriority(thread: *mut core::ffi::c_void, priority: i32) -> i32;
+        }
+        // THREAD_PRIORITY_BELOW_NORMAL
+        unsafe { SetThreadPriority(GetCurrentThread(), -1) };
+    }
+}
+
+fn pipe_async_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_PIPELINE_ASYNC").as_deref() != Ok("0"))
+}
+
+struct PipeJob {
+    ctx: PipeCtx,
+    device: wgpu::Device,
+    mains: Vec<PipelineKey>,
+    prepass: Vec<PrepassKey>,
+}
+
+struct PipeDone {
+    mains: Vec<(PipelineKey, wgpu::RenderPipeline)>,
+    prepass: Vec<(PrepassKey, wgpu::RenderPipeline)>,
+}
+
+struct PipeWorker {
+    job_tx: std::sync::mpsc::Sender<PipeJob>,
+    done_rx: std::sync::mpsc::Receiver<PipeDone>,
+    pending_main: rustc_hash::FxHashSet<PipelineKey>,
+    pending_prepass: rustc_hash::FxHashSet<PrepassKey>,
+}
+
+impl PipeWorker {
+    fn new() -> Self {
+        let (job_tx, job_rx) = std::sync::mpsc::channel::<PipeJob>();
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<PipeDone>();
+        let job_rx = std::sync::Arc::new(std::sync::Mutex::new(job_rx));
+        for _ in 0..2 {
+            let job_rx = job_rx.clone();
+            let done_tx = done_tx.clone();
+            let _ = std::thread::Builder::new().name("wgr-pipeline".into()).spawn(move || {
+                below_normal_priority();
+                loop {
+                // The lock is held only to take a job; the channel closing (renderer gone) ends it.
+                let job = match job_rx.lock() {
+                    Ok(rx) => rx.recv(),
+                    Err(_) => return,
+                };
+                let Ok(job) = job else { return };
+                let done = PipeDone {
+                    mains: job.mains.iter().map(|&k| (k, build_main_pipeline(&job.ctx, &job.device, k))).collect(),
+                    prepass: job
+                        .prepass
+                        .iter()
+                        .map(|&k| (k, build_prepass_pipeline(&job.ctx, &job.device, k)))
+                        .collect(),
+                };
+                if done_tx.send(done).is_err() {
+                    return;
+                }
+                }
+            });
+        }
+        Self { job_tx, done_rx, pending_main: Default::default(), pending_prepass: Default::default() }
+    }
+
+    fn submit(&mut self, job: PipeJob) {
+        let _ = self.job_tx.send(job);
+    }
+}
+
+/// Everything the object pipeline builders read, cloned out of Gfx3d (wgpu handles are
+/// reference-counted) so a variant can also be compiled off the render thread (PERF-PIPE-ASYNC).
+#[derive(Clone)]
+struct PipeCtx {
+    shader: wgpu::ShaderModule,
+    plain_layout: wgpu::PipelineLayout,
+    skinned_layout: wgpu::PipelineLayout,
+    surface_format: wgpu::TextureFormat,
+    sample_count: u32,
+    foliage_a2c: bool,
+    vbuf_attrs: [wgpu::VertexAttribute; 6],
+    skin_attrs: [wgpu::VertexAttribute; 2],
+}
+
+fn build_main_pipeline(ctx: &PipeCtx, device: &wgpu::Device, key: PipelineKey) -> wgpu::RenderPipeline {
+    let _pipe_timer = PipelineCreateTimer::new("main");
+
+    let module = &ctx.shader;
+    let (vs_entry, layout) = if key.skinned {
+        ("vs_skinned", &ctx.skinned_layout)
+    } else {
+        ("vs_main", &ctx.plain_layout)
+    };
+
+    let vbuf_layout = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<WgrMeshVertex>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &ctx.vbuf_attrs,
+    };
+    let skin_layout = wgpu::VertexBufferLayout {
+        array_stride: 8,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &ctx.skin_attrs,
+    };
+    let plain_buffers = [vbuf_layout.clone()];
+    let skinned_buffers = [vbuf_layout, skin_layout];
+    let buffers: &[wgpu::VertexBufferLayout] = if key.skinned {
+        &skinned_buffers
+    } else {
+        &plain_buffers
+    };
+
+    // WgrDepthMode: 0 none, 1 test (no write), 2 test + write.
+    let (test, mut write) = match key.depth {
+        0 => (false, false),
+        1 => (true, false),
+        _ => (true, true),
+    };
+    // Prepassed opaque draws in the colour pass keep GreaterEqual but stop writing:
+    // the prepass already holds the frontmost depth (decision 2). GreaterEqual (not
+    // Equal) is robust to any sub-ULP VS drift; write-off just removes redundant writes.
+    if key.depth_write_off {
+        write = false;
+    }
+    // Shadows still use DepthBiasState (works well enough for them: drawn
+    // depth-test-no-write on the surface). Decal/ZBias overlays instead bias in
+    // the vertex shader (depth_bias below) — DepthBiasState's constant term is
+    // unreliable / a no-op on float depth formats, so it did nothing for close
+    // UI (notebook) and coplanar sign overlays.
+    // Reversed-Z: nearer = larger depth, so a toward-camera bias is positive
+    // (the forward-Z code used negatives). DepthBiasState's constant term is a
+    // no-op on this backend's float depth anyway, but keep the sign correct for
+    // formats/GPUs where it does apply.
+    let bias = match key.offset {
+        Offset::Shadow => wgpu::DepthBiasState {
+            constant: 64,
+            slope_scale: 1.0,
+            clamp: 0.0,
+        },
+        _ => wgpu::DepthBiasState::default(),
+    };
+
+    // Vertex-shader depth bias in [0,1] NDC depth. WGR_DECAL_SCALE / WGR_ZBIAS_SCALE
+    // multiply the base unit; ZBias also scales with its 1..3 level.
+    const DEPTH_BIAS_UNIT: f32 = 1.0e-5;
+
+    // DECAL is now a SEPARATE unit, because the ndc-squared fix silently rescaled it by four
+    // orders of magnitude and nobody adjusted the constant to match.
+    //
+    // The history: the bias used to be a constant NDC offset. Under reversed-Z, depth is
+    // near/z, so a constant NDC offset is a distance-DEPENDENT world pull — it dragged a road
+    // ~95 m forward at 1 km and 716 m at 3 km, which is why roads appeared through mountains.
+    // The fix multiplied by ndc squared, which is correct in SHAPE: it makes the pull a
+    // constant in WORLD space. But it changed the magnitude at the same time, and the constant
+    // was left at the value that had been tuned for the old meaning.
+    //
+    // With the ndc-squared form the world-space pull is `depth_bias * near`. This file's own
+    // calibration comment upstream uses near = 0.1 m, so 1.0e-5 buys 1.0e-6 m — ONE MICRON.
+    // That is not a small bias, it is no bias: the previous session traded a 716 m over-pull
+    // for zero, which is exactly why applying it did not fix the see-through and why the road
+    // agent's census found the mechanism still live.
+    //
+    // 5.0e-2 * 0.1 m = 0.005 m, which is ZRoadEpsilon (EngineWgpu.hpp:104) — the same
+    // world-space lift GL33 and the CPU path give a road at ClipShape.cpp:240, and which wgpu
+    // loses because GGpuTerrainConform makes the GPU conform pin the vertex flat
+    // (shader3d.wgsl:295 assigns world_pos.y and discards pos.y). So this is not a tuned
+    // magic number; it restores the documented parity value the wgpu path dropped.
+    //
+    // WGR_DECAL_SCALE still scales it, and now that env_f32 accepts 0 (see above) the
+    // ablation arm works for the first time: WGR_DECAL_SCALE=0 is genuinely no bias, and
+    // WGR_DECAL_SCALE=0.0002 reproduces the old 1e-5 behaviour for an A/B.
+    //
+    // ZBias is deliberately LEFT ALONE at the old unit even though the ndc-squared change
+    // nulled it by the same factor. It plausibly has the identical defect — but it is applied
+    // to coplanar geometry all over every world at three different levels, and correcting it
+    // 5000x blind, on a night with no way to check for z-fighting across that surface area,
+    // risks trading one reported bug for an unreported one on content nobody is looking at.
+    // It needs its own measurement. Recorded rather than fixed.
+    const DECAL_BIAS_UNIT: f32 = 5.0e-2;
+    let depth_bias = match key.offset {
+        Offset::Decal => decal_scale() * DECAL_BIAS_UNIT,
+        Offset::ZBias(level) => level as f32 * zbias_scale() * DEPTH_BIAS_UNIT,
+        _ => 0.0,
+    } as f64;
+
+    let alpha_ref = f32::from_bits(key.alpha_ref_bits) as f64;
+    let is_shadow = if key.blend == WgrBlend::Shadow as u8 {
+        1.0
+    } else {
+        0.0
+    };
+    // HDR path: the scene color target is Rgba16Float only when the HDR pipeline
+    // is on, so it doubles as the `linear` shading signal (decode + no clamp).
+    let linear = if ctx.surface_format == wgpu::TextureFormat::Rgba16Float {
+        1.0
+    } else {
+        0.0
+    };
+    // Alpha-to-coverage for this pipeline: cutout foliage (opaque blend, alpha_ref > 0), not
+    // the shadow-darken pass, and only under MSAA. Drives the shader's coverage path and the
+    // pipeline's alpha_to_coverage_enabled below.
+    let a2c = ctx.foliage_a2c && key.blend == WgrBlend::Opaque as u8 && alpha_ref > 0.0;
+    // Alpha-blended draws (glass canopies) are flagged so the shared shading damps their diffuse
+    // sky-irradiance ambient — a transparent surface isn't a diffuse reflector, and a full sky
+    // wash blows out cockpit glass (and spikes auto-exposure). Only Alpha; Additive effects and
+    // the opaque/cutout GPU-driven set stay at the default 0.
+    let translucent = if key.blend == WgrBlend::Alpha as u8 {
+        1.0
+    } else {
+        0.0
+    };
+    let constants = [
+        ("alpha_ref", alpha_ref),
+        ("is_shadow", is_shadow),
+        ("depth_bias", depth_bias),
+        ("linear", linear),
+        ("a2c", if a2c { 1.0 } else { 0.0 }),
+        ("foliage_screen_ao", foliage_screen_ao() as f64),
+        ("far_crown_shadow_budget", far_crown_shadow().0 as f64),
+        ("far_crown_shadow_tent", far_crown_shadow().1 as f64),
+        ("blend_section_screen_ao", blend_section_screen_ao() as f64),
+        ("count_fragments", count_fragments() as f64),
+        ("translucent", translucent),
+
+        ("emissive_night", emissive_night() as f64),
+        ("cutout_mip_alpha", cutout_mip_alpha() as f64),
+        ("pixel_lift", road_pixel_lift() as f64),
+        (
+            "alpha_kill_door",
+            if std::env::var("WGR_ALPHA_KILL_DOOR").map(|v| v != "0").unwrap_or(false) {
+                1.0
+            } else {
+                0.0
+            },
+        ),
+        (
+            "road_kill_door",
+            if std::env::var("WGR_ROAD_KILL_DOOR").map(|v| v != "0").unwrap_or(false) {
+                1.0
+            } else {
+                0.0
+            },
+        ),
+        ("pixel_lift_max_frac", road_pixel_lift_max_frac() as f64),
+        ("pixel_lift_per_m", road_pixel_lift_per_m() as f64),
+    ];
+    // OnSurface (Offset::Decal) draws on the plain path take the frag_depth-writing twin
+    // so the road hugs the terrain at every PIXEL (WGR_ROAD_PIXEL_CONFORM). Plain only:
+    // fs_surface reads `objects`-conformed varyings and the heightmap group, and the
+    // skinned pipeline binds the bone palette at that slot; roads are never skinned.
+    // Everything else keeps fs_main and its early-Z. Decal draws are never prepassed
+    // (PipelineKey::prepassed requires Offset::None), so no prepass twin has to agree.
+    let fs_entry = if key.offset == Offset::Decal && !key.skinned && road_pixel_conform() {
+        "fs_surface"
+    } else if !write && object_early_z() {
+        // REN-OBJ-004: prepassed (write-off) colour draws test depth before shading.
+        "fs_main_early"
+    } else {
+        "fs_main"
+    };
+
+    // Shadow draws exclude already-shadowed pixels via the stencil: test EQUAL
+    // 0 (stencil is cleared to 0 each segment; opaque geometry leaves it 0) and
+    // INCR on pass, so the first shadow polygon over a pixel darkens it and any
+    // overlapping ones fail the test. Non-shadow pipelines leave the stencil
+    // untouched (default = disabled).
+    let stencil = if key.blend == WgrBlend::Shadow as u8 {
+        let face = wgpu::StencilFaceState {
+            compare: wgpu::CompareFunction::Equal,
+            fail_op: wgpu::StencilOperation::Keep,
+            depth_fail_op: wgpu::StencilOperation::Keep,
+            pass_op: wgpu::StencilOperation::IncrementClamp,
+        };
+        wgpu::StencilState {
+            front: face,
+            back: face,
+            read_mask: 0xff,
+            write_mask: 0xff,
+        }
+    } else {
+        wgpu::StencilState::default()
+    };
+
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("wgr_3d_pipeline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: Some(vs_entry),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                ..Default::default()
+            },
+            buffers,
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Cw,
+            // WGR_NO_CULL=1 disables backface culling on the object pipelines.
+            // Diagnostic only: a single-sided face whose winding the loader got
+            // backwards is INVISIBLE, and from inside a cockpit that reads as a
+            // transparent airframe rather than as missing geometry. One run with
+            // this set separates "not drawn because culled" from every other
+            // reason a surface can fail to appear. Per-draw `double_sided`
+            // (Enfusion `Cull none`) takes the same no-cull variant.
+            cull_mode: if key.double_sided
+                || std::env::var("WGR_NO_CULL").map(|v| v != "0").unwrap_or(false) {
+                None
+            } else {
+                Some(wgpu::Face::Back)
+            },
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: depth_format(device),
+            depth_write_enabled: Some(write),
+            depth_compare: Some(if test {
+                // Reversed-Z (see shader3d.wgsl): nearer geometry has the larger
+                // depth value, so the "keep closer" test is GreaterEqual.
+                wgpu::CompareFunction::GreaterEqual
+            } else {
+                wgpu::CompareFunction::Always
+            }),
+            stencil,
+            bias,
+        }),
+        multisample: wgpu::MultisampleState {
+            count: ctx.sample_count,
+            alpha_to_coverage_enabled: a2c,
+            ..Default::default()
+        },
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some(fs_entry),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                ..Default::default()
+            },
+            targets: &[Some(wgpu::ColorTargetState {
+                format: ctx.surface_format,
+                blend: Gfx3d::blend_state(key.blend),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+    pipeline
+}
+
+
+// Create the depth+normal prepass pipeline for `key` if absent. Reuses the colour
+// pass' VS entry + pipeline layout + vertex buffers + override constants (VS parity
+// is load-bearing — see the plan's hazards), writes depth GreaterEqual/write-ON and
+// the view-space normal into NORMAL_FORMAT via fs_prepass. All prepassed draws have
+// offset None, so depth_bias is 0 here, matching their colour VS exactly.
+fn build_prepass_pipeline(ctx: &PipeCtx, device: &wgpu::Device, key: PrepassKey) -> wgpu::RenderPipeline {
+    let _pipe_timer = PipelineCreateTimer::new("prepass");
+    let module = &ctx.shader;
+    let (vs_entry, layout) = if key.skinned {
+        ("vs_skinned", &ctx.skinned_layout)
+    } else {
+        ("vs_main", &ctx.plain_layout)
+    };
+    let vbuf_layout = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<WgrMeshVertex>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &ctx.vbuf_attrs,
+    };
+    let skin_layout = wgpu::VertexBufferLayout {
+        array_stride: 8,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &ctx.skin_attrs,
+    };
+    let plain_buffers = [vbuf_layout.clone()];
+    let skinned_buffers = [vbuf_layout, skin_layout];
+    let buffers: &[wgpu::VertexBufferLayout] = if key.skinned {
+        &skinned_buffers
+    } else {
+        &plain_buffers
+    };
+    let alpha_ref = f32::from_bits(key.alpha_ref_bits) as f64;
+    // cutout_mip_alpha MUST match the colour pipeline's, or the prepass lays depth for
+    // texels the colour pass discards (gpu_driven.wgsl's prepass_match rationale). A
+    // blend-pass section (MAT-053) has no cutout in its colour pass, so no mip lift here.
+    let mip_alpha = if key.solid_blend { 0.0 } else { cutout_mip_alpha() as f64 };
+    let constants = [
+        ("alpha_ref", alpha_ref),
+        ("depth_bias", 0.0),
+        ("cutout_mip_alpha", mip_alpha),
+        ("count_fragments", count_fragments() as f64),
+    ];
+    // Cutout foliage under MSAA: the A2C prepass twin emits a vec4 whose .a carries coverage,
+    // and the pipeline enables alpha_to_coverage so it writes depth to exactly the samples the
+    // colour pass will shade. Pure-opaque prepass (alpha_ref == 0) keeps the vec2 fs_prepass,
+    // and so does MAT-053's hard solid-texel test (its colour pass blends, never covers).
+    let a2c = ctx.foliage_a2c && alpha_ref > 0.0 && !key.solid_blend;
+    let fs_entry = if a2c { "fs_prepass_a2c" } else { "fs_prepass" };
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("wgr_3d_prepass_pipeline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: Some(vs_entry),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                ..Default::default()
+            },
+            buffers,
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Cw,
+            // WGR_NO_CULL=1 disables backface culling on the object pipelines.
+            // Diagnostic only: a single-sided face whose winding the loader got
+            // backwards is INVISIBLE, and from inside a cockpit that reads as a
+            // transparent airframe rather than as missing geometry. One run with
+            // this set separates "not drawn because culled" from every other
+            // reason a surface can fail to appear.
+            cull_mode: if std::env::var("WGR_NO_CULL").map(|v| v != "0").unwrap_or(false) {
+                None
+            } else {
+                Some(wgpu::Face::Back)
+            },
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: depth_format(device),
+            depth_write_enabled: Some(true),
+            // Reversed-Z: nearer geometry has the larger depth value.
+            depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            count: ctx.sample_count,
+            alpha_to_coverage_enabled: a2c,
+            ..Default::default()
+        },
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some(fs_entry),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                ..Default::default()
+            },
+            targets: &[Some(wgpu::ColorTargetState {
+                format: NORMAL_FORMAT,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+    pipeline
 }
 
 impl Gfx3d {
@@ -5198,7 +5872,31 @@ impl Gfx3d {
             foliage_a2c,
             wgpu::FrontFace::Cw,
             false,
+            Some(wgpu::Face::Back),
         );
+        // RFG-188: the cutout variant's double-sided twins (colour + its prepass, early-Z colour,
+        // planar reflection). WGR_CROWN_DOUBLE_SIDED=0 keeps every cutout single-sided.
+        let crown_double_sided = std::env::var("WGR_CROWN_DOUBLE_SIDED").map(|v| v.trim() != "0").unwrap_or(true);
+        let (gpu_pipeline_cutout, gpu_prepass_pipeline_cutout) = if crown_double_sided {
+            let (c, p) = cull::build_gpu_pipeline(
+                device,
+                composer,
+                &cameras.layout,
+                &gpu_group1_layout,
+                &textures.bindless_layout,
+                &textures.sampler_array_layout,
+                &conform.gpu_layout,
+                surface_format,
+                sample_count,
+                foliage_a2c,
+                wgpu::FrontFace::Cw,
+                false,
+                None,
+            );
+            (Some(c), Some(p))
+        } else {
+            (None, None)
+        };
         let weather_gpu_pipeline = weather_cover::retained_pipeline(device, composer,
             &cameras.layout, &gpu_group1_layout, &textures.bindless_layout,
             &textures.sampler_array_layout, &conform.gpu_layout, false);
@@ -5220,6 +5918,29 @@ impl Gfx3d {
                     foliage_a2c,
                     wgpu::FrontFace::Cw,
                     true,
+                    Some(wgpu::Face::Back),
+                )
+                .0,
+            )
+        } else {
+            None
+        };
+        let gpu_pipeline_early_cutout = if object_early_z() && crown_double_sided {
+            Some(
+                cull::build_gpu_pipeline(
+                    device,
+                    composer,
+                    &cameras.layout,
+                    &gpu_group1_layout,
+                    &textures.bindless_layout,
+                    &textures.sampler_array_layout,
+                    &conform.gpu_layout,
+                    surface_format,
+                    sample_count,
+                    foliage_a2c,
+                    wgpu::FrontFace::Cw,
+                    true,
+                    None,
                 )
                 .0,
             )
@@ -5242,7 +5963,30 @@ impl Gfx3d {
             false,
             wgpu::FrontFace::Ccw,
             false,
+            Some(wgpu::Face::Back),
         );
+        let gpu_reflection_pipeline_cutout = if crown_double_sided {
+            Some(
+                cull::build_gpu_pipeline(
+                    device,
+                    composer,
+                    &cameras.layout,
+                    &gpu_group1_layout,
+                    &textures.bindless_layout,
+                    &textures.sampler_array_layout,
+                    &conform.gpu_layout,
+                    surface_format,
+                    1,
+                    false,
+                    wgpu::FrontFace::Ccw,
+                    false,
+                    None,
+                )
+                .0,
+            )
+        } else {
+            None
+        };
         // GPU-driven cascade shadow depth pipeline (§6 multi-view): the retained set cast into
         // each cascade's depth map. Group 0 is the shadow pass UBO (light-VP), so it shares the
         // gpu_group1/bindless/conform layouts with the colour path.
@@ -5322,6 +6066,7 @@ impl Gfx3d {
             skin_attrs,
             pipelines: FxHashMap::default(),
             prepass_pipelines: FxHashMap::default(),
+            pipe_worker: None,
             depth: None,
             normal: None,
             depth_size: (0, 0),
@@ -5356,6 +6101,7 @@ impl Gfx3d {
             snow_surface: [0.0, -1.0, 0.0, 0.0],
             ground_weather: [0.0; 4],
             layer_fog_requested: false,
+            world_max_height: f32::NAN,
             object_snow_enabled: std::env::var("WGR_OBJECT_SNOW").as_deref() != Ok("0"),
             snow_surface_trace: std::env::var("WGR_SNOW_SURFACE_FIXTURE").as_deref() == Ok("1"),
             snow_surface_trace_rows: 0,
@@ -5384,6 +6130,8 @@ impl Gfx3d {
                 Some(Box::new(std::cell::Cell::new(geometry_pass_facts::WgrGeometryPassFacts::new())))
             } else {None},
             geometry_shadow_cull_mask: std::cell::Cell::new(0),
+            shadow_keep_mask: std::cell::Cell::new(0),
+            shadow_cull_skipped_mask: std::cell::Cell::new(0),
             shadow_target_draw_closed_mask: std::cell::Cell::new(0),
             local0_target_draw_closed: std::cell::Cell::new(false),
             gi_target_draw_closed: std::cell::Cell::new(false),
@@ -5424,6 +6172,7 @@ impl Gfx3d {
             shadow_pipelines: None,
             shadow_target: None,
             shadow_gen: 0,
+            shadow_gen_rendered: std::cell::Cell::new(u64::MAX),
             dummy_shadow_view,
             dummy_ao_view,
             interior_sky: SkyVisSettings::default(),
@@ -5503,6 +6252,13 @@ impl Gfx3d {
             indirect_args_cap: 0,
             gpu_driven_enabled,
             gpu_section_src: Vec::new(),
+            evicted_meshes: Default::default(),
+            section_mesh_rows: Default::default(),
+            section_mesh_rows_valid: false,
+            section_dirty_meshes: Default::default(),
+            section_dirty_rows: Vec::new(),
+            lod_residency_flags_set: false,
+            pool_split_tick: 0,
             gpu_section_refresh: section_refresh::SectionRefreshValidity::from_setting(
                 std::env::var("WGR_CULL_SECTION_REFRESH").ok().as_deref()),
             gpu_dbg_stale: u32::MAX,
@@ -5511,6 +6267,10 @@ impl Gfx3d {
             cull,
             gpu_pipeline,
             gpu_pipeline_early,
+            gpu_pipeline_cutout,
+            gpu_pipeline_early_cutout,
+            gpu_prepass_pipeline_cutout,
+            gpu_reflection_pipeline_cutout,
             gpu_reflection_pipeline,
             gpu_prepass_pipeline,
             gpu_velocity_pipeline,
@@ -5529,6 +6289,7 @@ impl Gfx3d {
             cull_debug_layout,
             cull_debug_bind: None,
             meshes: SlotMap::with_key(),
+            shared_meshes: SharedMeshes::default(),
         }
     }
 
@@ -5587,383 +6348,88 @@ impl Gfx3d {
     }
 
     // Create the pipeline for `key` if it doesn't exist yet.
-    fn ensure_pipeline(&mut self, device: &wgpu::Device, key: PipelineKey) {
-        if self.pipelines.contains_key(&key) {
-            return;
+    fn pipe_ctx(&self) -> PipeCtx {
+        PipeCtx {
+            shader: self.shader.clone(),
+            plain_layout: self.plain_layout.clone(),
+            skinned_layout: self.skinned_layout.clone(),
+            surface_format: self.surface_format,
+            sample_count: self.sample_count,
+            foliage_a2c: self.foliage_a2c,
+            vbuf_attrs: self.vbuf_attrs,
+            skin_attrs: self.skin_attrs,
         }
-
-        let module = &self.shader;
-        let (vs_entry, layout) = if key.skinned {
-            ("vs_skinned", &self.skinned_layout)
-        } else {
-            ("vs_main", &self.plain_layout)
-        };
-
-        let vbuf_layout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<WgrMeshVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &self.vbuf_attrs,
-        };
-        let skin_layout = wgpu::VertexBufferLayout {
-            array_stride: 8,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &self.skin_attrs,
-        };
-        let plain_buffers = [vbuf_layout.clone()];
-        let skinned_buffers = [vbuf_layout, skin_layout];
-        let buffers: &[wgpu::VertexBufferLayout] = if key.skinned {
-            &skinned_buffers
-        } else {
-            &plain_buffers
-        };
-
-        // WgrDepthMode: 0 none, 1 test (no write), 2 test + write.
-        let (test, mut write) = match key.depth {
-            0 => (false, false),
-            1 => (true, false),
-            _ => (true, true),
-        };
-        // Prepassed opaque draws in the colour pass keep GreaterEqual but stop writing:
-        // the prepass already holds the frontmost depth (decision 2). GreaterEqual (not
-        // Equal) is robust to any sub-ULP VS drift; write-off just removes redundant writes.
-        if key.depth_write_off {
-            write = false;
-        }
-        // Shadows still use DepthBiasState (works well enough for them: drawn
-        // depth-test-no-write on the surface). Decal/ZBias overlays instead bias in
-        // the vertex shader (depth_bias below) — DepthBiasState's constant term is
-        // unreliable / a no-op on float depth formats, so it did nothing for close
-        // UI (notebook) and coplanar sign overlays.
-        // Reversed-Z: nearer = larger depth, so a toward-camera bias is positive
-        // (the forward-Z code used negatives). DepthBiasState's constant term is a
-        // no-op on this backend's float depth anyway, but keep the sign correct for
-        // formats/GPUs where it does apply.
-        let bias = match key.offset {
-            Offset::Shadow => wgpu::DepthBiasState {
-                constant: 64,
-                slope_scale: 1.0,
-                clamp: 0.0,
-            },
-            _ => wgpu::DepthBiasState::default(),
-        };
-
-        // Vertex-shader depth bias in [0,1] NDC depth. WGR_DECAL_SCALE / WGR_ZBIAS_SCALE
-        // multiply the base unit; ZBias also scales with its 1..3 level.
-        const DEPTH_BIAS_UNIT: f32 = 1.0e-5;
-
-        // DECAL is now a SEPARATE unit, because the ndc-squared fix silently rescaled it by four
-        // orders of magnitude and nobody adjusted the constant to match.
-        //
-        // The history: the bias used to be a constant NDC offset. Under reversed-Z, depth is
-        // near/z, so a constant NDC offset is a distance-DEPENDENT world pull — it dragged a road
-        // ~95 m forward at 1 km and 716 m at 3 km, which is why roads appeared through mountains.
-        // The fix multiplied by ndc squared, which is correct in SHAPE: it makes the pull a
-        // constant in WORLD space. But it changed the magnitude at the same time, and the constant
-        // was left at the value that had been tuned for the old meaning.
-        //
-        // With the ndc-squared form the world-space pull is `depth_bias * near`. This file's own
-        // calibration comment upstream uses near = 0.1 m, so 1.0e-5 buys 1.0e-6 m — ONE MICRON.
-        // That is not a small bias, it is no bias: the previous session traded a 716 m over-pull
-        // for zero, which is exactly why applying it did not fix the see-through and why the road
-        // agent's census found the mechanism still live.
-        //
-        // 5.0e-2 * 0.1 m = 0.005 m, which is ZRoadEpsilon (EngineWgpu.hpp:104) — the same
-        // world-space lift GL33 and the CPU path give a road at ClipShape.cpp:240, and which wgpu
-        // loses because GGpuTerrainConform makes the GPU conform pin the vertex flat
-        // (shader3d.wgsl:295 assigns world_pos.y and discards pos.y). So this is not a tuned
-        // magic number; it restores the documented parity value the wgpu path dropped.
-        //
-        // WGR_DECAL_SCALE still scales it, and now that env_f32 accepts 0 (see above) the
-        // ablation arm works for the first time: WGR_DECAL_SCALE=0 is genuinely no bias, and
-        // WGR_DECAL_SCALE=0.0002 reproduces the old 1e-5 behaviour for an A/B.
-        //
-        // ZBias is deliberately LEFT ALONE at the old unit even though the ndc-squared change
-        // nulled it by the same factor. It plausibly has the identical defect — but it is applied
-        // to coplanar geometry all over every world at three different levels, and correcting it
-        // 5000x blind, on a night with no way to check for z-fighting across that surface area,
-        // risks trading one reported bug for an unreported one on content nobody is looking at.
-        // It needs its own measurement. Recorded rather than fixed.
-        const DECAL_BIAS_UNIT: f32 = 5.0e-2;
-        let depth_bias = match key.offset {
-            Offset::Decal => decal_scale() * DECAL_BIAS_UNIT,
-            Offset::ZBias(level) => level as f32 * zbias_scale() * DEPTH_BIAS_UNIT,
-            _ => 0.0,
-        } as f64;
-
-        let alpha_ref = f32::from_bits(key.alpha_ref_bits) as f64;
-        let is_shadow = if key.blend == WgrBlend::Shadow as u8 {
-            1.0
-        } else {
-            0.0
-        };
-        // HDR path: the scene color target is Rgba16Float only when the HDR pipeline
-        // is on, so it doubles as the `linear` shading signal (decode + no clamp).
-        let linear = if self.surface_format == wgpu::TextureFormat::Rgba16Float {
-            1.0
-        } else {
-            0.0
-        };
-        // Alpha-to-coverage for this pipeline: cutout foliage (opaque blend, alpha_ref > 0), not
-        // the shadow-darken pass, and only under MSAA. Drives the shader's coverage path and the
-        // pipeline's alpha_to_coverage_enabled below.
-        let a2c = self.foliage_a2c && key.blend == WgrBlend::Opaque as u8 && alpha_ref > 0.0;
-        // Alpha-blended draws (glass canopies) are flagged so the shared shading damps their diffuse
-        // sky-irradiance ambient — a transparent surface isn't a diffuse reflector, and a full sky
-        // wash blows out cockpit glass (and spikes auto-exposure). Only Alpha; Additive effects and
-        // the opaque/cutout GPU-driven set stay at the default 0.
-        let translucent = if key.blend == WgrBlend::Alpha as u8 {
-            1.0
-        } else {
-            0.0
-        };
-        let constants = [
-            ("alpha_ref", alpha_ref),
-            ("is_shadow", is_shadow),
-            ("depth_bias", depth_bias),
-            ("linear", linear),
-            ("a2c", if a2c { 1.0 } else { 0.0 }),
-            ("foliage_screen_ao", foliage_screen_ao() as f64),
-            ("count_fragments", count_fragments() as f64),
-            ("translucent", translucent),
-
-            ("emissive_night", emissive_night() as f64),
-            ("cutout_mip_alpha", cutout_mip_alpha() as f64),
-            ("pixel_lift", road_pixel_lift() as f64),
-            (
-                "alpha_kill_door",
-                if std::env::var("WGR_ALPHA_KILL_DOOR").map(|v| v != "0").unwrap_or(false) {
-                    1.0
-                } else {
-                    0.0
-                },
-            ),
-            (
-                "road_kill_door",
-                if std::env::var("WGR_ROAD_KILL_DOOR").map(|v| v != "0").unwrap_or(false) {
-                    1.0
-                } else {
-                    0.0
-                },
-            ),
-            ("pixel_lift_max_frac", road_pixel_lift_max_frac() as f64),
-            ("pixel_lift_per_m", road_pixel_lift_per_m() as f64),
-        ];
-        // OnSurface (Offset::Decal) draws on the plain path take the frag_depth-writing twin
-        // so the road hugs the terrain at every PIXEL (WGR_ROAD_PIXEL_CONFORM). Plain only:
-        // fs_surface reads `objects`-conformed varyings and the heightmap group, and the
-        // skinned pipeline binds the bone palette at that slot; roads are never skinned.
-        // Everything else keeps fs_main and its early-Z. Decal draws are never prepassed
-        // (PipelineKey::prepassed requires Offset::None), so no prepass twin has to agree.
-        let fs_entry = if key.offset == Offset::Decal && !key.skinned && road_pixel_conform() {
-            "fs_surface"
-        } else if !write && object_early_z() {
-            // REN-OBJ-004: prepassed (write-off) colour draws test depth before shading.
-            "fs_main_early"
-        } else {
-            "fs_main"
-        };
-
-        // Shadow draws exclude already-shadowed pixels via the stencil: test EQUAL
-        // 0 (stencil is cleared to 0 each segment; opaque geometry leaves it 0) and
-        // INCR on pass, so the first shadow polygon over a pixel darkens it and any
-        // overlapping ones fail the test. Non-shadow pipelines leave the stencil
-        // untouched (default = disabled).
-        let stencil = if key.blend == WgrBlend::Shadow as u8 {
-            let face = wgpu::StencilFaceState {
-                compare: wgpu::CompareFunction::Equal,
-                fail_op: wgpu::StencilOperation::Keep,
-                depth_fail_op: wgpu::StencilOperation::Keep,
-                pass_op: wgpu::StencilOperation::IncrementClamp,
-            };
-            wgpu::StencilState {
-                front: face,
-                back: face,
-                read_mask: 0xff,
-                write_mask: 0xff,
-            }
-        } else {
-            wgpu::StencilState::default()
-        };
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("wgr_3d_pipeline"),
-            layout: Some(layout),
-            vertex: wgpu::VertexState {
-                module,
-                entry_point: Some(vs_entry),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &constants,
-                    ..Default::default()
-                },
-                buffers,
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                front_face: wgpu::FrontFace::Cw,
-                // WGR_NO_CULL=1 disables backface culling on the object pipelines.
-                // Diagnostic only: a single-sided face whose winding the loader got
-                // backwards is INVISIBLE, and from inside a cockpit that reads as a
-                // transparent airframe rather than as missing geometry. One run with
-                // this set separates "not drawn because culled" from every other
-                // reason a surface can fail to appear. Per-draw `double_sided`
-                // (Enfusion `Cull none`) takes the same no-cull variant.
-                cull_mode: if key.double_sided
-                    || std::env::var("WGR_NO_CULL").map(|v| v != "0").unwrap_or(false) {
-                    None
-                } else {
-                    Some(wgpu::Face::Back)
-                },
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: depth_format(device),
-                depth_write_enabled: Some(write),
-                depth_compare: Some(if test {
-                    // Reversed-Z (see shader3d.wgsl): nearer geometry has the larger
-                    // depth value, so the "keep closer" test is GreaterEqual.
-                    wgpu::CompareFunction::GreaterEqual
-                } else {
-                    wgpu::CompareFunction::Always
-                }),
-                stencil,
-                bias,
-            }),
-            multisample: wgpu::MultisampleState {
-                count: self.sample_count,
-                alpha_to_coverage_enabled: a2c,
-                ..Default::default()
-            },
-            fragment: Some(wgpu::FragmentState {
-                module,
-                entry_point: Some(fs_entry),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &constants,
-                    ..Default::default()
-                },
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: self.surface_format,
-                    blend: Self::blend_state(key.blend),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
-        self.pipelines.insert(key, pipeline);
     }
 
-    // Create the depth+normal prepass pipeline for `key` if absent. Reuses the colour
-    // pass' VS entry + pipeline layout + vertex buffers + override constants (VS parity
-    // is load-bearing — see the plan's hazards), writes depth GreaterEqual/write-ON and
-    // the view-space normal into NORMAL_FORMAT via fs_prepass. All prepassed draws have
-    // offset None, so depth_bias is 0 here, matching their colour VS exactly.
+    fn ensure_pipeline(&mut self, device: &wgpu::Device, key: PipelineKey) {
+        if !self.pipelines.contains_key(&key) {
+            let pipeline = build_main_pipeline(&self.pipe_ctx(), device, key);
+            self.pipelines.insert(key, pipeline);
+        }
+    }
+
     fn ensure_prepass_pipeline(&mut self, device: &wgpu::Device, key: PrepassKey) {
-        if self.prepass_pipelines.contains_key(&key) {
+        if !self.prepass_pipelines.contains_key(&key) {
+            let pipeline = build_prepass_pipeline(&self.pipe_ctx(), device, key);
+            self.prepass_pipelines.insert(key, pipeline);
+        }
+    }
+
+    /// PERF-PIPE-ASYNC: queue whatever this draw's variants still lack (one job per draw, so a
+    /// draw's set arrives together and not behind a whole frame's worth of compiles).
+    fn request_pipelines(&mut self, device: &wgpu::Device, d: &WgrDraw3D, skinned: bool) {
+        let (mains, prepass) = required_pipelines(d, skinned);
+        let mains: Vec<PipelineKey> =
+            mains.into_iter().flatten().filter(|k| !self.pipelines.contains_key(k)).collect();
+        let prepass: Vec<PrepassKey> =
+            prepass.into_iter().filter(|k| !self.prepass_pipelines.contains_key(k)).collect();
+        if mains.is_empty() && prepass.is_empty() {
             return;
         }
-        let module = &self.shader;
-        let (vs_entry, layout) = if key.skinned {
-            ("vs_skinned", &self.skinned_layout)
-        } else {
-            ("vs_main", &self.plain_layout)
-        };
-        let vbuf_layout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<WgrMeshVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &self.vbuf_attrs,
-        };
-        let skin_layout = wgpu::VertexBufferLayout {
-            array_stride: 8,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &self.skin_attrs,
-        };
-        let plain_buffers = [vbuf_layout.clone()];
-        let skinned_buffers = [vbuf_layout, skin_layout];
-        let buffers: &[wgpu::VertexBufferLayout] = if key.skinned {
-            &skinned_buffers
-        } else {
-            &plain_buffers
-        };
-        let alpha_ref = f32::from_bits(key.alpha_ref_bits) as f64;
-        // cutout_mip_alpha MUST match the colour pipeline's, or the prepass lays depth for
-        // texels the colour pass discards (gpu_driven.wgsl's prepass_match rationale). A
-        // blend-pass section (MAT-053) has no cutout in its colour pass, so no mip lift here.
-        let mip_alpha = if key.solid_blend { 0.0 } else { cutout_mip_alpha() as f64 };
-        let constants = [
-            ("alpha_ref", alpha_ref),
-            ("depth_bias", 0.0),
-            ("cutout_mip_alpha", mip_alpha),
-            ("count_fragments", count_fragments() as f64),
-        ];
-        // Cutout foliage under MSAA: the A2C prepass twin emits a vec4 whose .a carries coverage,
-        // and the pipeline enables alpha_to_coverage so it writes depth to exactly the samples the
-        // colour pass will shade. Pure-opaque prepass (alpha_ref == 0) keeps the vec2 fs_prepass,
-        // and so does MAT-053's hard solid-texel test (its colour pass blends, never covers).
-        let a2c = self.foliage_a2c && alpha_ref > 0.0 && !key.solid_blend;
-        let fs_entry = if a2c { "fs_prepass_a2c" } else { "fs_prepass" };
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("wgr_3d_prepass_pipeline"),
-            layout: Some(layout),
-            vertex: wgpu::VertexState {
-                module,
-                entry_point: Some(vs_entry),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &constants,
-                    ..Default::default()
-                },
-                buffers,
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                front_face: wgpu::FrontFace::Cw,
-                // WGR_NO_CULL=1 disables backface culling on the object pipelines.
-                // Diagnostic only: a single-sided face whose winding the loader got
-                // backwards is INVISIBLE, and from inside a cockpit that reads as a
-                // transparent airframe rather than as missing geometry. One run with
-                // this set separates "not drawn because culled" from every other
-                // reason a surface can fail to appear.
-                cull_mode: if std::env::var("WGR_NO_CULL").map(|v| v != "0").unwrap_or(false) {
-                    None
-                } else {
-                    Some(wgpu::Face::Back)
-                },
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: depth_format(device),
-                depth_write_enabled: Some(true),
-                // Reversed-Z: nearer geometry has the larger depth value.
-                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: self.sample_count,
-                alpha_to_coverage_enabled: a2c,
-                ..Default::default()
-            },
-            fragment: Some(wgpu::FragmentState {
-                module,
-                entry_point: Some(fs_entry),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &constants,
-                    ..Default::default()
-                },
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: NORMAL_FORMAT,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
-        self.prepass_pipelines.insert(key, pipeline);
+        let Some(w) = self.pipe_worker.as_ref() else { return };
+        if mains.iter().all(|k| w.pending_main.contains(k)) && prepass.iter().all(|k| w.pending_prepass.contains(k)) {
+            return;
+        }
+        let ctx = self.pipe_ctx();
+        let Some(w) = self.pipe_worker.as_mut() else { return };
+        let mains: Vec<PipelineKey> = mains.into_iter().filter(|k| w.pending_main.insert(*k)).collect();
+        let prepass: Vec<PrepassKey> = prepass.into_iter().filter(|k| w.pending_prepass.insert(*k)).collect();
+        if !mains.is_empty() || !prepass.is_empty() {
+            w.submit(PipeJob { ctx, device: device.clone(), mains, prepass });
+        }
+    }
+
+    /// PERF-PIPE-ASYNC: install every variant the worker has finished.
+    fn poll_pipelines(&mut self) {
+        let Some(w) = self.pipe_worker.as_mut() else { return };
+        while let Ok(done) = w.done_rx.try_recv() {
+            for (k, p) in done.mains {
+                w.pending_main.remove(&k);
+                self.pipelines.insert(k, p);
+            }
+            for (k, p) in done.prepass {
+                w.pending_prepass.remove(&k);
+                self.prepass_pipelines.insert(k, p);
+            }
+        }
+    }
+
+    /// PERF-PIPE-ASYNC: every pipeline this draw's passes use exists. A draw whose set is still
+    /// compiling is left out of ALL its passes; drawn by some and not others, a prepass could
+    /// lay depth for a surface its colour pass never paints.
+    fn draw_ready(&self, d: &WgrDraw3D, skinned: bool) -> bool {
+        if self.pipe_worker.is_none() {
+            return true;
+        }
+        let (mains, prepass) = required_pipelines(d, skinned);
+        mains.into_iter().flatten().all(|k| self.pipelines.contains_key(&k))
+            && prepass.is_none_or(|k| self.prepass_pipelines.contains_key(&k))
     }
 
     fn ensure_weather_pipeline(&mut self, device: &wgpu::Device, key: PrepassKey) {
         if self.weather_pipelines.contains_key(&key) &&
             (self.weather_cover_far.view.is_none() || self.weather_far_pipelines.contains_key(&key)) {return;}
+        let _pipe_timer = PipelineCreateTimer::new("weather");
         let vertex = wgpu::VertexBufferLayout {array_stride: BAKED_VERT_SIZE,
             step_mode: wgpu::VertexStepMode::Vertex, attributes: &self.vbuf_attrs};
         let skin = wgpu::VertexBufferLayout {array_stride: 8,
@@ -6019,12 +6485,147 @@ impl Gfx3d {
             aabb_max,
         });
         // New full-generational identity can change a formerly missing source.
-        self.gpu_section_refresh.invalidate();
-        key.data().as_ffi()
+        let created = key.data().as_ffi();
+        self.note_section_mesh(created);
+        created
+    }
+
+    /// LOD-STREAM: give a static, unshared, rigid mesh's pool ranges back while keeping its
+    /// handle. Sections naming it resolve to nothing and their LOD rows are flagged not resident,
+    /// so the cull draws the next coarser level. Refused (false) for skinned meshes and for an
+    /// allocation another mesh shares by content (RFG-127).
+    pub fn mesh_evict(&mut self, handle: u64) -> bool {
+        let key: MeshKey = KeyData::from_ffi(handle).into();
+        let Some(mesh) = self.meshes.get(key) else { return false };
+        if mesh.vert_count == 0 || mesh.skin.is_some() {
+            return false;
+        }
+        if let Some(content) = self.shared_meshes.of_mesh.get(&key).copied() {
+            match self.shared_meshes.by_content.get(&content) {
+                Some((_, refs)) if *refs > 1 => return false,
+                _ => {
+                    self.shared_meshes.by_content.remove(&content);
+                    self.shared_meshes.of_mesh.remove(&key);
+                }
+            }
+        }
+        let mesh = self.meshes.get_mut(key).unwrap();
+        self.pool.free(&mesh.alloc, mesh.vert_count, mesh.index_count);
+        mesh.vert_count = 0;
+        mesh.index_count = 0;
+        self.evicted_meshes.insert(handle);
+        self.bake_bind_cache.remove(&key);
+        self.bake_bind_cache_prev.remove(&key);
+        self.note_section_mesh(handle);
+        true
+    }
+
+    /// LOD-STREAM: upload an evicted mesh's geometry again under the same handle.
+    pub fn mesh_restore(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, handle: u64,
+                        verts: &[WgrMeshVertex], indices: &[u32]) -> bool {
+        if !self.evicted_meshes.contains(&handle) {
+            return false;
+        }
+        let key: MeshKey = KeyData::from_ffi(handle).into();
+        if !self.meshes.contains_key(key) {
+            self.evicted_meshes.remove(&handle);
+            return false;
+        }
+        let gen_before = self.pool.generation();
+        let Some(alloc) = self.pool.alloc(device, queue, verts, indices) else { return false };
+        if self.pool.generation() != gen_before {
+            self.bake_bind_cache.clear();
+            self.bake_bind_cache_prev.clear();
+        }
+        let mesh = self.meshes.get_mut(key).unwrap();
+        mesh.alloc = alloc;
+        mesh.vert_count = verts.len() as u32;
+        mesh.index_count = indices.len() as u32;
+        self.evicted_meshes.remove(&handle);
+        self.note_section_mesh(handle);
+        true
+    }
+
+    /// LOD-STREAM: see cull::CullState::lod_distance_demand.
+    pub fn lod_distance_demand(&self, margin: u32, out: &mut Vec<u8>) {
+        self.cull.lod_distance_demand(margin, out);
+    }
+
+    /// LOD-STREAM: evicted mesh count, for the residency log line.
+    pub fn evicted_mesh_count(&self) -> usize {
+        self.evicted_meshes.len()
+    }
+
+    // RFG-127: `mesh_create` for geometry that is never rewritten in place. Byte-identical
+    // content reuses the live allocation of its first copy (see SharedMeshes).
+    pub fn mesh_create_shared(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        verts: &[WgrMeshVertex],
+        indices: &[u32],
+    ) -> u64 {
+        if !mesh_dedup_enabled() || verts.is_empty() || indices.is_empty() {
+            return self.mesh_create(device, queue, verts, indices);
+        }
+        let content = mesh_content_key(verts, indices);
+        if let Some((alloc, refs)) = self.shared_meshes.by_content.get_mut(&content) {
+            *refs += 1;
+            let alloc = *alloc;
+            let (mut aabb_min, mut aabb_max) = ([f32::MAX; 3], [f32::MIN; 3]);
+            for v in verts {
+                let p = [v.pos.x, v.pos.y, v.pos.z];
+                for a in 0..3 {
+                    aabb_min[a] = aabb_min[a].min(p[a]);
+                    aabb_max[a] = aabb_max[a].max(p[a]);
+                }
+            }
+            let key = self.meshes.insert(Mesh {
+                alloc,
+                index_count: indices.len() as u32,
+                vert_count: verts.len() as u32,
+                skin: None,
+                aabb_min,
+                aabb_max,
+            });
+            self.shared_meshes.of_mesh.insert(key, content);
+            self.shared_meshes.hits += 1;
+            self.shared_meshes.saved_bytes += (std::mem::size_of_val(verts) + std::mem::size_of_val(indices)) as u64;
+            let s = &mut self.shared_meshes;
+            if s.hits >= s.reported_hits.saturating_mul(2).max(1) {
+                s.reported_hits = s.hits;
+                eprintln!(
+                    "[wgr] mesh dedup (RFG-127): {} meshes share an existing allocation, {:.1} MB of pool not written",
+                    s.hits,
+                    s.saved_bytes as f64 / 1048576.0
+                );
+            }
+            let created = key.data().as_ffi();
+            self.note_section_mesh(created);
+            return created;
+        }
+        let id = self.mesh_create(device, queue, verts, indices);
+        if id != 0 {
+            let key: MeshKey = KeyData::from_ffi(id).into();
+            if let Some(mesh) = self.meshes.get(key) {
+                self.shared_meshes.by_content.insert(content, (mesh.alloc, 1));
+                self.shared_meshes.of_mesh.insert(key, content);
+            }
+        }
+        id
+    }
+
+    pub fn mesh_is_shared(&self, handle: u64) -> bool {
+        self.shared_meshes.of_mesh.contains_key(&KeyData::from_ffi(handle).into())
     }
 
     pub fn set_geometry_pressure_budget(&mut self, bytes: u64) {
         self.pool.set_pressure_budget(bytes);
+    }
+
+    /// RFG-140: see GeometryPool::reserve.
+    pub fn reserve_geometry(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vert_bytes: u64, index_bytes: u64) {
+        self.pool.reserve(device, queue, vert_bytes, index_bytes);
     }
 
     pub fn geometry_residency(&self) -> pool::GeometryResidency {
@@ -6205,6 +6806,14 @@ impl Gfx3d {
         if verts.is_empty() || verts.len() as u32 > mesh.vert_count {
             return;
         }
+        // RFG-127: shared geometry belongs to every twin; writing it would move them all.
+        if self.shared_meshes.of_mesh.contains_key(&KeyData::from_ffi(handle).into()) {
+            static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            if !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("[wgr] mesh_update refused on a shared (RFG-127) mesh {handle:#x}");
+            }
+            return;
+        }
         let vbase = mesh.alloc.vbase;
         self.pool.update_verts(queue, vbase, verts);
         // The pool handle can be shared by multiple model sections. Until a
@@ -6270,9 +6879,27 @@ impl Gfx3d {
             let key: MeshKey = KeyData::from_ffi(handle).into();
             // Return the mesh's pool ranges to the free-list so a later load reuses them.
             if let Some(mesh) = self.meshes.remove(key) {
-                self.gpu_section_refresh.invalidate();
-                self.pool
-                    .free(&mesh.alloc, mesh.vert_count, mesh.index_count);
+                self.note_section_mesh(handle);
+                // RFG-127: a shared allocation is freed by its last user only.
+                let free_now = match self.shared_meshes.of_mesh.remove(&key) {
+                    Some(content) => match self.shared_meshes.by_content.get_mut(&content) {
+                        Some((_, refs)) if *refs > 1 => {
+                            *refs -= 1;
+                            false
+                        }
+                        _ => {
+                            self.shared_meshes.by_content.remove(&content);
+                            true
+                        }
+                    },
+                    None => true,
+                };
+                // LOD-STREAM: an evicted mesh already gave its ranges back.
+                if free_now && mesh.vert_count != 0 {
+                    self.pool
+                        .free(&mesh.alloc, mesh.vert_count, mesh.index_count);
+                }
+                self.evicted_meshes.remove(&handle);
             }
             // Drop any cached skin-bake bind that referenced this mesh's skin buffer.
             self.bake_bind_cache.remove(&key);
@@ -6708,6 +7335,11 @@ impl Gfx3d {
     // Farthest-sample sceen depth for water's seabed reconstruction (see the field comment). Under
     // MSAA this is stale until resolve_water_depth records the far-resolve; at 1x it's the live 1x
     // depth aspect. Paired with depth_gen() for bind-group rebuild tracking.
+    /// The scene depth target itself (its size, sample count and format size the water's own depth).
+    pub fn depth_texture(&self) -> Option<&wgpu::Texture> {
+        self.depth.as_ref().map(|(t, _)| t)
+    }
+
     pub fn water_depth_view(&self) -> Option<&wgpu::TextureView> {
         self.water_depth_view.as_ref()
     }
@@ -6761,7 +7393,7 @@ impl Gfx3d {
         draws: &[crate::ffi::WgrDraw3D],
         subset: &[(u32, [f32; 16])],
         skin_subset: &[(u32, u32)],
-        veg_subset: &[(u32, f32)],
+        veg_subset: &[(u32, f32, f32)],
         uniform: &crate::temporal::ObjVelUniform,
         veg_uniform: Option<&crate::temporal::VegVelUniform>,
     ) {
@@ -6864,10 +7496,10 @@ impl Gfx3d {
         let mut veg_bind: Option<wgpu::BindGroup> = None;
         if veg_ready {
             let mut vdata: Vec<f32> = Vec::with_capacity(veg_subset.len() * 20);
-            for (idx, leaf) in veg_subset {
+            for (idx, leaf, bush) in veg_subset {
                 let d = &draws[*idx as usize];
                 vdata.extend_from_slice(&d.world);
-                vdata.extend_from_slice(&[*leaf, 0.0, 0.0, 0.0]);
+                vdata.extend_from_slice(&[*leaf, *bush, 0.0, 0.0]);
             }
             let vbytes: &[u8] = bytemuck::cast_slice(&vdata);
             if (vbytes.len() as u64) > vp.veg_ssbo_cap {
@@ -7000,7 +7632,7 @@ impl Gfx3d {
         if let Some(veg_bind) = veg_bind.as_ref() {
             pass.set_pipeline(&vp.veg_pipeline);
             pass.set_bind_group(0, veg_bind, &[]);
-            for (i, (idx, _)) in veg_subset.iter().enumerate() {
+            for (i, (idx, _, _)) in veg_subset.iter().enumerate() {
                 let d = &draws[*idx as usize];
                 let key: MeshKey = slotmap::KeyData::from_ffi(d.mesh).into();
                 let Some(mesh) = self.meshes.get(key) else {
@@ -7544,6 +8176,7 @@ impl Gfx3d {
         grass: &Grass,
     ) {
         let count = pass.count.min(MAX_CASCADES);
+        self.shadow_keep_mask.set(if count > 0 { pass.cascade_keep_mask } else { 0 });
         // LGT-010: local views are work too. At night the sun has no cascades (count == 0)
         // and this used to return immediately -- so a spot light's shadow was impossible for
         // exactly the hours a spot light exists for.
@@ -7820,6 +8453,17 @@ impl Gfx3d {
             if is_local && !self.local_view_refresh.contains(&local_index) {
                 continue;
             }
+            // PERF 2026-10-14: a far sun cascade the engine kept from an earlier frame is the
+            // same saving -- its layer already holds depth for the box it is sampled with.
+            if !is_local && c < 32 && (pass.cascade_keep_mask >> c) & 1 != 0 &&
+                self.shadow_gen_rendered.get() == self.shadow_gen {
+                continue;
+            }
+            // PERF-SHADOW-CULL-SKIP guard: this cascade renders, so its args must be this frame's.
+            if !is_local && c < 32 && (self.shadow_cull_skipped_mask.get() >> c) & 1 != 0 {
+                self.cull.dispatch_shadow(encoder, c);
+                self.shadow_cull_skipped_mask.set(self.shadow_cull_skipped_mask.get() & !(1 << c));
+            }
             // LGT-026: and so a local view can no longer CLEAR THE LAYER, because the tiles it
             // would wipe are the cached ones it is being run beside. Every local view loads and
             // resets only its own tile, with the clear-quad below.
@@ -7898,6 +8542,22 @@ impl Gfx3d {
             if let (Some((pipes, caster_bind)), Some(conform_bind), Some(plan)) =
                 (cpu, self.conform.bind.as_ref(), self.shadow_plan.get(c))
             {
+                // PERF-R3/R4 (docs/perf/AUDIT-20261017.md): the loop set the pipeline, four bind
+                // groups and both buffers for EVERY bucket. With state tracking a call is skipped
+                // when it would re-set what is already bound (wgpu state persists within the
+                // pass), and a rigid/baked caster binds its WHOLE vertex buffer and offsets by
+                // base_vertex instead of slicing per mesh (shadow_depth.wgsl reads no
+                // vertex_index), so consecutive casters share one binding. The VS-skinned fallback
+                // keeps its per-mesh slice (its slot-1 skin buffer is indexed from the mesh's own
+                // first vertex). Exact by construction; WGR_SHADOW_STATE_TRACK=0 = the old loop.
+                let track = shadow_state_track();
+                let mut last_pipe: *const wgpu::RenderPipeline = std::ptr::null();
+                let mut last_b1: (*const wgpu::BindGroup, u64) = (std::ptr::null(), u64::MAX);
+                let mut last_b2: *const wgpu::BindGroup = std::ptr::null();
+                let mut last_b3: *const wgpu::BindGroup = std::ptr::null();
+                let mut b4_set = false;
+                let mut ibuf_set = false;
+                let mut last_v0: (*const wgpu::Buffer, u64) = (std::ptr::null(), u64::MAX);
                 for bucket in plan {
                     let caster = &casters[bucket.repr as usize];
                     let Some(mesh) = self.meshes.get(KeyData::from_ffi(caster.mesh).into()) else {
@@ -7916,29 +8576,44 @@ impl Gfx3d {
                     } else {
                         None
                     };
-                    rp.set_pipeline(pipes.get(skin.is_some(), alpha));
+                    let pipe = pipes.get(skin.is_some(), alpha);
+                    if !track || !std::ptr::eq(pipe, last_pipe) {
+                        rp.set_pipeline(pipe);
+                        last_pipe = pipe;
+                    }
                     if let Some(skin) = skin {
                         let Some(palette_bind) = self.palette.bind.as_ref() else {
                             continue;
                         };
-                        rp.set_bind_group(
-                            1,
-                            palette_bind,
-                            &[(caster.palette_slot as u64 * self.palette.stride) as u32],
-                        );
+                        let off = caster.palette_slot as u64 * self.palette.stride;
+                        if !track || !std::ptr::eq(palette_bind, last_b1.0) || off != last_b1.1 {
+                            rp.set_bind_group(1, palette_bind, &[off as u32]);
+                            last_b1 = (palette_bind, off);
+                        }
                         rp.set_vertex_buffer(1, skin.slice(..));
                     } else {
                         // Whole-buffer storage bound once; each instance's slot travels as
                         // base_instance (read via @builtin(instance_index)) — no dynamic offset.
-                        rp.set_bind_group(1, caster_bind, &[]);
+                        let cb: &wgpu::BindGroup = caster_bind;
+                        if !track || !std::ptr::eq(cb, last_b1.0) || last_b1.1 != u64::MAX - 1 {
+                            rp.set_bind_group(1, cb, &[]);
+                            last_b1 = (cb, u64::MAX - 1);
+                        }
                     }
-                    rp.set_bind_group(
-                        2,
-                        textures.texture_bind(device, if alpha { caster.texture_id } else { 0 }),
-                        &[],
-                    );
-                    rp.set_bind_group(3, textures.sampler_bind(caster.sampler.index()), &[]);
-                    rp.set_bind_group(4, conform_bind, &[]);
+                    let b2 = textures.texture_bind(device, if alpha { caster.texture_id } else { 0 });
+                    if !track || !std::ptr::eq(b2, last_b2) {
+                        rp.set_bind_group(2, b2, &[]);
+                        last_b2 = b2;
+                    }
+                    let b3 = textures.sampler_bind(caster.sampler.index());
+                    if !track || !std::ptr::eq(b3, last_b3) {
+                        rp.set_bind_group(3, b3, &[]);
+                        last_b3 = b3;
+                    }
+                    if !track || !b4_set {
+                        rp.set_bind_group(4, conform_bind, &[]);
+                        b4_set = true;
+                    }
                     // Baked casters pull baked verts from the shared skinned buffer at the
                     // baked slice offset; rigid/VS-skinned pull from the geometry pool at the
                     // mesh's vbase. Sliced to that byte offset with base_vertex 0 (as in
@@ -7951,12 +8626,24 @@ impl Gfx3d {
                         ),
                         _ => (self.pool.vbuf(), mesh.alloc.vbase as u64 * BAKED_VERT_SIZE),
                     };
-                    rp.set_vertex_buffer(0, vbuf.slice(vert_off..));
-                    rp.set_index_buffer(self.pool.ibuf().slice(..), wgpu::IndexFormat::Uint32);
+                    // Whole buffer + base_vertex when tracking (and not the VS-skin fallback);
+                    // the old per-mesh slice otherwise.
+                    let whole = track && skin.is_none();
+                    let (bind_off, base_vertex) =
+                        if whole { (0u64, (vert_off / BAKED_VERT_SIZE) as i32) } else { (vert_off, 0i32) };
+                    let vb: &wgpu::Buffer = vbuf;
+                    if !track || !std::ptr::eq(vb, last_v0.0) || bind_off != last_v0.1 {
+                        rp.set_vertex_buffer(0, vb.slice(bind_off..));
+                        last_v0 = (vb, bind_off);
+                    }
+                    if !track || !ibuf_set {
+                        rp.set_index_buffer(self.pool.ibuf().slice(..), wgpu::IndexFormat::Uint32);
+                        ibuf_set = true;
+                    }
                     let first = mesh.alloc.ibase + caster.index_begin;
                     rp.draw_indexed(
                         first..(first + caster.index_count),
-                        0,
+                        base_vertex,
                         bucket.base..(bucket.base + bucket.count),
                     );
                 }
@@ -8026,6 +8713,9 @@ impl Gfx3d {
         if local_timer_open {
             timers.end(encoder, crate::gpu_timers::Region::LocalShadow);
             timers.cpu_end(crate::gpu_timers::Region::LocalShadow);
+        }
+        if count > 0 {
+            self.shadow_gen_rendered.set(self.shadow_gen);
         }
     }
 
@@ -8288,11 +8978,13 @@ impl Gfx3d {
             let main = cameras.get(gtao_camera).unwrap_or(&cameras[0]);
             let sky_cam = glam::Vec3::new(main.cam_pos[0], main.cam_pos[1], main.cam_pos[2]);
             self.prepare_interior_sky(device, sky_cam);
+            // Snow that can reach a surface on this world, not every configured snowline.
+            let cover_snow = weather_cover::snow_for_cover(self.snow_surface, self.world_max_height);
             self.weather_cover.prepare(device, queue, sky_cam, self.cull.instance_epoch(),
-                self.snow_surface, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0, self.layer_fog_requested);
+                cover_snow, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0, self.layer_fog_requested);
             self.weather_cover.camera_offset = (gtao_camera as u64 * self.cameras.stride) as u32;
             self.weather_cover_far.prepare(device, queue, sky_cam, self.cull.instance_epoch(),
-                self.snow_surface, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0, self.layer_fog_requested);
+                cover_snow, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0, self.layer_fog_requested);
             self.weather_cover_far.camera_offset = (gtao_camera as u64 * self.cameras.stride) as u32;
             let epoch = self.cull.instance_epoch();
             let gi_retry = self.gi_rsm_publication.as_ref()
@@ -8818,6 +9510,11 @@ impl Gfx3d {
 
         // Build any pipeline variants this frame's draws need before the render
         // pass records them (pipeline creation needs &mut self; draw_one is &self).
+        // PERF-PIPE-ASYNC: or have them compiled off this thread (see PipeWorker).
+        if self.pipe_worker.is_none() && pipe_async_enabled() {
+            self.pipe_worker = Some(PipeWorker::new());
+        }
+        self.poll_pipelines();
         for d in draws {
             let has_skin = self
                 .meshes
@@ -8827,30 +9524,16 @@ impl Gfx3d {
             // so build the plain variant for it, not the skinned one.
             let baked = self.baked_draw_base(d.palette_slot, d.mesh).is_some() && has_skin;
             let skinned = d.palette_slot != NO_PALETTE && has_skin && !baked;
-            let key = PipelineKey::from_draw(d, skinned);
-            self.ensure_pipeline(device, key);
-            // Opaque draws are prepassed: also build their colour write-off variant (used
-            // in the prepassed segment) and their depth+normal prepass pipeline.
-            if key.prepassed() {
-                self.ensure_pipeline(device, key.with_write_off());
-                self.ensure_prepass_pipeline(
-                    device,
-                    PrepassKey {
-                        skinned,
-                        alpha_ref_bits: key.alpha_ref_bits,
-                        solid_blend: false,
-                    },
-                );
-            } else if draw_solid_blend_prepassed(d) {
-                self.ensure_prepass_pipeline(
-                    device,
-                    PrepassKey {
-                        skinned,
-                        alpha_ref_bits: SOLID_BLEND_ALPHA.to_bits(),
-                        solid_blend: true,
-                    },
-                );
-                self.ensure_pipeline(device, solid_blend_write_key(key));
+            if self.pipe_worker.is_some() {
+                self.request_pipelines(device, d, skinned);
+                continue;
+            }
+            let (mains, prepass) = required_pipelines(d, skinned);
+            for key in mains.into_iter().flatten() {
+                self.ensure_pipeline(device, key);
+            }
+            if let Some(key) = prepass {
+                self.ensure_prepass_pipeline(device, key);
             }
         }
         if self.weather_cover.view.is_some() {
@@ -9117,6 +9800,9 @@ impl Gfx3d {
         }
         let skinned = d.palette_slot != NO_PALETTE && mesh.skin.is_some() && baked.is_none();
         let base_key = PipelineKey::from_draw(d, skinned);
+        if !matches!(mode, Pass3dMode::Weather | Pass3dMode::WeatherFar) && !self.draw_ready(d, skinned) {
+            return;
+        }
         if matches!(mode, Pass3dMode::Color { .. }) && draw_solid_blend_prepassed(d) {
             self.draw_one(pass, textures, d, base, count, st, Pass3dMode::SolidBlendWrite);
         }
@@ -9177,13 +9863,19 @@ impl Gfx3d {
             return;
         }
 
-        // A plain<->skinned switch changes the group-1 pipeline layout, which invalidates
-        // bind groups 1..=4 in wgpu; drop their tracked state so they are re-bound.
+        // A plain<->skinned switch changes the group-1 layout, so group 1 is re-bound. Groups 2..=4
+        // are NOT: their layouts are the same in both pipeline layouts, wgpu-core keeps them
+        // assigned across set_pipeline and re-sends them itself (Binder::change_pipeline_layout ->
+        // update_expectations). Re-setting them here re-merged every bindless texture into the
+        // pass's usage scope on each switch -- merge_single/register_init_action were ~6% of the
+        // render thread in Arma 2 Chernarus (Nsight ns-a2). WGR_REBIND_ON_SKIN_SWITCH=1 = old.
         if st.last_skinned.is_some() && st.last_skinned != Some(skinned) {
             st.group1_plain = false;
             st.skinned_off = None;
-            st.bindless = false;
-            st.conform = false;
+            if rebind_on_skin_switch() {
+                st.bindless = false;
+                st.conform = false;
+            }
         }
         st.last_skinned = Some(skinned);
 
@@ -9293,6 +9985,9 @@ impl Gfx3d {
         // Eligible buckets are always plain opaque-rigid (see plan_3d): never skinned,
         // never baked, so pipeline + bind selection is the plain, non-skinned path.
         let base_key = PipelineKey::from_draw(d, false);
+        if !self.draw_ready(d, false) {
+            return;
+        }
         let pipeline = match mode {
             Pass3dMode::Weather | Pass3dMode::WeatherFar => return, // weather replays exact direct source slots
             Pass3dMode::Prepass => {
@@ -9328,8 +10023,10 @@ impl Gfx3d {
         if st.last_skinned.is_some() && st.last_skinned != Some(false) {
             st.group1_plain = false;
             st.skinned_off = None;
-            st.bindless = false;
-            st.conform = false;
+            if rebind_on_skin_switch() {
+                st.bindless = false;
+                st.conform = false;
+            }
         }
         st.last_skinned = Some(false);
 
@@ -9400,18 +10097,82 @@ impl Gfx3d {
     // skin-bake writes do not alter this function's inputs. Pool growth/tail shrink preserve
     // live offsets too, but generation changes conservatively force the original full refresh.
     // This skips no mutation/cull/upload work outside the section-address refresh itself.
+    /// PERF-SECTION-INCREMENTAL: a mesh's resolution may have changed (created, evicted,
+    /// restored, destroyed). Recorded for the incremental refresh, or a full one when there is
+    /// no reverse index yet / WGR_SECTION_REFRESH_INCREMENTAL=0.
+    fn note_section_mesh(&mut self, handle: u64) {
+        if self.section_mesh_rows_valid && section_incremental_enabled() {
+            self.section_dirty_meshes.insert(handle);
+        } else {
+            self.gpu_section_refresh.invalidate();
+        }
+    }
+
+    /// PERF-SECTION-INCREMENTAL: re-resolve only the rows naming a changed mesh (and the rows
+    /// registered since), and re-derive LOD residency only for the LODs owning them. Same
+    /// resolve_section and the same residency rule as the full refresh.
+    fn refresh_cull_sections_incremental(&mut self) {
+        if self.section_dirty_meshes.is_empty() && self.section_dirty_rows.is_empty() {
+            return;
+        }
+        let mut rows = std::mem::take(&mut self.section_dirty_rows);
+        for mesh in self.section_dirty_meshes.drain() {
+            if let Some(list) = self.section_mesh_rows.get_mut(&mesh) {
+                // Drop rows that no longer name this mesh (retired / reused spans) on the way.
+                list.retain(|&r| self.gpu_section_src.get(r as usize).is_some_and(|s| s.mesh == mesh));
+                rows.extend_from_slice(list);
+            }
+        }
+        rows.sort_unstable();
+        rows.dedup();
+        let updates: Vec<(usize, cull::SectionGpu)> = rows
+            .iter()
+            .filter_map(|&r| self.gpu_section_src.get(r as usize).map(|s| (r as usize, self.resolve_section(s))))
+            .collect();
+        let evicted = &self.evicted_meshes;
+        let sources = &self.gpu_section_src;
+        self.cull.update_sections_incremental(&updates, |s| sources.get(s).is_some_and(|src| evicted.contains(&src.mesh)));
+        self.lod_residency_flags_set |= !evicted.is_empty();
+        // WGR_SECTION_REFRESH_VERIFY=1: compare against what a full refresh would produce.
+        static VERIFY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *VERIFY.get_or_init(|| std::env::var("WGR_SECTION_REFRESH_VERIFY").as_deref() == Ok("1")) {
+            let (table, lods) = self.cull.verify_view();
+            let mut bad_rows = 0usize;
+            for (row, src) in self.gpu_section_src.iter().enumerate() {
+                if table.get(row).is_some_and(|t| *t != self.resolve_section(src)) {
+                    bad_rows += 1;
+                }
+            }
+            let mut bad_lods = 0usize;
+            for (base, count, flag) in lods {
+                let evicted = (base..base + count).any(|s| {
+                    self.gpu_section_src.get(s).is_some_and(|src| self.evicted_meshes.contains(&src.mesh))
+                });
+                if evicted != flag && (evicted || self.lod_residency_flags_set) {
+                    bad_lods += 1;
+                }
+            }
+            eprintln!("SECTION_VERIFY rows={} updated={} badRows={} badLods={}", self.gpu_section_src.len(), updates.len(), bad_rows, bad_lods);
+        }
+    }
+
     fn refresh_cull_sections(&mut self) {
         if let Some(line) = self.cull.take_section_reuse_notice() { self.queued_log.push(line); }
         if let Some(line) = self.cull.take_lod_reuse_notice() { self.queued_log.push(line); }
         self.cull.validate_source_table_length(self.gpu_section_src.len());
         let sources = &mut self.gpu_section_src;
+        let incremental = self.section_mesh_rows_valid && section_incremental_enabled();
         if self.cull.clear_retired_sections(|span| {
             sources[span.base..span.base + span.count].fill(GpuSectionSrc {
                 mesh: 0, index_begin: 0, index_count: 0, variant: 0 });
-        }) { self.gpu_section_refresh.invalidate(); }
+        }) && !incremental { self.gpu_section_refresh.invalidate(); }
 
         let pool_generation = self.pool.generation();
         let validity = self.gpu_section_refresh;
+        if incremental && !validity.needs_refresh(pool_generation) {
+            self.refresh_cull_sections_incremental();
+            return;
+        }
         let refreshed = validity.run_if_needed(pool_generation, || {
             if self.gpu_section_src.is_empty() {
                 return;
@@ -9439,6 +10200,23 @@ impl Gfx3d {
                 self.gpu_dbg_stale = stale;
             }
             self.cull.set_sections(&resolved);
+            // PERF-SECTION-INCREMENTAL: the reverse index the next frames refresh through.
+            self.section_mesh_rows.clear();
+            for (row, s) in self.gpu_section_src.iter().enumerate() {
+                if s.mesh != 0 {
+                    self.section_mesh_rows.entry(s.mesh).or_default().push(row as u32);
+                }
+            }
+            self.section_mesh_rows_valid = true;
+            self.section_dirty_meshes.clear();
+            self.section_dirty_rows.clear();
+            // LOD-STREAM: rows naming an evicted mesh step to a coarser resident level.
+            if !self.evicted_meshes.is_empty() || self.lod_residency_flags_set {
+                let evicted = &self.evicted_meshes;
+                let sources = &self.gpu_section_src;
+                self.cull.apply_lod_residency(|s| sources.get(s).is_some_and(|src| evicted.contains(&src.mesh)));
+                self.lod_residency_flags_set = !evicted.is_empty();
+            }
         });
         // Callback completion only: panic/allocation failure leaves the original live
         // dirty state (or different pool generation) intact for the next attempt.
@@ -9520,8 +10298,14 @@ impl Gfx3d {
         }
         let gpu_sections: Vec<cull::SectionGpu> =
             srcs.iter().map(|s| self.resolve_section(s)).collect();
-        // Invalidate before append, including any exceptional partial mutation.
-        self.gpu_section_refresh.invalidate();
+        // Invalidate before append, including any exceptional partial mutation. Incremental
+        // (PERF-SECTION-INCREMENTAL): the rows below are resolved right here, so only they are
+        // recorded -- a full refresh of every section in the world per registered model was
+        // 10-230 ms of the render thread while streaming.
+        let incremental = self.section_mesh_rows_valid && section_incremental_enabled();
+        if !incremental {
+            self.gpu_section_refresh.invalidate();
+        }
 
         // `materials` is parallel to `sections` (one material per section), so the
         // section's flags word rides across here in WgrModelSection::flags.
@@ -9556,9 +10340,16 @@ impl Gfx3d {
                         srgb_bcr_slots = [0; 4];
                     }
                 } else { flags &= !NATIVE_PBR_SRGB; }
-                let global_overlay = cull::global_overlay_parameters(
-                    textures.texture_slot(m.global_overlay_texture_id), flags,
-                    m.native_pbr_scales[3], m.global_overlay_black, m.global_overlay_white);
+                // RFG-118: a production GlobalMCR (mode bit 0) rides the same lane with w = 3 +
+                // (multiply 1, uv1 2); the linear preview keeps w = 1.
+                let global_overlay = if m.global_overlay_mode & 1 != 0 {
+                    cull::global_mcr_parameters(textures.texture_slot(m.global_overlay_texture_id),
+                        m.global_overlay_mode, m.global_overlay_black, m.global_overlay_white)
+                } else {
+                    cull::global_overlay_parameters(
+                        textures.texture_slot(m.global_overlay_texture_id), flags,
+                        m.native_pbr_scales[3], m.global_overlay_black, m.global_overlay_white)
+                };
                 if m.global_overlay_texture_id != 0 {
                     global_overlay_admission.0 += 1;
                     if global_overlay[3] > 0.5 { global_overlay_admission.1 += 1; }
@@ -9589,7 +10380,8 @@ impl Gfx3d {
                     layer_uv: m.layer_uv,
                     layer_colour: m.layer_colour,
                     normal_power: m.normal_power,
-                    _pad_np: [0; 3],
+                    far_normals: m.far_normals,
+                    _pad_np: [0; 2],
                     crown_ao_p0: m.crown_ao_p0,
                     crown_ao_p1: m.crown_ao_p1,
                     native_pbr_scales: m.native_pbr_scales,
@@ -9625,6 +10417,13 @@ impl Gfx3d {
         let (model, span) = self.cull
             .register_model_span(bounding_sphere, &gpu_lods, &gpu_sections, &gpu_materials);
         section_span_pool::write_span(&mut self.gpu_section_src, span, &srcs);
+        if incremental {
+            for (i, s) in srcs.iter().enumerate() {
+                let row = (span.base + i) as u32;
+                self.section_mesh_rows.entry(s.mesh).or_default().push(row);
+                self.section_dirty_rows.push(row);
+            }
+        }
         // Positive proof is queued only AFTER all three arrays and immutable birth IDs commit.
         if let Some(line) = self.cull.note_committed_section_reuse(model, span, previous_source_len) {
             self.queued_log.push(line);
@@ -9633,6 +10432,11 @@ impl Gfx3d {
             self.queued_log.push(line);
         }
         self.bake_model_sky_visibility(device, queue, model, lods, sections, name);
+        if lod_census_enabled() {
+            if let Ok(mut names) = lod_census_names().lock() {
+                names.insert(model, name.unwrap_or("(unnamed)").to_owned());
+            }
+        }
         model
     }
 
@@ -9842,7 +10646,10 @@ impl Gfx3d {
     }
 
     pub fn retire_model(&mut self, model: u32) {
-        self.gpu_section_refresh.invalidate();
+        // Retired rows are zeroed in both tables by clear_retired_sections; no other row moves.
+        if !(self.section_mesh_rows_valid && section_incremental_enabled() && self.cull.section_reuse_active()) {
+            self.gpu_section_refresh.invalidate();
+        }
         self.cull.retire_model(model);
         // A completed readback of a dead model must not consume its slot again.
         self.sky_bakes_pending.retain(|(id, _, _)| *id != model);
@@ -10518,9 +11325,26 @@ impl Gfx3d {
         if !self.gpu_driven_enabled {
             return;
         }
+        if lod_census_enabled() {
+            static FRAMES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 600 == 599 {
+                let rows = self.cull.main_lod_census(30);
+                let names = lod_census_names().lock().map(|n| n.clone()).unwrap_or_default();
+                let total: u64 = rows.iter().map(|r| r.2).sum();
+                self.queued_log.push(format!("[wgr] lod census (main view, top 30 = {total} tris):"));
+                for (model, n, tris, hist) in rows {
+                    let ladder: Vec<String> = self.cull.model_lod_ladder(model).iter()
+                        .map(|(r, t)| format!("{r:.1}:{t}")).collect();
+                    self.queued_log.push(format!("[wgr]   {tris:>9} tris  {n:>6} inst  levels={hist:?}  ladder=[{}]  {}",
+                        ladder.join(" "), names.get(&model).map_or("?", |s| s.as_str())));
+                }
+            }
+        }
         // Re-resolve section pool addressing from the current mesh allocs (a mesh's vbase can
         // move when its VB is recreated), so the cull emits correct base_vertex/first_index.
+        let pc_t0 = std::time::Instant::now();
         self.refresh_cull_sections();
+        let pc_refresh = pc_t0.elapsed().as_secs_f32() * 1e3;
         if self.weather_cover.view.is_some() {
             self.weather_cover.identity.instance_epoch = self.cull.instance_epoch();
             self.weather_cover.publication.get_mut().plan(self.weather_cover.identity,
@@ -10590,12 +11414,20 @@ impl Gfx3d {
         self.cull
             .set_shadow_view_count(device, n_cascades + n_local);
         let scam = glam::Vec3::new(shadow.cam_pos[0], shadow.cam_pos[1], shadow.cam_pos[2]);
+        // Cascades from WGR_SHADOW_LOD_FLOOR_FROM on (default 2: the near two keep the main
+        // view's LOD, so nothing inside their range self-shadows against a coarser caster) floor
+        // their LOD metric at the cascade's texel size (WGR_DEPTH_VIEW_LOD_FLOOR, 0 = off). The
+        // weather-cover maps below take the same floor.
+        let lod_floor = env_f32("WGR_DEPTH_VIEW_LOD_FLOOR", 1.0);
+        let lod_floor_from = env_f32("WGR_SHADOW_LOD_FLOOR_FROM", 2.0).max(0.0) as usize;
+        let main_width = self.depth_size.0 as f32;
         for c in 0..n_cascades {
             let lvp = glam::Mat4::from_cols_array(&shadow.light_vp[c]);
-            self.cull.set_shadow_params(
-                c,
-                cull::params_from_shadow_cascade(lvp, scam, self.cull_inputs),
-            );
+            let mut p = cull::params_from_shadow_cascade(lvp, scam, self.cull_inputs);
+            if c >= lod_floor_from {
+                p = cull::with_texel_lod_floor(p, lvp, shadow.resolution, main_width, lod_floor);
+            }
+            self.cull.set_shadow_params(c, p);
         }
         for k in 0..n_local {
             // Same helper as a cascade: it takes a view-projection and builds frustum planes
@@ -10669,13 +11501,15 @@ impl Gfx3d {
         }
         if let Some(view) = self.weather_cover.view {
             let vp_rel = view.view_proj * glam::Mat4::from_translation(cam_pos);
-            self.cull.set_sky_params(weather_cover::CULL_VIEW,
-                cull::params_from_shadow_cascade(vp_rel, cam_pos, self.cull_inputs));
+            self.cull.set_sky_params(weather_cover::CULL_VIEW, cull::with_texel_lod_floor(
+                cull::params_from_shadow_cascade(vp_rel, cam_pos, self.cull_inputs),
+                vp_rel, weather_cover::RESOLUTION, main_width, lod_floor));
         }
         if let Some(view) = self.weather_cover_far.view {
             let vp_rel = view.view_proj * glam::Mat4::from_translation(cam_pos);
-            self.cull.set_sky_params(weather_cover::FAR_CULL_VIEW,
-                cull::params_from_shadow_cascade(vp_rel, cam_pos, self.cull_inputs));
+            self.cull.set_sky_params(weather_cover::FAR_CULL_VIEW, cull::with_texel_lod_floor(
+                cull::params_from_shadow_cascade(vp_rel, cam_pos, self.cull_inputs),
+                vp_rel, weather_cover::RESOLUTION, main_width, lod_floor));
         }
         // Seed the dummies on the first call so the group-1 layout is satisfiable
         // immediately, bake or no bake.
@@ -10683,7 +11517,18 @@ impl Gfx3d {
             self.sky_volumes_dirty = true;
         }
         let volumes_grew = self.upload_sky_volumes(device, queue);
+        let pc_t1 = std::time::Instant::now();
         let grew = self.cull.prepare(device, queue) || volumes_grew;
+        let pc_upload = pc_t1.elapsed().as_secs_f32() * 1e3;
+        {
+            static LIMIT: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+            let limit = *LIMIT.get_or_init(|| std::env::var("WGR_FRAME_LAP_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(f32::MAX));
+            let total = pc_t0.elapsed().as_secs_f32() * 1e3;
+            if total >= limit * 0.25 {
+                self.queued_log.push(format!("prepare_cull lap {total:.1} ms: refresh_sections={pc_refresh:.1} cull.prepare={pc_upload:.1} ({})",
+                    self.cull.last_upload_summary()));
+            }
+        }
         if let Some(line) = self.cull.take_model_row_activation() { self.queued_log.push(line); }
         if let Some(line) = self.cull.take_model_row_commit_notice() { self.queued_log.push(line); }
         let mipfb_grew = std::mem::take(&mut self.mip_feedback_grew);
@@ -10969,6 +11814,26 @@ impl Gfx3d {
     /// Drain completed stats readbacks (after queue.submit, alongside GpuTimers::harvest).
     pub fn harvest_object_stats(&mut self, device: &wgpu::Device) {
         self.cull.harvest_stats(device);
+        // LOD-STREAM: every ~10 s at 60 fps, the pool's live/prefix/capacity per buffer.
+        self.pool_split_tick = self.pool_split_tick.wrapping_add(1);
+        if self.pool_split_tick % 600 == 0 {
+            self.queued_log.push(format!("{} ({} evicted LOD meshes)", self.pool.split_line(), self.evicted_meshes.len()));
+        }
+        if lod_usage::enabled() {
+            // PERF-LOD-USAGE: pool bytes per mesh, keyed by its vbase (what a section names).
+            let by_vbase: FxHashMap<u32, u64> = self.meshes.values()
+                .map(|m| (m.alloc.vbase, u64::from(m.vert_count) * std::mem::size_of::<WgrMeshVertex>() as u64
+                    + u64::from(m.index_count) * 4))
+                .collect();
+            if let Some((v, samples)) = self.cull.harvest_lod_usage(device, |vb| by_vbase.get(&vb).copied()) {
+                const MB: f64 = 1048576.0;
+                self.queued_log.push(format!(
+                    "LOD usage (main view, {samples} samples / 10 s): geometry {:.0} MB in {} models ({} drawn);                      drawn levels {:.0} MB, + one finer margin level + coarser fallbacks {:.0} MB,                      models not drawn at all {:.0} MB, finer-than-margin levels of drawn models {:.0} MB                      (WGR_LOD_USAGE_REPORT)",
+                    v.total as f64 / MB, v.models, v.models_drawn, v.drawn as f64 / MB,
+                    v.needed_with_margin as f64 / MB, v.undrawn_models as f64 / MB,
+                    (v.total - v.needed_with_margin - v.undrawn_models) as f64 / MB));
+            }
+        }
     }
 
     pub fn arm_main_target_count(&mut self, device: &wgpu::Device, token: u64,
@@ -11856,6 +12721,8 @@ impl Gfx3d {
     }
 
     pub fn set_layer_fog_requested(&mut self, active:bool) {self.layer_fog_requested=active;}
+    /// Highest terrain point of the loaded world (NaN = unknown); see weather_cover::snow_for_cover.
+    pub fn set_world_max_height(&mut self, h: f32) {self.world_max_height=h;}
     // Exact current encoder publication, not yesterday's committed map. Overflow
     // remains a GPU refusal through the real COUNT/EMIT buffers.
     pub fn layer_fog_weather_inputs(&self)->crate::layered_fog::WeatherInputs {
@@ -11977,7 +12844,8 @@ impl Gfx3d {
                     s.thickness.max(0.01),
                     // Must match the `scale` handed to `dispatch` below — see its comment.
                     self.gtao_scale.max(1) as f32,
-                    0.0,
+                    // RFG-124: 1 = the old fade toward a 90-degree horizon (WGR_GTAO_FADE_LEGACY=1).
+                    if gtao_fade_legacy() { 1.0 } else { 0.0 },
                 ],
             },
         );
@@ -12014,6 +12882,7 @@ impl Gfx3d {
         encoder: &mut wgpu::CommandEncoder,
         timers: &crate::gpu_timers::GpuTimers,
     ) {
+        self.shadow_cull_skipped_mask.set(0);
         if !self.gpu_driven_enabled {
             return;
         }
@@ -12031,8 +12900,24 @@ impl Gfx3d {
             .cull
             .shadow_view_count()
             .saturating_sub(self.local_shadow_count);
+        // PERF-SHADOW-CULL-SKIP: the same holds for a far sun cascade the engine KEPT from an
+        // earlier frame (UpdateShadowCascadeCache) -- render_shadow_passes skips its depth pass
+        // under exactly this test, so its cull's args were computed and never read. The cull has
+        // no other output (no demand/residency writes). render_shadow_passes re-dispatches a
+        // skipped cull itself should a skipped cascade render after all, so the two cannot
+        // disagree. WGR_SHADOW_CULL_SKIP=0 culls every cascade every frame.
+        let keep = if shadow_cull_skip() && self.shadow_gen_rendered.get() == self.shadow_gen {
+            self.shadow_keep_mask.get()
+        } else {
+            0
+        };
+        let mut skipped = 0u32;
         for c in 0..self.cull.shadow_view_count() {
             if c >= n_cascades && !self.local_view_refresh.contains(&(c - n_cascades)) {
+                continue;
+            }
+            if c < n_cascades && c < 32 && (keep >> c) & 1 != 0 {
+                skipped |= 1 << c;
                 continue;
             }
             let dispatched = self.cull.dispatch_shadow(encoder, c);
@@ -12052,6 +12937,7 @@ impl Gfx3d {
                 self.geometry_shadow_cull_mask.set(self.geometry_shadow_cull_mask.get() | (1 << c));
             }
         }
+        self.shadow_cull_skipped_mask.set(skipped);
         timers.end(encoder, crate::gpu_timers::Region::ObjCullShadow);
         timers.cpu_end(crate::gpu_timers::Region::ObjCullShadow);
     }
@@ -12176,6 +13062,11 @@ impl Gfx3d {
             textures,
             cam_off,
             self.gpu_pipeline_early.as_ref().unwrap_or(&self.gpu_pipeline),
+            if self.gpu_pipeline_early.is_some() {
+                self.gpu_pipeline_early_cutout.as_ref()
+            } else {
+                self.gpu_pipeline_cutout.as_ref()
+            },
             args,
             group1,
             counters,
@@ -12202,6 +13093,7 @@ impl Gfx3d {
             textures,
             cam_off,
             &self.gpu_reflection_pipeline,
+            self.gpu_reflection_pipeline_cutout.as_ref(),
             self.cull.reflection_out_args(),
             self.gpu_reflection_group1_bind.as_ref(),
             self.cull
@@ -12227,6 +13119,7 @@ impl Gfx3d {
             textures,
             cam_off,
             &self.gpu_prepass_pipeline,
+            self.gpu_prepass_pipeline_cutout.as_ref(),
             self.cull.out_args(),
             self.gpu_group1_bind.as_ref(),
             self.cull.counter_buf(),
@@ -12335,6 +13228,8 @@ impl Gfx3d {
         textures: &SharedTextures,
         cam_off: u32,
         pipeline: &wgpu::RenderPipeline,
+        // RFG-188: the cutout variant's double-sided twin; None draws it with `pipeline`.
+        cutout_pipeline: Option<&wgpu::RenderPipeline>,
         args: Option<&wgpu::Buffer>,
         group1: Option<&wgpu::BindGroup>,
         counters: &wgpu::Buffer,
@@ -12374,6 +13269,11 @@ impl Gfx3d {
             // full conservative capacity of instance_count = 0 no-ops each frame.
             for v in 0..cull::CULL_VARIANT_COUNT {
                 let offset = v as u64 * cap as u64 * INDIRECT_ARG_SIZE;
+                if v == 1 {
+                    if let Some(cp) = cutout_pipeline {
+                        pass.set_pipeline(cp);
+                    }
+                }
                 let r = regions.and_then(|(t, rs)| rs.get(v as usize).map(|r| (t, *r)));
                 if let Some((t, r)) = r {
                     t.cpu_begin(r);
@@ -12391,6 +13291,11 @@ impl Gfx3d {
             // no-ops.
             for v in 0..cull::CULL_VARIANT_COUNT {
                 let offset = v as u64 * cap as u64 * INDIRECT_ARG_SIZE;
+                if v == 1 {
+                    if let Some(cp) = cutout_pipeline {
+                        pass.set_pipeline(cp);
+                    }
+                }
                 let r = regions.and_then(|(t, rs)| rs.get(v as usize).map(|r| (t, *r)));
                 if let Some((t, r)) = r {
                     t.cpu_begin(r);
@@ -12580,7 +13485,7 @@ fn multi_layer_normals_keep_every_layout_in_step() {
     // Mirrors the C++ static_assert in include/wgpu_renderer.hpp.
     assert_eq!(
         std::mem::size_of::<WgrModelMaterial>(),
-        456,
+        464,
         "WgrModelMaterial includes native PBR scales; wgpu_renderer.hpp must agree"
     );
     assert_eq!(
@@ -12650,7 +13555,7 @@ fn multi_layer_normals_keep_every_layout_in_step() {
             "{name} must mirror SectionMaterialGpu::normal_power"
         );
         for pad in [
-            "_pad_np0: u32,",
+            "far_normals: u32,",
             "_pad_np1: u32,",
             "_pad_np2: u32,",
         ] {
@@ -13901,4 +14806,11 @@ mod sky_atlas_tests {
         assert!(values[4..1024].iter().all(|&x| x == 0.0));
         assert!(values[1028..].iter().all(|&x| x == 0.0));
     }
+}
+
+/// WGR_REBIND_ON_SKIN_SWITCH=1: re-set bind groups 2..=4 after a plain<->skinned switch (the
+/// behaviour before 2026-10-20).
+fn rebind_on_skin_switch() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| std::env::var("WGR_REBIND_ON_SKIN_SWITCH").map(|v| v == "1").unwrap_or(false))
 }

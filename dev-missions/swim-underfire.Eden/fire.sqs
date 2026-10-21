@@ -1,0 +1,11 @@
+; One rifleman: aim at a random point of the water within 4 m of the player, fire, again every ~0.5-1.1 s.
+_u = _this select 0
+#loop
+?!(alive _u): exit
+_p = getPos player
+_u doWatch [(_p select 0) - 4 + random 8, (_p select 1) - 4 + random 8, 0]
+_w = 0.5 + random 0.6
+~_w
+_u fire (primaryWeapon _u)
+_u setVehicleAmmo 1
+goto "loop"

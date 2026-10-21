@@ -271,6 +271,20 @@ extern SectionClassFilter GSectionFilter;
 // 12a). Default false; only the wgpu GPU-driven path ever sets it, so GL33 is unaffected.
 extern bool GSkipGpuOwnedSections;
 
+// Pass-1 blend recording (PERF, 2026-10-14). An opaque object that owns blend sections used
+// to be drawn twice -- Animate, every section walk, every proxy, Deanimate -- once per pass,
+// and the second run existed only to emit its blend sections in back-to-front order. While
+// `active`, a Shape::Draw under the OpaqueAndCutout filter also walks its blend sections, with
+// `depthReadOnly` standing in for GBlendSectionDepthReadOnly, and the engine captures those
+// draws instead of emitting them; the scene replays the capture at the object's sorted slot
+// (SceneDraw.cpp, pass 2). Set only by the scene, only when the engine supports capture.
+struct BlendRecordRequest
+{
+    bool active = false;
+    bool depthReadOnly = false;
+};
+extern BlendRecordRequest GBlendRecord;
+
 // Terrain-conform plane published around a conformed object's draw (ForestPlain),
 // so the wgpu backend can upload the shared base mesh ONCE undeformed and conform it
 // per instance in the vertex shader instead of the CPU rewriting the shared vertex
@@ -529,6 +543,16 @@ class Shape: public Poseidon::VertexTable
 	void ConvertToVBuffer(VBType type);
 	void ReleaseVBuffer();
 
+	// CPU-VB-STREAM: a level's vertex buffer is built for every level when the shape loads and
+	// used to live as long as the shape. ShapeBank::ReleaseIdleVBuffers frees static ones no draw
+	// or shadow caster touched for a while; TouchVBuffer (every draw and shadow submission)
+	// marks use and rebuilds a released buffer before anything reads it.
+	void TouchVBuffer() const;
+	static uint32_t VbEpoch; // advanced about once a second by the renderer
+	mutable uint32_t _vbLastUse = 0;
+	int8_t _vbType = -1;          // the VBType ConvertToVBuffer last used, -1 = none
+	bool _vbStreamReleased = false;
+
 	void RecalculateAreas();
 	void RecalculateNormals( bool full );
 	
@@ -543,6 +567,15 @@ class Shape: public Poseidon::VertexTable
 		Offset offset=_face.Find(i);
 		_face.Delete(offset);
 	}
+
+	// BOOM-002 (wall breaches): append `count` vertices, vertex k a copy of vertex sources[k]
+	// in EVERY per-vertex array (clip, normal, tangents, UVs, the second UV set, saved
+	// originals, the point mapping) so the tables stay the same length; returns the first
+	// new index. The caller then moves them with SetPos/SetNorm/SetUV.
+	int AppendVertexCopies( const int *sources, int count );
+	// The copy constructor leaves _proxy empty (its loop runs over the new, empty array):
+	// a clone that must keep its proxies takes them from the source here.
+	void CopyProxiesFrom( const Shape &src );
 
 	// maintain named selections (points and faces)
 	int PointIndex( const char *name ) const;
@@ -1033,6 +1066,9 @@ class LODShape: public RefCountWithLinks
 	Vector3Val GeometryCenter() const {return _geometryCenter;}
 	Vector3Val AimingCenter() const {return _aimingCenter;}
 	const char *Name() const {return _name;}
+	// BOOM-002: a per-object clone (the copy constructor leaves the name empty) is named after
+	// its source so logs and the renderer's census can still tell what it is.
+	void SetName( const char *name ) {_name = name;}
 
 	const RStringB &GetName() const {return _name;}
 
@@ -1295,6 +1331,9 @@ class ShapeBank
 	};
 	bool _worldModelScope = false;
 	void ReleaseAllVBuffers();
+	// CPU-VB-STREAM: free static level buffers untouched for `idleEpochs` (at most `maxCount`);
+	// returns the bytes released (vertices + indices as built).
+	uint64_t ReleaseIdleVBuffers(uint32_t idleEpochs, uint32_t maxCount, uint32_t* released = nullptr);
 
 	// Iterate every cached shape.  Order unspecified.  Skips entries
 	// whose weak Link has already auto-nulled (shape released).

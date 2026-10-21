@@ -102,6 +102,10 @@ param(
 
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
 
+    # Run this exe (with the wgpu_renderer.dll beside it) against $GameDir's data instead of the
+    # game folder's own binary -- an A/B of two builds without deploying either.
+    [string]$Exe = '',
+
     [ValidateSet('wgpu', 'gl33')]
     [string]$Backend = 'wgpu',
 
@@ -263,7 +267,7 @@ function Test-JsonProperty {
 # Resolve inputs
 # ----------------------------------------------------------------------------------------
 if (-not (Test-Path -LiteralPath $GameDir)) { throw "Game directory not found: $GameDir" }
-$gameExe = Join-Path $GameDir 'OpenPoseidon.exe'
+$gameExe = if ($Exe) { $Exe } else { Join-Path $GameDir 'OpenPoseidon.exe' }
 if (-not (Test-Path -LiteralPath $gameExe)) {
     throw "Game executable not found: $gameExe`n  Deploy first: .\scripts\Deploy.ps1"
 }

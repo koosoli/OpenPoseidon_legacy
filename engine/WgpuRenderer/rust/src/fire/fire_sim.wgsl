@@ -24,7 +24,9 @@ struct SimParams {
     losses: vec4<f32>,      // cooling (1/s), dissipation (1/s), turbulence strength, turbulence scale
     wind: vec4<f32>,        // wind velocity x, bed patchiness (0..1), wind z, response (1/s)
     extra: vec4<f32>,       // x: flame (1) or smoke only (0), y: share of the wind taken up,
-                            // z: the box frame's turn about the vertical through the emitter (rad)
+                            // z: the box frame's turn about the vertical through the emitter (rad),
+                            // w: a bursting charge's outward speed (m/s, 0 for none)
+    tint: vec4<f32>,        // FIRE-002: grey share of new smoke: x mean, y swing (fields .w)
     // the solids (Fire Pro's colliders, solids.wgsl): 10 x 10 columns over the box, each open
     // from floor to ceiling (world y); a wall is a column whose ceiling is below its floor
     floor_h: array<vec4<f32>, 25>,
@@ -186,10 +188,22 @@ fn cs_evolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     let transported = max(corrected, vec4<f32>(0.0));
 
     // the emitter: a flattened sphere at the base (fluid-sources.wgsl emitterWeight)
-    let d = (p - S.emitter.xyz) / max(vec3<f32>(S.emitter.w, S.emitter.w * 0.45, S.emitter.w), vec3<f32>(0.03));
+    // BOOM-001: a burst (extra.w > 0) blows from a near-round charge, not a flat bed: a flattened
+    // emitter made the fireball a lens
+    // (a ground burst's thrown earth, tint.w: a tall column of soil, ~3 radii high)
+    let flat = select(0.45, select(0.9, 3.2, S.tint.w > 0.5), S.extra.w > 0.0);
+    let d = (p - S.emitter.xyz) / max(vec3<f32>(S.emitter.w, S.emitter.w * flat, S.emitter.w), vec3<f32>(0.03));
     let r = length(d);
     var weight = 0.0;
     if (r < 1.0) { weight = 1.0 - smoothstep(0.5, 1.0, r); }
+    if (S.tint.w > 0.5 && weight > 0.0) {
+        // BOOM-001: thrown earth leaves in separate jets (the crown of spikes in the reference
+        // photos) and a central column, not as one ball: emit only where the crown has a jet
+        let a = atan2(d.z, d.x);
+        let jets = abs(sin(a * 3.5 + S.step.z) * sin(a * 2.3 + S.step.z * 1.7 + 1.3));
+        let core = 1.0 - smoothstep(0.2, 0.4, length(d.xz));
+        weight *= max(smoothstep(0.3, 0.75, jets), core);
+    }
     var lifetime = transported.z;
     var sourceProducts = vec2<f32>(0.0);
     if (weight > 0.0) {
@@ -217,13 +231,24 @@ fn cs_evolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let losses = vec2<f32>(S.losses.y, S.losses.x); // smoke dissipation, heat cooling
     let dh = transported.xy * exp(-losses * dt) + (sourceProducts + products.xy) * exp(-losses * dt * 0.5);
+    // FIRE-002: the grey share of the smoke, a tracer carried in .w (fuel is not used here): the
+    // smoke made this step is grey by a share that drifts in patches through the source and in
+    // time, so a wreck's plume comes out black and grey by turns
+    var greyNow = 0.0;
+    if (S.tint.x > 0.0 || S.tint.y > 0.0) {
+        let tg = S.step.y;
+        let qg = (p - S.emitter.xyz) / max(S.emitter.w, 0.3) * 0.7 + vec3<f32>(S.step.z, -tg * 0.8, tg * 0.23);
+        greyNow = clamp(S.tint.x + S.tint.y * (vnoise(qg) - 0.5) * 2.0, 0.0, 1.0);
+    }
+    let made = (sourceProducts.x + products.x) * exp(-losses.x * dt * 0.5);
+    let greyW = transported.w * exp(-losses.x * dt) + made * greyNow;
     if (solidCell(id)) {
         // nothing lives inside a wall, a roof or the ground
         textureStore(outRgba, id, vec4<f32>(0.0));
         textureStore(outR, id, vec4<f32>(0.0));
         return;
     }
-    textureStore(outRgba, id, vec4<f32>(max(dh, vec2<f32>(0.0)), after, 0.0));
+    textureStore(outRgba, id, vec4<f32>(max(dh, vec2<f32>(0.0)), after, clamp(greyW, 0.0, max(dh.x, 0.0))));
     textureStore(outR, id, vec4<f32>(products.z, 0.0, 0.0, 0.0));
 }
 
@@ -322,8 +347,46 @@ fn cs_forces(@builtin(global_invocation_id) gid: vec3<u32>) {
     let layer = clamp(sqrt(max(p.y - bedBase, 0.0) / (3.0 * S.emitter.w + 1.0)), 0.2, 1.0);
     let windV = vec3<f32>(S.wind.x * S.extra.y * layer, v.y, S.wind.z * S.extra.y * layer);
     v = mix(v, windV, 1.0 - exp(-S.wind.w * layer * dt));
+    // FIRE-002: a bursting charge blows outward (Fire Pro's burst outwardSpeed), while it bursts
+    if (S.extra.w > 0.0) {
+        let dq = (p - S.emitter.xyz) / max(S.emitter.w, 0.03);
+        let rq = length(dq);
+        if (rq < 1.6) {
+            let w = 1.0 - smoothstep(0.6, 1.6, rq);
+            var outward = (p - S.emitter.xyz) / max(length(p - S.emitter.xyz), 1e-3);
+            var speed = S.extra.w;
+            if (S.tint.w > 0.5) {
+                // BOOM-001: a ground burst throws its earth UP and out in a crown of jets: steep
+                // in the middle, flatter towards the rim, a skirt along the ground at its foot;
+                // the speed varies round the crown so it breaks into separate spikes of soil
+                let a = atan2(dq.z, dq.x);
+                let seed = S.step.z;
+                let jets = abs(sin(a * 3.5 + seed) * sin(a * 2.3 + seed * 1.7 + 1.3));
+                let up = 1.6 + 1.2 * jets - 0.9 * smoothstep(0.4, 1.4, length(dq.xz));
+                outward = normalize(vec3<f32>(dq.x, max(dq.y, 0.0) + up, dq.z));
+                speed = S.extra.w * (0.3 + 1.1 * pow(jets, 1.2));
+                // the central column goes straight up, fastest of all
+                let core = 1.0 - smoothstep(0.2, 0.4, length(dq.xz));
+                outward = normalize(mix(outward, vec3<f32>(0.0, 1.0, 0.0), core));
+                speed = mix(speed, S.extra.w * 1.3, core);
+                // the skirt: what starts at ground level runs out along it
+                if (dq.y < 0.15) {
+                    outward = normalize(vec3<f32>(dq.x, 0.25, dq.z));
+                    speed = S.extra.w * 0.45;
+                }
+            }
+            // a charge's kick is near-instant for thrown earth (12/s eased the jets in over ~10
+            // steps, and the burst was over before they reached speed)
+            let kick = select(12.0, 90.0, S.tint.w > 0.5);
+            v = mix(v, outward * speed, 1.0 - exp(-kick * w * dt));
+        }
+    }
     // the source's own velocity (sourceVelocity): a rise out of the bed
-    let d = (p - S.emitter.xyz) / max(vec3<f32>(S.emitter.w, S.emitter.w * 0.45, S.emitter.w), vec3<f32>(0.03));
+    // BOOM-001: a burst (extra.w > 0) blows from a near-round charge, not a flat bed: a flattened
+    // emitter made the fireball a lens
+    // (a ground burst's thrown earth, tint.w: a tall column of soil, ~3 radii high)
+    let flat = select(0.45, select(0.9, 3.2, S.tint.w > 0.5), S.extra.w > 0.0);
+    let d = (p - S.emitter.xyz) / max(vec3<f32>(S.emitter.w, S.emitter.w * flat, S.emitter.w), vec3<f32>(0.03));
     let r = length(d);
     if (r < 1.0 && S.emit.w > 0.0) {
         let w = 1.0 - smoothstep(0.5, 1.0, r);
@@ -376,7 +439,10 @@ fn cs_project(@builtin(global_invocation_id) gid: vec3<u32>) {
     var v = textureLoad(velIn, id, 0).xyz - grad;
     if (id.y == 0 && S.dims.w == 1u) { v.y = max(v.y, 0.0); }
     // keep the gas inside the box finite: a runaway cell would smear the whole field
+    // (BOOM-001: thrown earth leaves at up to ~70 m/s -- at the gas's 25 m/s cap the dirt
+    // burst never rose above ~8 m)
     let speed = length(v);
-    if (speed > 25.0) { v = v * (25.0 / speed); }
+    let cap = select(25.0, 90.0, S.tint.w > 0.5);
+    if (speed > cap) { v = v * (cap / speed); }
     textureStore(outRgba, id, vec4<f32>(enforce(id, v), 0.0));
 }

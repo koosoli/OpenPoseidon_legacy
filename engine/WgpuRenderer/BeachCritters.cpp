@@ -517,7 +517,8 @@ void BeachCritters::Scan(const Vector3& camera)
         c.h = h;
         c.hermit = h.hermit;
         c.seed = h.seed;
-        c.size = h.hermit ? 0.028f + h.seed * 0.016f : (0.034f + h.seed * 0.022f) * h.size;
+        // (x1.6 over life size: a 5 cm crab is a speck from standing height)
+        c.size = (h.hermit ? 0.028f + h.seed * 0.016f : (0.034f + h.seed * 0.022f) * h.size) * 1.6f;
         c.x = h.x, c.z = h.z, c.yaw = h.yaw;
         c.state = h.hermit ? 1 : (Rand() < 0.5f ? 0 : 3);
         c.out = h.hermit || c.state == 3 ? 1.0f : 0.0f;
@@ -568,13 +569,15 @@ float NearestThreat(float x, float z, const Vector3* threats, int n)
 void BeachCritters::StepGhost(Crab& c, float dt, const Vector3* threats, int nThreats)
 {
     const float d = NearestThreat(c.x, c.z, threats, nThreats);
-    const bool scary = d < 6.5f, alert = d < 10.0f;
+    // (OP, 2026-10-13) bolder than real ghost crabs (6.5 / 10 m): at those distances a walking player
+    // never saw one closer than 10 m, two pixels of crab (owner: "i also see no crabs walking")
+    const bool scary = d < 3.5f, alert = d < 5.0f;
     c.t -= dt;
     switch (c.state)
     {
     case 0: // hidden in the burrow
         c.out = 0;
-        if (d < 10)
+        if (d < 5)
             c.t = std::max(c.t, 4 + Rand() * 6);
         if (c.t <= 0)
             c.state = 1, c.t = 1.5f + Rand() * 3, c.x = c.h.x, c.z = c.h.z;
@@ -638,7 +641,7 @@ void BeachCritters::StepHermit(Crab& c, float dt, const Vector3* threats, int nT
 {
     const float d = NearestThreat(c.x, c.z, threats, nThreats);
     c.t -= dt;
-    if (d < 3.0f && c.state != 2)
+    if (d < 1.5f && c.state != 2)
         c.state = 2, c.t = 5 + Rand() * 5;
     switch (c.state)
     {

@@ -1,0 +1,11 @@
+LIST=missions_first.txt
+OUT=tests
+SECONDS=40
+WINDOW=1
+SHOTS=1
+EXE=bin
+DEPLOY=0
+WAIT=480
+QUIET=90
+RENDER=
+EXTRA=

@@ -1,11 +1,13 @@
 #include <Poseidon/Core/TaskPool.hpp>
 #include <Poseidon/Foundation/Platform/FpEnvironment.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 
 #include <enkiTS/TaskScheduler.h>
 
 #include <algorithm>
 #include <cassert>
 #include <stddef.h>
+#include <string>
 #include <utility>
 
 // enki's WaitforTask synchronises workers and the waiter through its own atomics/semaphores, which
@@ -84,8 +86,9 @@ std::unique_ptr<TaskPool> g_globalPool;
 // Roadmap 8.1. A worker thread starts with the platform-default MXCSR, not the main
 // thread's — see Foundation/Platform/FpEnvironment.hpp for why that matters. enkiTS
 // exposes a per-thread start hook (`profilerCallbacks.threadStart`), so use it.
-static void TaskPoolWorkerThreadStart(uint32_t /*threadnum*/)
+static void TaskPoolWorkerThreadStart(uint32_t threadnum)
 {
+    Foundation::SetCurrentThreadName(("task-pool-" + std::to_string(threadnum)).c_str());
     Foundation::ApplyMainFpEnvironment();
 }
 

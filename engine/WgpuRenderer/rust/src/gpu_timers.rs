@@ -558,6 +558,22 @@ impl GpuTimers {
                     }
                     slot.buf.unmap();
                     slot.state = SlotState::Idle;
+                    // Diagnostic (WGR_GPU_SPIKE_MS=<ms>): a frame whose FrameTotal reaches the
+                    // threshold prints its eight largest regions (Region discriminants) on stderr.
+                    static SPIKE: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+                    if let Some(limit) = *SPIKE.get_or_init(|| {
+                        std::env::var("WGR_GPU_SPIKE_MS").ok().and_then(|v| v.trim().parse().ok())
+                    }) {
+                        let total = inner.latest_ms[Region::FrameTotal as usize];
+                        if total >= limit {
+                            let mut top: Vec<(usize, f32)> = inner.latest_ms.iter().copied().enumerate()
+                                .filter(|&(i, ms)| ms > 0.0 && i != Region::FrameTotal as usize).collect();
+                            top.sort_by(|a, b| b.1.total_cmp(&a.1));
+                            let parts: Vec<String> = top.iter().take(8).map(|(i, ms)| format!("{i}={ms:.1}")).collect();
+                            let regsum: f32 = top.iter().map(|r| r.1).sum();
+                            eprintln!("GPU_SPIKE t={:.0} total={total:.1} regsum={regsum:.1} {}", crate::upload_stats::clock_ms(), parts.join(" "));
+                        }
+                    }
                 }
                 Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {
                     // Mapping failed (device loss etc.) — recycle the slot, keep last values.

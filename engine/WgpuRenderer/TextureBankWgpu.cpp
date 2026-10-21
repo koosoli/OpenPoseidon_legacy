@@ -1,3 +1,4 @@
+#include <Poseidon/Foundation/Platform/EnvOnce.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include "TextureBankWgpu.hpp"
 #include "EngineWgpu.hpp" // AcquireProducerWindow / LastMemoryStats (REN-THR-013)
@@ -142,10 +143,10 @@ static uint64_t TextureBudgetBytes(uint64_t budgetBytes)
 // It is a MEASUREMENT and nothing acts on it yet. Deliberately: a residency policy driven by
 // this signal has to answer what happens to a texture the GPU stops reporting because the LRU
 // already evicted it, and that question is not settled by the instrument that raises it.
-void TextureBankWgpu::ReportMipFeedback()
+bool TextureBankWgpu::ReportMipFeedback()
 {
     if (!_renderer)
-        return;
+        return true;
     WgrMipFeedbackStats fb{};
     // One allocation, sized past any plausible bindless cap (8,192 today). The call writes
     // min(this, the renderer's slot count) and reports which, so oversizing costs 96 KB once
@@ -155,19 +156,29 @@ void TextureBankWgpu::ReportMipFeedback()
         _mipDesired.resize(65536);
         _mipAge.resize(65536);
     }
-    EngineWgpu::AcquireProducerWindow("mip feedback");
+    // PERF-MIP-REPORT-NOWAIT (2026-10-20). This report is a log line, and it opened the producer
+    // window -- the main thread waiting 30-40 ms for the render thread's frame in flight, plus the
+    // texture walk: a 68-86 ms hitch every 600 frames (~20 s) on Everon and Stratis. By default it
+    // runs only when the window is free -- with the render thread overlapped that is rarely, so in
+    // practice the report is off. WGR_MIP_FEEDBACK_REPORT=1 = the old blocking report, for when the
+    // numbers are wanted.
+    static const bool forced = [] { const char* v = std::getenv("WGR_MIP_FEEDBACK_REPORT"); return v && v[0] == '1'; }();
+    if (forced)
+        EngineWgpu::AcquireProducerWindow("mip feedback");
+    else if (!EngineWgpu::TryAcquireProducerWindow())
+        return false;
     const uint32_t slots =
         wgr_get_mip_feedback(_renderer, &fb, _mipDesired.data(), _mipAge.data(),
                              static_cast<uint32_t>(_mipDesired.size()));
     if (slots == 0)
-        return;
+        return true;
     if (fb.harvests == 0)
     {
         // NOT the same statement as "nothing was sampled", and reporting it as one is exactly
         // the failure mode a counter that cannot say "did not run" produces. Say it plainly.
         LOG_INFO(Graphics, "Wgpu mip feedback: no readback has completed yet (slots={} groups={})",
                  slots, fb.groups);
-        return;
+        return true;
     }
 
     uint32_t resident = 0;      // resident, leased, evictable object textures
@@ -180,13 +191,12 @@ void TextureBankWgpu::ReportMipFeedback()
     for (int i = 0; i < _texture.Size(); ++i)
     {
         TextureWgpu* texture = _texture[i];
-        if (!texture || !texture->GpuHandle() || texture->IsDynamicTexture() ||
-            IsTerrainOwnedTexture(texture))
+        if (!texture || !texture->GpuHandle() || texture->IsDynamicTexture())
             continue;
         const uint32_t slot = texture->SlotLease();
         // Slot 0 means the bindless array was at cap and this texture samples through
         // per-upload slots, where no stable identity exists to report against.
-        if (slot == 0 || slot >= slots)
+        if (slot == 0 || slot >= slots || IsTerrainOwnedTexture(texture)) // the name scan last
             continue;
         ++resident;
         const uint8_t desired = _mipDesired[slot];
@@ -220,13 +230,14 @@ void TextureBankWgpu::ReportMipFeedback()
              "slots={} observed={} groups={} harvests={}",
              resident, resident - unsampled, unsampled, markedButUnsampled, stale, hist[0], hist[1],
              hist[2], hist[3], hist[4], slackPct, slots, fb.observed, fb.groups, fb.harvests);
+    return true;
 }
 
 void TextureBankWgpu::UpdateAdaptiveTextureDetail()
 {
     static const bool enabled = [] {
         const char* value = std::getenv("WGR_ADAPTIVE_TEXTURE_DETAIL");
-        return value && value[0] == '1';
+        return !(value && value[0] == '0'); // PERF-RFG-213: on by default
     }();
     if (!enabled || !_renderer || (_residencyFrame % 8) != 0 || !GScene || !GScene->GetCamera()) return;
     const auto position = GScene->GetCamera()->Position();
@@ -244,31 +255,63 @@ void TextureBankWgpu::UpdateAdaptiveTextureDetail()
         _adaptiveProjectionX = projectionX; _adaptiveProjectionY = projectionY;
     }
     if (_mipDesired.size() < 65536) { _mipDesired.resize(65536); _mipAge.resize(65536); }
-    if (!EngineWgpu::TryAcquireProducerWindow()) return; // optional work must not serialize render overlap
+    // PERF-RFG-213: under VRAM pressure the work is no longer optional. On a GPU-bound frame the
+    // render thread is never idle, so the try-acquire below failed nearly every time (12 images
+    // replaced in a 3-minute Everon run). Every 64th residency frame over budget takes the window
+    // with a blocking acquire -- one short wait a second -- and may replace up to 32 images.
+    WgrMemoryStats windowStats{};
+    const bool overBudget = EngineWgpu::LastMemoryStats(windowStats) && windowStats.budget_bytes != 0 &&
+                            windowStats.tracked_bytes > windowStats.budget_bytes;
+    const bool forced = overBudget && (_residencyFrame % 64) == 0;
+    if (forced)
+        EngineWgpu::AcquireProducerWindow("adaptive texture detail");
+    else if (!EngineWgpu::TryAcquireProducerWindow())
+        return; // optional work must not serialize render overlap
     WgrMipFeedbackStats feedback{};
     const uint32_t slots = wgr_get_mip_feedback(_renderer, &feedback, _mipDesired.data(), _mipAge.data(), 65536);
     if (!slots) return;
     const size_t count = static_cast<size_t>(_texture.Size());
+    // PERF-RFG-213: under budget pressure, a camera move no longer forces full detail (fresh
+    // feedback still promotes what is seen up close), and a pass may replace up to 8 images /
+    // 16 MB instead of one: one per eight frames took minutes to settle 2,400 textures.
+    WgrMemoryStats pressureStats{};
+    const bool pressure = EngineWgpu::LastMemoryStats(pressureStats) && pressureStats.budget_bytes != 0 &&
+                          pressureStats.tracked_bytes > pressureStats.budget_bytes;
+    int replaced = 0;
+    // Diagnostic tallies, logged every ~600 calls: where the textures fall out of the scan.
+    static uint64_t nScanned = 0, nCandidates = 0, nSlot = 0, nSame = 0, nWant = 0, nOk = 0, nCalls = 0;
     // Round-robin prevents one frequently changing texture from starving the others.
-    for (size_t scanned = 0; scanned < count; ++scanned) {
+    const int replaceCap = forced ? 32 : 8;
+    for (size_t scanned = 0; scanned < count && replaced < replaceCap; ++scanned) {
         _adaptiveCursor %= count;
         TextureWgpu* texture = _texture[static_cast<int>(_adaptiveCursor++)];
+        ++nScanned;
         if (!texture || IsTerrainOwnedTexture(texture) || !texture->AdaptiveMipCandidate()) continue;
+        ++nCandidates;
         const uint32_t slot = texture->_slotLease;
-        if (slot >= slots) continue;
-        const bool moved = texture->_adaptiveViewEpoch != _adaptiveViewEpoch;
+        if (slot >= slots) { ++nSlot; continue; }
+        const bool moved = !pressure && texture->_adaptiveViewEpoch != _adaptiveViewEpoch;
         int maxBias = std::min(3, texture->_nMipmaps - 1);
         while (maxBias > 0 && (texture->_mipmaps[maxBias]._w < 128 || texture->_mipmaps[maxBias]._h < 128)) --maxBias;
         const int target = texture->_mipDemand.Choose(texture->_uploadedFirstLevel, _mipDesired[slot],
-            _mipAge[slot], feedback.groups, _residencyFrame, moved, maxBias);
+            _mipAge[slot], feedback.groups, _residencyFrame, moved, maxBias, pressure);
         if (target == texture->_uploadedFirstLevel) {
             if (target == 0) texture->_adaptiveViewEpoch = _adaptiveViewEpoch;
+            ++nSame;
             continue;
         }
+        ++nWant;
         if (texture->ReplaceMipTail(target, _residencyFrame)) {
             texture->_adaptiveViewEpoch = _adaptiveViewEpoch;
-            break; // at most one image / 4 MiB per eight frames
+            ++replaced;
+            ++nOk;
         }
+    }
+    if ((++nCalls % 600) == 0) {
+        LOG_INFO(Graphics, "Adaptive texture detail scan: calls={} scanned={} candidates={} slotMiss={} unchanged={} "
+            "wanted={} replaced={} pressure={} feedbackSlots={} groups={} harvests={}",
+            nCalls, nScanned, nCandidates, nSlot, nSame, nWant, nOk, pressure ? 1 : 0, slots, feedback.groups,
+            feedback.harvests);
     }
 }
 
@@ -279,11 +322,8 @@ void TextureBankWgpu::TrimResidency()
         return;
     // Every 600 residency frames -- roughly ten seconds of play, and long enough that the
     // rotation (32 frames by default) has swept the table a dozen times over.
-    if (_residencyFrame >= _mipReportDue)
-    {
+    if (_residencyFrame >= _mipReportDue && ReportMipFeedback())
         _mipReportDue = _residencyFrame + 600;
-        ReportMipFeedback();
-    }
     // REN-THR-013: the on-budget frame (every frame on a stock world) reads the worker's
     // snapshot and never touches the renderer; only an over-budget frame opens the window,
     // re-reads the live figure and evicts as before.
@@ -307,8 +347,21 @@ void TextureBankWgpu::TrimResidency()
     const uint64_t textureBudget = TextureBudgetBytes(stats.budget_bytes);
     if (stats.object_texture_bytes <= textureBudget)
         return;
-    EngineWgpu::AcquireProducerWindow("texture residency trim");
-    if (!wgr_get_memory_stats(_renderer, &stats) || stats.object_texture_bytes <= textureBudget)
+    // PERF-TRIM-BACKOFF (2026-10-20). Over the TEXTURE budget with the whole VRAM budget still
+    // met is a soft overage. When the last trim could not get under it (everything still in use
+    // is exempt, see below), trying again next frame only repeats it: on a 15 m/s Reforger
+    // Durras flight the trim ran 48 times, 32 of them evicting ONE texture, and every run opened
+    // the producer window -- the main thread waiting 40-170 ms for the render thread, one slow
+    // frame per trim (textures 2.13 GB over a 1.74 GB texture budget, 3.3 of 3.5 GB in all).
+    // After such a trim the next waits ~10 s (WGR_TEXTURE_TRIM_BACKOFF_FRAMES, 0 = off). Real
+    // pressure -- tracked bytes past the whole budget -- never waits.
+    static const uint64_t trimBackoff = []
+    {
+        const char* v = std::getenv("WGR_TEXTURE_TRIM_BACKOFF_FRAMES");
+        return v ? static_cast<uint64_t>(std::clamp<long long>(std::strtoll(v, nullptr, 10), 0, 36000)) : 600ull;
+    }();
+    const bool hardPressure = stats.tracked_bytes > stats.budget_bytes;
+    if (!hardPressure && _residencyFrame < _trimBackoffUntil)
         return;
 
     // NOTE on the ResidentPins() check below. A pin means "some REGISTERED model references
@@ -366,7 +419,7 @@ void TextureBankWgpu::TrimResidency()
     for (int i = 0; i < _texture.Size(); ++i)
     {
         TextureWgpu* texture = _texture[i];
-        if (!texture || !texture->GpuHandle() || texture->IsDynamicTexture() || IsTerrainOwnedTexture(texture))
+        if (!texture || !texture->GpuHandle() || texture->IsDynamicTexture())
             continue;
         if (texture->AdaptiveMipCandidate()) continue; // prototype retains a valid image; reports soft overage instead of white fallback
         const bool pinned = texture->ResidentPins() != 0;
@@ -376,10 +429,30 @@ void TextureBankWgpu::TrimResidency()
         // sweep-period old before it means anything. Unpinned (direct-draw) textures are marked
         // every frame they are used and keep the plain grace.
         const uint64_t effectiveGrace = pinned ? std::max(grace, _retainedLivenessMaxAgeFrames) : grace;
-        if (_residencyFrame < texture->LastUsedFrame() + effectiveGrace)
+        // The name test last: it scans the name four times, and on DayZ it was 76% of the trim
+        // (Nsight ns-dayz2) when it ran first, for every resident texture.
+        if (_residencyFrame < texture->LastUsedFrame() + effectiveGrace || IsTerrainOwnedTexture(texture))
             continue;
         candidates.push_back(texture);
     }
+    // The window is opened only when there is something to evict. The candidates are all
+    // CPU-side state (handle, last use, pins), so choosing them needs no renderer. Opening it
+    // first made an over-budget frame with nothing evictable wait for the render thread to
+    // finish the frame just published -- every frame, at Durras under the live VRAM budget
+    // (REN-RES-004): lazy wait 16 ms in 90% of frames, overlap reduced to lockstep, no LRU row.
+    if (candidates.empty())
+        return;
+    // PERF-TRIM-NOWAIT: a soft overage (the whole budget still met) does not have to be trimmed on
+    // THIS frame, so it never waits for the render thread: it takes the window only if it is free
+    // now and otherwise tries again next frame. Seven backed-off trims still cost ~0.5 s of
+    // main-thread waits (35-60 ms each) on the Durras flight. Real pressure keeps the blocking
+    // acquire.
+    if (hardPressure)
+        EngineWgpu::AcquireProducerWindow("texture residency trim");
+    else if (!EngineWgpu::TryAcquireProducerWindow())
+        return;
+    if (!wgr_get_memory_stats(_renderer, &stats) || stats.object_texture_bytes <= textureBudget)
+        return;
     std::sort(candidates.begin(), candidates.end(), [](const TextureWgpu* a, const TextureWgpu* b)
               { return a->LastUsedFrame() < b->LastUsedFrame(); });
 
@@ -401,6 +474,10 @@ void TextureBankWgpu::TrimResidency()
             stats.object_texture_bytes <= target)
             break;
     }
+    // PERF-TRIM-BACKOFF: still over after evicting everything it was allowed to -- back off.
+    if (wgr_get_memory_stats(_renderer, &stats) && stats.object_texture_bytes > textureBudget &&
+        stats.tracked_bytes <= stats.budget_bytes)
+        _trimBackoffUntil = _residencyFrame + trimBackoff;
     if (evicted && wgr_get_memory_stats(_renderer, &stats))
         LOG_INFO(Graphics,
                  "Wgpu texture LRU: evicted={} (pinned={}) textureBytes={} textureBudget={} tracked={} budget={} "
@@ -555,7 +632,7 @@ Ref<Texture> TextureBankWgpu::LoadLegacyEnhancementNormal(const char* name)
     if (dot == std::string::npos || dot == 0)
         return {};
     const std::string mapped = LegacyNormalPath(name);
-    const char* normalMode = std::getenv("POSEIDON_VISUAL_UPGRADE_NORMALS");
+    const char* normalMode = POSEIDON_GETENV_ONCE("POSEIDON_VISUAL_UPGRADE_NORMALS"); // asked per section
     if (!mapped.empty() && normalMode && std::strcmp(normalMode, "0") == 0)
         return {}; // Albedo-only arm, without disabling unrelated authored normals.
     const std::string candidate = mapped.empty() ? key.substr(0, dot) + "_nohq.paa" : mapped;
@@ -571,8 +648,8 @@ Ref<Texture> TextureBankWgpu::LoadLegacyTerrainDetailNormal(const char* name, fl
     repeatsPerMetre = 0.0f;
     if (LegacyNormalPath(name).empty())
         return {};
-    const char* normalMode = std::getenv("POSEIDON_VISUAL_UPGRADE_NORMALS");
-    const char* detailMode = std::getenv("POSEIDON_VISUAL_UPGRADE_DETAIL_NORMALS");
+    const char* normalMode = POSEIDON_GETENV_ONCE("POSEIDON_VISUAL_UPGRADE_NORMALS");
+    const char* detailMode = POSEIDON_GETENV_ONCE("POSEIDON_VISUAL_UPGRADE_DETAIL_NORMALS");
     if ((normalMode && std::strcmp(normalMode, "0") == 0) ||
         (detailMode && std::strcmp(detailMode, "0") == 0))
         return {};
@@ -665,6 +742,20 @@ Texture* TextureBankWgpu::CreateDynamic(int w, int h, const void* rgba, uint32_t
     // and keeps the base Opaque. That is right for a font atlas and wrong for a leaf
     // card whose coverage the caller just folded in by hand, which draws as a solid
     // quad with no warning anywhere.
+    if (alphaClass >= 0)
+        texture->SetAlphaClassHint(static_cast<AlphaStats::Kind>(alphaClass));
+    return texture;
+}
+
+Texture* TextureBankWgpu::CreateCompressed(int w, int h, int32_t format, uint32_t mipCount, const void* data,
+                                           uint32_t size, int alphaClass)
+{
+    auto* texture = new TextureWgpu(this);
+    if (!texture->InitCompressed(w, h, format, mipCount, data, size))
+    {
+        Ref<Texture> discard = texture; // released here
+        return nullptr;
+    }
     if (alphaClass >= 0)
         texture->SetAlphaClassHint(static_cast<AlphaStats::Kind>(alphaClass));
     return texture;

@@ -17,6 +17,8 @@ enum FireVolumeKind
     FireKindWreck = 1,     // a burning vehicle: wide, smoky
     FireKindExplosion = 2, // a burst: hot, fast, short
     FireKindSmoke = 3,     // smoke without flame: a smoke grenade, a smouldering source
+    FireKindSmokeStack = 4, // FIRE-002: a wreck's thick black column (Fire Pro's smoke stack)
+    FireKindDirt = 5,       // BOOM-001: a ground burst's thrown earth: a brown crown of jets that falls back, dust that hangs
 };
 
 struct FireVolumeReport
@@ -46,7 +48,9 @@ void ReportFireVolume(const void* owner, Vector3Par base, float radius, float in
                       const float* color = nullptr);
 // A fire that burns for `duration` seconds of game time (negative: until extinguished).
 // Explosions fade from full strength to nothing over theirs; the others hold and fade at the end.
-void SpawnFireVolume(Vector3Par base, float radius, float smoke, float duration, int kind);
+// `color`: the smoke's colour (linear albedo) and density scale; soot when null.
+void SpawnFireVolume(Vector3Par base, float radius, float smoke, float duration, int kind,
+                     const float* color = nullptr);
 void ExtinguishFireVolumes();
 int TimedFireVolumeCount();
 // The live fires, stale ones dropped, and remembers which are near enough to `camera` to be
@@ -57,6 +61,8 @@ bool FireVolumeDrawn(const void* owner);
 // False when the volumetric fire is switched off (WGR_FIRE=0).
 bool FireVolumesEnabled();
 
-constexpr int MaxDrawnFireVolumes = 4;
+constexpr int MaxDrawnFireVolumes = 6;
+// a wreck column's wind-turned box: this many box widths long downwind (fire/mod.rs STACK_X / STACK_Z)
+constexpr float FireStackLengthRatio = 176.0f / 48.0f;
 constexpr float FireVolumeRange = 300.0f;
 } // namespace Poseidon

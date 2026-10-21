@@ -2,6 +2,7 @@
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/AI/AIDangerList.hpp> // AI-XRAY-004: typed dangers
 #include <Poseidon/AI/VehicleAI.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
 #include <Poseidon/World/World.hpp>
@@ -19,6 +20,8 @@
 #include <Poseidon/Foundation/Containers/StaticArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
+#include <cstdlib>
+#include <map>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Math/Math3DP.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
@@ -951,9 +954,37 @@ void EntityAI::SimulateWeaponActivity(float deltaT, SimulationImportance prec)
 
     if (_forceFireWeapon >= 0 && !_isDead)
     {
+        // OP_FORCEFIRE_LOG=1: why a scripted `fire` does or does not go off, twice a second
+        // per unit (selected weapon, loaded, weapon elevation, aimed).
+        static const bool forceFireLog = [] {
+            const char* e = std::getenv("OP_FORCEFIRE_LOG");
+            return e && *e == '1';
+        }();
+        static std::map<const EntityAI*, float> forceFireLogged;
+        bool logNow = false;
+        if (forceFireLog)
+        {
+            float& last = forceFireLogged[this];
+            logNow = Glob.time.toFloat() - last >= 0.5f || Glob.time.toFloat() < last;
+            if (logNow)
+                last = Glob.time.toFloat();
+        }
+        if (logNow)
+        {
+            const int w = _currentWeapon;
+            LOG_INFO(AI, "force fire {}: wanted {} selected {} loaded {} dirY {:.2f}",
+                     (const char*)GetDebugName(), _forceFireWeapon, w,
+                     w >= 0 && w < NMagazineSlots() ? (GetWeaponLoaded(w) ? 1 : 0) : -1,
+                     w >= 0 && w < NMagazineSlots() ? GetWeaponDirection(w).Y() : 0.0f);
+        }
         if (_forceFireWeapon == SelectedWeapon())
         {
-            bool aimed = AimWeaponForceFire(_currentWeapon);
+            // The player's own unit aims where the player aims: a scripted `fire` on it
+            // (player fire "M16") goes off in that direction instead of waiting for an AI
+            // aim the player's input never lets settle -- it never fired before.
+            bool aimed = QIsManual() ? true : AimWeaponForceFire(_currentWeapon);
+            if (logNow)
+                LOG_INFO(AI, "force fire {}: aimed {}", (const char*)GetDebugName(), aimed ? 1 : 0);
             if (GetWeaponLoaded(_currentWeapon) && (GetWeaponDirection(_currentWeapon).Y() >= 0.7 || aimed))
             {
                 const WeaponModeType* mode = GetWeaponMode(_currentWeapon);
@@ -972,7 +1003,10 @@ void EntityAI::SimulateWeaponActivity(float deltaT, SimulationImportance prec)
                 }
                 else
                 {
-                    if (FireWeapon(_currentWeapon, nullptr))
+                    const bool fired = FireWeapon(_currentWeapon, nullptr);
+                    if (logNow)
+                        LOG_INFO(AI, "force fire {}: FireWeapon {}", (const char*)GetDebugName(), fired ? 1 : 0);
+                    if (fired)
                     {
                         _forceFireWeapon = -1;
                     }
@@ -1438,22 +1472,48 @@ void EntityAI::Deanimate(int level)
     base::Deanimate(level);
 }
 
+// --arma1 diagnostic: why a gunner of an Arma 1 vehicle (generated A1x_ class) holds fire --
+// the HMMWV M2 and UAZ DShKM gunners never fired at known enemies (a1gunfire), CWA's own
+// JeepMG with the same crew did. At most one line per vehicle every 2 s.
+static bool A1AimDiagDue(const EntityAI* self)
+{
+    if (!Arma1Compat::Active() || self->GetType()->IsKindOf(GWorld->Preloaded(VTypeMan)))
+        return false;
+    const char* name = self->GetType()->GetName();
+    if (!name || _strnicmp(name, "A1x_", 4) != 0)
+        return false;
+    static std::map<const void*, float> last;
+    float& t = last[self];
+    if (t > 0 && Glob.time.toFloat() - t < 2.0f)
+        return false;
+    t = Glob.time.toFloat();
+    return true;
+}
+
 float EntityAI::GetAimed(int weapon, Target* target) const
 {
+    const auto why = [&](const char* reason) {
+        if (A1AimDiagDue(this))
+            LOG_INFO(AI, "A1 aim {}: weapon {} holds fire: {}", (const char*)GetType()->GetName(), weapon, reason);
+    };
     if (weapon < 0 || weapon >= NMagazineSlots())
     {
+        why("no such weapon slot");
         return 0;
     }
     if (!target)
     {
+        why("no target");
         return 0;
     }
     if (!target->idExact)
     {
+        why("target not identified");
         return 0;
     }
     if (target->lastSeen < Glob.time - 5)
     {
+        why("target not seen for 5 s");
         return 0;
     }
 
@@ -1469,6 +1529,7 @@ float EntityAI::GetAimed(int weapon, Target* target) const
     }
     if (target->posError.SquareSize() > Square(ammo->indirectHitRange * 2))
     {
+        why("target position error too large");
         return 0;
     }
 
@@ -1513,6 +1574,12 @@ float EntityAI::GetAimed(int weapon, Target* target) const
             GlobalShowMessage(2000, "Error %.1f, tgtSize %.1f, maxError %.1f", error, tgtSize, maxError);
         }
 #endif
+        if (A1AimDiagDue(this))
+            LOG_INFO(AI,
+                     "A1 aim {}: weapon {} error {:.2f} max {:.2f} visible {:.2f} dist {:.0f} wPos {:.1f} {:.1f} {:.1f} "
+                     "wDir {:.2f} {:.2f} {:.2f} target {:.1f} {:.1f} {:.1f}",
+                     (const char*)GetType()->GetName(), weapon, error, maxError, visible, dist, wPos.X(), wPos.Y(),
+                     wPos.Z(), wDir.X(), wDir.Y(), wDir.Z(), estPos.X(), estPos.Y(), estPos.Z());
         return (error < maxError) * visible;
     }
     else
@@ -2394,7 +2461,7 @@ void EntityAI::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI*
     if (mType && slot._mode >= 0 && slot._mode < mType->_modes.Size())
     {
         mode = mType->_modes[slot._mode];
-        sound = &mode->_sound;
+        sound = muzzle && muzzle->_shotSound.name.GetLength() > 0 ? &muzzle->_shotSound : &mode->_sound;
         continuous = mode->_soundContinuous;
         // sound only on first shot in burst
         if (magazine->_burstLeft > 0)

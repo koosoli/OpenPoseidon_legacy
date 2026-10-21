@@ -1,3 +1,4 @@
+#include <Poseidon/Foundation/Platform/EnvOnce.hpp>
 #include <cstdio>
 #include <mutex>
 #include <memory>
@@ -640,6 +641,14 @@ void CreateAdapterProxies(LODShapeWithShadow* shape, const Poseidon::Model::Mode
                 // name only a seat. Stand a CWA crew proxy of the same seat in for them, so
                 // the vehicle gets its driver/gunner/commander/cargo positions and the crew
                 // is drawn where Arma 1 seats it instead of not at all.
+                // --arma3: the head placeholder every Arma 3 man carries is drawn with the
+                // default Arma 3 head (Arma 3 puts the identity's head there).
+                if (!proxyHasConfigClass && Arma1Compat::Active())
+                {
+                    const RString head = Arma1Compat::Arma3HeadForProxy(modelName);
+                    if (head.GetLength() > 0 && QIFStreamB::FileExist(GetShapeName(head)))
+                        modelName = head;
+                }
                 if (!proxyHasConfigClass && Arma1Compat::Active() && !QIFStreamB::FileExist(GetShapeName(modelName)))
                 {
                     RString substitute = Arma1CrewProxyStandIn(modelName);
@@ -1473,7 +1482,8 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
             // Shape itself carries no source path at draw time, so this is the
             // only reliable way to distinguish a visible LOD from its similarly
             // numbered shadow LOD without changing runtime data structures.
-            if (const char* trace = std::getenv("WGR_MATERIAL_DEBUG_RVMAT"); trace && std::strcmp(trace, "__trace__") == 0)
+            if (const char* trace = POSEIDON_GETENV_ONCE("WGR_MATERIAL_DEBUG_RVMAT");
+                trace && std::strcmp(trace, "__trace__") == 0)
             {
                 for (int s = 0; s < nSections; ++s)
                 {
@@ -1632,6 +1642,33 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
         shape->_lods[i]->RecalculateAreas();
         shape->_lods[i]->StoreOriginalMinMax();
         areaMs += ::Poseidon::Dev::Perf::ElapsedMs(areaT0);
+    }
+    // --arma1 diagnostic (owner's play test: Sara's runway flickers, the helipad floats): how a
+    // surface-hugging Arma model comes in -- OnSurface (vertices flagged land-on) and z-bias
+    // on LOD 0, its height range. Runways, roads, helipads; once per shape.
+    if (lodCount > 0 && shape->_lods[0])
+    {
+        const std::string lower = [&] {
+            std::string n = shape->Name() ? shape->Name() : "";
+            for (char& c : n)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return n;
+        }();
+        if (lower.find("runway") != std::string::npos || lower.find("\\roads\\") != std::string::npos ||
+            lower.find("heli_h") != std::string::npos || lower.find("draha") != std::string::npos)
+        {
+            const Shape* l0 = shape->_lods[0];
+            int onSurface = 0, biased = 0;
+            for (Offset f = l0->BeginFaces(); f < l0->EndFaces(); l0->NextFace(f))
+            {
+                const int spec = l0->Face(f).Special();
+                onSurface += (spec & OnSurface) != 0;
+                biased += (spec & ZBiasMask) != 0;
+            }
+            LOG_INFO(Graphics, "Surface model {}: lod0 {} faces, {} on surface, {} z-biased, lod special {:#x}, y {:.2f}..{:.2f}",
+                     shape->Name() ? shape->Name() : "?", l0->NFaces(), onSurface, biased, (unsigned)l0->Special(),
+                     model.lodLevels[0].mesh.boundingBox.min.y, model.lodLevels[0].mesh.boundingBox.max.y);
+        }
     }
     const auto tailT0 = ::Poseidon::Dev::Perf::Now();
 

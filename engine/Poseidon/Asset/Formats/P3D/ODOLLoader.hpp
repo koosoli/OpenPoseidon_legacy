@@ -316,11 +316,40 @@ class ODOLLoader
         // RTM animations are authored in the source model's space. The centre is not
         // applied to drawing (every proxy and grounding offset assumes zero); it is
         // carried for the animation code, which needs it to pose a skinned man.
-        if (info.boundingCenter.x != 0.0f || info.boundingCenter.y != 0.0f || info.boundingCenter.z != 0.0f)
+        // Revision 73 keeps it out of ModelInfo's boundingCenter (see Odol73LodDirectory);
+        // an Arma 3 man -- and his head and gear, built on the same skeleton -- takes it
+        // here: his moves pose the source model's space exactly as an Arma 2 man's do.
+        // Measured offline on b_soldier_01 (0.305, 0.836, -0.401) with three moves: posed
+        // around it the mean edge stretch is 0.08-0.12, posed around the stored centre
+        // (what the game did) it is 4-5 -- the crumpled, knotted soldiers of the first runs.
+        Vector3 boundingCenter(info.boundingCenter.x, info.boundingCenter.y, info.boundingCenter.z);
+        if (sourceVersion == 73 && boundingCenter.x == 0.0f && boundingCenter.y == 0.0f && boundingCenter.z == 0.0f)
+        {
+            bool pelvis = false, spine = false, head = false;
+            for (const auto& b : source.directory.bones)
+            {
+                std::string n = b.name;
+                for (char& c : n)
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                pelvis |= n == "pelvis";
+                spine |= n == "spine";
+                head |= n == "head";
+            }
+            static const bool keepZero = [] {
+                const char* e = std::getenv("OP_A3_MAN_NO_CENTRE");
+                return e && *e == '1';
+            }();
+            if (pelvis && spine && head && !keepZero)
+            {
+                const auto& c = source.directory.storedBoundingCenter;
+                boundingCenter = Vector3(c.x, c.y, c.z);
+            }
+        }
+        if (boundingCenter.x != 0.0f || boundingCenter.y != 0.0f || boundingCenter.z != 0.0f)
         {
             char centre[96];
-            std::snprintf(centre, sizeof(centre), "%.6f %.6f %.6f", info.boundingCenter.x, info.boundingCenter.y,
-                          info.boundingCenter.z);
+            std::snprintf(centre, sizeof(centre), "%.6f %.6f %.6f", boundingCenter.x, boundingCenter.y,
+                          boundingCenter.z);
             model.metadata["odolBoundingCenter"] = centre;
         }
         // An Arma 2 man (the skeleton has pelvis, spine and head) is modelled with its
@@ -329,7 +358,8 @@ class ODOLLoader
         // which every placement in the soldier code takes as ground level ("landContact at
         // y=0"). The whole model is lifted until its lowest drawn point is at y=0; the
         // animation origin moves with it, so the moves still pose about the same point.
-        if (sourceVersion >= 48 && sourceVersion <= 54 && !model.lodLevels.empty())
+        // Arma 3 (ODOL 73) men use the same skeleton; their feet are grounded the same way.
+        if (((sourceVersion >= 48 && sourceVersion <= 54) || sourceVersion == 73) && !model.lodLevels.empty())
         {
             bool man = false, spine = false, head = false;
             for (const auto& b : source.directory.bones)
@@ -363,8 +393,8 @@ class ODOLLoader
                         const char* e = std::getenv("OP_A2_MAN_NO_CENTRE");
                         return e && *e == '1';
                     }();
-                    const float sx = keepAside ? 0.0f : info.boundingCenter.x;
-                    const float sz = keepAside ? 0.0f : info.boundingCenter.z;
+                    const float sx = keepAside ? 0.0f : boundingCenter.x;
+                    const float sz = keepAside ? 0.0f : boundingCenter.z;
                     for (auto& lod : model.lodLevels)
                     {
                         for (auto& v : lod.mesh.vertices)
@@ -402,8 +432,8 @@ class ODOLLoader
                     model.centerOfMass.y += lift;
                     model.centerOfMass.z += sz;
                     char centre[96];
-                    std::snprintf(centre, sizeof(centre), "%.6f %.6f %.6f", info.boundingCenter.x - sx,
-                                  info.boundingCenter.y - lift, info.boundingCenter.z - sz);
+                    std::snprintf(centre, sizeof(centre), "%.6f %.6f %.6f", boundingCenter.x - sx,
+                                  boundingCenter.y - lift, boundingCenter.z - sz);
                     model.metadata["odolBoundingCenter"] = centre;
                     // Its land-contact LOD is a single point at the hip (model y=0): Arma 2
                     // grounds a man by his animated feet, this engine by that point. Put it at
@@ -606,9 +636,28 @@ class ODOLLoader
             if (bone < 0)
             {
                 std::string model = lowered(proxy.model);
-                if (model.find("\\heads\\") != std::string::npos || model.find("/heads/") != std::string::npos)
-                    if (const auto head = boneByName.find("head"); head != boneByName.end())
-                        bone = static_cast<int32_t>(head->second);
+                for (char& c : model)
+                    if (c == '/')
+                        c = '\\';
+                const auto boneNamed = [&](const char* name) {
+                    const auto found = boneByName.find(name);
+                    return found == boneByName.end() ? int32_t(-1) : static_cast<int32_t>(found->second);
+                };
+                const size_t slash = model.find_last_of('\\');
+                const std::string leaf = slash == std::string::npos ? model : model.substr(slash + 1);
+                if (model.find("\\heads\\") != std::string::npos)
+                    bone = boneNamed("head");
+                // Arma 3's gear placeholders (\a3\characters_f\proxies\headgear, equipment,
+                // backpack, ...) carry no bone either: the gear they stand for is skinned to the
+                // whole man. Held rigidly, a helmet, goggles and hair follow the head, a vest and
+                // a pack the upper back.
+                else if (model.find("\\proxies\\") != std::string::npos)
+                {
+                    if (leaf == "headgear" || leaf == "glasses" || leaf == "hair" || leaf == "hmd" || leaf == "nvg")
+                        bone = boneNamed("head");
+                    else if (leaf == "equipment" || leaf.rfind("backpack", 0) == 0 || leaf == "radio")
+                        bone = boneNamed("spine3");
+                }
             }
             if (bone < 0 || static_cast<size_t>(bone) >= bones.size() || bestVertex[static_cast<size_t>(bone)].first < 0)
                 continue;

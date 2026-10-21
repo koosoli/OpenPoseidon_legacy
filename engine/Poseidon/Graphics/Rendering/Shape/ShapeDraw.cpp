@@ -127,7 +127,7 @@ static AuthoredAlphaRoute ShaderFamilyAlphaRoute(const char* family)
 // Resolving this means opening and parsing an RVMAT, which cannot happen per draw, so the
 // answer is cached by material path -- including the negative answers, so a missing or
 // unparseable material is not retried on every frame.
-static AuthoredAlphaRoute SectionMaterialAlphaRoute(const Ref<TexMaterial>& surfMat)
+static AuthoredAlphaRoute SectionMaterialAlphaRouteByPath(const Ref<TexMaterial>& surfMat)
 {
     if (surfMat.IsNull())
         return AuthoredAlphaRoute::Default;
@@ -175,7 +175,7 @@ static AuthoredAlphaRoute SectionMaterialAlphaRoute(const Ref<TexMaterial>& surf
 // Whether a section's `.emat` authors real translucency: an `OpacityMap`
 // plus `BlendMode AlphaBlend` on a non-solid surface (wire mesh, glass).
 // Same cached shape as the answers above.
-static bool SectionMaterialEmatBlends(const Ref<TexMaterial>& surfMat)
+static bool SectionMaterialEmatBlendsByPath(const Ref<TexMaterial>& surfMat)
 {
     if (surfMat.IsNull())
         return false;
@@ -247,7 +247,7 @@ static std::string SectionMaterialEmatFamily(const Ref<TexMaterial>& surfMat)
 
 // Whether a section's `.emat` names `Cull none` (wire mesh, glass panes).
 // Same cached shape as the two answers above: file read once per material.
-static bool SectionMaterialCullNone(const Ref<TexMaterial>& surfMat)
+static bool SectionMaterialCullNoneByPath(const Ref<TexMaterial>& surfMat)
 {
     if (surfMat.IsNull())
         return false;
@@ -283,18 +283,75 @@ static bool SectionMaterialCullNone(const Ref<TexMaterial>& surfMat)
     return cullNone;
 }
 
+// The three answers above, asked per section per frame. The path-keyed caches make the
+// FIRST answer cheap; these make every later one a load from the material itself (see
+// TexMaterial::Memo) instead of a std::string built, hashed and looked up under a mutex.
+static AuthoredAlphaRoute SectionMaterialAlphaRoute(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return AuthoredAlphaRoute::Default;
+    return static_cast<AuthoredAlphaRoute>(
+        surfMat->Memo(TexMaterial::MemoSectionAlphaRoute,
+                      [&] { return static_cast<int>(SectionMaterialAlphaRouteByPath(surfMat)); }));
+}
+
+static bool SectionMaterialEmatBlends(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return false;
+    return surfMat->Memo(TexMaterial::MemoSectionEmatBlends,
+                         [&] { return int(SectionMaterialEmatBlendsByPath(surfMat)); }) != 0;
+}
+
+static bool SectionMaterialCullNone(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return false;
+    return surfMat->Memo(TexMaterial::MemoSectionCullNone,
+                         [&] { return int(SectionMaterialCullNoneByPath(surfMat)); }) != 0;
+}
+
+// RFG-123: Enfusion glass is translucent because its material says so, whatever the texture
+// class reads. Two shapes of it: an `OpacityMap` + `BlendMode AlphaBlend` (the dirt-atlas pane,
+// whose `enfa|` composite RFG-055 classifies Cutout for the leaf cards' sake), and a constant
+// `AlphaMul` with no map (`enfk|`). Gated on the class alone, both stayed in the opaque pass
+// and drew as solid sheets: every Everon window looked bricked up from inside.
+// POSEIDON_AUTHORED_GLASS_BLEND=0 restores the old routing for an A/B.
+bool AuthoredGlassBlendEnabled()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("POSEIDON_AUTHORED_GLASS_BLEND");
+        return !(v && v[0] == '0');
+    }();
+    return on;
+}
+
+static bool SectionAuthoredTranslucent(const ShapeSectionInfo& sec)
+{
+    auto* tex = sec.properties.GetTexture();
+    if (!tex || !AuthoredGlassBlendEnabled())
+        return false;
+    if (tex->NameMemo(Texture::NameSlotEnfusionConstantAlpha, &render::IsEnfusionConstantAlphaTexture))
+        return true;
+    return tex->NameMemo(Texture::NameSlotEnfusionCoverage, &render::IsEnfusionCoverageTexture) &&
+           SectionMaterialEmatBlends(sec.surfMat);
+}
+
 // The single place that decides whether a section belongs in the back-to-front pass.
 static bool SectionIsBlend(const ShapeSectionInfo& sec)
 {
+    if (SectionAuthoredTranslucent(sec))
+        return true;
     auto* tex = sec.properties.GetTexture();
     if (!tex || tex->GetAlphaClass() != Poseidon::AlphaStats::Blend)
         return false;
     // Legacy A1 foliage has no RVMAT to speak for it, so the histogram is the only voice in
     // the room and it mis-hears antialiased downscales as translucency. See
     // render::IsLegacyPlantCutoutTexture for the measured per-LOD split.
-    if (render::IsLegacyPlantCutoutTexture(tex->Name()))
+    if (tex->NameMemo(Texture::NameSlotLegacyPlantCutout, &render::IsLegacyPlantCutoutTexture))
         return false;
-    if (render::IsEnfusionCoverageTexture(tex->Name()))
+    if (tex->NameMemo(Texture::NameSlotEnfusionCoverage, &render::IsEnfusionCoverageTexture))
     {
         // Authored translucency (`OpacityMap` + `BlendMode AlphaBlend`: wire
         // mesh, glass) blends even when holey; merged coverage WITH holes
@@ -334,6 +391,9 @@ static bool SectionIsBlend(const ShapeSectionInfo& sec)
 // today's behaviour -- which, since the route reader landed, they do.
 bool SectionRetainedRefuses(const ShapeSectionInfo& sec)
 {
+    // RFG-123: the retained path has no blend pass, so authored glass is the CPU's.
+    if (SectionAuthoredTranslucent(sec))
+        return true;
     if (!SectionIsBlend(sec))
         return false;
     const char* mat = sec.surfMat.IsNull() ? nullptr : sec.surfMat->GetName().Data();
@@ -346,6 +406,8 @@ bool SectionGpuOwned(const ShapeSectionInfo& sec)
     if (render::IsGpuOwnedSectionSpec(spec))
         return !SectionRetainedRefuses(sec);
     // IsAlpha spec. Owned only when the per-draw path would hard-test it in the opaque pass.
+    if (SectionAuthoredTranslucent(sec))
+        return false;
     const render::RenderPassDescriptor desc = render::BuildRenderPassDescriptor(render::SplitLegacy(spec));
     if (desc.blend != render::BlendMode::AlphaBlend || desc.surface != render::SurfaceMode::Default)
         return false;
@@ -431,6 +493,7 @@ bool Shape::HasBlendSections() const
 
 SectionClassFilter GSectionFilter = SectionClassFilter::All;
 bool GSkipGpuOwnedSections = false;
+BlendRecordRequest GBlendRecord;
 ConformPlane GCurrentConformPlane;
 bool GCurrentIsVegetation = false;
 float GCurrentFoliageKind = 0.0f;
@@ -535,6 +598,7 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
     Engine* engine = GEngine;
 
     bool tlAble = ((spec & OnSurface) == 0 || engine->GetTLOnSurface()) && (clip & ClipUser0) == 0;
+    TouchVBuffer(); // CPU-VB-STREAM: rebuild a released buffer before the T&L gate reads it
 
     if (engine->GetTL() && EnableHWTLState && tlAble && _buffer)
     {
@@ -591,14 +655,6 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
             // check if shape is dynamic or not
             bool dynamic = matSource->GetAnimated(*this);
             engine->BeginMeshTL(*this, spec, dynamic);
-            // check first face properties
-            int secBeg = -1;
-            int secEnd = -1;
-            Texture* secTexture = (Texture*)-1;
-            int secSpecial = -1;
-            int secMaterial = -1;
-            TexMaterial* secSurfMat = nullptr;
-
             // MAT-052 diagnostic (temporary): WGR_SECTION_SKIP_TRACE=<substring> names, once
             // per shape, every section of a matching shape with its texture, flags and the
             // reason it was skipped -- because a section that is never submitted is invisible
@@ -632,92 +688,120 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
                                                                std::memory_order_relaxed);
             }
             const bool p1sSections = Poseidon::Pass1Submit::Counting();
-            for (int i = 0; i < NSections(); i++)
+            // One walk of the sections under `filter`. Run once, as always; run a second time
+            // for the blend sections when the scene is recording them (GBlendRecord), so the
+            // object's back-to-front draws come out of this one Animate instead of a second
+            // whole draw of the object in pass 2. Diagnostics and counters stay on the first.
+            const auto walkSections = [&](SectionClassFilter filter, bool firstWalk)
             {
-                const ShapeSection& sec = GetSection(i);
-                if (sectionTrace)
+                // check first face properties
+                int secBeg = -1;
+                int secEnd = -1;
+                Texture* secTexture = (Texture*)-1;
+                int secSpecial = -1;
+                int secMaterial = -1;
+                TexMaterial* secSurfMat = nullptr;
+                for (int i = 0; i < NSections(); i++)
                 {
-                    const Texture* t = sec.properties.GetTexture();
-                    const bool hid = (sec.properties.Special() & (IsHidden | IsHiddenProxy)) != 0;
-                    const bool gpuOwned = GSkipGpuOwnedSections && SectionGpuOwned(sec);
-                    const bool filtered = GSectionFilter != SectionClassFilter::All &&
-                                          ((GSectionFilter == SectionClassFilter::BlendOnly) != SectionIsBlend(sec));
-                    LOG_WARN(Graphics, "SECTRACE shape@{} sec {} tex={} special={:#x} {}{}{}",
-                             static_cast<const void*>(this), i, t ? t->Name() : "<none>",
-                             unsigned(sec.properties.Special()),
-                             hid ? "SKIP-HIDDEN " : "", gpuOwned ? "SKIP-GPUOWNED " : "",
-                             filtered ? "SKIP-FILTER " : "");
-                }
-                if (sec.properties.Special() & (IsHidden | IsHiddenProxy))
-                {
-                    continue;
-                }
-
-                // Partial GPU-driven object (wgpu §12): the GPU retained scene already drew
-                // this shape's GPU-owned (opaque, Default-surface) sections into the colour +
-                // prepass targets, so the CPU repaints only the complement (blend glass,
-                // decals). Same predicate the wgpu backend registered the section with, so
-                // owned sections are dropped exactly once — never double-drawn, never held.
-                if (GSkipGpuOwnedSections && SectionGpuOwned(sec))
-                {
-                    continue;
-                }
-
-                // per-section transparency routing: in the opaque pass draw only
-                // opaque+cutout sections, in the back-to-front pass only blend ones.
-                if (GSectionFilter != SectionClassFilter::All)
-                {
-                    const bool isBlend = SectionIsBlend(sec);
-                    if ((GSectionFilter == SectionClassFilter::BlendOnly) != isBlend)
+                    const ShapeSection& sec = GetSection(i);
+                    if (sectionTrace && firstWalk)
+                    {
+                        const Texture* t = sec.properties.GetTexture();
+                        const bool hid = (sec.properties.Special() & (IsHidden | IsHiddenProxy)) != 0;
+                        const bool gpuOwned = GSkipGpuOwnedSections && SectionGpuOwned(sec);
+                        const bool filtered =
+                            GSectionFilter != SectionClassFilter::All &&
+                            ((GSectionFilter == SectionClassFilter::BlendOnly) != SectionIsBlend(sec));
+                        LOG_WARN(Graphics, "SECTRACE shape@{} sec {} tex={} special={:#x} {}{}{}",
+                                 static_cast<const void*>(this), i, t ? t->Name() : "<none>",
+                                 unsigned(sec.properties.Special()), hid ? "SKIP-HIDDEN " : "",
+                                 gpuOwned ? "SKIP-GPUOWNED " : "", filtered ? "SKIP-FILTER " : "");
+                    }
+                    if (sec.properties.Special() & (IsHidden | IsHiddenProxy))
                     {
                         continue;
                     }
-                }
 
-                if (p1sSections)
-                {
-                    Poseidon::Pass1Submit::gSectionsDrawn.fetch_add(1, std::memory_order_relaxed);
+                    // Partial GPU-driven object (wgpu §12): the GPU retained scene already drew
+                    // this shape's GPU-owned (opaque, Default-surface) sections into the colour +
+                    // prepass targets, so the CPU repaints only the complement (blend glass,
+                    // decals). Same predicate the wgpu backend registered the section with, so
+                    // owned sections are dropped exactly once — never double-drawn, never held.
+                    if (GSkipGpuOwnedSections && SectionGpuOwned(sec))
+                    {
+                        continue;
+                    }
+
+                    // per-section transparency routing: in the opaque pass draw only
+                    // opaque+cutout sections, in the back-to-front pass only blend ones.
+                    if (filter != SectionClassFilter::All)
+                    {
+                        const bool isBlend = SectionIsBlend(sec);
+                        if ((filter == SectionClassFilter::BlendOnly) != isBlend)
+                        {
+                            continue;
+                        }
+                    }
+
+                    if (p1sSections && firstWalk)
+                    {
+                        Poseidon::Pass1Submit::gSectionsDrawn.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    if (secBeg < 0)
+                    {
+                        secBeg = i;
+                        secEnd = i + 1;
+                        secTexture = sec.properties.GetTexture();
+                        secSpecial = sec.properties.Special();
+                        secMaterial = sec.material;
+                        secSurfMat = sec.surfMat;
+                    }
+                    else if (sec.properties.GetTexture() == secTexture && sec.properties.Special() == secSpecial &&
+                             sec.material == secMaterial && sec.surfMat == secSurfMat && i == secEnd)
+                    {
+                        // extend section
+                        secEnd = i + 1;
+                    }
+                    else
+                    {
+                        // flush section
+                        TLMaterial mat;
+                        matSource->GetMaterial(mat, GetSection(secBeg).material);
+                        GetSection(secBeg).PrepareTL(mat, lights, spec);
+                        GEngine->DrawSectionTL(*this, secBeg, secEnd);
+                        // open another section
+                        secBeg = i;
+                        secEnd = i + 1;
+                        secTexture = sec.properties.GetTexture();
+                        secSpecial = sec.properties.Special();
+                        secMaterial = sec.material;
+                        secSurfMat = sec.surfMat;
+                    }
                 }
-                if (secBeg < 0)
+                if (secEnd > secBeg)
                 {
-                    secBeg = i;
-                    secEnd = i + 1;
-                    secTexture = sec.properties.GetTexture();
-                    secSpecial = sec.properties.Special();
-                    secMaterial = sec.material;
-                    secSurfMat = sec.surfMat;
-                }
-                else if (sec.properties.GetTexture() == secTexture && sec.properties.Special() == secSpecial &&
-                         sec.material == secMaterial && sec.surfMat == secSurfMat && i == secEnd)
-                {
-                    // extend section
-                    secEnd = i + 1;
-                }
-                else
-                {
-                    // flush section
+                    int matIndex = GetSection(secBeg).material;
                     TLMaterial mat;
-                    matSource->GetMaterial(mat, GetSection(secBeg).material);
+                    matSource->GetMaterial(mat, matIndex);
+                    // flush section
                     GetSection(secBeg).PrepareTL(mat, lights, spec);
-                    GEngine->DrawSectionTL(*this, secBeg, secEnd);
-                    // open another section
-                    secBeg = i;
-                    secEnd = i + 1;
-                    secTexture = sec.properties.GetTexture();
-                    secSpecial = sec.properties.Special();
-                    secMaterial = sec.material;
-                    secSurfMat = sec.surfMat;
-                }
-            }
-            if (secEnd > secBeg)
-            {
-                int matIndex = GetSection(secBeg).material;
-                TLMaterial mat;
-                matSource->GetMaterial(mat, matIndex);
-                // flush section
-                GetSection(secBeg).PrepareTL(mat, lights, spec);
 
-                GEngine->DrawSectionTL(*this, secBeg, secEnd);
+                    GEngine->DrawSectionTL(*this, secBeg, secEnd);
+                }
+            };
+            walkSections(GSectionFilter, true);
+            if (GBlendRecord.active && GSectionFilter == SectionClassFilter::OpaqueAndCutout)
+            {
+                // Exactly the state pass 2 draws these sections under: the BlendOnly filter
+                // (above) and the scene's depth-read-only choice. Everything else a section
+                // draw reads -- transform, palette, lights, bias, pass hint, draw owner -- was
+                // set by this same draw of the object and is what pass 2 would set again.
+                const bool savedDepthReadOnly = render::GBlendSectionDepthReadOnly;
+                render::GBlendSectionDepthReadOnly = GBlendRecord.depthReadOnly;
+                engine->BlendRecordCapture(true);
+                walkSections(SectionClassFilter::BlendOnly, false);
+                engine->BlendRecordCapture(false);
+                render::GBlendSectionDepthReadOnly = savedDepthReadOnly;
             }
 
             engine->EndMeshTL(*this);
@@ -971,6 +1055,8 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
     // both recognised P3D encodings through that path keeps test-model (and
     // normal-map smoke tests) from silently producing an empty mesh.
     LODShapeWithShadow* shape = nullptr;
+    double installTailMs = 0.0, installRegisterMs = 0.0, installOptimizeMs = 0.0;
+    double syncParseMs = 0.0, syncAdaptMs = 0.0; // the main-thread load (not preadapted), for its slow-load row
     std::shared_ptr<const ModelCompressedSourceBirth> parsedSourceBirth;
     bool freshCanonicalAdapter = false;
     if (preadapted)
@@ -981,8 +1067,10 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
         shape = preadapted;
         // The worker stopped before the ODOL tail; run it here, in order (proxies
         // first, then OptimizeShapes and the rest), before OptimizeOneShape below.
+        const auto tailStart = ::Poseidon::Dev::Perf::Now();
         if (preparsed)
             Poseidon::Model::ShapeAdapter::FinishOdolAdapterTail(shape, *preparsed, reversed);
+        installTailMs = ::Poseidon::Dev::Perf::ElapsedMs(tailStart);
         if (timing)
         {
             timing->preparsed = true;
@@ -1003,10 +1091,11 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
             Poseidon::ModelCache cache;
             model = cache.load(lowName, &parsedSourceBirth);
         }
+        syncParseMs = arrivedPreparsed ? 0.0 : ::Poseidon::Dev::Perf::ElapsedMs(parseStart);
         if (timing)
         {
             timing->preparsed = arrivedPreparsed;
-            timing->parseMs = arrivedPreparsed ? 0.0 : ::Poseidon::Dev::Perf::ElapsedMs(parseStart);
+            timing->parseMs = syncParseMs;
         }
         const auto adaptStart = ::Poseidon::Dev::Perf::Now();
         // OFP MLODs (every LOD "SP3X") go through the original loader, as they do in Malprave and
@@ -1068,8 +1157,9 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
             shape = new LODShapeWithShadow(lowName, reversed);
             ownedShape.reset(shape);
         }
+        syncAdaptMs = ::Poseidon::Dev::Perf::ElapsedMs(adaptStart);
         if (timing)
-            timing->adaptMs = ::Poseidon::Dev::Perf::ElapsedMs(adaptStart);
+            timing->adaptMs = syncAdaptMs;
     }
     if (!shape)
     {
@@ -1137,13 +1227,24 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
             // RFG-099: let the retained renderer own the mesh first.
             if (_worldModelScope && GEngine)
                 GEngine->WorldShapeLoaded(shape);
+            installRegisterMs = ::Poseidon::Dev::Perf::ElapsedMs(optimizeStart);
+            const auto legacyStart = ::Poseidon::Dev::Perf::Now();
             OptimizeOneShape(shape);
+            installOptimizeMs = ::Poseidon::Dev::Perf::ElapsedMs(legacyStart);
         }
         if (timing)
             timing->optimizeMs = ::Poseidon::Dev::Perf::ElapsedMs(optimizeStart);
     }
 
     const double _perfShapeLoadMs = ::Poseidon::Dev::Perf::ElapsedMs(_perfShapeLoadStart);
+    // A whole model loaded on the main thread (a building's furniture proxy, NewObject inside its
+    // install tail): what the parse, the conversion and the registration each cost.
+    if (!preadapted && _perfShapeLoadMs >= 10.0)
+        LOG_INFO(Graphics, "Slow sync shape load: {} {:.1f} ms | parse {:.1f} adapt {:.1f} register {:.1f} optimize {:.1f}",
+                 lowName, _perfShapeLoadMs, syncParseMs, syncAdaptMs, installRegisterMs, installOptimizeMs);
+    if (preadapted && _perfShapeLoadMs >= 30.0)
+        LOG_INFO(Graphics, "Slow shape install: {} {:.1f} ms | tail {:.1f} register {:.1f} optimize {:.1f} ({} LODs)",
+                 lowName, _perfShapeLoadMs, installTailMs, installRegisterMs, installOptimizeMs, shape->NLevels());
     if (_perfShapeLoadMs >= 1.0)
     {
         LOG_DEBUG(Graphics, "PERF: ShapeBank::New {} took {:.2f}ms ({} LODs)", lowName, _perfShapeLoadMs,
@@ -1169,12 +1270,55 @@ void Shape::ConvertToVBuffer(VBType type)
     if (!_buffer)
     {
         _buffer = GEngine->CreateVertexBuffer(*this, type);
+        _vbType = int8_t(type);
+        _vbStreamReleased = false;
+        _vbLastUse = VbEpoch;
     }
 }
 
 void Shape::ReleaseVBuffer()
 {
     _buffer.Free();
+}
+
+uint32_t Shape::VbEpoch = 0;
+
+void Shape::TouchVBuffer() const
+{
+    _vbLastUse = VbEpoch;
+    if (_vbStreamReleased && !_buffer && _vbType >= 0)
+    {
+        Shape* self = const_cast<Shape*>(this);
+        self->_vbStreamReleased = false;
+        self->ConvertToVBuffer(VBType(_vbType));
+    }
+}
+
+uint64_t ShapeBank::ReleaseIdleVBuffers(uint32_t idleEpochs, uint32_t maxCount, uint32_t* released)
+{
+    uint64_t bytes = 0;
+    uint32_t count = 0;
+    ForEach(
+        [&](LODShapeWithShadow& shape)
+        {
+            for (int l = 0; l < shape.NLevels() && count < maxCount; l++)
+            {
+                Shape* level = shape.Level(l);
+                // Static only: a dynamic buffer is animated or carries a conform selector baked
+                // on its first in-plane update (roads), which a rebuild must not skip.
+                if (!level || !level->GetVertexBuffer() || level->_vbType != int8_t(VBStatic))
+                    continue;
+                if (Shape::VbEpoch - level->_vbLastUse < idleEpochs)
+                    continue;
+                bytes += uint64_t(level->NVertex()) * 36 + uint64_t(level->NFaces()) * 3 * 4;
+                level->ReleaseVBuffer();
+                level->_vbStreamReleased = true;
+                ++count;
+            }
+        });
+    if (released)
+        *released = count;
+    return bytes;
 }
 
 void ShapeBank::ReleaseAllVBuffers()

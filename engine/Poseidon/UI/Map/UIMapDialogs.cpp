@@ -585,10 +585,10 @@ DisplayDebriefing::DisplayDebriefing(ControlsContainer* parent, bool animation, 
         // single player
         _server = false;
         _client = false;
-        GetCtrl(IDC_DEBRIEFING_PLAYERS_TITLE_BG)->ShowCtrl(false);
-        GetCtrl(IDC_DEBRIEFING_PLAYERS_TITLE)->ShowCtrl(false);
-        GetCtrl(IDC_DEBRIEFING_PLAYERS_BG)->ShowCtrl(false);
-        GetCtrl(IDC_DEBRIEFING_PLAYERS)->ShowCtrl(false);
+        if (IControl* ctrl = GetCtrl(IDC_DEBRIEFING_PLAYERS_TITLE_BG)) ctrl->ShowCtrl(false);
+        if (IControl* ctrl = GetCtrl(IDC_DEBRIEFING_PLAYERS_TITLE)) ctrl->ShowCtrl(false);
+        if (IControl* ctrl = GetCtrl(IDC_DEBRIEFING_PLAYERS_BG)) ctrl->ShowCtrl(false);
+        if (IControl* ctrl = GetCtrl(IDC_DEBRIEFING_PLAYERS)) ctrl->ShowCtrl(false);
     }
 
     UpdateDebriefingActionLabels(this);
@@ -666,7 +666,7 @@ void DisplayDebriefing::OnButtonClicked(int idc)
             if (_client)
             {
                 GetNetworkManager().ClientReady(NGSDebriefingOK);
-                GetCtrl(IDC_CANCEL)->ShowCtrl(false);
+                if (IControl* ctrl = GetCtrl(IDC_CANCEL)) ctrl->ShowCtrl(false);
             }
             else if (!_server)
             {
@@ -739,7 +739,7 @@ void DisplayDebriefing::OnSimulate(EntityAI* vehicle)
         if (!GetNetworkManager().IsServer() && !GetNetworkManager().IsGameMaster())
         {
             _server = false;
-            GetCtrl(IDC_DEBRIEFING_RESTART)->ShowCtrl(true);
+            if (IControl* ctrl = GetCtrl(IDC_DEBRIEFING_RESTART)) ctrl->ShowCtrl(true);
             CActiveText* ctrl = dynamic_cast<CActiveText*>(GetCtrl(IDC_CANCEL));
             if (ctrl)
             {
@@ -752,7 +752,7 @@ void DisplayDebriefing::OnSimulate(EntityAI* vehicle)
         if (GetNetworkManager().IsServer() || GetNetworkManager().IsGameMaster())
         {
             _server = true;
-            GetCtrl(IDC_DEBRIEFING_RESTART)->ShowCtrl(false);
+            if (IControl* ctrl = GetCtrl(IDC_DEBRIEFING_RESTART)) ctrl->ShowCtrl(false);
             CActiveText* ctrl = dynamic_cast<CActiveText*>(GetCtrl(IDC_CANCEL));
             if (ctrl)
             {

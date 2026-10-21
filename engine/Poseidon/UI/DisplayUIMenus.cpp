@@ -945,9 +945,23 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
             LOG_INFO(Core, "ARMA1-TEST mission runtime entered ({}.{})", (const char*)Glob.header.filename,
                      (const char*)Glob.header.worldname);
             Poseidon::Arma1Compat::LogAssetCensus();
+            Poseidon::Arma1Compat::LogUnitMotion(true);
         }
         else if (now - testStart >= static_cast<DWORD>(testSeconds * 1000.0f))
         {
+            // where the player ended up: a player standing in the sea or under the ground is a
+            // failed placement even when the mission ran
+            if (const Object* who = GWorld->GetRealPlayer(); who && GLandscape)
+            {
+                const Vector3 p = who->Position();
+                const Object* in = GWorld->CameraOn();
+                LOG_INFO(Core, "ARMA1-TEST player at {:.1f} {:.1f}, {:.2f} m (ground {:.2f} m, sea level 0){}", p.X(),
+                         p.Z(), p.Y(), GLandscape->SurfaceY(p.X(), p.Z()),
+                         in && in != who ? " in a vehicle" : "");
+            }
+            Poseidon::Arma1Compat::LogUnitMotion(false);
+            Poseidon::Arma1Compat::LogSoundCensus();
+            Poseidon::Arma1Compat::LogScriptProbe();
             LOG_INFO(Core, "ARMA1-TEST PASS ({}.{}) played {} s", (const char*)Glob.header.filename,
                      (const char*)Glob.header.worldname, testSeconds);
             testStart = 0xFFFFFFFF;
@@ -1416,6 +1430,29 @@ void DisplayIntro::OnSimulate(EntityAI* vehicle)
 {
     DisplayCutscene::OnSimulate(vehicle);
 
+    // --arma1-test-seconds on a mission that has only an intro (an Arma 3 scene: Eden's
+    // ScenarioData with an Intro and no Mission). DisplayMission keeps the timer for real
+    // missions; without this one the run never ended and the harness timed out.
+    if (const float testSeconds = AppConfig::Instance().GetArma1TestSeconds(); testSeconds > 0.0f)
+    {
+        static DWORD introTestStart = 0;
+        const DWORD now = Poseidon::Foundation::GlobalTickCount();
+        if (introTestStart == 0)
+        {
+            introTestStart = now;
+            LOG_INFO(Core, "ARMA1-TEST intro runtime entered ({}.{}) -- the mission has only an intro",
+                     (const char*)Glob.header.filename, (const char*)Glob.header.worldname);
+        }
+        else if (introTestStart != 0xFFFFFFFF && now - introTestStart >= static_cast<DWORD>(testSeconds * 1000.0f))
+        {
+            LOG_INFO(Core, "ARMA1-TEST PASS ({}.{}) played {} s (intro only)", (const char*)Glob.header.filename,
+                     (const char*)Glob.header.worldname, testSeconds);
+            introTestStart = 0xFFFFFFFF;
+            GApp->m_exitCode = 0;
+            GApp->m_closeRequest = true;
+        }
+    }
+
     if (AppConfig::Instance().IsMissionSmokeCheck() && !_missionSmokeReported)
     {
         _missionSmokeReported = true;
@@ -1706,16 +1743,16 @@ DisplayMissionEnd::DisplayMissionEnd(ControlsContainer* parent /*, bool editor*/
     _quotation = toIntFloor(quotations * GRandGen.RandomValue());
     Load("RscDisplayMissionEnd");
 
-    GetCtrl(IDC_ME_LOAD)->ShowCtrl(false);
-    GetCtrl(IDC_ME_RETRY)->ShowCtrl(false);
+    if (IControl* ctrl = GetCtrl(IDC_ME_LOAD)) ctrl->ShowCtrl(false);
+    if (IControl* ctrl = GetCtrl(IDC_ME_RETRY)) ctrl->ShowCtrl(false);
     if (GWorld->GetMode() != GModeNetware)
     {
         RString name = GetSaveDirectory() + RString("save.fps");
         if (QIFStream::FileExists(name))
         {
-            GetCtrl(IDC_ME_LOAD)->ShowCtrl(true);
+            if (IControl* ctrl = GetCtrl(IDC_ME_LOAD)) ctrl->ShowCtrl(true);
         }
-        GetCtrl(IDC_ME_RETRY)->ShowCtrl(true);
+        if (IControl* ctrl = GetCtrl(IDC_ME_RETRY)) ctrl->ShowCtrl(true);
     }
     InputSubsystem::Instance().ChangeGameFocus(+1);
 }

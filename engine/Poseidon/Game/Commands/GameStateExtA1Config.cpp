@@ -11,6 +11,7 @@
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/UI/Locale/Stringtable/Stringtable.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -197,8 +198,19 @@ GameValue A1ConfigName(const GameState*, GameValuePar oper1)
     return GameValue(RString(e ? (const char*)e->GetName() : ""));
 }
 
+// A config entry that names nothing (configNull, or a path to a missing entry).
+bool A1ConfigIsNull(GameValuePar v)
+{
+    bool root = false;
+    const ParamEntry* e = Resolve(v, &root);
+    return !root && !e;
+}
+
 GameValue A1ConfigCount(const GameState*, GameValuePar oper1)
 {
+    // Arma 3: count "text" is the length of a string that is no config entry
+    if (!IsConfigValue(oper1))
+        return GameValue(static_cast<float>(((RString)oper1).GetLength()));
     bool root = false;
     const ParamEntry* e = Resolve(oper1, &root);
     if (root && !e)
@@ -208,6 +220,13 @@ GameValue A1ConfigCount(const GameState*, GameValuePar oper1)
 
 GameValue A1ConfigSelect(const GameState*, GameValuePar oper1, GameValuePar oper2)
 {
+    // Arma 3: "text" select n is the rest of a string from n on
+    if (!IsConfigValue(oper1))
+    {
+        const RString s = oper1;
+        const int from = std::max(0, toInt((float)oper2));
+        return GameValue(from < s.GetLength() ? RString((const char*)s + from) : RString(""));
+    }
     bool root = false;
     const ParamEntry* e = Resolve(oper1, &root);
     if (root && !e)
@@ -250,6 +269,8 @@ GameValue A1Max(const GameState*, GameValuePar oper1, GameValuePar oper2)
 GameValue A1TypeName(const GameState*, GameValuePar oper1)
 {
     const GameType t = oper1.GetType();
+    if (t == GameString && oper1.GetData() && oper1.GetData()->IsCode())
+        return GameValue(RString("CODE"));
     // Arma 2 handles that are tagged strings here.
     if (t == GameString)
     {
@@ -280,4 +301,245 @@ GameValue A1SurfaceIsWater(const GameState* state, GameValuePar oper1)
     if (!GetRelPos(state, pos, oper1))
         return GameValue(false);
     return GameValue(GLandscape->SurfaceY(pos.X(), pos.Z()) < 0.0f);
+}
+
+// ---------------------------------------------------------------------------------------
+// Arma 3 config commands
+// ---------------------------------------------------------------------------------------
+
+namespace
+{
+// The entries of a class, own and (when `inherit`) inherited, in Arma 3's order: the
+// class's own first, then each base's that the class does not override.
+void CollectEntries(const ParamEntry& cls, bool inherit, std::vector<const ParamEntry*>& out)
+{
+    std::vector<std::string> seen;
+    const auto has = [&](const char* n)
+    {
+        for (const std::string& s : seen)
+            if (_stricmp(s.c_str(), n) == 0)
+                return true;
+        return false;
+    };
+    const ParamEntry* c = &cls;
+    for (int guard = 0; c && guard < 64; guard++)
+    {
+        for (int i = 0; i < c->GetEntryCount(); i++)
+        {
+            const ParamEntry& e = c->GetEntry(i);
+            if (has(e.GetName()))
+                continue;
+            seen.emplace_back((const char*)e.GetName());
+            out.push_back(&e);
+        }
+        if (!inherit)
+            break;
+        const ParamClass* pc = c->GetClassInterface();
+        const ParamClass* base = pc ? pc->GetBase() : nullptr;
+        c = base;
+    }
+}
+
+GameValue FilterEntries(const GameState* state, GameValuePar config, const RString& condition, bool inherit,
+                        bool classesOnly)
+{
+    GameArrayType out;
+    bool root = false;
+    const ParamEntry* e = Resolve(config, &root);
+    if (root && !e)
+        e = Arma1Compat::ConfigRoot() ? Arma1Compat::ConfigRoot() : &Pars;
+    if (!e || !e->IsClass())
+        return GameValue(out);
+    std::vector<const ParamEntry*> entries;
+    CollectEntries(*e, inherit, entries);
+    for (const ParamEntry* entry : entries)
+    {
+        if (classesOnly && !entry->IsClass())
+            continue;
+        const GameValue child = Child(config, entry->GetName());
+        if (condition.GetLength() > 0)
+        {
+            GameVarSpace local(state->GetContext());
+            state->BeginContext(&local);
+            state->VarSetLocal("_x", child, false, true);
+            const GameValue keep = state->EvaluateMultiple(condition);
+            state->EndContext();
+            if (state->GetLastError() != EvalOK)
+                break;
+            if (keep.GetType() != GameBool || !(bool)keep)
+                continue;
+        }
+        out.Add(child);
+    }
+    return GameValue(out);
+}
+} // namespace
+
+// "condition" configClasses config: the classes of a config class (inherited ones too)
+// for which the condition (with _x = the class) holds.
+GameValue A3ConfigClasses(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return FilterEntries(state, oper2, (RString)oper1, true, true);
+}
+
+// configClasses [config, depth, inherit, allTiers] (the form BIS_fnc_returnChildren uses):
+// the classes of a config class, and with depth > 0 theirs too, down `depth` more levels;
+// allTiers false keeps only the deepest tier.
+GameValue A3ConfigClassesTiers(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& a = oper1;
+    GameArrayType out;
+    if (a.Size() < 1)
+        return GameValue(out);
+    const int depth = a.Size() > 1 && a[1].GetType() == GameScalar ? toInt((float)a[1]) : 0;
+    const bool inherit = a.Size() > 2 && a[2].GetType() == GameBool ? (bool)a[2] : true;
+    const bool allTiers = a.Size() > 3 && a[3].GetType() == GameBool ? (bool)a[3] : true;
+    GameArrayType tier;
+    tier.Add(a[0]);
+    for (int level = 0; level <= depth && level < 32; level++)
+    {
+        GameArrayType next;
+        for (int i = 0; i < tier.Size(); i++)
+        {
+            const GameValue children = FilterEntries(state, tier[i], RString(), inherit, true);
+            const GameArrayType& list = children;
+            for (int j = 0; j < list.Size(); j++)
+                next.Add(list[j]);
+        }
+        if (allTiers || level == depth)
+            for (int j = 0; j < next.Size(); j++)
+                out.Add(next[j]);
+        if (next.Size() == 0)
+            break;
+        tier = next;
+    }
+    return GameValue(out);
+}
+
+// configProperties [config, condition, inherit]
+GameValue A3ConfigProperties(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& a = oper1;
+    if (a.Size() < 1)
+        return GameValue(GameArrayType());
+    const RString condition = a.Size() > 1 && a[1].GetType() == GameString ? (RString)a[1] : RString("true");
+    const bool inherit = a.Size() > 2 && a[2].GetType() == GameBool ? (bool)a[2] : true;
+    return FilterEntries(state, a[0], condition, inherit, false);
+}
+
+// configHierarchy config: [configFile, configFile >> "CfgVehicles", ..., config]
+GameValue A3ConfigHierarchy(const GameState*, GameValuePar oper1)
+{
+    GameArrayType out;
+    if (!IsConfigValue(oper1))
+        return GameValue(out);
+    const RString s = oper1;
+    const bool mission = strncmp(s, kMissionCfg, strlen(kMissionCfg)) == 0;
+    const char* tag = mission ? kMissionCfg : kCfg;
+    GameValue cur = GameValue(RString(tag));
+    out.Add(cur);
+    for (const std::string& seg : Segments((const char*)s + strlen(tag)))
+    {
+        cur = Child(cur, seg.c_str());
+        out.Add(cur);
+    }
+    return GameValue(out);
+}
+
+// configHierarchy [config, ...flags, returnNames] -- the form BIS_fnc_returnParents uses:
+// the class and its base classes, the class first (configName of each with returnNames).
+GameValue A3ConfigHierarchyArray(const GameState* state, GameValuePar oper1)
+{
+    GameArrayType out;
+    const GameArrayType& args = oper1;
+    if (args.Size() < 1 || !IsConfigValue(args[0]))
+        return GameValue(out);
+    const bool names = args.Size() >= 5 && args[4].GetType() == GameBool && (bool)args[4];
+    GameValue cur = args[0];
+    for (int guard = 0; guard < 64; guard++)
+    {
+        const RString path = cur;
+        if (path.GetLength() == 0 || !Resolve(cur))
+            break;
+        out.Add(names ? A1ConfigName(state, cur) : cur);
+        cur = A1InheritsFrom(state, cur);
+    }
+    return GameValue(out);
+}
+
+GameValue A3ConfigNull(const GameState*)
+{
+    return GameValue(RString("::CFG::\x01null"));
+}
+
+// getMissionConfigValue "name" / [name, default]: description.ext's value, else the
+// mission.sqm scenario attribute (not kept here), else the default.
+GameValue A3GetMissionConfigValue(const GameState*, GameValuePar oper1)
+{
+    RString name;
+    GameValue fallback;
+    if (oper1.GetType() == GameArray)
+    {
+        const GameArrayType& a = oper1;
+        if (a.Size() < 1 || a[0].GetType() != GameString)
+            return GameValue();
+        name = a[0];
+        if (a.Size() > 1)
+            fallback = a[1];
+    }
+    else
+        name = oper1;
+    const ParamEntry* e = ExtParsMission.FindEntry(name);
+    if (!e)
+        return fallback;
+    if (e->IsArray())
+        return ArrayOf(*e);
+    if (e->IsClass())
+        return Child(GameValue(RString(kMissionCfg)), name);
+    if (e->IsFloatValue() || e->IsIntValue())
+        return GameValue((float)*e);
+    return GameValue(RString(e->GetValue()));
+}
+
+GameValue A3GetMissionConfig(const GameState*, GameValuePar oper1)
+{
+    return Child(GameValue(RString(kMissionCfg)), (RString)oper1);
+}
+
+GameValue A3IsLocalized(const GameState*, GameValuePar oper1)
+{
+    RString key = oper1;
+    const char* k = key;
+    if (*k == '@')
+        k++;
+    const RString text = LocalizeString(k);
+    return GameValue(text.GetLength() > 0 && _stricmp(text, k) != 0);
+}
+
+GameValue A3ConfigSourceMod(const GameState*, GameValuePar)
+{
+    return GameValue(RString(""));
+}
+
+GameValue A3ConfigSourceAddonList(const GameState*, GameValuePar)
+{
+    return GameValue(GameArrayType());
+}
+
+// Arma 3 config commands, registered with the other Arma 3 commands (--arma3 only).
+void RegisterArma3ConfigCommands()
+{
+    GGameState.NewOperator(GameOperator(GameArray, "configClasses", function, A3ConfigClasses, GameString, GameString));
+    GGameState.NewFunction(GameFunction(GameArray, "configClasses", A3ConfigClassesTiers, GameArray));
+    GGameState.NewFunction(GameFunction(GameArray, "configProperties", A3ConfigProperties, GameArray));
+    GGameState.NewFunction(GameFunction(GameArray, "configHierarchy", A3ConfigHierarchy, GameString));
+    GGameState.NewFunction(GameFunction(GameArray, "configHierarchy", A3ConfigHierarchyArray, GameArray));
+    GGameState.NewNularOp(GameNular(GameString, "configNull", A3ConfigNull));
+    GGameState.NewFunction(GameFunction(GameAny, "getMissionConfigValue", A3GetMissionConfigValue, GameString | GameArray));
+    GGameState.NewFunction(GameFunction(GameString, "getMissionConfig", A3GetMissionConfig, GameString));
+    GGameState.NewFunction(GameFunction(GameString, "getTextRaw", A1GetText, GameString));
+    GGameState.NewFunction(GameFunction(GameBool, "isLocalized", A3IsLocalized, GameString));
+    GGameState.NewFunction(GameFunction(GameString, "configSourceMod", A3ConfigSourceMod, GameString));
+    GGameState.NewFunction(GameFunction(GameArray, "configSourceAddonList", A3ConfigSourceAddonList, GameString));
+    GGameState.NewFunction(GameFunction(GameArray, "configSourceModList", A3ConfigSourceAddonList, GameString));
 }

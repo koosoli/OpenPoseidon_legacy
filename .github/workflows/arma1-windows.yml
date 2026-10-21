@@ -1,0 +1,105 @@
+name: Arma 1 / Windows game build
+
+# Builds only the Windows game (no tests) for a branch, on demand, and uploads
+# OpenPoseidon.exe with its wgpu_renderer.dll as one artifact. Used to get a build onto
+# a machine without a local toolchain. Compiler errors are re-emitted as annotations so
+# they can be read through the API.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - MrDudeX-arma1
+
+# Only the newest push is worth a build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
+  CCACHE_NOHASHDIR: true
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build-windows:
+    name: Windows game (RelWithDebInfo)
+    runs-on: windows-2022
+    env:
+      CWR_PRESET: win-x64-clang-rwdi
+      CWR_BUILD_DIR: build/win-x64-clang-rwdi
+      CWR_DIST_DIR: dist/x64-win-rwdi
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build metadata
+        id: meta
+        shell: bash
+        run: echo "sha_short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      # The full build also compiles test programs; only the game (and its staged
+      # content) has to succeed.
+      - name: Build
+        continue-on-error: true
+        uses: ./.github/actions/build-cwr
+        with:
+          preset: ${{ env.CWR_PRESET }}
+          vcpkg-triplet: x64-windows-clang
+          build-dir: ${{ env.CWR_BUILD_DIR }}
+          run-tests: 'false'
+
+      - name: Build the game
+        shell: bash
+        run: |
+          # keep going past failing test targets so staged content (assets, Mods) is complete
+          cmake --build "$CWR_BUILD_DIR" --parallel 2 -- -k 0 || true
+          cmake --build "$CWR_BUILD_DIR" --target PoseidonGame --parallel 2
+
+      - name: Report compiler errors
+        if: failure()
+        shell: bash
+        run: |
+          cmake --build "$CWR_BUILD_DIR" --target PoseidonGame --parallel 2 -- -k 0 > build-errors.txt 2>&1 || true
+          grep -E "error( [A-Z]+[0-9]+)?:|undefined symbol|LNK[0-9]+" build-errors.txt | head -40 | while IFS= read -r line; do
+            echo "::error::${line//%/%25}"
+          done
+          exit 1
+
+      - name: Build starter (Arma1Start.exe)
+        shell: pwsh
+        run: |
+          $clang = (Get-Command clang-cl -ErrorAction SilentlyContinue).Source
+          if (-not $clang) { $clang = 'C:\Program Files\LLVM\bin\clang-cl.exe' }
+          New-Item -ItemType Directory -Force out | Out-Null
+          & $clang /nologo /O2 /W3 /DUNICODE /D_UNICODE /D_CRT_SECURE_NO_WARNINGS tools/arma1-launcher/Arma1Start.c `
+            /Fe:out/Arma1Start.exe /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib advapi32.lib ole32.lib
+          if ($LASTEXITCODE -ne 0) { throw "starter build failed" }
+          Remove-Item out/*.obj -ErrorAction SilentlyContinue
+
+      - name: Collect game files
+        shell: bash
+        run: |
+          mkdir -p out/Werkzeuge
+          cp "$CWR_DIST_DIR/OpenPoseidon.exe" out/
+          if [ -f "$CWR_DIST_DIR/wgpu_renderer.dll" ]; then cp "$CWR_DIST_DIR/wgpu_renderer.dll" out/; else cp "$CWR_BUILD_DIR/engine/WgpuRenderer/wgpu_renderer.dll" out/; fi
+          cp "$CWR_DIST_DIR/OpenAL32.dll" "$CWR_DIST_DIR/OpenAL-Soft.LICENSE.txt" out/ 2>/dev/null || true
+          # The same content Deploy.ps1 installs: menu scene, logo, inventory icons, default packs.
+          [ -d "$CWR_DIST_DIR/assets" ] && cp -r "$CWR_DIST_DIR/assets" out/
+          [ -d "$CWR_DIST_DIR/Mods" ] && cp -r "$CWR_DIST_DIR/Mods" out/
+          cp tools/arma1-launcher/LIESMICH.txt out/
+          cp scripts/Install.ps1 scripts/CwaCommon.ps1 out/Werkzeuge/
+          printf 'branch=%s\ncommit=%s\nsource=GitHub Actions %s (%s)\n' "$GITHUB_REF_NAME" "${GITHUB_SHA::7}" "$GITHUB_RUN_ID" "$CWR_PRESET" > out/BUILT-FROM.txt
+          printf '%s %s %s github-actions-zip\n' "$GITHUB_REF_NAME" "${GITHUB_SHA::7}" "$(date +%Y-%m-%d_%H:%M)" > out/DEPLOYED-FROM.txt
+          find out -maxdepth 2 | sort
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenPoseidon-Arma1-spielbar-${{ steps.meta.outputs.sha_short }}
+          path: out/*
+          if-no-files-found: error

@@ -1,0 +1,13 @@
+# Interaction probe (RFG-157 doors, RFG-158 window panes) at the houseNear house, Open Poseidon only.
+# '!' lines are raw SQS run at that point (go.ps1). The house stands ~10 m ESE of houseNear.
+houseNear     5154.1  5386.3  1.8   125.0   2.0
+!_hh = triTerrainHeight [5162, 5380]
+!logInfo format ["probe census: %1 | %2", triEnfusionDoorCensus, triEnfusionGlassCensus]
+!logInfo format ["probe nearest door: %1 | pane: %2", triEnfusionDoor [5162, 5380, 40], triEnfusionGlass [5162, 5380, _hh + 2, 40]]
+!_n = triEnfusionDoorsAll [5162, 5380, 35, 1]
+!_g = triEnfusionGlassBreakAll [5162, 5380, _hh + 2, 35]
+!logInfo format ["probe opened %1 doors, broke %2 panes", _n, _g]
+!~3
+houseNearOpen 5154.1  5386.3  1.8   125.0   2.0
+houseFarOpen  5149.2  5389.8  1.8   125.0  -3.0
+!logInfo format ["probe after: %1 | %2", triEnfusionDoorCensus, triEnfusionGlassCensus]

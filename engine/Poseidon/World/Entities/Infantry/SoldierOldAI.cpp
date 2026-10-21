@@ -28,6 +28,7 @@
 #include <Poseidon/AI/AIHunt.hpp>
 #include <Poseidon/AI/AICombatPace.hpp> // AI-AIM-001
 #include <Poseidon/World/Weather/WindModel.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/MuzzleBurst.hpp>
 
 namespace Poseidon
 {
@@ -1015,6 +1016,27 @@ Vector3 Man::GetWeaponPoint(int weapon) const
     return PositionWorldToModel(AimingPosition());
 }
 
+Vector3 Man::GetWeaponBarrelDirection(int weapon) const
+{
+    if (weapon < 0 || weapon >= NMagazineSlots()) return VZero;
+    const WeaponType* info = GetMagazineSlot(weapon)._weapon;
+    const MuzzleType* muzzle = GetMagazineSlot(weapon)._muzzle;
+    if (!info || !muzzle) return VZero;
+    int weaponIndex = -1;
+    if (info->_weaponType & MaskSlotPrimary) weaponIndex = Type()->_priWeaponIndex;
+    else if (info->_weaponType & MaskSlotSecondary) weaponIndex = Type()->_secWeaponIndex;
+    else if (info->_weaponType & MaskSlotHandGun) weaponIndex = Type()->_handGunIndex;
+    if (weaponIndex < 0) return VZero;
+    Shape* proxyContainer = _shape->MemoryLevel();
+    if (!proxyContainer) return VZero;
+    const ProxyObject& proxy = proxyContainer->Proxy(weaponIndex);
+    const Matrix4 animTrans = AnimateProxyMatrix(_shape->FindMemoryLevel(), proxy);
+    Vector3 dir = animTrans.Rotate(muzzle->_muzzleDir);
+    if (dir.SquareSize() < 1e-8f) return VZero;
+    dir.Normalize();
+    return dir;
+}
+
 bool Man::GetWeaponCartridgePos(int weapon, Matrix4& pos, Vector3& vel) const
 {
     if (weapon >= 0 && weapon < NMagazineSlots())
@@ -1576,6 +1598,18 @@ bool Soldier::FireWeapon(int weapon, TargetType* target)
         {
             if (!EnableMissile())
             {
+                // OP_FORCEFIRE_LOG=1 (see EntityAI::SimulateWeapons): a scripted launcher shot
+                // waits here while the soldier's move does not allow a missile.
+                static const bool forceFireLog = [] {
+                    const char* e = std::getenv("OP_FORCEFIRE_LOG");
+                    return e && *e == '1';
+                }();
+                if (forceFireLog && _forceFireWeapon >= 0)
+                {
+                    LOG_INFO(AI, "force fire {}: missile not enabled in move {} (factor {:.2f})",
+                             (const char*)GetDebugName(), (const char*)Type()->GetMoveName(_primaryMove.id),
+                             _primaryFactor);
+                }
                 return false;
             }
             // check relative missile direction
@@ -1764,6 +1798,29 @@ void Soldier::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI* 
             const Vector3 muzzleWorld = GetHierachyParent() ? WorldTransform().FastTransform(muzzleModel)
                                                           : PositionModelToWorld(muzzleModel);
             _mGunFire.StartMuzzle(muzzleWorld);
+            {
+                // Cosmetic particle burst. Its seed is a private counter mixed with
+                // the shooter and the clock -- never the gameplay RNG.
+                static std::uint32_t shots = 0;
+                // the barrel as the model holds it (owner, 2026-10-19: "are you sure the muzzle
+                // fire is aligned with the rifle barrel?" -- the aim direction is not)
+                Vector3 barrel = GetWeaponDirection(weapon);
+                const Vector3 barrelModel = GetWeaponBarrelDirection(weapon);
+                if (barrelModel.SquareSize() > 0.5f)
+                    barrel = GetHierachyParent() ? WorldTransform().Rotate(barrelModel) : DirectionModelToWorld(barrelModel);
+                const Vector3 carrier = WorldSpeed();
+                Poseidon::render::MuzzleBurstShot shot;
+                shot.muzzle = {muzzleWorld.X(), muzzleWorld.Y(), muzzleWorld.Z()};
+                shot.forward = {barrel.X(), barrel.Y(), barrel.Z()};
+                shot.carrier = {carrier.X(), carrier.Y(), carrier.Z()};
+                shot.birthMs = Glob.time.toInt();
+                // BOOM-005: the flash grows with the charge: a 5.56 rifle (hit ~8) = 1, a pistol
+                // smaller, a 7.62 MG larger
+                shot.size = std::clamp(std::sqrt(std::max(mode->_ammo->hit, 1.0f) / 8.0f), 0.55f, 1.8f);
+                shot.seed = ++shots * 2654435761u ^ std::uint32_t(reinterpret_cast<std::uintptr_t>(this) >> 4) ^
+                            std::uint32_t(shot.birthMs);
+                Poseidon::render::RecordMuzzleBurst(shot);
+            }
             _mGunFireFrames = 1;
             _mGunFireTime = Glob.uiTime;
             int newPhase;
@@ -2734,6 +2791,14 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
     else if (LauncherFire())
     {
         // if RPG soldier is ready to fire, force weapon activation
+        minPos = ManPosWeapon;
+        maxPos = ManPosWeapon;
+    }
+    else if (_forceFireWeapon >= 0 && _forceFireWeapon == _currentWeapon && LauncherSelected() && LauncherReady())
+    {
+        // A scripted `fire` of a launcher (unit fire "LAWLauncher"): raise it as an AT soldier
+        // in combat would. Without this a soldier out of combat stayed in his rifle move,
+        // where FireWeapon refuses a missile, and the shot never left (CWA and Arma alike).
         minPos = ManPosWeapon;
         maxPos = ManPosWeapon;
     }

@@ -13,6 +13,10 @@
 #include <Poseidon/IO/Streams/ModelCompressedSourceBirth.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/World/Model/ModelDerivedCache.hpp>
+#include <Poseidon/IO/Streams/QBStream.hpp>
+#include <cjson/cJSON.h>
+#include <cstdlib>
+#include <unordered_map>
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -36,6 +40,59 @@ std::string ModelCache::normalizePath(const std::string& path) const
     return Asset::VirtualPath::Parse(path).canonical();
 }
 
+namespace
+{
+// OP's model redirects: a stock model name -> its replacement in the visual pack
+// (op_ground_materials\models.json, {"api":1,"models":[{"source":..., "model":...}]}). The first
+// is the hedges (owner, 2026-10-13: OFP's krovi* hedges are a few flat cards each; the pack's
+// generate_hedges.py builds denser ones). The shape keeps the stock name, so every placement,
+// map symbol and cache key is unchanged; only the bytes come from the pack. OP_HEDGES=0 turns
+// the redirects off. Read once the pack is mounted (an early lookup returns nothing and retries).
+const std::string* ModelRedirect(const std::string& key)
+{
+    static std::unordered_map<std::string, std::string> redirects;
+    static bool loaded = false;
+    if (!loaded)
+    {
+        constexpr const char* manifest = "op_ground_materials\\models.json";
+        if (!QIFStreamB::AutoBank(manifest))
+            return nullptr;
+        loaded = true;
+        if (const char* v = std::getenv("OP_HEDGES"); v && v[0] == '0')
+            return nullptr;
+        QIFStreamB file;
+        file.AutoOpen(manifest);
+        const int length = file.rest();
+        if (length <= 0 || length > 65536)
+            return nullptr;
+        std::string text(static_cast<size_t>(length), '\0');
+        file.read(text.data(), length);
+        cJSON* root = cJSON_Parse(text.c_str());
+        if (!root)
+            return nullptr;
+        const cJSON* api = cJSON_GetObjectItemCaseSensitive(root, "api");
+        const cJSON* models = cJSON_GetObjectItemCaseSensitive(root, "models");
+        if (cJSON_IsNumber(api) && api->valuedouble == 1 && cJSON_IsArray(models))
+        {
+            const cJSON* entry;
+            cJSON_ArrayForEach(entry, models)
+            {
+                const cJSON* source = cJSON_GetObjectItemCaseSensitive(entry, "source");
+                const cJSON* model = cJSON_GetObjectItemCaseSensitive(entry, "model");
+                if (!cJSON_IsString(source) || !cJSON_IsString(model) || !QIFStreamB::AutoBank(model->valuestring))
+                    continue;
+                redirects[Asset::VirtualPath::Parse(source->valuestring).canonical()] = model->valuestring;
+            }
+        }
+        cJSON_Delete(root);
+        LOG_INFO(Graphics, "Model redirects: {} stock models replaced by the visual pack (OP_HEDGES=0 to keep them)",
+                 redirects.size());
+    }
+    const auto it = redirects.find(key);
+    return it == redirects.end() ? nullptr : &it->second;
+}
+} // namespace
+
 std::shared_ptr<Poseidon::Model::Model> ModelCache::load(
     const std::string& filePath,
     std::shared_ptr<const ModelCompressedSourceBirth>* sourceBirth)
@@ -54,7 +111,8 @@ std::shared_ptr<Poseidon::Model::Model> ModelCache::load(
 
     _stats.cacheMisses++;
 
-    auto model = loadFromFile(filePath, sourceBirth);
+    const std::string* redirect = ModelRedirect(key);
+    auto model = loadFromFile(redirect ? *redirect : filePath, sourceBirth);
     if (!model)
     {
         _stats.loadFailures++;

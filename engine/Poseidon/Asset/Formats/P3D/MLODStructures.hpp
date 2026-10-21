@@ -340,8 +340,30 @@ inline P3DMSection readP3DMHeader(BinaryReader& reader)
 }
 
 // A NUL-terminated string of unbounded length on the wire.
+//
+// Scanned in place rather than read a character at a time -- that loop was a fifth of
+// converting a native model -- with the same result, the same two errors and the same
+// bytes consumed as the loop below, which still serves a stream already in a failed state.
 inline std::string readAsciiZ(BinaryReader& reader, const char* what)
 {
+    if (const int left = reader.remaining(); left > 0 && !reader.fail())
+    {
+        const char* at = reader.peek();
+        const int window = left < 1025 ? left : 1025;
+        if (const void* nul = std::memchr(at, 0, static_cast<size_t>(window)))
+        {
+            const int length = static_cast<int>(static_cast<const char*>(nul) - at);
+            std::string text(at, static_cast<size_t>(length));
+            reader.consume(length + 1);
+            return text;
+        }
+        // No terminator in reach: 1025 characters make it too long, and a stream that ends
+        // first leaves it unterminated.
+        reader.consume(window);
+        if (window == 1025)
+            throw std::runtime_error(std::string("P3DM ") + what + " string exceeds 1024 bytes");
+        throw std::runtime_error(std::string("P3DM ") + what + " string is unterminated");
+    }
     std::string text;
     for (;;)
     {
@@ -370,17 +392,36 @@ inline FaceTable readP3DMFaceTable(BinaryReader& reader, int32_t nFace)
             throw std::runtime_error("P3DM face " + std::to_string(i) + " has invalid vertex count " + std::to_string(face.n));
         // Four vertex slots are always stored, even for a triangle; the unused
         // slot is skipped by reading it, not by seeking past a computed size.
-        for (int j = 0; j < 4; ++j)
+        // The block and the flags are copied in one go when the input holds them; a short
+        // input takes the field-by-field reads, which fail at the field that does not fit.
+        constexpr int kVertexBlock = 4 * 16 + 4;
+        if (reader.remaining() >= kVertexBlock && !reader.fail())
         {
-            face.vs[j].point  = reader.read<int32_t>();
-            face.vs[j].normal = reader.read<int32_t>();
-            face.vs[j].mapU   = reader.read<float>();
-            face.vs[j].mapV   = reader.read<float>();
+            const char* at = reader.peek();
+            for (int j = 0; j < 4; ++j)
+            {
+                std::memcpy(&face.vs[j].point, at + j * 16 + 0, 4);
+                std::memcpy(&face.vs[j].normal, at + j * 16 + 4, 4);
+                std::memcpy(&face.vs[j].mapU, at + j * 16 + 8, 4);
+                std::memcpy(&face.vs[j].mapV, at + j * 16 + 12, 4);
+            }
+            std::memcpy(&face.flags, at + 64, 4);
+            reader.consume(kVertexBlock);
         }
-        face.flags        = reader.read<int32_t>();
+        else
+        {
+            for (int j = 0; j < 4; ++j)
+            {
+                face.vs[j].point  = reader.read<int32_t>();
+                face.vs[j].normal = reader.read<int32_t>();
+                face.vs[j].mapU   = reader.read<float>();
+                face.vs[j].mapV   = reader.read<float>();
+            }
+            face.flags = reader.read<int32_t>();
+        }
         face.textureName  = readAsciiZ(reader, "face texture");
         face.materialName = readAsciiZ(reader, "face material");
-        ftable.faces.push_back(face);
+        ftable.faces.push_back(std::move(face));
     }
     return ftable;
 }

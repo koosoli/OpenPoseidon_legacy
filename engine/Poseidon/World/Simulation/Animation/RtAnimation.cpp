@@ -239,8 +239,25 @@ int AnimationRTWeights::ReplaceSelection(Shape* shape, int selIndex, int matrixI
                 continue;
             }
         }
-        entry.Clear();
-        entry.Add(AnimationRTPair(matrixIndex, 1.0f));
+        if (entry.Size() <= 1)
+        {
+            entry.Clear();
+            entry.Add(AnimationRTPair(matrixIndex, 1.0f));
+        }
+        else
+        {
+            // A blended vertex (an add-on creature's lip bound to both the torso and the neck,
+            // L.O.M.D.E's Annihilator) keeps its other bones: only the parent's share moves
+            // onto the face bone. Collapsing it onto the parent alone tore the jaw off the
+            // neck as soon as the creature's own animation turned the neck.
+            AnimationRTWeight kept = entry;
+            entry.Clear();
+            for (int i = 0; i < kept.Size(); i++)
+            {
+                const int b = kept[i].GetSel();
+                entry.Add(AnimationRTPair(b == bestSel ? matrixIndex : b, kept[i].GetWeight()));
+            }
+        }
         moved++;
     }
     if (moved <= 0)

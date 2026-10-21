@@ -29,7 +29,11 @@
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/UnderwaterBubbles.hpp>
+#include <Poseidon/World/Entities/Weapons/UnderwaterBallistics.hpp>
+#include <Poseidon/World/Entities/Infantry/SwimView.hpp>
 #include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
+#include <Poseidon/World/Effects/BuildingBreach.hpp> // BOOM-007
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
@@ -144,8 +148,24 @@ void SnowBulletTerrainImpact(Object* projectile, Object* owner, const Vector3& p
         }
         cut = SnowBulletImpactPolicy(speed,damage,remaining,normal.Y(),incoming*normal,
                                      point.Y()-ground,local,explosive,water,roadway,sheltered);
+        // the faint disturbance round the hole: half a metre of it at most (see SnowBulletVisibleLength)
         if (cut.depth > 0) changed = GSnow().BulletImpact(x,z,cut.radius,cut.depth,
-            groove.directionX,groove.directionZ,groove.length);
+            groove.directionX,groove.directionZ,std::min(groove.length,0.5f));
+        // BOOM-004: the crisp hole/slit itself, from where the round entered the snow to here.
+        if (changed)
+        {
+            // BOOM-004: the round's track through the snow, from the surface down to this ground
+            // point along its own flight direction; started a hole's width above the surface so
+            // the shader's cylinder breaks through wherever the drawn surface lies
+            const float hole = SnowBulletHoleRadius(damage);
+            // the whole path up to the surface: a 1-degree round climbs 25 cm of snow over ~15 m
+            // (capped at 3 m the track began under the surface and never broke through it)
+            const float through = std::clamp(remaining / std::max(-(incoming*normal), 0.012f), 0.0f, 15.0f);
+            const float above = 2.0f * hole;
+            const Vector3 top = point - incoming * (through + above);
+            GSnow().AddBulletTrack(top.X(), top.Y(), top.Z(), incoming.X(), incoming.Y(), incoming.Z(),
+                                   through + above, hole);
+        }
     }
     if (SnowBulletTraceEnabled())
         LOG_INFO(World, "SNOW_BULLET terrain=1 changed={} x={:.3f} y={:.3f} z={:.3f} speed={:.2f} base={:.4f} remaining={:.4f} radius={:.4f} depth={:.4f} before={:.4f} after={:.4f} roadway={} sheltered={} land={} budget={} up={:.4f} incidence={:.4f} supportError={:.4f} directionX={:.5f} directionZ={:.5f} grooveLength={:.5f}",
@@ -883,7 +903,11 @@ void ShotShell::Detonate(Vector3Par pos, Object* hitObject, Vector3Par hitNormal
         return;
     }
     Vector3 exploPos = pos;
-    if (Type()->explosive)
+    // Under water there is no fireball: the blast is a gas bubble, drawn with the
+    // bubbles (Landscape::ExplosionDammageEffects records it on every client).
+    const bool underwaterBlast = Poseidon::Underwater::Enabled() &&
+                                 pos.Y() < SwimMeanWaterLevel(pos.X(), pos.Z()) - 0.3f;
+    if (Type()->explosive && !underwaterBlast)
     {
         // The 0.003 of the ground path, not the 0.001 of the object path. The
         // latter sits behind a `hit > 50` gate that a hand grenade (hit = 20)
@@ -899,6 +923,57 @@ void ShotShell::Detonate(Vector3Par pos, Object* hitObject, Vector3Par hitNormal
         GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
     }
     GLandscape->ExplosionDammage(_parent, this, hitObject, pos, hitNormal, Type());
+}
+
+bool Poseidon::Underwater::Enabled()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("POSEIDON_UNDERWATER_BALLISTICS");
+        return !(value && value[0] == '0');
+    }();
+    return enabled;
+}
+
+void ShotShell::StepUnderwater(Vector3& position, float deltaT)
+{
+    namespace UW = Poseidon::Underwater;
+    const Vector3 from = position;
+    if (_fuseArmed)
+    {
+        float vx = _speed.X(), vy = _speed.Y(), vz = _speed.Z();
+        UW::SinkStep(vx, vy, vz, UW::GrenadeDragK, UW::GrenadeSinkAccel, deltaT);
+        _speed = Vector3(vx, vy, vz);
+        position += _speed * deltaT;
+        return;
+    }
+    const float speed = _speed.Size();
+    _waterStepSpeed = speed;
+    if (speed < 1e-3f) return;
+    const Vector3 dir = _speed / speed;
+    float distance = 0.0f, after = 0.0f;
+    UW::Advance(speed, _waterK, deltaT, distance, after);
+    position += dir * distance;
+    _speed = dir * after;
+    if (distance > 0.01f)
+    {
+        static std::uint32_t trails = 0;
+        Poseidon::render::BubbleTrail trail;
+        trail.from = {from.X(), from.Y(), from.Z()};
+        trail.to = {position.X(), position.Y(), position.Z()};
+        trail.speed = speed;
+        trail.surfaceY = SwimMeanWaterLevel(from.X(), from.Z());
+        trail.birthMs = Glob.time.toInt();
+        trail.seed = ++trails * 2654435761u ^ std::uint32_t(trail.birthMs);
+        Poseidon::render::RecordBubbleTrail(trail);
+    }
+}
+
+float ShotShell::UnderwaterHitScale(Vector3Par point) const
+{
+    if (_fuseArmed) return 1.0f;
+    const float along = (point - Position()).Size();
+    const float speed = _waterStepSpeed * std::exp(-_waterK * along);
+    return Poseidon::Underwater::EnergyScale(speed, _waterEntrySpeed);
 }
 
 bool ShotShell::Invisible() const
@@ -1056,7 +1131,10 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
     if (_initDelay <= 0)
     {
         const Vector3 segmentStart = position;
-        position += _speed * deltaT;
+        if (_underwater)
+            StepUnderwater(position, deltaT);
+        else
+            position += _speed * deltaT;
         // Malprave aiSuppression: rounds passing close to infantry suppress them (checked before any
         // impact below, so rounds landing near someone count too)
         ApplyNearMissSuppression(_parent, Type(), segmentStart, position);
@@ -1086,6 +1164,17 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                     if (collision[i].object == carrier) collision[i].object = nullptr;
                 for (int i = 0; i < surface.Size(); ++i) collision.Append() = surface[i];
             }
+        }
+        // RFG-158: native Enfusion window panes on this tick's path, up to the first solid
+        // contact, break. They are not in the collision world and never stop the round.
+        if (GLandscape->EnfusionGlass().Count() > 0)
+        {
+            float solidT = 1.0f;
+            for (int i = 0; i < collision.Size(); ++i)
+                if (collision[i].object && collision[i].under < solidT)
+                    solidT = std::max(0.0f, collision[i].under);
+            const Vector3 from = Position();
+            GLandscape->BreakNativeGlassAlongSegment(from, from + (position - from) * solidT, Type());
         }
         Vector3 probeHit, probeNormal;
         if (IsLocal() && ShowcaseContactBeforeScenery(Position(), position, collision, probeHit, probeNormal))
@@ -1185,8 +1274,11 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                     {
                         continue;
                     }
-                    // dammage corresponding component (if any)
-                    info.object->DirectLocalHit(info.component, Type()->hit //*info.object->GetInvArmor()
+                    // dammage corresponding component (if any); under water only the
+                    // energy the round still has where it meets the target
+                    const float hitScale =
+                        _underwater ? UnderwaterHitScale(info.object->PositionModelToTop(info.pos)) : 1.0f;
+                    info.object->DirectLocalHit(info.component, Type()->hit * hitScale //*info.object->GetInvArmor()
                     );
                 }
             }
@@ -1235,7 +1327,16 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                         GLOB_WORLD->AddAnimal(explosion);
                         GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
                     }
+                    _hitScaleNow = _underwater ? UnderwaterHitScale(pos) : 1.0f;
                     GLandscape->ExplosionDammage(_parent, this, info.object, pos, info.dirOut, Type());
+                    // BOOM-007: the round marks the wall it struck
+                    if (!Type()->explosive && info.object && info.object->Static())
+                    {
+                        Vector3 normal = info.surfaceNormal.SquareSize() > 1e-6f
+                                             ? info.object->WorldTransform().Rotate(info.surfaceNormal)
+                                             : VZero;
+                        BuildingBreach::BulletImpact(info.object, pos, normal, _speed, Type()->hit, info.texture);
+                    }
                 }
 
                 // PENETRATION. The round has already damaged what it hit -- a bullet
@@ -1260,7 +1361,36 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
 
             Vector3 isect;
             bool hitSea = false;
-            float t = GLandscape->IntersectWithGroundOrSea(&isect, hitSea, lPos, lDirNorm, 0, maxDist * 1.1);
+            // Under water the sea is not an obstacle any more; only the bed is.
+            float t = _underwater
+                          ? GLandscape->IntersectWithGround(&isect, lPos, lDirNorm, 0, maxDist * 1.1)
+                          : GLandscape->IntersectWithGroundOrSea(&isect, hitSea, lPos, lDirNorm, 0, maxDist * 1.1);
+
+            if (_underwater)
+            {
+                const bool bed = t <= maxDist;
+                if (!_fuseArmed)
+                {
+                    // A spent round sinks and is of no further interest; the bed stops it outright.
+                    if (bed || _speed.Size() < Poseidon::Underwater::RetireSpeed)
+                    {
+                        Poseidon::Dev::Ballistics::NotifyImpact(static_cast<Entity*>(this), position.X(),
+                                                                position.Y(), position.Z(),
+                                                                Poseidon::Dev::BallisticTerminus::HitWater, nullptr);
+                        _delete = true;
+                        return;
+                    }
+                }
+                else if (bed)
+                {
+                    // A grenade settles on the bottom and cooks off there.
+                    position = isect + VUp * 0.05f;
+                    _speed = VZero;
+                    _atRest = true;
+                }
+                Move(position);
+                return; // StepUnderwater already set the speed: no air drag or gravity
+            }
 
             if (!_waterImpactDone)
             {
@@ -1330,6 +1460,30 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                                 GLOB_WORLD->AddCloudlet(droplet);
                             }
                         }
+                    }
+
+                    // UNDERWATER: a bullet and a fused grenade go on into the water from the
+                    // point they cross the surface; a contact-fused explosive still bursts on it.
+                    const bool downward = lPos.Y() > seaLevel && position.Y() <= seaLevel + 0.3f;
+                    if (Poseidon::Underwater::Enabled() && (hitSea || segmentCrossedSea) && downward &&
+                        (_fuseArmed || !Type()->explosive))
+                    {
+                        const float drop = lPos.Y() - position.Y();
+                        const float f = drop > 1e-4f ? std::clamp((lPos.Y() - seaLevel) / drop, 0.0f, 1.0f) : 0.0f;
+                        const float speed = _speed.Size();
+                        _underwater = true;
+                        _waterEntrySpeed = speed;
+                        if (_fuseArmed)
+                        {
+                            _speed *= 0.35f; // slapping into the water takes most of a throw's speed
+                        }
+                        else
+                        {
+                            const auto shell = Poseidon::Ballistics::ShellParamsFor(*Type());
+                            _waterK = Poseidon::Underwater::DragK(shell.mass, shell.calibre, speed);
+                        }
+                        Move(lPos + (position - lPos) * f);
+                        return;
                     }
                 }
             }
@@ -1810,6 +1964,15 @@ void Missile::Simulate(float deltaT, SimulationImportance prec)
             {
                 const CollisionInfo& info = collision[minI];
                 Point3 pos = info.object->PositionModelToWorld(info.pos);
+                static const bool breachTrace = [] { const char* v = std::getenv("POSEIDON_BREACH_TRACE"); return v && v[0] == '1'; }();
+                if (breachTrace)
+                {
+                    for (int i = 0; i < collision.Size(); i++)
+                        LOG_INFO(World, "Shell impact trace: [{}] {} model pos [{:.2f},{:.2f},{:.2f}] under {:.3f} component {} shell at [{:.1f},{:.1f},{:.1f}]",
+                                 i, collision[i].object ? static_cast<const char*>(collision[i].object->GetDebugName()) : "-",
+                                 collision[i].pos.X(), collision[i].pos.Y(), collision[i].pos.Z(), collision[i].under,
+                                 collision[i].component, Position().X(), Position().Y(), Position().Z());
+                }
                 float size = Type()->hit * 0.003;
                 saturate(size, MinExplosion, MaxExplosion);
                 Explosion* explosion = new Explosion(nullptr, _parent, size);

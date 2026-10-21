@@ -1,0 +1,4 @@
+; back between the houses
+smokePlayer setPos [9717, 1545, 0]
+smokePlayer setDir 0
+exit

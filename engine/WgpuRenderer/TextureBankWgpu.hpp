@@ -64,6 +64,8 @@ class TextureBankWgpu : public AbstractTextBank
     };
     std::unordered_map<std::string, LegacyMaterial> _legacyMaterials;
     bool _legacyMaterialsLoaded = false;
+    int _detailTextureLoads = 0;
+    int _releases = 0;
     const LegacyMaterial* ResolveLegacyMaterial(const char* name);
 
     WgrRenderer* _renderer;
@@ -92,8 +94,11 @@ class TextureBankWgpu : public AbstractTextBank
     // REPORT is periodic, because the interesting quantity is a working set, and a working set
     // does not change meaningfully between two consecutive frames.
     uint64_t _mipReportDue = 0;
+    // PERF-TRIM-BACKOFF: no texture trim before this residency frame (see TrimResidency).
+    uint64_t _trimBackoffUntil = 0;
     // What the GPU says about the CPU's residency decisions. See ReportMipFeedback.
-    void ReportMipFeedback();
+    // false = the producer window was busy and nothing was done; ask again next frame.
+    bool ReportMipFeedback();
     uint64_t _adaptiveViewEpoch = 1;
     bool _adaptiveViewValid = false;
     float _adaptiveViewX = 0, _adaptiveViewY = 0, _adaptiveViewZ = 0;
@@ -128,6 +133,7 @@ class TextureBankWgpu : public AbstractTextBank
     void TrimResidency();
 
     int Find(RStringB name) const;
+    bool IsLoaded(RStringB name) const override { return Find(name) >= 0; }
     Ref<Texture> Load(RStringB name) override;
     std::string LegacyNormalPath(const char* name);
     Ref<Texture> LoadLegacyEnhancementNormal(const char* name);
@@ -144,11 +150,17 @@ class TextureBankWgpu : public AbstractTextBank
 
     int NTextures() const override { return _texture.Size(); }
     Texture* GetTexture(int i) const override { return _texture[i]; }
+    // The terrain loads CfgDetailTextures (TerrainWgpu::UploadDetailNoise); it counts here so
+    // triDetailTextureLoads reads the same on every backend.
+    int NDetailTextureLoads() const override { return _detailTextureLoads; }
+    void NoteDetailTextureLoad() { ++_detailTextureLoads; }
+    int NReleases() const override { return _releases; }
 
     void FlushTextures() override {}
     // The only path that removes entries from _texture; the name index has to go with it.
     void ReleaseAllTextures() override
     {
+        ++_releases;
         _texture.Clear();
         _textureByName.clear();
         _legacyMaterials.clear();
@@ -159,6 +171,10 @@ class TextureBankWgpu : public AbstractTextBank
     Texture* CreateDynamic(int w, int h, const void* rgba, uint32_t size, bool mipmap = false,
                            int alphaClass = -1) override;
     void UpdateDynamic(Texture* tex, const void* rgba, uint32_t size) override;
+    // A texture from already-compressed mip levels (see TextureWgpu::InitCompressed). Null when
+    // the upload fails, e.g. on a device without BC support -- the caller keeps its fallback.
+    Texture* CreateCompressed(int w, int h, int32_t format, uint32_t mipCount, const void* data, uint32_t size,
+                              int alphaClass = -1);
 };
 
 } // namespace Poseidon

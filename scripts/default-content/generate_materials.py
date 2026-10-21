@@ -36,6 +36,56 @@ def encode_nohq(height, metres):
     return normal
 
 
+def srgb_to_linear(c):
+    c = np.asarray(c, dtype=float)
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+
+def linear_to_srgb(c):
+    c = np.clip(c, 0.0, 1.0)
+    return np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1.0 / 2.4) - 0.055)
+
+
+def smoothstep(a, b, x):
+    t = np.clip((x - a) / (b - a), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def tidewater_sand(rng, size, metres):
+    """Tidewater's beach sand (dgreenheck/tidewater @ 4811ba48, MIT; src/world/Terrain.js, the
+    `beach sand` block): pale coral sand with warmer, coarser drifts, grain, trodden patches and
+    sparse shell grit. Its detail-texture channels are periodic noise at the same physical scales
+    (macro 47 m, mid 6.7 m, near 1.9 m); the height-dependent parts (wet band, wrack line, wind
+    ripples on the dry upper beach) stay in the renderer. Returns linear RGB."""
+    def field(radius, std=0.17):
+        return np.clip(0.5 + std * periodic_noise(rng, size, metres, radius), 0.0, 1.0)
+
+    macro_a, macro_b = field(9.0), field(5.0)
+    mcr = macro_a * 0.6 + macro_b * 0.4
+    dm_w, dm_x, dm_y = field(1.1), field(0.9), field(0.35)
+    dn_w, dn_y = field(0.3), field(0.12)
+    # sand channel: fine grain (sub-texel here: what survives the texel is a speckle) and pebbles
+    grain = np.minimum(0.45 + 0.2 * np.tanh(periodic_noise(rng, size, metres, metres[0] / size * 0.6)), 0.62)
+    grain_f = np.minimum(0.45 + 0.2 * np.tanh(periodic_noise(rng, size, metres, metres[0] / size * 0.4)), 0.62)
+    pebble = smoothstep(2.2, 3.2, periodic_noise(rng, size, metres, metres[0] / size * 0.8))
+    dry_k = 0.6  # the tile cannot know its height above the sea: between the berm and the dunes
+    srgb = lambda r, g, b: srgb_to_linear([r, g, b])[None, None, :]
+    t = smoothstep(0.3, 0.72, mcr + dry_k * 0.2)[:, :, None]
+    sand = srgb(0.83, 0.75, 0.6) * (1 - t) + srgb(0.9, 0.84, 0.72) * t
+    d = (smoothstep(0.55, 0.8, dm_w + (macro_b - 0.5) * 0.6) * 0.45)[:, :, None]
+    sand = sand * (1 - d) + srgb(0.84, 0.72, 0.55) * d
+    sand = sand * (((dm_w - 0.5) * 0.16 + 1.0) * ((dn_w - 0.5) * 0.1 + 1.0))[:, :, None]
+    sand = sand * (((grain - 0.45) * 0.3 + 0.97) * ((grain_f - 0.45) * 0.2 + 1.0))[:, :, None]
+    trod = smoothstep(0.52, 0.7, dn_y + (dm_y - 0.5) * 0.6) * dry_k
+    sand = sand * (1.0 - trod * 0.07)[:, :, None]
+    peb_density = smoothstep(0.62, 0.85, macro_b + dm_w * 0.3) * 0.2 + 0.05
+    peb_w = (pebble * np.clip(peb_density * 4.0, 0.0, 1.0) * 0.75)[:, :, None]
+    shell = smoothstep(0.45, 0.75, dm_x)[:, :, None]
+    dark = smoothstep(0.74, 0.82, dm_y)[:, :, None]
+    peb_col = (srgb(0.86, 0.82, 0.74) * (1 - shell) + srgb(0.78, 0.64, 0.6) * shell) * (1 - dark) + srgb(0.36, 0.33, 0.3) * dark
+    return sand * (1 - peb_w) + peb_col * peb_w
+
+
 def generate(spec, size):
     if size < 32 or size > 2048 or size & (size - 1):
         raise ValueError("size must be a power of two from 32 to 2048")
@@ -79,6 +129,9 @@ def generate(spec, size):
             alpha = alpha * coverage
         rgb = rgb + dust[None, :, None] * np.array([22, 18, 10])[None, None, :]
         rgb = rgb - wear[None, :, None] * 7.0
+    if spec.get("tidewater", False):
+        # its own rng: the relief above keeps exactly the fields it had
+        rgb = linear_to_srgb(tidewater_sand(np.random.default_rng(spec["seed"] + 1), size, metres)) * 255.0
     albedo[:, :, :3] = np.rint(np.clip(rgb, 0, 255)).astype(np.uint8)
     albedo[:, :, 3] = np.rint(alpha * 255).astype(np.uint8)
     roughness = np.rint(np.clip(spec["roughness"] + 0.025 * np.tanh(fine), 0, 1) * 255).astype(np.uint8)

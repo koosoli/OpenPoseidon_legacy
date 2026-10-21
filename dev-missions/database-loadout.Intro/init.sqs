@@ -1,0 +1,27 @@
+~1
+logInfo "INTEGRATED_TEST: starting database/loadout round trip"
+_original = getUnitLoadout player
+logInfo format ["INTEGRATED_TEST: original=%1", _original]
+? count _original != 3 : goto "failed"
+? count (_original select 0) == 0 : goto "failed"
+_db = dbNew
+? !(_db dbSet ["player.loadout", _original]) : goto "failed"
+? !(_db dbSave "integrated-loadout-test.db") : goto "failed"
+player setUnitLoadout [[], [], ""]
+_empty = getUnitLoadout player
+? count (_empty select 0) != 0 : goto "failed"
+_loaded = dbLoad "integrated-loadout-test.db"
+_saved = _loaded dbGet ["player.loadout", []]
+? format ["%1", _saved] != format ["%1", _original] : goto "failed"
+player setUnitLoadout _saved
+_restored = getUnitLoadout player
+logInfo format ["INTEGRATED_TEST: restored=%1", _restored]
+? format ["%1", _restored] != format ["%1", _original] : goto "failed"
+logInfo "INTEGRATED_TEST: PASS - loadout saved to disk, cleared, loaded and restored"
+hint "PASS: Database and loadout round trip. Your weapons and magazine ammunition were restored. You can now move and fire."
+exit
+#failed
+player setUnitLoadout _original
+logInfo "INTEGRATED_TEST: FAIL - see earlier log entries"
+hint "FAIL: Database/loadout test. Check the integrated-game-test log."
+exit

@@ -262,8 +262,10 @@ fn surfFoamLight(info: SurfFoamInfo, g: SurfFoamGrad, N: vec3<f32>, L: vec3<f32>
     // ~3x the lit foam's own radiance and the whole surf band clipped to flat white under OP's
     // exposure; backlit whitewater reads grey with bright thin edges
     let trans = surfFoamPhaseHG(dot(-V, L), 0.55) * thin * 0.45;
-    let transCol = mix(vec3<f32>(1.0), vec3<f32>(0.6, 0.92, 0.82), ww * 0.7 + 0.3);
+    // (OP) the light through thin whitewater: a pale temperate green, not Tidewater's tropical cyan
+    let transCol = mix(vec3<f32>(1.0), vec3<f32>(0.72, 0.86, 0.78), ww * 0.7 + 0.3);
     let skyGrey = vec3<f32>(dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722)));
     let amb = mix(sky, skyGrey, ww * 0.35) * ao + sun * (ww * 0.05) * ao;
-    return (sun * (diff * mix(1.0, sqrt(cavity), ww) / PI + transCol * trans) + amb) * 0.86;
+    // (OP) albedo 0.7 (Tidewater 0.86): the surf band clipped to flat white under OFP's sun
+    return (sun * (diff * mix(1.0, sqrt(cavity), ww) / PI + transCol * trans) + amb) * 0.7;
 }

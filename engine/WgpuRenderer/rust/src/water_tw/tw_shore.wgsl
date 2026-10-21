@@ -136,6 +136,8 @@ const SHORE_BEACH_SLOPE: f32 = 0.066;
 const SHORE_SWASH_UP: f32 = 0.4;
 const SHORE_SWASH_DOWN: f32 = 0.55;
 const SHORE_SWASH_OVERSHOOT: f32 = 1.2;
+// (OP) the lapping run-up of a sheltered beach: wavelet height cap (m), see shoreSwashRunup
+const SHORE_LAP_H: f32 = 0.22;
 
 struct ShoreSample {
 	disp: vec3f,
@@ -469,7 +471,13 @@ fn shoreSwashRunup( sh: vec4f, along: f32, groundH: f32 ) -> ShoreRunup {
 	let tau = ss - ms; // 0..1 time since that wave's bore reached the shoreline
 	let Am = shoreWaveAmp( ms, along );
 	// vertical run-up ~ H on this gentle beach, converted to a horizontal excursion
-	let RhMax = Am * 2.1 * tw.shore1.z * sat( exposure * 1.4 ) / SHORE_BEACH_SLOPE;
+	// (OP, 2026-10-13) with a lapping floor: Tidewater's beach faces the open sea, but OFP's bays and
+	// straits are sheltered (exposure ~0), and there the sea never ran up the sand or wet it (owner:
+	// "the water is not really going over the sand to make it wet"). Local chop still laps a sheltered
+	// beach: a quarter of the open-sea height, at most SHORE_LAP_H (0.22 m: OFP beaches are steeper than
+	// Tidewater's 1:15, so the same height runs up less sand).
+	let lapH = min( Am * 0.25, SHORE_LAP_H );
+	let RhMax = max( Am * sat( exposure * 1.4 ), lapH ) * 2.1 * tw.shore1.z / SHORE_BEACH_SLOPE;
 	// decelerating uprush, then a backwash that starts slowly and accelerates as the sheet drains
 	let su = sat( tau / SHORE_SWASH_UP );
 	let sb = sat( ( tau - SHORE_SWASH_UP ) / SHORE_SWASH_DOWN );

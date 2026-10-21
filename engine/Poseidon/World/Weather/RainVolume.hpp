@@ -4,6 +4,7 @@
 #include <Poseidon/Foundation/Time/Time.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 
+#include <unordered_map>
 #include <vector>
 
 namespace Poseidon
@@ -290,6 +291,14 @@ private:
 		float radius = 0.0f;
 	};
 	std::vector<Occluder> _occluders;
+
+	// (OP, 2026-10-14) RAIN part 2: runoff dripping off the eaves. Per building TYPE (its interior),
+	// the model-space points along the roof's lower edges where the water leaves it, surveyed once
+	// from the interior's cached shell columns (EavesOf), and drips emitted there while it rains.
+	const std::vector<Vector3>& EavesOf(const Occluder& occluder);
+	void EmitEaveDrips(float deltaT);
+	std::unordered_map<class BuildingInterior const*, std::vector<Vector3>> _eaves;
+	float _dripAccumulator = 0.0f;
 };
 
 /// The live rain authority, next to GWind.

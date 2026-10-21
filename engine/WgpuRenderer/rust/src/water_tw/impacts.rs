@@ -18,6 +18,9 @@
 //! Sinkhole W3: a swimmer's hand or foot cutting the surface (kind 6, SoldierOldSwim.cpp) is a small
 //! splash of the same kind: drops, a few ligaments and a puff of white water, thrown up from the
 //! wave's own height (the event carries it -- a swimmer rides the crests) and onward with the limb.
+//!
+//! (OP) A humpback's blow (kind 7, Whale.cpp): Tidewater's Whale._effects column -- a dense cloud of spray, a
+//! haze of mist that hangs and drifts and heavier drops, thrown up from the blowholes for 1.4 s.
 
 use super::spray::EmitRequest;
 use crate::ffi::WgrWaterInteractionEvent;
@@ -25,6 +28,8 @@ use crate::ffi::WgrWaterInteractionEvent;
 const KIND_BULLET: f32 = 0.0;
 const KIND_EXPLOSION: f32 = 3.0;
 const KIND_SWIM_SPLASH: f32 = 6.0;
+const KIND_WHALE_BLOW: f32 = 7.0;
+const KIND_BLOOD: f32 = 8.0;
 // spray particle kinds (tw_spray_common.wgsl)
 const DROPLET: f32 = 0.0;
 const MIST: f32 = 1.0;
@@ -36,6 +41,11 @@ const GRAVITY: f32 = 9.81;
 pub const MAX_IMPACTS: usize = 24;
 /// Explosions shown in the water surface (the most recent).
 pub const SURFACE_SLOTS: usize = 4;
+/// Blood stains in the water (a wounded whale, Whale.cpp; kind 8): slots, and how long one stays (s).
+pub const BLOOD_SLOTS: usize = 16;
+pub const BLOOD_LIFE: f32 = 120.0;
+/// How long a whale's blow lasts (s; Tidewater's WhaleBrain).
+const BLOW_TIME: f32 = 1.4;
 /// How long an explosion stays in the water surface (s).
 pub const SURFACE_LIFE: f32 = 14.0;
 
@@ -68,6 +78,8 @@ struct Impact {
     explosive: bool,
     /// a swimmer's splash (kind 6)
     swim: bool,
+    /// a whale's blow (kind 7)
+    blow: bool,
     /// horizontal velocity added to every particle (the limb's throw; 0 for shots)
     throw: [f32; 2],
     age: f32,
@@ -83,7 +95,13 @@ impl Impact {
     }
     /// the core's emission time (s)
     fn burst(&self) -> f32 {
-        if self.explosive { 0.1 + 0.012 * self.height } else { 0.06 }
+        if self.blow {
+            BLOW_TIME
+        } else if self.explosive {
+            0.1 + 0.012 * self.height
+        } else {
+            0.06
+        }
     }
     /// time for the column to top out (s)
     fn peak(&self) -> f32 {
@@ -99,6 +117,8 @@ pub struct Impacts {
     list: Vec<Impact>,
     /// explosions for the water surface: (x, z, age, height, radius, range)
     surface: Vec<[f32; 6]>,
+    /// (OP) blood in the water: (x, z, age, amount)
+    blood: Vec<[f32; 4]>,
     /// splashes received since the last log line
     pub received: u32,
     /// particles thrown last frame
@@ -111,13 +131,23 @@ impl Impacts {
         for e in events {
             let kind = e.velocity_kind[3];
             let hit = e.time_life_foam_mass[3];
-            if hit <= 0.0 || !(kind == KIND_EXPLOSION || kind == KIND_BULLET || kind == KIND_SWIM_SPLASH) {
+            if kind == KIND_BLOOD && hit > 0.0 {
+                self.add_blood(e.position_radius[0], e.position_radius[1], hit);
+                continue;
+            }
+            if hit <= 0.0
+                || !(kind == KIND_EXPLOSION || kind == KIND_BULLET || kind == KIND_SWIM_SPLASH || kind == KIND_WHALE_BLOW)
+            {
                 continue;
             }
             let explosive = kind == KIND_EXPLOSION;
             let swim = kind == KIND_SWIM_SPLASH;
+            let blow = kind == KIND_WHALE_BLOW;
             let range = e.direction_depth_flags[2].max(0.01);
-            let (height, radius, y, throw) = if swim {
+            let (height, radius, y, throw) = if blow {
+                let t = [e.velocity_kind[0], e.velocity_kind[1]];
+                (hit.clamp(1.0, 10.0), e.position_radius[2].clamp(0.1, 2.0), e.position_radius[3], t)
+            } else if swim {
                 // the height and radius come with the event, and the surface height: the limb is on a wave
                 let t = [0.35 * e.velocity_kind[0], 0.35 * e.velocity_kind[1]];
                 (hit.clamp(0.05, 1.0), e.position_radius[2].clamp(0.03, 0.4), e.position_radius[3], t)
@@ -137,6 +167,7 @@ impl Impacts {
                 radius,
                 explosive,
                 swim,
+                blow,
                 throw,
                 age: 0.0,
                 rot: (x * 0.37 + z * 0.61).fract() * std::f32::consts::TAU,
@@ -152,6 +183,35 @@ impl Impacts {
         }
     }
 
+    /// A wound bleeding into the water at (x, z): `amount` adds to a fresh stain within 3 m, else starts one
+    /// (when every slot is taken the faintest goes: a running whale's trail of small ones must not push out the
+    /// pool where it was blown open).
+    fn add_blood(&mut self, x: f32, z: f32, amount: f32) {
+        if let Some(s) = self.blood.iter_mut().find(|s| s[2] < 30.0 && (s[0] - x).hypot(s[1] - z) < 3.0) {
+            s[3] = (s[3] + amount).min(8.0);
+            s[2] = s[2].min(5.0); // fed: it keeps spreading as a fresh one
+            return;
+        }
+        if self.blood.len() >= BLOOD_SLOTS {
+            // what is left of a stain, as tw_impact.wgsl thins it
+            let left = |s: &[f32; 4]| s[3].min(3.0) * (-s[2] / 90.0).exp() / (1.0 + 0.02 * s[2]);
+            let faintest = (0..self.blood.len()).min_by(|&a, &b| left(&self.blood[a]).total_cmp(&left(&self.blood[b])));
+            if let Some(i) = faintest {
+                self.blood.remove(i);
+            }
+        }
+        self.blood.push([x, z, 0.0, amount.min(8.0)]);
+    }
+
+    /// The blood lanes (tw_impact.wgsl `bloodAmount`): per slot (x, z, age, amount); amount 0 = unused.
+    pub fn blood_lanes(&self) -> [[f32; 4]; BLOOD_SLOTS] {
+        let mut out = [[0.0; 4]; BLOOD_SLOTS];
+        for (o, s) in out.iter_mut().zip(self.blood.iter()) {
+            *o = *s;
+        }
+        out
+    }
+
     /// Ages the splashes by `dt` and appends this frame's emit requests (at most `max` in all).
     /// `cam`: the camera (far splashes throw fewer particles).
     pub fn update(&mut self, dt: f32, cam: [f32; 3], out: &mut Vec<EmitRequest>, max: usize) {
@@ -163,6 +223,10 @@ impl Impacts {
             s[2] += dt;
         }
         self.surface.retain(|s| s[2] < SURFACE_LIFE);
+        for s in &mut self.blood {
+            s[2] += dt;
+        }
+        self.blood.retain(|s| s[2] < BLOOD_LIFE);
         let mut emitted = 0u32;
         for imp in &mut self.list {
             let d = ((imp.x - cam[0]).powi(2) + (imp.y - cam[1]).powi(2) + (imp.z - cam[2]).powi(2)).sqrt();
@@ -271,6 +335,19 @@ fn emit(imp: &mut Impact, dt: f32, lod: f32, out: &mut Vec<EmitRequest>, max: us
     let burst = imp.burst();
     let mut sent = 0;
     let im = *imp;
+    if imp.blow {
+        // Tidewater's column (Whale._effects at 60 frames a second, times its 0..1 blow): spray, mist that hangs
+        // and drifts downwind (0.75 of the speed), heavy drops (0.9)
+        let s = (imp.age / BLOW_TIME).clamp(0.0, 1.0);
+        let env = (std::f32::consts::PI * s).sin().max(0.0).sqrt();
+        let n = dt.min((BLOW_TIME - imp.age).max(0.0)) * 60.0 * env * lod;
+        let c = &mut imp.carry;
+        let col = Some((0.0, 0.3));
+        sent += class(&im, &mut c[0], 7.0 * n, 0.0, v0, 0.0, SPRAY, 0.3, 2.2, 3.2, 0.25, col, out, max);
+        sent += class(&im, &mut c[1], 10.0 * n, 0.0, 0.75 * v0, 0.0, MIST, 0.7, 5.5, 2.6, 0.35, col, out, max);
+        sent += class(&im, &mut c[2], 12.0 * n, 0.0, 0.9 * v0, 0.0, DROPLET, 0.018, 2.2, 3.5, 0.2, col, out, max);
+        return sent;
+    }
     // the core: this frame's share of the burst, the first particles fastest
     if imp.age < burst {
         let frac = dt.min(burst - imp.age) / burst;
@@ -367,6 +444,46 @@ mod tests {
         let lanes = im.lanes();
         assert_eq!(lanes[0][0], 100.0);
         assert!(lanes[0][3] > 13.0 && lanes[1][2] > 0.2);
+    }
+
+    #[test]
+    fn a_whale_blow_is_a_column_for_its_breath() {
+        let mut im = Impacts::default();
+        let mut e = event(KIND_WHALE_BLOW, 4.2, 0.0);
+        e.position_radius = [100.0, 200.0, 0.45, 1.2];
+        im.submit(&[e], 0.0);
+        let (mut total, mut t) = (0, 0.0);
+        while im.active() > 0 && t < 5.0 {
+            let mut out = Vec::new();
+            im.update(1.0 / 60.0, [100.0, 5.0, 150.0], &mut out, 64);
+            for r in &out {
+                // from the blowholes, straight up
+                assert!(r.a[1] >= 1.2 && r.vel[1] > 5.0 && r.a[0] == 100.0);
+            }
+            total += out.iter().map(|r| r.count).sum::<u32>();
+            t += 1.0 / 60.0;
+        }
+        assert!((1.3..1.6).contains(&t), "the breath lasts {t} s");
+        // Tidewater: (7 + 10 + 12) per frame at full blow, under a sin^0.5 envelope
+        assert!((1500..2500).contains(&total), "{total} particles");
+        assert_eq!(im.lanes()[0][3], 0.0, "no surface mark");
+    }
+
+    #[test]
+    fn blood_pools_where_a_whale_bleeds_and_fades() {
+        let mut im = Impacts::default();
+        let mut e = event(KIND_BLOOD, 1.0, 0.0);
+        im.submit(&[e], 0.0);
+        e.position_radius[0] += 1.0;
+        im.submit(&[e], 0.0); // a second wound beside it feeds the same stain
+        e.position_radius[0] += 20.0;
+        im.submit(&[e], 0.0);
+        let l = im.blood_lanes();
+        assert_eq!((l[0][3], l[1][3], l[2][3]), (2.0, 1.0, 0.0));
+        assert_eq!(im.active(), 0, "no splash");
+        let mut out = Vec::new();
+        im.update(BLOOD_LIFE + 1.0, [0.0; 3], &mut out, 64);
+        assert_eq!(im.blood_lanes()[0][3], 0.0, "gone after {BLOOD_LIFE} s");
     }
 
     #[test]

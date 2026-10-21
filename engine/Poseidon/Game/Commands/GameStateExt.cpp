@@ -68,6 +68,14 @@ RString GameDataObject::GetText() const
     {
         return "<nullptr-object>";
     }
+    // Arma 3 writes a named object as its variable name (str, format "%1"), and missions
+    // compile code from that: format ["%1 getVariable 'BIS_cleared'", _logic].
+    if (Poseidon::Arma1Compat::Active() && Poseidon::Arma1Compat::Generation() >= 3)
+    {
+        const RString name = _value->GetVarName();
+        if (name.GetLength() > 0)
+            return name;
+    }
     return _value->GetDebugName();
 }
 
@@ -470,6 +478,27 @@ GameValue CamDestroy(const GameState* state, GameValuePar oper1);
 GameValue CenterCreate(const GameState* state, GameValuePar oper1);
 GameValue CenterDelete(const GameState* state, GameValuePar oper1);
 GameValue ConfigLoad(const GameState* state, GameValuePar oper1);
+GameValue DatabaseNew(const GameState* state);
+GameValue DatabaseLoad(const GameState* state, GameValuePar oper1);
+GameValue DatabaseGet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseSet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseDelete(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseExists(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseKeys(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseSave(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListPush(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListPushMany(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListPop(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListGet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListSet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListRemove(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListSize(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashSet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashSetMany(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashGet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashDelete(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashExists(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashKeys(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue CtrlEnable(const GameState* state, GameValuePar oper1);
 GameValue CtrlEnabled(const GameState* state, GameValuePar oper1);
 GameValue CtrlGetText(const GameState* state, GameValuePar oper1);
@@ -510,6 +539,9 @@ GameValue GetLaserTarget(const GameState* state, GameValuePar oper1);
 GameValue GetNearestObject(const GameState* state, GameValuePar oper1);
 GameValue GetNearestObjectByDistance(const GameState* state, GameValuePar oper1);
 GameValue A1NearObjects(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1GetWeaponCargo(const GameState* state, GameValuePar oper1);
+GameValue A1Reload(const GameState* state, GameValuePar oper1);
+GameValue A1GetMagazineCargo(const GameState* state, GameValuePar oper1);
 GameValue A1ConfigFile(const GameState* state);
 GameValue A1MissionConfigFile(const GameState* state);
 GameValue A1ConfigChild(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -582,6 +614,7 @@ GameValue ObjFlee(const GameState* state, GameValuePar oper1);
 GameValue ObjFuel(const GameState* state, GameValuePar oper1);
 GameValue ObjGetAllMagazines(const GameState* state, GameValuePar oper1);
 GameValue ObjGetAllWeapons(const GameState* state, GameValuePar oper1);
+GameValue ObjUnitLoadout(const GameState* state, GameValuePar oper1);
 GameValue ObjGetDammage(const GameState* state, GameValuePar oper1);
 GameValue ObjGetDir(const GameState* state, GameValuePar oper1);
 GameValue ObjGetFlag(const GameState* state, GameValuePar oper1);
@@ -768,6 +801,7 @@ GameValue ObjChangeModel(const GameState* state, GameValuePar oper1, GameValuePa
 GameValue ObjCmpE(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjCmpNE(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjDisableAI(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjEnableAI(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjDistance(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjFire(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjFireEx(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -797,6 +831,7 @@ GameValue ObjSaveIdentity(const GameState* state, GameValuePar oper1, GameValueP
 GameValue ObjSaveStatus(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSay(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSelectWeapon(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjSetUnitLoadout(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetAmmoCargo(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetVehicleAmmo(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetCaptive(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -1105,6 +1140,13 @@ static GameValue A1BreakOut(const GameState* state, GameValuePar oper1)
     return NOTHING;
 }
 
+// value breakOut "scope" (Arma 3): leave the scope with that value as its result
+static GameValue A1BreakOutWith(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    state->BreakOutWithValue(RString(oper2), oper1);
+    return NOTHING;
+}
+
 // for [{init}, {condition}, {step}] do {body}
 static GameValue A1ForArray(const GameState*, GameValuePar oper1)
 {
@@ -1326,6 +1368,9 @@ static GameValue A1IsPlayer(const GameState* state, GameValuePar oper1)
 // compile: code is a string here, so compiling is the identity
 static GameValue A1Compile(const GameState*, GameValuePar oper1)
 {
+    // Arma 3 content: compiled text is code ({...}), which typeName and params tell apart.
+    if (GameState::s_codeValues)
+        return GameValue(new GameDataCode((RString)oper1));
     return oper1;
 }
 
@@ -1487,6 +1532,7 @@ static const GameNular* GetExtNular(int& count)
         GameNular(GameObject, "cameraOn", CameraOn),
 
         GameNular(GameFile, "newConfig", ConfigNew),
+        GameNular(GameDatabase, "dbNew", DatabaseNew),
         GameNular(GameArray, "listConfigNames", ConfigListNames),
         GameNular(GameString, "missionName", MissionName),
         GameNular(GameArray, "missionStart", MissionStart),
@@ -1544,6 +1590,8 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameString, "inheritsFrom", A1InheritsFrom, GameString),
         GameFunction(GameString, "typeName", A1TypeName, GameVoid),
         GameFunction(GameBool, "surfaceIsWater", A1SurfaceIsWater, GameArray),
+        GameFunction(GameArray, "getWeaponCargo", A1GetWeaponCargo, GameObject),
+        GameFunction(GameArray, "getMagazineCargo", A1GetMagazineCargo, GameObject),
         GameFunction(GameString, "animationState", A1AnimationState, GameObject),
         GameFunction(GameString, "composeText", A1ComposeText, GameArray),
         GameFunction(GameArray, "switch", A1Switch_, GameVoid),
@@ -1556,7 +1604,7 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameBool, "isNil", A1IsNil, GameString),
         GameFunction(GameNothing, "doGetOut", A1DoGetOut, GameObjectOrArray),
         GameFunction(GameNothing, "enableEnvironment", A1IgnoredUnary, GameBool),
-        GameFunction(GameNothing, "reload", A1IgnoredUnary, GameObject),
+        GameFunction(GameNothing, "reload", A1Reload, GameObject),
         GameFunction(GameNothing, "terminate", ScriptTerminate, GameScalar),
         GameFunction(GameBool, "scriptDone", ScriptIsDone, GameScalar),
         GameFunction(GameBool, "waitUntil", ScriptWaitUntilUnscheduled, GameString),
@@ -1777,6 +1825,7 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameString, "secondaryWeapon", ObjGetSecondaryWeapon, GameObject),
         GameFunction(GameArray, "weapons", ObjGetAllWeapons, GameObject),
         GameFunction(GameArray, "magazines", ObjGetAllMagazines, GameObject),
+        GameFunction(GameArray, "getUnitLoadout", ObjUnitLoadout, GameObject),
 
         GameFunction(GameObject, "object", GetObject, GameScalar),
 
@@ -1786,6 +1835,7 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameNothing, "remoteExecRemove", RemoteExecRemove, GameString),
 
         GameFunction(GameFile, "loadConfig", ConfigLoad, GameString),
+        GameFunction(GameDatabase, "dbLoad", DatabaseLoad, GameString),
 
         GameFunction(GameNothing, "VBS_addHeader", AddMPReportHeader, GameString),
         GameFunction(GameNothing, "VBS_addEvent", AddMPReportEvent, GameString),
@@ -1905,6 +1955,7 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "removeMagazine", function, ObjRemoveMagazine, GameObject, GameString),
         GameOperator(GameNothing, "removeMagazines", function, ObjRemoveMagazines, GameObject, GameString),
         GameOperator(GameNothing, "selectWeapon", function, ObjSelectWeapon, GameObject, GameString),
+        GameOperator(GameNothing, "setUnitLoadout", function, ObjSetUnitLoadout, GameObject, GameArray),
         GameOperator(GameNothing, "fire", function, ObjFire, GameObject, GameString),
         GameOperator(GameNothing, "fire", function, ObjFireEx, GameObject, GameArray),
         GameOperator(GameScalar, "muzzleReloadTime", function, ObjMuzzleReloadTime, GameObject, GameString),
@@ -1984,7 +2035,11 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "ctrlSetForegroundColor", function, A1CtrlIgnored, GameScalar, GameArray),
         GameOperator(GameObject, "nearestObject", function, A1NearestObject, GameArray, GameScalar | GameString),
         GameOperator(GameArray, "nearObjects", function, A1NearObjects, GameArray | GameObject, GameArray | GameScalar),
-        GameOperator(GameString, ">>", function, A1ConfigChild, GameString, GameString),
+        // Config paths bind looser than other binary commands: Arma 3's own functions write
+        // `configFile >> "CfgWorlds" >> worldName >> "Armory" >> ["a", "b"] select _this` and
+        // `... >> SIDE_COLORS param [_side, "colorUnknown"]`, the select/param first.
+        GameOperator(GameString, ">>", comparison, A1ConfigChild, GameString, GameString),
+        GameOperator(GameNothing, "breakOut", function, A1BreakOutWith, GameAny, GameString),
         GameOperator(GameString, "select", function, A1ConfigSelect, GameString, GameScalar),
         GameOperator(GameScalar, "min", function, A1Min, GameScalar, GameScalar),
         GameOperator(GameScalar, "max", function, A1Max, GameScalar, GameScalar),
@@ -2021,7 +2076,7 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "joinSilent", function, ListJoin, GameArray, GameObjectOrGroup),
         GameOperator(GameNothing, "hintC", function, A1HintC, GameString, GameString | GameArray),
         GameOperator(GameNothing, "setRank", function, A1IgnoredBinary, GameObject, GameString),
-        GameOperator(GameNothing, "enableAI", function, A1IgnoredBinary, GameObject, GameString),
+        GameOperator(GameNothing, "enableAI", function, ObjEnableAI, GameObject, GameString),
         GameOperator(GameNothing, "selectLeader", function, A1SelectLeader, GameGroup, GameObject),
         GameOperator(GameArray, "modelToWorld", function, A1ModelToWorld, GameObject, GameArray),
         GameOperator(GameNothing, "addVehicle", function, A1AddVehicle, GameGroup, GameObject),
@@ -2092,6 +2147,25 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "setObjectTexture", function, ObjSetTexture, GameObject, GameArray),
 
         GameOperator(GameNothing, "saveConfig", function, ConfigSave, GameFile, GameString),
+        GameOperator(GameVoid, "dbGet", function, DatabaseGet, GameDatabase, GameArray),
+        GameOperator(GameBool, "dbSet", function, DatabaseSet, GameDatabase, GameArray),
+        GameOperator(GameBool, "dbDelete", function, DatabaseDelete, GameDatabase, GameString),
+        GameOperator(GameBool, "dbExists", function, DatabaseExists, GameDatabase, GameString),
+        GameOperator(GameArray, "dbKeys", function, DatabaseKeys, GameDatabase, GameString),
+        GameOperator(GameBool, "dbSave", function, DatabaseSave, GameDatabase, GameString),
+        GameOperator(GameScalar, "dbListPush", function, DatabaseListPush, GameDatabase, GameArray),
+        GameOperator(GameScalar, "dbListPushMany", function, DatabaseListPushMany, GameDatabase, GameArray),
+        GameOperator(GameVoid, "dbListPop", function, DatabaseListPop, GameDatabase, GameArray),
+        GameOperator(GameVoid, "dbListGet", function, DatabaseListGet, GameDatabase, GameArray),
+        GameOperator(GameBool, "dbListSet", function, DatabaseListSet, GameDatabase, GameArray),
+        GameOperator(GameBool, "dbListRemove", function, DatabaseListRemove, GameDatabase, GameArray),
+        GameOperator(GameScalar, "dbListSize", function, DatabaseListSize, GameDatabase, GameString),
+        GameOperator(GameBool, "dbHashSet", function, DatabaseHashSet, GameDatabase, GameArray),
+        GameOperator(GameBool, "dbHashSetMany", function, DatabaseHashSetMany, GameDatabase, GameArray),
+        GameOperator(GameVoid, "dbHashGet", function, DatabaseHashGet, GameDatabase, GameArray),
+        GameOperator(GameBool, "dbHashDelete", function, DatabaseHashDelete, GameDatabase, GameArray),
+        GameOperator(GameBool, "dbHashExists", function, DatabaseHashExists, GameDatabase, GameArray),
+        GameOperator(GameArray, "dbHashKeys", function, DatabaseHashKeys, GameDatabase, GameString),
         GameOperator(GameFile, "openClass", function, ClassOpen, GameFile, GameString),
         GameOperator(GameFile, "addClass", function, ClassAdd, GameFile, GameString),
         GameOperator(GameVoid, "getValue", function, ValueGet, GameFile, GameString),
@@ -2186,6 +2260,7 @@ INIT_MODULE(GameStateExt, 2)
     GGameState.NewType("SIDE", GameSide, CreateGameDataSide, LocalizeString(IDS_EVAL_TYPESIDE));
     GGameState.NewType("GROUP", GameGroup, CreateGameDataGroup, LocalizeString(IDS_EVAL_TYPEGROUP));
     GGameState.NewType("FILE", GameFile, CreateGameDataFile, "File");
+    GGameState.NewType("DATABASE", GameDatabase, CreateGameDataDatabase, "Database");
 
     int extUnaryCount;
     const GameFunction* ExtUnary = GetExtUnary(extUnaryCount);

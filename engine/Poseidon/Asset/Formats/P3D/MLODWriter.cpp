@@ -288,6 +288,21 @@ std::vector<char> MLODWriter::writeToBuffer(const MLOD::WriteModel& model)
                                  std::to_string(kMaxLodCount) + ")");
 
     ByteSink sink;
+    // Sized up front: the native-world converter writes thousands of models, and growing
+    // the buffer a push at a time reallocated (and, through the engine heap, re-zeroed) it
+    // over and over. The bytes written do not depend on it.
+    {
+        size_t estimate = 16;
+        for (const auto& lod : model.lods)
+        {
+            const size_t perSelection = lod.points.size() + lod.faces.size() + 64 + 4 + 1;
+            estimate += 32 + lod.points.size() * 16 + lod.normals.size() * 12 + lod.mass.size() * 4 +
+                        lod.selections.size() * perSelection + lod.properties.size() * 200 + 128;
+            for (const auto& face : lod.faces)
+                estimate += 72 + face.texture.size() + face.material.size() + 2 + (lod.secondUVChannel ? 64 : 0);
+        }
+        sink.bytes.reserve(estimate);
+    }
     sink.signature("MLOD");
     sink.u8(1); // versionMajor
     sink.u8(1); // versionMinor -- MLOD 1.1, what every Real Virtuality model carries

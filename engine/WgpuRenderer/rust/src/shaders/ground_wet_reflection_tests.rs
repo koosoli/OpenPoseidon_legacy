@@ -50,7 +50,9 @@ fn local_reflection_composes_and_reuses_exact_normal_work() {
     let end = terrain[start..].find("fn sample_mud_normal(").unwrap() + start;
     let pair = &terrain[start..end];
     assert_eq!(pair.matches("sample_normal(").count(), 1);
-    assert_eq!(pair.matches("mud_height_gradient(").count(), 2);
+    // (2026-10-14) the step-scale mud gradient reuses the broad normal's offsets (one call left)
+    assert_eq!(pair.matches("mud_height_gradient(").count(), 1);
+    // footprint + the sub-0.125 m step fallback; the usual step reuses the broad normal's offsets
     assert_eq!(pair.matches("sand_height_gradient(").count(), 2);
     assert!(pair.contains(
         "normalize(vec3<f32>(base.x - delta.x * base.y, base.y, base.z - delta.y * base.y))"

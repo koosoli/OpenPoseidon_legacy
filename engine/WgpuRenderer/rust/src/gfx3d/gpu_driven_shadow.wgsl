@@ -71,7 +71,8 @@ struct SectionMaterial {
     // NormalPower + pads: the shadow pass never shades, present only so this mirror
     // stays field-for-field with SectionMaterialGpu (272 bytes, 16 stride).
     normal_power: f32,
-    _pad_np0: u32,
+    // RFG-181: Enfusion NormalsToCamera (bit 15 on, 0-14 distance dm, 16-31 height dm i16).
+    far_normals: u32,
     _pad_np1: u32,
     _pad_np2: u32,
     // Crown AO lanes: the shadow pass never shades, present only so this mirror

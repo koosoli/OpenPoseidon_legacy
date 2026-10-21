@@ -756,9 +756,15 @@ void ArcadeTemplate::MarkerUpdate(int index, ArcadeMarkerInfo& mInfo)
         markers[index] = mInfo;
     }
 
-    const ParamEntry& cls = Pars >> "CfgMarkers" >> markers[index].type;
-    markers[index].icon = GlobLoadTexture(GetPictureName(cls >> "icon"));
-    markers[index].size = cls >> "size";
+    // a marker type the config lacks (an Arma mission's) keeps no icon instead of failing
+    const ParamEntry* all = Pars.FindEntry("CfgMarkers");
+    const ParamEntry* cls =
+        all && markers[index].type.GetLength() > 0 ? all->FindEntry(markers[index].type) : nullptr;
+    if (cls && cls->IsClass() && cls->FindEntry("icon") && cls->FindEntry("size"))
+    {
+        markers[index].icon = GlobLoadTexture(GetPictureName((*cls) >> "icon"));
+        markers[index].size = (*cls) >> "size";
+    }
 }
 
 void ArcadeTemplate::MarkerDelete(int index)

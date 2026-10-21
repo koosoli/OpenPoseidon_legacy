@@ -1,4 +1,6 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/MuzzleBurst.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/UnderwaterBubbles.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Foundation/Algorithms/RadixSort.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -49,6 +51,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/World/Scene/InsideViewPass.hpp>
 #include <Poseidon/World/Scene/AlphaSortOrder.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
+#include <Poseidon/World/Entities/Infantry/SwimView.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 // MAT-048: `render::GBlendSectionDepthReadOnly`, set around the object-blend branch in
 // DrawObjectsAndShadowsPass2.  Previously reached only transitively (via RenderFlags.hpp for
@@ -689,6 +692,13 @@ void Scene::DrawRain()
     // compared against the particle rain on a clear day; -1 means "follow the weather".
     float density = GRain.LegacyDensityOverride() >= 0.0f ? GRain.LegacyDensityOverride()
                                                           : GetLandscape()->GetRainDensity();
+    // the screen-space rain layer stays above the water too (see RainSystem::UpdateAndDraw)
+    if (const Camera* camera = GetCamera())
+    {
+        const Vector3 eye = camera->Position();
+        if (eye.Y() < SwimWaterSurfaceY(eye.X(), eye.Z()))
+            return;
+    }
     if (density >= 0.1)
     {
         Vector3Val dir = GetCamera()->Direction();
@@ -746,6 +756,8 @@ void Scene::ObjectsDrawn()
     {
         GRain.UpdateAndDraw();
     }
+    render::DrawMuzzleBursts();
+    render::DrawUnderwaterBubbles();
 
     DrawObjectsAndShadowsPass3();
 
@@ -2238,6 +2250,58 @@ void ReportPass1Stats()
 
 } // namespace
 
+static bool IsSurfaceSortObject(const SortObject* oi);
+static bool CockpitBlendLegacy();
+
+namespace
+{
+// Pass-1 blend recording (Shape.hpp, GBlendRecord): an opaque object that owns blend sections
+// records those draws during its pass-1 draw, and pass 2 splices the recording in at the
+// object's back-to-front slot instead of drawing the whole object -- Animate, section walks,
+// proxies, Deanimate -- a second time. On a 120-soldier firefight that second Man::Draw was
+// ~4% of the main thread (PERF, 2026-10-14).
+//   POSEIDON_BLEND_RECORD=0       the old second draw, exactly
+//   POSEIDON_BLEND_RECORD=verify  record AND draw a second time, compare the two record for
+//                                 record (BlendRecordMatches), keep the real one, and log the
+//                                 counts every 300 frames; a mismatch names its shape once
+enum class BlendRecordMode : unsigned char
+{
+    Off,
+    On,
+    Verify
+};
+BlendRecordMode BlendRecordSetting()
+{
+    static const BlendRecordMode mode = []
+    {
+        const char* v = std::getenv("POSEIDON_BLEND_RECORD");
+        if (v && std::strcmp(v, "0") == 0)
+            return BlendRecordMode::Off;
+        if (v && std::strcmp(v, "verify") == 0)
+            return BlendRecordMode::Verify;
+        return BlendRecordMode::On;
+    }();
+    return mode;
+}
+// Bumped by every pass 1 that records; a SortObject's recording is used only by the pass 2 of
+// the same generation, so a second view rendered in between falls back to the real draw.
+int GBlendRecordGen = 0;
+// The predicate of pass 2's blend-revisit branch, evaluated in pass 1.
+bool WantsBlendRecord(SortObject* oi)
+{
+    if (oi->drawLOD == LOD_INVISIBLE || oi->passNum > 1)
+        return false;
+    LODShape* shape = oi->object->GetShape();
+    Shape* sShape = shape ? shape->LevelOpaque(oi->drawLOD) : nullptr;
+    return sShape && sShape->HasBlendSections() && !IsSurfaceSortObject(oi);
+}
+struct BlendRecordCounts
+{
+    uint64_t recorded = 0, replayed = 0, verified = 0, mismatched = 0;
+    int frames = 0;
+} GBlendRecordCounts;
+} // namespace
+
 void Scene::DrawObjectsAndShadowsPass1()
 {
     // select first objects - those with highest visual priority
@@ -2620,6 +2684,11 @@ void Scene::DrawObjectsAndShadowsPass1()
         // scene, and a tight distance band so the head's constant-fog value
         // is representative for the whole batch.
         const bool noLocalLights = NLights() == 0;
+        const bool blendRecord = BlendRecordSetting() != BlendRecordMode::Off && GEngine->BlendRecordAvailable();
+        if (blendRecord)
+        {
+            GBlendRecordGen++;
+        }
         for (int i = 0; i < _drawMergers.Size();)
         {
             SortObject* oi = _drawMergers[i];
@@ -2740,7 +2809,22 @@ void Scene::DrawObjectsAndShadowsPass1()
                 }
                 for (int k = i; k < runEnd; k++)
                 {
-                    DrawSortObject(_drawMergers[k]);
+                    SortObject* ok = _drawMergers[k];
+                    const bool record = blendRecord && WantsBlendRecord(ok);
+                    if (!record)
+                    {
+                        DrawSortObject(ok);
+                        continue;
+                    }
+                    const uint32_t recordBeg = GEngine->BlendRecordSize();
+                    GBlendRecord.active = true;
+                    GBlendRecord.depthReadOnly = !CockpitBlendLegacy();
+                    DrawSortObject(ok);
+                    GBlendRecord.active = false;
+                    ok->blendRecordGen = GBlendRecordGen;
+                    ok->blendRecordBeg = recordBeg;
+                    ok->blendRecordEnd = GEngine->BlendRecordSize();
+                    GBlendRecordCounts.recorded++;
                 }
             }
             if (subOn)
@@ -3085,14 +3169,47 @@ void Scene::DrawObjectsAndShadowsPass2()
             // MAT-051 diagnostic (temporary): name each object the blend-revisit
             // pass actually draws, so a glass-owning shape that never appears
             // here names the gap.
-            if (const char* trace = std::getenv("WGR_BLEND_PASS_TRACE"); trace && *trace == '1')
+            // Read once: a getenv per blend object per frame walked the whole environment
+            // block under the CRT lock, ~3% of the Durras main thread (PERF, 2026-10-14).
+            static const bool blendPassTrace = []
+            {
+                const char* trace = std::getenv("WGR_BLEND_PASS_TRACE");
+                return trace && *trace == '1';
+            }();
+            if (blendPassTrace)
             {
                 static std::unordered_set<std::string> logged;
                 const char* nm = shape ? shape->Name() : nullptr;
                 if (nm && logged.size() < 40 && logged.insert(std::string(nm)).second)
                     LOG_WARN(Graphics, "Blend revisit: {} lod={} passNum={}", nm, oi->drawLOD, oi->passNum);
             }
-            DrawSortObject(oi);
+            const BlendRecordMode recordMode = BlendRecordSetting();
+            const bool recorded =
+                recordMode != BlendRecordMode::Off && GBlendRecordGen != 0 && oi->blendRecordGen == GBlendRecordGen;
+            if (recorded && recordMode == BlendRecordMode::On)
+            {
+                // Recorded under exactly this filter and depth state in pass 1 (see the pass-1 loop).
+                GEngine->BlendRecordReplay(oi->blendRecordBeg, oi->blendRecordEnd);
+                GBlendRecordCounts.replayed++;
+            }
+            else
+            {
+                const uint32_t mark = GEngine->BlendRecordStreamMark();
+                DrawSortObject(oi);
+                if (recorded)
+                {
+                    GBlendRecordCounts.verified++;
+                    if (!GEngine->BlendRecordMatches(oi->blendRecordBeg, oi->blendRecordEnd, mark))
+                    {
+                        GBlendRecordCounts.mismatched++;
+                        static std::unordered_set<std::string> named;
+                        const char* nm = shape ? shape->Name() : nullptr;
+                        if (nm && named.size() < 40 && named.insert(std::string(nm)).second)
+                            LOG_WARN(Graphics, "BLEND_RECORD mismatch: {} lod={} recorded={} drawn={}", nm, oi->drawLOD,
+                                     oi->blendRecordEnd - oi->blendRecordBeg, GEngine->BlendRecordStreamMark() - mark);
+                    }
+                }
+            }
             if (blendDepthReadOnly)
             {
                 GEngine->FlushQueues();
@@ -3106,6 +3223,12 @@ void Scene::DrawObjectsAndShadowsPass2()
     }
     alphaDrawScope.Close();
     GEngine->EnableReorderQueues(true);
+    if (BlendRecordSetting() == BlendRecordMode::Verify && ++GBlendRecordCounts.frames % 300 == 0)
+    {
+        LOG_INFO(Graphics, "BLEND_RECORD verify frames={} recorded={} verified={} mismatched={}",
+                 GBlendRecordCounts.frames, GBlendRecordCounts.recorded, GBlendRecordCounts.verified,
+                 GBlendRecordCounts.mismatched);
+    }
 }
 
 #include <Poseidon/Foundation/Common/Filenames.hpp>

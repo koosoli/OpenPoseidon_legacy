@@ -30,6 +30,21 @@ struct WaterSurfaceSample
 // matches the rendered sea in scale, period and roughness rather than crest for crest.
 WaterSurfaceSample QueryWaterSurface(float worldX, float worldZ, float time, float seaLevel);
 
+// (OP) The Tidewater sea's amplitude for a weather wind above the Storm preset (owner, 2026-10-13:
+// "make it that wind speed 30 m/s is having a wave amplitude of 2.0"). Weather mode reaches the Storm
+// preset at a weather wind of 12 m/s; from there the amplitude rises linearly to 2.0 at 30 m/s (and
+// stays there). The renderer (WaterWgpu.cpp) and this predictor apply the same factor.
+inline float TidewaterWindAmplitude(float weatherWind)
+{
+    const float t = (weatherWind - 12.0f) / 18.0f;
+    return 1.0f + (t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t);
+}
+
+// (OP) The highest choppiness x amplitude the Tidewater surface is drawn with: past it the displaced
+// mesh folds over itself (dark creases along the crests, the folds' back faces shading as water seen
+// from below). A raised amplitude lowers the choppiness to keep the product here.
+constexpr float TidewaterMaxDisplayedChop = 1.3f;
+
 // WRL-003 / WRL-006b — the same predictor for a bounded body: `surfaceLevel` is the body's local
 // mean surface at (worldX, worldZ) and `waveScale` scales every component amplitude (a sheltered
 // lake carries ripples, not swell). waveScale 1.0 reproduces QueryWaterSurface exactly.

@@ -1,3 +1,4 @@
+#include <Poseidon/World/Effects/BuildingBreach.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/World/Scene/CargoSurface.hpp>
 
@@ -927,6 +928,10 @@ void Object::Intersect(const FrameBase& pos, CollisionBuffer& result, Vector3Par
             }
             dirOut = normal;
         }
+        // BOOM-002: the stretch of the line inside this component runs through a wall breach:
+        // the wall is not there any more, for bullets, shells and sight alike
+        if (BuildingBreach::AnyBreach() && BuildingBreach::PassesThroughHole(this, b, e))
+            goto NotInside;
         {
             // b,e interval is intersection
             if (bt > et)

@@ -311,3 +311,47 @@ TEST_CASE("A top-level entity is not composed onto anything", "[enfusion][ebin]"
     CHECK(world.placements[1].position[1] == Catch::Approx(1.0f));
     CHECK(world.placements[1].position[2] == Catch::Approx(9.0f));
 }
+
+TEST_CASE("A road generator inside a prefab keeps the prefab its material comes from", "[enfusion][ebin]")
+{
+    // RFG-139. RFG-120 stopped NAMED children without a prefab of their own from inheriting
+    // the enclosing prefab, because on Everon those are overrides of the prefab's own children
+    // (a villa's railing nudged by ID) and inheriting drew the whole villa a second time. A
+    // `RoadGeneratorEntity` is not an override: it draws from its own points, and the enclosing
+    // road prefab is the only route to its `.emat`. Losing it put 2,199 of Everon's 2,398 roads
+    // on the flat fallback colour. Both halves are asserted, so neither rule can eat the other.
+    EbinBuilder builder;
+
+    std::vector<uint8_t> road;
+    builder.Coords(road, 1.0f, 0.0f, 2.0f);
+    std::vector<uint8_t> override_;
+    builder.Coords(override_, 0.0f, 0.0f, -0.443f);
+
+    std::vector<uint8_t> parent;
+    builder.Coords(parent, 100.0f, 10.0f, 200.0f);
+    builder.Ident(parent, "RoadGeneratorEntity");
+    EbinBuilder::Block(parent, EbinBuilder::Entity(road));
+    builder.Ident(parent, "GenericEntity");
+    EbinBuilder::Block(parent, EbinBuilder::Entity(override_));
+
+    // `SplineShapeEntity {0123456789ABCDEF} { ... }` -- the prefab as an inline GUID (tag 0x44),
+    // written little-endian: the textual form is these bytes reversed.
+    builder.Ident(builder.records, "SplineShapeEntity");
+    builder.records.push_back(0x44);
+    for (const uint8_t b : {0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01})
+        builder.records.push_back(b);
+    EbinBuilder::Block(builder.records, EbinBuilder::Entity(parent));
+
+    const std::vector<uint8_t> bytes = builder.Finish();
+    const EbinWorld world = ReadEbin(bytes.data(), bytes.size());
+
+    INFO(world.error);
+    REQUIRE(world.valid());
+    REQUIRE(world.consumed == bytes.size());
+    REQUIRE(world.placements.size() == 3);
+    CHECK(world.placements[0].prefabGuid == "0123456789ABCDEF");
+    CHECK(world.placements[1].className == "RoadGeneratorEntity");
+    CHECK(world.placements[1].prefabGuid == "0123456789ABCDEF");
+    CHECK(world.placements[2].className == "GenericEntity");
+    CHECK(world.placements[2].prefabGuid.empty());
+}

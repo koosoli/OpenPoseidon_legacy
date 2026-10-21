@@ -117,6 +117,8 @@ GameValue TriEditorMode(const GameState*);
 GameValue TriRemount(const GameState*);
 GameValue TriLoadedShapeCount(const GameState*);
 GameValue TriScenePreloadCount(const GameState*);
+GameValue TriDetailTextureLoads(const GameState*);
+GameValue TriTextureBankReleases(const GameState*);
 GameValue TriClick(const GameState*, GameValuePar);
 GameValue TriClickAt(const GameState*, GameValuePar);
 GameValue TriInvokeButton(const GameState*, GameValuePar);
@@ -209,6 +211,14 @@ GameValue EarthGroundHeight(const GameState*, GameValuePar);
 GameValue TriTerrainPaint(const GameState*, GameValuePar);
 GameValue TriRocketCraters(const GameState*, GameValuePar);
 GameValue TriTerrainHeight(const GameState*, GameValuePar);
+GameValue TriEnfusionDoor(const GameState*, GameValuePar);
+GameValue TriEnfusionDoorSet(const GameState*, GameValuePar);
+GameValue TriEnfusionDoorCensus(const GameState*);
+GameValue TriEnfusionGlass(const GameState*, GameValuePar);
+GameValue TriEnfusionGlassBreak(const GameState*, GameValuePar);
+GameValue TriEnfusionGlassCensus(const GameState*);
+GameValue TriEnfusionDoorsAll(const GameState*, GameValuePar);
+GameValue TriEnfusionGlassBreakAll(const GameState*, GameValuePar);
 GameValue TriDevPanelSelectShadows(const GameState*);
 GameValue TriDevPanelSelectMemory(const GameState*);
 GameValue TriShadowSunFactor(const GameState*);
@@ -2182,6 +2192,24 @@ GameValue TriScenePreloadCount(const GameState* /*state*/)
     return GameValue(static_cast<float>(n));
 }
 
+/// triDetailTextureLoads - how many times the texture bank has derived its detail /
+/// specular / grass / water-bump set from `CfgDetailTextures`. One per content load.
+GameValue TriDetailTextureLoads(const GameState* /*state*/)
+{
+    if (GEngine == nullptr || GEngine->TextBank() == nullptr)
+        return GameValue(0.0f);
+    return GameValue(static_cast<float>(GEngine->TextBank()->NDetailTextureLoads()));
+}
+
+/// triTextureBankReleases - how many times the active texture bank has dropped its loaded set.
+/// A re-mount must add one, or textures a mod replaces under the same path stay the old ones.
+GameValue TriTextureBankReleases(const GameState* /*state*/)
+{
+    if (GEngine == nullptr || GEngine->TextBank() == nullptr)
+        return GameValue(0.0f);
+    return GameValue(static_cast<float>(GEngine->TextBank()->NReleases()));
+}
+
 /// triFontTune ["prefix", renderPx, widthScale]
 /// triFontTune ["prefix", renderPx, widthScale, baselineOffset]
 /// triFontTune ["prefix", renderPx, widthScale, baselineOffset, syntheticBold]
@@ -3145,6 +3173,8 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewNularOp(GameNular(GameString, "triRemount", TriRemount));
     GGameState.NewNularOp(GameNular(GameScalar, "triLoadedShapeCount", TriLoadedShapeCount));
     GGameState.NewNularOp(GameNular(GameScalar, "triScenePreloadCount", TriScenePreloadCount));
+    GGameState.NewNularOp(GameNular(GameScalar, "triDetailTextureLoads", TriDetailTextureLoads));
+    GGameState.NewNularOp(GameNular(GameScalar, "triTextureBankReleases", TriTextureBankReleases));
     GGameState.NewNularOp(GameNular(GameScalar, "triIsEndForced", TriIsEndForced));
     GGameState.NewNularOp(GameNular(GameString, "triCheatStorePosition", TriCheatStorePosition));
     GGameState.NewNularOp(GameNular(GameString, "triCheatSaveGame", TriCheatSaveGame));
@@ -3284,6 +3314,14 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameString, "triTerrainPaint", TriTerrainPaint, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triRocketCraters", TriRocketCraters, GameString));
     GGameState.NewFunction(GameFunction(GameScalar, "triTerrainHeight", TriTerrainHeight, GameArray));
+    GGameState.NewFunction(GameFunction(GameString, "triEnfusionDoor", TriEnfusionDoor, GameArray));
+    GGameState.NewFunction(GameFunction(GameString, "triEnfusionDoorSet", TriEnfusionDoorSet, GameArray));
+    GGameState.NewFunction(GameFunction(GameScalar, "triEnfusionDoorsAll", TriEnfusionDoorsAll, GameArray));
+    GGameState.NewFunction(GameFunction(GameScalar, "triEnfusionGlassBreakAll", TriEnfusionGlassBreakAll, GameArray));
+    GGameState.NewNularOp(GameNular(GameString, "triEnfusionDoorCensus", TriEnfusionDoorCensus));
+    GGameState.NewFunction(GameFunction(GameString, "triEnfusionGlass", TriEnfusionGlass, GameArray));
+    GGameState.NewFunction(GameFunction(GameString, "triEnfusionGlassBreak", TriEnfusionGlassBreak, GameScalar));
+    GGameState.NewNularOp(GameNular(GameString, "triEnfusionGlassCensus", TriEnfusionGlassCensus));
     GGameState.NewFunction(GameFunction(GameString, "triRadioDeliveryProbe", TriRadioDeliveryProbe, GameArray));
     GGameState.NewNularOp(GameNular(GameString, "triDevPanelSelectShadows", TriDevPanelSelectShadows));
     GGameState.NewNularOp(GameNular(GameString, "triDevPanelSelectMemory", TriDevPanelSelectMemory));

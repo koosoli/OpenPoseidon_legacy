@@ -1,0 +1,16 @@
+; The grenadier's grenades: one every ~6 s, dropped onto the water 2-4 m from the player; it sinks and goes off
+; below (underwater ballistics). Dropped, not thrown: a scripted CWA soldier will not throw (fire "HandGrenade"
+; does nothing), so the grenade is made where it lands ("GrenadeHand" camCreate makes a live one).
+_g = _this select 0
+uwGrenades = 0
+~4
+#loop
+?!(alive _g): exit
+_p = getPos player
+_a = random 360
+_r = 2 + random 2
+_s = "GrenadeHand" camCreate [(_p select 0) + _r * sin _a, (_p select 1) + _r * cos _a, 2]
+_s setVelocity [0, 0, -4]
+uwGrenades = uwGrenades + 1
+~6
+goto "loop"

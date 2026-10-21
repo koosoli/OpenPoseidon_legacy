@@ -1,3 +1,5 @@
+#include <Poseidon/World/Terrain/CraterField.hpp>
+#include <Poseidon/World/Effects/BuildingBreach.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
@@ -157,6 +159,7 @@ using namespace Dev;
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 
 #include <Poseidon/Core/resincl.hpp>
+#include <Poseidon/World/SeaSoundscape.hpp>
 
 namespace Poseidon
 {
@@ -767,7 +770,7 @@ void World::SimulateCloudlets(float deltaT)
     if (GLandscape)
     {
         GMud().Advance(deltaT, UniformWettingDensity(GLandscape->GetRainDensity(),
-            GRain.EffectiveDensity(), GRain.Params().snowflakes));
+            GRain.EffectiveDensity(), GRain.Params().snowflakes), _actualOvercast);
         GSand().Advance(deltaT, UniformWettingDensity(GLandscape->GetRainDensity(),
             GRain.EffectiveDensity(), GRain.Params().snowflakes));
         softCost.Stop();
@@ -1527,6 +1530,8 @@ void World::PerformSound(Entity* inside, float deltaT)
     {
         GSoundScene->SetEnvSound(envNames[i], envVols[i]);
     }
+    // (OP) Tidewater's surf and distant-surf bed (@OP_TidewaterWildlife; silent without it)
+    UpdateSeaSoundscape(camPos, 0.0f);
     GSoundScene->AdvanceEnvSounds();
 #endif
 }
@@ -1568,6 +1573,22 @@ void World::AdjustSubdivisionGrid(float gridSize)
     LOG_DEBUG(World, "Terrain subdivision wanted: {} ({:.3f})", coefLogInt, coefLog);
     int currentLog = TerrainRangeLog - LandRangeLog;
     int terrainChange = coefLogInt - currentLog;
+    // A native Enfusion world arrives at its own terrain grid (Everon: 3.125 m, which matches
+    // Reforger's GetSurfaceY to 5 mm), and everything placed at load was fitted to THAT surface:
+    // the road strips are draped on it, terrain-relative objects stand on it. Coarsening it to
+    // the Terrain Detail tier afterwards (Ultra = 6.25 m) lifted convex cells over the roads --
+    // "streets partly in the ground" -- and sank or floated what stood on them. Finer stays
+    // allowed. POSEIDON_NATIVE_TERRAIN_KEEP=0 restores the tier's coarser grid.
+    static const bool keepNative = [] {
+        const char* value = std::getenv("POSEIDON_NATIVE_TERRAIN_KEEP");
+        return !(value && value[0] == '0');
+    }();
+    if (terrainChange < 0 && keepNative && GLandscape && GLandscape->GetEnfusionSurfaceCount() > 0)
+    {
+        LOG_INFO(World, "Terrain grid: native world keeps its {} m grid (Terrain Detail asked for {} m; "
+                 "POSEIDON_NATIVE_TERRAIN_KEEP=0 = coarsen)", LandGrid / static_cast<float>(1 << currentLog), gridSize);
+        terrainChange = 0;
+    }
     if (requestedLog != coefLogInt && terrainChange != 0)
         LOG_INFO(World, "Terrain refinement capped for {} land cells: requested {}m, effective {}m",
                  LandRange, gridSize, LandGrid / static_cast<float>(1 << coefLogInt));
@@ -1709,6 +1730,13 @@ void World::SwitchLandscape(const char* name)
     else
     {
         land->ResetState();
+        // Same island again (mission restart, editor preview, next mission):
+        // wheel ruts and sand tracks belong to the previous mission, so clear
+        // them like a fresh island load does (InitLandscape).
+        GMud().Reset();
+        GSand().Reset();
+        GCraters().Reset();
+        BuildingBreach::Reset();
         Reset();
         land->FlushCache();
         if (!_map)
@@ -2098,6 +2126,11 @@ LSError World::Save(const char* name, int message) const
 bool World::LoadBin(const char* name, int message)
 {
     LOG_DEBUG(World, "LoadBin: Start - Total allocated: {} MB", Foundation::MemoryUsed() / (1024 * 1024));
+    // A mission retry loads the start-of-mission autosave instead of switching the landscape, and
+    // never reached the resets there: breached houses kept their holes and craters stayed (owner,
+    // 2026-10-19: "when i reset the map the holes are there"). Neither is in the save.
+    GCraters().Reset();
+    BuildingBreach::Reset();
     LSError err;
     {
         GDebugger.NextAliveExpected(15 * 60 * 1000);

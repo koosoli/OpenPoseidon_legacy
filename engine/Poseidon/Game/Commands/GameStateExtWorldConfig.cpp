@@ -74,6 +74,7 @@ namespace Poseidon
 #include <Poseidon/Foundation/Platform/VersionNo.h>
 
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
+#include <vector>
 
 namespace Poseidon
 {
@@ -1123,12 +1124,52 @@ GameValue StringLoad(const GameState* state, GameValuePar oper1)
     return RString();
 }
 
+// "a3\functions_f\Sides\..\paramsCheck.inc" -> "a3\functions_f\paramsCheck.inc": the
+// archives know no "." or ".." folders, and Arma 3's function library includes its shared
+// headers that way (#include "..\paramsCheck.inc").
+static std::string CollapseDots(const std::string& path)
+{
+    std::vector<std::string> parts;
+    std::string part;
+    const auto flush = [&]
+    {
+        if (part == "..")
+        {
+            if (!parts.empty() && parts.back() != "..")
+                parts.pop_back();
+            else
+                parts.push_back(part);
+        }
+        else if (!part.empty() && part != ".")
+            parts.push_back(part);
+        part.clear();
+    };
+    for (char c : path)
+    {
+        if (c == '\\' || c == '/')
+            flush();
+        else
+            part += c;
+    }
+    flush();
+    std::string out;
+    for (size_t i = 0; i < parts.size(); i++)
+        out += (i ? "\\" : "") + parts[i];
+    return out;
+}
+
 class FilePreprocessor : public Preproc
 {
   public:
     // Folder of the file being preprocessed ("ca\\modules\\functions\\"), for includes
     // given relative to it. Arma 2 scripts include both ways.
     std::string baseDir;
+
+  private:
+    // Folders of the files being read, innermost last: an included file's own includes
+    // resolve beside IT first (Old Man's commonDefines.inc, in Systems\\defines, includes
+    // "profilingDefines.inc" next to itself, not next to the script that included it).
+    std::vector<std::string> _dirs;
 
   protected:
     QIStream* OnEnterInclude(const char* filename) override
@@ -1137,19 +1178,34 @@ class FilePreprocessor : public Preproc
         // Arma 2 names bank paths with a leading backslash ("\\ca\\modules\\...").
         while (!name.empty() && (name[0] == '\\' || name[0] == '/'))
             name.erase(0, 1);
-        if (!QIFStreamB::FileExist(name.c_str()) && !baseDir.empty() &&
-            QIFStreamB::FileExist((baseDir + name).c_str()))
-            name = baseDir + name;
+        for (auto dir = _dirs.rbegin(); !QIFStreamB::FileExist(name.c_str()) && dir != _dirs.rend(); ++dir)
+        {
+            if (dir->empty())
+                continue;
+            const std::string relative = CollapseDots(*dir + name);
+            if (QIFStreamB::FileExist(relative.c_str()))
+                name = relative;
+        }
+        if (!QIFStreamB::FileExist(name.c_str()) && !baseDir.empty())
+        {
+            const std::string relative = CollapseDots(baseDir + name);
+            if (QIFStreamB::FileExist(relative.c_str()))
+                name = relative;
+        }
         if (!QIFStreamB::FileExist(name.c_str()))
         {
             return nullptr;
         }
         QIFStreamB* stream = new QIFStreamB();
         stream->AutoOpen(name.c_str());
+        const size_t slash = name.find_last_of("\\/");
+        _dirs.push_back(slash == std::string::npos ? std::string() : name.substr(0, slash + 1));
         return stream;
     }
     void OnExitInclude(QIStream* stream) override
     {
+        if (!_dirs.empty())
+            _dirs.pop_back();
         if (stream)
         {
             delete (QIFStreamB*)stream;
@@ -1206,7 +1262,7 @@ bool PreprocessScriptFile(const char* name, std::string& out)
 
 GameValue StringPreprocess(const GameState* state, GameValuePar oper1)
 {
-    if (Poseidon::Arma1Compat::Generation() == 2)
+    if (Poseidon::Arma1Compat::Generation() >= 2)
     {
         // Arma 2 names its library scripts by absolute bank path ("\\ca\\modules\\...").
         std::string text;

@@ -1,3 +1,5 @@
+#include <Poseidon/World/Terrain/CraterField.hpp>
+#include <Poseidon/World/Effects/BuildingBreach.hpp>
 #include <Poseidon/Core/Game/GameLoop.hpp> // LockstepPacingActive (SIM-815)
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
@@ -18,6 +20,7 @@
 #include <Poseidon/Graphics/Cursor/GameCursorOverlay.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/EnvSoundRegions.hpp> // OFP Fusion: ambient loops per island
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
@@ -256,6 +259,8 @@ void World::InitGeneral(const ParamEntry& cfg)
     _nearImportanceDistributionTime = Poseidon::Foundation::Time(0);
     _farImportanceDistributionTime = Poseidon::Foundation::Time(0);
     _firstFrame = true;
+    // Overcast mission: start with ground already soaked (deep ruts from the start).
+    GMud().SeedWeather(_actualOvercast);
 
     RString time = cfg >> "startTime";
     RString date = cfg >> "startDate";
@@ -290,6 +295,8 @@ void World::InitGeneral(ArcadeIntel& intel)
     _nextWeatherChange = 30 * 60;
     _nearImportanceDistributionTime = Poseidon::Foundation::Time(0);
     _farImportanceDistributionTime = Poseidon::Foundation::Time(0);
+    // Overcast mission: start with ground already soaked (deep ruts from the start).
+    GMud().SeedWeather(_actualOvercast);
 
     int day = intel.day - 1;
     int year = intel.year;
@@ -402,6 +409,28 @@ static void InitEnvSounds(const ParamEntry& cfg)
     GetValue(EnvSoundParsNight[3], cfg >> "Hills" >> "soundNight");
     GetValue(EnvSoundParsNight[4], cfg >> "Rain" >> "soundNight");
     GetValue(EnvSoundParsNight[5], cfg >> "Default" >> "sound");
+
+    // Arma 3 (--arma3): its own ambience (birds, forest, crickets, wind, sea, rain) in place
+    // of CWA's loops, at the CWA slot's loudness; a slot the install cannot fill keeps CWA's.
+    if (Arma1Compat::Active() && Arma1Compat::Generation() >= 3)
+    {
+        static const char* const kSlot[5] = {"sea", "trees", "meadows", "hills", "rain"};
+        for (int slot = 0; slot < 5; slot++)
+            for (int night = 0; night < 2; night++)
+            {
+                const std::string file = Arma1Compat::Arma3EnvSound(slot, night != 0);
+                if (file.empty())
+                    continue;
+                SoundPars& pars = night ? EnvSoundParsNight[slot] : EnvSoundPars[slot];
+                pars.name = GetSoundName(RString(file.c_str()));
+                if (pars.vol <= 0)
+                    pars.vol = 0.1f;
+                if (pars.freq <= 0)
+                    pars.freq = 1.0f;
+                LOG_INFO(Mission, "Arma 3: ambient {} ({}) plays {}", kSlot[slot], night ? "night" : "day",
+                         (const char*)pars.name);
+            }
+    }
 }
 
 SRef<EntityAI> GDummyVehicle;
@@ -926,6 +955,8 @@ void World::InitLandscape(Landscape* landscape)
     GSnow().Reset();
     GMud().Reset();
     GSand().Reset();
+    GCraters().Reset();
+    BuildingBreach::Reset();
     GRainWater().Reset();
     GSnowFlakes.ClearParticles();
     GSnow().enabled = false;
@@ -1169,6 +1200,15 @@ void World::ParseCfgWorld()
 
     _latitude = LoadValue(cls, "latitude", -40) * (H_PI / 180); // -40 - Croatia, -90 - north pole;
     _longitude = LoadValue(cls, "longitude", +15) * (H_PI / 180);
+    // RFG-187: a native Reforger world sits where its own TimeAndWeatherManager says (north is
+    // negative here, as in the CfgWorlds convention above).
+    if (float lat = 0.0f, lon = 0.0f;
+        GLandscape != nullptr && GLandscape->GetEnfusionSurfaceCount() > 0 && GetEnfusionWorldGeo(lat, lon))
+    {
+        _latitude = -lat * (H_PI / 180);
+        _longitude = lon * (H_PI / 180);
+        LOG_INFO(Core, "World geo: native world at latitude {:.3f}, longitude {:.3f} (RFG-187)", lat, lon);
+    }
 
     const ParamEntry& clsGrid = cls >> "Grid";
     _gridOffsetX = clsGrid >> "offsetX";

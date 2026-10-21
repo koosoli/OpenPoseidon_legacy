@@ -533,6 +533,10 @@ protected:
 	Poseidon::Foundation::UITime _scrollTime;
 
 	CScrollBar _scrollbar;
+	// Arma-era list boxes paint the selected row in colorSelectBackground (CWA paints it in
+	// colorText, which Arma sets to the black of its text).
+	bool _hasSelBg = false;
+	PackedColor _selBgColor;
 public:
 
 	CListBox(ControlsContainer *parent, int idc, const ParamEntry &cls);

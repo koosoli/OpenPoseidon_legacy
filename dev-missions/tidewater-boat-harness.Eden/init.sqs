@@ -1,0 +1,18 @@
+; Capture harness for Tidewater's lobster boat (scripts/Test-TidewaterBoat.ps1 adds the keys with --auto-keys):
+; the player drives off from the helm, steps out onto the deck, a second soldier takes the helm and runs
+; south while the player stands and walks on the deck, then the player takes the helm back.
+setViewDistance 1500
+boat = "OP_TidewaterBoat" createVehicle [9950, 1330, 0]
+boat setDir 180
+player moveInDriver boat
+~22
+player action ["getOut", boat]
+~3
+drv moveInDriver boat
+~1
+drv doMove [9950, 200]
+~24
+drv action ["getOut", boat]
+~3
+player action ["getInDriver", boat]
+exit

@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 
 #include <Poseidon/Graphics/Core/MatrixConversion.hpp>
 #include <Poseidon/Graphics/Core/MeshVertex.hpp> // SVertex, for the queued mesh-create payloads (REN-THR-008)
@@ -155,6 +156,8 @@ class EngineWgpu : public EngineDummy
     bool CanBeWindowed() const override;
 
     AbstractTextBank* TextBank() override;
+    void ResetForRemount() override;
+    void NoteDetailTextureLoad();
 
     void InitDraw(bool clear, PackedColor color) override;
     void FinishDraw() override;
@@ -189,6 +192,14 @@ class EngineWgpu : public EngineDummy
     void BeginMeshTL(const Shape& sMesh, int spec, bool dynamic) override;
     void EndMeshTL(const Shape& sMesh) override;
     void DrawSectionTL(const Shape& sMesh, int beg, int end) override;
+    // Pass-1 blend recording (Engine.hpp). Captured draws stay in _draws3d like any other;
+    // only their WGR_CMD_DRAW_3D entries wait in _blendStash until the scene splices them in.
+    bool BlendRecordAvailable() const override { return _renderer != nullptr; }
+    void BlendRecordCapture(bool on) override { _blendCapture = on; }
+    uint32_t BlendRecordSize() const override { return uint32_t(_blendStash.size()); }
+    void BlendRecordReplay(uint32_t beg, uint32_t end) override;
+    uint32_t BlendRecordStreamMark() const override { return uint32_t(_cmds.size()); }
+    bool BlendRecordMatches(uint32_t beg, uint32_t end, uint32_t mark) const override;
     // Captures the per-section material so DrawSectionTL can fold it with the sun
     // (GL33 parity: emissive + sun_ambient + sun_diffuse * N.L). Called by
     // ShapeSection::PrepareTL immediately before each DrawSectionTL.
@@ -208,6 +219,26 @@ class EngineWgpu : public EngineDummy
     bool CaptureWarmRapStageRead(const char* key, WarmTextureRead& out) const override;
     bool SceneFarObjectCreated(uint32_t id, LODShapeWithShadow* shape, const Matrix4& transform) override;
     void SceneFarObjectRemoved(uint32_t id) override;
+    // Canopy occlusion map (frame.wgsl canopy_sky_ao): every canopy-classed object the scene hands
+    // the renderer (MapTree / MapSmallTree / MapBush / forests), as a top height and crown radius,
+    // rasterised into a world grid and handed to the terrain sky-visibility texture. Generic: it
+    // follows whatever the world draws, near objects and far authored instances alike.
+    struct CanopyEntry
+    {
+        float x = 0.0f, z = 0.0f, top = 0.0f, radius = 0.0f;
+    };
+    std::unordered_map<uint64_t, CanopyEntry> _canopy;
+    bool _canopyDirty = false;
+    std::chrono::steady_clock::time_point _canopyBuilt{};
+    //! PERF (2026-10-14): the grid is built on its own thread from a snapshot of `_canopy` and
+    //! collected by a later UpdateCanopyMap -- see there. One build in flight at a time.
+    struct CanopyJob;
+    std::shared_ptr<CanopyJob> _canopyJob;
+    uint32_t _canopyPublishedN = 0;
+    uint64_t _canopyPublishedHash = 0;
+    void CanopyNote(uint64_t key, const LODShapeWithShadow* shape, const Matrix4& transform);
+    void CanopyForget(uint64_t key);
+    void UpdateCanopyMap();
     void ClearFarObjects() override;
     // Independent Worldgen presentation owners. Authored affine transforms are
     // already grounded against resident Earth; never sample the native island.
@@ -258,6 +289,8 @@ class EngineWgpu : public EngineDummy
     void DrawDecalRotated(Vector3Par screen, float rhw, float sizeX, float sizeY, PackedColor color,
                           const MipInfo& mip, int specFlags, float dirX, float dirY,
                           float radianceScale = 1.0f) override;
+    void SetDecalDepthCutout(bool enabled) override { _decalDepthCutout = enabled; }
+    bool _decalDepthCutout = false;
     // World-space line / point primitives, fed by the same software-T&L mesh as
     // DrawSection above (Object::DrawLines / Object::DrawPoints). Without these the
     // base EngineDummy body is empty, so every world diagnostic line -- ballistics
@@ -311,6 +344,10 @@ class EngineWgpu : public EngineDummy
     bool SupportsSky() const override { return _renderer != nullptr; }
     SkySettings GetSkySettings() const override { return _sky; }
     int ControlWetSoilDiagnostic(int mode = -1) override;
+    bool SceneClutterObjectCreated(uint32_t id, LODShapeWithShadow* shape, const Matrix4& transform) override;
+    void SceneClutterObjectRemoved(uint32_t id) override;
+    void ClearClutterObjects();
+    void UpdateNativeClutter(const Vector3& camera) override;
     void SetSkySettings(const SkySettings& s) override;
     // Second cloud layer (high cirrus at ~7 km): on/off and flat-vs-volumetric. Defined here
     // rather than folded into PushRenderParams because it is its own FFI entry point, not a lane
@@ -427,6 +464,13 @@ class EngineWgpu : public EngineDummy
     // authored placement rows (Landscape::LoadOprwModern). Everything past the object
     // residency window is invisible without it; nothing here ever becomes an Object.
     void SetFarProxyInstances(const FarProxyInstance* data, size_t count) override;
+    void SetFarProxyInstancesOwned(std::vector<FarProxyInstance>&& instances) override;
+    bool SupportsRiverSurfaces() const override;
+    bool _riverSurfaces = false; //!< RFG-162: the renderer draws rivers as water (HDR on)
+    void SetRiverSurfaces(const float* vertices, size_t floatCount, const uint32_t* indices, size_t indexCount,
+                          const float* look, size_t lookCount) override;
+    void SetNativeFarProxyStart(float metres) override { _nativeFarProxyStart = metres; }
+    float _nativeFarProxyStart = -1.0f;
 
     // GRS-A — grass instance counts, read back from wgr_get_grass_stats.
     bool GetGrassStats(GrassStatsOut& out) const override;
@@ -760,6 +804,8 @@ class EngineWgpu : public EngineDummy
     std::vector<WgrDraw2DBatch> _batches;
     std::vector<WgrDraw3D> _draws3d;
     std::vector<WgrCmd> _cmds;
+    std::vector<WgrCmd> _blendStash; // see BlendRecordCapture; cleared with _cmds
+    bool _blendCapture = false;
     // Bone-matrix pool for skinned draws (128-matrix blocks; world pre-multiplied in).
     std::vector<WgrMat4> _palette;
     // Frame-global point/spot lights (rebuilt each frame in NextFrame, <= WGR_MAX_LIGHTS).
@@ -823,6 +869,7 @@ class EngineWgpu : public EngineDummy
         Ref<LODShapeWithShadow> shape;
     };
     std::unordered_map<uint32_t, FarGpuInstance> _farGpuInstances;
+    std::unordered_map<uint32_t, FarGpuInstance> _clutterGpuInstances; //!< RFG-153 near clutter meshes
     std::unordered_map<uint32_t, FarGpuInstance> _earthWorldgenInstances;
     std::unordered_map<const LODShapeWithShadow*, uint32_t> _earthWorldgenModelRefs;
     // Dedicated shape identities prevent Earth road alpha coverage from changing
@@ -872,6 +919,30 @@ class EngineWgpu : public EngineDummy
     // the expensive pool meshes and textures are released when the last streamed
     // instance leaves the working set, then rebuilt if that shape returns.
     std::unordered_map<const LODShapeWithShadow*, std::vector<uint64_t>> _gpuModelMeshes;
+    // LOD-STREAM: per registered shape, its level meshes in registration order. `lodIndex` is the
+    // level's index in the model's registered LOD list (-1 = built but not registered);
+    // `streamable` = the mesh can be rebuilt bit-exact from `src` (no conform/forest/church
+    // patching). Producer-thread only.
+    struct LodLevelMesh
+    {
+        const Shape* src = nullptr;
+        uint64_t mesh = 0;
+        int level = 0;
+        int lodIndex = -1;
+        bool streamable = false;
+        bool evicted = false;
+        double unneededSince = 0;
+        uint64_t bytes = 0;
+    };
+    std::unordered_map<const LODShapeWithShadow*, std::vector<LodLevelMesh>> _gpuModelLodMeshes;
+    // Filled by the drain (LodStreamTick): demand indexed by PRODUCER model handle, 255 = none.
+    std::mutex _lodStreamMutex;
+    std::vector<uint8_t> _lodStreamDemand;
+    uint64_t _lodStreamDemandSerial = 0, _lodStreamSeenSerial = 0;
+    uint64_t _lodStreamFrame = 0;
+    uint64_t _lodStreamEvictedBytes = 0, _lodStreamEvictions = 0, _lodStreamRestores = 0;
+    std::atomic<uint64_t> _lodStreamEvictRefused{0};
+    void UpdateLodStreaming();
     // RFG-088: level Shape -> the retained mesh (producer handle) built from exactly the
     // vertices CreateVertexBuffer would build, so a CPU-path buffer for that level can share
     // it. Conform levels (BuildOrigVertices) and forest levels (crown-patched conform words)
@@ -1140,12 +1211,17 @@ class EngineWgpu : public EngineDummy
     // fills, so this shares its ordering dependency. WGR_MATERIAL_NORMAL_POWER=0 forces
     // 1.0 everywhere (the pre-support picture) for the A/B.
     float ResolveMaterialNormalPower(const ShapeSection& section);
+    // RFG-181/185: a native crown's far-normal word for WgrModelSection::far_normals -- bits 0-12
+    // FarLODDistanceOffset (dm), bit 13 crown, bit 15 NormalsToCamera, bits 16-25 FarLODHeightOffset
+    // (dm, signed 10-bit), bits 26-31 SSSBackScattering x 63. 0 for every other material.
+    uint32_t ResolveMaterialFarNormals(const ShapeSection& section);
     // A section's crown self-occlusion volume, packed for the GPU record:
     // ao_p0 = trunk-axis centre (model space) + intensity, ao_p1 = height,
     // radius, 0, 0. All-zero when the material names no volume. Shares the
     // translation-cache ordering dependency. WGR_FOLIAGE_CROWN_AO=0 zeroes the
     // intensity lane (the pre-support picture) for the A/B.
     void ResolveMaterialCrownAo(const ShapeSection& section, float aoP0[4], float aoP1[4]);
+    uint32_t ResolveColorizeMean(const std::string& path);
     // A section's environment (reflection) map when its material names a loadable one,
     // or 0. DZ-003: DayZ water is authored as a near-black constant plus a reflection,
     // so a non-zero answer here is what marks a surface reflective for the shader.
@@ -1189,6 +1265,28 @@ class EngineWgpu : public EngineDummy
     bool _smEnabledFrame = false;
     shadow::CascadeSet _smCascades;
     int _smCascadeRes = 0;
+    // FAR-CASCADE REUSE (PERF 2026-10-14, UpdateShadowCascadeCache). What each sun cascade
+    // layer currently holds, what this frame decided, and the matrices the lit pass samples.
+    struct ShadowCascadeCacheEntry
+    {
+        bool valid = false;
+        shadow::Mat4 vp; // camera-relative light VP the layer was rendered with
+        float camPos[3] = {0.0f, 0.0f, 0.0f};
+        shadow::Vec3 sunDir;
+        float split = 0.0f, omniRadius = 0.0f;
+        int count = 0, omniCount = 0, resolution = 0;
+    };
+    ShadowCascadeCacheEntry _smCache[4];
+    ShadowCascadeCacheEntry _smCachePending[4];
+    uint32_t _smKeepMask = 0;
+    uint32_t _smRefreshMask = 0;
+    shadow::Mat4 _smSampleVP[4];
+    uint64_t _smCacheTick = 0;
+    struct
+    {
+        uint32_t considered = 0, kept = 0, uncovered = 0;
+    } _smCacheStats;
+    void UpdateShadowCascadeCache();
     bool _smCascadesValid = false;
     std::vector<WgrShadowCaster> _shadowCasters;
 
@@ -1284,6 +1382,10 @@ class EngineWgpu : public EngineDummy
         float farNearCutoff = 0.0f, farDistance = 0.0f, farPixelLimit = 0.0f;
         uint32_t farEnabled = 0;
         bool farParamsDirty = false;
+        // Canopy occlusion grid (UpdateCanopyMap), n x n; applied by wgr_terrain_set_canopy.
+        uint32_t canopyN = 0;
+        std::vector<float> canopyTop, canopyCover;
+        bool canopyDirty = false;
 
         // REN-THR-013: the per-frame producer-side pushes that used to reach the renderer
         // directly from NextFrame and the draw traversal. Queued like the rest, applied by the
@@ -1301,6 +1403,12 @@ class EngineWgpu : public EngineDummy
         bool terrainParamsDirty = false;
         std::vector<float> snowData;
         std::vector<float> mudData;
+        std::vector<float> mudFarData;
+        std::vector<float> craterNearData; // BOOM-001: CraterField::Snapshot(near), heights + materials
+        std::vector<float> craterFarData;
+        std::vector<float> snowMarkData; // BOOM-004: SnowField::NearestBulletMarks
+        std::vector<float> grassCraterData;
+        float mudWater = -1.0f; // standing water in mud ruts [0,1]; < 0 = no update queued
         std::vector<float> sandData;
         // Sinkhole W1: this frame's terrain hole edges (n x {nx, nz, d, last}); applied with the rest so the
         // landscape draw never touches the renderer itself.
@@ -1318,7 +1426,11 @@ class EngineWgpu : public EngineDummy
         bool smokeVolumeDirty = false;
         // FIRE-001: this frame's fires for the volumetric fire
         std::vector<WgrFireSource> fireSources;
+        std::vector<float> muzzleFlashData; // BOOM-005: render::CollectMuzzleFlashes
         bool fireDirty = false;
+        // MUD-001: this frame's mud sprays (accumulated if a frame is skipped)
+        std::vector<WgrMudEmitter> mudEmitters;
+        bool mudDirty = false;
         float smokeStrength = 0.0f;
         bool smokeDirty = false;
         float cloudShadowStrength = 0.0f, starIntensity = 0.0f, lensFlare = 0.0f;
@@ -1476,9 +1588,14 @@ class EngineWgpu : public EngineDummy
             LodDemandCancel,
             SharedMeshFixtureObserve,
             GeometryPageFixtureObserve,
-            RetailPageRecordObserve // explicit non-instanced retail record cut only
+            RetailPageRecordObserve, // explicit non-instanced retail record cut only
+            MeshEvict,     // LOD-STREAM: give a level mesh's pool storage back, keep its handle
+            MeshRestore,   // LOD-STREAM: upload `verts`/`indices` again under `mesh`
+            LodStreamTick, // LOD-STREAM: read the renderer's distance demand into _lodStreamDemand
+            Callback       // run `callback` on the render thread at the drain (renderer calls, no window wait)
         };
         Kind kind = MeshCreate;
+        std::function<void(WgrRenderer*)> callback; // Callback
         uint64_t mesh = 0;  // MeshCreate: the producer handle being defined; MeshDestroy: the one dying
         uint32_t model = 0; // ModelRegister: the producer handle being defined
         float sphereRadius = 0.0f;
@@ -1745,6 +1862,15 @@ class EngineWgpu : public EngineDummy
     static bool ProducerMayTouchRenderer();
     // Optional streaming work may acquire an already idle renderer, never wait for one.
     static bool TryAcquireProducerWindow();
+    //! Queue renderer calls to run on the render thread at its next resource drain, in order with
+    //! the other resource operations -- for producer work that must not wait for the window.
+    void QueueRendererCallback(std::function<void(WgrRenderer*)> callback)
+    {
+        ResourceOp op;
+        op.kind = ResourceOp::Callback;
+        op.callback = std::move(callback);
+        _resourceOps.push_back(std::move(op));
+    }
     // REN-THR-013: the lazy producer window. Every remaining direct renderer call on the
     // producer side goes through this instead of relying on InitDraw having waited: it returns
     // at once while the worker is idle, and otherwise waits for it -- and records who asked, so
@@ -1756,6 +1882,11 @@ class EngineWgpu : public EngineDummy
     void QueueTerrainParams(const WgrTerrainParams& p);
     void QueueSnow(std::vector<float> data) { _pendingSet.snowData = std::move(data); }
     void QueueMud(std::vector<float> data) { _pendingSet.mudData = std::move(data); }
+    void QueueMudFar(std::vector<float> data) { _pendingSet.mudFarData = std::move(data); }
+    void QueueGrassCraters(std::vector<float> data) { _pendingSet.grassCraterData = std::move(data); }
+    void QueueSnowMarks(std::vector<float> data) { _pendingSet.snowMarkData = std::move(data); }
+    void QueueCraters(std::vector<float> data, bool farView) { (farView ? _pendingSet.craterFarData : _pendingSet.craterNearData) = std::move(data); }
+    void QueueMudWater(float level) { _pendingSet.mudWater = level; }
     void QueueSand(std::vector<float> data) { _pendingSet.sandData = std::move(data); }
     void QueueWaterParams(const WgrWaterParams& p);
     void QueueRainWater(const WgrRainWaterParams& p, uint64_t revision, std::vector<WgrVec4> cells);

@@ -26,6 +26,9 @@ struct TemporalParams {
     // x = debug magnitude scale, y unused, zw = the DEBUG target's size in pixels
     // (the velocity texture is render-res, the debug view draws at output-res).
     misc: vec4<f32>,
+    // Velocity pass: cloud deck motion. xy = this frame's wind step (world m, x/z), z = deck
+    // mid-shell radius, w = camera radius (planet-centred). z <= w = none.
+    cloud: vec4<f32>,
 };
 
 @group(0) @binding(0) var scene_depth: texture_depth_2d;
@@ -54,7 +57,8 @@ fn fs_velocity(in: VsOut) -> @location(0) vec2<f32> {
     // Clamp the far-clear 0 to a tiny stored depth instead of branching: stored d =
     // near/distance, so 1e-7 IS a point hundreds of kilometres out, and the sky then
     // reprojects by camera rotation with negligible (sub-1e-4 px) translation parallax.
-    let d = max(textureLoad(scene_depth, frag, 0), 1e-7);
+    let stored = textureLoad(scene_depth, frag, 0);
+    let d = max(stored, 1e-7);
     let uv = in.pos.xy / dims;
     // Depth belongs to the jittered raster ray. Both matrices and the output
     // motion are unjittered, so remove the current raster offset exactly once.
@@ -69,6 +73,26 @@ fn fs_velocity(in: VsOut) -> @location(0) vec2<f32> {
     }
     let prev_ndc = prev_clip.xy / prev_clip.w;
     let delta_ndc = ndc - prev_ndc;
+    // Sky pixels: the clouds over them DRIFT. A deck that moves under motion vectors of zero is
+    // read by DLSS as detail that should hold still, and its history smears along the wind --
+    // the horizontal streaks through every cloud (gone with the clouds frozen). The sky renders
+    // the deck at world + wind offset (sky.wgsl cloud_world), so what this pixel shows at the
+    // deck's middle stood one wind step upwind last frame. Clear sky between clouds takes the
+    // same vector; it has no detail for a vector to be wrong about.
+    if (stored <= 0.0 && tp.cloud.z > tp.cloud.w && tp.cloud.w > 0.0) {
+        let dir = normalize(rel_h.xyz / rel_h.w);
+        // Ray from the camera at (0, w, 0) planet-centred, to the shell |o + t*dir| = z.
+        let b = tp.cloud.w * dir.y;
+        let c = tp.cloud.w * tp.cloud.w - tp.cloud.z * tp.cloud.z;
+        let t = -b + sqrt(max(b * b - c, 0.0));
+        let at = dir * t;
+        let was = at - vec3<f32>(tp.cloud.x, 0.0, tp.cloud.y) + tp.cam_delta.xyz;
+        let was_clip = tp.prev_view_proj * vec4<f32>(was, 1.0);
+        if (was_clip.w > 1e-6) {
+            let d = ndc - was_clip.xy / was_clip.w;
+            return vec2<f32>(d.x * 0.5, d.y * -0.5);
+        }
+    }
     return vec2<f32>(delta_ndc.x * 0.5, delta_ndc.y * -0.5);
 }
 

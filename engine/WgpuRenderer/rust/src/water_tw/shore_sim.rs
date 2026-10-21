@@ -66,6 +66,13 @@ impl Region {
     }
 }
 
+/// Whether `r` simulates the coast block centred at `c` (the block's own 95 m half-size inside
+/// the region, so the whole block's beach is in it).
+fn covers(r: &Region, c: [f32; 2]) -> bool {
+    let reach = SIZE * 0.5 - 95.0;
+    (r.centre[0] - c[0]).abs() <= reach && (r.centre[1] - c[1]).abs() <= reach
+}
+
 fn dist(a: [f32; 2], b: [f32; 2]) -> f32 {
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
 }
@@ -99,8 +106,11 @@ pub fn select(slots: &mut [Option<Region>; K], candidates: &[[f32; 2]], cam: [f3
         }
     }
     for (d, c) in wanted {
-        // already simulated (or covered by a region close enough to it)
-        if slots.iter().flatten().any(|r| dist(r.centre, c) < MIN_SEPARATION) {
+        // already simulated: inside a region, with a margin. (OP, 2026-10-13: this was "a region
+        // centre within MIN_SEPARATION", 300 m, while a region reaches only SIZE / 2 = 190 m -- a
+        // beach 190..300 m from a centre was neither simulated nor given a region of its own:
+        // owner, "the water is not really going over the sand to make it wet".)
+        if slots.iter().flatten().any(|r| covers(r, c)) {
             continue;
         }
         // an empty slot, else the farthest region if this candidate is clearly nearer

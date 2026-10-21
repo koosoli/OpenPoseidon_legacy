@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <vector>
 #include <algorithm>
 #include <Poseidon/Network/NetworkImpl.hpp>
@@ -78,6 +79,7 @@ namespace Poseidon
 
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
+#include <Poseidon/Game/Commands/GameStateExtA3Rsc.hpp>
 
 namespace Poseidon
 {
@@ -1734,7 +1736,10 @@ GameValue ObjSwitchCamera(const GameState* state, GameValuePar oper1, GameValueP
 bool ParseEffect(const GameState* state, GameStringType& effect, GameStringType& str, float& speed, GameValuePar oper1)
 {
     const GameArrayType& array = oper1;
-    if (array.Size() < 2 || array.Size() > 3)
+    // Arma 2/3 add trailing fields (speed, showInMap, structured text / drawOverHUD) that
+    // have no counterpart here; the first three are what CWA reads
+    const bool armaTail = Poseidon::Arma1Compat::Active() && Poseidon::Arma1Compat::Generation() >= 2;
+    if (array.Size() < 2 || (array.Size() > 3 && !armaTail))
     {
         state->SetError(EvalDim, array.Size(), 2);
         return false;
@@ -1753,7 +1758,7 @@ bool ParseEffect(const GameState* state, GameStringType& effect, GameStringType&
     effect = array[0];
     str = array[1];
     speed = 1;
-    if (array.Size() == 3)
+    if (array.Size() >= 3)
     {
         if (array[2].GetType() != GameScalar)
         {
@@ -1793,6 +1798,7 @@ static TitEffectName TitEffectFromString(const GameStringType& str)
 
 GameValue GameTitleText(const GameState* state, GameValuePar oper1)
 {
+    Poseidon::Arma3Rsc::CloseLayer("title");
     TITLE_PREFIX
 
     GWorld->SetTitleEffect(CreateTitleEffect(name, effect, speed));
@@ -1801,6 +1807,7 @@ GameValue GameTitleText(const GameState* state, GameValuePar oper1)
 
 GameValue GameTitleRsc(const GameState* state, GameValuePar oper1)
 {
+    Poseidon::Arma3Rsc::Open("title", oper1);
     TITLE_PREFIX
 
     const ParamEntry* cls = FindRscTitle(effect);
@@ -1819,7 +1826,9 @@ GameValue GameTitleObj(const GameState* state, GameValuePar oper1)
     return NOTHING;
 }
 
-GameValue CutText(const GameState* state, GameValuePar oper1)
+// The cut effect alone; cutText / cutRsc below also end or open an Arma 3 stand-in display
+// on the layer (GameStateExtA3Rsc.cpp), the layered forms on their own layer.
+GameValue CutTextEffect(const GameState* state, GameValuePar oper1)
 {
     TITLE_PREFIX
 
@@ -1827,7 +1836,7 @@ GameValue CutText(const GameState* state, GameValuePar oper1)
     return NOTHING;
 }
 
-GameValue CutRsc(const GameState* state, GameValuePar oper1)
+GameValue CutRscEffect(const GameState* state, GameValuePar oper1)
 {
     TITLE_PREFIX
 
@@ -1837,6 +1846,18 @@ GameValue CutRsc(const GameState* state, GameValuePar oper1)
         GWorld->SetCutEffect(CreateTitleEffectRsc(name, *cls));
     }
     return NOTHING;
+}
+
+GameValue CutText(const GameState* state, GameValuePar oper1)
+{
+    Poseidon::Arma3Rsc::CloseLayer("0");
+    return CutTextEffect(state, oper1);
+}
+
+GameValue CutRsc(const GameState* state, GameValuePar oper1)
+{
+    Poseidon::Arma3Rsc::Open("0", oper1);
+    return CutRscEffect(state, oper1);
 }
 
 GameValue CutObj(const GameState* state, GameValuePar oper1)
@@ -2512,6 +2533,22 @@ GameValue ObjStop(const GameState* state, GameValuePar oper1, GameValuePar oper2
     return NOTHING;
 }
 
+// The AI bits a disableAI/enableAI name stands for. CWA knows TARGET, AUTOTARGET, MOVE and
+// ANIM; Arma 3 adds PATH (stand, but still turn and shoot -- here the same as MOVE) and ALL.
+// Arma 3's other features (AUTOCOMBAT, COVER, SUPPRESSION, FSM, ...) have no counterpart in
+// this AI and read as no bit at all, as before.
+static int DisabledAIBits(const char* name)
+{
+    if (!name)
+        return 0;
+    if (!_stricmp(name, "PATH"))
+        return AIUnit::DAMove;
+    if (!_stricmp(name, "ALL"))
+        return AIUnit::DATarget | AIUnit::DAMove | AIUnit::DAAutoTarget | AIUnit::DAAnim;
+    const int s = GetEnumValue<AIUnit::DisabledAI>(name);
+    return s == INT_MIN ? 0 : s;
+}
+
 GameValue ObjDisableAI(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     Object* obj = GetObject(oper1);
@@ -2530,14 +2567,23 @@ GameValue ObjDisableAI(const GameState* state, GameValuePar oper1, GameValuePar 
         return NOTHING;
     }
     GameStringType str = oper2;
-    const char* ss = str;
-    AIUnit::DisabledAI s = GetEnumValue<AIUnit::DisabledAI>(ss);
-    int dai = unit->GetAIDisabled();
-    if (s == INT_MIN)
+    unit->SetAIDisabled(unit->GetAIDisabled() | DisabledAIBits(str));
+    return NOTHING;
+}
+
+// enableAI (Arma 1 and later) undoes disableAI. It used to be ignored, so a unit an Arma 3
+// mission holds back with disableAI "MOVE" until the player arrives never moved again.
+GameValue ObjEnableAI(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* obj = GetObject(oper1);
+    EntityAI* veh = obj ? dyn_cast<EntityAI>(obj) : nullptr;
+    AIUnit* unit = veh ? veh->CommanderUnit() : nullptr;
+    if (!unit)
     {
-        s = (AIUnit::DisabledAI)0;
+        return NOTHING;
     }
-    unit->SetAIDisabled(dai | s);
+    GameStringType str = oper2;
+    unit->SetAIDisabled(unit->GetAIDisabled() & ~DisabledAIBits(str));
     return NOTHING;
 }
 

@@ -1,4 +1,4 @@
-#import frame::{frame, reverse_z, apply_fog, sky_irradiance, terrain_sun_shadow, sky_vis_ao, cloud_sun_shadow}
+#import frame::{frame, reverse_z, apply_fog, sky_irradiance, terrain_sun_shadow, sky_vis_ao, canopy_sky_ao, canopy_sun_shadow, cloud_sun_shadow}
 #import gbuffer::{oct_encode, a2c_coverage}
 #import shadow::shadow_strength
 
@@ -114,7 +114,7 @@ struct GrassParams {
     native: vec4<f32>,
     // RFG-091: .x = how far the native blade takes the ground colour in native.yzw
     // (the PlantMat's SatMapLerp); .y gust variation (-1 = previous gusts),
-    // .z front size in metres, .w spare.
+    // .z front size in metres, .w = 1 the real sun (grass_light_dir).
     native2: vec4<f32>,
     // Opaque bounding box per photo layer, (u0, u1, v0, v1) in texture space.
     // The card quad is trimmed to it: the margin outside can never survive the
@@ -130,6 +130,46 @@ struct GrassParams {
     wind_flutter: vec4<f32>,
     // Separate blade_tex means, linear and source-opacity weighted; w=0 invalid.
     blade_layer_means: array<vec4<f32>, 8>,
+    // Per photo-card layer: x = selection weight within its surface's run (0 everywhere =
+    // uniform), y = max draw distance as a fraction of the card ring's reach. Renderer-owned,
+    // set by wgr_grass_set_layer_pick from the map's own clutter definitions.
+    layer_pick: array<vec4<f32>, 32>,
+    // RFG-116: .x = bit per atlas layer whose run belongs to a surface naming no PlantMat;
+    // the near ring places no blade on a cell whose run starts there. .yzw spare.
+    blade_skip: vec4<u32>,
+    // RFG-117: the near ring as Reforger's PlantMat plants -- each instance BladesCount crossed
+    // cards of a whole atlas tuft, cut out by the atlas alpha. .x = 1 on (native only), .y cards
+    // per plant, .z Zenith lean (deg), .w ZenithRandomOffset (deg).
+    native_tuft: vec4<f32>,
+    // .x card height (m), .y HeightRandomOffset, .z plants per m^2 (the PlantMat's Plants), .w spare.
+    native_tuft2: vec4<f32>,
+    // Per blade layer (8): width / height of its atlas rectangle, and its ScaleDistribution.
+    tuft_aspect: array<vec4<f32>, 2>,
+    tuft_scale: array<vec4<f32>, 2>,
+    // RFG-138: per-surface PlantMat blade sets (blade_set_of picks the set from the cell's run).
+    // Set s: tuft_sets[2s] = cards, Zenith deg, ZenithRandomOffset deg, height m;
+    //        tuft_sets[2s+1] = HeightRandomOffset, Plants/m2, ground-colour lerp, has mask.
+    // tuft_set_aspect / tuft_set_scale: set s, layer k at [2s + k/4][k%4]. All zero = one set.
+    tuft_sets: array<vec4<f32>, 16>,
+    tuft_set_aspect: array<vec4<f32>, 16>,
+    tuft_set_scale: array<vec4<f32>, 16>,
+    // .x = bit per atlas layer whose run grows blades only (no cards); .y = bit per layer whose
+    // cards are drawn at full coverage (RFG-143 crop distance cards). .zw spare.
+    card_skip: vec4<u32>,
+    // RFG-159 (native_tuft_shade): .x on, .y root occlusion strength, .z translucency, .w the
+    // NTOMap green sign (-1 DirectX, 0 = no per-texel normal).
+    native_look: vec4<f32>,
+    // .x receive cascade shadows, .y up-bend of the shading normal, .z NormalPower multiplier,
+    // .w cascade fade-out distance (m).
+    native_look2: vec4<f32>,
+    // RFG-160 (native near ring): .x distance past which plants thin as d0/d, .y the widening
+    // exponent of the survivors, .z height floor in the outer dissolve, .w radius multiplier
+    // (applied by grass/mod.rs to near_radius).
+    native_ring: vec4<f32>,
+    // GRS-VAR (grass/mod.rs resolve_variety): .x on, .y head brightness, .z head share, .w drift
+    // field frequency (1/m); look_weights = the per-slot weights pick_look draws from.
+    variety: vec4<f32>,
+    look_weights: array<vec4<f32>, 4>,
 };
 
 // 32 bytes. `pos_seed` stays f32 for world precision; everything the compute
@@ -157,6 +197,19 @@ struct WindField {
 @group(1) @binding(0) var<uniform> terrain: TerrainParams;
 @group(1) @binding(1) var heightmap: texture_2d<f32>;
 @group(1) @binding(2) var geography: texture_2d<u32>;
+// RFG-PBR: a native world's satellite over the whole land (sRGB-encoded, alpha 0 where it has no
+// say); a 1x1 placeholder elsewhere. Read by grass_ground_colour.
+@group(1) @binding(4) var grass_satellite: texture_2d<f32>;
+// RFG-107/109: what a native world's grass keeps out of, per land cell
+// (TerrainWgpu::UploadGrassRoadCells):
+//   [0]           land range n (0 = nothing; also ignored when it is not this ground's range)
+//   [1]           word offset of the shape table
+//   [2 .. 2+n*n]  per cell: (word offset of its index list << 8) | shape count
+//   index lists   u32 shape numbers
+//   shape table   6 words per shape (f32 bits, world metres):
+//                   road:   ax, az, bx, bz, half width, -1
+//                   object: centre x, z, unit axis x, z, half extent along, across
+@group(1) @binding(5) var<storage, read> road_cells: array<u32>;
 
 // Sinkhole W1 (port of Malprave terrainHole2 to wgpu): terrain holes -- world X/Z convex areas a hole-cutting
 // object (memory-LOD `terrain_hole*` selection + roadway LOD) has cut out of the ground. Written by
@@ -167,6 +220,29 @@ struct TerrainHoles {
     edges: array<vec4<f32>, 64>,
 };
 @group(1) @binding(3) var<storage, read> holes: TerrainHoles;
+
+// BOOM-001: explosion craters near the camera (TerrainWgpu uploads the nearest 64): no grass grows
+// on a crater's fresh soil. discs[i] = (x, z, soil radius, seed); the edge is ragged like the
+// thrown soil the terrain draws there.
+struct GrassCraters {
+    info: vec4<f32>,
+    discs: array<vec4<f32>, 64>,
+};
+@group(1) @binding(6) var<storage, read> grass_craters: GrassCraters;
+fn on_crater_soil(xz: vec2<f32>) -> bool {
+    let n = min(u32(max(grass_craters.info.x, 0.0)), 64u);
+    for (var i = 0u; i < n; i = i + 1u) {
+        let c = grass_craters.discs[i];
+        let d = xz - c.xy;
+        let d2 = dot(d, d);
+        if (d2 > c.z * c.z * 1.44) { continue; }
+        let a = atan2(d.y, d.x);
+        let ragged = 0.88 + 0.12 * sin(5.0 * a + c.w) + 0.08 * sin(11.0 * a + c.w * 1.7)
+                   + 0.10 * fract(sin(dot(floor(xz * 3.0), vec2<f32>(12.9898, 78.233))) * 43758.5453);
+        if (d2 < c.z * c.z * ragged * ragged) { return true; }
+    }
+    return false;
+}
 
 fn in_terrain_hole(world: vec3<f32>) -> bool {
     let xz = world.xz;
@@ -270,7 +346,14 @@ fn card_placement_spacing() -> f32 {
 
 // Must mirror `near_placement_spacing` in grass/mod.rs: the shader decides where
 // candidates land, the renderer decides how many cells exist.
+// RFG-117: the near ring draws whole Reforger tufts (native_tuft.x), one PlantMat plant per cell.
+fn native_tufts_on() -> bool { return grass.native_tuft.x > 0.5 && grass.native.x > 0.0; }
+
 fn near_placement_spacing() -> f32 {
+    // `Plants` per square metre: one plant per cell of 1/sqrt(Plants) metres.
+    if (native_tufts_on()) {
+        return inverseSqrt(clamp(grass.native_tuft2.z, 0.25, 64.0)) / sqrt(max(grass.density, 1.0));
+    }
     let blade = grass.spacing * select(1.72, 3.20, grass.renderer.x > 0.5);
     return select(blade, card_placement_spacing(), cards_on_near()) / sqrt(max(grass.density, 1.0));
 }
@@ -502,11 +585,40 @@ fn pack_lod_fade(fade: f32) -> u32 {
     return pack2x16unorm(vec2<f32>(clamp(fade, 0.0, 1.0), 0.0));
 }
 
+fn pack_lod_fade_edge(fade: f32, presence: f32) -> u32 {
+    return pack2x16unorm(vec2<f32>(clamp(fade, 0.0, 1.0), 1.0 - clamp(presence, 0.0, 1.0)));
+}
+
 // Height multiplier from the cached fade. It deliberately stops at 0.45 rather
 // than 0: the dissolve removes the clump, so shrinking it to nothing as well
 // would thin the join twice over.
 fn lod_height_scale(packed_z: u32) -> f32 {
-    return mix(0.45, 1.0, unpack2x16unorm(packed_z).x);
+    // x = ring fade (floored at 0.45: the dissolve already removes clumps), y = how far into a
+    // meadow margin the clump stands (grass_edge_presence, stored inverted so 0 = full height):
+    // margin blades come down to a quarter, which is what makes the edge read as a fade.
+    let f = unpack2x16unorm(packed_z);
+    return mix(0.45, 1.0, f.x) * (1.0 - 0.75 * f.y);
+}
+
+// RFG-160: a native world's tufts keep (most of) their height into the ring's outer dissolve --
+// shrinking them to 0.45 there flattened the meadow from 20 m on -- and past native_ring.x metres
+// they thin as d0/d, so the plants per unit of screen stay about constant out to the larger ring,
+// the survivors widened by (d/d0)^native_ring.y so the meadow keeps its cover. The thinning hash
+// has a salt of its own (see lod_dissolve on why salts must differ).
+fn native_lod_height_scale(packed_z: u32) -> f32 {
+    let f = unpack2x16unorm(packed_z);
+    return mix(clamp(grass.native_ring.z, 0.0, 1.0), 1.0, f.x) * (1.0 - 0.75 * f.y);
+}
+fn native_tuft_keep(distance: f32) -> f32 {
+    let d0 = grass.native_ring.x;
+    if (d0 <= 0.5 || distance <= d0) { return 1.0; }
+    return d0 / distance;
+}
+fn native_tuft_thinned(cell_id: vec2<i32>, distance: f32) -> bool {
+    return hash_cell01(cell_id, 0x2b7e1516u) > native_tuft_keep(distance);
+}
+fn native_tuft_widen(distance: f32) -> f32 {
+    return pow(1.0 / native_tuft_keep(distance), clamp(grass.native_ring.y, 0.0, 1.0));
 }
 
 // Which photographed atlas layer a clump uses. Layer 0 is the primary clump and
@@ -520,6 +632,15 @@ fn photo_layer_bounds(layer: u32) -> vec4<f32> {
     // A degenerate or unset box would collapse the card; fall back to the quad.
     if (b.y - b.x < 0.02 || b.w - b.z < 0.02) { return vec4<f32>(0.0, 1.0, 0.0, 1.0); }
     return b;
+}
+
+// RFG-108: a layer holding a plant rasterised from its own model carries the world size of its
+// full square in layer_pick.z (base on the bottom edge) and its MinScale..MaxScale spread in .w.
+// 0 = a stock photo/sheet card, sized the old way. Mirrored in grass_shadow.wgsl.
+fn plant_card_size(layer: u32, xz: vec2<f32>) -> f32 {
+    let pick = grass.layer_pick[min(layer, 31u)];
+    if (pick.z <= 0.0) { return 0.0; }
+    return pick.z * (1.0 + pick.w * (hash11(xz + 13.0) * 2.0 - 1.0));
 }
 
 fn photo_layer_weight(index: u32) -> f32 {
@@ -541,6 +662,41 @@ fn instance_layer_run(packed_w: u32) -> vec2<u32> {
     return vec2<u32>((packed_w >> 3u) & 31u, (packed_w >> 8u) & 7u);
 }
 
+// RFG-138: the blade set (0..7) the run starting on atlas layer `first` draws its near-ring tufts
+// from -- 3 bits per layer across blade_skip.yzw, layer L at bit 3L. 0 when no sets were uploaded.
+fn blade_set_of(first: u32) -> u32 {
+    let bit = min(first, 31u) * 3u;
+    let word = bit / 32u;
+    let shift = bit % 32u;
+    let lo = select(select(grass.blade_skip.w, grass.blade_skip.z, word == 1u), grass.blade_skip.y, word == 0u);
+    var v = lo >> shift;
+    if (shift > 29u) {
+        let hi = select(grass.blade_skip.w, grass.blade_skip.z, word == 0u);
+        v = v | (hi << (32u - shift));
+    }
+    return v & 7u;
+}
+
+fn blade_sets_on() -> bool { return grass.tuft_sets[0].x > 0.5; }
+
+// RFG-138: the cell's run grows blades only (a PlantMat surface with no ClutterConfig: crop fields).
+fn cell_skips_cards(geo: u32) -> bool {
+    if (grass.card_skip.x == 0u || (geo & GEO_AUTHORED) == 0u || ((geo >> 28u) & 7u) == 0u) { return false; }
+    return ((grass.card_skip.x >> ((geo & GEO_SURFACE_MASK) >> GEO_SURFACE_SHIFT)) & 1u) != 0u;
+}
+
+// RFG-143: the cell's run is a crop surface's PlantMat distance card (card_skip.y): full coverage.
+fn cell_full_cards(geo: u32) -> bool {
+    if (grass.card_skip.y == 0u || (geo & GEO_AUTHORED) == 0u || ((geo >> 28u) & 7u) == 0u) { return false; }
+    return ((grass.card_skip.y >> ((geo & GEO_SURFACE_MASK) >> GEO_SURFACE_SHIFT)) & 1u) != 0u;
+}
+
+// RFG-116: the cell's run starts on a layer whose surface names no PlantMat.
+fn cell_skips_blades(geo: u32) -> bool {
+    if (grass.blade_skip.x == 0u || (geo & GEO_AUTHORED) == 0u || ((geo >> 28u) & 7u) == 0u) { return false; }
+    return ((grass.blade_skip.x >> ((geo & GEO_SURFACE_MASK) >> GEO_SURFACE_SHIFT)) & 1u) != 0u;
+}
+
 // The "Photo grass mix" slider (renderer.z): the fraction of world-space patches
 // that draw from the FULL variety. 0 = ONE variety everywhere -- the surface's
 // first clutter class on a map-clutter world, the primary clump on a loose-card
@@ -549,6 +705,10 @@ fn instance_layer_run(packed_w: u32) -> vec2<u32> {
 // global-mix path, so on every map that declares its own clutter runs (Takistan,
 // Stratis) the slider did nothing at all.
 fn photo_variety_mix() -> f32 {
+    // RFG-108: a native world's cards are its own plants at its own per-plant frequencies; the
+    // single-variety default (0) was a cure for A3 photo plates and leaves a Reforger meadow one
+    // species of dry grass.
+    if (grass.native2.w > 0.5) { return 1.0; }
     return clamp(grass.renderer.z, 0.0, 1.0);
 }
 
@@ -561,7 +721,24 @@ fn pick_photo_layer_run(patch_cell: vec2<f32>, run: vec2<u32>) -> u32 {
         if (hash11(patch_cell + vec2<f32>(19.0, 71.0)) >= photo_variety_mix()) {
             return min(run.x, 31u);
         }
-        let pick = u32(hash11(patch_cell + vec2<f32>(43.0, 11.0)) * f32(run.y));
+        // Weighted by the map's own per-plant frequency when it gives one (Reforger: collection
+        // Occurrence x plant Density; layer_pick.x). Uniform when every weight in the run is 0.
+        let h = hash11(patch_cell + vec2<f32>(43.0, 11.0));
+        var total = 0.0;
+        for (var i = 0u; i < run.y; i++) {
+            total += max(grass.layer_pick[min(run.x + i, 31u)].x, 0.0);
+        }
+        if (total > 0.0) {
+            var acc = 0.0;
+            for (var i = 0u; i < run.y; i++) {
+                acc += max(grass.layer_pick[min(run.x + i, 31u)].x, 0.0) / total;
+                if (h < acc) {
+                    return min(run.x + i, 31u);
+                }
+            }
+            return min(run.x + run.y - 1u, 31u);
+        }
+        let pick = u32(h * f32(run.y));
         return min(run.x + min(pick, run.y - 1u), 31u);
     }
     // Otherwise the legacy global mix: every OFP world, and any Arma surface
@@ -604,6 +781,104 @@ fn geo_clutter_coverage(geo: u32) -> f32 {
     return f32((geo & GEO_COVERAGE_MASK) >> GEO_COVERAGE_SHIFT) * (1.0 / 127.0);
 }
 
+// A geography cell grass may never enter: water, road, track, hard objects (buildings), and the
+// forest flags unless the diagnostic override relaxes them. Never faded into, never spilled onto.
+fn grass_cell_blocked(geo: u32) -> bool {
+    // RFG-109: hard-object bits (10-11) are the footprints' job where this ground has them.
+    let hard = select(GEO_EXCLUDE_HARD, GEO_EXCLUDE_HARD & ~0x00000c00u, grass_has_exclusion_shapes());
+    return (geo & hard) != 0u ||
+        (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u);
+}
+
+fn grass_cell_weight(cell: vec2<i32>) -> f32 {
+    let c = clamp(cell, vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
+    let geo = textureLoad(geography, c, 0).x;
+    return select(0.0, 1.0, (geo & 0x80000000u) != 0u && !grass_cell_blocked(geo));
+}
+
+// How much of a full meadow this point carries, 0..1, from the grass/no-grass state of the four
+// geography cells around it. The cells are tens of metres wide on OFP worlds, and testing only the
+// point's own cell drew every meadow as a hard-edged square block. Interpolating the four cell
+// centres and sharpening with a warped threshold gives an edge that thins over ~a third of a cell
+// and wanders like a real field margin. A point in a blocked cell is 0 outright, and a blocked
+// neighbour counts as bare ground, so grass thins TOWARDS a road or building cell and never into
+// it. GRASS_HARD_CELL_EDGES (WGR_GRASS_EDGE_FADE=0) restores the square cells.
+fn grass_edge_presence(world_xz: vec2<f32>, own_geo: u32) -> f32 {
+    if (grass_cell_blocked(own_geo)) { return 0.0; }
+#ifdef GRASS_HARD_CELL_EDGES
+    return select(0.0, 1.0, (own_geo & 0x80000000u) != 0u);
+#else
+    let g = (world_xz - terrain.world_origin) / terrain.land_grid - vec2<f32>(0.5);
+    let c0 = vec2<i32>(floor(g));
+    let f = g - floor(g);
+    let w00 = grass_cell_weight(c0);
+    let w10 = grass_cell_weight(c0 + vec2<i32>(1, 0));
+    let w01 = grass_cell_weight(c0 + vec2<i32>(0, 1));
+    let w11 = grass_cell_weight(c0 + vec2<i32>(1, 1));
+    // Uniform neighbourhoods (the inside of a meadow, open bare ground) skip the noise.
+    let sum = w00 + w10 + w01 + w11;
+    if (sum >= 3.999) { return 1.0; }
+    if (sum <= 0.001) { return 0.0; }
+    // Linear, not smoothstepped: a smoothstep is steepest exactly on the cell boundary, which
+    // squeezed the whole margin into a few metres there.
+    let b = mix(mix(w00, w10, f.x), mix(w01, w11, f.x), f.y);
+    // Two octaves of value noise, ~0.6 and ~0.17 of a cell, scaled to the cell so a coarse world and a fine
+    // one get the same proportion of wander.
+    let cell_m = max(terrain.land_grid, 1.0);
+    let n = clump_noise(world_xz, 1.7 / cell_m, 0x5e3a91c7u) * 0.6 +
+            clump_noise(world_xz, 6.0 / cell_m, 0x2b7d40e5u) * 0.4;
+    // Full meadow only near the middle of a grass cell; the margin runs from there to a little
+    // past the boundary (blocked cells stay 0 regardless). The noise keeps it off a straight line.
+    return smoothstep(0.30, 0.95, b + (n - 0.5) * 0.45);
+#endif
+}
+
+// RFG-109: true when this ground has the per-cell shapes. The geography's hard-object bits
+// then stop blocking whole cells: on a native world they mark every 12.5 m cell holding a
+// fence post or a boulder, and the footprints below keep blades out of the objects themselves.
+fn grass_has_exclusion_shapes() -> bool {
+    let n = road_cells[0];
+    return n != 0u && n == terrain.land_range;
+}
+
+// RFG-107/109: how much grass `world_xz` keeps next to roads and hard objects, 0..1: 0 on a
+// road or inside a footprint, 1 from ~1.6 m past a road's edge and ~0.6 m past a footprint's.
+// The noise keeps the verge off a ruled line. Multiplies the meadow-edge presence, so the
+// margin is sparser AND shorter.
+fn grass_exclusion_presence(world_xz: vec2<f32>) -> f32 {
+    if (!grass_has_exclusion_shapes()) { return 1.0; }
+    let n = road_cells[0];
+    let cell = vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid));
+    if (any(cell < vec2<i32>(0)) || any(cell >= vec2<i32>(i32(n)))) { return 1.0; }
+    let entry = road_cells[2u + u32(cell.y) * n + u32(cell.x)];
+    let count = entry & 0xffu;
+    if (count == 0u) { return 1.0; }
+    let first = entry >> 8u;
+    let table = road_cells[1];
+    var road_d = 1e9;
+    var obj_d = 1e9;
+    for (var i = 0u; i < count; i = i + 1u) {
+        let w = table + road_cells[first + i] * 6u;
+        let a = vec2<f32>(bitcast<f32>(road_cells[w]), bitcast<f32>(road_cells[w + 1u]));
+        let b = vec2<f32>(bitcast<f32>(road_cells[w + 2u]), bitcast<f32>(road_cells[w + 3u]));
+        let e = bitcast<f32>(road_cells[w + 4u]);
+        let f = bitcast<f32>(road_cells[w + 5u]);
+        if (f < 0.0) {
+            let ab = b - a;
+            let t = clamp(dot(world_xz - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+            road_d = min(road_d, length(world_xz - (a + ab * t)) - e);
+        } else {
+            // b is the box's unit axis; e and f its half extents along and across it.
+            let d = world_xz - a;
+            let q = abs(vec2<f32>(dot(d, b), dot(d, vec2<f32>(-b.y, b.x)))) - vec2<f32>(e, f);
+            obj_d = min(obj_d, length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0));
+        }
+    }
+    if (road_d > 3.0 && obj_d > 1.5) { return 1.0; }
+    let jitter = clump_noise(world_xz, 0.45, 0x7b3e19a5u) - 0.5;
+    return smoothstep(0.05, 1.6, road_d + jitter * 0.6) * smoothstep(0.0, 0.6, obj_d + jitter * 0.3);
+}
+
 // Stable thinning by the authored coverage. Keyed on a salt of its own rather
 // than reusing the candidate's survival seed, so the coverage field thins the
 // set independently instead of correlating with the density hash and carving
@@ -640,6 +915,8 @@ fn photo_card_scale() -> f32 {
 }
 
 fn card_coverage_for(geo: u32) -> f32 {
+    // RFG-143: a crop field's cards are the field itself, not scattered meadow plants -- full.
+    if (cell_full_cards(geo)) { return 1.0; }
     let manual = clamp(grass.card_look.x, 0.0, 1.0);
     let authored = (geo & GEO_AUTHORED) != 0u;
     return select(manual, 1.0, authored && grass.card_look.y > 0.5);
@@ -648,9 +925,21 @@ fn card_coverage_for(geo: u32) -> f32 {
 // Stable card thinning, salted apart from both the density seed and the
 // authored-coverage seed so the three thin the field independently.
 fn card_thinned(cell_id: vec2<i32>, geo: u32) -> bool {
+    if (cell_skips_cards(geo)) { return true; } // RFG-138
     let cover = card_coverage_for(geo);
     if (cover >= 0.999) { return false; }
     return hash_cell01(cell_id, 0x2e7d9b41u) >= cover;
+}
+
+// RFG-153: inside card_skip.z metres of the camera a native world's clutter plants are drawn as
+// their own models (TerrainWgpuNativeClutterMeshes.cpp), so the card yields -- entirely inside the
+// handover band, with probability 1 - smoothstep(r - 4, r, d) across it; the mesh ring keeps the
+// complement. Crop distance cards and unauthored cells keep their cards. 0 = off.
+fn card_yields_to_mesh(world_xz: vec2<f32>, distance: f32, geo: u32) -> bool {
+    let r = bitcast<f32>(grass.card_skip.z);
+    if (!(r > 4.0) || (geo & GEO_AUTHORED) == 0u || cell_full_cards(geo)) { return false; }
+    let keep = smoothstep(r - 4.0, r, distance);
+    return hash11(world_xz + vec2<f32>(71.3, 29.7)) >= keep;
 }
 
 // Coverage multiplier from a world-space noise map, so density is patchy rather
@@ -671,9 +960,31 @@ fn density_field(world_xz: vec2<f32>) -> f32 {
 
 // The renderer integrates the scroll slider and weather into shared phases.
 // Reading the phase here avoids t * v(t), whose jumps grow with mission age.
+// RFG-142: the wind lanes that move from frame to frame, so the grass velocity pass can evaluate
+// the same field for the PREVIOUS frame (motion vectors) -- see vs_grass_velocity.
+struct WindLanes {
+    strength: f32,
+    direction: f32,
+    advection: vec4<f32>,
+    flutter: vec4<f32>,
+};
+
+fn wind_lanes_now() -> WindLanes {
+    var lanes: WindLanes;
+    lanes.strength = grass.wind_strength;
+    lanes.direction = grass.wind_direction;
+    lanes.advection = grass.wind_advection;
+    lanes.flutter = grass.wind_flutter;
+    return lanes;
+}
+
 fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField {
-    let strength = clamp(grass.wind_strength, 0.0, 3.0);
-    let base_angle = grass.wind_direction * 0.01745329252;
+    return sample_wind_field_lanes(world_xz, height_t, seed, wind_lanes_now());
+}
+
+fn sample_wind_field_lanes(world_xz: vec2<f32>, height_t: f32, seed: f32, lanes: WindLanes) -> WindField {
+    let strength = clamp(lanes.strength, 0.0, 3.0);
+    let base_angle = lanes.direction * 0.01745329252;
     let base_direction = vec2<f32>(cos(base_angle), sin(base_angle));
     // Advect two fields at distinct scales.  The broad field turns coherent
     // gusts gradually; the smaller field supplies strength and tip flutter.
@@ -682,8 +993,8 @@ fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField
     // which is also the direction blades bend. Sampling noise at `p + v*t`
     // makes the pattern travel along `-v`, so the scroll is negated -- gust
     // fronts previously swept across the field opposite to the blades' lean.
-    let broad_scroll = grass.wind_advection.xy;
-    let gust_scroll = grass.wind_advection.zw;
+    let broad_scroll = lanes.advection.xy;
+    let gust_scroll = lanes.advection.zw;
     let direction_noise = clump_noise(world_xz + broad_scroll, 0.006, 0x0d7e31a5u);
     // Stretch the existing gust sample into coherent fronts perpendicular to
     // the wind. Integrated phase keeps their location stable when weather or
@@ -692,7 +1003,7 @@ fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField
     let front_size = max(grass.native2.z, 10.0);
     // Frozen heading lives in the existing flutter spare lanes. Changing the
     // wind turns transport velocity, never absolute world-space coordinates.
-    let front_direction = grass.wind_flutter.zw;
+    let front_direction = lanes.flutter.zw;
     let cross_direction = vec2<f32>(-front_direction.y, front_direction.x);
     let front_position = vec2<f32>(dot(gust_position, front_direction),
                                   dot(gust_position, cross_direction) / 3.0) / front_size;
@@ -705,7 +1016,7 @@ fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField
     let local_gust = mix(0.18, 1.0, gust_pulse);
     let gust = select(local_gust, mix(0.55, local_gust, clamp(grass.native2.y, 0.0, 1.0)), grass.native2.y >= 0.0);
     let direction_angle = base_angle + (direction_noise - 0.5) * min(strength, 1.5) * 1.10;
-    let flutter_scroll = grass.wind_flutter.xy;
+    let flutter_scroll = lanes.flutter.xy;
     let flutter_noise = clump_noise(world_xz + flutter_scroll + base_direction * (height_t * height_t * 4.0) +
                                     vec2<f32>(seed * 19.0, seed * 31.0),
                                     0.105, 0x3f5a91c7u);
@@ -935,6 +1246,185 @@ fn species_transmission(species: u32) -> vec4<f32> {
     }
 }
 
+// GRS-VAR -- the meadow's per-clump LOOK, packed.w bits 12-15. Bits 0-2 (species), 3-10 (the
+// surface's atlas run, which the native card decode reads) and 11 (the mid-ring flag) do not
+// move. 0 is the look before GRS-VAR in every species group, so WGR_GRASS_VARIETY=0, which
+// writes 0, is the old image exactly, and a native world (variety_on() false) never sees one.
+//   grass  : 0 plain, 1 foxtail seed head, 2 short bent, 14 seeding fescue
+//   weed   : 0 clover/broadleaf, 3 nettle, 4 thistle, 5 dock/sorrel
+//   flower : 6 daisy, 7 poppy, 8 dandelion, 9 cornflower, 10 buttercup, 11 red clover,
+//            12 yarrow, 13 cranesbill; 15 spare
+// The colour comes from here, not from the blade atlas: on OFP the atlas is the photo leaf set
+// and grass_shade keeps only its luminance relief, so a coloured atlas layer would never show.
+// look_shape is mirrored literally by grass_shadow.wgsl (the tests compare the two).
+const LOOK_SHIFT: u32 = 12u;
+const LOOK_HEAD_BIT: u32 = 16u;
+// GRS-VAR phase 3: this vertex belongs to a real flower head (ofp_near_vertex), not a blade.
+const LOOK_HEAD_GEOM: u32 = 32u;
+
+fn variety_on() -> bool {
+    return grass.variety.x > 0.5 && grass.native.x <= 0.0 && grass.native2.w < 0.5;
+}
+
+fn instance_look(packed_w: u32) -> u32 { return (packed_w >> LOOK_SHIFT) & 15u; }
+
+// Slot -> look id. Slots are what the weights index (a look id can sit in two groups: 0 is
+// plain grass and clover): grass 0-3, weed 4-7, flower 8-15.
+fn slot_look(slot: u32) -> u32 {
+    switch (slot) {
+        case 0u, 4u: { return 0u; }
+        case 1u: { return 1u; }
+        case 2u: { return 2u; }
+        case 3u: { return 14u; }
+        case 5u: { return 3u; }
+        case 6u: { return 4u; }
+        case 7u: { return 5u; }
+        default: { return slot - 2u; }
+    }
+}
+
+// The dry_patch mask at a point (same field and threshold, so the seed heads land where the
+// field browns).
+fn dry_patch_mask(world_xz: vec2<f32>) -> f32 {
+    let amount = clamp(grass.look.y, 0.0, 1.0);
+    if (amount <= 0.001) { return 0.0; }
+    let field = clump_noise(world_xz, max(grass.look.z, 0.002), 0x93b5e1a7u);
+    return smoothstep(1.0 - amount, 1.0 - amount * 0.05, field);
+}
+
+fn slot_weight(slot: u32, dry: f32) -> f32 {
+    let w = max(grass.look_weights[slot / 4u][slot % 4u], 0.0);
+    // Seeding grasses and dock take over where the meadow dries: x3 at the patch centre.
+    let seeding = slot == 1u || slot == 3u || slot == 7u;
+    return w * select(1.0, 1.0 + 2.0 * dry, seeding);
+}
+
+fn pick_look(world_xz: vec2<f32>, species: u32) -> u32 {
+    if (!variety_on()) { return 0u; }
+    // A drift field of its own (variety.w, ~11 m by default), folded so each look forms drifts
+    // with a light sprinkle of its neighbours; the ~25 m group field in pick_species still
+    // decides grass / weed / flower.
+    let field = clump_noise(world_xz, clamp(grass.variety.w, 0.005, 1.0), 0x3c6ef372u);
+    let h = fract(field * 3.0 + hash11(world_xz * 0.37 + vec2<f32>(5.3, 1.7)) * 0.3);
+    var first = 0u;
+    var count = 4u;
+    if (species >= SPECIES_WEED_END) {
+        first = 8u;
+        count = 8u;
+    } else if (species >= SPECIES_GRASS_END) {
+        first = 4u;
+    }
+    let dry = dry_patch_mask(world_xz);
+    var total = 0.0;
+    for (var i = 0u; i < count; i = i + 1u) { total = total + slot_weight(first + i, dry); }
+    if (total <= 0.0) { return slot_look(first); }
+    let goal = h * total;
+    var acc = 0.0;
+    for (var i = 0u; i < count; i = i + 1u) {
+        acc = acc + slot_weight(first + i, dry);
+        if (goal < acc) { return slot_look(first + i); }
+    }
+    return slot_look(first + count - 1u);
+}
+
+// (width scale, height scale) on top of species_shape_mixed. (1, 1) for look 0.
+fn look_shape(look: u32) -> vec2<f32> {
+    switch (look) {
+        case 1u: { return vec2<f32>(0.80, 1.18); }
+        case 2u: { return vec2<f32>(0.80, 0.70); }
+        case 3u: { return vec2<f32>(0.95, 1.30); }
+        case 4u: { return vec2<f32>(1.15, 1.18); }
+        case 5u: { return vec2<f32>(0.85, 1.38); }
+        case 7u: { return vec2<f32>(1.00, 1.10); }
+        case 8u: { return vec2<f32>(1.00, 0.72); }
+        case 10u: { return vec2<f32>(1.00, 0.92); }
+        case 14u: { return vec2<f32>(0.85, 1.12); }
+        default: { return vec2<f32>(1.0, 1.0); }
+    }
+}
+
+// Whole-blade albedo multiplier: nettle darker and bluer, thistle grey-green, dock warm.
+fn look_tint(look: u32) -> vec3<f32> {
+    switch (look) {
+        case 2u: { return vec3<f32>(0.92, 1.02, 0.96); }
+        case 3u: { return vec3<f32>(0.72, 0.90, 0.80); }
+        case 4u: { return vec3<f32>(1.02, 1.00, 1.10); }
+        case 5u: { return vec3<f32>(1.08, 0.96, 0.84); }
+        default: { return vec3<f32>(1.0); }
+    }
+}
+
+struct LookHead {
+    colour: vec3<f32>,
+    // Disc floret colour (kind 0 only).
+    centre: vec3<f32>,
+    // Share of the blade, from the tip, the head occupies; 0 = no head.
+    fraction: f32,
+    // 0 = a disc flower seen side-on, 1 = a spike / panicle filling the head region.
+    kind: f32,
+};
+
+// Linear albedo before the head brightness lane (variety.y): real-world reflectance ratios
+// against the meadow's green ramp, muted by that lane.
+fn look_head(look: u32) -> LookHead {
+    var h: LookHead;
+    h.colour = vec3<f32>(0.0);
+    h.centre = vec3<f32>(0.0);
+    h.fraction = 0.0;
+    h.kind = 0.0;
+    switch (look) {
+        case 1u: { h.colour = vec3<f32>(0.42, 0.37, 0.18); h.fraction = 0.24; h.kind = 1.0; }
+        case 4u: { h.colour = vec3<f32>(0.40, 0.14, 0.40); h.fraction = 0.12; h.kind = 1.0; }
+        case 5u: { h.colour = vec3<f32>(0.20, 0.09, 0.05); h.fraction = 0.34; h.kind = 1.0; }
+        case 6u: { h.colour = vec3<f32>(0.74, 0.74, 0.68); h.centre = vec3<f32>(0.78, 0.55, 0.06); h.fraction = 0.18; }
+        case 7u: { h.colour = vec3<f32>(0.62, 0.06, 0.03); h.centre = vec3<f32>(0.04, 0.03, 0.03); h.fraction = 0.20; }
+        case 8u: { h.colour = vec3<f32>(0.82, 0.60, 0.03); h.centre = vec3<f32>(0.78, 0.50, 0.02); h.fraction = 0.20; }
+        case 9u: { h.colour = vec3<f32>(0.10, 0.18, 0.62); h.centre = vec3<f32>(0.20, 0.10, 0.40); h.fraction = 0.17; }
+        case 10u: { h.colour = vec3<f32>(0.86, 0.68, 0.04); h.centre = vec3<f32>(0.70, 0.62, 0.10); h.fraction = 0.15; }
+        case 11u: { h.colour = vec3<f32>(0.56, 0.14, 0.30); h.centre = vec3<f32>(0.48, 0.10, 0.26); h.fraction = 0.16; }
+        case 12u: { h.colour = vec3<f32>(0.64, 0.62, 0.54); h.fraction = 0.16; h.kind = 1.0; }
+        case 13u: { h.colour = vec3<f32>(0.36, 0.22, 0.58); h.centre = vec3<f32>(0.62, 0.52, 0.66); h.fraction = 0.16; }
+        case 14u: { h.colour = vec3<f32>(0.30, 0.19, 0.20); h.fraction = 0.30; h.kind = 1.0; }
+        default: {}
+    }
+    return h;
+}
+
+// The flat varying a blade carries: its clump's look, plus LOOK_HEAD_BIT when this blade of the
+// clump bears the head (a variety.z share of them -- every blade of a flower clump flowering
+// reads as a bouquet, not a meadow).
+fn blade_look(inst: vec4<f32>, inst_packed: vec4<u32>, blade: u32, near: bool) -> u32 {
+    let look = instance_look(inst_packed.w);
+    if (look == 0u || look_head(look).fraction <= 0.0) { return look; }
+    // Near-ring disc flowers carry real heads (ofp_near_vertex); their stems stay green.
+    if (near && near_head_count(look) > 0u) { return look; }
+    let h = hash11(inst.xz + vec2<f32>(f32(blade) * 37.0 + 2.0, f32(blade) * 5.0 + 61.0));
+    return look | select(0u, LOOK_HEAD_BIT, h < clamp(grass.variety.z, 0.0, 1.0));
+}
+
+// Applied to the finished OFP albedo, after the green-pivot grading (which would turn a petal
+// muddy). `uv_x` runs 0..1 across the ribbon, `t` 0 at the root and 1 at the tip.
+fn look_albedo(albedo: vec3<f32>, look_word: u32, uv: vec2<f32>, t: f32, seed: f32) -> vec3<f32> {
+    let look = look_word & 15u;
+    if ((look_word & LOOK_HEAD_GEOM) != 0u) { return head_disc_albedo(look, uv, seed); }
+    let uv_x = uv.x;
+    let tinted = albedo * look_tint(look);
+    if ((look_word & LOOK_HEAD_BIT) == 0u) { return tinted; }
+    let head = look_head(look);
+    let start = 1.0 - head.fraction;
+    if (t <= start) { return tinted; }
+    let hv = (t - start) / max(head.fraction, 0.01);
+    var cover = smoothstep(0.0, 0.25, hv);
+    var colour = head.colour;
+    if (head.kind < 0.5) {
+        // A disc seen side-on across the ribbon; its middle is the disc floret.
+        let d = length(vec2<f32>(uv_x * 2.0 - 1.0, (hv - 0.55) * 2.2));
+        cover = 1.0 - smoothstep(0.80, 1.0, d);
+        colour = mix(head.colour, head.centre, 1.0 - smoothstep(0.22, 0.40, d));
+    }
+    return mix(tinted, colour * clamp(grass.variety.y, 0.0, 2.0) * (0.9 + 0.2 * seed), cover);
+}
+
 // In daylight backlight, blue sky fill used to dominate the shaded grass side.
 // Move that fill towards neutral warm light at unchanged luminance; keep the
 // nighttime sky and the direct/transmitted sunlight untouched.
@@ -943,9 +1433,14 @@ fn grass_sky_fill(n: vec3<f32>, view_dir: vec3<f32>, light_dir: vec3<f32>) -> ve
     let luma = dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722));
     let warm = vec3<f32>(1.02, 1.0, 0.90);
     let neutral = warm * luma / dot(warm, vec3<f32>(0.2126, 0.7152, 0.0722));
-    let daylight = smoothstep(-0.02, 0.15, light_dir.y);
-    let backlight = smoothstep(0.05, 0.70, dot(view_dir, -light_dir));
-    return mix(sky, neutral, daylight * backlight * 0.65);
+    // Day is judged from the true sun height, whichever sign grass_light_dir uses: on OFP the
+    // legacy sign put light_dir BELOW the horizon at noon, so this read as night.
+    let daylight = smoothstep(-0.02, 0.15, -frame.sun_dir_world.y);
+    // In every view direction, not only "backlit": inside a meadow the shaded side of a blade sees
+    // mostly other blades and ground, not open sky. Gating it on backlight made the field turn
+    // blue whenever the view swung away from that direction -- on OFP, where grass keeps the
+    // legacy sun sign, that was every view TOWARDS the sun.
+    return mix(sky, neutral, daylight * 0.65);
 }
 
 // `geo` carries the surface's atlas run in bits 23-30 (see the geography word
@@ -999,6 +1494,11 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     let jitter = (hash_cell2(cell_id, 0x19a8b437u) - vec2<f32>(0.5)) * (near_spacing * 1.85);
     let world_xz = cell_world + jitter;
     let delta = world_xz - frame.cam_pos.xz;
+    // RFG-160: a native world's tufts thin with distance (native_tuft_thinned) before anything
+    // costlier is evaluated; past the ring nothing survives the dissolve below anyway.
+    if (native_tufts_on()) {
+        if (length(delta) > grass.near_radius || native_tuft_thinned(cell_id, length(delta))) { return; }
+    }
     let coverage = min(grass.density, 1.0) * clamp(grass.lod_density.x, 0.0, 1.0) * density_field(world_xz);
     if (seed > coverage) { return; }
     // Dissolve out over the last `band` metres instead of stopping dead on the
@@ -1026,14 +1526,19 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     // cells. Bit 2 (`full`) is intentionally NOT excluded: legacy Everon
     // marks broad normal ground with it, so rejecting it removes every blade
     // despite the surface being valid grass terrain.
-    if ((geo & 0x80000000u) == 0u) { return; }
-    if ((geo & GEO_EXCLUDE_HARD) != 0u) { return; }
-    if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
+    // Blocked cells (roads, buildings, water) stay bare; meadow margins thin out instead of
+    // ending on the cell's square edge (grass_edge_presence).
+    let presence = grass_edge_presence(world_xz, geo) * grass_exclusion_presence(world_xz);
+    if (presence <= 0.0 || hash_cell01(cell_id, 0x6d2b79f5u) >= presence * presence) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
     // Cards only: the card coverage (map's own where authored, else card_look.x).
     if (cards_on_near() && card_thinned(cell_id, geo)) { return; }
+    // RFG-116: blades only where the cell's surface names a PlantMat. A Reforger forest or dirt
+    // floor grows its clutter (needles, ferns, moss) on the card ring and no grass at all.
+    if (!cards_on_near() && cell_skips_blades(geo)) { return; }
     let y = sample_height(world_xz);
     if (in_terrain_hole(vec3<f32>(world_xz.x, y, world_xz.y))) { return; } // preserve ground above a bounded cave mouth
+    if (on_crater_soil(world_xz)) { return; }
     if (y <= terrain.sea_level + 0.35) { return; }
     let normal = sample_normal(world_xz);
     if (normal.y < 0.70) { return; }
@@ -1049,8 +1554,11 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     instances[out_index].pos_seed = vec4<f32>(world_xz.x, y, world_xz.y, seed);
-    var packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz), geo);
-    packed.z = pack_lod_fade(near_fade);
+    let species = pick_species(world_xz);
+    var packed = pack_flatten(eval_flatten(world_xz), species, geo);
+    packed.w |= pick_look(world_xz, species) << LOOK_SHIFT;
+    // The margin is shorter as well as sparser.
+    packed.z = pack_lod_fade_edge(near_fade, presence);
     instances[out_index].packed = packed;
 }
 
@@ -1077,7 +1585,6 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     let world_xz = cell_world + jitter;
     let delta = world_xz - frame.cam_pos.xz;
     let distance2 = dot(delta, delta);
-    let coverage = min(grass.density, 1.0) * clamp(grass.lod_density.y, 0.0, 1.0) * density_field(world_xz);
     // The SAME cap cs_place applies. The two rings are complementary -- near
     // thins out across exactly the band mid thickens in across -- so if only one
     // of them clamped, a short near radius would leave the pair either
@@ -1086,37 +1593,48 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     // A small overlap avoids a bare annulus at the detailed/mid and mid/far
     // joins; the dissolve band widens that overlap into a real crossfade.
     let mid_start = select(max(0.0, grass.near_radius - mid_spacing * 1.5 - band), 0.0, mid_cards_from_camera());
-    if (distance2 < mid_start * mid_start || distance2 > mid_end * mid_end || seed > coverage) { return; }
+    if (distance2 < mid_start * mid_start || distance2 > mid_end * mid_end) { return; }
+    let map_max = terrain.world_origin + vec2<f32>(f32(terrain.hm_width - 1u), f32(terrain.hm_height - 1u)) * terrain.terrain_grid;
+    if (any(world_xz < terrain.world_origin) || any(world_xz >= map_max)) { return; }
+    // PERF (2026-10-14): the view test FIRST. The ring is a whole disc round the camera
+    // and the frustum sees a wedge of it, so most of its ~3 million candidates used to run
+    // the coverage noise, the geography neighbourhood, the road/footprint distance loop
+    // and the normal fetch only to be thrown away here. Every test in this function is a
+    // side-effect-free predicate of the candidate until the atomicAdd, so their order
+    // cannot change which blades are placed -- only how much work the rejected ones do.
+    let y = sample_height(world_xz);
+    let rel = vec3<f32>(world_xz.x, y, world_xz.y) - frame.cam_pos.xyz;
+    let clip = frame.proj * frame.view * vec4<f32>(rel, 1.0);
+    if (clip.w <= 0.0 || abs(clip.x) > clip.w * 1.15 || abs(clip.y) > clip.w * 1.15) { return; }
+    let coverage = min(grass.density, 1.0) * clamp(grass.lod_density.y, 0.0, 1.0) * density_field(world_xz);
+    if (seed > coverage) { return; }
     // Fade IN as the near ring fades out, and OUT as the far ring fades in.
     let distance = sqrt(distance2);
     let fade_in = select(smoothstep(mid_start, max(mid_start, grass.near_radius), distance), 1.0, mid_cards_from_camera());
     let fade_out = 1.0 - smoothstep(max(mid_end - band, mid_start), mid_end, distance);
     let mid_fade = min(fade_in, fade_out);
     if (!lod_dissolve(cell_id, mid_fade)) { return; }
-    let map_max = terrain.world_origin + vec2<f32>(f32(terrain.hm_width - 1u), f32(terrain.hm_height - 1u)) * terrain.terrain_grid;
-    if (any(world_xz < terrain.world_origin) || any(world_xz >= map_max)) { return; }
     let geocell = clamp(vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid)), vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
     let geo = textureLoad(geography, geocell, 0).x;
-    if ((geo & 0x80000000u) == 0u || (geo & GEO_EXCLUDE_HARD) != 0u) { return; }
-    if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
+    let presence = grass_edge_presence(world_xz, geo) * grass_exclusion_presence(world_xz);
+    if (presence <= 0.0 || hash_cell01(cell_id, 0x6d2b79f5u) >= presence * presence) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
     // Cards only: the card coverage (map's own where authored, else card_look.x).
     if (cards_on_mid() && card_thinned(cell_id, geo)) { return; }
-    let y = sample_height(world_xz);
+    if (cards_on_mid() && card_yields_to_mesh(world_xz, distance, geo)) { return; }
     if (in_terrain_hole(vec3<f32>(world_xz.x, y, world_xz.y))) { return; } // preserve ground above a bounded cave mouth
+    if (on_crater_soil(world_xz)) { return; }
     if (y <= terrain.sea_level + 0.35 || sample_normal(world_xz).y < 0.70) { return; }
-    let rel = vec3<f32>(world_xz.x, y, world_xz.y) - frame.cam_pos.xyz;
-    let clip = frame.proj * frame.view * vec4<f32>(rel, 1.0);
-    if (clip.w <= 0.0 || abs(clip.x) > clip.w * 1.15 || abs(clip.y) > clip.w * 1.15) { return; }
     let out_index = atomicAdd(&placement_count[0], 1u);
     if (out_index >= MAX_MID_INSTANCES) {
         atomicMin(&placement_count[0], MAX_MID_INSTANCES);
         return;
     }
     instances[out_index].pos_seed = vec4<f32>(world_xz.x, y, world_xz.y, seed);
-    var packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz), geo);
-    packed.z = pack_lod_fade(mid_fade);
-    packed.w |= 1u << 11u;
+    let species = pick_species(world_xz);
+    var packed = pack_flatten(eval_flatten(world_xz), species, geo);
+    packed.z = pack_lod_fade_edge(mid_fade, presence);
+    packed.w |= (1u << 11u) | (pick_look(world_xz, species) << LOOK_SHIFT);
     instances[out_index].packed = packed;
 }
 
@@ -1183,11 +1701,12 @@ fn cs_place_far(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (any(world_xz < terrain.world_origin) || any(world_xz >= map_max)) { return; }
     let geocell = clamp(vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid)), vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
     let geo = textureLoad(geography, geocell, 0).x;
-    if ((geo & 0x80000000u) == 0u || (geo & GEO_EXCLUDE_HARD) != 0u) { return; }
-    if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
+    let presence = grass_edge_presence(world_xz, geo) * grass_exclusion_presence(world_xz);
+    if (presence <= 0.0 || hash_cell01(cell_id, 0x6d2b79f5u) >= presence * presence) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
     let y = sample_height(world_xz);
     if (in_terrain_hole(vec3<f32>(world_xz.x, y, world_xz.y))) { return; } // preserve ground above a bounded cave mouth
+    if (on_crater_soil(world_xz)) { return; }
     if (y <= terrain.sea_level + 0.35) { return; }
     let normal = sample_normal(world_xz);
     if (normal.y < 0.70) { return; }
@@ -1217,7 +1736,221 @@ struct VsOut {
     @location(5) blade_uv: vec4<f32>,
     // Constant on each ribbon, including its near-ring taper jitter.
     @location(6) @interpolate(flat) blade_taper: f32,
+    // GRS-VAR: blade_look() -- the clump's look id | LOOK_HEAD_BIT. 0 everywhere else.
+    @location(7) @interpolate(flat) look: u32,
 };
+
+// RFG-142: native tufts sway visibly in calm weather too. The live wind strength is speed x 0.2 x
+// gain -- ~0.3 on a calm Everon day, which bent a 0.6 m tuft's tip 1-8 cm and read as frozen
+// (owner: "no wind sway"). Floored like the trees' calm floor; stronger wind still scales it.
+const NATIVE_TUFT_WIND_FLOOR: f32 = 0.8;
+
+struct NativeTuftGeo {
+    valid: bool,
+    local: vec3<f32>,
+    axis: vec3<f32>,
+    up: vec3<f32>,
+    u: f32,
+    layer_index: u32,
+    gust: f32,
+};
+
+// One Reforger PlantMat card's corner, relative to its instance, under the given wind lanes.
+fn native_tuft_geometry(inst: vec4<f32>, inst_packed: vec4<u32>, card: u32, t: f32, left: bool,
+                        lanes: WindLanes) -> NativeTuftGeo {
+    var g: NativeTuftGeo;
+    g.valid = false;
+    // RFG-138: this cell's PlantMat set -- wheat on a crop field, Grass_02's own tufts on Grass_02.
+    let run = instance_layer_run(inst_packed.w);
+    let sets = blade_sets_on();
+    let bset = select(0u, blade_set_of(run.x), sets && run.y > 0u);
+    var p0 = vec4<f32>(grass.native_tuft.y, grass.native_tuft.z, grass.native_tuft.w, grass.native_tuft2.x);
+    var p1 = vec4<f32>(grass.native_tuft2.y, grass.native_tuft2.z, 0.0, 0.0);
+    if (sets) {
+        p0 = grass.tuft_sets[bset * 2u];
+        p1 = grass.tuft_sets[bset * 2u + 1u];
+    }
+    let cards = u32(clamp(p0.x, 1.0, 6.0));
+    if (card >= cards) {
+        return g;
+    }
+    let seed = inst.w;
+    let pick = hash11(inst.xz + vec2<f32>(f32(card) * 31.0 + 5.0, f32(card) * 17.0 + 13.0));
+    let layer = min(u32(pick * 8.0), 7u);
+    var aspect = clamp(grass.tuft_aspect[layer / 4u][layer % 4u], 0.1, 6.0);
+    var scale = clamp(grass.tuft_scale[layer / 4u][layer % 4u], 0.1, 4.0);
+    if (sets) {
+        aspect = clamp(grass.tuft_set_aspect[bset * 2u + layer / 4u][layer % 4u], 0.1, 6.0);
+        scale = clamp(grass.tuft_set_scale[bset * 2u + layer / 4u][layer % 4u], 0.1, 4.0);
+    }
+    let jitter = hash11(inst.xz + vec2<f32>(f32(card) * 7.0 + 1.0, 41.0)) - 0.5;
+    let height = max(p0.w, 0.01) * scale *
+        (1.0 + jitter * 2.0 * clamp(p1.x, 0.0, 1.0)) * native_lod_height_scale(inst_packed.z);
+    // RFG-160: thinned with distance in cs_place, widened here by the same distance.
+    let widen = native_tuft_widen(length(inst.xz - frame.cam_pos.xz));
+    let crush_dir = unpack2x16snorm(inst_packed.x);
+    let crush = unpack2x16unorm(inst_packed.y).x;
+    let depth = imprint_depth();
+    let crushed_height = height * (1.0 - depth * crush);
+    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (depth * crush);
+    // Crossed evenly over half a turn, the plant as a whole turned by its seed.
+    let yaw = seed * 6.2831853 + f32(card) * (3.14159265 / f32(cards));
+    g.axis = vec3<f32>(cos(yaw), 0.0, sin(yaw));
+    let facing = vec3<f32>(-sin(yaw), 0.0, cos(yaw));
+    let lean_rand = hash11(inst.xz + vec2<f32>(f32(card) * 11.0 + 3.0, 97.0));
+    let zenith = radians(clamp(p0.y + (lean_rand - 0.5) * 2.0 * p0.z, -60.0, 60.0));
+    g.up = vec3<f32>(0.0, cos(zenith), 0.0) + facing * sin(zenith);
+    let wind = sample_wind_field_lanes(inst.xz, t, seed + pick, lanes);
+    // The bend scales with the card's own height, so a 0.2 m stubble and a 0.6 m wheat head lean
+    // by the same ANGLE (it was absolute metres, tuned for 0.6 m).
+    let sway = max(lanes.strength, NATIVE_TUFT_WIND_FLOOR) * (height / 0.6);
+    let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * sway *
+        (0.035 + 0.21 * wind.gust + wind.turbulence) * (1.0 - depth * crush);
+    g.u = select(1.0, 0.0, left);
+    g.local = g.axis * ((g.u - 0.5) * height * aspect * widen) + g.up * (crushed_height * t) +
+        (wind_bend + crush_bend) * (t * t);
+    // RFG-138: set s owns array layers 16s..16s+7 (colour) and 16s+8.. (its SatMapBlendMask), so
+    // native_sat_mask's +8 stays inside the set.
+    g.layer_index = bset * 16u + layer;
+    g.gust = wind.gust;
+    g.valid = true;
+    return g;
+}
+
+// RFG-117: one Reforger PlantMat plant. `native_tuft.y` crossed cards, each showing a WHOLE atlas
+// tuft, as wide as the tuft's own rectangle is (tuft_aspect), as tall as Height x that rectangle's
+// ScaleDistribution x HeightRandomOffset jitter, leaning Zenith +- ZenithRandomOffset degrees. No
+// taper: the silhouette is the atlas alpha (fs_grass_native_tuft*). Card slots past the card count
+// collapse outside clip space.
+fn vs_native_tuft(inst: vec4<f32>, inst_packed: vec4<u32>, card: u32, t: f32, left: bool) -> VsOut {
+    var out: VsOut;
+    let g = native_tuft_geometry(inst, inst_packed, card, t, left, wind_lanes_now());
+    if (!g.valid) {
+        out.clip = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        out.normal = vec3<f32>(0.0, 1.0, 0.0);
+        return out;
+    }
+    let rel = inst.xyz + g.local - frame.cam_pos.xyz;
+    out.clip = reverse_z(frame.proj * frame.view * vec4<f32>(rel, 1.0));
+    out.world_rel = rel;
+    out.normal = normalize(cross(g.axis, g.up));
+    out.height_t = t;
+    out.seed = inst.w;
+    out.wind_gust = g.gust;
+    out.blade_uv = vec4<f32>(g.u, 1.0 - t, f32(g.layer_index), blade_texture_strength(rel));
+    out.blade_taper = 1.0;
+    return out;
+}
+
+// RFG-142: motion vectors for the native near ring. Without them DLSS took every swaying tuft for
+// a static surface and smeared it (the failure RFG-136 fixed for trees). Same geometry as
+// vs_native_tuft, evaluated for this frame's wind lanes and the previous frame's; conventions as
+// in velocity_obj.wgsl (jittered raster for the depth test, unjittered matrices for the motion,
+// previous position relative to the previous camera, output = UV-space motion current -> previous).
+struct GrassVelParams {
+    jittered_vp: mat4x4<f32>,
+    cur_vp: mat4x4<f32>,
+    prev_vp: mat4x4<f32>,
+    misc: vec4<f32>,           // x = relative depth tolerance
+    cam_delta: vec4<f32>,      // cam_cur - cam_prev
+    prev_wind: vec4<f32>,      // x = strength, y = direction (deg)
+    prev_advection: vec4<f32>,
+    prev_flutter: vec4<f32>,
+};
+@group(3) @binding(0) var<uniform> gvel: GrassVelParams;
+@group(3) @binding(1) var gvel_scene_depth: texture_depth_2d;
+
+struct GrassVelOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) cur_clip: vec4<f32>,
+    @location(1) prev_clip: vec4<f32>,
+    @location(2) uv: vec3<f32>,
+};
+
+@vertex
+fn vs_grass_velocity(@builtin(vertex_index) vertex_index: u32,
+                     @builtin(instance_index) instance_index: u32) -> GrassVelOut {
+    var out: GrassVelOut;
+    out.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    if (!native_tufts_on()) {
+        return vs_ofp_blade_velocity(vertex_index, instance_index);
+    }
+    let inst = instances[instance_index].pos_seed;
+    let inst_packed = instances[instance_index].packed;
+    let blade = vertex_index / VERTS_PER_NEAR_BLADE_UNIQUE;
+    let packed = vertex_index % VERTS_PER_NEAR_BLADE_UNIQUE;
+    let t = f32(packed / 2u) / f32(BLADE_SEGMENTS);
+    let left = (packed % 2u) == 0u;
+    let cur = native_tuft_geometry(inst, inst_packed, blade, t, left, wind_lanes_now());
+    if (!cur.valid) {
+        return out;
+    }
+    var prev_lanes: WindLanes;
+    prev_lanes.strength = gvel.prev_wind.x;
+    prev_lanes.direction = gvel.prev_wind.y;
+    prev_lanes.advection = gvel.prev_advection;
+    prev_lanes.flutter = gvel.prev_flutter;
+    let prev = native_tuft_geometry(inst, inst_packed, blade, t, left, prev_lanes);
+    let base = inst.xyz - frame.cam_pos.xyz;
+    let cur_pos = vec4<f32>(base + cur.local, 1.0);
+    let prev_pos = vec4<f32>(base + gvel.cam_delta.xyz + prev.local, 1.0);
+    var raster = gvel.jittered_vp * cur_pos;
+    raster.z = raster.w - raster.z;
+    out.pos = raster;
+    out.cur_clip = gvel.cur_vp * cur_pos;
+    out.prev_clip = gvel.prev_vp * prev_pos;
+    out.uv = vec3<f32>(cur.u, 1.0 - t, f32(cur.layer_index));
+    return out;
+}
+
+// An OFP blade's motion (see ofp_blade): its uv.z is -1, the blade is cut by its geometry, not a
+// card's alpha.
+fn vs_ofp_blade_velocity(vertex_index: u32, instance_index: u32) -> GrassVelOut {
+    var out: GrassVelOut;
+    out.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    let inst = instances[instance_index].pos_seed;
+    let inst_packed = instances[instance_index].packed;
+    let blade = vertex_index / VERTS_PER_NEAR_BLADE_UNIQUE;
+    let packed = vertex_index % VERTS_PER_NEAR_BLADE_UNIQUE;
+    let row = packed / 2u;
+    let left = (packed % 2u) == 0u;
+    let cur = ofp_near_vertex(inst, inst_packed, blade, row, left, wind_lanes_now()).b;
+    var prev_lanes: WindLanes;
+    prev_lanes.strength = gvel.prev_wind.x;
+    prev_lanes.direction = gvel.prev_wind.y;
+    prev_lanes.advection = gvel.prev_advection;
+    prev_lanes.flutter = gvel.prev_flutter;
+    let prev = ofp_near_vertex(inst, inst_packed, blade, row, left, prev_lanes).b;
+    let base = inst.xyz - frame.cam_pos.xyz;
+    let cur_pos = vec4<f32>(base + cur.local, 1.0);
+    let prev_pos = vec4<f32>(base + gvel.cam_delta.xyz + prev.local, 1.0);
+    var raster = gvel.jittered_vp * cur_pos;
+    raster.z = raster.w - raster.z;
+    out.pos = raster;
+    out.cur_clip = gvel.cur_vp * cur_pos;
+    out.prev_clip = gvel.prev_vp * prev_pos;
+    out.uv = vec3<f32>(0.0, 0.0, -1.0);
+    return out;
+}
+
+@fragment
+fn fs_grass_velocity(in: GrassVelOut) -> @location(0) vec2<f32> {
+    // The card's own silhouette, as the colour pass cuts it (an OFP blade, uv.z < 0, has none).
+    if (in.uv.z >= 0.0 && textureSampleLevel(blade_tex, blade_samp, in.uv.xy, blade_layer(in.uv.z), 0.0).a <
+        tuft_alpha_cutoff()) {
+        discard;
+    }
+    // Visible surface only (velocity_obj.wgsl fs_velocity): no depth attachment on this pass.
+    let scene_d = textureLoad(gvel_scene_depth, vec2<i32>(in.pos.xy), 0);
+    if (in.pos.z < scene_d * (1.0 - gvel.misc.x)) {
+        discard;
+    }
+    if (in.prev_clip.w <= 1e-6) {
+        return vec2<f32>(0.0, 0.0);
+    }
+    let d = in.cur_clip.xy / max(in.cur_clip.w, 1e-6) - in.prev_clip.xy / in.prev_clip.w;
+    return vec2<f32>(d.x * 0.5, d.y * -0.5);
+}
 
 @vertex
 fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VsOut {
@@ -1239,6 +1972,54 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     let row = packed / 2u;
     let left = (packed % 2u) == 0u;
     let t = f32(row) / f32(BLADE_SEGMENTS);
+    if (native_tufts_on()) {
+        return vs_native_tuft(inst, inst_packed, blade, t, left);
+    }
+    let v = ofp_near_vertex(inst, inst_packed, blade, row, left, wind_lanes_now());
+    let b = v.b;
+    let world = inst.xyz + b.local;
+    let rel = world - frame.cam_pos.xyz;
+    var out: VsOut;
+    out.clip = reverse_z(frame.proj * frame.view * vec4<f32>(rel, 1.0));
+    out.world_rel = rel;
+    out.normal = normalize(cross(b.blade_axis, b.tangent));
+    out.height_t = t;
+    out.seed = seed;
+    out.wind_gust = b.gust;
+    out.blade_uv = vec4<f32>(select(1.0, 0.0, left), 1.0 - t, f32(inst_packed.w & 7u),
+                             blade_texture_strength(rel));
+    out.blade_taper = b.taper_exp;
+    out.look = blade_look(inst, inst_packed, blade, true);
+    if (v.head) {
+        // The whole head is "tip" for the ramp, and it samples no leaf texture.
+        out.height_t = 1.0;
+        out.blade_uv = vec4<f32>(v.uv, f32(inst_packed.w & 7u), 0.0);
+        out.look = instance_look(inst_packed.w) | LOOK_HEAD_GEOM;
+    }
+    return out;
+}
+
+// FIRE-002 round (owner, 2026-10-13: "grass is smearing when I fly around ... DLSS"): an OFP
+// near-ring blade, for this frame's wind lanes or the last frame's. The colour pass and the
+// velocity pass share it, so the motion vectors describe the sway that is drawn -- before this only
+// the native (Reforger) tufts had any (RFG-142) and every OFP blade swayed as a "static" surface.
+struct OfpBlade {
+    local: vec3<f32>,
+    tangent: vec3<f32>,
+    blade_axis: vec3<f32>,
+    gust: f32,
+    taper_exp: f32,
+};
+
+fn ofp_blade(inst: vec4<f32>, inst_packed: vec4<u32>, blade: u32, t: f32, left: bool, lanes: WindLanes) -> OfpBlade {
+    let seed = inst.w;
+    let shape = species_shape_mixed(inst_packed.w & 7u, grass.shape_mix.x) *
+        vec3<f32>(look_shape(instance_look(inst_packed.w)), 1.0);
+    let crush_dir = unpack2x16snorm(inst_packed.x);
+    let crush_data = unpack2x16unorm(inst_packed.y);
+    let crush = crush_data.x;
+    let rotor_wash = active_rotor_wash(inst.xz, crush, crush_data.y);
+    let blade_count = select(6.0, 12.0, grass.renderer.x > 0.5);
     // Four clump archetypes: compact upright, open meadow, low splayed, tall wisp.
     let archetype = u32(seed * 4.0);
     // Most meadow clumps stay short; the occasional wisp preserves a layered
@@ -1260,8 +2041,8 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     let depth = imprint_depth();
     let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (depth * crush);
     let crushed_height = height * (1.0 - depth * crush);
-    let wind = sample_wind_field(inst.xz + base_offset.xz, t, seed + blade_seed);
-    let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * grass.wind_strength *
+    let wind = sample_wind_field_lanes(inst.xz + base_offset.xz, t, seed + blade_seed, lanes);
+    let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * lanes.strength *
         (0.035 + 0.21 * wind.gust + wind.turbulence);
     // Rotor wash has its own fast, per-blade turbulence. It is driven by the
     // cached crush amount so normal grass remains governed solely by weather.
@@ -1285,19 +2066,121 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     let edge_on = pow(1.0 - abs(dot(blade_normal, view_dir)), 4.0);
     let lateral = select(blade_axis * half_width, -blade_axis * half_width, left) * (1.0 + edge_on * 1.6);
     let local = base_offset + lateral + vec3<f32>(0.0, crushed_height * t, 0.0) + curve;
-    let world = inst.xyz + local;
-    let rel = world - frame.cam_pos.xyz;
-    var out: VsOut;
-    out.clip = reverse_z(frame.proj * frame.view * vec4<f32>(rel, 1.0));
-    out.world_rel = rel;
-    out.normal = normalize(cross(blade_axis, tangent));
-    out.height_t = t;
-    out.seed = seed;
-    out.wind_gust = wind.gust;
-    out.blade_uv = vec4<f32>(select(1.0, 0.0, left), 1.0 - t, f32(inst_packed.w & 7u),
-                             blade_texture_strength(rel));
-    out.blade_taper = max(shape.z * taper_jitter, 0.05);
-    return out;
+    var o: OfpBlade;
+    o.local = local;
+    o.tangent = tangent;
+    o.blade_axis = blade_axis;
+    o.gust = wind.gust;
+    o.taper_exp = max(shape.z * taper_jitter, 0.05);
+    return o;
+}
+
+// GRS-VAR phase 3: which looks draw a real head on the near ring, and how many of a clump's
+// blades become heads (its LAST blades; each sits on the tip of stem blade 0 or 1). Mirrored
+// literally by grass_shadow.wgsl, which collapses those blades (tests compare the two).
+fn look_has_disc_head(look: u32) -> bool { return (look >= 6u && look <= 11u) || look == 13u; }
+
+fn near_head_count(look: u32) -> u32 {
+    let share = clamp(grass.variety.z, 0.0, 1.0);
+    if (!look_has_disc_head(look) || share <= 0.0) { return 0u; }
+    return select(1u, 2u, share >= 0.5);
+}
+
+// Head radius (m): roughly the real flower, x1.25 so it still reads at a few metres.
+fn look_head_radius(look: u32) -> f32 {
+    switch (look) {
+        case 6u: { return 0.026; }
+        case 7u: { return 0.042; }
+        case 8u: { return 0.026; }
+        case 9u: { return 0.022; }
+        case 10u: { return 0.016; }
+        case 11u: { return 0.017; }
+        default: { return 0.020; }
+    }
+}
+
+// Petal count for head_disc_albedo; 0 = a clover-type floret ball.
+fn look_petals(look: u32) -> f32 {
+    switch (look) {
+        case 6u: { return 16.0; }
+        case 7u: { return 4.0; }
+        case 8u: { return 28.0; }
+        case 9u: { return 9.0; }
+        case 10u: { return 5.0; }
+        case 11u: { return 0.0; }
+        default: { return 5.0; }
+    }
+}
+
+struct OfpVertex {
+    b: OfpBlade,
+    uv: vec2<f32>,
+    head: bool,
+};
+
+// One near-ring vertex. A disc flower clump's last near_head_count() blades are not drawn as
+// blades: their twelve vertices (six rows x two sides) become one round disc -- each row a chord
+// of the circle -- on the tip of stem blade 0 or 1, under that stem's wind, crush and LOD fade.
+// Same vertex count, same index buffer, no discard (the near pass keeps early-Z). The colour,
+// prepass and velocity passes all come through here, so the head moves with its stem.
+fn ofp_near_vertex(inst: vec4<f32>, inst_packed: vec4<u32>, blade: u32, row: u32, left: bool,
+                   lanes: WindLanes) -> OfpVertex {
+    var o: OfpVertex;
+    let t = f32(row) / f32(BLADE_SEGMENTS);
+    o.uv = vec2<f32>(select(1.0, 0.0, left), 1.0 - t);
+    o.head = false;
+    let look = instance_look(inst_packed.w);
+    let heads = near_head_count(look);
+    let count = select(6u, 12u, grass.renderer.x > 0.5);
+    if (heads == 0u || blade + heads < count) {
+        o.b = ofp_blade(inst, inst_packed, blade, t, left, lanes);
+        return o;
+    }
+    let stem = blade + heads - count;
+    // At t = 1 the blade's lateral offset is zero, so local is the stem's centre-line tip.
+    let tip = ofp_blade(inst, inst_packed, stem, 1.0, true, lanes);
+    let jitter = hash11(inst.xz + vec2<f32>(f32(stem) * 41.0 + 7.0, 23.0));
+    let yaw = jitter * 6.2831853;
+    let tilt = mix(0.45, 1.1, hash11(inst.xz + vec2<f32>(f32(stem) * 13.0 + 3.0, 89.0)));
+    // Facing up the stem, turned 25-50 degrees to one side so the head reads from eye height.
+    let n = normalize(normalize(tip.tangent) + vec3<f32>(cos(yaw), 0.0, sin(yaw)) * tilt);
+    var u_axis = cross(vec3<f32>(0.0, 1.0, 0.0), n);
+    u_axis = select(normalize(u_axis), vec3<f32>(1.0, 0.0, 0.0), length(u_axis) < 1e-4);
+    let v_axis = cross(n, u_axis);
+    let y = -cos(3.14159265 * t);
+    let half_w = sqrt(max(1.0 - y * y, 0.0));
+    let x = select(half_w, -half_w, left);
+    let radius = look_head_radius(look) * mix(0.8, 1.2, jitter) * lod_height_scale(inst_packed.z);
+    o.b = tip;
+    o.b.local = tip.local + (u_axis * x + v_axis * y) * radius;
+    // vs_grass's normal is cross(blade_axis, tangent) = cross(u, v) = n.
+    o.b.blade_axis = u_axis;
+    o.b.tangent = v_axis;
+    o.uv = vec2<f32>(0.5 + 0.5 * x, 0.5 + 0.5 * y);
+    o.head = true;
+    return o;
+}
+
+// The head's own albedo: petals with darker gaps towards the rim, the disc floret in the middle
+// (or a floret ball for clover). Replaces the blade colour outright.
+fn head_disc_albedo(look: u32, uv: vec2<f32>, seed: f32) -> vec3<f32> {
+    let head = look_head(look);
+    let p = uv * 2.0 - 1.0;
+    let r = length(p);
+    let petals = look_petals(look);
+    var shade = 1.0;
+    var centre = 0.0;
+    if (petals > 0.5) {
+        let lobe = abs(cos(atan2(p.y, p.x) * petals * 0.5));
+        shade = mix(1.0, mix(0.55, 1.0, lobe), smoothstep(0.35, 0.95, r));
+        centre = 1.0 - smoothstep(0.24, 0.36, r);
+    } else {
+        let cell = floor(p * 5.0);
+        shade = 0.8 + 0.25 * fract(sin(dot(cell, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+    }
+    shade = shade * (1.0 - 0.25 * smoothstep(0.75, 1.0, r));
+    let colour = mix(head.colour * shade, head.centre, centre);
+    return colour * clamp(grass.variety.y, 0.0, 2.0) * (0.9 + 0.2 * seed);
 }
 
 @vertex
@@ -1305,7 +2188,8 @@ fn vs_grass_mid(@builtin(vertex_index) vertex_index: u32, @builtin(instance_inde
     let inst = instances[instance_index].pos_seed;
     let seed = inst.w;
     let inst_packed = instances[instance_index].packed;
-    let shape = species_shape_mixed(inst_packed.w & 7u, grass.shape_mix.x);
+    let shape = species_shape_mixed(inst_packed.w & 7u, grass.shape_mix.x) *
+        vec3<f32>(look_shape(instance_look(inst_packed.w)), 1.0);
     let crush_dir = unpack2x16snorm(inst_packed.x);
     let crush_data = unpack2x16unorm(inst_packed.y);
     let crush = crush_data.x;
@@ -1354,6 +2238,7 @@ fn vs_grass_mid(@builtin(vertex_index) vertex_index: u32, @builtin(instance_inde
     out.blade_uv = vec4<f32>(select(1.0, 0.0, left), 1.0 - t, f32(inst_packed.w & 7u),
                              blade_texture_strength(rel));
     out.blade_taper = shape.z;
+    out.look = blade_look(inst, inst_packed, blade, false);
     return out;
 }
 
@@ -1406,10 +2291,21 @@ fn vs_grass_mid_tuft(@builtin(vertex_index) vertex_index: u32, @builtin(instance
     let family = u32(seed * 4.0);
     let family_height = select(select(select(0.78, 1.00, family == 1u), 1.24, family == 2u), 0.62, family == 3u);
     let family_width = select(select(select(0.72, 1.00, family == 1u), 1.20, family == 2u), 1.38, family == 3u);
-    let height = mix(0.34, 0.78, height_seed) * grass.blade_height * 1.7 * family_height *
-        lod_height_scale(inst_packed.z) * photo_card_scale();
-    let half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0)) * family_width *
+    // A plant's own max draw distance (layer_pick.y, a fraction of the card ring's reach): it
+    // shrinks away over the last 15% of its range instead of being drawn to the ring's edge.
+    let pick_far = grass.layer_pick[layer].y;
+    let layer_reach = select(1.0e9, pick_far * mid_ring_end(), pick_far > 0.0);
+    let layer_fade = 1.0 - smoothstep(0.85, 1.0, length(inst.xz - frame.cam_pos.xz) / max(layer_reach, 1.0));
+    var height = mix(0.34, 0.78, height_seed) * grass.blade_height * 1.7 * family_height *
+        lod_height_scale(inst_packed.z) * photo_card_scale() * layer_fade;
+    var half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0)) * family_width *
         mid_coverage_width_scale(inst_packed.w);
+    let plant_size = plant_card_size(layer, inst.xz);
+    if (plant_size > 0.0) {
+        // The plant's own size and proportions: the square is as wide as it is tall.
+        height = plant_size * lod_height_scale(inst_packed.z) * layer_fade;
+        half_width = height * 0.5;
+    }
 
     let crush_dir = unpack2x16snorm(inst_packed.x);
     let crush_data = unpack2x16unorm(inst_packed.y);
@@ -1459,7 +2355,8 @@ fn vs_grass_mid_tuft(@builtin(vertex_index) vertex_index: u32, @builtin(instance
     // The slice inset works within the trimmed box, not the raw image, so a
     // trimmed card still samples the same content it did untrimmed.
     let mirror = hash11(inst.xz + 5.0) < 0.5;
-    let slice = mix(0.0, 0.18, hash11(inst.xz + 41.0)) * (bounds.y - bounds.x);
+    // A rasterised plant is not sliced: the slice would stretch it off its true width.
+    let slice = select(mix(0.0, 0.18, hash11(inst.xz + 41.0)), 0.0, plant_size > 0.0) * (bounds.y - bounds.x);
     var uu = clamp(mix(bounds.x + slice, bounds.y - slice, quad_u), bounds.x, bounds.y);
     if (mirror) { uu = bounds.x + bounds.y - uu; }
     out.blade_uv = vec4<f32>(uu, img_v, f32(layer), 1.0);
@@ -1504,7 +2401,7 @@ fn vs_grass_far(@builtin(vertex_index) vertex_index: u32, @builtin(instance_inde
 // pipelines, one shading function, no penalty on the default path.
 @fragment
 fn fs_grass_cards(in: VsOut) -> @location(0) vec4<f32> {
-    let cutout = textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), frame.renscale.x);
+    let cutout = textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, blade_layer(in.blade_uv.z), frame.renscale.x);
     if (cutout.a < grass.cards.y) {
         discard;
     }
@@ -1652,10 +2549,67 @@ fn blade_height_ao_mean(taper: f32) -> f32 {
 // Preserve the authored species palette on an unresolved native ribbon. Its
 // opacity-weighted CPU mean excludes transparent margins; sampled alpha still
 // belongs to coverage and is never altered here. Empty layers retain the sample.
+// RFG-138: the array layer a blade's interpolated `blade_uv.z` names. ROUNDED, never truncated:
+// the value is constant per card but interpolated, and 16.0 arrives as 15.9999 on some pixels --
+// truncated, a set-1 card sampled set 0's last SatMapBlendMask layer (solid white) there and drew
+// as a sparkling white rectangle. Layer 0 cannot fall below itself, which hid this until sets.
+fn blade_layer(z: f32) -> i32 { return i32(z + 0.5); }
+
 fn native_blade_colour(sampled: vec3<f32>, mean: vec4<f32>, detail: f32) -> vec3<f32> {
     return select(sampled, mix(mean.rgb, sampled, detail), mean.w > 0.0);
 }
 // End pure footprint moments.
+
+// frame.sun_dir_world is the light's TRAVEL direction (lighting.wgsl); surface -> sun is its
+// negation. Grass took it un-negated from its first commit, so its sun term was zero at every
+// elevation and the field has lived on sky fill alone: black on native Reforger cover, and the
+// OFP meadow palette was tuned under that. native2.w = 1 (native worlds) takes the real sun;
+// the OFP look keeps the old sign until it is re-tuned under the sun. WGR_GRASS_SUN=1 forces the
+// real sun everywhere, WGR_GRASS_SUN=0 the old sign everywhere (shaders/mod.rs).
+fn grass_light_dir() -> vec3<f32> {
+#ifdef GRASS_LEGACY_SUN_SIGN
+    return normalize(frame.sun_dir_world.xyz);
+#else
+#ifdef GRASS_SUN_ALL
+    return normalize(-frame.sun_dir_world.xyz);
+#else
+    return normalize(select(1.0, -1.0, grass.native2.w > 0.5) * frame.sun_dir_world.xyz);
+#endif
+#endif
+}
+
+// RFG-PBR: the ground colour a native blade leans towards (SatMapLerp): the satellite under it
+// when the world has one -- what Reforger's PlantMat names -- else the surface's mean albedo.
+// RFG-201: whether a real satellite is bound. Everon's satellite is PAGED, so the grass gets the
+// 1x1 placeholder and grass_ground_colour fell back to the surface's mean albedo -- a straw
+// average Reforger never uses -- and SatMapLerp 0.8 pulled the green carpet 80% of the way to it
+// (groundDown G/R 1.00 vs Reforger's 1.18). Workbench, cp_grass_03 overridden at matched poses:
+// SatMapLerp 0 vs 0.8 leaves Reforger's carpet at G/R 1.17 vs 1.18 -- the atlas carries the green.
+// So without a satellite, the atlas colour stands.
+fn grass_has_satellite() -> bool {
+    return textureDimensions(grass_satellite).x > 1u;
+}
+
+fn grass_ground_colour(world_xz: vec2<f32>) -> vec3<f32> {
+    if (textureDimensions(grass_satellite).x > 1u) {
+        let extent = terrain.land_grid * f32(terrain.land_range);
+        let s = textureSampleLevel(grass_satellite, blade_samp,
+                                   (world_xz - terrain.world_origin) / max(extent, 1.0), 0.0);
+        if (s.a > 0.5) {
+            return pow(s.rgb, vec3<f32>(2.2));
+        }
+    }
+    return grass.native.yzw;
+}
+
+// RFG-117: how far the ground colour may pull this texel (the PlantMat's SatMapBlendMask, uploaded
+// as blade layers 8..15 when native_tuft2.w is set; 1 = everywhere, the pre-mask behaviour). The
+// array is sRGB, the mask is authored linear: re-encode what the sampler decoded.
+fn native_sat_mask(uv: vec4<f32>) -> f32 {
+    if (grass.native_tuft2.w < 0.5) { return 1.0; }
+    let m = textureSampleBias(blade_tex, blade_samp, uv.xy, blade_layer(uv.z) + 8, frame.renscale.x).r;
+    return select(1.055 * pow(m, 1.0 / 2.4) - 0.055, m * 12.92, m <= 0.0031308);
+}
 
 fn grass_shade(in: VsOut) -> vec4<f32> {
     let shading_detail = blade_shading_detail(in.blade_uv.xy);
@@ -1685,11 +2639,14 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // Photo veins can alias as sub-pixel blades move in the wind. A small
     // positive mip bias stabilises that fine detail while keeping it readable
     // at the close ranges where this near-LOD texture is actually visible.
-    let blade = textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), frame.renscale.x);
+    let blade = textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, blade_layer(in.blade_uv.z), frame.renscale.x);
     var blade_colour = blade.rgb;
     if (grass.native.x > 0.0) {
-        blade_colour = native_blade_colour(blade.rgb,
-            grass.blade_layer_means[min(u32(in.blade_uv.z), 7u)], shading_detail);
+        // RFG-138: the means are measured for set 0's eight layers only; another set keeps its own
+        // sampled colour rather than drifting towards grass_03's green with distance.
+        let mean_layer = u32(blade_layer(in.blade_uv.z));
+        let layer_mean_native = select(vec4<f32>(0.0), grass.blade_layer_means[min(mean_layer, 7u)], mean_layer < 8u);
+        blade_colour = native_blade_colour(blade.rgb, layer_mean_native, shading_detail);
     } else {
         // The procedural atlas has several green, yellow and brown species.
         // Keep their fibres and luminance relief, but give the OFP meadow one
@@ -1710,16 +2667,24 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // the procedural root shade on top, so the Blade root shade slider governs
     // the textured near field too instead of going inert inside 35 m.
     var textured = blade_colour * variation * gust_highlight * mix(1.0, root, 0.75);
-    if (grass.native.x > 0.0 && grass.native2.x > 0.0) {
+    if (grass.native.x > 0.0 && grass.native2.x > 0.0 && grass_has_satellite()) {
         // RFG-091: Reforger's blade layer is authored grey-green and takes its colour from
         // the satellite map (`SatMapLerp 0.8`). With no satellite pages on the native path,
         // the ground's mean albedo stands in: the atlas keeps its luminance structure, the
         // ground lends its hue and saturation.
         let luma = vec3<f32>(0.2126, 0.7152, 0.0722);
-        let ground = grass.native.yzw;
+        let ground = grass_ground_colour(world.xz);
         let recoloured = ground * (dot(blade_colour, luma) / max(dot(ground, luma), 0.02));
         // No root shade: the atlas tuft carries its own base darkening.
-        textured = mix(blade_colour, recoloured, clamp(grass.native2.x, 0.0, 1.0)) * variation * gust_highlight;
+        // RFG-117: SatMapLerp scaled per texel by the PlantMat's SatMapBlendMask (layers 8..15).
+        // RFG-138: each PlantMat its own SatMapLerp (wheat 0.65, cut wheat 0.5, grass 0.8); the set
+        // is the array layer's 16-layer block.
+        var lerp = grass.native2.x;
+        if (blade_sets_on() && native_tufts_on()) {
+            lerp = grass.tuft_sets[min(u32(in.blade_uv.z + 0.5) / 16u, 7u) * 2u + 1u].z;
+        }
+        textured = mix(blade_colour, recoloured, clamp(lerp, 0.0, 1.0) * native_sat_mask(in.blade_uv)) *
+            variation * gust_highlight;
     }
     // shape_mix.w scales the photo texture globally on top of the distance fade
     // already in blade_uv.w, so the detail can be dialled back without deleting
@@ -1755,6 +2720,9 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let pivot = mix(base, tip, 0.5) * 0.65;
     var albedo = grass.tint_procedural.rgb *
         max((hued - pivot) * blade_contrast() + pivot, vec3<f32>(0.0));
+    if (in.look != 0u) {
+        albedo = look_albedo(albedo, in.look, in.blade_uv.xy, in.height_t, in.seed);
+    }
     if (grass.native.x > 0.0) {
         // RFG-091: the grading chain above (saturation, dry patches, hue drift, contrast
         // about a GREEN pivot, the procedural tint) was built for the procedural blades;
@@ -1767,10 +2735,10 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let upright = vec3<f32>(0.0, 1.0, 0.0);
     let resolved_normal = normalize(mix(normalize(in.normal), upright, 0.24));
     let n = normalize(mix(upright, resolved_normal, shading_detail));
-    let light_dir = normalize(frame.sun_dir_world.xyz);
+    let light_dir = grass_light_dir();
     let ndl = max(dot(n, light_dir), 0.0);
     let wrap = max((dot(n, light_dir) + 0.35) / 1.35, 0.0);
-    let terrain_shadow = terrain_sun_shadow(world.xz, world.y);
+    let terrain_shadow = max(terrain_sun_shadow(world.xz, world.y), canopy_sun_shadow(world));
     let cloud_lit = cloud_sun_shadow(world.xz);
     // Blade-on-blade: (sun occlusion, ambient AO). Identity at strength 0.
     // RFG-091: the blade-on-blade terms assume a bare procedural blade; the native atlas is
@@ -1781,7 +2749,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let direct = frame.sun_diffuse.rgb * mix(ndl, wrap, 0.35) *
         (1.0 - max(terrain_shadow, self_shadow.x)) * cloud_lit;
     let ambient = grass_sky_fill(normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.45)), view_dir, light_dir) * sky_vis_ao(world.xz) *
-        self_shadow.y;
+        canopy_sky_ao(world) * self_shadow.y;
     let transmission = species_transmission(u32(in.blade_uv.z));
     let transmission_amount = pow(max(dot(view_dir, -light_dir), 0.0), 1.5) * (1.0 - ndl) *
         grass.debug_flags.w * transmission.w;
@@ -1795,6 +2763,18 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let sheen = frame.sun_diffuse.rgb * vec3<f32>(0.85, 1.0, 0.75) * sheen_amount *
         (1.0 - max(terrain_shadow, self_shadow.x)) * cloud_lit;
     let lit = albedo * (ambient + direct + subsurface) + sheen;
+#ifdef GRASS_DEBUG_ALBEDO
+    return vec4<f32>(albedo, 1.0);
+#endif
+#ifdef GRASS_DEBUG_DIRECT
+    return vec4<f32>(direct * 0.25, 1.0);
+#endif
+#ifdef GRASS_DEBUG_AMBIENT
+    return vec4<f32>(ambient, 1.0);
+#endif
+#ifdef GRASS_DEBUG_TERMS
+    return vec4<f32>(terrain_shadow, cloud_lit, ndl, 1.0);
+#endif
     let fogged = apply_fog(lit, in.world_rel);
     return vec4<f32>(select(lit, fogged, grass.render_flags.y >= 0.5), 1.0);
 }
@@ -1839,9 +2819,9 @@ fn fs_grass_far(in: VsOut) -> @location(0) vec4<f32> {
         clump_noise(world.xz - vec2<f32>(0.0, 1.0), 0.075, 0x4f93d71bu);
     let macro_normal = normalize(vec3<f32>(-macro_dx * 0.24, 1.0, -macro_dz * 0.24));
     let n = normalize(mix(mix(in.normal, macro_normal, 0.42), vec3<f32>(0.0, 1.0, 0.0), 0.48));
-    let light_dir = normalize(frame.sun_dir_world.xyz);
+    let light_dir = grass_light_dir();
     let diffuse = max((dot(n, light_dir) + 0.35) / 1.35, 0.0);
-    let terrain_shadow = terrain_sun_shadow(world.xz, world.y);
+    let terrain_shadow = max(terrain_sun_shadow(world.xz, world.y), canopy_sun_shadow(world));
     let cloud_lit = cloud_sun_shadow(world.xz);
     let direct = frame.sun_diffuse.rgb * diffuse * (1.0 - terrain_shadow) * cloud_lit;
     let ambient = sky_irradiance(n) * sky_vis_ao(world.xz);
@@ -1969,7 +2949,7 @@ fn tuft_contour_normal(uv: vec2<f32>, layer: i32, card_normal: vec3<f32>) -> vec
 // without softening close clumps. Colour, prepass and A2C twins all go through
 // here so they sample the same mip of the same texel and agree on the alpha.
 fn tuft_sample(in: VsOut) -> vec4<f32> {
-    return textureSampleBias(tuft_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), 0.75);
+    return textureSampleBias(tuft_tex, blade_samp, in.blade_uv.xy, blade_layer(in.blade_uv.z), 0.75);
 }
 
 // Alpha-to-coverage for the cards under MSAA (grass/mod.rs builds the *_a2c
@@ -2021,7 +3001,12 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     // The per-layer material stand-in (card_tone_gain) multiplies BOTH the
     // sample and its contrast pivot below, so contrast stays brightness-neutral.
     let tone_gain = card_tone_gain(u32(in.blade_uv.z));
-    let a3_albedo = tex.rgb * PHOTO_TONE_CORRECTION * photo_brightness * tone_gain;
+    // A native world's clutter atlas is authored albedo, lit by the real sun (grass_light_dir):
+    // the A3 plate calibration and its white sun sheen were both made for sky-lit A3 plates and
+    // bleach it to mint.
+    let native_card = grass.native2.w > 0.5;
+    let tone_correction = select(PHOTO_TONE_CORRECTION, vec3<f32>(1.0), native_card);
+    let a3_albedo = tex.rgb * tone_correction * photo_brightness * tone_gain;
     // The source plates have strong chlorophyll green. Keep their natural
     // stem variation but pull this card-only correction toward luma before
     // the user's global grass saturation is applied.
@@ -2042,25 +3027,32 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     // the near-field cancellation between bright stems and dark gaps disappears.
     let contrast = clamp(grass.photo.x, 0.5, 2.5);
     let mean_a3 = grass.layer_means[min(u32(in.blade_uv.z), 31u)].rgb *
-        PHOTO_TONE_CORRECTION * photo_brightness * tone_gain;
+        tone_correction * photo_brightness * tone_gain;
     let mean_luma = dot(mean_a3, vec3<f32>(0.2126, 0.7152, 0.0722));
     let plate_pivot = mix(vec3<f32>(mean_luma), mean_a3, photo_sat);
     let shaped = max((photo_natural - plate_pivot) * contrast + plate_pivot, vec3<f32>(0.0));
     // Light does not reach the base of a clump. Occluding it there gives the
     // card a bottom, which is most of why an unoccluded plate floats.
     let root_ao = mix(1.0 - clamp(grass.photo.w, 0.0, 1.0), 1.0, smoothstep(0.0, 0.55, in.height_t));
-    let albedo = grass.tint_photo.rgb *
+    var albedo = grass.tint_photo.rgb *
         grass_saturation(dry_patch(shaped * variation * gust_highlight * root_ao, world.xz, in.height_t));
+    // RFG-108: a native card is the plant's own authored albedo, rasterised from its model.
+    // The chain above is A3 plate calibration -- saturation 0.62, contrast 1.35 about the
+    // plate mean, straw dry patches, the field tint -- and turned Everon's nettles and
+    // thistles grey-white. Only the base occlusion and the per-plant variation stay.
+    if (native_card) {
+        albedo = tex.rgb * variation * root_ao;
+    }
     // Photo cards are crossed billboards, so the base normal stays upright:
     // lighting the card's own facing made one clump brighten or darken as the
     // camera orbited it. The photograph's luma gradient then perturbs that
     // upright normal per texel, which is view-stable and gives the silhouette
     // real relief instead of one flat value across the whole plate.
-    let n = tuft_contour_normal(in.blade_uv.xy, i32(in.blade_uv.z), in.normal);
-    let light_dir = normalize(frame.sun_dir_world.xyz);
+    let n = tuft_contour_normal(in.blade_uv.xy, blade_layer(in.blade_uv.z), in.normal);
+    let light_dir = grass_light_dir();
     let ndl = max(dot(n, light_dir), 0.0);
     let wrap = max((dot(n, light_dir) + 0.35) / 1.35, 0.0);
-    let terrain_shadow = terrain_sun_shadow(world.xz, world.y);
+    let terrain_shadow = max(terrain_sun_shadow(world.xz, world.y), canopy_sun_shadow(world));
     // Grass shadowing grass. The cascade already contains these same cards
     // (draw_shadow submits the near and mid tuft rings), so this is a real
     // occlusion test, not a fake.
@@ -2078,8 +3070,17 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     let sheen_amount = grass_broad_sun_response(dot(clump_normal, half_direction), height_detail,
         view_dir.y, GRASS_MEDIUM_LIGHTING);
     let sheen = frame.sun_diffuse.rgb * vec3<f32>(0.85, 1.0, 0.75) * sheen_amount *
-        (1.0 - max(terrain_shadow, clump_shadow)) * cloud_lit;
+        (1.0 - max(terrain_shadow, clump_shadow)) * cloud_lit * select(1.0, 0.0, native_card);
     let lit = albedo * (ambient + direct) + sheen;
+#ifdef GRASS_DEBUG_ALBEDO
+    return albedo;
+#endif
+#ifdef GRASS_DEBUG_DIRECT
+    return direct * 0.25;
+#endif
+#ifdef GRASS_DEBUG_AMBIENT
+    return ambient;
+#endif
     let fogged = apply_fog(lit, in.world_rel);
     return select(lit, fogged, grass.render_flags.y >= 0.5);
 }
@@ -2119,6 +3120,164 @@ fn fs_grass_mid_tuft_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
     if (cov <= 0.0) { discard; }
     let normal_view = (frame.view * vec4<f32>(normalize(in.normal), 0.0)).xyz;
     let oct = oct_encode(normalize(normal_view));
+    return vec4<f32>(oct.x, oct.y, 0.0, cov);
+}
+
+// RFG-117: native near-ring tuft cards (vs_native_tuft). The silhouette is the atlas alpha, so
+// these discard / emit coverage exactly like the mid tufts, prepass twins included -- a prepass
+// that wrote the whole card would stamp its transparent margin into depth over the ground.
+// Two-sided: the back face shades with the flipped normal, bent half way to upright so a card
+// seen edge-on to the sun does not go black (the old blades' dark side).
+fn native_tuft_alpha(in: VsOut) -> f32 {
+    return textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, blade_layer(in.blade_uv.z), frame.renscale.x).a;
+}
+fn native_tuft_facing(in: VsOut, front: bool) -> VsOut {
+    var o = in;
+    o.normal = normalize(mix(select(-in.normal, in.normal, front), vec3<f32>(0.0, 1.0, 0.0), 0.5));
+    return o;
+}
+
+// RFG-159: a Reforger PlantMat tuft lit as a tuft, not as a sheet of paper.
+//
+// The RFG-117 shading lit every card with one normal -- the card's, bent half way to upright,
+// then another quarter -- and no occlusion: every texel of a tuft took the same light, so the
+// meadow read as flat painted cards (the owner's "grass looks flat next to Reforger"). What gives
+// Reforger's tufts their volume is in the PlantMat: its NTOMap carries a per-texel normal for the
+// atlas (R = along the card, G = down the image, DirectX convention; measured on cp_grass_01: the
+// covered texels' normals average 34 degrees off the card, the tuft tops lean image-up), scaled by
+// `NormalPower`; `Occlusion` darkens the base (wheat 21, grass_03 8, grass_01 0). The loader puts
+// the NTO normal in the G/B channels of each colour layer's SatMapBlendMask twin (R stays the
+// mask), and the set's Occlusion and NormalPower in tuft_sets[2s+1].w (16 x Occlusion +
+// NormalPower; NormalPower 0 = the set has no NTOMap). On top: the tufts receive the cascade
+// shadows (buildings and trees shade the meadow; RFG-117 cards took only the terrain's own
+// shadow) and transmit sun through the blades when backlit.
+fn native_srgb_encode(m: f32) -> f32 {
+    return select(1.055 * pow(m, 1.0 / 2.4) - 0.055, m * 12.92, m <= 0.0031308);
+}
+
+fn native_tuft_shade(in: VsOut, front: bool) -> vec4<f32> {
+    let world = in.world_rel + frame.cam_pos.xyz;
+    let dist = max(length(in.world_rel), 0.0001);
+    let view_dir = -in.world_rel / dist;
+    let up = vec3<f32>(0.0, 1.0, 0.0);
+    let luma = vec3<f32>(0.2126, 0.7152, 0.0722);
+    let shading_detail = blade_shading_detail(in.blade_uv.xy);
+    let layer = blade_layer(in.blade_uv.z);
+    let bset = min(u32(max(layer, 0)) / 16u, 7u);
+    let set_word = select(0.0, grass.tuft_sets[bset * 2u + 1u].w, blade_sets_on());
+    let occlusion = floor(max(set_word, 0.0) / 16.0);
+    let normal_power = max(set_word - occlusion * 16.0, 0.0);
+    // Derivatives first: uniform control flow (the shadow lookup below sits in a branch).
+    let dwx = dpdx(in.world_rel);
+    let dwy = dpdy(in.world_rel);
+
+    // Albedo: the atlas, leaning towards the ground colour by SatMapLerp x SatMapBlendMask (as
+    // grass_shade does for a native blade), the per-plant and field variation, the gust highlight.
+    let blade = textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, layer, frame.renscale.x);
+    let aux = textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, layer + 8, frame.renscale.x);
+    let field_tint = clump_noise(world.xz, 0.003, 0x5e3a91c7u);
+    let variation = mix(1.0, mix(0.78, 1.20, mix(in.seed, field_tint, 0.55)), grass.debug_flags.z);
+    let gust_highlight = 1.0 + in.wind_gust * clamp(grass.wind_strength, 0.0, 1.5) * (0.035 + 0.075 * in.height_t);
+    let mean_layer = u32(max(layer, 0));
+    let layer_mean = select(vec4<f32>(0.0), grass.blade_layer_means[min(mean_layer, 7u)], mean_layer < 8u);
+    let blade_colour = native_blade_colour(blade.rgb, layer_mean, shading_detail);
+    var albedo = blade_colour;
+    if (grass.native2.x > 0.0 && grass_has_satellite()) {
+        let ground = grass_ground_colour(world.xz);
+        let recoloured = ground * (dot(blade_colour, luma) / max(dot(ground, luma), 0.02));
+        var lerp = grass.native2.x;
+        if (blade_sets_on()) {
+            lerp = grass.tuft_sets[bset * 2u + 1u].z;
+        }
+        let mask = select(1.0, native_srgb_encode(aux.r), grass.native_tuft2.w > 0.5);
+        albedo = mix(blade_colour, recoloured, clamp(lerp, 0.0, 1.0) * mask);
+    }
+    albedo *= variation * gust_highlight;
+
+    // The card's frame: u runs along the card's horizontal axis, the image's v runs down it.
+    let card_n = normalize(in.normal);
+    let tangent = normalize(vec3<f32>(card_n.z, 0.0, -card_n.x));
+    let card_up = cross(card_n, tangent);
+    let face = select(-card_n, card_n, front);
+    let nto = vec2<f32>(native_srgb_encode(aux.g), native_srgb_encode(aux.b)) * 2.0 - 1.0;
+    let k = normal_power * clamp(grass.native_look2.z, 0.0, 4.0) * select(0.0, 1.0, abs(grass.native_look.w) > 0.5);
+    let z0 = sqrt(max(1.0 - dot(nto, nto), 0.04));
+    let ts = normalize(vec3<f32>(nto.x * k, nto.y * k * grass.native_look.w, z0));
+    let bumped = normalize(tangent * ts.x + card_up * ts.y + face * ts.z);
+    let bent = normalize(mix(bumped, up, clamp(grass.native_look2.y, 0.0, 1.0)));
+    // Sub-pixel tufts: their texels average, so does their light -- towards upright.
+    let n = normalize(mix(up, bent, shading_detail));
+
+    let light_dir = grass_light_dir();
+    let ndl_raw = dot(n, light_dir);
+    let ndl = max(ndl_raw, 0.0);
+    let wrap = max((ndl_raw + 0.35) / 1.35, 0.0);
+    let terrain_shadow = max(terrain_sun_shadow(world.xz, world.y), canopy_sun_shadow(world));
+    let cloud_lit = cloud_sun_shadow(world.xz);
+    var cascade = 0.0;
+    if (grass.native_look2.x > 0.5) {
+        let reach = max(grass.native_look2.w, 10.0);
+        cascade = shadow_strength(in.world_rel, face, 1.0, dwx, dwy) *
+            (1.0 - smoothstep(reach * 0.6, reach, dist));
+    }
+    let sun_vis = (1.0 - max(terrain_shadow, cascade)) * cloud_lit;
+    // Occlusion towards the base: neighbours stand between it and the sky (all of it) and the
+    // sun (half of it).
+    let occ = clamp(occlusion / 20.0, 0.0, 1.0) * clamp(grass.native_look.y, 0.0, 1.0);
+    let root_ao = mix(1.0 - occ, 1.0, smoothstep(0.0, 0.75, in.height_t));
+    let direct = frame.sun_diffuse.rgb * mix(ndl, wrap, 0.25) * sun_vis * mix(1.0, root_ao, 0.5);
+    let ambient = grass_sky_fill(normalize(mix(n, up, 0.35)), view_dir, light_dir) * sky_vis_ao(world.xz) *
+        canopy_sky_ao(world) * root_ao;
+    // Sun through the blade: light arriving on the side the viewer does not see, strongest
+    // looking towards the sun. Tinted by the blade itself (leaf transmission is its own green).
+    let behind = max(-dot(face, light_dir), 0.0);
+    let forward = pow(max(dot(view_dir, -light_dir), 0.0), 3.0);
+    let transmission = frame.sun_diffuse.rgb * (behind * (0.35 + 0.65 * forward)) *
+        clamp(grass.native_look.z, 0.0, 2.0) * sun_vis * root_ao;
+    let tint = min(albedo * 1.8 / max(dot(albedo, luma), 0.02) * 0.5, vec3<f32>(1.5));
+    let lit = albedo * (ambient + direct) + albedo * tint * transmission;
+#ifdef GRASS_DEBUG_ALBEDO
+    return vec4<f32>(albedo, 1.0);
+#endif
+#ifdef GRASS_DEBUG_DIRECT
+    return vec4<f32>(direct * 0.25, 1.0);
+#endif
+#ifdef GRASS_DEBUG_AMBIENT
+    return vec4<f32>(ambient, 1.0);
+#endif
+    let fogged = apply_fog(lit, in.world_rel);
+    return vec4<f32>(select(lit, fogged, grass.render_flags.y >= 0.5), 1.0);
+}
+
+fn native_tuft_colour(in: VsOut, front: bool) -> vec4<f32> {
+    if (grass.native_look.x > 0.5) {
+        return native_tuft_shade(in, front);
+    }
+    return grass_shade(native_tuft_facing(in, front));
+}
+@fragment
+fn fs_grass_native_tuft(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    if (native_tuft_alpha(in) < tuft_alpha_cutoff()) { discard; }
+    return native_tuft_colour(in, front);
+}
+@fragment
+fn fs_grass_native_tuft_a2c(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let cov = a2c_coverage(native_tuft_alpha(in), tuft_alpha_cutoff());
+    if (cov <= 0.0) { discard; }
+    return vec4<f32>(native_tuft_colour(in, front).rgb, cov);
+}
+@fragment
+fn fs_grass_native_tuft_prepass(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec2<f32> {
+    if (native_tuft_alpha(in) < tuft_alpha_cutoff()) { discard; }
+    let n = native_tuft_facing(in, front).normal;
+    return oct_encode(normalize((frame.view * vec4<f32>(n, 0.0)).xyz));
+}
+@fragment
+fn fs_grass_native_tuft_prepass_a2c(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let cov = a2c_coverage(native_tuft_alpha(in), tuft_alpha_cutoff());
+    if (cov <= 0.0) { discard; }
+    let n = native_tuft_facing(in, front).normal;
+    let oct = oct_encode(normalize((frame.view * vec4<f32>(n, 0.0)).xyz));
     return vec4<f32>(oct.x, oct.y, 0.0, cov);
 }
 

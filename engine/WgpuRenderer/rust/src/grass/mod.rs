@@ -368,7 +368,8 @@ struct GrassParams {
     // cards are on, and the mid ring's cards begin at the camera; .yzw spare.
     near_blades_only: f32,
     native_tint: [f32; 3],
-    // RFG-091: `native2`: .x tint lerp; .y gust variation (-1 = old gusts), .z front metres; .w spare.
+    // RFG-091: `native2`: .x tint lerp; .y gust variation (-1 = old gusts), .z front metres;
+    // .w = 1 lights a native world's cover with the real sun (grass_light_dir).
     native_tint_lerp: f32,
     _native2_pad: [f32; 3],
     // Renderer-derived from the uploaded atlas, never from the caller.
@@ -379,6 +380,150 @@ struct GrassParams {
     // Eight source-opacity-weighted linear means of blade_tex, not tuft_tex.
     // Renderer-private; w=0 leaves empty/unavailable layers on the sampled path.
     blade_layer_means: [f32; 32],
+    // Per card layer: weight, max-distance fraction, 0, 0 (grass.wgsl layer_pick).
+    layer_pick: [f32; 128],
+    // RFG-116: .x = bit per atlas layer whose run belongs to a surface that names no PlantMat,
+    // so the near ring grows no blades there (Reforger's forest/dirt floors); .yzw spare.
+    blade_skip: [u32; 4],
+    // RFG-117: mirrors native_tuft / native_tuft2 / tuft_aspect / tuft_scale in grass.wgsl.
+    native_tuft: [f32; 4],
+    native_tuft2: [f32; 4],
+    tuft_aspect: [f32; 8],
+    tuft_scale: [f32; 8],
+    // RFG-138: per-surface PlantMat blade sets (grass.wgsl tuft_sets / tuft_set_aspect /
+    // tuft_set_scale / card_skip). Set s: tuft_sets[8s..8s+4] = cards, Zenith, ZenithRandomOffset,
+    // height m; [8s+4..8s+8] = HeightRandomOffset, Plants/m2, ground-colour lerp, has mask.
+    tuft_sets: [f32; 64],
+    tuft_set_aspect: [f32; 64],
+    tuft_set_scale: [f32; 64],
+    // .x = bit per atlas layer whose run grows blades only (a PlantMat surface with no
+    // ClutterConfig: Reforger's crop fields); the card rings place nothing there. .yzw spare.
+    card_skip: [u32; 4],
+    // RFG-159: how the native near ring's PlantMat tufts are lit (grass.wgsl native_tuft_shade).
+    // Renderer-owned, read once from the environment (native_look_from_env).
+    native_look: [f32; 4],
+    native_look2: [f32; 4],
+    // RFG-160: the native near ring's reach (native_ring_from_env).
+    native_ring: [f32; 4],
+    // GRS-VAR: OFP meadow variety (grass.wgsl `variety`, resolve_variety): .x on, .y head
+    // brightness, .z head share, .w drift frequency; and the per-slot look weights.
+    variety: [f32; 4],
+    look_weights: [f32; 16],
+}
+
+/// GRS-VAR: the shipped look weights (Engine.hpp GrassSettings::lookWeights mirrors them).
+const DEFAULT_LOOK_WEIGHTS: [f32; 16] =
+    [3.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+
+/// GRS-VAR: the caller's variety lanes, with the environment as the A/B lever on top:
+/// WGR_GRASS_VARIETY=0 forces the pre-GRS-VAR meadow, =1 forces it on; the other variables
+/// replace one lane each.
+fn resolve_variety(caller: [f32; 4]) -> [f32; 4] {
+    let env = variety_from_env();
+    let set = |key: &str| std::env::var(key).is_ok();
+    [
+        if set("WGR_GRASS_VARIETY") { env[0] } else if caller[0] > 0.5 { 1.0 } else { 0.0 },
+        if set("WGR_GRASS_HEAD_BRIGHTNESS") { env[1] } else { caller[1].clamp(0.0, 2.0) },
+        if set("WGR_GRASS_HEAD_SHARE") { env[2] } else { caller[2].clamp(0.0, 1.0) },
+        if set("WGR_GRASS_LOOK_DRIFT") { env[3] } else if caller[3] > 0.0 { caller[3].clamp(0.005, 1.0) } else { env[3] },
+    ]
+}
+
+fn resolve_look_weights(caller: [f32; 16]) -> [f32; 16] {
+    let mut w = caller.map(|v| if v.is_finite() { v.clamp(0.0, 100.0) } else { 0.0 });
+    // An unset block (every lane 0) is a caller that predates the weights: shipped defaults.
+    if w.iter().all(|&v| v == 0.0) {
+        w = DEFAULT_LOOK_WEIGHTS;
+    }
+    w
+}
+
+/// GRS-VAR: `WGR_GRASS_SPECIES_MIX=weed,flower` overrides the Grass tab's species mix -- a fixed
+/// A/B lever for captures, read once.
+fn species_mix_override() -> Option<[f32; 2]> {
+    static MIX: std::sync::OnceLock<Option<[f32; 2]>> = std::sync::OnceLock::new();
+    *MIX.get_or_init(|| {
+        let v = std::env::var("WGR_GRASS_SPECIES_MIX").ok()?;
+        let mut it = v.split(',').map(|x| x.trim().parse::<f32>().ok().filter(|f| f.is_finite()));
+        Some([it.next()??, it.next()??])
+    })
+}
+
+/// GRS-VAR: the procedural meadow's per-clump looks (flower heads, weed tints, seeding grass).
+/// [on, flower/seed head brightness, share of a clump's blades that carry a head, spare].
+/// WGR_GRASS_VARIETY=0 is the image before it: every look id is 0 and nothing else changes.
+/// Never applies on a native (Reforger) world -- the shader gates it on the native lanes.
+fn variety_from_env() -> [f32; 4] {
+    let num = |key: &str, default: f32, lo: f32, hi: f32| -> f32 {
+        std::env::var(key)
+            .ok()
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .filter(|v| v.is_finite())
+            .map_or(default, |v| v.clamp(lo, hi))
+    };
+    [
+        num("WGR_GRASS_VARIETY", 1.0, 0.0, 1.0),
+        num("WGR_GRASS_HEAD_BRIGHTNESS", 0.8, 0.0, 2.0),
+        num("WGR_GRASS_HEAD_SHARE", 0.5, 0.0, 1.0),
+        num("WGR_GRASS_LOOK_DRIFT", 0.09, 0.005, 1.0),
+    ]
+}
+
+/// RFG-160: how far a native world's PlantMat tufts reach and how they thin. [distance (m) past
+/// which plants thin as d0/d -- constant plants per screen area, the far ones widened by
+/// (d/d0)^exponent so the meadow keeps its cover; that exponent; the height floor in the ring's
+/// outer dissolve (RFG-117 shrank tufts to 0.45 there, which flattened the meadow from 20 m on);
+/// the near radius multiplier on a native world (Ultra's 41 m -> 82 m; Reforger draws its grass to
+/// 120 m at Ultra)]. WGR_NATIVE_RING_SCALE=1 WGR_NATIVE_RING_THIN=0 WGR_NATIVE_RING_HEIGHT_FLOOR=0.45
+/// is the RFG-117 ring.
+fn native_ring_from_env() -> [f32; 4] {
+    let num = |key: &str, default: f32, lo: f32, hi: f32| -> f32 {
+        std::env::var(key)
+            .ok()
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .filter(|v| v.is_finite())
+            .map_or(default, |v| v.clamp(lo, hi))
+    };
+    [
+        num("WGR_NATIVE_RING_THIN", 22.0, 0.0, 200.0),
+        num("WGR_NATIVE_RING_WIDEN", 0.5, 0.0, 1.0),
+        num("WGR_NATIVE_RING_HEIGHT_FLOOR", 0.85, 0.0, 1.0),
+        num("WGR_NATIVE_RING_SCALE", 2.0, 0.25, 4.0),
+    ]
+}
+
+/// RFG-159: the native tuft look. `native_look` = [on, root occlusion strength, translucency,
+/// NTOMap green sign (-1 = DirectX, the Enfusion convention measured on cp_grass_01's atlas;
+/// 0 = no per-texel normal)]; `native_look2` = [receive cascade shadows, up-bend of the shading
+/// normal, NormalPower multiplier, cascade fade-out distance m]. WGR_NATIVE_TUFT_SHADE=0 keeps the
+/// RFG-117 shading (grass_shade with the card normal bent half way up).
+fn native_look_from_env() -> ([f32; 4], [f32; 4]) {
+    let num = |key: &str, default: f32, lo: f32, hi: f32| -> f32 {
+        std::env::var(key)
+            .ok()
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .filter(|v| v.is_finite())
+            .map_or(default, |v| v.clamp(lo, hi))
+    };
+    let on = num("WGR_NATIVE_TUFT_SHADE", 1.0, 0.0, 1.0);
+    let look = [
+        if on > 0.5 { 1.0 } else { 0.0 },
+        num("WGR_NATIVE_TUFT_AO", 0.8, 0.0, 1.0),
+        num("WGR_NATIVE_TUFT_SSS", 0.55, 0.0, 2.0),
+        num("WGR_NATIVE_TUFT_NTO_GREEN", -1.0, -1.0, 1.0),
+    ];
+    let look2 = [
+        if num("WGR_NATIVE_TUFT_CSM", 1.0, 0.0, 1.0) > 0.5 { 1.0 } else { 0.0 },
+        num("WGR_NATIVE_TUFT_UPBEND", 0.30, 0.0, 1.0),
+        num("WGR_NATIVE_TUFT_NORMAL", 0.6, 0.0, 4.0),
+        num("WGR_NATIVE_TUFT_CSM_RANGE", 80.0, 10.0, 400.0),
+    ];
+    (look, look2)
+}
+
+/// Neutral card-layer pick: uniform weights (0 = "the map gave none") and no distance limit.
+fn default_layer_pick() -> [f32; 128] {
+    [0.0; 128]
 }
 
 /// Owner's fallback for photo-card coverage where the map's own clutter density
@@ -386,6 +531,10 @@ struct GrassParams {
 /// A card then grows in roughly one clutter cell in four; on the 1.11 m grid that
 /// is ~0.19 cards/m^2, or one card every ~2.3 m on average.
 pub const CARD_COVERAGE_DEFAULT: f32 = 0.24;
+
+/// BOOM-001: grass placement's crater list (GrassCraters in grass.wgsl).
+pub const GRASS_CRATER_MAX: usize = 64;
+const GRASS_CRATER_BYTES: u64 = ((4 + GRASS_CRATER_MAX * 4) * 4) as u64;
 
 /// Mirrors `GrassInstance` in grass.wgsl and grass_shadow.wgsl (32 B). `packed`
 /// carries what the compute placement pass resolves once per blade -- currently
@@ -508,9 +657,19 @@ pub struct Grass {
     heightmap_view: wgpu::TextureView,
     geography: wgpu::Texture,
     geography_view: wgpu::TextureView,
+    // RFG-PBR: the native world's satellite (set_satellite) or the 1x1 placeholder.
+    satellite_view: wgpu::TextureView,
+    // RFG-107: the native world's road segments per land cell (set_road_cells), or the
+    // 16-byte placeholder whose header says "no roads".
+    road_cells: wgpu::Buffer,
     terrain_generation: u64,
+    // Whole World: the streamed near patch the grass stands on instead of the native island (an empty
+    // placeholder in that mode), with its own geography; see set_earth_ground.
+    earth: Option<EarthGround>,
+    earth_gen: u64,
     // Sinkhole W1: the placement's own copy of the terrain hole edges, refreshed when the terrain's changes.
     holes: wgpu::Buffer,
+    craters: wgpu::Buffer,
     holes_gen: u64,
     have_heightmap: bool,
     place_pipeline: wgpu::ComputePipeline,
@@ -524,6 +683,18 @@ pub struct Grass {
     // grass colour pass with the feature switched off.
     cards_color_pipeline: wgpu::RenderPipeline,
     cards_color_no_write_pipeline: wgpu::RenderPipeline,
+    // RFG-117: near ring as Reforger tuft cards (native worlds).
+    native_tuft_color_pipeline: wgpu::RenderPipeline,
+    native_tuft_color_no_write_pipeline: wgpu::RenderPipeline,
+    native_tuft_prepass_pipeline: wgpu::RenderPipeline,
+    native_tuft_shadow_pipeline: wgpu::RenderPipeline,
+    // RFG-142: motion vectors for the native near ring (vs_grass_velocity / fs_grass_velocity).
+    velocity_pipeline: wgpu::RenderPipeline,
+    velocity_layout: wgpu::BindGroupLayout,
+    velocity_uniform: wgpu::Buffer,
+    // The wind lanes of the frame the last velocity pass ran for: strength, direction, advection
+    // (4), flutter (4). None until the first frame, which then uses its own lanes (zero motion).
+    velocity_prev_lanes: std::cell::Cell<Option<[f32; 10]>>,
     prepass_pipeline: wgpu::RenderPipeline,
     mid_prepass_pipeline: wgpu::RenderPipeline,
     mid_color_pipeline: wgpu::RenderPipeline,
@@ -596,6 +767,8 @@ pub struct Grass {
     tuft_bounds: [f32; 128],
     // Mean covered colour per layer, the contrast pivot.
     tuft_means: [f32; 128],
+    // Per card layer pick weights / max-distance fractions (set_layer_pick).
+    layer_pick: [f32; 128],
     // Last pushed params, so set_tuft can re-publish them with the tuft flag set
     // without waiting for the Grass tab to touch a slider.
     last_params: GrassParams,
@@ -833,6 +1006,21 @@ impl Grass {
             wind_advection: [0.0; 4],
             wind_flutter: [0.0, 0.0, 1.0, 0.0],
             blade_layer_means: [0.0; 32],
+            layer_pick: default_layer_pick(),
+            blade_skip: [0; 4],
+            native_tuft: [0.0; 4],
+            native_tuft2: [0.0; 4],
+            tuft_aspect: [1.0; 8],
+            tuft_scale: [1.0; 8],
+            tuft_sets: [0.0; 64],
+            tuft_set_aspect: [1.0; 64],
+            tuft_set_scale: [1.0; 64],
+            card_skip: [0; 4],
+            native_look: native_look_from_env().0,
+            native_look2: native_look_from_env().1,
+            native_ring: native_ring_from_env(),
+            variety: variety_from_env(),
+            look_weights: DEFAULT_LOOK_WEIGHTS,
         };
         queue.write_buffer(&grass_params, 0, bytemuck::bytes_of(&params));
 
@@ -942,7 +1130,49 @@ impl Grass {
                     },
                     count: None,
                 },
+                // RFG-PBR: a native world's satellite (supertexture) over the whole land, the
+                // colour its procedural blades lean towards (SatMapLerp); 1x1 elsewhere.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // RFG-107: road segments per land cell, read by the placement passes.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(16),
+                    },
+                    count: None,
+                },
+                // BOOM-001: explosion craters near the camera; placement grows nothing on their soil.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(GRASS_CRATER_BYTES),
+                    },
+                    count: None,
+                },
             ],
+        });
+        let satellite_view = create_satellite_placeholder(device, queue);
+        let road_cells = create_road_cells_buffer(device, queue, &[]);
+        let craters = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_grass_craters"),
+            size: GRASS_CRATER_BYTES,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
         let holes = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_grass_terrain_holes"),
@@ -1161,6 +1391,9 @@ impl Grass {
             &heightmap_view,
             &geography_view,
             &holes,
+            &satellite_view,
+            &road_cells,
+            &craters,
         );
         let data_bind = make_data_bind(
             device,
@@ -1361,6 +1594,31 @@ impl Grass {
             NORMAL_FORMAT,
             true,
         );
+        // RFG-117: the near ring as Reforger tuft cards (native worlds, native_tuft.x). Cut out by
+        // the atlas alpha in BOTH passes, A2C under MSAA like the mid tufts.
+        let (native_fs, native_prepass_fs) = if card_a2c {
+            ("fs_grass_native_tuft_a2c", "fs_grass_native_tuft_prepass_a2c")
+        } else {
+            ("fs_grass_native_tuft", "fs_grass_native_tuft_prepass")
+        };
+        let native_tuft_color_pipeline =
+            make_pipeline_a2c("wgr_grass_native_tuft_color", "vs_grass", native_fs, surface_format, true, card_a2c);
+        let native_tuft_color_no_write_pipeline = make_pipeline_a2c(
+            "wgr_grass_native_tuft_color_no_write",
+            "vs_grass",
+            native_fs,
+            surface_format,
+            false,
+            card_a2c,
+        );
+        let native_tuft_prepass_pipeline = make_pipeline_a2c(
+            "wgr_grass_native_tuft_prepass",
+            "vs_grass",
+            native_prepass_fs,
+            NORMAL_FORMAT,
+            true,
+            card_a2c,
+        );
         let mid_prepass_pipeline = make_pipeline(
             "wgr_grass_mid_prepass",
             "vs_grass_mid",
@@ -1536,6 +1794,114 @@ impl Grass {
             multiview_mask: None,
             cache: None,
         });
+        // RFG-141: the native near ring's PlantMat tufts, cut out by the blade atlas alpha.
+        let native_tuft_shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("wgr_grass_native_tuft_shadow"),
+            layout: Some(&shadow_layout),
+            vertex: wgpu::VertexState {
+                module: &shadow_shader,
+                entry_point: Some("vs_grass_native_tuft_shadow"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: Default::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 4,
+                    slope_scale: 2.5,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shadow_shader,
+                entry_point: Some("fs_grass_native_tuft_shadow"),
+                compilation_options: Default::default(),
+                targets: &[],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        // RFG-142: grass motion vectors. Group 3 = the velocity uniform (matrices, camera delta,
+        // previous wind lanes) and the single-sample scene depth for the visibility compare.
+        let velocity_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("wgr_grass_velocity_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let velocity_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("wgr_grass_velocity_pipeline_layout"),
+            bind_group_layouts: &[
+                Some(camera_layout),
+                Some(&terrain_layout),
+                Some(&data_layout),
+                Some(&velocity_layout),
+            ],
+            immediate_size: 0,
+        });
+        let velocity_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("wgr_grass_velocity"),
+            layout: Some(&velocity_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_grass_velocity"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_grass_velocity"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rg16Float,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let velocity_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_grass_velocity_uniform"),
+            size: 272,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         Self {
             enabled,
             force_off: !enabled,
@@ -1563,8 +1929,13 @@ impl Grass {
             heightmap_view,
             geography,
             geography_view,
+            satellite_view,
+            road_cells,
             terrain_generation: u64::MAX,
+            earth: None,
+            earth_gen: 0,
             holes,
+            craters,
             holes_gen: 0,
             have_heightmap: false,
             place_pipeline,
@@ -1574,6 +1945,14 @@ impl Grass {
             color_no_write_pipeline,
             cards_color_pipeline,
             cards_color_no_write_pipeline,
+            native_tuft_color_pipeline,
+            native_tuft_color_no_write_pipeline,
+            native_tuft_prepass_pipeline,
+            native_tuft_shadow_pipeline,
+            velocity_pipeline,
+            velocity_layout,
+            velocity_uniform,
+            velocity_prev_lanes: std::cell::Cell::new(None),
             prepass_pipeline,
             mid_prepass_pipeline,
             mid_color_pipeline,
@@ -1633,6 +2012,7 @@ impl Grass {
             mid_grid_dim: 512,
             tuft_bounds: default_layer_bounds(),
             tuft_means: default_layer_means(),
+            layer_pick: default_layer_pick(),
             last_params: params,
             wind_phase: wind::WindPhase::default(),
             card_spacing,
@@ -1818,6 +2198,36 @@ impl Grass {
         self.far_data_bind = rebuild(&self.far_instances, &self.far_placement_count);
     }
 
+    /// Back to the built-in procedural near-blade atlas (as at startup): a world that must not
+    /// draw the previous world's photo blades -- a native Reforger world whose own PlantMat atlas
+    /// is not up -- drops them here rather than keeping whatever was bound last.
+    pub fn clear_blade_atlas(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        if !self.have_blade_atlas {
+            return;
+        }
+        eprintln!("[wgr] grass blade atlas: cleared to the built-in procedural layers");
+        self.blade_view = blade_atlas::create(device, queue);
+        self.have_blade_atlas = false;
+        self.last_params.blade_layer_means = [0.0; 32];
+        queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&self.last_params));
+        let rebuild = |instances: &wgpu::Buffer, count: &wgpu::Buffer| {
+            make_data_bind(
+                device,
+                &self.data_layout,
+                &self.grass_params,
+                instances,
+                count,
+                &self.blade_view,
+                &self.blade_sampler,
+                &self.tuft_view,
+                &self.frag_counts,
+            )
+        };
+        self.data_bind = rebuild(&self.instances, &self.placement_count);
+        self.mid_data_bind = rebuild(&self.mid_instances, &self.mid_placement_count);
+        self.far_data_bind = rebuild(&self.far_instances, &self.far_placement_count);
+    }
+
     /// Replace the procedural near-blade surface atlas with supplied opaque
     /// photo layers. A bind group captures its texture view, so all LOD binds
     /// must be rebuilt even though only the near shader samples this texture.
@@ -1833,8 +2243,10 @@ impl Grass {
         let Some(view) =
             blade_atlas::create_from_images(device, queue, width, height, layers, rgba)
         else {
+            eprintln!("[wgr] grass blade atlas REJECTED: {width}x{height} x {layers} layers, {} bytes", rgba.len());
             return;
         };
+        eprintln!("[wgr] grass blade atlas: {width}x{height} x {layers} layers");
         self.blade_view = view;
         self.have_blade_atlas = true;
         let means = blade_atlas::blade_layer_means(width, height, layers, rgba);
@@ -1858,6 +2270,175 @@ impl Grass {
         self.data_bind = rebuild(&self.instances, &self.placement_count);
         self.mid_data_bind = rebuild(&self.mid_instances, &self.mid_placement_count);
         self.far_data_bind = rebuild(&self.far_instances, &self.far_placement_count);
+    }
+
+    /// RFG-PBR: the native world's satellite (one texture over the whole land, sRGB-encoded
+    /// colour, alpha 0 where it has no say), or None for the placeholder. Rebinds group 1.
+    pub fn set_satellite(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, view: Option<wgpu::TextureView>) {
+        self.satellite_view = view.unwrap_or_else(|| create_satellite_placeholder(device, queue));
+        // the next prepare_terrain rebuilds the terrain bind with it
+        self.terrain_generation = u64::MAX;
+    }
+
+    /// RFG-107: the native world's road segments per land cell (see `road_edge_distance` in
+    /// grass.wgsl for the layout); empty restores "no roads". Rebinds group 1.
+    /// BOOM-001: the craters nearest the camera, `[count, 0, 0, 0]` then up to GRASS_CRATER_MAX
+    /// `(x, z, soil radius, seed)`; placement skips their fresh soil. Anything malformed clears them.
+    pub fn set_craters(&mut self, queue: &wgpu::Queue, data: &[f32]) {
+        let mut buf = vec![0.0f32; 4 + GRASS_CRATER_MAX * 4];
+        let n = data.first().copied().unwrap_or(0.0);
+        if n.is_finite() && n >= 0.0 && n <= GRASS_CRATER_MAX as f32 && n.fract() == 0.0
+            && data.len() == 4 + n as usize * 4 && data.iter().all(|v| v.is_finite()) {
+            buf[..data.len()].copy_from_slice(data);
+        }
+        queue.write_buffer(&self.craters, 0, bytemuck::cast_slice(&buf));
+    }
+
+    pub fn set_road_cells(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, data: &[u32]) {
+        self.road_cells = create_road_cells_buffer(device, queue, data);
+        self.terrain_generation = u64::MAX;
+    }
+
+    /// PERF-GRASS-CELLS-INCREMENTAL: patch only `ranges` (start, length word pairs) of `data` into
+    /// the live buffer. A table that outgrew it is uploaded whole into a new buffer with a quarter
+    /// spare, so the appends that follow patch in place. The rebuild every time objects streamed
+    /// in made a new 8.6 MB buffer each ~2 s on Everon (8-18 ms main thread, Nsight ns-rf2).
+    pub fn update_road_cells(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, data: &[u32], ranges: &[u32]) {
+        let need = (data.len() * 4) as u64;
+        if need > self.road_cells.size() || ranges.is_empty() {
+            let capacity = (need + need / 4).max(16).next_multiple_of(4);
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("wgr_grass_road_cells"),
+                size: capacity,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            queue.write_buffer(&buffer, 0, bytemuck::cast_slice(data));
+            self.road_cells = buffer;
+            self.terrain_generation = u64::MAX;
+            return;
+        }
+        for pair in ranges.chunks_exact(2) {
+            let start = (pair[0] as usize).min(data.len());
+            let end = start.saturating_add(pair[1] as usize).min(data.len());
+            if end > start {
+                queue.write_buffer(&self.road_cells, (start * 4) as u64, bytemuck::cast_slice(&data[start..end]));
+            }
+        }
+    }
+
+    /// Per photo-card layer selection weight (within its surface's run) and max draw distance as
+    /// a fraction of the card ring's reach. Empty slices restore the neutral pick (uniform, no
+    /// limit). Takes effect with the next params upload.
+    pub fn set_layer_pick(&mut self, queue: &wgpu::Queue, weights: &[f32], far: &[f32]) {
+        // .z/.w (RFG-108 layer size) belong to set_layer_size and survive a new pick.
+        let sizes: Vec<(f32, f32)> = (0..32).map(|i| (self.layer_pick[i * 4 + 2], self.layer_pick[i * 4 + 3])).collect();
+        self.layer_pick = default_layer_pick();
+        for (i, (z, w)) in sizes.into_iter().enumerate() {
+            self.layer_pick[i * 4 + 2] = z;
+            self.layer_pick[i * 4 + 3] = w;
+        }
+        for (i, w) in weights.iter().take(32).enumerate() {
+            self.layer_pick[i * 4] = if w.is_finite() { w.max(0.0) } else { 0.0 };
+        }
+        for (i, f) in far.iter().take(32).enumerate() {
+            self.layer_pick[i * 4 + 1] = if f.is_finite() { f.clamp(0.0, 1.0) } else { 0.0 };
+        }
+        // Patch just this block of the live uniform; the next set_params carries it too.
+        self.last_params.layer_pick = self.layer_pick;
+        queue.write_buffer(&self.grass_params, std::mem::offset_of!(GrassParams, layer_pick) as u64,
+                           bytemuck::cast_slice(&self.layer_pick));
+    }
+
+    /// RFG-108: per layer, the world size of a plant rasterised from its own model (layer_pick.z,
+    /// 0 = stock card sizing) and its per-instance size spread (.w). Empty slices reset both.
+    pub fn set_layer_size(&mut self, queue: &wgpu::Queue, sizes: &[f32], spreads: &[f32]) {
+        for i in 0..32 {
+            let size = sizes.get(i).copied().unwrap_or(0.0);
+            let spread = spreads.get(i).copied().unwrap_or(0.0);
+            self.layer_pick[i * 4 + 2] = if size.is_finite() { size.clamp(0.0, 20.0) } else { 0.0 };
+            self.layer_pick[i * 4 + 3] = if spread.is_finite() { spread.clamp(0.0, 0.9) } else { 0.0 };
+        }
+        self.last_params.layer_pick = self.layer_pick;
+        queue.write_buffer(&self.grass_params, std::mem::offset_of!(GrassParams, layer_pick) as u64,
+                           bytemuck::cast_slice(&self.layer_pick));
+    }
+
+    /// RFG-116: bit i set = atlas layer i belongs to a surface whose `.emat` names no PlantMat,
+    /// so the near ring places no blade on a cell whose run starts there. 0 = blades everywhere.
+    /// RFG-153: radius (m) inside which Reforger's clutter plants draw as their own meshes
+    /// (TerrainWgpuNativeClutterMeshes.cpp); the mid ring's cards yield there (grass.wgsl
+    /// card_yields_to_mesh). 0 = off. Carried in card_skip.z as f32 bits.
+    pub fn set_clutter_mesh_radius(&mut self, queue: &wgpu::Queue, radius: f32) {
+        let r = if radius.is_finite() { radius.max(0.0) } else { 0.0 };
+        self.last_params.card_skip[2] = r.to_bits();
+        queue.write_buffer(&self.grass_params, std::mem::offset_of!(GrassParams, card_skip) as u64,
+                           bytemuck::cast_slice(&self.last_params.card_skip));
+    }
+
+    pub fn set_blade_skip(&mut self, queue: &wgpu::Queue, mask: u32) {
+        // .yzw are the RFG-138 blade-set words (set_blade_sets); this answer leaves them alone.
+        self.last_params.blade_skip[0] = mask;
+        queue.write_buffer(&self.grass_params, std::mem::offset_of!(GrassParams, blade_skip) as u64,
+                           bytemuck::cast_slice(&self.last_params.blade_skip));
+    }
+
+    /// RFG-117: the near ring as Reforger PlantMat plants. `cfg` = [on, cards per plant, Zenith deg,
+    /// ZenithRandomOffset deg, card height m, HeightRandomOffset, Plants per m^2, 0]; `aspect` /
+    /// `scale` per blade layer (atlas rectangle width/height, ScaleDistribution). An empty `cfg`
+    /// turns it off.
+    pub fn set_native_tufts(&mut self, queue: &wgpu::Queue, cfg: &[f32], aspect: &[f32], scale: &[f32]) {
+        let finite = |v: f32, d: f32| if v.is_finite() { v } else { d };
+        let mut c = [0.0f32; 8];
+        for (i, v) in cfg.iter().take(8).enumerate() {
+            c[i] = finite(*v, 0.0);
+        }
+        // RFG-160: the near grid is sized from these (native radius and spacing, set_params).
+        let grid_inputs = (self.last_params.native_tuft[0], self.last_params.native_tuft2[2]);
+        self.last_params.native_tuft = [c[0], c[1], c[2], c[3]];
+        self.last_params.native_tuft2 = [c[4], c[5], c[6], c[7]];
+        for i in 0..8 {
+            self.last_params.tuft_aspect[i] = finite(aspect.get(i).copied().unwrap_or(1.0), 1.0).clamp(0.1, 6.0);
+            self.last_params.tuft_scale[i] = finite(scale.get(i).copied().unwrap_or(1.0), 1.0).clamp(0.1, 4.0);
+        }
+        if grid_inputs != (c[0], c[6]) && self.last_raw_params.near_radius > 0.0 {
+            let raw = self.last_raw_params;
+            self.set_params(queue, raw);
+        } else {
+            queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&self.last_params));
+        }
+    }
+
+    /// RFG-138: per-surface PlantMat blade sets. `set_words` = 3 bits per atlas layer (the set the
+    /// run starting on that layer draws its near-ring tufts from, layer L at bit 3L across the
+    /// three words); `card_skip` = bit per layer whose run grows blades only. `sets` = 8 floats per
+    /// set (see GrassParams::tuft_sets), `aspect` / `scale` = 8 per set. Missing entries reset.
+    pub fn set_blade_sets(&mut self, queue: &wgpu::Queue, set_words: &[u32], card_skip: u32, card_full: u32,
+                          sets: &[f32], aspect: &[f32], scale: &[f32]) {
+        let finite = |v: f32, d: f32| if v.is_finite() { v } else { d };
+        for i in 0..3 {
+            self.last_params.blade_skip[i + 1] = set_words.get(i).copied().unwrap_or(0);
+        }
+        // WGR_DEBUG_BLADE_SET=<0..7>: every run draws from that set (diagnostic only).
+        if let Some(forced) = std::env::var("WGR_DEBUG_BLADE_SET").ok().and_then(|v| v.parse::<u32>().ok()) {
+            let mut bits = [0u32; 3];
+            for layer in 0..32u32 {
+                let bit = layer * 3;
+                let (word, shift) = ((bit / 32) as usize, bit % 32);
+                bits[word] |= (forced & 7) << shift;
+                if shift > 29 && word + 1 < 3 {
+                    bits[word + 1] |= (forced & 7) >> (32 - shift);
+                }
+            }
+            self.last_params.blade_skip[1..4].copy_from_slice(&bits);
+        }
+        self.last_params.card_skip = [card_skip, card_full, self.last_params.card_skip[2], 0];
+        for i in 0..64 {
+            self.last_params.tuft_sets[i] = finite(sets.get(i).copied().unwrap_or(0.0), 0.0);
+            self.last_params.tuft_set_aspect[i] = finite(aspect.get(i).copied().unwrap_or(1.0), 1.0).clamp(0.1, 6.0);
+            self.last_params.tuft_set_scale[i] = finite(scale.get(i).copied().unwrap_or(1.0), 1.0).clamp(0.1, 4.0);
+        }
+        queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&self.last_params));
     }
 
     pub fn set_geography(
@@ -1895,6 +2476,8 @@ impl Grass {
         self.geography_view = self
             .geography
             .create_view(&wgpu::TextureViewDescriptor::default());
+        // the next prepare_terrain binds whichever ground is current
+        self.terrain_generation = u64::MAX;
         self.terrain_bind = make_terrain_bind(
             device,
             &self.terrain_layout,
@@ -1902,7 +2485,85 @@ impl Grass {
             &self.heightmap_view,
             &self.geography_view,
             &self.holes,
+            &self.satellite_view,
+            &self.road_cells,
+            &self.craters,
         );
+    }
+
+    /// Whole World: the grass stands on the streamed near patch -- `hm_n` x `hm_n` heights `grid` metres
+    /// apart from `origin` (frame x, z) -- with its own geography, `geo_n` x `geo_n` words `geo_cell`
+    /// metres apart over the same origin (bit 31: grass grows here; the engine derives it from the
+    /// satellite imagery). Replaces the native island's ground until clear_earth_ground.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_earth_ground(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        origin: [f32; 2],
+        grid: f32,
+        hm_n: u32,
+        heights: &[f32],
+        geo_cell: f32,
+        geo_n: u32,
+        geography: &[u32],
+        sea_level: f32,
+    ) {
+        if hm_n < 2 || geo_n == 0 || heights.len() < (hm_n * hm_n) as usize || geography.len() < (geo_n * geo_n) as usize {
+            return;
+        }
+        let heightmap = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("wgr_grass_earth_heightmap"),
+            size: wgpu::Extent3d { width: hm_n, height: hm_n, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: &heightmap, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            bytemuck::cast_slice(&heights[..(hm_n * hm_n) as usize]),
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(hm_n * 4), rows_per_image: Some(hm_n) },
+            wgpu::Extent3d { width: hm_n, height: hm_n, depth_or_array_layers: 1 },
+        );
+        let geo = make_geography_texture(device, geo_n, geo_n);
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: &geo, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            bytemuck::cast_slice(&geography[..(geo_n * geo_n) as usize]),
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(geo_n * 4), rows_per_image: Some(geo_n) },
+            wgpu::Extent3d { width: geo_n, height: geo_n, depth_or_array_layers: 1 },
+        );
+        self.earth_gen += 1;
+        self.pending_log.push(format!(
+            "Wgpu grass: Earth ground {hm_n}x{hm_n} heights from ({:.0}, {:.0}) every {grid:.2} m, geography {geo_n}x{geo_n} every {geo_cell:.2} m (gen {})",
+            origin[0], origin[1], self.earth_gen
+        ));
+        self.earth = Some(EarthGround {
+            heightmap_view: heightmap.create_view(&wgpu::TextureViewDescriptor::default()),
+            _heightmap: heightmap,
+            geography_view: geo.create_view(&wgpu::TextureViewDescriptor::default()),
+            _geography: geo,
+            origin,
+            grid,
+            hm_n,
+            geo_cell,
+            geo_n,
+            sea_level,
+        });
+    }
+
+    /// Back to the native island's ground (leaving Whole World, or relocating before the next patch).
+    /// Whole World: the grass stands on a streamed Earth patch, not the native island.
+    pub fn earth_active(&self) -> bool {
+        self.earth.is_some()
+    }
+
+    pub fn clear_earth_ground(&mut self) {
+        if self.earth.take().is_some() {
+            self.terrain_generation = u64::MAX;
+        }
     }
 
     pub fn set_params(&mut self, queue: &wgpu::Queue, params: WgrGrassParams) {
@@ -1955,10 +2616,23 @@ impl Grass {
         // RFG-090: a native world keeps blades on the near ring (cards move to the mid
         // ring, which then starts at the camera -- see cs_place_mid).
         let cards_near = cards_mid && clump_renderer && params.near_blades_only == 0.0;
+        // RFG-160: a native world's near ring of PlantMat tufts (native_tufts_on in grass.wgsl)
+        // reaches further, and its grid is sized with the spacing the shader really places them
+        // on -- one plant per 1/sqrt(Plants) m. It used the procedural blade spacing (0.16 m) here,
+        // so the grid's reach only matched the shader's by accident of Plants 8 x 3.5.
+        let native_tufts = self.last_params.native_tuft[0] > 0.5 && params.near_blades_only > 0.0;
+        let near_radius = if native_tufts {
+            (near_radius * self.last_params.native_ring[3]).clamp(8.0, 200.0)
+        } else {
+            near_radius
+        };
         // Must mirror cs_place's `near_spacing` (near_placement_spacing in grass.wgsl).
-        let near_spacing =
+        let near_spacing = if native_tufts {
+            1.0 / self.last_params.native_tuft2[2].clamp(0.25, 64.0).sqrt() / coverage_grid_scale(params.density, 1.0)
+        } else {
             near_placement_spacing(spacing, clump_renderer, cards_near, self.card_spacing)
-                / coverage_grid_scale(params.density, 1.0);
+                / coverage_grid_scale(params.density, 1.0)
+        };
         // The grid has to span the whole disc, so its edge is the diameter. Round
         // up to the workgroup size and cap.
         let want = (2.0 * near_radius / near_spacing).ceil().max(0.0) as u32;
@@ -2037,10 +2711,11 @@ impl Grass {
             density_noise_scale: params.density_noise_scale.clamp(0.002, 0.5),
             density_noise_strength: params.density_noise_strength.clamp(0.0, 1.0),
             // Clamp the pair so grass never goes negative if both are pushed up.
-            weed_percent: params.weed_percent.clamp(0.0, 1.0),
-            flower_percent: params
-                .flower_percent
-                .clamp(0.0, 1.0 - params.weed_percent.clamp(0.0, 1.0)),
+            weed_percent: species_mix_override().map_or(params.weed_percent, |m| m[0]).clamp(0.0, 1.0),
+            flower_percent: species_mix_override().map_or(params.flower_percent, |m| m[1]).clamp(
+                0.0,
+                1.0 - species_mix_override().map_or(params.weed_percent, |m| m[0]).clamp(0.0, 1.0),
+            ),
             blade_width_scale: params.blade_width_scale.clamp(0.25, 6.0),
             use_photo_tuft: if cards_mid { 1.0 } else { 0.0 },
             saturation: params.saturation.clamp(0.0, 2.0),
@@ -2145,7 +2820,8 @@ impl Grass {
                 if params.tint_photo[3].is_finite() && params.tint_photo[3] >= 10.0 {
                     params.tint_photo[3].clamp(10.0, 200.0)
                 } else { 45.0 },
-                0.0,
+                // .w: the real sun (grass.wgsl grass_light_dir) on a native world's cover.
+                if params.near_blades_only > 0.0 || params.native_tint_lerp > 0.0 { 1.0 } else { 0.0 },
             ],
             // Always the renderer's own measurement of the loaded atlas.
             photo_layer_bounds: self.tuft_bounds,
@@ -2153,6 +2829,21 @@ impl Grass {
             wind_advection: self.last_params.wind_advection,
             wind_flutter: self.last_params.wind_flutter,
             blade_layer_means: self.last_params.blade_layer_means,
+            layer_pick: self.layer_pick,
+            blade_skip: self.last_params.blade_skip,
+            native_tuft: self.last_params.native_tuft,
+            native_tuft2: self.last_params.native_tuft2,
+            tuft_aspect: self.last_params.tuft_aspect,
+            tuft_scale: self.last_params.tuft_scale,
+            tuft_sets: self.last_params.tuft_sets,
+            tuft_set_aspect: self.last_params.tuft_set_aspect,
+            tuft_set_scale: self.last_params.tuft_set_scale,
+            card_skip: self.last_params.card_skip,
+            native_look: self.last_params.native_look,
+            native_look2: self.last_params.native_look2,
+            native_ring: self.last_params.native_ring,
+            variety: resolve_variety(params.variety),
+            look_weights: resolve_look_weights(params.look_weights),
         };
         self.near_grid_dim = near_grid_dim;
         self.mid_grid_dim = mid_grid_dim;
@@ -2214,7 +2905,17 @@ impl Grass {
         queue: &wgpu::Queue,
         terrain: &Terrain,
     ) {
-        let params = terrain.params();
+        let mut params = terrain.params();
+        if let Some(e) = &self.earth {
+            // the Earth patch's frame: same time, wind, snowline and sea, its own grid
+            params.world_origin = glam::Vec2::new(e.origin[0], e.origin[1]);
+            params.terrain_grid = e.grid;
+            params.hm_width = e.hm_n;
+            params.hm_height = e.hm_n;
+            params.land_grid = e.geo_cell;
+            params.land_range = e.geo_n;
+            params.sea_level = e.sea_level;
+        }
         let (advection, flutter) = self.wind_phase.advance(params.time,
             self.last_params.wind_strength, self.last_params.wind_direction, self.last_params.wind_scroll);
         self.last_params.wind_advection = advection;
@@ -2226,17 +2927,32 @@ impl Grass {
             self.holes_gen = terrain.holes_gen();
             queue.write_buffer(&self.holes, 0, bytemuck::cast_slice(terrain.holes_data()));
         }
-        self.have_heightmap = terrain.has_heightmap();
-        if self.terrain_generation != terrain.heightmap_gen() {
-            self.terrain_generation = terrain.heightmap_gen();
-            self.heightmap_view = terrain.heightmap_view();
+        self.have_heightmap = terrain.has_heightmap() || self.earth.is_some();
+        // the Earth ground's generations live in the top half so they never meet the terrain's
+        let wanted = if self.earth.is_some() { (1u64 << 63) | self.earth_gen } else { terrain.heightmap_gen() };
+        if self.terrain_generation != wanted {
+            if self.earth.is_some() {
+                self.pending_log.push(format!(
+                    "Wgpu grass: placing on the Earth ground (enabled {}, heightmap {})", self.enabled, self.have_heightmap));
+            }
+            self.terrain_generation = wanted;
+            let (heightmap, geography) = match &self.earth {
+                Some(e) => (e.heightmap_view.clone(), e.geography_view.clone()),
+                None => {
+                    self.heightmap_view = terrain.heightmap_view();
+                    (self.heightmap_view.clone(), self.geography_view.clone())
+                }
+            };
             self.terrain_bind = make_terrain_bind(
                 device,
                 &self.terrain_layout,
                 &self.terrain_params,
-                &self.heightmap_view,
-                &self.geography_view,
+                &heightmap,
+                &geography,
                 &self.holes,
+                &self.satellite_view,
+                &self.road_cells,
+                &self.craters,
             );
         }
     }
@@ -2579,7 +3295,12 @@ impl Grass {
         // would have to pay the same early-Z loss to remove texels the depth
         // buffer already handles conservatively.
         let cutout = self.last_params.alpha_cards > 0.5;
+        // RFG-117: Reforger tuft cards replace the blades on the near ring, all three passes.
+        let native_tufts = self.last_params.native_tuft[0] > 0.5 && self.last_params.near_blades_only > 0.0;
         let pipeline = match kind {
+            GrassPass::Color if native_tufts => &self.native_tuft_color_pipeline,
+            GrassPass::ColorNoWrite if native_tufts => &self.native_tuft_color_no_write_pipeline,
+            GrassPass::Prepass if native_tufts => &self.native_tuft_prepass_pipeline,
             GrassPass::Color if cutout => &self.cards_color_pipeline,
             GrassPass::ColorNoWrite if cutout => &self.cards_color_no_write_pipeline,
             GrassPass::Color => &self.color_pipeline,
@@ -2633,6 +3354,84 @@ impl Grass {
         timers.end_pass(pass, region);
     }
 
+    /// RFG-142: write the native near ring's motion into the velocity target (Rg16Float, UV-space
+    /// current -> previous), over the camera-only reprojection already there. The geometry is the
+    /// colour pass's (native_tuft_geometry), evaluated for this frame's wind lanes and the last.
+    /// `mats` = jittered / current / previous view-projection + depth tolerance (temporal's
+    /// ObjVelUniform); `cam_delta` = current camera minus previous.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_velocity(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        camera_bind: &wgpu::BindGroup,
+        camera_offset: u32,
+        mats: &crate::temporal::ObjVelUniform,
+        cam_delta: [f32; 3],
+        scene_depth: &wgpu::TextureView,
+    ) {
+        let p = &self.last_params;
+        let lanes = [
+            p.wind_strength, p.wind_direction,
+            p.wind_advection[0], p.wind_advection[1], p.wind_advection[2], p.wind_advection[3],
+            p.wind_flutter[0], p.wind_flutter[1], p.wind_flutter[2], p.wind_flutter[3],
+        ];
+        let prev = self.velocity_prev_lanes.replace(Some(lanes)).unwrap_or(lanes);
+        // the native near ring's tufts, or (FIRE-002 round) OFP's own blades; not a ring of cards
+        let native_tufts = p.native_tuft[0] > 0.5 && p.near_blades_only > 0.0;
+        if !self.enabled || !self.have_heightmap || self.near_draws_cards() {
+            return;
+        }
+        let _ = native_tufts;
+        static OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *OFF.get_or_init(|| std::env::var("WGR_GRASS_VELOCITY").as_deref() == Ok("0")) {
+            return;
+        }
+        let mut data = [0.0f32; 68];
+        data[0..16].copy_from_slice(&mats.jittered_vp);
+        data[16..32].copy_from_slice(&mats.cur_vp);
+        data[32..48].copy_from_slice(&mats.prev_vp);
+        data[48..52].copy_from_slice(&mats.misc);
+        data[52..55].copy_from_slice(&cam_delta);
+        data[56] = prev[0];
+        data[57] = prev[1];
+        data[60..64].copy_from_slice(&prev[2..6]);
+        data[64..68].copy_from_slice(&prev[6..10]);
+        queue.write_buffer(&self.velocity_uniform, 0, bytemuck::cast_slice(&data));
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("wgr_grass_velocity_bind"),
+            layout: &self.velocity_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: self.velocity_uniform.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(scene_depth) },
+            ],
+        });
+        static LIVE: std::sync::Once = std::sync::Once::new();
+        LIVE.call_once(|| eprintln!("[wgr] grass velocity live: near-ring blades and tufts write motion vectors"));
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("wgr_grass_velocity"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&self.velocity_pipeline);
+        pass.set_bind_group(0, camera_bind, &[camera_offset]);
+        pass.set_bind_group(1, &self.terrain_bind, &[]);
+        pass.set_bind_group(2, &self.data_bind, &[]);
+        pass.set_bind_group(3, &bind, &[]);
+        pass.set_index_buffer(self.near_index.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed_indirect(&self.indirect, 0);
+    }
+
     /// Near grass always casts. When photographed clump cards are enabled, the
     /// mid cards also enter the cascade: otherwise they look ungrounded and
     /// cannot shade each other or the terrain at their visible range.
@@ -2656,14 +3455,34 @@ impl Grass {
         } else {
             &self.shadow_pipeline
         };
-        pass.set_pipeline(near_shadow_pipeline);
+        // RFG-108: a native world's near ring is the PlantMat's 10 cm procedural blades, and
+        // their cascade shadows stamped a sharp dark comma beside every blade -- ink marks
+        // all over the meadow that Reforger's own ground cover does not have. The plants
+        // (the card ring below) still cast. WGR_NATIVE_BLADE_SHADOW=1 restores them.
+        static NATIVE_BLADE_SHADOW: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+        let native_blades = self.last_raw_params.near_blades_only != 0.0 && !self.near_draws_cards();
+        // RFG-141: since RFG-117 those blades are whole PlantMat tuft CARDS, and with no shadow at
+        // all the wheat and the meadow sat on the ground like stickers. They cast their own
+        // alpha-cut silhouette now (vs_grass_native_tuft_shadow); WGR_NATIVE_BLADE_SHADOW=0 keeps
+        // the near ring shadowless, =1 restores the old procedural-blade shadow.
+        let native_tufts = native_blades && self.last_params.native_tuft[0] > 0.5;
+        let mode = *NATIVE_BLADE_SHADOW.get_or_init(|| match std::env::var("WGR_NATIVE_BLADE_SHADOW").as_deref() {
+            Ok("0") => 0u8,
+            Ok("1") => 1u8,
+            _ => 2u8,
+        });
+        let skip_near = native_blades && (mode == 0 || (mode == 2 && !native_tufts));
+        let near_shadow_pipeline = if native_tufts && mode == 2 { &self.native_tuft_shadow_pipeline } else { near_shadow_pipeline };
         pass.set_bind_group(0, shadow_bind, &[shadow_offset]);
         pass.set_bind_group(1, &self.terrain_bind, &[]);
-        pass.set_bind_group(2, &self.data_bind, &[]);
-        // The stride's own table and args (reset_indirect); identical to the colour
-        // draw's at stride 1 and on the card path.
-        pass.set_index_buffer(self.shadow_index.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed_indirect(&self.shadow_indirect, 0);
+        if !skip_near {
+            pass.set_pipeline(near_shadow_pipeline);
+            pass.set_bind_group(2, &self.data_bind, &[]);
+            // The stride's own table and args (reset_indirect); identical to the colour
+            // draw's at stride 1 and on the card path.
+            pass.set_index_buffer(self.shadow_index.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed_indirect(&self.shadow_indirect, 0);
+        }
         if self.tuft_enabled {
             pass.set_pipeline(&self.tuft_shadow_pipeline);
             pass.set_bind_group(2, &self.mid_data_bind, &[]);
@@ -2724,6 +3543,20 @@ fn default_layer_bounds() -> [f32; 128] {
     out
 }
 
+/// Whole World's ground for the grass (set_earth_ground).
+struct EarthGround {
+    _heightmap: wgpu::Texture,
+    heightmap_view: wgpu::TextureView,
+    _geography: wgpu::Texture,
+    geography_view: wgpu::TextureView,
+    origin: [f32; 2],
+    grid: f32,
+    hm_n: u32,
+    geo_cell: f32,
+    geo_n: u32,
+    sea_level: f32,
+}
+
 fn make_geography_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("wgr_grass_geography"),
@@ -2748,6 +3581,9 @@ fn make_terrain_bind(
     heightmap: &wgpu::TextureView,
     geography: &wgpu::TextureView,
     holes: &wgpu::Buffer,
+    satellite: &wgpu::TextureView,
+    road_cells: &wgpu::Buffer,
+    craters: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("wgr_grass_terrain_bind"),
@@ -2769,8 +3605,61 @@ fn make_terrain_bind(
                 binding: 3,
                 resource: holes.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(satellite),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: road_cells.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: craters.as_entire_binding(),
+            },
         ],
     })
+}
+
+/// RFG-107: the road-cell buffer (layout in grass.wgsl, `road_edge_distance`). Empty data gives
+/// the 16-byte placeholder whose header (range 0) means "no roads".
+// PERF-RFG-209: a plain device-local buffer filled by queue.write_buffer, NOT create_buffer_init
+// (mapped at creation), which can place a STORAGE buffer in host-visible memory -- the far tier's
+// identical source buffer cost 5-7 ms a frame read across the bus. Every placed blade reads this.
+fn create_road_cells_buffer(device: &wgpu::Device, queue: &wgpu::Queue, data: &[u32]) -> wgpu::Buffer {
+    let mut words: Vec<u32> = data.to_vec();
+    if words.len() < 4 {
+        words = vec![0; 4];
+    }
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("wgr_grass_road_cells"),
+        size: (words.len() * 4) as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&words));
+    buffer
+}
+
+/// The 1x1 satellite the grass binds when the world has none (grass.wgsl tests its size).
+fn create_satellite_placeholder(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::TextureView {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("wgr_grass_satellite_placeholder"),
+        size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        texture.as_image_copy(),
+        &[0, 0, 0, 0],
+        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
+        wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+    );
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
 fn make_data_bind(
@@ -2831,6 +3720,8 @@ mod tests {
     #[test]
     fn both_grass_shaders_consume_integrated_wind_phases()
     {
+        assert!(SHADER.contains("lanes.advection = grass.wind_advection;"));
+        assert!(SHADER.contains("lanes.flutter = grass.wind_flutter;"));
         for (name, src) in [("grass.wgsl", SHADER), ("grass_shadow.wgsl", SHADOW)]
         {
             for (term, phase) in [("broad_scroll", "grass.wind_advection.xy"),
@@ -2842,12 +3733,55 @@ mod tests {
                     .find(&head)
                     .unwrap_or_else(|| panic!("{name} has no `{head}`"));
                 let end = start + src[start..].find(';').expect("unterminated statement");
+                // RFG-142: grass.wgsl reads the phase through WindLanes (filled from the uniform by
+                // wind_lanes_now, or from the previous frame's lanes for motion vectors).
+                let via_lanes = phase.replace("grass.wind_", "lanes.").replace("lanes.advection", "lanes.advection");
                 assert!(
-                    src[start..end].contains(phase),
+                    src[start..end].contains(phase) || src[start..end].contains(via_lanes.as_str()),
                     "{name}: `{term}` does not read the integrated phase"
                 );
             }
         }
+    }
+
+    // GRS-VAR: the look rides in packed.w bits 12-15 and must leave 0-11 (species, the atlas run
+    // the native card decode reads, the mid flag) alone; the shadow's shape table is a literal copy.
+    #[test]
+    fn variety_look_bits_and_shadow_shape_mirror() {
+        let fn_body = |src: &str, name: &str| -> String {
+            let src = src.replace("\r\n", "\n");
+            let start = src.find(&format!("fn {name}(")).unwrap_or_else(|| panic!("{name} missing"));
+            let end = start + src[start..].find("\n}\n").expect("unterminated fn");
+            src[start..end].to_string()
+        };
+        assert_eq!(fn_body(SHADER, "look_shape"), fn_body(SHADOW, "look_shape"));
+        // Phase 3: the blades a head replaces are the same in colour, velocity and shadow.
+        assert_eq!(fn_body(SHADER, "near_head_count"), fn_body(SHADOW, "near_head_count"));
+        assert!(SHADER.contains("fn look_has_disc_head(look: u32) -> bool { return (look >= 6u && look <= 11u) || look == 13u; }"));
+        assert!(SHADOW.contains("fn look_has_disc_head(look: u32) -> bool { return (look >= 6u && look <= 11u) || look == 13u; }"));
+        for entry in ["vs_grass", "vs_ofp_blade_velocity"] {
+            let body = fn_body(SHADER, entry);
+            assert!(body.contains("ofp_near_vertex(") && !body.contains("ofp_blade("), "{entry}");
+        }
+        assert!(SHADER.contains("const LOOK_SHIFT: u32 = 12u;"));
+        assert!(SHADER.contains("fn instance_look(packed_w: u32) -> u32 { return (packed_w >> LOOK_SHIFT) & 15u; }"));
+        assert!(SHADOW.contains("look_shape((instances[instance_index].packed.w >> 12u) & 15u)"));
+        // The fields below the look are unchanged.
+        for src in [SHADER, SHADOW] {
+            assert!(src.contains("return vec2<u32>((packed_w >> 3u) & 31u, (packed_w >> 8u) & 7u);"));
+        }
+        assert!(SHADER.contains("0u, (species & 7u) | (first << 3u) | (count << 8u));"));
+        assert!(SHADER.contains("(packed & (1u << 11u)) != 0u);"));
+        // Look 0 is today's blade in every group, and no native world picks another.
+        assert!(fn_body(SHADER, "look_shape").contains("default: { return vec2<f32>(1.0, 1.0); }"));
+        assert!(fn_body(SHADER, "look_tint").contains("default: { return vec3<f32>(1.0); }"));
+        assert!(SHADER.contains(
+            "return grass.variety.x > 0.5 && grass.native.x <= 0.0 && grass.native2.w < 0.5;"
+        ));
+        // A caller that leaves the block zeroed gets the shipped weights, never an empty group.
+        assert_eq!(resolve_look_weights([0.0; 16]), DEFAULT_LOOK_WEIGHTS);
+        assert_eq!(resolve_look_weights([f32::NAN; 16])[0], DEFAULT_LOOK_WEIGHTS[0]);
+        assert!(fn_body(SHADER, "pick_look").starts_with("fn pick_look(world_xz: vec2<f32>, species: u32) -> u32 {\n    if (!variety_on()) { return 0u; }"));
     }
 
     #[test]
@@ -3047,10 +3981,13 @@ mod tests {
         // Applied to the sample AND its pivot in tuft_shade, and to layer 0 in
         // fs_grass_far. The correction vector is one constant everywhere.
         assert!(SHADER.contains("let tone_gain = card_tone_gain(u32(in.blade_uv.z));"));
-        assert!(SHADER.contains("tex.rgb * PHOTO_TONE_CORRECTION * photo_brightness * tone_gain;"));
+        // The correction is PHOTO_TONE_CORRECTION on A3 plates and 1 on a native world's
+        // authored atlas (tone_correction); the same factor reaches sample and pivot.
+        assert!(SHADER.contains("let tone_correction = select(PHOTO_TONE_CORRECTION, vec3<f32>(1.0), native_card);"));
+        assert!(SHADER.contains("tex.rgb * tone_correction * photo_brightness * tone_gain;"));
         assert_eq!(
             SHADER
-                .matches("PHOTO_TONE_CORRECTION * photo_brightness * tone_gain;")
+                .matches("tone_correction * photo_brightness * tone_gain;")
                 .count(),
             2,
             "sample and pivot"

@@ -1,0 +1,2 @@
+; Owner listen test for Steam Audio reverb: player is invulnerable.
+player allowDamage false

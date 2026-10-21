@@ -1,3 +1,5 @@
+#include <Poseidon/Game/Compat/ArmaOriginalUi.hpp>
+#include <Poseidon/UI/ArmaContentMenu.hpp>
 #include <Poseidon/UI/LocalMapsDisplay.hpp>
 #include <Poseidon/UI/WholeWorldDisplay.hpp>
 #include <Poseidon/UI/LocalMapEditor.hpp>
@@ -202,11 +204,16 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
     // menu. Without this the base RscDisplayMainRemaster — restored by
     // MergeBaseResourceExtra so the Options screen works — would replace the mod's
     // menu and lose its branding.
-    const char* mainRsc = (!IsMenuOverriddenByMod() && Res.FindEntry("RscDisplayMainRemaster"))
-                              ? "RscDisplayMainRemaster"
-                              : "RscDisplayMain";
+    // --arma-original-ui: the mounted Arma game's own menu (ArmaOriginalUi), not the remaster's.
+    const char* mainRsc =
+        (!ArmaOriginalUi::Switched("RscDisplayMain") && !IsMenuOverriddenByMod() && Res.FindEntry("RscDisplayMainRemaster"))
+            ? "RscDisplayMainRemaster"
+            : "RscDisplayMain";
+    const ParamEntry& menuCls = ArmaOriginalUi::Resource(mainRsc);
     Load(mainRsc);
-    if (QIFStreamB::FileExist("assets\\ui\\openposeidon_logo.paa"))
+    // The original Arma menu is shown as that game drew it: no OpenPoseidon logo, no added entries.
+    const bool armaMenu = ArmaOriginalUi::Switched("RscDisplayMain");
+    if (!armaMenu && QIFStreamB::FileExist("assets\\ui\\openposeidon_logo.paa"))
     {
         for (int i = 0; i < _controlsForeground.Size(); ++i)
         {
@@ -253,10 +260,10 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
     // row. idc=119 dispatches through GameModuleRegistry (DisplayMain::OnButtonClicked)
     // to the Mods screen, so wiring it is automatic. Heuristic finds Quit by its
     // standard class name; extend as more community menus are tested.
-    if (GetCtrl(IDC_MAIN_MODS) == nullptr && GameModuleRegistry::FindByIDC(IDC_MAIN_MODS) != nullptr)
+    if (!armaMenu && GetCtrl(IDC_MAIN_MODS) == nullptr && GameModuleRegistry::FindByIDC(IDC_MAIN_MODS) != nullptr)
     {
         Control* quit = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_QUIT));
-        ParamEntry* quitCls = Res.FindEntry(mainRsc) ? (Res >> mainRsc).FindEntry("Quit") : nullptr;
+        ParamEntry* quitCls = menuCls.FindEntry("Quit");
         if (quit != nullptr && quitCls != nullptr && quitCls->IsClass())
         {
             static ParamFile s_modsInjectCfg; // outlives the control (it back-references the class)
@@ -299,15 +306,15 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
     // large pictures and lines, and treating those as occupied once pushed both entries onto one spot.
     const auto injectEntry = [&](ParamFile& resource, const char* className, int idc, const char* label)
     {
-        const bool menu = Res.FindEntry(mainRsc) != nullptr;
+        const bool menu = menuCls.IsClass();
         Control* anchor = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_MULTIPLAYER));
-        ParamEntry* source = menu ? (Res >> mainRsc).FindEntry("Multiplayer") : nullptr;
+        ParamEntry* source = menu ? menuCls.FindEntry("Multiplayer") : nullptr;
         if (!anchor || !source || !source->IsClass())
         {
             anchor = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_QUIT));
-            source = menu ? (Res >> mainRsc).FindEntry("Quit") : nullptr;
+            source = menu ? menuCls.FindEntry("Quit") : nullptr;
         }
-        if (!anchor || !source || !source->IsClass())
+        if (armaMenu || !anchor || !source || !source->IsClass())
             return;
         resource.Clear();
         ParamClass* cls = resource.AddClass(className);
@@ -355,8 +362,12 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
         }
     };
     static ParamFile mapButtonResource, worldButtonResource;
-    injectEntry(mapButtonResource, "LocalMapsButton", LocalMapsMenuId, "LOCAL MAPS");
+    injectEntry(mapButtonResource, "LocalMapsButton", LocalMapsMenuId, "ARMA CONTENT");
     injectEntry(worldButtonResource, "WholeWorldButton", WholeWorldMenuId, "WHOLE WORLD");
+#ifdef _WIN32
+    static ParamFile islandEditorButtonResource;
+    injectEntry(islandEditorButtonResource, "IslandEditorButton", IslandEditorMenuId, "ISLAND EDITOR");
+#endif
 
     // Guard every control lookup: when the RscDisplayMain class is absent or
     // minimal (PoseidonUITest's own RESOURCE.BIN, or a headless --test-mission
@@ -596,10 +607,52 @@ void __cdecl CreateOutro(Display* disp, EndMode end)
     disp->CreateChild(new DisplayOutro(disp, end));
 }
 
+bool ProcessFullName(RString name); // UIArcadeWaypoint.cpp: a mission.sqm path, archive or folder
+
 void DisplayMain::OnChildDestroyed(int idd, int exit)
 {
     switch (idd)
     {
+        case ArmaContentIdd: // the mounted Arma game's campaign or mission (ArmaContentMenu)
+        {
+            bool campaign = false;
+            std::string value;
+            const bool chosen = exit == IDC_OK && ArmaContentChoice(_child, campaign, value);
+            Display::OnChildDestroyed(idd, exit);
+            if (!chosen)
+                break;
+            CurrentTemplate.Clear();
+            if (GWorld->UI())
+                GWorld->UI()->Init();
+            CurrentBattle = "";
+            CurrentMission = "";
+            if (campaign)
+            {
+                LOG_INFO(UI, "Arma content: campaign {}", value);
+                StartCampaign(RString(value.c_str()), this);
+                // StartCampaign returns quietly when the campaign's description.ext names no first
+                // battle or mission (Arma 3's Apex, for one): say so instead of doing nothing.
+                if (CurrentBattle.GetLength() == 0 || CurrentMission.GetLength() == 0)
+                {
+                    LOG_WARN(UI, "Arma content: campaign {} has no first battle/mission this engine can start", value);
+                    CreateMsgBox(MB_BUTTON_OK, RString("This campaign cannot be started yet: its description.ext "
+                                                       "names no first battle or mission this engine reads."));
+                }
+                break;
+            }
+            CurrentCampaign = "";
+            SetCampaign("");
+            LOG_INFO(UI, "Arma content: mission {}", value);
+            if (!ProcessFullName(RString(value.c_str())))
+            {
+                CreateMsgBox(MB_BUTTON_OK, RString(("This mission could not be loaded: " + value).c_str()));
+                break;
+            }
+            GStats.ClearAll();
+            ApplyCurrentMissionViewDistance();
+            CreateChild(new DisplayIntro(this));
+            break;
+        }
         case IDD_CAMPAIGN_LOAD: // Campaign
             if (exit == IDC_OK)
             {
@@ -2357,6 +2410,27 @@ void DisplayMain::OnButtonClicked(int idc)
 {
     if (idc == LocalMapsMenuId) { CreateChild(CreateLocalMapsDisplay(this)); return; }
     if (idc == WholeWorldMenuId) { CreateChild(CreateWholeWorldDisplay(this)); return; }
+    if (idc == IslandEditorMenuId)
+    {
+        std::string error;
+        if (!LaunchIslandEditor(error))
+            CreateMsgBox(MB_BUTTON_OK, RString(error.c_str()));
+        return;
+    }
+    // An Arma game is mounted: Campaign / Missions / Tutorials list that game's content, Arma 1's
+    // Options shortcuts open Options, and what cannot work here says so instead of doing nothing.
+    if (ArmaContentKind kind; ArmaMenuContentKind(idc, kind))
+    {
+        CreateChild(CreateArmaContentDisplay(this, kind));
+        return;
+    }
+    if (const char* unavailable = ArmaMenuUnavailable(idc))
+    {
+        CreateMsgBox(MB_BUTTON_OK, RString(unavailable));
+        return;
+    }
+    if (ArmaMenuOpensOptions(idc))
+        idc = IDC_MAIN_OPTIONS;
     // Dispatch registered game module buttons via registry
     if (auto* mod = GameModuleRegistry::FindByIDC(idc))
     {

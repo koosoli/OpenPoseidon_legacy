@@ -289,6 +289,14 @@ bool VerifyFloat(float x);
 
 bool Vector3P::IsFinite() const
 {
+    // PERF (2026-10-14): the common answer inline. VerifyFloat classifies through _fpclass, a
+    // CRT call per component, and corpse-pose validation asks this of every point of every
+    // corpse every tick (~1.5% of a firefight's main thread). It returns true for every
+    // finite value, so it is only needed for the report it writes about a non-finite one.
+    if (std::isfinite(Get(0)) && std::isfinite(Get(1)) && std::isfinite(Get(2)))
+    {
+        return true;
+    }
     if (!VerifyFloat(Get(0)))
     {
         return false;

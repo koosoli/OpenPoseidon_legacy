@@ -115,6 +115,32 @@ pub struct LayeredFog {
     layout: wgpu::BindGroupLayout, solar_layout: wgpu::BindGroupLayout, compute: wgpu::ComputePipeline, solar_compute: wgpu::ComputePipeline,
     background: wgpu::RenderPipeline, background_bind: wgpu::BindGroup,
     ready: bool, trace: bool, frames: u64,
+    // The incoming-solar field depends only on the snapped domain, the sun, the
+    // fog profile and the native height source -- never on the camera inside a
+    // cell. Re-marching 32^3 sun columns every frame bought nothing.
+    solar_key: Option<SolarKey>, solar_reuses: u64,
+}
+// What cs_solar reads (see fog_solar_transmission and its callees).
+#[derive(Clone, Copy, PartialEq)]
+struct SolarKey {
+    domain: [f32;4], layers: [[f32;4];2], terrain: [f32;4], patch: [f32;4], sky_limit: [f32;4],
+    ocean: [f32;2], far: f32, weather: f32, light: [f32;3], height_generation: u64,
+}
+impl SolarKey {
+    // The sun creeps every frame. Below ~0.1 degree of travel (tens of seconds of
+    // game time) or 0.2% of weather the field is visually identical; past that
+    // the next frame rebuilds it in full, so no error accumulates.
+    fn reusable(&self, now: &SolarKey) -> bool {
+        let dot=self.light[0]*now.light[0]+self.light[1]*now.light[1]+self.light[2]*now.light[2];
+        // The live sea level moves by millimetres every frame (tide and swell) and
+        // also sets the air floor (sky_limit.w); 5 cm of either is invisible in fog.
+        let level=|a:f32,b:f32|(a-b).abs()<=0.05;
+        self.domain==now.domain && self.layers==now.layers && self.terrain==now.terrain && self.patch==now.patch
+            && self.sky_limit[..3]==now.sky_limit[..3] && level(self.sky_limit[3],now.sky_limit[3])
+            && self.ocean[1]==now.ocean[1] && level(self.ocean[0],now.ocean[0]) && self.far==now.far
+            && self.height_generation==now.height_generation
+            && (self.weather-now.weather).abs()<=0.002 && dot>=0.999998
+    }
 }
 impl LayeredFog {
     pub fn is_ready(&self)->bool { self.ready }
@@ -189,10 +215,13 @@ impl LayeredFog {
             wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::Sampler(&sampler)},
             wgpu::BindGroupEntry {binding:2,resource:consumer.as_entire_binding()}]});
         Self {view,solar_view,consumer,_texture:texture,_solar_texture:solar_texture,params,height,shadow,csm,zero_counts,local_lights,local_count:0,sampler,comparison,layout,solar_layout,compute,solar_compute,background,background_bind,
-            ready:false,trace:std::env::var("WGR_LAYERED_FOG_TRACE").as_deref()==Ok("1"),frames:0}
+            ready:false,trace:std::env::var("WGR_LAYERED_FOG_TRACE").as_deref()==Ok("1"),frames:0,
+            solar_key:None,solar_reuses:0}
     }
     pub fn invalidate(&mut self,queue:&wgpu::Queue) {
         if self.ready {queue.write_buffer(&self.consumer,0,bytemuck::bytes_of(&Consumer::zeroed()));}
+        // Runs every frame before render(): the solar field texture survives it,
+        // so the cache key does too (an ineligible frame clears it in render()).
         self.ready=false;
     }
     // Call once per frame with the SAME real lighting packet as surface rendering.
@@ -224,7 +253,7 @@ impl LayeredFog {
                 self.frames,requested(settings,weather,hdr,underground),eligible,weather,far,height_generation,
                 cover.controls[0][0],cover.controls[1][0],cam.cam_pos,settings.layers,settings.terrain,settings.patch,cloud_limit);
         }
-        if !eligible {return;}
+        if !eligible {self.solar_key=None;return;}
         let ocean=ocean.filter(|v|v.is_finite());
         // Atmospheric terrain follows the water surface, not its seabed.
         let air_bounds=match ocean {Some(level)=>[native_bounds[0].max(level),native_bounds[1].max(level)],None=>native_bounds};
@@ -267,8 +296,23 @@ impl LayeredFog {
         let mut view_entries:Vec<_>=entries.into_iter().filter(|e|e.binding!=16).collect();
         view_entries.push(image(18,&self.solar_view));
         let bind=device.create_bind_group(&wgpu::BindGroupDescriptor {label:Some("wgr_layer_fog_compute_bind"),layout:&self.layout,entries:&view_entries});
+        let key=SolarKey {domain:data.solar_domain,layers:data.layers,terrain:data.terrain,patch:data.patch,
+            sky_limit:data.sky_limit,ocean:[data.ocean[0],data.ocean[1]],far:data.radiance[3],weather:data.control[2],
+            light:[data.light[0],data.light[1],data.light[2]],height_generation};
+        let reuse_solar=self.solar_key.is_some_and(|cached|cached.reusable(&key));
+        if self.trace && !reuse_solar && self.frames%120==0 {
+            if let Some(c)=self.solar_key {
+                eprintln!("[wgr] layered fog: solar rebuild domain={} layers={} terrain={} patch={} sky={:?}->{:?} ocean={:?}->{:?} far={}->{} weather={}->{} light={:?}->{:?} height={}",
+                    c.domain==key.domain,c.layers==key.layers,c.terrain==key.terrain,c.patch==key.patch,c.sky_limit,key.sky_limit,
+                    c.ocean,key.ocean,c.far,key.far,c.weather,key.weather,c.light,key.light,c.height_generation==key.height_generation);
+            }
+        }
+        if reuse_solar {self.solar_reuses+=1;} else {self.solar_key=Some(key);}
+        if self.trace && self.frames%120==0 {
+            eprintln!("[wgr] layered fog: solar field reused {} of {} frames",self.solar_reuses,self.frames);
+        }
         encoder.push_debug_group("wgr_layered_fog_transport");
-        {let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {label:Some("wgr_layered_fog_transport"),timestamp_writes:None});
+        if !reuse_solar {let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {label:Some("wgr_layered_fog_transport"),timestamp_writes:None});
             pass.set_pipeline(&self.solar_compute);pass.set_bind_group(0,&solar_bind,&[]);pass.dispatch_workgroups(SIZE.div_ceil(8),SIZE.div_ceil(8),SIZE);}
         {let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {label:Some("wgr_layer_fog_view_transport"),timestamp_writes:None});
             pass.set_pipeline(&self.compute);pass.set_bind_group(0,&bind,&[]);pass.dispatch_workgroups(VIEW_SIZE.div_ceil(8),VIEW_SIZE.div_ceil(8),1);}
@@ -287,6 +331,26 @@ impl LayeredFog {
 #[cfg(test)]
 #[path="layered_fog_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod solar_cache_tests {
+    use super::SolarKey;
+    fn key()->SolarKey {SolarKey {domain:[0.,0.,0.001,100.],layers:[[0.,35.,5.,0.008],[70.,100.,5.,0.003]],terrain:[1.,0.,1.,150.],
+        patch:[0.45,250.,70.,300.],sky_limit:[0.05,1200.,360.,1.19],ocean:[1.19,1.],far:387.,weather:0.6,light:[0.8,0.6,0.],height_generation:3}}
+    #[test]
+    fn solar_field_is_reused_across_swell_and_sun_creep_but_not_real_changes() {
+        let base=key();
+        let mut swell=base;swell.ocean[0]+=0.002;swell.sky_limit[3]+=0.002;
+        assert!(base.reusable(&swell),"tide/swell millimetres must not rebuild the field every frame");
+        let mut creep=base;creep.light=[0.8001,0.5999,0.];assert!(base.reusable(&creep));
+        let mut sun=base;sun.light=[0.81,0.586,0.];assert!(!base.reusable(&sun));
+        let mut moved=base;moved.domain[0]+=26.;assert!(!base.reusable(&moved));
+        let mut tide=base;tide.ocean[0]+=0.2;assert!(!base.reusable(&tide));
+        let mut weather=base;weather.weather=0.61;assert!(!base.reusable(&weather));
+        let mut terrain=base;terrain.height_generation=4;assert!(!base.reusable(&terrain));
+        let mut profile=base;profile.layers[0][3]=0.009;assert!(!base.reusable(&profile));
+    }
+}
 
 #[cfg(test)]
 mod local_light_tests {

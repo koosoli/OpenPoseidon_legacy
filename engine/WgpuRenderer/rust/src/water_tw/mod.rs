@@ -36,6 +36,8 @@
 mod boat_spray;
 mod impacts;
 pub(crate) mod probe;
+pub(crate) mod swash;
+pub(crate) mod query;
 mod breakers;
 mod cdlod;
 mod fft;
@@ -59,7 +61,7 @@ use std::sync::Arc;
 use crate::ffi::{WgrCamera, WgrWaterParams};
 
 /// The water shader: the material plus the shoreline-wave module appended to it (one module).
-const TW_WATER_WGSL: &str = concat!(
+pub(crate) const TW_WATER_WGSL: &str = concat!(
     include_str!("tw_water.wgsl"),
     "\n",
     include_str!("tw_common.wgsl"),
@@ -124,6 +126,46 @@ pub const AVAILABLE: bool = true;
 /// `WGR_TW_DEBUG=<n>` forces Tidewater's material debug view (the Water tab's "TW debug view":
 /// 6 path length, 7 sea bed seen through, 8 sea depth, ...) for a session, so a capture script can
 /// take the debug views without a Water-tab edit. Read once.
+/// WGR_TW_TIME_TRACE=1: every 600 frames, how evenly the water clock advanced against wall time
+/// (the owner sees the curl waves stutter "as if frames were missing"): frames whose clock step was
+/// zero (a repeated animation frame), the step's min / median / max, and the wall frame time's.
+fn time_trace(dt: f32) {
+    use std::sync::Mutex;
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var("WGR_TW_TIME_TRACE").is_ok_and(|v| v.trim() == "1")) {
+        return;
+    }
+    struct T {
+        last: Option<std::time::Instant>,
+        clock: Vec<f32>,
+        wall: Vec<f32>,
+    }
+    static S: Mutex<T> = Mutex::new(T { last: None, clock: Vec::new(), wall: Vec::new() });
+    let Ok(mut t) = S.lock() else { return };
+    let now = std::time::Instant::now();
+    if let Some(l) = t.last {
+        let w = (now - l).as_secs_f32();
+        t.wall.push(w);
+        t.clock.push(dt);
+    }
+    t.last = Some(now);
+    if t.clock.len() >= 600 {
+        let stats = |v: &mut Vec<f32>| {
+            v.sort_by(|a, b| a.total_cmp(b));
+            (v[0] * 1000.0, v[v.len() / 2] * 1000.0, v[v.len() - 1] * 1000.0)
+        };
+        let zero = t.clock.iter().filter(|&&d| d <= 1e-6).count();
+        let ratio_bad = t.clock.iter().zip(&t.wall).filter(|(c, w)| (**c - **w).abs() > 0.5 * **w).count();
+        let (c0, c1, c2) = stats(&mut t.clock);
+        let (w0, w1, w2) = stats(&mut t.wall);
+        eprintln!(
+            "[wgr] TW time trace (600 frames): clock step ms min/med/max {c0:.2}/{c1:.2}/{c2:.2}, zero steps {zero}, steps off their frame's wall time by >50%: {ratio_bad}; wall ms min/med/max {w0:.2}/{w1:.2}/{w2:.2}"
+        );
+        t.clock.clear();
+        t.wall.clear();
+    }
+}
+
 fn debug_view_override() -> Option<f32> {
     static V: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
     *V.get_or_init(|| std::env::var("WGR_TW_DEBUG").ok().and_then(|v| v.trim().parse::<f32>().ok()))
@@ -203,9 +245,23 @@ struct ShoreGrid {
     centre: [f32; 2],
 }
 
-/// Tidewater's `frame.waterAbsorption` / `frame.waterScattering` defaults (Frame.js), 1/m.
-const WATER_ABSORPTION: [f32; 3] = [0.42, 0.075, 0.035];
-const WATER_SCATTERING: [f32; 3] = [0.012, 0.018, 0.024];
+/// Tidewater's `frame.waterAbsorption` / `frame.waterScattering` defaults (Frame.js), 1/m: clear
+/// tropical ocean (its island), the turquoise.
+const TROPICAL_ABSORPTION: [f32; 3] = [0.42, 0.075, 0.035];
+const TROPICAL_SCATTERING: [f32; 3] = [0.012, 0.018, 0.024];
+/// (OP) temperate coastal water for OFP's islands (owner, 2026-10-12: "this turquoise blue just
+/// does not look right"). Pure water's red absorption, plus the dissolved organic matter and
+/// chlorophyll of a temperate coast, which absorb most in the blue (blue above green, as in Jerlov's
+/// coastal types), and ~0.04-0.05/m of particle scattering, flat-ish across the spectrum. Reads
+/// green-grey and ~7 m clear instead of turquoise and ~25 m clear. WGR_TW_WATER_OPTICS=tropical
+/// restores Tidewater's.
+const TEMPERATE_ABSORPTION: [f32; 3] = [0.45, 0.09, 0.12];
+const TEMPERATE_SCATTERING: [f32; 3] = [0.04, 0.05, 0.045];
+fn water_optics() -> ([f32; 3], [f32; 3]) {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let tropical = *V.get_or_init(|| std::env::var("WGR_TW_WATER_OPTICS").map(|v| v.trim().eq_ignore_ascii_case("tropical")).unwrap_or(false));
+    if tropical { (TROPICAL_ABSORPTION, TROPICAL_SCATTERING) } else { (TEMPERATE_ABSORPTION, TEMPERATE_SCATTERING) }
+}
 
 /// `TwSurface` in tw_water.wgsl.
 #[repr(C)]
@@ -237,9 +293,36 @@ struct TwSurface {
     rotor_domain: [f32; 4],
     rotor_control: [f32; 4],
     rotor_sources: [[f32; 4]; rotor_wash::SOURCES],
+    // the hulls that keep the sea out (Tidewater's boat), 4 lanes per wake boat: waterline origin xyz +
+    // half beam, forward xyz + stern, up xyz + bow, sheer aft / bow + on (hull_mask_lanes)
+    hulls: [[f32; 4]; wake::SLOTS * 4],
+    // (OP) blood in the water: per stain x, z, age, amount (impacts.rs blood_lanes, tw_impact.wgsl)
+    blood: [[f32; 4]; impacts::BLOOD_SLOTS],
 }
 
-const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (20 + cdlod::LEVELS + wake::SLOTS * 4 + impacts::SURFACE_SLOTS * 2 + rotor_wash::SOURCES));
+const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (20 + cdlod::LEVELS + wake::SLOTS * 4 + impacts::SURFACE_SLOTS * 2 + rotor_wash::SOURCES + wake::SLOTS * 4 + impacts::BLOOD_SLOTS));
+
+/// The water mask of the wake boats whose producer flagged one (`tidewater_wake` flags bit 2): no sea
+/// surface is drawn inside these hulls (tw_water.wgsl `insideHull`). Lanes per boat as `TwSurface::hulls`.
+fn hull_mask_lanes(p: &WgrWaterParams) -> [[f32; 4]; wake::SLOTS * 4] {
+    let mut out = [[0.0f32; 4]; wake::SLOTS * 4];
+    for i in 0..wake::SLOTS {
+        let l = &p.tidewater_wake[i * 8..i * 8 + 8];
+        let flags = l[2][3] as u32;
+        if flags & 1 == 0 || flags & 4 == 0 || !l.iter().flatten().all(|v| v.is_finite()) {
+            continue;
+        }
+        let (stern, bow) = (l[4][3], l[5][3]);
+        if !(bow > stern) || !(l[2][0] > 0.0) {
+            continue;
+        }
+        out[i * 4] = [l[0][0], l[3][0], l[0][1], l[2][0]];
+        out[i * 4 + 1] = [l[4][0], l[4][1], l[4][2], stern];
+        out[i * 4 + 2] = [l[5][0], l[5][1], l[5][2], bow];
+        out[i * 4 + 3] = [l[7][2], l[7][3], 1.0, 0.0];
+    }
+    out
+}
 
 /// Whether the shore simulation runs (Water tab, and only once the shore waves have a field).
 /// Breaker spray on (W4a): emission gain and sprite intensity above zero (the caller also needs
@@ -249,6 +332,29 @@ const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (20 + cdlod::LEVE
 fn lip_override() -> Option<f32> {
     static V: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
     *V.get_or_init(|| std::env::var("WGR_TW_LIP").ok().and_then(|v| v.trim().parse::<f32>().ok()))
+}
+
+/// OP: whitecaps drawn as patches on the crests (lanes absorption.w / scattering.w of TwSurface =
+/// the coverage that starts a cap, the coverage that is a full one). Tidewater thresholds its lace
+/// pattern by the raw coverage, which suits its calm tropical sea; on a rough sea the low foam
+/// spread over every wave left only the pattern's densest veins, thin white squiggles all over the
+/// water (owner, 2026-10-12). On by default: the owner chose distinct caps over Tidewater's spread
+/// foam ("more white caps and less foam"); WGR_TW_WHITECAP=0 restores Tidewater's look, "lo,hi"
+/// tunes the cover that starts a cap and the cover that is a full one.
+pub const WHITECAP_PATCH: [f32; 2] = [0.008, 0.11];
+// off: the whitecaps are drawn as island-expansion draws them (the coverage thresholds its bubbly
+// lace pattern), synced on the owner's request 2026-10-13; WGR_TW_WHITECAP=1 brings the patches back
+const WHITECAP_PATCH_DEFAULT_ON: bool = false;
+fn whitecap_patch() -> [f32; 2] {
+    static V: std::sync::OnceLock<[f32; 2]> = std::sync::OnceLock::new();
+    *V.get_or_init(|| match std::env::var("WGR_TW_WHITECAP") {
+        Ok(v) if v.trim() == "0" => [0.0, 0.0],
+        Ok(v) => {
+            let n: Vec<f32> = v.split(',').filter_map(|s| s.trim().parse::<f32>().ok()).collect();
+            if n.len() == 2 && n[1] > n[0] && n[0] > 0.0 { [n[0], n[1]] } else if v.trim() == "1" { WHITECAP_PATCH } else { [0.0, 0.0] }
+        }
+        Err(_) => if WHITECAP_PATCH_DEFAULT_ON { WHITECAP_PATCH } else { [0.0, 0.0] },
+    })
 }
 
 fn spray_on(p: &WgrWaterParams) -> bool {
@@ -306,6 +412,7 @@ struct FrameInputs<'a> {
     // W6: the wake readers' lanes
     wake: [[f32; 4]; wake::SLOTS * 4],
     impacts: [[f32; 4]; impacts::SURFACE_SLOTS * 2],
+    blood: [[f32; 4]; impacts::BLOOD_SLOTS],
     // W9a: the probe grid, and the surface height under the camera read back from it
     probe: [f32; 4],
     cam_surface: Option<f32>,
@@ -344,8 +451,8 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         material0: [tw[2][3], tw[2][2], tw[1][1], tw[1][3]],
         // roughness, ssr on, debug view, water glow (W3j; tidewater_fx.z)
         material1: [tw[2][1], tw[1][2], debug_view_override().unwrap_or(tw[3][3]), glow_override().unwrap_or(p.tidewater_fx[2]).clamp(0.0, 2.0)],
-        absorption: [WATER_ABSORPTION[0], WATER_ABSORPTION[1], WATER_ABSORPTION[2], 0.0],
-        scattering: [WATER_SCATTERING[0], WATER_SCATTERING[1], WATER_SCATTERING[2], 0.0],
+        absorption: [water_optics().0[0], water_optics().0[1], water_optics().0[2], whitecap_patch()[0]],
+        scattering: [water_optics().1[0], water_optics().1[1], water_optics().1[2], whitecap_patch()[1]],
         detail: [tw[3][0], tw[3][1], tw[3][2], if earth_preview(p) { 1.0 } else { 0.0 }],
         shore0,
         shore1,
@@ -363,6 +470,8 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         rotor_domain: f.rotor.domain,
         rotor_control: f.rotor.control,
         rotor_sources: f.rotor.sources,
+        hulls: hull_mask_lanes(p),
+        blood: f.blood,
     }
 }
 
@@ -450,6 +559,8 @@ pub struct Tidewater {
     layout: wgpu::BindGroupLayout,
     bind: wgpu::BindGroup,
     bind_dirty: bool,
+    // PERF-TW-CAUSTICS-GATE: this frame's caustics are not needed (set_caustics_skip).
+    caustics_skip: bool,
     pipeline: wgpu::RenderPipeline,
     grid_vbuf: wgpu::Buffer,
     grid_ibuf: wgpu::Buffer,
@@ -458,15 +569,23 @@ pub struct Tidewater {
     instance_count: u32,
     last_params: Option<WgrWaterParams>,
     last_time: Option<f32>,
+    /// (OP) the render-paced water clock (`smooth_clock`): (smoothed time, game time, wall instant)
+    clock: Option<(f64, f32, std::time::Instant)>,
     rotor: rotor_wash::RotorWash,
     detail_offset: [f32; 2],
     rotor_trace: rotor_wash::RotorTrace,
+    /// RFG-191: the camera is in a lake: (level, absorption, scattering) for the underwater view,
+    /// which then stands on that flat, calm surface instead of the sea's.
+    lake: Option<(f32, [f32; 3], [f32; 3])>,
     gens: [u64; 4], // depth, env, scene, heightmap
     // W3a shore field
     shore_t_view: wgpu::TextureView,
     shore_dir_view: wgpu::TextureView,
     shore_grid: Option<ShoreGrid>,
     shore_stamp: Option<shore_field::FieldStamp>,
+    /// PERF-SHORE-TIDE: the sea level the shore field is solved for -- the producer's level with
+    /// the wave bob averaged out (see update_shore_field), and when it was last advanced.
+    shore_sea: Option<(f32, std::time::Instant)>,
     shore_worker: shore_field::ShoreFieldWorker,
     terrain: Option<(Arc<[f32]>, crate::ffi::WgrTerrainParams, u64)>,
     // W3b shore simulation
@@ -499,6 +618,10 @@ pub struct Tidewater {
     impacts: impacts::Impacts,
     // W9a: the surface around the camera, as drawn (underwater composite, view side, gate)
     probe: probe::Probe,
+    // (OP) the swash field around the camera, for the shorebirds (swash.rs)
+    swash: swash::Swash,
+    // (OP) water heights at the engine's points (boat hulls; query.rs)
+    query: query::Query,
     // Swimming: the exact lanes recorded alongside each probe readback.
     probe_lanes: [f32; 4],
     // W5e: the frame's spot lights (the diver's torch is picked from them in prepare)
@@ -509,6 +632,11 @@ pub struct Tidewater {
 }
 
 impl Tidewater {
+    /// RFG-191: see [`Tidewater::lake`]. Set every frame before `prepare`.
+    pub fn set_lake(&mut self, lake: Option<(f32, [f32; 3], [f32; 3])>) {
+        self.lake = lake;
+    }
+
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -702,12 +830,14 @@ impl Tidewater {
                 cull_mode: None,
                 ..Default::default()
             },
-            // The water pass attaches depth READ-ONLY (lib.rs): the sea depth-tests against the
-            // coast like Current OP but cannot write depth there. Tidewater writes depth to
-            // reject hidden wave faces; front-to-back node order keeps most of that benefit.
+            // (OP) The water pass attaches a depth buffer of its own (water_zbuf.rs), initialised
+            // from the scene depth: the sea tests the coast AND itself, as Tidewater's does, so the
+            // nearest wave wins. Read-only (WGR_TW_WATER_ZBUF=0, the scene depth), the draw order
+            // decided between overlapping water, and the CDLOD nodes go front to back: the far sea
+            // painted over the near (slivers above the water, the sky through the surface below).
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: crate::gfx3d::depth_format(device),
-                depth_write_enabled: Some(false),
+                depth_write_enabled: Some(crate::water_zbuf::enabled()),
                 depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
@@ -744,6 +874,8 @@ impl Tidewater {
         let spray = spray::SprayGpu::new(device, queue, camera_layout, &layout, &shader, surface_format, sample_count, linear);
         let uw = underwater::TwUnderwater::new(device, surface_format);
         let probe = probe::Probe::new(device, &layout, &shader);
+        let swash = swash::Swash::new(device, &layout, &shader);
+        let query = query::Query::new(device, &layout, &shader);
         let caustics = caustics::Caustics::new(device);
         let wake = wake::WakeGpu::new(device, TW_WAKE_KERNEL_WGSL);
 
@@ -791,6 +923,7 @@ impl Tidewater {
             heightmap_view,
             layout,
             bind_dirty: true,
+            caustics_skip: false,
             pipeline,
             grid_vbuf,
             grid_ibuf,
@@ -799,14 +932,17 @@ impl Tidewater {
             instance_count: 0,
             last_params: None,
             last_time: None,
+            clock: None,
             rotor: Default::default(),
             detail_offset: [0.0; 2],
             rotor_trace: Default::default(),
+            lake: None,
             gens: [u64::MAX; 4],
             shore_t_view,
             shore_dir_view,
             shore_grid: None,
             shore_stamp: None,
+            shore_sea: None,
             shore_worker: Default::default(),
             terrain: None,
             sim,
@@ -820,6 +956,8 @@ impl Tidewater {
             spots: Vec::new(),
             impacts: Default::default(),
             probe,
+            swash,
+            query,
             probe_lanes: [0.0; 4],
             spray,
             uw,
@@ -975,6 +1113,10 @@ impl Tidewater {
                 bytemuck::cast_slice(&field.dirs),
             );
             self.shore_grid = Some(ShoreGrid { origin: field.origin, cell: field.cell, centre: field.centre() });
+            if PrepLap::limit().is_some() {
+                eprintln!("TW_SHORE_FIELD {}x{} gen={} sea={:.3} heading={:.1}", w, h, field.stamp.terrain_gen,
+                          field.stamp.sea_level, field.stamp.heading_deg);
+            }
             self.shore_stamp = Some(field.stamp);
             self.coast = field.coast;
             self.rebuild_bind(device);
@@ -983,13 +1125,36 @@ impl Tidewater {
         if tp.hm_width < 2 || tp.hm_height < 2 || tp.terrain_grid <= 0.0 {
             return;
         }
+        // PERF-SHORE-TIDE (2026-10-20): the producer's sea level is Landscape::GetSeaLevel, the
+        // tide PLUS the wave bob (_seaLevelWave). The bob swings ~0.25 m every few seconds, which
+        // is exactly the field's re-solve threshold: on a Reforger flight the 2048x2048 field was
+        // solved and re-uploaded 18 times in 80 s, 30-80 ms of the render thread each (the
+        // largest render-side hitch left). The field describes where swell arrives over the
+        // bathymetry, which follows the tide, not each wave; it now follows the level averaged
+        // over ~20 s, which a tide (hours) passes through unchanged. A jump (world load, setTide)
+        // snaps. WGR_TW_SHORE_RAW_SEA=1 = the instantaneous level.
+        let sea_level = {
+            static RAW: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let now = std::time::Instant::now();
+            let level = match self.shore_sea {
+                _ if *RAW.get_or_init(|| std::env::var("WGR_TW_SHORE_RAW_SEA").as_deref() == Ok("1")) => p.sea_level,
+                Some((avg, _)) if (p.sea_level - avg).abs() > 2.0 => p.sea_level,
+                Some((avg, last)) => {
+                    let k = ((now - last).as_secs_f32() / 20.0).min(1.0);
+                    avg + (p.sea_level - avg) * k
+                }
+                None => p.sea_level,
+            };
+            self.shore_sea = Some((level, now));
+            level
+        };
         let input = shore_field::ShoreFieldInput {
             heights: heights.clone(),
             hm_width: tp.hm_width,
             hm_height: tp.hm_height,
             origin: [tp.world_origin.x, tp.world_origin.y],
             grid: tp.terrain_grid,
-            sea_level: p.sea_level,
+            sea_level,
             swell_dir: swell_dir(p),
             terrain_gen: *generation,
         };
@@ -998,6 +1163,39 @@ impl Tidewater {
 
     /// CDLOD selection for this frame's water camera, plus the per-frame uniforms.
     /// CDLOD selection for this frame's water camera, plus the per-frame uniforms (timed, W7b).
+    /// (OP) The water's animation clock, advanced by the wall time between this thread's frames and
+    /// steered toward the game's presentation clock (8 % of the gap a frame; a gap past 0.25 s snaps).
+    /// The game clock is interpolated on the simulation side, which runs a frame ahead of the renderer
+    /// on its own pace, so the step it gave each drawn frame missed the frame's real duration by more
+    /// than half on ~8 % of frames (WGR_TW_TIME_TRACE at the owner's Stratis pose) -- the waves and the
+    /// curling lips jumped (owner: "the curl wave animation is not fluid ... as if frames were
+    /// missing"). A clock that stops (pause) stops the water; one set from outside (load, setDate)
+    /// snaps. WGR_TW_SMOOTH_CLOCK=0: the game clock as given.
+    fn smooth_clock(&mut self, game: f32) -> f32 {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if !*ON.get_or_init(|| !std::env::var("WGR_TW_SMOOTH_CLOCK").is_ok_and(|v| v.trim() == "0")) {
+            return game;
+        }
+        let now = std::time::Instant::now();
+        let t = match self.clock {
+            None => game as f64,
+            Some((smooth, last_game, last_wall)) => {
+                let wall = (now - last_wall).as_secs_f64().min(0.1);
+                let advancing = game > last_game;
+                let mut s = if advancing { smooth + wall } else { smooth };
+                let err = game as f64 - s;
+                if err.abs() > 0.25 {
+                    s = game as f64;
+                } else {
+                    s += err * 0.08;
+                }
+                s
+            }
+        };
+        self.clock = Some((t, game, now));
+        t as f32
+    }
+
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, camera: Option<&WgrCamera>) {
         let t0 = std::time::Instant::now();
         self.prepare_inner(device, queue, camera);
@@ -1008,6 +1206,7 @@ impl Tidewater {
     }
 
     fn prepare_inner(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, camera: Option<&WgrCamera>) {
+        let mut lap = PrepLap::new();
         if let Some(p) = self.last_params {
             if earth_preview(&p) {
                 // A rolling Earth height window has no authoritative bathymetry/coast sim.
@@ -1017,6 +1216,7 @@ impl Tidewater {
                 self.update_shore_field(device, queue, &p);
             }
         }
+        lap.mark("shore_field");
         let (Some(p), Some(cam)) = (self.last_params, camera) else {
             self.instance_count = 0;
             return;
@@ -1028,9 +1228,16 @@ impl Tidewater {
             self.instance_count = 0;
             return;
         }
+        // the water's clock, paced by this thread's own frames (see `smooth_clock`)
+        let mut p = p;
+        p.time = self.smooth_clock(p.time);
+        if let Some(lp) = self.last_params.as_mut() {
+            lp.time = p.time;
+        }
         // water clock, pause-coherent like Current OP's (Glob.time)
         let dt = self.last_time.map_or(0.0, |t| (p.time - t).clamp(0.0, 0.1));
         self.last_time = Some(p.time);
+        time_trace(dt);
         // SeaDetail.update: gust patterns drift downwind at ~0.7 x the wind speed
         // ShoreSim regions on the coast nearest the camera (W3b)
         if shore_sim_on(&p, self.shore_grid) {
@@ -1038,16 +1245,20 @@ impl Tidewater {
         } else {
             self.sim.regions = [None; shore_sim::K];
         }
+        lap.mark("shore_sim");
         self.brk.lips_on = p.tidewater_shore[2][3] > 0.0;
         let ts = std::time::Instant::now();
         self.update_stations(queue, p.sea_level);
         self.prep_stats[2] = self.prep_stats[2].max(ts.elapsed().as_secs_f32() * 1000.0);
+        lap.mark("stations");
         // W4a: the spray lives where the breakers are (the simulated regions)
         let spray_on = (spray_on(&p) || spray_override().is_some_and(|(g, i)| g > 0.0 && i > 0.0))
             && self.sim.any_active()
             && self.brk.ns >= 2;
         self.spray.poll_stats();
         self.probe.poll();
+        self.swash.poll();
+        self.query.poll();
         let cp = [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]];
         let (gain, intensity) = spray_override().unwrap_or((p.tidewater_fx[0], p.tidewater_fx[1]));
         // W6i: the boats' bow spray into the ring's CPU tail, and their hulls as collision bodies
@@ -1061,7 +1272,9 @@ impl Tidewater {
         let bodies: Vec<spray::Body> = spray_boats.iter().flatten().map(|b| b.body()).collect();
         self.spray.set_frame(queue, dt, p.time, cp, gain, intensity, spray_on, &requests, &bodies);
         // W6: the boats' wakes (visual only; see wake.rs)
+        lap.mark("spray");
         self.wake_lanes = self.wake.update(queue, wake::WakeBoat::from_params(&p), dt, p.time, p.sea_level);
+        lap.mark("wake");
         let mut inputs = FrameInputs {
             detail_offset: self.detail_offset,
             morph: &self.cdlod.morph,
@@ -1072,6 +1285,7 @@ impl Tidewater {
             caustic_tiles: self.caustics.tiles,
             wake: self.wake_lanes,
             impacts: self.impacts.lanes(),
+            blood: self.impacts.blood_lanes(),
             probe: probe::Probe::lanes(cp),
             cam_surface: self.probe.camera_height(),
             rotor: self.rotor,
@@ -1101,14 +1315,26 @@ impl Tidewater {
         {
             let glow = glow_override().unwrap_or(p.tidewater_fx[2]);
             let torch = underwater::pick_torch(&self.spots, [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]]);
-            let mut uwp = underwater::UwParams::new(cam, &p, self.linear, glow, spec.sizes, self.caustics.tiles, WATER_ABSORPTION, WATER_SCATTERING, p.underwater_gate[0] > 0.5, torch);
+            let mut uwp = underwater::UwParams::new(cam, &p, self.linear, glow, spec.sizes, self.caustics.tiles, water_optics().0, water_optics().1, p.underwater_gate[0] > 0.5, torch);
             // W9a: the drawn surface around the camera (the grid is drawn in `update`, before the
             // composite reads it; until the first one exists the composite uses the FFT alone)
             uwp.probe = if self.probe.ready || !self.bind_dirty { probe::Probe::lanes(cp) } else { [0.0; 4] };
+            // RFG-191: under a lake the medium's surface is the lake's -- flat (no FFT, no probe of
+            // the SEA's drawn grid) and its own murky water.
+            if let Some((level, absorption, scattering)) = self.lake {
+                uwp.scattering = [scattering[0], scattering[1], scattering[2], level];
+                uwp.absorption = [absorption[0], absorption[1], absorption[2], uwp.absorption[3]];
+                uwp.ocean[0] = 0.0;
+                uwp.probe = [0.0; 4];
+            }
             self.probe_lanes = probe::Probe::lanes(cp);
+            self.probe.set_camera(cp);
+            self.query.prepare(queue);
             self.uw.set_frame(queue, &uwp);
         }
-        self.fft.set_frame(queue, spec, p.tidewater[0][1], p.time, dt);
+        lap.mark("surface+uw");
+        self.fft.set_frame(queue, spec, p.tidewater[0][1], p.tidewater[0][0], p.tidewater_fx[3], p.time, dt);
+        lap.mark("fft");
 
         let cam_pos = glam::DVec3::new(cam.cam_pos[0] as f64, cam.cam_pos[1] as f64, cam.cam_pos[2] as f64);
         let clip = glam::Mat4::from_cols_array(&cam.proj) * glam::Mat4::from_cols_array(&cam.view);
@@ -1118,12 +1344,15 @@ impl Tidewater {
         // Existing CDLOD levels/node cap cover the curved sea to its horizon;
         // opaque scene depth retains land outside the near height window.
         let nodes = cdlod::Selection::new(&self.cdlod, cam_pos, p.sea_level, Some(planes))
+            .displacement(p.tidewater[0][0], p.tidewater[0][1])
             .curved_earth(earth_preview(&p)).run();
         self.prep_stats[3] += tc.elapsed().as_secs_f32() * 1000.0;
         self.instance_count = nodes.len() as u32;
         if !nodes.is_empty() {
             queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&nodes));
         }
+        lap.mark("cdlod");
+        lap.report();
     }
 
     /// Per-frame compute before the water draw: the FFT and its mip chain.
@@ -1133,7 +1362,7 @@ impl Tidewater {
             self.fft.dispatch(encoder, timers);
             if self.last_params.as_ref().is_some_and(earth_preview) { return; }
             // W5b: the caustics follow this frame's FFT (W7h: timed)
-            if !self.bind_dirty {
+            if !self.bind_dirty && !self.caustics_skip {
                 timers.begin(encoder, crate::gpu_timers::Region::TwCaustics);
                 self.caustics.dispatch(encoder);
                 timers.end(encoder, crate::gpu_timers::Region::TwCaustics);
@@ -1163,8 +1392,15 @@ impl Tidewater {
             // W9a: the surface around the camera, after everything that displaces it
             if !self.bind_dirty {
                 self.probe.record(encoder, &self.bind, self.probe_lanes);
+                self.swash.record(encoder, &self.bind, self.probe_lanes);
+                self.query.record(encoder, &self.bind);
             }
         }
+    }
+
+    /// PERF-TW-CAUSTICS-GATE: skip the caustic splats this frame (see lib.rs, where it is decided).
+    pub fn set_caustics_skip(&mut self, skip: bool) {
+        self.caustics_skip = skip;
     }
 
     /// W9a: the drawn surface's height under the camera (absolute m), read back from the probe
@@ -1186,8 +1422,9 @@ impl Tidewater {
         source: &wgpu::TextureView,
         depth: &wgpu::TextureView,
         destination: &wgpu::TextureView,
+        sky_sh: &wgpu::Buffer,
     ) {
-        self.uw.render(device, encoder, source, depth, destination, self.fft.displacement_view(), (self.caustics.fine_view(), self.caustics.broad_view()), &self.probe.view);
+        self.uw.render(device, encoder, source, depth, destination, self.fft.displacement_view(), (self.caustics.fine_view(), self.caustics.broad_view()), &self.probe.view, sky_sh);
     }
 
     /// W4b: the lips' and the spray's coverage into the upscalers' history-control ("reactive")
@@ -1322,6 +1559,10 @@ impl Tidewater {
             cdlod::grid(),
             self.sim.regions.iter().flatten().count()
         );
+        // (OP) where the shore simulation runs: outside these the beach has no swash wetness
+        let regions: Vec<String> = self.sim.regions.iter().flatten()
+            .map(|r| format!("{:.0},{:.0} (w {:.2})", r.centre[0], r.centre[1], r.weight())).collect();
+        let s = format!("{s} at [{}]", regions.join("; "));
         self.prep_stats = [0.0; 7];
         // W7j: where the shore field found coast (16 samples), to pick a second coast for captures
         let n = self.coast.len();
@@ -1334,13 +1575,14 @@ impl Tidewater {
             (Some(p), Some(spec)) => {
                 let (var_h, mss) = fft::sea_stats(spec.sizes, spec.local, spec.swell, spec.depth);
                 format!(
-                    " | (W9c) sea: wind {:.1} m/s fetch {:.0} km, Hs {:.2} m (x amplitude {:.2}), rms slope {:.3}, foam bias {:.3} | (W9a) surface under the camera {}",
+                    " | (W9c) sea: wind {:.1} m/s fetch {:.0} km, Hs {:.2} m (x amplitude {:.2}), rms slope {:.3}, foam bias {:.3} decay {:.3} | (W9a) surface under the camera {}",
                     spec.local.wind_speed,
                     spec.local.fetch_km,
                     4.0 * var_h.max(0.0).sqrt() * p.tidewater[0][0],
                     p.tidewater[0][0],
                     mss.max(0.0).sqrt(),
                     spec.foam_bias,
+                    spec.foam_decay,
                     self.probe.camera_height().map_or("none".to_string(), |h| format!("{h:.2} m (sea {:.2}, read {} frames ago)", p.sea_level, self.probe.age))
                 )
             }
@@ -1528,7 +1770,9 @@ mod tests {
         assert_eq!(std::mem::offset_of!(TwSurface, rotor_domain), 800);
         assert_eq!(std::mem::offset_of!(TwSurface, rotor_control), 816);
         assert_eq!(std::mem::offset_of!(TwSurface, rotor_sources), 832);
-        assert_eq!(std::mem::size_of::<TwSurface>(), 960);
+        assert_eq!(std::mem::offset_of!(TwSurface, hulls), 960);
+        assert_eq!(std::mem::offset_of!(TwSurface, blood), 1088);
+        assert_eq!(std::mem::size_of::<TwSurface>(), 1344);
     }
 
     #[test]
@@ -1648,5 +1892,39 @@ mod tests {
         assert_eq!(p1, [1.0, 0.02, 0.016, 1.0]);
         p.tidewater_shore[2][1] = 0.0;
         assert!(!shore_sim_on(&p, Some(g)));
+    }
+}
+
+/// Diagnostic: the phases of one slow `prepare` (WGR_FRAME_LAP_MS, the render thread's lap
+/// threshold), on stderr as `TW_PREP_LAP`.
+struct PrepLap {
+    t0: Option<std::time::Instant>,
+    t: std::time::Instant,
+    laps: Vec<(&'static str, f32)>,
+}
+impl PrepLap {
+    fn limit() -> Option<f32> {
+        static LIMIT: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+        *LIMIT.get_or_init(|| std::env::var("WGR_FRAME_LAP_MS").ok().and_then(|v| v.parse().ok()))
+    }
+    fn new() -> Self {
+        let now = std::time::Instant::now();
+        Self { t0: Self::limit().map(|_| now), t: now, laps: Vec::new() }
+    }
+    fn mark(&mut self, name: &'static str) {
+        if self.t0.is_some() {
+            let now = std::time::Instant::now();
+            self.laps.push((name, (now - self.t).as_secs_f32() * 1e3));
+            self.t = now;
+        }
+    }
+    fn report(&self) {
+        if let (Some(t0), Some(limit)) = (self.t0, Self::limit()) {
+            let total = t0.elapsed().as_secs_f32() * 1e3;
+            if total >= limit * 0.5 {
+                let parts: Vec<String> = self.laps.iter().map(|(n, ms)| format!("{n}={ms:.1}")).collect();
+                eprintln!("TW_PREP_LAP {total:.1} ms: {}", parts.join(" "));
+            }
+        }
     }
 }

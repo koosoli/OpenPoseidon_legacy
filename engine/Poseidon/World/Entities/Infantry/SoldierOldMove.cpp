@@ -4,6 +4,7 @@
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/World/Weather/MudContact.hpp>
+#include <Poseidon/World/Effects/MudSpray.hpp>
 #include <Poseidon/World/Weather/SandContact.hpp>
 #include <Poseidon/World/Weather/SandField.hpp>
 #include <Poseidon/World/Entities/Infantry/GroundBootEvents.hpp>
@@ -196,6 +197,18 @@ void Man::EmitGroundBootContact(bool left, SimulationImportance prec)
         if (yr <= ys + 0.2f && !GLandscape->InTerrainHoleBelow(pos, 0.3f))
         {
             mudChanged = StampMudFootstep(*GLandscape, *this, pos, Direction());
+            if (mudChanged)
+            {
+                // MUD-001: a boot in wet mud splashes a little of it up and forward
+                MudSprayReport spray;
+                spray.pos = pos + VUp * 0.03f;
+                spray.vel = Direction() * 0.5f + VUp * 0.9f;
+                spray.count = 10.0f;
+                spray.velSpread = 0.6f;
+                spray.size = 0.022f;
+                spray.posSpread = 0.06f;
+                ReportMudSpray(spray);
+            }
             sandChanged = StampSandFootstep(*GLandscape, *this, pos, Direction());
             if (GSnow().CoverActive() && !GSnow().NeedsWalkingChannelAt(pos.X(), pos.Z()) && ys > GLandscape->GetSeaLevel())
             {
@@ -715,6 +728,10 @@ void Man::StartActionProcessing(const UIAction& action, AIUnit* unit)
 
 bool Man::IsActionInProgress(MoveFinishF action) const
 {
+    if (_upperContext && _upperContext->function == action)
+    {
+        return true; // played on the upper body (SoldierOldUpperBody.cpp)
+    }
     if (_primaryMove.context && _primaryMove.context->function == action)
     {
         return true;

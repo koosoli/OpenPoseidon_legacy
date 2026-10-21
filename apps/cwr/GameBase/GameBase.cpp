@@ -121,7 +121,7 @@ bool GameBase::ParseCommandLine(const char* commandLine)
 
     // Process-wide TaskPool — owned for the whole process. Audio decode and parallel
     // terrain segment generation both submit to this single instance. Auto-capped at
-    // kDefaultMaxTaskThreads (a CWA-era game doesn't scale past it); --max-threads
+    // kDefaultMaxTaskThreads (see there for why 16, measured); --max-threads
     // overrides (0 = one per core).
     Poseidon::InitGlobalTaskPool(Poseidon::ResolveTaskPoolThreadCount(AppConfig::Instance().GetMaxThreads(),
                                                                       std::thread::hardware_concurrency()));

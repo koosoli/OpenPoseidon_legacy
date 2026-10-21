@@ -1,3 +1,5 @@
+#include <Poseidon/UI/ArmaContentMenu.hpp>
+#include <Poseidon/Dev/Diag/FixedStepStats.hpp>
 #include <Poseidon/UI/LocalMapWorlds.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/World/Terrain/TerrainPreviewStart.hpp>
@@ -601,6 +603,7 @@ __attribute__((used)) static void (*_forceLinkGameStateExtTest)() = &InitModuleG
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Dev/Harness/HarnessServer.hpp>
 #include <Poseidon/Dev/Harness/HarnessBuiltins.hpp>
+#include <Poseidon/Dev/NpcChat/NpcChatHarness.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
 #include <Poseidon/Dev/Harness/HarnessPlayerTracker.hpp>
 #include <Poseidon/Dev/Harness/HarnessMissionStateTracker.hpp>
@@ -1219,6 +1222,12 @@ static std::string HarnessHandleQuery(const char* what, cJSON* root)
 // Auto-key / auto-screenshot scheduler. Trident parity + flicker scripts
 // ship specs like "700:path" (frame-based) or "2.5s:path" (time-based);
 // TimedTrigger stores both and fires once when either condition matches.
+// POSEIDON_FREEFLY_DRIFT state: the freefly camera, its per-frame step, and when it starts.
+static OLink<CameraVehicle> s_driftCamera;
+static Vector3 s_driftStep;
+static float s_driftYawRate = 0.0f;
+static int s_driftStartMs = -1;
+
 struct TimedTrigger
 {
     int frame = -1;
@@ -1389,6 +1398,8 @@ static std::unique_ptr<HarnessServer> CreateGameHarness()
     // Multiplayer PTT tests (triHoldKey / triReleaseKey) drive VoN
     // transmission via these commands.
     HarnessBuiltins::RegisterKeyInjection(*hs);
+    // NPC chat (experimental): npc_chat_configure / _say / _transcript / _report.
+    Poseidon::NpcChat::RegisterHarness(*hs);
 #if POSEIDON_DIAG
     // DIAG-001: diag_inspect, diag_pause, diag_step, diag_camera, ... (Dev/Diag/OpDiagHarness.cpp)
     Poseidon::Dev::OpDiag::RegisterHarness(*hs);
@@ -1556,6 +1567,7 @@ int GameApplication::RunAfterArgumentParsing()
             return 3;
         }
 #ifdef _WIN32
+        Poseidon::Foundation::DrainLogFileQueue(1000); // the log file's writer thread (PERF-LOG-FILE-QUEUE)
         ExitProcess(0); // bypass static destructors and CRT assertions
 #else
         return 0;
@@ -1933,6 +1945,7 @@ void GameApplication::RunMainLoop()
             LOG_INFO(Core, "Capture metrics {}: {}", WriteCaptureMetrics(captureMetricsPath) ? "saved" : "failed",
                      captureMetricsPath);
         LOG_INFO(Core, "Screenshot saved to: {}", screenshotPath);
+        Poseidon::Foundation::DrainLogFileQueue(1000); // the log file's writer thread (PERF-LOG-FILE-QUEUE)
         _exit(0);
     }
 
@@ -2002,10 +2015,28 @@ void GameApplication::RunMainLoop()
     HarnessPlayerTracker harnessPlayerTracker;
     HarnessMissionStateTracker harnessMissionStateTracker;
 
+    // POSEIDON_DEV_CRASH_AFTER_S=<s>: crash on purpose (an access violation) that many seconds into
+    // the main loop, after logging a burst of lines -- to test that the crash handler's report and
+    // the lines before it reach the log file (PERF-LOG-FILE-QUEUE writes it from its own thread).
+    static const double devCrashAfterS = []
+    {
+        const char* v = std::getenv("POSEIDON_DEV_CRASH_AFTER_S");
+        return v ? std::strtod(v, nullptr) : 0.0;
+    }();
+    const auto devCrashStart = std::chrono::steady_clock::now();
     while (!m_closeRequest)
     {
         GDebugger.ProcessAlive(); // keep watchdog thread happy
         Poseidon::AppIdle();      // simulate + render one frame
+        if (devCrashAfterS > 0.0 &&
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - devCrashStart).count() >= devCrashAfterS)
+        {
+            for (int i = 0; i < 2000; ++i)
+                LOG_INFO(Core, "DEV CRASH TEST: burst line {} of 2000", i + 1);
+            LOG_ERROR(Core, "DEV CRASH TEST: crashing now (POSEIDON_DEV_CRASH_AFTER_S)");
+            volatile int* volatile nowhere = nullptr;
+            *nowhere = 1;
+        }
 
         PollStrictAbort(); // --strict: stop on any ERROR logged this frame
 
@@ -2017,6 +2048,7 @@ void GameApplication::RunMainLoop()
                 break;
         }
 
+        Poseidon::TickMenuClickHook(); // POSEIDON_MENU_CLICKS (captures only)
         // Inject auto-key events via SDL (scancodes)
         DWORD elapsedMs = GetTickCount() - loopStartTick;
         ReleaseHeldAutoKeys(autoKeyEvents, elapsedMs);
@@ -2114,8 +2146,32 @@ void GameApplication::RunMainLoop()
             {
                 const int hour = static_cast<int>(testWorldHour);
                 const int minute = static_cast<int>((testWorldHour - hour) * 60.0f + 0.5f);
-                GWorld->SetDate(1985, 5, 11, hour, minute);
-                LOG_INFO(Core, "--test-world-hour: set world time to {:02d}:{:02d}", hour, minute);
+                // POSEIDON_TEST_DATE=YYYY-MM-DD: the day too, so the sun matches a reference frame
+                // taken on another date (the default stays the long-standing 1985-05-11).
+                int year = 1985, month = 5, day = 11;
+                if (const char* dateEnv = std::getenv("POSEIDON_TEST_DATE"); dateEnv != nullptr)
+                {
+                    int y = 0, m = 0, d = 0;
+                    if (std::sscanf(dateEnv, "%d-%d-%d", &y, &m, &d) == 3 && m >= 1 && m <= 12 && d >= 1 && d <= 31)
+                        year = y, month = m, day = d;
+                }
+                GWorld->SetDate(year, month, day, hour, minute);
+                LOG_INFO(Core, "--test-world-hour: set world time to {:04d}-{:02d}-{:02d} {:02d}:{:02d}", year, month,
+                         day, hour, minute);
+            }
+            // POSEIDON_TEST_OVERCAST=0..1: the sky a reference frame was taken under, applied at once.
+            if (const char* overcastEnv = std::getenv("POSEIDON_TEST_OVERCAST"); overcastEnv != nullptr && *overcastEnv)
+            {
+                const float overcast = std::clamp(std::strtof(overcastEnv, nullptr), 0.0f, 1.0f);
+                GWorld->SetWeather(overcast, -1, 0);
+                LOG_INFO(Core, "POSEIDON_TEST_OVERCAST: overcast {}", overcast);
+            }
+            // POSEIDON_TEST_FOG=0..1: the weather fog (the Weather tab's "Fog amount"), applied at once.
+            if (const char* fogEnv = std::getenv("POSEIDON_TEST_FOG"); fogEnv != nullptr && *fogEnv)
+            {
+                const float fog = std::clamp(std::strtof(fogEnv, nullptr), 0.0f, 1.0f);
+                GWorld->SetWeather(-1, fog, 0);
+                LOG_INFO(Core, "POSEIDON_TEST_FOG: fog {}", fog);
             }
             Object* cameraOn = GWorld->CameraOn();
             if (!freeFlyPose && (!cameraOn || !GLandscape))
@@ -2166,8 +2222,39 @@ void GameApplication::RunMainLoop()
                     camera->SetManual(true);
                     camera->SetAltitudeSpeedScaling(true);
                     camera->SetMouseLookRequiresRightButton(true);
+                    // POSEIDON_FREEFLY_FOV: the camera's fov in the engine's own unit (the
+                    // `camSetFov` value; 0.7 default), so a capture can match a reference
+                    // frame taken through another game's camera.
+                    if (const char* fovEnv = std::getenv("POSEIDON_FREEFLY_FOV"); fovEnv != nullptr && *fovEnv != 0)
+                    {
+                        const float fov = std::strtof(fovEnv, nullptr);
+                        if (fov > 0.05f && fov < 3.0f)
+                        {
+                            camera->SetManualFov(fov);
+                            LOG_INFO(Core, "--test-world-freefly: fov {} (POSEIDON_FREEFLY_FOV)", fov);
+                        }
+                    }
                     camera->SetCrossHairs(false);
                     camera->ResetTargets();
+                    // POSEIDON_FREEFLY_DRIFT="vx,vz,startSeconds": from startSeconds on, the camera
+                    // moves vx,vz metres per second at a nominal 60 frames -- a fixed step per
+                    // FRAME, so a run of consecutive auto-screenshots (each stalls ~0.6 s on the
+                    // readback) shows walking-pace motion rather than one jump per capture. For
+                    // grass/foliage flicker probes, which a still camera cannot reproduce.
+                    if (const char* drift = std::getenv("POSEIDON_FREEFLY_DRIFT"); drift != nullptr && *drift != 0)
+                    {
+                        float vx = 0.0f, vz = 0.0f, start = 0.0f, yawDegPerS = 0.0f;
+                        // Optional 4th value: a pan in degrees per second (grass/DLSS motion probes).
+                        if (std::sscanf(drift, "%f,%f,%f,%f", &vx, &vz, &start, &yawDegPerS) >= 2)
+                        {
+                            s_driftCamera = camera;
+                            s_driftYawRate = yawDegPerS * 3.14159265f / 180.0f;
+                            s_driftStep = Vector3(vx / 60.0f, 0.0f, vz / 60.0f);
+                            s_driftStartMs = static_cast<int>(start * 1000.0f);
+                            LOG_INFO(Core, "--test-world-freefly: drift {} {} m/s from {} s (POSEIDON_FREEFLY_DRIFT)", vx,
+                                     vz, start);
+                        }
+                    }
                     GWorld->AddAnimal(camera);
                     GWorld->SetCameraEffect(CreateCameraEffect(camera, "Internal", CamEffectTop, true));
                     // A camera effect is a cutscene as far as CameraEffect::Draw is
@@ -2212,12 +2299,19 @@ void GameApplication::RunMainLoop()
                     // the captured pose is unchanged.
                     if (cameraOn && GLandscape)
                     {
-                        const float groundY = GLandscape->SurfaceY(x, z) + 1.8f;
-                        cameraOn->Move(Vector3(x, groundY, z));
+                        // POSEIDON_FREEFLY_PLAYER_AWAY=<metres>: ground the player that far east of
+                        // the camera instead, so an interior capture is not filled by the player's
+                        // own body standing at the lens.
+                        float away = 0.0f;
+                        if (const char* a = std::getenv("POSEIDON_FREEFLY_PLAYER_AWAY"); a && *a)
+                            away = static_cast<float>(std::atof(a));
+                        const float px = x + away;
+                        const float groundY = GLandscape->SurfaceY(px, z) + 1.8f;
+                        cameraOn->Move(Vector3(px, groundY, z));
                         LOG_INFO(Core,
                                  "--test-world-freefly: grounded the player at {}, {}, {} so a"
                                  " drowning player cannot end the mission",
-                                 x, groundY, z);
+                                 px, groundY, z);
                     }
                     LOG_INFO(Core,
                              "--test-world-freefly: camera at {}, {}, {}; azimuth {} elevation {} degrees{}", x,
@@ -2435,6 +2529,27 @@ void GameApplication::RunMainLoop()
             }
         }
 
+        // POSEIDON_FREEFLY_DRIFT: one fixed step per SIMULATION TICK this frame ran -- how the
+        // free-fly camera moves under the keyboard, so the drawn camera's per-frame motion shows
+        // the same tick judder (and its fix) a person flying does. POSEIDON_FREEFLY_DRIFT_PER_FRAME=1
+        // = the old one step per frame.
+        if (s_driftStartMs >= 0 && static_cast<int>(elapsedMs) >= s_driftStartMs)
+            if (s_driftCamera)
+            {
+                static const bool perFrame = [] {
+                    const char* value = std::getenv("POSEIDON_FREEFLY_DRIFT_PER_FRAME");
+                    return value && value[0] == '1';
+                }();
+                if (perFrame)
+                    s_driftCamera->Move(s_driftCamera->Position() + s_driftStep);
+                else
+                {
+                    s_driftCamera->SetHarnessDrift(s_driftStep * 60.0f); // inside the camera's own ticks
+                    s_driftCamera->SetHarnessYawRate(s_driftYawRate);
+                    s_driftCamera = nullptr;
+                }
+            }
+
         // Auto-screenshot: capture at specified frame/time triggers
         if (nextAutoScreenshot < autoScreenshots.size() &&
             TriggerReady(autoScreenshots[nextAutoScreenshot].trigger, mainFrameCounter, elapsedMs))
@@ -2559,6 +2674,7 @@ void GameApplication::RunMainLoop()
 
         DWORD elapsedMs = Poseidon::Foundation::GlobalTickCount() - loopStartTick;
 
+        Poseidon::TickMenuClickHook(); // POSEIDON_MENU_CLICKS (captures only)
         // Inject auto-key events for this frame / time
         ReleaseHeldAutoKeys(autoKeyEvents, static_cast<uint32_t>(elapsedMs));
         for (auto& ak : autoKeyEvents)
@@ -2762,6 +2878,7 @@ void GameApplication::ShutdownRuntime()
         networkManager.Close();
         Sleep(100);
         LOG_INFO(Core, "MP auto-test: exiting with code {}", m_exitCode);
+        Poseidon::Foundation::DrainLogFileQueue(1000); // the log file's writer thread (PERF-LOG-FILE-QUEUE)
         _exit(m_exitCode);
     }
 
@@ -2827,6 +2944,10 @@ void GameApplication::RegisterAudioBackends()
     Poseidon::RegisterTextAudioBackend();
     Poseidon::RegisterOpenALAudioBackend();
     Poseidon::RegisterOpenALVoiceBackend();
+#if POSEIDON_ENABLE_STEAMAUDIO
+    Poseidon::RegisterSteamAudioBackend(); // --audio steam
+    Poseidon::RegisterSDLVoiceBackend();
+#endif
     Poseidon::RegisterTestToneVoiceBackend();
 }
 

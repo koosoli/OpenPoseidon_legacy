@@ -31,6 +31,7 @@ class FishSchools
         int behaviour = 0;
         Vector3 home;
         float wanderAngle = 0, homeY = 0;
+        float surface = 0; // LAKE-FISH-001: water level the group lives under
         std::vector<Fish> fish;
     };
     void EnsureMeshes();

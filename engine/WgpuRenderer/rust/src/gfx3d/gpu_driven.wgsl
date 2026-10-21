@@ -9,7 +9,7 @@
 // Rigid opaque only: terrain-conformed vegetation, skinned, and transparent draws stay on
 // the CPU path (they never enter the retained instance set), so this VS has no conform.
 
-#import frame::{frame, reverse_z, fog_factor, atmo_applied, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
+#import frame::{frame, reverse_z, fog_factor, atmo_applied, veg_sway_offset, veg_sway_height, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
 #import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal, object_snow_baked_exposure}
 #import tree_snow::{tree_snow_height, tree_snow_coverage, forest_snow_coverage, forest_snow_sample_uv, forest_snow_diagnostic_colour}
 #import frame::interior_rain_coverage
@@ -31,6 +31,11 @@ override a2c: f32 = 0.0;
 // REN-OBJ-001: 1 = vegetation cutouts also sample GTAO + the interior-sky volume (the pre-2026-09-02
 // behaviour, WGR_FOLIAGE_SCREEN_AO=1); 0 = they take only their canopy term. See shade().
 override foliage_screen_ao: f32 = 0.0;
+// PERF-FAR-CROWN: distance (m) past which leaf cards take the 8-tap budget shadow filter, and
+// past which the 3x3 tent (shadow::shadow_strength_lod), 40 / 120 m. Budget 0 = off (WGR_FAR_CROWN_SHADOW=0);
+// WGR_FAR_CROWN_SHADOW=<budget>,<tent> moves them. Supplied by BOTH pipeline families.
+override far_crown_shadow_budget: f32 = 40.0;
+override far_crown_shadow_tent: f32 = 120.0;
 override count_fragments: f32 = 0.0; // REN-OBJ-003 object fragment census, see census()
 // 1 = the depth+normal PREPASS fragment applies the colour pass' FULL discard set, so the depth
 // it lays down covers exactly the pixels fs_gpu will shade. 0 restores the pre-fix behaviour
@@ -51,6 +56,27 @@ override emissive_night: f32 = 0.0;
 // gbuffer.wgsl mip_alpha_boost: without it Arma 2 canopies dissolve to speckle past ~15 m
 // while their shadows stay full (owner: "leaves only render when one comes extremely close").
 override cutout_mip_alpha: f32 = 0.0;
+// RFG-185: how far a native crown's card normals go onto the FarLOD radial field at distance
+// (0 = authored normals at every distance, the pre-185 look; a pipeline override, default 1).
+override far_lod_normal_blend: f32 = 1.0;
+// RFG-189: the sun a native crown's shadowed leaf receives through the leaves in front of it.
+// A green leaf transmits ~10-20% and a crown point sees through one to a few of them, diffusely;
+// 0.3 was a start value against the Workbench backlit pose (roadVillageSun), set while the native
+// sky was ~3% of the sun. With it lifted to half (RFG-196) the 0.3 double-counted the fill: the
+// backlit forest (forestOwner) read +1.6 EV over Reforger; 0.1 measured +1.2, 0 +1.0, and 0.1 with
+// the albedo crown AO below +0.9 (treeNear +0.41). WGR_LEAF_TRANSMISSION overrides.
+override native_leaf_transmission: f32 = 0.1;
+// RFG-197: a native crown's occlusion darkens its AMBIENT only, as Reforger's does (Workbench,
+// MatPBRTreeCrown Geometry/Ellipsoid AO: "affects ambient only", reforger-workbench-measurements).
+// Applied to the albedo it also dimmed every sunlit leaf tip; with the native sky lifted to half
+// the sun (RFG-196) that flattened whole crowns. 0 = the old albedo multiply (WGR_CROWN_AO_AMBIENT=0).
+// MEASURED OFF BY DEFAULT: ambient-only made forestOwner +1.60 EV vs +0.91 on the albedo (same
+// transmission), treeNear +0.70 vs +0.41 -- our baked/volume occlusion is weaker than Reforger's,
+// and on the albedo it stands in for the crown self-shadowing we do not yet render.
+// WGR_CROWN_AO_AMBIENT=1 selects ambient-only.
+override crown_ao_ambient: f32 = 0.0;
+const FAR_LOD_NORMAL_NEAR: f32 = 20.0;
+const FAR_LOD_NORMAL_FAR: f32 = 80.0;
 
 // InstanceGpu / RecordGpu / SectionMaterialGpu (cull.rs). conform0/1/2 is the terrain-conform
 // plane (WgrDraw3D::conform* parity); conform2.z = mode (0 rigid, 1 ForestPlain plane, 2
@@ -108,7 +134,8 @@ struct SectionMaterial {
     // decoded tangent-space XY, renormalised after. 1.0 = no-op default. Trailing
     // scalar with explicit pads so the array stride stays 16 on both sides (272).
     normal_power: f32,
-    _pad_np0: u32,
+    // RFG-181: Enfusion NormalsToCamera (bit 15 on, 0-14 distance dm, 16-31 height dm i16).
+    far_normals: u32,
     _pad_np1: u32,
     _pad_np2: u32,
     // Crown self-occlusion volume (xyz = trunk-axis centre in model space,
@@ -192,6 +219,18 @@ fn tint_albedo(c: vec3<f32>, k: vec3<f32>) -> vec3<f32> {
         return select(hi, lo, lin <= vec3<f32>(0.0031308));
     }
     return c * k;
+}
+
+// RFG-118: GlobalMCRMode. Overlay: the map's dark half darkens with OverlayBlackPower and its
+// light half lightens with OverlayWhitePower (0.5 neutral) -- the same blend the linear preview
+// (native_pbr_global_overlay) uses, here on encoded colour. Multiply: a straight product.
+fn global_mcr_apply(base: vec3<f32>, mcr: vec3<f32>, powers: vec2<f32>, multiply: bool) -> vec3<f32> {
+    if (multiply) { return base * mcr; }
+    let strength = select(vec3<f32>(powers.y), vec3<f32>(powers.x), mcr < vec3<f32>(0.5));
+    let q = clamp(vec3<f32>(0.5) + (mcr - vec3<f32>(0.5)) * strength, vec3<f32>(0.0), vec3<f32>(1.0));
+    let low = 2.0 * base * q;
+    let high = vec3<f32>(1.0) - 2.0 * (vec3<f32>(1.0) - base) * (vec3<f32>(1.0) - q);
+    return select(low, high, q > vec3<f32>(0.5));
 }
 
 #ifdef NATIVE_PBR_PREVIEW
@@ -733,7 +772,7 @@ fn vs_gpu(
         }
         let leaf = select(select(0.0, 1.0, section_materials[rec.section].alpha_ref > 0.0),
                           -1.0, (inst.flags & INST_COHERENT_TREE_WIND) != 0u);
-        world_pos = world_pos + veg_sway_offset(pos.y, phase_xz, leaf);
+        world_pos = world_pos + veg_sway_offset(veg_sway_height(pos.y, (inst.flags & INST_CANOPY_BUSH) != 0u), phase_xz, leaf);
     }
     // Spherical / canopy normals (docs/foliage-translucency-plan.md Stage 3): bend a leaf's normal
     // toward a radial "crown" normal from the object centre, so the low-poly canopy shades as a
@@ -783,6 +822,31 @@ fn vs_gpu(
             }
         }
     }
+    // RFG-181: Enfusion `NormalsToCamera` -- the far MLOD cross-billboards shade with normals
+    // facing the viewer (RV's TreeAdvModNormals), radiating from a point FarLODDistanceOffset
+    // metres behind the crown centre and FarLODHeightOffset metres up. Their authored normals
+    // are the cards' own planes, so half of every billboard faced away from the sun and the
+    // far forests drew near-black. world_pos is camera-relative: the camera is the origin.
+    // RFG-185: EVERY crown names those offsets (class default 10 m / 0 m), not only the
+    // billboards -- the "FarLOD" look. Past ~20 m a crown's card normals ease onto the same
+    // radial field, so a mid-distance canopy shades as a rounded volume instead of a heap of
+    // flat facets (forestHill against Workbench). The ramp is NOT measured (FAR_LOD_NORMAL_*).
+    let far_normals = section_materials[rec.section].far_normals;
+    if ((far_normals & 0x2000u) != 0u && (inst.flags & INST_CANOPY_FOREST) == 0u) {
+        let centre = inst.center.xyz - frame.cam_pos.xyz;
+        let centre_dist = length(centre);
+        let away = centre / max(centre_dist, 1e-3);
+        let dist = f32(far_normals & 0x1FFFu) * 0.1;
+        let height = f32(bitcast<i32>(far_normals << 6u) >> 22u) * 0.1;
+        let origin = centre + away * dist + vec3<f32>(0.0, height, 0.0);
+        let d = world_pos - origin;
+        let dl = length(d);
+        if (dl > 1e-3) {
+            var w = smoothstep(FAR_LOD_NORMAL_NEAR, FAR_LOD_NORMAL_FAR, centre_dist) * far_lod_normal_blend;
+            if ((far_normals & 0x8000u) != 0u) { w = 1.0; }
+            normal_ws = normalize(mix(normal_ws, d / dl, w));
+        }
+    }
     // Crown self-occlusion (Enfusion `GeometryAO*`): a radial cylinder about the
     // trunk axis in MODEL space -- the runtime form of the baked vertex colours
     // the .xob colour stream carries (alnus crown: openness fit R=0.74 against
@@ -793,7 +857,17 @@ fn vs_gpu(
     // merged forests whose vertices live in patch space, not tree space.
     // Forests keep 1.0 (follow-up with the per-vertex crown table).
     var crown_ao = 1.0;
-    if (canopy != 0u && (canopy & INST_CANOPY_FOREST) == 0u &&
+    // RFG-106: the model's own baked occlusion (xob colour byte 2, carried in UV set 2 with the
+    // -7 sentinel V by the converter). Per vertex, so it is right in a merged forest's patch space
+    // too, where the model-space volume below cannot be evaluated. Intensity from GeometryAO
+    // when the material gives one.
+    if (canopy != 0u && section_materials[rec.section].alpha_ref > 0.0 && uv1.y < -6.5) {
+        // RFG-180: a negative intensity is an authored `GeometryAOIntensity 0` -- no occlusion.
+        let ao_w = section_materials[rec.section].crown_ao_p0.w;
+        if (ao_w >= 0.0) {
+            crown_ao = clamp(mix(1.0 - select(1.0, ao_w, ao_w > 0.0), 1.0, clamp(uv1.x, 0.0, 1.0)), 0.0, 1.0);
+        }
+    } else if (canopy != 0u && (canopy & INST_CANOPY_FOREST) == 0u &&
         section_materials[rec.section].alpha_ref > 0.0) {
         let ao = section_materials[rec.section].crown_ao_p0;
         if (ao.w > 0.0) {
@@ -1000,13 +1074,21 @@ fn native_pbr_ordered_weights(mask: vec3<f32>) -> vec4<f32> {
                      mask.y * remaining.z, mask.z);
 }
 
-fn fs_gpu_body(in: VsOut
-#ifdef NATIVE_PBR_TANGENTS
-    , front: bool
-#endif
-) -> vec4<f32> {
+// RFG-188: the cutout variant is drawn double-sided (cull.rs build_gpu_pipeline, its `None` twin)
+// because Reforger draws a crown's cards from both sides -- culled, half of every crown's cards
+// vanished from any viewpoint and a full lime tree read as bare branches beside Reforger's. Only
+// native crowns (far_normals bit 13) keep their back faces; every other cutout section (OFP and
+// Arma foliage, fences, nets) rejects them here, exactly as the culled pipeline did.
+fn cutout_back_face_rejected(front: bool, section: u32) -> bool {
+    return !front && (section_materials[section].far_normals & 0x2000u) == 0u;
+}
+
+fn fs_gpu_body(in: VsOut, front: bool) -> vec4<f32> {
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
+    if (cutout_back_face_rejected(front, in.section)) {
+        discard;
+    }
     census(0u); // every rasterised colour fragment; word 1 (cutout survivors) is counted after the alpha test
     // AST-012A: the raw UV derivatives, taken HERE because derivative builtins need uniform
     // control flow and everything below this point is conditional. The layer transform is
@@ -1058,10 +1140,34 @@ fn fs_gpu_body(in: VsOut
 #ifdef NATIVE_PBR_PREVIEW
     }
 #endif
-    // Crown self-occlusion: the vertex shader's GeometryAO factor, applied to the
-    // albedo like a baked vertex colour (which is what it replaces). 1.0 for every
-    // section whose material names no volume, so this is a no-op everywhere else.
-    base = vec4<f32>(base.rgb * retained_crown_ao(in), base.a);
+    // Enfusion vegetation colorization (EngineWgpu::ResolveMaterialCrownAo): the albedo lerps
+    // toward the world colorize colour by crown_ao_p1.z, ramping in from the camera over the
+    // authored distance (alpha byte, metres). Lerp 0 = every non-crown material, a no-op.
+    if (sm.crown_ao_p1.z > 0.0) {
+        let colorize = unpack4x8unorm(bitcast<u32>(sm.crown_ao_p1.w));
+        let ramp_m = colorize.a * 255.0;
+        let ramp = select(1.0, clamp(length(in.world_pos) / max(ramp_m, 1.0), 0.0, 1.0), ramp_m > 0.0);
+        // RFG-183: lane z = lerp + 2 * at-camera byte (EngineWgpu::ResolveMaterialCrownAo). The
+        // amount runs from ColorizeMapLerpAtCamera at the eye to ColorizeMapLerp at the distance.
+        let packed_lerp = sm.crown_ao_p1.z;
+        let at_byte = floor(packed_lerp * 0.5);
+        let far_lerp = packed_lerp - 2.0 * at_byte;
+        let amount = mix(at_byte / 255.0, far_lerp, ramp);
+        var colorize_linear = false;
+#ifdef NATIVE_PBR_PREVIEW
+        colorize_linear = bcr_linear;
+#endif
+        let target_colour = select(colorize.rgb, srgb_to_linear(colorize.rgb), colorize_linear);
+        base = vec4<f32>(mix(base.rgb, target_colour, amount), base.a);
+    }
+    // Crown self-occlusion (the model's baked occlusion, else the GeometryAO volume), applied to
+    // the albedo like the baked vertex colour it is -- and AFTER the colorize lerp. Before it, a
+    // ColorizeMapLerp of 0.8 replaced 80% of the occluded albedo with the flat world colour, so
+    // the crowns' authored dark cores never reached the picture (RFG-106). 1.0 for every section
+    // without either, a no-op everywhere else.
+    let crown_occ = retained_crown_ao(in);
+    let crown_occ_ambient = crown_ao_ambient > 0.5 && (sm.far_normals & 0x2000u) != 0u;
+    base = vec4<f32>(base.rgb * select(crown_occ, 1.0, crown_occ_ambient), base.a);
     // The final per-layer mask weights, hoisted out of the block below so the NORMAL blend
     // (MAT-048, further down) uses exactly the weights the colour blend used — one mask
     // sample, one set of weights, colours and normals agreeing per fragment by construction.
@@ -1155,9 +1261,27 @@ fn fs_gpu_body(in: VsOut
 #endif
         base = vec4<f32>(base.rgb * layer_base_weight + blended, base.a);
     }
+    // RFG-118: Enfusion's GlobalMCRMap in production (global_overlay.w = 3 + multiply + 2*uv1).
+    // The object's own baked colour detail over the composed layers -- without it a granite
+    // rock is only its tiled grey layers. Encoded space, where the layers were mixed.
+    if (sm.global_overlay.w > 2.5) {
+        let code = u32(sm.global_overlay.w - 3.0 + 0.5);
+        let mcr_uv = select(in.uv, in.uv1, (code & 2u) != 0u);
+        let mcr = textureSampleBias(textures[bitcast<u32>(sm.global_overlay.x)], samplers[sm.sampler_idx], mcr_uv,
+                                    frame.renscale.x).rgb;
+        var encoded = base.rgb;
+#ifdef NATIVE_PBR_PREVIEW
+        if (bcr_linear) { encoded = native_pbr_encode_albedo(base.rgb); }
+#endif
+        var applied = global_mcr_apply(encoded, mcr, sm.global_overlay.yz, (code & 1u) != 0u);
+#ifdef NATIVE_PBR_PREVIEW
+        if (bcr_linear) { applied = srgb_to_linear(applied); }
+#endif
+        base = vec4<f32>(applied, base.a);
+    }
 #ifdef NATIVE_PBR_PREVIEW
 #ifdef NATIVE_PBR_GLOBAL_OVERLAY
-    if (bcr_linear && sm.global_overlay.w > 0.5 && sm.native_pbr_scales.w > 1.5) {
+    if (bcr_linear && sm.global_overlay.w > 0.5 && sm.global_overlay.w < 1.5 && sm.native_pbr_scales.w > 1.5) {
         let overlay_slot = bitcast<u32>(sm.global_overlay.x);
         let overlay = textureSampleBias(textures[overlay_slot], samplers[sm.sampler_idx], in.uv1, frame.renscale.x);
         let composed = native_pbr_global_overlay(vec4<f32>(base.rgb, pbr_roughness), overlay, sm.global_overlay.yz);
@@ -1175,6 +1299,7 @@ fn fs_gpu_body(in: VsOut
     if (sm.alpha_ref > 0.0) {
         let dims0 = vec2<f32>(textureDimensions(textures[sm.texture_slot]));
         cut_a = mip_alpha_boost(base.a, in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw, dims0, cutout_mip_alpha);
+        cut_a = fade_faces_alpha(cut_a, sm.crown_ao_p1.x, in.world_pos, dwx, dwy);
     }
     var out_a = base.a;
     if (a2c > 0.5) {
@@ -1202,6 +1327,14 @@ fn fs_gpu_body(in: VsOut
     m.wet_cloth = 0.0;
     m.native_cavity = 1.0;
     m.native_ao = 1.0;
+    // RFG-185: a native crown's back-light follows its SSSBackScattering (bits 26-31 of the crown
+    // word, x63; the class default 0.15 is the reference 1.0). Far atlases author 0.05.
+    m.foliage_trans = 1.0;
+    m.leaf_transmission = 0.0;
+    if ((sm.far_normals & 0x2000u) != 0u) {
+        m.foliage_trans = clamp(f32(sm.far_normals >> 26u) / 63.0 / 0.15, 0.0, 3.0);
+        m.leaf_transmission = native_leaf_transmission;
+    }
     // Imported OFP/A3 materials use the legacy emissive lane for a mixture of
     // real signal lamps and fixed-function brightness compensation. The latter
     // was baked into plant materials to survive OFP's old lighting model; in
@@ -1240,6 +1373,29 @@ fn fs_gpu_body(in: VsOut
     // GlossToRoughnessUnvalidated out of the translation path; the map is bound and the
     // channel is there when that question is answered.
     m.spec_mask = 1.0;
+#ifdef NATIVE_LEAF_GLOSS
+    // RFG-156: native leaf cards (MatPBRTreeCrown) translate with specular 0 / power 0, so a
+    // Reforger crown rendered fully matte -- no sun glints, no sky sheen. Their BCR alpha is not
+    // usable as roughness here (the cutout consumes it), so give native vegetation cutouts the
+    // class default dielectric F0 0.04 and one fixed roughness through the same energy-
+    // normalised Blinn lobe as the PBR preview. Sections with authored specular are untouched.
+    if (retained_is_veg(in) != 0u && sm.alpha_ref > 0.0 && (sm.flags & SECTION_NORMAL_RG) != 0u
+        && m.spec_power <= 0.0) {
+#ifdef NATIVE_LEAF_GLOSS_SMOOTH
+        let leaf_rough = 0.3;
+#else
+#ifdef NATIVE_LEAF_GLOSS_ROUGH
+        let leaf_rough = 0.6;
+#else
+        let leaf_rough = 0.45;
+#endif
+#endif
+        m.spec_power = clamp(2.0 / (leaf_rough * leaf_rough) - 2.0, 1.0, 256.0);
+        let leaf_lobe = (m.spec_power + 8.0) / (8.0 * 3.14159265);
+        m.specular = frame.sun_diffuse.rgb * 0.04 * leaf_lobe;
+        m.local_specular = vec3<f32>(0.04 * leaf_lobe);
+    }
+#endif
     // The debug view exposes the authored map without another default-path fetch. Red is
     // SMDI G (specular level), green is SMDI B (gloss), blue marks that a map was present.
     // Materials without SMDI show their constant specular level/power and blue = 0.
@@ -1504,9 +1660,15 @@ fn fs_gpu_body(in: VsOut
         pbr_metal = scaled.y;
         m.native_ao = scaled.z;
         m.spec_power = clamp(2.0 / (roughness * roughness) - 2.0, 1.0, 256.0);
-        let reflected_f0 = mix(vec3<f32>(0.22), base.rgb, pbr_metal);
-        m.specular = frame.sun_diffuse.rgb * reflected_f0;
-        m.local_specular = reflected_f0;
+        // A dielectric reflects 4% at normal incidence, a metal its base colour. The highlight is the
+        // ENERGY-NORMALISED Blinn-Phong lobe, (n + 8) / (8 pi): shade() applies a bare N.H^n, and
+        // with the old F0 of 0.22 a rough surface (n near 1) took a fifth of the sunlight as a flat
+        // sheen over its whole face -- Everon's shingle roofs came out cream. Normalised, a rough
+        // surface keeps a faint broad sheen and a smooth one a bright tight highlight.
+        let reflected_f0 = mix(vec3<f32>(0.04), base.rgb, pbr_metal);
+        let lobe = (m.spec_power + 8.0) / (8.0 * 3.14159265);
+        m.specular = frame.sun_diffuse.rgb * reflected_f0 * lobe;
+        m.local_specular = reflected_f0 * lobe;
         m.spec_mask = 1.0;
         pbr_diffuse_scale = pow(1.0 - pbr_metal, 0.4545);
     }
@@ -1550,6 +1712,7 @@ fn fs_gpu_body(in: VsOut
     if (dbg_view == MATDBG_VIEW_LIGHTING) {
         base = vec4<f32>(1.0, 1.0, 1.0, base.a);
     }
+    if (crown_occ_ambient) { m.native_ao = m.native_ao * crown_occ; }
     let rgb = shade(
         // `geometric_normal` rides along beside the shading normal so the directional sky
         // ambient can recover how far the normal map turned this pixel; see shade()'s
@@ -1572,6 +1735,7 @@ fn fs_gpu_body(in: VsOut
         retained_tree_snow_cover(in),
         retained_ground_receiver(in),
         frame.snow_surface.x,
+        vec2<f32>(far_crown_shadow_budget, far_crown_shadow_tent),
     );
     // REN-ATM-001: read back what shade()'s apply_fog actually did to THIS fragment and bin it by
     // shader family. Placed immediately after shade() so nothing between the fog and the count can
@@ -1633,15 +1797,9 @@ fn prepass_clipped(world_pos: vec3<f32>) -> bool {
 // applies the SAME discard as fs_gpu so prepass coverage matches the colour pass.
 @fragment
 fn fs_gpu(in: VsOut
-#ifdef NATIVE_PBR_TANGENTS
     , @builtin(front_facing) front: bool
-#endif
 ) -> @location(0) vec4<f32> {
-    return fs_gpu_body(in
-#ifdef NATIVE_PBR_TANGENTS
-        , front
-#endif
-    );
+    return fs_gpu_body(in, front);
 }
 
 #ifdef EARLY_DEPTH
@@ -1655,22 +1813,19 @@ fn fs_gpu(in: VsOut
 @fragment
 @early_depth_test(force)
 fn fs_gpu_early(in: VsOut
-#ifdef NATIVE_PBR_TANGENTS
     , @builtin(front_facing) front: bool
-#endif
 ) -> @location(0) vec4<f32> {
-    return fs_gpu_body(in
-#ifdef NATIVE_PBR_TANGENTS
-        , front
-#endif
-    );
+    return fs_gpu_body(in, front);
 }
 #endif
 
 @fragment
-fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
+fn fs_gpu_prepass(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec2<f32> {
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
+    if (cutout_back_face_rejected(front, in.section)) {
+        discard;
+    }
     let surface_n = surface_normal(in.normal, in.world_pos, dwx, dwy);
     let snow_cover = object_snow_coverage(in.world_pos, surface_n, retained_snow_receiver(in) && linear > 0.5, retained_snow_exposure(in));
     let snow_surface_n = object_snow_normal(in.world_pos, surface_n, surface_n, dwx, dwy, snow_cover);
@@ -1684,8 +1839,10 @@ fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
         // Same mip-coverage lift as fs_gpu, or the prepass keeps depth for texels the colour
         // pass discards (and vice versa) -- the exact mismatch prepass_match exists to prevent.
         let dims0 = vec2<f32>(textureDimensions(textures[sm.texture_slot]));
-        let a = mip_alpha_boost(textureSampleBias(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv, frame.renscale.x).a,
-                                base_uv, dims0, cutout_mip_alpha);
+        let a = fade_faces_alpha(
+            mip_alpha_boost(textureSampleBias(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv, frame.renscale.x).a,
+                            base_uv, dims0, cutout_mip_alpha),
+            sm.crown_ao_p1.x, in.world_pos, dwx, dwy);
         if (a < sm.alpha_ref) {
             discard;
         }
@@ -1694,6 +1851,24 @@ fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
     // direction gives view space (matches shader3d::fs_prepass).
     let n_view = (frame.view * vec4<f32>(snow_surface_n, 0.0)).xyz;
     return oct_encode(normalize(n_view));
+}
+
+// RFG-144: Enfusion `FadeFaces` (section crown_ao_p1.x, 0 = off). A leaf card turned edge-on to
+// the viewer fades out below this |N.V| -- without it the edge-on cards drew as long smeared
+// streaks of stretched leaf texture through every crown. The GEOMETRIC face normal from the
+// position derivatives, not the vertex normal: crown cards carry bent normals pointing out of the
+// crown, which say nothing about which way the card faces.
+fn fade_faces_alpha(a: f32, fade: f32, world_pos: vec3<f32>, dwx: vec3<f32>, dwy: vec3<f32>) -> f32 {
+    if (fade <= 0.0) {
+        return a;
+    }
+    let n = cross(dwx, dwy);
+    let len = length(n);
+    if (len <= 1e-12) {
+        return a;
+    }
+    let ndv = abs(dot(n / len, normalize(-world_pos)));
+    return a * smoothstep(0.0, fade, ndv);
 }
 
 // Actual retained material alpha and authored wind; no shading/target sampling.
@@ -1715,9 +1890,12 @@ fn fs_gpu_weather_depth(in: VsOut) {
 // terrain fills the rest (no edge halo). The whole set goes through this pipeline, hence the
 // per-fragment opaque/cutout split rather than a pipeline override.
 @fragment
-fn fs_gpu_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
+fn fs_gpu_prepass_a2c(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
+    if (cutout_back_face_rejected(front, in.section)) {
+        discard;
+    }
     let surface_n = surface_normal(in.normal, in.world_pos, dwx, dwy);
     let snow_cover = object_snow_coverage(in.world_pos, surface_n, retained_snow_receiver(in) && linear > 0.5, retained_snow_exposure(in));
     let snow_surface_n = object_snow_normal(in.world_pos, surface_n, surface_n, dwx, dwy, snow_cover);
@@ -1731,8 +1909,10 @@ fn fs_gpu_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
     if (sm.alpha_ref > 0.0) {
         let base_uv = prepass_base_uv(in.uv, sm.layer_uv[0]);
         let dims0 = vec2<f32>(textureDimensions(textures[sm.texture_slot]));
-        let alpha = mip_alpha_boost(textureSampleBias(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv, frame.renscale.x).a,
-                                    base_uv, dims0, cutout_mip_alpha);
+        let alpha = fade_faces_alpha(
+            mip_alpha_boost(textureSampleBias(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv, frame.renscale.x).a,
+                            base_uv, dims0, cutout_mip_alpha),
+            sm.crown_ao_p1.x, in.world_pos, dwx, dwy);
         cov = a2c_coverage(alpha, sm.alpha_ref);
         if (cov <= 0.0) {
             discard;
@@ -1782,7 +1962,12 @@ fn veg_sway_prev_at(model_y: f32, phase_xz: vec2<f32>, leaf: f32) -> vec3<f32> {
     let hn = clamp(max(model_y, 0.0) / 12.0, 0.0, 3.0);
     let coherent_hs = model_y / 12.0 * (1.6 / max(velp.sway_prev2.z, 0.25));
     let hs = select(pow(hn, velp.sway_prev2.z), coherent_hs, leaf < 0.0);
-    let ph = dot(phase_xz, vec2<f32>(0.37, 0.29));
+    // RFG-136: the coherent mode (leaf < 0, every native tree) snaps its phase to a 2 m cell
+    // (frame.wgsl veg_sway_phase). This copy used the raw phase, so the motion vectors described
+    // a different sway than the one drawn and DLSS smeared every native crown.
+    let cell = vec2<f32>(2.0, 2.0);
+    let ph_xz = select(phase_xz, floor(phase_xz / cell) * cell + cell * 0.5, leaf < 0.0);
+    let ph = dot(ph_xz, vec2<f32>(0.37, 0.29));
     let gust = 1.0 + 0.65 * velp.sway_prev2.x;
     let s = sin(t * 0.9 + ph) * 0.65 + sin(t * 1.63 + ph * 1.7) * 0.35;
     var bend = dir * (amp * hs * s * gust);
@@ -1857,8 +2042,9 @@ fn vs_gpu_velocity(
     }
     let leaf = select(select(0.0, 1.0, section_materials[rec.section].alpha_ref > 0.0),
                       -1.0, (inst.flags & INST_COHERENT_TREE_WIND) != 0u);
-    let s_cur = veg_sway_offset(pos.y, phase_xz, leaf);
-    let s_prev = veg_sway_prev_at(pos.y, phase_xz, leaf);
+    let sway_y = veg_sway_height(pos.y, (inst.flags & INST_CANOPY_BUSH) != 0u);
+    let s_cur = veg_sway_offset(sway_y, phase_xz, leaf);
+    let s_prev = veg_sway_prev_at(sway_y, phase_xz, leaf);
     let cur_pos = vec4<f32>(world_pos + s_cur, 1.0);
     let prev_pos = vec4<f32>(world_pos + velp.cam_delta.xyz + s_prev, 1.0);
     // frame.proj/view carry the jitter; reverse_z is the shared helper.

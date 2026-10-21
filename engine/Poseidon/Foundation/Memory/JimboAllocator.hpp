@@ -9,6 +9,7 @@
 #include <Poseidon/Foundation/Memory/MemoryBudget.hpp>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <mimalloc.h>
 
 namespace Poseidon::Foundation
@@ -21,7 +22,18 @@ class JimboAllocator : public MemFunctions
 {
 public:
     JimboAllocator();
+    // batchedAccounting: the process-global instance. Each thread keeps its byte/block
+    // delta locally and folds it into the shared budget past +-kAccountFlushBytes, instead
+    // of four to six atomic read-modify-writes on one shared cache line per new/delete
+    // (PERF, 2026-10-14: ~12% of the main thread during a native Reforger load, with two
+    // streaming workers allocating beside it). Used()/Peak() are then exact to within
+    // kAccountFlushBytes per thread -- a 4-8 GB backstop does not notice -- and a thread's
+    // unflushed remainder is dropped when it exits. Default-constructed instances (the
+    // tests' local ones) keep the exact per-allocation accounting.
+    explicit JimboAllocator(bool batchedAccounting);
     ~JimboAllocator();
+
+    static constexpr int64_t kAccountFlushBytes = 64 * 1024;
 
     void* New(size_t size) override;
     void Delete(void* mem) override;
@@ -59,8 +71,13 @@ public:
     size_t FrameMaintenance();
 
 private:
+    void Account(int64_t bytes, int64_t blocks);
+    int64_t CallerPendingBytes() const;
+    size_t UsedIncludingCaller() const;
+
     mi_heap_t* _heap;
-    std::atomic<size_t> _allocCount;
+    bool _batched = false;
+    std::atomic<int64_t> _allocCount;
     std::atomic<bool> _outOfMemory;
     ProcessMemoryBudget _budget;
     MemoryFreeOnDemandList _freeOnDemand;

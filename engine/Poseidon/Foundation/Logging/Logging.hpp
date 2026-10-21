@@ -8,6 +8,10 @@
 namespace Poseidon::Foundation
 {
 /// Logging subsystem - owned by Application
+// PERF-LOG-FILE-QUEUE: wait (bounded) until the log file's writer thread has written every
+// queued line -- for paths that end the process (the crash handler).
+void DrainLogFileQueue(int timeoutMs);
+
 class LoggingSystem
 {
 public:
@@ -103,6 +107,10 @@ public:
 
 private:
 	std::shared_ptr<spdlog::logger> m_logger;
+	// The text console sink (null in JSONL / test mode). PERF-CONSOLE-LEVEL: limited to warnings
+	// once a log file holds everything (QuietConsoleForFile).
+	std::shared_ptr<spdlog::sinks::sink> m_consoleSink;
+	void QuietConsoleForFile();
 	std::shared_ptr<spdlog::logger> m_categoryLoggers[static_cast<int>(LogCategory::_Count)];
 	bool m_initialized;
 	bool m_jsonlMode;

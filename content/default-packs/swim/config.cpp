@@ -77,11 +77,38 @@ class CfgMovesMC
 			Die="SwimDeadF";
 			upDegree="manposstand";
 		};
+		// under water (W4, diving): the underwater stroke forward, holding still otherwise. The engine enters it with
+		// SwimDive and leaves it with SwimSurface (SoldierOldSwim.cpp); Man::IsSwimMove counts this map as swimming
+		class SwimUnderActions: NoActions
+		{
+			Stop="SwimUnderIdle";
+			StopRelaxed="SwimUnderIdle";
+			TurnL="SwimUnderIdle";
+			TurnR="SwimUnderIdle";
+			TurnLRelaxed="SwimUnderIdle";
+			TurnRRelaxed="SwimUnderIdle";
+			WalkF="SwimUnder";
+			SlowF="SwimUnder";
+			FastF="SwimUnder";
+			Default="SwimUnderIdle";
+			Die="SwimDeadF";
+			upDegree="manposstand";
+			turnSpeed=1.0;
+			limitFast=1.2;
+		};
 		// falling (the engine holds it while the man drops; killed in the air he dies as in combat)
 		class FallActions: NoActions
 		{
 			Stop="Fall";
 			Default="Fall";
+			Die="CombatDying";
+			upDegree="manposstand";
+		};
+		// a jump in the air (SoldierOldJump.cpp): the engine holds Jump, then JumpAir, until he lands
+		class JumpActions: NoActions
+		{
+			Stop="JumpAir";
+			Default="JumpAir";
 			Die="CombatDying";
 			upDegree="manposstand";
 		};
@@ -101,12 +128,12 @@ class CfgMovesMC
 	class DefaultDie;
 	class States
 	{
-		// treading water (2.4 s)
+		// treading water (3.3 s: the ActionForge/Quaternius treading cycle at its own pace)
 		class Swim: StandBase
 		{
 			actions="SwimActions";
 			file="\swim\tread.rtm";
-			speed=-2.38;
+			speed=-3.333;
 			looped=1;
 			soundEnabled=0;
 			duty=-0.2;
@@ -184,7 +211,7 @@ class CfgMovesMC
 			relSpeedMax=1.1;
 			interpolateTo[]={"SwimStop",0.05,"SwimSlowF",0.1,"SwimFastF",0.1,"SwimLF",0.1,"SwimRF",0.1,"SwimDeadF",0.1};
 		};
-		// same stroke, slower (walk speed) and faster (sprint)
+		// the same stroke slower (walk speed); the sprint is the front crawl (heads-up, both arms in turn)
 		class SwimSlowF: SwimF
 		{
 			speed=-2.4;
@@ -195,6 +222,7 @@ class CfgMovesMC
 		};
 		class SwimFastF: SwimF
 		{
+			file="\swim\swimfast.rtm";
 			speed=-1.1;
 			duty=0.6;
 			relSpeedMin=0.8;
@@ -244,6 +272,49 @@ class CfgMovesMC
 			interpolateTo[]={"SwimDead",0.1};
 			connectTo[]={"Swim",0.05,"SwimB",0.05,"SwimL",0.05,"SwimR",0.05,"SwimLB",0.05,"SwimRB",0.05,"SwimTurnL",0.05,"SwimTurnR",0.05,"SwimStart",0.05};
 		};
+		// diving (W4; made in Blender, scripts/swim/dive_moves.py). The engine blends to SwimDive on the player's
+		// move-down key and to SwimSurface at the surface (BlendToMove); no swim state leads to them by itself.
+		// surface dive from treading: lean onto the water, pike at the hips, the legs up overhead, level into the glide (1.6 s)
+		class SwimDive: Swim
+		{
+			actions="SwimUnderActions";
+			file="\swim\swimdive.rtm";
+			speed=-1.6;
+			looped=0;
+			duty=0.3;
+			interpolateTo[]={"SwimDeadF",0.1};
+			connectTo[]={"SwimUnder",0.05,"SwimUnderIdle",0.05,"SwimSurface",0.1};
+		};
+		// the underwater breaststroke: long pull to the thighs, glide, frog kick (2.2 s, 1.6 m a stroke)
+		class SwimUnder: Swim
+		{
+			actions="SwimUnderActions";
+			file="\swim\swimunder.rtm";
+			speed=-2.2;
+			duty=0.3;
+			relSpeedMin=0.7;
+			relSpeedMax=1.1;
+			interpolateTo[]={"SwimUnderIdle",0.2,"SwimSurface",0.1,"SwimDeadF",0.1};
+		};
+		// holding still under water: flat, sculling, an easy kick (2.4 s)
+		class SwimUnderIdle: Swim
+		{
+			actions="SwimUnderActions";
+			file="\swim\swimunderidle.rtm";
+			speed=-2.4;
+			duty=0.0;
+			interpolateTo[]={"SwimUnder",0.2,"SwimSurface",0.1,"SwimDeadF",0.1};
+		};
+		// up from the glide into treading: head and chest lift, a pull down and a kick (1.3 s)
+		class SwimSurface: Swim
+		{
+			file="\swim\swimsurface.rtm";
+			speed=-1.3;
+			looped=0;
+			duty=0.3;
+			interpolateTo[]={"SwimDead",0.1};
+			connectTo[]={"Swim",0.05,"SwimStart",0.05,"SwimB",0.05,"SwimL",0.05,"SwimR",0.05,"SwimTurnL",0.05,"SwimTurnR",0.05};
+		};
 		// falling: upright, the rifle held lowered in both hands, legs loose (the engine plays it once a man has
 		// been dropping for a moment, keeps him upright, and leaves it when he lands or reaches the water)
 		class Fall: StandBase
@@ -271,6 +342,34 @@ class CfgMovesMC
 			speed=-1.4;
 			looped=0;
 			interpolationSpeed=6;
+		};
+		// jumping (Space on foot, SoldierOldJump.cpp): the take-off and rise, then the pose in the air until he lands.
+		// Legs from Quaternius' Jump_Start / Jump_Loop (Universal Animation Library, CC0), retargeted onto the MC rig
+		// (io_import_p3d/retarget.py); the trunk, arms and rifle as in Fall
+		class Jump: Fall
+		{
+			actions="JumpActions";
+			file="\swim\jump.rtm";
+			speed=-0.5;
+			looped=0;
+			interpolationSpeed=10;
+		};
+		class JumpAir: Fall
+		{
+			actions="JumpActions";
+			file="\swim\jumpair.rtm";
+			speed=-2.5;
+			looped=1;
+			interpolationSpeed=6;
+		};
+		// a soft touchdown's give at the knees: never played as a move, the engine blends its hips and legs in and out
+		// over whatever he does next (the landing layer, SoldierOldUpperBody.cpp). Quaternius' Jump_Land, CC0.
+		class JumpLand: Fall
+		{
+			actions="FallLandActions";
+			file="\swim\jumpland.rtm";
+			speed=-0.8;
+			looped=0;
 		};
 		// killed while treading water / while swimming: goes limp and floats face down
 		class SwimDead: DefaultDie

@@ -74,6 +74,15 @@ struct DdsPreparationOptions
 };
 DdsPreparationOptions CaptureDdsPreparationOptions();
 
+// RFG-112: whether `enfa|` leaf composites keep their authored mip levels (default on).
+bool AuthoredCompositeMips();
+
+// Whether an `enft|r,g,b|inner` texture is built as a lazy linear-tint VIEW of `inner`
+// (TextureWgpu's loadSource) rather than decoded and tinted as a composite of its own. On
+// that route the DDS factory is asked for `inner`, never for the composite name, so anything
+// preparing sources ahead of the factory must key on `inner` too. One definition, used by both.
+bool LazyBcrTintRoute();
+
 class TextureSourceDDS : public ITextureSource
 {
     friend class TextureSourceDDSLinearTint;
@@ -107,6 +116,9 @@ class TextureSourceDDS : public ITextureSource
     bool PrepareCompositeBc3(size_t reservedBytes, const Bc3EncodingObserver* observer = nullptr);
     // Main-thread one-shot claim. Incompatible dimensions/name leave it unused.
     bool TakeCompositeBc3(const char* sourceName, int width, int height, Bc3MipChain& out);
+    // RFG-112: BC3 from the source's OWN mip levels (each encoded as-is), not mips regenerated
+    // from the top. False unless the levels form an exact halving chain down to 4x4.
+    bool EncodeAuthoredBc3(Bc3MipChain& out) const;
     // Borrow immutable BC7 BCR pixels. The owner MUST retain this source until
     // after the view dies. No I/O, GPU work, cached decoded chain or workers.
     // Declines other formats/materials; the ordinary factory remains fallback.

@@ -23,6 +23,7 @@
 // and it is deliberate — 2048 x 2048 over 12.8 km is 6.25 m a cell, the same figure
 // the converting exporter produces, so the two routes are comparable.
 
+#include <Poseidon/Foundation/Platform/EnvOnce.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp> // RFG-097/099: the nativeStreaming lever
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
@@ -33,6 +34,7 @@
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobConvert.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp> // RFG-097 external loader
+#include <Poseidon/World/Model/ShapeAdapter.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobModel.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODLoader.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODWriter.hpp>
@@ -41,9 +43,18 @@
 #include <Poseidon/Asset/Formats/Enfusion/TerrainMaterials.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainTile.hpp>
 #include <Poseidon/Asset/Formats/Material/EmatSource.hpp>
+#include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Core/ProgressSystem.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
+#include <array>
+#include <atomic>
+#include <optional>
+#include <unordered_set>
+#include <chrono>
+#include <functional>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // RFG-070 `enft|` layer tint
 #include <Poseidon/Graphics/Textures/Image.hpp>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
@@ -58,7 +69,9 @@
 #include <unordered_map>
 #include <iterator>
 #include <filesystem>
+#include <future>
 #include <map>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -303,6 +316,57 @@ struct LayerTint
     float rgb[3] = {0.0f, 0.0f, 0.0f};
 };
 
+//! A mask's R, G and B means at its 64-px mip, or `decoded == false`.
+//!
+//! Memoised per path for the mount's current generation: decoding the mask (the whole
+//! `.edds`, every mip) was most of what a tint costs, and the same material -- so the same
+//! mask -- recurs across hundreds of part models and streamed conversions. The means are
+//! the same numbers either way.
+struct MaskMeans
+{
+    bool decoded = false;
+    double mean[3] = {0.0, 0.0, 0.0};
+};
+
+MaskMeans MaskChannelMeans(const EnfusionMount& mount, const std::string& maskPath)
+{
+    static std::mutex mutex;
+    static std::unordered_map<std::string, MaskMeans> cache;
+    static const EnfusionMount* cacheMount = nullptr;
+    static uint64_t cacheGeneration = 0;
+    const uint64_t generation = mount.Generation();
+    {
+        std::lock_guard lock(mutex);
+        if (cacheMount != &mount || cacheGeneration != generation)
+        {
+            cache.clear();
+            cacheMount = &mount;
+            cacheGeneration = generation;
+        }
+        if (const auto hit = cache.find(maskPath); hit != cache.end())
+            return hit->second;
+    }
+    MaskMeans out;
+    int width = 0, height = 0;
+    std::vector<uint8_t> rgba;
+    if (DecodeEddsRgba(mount, maskPath, 64, width, height, rgba) && !rgba.empty())
+    {
+        const size_t texels = rgba.size() / 4;
+        for (int c = 0; c < 3; ++c)
+        {
+            double sum = 0.0;
+            for (size_t t = 0; t < texels; ++t)
+                sum += rgba[t * 4 + static_cast<size_t>(c)];
+            out.mean[c] = sum / (255.0 * static_cast<double>(texels));
+        }
+        out.decoded = true;
+    }
+    std::lock_guard lock(mutex);
+    if (cacheMount == &mount && cacheGeneration == generation)
+        cache.emplace(maskPath, out);
+    return out;
+}
+
 LayerTint ResolveLayerTint(const EnfusionMount& mount, const Poseidon::Asset::Material::EmatMaterial& material)
 {
     LayerTint out;
@@ -314,20 +378,13 @@ LayerTint ResolveLayerTint(const EnfusionMount& mount, const Poseidon::Asset::Ma
     const std::string maskPath = material.TextureOf("MaskMap");
     if (!maskPath.empty())
     {
-        int width = 0, height = 0;
-        std::vector<uint8_t> rgba;
-        if (DecodeEddsRgba(mount, maskPath, 64, width, height, rgba) && !rgba.empty())
+        if (const MaskMeans means = MaskChannelMeans(mount, maskPath); means.decoded)
         {
-            const size_t texels = rgba.size() / 4;
             double covered = 0.0;
             for (int c = 0; c < 3; ++c)
             {
-                double sum = 0.0;
-                for (size_t t = 0; t < texels; ++t)
-                    sum += rgba[t * 4 + static_cast<size_t>(c)];
-                const double mean = sum / (255.0 * static_cast<double>(texels));
-                weight[c + 2] = static_cast<float>(mean);
-                covered += mean;
+                weight[c + 2] = static_cast<float>(means.mean[c]);
+                covered += means.mean[c];
             }
             weight[1] = static_cast<float>(covered < 1.0 ? 1.0 - covered : 0.0);
             out.maskWeighted = true;
@@ -341,9 +398,8 @@ LayerTint ResolveLayerTint(const EnfusionMount& mount, const Poseidon::Asset::Ma
         const std::string index = std::to_string(layer);
         if (material.TextureOf("BCR_" + index).empty())
             continue;
-        float enabled = 1.0f;
-        material.FloatOf("Enabled_" + index, enabled);
-        if (enabled == 0.0f)
+        // RFG-131: layers 2..4 default OFF (Workbench class default); layer 1 has no switch.
+        if (!Poseidon::Asset::Material::EmatLayerEnabled(material, layer))
             continue;
         float colour[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         if (!material.Vec4Of("Color_" + index, colour))
@@ -376,6 +432,41 @@ LayerTint ResolveLayerTint(const EnfusionMount& mount, const Poseidon::Asset::Ma
     {
         out.maskWeighted = false;
     }
+    // RFG-199: the material's own `Color` and `Diffuse` multiply every layer (class properties of
+    // all PBR materials, default 1). Everon's village window frames are a pale shared wood tile
+    // (`BCR_1` ST_WoodPlain_Mid) under `Color_1 0.286` AND `Diffuse 0.223`
+    // (win_mountain_wood_brown.emat) -- dark brown in Reforger, the bare pale tile here, because
+    // only the per-layer Color_N was read. A material with neither layer tint still takes these.
+    // POSEIDON_EMAT_DIFFUSE=0 leaves both out (the pre-199 tint).
+    static const bool globalFactors = []
+    {
+        const char* v = std::getenv("POSEIDON_EMAT_DIFFUSE");
+        return !(v != nullptr && v[0] == '0');
+    }();
+    if (globalFactors)
+    {
+        float factor[3] = {1.0f, 1.0f, 1.0f};
+        bool any = false;
+        for (const char* key : {"Color", "Diffuse"})
+        {
+            float v[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            if (!material.Vec4Of(key, v))
+                continue;
+            for (int c = 0; c < 3; ++c)
+                factor[c] *= std::max(v[c], 0.0f);
+            any = true;
+        }
+        if (any && (factor[0] != 1.0f || factor[1] != 1.0f || factor[2] != 1.0f))
+        {
+            if (!out.resolved)
+            {
+                out.rgb[0] = out.rgb[1] = out.rgb[2] = 1.0f;
+                out.resolved = true;
+            }
+            for (int c = 0; c < 3; ++c)
+                out.rgb[c] *= factor[c];
+        }
+    }
     return out;
 }
 
@@ -400,6 +491,19 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
         return resolved.waterErase || (resolved.decal && resolved.colour.empty());
     }
 
+    //! RFG-126: `MatPBRDecal` faces are lifted off their wall; POSEIDON_DECAL_LIFT_CM sets it
+    //! (0 = off). Enfusion projects these decals, so their mesh need not lie in front.
+    float DecalLift(const std::string& materialSource) const override
+    {
+        static const float lift = []
+        {
+            const char* env = std::getenv("POSEIDON_DECAL_LIFT_CM");
+            const float cm = env ? static_cast<float>(std::atof(env)) : 2.0f;
+            return std::isfinite(cm) ? std::clamp(cm, 0.0f, 50.0f) * 0.01f : 0.0f;
+        }();
+        return lift > 0.0f && Resolve(materialSource).decal ? lift : 0.0f;
+    }
+
     std::string TexturePath(const std::string& materialSource) const override
     {
         const Resolved& r = Resolve(materialSource);
@@ -409,6 +513,12 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
         // them one image. A face that names only the colour can never be a cutout,
         // and Enfusion keeps the coverage in its own file.
         std::string name = r.opacity.empty() ? r.colour : "enfa|" + r.opacity + "|" + r.colour;
+        if (r.opacity.empty() && r.constantAlpha >= 0.0f && r.colour.find('|') == std::string::npos)
+        {
+            char head[24];
+            std::snprintf(head, sizeof(head), "enfk|%.3f|", r.constantAlpha);
+            name = head + r.colour;
+        }
         // RFG-070: and wrap the layer colour around whichever of the two that was. The
         // tint is OUTERMOST because the texture source strips it first and then reads the
         // rest exactly as it did before -- which is the only reason a tinted cutout is
@@ -444,6 +554,8 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
         //! material instead of one per section.
         bool tinted = false;
         float tint[3] = {0.0f, 0.0f, 0.0f};
+        //! RFG-119: glass whose whole transparency is `AlphaMul` (>= 0 when it applies).
+        float constantAlpha = -1.0f;
     };
 
     const Resolved& Resolve(const std::string& materialSource) const
@@ -459,6 +571,26 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
             out.colour = ColourTextureOf(material, &kind);
             out.opacity = material.TextureOf("OpacityMap");
             out.decal = material.className == "MatPBRDecal";
+            // RFG-119: 33 corpus materials blend (`BlendMode AlphaBlend`) with no OpacityMap --
+            // window panes, scope lenses -- and their only opacity is `AlphaMul` over a BCR whose
+            // alpha is roughness. Named `enfk|<AlphaMul>|<colour>` so the texture is that
+            // constant coverage. Basic + Glass families only: decals, roads and Multi keep theirs.
+            // POSEIDON_ENFUSION_GLASS_ALPHA=0 draws them opaque again.
+            {
+                static const bool glassAlpha = []
+                {
+                    const char* env = std::getenv("POSEIDON_ENFUSION_GLASS_ALPHA");
+                    return !(env && env[0] == '0');
+                }();
+                float alphaMul = 1.0f;
+                const auto* blend = material.Find("BlendMode");
+                if (glassAlpha && out.opacity.empty() &&
+                    (material.className == "MatPBRBasicGlass" || material.className == "MatPBRBasic") && blend &&
+                    !blend->values.empty() && !blend->values[0].isNumber &&
+                    Poseidon::Asset::Material::EmatMaterial::NameMatches(blend->values[0].text, "AlphaBlend") &&
+                    material.FloatOf("AlphaMul", alphaMul) && std::isfinite(alphaMul) && alphaMul < 1.0f)
+                    out.constantAlpha = std::clamp(alphaMul, 0.02f, 1.0f);
+            }
             // RFG-061: the OTHER invisible family, missing here and present in the
             // converting exporter since MAT-050.
             //
@@ -484,9 +616,21 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
                 // can composite one. Drawn as an ordinary face it is a white rectangle
                 // stuck to a wall, so a decal with no albedo of its own is hidden --
                 // absent is closer to right than white.
-                if (!out.decal)
+                //
+                // RFG-125: except a decal that DOES have a shape -- an OpacityMap -- and a flat
+                // `Color` to paint it with. That is a stencil (Graffiti_02: near-black spray
+                // paint, no BCRMap), and its letters are the coverage. Named
+                // `enfa|<coverage>|enfc|r,g,b`. POSEIDON_ENFUSION_PAINT_DECALS=0 hides it again.
+                static const bool paintDecals = []
+                {
+                    const char* env = std::getenv("POSEIDON_ENFUSION_PAINT_DECALS");
+                    return !(env && env[0] == '0');
+                }();
+                const bool stencil = out.decal && paintDecals && !out.opacity.empty();
+                if (!out.decal || stencil)
                     out.colour = ColourConstantOf(material);
-                out.opacity.clear();
+                if (!stencil || out.colour.empty())
+                    out.opacity.clear();
                 if (!out.colour.empty())
                     kind = ColourKind::Flat;
             }
@@ -541,7 +685,8 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
             if (GColourCensus.firstNone.empty())
                 GColourCensus.firstNone = materialSource;
         }
-        if (!out.colour.empty() && !out.opacity.empty())
+        // A flat `enfc|` colour (RFG-125 stencils) is not a file and is shared by many decals.
+        if (!out.colour.empty() && !out.opacity.empty() && out.colour.rfind("enfc|", 0) != 0)
             _byColour.emplace(LowerCopy(out.colour), out.opacity);
         // RFG-038: name the materials that yield no colour texture at all. 71 sections
         // in one village bind nothing, and a section with no texture draws white --
@@ -705,6 +850,9 @@ struct EnfusionTerrain
     TerrainDescriptor descriptor;
     std::vector<uint16_t> heights;
     uint32_t tileEdge = 0;
+    uint32_t tilesX = 0;
+    //! `<dir>/.Data/<name>_` -- the per-tile pages (`_supertexture.edds` and friends) share it
+    std::string tilePrefix;
     size_t tilesFound = 0;
     size_t tilesFailed = 0;
     /// RFG-006: which authored surface covers each square metre, from the tiles' TMAT
@@ -756,6 +904,8 @@ EnfusionTerrain AssembleTerrain(const std::string& addonsDir)
                 !std::all_of(digits.begin(), digits.end(), [](unsigned char c) { return std::isdigit(c) != 0; }))
                 continue;
             tiles[static_cast<uint32_t>(std::stoul(digits))] = path;
+            if (out.tilePrefix.empty())
+                out.tilePrefix = path.substr(0, underscore + 1);
         }
     }
 
@@ -790,15 +940,55 @@ EnfusionTerrain AssembleTerrain(const std::string& addonsDir)
     // The tile edge comes from the tiles themselves: the descriptor does not carry it
     // and it is not constant across the corpus.
     uint32_t tilesX = 0;
-    for (const auto& [index, tilePath] : tiles)
+    // (PERF, 2026-10-14) Archive read + zlib + tile parse run on the task pool, a batch at a
+    // time (bounded memory); everything below stays serial in index order, so the result is
+    // the one the plain loop produced.
+    struct LoadedTile
     {
-        std::vector<uint8_t> tileBytes;
-        if (!mount.Read(tilePath, tileBytes))
+        bool read = false;
+        std::vector<uint8_t> bytes;
+        TerrainTile tile;
+    };
+    const std::vector<std::pair<uint32_t, std::string>> tileList(tiles.begin(), tiles.end());
+    Poseidon::TaskPool* tilePool = Poseidon::GetGlobalTaskPool();
+    constexpr size_t kTileBatch = 256;
+    std::vector<LoadedTile> batch;
+    const auto loadBatch = [&](size_t first)
+    {
+        const size_t count = std::min(kTileBatch, tileList.size() - first);
+        batch.clear();
+        batch.resize(count);
+        const auto loadTile = [&](size_t i)
+        {
+            LoadedTile& loaded = batch[i];
+            loaded.read = mount.Read(tileList[first + i].second, loaded.bytes);
+            if (loaded.read)
+                loaded.tile = ReadTerrainTile(loaded.bytes.data(), loaded.bytes.size());
+        };
+        if (tilePool != nullptr && count > 1)
+            tilePool->ParallelFor(static_cast<uint32_t>(count),
+                                  [&](uint32_t start, uint32_t end)
+                                  {
+                                      for (uint32_t i = start; i < end; ++i)
+                                          loadTile(i);
+                                  });
+        else
+            for (size_t i = 0; i < count; ++i)
+                loadTile(i);
+    };
+    for (size_t tileAt = 0; tileAt < tileList.size(); ++tileAt)
+    {
+        if (tileAt % kTileBatch == 0)
+            loadBatch(tileAt);
+        const uint32_t index = tileList[tileAt].first;
+        const LoadedTile& loaded = batch[tileAt % kTileBatch];
+        const std::vector<uint8_t>& tileBytes = loaded.bytes;
+        if (!loaded.read)
         {
             out.tilesFailed++;
             continue;
         }
-        const TerrainTile tile = ReadTerrainTile(tileBytes.data(), tileBytes.size());
+        const TerrainTile& tile = loaded.tile;
         if (!tile.valid() || tile.samples == 0)
         {
             out.tilesFailed++;
@@ -808,6 +998,7 @@ EnfusionTerrain AssembleTerrain(const std::string& addonsDir)
         {
             out.tileEdge = tile.samples - 1;
             tilesX = (gridW - 1) / out.tileEdge;
+            out.tilesX = tilesX;
             if (out.descriptor.subPerTileEdge > 0)
             {
                 out.materialEdge = tilesX * out.descriptor.subPerTileEdge * Tmat::kMaskEdge;
@@ -909,13 +1100,27 @@ struct PlacementSummary
     size_t meshResolved = 0;
     size_t distinctMeshes = 0;
     size_t terrainRelative = 0;
+    size_t yRuleToRelative = 0; //!< RFG-130: placements the authored RELATIVE_Y flag moved to relative
+    size_t yRuleToAbsolute = 0; //!< ...and to absolute
+    size_t yRuleUnknown = 0;    //!< ...and whose prefab chain declares no Flags (heuristic kept)
+    size_t rivers = 0;          //!< RFG-134: SplineShapeEntity carriers with a RiverEntity
+    size_t lakes = 0;           //!< RFG-163: PolylineShapeEntity carriers with a LakeGeneratorEntity
+    size_t decals = 0;          //!< RFG-194: DecalEntity placements drawn as terrain strips
     // RFG-064, the attachment side. Counted separately from the mesh totals above
     // because "the houses are missing" and "the houses have no doors" are different
     // failures and the placement histogram cannot tell them apart.
     size_t slotPrefabs = 0;    //!< distinct prefabs whose .et chain declared slots
     size_t slotBones = 0;      //!< socket bones that matched a slot rule
     size_t slotUnresolved = 0; //!< of those, bones whose part prefab gave no .xob
+    size_t slotRemapped = 0;   //!< RFG-128: distinct parts re-materialled by their parent's block
     size_t slotBuildings = 0;  //!< PLACEMENTS that carry at least one attachment
+    size_t childPrefabs = 0;   //!< RFG-120: distinct prefabs whose transform children became parts
+    size_t childParts = 0;     //!< RFG-120: those parts, per distinct prefab (furniture, props)
+    size_t doorLeaves = 0;     //!< RFG-157: door leaves found, per distinct building prefab
+    size_t doorMembers = 0;    //!< RFG-157: parts riding on them (glass, handles)
+    size_t doorSkipped = 0;    //!< RFG-157: DoorComponents that do not turn as a whole entity
+    size_t glassPanes = 0;     //!< RFG-158: destructible panes with a broken-phase model (per prefab)
+    size_t glassNoPhase = 0;   //!< RFG-158: destructible panes naming no broken-phase model
     std::string slotFailure;
     std::string firstFailure;
     std::string error;
@@ -934,10 +1139,16 @@ bool LoadResourceDatabases(const std::string& addonsDir, std::unordered_map<std:
             continue;
         if (LowerCopy(it->path().filename().string()) != "resourcedatabase.rdb")
             continue;
-        std::ifstream file(it->path(), std::ios::binary);
+        std::ifstream file(it->path(), std::ios::binary | std::ios::ate);
         if (!file)
             continue;
-        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        // One sized read: the stream-iterator copy this replaces went through the stream a
+        // byte at a time, and Reforger's databases are megabytes.
+        std::vector<uint8_t> bytes(static_cast<size_t>(std::max<std::streamoff>(file.tellg(), 0)));
+        file.seekg(0);
+        if (!bytes.empty() &&
+            !file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size())))
+            bytes.resize(static_cast<size_t>(std::max<std::streamsize>(file.gcount(), 0)));
         const Enf::ResourceDatabase db = Enf::ReadResourceDatabase(bytes.data(), bytes.size());
         // Refused WHOLE rather than partially: a walk that stopped early yields
         // plausible paths for the wrong GUIDs, which is worse than none.
@@ -973,6 +1184,15 @@ struct MeshAttachment
     Vector3 offset;    //!< in the shell's model space
     Matrix3 basis;     //!< part model space -> shell model space
     uint32_t mesh = 0; //!< index into the ATTACHMENT mesh list
+    //! RFG-157: a door leaf (DoorComponent, WholeEntity): its AngleRange, degrees; 0 = no door.
+    float doorAngle = 0.0f;
+    float doorAction[3] = {1.2f, 1.1f, 0.0f}; //!< the door's action point, leaf space
+    float doorRadius = 0.65f;
+    //! RFG-157: index in the set's parts of the door leaf this part rides on (its glass, its
+    //! handle), or -1.
+    int32_t doorLeaf = -1;
+    //! RFG-158: a destructible pane: the attachment mesh of its broken phase, or none.
+    uint32_t glassBroken = 0xffffffffu;
 };
 
 //! Everything one building prefab hangs on itself. Keyed per prefab, not per mesh:
@@ -1031,9 +1251,40 @@ struct ResolvedPlacement
     float pitchDeg = 0.0f;
     float rollDeg = 0.0f;
     bool terrainRelative = false;
+    bool hasFlags = false;   //!< RFG-130 census: the entity carried its own `Flags`
+    uint16_t classIndex = 0; //!< RFG-130 census: index into the census class names
+    //! RFG-114: the prefab says `placement slopelandcontact` and the file stores no tilt: the
+    //! object leans to the terrain at load, as Enfusion does (see SlopeAlignedOrientation).
+    bool slopeAlign = false;
     uint32_t mesh = 0; //!< index into the mesh list
     uint32_t attachSet = kNoAttachSet; //!< RFG-064: index into the attachment sets, or none
 };
+
+//! RFG-130: the Y-rule census (POSEIDON_Y_CENSUS=1). Entity class names, interned.
+std::vector<std::string>& YCensusClasses()
+{
+    static std::vector<std::string> names{"?"};
+    return names;
+}
+
+uint16_t YCensusClassIndex(const std::string& className)
+{
+    static const bool on = []
+    {
+        const char* env = std::getenv("POSEIDON_Y_CENSUS");
+        return env && env[0] == '1';
+    }();
+    if (!on)
+        return 0;
+    auto& names = YCensusClasses();
+    for (size_t i = 0; i < names.size(); ++i)
+        if (names[i] == className)
+            return static_cast<uint16_t>(i);
+    if (names.size() >= 0xFFFF)
+        return 0;
+    names.push_back(className);
+    return static_cast<uint16_t>(names.size() - 1);
+}
 
 //! RFG-027: one road, ready to become a strip of geometry.
 struct ResolvedRoad
@@ -1044,6 +1295,42 @@ struct ResolvedRoad
     float width = 0.0f;                   //!< metres, 0 when the road left it default
     std::string texture;                  //!< colour `.edds`, empty when unresolved
     std::string material;                 //!< the `.emat` the texture came from
+    //! From the road's MatPBRRoad: the coverage map that cuts the strip into its tracks (the
+    //! ground shows between and beside them), the `Color` multiplier over the dark base
+    //! texture, how many side-by-side variants the textures hold (`NumVersions`, U slices) and
+    //! the length tiling (`GlobalMapsUVTransform TilingV`, repeats per width). Empty / 1 / 0
+    //! when the material does not say.
+    std::string opacity;
+    float tint[3] = {1.0f, 1.0f, 1.0f};
+    bool tinted = false;
+    int versions = 1;
+    float tilingV = 0.0f;
+    //! RFG-134: a river ribbon. Its surface follows the spline's own height (plus the
+    //! generator's SplineOffsetUp) instead of being draped, and its width can vary per point.
+    bool river = false;
+    std::vector<float> pointWidths; //!< aligned with `points`; <= 0 = `width`
+    //! RFG-162: the river's `ReverseFlow`, and its MatRiver look for the water renderer: Color
+    //! r, g, b, HalfLightDistance, FlowSpeed, Fresnel, SunPower, SunInfluence, WetFloor,
+    //! WaterVisibility (RFG-190) -- RiverSurface_01's values when the material does not say.
+    bool reverseFlow = false;
+    float riverLook[10] = {0.035f, 0.04f, 0.019f, 30.0f, 0.2f, 0.02f, 1024.0f, 0.025f, 0.3f, 1.0f};
+    //! RFG-163: a pond -- `points` is its shore polygon, `river` is false. Only ever drawn as
+    //! water (never as a ribbon); its level is its lowest shore point.
+    bool lake = false;
+    //! RFG-194: a DecalEntity drawn as a two-point strip on the terrain (TerrainOnly decals):
+    //! lifted `liftM` off the ground so it lies over the road it marks, and it never clears grass.
+    bool decal = false;
+    float liftM = 0.0f;
+};
+
+//! The parts of a road's `.emat` its strip is built from (see ResolvedRoad).
+struct RoadLook
+{
+    std::string texture, material, opacity;
+    float tint[3] = {1.0f, 1.0f, 1.0f};
+    bool tinted = false;
+    int versions = 1;
+    float tilingV = 0.0f;
 };
 
 namespace Enf = Poseidon::Asset::Formats::Enfusion;
@@ -1054,13 +1341,58 @@ namespace Enf = Poseidon::Asset::Formats::Enfusion;
 /// ASSET: Everon places one farmhouse prefab thousands of times, and reading its
 /// shell `.xob` -- a multi-megabyte zlib decompress -- once per placement would cost
 /// more than the rest of the world load put together.
+//! What the placement pass asks of each prefab, answered on the task pool before it runs.
+//!
+//! The serial pass keeps the order every mesh, part and counter is indexed and counted in, so
+//! it stays serial; what it waited on was the chain walks (each a few archive reads and an
+//! `.et` parse per question, ~4,000 prefabs on Everon). These are pure functions of the mount,
+//! so a lookup here returns exactly what the pass would have computed; a path that is not here
+//! is computed in place as before. POSEIDON_PREFAB_PREPASS=0 skips it.
+struct PrefabPrepass
+{
+    struct Answers
+    {
+        Enf::PrefabResolution model;
+        Enf::PrefabSlots slots;
+        std::vector<Enf::PrefabChild> children;
+        bool topLevel = false; //!< `placement` and `flags` are filled only for placed prefabs
+        std::string placement;
+        Enf::PrefabEntityFlags flags;
+        Enf::PrefabDoor door; //!< RFG-157
+        Enf::PrefabGlass glass; //!< RFG-158
+    };
+    struct Bones
+    {
+        bool read = false;
+        Enf::XobHeader header;
+    };
+    //! Keyed by the exact `.et` path the pass passes (a GUID's path, a slot's or child's prefab).
+    std::unordered_map<std::string, Answers> byPath;
+    //! Keyed by the `.xob` (a mesh key's model, remap stripped), for prefabs that declare slots.
+    std::unordered_map<std::string, Bones> bonesByXob;
+
+    const Answers* Find(const std::string& path) const
+    {
+        const auto hit = byPath.find(path);
+        return hit == byPath.end() ? nullptr : &hit->second;
+    }
+    const Bones* FindBones(const std::string& xob) const
+    {
+        const auto hit = bonesByXob.find(xob);
+        return hit == bonesByXob.end() ? nullptr : &hit->second;
+    }
+};
+
 struct AttachWorkspace
 {
     const EnfusionMount* mount = nullptr;
+    const PrefabPrepass* prepass = nullptr;
     std::unordered_map<std::string, std::string> partToMesh;              //!< `.et` (lower) -> `.xob`
     std::unordered_map<std::string, std::vector<Enf::XobBone>> meshBones; //!< `.xob` -> its bones
     std::unordered_map<std::string, uint32_t> index;                      //!< `.xob` -> attachment mesh slot
     std::vector<size_t> counts;                                           //!< placements per attachment mesh
+    //! RFG-120: `.et` (lower) -> its transform-placed children (ResolvePrefabChildren).
+    std::unordered_map<std::string, std::vector<Poseidon::Asset::Formats::Enfusion::PrefabChild>> children;
 };
 
 const std::vector<Enf::XobBone>& BonesOf(AttachWorkspace& ws, const std::string& xobPath, PlacementSummary& summary)
@@ -1069,16 +1401,169 @@ const std::vector<Enf::XobBone>& BonesOf(AttachWorkspace& ws, const std::string&
     if (hit != ws.meshBones.end())
         return hit->second;
     std::vector<Enf::XobBone> bones;
-    std::vector<uint8_t> blob;
-    if (ws.mount->Read(xobPath, blob))
+    const std::string xob = Enf::SplitRemappedMeshKey(xobPath); // RFG-121: bones are the model's
+    const auto apply = [&](const Enf::XobHeader& header)
     {
-        const Enf::XobHeader header = Enf::ReadXobHeader(blob.data(), blob.size());
         if (header.valid())
             bones = header.bones;
         else if (summary.slotFailure.empty())
             summary.slotFailure = xobPath + ": " + header.error;
+    };
+    if (const PrefabPrepass::Bones* pre = ws.prepass ? ws.prepass->FindBones(xob) : nullptr)
+    {
+        if (pre->read)
+            apply(pre->header);
+    }
+    else
+    {
+        std::vector<uint8_t> blob;
+        if (ws.mount->Read(xob, blob))
+            apply(Enf::ReadXobHeader(blob.data(), blob.size()));
     }
     return ws.meshBones.emplace(xobPath, std::move(bones)).first->second;
+}
+
+Enf::PrefabResolution PrefabModelOf(const AttachWorkspace& ws, const std::string& etPath)
+{
+    if (const PrefabPrepass::Answers* pre = ws.prepass ? ws.prepass->Find(etPath) : nullptr)
+        return pre->model;
+    return Enf::ResolvePrefabModel(*ws.mount, etPath);
+}
+
+Enf::PrefabSlots PrefabSlotsOf(const AttachWorkspace& ws, const std::string& etPath)
+{
+    if (const PrefabPrepass::Answers* pre = ws.prepass ? ws.prepass->Find(etPath) : nullptr)
+        return pre->slots;
+    return Enf::ResolvePrefabSlots(*ws.mount, etPath);
+}
+
+Enf::PrefabDoor PrefabDoorOf(const AttachWorkspace& ws, const std::string& etPath)
+{
+    if (!Poseidon::EnfusionDoorRegistry::Enabled())
+        return {};
+    if (const PrefabPrepass::Answers* pre = ws.prepass ? ws.prepass->Find(etPath) : nullptr)
+        return pre->door;
+    return Enf::ResolvePrefabDoor(*ws.mount, etPath);
+}
+
+Enf::PrefabGlass PrefabGlassOf(const AttachWorkspace& ws, const std::string& etPath)
+{
+    if (!Poseidon::EnfusionGlassRegistry::Enabled())
+        return {};
+    if (const PrefabPrepass::Answers* pre = ws.prepass ? ws.prepass->Find(etPath) : nullptr)
+        return pre->glass;
+    return Enf::ResolvePrefabGlass(*ws.mount, etPath);
+}
+
+std::vector<Enf::PrefabChild> PrefabChildrenOf(const AttachWorkspace& ws, const std::string& etPath)
+{
+    if (const PrefabPrepass::Answers* pre = ws.prepass ? ws.prepass->Find(etPath) : nullptr)
+        return pre->children;
+    return Enf::ResolvePrefabChildren(*ws.mount, etPath);
+}
+
+//! Fills `out` for the placed prefabs `topPaths` and, round by round, every slot part and
+//! transform child they lead to -- the same paths the serial pass will ask about.
+void BuildPrefabPrepass(const EnfusionMount& mount, const std::vector<std::string>& topPaths, bool wantPlacement,
+                        bool wantFlags, PrefabPrepass& out)
+{
+    Poseidon::TaskPool* pool = Poseidon::GetGlobalTaskPool();
+    const auto parallel = [pool](size_t count, const std::function<void(size_t)>& work)
+    {
+        if (pool != nullptr && count > 1)
+            pool->ParallelFor(static_cast<uint32_t>(count),
+                              [&](uint32_t start, uint32_t end)
+                              {
+                                  for (uint32_t i = start; i < end; ++i)
+                                      work(i);
+                              });
+        else
+            for (size_t i = 0; i < count; ++i)
+                work(i);
+    };
+    std::vector<std::string> round = topPaths;
+    std::unordered_set<std::string> seen(round.begin(), round.end());
+    // Building -> set -> leaf for slots, four levels for children: six rounds cover both.
+    for (int level = 0; level < 6 && !round.empty(); ++level)
+    {
+        std::vector<PrefabPrepass::Answers> answers(round.size());
+        std::vector<uint8_t> ok(round.size(), 0);
+        parallel(round.size(),
+                 [&](size_t i)
+                 {
+                     try
+                     {
+                         PrefabPrepass::Answers& a = answers[i];
+                         a.model = Enf::ResolvePrefabModel(mount, round[i]);
+                         a.slots = Enf::ResolvePrefabSlots(mount, round[i]);
+                         a.children = Enf::ResolvePrefabChildren(mount, round[i]);
+                         if (Poseidon::EnfusionDoorRegistry::Enabled())
+                             a.door = Enf::ResolvePrefabDoor(mount, round[i]);
+                         if (Poseidon::EnfusionGlassRegistry::Enabled())
+                             a.glass = Enf::ResolvePrefabGlass(mount, round[i]);
+                         if (level == 0)
+                         {
+                             a.topLevel = true;
+                             if (wantPlacement)
+                                 a.placement = Enf::ResolvePrefabPlacement(mount, round[i]);
+                             if (wantFlags)
+                                 a.flags = Enf::ResolvePrefabEntityFlags(mount, round[i]);
+                         }
+                         ok[i] = 1;
+                     }
+                     catch (...)
+                     {
+                         // Left out: the serial pass computes it in place.
+                     }
+                 });
+        std::vector<std::string> next;
+        const auto follow = [&](const std::string& path)
+        {
+            if (!path.empty() && seen.insert(path).second)
+                next.push_back(path);
+        };
+        for (size_t i = 0; i < round.size(); ++i)
+        {
+            if (!ok[i])
+                continue;
+            for (const Enf::PrefabSlot& slot : answers[i].slots.exact)
+                follow(slot.prefab);
+            for (const Enf::PrefabSlot& slot : answers[i].slots.prefixes)
+                follow(slot.prefab);
+            for (const Enf::PrefabChild& child : answers[i].children)
+                follow(child.prefab);
+            out.byPath.emplace(round[i], std::move(answers[i]));
+        }
+        round = std::move(next);
+    }
+
+    std::vector<std::string> xobs;
+    {
+        std::unordered_set<std::string> distinct;
+        for (const auto& [path, a] : out.byPath)
+            if (!a.slots.empty() && !a.model.xobPath.empty() && distinct.insert(a.model.xobPath).second)
+                xobs.push_back(a.model.xobPath);
+    }
+    std::vector<PrefabPrepass::Bones> bones(xobs.size());
+    std::vector<uint8_t> ok(xobs.size(), 0);
+    parallel(xobs.size(),
+             [&](size_t i)
+             {
+                 try
+                 {
+                     std::vector<uint8_t> blob;
+                     bones[i].read = mount.Read(xobs[i], blob);
+                     if (bones[i].read)
+                         bones[i].header = Enf::ReadXobHeader(blob.data(), blob.size());
+                     ok[i] = 1;
+                 }
+                 catch (...)
+                 {
+                 }
+             });
+    for (size_t i = 0; i < xobs.size(); ++i)
+        if (ok[i])
+            out.bonesByXob.emplace(xobs[i], std::move(bones[i]));
 }
 
 /// Every part a prefab hangs on its shell, flattened into the shell's model space.
@@ -1090,13 +1575,13 @@ const std::vector<Enf::XobBone>& BonesOf(AttachWorkspace& ws, const std::string&
 /// the hole this whole change is here to close.
 void CollectAttachments(AttachWorkspace& ws, PlacementSummary& summary, const std::string& etPath,
                         const std::string& xobPath, const Vector3& offset, const Matrix3& basis, int depth,
-                        std::vector<MeshAttachment>& out)
+                        std::vector<MeshAttachment>& out, float inheritedDoorAngle = NAN)
 {
     // Three levels is building -> set -> leaf, which is the deepest the corpus goes;
     // the limit is here to bound authored data, not to express an expectation.
     if (depth > 2)
         return;
-    const Enf::PrefabSlots slots = Enf::ResolvePrefabSlots(*ws.mount, etPath);
+    const Enf::PrefabSlots slots = PrefabSlotsOf(ws, etPath);
     if (slots.empty())
         return;
     if (depth == 0)
@@ -1106,18 +1591,43 @@ void CollectAttachments(AttachWorkspace& ws, PlacementSummary& summary, const st
     const std::vector<Enf::XobBone> bones = BonesOf(ws, xobPath, summary);
     for (const Enf::XobBone& bone : bones)
     {
-        const std::string partEt = Enf::SlotPrefabForBone(slots, bone.name);
+        const Enf::PrefabSlot* boneSlot = Enf::SlotForBone(slots, bone.name);
+        const std::string partEt = boneSlot != nullptr ? boneSlot->prefab : std::string();
         if (partEt.empty())
             continue;
         ++summary.slotBones;
-        const std::string key = LowerCopy(partEt);
+        // RFG-128: the parent's inline material override of this part is part of its identity.
+        static const bool inlineRemap = []
+        {
+            const char* env = std::getenv("POSEIDON_SLOT_MATERIALS");
+            return !(env && env[0] == '0');
+        }();
+        const bool overridden = inlineRemap && !boneSlot->materialRemap.empty();
+        std::string key = LowerCopy(partEt);
+        if (overridden)
+            for (const auto& [source, assigned] : boneSlot->materialRemap)
+                key += "|" + LowerCopy(source) + "=" + LowerCopy(assigned);
         auto cached = ws.partToMesh.find(key);
         if (cached == ws.partToMesh.end())
         {
-            const Enf::PrefabResolution resolved = Enf::ResolvePrefabModel(*ws.mount, partEt);
+            Enf::PrefabResolution resolved = PrefabModelOf(ws, partEt);
             if (resolved.xobPath.empty() && summary.slotFailure.empty())
                 summary.slotFailure = partEt + ": " + resolved.reason;
-            cached = ws.partToMesh.emplace(key, resolved.xobPath).first;
+            if (overridden)
+            {
+                std::vector<std::pair<std::string, std::string>> merged = boneSlot->materialRemap;
+                for (auto& pair : resolved.materialRemap)
+                {
+                    bool known = false;
+                    for (const auto& have : merged)
+                        known = known || LowerCopy(have.first) == LowerCopy(pair.first);
+                    if (!known)
+                        merged.push_back(std::move(pair));
+                }
+                resolved.materialRemap = std::move(merged);
+                ++summary.slotRemapped;
+            }
+            cached = ws.partToMesh.emplace(key, resolved.MeshKey()).first;
         }
         if (cached->second.empty())
         {
@@ -1144,11 +1654,249 @@ void CollectAttachments(AttachWorkspace& ws, PlacementSummary& summary, const st
             ws.counts.push_back(0);
         }
         part.mesh = slot->second;
+        // RFG-157: a door leaf. The angle is the nearest override (the building's instance block
+        // for this door set, then this slot's own block), else the leaf prefab's AngleRange.
+        const float slotAngle = std::isnan(inheritedDoorAngle) ? boneSlot->doorAngle : inheritedDoorAngle;
+        const Enf::PrefabDoor door = PrefabDoorOf(ws, partEt);
+        const bool isDoor = door.isDoor && door.wholeEntity;
+        if (isDoor)
+        {
+            const float angle = !std::isnan(slotAngle) ? slotAngle : (!std::isnan(door.angleDeg) ? door.angleDeg : 90.0f);
+            part.doorAngle = std::fabs(angle) > 0.5f ? angle : 0.0f;
+            for (int i = 0; i < 3; ++i)
+                if (!std::isnan(door.offset[i]))
+                    part.doorAction[i] = door.offset[i];
+            if (!std::isnan(door.radius) && door.radius > 0.0f)
+                part.doorRadius = door.radius;
+            if (part.doorAngle != 0.0f)
+                ++summary.doorLeaves;
+        }
+        else if (door.isDoor)
+            ++summary.doorSkipped;
+        // RFG-158: a destructible pane keeps the model of its broken phase beside it (the same
+        // material override, the phase's own .xob), as one more attachment mesh with no placements.
+        if (const Enf::PrefabGlass glass = PrefabGlassOf(ws, partEt); glass.Destructible() && !glass.phaseModel.empty())
+        {
+            const std::string& intact = cached->second;
+            std::string broken = glass.phaseModel;
+            if (intact.compare(0, 5, "enfm|") == 0)
+            {
+                const size_t bar = intact.find('|', 5);
+                if (bar != std::string::npos)
+                    broken = intact.substr(0, bar + 1) + glass.phaseModel;
+            }
+            auto brokenSlot = ws.index.find(broken);
+            if (brokenSlot == ws.index.end())
+            {
+                brokenSlot = ws.index.emplace(broken, static_cast<uint32_t>(ws.counts.size())).first;
+                ws.counts.push_back(0);
+            }
+            part.glassBroken = brokenSlot->second;
+            ++summary.glassPanes;
+        }
+        else if (glass.Destructible())
+            ++summary.glassNoPhase;
+        const size_t partIndex = out.size();
         out.push_back(part);
 
-        CollectAttachments(ws, summary, partEt, cached->second, part.offset, part.basis, depth + 1, out);
+        CollectAttachments(ws, summary, partEt, cached->second, part.offset, part.basis, depth + 1, out,
+                           isDoor ? NAN : slotAngle);
+        if (isDoor && out[partIndex].doorAngle != 0.0f)
+            for (size_t k = partIndex + 1; k < out.size(); ++k)
+                if (out[k].doorLeaf < 0 && out[k].doorAngle == 0.0f)
+                {
+                    out[k].doorLeaf = static_cast<int32_t>(partIndex);
+                    ++summary.doorMembers;
+                }
     }
 }
+
+/// RFG-120: the parts a prefab places by TRANSFORM -- a house's furniture composition and
+/// the props in it (Enf::ResolvePrefabChildren) -- folded into the same attachment set as
+/// the socket parts, so the streamed and the placed draw paths take them unchanged. Each
+/// child's transform is local to its parent and composed with the signs and order a world
+/// placement uses (RFG-068: angles negated; yaw, then pitch, then roll; then scale). Its own
+/// socket parts and its own children follow. POSEIDON_PREFAB_CHILDREN=0 turns it off.
+void CollectChildParts(AttachWorkspace& ws, PlacementSummary& summary, const std::string& etPath,
+                       const Vector3& offset, const Matrix3& basis, int depth, std::vector<MeshAttachment>& out)
+{
+    static const bool enabled = []
+    {
+        const char* env = std::getenv("POSEIDON_PREFAB_CHILDREN");
+        return !(env && env[0] == '0');
+    }();
+    if (!enabled || depth > 3)
+        return;
+    const std::string key = LowerCopy(etPath);
+    auto known = ws.children.find(key);
+    if (known == ws.children.end())
+        known = ws.children.emplace(key, PrefabChildrenOf(ws, etPath)).first;
+    // Copied: the recursion below inserts into `children`.
+    const std::vector<Enf::PrefabChild> children = known->second;
+    constexpr float toRad = 0.01745329252f;
+    for (const Enf::PrefabChild& child : children)
+    {
+        Matrix3 local(MRotationY, -child.angles[1] * toRad);
+        if (std::fabs(child.angles[0]) > 0.01f)
+            local = local * Matrix3(MRotationX, -child.angles[0] * toRad);
+        if (std::fabs(child.angles[2]) > 0.01f)
+            local = local * Matrix3(MRotationZ, -child.angles[2] * toRad);
+        if (std::isfinite(child.scale) && child.scale > 0.0f && std::fabs(child.scale - 1.0f) > 1e-3f)
+            local = local * Matrix3(MScale, child.scale);
+        const Matrix3 childBasis = basis * local;
+        const Vector3 childOffset = offset + basis * Vector3(child.position[0], child.position[1], child.position[2]);
+
+        const std::string partKey = LowerCopy(child.prefab);
+        auto cached = ws.partToMesh.find(partKey);
+        if (cached == ws.partToMesh.end())
+            cached = ws.partToMesh.emplace(partKey, PrefabModelOf(ws, child.prefab).MeshKey()).first;
+        if (!cached->second.empty())
+        {
+            MeshAttachment part;
+            part.basis = childBasis;
+            part.offset = childOffset;
+            auto slot = ws.index.find(cached->second);
+            if (slot == ws.index.end())
+            {
+                slot = ws.index.emplace(cached->second, static_cast<uint32_t>(ws.counts.size())).first;
+                ws.counts.push_back(0);
+            }
+            part.mesh = slot->second;
+            out.push_back(part);
+            ++summary.childParts;
+            // A cabinet's doors, a window's curtains: the child's own socket parts.
+            CollectAttachments(ws, summary, child.prefab, cached->second, childOffset, childBasis, 1, out);
+        }
+        // A composition (BuildingFurniture_base) draws nothing itself; its children do.
+        CollectChildParts(ws, summary, child.prefab, childOffset, childBasis, depth + 1, out);
+    }
+}
+
+//! RFG-194: what a DecalEntity prefab chain says about its decal (child first): its material,
+//! its size (`scale`), `Stretch` and `TerrainOnly` -- the class defaults 1 / 1 / 1, read from
+//! Workbench (BaseContainerTools.CreateContainer("DecalEntity")).
+struct DecalLook
+{
+    bool resolved = false;
+    RoadLook look;
+    float scale = 1.0f;
+    float stretch = 1.0f;
+    bool terrainOnly = true;
+};
+
+namespace
+{
+//! The value after `<key> ` on an entity's top-level line (one leading space) of one `.et` body.
+bool TopLevelValue(const std::string& text, const char* key, std::string& value)
+{
+    const std::string needle = std::string("\n ") + key + " ";
+    const size_t at = text.find(needle);
+    if (at == std::string::npos)
+        return false;
+    const size_t begin = at + needle.size();
+    const size_t end = text.find_first_of("\r\n", begin);
+    value = text.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+    return !value.empty();
+}
+
+DecalLook ResolveDecalLook(const EnfusionMount& mount, std::string path)
+{
+    DecalLook out;
+    bool haveMat = false, haveScale = false, haveStretch = false, haveTerrainOnly = false;
+    std::string ematPath;
+    for (int depth = 0; depth < 8 && !path.empty(); ++depth)
+    {
+        std::vector<uint8_t> blob;
+        if (!mount.Read(path, blob))
+            break;
+        const std::string text(reinterpret_cast<const char*>(blob.data()), blob.size());
+        std::string value;
+        if (!haveMat && TopLevelValue(text, "Mat", value))
+        {
+            // "{GUID}Assets/....emat"
+            const size_t close = value.find('}');
+            ematPath = value.substr(close == std::string::npos ? 0 : close + 1);
+            ematPath.erase(std::remove(ematPath.begin(), ematPath.end(), '"'), ematPath.end());
+            haveMat = !ematPath.empty();
+        }
+        if (!haveScale && TopLevelValue(text, "scale", value))
+            out.scale = std::strtof(value.c_str(), nullptr), haveScale = true;
+        if (!haveStretch && TopLevelValue(text, "Stretch", value))
+            out.stretch = std::strtof(value.c_str(), nullptr), haveStretch = true;
+        if (!haveTerrainOnly && TopLevelValue(text, "TerrainOnly", value))
+            out.terrainOnly = std::atoi(value.c_str()) != 0, haveTerrainOnly = true;
+        path = Poseidon::Asset::Material::ParseEmat(text).parentPath;
+    }
+    if (!haveMat)
+        return out;
+    Poseidon::Asset::Material::EmatMaterial material;
+    if (!LoadEmatFromMount(mount, ematPath, material))
+        return out;
+    out.look.material = ematPath;
+    out.look.texture = ColourTextureOf(material);
+    out.look.opacity = material.TextureOf("OpacityMap");
+    float color[4];
+    if (material.Vec4Of("Color", color))
+    {
+        out.look.tint[0] = color[0], out.look.tint[1] = color[1], out.look.tint[2] = color[2];
+        out.look.tinted = color[0] != 1.0f || color[1] != 1.0f || color[2] != 1.0f;
+    }
+    out.resolved = !out.look.texture.empty();
+    return out;
+}
+
+void AppendTerrainDecal(const Enf::EbinPlacement& placement, const std::unordered_map<std::string, std::string>& byGuid,
+                        const EnfusionMount& mount, std::unordered_map<std::string, DecalLook>& looks,
+                        std::vector<ResolvedRoad>& roads, size_t& count)
+{
+    auto cached = looks.find(placement.prefabGuid);
+    if (cached == looks.end())
+    {
+        const auto hit = byGuid.find(placement.prefabGuid);
+        cached = looks.emplace(placement.prefabGuid,
+                               hit != byGuid.end() ? ResolveDecalLook(mount, hit->second) : DecalLook{}).first;
+    }
+    const DecalLook& decal = cached->second;
+    if (!decal.resolved || !decal.terrainOnly)
+        return;
+    // The placed models' rotation (see the RFG-068 note in ResolvePlacements): the decal projects
+    // along its local Z; its texture spans local X (width) and Y (length).
+    constexpr float toRad = 0.01745329252f;
+    const Matrix3 m = Matrix3(MRotationY, -placement.angles[1] * toRad) *
+                      Matrix3(MRotationX, -placement.angles[0] * toRad) *
+                      Matrix3(MRotationZ, -placement.angles[2] * toRad);
+    const Vector3 projection = m * Vector3(0.0f, 0.0f, 1.0f);
+    if (std::fabs(projection.Y()) < 0.7f)
+        return; // not projected onto the ground
+    Vector3 along = m * Vector3(0.0f, 1.0f, 0.0f);
+    along[1] = 0.0f;
+    if (along.SquareSize() < 1e-6f)
+        along = Vector3(0.0f, 0.0f, 1.0f);
+    along.Normalize();
+    const float size = (std::isfinite(placement.scale) && std::fabs(placement.scale - 1.0f) > 1e-3f) ? placement.scale
+                                                                                                    : decal.scale;
+    const float length = std::max(size * std::max(decal.stretch, 0.01f), 0.05f);
+    if (!(size > 0.05f))
+        return;
+    ResolvedRoad road;
+    road.origin[0] = placement.position[0];
+    road.origin[1] = placement.position[1];
+    road.origin[2] = placement.position[2];
+    const float half = 0.5f * length;
+    road.points = {-along.X() * half, 0.0f, -along.Z() * half, along.X() * half, 0.0f, along.Z() * half};
+    road.width = std::max(size, 0.11f);
+    road.texture = decal.look.texture;
+    road.material = decal.look.material;
+    road.opacity = decal.look.opacity;
+    std::copy(std::begin(decal.look.tint), std::end(decal.look.tint), road.tint);
+    road.tinted = decal.look.tinted;
+    road.tilingV = road.width / length; // the texture once over the strip's length
+    road.decal = true;
+    road.liftM = 0.03f;
+    roads.push_back(std::move(road));
+    ++count;
+}
+} // namespace
 
 PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string& addonsDir,
                                    std::vector<std::pair<std::string, size_t>>& meshes,
@@ -1159,9 +1907,11 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
     namespace Enf = Poseidon::Asset::Formats::Enfusion;
     PlacementSummary out;
 
+    // The resource databases load on their own thread while this one reads and parses the
+    // world file; neither needs the other. The errors keep their order: databases first.
     std::unordered_map<std::string, std::string> byGuid;
-    if (!LoadResourceDatabases(addonsDir, byGuid, out.error))
-        return out;
+    std::string rdbError;
+    auto rdb = std::async(std::launch::async, [&] { return LoadResourceDatabases(addonsDir, byGuid, rdbError); });
 
     // The world's own `.ent`, beside the terrain in the same folder.
     std::string entPath;
@@ -1172,28 +1922,40 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
             entPath = path;
             break;
         }
-    if (entPath.empty())
-    {
-        out.error = "no .ent world beside the terrain";
-        return out;
-    }
+    std::string entError;
     std::vector<uint8_t> bytes;
-    if (!mount.Read(entPath, bytes))
+    Enf::EbinWorld world;
+    if (entPath.empty())
+        entError = "no .ent world beside the terrain";
+    else if (!mount.Read(entPath, bytes))
+        entError = "cannot read " + entPath;
+    else
     {
-        out.error = "cannot read " + entPath;
+        world = Enf::ReadEbin(bytes.data(), bytes.size());
+        if (!world.valid())
+            entError = world.error;
+    }
+    if (!rdb.get())
+    {
+        out.error = rdbError;
         return out;
     }
-    const Enf::EbinWorld world = Enf::ReadEbin(bytes.data(), bytes.size());
-    if (!world.valid())
+    if (!entError.empty())
     {
-        out.error = world.error;
+        out.error = entError;
         return out;
     }
+    // RFG-132: every `.emat` parsed from here on resolves `{GUID}path` by its GUID.
+    Poseidon::Asset::Material::Detail::SetEmatGuidPaths(
+        std::make_shared<const Poseidon::Asset::Material::Detail::EmatGuidPaths>(byGuid));
     out.placements = world.placements.size();
 
     // One resolution per DISTINCT prefab, not per placement: Everon's 1.23 M
     // placements come from a few thousand prefabs, and the chain walk reads files.
     std::unordered_map<std::string, std::string> prefabToMesh;
+    std::unordered_map<std::string, DecalLook> decalLooks; // RFG-194, by prefab GUID
+    std::unordered_map<std::string, Enf::PrefabEntityFlags> prefabFlags; // RFG-130, per GUID
+    std::unordered_map<std::string, bool> prefabSlopeAlign; // RFG-114, by prefab GUID
     std::unordered_map<std::string, uint32_t> meshIndex;
     std::vector<size_t> meshCounts;
     // RFG-064: the attachment side keeps its OWN mesh list. Sharing the main one
@@ -1204,9 +1966,168 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
     AttachWorkspace workspace;
     workspace.mount = &mount;
     resolved.reserve(world.placements.size());
+
+    static const bool slopeOn = []
+    {
+        const char* env = std::getenv("POSEIDON_SLOPE_PLACEMENT");
+        return !(env && env[0] == '0');
+    }();
+    static const bool authoredY = []
+    {
+        const char* env = std::getenv("POSEIDON_Y_RULE_FLAGS");
+        return !(env && env[0] == '0');
+    }();
+    PrefabPrepass prepass;
+    {
+        static const bool prepassOn = []
+        {
+            const char* env = std::getenv("POSEIDON_PREFAB_PREPASS");
+            return !(env && env[0] == '0');
+        }();
+        if (prepassOn)
+        {
+            const auto prepassStart = std::chrono::steady_clock::now();
+            std::vector<std::string> topPaths;
+            std::unordered_set<std::string> seenGuid;
+            for (const Enf::EbinPlacement& placement : world.placements)
+                if (placement.points.empty() && !placement.prefabGuid.empty() &&
+                    seenGuid.insert(placement.prefabGuid).second)
+                    if (const auto hit = byGuid.find(placement.prefabGuid); hit != byGuid.end())
+                        topPaths.push_back(hit->second);
+            std::sort(topPaths.begin(), topPaths.end());
+            topPaths.erase(std::unique(topPaths.begin(), topPaths.end()), topPaths.end());
+            BuildPrefabPrepass(mount, topPaths, slopeOn, authoredY, prepass);
+            workspace.prepass = &prepass;
+            LOG_INFO(
+                World,
+                "Enfusion native load: prefab pre-pass answered {} prefabs ({} placed) and {} models' bones in "
+                "{:.0f} ms (POSEIDON_PREFAB_PREPASS=0 = off)",
+                prepass.byPath.size(), topPaths.size(), prepass.bonesByXob.size(),
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - prepassStart).count());
+        }
+    }
     // Resolved once per material GUID: 2,370 roads share a couple of dozen surfaces
     // and each resolution reads an `.emat` out of an archive.
-    std::unordered_map<std::string, std::pair<std::string, std::string>> roadTextures;
+    std::unordered_map<std::string, RoadLook> roadTextures;
+
+    // RFG-134: rivers. A `SplineShapeEntity` holding a `RiverEntity` generator, read into its
+    // own list by the EBIN walk; built here as level water ribbons along the spline.
+    static const bool riversOn = []
+    {
+        const char* env = std::getenv("POSEIDON_ENFUSION_RIVERS");
+        return !(env && env[0] == '0');
+    }();
+    static const bool riverOpaque = []
+    {
+        // OPT-IN for now (POSEIDON_RIVER_TRANSLUCENT=1): blended, the ribbons leave the retained
+        // set for the per-draw path, and at Everon 5052/5312 that pushed the geometry pool past
+        // 1088 MB on an 8 GB card -- device lost even with pressure growth. Opaque until that
+        // path's cost is understood.
+        const char* env = std::getenv("POSEIDON_RIVER_TRANSLUCENT");
+        return !(env && env[0] == '1');
+    }();
+    static const float riverAlpha = []
+    {
+        const char* env = std::getenv("POSEIDON_RIVER_ALPHA");
+        return (env && *env) ? static_cast<float>(std::atof(env)) : -1.0f;
+    }();
+    for (const Enf::EbinRiver& source : world.rivers)
+    {
+        if (!riversOn || !source.isRiver || source.points.size() < 6)
+            continue;
+        ResolvedRoad river;
+        river.river = true;
+        river.origin[0] = source.position[0];
+        river.origin[1] = source.position[1] + source.splineOffsetUp;
+        river.origin[2] = source.position[2];
+        river.points = source.points;
+        river.yawDeg = source.yawDeg;
+        river.width = source.width > 0.1f ? source.width : 5.0f;
+        river.reverseFlow = source.reverseFlow;
+        river.pointWidths.assign(source.points.size() / 3, 0.0f);
+        for (size_t i = 0; i < river.pointWidths.size() && i < source.pointWidths.size(); ++i)
+            if (i < source.pointWidthModes.size() && source.pointWidthModes[i] == 2 && source.pointWidths[i] > 0.1f)
+                river.pointWidths[i] = source.pointWidths[i];
+        constexpr float kRiverFilmAlpha = 0.4f; // measured, see RFG-137 below
+        if (const auto hit = byGuid.find(source.materialGuid); hit != byGuid.end())
+        {
+            river.material = hit->second;
+            Poseidon::Asset::Material::EmatMaterial material;
+            float colour[4];
+            if (LoadEmatFromMount(mount, river.material, material) && material.Vec4Of("Color", colour))
+            {
+                char text[96];
+                std::snprintf(text, sizeof(text), "enfc|%.4f,%.4f,%.4f", colour[0], colour[1], colour[2]);
+                river.texture = text;
+                for (int c = 0; c < 3; ++c)
+                    river.riverLook[c] = colour[c];
+                // RFG-162: the rest of the look the water renderer takes from the MatRiver.
+                static constexpr const char* kLookKeys[7] = {"HalfLightDistance", "FlowSpeed", "Fresnel",
+                                                             "SunPower",          "SunInfluence", "WetFloor",
+                                                             "WaterVisibility"};
+                for (int k = 0; k < 7; ++k)
+                {
+                    float value = 0.0f;
+                    if (material.FloatOf(kLookKeys[k], value))
+                        river.riverLook[3 + k] = value;
+                }
+            }
+        }
+        if (river.texture.empty())
+            river.texture = "enfc|0.0350,0.0400,0.0190"; // RiverSurface_01's own Color
+        // RFG-137: a river is a clear film over its bed, not an opaque sheet. Measured in
+        // Workbench: Reforger's surface is ~0.1 m above the channel bottom (HalfLightDistance
+        // 30 m makes that depth practically transparent) and the gravel shows through. The
+        // constant-alpha route (`enfk|`, as glass) draws it blended and the shader composites the
+        // Fresnel reflection on top at full strength. The film alpha is MEASURED, not read from
+        // a field whose semantics are unknown: in Workbench the same gravel under the river is
+        // 0.59/0.67/0.60 (R/G/B) of its dry brightness, i.e. (1 - a) ~ 0.62. Opt-in, see riverOpaque;
+        // POSEIDON_RIVER_ALPHA=<0..1> overrides the alpha for an A/B.
+        if (!riverOpaque)
+        {
+            char head[32];
+            std::snprintf(head, sizeof(head), "enfk|%.3f|", std::clamp(riverAlpha >= 0.0f ? riverAlpha : kRiverFilmAlpha, 0.02f, 1.0f));
+            river.texture = head + river.texture;
+        }
+        if (std::getenv("POSEIDON_RIVER_DUMP"))
+        {
+            size_t fixedPoints = 0;
+            float minW = 1e9f, maxW = 0.0f;
+            for (const float w : river.pointWidths)
+                if (w > 0.1f)
+                {
+                    ++fixedPoints;
+                    minW = std::min(minW, w);
+                    maxW = std::max(maxW, w);
+                }
+            int modes[4] = {0, 0, 0, 0};
+            for (const int m : source.pointWidthModes)
+                ++modes[m >= 0 && m < 3 ? m : 3];
+            LOG_INFO(World, "RFG-134 river at ({:.0f},{:.0f},{:.0f}): {} points, Width {:.2f} (authored {:.2f}), "
+                            "offsetUp {:.2f}, fixed widths {} [{:.2f}..{:.2f}], WidthOverride modes 0:{} 1:{} 2:{} other:{}",
+                     source.position[0], source.position[1], source.position[2], source.points.size() / 3, river.width,
+                     source.width, source.splineOffsetUp, fixedPoints, fixedPoints ? minW : 0.0f, maxW, modes[0],
+                     modes[1], modes[2], modes[3]);
+        }
+        ++out.rivers;
+        roads.push_back(std::move(river));
+    }
+    // RFG-163: ponds. Water only (the river renderer); nothing was drawn for them before.
+    for (const Enf::EbinRiver& source : world.rivers)
+    {
+        if (!riversOn || !source.isLake || source.isRiver || source.points.size() < 9)
+            continue;
+        ResolvedRoad lake;
+        lake.lake = true;
+        lake.origin[0] = source.position[0];
+        // RFG-165: plus the generator's own offset (Lake_Center: 7 m below its spline).
+        lake.origin[1] = source.position[1] + source.lakeOffsetY;
+        lake.origin[2] = source.position[2];
+        lake.points = source.points;
+        lake.yawDeg = source.yawDeg;
+        ++out.lakes;
+        roads.push_back(std::move(lake));
+    }
 
     for (const Enf::EbinPlacement& placement : world.placements)
     {
@@ -1242,17 +2163,57 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
                     if (prefabHit != byGuid.end())
                         ematPath = Enf::ResolvePrefabMaterial(mount, prefabHit->second);
                 }
-                std::string texture;
+                RoadLook look;
+                look.material = ematPath;
                 if (!ematPath.empty())
                 {
                     Poseidon::Asset::Material::EmatMaterial material;
                     if (LoadEmatFromMount(mount, ematPath, material))
-                        texture = ColourTextureOf(material);
+                    {
+                        look.texture = ColourTextureOf(material);
+                        look.opacity = material.TextureOf("OpacityMap");
+                        float color[4];
+                        if (material.Vec4Of("Color", color))
+                        {
+                            look.tint[0] = color[0], look.tint[1] = color[1], look.tint[2] = color[2];
+                            look.tinted = color[0] != 1.0f || color[1] != 1.0f || color[2] != 1.0f;
+                        }
+                        if (const auto* versions = material.Find("NumVersions"); versions && !versions->values.empty())
+                        {
+                            const auto& v = versions->values[0];
+                            const int n = v.isNumber ? static_cast<int>(v.number) : std::atoi(v.text.c_str());
+                            look.versions = std::clamp(n, 1, 8);
+                        }
+                        Poseidon::Asset::Material::RvUvTransform uv;
+                        if (Poseidon::Asset::Material::EmatUvTransform(material, "GlobalMapsUVTransform", uv) &&
+                            uv.up[1] > 0.0f)
+                            look.tilingV = uv.up[1];
+                    }
                 }
-                cachedTexture = roadTextures.emplace(materialKey, std::make_pair(texture, ematPath)).first;
+                // RFG-139 follow-up: name the roads that still resolve no texture (79 on Everon),
+                // one line per distinct key, so the next fix starts from data.
+                if (look.texture.empty())
+                {
+                    static int named = 0;
+                    if (named++ < 12)
+                    {
+                        const auto prefabHit = byGuid.find(placement.prefabGuid);
+                        LOG_INFO(World, "Enfusion road without texture: class {} material {} prefab {} ({}) emat '{}'",
+                                 placement.className, placement.materialGuid.empty() ? "-" : placement.materialGuid,
+                                 placement.prefabGuid.empty() ? "-" : placement.prefabGuid,
+                                 prefabHit != byGuid.end() ? prefabHit->second : std::string("unresolved"), ematPath);
+                    }
+                }
+                cachedTexture = roadTextures.emplace(materialKey, std::move(look)).first;
             }
-            road.texture = cachedTexture->second.first;
-            road.material = cachedTexture->second.second;
+            const RoadLook& look = cachedTexture->second;
+            road.texture = look.texture;
+            road.material = look.material;
+            road.opacity = look.opacity;
+            std::copy(std::begin(look.tint), std::end(look.tint), road.tint);
+            road.tinted = look.tinted;
+            road.versions = look.versions;
+            road.tilingV = look.tilingV;
             roads.push_back(std::move(road));
             continue;
         }
@@ -1269,9 +2230,9 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
             const auto guidHit = byGuid.find(placement.prefabGuid);
             if (guidHit != byGuid.end())
             {
-                const Enf::PrefabResolution resolved = Enf::ResolvePrefabModel(mount, guidHit->second);
+                const Enf::PrefabResolution resolved = PrefabModelOf(workspace, guidHit->second);
                 if (!resolved.xobPath.empty())
-                    mesh = resolved.xobPath;
+                    mesh = resolved.MeshKey(); // RFG-121: a colour variant is its own model
                 else if (out.firstFailure.empty())
                     out.firstFailure = resolved.reason;
             }
@@ -1282,7 +2243,24 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
             cached = prefabToMesh.emplace(placement.prefabGuid, mesh).first;
         }
         if (cached->second.empty())
+        {
+            // RFG-194: a DecalEntity has no mesh, so every one of Everon's 4,250 (asphalt patches,
+            // cracks, crossroad wear, manholes, crosswalks, dirt patches, footprints) was dropped
+            // here: village roads drew as clean light tarmac beside Reforger's. A TerrainOnly decal
+            // (the DecalEntity class default) becomes a two-point strip draped on the terrain, its
+            // prefab's `scale` metres wide and `scale x Stretch` long, in its `Mat`'s colour and
+            // coverage, oriented by the same rotation placed models use. Wall decals
+            // (TerrainOnly 0, a projection axis that is not vertical) are left for later.
+            // POSEIDON_ENFUSION_DECALS=0 keeps dropping them.
+            static const bool decalsOn = []
+            {
+                const char* env = std::getenv("POSEIDON_ENFUSION_DECALS");
+                return !(env && env[0] == '0');
+            }();
+            if (decalsOn && placement.className == "DecalEntity")
+                AppendTerrainDecal(placement, byGuid, mount, decalLooks, roads, out.decals);
             continue;
+        }
         if (byGuid.count(placement.prefabGuid) != 0)
             ++out.guidResolved;
         ++out.meshResolved;
@@ -1339,6 +2317,27 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         item.yawDeg = -placement.angles[1];
         item.pitchDeg = -placement.angles[0];
         item.rollDeg = -placement.angles[2];
+        // RFG-114: Enfusion's `placement slopelandcontact` tilts the object to the ground at load;
+        // the world file then carries no tilt (fence runs: pitch 0 / roll 0, stepped heights).
+        // Only when the file stores none -- an authored tilt is the authored answer.
+        if (std::fabs(placement.angles[0]) < 0.01f && std::fabs(placement.angles[2]) < 0.01f)
+        {
+            auto slope = prefabSlopeAlign.find(placement.prefabGuid);
+            if (slope == prefabSlopeAlign.end())
+            {
+                bool align = false;
+                const auto guidHit = byGuid.find(placement.prefabGuid);
+                if (slopeOn && guidHit != byGuid.end())
+                {
+                    const PrefabPrepass::Answers* pre = workspace.prepass ? prepass.Find(guidHit->second) : nullptr;
+                    align =
+                        (pre && pre->topLevel ? pre->placement : Enf::ResolvePrefabPlacement(mount, guidHit->second)) ==
+                        "slopelandcontact";
+                }
+                slope = prefabSlopeAlign.emplace(placement.prefabGuid, align).first;
+            }
+            item.slopeAlign = slope->second;
+        }
         {
             // RFG-100 diagnosis: every church_01* placement as resolved (doors stand in the nave).
             static int churchDiag = 0;
@@ -1348,12 +2347,95 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
                          placement.angles[0], placement.angles[1], placement.angles[2], placement.scale, placement.hasFlags ? 1 : 0,
                          placement.points.size());
         }
+        {
+            // POSEIDON_PLACEMENT_PROBE=<substring>: the first 40 matching placements as stored
+            // (angles, flags, Y) -- what a "this object sits wrong" report needs first.
+            static const char* probe = std::getenv("POSEIDON_PLACEMENT_PROBE");
+            static int probeRows = 0;
+            if (probe && *probe && probeRows < 40 && LowerCopy(cached->second).find(LowerCopy(probe)) != std::string::npos)
+            {
+                ++probeRows;
+                LOG_INFO(World, "Placement probe: '{}' class='{}' pos=[{:.2f} {:.2f} {:.2f}] angles=[{:.2f} {:.2f} {:.2f}] "
+                                "scale={:.2f} flags={}",
+                         cached->second, placement.className, placement.position[0], placement.position[1],
+                         placement.position[2], placement.angles[0], placement.angles[1], placement.angles[2],
+                         placement.scale, placement.hasFlags ? 1 : 0);
+            }
+            // POSEIDON_PLACEMENT_REGION="x:z:radius": every placement within radius metres of
+            // (x, z) (first 300), with its mesh and prefab class -- "what is standing at this
+            // reported pose" without guessing a substring first.
+            // Several regions separated by ';' (first 600 rows over all of them).
+            static const std::vector<std::array<float, 3>> regions = []
+            {
+                std::vector<std::array<float, 3>> out;
+                const char* env = std::getenv("POSEIDON_PLACEMENT_REGION");
+                for (const char* p = env; p && *p;)
+                {
+                    std::array<float, 3> r{};
+                    if (std::sscanf(p, "%f:%f:%f", &r[0], &r[1], &r[2]) == 3 && r[2] > 0.0f)
+                        out.push_back(r);
+                    p = std::strchr(p, ';');
+                    if (p)
+                        ++p;
+                }
+                return out;
+            }();
+            static int regionRows = 0;
+            for (size_t ri = 0; ri < regions.size() && regionRows < 600; ++ri)
+            {
+                const float dx = placement.position[0] - regions[ri][0], dz = placement.position[2] - regions[ri][1];
+                if (dx * dx + dz * dz <= regions[ri][2] * regions[ri][2])
+                {
+                    ++regionRows;
+                    LOG_INFO(World, "Placement region {}: '{}' class='{}' guid={} pos=[{:.2f} {:.2f} {:.2f}] angles=[{:.1f} "
+                                    "{:.1f} {:.1f}] scale={:.2f} flags={}",
+                             ri, cached->second, placement.className, placement.prefabGuid, placement.position[0],
+                             placement.position[1], placement.position[2], placement.angles[0], placement.angles[1],
+                             placement.angles[2], placement.scale, placement.hasFlags ? 1 : 0);
+                    break;
+                }
+            }
+        }
         item.scale = (std::isfinite(placement.scale) && placement.scale > 0.0f) ? placement.scale : 1.0f;
         // The Y rule, measured over Everon's 1.23 M placements: with a Flags block
         // 96.3% sit within half a metre of the terrain, without one the median Y is
         // exactly 0. Reading every Y as absolute buries the houses a median 29 m
         // under, because SCR_DestructibleBuildingEntity is 93% flagless.
         item.terrainRelative = !placement.hasFlags && std::fabs(placement.position[1]) < 2.0f;
+        // RFG-130: the authored rule replaces the heuristic above wherever the prefab chain
+        // states its flags. Building_Base.et sets RELATIVE_Y (`Flags 0x80403 0`); Props_Base.et
+        // does not (`Flags 0x403 0`); an instance may set or clear bits over that. The |Y| < 2
+        // heuristic floated the harbour's sea bollards 2.7 m over the quay (relative Y ~5 over a
+        // -2.8 m seabed) and is kept only for chains that declare nothing.
+        {
+            if (authoredY)
+            {
+                auto flagsHit = prefabFlags.find(placement.prefabGuid);
+                if (flagsHit == prefabFlags.end())
+                {
+                    Enf::PrefabEntityFlags resolvedFlags;
+                    if (const auto guidHit = byGuid.find(placement.prefabGuid); guidHit != byGuid.end())
+                    {
+                        const PrefabPrepass::Answers* pre = workspace.prepass ? prepass.Find(guidHit->second) : nullptr;
+                        resolvedFlags =
+                            pre && pre->topLevel ? pre->flags : Enf::ResolvePrefabEntityFlags(mount, guidHit->second);
+                    }
+                    flagsHit = prefabFlags.emplace(placement.prefabGuid, resolvedFlags).first;
+                }
+                if (flagsHit->second.known)
+                {
+                    const uint32_t flags = (flagsHit->second.flags | placement.flagsSet) & ~placement.flagsClear;
+                    const bool relative = (flags & 0x80000u) != 0;
+                    if (relative != item.terrainRelative)
+                        ++(relative ? out.yRuleToRelative : out.yRuleToAbsolute);
+                    item.terrainRelative = relative;
+                }
+                else
+                    ++out.yRuleUnknown;
+            }
+        }
+        item.hasFlags = placement.hasFlags;
+        item.classIndex = YCensusClassIndex(placement.className);
         item.mesh = slot->second;
         // RFG-064: the parts this prefab hangs off its shell's socket bones. Once
         // per DISTINCT prefab GUID, like the mesh above.
@@ -1367,6 +2449,10 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
                 AttachSet set;
                 const Matrix3 identity(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
                 CollectAttachments(workspace, out, guidHit->second, cached->second, Vector3(0.0f, 0.0f, 0.0f), identity, 0, set.parts);
+                const size_t beforeChildren = set.parts.size();
+                CollectChildParts(workspace, out, guidHit->second, Vector3(0.0f, 0.0f, 0.0f), identity, 0, set.parts);
+                if (set.parts.size() > beforeChildren)
+                    ++out.childPrefabs;
                 if (!set.parts.empty())
                 {
                     setIndex = static_cast<uint32_t>(attachSets.size());
@@ -1399,36 +2485,321 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
     return out;
 }
 
-/// RFG-027: a road's centreline -> a ribbon of quads the engine can draw.
+/// RFG-027: a road's centreline -> a strip of quads the engine can draw.
 ///
 /// Everon ships no road geometry at all: Enfusion generates the strip at load time
 /// from `RoadEntity`'s spline, so anything that wants roads has to generate them
-/// too. This is the same generation, reduced to what a first pass needs -- a flat
-/// ribbon of the authored width, mitred at each interior point so the seams do not
-/// gap on a bend, with V running along the road so the tarmac tiles by length.
+/// too. This is the same generation, reduced to what it needs: a ribbon of the
+/// authored width, mitred at each interior point so the seams do not gap on a bend.
 ///
-/// Deliberately NOT modelled: crossings, end caps, the separate line-marking pass,
-/// and the terrain cut Enfusion applies underneath. Those are the difference between
-/// "the road network is there" and "the road network is finished", and the first is
-/// worth having on its own.
-LODShapeWithShadow* BuildRoadShape(const std::vector<float>& points, float width, const std::string& texture,
-                                   const std::string& material, const std::string& name)
+/// RFG-104: what the strip is made of comes from its own MatPBRRoad.
+///   * Three vertices across (left, centre, right), EACH draped on the ground through
+///     `groundY`. Draping only the centreline left a strip that is level across its
+///     width, so on any cross-slope the uphill edge sank under the terrain and the edge
+///     drew as a sawtooth where the ground poked through between vertices.
+///   * `OpacityMap` folded into the colour's alpha (`enfa|`): a road's look IS its
+///     coverage -- a dirt trail is two worn tracks with the ground showing between and
+///     beside them, not a solid band of gravel.
+///   * `Color` as a multiplier over the base texture (`enft|`), which on Everon's dirt
+///     roads is a near-black gravel tile that the colour turns grey-brown.
+///   * `NumVersions` side-by-side variants: U spans ONE of them, picked per road. U 0..1
+///     drew all of them abreast, which is a strip of parallel stripes.
+///   * V repeats every width / `TilingV` metres (`GlobalMapsUVTransform`), which leaves a
+///     2-version 0.5-tiling road texel-square.
+///
+/// Not modelled: crossings, end caps, line markings, Enfusion's terrain cut, and the
+/// along-road variant switching (MidPiece weights).
+//! RFG-162: one river's water surface for the renderer (Engine::SetRiverSurfaces): the dense
+//! centreline as the road pass leaves it (yaw folded in, at the river's water level, local to
+//! `origin`), a vertex either side at its half width, and per vertex the flow coordinates the
+//! water shader advects its ripples in -- metres along (downstream: the spline's direction
+//! unless `ReverseFlow`), the downstream direction, signed metres across, the half width.
+void AppendRiverWater(const ResolvedRoad& road, std::vector<float>& vertices, std::vector<uint32_t>& indices)
+{
+    const size_t count = road.points.size() / 3;
+    if (count < 2)
+        return;
+    const bool perPoint = road.pointWidths.size() == count;
+    const float defaultWidth = road.width > 0.1f ? road.width : 5.0f;
+    const float flowSign = road.reverseFlow ? -1.0f : 1.0f;
+    std::vector<float> run(count, 0.0f);
+    for (size_t i = 1; i < count; ++i)
+    {
+        const float dx = road.points[i * 3 + 0] - road.points[(i - 1) * 3 + 0];
+        const float dz = road.points[i * 3 + 2] - road.points[(i - 1) * 3 + 2];
+        run[i] = run[i - 1] + std::sqrt(dx * dx + dz * dz);
+    }
+    const float total = run.back();
+    const uint32_t base = static_cast<uint32_t>(vertices.size() / 8);
+    vertices.reserve(vertices.size() + count * 16);
+    for (size_t i = 0; i < count; ++i)
+    {
+        float dx = 0.0f, dz = 0.0f;
+        if (i + 1 < count)
+        {
+            dx += road.points[(i + 1) * 3 + 0] - road.points[i * 3 + 0];
+            dz += road.points[(i + 1) * 3 + 2] - road.points[i * 3 + 2];
+        }
+        if (i > 0)
+        {
+            dx += road.points[i * 3 + 0] - road.points[(i - 1) * 3 + 0];
+            dz += road.points[i * 3 + 2] - road.points[(i - 1) * 3 + 2];
+        }
+        const float length = std::sqrt(dx * dx + dz * dz);
+        if (length > 1e-4f)
+        {
+            dx /= length;
+            dz /= length;
+        }
+        else
+        {
+            dx = 1.0f;
+            dz = 0.0f;
+        }
+        const float half = 0.5f * (perPoint && road.pointWidths[i] > 0.1f ? road.pointWidths[i] : defaultWidth);
+        const float cx = road.origin[0] + road.points[i * 3 + 0];
+        const float cy = road.origin[1] + road.points[i * 3 + 1];
+        const float cz = road.origin[2] + road.points[i * 3 + 2];
+        const float along = road.reverseFlow ? total - run[i] : run[i];
+        for (const float side : {-1.0f, 1.0f})
+        {
+            const float across = side * half;
+            // `across` is measured to the left of the FLOW (the shader's frame), which is the
+            // spline's right where the river runs against it.
+            vertices.insert(vertices.end(), {cx - dz * across, cy, cz + dx * across, along, dx * flowSign,
+                                             dz * flowSign, across * flowSign, half});
+        }
+    }
+    for (uint32_t i = 0; i + 1 < count; ++i)
+    {
+        const uint32_t a = base + 2 * i, b = a + 1, c = a + 2, d = a + 3;
+        indices.insert(indices.end(), {a, c, b, b, c, d});
+    }
+}
+
+//! RFG-163: one pond's water surface for the renderer: its shore polygon (yaw folded in by the
+//! road pass, local to `origin`) ear-clipped flat at its lowest point -- the generator's
+//! m_bFlattenByBottomPlane. Still water: the vertex's half width is -1, which the water shader
+//! reads as "no current" (the ripples drift, they do not run); along/across are world x/z.
+bool AppendLakeWater(const ResolvedRoad& road, std::vector<float>& vertices, std::vector<uint32_t>& indices)
+{
+    size_t count = road.points.size() / 3;
+    if (count < 3)
+        return false;
+    std::vector<float> x, z;
+    x.reserve(count);
+    z.reserve(count);
+    float level = 1e30f;
+    for (size_t i = 0; i < count; ++i)
+    {
+        const float px = road.origin[0] + road.points[i * 3 + 0];
+        const float pz = road.origin[2] + road.points[i * 3 + 2];
+        level = std::min(level, road.origin[1] + road.points[i * 3 + 1]);
+        // Repeated points (the closing one included) would make zero-length edges that block
+        // every ear touching them.
+        if (!x.empty() && std::fabs(px - x.back()) < 1e-3f && std::fabs(pz - z.back()) < 1e-3f)
+            continue;
+        x.push_back(px);
+        z.push_back(pz);
+    }
+    count = x.size();
+    if (count > 3 && std::fabs(x[0] - x[count - 1]) < 1e-3f && std::fabs(z[0] - z[count - 1]) < 1e-3f)
+    {
+        x.pop_back();
+        z.pop_back();
+        --count;
+    }
+    if (count < 3)
+        return false;
+    // RFG-190: what the level rule chooses from, per pond (shore lowest / mean / highest).
+    {
+        float hi = -1e30f, sum = 0.0f;
+        const size_t raw = road.points.size() / 3;
+        for (size_t i = 0; i < raw; ++i)
+        {
+            const float y = road.origin[1] + road.points[i * 3 + 1];
+            hi = std::max(hi, y);
+            sum += y;
+        }
+        const float cx = 0.5f * (*std::min_element(x.begin(), x.end()) + *std::max_element(x.begin(), x.end()));
+        const float cz = 0.5f * (*std::min_element(z.begin(), z.end()) + *std::max_element(z.begin(), z.end()));
+        LOG_INFO(World, "RFG-190 pond at {:.0f},{:.0f} ({:.0f} m wide): shore low {:.2f} mean {:.2f} high {:.2f}", cx, cz,
+                 *std::max_element(x.begin(), x.end()) - *std::min_element(x.begin(), x.end()), level,
+                 sum / static_cast<float>(raw), hi);
+    }
+    double area = 0.0;
+    for (size_t i = 0; i < count; ++i)
+    {
+        const size_t j = (i + 1) % count;
+        area += static_cast<double>(x[i]) * z[j] - static_cast<double>(x[j]) * z[i];
+    }
+    if (std::fabs(area) < 1e-3)
+        return false;
+    const float orientation = area > 0.0 ? 1.0f : -1.0f;
+    const uint32_t base = static_cast<uint32_t>(vertices.size() / 8);
+    // Ripple coordinates local to the pond: world metres (to 12.8 km) are past what the shader's
+    // noise resolves.
+    const float ox = *std::min_element(x.begin(), x.end()), oz = *std::min_element(z.begin(), z.end());
+    for (size_t i = 0; i < count; ++i)
+        vertices.insert(vertices.end(), {x[i], level, z[i], x[i] - ox, 1.0f, 0.0f, z[i] - oz, -1.0f});
+    // Ear clipping: n is a few dozen at most.
+    std::vector<uint32_t> ring(count);
+    for (size_t i = 0; i < count; ++i)
+        ring[i] = static_cast<uint32_t>(i);
+    const auto cross = [&](uint32_t a, uint32_t b, uint32_t c)
+    { return (x[b] - x[a]) * (z[c] - z[a]) - (z[b] - z[a]) * (x[c] - x[a]); };
+    // Strictly inside: a shore point ON an ear's edge (collinear shore) does not block it.
+    const auto inside = [&](uint32_t p, uint32_t a, uint32_t b, uint32_t c)
+    {
+        const float d1 = cross(a, b, p) * orientation, d2 = cross(b, c, p) * orientation, d3 = cross(c, a, p) * orientation;
+        return d1 > 1e-6f && d2 > 1e-6f && d3 > 1e-6f;
+    };
+    size_t guard = count * count + 8;
+    while (ring.size() > 3 && guard-- > 0)
+    {
+        bool clipped = false;
+        for (size_t i = 0; i < ring.size(); ++i)
+        {
+            const uint32_t a = ring[(i + ring.size() - 1) % ring.size()], b = ring[i], c = ring[(i + 1) % ring.size()];
+            if (cross(a, b, c) * orientation <= 0.0f)
+                continue; // reflex (or straight) corner
+            bool ear = true;
+            for (const uint32_t p : ring)
+                if (p != a && p != b && p != c && inside(p, a, b, c))
+                {
+                    ear = false;
+                    break;
+                }
+            if (!ear)
+                continue;
+            indices.insert(indices.end(), {base + a, base + b, base + c});
+            ring.erase(ring.begin() + static_cast<ptrdiff_t>(i));
+            clipped = true;
+            break;
+        }
+        if (!clipped)
+            break; // a self-touching shore: what is left is not drawn rather than drawn wrong
+    }
+    if (ring.size() == 3)
+        indices.insert(indices.end(), {base + ring[0], base + ring[1], base + ring[2]});
+    // RFG-190: when the clipper gives up (Lake_Center's 884 m shore), the part it left is FILLED
+    // rather than dropped -- with a grid of cells whose centre lies inside what is left. Half of
+    // that lake drew as dry lakebed where Reforger has water to the far trees (Workbench measured
+    // the same 50.9 m level ours uses). The stepped edge sits under the shore terrain, which stands
+    // above the water. POSEIDON_POND_GRID_FILL=0 keeps the old drop.
+    static const bool gridFill = []
+    {
+        const char* env = std::getenv("POSEIDON_POND_GRID_FILL");
+        return !(env && env[0] == '0');
+    }();
+    if (ring.size() > 3)
+    {
+        const size_t left = ring.size();
+        if (gridFill)
+        {
+            float x0 = 1e30f, x1 = -1e30f, z0 = 1e30f, z1 = -1e30f;
+            for (const uint32_t p : ring)
+            {
+                x0 = std::min(x0, x[p]), x1 = std::max(x1, x[p]);
+                z0 = std::min(z0, z[p]), z1 = std::max(z1, z[p]);
+            }
+            const float cell = std::max(2.0f, std::max(x1 - x0, z1 - z0) / 160.0f);
+            // Even-odd point-in-polygon against the remaining ring.
+            const auto insideRing = [&](float px, float pz)
+            {
+                bool in = false;
+                for (size_t i = 0, j = ring.size() - 1; i < ring.size(); j = i++)
+                {
+                    const float xi = x[ring[i]], zi = z[ring[i]], xj = x[ring[j]], zj = z[ring[j]];
+                    if ((zi > pz) != (zj > pz) && px < (xj - xi) * (pz - zi) / (zj - zi) + xi)
+                        in = !in;
+                }
+                return in;
+            };
+            const float ox = *std::min_element(x.begin(), x.end()), oz = *std::min_element(z.begin(), z.end());
+            size_t cells = 0;
+            for (float cz = z0; cz < z1; cz += cell)
+                for (float cx = x0; cx < x1; cx += cell)
+                {
+                    if (!insideRing(cx + 0.5f * cell, cz + 0.5f * cell))
+                        continue;
+                    const uint32_t v = static_cast<uint32_t>(vertices.size() / 8);
+                    const float px[4] = {cx, cx + cell, cx, cx + cell};
+                    const float pz[4] = {cz, cz, cz + cell, cz + cell};
+                    for (int k = 0; k < 4; ++k)
+                        vertices.insert(vertices.end(), {px[k], level, pz[k], px[k] - ox, 1.0f, 0.0f, pz[k] - oz, -1.0f});
+                    // The ear triangles' winding: cross(a, b, c) * orientation > 0.
+                    if (orientation > 0.0f)
+                        indices.insert(indices.end(), {v, v + 1, v + 2, v + 1, v + 3, v + 2});
+                    else
+                        indices.insert(indices.end(), {v, v + 2, v + 1, v + 1, v + 2, v + 3});
+                    ++cells;
+                }
+            LOG_INFO(World, "RFG-190 pond: the shore clipper left {} of {} points; filled with {} cells of {:.1f} m",
+                     left, count, cells, cell);
+        }
+        else
+            LOG_INFO(World, "RFG-190 pond: the shore clipper left {} of {} points undrawn", left, count);
+    }
+    return true;
+}
+
+//! The model half of a road: the draped ribbon, through the MLOD round trip. Pure (the ground
+//! is read through `groundY`), so the loader builds every road's on the task pool and only
+//! registers the shapes on the main thread.
+//! PERF-DECAL-MERGE: the strip's geometry alone (BuildRoadModel wraps it into a Model), so several
+//! decal strips can be concatenated into ONE model. False when there is nothing to build.
+bool BuildRoadLod(const ResolvedRoad& road, const std::function<float(float, float)>& groundY, size_t variantSeed,
+                  Poseidon::Asset::Formats::MLOD::WriteLod& lodOut)
 {
     namespace Fmt = Poseidon::Asset::Formats;
 
+    // Densified to at most 2 m between centreline points: the strip is draped vertex by vertex,
+    // and the terrain between two draped vertices is not the straight line between them.
+    std::vector<float> points;
+    std::vector<float> halfWidths; // RFG-134: per point (rivers vary along their length)
+    {
+        const std::vector<float>& source = road.points;
+        const size_t sourceCount = source.size() / 3;
+        if (sourceCount < 2)
+            return false;
+        const float defaultWidth = (road.width > 0.1f) ? road.width : 6.0f;
+        const bool perPoint = road.pointWidths.size() == sourceCount;
+        const auto widthAt = [&](size_t i)
+        { return perPoint && road.pointWidths[i] > 0.1f ? road.pointWidths[i] : defaultWidth; };
+        points.reserve(source.size() * 2);
+        for (size_t i = 0; i < sourceCount; ++i)
+        {
+            if (i > 0)
+            {
+                const float dx = source[i * 3 + 0] - source[(i - 1) * 3 + 0];
+                const float dz = source[i * 3 + 2] - source[(i - 1) * 3 + 2];
+                const int steps = std::max(1, static_cast<int>(std::ceil(std::sqrt(dx * dx + dz * dz) / 2.0f)));
+                for (int k = 1; k < steps; ++k)
+                {
+                    const float t = static_cast<float>(k) / static_cast<float>(steps);
+                    for (int c = 0; c < 3; ++c)
+                        points.push_back(source[(i - 1) * 3 + c] + (source[i * 3 + c] - source[(i - 1) * 3 + c]) * t);
+                    halfWidths.push_back(0.5f * (widthAt(i - 1) + (widthAt(i) - widthAt(i - 1)) * t));
+                }
+            }
+            for (int c = 0; c < 3; ++c)
+                points.push_back(source[i * 3 + c]);
+            halfWidths.push_back(0.5f * widthAt(i));
+        }
+    }
     const size_t count = points.size() / 3;
-    if (count < 2)
-        return nullptr;
 
     // The authored default. Everon's roads that set `Width` cluster on 6-8 m; a road
     // that leaves it unset gets the commonest value rather than a zero-area ribbon.
-    const float halfWidth = 0.5f * ((width > 0.1f) ? width : 6.0f);
+    const float width = (road.width > 0.1f) ? road.width : 6.0f;
+    const float halfWidth = 0.5f * width;
 
     Fmt::MLOD::WriteLod lod;
     lod.resolution = 1.0f;
-    lod.points.reserve(count * 2);
-    lod.normals.reserve(count * 2);
-    lod.faces.reserve(count * 2);
+    lod.points.reserve(count * 3);
+    lod.normals.reserve(count * 3);
+    lod.faces.reserve(count * 4);
 
     std::vector<float> distance(count, 0.0f);
     for (size_t i = 1; i < count; ++i)
@@ -1467,74 +2838,143 @@ LODShapeWithShadow* BuildRoadShape(const std::vector<float>& points, float width
             dz = 0.0f;
         }
         // Perpendicular in the ground plane.
-        const float nx = -dz * halfWidth;
-        const float nz = dx * halfWidth;
-
-        Fmt::MLOD::WritePoint left;
-        left.position = {points[i * 3 + 0] + nx, points[i * 3 + 1], points[i * 3 + 2] + nz};
-        Fmt::MLOD::WritePoint right;
-        right.position = {points[i * 3 + 0] - nx, points[i * 3 + 1], points[i * 3 + 2] - nz};
-        lod.points.push_back(left);
-        lod.points.push_back(right);
-        // ONE NORMAL PER POINT, indexed by the point index, exactly as the `.xob`
-        // converter writes them. A single shared normal with every corner indexing 0
-        // is a legal MLOD and loads without complaint -- and the section it produces
-        // draws untextured, which is a much harder thing to see than a failure.
-        //
-        // And it points DOWN in the file, which is what an upward-facing surface
-        // looks like here: `MeshBuild.cpp:44` negates every normal on the way to the
-        // vertex buffer, and `shading.wgsl` then takes `max(dot(N, -sun), 0)`. A road
-        // written with +Y gets no sun term at all AND samples the sky irradiance from
-        // the darkest point of the dome -- which is the whole of "the roads are
-        // black". The `.xob` path reaches the same convention from the other side,
-        // via `fixOrientation`.
-        lod.normals.push_back({0.0f, -1.0f, 0.0f});
-        lod.normals.push_back({0.0f, -1.0f, 0.0f});
-    }
-
-    for (size_t i = 0; i + 1 < count; ++i)
-    {
-        // V tiles every 2 x width of length, which is what makes a 6 m road's texture
-        // square rather than smeared.
-        const float v0 = distance[i] / (halfWidth * 4.0f);
-        const float v1 = distance[i + 1] / (halfWidth * 4.0f);
-        const int32_t base = static_cast<int32_t>(i) * 2;
-        const float u[4] = {0.0f, 1.0f, 1.0f, 0.0f};
-        const float v[4] = {v0, v0, v1, v1};
-        const int32_t point[4] = {base, base + 1, base + 3, base + 2};
-        // Two triangles rather than one quad, for the same reason as the normals:
-        // this is the shape the converter emits and the one the whole path is
-        // exercised against.
-        //
-        // Ring order, and it is the RIGHT order even though the cross product of the
-        // corner edges comes out negative on Y. Reversing it -- which the arithmetic
-        // alone argues for -- makes every road disappear behind backface culling
-        // while its shadow stays, so the engine's front face here is the one ring
-        // order gives. The arithmetic was measured against the picture and lost.
-        const int triangle[2][3] = {{0, 1, 2}, {0, 2, 3}};
-        for (const auto& corners : triangle)
+        const float half = road.river ? halfWidths[i] : halfWidth;
+        const float nx = -dz * half;
+        const float nz = dx * half;
+        const float cx = points[i * 3 + 0], cz = points[i * 3 + 2];
+        for (const float side : {1.0f, 0.0f, -1.0f}) // left, centre, right
         {
-            Fmt::MLOD::WriteFace face;
-            face.vertexCount = 3;
-            // A road without a texture (dirt tracks, and any material that
-            // resolves to no colour texture) would otherwise draw with the
-            // white untextured fallback across metres of landscape. Give it a
-            // flat dirt-grey constant through the existing `enfc|` mechanism
-            // (RFG-039) instead: native road ribbons only, no legacy path
-            // names such a texture.
-            face.texture = texture.empty() ? "enfc|0.40,0.35,0.29" : texture;
-            face.material = material;
-            for (int c = 0; c < 3; ++c)
-            {
-                face.vertices[c].point = point[corners[c]];
-                face.vertices[c].normal = point[corners[c]];
-                face.vertices[c].u = u[corners[c]];
-                face.vertices[c].v = v[corners[c]];
-            }
-            lod.faces.push_back(face);
+            Fmt::MLOD::WritePoint point;
+            const float x = cx + side * nx, z = cz + side * nz;
+            // RFG-134: a river is a level water surface across its width, at its centreline
+            // height. The banks cover its edges: Reforger's authored Width is the full ribbon,
+            // and at the matched Workbench pose only the part below the banks shows (lifting
+            // the edges onto the ground drew a 7 m river ~2.5x wider than Reforger's frame).
+            const float y = road.river ? points[i * 3 + 1] : groundY(x, z) + road.liftM;
+            point.position = {x, y, z};
+            lod.points.push_back(point);
+            // ONE NORMAL PER POINT, indexed by the point index, exactly as the `.xob`
+            // converter writes them. A single shared normal with every corner indexing 0
+            // is a legal MLOD and loads without complaint -- and the section it produces
+            // draws untextured, which is a much harder thing to see than a failure.
+            //
+            // And it points DOWN in the file, which is what an upward-facing surface
+            // looks like here: `MeshBuild.cpp:44` negates every normal on the way to the
+            // vertex buffer, and `shading.wgsl` then takes `max(dot(N, -sun), 0)`. A road
+            // written with +Y gets no sun term at all AND samples the sky irradiance from
+            // the darkest point of the dome -- which is the whole of "the roads are
+            // black". The `.xob` path reaches the same convention from the other side,
+            // via `fixOrientation`.
+            lod.normals.push_back({0.0f, -1.0f, 0.0f});
         }
     }
 
+    // Upper envelope. Each quad is checked against the terrain at its centre and edge
+    // midpoints; where the ground rises above the quad's own interpolation there, its corners
+    // are raised by the shortfall. Draping corners alone left whole stretches under a convex
+    // terrain cell -- a run of the strip vanishing behind a straight triangle edge.
+    //
+    // RFG-134: never for a river. Its surface is level water and its banks are MEANT to cover
+    // its edges (measured on Everon: banks 0.4 m above the spline at 1.5 m out, 1.4 m at 4.5 m);
+    // raising the strip onto them drew every river at its full authored Width.
+    if (!road.river)
+    {
+        std::vector<float> raise(lod.points.size(), 0.0f);
+        const auto at = [&](size_t index)
+        {
+            const auto& p = lod.points[index].position;
+            return std::array<float, 3>{p.x, p.y, p.z};
+        };
+        for (size_t i = 0; i + 1 < count; ++i)
+            for (size_t c = 0; c < 2; ++c)
+            {
+                const size_t a = i * 3 + c, b = i * 3 + c + 1, d = (i + 1) * 3 + c, e = (i + 1) * 3 + c + 1;
+                float shortfall = 0.0f;
+                for (const auto& [s, t] : {std::pair{0.5f, 0.5f}, std::pair{0.5f, 0.0f}, std::pair{0.5f, 1.0f},
+                                           std::pair{0.0f, 0.5f}, std::pair{1.0f, 0.5f}})
+                {
+                    // Bilinear over the quad (s across, t along) -- what the two triangles give
+                    // to within their shared diagonal.
+                    const auto lerp = [](const auto& p, const auto& q, float k)
+                    {
+                        return std::array<float, 3>{p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k,
+                                                    p[2] + (q[2] - p[2]) * k};
+                    };
+                    const auto near = lerp(at(a), at(b), s), far = lerp(at(d), at(e), s);
+                    const auto mid = lerp(near, far, t);
+                    shortfall = std::max(shortfall, groundY(mid[0], mid[2]) - mid[1]);
+                }
+                for (const size_t v : {a, b, d, e})
+                    raise[v] = std::max(raise[v], shortfall);
+            }
+        for (size_t v = 0; v < lod.points.size(); ++v)
+            lod.points[v].position.y += raise[v];
+    }
+
+    // A road without a texture (dirt tracks, and any material that resolves to no colour
+    // texture) would otherwise draw with the white untextured fallback across metres of
+    // landscape: a flat dirt-grey constant through `enfc|` (RFG-039) instead.
+    std::string texture = road.texture.empty() ? "enfc|0.40,0.35,0.29" : road.texture;
+    static const bool roadOpacity = [] {
+        const char* value = std::getenv("POSEIDON_ROAD_OPACITY");
+        return !(value && value[0] == '0');
+    }();
+    if (!road.texture.empty() && !road.opacity.empty() && roadOpacity)
+        texture = "enfa|" + road.opacity + "|" + texture;
+    if (!road.texture.empty() && road.tinted && Poseidon::Enfusion::LayerTintEnabled())
+        texture = Poseidon::Enfusion::MakeLayerTintName(road.tint, texture);
+
+    const int versions = std::max(1, road.versions);
+    const float slice = 1.0f / static_cast<float>(versions);
+    const float u0 = slice * static_cast<float>(variantSeed % static_cast<size_t>(versions));
+    const float uc = u0 + 0.5f * slice, u1 = u0 + slice;
+    // V per metre of length. Without a TilingV, every 2 x width as before.
+    const float vPerMetre = road.tilingV > 0.0f ? road.tilingV / width : 1.0f / (2.0f * width);
+
+    for (size_t i = 0; i + 1 < count; ++i)
+    {
+        const float v0 = distance[i] * vPerMetre;
+        const float v1 = distance[i + 1] * vPerMetre;
+        const int32_t base = static_cast<int32_t>(i) * 3;
+        // Two quads across: left-centre and centre-right. Each in the ring order the
+        // single-quad strip used (near-left, near-right, far-right, far-left), which is
+        // the engine's front face here even though the corner cross product comes out
+        // negative on Y -- reversing it hides every road behind backface culling while
+        // its shadow stays. The arithmetic was measured against the picture and lost.
+        struct Quad
+        {
+            int32_t point[4];
+            float u[4];
+        };
+        const Quad quads[2] = {{{base, base + 1, base + 4, base + 3}, {u0, uc, uc, u0}},
+                               {{base + 1, base + 2, base + 5, base + 4}, {uc, u1, u1, uc}}};
+        const float v[4] = {v0, v0, v1, v1};
+        const int triangle[2][3] = {{0, 1, 2}, {0, 2, 3}};
+        for (const Quad& quad : quads)
+            for (const auto& corners : triangle)
+            {
+                Fmt::MLOD::WriteFace face;
+                face.vertexCount = 3;
+                face.texture = texture;
+                face.material = road.material;
+                for (int c = 0; c < 3; ++c)
+                {
+                    face.vertices[c].point = quad.point[corners[c]];
+                    face.vertices[c].normal = quad.point[corners[c]];
+                    face.vertices[c].u = quad.u[corners[c]];
+                    face.vertices[c].v = v[corners[c]];
+                }
+                lod.faces.push_back(face);
+            }
+    }
+    lodOut = std::move(lod);
+    return true;
+}
+
+std::shared_ptr<Poseidon::Model::Model> ModelFromRoadLod(Poseidon::Asset::Formats::MLOD::WriteLod&& lod,
+                                                         const std::string& name)
+{
+    namespace Fmt = Poseidon::Asset::Formats;
     Fmt::MLOD::WriteModel model;
     model.lods.push_back(std::move(lod));
 
@@ -1545,7 +2985,17 @@ LODShapeWithShadow* BuildRoadShape(const std::vector<float>& points, float width
         Fmt::MLODLoader::loadFromBuffer(buffer.data(), static_cast<int>(buffer.size()), name));
     if (parsed->lodLevels.empty())
         return nullptr;
-    return Poseidon::Shapes.NewFromModel(name.c_str(), false, true, parsed, nullptr);
+    return parsed;
+}
+
+std::shared_ptr<Poseidon::Model::Model> BuildRoadModel(const ResolvedRoad& road,
+                                                       const std::function<float(float, float)>& groundY,
+                                                       size_t variantSeed, const std::string& name)
+{
+    Poseidon::Asset::Formats::MLOD::WriteLod lod;
+    if (!BuildRoadLod(road, groundY, variantSeed, lod))
+        return nullptr;
+    return ModelFromRoadLod(std::move(lod), name);
 }
 
 /// RFG-013: one `.xob` in the archives -> one shape the engine can draw.
@@ -1565,13 +3015,19 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
     namespace Enf = Poseidon::Asset::Formats::Enfusion;
     namespace Fmt = Poseidon::Asset::Formats;
 
+    // RFG-121: a mesh key may carry the placing prefab's material remap (enfm|...|<xob>).
+    std::vector<std::pair<std::string, std::string>> materialRemap;
+    std::vector<float> lodFactors; // RFG-182
+    const std::string xobFile = Enf::SplitRemappedMeshKey(xobPath, &materialRemap, &lodFactors);
     std::vector<uint8_t> bytes;
-    if (!mount.Read(xobPath, bytes))
+    if (!mount.Read(xobFile, bytes))
     {
         why = "not in any archive";
         return nullptr;
     }
     Enf::ConvertOptions options;
+    options.materialRemap = std::move(materialRemap);
+    options.lodFactors = std::move(lodFactors);
     // Both corrections ON. They are opt-in flags in the tool because that is where
     // the A/B lives; for a world that has to look right there is no argument for
     // either default. Orientation is an XOR PAIR -- negate the normal AND swap the
@@ -1585,6 +3041,21 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
     // 1..5 brings that impostor in to a few tens of metres, which reads as a forest of
     // flat cards.
     options.lodFromThreshold = true;
+    // RFG-103: and in the threshold's own unit, screen-height coverage. The engine selects a
+    // level once distance * lodInvWidth * tan(halfFovX) passes its resolution; with
+    // lodInvWidth = lodCoef * 2 / width that reaches coverage c of a diameter-D model at
+    // resolution lodCoef * D / (height * c). Calibrated at the reference camera the bench
+    // and default config use (lodCoef 10, 1080 lines); other widths and lodCoef settings then
+    // scale these models exactly as they scale the engine's own. POSEIDON_XOB_LOD_COVERAGE=0
+    // restores the RFG-022 ratio ladder for the A/B.
+    {
+        const char* env = std::getenv("POSEIDON_XOB_LOD_COVERAGE");
+        options.lodCoverageScale = (env && env[0] == '0' && env[1] == '\0') ? 0.0f : 10.0f / 1080.0f;
+        // RFG-111: Enfusion's measured triangle/pixel rule in place of the template thresholds.
+        // POSEIDON_XOB_LOD_TPP overrides K (0 = the RFG-103 threshold reading).
+        const char* tpp = std::getenv("POSEIDON_XOB_LOD_TPP");
+        options.lodTrianglesPerPixel = tpp ? static_cast<float>(std::atof(tpp)) : 0.8f;
+    }
     // RFG-072: BOTH UV sets. A `MatPBRMulti` paints its GLOBAL_MASK in the `.xob`'s second
     // stream (`UVSrcGlobalMaps "UV set 2"`), and without this block the mask sampled the
     // first -- the metre-scale tiling unwrap, u[-16..32] on Church_01's walls -- and
@@ -1597,7 +3068,7 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
     Fmt::MLOD::WriteModel model;
     Enf::ConvertStats stats;
     const MountMaterialSink sink(mount);
-    if (!Enf::ConvertXob(bytes, options, &sink, xobPath, model, stats, why))
+    if (!Enf::ConvertXob(bytes, options, &sink, xobFile, model, stats, why))
         return nullptr;
 
     // RFG-040: does the material path survive the trip? A section with no surface
@@ -1606,10 +3077,10 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
     // report mat '(none)'" are one question, asked at two ends of the same chain. Count
     // it at the point the model leaves the converter, before MLOD can be blamed.
     {
-        static int reportedMat = 0;
-        if (reportedMat < 3 && !model.lods.empty())
+        // Atomic: this runs on the streaming workers and the load's task pool too.
+        static std::atomic<int> reportedMat{0};
+        if (!model.lods.empty() && reportedMat.fetch_add(1, std::memory_order_relaxed) < 3)
         {
-            ++reportedMat;
             size_t withMaterial = 0, withTexture = 0;
             for (const auto& face : model.lods[0].faces)
             {
@@ -1641,15 +3112,21 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
     return parsed;
 }
 
-LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::string& xobPath, std::string& why)
+//! The ShapeBank half of BuildShapeFromXob: MAIN THREAD ONLY (bank insert, texture and
+//! material banks). BuildModelFromXob is the half that may run on workers.
+//! `preadapted`: the model already converted with its bank tables (ConvertModelsOnPool); the
+//! bank adopts it. Null converts in place, as before.
+LODShapeWithShadow* InstallShapeFromXobModel(const std::string& xobPath, std::shared_ptr<Poseidon::Model::Model> parsed,
+                                             std::string& why, LODShapeWithShadow* preadapted = nullptr)
 {
-    std::shared_ptr<Poseidon::Model::Model> parsed = BuildModelFromXob(mount, xobPath, why);
+    std::unique_ptr<LODShapeWithShadow> adopted(preadapted);
     if (!parsed)
         return nullptr;
     // The name is only a cache key here -- no file is opened, because the parsed
     // model is handed in.
     Poseidon::ShapeBank::WorldModelScope worldModel(Poseidon::Shapes); // RFG-099
-    LODShapeWithShadow* shape = Poseidon::Shapes.NewFromModel(xobPath.c_str(), false, true, parsed, nullptr);
+    LODShapeWithShadow* shape =
+        Poseidon::Shapes.NewFromModel(xobPath.c_str(), false, true, parsed, nullptr, adopted.release());
     if (shape == nullptr)
     {
         why = "ShapeBank refused the model";
@@ -1725,7 +3202,7 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
     // untextured-section warning -- that fires only when a section binds NOTHING, and
     // all 166 of those were roads. A wrong texture is bound, not absent, so the list
     // of what IS bound is the only thing that can name it.
-    if (std::getenv("POSEIDON_REFORGER_TEXTURE_CENSUS") != nullptr && shape->NLevels() > 0)
+    if (POSEIDON_GETENV_ONCE("POSEIDON_REFORGER_TEXTURE_CENSUS") != nullptr && shape->NLevels() > 0)
     {
         static std::map<std::string, size_t> census;
         static size_t shapesSeen = 0;
@@ -1763,6 +3240,76 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
     }
     return shape;
 }
+
+LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::string& xobPath, std::string& why)
+{
+    return InstallShapeFromXobModel(xobPath, BuildModelFromXob(mount, xobPath, why), why);
+}
+
+//! PERF (2026-10-14): converts `models[i]` (installed as `names[i]`) with their bank tables
+//! ahead of the install, the conversion itself on the pool. The split is the object
+//! streamer's (SIM-807): the tables -- every texture and material bank call -- are built here,
+//! on the main thread and in model order, and only the tables-mode conversion, which makes no
+//! bank calls, runs on workers. For an MLOD model that is the whole conversion (its tail has
+//! no proxies and stays inside it), so the shape the bank adopts is the one it would have
+//! built. Entries the pool cannot convert stay null and convert in place.
+//! POSEIDON_PART_POOL_ADAPT=0 converts every part and road in place.
+std::vector<std::unique_ptr<LODShapeWithShadow>>
+ConvertModelsOnPool(const std::vector<std::string>& names,
+                    const std::vector<std::shared_ptr<Poseidon::Model::Model>>& models)
+{
+    namespace Adapter = Poseidon::Model::ShapeAdapter;
+    std::vector<std::unique_ptr<LODShapeWithShadow>> out(models.size());
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("POSEIDON_PART_POOL_ADAPT");
+        return !(v && v[0] == '0');
+    }();
+    Poseidon::TaskPool* pool = Poseidon::GetGlobalTaskPool();
+    if (!enabled || pool == nullptr || models.size() < 2)
+        return out;
+    std::vector<Adapter::AdapterBankTables> tables(models.size());
+    std::vector<uint8_t> wanted(models.size(), 0);
+    for (size_t i = 0; i < models.size(); ++i)
+    {
+        Poseidon::Model::Model* model = models[i].get();
+        if (model == nullptr || model->sourceFormat != "MLOD" || model->lodLevels.empty() ||
+            Poseidon::Shapes.Find(names[i].c_str(), false, true) != nullptr)
+            continue;
+        bool sp3x = true;
+        for (const auto& lod : model->lodLevels)
+            sp3x = sp3x && lod.sourceEncoding == "SP3X";
+        if (sp3x)
+            continue; // the bank sends an all-SP3X MLOD down its legacy loader
+        // The adapter names the shape from sourcePath: the bank's lowered, 127-character key.
+        std::string low = names[i].substr(0, 127);
+        for (char& c : low)
+            if (c >= 'A' && c <= 'Z')
+                c = static_cast<char>(c - 'A' + 'a');
+        model->sourcePath = low;
+        Adapter::BuildAdapterBankTables(*model, tables[i]);
+        wanted[i] = 1;
+    }
+    pool->ParallelFor(static_cast<uint32_t>(models.size()),
+                      [&](uint32_t start, uint32_t end)
+                      {
+                          for (uint32_t i = start; i < end; ++i)
+                          {
+                              if (!wanted[i])
+                                  continue;
+                              try
+                              {
+                                  out[i].reset(Adapter::convertToLODShape(*models[i], false, &tables[i],
+                                                                          /*finishTail=*/false));
+                              }
+                              catch (...)
+                              {
+                                  out[i].reset();
+                              }
+                          }
+                      });
+    return out;
+}
 } // namespace
 
 namespace
@@ -1779,6 +3326,75 @@ std::shared_ptr<Poseidon::Model::Model> LoadXobModelForCache(const std::string& 
     return BuildModelFromXob(mount, path, why);
 }
 } // namespace
+
+// RFG-187: the native world's own place on Earth. Reforger puts the sun from the world's
+// `TimeAndWeatherManager_<World>.et` (Everon: Latitude 47.685, Longitude -27.311); OP used the OFP
+// default of 40 N for every world, so at the same hour the sun stood higher and elsewhere -- a
+// matched parity pose had its lit and shaded walls swapped. Read at load, applied by
+// World::ParseCfgWorld, which runs after the landscape. POSEIDON_ENFUSION_GEO=0 = the old 40 N.
+namespace
+{
+struct EnfusionGeo
+{
+    bool valid = false;
+    float latitudeDeg = 0.0f;
+    float longitudeDeg = 0.0f;
+};
+EnfusionGeo GEnfusionGeo;
+
+// `<Key> <number>` at the entity's top level of one `.et`, walking up its prefab parents.
+bool FindPrefabNumber(const EnfusionMount& mount, std::string path, const char* key, float& out)
+{
+    for (int depth = 0; depth < 8 && !path.empty(); ++depth)
+    {
+        std::vector<uint8_t> blob;
+        if (!mount.Read(path, blob))
+            return false;
+        const std::string text(reinterpret_cast<const char*>(blob.data()), blob.size());
+        const std::string needle = std::string("\n ") + key + " ";
+        if (const size_t at = text.find(needle); at != std::string::npos)
+        {
+            out = std::strtof(text.c_str() + at + needle.size(), nullptr);
+            return true;
+        }
+        const auto parsed = Poseidon::Asset::Material::ParseEmat(text);
+        path = parsed.parentPath;
+    }
+    return false;
+}
+
+void ResolveEnfusionGeo(const EnfusionMount& mount, const std::string& worldDirectory)
+{
+    GEnfusionGeo = {};
+    const char* env = std::getenv("POSEIDON_ENFUSION_GEO");
+    if (env && env[0] == '0')
+        return;
+    // worlds/eden -> Eden (the prefab folders are capitalised; the mount reads case-insensitively
+    // when it can, so try the authored spelling first).
+    std::string name = worldDirectory.substr(worldDirectory.find_last_of("/\\") + 1);
+    if (name.empty())
+        return;
+    name[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(name[0])));
+    const std::string prefab = "Prefabs/World/Game/" + name + "/TimeAndWeatherManager_" + name + ".et";
+    float lat = 0.0f, lon = 0.0f;
+    if (FindPrefabNumber(mount, prefab, "Latitude", lat) && FindPrefabNumber(mount, prefab, "Longitude", lon))
+    {
+        GEnfusionGeo = {true, lat, lon};
+        LOG_INFO(World, "Enfusion native load: RFG-187 geo from {}: latitude {:.3f}, longitude {:.3f}", prefab, lat, lon);
+    }
+    else
+        LOG_INFO(World, "Enfusion native load: RFG-187 no geo prefab {} -- the world keeps its CfgWorlds latitude", prefab);
+}
+} // namespace
+
+bool Poseidon::GetEnfusionWorldGeo(float& latitudeDeg, float& longitudeDeg)
+{
+    if (!GEnfusionGeo.valid)
+        return false;
+    latitudeDeg = GEnfusionGeo.latitudeDeg;
+    longitudeDeg = GEnfusionGeo.longitudeDeg;
+    return true;
+}
 
 bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirectory, bool localPreview)
 {
@@ -1804,6 +3420,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
         LOG_WARN(World, "Enfusion native load: {}", terrain.error);
         return false;
     }
+    ResolveEnfusionGeo(EnfusionMount::Instance(), selectedNativeWorld);
 
     const TerrainDescriptor& d = terrain.descriptor;
     const float extent = d.WorldWidth();
@@ -1816,7 +3433,20 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
     // The engine's grids are powers of two. 2048 terrain cells over 12.8 km is 6.25 m,
     // matching what the converting exporter emits, so a native frame and a converted
     // one are the same resolution and can be compared directly.
-    const int terrainRange = 2048;
+    //
+    // RFG-135: 4096 (3.125 m) by default against Reforger's own 2 m field -- at 6.25 m a 7 m
+    // river channel or a road cut is a single sample wide, and the smoothed V floated the rivers.
+    // Terrain GPU time measured unchanged at the river pose (CDLOD: 1.27-1.43 ms at 6.25 m,
+    // 1.40-1.70 ms at 3.125 m, run noise); load +15 s. POSEIDON_REFORGER_TERRAIN_CELLS=2048 restores.
+    static const int terrainRange = []
+    {
+        const char* v = std::getenv("POSEIDON_REFORGER_TERRAIN_CELLS");
+        const int wanted = (v != nullptr && *v != 0) ? std::atoi(v) : 4096;
+        for (int candidate : {8192, 4096, 2048})
+            if (wanted >= candidate)
+                return candidate;
+        return 2048;
+    }();
     // RFG-009: 1024 land cells, not 256. The surface index is ONE material per land
     // cell, so a 50 m cell paints fifty metres of ground with whichever material sat
     // under its centre -- visible as square patches from the air. 12.5 m is four times
@@ -1850,6 +3480,34 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
     // second thing to be wrong about.
     const uint32_t gridW = d.gridWidth;
     const uint32_t gridH = d.gridHeight;
+    // RFG-135: finer than the default grid, the source is sampled bilinearly -- at 3.125 m over
+    // a 2 m field, point sampling moves every bank and cut by up to a metre.
+    if (terrainRange > 2048)
+    {
+        const float scaleX = static_cast<float>(gridW - 1) / static_cast<float>(terrainRange);
+        const float scaleZ = static_cast<float>(gridH - 1) / static_cast<float>(terrainRange);
+        const auto raw = [&](uint32_t sx, uint32_t sz)
+        {
+            return static_cast<float>(
+                terrain.heights[static_cast<size_t>(std::min(sz, gridH - 1)) * gridW + std::min(sx, gridW - 1)]);
+        };
+        for (int z = 0; z < terrainRange; ++z)
+        {
+            const float fz = static_cast<float>(z) * scaleZ;
+            const uint32_t z0 = static_cast<uint32_t>(fz);
+            const float tz = fz - static_cast<float>(z0);
+            for (int x = 0; x < terrainRange; ++x)
+            {
+                const float fx = static_cast<float>(x) * scaleX;
+                const uint32_t x0 = static_cast<uint32_t>(fx);
+                const float tx = fx - static_cast<float>(x0);
+                const float top = raw(x0, z0) + (raw(x0 + 1, z0) - raw(x0, z0)) * tx;
+                const float bottom = raw(x0, z0 + 1) + (raw(x0 + 1, z0 + 1) - raw(x0, z0 + 1)) * tx;
+                SetData(x, z, (top + (bottom - top) * tz) * d.heightScale + d.heightOffset);
+            }
+        }
+    }
+    else
     for (int z = 0; z < terrainRange; ++z)
     {
         const uint32_t srcZ = std::min<uint32_t>(
@@ -1903,6 +3561,57 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                 ++histogram[index];
         }
     }
+
+    // RFG-PBR: the surface map the terrain shader blends, point-sampled at texel centres out of the
+    // 1 m masks onto a 4096 grid (3.1 m on Everon; 16 MB on the GPU as R8). The land cell keeps its
+    // single index above for everything that wants one (clutter, AI, the rain medium).
+    _enfusionSurfaceMap.clear();
+    _enfusionSurfaceEdge = 0;
+    if (terrain.materialEdge > 0)
+    {
+        const int edge = static_cast<int>(std::min<uint32_t>(terrain.materialEdge, 4096));
+        _enfusionSurfaceMap.assign(static_cast<size_t>(edge) * edge, 0);
+        for (int z = 0; z < edge; ++z)
+        {
+            const uint32_t mz = std::min<uint32_t>(
+                terrain.materialEdge - 1,
+                static_cast<uint32_t>((z + 0.5) * terrain.materialEdge / edge));
+            for (int x = 0; x < edge; ++x)
+            {
+                const uint32_t mx = std::min<uint32_t>(
+                    terrain.materialEdge - 1,
+                    static_cast<uint32_t>((x + 0.5) * terrain.materialEdge / edge));
+                const uint8_t sample = terrain.materials[static_cast<size_t>(mz) * terrain.materialEdge + mx];
+                _enfusionSurfaceMap[static_cast<size_t>(z) * edge + x] =
+                    sample != 0xFF && sample < d.materials.size() ? sample : 0;
+            }
+        }
+        _enfusionSurfaceEdge = edge;
+    }
+    // POSEIDON_ENFUSION_PROBE="x,z;x,z": the authored surface at those world points, from the
+    // 1 m masks -- to name the ground in a capture before reasoning about how it renders.
+    if (const char* probe = std::getenv("POSEIDON_ENFUSION_PROBE"); probe != nullptr && terrain.materialEdge > 0)
+    {
+        const float metresPerTexel = extent / static_cast<float>(terrain.materialEdge);
+        for (const char* p = probe; *p != 0;)
+        {
+            char* end = nullptr;
+            const float px = std::strtof(p, &end);
+            if (end == p || *end != ',')
+                break;
+            const float pz = std::strtof(end + 1, &end);
+            const uint32_t mx = std::min<uint32_t>(terrain.materialEdge - 1, static_cast<uint32_t>(std::max(px, 0.0f) / metresPerTexel));
+            const uint32_t mz = std::min<uint32_t>(terrain.materialEdge - 1, static_cast<uint32_t>(std::max(pz, 0.0f) / metresPerTexel));
+            const uint8_t m = terrain.materials[static_cast<size_t>(mz) * terrain.materialEdge + mx];
+            LOG_INFO(World, "Enfusion probe [{:.0f} {:.0f}]: surface {} {}", px, pz, m,
+                     m < d.materials.size() ? d.materials[m] : std::string("(none)"));
+            p = (*end == ';') ? end + 1 : end;
+            if (*end == 0)
+                break;
+        }
+    }
+    _enfusionTilePrefix = terrain.tilePrefix;
+    _enfusionTilesX = static_cast<int>(terrain.tilesX);
 
     // The palette itself. The names resolve to nothing yet -- they are `.emat` paths
     // INSIDE the archives, and the engine's file layer cannot open a `.pak` -- so the
@@ -1997,6 +3706,17 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                      summary.placements, summary.withGuid, summary.meshResolved, summary.distinctMeshes,
                      summary.terrainRelative, Poseidon::Foundation::GlobalTickCount() - placeStart,
                      summary.firstFailure.empty() ? "" : ("; first failure: " + summary.firstFailure), top);
+            LOG_INFO(World,
+                     "Enfusion native load: RFG-130 Y rule from EntityFlags.RELATIVE_Y: {} placements moved to "
+                     "terrain-relative, {} to absolute, {} prefab chains declare no Flags (|Y|<2 heuristic kept) "
+                     "(POSEIDON_Y_RULE_FLAGS=0 = heuristic only)",
+                     summary.yRuleToRelative, summary.yRuleToAbsolute, summary.yRuleUnknown);
+            LOG_INFO(World, "Enfusion native load: RFG-134 {} rivers (spline + RiverEntity, MatRiver), RFG-163 {} "
+                            "ponds (polyline + LakeGeneratorEntity) (POSEIDON_ENFUSION_RIVERS=0 = off)",
+                     summary.rivers, summary.lakes);
+            LOG_INFO(World, "Enfusion native load: RFG-194 {} terrain decals (DecalEntity, TerrainOnly) as strips "
+                            "(POSEIDON_ENFUSION_DECALS=0 = off)",
+                     summary.decals);
 
             // RFG-013: build the meshes and put their placements in the world.
             //
@@ -2194,38 +3914,162 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
             std::unordered_map<uint32_t, LODShapeWithShadow*> attachShapes;
             size_t attachBuilt = 0, attachBuildFailed = 0;
             std::string firstAttachFailure;
-            for (size_t i = 0; !deferAttachmentShapes && i < attachMeshes.size(); ++i)
+            // (PERF, 2026-10-14) The model half of every part is built up front on the task
+            // pool -- archive read + XOB convert + in-memory MLOD round trip, the same pure
+            // path the streaming workers run -- and only the ShapeBank install stays serial,
+            // in the original order. 1,429 parts on Everon: 19.5 s serial on the main thread.
+            std::vector<std::shared_ptr<Poseidon::Model::Model>> attachModels;
+            std::vector<std::string> attachWhy;
+            if (!deferAttachmentShapes)
             {
-                std::string why;
-                LODShapeWithShadow* shape =
-                    BuildShapeFromXob(EnfusionMount::Instance(), attachMeshes[i].first, why);
-                if (shape == nullptr)
+                attachModels.resize(attachMeshes.size());
+                attachWhy.resize(attachMeshes.size());
+                std::atomic<int64_t> workUs{0};
+                const auto buildModel = [&](size_t i)
                 {
-                    ++attachBuildFailed;
-                    if (firstAttachFailure.empty())
-                        firstAttachFailure = attachMeshes[i].first + ": " + why;
-                    continue;
-                }
-                attachShapes.emplace(static_cast<uint32_t>(i), shape);
-                ++attachBuilt;
+                    const auto t = std::chrono::steady_clock::now();
+                    attachModels[i] = BuildModelFromXob(EnfusionMount::Instance(), attachMeshes[i].first, attachWhy[i]);
+                    workUs.fetch_add(
+                        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t)
+                            .count(),
+                        std::memory_order_relaxed);
+                };
+                const auto parallelStart = std::chrono::steady_clock::now();
+                Poseidon::TaskPool* pool = Poseidon::GetGlobalTaskPool();
+                if (pool != nullptr && attachMeshes.size() > 1)
+                    pool->ParallelFor(static_cast<uint32_t>(attachMeshes.size()),
+                                      [&](uint32_t start, uint32_t end)
+                                      {
+                                          for (uint32_t i = start; i < end; ++i)
+                                              buildModel(i);
+                                      });
+                else
+                    for (size_t i = 0; i < attachMeshes.size(); ++i)
+                        buildModel(i);
+                LOG_INFO(
+                    World, "Enfusion native load: {} part models built in {:.0f} ms on {} threads ({:.0f} ms of work)",
+                    attachMeshes.size(),
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - parallelStart).count(),
+                    pool != nullptr ? pool->ThreadCount() : 1u, workUs.load() / 1000.0);
             }
+            const auto installStart = std::chrono::steady_clock::now();
+            // PERF (2026-10-14): each chunk's textures first, on the pool; its installs then take
+            // them instead of reading and decoding each on this thread. Chunked so the prepared
+            // sources waiting to be taken stay well inside the store's byte budget.
+            std::unordered_set<std::string> installTextureClaims;
+            Poseidon::NativeInstallTexturePrep partTextures;
+            constexpr size_t kInstallChunk = 192;
+            for (size_t chunk = 0; !deferAttachmentShapes && chunk < attachMeshes.size(); chunk += kInstallChunk)
+            {
+                const size_t chunkEnd = std::min(attachMeshes.size(), chunk + kInstallChunk);
+                {
+                    std::vector<const Poseidon::Model::Model*> batch;
+                    for (size_t i = chunk; i < chunkEnd; ++i)
+                        batch.push_back(attachModels[i].get());
+                    const auto prep = Poseidon::PrepareNativeInstallTextures(batch, Poseidon::GetGlobalTaskPool(),
+                                                                             installTextureClaims);
+                    partTextures.names += prep.names;
+                    partTextures.prepared += prep.prepared;
+                    partTextures.failed += prep.failed;
+                    partTextures.ms += prep.ms;
+                }
+                const Poseidon::NativeInstallTextureScope installTextures;
+                std::vector<std::unique_ptr<LODShapeWithShadow>> converted;
+                {
+                    std::vector<std::string> names;
+                    std::vector<std::shared_ptr<Poseidon::Model::Model>> models;
+                    for (size_t i = chunk; i < chunkEnd; ++i)
+                    {
+                        names.push_back(attachMeshes[i].first);
+                        models.push_back(attachModels[i]);
+                    }
+                    converted = ConvertModelsOnPool(names, models);
+                }
+                for (size_t i = chunk; i < chunkEnd; ++i)
+                {
+                    std::string why = std::move(attachWhy[i]);
+                    LODShapeWithShadow* shape = InstallShapeFromXobModel(
+                        attachMeshes[i].first, std::move(attachModels[i]), why, converted[i - chunk].release());
+                    if (shape == nullptr)
+                    {
+                        ++attachBuildFailed;
+                        if (firstAttachFailure.empty())
+                            firstAttachFailure = attachMeshes[i].first + ": " + why;
+                        continue;
+                    }
+                    attachShapes.emplace(static_cast<uint32_t>(i), shape);
+                    ++attachBuilt;
+                }
+            }
+            if (!deferAttachmentShapes)
+                LOG_INFO(World, "Enfusion native load: part textures prepared {} of {} ({} fell back) in {:.0f} ms",
+                         partTextures.prepared, partTextures.names, partTextures.failed, partTextures.ms);
+            if (!deferAttachmentShapes)
+                LOG_INFO(
+                    World, "Enfusion native load: {} part shapes installed in {:.0f} ms", attachBuilt,
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - installStart).count());
             const DWORD buildMs = Poseidon::Foundation::GlobalTickCount() - buildStart;
 
             // Near first here too: the object cap walks this list in order, so leaving
             // it in file order empties whatever region the file happened to write
             // last -- which is a different region every world and none of them the
             // one being looked at.
-            std::stable_sort(placed.begin(), placed.end(),
-                             [&](const ResolvedPlacement& a, const ResolvedPlacement& b)
-                             {
-                                 const float ax = a.position[0] - focusX, az = a.position[2] - focusZ;
-                                 const float bx = b.position[0] - focusX, bz = b.position[2] - focusZ;
-                                 return ax * ax + az * az < bx * bx + bz * bz;
-                             });
+            //
+            // Sorted by key -- the distance worked out once per placement rather than twice per
+            // comparison, ties broken by file position -- which is exactly the order the
+            // stable_sort by distance this replaces produced, on 1.2 M placements.
+            {
+                std::vector<std::pair<float, uint32_t>> order(placed.size());
+                for (size_t i = 0; i < placed.size(); ++i)
+                {
+                    const float ax = placed[i].position[0] - focusX, az = placed[i].position[2] - focusZ;
+                    order[i] = {ax * ax + az * az, static_cast<uint32_t>(i)};
+                }
+                std::sort(order.begin(), order.end(),
+                          [](const std::pair<float, uint32_t>& a, const std::pair<float, uint32_t>& b)
+                          { return a.first < b.first || (!(b.first < a.first) && a.second < b.second); });
+                std::vector<ResolvedPlacement> sorted;
+                sorted.reserve(placed.size());
+                for (const auto& entry : order)
+                    sorted.push_back(placed[entry.second]);
+                placed = std::move(sorted);
+            }
 
             size_t added = 0;
             size_t attachPlaced = 0;
             size_t attachSkipped = 0;
+            // RFG-157: the doors of these buildings, registered as their parts are placed.
+            _enfusionDoors.Clear();
+            _enfusionGlass.Clear(); // RFG-158
+            std::vector<int> doorOfPart; // per part of the current building: its door index, or -1
+            const auto registerDoorPart = [&](const AttachSet& set, size_t partIndex, int objectId,
+                                              const Matrix4& frame)
+            {
+                if (!Poseidon::EnfusionDoorRegistry::Enabled())
+                    return;
+                if (partIndex == 0)
+                    doorOfPart.assign(set.parts.size(), -1);
+                const MeshAttachment& part = set.parts[partIndex];
+                if (part.doorAngle != 0.0f)
+                {
+                    Poseidon::EnfusionDoorRegistry::Spec spec;
+                    spec.angleDeg = part.doorAngle;
+                    for (int i = 0; i < 3; ++i)
+                        spec.action[i] = part.doorAction[i];
+                    spec.radius = part.doorRadius;
+                    doorOfPart[partIndex] = _enfusionDoors.AddDoor(_enfusionDoors.AddSpec(spec), objectId, frame);
+                }
+                else if (part.doorLeaf >= 0 && static_cast<size_t>(part.doorLeaf) < doorOfPart.size() &&
+                         doorOfPart[static_cast<size_t>(part.doorLeaf)] >= 0)
+                    _enfusionDoors.AddMember(doorOfPart[static_cast<size_t>(part.doorLeaf)], objectId, frame);
+            };
+            const auto frameOf = [](const Vector3& position, const Matrix3& orientation)
+            {
+                Matrix4 frame;
+                frame.SetOrientation(orientation);
+                frame.SetPosition(position);
+                return frame;
+            };
             size_t buriedObjects = 0;
             size_t buriedStructures = 0;
             size_t rescuedObjects = 0;
@@ -2320,6 +4164,22 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                 _modernObjectPlacements.push_back(std::move(placement));
                 _modernObjectCells[static_cast<size_t>(cz) * _landRange + cx].push_back(index);
             };
+            // RFG-114: `placement slopelandcontact` -- keep the authored heading, stand the object
+            // on the ground's normal (central differences over 1 m), so a fence run follows the
+            // slope instead of stepping down it in level pieces.
+            size_t slopeAligned = 0;
+            const auto slopeFrame = [this, &slopeAligned](const Matrix3& yawed, float x, float z)
+            {
+                const float d = 1.0f;
+                const float hx = SurfaceY(x + d, z) - SurfaceY(x - d, z);
+                const float hz = SurfaceY(x, z + d) - SurfaceY(x, z - d);
+                Vector3 normal(-hx / (2.0f * d), 1.0f, -hz / (2.0f * d));
+                normal.Normalize();
+                Matrix3 framed;
+                framed.SetUpAndDirection(normal, yawed.Direction());
+                ++slopeAligned;
+                return framed;
+            };
             for (const ResolvedPlacement& item : placed)
             {
                 if (streamNative)
@@ -2342,6 +4202,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                         orientation = orientation * Matrix3(MRotationX, item.pitchDeg * 0.01745329252f);
                     if (std::fabs(item.rollDeg) > 0.01f)
                         orientation = orientation * Matrix3(MRotationZ, item.rollDeg * 0.01745329252f);
+                    if (item.slopeAlign)
+                        orientation = slopeFrame(orientation, item.position[0], item.position[2]);
                     if (std::fabs(item.scale - 1.0f) > 1e-3f)
                         orientation = orientation * Matrix3(MScale, item.scale);
                     const Vector3 position(item.position[0], y, item.position[2]);
@@ -2349,10 +4211,21 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     ++streamed;
                     if (item.attachSet != kNoAttachSet)
                     {
-                        for (const MeshAttachment& part : attachSets[item.attachSet].parts)
+                        const AttachSet& set = attachSets[item.attachSet];
+                        for (size_t partIndex = 0; partIndex < set.parts.size(); ++partIndex)
                         {
-                            pushStreamPlacement(static_cast<uint32_t>(meshes.size() + part.mesh),
-                                                position + orientation * part.offset, orientation * part.basis);
+                            const MeshAttachment& part = set.parts[partIndex];
+                            const Vector3 partPosition = position + orientation * part.offset;
+                            const Matrix3 partOrientation = orientation * part.basis;
+                            pushStreamPlacement(static_cast<uint32_t>(meshes.size() + part.mesh), partPosition,
+                                                partOrientation);
+                            registerDoorPart(set, partIndex, _modernObjectPlacements.back().id,
+                                             frameOf(partPosition, partOrientation));
+                            if (part.glassBroken != 0xffffffffu && Poseidon::EnfusionGlassRegistry::Enabled())
+                                _enfusionGlass.AddPane(static_cast<uint32_t>(_modernObjectPlacements.size() - 1),
+                                                       _modernObjectPlacements.back().id,
+                                                       static_cast<uint32_t>(meshes.size() + part.glassBroken),
+                                                       partPosition);
                             ++streamedParts;
                         }
                     }
@@ -2434,6 +4307,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                         orientation = orientation * Matrix3(MRotationX, item.pitchDeg * 0.01745329252f);
                     if (std::fabs(item.rollDeg) > 0.01f)
                         orientation = orientation * Matrix3(MRotationZ, item.rollDeg * 0.01745329252f);
+                    if (item.slopeAlign)
+                        orientation = slopeFrame(orientation, item.position[0], item.position[2]);
                     if (std::fabs(item.scale - 1.0f) > 1e-3f)
                         orientation = orientation * Matrix3(MScale, item.scale);
                     placedObject->SetOrientation(orientation);
@@ -2449,8 +4324,12 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     // exceeding the cap by the number of its openings.
                     if (item.attachSet != kNoAttachSet)
                     {
-                        for (const MeshAttachment& part : attachSets[item.attachSet].parts)
+                        const AttachSet& set = attachSets[item.attachSet];
+                        for (size_t partIndex = 0; partIndex < set.parts.size(); ++partIndex)
                         {
+                            const MeshAttachment& part = set.parts[partIndex];
+                            if (partIndex == 0 && Poseidon::EnfusionDoorRegistry::Enabled())
+                                doorOfPart.assign(set.parts.size(), -1);
                             const auto partShape = attachShapes.find(part.mesh);
                             if (partShape == attachShapes.end())
                             {
@@ -2466,6 +4345,9 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                                 continue;
                             }
                             attached->SetOrientation(orientation * part.basis);
+                            registerDoorPart(set, partIndex, attached->ID(), attached->Transform());
+                            if (part.glassBroken != 0xffffffffu && Poseidon::EnfusionGlassRegistry::Enabled())
+                                _enfusionGlass.AddPane(0xffffffffu, attached->ID(), 0xffffffffu, here);
                             ++attachPlaced;
                         }
                     }
@@ -2559,6 +4441,62 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                              item.position[0], item.position[1], item.position[2], meshes[item.mesh].first);
                 }
             }
+            // RFG-130: the Y-rule census, by entity class. For each placement: raw Y, the drawn
+            // ground under it, and which reading puts it ON that ground. An absolute Y that is
+            // far from the ground while Y itself is a small offset says "relative"; one that
+            // matches the ground says "absolute". Measured, then the rule follows the data.
+            if (YCensusClasses().size() > 1)
+            {
+                struct Row
+                {
+                    size_t n = 0, flags = 0, small = 0, absOnGround = 0, relOnly = 0, neither = 0;
+                    std::vector<std::string> examples;
+                };
+                std::vector<Row> rows(YCensusClasses().size());
+                for (const ResolvedPlacement& item : placed)
+                {
+                    Row& row = rows[item.classIndex < rows.size() ? item.classIndex : 0];
+                    ++row.n;
+                    if (item.hasFlags)
+                    {
+                        ++row.flags;
+                        continue;
+                    }
+                    const float y = item.position[1];
+                    const float g = SurfaceY(item.position[0], item.position[2]);
+                    if (std::fabs(y) < 2.0f)
+                    {
+                        ++row.small;
+                        continue;
+                    }
+                    if (std::fabs(y - g) < 1.5f)
+                        ++row.absOnGround;
+                    else if (y > 0.0f && y < 40.0f)
+                    {
+                        ++row.relOnly;
+                        if (row.examples.size() < 4 && static_cast<size_t>(item.mesh) < meshes.size())
+                            row.examples.push_back(meshes[item.mesh].first + " Y=" + std::to_string(y) +
+                                                   " ground=" + std::to_string(g) + " at " +
+                                                   std::to_string(int(item.position[0])) + "," +
+                                                   std::to_string(int(item.position[2])));
+                    }
+                    else
+                        ++row.neither;
+                }
+                for (size_t i = 0; i < rows.size(); ++i)
+                {
+                    const Row& row = rows[i];
+                    if (row.n < 50)
+                        continue;
+                    std::string ex;
+                    for (const auto& e : row.examples)
+                        ex += " | " + e;
+                    LOG_INFO(World,
+                             "RFG-130 Y census: class '{}' n={} flags={} flagless|Y|<2={} flagless absolute-on-ground={} "
+                             "flagless off-ground small-offset(0..40)={} other={}{}",
+                             YCensusClasses()[i], row.n, row.flags, row.small, row.absOnGround, row.relOnly, row.neither, ex);
+                }
+            }
             LOG_INFO(World,
                      "Enfusion native load: built {} of {} meshes ({} failed) in {} ms, placed {} objects "
                      "({} more than 2 m under the terrain, {} of them structures, {} rescued from below 10 m){}{}",
@@ -2567,6 +4505,9 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                      firstBuriedStructure.empty() ? (firstBuried.empty() ? "" : ("; first: " + firstBuried))
                                                   : ("; first structure: " + firstBuriedStructure),
                      firstBuildFailure.empty() ? "" : ("; first build failure: " + firstBuildFailure));
+            LOG_INFO(World, "Enfusion native load: {} placements stood on the terrain normal (prefab placement "
+                            "slopelandcontact, no stored tilt; POSEIDON_SLOPE_PLACEMENT=0 = off)",
+                     slopeAligned);
 
             // RFG-064: the one line that says whether the houses got their doors
             // back. Everything else about this feature is invisible from the air --
@@ -2583,6 +4524,23 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                      attachBuilt, attachBuildFailed, attachPlaced, summary.slotBuildings, attachSkipped,
                      summary.slotFailure.empty() ? "" : ("; first slot failure: " + summary.slotFailure),
                      firstAttachFailure.empty() ? "" : ("; first build failure: " + firstAttachFailure));
+            LOG_INFO(World,
+                     "Enfusion native load: RFG-120 prefab children: {} prefabs place {} transform children "
+                     "(furniture, props; per distinct prefab) (POSEIDON_PREFAB_CHILDREN); RFG-128: {} socket "
+                     "parts take their parent's inline material override (POSEIDON_SLOT_MATERIALS)",
+                     summary.childPrefabs, summary.childParts, summary.slotRemapped);
+            LOG_INFO(World,
+                     "Enfusion native load: RFG-157 doors: {} door leaves in {} building prefabs carry {} riding "
+                     "parts ({} DoorComponents not WholeEntity, skipped); {} doors registered with {} parts "
+                     "(POSEIDON_ENFUSION_DOORS={})",
+                     summary.doorLeaves, summary.slotPrefabs, summary.doorMembers, summary.doorSkipped,
+                     _enfusionDoors.Count(), _enfusionDoors.MemberCount(), Poseidon::EnfusionDoorRegistry::Enabled() ? 1 : 0);
+            LOG_INFO(World,
+                     "Enfusion native load: RFG-158 glass: {} destructible pane parts with a broken-phase model ({} "
+                     "without one, left whole) per building prefab; {} panes registered "
+                     "(POSEIDON_ENFUSION_GLASS_BREAK={})",
+                     summary.glassPanes, summary.glassNoPhase, _enfusionGlass.Count(),
+                     Poseidon::EnfusionGlassRegistry::Enabled() ? 1 : 0);
 
             // RFG-027: the road network. One shape per road rather than one shared
             // shape placed many times, because every road is a different length and
@@ -2590,7 +4548,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
             if (std::getenv("POSEIDON_REFORGER_NO_ROADS") == nullptr)
             {
                 const DWORD roadStart = Poseidon::Foundation::GlobalTickCount();
-                size_t roadsBuilt = 0, roadsFailed = 0, roadTextured = 0;
+                size_t roadsBuilt = 0, roadsFailed = 0, roadTextured = 0, decalsMerged = 0;
                 std::map<std::string, size_t> textureUse;
                 double roadKm = 0.0;
                 // The land cells under the tarmac, for the clutter bake. A road is a
@@ -2600,12 +4558,24 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                 // `cs_clutter_prepare$HOLES` permutation in the corpus). One byte per
                 // cell, marked below as each ribbon is built.
                 _enfusionRoadCells.assign(static_cast<size_t>(_landRange) * static_cast<size_t>(_landRange), 0);
+                _enfusionRoadSegments.clear();
                 size_t roadCells = 0;
+                // PERF (2026-10-14): three passes. Building each ribbon's model -- drape
+                // samples, the MLOD write and its parse -- was ~6 s of native Everon's load
+                // on the main thread, one road after another. Preparing the centrelines
+                // (densify, rotate, drape, the length total) stays serial and in order; the
+                // models build on the task pool; registration, the land-cell marks and
+                // AddObject then run serially in the same road order as before, so names,
+                // object order and every counter come out as they did.
+                std::vector<char> roadReady(roads.size(), 0);
                 for (size_t r = 0; r < roads.size(); ++r)
                 {
                     ResolvedRoad& road = roads[r];
                     if (road.points.size() < 6)
                         continue;
+                    // RFG-163: a pond keeps its shore polygon as authored (rotated below) and its
+                    // points' own heights -- the water stands at the lowest of them.
+                    const bool lake = road.lake;
 
                     // Subdivide before draping. Everon's centrelines average one point
                     // every 16 m (26,271 points over 419.8 km) and run much longer than
@@ -2615,10 +4585,15 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     // That is exactly what the first draped capture showed, and it is
                     // a sampling artefact rather than a height-rule one -- the rule was
                     // right, the ribbon simply had nowhere to bend.
+                    if (!lake)
                     {
                         std::vector<float> dense;
+                        std::vector<float> denseWidths; // RFG-134: rivers only
+                        const bool widths = road.river && road.pointWidths.size() == road.points.size() / 3;
                         dense.reserve(road.points.size() * 4);
                         const size_t source = road.points.size() / 3;
+                        const auto widthAt = [&](size_t i)
+                        { return road.pointWidths[i] > 0.1f ? road.pointWidths[i] : road.width; };
                         for (size_t i = 0; i + 1 < source; ++i)
                         {
                             const float ax = road.points[i * 3 + 0];
@@ -2637,12 +4612,17 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                                 dense.push_back(ax + (bx - ax) * t);
                                 dense.push_back(ay + (by - ay) * t);
                                 dense.push_back(az + (bz - az) * t);
+                                if (widths)
+                                    denseWidths.push_back(widthAt(i) + (widthAt(i + 1) - widthAt(i)) * t);
                             }
                         }
                         dense.push_back(road.points[(source - 1) * 3 + 0]);
                         dense.push_back(road.points[(source - 1) * 3 + 1]);
                         dense.push_back(road.points[(source - 1) * 3 + 2]);
+                        if (widths)
+                            denseWidths.push_back(widthAt(source - 1));
                         road.points = std::move(dense);
+                        road.pointWidths = std::move(denseWidths);
                     }
 
                     const size_t pointCount = road.points.size() / 3;
@@ -2690,14 +4670,32 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                     // than as a road. Draping costs the smooth profile -- the road
                     // now follows every 12.5 m step of the coarse terrain -- and that
                     // is the cheaper defect until the terrain carries the road cut.
-                    for (size_t i = 0; i < pointCount; ++i)
+                    for (size_t i = 0; i < pointCount && !lake; ++i)
                     {
                         const float worldX = road.origin[0] + road.points[i * 3 + 0];
                         const float worldZ = road.origin[2] + road.points[i * 3 + 2];
                         const float splineY = road.origin[1] + road.points[i * 3 + 1];
                         const float groundY = SurfaceY(worldX, worldZ);
-                        (void)splineY;
-                        road.points[i * 3 + 1] = groundY + 0.08f - road.origin[1];
+                        // RFG-134: a river's surface is its spline, already raised by its own
+                        // SplineOffsetUp in `origin` -- Reforger's authored water level. Measured on
+                        // Everon the 2 m channel bottom sits within ~0.1 m of it; our resampled ground
+                        // smooths that V upward, so lifting the water onto it (the first cut) floated
+                        // every river a few decimetres high. POSEIDON_RIVER_ON_GROUND=1 restores the 5 cm lift.
+                        if (road.river)
+                        {
+                            static const bool onGround = []
+                            {
+                                const char* env = std::getenv("POSEIDON_RIVER_ON_GROUND");
+                                return env && env[0] == '1';
+                            }();
+                            // Never under the ground at the centreline, though: the 3.125 m field
+                            // still rounds the channel bottom up in places, and a river that
+                            // dips under it breaks into pieces (2 cm, not the first cut's 5).
+                            road.points[i * 3 + 1] =
+                                std::max(splineY, groundY + (onGround ? 0.05f : 0.02f)) - road.origin[1];
+                        }
+                        else
+                            road.points[i * 3 + 1] = groundY + 0.08f - road.origin[1];
                         if (i > 0)
                         {
                             const float dx = road.points[i * 3 + 0] - road.points[(i - 1) * 3 + 0];
@@ -2706,24 +4704,191 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                         }
                     }
 
-                    const std::string name = "enfusion_road_" + std::to_string(r);
-                    LODShapeWithShadow* shape =
-                        BuildRoadShape(road.points, road.width, road.texture, road.material, name);
-                    if (shape == nullptr)
+                    roadReady[r] = 1;
+                }
+                // RFG-162: rivers go to the renderer as water when it can draw them, instead of
+                // becoming opaque ribbon objects (WGR_RIVERS=0 keeps the ribbons).
+                const bool riversAsWater = Poseidon::GEngine != nullptr && Poseidon::GEngine->SupportsRiverSurfaces();
+                std::vector<float> riverVertices;
+                std::vector<uint32_t> riverIndices;
+                const float* riverLook = nullptr;
+                size_t riversAsWaterCount = 0, lakesAsWater = 0;
+                std::vector<std::shared_ptr<Poseidon::Model::Model>> roadModels(roads.size());
+                // PERF-DECAL-MERGE: Everon's ~4,000 terrain decals (RFG-194) were each their own
+                // blended object -- hundreds of separate draws in the transparent pass (~0.4 ms
+                // GPU at the village pose, A/B with POSEIDON_ENFUSION_DECALS=0). Decals whose
+                // origins share a 64 m cell are now concatenated into the first one's model
+                // (vertices rebased to its origin); faces keep their own texture, so a mixed
+                // cell is one object with a few sections. The others are skipped below.
+                // POSEIDON_ENFUSION_DECAL_MERGE=0 keeps one object per decal.
+                std::vector<std::vector<size_t>> decalGroups;   // leader -> members (incl. leader)
+                std::vector<int64_t> decalLeader(roads.size(), -1);
+                {
+                    static const bool decalMerge = []
                     {
-                        ++roadsFailed;
+                        const char* v = std::getenv("POSEIDON_ENFUSION_DECAL_MERGE");
+                        return !(v && v[0] == '0');
+                    }();
+                    if (decalMerge)
+                    {
+                        std::unordered_map<uint64_t, size_t> cellGroup;
+                        for (size_t r = 0; r < roads.size(); ++r)
+                        {
+                            if (!roadReady[r] || !roads[r].decal || roads[r].lake || roads[r].river)
+                                continue;
+                            const int64_t cx = static_cast<int64_t>(std::floor(roads[r].origin[0] / 64.0f));
+                            const int64_t cz = static_cast<int64_t>(std::floor(roads[r].origin[2] / 64.0f));
+                            const uint64_t key = (static_cast<uint64_t>(cx) << 32) ^ static_cast<uint64_t>(cz & 0xffffffff);
+                            auto [it, fresh] = cellGroup.try_emplace(key, decalGroups.size());
+                            if (fresh)
+                                decalGroups.push_back({});
+                            decalGroups[it->second].push_back(r);
+                            decalLeader[r] = static_cast<int64_t>(decalGroups[it->second].front());
+                        }
+                    }
+                }
+                std::vector<int64_t> groupOfLeader(roads.size(), -1);
+                for (size_t g = 0; g < decalGroups.size(); ++g)
+                    groupOfLeader[decalGroups[g].front()] = static_cast<int64_t>(g);
+                {
+                    const auto buildRoad = [&](size_t r)
+                    {
+                        if (!roadReady[r] || roads[r].lake || (riversAsWater && roads[r].river))
+                            return;
+                        if (decalLeader[r] >= 0 && decalLeader[r] != static_cast<int64_t>(r))
+                            return; // merged into its cell's leader
+                        const ResolvedRoad& road = roads[r];
+                        if (groupOfLeader[r] >= 0 && decalGroups[static_cast<size_t>(groupOfLeader[r])].size() > 1)
+                        {
+                            namespace Fmt = Poseidon::Asset::Formats;
+                            Fmt::MLOD::WriteLod merged;
+                            merged.resolution = 1.0f;
+                            for (const size_t m : decalGroups[static_cast<size_t>(groupOfLeader[r])])
+                            {
+                                const ResolvedRoad& member = roads[m];
+                                const auto groundM = [this, &member](float x, float z)
+                                { return SurfaceY(member.origin[0] + x, member.origin[2] + z) + 0.08f - member.origin[1]; };
+                                Fmt::MLOD::WriteLod part;
+                                if (!BuildRoadLod(member, groundM, m, part))
+                                    continue;
+                                const float ox = member.origin[0] - road.origin[0];
+                                const float oy = member.origin[1] - road.origin[1];
+                                const float oz = member.origin[2] - road.origin[2];
+                                const int32_t base = static_cast<int32_t>(merged.points.size());
+                                for (auto point : part.points)
+                                {
+                                    point.position.x += ox;
+                                    point.position.y += oy;
+                                    point.position.z += oz;
+                                    merged.points.push_back(point);
+                                }
+                                merged.normals.insert(merged.normals.end(), part.normals.begin(), part.normals.end());
+                                for (auto face : part.faces)
+                                {
+                                    for (int c = 0; c < face.vertexCount; ++c)
+                                    {
+                                        face.vertices[c].point += base;
+                                        face.vertices[c].normal += base;
+                                    }
+                                    merged.faces.push_back(face);
+                                }
+                            }
+                            if (!merged.faces.empty())
+                                roadModels[r] = ModelFromRoadLod(std::move(merged), "enfusion_road_" + std::to_string(r));
+                            return;
+                        }
+                        // Each strip vertex sits on the engine's own terrain, 8 cm up, whatever the
+                        // centreline's height (see BuildRoadModel: a strip draped by its centre
+                        // alone sinks its uphill edge).
+                        const auto ground = [this, &road](float x, float z)
+                        { return SurfaceY(road.origin[0] + x, road.origin[2] + z) + 0.08f - road.origin[1]; };
+                        roadModels[r] =
+                            BuildRoadModel(road, ground, static_cast<size_t>(r), "enfusion_road_" + std::to_string(r));
+                    };
+                    Poseidon::TaskPool* pool = Poseidon::GetGlobalTaskPool();
+                    if (pool != nullptr && roads.size() > 1)
+                        pool->ParallelFor(static_cast<uint32_t>(roads.size()),
+                                          [&](uint32_t start, uint32_t end)
+                                          {
+                                              for (uint32_t r = start; r < end; ++r)
+                                                  buildRoad(r);
+                                          });
+                    else
+                        for (size_t r = 0; r < roads.size(); ++r)
+                            buildRoad(r);
+                }
+                // Their textures first, on the pool, as for the part shapes above.
+                std::optional<Poseidon::NativeInstallTextureScope> roadTextures;
+                {
+                    std::vector<const Poseidon::Model::Model*> batch;
+                    batch.reserve(roadModels.size());
+                    for (const auto& model : roadModels)
+                        if (model)
+                            batch.push_back(model.get());
+                    std::unordered_set<std::string> roadTextureClaims;
+                    const auto prep =
+                        Poseidon::PrepareNativeInstallTextures(batch, Poseidon::GetGlobalTaskPool(), roadTextureClaims);
+                    LOG_INFO(World, "Enfusion native load: road textures prepared {} of {} ({} fell back) in {:.0f} ms",
+                             prep.prepared, prep.names, prep.failed, prep.ms);
+                    roadTextures.emplace();
+                }
+                // Converted on the pool and adopted below, as the part shapes are.
+                std::vector<std::unique_ptr<LODShapeWithShadow>> roadShapes;
+                {
+                    std::vector<std::string> names(roads.size());
+                    std::vector<std::shared_ptr<Poseidon::Model::Model>> models(roads.size());
+                    for (size_t r = 0; r < roads.size(); ++r)
+                        if (roadReady[r] && roadModels[r])
+                        {
+                            names[r] = "enfusion_road_" + std::to_string(r);
+                            models[r] = roadModels[r];
+                        }
+                    roadShapes = ConvertModelsOnPool(names, models);
+                }
+                for (size_t r = 0; r < roads.size(); ++r)
+                {
+                    if (!roadReady[r])
+                        continue;
+                    if (decalLeader[r] >= 0 && decalLeader[r] != static_cast<int64_t>(r))
+                    {
+                        ++decalsMerged;
+                        continue; // PERF-DECAL-MERGE: drawn by its cell's leader
+                    }
+                    ResolvedRoad& road = roads[r];
+                    const size_t pointCount = road.points.size() / 3;
+                    if (road.lake)
+                    {
+                        if (riversAsWater && AppendLakeWater(road, riverVertices, riverIndices))
+                            ++lakesAsWater;
                         continue;
                     }
-                    if (!road.texture.empty())
-                        ++roadTextured;
-                    ++textureUse[road.texture];
+                    const bool asWater = riversAsWater && road.river;
+                    LODShapeWithShadow* shape = nullptr;
+                    if (!asWater)
+                    {
+                        const std::string name = "enfusion_road_" + std::to_string(r);
+                        shape = roadModels[r] ? Poseidon::Shapes.NewFromModel(name.c_str(), false, true,
+                                                                              std::move(roadModels[r]), nullptr,
+                                                                              roadShapes[r].release())
+                                              : nullptr;
+                        if (shape == nullptr)
+                        {
+                            ++roadsFailed;
+                            continue;
+                        }
+                        if (!road.texture.empty())
+                            ++roadTextured;
+                        ++textureUse[road.texture];
+                    }
                     // Mark every land cell within half the road width plus a 1 m verge of
                     // the centreline. The dense points are up to 4 m apart (up to ~8 m
                     // where a source segment rounded down to one step), so each segment
                     // is walked at 2 m and each sample tests the cells it can reach as a
                     // disc against the cell SQUARE -- a cell the ribbon merely clips at a
                     // corner is cleared too, which is what actually keeps grass off the
-                    // tarmac at this grid. The same default width BuildRoadShape uses.
+                    // tarmac at this grid. The same default width BuildRoadModel uses.
+                    // RFG-194: not for decals -- a dirt patch or footprints lie IN the grass.
+                    if (!road.decal)
                     {
                         const float reach = 0.5f * ((road.width > 0.1f) ? road.width : 6.0f) + 1.0f;
                         const float reach2 = reach * reach;
@@ -2734,6 +4899,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                             const float bx = road.origin[0] + road.points[(i + 1) * 3 + 0];
                             const float bz = road.origin[2] + road.points[(i + 1) * 3 + 2];
                             const float length = std::sqrt((bx - ax) * (bx - ax) + (bz - az) * (bz - az));
+                            _enfusionRoadSegments.insert(_enfusionRoadSegments.end(),
+                                                         {ax, az, bx, bz, reach - 1.0f});
                             const int sub = std::max(1, static_cast<int>(std::ceil(length / 2.0f)));
                             for (int k = 0; k <= sub; ++k)
                             {
@@ -2769,20 +4936,38 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                             }
                         }
                     }
+                    if (asWater)
+                    {
+                        AppendRiverWater(road, riverVertices, riverIndices);
+                        riverLook = road.riverLook;
+                        ++riversAsWaterCount;
+                        continue;
+                    }
                     // The vertices are already local to `origin`, and a road carries
                     // no rotation of its own -- the spline is authored in world axes.
                     AddObject(Vector3(road.origin[0], road.origin[1], road.origin[2]), road.yawDeg, shape);
                     ++roadsBuilt;
                 }
+                if (riversAsWater)
+                {
+                    // One look for all of them: Everon's rivers share RiverSurface_01 (the last
+                    // river's MatRiver stands for the set).
+                    Poseidon::GEngine->SetRiverSurfaces(riverVertices.data(), riverVertices.size(), riverIndices.data(),
+                                              riverIndices.size(), riverLook, riverLook ? 10u : 0u);
+                    _riversUploaded = !riverVertices.empty();
+                    LOG_INFO(World, "Enfusion native load: RFG-162 {} rivers, RFG-163 {} ponds drawn as water ({} vertices)",
+                             riversAsWaterCount, lakesAsWater, riverVertices.size() / 8);
+                }
+                roadTextures.reset();
                 for (const auto& [path, count] : textureUse)
                     LOG_INFO(World, "Enfusion native load: road surface {}x '{}'", count,
                              path.empty() ? "(none)" : path);
                 LOG_INFO(World, "Enfusion native load: {} objects more than 50 m above the terrain{}",
                      floatingObjects, firstFloating.empty() ? "" : ("; first: " + firstFloating));
             LOG_INFO(World,
-                     "Enfusion native load: {} roads built ({} failed, {} textured), {:.1f} km, {} of {} land cells "
-                     "under roads ({:.2f}%), {} ms",
-                     roadsBuilt, roadsFailed, roadTextured, roadKm, roadCells, _enfusionRoadCells.size(),
+                     "Enfusion native load: {} roads built ({} failed, {} textured, {} decals merged into their "
+                     "cell's object), {:.1f} km, {} of {} land cells under roads ({:.2f}%), {} ms",
+                     roadsBuilt, roadsFailed, roadTextured, decalsMerged, roadKm, roadCells, _enfusionRoadCells.size(),
                      _enfusionRoadCells.empty() ? 0.0 : 100.0 * double(roadCells) / double(_enfusionRoadCells.size()),
                      Poseidon::Foundation::GlobalTickCount() - roadStart);
             }
@@ -2801,7 +4986,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
     }
     {
         // RFG-096: the second UV set carries the MatPBRMulti mask; say what it looked like.
-        const auto& uv = Poseidon::Asset::Formats::Enfusion::GXobUvCensus();
+        auto& uv = Poseidon::Asset::Formats::Enfusion::GXobUvCensus();
+        std::lock_guard<std::mutex> censusLock(uv.mutex); // streaming workers may still be converting
         LOG_INFO(World,
                  "Enfusion native load: UV set 2 census -- {} parts carry one, {} outside [0,1], {} degenerate (all "
                  "corners one texel), first outside: {}",
@@ -2815,6 +5001,15 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirec
                  uv.partsFaceUvScaled, uv.firstFaceUvScaled.empty() ? "-" : uv.firstFaceUvScaled.c_str());
     }
     InitGeography();
+    // RFG-135: point-for-point terrain comparison against Reforger's own BaseWorld.GetSurfaceY
+    // (the Workbench RfProbe helper reads the same file format: one "x z" per line).
+    if (const char* probe = std::getenv("POSEIDON_SURFACE_PROBE"); probe != nullptr && *probe != 0)
+    {
+        std::ifstream in(probe);
+        float x = 0.0f, z = 0.0f;
+        while (in >> x >> z)
+            LOG_INFO(World, "RFG-135 probe {:.2f} {:.2f} {:.3f}", x, z, SurfaceY(x, z));
+    }
     ProgressFinish();
 
     // RFG-066: the denominator for "are the buildings' textures right". Without it the

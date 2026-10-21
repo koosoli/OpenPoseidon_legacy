@@ -298,6 +298,18 @@ void SmokeSourceVehicle::SimulateExplosion()
     if (!_exploded && _explosionTime <= Glob.time)
     {
         _exploded = true;
+        {
+            // FIRE-002: with Fire Pro drawing it, a wreck burns and smokes for ten minutes and
+            // takes three more to die down -- a real car fire burns 10-20 minutes (the 2001 wreck:
+            // 40 s and 40 s). Every wreck: this was inside the "big fuel explosion" branch below,
+            // so a jeep (little fuel, hit <= 50) kept the config's ~10 s and went out in seconds
+            // (owner, 2026-10-19: "the burning jeep ... is only burning for several seconds").
+            const float rndTime = GRandGen.RandomValue() * 0.4f + 0.8f;
+            if (FireProSmokeActive() && FireVolumesEnabled())
+                SetSourceTimes(0, 600 * rndTime, 180 * rndTime);
+            else
+                SetSourceTimes(0, 40 * rndTime, 40 * rndTime);
+        }
         VehicleNonAIType* vType = VehicleTypes.New("FuelExplosion");
         AmmoType* aType = dynamic_cast<AmmoType*>(vType);
         if (!aType)
@@ -323,8 +335,9 @@ void SmokeSourceVehicle::SimulateExplosion()
             {
                 const Vector3 p = wreck->Position();
                 const float ground = GLandscape ? GLandscape->SurfaceY(p.X(), p.Z()) : p.Y();
+                // FIRE-002: Fire Pro's fuel fireball -- a vehicle's fuel goes up black (smoke 1)
                 SpawnFireVolume(Vector3(p.X(), ground, p.Z()), std::clamp(wreck->GetRadius() * 0.5f, 1.2f, 3.5f),
-                                0.75f, 2.5f, FireKindExplosion);
+                                1.0f, 5.0f, FireKindExplosion);
             }
             // change fire and darkFire parameters based on type.hit value
             float fireSize = type.hit * 0.001;
@@ -335,8 +348,6 @@ void SmokeSourceVehicle::SimulateExplosion()
             _darkFire.SetSize(fireSize);
             _fire.Start(fireTime);
             _darkFire.Start(fireTime);
-            float rndTime = GRandGen.RandomValue() * 0.4 + 0.8;
-            SetSourceTimes(0, 40 * rndTime, 40 * rndTime);
             // sound of explosion
             const ParamEntry& par = Pars >> "CfgDestroy" >> "EngineHit";
             SoundPars soundPars;
@@ -366,15 +377,55 @@ void SmokeSourceVehicle::Simulate(float deltaT, SimulationImportance prec)
     {
         canDelete = true;
     }
-    // FIRE-001: a wreck burns while it smokes: a bed the size of the hull on the ground under
-    // it, its strength the smoke's own fade in and out
+    // FIRE-002: a destroyed vehicle in Fire Pro's three acts. The fuel goes up as a fireball
+    // (SimulateExplosion); a thick black column then climbs off the hull and drifts with the wind
+    // (its smoke stack); and the wreck catches and burns (its delayed ignition: the flames start a
+    // couple of seconds after the blast and grow, instead of being there at full size at once).
+    // The column and the flames are separate solver boxes; both keep out of walls (FireVolumes).
     if (Object* wreck = GetObject(); wreck && _inOutDensity > 0.02f)
     {
+        _burnAge += deltaT;
         const Vector3 p = wreck->Position();
         const float ground = GLandscape ? GLandscape->SurfaceY(p.X(), p.Z()) : p.Y();
         const float radius = std::clamp(wreck->GetRadius() * 0.35f, 0.6f, 2.2f);
-        ReportFireVolume(this, Vector3(p.X(), std::max(ground, Position().Y() - 1.2f), p.Z()), radius,
-                         _inOutDensity, 0.5f, FireKindWreck);
+        // seconds since the fireball, or since the smoke began when there was none
+        const float since = _exploded ? std::max((Glob.time - _explosionTime), 0.0f) : _burnAge;
+        const auto ramp = [](float a, float b, float x)
+        {
+            const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
+            return t * t * (3.0f - 2.0f * t);
+        };
+        const float ignition = ramp(_exploded ? 1.5f : 2.0f, _exploded ? 4.5f : 6.0f, since);
+        if (ignition > 0.0f)
+            ReportFireVolume(this, Vector3(p.X(), std::max(ground, Position().Y() - 1.2f), p.Z()), radius,
+                             _inOutDensity * ignition, 0.5f, FireKindWreck);
+        // the column rises out of the fire itself, from the same bed as the flames (it stood on the
+        // hull's top and read as smoke hanging over the wreck -- owner, 2026-10-13); the probes
+        // that keep it out of walls start outside the hull (FireVolumes ProbeSolids)
+        const float bedY = std::max(ground, Position().Y() - 1.2f);
+        const float column = ramp(0.3f, 2.0f, since);
+        const void* columnOwner = reinterpret_cast<const char*>(this) + 1;
+        if (column > 0.0f)
+        {
+            // soot: near black, and dense (x6 per metre in the renderer: 15 / m)
+            static const float kSoot[4] = {0.012f, 0.012f, 0.013f, 2.5f};
+            ReportFireVolume(columnOwner, Vector3(p.X(), bedY, p.Z()),
+                             std::clamp(wreck->GetRadius() * 0.25f, 0.8f, 1.6f), _inOutDensity * column, 1.0f,
+                             FireKindSmokeStack, kSoot);
+        }
+        // while the column is drawn, the 2001 puffs only carry it on where it leaves its box (as
+        // for a smoke grenade) -- and then far: they live half a minute and drift with the wind
+        // (owner, 2026-10-13: "make the smoke really go far and live long")
+        if (FireVolumeDrawn(columnOwner))
+        {
+            const float wind = GLandscape ? GLandscape->GetWind().SizeXZ() : 0.0f;
+            const float columnRadius = std::clamp(wreck->GetRadius() * 0.25f, 0.8f, 1.6f);
+            const float reach = 0.85f * FireStackLengthRatio * std::max(columnRadius * 12.0f, 16.0f);
+            SetHandoffFadeIn(std::clamp(reach / std::max(wind, 1.5f), 3.0f, 20.0f));
+            SetTimes(30.0f, 3.0f);
+        }
+        else
+            SetHandoffFadeIn(0.0f);
     }
     if (_fire.Active() || _darkFire.Active())
     {
@@ -444,6 +495,8 @@ LSError SmokeSourceOnVehicle::Serialize(ParamArchive& ar)
 DEFINE_FAST_ALLOCATOR(ObjectDestructed)
 
 const float DestroyerTimeToLive = 2;
+
+DEFINE_CASTING(ObjectDestructed)
 
 ObjectDestructed::ObjectDestructed(LODShapeWithShadow* shape)
     : Vehicle(shape, VehicleTypes.New("ObjectDestructed"), -1), _destroy(nullptr), _anim(0),
@@ -893,8 +946,30 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
     }
     // simulate acceleration
     _speed[1] += _accY * deltaT;
-    Friction(_speed[0], _xFriction, 0, deltaT);
-    Friction(_speed[2], _zFriction, 0, deltaT);
+    if (_smokeShadow && GLandscape != nullptr && _roomId < 0)
+    {
+        // FIRE-002: smoke in the air drifts with the wind as it is NOW. The 2001 puff took the
+        // wind once, when it was dropped, and its side friction then braked it to a standstill,
+        // so a change of wind never reached the smoke already up (owner, 2026-10-13). The
+        // horizontal speed relaxes toward the current wind instead of toward zero (a room's
+        // smoke, _roomId >= 0, still feels none).
+        const Vector3 wind = GLandscape->GetWind() * 0.8f;
+        const float rate = floatMax(floatMax(_xFriction, _zFriction), 0.6f) * deltaT;
+        _speed[0] += std::clamp(wind.X() - _speed[0], -rate, rate);
+        _speed[2] += std::clamp(wind.Z() - _speed[2], -rate, rate);
+    }
+    else
+    {
+        // Brake towards the side speed the source asked for (SetSideSpeed). Every legacy
+        // source asks for 0, 0, so for them this is the original braking to a standstill;
+        // rifle smoke asks for the wind at the muzzle and drifts off with it.
+        float relX = _speed[0] - _xSpeed0;
+        float relZ = _speed[2] - _zSpeed0;
+        Friction(relX, _xFriction, 0, deltaT);
+        Friction(relZ, _zFriction, 0, deltaT);
+        _speed[0] = _xSpeed0 + relX;
+        _speed[2] = _zSpeed0 + relZ;
+    }
     Limit(_speed[1], _minYSpeed, _maxYSpeed);
     // SMK-030: keep the step inside the room it started in. Outdoors this costs one
     // room lookup for the whole life of the cloudlet (see the header note).
@@ -1117,6 +1192,10 @@ bool Cloudlet::SampleShadow(CloudletShadowSample& out) const
     out.pos = Position();
     out.radius = floatMax(_drawScale, 0.05f);
     out.density = density;
+    // FIRE-002: what the puff looks like, as a scattering albedo for the volumetric renderer
+    // (a wreck's soot near black, a smoke grenade's near white)
+    const PackedColor c = GetConstantColor();
+    out.albedo = std::clamp((0.2126f * c.R8() + 0.7152f * c.G8() + 0.0722f * c.B8()) * (1.0f / 255.0f), 0.02f, 0.92f);
     out.heightAboveGround = floatMax(out.pos.Y() - _groundY, 0.0f);
     return true;
 }
@@ -1519,6 +1598,28 @@ void WeaponCloudsSource::Start(float time)
     _timeToLive = time;
 }
 
+bool WeaponCloudsSource::RifleSmokeEnabled()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("POSEIDON_RIFLE_SMOKE");
+        return !(value && value[0] == '0');
+    }();
+    return enabled;
+}
+
+void WeaponCloudsSource::SetRifleSmoke()
+{
+    SetTimes(1.4f, 1.0f);           // retail: 0.05 s
+    SetFades(0.6f, 0.02f, 0.8f);    // swell over 0.6 s, thin out towards the end
+    SetAlpha(0.28f);                // several overlapping thin puffs per shot
+    SetSize(0.30f, 0.03f);
+    SetColor(Color(0.80f, 0.80f, 0.78f));
+    SetClimbRate(0.25f, 0.0f, 0.5f);
+    _sideFriction = 10.0f;          // the (halved) muzzle blast stops within ~1 m, even at 5 Hz
+    _windDrift = true;
+    _windCoef = 0.6f;
+}
+
 void WeaponCloudsSource::Simulate(Vector3Par pos, Vector3Par speed, float density, float deltaT)
 {
     if (_timeToLive < 0)
@@ -1569,7 +1670,15 @@ void WeaponCloudsSource::Simulate(Vector3Par pos, Vector3Par speed, float densit
         cloudlet->SetSpeed(speed + speed2 * dir);
 
         cloudlet->SetClimbRate(_cloudletAccY * density * 1.5, _cloudletMinYSpeed, _cloudletMaxYSpeed);
-        cloudlet->SetSideSpeed(0, 0, 1.5, 1.5);
+        if (_windDrift)
+        {
+            Vector3Val wind = LegacySmokeWind(pos, _windCoef); // SMK-033
+            cloudlet->SetSideSpeed(wind.X(), wind.Z(), _sideFriction, _sideFriction);
+        }
+        else
+        {
+            cloudlet->SetSideSpeed(0, 0, 1.5, 1.5);
+        }
         GLOB_WORLD->AddCloudlet(cloudlet);
     }
 }
@@ -2306,6 +2415,8 @@ static const RStringB& GetExplosionName()
     return ExplosionName;
 }
 
+DEFINE_CASTING(Explosion)
+
 Explosion::Explosion(LODShapeWithShadow* shape, Vehicle* owner, float duration)
     : Vehicle(nullptr, VehicleTypes.New(GetExplosionName()), -1), _soundDone(false), _exSize(duration), _owner(owner)
 {
@@ -2335,8 +2446,17 @@ void Explosion::Simulate(float deltaT, SimulationImportance prec)
             const Vector3 p = Position();
             const float ground = GLandscape ? GLandscape->SurfaceY(p.X(), p.Z()) : p.Y();
             const float size = std::min(_exSize, 1.0f);
-            SpawnFireVolume(Vector3(p.X(), std::max(ground, p.Y() - 1.5f), p.Z()), 0.6f + 1.8f * size, 0.6f,
-                            0.6f + 0.8f * size, FireKindExplosion);
+            // BOOM-001: a burst at the ground is a ball sitting on it, not a ring flattened
+            // against it: the ball's centre half a radius up
+            // (owner, 2026-10-18: "the fireball needs to be bigger") -- free: the solver box is a
+            // fixed cell count whatever its size, so a bigger ball costs the same to simulate
+            const float radius = 1.2f + 2.8f * size;
+            // a burst against a wall or in the air is a ball where it went off (owner, 2026-10-19:
+            // "when i shoot at a wall, the fireball can not come from the ground"); one at the
+            // ground sits on it
+            const bool raised = p.Y() - ground > 1.0f;
+            const float baseY = raised ? p.Y() : std::max(ground + 0.5f * radius, p.Y() - 1.5f);
+            SpawnFireVolume(Vector3(p.X(), baseY, p.Z()), radius, 0.6f, 0.6f + 0.8f * size, FireKindExplosion);
         }
     }
 

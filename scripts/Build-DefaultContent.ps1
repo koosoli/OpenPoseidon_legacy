@@ -9,7 +9,8 @@ if (!(Test-Path -LiteralPath $tools)) { throw 'Build PoseidonTools before packag
 $source = Join-Path $root 'content/default-packs/visual'
 $generated = Join-Path $root 'build/default-content/generated'
 $stage = Join-Path $root 'build/default-content/pbo-source'
-$pack = Join-Path $dist 'Mods/@OP_VisualUpgrade'
+# Engine feature packs are staged under assets\Mods (the game ships as exe + dll + assets\).
+$pack = Join-Path $dist 'assets/Mods/@OP_VisualUpgrade'
 New-Item -ItemType Directory -Force $stage, (Join-Path $pack 'AddOns') | Out-Null
 & $Python "$PSScriptRoot/default-content/generate_materials.py" --spec "$source/materials.json" --out $generated --size 1024
 if ($LASTEXITCODE -ne 0) { throw 'Material generation failed' }
@@ -26,6 +27,19 @@ foreach ($material in @('road_asphalt','sand','gravel')) {
 & $tools image convert "$generated/sand_detail_nohq.png" "$stage/sand_detail_nohq.paa" --format DXT5
 if ($LASTEXITCODE -ne 0) { throw 'Sand detail normal encoding failed' }
 $expected += 'sand_detail_nohq.paa'
+# Denser hedges for the stock krovi* models (generate_hedges.py) and the redirect manifest the
+# engine's ModelCache reads (models.json). Their leaves are ez-tree's oak and ash sheets (MIT,
+# third-party/ez-tree), one atlas, DXT5 with a narrow soft rim (an anti-aliased cutout).
+& $Python "$PSScriptRoot/default-content/generate_hedges.py" --out "$generated/hedges" --prefix op_ground_materials `
+    --leaves "$source/third-party/ez-tree/leaves" --atlas "$generated/hedge_leaves.png"
+if ($LASTEXITCODE -ne 0) { throw 'Hedge generation failed' }
+& $tools image convert "$generated/hedge_leaves.png" "$stage/hedge_leaves.paa" --format DXT5
+if ($LASTEXITCODE -ne 0) { throw 'Hedge leaf atlas encoding failed' }
+$expected += 'hedge_leaves.paa'
+foreach ($file in Get-ChildItem -LiteralPath "$generated/hedges" -File) {
+    Copy-Item -LiteralPath $file.FullName -Destination "$stage/$($file.Name)" -Force
+    $expected += $file.Name
+}
 Copy-Item -LiteralPath "$source/config.cpp" -Destination "$stage/config.cpp" -Force
 Copy-Item -LiteralPath "$source/material-overrides.json" -Destination "$stage/materials.json" -Force
 foreach ($file in Get-ChildItem -LiteralPath $stage -Force) {
@@ -37,6 +51,8 @@ Copy-Item -LiteralPath "$source/mod.json" -Destination "$pack/mod.json" -Force
 Write-Host "Staged road and terrain integration package: $pack"
 & "$PSScriptRoot/Build-VehicleActions.ps1" -Preset $Preset -Python $Python
 & "$PSScriptRoot/Build-Swim.ps1" -Preset $Preset
+& "$PSScriptRoot/Build-TidewaterBoat.ps1" -Preset $Preset -Python $Python
+& "$PSScriptRoot/Build-TidewaterWildlife.ps1" -Preset $Preset -Python $Python
 & "$PSScriptRoot/Build-InventoryIcons.ps1" -Preset $Preset
 $menuStage = Join-Path $dist 'assets/menu/RoughSea.Intro'
 New-Item -ItemType Directory -Force $menuStage | Out-Null

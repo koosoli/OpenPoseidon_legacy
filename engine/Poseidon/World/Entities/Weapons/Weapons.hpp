@@ -208,6 +208,9 @@ public:
 	LocalizedString _displayName;
 	float _magazineReloadTime;
 	SoundPars _sound;
+	// The shot of this weapon whatever magazine it fires (a3SoundShot[]): an Arma 3 weapon on a
+	// CWA carrier fires the carrier's magazines, whose modes hold the CWA shot sound.
+	SoundPars _shotSound;
 	SoundPars _reloadSound;
 	SoundPars _reloadMagazineSound;
 	float _reloadSoundDuration;
@@ -331,6 +334,10 @@ typedef BankInitArray<WeaponType> WeaponTypeBank;
 
 extern MagazineTypeBank MagazineTypes;
 extern WeaponTypeBank WeaponTypes;
+
+// Every muzzle already built that takes `baseMagazine` also takes `magazine` from now on
+// (--arma1: a generated A1x_ magazine of another round count on a CWA magazine).
+void AddMagazineToMuzzlesTaking(const char* baseMagazine, const char* magazine);
 
 } // namespace Poseidon
 namespace Poseidon::Foundation {

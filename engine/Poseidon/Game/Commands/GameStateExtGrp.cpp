@@ -1443,7 +1443,7 @@ GameValue VehAddUserAction(const GameState* state, GameValuePar oper1, GameValue
 
     const GameArrayType& array = oper2;
     // Arma 2: [title, script, arguments, priority, showWindow, hideOnUse, shortcut, condition]
-    const bool arma2 = Poseidon::Arma1Compat::Generation() == 2;
+    const bool arma2 = Poseidon::Arma1Compat::Generation() >= 2;
     if (array.Size() != 2 && !(arma2 && array.Size() > 2))
     {
         state->SetError(EvalDim, array.Size(), 2);
@@ -1459,7 +1459,24 @@ GameValue VehAddUserAction(const GameState* state, GameValuePar oper1, GameValue
         state->TypeError(GameString, array[1].GetType());
         return -1.0f;
     }
-    const int id = veh->AddUserAction(array[0], array[1]);
+    RString title = array[0];
+    if (arma2)
+    {
+        // Arma 2/3 titles are structured text (`<t color='#FFFFFF'>Test</t>`); the action menu
+        // here draws plain text, so the tags go and the text stays.
+        const std::string in = (const char*)title;
+        std::string out;
+        for (size_t i = 0; i < in.size(); i++)
+        {
+            const size_t close = in[i] == '<' ? in.find('>', i) : std::string::npos;
+            if (close == std::string::npos)
+                out.push_back(in[i]);
+            else
+                i = close;
+        }
+        title = RString(out.c_str());
+    }
+    const int id = veh->AddUserAction(title, array[1]);
     if (arma2 && array.Size() > 2)
         Arma2SetUserActionArguments(veh, id, array[2]);
     return (float)id;

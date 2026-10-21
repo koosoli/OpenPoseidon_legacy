@@ -131,6 +131,11 @@ public:
 	void HitBy( EntityAI *killer, float howMuch, RString ammo ) override;
 
 	LSError Serialize(ParamArchive &ar) override;
+
+	// Without its own class id dyn_cast<StreetLamp> answered yes for every entity sharing
+	// the base's id: `this switchLight "OFF"` on a vehicle (Arma 3 missions do it for UGVs
+	// and APCs) cast the vehicle to a lamp and crashed freeing its "light".
+	USE_CASTING(base)
 };
 
 class RoadType: public RefCount

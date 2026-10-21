@@ -782,6 +782,25 @@ struct SkyUniform {
 // dirties the LUTs; per-frame celestial pushes do not.
 type LutKey = [f32; 14];
 
+fn sky_lut_tolerance() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("WGR_SKY_LUT_TOLERANCE").ok().and_then(|v| v.trim().parse::<f32>().ok())
+            .filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(0.002)
+    })
+}
+
+/// Whether any key component moved more than `tol` relative to the built one (exact when 0).
+fn lut_key_moved(built: &LutKey, now: &LutKey, tol: f32) -> bool {
+    built.iter().zip(now.iter()).any(|(a, b)| {
+        if tol <= 0.0 {
+            a != b
+        } else {
+            (a - b).abs() > tol * a.abs().max(b.abs()).max(1e-12)
+        }
+    })
+}
+
 fn lut_key(sky: &WgrSky) -> LutKey {
     [
         sky.rayleigh[0],
@@ -1148,6 +1167,8 @@ pub struct Sky {
     sh_pipeline: wgpu::ComputePipeline,
     sh_bind: wgpu::BindGroup,
     sh_buf: wgpu::Buffer,
+    // RFG-186: the ground-bounce inputs of the SH projection (sky_sh.wgsl `Ground`).
+    sh_ground_buf: wgpu::Buffer,
     // LUT build pipelines (target LUT_FORMAT) + their target views/binds.
     transmittance_pipeline: wgpu::RenderPipeline,
     transmittance_bind: wgpu::BindGroup,
@@ -1270,6 +1291,11 @@ pub struct Sky {
     // LUTs are rebuilt only when the atmosphere key changes (None = never built).
     last_lut: Option<LutKey>,
     lut_dirty: bool,
+    // PERF-CLOUD-TEMPORAL: the camera of the most recent upload (the main one by the time the
+    // over-scene march runs) and the phase counter of the 2x2 march rotation.
+    last_ivp: [[f32; 4]; 4],
+    last_cam: [f32; 3],
+    cloud_tc_frame: u32,
 }
 
 // One cached low-res cloud march target. `_tex` keeps the allocation alive for `view`.
@@ -1283,6 +1309,29 @@ struct CloudLoTarget {
     layer_fog: bool,
     composite_bind: Option<wgpu::BindGroup>,
     depth_bind: Option<wgpu::BindGroup>,
+    // PERF-CLOUD-TEMPORAL: last frame's march (copied after each over-scene march), the
+    // per-target uniform telling fs_cloud whether and how to reuse it, and what it was made with.
+    hist: wgpu::Texture,
+    hist_view: wgpu::TextureView,
+    tc_buf: wgpu::Buffer,
+    hist_valid: bool,
+    prev_ivp: Option<[[f32; 4]; 4]>,
+    prev_cam: [f32; 3],
+}
+
+/// fs_cloud's CloudTemporal uniform (sky.wgsl): the previous frame's direction projection and
+/// (enabled, phase, -, -).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct CloudTemporalUniform {
+    prev_vp: [[f32; 4]; 4],
+    params: [f32; 4],
+}
+
+/// PERF-CLOUD-TEMPORAL lever: WGR_CLOUD_TEMPORAL=0 marches every pixel every frame.
+fn cloud_temporal_enabled() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_CLOUD_TEMPORAL").map(|v| v.trim() != "0").unwrap_or(true))
 }
 
 // How many distinct low-res cloud sizes to keep. Two are live every frame (screen/2 and
@@ -1529,9 +1578,24 @@ impl Sky {
                 | wgpu::BufferUsages::UNIFORM
                 | wgpu::BufferUsages::COPY_DST,
         });
+        let sh_ground_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("wgr_sky_sh_ground"),
+            contents: &[0u8; 64],
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let sh_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_sky_sh_layout"),
             entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -1565,6 +1629,10 @@ impl Sky {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: sh_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: sh_ground_buf.as_entire_binding(),
                 },
             ],
         });
@@ -2066,6 +2134,27 @@ impl Sky {
                         multisampled: false,
                     },
                     count: None,
+                },
+                // PERF-CLOUD-TEMPORAL: last frame's march + the reuse uniform.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 }],
             });
         // WGR_CLOUD_STEPS / WGR_CLOUD_LIGHT_STEPS: primary and light-march sample caps for the
@@ -2295,6 +2384,7 @@ impl Sky {
             sh_pipeline,
             sh_bind,
             sh_buf,
+            sh_ground_buf,
             transmittance_pipeline,
             transmittance_bind,
             transmittance_view,
@@ -2361,6 +2451,9 @@ impl Sky {
             linear,
             last_lut: None,
             lut_dirty: true,
+            last_ivp: [[0.0; 4]; 4],
+            last_cam: [0.0; 3],
+            cloud_tc_frame: 0,
         }
     }
 
@@ -2572,7 +2665,12 @@ impl Sky {
         if earth_preview { adjusted_sky.params[2] = 6_378_137.0; }
         let sky = &adjusted_sky;
         let key = lut_key(sky);
-        if self.last_lut != Some(key) {
+        // PERF-SKY-LUT: the key is auto-derived from the sun's elevation every frame, so as game
+        // time runs it drifts by millionths and an EXACT compare rebuilt both LUTs every frame
+        // (0.28 ms GPU, Durras and village alike). Rebuilt now when any component has moved more
+        // than WGR_SKY_LUT_TOLERANCE (relative, default 0.002) from what the LUTs were built
+        // with -- a few seconds of game time apart, far below anything visible. 0 = exact.
+        if self.last_lut.is_none_or(|last| lut_key_moved(&last, &key, sky_lut_tolerance())) {
             self.last_lut = Some(key);
             self.lut_dirty = true;
         }
@@ -2591,6 +2689,8 @@ impl Sky {
         self.cirrus_amount_now += (self.cirrus_amount - self.cirrus_amount_now) * CIRRUS_PUFF_EASE;
         self.cirrus_match_now += (self.cirrus_match - self.cirrus_match_now) * CIRRUS_PUFF_EASE;
         self.cirrus_soft_now += (self.cirrus_soft - self.cirrus_soft_now) * CIRRUS_PUFF_EASE;
+        self.last_ivp = inv_view_proj;
+        self.last_cam = [cam_pos[0], cam_pos[1], cam_pos[2]];
         let u = SkyUniform {
             inv_view_proj,
             sun_dir: sky.sun_dir,
@@ -2747,6 +2847,7 @@ impl Sky {
     pub fn render_cloud(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         depth_view: &wgpu::TextureView,
         width: u32,
@@ -2773,10 +2874,28 @@ impl Sky {
                     dimension: wgpu::TextureDimension::D2,
                     format: crate::HDR_FORMAT,
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                        | wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_SRC,
                     view_formats: &[],
                 });
                 let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+                let hist = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("wgr_cloud_hist"),
+                    size: wgpu::Extent3d { width: lo.0, height: lo.1, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: crate::HDR_FORMAT,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                let hist_view = hist.create_view(&wgpu::TextureViewDescriptor::default());
+                let tc_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("wgr_cloud_temporal"),
+                    size: std::mem::size_of::<CloudTemporalUniform>() as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
                 // Evict oldest first so a window resize cannot grow this without bound.
                 if self.cloud_lo.len() >= CLOUD_LO_CACHE {
                     self.cloud_lo.remove(0);
@@ -2789,6 +2908,12 @@ impl Sky {
                     layer_fog: false,
                     composite_bind: None,
                     depth_bind: None,
+                    hist,
+                    hist_view,
+                    tc_buf,
+                    hist_valid: false,
+                    prev_ivp: None,
+                    prev_cam: [0.0; 3],
                 });
                 self.cloud_lo.len() - 1
             }
@@ -2833,6 +2958,14 @@ impl Sky {
                     entries: &[wgpu::BindGroupEntry {
                         binding: 6,
                         resource: wgpu::BindingResource::TextureView(depth_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::TextureView(&target.hist_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: target.tc_buf.as_entire_binding(),
                     }],
                 }));
                 target.depth_src = Some(depth_view.clone());
@@ -2845,6 +2978,35 @@ impl Sky {
             .depth_bind
             .clone()
             .expect("cloud depth bind just built");
+        // PERF-CLOUD-TEMPORAL: on the over-scene march, each 2x2 block of the low-res buffer
+        // marches one pixel per frame (a rotating phase) and the other three take last frame's
+        // march at the direction reprojected through last frame's camera (fs_cloud). Reuse only
+        // happens for upward rays whose whole neighbourhood is sky; everything else -- terrain,
+        // silhouettes, the planar reflection, the first frame, a resize, a camera jump over 20 m
+        // -- marches every pixel exactly as before. Each pixel is re-marched every fourth frame,
+        // so nothing on screen is more than three frames old.
+        {
+            self.cloud_tc_frame = self.cloud_tc_frame.wrapping_add(u32::from(!reflection));
+            let (cur_ivp, cur_cam, frame) = (self.last_ivp, self.last_cam, self.cloud_tc_frame);
+            let target = &mut self.cloud_lo[slot];
+            let mut params = [0.0f32, (frame % 4) as f32, 0.0, 0.0];
+            let mut prev_vp = [[0.0f32; 4]; 4];
+            if !reflection && cloud_temporal_enabled() && target.hist_valid {
+                if let Some(prev) = target.prev_ivp {
+                    let moved = (0..3).map(|i| (cur_cam[i] - target.prev_cam[i]).powi(2)).sum::<f32>();
+                    let inv = glam::DMat4::from_cols_array_2d(&prev.map(|c| c.map(f64::from))).inverse();
+                    if moved < 400.0 && inv.is_finite() {
+                        prev_vp = inv.as_mat4().to_cols_array_2d();
+                        params[0] = 1.0;
+                    }
+                }
+            }
+            queue.write_buffer(&target.tc_buf, 0, bytemuck::bytes_of(&CloudTemporalUniform { prev_vp, params }));
+            if !reflection {
+                target.prev_ivp = Some(cur_ivp);
+                target.prev_cam = cur_cam;
+            }
+        }
         let lo_view = &self.cloud_lo[slot].view;
         if !reflection {
             self.cloud_temporal_view = Some(lo_view.clone());
@@ -2875,6 +3037,15 @@ impl Sky {
         pass.set_bind_group(1, &depth_bind, &[]);
         pass.draw(0..3, 0..1);
         drop(pass);
+        if !reflection && cloud_temporal_enabled() {
+            let target = &mut self.cloud_lo[slot];
+            encoder.copy_texture_to_texture(
+                target._tex.as_image_copy(),
+                target.hist.as_image_copy(),
+                wgpu::Extent3d { width: lo.0, height: lo.1, depth_or_array_layers: 1 },
+            );
+            target.hist_valid = true;
+        }
         encoder.pop_debug_group();
     }
 
@@ -2929,6 +3100,53 @@ impl Sky {
     // Project the env map into SH-9 diffuse sky irradiance for this frame. Must run after render_env
     // (reads the freshly-baked env) and before the lit-mesh / terrain passes read `sh_buf`. One tiny
     // dispatch. Recorded on the same encoder so wgpu barriers env-write -> read and sh-write -> read.
+    /// RFG-186: this frame's ground-bounce inputs for the SH projection. `sun` is the main
+    /// camera's sun_diffuse (E/pi, already cloud-dimmed), `sun_up` the sun direction's y.
+    /// WGR_GROUND_BOUNCE=0 restores the horizon-continued lower hemisphere;
+    /// WGR_GROUND_BOUNCE_ALBEDO=r,g,b (linear) replaces the default ground.
+    /// RFG-196: `native` = a native Reforger world, whose sky is lifted to its authored indirect
+    /// share (WGR_NATIVE_INDIRECT=0 off; WGR_NATIVE_INDIRECT_RATIO overrides Lighting_Eden's 0.5).
+    pub fn set_ground_bounce(&self, queue: &wgpu::Queue, sun: [f32; 3], sun_up: f32, native: bool) {
+        static CFG: std::sync::OnceLock<(bool, [f32; 3])> = std::sync::OnceLock::new();
+        let (on, albedo) = *CFG.get_or_init(|| {
+            let on = std::env::var("WGR_GROUND_BOUNCE").map(|v| v.trim() != "0").unwrap_or(true);
+            // An ESTIMATE of open European ground (grass, soil): green-brown, ~0.15 broadband.
+            // Not measured; tune against the parity poses with the env var.
+            let mut albedo = [0.14f32, 0.16, 0.09];
+            if let Ok(v) = std::env::var("WGR_GROUND_BOUNCE_ALBEDO") {
+                let parts: Vec<f32> = v.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+                if parts.len() == 3 {
+                    albedo = [parts[0], parts[1], parts[2]];
+                }
+            }
+            (on, albedo)
+        });
+        static NORM: std::sync::OnceLock<(bool, f32)> = std::sync::OnceLock::new();
+        static NEUTRAL: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+        let neutral = *NEUTRAL.get_or_init(|| {
+            std::env::var("WGR_NATIVE_INDIRECT_NEUTRAL").ok().and_then(|v| v.trim().parse::<f32>().ok())
+                .filter(|v| v.is_finite()).map(|v| v.clamp(0.0, 1.0)).unwrap_or(1.0)
+        });
+        let (norm_on, ratio) = *NORM.get_or_init(|| {
+            let on = std::env::var("WGR_NATIVE_INDIRECT").map(|v| v.trim() != "0").unwrap_or(true);
+            let ratio = std::env::var("WGR_NATIVE_INDIRECT_RATIO").ok().and_then(|v| v.trim().parse::<f32>().ok())
+                .filter(|v| v.is_finite() && *v > 0.0).unwrap_or(0.5);
+            (on, ratio)
+        });
+        // RFG-200: the native dome scale, mirrored from EngineWgpu (WGR_NATIVE_SKY_SCALE, default
+        // 2.5) -- undone for the SH so the sky's LIGHT stays the physical sky's.
+        static DOME: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+        let dome = *DOME.get_or_init(|| {
+            std::env::var("WGR_NATIVE_SKY_SCALE").ok().and_then(|v| v.trim().parse::<f32>().ok())
+                .filter(|v| v.is_finite() && *v > 0.0).unwrap_or(2.5)
+        });
+        let phys = if native { 1.0 / dome } else { 1.0 };
+        let data: [f32; 16] = [sun[0], sun[1], sun[2], sun_up, albedo[0], albedo[1], albedo[2],
+            if on { 1.0 } else { 0.0 }, ratio, if norm_on && native { 1.0 } else { 0.0 }, 24.0, neutral,
+            phys, 0.0, 0.0, 0.0];
+        queue.write_buffer(&self.sh_ground_buf, 0, bytemuck::cast_slice(&data));
+    }
+
     pub fn render_sh(&self, encoder: &mut wgpu::CommandEncoder) {
         encoder.push_debug_group("wgr_sky_sh");
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {

@@ -16,9 +16,13 @@ Python requirement. For an already built tool:
 ./scripts/Build-DefaultContent.ps1
 ```
 
-Output is `dist/x64-win-<configuration>/Mods/@OP_VisualUpgrade`, containing mod.json
-and AddOns/op_ground_materials.pbo, plus `@OP_VehicleActions` with mod.json and
-AddOns/op_jeep_actions.pbo. Deploy.ps1 copies these own files and verifies
+Output is `dist/x64-win-<configuration>/assets/Mods/@OP_VisualUpgrade`, containing mod.json
+and AddOns/op_ground_materials.pbo, plus `@OP_VehicleActions`, `@OP_Swim`, `@OP_TidewaterBoat` and
+`@OP_TidewaterWildlife` beside it. Engine feature packs live in `assets/Mods` (owner, 2026-10-20): the
+game is `OpenPoseidon.exe` + `wgpu_renderer.dll` + `assets/`, and `scripts/Package-Share.ps1` builds
+exactly that for a player who has Cold War Assault installed. Maps (`@OP_Fusion`, `@OP_Showcase`,
+`@OP_SizeProbe`) stay in `Mods`. The engine looks in the other place too, and Deploy removes the files
+it put in an old `Mods/@OP_*` feature pack once the `assets` copy is installed. Deploy.ps1 copies these own files and verifies
 their SHA256; it does not modify Dta/Data.pbo, LandText.pbo, original models or WRP.
 Source-only roughness/height/soil artifacts are not claimed as bound maps.
 

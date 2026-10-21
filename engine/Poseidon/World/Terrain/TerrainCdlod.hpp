@@ -118,6 +118,40 @@ void RefineCdlodContactUnion(const CdlodSelection& node,
     }
 }
 
+// Mud ruts are ~0.5 m wide, so they need a fine mesh further out than the 8 m
+// contact window: split down to 8 m patches (32 cells -> 25 cm) within
+// `outerRadius` of (x, z), then hand each patch to the existing contact union,
+// which keeps its 4 m patches inside the 8 m windows. Exact partition, bounded:
+// the outer window must fit the camera-centred 64 m signed-height upload.
+constexpr float CdlodWideReliefMaxRadius = 28.0f;
+template <typename EmitFn>
+void RefineCdlodContactWide(const CdlodSelection& node,
+    const std::array<CdlodContactFocus,2>& focuses, size_t count,
+    float x, float z, float outerRadius, EmitFn&& emit)
+{
+    const bool valid = std::isfinite(x) && std::isfinite(z) && std::isfinite(outerRadius) &&
+        std::abs(x) <= 1000000.0f && std::abs(z) <= 1000000.0f &&
+        outerRadius > 0.0f && outerRadius <= CdlodWideReliefMaxRadius;
+    // (not `near`: <windows.h> defines near/far as macros)
+    const bool inWindow = valid && node.originX < x + outerRadius && node.originZ < z + outerRadius &&
+        node.originX + node.size > x - outerRadius && node.originZ + node.size > z - outerRadius;
+    if (!inWindow || node.size <= 8.0f)
+    {
+        RefineCdlodContactUnion(node, focuses, count, emit);
+        return;
+    }
+    for (int child = 0; child < 4; ++child)
+    {
+        auto patch = node;
+        patch.size *= 0.5f;
+        patch.originX += (child & 1) * patch.size;
+        patch.originZ += (child >> 1) * patch.size;
+        patch.morphStart = 1.0e10f;
+        patch.morphEnd = 2.0e10f;
+        RefineCdlodContactWide(patch, focuses, count, x, z, outerRadius, emit);
+    }
+}
+
 // Refine only the close-up snow window, not the entire authored heightfield.
 // Children partition the parent exactly; no overlapping overlay or depth bias.
 template <typename EmitFn>

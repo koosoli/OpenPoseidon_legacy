@@ -4,6 +4,8 @@
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/Foundation/Types/RemoveLinks.hpp>
 
+#include <atomic>
+#include <cstdint>
 #include <string>
 
 // Surface material properties; primary consumer is ShapeSection.
@@ -46,6 +48,42 @@ class TexMaterial: public RefCountWithLinks
 	// (TAGG AVGC) the first time, so call it from the render thread.
 	float SpecularMapLevel() const;
 	const RStringB &GetName() const {return _name;} // required by BankArray
+
+	// PERF (2026-10-14): answers that are pure functions of _name, memoised on the material.
+	// The per-section classifiers (ShapeDraw's SectionMaterial*, EngineWgpu's GpuEmat*) each
+	// built a std::string from the path and hashed it under a mutex for every draw, every
+	// frame -- a few percent of a native world's main thread for no new information. They
+	// still compute through their own path-keyed caches the first time, so what is read from
+	// disk, and when, is unchanged. Four bits a slot: bit 0 known, bits 1-3 the value.
+	enum MemoSlot
+	{
+		MemoSectionEmatBlends,
+		MemoSectionCullNone,
+		MemoSectionAlphaRoute,
+		MemoGpuEmatBlends,
+		MemoGpuEmatCullNone,
+		MemoSlotCount
+	};
+	static_assert(MemoSlotCount <= 8, "eight four-bit slots in the memo word");
+	template <class Compute>
+	int Memo(MemoSlot slot, Compute&& compute) const
+	{
+		const uint32_t shift = static_cast<uint32_t>(slot) * 4;
+		const uint32_t word = _nameMemo.load(std::memory_order_relaxed);
+		if (word & (1u << shift))
+			return static_cast<int>((word >> (shift + 1)) & 7u);
+		const int value = compute();
+		// Two threads racing here computed the same pure function, so either write is right.
+		_nameMemo.fetch_or((1u | (static_cast<uint32_t>(value) & 7u) << 1) << shift, std::memory_order_relaxed);
+		return value;
+	}
+	//! Unique per constructed material: a pointer-keyed cache can tell a recycled address
+	//! from the material it remembers without comparing paths.
+	uint64_t Serial() const {return _serial;}
+
+	private:
+	mutable std::atomic<uint32_t> _nameMemo{0};
+	uint64_t _serial;
 };
 
 } // namespace Poseidon

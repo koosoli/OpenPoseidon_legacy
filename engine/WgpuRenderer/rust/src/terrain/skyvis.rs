@@ -162,7 +162,9 @@ pub fn compute_cached(
     }
     // Include the bilinear sampling footprint as well as the ray's full radius.
     let reach = opts.radius_m.max(0.0) / grid + 1.0;
-    for oy in 0..out_h {
+    // (PERF, 2026-10-14) rows in parallel: the scan is a pure function of the heights per output
+    // texel, and on one thread it measured 2.42 s of every Everon load (1024^2 from 2048^2)
+    let row_scan = |oy: u32, row: &mut [f32]| {
         for ox in 0..out_w {
             // Heightfield-texel coordinate at the centre of this output block.
             let hx = (ox as f32 + 0.5) * ds;
@@ -215,9 +217,21 @@ pub fn compute_cached(
                 // Cosine-weighted visible-sky fraction of this azimuth slice: cos^2(alpha) = 1/(1+t^2).
                 vis_sum += 1.0 / (1.0 + t_max * t_max);
             }
-            out[(oy as usize) * (out_w as usize) + ox as usize] = vis_sum / (k as f32);
+            row[ox as usize] = vis_sum / (k as f32);
         }
-    }
+    };
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 16);
+    let rows_per = (out_h as usize).div_ceil(threads).max(1);
+    std::thread::scope(|scope| {
+        for (chunk_index, chunk) in out.chunks_mut(rows_per * out_w as usize).enumerate() {
+            let row_scan = &row_scan;
+            scope.spawn(move || {
+                for (r, row) in chunk.chunks_mut(out_w as usize).enumerate() {
+                    row_scan((chunk_index * rows_per + r) as u32, row);
+                }
+            });
+        }
+    });
     // Smooth the coarse map so the shader's bilinear tap doesn't Mach-band into facets on
     // high-contrast cliffs, and to erase the per-texel jitter noise. Runs once per bake.
     let blurred = blur_separable(&out, out_w as usize, out_h as usize, opts.blur_radius);

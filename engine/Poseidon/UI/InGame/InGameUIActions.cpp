@@ -1,5 +1,6 @@
 
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
@@ -313,6 +314,14 @@ void UIAction::Process(AIUnit* unit) const
     EntityAI* veh = target;
     switch (type)
     {
+        case ATOpenDoor:
+        case ATCloseDoor:
+        {
+            // RFG-157: a native Enfusion door; the target is the person, `param` the door.
+            if (GLandscape && unit->IsFreeSoldier())
+                GLandscape->EnfusionDoors().RequestState(param, type == ATOpenDoor);
+            return;
+        }
         case ATCargoWeaponReady:
         case ATCargoWeaponStow:
         {

@@ -1,0 +1,8 @@
+GameProject {
+ ID "MDXParity"
+ GUID "7845A677550724B5"
+ TITLE "MDX Reforger Parity Capture"
+ Dependencies {
+  "58D0FB3206B6F859"
+ }
+}

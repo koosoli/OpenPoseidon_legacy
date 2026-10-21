@@ -26,6 +26,31 @@ struct Sh {
 };
 @group(0) @binding(1) var<storage, read_write> sh: Sh;
 
+// RFG-186: what the lower hemisphere radiates. The env map below the horizon only continues the
+// horizon sky, so every surface facing sideways or down was lit from BELOW by blue sky -- shade
+// read cold and dark (a wall in shade: ours 48/57/72, Reforger's 84/80/69, warm from the sunlit
+// ground in front of it). With `albedo.w` > 0.5 the lower half is replaced by the ground as a
+// Lambert reflector: albedo x (sky irradiance on it + the sun's) / pi. The sun term arrives already
+// dimmed by cloud cover (EngineWgpu cloudDim), so an overcast sky moves light from the beam into
+// this soft fill instead of losing it.
+struct Ground {
+    sun: vec4<f32>,    // rgb = frame sun_diffuse (E / pi), w = sun direction y (up = 1)
+    albedo: vec4<f32>, // rgb = linear ground albedo, w = enable
+    // RFG-196: x = the indirect/direct illuminance ratio a native world asks for, y = enable,
+    // z = the largest lift allowed, w = how much of the ADDED light is desaturated (Lighting_Eden's
+    // indirect colour is white: lifting a blue sky as-is turns every sunlit road blue-white). Reforger's Lighting_Eden.et: DirectLightLV 15, IndirectLightLV
+    // 14 -> 0.5. The sky's irradiance on level ground is lifted (never lowered) to that share of the
+    // sun's beam; ours sat near 3% (a shaded pavement 5.2 EV under the sunlit road beside it where
+    // Reforger shows 1.7 EV, matched pose shadowProbe).
+    norm: vec4<f32>,
+    // RFG-200: x = 1 / the native dome scale (EngineWgpu WGR_NATIVE_SKY_SCALE, 2.5). The dome is
+    // brightened to Reforger's pale sky, but the LIGHT it casts must stay the physical sky's:
+    // projected at 2.5x, the sky's own blue outweighed the neutral lift below and tinted every
+    // crown (forestOwner blue 52 vs 44, +1.13 vs +0.91 EV). 1 elsewhere.
+    phys: vec4<f32>,
+};
+@group(0) @binding(2) var<uniform> ground: Ground;
+
 const PI: f32 = 3.14159265359;
 const LANES: u32 = 64u;
 
@@ -73,7 +98,8 @@ fn cs_sky_sh(@builtin(local_invocation_index) lane: u32) {
             let azimuth = (u - 0.5) * 2.0 * PI;
             let dir = vec3<f32>(sp * cos(azimuth), cp, sp * sin(azimuth));
             let rad = textureLoad(env, vec2<i32>(x, y), 0).rgb;
-            let wr = rad * domega;
+            // RFG-186: below the horizon the ground stands in, added analytically after the sum.
+            let wr = select(rad * domega, vec3<f32>(0.0), ground.albedo.w > 0.5 && dir.y < 0.0);
             c[0] = c[0] + wr * 0.282095;
             c[1] = c[1] + wr * 0.488603 * dir.y;
             c[2] = c[2] + wr * 0.488603 * dir.z;
@@ -120,9 +146,10 @@ fn cs_sky_sh(@builtin(local_invocation_index) lane: u32) {
         stride = stride / 2u;
     }
 
+    var full: array<vec3<f32>, 9>;
     if (lane == 0u) {
         for (var i = 0; i < 9; i = i + 1) {
-            sh.c[i] = vec4<f32>(partial[0][i], 0.0);
+            full[i] = partial[0][i];
         }
     }
     // Reuse the 9 KiB scratch instead of doubling workgroup memory beyond the
@@ -143,5 +170,43 @@ fn cs_sky_sh(@builtin(local_invocation_index) lane: u32) {
     }
     if (lane == 0u) {
         for (var i = 0; i < 9; i = i + 1) { sh.c[i + 9] = vec4<f32>(partial[0][i], 0.0); }
+        // Sky irradiance on level ground from the upper-sky coefficients (frame::sky_irradiance
+        // at n = +y, before its 1/pi).
+        for (var i = 0; i < 9; i = i + 1) { full[i] = full[i] * ground.phys.x; }
+        // RFG-215: the factor the native lift below applies, published in sh.c[0].w for the
+        // interior floor (frame.wgsl interior_sky_ao); 1 where nothing is lifted.
+        var lifted = 1.0;
+        let u = partial[0];
+        var e_sky = ground.phys.x * max(-0.429043 * u[8] + 0.886227 * u[0] - 0.247708 * u[6] + 2.0 * 0.511664 * u[1],
+                        vec3<f32>(0.0));
+        // RFG-196: lift the sky (the full set, before the ground is added) to the native world's
+        // indirect share of the sun's beam (luminance), keeping its colour and its direction.
+        if (ground.norm.y > 0.5) {
+            let lum = vec3<f32>(0.2126, 0.7152, 0.0722);
+            let e_sun_beam = dot(ground.sun.rgb * PI, lum);
+            let e_sky_lum = dot(e_sky, lum);
+            if (e_sun_beam > 0.0 && e_sky_lum > 1.0e-6) {
+                let lift = clamp(ground.norm.x * e_sun_beam / e_sky_lum, 1.0, max(ground.norm.z, 1.0));
+                // Desaturation is linear, so it applies per coefficient and keeps the SH a projection.
+                let k = lift - 1.0;
+                lifted = lift;
+                for (var i = 0; i < 9; i = i + 1) {
+                    let c = full[i];
+                    full[i] = c + k * mix(c, vec3<f32>(dot(c, lum)), ground.norm.w);
+                }
+                e_sky = e_sky + k * mix(e_sky, vec3<f32>(e_sky_lum), ground.norm.w);
+            }
+        }
+        if (ground.albedo.w > 0.5) {
+            // Plus the sun's irradiance, then the ground's Lambert radiance.
+            let e_sun = ground.sun.rgb * PI * max(ground.sun.w, 0.0);
+            let lg = ground.albedo.rgb * (e_sky + e_sun) / PI;
+            // A constant radiance over the lower hemisphere projects onto Y00 and Y10 only:
+            // integral of Y00 = 0.282095 * 2 pi, integral of Y10 (0.488603 y) = -0.488603 * pi.
+            full[0] = full[0] + lg * (0.282095 * 2.0 * PI);
+            full[1] = full[1] - lg * (0.488603 * PI);
+        }
+        for (var i = 0; i < 9; i = i + 1) { sh.c[i] = vec4<f32>(full[i], 0.0); }
+        sh.c[0].w = lifted;
     }
 }

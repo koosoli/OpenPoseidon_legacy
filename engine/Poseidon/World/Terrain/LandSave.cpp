@@ -6,8 +6,17 @@
 #include <chrono>
 #include <atomic>
 #include <optional>
+#include <semaphore>
+#include <thread>
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
+// Foundation/Threads/PoThread.hpp drags in windows.h, whose GetObject macro renames
+// Landscape::GetObject in this file; the one function needed is declared here instead.
+namespace Poseidon::Foundation
+{
+extern bool poSetMyPriority(int delta);
+}
+extern bool GUseFileBanks; // QBStream.cpp, global scope
 #include <Poseidon/World/Terrain/AuthoredObjectIds.hpp>
 #include <Poseidon/World/Terrain/TerrainSubdivision.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
@@ -38,6 +47,7 @@
 #include <Poseidon/Asset/Formats/World/Oprw24.hpp>
 #include <Poseidon/Asset/Formats/World/Oprw20.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
+#include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
 // FAR INSTANCE TIER — proxy dimensions read from a model's ModelInfo alone (no LOD body).
 #include <Poseidon/Asset/Formats/P3D/ModelProxyBounds.hpp>
@@ -48,10 +58,16 @@
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp> // ShapeBank::Find / NewFromModel (async admission)
 #include <Poseidon/World/Model/ShapeAdapter.hpp> // BuildAdapterBankTables (stage-3 async adapt)
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp> // the split of `create`
+#include <Poseidon/Graphics/Textures/PAADecoder.hpp>
+#include <Poseidon/IO/ParamFileExt.hpp> // GetShapeName
+#include <Poseidon/World/Terrain/ObjectStreamRapStageNames.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // worker-prepared texture store (clear + stats)
 #include <Poseidon/World/Model/Model.hpp>              // the IR handed over by ObjectStreamPreparer
 #include <Poseidon/World/Model/ModelMemory.hpp>        // conversion reservation estimate
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
 #include <Poseidon/World/Terrain/ObjectTextureUploadTrace.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamTreeFixture.hpp>
 #include <Poseidon/World/Terrain/WarmModelCaptureWindow.hpp>
@@ -1793,8 +1809,11 @@ void Landscape::SerializeBin(SerializeBinStream& f, float landGrid)
 
 bool Landscape::LoadOptimized(QIStream& f, float landGrid)
 {
+    const auto tStart = std::chrono::steady_clock::now();
     WrpReader reader;
-    if (!reader.Load(f))
+    const bool readerOk = reader.Load(f);
+    const auto tRead = std::chrono::steady_clock::now();
+    if (!readerOk)
     {
         RptF("WrpReader: %s", reader.GetError() ? reader.GetError() : "unknown error");
         return false;
@@ -1844,6 +1863,7 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
 
     // Create objects from reader data (names already resolved by WrpReader)
 #if _ENABLE_CHEATS
+    const auto tObjects = std::chrono::steady_clock::now();
     for (int i = 0; i < reader.GetObjectCount(); i++)
     {
         const auto& obj = reader.GetObject(i);
@@ -1871,6 +1891,15 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     RStringB worstFloatName;
     Vector3 worstFloatPos(0, 0, 0);
 
+    static const bool loadProfile = [] {
+        const char* v = std::getenv("POSEIDON_LOAD_PROFILE");
+        return v && v[0] == '1';
+    }();
+    if (loadProfile)
+    {
+        render::GObjectAdmitProfile.Reset();
+        render::GObjectAdmitProfile.active = true;
+    }
     for (int i = 0; i < reader.GetObjectCount(); i++)
     {
         const auto& obj = reader.GetObject(i);
@@ -1946,6 +1975,23 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     }
 
     ProgressFinish();
+    if (loadProfile)
+    {
+        const auto& ap = render::GObjectAdmitProfile;
+        LOG_INFO(World, "LoadOptimized admit profile: scene {:.0f} register {:.0f} proxies {:.0f} | meshBuild {:.0f} meshCreate {:.0f} section {:.0f} modelRegister {:.0f} | texHeader {:.0f} ({}) texRead {:.0f} texCreate {:.0f} texFallback {:.0f} alphaScan {:.0f} | meshes {} sections {} uploads {}",
+                 ap.sceneMs, ap.registerMs, ap.proxiesMs, ap.meshBuildMs, ap.meshCreateMs, ap.sectionMs, ap.modelRegisterMs,
+                 ap.texHeaderLoadMs, ap.texHeaderLoads, ap.textureReadMs, ap.textureCreateMs, ap.textureFallbackMs, ap.alphaScanMs,
+                 ap.meshes, ap.sections, ap.textureUploads);
+        render::GObjectAdmitProfile.active = false;
+    }
+    extern double GLoadProfileMs[4];
+    if (GLoadProfileMs[0] + GLoadProfileMs[1] + GLoadProfileMs[2] > 0)
+        LOG_INFO(World, "LoadOptimized object profile: Shapes.New {:.0f} ms, NewObject {:.0f} ms, list add {:.0f} ms, scene register {:.0f} ms",
+                 GLoadProfileMs[0], GLoadProfileMs[1], GLoadProfileMs[2], GLoadProfileMs[3]);
+    LOG_INFO(World, "LoadOptimized parts: WrpReader {:.0f} ms, rest {:.0f} ms ({} objects)",
+             std::chrono::duration<double, std::milli>(tRead - tStart).count(),
+             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tRead).count(),
+             reader.GetObjectCount());
     return true;
 }
 
@@ -2366,6 +2412,34 @@ bool Landscape::LoadOprwModern(const char* path)
             _tex(x, z) = static_cast<short>(world.materialIndex[landIndex]);
         }
     }
+    // The ambient-sound map (which loop a cell plays: sea, trees, meadow, highland wind) was
+    // never filled for these worlds, so every cell read "no sound" and an Arma world was
+    // silent but for the units in it. It is made as InitSoundMap makes it for an OFP world,
+    // from what the Arma 3 grid says directly: the forest bit (OFP counted tree models by
+    // name, and these are streamed in later and named otherwise), the sea depth, the height.
+    {
+        const auto setAround = [&](int cx, int cz, int r, int sound) {
+            for (int zz = -r; zz <= r; ++zz)
+                for (int xx = -r; xx <= r; ++xx)
+                    SetSound(cx + xx, cz + zz, sound);
+        };
+        for (int z = 0; z < land; ++z)
+            for (int x = 0; x < land; ++x)
+                SetSound(x, z, 2); // meadow
+        for (int z = 0; z < land; ++z)
+            for (int x = 0; x < land; ++x)
+                if (Fmt::World::Oprw25Geography{world.geography[static_cast<size_t>(z) * land + x]}.Forest())
+                    setAround(x, z, 1, 1); // trees: birds
+        for (int z = 0; z < land; ++z)
+            for (int x = 0; x < land; ++x)
+                if (GetLandData(x, z) > 170)
+                    SetSound(x, z, 3); // wind on highlands
+        for (int z = 0; z < land; ++z)
+            for (int x = 0; x < land; ++x)
+                if (_geography(x, z).u.waterDepth > 0)
+                    setAround(x, z, 2, 0); // sea
+    }
+
     LOG_INFO(World,
              "Modern world dual grid: land {}x{} at {}m, terrain {}x{} at {}m; semantic cells reduced {}x "
              "versus the compatibility bridge",
@@ -3226,6 +3300,18 @@ static size_t ObjectStreamShapeCacheLimit()
 // lead those extra frames are frames in which the objects are already needed and missing.
 // (b) and (c) are a pair; (b) alone moves the same synchronous cost earlier without shrinking
 // it, and (c) alone trades a stall for pop-in.
+// PERF-STREAM-HYSTERESIS lever (see UpdateModernObjectResidency): 0 = recentre on the bare
+// quantised block, as before.
+static bool ObjectStreamCentreHysteresis()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_HYSTERESIS");
+        return !(v && v[0] == '0');
+    }();
+    return on;
+}
+
 static float ObjectStreamPrefetchSeconds()
 {
     static const float seconds = []
@@ -3638,10 +3724,591 @@ bool Landscape::SetObjectStreamTestBudget(uint32_t budget)
     return true;
 }
 
+// PERF (2026-10-14): a streamed native model's bank tables, with its face textures prepared on
+// the task pool first (PrepareNativeInstallTextures: exactly the names BuildAdapterBankTables
+// loads, minus what the bank already holds). The table build here was the main thread's cold
+// admission cost -- each new .edds read, LZ4'd, BC7-decoded and tinted in turn. Only with
+// Enfusion archives mounted; POSEIDON_STREAM_TEXTURE_PREP=0 is the A/B.
+// Whether BuildStreamedBankTables prepares native textures ahead of the bank (its first branch).
+static bool NativeTexturePrepApplies(AbstractTextBank* bank)
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("POSEIDON_STREAM_TEXTURE_PREP");
+        return !(v && v[0] == '0');
+    }();
+    return enabled && bank && Asset::Formats::Enfusion::EnfusionMount::Instance().ArchiveCount() > 0;
+}
+
+// STREAM-PAA-PREP (2026-10-20): the PBO-archive counterpart of NativeTexturePrepApplies. On a
+// DayZ Chernarus+ flight every cold model's PAAs were read from their PBO and LZO-decompressed on
+// the main thread at upload (Nsight: Lzo1x::Decompress 27% of the main thread in frames > 50 ms;
+// "texprep worker=0chains", 0 of 2,398 uploads prepared). POSEIDON_STREAM_PAA_PREP=0 = off.
+static bool PaaTexturePrepApplies(AbstractTextBank* bank)
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("POSEIDON_STREAM_PAA_PREP");
+        return !(v && v[0] == '0');
+    }();
+    return enabled && bank && GUseFileBanks && render::PreparedTextureStore::Enabled() &&
+           Asset::Formats::Enfusion::EnfusionMount::Instance().ArchiveCount() == 0;
+}
+
+// The background texture tasks of parked models: one per model, at most a quarter of the cores
+// (2..6, POSEIDON_STREAM_PREP_THREADS) at a time, below normal priority.
+static std::counting_semaphore<64>& StreamPrepGate()
+{
+    static std::counting_semaphore<64> gate([]
+    {
+        const char* v = std::getenv("POSEIDON_STREAM_PREP_THREADS");
+        const long want = v ? std::strtol(v, nullptr, 10)
+                            : static_cast<long>(std::thread::hardware_concurrency() / 4);
+        return static_cast<std::ptrdiff_t>(std::clamp<long>(want, v ? 1 : 2, v ? 64 : 6));
+    }());
+    return gate;
+}
+
+// PERF-FAR-ASYNC-PREP lever (see UpdateNativeFarResidency).
+static bool NativeFarAsyncPrep()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_NATIVE_FAR_ASYNC_PREP");
+        return !(v && v[0] == '0');
+    }();
+    return on;
+}
+
+static void BuildStreamedBankTables(const Model::Model& model, Model::ShapeAdapter::AdapterBankTables& tables)
+{
+    AbstractTextBank* bank = GEngine ? GEngine->TextBank() : nullptr;
+    if (NativeTexturePrepApplies(bank))
+    {
+        std::unordered_set<std::string> claims;
+        PrepareNativeInstallTextures({&model}, GetGlobalTaskPool(), claims,
+                                     [bank](const char* name) { return bank->IsLoaded(RStringB(name)); });
+        const NativeInstallTextureScope takePrepared;
+        Model::ShapeAdapter::BuildAdapterBankTables(model, tables);
+        return;
+    }
+    Model::ShapeAdapter::BuildAdapterBankTables(model, tables);
+}
+
+// STREAM-PAA-PREP: capture one PAA's immutable archive member for a background read (main thread:
+// the bank lookup is). Skips what is loaded, prepared/claimed, or not a plain PBO member.
+static uint32_t GPaaCaptureRefused[5] = {}; // diagnostics: loaded, store refused, no archive, no member
+static void CapturePaaRead(AbstractTextBank* bank, const std::string& raw,
+                           std::vector<std::pair<std::string, BankReadRequest>>& reads)
+{
+    // Claims expire: a prepared chain nobody took (TTL) or a texture evicted after its upload must be
+    // preparable again for the next model that names it. The store itself refuses a key it holds.
+    static std::unordered_map<std::string, std::chrono::steady_clock::time_point> claimed; // main thread only
+    if (raw.empty() || reads.size() >= 512)
+        return;
+    std::string key = render::PreparedTextureStore::Key(raw);
+    if (key.size() < 4 || (key.compare(key.size() - 4, 4, ".paa") != 0 && key.compare(key.size() - 4, 4, ".pac") != 0))
+        return;
+    // PERF-PAA-PREP-KINDS (2026-10-20). Measured on a Chernarus flight (prepared puts vs puts that
+    // expired untaken, by name suffix): _mc 97%, _as 93%, _mca 98%, _ads 93%, _dt 85%, _sm 89%,
+    // _ext/_int/_detail 100% -- maps the renderer does not bind, ~500 MB of the store's intake, a
+    // third of it. They kept the 512 MB store full through the opening burst, so the textures the
+    // installs DID need (a school's furniture: one install tail of 1 s) were refused and decoded
+    // on the main thread. They are not prepared; whatever does bind one still loads it as before.
+    // _co/_nohq/_smdi (7-19%) and _ca (44%) stay. POSEIDON_PAA_PREP_ALL_KINDS=1 = prepare all.
+    static const bool allKinds = [] { const char* v = std::getenv("POSEIDON_PAA_PREP_ALL_KINDS"); return v && v[0] == '1'; }();
+    if (!allKinds)
+    {
+        const size_t dot = key.size() - 4;
+        const size_t underscore = key.rfind('_', dot);
+        const size_t slash = key.find_last_of("\\/", dot);
+        if (underscore != std::string::npos && (slash == std::string::npos || underscore > slash))
+        {
+            const std::string_view kind(key.data() + underscore + 1, dot - underscore - 1);
+            for (const char* skip : {"mc", "as", "mca", "ads", "dt", "sm", "ext", "int", "detail"})
+                if (kind == skip)
+                    return;
+        }
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (const auto it = claimed.find(key); it != claimed.end() && now - it->second < std::chrono::seconds(10))
+    {
+        ++GPaaCaptureRefused[4];
+        return;
+    }
+    if (bank->IsLoaded(RStringB(key.c_str())))
+    {
+        ++GPaaCaptureRefused[0];
+        return;
+    }
+    if (!render::PreparedTextureStore::Instance().ShouldPrepare(key))
+    {
+        ++GPaaCaptureRefused[1];
+        return;
+    }
+    QFBank* archive = QIFStreamB::AutoBank(key.c_str());
+    if (!archive || archive->GetPrefix().GetLength() >= static_cast<int>(key.size()))
+    {
+        ++GPaaCaptureRefused[2];
+        return;
+    }
+    // With the archive identity (a lease on the exact mounted member) the worker can also publish
+    // the texture's alpha facts, which the alpha classification takes only for that same member.
+    static const bool withIdentity = [] {
+        const char* v = std::getenv("POSEIDON_STREAM_PAA_IDENTITY");
+        return !(v && v[0] == '0');
+    }();
+    auto read = withIdentity ? archive->CaptureReadRequest(key.c_str() + archive->GetPrefix().GetLength(), true)
+                             : std::optional<BankReadRequest>{};
+    if (!read)
+        read = archive->CaptureReadRequest(key.c_str() + archive->GetPrefix().GetLength());
+    if (!read || read->bytes == 0 || read->bytes > 16u * 1024 * 1024)
+    {
+        ++GPaaCaptureRefused[3];
+        return;
+    }
+    claimed.insert_or_assign(key, now);
+    if (claimed.size() > 65536)
+        std::erase_if(claimed, [&](const auto& entry) { return now - entry.second > std::chrono::seconds(10); });
+    reads.emplace_back(std::move(key), std::move(*read));
+}
+
+// STREAM-PAA-PREP, background half: read and LZO-decode the captured PAAs into the prepared store.
+static void DecodePaaReads(std::vector<std::pair<std::string, BankReadRequest>>& reads, uint64_t generation)
+{
+    render::PreparedTextureStore& prepared = render::PreparedTextureStore::Instance();
+    std::vector<char> bytes;
+    for (auto& [key, read] : reads)
+    {
+        try
+        {
+            PAABlockChain chain;
+            const bool readOk = read.Read(bytes);
+            const bool decoded = readOk &&
+                ReadPAABlockChainBuffer(bytes.data(), bytes.size(), chain, nullptr, 64u * 1024 * 1024) && chain.valid();
+            // STREAM-PAA-ALPHA: the alpha classification's facts (histogram + shape) from the same
+            // chain, so the cold install's GetAlphaClass need not read and decode the top mip again.
+            std::unique_ptr<render::PreparedAlphaFacts> facts;
+            if (decoded && read.HasArchiveIdentity())
+                facts = render::PreparedTextureStore::BuildAlphaFacts(chain, read);
+            const bool put = decoded && prepared.Put(key, std::move(chain), generation, std::move(facts));
+            static const bool putLog = [] { const char* v = std::getenv("WGR_PAA_PUT_LOG"); return v && v[0] == '1'; }();
+            static std::atomic<int> putRows{0};
+            // WGR_PAA_PUT_LOG=1: every REFUSED put, with the store counters that say why.
+            if (putLog && !put && putRows.fetch_add(1) < 5000)
+            {
+                const auto st = prepared.SnapshotStats();
+                LOG_INFO(World, "PAA put: {} read={} decoded={} put={} | store full={} dup={} stale={} uploaded={} "
+                         "cancelled={} entries={} MB={} puts={} takes={} misses={} expired={}", key, readOk, decoded,
+                         put, st.rejectedFull, st.rejectedDup, st.rejectedStale, st.skippedUploaded, st.paaCancelled,
+                         st.entries, st.bytes >> 20, st.puts, st.takes, st.misses, st.expired);
+            }
+        }
+        catch (...)
+        {
+            // The upload reads it itself, as before.
+        }
+    }
+}
+
+// STREAM-PAA-PREP: NUL-terminated .paa/.pac/.rvmat path strings in a P3D's bytes (texture and
+// material names are stored uncompressed). A speculative scan: a false positive costs one
+// skipped capture, a miss leaves the texture to the main thread as before.
+static void ScanP3dTextureNames(std::span<const char> bytes, std::vector<std::string>& paa, std::vector<std::string>& rvmat)
+{
+    if (bytes.size() < 8 || (std::string_view(bytes.data(), 4) != "ODOL" && std::string_view(bytes.data(), 4) != "MLOD"))
+        return;
+    const auto pathByte = [](unsigned char c)
+    {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' ||
+               c == '.' || c == '\\' || c == '/';
+    };
+    const auto endsWith = [](std::string_view s, std::string_view suffix)
+    {
+        if (s.size() < suffix.size())
+            return false;
+        for (size_t i = 0; i < suffix.size(); ++i)
+        {
+            char c = s[s.size() - suffix.size() + i];
+            if (c >= 'A' && c <= 'Z')
+                c = static_cast<char>(c - 'A' + 'a');
+            if (c != suffix[i])
+                return false;
+        }
+        return true;
+    };
+    for (size_t i = 8; i < bytes.size() && paa.size() + rvmat.size() < 4096;)
+    {
+        if (!pathByte(static_cast<unsigned char>(bytes[i])))
+        {
+            ++i;
+            continue;
+        }
+        const size_t start = i;
+        do
+            ++i;
+        while (i < bytes.size() && pathByte(static_cast<unsigned char>(bytes[i])));
+        const size_t length = i - start;
+        if (length < 7 || length > 240 || i == bytes.size() || bytes[i] != '\0')
+            continue;
+        const std::string_view token(bytes.data() + start, length);
+        if (endsWith(token, ".paa") || endsWith(token, ".pac"))
+            paa.emplace_back(token);
+        else if (endsWith(token, ".rvmat"))
+            rvmat.emplace_back(token);
+    }
+}
+
+// STREAM-PAA-PREP, background half of one round: decode the captured PAAs; name the stage PAAs
+// of the captured .rvmat materials and the PAAs/materials of the captured proxy models.
+static void RunPaaRound(std::vector<std::pair<std::string, BankReadRequest>>& paaReads,
+                        const std::vector<std::pair<std::string, BankReadRequest>>& rvmatReads,
+                        const std::vector<std::pair<std::string, BankReadRequest>>& p3dReads, uint64_t generation,
+                        std::vector<std::string>& foundPaa, std::vector<std::string>& foundRvmat)
+{
+    DecodePaaReads(paaReads, generation);
+    std::vector<char> bytes;
+    for (const auto& [path, read] : rvmatReads)
+    {
+        try
+        {
+            if (!read.Read(bytes))
+                continue;
+            const auto canonical = Asset::VirtualPath::Parse(path).canonical();
+            const auto stages = Streaming::ExtractOwnedRapStageNames(std::span<const char>(bytes.data(), bytes.size()), canonical);
+            if (stages.status == Streaming::RapStageNamesStatus::Complete)
+                foundPaa.insert(foundPaa.end(), stages.names.begin(), stages.names.end());
+        }
+        catch (...)
+        {
+        }
+    }
+    for (const auto& [path, read] : p3dReads)
+    {
+        try
+        {
+            if (read.Read(bytes))
+                ScanP3dTextureNames(std::span<const char>(bytes.data(), bytes.size()), foundPaa, foundRvmat);
+        }
+        catch (...)
+        {
+        }
+    }
+}
+
+// STREAM-PAA-PREP: capture a .rvmat or .p3d member (main thread), once per process.
+static void CaptureOnce(const std::string& raw, size_t limit, std::vector<std::pair<std::string, BankReadRequest>>& out,
+                        size_t cap)
+{
+    static std::unordered_map<std::string, std::chrono::steady_clock::time_point> seen; // main thread only
+    if (out.size() >= cap)
+        return;
+    std::string key = render::PreparedTextureStore::Key(raw);
+    const auto now = std::chrono::steady_clock::now();
+    if (key.empty())
+        return;
+    if (const auto it = seen.find(key); it != seen.end() && now - it->second < std::chrono::seconds(60))
+        return;
+    seen.insert_or_assign(key, now);
+    QFBank* archive = QIFStreamB::AutoBank(key.c_str());
+    if (!archive || archive->GetPrefix().GetLength() >= static_cast<int>(key.size()))
+        return;
+    if (auto read = archive->CaptureReadRequest(key.c_str() + archive->GetPrefix().GetLength());
+        read && read->bytes > 0 && read->bytes <= limit)
+        out.emplace_back(std::move(key), std::move(*read));
+}
+
+// Start one background round for a parked model.
+static std::future<void> StartPaaRound(std::vector<std::pair<std::string, BankReadRequest>> paaReads,
+                                       std::vector<std::pair<std::string, BankReadRequest>> rvmatReads,
+                                       std::vector<std::pair<std::string, BankReadRequest>> p3dReads,
+                                       std::shared_ptr<std::vector<std::string>> foundPaa,
+                                       std::shared_ptr<std::vector<std::string>> foundRvmat)
+{
+    const uint64_t generation = render::PreparedTextureStore::Instance().Generation();
+    return std::async(std::launch::async,
+        [paaReads = std::move(paaReads), rvmatReads = std::move(rvmatReads), p3dReads = std::move(p3dReads),
+         foundPaa, foundRvmat, generation]() mutable
+    {
+        std::counting_semaphore<64>& gate = StreamPrepGate();
+        gate.acquire();
+        struct Release { std::counting_semaphore<64>& g; ~Release() { g.release(); } } release{gate};
+        Foundation::poSetMyPriority(-1);
+        RunPaaRound(paaReads, rvmatReads, p3dReads, generation, *foundPaa, *foundRvmat);
+    });
+}
+
+void Landscape::ParkStreamTexPrep(uint32_t modelIndex, std::shared_ptr<Model::Model> model, bool ownerAdmission)
+{
+    AbstractTextBank* bank = GEngine ? GEngine->TextBank() : nullptr;
+    if (PaaTexturePrepApplies(bank))
+    {
+        // STREAM-PAA-PREP: name the model's PAAs here (the bank and the mounted PBOs are main-
+        // thread state), capture each one's immutable archive member, and read + LZO-decode them
+        // on the background task into the prepared store, where the upload's ordinary Take finds
+        // them (it checks every level against the header it parsed itself before using a byte).
+        // A texture that is loaded, already prepared or not a plain stored PBO member is left to
+        // the main thread exactly as before.
+        // The model's own PAAs, its .rvmat materials (whose stage maps -- normal, specular, masks --
+        // are resolved only at GPU registration) and its proxy models (a building's furniture,
+        // loaded inside its install) are all captured here; the rounds that follow (FinishStream
+        // TexPrep) chase what the materials and proxies name before the model may convert.
+        std::vector<std::pair<std::string, BankReadRequest>> reads, rvmats, p3ds;
+        if (model)
+            for (const auto& level : model->lodLevels)
+            {
+                for (const auto& material : level.mesh.materials)
+                {
+                    CapturePaaRead(bank, material.texturePath, reads);
+                    for (const auto& stage : material.embeddedStages)
+                        CapturePaaRead(bank, stage.texturePath, reads);
+                    if (!material.materialPath.empty())
+                        CaptureOnce(material.materialPath, 256u * 1024, rvmats, 256);
+                }
+                if (level.purpose == Model::LodPurpose::Visual)
+                    for (const auto& proxy : level.mesh.proxies)
+                    {
+                        const auto normalized = Model::ShapeAdapter::normalizeProxyModelName(proxy.name);
+                        if (!normalized.modelName.empty())
+                            CaptureOnce(static_cast<const char*>(GetShapeName(RString(normalized.modelName.c_str()))),
+                                        4u * 1024 * 1024, p3ds, 256);
+                    }
+            }
+        static const bool roundLog = [] { const char* v = std::getenv("WGR_PAA_ROUND_LOG"); return v && v[0] == '1'; }();
+        if (roundLog && model)
+            LOG_INFO(World, "PAA round 0: {} paa={} rvmat={} p3d={}", model->sourcePath, reads.size(), rvmats.size(), p3ds.size());
+        NativeFarTexPrep pending;
+        pending.model = std::move(model);
+        pending.ownerAdmission = ownerAdmission;
+        pending.foundPaa = std::make_shared<std::vector<std::string>>();
+        pending.foundRvmat = std::make_shared<std::vector<std::string>>();
+        pending.decode = StartPaaRound(std::move(reads), std::move(rvmats), std::move(p3ds), pending.foundPaa,
+                                       pending.foundRvmat);
+        _nativeFarTexPrep.insert_or_assign(modelIndex, std::move(pending));
+        return;
+    }
+    std::unordered_set<std::string> claims;
+    std::vector<std::string> keys = CollectNativeInstallTextureKeys(
+        {model.get()}, claims, [bank](const char* n) { return bank && bank->IsLoaded(RStringB(n)); });
+    // STREAM-EMAT-PREP: the face textures above are only half of what a cold install loads. The
+    // .emat stage maps (BCR, NMO, masks) are resolved at GPU registration, on the main thread,
+    // and every one of them was a synchronous pak read + decode there: 689 textures / 4.3 s of
+    // the main thread on a 15 m/s Durras flight (2.6 s of it the read). The materials are read
+    // here too, on the same background task, and their maps prepared; the cold install takes
+    // them under NativeInstallTextureScope. A material is asked once per process (the bank keeps
+    // what it loaded). POSEIDON_STREAM_EMAT_PREP=0 = the face textures only.
+    static const bool ematPrep = []
+    {
+        const char* v = std::getenv("POSEIDON_STREAM_EMAT_PREP");
+        return !(v && v[0] == '0');
+    }();
+    static std::unordered_set<std::string> ematSeen;
+    std::vector<std::string> emats;
+    if (ematPrep && model)
+        for (const auto& level : model->lodLevels)
+            for (const auto& material : level.mesh.materials)
+                if (Asset::Material::IsEmatPath(material.materialPath) && ematSeen.insert(material.materialPath).second)
+                    emats.push_back(material.materialPath);
+    NativeFarTexPrep pending;
+    pending.model = std::move(model);
+    pending.ownerAdmission = ownerAdmission;
+    pending.decode = std::async(std::launch::async, [keys = std::move(keys), emats = std::move(emats)]() mutable
+    {
+        // STREAM-EMAT-PREP: one task per parked model, and a recentre parks hundreds at once.
+        // Unbounded, they all decoded together and competed with the main and render threads;
+        // at most POSEIDON_STREAM_PREP_THREADS (default: a quarter of the cores, 2..6) run.
+        std::counting_semaphore<64>& gate = StreamPrepGate();
+        gate.acquire();
+        struct Release { std::counting_semaphore<64>& g; ~Release() { g.release(); } } release{gate};
+        // Below normal, as the object-stream workers: this decode/encode must never win a core from
+        // the main or render thread (a CPU-contended flight showed render-thread stalls of 10-230 ms
+        // in work that costs under a millisecond).
+        Foundation::poSetMyPriority(-1);
+        if (!emats.empty())
+        {
+            const auto& mount = Asset::Formats::Enfusion::EnfusionMount::Instance();
+            const auto readText = [&mount](const std::string& path, std::string& text)
+            {
+                const auto request = mount.MakeReadRequest(path.c_str());
+                std::vector<uint8_t> bytes;
+                std::string error;
+                if (!request || !request->Read(bytes, error) || bytes.empty())
+                    return false;
+                text.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+                return true;
+            };
+            render::PreparedTextureStore& store = render::PreparedTextureStore::Instance();
+            std::unordered_set<std::string> claimed(keys.begin(), keys.end());
+            for (const std::string& path : emats)
+            {
+                try
+                {
+                    std::string text;
+                    if (!readText(path, text))
+                        continue;
+                    Asset::Material::EmatMaterial emat = Asset::Material::ParseEmat(text);
+                    if (!emat.valid())
+                        continue;
+                    Asset::Material::ResolveEmatInheritance(emat, readText);
+                    const Asset::Material::TranslatedMaterial translated =
+                        Asset::Material::TranslateEmat(emat, path, std::string());
+                    for (const auto& slot : translated.slots)
+                    {
+                        if (slot.texture.isProcedural || slot.texture.path.empty())
+                            continue;
+                        std::string key = render::PreparedTextureStore::Key(slot.texture.path.canonical().c_str());
+                        if ((key.ends_with(".edds") || key.ends_with(".dds")) && !claimed.count(key) &&
+                            store.ShouldPrepare(key))
+                        {
+                            claimed.insert(key);
+                            keys.push_back(std::move(key));
+                        }
+                    }
+                }
+                catch (...)
+                {
+                    // The main thread reads it again and caches the miss, as before.
+                }
+            }
+        }
+        DecodeNativeInstallTextureKeys(keys, nullptr);
+    });
+    _nativeFarTexPrep.insert_or_assign(modelIndex, std::move(pending));
+}
+
+bool Landscape::FinishStreamTexPrep(uint32_t modelIndex)
+{
+    const auto found = _nativeFarTexPrep.find(modelIndex);
+    if (found == _nativeFarTexPrep.end())
+        return false;
+    // `decode` is consumed once; a model kept parked after that (PERF-PROXY-WARM) comes back here
+    // with no task to wait for.
+    if (found->second.decode.valid())
+    {
+        if (found->second.decode.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            return false;
+        found->second.decode.get();
+    }
+    // STREAM-PAA-PREP: a round named more (material stage maps, proxy textures): capture them here
+    // and run another round before the model converts, so its install finds them prepared.
+    if (NativeFarTexPrep& parked = found->second; parked.foundPaa && parked.paaRounds < 3 &&
+        (!parked.foundPaa->empty() || !parked.foundRvmat->empty()))
+    {
+        AbstractTextBank* bank = GEngine ? GEngine->TextBank() : nullptr;
+        std::vector<std::pair<std::string, BankReadRequest>> reads, rvmats;
+        if (bank)
+        {
+            for (const std::string& name : *parked.foundPaa)
+                CapturePaaRead(bank, name, reads);
+            for (const std::string& name : *parked.foundRvmat)
+                CaptureOnce(name, 256u * 1024, rvmats, 256);
+        }
+        static const bool roundLog = [] { const char* v = std::getenv("WGR_PAA_ROUND_LOG"); return v && v[0] == '1'; }();
+        if (roundLog)
+            LOG_INFO(World, "PAA round {}: {} found paa={} rvmat={} captured paa={} rvmat={} | refused so far loaded={} store={} archive={} member={} claimed={} | first={}", parked.paaRounds + 1,
+                     parked.model ? parked.model->sourcePath : std::string("?"), parked.foundPaa->size(),
+                     parked.foundRvmat->size(), reads.size(), rvmats.size(), GPaaCaptureRefused[0], GPaaCaptureRefused[1],
+                     GPaaCaptureRefused[2], GPaaCaptureRefused[3], GPaaCaptureRefused[4],
+                     parked.foundPaa->empty() ? std::string("-") : parked.foundPaa->front());
+        parked.foundPaa = std::make_shared<std::vector<std::string>>();
+        parked.foundRvmat = std::make_shared<std::vector<std::string>>();
+        ++parked.paaRounds;
+        if (!reads.empty() || !rvmats.empty())
+        {
+            parked.decode = StartPaaRound(std::move(reads), std::move(rvmats), {}, parked.foundPaa, parked.foundRvmat);
+            return false; // still parked; the next call sees the new round
+        }
+    }
+    // PERF-PROXY-WARM (2026-10-20). A building's furniture is loaded inside its install tail
+    // (CreateAdapterProxies -> NewObject -> Shapes.New): every proxy model not yet in the bank is
+    // parsed, converted and registered there, in one frame -- DayZ's city school took 835-1010 ms,
+    // dozens of 1-40 ms furniture loads (2.9-3.2 s of install tails per Chernarus flight). They
+    // are loaded here instead, while the building is still parked, at most
+    // POSEIDON_PROXY_WARM_MS (default 4) of main-thread time per update across all parked
+    // models, with the same Shapes.New call the install makes, so the install finds them
+    // cached. The building converts once its list is done. 0 = off.
+    if (NativeFarTexPrep& parked = found->second; parked.foundPaa && parked.model)
+    {
+        static const double warmBudgetMs = []
+        {
+            const char* v = std::getenv("POSEIDON_PROXY_WARM_MS");
+            return v ? std::clamp(std::strtod(v, nullptr), 0.0, 1000.0) : 4.0;
+        }();
+        if (warmBudgetMs > 0.0)
+        {
+            if (!parked.proxiesListed)
+            {
+                parked.proxiesListed = true;
+                std::unordered_set<std::string> seen;
+                for (const auto& level : parked.model->lodLevels)
+                    for (const auto& proxy : level.mesh.proxies)
+                    {
+                        const auto normalized = Model::ShapeAdapter::normalizeProxyModelName(proxy.name);
+                        if (normalized.modelName.empty() || !seen.insert(normalized.modelName).second)
+                            continue;
+                        const RString modelName(normalized.modelName.c_str());
+                        // A proxy with a CfgNonAIVehicles class is created through its vehicle
+                        // type, not this call; an absent file is skipped by the install.
+                        if ((Pars >> "CfgNonAIVehicles").FindEntry(RString("Proxy") + modelName) != nullptr)
+                            continue;
+                        const RString shapeName = GetShapeName(modelName);
+                        if (Shapes.Find(shapeName, false, true) || !QIFStreamB::FileExist(shapeName))
+                            continue;
+                        parked.proxyShapes.emplace_back(static_cast<const char*>(shapeName));
+                    }
+            }
+            while (parked.proxyNext < parked.proxyShapes.size())
+            {
+                if (_proxyWarmSpentMs >= warmBudgetMs)
+                    return false; // still parked; the next update continues the list
+                const auto began = std::chrono::steady_clock::now();
+                const RString shapeName(parked.proxyShapes[parked.proxyNext++].c_str());
+                if (!Shapes.Find(shapeName, false, true))
+                {
+                    // The install loads its proxies inside its WorldModelScope (RFG-099), which
+                    // registers them with the retained renderer; so does this.
+                    ShapeBank::WorldModelScope worldModel(Shapes);
+                    if (Ref<LODShapeWithShadow> shape = Shapes.New(shapeName, false, true))
+                        _proxyWarmHold.emplace_back(std::move(shape), began);
+                }
+                _proxyWarmSpentMs +=
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+            }
+        }
+    }
+    std::shared_ptr<Model::Model> model = std::move(found->second.model);
+    const bool ownerAdmission = found->second.ownerAdmission;
+    _nativeFarTexPrep.erase(found);
+    if (!model || !_modernObjectPreparer)
+        return true;
+    auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
+    {
+        const NativeInstallTextureScope takePrepared;
+        Model::ShapeAdapter::BuildAdapterBankTables(*model, *tables);
+    }
+    const auto radiusToken = _modernObjectPreparer->QueryRadius(modelIndex);
+    const bool submitted = ownerAdmission
+        ? _modernObjectPreparer->SubmitConvert(modelIndex, std::move(model), std::move(tables), &radiusToken, nullptr, true,
+              [](void*, const char* key, WarmTextureRead& out) { return GEngine && GEngine->CaptureWarmRapStageRead(key, out); })
+        : _modernObjectPreparer->SubmitConvert(modelIndex, std::move(model), std::move(tables), &radiusToken);
+    if (!submitted)
+        _modernObjectPreparer->Request(modelIndex); // workers gone: start over, never parse here
+    return true;
+}
+
 void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
 {
+    // PERF-PROXY-WARM: a new update's budget; a warmed shape is held for a minute -- the install
+    // that wants it follows within a few updates, and from then on its proxies hold it.
+    _proxyWarmSpentMs = 0.0;
+    if (!_proxyWarmHold.empty())
+    {
+        const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(60);
+        std::erase_if(_proxyWarmHold, [&](const auto& held) { return held.second < cutoff; });
+    }
     if (!_modernObjectStreaming || _modernObjectCells.empty())
     {
+        _proxyWarmHold.clear(); // never let a dead world's shapes outlive it
         _modernPendingOwnerPrimaryTextures.reset();
         // (d) Same teardown argument as the cache below: a preparer still holding a dead
         // world's IRs, or a queue of its models, must be flushed. Reset only bumps a
@@ -3842,6 +4509,27 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     int centerZ = std::clamp(static_cast<int>(std::floor(effectivePosition.Z() * _invLandGrid)), 0, _landRange - 1);
     centerX = (centerX / QuantizeCells) * QuantizeCells;
     centerZ = (centerZ / QuantizeCells) * QuantizeCells;
+    // PERF-STREAM-HYSTERESIS: the quantised centre had no hysteresis, and the prefetch lead is
+    // not steady -- it jitters by a metre or two as the smoothed velocity follows the tick
+    // cadence. Near a block edge the lead-shifted position crossed it and back within a few
+    // frames: a 15 m/s Everon flight logged centre 700 -> 696 -> 700 inside 100 ms, and every
+    // flip released and re-created ~1,250 objects (created=1286 released=1285, then 1266/1289,
+    // then 1285/1266) -- each a frame of 50-100 ms. Hold the current block while the position
+    // stays within one cell of it on either side; a real move passes that margin a cell later,
+    // well inside the lead, and a teleport is far outside it. Off for the residency smoke-test
+    // sweep, which moves the centre by design. WGR_OBJECT_STREAM_HYSTERESIS=0 = no margin.
+    if (sweepCells == nullptr && _modernObjectCenterX > -0x3fffffff && ObjectStreamCentreHysteresis())
+    {
+        constexpr float MarginCells = 1.0f;
+        const float fx = effectivePosition.X() * _invLandGrid;
+        const float fz = effectivePosition.Z() * _invLandGrid;
+        if (centerX != _modernObjectCenterX && fx >= _modernObjectCenterX - MarginCells &&
+            fx < _modernObjectCenterX + QuantizeCells + MarginCells)
+            centerX = _modernObjectCenterX;
+        if (centerZ != _modernObjectCenterZ && fz >= _modernObjectCenterZ - MarginCells &&
+            fz < _modernObjectCenterZ + QuantizeCells + MarginCells)
+            centerZ = _modernObjectCenterZ;
+    }
     const bool centerChanged = centerX != _modernObjectCenterX || centerZ != _modernObjectCenterZ;
 
     // PRELOAD MODE. Off by default; WGR_OBJECT_STREAM_PRELOAD=1 turns it on.
@@ -4631,6 +5319,26 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 preparsed = std::move(pending.model);
                 _modernPendingOwnerPrimaryTextures.reset();
             }
+            else if (cold && asyncOn && _nativeFarTexPrep.count(placement.modelIndex))
+            {
+                // PERF-FAR-ASYNC-PREP (near window): this model's textures are decoding in the
+                // background. Once they are done the conversion goes out (under the same per-update
+                // table limit the synchronous hand-off obeyed); the placement waits either way and
+                // is admitted when the conversion lands, exactly as after a synchronous hand-off.
+                if (!(tableLimit > 0 && tablesPrepared >= tableLimit))
+                {
+                    const auto tableStart = std::chrono::steady_clock::now();
+                    if (FinishStreamTexPrep(placement.modelIndex))
+                    {
+                        ++tablesPrepared;
+                        tablePrepareMs += std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - tableStart).count();
+                    }
+                }
+                ++waited;
+                ++scan;
+                continue;
+            }
             else if (cold && asyncOn)
             {
                 const ObjectStreamPreparer::State state = _modernObjectPreparer->Query(placement.modelIndex);
@@ -4732,11 +5440,30 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                             if (c >= 'A' && c <= 'Z')
                                 c = static_cast<char>(c - 'A' + 'a');
                         preparsed->sourcePath = low;
+                        // PERF-FAR-ASYNC-PREP (near window): the synchronous hand-off below waited
+                        // for the native texture decode on the main thread -- table prep up to
+                        // 160-300 ms per model on a 15 m/s Everon flight. Park it instead; the
+                        // branch above submits it once decoded. The DayZ tenement pilot keeps its
+                        // own scoped synchronous path.
+                        if (AbstractTextBank* nearBank = GEngine ? GEngine->TextBank() : nullptr;
+                            NativeFarAsyncPrep() && (NativeTexturePrepApplies(nearBank) || PaaTexturePrepApplies(nearBank)) &&
+                            // The tenement keeps its own synchronous path only while its pilot is on.
+                            !(TenementPhysicalPaaScope::Enabled() &&
+                              low == R"(dz\structures\residential\tenements\tenement_small.p3d)"))
+                        {
+                            const auto tableStart = std::chrono::steady_clock::now();
+                            ParkStreamTexPrep(placement.modelIndex, std::move(preparsed), true);
+                            tablePrepareMs += std::chrono::duration<double, std::milli>(
+                                std::chrono::steady_clock::now() - tableStart).count();
+                            ++waited;
+                            ++scan;
+                            continue;
+                        }
                         auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
                         const auto tableStart = std::chrono::steady_clock::now();
                         TenementPhysicalPaaScope physicalPaaTables(
                             low == R"(dz\structures\residential\tenements\tenement_small.p3d)");
-                        Model::ShapeAdapter::BuildAdapterBankTables(*preparsed, *tables);
+                        BuildStreamedBankTables(*preparsed, *tables);
                         if (TenementPhysicalPaaScope::Overflowed())
                             LOG_INFO(World, "DayZ physical prefetch: parent Init identity capture overflowed 256 attempts; uncaptured sources use ordinary reads");
                         tablePrepareMs += std::chrono::duration<double, std::milli>(
@@ -5018,6 +5745,11 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             }
             // Same taken ConvertedShape, joined nonyielding owner operation through first GPU registration.
             render::ColdPaaAdmissionScope coldTextureScope(coldTexture.get());
+            // STREAM-EMAT-PREP: a cold install takes the face and .emat stage maps ParkStreamTexPrep
+            // decoded in the background instead of reading and decoding them here.
+            std::optional<NativeInstallTextureScope> takePreparedStages;
+            if (cold && NativeTexturePrepApplies(GEngine ? GEngine->TextBank() : nullptr))
+                takePreparedStages.emplace();
             TenementPhysicalPaaScope physicalPaaAdmission(cold &&
                 std::strcmp((const char*)modelName,
                     R"(dz\structures\residential\tenements\tenement_small.p3d)") == 0);
@@ -5448,39 +6180,418 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     }
 }
 
+void Landscape::NoteNativeProxyModel(uint32_t modelIndex, const LODShapeWithShadow& shape)
+{
+    if (_nativeProxyModels.size() < _modernObjectModels.size())
+        _nativeProxyModels.resize(_modernObjectModels.size());
+    if (modelIndex >= _nativeProxyModels.size() || _nativeProxyModels[modelIndex].valid)
+        return;
+    NativeProxyModel& proxy = _nativeProxyModels[modelIndex];
+    const Vector3 lo = shape.Min(), hi = shape.Max();
+    proxy.height = hi.Y() - lo.Y();
+    proxy.baseY = lo.Y();
+    proxy.radius = 0.5f * std::max(hi.X() - lo.X(), hi.Z() - lo.Z());
+    // Colour: the mean of the first LOD's section textures (their own average colours).
+    float r = 0, g = 0, b = 0;
+    int n = 0;
+    if (const Shape* lod = shape.NLevels() > 0 ? shape.LevelOpaque(0) : nullptr)
+        for (int i = 0; i < lod->NSections(); ++i)
+            if (Texture* texture = lod->GetSection(i).properties.GetTexture())
+            {
+                const Color c = texture->GetColor();
+                r += c.R(); g += c.G(); b += c.B();
+                ++n;
+            }
+    // Texture averages are sRGB-encoded; far.wgsl multiplies the colour as LINEAR albedo (the
+    // OFP worlds' ModelInfo colours were tuned that way), so a native proxy is decoded here:
+    // undecoded, a spruce at sRGB 0x50 (0.31) drew at ~4x its brightness -- pale ghost forests.
+    const auto linear = [](float v) { return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f); };
+    proxy.colour = n > 0 ? static_cast<uint32_t>(PackedColor(Color(linear(r / n), linear(g / n), linear(b / n), 1.0f)))
+                         : 0xFF404040u;
+    proxy.flags = FarProxyIsPrism(static_cast<const char*>(_modernObjectModels[modelIndex])) ? 1u : 0u;
+    proxy.valid = proxy.height > 0.05f && proxy.radius > 0.05f;
+    _nativeProxyDirty |= proxy.valid;
+    _nativeProxyModelCount += proxy.valid ? 1u : 0u;
+}
+
+// PERF-FAR-PROXY-ASYNC (2026-10-20). UploadNativeProxies walked all 1.38M Everon placements and
+// then waited for the render thread to upload ~1M instances: 55-95 ms of the main thread, nine
+// times in the first 80 s of a Durras flight (the slow swaps marked "native far"). The walk now
+// runs on a worker over snapshots (the proxy models, the wanted flags; placements' rows and
+// models do not change after load) and the upload is queued to the render thread.
+// WGR_FAR_PROXY_ASYNC=0 = the synchronous rebuild below.
+struct Landscape::NativeProxyBuild
+{
+    std::vector<Engine::FarProxyInstance> instances;
+    size_t prisms = 0;
+    double walkMs = 0.0;
+};
+
+void Landscape::StartNativeProxyBuild()
+{
+    _nativeProxyBuildModels = _nativeProxyModelCount;
+    _nativeProxyDirty = false; // models noted while it runs mark it dirty again
+    auto models = std::make_shared<std::vector<NativeProxyModel>>(_nativeProxyModels);
+    auto wanted = std::make_shared<std::vector<uint8_t>>(_nativeFarWanted);
+    const std::vector<ModernObjectPlacement>* placements = &_modernObjectPlacements;
+    // The first build also names the commonest proxies and their colours (a wrong colour on a
+    // forest-sized model is visible from every hill) -- a second pass, so on the worker too.
+    static bool reported = false;
+    const bool report = !reported;
+    reported = true;
+    std::shared_ptr<std::vector<std::string>> names;
+    if (report)
+    {
+        names = std::make_shared<std::vector<std::string>>();
+        names->reserve(_modernObjectModels.size());
+        for (size_t m = 0; m < _modernObjectModels.size(); ++m)
+            names->emplace_back(static_cast<const char*>(_modernObjectModels[m]));
+    }
+    _nativeProxyBuild = std::async(std::launch::async, [models, wanted, placements, names]() {
+        Foundation::poSetMyPriority(-1);
+        const auto start = std::chrono::steady_clock::now();
+        auto result = std::make_shared<NativeProxyBuild>();
+        NativeProxyBuild& out = *result;
+        out.instances.reserve(placements->size());
+        for (size_t index = 0; index < placements->size(); ++index)
+        {
+            const ModernObjectPlacement& placement = (*placements)[index];
+            if (placement.modelIndex >= models->size() || !(*models)[placement.modelIndex].valid ||
+                (index < wanted->size() && ((*wanted)[index] & 2)))
+                continue;
+            const NativeProxyModel& proxy = (*models)[placement.modelIndex];
+            const float scale = std::sqrt(placement.rows[0] * placement.rows[0] + placement.rows[1] * placement.rows[1] +
+                                          placement.rows[2] * placement.rows[2]);
+            Engine::FarProxyInstance instance;
+            instance.x = placement.rows[9];
+            instance.y = placement.rows[10] + proxy.baseY * scale;
+            instance.z = placement.rows[11];
+            instance.height = proxy.height * scale;
+            instance.radius = proxy.radius * scale;
+            instance.colour = proxy.colour;
+            instance.flags = proxy.flags;
+            out.prisms += proxy.flags != 0;
+            out.instances.push_back(instance);
+        }
+        out.walkMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        if (names)
+        {
+            std::vector<uint32_t> perModel(models->size(), 0);
+            for (const ModernObjectPlacement& placement : *placements)
+                if (placement.modelIndex < perModel.size() && (*models)[placement.modelIndex].valid)
+                    ++perModel[placement.modelIndex];
+            std::vector<std::pair<uint32_t, uint32_t>> counts; // (count, model)
+            for (uint32_t m = 0; m < perModel.size(); ++m)
+                if (perModel[m])
+                    counts.push_back({perModel[m], m});
+            std::sort(counts.begin(), counts.end(), std::greater<>());
+            for (size_t i = 0; i < counts.size() && i < 8; ++i)
+            {
+                const NativeProxyModel& proxy = (*models)[counts[i].second];
+                LOG_INFO(World, "Native far proxy #{}: {} x{} colour {:08x} h={:.1f} r={:.1f} {}", i,
+                         counts[i].second < names->size() ? (*names)[counts[i].second] : std::string("?"),
+                         counts[i].first, proxy.colour, proxy.height, proxy.radius, proxy.flags ? "prism" : "card");
+            }
+        }
+        return result;
+    });
+}
+
+bool Landscape::FinishNativeProxyBuild()
+{
+    if (!_nativeProxyBuild.valid() ||
+        _nativeProxyBuild.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return false;
+    const auto start = std::chrono::steady_clock::now();
+    const std::shared_ptr<NativeProxyBuild> result = _nativeProxyBuild.get();
+    NativeProxyBuild& built = *result;
+    const size_t count = built.instances.size();
+    if (GEngine)
+        GEngine->SetFarProxyInstancesOwned(std::move(built.instances));
+    _nativeProxyUploaded = count != 0;
+    _nativeProxyModelsAtUpload = _nativeProxyBuildModels;
+    _nativeProxyUploadMs = Poseidon::Foundation::GlobalTickCount();
+    LOG_INFO(World, "Native far proxies: {} ({} prisms) from {} placements, walk {:.1f} ms on a worker, "
+             "hand-off {:.1f} ms", count, built.prisms, _modernObjectPlacements.size(), built.walkMs,
+             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+    return true;
+}
+
+void Landscape::UploadNativeProxies()
+{
+    if (!GEngine)
+        return;
+    const auto start = std::chrono::steady_clock::now();
+    std::vector<Engine::FarProxyInstance> instances;
+    size_t prisms = 0;
+    instances.reserve(_modernObjectPlacements.size());
+    for (size_t index = 0; index < _modernObjectPlacements.size(); ++index)
+    {
+        const ModernObjectPlacement& placement = _modernObjectPlacements[index];
+        if (placement.modelIndex >= _nativeProxyModels.size() || !_nativeProxyModels[placement.modelIndex].valid ||
+            (index < _nativeFarWanted.size() && (_nativeFarWanted[index] & 2)))
+            continue;
+        const NativeProxyModel& proxy = _nativeProxyModels[placement.modelIndex];
+        const float scale = std::sqrt(placement.rows[0] * placement.rows[0] + placement.rows[1] * placement.rows[1] +
+                                      placement.rows[2] * placement.rows[2]);
+        Engine::FarProxyInstance instance;
+        instance.x = placement.rows[9];
+        instance.y = placement.rows[10] + proxy.baseY * scale;
+        instance.z = placement.rows[11];
+        instance.height = proxy.height * scale;
+        instance.radius = proxy.radius * scale;
+        instance.colour = proxy.colour;
+        instance.flags = proxy.flags;
+        prisms += proxy.flags != 0;
+        instances.push_back(instance);
+    }
+    const auto walked = std::chrono::steady_clock::now();
+    GEngine->SetFarProxyInstances(instances.data(), instances.size());
+    static uint32_t proxyReports = 0;
+    if (proxyReports++ < 1) // a second pass over every placement: the first upload only
+    {
+        // The first uploads name the commonest proxies and their colours: a wrong colour on a
+        // forest-sized model is visible from every hill.
+        std::vector<std::pair<uint32_t, uint32_t>> counts; // (count, model)
+        std::vector<uint32_t> perModel(_nativeProxyModels.size(), 0);
+        for (const ModernObjectPlacement& placement : _modernObjectPlacements)
+            if (placement.modelIndex < perModel.size() && _nativeProxyModels[placement.modelIndex].valid)
+                ++perModel[placement.modelIndex];
+        for (uint32_t m = 0; m < perModel.size(); ++m)
+            if (perModel[m])
+                counts.push_back({perModel[m], m});
+        std::sort(counts.begin(), counts.end(), std::greater<>());
+        for (size_t i = 0; i < counts.size() && i < 8; ++i)
+        {
+            const NativeProxyModel& proxy = _nativeProxyModels[counts[i].second];
+            LOG_INFO(World, "Native far proxy #{}: {} x{} colour {:08x} h={:.1f} r={:.1f} {}", i,
+                     static_cast<const char*>(_modernObjectModels[counts[i].second]), counts[i].first, proxy.colour,
+                     proxy.height, proxy.radius, proxy.flags ? "prism" : "card");
+        }
+    }
+    _nativeProxyUploaded = !instances.empty();
+    _nativeProxyDirty = false;
+    _nativeProxyModelsAtUpload = _nativeProxyModelCount;
+    _nativeProxyUploadMs = Poseidon::Foundation::GlobalTickCount();
+    LOG_INFO(World, "Native far proxies: {} ({} prisms) from {} placements, {:.1f} ms (walk {:.1f} ms)",
+             instances.size(), prisms, _modernObjectPlacements.size(),
+             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(),
+             std::chrono::duration<double, std::milli>(walked - start).count());
+}
+
 void Landscape::ClearNativeFarResidency()
 {
-    if (GEngine && !_nativeFarActive.empty())
+    if (_nativeProxyBuild.valid())
+        _nativeProxyBuild.wait(); // its worker reads this world's placements
+    _nativeProxyBuild = {};
+    // Unconditional: the engine also holds the near clutter (RFG-153), which the far set says
+    // nothing about. Cheap when there is nothing to clear.
+    if (GEngine)
         GEngine->ClearFarObjects();
     _nativeFarActive.clear();
+    _nativeFarSweep.clear();
+    _nativeFarSweepPos = 0;
+    _nativeFarRelease.clear();
+    _nativeFarReleasePos = 0;
     _nativeFarModels.clear();
+    _nativeFarTexPrep.clear(); // each future waits for its decode
     _nativeFarCandidates.clear();
     _nativeFarWanted.clear();
     _nativeFarModelWanted.clear();
     _nativeFarModelRejected.clear();
     _nativeFarCursor = 0;
+    _nativeFarRejectedAtBuild = _nativeFarRejectedCount = 0;
+    _nativeFarRejectRebuild = false;
+    _nativeFarCells.clear();
+    _nativeFarFillCell = _nativeFarFillEntry = 0;
+    _nativeProxyModels.clear();
+    _nativeProxyDirty = false;
+    _nativeProxyModelCount = _nativeProxyModelsAtUpload = 0;
+    _nativeProxyReach = -1.0f;
+    if (_nativeProxyUploaded && GEngine)
+    {
+        GEngine->SetFarProxyInstances(nullptr, 0);
+        GEngine->SetNativeFarProxyStart(-1.0f);
+    }
+    _nativeProxyUploaded = false;
     _nativeFarCenterX = _nativeFarCenterZ = -0x3fffffff;
+    // RFG-162: the world's rivers go with it.
+    if (_riversUploaded && GEngine)
+        GEngine->SetRiverSurfaces(nullptr, 0, nullptr, 0, nullptr, 0);
+    _riversUploaded = false;
+}
+
+// PERF-FAR-SWEEP: remove the far instances the last window rebuild no longer wants, a slice at a
+// time (WGR_NATIVE_FAR_SWEEP_MS per call, default 2; 0 = all of it in the rebuild frame), then
+// drop the models nothing wants any more.
+void Landscape::SweepNativeFarActive(bool rebuildFrame)
+{
+    static const double budgetMs = [] {
+        const char* value = std::getenv("WGR_NATIVE_FAR_SWEEP_MS");
+        return value && *value ? std::clamp(std::atof(value), 0.0, 100.0) : 2.0;
+    }();
+    const auto start = std::chrono::steady_clock::now();
+    // PERF-FAR-RELEASE (2026-10-20): the far models the last sweep left unwanted, released a slice
+    // at a time within the same budget. Releasing them all at the end of the sweep was one 97 ms
+    // frame at Durras (179 models: the shapes' destruction). A model wanted again meanwhile stays.
+    if (_nativeFarReleasePos < _nativeFarRelease.size())
+    {
+        if (rebuildFrame && budgetMs > 0.0)
+            return;
+        while (_nativeFarReleasePos < _nativeFarRelease.size())
+        {
+            const uint32_t model = _nativeFarRelease[_nativeFarReleasePos++];
+            if (model < _nativeFarModelWanted.size() && !_nativeFarModelWanted[model])
+                _nativeFarModels.erase(model);
+            if (budgetMs > 0.0 && std::chrono::duration<double, std::milli>(
+                                      std::chrono::steady_clock::now() - start).count() >= budgetMs)
+                return;
+        }
+        _nativeFarRelease.clear();
+        _nativeFarReleasePos = 0;
+        return;
+    }
+    if (_nativeFarSweepPos >= _nativeFarSweep.size())
+        return;
+    if (rebuildFrame && budgetMs > 0.0)
+        return; // the slices start next call; the rebuild frame already paid for the list
+    while (_nativeFarSweepPos < _nativeFarSweep.size())
+    {
+        const uint32_t index = _nativeFarSweep[_nativeFarSweepPos++];
+        if (((_nativeFarWanted[index] & 1) == 0 || _modernObjectPlacements[index].resident) &&
+            _nativeFarActive.erase(index) && GEngine)
+            GEngine->SceneFarObjectRemoved(index);
+        // Every 16th: a removal that drops a model's last far instance can cost milliseconds, and
+        // checking every 256th let one call run to 123 ms (Durras, 2026-10-20).
+        if (budgetMs > 0.0 && (_nativeFarSweepPos & 15) == 0 &&
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() >= budgetMs)
+            return;
+    }
+    _nativeFarSweep.clear();
+    _nativeFarSweepPos = 0;
+    static const bool sliceRelease = [] {
+        const char* v = std::getenv("WGR_NATIVE_FAR_RELEASE_SLICED");
+        return !(v && v[0] == '0');
+    }();
+    const auto releaseStart = std::chrono::steady_clock::now();
+    size_t released = 0;
+    _nativeFarRelease.clear();
+    _nativeFarReleasePos = 0;
+    for (auto it = _nativeFarModels.begin(); it != _nativeFarModels.end();)
+        if (!_nativeFarModelWanted[it->first])
+        {
+            if (sliceRelease && budgetMs > 0.0)
+            {
+                _nativeFarRelease.push_back(it->first); // released by the next calls, a slice each
+                ++it;
+            }
+            else
+            {
+                it = _nativeFarModels.erase(it);
+                ++released;
+            }
+        }
+        else
+            ++it;
+    const auto end = std::chrono::steady_clock::now();
+    const double totalMs = std::chrono::duration<double, std::milli>(end - start).count();
+    if (totalMs >= 20.0)
+        LOG_INFO(World, "Native far sweep: {:.1f} ms | removals {:.1f} ms, model release {:.1f} ms ({} models, {} queued)",
+                 totalMs, std::chrono::duration<double, std::milli>(releaseStart - start).count(),
+                 std::chrono::duration<double, std::milli>(end - releaseStart).count(), released, _nativeFarRelease.size());
 }
 
 void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
 {
-    // Kept opt-in until the authored-mesh cost/coverage and lifetime tests pass.
+    // On by default since 2026-10-11: against a capture of Arma Reforger itself at the same
+    // Game Master pose, the hillsides past the residency window were bare ground without it and
+    // carry their forests and granite with it (+3.6 ms GPU at that pose). WGR_NATIVE_FAR_AUTHORED=0
+    // restores the window-only world.
     static const bool enabled = [] {
         const char* value = std::getenv("WGR_NATIVE_FAR_AUTHORED");
-        return value && value[0] == '1';
+        return !(value && value[0] == '0');
     }();
     if (!enabled || !_modernObjectStreaming || GetEnfusionSurfaceCount() == 0 || !GEngine)
         return;
     if (!std::isfinite(cameraPosition.X()) || !std::isfinite(cameraPosition.Z()) || _landGrid <= 0)
         return;
-    constexpr float range = 3000.0f;
-    constexpr size_t candidateBudget = 200000;
+    const auto farT0 = std::chrono::steady_clock::now(); // PERF-HITCH phase row (end of function)
+    // WGR_NATIVE_FAR_RANGE (m) / WGR_NATIVE_FAR_CAP (placements): the far window's reach and size.
+    static const float range = [] {
+        const char* value = std::getenv("WGR_NATIVE_FAR_RANGE");
+        return value && *value ? std::clamp(static_cast<float>(std::atof(value)), 500.0f, 12000.0f) : 3000.0f;
+    }();
+    static const size_t candidateBudget = [] {
+        const char* value = std::getenv("WGR_NATIVE_FAR_CAP");
+        return value && *value ? static_cast<size_t>(std::clamp(std::atol(value), 1000L, 2000000L)) : size_t(200000);
+    }();
+    // WGR_NATIVE_FAR_SKIP_REJECTED=0: rejected models keep their candidate slots (the old list).
+    static const bool farSkipRejected = [] {
+        const char* value = std::getenv("WGR_NATIVE_FAR_SKIP_REJECTED");
+        return !(value && value[0] == '0');
+    }();
     const int cx = static_cast<int>(std::clamp(cameraPosition.X() / _landGrid,
                                              0.0f, static_cast<float>(_landRange - 1))) / 16 * 16;
     const int cz = static_cast<int>(std::clamp(cameraPosition.Z() / _landGrid,
                                              0.0f, static_cast<float>(_landRange - 1))) / 16 * 16;
+    // The ring fill, resumable: nearest cells first, from where the last fill stopped, until the
+    // list holds candidateBudget placements. Models rejected for the far tier are skipped.
+    const auto fillCandidates = [&] {
+        for (; _nativeFarFillCell < _nativeFarCells.size(); ++_nativeFarFillCell, _nativeFarFillEntry = 0)
+        {
+            const auto& entries = _modernObjectCells[_nativeFarCells[_nativeFarFillCell].index];
+            for (; _nativeFarFillEntry < entries.size(); ++_nativeFarFillEntry)
+            {
+                if (_nativeFarCandidates.size() >= candidateBudget)
+                    return;
+                const uint32_t index = entries[_nativeFarFillEntry];
+                const auto& placement = _modernObjectPlacements[index];
+                if (placement.modelIndex >= _modernObjectModels.size() || (_nativeFarWanted[index] & 2) ||
+                    (farSkipRejected && _nativeFarModelRejected[placement.modelIndex]))
+                    continue;
+                _nativeFarCandidates.push_back(index);
+                _nativeFarWanted[index] = 1;
+                _nativeFarModelWanted[placement.modelIndex] = 1;
+            }
+        }
+    };
+    // A finished sweep that rejected more models (props under 2 m, failures) frees their slots:
+    // on a cluttered map those placements filled the cap before the ring reached the hillside
+    // forests (the bare far slopes at Durras). The list is compacted and the fill resumes where it
+    // stopped, which costs a pass over the list. Rebuilding it whole, as this first did, cost
+    // 20-40 ms on the main thread every ~1.5 s at Durras while the rejections trickled in.
+    if (_nativeFarRejectRebuild && cx == _nativeFarCenterX && cz == _nativeFarCenterZ)
+    {
+        const auto compactStart = std::chrono::steady_clock::now();
+        _nativeFarRejectRebuild = false;
+        _nativeFarRejectedAtBuild = _nativeFarRejectedCount;
+        const size_t before = _nativeFarCandidates.size();
+        size_t kept = 0;
+        for (const uint32_t index : _nativeFarCandidates)
+        {
+            if (_nativeFarModelRejected[_modernObjectPlacements[index].modelIndex])
+                _nativeFarWanted[index] &= 2;
+            else
+                _nativeFarCandidates[kept++] = index;
+        }
+        _nativeFarCandidates.resize(kept);
+        fillCandidates();
+        _nativeFarCursor = 0;
+        const double compactMs =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - compactStart).count();
+        ++_nativeFarStats.rebuilds;
+        _nativeFarStats.rebuildMs += compactMs;
+        LOG_INFO(World, "Native authored far window: compacted {} -> {} candidates, refilled to {} in {:.1f} ms",
+                 before, kept, _nativeFarCandidates.size(), compactMs);
+    }
+    _nativeFarRejectRebuild = false;
     if (cx != _nativeFarCenterX || cz != _nativeFarCenterZ)
     {
+        const auto buildStart = std::chrono::steady_clock::now();
+        const auto sinceBuild = [&buildStart] {
+            return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - buildStart).count();
+        };
+        _nativeFarRejectedAtBuild = _nativeFarRejectedCount;
         _nativeFarCenterX = cx;
         _nativeFarCenterZ = cz;
         _nativeFarWanted.resize(_modernObjectPlacements.size(), 0);
@@ -5492,7 +6603,10 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         _nativeFarCursor = 0;
         const int radius = static_cast<int>(std::min(std::ceil(range / _landGrid),
                                                     static_cast<float>(_landRange)));
-        std::vector<ModernObjectCellCandidate> cells;
+        std::vector<ModernObjectCellCandidate>& cells = _nativeFarCells;
+        cells.clear();
+        _nativeFarFillCell = 0;
+        _nativeFarFillEntry = 0;
         for (int z = std::max(0, cz - radius); z <= std::min(_landRange - 1, cz + radius); ++z)
             for (int x = std::max(0, cx - radius); x <= std::min(_landRange - 1, cx + radius); ++x)
             {
@@ -5505,37 +6619,19 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         std::sort(cells.begin(), cells.end(), [](const auto& a, const auto& b) {
             return a.distance2 != b.distance2 ? a.distance2 < b.distance2 : a.index < b.index;
         });
-        for (const auto& cell : cells)
-        {
-            for (uint32_t index : _modernObjectCells[cell.index])
-            {
-                const auto& placement = _modernObjectPlacements[index];
-                if (placement.modelIndex >= _modernObjectModels.size() || (_nativeFarWanted[index] & 2))
-                    continue;
-                _nativeFarCandidates.push_back(index);
-                _nativeFarWanted[index] = 1;
-                _nativeFarModelWanted[placement.modelIndex] = 1;
-                if (_nativeFarCandidates.size() >= candidateBudget)
-                    break;
-            }
-            if (_nativeFarCandidates.size() >= candidateBudget)
-                break;
-        }
-        for (auto it = _nativeFarActive.begin(); it != _nativeFarActive.end();)
-        {
-            if ((_nativeFarWanted[*it] & 1) == 0 || _modernObjectPlacements[*it].resident)
-            {
-                GEngine->SceneFarObjectRemoved(*it);
-                it = _nativeFarActive.erase(it);
-            }
-            else
-                ++it;
-        }
-        for (auto it = _nativeFarModels.begin(); it != _nativeFarModels.end();)
-            if (!_nativeFarModelWanted[it->first])
-                it = _nativeFarModels.erase(it);
-            else
-                ++it;
+        const double cellsMs = sinceBuild();
+        fillCandidates();
+        const double listMs = sinceBuild();
+        // PERF-FAR-SWEEP (2026-10-20): the instances that left the window used to be removed here,
+        // in one pass over the whole active set (~170k at Durras): 22-174 ms of the main thread at
+        // each re-centre (Nsight: UpdateNativeFarResidency 36% of the main thread in long frames).
+        // The set is snapshotted now and swept a few ms per call below (SweepNativeFarActive). A
+        // far instance outside the window lingers a few frames; one admitted near is still removed
+        // at once where it is admitted. WGR_NATIVE_FAR_SWEEP_MS=0 = the whole pass here.
+        _nativeFarSweep.assign(_nativeFarActive.begin(), _nativeFarActive.end());
+        _nativeFarSweepPos = 0;
+        SweepNativeFarActive(true);
+        const double activeMs = sinceBuild();
         // Preserve near requests and retire old far work through the SAME queue.
         if (_modernObjectPreparer && _modernObjectModelPrefetchEpoch.size() == _nativeFarModelWanted.size())
         {
@@ -5547,15 +6643,27 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
             PreserveModernSourceDiagnosticRequests(epochs, _modernObjectPrefetchEpoch);
             _modernObjectPreparer->DropStale(epochs.data(), epochs.size(), _modernObjectPrefetchEpoch);
         }
-        LOG_INFO(World, "Native authored far window: candidates={} active={} models={} radius={}m cap={}",
-                 _nativeFarCandidates.size(), _nativeFarActive.size(), _nativeFarModels.size(), range,
-                 candidateBudget);
+        // How far the list actually reaches: the cap can run out before `range` in forest.
+        const float reachM = _nativeFarFillCell < _nativeFarCells.size()
+                                 ? std::sqrt(static_cast<float>(_nativeFarCells[_nativeFarFillCell].distance2)) * _landGrid
+                                 : range;
+        LOG_INFO(World, "Native authored far window: candidates={} active={} models={} radius={}m reach={:.0f}m cap={} | "
+                 "build {:.1f} ms (cells {:.1f}, list {:.1f}, active {:.1f})",
+                 _nativeFarCandidates.size(), _nativeFarActive.size(), _nativeFarModels.size(), range, reachM,
+                 candidateBudget, sinceBuild(), cellsMs, listMs - cellsMs, activeMs - listMs);
     }
+    const auto farTWindow = std::chrono::steady_clock::now();
+    SweepNativeFarActive(false);
+    const auto farTSweep = std::chrono::steady_clock::now();
     if (_nativeFarCandidates.empty())
         return;
     const auto start = std::chrono::steady_clock::now();
     uint32_t added = 0, modelWork = 0;
     bool completedSweep = false;
+    // PERF-HITCH: what a slow call spent its time on (logged below when >= 60 ms).
+    const double installMs0 = _nativeFarStats.installMs, readyMs0 = _nativeFarStats.readyMs;
+    double createMsCall = 0.0, createMaxMsCall = 0.0;
+    uint32_t createsCall = 0;
     for (size_t scan = 0; scan < std::min<size_t>(4096, _nativeFarCandidates.size()); ++scan)
     {
         if (scan > 0 && std::chrono::duration<double, std::milli>(
@@ -5576,6 +6684,23 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
             Ref<LODShapeWithShadow> shape = Shapes.Find(name, false, true);
             if (!shape)
             {
+                // PERF-FAR-ASYNC-PREP, second half: the model's textures were being decoded off
+                // the main thread. Until they are, the model waits here (and is not re-requested);
+                // once they are, the bank tables take the prepared sources and the conversion is
+                // submitted -- the same calls the synchronous hand-off made, in the same order.
+                if (_nativeFarTexPrep.count(modelIndex))
+                {
+                    if (modelWork)
+                        continue;
+                    const auto tTables = std::chrono::steady_clock::now();
+                    if (FinishStreamTexPrep(modelIndex))
+                    {
+                        ++modelWork;
+                        _nativeFarStats.readyMs += std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - tTables).count();
+                    }
+                    continue;
+                }
                 if (_modernPendingOwnerPrimaryTextures &&
                     _modernPendingOwnerPrimaryTextures->modelIndex == modelIndex)
                     continue; // The near owner already holds this Converted shape.
@@ -5588,18 +6713,46 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                     _modernObjectPreparer->Request(modelIndex);
                 else if (state == ObjectStreamPreparer::State::Ready)
                 {
+                    const auto tReady = std::chrono::steady_clock::now();
                     auto model = _modernObjectPreparer->Take(modelIndex);
+                    struct ReadyTimer
+                    {
+                        Landscape::NativeFarStats& stats;
+                        std::chrono::steady_clock::time_point began;
+                        bool counted = false;
+                        ~ReadyTimer()
+                        {
+                            if (counted)
+                                stats.readyMs += std::chrono::duration<double, std::milli>(
+                                    std::chrono::steady_clock::now() - began).count();
+                        }
+                    } readyTimer{_nativeFarStats, tReady};
                     if (model)
                     {
                         ++modelWork;
+                        ++_nativeFarStats.ready;
+                        readyTimer.counted = true;
                         std::string low(static_cast<const char*>(name));
                         for (char& c : low)
                             if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
                         model->sourcePath = low;
-                        auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
-                        Model::ShapeAdapter::BuildAdapterBankTables(*model, *tables);
-                        const auto radiusToken = _modernObjectPreparer->QueryRadius(modelIndex);
-                        _modernObjectPreparer->SubmitConvert(modelIndex, std::move(model), std::move(tables), &radiusToken);
+                        // PERF-FAR-ASYNC-PREP, first half. BuildStreamedBankTables decoded the
+                        // model's native textures on the task pool WITH THE MAIN THREAD WAITING:
+                        // 70-240 ms frames while flying (Native authored far slow call: ready
+                        // 160-180 ms). The names are still collected here (that asks the texture
+                        // bank, which is main-thread only), the decode runs in the background, and
+                        // the model waits in _nativeFarTexPrep for the second half above.
+                        // WGR_NATIVE_FAR_ASYNC_PREP=0 = the synchronous hand-off.
+                        AbstractTextBank* bank = GEngine ? GEngine->TextBank() : nullptr;
+                        if (NativeFarAsyncPrep() && (NativeTexturePrepApplies(bank) || PaaTexturePrepApplies(bank)))
+                            ParkStreamTexPrep(modelIndex, std::move(model), false);
+                        else
+                        {
+                            auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
+                            BuildStreamedBankTables(*model, *tables);
+                            const auto radiusToken = _modernObjectPreparer->QueryRadius(modelIndex);
+                            _modernObjectPreparer->SubmitConvert(modelIndex, std::move(model), std::move(tables), &radiusToken);
+                        }
                     }
                 }
                 else if (state == ObjectStreamPreparer::State::Converted)
@@ -5608,13 +6761,44 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                     if (converted.shape)
                     {
                         ++modelWork;
+                        const auto tNew = std::chrono::steady_clock::now();
+                        const bool profWas = render::GObjectAdmitProfile.active;
+                        if (!profWas)
+                        {
+                            render::GObjectAdmitProfile.Reset();
+                            render::GObjectAdmitProfile.active = true;
+                        }
                         ShapeBank::WorldModelScope worldModel(Shapes);
+                        // STREAM-EMAT-PREP, far half: ParkStreamTexPrep decoded this model's face and
+                        // .emat maps in the background, but nothing here took them -- 964 of 1,379 ms of
+                        // far installs on a Durras flight were synchronous texture loads ("prepared 0"),
+                        // 60-85 ms main-thread frames inside swap.
+                        std::optional<NativeInstallTextureScope> takePrepared;
+                        if (NativeTexturePrepApplies(GEngine ? GEngine->TextBank() : nullptr))
+                            takePrepared.emplace();
                         shape = Shapes.NewFromModel(name, false, true, std::move(converted.model),
                                                     nullptr, converted.shape);
+                        takePrepared.reset();
+                        const double newMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tNew).count();
+                        ++_nativeFarStats.installs;
+                        _nativeFarStats.installMs += newMs;
+                        _nativeFarStats.installMaxMs = std::max(_nativeFarStats.installMaxMs, newMs);
+                        const auto& ap = render::GObjectAdmitProfile;
+                        if (newMs >= 30.0)
+                            LOG_INFO(World, "Native authored far: NewFromModel {:.1f} ms | meshBuild {:.1f} meshCreate {:.1f} section {:.1f} modelRegister {:.1f} | texHeader {:.1f} ({}) texRead {:.1f} texCreate {:.1f} winWait {:.1f} encode {:.1f} fallback {:.1f} alpha {:.1f} ({}) | meshes {} sections {} uploads {} prepared {}",
+                                     newMs, ap.meshBuildMs, ap.meshCreateMs, ap.sectionMs, ap.modelRegisterMs, ap.texHeaderLoadMs,
+                                     ap.texHeaderLoads, ap.textureReadMs, ap.textureCreateMs, ap.textureWindowWaitMs, ap.textureEncodeMs,
+                                     ap.textureFallbackMs, ap.alphaScanMs, ap.alphaScans, ap.meshes, ap.sections, ap.textureUploads,
+                                     ap.texturePrepared);
+                        if (!profWas)
+                            render::GObjectAdmitProfile.active = false;
                     }
                 }
                 else if (state == ObjectStreamPreparer::State::Failed || state == ObjectStreamPreparer::State::NotLoose)
+                {
                     _nativeFarModelRejected[modelIndex] = 1;
+                    ++_nativeFarRejectedCount;
+                }
                 if (!shape)
                     continue;
             }
@@ -5622,9 +6806,11 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
             if (shape->BoundingSphere() < 2.0f)
             {
                 _nativeFarModelRejected[modelIndex] = 1;
+                ++_nativeFarRejectedCount;
                 continue;
             }
             found = _nativeFarModels.emplace(modelIndex, shape).first;
+            NoteNativeProxyModel(modelIndex, *shape);
         }
         Matrix4 transform;
         transform.SetDirectionAside(Vector3(placement.rows[0], placement.rows[1], placement.rows[2]));
@@ -5634,14 +6820,47 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         const float scale = transform.Scale();
         transform.SetUpAndAside(transform.DirectionUp(), transform.DirectionAside());
         transform.SetScale(scale);
-        if (GEngine->SceneFarObjectCreated(index, found->second, transform))
+        const auto tCreate = std::chrono::steady_clock::now();
+        const bool createProfWas = render::GObjectAdmitProfile.active;
+        if (!createProfWas)
+        {
+            render::GObjectAdmitProfile.Reset();
+            render::GObjectAdmitProfile.active = true;
+        }
+        const bool created = GEngine->SceneFarObjectCreated(index, found->second, transform);
+        if (!createProfWas)
+            render::GObjectAdmitProfile.active = false;
+        {
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tCreate).count();
+            createMsCall += ms;
+            createMaxMsCall = std::max(createMaxMsCall, ms);
+            ++createsCall;
+            if (ms >= 30.0)
+            {
+                const auto& ap = render::GObjectAdmitProfile;
+                LOG_INFO(World, "Native far slow create: {:.1f} ms | {} (LODs {}, far models {}) | register {:.1f} "
+                         "meshBuild {:.1f} meshCreate {:.1f} section {:.1f} modelRegister {:.1f} | texRead {:.1f} "
+                         "texCreate {:.1f} winWait {:.1f} fallback {:.1f} alpha {:.1f} | uploads {} prepared {}", ms,
+                         static_cast<const char*>(_modernObjectModels[modelIndex]), found->second->NLevels(),
+                         _nativeFarModels.size(), ap.registerMs, ap.meshBuildMs, ap.meshCreateMs, ap.sectionMs,
+                         ap.modelRegisterMs, ap.textureReadMs, ap.textureCreateMs, ap.textureWindowWaitMs,
+                         ap.textureFallbackMs, ap.alphaScanMs, ap.textureUploads, ap.texturePrepared);
+            }
+        }
+        if (created)
         {
             _nativeFarActive.insert(index);
             ++added;
         }
         else
+        {
             _nativeFarModelRejected[modelIndex] = 1;
+            ++_nativeFarRejectedCount;
+        }
     }
+    if (completedSweep && farSkipRejected && _nativeFarRejectedCount != _nativeFarRejectedAtBuild &&
+        _nativeFarCandidates.size() >= candidateBudget)
+        _nativeFarRejectRebuild = true;
     if (completedSweep && _modernObjectPreparer &&
         _modernObjectModelPrefetchEpoch.size() == _nativeFarModelWanted.size())
     {
@@ -5664,6 +6883,81 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
             epochs.data(), epochs.size(), _modernObjectPrefetchEpoch);
         if (retired)
             LOG_INFO(World, "Native authored far: retired {} unneeded prepared results", retired);
+        const double sweepEndMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        if (sweepEndMs >= 10.0)
+            LOG_INFO(World, "Native authored far: sweep end took {:.1f} ms over {} models", sweepEndMs, epochs.size());
+    }
+    {
+        const double callMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        ++_nativeFarStats.calls;
+        _nativeFarStats.callMs += callMs;
+        _nativeFarStats.callMaxMs = std::max(_nativeFarStats.callMaxMs, callMs);
+        if (callMs >= 30.0)
+            ++_nativeFarStats.slowCalls;
+        if (callMs >= 60.0)
+            LOG_INFO(World, "Native authored far slow call: {:.1f} ms | install {:.1f} ready {:.1f} | creates {} {:.1f} ms "
+                     "(max {:.1f}) | added {} modelWork {}",
+                     callMs, _nativeFarStats.installMs - installMs0, _nativeFarStats.readyMs - readyMs0, createsCall,
+                     createMsCall, createMaxMsCall, added, modelWork);
+        if (_nativeFarStats.calls >= 600)
+        {
+            const auto& st = _nativeFarStats;
+            LOG_INFO(World, "Native authored far stats over {} frames: {:.1f} ms total (max {:.1f}, {} >= 30 ms) | "
+                     "installs {} {:.1f} ms (max {:.1f}) | ready hand-offs {} {:.1f} ms | list rebuilds {} {:.1f} ms",
+                     st.calls, st.callMs, st.callMaxMs, st.slowCalls, st.installs, st.installMs, st.installMaxMs,
+                     st.ready, st.readyMs, st.rebuilds, st.rebuildMs);
+            _nativeFarStats = {};
+        }
+    }
+    const auto farTLoop = std::chrono::steady_clock::now();
+    // FAR-002: proxies beyond the window. WGR_NATIVE_FAR_PROXIES=0 = none (the bare far hills).
+    static const bool farProxies = [] {
+        const char* value = std::getenv("WGR_NATIVE_FAR_PROXIES");
+        return !(value && value[0] == '0');
+    }();
+    if (farProxies)
+    {
+        const float reach = _nativeFarFillCell < _nativeFarCells.size()
+                                ? std::sqrt(static_cast<float>(_nativeFarCells[_nativeFarFillCell].distance2)) * _landGrid
+                                : range;
+        if (std::fabs(reach - _nativeProxyReach) > 1.0f)
+        {
+            _nativeProxyReach = reach;
+            GEngine->SetNativeFarProxyStart(reach);
+        }
+        // A rebuild walks every placement and re-uploads ~1M proxies (~60 ms), so it waits for
+        // the known-model set to grow by 15% (the first ones arrive in bursts), or 30 s for any.
+        static const bool proxyAsync = [] {
+            const char* v = std::getenv("WGR_FAR_PROXY_ASYNC");
+            return !(v && v[0] == '0');
+        }();
+        const bool building = proxyAsync && _nativeProxyBuild.valid();
+        if (building)
+            FinishNativeProxyBuild();
+        else if (_nativeProxyDirty)
+        {
+            const uint32_t since = Poseidon::Foundation::GlobalTickCount() - _nativeProxyUploadMs;
+            const bool grown = _nativeProxyModelCount >= _nativeProxyModelsAtUpload + std::max(5u, _nativeProxyModelsAtUpload * 15 / 100);
+            if ((grown && since >= 3000u) || since >= 30000u || !_nativeProxyUploaded)
+            {
+                if (proxyAsync)
+                    StartNativeProxyBuild();
+                else
+                    UploadNativeProxies();
+            }
+        }
+    }
+    {
+        // PERF-HITCH: the whole call by phase when it is slow -- the slow-call row above covers only
+        // the create loop, and a 117 ms "native far" swap at Durras had no row at all.
+        const auto farTEnd = std::chrono::steady_clock::now();
+        const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+        if (ms(farT0, farTEnd) >= 50.0)
+            LOG_INFO(World, "Native far update: {:.1f} ms | window {:.1f} sweep {:.1f} loop {:.1f} (creates {} {:.1f} max {:.1f}, "
+                     "install {:.1f} ready {:.1f}) proxies {:.1f}",
+                     ms(farT0, farTEnd), ms(farT0, farTWindow), ms(farTWindow, farTSweep), ms(farTSweep, farTLoop),
+                     createsCall, createMsCall, createMaxMsCall, _nativeFarStats.installMs - installMs0,
+                     _nativeFarStats.readyMs - readyMs0, ms(farTLoop, farTEnd));
     }
     if (added && (_nativeFarActive.size() / 10000 != (_nativeFarActive.size() - added) / 10000))
         LOG_INFO(World, "Native authored far progress: active={} sharedModels={} near={}",

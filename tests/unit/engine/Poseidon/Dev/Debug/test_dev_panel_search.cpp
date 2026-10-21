@@ -72,6 +72,8 @@ TEST_CASE("Dev panel controls all go through the search filter", "[dev][panel]")
         "engine/Poseidon/Dev/Debug/DebugOverlay.cpp",
         "engine/Poseidon/Dev/Diag/SmokeTab.cpp",
         "engine/Poseidon/Dev/Diag/MapEditorTab.cpp",
+        "engine/Poseidon/Dev/Debug/DevPanelHome.cpp",
+        "engine/Poseidon/Dev/NpcChat/NpcChatUi.cpp",
     };
     const std::filesystem::path overlay = RepoFile(panelSources[0]);
     INFO("searched upward from " << std::filesystem::path(__FILE__).parent_path().string()

@@ -1,4 +1,5 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <stdio.h>
@@ -143,6 +144,8 @@ void Soldier::KeyboardPilot(float deltaT, SimulationImportance prec)
         }
     }
 
+    UpdateLeanInput();
+
     AdvanceExternalQueue();
     if (_externalMove.id != MoveIdNone)
     {
@@ -161,6 +164,12 @@ void Soldier::KeyboardPilot(float deltaT, SimulationImportance prec)
     if (input.GetActionToDo(UASlow))
     {
         _walkToggle = !_walkToggle;
+    }
+
+    // jump (SoldierOldJump.cpp): Space on foot
+    if (input.GetActionToDo(UAJump))
+    {
+        TryJump();
     }
 
     float fbWanted = ((input.GetMoveFastForward() > 0) * 2.0f + (input.GetMoveForward() > 0) * 1.0f +
@@ -218,7 +227,16 @@ void Soldier::KeyboardPilot(float deltaT, SimulationImportance prec)
                 context->param = magazine->_creator;
                 context->param2 = magazine->_id;
                 context->param3 = muzzleID;
-                if (PlayAction(magazine->_type->_reloadAction, context))
+                // on the move (standing or crouched) the reload plays on the upper body and he keeps walking
+                // (SoldierOldUpperBody.cpp); standing still or prone it is the full-body move, as before
+                const bool moving = (fabs(fbWanted) > 0.01f || fabs(rlWanted) > 0.01f) && !IsDown() && !IsSwimming();
+                const ActionMap* actions = Type()->GetActionMap(_primaryMove.id);
+                const MoveId upper = moving && actions ? actions->GetAction(magazine->_type->_reloadAction) : MoveIdNone;
+                if (upper != MoveIdNone && StartUpperBodyAction(upper, context))
+                {
+                    PlayReloadMagazineSound(_currentWeapon, slot._muzzle);
+                }
+                else if (PlayAction(magazine->_type->_reloadAction, context))
                 {
                     PlayReloadMagazineSound(_currentWeapon, slot._muzzle);
                 }
@@ -323,7 +341,12 @@ void Soldier::KeyboardPilot(float deltaT, SimulationImportance prec)
         wantSlow = _walkToggle || GWorld->GetCameraTypeWanted() == CamGunner;
     }
 
-    if (input.GetMoveUp() > 0.1f)
+    // Sinkhole W4: swimming, the swim keys dive, rise and sink (SoldierOldSwim.cpp). They have actions of their own
+    // (Controls > on foot: Dive Z / Page Down, Surface Q / Page Up), sharing keys with the stance and lean keys,
+    // which do nothing in the water.
+    const bool swimming = IsSwimming();
+    SetSwimVerticalWanted(swimming ? input.GetAction(UASurface) - input.GetAction(UADive) : 0.0f);
+    if (!swimming && input.GetMoveUp() > 0.1f)
     {
         selAction = ManActUp;
         forceAction = true;
@@ -340,7 +363,7 @@ void Soldier::KeyboardPilot(float deltaT, SimulationImportance prec)
             }
         }
     }
-    else if (input.GetMoveDown() > 0.1f)
+    else if (!swimming && input.GetMoveDown() > 0.1f)
     {
         selAction = ManActDown;
         forceAction = true;
@@ -660,6 +683,14 @@ MoveId Man::GetVehMove(ManVehAction action) const
     {
         Fail("Vehicle action ManVehActNone used");
         return MoveIdNone;
+    }
+    // An Arma 1 crew pose (ManActA1_<state>, --arma1) a man's moves do not have -- his moves
+    // loaded before it was registered, or they are CWA's -- plays the CWA pose of that seat.
+    if (action >= map.GetMaxAction() || map.GetAction(action) == MoveIdNone)
+    {
+        const int fallback = Arma1Compat::Arma1CrewActionFallback(action);
+        if (fallback >= 0 && fallback < map.GetMaxAction())
+            return map.GetAction(ManVehAction(fallback));
     }
     if (action >= map.GetMaxAction())
     {
@@ -1854,7 +1885,15 @@ static Matrix3 CreateZRotation(float sinr, float cosr)
 
 void Man::RecalcGunTransform()
 {
+    // The axis as the move poses it, without the aim/lean transform on top: the aim rotates about
+    // it (a fixed point, so that never mattered), but the lean moves it and must not feed back.
+    const bool gunTransIdent = _gunTransIdent;
+    _gunTransIdent = true;
     Vector3 gunAxis = GetWeaponCenter(0);
+    _gunTransIdent = gunTransIdent;
+    // Corner peeking: the lean is applied first, so the barrel still points along the aim.
+    const bool leaning = fabs(_lean) > 1e-4f;
+    const Matrix4 lean = leaning ? LeanTransform(gunAxis, _lean) : Matrix4(MIdentity);
     if (const auto* seat = GetActiveCargoWeaponSeat())
     {
         const float azimuth = seat->azimuth * (H_PI / 180.0f);
@@ -1870,14 +1909,18 @@ void Man::RecalcGunTransform()
         correctBank.SetPosition(VZero);
         _gunTrans = (Matrix4(MTranslation, gunAxis) * Matrix4(MRotationY, _gunYRot) * Matrix4(MRotationX, -_gunXRot) *
                      correctBank * Matrix4(MTranslation, -gunAxis));
+        if (leaning)
+            _gunTrans = _gunTrans * lean;
         _gunTransIdent = false;
     }
     else
     {
-        if (fabs(_gunXRot) + fabs(_gunYRot) > 1e-6)
+        if (fabs(_gunXRot) + fabs(_gunYRot) > 1e-6 || leaning)
         {
             _gunTrans = (Matrix4(MTranslation, gunAxis) * Matrix4(MRotationY, _gunYRot) *
                          Matrix4(MRotationX, -_gunXRot) * Matrix4(MTranslation, -gunAxis));
+            if (leaning)
+                _gunTrans = _gunTrans * lean;
             _gunTransIdent = false;
         }
         else
@@ -1910,6 +1953,13 @@ void Man::RecalcGunTransform()
     {
         _recoil->ApplyRecoil(_recoilTime, _gunTrans, _recoilFactor);
         _gunTransIdent = false;
+    }
+    _gunTransNoLean = _gunTrans;
+    _gunTransNoLeanIdent = _gunTransIdent;
+    if (leaning)
+    {
+        // Undo the lean for the collision LOD: aim * lean * lean^-1 (recoil sits on the left).
+        _gunTransNoLean = _gunTrans * Matrix4(MInverseGeneral, lean);
     }
 }
 
@@ -2144,10 +2194,21 @@ void Man::MoveWeapons(float deltaT, bool forceRecalcMatrix)
     {
         forceRecalcMatrix = true;
     }
+    const bool leanMoved = MoveLean(deltaT);
+    if (leanMoved)
+    {
+        forceRecalcMatrix = true;
+    }
 
     if (forceRecalcMatrix)
     {
         RecalcGunTransform();
+    }
+    // The cached aiming/eye points otherwise refresh only when he moves: a peeking head has to be
+    // where AI looks for it (visibility) and where his voice comes from.
+    if (leanMoved && IsInLandscape())
+    {
+        RecalcPositions(*this);
     }
 }
 
@@ -2216,7 +2277,8 @@ float Man::ValueTest(TestValueTimed func, float defValue) const
 
 bool Man::DisableWeapons() const
 {
-    return WeaponsDisabled();
+    // an action on the upper body (a reload on the walk) has the weapon in the hands, as its full-body move would
+    return WeaponsDisabled() || _upperMove != MoveIdNone;
 }
 
 bool Man::EnableMissile() const

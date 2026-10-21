@@ -107,6 +107,11 @@ class IGraphicsEngine
         DrawDecal(pos, rhw, m, m, col, mip, specFlags);
     }
 
+    /// While set, rotated decals also WRITE depth where they are solid (alpha >= 0.3).
+    /// For sprites a later full-screen pass fogs by depth -- underwater bubbles under the
+    /// underwater compositor. Backends without such a pass ignore it.
+    virtual void SetDecalDepthCutout(bool /*enabled*/) {}
+
     virtual void Draw2D(const Draw2DPars& pars, const Rect2DAbs& rect, const Rect2DAbs& clip) = 0;
     virtual void DrawPoly(const MipInfo& mip, const Vertex2DAbs* vertices, int nVertices, const Rect2DAbs& clip,
                           int specFlags) = 0;

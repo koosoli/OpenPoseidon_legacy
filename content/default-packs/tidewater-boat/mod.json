@@ -1,0 +1,6 @@
+{
+  "name": "OpenPoseidon Tidewater Boat",
+  "version": "1.0.0",
+  "defaultContentApi": "1",
+  "description": "Tidewater's procedural lobster boat (dgreenheck/tidewater, MIT) as the ship OP_TidewaterBoat: Tidewater's hydrostatics and handling, a walkable deck. Spawn it from the dev panel's Zeus tab."
+}

@@ -15,8 +15,8 @@ struct TwSurface {
     surface: vec4<f32>,    // amplitude, slope scale, foam coverage, foam pattern scale (1/m)
     material0: vec4<f32>,  // backscatter, sss, foam intensity, reflection strength
     material1: vec4<f32>,  // roughness, ssr on, debug view, water glow (W3j: in-scatter scale)
-    absorption: vec4<f32>, // rgb 1/m
-    scattering: vec4<f32>, // rgb 1/m
+    absorption: vec4<f32>, // rgb 1/m; w = whitecap patch start (OP, 0 = Tidewater's lace look)
+    scattering: vec4<f32>, // rgb 1/m; w = whitecap patch full
     detail: vec4<f32>,     // gust, slick, streak amounts, Earth preview marker
     shore0: vec4<f32>,     // ShoreParams: period (s), amplitude (H/2, m), variation, gamma
     shore1: vec4<f32>,     // ShoreParams: breakSpan, curl, runup, enabled (0 until the field exists)
@@ -33,6 +33,8 @@ struct TwSurface {
     rotorDomain: vec4<f32>,       // camera interaction domain: min XZ, size, reciprocal
     rotorControl: vec4<f32>,      // frozen water clock, source count, reserved
     rotorSources: array<vec4<f32>, 8>, // actual rotor-only world XZ, radius, strength
+    hulls: array<vec4<f32>, 8>,   // hulls that keep the sea out, 4 lanes each (mod.rs hull_mask_lanes)
+    blood: array<vec4<f32>, 16>,   // (OP) blood in the water: x, z, age, amount per stain (tw_impact.wgsl)
 };
 
 struct ConformParams {

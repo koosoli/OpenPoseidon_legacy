@@ -117,6 +117,16 @@ class CameraVehicle : public CameraHolder
     ~CameraVehicle() override;
 
     void ResetTargets();
+    //! A manual camera's own fov (what keypad zoom drives), set directly.
+    void SetManualFov(float fov) { _lastFov = _minFov = _maxFov = fov; }
+    //! Harness only (POSEIDON_FREEFLY_DRIFT): a constant velocity applied inside Simulate, i.e.
+    //! per simulation tick exactly as keyboard flight moves the camera.
+    void SetHarnessDrift(Vector3Par metresPerSecond) { _harnessDrift = metresPerSecond; }
+    Vector3 _harnessDrift = VZero;
+    // Test harness: turn about the vertical at this many radians per second (pans, for temporal
+    // upscaler/grass motion probes a translating camera cannot reproduce).
+    void SetHarnessYawRate(float radiansPerSecond) { _harnessYawRate = radiansPerSecond; }
+    float _harnessYawRate = 0.0f;
     // Debug free-fly can opt into Game Master-style speed scaling.
     void SetAltitudeSpeedScaling(bool enabled) { _altitudeSpeedScaling = enabled; }
     void SetMouseLookRequiresRightButton(bool enabled) { _mouseLookRequiresRightButton = enabled; }

@@ -1,4 +1,5 @@
 
+#include <Poseidon/Game/Compat/ArmaOriginalUi.hpp>
 #include <Poseidon/UI/Controls/UIControls.hpp>
 #include <Poseidon/UI/Controls/CursorLayout.hpp>
 #include <Poseidon/Input/ControllerUiLayout.hpp>
@@ -438,7 +439,7 @@ void ControlsContainer::Load(const ParamEntry& clsEntry)
 
 void ControlsContainer::Load(const char* clsName)
 {
-    const ParamEntry& mainCfg = Res >> clsName;
+    const ParamEntry& mainCfg = ArmaOriginalUi::Resource(clsName); // Res >> clsName unless --arma-original-ui
     Load(mainCfg);
 }
 

@@ -1,0 +1,8 @@
+; Smoke test (corner-peek session, 2026-10-20): leaning, jumping, landing, reloading on the move, swimming and diving.
+; The player starts in a hamlet on Everon's south coast; two unarmed targets stand behind the houses to the north.
+setViewDistance 1200
+smokePlayer addAction ["Smoke test: go swimming (deep water)", "swimtp.sqs"]
+smokePlayer addAction ["Smoke test: back to the village", "villagetp.sqs"]
+~1
+hint "SMOKE TEST\nQ / E: lean (hold, or tap to toggle)\nSpace: jump (run + Space: leap)\nR while walking: reload on the move\nAction menu: go swimming\nIn water: Z (Y on German keyboards) dive, Q surface, W swim\nControls page: Options > Controls > On foot"
+exit

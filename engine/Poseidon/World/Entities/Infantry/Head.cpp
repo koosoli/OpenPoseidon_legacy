@@ -3,6 +3,7 @@
 
 #include <Poseidon/World/Entities/Infantry/Head.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Filesystem/Utf8Paths.hpp>
@@ -266,6 +267,33 @@ void HeadType::Load(const ParamEntry& cfg)
     _rMouthRandom.Load(micro >> "rMouth");
 }
 
+// Arma 1 and later name the same face selections in English: the eyelids, the lower lip ("llip"), the
+// mouth corners and the brows. Asked only for OFP's Czech names, every Arma head kept a still mouth
+// while it spoke (the owner, Queen's Gambit intro). The OFP name wins where a model has it.
+static const char* FaceSelName(LODShape* shape, const char* ofp)
+{
+    static const struct
+    {
+        const char* ofp;
+        const char* arma;
+    } kArma[] = {{"vicka", "eyelids"}, {"spodni ret", "llip"}, {"lkoutek", "lmouth"}, {"skoutek", "mmouth"},
+                 {"pkoutek", "rmouth"}, {"loboci", "lbrow"}, {"soboci", "mbrow"}, {"poboci", "rbrow"}};
+    const char* arma = nullptr;
+    for (const auto& n : kArma)
+        if (strcmp(n.ofp, ofp) == 0)
+            arma = n.arma;
+    if (!arma || !shape)
+        return ofp;
+    bool hasOfp = false, hasArma = false;
+    for (int level = 0; level < shape->NLevels(); level++)
+        if (Shape* lod = shape->Level(level))
+        {
+            hasOfp = hasOfp || lod->FindNamedSel(RStringB(ofp)) >= 0;
+            hasArma = hasArma || lod->FindNamedSel(RStringB(arma)) >= 0;
+        }
+    return !hasOfp && hasArma ? arma : ofp;
+}
+
 void HeadType::InitShape(const ParamEntry& cfg, LODShape* shape)
 {
     _personality.Init(shape, "osobnost", nullptr);
@@ -273,15 +301,15 @@ void HeadType::InitShape(const ParamEntry& cfg, LODShape* shape)
 
     _glasses.Init(shape, "brejle", nullptr);
 
-    _lBrow.Init(shape, "loboci", nullptr);
-    _mBrow.Init(shape, "soboci", nullptr);
-    _rBrow.Init(shape, "poboci", nullptr);
-    _lMouth.Init(shape, "lkoutek", nullptr);
-    _mMouth.Init(shape, "skoutek", nullptr);
-    _rMouth.Init(shape, "pkoutek", nullptr);
+    _lBrow.Init(shape, FaceSelName(shape, "loboci"), nullptr);
+    _mBrow.Init(shape, FaceSelName(shape, "soboci"), nullptr);
+    _rBrow.Init(shape, FaceSelName(shape, "poboci"), nullptr);
+    _lMouth.Init(shape, FaceSelName(shape, "lkoutek"), nullptr);
+    _mMouth.Init(shape, FaceSelName(shape, "skoutek"), nullptr);
+    _rMouth.Init(shape, FaceSelName(shape, "pkoutek"), nullptr);
 
-    _eyelid.Init(shape, "vicka", nullptr);
-    _lip.Init(shape, "spodni ret", nullptr);
+    _eyelid.Init(shape, FaceSelName(shape, "vicka"), nullptr);
+    _lip.Init(shape, FaceSelName(shape, "spodni ret"), nullptr);
 }
 
 Head::Head(const HeadType& type, LODShape* lShape)
@@ -461,7 +489,7 @@ void SetupFaceBoneRig(Skeleton* skeleton, LODShapeWithShadow* lShape, WeightInfo
         }
         for (int g = 0; g < NFaceGroups; g++)
         {
-            const int selIndex = shape->FindNamedSel(RStringB(GFaceSelNames[g]));
+            const int selIndex = shape->FindNamedSel(RStringB(FaceSelName(lShape, GFaceSelNames[g])));
             if (selIndex < 0)
             {
                 continue;
@@ -965,8 +993,48 @@ void Head::Simulate(const HeadType& type, float deltaT, SimulationImportance pre
     }
 }
 
+// An Arma 1 head (a soldier drawn with the Arma 1 model, under ca\) wears Arma 1's own face
+// textures: Arma 1's CfgFaces >> Man names the same Face1..Face55 as CWA, but CWA's textures
+// are laid out for OFP's head and look wrong on Arma 1's. Null when it is no Arma 1 head.
+// OP_A1_FACES=0: CWA's faces, as before.
+static Ref<Texture> Arma1FaceTexture(LODShape* lShape, RString name)
+{
+    static const bool on = [] {
+        const char* e = std::getenv("OP_A1_FACES");
+        return !(e && *e == '0');
+    }();
+    if (!on || Arma1Compat::Generation() != 1 || !lShape)
+        return nullptr;
+    const char* shape = lShape->GetName();
+    if (!shape || _strnicmp(shape[0] == '\\' ? shape + 1 : shape, "ca\\", 3) != 0)
+        return nullptr;
+    const ParamEntry* faces = Arma1Compat::FindConfigClass("CfgFaces", "Man");
+    if (!faces || !faces->IsClass())
+        return nullptr;
+    const ParamEntry* face = faces->FindEntry(name);
+    if (!face || !face->IsClass())
+        face = faces->FindEntry("Default");
+    const ParamEntry* tex = face ? face->FindEntry("texture") : nullptr;
+    if (!tex || tex->IsClass() || tex->IsArray())
+        return nullptr;
+    RString file = (RStringB)*tex;
+    if (file.GetLength() > 0 && file[0] == '\\')
+        file = (const char*)file + 1;
+    if (file.GetLength() == 0 || file[0] == '#')
+        return nullptr;
+    return GlobLoadTexture(file);
+}
+
 void Head::SetFace(const HeadType& type, bool women, LODShape* lShape, RString name, RString player)
 {
+    if (stricmp(name, "custom") != 0)
+        if (Ref<Texture> a1Face = Arma1FaceTexture(lShape, name))
+        {
+            _texture = a1Face;
+            _textureWounded = nullptr;
+            lShape->RegisterTexture(_texture, type._personality);
+            return;
+        }
     const ParamEntry* cls = (Pars >> "CfgFaces").FindEntry(name);
     if (!cls)
     {
@@ -1134,6 +1202,11 @@ void Head::SetMimicMode(RStringB modeName)
 {
     if (modeName.GetLength() > 0)
     {
+        // PERF (2026-10-14): called every tick per soldier with the mode it already has. The
+        // entry was found by this same name (RStringB equality is the interned string), so
+        // the two linear config lookups below would return it again -- skip them.
+        if (_mimicMode && _mimicMode->GetName() == modeName)
+            return;
         const ParamEntry& par = Pars >> "CfgMimics" >> modeName;
         if (_mimicMode != &par)
         {

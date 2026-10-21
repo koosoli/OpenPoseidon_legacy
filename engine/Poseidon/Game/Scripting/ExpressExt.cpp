@@ -3,6 +3,7 @@
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 
 #include <Poseidon/Core/BuildInfo.hpp>
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
@@ -159,14 +160,17 @@ void GameStateStringtableInfoFunctions::DisplayErrorMessage(const char* position
         return;
     }
 #endif
-    if (AutoTest && Poseidon::Arma1Compat::Generation() == 2)
+    if (AutoTest && Poseidon::Arma1Compat::Generation() >= 2)
     {
         // Arma 2 test runs (--arma2-test-seconds) collect every error of a mission in one
         // pass instead of stopping at the first: the content still has gaps, and a run
         // that names all of them is worth more than one that names the first.
         LOG_WARN(Script, "Script error at '{}': {} (arma2 test: mission continues)", position, error);
     }
-    else if (AutoTest)
+    // An Arma 1 mission is started through the autotest path (--arma1-mission) but is played,
+    // not tested: one rejected line of the original's scripts must not end the mission. It is
+    // reported like any other script error below.
+    else if (AutoTest && !Poseidon::Arma1Compat::Active())
     {
         // Test mode: surface every SQF/SQS error as a hard failure so the
         // test reports it instead of silently timing out.  Logging at

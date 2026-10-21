@@ -137,6 +137,9 @@ pub enum WgrDepthMode {
     // and only while the Smoke tab's soft-particle lever is on. `WgrDraw2DBatch.depth` is a
     // plain u32, so this adds no ABI size and an older exe simply never sends it.
     TestSoft = 3,
+    // Test + write with an alpha cutout (fs_cutout): underwater bubbles, which the
+    // underwater compositor fogs by depth. Plain u32 lane, no ABI size.
+    TestWriteCutout = 4,
 }
 
 #[repr(C)]
@@ -359,6 +362,13 @@ pub struct WgrModelMaterial {
     pub global_overlay_texture_id: u64,
     pub global_overlay_black: f32,
     pub global_overlay_white: f32,
+    // RFG-118: 0 = the linear preview contract above; bit 0 = Enfusion GlobalMCRMap in
+    // production (encoded colour), bit 1 = GlobalMCRMode Multiply (else Overlay),
+    // bit 2 = UVSrcGlobalMaps "UV set 2" (else the first set, Enfusion's default).
+    pub global_overlay_mode: u32,
+    // RFG-181 (was a pad word): Enfusion NormalsToCamera, packed as EngineWgpu::
+    // ResolveMaterialFarNormals writes it. 0 = authored normals.
+    pub far_normals: u32,
 }
 
 // One drawable LOD level of a model: its FindSqrtLevel resolution threshold (`_resolutions[i]`)
@@ -515,8 +525,8 @@ pub struct WgrExposure {
     pub max_scale: f32,
     pub rate: f32,       // per-frame ease toward the target (0..1)
     pub sky_weight: f32, // metering weight of the top of frame (sky) vs bottom (ground)
-    pub _pad1: f32,
-    pub _pad2: f32,
+    pub compensation: f32, // RFG-150: share of a metered change compensated (<= 0 = 1)
+    pub meter_mode: f32,   // RFG-150: 0 = sky weight, 1 = Reforger centre-weighted mask
 }
 
 impl Default for WgrExposure {
@@ -528,8 +538,8 @@ impl Default for WgrExposure {
             max_scale: 4.0,
             rate: 0.03,
             sky_weight: 0.3,
-            _pad1: 0.0,
-            _pad2: 0.0,
+            compensation: 1.0,
+            meter_mode: 0.0,
         }
     }
 }
@@ -1130,7 +1140,10 @@ pub struct WgrShadowPass {
     /// the light's parameters live in ABSOLUTE world space; the renderer adds the reasons only
     /// it can see (the retained-set epoch, the caster set, the target's shape).
     pub local_dirty_mask: u32,
-    pub local_pad: [u32; 1],
+    /// PERF 2026-10-14. Bit c set = sun cascade c keeps the depth it holds from an earlier frame
+    /// (no pass, no clear); the engine samples it with the matrix it was rendered with. A former
+    /// pad word, so the ABI is unchanged.
+    pub cascade_keep_mask: u32,
     pub local_vp: [WgrMat4; 24],
 }
 
@@ -1453,6 +1466,10 @@ pub struct WgrGrassParams {
     /// RFG-091: see `native_tint` in wgpu_renderer.h.
     pub native_tint: [f32; 3],
     pub native_tint_lerp: f32,
+    /// GRS-VAR: see `variety` in wgpu_renderer.hpp.
+    pub variety: [f32; 4],
+    /// GRS-VAR: see `look_weights` in wgpu_renderer.hpp.
+    pub look_weights: [f32; 16],
 }
 
 // Additive rainfall grid API. The ocean/backends retain their existing layout.
@@ -1741,7 +1758,8 @@ const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 68);
 const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 288);
 const _: () = assert!(std::mem::size_of::<WgrLight>() == 64);
 const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);
-const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 456);
+const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 464);
+const _: () = assert!(std::mem::offset_of!(WgrModelMaterial, global_overlay_mode) == 456);
 const _: () = assert!(std::mem::offset_of!(WgrModelMaterial, global_normal_uv) == 408);
 const _: () = assert!(std::mem::offset_of!(WgrModelMaterial, detail_normal_strength) == 424);
 const _: () = assert!(std::mem::offset_of!(WgrModelMaterial, global_overlay_texture_id) == 440);
@@ -1793,7 +1811,7 @@ const _: () = assert!(std::mem::size_of::<WgrGrassDownwash>() == 16);
 // block and eight per-layer weights complete five further vec4s
 // (GrassParams.photo / .place / .photo_mix / .layer_weights[2]). 4736 + 32 for
 // the card-coverage / procedural-look pair (GrassParams.card_look / .blade_look).
-const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4784);
+const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4864);
 const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 1472);
 const _: () = assert!(std::mem::size_of::<WgrRainWaterParams>() == 48);
 const _: () = assert!(std::mem::size_of::<WgrRainWaterSourceKey>()==32 && std::mem::offset_of!(WgrRainWaterSourceKey,terrain_range)==24);
@@ -1922,9 +1940,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(25)
+            .unwrap_or(26)
     } else {
-        25
+        26
     }
 }
 
@@ -2159,6 +2177,37 @@ pub unsafe extern "C" fn wgr_set_fire_sources(
     }));
 }
 
+/// MUD-001: this frame's mud sprays (wheels and boots in wet soft ground); see mud/mod.rs.
+///
+/// # Safety
+/// `renderer` must be live; `emitters` must hold `count` elements (or be null with 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_mud_emitters(
+    renderer: *mut WgrRenderer,
+    emitters: *const crate::mud::MudEmitter,
+    count: u32,
+) {
+    if renderer.is_null() || emitters.is_null() || count == 0 {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let slice = unsafe { std::slice::from_raw_parts(emitters, count as usize) };
+        unsafe { &mut *renderer }.set_mud_emitters(slice);
+    }));
+}
+
+/// MUD-001: blobs emitted since start (0 on a null renderer).
+///
+/// # Safety
+/// `renderer` must be live or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_get_mud_emitted(renderer: *mut WgrRenderer) -> u64 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| unsafe { &*renderer }.mud.emitted())).unwrap_or(0)
+}
+
 /// FIRE-001: boxes in use (low 32) and solver steps taken (high 32). Zero on a null renderer.
 ///
 /// # Safety
@@ -2270,12 +2319,12 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 25); // Append-only linear global overlay
+        assert_eq!(super::wgr_abi_version(), 26); // Append-only GlobalMCR production mode
     }
 
     #[test]
     fn pre_global_overlay_material_pair_is_refused() {
-        assert_eq!(std::mem::size_of::<super::WgrModelMaterial>(),456);
+        assert_eq!(std::mem::size_of::<super::WgrModelMaterial>(),464);
         let mut check=good_check();check.abi_version=24;
         assert_eq!(unsafe {super::wgr_abi_validate(&check)},0);
     }
@@ -2383,7 +2432,18 @@ pub unsafe extern "C" fn wgr_create(
             },
             None => LogSink::none(),
         };
-        match Renderer::new(desc, sink) {
+        let created = Renderer::new(desc, sink);
+        // The threaded DLSS probe disagreed with the configuration built for it (lib.rs,
+        // ngx_speculation_allowed): build once more with the synchronous probe.
+        #[cfg(feature = "dlss")]
+        let created = match created {
+            Err(e) if e == super::ERR_NGX_SPECULATION => {
+                sink.log(log_level::WARN, &e);
+                Renderer::new(desc, sink)
+            }
+            other => other,
+        };
+        match created {
             Ok(renderer) => {
                 sink.log(log_level::INFO, "wgpu renderer created");
                 Box::into_raw(Box::new(renderer))
@@ -2575,6 +2635,76 @@ pub unsafe extern "C" fn wgr_texture_create_in_slot(
     .unwrap_or(0)
 }
 
+/// FLY-001: the renderer's texture ingress, for creating textures from the producer thread
+/// without waiting for the render thread. Valid for the renderer's lifetime. Null when the
+/// renderer is null.
+///
+/// # Safety
+/// `renderer` must be a live pointer from `wgr_create`, or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_texture_ingress(renderer: *mut WgrRenderer) -> *const crate::textures::TextureIngress {
+    if renderer.is_null() {
+        return std::ptr::null();
+    }
+    unsafe { &*renderer }.texture_ingress_ptr()
+}
+
+/// A leased bindless slot from the ingress's pool (0 = none ready; see TextureIngress).
+/// Thread-safe.
+///
+/// # Safety
+/// `ingress` must come from `wgr_texture_ingress` on a live renderer, or be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_texture_ingress_slot_acquire(ingress: *const crate::textures::TextureIngress) -> u32 {
+    if ingress.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| unsafe { &*ingress }.slot_acquire())).unwrap_or(0)
+}
+
+/// As `wgr_texture_create_in_slot`, but callable while the render thread is mid-frame: the
+/// texture is made now and joins the registry at the next drain. 0 = refused; the caller then
+/// uses the ordinary path. Thread-safe.
+///
+/// # Safety
+/// `ingress` must come from `wgr_texture_ingress` on a live renderer; `data` must point to at
+/// least `byte_len` bytes.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn wgr_texture_ingress_create(
+    ingress: *const crate::textures::TextureIngress,
+    width: u32,
+    height: u32,
+    format: i32,
+    mip_count: u32,
+    flags: u32,
+    data: *const u8,
+    byte_len: u32,
+    slot: u32,
+) -> u64 {
+    if ingress.is_null() || data.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let Some(fmt) = TextureFormat::from_i32(format) else {
+            return 0;
+        };
+        let slice = unsafe { std::slice::from_raw_parts(data, byte_len as usize) };
+        unsafe { &*ingress }.create(
+            &crate::textures::TextureData {
+                width,
+                height,
+                format: fmt,
+                mip_count,
+                gen_mips: flags & TEXTURE_GEN_MIPS != 0,
+                bytes: slice,
+            },
+            slot,
+        )
+    }))
+    .unwrap_or(0)
+}
+
 /// # Safety
 /// `renderer` must be live; `data` must point to at least `byte_len` bytes, or be null.
 #[unsafe(no_mangle)]
@@ -2623,6 +2753,29 @@ pub unsafe extern "C" fn wgr_mesh_create(
         let verts = unsafe { verts.as_slice() };
         let indices = unsafe { indices.as_slice() };
         renderer.mesh_create(verts, indices)
+    }))
+    .unwrap_or(0)
+}
+
+/// RFG-127: `wgr_mesh_create` for static geometry that is never updated in place; content
+/// identical to a live shared mesh reuses its pool allocation.
+///
+/// # Safety
+/// As `wgr_mesh_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_mesh_create_shared(
+    renderer: *mut WgrRenderer,
+    verts: WgrSlice<WgrMeshVertex>,
+    indices: WgrSlice<u32>,
+) -> u64 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let verts = unsafe { verts.as_slice() };
+        let indices = unsafe { indices.as_slice() };
+        renderer.mesh_create_shared(verts, indices)
     }))
     .unwrap_or(0)
 }
@@ -2777,6 +2930,70 @@ pub unsafe extern "C" fn wgr_mesh_destroy(renderer: *mut WgrRenderer, id: u64) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         unsafe { &mut *renderer }.mesh_destroy(id);
     }));
+}
+
+/// LOD-STREAM: give a static, unshared mesh's geometry-pool storage back while keeping its
+/// handle; sections naming it stop drawing and their LOD falls back to the next coarser resident
+/// level. Returns 1 when evicted, 0 when refused (unknown, skinned, already evicted, or content-
+/// shared with another mesh).
+///
+/// # Safety
+/// `renderer` must be live or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_mesh_evict(renderer: *mut WgrRenderer, id: u64) -> u32 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| u32::from(unsafe { &mut *renderer }.mesh_evict(id)))).unwrap_or(0)
+}
+
+/// LOD-STREAM: upload an evicted mesh's geometry again under the same handle (the same content
+/// it was created with). Returns 1 on success, 0 when the handle is not evicted.
+///
+/// # Safety
+/// `renderer` must be live or null; the slices must be valid for the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_mesh_restore(
+    renderer: *mut WgrRenderer,
+    id: u64,
+    verts: WgrSlice<WgrMeshVertex>,
+    indices: WgrSlice<u32>,
+) -> u32 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let verts = unsafe { verts.as_slice() };
+        let indices = unsafe { indices.as_slice() };
+        u32::from(renderer.mesh_restore(id, verts, indices))
+    }))
+    .unwrap_or(0)
+}
+
+/// LOD-STREAM: per registered model id, the finest LOD index (into the model's registered LOD
+/// list) any instance needs by distance alone, minus `margin` levels; 255 = no live instance.
+/// Writes min(models, capacity) bytes and returns the model count.
+///
+/// # Safety
+/// `renderer` must be live or null; `out` must hold `capacity` bytes or be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_lod_distance_demand(renderer: *mut WgrRenderer, margin: u32, out: *mut u8,
+                                                 capacity: u32) -> u32 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let mut demand = Vec::new();
+        renderer.gfx3d.lod_distance_demand(margin, &mut demand);
+        if !out.is_null() {
+            let n = demand.len().min(capacity as usize);
+            unsafe { std::ptr::copy_nonoverlapping(demand.as_ptr(), out, n) };
+        }
+        demand.len() as u32
+    }))
+    .unwrap_or(0)
 }
 
 // --- GPU-driven retained scene (docs/gpu-culling-and-depth-plan.md Stage 3b) ---
@@ -3082,6 +3299,50 @@ pub unsafe extern "C" fn wgr_far_set_instances(
     }));
 }
 
+/// RFG-162 — whether this renderer draws rivers as water (it needs the HDR scene snapshot the
+/// water pass refracts through). 0 = keep building them as ribbons.
+///
+/// # Safety
+/// `renderer` must be live or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_river_supported(renderer: *mut WgrRenderer) -> u32 {
+    if renderer.is_null() {
+        return 0;
+    }
+    let renderer = unsafe { &*renderer };
+    u32::from(renderer.river_supported())
+}
+
+/// RFG-162 — replace every river of a native world, drawn as water in the water pass.
+///
+/// `vertices` = 8 floats per vertex: absolute world position (3), metres along the spline
+/// downstream, the downstream direction (x, z), signed metres across from the centreline, the
+/// half width there. `indices` = triangles. `look` = the river's MatRiver: r, g, b (`Color`),
+/// HalfLightDistance, FlowSpeed, Fresnel, SunPower, SunInfluence, WetFloor (shorter = defaults).
+/// Empty `vertices` releases the rivers.
+///
+/// # Safety
+/// `renderer` must be live; every slice must be valid for its length (or null with length 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_river_set_mesh(
+    renderer: *mut WgrRenderer,
+    vertices: WgrSlice<f32>,
+    indices: WgrSlice<u32>,
+    look: WgrSlice<f32>,
+) -> u32 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let vertices = unsafe { vertices.as_slice() };
+        let indices = unsafe { indices.as_slice() };
+        let look = unsafe { look.as_slice() };
+        renderer.river_set_mesh(vertices, indices, look)
+    }))
+    .unwrap_or(0)
+}
+
 /// FAR INSTANCE TIER — per-frame knobs. `near_cutoff_m` is where the tier starts (it should be
 /// the object draw distance, so proxies begin exactly where real objects stop); `far_distance_m`
 /// where it ends; `pixel_limit` the sub-pixel rejection threshold in pixels of projected height,
@@ -3104,7 +3365,7 @@ pub unsafe extern "C" fn wgr_far_set_params(
     }
     let _ = catch_unwind(AssertUnwindSafe(|| {
         let renderer = unsafe { &mut *renderer };
-        renderer.far_set_params(near_cutoff_m, far_distance_m, pixel_limit, enabled != 0);
+        renderer.far_set_params(near_cutoff_m, far_distance_m, pixel_limit, enabled);
     }));
 }
 
@@ -3270,6 +3531,68 @@ pub unsafe extern "C" fn wgr_water_set_interaction_params(
 ///
 /// # Safety
 /// `xyz` must hold `cap * 3` floats, `lanes` 4 and `age_ms` 1.
+/// (OP) The swash field around the camera for the shorebirds (water_tw/swash.rs, read back 1-3
+/// frames late): up to `cap` texels of (runup, inland, dRdt, tau) into `texels` (4 floats each; w < 0
+/// where no shore waves run), the lattice's lanes (first texel x, z, step, texels per side) into
+/// `lanes` and the readback's age into `age_ms`. Returns the texel count, 0 when there is none. Any thread.
+///
+/// # Safety
+/// `texels` must hold `cap * 4` floats, `lanes` 4 and `age_ms` 1.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_water_swash_field(texels: *mut f32, cap: u32, lanes: *mut f32, age_ms: *mut f32) -> u32 {
+    if texels.is_null() || lanes.is_null() || age_ms.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let out = unsafe { std::slice::from_raw_parts_mut(texels as *mut [f32; 4], cap as usize) };
+        let mut l = [0.0f32; 4];
+        let mut age = 0.0f32;
+        let n = crate::water_tw::swash::field(out, &mut l, &mut age);
+        if n > 0 {
+            unsafe {
+                std::ptr::copy_nonoverlapping(l.as_ptr(), lanes, 4);
+                *age_ms = age;
+            }
+        }
+        n as u32
+    }))
+    .unwrap_or(0)
+}
+
+/// # Safety
+/// `xz` must point to `count` pairs of floats unless `count` is zero.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_water_query_points(xz: *const f32, count: u32) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let pts: &[[f32; 2]] = if xz.is_null() || count == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(xz as *const [f32; 2], count as usize) }
+        };
+        crate::water_tw::query::set_points(pts);
+    }));
+}
+
+/// # Safety
+/// `xz` must hold `cap` pairs and `values` `cap` quadruples of floats; `age_ms` must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_water_query_results(xz: *mut f32, values: *mut f32, cap: u32, age_ms: *mut f32) -> u32 {
+    if xz.is_null() || values.is_null() || age_ms.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let pts = unsafe { std::slice::from_raw_parts_mut(xz as *mut [f32; 2], cap as usize) };
+        let vals = unsafe { std::slice::from_raw_parts_mut(values as *mut [f32; 4], cap as usize) };
+        let mut age = 0.0f32;
+        let n = crate::water_tw::query::results(pts, vals, &mut age);
+        if n > 0 {
+            unsafe { *age_ms = age };
+        }
+        n as u32
+    }))
+    .unwrap_or(0)
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wgr_water_drawn_grid(xyz: *mut f32, cap: u32, lanes: *mut f32, age_ms: *mut f32) -> u32 {
     if xyz.is_null() || lanes.is_null() || age_ms.is_null() {
@@ -3360,6 +3683,72 @@ pub unsafe extern "C" fn wgr_terrain_set_mud(renderer: *mut WgrRenderer, data: *
     }));
 }
 
+/// Upload the far mud view (0.5 m cells, 256 m window, ruts only): distant ruts.
+/// # Safety
+/// `data` must address `count` floats; renderer must be live and exclusively owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_mud_far(renderer: *mut WgrRenderer, data: *const f32, count: u32) {
+    if renderer.is_null() || data.is_null() || count != 4 + 512 * 512 { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        let values = unsafe { std::slice::from_raw_parts(data, count as usize) };
+        r.terrain.set_mud_far(&r.queue, values);
+    }));
+}
+
+/// BOOM-001: upload one crater view pair (heights + materials), near (far = 0) or far (far = 1).
+/// # Safety
+/// `data` must address `count` floats; renderer must be live and exclusively owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_craters(renderer: *mut WgrRenderer, data: *const f32, count: u32, far: u32) {
+    if renderer.is_null() || data.is_null() || count != 2 * (4 + 512 * 512) { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        let values = unsafe { std::slice::from_raw_parts(data, count as usize) };
+        r.terrain.set_craters(&r.queue, values, far != 0);
+    }));
+}
+
+/// BOOM-005: this frame's muzzle flashes (fire::FLASH_FLOATS each), drawn once by the fire march.
+/// # Safety
+/// `data` must address `count` floats; renderer must be live and exclusively owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_fire_set_muzzle_flashes(renderer: *mut WgrRenderer, data: *const f32, count: u32) {
+    if renderer.is_null() || data.is_null() || count as usize > crate::fire::FLASH_FLOATS * crate::fire::MAX_FLASHES {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        let values = unsafe { std::slice::from_raw_parts(data, count as usize) };
+        r.fire.set_muzzle_flashes(values);
+    }));
+}
+
+/// BOOM-004: upload the sharp snow bullet holes ([count, originX, originZ, 0] + count * 8 floats).
+/// # Safety
+/// `data` must address `count` floats; renderer must be live and exclusively owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_snow_marks(renderer: *mut WgrRenderer, data: *const f32, count: u32) {
+    if renderer.is_null() || data.is_null() || count < 4 || count as usize > crate::terrain::SNOW_MARKS_FLOATS { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        let values = unsafe { std::slice::from_raw_parts(data, count as usize) };
+        r.terrain.set_snow_marks(&r.queue, values);
+    }));
+}
+
+/// How full of standing water the mud ruts are, [0,1]; non-finite = 0.
+/// # Safety
+/// renderer must be live and exclusively owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_mud_water(renderer: *mut WgrRenderer, level: f32) {
+    if renderer.is_null() { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        r.terrain.set_mud_water(&r.queue, level);
+    }));
+}
+
 /// Upload a signed sand view, including positive displaced-grain rims.
 /// # Safety
 /// `data` must address `count` floats; renderer must be live and exclusively owned.
@@ -3425,6 +3814,51 @@ pub unsafe extern "C" fn wgr_terrain_set_ground_layers(
     }));
 }
 
+/// Canopy occlusion grid: `n` x `n` cells over the terrain's world span (row-major z, x), the
+/// highest canopy top in metres and the canopy coverage [0,1]. Lowers sky ambient below the canopy.
+/// `n` 0 clears it.
+///
+/// # Safety
+/// `renderer` must be live; `top` and `cover` must hold `n * n` floats each (or be null with n 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_canopy(renderer: *mut WgrRenderer, n: u32, top: *const f32, cover: *const f32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        if n == 0 || top.is_null() || cover.is_null() {
+            renderer.terrain_set_canopy(0, &[], &[]);
+            return;
+        }
+        let cells = (n as usize) * (n as usize);
+        let top = unsafe { std::slice::from_raw_parts(top, cells) };
+        let cover = unsafe { std::slice::from_raw_parts(cover, cells) };
+        renderer.terrain_set_canopy(n, top, cover);
+    }));
+}
+
+/// RFG-PBR: a native Reforger world's surface map, `edge` x `edge` palette indices (one byte each),
+/// for the terrain shader's blend (see terrain::set_surface_map). `edge` 0 clears it.
+///
+/// # Safety
+/// `renderer` must be live; `data` must hold `edge * edge` bytes (or be null with edge 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_surface_map(renderer: *mut WgrRenderer, edge: u32, data: *const u8) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        if data.is_null() || edge == 0 {
+            renderer.terrain_set_surface_map(0, &[]);
+            return;
+        }
+        let slice = unsafe { std::slice::from_raw_parts(data, (edge as usize) * (edge as usize)) };
+        renderer.terrain_set_surface_map(edge, slice);
+    }));
+}
+
 /// Upload the per-land-cell texture index map (R16Uint). See wgpu_renderer.hpp.
 ///
 /// # Safety
@@ -3468,6 +3902,232 @@ pub unsafe extern "C" fn wgr_terrain_set_materials(
     }));
 }
 
+/// RFG-PBR: the native world's satellite for the grass (a texture handle from the bank, one image
+/// over the whole land); 0 clears it.
+///
+/// # Safety
+/// `renderer` must be live; `handle` must be 0 or a live texture handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_satellite(renderer: *mut WgrRenderer, handle: u64) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        renderer.grass_set_satellite(handle);
+    }));
+}
+
+/// RFG-108: per photo-card layer, the world size of a rasterised plant's full square (0 = stock
+/// sizing) and its per-instance size spread; null or zero `count` resets.
+///
+/// # Safety
+/// `renderer` must be live; `sizes` and `spreads` must be null or point to `count` floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_layer_size(renderer: *mut WgrRenderer, sizes: *const f32, spreads: *const f32,
+                                                  count: u32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let n = count.min(32) as usize;
+        let sizes: &[f32] = if sizes.is_null() || n == 0 { &[] } else { unsafe { std::slice::from_raw_parts(sizes, n) } };
+        let spreads: &[f32] =
+            if spreads.is_null() || n == 0 { &[] } else { unsafe { std::slice::from_raw_parts(spreads, n) } };
+        renderer.grass_set_layer_size(sizes, spreads);
+    }));
+}
+
+/// RFG-117: the near ring as Reforger PlantMat tuft cards. `cfg` = 8 floats [on, cards per plant,
+/// Zenith, ZenithRandomOffset, height m, HeightRandomOffset, Plants per m^2, 0]; `aspect` and
+/// `scale` = 8 floats each (per blade layer). Null `cfg` turns it off.
+///
+/// # Safety
+/// `renderer` must be null or live; each non-null pointer must address 8 readable floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_native_tufts(renderer: *mut WgrRenderer, cfg: *const f32,
+                                                    aspect: *const f32, scale: *const f32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let read = |p: *const f32| -> &[f32] { if p.is_null() { &[] } else { unsafe { std::slice::from_raw_parts(p, 8) } } };
+        renderer.grass_set_native_tufts(read(cfg), read(aspect), read(scale));
+    }));
+}
+
+/// RFG-140: reserve the shared geometry pool (bytes) now and keep it as a shrink floor.
+///
+/// LAKE-FISH-001: the surface level of the still water (pond / lake) covering world (x, z).
+/// Returns 1 and writes `level` when there is one, else 0. Thread-safe; needs no renderer.
+///
+/// # Safety
+/// `level` must be null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_still_water_level_at(x: f32, z: f32, level: *mut f32) -> u32 {
+    catch_unwind(AssertUnwindSafe(|| match crate::river::shared_still_level_at(x, z) {
+        Some(l) => {
+            if !level.is_null() {
+                unsafe { *level = l };
+            }
+            1
+        }
+        None => 0,
+    }))
+    .unwrap_or(0)
+}
+
+/// # Safety
+/// `renderer` must be null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_geo_pool_reserve(renderer: *mut WgrRenderer, vert_bytes: u64, index_bytes: u64) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        renderer.geo_pool_reserve(vert_bytes, index_bytes);
+    }));
+}
+
+/// RFG-138: per-surface PlantMat blade sets (see GrassRenderer::set_blade_sets).
+///
+/// # Safety
+/// `renderer` must be null or live; `set_words` null or 3 words; `sets`, `aspect`, `scale`
+/// null or 64 floats each.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_blade_sets(renderer: *mut WgrRenderer, set_words: *const u32,
+                                                  card_skip: u32, card_full: u32, sets: *const f32,
+                                                  aspect: *const f32, scale: *const f32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let words: &[u32] = if set_words.is_null() { &[] } else { unsafe { std::slice::from_raw_parts(set_words, 3) } };
+        let read = |p: *const f32| -> &[f32] { if p.is_null() { &[] } else { unsafe { std::slice::from_raw_parts(p, 64) } } };
+        renderer.grass_set_blade_sets(words, card_skip, card_full, read(sets), read(aspect), read(scale));
+    }));
+}
+
+/// RFG-153: radius (m) inside which native clutter plants draw as meshes and the cards yield; 0 = off.
+///
+/// # Safety
+/// `renderer` must be null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_clutter_mesh_radius(renderer: *mut WgrRenderer, radius: f32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        renderer.grass_set_clutter_mesh_radius(radius);
+    }));
+}
+
+/// RFG-116: bit i = atlas layer i belongs to a surface naming no PlantMat (no near blades).
+///
+/// # Safety
+/// `renderer` must be null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_blade_skip(renderer: *mut WgrRenderer, mask: u32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        renderer.grass_set_blade_skip(mask);
+    }));
+}
+
+/// BOOM-001: the explosion craters nearest the camera for the grass placement: `[count, 0, 0, 0]`
+/// then `count` x `(x, z, soil radius, seed)`, count <= 64. Malformed data clears the list.
+///
+/// # Safety
+/// `renderer` must be live; `data` must point to `count` readable floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_craters(renderer: *mut WgrRenderer, data: *const f32, count: u32) {
+    if renderer.is_null() || data.is_null() || count < 4 { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        let values = unsafe { std::slice::from_raw_parts(data, count as usize) };
+        r.grass.set_craters(&r.queue, values);
+    }));
+}
+
+/// PERF-GRASS-CELLS-INCREMENTAL: the same table as `wgr_grass_set_road_cells`, of which only the
+/// word ranges in `ranges` (`range_count` pairs of start, length) changed since the last call.
+/// They are patched into the live buffer when it is big enough; otherwise the whole table is
+/// uploaded into a new one with spare capacity.
+///
+/// # Safety
+/// `renderer` must be live; `data` must point to `count` words and `ranges` to `2 * range_count`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_update_road_cells(
+    renderer: *mut WgrRenderer,
+    data: *const u32,
+    count: u32,
+    ranges: *const u32,
+    range_count: u32,
+) {
+    if renderer.is_null() || data.is_null() || count == 0 {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let words = unsafe { std::slice::from_raw_parts(data, count as usize) };
+        let ranges: &[u32] = if ranges.is_null() || range_count == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(ranges, range_count as usize * 2) }
+        };
+        renderer.grass_update_road_cells(words, ranges);
+    }));
+}
+
+/// RFG-107: the native world's road segments per land cell, for the grass placement (layout in
+/// grass.wgsl, `road_edge_distance`); null or zero `count` clears them.
+///
+/// # Safety
+/// `renderer` must be live; `data` must be null or point to `count` readable words.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_road_cells(renderer: *mut WgrRenderer, data: *const u32, count: u32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let words: &[u32] = if data.is_null() || count == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(data, count as usize) }
+        };
+        renderer.grass_set_road_cells(words);
+    }));
+}
+
+/// Per photo-card layer: selection weight within its surface's run (0 for all = uniform) and max
+/// draw distance as a fraction of the card ring's reach (0 = no limit). `count` <= 32; a null or
+/// zero-count call restores the neutral pick.
+///
+/// # Safety
+/// `renderer` must be live; `weights` and `far` must hold `count` floats each (or be null).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_layer_pick(renderer: *mut WgrRenderer, weights: *const f32, far: *const f32, count: u32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let n = count.min(32) as usize;
+        let w = if weights.is_null() || n == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(weights, n) } };
+        let f = if far.is_null() || n == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(far, n) } };
+        renderer.grass_set_layer_pick(w, f);
+    }));
+}
+
 /// Upload per-land-cell geography flags for GPU grass placement.  The values are
 /// `GeographyInfo::packed`, one `u32` for every landscape cell.
 ///
@@ -3488,6 +4148,51 @@ pub unsafe extern "C" fn wgr_grass_set_geography(
         let count = width as usize * height as usize;
         let values = unsafe { std::slice::from_raw_parts(values, count) };
         renderer.grass_set_geography(width, height, values);
+    }));
+}
+
+/// Whole World: the grass stands on the streamed near patch (`hm_n` x `hm_n` heights, `grid` m apart
+/// from frame (origin_x, origin_z)) with its own geography (`geo_n` x `geo_n` words, `geo_cell` m apart,
+/// bit 31 = grass), instead of the native island, until wgr_grass_clear_earth_ground.
+///
+/// # Safety
+/// `renderer` must be live; `heights` must hold `hm_n * hm_n` floats and `geography` `geo_n * geo_n` words.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_earth_ground(
+    renderer: *mut WgrRenderer,
+    origin_x: f32,
+    origin_z: f32,
+    grid: f32,
+    hm_n: u32,
+    heights: *const f32,
+    geo_cell: f32,
+    geo_n: u32,
+    geography: *const u32,
+    sea_level: f32,
+) {
+    if renderer.is_null() || heights.is_null() || geography.is_null() || hm_n < 2 || geo_n == 0 {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let heights = unsafe { std::slice::from_raw_parts(heights, (hm_n * hm_n) as usize) };
+        let geography = unsafe { std::slice::from_raw_parts(geography, (geo_n * geo_n) as usize) };
+        renderer.grass_set_earth_ground([origin_x, origin_z], grid, hm_n, heights, geo_cell, geo_n, geography, sea_level);
+    }));
+}
+
+/// Back to the native island's ground for the grass.
+///
+/// # Safety
+/// `renderer` must be live or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_clear_earth_ground(renderer: *mut WgrRenderer) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        renderer.grass_clear_earth_ground();
     }));
 }
 
@@ -3569,7 +4274,15 @@ pub unsafe extern "C" fn wgr_grass_set_blade_atlas(
     layers: u32,
     rgba: *const u8,
 ) {
-    if renderer.is_null() || rgba.is_null() || width == 0 || height == 0 || layers == 0 {
+    if renderer.is_null() {
+        return;
+    }
+    // No image (null pixels, zero layers): restore the built-in procedural atlas.
+    if rgba.is_null() && layers == 0 {
+        let _ = catch_unwind(AssertUnwindSafe(|| unsafe { &mut *renderer }.grass_clear_blade_atlas()));
+        return;
+    }
+    if rgba.is_null() || width == 0 || height == 0 || layers == 0 {
         return;
     }
     let _ = catch_unwind(AssertUnwindSafe(|| {

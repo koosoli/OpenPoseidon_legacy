@@ -319,6 +319,8 @@ GameValue GameState::Const() const
         if (closed)
         {
             _e->_pos = end + 1;
+            if (s_codeValues)
+                return GameValue(new GameDataCode(RString(start, end - start)));
             return RString(start, end - start);
         }
         else
@@ -762,6 +764,7 @@ static GameValue ListSet(const GameState* state, GameValuePar oper1, GameValuePa
 // Set by StringExitWith when the condition is true; read and cleared
 // by loop handlers (ForDoOp, StringRepeat) to propagate the exit value.
 static thread_local GameValue tls_exitWithValue;
+static GameValue TakeBreakOutValue(); // after GameState::BreakOutWithValue
 
 // exitWith in a called function leaves that function only: its value is the call's
 // value, and the caller carries on with its next statement.
@@ -1127,6 +1130,7 @@ static GameValue ListForEach(const GameState* state, GameValuePar oper1, GameVal
         const GameValue& val = array[i];
         // set local varible - will be deleted on EndContext
         state->VarSetLocal("_x", val, true);
+        state->VarSetLocal("_forEachIndex", GameValue(static_cast<float>(i)), true);
         const_cast<GameState*>(state)->Execute(expression);
         if (state->GetLastError())
         {
@@ -2109,6 +2113,11 @@ RString GameDataString::GetText() const
     return RString("\"") + _value + RString("\"");
 }
 
+RString GameDataCode::GetText() const
+{
+    return RString("{") + GetString() + RString("}");
+}
+
 bool GameDataString::IsEqualTo(const GameData* data) const
 {
     RString val1 = GetString();
@@ -2536,6 +2545,15 @@ GameValue GameState::VarGet(const char* name) const
         // get variable value
         return var._value;
     }
+    if (s_resolveGlobal && source[0] != '_')
+    {
+        GameValue resolved;
+        if (s_resolveGlobal(source, resolved))
+        {
+            const_cast<GameState*>(this)->VarSet(source, resolved);
+            return resolved;
+        }
+    }
 
     return GameValueNil();
 }
@@ -2871,7 +2889,10 @@ GameValue GameState::EvaluateMultiple(const char* expression, bool localOnly) co
                 {
                     ret = NOTHING;
                     if (leaveScope)
+                    {
+                        ret = TakeBreakOutValue();
                         break;
+                    }
                     goto NextStatement;
                 }
                 // exitWith gives the scope its value (the statement itself stops before
@@ -2969,6 +2990,25 @@ bool GameState::PerformAssignment(bool localOnly)
         declareLocal = true;
         _e->_pos += 7;
         vynech();
+    }
+
+    // Arma 3 init lines write "0 = [] spawn {...};" (an init line must not return a value):
+    // a number on the left, so the value is computed and dropped. Arma 3 only (code values).
+    if (s_codeValues && !declareLocal && isdigit(static_cast<unsigned char>(*_e->_pos)))
+    {
+        while (isdigit(static_cast<unsigned char>(*_e->_pos)))
+            _e->_pos++;
+        vynech();
+        if (*_e->_pos != '=')
+        {
+            SetError(EvalEqu);
+            return false;
+        }
+        _e->_pos++;
+        vynech();
+        GameValue dropped = Vyhod();
+        CleanStack();
+        return !_e->_error;
     }
 
     char name[MAX_EXPR_LEN];
@@ -3216,6 +3256,25 @@ void GameState::EndContext() const
 void GameState::SetScopeName(const char* name) const
 {
     _e->_scopeName = name;
+}
+
+static thread_local GameValue tls_breakOutValue;
+static thread_local bool tls_breakOutHasValue = false;
+
+void GameState::BreakOutWithValue(const char* name, const GameValue& value) const
+{
+    tls_breakOutValue = value;
+    tls_breakOutHasValue = true;
+    BreakToScope(name, true);
+}
+
+// The value a scope left by "value breakOut name" gives (taken once).
+static GameValue TakeBreakOutValue()
+{
+    GameValue v = tls_breakOutHasValue ? tls_breakOutValue : GameValue(NOTHING);
+    tls_breakOutValue = GameValue();
+    tls_breakOutHasValue = false;
+    return v;
 }
 
 void GameState::BreakToScope(const char* name, bool out) const

@@ -64,6 +64,18 @@ struct CorrectedCorpsePose
         return true;
     }
 
+    // The parts Apply rewrites, checked as Valid() checks them.
+    bool OutputsValid() const
+    {
+        for (const auto& level : levels)
+        {
+            for (const auto& matrix : level.palette) if (!matrix.IsFinite()) return false;
+            for (const auto& point : level.points) if (!point.IsFinite() || point.Size() > 8) return false;
+            for (const auto& matrix : level.proxies) if (!matrix.IsFinite()) return false;
+        }
+        return true;
+    }
+
     // Always compose against the captured consumer output, never last tick's
     // output. The identity shortcut preserves its exact floating-point bytes.
     bool Apply(const std::vector<Matrix4>& deltas)
@@ -91,7 +103,11 @@ struct CorrectedCorpsePose
                 level.proxies[p] = CorpseMatrixIdentityError(deltas[level.proxyBones[p]]) == 0 ?
                     level.authoredProxies[p] : deltas[level.proxyBones[p]]*level.authoredProxies[p];
         }
-        return Valid();
+        // PERF (2026-10-14): Valid() passed on entry, and this function writes nothing but the
+        // palettes, points and proxies -- sizes, roots, authored data and bindings are exactly
+        // what was just checked. So the full re-check reduces to those outputs. It ran per
+        // corpse per tick and was most of a firefight's ~3% in this function.
+        return OutputsValid();
     }
 };
 }

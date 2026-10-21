@@ -192,6 +192,13 @@ struct GridInfo
 
 DECL_ENUM(AICenterMode)
 
+/// The clock the renderer animates with (water, clouds, foliage sway): the simulation clock at the
+/// DRAWN time, i.e. between the last two ticks by the same interpolation alpha the objects are
+/// drawn with (REN-INTERP-001). Glob.time only moves on fixed 1/60 s ticks, so at 87 fps about
+/// one frame in three saw no advance at all and every wave stepped unevenly ("as if it skipped
+/// frames"). Equals Glob.time when paused or with POSEIDON_RENDER_INTERP=0.
+float PresentationClockSeconds();
+
 class World
 {
 	protected:

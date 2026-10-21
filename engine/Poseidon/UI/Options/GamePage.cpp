@@ -29,16 +29,49 @@ int CurrentLanguageIndex(const std::string& language)
     return idx >= 0 ? idx : 0;
 }
 
+// The slider is STEPPED, not linear: 100 m steps up to 5 km (every island view distance), 500 m to
+// 20 km, 5 km to the whole-world maximum. Linear 100 m steps over 100 m .. 150 km were 1,499
+// positions; a mouse drag moved several hundred metres a pixel and 800 m could no longer be picked
+// (tester report, 2026-10-04). Each segment: the distance it ends at, and its step.
+struct ViewDistanceSegment
+{
+    float end;
+    float step;
+};
+constexpr ViewDistanceSegment kViewDistanceSegments[] = {
+    {5000.0f, 100.0f},
+    {20000.0f, 500.0f},
+    {GameSettingsConfig::kMaxViewDistance, 5000.0f},
+};
+
 int ViewDistanceToSliderImpl(float value)
 {
-    float clamped = ClampPreferredViewDistance(value);
-    return (int)std::lround((clamped - GameSettingsConfig::kMinViewDistance) / 100.0f);
+    const float clamped = ClampPreferredViewDistance(value);
+    float start = GameSettingsConfig::kMinViewDistance;
+    int base = 0;
+    for (const ViewDistanceSegment& seg : kViewDistanceSegments)
+    {
+        if (clamped <= seg.end)
+            return base + (int)std::lround((clamped - start) / seg.step);
+        base += (int)std::lround((seg.end - start) / seg.step);
+        start = seg.end;
+    }
+    return base;
 }
 
 float SliderToViewDistanceImpl(int slider)
 {
-    int clamped = std::clamp(slider, 0, GamePage::ViewDistanceSliderMax());
-    return GameSettingsConfig::kMinViewDistance + clamped * 100.0f;
+    int left = std::clamp(slider, 0, GamePage::ViewDistanceSliderMax());
+    float start = GameSettingsConfig::kMinViewDistance;
+    for (const ViewDistanceSegment& seg : kViewDistanceSegments)
+    {
+        const int steps = (int)std::lround((seg.end - start) / seg.step);
+        if (left <= steps)
+            return start + left * seg.step;
+        left -= steps;
+        start = seg.end;
+    }
+    return start;
 }
 } // namespace
 
@@ -59,8 +92,7 @@ float GamePage::SliderToViewDistance(int slider)
 
 int GamePage::ViewDistanceSliderMax()
 {
-    return (int)std::lround((GameSettingsConfig::kMaxViewDistance -
-                           GameSettingsConfig::kMinViewDistance) / 100.0f);
+    return ViewDistanceToSliderImpl(GameSettingsConfig::kMaxViewDistance);
 }
 
 const char* GamePage::CloseLabel()

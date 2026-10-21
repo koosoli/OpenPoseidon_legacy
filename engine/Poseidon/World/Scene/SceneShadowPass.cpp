@@ -69,6 +69,11 @@ std::unordered_map<Object*, StaticCasterCache> s_staticCasterCache;
 constexpr size_t kStaticCasterCacheCap = 1024;
 } // namespace
 
+void Scene::ResetStaticShadowCasterCache()
+{
+    s_staticCasterCache.clear();
+}
+
 namespace
 {
 // WGR_SHADOW_RECOVER_LOD=1 re-derives a caster LOD for objects the MAIN-VIEW culls

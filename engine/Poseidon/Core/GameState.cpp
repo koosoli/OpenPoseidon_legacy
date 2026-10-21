@@ -1,3 +1,4 @@
+#include <chrono>
 #include <filesystem>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/Core/Application.hpp>
@@ -256,7 +257,11 @@ static void LoadBanks(const char* path, const char* fullPath, bool emptyPrefix, 
         }
 
         RString bankPath = RString(fullPath) + RString("\\");
+        const auto tBank = std::chrono::steady_clock::now();
         GFileBanks.Load(bankPath, bankPrefix, bName, emptyPrefix, CheckProductCallback, addonCallback, cpc);
+        const double bankMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tBank).count();
+        if (bankMs > 20.0)
+            LOG_INFO(Core, "Bank mount: {}{} {:.0f} ms", (const char*)bankPath, (const char*)bName, bankMs);
     }
 }
 
@@ -309,6 +314,7 @@ void Globals::Init()
         // engine alive, so the previous mount's addon registry would otherwise persist.
         AddonSystem::ClearRegistry();
         GFileBanks.Clear();
+        const auto tMount0 = std::chrono::steady_clock::now();
         if (GFileBankPrefix.GetLength() > 0)
         {
             LoadBanksEx(RString("dta\\") + GFileBankPrefix, true);
@@ -317,7 +323,11 @@ void Globals::Init()
         LoadAddonArchiveRoots();
         LoadBanksEx("dta", true);
         LoadBanksEx("addons", true, true);
+        // The shareable build keeps what the retail game lacks in assets\ (Install.ps1 -Package): its
+        // add-ons (cwr_logo.pbo) mount after the game's own, and a bank the game already has is skipped.
+        LoadBanks("addons", "assets\\addons", true, true);
         LoadBanksEx("Campaigns", false);
+        const auto tMount1 = std::chrono::steady_clock::now();
         // Local map previews mount only assets: foreign gameplay/config classes cannot replace CWA units.
         const std::string mapRoots = AppConfig::Instance().GetMapArchivePaths().Data();
         size_t mapStart = 0;
@@ -336,9 +346,14 @@ void Globals::Init()
         }
         // --arma1: an installed Arma 1 folder, mounted data-only like the map roots above.
         Poseidon::Arma1Compat::MountArchives();
+        const auto tMount2 = std::chrono::steady_clock::now();
         AddonSystem::ParseAllAddonConfigs();
         AddonSystem::ClearAddonConfigs();
         AddonSystem::MarkAllAddonsLockable();
+        const auto tMount3 = std::chrono::steady_clock::now();
+        const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+        LOG_INFO(Core, "Bank mount: game banks {:.0f} ms, map roots + Arma 1 {:.0f} ms, addon configs {:.0f} ms",
+                 ms(tMount0, tMount1), ms(tMount1, tMount2), ms(tMount2, tMount3));
     }
 
     remove("clipboard.txt");

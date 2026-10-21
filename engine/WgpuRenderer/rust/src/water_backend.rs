@@ -281,6 +281,7 @@ impl WaterBackend {
         let t0 = std::time::Instant::now();
         // Drop first: at no point do both backends hold GPU memory.
         crate::water_tw::probe::clear_drawn_grid();
+        crate::water_tw::query::clear();
         self.active = Active::Empty;
         self.active = match want {
             WaterBackendKind::CurrentOp => {
@@ -563,13 +564,14 @@ impl WaterBackend {
         source: &wgpu::TextureView,
         depth: &wgpu::TextureView,
         destination: &wgpu::TextureView,
+        sky_sh: &wgpu::Buffer,
     ) {
         match &self.active {
             Active::CurrentOp(op) => {
                 let displacement = op.water.underwater_displacement_view();
                 op.underwater.render(device, encoder, source, depth, destination, &displacement);
             }
-            Active::Tidewater(tw) => tw.render_underwater(device, encoder, source, depth, destination),
+            Active::Tidewater(tw) => tw.render_underwater(device, encoder, source, depth, destination, sky_sh),
             Active::Empty => {}
         }
     }

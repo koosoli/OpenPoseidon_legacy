@@ -38,3 +38,72 @@ fn fs_tw_probe(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let d = twDisplace(xz, PROBE_MESH);
     return vec4<f32>(d.world, 1.0);
 }
+
+// (OP) the swash field for the shorebirds (swash.rs; Tidewater's SwashProbe evaluates the same
+// run-up at the birds' own points): SW_N x SW_N texels SW_STEP m apart on a lattice around the
+// camera, each the shore waves' swash at that point -- run-up of the current wave and the point's
+// own distance up the beach (both m along the beach), the leading edge's speed (dRt/dt, > 0 while
+// the water runs up) and the swash cycle's phase. The lattice is derived from the probe's lanes (the
+// camera), the same way swash.rs derives it, so no lane of its own is needed.
+const SW_N: f32 = 64.0;
+const SW_STEP: f32 = 3.0;
+
+fn swashOrigin() -> vec2<f32> {
+    let cam = tw.probe.xy + vec2<f32>(tw.probe.w * 0.5 * tw.probe.z);
+    return (floor(cam / SW_STEP) - SW_N * 0.5) * SW_STEP;
+}
+
+@fragment
+fn fs_tw_swash(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    if (tw.probe.w < 2.0 || tw.shore1.w <= 0.0) { return vec4<f32>(0.0, 0.0, 0.0, -1.0); }
+    let xz = swashOrigin() + floor(pos.xy) * SW_STEP;
+    let ground = materialTerrainHeightAt(xz);
+    let s = shoreEvaluateNoNormal(xz, waterLevelAt(xz) - ground, ground);
+    return vec4<f32>(s.runup, s.inland, s.dRdt, s.tau);
+}
+
+// (OP) Water height queries at arbitrary points (query.rs; Tidewater's WaterQuery.js): texel i of a
+// TW_QUERY_N x 1 target evaluates the drawn surface over point i -- height and slope -- for the
+// boats' hull samples anywhere on the sea, not only in the probe's 16 m around the camera.
+const TW_QUERY_N: u32 = 128u;
+// the band limit the displacement is read at: smoother than the near mesh (0.25 m), so a hull
+// sample does not ride the finest ripples, still every wave a boat responds to
+const TW_QUERY_SPACING: f32 = 0.5;
+struct TwQueryPoints { p: array<vec4<f32>, 128>, };
+@group(2) @binding(0) var<uniform> twQueryPoints: TwQueryPoints;
+
+// the surface over xz, from lattice point x0 (the guess): Newton on x0 + D(x0) = xz with a finite-
+// difference Jacobian (as probe.rs surface_height; plain fixed-point steps fail on choppy crests).
+// Returns (height, x0).
+fn twQuerySolve(xz: vec2<f32>, start: vec2<f32>) -> vec3<f32> {
+    var x0 = start;
+    let e = 0.1;
+    for (var k = 0; k < 5; k++) {
+        let d = twDisplace(x0, TW_QUERY_SPACING).world.xz;
+        let jx = (twDisplace(x0 + vec2<f32>(e, 0.0), TW_QUERY_SPACING).world.xz - d) / e;
+        let jz = (twDisplace(x0 + vec2<f32>(0.0, e), TW_QUERY_SPACING).world.xz - d) / e;
+        let r = d - xz;
+        let det = jx.x * jz.y - jz.x * jx.y;
+        var step = r;
+        if (det > 0.05) {
+            step = vec2<f32>(jz.y * r.x - jz.x * r.y, jx.x * r.y - jx.y * r.x) / det;
+        }
+        let len = length(step);
+        if (len > 2.0) { step = step * (2.0 / len); }
+        x0 = x0 - step;
+    }
+    return vec3<f32>(twDisplace(x0, TW_QUERY_SPACING).world.y, x0);
+}
+
+@fragment
+fn fs_tw_query(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let i = min(u32(pos.x), TW_QUERY_N - 1u);
+    let q = twQueryPoints.p[i];
+    if (q.w < 0.5) { return vec4<f32>(0.0); }
+    let c = twQuerySolve(q.xy, q.xy);
+    // the slope over 0.35 m (Tidewater's), each neighbour warm-started from this point's lattice point
+    let e = 0.35;
+    let hx = twQuerySolve(q.xy + vec2<f32>(e, 0.0), c.yz + vec2<f32>(e, 0.0)).x;
+    let hz = twQuerySolve(q.xy + vec2<f32>(0.0, e), c.yz + vec2<f32>(0.0, e)).x;
+    return vec4<f32>(c.x, (hx - c.x) / e, (hz - c.x) / e, 1.0);
+}

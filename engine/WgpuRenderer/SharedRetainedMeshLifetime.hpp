@@ -38,6 +38,9 @@ public:
     struct Owners { uint64_t boundBorrowers; bool producerOwned; };
     Owners SnapshotOwners()
     { std::lock_guard lock(_mutex); return {_boundBorrowers, _producerOwned}; }
+    // LOD-STREAM: attached CPU borrowers, bound or still queued.
+    uint64_t SnapshotBorrowers()
+    { std::lock_guard lock(_mutex); return _borrowers; }
     template<class Retire> void Dispatch(uint64_t handle, Retire&& retire)
     { if (_epoch) _epoch->Dispatch(handle, std::forward<Retire>(retire)); }
     // Returns the full generational renderer handle exactly once when no

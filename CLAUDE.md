@@ -20,8 +20,13 @@
 >    *Why:* on 2026-08-23 a session root-caused Everon's buried buildings, fixed the exporter, validated on a patched scratch `.wrp`, pushed, and left the owner with the old exe AND the old world file. The owner flew to the coordinates, saw the same missing town, and reasonably asked whether they were on a stale version. They were, twice over.
 > 0c. **BEFORE YOU WRITE ANYTHING, MAKE SURE YOUR BRANCH IS NOT ALREADY BEHIND.** Several agents and worktrees share this repository and the same game folder. The expensive failure is not losing work, it is having to MERGE it: two sides that touched the same files for different reasons, reconciled by hand, which is where a change gets dropped and nobody notices for a day.
 >    - Run `scripts\Use-RepoHooks.ps1` once per clone. It sets `core.hooksPath` (repo-relative, so every worktree honours it), gives the trunk an upstream, and reports ahead/behind.
->    - Trunk is **`consolidated-v2`**, tracking `safety/consolidated-v2`. Anything meant to ship belongs there. **It moved on 2026-08-28**: the old trunk `feat/consolidated` is frozen at `a1a39df0`, 21 commits behind, and is archived as `archive/consolidated-v1-20260828`. `feat/consolidated` was deliberately NOT deleted from the mirror, so its existence is not a sign it is live — do not commit there. The mirror carries ~30 branches; almost all are history, not work in progress.
->    - `git pull --rebase safety consolidated-v2` at the START of a session, not the end. **Rebase, not merge** — a merge here buries whose change was whose.
+>    - **DO NOT ASSUME THE TRUNK IS WHERE THE WORK IS. Find the most recent branch, then ASK THE OWNER which branch to start from — before you write anything.** The nominal trunk is `consolidated-v2` (tracking `safety/consolidated-v2`), but the live line often runs ahead of it on a feature branch for weeks. On 2026-10-17 `consolidated-v2` was its 2026-09-13 state plus one reverted feature, while `feat/arma-original-ui` was **2,785 commits ahead** and was what the game folder ran. A session that started from the trunk would have built on month-old code and then had to merge across all of it. At the start of every session:
+>      1. `git fetch safety`, then list branches by their last commit: `git for-each-ref --sort=-committerdate refs/remotes/safety --format="%(committerdate:short) %(refname:short) %(subject)"` (the first 10–15 lines).
+>      2. Read `<game folder>\DEPLOYED-FROM.txt` — the branch and commit the owner is actually playing (rule 0).
+>      3. For each candidate, how far apart it is from the trunk: `git rev-list --left-right --count safety/consolidated-v2...safety/<branch>` (left = only on the trunk, right = only on the branch).
+>      4. **Tell the owner what you found** — the trunk's last commit and date, the most active branch, what the game folder runs, how many commits apart they are — and **ask which branch to base your work on. Wait for the answer; never default to the trunk on your own.** A task brief that already names the branch counts as the answer, but if what you found contradicts it (the named branch is far behind another active one), say so and ask anyway.
+>      5. Branch your own worktree (0d) from the branch the owner named, and `git pull --rebase safety <that branch>` at the START of the session, not the end. **Rebase, not merge** — a merge here buries whose change was whose.
+>    - History: the trunk moved from `feat/consolidated` to `consolidated-v2` on 2026-08-28; `feat/consolidated` is frozen at `a1a39df0` and archived as `archive/consolidated-v1-20260828`, and still exists on the mirror — its existence is not a sign it is live, do not commit there. The mirror carries dozens of branches; most are history. Recency (step 1) and the owner's answer (step 4) decide where to work, not the branch's name.
 >    - Push as soon as a change stands on its own. An hour of unpushed work is an hour in which someone else can diverge from you.
 >    - The `pre-commit` hook refuses a commit onto a branch that is behind, and prints the exact command to fix it. If you find yourself reaching for `SKIP_BRANCH_GUARD=1`, that is the signal to rebase instead.
 >    - **Never `git reset --hard` with staged-but-uncommitted new files.** It deletes them from the index *and* the working tree with no reflog entry to recover from. Commit first, then experiment. (Written after doing exactly this to the hook files above, minutes after creating them.)
@@ -48,6 +53,29 @@
 >    *Why this is separate from 0c:* the branch guard answers "am I starting from the right place". Nothing answers "did I just commit half a change, or someone else's". Those are the failures that cost this project a redeploy, a force-push and a backout commit in a single day.
 > 1. **Use the scripts — do not hand-roll build/install/launch.** `scripts/Build.ps1`, `scripts/Install.ps1`, `scripts/Start.ps1` are the supported path (see [Build, install, run](#build-install-run) below). **`Install.ps1` must be run once per game install**: the retail game is missing files the remaster needs, and hand-copying only the two binaries leaves an install that boots but has a *dead Options menu* and missing UI art — a failure with no error message. Run it before assuming anything is a code bug.
 > 1b. **Dual Binary Deployment**: if you do deploy by hand, you MUST copy **BOTH** `OpenPoseidon.exe` AND `wgpu_renderer.dll` to `D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\`. Copying only one binary causes an instant `Entry Point Not Found` crash on launch.
+> 1c. **ENGINE CONTENT GOES IN `assets\`, NEVER IN `Mods\`.** The game a player receives is `OpenPoseidon.exe` +
+>    `wgpu_renderer.dll` + `assets\`, and nothing else (`scripts\Package-Share.ps1` builds exactly that, for someone who
+>    has Cold War Assault installed). Anything an OpenPoseidon feature needs to work goes under `assets\`. That covers
+>    feature packs (`assets\Mods\@OP_*`: VisualUpgrade, VehicleActions, Swim, TidewaterBoat, TidewaterWildlife), UI,
+>    menu, inventory icons, grass blades, and any new pack you add. **Deleting the game folder's `Mods\`
+>    must not remove a single engine feature.**
+>    - `Mods\` is for maps (`@OP_Fusion`, `@OP_Showcase`, `@OP_SizeProbe`) and the player's own mods only.
+>    - A new pack builder writes to `dist\<preset>\assets\Mods\@OP_<Name>`. Deploy installs it, and `ResolveDefaultContentPacks`
+>      (`ModCollection.cpp`) finds it there without a `-mod` parameter. Add it to `Deploy.ps1` and `Package-Share.ps1` too.
+>    - Loose runtime files the repo ships go under `assets\<area>\`. `/assets/` is gitignored, so add them with
+>      `git add -f` and check `git show --stat` for them.
+>    - **Verify on a clean copy:** a game folder whose `Mods\` holds no `@OP_*` feature pack must still boot with every
+>      feature. A pack that only works from `Mods\` cannot reach a player who received the shared package.
+>    - Never ship content from another game in `assets\` (no Reforger/Arma/DayZ/The Forest files). Only own, CC0 or
+>      compatibly licensed work, with its source recorded.
+>
+>    *Why:* on 2026-10-20 the owner wanted to hand a friend just the exe, the dll and `assets\`. Half the features lived
+>    in `Mods\@OP_*` and would silently have been missing.
+> 1d. **PROFILING A STUTTER:** read [.agents/PROFILING-WITH-NSIGHT.md](.agents/PROFILING-WITH-NSIGHT.md) first. It lists the
+>    engine's own slow-frame logs (try them before Nsight), the one-command Nsight recording
+>    (`scriptseforger-pc\Run-NsysFlight.ps1`, needs the owner's admin terminal), the three launch traps that
+>    each look like "program not found", and `scriptseforger-pc
+sys_long_frames.py`, which symbolises the trace.
 > 2. **WGSL Shader Rules**: Review [.agents/WGSL_CODING_RULES.md](.agents/WGSL_CODING_RULES.md). No 4-component swizzles on `vec2` (`.xxyy` / `.xyxy`), all variables must be explicitly declared in scope.
 > 3. **Startup Diagnostics**: If the game exits instantly, ALWAYS test with
 >    `cmd /c ".\OpenPoseidon.exe --render wgpu --window --dev --log-file cwr.log"` to read the panic traceback.
@@ -134,6 +162,7 @@ Formatting and static analysis are wired as CMake custom targets (build them lik
 - `Format` / `FormatFix` — clang-format check / apply (config in `.clang-format`: 4-space indent, Allman braces, 120 cols).
 - `Tidy` / `TidyFix` — clang-tidy (config in `.clang-tidy`).
 - `PythonLint` / `PythonLintFix` — ruff (via `uv`) for the Blender addon, only if `uv` is present.
+  Editing models, textures or animations in Blender (the add-on, the Blender MCP, the conventions): `.claude/skills/ofp-blender/SKILL.md`.
 - `Lint` / `LintFix` — combined C++ (+ Python) convenience targets.
 - `FileSize` — warns at >3000 lines, errors at >5000.
 

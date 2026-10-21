@@ -66,6 +66,12 @@ class SortObject : public RefCount
     int sortComplexity; // GetShape()->Level(0)->NFaces()  (CmpShapeObj shape tiebreak)
     int sortPassOrder;  // object->PassOrder(drawLOD)       (CmpSurfaceObj primary key)
 
+    // Pass-1 blend recording (SceneDraw.cpp): this object's blend-section draws, captured in
+    // pass 1 of generation `blendRecordGen`, as a range of the engine's recording list.
+    int blendRecordGen = 0;
+    uint32_t blendRecordBeg = 0;
+    uint32_t blendRecordEnd = 0;
+
     USE_FAST_ALLOCATOR
 };
 
@@ -430,6 +436,9 @@ class Scene
     // GPU-driven variant (Engine::UsesGpuShadowCasters): submits caster meshes +
     // transforms via AddShadowCaster instead of collecting a CPU triangle soup.
     void RenderShadowMapDepthPassGpu(int nDraw);
+    // Drops the static-caster cache (SceneShadowPass.cpp). It is keyed by Object* and holds raw
+    // Texture*; a re-mount reloading the same world can put a new object at a cached address.
+    static void ResetStaticShadowCasterCache();
     void DrawObjectsAndShadowsPass3(); // last draw cockpits
     void ObjectsDrawn();               // release all temporary information
 

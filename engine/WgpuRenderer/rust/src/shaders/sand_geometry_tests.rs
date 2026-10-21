@@ -46,11 +46,22 @@ fn probe_source(terrain: bool) -> String {
             @group(1) @binding(1) var heightmap: texture_2d<f32>;\n\
             @group(1) @binding(4) var<storage, read> snow: SnowData;\n",
         );
+        // BOOM-001: the crater views compose into sample_height as well; copy their
+        // constants and lookups verbatim too.
+        let craters = TERRAIN.find("const CRATER_NEAR").expect("crater constants");
+        let crater_fns = TERRAIN[craters..].find("fn crater_view(").unwrap() + craters;
+        source.push_str(&TERRAIN[craters..crater_fns]);
+        for name in ["crater_view", "crater_active", "crater_height_offset", "crater_height_gradient"] {
+            source.push_str(declaration(TERRAIN, &format!("fn {name}(")));
+            source.push('\n');
+        }
         for name in [
             "hm_load",
             "sand_height_offset",
             "sand_height_gradient",
             "sample_height",
+            "offmap_bed",
+            "grid_height",
             "sample_normal",
             "sample_mud_normals",
             "sample_mud_normal",

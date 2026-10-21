@@ -102,6 +102,13 @@ fn far_accepts(
     !real_drawn
 }
 
+/// RFG-161: WGR_NATIVE_FAR_SUN=0 keeps a native world's far proxies on sky light alone (the look
+/// before: the sun term was zero, so a distant forest was the same dull tone on its sunny and its
+/// shaded side and darker than the real trees in front of it).
+fn native_far_sun() -> bool {
+    !matches!(std::env::var("WGR_NATIVE_FAR_SUN").ok().as_deref(), Some("0"))
+}
+
 /// `WGR_FAR_MODE=distance` restores the pre-complement pure-distance start rule from the SAME
 /// binary, so an A/B of the two rules is one environment variable and not a rebuild. Anything
 /// else (including unset) is the complement.
@@ -134,6 +141,8 @@ struct FarData {
     /// Workgroups along X; Y covers the remainder for worlds past the per-dimension limit.
     groups_x: u32,
     groups_y: u32,
+    /// PERF-RFG-209: bytes the source buffer holds (>= the rows in use).
+    src_capacity: u64,
 }
 
 pub struct Far {
@@ -144,6 +153,8 @@ pub struct Far {
     card_pipeline: wgpu::RenderPipeline,
     prism_pipeline: wgpu::RenderPipeline,
     data: Option<FarData>,
+    /// The last `set_params` came from a native (Enfusion) world: `enabled == 2`.
+    native_world: bool,
 }
 
 impl Far {
@@ -294,66 +305,69 @@ impl Far {
         };
         let card_pipeline = make_pipeline("wgr_far_cards", "vs_card", "fs_card");
         let prism_pipeline = make_pipeline("wgr_far_prisms", "vs_prism", "fs_prism");
-        Self {
+        let mut far = Self {
             params,
+            native_world: false,
             params_buffer,
             layout,
             cull_pipeline,
             card_pipeline,
             prism_pipeline,
             data: None,
+        };
+        // PERF-FAR-RESIDENT: allocate the sweep's buffers NOW, with the renderer, while VRAM is
+        // still empty. Measured 2026-10-19 at the owner's 3440x1440 on Everon: the far window grew
+        // to 1.05M rows (33.6 MB), just past the old 32 MB first allocation, so the source was
+        // re-created late in the load with VRAM full -- WDDM placed it in system memory and the
+        // sweep read it over PCIe every frame: "Far tier: cull" 7.8 ms, linear in rows (3.4-4.5
+        // ms at half the rows), against 0.09 ms for the same pose at 1920x1080. 2M rows (64 MB)
+        // covers every native world measured; the buffers are kept across worlds.
+        // WGR_FAR_PREALLOC_MB (default 64; 0 = allocate on first use as before).
+        let mb = std::env::var("WGR_FAR_PREALLOC_MB").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(64);
+        if mb > 0 {
+            far.allocate(device, mb << 20);
         }
+        far
     }
 
-    /// Replace the whole proxy set. Called once per world load; an empty slice releases the
-    /// ~42 MB of compacted storage as well as the source rows. Returns (cards, prisms) so
-    /// the caller can log a denominator rather than a reassuring "ok".
-    pub fn set_instances(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        instances: &[WgrFarInstance],
-    ) -> (u32, u32) {
-        self.data = None;
-        if instances.is_empty() {
-            self.params.cfg[3] = 0.0;
-            self.upload_params(queue);
-            return (0, 0);
-        }
-        // One mapped-at-creation write rather than queue.write_buffer: this is a single
-        // bulk upload of up to ~117 MB (3.65M rows), and pushing that through the staging
-        // belt copies it twice for no benefit.
-        let bytes: &[u8] = bytemuck::cast_slice(instances);
+    /// (Re)allocate the source rows with `capacity` bytes; the visible/count/indirect buffers
+    /// are allocated once and carried over.
+    fn allocate(&mut self, device: &wgpu::Device, capacity: u64) {
         let src = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_far_src"),
-            size: bytes.len() as u64,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: true,
-        });
-        src.slice(..).get_mapped_range_mut().copy_from_slice(bytes);
-        src.unmap();
-
-        let visible = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("wgr_far_visible"),
-            size: VISIBLE_CAP as u64 * VISIBLE_STRIDE,
-            usage: wgpu::BufferUsages::STORAGE,
+            size: capacity,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            // Not mapped_at_creation: a mapped-at-creation STORAGE buffer may be placed in
+            // host-visible memory, which the per-frame sweep then reads across the bus.
             mapped_at_creation: false,
         });
-        let counts = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("wgr_far_counts"),
-            size: 8,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        // Two 16-byte draw-indirect arg blocks: cards at 0, prisms at 16.
-        let indirect = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("wgr_far_indirect"),
-            size: 32,
-            usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let previous = self.data.take();
+        let (visible, counts, indirect) = match previous {
+            Some(d) => (d.visible, d.counts, d.indirect),
+            None => (
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("wgr_far_visible"),
+                    size: VISIBLE_CAP as u64 * VISIBLE_STRIDE,
+                    usage: wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                }),
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("wgr_far_counts"),
+                    size: 8,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_SRC
+                        | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+                // Two 16-byte draw-indirect arg blocks: cards at 0, prisms at 16.
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("wgr_far_indirect"),
+                    size: 32,
+                    usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+            ),
+        };
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wgr_far_bind"),
             layout: &self.layout,
@@ -376,6 +390,55 @@ impl Far {
                 },
             ],
         });
+        self.data = Some(FarData {
+            src,
+            visible,
+            counts,
+            indirect,
+            bind,
+            groups_x: 0,
+            groups_y: 0,
+            src_capacity: capacity,
+        });
+    }
+
+    /// Replace the whole proxy set (a native world's far window refills it every ~30 s); an empty slice releases the
+    /// ~42 MB of compacted storage as well as the source rows. Returns (cards, prisms) so
+    /// the caller can log a denominator rather than a reassuring "ok".
+    pub fn set_instances(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        instances: &[WgrFarInstance],
+    ) -> (u32, u32) {
+        if instances.is_empty() {
+            // PERF-FAR-RESIDENT: the buffers stay (allocated while VRAM was free); only the
+            // rows go. A next world reuses them instead of allocating under pressure.
+            self.params.cfg[3] = 0.0;
+            self.upload_params(queue);
+            return (0, 0);
+        }
+        // PERF-RFG-209: the buffers are KEPT across calls. On a native world the authored far window
+        // refills this set every ~30 s (Everon: 15 times in a 4-minute run, growing 202 -> 808k
+        // rows), and each call used to allocate a fresh 25 MB source and 42 MB visible buffer. Late
+        // in a session VRAM is over budget, so those allocations can land in system memory -- and
+        // the per-frame sweep then reads 25 MB over PCIe: the far cull measured 5-7 ms with nothing
+        // even surviving it (WGR_FAR_PIXEL_LIMIT=100000), bimodally between runs, against < 0.3 ms
+        // when the allocation stayed resident. Now: one source allocation with headroom (grown x1.5
+        // when outgrown), refills uploaded into it, and the visible/count/indirect buffers and the
+        // bind group allocated once.
+        let bytes: &[u8] = bytemuck::cast_slice(instances);
+        let need = bytes.len() as u64;
+        let reuse = self.data.as_ref().is_some_and(|d| d.src_capacity >= need);
+        if reuse {
+            let data = self.data.as_ref().unwrap();
+            queue.write_buffer(&data.src, 0, bytes);
+        } else {
+            // Outgrown (or never preallocated): half again what is needed now.
+            let capacity = (need + need / 2).max(1u64 << 25).max(need);
+            self.allocate(device, capacity);
+            queue.write_buffer(&self.data.as_ref().unwrap().src, 0, bytes);
+        }
 
         let count = instances.len() as u32;
         let groups = count.div_ceil(WORKGROUP);
@@ -384,15 +447,10 @@ impl Far {
         self.params.cfg[3] = count as f32;
         self.params.tune[2] = (groups_x * WORKGROUP) as f32;
         self.upload_params(queue);
-        self.data = Some(FarData {
-            src,
-            visible,
-            counts,
-            indirect,
-            bind,
-            groups_x,
-            groups_y,
-        });
+        if let Some(data) = self.data.as_mut() {
+            data.groups_x = groups_x;
+            data.groups_y = groups_y;
+        }
 
         let prisms = instances
             .iter()
@@ -408,13 +466,25 @@ impl Far {
         near_cutoff_m: f32,
         far_distance_m: f32,
         pixel_limit: f32,
-        enabled: bool,
+        enabled: u32,
     ) {
         self.params.cfg[0] = near_cutoff_m.max(0.0);
         self.params.cfg[1] = far_distance_m.max(0.0);
         self.params.cfg[2] = pixel_limit;
-        self.params.tune[1] = if enabled { 1.0 } else { 0.0 };
+        self.params.tune[1] = if enabled != 0 { 1.0 } else { 0.0 };
+        self.native_world = enabled == 2;
+        // enabled == 2: pure-distance start rule from `near_cutoff_m` (a native world whose real
+        // models end at a known reach -- the authored far window -- rather than at the cull).
+        self.params.tune[3] = if enabled == 2 { 1.0 } else { mode_from_env() };
+        // RFG-161: a native world's proxies take the real sun (far_shade); the OFP/Arma look was
+        // tuned without it and keeps that.
+        self.params.cull[2] = if enabled == 2 && native_far_sun() { 1.0 } else { 0.0 };
         self.upload_params(queue);
+    }
+
+    /// RFG-196: whether the world is a native Reforger one (the far tier is told so by its mode).
+    pub fn native_world(&self) -> bool {
+        self.native_world
     }
 
     /// The REAL object cull's coefficients for this frame, straight from `Gfx3d::cull_inputs()`
@@ -459,7 +529,7 @@ impl Far {
 
     /// True when there is a set to sweep and the game has not switched the tier off.
     pub fn active(&self) -> bool {
-        self.data.is_some() && self.params.tune[1] >= 0.5 && self.params.cfg[1] > 0.0
+        self.data.is_some() && self.params.cfg[3] > 0.0 && self.params.tune[1] >= 0.5 && self.params.cfg[1] > 0.0
     }
 
     /// One compute sweep over EVERY placement, compacted into the two indirect draws.
@@ -497,7 +567,15 @@ impl Far {
             pass.set_pipeline(&self.cull_pipeline);
             pass.set_bind_group(0, camera_bind, &[camera_offset]);
             pass.set_bind_group(1, &data.bind, &[]);
-            pass.dispatch_workgroups(data.groups_x, data.groups_y, 1);
+            // Diagnostic: WGR_FAR_DISPATCH_FRACTION (0..1) sweeps only that share of the rows.
+            static FRACTION: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+            let fraction = *FRACTION.get_or_init(|| {
+                std::env::var("WGR_FAR_DISPATCH_FRACTION").ok().and_then(|v| v.trim().parse::<f32>().ok())
+                    .filter(|v| v.is_finite()).map(|v| v.clamp(0.0, 1.0)).unwrap_or(1.0)
+            });
+            let gx = if fraction < 1.0 { ((data.groups_x as f32 * fraction).ceil() as u32).max(1) } else { data.groups_x };
+            let gy = if fraction < 1.0 { 1 } else { data.groups_y };
+            pass.dispatch_workgroups(gx, gy, 1);
         }
         timers.end(encoder, Region::FarCull);
         // The draws consume a dedicated indirect buffer: a buffer bound STORAGE read_write
@@ -604,15 +682,15 @@ mod tests {
         // Params still unset, so a live buffer alone must NOT switch the tier on — otherwise
         // "off" would depend on nothing having been loaded yet.
         assert!(!far.active());
-        far.set_params(&queue, 700.0, 12000.0, 2.0, true);
+        far.set_params(&queue, 700.0, 12000.0, 2.0, 1);
         far.set_view_metrics(&queue, 540.0);
         assert!(far.active());
         // The kill switch has to work with a set resident, which is the only case that matters.
-        far.set_params(&queue, 700.0, 12000.0, 2.0, false);
+        far.set_params(&queue, 700.0, 12000.0, 2.0, 0);
         assert!(!far.active());
 
         far.set_instances(&device, &queue, &[]);
-        far.set_params(&queue, 700.0, 12000.0, 2.0, true);
+        far.set_params(&queue, 700.0, 12000.0, 2.0, 1);
         assert!(!far.active());
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }

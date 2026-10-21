@@ -44,6 +44,30 @@ struct GrassParams {
     wind_advection: vec4<f32>,
     wind_flutter: vec4<f32>,
     blade_layer_means: array<vec4<f32>, 8>,
+    // Per photo-card layer: x = selection weight within its surface's run (0 everywhere =
+    // uniform), y = max draw distance as a fraction of the card ring's reach. Renderer-owned,
+    // set by wgr_grass_set_layer_pick from the map's own clutter definitions.
+    layer_pick: array<vec4<f32>, 32>,
+    // RFG-116: .x = atlas layers whose surface names no PlantMat (no near blades).
+    blade_skip: vec4<u32>,
+    // RFG-117: mirrors grass.wgsl (native near-ring tuft cards).
+    native_tuft: vec4<f32>,
+    native_tuft2: vec4<f32>,
+    tuft_aspect: array<vec4<f32>, 2>,
+    tuft_scale: array<vec4<f32>, 2>,
+    // RFG-138: mirrors grass.wgsl (per-surface PlantMat blade sets, blades-only runs).
+    tuft_sets: array<vec4<f32>, 16>,
+    tuft_set_aspect: array<vec4<f32>, 16>,
+    tuft_set_scale: array<vec4<f32>, 16>,
+    card_skip: vec4<u32>,
+    // RFG-159: mirrors grass.wgsl (native tuft shading; unused here).
+    native_look: vec4<f32>,
+    native_look2: vec4<f32>,
+    native_ring: vec4<f32>,
+    // GRS-VAR (grass/mod.rs resolve_variety): .x on, .y head brightness, .z head share, .w drift
+    // field frequency (1/m); look_weights = the per-slot weights pick_look draws from.
+    variety: vec4<f32>,
+    look_weights: array<vec4<f32>, 4>,
 };
 // Must mirror grass.wgsl's 32-byte layout exactly: both shaders bind the same
 // instance buffer through the shared `data_layout`.
@@ -94,7 +118,22 @@ fn clump_noise(world_xz: vec2<f32>, frequency: f32, salt: u32) -> f32 {
 // Mirrors grass.wgsl. A blade tapered by the LOD dissolve must cast the shadow
 // of the size actually drawn, or the join reappears in the shadow map.
 fn lod_height_scale(packed_z: u32) -> f32 {
-    return mix(0.45, 1.0, unpack2x16unorm(packed_z).x);
+    // x = ring fade (floored at 0.45: the dissolve already removes clumps), y = how far into a
+    // meadow margin the clump stands (grass_edge_presence, stored inverted so 0 = full height):
+    // margin blades come down to a quarter, which is what makes the edge read as a fade.
+    let f = unpack2x16unorm(packed_z);
+    return mix(0.45, 1.0, f.x) * (1.0 - 0.75 * f.y);
+}
+
+// RFG-160: mirrors grass.wgsl native_lod_height_scale / native_tuft_widen.
+fn native_lod_height_scale(packed_z: u32) -> f32 {
+    let f = unpack2x16unorm(packed_z);
+    return mix(clamp(grass.native_ring.z, 0.0, 1.0), 1.0, f.x) * (1.0 - 0.75 * f.y);
+}
+fn native_tuft_widen(distance: f32) -> f32 {
+    let d0 = grass.native_ring.x;
+    if (d0 <= 0.5 || distance <= d0) { return 1.0; }
+    return pow(distance / d0, clamp(grass.native_ring.y, 0.0, 1.0));
 }
 
 fn native_blade_height_scale() -> f32 {
@@ -107,6 +146,13 @@ fn native_blade_height_scale() -> f32 {
 // Mirrors photo_layer_bounds in grass.wgsl. The shadow card must be trimmed the
 // same way as the colour card, or the cascade would carry a silhouette larger
 // than the one drawn.
+// Mirrors plant_card_size in grass.wgsl (RFG-108).
+fn plant_card_size(layer: u32, xz: vec2<f32>) -> f32 {
+    let pick = grass.layer_pick[min(layer, 31u)];
+    if (pick.z <= 0.0) { return 0.0; }
+    return pick.z * (1.0 + pick.w * (hash11(xz + 13.0) * 2.0 - 1.0));
+}
+
 fn photo_layer_bounds(layer: u32) -> vec4<f32> {
     let b = grass.layer_bounds[min(layer, 31u)];
     if (b.y - b.x < 0.02 || b.w - b.z < 0.02) { return vec4<f32>(0.0, 1.0, 0.0, 1.0); }
@@ -132,10 +178,28 @@ fn pick_photo_layer_run(patch_cell: vec2<f32>, run: vec2<u32>) -> u32 {
     if (run.y > 0u) {
         // Mirrors grass.wgsl: patches outside the variety mix keep the run's
         // first class (single variety), so the shadow matches the colour card.
-        if (hash11(patch_cell + vec2<f32>(19.0, 71.0)) >= clamp(grass.renderer.z, 0.0, 1.0)) {
+        let mix_amount = select(clamp(grass.renderer.z, 0.0, 1.0), 1.0, grass.native2.w > 0.5);
+        if (hash11(patch_cell + vec2<f32>(19.0, 71.0)) >= mix_amount) {
             return min(run.x, 31u);
         }
-        let pick = u32(hash11(patch_cell + vec2<f32>(43.0, 11.0)) * f32(run.y));
+        // The same weighted pick as the colour card (layer_pick.x), so a plant's shadow is
+        // the plant's -- the cards differ in size since RFG-108.
+        let h = hash11(patch_cell + vec2<f32>(43.0, 11.0));
+        var total = 0.0;
+        for (var i = 0u; i < run.y; i++) {
+            total += max(grass.layer_pick[min(run.x + i, 31u)].x, 0.0);
+        }
+        if (total > 0.0) {
+            var acc = 0.0;
+            for (var i = 0u; i < run.y; i++) {
+                acc += max(grass.layer_pick[min(run.x + i, 31u)].x, 0.0) / total;
+                if (h < acc) {
+                    return min(run.x + i, 31u);
+                }
+            }
+            return min(run.x + run.y - 1u, 31u);
+        }
+        let pick = u32(h * f32(run.y));
         return min(run.x + min(pick, run.y - 1u), 31u);
     }
     return pick_photo_layer(patch_cell);
@@ -207,6 +271,34 @@ fn rotor_flutter_direction(world_xz: vec2<f32>, seed: f32) -> vec2<f32> {
     return select(vec2<f32>(1.0, 0.0), normalize(direction), dot(direction, direction) > 0.0001);
 }
 
+// GRS-VAR phase 3: which looks draw a real head on the near ring, and how many of a clump's
+// blades become heads (its LAST blades; each sits on the tip of stem blade 0 or 1). Mirrored
+// literally by grass_shadow.wgsl, which collapses those blades (tests compare the two).
+fn look_has_disc_head(look: u32) -> bool { return (look >= 6u && look <= 11u) || look == 13u; }
+
+fn near_head_count(look: u32) -> u32 {
+    let share = clamp(grass.variety.z, 0.0, 1.0);
+    if (!look_has_disc_head(look) || share <= 0.0) { return 0u; }
+    return select(1u, 2u, share >= 0.5);
+}
+
+// GRS-VAR: mirrors grass.wgsl look_shape (packed.w bits 12-15) literally.
+// (width scale, height scale) on top of species_shape_mixed. (1, 1) for look 0.
+fn look_shape(look: u32) -> vec2<f32> {
+    switch (look) {
+        case 1u: { return vec2<f32>(0.80, 1.18); }
+        case 2u: { return vec2<f32>(0.80, 0.70); }
+        case 3u: { return vec2<f32>(0.95, 1.30); }
+        case 4u: { return vec2<f32>(1.15, 1.18); }
+        case 5u: { return vec2<f32>(0.85, 1.38); }
+        case 7u: { return vec2<f32>(1.00, 1.10); }
+        case 8u: { return vec2<f32>(1.00, 0.72); }
+        case 10u: { return vec2<f32>(1.00, 0.92); }
+        case 14u: { return vec2<f32>(0.85, 1.12); }
+        default: { return vec2<f32>(1.0, 1.0); }
+    }
+}
+
 @vertex
 fn vs_grass_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> @builtin(position) vec4<f32> {
     let inst = instances[instance_index].pos_seed;
@@ -230,7 +322,8 @@ fn vs_grass_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_i
         case 6u: { varied = vec3<f32>(0.85, 1.15, 0.12); }
         default: { varied = vec3<f32>(0.68, 1.32, 0.09); }
     }
-    let shape = mix(legacy, varied, clamp(grass.shape_mix.x, 0.0, 1.0));
+    let shape = mix(legacy, varied, clamp(grass.shape_mix.x, 0.0, 1.0)) *
+        vec3<f32>(look_shape((instances[instance_index].packed.w >> 12u) & 15u), 1.0);
     // Flattening cached by cs_place. Without this the shadow pass rebuilt an
     // upright blade, so grass a player had walked flat kept casting a full
     // standing shadow.
@@ -263,6 +356,11 @@ fn vs_grass_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_i
     let stride = max(u32(grass.card_look.w + 0.5), 1u);
     let blade = (vertex_index / 12u) * stride;
     let blade_count = select(6.0, 12.0, grass.renderer.x > 0.5);
+    // GRS-VAR phase 3: a flower head's blade slots draw the head, not a blade; a 2-4 cm head's
+    // shadow is below a cascade texel, so it casts none rather than a phantom blade's.
+    if (blade + near_head_count((instances[instance_index].packed.w >> 12u) & 15u) >= u32(blade_count)) {
+        return vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    }
 
     let packed = vertex_index % 12u;
     let row = packed / 2u;
@@ -348,9 +446,14 @@ fn vs_grass_tuft_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(insta
     let family_width = select(select(select(0.72, 1.00, family == 1u), 1.20, family == 2u), 1.38, family == 3u);
     // Mirrors photo_card_scale() in grass.wgsl (card_look.z, 0 = stock).
     let card_scale = select(clamp(grass.card_look.z, 0.25, 2.0), 1.0, grass.card_look.z <= 0.0);
-    let height = mix(0.34, 0.78, height_seed) * grass.blade_height * 1.7 * family_height *
+    var height = mix(0.34, 0.78, height_seed) * grass.blade_height * 1.7 * family_height *
         lod_height_scale(inst_packed.z) * card_scale;
-    let half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0)) * family_width;
+    var half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0)) * family_width;
+    let plant_size = plant_card_size(layer, inst.xz);
+    if (plant_size > 0.0) {
+        height = plant_size * lod_height_scale(inst_packed.z);
+        half_width = height * 0.5;
+    }
     let crush_dir = unpack2x16snorm(inst_packed.x);
     let crush_data = unpack2x16unorm(inst_packed.y);
     let crush = crush_data.x;
@@ -377,7 +480,7 @@ fn vs_grass_tuft_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(insta
     let lateral = axis * (u - 0.5) * 2.0 * half_width;
     let world = inst.xyz + lateral + vec3<f32>(0.0, crushed_height * vh, 0.0) + lean;
     let mirror = hash11(inst.xz + 5.0) < 0.5;
-    let slice = mix(0.0, 0.18, hash11(inst.xz + 41.0)) * (bounds.y - bounds.x);
+    let slice = select(mix(0.0, 0.18, hash11(inst.xz + 41.0)), 0.0, plant_size > 0.0) * (bounds.y - bounds.x);
     var uu = clamp(mix(bounds.x + slice, bounds.y - slice, quad_u), bounds.x, bounds.y);
     if (mirror) { uu = bounds.x + bounds.y - uu; }
     var out: TuftShadowOut;
@@ -391,5 +494,100 @@ fn fs_grass_tuft_shadow(in: TuftShadowOut) {
     // Same cutoff as the colour pass, or a trimmed card would still cast the
     // untrimmed silhouette.
     if (textureSampleBias(tuft_tex, blade_samp, in.uv.xy, i32(in.uv.z), 0.75).a <
+        clamp(grass.place.w, 0.05, 0.95)) { discard; }
+}
+
+// RFG-141: the native near ring's Reforger tuft cards cast their own shadow. RFG-108 switched the
+// near ring's cascade shadow off because the PROCEDURAL blades stamped dark commas; since RFG-117
+// the near ring draws whole PlantMat tufts (vs_native_tuft in grass.wgsl), and with no shadow the
+// wheat and the meadow sat on the ground like stickers. This mirrors vs_native_tuft exactly --
+// set lookup, card count, layer pick, aspect/scale, height jitter, Zenith lean, wind bend -- and
+// cuts by the same atlas alpha, so the shadow is the card's own silhouette.
+@group(2) @binding(3) var blade_tex: texture_2d_array<f32>;
+
+fn shadow_blade_set_of(first: u32) -> u32 {
+    let bit = min(first, 31u) * 3u;
+    let word = bit / 32u;
+    let shift = bit % 32u;
+    let lo = select(select(grass.blade_skip.w, grass.blade_skip.z, word == 1u), grass.blade_skip.y, word == 0u);
+    var v = lo >> shift;
+    if (shift > 29u) {
+        let hi = select(grass.blade_skip.w, grass.blade_skip.z, word == 0u);
+        v = v | (hi << (32u - shift));
+    }
+    return v & 7u;
+}
+
+struct NativeTuftShadowOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) uv: vec3<f32>,
+};
+
+@vertex
+fn vs_grass_native_tuft_shadow(@builtin(vertex_index) vertex_index: u32,
+                               @builtin(instance_index) instance_index: u32) -> NativeTuftShadowOut {
+    var out: NativeTuftShadowOut;
+    let inst = instances[instance_index].pos_seed;
+    let inst_packed = instances[instance_index].packed;
+    // The near shadow index table: 12 unique vertices per card slot, every stride-th slot.
+    let stride = max(u32(grass.card_look.w + 0.5), 1u);
+    let card = (vertex_index / 12u) * stride;
+    let packed = vertex_index % 12u;
+    let t = f32(packed / 2u) / 5.0;
+    let left = (packed % 2u) == 0u;
+
+    let run = instance_layer_run(inst_packed.w);
+    let sets = grass.tuft_sets[0].x > 0.5;
+    let bset = select(0u, shadow_blade_set_of(run.x), sets && run.y > 0u);
+    var p0 = vec4<f32>(grass.native_tuft.y, grass.native_tuft.z, grass.native_tuft.w, grass.native_tuft2.x);
+    var p1 = vec4<f32>(grass.native_tuft2.y, grass.native_tuft2.z, 0.0, 0.0);
+    if (sets) {
+        p0 = grass.tuft_sets[bset * 2u];
+        p1 = grass.tuft_sets[bset * 2u + 1u];
+    }
+    let cards = u32(clamp(p0.x, 1.0, 6.0));
+    if (card >= cards) {
+        out.clip = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        return out;
+    }
+    let seed = inst.w;
+    let pick = hash11(inst.xz + vec2<f32>(f32(card) * 31.0 + 5.0, f32(card) * 17.0 + 13.0));
+    let layer = min(u32(pick * 8.0), 7u);
+    var aspect = clamp(grass.tuft_aspect[layer / 4u][layer % 4u], 0.1, 6.0);
+    var scale = clamp(grass.tuft_scale[layer / 4u][layer % 4u], 0.1, 4.0);
+    if (sets) {
+        aspect = clamp(grass.tuft_set_aspect[bset * 2u + layer / 4u][layer % 4u], 0.1, 6.0);
+        scale = clamp(grass.tuft_set_scale[bset * 2u + layer / 4u][layer % 4u], 0.1, 4.0);
+    }
+    let jitter = hash11(inst.xz + vec2<f32>(f32(card) * 7.0 + 1.0, 41.0)) - 0.5;
+    let height = max(p0.w, 0.01) * scale *
+        (1.0 + jitter * 2.0 * clamp(p1.x, 0.0, 1.0)) * native_lod_height_scale(inst_packed.z);
+    let widen = native_tuft_widen(length(inst.xz - shadow.cam_pos.xz));
+    let crush_dir = unpack2x16snorm(inst_packed.x);
+    let crush = unpack2x16unorm(inst_packed.y).x;
+    let depth = clamp(grass.photo_mix.w, 0.0, 0.95);
+    let crushed_height = height * (1.0 - depth * crush);
+    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (depth * crush);
+    let yaw = seed * 6.2831853 + f32(card) * (3.14159265 / f32(cards));
+    let axis = vec3<f32>(cos(yaw), 0.0, sin(yaw));
+    let facing = vec3<f32>(-sin(yaw), 0.0, cos(yaw));
+    let lean_rand = hash11(inst.xz + vec2<f32>(f32(card) * 11.0 + 3.0, 97.0));
+    let zenith = radians(clamp(p0.y + (lean_rand - 0.5) * 2.0 * p0.z, -60.0, 60.0));
+    let up = vec3<f32>(0.0, cos(zenith), 0.0) + facing * sin(zenith);
+    let wind = sample_wind_field(inst.xz, t, seed + pick);
+    // RFG-142: the calm floor and height scaling of grass.wgsl native_tuft_geometry (0.8, /0.6 m).
+    let wind_bend = vec3<f32>(wind.x, 0.0, wind.y) * max(grass.wind_strength, 0.8) * (height / 0.6) *
+        (0.035 + 0.21 * wind.z + wind.w) * (1.0 - depth * crush);
+    let u = select(1.0, 0.0, left);
+    let local = axis * ((u - 0.5) * height * aspect * widen) + up * (crushed_height * t) + (wind_bend + crush_bend) * (t * t);
+    out.clip = shadow.light_vp * vec4<f32>(inst.xyz + local - shadow.cam_pos.xyz, 1.0);
+    out.uv = vec3<f32>(u, 1.0 - t, f32(bset * 16u + layer));
+    return out;
+}
+
+@fragment
+fn fs_grass_native_tuft_shadow(in: NativeTuftShadowOut) {
+    // Same cutoff as fs_grass_native_tuft; the layer index is rounded, never truncated (RFG-138).
+    if (textureSampleLevel(blade_tex, blade_samp, in.uv.xy, i32(in.uv.z + 0.5), 1.0).a <
         clamp(grass.place.w, 0.05, 0.95)) { discard; }
 }

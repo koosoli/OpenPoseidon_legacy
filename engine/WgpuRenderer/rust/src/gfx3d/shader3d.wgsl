@@ -5,8 +5,8 @@
 // point): the plain pipeline binds `object`, the skinned pipeline binds the
 // bone `palette` (from the skin module). Shadowing is the shared cascade kernel.
 
-#import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, apply_layered_fog, apply_fog_terrain, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_FRESNEL_ENV, sky_irradiance}
-#import shadow::shadow_strength
+#import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, apply_layered_fog, apply_fog_terrain, veg_sway_offset, veg_sway_height, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_FRESNEL_ENV, sky_irradiance}
+#import shadow::{shadow_strength, csm_occlusion_point}
 #import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage}
 #import frame::{surface_rays, cloud_shadow_tex, terrain_shadow_samp, terrain_shadow_map, cloud_sun_shadow}
 #import frame::monitor_scene
@@ -23,9 +23,17 @@
 #import conform::{surface_y, surface_grad, surface_y_raster, hm_params, snow_depth, snow_deficit, rigid_ground_fragment, cave_daylight}
 
 // BEGIN_MUZZLE_FLASH_HELPERS (actual helper exercised by the GPU probe)
+// The warmed sheet encodes its heat in chroma (MuzzleFlashAppearance.hpp: blue/red =
+// 0.07 + 0.73*hot), so the hot core can be recovered here without a new material lane.
+// The core is HDR radiance well above the bloom knee (a real flash outshines the scene
+// by orders of magnitude, day or night); the cooler petals stay a modest orange.
+const MUZZLE_EDGE_GAIN: f32 = 1.5;
+const MUZZLE_CORE_GAIN: f32 = 16.0;
 fn stock_muzzle_flash_radiance(srgb: vec3<f32>, linear: f32) -> vec3<f32> {
     let bounded = clamp(srgb, vec3<f32>(0.0), vec3<f32>(1.0));
-    return select(bounded, srgb_to_linear(bounded) * 1.25, linear > 0.5);
+    let heat = clamp((bounded.b / max(bounded.r, 1e-4) - 0.07) / 0.73, 0.0, 1.0);
+    let gain = MUZZLE_EDGE_GAIN + (MUZZLE_CORE_GAIN - MUZZLE_EDGE_GAIN) * heat * heat;
+    return select(bounded, srgb_to_linear(bounded) * gain, linear > 0.5);
 }
 // END_MUZZLE_FLASH_HELPERS
 
@@ -98,6 +106,90 @@ fn uniform_cloth_color(rgb: vec3<f32>, encoded: f32, uv: vec2<f32>, footprint: v
 }
 // END_UNIFORM_CLOTH_HELPERS
 
+// BEGIN_VEHICLE_MUD_HELPERS
+// Mud caked on vehicles (engine Weather/MudCoat.hpp). The per-draw material's
+// light_ambient.w is the material ambient alpha (never negative) except on a
+// muddy vehicle, where it is -(1 + round(wheels*127) + body); light_diffuse.w is
+// then the world height of the vehicle's lowest point. Mud is laid on the lower
+// part of the model by height above that point -- wheels and sills first,
+// creeping up the body as `body` grows -- and broken up by noise in UV space,
+// so the patches and flecks stay put on the panels as the vehicle moves.
+fn vmud_hash(p: vec2<f32>) -> f32 {
+    let q = fract(p * vec2<f32>(0.1031, 0.1030));
+    let r = q + dot(q, q.yx + vec2<f32>(33.33, 33.33));
+    return fract((r.x + r.y) * r.x);
+}
+
+fn vmud_noise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (vec2<f32>(3.0, 3.0) - 2.0 * f);
+    let a = mix(vmud_hash(i), vmud_hash(i + vec2<f32>(1.0, 0.0)), u.x);
+    let b = mix(vmud_hash(i + vec2<f32>(0.0, 1.0)), vmud_hash(i + vec2<f32>(1.0, 1.0)), u.x);
+    return mix(a, b, u.y);
+}
+
+// Height of a world point above the vehicle's lowest point, measured along the
+// vehicle's own up axis (packed as in MudCoat.hpp PackMudUp), so the mud line
+// stays on the panels when the vehicle pitches or rolls.
+fn vehicle_mud_height(world_abs: vec3<f32>, packed_up: f32, plane_d: f32) -> f32 {
+    let qx = floor(packed_up / 4096.0);
+    let qz = packed_up - qx * 4096.0;
+    let ux = qx / 4095.0 * 2.0 - 1.0;
+    let uz = qz / 4095.0 * 2.0 - 1.0;
+    let up = vec3<f32>(ux, sqrt(max(0.0, 1.0 - ux * ux - uz * uz)), uz);
+    return dot(world_abs, up) - plane_d;
+}
+
+// x = mud cover 0..1, y = how fresh/wet that mud is 0..1. h: vehicle_mud_height.
+fn vehicle_mud_cover(encoded: f32, h: f32, uv: vec2<f32>, normal: vec3<f32>,
+                     footprint: vec2<f32>) -> vec2<f32> {
+    if (!(encoded <= -1.0)) { return vec2<f32>(0.0, 0.0); }
+    let t = -encoded - 1.0;
+    let whole = floor(t + 0.0001);
+    let wheels = clamp(whole / 127.0, 0.0, 1.0);
+    let body = clamp(t - whole, 0.0, 1.0);
+    // Fine detail fades where one pixel covers a lot of texture (distant or grazing).
+    let detail = 1.0 - smoothstep(0.003, 0.012, max(footprint.x, footprint.y));
+    let n1 = vmud_noise(uv * 18.0);
+    let n2 = vmud_noise(uv * 70.0 + vec2<f32>(17.3, 5.1));
+    let n = mix(n1, n1 * 0.6 + n2 * 0.4, detail);
+    let jitter = (n - 0.5) * 0.45;
+    // Wheels turn, so a tyre is caked all the way round, not only below its hub:
+    // the wheel band reaches past the top of a truck tyre (~1.1 m) at full strength,
+    // taking the frame rails and other low parts along with it.
+    let low = wheels * (1.0 - smoothstep(1.35, 1.75, h + jitter * 0.5));
+    let reach = mix(0.8, 2.3, body);
+    let high = body * (1.0 - smoothstep(reach * 0.55, reach, h + jitter));
+    // On the body, faces pointing down or sideways catch the spray; tops collect less.
+    // Not in the wheel band: a turning tyre's tread faces every way in turn.
+    let facing = 1.0 - 0.45 * clamp(normal.y, 0.0, 1.0);
+    // Below the top of the tyres the wheel coat decides (it is never lower than
+    // the body coat while mud builds up), so a wheel-deep ford visibly washes the
+    // tyres and frame while the mud higher up stays.
+    let above_wheels = smoothstep(1.25, 1.6, h + jitter * 0.5);
+    let amount = mix(low, max(low, high * facing), above_wheels);
+    // Soft, partial coverage (thin smears blend into the paint); the hard-edged
+    // patch threshold tried in step 20 read as plastic in game.
+    var cover = clamp(amount * 1.35 - (1.0 - n) * 0.55, 0.0, 1.0);
+    // Flecks flung higher than the coat itself.
+    let fleck = step(0.8, vmud_noise(uv * 140.0 + vec2<f32>(3.7, 9.2))) * detail
+              * (1.0 - smoothstep(reach, reach * 1.6, h))
+              * mix(wheels * 0.5, max(body, wheels * 0.5), above_wheels);
+    cover = max(cover, fleck * 0.85);
+    // Low down it stays wet and dark; higher splashes dry lighter.
+    let wet = clamp(1.0 - h / max(reach, 0.5), 0.0, 1.0);
+    return vec2<f32>(cover, wet);
+}
+
+fn vehicle_mud_albedo(uv: vec2<f32>, wet: f32) -> vec3<f32> {
+    let v = vmud_noise(uv * 31.0 + vec2<f32>(1.3, 7.1));
+    let wet_mud = vec3<f32>(0.17, 0.12, 0.08);
+    let dry_mud = vec3<f32>(0.40, 0.33, 0.24);
+    return mix(dry_mud, wet_mud, clamp(wet * 0.8 + v * 0.3, 0.0, 1.0)) * (0.85 + 0.3 * v);
+}
+// END_VEHICLE_MUD_HELPERS
+
 struct Object {
     world: mat4x4<f32>,
     // Terrain-conform plane, published per instance by the CPU (ForestPlain).
@@ -143,6 +235,9 @@ const MATFLAG_NIGHT_EMITTER: u32 = 4u;
 // otherwise vanish from the pilot seat. 0.18 is the retail tint's own average (46/255).
 const MATFLAG_GLASS: u32 = 8u;
 const GLASS_MIN_ALPHA: f32 = 0.18;
+// RFG-164: the Fresnel curve of Reforger's window_glass.emat (FresnelBias, FresnelPower).
+const GLASS_FRESNEL_BIAS: f32 = 0.05;
+const GLASS_FRESNEL_POWER: f32 = 1.333;
 // MAT-052 second half (WGR_DRAW3D_COCKPIT): a first-person cockpit draw. shade() takes the
 // FLAT scene ambient for these instead of the sky-dome irradiance -- an interior plate lit
 // by the full outdoor sky washes to near-sky brightness and reads as a TRANSPARENT cockpit
@@ -152,6 +247,8 @@ const MATFLAG_COCKPIT: u32 = 16u;
 const MATFLAG_NORMAL_RG: u32 = 128u;
 const MATFLAG_SNOW_RECEIVER: u32 = 2048u;
 const MATFLAG_GROUND_RECEIVER: u32 = 4096u;
+// RFG-129: WGR_DRAW3D_BLEND_SECTION -- a back-to-front section not on a surface; see mod.rs.
+const MATFLAG_BLEND_SECTION: u32 = 8192u;
 const MATFLAG_BOOT_RELIEF: u32 = 16384u;
 const MATFLAG_EARTH_SURFACE: u32 = 32768u;
 
@@ -401,6 +498,10 @@ override is_shadow: f32 = 0.0;   // 1 = output black + shadow-strength alpha
 // MSAA; the prepass twin (fs_prepass_a2c) emits the same coverage so the masks match.
 override a2c: f32 = 0.0;
 override foliage_screen_ao: f32 = 0.0; // REN-OBJ-001, as in gpu_driven.wgsl
+// PERF-FAR-CROWN (as in gpu_driven.wgsl): leaf-card shadow filter distances, m; budget 0 = off.
+override far_crown_shadow_budget: f32 = 40.0;
+override far_crown_shadow_tent: f32 = 120.0;
+override blend_section_screen_ao: f32 = 0.0; // RFG-129
 override count_fragments: f32 = 0.0;   // REN-OBJ-003, as in gpu_driven.wgsl (colour pass only here)
 // 1 = an alpha-blended (glass) pipeline: the shared shading damps its diffuse sky-irradiance
 // ambient so transparent cockpit canopies don't wash out to the sky (and crash auto-exposure).
@@ -629,7 +730,7 @@ fn vs_main(
         // value would make every plant swim as the camera walks.
         let phase_xz = world[3].xz + frame.cam_pos.xz;
         let leaf = select(select(0.0, 1.0, alpha_ref > 0.0), -1.0, foliage_kind > 2.5);
-        let sway = veg_sway_offset(pos.y, phase_xz, leaf);
+        let sway = veg_sway_offset(veg_sway_height(pos.y, foliage_kind < 1.5), phase_xz, leaf);
         world_pos = vec4<f32>(world_pos.xyz + sway, world_pos.w);
     }
     // REGRESSION GUARD (CWA stock-tree canopies): legacy leaf cards have arbitrary authored
@@ -1175,6 +1276,11 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // Uniform derivatives before cutout discard. RGB only: depth, alpha,
     // shadow coverage and the prepass retain their authored values.
     base = vec4<f32>(uniform_cloth_color(base.rgb, material.local_specular.w, in.uv, uniform_uv_footprint), base.a);
+    // Mud caked on vehicles (MudCoat.hpp): replaces the paint where it covers it.
+    let vehicle_mud = vehicle_mud_cover(material.light_ambient.w,
+        vehicle_mud_height(in.world_pos + frame.cam_pos.xyz, material.sun_diffuse.w, material.light_diffuse.w),
+        in.uv, in.normal, uniform_uv_footprint);
+    base = vec4<f32>(mix(base.rgb, vehicle_mud_albedo(in.uv, vehicle_mud.y), vehicle_mud.x), base.a);
     if ((material_flags(material) & 32u) != 0u && linear > 0.5) {
         let dims = vec2<f32>(textureDimensions(monitor_scene));
         let screen_uv = in.clip.xy / dims;
@@ -1273,6 +1379,8 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     m.wet_cloth = uniform_cloth_wetness(material.local_specular.w, in.uv, uniform_uv_footprint);
     m.native_cavity = 1.0;
     m.native_ao = 1.0;
+    m.foliage_trans = 1.0;
+    m.leaf_transmission = 0.0;
 #ifdef NATIVE_LEAF_CAVITY
     if ((material_flags(material) & 1024u) != 0u && material.normal_map.z > 0.5) {
         m.native_cavity = clamp(normal_sample.a, 0.0, 1.0);
@@ -1298,6 +1406,8 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // The per-draw path carries no specular map: this is the ~7 sections a frame that reach
     // DrawSectionTL, not the retained set. 1.0 leaves the flat constant exactly as before.
     m.spec_mask = 1.0;
+    // Caked mud is matte where it has dried and only dully glossy where wet.
+    m.spec_mask = 1.0 - vehicle_mud.x * (0.9 - 0.4 * vehicle_mud.y);
     // The direct path has no retained SMDI binding. Show the constant specular lane and its
     // normalized power, with blue = 0 to make the absence of a texel map explicit.
     let specular_debug = vec3<f32>(
@@ -1347,7 +1457,10 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // world-space sample of the same normal map; see water_ripple_normal. Kept in step with
     // gpu_driven.wgsl's copy on purpose: DayZ water reaches the retained path in practice, but
     // the two paths must not disagree about what a water surface looks like.
+    // RFG-164: a reflective GLASS pane (native Enfusion window glass) is a flat mirror, not water:
+    // it takes no ripple.
     if ((material_flags(material) & MATFLAG_REFLECTIVE) != 0u && frame.wateranim.y > 0.0
+        && (material_flags(material) & MATFLAG_GLASS) == 0u
         && !matdbg_flag(MATDBG_DISABLE_FRESNEL_ENV)) {
         let t = frame.wateranim.x;
         shading_normal = water_ripple_normal(
@@ -1416,23 +1529,27 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         veg_cutout, translucent > 0.5 && (material_flags(material) & MATFLAG_GLASS) != 0u, veg_cutout,
         material.sun_ambient.w > 0.5,
         (material_flags(material) & MATFLAG_COCKPIT) != 0u, in.clip.xy,
-        !(veg_cutout && foliage_screen_ao < 0.5),
+        !(veg_cutout && foliage_screen_ao < 0.5) &&
+            !(translucent > 0.5 && (material_flags(material) & MATFLAG_BLEND_SECTION) != 0u &&
+              blend_section_screen_ao < 0.5),
         direct_snow_receiver(in), 0.0,
         direct_tree_snow_cover(in),
         ground_surface,
         select(0.0, snow_depth(in.world_pos.xz + frame.cam_pos.xz), ground_surface),
+        vec2<f32>(far_crown_shadow_budget, far_crown_shadow_tent),
     );
     if (material.local_specular.w == -1.0) {
         // Only exact authored animated stock muzzle sections receive this value.
         // Evaluate shade uniformly first: its texture derivatives stay valid.
         // The flame itself is radiance, not diffuse geometry receiving sun/SH.
         rgb = stock_muzzle_flash_radiance(base.rgb, linear);
+        // The flash draws ADDITIVELY (EngineWgpu): the air between it and the camera
+        // is already in the destination, so fog may only attenuate the emission.
+        // fog(rgb) - fog(0) is exactly rgb * transmittance for either fog model.
         if (frame.params.fog_enabled >= 1.5) {
-            rgb = apply_fog(rgb, in.world_pos);
+            rgb = max(apply_fog(rgb, in.world_pos) - apply_fog(vec3<f32>(0.0), in.world_pos), vec3<f32>(0.0));
         } else {
-            var fog_rgb = frame.fog_color.rgb;
-            if (linear > 0.5) { fog_rgb = srgb_to_linear(fog_rgb); }
-            rgb = mix(fog_rgb, rgb, in.fog);
+            rgb = rgb * in.fog;
         }
     }
     // REN-ATM-001: the per-draw twin of gpu_driven.wgsl's atmosphere census -- same words, same
@@ -1458,13 +1575,52 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // the per-draw path's own per-instance debug lane is a legacy of the material-debug
     // slice and would give the panel two switches for one checkbox.
     var out_rgb = rgb;
+    var out_a2 = out_a;
     if ((material_flags(material) & MATFLAG_REFLECTIVE) != 0u && linear > 0.5
         && !matdbg_flag(MATDBG_DISABLE_FRESNEL_ENV)) {
-        out_rgb = env_reflection(out_rgb, shading_normal, in.world_pos, in.fog);
+        if (translucent > 0.5) {
+            // RFG-137: a translucent reflective surface (a river over its bed). The reflection
+            // sits ON TOP of the film, so it is not scaled by the film's alpha:
+            //   out = env*F + (1-F) * (a*shaded + (1-a)*bed)
+            // which standard alpha blending gives with A = 1-(1-F)(1-a) and src = (env*F +
+            // (1-F)*a*shaded) / A. Scaling a mix() by the film alpha instead capped every
+            // reflection at a -- a grazing river would never mirror the sky.
+            let view_dir = normalize(-in.world_pos);
+            let n = select(-shading_normal, shading_normal, dot(shading_normal, view_dir) >= 0.0);
+            let daylight = cave_daylight(in.world_pos + frame.cam_pos.xyz);
+            // RFG-164: glass (MATFLAG_GLASS on a reflective draw) reflects by the curve Reforger's
+            // window_glass.emat authors -- FresnelBias 0.05, FresnelPower 1.333 -- read as
+            // bias + (1 - bias) * (1 - cos)^power. Far stronger off-axis than water's Schlick:
+            // 0.24 at 45 degrees, which is why Reforger's panes read as sky mirrors.
+            let cos_vn = clamp(dot(n, view_dir), 0.0, 1.0);
+            var fres = env_fresnel(cos_vn);
+            if ((material_flags(material) & MATFLAG_GLASS) != 0u) {
+                fres = GLASS_FRESNEL_BIAS + (1.0 - GLASS_FRESNEL_BIAS) * pow(1.0 - cos_vn, GLASS_FRESNEL_POWER);
+            }
+            let f = fres * clamp(in.fog, 0.0, 1.0) * daylight;
+            let refl_dir = reflect(-view_dir, n);
+            var env = sky_env_sample(refl_dir);
+            if ((material_flags(material) & MATFLAG_GLASS) != 0u) {
+                // RFG-168: a window mirrors the street, not open sky: near the horizon its
+                // reflection meets houses, trees and ground, which the sky map does not hold.
+                // The first build mirrored a clean horizon gradient in every pane (bright blue
+                // windows; Reforger's read dark with a soft sheen).
+                env = env * mix(0.25, 1.0, smoothstep(0.05, 0.6, refl_dir.y));
+                // RFG-208: and desaturated by half, as Reforger's environment probes author it
+                // (ProbeHouse_Base: ReflectionDesaturation 0.5). The sky map alone tinted every
+                // pane blue; Reforger's read neutral grey (houseNear).
+                env = mix(env, vec3<f32>(dot(env, vec3<f32>(0.2126, 0.7152, 0.0722))), 0.5);
+            }
+            let a = clamp(out_a, 0.0, 1.0);
+            let a_out = 1.0 - (1.0 - f) * (1.0 - a);
+            out_rgb = (env * f + (1.0 - f) * a * out_rgb) / max(a_out, 1e-4);
+            out_a2 = a_out;
+        } else {
+            out_rgb = env_reflection(out_rgb, shading_normal, in.world_pos, in.fog);
+        }
     }
     // MAT-051: a glass pane keeps a minimum presence head-on. Applied AFTER the
     // reflection so the floor composites the reflected colour, not the bare albedo.
-    var out_a2 = out_a;
     if ((material_flags(material) & MATFLAG_GLASS) != 0u) {
         out_a2 = max(out_a2, GLASS_MIN_ALPHA);
     }
@@ -1512,7 +1668,13 @@ fn surface_scattering(pos: vec3<f32>) -> vec3<f32> {
             cloud = mix(visibility, 1.0, smoothstep(0.85, 1.0, edge));
         }
         let terrain = terrain_sun_shadow(world.xz, world.y);
+        // The god rays' own lookup (shadow.wgsl csm_occlusion_point); WGR_SURFACE_RAYS_FILTER=1
+        // restores the receiver filter here for an A/B.
+#ifdef SURFACE_RAYS_RECEIVER_FILTER
         let object = shadow_strength(rel, sun, 1.0, vec3<f32>(0.0), vec3<f32>(0.0));
+#else
+        let object = csm_occlusion_point(rel);
+#endif
         scatter = scatter + transmit * cloud * (1.0 - max(terrain, object)) * (1.0 - segment);
         transmit = transmit * segment;
         previous = next;

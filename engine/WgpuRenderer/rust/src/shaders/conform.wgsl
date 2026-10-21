@@ -141,7 +141,8 @@ fn mud_height_offset(world_xz: vec2<f32>) -> f32 {
     let offset = mix(mix(snow.deficits[i], snow.deficits[i + 1u], f.x),
                      mix(snow.deficits[i + 512u], snow.deficits[i + 513u], f.x), f.y);
     let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
-    return clamp(offset, -limit, 0.0) * smoothstep(0.0, 24.0, edge);
+    // Negative: ruts/footprints. Positive: soil heaped beside ruts (MudField::MaxRim).
+    return clamp(offset, -limit, 0.1) * smoothstep(0.0, 24.0, edge);
 }
 
 // Third signed view: sand compaction and positive loose-grain rims.
@@ -213,6 +214,43 @@ fn mud_height_gradient(world_xz: vec2<f32>, footprint: f32) -> vec2<f32> {
         mud_height_offset(world_xz + vec2<f32>(0.0, h)) - mud_height_offset(world_xz - vec2<f32>(0.0, h))) / (2.0 * h);
 }
 
+// BOOM-001: explosion craters (CraterField). Two views in the shared storage buffer after the
+// mud/sand views: near 0.25 m cells over 128 m, far 1 m cells over 512 m; each a header
+// [originX, originZ, cell, limit] + 512*512 signed heights, then a material view of the same
+// shape (soil + 256 * scorch, 0..255 each). Same cell-centre bilinear rule as CraterField::
+// HeightOffsetAt, so the drawn crater is the one men and vehicles stand in. Returns
+// (height, coverage): coverage fades over the window's last 24 cells.
+const CRATER_NEAR: u32 = 1048592u; // deficits[] starts after the vec4 header: (4 views + rut-water vec4) - 4
+const CRATER_FAR: u32 = 1572888u;
+const CRATER_VIEW: u32 = 262148u;
+const CRATER_END: u32 = 2097184u;
+fn crater_view(base: u32, cell: f32, world_xz: vec2<f32>) -> vec2<f32> {
+    let limit = snow.deficits[base + 3u];
+    if (limit <= 0.0 || snow.deficits[base + 2u] != cell) { return vec2<f32>(0.0); }
+    let origin = vec2<f32>(snow.deficits[base], snow.deficits[base + 1u]);
+    let t = (world_xz - origin) / cell - vec2<f32>(0.5);
+    if (any(t < vec2<f32>(0.0)) || any(t >= vec2<f32>(511.0))) { return vec2<f32>(0.0); }
+    let b = vec2<u32>(floor(t));
+    let f = fract(t);
+    let i = base + 4u + b.y * 512u + b.x;
+    let h = mix(mix(snow.deficits[i], snow.deficits[i + 1u], f.x),
+                mix(snow.deficits[i + 512u], snow.deficits[i + 513u], f.x), f.y);
+    let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
+    return vec2<f32>(clamp(h, -limit, 1.5), smoothstep(0.0, 24.0, edge));
+}
+// One load: the 512 m far view holds every crater the near view can (it contains it), so an
+// empty far view means nothing to look up. sample_height runs many times per terrain pixel
+// (snow cover, normals); without this gate a crater-free snowy map paid ~3 ms of buffer reads.
+fn crater_active() -> bool {
+    return arrayLength(&snow.deficits) >= CRATER_END && snow.deficits[CRATER_FAR + 3u] > 0.0;
+}
+fn crater_height_offset(world_xz: vec2<f32>) -> f32 {
+    if (!crater_active()) { return 0.0; }
+    let near = crater_view(CRATER_NEAR, 0.25, world_xz);
+    if (near.y >= 1.0) { return near.x; }
+    let far = crater_view(CRATER_FAR, 1.0, world_xz);
+    return mix(far.x * far.y, near.x, near.y);
+}
 fn hm_load(ix: i32, iz: i32) -> f32 {
     let cx = clamp(ix, 0, i32(hm_params.hm_width) - 1);
     let cz = clamp(iz, 0, i32(hm_params.hm_height) - 1);
@@ -267,7 +305,7 @@ fn rigid_ground_fragment(world_abs: vec3<f32>, authored_normal: vec3<f32>,
 
 fn surface_y(world_xz: vec2<f32>) -> f32 {
     if (hm_params.enabled < 0.5) { return 0.0; }
-    return bare_surface_y(world_xz) + mud_height_offset(world_xz) + sand_height_offset(world_xz);
+    return bare_surface_y(world_xz) + mud_height_offset(world_xz) + sand_height_offset(world_xz) + crater_height_offset(world_xz);
 }
 
 // ---------------------------------------------------------------------------
@@ -326,9 +364,9 @@ fn lattice_y(world_xz: vec2<f32>, step_texels: f32) -> f32 {
     let y10 = hm_load(ix, iz + n);
     let y11 = hm_load(ix + n, iz + n);
     if (f.x <= 1.0 - f.y) {
-        return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x + mud_height_offset(world_xz) + sand_height_offset(world_xz);
+        return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x + mud_height_offset(world_xz) + sand_height_offset(world_xz) + crater_height_offset(world_xz);
     }
-    return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y + mud_height_offset(world_xz) + sand_height_offset(world_xz);
+    return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y + mud_height_offset(world_xz) + sand_height_offset(world_xz) + crater_height_offset(world_xz);
 }
 
 // Absolute terrain height at world xz ON THE DRAWN SURFACE. `cam_pos` is the ABSOLUTE camera

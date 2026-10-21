@@ -4,6 +4,7 @@
 #include <Poseidon/AI/Path/AIDefs.hpp>
 
 #include <Poseidon/AI/AIRadio.hpp>
+#include <Poseidon/Audio/GameVoiceMute.hpp>
 #include <Poseidon/AI/UnitNumberList.hpp>
 
 #include <Poseidon/World/World.hpp>
@@ -1484,6 +1485,8 @@ void RadioChannel::Say(RString waveName, AIUnit* sender, RString senderName, RSt
         if (wave)
         {
             wave->SetKind(WaveSpeech);
+            if (GameVoicesMuted())
+                wave->SetVolume(0.0f); // silent but timed, see GameVoiceMute.hpp
         }
         if (!_saying)
         {

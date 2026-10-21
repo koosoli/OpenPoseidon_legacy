@@ -157,31 +157,15 @@ class Vector3P
 
     Coord SquareSize() const { return X() * X() + Y() * Y() + Z() * Z(); }
     __forceinline Coord SquareSizeInline() const { return X() * X() + Y() * Y() + Z() * Z(); }
-    Coord Size() const
-    {
-        // optimization: |v|=|v|*|v|/|v|
-        float size2 = SquareSizeInline();
-        if (size2 == 0)
-        {
-            return 0;
-        }
-        Coord invSize = InvSqrt(size2);
-        return size2 * invSize;
-    }
+    // A plain sqrt (PERF 2026-10-14): the 2001 form computed |v| as |v|^2 * InvSqrt(|v|^2) because
+    // sqrt was slow then; today sqrtss is one instruction, exact, and right for 0 and for an
+    // overflowed (infinite) square, which the product form turned into NaN.
+    Coord Size() const { return std::sqrt(SquareSizeInline()); }
     Coord InvSize() const { return InvSqrt(SquareSize()); }
     Coord InvSquareSize() const { return Inv(SquareSize()); }
 
     Coord SquareSizeXZ() const { return X() * X() + Z() * Z(); }
-    Coord SizeXZ() const
-    {
-        float size2 = SquareSizeXZ();
-        if (size2 == 0)
-        {
-            return 0;
-        }
-        Coord invSize = InvSqrt(size2);
-        return size2 * invSize;
-    }
+    Coord SizeXZ() const { return std::sqrt(SquareSizeXZ()); }
     Coord InvSizeXZ() const { return InvSqrt(SquareSizeXZ()); }
     Coord InvSquareSizeXZ() const { return Inv(SquareSizeXZ()); }
 

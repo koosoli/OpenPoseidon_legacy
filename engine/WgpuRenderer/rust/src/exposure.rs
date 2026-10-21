@@ -8,8 +8,9 @@ use wgpu::util::DeviceExt;
 
 use crate::ffi::WgrExposure;
 
-// Rg16Float: R = weighted log-luminance, G = metering weight (see exposure.wgsl).
-const LUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg16Float;
+// Rgba16Float: R = weighted log-luminance, G = metering weight, B/A = the ground's weighted
+// 4th-power display brightness and its weight (the highlight cap; see exposure.wgsl).
+const LUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const SCALE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
 
 #[test]
@@ -42,6 +43,9 @@ pub struct Exposure {
     mip_views: Vec<wgpu::TextureView>,
     reduce_binds: Vec<wgpu::BindGroup>,
     adapt_bind: Option<wgpu::BindGroup>,
+    // BOOM-006: clipped / sampled pixel counts the tonemap adds up (CLIP_SLOTS of each); the
+    // next adapt reads them, then they are cleared
+    clip_buf: wgpu::Buffer,
     mip_count: usize,
     probe_source: Option<wgpu::TextureView>,
 }
@@ -85,6 +89,16 @@ impl Exposure {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         // Adapt: 1x1 avg-luminance + 1x1 previous scale (both textureLoad, unfilterable
@@ -108,6 +122,17 @@ impl Exposure {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // BOOM-006: last frame's clip counts from the tonemap
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -228,6 +253,13 @@ impl Exposure {
             },
         );
 
+        let clip_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_exposure_clip_counts"),
+            size: (2 * CLIP_SLOTS * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         Self {
             lum_first,
             lum_down,
@@ -243,6 +275,7 @@ impl Exposure {
             mip_views: Vec::new(),
             reduce_binds: Vec::new(),
             adapt_bind: None,
+            clip_buf,
             mip_count: 0,
             probe_source: None,
         }
@@ -312,6 +345,12 @@ impl Exposure {
                             binding: 2,
                             resource: self.params_buf.as_entire_binding(),
                         },
+                        // last frame's exposure scale: the first step meters what the pixel
+                        // will look like, not its raw radiance (exposure.wgsl fs_lum_first)
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::TextureView(&self.current_view),
+                        },
                     ],
                 })
             })
@@ -332,6 +371,10 @@ impl Exposure {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: self.params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: self.clip_buf.as_entire_binding(),
                 },
             ],
         });
@@ -372,6 +415,10 @@ impl Exposure {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: self.params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&self.current_view),
                 },
             ],
         });
@@ -510,7 +557,17 @@ impl Exposure {
                 depth_or_array_layers: 1,
             },
         );
+        // the tonemap counts this frame's clipped pixels afresh
+        encoder.clear_buffer(&self.clip_buf, 0, None);
         encoder.pop_debug_group();
         true
     }
+
+    /// BOOM-006: the clip counters the tonemap writes (exposure.wgsl CLIP_SLOTS x 2 u32).
+    pub fn clip_buffer(&self) -> &wgpu::Buffer {
+        &self.clip_buf
+    }
 }
+
+/// BOOM-006: counter slots (spread so the tonemap's atomics do not all hit one address).
+pub const CLIP_SLOTS: usize = 64;

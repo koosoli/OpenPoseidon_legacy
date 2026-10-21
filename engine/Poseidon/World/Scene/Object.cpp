@@ -1,3 +1,4 @@
+#include <vector>
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/World/Scene/Object.hpp>
@@ -59,6 +60,7 @@ namespace Poseidon
 namespace
 {
 float g_renderInterpAlpha = 1.0f;
+float g_renderInterpStepSeconds = 0.0f;
 constexpr float kRenderInterpMaxJump = 40.0f;
 bool RenderInterpEnabledFromEnv()
 {
@@ -81,6 +83,17 @@ void Object::SetRenderInterpAlpha(float alpha)
 float Object::RenderInterpAlpha()
 {
     return g_renderInterpAlpha;
+}
+
+void Object::SetRenderInterpStep(float stepSeconds)
+{
+    g_renderInterpStepSeconds = std::isfinite(stepSeconds) && stepSeconds > 0.0f ? stepSeconds : 0.0f;
+}
+
+double Object::RenderTimeMs()
+{
+    const double behind = RenderInterpEnabled() ? (1.0 - double(g_renderInterpAlpha)) * g_renderInterpStepSeconds : 0.0;
+    return double(Glob.time.toInt()) - behind * 1000.0;
 }
 
 Matrix4 Object::RenderTransform() const
@@ -1574,8 +1587,55 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
     Deanimate(forceLOD);
 }
 
+namespace
+{
+struct DeferredOverlay
+{
+    bool pillarbox = false;
+    LODShape* shape = nullptr;
+    int lod = 0;
+    PackedColor color;
+    bool preserveAspect4x3 = false;
+    bool requireGameplayActive = true;
+    bool force = false;
+};
+bool GDeferOverlays = false;
+std::vector<DeferredOverlay> GDeferredOverlays;
+} // namespace
+
+void Object::BeginDeferredOverlays()
+{
+    GDeferredOverlays.clear();
+    GDeferOverlays = true;
+}
+
+void Object::FlushDeferredOverlays()
+{
+    GDeferOverlays = false;
+    std::vector<DeferredOverlay> pending;
+    pending.swap(GDeferredOverlays);
+    for (const DeferredOverlay& o : pending)
+    {
+        if (o.pillarbox)
+            DrawWidescreenPillarbox(o.requireGameplayActive, o.force);
+        else
+            Draw2D(o.shape, o.lod, o.color, o.preserveAspect4x3);
+    }
+}
+
 void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserveAspect4x3)
 {
+    if (GDeferOverlays)
+    {
+        // Same frame, same shape state (hidden muzzle-flash faces etc.); see FlushDeferredOverlays.
+        DeferredOverlay o;
+        o.shape = lShape;
+        o.lod = lod;
+        o.color = cColor;
+        o.preserveAspect4x3 = preserveAspect4x3;
+        GDeferredOverlays.push_back(o);
+        return;
+    }
     LightSun* sun = GScene->MainLight();
     TLMaterial mat;
     mat.ambient = HWhite;
@@ -1626,6 +1686,63 @@ void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserve
     // the scope image: fit that to the screen height, keep it square, black out the
     // sides. OFP optics are all quads and keep the fit above.
     bool frameOptic = false;
+    // An Arma 1 optic (\ca\weapons\optika_sniperw, _snpiere, _acog) builds the same frame from four
+    // trapezoid QUADS running from a large outer rectangle in to the scope image. Fitting the
+    // outer rectangle left the M24's scope a small box in the middle, and the trapezoids came out
+    // as stray black slabs (drawn as axis-aligned rectangles). A quad that is not an axis-aligned
+    // rectangle is frame: the remaining quads are the scope image, fitted as above.
+    const auto isFrameQuad = [shape](const Poly& face)
+    {
+        if (face.N() != 4)
+            return false;
+        float xs[2], ys[2];
+        int nx = 0, ny = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            Vector3Val vv = shape->Pos(face.GetVertex(i));
+            const auto distinct = [](float* vals, int& n, float v)
+            {
+                for (int k = 0; k < n; k++)
+                    if (fabs(vals[k] - v) < 1e-4f)
+                        return true;
+                if (n == 2)
+                    return false;
+                vals[n++] = v;
+                return true;
+            };
+            if (!distinct(xs, nx, vv.X()) || !distinct(ys, ny, vv.Y()))
+                return true; // a third x or y: not a rectangle
+        }
+        return false;
+    };
+    {
+        float ixMin = +1e10, ixMax = -1e10, iyMin = +1e10, iyMax = -1e10;
+        bool anyFrameQuad = false;
+        for (Offset o = shape->BeginFaces(); o < shape->EndFaces(); shape->NextFace(o))
+        {
+            const Poly& face = shape->Face(o);
+            if (face.N() != 4)
+                continue;
+            if (isFrameQuad(face))
+            {
+                anyFrameQuad = true;
+                continue;
+            }
+            for (int i = 0; i < 4; i++)
+            {
+                Vector3Val vv = shape->Pos(face.GetVertex(i));
+                saturateMin(ixMin, vv.X()), saturateMax(ixMax, vv.X());
+                saturateMin(iyMin, vv.Y()), saturateMax(iyMax, vv.Y());
+            }
+        }
+        if (anyFrameQuad && ixMax > ixMin && iyMax > iyMin)
+        {
+            frameOptic = true;
+            xMin = ixMin, xMax = ixMax, yMin = iyMin, yMax = iyMax;
+            preserveAspect4x3 = true;
+        }
+    }
+    if (!frameOptic)
     {
         float outer = 0;
         for (Offset o = shape->BeginFaces(); o < shape->EndFaces(); shape->NextFace(o))
@@ -1692,10 +1809,32 @@ void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserve
         {
             continue;
         }
+        // A framed optic draws its other faces as polygons: the frame (black triangles or trapezoid
+        // quads) and, in Arma 1's PSO (\ca\weapons\optika_snpiere), the whole reticle -- chevrons,
+        // rangefinder and scale are untextured triangles, and skipping every non-quad left the SVD
+        // with no reticle at all. Untextured faces are black, as Arma draws them.
+        if (frameOptic && (face.N() != 4 || isFrameQuad(face)))
+        {
+            Vertex2DAbs verts[8];
+            const int n = std::min(face.N(), 8);
+            Texture* polyTexture = face.GetTexture();
+            for (int i = 0; i < n; i++)
+            {
+                const int vi = face.GetVertex(i);
+                Vector3Val pos = shape->Pos(vi);
+                verts[i].x = (pos.X() - xAvg) * coef * effW + w * 0.5f;
+                verts[i].y = (yAvg - pos.Y()) * coef * (4.0f / 3) * h + h * 0.5f;
+                verts[i].u = polyTexture ? polyTexture->UToLogical(shape->U(vi)) : 0.0f;
+                verts[i].v = polyTexture ? polyTexture->VToLogical(shape->V(vi)) : 0.0f;
+                verts[i].color = polyTexture ? color : PackedBlack;
+            }
+            GEngine->DrawPoly(GEngine->TextBank()->UseMipmap(polyTexture, 0, 0), verts, n, Rect2DClipAbs,
+                              NoZBuf | IsAlpha | IsAlphaFog);
+            continue;
+        }
         if (face.N() != 4)
         {
-            if (!frameOptic) // the frame's triangles: the side bars below stand in for them
-                Fail("Non square in 2D object");
+            Fail("Non square in 2D object");
             continue; // draw only rectangular faces
         }
         int faceVertices[4];
@@ -1772,6 +1911,15 @@ void Object::DrawWidescreenPillarbox(bool requireGameplayActive)
 
 void Object::DrawWidescreenPillarbox(bool requireGameplayActive, bool force)
 {
+    if (GDeferOverlays)
+    {
+        DeferredOverlay o;
+        o.pillarbox = true;
+        o.requireGameplayActive = requireGameplayActive;
+        o.force = force;
+        GDeferredOverlays.push_back(o);
+        return;
+    }
     if (!force && !AspectRatio::ArePillarboxBarsEnabled())
         return;
     // The pillarbox treatment exists for 4:3-designed dark-around
@@ -2147,7 +2295,15 @@ Vector3 Object::AimingPosition() const
     LODShape* lShape = GetShape();
     if (!lShape)
     {
-        LOG_ERROR(Graphics, "No shape object {} tested for aiming position", (const char*)GetDebugName());
+        // Once: the shape-less free-fly camera asks this through CameraPosition every frame, and
+        // a log line per frame was ~0.4% of the main thread on the firefight bench.
+        static bool reported = false;
+        if (!reported)
+        {
+            reported = true;
+            LOG_ERROR(Graphics, "No shape object {} tested for aiming position (reported once)",
+                      (const char*)GetDebugName());
+        }
         return Position();
     }
     return PositionModelToWorld(GetShape()->AimingCenter());

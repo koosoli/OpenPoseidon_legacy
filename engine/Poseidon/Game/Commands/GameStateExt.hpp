@@ -16,6 +16,7 @@ const GameType GameOrient(0x800);
 const GameType GameSide(0x1000);
 const GameType GameGroup(0x2000);
 const GameType GameFile(0x4000);
+const GameType GameDatabase(0x8000);
 
 typedef TargetSide GameSideType;
 
@@ -43,6 +44,21 @@ public:
 	void SetIndex(int index);
 };
 
+class GameDatabaseType
+{
+private:
+    int _index;
+
+public:
+    GameDatabaseType() {_index = -1;}
+    GameDatabaseType(const GameDatabaseType &src);
+    ~GameDatabaseType();
+
+    void operator=(const GameDatabaseType &src);
+
+    int GetIndex() const { return _index; }
+    void SetIndex(int index);
+};
 
 class GameDataObject: public GameData
 {
@@ -63,7 +79,7 @@ class GameDataObject: public GameData
 	const char *GetTypeName() const override {return "object";}
 	GameData *Clone() const override;
 
-	LSError Serialize(ParamArchive &ar) override;	
+	LSError Serialize(ParamArchive &ar) override;
 
 	USE_FAST_ALLOCATOR
 };
@@ -87,11 +103,10 @@ class GameDataGroup: public GameData
 	const char *GetTypeName() const override {return "group";}
 	GameData *Clone() const override;
 
-	LSError Serialize(ParamArchive &ar) override;	
+	LSError Serialize(ParamArchive &ar) override;
 
 	USE_FAST_ALLOCATOR
 };
-
 
 class GameDataSide: public GameData
 {
@@ -141,6 +156,31 @@ class GameDataFile: public GameData
 	USE_FAST_ALLOCATOR
 };
 
+class GameDataDatabase : public GameData
+{
+    typedef GameData base;
+
+    GameDatabaseType _value;
+
+public:
+    GameDataDatabase(){}
+    GameDataDatabase( GameDatabaseType value ):_value(value){}
+    ~GameDataDatabase() override{}
+
+    GameType GetType() const override {return GameDatabase;}
+    GameDatabaseType GetDatabase() const {return _value;}
+
+    RString GetText() const override;
+    bool IsEqualTo(const GameData *data) const override;
+    const char *GetTypeName() const override {return "database";}
+    GameData* Clone() const override {return new GameDataDatabase(*this);}
+
+    LSError Serialize(ParamArchive &ar) override;
+
+    USE_FAST_ALLOCATOR
+};
+
+GameData* CreateGameDataDatabase();
 
 inline TargetSide GetSide( GameValuePar oper )
 {
@@ -163,6 +203,7 @@ class GameValueExt: public GameValue
 	GameValueExt( GameTransType value );
 	GameValueExt( GameOrientType value );
 	GameValueExt( GameFileType value ) {_data=new GameDataFile(value);}
+	GameValueExt( GameDatabaseType value ) {_data=new GameDataDatabase(value);}
 };
 
 inline GameValue CreateGameSide( TargetSide side ) {return GameValueExt(side);}
