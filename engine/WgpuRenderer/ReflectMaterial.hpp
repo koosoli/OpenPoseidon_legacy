@@ -105,10 +105,12 @@ inline Params Preset(SurfaceClass cls)
     case SurfaceClass::None: break;
     case SurfaceClass::Matt: p.roughness = 0.85f; p.f0 = 0.04f; break;
     case SurfaceClass::PaintMatt: p.roughness = 0.6f; p.f0 = 0.04f; break;
+    // Stock paint is weathered: a full-strength coat read as a fresh mirror finish on every
+    // 30-year-old Skoda (first test, 2026-10-22). Own addons declare 1.0 where they mean it.
     case SurfaceClass::PaintGloss:
-        p.roughness = 0.45f; p.f0 = 0.04f; p.clearCoat = 1.0f; p.coatRoughness = 0.06f; break;
+        p.roughness = 0.45f; p.f0 = 0.04f; p.clearCoat = 0.6f; p.coatRoughness = 0.08f; break;
     case SurfaceClass::PaintMetallic:
-        p.roughness = 0.35f; p.f0 = 0.08f; p.clearCoat = 1.0f; p.coatRoughness = 0.05f; break;
+        p.roughness = 0.35f; p.f0 = 0.08f; p.clearCoat = 0.8f; p.coatRoughness = 0.06f; break;
     case SurfaceClass::Chrome: p.roughness = 0.08f; p.f0 = 0.04f; p.metal = 1.0f; break;
     case SurfaceClass::Glass: p.roughness = 0.03f; p.f0 = 0.04f; break;
     case SurfaceClass::Mirror: p.roughness = 0.02f; p.f0 = 0.04f; p.metal = 1.0f; break;
