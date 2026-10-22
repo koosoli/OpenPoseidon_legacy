@@ -27,6 +27,8 @@ fn compose_sky(composer:&mut naga_oil::compose::Composer)->naga::Module {
 #[cfg(test)]
 mod reference;
 pub mod milkyway;
+// REFLECT-001 phase D: GGX-prefiltered mips of the reflection env map.
+pub mod env_prefilter;
 pub mod starcat;
 
 // Guards every sky.wgsl edit: parse + validate the module offline so a WGSL error
@@ -1158,6 +1160,9 @@ pub struct Sky {
     #[allow(dead_code)]
     env_tex: wgpu::Texture,
     env_view: wgpu::TextureView,
+    // REFLECT-001 phase D: the single-mip view the bake renders into, and the prefilter chain.
+    env_target_view: wgpu::TextureView,
+    env_prefilter: env_prefilter::EnvPrefilter,
     // Tileable 3D cloud noise, sampled by the cloud march (bound into sky_bind). Held to keep the
     // texture alive (the view/sampler are owned by the bind group).
     #[allow(dead_code)]
@@ -1555,7 +1560,9 @@ impl Sky {
                 height: ENV_H,
                 depth_or_array_layers: 1,
             },
-            mip_level_count: 1,
+            // REFLECT-001 phase D: level 0 is the bake as before; levels 1.. are the GGX
+            // prefilter (env_prefilter.rs). Every existing reader samples level 0 explicitly.
+            mip_level_count: env_prefilter::ENV_MIPS,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: ENV_FORMAT,
@@ -1563,6 +1570,14 @@ impl Sky {
             view_formats: &[],
         });
         let env_view = env_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        // A render target view must cover exactly one mip.
+        let env_target_view = env_tex.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("wgr_sky_env_mip0"),
+            base_mip_level: 0,
+            mip_level_count: Some(1),
+            ..Default::default()
+        });
+        let env_prefilter = env_prefilter::EnvPrefilter::new(device, &env_tex, ENV_FORMAT, ENV_W, ENV_H);
 
         // SH-9 sky-irradiance projection: reads the env map (textureLoad, non-filtering) and writes
         // 9 vec4 RGB coefficients into sh_buf (also bound UNIFORM into the camera group). Zero-init
@@ -2369,6 +2384,8 @@ impl Sky {
             env_pipeline,
             env_tex,
             env_view,
+            env_target_view,
+            env_prefilter,
             cloud_noise_tex,
             cloud_pipeline,
             cloud_temporal_view: None,
@@ -3074,7 +3091,7 @@ impl Sky {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("wgr_sky_env"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &self.env_view,
+                view: &self.env_target_view,
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
@@ -3090,6 +3107,10 @@ impl Sky {
         pass.set_pipeline(&self.env_pipeline);
         pass.set_bind_group(0, &self.sky_bind, &[]);
         pass.draw(0..3, 0..1);
+        drop(pass);
+        // REFLECT-001 phase D: rough reflections read the prefiltered levels (no-op unless
+        // WGR_REFLECT / WGR_REFLECT_DEBUG is set).
+        self.env_prefilter.record(encoder);
     }
 
     // The reflection env map view, lent to the water bind group (water look plan Stage 4a).

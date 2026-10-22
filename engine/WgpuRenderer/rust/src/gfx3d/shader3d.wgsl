@@ -16,7 +16,7 @@
 #import boot_relief::{boot_relief_height, boot_relief_normal, boot_relief_parallax, boot_relief_multiplier, boot_relief_composite}
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
 // Shared fragment shading, also used by the GPU-driven indirect path (gpu_driven.wgsl).
-#import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal, reflect_classified, reflect_base_reflectance, reflect_schlick}
+#import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal, reflect_classified, reflect_base_reflectance}
 #import tree_snow::{tree_snow_height, tree_snow_coverage}
 // Group(4) terrain heightmap + surface_y, shared with the shadow depth pass.
 // surface_grad tilts conformed veg normals to follow the ground slope (color pass only).
@@ -790,22 +790,38 @@ fn vs_skinned(
 // prefiltered chain), and dimmed where the reflection ray meets the world instead of sky --
 // toward and below the horizon a car mirrors street, ground and trees, which the sky map
 // does not hold (the same reading RFG-168 gives window glass).
+// REFLECT-001 phase D: the sky env map carries GGX-prefiltered mips (sky/env_prefilter.rs);
+// level = roughness x max level. Pinned to env_prefilter::ENV_MIPS by a Rust test.
+const ENV_PREFILTER_MAX_LOD: f32 = 5.0;
+fn sky_env_sample_rough(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
+    let u = 0.5 + atan2(dir.z, dir.x) / ENV_TWO_PI;
+    let v = acos(clamp(dir.y, -1.0, 1.0)) / (ENV_TWO_PI * 0.5);
+    return textureSampleLevel(sky_env, sky_env_samp, vec2<f32>(u, v),
+                              clamp(roughness, 0.0, 1.0) * ENV_PREFILTER_MAX_LOD).rgb;
+}
+
+// Split-sum environment BRDF, Karis' analytic fit (UE4 mobile): the scale and bias that turn
+// F0 into the hemisphere-integrated specular of a GGX surface. Replaces the roughness-aware
+// Schlick and the (1-r)^1.5 fade of phase C, which only stood in for this.
+fn reflect_env_brdf(f0: vec3<f32>, roughness: f32, ndv: f32) -> vec3<f32> {
+    let c0 = vec4<f32>(-1.0, -0.0275, -0.572, 0.022);
+    let c1 = vec4<f32>(1.0, 0.0425, 1.04, -0.04);
+    let r = roughness * c0 + c1;
+    let a004 = min(r.x * r.x, exp2(-9.28 * ndv)) * r.x + r.y;
+    let ab = vec2<f32>(-1.04, 1.04) * a004 + r.zw;
+    return f0 * ab.x + vec3<f32>(ab.y);
+}
+
 fn reflect_env_radiance(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
-    var env = sky_env_sample(dir);
-    let spread = roughness * roughness * 1.2;
-    if (spread > 0.01) {
-        let guide = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), abs(dir.y) > 0.95);
-        let t = normalize(cross(dir, guide));
-        let b = cross(dir, t);
-        env = (env * 2.0 + sky_env_sample(normalize(dir + t * spread)) + sky_env_sample(normalize(dir - t * spread))
-               + sky_env_sample(normalize(dir + b * spread)) + sky_env_sample(normalize(dir - b * spread))) / 6.0;
-    }
+    let env = sky_env_sample_rough(dir, roughness);
     // Above the horizon: sky, a little dimmed near it where street, houses and trees stand,
     // and desaturated by half as RFG-208 does for window glass (Reforger's probes author
     // ReflectionDesaturation 0.5). Undesaturated, the env map's deep blue turned red cars
     // purple at low sun (first test, 2026-10-22: Arma 1 hatchback, Arma 2 Skoda).
     var sky = env * mix(0.6, 1.0, smoothstep(0.0, 0.45, dir.y));
-    sky = mix(sky, vec3<f32>(dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722))), 0.5);
+    // Phase D: 0.3 instead of 0.5 -- with sharp, correctly weighted reflections the owner wants
+    // the sky's colour back in roofs and bonnets (reference renders, 2026-10-22).
+    sky = mix(sky, vec3<f32>(dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722))), 0.3);
     // Below it: the ground, lit the way the renderer lights the ground -- sky ambient plus sun --
     // at a typical ground albedo. A flat dark constant made the lower half of every body panel
     // darker than before on bright sand (first test, 2026-10-22: Peugeot white doors went grey).
@@ -1720,23 +1736,17 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         let coat = clamp(material.reflect0.w, 0.0, 1.0);
         let albedo_lin = srgb_to_linear(base.rgb);
         let occ = gtao_ao(in.clip.xy) * cave_daylight(in.world_pos + frame.cam_pos.xyz) * clamp(in.fog, 0.0, 1.0);
-        // Roughness-aware Schlick: a rough surface does not turn into a mirror at grazing angles.
-        let f0b = reflect_base_reflectance(m, albedo_lin);
-        let c = 1.0 - ndv;
-        let c5 = c * c * c * c * c;
-        let fb = f0b + (max(vec3<f32>(1.0 - rough), f0b) - f0b) * c5;
-        let fc = reflect_schlick(vec3<f32>(0.04), ndv).x * coat;
+        // Phase D: prefiltered environment (sharp for the clear coat, blurred for a rough base)
+        // weighted by the split-sum environment BRDF.
+        let coat_rough = clamp(material.reflect1.y, 0.0, 1.0);
+        let fb = reflect_env_brdf(reflect_base_reflectance(m, albedo_lin), rough, ndv);
+        let fc = reflect_env_brdf(vec3<f32>(0.04), coat_rough, ndv).x * coat;
         let env_base = reflect_env_radiance(refl_dir, rough);
-        let env_coat = reflect_env_radiance(refl_dir, clamp(material.reflect1.y, 0.0, 1.0));
-        // A rough base layer spreads its reflection over the whole hemisphere; with one sky map
-        // and no prefiltered lobe the five-tap cone overstates it, and matt paint came out
-        // washed grey by the reflected sand (CWA desert, 2026-10-22: HMMWV, 5t truck). Fade the
-        // base-layer reflection with roughness until phase D brings real prefiltering.
-        let rough_fade = pow(1.0 - rough, 1.5);
-        let spec = (env_base * fb * rough_fade * (1.0 - fc) + env_coat * fc) * occ;
+        let env_coat = reflect_env_radiance(refl_dir, coat_rough);
+        let spec = (env_base * fb * (1.0 - fc) + env_coat * fc) * occ;
         // What the reflection takes, the diffuse body no longer scatters (energy, roughly).
         let keep = (1.0 - fc * occ) *
-            (1.0 - max(fb.r, max(fb.g, fb.b)) * rough_fade * occ * (1.0 - clamp(material.reflect0.z, 0.0, 1.0)));
+            (1.0 - max(fb.r, max(fb.g, fb.b)) * occ * (1.0 - clamp(material.reflect0.z, 0.0, 1.0)));
         if (translucent > 0.5) {
             // A pane over what is behind it: the reflection sits on top of the film (RFG-137's form).
             let f = clamp(max(fb.r, max(fb.g, fb.b)) * (1.0 - fc) + fc, 0.0, 1.0) * occ;
