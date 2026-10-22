@@ -55,6 +55,58 @@ def read_4wvr(path):
     return heights, tex, names
 
 
+def open_sea(heights, cell):
+    """The island in open water. OFP maps carry shelves and stray sandbanks out to their edges (Desert Island
+    has a shallow shelf along its whole north edge), which in the open ocean read as a straight line of
+    surf and sand far from the island. Keep the land within 15 cells of the largest island's bounding box
+    and the sea floor within 300 m of it as authored; beyond that the floor falls away to 60 m."""
+    land = heights > 0.3
+    n = heights.shape[0]
+    # Largest connected landmass (4-neighbour flood fill), then everything in its padded bounding box.
+    seen = np.zeros_like(land)
+    best = None
+    for z0, x0 in np.argwhere(land):
+        if seen[z0, x0]:
+            continue
+        stack, cells = [(z0, x0)], []
+        seen[z0, x0] = True
+        while stack:
+            z, x = stack.pop()
+            cells.append((z, x))
+            for dz, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                a, b = z + dz, x + dx
+                if 0 <= a < n and 0 <= b < n and land[a, b] and not seen[a, b]:
+                    seen[a, b] = True
+                    stack.append((a, b))
+        if best is None or len(cells) > len(best):
+            best = cells
+    keep = np.zeros_like(land)
+    if best:
+        zs, xs = zip(*best)
+        z0, z1 = max(min(zs) - 15, 0), min(max(zs) + 16, n)
+        x0, x1 = max(min(xs) - 15, 0), min(max(xs) + 16, n)
+        keep[z0:z1, x0:x1] = land[z0:z1, x0:x1]
+    # Distance (cells) from the kept land, chessboard metric by repeated dilation.
+    dist = np.full(heights.shape, 1e9, np.float32)
+    front = keep.copy()
+    dist[front] = 0
+    d = 0
+    while front.any() and d < n:
+        d += 1
+        grown = front.copy()
+        grown[1:, :] |= front[:-1, :]
+        grown[:-1, :] |= front[1:, :]
+        grown[:, 1:] |= front[:, :-1]
+        grown[:, :-1] |= front[:, 1:]
+        new = grown & (dist > d)
+        dist[new] = d
+        front = grown
+    metres = dist * cell
+    floor = -np.clip(2.0 + (metres - 300.0) * 0.04, 2.0, 60.0)
+    out = np.where(metres <= 300.0, heights, np.minimum(heights, floor))
+    return np.where(keep | (metres <= 300.0), out, np.minimum(out, -2.0)).astype(np.float32)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--wrp', required=True)
@@ -82,6 +134,7 @@ def main():
         heights, tex, names = read_4wvr(world)
         n = heights.shape[0]
         print(f'{args.wrp}: {n}x{heights.shape[1]} cells, heights {heights.min():.1f}..{heights.max():.1f} m')
+        heights = open_sea(heights, args.cell)
 
         # Ground textures: extract LandText.pbo once, convert the used PAAs to PNG, average-safe fallbacks.
         landtext = os.path.join(game, 'DTA', 'LandText.pbo')

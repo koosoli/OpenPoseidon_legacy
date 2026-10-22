@@ -13,7 +13,7 @@ namespace Poseidon::EarthIslands
 namespace
 {
 // Outer cells over which an island's own sea floor fades into the source elevation.
-constexpr double BlendCells = 24;
+constexpr double BlendCells = 6; // the preparation script already deepens the sea floor away from the island
 
 double Number(const cJSON* root, const char* name)
 {
