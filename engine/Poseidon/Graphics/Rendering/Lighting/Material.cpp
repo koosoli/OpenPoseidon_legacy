@@ -106,9 +106,15 @@ TexMaterial::TexMaterial(const char* name) : _serial(NextTexMaterialSerial())
             }
             _specular = color(source.specular);
             _specularPower = source.specularPower;
+            _pixelShaderId = source.pixelShaderId;
             if (const auto ir = Asset::Material::TranslateMaterial(source); ir.schemaKnown)
+            {
                 if (const auto& map = ir.Slot(Asset::Material::MaterialSlot::SpecularDetail); map.present)
                     _specularMapName = map.texture.isProcedural ? map.texture.raw : map.texture.path.canonical();
+                if (const auto& fresnel = ir.Slot(Asset::Material::MaterialSlot::Fresnel); fresnel.present)
+                    _fresnelStage = fresnel.texture.raw;
+                _hasEnvMap = ir.Slot(Asset::Material::MaterialSlot::Environment).present;
+            }
             _bumpmapFactor = 1;
             _detailmapFactor = 1;
             return;

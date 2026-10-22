@@ -23,6 +23,7 @@
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
+#include <Poseidon/World/Scene/ScriptLight.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Game/Scripting/Scripts.hpp>
 
@@ -2090,7 +2091,16 @@ GameValue A2CreateVehicleArray(const GameState* state, GameValuePar oper1)
         return GameValueExt((Object*)nullptr);
     const RString type = args[0];
     if (type.GetLength() > 0 && type[0] == '#')
+    {
+        // LGT-SCRIPT-001: createVehicle ["#lightpoint", pos, ...] -- the Arma 2/3 array form
+        if (stricmp(type, "#lightpoint") == 0)
+        {
+            Vector3 lp;
+            if (GetPos(state, lp, args[1]))
+                return GameValueExt(Poseidon::CreateScriptLight(lp));
+        }
         return GameValueExt((Object*)nullptr);
+    }
     GameValue pos = args[1];
     if (pos.GetType() == GameObject)
         pos = A2GetPosATL(state, pos);

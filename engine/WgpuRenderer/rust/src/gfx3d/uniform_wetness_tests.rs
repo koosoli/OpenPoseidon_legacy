@@ -152,7 +152,9 @@ fn actual_uniform_helper_preserves_material_tail_layout() {
     let tail = members.iter().find(|m|m.name.as_deref()==Some("local_specular")).unwrap();
     assert_eq!(tail.offset as usize,std::mem::offset_of!(super::MaterialUbo,local_specular));
     assert_eq!(tail.offset,112);
-    assert_eq!(*span,128); // existing .w at byte124, no public ABI extension
+    // 128 until REFLECT-001 appended reflect0/reflect1 behind local_specular (128 -> 160);
+    // the wetness scalar stays at byte 124.
+    assert_eq!(*span,160);
 }
 
 #[test]

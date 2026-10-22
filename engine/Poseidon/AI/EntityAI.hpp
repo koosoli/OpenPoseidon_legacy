@@ -175,6 +175,7 @@ struct UserActionDescription
 };
 
 class LightReflectorOnVehicle;
+class LightPointOnVehicle;
 
 class IndicesUpdateEntityAIWeapons;
 
@@ -365,6 +366,9 @@ protected:
 
 	//! Light of all lights on vehicle
 	RefArray<LightReflectorOnVehicle> _reflectors;
+	//! LGT-AUTO-001: point lights at the tail / brake lamps (VehicleAutoLights.cpp)
+	RefArray<LightPointOnVehicle> _autoTailLights;
+	RefArray<LightPointOnVehicle> _autoBrakeLights;
 
 	//! Flag (support for Capture the flag)
 	Ref<Flag> _flag;
@@ -374,6 +378,10 @@ protected:
 
 	//! Textures on hidden selections
 	RefArray<Texture> _hiddenSelectionsTextures;
+	// REFLECT-001 B2: material per hidden selection (hiddenSelectionsMaterials, setObjectMaterial),
+	// null = the model's own; and the section materials it replaced between Animate and Deanimate.
+	RefArray<TexMaterial> _hiddenSelectionsMaterials;
+	AutoArray<SavedSectionMaterial> _hiddenSelectionsSavedMaterials;
 
 	//! user defined actions
 	//! List of all user defined actions
@@ -764,6 +772,7 @@ protected:
 
 	//! Change texture in hiddenSelections
 	void SetObjectTexture(int index, Texture *texture);
+	void SetObjectMaterial(int index, TexMaterial *material);
 
 	/*!
 	\name Flag support
@@ -1263,6 +1272,9 @@ public:
 	bool IsUserStopped() const {return _userStopped;}
 
 	virtual bool EngineIsOn() const {return true;}
+	//! LGT-AUTO-001: true while the brake lamps glow (TankOrCar); switches their cast light
+	virtual bool AutoBrakeLightsOn() const {return false;}
+	void UpdateAutoVehicleLights();
 	virtual void EngineOn() {}
 	virtual float MakeAirborne() {return 0;}
 	virtual void EngineOff() {}

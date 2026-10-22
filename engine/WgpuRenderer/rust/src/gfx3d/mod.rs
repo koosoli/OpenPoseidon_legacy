@@ -869,7 +869,7 @@ fn palette_batch_keeps_padded_or_incomplete_layouts_on_legacy_path() {
 
 // Eight vec4 lanes, matching Material in shader3d.wgsl, including separate
 // sun-folded and raw local specular so sunset cannot erase lamp highlights.
-const MATERIAL_SIZE: u64 = 128;
+const MATERIAL_SIZE: u64 = 160;
 
 // Fixed capacity of the frame-global light storage buffer (group 0). The
 // active count per frame rides in WgrCamera::cam_pos.w; slots beyond it aren't read.
@@ -902,6 +902,8 @@ struct MaterialUbo {
     specular: [f32; 4],
     normal_map: [f32; 4], // x packed texture/sampler, y debug view, z enabled
     local_specular: [f32; 4],
+    reflect0: [f32; 4], // REFLECT-001: roughness, F0, metal, clear coat (zero = off)
+    reflect1: [f32; 4], // class, coat roughness, source, debug view
 }
 
 const _: () = assert!(std::mem::size_of::<MaterialUbo>() == MATERIAL_SIZE as usize);
@@ -917,6 +919,34 @@ mod local_specular_tests {
         let shading = include_str!("../shaders/shading.wgsl");
         assert!(shading.contains("m_local_specular = m_local_specular * mat.spec_mask"));
         assert!(shading.contains("let raw = sun + local.diffuse"));
+    }
+}
+
+#[cfg(test)]
+mod reflect_lane_tests {
+    // REFLECT-001 phase B: the two appended lanes reach the per-draw Material in the same
+    // order the C ABI declares them, and only a non-zero debug view reads them, so a frame
+    // with WGR_REFLECT off (all-zero lanes) shades exactly as before.
+    #[test]
+    fn reflect_lanes_are_appended_and_inert_when_zero() {
+        let src = include_str!("shader3d.wgsl");
+        let material = src.split("struct Material {").nth(1).unwrap().split("};").next().unwrap();
+        let ls = material.find("local_specular:").unwrap();
+        let r0 = material.find("reflect0:").unwrap();
+        let r1 = material.find("reflect1:").unwrap();
+        assert!(ls < r0 && r0 < r1, "reflect lanes must follow local_specular, in ABI order");
+        assert!(src.contains("let reflect_view = u32(material.reflect1.w + 0.5);"));
+        assert!(src.contains("if (reflect_view != 0u) {"));
+        // Phase C: the lanes reach shade() and the env reflection, and a classified surface
+        // takes neither the legacy Blinn lobe nor the SH sky sheen (no double highlight).
+        assert!(src.contains("m.refl_a = material.reflect0;") && src.contains("m.refl_b = material.reflect1;"));
+        assert!(src.contains("if (reflect_classified(m, linear) && (material_flags(material) & MATFLAG_REFLECTIVE) == 0u"));
+        let shading = include_str!("../shaders/shading.wgsl");
+        assert!(shading.contains("} else if (m_spec_power > 0.0) {"));
+        assert!(shading.contains("sky_spec = vec4<f32>(0.0, 0.0, 0.0, 1.0);"));
+        assert!(shading.contains("return mat.refl_b.x > 0.5 && linear > 0.5;"));
+        assert_eq!(super::MATERIAL_SIZE, 160);
+        assert_eq!(std::mem::size_of::<crate::ffi::WgrDraw3D>(), 320);
     }
 }
 
@@ -9513,6 +9543,8 @@ impl Gfx3d {
                             light_ambient: d.mat_light_ambient,
                             specular: d.mat_specular,
                             local_specular: d.mat_local_specular,
+                            reflect0: d.mat_reflect0,
+                            reflect1: d.mat_reflect1,
                             // w is a small BITFIELD, not a bool: bit 0 = invert the normal
                             // map's Y (the material-debug toggle it already carried), bit 1 =
                             // DZ-003 reflective (the material named an EnvironmentMap), bit 2 =

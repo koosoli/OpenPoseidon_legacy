@@ -124,7 +124,74 @@ struct ShadeMaterial {
     // Shader-local material value, never a public buffer/ABI field.
     // Nonzero only after exact primary cloth admission and filtered UV masking.
     wet_cloth: f32,
+    // REFLECT-001 phase C (ReflectMaterial.hpp): roughness, F0, metal, clear coat / class,
+    // coat roughness, source, debug view. Zero (every caller's `var m: ShadeMaterial` default,
+    // and the retained path never sets it) = not classified: shade() takes its old branches.
+    // (Not reflect0/reflect1: naga_oil forbids module identifiers that end in a digit.)
+    refl_a: vec4<f32>,
+    refl_b: vec4<f32>,
 };
+
+// REFLECT-001 phase C -- physically based sun response for classified surfaces.
+const REFLECT_PI: f32 = 3.14159265;
+const REFLECT_CLASS_CHROME: u32 = 5u;
+const REFLECT_CLASS_MIRROR: u32 = 7u;
+const REFLECT_CLASS_LAMP_GLASS: u32 = 8u;
+const REFLECT_CLASS_LAMP_PLASTIC: u32 = 9u;
+
+fn reflect_classified(mat: ShadeMaterial, linear: f32) -> bool {
+    return mat.refl_b.x > 0.5 && linear > 0.5;
+}
+
+// Normal-incidence reflectance of the base layer. Polished metal parts (chrome, mirror glass,
+// the chromed bowl behind a lamp cover) are silver whatever their often dark or atlas-shared
+// texture says, so they take a fixed silver tinted lightly by the albedo; other metals take
+// the albedo, dielectrics the scalar F0.
+fn reflect_base_reflectance(mat: ShadeMaterial, albedo_lin: vec3<f32>) -> vec3<f32> {
+    let cls = u32(mat.refl_b.x + 0.5);
+    let polished = cls == REFLECT_CLASS_CHROME || cls == REFLECT_CLASS_MIRROR ||
+                   cls == REFLECT_CLASS_LAMP_GLASS || cls == REFLECT_CLASS_LAMP_PLASTIC;
+    let metal_f0 = select(albedo_lin, mix(vec3<f32>(0.62), albedo_lin, 0.25), polished);
+    return mix(vec3<f32>(mat.refl_a.y), metal_f0, clamp(mat.refl_a.z, 0.0, 1.0));
+}
+
+fn reflect_schlick(f0: vec3<f32>, cos_t: f32) -> vec3<f32> {
+    let c = clamp(1.0 - cos_t, 0.0, 1.0);
+    let c2 = c * c;
+    return f0 + (vec3<f32>(1.0) - f0) * (c2 * c2 * c);
+}
+
+// GGX distribution x height-correlated Smith visibility (Filament's form), for one lobe.
+// The sun is a disc of finite size, so the lobe is never sharper than roughness 0.1: a perfect
+// mirror would otherwise turn the sun into a single-pixel spike of tens of thousands.
+fn reflect_ggx(ndl: f32, ndv: f32, ndh: f32, roughness: f32) -> f32 {
+    let r = max(roughness, 0.1);
+    let a2 = r * r * r * r;
+    let d_den = ndh * ndh * (a2 - 1.0) + 1.0;
+    let d = a2 / (REFLECT_PI * d_den * d_den);
+    let gv = ndl * sqrt(ndv * ndv * (1.0 - a2) + a2);
+    let gl = ndv * sqrt(ndl * ndl * (1.0 - a2) + a2);
+    let v = 0.5 / max(gv + gl, 1e-5);
+    return d * v;
+}
+
+// Sun specular of base + clear coat, times N.L (radiance scale: multiply by the sun colour).
+fn reflect_sun_specular(mat: ShadeMaterial, albedo_lin: vec3<f32>, n: vec3<f32>, view_dir: vec3<f32>,
+                        to_sun: vec3<f32>) -> vec3<f32> {
+    let ndl = dot(n, to_sun);
+    let ndv = max(dot(n, view_dir), 1e-4);
+    if (ndl <= 0.0) {
+        return vec3<f32>(0.0);
+    }
+    let h = normalize(to_sun + view_dir);
+    let ndh = clamp(dot(n, h), 0.0, 1.0);
+    let vdh = clamp(dot(view_dir, h), 0.0, 1.0);
+    let base = reflect_schlick(reflect_base_reflectance(mat, albedo_lin), vdh) * reflect_ggx(ndl, ndv, ndh, mat.refl_a.x);
+    let coat = clamp(mat.refl_a.w, 0.0, 1.0);
+    let fc = reflect_schlick(vec3<f32>(0.04), vdh).x * coat;
+    let coat_lobe = fc * reflect_ggx(ndl, ndv, ndh, mat.refl_b.y);
+    return (base * (1.0 - fc) + vec3<f32>(coat_lobe)) * ndl;
+}
 
 // Rotate `v` by the rotation that carries unit vector `src_n` onto unit vector `dst_n`.
 //
@@ -573,8 +640,13 @@ fn shade(
         // is the same sky arriving at the same point, so anything that occludes one occludes the
         // other. Letting it out of the occlusion is how crevices acquire glints.
         let view_dir_sky = normalize(-world_pos);
-        let sky_spec = sky_specular_split(
+        // REFLECT-001: a classified surface reflects the sky through the env map in the caller
+        // (shader3d.wgsl, reflect_environment), so its share here is zero -- not counted twice.
+        var sky_spec = sky_specular_split(
             nrm, view_dir_sky, spec_power_to_gloss(m_spec_power), m_spec_mask);
+        if (reflect_classified(mat, linear)) {
+            sky_spec = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        }
         // REN-GI-001: the probe volume's irradiance replaces the analytic sky-dome ambient
         // where the volume covers the point (weight fades at its edge; 0 with the feature
         // off, which makes this line the pre-GI expression exactly). The probes already saw
@@ -716,6 +788,10 @@ fn shade(
     let raw = sun + local.diffuse;
     let lit = select(clamp(raw, vec3<f32>(0.0), vec3<f32>(1.0)), max(raw, vec3<f32>(0.0)), linear > 0.5);
     var rgb = albedo * lit;
+    // REFLECT-001: a metal has no diffuse body; its colour is all in the reflection.
+    if (reflect_classified(mat, linear)) {
+        rgb = rgb * (1.0 - clamp(mat.refl_a.z, 0.0, 1.0)) + m_emissive * albedo * clamp(mat.refl_a.z, 0.0, 1.0);
+    }
     // Object lighting diagnostics (WGR_OBJECT_DEBUG_VIEW=albedo|light): the albedo alone, or the
     // light it receives (sun + sky + local, before albedo) at 1/8 -- to tell a dark texture from a
     // dark light before reasoning about either.
@@ -729,7 +805,13 @@ fn shade(
                   max(local.specular, vec3<f32>(0.0)), linear > 0.5);
     // Sun-only Blinn-Phong specular (untextured, additive, before the shadow multiply). The
     // camera is at the origin in camera-relative space, so view_dir = normalize(-world_pos).
-    if (m_spec_power > 0.0) {
+    if (reflect_classified(mat, linear)) {
+        // REFLECT-001 phase C: GGX base + clear coat instead of the legacy Blinn lobe (never both:
+        // that is the double highlight). Raw sun colour, as the sky-lit diffuse above uses.
+        let spec_r = reflect_sun_specular(mat, albedo, nrm, normalize(-world_pos), -frame.sun_dir_world.xyz)
+            * frame.sun_diffuse.rgb * sun_vis;
+        rgb += max(spec_r, vec3<f32>(0.0));
+    } else if (m_spec_power > 0.0) {
         let view_dir = normalize(-world_pos);
         let half_vec = normalize(-frame.sun_dir_world.xyz + view_dir);
         let n_dot_h = max(dot(nrm, half_vec), 0.0);

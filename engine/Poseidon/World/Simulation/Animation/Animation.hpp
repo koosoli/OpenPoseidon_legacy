@@ -32,6 +32,16 @@ class Animation
 
 };
 
+//! A section's own material while a hidden selection shows another one (setObjectMaterial,
+//! hiddenSelectionsMaterials). Kept by the entity between Animate and Deanimate, because the
+//! shape -- and so the section -- is shared by every instance of the model.
+struct SavedSectionMaterial
+{
+	int level = -1;
+	int section = -1;
+	Ref<TexMaterial> material;
+};
+
 class AnimationSection: public Animation
 {
 	protected:
@@ -45,6 +55,11 @@ class AnimationSection: public Animation
 
 	void SetTexture( LODShape *shape, int level, Texture *texture ) const;
 	Texture *GetTexture(LODShape *shape) const;
+	//! Show `material` on this selection's sections of `level`, remembering each section's own
+	//! material in `saved` (once per section and level, however often it is called).
+	void SetMaterial( LODShape *shape, int level, TexMaterial *material, AutoArray<SavedSectionMaterial> &saved ) const;
+	//! Put back every material `saved` holds for `level`, and forget those entries.
+	static void RestoreMaterials( LODShape *shape, int level, AutoArray<SavedSectionMaterial> &saved );
 	void Hide( LODShape *shape, int level ) const;
 	void Unhide( LODShape *shape, int level ) const;
 };

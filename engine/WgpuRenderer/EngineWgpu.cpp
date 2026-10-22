@@ -95,6 +95,7 @@
 #include <Poseidon/Graphics/Rendering/RenderFlags.hpp>
 #include <Poseidon/Graphics/Rendering/DecalDepth.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Material.hpp> // TexMaterial::Combine (GPU-driven material extract)
+#include "EngineWgpuReflect.hpp"                                  // REFLECT-001 surface class lanes
 #include <Poseidon/Graphics/Rendering/Lighting/MuzzleFlashAppearance.hpp>
 #include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
@@ -9932,6 +9933,9 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     d.mat_specular = {specCol.R() * specEn, specCol.G() * specEn, specCol.B() * specEn, specPow};
     const Color& localSpec = _curMaterial.specular;
     d.mat_local_specular = {localSpec.R(), localSpec.G(), localSpec.B(), 0.0f};
+    // REFLECT-001 phase B: surface class lanes. A no-op unless WGR_REFLECT / WGR_REFLECT_DEBUG.
+    FillReflectLanes(d, static_cast<const Object*>(GetDrawObject()), sMesh.GetSection(beg).properties.GetTexture(),
+                     debugSection.surfMat.GetRef());
     if (const auto* person = dyn_cast<const Person>(static_cast<const Object*>(GetDrawObject())))
     {
         const auto* ownerShape = person->GetShape();

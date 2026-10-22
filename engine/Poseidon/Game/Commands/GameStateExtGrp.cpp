@@ -76,6 +76,7 @@ namespace Poseidon
 #include <Poseidon/Foundation/Platform/VersionNo.h>
 
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
+#include <Poseidon/World/Scene/ScriptLight.hpp>
 
 GameValue ObjBehaviour(const GameState* state, GameValuePar oper1)
 {
@@ -1784,6 +1785,14 @@ GameValue ObjSetPos(const GameState* state, GameValuePar oper1, GameValuePar ope
     Vector3 pos;
     if (!GetRelPos(state, pos, oper2))
     {
+        return NOTHING;
+    }
+    // LGT-SCRIPT-001: a "#lightpoint" has no shape to place on the surface; Arma puts it at
+    // the given height above ground
+    if (Poseidon::ScriptLight* light = dyn_cast<Poseidon::ScriptLight>(obj1))
+    {
+        pos[1] += GLandscape ? GLandscape->SurfaceYAboveWater(pos[0], pos[2]) : 0.0f;
+        light->MoveTo(pos);
         return NOTHING;
     }
     if (obj1->GetType() == Primary || obj1->GetType() == Network)

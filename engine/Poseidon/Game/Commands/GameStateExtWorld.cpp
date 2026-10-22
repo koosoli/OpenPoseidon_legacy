@@ -74,6 +74,7 @@ namespace Poseidon
 #include <Poseidon/Foundation/Platform/VersionNo.h>
 
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
+#include <Poseidon/World/Scene/ScriptLight.hpp>
 
 namespace Poseidon
 {
@@ -434,6 +435,11 @@ GameValue VehDelete(const GameState* state, GameValuePar oper1)
 {
     Object* obj = GetObject(oper1);
     if (!obj)
+    {
+        return NOTHING;
+    }
+    // LGT-SCRIPT-001: a "#lightpoint" is not an Entity and never in the world lists
+    if (Poseidon::DeleteScriptLight(obj))
     {
         return NOTHING;
     }

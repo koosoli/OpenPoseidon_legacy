@@ -212,3 +212,65 @@ Flug, WGPU `all`, gleiche Mission (zeitgewichtete fps):
 - Mit Schnee: neue Maske 2,7 ms statt 75 ms je Aufruf, 0 neue Prüfungen, 1 515 526 aus dem Cache,
   **masked=91 280 in allen Läufen** -- dasselbe Ergebnis.
 - WGPU ist damit auf dem ganzen Flug schneller als GL33 und ohne Ruckler.
+
+## Messung 5: neuer Stand `2ff794f` im Spielordner (22.10. 08:20)
+
+`MrDudeX-wgpu-aktuell` @ `2ff794f` = Olis `MrDudeX-arma1` @ `9c16747d` (darauf baut
+`feat/jump-reload-lean`) + 24 WGPU-Commits. Eingespielt in `Remastered` aus dem CI-Build
+(GitHub Actions 39693362590, win-x64-clang-rwdi). `OpenPoseidon.exe`, `PoseidonGame.exe` und
+`wgpu_renderer.dll` stammen alle aus diesem einen Build, sind per `cmp` geprüft und haben dieselbe
+Dateizeit. `DEPLOYED-FROM.txt` ist neu gestempelt. Der vorige Stand (`9c16747d`) liegt in
+`Remastered\_backup_vor_wgpu_20261022\`. Gemessen wurde die EXE aus `Remastered`, also genau das,
+was der Besitzer spielt.
+
+Gleiche Flug-Mission. Kennzahl hier: **Bilder ÷ Zeit über den ganzen Flug**. Das ist nicht die
+abschnittsgewichtete Zahl aus Messung 4, deshalb stehen die alten Läufe in derselben Kennzahl daneben.
+
+| Lauf | Bau | fps | schlechtester Abschnitt | max. p95 | GPU-Bild (Mittel) | 3D-Farbpass GPU |
+| --- | --- | --- | --- | --- | --- | --- |
+| WGPU `all`, ohne Schnee | `b3f8c9c` (alte Basis) | 75,5 | 54,8 | 22,8 ms | 12,8 ms | 7,0 ms |
+| WGPU `all`, ohne Schnee | **`2ff794f`** | **77,5** | **57,0** | 19,8 ms | 14,9 ms | 8,5 ms |
+| WGPU `exact` (Standard), ohne Schnee | **`2ff794f`** | 63,7 | 35,7 | 30,8 ms | 18,3 ms | 12,6 ms |
+| WGPU `exact`, 30 cm Schnee | **`2ff794f`** | 58,9 | 34,3 | 31,6 ms | -- | -- |
+| WGPU `all`, 30 cm Schnee | `b3f8c9c` | 69,8 | 50,6 | 22,7 ms | -- | -- |
+| GL33 | `b3f8c9c` (21.10. 19:27) | 85,3 | 37,1 | 28,3 ms | -- | -- |
+| GL33 | **`2ff794f`** | 86,6 | 37,8 | 28,4 ms | -- | -- |
+
+- **Olis neue Basis macht nichts langsamer.** Gleiche Einstellung (`all`): 77,5 statt 75,5 fps.
+  Die CPU-Phasen sind gleich, `land:gnd` liegt bei 0,18 ms (PERF-031 wirkt auch hier).
+- **Der Unterschied zwischen 63,7 und 77,5 fps ist allein der Bündel-Modus.** `exact` (Standard
+  seit WGPU-033) nimmt MAT-053-Zwillinge nicht in die Bündel auf. Auf dem Deck kostet das ~4 ms GPU
+  im 3D-Farbpass (12,6 statt 8,5 ms), und `swap` wartet entsprechend länger. Dasselbe Bild zeigte
+  schon Messung 3 auf der alten Basis: `exact` ≈ `0`, nur `all` spart.
+- Schnee ist auch auf der neuen Basis ohne Ruckler: Maske 2,7 ms, `cached=1 515 526`, `masked=91 280`
+  wie zuvor.
+- GL33 ist im Mittel weiter schneller (86,6 fps). Sein schlechtester Abschnitt (37,8) liegt aber
+  unter dem von WGPU `all` (57,0).
+- Offen (am Ende entscheiden, Vorgabe des Besitzers): `WGR_DIRECT_BATCH=all` als Standard, mit
+  Farbabweichung an überlappenden halbtransparenten Stellen. Alternative ohne Abweichung: Zwillinge
+  bündeln, solange sich die Bildschirm-Rechtecke der Mitglieder eines Laufs nicht überschneiden.
+  Dann ist die Reihenfolge gleichgültig und das Bild identisch (WGPU-034, Vorschlag).
+
+## Messung 6: WGPU-034 (Zwillinge in bildschirm-getrennten Stücken) -- kein Gewinn, zurückgenommen (22.10. 09:54)
+
+Build `6394a65` (CI 39737717502) im Testordner `_OpenPoseidon-WGPU\bin`. `Remastered` blieb
+unverändert auf `2ff794f`. Drei Flüge mit demselben Build. Gestartet erst, nachdem die
+Bilderserie der Spiegelungen-Sitzung (`before-2ff794f`, 09:21–09:43) fertig war.
+
+| Lauf | fps (Bilder ÷ Zeit) | schlechtester Abschnitt | max. p95 | 3D-Farbpass GPU |
+| --- | --- | --- | --- | --- |
+| Standard mit WGPU-034 | 64,8 | 35,2 | 31,1 ms | 13,1 ms |
+| Standard ohne WGPU-034 (`WGR_DIRECT_BATCH_TWIN_RECT=0`) | 64,0 | 34,9 | 30,9 ms | 12,2 ms |
+| `all` | 76,9 | 56,8 | 21,2 ms | -- |
+
+- Die Trace-Zeile erklärt es. `all` fasst ~2 700 Zwillings-Draws in 195 Läufe. WGPU-034 fand nur
+  57 Zwillings-Stücke mit ~120 Draws und schnitt je Bild ~2 000–2 500-mal: Aufeinanderfolgende
+  Zwillings-Abschnitte (in der Reihenfolge von hinten nach vorn) überlappen sich auf dem Bildschirm
+  fast immer, etwa Geländer und Gitterroste, die entlang der Blickrichtung hintereinander liegen.
+  Der Beweis „disjunkt, also gleiches Bild" greift deshalb kaum.
+- Auch genauere Rechtecke je Abschnitt statt je Modell würden daran wenig ändern: Die Überlappung
+  steckt in der Szene selbst.
+- Zurückgenommen per Revert-Commit (zusätzlicher Commit, nichts umgeschrieben). Der Code auf dem
+  Branch verhält sich wieder wie `2ff794f`.
+- Damit bleibt `WGR_DIRECT_BATCH=all` der einzige Weg zu ~77 fps auf dem Deck. Die Entscheidung
+  darüber liegt beim Besitzer (am Ende).
