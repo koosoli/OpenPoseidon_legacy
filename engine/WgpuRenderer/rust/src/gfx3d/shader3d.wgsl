@@ -16,7 +16,7 @@
 #import boot_relief::{boot_relief_height, boot_relief_normal, boot_relief_parallax, boot_relief_multiplier, boot_relief_composite}
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
 // Shared fragment shading, also used by the GPU-driven indirect path (gpu_driven.wgsl).
-#import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal}
+#import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal, reflect_classified, reflect_base_reflectance, reflect_schlick}
 #import tree_snow::{tree_snow_height, tree_snow_coverage}
 // Group(4) terrain heightmap + surface_y, shared with the shadow depth pass.
 // surface_grad tilts conformed veg normals to follow the ground slope (color pass only).
@@ -785,6 +785,25 @@ fn vs_skinned(
 // The colour-pass fragment. Depth is fixed-function (no frag_depth), so early-Z stays on for
 // every ordinary draw; the OnSurface variant below (fs_surface) shares this body and adds
 // only a depth output.
+// REFLECT-001 phase C -- what a classified surface mirrors: the sky env map, widened by
+// roughness with a five-tap cone (the map has one mip; phase D replaces this with a
+// prefiltered chain), and dimmed where the reflection ray meets the world instead of sky --
+// toward and below the horizon a car mirrors street, ground and trees, which the sky map
+// does not hold (the same reading RFG-168 gives window glass).
+fn reflect_env_radiance(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
+    var env = sky_env_sample(dir);
+    let spread = roughness * roughness * 1.2;
+    if (spread > 0.01) {
+        let guide = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), abs(dir.y) > 0.95);
+        let t = normalize(cross(dir, guide));
+        let b = cross(dir, t);
+        env = (env * 2.0 + sky_env_sample(normalize(dir + t * spread)) + sky_env_sample(normalize(dir - t * spread))
+               + sky_env_sample(normalize(dir + b * spread)) + sky_env_sample(normalize(dir - b * spread))) / 6.0;
+    }
+    let world = mix(0.22, 1.0, smoothstep(-0.08, 0.45, dir.y));
+    return env * world;
+}
+
 // REFLECT-001 debug colours. View 1 = surface class (fixed palette), 2 = roughness (grey),
 // 3 = F0 / metal (red = F0 x 10, green = metal), 4 = clear coat (blue = strength, green =
 // 1 - coat roughness), 5 = source (declared / RVMAT / part rule / body rule / default).
@@ -1449,6 +1468,9 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // The per-draw path carries no specular map: this is the ~7 sections a frame that reach
     // DrawSectionTL, not the retained set. 1.0 leaves the flat constant exactly as before.
     m.spec_mask = 1.0;
+    // REFLECT-001: zero unless WGR_REFLECT / WGR_REFLECT_DEBUG classified this section.
+    m.refl_a = material.reflect0;
+    m.refl_b = material.reflect1;
     // Caked mud is matte where it has dried and only dully glossy where wet.
     m.spec_mask = 1.0 - vehicle_mud.x * (0.9 - 0.4 * vehicle_mud.y);
     // The direct path has no retained SMDI binding. Show the constant specular lane and its
@@ -1666,6 +1688,41 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             out_a2 = a_out;
         } else {
             out_rgb = env_reflection(out_rgb, shading_normal, in.world_pos, in.fog);
+        }
+    }
+    // REFLECT-001 phase C: environment reflection of classified surfaces (base layer + clear
+    // coat). Skipped where DZ-003 above already mirrored the sky, and on LDR targets for the
+    // reason given there. Occluded by GTAO and the cave fade like any other sky light.
+    if (reflect_classified(m, linear) && (material_flags(material) & MATFLAG_REFLECTIVE) == 0u
+        && !matdbg_flag(MATDBG_DISABLE_FRESNEL_ENV)) {
+        let view_dir = normalize(-in.world_pos);
+        let n = select(-shading_normal, shading_normal, dot(shading_normal, view_dir) >= 0.0);
+        let ndv = clamp(dot(n, view_dir), 1e-4, 1.0);
+        let refl_dir = reflect(-view_dir, n);
+        let rough = clamp(material.reflect0.x, 0.0, 1.0);
+        let coat = clamp(material.reflect0.w, 0.0, 1.0);
+        let albedo_lin = srgb_to_linear(base.rgb);
+        let occ = gtao_ao(in.clip.xy) * cave_daylight(in.world_pos + frame.cam_pos.xyz) * clamp(in.fog, 0.0, 1.0);
+        // Roughness-aware Schlick: a rough surface does not turn into a mirror at grazing angles.
+        let f0b = reflect_base_reflectance(m, albedo_lin);
+        let c = 1.0 - ndv;
+        let c5 = c * c * c * c * c;
+        let fb = f0b + (max(vec3<f32>(1.0 - rough), f0b) - f0b) * c5;
+        let fc = reflect_schlick(vec3<f32>(0.04), ndv).x * coat;
+        let env_base = reflect_env_radiance(refl_dir, rough);
+        let env_coat = reflect_env_radiance(refl_dir, clamp(material.reflect1.y, 0.0, 1.0));
+        let spec = (env_base * fb * (1.0 - fc) + env_coat * fc) * occ;
+        // What the reflection takes, the diffuse body no longer scatters (energy, roughly).
+        let keep = (1.0 - fc * occ) * (1.0 - max(fb.r, max(fb.g, fb.b)) * occ * (1.0 - clamp(material.reflect0.z, 0.0, 1.0)));
+        if (translucent > 0.5) {
+            // A pane over what is behind it: the reflection sits on top of the film (RFG-137's form).
+            let f = clamp(max(fb.r, max(fb.g, fb.b)) * (1.0 - fc) + fc, 0.0, 1.0) * occ;
+            let a = clamp(out_a2, 0.0, 1.0);
+            let a_out = 1.0 - (1.0 - f) * (1.0 - a);
+            out_rgb = (spec + (1.0 - f) * a * out_rgb) / max(a_out, 1e-4);
+            out_a2 = a_out;
+        } else {
+            out_rgb = out_rgb * keep + spec;
         }
     }
     // MAT-051: a glass pane keeps a minimum presence head-on. Applied AFTER the
