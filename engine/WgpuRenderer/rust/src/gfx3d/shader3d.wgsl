@@ -1709,7 +1709,12 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         && !matdbg_flag(MATDBG_DISABLE_FRESNEL_ENV)) {
         let view_dir = normalize(-in.world_pos);
         let n = select(-shading_normal, shading_normal, dot(shading_normal, view_dir) >= 0.0);
-        let ndv = clamp(dot(n, view_dir), 1e-4, 1.0);
+        // Fresnel from the GEOMETRIC normal, the reflected direction from the mapped one. With
+        // the mapped normal in both, a normal map that tilts far from the surface (Arma 3's
+        // C_SUV_01_F, C_Offroad_01_F) gave grazing Fresnel across whole panels: the red SUV came
+        // out a white mirror in the clean run of 2026-10-22, while the Hatchback was fine.
+        let gn = select(-geometric_normal, geometric_normal, dot(geometric_normal, view_dir) >= 0.0);
+        let ndv = clamp(dot(gn, view_dir), 1e-4, 1.0);
         let refl_dir = reflect(-view_dir, n);
         let rough = clamp(material.reflect0.x, 0.0, 1.0);
         let coat = clamp(material.reflect0.w, 0.0, 1.0);
