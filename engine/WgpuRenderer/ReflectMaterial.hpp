@@ -112,8 +112,12 @@ inline Params Preset(SurfaceClass cls)
     case SurfaceClass::Chrome: p.roughness = 0.08f; p.f0 = 0.04f; p.metal = 1.0f; break;
     case SurfaceClass::Glass: p.roughness = 0.03f; p.f0 = 0.04f; break;
     case SurfaceClass::Mirror: p.roughness = 0.02f; p.f0 = 0.04f; p.metal = 1.0f; break;
-    case SurfaceClass::LampGlass: p.roughness = 0.03f; p.f0 = 0.04f; p.clearCoat = 1.0f; break;
-    case SurfaceClass::LampPlastic: p.roughness = 0.06f; p.f0 = 0.05f; p.clearCoat = 1.0f; break;
+    // A lamp is a chromed reflector bowl (the base, metal) under its cover (the clear coat):
+    // glass on older vehicles stays sharp, a modern polycarbonate cover is a touch softer.
+    case SurfaceClass::LampGlass:
+        p.roughness = 0.15f; p.f0 = 0.04f; p.metal = 1.0f; p.clearCoat = 1.0f; p.coatRoughness = 0.02f; break;
+    case SurfaceClass::LampPlastic:
+        p.roughness = 0.2f; p.f0 = 0.04f; p.metal = 1.0f; p.clearCoat = 1.0f; p.coatRoughness = 0.05f; break;
     case SurfaceClass::Rubber: p.roughness = 0.9f; p.f0 = 0.03f; break;
     case SurfaceClass::Plastic: p.roughness = 0.6f; p.f0 = 0.04f; break;
     case SurfaceClass::BareMetal: p.roughness = 0.45f; p.f0 = 0.04f; p.metal = 1.0f; break;
