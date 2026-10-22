@@ -1129,7 +1129,12 @@ class VertexBufferWgpu : public VertexBuffer
         // VBSmallDiscardable shadow meshes do exactly this. Cancelling the queued create is
         // strictly better than fulfilling it and then destroying it: no pool allocation, no
         // bind-cache clear, no generation bump for a mesh nobody can name any more.
-        slot->dead = true;
+        {
+            // CRASH-20261022: once `dead` is set under the lock, a drain either finished its
+            // create before we got here or will skip the slot, so the frees below are safe.
+            std::lock_guard payloadLock(slot->payloadMutex);
+            slot->dead = true;
+        }
         if (VbUpdateStatsEnabled())
         {
             const size_t typeIndex = static_cast<size_t>(bufferType);
@@ -1219,15 +1224,18 @@ class VertexBufferWgpu : public VertexBuffer
                     render::mesh::BuildOrigVertices(src, bind.data());
                     haveUploadHash = false;
                     bufferDirty = false;
-                    if (slot->renderer == 0)
+                    bool pending = false;
                     {
-                        slot->verts = std::move(bind);
+                        std::lock_guard payloadLock(slot->payloadMutex); // CRASH-20261022
+                        pending = slot->renderer == 0;
+                        if (pending)
+                            slot->verts = std::move(bind);
                     }
-                    else if (uploader)
+                    if (!pending && uploader)
                     {
                         wgr_uploader_mesh_update(uploader, slot->renderer, AsMeshVerts(bind));
                     }
-                    else
+                    else if (!pending)
                     {
                         wgr_mesh_update(renderer, slot->renderer, AsMeshVerts(bind));
                     }
@@ -1350,7 +1358,9 @@ class VertexBufferWgpu : public VertexBuffer
         // and it is what keeps the conformed-road case exact: that road's FIRST Update is the
         // one that replaces BuildVertices bytes with BuildOrigVertices bytes carrying the
         // ClipLand selector, and it runs in the same draw phase as the create.
-        if (slot->renderer == 0)
+        // CRASH-20261022: checked and rewritten under the payload lock -- the drain may be
+        // copying these very bytes on the render thread right now.
+        if (std::lock_guard payloadLock(slot->payloadMutex); slot->renderer == 0)
         {
             if (diag) { diag->pendingRewrites.fetch_add(1, std::memory_order_relaxed); }
             if (cpuPosed) { Poseidon::GFaceDiag().updPending++; }
@@ -4160,6 +4170,11 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             // REN-THR-011. `dead` means the VertexBufferWgpu was destroyed before this drain
             // ran, so nothing can name the mesh any more: skipping the create is the whole
             // handling of that case, and it is cheaper than creating and then destroying.
+            // CRASH-20261022: the producer may rewrite or release the payload concurrently
+            // (render overlap); hold the slot's payload lock for the whole create.
+            std::unique_lock<std::mutex> payloadLock;
+            if (op.cpu)
+                payloadLock = std::unique_lock<std::mutex>(op.cpu->payloadMutex);
             if (!op.cpu || op.cpu->dead)
             {
                 if (_geometryOwnerLedger) _geometryOwnerLedger->NoteCancelledBeforeCreate(_geometryOwnerEpoch);

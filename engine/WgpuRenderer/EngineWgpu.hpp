@@ -107,6 +107,15 @@ struct CpuMeshSlot
     // so releasing the newest borrower cannot invalidate an older live buffer.
     uint64_t sharedProducer = 0;
     render::SharedRetainedMeshLifetime::Borrower sharedLifetime;
+    // CRASH-20261022: the pending payload is shared between the render thread's drain (which
+    // uploads `verts`/`indices` and then sets `renderer`) and the producer, which rewrites
+    // `verts` while `renderer` is 0 and marks the slot `dead` on release. With render overlap
+    // the drain runs DURING the draw phase, so a rewrite freed the vector the create was
+    // copying (owner crash: wgr_mesh_create read freed memory as a spawned boat's three meshes
+    // were updated before their creates landed). The drain holds this for the whole create;
+    // the producer holds it only around the pending check and the move -- never across a
+    // wgr_* call, so it cannot deadlock against the renderer.
+    std::mutex payloadMutex;
 };
 
 // REN-THR-011 -- the back edge a CPU-path vertex buffer needs and must not own outright.
