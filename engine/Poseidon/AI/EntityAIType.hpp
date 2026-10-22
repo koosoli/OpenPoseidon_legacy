@@ -165,6 +165,10 @@ struct ReflectorInfo
 	Vector3 direction;
 	float size;
 	float brightness;
+	//! LGT-REFL-001: optional `opConeAngle` (full beam angle, degrees). Stored as the half-angle
+	//! in radians; 0 when the class does not say, and then the beam keeps the engine's
+	//! historical 36 degrees -- `size` is NOT read as an angle here, old configs never meant it.
+	float coneHalfAngle = 0;
 	AnimationSection selection; // used to Hide/Unhide
 	HitPoint hitPoint;
 

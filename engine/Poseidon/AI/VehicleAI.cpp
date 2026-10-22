@@ -181,6 +181,17 @@ void ReflectorInfo::Load(EntityAIType& type, const ParamEntry& cls, float armor)
     }
     size = cls >> "size";
     brightness = cls >> "brightness";
+    // LGT-REFL-001: an addon may give its reflector a beam width. Nothing in OFP, CWA or the
+    // Arma configs carries this key, so every existing reflector keeps its old beam.
+    coneHalfAngle = 0;
+    if (cls.FindEntry("opConeAngle"))
+    {
+        const float degrees = cls >> "opConeAngle";
+        if (degrees > 1.0f && degrees < 176.0f)
+        {
+            coneHalfAngle = degrees * (H_PI / 360.0f);
+        }
+    }
     RString selName = cls >> "selection";
     selection.Init(shape, selName, nullptr);
     RString hitName = cls >> "hitpoint";
@@ -1205,6 +1216,10 @@ EntityAI::EntityAI(EntityAIType* type, bool fullCreate)
         LightReflectorOnVehicle* light = new LightReflectorOnVehicle(shape, info.color, info.colorAmbient, this,
                                                                      info.position, info.direction, info.size);
         light->SetBrightness(info.brightness);
+        if (info.coneHalfAngle > 0)
+        {
+            light->SetAngle(info.coneHalfAngle); // LGT-REFL-001
+        }
         GScene->AddLight(light);
         _reflectors[i] = light;
     }
