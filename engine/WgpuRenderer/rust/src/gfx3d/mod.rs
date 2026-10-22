@@ -327,8 +327,10 @@ fn vb_whole() -> bool {
 // it is at most (1 - alpha) <= 2%. The owner approved a small deviation, not that one, so twin
 // batching stays opt-in until they decide:
 //   WGR_DIRECT_BATCH=0      every draw on its own, as before
-//   default (or =exact)     batch only runs without twins (bit-identical image)
-//   WGR_DIRECT_BATCH=all    batch twin runs too (the deviation above)
+//   default (or =exact)     batch runs without twins, and twin runs only in pieces whose members
+//                           cover pairwise disjoint screen rectangles (WGPU-034) -- both leave
+//                           the image bit-identical
+//   WGR_DIRECT_BATCH=all    batch whole twin runs (the deviation above)
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum DirectBatchMode {
     Off,
@@ -406,6 +408,168 @@ fn direct_batch_replay_bits(d: &WgrDraw3D) -> u8 {
         | ((draw_replays_before_rays(d, true) as u8) << 1)
         | ((draw_replays_before_water(d) as u8) << 2)
         | ((draw_is_prepassed(d) as u8) << 3)
+}
+
+// WGPU-034 -- twin runs in the default (exact) mode. Batching a twin run reorders twin_j ahead
+// of blend_i for every i < j in the run (see DirectBatchMode); the image changes only where those
+// two draws touch the same samples. If every pair of members covers disjoint screen rectangles,
+// no sample is touched by both, so the reordered run produces the same image bit for bit -- depth
+// and colour are per-sample, and neither draw reads what the other writes anywhere else. A twin
+// run is therefore cut into maximal pieces whose members' conservative NDC rectangles are
+// pairwise disjoint, and only those pieces are batched. A member whose rectangle cannot be
+// bounded (a corner at or behind the eye plane, an untrusted AABB, vertex displacement by
+// conform or vegetation sway, a skinned draw) stays a single draw, exactly as before.
+// WGR_DIRECT_BATCH_TWIN_RECT=0 restores WGPU-033's exact mode (no twin batching at all).
+fn direct_batch_twin_rect_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_DIRECT_BATCH_TWIN_RECT").map(|v| v.trim() != "0").unwrap_or(true))
+}
+
+// Longest twin piece; bounds the pairwise test to max * (max - 1) / 2 rectangle checks.
+const DIRECT_BATCH_TWIN_MAX: usize = 64;
+// Instances a twin op may carry and still get a rectangle (the union of all of them).
+const DIRECT_BATCH_TWIN_MAX_INSTANCES: u32 = 32;
+// Widening of every rectangle, in NDC units (~2 px at 2000 px): absorbs the CPU/GPU rounding
+// difference of the same transform. The rasteriser itself never covers a sample outside the
+// projected hull, which lies inside the rectangle of the projected AABB corners.
+const DIRECT_BATCH_RECT_MARGIN: f32 = 2.0e-3;
+
+fn vertex_aabb(verts: &[WgrMeshVertex]) -> ([f32; 3], [f32; 3]) {
+    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for v in verts {
+        let p = [v.pos.x, v.pos.y, v.pos.z];
+        for a in 0..3 {
+            lo[a] = lo[a].min(p[a]);
+            hi[a] = hi[a].max(p[a]);
+        }
+    }
+    (lo, hi)
+}
+
+// Conservative NDC rectangle [min_x, min_y, max_x, max_y] (clamped to the screen) of a model
+// AABB under `m` = proj * view * world, or None when it cannot be bounded: an empty or invalid
+// AABB, a non-finite value, or any corner with clip w <= 0 (the box reaches the eye plane, and
+// its projection is unbounded). With w > 0 at all eight corners w is positive on the whole box
+// (it is affine), so every point of it projects inside the corners' rectangle.
+fn aabb_ndc_rect(lo: [f32; 3], hi: [f32; 3], m: glam::Mat4) -> Option<[f32; 4]> {
+    if (0..3).any(|a| !(lo[a] <= hi[a]) || !lo[a].is_finite() || !hi[a].is_finite()) {
+        return None;
+    }
+    let mut r = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+    for k in 0..8 {
+        let c = glam::Vec4::new(
+            if k & 1 == 0 { lo[0] } else { hi[0] },
+            if k & 2 == 0 { lo[1] } else { hi[1] },
+            if k & 4 == 0 { lo[2] } else { hi[2] },
+            1.0,
+        );
+        let p = m * c;
+        if !(p.w > 1.0e-6) || !p.x.is_finite() || !p.y.is_finite() {
+            return None;
+        }
+        let (x, y) = (p.x / p.w, p.y / p.w);
+        r = [r[0].min(x), r[1].min(y), r[2].max(x), r[3].max(y)];
+    }
+    let e = DIRECT_BATCH_RECT_MARGIN;
+    Some([
+        (r[0] - e).clamp(-1.0, 1.0),
+        (r[1] - e).clamp(-1.0, 1.0),
+        (r[2] + e).clamp(-1.0, 1.0),
+        (r[3] + e).clamp(-1.0, 1.0),
+    ])
+}
+
+// Closed intervals: touching rectangles count as overlapping (conservative).
+fn ndc_rects_overlap(a: &[f32; 4], b: &[f32; 4]) -> bool {
+    a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
+}
+
+// Cuts 0..rects.len() into consecutive pieces whose rectangles are pairwise disjoint, greedily
+// (a member joins the open piece unless it overlaps one of its members or the piece is full).
+// A member without a rectangle is a piece of its own. Every index lands in exactly one piece.
+fn split_pairwise_disjoint(rects: &[Option<[f32; 4]>], max_len: usize) -> Vec<std::ops::Range<usize>> {
+    let mut pieces = Vec::new();
+    let mut start = 0;
+    for k in 0..rects.len() {
+        let Some(rk) = rects[k] else {
+            if start < k {
+                pieces.push(start..k);
+            }
+            pieces.push(k..k + 1);
+            start = k + 1;
+            continue;
+        };
+        let full = k - start >= max_len.max(1);
+        if full || rects[start..k].iter().flatten().any(|r| ndc_rects_overlap(r, &rk)) {
+            pieces.push(start..k);
+            start = k;
+        }
+    }
+    if start < rects.len() {
+        pieces.push(start..rects.len());
+    }
+    pieces
+}
+
+#[test]
+fn twin_pieces_are_pairwise_disjoint() {
+    let r = |x0: f32, x1: f32| Some([x0, -0.1, x1, 0.1]);
+    // a b c disjoint; d overlaps a (not its neighbour c) -> cut before d
+    let rects = [r(-0.9, -0.7), r(-0.6, -0.4), r(-0.3, -0.1), r(-0.8, -0.75), r(0.5, 0.6)];
+    assert_eq!(split_pairwise_disjoint(&rects, 64), vec![0..3, 3..5]);
+    // a member without a rectangle stands alone and closes the open piece
+    let rects = [r(-0.9, -0.7), None, r(-0.6, -0.4), r(-0.3, -0.1)];
+    assert_eq!(split_pairwise_disjoint(&rects, 64), vec![0..1, 1..2, 2..4]);
+    // touching edges count as overlap
+    let rects = [r(-0.5, 0.0), r(0.0, 0.5)];
+    assert_eq!(split_pairwise_disjoint(&rects, 64), vec![0..1, 1..2]);
+    // the length cap
+    let rects: Vec<_> = (0..5).map(|i| r(i as f32 * 0.2 - 0.95, i as f32 * 0.2 - 0.9)).collect();
+    assert_eq!(split_pairwise_disjoint(&rects, 2), vec![0..2, 2..4, 4..5]);
+    assert!(split_pairwise_disjoint(&[], 64).is_empty());
+    // every piece really is pairwise disjoint, every index covered once
+    let rects = [r(-0.9, -0.5), r(-0.4, 0.0), r(-0.6, -0.45), r(0.1, 0.2), r(-0.05, 0.05), r(0.3, 0.4)];
+    let pieces = split_pairwise_disjoint(&rects, 64);
+    assert_eq!(pieces.iter().map(|p| p.len()).sum::<usize>(), rects.len());
+    for p in &pieces {
+        for i in p.clone() {
+            for j in p.clone() {
+                if i < j {
+                    assert!(!ndc_rects_overlap(&rects[i].unwrap(), &rects[j].unwrap()));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn aabb_rect_is_conservative_and_refuses_the_eye_plane() {
+    let proj = glam::Mat4::perspective_rh(1.0, 16.0 / 9.0, 0.1, 1000.0);
+    let world = glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, -10.0));
+    let (lo, hi) = ([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]);
+    let m = proj * world;
+    let r = aabb_ndc_rect(lo, hi, m).expect("box in front of the eye");
+    // every vertex of a dense sample of the box projects inside
+    for i in 0..=10 {
+        for j in 0..=10 {
+            for k in 0..=10 {
+                let p = glam::Vec3::new(i as f32 / 5.0 - 1.0, j as f32 / 5.0 - 1.0, k as f32 / 5.0 - 1.0);
+                let c = m * p.extend(1.0);
+                let (x, y) = (c.x / c.w, c.y / c.w);
+                assert!(x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]);
+            }
+        }
+    }
+    // a box reaching behind the eye cannot be bounded
+    let near = glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, -0.5));
+    assert!(aabb_ndc_rect(lo, hi, proj * near).is_none());
+    // an empty AABB (no vertices) cannot either
+    assert!(aabb_ndc_rect([f32::MAX; 3], [f32::MIN; 3], m).is_none());
+    // a box far to the side is clamped to the screen edge
+    let side = glam::Mat4::from_translation(glam::Vec3::new(-200.0, 0.0, -10.0));
+    let r = aabb_ndc_rect(lo, hi, proj * side).unwrap();
+    assert_eq!(r[0], -1.0);
+    assert_eq!(r[2], -1.0);
 }
 
 fn solid_blend_candidate(d: &WgrDraw3D) -> bool {
@@ -1528,6 +1692,10 @@ struct Mesh {
     // afterwards they live in the GPU pool and recovering them means a readback.
     aabb_min: [f32; 3],
     aabb_max: [f32; 3],
+    // WGPU-034: false once anything rewrote this mesh's vertices after the AABB was taken
+    // (Gfx3d::mesh_update, or the off-handle uploader -- see note_meshes_rewritten). Only a
+    // trusted AABB may bound a draw's screen rectangle for twin batching.
+    aabb_trusted: bool,
 }
 
 // One GPU-driven section's registration source: the mesh handle it lives in, its mesh-local
@@ -1601,7 +1769,7 @@ mod palette_section_tests {
         let mut meshes: SlotMap<MeshKey, Mesh> = SlotMap::with_key();
         let make_mesh = || Mesh {
             alloc: MeshAlloc { vbase: 2, ibase: 4 }, index_count: 9, vert_count: 3,
-            skin: None, aabb_min: [0.0; 3], aabb_max: [0.0; 3],
+            skin: None, aabb_min: [0.0; 3], aabb_max: [0.0; 3], aabb_trusted: false,
         };
         let first = meshes.insert(make_mesh());
         let source = GpuSectionSrc { mesh: first.data().as_ffi(), index_begin: 2,
@@ -6602,6 +6770,7 @@ impl Gfx3d {
             skin: None,
             aabb_min,
             aabb_max,
+            aabb_trusted: true,
         });
         // New full-generational identity can change a formerly missing source.
         let created = key.data().as_ffi();
@@ -6660,6 +6829,8 @@ impl Gfx3d {
         mesh.alloc = alloc;
         mesh.vert_count = verts.len() as u32;
         mesh.index_count = indices.len() as u32;
+        // WGPU-034: the restored geometry is the caller's, not necessarily the evicted one.
+        (mesh.aabb_min, mesh.aabb_max) = vertex_aabb(verts);
         self.evicted_meshes.remove(&handle);
         self.note_section_mesh(handle);
         true
@@ -6706,6 +6877,7 @@ impl Gfx3d {
                 skin: None,
                 aabb_min,
                 aabb_max,
+                aabb_trusted: true,
             });
             self.shared_meshes.of_mesh.insert(key, content);
             self.shared_meshes.hits += 1;
@@ -6935,6 +7107,10 @@ impl Gfx3d {
         }
         let vbase = mesh.alloc.vbase;
         self.pool.update_verts(queue, vbase, verts);
+        // WGPU-034: the new vertices may leave the AABB taken at create time.
+        if let Some(mesh) = self.meshes.get_mut(KeyData::from_ffi(handle).into()) {
+            mesh.aabb_trusted = false;
+        }
         // The pool handle can be shared by multiple model sections. Until a
         // complete reverse owner map exists, advance the optional per-model
         // witness after a successful on-renderer vertex update. Old samples
@@ -6980,6 +7156,16 @@ impl Gfx3d {
     // fixed for the life of a mesh (the pool never compacts); the pool buffer is NOT, which
     // is why `pool_generation` is published alongside it and the renderer republishes at
     // the two sites where the epoch can move.
+    /// WGPU-034: meshes the off-handle uploader rewrote since the last call
+    /// (Uploader::take_rewritten). Their create-time AABB no longer bounds them.
+    pub fn note_meshes_rewritten(&mut self, handles: &[u64]) {
+        for &h in handles {
+            if let Some(mesh) = self.meshes.get_mut(KeyData::from_ffi(h).into()) {
+                mesh.aabb_trusted = false;
+            }
+        }
+    }
+
     pub fn mesh_upload_meta(&self, handle: u64) -> Option<(u32, u32)> {
         let mesh = self.meshes.get(KeyData::from_ffi(handle).into())?;
         Some((mesh.alloc.vbase, mesh.vert_count))
@@ -9890,7 +10076,8 @@ impl Gfx3d {
             return None;
         }
         let twin = draw_solid_blend_prepassed(d);
-        if twin && mode != DirectBatchMode::All {
+        // Exact admits twins only to cut their runs into screen-disjoint pieces (WGPU-034).
+        if twin && !(mode == DirectBatchMode::All || direct_batch_twin_rect_enabled()) {
             return None;
         }
         Some(DirectBatchSig {
@@ -9899,6 +10086,40 @@ impl Gfx3d {
             twin,
             replay: direct_batch_replay_bits(d),
         })
+    }
+
+    // WGPU-034: the conservative NDC rectangle of everything one twin op can rasterise in the
+    // colour pass -- the union over its instances -- or None when it cannot be bounded and the
+    // op must stay a single draw. Each instance's world is the one object_gpu_for_draw packs
+    // (draws[order[slot]].world, camera-relative); the vertex shader moves no vertex of a rigid,
+    // unconformed, non-vegetation draw beyond `world`, and the mesh AABB holds every vertex as
+    // long as nothing rewrote them since it was taken (Mesh::aabb_trusted).
+    fn twin_op_rect(&self, op: &Plan3dOp, draws: &[WgrDraw3D], cameras: &[WgrCamera], order: &[u32]) -> Option<[f32; 4]> {
+        let Plan3dOp::Draw3D { draw, base, count, .. } = op else {
+            return None;
+        };
+        if *count == 0 || *count > DIRECT_BATCH_TWIN_MAX_INSTANCES {
+            return None;
+        }
+        let cam = cameras.get(draws.get(*draw as usize)?.camera as usize)?;
+        let vp = glam::Mat4::from_cols_array(&cam.proj) * glam::Mat4::from_cols_array(&cam.view);
+        let mut acc: Option<[f32; 4]> = None;
+        for k in 0..*count {
+            let d = draws.get(*order.get((*base + k) as usize)? as usize)?;
+            if d.palette_slot != NO_PALETTE || d.conform2[2] > 0.5 || d.mat_sun_ambient[3] > 0.5 {
+                return None;
+            }
+            let mesh = self.meshes.get(KeyData::from_ffi(d.mesh).into())?;
+            if !mesh.aabb_trusted || mesh.vert_count == 0 {
+                return None;
+            }
+            let r = aabb_ndc_rect(mesh.aabb_min, mesh.aabb_max, vp * glam::Mat4::from_cols_array(&d.world))?;
+            acc = Some(match acc {
+                None => r,
+                Some(a) => [a[0].min(r[0]), a[1].min(r[1]), a[2].max(r[2]), a[3].max(r[3])],
+            });
+        }
+        acc
     }
 
     // WGPU-033: fold runs of consecutive Direct ops with one signature into a DirectBatch op
@@ -9910,6 +10131,8 @@ impl Gfx3d {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         draws: &[WgrDraw3D],
+        cameras: &[WgrCamera],
+        order: &[u32],
         ops: &mut [Plan3dOp],
     ) {
         let mode = direct_batch_mode();
@@ -9920,8 +10143,26 @@ impl Gfx3d {
             ops.iter().map(|op| self.direct_batch_sig(op, draws, mode)).collect();
         let runs_found = direct_batch_runs(&sigs);
         let mut args: Vec<DrawIndexedIndirectArgs> = Vec::new();
-        let (mut runs, mut twin_runs) = (0u32, 0u32);
-        for run in runs_found {
+        let (mut runs, mut twin_runs, mut twin_cut) = (0u32, 0u32, 0u32);
+        // WGPU-034: in exact mode a twin run is batched only in screen-disjoint pieces.
+        let pieces: Vec<std::ops::Range<usize>> = runs_found
+            .into_iter()
+            .flat_map(|run| {
+                let twin = sigs[run.start].is_some_and(|s| s.twin);
+                if !twin || mode == DirectBatchMode::All {
+                    return vec![run];
+                }
+                let rects: Vec<Option<[f32; 4]>> =
+                    ops[run.clone()].iter().map(|op| self.twin_op_rect(op, draws, cameras, order)).collect();
+                let cut = split_pairwise_disjoint(&rects, DIRECT_BATCH_TWIN_MAX);
+                twin_cut += (cut.len() - 1) as u32;
+                cut.into_iter()
+                    .filter(|p| p.len() >= 2)
+                    .map(|p| p.start + run.start..p.end + run.start)
+                    .collect()
+            })
+            .collect();
+        for run in pieces {
             let (i, j) = (run.start, run.end);
             let twin = sigs[i].is_some_and(|s| s.twin);
             let arg_offset = (args.len() as u64 * INDIRECT_ARG_SIZE) as u32;
@@ -9953,8 +10194,8 @@ impl Gfx3d {
         if *TRACE.get_or_init(|| std::env::var("WGR_DIRECT_BATCH_TRACE").is_ok_and(|v| v != "0")) {
             if self.direct_batch_frames % 300 == 0 {
                 self.queued_log.push(format!(
-                    "[wgr] WGPU-033 direct batches ({mode:?}): {runs} runs ({twin_runs} with twins) \
-                     hold {} draws; {singles} direct draws stay single",
+                    "[wgr] WGPU-033 direct batches ({mode:?}): {runs} runs ({twin_runs} with twins, \
+                     {twin_cut} WGPU-034 cuts) hold {} draws; {singles} direct draws stay single",
                     args.len()
                 ));
             }
