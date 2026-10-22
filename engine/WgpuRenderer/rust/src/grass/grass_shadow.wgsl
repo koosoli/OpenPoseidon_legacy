@@ -68,6 +68,9 @@ struct GrassParams {
     // field frequency (1/m); look_weights = the per-slot weights pick_look draws from.
     variety: vec4<f32>,
     look_weights: array<vec4<f32>, 4>,
+    // WGPU-036 (grass/mod.rs mid_lod_lanes): procedural mid-ring screen-density LOD. .x = d0 (m)
+    // past which clumps thin as d0/d (0 = off), .y = survivors' widening exponent, .zw spare.
+    mid_lod: vec4<f32>,
 };
 // Must mirror grass.wgsl's 32-byte layout exactly: both shaders bind the same
 // instance buffer through the shared `data_layout`.
