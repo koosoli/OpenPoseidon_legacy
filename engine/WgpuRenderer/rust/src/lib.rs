@@ -140,6 +140,13 @@ struct UnderwaterView {
 
 // Like env_f32 but keeps a 0 value (env_f32 filters to >0 for scales). Used for the
 // tonemap mode/encode toggles where 0 is a meaningful "off".
+/// PERF-SKY-AFTER-PREPASS lever: WGR_SKY_AFTER_PREPASS=0 draws the sky before the depth prepass,
+/// over every pixel, as before.
+fn sky_after_prepass() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_SKY_AFTER_PREPASS").map(|v| v.trim() != "0").unwrap_or(true))
+}
+
 fn env_f32_opt(name: &str, default: f32) -> f32 {
     std::env::var(name)
         .ok()
@@ -5724,6 +5731,8 @@ impl Renderer {
             self.gfx2d.set_soft_depth(&self.device, None, 0);
             self.soft_particles.invalidate();
         }
+        // PERF-SKY-AFTER-PREPASS: set below when the sky waits for the depth prepass.
+        let mut sky_deferred = false;
         if let Some((ivp, cam_pos, cam_shadow)) = sky_ivp {
             self.sky.set_ocean_level(self.water.ocean_level());
             self.sky.upload(
@@ -5785,6 +5794,11 @@ impl Renderer {
                 self.gpu_timers.end(&mut encoder,TimerRegion::LayeredFog);
             }
             self.sky.update_fog_chroma(&self.queue,self.sky.fog.is_ready(),self.layer_fog_weather);
+            // PERF-SKY-AFTER-PREPASS: with a depth prepass the sky is drawn right after it (in
+            // the segment loop below), depth-tested, so its per-pixel atmosphere march runs only
+            // where no surface will cover it. WGR_SKY_AFTER_PREPASS=0 draws it here as before.
+            sky_deferred = normal.is_some() && sky_after_prepass();
+          if !sky_deferred {
             self.gpu_timers.begin(&mut encoder, TimerRegion::SkyDraw);
             encoder.push_debug_group("wgr_sky");
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -5813,6 +5827,7 @@ impl Renderer {
             drop(pass);
             encoder.pop_debug_group();
             self.gpu_timers.end(&mut encoder, TimerRegion::SkyDraw);
+          }
         }
 
         // The underwater volume is genuinely view-local work, so keep it completely
@@ -6269,6 +6284,43 @@ impl Renderer {
                     .end(&mut encoder, TimerRegion::ObjPrepassSegment);
                 self.gpu_timers.cpu_end(TimerRegion::ObjPrepassSegment);
                 encoder.pop_debug_group();
+            }
+            // PERF-SKY-AFTER-PREPASS: the sky, deferred from above, over the far-plane pixels the
+            // prepass left. It still clears the colour target first, exactly as before.
+            if sky_deferred && do_prepass {
+                sky_deferred = false;
+                self.gpu_timers.begin(&mut encoder, TimerRegion::SkyDraw);
+                encoder.push_debug_group("wgr_sky");
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("wgr_sky"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &scene_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: clear_rgb[0] as f64,
+                                g: clear_rgb[1] as f64,
+                                b: clear_rgb[2] as f64,
+                                a: clear[3] as f64,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &depth,
+                        depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
+                        stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                self.sky.render_depth_tested(&mut pass);
+                self.sky.fog.render_background_depth_tested(&mut pass);
+                drop(pass);
+                encoder.pop_debug_group();
+                self.gpu_timers.end(&mut encoder, TimerRegion::SkyDraw);
             }
             // When the prepass ran, the depth (+ stencil 0) it wrote is complete, so the
             // colour sub-pass LOADS it; otherwise it clears as before.

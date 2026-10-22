@@ -113,7 +113,7 @@ pub struct LayeredFog {
     local_lights: wgpu::Buffer, local_count: u32,
     sampler: wgpu::Sampler, comparison: wgpu::Sampler,
     layout: wgpu::BindGroupLayout, solar_layout: wgpu::BindGroupLayout, compute: wgpu::ComputePipeline, solar_compute: wgpu::ComputePipeline,
-    background: wgpu::RenderPipeline, background_bind: wgpu::BindGroup,
+    background: wgpu::RenderPipeline, background_depth_tested: wgpu::RenderPipeline, background_bind: wgpu::BindGroup, background_depth_tested_bind: wgpu::BindGroup,
     ready: bool, trace: bool, frames: u64,
     // The incoming-solar field depends only on the snapped domain, the sun, the
     // fog profile and the native height source -- never on the camera inside a
@@ -210,11 +210,22 @@ impl LayeredFog {
             fragment:Some(wgpu::FragmentState {module:&background_module,entry_point:Some("fs_main"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState {format,
                 blend:Some(wgpu::BlendState {color:wgpu::BlendComponent {src_factor:wgpu::BlendFactor::One,dst_factor:wgpu::BlendFactor::SrcAlpha,operation:wgpu::BlendOperation::Add},alpha:wgpu::BlendComponent {src_factor:wgpu::BlendFactor::Zero,dst_factor:wgpu::BlendFactor::One,operation:wgpu::BlendOperation::Add}}),write_mask:wgpu::ColorWrites::ALL})]}),
             primitive:Default::default(),depth_stencil:None,multisample:wgpu::MultisampleState {count:samples,..Default::default()},multiview_mask:None,cache:None});
+        // PERF-SKY-AFTER-PREPASS: drawn with the sky after the depth prepass, only on far-plane pixels.
+        let background_depth_tested=device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {label:Some("wgr_layer_fog_background_depth_tested"),layout:None,
+            vertex:wgpu::VertexState {module:&background_module,entry_point:Some("vs_main"),compilation_options:Default::default(),buffers:&[]},
+            fragment:Some(wgpu::FragmentState {module:&background_module,entry_point:Some("fs_main"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState {format,
+                blend:Some(wgpu::BlendState {color:wgpu::BlendComponent {src_factor:wgpu::BlendFactor::One,dst_factor:wgpu::BlendFactor::SrcAlpha,operation:wgpu::BlendOperation::Add},alpha:wgpu::BlendComponent {src_factor:wgpu::BlendFactor::Zero,dst_factor:wgpu::BlendFactor::One,operation:wgpu::BlendOperation::Add}}),write_mask:wgpu::ColorWrites::ALL})]}),
+            primitive:Default::default(),depth_stencil:Some(wgpu::DepthStencilState {format:crate::gfx3d::depth_format(device),depth_write_enabled:Some(false),depth_compare:Some(wgpu::CompareFunction::GreaterEqual),stencil:wgpu::StencilState::default(),bias:wgpu::DepthBiasState::default()}),multisample:wgpu::MultisampleState {count:samples,..Default::default()},multiview_mask:None,cache:None});
         let background_bind=device.create_bind_group(&wgpu::BindGroupDescriptor {label:Some("wgr_layer_fog_background_bind"),layout:&background.get_bind_group_layout(0),entries:&[
             wgpu::BindGroupEntry {binding:0,resource:wgpu::BindingResource::TextureView(&view)},
             wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::Sampler(&sampler)},
             wgpu::BindGroupEntry {binding:2,resource:consumer.as_entire_binding()}]});
-        Self {view,solar_view,consumer,_texture:texture,_solar_texture:solar_texture,params,height,shadow,csm,zero_counts,local_lights,local_count:0,sampler,comparison,layout,solar_layout,compute,solar_compute,background,background_bind,
+        // An auto layout belongs to its own pipeline: the depth-tested twin needs its own bind group.
+        let background_depth_tested_bind=device.create_bind_group(&wgpu::BindGroupDescriptor {label:Some("wgr_layer_fog_background_depth_tested_bind"),layout:&background_depth_tested.get_bind_group_layout(0),entries:&[
+            wgpu::BindGroupEntry {binding:0,resource:wgpu::BindingResource::TextureView(&view)},
+            wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::Sampler(&sampler)},
+            wgpu::BindGroupEntry {binding:2,resource:consumer.as_entire_binding()}]});
+        Self {view,solar_view,consumer,_texture:texture,_solar_texture:solar_texture,params,height,shadow,csm,zero_counts,local_lights,local_count:0,sampler,comparison,layout,solar_layout,compute,solar_compute,background,background_depth_tested,background_bind,background_depth_tested_bind,
             ready:false,trace:std::env::var("WGR_LAYERED_FOG_TRACE").as_deref()==Ok("1"),frames:0,
             solar_key:None,solar_reuses:0}
     }
@@ -325,6 +336,10 @@ impl LayeredFog {
     }
     pub fn render_background(&self,pass:&mut wgpu::RenderPass<'_>) {
         if self.ready {pass.set_pipeline(&self.background);pass.set_bind_group(0,&self.background_bind,&[]);pass.draw(0..3,0..1);}
+    }
+    /// PERF-SKY-AFTER-PREPASS: render_background in the depth-tested sky pass.
+    pub fn render_background_depth_tested(&self,pass:&mut wgpu::RenderPass<'_>) {
+        if self.ready {pass.set_pipeline(&self.background_depth_tested);pass.set_bind_group(0,&self.background_depth_tested_bind,&[]);pass.draw(0..3,0..1);}
     }
 }
 

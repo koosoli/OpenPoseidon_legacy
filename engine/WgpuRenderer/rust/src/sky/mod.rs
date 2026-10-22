@@ -1149,6 +1149,8 @@ pub struct Sky {
     pub fog: crate::layered_fog::LayeredFog,
     // Main fullscreen sky pipeline (targets the scene format).
     sky_pipeline: wgpu::RenderPipeline,
+    // PERF-SKY-AFTER-PREPASS: sky_pipeline depth-tested against the prepass (render_depth_tested).
+    sky_pipeline_depth_tested: wgpu::RenderPipeline,
     // Single-sample twin for the resolution-scaled planar reflection.
     planar_sky_pipeline: wgpu::RenderPipeline,
     sky_bind: wgpu::BindGroup,
@@ -1492,7 +1494,8 @@ impl Sky {
                              layout: &wgpu::BindGroupLayout,
                              fs: &str,
                              format: wgpu::TextureFormat,
-                             samples: u32| {
+                             samples: u32,
+                             depth: Option<wgpu::TextureFormat>| {
             let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(label),
                 bind_group_layouts: &[Some(layout)],
@@ -1508,7 +1511,15 @@ impl Sky {
                     compilation_options: Default::default(),
                 },
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
+                // PERF-SKY-AFTER-PREPASS: the depth-tested twin draws only where the depth
+                // prepass left the far plane (reversed-Z 0; the triangle's own depth is 0).
+                depth_stencil: depth.map(|format| wgpu::DepthStencilState {
+                    format,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState {
                     count: samples,
                     ..Default::default()
@@ -1534,6 +1545,7 @@ impl Sky {
             "fs_transmittance",
             LUT_FORMAT,
             1,
+            None,
         );
         let multiscatter_pipeline = make_pipeline(
             "wgr_sky_multiscatter",
@@ -1541,13 +1553,16 @@ impl Sky {
             "fs_multiscatter",
             LUT_FORMAT,
             1,
+            None,
         );
         let sky_pipeline =
-            make_pipeline("wgr_sky", &sky_layout, "fs_sky", color_format, sample_count);
+            make_pipeline("wgr_sky", &sky_layout, "fs_sky", color_format, sample_count, None);
+        let sky_pipeline_depth_tested = make_pipeline("wgr_sky_depth_tested", &sky_layout, "fs_sky",
+            color_format, sample_count, Some(crate::gfx3d::depth_format(device)));
         let planar_sky_pipeline =
-            make_pipeline("wgr_sky_planar", &sky_layout, "fs_sky", color_format, 1);
+            make_pipeline("wgr_sky_planar", &sky_layout, "fs_sky", color_format, 1, None);
         // Env-map bake: same group(0) layout as the sky pass, single-sample, LUT_FORMAT target.
-        let env_pipeline = make_pipeline("wgr_sky_env", &sky_layout, "fs_sky_env", ENV_FORMAT, 1);
+        let env_pipeline = make_pipeline("wgr_sky_env", &sky_layout, "fs_sky_env", ENV_FORMAT, 1, None);
         let env_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("wgr_sky_env"),
             size: wgpu::Extent3d {
@@ -2364,6 +2379,7 @@ impl Sky {
         Self {
             fog,
             sky_pipeline,
+            sky_pipeline_depth_tested,
             planar_sky_pipeline,
             sky_bind,
             env_pipeline,
@@ -2820,6 +2836,14 @@ impl Sky {
     // Draw the fullscreen sky into an already-begun render pass targeting the scene.
     pub fn render(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_pipeline(&self.sky_pipeline);
+        pass.set_bind_group(0, &self.sky_bind, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
+    /// PERF-SKY-AFTER-PREPASS: the sky in a pass that carries the depth prepass's depth, shaded
+    /// only where nothing was drawn. Same shader, same output on every pixel it touches.
+    pub fn render_depth_tested(&self, pass: &mut wgpu::RenderPass<'_>) {
+        pass.set_pipeline(&self.sky_pipeline_depth_tested);
         pass.set_bind_group(0, &self.sky_bind, &[]);
         pass.draw(0..3, 0..1);
     }
