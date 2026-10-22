@@ -814,7 +814,7 @@ fn reflect_env_radiance(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
         (sky_irradiance(vec3<f32>(0.0, 1.0, 0.0)) * frame.sun_ambient.w + frame.sun_diffuse.rgb * max(to_sun.y, 0.0));
     return mix(ground, sky, smoothstep(-0.08, 0.08, dir.y));
 }
-const REFLECT_GROUND_ALBEDO: f32 = 0.3;
+const REFLECT_GROUND_ALBEDO: f32 = 0.2;
 
 // REFLECT-001 debug colours. View 1 = surface class (fixed palette), 2 = roughness (grey),
 // 3 = F0 / metal (red = F0 x 10, green = metal), 4 = clear coat (blue = strength, green =
