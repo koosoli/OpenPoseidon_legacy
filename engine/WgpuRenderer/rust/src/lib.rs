@@ -4344,6 +4344,10 @@ impl Renderer {
         // args-buffer offset for the replay below.
         self.gfx3d
             .build_indirect(&self.device, &self.queue, draws3d, &mut plan.ops);
+        // WGPU-033: runs of consecutive barrier draws on one pipeline become one multi-draw in
+        // the colour replay (WGR_DIRECT_BATCH, see gfx3d::DirectBatchMode).
+        self.gfx3d
+            .build_direct_batches(&self.device, &self.queue, draws3d, &mut plan.ops);
         let main_selection = main_camera_tuple::select(
             terrain_batches.first().map(|b| b.camera as usize), draws3d.first().map(|d| d.camera as usize),
             water_batches.first().map(|b| b.camera as usize), grass_batches.first().map(|b| b.camera as usize));
@@ -5940,7 +5944,8 @@ impl Renderer {
                         kind,
                     } => {
                         if let Some(d) = draws3d.get(*draw as usize) {
-                            // PERF-005: counted in the COLOUR replay only. The prepass replay is
+                            // PERF-005: counted in the COLOUR replay only (per DRAW: a WGPU-033
+                            // batch counts each member, so figures stay comparable). The prepass replay is
                             // a separate match arm above; counting both would double every
                             // figure while describing one set of objects.
                             let mut ds = renderer.direct_draws.get();
@@ -5953,17 +5958,30 @@ impl Renderer {
                             }
                             renderer.direct_draws.set(ds);
                             let mode = crate::gfx3d::Pass3dMode::Color { depth_write_off };
-                            if let crate::gfx3d::DrawKind::Indirect(off) = kind {
-                                renderer.gfx3d.draw_indirect(
+                            match *kind {
+                                crate::gfx3d::DrawKind::Indirect(off) => renderer.gfx3d.draw_indirect(
                                     pass,
                                     &renderer.textures,
                                     d,
-                                    *off,
+                                    off,
                                     &mut st3d,
                                     mode,
-                                );
-                            } else {
-                                renderer.gfx3d.draw_one(
+                                ),
+                                // WGPU-033: the whole run in one multi-draw at its first op; the
+                                // members after it were drawn there and are skipped here.
+                                crate::gfx3d::DrawKind::DirectBatch { arg_offset, draws } => renderer
+                                    .gfx3d
+                                    .draw_direct_batch(
+                                        pass,
+                                        &renderer.textures,
+                                        d,
+                                        arg_offset,
+                                        draws,
+                                        &mut st3d,
+                                        mode,
+                                    ),
+                                crate::gfx3d::DrawKind::Batched => {}
+                                _ => renderer.gfx3d.draw_one(
                                     pass,
                                     &renderer.textures,
                                     d,
@@ -5971,7 +5989,7 @@ impl Renderer {
                                     *count,
                                     &mut st3d,
                                     mode,
-                                );
+                                ),
                             }
                         }
                     }

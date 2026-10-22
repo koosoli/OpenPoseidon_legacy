@@ -996,7 +996,8 @@ pub struct CullState {
     variant_capacity: u32,
     params: CullParamsGpu,
     // Debug flags written into CullParamsGpu.debug_flags each frame (cull.wgsl reads them). bit 0
-    // = WGR_CULL_NO_FRUSTUM (skip the frustum test — discriminates "culled" from "not drawn").
+    // = WGR_CULL_NO_FRUSTUM (skip the frustum test — discriminates "culled" from "not drawn");
+    // bit 3 = WGR_CULL_COOP=0 (one-thread section walks, WGPU-030).
     debug_flags: u32,
     // CPU diagnostic selection only; no readback or residency policy consumes it.
     target_model_id: Option<u32>,
@@ -1725,11 +1726,11 @@ impl CullState {
             params_buf,
             variant_capacity: DEFAULT_VARIANT_CAPACITY,
             params: CullParamsGpu::zeroed(),
-            debug_flags: if std::env::var("WGR_CULL_NO_FRUSTUM").is_ok() {
-                1
-            } else {
-                0
-            },
+            // bit 0 = WGR_CULL_NO_FRUSTUM; bit 3 = WGR_CULL_COOP=0 (WGPU-030: walk every
+            // instance's sections on one thread, the pre-cooperative cull). Neither changes
+            // which instances survive, so CountCullInputKey keeps masking them out (& 3).
+            debug_flags: (if std::env::var("WGR_CULL_NO_FRUSTUM").is_ok() { 1 } else { 0 })
+                | (if std::env::var("WGR_CULL_COOP").as_deref() == Ok("0") { 8 } else { 0 }),
             target_model_id: target_model_default,
             target_model_default,
             main_count_slots: None,

@@ -42,7 +42,17 @@ namespace ShapeAdapter
         std::vector<std::vector<Ref<Poseidon::TexMaterial>>> surfMats;
         // MLOD has no authored section table; FindSections recovers these by path.
         std::vector<std::unordered_map<std::string, Ref<Poseidon::TexMaterial>>> mlodSurfMats;
+        // WGPU-021: the CfgModels `sections[]` names for an MLOD model (its own class, else
+        // `default`, following `sectionsInherit`), read on the main thread so the conversion
+        // can split sections at those selections without touching the config.
+        std::vector<std::string> cfgSections;
     };
+
+    // MAIN THREAD ONLY (reads the config). The CfgModels `sections[]` names for a model
+    // path, as the legacy loader resolves them (ShapeLOD.cpp): the class named after the
+    // file (spaces, '-', '/', '(' and ')' become '_'), else `default`, then every class
+    // `sectionsInherit` leads to. Empty when the config has no CfgModels.
+    std::vector<std::string> ResolveCfgModelSections(const std::string& sourcePath);
 
     // MAIN THREAD ONLY: touches the global texture bank and material bank, and loads
     // texture headers for non-ODOL models (the MLOD specials scan reads them).

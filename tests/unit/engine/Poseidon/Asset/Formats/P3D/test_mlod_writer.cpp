@@ -618,3 +618,45 @@ TEST_CASE("Authored UV0 tangent sidecar preserves seams winding and cache proven
     auto mismatch=MLODLoader::loadFromBuffer(bytes.data(),int(bytes.size()),"owned.xob",&source.tangentFrames);
     for (const auto& v : mismatch.lodLevels[0].mesh.vertices) REQUIRE_FALSE(v.hasTangentFrame);
 }
+
+// WGPU-020: a loose point that a named selection holds survives in a visual LOD.
+//
+// The steering-wheel axis (`osaVolantZac`/`osaVolantKon`) is read from the pilot view LOD,
+// where it is a pair of points no face uses. The reader used to keep only face corners in
+// visual and geometry LODs, so the selection came out empty; the legacy SP3X loader keeps
+// every point. A loose point outside every selection is still dropped.
+TEST_CASE("MLOD loader: a selected loose point in a visual LOD becomes a vertex", "[mlod][writer][wgpu-020]")
+{
+    MLODW::WriteModel model = buildTestModel();
+    MLODW::WriteLod& visual = model.lods[0];
+    const Poseidon::Asset::Formats::Vector3 axisPoint{0.5f, 1.0f, -2.0f};
+    const Poseidon::Asset::Formats::Vector3 strayPoint{9.0f, 9.0f, 9.0f};
+    visual.points.push_back({axisPoint, 0});  // point 6: in a selection, no face
+    visual.points.push_back({strayPoint, 0}); // point 7: in nothing, no face
+    MLODW::WriteNamedSelection axis;
+    axis.name = "osaVolantZac";
+    axis.points = {6};
+    visual.selections.push_back(axis);
+
+    const std::vector<char> bytes = MLODWriter::writeToBuffer(model);
+    const auto loaded = MLODLoader::loadFromBuffer(bytes.data(), static_cast<int>(bytes.size()), "memory");
+    const auto& mesh = loaded.lodLevels[0].mesh;
+
+    // Six face corners plus the selected axis point; the stray point is not kept.
+    REQUIRE(mesh.vertices.size() == 7);
+    REQUIRE(mesh.triangles.size() == 1);
+    REQUIRE(mesh.quads.size() == 1);
+
+    const Poseidon::Model::NamedSelection* found = nullptr;
+    for (const auto& selection : mesh.selections)
+        if (selection.name == "osaVolantZac")
+            found = &selection;
+    REQUIRE(found != nullptr);
+    REQUIRE(found->vertexIndices.size() == 1);
+    const auto& vertex = mesh.vertices[found->vertexIndices[0]];
+    REQUIRE(vertex.position.x == axisPoint.x);
+    REQUIRE(vertex.position.y == axisPoint.y);
+    REQUIRE(vertex.position.z == axisPoint.z);
+    for (const auto& v : mesh.vertices)
+        REQUIRE_FALSE(v.position.x == strayPoint.x);
+}
