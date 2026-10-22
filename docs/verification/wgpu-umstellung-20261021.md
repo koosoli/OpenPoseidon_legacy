@@ -212,3 +212,161 @@ Flug, WGPU `all`, gleiche Mission (zeitgewichtete fps):
 - Mit Schnee: neue Maske 2,7 ms statt 75 ms je Aufruf, 0 neue Prüfungen, 1 515 526 aus dem Cache,
   **masked=91 280 in allen Läufen** -- dasselbe Ergebnis.
 - WGPU ist damit auf dem ganzen Flug schneller als GL33 und ohne Ruckler.
+
+## Messung 5: neuer Stand `2ff794f` im Spielordner (22.10. 08:20)
+
+`MrDudeX-wgpu-aktuell` @ `2ff794f` = Olis `MrDudeX-arma1` @ `9c16747d` (darauf baut
+`feat/jump-reload-lean`) + 24 WGPU-Commits. Eingespielt in `Remastered` aus dem CI-Build
+(GitHub Actions 39693362590, win-x64-clang-rwdi). `OpenPoseidon.exe`, `PoseidonGame.exe` und
+`wgpu_renderer.dll` stammen alle aus diesem einen Build, sind per `cmp` geprüft und haben dieselbe
+Dateizeit. `DEPLOYED-FROM.txt` ist neu gestempelt. Der vorige Stand (`9c16747d`) liegt in
+`Remastered\_backup_vor_wgpu_20261022\`. Gemessen wurde die EXE aus `Remastered`, also genau das,
+was der Besitzer spielt.
+
+Gleiche Flug-Mission. Kennzahl hier: **Bilder ÷ Zeit über den ganzen Flug**. Das ist nicht die
+abschnittsgewichtete Zahl aus Messung 4, deshalb stehen die alten Läufe in derselben Kennzahl daneben.
+
+| Lauf | Bau | fps | schlechtester Abschnitt | max. p95 | GPU-Bild (Mittel) | 3D-Farbpass GPU |
+| --- | --- | --- | --- | --- | --- | --- |
+| WGPU `all`, ohne Schnee | `b3f8c9c` (alte Basis) | 75,5 | 54,8 | 22,8 ms | 12,8 ms | 7,0 ms |
+| WGPU `all`, ohne Schnee | **`2ff794f`** | **77,5** | **57,0** | 19,8 ms | 14,9 ms | 8,5 ms |
+| WGPU `exact` (Standard), ohne Schnee | **`2ff794f`** | 63,7 | 35,7 | 30,8 ms | 18,3 ms | 12,6 ms |
+| WGPU `exact`, 30 cm Schnee | **`2ff794f`** | 58,9 | 34,3 | 31,6 ms | -- | -- |
+| WGPU `all`, 30 cm Schnee | `b3f8c9c` | 69,8 | 50,6 | 22,7 ms | -- | -- |
+| GL33 | `b3f8c9c` (21.10. 19:27) | 85,3 | 37,1 | 28,3 ms | -- | -- |
+| GL33 | **`2ff794f`** | 86,6 | 37,8 | 28,4 ms | -- | -- |
+
+- **Olis neue Basis macht nichts langsamer.** Gleiche Einstellung (`all`): 77,5 statt 75,5 fps.
+  Die CPU-Phasen sind gleich, `land:gnd` liegt bei 0,18 ms (PERF-031 wirkt auch hier).
+- **Der Unterschied zwischen 63,7 und 77,5 fps ist allein der Bündel-Modus.** `exact` (Standard
+  seit WGPU-033) nimmt MAT-053-Zwillinge nicht in die Bündel auf. Auf dem Deck kostet das ~4 ms GPU
+  im 3D-Farbpass (12,6 statt 8,5 ms), und `swap` wartet entsprechend länger. Dasselbe Bild zeigte
+  schon Messung 3 auf der alten Basis: `exact` ≈ `0`, nur `all` spart.
+- Schnee ist auch auf der neuen Basis ohne Ruckler: Maske 2,7 ms, `cached=1 515 526`, `masked=91 280`
+  wie zuvor.
+- GL33 ist im Mittel weiter schneller (86,6 fps). Sein schlechtester Abschnitt (37,8) liegt aber
+  unter dem von WGPU `all` (57,0).
+- Offen (am Ende entscheiden, Vorgabe des Besitzers): `WGR_DIRECT_BATCH=all` als Standard, mit
+  Farbabweichung an überlappenden halbtransparenten Stellen. Alternative ohne Abweichung: Zwillinge
+  bündeln, solange sich die Bildschirm-Rechtecke der Mitglieder eines Laufs nicht überschneiden.
+  Dann ist die Reihenfolge gleichgültig und das Bild identisch (WGPU-034, Vorschlag).
+
+## Messung 6: WGPU-034 (Zwillinge in bildschirm-getrennten Stücken) -- kein Gewinn, zurückgenommen (22.10. 09:54)
+
+Build `6394a65` (CI 39737717502) im Testordner `_OpenPoseidon-WGPU\bin`. `Remastered` blieb
+unverändert auf `2ff794f`. Drei Flüge mit demselben Build. Gestartet erst, nachdem die
+Bilderserie der Spiegelungen-Sitzung (`before-2ff794f`, 09:21–09:43) fertig war.
+
+| Lauf | fps (Bilder ÷ Zeit) | schlechtester Abschnitt | max. p95 | 3D-Farbpass GPU |
+| --- | --- | --- | --- | --- |
+| Standard mit WGPU-034 | 64,8 | 35,2 | 31,1 ms | 13,1 ms |
+| Standard ohne WGPU-034 (`WGR_DIRECT_BATCH_TWIN_RECT=0`) | 64,0 | 34,9 | 30,9 ms | 12,2 ms |
+| `all` | 76,9 | 56,8 | 21,2 ms | -- |
+
+- Die Trace-Zeile erklärt es. `all` fasst ~2 700 Zwillings-Draws in 195 Läufe. WGPU-034 fand nur
+  57 Zwillings-Stücke mit ~120 Draws und schnitt je Bild ~2 000–2 500-mal: Aufeinanderfolgende
+  Zwillings-Abschnitte (in der Reihenfolge von hinten nach vorn) überlappen sich auf dem Bildschirm
+  fast immer, etwa Geländer und Gitterroste, die entlang der Blickrichtung hintereinander liegen.
+  Der Beweis „disjunkt, also gleiches Bild" greift deshalb kaum.
+- Auch genauere Rechtecke je Abschnitt statt je Modell würden daran wenig ändern: Die Überlappung
+  steckt in der Szene selbst.
+- Zurückgenommen per Revert-Commit (zusätzlicher Commit, nichts umgeschrieben). Der Code auf dem
+  Branch verhält sich wieder wie `2ff794f`.
+- Damit bleibt `WGR_DIRECT_BATCH=all` der einzige Weg zu ~77 fps auf dem Deck. Die Entscheidung
+  darüber liegt beim Besitzer (am Ende).
+
+## Messung 7: Wofür die GPU auf dem Deck Zeit braucht (22.10. 11:39, `WGR_GPU_REGIONS_ALL=1`)
+
+EXE aus `Remastered` (`2ff794f`), gleicher Flug, Mittel über 65 Stichproben je Lauf.
+Gestartet, nachdem die drei Bilderserien der Spiegelungen-Sitzung (bis 11:33) fertig waren.
+
+| GPU-Region (ms) | Standard (`exact`) | `all` |
+| --- | --- | --- |
+| 3D-Farbpass gesamt | 13,1 | 7,3 |
+| davon Draw-Ops nach dem Wasser (transparente/Barriere-Draws) | **7,0** | **1,9** |
+| davon Draw-Ops vor dem Wasser | 2,2 | 1,5 |
+| davon Terrain Farbe | 2,1 | 1,4 |
+| davon Objekte (GPU-getrieben) Farbe | 1,2 | 1,3 |
+| davon Wasser | 1,3 | 1,2 |
+| Prepass gesamt | 0,9 | 0,9 |
+| Wolken, AO, Schatten-Kaskaden, Culling (je) | 0,3–0,6 | 0,3–0,6 |
+| fps (Bilder ÷ Zeit) | 63,3 | 75,7 |
+
+- Der ganze Abstand zwischen den Modi steckt in den Draw-Ops nach dem Wasser: 7,0 gegen 1,9 ms.
+  Das sind die halbtransparenten Abschnitte mit MAT-053-Zwilling. Bitgleich muss jeder Abschnitt
+  abwechselnd erst den Zwilling (Tiefe schreiben, Pipeline A) und dann den Blend (keine Tiefe,
+  Pipeline B) zeichnen: ~2 700 Abschnitte ergeben ~5 400 Pipeline-Wechsel je Bild. Das kostet die
+  GPU-Front-End-Zeit.
+- Tiefe-Schreiben ist in WebGPU fester Pipeline-Zustand. Ohne die Reihenfolge zu ändern, lässt sich
+  der Wechsel also nicht vermeiden (WGPU-034 hat gezeigt: getrennte Bildschirmbereiche gibt es dort
+  kaum).
+- Alles andere ist ohne Ausreißer: Terrain, Wasser, Objekte und die WGPU-Effekte (AO, Wolken, GI,
+  Schatten), die GL33 gar nicht hat, liegen jeweils bei 0,3–2 ms. Eine einzelne Spitze
+  (Terrain 43 ms) fiel in die Ladephase (11:39:17).
+- Folgerung: Auf dem Deck bleibt als großer Hebel nur `WGR_DIRECT_BATCH=all`, die Entscheidung des
+  Besitzers.
+
+## Messung 8: WGPU-035 -- Zwillinge standardmäßig gebündelt, Zwilling ohne Mip-Lift (22.10. 16:02)
+
+Build `a4f9308` (CI 39768762007) im Testordner. Gestartet um 16:02, nachdem die Spiegelungen-Serie
+gestoppt war. Flug über die Big Shell, gleiche Kennzahl wie bisher (Bilder ÷ Zeit):
+
+| Lauf | fps | schlechtester Abschnitt | max. p95 |
+| --- | --- | --- | --- |
+| **neu: Standard (`all`, Zwilling ohne Mip-Lift)** | **80,6** | **64,7** | 19,4 ms |
+| `WGR_DIRECT_BATCH=exact`, Zwilling ohne Mip-Lift | 74,0 | 54,1 | 23,6 ms |
+| alt: `exact` + `WGR_SOLID_TWIN_MIP_LIFT=1` (= Stand vor WGPU-035) | 63,9 | 35,3 | 31,0 ms |
+
+- Die Rücknahme des Mip-Lifts am Zwilling allein bringt +10 fps. Der Zwilling deckt in der Ferne
+  weniger Texel ab, die zweimal gemischt wurden.
+- Das Bündeln bringt weitere +6,6 fps. Zusammen sind es +26 % gegenüber vorher, und der
+  schlechteste Abschnitt steigt von 35 auf 65 fps.
+
+Bildvergleich: neue private Mission `BigShellBilder.Intro`, 5 feste Ansichten, `--auto-screenshot`.
+Je Ansicht zwei Läufe „neu" als Rauschmaske; verglichen werden nur Pixel, die zwischen diesen beiden
+Läufen höchstens um 2/255 abweichen.
+
+| Ansicht | Bündeln (exact → neu): Pixel > 5/255 | Mip-Lift (alt → exact): Pixel > 5/255 | gesamt (alt → neu): Pixel > 5/255 |
+| --- | --- | --- | --- |
+| 1 Gesamtansicht | 0,17 % | 0,66 % | 0,34 % |
+| 2 Deck West | 0,12 % | 0,14 % | 0,24 % |
+| 3 Strut-Nahansicht | 0,01 % | 0,06 % | 0,05 % |
+| 4 Deck Mitte | 0,003 % | 0,18 % | 0,23 % |
+| 5 Meerblick | 0,02 % | 2,9 % | 5,0 % |
+
+- 5/255 sind etwa 2 %. Das Bündeln bleibt bis auf ≤ 0,17 % der Pixel unter dieser Schwelle; das
+  ist die zugesagte Grenze.
+- Die größeren Werte stehen fast ausschließlich auf dem Wasser und der Brandung. Die
+  Unterschiedsbilder (×8) zeigen sie dort, nicht an der Struktur. Wasser und Brandung bewegen sich
+  von Lauf zu Lauf, und die Rauschmaske aus nur zwei Läufen fängt das nicht vollständig.
+- An Geländern, Rosten und Deck ist auch bei 8-facher Verstärkung kein Unterschied zu sehen.
+
+Eingespielt in `Remastered` (16:25, Backup `_backup_vor_a4f9308_20261022`). Der Stand enthält auch
+LGT-SCRIPT-001/002 und LGT-AUTO-001 der Peugeot-Sitzung.
+
+## Messung 9: Everon -- Kameraflug und großes Gefecht, WGPU gegen GL33 (22.10. 17:22)
+
+EXE aus `Remastered` (`a4f9308`), ohne Mods. Zwei neue private Missionen:
+- `EveronFlug.eden`: 6 Abschnitte je 15 s auf 50 m über Grund, Dorf → Felder → See → Ostküste →
+  Wald → Süden.
+- `EveronGefecht.eden`: Kopie von `tests/perf/missions/perf_combat.eden`, 193 Einheiten, Spieleransicht.
+
+| Lauf | WGPU fps | GL33 fps | WGPU schlechtestes Fenster | GL33 schlechtestes Fenster |
+| --- | --- | --- | --- | --- |
+| Everon-Flug | 72,6 | 97,8 | **55,7** | 49,4 |
+| Gefecht | **45,7** | 42,7 | **43,5** | 40,9 |
+
+- **Gefecht:** WGPU ist schneller als GL33. Eine Gegenprobe mit `WGR_SKIN_BAKE=0` ändert nichts
+  (46,0 fps), der Compute-Skin-Bake ist also nicht der Engpass.
+  - Frame-Accounting: 3–6 ms GPU-Zeit liegen außerhalb aller benannten Regionen.
+  - Der Render-Worker verbringt 19 ms je Bild in `queue submit`.
+  - Klären ließe sich das nur mit einer Nsight-Aufnahme (`.agents/PROFILING-WITH-NSIGHT.md`, braucht
+    das Admin-Terminal des Besitzers).
+- **Flug:** Im Mittel liegt GL33 vorn. Es zeichnet aber weder Gras noch Wolken, AO, GI oder
+  Tidewater-Wasser: über freien Feldern 240–470 fps, wo WGPU bei 55–62 fps liegt.
+  - Im schlechtesten Abschnitt ist WGPU besser.
+  - Die WGPU-Untergrenze über Wiesen sind ~17 ms GPU. Davon entfallen ~6,5 ms aufs Gras
+    (Farbe 4,2 + Prepass 2,2), ~3 ms auf Terrain, ~1,4 ms auf Wolken und ~3 ms auf die übrigen
+    Draw-Ops vor dem Wasser.
+- Ein WGPU-Rückstand wie anfangs auf der Big Shell zeigt sich auf Everon nicht. Der größte einzelne
+  Posten ist das Gras (Olis System, schon mit vielen Schaltern optimiert, `docs/grass-plan.md`).

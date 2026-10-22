@@ -1035,6 +1035,7 @@ void EntityAI::SimulateWeaponActivity(float deltaT, SimulationImportance prec)
         bool on = _pilotLight && GetHit(info.hitPoint) < 0.9;
         light->Switch(on);
     }
+    UpdateAutoVehicleLights(); // LGT-AUTO-001
 
     // advance time for all looping weapon sounds
     for (int i = 0; i < _weaponFired.Size(); i++)

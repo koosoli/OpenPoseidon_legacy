@@ -291,6 +291,34 @@ fn solid_blend_write_key(mut key: PipelineKey) -> PipelineKey {
     key
 }
 
+// WGPU-035: the colour twin's solid-texel test reads the PLAIN texture alpha, like its prepass
+// (build_prepass_pipeline: `solid_blend` -> no mip lift). It used to inherit the foliage cutout
+// mip lift (cutout_mip_alpha, 0.5), so on a minified texture it wrote depth -- and painted -- for
+// texels down to plain alpha ~0.49 that its own prepass had left open, and those half-transparent
+// texels were then blended twice (twin, then the blend). Without the lift the twin covers only
+// alpha >= SOLID_BLEND_ALPHA, which is also what bounds the twin-batching deviation of
+// WGR_DIRECT_BATCH=all to (1 - alpha) <= 2% (see DirectBatchMode). WGR_SOLID_TWIN_MIP_LIFT=1 = old.
+fn solid_twin_mip_lift() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_SOLID_TWIN_MIP_LIFT").is_ok_and(|v| v.trim() == "1"))
+}
+
+// The colour pipeline solid_blend_write_key builds: an alpha-blended, depth-writing draw with the
+// MAT-053 threshold. No other draw carries alpha_ref == SOLID_BLEND_ALPHA with blending.
+fn is_solid_blend_write_key(key: &PipelineKey) -> bool {
+    key.blend == WgrBlend::Alpha as u8
+        && key.depth == WgrDepthMode::TestWrite as u8
+        && key.alpha_ref_bits == SOLID_BLEND_ALPHA.to_bits()
+}
+
+fn colour_pipeline_mip_alpha(key: &PipelineKey) -> f64 {
+    if is_solid_blend_write_key(key) && !solid_twin_mip_lift() {
+        0.0
+    } else {
+        cutout_mip_alpha() as f64
+    }
+}
+
 pub(crate) fn draw_solid_blend_prepassed(d: &WgrDraw3D) -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let enabled = *ENABLED.get_or_init(|| std::env::var("WGR_BLEND_SOLID_DEPTH").map(|v| v != "0").unwrap_or(true));
@@ -324,11 +352,15 @@ fn vb_whole() -> bool {
 // shader3d.wgsl tests the lifted alpha, blends the plain one), so on a minified texture a twin
 // covers texels down to 0.98 / (1 + 0.5 * lod) -- 0.49 at lod 2 -- and the colour change reaches
 // ~15% for two overlapping sections (review of WGPU-033, 2026-10-21). With WGR_CUTOUT_MIP_ALPHA=0
-// it is at most (1 - alpha) <= 2%. The owner approved a small deviation, not that one, so twin
-// batching stays opt-in until they decide:
+// it is at most (1 - alpha) <= 2%. WGPU-035 (2026-10-22): the twin no longer takes the mip lift
+// (colour_pipeline_mip_alpha), so the bound is that 2% with the foliage lift untouched, and the
+// owner chose to batch twin runs by default on that bound. One exception is not bounded: where
+// the back-to-front object sort had a nearer section's blend BEFORE a farther section's twin
+// (sorted by object centre), the old order painted the twin over it; batched, the blend now
+// shows in front -- the geometrically right result, and the only place a larger change appears.
 //   WGR_DIRECT_BATCH=0      every draw on its own, as before
-//   default (or =exact)     batch only runs without twins (bit-identical image)
-//   WGR_DIRECT_BATCH=all    batch twin runs too (the deviation above)
+//   WGR_DIRECT_BATCH=exact  batch only runs without twins (bit-identical to the unbatched path)
+//   default (or =all, =1)   batch twin runs too (Big Shell flight: 63.7 -> 77.5 fps)
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum DirectBatchMode {
     Off,
@@ -344,8 +376,8 @@ fn direct_batch_mode() -> DirectBatchMode {
 fn parse_direct_batch_mode(v: Option<&str>) -> DirectBatchMode {
     match v.map(str::trim) {
         Some("0") | Some("off") => DirectBatchMode::Off,
-        Some("all") => DirectBatchMode::All,
-        _ => DirectBatchMode::Exact,
+        Some("exact") => DirectBatchMode::Exact,
+        _ => DirectBatchMode::All,
     }
 }
 
@@ -393,8 +425,8 @@ fn direct_batch_runs_join_only_equal_neighbours() {
 
 #[test]
 fn direct_batch_mode_switch_parses() {
-    assert_eq!(parse_direct_batch_mode(None), DirectBatchMode::Exact);
-    assert_eq!(parse_direct_batch_mode(Some("1")), DirectBatchMode::Exact);
+    assert_eq!(parse_direct_batch_mode(None), DirectBatchMode::All);
+    assert_eq!(parse_direct_batch_mode(Some("1")), DirectBatchMode::All);
     assert_eq!(parse_direct_batch_mode(Some("all")), DirectBatchMode::All);
     assert_eq!(parse_direct_batch_mode(Some("0")), DirectBatchMode::Off);
     assert_eq!(parse_direct_batch_mode(Some("off")), DirectBatchMode::Off);
@@ -447,6 +479,29 @@ fn solid_blend_prepass_takes_only_blend_pass_sections() {
     d.flags = 0;
     assert!(PipelineKey::from_draw(&d, false).prepassed());
     assert!(!solid_blend_candidate(&d));
+}
+
+#[test]
+fn solid_twin_colour_pipeline_takes_no_mip_lift() {
+    // WGPU-035: only the twin solid_blend_write_key builds loses the lift; its blend draw and
+    // every cutout pipeline keep cutout_mip_alpha().
+    let mut d: WgrDraw3D = unsafe { std::mem::zeroed() };
+    d.blend = WgrBlend::Alpha;
+    d.depth = WgrDepthMode::Test;
+    d.flags = crate::ffi::WGR_DRAW3D_BLEND_SECTION;
+    let base = PipelineKey::from_draw(&d, false);
+    let twin = solid_blend_write_key(base);
+    assert!(is_solid_blend_write_key(&twin));
+    assert!(!is_solid_blend_write_key(&base));
+    assert_eq!(colour_pipeline_mip_alpha(&twin), 0.0);
+    assert_eq!(colour_pipeline_mip_alpha(&base), cutout_mip_alpha() as f64);
+    // a foliage cutout (opaque, alpha_ref 0.5) keeps its lift
+    d.blend = WgrBlend::Opaque;
+    d.alpha_ref = 0.5;
+    d.flags = 0;
+    let leaf = PipelineKey::from_draw(&d, false);
+    assert!(!is_solid_blend_write_key(&leaf));
+    assert_eq!(colour_pipeline_mip_alpha(&leaf), cutout_mip_alpha() as f64);
 }
 
 // Per-level constant depth-bias magnitude for ZBias overlay faces (signs).
@@ -5307,7 +5362,7 @@ fn build_main_pipeline(ctx: &PipeCtx, device: &wgpu::Device, key: PipelineKey) -
         ("translucent", translucent),
 
         ("emissive_night", emissive_night() as f64),
-        ("cutout_mip_alpha", cutout_mip_alpha() as f64),
+        ("cutout_mip_alpha", colour_pipeline_mip_alpha(&key)),
         ("pixel_lift", road_pixel_lift() as f64),
         (
             "alpha_kill_door",

@@ -237,3 +237,15 @@ id there is 0 and every new branch is skipped. Not captured on native Everon.
 Levers: `WGR_GRASS_VARIETY=0/1`, `WGR_GRASS_SPECIES_MIX=weed,flower`,
 `WGR_GRASS_HEAD_SHARE`, `WGR_GRASS_HEAD_BRIGHTNESS`, `WGR_GRASS_LOOK_DRIFT`; the Grass
 tab has the same under "Meadow variety".
+
+## 6. Mid-ring screen-density LOD (WGPU-036, 2026-10-22)
+
+The procedural mid ring kept its full clump density out to the ring's edge. From 50 m above
+Everon that was 454 971 clumps x 36 triangles, drawn twice (prepass and colour): 32.8 M grass
+triangles a frame, most of them blades a tenth of a pixel wide, and ~5.5 ms of a ~17 ms frame.
+Past d0 -- where a mid blade (mean full width 54 mm x the width slider) is narrower than
+`WGR_GRASS_MID_LOD_PX` pixels (default 0.5) -- clumps now thin as d0/d with a salt of their own,
+and `vs_grass_mid` widens the survivors' blades by d/d0, the RFG-160 trade for the native near
+ring. Under MSAA a sub-pixel blade contributes only its area to a pixel, and the expected area
+per pixel is unchanged; nothing nearer than d0 moves. Photo cards (`cards_on_mid`) keep their
+density. `WGR_GRASS_MID_LOD_PX=0` is the previous ring exactly.

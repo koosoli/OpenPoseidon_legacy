@@ -1132,7 +1132,8 @@ float LightReflector::FlareIntensity(Vector3Par camPos, Vector3Par camDir) const
     }
     float size2 = relPos.SquareSize();
 
-    float startAtten = Square(_startAtten);
+    // LGT-REFL-001: an explicit flare range only ever lengthens it; without one this is 2001's
+    float startAtten = Square(_flareRange > _startAtten ? _flareRange : _startAtten);
     float endAtten = startAtten * 100;
     if (size2 >= endAtten)
     {

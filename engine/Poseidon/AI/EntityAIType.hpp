@@ -165,6 +165,13 @@ struct ReflectorInfo
 	Vector3 direction;
 	float size;
 	float brightness;
+	//! LGT-REFL-001: optional `opConeAngle` (full beam angle, degrees). Stored as the half-angle
+	//! in radians; 0 when the class does not say, and then the beam keeps the engine's
+	//! historical 36 degrees -- `size` is NOT read as an angle here, old configs never meant it.
+	float coneHalfAngle = 0;
+	//! LGT-REFL-001: optional `opFlareRange` (metres): the lamp's bulb stays visible this far
+	//! even when the light it casts is short. 0 = not given, flare follows the light as before.
+	float flareRange = 0;
 	AnimationSection selection; // used to Hide/Unhide
 	HitPoint hitPoint;
 
@@ -556,6 +563,15 @@ class EntityAIType: public EntityType
 	AutoArray<ExtSoundInfo> _extEnvSounds;
 
 	AutoArray<ReflectorInfo> _reflectors;
+
+	// LGT-AUTO-001: light CAST by the tail / brake lamps of models that only have the glowing
+	// "zadni svetlo" / "brzdove svetlo" faces (every OFP / CWA vehicle). Worked out once per
+	// type from LOD 0 (VehicleAutoLights.cpp); the faces themselves are untouched.
+	mutable bool _autoLightsReady = false;
+	mutable bool _autoTailCasts = false; //!< false when the model already has a rear Reflector
+	mutable AutoArray<Vector3> _autoTailPos;
+	mutable AutoArray<Vector3> _autoBrakePos;
+	void PrepareAutoLights() const;
 
 	AutoArray<LightInfo> _lights;
 	AnimationSection _showDmg;

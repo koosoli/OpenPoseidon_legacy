@@ -89,6 +89,8 @@ class TankOrCar: public Transport
 	virtual void AnimateSpeedIndicator(Matrix4 &trans, int level);
 
 	void Animate( int level ) override;
+	//! LGT-AUTO-001: same condition that shows the "brzdove svetlo" faces in Animate
+	bool AutoBrakeLightsOn() const override;
 	void Deanimate( int level ) override;
 
 	void SimulateExhaust( float deltaT, SimulationImportance prec );
