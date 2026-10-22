@@ -800,9 +800,17 @@ fn reflect_env_radiance(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
         env = (env * 2.0 + sky_env_sample(normalize(dir + t * spread)) + sky_env_sample(normalize(dir - t * spread))
                + sky_env_sample(normalize(dir + b * spread)) + sky_env_sample(normalize(dir - b * spread))) / 6.0;
     }
-    let world = mix(0.22, 1.0, smoothstep(-0.08, 0.45, dir.y));
-    return env * world;
+    // Above the horizon: sky, a little dimmed near it where street, houses and trees stand.
+    let sky = env * mix(0.6, 1.0, smoothstep(0.0, 0.45, dir.y));
+    // Below it: the ground, lit the way the renderer lights the ground -- sky ambient plus sun --
+    // at a typical ground albedo. A flat dark constant made the lower half of every body panel
+    // darker than before on bright sand (first test, 2026-10-22: Peugeot white doors went grey).
+    let to_sun = -frame.sun_dir_world.xyz;
+    let ground = REFLECT_GROUND_ALBEDO *
+        (sky_irradiance(vec3<f32>(0.0, 1.0, 0.0)) * frame.sun_ambient.w + frame.sun_diffuse.rgb * max(to_sun.y, 0.0));
+    return mix(ground, sky, smoothstep(-0.08, 0.08, dir.y));
 }
+const REFLECT_GROUND_ALBEDO: f32 = 0.3;
 
 // REFLECT-001 debug colours. View 1 = surface class (fixed palette), 2 = roughness (grey),
 // 3 = F0 / metal (red = F0 x 10, green = metal), 4 = clear coat (blue = strength, green =
