@@ -1,0 +1,131 @@
+; OpenPoseidon ICBM: the flight from Desert Island to icbmCities select icbmTarget (icbm_init.sqs).
+; A great-circle track with a lofted ballistic profile (apogee a quarter of the range, at most 1,200 km),
+; drawn as the SCUD's own missile model with exhaust and contrail particles. With icbmFollow the
+; free-fly camera rides behind it; free flight then moves the geographic origin with it, so the
+; launcher and the player are pinned to their spots until the world is brought back to the island.
+icbmFlying = true
+_c = icbmCities select icbmTarget
+_lat0 = icbmSite select 0
+_lon0 = icbmSite select 1
+_lat1 = _c select 1
+_lon1 = _c select 2
+_x0 = (cos _lat0) * (cos _lon0)
+_y0 = (cos _lat0) * (sin _lon0)
+_z0 = sin _lat0
+_x1 = (cos _lat1) * (cos _lon1)
+_y1 = (cos _lat1) * (sin _lon1)
+_z1 = sin _lat1
+_om = acos ((_x0 * _x1) + (_y0 * _y1) + (_z0 * _z1))
+_dist = _om * 111.32
+_apo = _dist * 250
+?(_apo > 1200000): _apo = 1200000
+_dur = 60 + (_dist / 40)
+_vp = getPos icbm
+_pp = getPos player
+_inside = vehicle player == icbm
+_p = earthGeoToPos icbmSite
+_m = "ProxyScud_Strela_Proxy" camCreate [(_vp select 0), (_vp select 1), 15]
+hint format ["ICBM launched at %1: %2 km, impact in %3 s.", _c select 0, round _dist, round _dur]
+_t0 = _time
+_s = 0
+#loop
+_f = (_time - _t0) / _dur
+?(_f >= 1): goto "impact"
+_s = _f
+; ground track position and the point a moment ahead (for the missile's heading)
+_a = (sin ((1 - _s) * _om)) / (sin _om)
+_b = (sin (_s * _om)) / (sin _om)
+_lat = asin ((_a * _z0) + (_b * _z1))
+_lon = ((_a * _y0) + (_b * _y1)) atan2 ((_a * _x0) + (_b * _x1))
+_s2 = _s + 0.002
+_a = (sin ((1 - _s2) * _om)) / (sin _om)
+_b = (sin (_s2 * _om)) / (sin _om)
+_lat2 = asin ((_a * _z0) + (_b * _z1))
+_lon2 = ((_a * _y0) + (_b * _y1)) atan2 ((_a * _x0) + (_b * _x1))
+; lofted: steep out of the silo and steep into the target
+_alt = _apo * (sqrt (sin (_s * 180)))
+_alt2 = _apo * (sqrt (sin (_s2 * 180)))
+_q = earthGeoToPos [_lat, _lon]
+_q2 = earthGeoToPos [_lat2, _lon2]
+?((count _q == 0) || (count _q2 == 0)): goto "next"
+_pos = [_q select 0, _q select 1, _alt + 12]
+_dx = (_q2 select 0) - (_q select 0)
+_dy = (_q2 select 1) - (_q select 1)
+_dz = _alt2 - _alt
+_len = sqrt ((_dx * _dx) + (_dy * _dy) + (_dz * _dz))
+?(_len < 0.001): goto "next"
+_dx = _dx / _len
+_dy = _dy / _len
+_dz = _dz / _len
+_m setPos _pos
+; the SCUD missile model's nose is along its -Z, so its "direction" is the reverse of travel
+_m setVectorDirAndUp [[0 - _dx, 0 - _dy, 0 - _dz], [0 - (_dx * _dz), 0 - (_dy * _dz), 1 - (_dz * _dz)]]
+; exhaust (behind the nozzle) and the contrail it leaves
+_e = [(_pos select 0) - (_dx * 9), (_pos select 1) - (_dy * 9), (_pos select 2) - (_dz * 9)]
+drop ["cl_fire", "", "Billboard", 1, 0.4, _e, [0, 0, 0], 0, 1.275, 1, 0, [5, 11], [[4, 3.4, 2.4, 1], [3, 1.4, 0.4, 0]], [0], 0, 0, "", "", ""]
+drop ["cl_basic", "", "Billboard", 1, 30, [(_e select 0) - (_dx * 25), (_e select 1) - (_dy * 25), (_e select 2) - (_dz * 25)], [0, 0, 0], 0, 1.275, 1, 0.02, [3, 40, 110], [[0.9, 0.9, 0.9, 0.25], [0.85, 0.85, 0.85, 0.45], [0.8, 0.8, 0.8, 0]], [0], 0, 0, "", "", ""]
+?(!icbmFollow): goto "pin"
+; third-person camera, the Earth always behind the missile: at launch in front of and above it looking
+; back down at it as it climbs, then easing round to behind and above it for the cruise and the dive
+_k = (_s - 0.12) / 0.18
+?(_k < 0): _k = 0
+?(_k > 1): _k = 1
+_k = _k * _k * (3 - (2 * _k))
+_fwd = (160 * (1 - _k)) - (130 * _k)
+_cx = (_pos select 0) + (_dx * _fwd) + (_dy * 40)
+_cy = (_pos select 1) + (_dy * _fwd) - (_dx * 40)
+_cz = (_pos select 2) + (_dz * _fwd) + 70
+_lx = (_pos select 0) - _cx
+_ly = (_pos select 1) - _cy
+_lz = (_pos select 2) - _cz
+_az = _lx atan2 _ly
+_el = _lz atan2 (sqrt ((_lx * _lx) + (_ly * _ly)))
+_r = triFreeFlyPose format ["[%1,%2,%3] az %4 el %5", _cx, _cy, _cz, _az, _el]
+#pin
+; the origin may have moved with the camera: hold the launcher and the player where they are
+icbm setPos _vp
+icbm setVelocity [0, 0, 0]
+?(!_inside): player setPos _pp
+?(!_inside): player setVelocity [0, 0, 0]
+#next
+~0.02
+goto "loop"
+#impact
+_q = earthGeoToPos [_lat1, _lon1]
+camDestroy _m
+?(count _q == 0): goto "home"
+[_q select 0, _q select 1] exec "icbm_nuke.sqs"
+?(!icbmFollow): goto "home"
+; watch it from 12 km out and 1.5 km up, the camera holding still, framed for the cloud's rise
+_i = 0
+#watch
+_r = triFreeFlyPose format ["[%1,%2,%3] az 30 el 14", (_q select 0) - 6000, (_q select 1) - 10400, 1500]
+icbm setPos _vp
+icbm setVelocity [0, 0, 0]
+?(!_inside): player setPos _pp
+~0.5
+_i = _i + 1
+?(_i < 90): goto "watch"
+#home
+; bring the world back to the island; hold the launcher and the player in the air, at rest, until the
+; island's ground is resident again (until then there is nothing to stand on), then set them down
+; end free flight first: the ground streams around the camera, and it has to be back with the player
+_r = triFreeFlyOff
+~0.5
+_ok = earthGoTo [_lat0, _lon0, 300]
+_i = 0
+#settle
+icbm setPos [6430, 6420, 60]
+icbm setVelocity [0, 0, 0]
+?(!_inside): player setPos [6440, 6410, 60]
+?(!_inside): player setVelocity [0, 0, 0]
+~0.05
+_i = _i + 1
+?((count (earthGroundHeight [6430, 6420]) == 0) && (_i < 600)): goto "settle"
+~0.5
+icbm setPos [6430, 6420, 0]
+icbm setVelocity [0, 0, 0]
+?(!_inside): player setPos [6440, 6410, 0]
+?(!_inside): player setVelocity [0, 0, 0]
+icbmFlying = false
+hint format ["ICBM: %1 was hit.", _c select 0]

@@ -52,7 +52,7 @@ constexpr Place Places[] = {
     {"Manhattan, New York", 40.758, -73.985, 1500},
     {"Sognefjord, Norway", 61.150, 6.700, 3000},
     {"Big Island, Hawaii", 19.600, -155.500, 12000},
-    {"Desert Island (OFP), Bay of Biscay", 45.369, -7.752, 400},
+    {"Desert Island (OFP), Bay of Biscay", 45.3809, -7.7453, 400},
     {"Earth from orbit", 30.000, 10.000, 18000000},
 };
 
@@ -308,19 +308,31 @@ class WholeWorldDisplay : public WholeWorldScreen
             for (const char* section : {"Intro", "OutroWin", "OutroLoose"})
                 sqm << "class " << section << "\n{\n  addOns[]={};\n  addOnsAuto[]={};\n  randomSeed=1;\n" << intel
                     << "  class Groups {items=0;};\n" << empty << "};\n";
-            // Test aid: a whole day in one minute (0.02 h every 0.05 s), to judge sunrise, noon, sunset
-            // and night lighting from one spot. Off: no init script at all.
             const auto initScript = mission / "init.sqs";
-            if (_dayCycle)
             {
+                // The Desert Island ICBM site (assets/earth/icbm, engine content): its scripts go into the
+                // mission, and it sets itself up only when the player starts near the island.
+                wchar_t modulePath[32768]{};
+                bool icbm = false;
+                if (GetModuleFileNameW(nullptr, modulePath, 32768))
+                {
+                    const auto source = std::filesystem::path(modulePath).parent_path() / "assets" / "earth" / "icbm";
+                    for (const auto& entry : std::filesystem::directory_iterator(source, ec))
+                        if (entry.path().extension() == ".sqs")
+                            icbm |= std::filesystem::copy_file(entry.path(), mission / entry.path().filename(),
+                                                               std::filesystem::copy_options::overwrite_existing, ec);
+                }
                 std::ofstream init(initScript, std::ios::trunc);
-                // Broken cloud too, so the decks' lighting through dawn, noon, dusk and night can be judged.
-                init << "; OpenPoseidon whole world: one day per minute (Day cycle test option)\n"
-                        "0 setOvercast 0.55\n"
-                        "#loop\n~0.05\nskipTime 0.02\ngoto \"loop\"\n";
+                init << "; OpenPoseidon whole world\n";
+                if (icbm)
+                    init << "[] exec \"icbm_init.sqs\"\n";
+                // Test aid: a whole day in one minute (0.02 h every 0.05 s), to judge sunrise, noon, sunset
+                // and night lighting from one spot. Broken cloud too, so the decks' lighting can be judged.
+                if (_dayCycle)
+                    init << "; one day per minute (Day cycle test option)\n"
+                            "0 setOvercast 0.55\n"
+                            "#loop\n~0.05\nskipTime 0.02\ngoto \"loop\"\n";
             }
-            else
-                std::filesystem::remove(initScript, ec);
             if (!file || !sqm)
             {
                 error = "Cannot write the whole-world start files to " + Utf8(fixture);

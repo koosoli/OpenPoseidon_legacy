@@ -8632,6 +8632,11 @@ bool SetEarthPreviewLocation(double latitude,double longitude,double altitude)
     return EarthStreaming::Locations().Set(latitude,longitude,altitude);
 }
 
+void DisableFreeFly()
+{
+    if (s_zeusCamera) DisableZeusCamera();
+}
+
 bool SetEarthMoonPose(double altitude, double pitchDegrees, bool surface)
 {
     if (!EarthStreaming::Enabled() || MultiplayerSession() || !ZeusWorldAvailable() || !GScene || !GScene->MainLight() ||

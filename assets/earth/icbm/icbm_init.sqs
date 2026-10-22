@@ -1,0 +1,30 @@
+; OpenPoseidon whole world: an ICBM site on Desert Island (scripts/Prepare-EarthIsland.py --name desert).
+; Runs from the whole-world mission's init.sqs and does nothing unless the player starts near the island.
+; Use: walk to the SCUD launcher, pick a target from its action menu, get in as driver, then SCUD LAUNCH
+; (raise) and SCUD START (fire). "ICBM: follow" toggles the third-person camera that rides along.
+~3
+icbmSite = [45.3809, -7.7453]
+_p = earthGeoToPos icbmSite
+?(count _p == 0): exit
+?((player distance [_p select 0, _p select 1, 0]) > 8000): exit
+icbm = "Scud" createVehicle [(_p select 0) + 30, (_p select 1) + 20, 0]
+icbm setDir 300
+icbmCities = [["Moscow", 55.7558, 37.6173], ["Washington", 38.8977, -77.0365], ["London", 51.5074, -0.1278], ["Paris", 48.8566, 2.3522], ["Beijing", 39.9042, 116.4074], ["New York", 40.7128, -74.006]]
+icbmTarget = 0
+icbmFollow = true
+icbmFlying = false
+icbm addAction ["ICBM target: Moscow", "icbm_t0.sqs"]
+icbm addAction ["ICBM target: Washington", "icbm_t1.sqs"]
+icbm addAction ["ICBM target: London", "icbm_t2.sqs"]
+icbm addAction ["ICBM target: Paris", "icbm_t3.sqs"]
+icbm addAction ["ICBM target: Beijing", "icbm_t4.sqs"]
+icbm addAction ["ICBM target: New York", "icbm_t5.sqs"]
+icbm addAction ["ICBM: follow the missile on/off", "icbm_follow.sqs"]
+hint "ICBM site on Desert Island: pick a target at the SCUD launcher, get in as driver, SCUD LAUNCH, then SCUD START."
+#wait
+~0.5
+?(!alive icbm): exit
+?((scudState icbm) >= 3.99): goto "launch"
+goto "wait"
+#launch
+[] exec "icbm_fly.sqs"

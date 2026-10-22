@@ -1800,7 +1800,9 @@ GameValue ObjSetPos(const GameState* state, GameValuePar oper1, GameValuePar ope
         return NOTHING;
     }
 
-    if (EarthStreaming::Enabled())
+    // Scripted scenery (camCreate'd temporary objects, e.g. the Earth ICBM's missile 100 km up) never
+    // stands on the ground; only grounded objects need resident Earth ground under them.
+    if (EarthStreaming::Enabled() && obj1->GetType() != Temporary)
     {
         const auto ground = EarthStreaming::Locations().Ground();
         if (!ground || !ground->Contains(pos.X(), pos.Z(), std::max(2.0f, obj1->GetRadius())))

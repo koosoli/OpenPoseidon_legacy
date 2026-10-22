@@ -82,5 +82,7 @@ namespace DebugOverlay
     // looking at it. surface=true: over a near-side point with the sun ~15 deg up, looking along the
     // ground away from the sun, pitched by `pitchDegrees` (the Earth is overhead).
     bool SetEarthMoonPose(double altitude, double pitchDegrees, bool surface);
+    // Ends free flight and hands the view back to the player (the Zeus "disable" path).
+    void DisableFreeFly();
 } // namespace DebugOverlay
 } // namespace Poseidon::Dev

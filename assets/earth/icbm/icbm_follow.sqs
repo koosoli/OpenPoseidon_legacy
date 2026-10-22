@@ -1,0 +1,4 @@
+; OpenPoseidon ICBM: third-person camera on/off (used when the missile leaves the rail)
+icbmFollow = !icbmFollow
+?(icbmFollow): hint "ICBM: the camera will follow the missile to its target."
+?(!icbmFollow): hint "ICBM: the camera stays with you."

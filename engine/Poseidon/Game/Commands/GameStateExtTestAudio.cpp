@@ -1193,6 +1193,13 @@ GameValue TriPlayerPosZ(const GameState* /*state*/)
 /// triEarthLocation [latitude,longitude,altitude] relocates the opt-in Earth
 /// preview through the same camera/origin transaction as its navigation tab.
 /// An empty array queries the current origin and revision for harness assertions.
+/// triFreeFlyOff ends free flight and hands the view back to the player (the ICBM follow camera).
+GameValue TriFreeFlyOff(const GameState*)
+{
+    DebugOverlay::DisableFreeFly();
+    return GameValue("OK");
+}
+
 /// triEarthMoon [altitude, pitch, surface(0/1)] puts the free-fly camera above the moon (dev/harness).
 GameValue TriEarthMoon(const GameState*, GameValuePar arg)
 {
@@ -3205,6 +3212,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerPosZ", TriPlayerPosZ));
     GGameState.NewFunction(GameFunction(GameString, "triEarthLocation", TriEarthLocation, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triEarthMoon", TriEarthMoon, GameArray));
+    GGameState.NewNularOp(GameNular(GameString, "triFreeFlyOff", TriFreeFlyOff));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerGroundClearance", TriPlayerGroundClearance));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerTerrainClearance", TriPlayerTerrainClearance));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerContactGroundClearance", TriPlayerContactGroundClearance));

@@ -1550,6 +1550,11 @@ GameValue ObjCameraEffect(const GameState* state, GameValuePar oper1, GameValueP
     return NOTHING;
 }
 
+namespace Poseidon
+{
+Object* NewNonAIVehicleQuiet(RString typeName, RString shapeName, bool fullCreate); // VehicleTypes.cpp
+}
+
 GameValue CamCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     GameStringType effect = oper1;
@@ -1569,6 +1574,15 @@ GameValue CamCreate(const GameState* state, GameValuePar oper1, GameValuePar ope
     Vehicle* veh = NewNonAIVehicle(type, nullptr);
     if (!veh)
     {
+        // A typed non-AI object that is not a vehicle -- the weapon proxies, e.g. the SCUD's missile
+        // ("ProxyScud_Strela_Proxy", which the Earth ICBM flies): placed as scenery a script can move.
+        if (Object* obj = NewNonAIVehicleQuiet(type, "", true))
+        {
+            obj->SetType(Temporary); // setPos leaves map (Primary) objects where they are
+            obj->SetPosition(pos);
+            GLandscape->AddObject(obj);
+            return GameValueExt(obj);
+        }
         LOG_WARN(Script, "camCreate: NewNonAIVehicle('{}') returned null", (const char*)type);
         return OBJECT_NULL;
     }

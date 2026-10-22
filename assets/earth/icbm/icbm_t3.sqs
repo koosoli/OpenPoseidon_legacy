@@ -1,0 +1,3 @@
+; OpenPoseidon ICBM: choose target 3 of icbmCities (icbm_init.sqs)
+icbmTarget = 3
+hint format ["ICBM target: %1. Get in as driver: SCUD LAUNCH raises the missile, SCUD START fires it.", (icbmCities select 3) select 0]
