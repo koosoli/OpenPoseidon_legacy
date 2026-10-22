@@ -5216,6 +5216,7 @@ impl Renderer {
                             batch.first_node,
                             batch.node_count,
                             crate::terrain::TerrainPass::Planar,
+                            None,
                         );
                     }
                 }
@@ -6008,9 +6009,12 @@ impl Renderer {
                             renderer
                                 .gpu_timers
                                 .begin_pass(pass, TimerRegion::TerrainColor);
+                            let cam_pos = prepared_cameras
+                                .get(b.camera as usize)
+                                .map(|c| [c.cam_pos[0], c.cam_pos[1], c.cam_pos[2]]);
                             renderer
                                 .terrain
-                                .draw(pass, cam, off, b.first_node, b.node_count, kind);
+                                .draw(pass, cam, off, b.first_node, b.node_count, kind, cam_pos);
                             renderer
                                 .gpu_timers
                                 .end_pass(pass, TimerRegion::TerrainColor);
@@ -6223,6 +6227,7 @@ impl Renderer {
                                     b.first_node,
                                     b.node_count,
                                     crate::terrain::TerrainPass::Prepass,
+                                    None,
                                 );
                                 self.gpu_timers
                                     .end_pass(&mut pp, TimerRegion::TerrainPrepass);

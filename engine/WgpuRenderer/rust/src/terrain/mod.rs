@@ -480,6 +480,17 @@ pub struct Terrain {
     // with depth-write OFF (colour pass of the prepassed segment), and the depth+normal
     // prepass pipeline (writes the view-space normal G-buffer + depth).
     pipeline_no_write: wgpu::RenderPipeline,
+    // PERF-TERRAIN-FAR-SPLIT: the two colour pipelines compiled with `tw_far_only`, for nodes
+    // that lie wholly beyond the Tidewater ground's near band (see `draw`). None when
+    // WGR_TERRAIN_FAR_SPLIT=0.
+    far_pipelines: Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
+    // The nodes `prepare` uploaded, for the near/far split in `draw`.
+    nodes_cpu: Vec<WgrTerrainNode>,
+    // Highest heightmap sample per HEIGHT_BLOCK x HEIGHT_BLOCK block (row-major, `height_blocks_w`
+    // wide), rebuilt by `set_heightmap`: the far split's bound on how high a node's ground reaches.
+    height_blocks: Vec<f32>,
+    height_blocks_w: u32,
+    height_blocks_h: u32,
     prepass_pipeline: wgpu::RenderPipeline,
     // The reflection is already resolution-scaled and mip-filtered by water. Keeping a
     // dedicated 1x variant avoids multiplying that secondary view by the main scene's MSAA.
@@ -1194,6 +1205,22 @@ impl Terrain {
             false,
             sample_count,
         );
+        let far_split = std::env::var("WGR_TERRAIN_FAR_SPLIT").map(|v| v != "0").unwrap_or(true);
+        let far_pipelines = far_split.then(|| {
+            let fs_far: Vec<(&str, f64)> =
+                fs_constants.iter().copied().chain(std::iter::once(("tw_far_only", 1.0))).collect();
+            (
+                make_pipeline("wgr_terrain_pipeline_far", "fs_terrain", &fs_far, surface_format, true, sample_count),
+                make_pipeline(
+                    "wgr_terrain_pipeline_no_write_far",
+                    "fs_terrain",
+                    &fs_far,
+                    surface_format,
+                    false,
+                    sample_count,
+                ),
+            )
+        });
         let prepass_pipeline = make_pipeline(
             "wgr_terrain_prepass_pipeline",
             "fs_terrain_prepass",
@@ -1286,6 +1313,11 @@ impl Terrain {
             instance_count: 0,
             pipeline,
             pipeline_no_write,
+            far_pipelines,
+            nodes_cpu: Vec::new(),
+            height_blocks: Vec::new(),
+            height_blocks_w: 0,
+            height_blocks_h: 0,
             prepass_pipeline,
             planar_pipeline,
             max_dim: device.limits().max_texture_dimension_2d,
@@ -1514,6 +1546,7 @@ impl Terrain {
         // possible occluders (the auto-adapting range in terrain_shadow.wgsl).
         (self.min_height,self.max_height) = heights[..(w as usize * h as usize)]
             .iter().copied().fold((f32::MAX,f32::MIN),|(lo,hi),h|(lo.min(h),hi.max(h)));
+        self.build_height_blocks(&heights[..(w as usize * h as usize)], w, h);
         self.hm_width = w;
         self.hm_height = h;
         self.mask_width = mask_w;
@@ -2049,6 +2082,8 @@ impl Terrain {
         nodes: &[WgrTerrainNode],
     ) {
         self.instance_count = nodes.len() as u32;
+        self.nodes_cpu.clear();
+        self.nodes_cpu.extend_from_slice(nodes);
         if nodes.is_empty() {
             return;
         }
@@ -2101,6 +2136,7 @@ impl Terrain {
         first_node: u32,
         node_count: u32,
         kind: TerrainPass,
+        cam: Option<[f32; 3]>,
     ) {
         if !self.have_heightmap || node_count == 0 {
             return;
@@ -2114,7 +2150,95 @@ impl Terrain {
             TerrainPass::Prepass => &self.prepass_pipeline,
             TerrainPass::Planar => &self.planar_pipeline,
         };
-        pass.set_pipeline(pipeline);
+        // PERF-TERRAIN-FAR-SPLIT: the colour pass draws each run of nodes that lies wholly beyond
+        // the Tidewater near band with the far-only pipeline. Exact: the shader's band test uses
+        // the 3D distance, never less than the horizontal distance measured here, so every pixel
+        // of such a node already took the far path. The margin covers f32 rounding.
+        let far = match (kind, cam, &self.far_pipelines) {
+            (TerrainPass::Color, Some(c), Some((p, _))) => Some((c, p)),
+            (TerrainPass::ColorNoWrite, Some(c), Some((_, p))) => Some((c, p)),
+            _ => None,
+        };
+        self.bind_for_draw(pass, camera_bind, camera_offset);
+        let Some((cam, far_pipeline)) = far else {
+            pass.set_pipeline(pipeline);
+            pass.draw_indexed(0..self.grid_index_count, 0, first_node..first_node + node_count);
+            return;
+        };
+        let end = first_node + node_count;
+        let is_far = |i: u32| {
+            let n = &self.nodes_cpu[i as usize];
+            let dx = (n.origin.x - cam[0]).max(cam[0] - (n.origin.x + n.size)).max(0.0);
+            let dz = (n.origin.y - cam[2]).max(cam[2] - (n.origin.y + n.size)).max(0.0);
+            // The camera's height over the node's highest possible ground (heightmap block maximum
+            // plus FAR_SPLIT_HEIGHT_MARGIN for snow, crater rims and sand) adds to the distance.
+            let dy = (cam[1] - self.node_max_height(n)).max(0.0);
+            dx * dx + dz * dz + dy * dy >= (TW_NEAR_END + 1.0) * (TW_NEAR_END + 1.0)
+        };
+        let mut start = first_node;
+        let mut bound: Option<bool> = None;
+        while start < end {
+            let far_run = is_far(start);
+            let mut stop = start + 1;
+            while stop < end && is_far(stop) == far_run {
+                stop += 1;
+            }
+            if bound != Some(far_run) {
+                pass.set_pipeline(if far_run { far_pipeline } else { pipeline });
+                bound = Some(far_run);
+            }
+            pass.draw_indexed(0..self.grid_index_count, 0, start..stop);
+            start = stop;
+        }
+    }
+
+    /// Upper bound on the ground height anywhere in node `n`: the block maxima under its
+    /// footprint plus a margin for what the vertex shader adds (snow depth, crater rims, sand).
+    /// Outside the map the vertex height is the clamped edge sample, lowered -- covered by the
+    /// clamped block range. +inf when there is no heightmap.
+    fn node_max_height(&self, n: &WgrTerrainNode) -> f32 {
+        if self.height_blocks.is_empty() || self.params.terrain_grid <= 0.0 {
+            return f32::INFINITY;
+        }
+        let g = self.params.terrain_grid;
+        let o = self.params.world_origin;
+        let w = self.params.hm_width as i64;
+        let h = self.params.hm_height as i64;
+        let ix0 = (((n.origin.x - o.x) / g).floor() as i64).clamp(0, w - 1);
+        let ix1 = (((n.origin.x + n.size - o.x) / g).ceil() as i64).clamp(0, w - 1);
+        let iz0 = (((n.origin.y - o.y) / g).floor() as i64).clamp(0, h - 1);
+        let iz1 = (((n.origin.y + n.size - o.y) / g).ceil() as i64).clamp(0, h - 1);
+        let b = HEIGHT_BLOCK as i64;
+        let mut top = f32::NEG_INFINITY;
+        for bz in iz0 / b..=iz1 / b {
+            let row = (bz as usize) * self.height_blocks_w as usize;
+            for bx in ix0 / b..=ix1 / b {
+                top = top.max(self.height_blocks[row + bx as usize]);
+            }
+        }
+        top + FAR_SPLIT_HEIGHT_MARGIN
+    }
+
+    fn build_height_blocks(&mut self, heights: &[f32], w: u32, h: u32) {
+        let bw = w.div_ceil(HEIGHT_BLOCK);
+        let bh = h.div_ceil(HEIGHT_BLOCK);
+        let mut blocks = vec![f32::NEG_INFINITY; (bw * bh) as usize];
+        for z in 0..h {
+            let brow = (z / HEIGHT_BLOCK * bw) as usize;
+            let src = &heights[(z * w) as usize..((z + 1) * w) as usize];
+            for (x, &v) in src.iter().enumerate() {
+                let slot = &mut blocks[brow + x / HEIGHT_BLOCK as usize];
+                if v > *slot {
+                    *slot = v;
+                }
+            }
+        }
+        self.height_blocks = blocks;
+        self.height_blocks_w = bw;
+        self.height_blocks_h = bh;
+    }
+
+    fn bind_for_draw(&self, pass: &mut wgpu::RenderPass<'_>, camera_bind: &wgpu::BindGroup, camera_offset: u32) {
         pass.set_bind_group(0, camera_bind, &[camera_offset]);
         pass.set_bind_group(1, &self.group1_bind, &[]);
         pass.set_bind_group(2, &self.group2_bind, &[]);
@@ -2122,13 +2246,17 @@ impl Terrain {
         pass.set_vertex_buffer(0, self.grid_vbuf.slice(..));
         pass.set_vertex_buffer(1, self.instance_buf.slice(..));
         pass.set_index_buffer(self.grid_ibuf.slice(..), wgpu::IndexFormat::Uint16);
-        pass.draw_indexed(
-            0..self.grid_index_count,
-            0,
-            first_node..first_node + node_count,
-        );
     }
 }
+
+/// PERF-TERRAIN-FAR-SPLIT: terrain.wgsl's TW_NEAR_END, the outer edge of the Tidewater ground's
+/// near band in metres. Keep the two equal.
+const TW_NEAR_END: f32 = 200.0;
+/// Heightmap samples per side of one `height_blocks` cell.
+const HEIGHT_BLOCK: u32 = 16;
+/// Metres above the heightmap the vertex shader can raise the ground: snow cover, crater rims and
+/// sand offsets are decimetres to a few metres; this keeps the bound conservative.
+const FAR_SPLIT_HEIGHT_MARGIN: f32 = 25.0;
 
 fn texel_copy(texture: &wgpu::Texture) -> wgpu::TexelCopyTextureInfo<'_> {
     wgpu::TexelCopyTextureInfo {

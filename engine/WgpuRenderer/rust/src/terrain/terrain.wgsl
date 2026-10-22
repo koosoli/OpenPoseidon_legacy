@@ -2333,6 +2333,16 @@ override tile_normal_strength: f32 = 1.0;
 // WGR_TERRAIN_COST_STAGE (profiling only, default 0 = off): fs_terrain returns after stage N so
 // the compiler drops the rest -- 1 ground colour, 2 + wet/mud/snow, 3 + shadows, 4 + lighting.
 override cost_stage: u32 = 0u;
+// PERF-TERRAIN-FAR-SPLIT: 1 in the pipeline that draws terrain nodes lying wholly beyond the
+// Tidewater ground's near band (Terrain::draw). Every pixel there has farK = 1, so the near kinds
+// (sand, rock, the land covers: 15-30 detail taps and most of the shader's registers) are dead
+// code -- and compiling them out is the point: their mere presence cost the whole terrain shader
+// its occupancy. Measured on Arma 2 Chernarus at 3440x1440 from 150 m: terrain colour 23.5 -> 13.1
+// ms with the near kinds removed, although almost no pixel ever took them.
+override tw_far_only: u32 = 0u;
+// The near band's outer edge: farK = smoothstep(130, TW_NEAR_END, distance). Terrain::draw keeps
+// any node that can reach inside it on the full pipeline (TW_NEAR_END in terrain/mod.rs).
+const TW_NEAR_END: f32 = 200.0;
 // How much of the authored surface's gain comes from its OWN measured average instead of
 // the assumed 0.5 behind the x2 (WGR_TERRAIN_SURFACE_NORMALISE). 0 = the shipped x2, exactly;
 // 1 = `surface / mean(surface)`, neutral by construction for any source albedo; between =
@@ -2539,7 +2549,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     if (tw_total * tws_fade > 0.001 && tw_det != 0u) {
         let wind = normalize(frame.foliaged.zw + vec2<f32>(1e-4, 0.0));
         let h_sea = absolute_world_pos.y - tp.sea_level;
-        let farK = smoothstep(130.0, 200.0, length(in.world_pos));
+        let farK = select(smoothstep(130.0, TW_NEAR_END, length(in.world_pos)), 1.0, tw_far_only != 0u);
         let macroA = twd(tw_det, tws_rot(absolute_world_pos.xz, 0.7) / 173.0, vec2<f32>(0.0), vec2<f32>(0.0)).w;
         let macroB = twd(tw_det, tws_rot(absolute_world_pos.xz, 2.1) / 47.0, vec2<f32>(0.0), vec2<f32>(0.0)).w;
         var tin: TwIn;
