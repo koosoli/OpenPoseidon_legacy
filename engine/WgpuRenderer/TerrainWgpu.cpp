@@ -4297,8 +4297,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
     // Snow (whole world). DrawTerrain returns before its snow code in this mode, so the island's fixed
     // 645 m line and an empty track window were all the Earth terrain ever saw. A real-world snow line: the
     // permanent line falls from ~5,000 m at the equator to ~2,900 m in the Alps and ~1,700 m in Norway
-    // (5000 cos(lat)^1.5), and outside the tropics winter brings it down by up to 2,200 m (Alps in December
-    // ~700 m). 250 m ramp; 30 cm of cover above it, deep enough for footprints and tracks to press in.
+    // (5000 cos(lat)^1.5), and outside the tropics winter brings it down by up to 600 m (Alps in December
+    // ~2,300 m). 250 m ramp; 30 cm of cover above it, deep enough for footprints and tracks to press in.
     if (GSnow().EffSnowlineEnabled() && !SnowField::ResolveSnowlineOverride().active)
     {
         const double lat = std::abs(origin.latitude);
@@ -4308,7 +4308,9 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         const double summerNorth = std::cos(2.0 * Earth::Pi * (year - 172.0 / 365.0)); // +1 on 21 June
         const double winter = 0.5 * (1.0 - (origin.latitude >= 0 ? summerNorth : -summerNorth));
         const double t = std::clamp((lat - 20.0) / 25.0, 0.0, 1.0);
-        GSnow().snowlineHeight = float(std::max(permanent - winter * 2200.0 * t * t * (3.0 - 2.0 * t), 0.0));
+        // Winter lowers it by at most 600 m (was 2,200 m: Alps in December down to ~700 m), so the cover
+        // stays on the high ground: from a distance whole valley systems turned white (owner, 2026-10-22).
+        GSnow().snowlineHeight = float(std::max(permanent - winter * 600.0 * t * t * (3.0 - 2.0 * t), 0.0));
         GSnow().snowlineRange = 250.0f;
         GSnow().snowlineDepth = 0.3f;
     }
