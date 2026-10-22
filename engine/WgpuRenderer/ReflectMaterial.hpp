@@ -245,8 +245,11 @@ inline Params Classify(const Inputs& in)
         return p;
     }
 
-    // An environment map on an otherwise unnamed part is the authors' own "this shines".
-    if (in.hasEnvMap && in.specularPower >= 60.0f && !in.military)
+    // An environment map on an otherwise unnamed part is the authors' own "this shines" --
+    // but not on a vehicle: Arma 3 gives its PAINT an env map and a high power too, and
+    // reading that as chrome turned the red C_SUV_01_F into a blue mirror (first test,
+    // 2026-10-22). Vehicle bodies with an env map are metallic paint (rule 4).
+    if (!in.isVehicle && in.hasEnvMap && in.specularPower >= 60.0f && in.specular >= 0.5f)
     {
         Params p = Preset(SurfaceClass::Chrome);
         p.roughness = std::max(RoughnessFromBlinn(in.specularPower), 0.06f);
