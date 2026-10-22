@@ -427,7 +427,7 @@ fn sand_geometry_gpu_samples_signed_depression_and_rim_without_corrupting_snow_o
             });
             device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
             receive.recv().unwrap().unwrap();
-            let bytes = slice.get_mapped_range();
+            let bytes = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
             let values = bytemuck::cast_slice::<u8, f32>(&bytes).to_vec();
             assert!(
                 values.iter().all(|v| v.is_finite()),

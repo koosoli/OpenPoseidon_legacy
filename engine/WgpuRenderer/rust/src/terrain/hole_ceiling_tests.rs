@@ -87,7 +87,7 @@ fn gpu_values(device:&wgpu::Device,queue:&wgpu::Queue,source:&str,edges:&[[f32;4
     encoder.copy_buffer_to_buffer(&output,0,&staging,0,bytes);queue.submit([encoder.finish()]);
     let(tx,rx)=std::sync::mpsc::channel();staging.slice(..).map_async(wgpu::MapMode::Read,move|r|tx.send(r).unwrap());
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();rx.recv().unwrap().unwrap();
-    let mapped=staging.slice(..).get_mapped_range();let result=bytemuck::cast_slice::<u8,[f32;4]>(&mapped).to_vec();drop(mapped);staging.unmap();result
+    let mapped=staging.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");let result=bytemuck::cast_slice::<u8,[f32;4]>(&mapped).to_vec();drop(mapped);staging.unmap();result
 }
 
 #[test]

@@ -185,7 +185,7 @@ fn actual_gpu_recorded_edges_remove_unavailable_sky_without_extra_energy() {
         .map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
-    let data = staging.slice(..).get_mapped_range();
+    let data = staging.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let rows: &[[f32; 4]] = bytemuck::cast_slice(&data);
     let b = [0.04, 0.025, 0.012];
     let mut blocked = 0;

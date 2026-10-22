@@ -134,7 +134,7 @@ fn rain_cover_gpu_uses_zenith_not_diffuse_window_light() {
         slice.map_async(wgpu::MapMode::Read, move |result| { let _ = sender.send(result); });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         receiver.recv().unwrap().unwrap();
-        let data = slice.get_mapped_range();
+        let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let values: [f32; 4] = bytemuck::cast_slice::<u8,f32>(&data).try_into().unwrap();
         drop(data); staging.unmap(); values
     };

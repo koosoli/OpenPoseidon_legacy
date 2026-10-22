@@ -1522,6 +1522,9 @@ impl Renderer {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
+                // wgpu 30: limit bucketing is a web-privacy measure; a native game wants the
+                // adapter's real limits (the wgpu 29 behaviour).
+                apply_limit_buckets: false,
             }))
             .map_err(|e| format!("request_adapter failed: {e}"))?;
 
@@ -7646,7 +7649,8 @@ impl Renderer {
         self.gfx3d.collect_sky_bakes(&self.device);
         self.gpu_timers
             .cpu_begin(crate::gpu_timers::Region::WorkerPresent);
-        frame.present();
+        // wgpu 30: presenting moved from SurfaceTexture::present to Queue::present.
+        self.queue.present(frame);
         self.gpu_timers
             .cpu_end(crate::gpu_timers::Region::WorkerPresent);
         // REN-TEMP-001E: this frame's camera becomes the previous frame's history.
@@ -7665,7 +7669,7 @@ impl Renderer {
                 .is_ok()
                 && matches!(rx.recv(), Ok(Ok(())))
             {
-                let mapped = slice.get_mapped_range();
+                let mapped = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                 let mut rgba = vec![0; bytes_per_row as usize * height as usize];
                 for row in 0..height as usize {
                     let source =

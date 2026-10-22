@@ -1263,11 +1263,11 @@ impl VelocityObjPass {
                 immediate_size: 0,
             });
             // Position-only view of the pool vertex layout: same stride, one attribute.
-            let vbuf_layout = wgpu::VertexBufferLayout {
+            let vbuf_layout = Some(wgpu::VertexBufferLayout {
                 array_stride: BAKED_VERT_SIZE,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &wgpu::vertex_attr_array![0 => Float32x3],
-            };
+            });
             let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("wgr_velocity_obj_pipeline"),
                 layout: Some(&pipeline_layout),
@@ -1363,11 +1363,11 @@ impl VelocityObjPass {
                     bind_group_layouts: &[Some(&skin_layout)],
                     immediate_size: 0,
                 });
-            let skin_vbuf_layout = wgpu::VertexBufferLayout {
+            let skin_vbuf_layout = Some(wgpu::VertexBufferLayout {
                 array_stride: BAKED_VERT_SIZE,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &wgpu::vertex_attr_array![0 => Float32x3],
-            };
+            });
             let skin_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("wgr_velocity_skin_pipeline"),
                 layout: Some(&skin_pipeline_layout),
@@ -1457,11 +1457,11 @@ impl VelocityObjPass {
                     bind_group_layouts: &[Some(&veg_layout)],
                     immediate_size: 0,
                 });
-            let veg_vbuf_layout = wgpu::VertexBufferLayout {
+            let veg_vbuf_layout = Some(wgpu::VertexBufferLayout {
                 array_stride: BAKED_VERT_SIZE,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &wgpu::vertex_attr_array![0 => Float32x3],
-            };
+            });
             let veg_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("wgr_velocity_veg_pipeline"),
                 layout: Some(&veg_pipeline_layout),
@@ -1587,7 +1587,7 @@ fn read_depth_layer(
     {
         return false;
     }
-    let data = slice.get_mapped_range();
+    let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     for y in 0..res {
         let row = &data[y * padded as usize..y * padded as usize + unpadded as usize];
         out[y * res..(y + 1) * res].copy_from_slice(bytemuck::cast_slice(row));
@@ -1626,7 +1626,7 @@ fn read_u32_buffer(
     {
         return Vec::new();
     }
-    let data = slice.get_mapped_range();
+    let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let out = bytemuck::cast_slice::<u8, u32>(&data).to_vec();
     drop(data);
     staging.unmap();
@@ -3479,7 +3479,7 @@ fn gtao_writes_full_visibility_where_nothing_was_drawn() {
     let slice = readback.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-    let data = slice.get_mapped_range();
+    let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let mut seen = 0usize;
     for y in 0..h as usize {
         for x in 0..w as usize {
@@ -5349,19 +5349,19 @@ fn build_main_pipeline(ctx: &PipeCtx, device: &wgpu::Device, key: PipelineKey) -
         ("vs_main", &ctx.plain_layout)
     };
 
-    let vbuf_layout = wgpu::VertexBufferLayout {
+    let vbuf_layout = Some(wgpu::VertexBufferLayout {
         array_stride: std::mem::size_of::<WgrMeshVertex>() as wgpu::BufferAddress,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &ctx.vbuf_attrs,
-    };
-    let skin_layout = wgpu::VertexBufferLayout {
+    });
+    let skin_layout = Some(wgpu::VertexBufferLayout {
         array_stride: 8,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &ctx.skin_attrs,
-    };
+    });
     let plain_buffers = [vbuf_layout.clone()];
     let skinned_buffers = [vbuf_layout, skin_layout];
-    let buffers: &[wgpu::VertexBufferLayout] = if key.skinned {
+    let buffers: &[Option<wgpu::VertexBufferLayout>] = if key.skinned {
         &skinned_buffers
     } else {
         &plain_buffers
@@ -5619,19 +5619,19 @@ fn build_prepass_pipeline(ctx: &PipeCtx, device: &wgpu::Device, key: PrepassKey)
     } else {
         ("vs_main", &ctx.plain_layout)
     };
-    let vbuf_layout = wgpu::VertexBufferLayout {
+    let vbuf_layout = Some(wgpu::VertexBufferLayout {
         array_stride: std::mem::size_of::<WgrMeshVertex>() as wgpu::BufferAddress,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &ctx.vbuf_attrs,
-    };
-    let skin_layout = wgpu::VertexBufferLayout {
+    });
+    let skin_layout = Some(wgpu::VertexBufferLayout {
         array_stride: 8,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &ctx.skin_attrs,
-    };
+    });
     let plain_buffers = [vbuf_layout.clone()];
     let skinned_buffers = [vbuf_layout, skin_layout];
-    let buffers: &[wgpu::VertexBufferLayout] = if key.skinned {
+    let buffers: &[Option<wgpu::VertexBufferLayout>] = if key.skinned {
         &skinned_buffers
     } else {
         &plain_buffers
@@ -6802,7 +6802,7 @@ impl Gfx3d {
                 step_mode: wgpu::VertexStepMode::Vertex, attributes: &vbuf_attrs};
             let skin = wgpu::VertexBufferLayout {array_stride: 8,
                 step_mode: wgpu::VertexStepMode::Vertex, attributes: &skin_attrs};
-            let buffers = if key.skinned {vec![vertex,skin]} else {vec![vertex]};
+            let buffers = if key.skinned {vec![Some(vertex),Some(skin)]} else {vec![Some(vertex)]};
             let entry = if key.skinned {"vs_skinned"} else {"vs_main"};
             let alpha = f32::from_bits(key.alpha_ref_bits);
             let near = weather_cover::depth_pipeline(device, &shader, &layout, &buffers, entry, "fs_weather_depth", alpha, false);
@@ -8121,16 +8121,16 @@ impl Gfx3d {
         if self.shadow_pipelines.is_some() {
             return;
         }
-        let vbuf_layout = wgpu::VertexBufferLayout {
+        let vbuf_layout = Some(wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<WgrMeshVertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &self.vbuf_attrs,
-        };
-        let skin_layout = wgpu::VertexBufferLayout {
+        });
+        let skin_layout = Some(wgpu::VertexBufferLayout {
             array_stride: 8,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &self.skin_attrs,
-        };
+        });
         let plain_buffers = [vbuf_layout.clone()];
         let skinned_buffers = [vbuf_layout, skin_layout];
         let build = |vs: &str, fs: Option<&str>, skinned: bool| {
@@ -15152,6 +15152,7 @@ fn velocity_obj_pipelines_build_on_a_real_device() {
         power_preference: wgpu::PowerPreference::default(),
         compatible_surface: None,
         force_fallback_adapter: false,
+        apply_limit_buckets: false,
     })) else {
         return;
     };
@@ -15418,7 +15419,7 @@ mod sky_atlas_tests {
         staging.slice(..).map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         rx.recv().unwrap().unwrap();
-        let data = staging.slice(..).get_mapped_range();
+        let data = staging.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let values: &[f32] = bytemuck::cast_slice(&data);
         assert_eq!(&values[..4], &first);
         assert_eq!(&values[1024..1028], &second);

@@ -633,6 +633,7 @@ mod tests {
             power_preference: wgpu::PowerPreference::default(),
             compatible_surface: None,
             force_fallback_adapter: false,
+            apply_limit_buckets: false,
         }))
         .ok()?;
         // The compacted buffer is bound read_write to a VERTEX stage. Not optional here, and

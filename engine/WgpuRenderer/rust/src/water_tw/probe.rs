@@ -217,7 +217,7 @@ impl Probe {
                     0 => {}
                     1 => {
                         let (h, xyz) = {
-                            let data = slot.buf.slice(..).get_mapped_range();
+                            let data = slot.buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                             let lane = |row: usize, col: usize, l: usize| {
                                 // (W12d) rgba32float vertices: x, height, z
                                 let o = row * ROW as usize + col * 16 + l * 4;

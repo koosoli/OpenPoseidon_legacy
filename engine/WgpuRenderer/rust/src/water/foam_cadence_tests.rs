@@ -124,7 +124,7 @@ fn probe() {result[0]=textureLoad(history,vec2<i32>(512,512),0);result[1]=textur
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         rx.recv().unwrap().unwrap();
         let result = {
-            let bytes = read.slice(..).get_mapped_range();
+            let bytes = read.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
             *bytemuck::from_bytes::<[[f32; 4]; 2]>(&bytes)
         };
         read.unmap();

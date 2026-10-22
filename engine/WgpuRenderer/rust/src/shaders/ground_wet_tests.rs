@@ -135,7 +135,7 @@ fn actual_wet_soil_sun_gpu_is_energy_bounded_broad_filtered_and_physically_gated
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |r| { tx.send(r).unwrap(); });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap(); rx.recv().unwrap().unwrap();
-    let bytes = slice.get_mapped_range();
+    let bytes = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let samples = bytemuck::cast_slice::<u8, f32>(&bytes);
     let eta = 1.333f32;
     let f0 = ((eta-1.0)/(eta+1.0)).powi(2);
@@ -300,7 +300,7 @@ fn actual_wet_soil_surface_gpu_preserves_hard_film_and_hands_soft_film_to_rough_
     });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
-    let bytes = slice.get_mapped_range();
+    let bytes = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let samples = bytemuck::cast_slice::<u8, f32>(&bytes);
     let mut previous = 1.0;
     let mut positive = false;
@@ -454,7 +454,7 @@ fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {
     });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
-    let bytes = slice.get_mapped_range();
+    let bytes = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let samples = bytemuck::cast_slice::<u8, f32>(&bytes);
     let mut previous = 0.0;
     for s in samples.chunks_exact(12) {

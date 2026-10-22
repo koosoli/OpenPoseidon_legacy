@@ -625,7 +625,7 @@ mod tests {
                 });
                 device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
                 recv.recv().unwrap().unwrap();
-                let bytes = staging.slice(..).get_mapped_range();
+                let bytes = staging.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                 let result = bytemuck::cast_slice::<u8, [f32; 4]>(&bytes).to_vec();
                 drop(bytes);
                 staging.unmap();

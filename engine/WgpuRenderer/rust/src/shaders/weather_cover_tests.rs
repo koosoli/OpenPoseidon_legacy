@@ -374,7 +374,7 @@ fn weather_cover_actual_gpu_far_roof_overhang_hole_underside_and_unknown() {
         });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         recv.recv().unwrap().unwrap();
-        let data = slice.get_mapped_range();
+        let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let values: [f32; 4] = bytemuck::cast_slice(&data).try_into().unwrap();
         drop(data);
         readback.unmap();

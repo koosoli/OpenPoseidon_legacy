@@ -144,7 +144,7 @@ pub enum Region {
     // the bound. Acquire is the swapchain wait BEFORE this frame's encoder exists (recorded
     // into the frame after begin_frame), present the call at the end.
     WorkerAcquire = 63, // surface.get_current_texture(): blocked until an image is free
-    WorkerPresent = 64, // frame.present()
+    WorkerPresent = 64, // queue.present(frame) (wgpu 30; frame.present() before)
     WorkerSetup = 65,   // render_frame entry -> begin_frame (uploads, drains, acquire included)
     WorkerSubmit = 66,  // queue.submit of the frame encoder
     WorkerHarvest = 67, // the non-blocking readback harvests after present
@@ -561,7 +561,7 @@ impl GpuTimers {
                 Ok(Ok(())) => {
                     let written = *written;
                     {
-                        let data = slot.buf.slice(..).get_mapped_range();
+                        let data = slot.buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                         // Read ticks byte-wise: mapped data has no u64 alignment guarantee.
                         let tick = |i: usize| {
                             u64::from_le_bytes(data[i * 8..i * 8 + 8].try_into().unwrap())

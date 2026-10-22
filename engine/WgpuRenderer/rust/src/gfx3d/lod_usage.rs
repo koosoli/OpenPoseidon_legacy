@@ -96,7 +96,7 @@ impl LodUsage {
                 Ok(Ok(())) => {
                     let buffer = slot.buffer.as_ref().unwrap();
                     {
-                        let view = buffer.slice(..n as u64 * 4).get_mapped_range();
+                        let view = buffer.slice(..n as u64 * 4).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                         let words: &[u32] = bytemuck::cast_slice(&view);
                         if self.used.len() < words.len() {
                             self.used.resize(words.len(), false);

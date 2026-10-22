@@ -170,7 +170,7 @@ fn muzzle_actual_gpu_srgb_transfer_and_bounded_self_emission() {
     });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     receiver.recv().unwrap().unwrap();
-    let data = slice.get_mapped_range();
+    let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let actual: &[[f32; 4]] = bytemuck::cast_slice(&data);
     let decode = |x: f32| {
         if x <= 0.04045 {

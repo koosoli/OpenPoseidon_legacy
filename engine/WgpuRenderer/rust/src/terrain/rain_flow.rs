@@ -407,7 +407,7 @@ mod tests {
         queue.submit([enc.finish()]);
         buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
-        let data = buf.slice(..).get_mapped_range();
+        let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let px: &[u16] = bytemuck::cast_slice(&data);
         let f16 = |b: u16| -> f32 {
             let (s, e, m) = ((b >> 15) as i32, ((b >> 10) & 31) as i32, (b & 1023) as f32);
@@ -427,7 +427,7 @@ mod tests {
         queue.submit([enc.finish()]);
         gbuf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
-        let gdata = gbuf.slice(..).get_mapped_range();
+        let gdata = gbuf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let ground: &[f32] = bytemuck::cast_slice(&gdata);
         let (gmin, gmax) = ground.iter().fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
         eprintln!("ground: {gmin:.3} .. {gmax:.3}; slot (0,0) {:.3}, (128,0) {:.3}, (256,0) {:.3}, (0,128) {:.3}",

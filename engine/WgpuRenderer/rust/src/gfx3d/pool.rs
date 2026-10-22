@@ -842,7 +842,7 @@ mod tests {
         });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         rx.recv().unwrap().unwrap();
-        let data = slice.get_mapped_range();
+        let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let verts: &[WgrMeshVertex] = bytemuck::cast_slice(&data);
         verts.iter().map(|v| v.pos.x).collect()
     }
@@ -888,7 +888,7 @@ mod tests {
         slice.map_async(wgpu::MapMode::Read, move |result| { let _ = tx.send(result); });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         rx.recv().unwrap().unwrap();
-        let bytes = slice.get_mapped_range().to_vec();staging.unmap();bytes
+        let bytes = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer").to_vec();staging.unmap();bytes
     }
 
     #[test]

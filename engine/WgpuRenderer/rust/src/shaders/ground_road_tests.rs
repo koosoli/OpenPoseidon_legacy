@@ -147,7 +147,7 @@ fn ground_rain_gpu_rejects_roof_border_open_fallback() {
     });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     receive.recv().unwrap().unwrap();
-    let bytes = slice.get_mapped_range();
+    let bytes = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let values = bytemuck::cast_slice::<u8, f32>(&bytes);
     let mut falsified_old_gate = false;
     for (i, sample) in values.chunks_exact(4).enumerate() {

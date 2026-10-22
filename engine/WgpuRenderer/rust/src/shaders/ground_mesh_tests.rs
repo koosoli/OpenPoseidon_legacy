@@ -254,7 +254,7 @@ fn ground_mesh_gpu_proves_each_fragment_triangle_side_and_valid_heightmap() {
         });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         receive.recv().unwrap().unwrap();
-        let bytes = slice.get_mapped_range();
+        let bytes = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let values = bytemuck::cast_slice::<u8, f32>(&bytes);
         let expected = if case == 0 {
             [

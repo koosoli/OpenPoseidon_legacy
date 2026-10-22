@@ -259,7 +259,7 @@ impl MipFeedback {
             match rx.try_recv() {
                 Ok(Ok(())) => {
                     {
-                        let data = buf.slice(..).get_mapped_range();
+                        let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                         let words = data.len() / 4;
                         if frame >= self.frag_prev_frame {
                             let mut cur = [0u32; HEADER_WORDS as usize];

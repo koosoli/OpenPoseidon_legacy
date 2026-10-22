@@ -110,7 +110,7 @@ fn church_clock_bit128_actual_gpu_veto_preserves_fixed_solid_and_cutout() {
     let slice=staging.slice(..);let (tx,rx)=std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read,move|result|{let _=tx.send(result);});
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();rx.recv().unwrap().unwrap();
-    let data=slice.get_mapped_range();
+    let data=slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     assert_eq!(bytemuck::cast_slice::<u8,u32>(&data), &[1,0,0,0,0,1,0,0,0,0]);
     drop(data);staging.unmap();
 }

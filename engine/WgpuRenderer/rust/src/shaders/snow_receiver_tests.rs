@@ -373,7 +373,7 @@ fn snow_receiver_actual_gpu_slopes_subtexels_handoff_and_thin_roof_rejections() 
         });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         recv.recv().unwrap().unwrap();
-        let data = slice.get_mapped_range();
+        let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let values: [f32; 8] = bytemuck::cast_slice(&data).try_into().unwrap();
         drop(data);
         readback.unmap();

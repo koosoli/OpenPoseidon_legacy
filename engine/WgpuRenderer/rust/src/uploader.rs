@@ -283,7 +283,7 @@ mod tests {
         });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         rx.recv().unwrap().unwrap();
-        let data = slice.get_mapped_range();
+        let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let verts: &[WgrMeshVertex] = bytemuck::cast_slice(&data);
         verts.iter().map(|v| v.pos.x).collect()
     }

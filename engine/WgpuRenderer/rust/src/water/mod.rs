@@ -741,16 +741,16 @@ impl Water {
                     ..Default::default()
                 },
                 buffers: &[
-                    wgpu::VertexBufferLayout {
+                    Some(wgpu::VertexBufferLayout {
                         array_stride: 12,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &grid_attrs,
-                    },
-                    wgpu::VertexBufferLayout {
+                    }),
+                    Some(wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<WgrWaterNode>() as u64,
                         step_mode: wgpu::VertexStepMode::Instance,
                         attributes: &inst_attrs,
-                    },
+                    }),
                 ],
             },
             primitive: wgpu::PrimitiveState {

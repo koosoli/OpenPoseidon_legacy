@@ -388,7 +388,7 @@ impl Pending {
         {
             return Err("map failed");
         }
-        let mapped = slice.get_mapped_range();
+        let mapped = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let values = decode(&mapped, &self.input);
         drop(mapped);
         self.buffer.unmap();

@@ -304,7 +304,7 @@ pub fn depth_pipeline(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
     layout: &wgpu::PipelineLayout,
-    buffers: &[wgpu::VertexBufferLayout<'_>],
+    buffers: &[Option<wgpu::VertexBufferLayout<'_>>],
     vs: &'static str,
     fs: &'static str,
     alpha: f32,
@@ -411,11 +411,11 @@ pub fn retained_pipeline(
         device,
         &module,
         &layout,
-        &[wgpu::VertexBufferLayout {
+        &[Some(wgpu::VertexBufferLayout {
             array_stride: super::BAKED_VERT_SIZE,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &attributes,
-        }],
+        })],
         "vs_gpu",
         "fs_gpu_weather_depth",
         0.0,

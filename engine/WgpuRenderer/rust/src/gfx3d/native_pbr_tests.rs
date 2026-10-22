@@ -431,7 +431,7 @@ fn gpu_channels_result_count(module: naga::Module, count: u32) -> Vec<f32> {
     });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
-    let data = staging.slice(..).get_mapped_range();
+    let data = staging.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let actual = bytemuck::cast_slice::<u8, f32>(&data).to_vec();
     drop(data);
     staging.unmap();

@@ -98,7 +98,7 @@ fn forest_coverage_diagnostic_actual_gpu_keeps_source_negatives_and_raw_coat() {
     encoder.copy_buffer_to_buffer(&output,0,&staging,0,128);queue.submit(Some(encoder.finish()));
     let slice=staging.slice(..);let (send,recv)=std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read,move|r|{let _=send.send(r);});device.poll(wgpu::PollType::wait_indefinitely()).unwrap();recv.recv().unwrap().unwrap();
-    let bytes=slice.get_mapped_range();let samples=bytemuck::cast_slice::<u8,f32>(&bytes);
+    let bytes=slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");let samples=bytemuck::cast_slice::<u8,f32>(&bytes);
     let expected=[[1.,1.,1.,1.],[0.,0.,0.,1.],[0.,0.,0.,1.],[0.;4],[0.;4],[0.;4],[0.25,0.25,0.25,1.],[0.,0.,0.,1.]];
     for (actual,want) in samples.chunks_exact(4).zip(expected) {for (a,b) in actual.iter().zip(want){assert!(a.is_finite() && (*a-b).abs()<1e-6);}}
     drop(bytes);staging.unmap();
@@ -146,7 +146,7 @@ fn tree_crown_actual_gpu_height_depth_shelter_and_ablation() {
         let (send,recv) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read,move |r| { let _ = send.send(r); });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap(); recv.recv().unwrap().unwrap();
-        let bytes = slice.get_mapped_range();
+        let bytes = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let samples = bytemuck::cast_slice::<u8,f32>(&bytes);
         for (i,sample) in samples.chunks_exact(4).enumerate() {
             assert!(sample.iter().all(|v| v.is_finite()));
@@ -308,7 +308,7 @@ fn forest_actual_gpu_audited_atlas_crowns_trunks_ground_shelter_and_ablation() {
         let slice = staging.slice(..);let (send,recv) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read,move |r| {let _ = send.send(r);});
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();recv.recv().unwrap().unwrap();
-        let bytes = slice.get_mapped_range();let samples = bytemuck::cast_slice::<u8,f32>(&bytes);
+        let bytes = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");let samples = bytemuck::cast_slice::<u8,f32>(&bytes);
         for (i,sample) in samples.chunks_exact(4).enumerate() {
             let expected = match i {0|2|16|20|23|24|29|30|32|36|45|46|48|51|53|55|58|61=>1.0,
                 8|9|10=>0.5,_=>0.0};
@@ -400,7 +400,7 @@ fn tree_frost_actual_gpu_retains_authored_leaf_contrast_and_dark_recesses() {
     let slice = staging.slice(..);let (send,recv) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read,move |r| {let _=send.send(r);});
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();recv.recv().unwrap().unwrap();
-    let bytes = slice.get_mapped_range();let samples = bytemuck::cast_slice::<u8,f32>(&bytes);
+    let bytes = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");let samples = bytemuck::cast_slice::<u8,f32>(&bytes);
     let levels = [0.0,0.001,0.005,0.02,0.04,0.08,0.16,0.64];
     for (i,sample) in samples.chunks_exact(4).enumerate() {
         assert!(sample.iter().all(|v| v.is_finite() && *v >= 0.0 && *v < 0.85));

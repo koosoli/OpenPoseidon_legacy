@@ -1273,7 +1273,7 @@ impl BatchCountRing {
                 BatchCountSlot::Mapping { identity, copied, committed, aborted, done } => {
                     match done.try_recv() {
                         Ok(Ok(())) => {
-                            let data = buf.slice(..).get_mapped_range();
+                            let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                             if committed && !aborted && epoch == identity.cull_epoch &&
                                 target_revision == Some((identity.model_id, identity.target_revision)) {
                                 for (i, fact) in self.latest.iter_mut().enumerate() {
@@ -2252,7 +2252,7 @@ impl CullState {
                 MainCountSlot::Mapping { identity, committed, aborted, done } => {
                     match done.try_recv() {
                         Ok(Ok(())) => {
-                            let data = buf.slice(..).get_mapped_range();
+                            let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                             let count = u32::from_le_bytes(data[..4].try_into().unwrap());
                             drop(data);
                             buf.unmap();
@@ -2418,7 +2418,7 @@ impl CullState {
                 MainCountSlot::Mapping { identity, committed, aborted, done } => {
                     match done.try_recv() {
                         Ok(Ok(())) => {
-                            let data = buf.slice(..).get_mapped_range();
+                            let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                             let count = u32::from_le_bytes(data[..4].try_into().unwrap());
                             drop(data);
                             buf.unmap();
@@ -2545,7 +2545,7 @@ impl CullState {
                 MainCountSlot::Mapping { identity, committed, aborted, done } => {
                     match done.try_recv() {
                         Ok(Ok(())) => {
-                            let data = buf.slice(..).get_mapped_range();
+                            let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                             let count = u32::from_le_bytes(data[..4].try_into().unwrap());
                             drop(data);
                             buf.unmap();
@@ -2661,7 +2661,7 @@ impl CullState {
                 MainCountSlot::Mapping { identity, committed, aborted, done } => {
                     match done.try_recv() {
                         Ok(Ok(())) => {
-                            let data = buf.slice(..).get_mapped_range();
+                            let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                             let count = u32::from_le_bytes(data[..4].try_into().unwrap());
                             drop(data);
                             buf.unmap();
@@ -2774,7 +2774,7 @@ impl CullState {
                 MainCountSlot::Mapping { identity, committed, aborted, done } => {
                     match done.try_recv() {
                         Ok(Ok(())) => {
-                            let data = buf.slice(..).get_mapped_range();
+                            let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                             let count = u32::from_le_bytes(data[..4].try_into().unwrap());
                             drop(data);
                             buf.unmap();
@@ -2890,7 +2890,7 @@ impl CullState {
             match rx.try_recv() {
                 Ok(Ok(())) => {
                     {
-                        let data = buf.slice(..).get_mapped_range();
+                        let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                         let word = |i: usize| {
                             u32::from_le_bytes(data[i * 4..i * 4 + 4].try_into().unwrap())
                         };
@@ -4603,11 +4603,11 @@ pub fn build_gpu_velocity_pipeline(
             shader_location: 5,
         },
     ];
-    let vbuf_layout = wgpu::VertexBufferLayout {
+    let vbuf_layout = Some(wgpu::VertexBufferLayout {
         array_stride: std::mem::size_of::<crate::ffi::WgrMeshVertex>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &vbuf_attrs,
-    };
+    });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("wgr_gpu_velocity_pipeline"),
         layout: Some(&pipeline_layout),
@@ -4721,11 +4721,11 @@ pub fn build_gpu_pipeline(
             wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 48, shader_location: 8 },
         ]);
     }
-    let vbuf_layout = wgpu::VertexBufferLayout {
+    let vbuf_layout = Some(wgpu::VertexBufferLayout {
         array_stride: super::BAKED_VERT_SIZE,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &vbuf_attrs,
-    };
+    });
     let linear = if surface_format == wgpu::TextureFormat::Rgba16Float {
         1.0
     } else {
@@ -4925,11 +4925,11 @@ pub fn build_gpu_shadow_pipeline(
     });
     let vbuf_attrs =
         wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 5 => Uint32];
-    let vbuf_layout = wgpu::VertexBufferLayout {
+    let vbuf_layout = Some(wgpu::VertexBufferLayout {
         array_stride: super::BAKED_VERT_SIZE,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &vbuf_attrs,
-    };
+    });
     let vbuffers = [vbuf_layout];
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("wgr_gpu_driven_shadow_pipeline"),
@@ -5003,11 +5003,11 @@ pub fn build_gpu_rsm_pipeline(
     });
     let vbuf_attrs =
         wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 5 => Uint32];
-    let vbuf_layout = wgpu::VertexBufferLayout {
+    let vbuf_layout = Some(wgpu::VertexBufferLayout {
         array_stride: super::BAKED_VERT_SIZE,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &vbuf_attrs,
-    };
+    });
     let vbuffers = [vbuf_layout];
     let target = |format: wgpu::TextureFormat| {
         Some(wgpu::ColorTargetState {
@@ -5446,6 +5446,7 @@ pub(crate) mod tests {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: None,
                 force_fallback_adapter: false,
+                apply_limit_buckets: false,
             }))
         else {
             return;
@@ -5641,6 +5642,7 @@ pub(crate) mod tests {
             power_preference: wgpu::PowerPreference::default(),
             compatible_surface: None,
             force_fallback_adapter: false,
+            apply_limit_buckets: false,
         }))
         .ok()?;
         // Actual object shaders include conform resources in group 4, matching
@@ -5678,7 +5680,7 @@ pub(crate) mod tests {
         });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         rx.recv().unwrap().unwrap();
-        let data = slice.get_mapped_range();
+        let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         bytemuck::cast_slice::<u8, u32>(&data).to_vec()
     }
 

@@ -122,7 +122,7 @@ impl WaterVisibility {
             match rx.try_recv() {
                 Ok(Ok(())) => {
                     {
-                        let bytes = slot.buffer.slice(..).get_mapped_range();
+                        let bytes = slot.buffer.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                         let samples = u64::from_le_bytes(
                             bytes[..8].try_into().expect("one occlusion query"),
                         );

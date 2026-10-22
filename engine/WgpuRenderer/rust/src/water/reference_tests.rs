@@ -161,7 +161,7 @@ fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         rx.recv().unwrap().unwrap();
         {
-            let bytes = read.slice(..).get_mapped_range();
+            let bytes = read.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
             let pairs: &[[f32; 2]] = bytemuck::cast_slice(&bytes);
             let values: Vec<f32> = pairs.iter().map(|p| p[0]).collect();
             if id == 6 {

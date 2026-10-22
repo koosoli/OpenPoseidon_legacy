@@ -70,7 +70,7 @@ fn ground_puddles_gpu_grow_with_wetness_filter_rain_and_obey_land_gates() {
     slice.map_async(wgpu::MapMode::Read, move |r| { let _ = send.send(r); });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     recv.recv().unwrap().unwrap();
-    let bytes = slice.get_mapped_range();
+    let bytes = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let samples = bytemuck::cast_slice::<u8, f32>(&bytes);
     let mut resolved_rain = false;
     let mut moving_rain = false;

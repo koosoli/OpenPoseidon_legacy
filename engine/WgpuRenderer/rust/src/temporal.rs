@@ -1721,7 +1721,7 @@ mod tests {
             readback.slice(..).map_async(wgpu::MapMode::Read, move |r| { tx.send(r).unwrap(); });
             device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
             rx.recv().unwrap().unwrap();
-            let actual = readback.slice(..).get_mapped_range()[0];
+            let actual = readback.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer")[0];
             readback.unmap();
             assert!(actual.abs_diff(expected) <= 1, "mask {actual}, expected {expected}");
         }
@@ -1736,6 +1736,7 @@ mod tests {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: None,
                 force_fallback_adapter: false,
+                apply_limit_buckets: false,
             },
         )) else {
             return; // no GPU on this runner
@@ -1884,7 +1885,7 @@ mod tests {
             });
             device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
             rx.recv().expect("map callback").expect("map ok");
-            let data = slice.get_mapped_range();
+            let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
             let centre = ((H / 2) * W + W / 2) as usize * 4;
             let f16 = |lo: u8, hi: u8| -> f32 {
                 let h = u16::from_le_bytes([lo, hi]);

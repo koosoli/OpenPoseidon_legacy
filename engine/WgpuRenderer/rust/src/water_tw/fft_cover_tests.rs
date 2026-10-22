@@ -57,7 +57,7 @@ fn read_foam(device: &wgpu::Device, queue: &wgpu::Queue, fft: &OceanFft) -> Vec<
     queue.submit([enc.finish()]);
     staging.slice(..).map_async(wgpu::MapMode::Read, |_| {});
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-    let out = bytemuck::cast_slice::<u8, f32>(&staging.slice(..).get_mapped_range()).to_vec();
+    let out = bytemuck::cast_slice::<u8, f32>(&staging.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer")).to_vec();
     out
 }
 
@@ -303,7 +303,7 @@ fn bake_pattern(device: &wgpu::Device, queue: &wgpu::Queue) -> Vec<[f32; 2]> {
         let m = (h & 0x3ff) as f32;
         s * if e == 0 { m * 2f32.powi(-24) } else { (1.0 + m / 1024.0) * 2f32.powi(e - 15) }
     };
-    let raw = staging.slice(..).get_mapped_range();
+    let raw = staging.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let h: &[u16] = bytemuck::cast_slice(&raw);
     (0..(size * size) as usize).map(|i| [half(h[i * 4]), half(h[i * 4 + 1])]).collect()
 }

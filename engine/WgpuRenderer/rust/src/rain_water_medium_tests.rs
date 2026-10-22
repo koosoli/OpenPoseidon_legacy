@@ -120,7 +120,7 @@ fn actual_gpu_medium_source_bounds_energy_and_clear_counterexamples() {
         encoder.copy_buffer_to_buffer(&output,0,&readback,0,bytes);queue.submit([encoder.finish()]);
         let (tx,rx)=std::sync::mpsc::channel();readback.slice(..).map_async(wgpu::MapMode::Read,move|r|tx.send(r).unwrap());
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();rx.recv().unwrap().unwrap();
-        let data=readback.slice(..).get_mapped_range();let values:&[[f32;4]]=bytemuck::cast_slice(&data);
+        let data=readback.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");let values:&[[f32;4]]=bytemuck::cast_slice(&data);
         for i in 0..16 {
             let soil=values[i*3][0];let depth=values[i*3][1];let result=values[i*3+1];let clear=values[i*3+2];
             if ready==0 || generation!=3 || [1,2,3,5,6,7,8,9,10].contains(&i) {assert_eq!(soil,0.,"Source refusal i={i}, ready={ready}, generation={generation}");}

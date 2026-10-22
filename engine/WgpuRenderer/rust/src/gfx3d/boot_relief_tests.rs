@@ -116,7 +116,7 @@ fn boot_relief_actual_gpu_depth_normal_parallax_and_neutral_colour() {
     });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     receiver.recv().unwrap().unwrap();
-    let data = slice.get_mapped_range();
+    let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let actual: &[[f32; 4]] = bytemuck::cast_slice(&data);
     assert!(
         (actual[0][0] + 0.003).abs() < 0.000001

@@ -1362,6 +1362,7 @@ mod tests {
             power_preference: wgpu::PowerPreference::default(),
             compatible_surface: None,
             force_fallback_adapter: false,
+            apply_limit_buckets: false,
         }))
         .ok()?;
         let needed = wgpu::Features::TEXTURE_BINDING_ARRAY
@@ -1424,6 +1425,7 @@ mod tests {
             source: wgpu::ShaderSource::Wgsl(
                 {
                     let source = r#"
+enable wgpu_binding_array;
 @group(0) @binding(0) var textures: binding_array<texture_2d<f32>>;
 // vec4 so the uniform block is exactly 16 bytes; only .x is meaningful.
 struct Which { slot: vec4<u32> };
@@ -1590,7 +1592,7 @@ fn fs() -> @location(0) vec4<f32> {
         });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         rx.recv().unwrap().unwrap();
-        let mapped = slice.get_mapped_range();
+        let mapped = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         [mapped[0], mapped[1], mapped[2], mapped[3]]
     }
 
@@ -1987,6 +1989,7 @@ mod slot_lease_tests {
             power_preference: wgpu::PowerPreference::default(),
             compatible_surface: None,
             force_fallback_adapter: false,
+            apply_limit_buckets: false,
         }))
         .ok()?;
         if !adapter

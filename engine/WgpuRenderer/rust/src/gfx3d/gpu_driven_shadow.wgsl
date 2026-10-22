@@ -10,6 +10,9 @@
 
 // Group(4) terrain heightmap + surface_y/surface_grad, shared with shader3d / shadow_depth /
 // gpu_driven, so the GPU shadow silhouette conforms ClipLand vegetation to the same ground.
+// naga 30 / wgpu 30: binding_array needs its enable extension (before any #import or declaration).
+enable wgpu_binding_array;
+
 #import conform::{surface_y}
 
 // group(0): this cascade's light view-projection + the camera world position the casters are

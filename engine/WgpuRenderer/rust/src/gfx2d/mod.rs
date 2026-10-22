@@ -122,11 +122,11 @@ impl Gfx2d {
         // pos(x,y,z), (rhw, fog), uv, color.
         let attrs =
             wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x2, 3 => Unorm8x4];
-        let vbuf_layout = wgpu::VertexBufferLayout {
+        let vbuf_layout = Some(wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<WgrVertex2D>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &attrs,
-        };
+        });
 
         // (test, write): plain 2D / sky use (false,false); transparent meshes
         // (false… ) — see callers below. test gates GreaterEqual (reversed-Z) vs Always.
@@ -305,11 +305,11 @@ impl Gfx2d {
                 module: &overlay_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout {
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<WgrOverlayVertex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &overlay_attrs,
-                }],
+                })],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,

@@ -221,7 +221,7 @@ impl Query {
                     1 => {
                         let n = slot.points.len();
                         let values: Vec<[f32; 4]> = {
-                            let data = slot.buf.slice(..).get_mapped_range();
+                            let data = slot.buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                             data.chunks_exact(16)
                                 .take(n)
                                 .map(|c| {

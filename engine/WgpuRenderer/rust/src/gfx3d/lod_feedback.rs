@@ -123,7 +123,7 @@ impl LodFeedback {
             let SlotState::Mapping(sample, ref rx) = slot.state else { continue; };
             match rx.try_recv() {
                 Ok(Ok(())) => {
-                    { let bytes = slot.buffer.slice(..).get_mapped_range();
+                    { let bytes = slot.buffer.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                       accept_sample(&mut self.report, sample.epoch, sample.frame, sample.dispatches,
                           sample.passes, |i| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())); }
                     slot.buffer.unmap(); slot.state = SlotState::Idle;

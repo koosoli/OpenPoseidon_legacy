@@ -72,7 +72,7 @@ fn actual_gpu_recorded_edge_direction_and_retained_interface_eligibility() {
     encoder.copy_buffer_to_buffer(&output,0,&staging,0,bytes);queue.submit([encoder.finish()]);
     let(tx,rx)=std::sync::mpsc::channel();staging.slice(..).map_async(wgpu::MapMode::Read,move|r|tx.send(r).unwrap());
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();rx.recv().unwrap().unwrap();
-    let data=staging.slice(..).get_mapped_range();let values:&[[f32;4]]=bytemuck::cast_slice(&data);
+    let data=staging.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");let values:&[[f32;4]]=bytemuck::cast_slice(&data);
     let mut downward=0;let mut standing=0;let mut wet=0;let mut logged=0;
     for (i,e) in rows.iter().enumerate() {
         let view=(glam::Vec3::from_array(e.eye[..3].try_into().unwrap())-glam::Vec3::from_array(e.surface[..3].try_into().unwrap())).normalize();

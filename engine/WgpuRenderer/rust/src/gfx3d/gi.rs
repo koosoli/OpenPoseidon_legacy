@@ -680,11 +680,11 @@ mod tests {
             0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 5 => Uint32, 6 => Float32x3,
             7 => Float32x3
         ];
-        let vbuffers = [wgpu::VertexBufferLayout {
+        let vbuffers = [Some(wgpu::VertexBufferLayout {
             array_stride: super::super::BAKED_VERT_SIZE,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &attrs,
-        }];
+        })];
         let _ = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("wgr_shader3d_gi_test"),
             layout: None,
@@ -769,6 +769,7 @@ mod tests {
             power_preference: wgpu::PowerPreference::default(),
             compatible_surface: None,
             force_fallback_adapter: false,
+            apply_limit_buckets: false,
         }))
         .ok()?;
         // ...and the binding-array features the module's bindless textures/samplers need.
@@ -805,11 +806,11 @@ mod tests {
         );
         let attrs =
             wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 5 => Uint32];
-        let vbuffers = [wgpu::VertexBufferLayout {
+        let vbuffers = [Some(wgpu::VertexBufferLayout {
             array_stride: super::super::BAKED_VERT_SIZE,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &attrs,
-        }];
+        })];
         let target = |format: wgpu::TextureFormat| {
             Some(wgpu::ColorTargetState {
                 format,

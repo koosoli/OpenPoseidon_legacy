@@ -121,7 +121,7 @@ fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {{
     let slice = staging.slice(..); let (sender, receiver) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |r| { let _ = sender.send(r); });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap(); receiver.recv().unwrap().unwrap();
-    let data = slice.get_mapped_range(); let actual: &[[f32;4]] = bytemuck::cast_slice(&data);
+    let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer"); let actual: &[[f32;4]] = bytemuck::cast_slice(&data);
     for (i, v) in input.iter().enumerate() {
         let response = actual[i * 2]; let light = actual[i * 2 + 1];
         assert!(response.iter().chain(light.iter()).all(|x| x.is_finite()));
@@ -225,7 +225,7 @@ fn cs_layer(@builtin(global_invocation_id) id: vec3<u32>) {{
     encoder.copy_buffer_to_buffer(&output,0,&staging,0,bytes);queue.submit(Some(encoder.finish()));
     let (sender,receiver)=std::sync::mpsc::channel();staging.slice(..).map_async(wgpu::MapMode::Read,move|r|{let _=sender.send(r);});
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();receiver.recv().unwrap().unwrap();
-    let data=staging.slice(..).get_mapped_range();let actual:&[[f32;4]]=bytemuck::cast_slice(&data);
+    let data=staging.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");let actual:&[[f32;4]]=bytemuck::cast_slice(&data);
     let dry=|i:usize|actual[i*3]; let wet=|i:usize|actual[i*3+1];
     let luminance=|v:[f32;4]|v[0]*0.2126+v[1]*0.7152+v[2]*0.0722;
     assert!(actual.iter().flatten().all(|x|x.is_finite()));
@@ -326,7 +326,7 @@ fn real_uniform_shader_preserves_skin_and_cloth_linear_hue_on_gpu() {
     let slice=staging.slice(..);let (sender,receiver)=std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read,move |result| {let _=sender.send(result);});
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();receiver.recv().unwrap().unwrap();
-    let data=slice.get_mapped_range();let actual: &[[f32;4]]=bytemuck::cast_slice(&data);
+    let data=slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");let actual: &[[f32;4]]=bytemuck::cast_slice(&data);
     let decode=|x:f32|if x<=0.04045 {x/12.92} else {((x+0.055)/1.055).powf(2.4)};
     for (i,((input,wet),row)) in cases.iter().zip(actual).enumerate() {
         for channel in 0..3 {

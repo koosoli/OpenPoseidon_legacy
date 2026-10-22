@@ -118,7 +118,7 @@ fn actual_gpu_rough_soil_environment_is_filtered_convex_and_locally_visible() {
         .map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
-    let data = staging.slice(..).get_mapped_range();
+    let data = staging.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let rows: &[[f32; 4]] = bytemuck::cast_slice(&data);
     let mut ground_blocked = 0;
     let mut cloud_transition = 0;

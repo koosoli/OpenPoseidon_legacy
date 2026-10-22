@@ -1138,16 +1138,16 @@ impl Terrain {
         let inst_attrs =
             wgpu::vertex_attr_array![1 => Float32x2, 2 => Float32, 3 => Uint32, 4 => Float32x2];
         let vbuf_layouts = [
-            wgpu::VertexBufferLayout {
+            Some(wgpu::VertexBufferLayout {
                 array_stride: 12,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &grid_attrs,
-            },
-            wgpu::VertexBufferLayout {
+            }),
+            Some(wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<WgrTerrainNode>() as u64,
                 step_mode: wgpu::VertexStepMode::Instance,
                 attributes: &inst_attrs,
-            },
+            }),
         ];
         // Three variants sharing the VS (skirt_k) + layout + geometry: the shading
         // pipeline (fs_terrain, depth-write ON), its write-off twin for the prepassed

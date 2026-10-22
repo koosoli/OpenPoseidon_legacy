@@ -473,7 +473,7 @@ impl Exposure {
         {
             return 1.0;
         }
-        let data = slice.get_mapped_range();
+        let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let v = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
         drop(data);
         buf.unmap();

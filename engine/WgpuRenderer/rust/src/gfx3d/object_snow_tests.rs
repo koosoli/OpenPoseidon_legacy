@@ -230,7 +230,7 @@ fn actual_object_snow_gpu_rejects_shelter_underside_unknown_and_ineligible() {
         });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         receiver.recv().unwrap().unwrap();
-        let data = slice.get_mapped_range();
+        let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let values: [f32; 12] = bytemuck::cast_slice::<u8, f32>(&data).try_into().unwrap();
         drop(data);
         staging.unmap();

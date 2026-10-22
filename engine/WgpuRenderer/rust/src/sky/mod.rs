@@ -227,6 +227,7 @@ mod sky_device_tests {
             power_preference: wgpu::PowerPreference::default(),
             compatible_surface: None,
             force_fallback_adapter: false,
+            apply_limit_buckets: false,
         }))
         .ok()?;
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
@@ -400,7 +401,7 @@ mod sky_device_tests {
         queue.submit(Some(encoder.finish()));
         buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-        let data = buf.slice(..).get_mapped_range();
+        let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let halves: &[u16] = bytemuck::cast_slice(&data);
         let out = halves
             .chunks_exact(4)

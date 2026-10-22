@@ -821,16 +821,16 @@ impl Tidewater {
                 entry_point: Some("vs_tidewater"),
                 compilation_options: Default::default(),
                 buffers: &[
-                    wgpu::VertexBufferLayout {
+                    Some(wgpu::VertexBufferLayout {
                         array_stride: 8,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &grid_attrs,
-                    },
-                    wgpu::VertexBufferLayout {
+                    }),
+                    Some(wgpu::VertexBufferLayout {
                         array_stride: 16,
                         step_mode: wgpu::VertexStepMode::Instance,
                         attributes: &node_attrs,
-                    },
+                    }),
                 ],
             },
             primitive: wgpu::PrimitiveState {

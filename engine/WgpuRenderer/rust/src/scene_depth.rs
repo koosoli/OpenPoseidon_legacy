@@ -304,7 +304,7 @@ impl State {
         if let Some(result) = result {
             let pending = self.pending.take().unwrap();
             if result.is_ok() && pending.generation == self.publication.generation {
-                let mapped = pending.buffer.slice(..).get_mapped_range();
+                let mapped = pending.buffer.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                 let values = std::array::from_fn(|i| {
                     let offset = (i / GRID as usize) * ROW as usize + (i % GRID as usize) * 4;
                     f32::from_le_bytes(mapped[offset..offset + 4].try_into().unwrap())

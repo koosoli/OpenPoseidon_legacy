@@ -268,11 +268,11 @@ impl RainWater {
                     module: &shader,
                     entry_point: Some(entry),
                     compilation_options: Default::default(),
-                    buffers: &[wgpu::VertexBufferLayout {
+                    buffers: &[Some(wgpu::VertexBufferLayout {
                         array_stride: 4,
                         step_mode: wgpu::VertexStepMode::Instance,
                         attributes: &attributes,
-                    }],
+                    })],
                 },
                 primitive: wgpu::PrimitiveState {
                     // World-up cells are clockwise after the engine's LH projection.
@@ -999,7 +999,7 @@ mod tests {
         });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         receive.recv().unwrap().unwrap();
-        let bytes = slice.get_mapped_range();
+        let bytes = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let values = bytemuck::cast_slice::<u8, f32>(&bytes);
         assert!(values.iter().all(|v| v.is_finite()));
         for (actual, expected) in values[..4].iter().zip([2.325, 0.175, 1.0, -2.0]) {
@@ -1245,7 +1245,7 @@ fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {{
         });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         receive.recv().unwrap().unwrap();
-        let bytes = slice.get_mapped_range();
+        let bytes = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let values = bytemuck::cast_slice::<u8, f32>(&bytes);
         assert!(
             values
@@ -1735,11 +1735,11 @@ mod full_draw_tests {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout {
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: 4,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &attributes,
-                }],
+                })],
             },
             primitive: wgpu::PrimitiveState {
                 front_face: wgpu::FrontFace::Cw,
@@ -1950,7 +1950,7 @@ mod full_draw_tests {
             });
             device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
             rx.recv().unwrap().unwrap();
-            let bytes = slice.get_mapped_range();
+            let bytes = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
             let count = bytes.chunks_exact(4).filter(|p| p[3] > 0).count();
             let energy: usize = bytes
                 .chunks_exact(4)
@@ -2019,7 +2019,7 @@ mod full_draw_tests {
                 wgpu::TexelCopyBufferInfo{buffer:&readback,layout:wgpu::TexelCopyBufferLayout{offset:0,bytes_per_row:Some(256),rows_per_image:Some(64)}},output.size());
             queue.submit(Some(encoder.finish()));let slice=readback.slice(..);let(tx,rx)=std::sync::mpsc::channel();
             slice.map_async(wgpu::MapMode::Read,move|r|{let _=tx.send(r);});device.poll(wgpu::PollType::wait_indefinitely()).unwrap();rx.recv().unwrap().unwrap();
-            let bytes=slice.get_mapped_range().to_vec();readback.unmap();bytes
+            let bytes=slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer").to_vec();readback.unmap();bytes
         };
         let fine_cases=["flat","crater","slope","dry owned coarse exclusion","physical roof","snow","underside","sea"];
         let mut fine_counts=Vec::new();
@@ -2130,7 +2130,7 @@ mod full_draw_tests {
         {let mut pass=encoder.begin_compute_pass(&Default::default());pass.set_pipeline(&pipeline);pass.set_bind_group(0,&result_bind,&[]);pass.set_bind_group(1,&helper_bind,&[]);pass.dispatch_workgroups(1,1,1);}
         encoder.copy_buffer_to_buffer(&result_buffer,0,&readback,0,48);queue.submit(Some(encoder.finish()));
         let slice=readback.slice(..48);let(tx,rx)=std::sync::mpsc::channel();slice.map_async(wgpu::MapMode::Read,move|r|{let _=tx.send(r);});
-        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();rx.recv().unwrap().unwrap();let data=slice.get_mapped_range();
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();rx.recv().unwrap().unwrap();let data=slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         let actual:&[f32]=bytemuck::cast_slice(&data);assert_eq!(&actual[..4],&[1.,0.,0.,1.]);
         assert!((actual[4]-3.).abs()<1e-6 && (actual[5]-0.625).abs()<1e-6,"Actual native lower triangle: {actual:?}");
         assert_eq!(actual[8],3.);assert_eq!(actual[9],0.,"Native upper triangle is above horizontal head");drop(data);readback.unmap();

@@ -53,7 +53,7 @@ fn read_probe(device:&wgpu::Device,queue:&wgpu::Queue,shader:&str,entries:&[wgpu
  encoder.copy_buffer_to_buffer(&out,0,&staging,0,(count*4) as u64);queue.submit(Some(encoder.finish()));
  let slice=staging.slice(..);let(tx,rx)=std::sync::mpsc::channel();slice.map_async(wgpu::MapMode::Read,move|r|{tx.send(r).unwrap();});
  device.poll(wgpu::PollType::wait_indefinitely()).unwrap();rx.recv().unwrap().unwrap();
- bytemuck::cast_slice::<u8,f32>(&slice.get_mapped_range()).to_vec()
+ bytemuck::cast_slice::<u8,f32>(&slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer")).to_vec()
 }
 
 #[test]

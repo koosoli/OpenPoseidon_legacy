@@ -2,7 +2,7 @@
 name = "wgpu_renderer"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.87" # wgpu 29 MSRV
+rust-version = "1.87" # wgpu 30 MSRV (unchanged from 29)
 description = "WGPU graphics backend for Cold War Assault (Rust side of the C ABI)"
 license = "GPL-3.0-or-later"
 publish = false
@@ -21,13 +21,13 @@ dlss = []
 [dependencies]
 # naga-ir: lets us hand wgpu a pre-composed naga::Module (ShaderSource::Naga),
 # which is how the naga_oil-composed shaders are fed in (see src/shaders/).
-wgpu = { version = "29.0", features = ["naga-ir", "counters"] }
-# Shader module system (#import / #define_import_path). 0.22 tracks naga 29, the
-# same naga wgpu 29 pins, so the naga crate unifies to one version.
-naga_oil = "0.22"
+wgpu = { version = "30.0.1", features = ["naga-ir", "counters"] }
+# Shader module system (#import / #define_import_path). 0.23 tracks naga 30, the
+# same naga wgpu 30 pins, so the naga crate unifies to one version.
+naga_oil = "0.23"
 # Direct handle on naga (the version above pulls it in) so we can hand the
 # composer the validation capabilities our shaders need (binding arrays).
-naga = "29"
+naga = "30"
 # must match the version wgpu re-exports
 raw-window-handle = "0.6"
 pollster = "0.4"
@@ -43,7 +43,7 @@ rustc-hash = "2"
 # Raw Vulkan handle access for the optional developer depth handoff, and DLSS
 # instance/device creation with the NGX-required extensions,
 # wrapped back into wgpu via wgpu-hal from_raw/device_from_raw. Version MUST match the
-# ash wgpu-hal 29 pins (0.38), or the two disagree about handle types.
+# ash wgpu-hal 30 pins (0.38, unchanged from 29), or the two disagree about handle types.
 ash = { version = "0.38" }
 
 [dev-dependencies]

@@ -225,7 +225,7 @@ fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
         });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
-    let bytes = read.slice(..).get_mapped_range();
+    let bytes = read.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let values: &[[f32; 4]] = bytemuck::cast_slice(&bytes);
     let mut errors = Vec::new();
     for (index, scale) in [0.5, 1.0, 2.0].into_iter().enumerate() {
@@ -331,7 +331,7 @@ fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
     });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
-    let bytes = read.slice(..).get_mapped_range();
+    let bytes = read.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let values: &[[f32; 4]] = bytemuck::cast_slice(&bytes);
     for i in 0..4 {
         eprintln!("foam cadence {}: {:?}", [30, 60, 120, 20][i], values[i * 2]);
@@ -484,7 +484,7 @@ fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
     });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
-    let bytes = read.slice(..).get_mapped_range();
+    let bytes = read.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let values: &[[f32; 4]] = bytemuck::cast_slice(&bytes);
 
     assert_eq!(values[28], [2.0,3.3,-1.0,1.0], "surf erased existing ocean displacement");
@@ -595,7 +595,7 @@ fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
     });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
-    let bytes = read.slice(..).get_mapped_range();
+    let bytes = read.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let values: &[[f32; 4]] = bytemuck::cast_slice(&bytes);
     eprintln!("curl stages: {values:?}");
     // A single-valued heightfield cannot reverse horizontal tangent at its lip.

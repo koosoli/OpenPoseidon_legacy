@@ -133,7 +133,7 @@ fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>){{
         .map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
-    let mapped = readback.slice(..).get_mapped_range();
+    let mapped = readback.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let rows: Vec<[f32; 4]> = bytemuck::cast_slice(&mapped).to_vec();
     drop(mapped);
     readback.unmap();
@@ -241,7 +241,7 @@ fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>){{
         .map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
-    let mapped = readback.slice(..).get_mapped_range();
+    let mapped = readback.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let rows: Vec<[f32; 4]> = bytemuck::cast_slice(&mapped).to_vec();
     drop(mapped);
     readback.unmap();

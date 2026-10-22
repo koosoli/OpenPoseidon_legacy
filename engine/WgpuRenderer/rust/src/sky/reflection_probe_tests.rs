@@ -82,7 +82,7 @@ fn read(device:&wgpu::Device,queue:&wgpu::Queue,sky:&mut super::Sky,params:&crat
     queue.submit([encoder.finish()]);let(tx,rx)=std::sync::mpsc::channel();
     buffer.slice(..).map_async(wgpu::MapMode::Read,move|r|tx.send(r).unwrap());
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();rx.recv().unwrap().unwrap();
-    let bytes=buffer.slice(..).get_mapped_range();let mut result=Vec::new();
+    let bytes=buffer.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");let mut result=Vec::new();
     for (x,y) in SAMPLES {let start=((y*super::ENV_W+x)*pixel) as usize;let mut rgba=[0.;4];
         for c in 0..4 {rgba[c]=if pixel==16 {f32::from_le_bytes(bytes[start+c*4..start+c*4+4].try_into().unwrap())}
             else{half(u16::from_le_bytes(bytes[start+c*2..start+c*2+2].try_into().unwrap()))};}result.push(rgba);}

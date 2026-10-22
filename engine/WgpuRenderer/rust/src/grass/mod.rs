@@ -3154,7 +3154,7 @@ impl Grass {
             match rx.try_recv() {
                 Ok(Ok(())) => {
                     {
-                        let data = buf.slice(..).get_mapped_range();
+                        let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                         let word = |i: usize| {
                             u32::from_le_bytes(data[i * 4..i * 4 + 4].try_into().unwrap())
                         };
@@ -4170,6 +4170,7 @@ mod tests {
             power_preference: wgpu::PowerPreference::default(),
             compatible_surface: None,
             force_fallback_adapter: false,
+            apply_limit_buckets: false,
         }))
         .ok()?;
         // The instance buffers are storage read_write in the VERTEX stage, as in production.

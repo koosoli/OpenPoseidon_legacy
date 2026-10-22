@@ -184,7 +184,7 @@ impl Swash {
                     0 => {}
                     1 => {
                         let texels: Vec<[f32; 4]> = {
-                            let data = slot.buf.slice(..).get_mapped_range();
+                            let data = slot.buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                             data.chunks_exact(16)
                                 .map(|c| {
                                     let v = |k: usize| f32::from_le_bytes([c[k], c[k + 1], c[k + 2], c[k + 3]]);

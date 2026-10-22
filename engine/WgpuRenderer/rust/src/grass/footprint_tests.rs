@@ -250,7 +250,7 @@ fn gpu_probe(
     });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
-    let bytes = readback.slice(..).get_mapped_range();
+    let bytes = readback.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
     let actual = bytemuck::cast_slice::<u8, [f32; 4]>(&bytes).to_vec();
     drop(bytes);
     readback.unmap();

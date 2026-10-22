@@ -176,7 +176,7 @@ A single Cargo workspace at the repo root (`Cargo.toml`) holds every crate, shar
 - `engine/WgpuRenderer/rust/` — `wgpu_renderer`, the Rust side of the wgpu graphics backend (a `cdylib` linked into the game via corrosion; see below).
 - `mserver/` — master-server service and tooling crates (`Archive`, `CLI`, `Client`, `MasterService`). Standard `cargo fmt` / `cargo clippy` / `cargo test` / `cargo build`.
 
-All members declare `rust-version = "1.87"` (wgpu 29's MSRV) so the workspace's MSRV-aware resolver doesn't hold shared dependencies back to older, incompatible versions.
+All members declare `rust-version = "1.87"` (the MSRV of wgpu 29 and 30) so the workspace's MSRV-aware resolver doesn't hold shared dependencies back to older, incompatible versions.
 
 The **wgpu backend** (`engine/WgpuRenderer/`) is a `POSEIDON_ENABLE_WGPU`-gated graphics backend: the Rust `cdylib` is built by corrosion (fetched via CMake `FetchContent`) and driven from C++ (`EngineWgpu`) across a hand-written C ABI (`include/wgpu_renderer.h`). WGPU is the default backend as of 2026-08-06; GL33 remains fully supported and is one flag away (`--render gl33`). In non-release builds the dev panel is also on by default (`--no-dev` disables it); release builds do not register the flag at all.
 
