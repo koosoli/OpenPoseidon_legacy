@@ -274,3 +274,72 @@ Bilderserie der Spiegelungen-Sitzung (`before-2ff794f`, 09:21–09:43) fertig wa
   Branch verhält sich wieder wie `2ff794f`.
 - Damit bleibt `WGR_DIRECT_BATCH=all` der einzige Weg zu ~77 fps auf dem Deck. Die Entscheidung
   darüber liegt beim Besitzer (am Ende).
+
+## Messung 7: Wofür die GPU auf dem Deck Zeit braucht (22.10. 11:39, `WGR_GPU_REGIONS_ALL=1`)
+
+EXE aus `Remastered` (`2ff794f`), gleicher Flug, Mittel über 65 Stichproben je Lauf.
+Gestartet, nachdem die drei Bilderserien der Spiegelungen-Sitzung (bis 11:33) fertig waren.
+
+| GPU-Region (ms) | Standard (`exact`) | `all` |
+| --- | --- | --- |
+| 3D-Farbpass gesamt | 13,1 | 7,3 |
+| davon Draw-Ops nach dem Wasser (transparente/Barriere-Draws) | **7,0** | **1,9** |
+| davon Draw-Ops vor dem Wasser | 2,2 | 1,5 |
+| davon Terrain Farbe | 2,1 | 1,4 |
+| davon Objekte (GPU-getrieben) Farbe | 1,2 | 1,3 |
+| davon Wasser | 1,3 | 1,2 |
+| Prepass gesamt | 0,9 | 0,9 |
+| Wolken, AO, Schatten-Kaskaden, Culling (je) | 0,3–0,6 | 0,3–0,6 |
+| fps (Bilder ÷ Zeit) | 63,3 | 75,7 |
+
+- Der ganze Abstand zwischen den Modi steckt in den Draw-Ops nach dem Wasser: 7,0 gegen 1,9 ms.
+  Das sind die halbtransparenten Abschnitte mit MAT-053-Zwilling. Bitgleich muss jeder Abschnitt
+  abwechselnd erst den Zwilling (Tiefe schreiben, Pipeline A) und dann den Blend (keine Tiefe,
+  Pipeline B) zeichnen: ~2 700 Abschnitte ergeben ~5 400 Pipeline-Wechsel je Bild. Das kostet die
+  GPU-Front-End-Zeit.
+- Tiefe-Schreiben ist in WebGPU fester Pipeline-Zustand. Ohne die Reihenfolge zu ändern, lässt sich
+  der Wechsel also nicht vermeiden (WGPU-034 hat gezeigt: getrennte Bildschirmbereiche gibt es dort
+  kaum).
+- Alles andere ist ohne Ausreißer: Terrain, Wasser, Objekte und die WGPU-Effekte (AO, Wolken, GI,
+  Schatten), die GL33 gar nicht hat, liegen jeweils bei 0,3–2 ms. Eine einzelne Spitze
+  (Terrain 43 ms) fiel in die Ladephase (11:39:17).
+- Folgerung: Auf dem Deck bleibt als großer Hebel nur `WGR_DIRECT_BATCH=all`, die Entscheidung des
+  Besitzers.
+
+## Messung 8: WGPU-035 -- Zwillinge standardmäßig gebündelt, Zwilling ohne Mip-Lift (22.10. 16:02)
+
+Build `a4f9308` (CI 39768762007) im Testordner. Gestartet um 16:02, nachdem die Spiegelungen-Serie
+gestoppt war. Flug über die Big Shell, gleiche Kennzahl wie bisher (Bilder ÷ Zeit):
+
+| Lauf | fps | schlechtester Abschnitt | max. p95 |
+| --- | --- | --- | --- |
+| **neu: Standard (`all`, Zwilling ohne Mip-Lift)** | **80,6** | **64,7** | 19,4 ms |
+| `WGR_DIRECT_BATCH=exact`, Zwilling ohne Mip-Lift | 74,0 | 54,1 | 23,6 ms |
+| alt: `exact` + `WGR_SOLID_TWIN_MIP_LIFT=1` (= Stand vor WGPU-035) | 63,9 | 35,3 | 31,0 ms |
+
+- Die Rücknahme des Mip-Lifts am Zwilling allein bringt +10 fps. Der Zwilling deckt in der Ferne
+  weniger Texel ab, die zweimal gemischt wurden.
+- Das Bündeln bringt weitere +6,6 fps. Zusammen sind es +26 % gegenüber vorher, und der
+  schlechteste Abschnitt steigt von 35 auf 65 fps.
+
+Bildvergleich: neue private Mission `BigShellBilder.Intro`, 5 feste Ansichten, `--auto-screenshot`.
+Je Ansicht zwei Läufe „neu" als Rauschmaske; verglichen werden nur Pixel, die zwischen diesen beiden
+Läufen höchstens um 2/255 abweichen.
+
+| Ansicht | Bündeln (exact → neu): Pixel > 5/255 | Mip-Lift (alt → exact): Pixel > 5/255 | gesamt (alt → neu): Pixel > 5/255 |
+| --- | --- | --- | --- |
+| 1 Gesamtansicht | 0,17 % | 0,66 % | 0,34 % |
+| 2 Deck West | 0,12 % | 0,14 % | 0,24 % |
+| 3 Strut-Nahansicht | 0,01 % | 0,06 % | 0,05 % |
+| 4 Deck Mitte | 0,003 % | 0,18 % | 0,23 % |
+| 5 Meerblick | 0,02 % | 2,9 % | 5,0 % |
+
+- 5/255 sind etwa 2 %. Das Bündeln bleibt bis auf ≤ 0,17 % der Pixel unter dieser Schwelle; das
+  ist die zugesagte Grenze.
+- Die größeren Werte stehen fast ausschließlich auf dem Wasser und der Brandung. Die
+  Unterschiedsbilder (×8) zeigen sie dort, nicht an der Struktur. Wasser und Brandung bewegen sich
+  von Lauf zu Lauf, und die Rauschmaske aus nur zwei Läufen fängt das nicht vollständig.
+- An Geländern, Rosten und Deck ist auch bei 8-facher Verstärkung kein Unterschied zu sehen.
+
+Eingespielt in `Remastered` (16:25, Backup `_backup_vor_a4f9308_20261022`). Der Stand enthält auch
+LGT-SCRIPT-001/002 und LGT-AUTO-001 der Peugeot-Sitzung.

@@ -814,7 +814,7 @@ fn reflect_env_radiance(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
         (sky_irradiance(vec3<f32>(0.0, 1.0, 0.0)) * frame.sun_ambient.w + frame.sun_diffuse.rgb * max(to_sun.y, 0.0));
     return mix(ground, sky, smoothstep(-0.08, 0.08, dir.y));
 }
-const REFLECT_GROUND_ALBEDO: f32 = 0.3;
+const REFLECT_GROUND_ALBEDO: f32 = 0.2;
 
 // REFLECT-001 debug colours. View 1 = surface class (fixed palette), 2 = roughness (grey),
 // 3 = F0 / metal (red = F0 x 10, green = metal), 4 = clear coat (blue = strength, green =
@@ -1709,7 +1709,12 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         && !matdbg_flag(MATDBG_DISABLE_FRESNEL_ENV)) {
         let view_dir = normalize(-in.world_pos);
         let n = select(-shading_normal, shading_normal, dot(shading_normal, view_dir) >= 0.0);
-        let ndv = clamp(dot(n, view_dir), 1e-4, 1.0);
+        // Fresnel from the GEOMETRIC normal, the reflected direction from the mapped one. With
+        // the mapped normal in both, a normal map that tilts far from the surface (Arma 3's
+        // C_SUV_01_F, C_Offroad_01_F) gave grazing Fresnel across whole panels: the red SUV came
+        // out a white mirror in the clean run of 2026-10-22, while the Hatchback was fine.
+        let gn = select(-geometric_normal, geometric_normal, dot(geometric_normal, view_dir) >= 0.0);
+        let ndv = clamp(dot(gn, view_dir), 1e-4, 1.0);
         let refl_dir = reflect(-view_dir, n);
         let rough = clamp(material.reflect0.x, 0.0, 1.0);
         let coat = clamp(material.reflect0.w, 0.0, 1.0);
@@ -1723,9 +1728,15 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         let fc = reflect_schlick(vec3<f32>(0.04), ndv).x * coat;
         let env_base = reflect_env_radiance(refl_dir, rough);
         let env_coat = reflect_env_radiance(refl_dir, clamp(material.reflect1.y, 0.0, 1.0));
-        let spec = (env_base * fb * (1.0 - fc) + env_coat * fc) * occ;
+        // A rough base layer spreads its reflection over the whole hemisphere; with one sky map
+        // and no prefiltered lobe the five-tap cone overstates it, and matt paint came out
+        // washed grey by the reflected sand (CWA desert, 2026-10-22: HMMWV, 5t truck). Fade the
+        // base-layer reflection with roughness until phase D brings real prefiltering.
+        let rough_fade = pow(1.0 - rough, 1.5);
+        let spec = (env_base * fb * rough_fade * (1.0 - fc) + env_coat * fc) * occ;
         // What the reflection takes, the diffuse body no longer scatters (energy, roughly).
-        let keep = (1.0 - fc * occ) * (1.0 - max(fb.r, max(fb.g, fb.b)) * occ * (1.0 - clamp(material.reflect0.z, 0.0, 1.0)));
+        let keep = (1.0 - fc * occ) *
+            (1.0 - max(fb.r, max(fb.g, fb.b)) * rough_fade * occ * (1.0 - clamp(material.reflect0.z, 0.0, 1.0)));
         if (translucent > 0.5) {
             // A pane over what is behind it: the reflection sits on top of the film (RFG-137's form).
             let f = clamp(max(fb.r, max(fb.g, fb.b)) * (1.0 - fc) + fc, 0.0, 1.0) * occ;

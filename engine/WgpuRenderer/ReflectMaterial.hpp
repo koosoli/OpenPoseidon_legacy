@@ -182,24 +182,45 @@ inline float RoughnessFromBlinn(float n)
 // Rule 3: the part a texture or material name says it is. Czech tokens because the
 // original data is Czech-authored (sklo = glass, zrcatko = mirror, svetlo = light,
 // kolo = wheel, guma = rubber). None when no part token is present.
-inline SurfaceClass PartFromNames(std::string_view texStem, std::string_view matStem, Era era)
+// A texture that names the body ("trup" is Czech for hull/body). A shiny material on it
+// (Arma 1/2 put `mirror.rvmat` on the Hilux body atlas, which the second logged run showed
+// as one big mirror) is a reflective paint, not a mirror or chrome part.
+inline bool IsBodyTexture(std::string_view texStem)
+{
+    return HasAny(texStem, {"trup", "body", "_ext", "karos", "carriage", "kabin"});
+}
+
+inline SurfaceClass PartFromNames(std::string_view texStem, std::string_view matStem, Era era,
+                                  bool glassShader = false)
 {
     for (std::string_view s : {texStem, matStem})
     {
         if (s.empty())
             continue;
-        if (HasAny(s, {"mirror", "zrcatk", "zrcadl", "spiegel"}))
+        // A glass shader is its own evidence: a mirror material with it is mirror glass.
+        const bool fromMaterialOnBody = !glassShader && s.data() == matStem.data() && IsBodyTexture(texStem);
+        if (fromMaterialOnBody && HasAny(s, {"mirror", "zrcatk", "zrcadl", "spiegel", "_zrc", "chrom"}))
+            continue;
+        // Token lists extended from the first logged class run (WGR_REFLECT_LOG, a787e47,
+        // 2026-10-22): CWA names its parts in Czech (zrc = mirror, palubka = dashboard,
+        // volant = steering wheel, budiky = gauges, rohoz = floor mat, odrazka = reflector,
+        // podvozek/spodek = underbody, pera = springs, zasterka = mud flap, plachta = tarp,
+        // drevo = wood, spz = number plate), Arma 3 marks interiors with `_int`.
+        if (HasAny(s, {"mirror", "zrcatk", "zrcadl", "spiegel", "_zrc"}))
             return SurfaceClass::Mirror;
         if (HasAny(s, {"chrom", "chrome"}))
             return SurfaceClass::Chrome;
-        if (HasAny(s, {"headlight", "light", "lamp", "svetl", "reflektor", "lights"}))
+        if (HasAny(s, {"headlight", "light", "lamp", "svetl", "reflektor", "lights", "odrazk"}))
             return era == Era::Modern ? SurfaceClass::LampPlastic : SurfaceClass::LampGlass;
         if (HasAny(s, {"glass", "sklo", "skla", "okno", "okna", "window", "windshield", "windscreen", "canopy"}))
             return SurfaceClass::Glass;
-        if (HasAny(s, {"tyre", "tire", "pneu", "guma", "rubber", "wheel", "kolo", "kola"}))
+        if (HasAny(s, {"tyre", "tire", "pneu", "guma", "rubber", "wheel", "kolo", "kola", "zasterk"}))
             return SurfaceClass::Rubber;
-        if (HasAny(s, {"interior", "dashboard", "palubn", "sedack", "seat", "cockpit"}))
+        if (HasAny(s, {"interior", "dashboard", "palub", "sedack", "seat", "cockpit", "_int", "_in_", "volant",
+                       "budik", "rohoz", "kozenk", "panel", "spz", "plate", "sterac", "pristroj"}))
             return SurfaceClass::Plastic;
+        if (HasAny(s, {"podvozek", "spodek", "bottom", "_pera", "plachta", "tarp", "drevo", "wood", "backpack"}))
+            return SurfaceClass::Matt;
     }
     return SurfaceClass::None;
 }
@@ -230,7 +251,7 @@ inline Params Classify(const Inputs& in)
     //    the named-part rule still decides between a pane, a mirror and a lamp.
     if (in.fresnelGlass || shader.rfind("glass", 0) == 0)
     {
-        const SurfaceClass part = PartFromNames(texStem, matStem, era);
+        const SurfaceClass part = PartFromNames(texStem, matStem, era, true);
         Params p = Preset(part == SurfaceClass::Mirror || part == SurfaceClass::LampGlass ||
                                   part == SurfaceClass::LampPlastic
                               ? part

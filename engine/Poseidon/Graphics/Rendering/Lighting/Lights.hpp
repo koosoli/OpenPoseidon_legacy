@@ -367,6 +367,7 @@ class LightReflector: public LightPositionedColored
 	bool _explicitAngle = false;
 	Ref<LODShapeWithShadow> _shape;
 	float _startAtten;
+	float _flareRange = 0;
 	float _size;
 	//! LGT-017: a reflector CARRIED BY THE VIEWER draws no bulb. The glow billboard sits right
 	//! in front of the eye there, so it reads as a grey blob in the middle of the screen
@@ -382,6 +383,11 @@ class LightReflector: public LightPositionedColored
 	//! 350 m across a village instead of making it brighter. Intensity belongs in the colour.
 	void SetRange( float metres ){_startAtten=metres>0.01f?metres:0.01f;}
 	float GetRange() const {return _startAtten;}
+	//! LGT-REFL-001: how far the BULB stays visible (its flare), when that should be further than
+	//! the light it casts. A tail lamp lights a metre or two of road but is seen from far away;
+	//! with one number for both, shortening the red pool also made the lamp vanish at 20 m.
+	//! 0 = the historical coupling (flare follows the light's reach).
+	void SetFlareRange( float metres ){_flareRange=metres>0?metres:0;}
 	LightReflector();
 	LightReflector
 	(

@@ -172,6 +172,19 @@ void FillReflectLanes(WgrDraw3D& d, const Object* owner, const Texture* texture,
             {
                 const TargetSide side = type->GetTypicalSide();
                 military = side == TEast || side == TWest || side == TGuerrila;
+                // A civilian class name wins over the side: the first logged run (2026-10-22)
+                // read Arma 3's C_Van_01_transport_F as military (its side comes from a base
+                // class), which painted a white civilian van matt.
+                // Imported Arma classes carry a generated prefix (A1x_C_Van_...), which the
+                // second run showed: strip it before looking for the C_ of a civilian class.
+                if (military)
+                {
+                    std::string cls = RM::Normalise(type->GetName().Data());
+                    if (cls.size() > 4 && cls[0] == 'a' && cls[2] == 'x' && cls[3] == '_')
+                        cls.erase(0, 4);
+                    if (cls.rfind("c_", 0) == 0 || cls.find("civ") != std::string::npos)
+                        military = false;
+                }
             }
         }
     }
@@ -219,11 +232,19 @@ void FillReflectLanes(WgrDraw3D& d, const Object* owner, const Texture* texture,
         if (logClasses && logged.fetch_add(1, std::memory_order_relaxed) < 4000)
         {
             const RM::Params& c = it->second.params;
+            std::string typeName = "-";
+            int side = -1;
+            if (const auto* entity = owner ? dyn_cast<const EntityAI>(owner) : nullptr)
+                if (const EntityAIType* type = entity->GetType())
+                {
+                    typeName = type->GetName().Data();
+                    side = int(type->GetTypicalSide());
+                }
             LOG_INFO(Graphics,
-                     "REFLECT class={} src={} r={:.2f} f0={:.2f} metal={:.1f} coat={:.1f} veh={} mil={} env={} "
-                     "ps='{}' spec={:.2f}/{:.0f} owner='{}' tex='{}' mat='{}'",
+                     "REFLECT class={} src={} r={:.2f} f0={:.2f} metal={:.1f} coat={:.1f} veh={} mil={} side={} env={} "
+                     "ps='{}' spec={:.2f}/{:.0f} type='{}' owner='{}' tex='{}' mat='{}'",
                      int(c.cls), int(c.source), c.roughness, c.f0, c.metal, c.clearCoat, int(isVehicle), int(military),
-                     int(in.hasEnvMap), std::string(in.pixelShader), in.specular, in.specularPower,
+                     side, int(in.hasEnvMap), std::string(in.pixelShader), in.specular, in.specularPower, typeName,
                      owner ? owner->GetDebugName().Data() : "-", std::string(in.texture), std::string(in.material));
         }
     }
