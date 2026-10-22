@@ -169,6 +169,9 @@ struct ReflectorInfo
 	//! in radians; 0 when the class does not say, and then the beam keeps the engine's
 	//! historical 36 degrees -- `size` is NOT read as an angle here, old configs never meant it.
 	float coneHalfAngle = 0;
+	//! LGT-REFL-001: optional `opFlareRange` (metres): the lamp's bulb stays visible this far
+	//! even when the light it casts is short. 0 = not given, flare follows the light as before.
+	float flareRange = 0;
 	AnimationSection selection; // used to Hide/Unhide
 	HitPoint hitPoint;
 

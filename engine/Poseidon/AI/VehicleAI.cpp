@@ -192,6 +192,12 @@ void ReflectorInfo::Load(EntityAIType& type, const ParamEntry& cls, float armor)
             coneHalfAngle = degrees * (H_PI / 360.0f);
         }
     }
+    flareRange = 0;
+    if (cls.FindEntry("opFlareRange"))
+    {
+        const float metres = cls >> "opFlareRange";
+        flareRange = metres > 0 ? metres : 0;
+    }
     RString selName = cls >> "selection";
     selection.Init(shape, selName, nullptr);
     RString hitName = cls >> "hitpoint";
@@ -1219,6 +1225,10 @@ EntityAI::EntityAI(EntityAIType* type, bool fullCreate)
         if (info.coneHalfAngle > 0)
         {
             light->SetAngle(info.coneHalfAngle); // LGT-REFL-001
+        }
+        if (info.flareRange > 0)
+        {
+            light->SetFlareRange(info.flareRange); // LGT-REFL-001
         }
         GScene->AddLight(light);
         _reflectors[i] = light;
