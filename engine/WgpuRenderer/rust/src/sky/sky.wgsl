@@ -576,6 +576,14 @@ fn sky_radiance_cloud_bg(dir: vec3<f32>) -> vec3<f32> {
     return sky_radiance_weighted(dir, clamp(1.0 - sky.night_sky.x, 0.0, 1.0));
 }
 
+// PERF-CLOUD-BG-LAZY: fs_cloud's background, evaluated only when a cloud layer can draw at this
+// pixel (see fs_cloud); otherwise nothing reads it.
+fn cloud_bg_if_needed(dir: vec3<f32>, needed: bool) -> vec3<f32> {
+    if (!needed) { return vec3<f32>(0.0); }
+    let bg = sky_radiance_cloud_bg(dir);
+    return bg;
+}
+
 // ---- Volumetric clouds (plan Stage 5) ----------------------------------------
 // A raymarched cloud shell between cloud0.z and cloud0.w (altitudes ASL) composited
 // OVER the atmosphere background (sky_radiance) by fs_sky (full march) and fs_sky_env
@@ -2396,7 +2404,19 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
     // Local sky colour for the cloud AMBIENT -- star-free (see sky_radiance_cloud_bg). This is the
     // pixel where the bug lived: with the full sky radiance here, a star's radiance became the
     // ambient lighting the cloud in front of it, so the composite handed it straight back.
-    let bg = sky_radiance_cloud_bg(dir);
+    // PERF-CLOUD-BG-LAZY: the background is a full atmosphere march per pixel, and only the deck
+    // and cirrus marches read it -- each of which returns "no cloud" without touching it when its
+    // first test fails. Those tests are repeated here (same expressions, same scene_dist), so a
+    // pixel neither can draw (terrain below the deck, rays down under a clear cirrus sky) skips
+    // the march; every other pixel computes exactly the value it always did.
+    var deck_can_draw = sky.cloud0.x > 0.001 && sky.cloud0.y > 0.0;
+    if (deck_can_draw) {
+        let iv = cloud_interval(pos, dir);
+        let t0 = max(iv.x, 0.0);
+        deck_can_draw = min(iv.y, min(scene_dist, t0 + CLOUD_MARCH_DIST)) > t0;
+    }
+    let cirrus_can_draw = !(sky.output.w < 0.5 || sky.cloud0.x <= 0.001 || dir.y <= 0.01);
+    let bg = cloud_bg_if_needed(dir, deck_can_draw || cirrus_can_draw);
     let radiance = sky.sun_dir.w * sky.params.y;
     let deck = march_clouds(pos, dir, sun, radiance, bg,
                             CLOUD_STEPS, CLOUD_LIGHT_STEPS, hash21(in.clip.xy), scene_dist);
