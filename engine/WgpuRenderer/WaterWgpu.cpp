@@ -1,6 +1,7 @@
 #include "WaterWgpu.hpp"
 #include <Poseidon/Dev/Diag/PhaseSplit.hpp>
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
+#include <Poseidon/World/Terrain/EarthMoonFrame.hpp>
 #include <Poseidon/World/Terrain/WaterBodies.hpp>
 #include <Poseidon/World/Terrain/WaterSurfaceQuery.hpp>
 #include <sstream>
@@ -883,7 +884,7 @@ void WaterWgpu::DrawEarthWater(Scene& scene, float originX, float originZ, float
 {
     Camera* camera = scene.GetCamera();
     const auto& look = _engine.WaterLook();
-    if (!_renderer || !camera || !look.enabled || !EarthStreaming::Enabled() ||
+    if (!_renderer || !camera || !look.enabled || !EarthStreaming::Enabled() || EarthStreaming::MoonFrameActive() ||
         camera->Position().Y() >= 8000.0f || samples < 2 || grid <= 0.0f)
         return;
     static const bool forceCurrentOp = [] {

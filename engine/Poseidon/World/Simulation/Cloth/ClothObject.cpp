@@ -62,7 +62,7 @@ void ClothObject::InitPos(Matrix4Val pos, Vector3Val vel)
     }
 }
 
-#define G_CONST 9.8066f
+// G_CONST: Vehicle.hpp.
 
 void ClothObject::Simulate(Matrix4Val pos,      // world space position of fixed points
                            Vector3Val velocity, // world space velocity of fixed points

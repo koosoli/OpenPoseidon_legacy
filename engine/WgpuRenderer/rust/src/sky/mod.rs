@@ -29,6 +29,7 @@ mod reference;
 pub mod milkyway;
 // REFLECT-001 phase D: GGX-prefiltered mips of the reflection env map.
 pub mod env_prefilter;
+pub mod moonmap;
 pub mod starcat;
 
 // Guards every sky.wgsl edit: parse + validate the module offline so a WGSL error
@@ -777,6 +778,11 @@ struct SkyUniform {
     night_sky: [f32; 4],
     // Whole world: x = origin latitude, y = longitude (radians); see sky.wgsl's `earth_frame`.
     earth_frame: [f32; 4],
+    // Whole world geometry in world coordinates of the active frame (WgrSkyRuntime).
+    earth_centre: [f32; 4],
+    moon_centre: [f32; 4],
+    ecef_x: [f32; 4],
+    ecef_z: [f32; 4],
 }
 
 // The atmosphere-only fields that determine the LUTs (sun/night/exposure excluded,
@@ -1261,6 +1267,7 @@ pub struct Sky {
     /// Eased, for the same reason the others are: this changes every cloud edge on screen at once.
     cirrus_soft_now: f32,
     earth_frame: [f32; 4],
+    earth_geometry: [[f32; 4]; 4],
     // Group(1) of cs_froxel: the terrain sun-shadow mask, rebuilt each frame (the mask
     // texture is Terrain-owned and regenerated) from the lent view + these two.
     froxel_shadow_layout: wgpu::BindGroupLayout,
@@ -1443,6 +1450,14 @@ impl Sky {
                 star_buf_entry(10),
                 star_buf_entry(11),
                 tex_entry(12),
+                // The whole world's moon surface map (moonmap.rs) and its sampler, wrapping in longitude.
+                tex_entry(13),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 14,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
 
@@ -1492,6 +1507,34 @@ impl Sky {
             &mw.texels,
         );
         let mw_view = mw_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        // The whole world's moon: NASA LRO WAC mosaic from the game folder, or a 1x1 placeholder.
+        let moon_map = moonmap::load();
+        eprintln!("[wgr] sky: moon map {} ({}x{}, {} levels)", moon_map.source, moon_map.width, moon_map.height, moon_map.levels.len());
+        let moon_tex = device.create_texture_with_data(
+            queue,
+            &wgpu::TextureDescriptor {
+                label: Some("wgr_sky_moon_map"),
+                size: wgpu::Extent3d { width: moon_map.width, height: moon_map.height, depth_or_array_layers: 1 },
+                mip_level_count: moon_map.levels.len() as u32,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            &moon_map.levels.concat(),
+        );
+        let moon_view = moon_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let moon_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("wgr_sky_moon_sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
         // Only the main sky pass draws into the (MSAA) scene target; the transmittance +
         // multiscatter LUTs are single-sample offscreen renders, so each pipeline takes its
         // own sample count.
@@ -1827,6 +1870,14 @@ impl Sky {
                 wgpu::BindGroupEntry {
                     binding: 12,
                     resource: wgpu::BindingResource::TextureView(&mw_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: wgpu::BindingResource::TextureView(&moon_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: wgpu::BindingResource::Sampler(&moon_sampler),
                 },
             ],
         });
@@ -2472,6 +2523,7 @@ impl Sky {
             cirrus_soft: soft_env.unwrap_or(CIRRUS_SOFT_DEFAULT),
             cirrus_soft_now: soft_env.unwrap_or(CIRRUS_SOFT_DEFAULT),
             earth_frame: [0.0; 4],
+            earth_geometry: [[0.0; 4]; 4],
             cloud_shadow_span: CLOUD_SHADOW_SPAN_MIN,
             cloud_shadow_map_params: [0.0, 0.0, 1.0 / CLOUD_SHADOW_SPAN_MIN, 0.85],
             froxel_view,
@@ -2653,6 +2705,10 @@ impl Sky {
     pub fn set_earth_frame(&mut self, latitude: f32, longitude: f32) {
         self.earth_frame = [latitude, longitude, 0.0, 0.0];
     }
+    /// Whole world: Earth centre, moon centre, Earth-fixed x and z axes in world coordinates.
+    pub fn set_earth_geometry(&mut self, geometry: [[f32; 4]; 4]) {
+        self.earth_geometry = geometry;
+    }
 
     pub fn update_fog_chroma(&self,queue:&wgpu::Queue,ready:bool,weather:f32) {
         let strength=if ready && weather.is_finite() && (0.0..=1.0).contains(&weather) {
@@ -2786,6 +2842,10 @@ impl Sky {
                 0.0,
             ],
             earth_frame: self.earth_frame,
+            earth_centre: self.earth_geometry[0],
+            moon_centre: self.earth_geometry[1],
+            ecef_x: self.earth_geometry[2],
+            ecef_z: self.earth_geometry[3],
         };
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
         // Terrain sun-shadow mask mapping for cs_froxel's occlusion lookup (own copy so

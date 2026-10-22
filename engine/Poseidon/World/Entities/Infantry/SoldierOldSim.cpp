@@ -768,7 +768,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             moveTrans.SetPosition(position);
         }
 
-        if (EarthStreaming::Enabled())
+        if (EarthStreaming::Enabled() && !EarthStreaming::OnMoon)
         {
             // Do not walk off the resident near mesh into unqueried horizon
             // terrain. Keep a small margin for the animated land-contact feet.

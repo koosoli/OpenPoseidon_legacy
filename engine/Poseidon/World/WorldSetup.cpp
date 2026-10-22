@@ -1,4 +1,6 @@
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
+#include <Poseidon/Dev/Debug/DebugOverlay.hpp>
+#include <cstring>
 #include <Poseidon/World/Simulation/StableExtract.hpp>
 #include <cstdlib>
 #include <unordered_map>
@@ -1348,12 +1350,28 @@ void World::SimulateLandscape(float deltaT)
     // recalculation the sky kept the old frame's directions until the clock's next step, so the sun and
     // moon sat in the wrong place and then jumped.
     static uint64_t earthRevision = 0;
-    const uint64_t revision = EarthStreaming::Enabled() ? EarthStreaming::GetLocation().revision : 0;
-    if (Glob.clock.AdvanceTime(timeD) || revision != earthRevision)
+    // (A switch to or across the moon frame, EarthMoonFrame.hpp, changes the frame the same way.)
+    const uint64_t revision = EarthStreaming::Enabled() ?
+        EarthStreaming::GetLocation().revision ^ (EarthStreaming::Celestial().Frame().revision << 40) : 0;
+    // From altitude the night/day judgement follows the camera's horizon dip (Lights.cpp), so it is
+    // re-evaluated every few frames there rather than once per 20 s clock step.
+    static int earthLightFrames = 0;
+    const bool earthAloft = EarthStreaming::Enabled() && GScene && GScene->GetCamera() &&
+                            GScene->GetCamera()->Position().Y() > 2000.0f && (++earthLightFrames % 4) == 0;
+    if (Glob.clock.AdvanceTime(timeD) || revision != earthRevision || earthAloft)
     {
         earthRevision = revision;
         sun->Recalculate(this);
     }
+    // WHOLE WORLD "The Moon": once the world has run a moment (the moon's place comes from the light just
+    // computed), put the free-flight camera over the moon's near side; retried until it succeeds.
+    static bool moonStart = [] {
+        const char* v = std::getenv("POSEIDON_EARTH_START_MOON");
+        return EarthStreaming::Enabled() && v && std::strcmp(v, "1") == 0;
+    }();
+    static int moonStartFrames = 0;
+    if (moonStart && ++moonStartFrames > 90 && Dev::DebugOverlay::SetEarthMoonPose(400.0, 4.0, true))
+        moonStart = false;
     float scaledTime = timeD * (1 / OneSecond);
     GLOB_LAND->Simulate(scaledTime);
     _scene.MainLightChanged();

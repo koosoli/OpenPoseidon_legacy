@@ -493,7 +493,8 @@ void BeamPlayerToZeusCamera()
     }
 
     Vector3 position = s_zeusCamera->Position();
-    if (EarthStreaming::Enabled())
+    // On the moon (whole world's moon frame) the ground is the moon's sphere, everywhere.
+    if (EarthStreaming::Enabled() && !EarthStreaming::OnMoon)
     {
         const auto ground = EarthStreaming::Locations().Ground();
         if (!ground || !ground->Contains(position.X(), position.Z(), 2.0f))
@@ -8639,58 +8640,52 @@ void DisableFreeFly()
 
 bool SetEarthMoonPose(double altitude, double pitchDegrees, bool surface)
 {
-    if (!EarthStreaming::Enabled() || MultiplayerSession() || !ZeusWorldAvailable() || !GScene || !GScene->MainLight() ||
-        !std::isfinite(altitude) || altitude < 100.0 || altitude > 1.0e8 || !std::isfinite(pitchDegrees))
+    // Straight into the moon frame (EarthMoonFrame.hpp): the camera `altitude` above a selenographic
+    // point -- over the sunlit side looking at the moon, or on the near side with the sun ~15 degrees up,
+    // looking along the ground away from the sun, pitched by `pitchDegrees` (the Earth stands overhead).
+    using namespace EarthStreaming;
+    if (!Enabled() || MultiplayerSession() || !ZeusWorldAvailable() || !std::isfinite(altitude) || altitude < 1.0 ||
+        altitude > 1.0e8 || !std::isfinite(pitchDegrees))
         return false;
-    const Vector3 toMoon = -GScene->MainLight()->MoonDirection();
-    const Vector3 toSun = -GScene->MainLight()->SunDirection(); // Direction() swings onto the moon at night
-    double cx, cy, cz;
-    if (!EarthStreaming::MoonCentre(toMoon.X(), toMoon.Y(), toMoon.Z(), cx, cy, cz)) return false;
-    using D = Earth::Direction;
-    const auto norm = [](D v) { const double l = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); return D{v.x / l, v.y / l, v.z / l}; };
-    const auto dot = [](D a, D b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
-    const D w = norm({EarthStreaming::CameraAnchor - cx, -cy, EarthStreaming::CameraAnchor - cz}); // toward the Earth
-    const D s = norm({toSun.X(), toSun.Y(), toSun.Z()});
-    D p, look;
+    const auto sky = Celestial().Sky();
+    D3 moon;
+    if (!MoonCentreEcef(sky, moon)) return false;
+    const auto earthFrame = EarthBasis(sky.originLatitude, sky.originLongitude);
+    const D3 s = Normalize(DirToEcef(earthFrame, sky.toSun));
+    const D3 w = Normalize(moon * -1.0); // toward the Earth
+    D3 up, look;
     if (surface)
     {
-        const double k = dot(w, s);
-        D perp = norm({w.x - s.x * k, w.y - s.y * k, w.z - s.z * k});
+        const D3 perp = Normalize(w - s * Dot(w, s));
         const double a = 75.0 * H_PI / 180.0;
-        p = norm({s.x * std::cos(a) + perp.x * std::sin(a), s.y * std::cos(a) + perp.y * std::sin(a), s.z * std::cos(a) + perp.z * std::sin(a)});
-        const double ks = dot(s, p);
-        const D away = norm({-(s.x - p.x * ks), -(s.y - p.y * ks), -(s.z - p.z * ks)});
+        up = Normalize(s * std::cos(a) + perp * std::sin(a));
+        const D3 away = Normalize((s - up * Dot(s, up)) * -1.0);
         const double e = pitchDegrees * H_PI / 180.0;
-        look = norm({away.x * std::cos(e) + p.x * std::sin(e), away.y * std::cos(e) + p.y * std::sin(e), away.z * std::cos(e) + p.z * std::sin(e)});
+        look = Normalize(away * std::cos(e) + up * std::sin(e));
     }
     else
     {
-        p = norm({s.x + w.x, s.y + w.y, s.z + w.z});
-        look = {-p.x, -p.y, -p.z};
+        up = Normalize(s + w);
+        look = up * -1.0;
     }
-    const double r = EarthStreaming::MoonRadius + altitude;
-    const auto old = EarthStreaming::GetLocation();
-    const Earth::Coordinate oldOrigin{old.latitude, old.longitude};
-    const double camX = cx + p.x * r, camY = cy + p.y * r, camZ = cz + p.z * r;
-    const auto rebase = Earth::CameraRebase(oldOrigin, camX, camY, camZ);
-    if (!rebase)
+    double latitude = 0, longitude = 0;
+    SelenographicOf(MoonFixedAxes(moon), up, latitude, longitude);
+    Celestial().EnterMoon(latitude, longitude);
+    // The player, left standing on the Earth, would otherwise keep his Earth-frame height and fall onto
+    // the moon from it: stand him on the surface below the camera, ready to be beamed or walked about.
+    if (Person* player = GWorld ? GWorld->GetRealPlayer() : nullptr)
     {
-        // Already within re-centring distance of this origin: place the camera in the current frame.
-        char pose[192];
-        snprintf(pose, sizeof(pose), "[%.3f,%.3f,%.9g] az %.6f el %.6f", camX, camZ, camY,
-                 std::atan2(look.x, look.z) * 180.0 / H_PI, std::asin(std::clamp(look.y, -1.0, 1.0)) * 180.0 / H_PI);
-        return SetFreeFlyTestPose(pose);
+        Vector3 standing(float(CameraAnchor) + 4.0f, 0.0f, float(CameraAnchor) + 4.0f);
+        if (const auto ground = QueryGround(standing.X(), standing.Z())) standing[1] = ground->height;
+        player->Move(standing);
+        player->SetSpeed(VZero);
     }
-    const D l = Earth::RotateFrame(oldOrigin, rebase->origin, look);
+    const D3 l = DirToWorld(MoonBasis(moon, latitude, longitude), look);
     char pose[192];
-    snprintf(pose, sizeof(pose), "[%g,%g,%.9g] az %.6f el %.6f", double(EarthStreaming::CameraAnchor),
-             double(EarthStreaming::CameraAnchor), rebase->altitude, std::atan2(l.x, l.z) * 180.0 / H_PI,
-             std::asin(std::clamp(l.y, -1.0, 1.0)) * 180.0 / H_PI);
-    LOG_INFO(Core, "Earth moon pose: toMoon [{:.4f},{:.4f},{:.4f}] centre [{:.0f},{:.0f},{:.0f}] camera [{:.0f},{:.0f},{:.0f}] -> origin [{:.4f},{:.4f}] altitude {:.0f}; {}",
-             toMoon.X(), toMoon.Y(), toMoon.Z(), cx, cy, cz, cx + p.x * r, cy + p.y * r, cz + p.z * r,
-             rebase->origin.latitude, rebase->origin.longitude, rebase->altitude, pose);
-    if (!SetFreeFlyTestPose(pose)) return false;
-    return EarthStreaming::Locations().Rebase(old.revision, rebase->origin.latitude, rebase->origin.longitude, rebase->altitude);
+    snprintf(pose, sizeof(pose), "[%g,%g,%.9g] az %.6f el %.6f", double(CameraAnchor), double(CameraAnchor), altitude,
+             std::atan2(l.x, l.z) * 180.0 / H_PI, std::asin(std::clamp(l.y, -1.0, 1.0)) * 180.0 / H_PI);
+    LOG_INFO(Core, "Earth moon pose: selenographic [{:.4f},{:.4f}] altitude {:.0f}; {}", latitude, longitude, altitude, pose);
+    return SetFreeFlyTestPose(pose);
 }
 
 } // namespace DebugOverlay

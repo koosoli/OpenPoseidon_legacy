@@ -243,6 +243,11 @@ foreach ($file in Get-ChildItem -LiteralPath (Join-Path $distDir 'assets/grass')
 foreach ($file in Get-ChildItem -LiteralPath (Join-Path $distDir 'assets/earth/icbm') -File -Filter '*.sqs' -ErrorAction SilentlyContinue) {
     $contentPayload += @{Source=$file.FullName; Relative=('assets/earth/icbm/' + $file.Name)}
 }
+# The whole world's moon surface map (NASA LRO WAC mosaic, tools/sky/make_moon_albedo.py); without it
+# the renderer draws procedural maria.
+foreach ($file in Get-ChildItem -LiteralPath (Join-Path $distDir 'assets/earth/moon') -File -Filter '*.pmoon' -ErrorAction SilentlyContinue) {
+    $contentPayload += @{Source=$file.FullName; Relative=('assets/earth/moon/' + $file.Name)}
+}
 # Engine feature packs live in assets\Mods (owner 2026-10-20: the game is exe + dll + assets\);
 # maps stay in Mods. A pack still installed at its old Mods\ location is removed after the copy.
 $relocatedPacks = @()

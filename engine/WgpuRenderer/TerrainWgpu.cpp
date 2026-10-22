@@ -1,4 +1,5 @@
 #include "TerrainWgpu.hpp"
+#include <Poseidon/World/Terrain/EarthMoonFrame.hpp>
 #include <Poseidon/World/Terrain/CraterField.hpp>
 #include <functional>
 #include "TerrainWgpuTidewaterDetail.hpp"
@@ -4219,6 +4220,17 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         for(size_t i=0;i<_earthBuildingMeshes.size();++i)if(_earthBuildingMeshes[i]){EngineWgpu::AcquireProducerWindow("Earth buildings relocate");wgr_mesh_destroy(_renderer,_earthBuildingMeshes[i]);_earthBuildingMeshes[i]=0;_earthBuildingIndices[i]=0;}
         _earthOriginRevision=origin.revision;
         LOG_INFO(Graphics,"Earth relocated: origin [{},{}], revision {}",origin.latitude,origin.longitude,origin.revision);
+    }
+    if (EarthStreaming::MoonFrameActive())
+    {
+        // At the moon (EarthMoonFrame.hpp) the world is the moon frame: only the globe is drawn, through
+        // the frame transform. The Earth's near ground (grass, trees, worldgen, water) is local to the
+        // Earth origin and would otherwise appear on the moon's surface.
+        if(_earthGrass){EngineWgpu::AcquireProducerWindow("Earth grass moon");wgr_grass_clear_earth_ground(_renderer);_earthGrass=false;}
+        _engine.ClearEarthTreeObjects();_earthTreeModels=false;
+        _engine.ClearEarthWorldgenObjects();
+        _engine.SubmitEarthHorizon(_earthGlobeMesh,_earthGlobeIndices,_earthGlobeTexture);
+        return;
     }
     _engine.SubmitEarthHorizon(_earthGlobeMesh,_earthGlobeIndices,_earthGlobeTexture);
     // Orbit needs only the fixed global overview. Do not download finer terrain

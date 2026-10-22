@@ -1181,12 +1181,20 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         // Sun height at THIS point of the globe (radial up from the planet centre, which sits a
         // radius below the origin anchor), not at the camera: the terminator is a twilight band,
         // not a knife edge, and the night side must not keep the camera's daytime sky light.
-        let earth_centre = vec3<f32>(6400.0, -6378137.0, 6400.0);
+        // The Earth's centre and the Earth origin's up in world coordinates: (6400, -R, 6400) and +Y in the
+        // Earth frame; from the moon frame the globe arrives through a frame transform and these come with
+        // it (EngineWgpu::SubmitEarthHorizon). Detailed near ground carries its ECEF origin there instead.
+        var earth_centre = vec3<f32>(6400.0, -6378137.0, 6400.0);
+        var origin_up = vec3<f32>(0.0, 1.0, 0.0);
+        if (!ground_detail && dot(material.light_ambient.xyz, material.light_ambient.xyz) > 0.5) {
+            earth_centre = material.light_diffuse.xyz;
+            origin_up = material.light_ambient.xyz;
+        }
         let radial_up = normalize(in.world_pos + frame.cam_pos.xyz - earth_centre);
         let sun_height = dot(radial_up, -frame.sun_dir_world.xyz);
         // Mesh normals are built in the origin's flat tangent frame (up = +Y); tilt them onto the true
         // radial up so the globe and far horizon shade as a sphere. Near the origin this is a no-op.
-        n = normalize(n + radial_up - vec3<f32>(0.0, 1.0, 0.0));
+        n = normalize(n + radial_up - origin_up);
         // Snow: the same snowline and deposit the objects and trees use (the Whole World producer sets a
         // real-world line from latitude and season), by altitude above the globe rather than the flat
         // frame's Y, which drops with curvature and stripped distant peaks. Cliffs stay bare.
@@ -1205,7 +1213,10 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             let carved = clamp(deficit / max(depth, 0.01), 0.0, 1.0);
             // Real alpine cover clings to slopes well past the 45 degrees fresh-fall shading allows.
             let up = dot(n, radial_up);
-            let cover = smoothstep(0.002, 0.04, depth) * smoothstep(0.18, 0.45, up);
+            // Near ground only: on the coarse distant mesh the cover cut hard-edged white polygons over
+            // the satellite imagery, which already shows the real snow from there.
+            let cover = smoothstep(0.002, 0.04, depth) * smoothstep(0.18, 0.45, up) *
+                        (1.0 - smoothstep(1500.0, 5000.0, distance));
             if (cover > 0.0) {
                 let footprint = max(length(dwx), length(dwy));
                 var snow_n = snow_powder_normal(world_abs, n, footprint);

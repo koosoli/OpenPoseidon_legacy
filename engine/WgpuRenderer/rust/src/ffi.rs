@@ -712,6 +712,12 @@ pub struct WgrSkyRuntime {
     // xyz = unit dir TO the sun as seen from the moon; w = earthshine floor.
     pub moon_sun: WgrVec4,
     pub layer_fog_weather: WgrVec4, // captured fog amount, landscape-ready, camera-ready, reserved
+    // Whole world, world coordinates of the active frame (Earth tangent or moon frame): the Earth's
+    // centre, the moon's centre, the Earth-fixed x and z axes. Zero outside whole-world mode.
+    pub earth_centre: WgrVec4,
+    pub moon_centre: WgrVec4,
+    pub ecef_x: WgrVec4,
+    pub ecef_z: WgrVec4,
 }
 
 // Long-distance terrain sun-shadow sweep (was wgr_terrain_set_sun_shadow's args).
@@ -1778,7 +1784,7 @@ const _: () = assert!(std::mem::size_of::<WgrTonemap>() == 64);
 // has to move together — any one of them left behind is silent garbage in the shader.
 const _: () = assert!(std::mem::size_of::<WgrSky>() == 288);
 const _: () = assert!(std::mem::size_of::<WgrSkyLook>() == 192);
-const _: () = assert!(std::mem::size_of::<WgrSkyRuntime>() == 128);
+const _: () = assert!(std::mem::size_of::<WgrSkyRuntime>() == 192);
 const _: () = assert!(std::mem::size_of::<WgrTerrainSunShadow>() == 16);
 // 20 header words, then satellite/mask UVs and six per-slot UVs of two vec4
 // each. The WGSL `TerrainMaterial` in terrain.wgsl mirrors this byte for byte.

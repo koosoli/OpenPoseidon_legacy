@@ -1,5 +1,6 @@
 
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
+#include <Poseidon/World/Terrain/EarthMoonFrame.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Ephemeris.hpp>
@@ -699,6 +700,36 @@ void LightSun::Recalculate(World* world)
             _direction = sunOverride.dir;
     }
 
+    // Whole world: publish the sky in the Earth origin's frame (the moon's place, the moon frame's axes
+    // and the renderer's Earth/moon geometry are built from it), then, near the moon, express the light
+    // in the moon frame the world is in (EarthMoonFrame.hpp).
+    if (earth)
+    {
+        const auto location = EarthStreaming::GetLocation();
+        EarthStreaming::SkyGeometry geometry;
+        geometry.valid = true;
+        geometry.originLatitude = location.latitude;
+        geometry.originLongitude = location.longitude;
+        geometry.toSun = {-_direction.X(), -_direction.Y(), -_direction.Z()};
+        geometry.toMoon = {-_moonDirection.X(), -_moonDirection.Y(), -_moonDirection.Z()};
+        EarthStreaming::Celestial().SetSky(geometry);
+        EarthStreaming::Basis world;
+        if (EarthStreaming::MoonFrameActive() &&
+            EarthStreaming::WorldBasis(location.latitude, location.longitude, world))
+        {
+            const auto earthFrame = EarthStreaming::EarthBasis(location.latitude, location.longitude);
+            const auto toWorld = [&](const Vector3& v)
+            {
+                const auto d = EarthStreaming::DirToWorld(world, EarthStreaming::DirToEcef(earthFrame, {v.X(), v.Y(), v.Z()}));
+                return Vector3(float(d.x), float(d.y), float(d.z));
+            };
+            _direction = toWorld(_direction);
+            _moonDirection = toWorld(_moonDirection);
+            _moonSunDirection = toWorld(_moonSunDirection);
+            _moonDirectionUp = toWorld(_moonDirectionUp);
+        }
+    }
+
     float sinSun = -_direction.Y();
     float absSinSun = fabs(sinSun);
 
@@ -777,7 +808,17 @@ void LightSun::Recalculate(World* world)
     // stars. Night now ramps from the sun at +2 degrees to -8 degrees (civil twilight and a little).
     if (earth)
     {
-        const float altitudeDeg = asin(floatMin(floatMax(sinSun, -1.0f), 1.0f)) * (180.0f / H_PI);
+        // Seen from altitude the horizon dips: from 400 km the sun is still up when it stands 20 degrees
+        // below the ground's horizon. Night is judged at the camera, or orbit stayed "night" while the
+        // sun was in view and then switched to day all at once.
+        float dipDeg = 0.0f;
+        if (GScene && GScene->GetCamera())
+        {
+            const double r = EarthStreaming::MoonFrameActive() ? EarthStreaming::MoonRadius : 6378137.0;
+            const double h = std::max(double(GScene->GetCamera()->Position().Y()), 0.0);
+            dipDeg = float(std::acos(r / (r + h)) * (180.0 / H_PI));
+        }
+        const float altitudeDeg = asin(floatMin(floatMax(sinSun, -1.0f), 1.0f)) * (180.0f / H_PI) + dipDeg;
         _nightEffect = Saturate01((2.0f - altitudeDeg) / 10.0f);
         _starsVisible = Saturate01((-2.0f - altitudeDeg) / 8.0f);
     }

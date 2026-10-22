@@ -689,7 +689,9 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
         // One immutable resident patch for all contact vertices. Legacy map
         // roads, terrain holes and water are not part of the Earth near mesh.
         const auto ground = EarthStreaming::Locations().Ground();
-        if (!ground || !with || !with->GetShape()) return;
+        // On the moon (moon frame) the ground is its sphere, from QueryGround (EarthStreamingMode.hpp).
+        const bool moon = EarthStreaming::OnMoon;
+        if ((!ground && !moon) || !with || !with->GetShape()) return;
         int level = with->GetShape()->FindLandContactLevel();
         if (level < 0 || (!soldier && (!enableLandcontact || withPos.DirectionUp().Y() < 0.7f)))
             level = with->GetShape()->FindGeometryLevel();
@@ -700,7 +702,7 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
         for (int j = 0; j < shape->NPos(); ++j)
         {
             const Point3 pos(VFastTransform, withPos.Transform(), shape->Pos(j));
-            const auto sample = ground->Sample(pos.X(), pos.Z());
+            const auto sample = moon ? EarthStreaming::QueryGround(pos.X(), pos.Z()) : ground->Sample(pos.X(), pos.Z());
             if (!sample || sample->Penetration(pos.Y(), above) <= 0) continue;
             UndergroundInfo& info = retVal.Append();
             info.texture = nullptr;

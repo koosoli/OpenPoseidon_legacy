@@ -82,6 +82,14 @@ struct Sky {
     // is sampled in an Earth-fixed frame built from these, so it does not turn with the camera's
     // tangent frame when free flight rebases the origin.
     earth_frame: vec4<f32>,
+    // Whole world, WORLD coordinates of the active frame -- the origin's Earth tangent frame or, near the
+    // moon, the moon frame (EarthMoonFrame.hpp): the Earth's centre, the moon's centre, and the Earth-fixed
+    // x and z axes as directions. sky_origin(), the planet clouds and the moon body read these, so the
+    // same shader draws the Earth from its own surface and from the moon.
+    earth_centre: vec4<f32>,
+    moon_centre: vec4<f32>,
+    ecef_x: vec4<f32>,
+    ecef_z: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> sky: Sky;
@@ -467,9 +475,9 @@ fn earth_forward_sphere_hit(interval: vec2<f32>) -> bool {
 }
 fn sky_origin() -> vec3<f32> {
     if (earth_preview()) {
-        // Same tangent-frame centre as EarthCoordinates.hpp, including lateral flight.
-        return vec3<f32>(sky.cam_pos.x - 6400.0, sky.params.z + sky.cam_pos.y,
-                         sky.cam_pos.z - 6400.0);
+        // The camera relative to the Earth's centre, in world axes (EarthCoordinates.hpp's centre in the
+        // Earth frame: (6400, -R, 6400); far away in the moon frame).
+        return sky.cam_pos.xyz - sky.earth_centre.xyz;
     }
     return vec3<f32>(0.0, sky.params.z + max(sky.night_zenith.w, 0.0), 0.0);
 }
@@ -933,6 +941,29 @@ struct StarGpu {
 // leave a visible seam down the sky there.
 @group(0) @binding(12) var milkyway_tex: texture_2d<f32>;
 
+// The whole world's moon surface: NASA LRO WAC global mosaic (sky/moonmap.rs), equirectangular in
+// selenographic longitude/latitude, longitude 0 (the near side's centre) at u = 0.5, relative albedo with
+// its mean at MOON_MAP_MEAN. A 1x1 placeholder when the file is not there.
+#ifdef WHOLE_WORLD
+@group(0) @binding(13) var moon_map: texture_2d<f32>;
+@group(0) @binding(14) var moon_map_samp: sampler;
+const MOON_MAP_MEAN: f32 = 96.0 / 255.0;
+// Relative albedo at moon-fixed direction q (x east at 0/0, y north, z toward the Earth), filtered to the
+// pixel footprint (radians on the unit sphere); -1 without a map.
+fn moon_map_albedo(q: vec3<f32>, footprint: f32) -> f32 {
+    let size = textureDimensions(moon_map);
+    if (size.x <= 1u) { return -1.0; }
+    let lon = atan2(q.x, q.z);
+    let lat = asin(clamp(q.y, -1.0, 1.0));
+    let uv = vec2<f32>(lon / (2.0 * PI) + 0.5, 0.5 - lat / PI);
+    // Explicit level: the longitude wraps at the far side's centre, where derivatives would jump.
+    let lod = log2(max(footprint * f32(size.x) / (2.0 * PI), 1.0e-6));
+    return textureSampleLevel(moon_map, moon_map_samp, uv, lod).r / MOON_MAP_MEAN;
+}
+#else
+fn moon_map_albedo(q: vec3<f32>, footprint: f32) -> f32 { return -1.0; }
+#endif
+
 // Angular size of one pixel, radians. Written at the top of each fragment entry point -- i.e. in
 // UNIFORM control flow, which is where a derivative is allowed. star_field is called from inside
 // a branch, so it cannot take the derivative itself. Zero (the default, for any path that does
@@ -1240,13 +1271,10 @@ fn earth_planet_cloud(dir: vec3<f32>, max_dist_in: f32) -> CloudResult {
         return CloudResult(vec3<f32>(0.0), 1.0);
     }
     let local_n = normalize(pos + dir * t);
-    // Tangent frame (x east, y up, z north) at the origin -> Earth-centred, Earth-fixed.
-    let lat = sky.earth_frame.x;
-    let lon = sky.earth_frame.y;
-    let east = vec3<f32>(-sin(lon), cos(lon), 0.0);
-    let north = vec3<f32>(-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat));
-    let up = vec3<f32>(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat));
-    let n = east * local_n.x + up * local_n.y + north * local_n.z;
+    // World axes -> Earth-centred, Earth-fixed, whichever frame the world is in.
+    let ax = sky.ecef_x.xyz;
+    let az = sky.ecef_z.xyz;
+    let n = vec3<f32>(dot(local_n, ax), dot(local_n, cross(az, ax)), dot(local_n, az));
     // The field is procedural on the unit sphere. It used to sample the deck's 3D noise volume, which
     // is built for a horizontal deck (its Y axis is the morph axis, not space), so on a sphere it
     // streaked into parallel lines, and three fixed taps aliased from far away. Isotropic gradient
@@ -2277,11 +2305,10 @@ fn cloud_over_cirrus(deck: CloudResult, cirrus: CloudResult) -> CloudResult {
 // procedural maria; lit by the same Lommel-Seeliger law and radiance the disc uses on the ground.
 const MOON_DISTANCE: f32 = 3.844e8;
 const MOON_RADIUS: f32 = 1.7374e6;
+// The moon's centre relative to the Earth's (world axes). For the moon body itself use the world
+// positions directly (earth_moon_body): in the moon frame both are small numbers and exact.
 fn earth_moon_centre() -> vec3<f32> {
-    let moon = normalize(sky.moon_dir.xyz);
-    let r = sky.params.z;
-    let b = r * moon.y;
-    return vec3<f32>(0.0, r, 0.0) + moon * (-b + sqrt(max(b * b - r * r + MOON_DISTANCE * MOON_DISTANCE, 0.0)));
+    return sky.moon_centre.xyz - sky.earth_centre.xyz;
 }
 // rgb = radiance, w = hit distance (-1 = miss).
 // Moon relief on the unit sphere: rolling highlands plus three scales of craters (bowl and raised
@@ -2312,15 +2339,17 @@ fn moon_crater_rays(q: vec3<f32>, footprint: f32) -> f32 {
 }
 
 fn earth_moon_body(pos: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
-    if (sky.moon_params.w < 0.5) { return vec4<f32>(0.0, 0.0, 0.0, -1.0); }
+    if (sky.moon_params.w < 0.5 || sky.moon_centre.w < 0.5) { return vec4<f32>(0.0, 0.0, 0.0, -1.0); }
     let centre = earth_moon_centre();
-    let oc = pos - centre;
+    // Camera relative to the moon's centre from WORLD positions, not from the Earth-relative `pos`:
+    // near the moon (moon frame) these are both small, so the surface is exact and does not shimmer.
+    let oc = sky.cam_pos.xyz - sky.moon_centre.xyz;
     let hit = ray_sphere(oc, dir, MOON_RADIUS);
     if (!earth_forward_sphere_hit(hit)) { return vec4<f32>(0.0, 0.0, 0.0, -1.0); }
     let n0 = normalize(oc + dir * hit.x);
     // Moon-fixed frame: w toward the Earth, u/v from the Earth's spin axis in this tangent frame.
     let w = normalize(-centre);
-    let axis = vec3<f32>(0.0, sin(sky.earth_frame.x), cos(sky.earth_frame.x));
+    let axis = sky.ecef_z.xyz;
     let u = normalize(cross(axis, w));
     let v = cross(w, u);
     let q = vec3<f32>(dot(n0, u), dot(n0, v), dot(n0, w));
@@ -2329,7 +2358,13 @@ fn earth_moon_body(pos: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
     let footprint = max(hit.x * 0.0015 / MOON_RADIUS, 1.0e-6);
     let maria = smoothstep(0.02, 0.3, planet_fbm(q * 1.7 + vec3<f32>(3.1), 4, footprint * 1.7));
     let grain = planet_fbm(q * 14.0, 4, footprint * 14.0);
-    let albedo = (1.0 - 0.42 * maria) * (1.0 + 0.12 * grain) * (1.0 + 0.25 * moon_crater_rays(q, footprint));
+    var albedo = (1.0 - 0.42 * maria) * (1.0 + 0.12 * grain) * (1.0 + 0.25 * moon_crater_rays(q, footprint));
+    // The real moon where the LRO map is loaded: its maria, highlands and ray craters, with the
+    // procedural grain only for the detail below the map's ~2.7 km texels.
+    let mapped = moon_map_albedo(q, footprint);
+    if (mapped >= 0.0) {
+        albedo = mapped * (1.0 + 0.12 * grain) * 0.85;
+    }
     // Relief (unit-sphere heights) from craters and rolling terrain; its gradient tilts the shading
     // normal, which is what makes a lit crater field read as a surface rather than a texture.
     let e = max(footprint * 0.7, 2.0e-6);
@@ -2366,8 +2401,7 @@ fn moon_disc(dir: vec3<f32>, pos: vec3<f32>) -> vec3<f32> {
     let radius = max(sky.moon_params.x, 1.0e-4);
     // Whole world, from altitude: the moon is a body (earth_moon_body), so free flight can reach it.
     if (earth_preview() && length(pos) - sky.params.z > 20000.0) {
-        let body = earth_moon_body(pos, dir);
-        return body.rgb;
+        return vec3<f32>(0.0); // drawn opaque by fs_sky itself
     }
     let cos_a = dot(dir, moon);
     let cos_r = cos(radius);
@@ -2465,6 +2499,16 @@ fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
     }
     if (star_occl > 0.001) {
         color = color + star_radiance(dir, sun) * star_occl;
+    }
+    // Whole world, from altitude: the moon is a body and it is opaque -- the stars and the Milky Way
+    // behind it do not show through; only the air in front of it remains (from the ground the disc
+    // keeps its own path below).
+    if (earth_preview() && length(pos) - planet_r > 20000.0 &&
+        !earth_forward_sphere_hit(ray_sphere(pos, dir, planet_r))) {
+        let body = earth_moon_body(pos, dir);
+        if (body.w > 0.0) {
+            color = lanes.atmosphere + body.rgb;
+        }
     }
 
     // Clouds are NO LONGER drawn here — they are a depth-aware over-scene composite (fs_cloud +

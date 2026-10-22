@@ -787,6 +787,13 @@ struct WgrSkyRuntime
     WgrVec4 moon_params;
     WgrVec4 moon_sun;
     WgrVec4 layer_fog_weather; // captured fog, landscape-ready, camera-ready, reserved
+    /* Whole world, in WORLD coordinates of the active frame (the Earth origin's tangent frame, or the
+     * moon frame near the moon -- EarthMoonFrame.hpp): the Earth's centre, the moon's centre, and the
+     * Earth-fixed x and z axes as world directions. Zero outside whole-world mode. */
+    WgrVec4 earth_centre;
+    WgrVec4 moon_centre;
+    WgrVec4 ecef_x;
+    WgrVec4 ecef_z;
 };
 
 /* Long-distance terrain sun-shadow sweep (was wgr_terrain_set_sun_shadow's args). */
@@ -2400,7 +2407,7 @@ static_assert(sizeof(WgrSkyLook) == 192, "WgrSkyLook layout must match the Rust 
  * This assert and sky/mod.rs's rust_and_wgsl_sky_structs_declare_the_same_fields_in_the_same_order
  * are the ONLY things standing between a lane added on one side of the FFI and silent garbage
  * in the shader — keep them in step. */
-static_assert(sizeof(WgrSkyRuntime) == 128, "WgrSkyRuntime layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrSkyRuntime) == 192, "WgrSkyRuntime layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTerrainSunShadow) == 16, "WgrTerrainSunShadow layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSkyVisibility) == 32, "WgrSkyVisibility layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrFoliage) == 80, "WgrFoliage layout must match the Rust #[repr(C)] struct");

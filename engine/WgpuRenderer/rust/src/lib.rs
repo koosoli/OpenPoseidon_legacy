@@ -2831,6 +2831,7 @@ impl Renderer {
         // Whole world rides the two spare runtime lanes: sun_dir.w = origin latitude, layer_fog_weather.w =
         // origin longitude (radians). Zero outside whole-world mode, where nothing reads them.
         self.sky.set_earth_frame(rt.sun_dir[3], rt.layer_fog_weather[3]);
+        self.sky.set_earth_geometry([rt.earth_centre, rt.moon_centre, rt.ecef_x, rt.ecef_z]);
         self.layer_fog_weather = if rt.layer_fog_weather[1] >= 0.5 && rt.layer_fog_weather[2] >= 0.5
             && rt.layer_fog_weather[0].is_finite() && (0.0..=1.0).contains(&rt.layer_fog_weather[0])
             { rt.layer_fog_weather[0] } else { 0.0 };

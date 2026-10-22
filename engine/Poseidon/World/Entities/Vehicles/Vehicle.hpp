@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Poseidon/World/Terrain/EarthGravity.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/Audio/IAudioSystem.hpp>
 #include <Poseidon/Audio/SoundScene.hpp>
@@ -538,7 +539,8 @@ class AttachedOnVehicle: virtual public Frame
 
 // general simulation functions
 
-#define G_CONST 9.8066f
+// Earth's 9.8066, or the moon's in the whole world's moon frame (EarthGravity.hpp).
+#define G_CONST (::Poseidon::EarthStreaming::Gravity)
 
 void Friction( float &speed, float friction, float accel, float deltaT );
 void Friction

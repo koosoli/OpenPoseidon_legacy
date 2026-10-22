@@ -2,6 +2,7 @@
 
 #include "EarthGroundPatch.hpp"
 #include "EarthFrame.hpp"
+#include "EarthMoonFrame.hpp"
 
 #include <cstdlib>
 #include <cstring>
@@ -106,6 +107,15 @@ class LocationState
     }
     std::optional<GroundSample> QueryGround(float x, float z) const
     {
+        // In the moon frame (EarthMoonFrame.hpp) the ground is the moon's sphere, exact everywhere: the
+        // sky draws its relief as shading only, so the silhouette and this height agree.
+        if (MoonFrameActive())
+        {
+            const double dx = double(x) - Earth::Anchor, dz = double(z) - Earth::Anchor;
+            const double s = std::sqrt(std::max(MoonRadius * MoonRadius - dx * dx - dz * dz, 1.0));
+            std::lock_guard lock(_mutex);
+            return GroundSample{float(s - MoonRadius), float(-dx / s), float(-dz / s), _location.revision, 1};
+        }
         std::lock_guard lock(_mutex);
         return _ground ? _ground->Sample(x, z) : std::nullopt;
     }

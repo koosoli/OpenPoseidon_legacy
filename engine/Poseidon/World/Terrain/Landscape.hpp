@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Poseidon/World/Terrain/EarthGravity.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/AI/Path/AITypes.hpp>
@@ -1641,7 +1642,8 @@ public:
     void SetFog(float fog) { _weather.SetFog(this, fog); }
     void SetRain(float density, float time) { _weather.SetRain(density, time); }
     void Simulate(float deltaT);
-    float GetSeaLevel() const { return _seaLevelWave; }
+    // No sea on the moon (whole world's moon frame): its ground lies below 0 away from the frame's anchor.
+    float GetSeaLevel() const { return EarthStreaming::OnMoon ? -1.0e9f : _seaLevelWave; }
     void SetSeaWaveSpeed(float seaWaveSpeed) { _seaWaveSpeed = seaWaveSpeed; }
 
     Vector3 GetWind() const;

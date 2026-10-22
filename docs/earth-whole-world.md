@@ -61,8 +61,28 @@ stays daylit while the starting place is in night; ground-level views are unchan
 
 From orbit the moon is a body 384,400 km from the Earth's centre (real ephemeris direction): it shows
 parallax, grows as you approach, and free flight can travel to it: speed follows the distance to the nearer
-of the Earth and the moon, the camera levels against the moon's ground once it is the nearer surface, and it
-stops 100 m above it. The surface has procedural maria, craters and relief (shading only, not collision).
+of the Earth and the moon, and the camera levels against whichever is nearer.
+
+**The moon frame** (`EarthMoonFrame.hpp`). Past the midpoint the world switches from the Earth origin's
+tangent frame to a tangent frame on the moon, and back on the way home. In the Earth frame the moon is
+~3.8e8 m out, where a float steps 32 m: the camera shook and nothing could stand there. In the moon frame
+the camera and the surface are small numbers again, and the frame re-centres across the moon as the Earth
+frame does across the Earth, so free flight can orbit it. The Earth (globe, clouds, atmosphere) is drawn
+through the frame transform; its near ground, grass, trees and water are not drawn from there.
+
+On the moon:
+
+* **Ground.** The moon's sphere (radius 1,737.4 km) is the ground for walking, vehicles, collisions and the
+  dev tools' *Zeus: beam player here*. The relief and craters are shading only, so the silhouette and the
+  ground agree. There is no sea.
+* **Gravity** is the moon's, 1.62 m/s^2, for everything the simulation drops (`G_CONST`): a jump rises
+  about six times as high and hangs about six times as long. Back in the Earth frame it is 9.8066 again.
+* **Surface.** NASA's LRO Wide Angle Camera global mosaic (`assets/earth/moon/moon_albedo.pmoon`, 4096 x
+  2048, built by `tools/sky/make_moon_albedo.py`), with procedural grain and craters below its ~2.7 km
+  texels. Without the file the moon falls back to procedural maria.
+* **The Moon** in the menu's place list starts in free flight 400 m over the near side, with the sun low
+  and the Earth overhead; the player stands on the surface below, ready to be beamed or walked about.
+
 The Go/menu altitude stays limited to 30,000 km; flight itself reaches 450,000 km.
 
 ## Desert Island

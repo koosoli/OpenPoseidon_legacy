@@ -605,6 +605,15 @@ mod sites are usually someone else's derived asset with no redistribution licenc
 GPL-incompatible regardless of how freely they are downloaded. The two sources above were
 chosen because they can actually be shipped.
 
+## Moon surface (shipped in `assets/earth/moon/`)
+
+| File | Source | Licence |
+|---|---|---|
+| `moon_albedo.pmoon` | NASA Lunar Reconnaissance Orbiter, Wide Angle Camera global mosaic (LRO_WAC_Mosaic_Global_303ppd_v02, served by NASA Moon Trek, trek.nasa.gov), level 3 of the tile pyramid: 4096 x 2048 | Public domain |
+
+Converted (stitched, poles filled, mip chain written) by `tools/sky/make_moon_albedo.py`. Credit:
+*Moon imagery courtesy NASA/GSFC/Arizona State University (LROC).*
+
 ## Notes
 
 - The copyright lines for the vcpkg dependencies in §2 are summarised for reference.

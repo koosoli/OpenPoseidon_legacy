@@ -43,6 +43,7 @@
 #include "EarthRoadCoverage.hpp"
 #include "EarthGroundDetail.hpp"
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
+#include <Poseidon/World/Terrain/EarthMoonFrame.hpp>
 #include "ForestSnowSurface.hpp"
 #include <typeinfo>
 #include "GeometryOwnerLedger.hpp"
@@ -673,6 +674,19 @@ float LerpF(float a, float b, float t)
 // toward the sun: per-channel atmospheric transmittance (0 = sun below the horizon / fully
 // occluded by the planet). Feeds sky-based scene lighting so the surface sun colour reddens
 // at dusk and fades to zero at night, on the same physical radiance scale as the sky/fog.
+// The camera's height above the Earth for the atmosphere and sky: its world Y in the Earth frame (as
+// always), its true altitude when the world is in the moon frame (EarthMoonFrame.hpp).
+float EarthCameraAltitude(const Vector3& camera)
+{
+    if (!EarthStreaming::Enabled() || !EarthStreaming::MoonFrameActive())
+        return camera.Y();
+    const auto location = EarthStreaming::GetLocation();
+    EarthStreaming::Basis world;
+    if (!EarthStreaming::WorldBasis(location.latitude, location.longitude, world))
+        return camera.Y();
+    return float(EarthStreaming::Length(EarthStreaming::ToEcef(world, camera.X(), camera.Y(), camera.Z())) - Earth::Radius);
+}
+
 Vector3 AtmosphereSunTransmittance(const Engine::SkySettings& s, float camAlt, Vector3 dirToSun)
 {
     const float Rg = s.planetRadius;
@@ -746,6 +760,7 @@ Engine::TonemapSettings LerpTonemap(const Engine::TonemapSettings& a, const Engi
 // dusk 18:30. Whole-world mode has the real sun for the real place, so a Grand Canyon sunset at 18:54
 // was already being darkened toward the 20:00 night preset. There the key is the hour at which the
 // tuned island has the same sun elevation: dawn keys while the sun is in the east, dusk keys in the west.
+float LookHourAt(double r, double ox, double oy, double oz, const Vector3& toSun, bool skyRadiance);
 float LookHour(float clockHour, bool skyRadiance = false)
 {
     if (!EarthStreaming::Enabled())
@@ -758,8 +773,17 @@ float LookHour(float clockHour, bool skyRadiance = false)
     const double ox = double(snap.cameraPos.X()) - 6400.0, oz = double(snap.cameraPos.Z()) - 6400.0;
     const double oy = double(snap.cameraPos.Y()) + 6378137.0;
     const double r = std::sqrt(ox * ox + oy * oy + oz * oz);
-    if (r - 6378137.0 > 60000.0)
+    // From space the lit hemisphere is exposed as daylight. Blended in over 30-90 km: switching at
+    // 60 km changed the whole grade in one frame on the way up at night.
+    const float space = float(std::clamp((r - 6378137.0 - 30000.0) / 60000.0, 0.0, 1.0));
+    if (space >= 1.0f)
         return 12.0f;
+    const float local = LookHourAt(r, ox, oy, oz, toSun, skyRadiance);
+    return local + (12.0f - local) * space * space * (3.0f - 2.0f * space);
+}
+
+float LookHourAt(double r, double ox, double oy, double oz, const Vector3& toSun, bool skyRadiance)
+{
     const float sinE = r > 0.0 ? float((ox * toSun.X() + oy * toSun.Y() + oz * toSun.Z()) / r) : toSun.Y();
     const float e = std::asin(std::clamp(sinE, -1.0f, 1.0f)) * (180.0f / 3.14159265f);
     const auto lerp = [](float a, float b, float t) { return a + (b - a) * std::clamp(t, 0.0f, 1.0f); };
@@ -6123,7 +6147,7 @@ void EngineWgpu::NextFrame()
         float daylight = 1.0f - (snap.hasMainLight ? snap.nightEffect : 0.0f);
         if (_hdrEnabled && _sky.enabled && _sky.skyLighting && snap.hasMainLight)
         {
-            const float camAlt = snap.hasCamera ? static_cast<float>(snap.cameraPos.Y()) : 0.0f;
+            const float camAlt = snap.hasCamera ? EarthCameraAltitude(snap.cameraPos) : 0.0f;
             const Vector3 tr = AtmosphereSunTransmittance(_sky, camAlt, -snap.sunDirection);
             const float rad = _sky.sunIntensity * _sky.exposure;
             sunLin[0] = tr.X() * rad;
@@ -8010,6 +8034,45 @@ void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTextur
         // world-metre grain stable through camera movement and geographic rebases.
         d.mat_light_diffuse = {split.high[0],split.high[1],split.high[2],0};
         d.mat_light_ambient = {split.low[0],split.low[1],split.low[2],1};
+    }
+    else
+    {
+        // The globe and other undetailed Earth draws: the Earth's centre and the origin's up in world
+        // coordinates (shader3d earth surface). In the Earth frame these are (6400, -R, 6400) and
+        // (0, 1, 0); in the moon frame the globe is drawn through the frame transform below.
+        d.mat_light_diffuse = {6400.0f, -6378137.0f, 6400.0f, 0};
+        d.mat_light_ambient = {0, 1, 0, 0};
+    }
+    if (EarthStreaming::MoonFrameActive())
+    {
+        // Near the moon the world is the moon frame (EarthMoonFrame.hpp): place the Earth's meshes, which
+        // are in the Earth origin's tangent frame, through Earth tangent -> ECEF -> moon frame.
+        const auto origin = EarthStreaming::Locations().Get();
+        const auto earth = EarthStreaming::EarthBasis(origin.latitude, origin.longitude);
+        EarthStreaming::Basis world;
+        if (EarthStreaming::WorldBasis(origin.latitude, origin.longitude, world))
+        {
+            const EarthStreaming::D3 cols[3] = {EarthStreaming::DirToWorld(world, earth.E), EarthStreaming::DirToWorld(world, earth.U),
+                                                EarthStreaming::DirToWorld(world, earth.N)};
+            // World = R * (p - (A, 0, A)) + T, T = the Earth origin's anchor point in the moon frame.
+            const auto T = EarthStreaming::ToWorld(world, earth.O);
+            const double cam[3] = {camera.pos[0], camera.pos[1], camera.pos[2]};
+            for (int c = 0; c < 3; ++c)
+            {
+                d.world.m[c * 4 + 0] = float(cols[c].x);
+                d.world.m[c * 4 + 1] = float(cols[c].y);
+                d.world.m[c * 4 + 2] = float(cols[c].z);
+                d.world.m[c * 4 + 3] = 0.0f;
+            }
+            const EarthStreaming::D3 shift = cols[0] * -double(Earth::Anchor) + cols[2] * -double(Earth::Anchor);
+            d.world.m[12] = float(T.x + shift.x - cam[0]);
+            d.world.m[13] = float(T.y + shift.y - cam[1]);
+            d.world.m[14] = float(T.z + shift.z - cam[2]);
+            d.world.m[15] = 1.0f;
+            const auto centre = EarthStreaming::ToWorld(world, {0.0, 0.0, 0.0});
+            d.mat_light_diffuse = {float(centre.x), float(centre.y), float(centre.z), 0};
+            d.mat_light_ambient = {float(cols[1].x), float(cols[1].y), float(cols[1].z), 0};
+        }
     }
     _draws3d.push_back(d);
     _cmds.push_back(WgrCmd{WGR_CMD_DRAW_3D,U32(_draws3d.size()-1)});
@@ -22561,7 +22624,8 @@ void EngineWgpu::PushSkyRuntime()
     // Whole world: a geographic origin rebase changes the frame the directions are in, not the sky;
     // easing across it swung the sun and moon through the sky after every rebase. Snap instead.
     static uint64_t skyEarthRevision = 0;
-    const uint64_t earthRevision = EarthStreaming::Enabled() ? EarthStreaming::GetLocation().revision : 0;
+    const uint64_t earthRevision = EarthStreaming::Enabled() ?
+        EarthStreaming::GetLocation().revision ^ (EarthStreaming::Celestial().Frame().revision << 40) : 0;
     const bool earthRebased = earthRevision != skyEarthRevision;
     skyEarthRevision = earthRevision;
     if (!_skyInit || earthRebased || tSun.DotProduct(_skySunDir) < 0.5f)
@@ -22591,7 +22655,7 @@ void EngineWgpu::PushSkyRuntime()
     // Camera altitude ASL feeds the aerial/sky raymarch origin: with the old fixed 200 m
     // the march dived below the terrain when flying (fake density -> grey wash). Sea level
     // is y = 0 in OFP, so the camera's world Y is the altitude directly.
-    const float camAlt = skySnap.hasCamera ? static_cast<float>(skySnap.cameraPos.Y()) : 0.0f;
+    const float camAlt = skySnap.hasCamera ? EarthCameraAltitude(skySnap.cameraPos) : 0.0f;
     // fog far-range: the aerial pass dissolves the terrain edge into the full sky as it nears
     // the fog/view distance, hiding the horizon colour step. 0 when there's no scene.
     const float fogFar = skySnap.hasScene ? skySnap.fogMaxRange : 0.0f;
@@ -22708,6 +22772,24 @@ void EngineWgpu::PushSkyRuntime()
         windZ = std::fmod(windZ - travelZ, kWindWrap);
     }
     rt.misc = {_skyNight, camAlt, static_cast<float>(windX), static_cast<float>(windZ)};
+    // Whole world: the Earth's and moon's centres and the Earth-fixed axes in world coordinates of the
+    // active frame, for the sky (sky.wgsl sky_origin / planet clouds / moon body). w = 1: valid.
+    rt.earth_centre = rt.moon_centre = rt.ecef_x = rt.ecef_z = {0.0f, 0.0f, 0.0f, 0.0f};
+    if (EarthStreaming::Enabled())
+    {
+        const auto location = EarthStreaming::GetLocation();
+        EarthStreaming::Basis world;
+        if (EarthStreaming::WorldBasis(location.latitude, location.longitude, world))
+        {
+            const auto put = [](WgrVec4& v, EarthStreaming::D3 d) { v = {float(d.x), float(d.y), float(d.z), 1.0f}; };
+            put(rt.earth_centre, EarthStreaming::ToWorld(world, {0.0, 0.0, 0.0}));
+            put(rt.ecef_x, EarthStreaming::DirToWorld(world, {1.0, 0.0, 0.0}));
+            put(rt.ecef_z, EarthStreaming::DirToWorld(world, {0.0, 0.0, 1.0}));
+            EarthStreaming::D3 moon;
+            if (EarthStreaming::MoonCentreEcef(EarthStreaming::Celestial().Sky(), moon))
+                put(rt.moon_centre, EarthStreaming::ToWorld(world, moon));
+        }
+    }
     rt.layer_fog_weather = {skySnap.weatherFog, skySnap.hasLandscape ? 1.0f : 0.0f,
                             skySnap.hasCamera ? 1.0f : 0.0f, earthLongitude}; // w: whole-world origin longitude
     // Cloud EVOLUTION offsets, on the same clock and the same wrap as the wind above (so they

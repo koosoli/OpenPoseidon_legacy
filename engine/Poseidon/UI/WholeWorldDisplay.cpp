@@ -44,6 +44,7 @@ struct Place
     const char* name;
     double latitude, longitude, altitude;
 };
+constexpr double MoonAltitude = 384400000.0;
 constexpr Place Places[] = {
     {"Swiss Alps, Jungfrau", 46.537, 7.962, 4500},
     {"Luxembourg City (prepared imagery)", 49.611, 6.130, 2000},
@@ -52,8 +53,12 @@ constexpr Place Places[] = {
     {"Manhattan, New York", 40.758, -73.985, 1500},
     {"Sognefjord, Norway", 61.150, 6.700, 3000},
     {"Big Island, Hawaii", 19.600, -155.500, 12000},
-    {"Desert Island (OFP), Bay of Biscay", 45.3809, -7.7453, 400},
+    // 600 m: the menu refuses Go below 500 m (the island's hill is 45 m; free flight starts over it).
+    {"Desert Island (OFP), Bay of Biscay", 45.3809, -7.7453, 600},
     {"Earth from orbit", 30.000, 10.000, 18000000},
+    // The moon's distance as the altitude: whole-world mode starts in orbit and free flight moves to the
+    // moon's surface (POSEIDON_EARTH_START_MOON, WorldSetup.cpp).
+    {"The Moon (surface)", 0.0, 0.0, MoonAltitude},
 };
 
 std::string Utf8(const std::filesystem::path& path)
@@ -165,6 +170,7 @@ class WholeWorldDisplay : public WholeWorldScreen
     EarthProviders::Config _config;
     int _imagery = 0, _elevation = 0, _selected = -1;
     bool _onFoot = false; // start as the soldier on the ground instead of the free-flight camera
+    bool _moon = false;   // this launch goes on to the moon's surface (free flight)
     bool _dayCycle = false; // test aid: one day per minute
     bool _editor = false; // open the mission editor (Plan mission) instead of playing
 
@@ -214,10 +220,11 @@ class WholeWorldDisplay : public WholeWorldScreen
             return !text.empty() && end && *end == 0 && std::isfinite(value);
         };
         double lat = 0, lon = 0, alt = 0;
+        const bool moon = parse(AltId, alt) && alt >= 300000000.0 && alt <= 450000000.0;
         if (!parse(LatId, lat) || !parse(LonId, lon) || !parse(AltId, alt) || std::abs(lat) > 84 ||
-            std::abs(lon) > 180 || alt < 500 || alt > 30000000)
+            std::abs(lon) > 180 || alt < 500 || (alt > 30000000 && !moon))
         {
-            Status("Latitude must be within +-84, longitude within +-180, altitude 500 m to 30,000 km.");
+            Status("Latitude must be within +-84, longitude within +-180, altitude 500 m to 30,000 km (or 384400000 for the moon).");
             return;
         }
         const std::string key = Text(KeyId);
@@ -239,8 +246,10 @@ class WholeWorldDisplay : public WholeWorldScreen
             return;
         }
         std::string error;
-        if (!Launch(cache, lat, lon, alt, error))
+        _moon = moon;
+        if (!Launch(cache, lat, lon, moon ? 20000000.0 : alt, error))
             Status(error);
+        _moon = false;
     }
 
     bool ParsePlace(double& lat, double& lon)
@@ -373,7 +382,7 @@ class WholeWorldDisplay : public WholeWorldScreen
         // streamed ground as it arrives (Man::Simulate); the near ground follows him as he moves.
         if (_editor)
             args.push_back("--test-editor");
-        else if (!_onFoot)
+        else if (!_onFoot || _moon)
             args.insert(args.end(), {"--test-world-freefly", "6400", "6400", Number(alt, 0), "30", orbit ? "-89.9" : "-20"});
         if (Foundation::AppConfig::Instance().DevMode())
             args.push_back("--dev"); // the Earth panel (Go to a place, clearance) lives in the dev panel
@@ -397,6 +406,7 @@ class WholeWorldDisplay : public WholeWorldScreen
         set("POSEIDON_EARTH_CACHE", cacheText);
         set("POSEIDON_EARTH_IMAGERY", std::filesystem::exists(nasa, ec) ? Utf8(nasa) : std::string());
         set("POSEIDON_EARTH_SURFACE", prepared ? "1" : "0");
+        set("POSEIDON_EARTH_START_MOON", _moon ? "1" : "0");
         const bool osm = _config.contentId == "overpass";
         set("POSEIDON_EARTH_CONTENT_OVERPASS", osm ? _config.contentUrl : std::string());
         set("POSEIDON_EARTH_BUILDINGS", osm ? "1" : "0");

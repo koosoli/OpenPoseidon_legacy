@@ -1,5 +1,6 @@
 #pragma once
 #include "EarthStreamingMode.hpp"
+#include "EarthMoonFrame.hpp"
 
 namespace Poseidon::EarthStreaming
 {
@@ -74,49 +75,62 @@ inline FlightPoint ConstrainFlight(FlightPoint previous, FlightPoint next, const
         FlightYAtAltitude(next.x, next.z, FlightAltitudeLimit));
     return next;
 }
-// The moon as a body free flight can reach: the same placement as sky.wgsl earth_moon_centre (the
-// topocentric ephemeris direction from the origin's ground, at the point 384,400 km from the Earth's
-// centre). The camera stops 100 m above its surface instead of flying into it.
-constexpr double MoonRadius = 1.7374e6;
-inline bool MoonCentre(double toMoonX, double toMoonY, double toMoonZ, double& cx, double& cy, double& cz)
+// The moon as a body free flight can reach (EarthMoonFrame.hpp): its centre in world coordinates of the
+// active frame -- from the ephemeris in the Earth frame, the fixed point (A, -R_moon, A) in the moon
+// frame. Free flight slows approaching it, levels against it once it is the nearer surface, and keeps
+// a little clearance above it.
+inline bool MoonCentreWorld(D3& centre)
 {
-    const double length = std::sqrt(toMoonX * toMoonX + toMoonY * toMoonY + toMoonZ * toMoonZ);
-    if (!std::isfinite(length) || length <= 0) return false;
-    const double dx = toMoonX / length, dy = toMoonY / length, dz = toMoonZ / length;
-    constexpr double distance = 3.844e8;
-    const double b = Earth::Radius * dy;
-    const double t = -b + std::sqrt(std::max(b * b - Earth::Radius * Earth::Radius + distance * distance, 0.0));
-    cx = CameraAnchor + dx * t; cy = dy * t; cz = CameraAnchor + dz * t;
+    if (MoonFrameActive())
+    {
+        centre = {double(Earth::Anchor), -MoonRadius, double(Earth::Anchor)};
+        return true;
+    }
+    D3 moon;
+    if (!MoonCentreEcef(Celestial().Sky(), moon)) return false;
+    const auto location = GetLocation();
+    centre = ToWorld(EarthBasis(location.latitude, location.longitude), moon);
     return true;
 }
-inline double MoonClearance(FlightPoint p, double toMoonX, double toMoonY, double toMoonZ)
+inline double MoonClearance(FlightPoint p)
 {
-    double cx, cy, cz;
-    if (!MoonCentre(toMoonX, toMoonY, toMoonZ, cx, cy, cz)) return 1e12;
-    return std::sqrt((p.x - cx) * (p.x - cx) + (p.y - cy) * (p.y - cy) + (p.z - cz) * (p.z - cz)) - MoonRadius;
+    D3 c;
+    if (!MoonCentreWorld(c)) return 1e12;
+    return Length(D3{p.x, p.y, p.z} - c) - MoonRadius;
+}
+// Height above the Earth's sea level, in either frame.
+inline double EarthAltitude(FlightPoint p)
+{
+    if (!MoonFrameActive()) return FlightAltitude(p);
+    const auto location = GetLocation();
+    Basis world;
+    if (!WorldBasis(location.latitude, location.longitude, world)) return 1e12;
+    return Length(ToEcef(world, p.x, p.y, p.z)) - Earth::Radius;
 }
 // "Up" for free flight: the Earth's radial up, or the moon's once the moon is the nearer surface, so the
 // camera levels against the ground it is over and stands upright on the moon.
-inline Earth::Direction FlightUpNear(FlightPoint p, double toMoonX, double toMoonY, double toMoonZ)
+inline Earth::Direction FlightUpNear(FlightPoint p)
 {
-    double cx, cy, cz;
-    if (MoonCentre(toMoonX, toMoonY, toMoonZ, cx, cy, cz))
+    D3 c;
+    if (MoonCentreWorld(c))
     {
-        const double vx = p.x - cx, vy = p.y - cy, vz = p.z - cz, d = std::sqrt(vx * vx + vy * vy + vz * vz);
-        if (std::isfinite(d) && d > 0 && d - MoonRadius < FlightAltitude(p)) return {vx / d, vy / d, vz / d};
+        const D3 v = D3{p.x, p.y, p.z} - c;
+        const double d = Length(v);
+        if (std::isfinite(d) && d > 0 && (MoonFrameActive() || d - MoonRadius < FlightAltitude(p)))
+            return {v.x / d, v.y / d, v.z / d};
     }
     return FlightUp(p);
 }
-inline FlightPoint KeepOutsideMoon(FlightPoint p, double toMoonX, double toMoonY, double toMoonZ)
+inline FlightPoint KeepOutsideMoon(FlightPoint p, double clearance)
 {
-    double cx, cy, cz;
-    if (!MoonCentre(toMoonX, toMoonY, toMoonZ, cx, cy, cz)) return p;
-    constexpr double keepOut = MoonRadius + 100.0;
-    const double vx = p.x - cx, vy = p.y - cy, vz = p.z - cz;
-    const double d = std::sqrt(vx * vx + vy * vy + vz * vz);
+    D3 c;
+    if (!MoonCentreWorld(c)) return p;
+    const double keepOut = MoonRadius + clearance;
+    const D3 v = D3{p.x, p.y, p.z} - c;
+    const double d = Length(v);
     if (!(d < keepOut) || d <= 0) return p;
-    const double k = keepOut / d;
-    return {float(cx + vx * k), float(cy + vy * k), float(cz + vz * k)};
+    const D3 out = c + v * (keepOut / d);
+    return {float(out.x), float(out.y), float(out.z)};
 }
 inline FlightPoint ZoomFlight(FlightPoint previous, float wheelSteps, const GroundPatch* ground, uint64_t revision)
 {
