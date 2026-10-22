@@ -230,7 +230,10 @@ bool Man::UpperBodyPoint(int level, int index, Vector3& res) const
     const std::vector<Matrix4>* palette = UpperBodyPalette();
     if (!palette || index < 0)
         return false;
-    const AnimationRTWeight& wg = Type()->GetWeights()[level][index];
+    const AnimationRTWeights& weights = Type()->GetWeights()[level];
+    if (index >= weights.Size()) // CRASH-20261022: the level's weights were never built
+        return false;
+    const AnimationRTWeight& wg = weights[index];
     if (wg.Size() <= 0)
         return false;
     Shape* shape = _shape->LevelOpaque(level);

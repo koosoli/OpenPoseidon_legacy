@@ -848,7 +848,11 @@ void AnimationRT::CombineTransform(const WeightInfo& weights, LODShape* lShape, 
 void AnimationRT::TransformPoint(Vector3& pos, const AnimationRTWeights& lWeights, Shape* shape, Matrix4Par trans,
                                  const BlendAnimInfo* blend, int nBlend, int index)
 {
-    if (index < 0)
+    // CRASH-20261022: a level whose weights were never built has an EMPTY table, and indexing it
+    // read through a null array (owner crash in a mission intro: Soldier::Soldier ->
+    // RecalcGunTransform -> GetWeaponCenter -> AnimatePoint -> TransformPoint). No weights =
+    // nothing to move.
+    if (index < 0 || index >= lWeights.Size())
     {
         return;
     }
@@ -891,7 +895,11 @@ void AnimationRT::TransformPoint(Vector3& pos, const AnimationRTWeights& lWeight
 void AnimationRT::TransformMatrix(Matrix4& mat, const AnimationRTWeights& lWeights, Shape* shape, Matrix4Par trans,
                                   const BlendAnimInfo* blend, int nBlend, int index)
 {
-    if (index < 0)
+    // CRASH-20261022: a level whose weights were never built has an EMPTY table, and indexing it
+    // read through a null array (owner crash in a mission intro: Soldier::Soldier ->
+    // RecalcGunTransform -> GetWeaponCenter -> AnimatePoint -> TransformPoint). No weights =
+    // nothing to move.
+    if (index < 0 || index >= lWeights.Size())
     {
         return;
     }
@@ -1021,6 +1029,10 @@ Vector3 AnimationRT::ApplyMatricesPoint(const AnimationRTWeights& lWeights, LODS
     // int npos=shape->NPos();
     PoseidonAssert(lShape->BoundingCenter().SquareSize() < 1e-10);
     // Vector3Val bc=lShape->BoundingCenter();
+    if (pointIndex < 0 || pointIndex >= lWeights.Size()) // CRASH-20261022: weights never built
+    {
+        return shape->Pos(pointIndex < 0 ? 0 : pointIndex);
+    }
     const AnimationRTWeight& wg = lWeights[pointIndex];
     int wsize = wg.Size();
     // note: animation is calculated before BC centering
@@ -1374,6 +1386,10 @@ Vector3 AnimationRT::Point(const WeightInfo& lWeights, LODShape* lShape, int lev
     }
 
     const AnimationRTWeights& weights = lWeights[level];
+    if (index >= weights.Size()) // CRASH-20261022: the level's weights were never built
+    {
+        return shape->Pos(index);
+    }
     const AnimationRTWeight& wg = weights[index];
     if (wg.Size() <= 0)
     {

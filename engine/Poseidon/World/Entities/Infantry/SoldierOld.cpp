@@ -2939,7 +2939,10 @@ Vector3 Man::AnimatePoint(int level, int index) const
     const ManType* type = Type();
     Vector3 res = VZero;
     const WeightInfo& rtw = type->GetWeights();
-    if (held && index >= 0 &&
+    // CRASH-20261022: a level whose weights were never built has an empty table; every lookup
+    // below indexes it, so treat such a point as unweighted (the held pose cannot move it).
+    const bool weighted = index >= 0 && index < rtw[level].Size();
+    if (held && weighted &&
         ((_corpsePosePrimary.Valid() && !_corpsePosePrimary.SupportsPoint(rtw[level][index])) ||
          (_corpsePoseSecondary.Valid() && !_corpsePoseSecondary.SupportsPoint(rtw[level][index]))))
     {
@@ -2951,7 +2954,7 @@ Vector3 Man::AnimatePoint(int level, int index) const
         if (!held) return anim->Point(rtw, _shape, level, time, index, _shape->AnimationOrigin());
         if (index < 0) return Vector3(VZero);
         Shape* shape = _shape->LevelOpaque(level);
-        if (rtw[level][index].Size() <= 0) return Vector3(shape->Pos(index));
+        if (!weighted || rtw[level][index].Size() <= 0) return Vector3(shape->Pos(index));
         shape->SaveOriginalPos();
         return pose.Point(rtw[level][index], shape->OrigPos(index), shape->Pos(index));
     };
