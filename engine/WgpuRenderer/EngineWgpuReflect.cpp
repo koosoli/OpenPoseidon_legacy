@@ -37,6 +37,7 @@
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <mutex>
 #include <string>
@@ -210,6 +211,21 @@ void FillReflectLanes(WgrDraw3D& d, const Object* owner, const Texture* texture,
             }
         }
         it = cache.insert_or_assign(key, CacheValue{textureName, RM::Classify(in)}).first;
+        // WGR_REFLECT_LOG=1 (or any debug view): one line per newly classified section, so a
+        // wrong colour in the debug view can be traced to its texture, material and rule. The
+        // first test read whole cars as lamps and mirrors; the pictures alone could not say why.
+        static const bool logClasses = EnvInt("WGR_REFLECT_LOG") != 0 || debugView != 0;
+        static std::atomic<int> logged{0};
+        if (logClasses && logged.fetch_add(1, std::memory_order_relaxed) < 4000)
+        {
+            const RM::Params& c = it->second.params;
+            LOG_INFO(Graphics,
+                     "REFLECT class={} src={} r={:.2f} f0={:.2f} metal={:.1f} coat={:.1f} veh={} mil={} env={} "
+                     "ps='{}' spec={:.2f}/{:.0f} owner='{}' tex='{}' mat='{}'",
+                     int(c.cls), int(c.source), c.roughness, c.f0, c.metal, c.clearCoat, int(isVehicle), int(military),
+                     int(in.hasEnvMap), std::string(in.pixelShader), in.specular, in.specularPower,
+                     owner ? owner->GetDebugName().Data() : "-", std::string(in.texture), std::string(in.material));
+        }
     }
     const RM::Params& p = it->second.params;
     d.mat_reflect0 = {p.roughness, p.f0, p.metal, p.clearCoat};
