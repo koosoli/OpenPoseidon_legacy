@@ -939,6 +939,9 @@ protected:
 	void UnloadSound() override;
 
 	virtual float GetEngineVol( float &freq ) const {freq=1;return 0;}
+	// (OP) the lights stay as they were left when nobody is at the controls (a boat with a deck: her helmsman
+	// steps out onto it, owner 2026-10-22); otherwise they go off, as in OFP
+	virtual bool LightsStayUnmanned() const {return false;}
 	virtual float GetEnvironVol( float &freq ) const {freq=1;return 0;}
 	virtual Vector3 GetEnginePos() const; // sound source position in model coord
 	virtual Vector3 GetEnvironPos() const; // sound source position in model coord

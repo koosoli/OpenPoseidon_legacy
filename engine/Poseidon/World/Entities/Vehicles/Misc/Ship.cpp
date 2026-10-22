@@ -1760,12 +1760,21 @@ Vector3 Ship::PlaceGetInPos(Person* person, Vector3Par memPos, Vector3Par upos) 
     Man* man = person ? dyn_cast<Man>(person) : nullptr;
     bool swims = man && man->CanSwim();
     bool swimming = person && person->IsSwimming();
+    static const bool doorDiag = std::getenv("POSEIDON_BOAT_DIAG") != nullptr;
+    if (doorDiag)
+        LOG_INFO(Physics, "Boat door for {}: swimming {} in this boat {}", person ? (const char*)person->GetDebugName() : "-",
+                 swimming, person && person->Brain() && person->Brain()->GetVehicleIn() == this);
     // A boat with a deck (a roadway LOD): whoever is not swimming boards from and steps out onto the deck
     // at the door, which moves with the boat; a swimmer still climbs in from where he is in the water.
     if (!swimming && GLandscape && _shape && _shape->FindRoadwayLevel() >= 0)
     {
         Object* deck = nullptr;
         const float y = GLandscape->RoadSurfaceY(Vector3(memPos) + VUp * 0.5f, nullptr, nullptr, nullptr, &deck);
+        static const bool diag = std::getenv("POSEIDON_BOAT_DIAG") != nullptr;
+        if (diag)
+            LOG_INFO(Physics, "Boat door: {} at {:.2f},{:.2f},{:.2f} deck y {:.2f} support {} (this boat: {})",
+                     person ? (const char*)person->GetDebugName() : "-", memPos.X(), memPos.Y(), memPos.Z(), y,
+                     deck ? (const char*)deck->GetDebugName() : "none", deck == this);
         if (deck == this)
         {
             Vector3 pos = memPos;
@@ -1909,7 +1918,10 @@ void Ship::KeyboardPilot(AIUnit* unit, float deltaT)
         CancelStop();
     }
 
-    if (_engineOff)
+    // The engine starts when the helmsman gives it throttle, as a car's does (Car::KeyboardPilot). It was started
+    // here every frame whatever he did, so "Engine off" from the action menu was undone on the next frame (owner,
+    // 2026-10-22: "turning tidewater boat engine off, does not turn it off").
+    if (_engineOff && fabs(forward) > 0.05f)
     {
         EngineOn();
     }

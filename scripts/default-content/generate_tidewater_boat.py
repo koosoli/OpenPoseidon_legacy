@@ -871,8 +871,15 @@ def nav_lights(meshes):
     green = pos[(col[:, 1] > 0.8) & (col[:, 0] < 0.3)]
     white = pos[(col[:, 0] > 0.8) & (col[:, 1] > 0.8)]
     mast, stern = white[white[:, 1] > white[:, 1].max() - 0.2], white[white[:, 2] < white[:, 2].min() + 0.2]
-    return {"cerveny pozicni": [red.mean(axis=0)], "zeleny pozicni": [green.mean(axis=0)],
-            "bily pozicni": [mast.mean(axis=0), stern.mean(axis=0)]}
+    # Each light 8 cm in front of its lens, not at the lens's centre: the lens is drawn into the light's own shadow
+    # map, and a light inside a closed caster is shut in on every side but for thin wedges -- which crossed the
+    # wheelhouse as red and green bands that jumped as the boat moved (owner, 2026-10-22: "the lights are somehow
+    # glitchin in the wheel house"). Red faces port (+x), green starboard, the masthead light up, the stern light aft.
+    out = 0.08
+    return {"cerveny pozicni": [np.array([red[:, 0].max() + out, red[:, 1].mean(), red[:, 2].mean()])],
+            "zeleny pozicni": [np.array([green[:, 0].min() - out, green[:, 1].mean(), green[:, 2].mean()])],
+            "bily pozicni": [np.array([mast[:, 0].mean(), mast[:, 1].max() + out, mast[:, 2].mean()]),
+                             np.array([stern[:, 0].mean(), stern[:, 1].mean(), stern[:, 2].min() - out])]}
 
 
 def work_lights(meshes):
@@ -887,6 +894,7 @@ def work_lights(meshes):
         if sel.any():
             p, n = pos[sel].mean(axis=0), nrm[sel].mean(axis=0)
             n = n / max(np.linalg.norm(n), 1e-6)
+            p = p + n * 0.1  # in front of the lamp's glass, outside the boat's own geometry (see nav_lights)
             out[name] = [p]
             out[name + "_dir"] = [p + n]
     return out
@@ -992,9 +1000,13 @@ class CfgVehicles
 				brightness = 0.6;
 			}};
 		}};
-		// the nav lights (memory cerveny / zeleny / bily pozicni) are real lamps: they light the deck and the water
-		// round the boat (VehicleAI.cpp); on with the boat's lights
-		markerLightScale = 15;
+		// the nav lights (memory cerveny / zeleny / bily pozicni): shielded lamps that shine out over the water, not
+		// onto their own boat -- their lenses glow by themselves (shining faces) and the deck floodlight lights the
+		// deck, so they light nothing. Lighting, they lit the wheelhouse from the mast: through its roof (night
+		// exposure makes even OFP's stock marker visible at 2 m), or, when the frame's four local shadows reached them,
+		// in bands that jumped frame to frame as those shadows went from light to light (owner, 2026-10-22: "the lights
+		// are somehow glitchin in the wheel house")
+		markerLightScale = 0;
 		class TransportMagazines {{}};
 		class TidewaterHull
 		{{

@@ -1857,7 +1857,10 @@ void Transport::Simulate(float deltaT, SimulationImportance prec)
 
     if (!CommanderUnit() || CommanderUnit()->IsInCargo())
     {
-        _pilotLight = false;
+        // nobody at the controls: OFP switches the lights off -- a parked car goes dark. A boat keeps hers as they
+        // were left (LightsStayUnmanned).
+        if (!LightsStayUnmanned())
+            _pilotLight = false;
     }
     else if (CommanderUnit()->HasAI())
     {
@@ -1898,8 +1901,9 @@ void Transport::Simulate(float deltaT, SimulationImportance prec)
             _markersOn = Glob.time - GRandGen.RandomValue();
             static const bool diag = std::getenv("POSEIDON_BOAT_DIAG") != nullptr;
             if (diag)
-                LOG_INFO(World, "{}: marker lights on ({} steady, {} blinking)", (const char*)GetDebugName(),
-                         _markers.Size(), _markersBlink.Size());
+                LOG_INFO(World, "{}: marker lights on ({} steady, {} blinking), first brightness {}", (const char*)GetDebugName(),
+                         _markers.Size(), _markersBlink.Size(),
+                         GetType()->_lights.Size() > 0 ? GetType()->_lights[0].brightness : -1.0f);
         }
     }
     else

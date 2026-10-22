@@ -464,7 +464,18 @@ bool Man::UpdateSwimming()
         // put on the water (a mission's placement, out of a boat): over a deep spot, close above the surface, not
         // standing on anything and not already dropping fast -- he swims at once, with no fall
         const float vy = Speed().Y();
-        const bool placed = !_objectContact && pos.Y() < level + SwimPlacedAbove && vy < 0.5f && vy > -FallStartSpeed;
+        bool placed = !_objectContact && pos.Y() < level + SwimPlacedAbove && vy < 0.5f && vy > -FallStartSpeed;
+        if (placed && Ship::DeckShips() > 0)
+        {
+            // ...but not a man just stepped out onto a boat's deck: the sole is a third of a metre over the sea, and
+            // in his first frame there he is neither a rider yet (OnPlatform) nor in contact, so he was "placed on
+            // the water" and swam off the deck (owner, 2026-10-22: "when exiting, i do not want to end up in the
+            // water but on deck of the boat")
+            Object* support = nullptr;
+            const float deckY = GLandscape->RoadSurfaceY(pos + VUp * 0.5f, nullptr, nullptr, nullptr, &support);
+            if (support && dyn_cast<Ship>(support) && std::fabs(pos.Y() - deckY) < 0.5f)
+                placed = false;
+        }
         // (a man standing on a boat's deck is neither: the deck is his ground, however low over the sea)
         if (IsDead() || _ladderBuilding || depth < SwimStartDepth || OnPlatform() ||
             (level - pos.Y() < SwimStartDepth - 0.1f && !placed) || GLandscape->InTerrainHole(pos.X(), pos.Z()))

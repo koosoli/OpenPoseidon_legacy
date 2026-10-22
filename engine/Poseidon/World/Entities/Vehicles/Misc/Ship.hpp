@@ -176,6 +176,8 @@ class Ship: public Transport
 	void Simulate( float deltaT, SimulationImportance prec ) override;
 
 	float GetEngineVol( float &freq ) const override;
+	// a boat with a deck keeps her lights as her helmsman left them when he steps out onto it or moves to a seat
+	bool LightsStayUnmanned() const override {return _hasDeck;}
 	float GetEnvironVol( float &freq ) const override;
 
 	Matrix4 InsideCamera( CameraType camType ) const override;
