@@ -2174,20 +2174,28 @@ impl Terrain {
             let dy = (cam[1] - self.node_max_height(n)).max(0.0);
             dx * dx + dz * dz + dy * dy >= (TW_NEAR_END + 1.0) * (TW_NEAR_END + 1.0)
         };
-        let mut start = first_node;
-        let mut bound: Option<bool> = None;
-        while start < end {
-            let far_run = is_far(start);
-            let mut stop = start + 1;
-            while stop < end && is_far(stop) == far_run {
-                stop += 1;
+        // Far runs first, then near runs: one pipeline switch per batch however the LOD order
+        // interleaves them (alternating cost more than the far pipeline saved at low altitude).
+        // Order-independent: the depth test decides visibility, and where both pipelines could
+        // shade one pixel they compute the same value.
+        for far_pass in [true, false] {
+            let mut bound = false;
+            let mut start = first_node;
+            while start < end {
+                let far_run = is_far(start);
+                let mut stop = start + 1;
+                while stop < end && is_far(stop) == far_run {
+                    stop += 1;
+                }
+                if far_run == far_pass {
+                    if !bound {
+                        pass.set_pipeline(if far_pass { far_pipeline } else { pipeline });
+                        bound = true;
+                    }
+                    pass.draw_indexed(0..self.grid_index_count, 0, start..stop);
+                }
+                start = stop;
             }
-            if bound != Some(far_run) {
-                pass.set_pipeline(if far_run { far_pipeline } else { pipeline });
-                bound = Some(far_run);
-            }
-            pass.draw_indexed(0..self.grid_index_count, 0, start..stop);
-            start = stop;
         }
     }
 
