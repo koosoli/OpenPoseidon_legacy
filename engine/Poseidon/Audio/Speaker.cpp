@@ -61,7 +61,13 @@ static RString UndefinedWordClip(const RString& dir, const RString& id)
 {
     const RString own = dir + id + RString(".wss");
     if (QIFStreamB::FileExist(own))
+    {
+        static std::set<std::string> ownLogged;
+        if (ownLogged.insert((const char*)own).second)
+            LOG_INFO(Audio, "Radio word '{}' is not in CfgVoice >> Words: spoken from {}", (const char*)id,
+                     (const char*)own);
         return own;
+    }
     static std::map<std::string, std::string> shared;
     const std::string key = (const char*)id;
     auto it = shared.find(key);
