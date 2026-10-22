@@ -775,7 +775,9 @@ bool Man::ReloadMagazine(int slotIndex, int iMagazine)
             context->param2 = magazine->_id;
             context->param3 = muzzleID;
 
-            reloadOk = unit->GetPerson()->PlayAction(magazine->_type->_reloadAction, context);
+            // RELOAD-LAYER: the player's reload from the action menu keeps him free to move.
+            reloadOk = StartReloadOnUpperBody(magazine->_type, context, false, false) ||
+                       unit->GetPerson()->PlayAction(magazine->_type->_reloadAction, context);
             if (reloadOk)
             {
                 PlayReloadMagazineSound(slotIndex, muzzle);

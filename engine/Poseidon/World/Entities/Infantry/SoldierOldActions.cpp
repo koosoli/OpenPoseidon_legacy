@@ -229,10 +229,9 @@ void Soldier::KeyboardPilot(float deltaT, SimulationImportance prec)
                 context->param3 = muzzleID;
                 // on the move (standing or crouched) the reload plays on the upper body and he keeps walking
                 // (SoldierOldUpperBody.cpp); standing still or prone it is the full-body move, as before
-                const bool moving = (fabs(fbWanted) > 0.01f || fabs(rlWanted) > 0.01f) && !IsDown() && !IsSwimming();
-                const ActionMap* actions = Type()->GetActionMap(_primaryMove.id);
-                const MoveId upper = moving && actions ? actions->GetAction(magazine->_type->_reloadAction) : MoveIdNone;
-                if (upper != MoveIdNone && StartUpperBodyAction(upper, context))
+                // (RELOAD-LAYER: standing still too, so he can start moving while he reloads)
+                const bool moving = fabs(fbWanted) > 0.01f || fabs(rlWanted) > 0.01f;
+                if (StartReloadOnUpperBody(magazine->_type, context, false, moving))
                 {
                     PlayReloadMagazineSound(_currentWeapon, slot._muzzle);
                 }

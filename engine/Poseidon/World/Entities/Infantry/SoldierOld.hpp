@@ -699,6 +699,9 @@ class Man: public Person
 	mutable MoveId _upperPaletteMoves[2] = {MoveIdNone, MoveIdNone};
 	mutable bool _upperPaletteValid = false;
 	bool StartUpperBodyAction(MoveId move, ActionContextBase* context);
+	// RELOAD-LAYER: the player's reload on the upper body (standing or crouched, not swimming), so he
+	// can move while he reloads. `requireMoving` keeps the first rule (only when already moving).
+	bool StartReloadOnUpperBody(const MagazineType* type, ActionContextBase* context, bool requireMoving, bool moving);
 	void SimulateUpperBodyAction(float deltaT);
 	bool UpperBodyLayerActive() const {return _upperMove != MoveIdNone && _upperFactor > 0.001f;}
 	bool PoseLayersActive() const {return UpperBodyLayerActive() || _landAge >= 0;}

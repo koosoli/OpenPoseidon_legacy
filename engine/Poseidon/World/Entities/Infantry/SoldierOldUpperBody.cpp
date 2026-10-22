@@ -39,6 +39,28 @@ const char* const LowerBones[] = {"pzadek", "lzadek", "pstehno", "lstehno", "pho
                                   "lchodidlo", "pprsty", "lprsty"};
 } // namespace
 
+// RELOAD-LAYER (2026-10-22, owner: "when I click on reload the rifle from the context menu I can no
+// longer move while the player is doing that"). The upper-body reload was used only for the reload
+// KEY pressed while already moving; the action menu's reload (Man::ReloadMagazine) and the key
+// pressed standing still played the full-body move, which holds him in place until it ends. For the
+// player, standing or crouched, every reload now plays on the upper body, so he can start or keep
+// moving. Prone, swimming and AI soldiers reload as before. POSEIDON_RELOAD_UPPER_ALWAYS=0 = only
+// the reload key while moving (the first rule).
+bool Man::StartReloadOnUpperBody(const MagazineType* type, ActionContextBase* context, bool requireMoving, bool moving)
+{
+    static const bool always = [] {
+        const char* v = std::getenv("POSEIDON_RELOAD_UPPER_ALWAYS");
+        return !(v && v[0] == '0');
+    }();
+    if (!type || !QIsManual() || IsDown() || IsSwimming())
+        return false;
+    if ((requireMoving || !always) && !moving)
+        return false;
+    const ActionMap* actions = Type()->GetActionMap(_primaryMove.id);
+    const MoveId upper = actions ? actions->GetAction(type->_reloadAction) : MoveIdNone;
+    return upper != MoveIdNone && StartUpperBodyAction(upper, context);
+}
+
 bool Man::StartUpperBodyAction(MoveId move, ActionContextBase* context)
 {
     if (move == MoveIdNone || !Type()->GetAnimation(move) || _upperMove != MoveIdNone)
