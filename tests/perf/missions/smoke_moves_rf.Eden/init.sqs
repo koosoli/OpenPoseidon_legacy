@@ -1,0 +1,11 @@
+; Smoke test on Arma Reforger's Everon (corner-peek session, 2026-10-20): leaning, jumping, landing, reloading on the
+; move. Launch with --test-world <Reforger addons> --reforger-world worlds/eden --test-world-pos 5176 3985: the engine
+; moves the player to the village once the mission reaches gameplay, and the two unarmed targets follow him here,
+; 25 m ahead, one to each side. No swimming here (the OFP map's smoke_moves.Eden has the swim teleport).
+setViewDistance 1200
+~4
+_p = getPos smokePlayer
+smokeTarget1 setPos [(_p select 0) - 12, (_p select 1) + 25, 0]
+smokeTarget2 setPos [(_p select 0) + 12, (_p select 1) + 25, 0]
+hint "SMOKE TEST (Reforger Everon)\nQ / E: lean (hold, or tap to toggle)\nSpace: jump (run + Space: leap)\nR while walking: reload on the move\nTwo unarmed targets 25 m north\nControls page: Options > Controls > On foot"
+exit

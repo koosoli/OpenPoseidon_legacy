@@ -1072,6 +1072,12 @@ void Man::PrepareBasePose(Matrix4Array& matrices) const
             else anim->PrepareMatrices(matrices, _secondaryTime, 1 - _primaryFactor);
         }
     }
+    // an action played on the upper body over the legs' move (a reload on the walk: SoldierOldUpperBody.cpp)
+    if (!held)
+    {
+        ApplyUpperBodyLayer(matrices);
+        ApplyLandingLayer(matrices); // a soft touchdown's give at the knees (SoldierOldUpperBody.cpp)
+    }
     // The RTMs pose the source model's space; an Arma 1 model is stored around its
     // bounding centre (LODShape::AnimationOrigin). Pose about the source origin and
     // stay in the stored coordinates: M'(v) = M(v - o) + o. Zero for OFP shapes, so
@@ -2811,6 +2817,9 @@ void Man::AnimateMatrix(Matrix4& mat, const AnimationRTWeight& wgt) const
         ClearCorpsePose();
         held = false;
     }
+    // the upper-body action layer: the proxies (the rifle in his hands) follow the layered pose
+    if (!held && UpperBodyMatrix(mat, wgt))
+        return;
     const ManType* type = Type();
     // Arma 1 shapes: pose about the source origin (see PrepareBasePose).
     const Vector3 origin = held ? VZero : _shape->AnimationOrigin();
@@ -2961,6 +2970,13 @@ Vector3 Man::AnimatePoint(int level, int index) const
         {
             res += point(_corpsePoseSecondary, anim, _secondaryTime) * (1 - _primaryFactor);
         }
+    }
+    // the upper-body action layer moves the eye, the muzzle and the hands' points with the drawn body
+    if (!held)
+    {
+        Vector3 layered;
+        if (UpperBodyPoint(level, index, layered))
+            res = layered;
     }
 
     if (type->_aimingAxisPoint >= 0 && !_gunTransIdent)

@@ -728,6 +728,10 @@ void Man::StartActionProcessing(const UIAction& action, AIUnit* unit)
 
 bool Man::IsActionInProgress(MoveFinishF action) const
 {
+    if (_upperContext && _upperContext->function == action)
+    {
+        return true; // played on the upper body (SoldierOldUpperBody.cpp)
+    }
     if (_primaryMove.context && _primaryMove.context->function == action)
     {
         return true;

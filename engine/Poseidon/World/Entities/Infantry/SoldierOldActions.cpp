@@ -166,6 +166,12 @@ void Soldier::KeyboardPilot(float deltaT, SimulationImportance prec)
         _walkToggle = !_walkToggle;
     }
 
+    // jump (SoldierOldJump.cpp): Space on foot
+    if (input.GetActionToDo(UAJump))
+    {
+        TryJump();
+    }
+
     float fbWanted = ((input.GetMoveFastForward() > 0) * 2.0f + (input.GetMoveForward() > 0) * 1.0f +
                       (input.GetMoveSlowForward() > 0) * 0.5f + (input.GetMoveBack() > 0) * -1.0f);
 
@@ -221,7 +227,16 @@ void Soldier::KeyboardPilot(float deltaT, SimulationImportance prec)
                 context->param = magazine->_creator;
                 context->param2 = magazine->_id;
                 context->param3 = muzzleID;
-                if (PlayAction(magazine->_type->_reloadAction, context))
+                // on the move (standing or crouched) the reload plays on the upper body and he keeps walking
+                // (SoldierOldUpperBody.cpp); standing still or prone it is the full-body move, as before
+                const bool moving = (fabs(fbWanted) > 0.01f || fabs(rlWanted) > 0.01f) && !IsDown() && !IsSwimming();
+                const ActionMap* actions = Type()->GetActionMap(_primaryMove.id);
+                const MoveId upper = moving && actions ? actions->GetAction(magazine->_type->_reloadAction) : MoveIdNone;
+                if (upper != MoveIdNone && StartUpperBodyAction(upper, context))
+                {
+                    PlayReloadMagazineSound(_currentWeapon, slot._muzzle);
+                }
+                else if (PlayAction(magazine->_type->_reloadAction, context))
                 {
                     PlayReloadMagazineSound(_currentWeapon, slot._muzzle);
                 }
@@ -326,9 +341,11 @@ void Soldier::KeyboardPilot(float deltaT, SimulationImportance prec)
         wantSlow = _walkToggle || GWorld->GetCameraTypeWanted() == CamGunner;
     }
 
-    // Sinkhole W4: swimming, the stance keys dive, rise and sink instead (SoldierOldSwim.cpp)
+    // Sinkhole W4: swimming, the swim keys dive, rise and sink (SoldierOldSwim.cpp). They have actions of their own
+    // (Controls > on foot: Dive Z / Page Down, Surface Q / Page Up), sharing keys with the stance and lean keys,
+    // which do nothing in the water.
     const bool swimming = IsSwimming();
-    SetSwimVerticalWanted(swimming ? input.GetMoveUp() - input.GetMoveDown() : 0.0f);
+    SetSwimVerticalWanted(swimming ? input.GetAction(UASurface) - input.GetAction(UADive) : 0.0f);
     if (!swimming && input.GetMoveUp() > 0.1f)
     {
         selAction = ManActUp;
@@ -2260,7 +2277,8 @@ float Man::ValueTest(TestValueTimed func, float defValue) const
 
 bool Man::DisableWeapons() const
 {
-    return WeaponsDisabled();
+    // an action on the upper body (a reload on the walk) has the weapon in the hands, as its full-body move would
+    return WeaponsDisabled() || _upperMove != MoveIdNone;
 }
 
 bool Man::EnableMissile() const

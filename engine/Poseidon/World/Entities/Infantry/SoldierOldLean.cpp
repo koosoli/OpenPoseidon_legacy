@@ -35,9 +35,17 @@ namespace Poseidon
 
 namespace
 {
-constexpr float kLeanAngle = 0.33f;       // upper-body roll at full lean (19 degrees)
-constexpr float kLeanShift = 0.12f;       // sideways hip shift at full lean, metres
-constexpr float kLeanPivotDrop = 0.50f;   // the roll pivot sits this far below the aiming axis
+// The aiming selection weights the transform 1 on the arms, shoulders and head, 0.9 on the chest, 0.5 mid-spine and
+// 0.2 low in the back (CfgMovesMC BlendAnims aimingDefault), and the aiming axis ("osa mireni") rides the lower back.
+// The first version pivoted 0.5 m under that axis (at the thighs) and shifted 0.12 m sideways: spread over those
+// weights it slid the chest sideways far more than it tilted it, and because the rifle stance stands him side-on to
+// the aim, one side of the lean folded him forward over the rifle like a plank (owner's smoke test, 2026-10-20: worse
+// leaning right). Reproduced and compared on the real mesh with the engine's own blend (Blender, linear-blend skinning
+// of (f*G + (1-f)*I) per bone): pivoting just under the axis with a small shift bends the spine instead, at about half
+// the head travel (0.16-0.19 m standing and crouched, against 0.32-0.35 m).
+constexpr float kLeanAngle = 0.36f;     // upper-body roll at full lean (21 degrees)
+constexpr float kLeanShift = 0.05f;     // sideways shift at full lean, metres
+constexpr float kLeanPivotDrop = 0.20f; // the roll pivot sits this far below the aiming axis
 constexpr float kLeanRate = 4.0f;         // full lean in a quarter second
 constexpr float kLeanTapTime = 0.25f;     // a shorter press latches the lean
 constexpr float kLeanHeadRadius = 0.15f;  // clearance kept between the eye and a wall

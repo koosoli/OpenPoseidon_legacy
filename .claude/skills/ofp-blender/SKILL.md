@@ -52,6 +52,41 @@ P3D/RTM/PAA codec: extend the DLL's C API and `p3d_lib.py`.
 * Scripted moves: `scripts/swim/dive_moves.py` shows the pattern (key poses as channels, Catmull-Rom curves, hands and
   feet trailing, baked to every frame, joined exactly to the moves before and after).
 
+## New moves from outside clips (retarget + compare)
+
+The owner's rule (2026-10-20): the stock moves are good; outside motion is for moves the game never had (a jump,
+getting into a vehicle, ...) or for the swim pack. Sidebar > Poseidon > New Moves from Clips, or in Python
+(`io_import_p3d.retarget`, `io_import_p3d.compare`):
+
+```python
+from io_import_p3d import retarget, compare
+src, clip = retarget.import_glb(r"<dir>\UAL1_Standard.glb", "Jump_Start")   # every clip becomes an action
+act = retarget.retarget(src, clip, "jump", keep_from="fall", keep_bones=retarget.ARMS_AND_RIFLE)
+compare.add_row(0.0, [("jump", 1.33, "NEW", "Quaternius Jump_Start")])        # or CURRENT + CANDIDATE pairs
+```
+
+* Sources and licences: Quaternius' Universal Animation Library (quaternius.itch.io, the free Standard zip, 43 clips,
+  CC0; ActionForge serves the same clips) and the CMU mocap database are fine. Not Mixamo (no redistributing the
+  motion), not another game's moves, and a generative model only after reading that model's licence. Record the source
+  in the pack's README and in CREDITS.md (Animation sources).
+* Bone names are UE-mannequin (`pelvis`, `spine_01..03`, `neck_01`, `head`, `clavicle/upperarm/lowerarm/hand`,
+  `thigh/calf/foot/ball`, `_l/_r`); `retarget.MAP` maps them, case-insensitive. Root motion is dropped (the game moves
+  the man by the move's step): import the library's version without root motion.
+* **Check the feet against the floor before shipping.** The game's floor is z = 0 of the rig: a stock move's lowest
+  foot point sits at ~0.02 (`anim\sbeh0l.rtm` -0.01..0.20, `anim\sdoskok.rtm` ~0). The rig's *rest* pose is not on it
+  (feet ~1.06 m below), and comparison rows in Blender look fine either way -- the first jump moves shipped with the
+  man sunk to the waist in game. `retarget` now stands the result on the floor (unless `match_height_of`); measure the
+  lowest of `retarget.FOOT_BONES` over the move anyway.
+* Unarmed clips under a rifle: `keep_bones=ARMS_AND_RIFLE` keeps the reference move's arms and rifle, frame by frame.
+  Check Motion afterwards -- the kept grip can run into a trunk the clip bends more (Jump_Start's right hand meets the
+  belly).
+* The clip's cycle time is kept (`act["seconds"]`); the move's `speed` in config.cpp is minus that. A move that starts
+  or ends on another (a transition) must be baked again against it: see the swim pack's README, Treading.
+* Show the owner, don't describe: `compare.add_row` puts each move on its own soldier at its in-game speed, labelled
+  CURRENT / CANDIDATE / NEW; Space plays the scene. With the Blender MCP connected, add rows to the owner's open scene
+  as you go. A row with the same actions is re-made in place.
+* `tests/BlenderAddon/blender_rig_check.py` checks the retarget on a synthetic UE rig (no download needed).
+
 ## Conventions that cost hours to find
 
 * Spaces: the MC rest skeleton and the soldier's own vertices are x forward, y up, z left; an RTM bone matrix takes

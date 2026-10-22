@@ -15,7 +15,7 @@ namespace Poseidon
 {
 namespace
 {
-constexpr int kContextControlsVersion = 8;
+constexpr int kContextControlsVersion = 9;
 constexpr int kGamepadButtonA = 0;
 constexpr int kGamepadButtonB = 1;
 constexpr int kGamepadButtonX = 2;
@@ -189,11 +189,16 @@ void ApplyDriverGamepadDefaults(InputProfile& profile)
 void ApplyContextDefaults(InputContext ctx, InputProfile& profile)
 {
     ApplyCommonGamepadDefaults(profile);
-    // Leaning is on-foot only; elsewhere Q/E keep their single vehicle meaning.
+    // Leaning, jumping and the swim keys are on-foot only; elsewhere Q/E/Z/Space keep their vehicle meaning.
     if (ctx != InputContext::Infantry)
     {
-        profile.ClearBindings(UALeanLeft);
-        profile.ClearBindings(UALeanRight);
+        for (UserAction a : {UALeanLeft, UALeanRight, UAJump, UADive, UASurface})
+            profile.ClearBindings(a);
+    }
+    else
+    {
+        // On foot Space jumps; switching weapons keeps its other default, Right Ctrl.
+        profile.Unbind(UAToggleWeapons, InputCode::Key(SDL_SCANCODE_SPACE));
     }
 
     switch (ctx)
@@ -384,6 +389,29 @@ bool ContextControlsConfig::Load(const std::string& path)
                 profile.Bind(UALeanLeft, InputCode::Key(SDL_SCANCODE_Q));
             if (profile.GetBindingEntries(UALeanRight).empty())
                 profile.Bind(UALeanRight, InputCode::Key(SDL_SCANCODE_E));
+        }
+        // v9 added the jump (Space on foot, weapon switching keeps Right Ctrl) and the swim keys of their own
+        // (dive Z / Page Down, surface Q / Page Up). Only actions the file does not list get them, and Space moves
+        // off weapon switching only when it is still there as the default and the jump takes it.
+        if (version < 9 && ctx == InputContext::Infantry)
+        {
+            const InputBinding space(InputCode::Key(SDL_SCANCODE_SPACE));
+            if (profile.GetBindingEntries(UAJump).empty())
+            {
+                profile.Bind(UAJump, space);
+                if (profile.HasBinding(UAToggleWeapons, space))
+                    profile.Unbind(UAToggleWeapons, InputCode::Key(SDL_SCANCODE_SPACE));
+            }
+            if (profile.GetBindingEntries(UADive).empty())
+            {
+                profile.Bind(UADive, InputCode::Key(SDL_SCANCODE_Z));
+                profile.Bind(UADive, InputCode::Key(SDL_SCANCODE_PAGEDOWN));
+            }
+            if (profile.GetBindingEntries(UASurface).empty())
+            {
+                profile.Bind(UASurface, InputCode::Key(SDL_SCANCODE_Q));
+                profile.Bind(UASurface, InputCode::Key(SDL_SCANCODE_PAGEUP));
+            }
         }
     }
 
