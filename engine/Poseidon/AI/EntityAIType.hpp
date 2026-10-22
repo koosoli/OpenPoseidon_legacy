@@ -557,6 +557,15 @@ class EntityAIType: public EntityType
 
 	AutoArray<ReflectorInfo> _reflectors;
 
+	// LGT-AUTO-001: light CAST by the tail / brake lamps of models that only have the glowing
+	// "zadni svetlo" / "brzdove svetlo" faces (every OFP / CWA vehicle). Worked out once per
+	// type from LOD 0 (VehicleAutoLights.cpp); the faces themselves are untouched.
+	mutable bool _autoLightsReady = false;
+	mutable bool _autoTailCasts = false; //!< false when the model already has a rear Reflector
+	mutable AutoArray<Vector3> _autoTailPos;
+	mutable AutoArray<Vector3> _autoBrakePos;
+	void PrepareAutoLights() const;
+
 	AutoArray<LightInfo> _lights;
 	AnimationSection _showDmg;
 	Vector3 _showDmgPoint;

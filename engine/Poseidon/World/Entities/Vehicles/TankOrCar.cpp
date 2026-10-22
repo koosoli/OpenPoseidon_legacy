@@ -132,6 +132,11 @@ void TankOrCar::Animate(int level)
     base::Animate(level);
 }
 
+bool TankOrCar::AutoBrakeLightsOn() const
+{
+    return (_pilotBrake && EngineIsOn()) || _lastPilotBrake > Glob.time - 0.4;
+}
+
 void TankOrCar::Deanimate(int level)
 {
     if (!_shape->Level(level))
