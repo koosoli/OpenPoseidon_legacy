@@ -68,11 +68,7 @@ public:
         _worker->set_level(spdlog::level::trace);
         _worker->flush_on(spdlog::level::trace); // the writer flushes every line, off the game's threads
     }
-    ~QueuedFileSink() override
-    {
-        // The pool joins after writing every queued line.
-        _pool.reset();
-    }
+    ~QueuedFileSink() override;
     void log(const spdlog::details::log_msg& message) override
     {
         _pool->post_log(std::shared_ptr<spdlog::async_logger>(_worker), message, spdlog::async_overflow_policy::block);
@@ -95,4 +91,12 @@ public:
 
 // The live queued file sink, if any (one per process), for DrainLogFileQueue.
 inline QueuedFileSink* GQueuedFileSink = nullptr;
+
+inline QueuedFileSink::~QueuedFileSink()
+{
+    if (GQueuedFileSink == this)
+        GQueuedFileSink = nullptr;
+    // The pool joins after writing every queued line.
+    _pool.reset();
+}
 }

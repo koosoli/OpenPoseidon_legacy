@@ -799,6 +799,8 @@ void LoggingSystem::Shutdown()
 {
     if (m_initialized)
     {
+        // PERF-LOG-FILE-QUEUE: the lines still queued for the file reach it before the loggers go.
+        DrainLogFileQueue(2000);
         // Clear per-category logger cache
         constexpr int catCount = static_cast<int>(LogCategory::_Count);
         for (int i = 0; i < catCount; ++i)
