@@ -82,6 +82,28 @@ int main()
     a3paint.specular = 0.8f;
     assert(ClassOf(a3paint) == SurfaceClass::PaintMetallic);
 
+    // Names from the first logged class run (2026-10-22).
+    Inputs part;
+    part.isVehicle = true;
+    part.texture = "data\\v3s_zrc_l_b.paa";
+    assert(ClassOf(part) == SurfaceClass::Mirror);
+    part.texture = "data\\sk_palubka.pac";
+    assert(ClassOf(part) == SurfaceClass::Plastic);
+    part.texture = "humr\\hmmwv_in_strop.pac";
+    part.military = true;
+    assert(ClassOf(part) == SurfaceClass::Plastic);
+    part.military = false;
+    part.texture = "a3\\soft_f_gamma\\suv_01\\data\\suv_01_int_base_co.paa";
+    part.hasEnvMap = true;
+    assert(ClassOf(part) == SurfaceClass::Plastic);
+    part.texture = "data\\red_sk_kapot.pac"; // body paint must not read as interior
+    assert(ClassOf(part) == SurfaceClass::PaintMetallic);
+    part.hasEnvMap = false;
+    part.texture = "o\\vehl\\cj5_podvozek.pac";
+    assert(ClassOf(part) == SurfaceClass::Matt);
+    part.texture = "data\\v3s_odrazka_l.paa";
+    assert(ClassOf(part) == SurfaceClass::LampGlass);
+
     // Declared entries win over every rule and may override single values.
     Inputs own;
     own.texture = "\\p406\\tex\\glass.paa";
