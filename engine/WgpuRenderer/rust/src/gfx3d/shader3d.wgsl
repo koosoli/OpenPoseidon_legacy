@@ -800,8 +800,12 @@ fn reflect_env_radiance(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
         env = (env * 2.0 + sky_env_sample(normalize(dir + t * spread)) + sky_env_sample(normalize(dir - t * spread))
                + sky_env_sample(normalize(dir + b * spread)) + sky_env_sample(normalize(dir - b * spread))) / 6.0;
     }
-    // Above the horizon: sky, a little dimmed near it where street, houses and trees stand.
-    let sky = env * mix(0.6, 1.0, smoothstep(0.0, 0.45, dir.y));
+    // Above the horizon: sky, a little dimmed near it where street, houses and trees stand,
+    // and desaturated by half as RFG-208 does for window glass (Reforger's probes author
+    // ReflectionDesaturation 0.5). Undesaturated, the env map's deep blue turned red cars
+    // purple at low sun (first test, 2026-10-22: Arma 1 hatchback, Arma 2 Skoda).
+    var sky = env * mix(0.6, 1.0, smoothstep(0.0, 0.45, dir.y));
+    sky = mix(sky, vec3<f32>(dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722))), 0.5);
     // Below it: the ground, lit the way the renderer lights the ground -- sky ambient plus sun --
     // at a typical ground albedo. A flat dark constant made the lower half of every body panel
     // darker than before on bright sand (first test, 2026-10-22: Peugeot white doors went grey).
