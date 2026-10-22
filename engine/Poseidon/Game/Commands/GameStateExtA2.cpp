@@ -25,6 +25,9 @@
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Game/Scripting/Scripts.hpp>
+#include <Poseidon/Input/InputSubsystem.hpp>
+#include <Poseidon/Input/KeyInput.hpp>
+#include <Poseidon/UI/DisplayUI.hpp>
 
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICenter.hpp>
@@ -66,6 +69,11 @@
 // The cut effects without the Arma 3 display layer handling (GameStateExtUi.cpp).
 GameValue CutTextEffect(const GameState* state, GameValuePar oper1);
 GameValue CutRscEffect(const GameState* state, GameValuePar oper1);
+
+namespace Poseidon
+{
+extern Input GInput; // InputSubsystem.cpp
+}
 
 using namespace Poseidon;
 
@@ -1408,6 +1416,51 @@ GameValue A2ZeroUnary(const GameState*, GameValuePar)
 GameValue A2EmptyArrayUnary(const GameState* state, GameValuePar)
 {
     return state->CreateGameValue(GameArray);
+}
+
+// actionKeysNamesArray "action" | ["action", maxKeys]: the names of the keys bound to a
+// user action, from the player's own bindings (Arma 2's bootcamp hints print them: "press
+// 'W'"). Arma 2 action names are this engine's names for the actions they share
+// ("MoveForward", "ReloadMagazine", "Compass", ...); a few are spelt differently.
+GameValue A2ActionKeysNamesArray(const GameState* state, GameValuePar oper1)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& names = result;
+    RString action;
+    int maxKeys = -1;
+    if (oper1.GetType() == GameString)
+        action = oper1;
+    else if (oper1.GetType() == GameArray)
+    {
+        const GameArrayType& args = oper1;
+        if (args.Size() > 0 && args[0].GetType() == GameString)
+            action = args[0];
+        if (args.Size() > 1 && args[1].GetType() == GameScalar)
+            maxKeys = toInt((float)args[1]);
+    }
+    if (action.GetLength() == 0)
+        return result;
+    static const struct
+    {
+        const char* arma2;
+        const char* here;
+    } aliases[] = {{"DefaultAction", "Fire"}, {"Gear", "Inventory"}, {"ShowMap", "Map"}};
+    const char* wanted = action;
+    for (const auto& a : aliases)
+        if (stricmp(wanted, a.arma2) == 0)
+            wanted = a.here;
+    const UserActionDesc* desc = InputSubsystem::GetUserActionDesc();
+    for (int i = 0; i < UAN; i++)
+    {
+        if (stricmp(desc[i].name, wanted) != 0)
+            continue;
+        const KeyList& keys = GInput.userKeys[i];
+        for (int k = 0; k < keys.Size() && (maxKeys < 0 || names.Size() < maxKeys); k++)
+            if (keys[k] >= 0)
+                names.Add(GameValue(GetKeyName(keys[k])));
+        break;
+    }
+    return result;
 }
 
 // getGroupIconParams: no group icons are drawn here, so every group has the neutral ones --
@@ -2945,6 +2998,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameString, "faction", A2Faction, GameObject),
     GameFunction(GameArray, "synchronizedObjects", A2SynchronizedObjects, GameObject),
     GameFunction(GameArray, "actionKeysNames", A2EmptyArrayUnary, GameString | GameArray),
+    GameFunction(GameArray, "actionKeysNamesArray", A2ActionKeysNamesArray, GameString | GameArray),
     GameFunction(GameNothing, "hcRemoveAllGroups", A2NothingUnary, GameObject),
     GameFunction(GameString, "createLocation", A2CreateLocation, GameArray),
     GameFunction(GameNothing, "deleteLocation", A2DeleteLocation, GameString),
