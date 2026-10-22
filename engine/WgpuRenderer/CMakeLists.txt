@@ -77,6 +77,7 @@ add_library(WgpuRenderer STATIC
     EarthFeatureStream.cpp
     EarthWorldgen.cpp
     EarthSurfaceStream.cpp
+    EarthIslands.cpp
     EarthImageryTiles.cpp
     FishSchools.cpp
     BirdFlocks.cpp

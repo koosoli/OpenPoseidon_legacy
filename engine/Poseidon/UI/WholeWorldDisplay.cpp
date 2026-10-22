@@ -52,6 +52,7 @@ constexpr Place Places[] = {
     {"Manhattan, New York", 40.758, -73.985, 1500},
     {"Sognefjord, Norway", 61.150, 6.700, 3000},
     {"Big Island, Hawaii", 19.600, -155.500, 12000},
+    {"Desert Island (OFP), Bay of Biscay", 45.369, -7.752, 400},
     {"Earth from orbit", 30.000, 10.000, 18000000},
 };
 

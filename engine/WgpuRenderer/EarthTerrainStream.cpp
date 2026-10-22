@@ -1,5 +1,6 @@
 #include "EarthTerrainStream.hpp"
 #include "EarthImageryTiles.hpp"
+#include "EarthIslands.hpp"
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 
 #include <curl/curl.h>
@@ -444,12 +445,13 @@ void EarthTerrainStream::Run()
                 if (_generation.load() != version) break;
                 for (int x = 0; x < Earth::GridSamples; ++x)
                 {
-                    const auto position = Earth::ToPixel(Earth::FromLocal(origin.latitude, origin.longitude,
-                        patch->x + x * patch->gridMetres, patch->z + z * patch->gridMetres),patch->sourceZoom);
+                    const auto geographic = Earth::FromLocal(origin.latitude, origin.longitude,
+                        patch->x + x * patch->gridMetres, patch->z + z * patch->gridMetres);
+                    const auto position = Earth::ToPixel(geographic,patch->sourceZoom);
                     const double wx = patch->x + x * patch->gridMetres;
                     const double wz = patch->z + z * patch->gridMetres;
-                    patch->heights[z * Earth::GridSamples + x] =
-                        Sample(position.x, position.y,patch->sourceZoom) - float(Earth::CurvatureDrop(wx,wz));
+                    patch->heights[z * Earth::GridSamples + x] = EarthIslands::Height(geographic.latitude, geographic.longitude,
+                        Sample(position.x, position.y,patch->sourceZoom)) - float(Earth::CurvatureDrop(wx,wz));
                 }
             }
             if (_generation.load() != version) { handled = version; continue; }
@@ -494,6 +496,7 @@ void EarthTerrainStream::Run()
                         const float weight = std::clamp(edge / blendWidth,0.0f,1.0f);
                         height = Sample(fine.x,fine.y,patch->sourceZoom) * (1-weight) + height * weight;
                     }
+                    height = EarthIslands::Height(geographic.latitude, geographic.longitude, height);
                     patch->horizonHeights[index] = height - float(Earth::CurvatureDrop(wx,wz));
                 }
             }

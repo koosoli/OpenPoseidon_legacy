@@ -1,9 +1,11 @@
 #include "EarthSurfaceStream.hpp"
+#include "EarthIslands.hpp"
 #include <Poseidon/Foundation/Algorithms/Sha256.hpp>
 #include <cjson/cJSON.h>
 #include <stb_image.h>
 #include <stb_image_resize2.h>
 #include <algorithm>
+#include <cstdio>
 #include <fstream>
 #include <stdexcept>
 
@@ -273,6 +275,23 @@ void EarthSurfaceStream::Run() {
                     if(width!=source.image.width || height!=source.image.height)throw std::runtime_error("surface receipt/hash/bounds mismatch");
                     FeatherNoData(pixels.get(),width,height);
                     decoded+=count;source.image.pixels=pixels.get();sources.push_back(source);images.push_back(std::move(pixels));
+                }
+                // OFP islands placed into the ocean (EarthIslands, scripts/Prepare-EarthIsland.py): their ground
+                // image on top of the provider imagery, feathered over 100 m at its edge (which is open water).
+                for(const auto& island:EarthIslands::All()) {
+                    try {
+                        auto bytes=Read(island.image,32*1024*1024);
+                        SourceView source;int width=0,height=0;
+                        auto pixels=Decode(bytes,width,height,true);
+                        const size_t count=size_t(width)*height*4;
+                        if(decoded+count>256*1024*1024)throw std::runtime_error("surface decoded-source budget exceeded");
+                        source.image={pixels.get(),width,height};
+                        source.south=island.south;source.west=island.west;source.north=island.north;source.east=island.east;
+                        source.featherMetres=100;
+                        decoded+=count;sources.push_back(source);images.push_back(std::move(pixels));
+                    } catch(const std::exception& e) {
+                        std::fprintf(stderr,"Earth island %s image skipped: %s\n",island.name.c_str(),e.what());
+                    }
                 }
                 if(sources.empty() && !_tiles)throw std::runtime_error("prepared surface cache missing");
             }
