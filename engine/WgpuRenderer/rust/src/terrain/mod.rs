@@ -486,11 +486,9 @@ pub struct Terrain {
     far_pipelines: Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
     // The nodes `prepare` uploaded, for the near/far split in `draw`.
     nodes_cpu: Vec<WgrTerrainNode>,
-    // Highest heightmap sample per HEIGHT_BLOCK x HEIGHT_BLOCK block (row-major, `height_blocks_w`
-    // wide), rebuilt by `set_heightmap`: the far split's bound on how high a node's ground reaches.
-    height_blocks: Vec<f32>,
-    height_blocks_w: u32,
-    height_blocks_h: u32,
+    // Highest heightmap sample per block, rebuilt by `set_heightmap`: the far split's bound on
+    // how high a node's ground reaches, and the weather cover's on local snow (gfx3d).
+    height_blocks: Option<std::sync::Arc<HeightBlocks>>,
     prepass_pipeline: wgpu::RenderPipeline,
     // The reflection is already resolution-scaled and mip-filtered by water. Keeping a
     // dedicated 1x variant avoids multiplying that secondary view by the main scene's MSAA.
@@ -1315,9 +1313,7 @@ impl Terrain {
             pipeline_no_write,
             far_pipelines,
             nodes_cpu: Vec::new(),
-            height_blocks: Vec::new(),
-            height_blocks_w: 0,
-            height_blocks_h: 0,
+            height_blocks: None,
             prepass_pipeline,
             planar_pipeline,
             max_dim: device.limits().max_texture_dimension_2d,
@@ -1546,7 +1542,10 @@ impl Terrain {
         // possible occluders (the auto-adapting range in terrain_shadow.wgsl).
         (self.min_height,self.max_height) = heights[..(w as usize * h as usize)]
             .iter().copied().fold((f32::MAX,f32::MIN),|(lo,hi),h|(lo.min(h),hi.max(h)));
-        self.build_height_blocks(&heights[..(w as usize * h as usize)], w, h);
+        self.height_blocks = (params.terrain_grid > 0.0).then(|| {
+            std::sync::Arc::new(HeightBlocks::build(&heights[..(w as usize * h as usize)], w, h,
+                params.world_origin, params.terrain_grid))
+        });
         self.hm_width = w;
         self.hm_height = h;
         self.mask_width = mask_w;
@@ -2194,48 +2193,20 @@ impl Terrain {
 
     /// Upper bound on the ground height anywhere in node `n`: the block maxima under its
     /// footprint plus a margin for what the vertex shader adds (snow depth, crater rims, sand).
-    /// Outside the map the vertex height is the clamped edge sample, lowered -- covered by the
-    /// clamped block range. +inf when there is no heightmap.
+    /// +inf when there is no heightmap.
     fn node_max_height(&self, n: &WgrTerrainNode) -> f32 {
-        if self.height_blocks.is_empty() || self.params.terrain_grid <= 0.0 {
-            return f32::INFINITY;
-        }
-        let g = self.params.terrain_grid;
-        let o = self.params.world_origin;
-        let w = self.params.hm_width as i64;
-        let h = self.params.hm_height as i64;
-        let ix0 = (((n.origin.x - o.x) / g).floor() as i64).clamp(0, w - 1);
-        let ix1 = (((n.origin.x + n.size - o.x) / g).ceil() as i64).clamp(0, w - 1);
-        let iz0 = (((n.origin.y - o.y) / g).floor() as i64).clamp(0, h - 1);
-        let iz1 = (((n.origin.y + n.size - o.y) / g).ceil() as i64).clamp(0, h - 1);
-        let b = HEIGHT_BLOCK as i64;
-        let mut top = f32::NEG_INFINITY;
-        for bz in iz0 / b..=iz1 / b {
-            let row = (bz as usize) * self.height_blocks_w as usize;
-            for bx in ix0 / b..=ix1 / b {
-                top = top.max(self.height_blocks[row + bx as usize]);
+        match &self.height_blocks {
+            Some(hb) => {
+                hb.max_in_rect(n.origin.x, n.origin.y, n.origin.x + n.size, n.origin.y + n.size)
+                    + FAR_SPLIT_HEIGHT_MARGIN
             }
+            None => f32::INFINITY,
         }
-        top + FAR_SPLIT_HEIGHT_MARGIN
     }
 
-    fn build_height_blocks(&mut self, heights: &[f32], w: u32, h: u32) {
-        let bw = w.div_ceil(HEIGHT_BLOCK);
-        let bh = h.div_ceil(HEIGHT_BLOCK);
-        let mut blocks = vec![f32::NEG_INFINITY; (bw * bh) as usize];
-        for z in 0..h {
-            let brow = (z / HEIGHT_BLOCK * bw) as usize;
-            let src = &heights[(z * w) as usize..((z + 1) * w) as usize];
-            for (x, &v) in src.iter().enumerate() {
-                let slot = &mut blocks[brow + x / HEIGHT_BLOCK as usize];
-                if v > *slot {
-                    *slot = v;
-                }
-            }
-        }
-        self.height_blocks = blocks;
-        self.height_blocks_w = bw;
-        self.height_blocks_h = bh;
+    /// The heightmap's block maxima, shared with the weather-cover policy (gfx3d).
+    pub fn height_blocks(&self) -> Option<std::sync::Arc<HeightBlocks>> {
+        self.height_blocks.clone()
     }
 
     fn bind_for_draw(&self, pass: &mut wgpu::RenderPass<'_>, camera_bind: &wgpu::BindGroup, camera_offset: u32) {
@@ -2252,8 +2223,58 @@ impl Terrain {
 /// PERF-TERRAIN-FAR-SPLIT: terrain.wgsl's TW_NEAR_END, the outer edge of the Tidewater ground's
 /// near band in metres. Keep the two equal.
 const TW_NEAR_END: f32 = 200.0;
-/// Heightmap samples per side of one `height_blocks` cell.
+/// Heightmap samples per side of one `HeightBlocks` cell.
 const HEIGHT_BLOCK: u32 = 16;
+
+/// The highest heightmap sample in each HEIGHT_BLOCK x HEIGHT_BLOCK block of the terrain: a cheap
+/// conservative bound on how high the ground reaches inside any world rectangle.
+pub struct HeightBlocks {
+    blocks: Vec<f32>,
+    blocks_w: u32,
+    hm_w: u32,
+    hm_h: u32,
+    origin: crate::ffi::WgrVec2,
+    grid: f32,
+}
+
+impl HeightBlocks {
+    fn build(heights: &[f32], w: u32, h: u32, origin: crate::ffi::WgrVec2, grid: f32) -> Self {
+        let bw = w.div_ceil(HEIGHT_BLOCK);
+        let bh = h.div_ceil(HEIGHT_BLOCK);
+        let mut blocks = vec![f32::NEG_INFINITY; (bw * bh) as usize];
+        for z in 0..h {
+            let brow = (z / HEIGHT_BLOCK * bw) as usize;
+            let src = &heights[(z * w) as usize..((z + 1) * w) as usize];
+            for (x, &v) in src.iter().enumerate() {
+                let slot = &mut blocks[brow + x / HEIGHT_BLOCK as usize];
+                if v > *slot {
+                    *slot = v;
+                }
+            }
+        }
+        Self { blocks, blocks_w: bw, hm_w: w, hm_h: h, origin, grid }
+    }
+
+    /// The highest heightmap sample under the world rectangle [x0, x1] x [z0, z1]. Outside the map
+    /// the ground is the clamped edge sample (lowered further off-map), so the sample range is
+    /// clamped to the map -- a rectangle wholly off-map is bounded by its nearest edge.
+    pub fn max_in_rect(&self, x0: f32, z0: f32, x1: f32, z1: f32) -> f32 {
+        let (w, h) = (self.hm_w as i64, self.hm_h as i64);
+        let ix0 = (((x0 - self.origin.x) / self.grid).floor() as i64).clamp(0, w - 1);
+        let ix1 = (((x1 - self.origin.x) / self.grid).ceil() as i64).clamp(0, w - 1);
+        let iz0 = (((z0 - self.origin.y) / self.grid).floor() as i64).clamp(0, h - 1);
+        let iz1 = (((z1 - self.origin.y) / self.grid).ceil() as i64).clamp(0, h - 1);
+        let b = HEIGHT_BLOCK as i64;
+        let mut top = f32::NEG_INFINITY;
+        for bz in iz0 / b..=iz1 / b {
+            let row = (bz as usize) * self.blocks_w as usize;
+            for bx in ix0 / b..=ix1 / b {
+                top = top.max(self.blocks[row + bx as usize]);
+            }
+        }
+        top
+    }
+}
 /// Metres above the heightmap the vertex shader can raise the ground: snow cover, crater rims and
 /// sand offsets are decimetres to a few metres; this keeps the bound conservative.
 const FAR_SPLIT_HEIGHT_MARGIN: f32 = 25.0;

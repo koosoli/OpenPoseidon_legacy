@@ -4614,6 +4614,9 @@ pub struct Gfx3d {
     ground_weather: [f32; 4],
     layer_fog_requested: bool,
     world_max_height: f32,
+    // PERF-COVER-LOCAL-SNOW: the terrain's block maxima, so each weather-cover map judges
+    // snowline snow against the ground inside its own square instead of the world's peak.
+    terrain_height_blocks: Option<std::sync::Arc<crate::terrain::HeightBlocks>>,
     object_snow_enabled: bool,
     snow_surface_trace: bool,
     snow_surface_trace_rows: u8,
@@ -6248,6 +6251,7 @@ impl Gfx3d {
             ground_weather: [0.0; 4],
             layer_fog_requested: false,
             world_max_height: f32::NAN,
+            terrain_height_blocks: None,
             object_snow_enabled: std::env::var("WGR_OBJECT_SNOW").as_deref() != Ok("0"),
             snow_surface_trace: std::env::var("WGR_SNOW_SURFACE_FIXTURE").as_deref() == Ok("1"),
             snow_surface_trace_rows: 0,
@@ -9130,13 +9134,35 @@ impl Gfx3d {
             let main = cameras.get(gtao_camera).unwrap_or(&cameras[0]);
             let sky_cam = glam::Vec3::new(main.cam_pos[0], main.cam_pos[1], main.cam_pos[2]);
             self.prepare_interior_sky(device, sky_cam);
-            // Snow that can reach a surface on this world, not every configured snowline.
-            let cover_snow = weather_cover::snow_for_cover(self.snow_surface, self.world_max_height);
+            // Snow that can reach a surface on this world, not every configured snowline -- and,
+            // per map, a surface INSIDE that map (PERF-COVER-LOCAL-SNOW): nothing reads a cover map
+            // outside its own square, so snow on a peak 5 km away needs neither. Chernarus' 645 m
+            // snowline kept both maps drawing over the coast (1.7 ms of a 24 ms owner-settings
+            // frame) because its highest summit reaches it.
+            // WGR_WEATHER_COVER_LOCAL_SNOW=0: judge against the world's peak again.
+            static LOCAL_SNOW: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let local_snow = *LOCAL_SNOW.get_or_init(|| {
+                std::env::var("WGR_WEATHER_COVER_LOCAL_SNOW").map(|v| v.trim() != "0").unwrap_or(true)
+            });
+            let local_max = |extent: f32| -> f32 {
+                let world = self.world_max_height;
+                match &self.terrain_height_blocks {
+                    Some(hb) if world.is_finite() && local_snow => {
+                        // The map's view is snapped to its texel grid: one cover texel of slack is
+                        // enough, 64 m is plenty.
+                        let r = extent + 64.0;
+                        hb.max_in_rect(sky_cam.x - r, sky_cam.z - r, sky_cam.x + r, sky_cam.z + r).min(world)
+                    }
+                    _ => world,
+                }
+            };
+            let cover_snow = weather_cover::snow_for_cover(self.snow_surface, local_max(weather_cover::EXTENT));
+            let cover_snow_far = weather_cover::snow_for_cover(self.snow_surface, local_max(weather_cover::FAR_EXTENT));
             self.weather_cover.prepare(device, queue, sky_cam, self.cull.instance_epoch(),
                 cover_snow, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0, self.layer_fog_requested);
             self.weather_cover.camera_offset = (gtao_camera as u64 * self.cameras.stride) as u32;
             self.weather_cover_far.prepare(device, queue, sky_cam, self.cull.instance_epoch(),
-                cover_snow, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0, self.layer_fog_requested);
+                cover_snow_far, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0, self.layer_fog_requested);
             self.weather_cover_far.camera_offset = (gtao_camera as u64 * self.cameras.stride) as u32;
             let epoch = self.cull.instance_epoch();
             let gi_retry = self.gi_rsm_publication.as_ref()
@@ -13056,6 +13082,9 @@ impl Gfx3d {
     pub fn set_layer_fog_requested(&mut self, active:bool) {self.layer_fog_requested=active;}
     /// Highest terrain point of the loaded world (NaN = unknown); see weather_cover::snow_for_cover.
     pub fn set_world_max_height(&mut self, h: f32) {self.world_max_height=h;}
+    pub fn set_terrain_height_blocks(&mut self, blocks: Option<std::sync::Arc<crate::terrain::HeightBlocks>>) {
+        self.terrain_height_blocks = blocks;
+    }
     // Exact current encoder publication, not yesterday's committed map. Overflow
     // remains a GPU refusal through the real COUNT/EMIT buffers.
     pub fn layer_fog_weather_inputs(&self)->crate::layered_fog::WeatherInputs {
