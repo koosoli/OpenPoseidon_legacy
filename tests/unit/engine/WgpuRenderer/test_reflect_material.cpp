@@ -72,6 +72,15 @@ int main()
     assert(ClassOf(env) == SurfaceClass::PaintMetallic);
     env.military = true;
     assert(ClassOf(env) == SurfaceClass::PaintMatt);
+    // Arma 3 paint: env map AND a high power -- still paint, never chrome.
+    Inputs a3paint;
+    a3paint.texture = "a3\\soft_f_gamma\\suv_01\\data\\suv_01_ext_co.paa";
+    a3paint.material = "a3\\soft_f_gamma\\suv_01\\data\\suv_01_ext.rvmat";
+    a3paint.isVehicle = true;
+    a3paint.hasEnvMap = true;
+    a3paint.specularPower = 120.0f;
+    a3paint.specular = 0.8f;
+    assert(ClassOf(a3paint) == SurfaceClass::PaintMetallic);
 
     // Declared entries win over every rule and may override single values.
     Inputs own;
