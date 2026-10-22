@@ -69,5 +69,27 @@ E. Only if measured: object SSR from `rain_water_reflections.wgsl` or one dynami
 - GL33: no change (owner asked 2026-10-17 whether GL33 should be retired; see the reply in
   the session -- decision 4 is on hold until that is settled).
 
+## Rebased onto the WGPU migration line (2026-10-22)
+
+`MrDudeX-reflect` now sits on `MrDudeX-wgpu-aktuell` (2ff794f + docs 995eb33f), the build the
+owner's game folder runs; the previous base (`feat/arma-original-ui` d707fd10) is kept locally
+as `backup/reflect-on-arma-ui-8d7d42e8`. WGPU-033's draw batching keeps the material per draw
+slot, so the two appended lanes travel with every batched draw unchanged.
+
+## Phase C (implemented, behind WGR_REFLECT=1)
+
+- `shading.wgsl`: `ShadeMaterial` carries the lanes (`refl_a`, `refl_b`; zero on the retained
+  path). Classified surfaces get GGX base + clear-coat sun lobes instead of Blinn, lose the SH
+  sky sheen (the env map replaces it) and, when metal, their diffuse body.
+- `shader3d.wgsl`: sky env map in the reflection direction, five-tap roughness cone, horizon
+  and below-horizon dimming (street, not sky), GTAO and cave occlusion; panes in the blend
+  pipeline composite the reflection over the film (RFG-137 form). Skipped where DZ-003
+  already mirrors.
+- Lamps: chrome bowl (metal base) under a glass/plastic cover (clear coat).
+- Handed over from the WGPU project: `setObjectMaterial` / `hiddenSelectionsMaterials` are Arma 3
+  stubs (`GameStateExtA3Stubs.cpp`). Hidden selections already switch textures per instance
+  (`AnimationSection::SetTexture` on the shared shape each frame); materials need the same plus
+  a restore of the section's own material for instances without an override. Planned as B2.
+
 Risks: baked highlights in old textures (double highlight), atlases, auto-exposure on bright
 ground (the Intro desert overexposes front-3/4 shots), GL33 gets roughness only.
