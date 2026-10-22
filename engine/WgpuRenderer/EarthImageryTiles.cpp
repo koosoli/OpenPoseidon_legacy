@@ -9,7 +9,9 @@
 #include <stb_image_write.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <mutex>
 #include <cstdio>
 #include <fstream>
 #include <future>
@@ -47,6 +49,31 @@ int Progress(void* context, curl_off_t, curl_off_t, curl_off_t, curl_off_t)
 {
     const auto* cancelled = static_cast<const std::function<bool()>*>(context);
     return (*cancelled && (*cancelled)()) ? 1 : 0;
+}
+
+// One connection cache, TLS session cache and DNS cache for every tile download. Each tile used a
+// fresh easy handle, so every tile paid a TCP connect plus a full TLS handshake -- the slow part of
+// fetching a 20 KB image, and the part this machine's network fails most often. Shared, the workers
+// reuse warm keep-alive connections to the tile server and resume sessions instead.
+std::mutex g_shareLocks[CURL_LOCK_DATA_LAST];
+void ShareLock(CURL*, curl_lock_data data, curl_lock_access, void*) { g_shareLocks[data].lock(); }
+void ShareUnlock(CURL*, curl_lock_data data, void*) { g_shareLocks[data].unlock(); }
+CURLSH* DownloadShare()
+{
+    static CURLSH* share = []
+    {
+        CURLSH* s = curl_share_init();
+        if (s)
+        {
+            curl_share_setopt(s, CURLSHOPT_LOCKFUNC, ShareLock);
+            curl_share_setopt(s, CURLSHOPT_UNLOCKFUNC, ShareUnlock);
+            curl_share_setopt(s, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
+            curl_share_setopt(s, CURLSHOPT_SHARE, CURL_LOCK_DATA_SSL_SESSION);
+            curl_share_setopt(s, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
+        }
+        return s;
+    }();
+    return share;
 }
 
 // Global web-mercator pixel position of a coordinate at `zoom` for `tile`-pixel tiles.
@@ -127,6 +154,9 @@ int EarthImageryTiles::Perform(const std::string& url, std::vector<uint8_t>& byt
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 3L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    if (CURLSH* share = DownloadShare())
+        curl_easy_setopt(curl, CURLOPT_SHARE, share);
+    curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Receive);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &bytes);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
@@ -166,79 +196,88 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
         stbi_image_free(rgba);
         return true;
     };
-    int deadBatches = 0;
-    for (size_t begin = 0; begin < missing.size(); begin += ParallelDownloads)
+    // A rolling pool: each worker takes the next tile as soon as its last one is done. The old lock-step
+    // batches of 16 waited for the slowest tile of each batch (a retried handshake: seconds) before
+    // starting any of the next sixteen.
+    struct Job
     {
-        if (cancelled && cancelled())
-            return;
-        const size_t end = std::min(missing.size(), begin + ParallelDownloads);
-        struct Job
+        bool ok = false, permanent = false;
+        Tile tile;
+    };
+    const auto fetchOne = [&](const std::tuple<int, int, int>& key) -> Job
+    {
+        const auto [z, x, y] = key;
+        const auto path = TilePath(z, x, y);
+        std::vector<uint8_t> bytes;
+        std::error_code ec;
+        const auto length = std::filesystem::file_size(path, ec);
+        Tile tile;
+        if (!ec && length > 0 && length <= MaxTileBytes)
         {
-            bool ok = false, permanent = false;
-            Tile tile;
-        };
-        std::vector<std::future<Job>> jobs;
-        for (size_t i = begin; i < end; ++i)
-        {
-            jobs.push_back(std::async(std::launch::async, [&, key = missing[i]]() -> Job
-            {
-                const auto [z, x, y] = key;
-                const auto path = TilePath(z, x, y);
-                std::vector<uint8_t> bytes;
-                std::error_code ec;
-                const auto length = std::filesystem::file_size(path, ec);
-                Tile tile;
-                if (!ec && length > 0 && length <= MaxTileBytes)
-                {
-                    std::ifstream input(path, std::ios::binary);
-                    bytes.assign(std::istreambuf_iterator<char>(input), {});
-                    if (decode(bytes, tile))
-                        return {true, false, std::move(tile)};
-                    bytes.clear();
-                }
-                if (!network)
-                    return {false, false, {}}; // cache-only pass: not on disk yet
-                bool permanent = false;
-                if (!Download(EarthProviders::ExpandUrl(_source, z, x, y), bytes, cancelled, permanent))
-                    return {false, permanent, {}};
-                if (!decode(bytes, tile))
-                    return {false, true, {}}; // not an image: an error page or an unsupported format
-                // Only a decodable tile is cached; a partial write never becomes a final file.
-                std::filesystem::create_directories(path.parent_path(), ec);
-                const auto temporary = path.string() + ".part";
-                {
-                    std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-                    output.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
-                }
-                std::filesystem::rename(temporary, path, ec);
-                if (ec)
-                    std::filesystem::remove(temporary, ec);
-                tile.use = 1; // marks a network fetch for the caller's count
+            std::ifstream input(path, std::ios::binary);
+            bytes.assign(std::istreambuf_iterator<char>(input), {});
+            if (decode(bytes, tile))
                 return {true, false, std::move(tile)};
-            }));
+            bytes.clear();
         }
-        bool any = false;
-        for (size_t i = begin; i < end; ++i)
+        if (!network)
+            return {false, false, {}}; // cache-only pass: not on disk yet
+        bool permanent = false;
+        if (!Download(EarthProviders::ExpandUrl(_source, z, x, y), bytes, cancelled, permanent))
+            return {false, permanent, {}};
+        if (!decode(bytes, tile))
+            return {false, true, {}}; // not an image: an error page or an unsupported format
+        // Only a decodable tile is cached; a partial write never becomes a final file.
+        std::filesystem::create_directories(path.parent_path(), ec);
+        const auto temporary = path.string() + ".part";
         {
-            auto [ok, permanent, tile] = jobs[i - begin].get();
+            std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+            output.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+        }
+        std::filesystem::rename(temporary, path, ec);
+        if (ec)
+            std::filesystem::remove(temporary, ec);
+        tile.use = 1; // marks a network fetch for the caller's count
+        return {true, false, std::move(tile)};
+    };
+    std::atomic<size_t> next{0};
+    // Consecutive failures (after retries) across all workers. 32 in a row means the provider or the
+    // network is down: stop rather than wait out every remaining timeout (the start-up overview would
+    // otherwise stall). Same budget as the old "two whole batches of 16 failed".
+    std::atomic<unsigned> failedInRow{0};
+    const auto worker = [&]
+    {
+        for (;;)
+        {
+            if ((cancelled && cancelled()) || failedInRow.load() >= 2 * ParallelDownloads)
+                return;
+            const size_t i = next.fetch_add(1);
+            if (i >= missing.size())
+                return;
+            auto [ok, permanent, tile] = fetchOne(missing[i]);
             std::lock_guard lock(_mutex);
             if (!ok)
             {
                 if (permanent) // transient failures are retried by the next window build
                     _failed.insert(missing[i]);
+                if (network)
+                    ++failedInRow;
                 continue;
             }
-            any = true;
+            failedInRow = 0;
             downloads += tile.use;
             tile.use = ++_use;
             _tiles[missing[i]] = std::move(tile);
         }
-        // Two whole batches failing (after retries) means the provider or the network is down: stop rather
-        // than wait out every remaining timeout (the start-up overview would otherwise stall).
-        deadBatches = any ? 0 : deadBatches + 1;
-        if (deadBatches >= 2)
-            break;
-    }
+    };
+    const size_t workers = std::min<size_t>(ParallelDownloads, missing.size());
+    std::vector<std::future<void>> pool;
+    for (size_t w = 1; w < workers; ++w)
+        pool.push_back(std::async(std::launch::async, worker));
+    if (workers > 0)
+        worker();
+    for (auto& f : pool)
+        f.get();
     std::lock_guard lock(_mutex);
     while (_tiles.size() > MaxResidentTiles)
         _tiles.erase(std::min_element(_tiles.begin(), _tiles.end(),

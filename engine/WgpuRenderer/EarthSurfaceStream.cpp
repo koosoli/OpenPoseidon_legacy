@@ -295,13 +295,22 @@ void EarthSurfaceStream::Run() {
                             s=std::min(s,c.latitude);n=std::max(n,c.latitude);wst=std::min(wst,c.longitude);e=std::max(e,c.longitude);
                         }
                     };
-                    const auto add=[&](const Window& w,double metresPerPixel,int size,unsigned tiles,EarthImageryTiles::Mosaic& m) {
+                    bool fetch=network;
+                    const auto add=[&](const Window& w,double metresPerPixel,int size,unsigned tiles,EarthImageryTiles::Mosaic& m,
+                                       bool outermost=false,bool ring=false) {
                         double s,wst,n,e;bounds(w,s,wst,n,e);
-                        if(!_tiles->Build(s,wst,n,e,metresPerPixel,size,tiles,m,cancelled,network))return;
+                        if(!_tiles->Build(s,wst,n,e,metresPerPixel,size,tiles,m,cancelled,fetch))return;
                         found+=m.tiles-m.failures;
                         SourceView v;v.image={m.pixels.data(),m.width,m.height};
                         v.south=m.south;v.west=m.west;v.north=m.north;v.east=m.east;
-                        v.featherMetres=std::clamp(.02*w.span,50.0,5000.0);
+                        // The outermost ring is the edge of the streamed ground: beyond it is the globe image.
+                        // A 5 km feather there was a hard rectangle (and a cyan provider sea against a navy
+                        // globe sea) seen from altitude; fade it out over its outer quarter instead.
+                        // Inner rings feather over a tenth of their span (was 2%, at most 5 km): the zoom levels
+                        // differ in colour, and a hard ring edge read as a square seam from altitude. The near
+                        // window keeps its own narrow feather, so the ground around the camera is unchanged.
+                        v.featherMetres=outermost ? .25*w.span : ring ? std::max(.1*w.span,50.0) :
+                            std::clamp(.02*w.span,50.0,5000.0);
                         frame.push_back(v);
                     };
                     // Nested rings, coarse to fine, each at the resolution the warped far atlas has there;
@@ -314,11 +323,32 @@ void EarthSurfaceStream::Run() {
                     }
                     // At most 8 sources in all: drop the coarsest inner rings first (the far ring stays).
                     while(rings.size()+1+sources.size()>8 && rings.size()>1)rings.erase(rings.begin()+1);
-                    mosaics.resize(rings.size()+1);
-                    for(size_t i=0;i<rings.size();++i)
-                        add(rings[i],rings[i].span/2048.0,2048,i?96:64,mosaics[i]);
-                    // The near atlas is warped ~4x denser at its centre; ask for that, within the tile budget.
-                    add(window,window.span/(AtlasSize*4.0),4096,256,mosaics.back());
+                    const auto gather=[&] {
+                        frame.clear();found=0;mosaics.clear();mosaics.resize(rings.size()+1);
+                        for(size_t i=0;i<rings.size();++i)
+                            add(rings[i],rings[i].span/2048.0,2048,i?96:64,mosaics[i],i==0,true);
+                        // The near atlas is warped ~4x denser at its centre; ask for that, within the tile budget.
+                        add(window,window.span/(AtlasSize*4.0),4096,256,mosaics.back());
+                    };
+                    if(network) {
+                        // The ground under the camera first. Downloading the wide rings first (192+ tiles
+                        // at their own zooms) kept the near window on its cached or globe imagery until
+                        // every ring had arrived. Fetch the near tiles, publish an atlas with them over
+                        // whatever the rings have on disk, then fetch the rings for the final atlas.
+                        EarthImageryTiles::Mosaic nearFirst;
+                        double s,wst,n,e;bounds(window,s,wst,n,e);
+                        _tiles->Build(s,wst,n,e,window.span/(AtlasSize*4.0),4096,256,nearFirst,cancelled,true);
+                        if(nearFirst.downloads>0 && !cancelled()) {
+                            fetch=false;gather();fetch=true;
+                            frame.insert(frame.end(),sources.begin(),sources.end());
+                            auto interim=std::make_unique<Atlas>(BuildRegional(window,{nasa.data(),4096,2048},frame,AtlasSize,cancelled,FarAtlasSize));
+                            if(interim->error.empty() && !interim->farPixels.empty()) {
+                                interim->sources="(near tiles first) "+std::to_string(nearFirst.downloads)+" new";
+                                std::lock_guard lock(_mutex);if(!_stop && _version==version)_ready=std::move(interim);
+                            }
+                        }
+                    }
+                    gather();
                     if(cancelled()){attempt->error="superseded";}
                 }
                 // Nothing cached yet and no prepared region: the first pass would only repeat the globe.
