@@ -91,5 +91,24 @@ slot, so the two appended lanes travel with every batched draw unchanged.
   (`AnimationSection::SetTexture` on the shared shape each frame); materials need the same plus
   a restore of the section's own material for instances without an override. Planned as B2.
 
+## Test results 2026-10-22 (test folder `_OpenPoseidon-Reflect\bin`, game folder untouched)
+
+Builds fe52892 -> a411113e, missions CWA Intro / Arma 1 Sara / Arma 2 Chernarus / Arma 3 Altis,
+noon and low sun, front/side/rear. Each finding fixed with a unit-tested rule or shader change:
+
+| Finding | Cause | Fix |
+| --- | --- | --- |
+| A2/A3 red paint as blue mirror | env map + power -> chrome rule ran on vehicle paint | B.1 |
+| Red cars purple at low sun | deep-blue sky env map | C.2 desaturate 0.5 (as RFG-208), coat 0.6/0.8 on stock paint |
+| Lower panels darker / grey frost | below-horizon constant, then ground albedo 0.3 | C.1 lit ground, C.5 albedo 0.2 |
+| Matt military paint washed grey | single-mip env overstates a rough lobe | C.3 base reflection x (1-r)^1.5 |
+| Hilux (A1/A2) one big mirror | `mirror.rvmat` on the body atlas `coyota_trup1` | B.4 material mirror/chrome ignored on body textures |
+| A3 SUV silver | light rvmats (`car_headlight_emit`) on `suv_01_ext_co` | B.5 same guard for lamp words |
+| C_Van military | generated `A1x_` class prefix | B.3 |
+| CWA interior/underbody as paint | Czech part names | B.2 token lists |
+
+Classification is traced with `WGR_REFLECT_LOG=1` (class, rule, type, side, texture, material).
+Own addons: `@Peugeot406_OP\Addons\p406_reflect.pbo` declares 39 textures in `CfgOpMaterials`.
+
 Risks: baked highlights in old textures (double highlight), atlases, auto-exposure on bright
 ground (the Intro desert overexposes front-3/4 shots), GL33 gets roughness only.
