@@ -26,18 +26,24 @@ inline Earth::Direction FlightUp(FlightPoint point)
     const double up = Earth::Radius + point.y, length = std::hypot(std::hypot(dx, dz), up);
     return std::isfinite(length) && length > 0 ? Earth::Direction{dx/length, up/length, dz/length} : Earth::Direction{0,1,0};
 }
+// Strictly rising with clearance: the old curve sat flat at 64x from ~1.6 km to ~5 km, so climbing
+// bought nothing there. Precise below 1 km (51x at 1 km), then a smooth power law: ~200x at 5 km,
+// ~2,600x at 100 km, ~18,000x at 1,000 km, held near 250,000x in orbit; past geostationary distance
+// the cap opens with the same law, so the moon is a minute away. Free flight takes the smaller of the
+// Earth's and the moon's value, so it slows down approaching either surface.
+inline double ClearanceSpeedScale(double clearance)
+{
+    clearance = std::max(clearance, 0.0);
+    if (clearance <= 1000.0)
+        return 1.0 + clearance * .03 + clearance * clearance * .00002;
+    return std::min(51.0 * std::pow(clearance / 1000.0, 0.85),
+                    250000.0 * std::max(1.0, std::pow(clearance / 2.5e7, 0.85)));
+}
 inline float FlightSpeedScale(FlightPoint point, const GroundPatch* ground, uint64_t revision)
 {
+    // Evaluated above the actual resident ground (no sea-level boost beside a mountain).
     const auto support = FlightGround(ground, revision, point);
-    const double clearance = std::max(support ? double(point.y) - support->height : FlightAltitude(point), 0.0);
-    // Evaluated above the actual resident ground (no sea-level boost beside a mountain). Strictly rising
-    // with height: the old curve sat flat at 64x from ~1.6 km to ~5 km, so climbing bought nothing there.
-    // Precise below 1 km (51x at 1 km), then a smooth power law: ~200x at 5 km, ~2,600x at 100 km,
-    // ~18,000x at 1,000 km, capped near orbit.
-    if (clearance <= 1000.0)
-        return float(1.0 + clearance * .03 + clearance * clearance * .00002);
-    // Past geostationary distance the cap opens with distance, so the moon is a minute away, not ten.
-    return float(std::min(51.0 * std::pow(clearance / 1000.0, 0.85), 250000.0 * std::max(1.0, clearance / 2.5e7)));
+    return float(ClearanceSpeedScale(support ? double(point.y) - support->height : FlightAltitude(point)));
 }
 inline FlightPoint ConstrainFlight(FlightPoint previous, FlightPoint next, const GroundPatch* ground, uint64_t revision)
 {
@@ -71,15 +77,29 @@ inline FlightPoint ConstrainFlight(FlightPoint previous, FlightPoint next, const
 // The moon as a body free flight can reach: the same placement as sky.wgsl earth_moon_centre (the
 // topocentric ephemeris direction from the origin's ground, at the point 384,400 km from the Earth's
 // centre). The camera stops 2 km above its surface instead of flying into it.
-inline FlightPoint KeepOutsideMoon(FlightPoint p, double toMoonX, double toMoonY, double toMoonZ)
+constexpr double MoonRadius = 1.7374e6;
+inline bool MoonCentre(double toMoonX, double toMoonY, double toMoonZ, double& cx, double& cy, double& cz)
 {
     const double length = std::sqrt(toMoonX * toMoonX + toMoonY * toMoonY + toMoonZ * toMoonZ);
-    if (!std::isfinite(length) || length <= 0) return p;
+    if (!std::isfinite(length) || length <= 0) return false;
     const double dx = toMoonX / length, dy = toMoonY / length, dz = toMoonZ / length;
-    constexpr double distance = 3.844e8, keepOut = 1.7374e6 + 2000.0;
+    constexpr double distance = 3.844e8;
     const double b = Earth::Radius * dy;
     const double t = -b + std::sqrt(std::max(b * b - Earth::Radius * Earth::Radius + distance * distance, 0.0));
-    const double cx = CameraAnchor + dx * t, cy = dy * t, cz = CameraAnchor + dz * t;
+    cx = CameraAnchor + dx * t; cy = dy * t; cz = CameraAnchor + dz * t;
+    return true;
+}
+inline double MoonClearance(FlightPoint p, double toMoonX, double toMoonY, double toMoonZ)
+{
+    double cx, cy, cz;
+    if (!MoonCentre(toMoonX, toMoonY, toMoonZ, cx, cy, cz)) return 1e12;
+    return std::sqrt((p.x - cx) * (p.x - cx) + (p.y - cy) * (p.y - cy) + (p.z - cz) * (p.z - cz)) - MoonRadius;
+}
+inline FlightPoint KeepOutsideMoon(FlightPoint p, double toMoonX, double toMoonY, double toMoonZ)
+{
+    double cx, cy, cz;
+    if (!MoonCentre(toMoonX, toMoonY, toMoonZ, cx, cy, cz)) return p;
+    constexpr double keepOut = MoonRadius + 2000.0;
     const double vx = p.x - cx, vy = p.y - cy, vz = p.z - cz;
     const double d = std::sqrt(vx * vx + vy * vy + vz * vz);
     if (!(d < keepOut) || d <= 0) return p;

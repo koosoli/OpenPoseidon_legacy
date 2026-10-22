@@ -1256,17 +1256,17 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             // gets its own: the unattenuated sun (sun_diffuse.w, SubmitEarthHorizon) through the air
             // above THAT point, so the day side is white sunlight even while the origin is in night,
             // and the ground reddens toward the terminator as it does in orbital photographs.
-            // Below 6 km the weight is 0 and the frame's sun is used exactly as before.
+            // Below 12 km the weight is 0 and the frame's sun is used exactly as before.
             let local_sun = material.sun_diffuse.w * earth_sun_transmittance(sun_height,
                 length(in.world_pos + frame.cam_pos.xyz - earth_centre) - 6378137.0);
-            let sun_light = mix(frame.sun_diffuse.rgb, local_sun, smoothstep(6000.0, 30000.0, cam_altitude));
+            let sun_light = mix(frame.sun_diffuse.rgb, local_sun, smoothstep(12000.0, 50000.0, cam_altitude));
             let sky_light = mix(sky_irradiance(n) * frame.sun_ambient.w,
                                 sun_light * 0.05 * clamp(sun_height * 2.0 + 0.2, 0.0, 1.0), space);
             light = sky_light * ambient_occlusion * twilight + sun_light * daylight * sun_occlusion;
             // Sun glint off the sea, from altitude only: a wind-roughened (Beckmann m 0.2) mirror,
             // Fresnel ~0.02 at normal incidence rising toward the limb. The sea is told apart by its
             // colour (deep blue, darker than land); the imagery carries no water mask.
-            let aloft = smoothstep(6000.0, 30000.0, cam_altitude);
+            let aloft = smoothstep(12000.0, 50000.0, cam_altitude);
             if (aloft > 0.0) {
                 let water = smoothstep(0.02, 0.08, surface.b - max(surface.r, surface.g * 0.85))
                           * (1.0 - smoothstep(0.12, 0.3, dot(surface, vec3<f32>(0.2126, 0.7152, 0.0722))));

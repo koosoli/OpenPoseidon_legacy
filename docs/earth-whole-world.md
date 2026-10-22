@@ -55,7 +55,7 @@ URL templates are web-mercator XYZ: `{z} {x} {y}`, `{-y}` (TMS rows), `{q}` (qua
 
 Free flight climbs continuously from the ground to orbit: the air in front of the globe (aerial
 perspective), the sunlight on each point of the globe and the cloud layers all blend with altitude,
-and the streamed ground fades into the globe image instead of ending at a rectangle. Above 6 km the
+and the streamed ground fades into the globe image instead of ending at a rectangle. Above 12 km the
 ground is lit by the sun through its own column of air, so the terminator reddens and the day side
 stays daylit while the starting place is in night; ground-level views are unchanged.
 

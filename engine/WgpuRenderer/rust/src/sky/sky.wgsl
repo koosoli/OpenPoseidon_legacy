@@ -1333,11 +1333,11 @@ fn planet_cloud_field(n: vec3<f32>, clock: f32, footprint: f32) -> f32 {
 // glow along the terminator, and the deck and ground kept full contrast to the horizon. This is
 // the same atmosphere the sky marches (same LUTs, phases and multiscatter), integrated to the
 // scene depth instead of to the top of the air, so the ground dissolves into the limb the sky
-// pass draws behind it. Faded in with camera altitude: on the ground and up to 6 km nothing
-// changes, so ground-level dawn and dusk look exactly as before.
+// pass draws behind it. Faded in with camera altitude: on the ground and up to 12 km nothing
+// changes, so ground-level (and airliner-level) dawn and dusk look exactly as before.
 fn earth_aerial_weight() -> f32 {
     if (!earth_preview()) { return 0.0; }
-    return smoothstep(6000.0, 30000.0, length(sky_origin()) - sky.params.z);
+    return smoothstep(12000.0, 50000.0, length(sky_origin()) - sky.params.z);
 }
 fn earth_aerial(dir: vec3<f32>, scene_dist: f32) -> CloudResult {
     let w = earth_aerial_weight();
@@ -2308,8 +2308,13 @@ fn earth_moon_body(pos: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
     // Edge: soften over the outer ~0.5% of the radius, as the disc did, so the limb does not alias.
     let miss = length(oc - dir * dot(oc, dir)) / MOON_RADIUS;
     let edge = 1.0 - smoothstep(0.995, 1.0, miss);
-    // Surface radiance does not depend on distance: the disc's own on-the-ground radiance.
-    let scale = sky.moon_params.z / (2.0 * PI * (1.0 - cos(max(sky.moon_params.x, 1.0e-4))));
+    // Surface radiance does not depend on distance. From the ground the disc's radiance is deliberately
+    // far above physical (moonIntensity is a visibility choice, ~25,000x), which from space bloomed the
+    // moon into a glare ball; from space it is what it is, grey regolith (albedo ~0.12) under the same
+    // sun that lights the Earth (Lommel-Seeliger is ~2x brighter than Lambert at full phase).
+    let ground_scale = sky.moon_params.z / (2.0 * PI * (1.0 - cos(max(sky.moon_params.x, 1.0e-4))));
+    let space_scale = 0.12 / PI * sky.sun_dir.w * sky.params.y;
+    let scale = mix(ground_scale, space_scale, earth_space_weight());
     let tint = vec3<f32>(1.0, 0.97, 0.92);
     let col = tint * (brdf * albedo + max(sky.moon_sun.w, 0.0)) * edge * scale * body_transmittance(pos, normalize(centre - pos), dir);
     return vec4<f32>(col, hit.x);

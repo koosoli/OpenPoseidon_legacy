@@ -22079,7 +22079,24 @@ void EngineWgpu::PushRenderParams()
             groundMean = ground->heights.empty() ? 0.0f : float(sum / double(ground->heights.size()));
             groundMax = ground->heights.empty() ? 0.0f : highest;
         }
-        const float base = std::max({cloudBottom, groundMean + 1500.0f, groundMax + 300.0f});
+        // The resident patch is the ground around the camera at a size set by the camera's altitude band
+        // (1.6, 6.4, 25.6 km), so every new patch in a climb gave a different mean and maximum and moved
+        // the whole deck by hundreds of metres in one frame: clouds flickered with camera height. Ease
+        // the base toward the target instead (tau 20 s); the first patch of a place still sets it at once.
+        static float easedBase = 0.0f;
+        static bool easedValid = false;
+        static auto easedAt = std::chrono::steady_clock::now();
+        const float target = std::max({cloudBottom, groundMean + 1500.0f, groundMax + 300.0f});
+        const auto now = std::chrono::steady_clock::now();
+        const float dt = std::clamp(std::chrono::duration<float>(now - easedAt).count(), 0.0f, 1.0f);
+        easedAt = now;
+        // A jump of more than 3 km is a teleport to another region, not a climb: set it at once.
+        if (!easedValid || cachedGeneration == 0 || std::abs(target - easedBase) > 3000.0f)
+            easedBase = target;
+        else
+            easedBase += (target - easedBase) * (1.0f - std::exp(-dt / 20.0f));
+        easedValid = cachedGeneration != 0;
+        const float base = easedBase;
         cloudTop = base + std::max(cloudTop - cloudBottom, 200.0f);
         cloudBottom = base;
     }

@@ -2874,9 +2874,9 @@ impl Sky {
     // Clouds are drawn only on the HDR path (the composite blends linear radiance over the HDR scene)
     // and when coverage is non-zero. lib.rs gates the cloud pass + composite on this.
     pub fn clouds_active(&self, sky: &WgrSky) -> bool {
-        // Whole world above 6 km: the same pass carries the air in front of the globe
+        // Whole world above 12 km: the same pass carries the air in front of the globe
         // (sky.wgsl earth_aerial), which a clear sky needs as much as a cloudy one.
-        let earth_aerial = sky.cloud4[3] > 0.5 && sky.night_zenith[3] > 6000.0;
+        let earth_aerial = sky.cloud4[3] > 0.5 && sky.night_zenith[3] > 12000.0;
         self.linear > 0.5 && (sky.cloud0[0] > 0.001 || earth_aerial)
     }
 

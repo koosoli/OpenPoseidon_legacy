@@ -431,6 +431,13 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
                 fmax(Position()[1] - GLandscape->SurfaceYAboveWater(Position()[0],Position()[2]),0.0f);
             speedScale = earth ? EarthStreaming::FlightSpeedScale(earthPrevious, earthGround.get(), earthLocation.revision) :
                 fmin(1.0f + altitude * 0.03f + altitude * altitude * 0.00002f, 64.0f);
+            if (earth && GScene && GScene->MainLight())
+            {
+                // Slow down approaching the moon as well as the Earth (EarthFreeFlight.hpp).
+                const Vector3 toMoon = -GScene->MainLight()->MoonDirection();
+                speedScale = fmin(speedScale, float(EarthStreaming::ClearanceSpeedScale(
+                    EarthStreaming::MoonClearance(earthPrevious, toMoon.X(), toMoon.Y(), toMoon.Z()))));
+            }
 
             // Shift is an absolute two-times multiplier for Zeus flight: it
             // accelerates sideways, vertical, and forward movement equally.
