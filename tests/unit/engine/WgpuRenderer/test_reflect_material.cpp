@@ -104,6 +104,22 @@ int main()
     part.texture = "data\\v3s_odrazka_l.paa";
     assert(ClassOf(part) == SurfaceClass::LampGlass);
 
+    // Arma 1/2 Hilux: mirror.rvmat on the body atlas is shiny paint, not a mirror.
+    Inputs hilux;
+    hilux.isVehicle = true;
+    hilux.texture = "data\\coyota_trup1.paa";
+    hilux.material = "mirror.rvmat";
+    hilux.hasEnvMap = true;
+    assert(ClassOf(hilux) == SurfaceClass::PaintMetallic);
+    hilux.texture = "data\\hilux_pristroje.paa";
+    hilux.material = "data\\default.rvmat";
+    assert(ClassOf(hilux) == SurfaceClass::Plastic);
+    Inputs a3mirror; // a mirror material on a non-body texture stays a mirror
+    a3mirror.isVehicle = true;
+    a3mirror.texture = "#(argb,8,8,3)color(0.75,0.75,0.75,1.0,co)";
+    a3mirror.material = "a3\\data_f\\mirror.rvmat";
+    assert(ClassOf(a3mirror) == SurfaceClass::Mirror);
+
     // Declared entries win over every rule and may override single values.
     Inputs own;
     own.texture = "\\p406\\tex\\glass.paa";
