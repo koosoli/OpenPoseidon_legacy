@@ -172,6 +172,15 @@ void FillReflectLanes(WgrDraw3D& d, const Object* owner, const Texture* texture,
             {
                 const TargetSide side = type->GetTypicalSide();
                 military = side == TEast || side == TWest || side == TGuerrila;
+                // A civilian class name wins over the side: the first logged run (2026-10-22)
+                // read Arma 3's C_Van_01_transport_F as military (its side comes from a base
+                // class), which painted a white civilian van matt.
+                if (military)
+                {
+                    const std::string cls = RM::Normalise(type->GetName().Data());
+                    if (cls.rfind("c_", 0) == 0 || cls.find("civ") != std::string::npos)
+                        military = false;
+                }
             }
         }
     }
