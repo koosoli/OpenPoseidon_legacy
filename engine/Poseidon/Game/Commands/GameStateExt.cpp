@@ -854,6 +854,7 @@ GameValue ObjSetRepairCargo(const GameState* state, GameValuePar oper1, GameValu
 GameValue ObjSetSelectionDammage(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetSkill(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetTexture(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjSetMaterial(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetUnitPos(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetVectorDir(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetVectorDirectionAndUp(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -2318,6 +2319,8 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "setSkill", function, ObjSetSkill, GameObject, GameScalar),
 
         GameOperator(GameNothing, "setObjectTexture", function, ObjSetTexture, GameObject, GameArray),
+        GameOperator(GameNothing, "setObjectMaterial", function, ObjSetMaterial, GameObject, GameArray),
+        GameOperator(GameNothing, "setObjectMaterialGlobal", function, ObjSetMaterial, GameObject, GameArray),
 
         GameOperator(GameNothing, "saveConfig", function, ConfigSave, GameFile, GameString),
         GameOperator(GameVoid, "dbGet", function, DatabaseGet, GameDatabase, GameArray),

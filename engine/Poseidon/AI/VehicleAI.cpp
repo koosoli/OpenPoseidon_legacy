@@ -956,6 +956,10 @@ void EntityAIType::InitShape()
     if (const ParamEntry* textures = par.FindEntry("hiddenSelectionsTextures"); textures && textures->IsArray())
         for (int i = 0; i < textures->GetSize() && i < _hiddenSelections.Size(); i++)
             _hiddenSelectionsTextureNames.Add((RString)(RStringB)(*textures)[i]);
+    _hiddenSelectionsMaterialNames.Clear();
+    if (const ParamEntry* materials = par.FindEntry("hiddenSelectionsMaterials"); materials && materials->IsArray())
+        for (int i = 0; i < materials->GetSize() && i < _hiddenSelections.Size(); i++)
+            _hiddenSelectionsMaterialNames.Add((RString)(RStringB)(*materials)[i]);
 
     // reload animations
     const ParamEntry* array = par.FindEntry("ReloadAnimations");
@@ -1248,6 +1252,20 @@ EntityAI::EntityAI(EntityAIType* type, bool fullCreate)
         lower.Lower();
         _hiddenSelectionsTextures[i] = GlobLoadTexture(lower);
     }
+    _hiddenSelectionsMaterials.Realloc(type->_hiddenSelections.Size());
+    _hiddenSelectionsMaterials.Resize(type->_hiddenSelections.Size());
+    for (int i = 0; i < type->_hiddenSelectionsMaterialNames.Size() && i < _hiddenSelectionsMaterials.Size(); i++)
+    {
+        RString name = type->_hiddenSelectionsMaterialNames[i];
+        if (name.GetLength() == 0)
+            continue;
+        const char* path = name.Data();
+        if (*path == '\\')
+            path++;
+        RString lower = path;
+        lower.Lower();
+        _hiddenSelectionsMaterials[i] = GTexMaterialBank.New(lower.Data());
+    }
 }
 
 EntityAI::~EntityAI()
@@ -1268,6 +1286,14 @@ void EntityAI::SetObjectTexture(int index, Texture* texture)
     if (index >= 0 && index < _hiddenSelectionsTextures.Size())
     {
         _hiddenSelectionsTextures[index] = texture;
+    }
+}
+
+void EntityAI::SetObjectMaterial(int index, TexMaterial* material)
+{
+    if (index >= 0 && index < _hiddenSelectionsMaterials.Size())
+    {
+        _hiddenSelectionsMaterials[index] = material;
     }
 }
 

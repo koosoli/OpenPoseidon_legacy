@@ -378,6 +378,10 @@ protected:
 
 	//! Textures on hidden selections
 	RefArray<Texture> _hiddenSelectionsTextures;
+	// REFLECT-001 B2: material per hidden selection (hiddenSelectionsMaterials, setObjectMaterial),
+	// null = the model's own; and the section materials it replaced between Animate and Deanimate.
+	RefArray<TexMaterial> _hiddenSelectionsMaterials;
+	AutoArray<SavedSectionMaterial> _hiddenSelectionsSavedMaterials;
 
 	//! user defined actions
 	//! List of all user defined actions
@@ -768,6 +772,7 @@ protected:
 
 	//! Change texture in hiddenSelections
 	void SetObjectTexture(int index, Texture *texture);
+	void SetObjectMaterial(int index, TexMaterial *material);
 
 	/*!
 	\name Flag support
