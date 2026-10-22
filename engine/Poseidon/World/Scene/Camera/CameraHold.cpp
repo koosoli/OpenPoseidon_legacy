@@ -20,6 +20,7 @@
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <SDL3/SDL_scancode.h>
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -478,6 +479,14 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
             if (next.z != position[2]) _speed[2] = 0;
             if (next.y != position[1]) _speed[1] = 0;
             position = Vector3(next.x,next.y,next.z);
+            if (GScene && GScene->MainLight())
+            {
+                const Vector3 toMoon = -GScene->MainLight()->MoonDirection();
+                const auto outside = EarthStreaming::KeepOutsideMoon({position[0],position[1],position[2]},
+                    toMoon.X(), toMoon.Y(), toMoon.Z());
+                if (outside.x != position[0] || outside.y != position[1] || outside.z != position[2]) _speed = VZero;
+                position = Vector3(outside.x,outside.y,outside.z);
+            }
         }
         if (_altitudeSpeedScaling)
         {
@@ -501,7 +510,7 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
                     const Earth::Coordinate oldOrigin{earthLocation.latitude,earthLocation.longitude};
                     if (const auto next = Earth::CameraRebase(oldOrigin,position[0],position[1],position[2]))
                     {
-                        const double altitude = std::clamp(next->altitude,double(EarthStreaming::FreeFlightAltitudeMinimum),double(EarthStreaming::OrbitAltitudeLimit));
+                        const double altitude = std::clamp(next->altitude,double(EarthStreaming::FreeFlightAltitudeMinimum),double(EarthStreaming::FlightAltitudeLimit));
                         if (EarthStreaming::ValidateFlightLocation(next->origin.latitude,next->origin.longitude,altitude))
                         {
                             if (!EarthStreaming::Locations().Rebase(earthLocation.revision,

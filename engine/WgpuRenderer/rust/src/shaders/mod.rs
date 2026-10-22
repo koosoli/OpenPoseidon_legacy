@@ -69,6 +69,13 @@ pub fn early_depth_supported() -> bool {
 
 pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compose::ShaderDefValue> {
     let mut defs = std::collections::HashMap::new();
+    // Whole-world (Earth) shading exists only in a whole-world process. Without the define every
+    // Earth path folds to a constant-false branch the driver removes, so the island game's sky and
+    // object shaders carry none of it (unexecuted code still costs registers and occupancy).
+    // Tests always compile them: they validate the Earth paths too.
+    if cfg!(test) || std::env::var("POSEIDON_WHOLE_WORLD").as_deref() == Ok("1") {
+        defs.insert("WHOLE_WORLD".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
     if std::env::var("WGR_TREE_SNOW").as_deref() == Ok("0") {
         defs.insert("DISABLE_TREE_SNOW".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }

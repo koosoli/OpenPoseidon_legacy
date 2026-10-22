@@ -41,13 +41,27 @@ URL templates are web-mercator XYZ: `{z} {x} {y}`, `{-y}` (TMS rows), `{q}` (qua
 * **Imagery:** a 2048² near atlas (warped toward the camera) and a 4096² far atlas warped toward the
   near window, filled from nested provider rings, each ring 4× wider at its own zoom. Measured over
   Manhattan at 450 m: zoom 18 under the camera, zoom 9 at the horizon. Tiles already on disk are shown
-  first; downloads replace them as they arrive. Transient failures are retried.
+  first; downloads replace them as they arrive. Transient failures are retried. Downloads reuse
+  warm connections and TLS sessions, sixteen at a time in a rolling pool, and the tiles under the
+  camera are fetched and shown before the wide outer rings.
 * **Elevation:** a 257² near patch: 6.25 m grid (zoom 14) below 1.5 km altitude, 25 m (zoom 12) below
   8 km, 100 m (zoom 10) above; a curved horizon to the visible radius.
 * **OpenStreetMap:** buildings extruded from `height` / `building:levels` (up to 900 m), roads,
   waterways, forests, per 0.02° cell, a 3×3 cell neighbourhood around the camera. Opt-in because the
   public Overpass server is shared: one request at a time, failed cells wait a minute, every cell is
   cached. Point `content_url` at your own Overpass instance for heavy use.
+
+## Flying to space and to the moon
+
+Free flight climbs continuously from the ground to orbit: the air in front of the globe (aerial
+perspective), the sunlight on each point of the globe and the cloud layers all blend with altitude,
+and the streamed ground fades into the globe image instead of ending at a rectangle. Above 6 km the
+ground is lit by the sun through its own column of air, so the terminator reddens and the day side
+stays daylit while the starting place is in night; ground-level views are unchanged.
+
+From orbit the moon is a body 384,400 km from the Earth's centre (real ephemeris direction): it shows
+parallax, grows as you approach, and free flight can travel to it (the camera stops 2 km above its
+surface). The Go/menu altitude stays limited to 30,000 km; flight itself reaches 450,000 km.
 
 ## Script commands
 

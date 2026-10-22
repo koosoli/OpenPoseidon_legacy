@@ -3953,7 +3953,7 @@ TerrainWgpu::~TerrainWgpu()
 void TerrainWgpu::UploadEarthGlobe(double latitude,double longitude)
 {
     EngineWgpu::AcquireProducerWindow("Earth globe");
-    constexpr int rows=128, cols=256;
+    constexpr int rows=256, cols=512; // ~0.7 degree facets: the limb stays round when the globe fills the view
     std::vector<WgrMeshVertex> vertices((rows+1)*(cols+1));
     std::vector<uint32_t> indices;
     indices.reserve(rows*cols*6);
@@ -4223,7 +4223,17 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
     _engine.SubmitEarthHorizon(_earthGlobeMesh,_earthGlobeIndices,_earthGlobeTexture);
     // Orbit needs only the fixed global overview. Do not download finer terrain
     // that covers less than one pixel at this distance.
-    if (camera.Position().Y()>500000.0f) return;
+    if (camera.Position().Y()>500000.0f)
+    {
+        // Keep drawing the streamed ground already resident (its outer ring fades into the globe
+        // image): dropping it at this line was a visible pop to the coarse globe in the climb.
+        if(_earthPatch)
+        {
+            _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices,_earthFarTexture?_earthFarTexture:_earthGlobeTexture,_earthFarTexture?3:2,true);
+            if(_earthSurface)_engine.SubmitEarthHorizon(_earthNearMesh,_earthNearIndices,_earthSurfaceTexture?_earthSurfaceTexture:_earthGlobeTexture,_earthSurfaceTexture?3:2,true,_earthSurfaceTexture != 0);
+        }
+        return;
+    }
     _earthStream->Request(camera.Position().X(), camera.Position().Z(),camera.Position().Y(),origin);
     // Installs a patch as the drawn terrain (mesh, heightmap). Without an atlas for it yet, the draw
     // falls back to the globe image until one arrives.

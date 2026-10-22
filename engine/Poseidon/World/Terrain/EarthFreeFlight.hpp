@@ -36,7 +36,8 @@ inline float FlightSpeedScale(FlightPoint point, const GroundPatch* ground, uint
     // ~18,000x at 1,000 km, capped near orbit.
     if (clearance <= 1000.0)
         return float(1.0 + clearance * .03 + clearance * clearance * .00002);
-    return float(std::min(51.0 * std::pow(clearance / 1000.0, 0.85), 250000.0));
+    // Past geostationary distance the cap opens with distance, so the moon is a minute away, not ten.
+    return float(std::min(51.0 * std::pow(clearance / 1000.0, 0.85), 250000.0 * std::max(1.0, clearance / 2.5e7)));
 }
 inline FlightPoint ConstrainFlight(FlightPoint previous, FlightPoint next, const GroundPatch* ground, uint64_t revision)
 {
@@ -64,8 +65,26 @@ inline FlightPoint ConstrainFlight(FlightPoint previous, FlightPoint next, const
         else next.y = std::max(next.y, FlightYAtAltitude(next.x, next.z, UnknownFlightAltitude));
     }
     next.y = std::clamp(next.y, FlightYAtAltitude(next.x, next.z, FreeFlightAltitudeMinimum),
-        FlightYAtAltitude(next.x, next.z, OrbitAltitudeLimit));
+        FlightYAtAltitude(next.x, next.z, FlightAltitudeLimit));
     return next;
+}
+// The moon as a body free flight can reach: the same placement as sky.wgsl earth_moon_centre (the
+// topocentric ephemeris direction from the origin's ground, at the point 384,400 km from the Earth's
+// centre). The camera stops 2 km above its surface instead of flying into it.
+inline FlightPoint KeepOutsideMoon(FlightPoint p, double toMoonX, double toMoonY, double toMoonZ)
+{
+    const double length = std::sqrt(toMoonX * toMoonX + toMoonY * toMoonY + toMoonZ * toMoonZ);
+    if (!std::isfinite(length) || length <= 0) return p;
+    const double dx = toMoonX / length, dy = toMoonY / length, dz = toMoonZ / length;
+    constexpr double distance = 3.844e8, keepOut = 1.7374e6 + 2000.0;
+    const double b = Earth::Radius * dy;
+    const double t = -b + std::sqrt(std::max(b * b - Earth::Radius * Earth::Radius + distance * distance, 0.0));
+    const double cx = CameraAnchor + dx * t, cy = dy * t, cz = CameraAnchor + dz * t;
+    const double vx = p.x - cx, vy = p.y - cy, vz = p.z - cz;
+    const double d = std::sqrt(vx * vx + vy * vy + vz * vz);
+    if (!(d < keepOut) || d <= 0) return p;
+    const double k = keepOut / d;
+    return {float(cx + vx * k), float(cy + vy * k), float(cz + vz * k)};
 }
 inline FlightPoint ZoomFlight(FlightPoint previous, float wheelSteps, const GroundPatch* ground, uint64_t revision)
 {

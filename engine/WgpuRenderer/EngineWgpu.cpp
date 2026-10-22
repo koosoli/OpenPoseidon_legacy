@@ -7997,7 +7997,10 @@ void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTextur
     // Receives the normal frame's sun, sky, atmosphere and depth; no post pass.
     const float r = texture ? 1.0f : .35f, g = texture ? 1.0f : .32f, b = texture ? 1.0f : .26f;
     d.mat_sun_ambient = {ambient.R()*r,ambient.G()*g,ambient.B()*b,0};
-    d.mat_sun_diffuse = {diffuse.R()*r,diffuse.G()*g,diffuse.B()*b,0};
+    // .w: the sun above the atmosphere on the sky-lit scale (the radiance the frame's sun_diffuse
+    // is this times the air's transmittance at the camera). From altitude the shader lights each
+    // point of the globe with it through that point's own air (shader3d earth_sun_transmittance).
+    d.mat_sun_diffuse = {diffuse.R()*r,diffuse.G()*g,diffuse.B()*b,_sky.sunIntensity*_sky.exposure};
     if (groundDetail)
     {
         const auto origin = EarthStreaming::Locations().Get();

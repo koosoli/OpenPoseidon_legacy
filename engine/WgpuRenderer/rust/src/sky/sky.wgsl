@@ -456,7 +456,12 @@ fn hash21(p: vec2<f32>) -> f32 {
 // Star radiance alone: the catalogue field + the Milky Way band, gated to night by sun altitude
 // and scaled by the master gain (Dev Tools -> Sky -> Stars -> "Star brightness"). Split out of
 // sky_radiance so a caller can ask for a STAR-FREE sky; see sky_radiance_weighted.
+#ifdef WHOLE_WORLD
 fn earth_preview() -> bool { return sky.cam_pos.w < -0.5; }
+#else
+// Not a whole-world process (shaders::shader_defs): every Earth branch is compiled out.
+fn earth_preview() -> bool { return false; }
+#endif
 fn earth_forward_sphere_hit(interval: vec2<f32>) -> bool {
     return interval.x > 0.0 && interval.x <= interval.y;
 }
@@ -467,6 +472,22 @@ fn sky_origin() -> vec3<f32> {
                          sky.cam_pos.z - 6400.0);
     }
     return vec3<f32>(0.0, sky.params.z + max(sky.night_zenith.w, 0.0), 0.0);
+}
+// Transmittance toward a celestial body. Inside the atmosphere this is exactly the LUT lookup
+// from the camera; from above it (Earth free flight) the camera itself sees no air, so the LUT
+// at the camera would call every sun white -- the light really crosses the chord where this
+// pixel's ray enters the atmosphere: the sun through the limb reddens and dims as it sets
+// behind the Earth, and is untouched where the ray misses the air entirely.
+fn body_transmittance(pos: vec3<f32>, body: vec3<f32>, ray: vec3<f32>) -> vec3<f32> {
+    let top_r = sky.params.z + sky.params.w;
+    if (!earth_preview() || dot(pos, pos) <= top_r * top_r) {
+        return sample_transmittance(pos, body);
+    }
+    let atmo = ray_sphere(pos, ray, top_r);
+    if (atmo.x > 0.0 && atmo.x <= atmo.y) {
+        return sample_transmittance(pos + ray * atmo.x, ray);
+    }
+    return vec3<f32>(1.0);
 }
 fn earth_space_weight() -> f32 {
     if (!earth_preview()) { return 0.0; }
@@ -1198,8 +1219,21 @@ struct CloudResult {
 // Distant Earth clouds use a single spherical sheet with broad weather banks. Three
 // samples of the existing noise volume replace the local cloud march above 60 km.
 // This is a visual cloud envelope, not global weather simulation or satellite data.
-fn earth_planet_cloud(dir: vec3<f32>, max_dist: f32) -> CloudResult {
+// The scene distance along an Earth ray, with "the globe" snapped to the sea-level sphere. From
+// thousands of km the depth buffer resolves the globe only to tens of km (and the mesh sits up to
+// ~300 m under sea level: ocean offset, facet sag), so anything compared with the raw depth --
+// where the air ends, whether the cloud shell is in front -- striped in a grid. Only a surface
+// clearly in front of the sphere (mountains, anything near) keeps its own depth.
+fn earth_scene_dist(pos: vec3<f32>, dir: vec3<f32>, scene_dist: f32) -> f32 {
+    let ground = ray_sphere(pos, dir, sky.params.z);
+    if (earth_forward_sphere_hit(ground) && scene_dist > ground.x - (0.02 * ground.x + 10000.0)) {
+        return ground.x;
+    }
+    return scene_dist;
+}
+fn earth_planet_cloud(dir: vec3<f32>, max_dist_in: f32) -> CloudResult {
     let pos = sky_origin();
+    let max_dist = earth_scene_dist(pos, dir, max_dist_in);
     let shell = ray_sphere(pos, dir, sky.params.z + 5500.0);
     let t = select(shell.y, shell.x, shell.x > 0.0);
     if (shell.x > shell.y || t <= 0.0 || t >= max_dist || sky.cloud0.x <= 0.001) {
@@ -1213,26 +1247,151 @@ fn earth_planet_cloud(dir: vec3<f32>, max_dist: f32) -> CloudResult {
     let north = vec3<f32>(-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat));
     let up = vec3<f32>(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat));
     let n = east * local_n.x + up * local_n.y + north * local_n.z;
-    // Only the weather clock drifts this layer; the deck's wind offset is a local-map quantity.
-    let drift = vec3<f32>(0.0, sky.cloud4.z * 0.05, 0.0) / 2000000.0;
-    let broad = textureSampleLevel(cloud_noise, cloud_samp, n * 2.8 - drift, 0.0).r;
-    let bands = textureSampleLevel(cloud_noise, cloud_samp,
-                                  n * 7.0 + vec3<f32>(broad * 0.28) - drift, 0.0).r;
-    let fine = textureSampleLevel(cloud_noise, cloud_samp, n * 24.0 - drift, 0.0).g;
-    let field = broad * 0.72 + bands * 0.23 + fine * 0.05;
-    let threshold = mix(0.63, 0.34, clamp(sky.cloud0.x, 0.0, 1.0));
-    let cover = smoothstep(threshold - 0.045, threshold + 0.09, field);
-    let opacity = cover * 0.92;
+    // The field is procedural on the unit sphere. It used to sample the deck's 3D noise volume, which
+    // is built for a horizontal deck (its Y axis is the morph axis, not space), so on a sphere it
+    // streaked into parallel lines, and three fixed taps aliased from far away. Isotropic gradient
+    // noise, domain-warped into swirls, octaves faded by the pixel footprint so a distant globe gets
+    // smooth cloud and a close one gets detail. The weather clock morphs it slowly in place.
+    let clock = sky.cloud4.z * 0.05 / 2000000.0;
+    // Pixel footprint on the unit sphere: ~one low-res cloud pixel at this distance.
+    let footprint = t * 0.003 / sky.params.z;
+    let field = planet_cloud_field(n, clock, footprint);
+    // Climate: the tropical convergence band and the mid-latitude storm tracks are cloudy, the
+    // subtropical highs (deserts, trade-wind seas) clear. n.z is the sine of latitude.
+    let band = abs(asin(clamp(n.z, -1.0, 1.0))) * (180.0 / PI);
+    let climate = 0.30 * exp(-band * band / 60.0) + 0.28 * exp(-(band - 55.0) * (band - 55.0) / 300.0)
+                - 0.22 * exp(-(band - 24.0) * (band - 24.0) / 90.0);
+    let coverage = clamp(sky.cloud0.x, 0.0, 1.0);
+    let density = field + climate + (coverage - 0.5) * 0.7 - 0.05;
+    let opacity = smoothstep(0.0, 0.32, density) * 0.95;
+    if (opacity <= 0.002) {
+        return CloudResult(vec3<f32>(0.0), 1.0);
+    }
     let sun = normalize(sky.sun_dir.xyz);
-    // Lighting stays in the tangent frame the sun direction is expressed in.
-    let daylight = max(dot(local_n, sun), 0.0);
-    let sun_t = sample_transmittance(local_n * (sky.params.z + 5500.0), sun);
+    // Lighting stays in the tangent frame the sun direction is expressed in. Tops ~7 km catch the sun
+    // a little past the ground's terminator and take its reddened light (the LUT at that height).
+    let mu = dot(local_n, sun);
+    let daylight = smoothstep(-0.02, 0.12, mu) * max(mu, 0.0) * 0.6 + smoothstep(-0.03, 0.05, mu) * 0.4;
+    let sun_t = sample_transmittance(local_n * (sky.params.z + 7000.0), sun);
     // The sky-light ambient belongs to the day side: across the terminator it fades to a trace, or the
     // night half of the globe showed bright cloud blobs over black ground.
-    let ambient = vec3<f32>(0.018, 0.027, 0.045) * mix(0.04, 1.0, smoothstep(-0.25, 0.05, dot(local_n, sun)));
-    let lit = (ambient + sun_t * daylight *
-               (sky.sun_dir.w * sky.params.y / PI)) * mix(0.72, 1.0, fine);
+    let ambient = vec3<f32>(0.018, 0.027, 0.045) * mix(0.04, 1.0, smoothstep(-0.25, 0.05, mu));
+    // Thick cores read bright, thin edges grey and translucent.
+    let body = mix(0.68, 1.0, smoothstep(0.05, 0.6, density));
+    let lit = (ambient + sun_t * daylight * (sky.sun_dir.w * sky.params.y / PI)) * body;
     return CloudResult(lit * opacity, 1.0 - opacity);
+}
+
+// Integer-lattice gradient noise in 3D (quintic fade), roughly in [-1, 1].
+fn planet_hash(c: vec3<i32>) -> vec3<f32> {
+    var h = vec3<u32>(bitcast<u32>(c.x), bitcast<u32>(c.y), bitcast<u32>(c.z));
+    h = h * vec3<u32>(1664525u, 1013904223u, 2654435761u) + vec3<u32>(1013904223u, 1664525u, 374761393u);
+    h.x += h.y * h.z; h.y += h.z * h.x; h.z += h.x * h.y;
+    h = h ^ (h >> vec3<u32>(16u));
+    h.x += h.y * h.z; h.y += h.z * h.x; h.z += h.x * h.y;
+    return vec3<f32>(h & vec3<u32>(0xffffu)) / 32767.5 - 1.0;
+}
+fn planet_noise(p: vec3<f32>) -> f32 {
+    let i = vec3<i32>(floor(p));
+    let f = p - floor(p);
+    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    var acc = 0.0;
+    for (var k = 0; k < 8; k++) {
+        let o = vec3<i32>(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+        let d = dot(planet_hash(i + o), f - vec3<f32>(o));
+        let w = select(1.0 - u.x, u.x, o.x == 1) * select(1.0 - u.y, u.y, o.y == 1) * select(1.0 - u.z, u.z, o.z == 1);
+        acc += d * w;
+    }
+    return acc * 1.6;
+}
+// fBm whose octaves fade out once their wavelength nears the pixel footprint (no aliasing from orbit).
+fn planet_fbm(p: vec3<f32>, octaves: i32, footprint: f32) -> f32 {
+    var sum = 0.0;
+    var amp = 0.5;
+    var freq = 1.0;
+    for (var o = 0; o < octaves; o++) {
+        let keep = 1.0 - smoothstep(0.25, 1.0, footprint * freq * 4.0);
+        sum += planet_noise(p * freq + vec3<f32>(f32(o) * 17.3)) * amp * keep;
+        freq *= 2.03;
+        amp *= 0.5;
+    }
+    return sum;
+}
+fn planet_cloud_field(n: vec3<f32>, clock: f32, footprint: f32) -> f32 {
+    let base = n * 3.2 + vec3<f32>(0.0, 0.0, clock);
+    // Two warps: the broad one bends banks into fronts and swirls, the fine one frays their edges.
+    let warp = vec3<f32>(planet_fbm(base + vec3<f32>(5.2, 1.3, 2.8), 3, footprint * 3.2),
+                         planet_fbm(base + vec3<f32>(1.7, 9.2, 4.1), 3, footprint * 3.2),
+                         planet_fbm(base + vec3<f32>(8.3, 2.8, 7.4), 3, footprint * 3.2));
+    let q = base + warp * 1.1;
+    return planet_fbm(q, 7, footprint * 3.2);
+}
+
+// Whole world: the atmosphere between the camera and the globe surface (aerial perspective).
+// The Earth surface shader applies only the layered ground fog, so from altitude the planet was
+// lit ground with no air in front of it: no blue veil thickening toward the limb, no twilight
+// glow along the terminator, and the deck and ground kept full contrast to the horizon. This is
+// the same atmosphere the sky marches (same LUTs, phases and multiscatter), integrated to the
+// scene depth instead of to the top of the air, so the ground dissolves into the limb the sky
+// pass draws behind it. Faded in with camera altitude: on the ground and up to 6 km nothing
+// changes, so ground-level dawn and dusk look exactly as before.
+fn earth_aerial_weight() -> f32 {
+    if (!earth_preview()) { return 0.0; }
+    return smoothstep(6000.0, 30000.0, length(sky_origin()) - sky.params.z);
+}
+fn earth_aerial(dir: vec3<f32>, scene_dist: f32) -> CloudResult {
+    let w = earth_aerial_weight();
+    if (w <= 0.0 || scene_dist > 1e11) { return CloudResult(vec3<f32>(0.0), 1.0); }
+    let pos = sky_origin();
+    let atmo = ray_sphere(pos, dir, sky.params.z + sky.params.w);
+    let begin = max(atmo.x, 0.0);
+    // The globe ends on the sea-level sphere, not on the coarse depth (earth_scene_dist).
+    let end = min(atmo.y, earth_scene_dist(pos, dir, scene_dist));
+    if (atmo.x > atmo.y || end <= begin) { return CloudResult(vec3<f32>(0.0), 1.0); }
+    let sun = normalize(sky.sun_dir.xyz);
+    let cos_t = dot(dir, sun);
+    let rp = rayleigh_phase(cos_t);
+    let mp = mie_phase(cos_t);
+    // The air is densest at the far (ground) end of a downward ray: squared spacing puts the
+    // samples there, and at the low point of a grazing one near the limb.
+    let steps = 20.0;
+    var lum = vec3<f32>(0.0);
+    var trans = vec3<f32>(1.0);
+    var t = begin;
+    for (var i = 1.0; i <= steps; i += 1.0) {
+        let u = i / steps;
+        let new_t = begin + (end - begin) * (1.0 - (1.0 - u) * (1.0 - u));
+        let dt = new_t - t;
+        let p = pos + dir * (t + 0.5 * dt);
+        t = new_t;
+        let m = scattering_values(p);
+        let sample_trans = exp(-dt * m.extinction);
+        let sun_t = sample_transmittance(p, sun);
+        let psi = sample_multiscatter(p, sun);
+        let in_scat = m.rayleigh * (rp * sun_t + psi) + vec3<f32>(m.mie) * (mp * sun_t + psi);
+        lum += (in_scat - in_scat * sample_trans) / max(m.extinction, vec3<f32>(1e-9)) * trans;
+        trans = trans * sample_trans;
+    }
+    let radiance = sky.sun_dir.w * sky.params.y;
+    // Mono transmittance: the composite blends with one alpha. Luminance-weighted keeps the
+    // brightness right; the blue cast comes from the in-scatter, which is what the eye sees of it.
+    let t_mono = dot(trans, vec3<f32>(0.2126, 0.7152, 0.0722));
+    return CloudResult(lum * radiance * w, mix(1.0, t_mono, w));
+}
+// Air in front of the clouds in front of the ground: out = air + T_air * (cloud + T_cloud * scene).
+// Also: no clouds in space. A ray that misses the planet only grazes the decks edge-on above the
+// limb, where a sheet drawn at full opacity read as cloud floating against black space (and the
+// half-resolution march smeared it past the globe's silhouette). From 15 km up such rays lose their
+// cloud smoothly; at 30 km the decks exist only in front of the ground.
+fn with_earth_aerial(cloud_in: CloudResult, dir: vec3<f32>, scene_dist: f32) -> CloudResult {
+    var cloud = cloud_in;
+    let pos = sky_origin();
+    if (scene_dist > 1e11 && !earth_forward_sphere_hit(ray_sphere(pos, dir, sky.params.z))) {
+        let space = smoothstep(15000.0, 30000.0, length(pos) - sky.params.z);
+        cloud = CloudResult(cloud.inscatter * (1.0 - space), mix(cloud.trans, 1.0, space));
+    }
+    let air = earth_aerial(dir, scene_dist);
+    return CloudResult(air.inscatter + cloud.inscatter * air.trans, cloud.trans * air.trans);
 }
 
 // March the cloud shell and return raw (inscatter, transmittance) — NOT composited over the
@@ -2111,13 +2270,63 @@ fn cloud_over_cirrus(deck: CloudResult, cirrus: CloudResult) -> CloudResult {
 // what makes the real moon read as a flat disc instead of a shaded ball: the regolith is a
 // deep, dark, porous scattering layer, and a Lambert full moon has obviously wrong dark
 // limbs.
+// Whole world: the moon as a body. The ephemeris direction is topocentric (from the origin's
+// ground, sky-frame (0, R, 0)), so the body sits along it at the point 384,400 km from the Earth's
+// centre: it stays put in space as free flight rebases the origin, shows parallax from orbit, grows
+// as the camera approaches, and can be flown to. Near side toward the Earth (tidally locked), with
+// procedural maria; lit by the same Lommel-Seeliger law and radiance the disc uses on the ground.
+const MOON_DISTANCE: f32 = 3.844e8;
+const MOON_RADIUS: f32 = 1.7374e6;
+fn earth_moon_centre() -> vec3<f32> {
+    let moon = normalize(sky.moon_dir.xyz);
+    let r = sky.params.z;
+    let b = r * moon.y;
+    return vec3<f32>(0.0, r, 0.0) + moon * (-b + sqrt(max(b * b - r * r + MOON_DISTANCE * MOON_DISTANCE, 0.0)));
+}
+// rgb = radiance, w = hit distance (-1 = miss).
+fn earth_moon_body(pos: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
+    if (sky.moon_params.w < 0.5) { return vec4<f32>(0.0, 0.0, 0.0, -1.0); }
+    let centre = earth_moon_centre();
+    let oc = pos - centre;
+    let hit = ray_sphere(oc, dir, MOON_RADIUS);
+    if (!earth_forward_sphere_hit(hit)) { return vec4<f32>(0.0, 0.0, 0.0, -1.0); }
+    let n = normalize(oc + dir * hit.x);
+    let l = normalize(sky.moon_sun.xyz);
+    let lit = max(dot(n, l), 0.0);
+    let ndv = max(dot(n, -dir), 0.0);
+    let brdf = mix(lit / max(lit + ndv, 1.0e-3), lit, 0.15);
+    // Moon-fixed frame: w toward the Earth, u/v from the Earth's spin axis in this tangent frame.
+    let w = normalize(-centre);
+    let axis = vec3<f32>(0.0, sin(sky.earth_frame.x), cos(sky.earth_frame.x));
+    let u = normalize(cross(axis, w));
+    let v = cross(w, u);
+    let q = vec3<f32>(dot(n, u), dot(n, v), dot(n, w));
+    let footprint = hit.x * 0.0015 / MOON_RADIUS;
+    let maria = smoothstep(0.02, 0.3, planet_fbm(q * 1.7 + vec3<f32>(3.1), 4, footprint * 1.7));
+    let grain = planet_fbm(q * 14.0, 4, footprint * 14.0);
+    let albedo = (1.0 - 0.42 * maria) * (1.0 + 0.12 * grain);
+    // Edge: soften over the outer ~0.5% of the radius, as the disc did, so the limb does not alias.
+    let miss = length(oc - dir * dot(oc, dir)) / MOON_RADIUS;
+    let edge = 1.0 - smoothstep(0.995, 1.0, miss);
+    // Surface radiance does not depend on distance: the disc's own on-the-ground radiance.
+    let scale = sky.moon_params.z / (2.0 * PI * (1.0 - cos(max(sky.moon_params.x, 1.0e-4))));
+    let tint = vec3<f32>(1.0, 0.97, 0.92);
+    let col = tint * (brdf * albedo + max(sky.moon_sun.w, 0.0)) * edge * scale * body_transmittance(pos, normalize(centre - pos), dir);
+    return vec4<f32>(col, hit.x);
+}
+
 fn moon_disc(dir: vec3<f32>, pos: vec3<f32>) -> vec3<f32> {
     if (sky.moon_params.w < 0.5) {
         return vec3<f32>(0.0);
     }
     let moon = normalize(sky.moon_dir.xyz);
-    let cos_a = dot(dir, moon);
     let radius = max(sky.moon_params.x, 1.0e-4);
+    // Whole world, from altitude: the moon is a body (earth_moon_body), so free flight can reach it.
+    if (earth_preview() && length(pos) - sky.params.z > 20000.0) {
+        let body = earth_moon_body(pos, dir);
+        return body.rgb;
+    }
+    let cos_a = dot(dir, moon);
     let cos_r = cos(radius);
     if (cos_a <= cos_r) {
         return vec3<f32>(0.0);
@@ -2159,7 +2368,7 @@ fn moon_disc(dir: vec3<f32>, pos: vec3<f32>) -> vec3<f32> {
     let solid_angle = 2.0 * PI * (1.0 - cos_r);
     let scale = sky.moon_params.z / solid_angle;
     let tint = vec3<f32>(1.0, 0.97, 0.92);
-    let moon_t = sample_transmittance(pos, moon);
+    let moon_t = body_transmittance(pos, moon, dir);
     return tint * (brdf + earthshine) * edge * scale * moon_t;
 }
 
@@ -2240,7 +2449,7 @@ fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
             disc_cover = t * t;
         }
         if (cos_sun > cos_radius) {
-            let sun_t = sample_transmittance(pos, sun);
+            let sun_t = body_transmittance(pos, sun, dir);
             let edge = clamp((cos_sun - cos_radius) / (1.0 - cos_radius), 0.0, 1.0);
             let limb = 0.4 + 0.6 * sqrt(edge);
             // sun_dir.w * params.y is the solar IRRADIANCE (the scale that drives the sky
@@ -2250,7 +2459,9 @@ fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
             // haze. Dividing by the ACTUAL drawn radius keeps it energy-conserving: inflating
             // the disc for visibility lowers its radiance so total power stays fixed.
             let solid_angle = 2.0 * PI * (1.0 - cos_radius);
-            let disc = (sky.sun_dir.w * sky.params.y) / solid_angle;
+            // From space the unfiltered disc is ~10x a sunset sun and its bloom swallowed a third of
+            // the frame; a camera exposed for the sunlit Earth clips it to a smaller star.
+            let disc = (sky.sun_dir.w * sky.params.y) / solid_angle * mix(1.0, 0.04, earth_space_weight());
             color = color + disc * sun_t * limb * disc_cover;
         }
         // Moon disc, same gate: only where the view ray misses the planet, and drawn here in
@@ -2370,6 +2581,14 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
     if (d > 0.0) {
         let wh = sky.inv_view_proj * vec4<f32>(ndc, 1.0 - d, 1.0);
         scene_dist = length(wh.xyz / wh.w);
+        if (earth_preview()) {
+            // From altitude the stored depth is ~1e-6 and `1 - d` keeps only a few bits of it: the
+            // distance came back in ~6% steps, which banded the air in front of the globe. Under the
+            // infinite reversed-Z projection the depth is near/z, so the distance is the near-plane
+            // point's distance divided by d -- exact at any range.
+            let near = sky.inv_view_proj * vec4<f32>(ndc, 0.0, 1.0);
+            scene_dist = length(near.xyz / near.w) / d;
+        }
     }
 
     // PERF-CLOUD-TEMPORAL: three pixels in four of an all-sky, upward neighbourhood take last
@@ -2389,6 +2608,15 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
         }
     }
 
+    // Whole world: the moon in front of the Earth (seen from beyond it) -- the sky pass draws it
+    // behind all geometry, so it is composited here, over the scene, where it is nearer.
+    if (d > 0.0 && earth_preview() && length(sky_origin()) - sky.params.z > 20000.0) {
+        let moon_body = earth_moon_body(sky_origin(), dir);
+        if (moon_body.w > 0.0 && moon_body.w < scene_dist) {
+            return vec4<f32>(moon_body.rgb, 0.0);
+        }
+    }
+
     // Water is depth-read-only. A ray missing the spherical ground can still hit
     // the flat ocean. Stop both decks there, without removing foreground clouds.
     // Mirrored and underwater views opt out via cam_pos.w = 0.
@@ -2397,7 +2625,7 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
     }
 
     if (earth_cloud_weight() >= 1.0) {
-        let cloud = earth_planet_cloud(dir, scene_dist);
+        let cloud = with_earth_aerial(earth_planet_cloud(dir, scene_dist), dir, scene_dist);
         return vec4<f32>(cloud.inscatter, cloud.trans);
     }
 
@@ -2427,6 +2655,7 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
         let planet = earth_planet_cloud(dir, scene_dist);
         cloud = CloudResult(mix(cloud.inscatter, planet.inscatter, earth_cloud_weight()),
                             mix(cloud.trans, planet.trans, earth_cloud_weight()));
+        cloud = with_earth_aerial(cloud, dir, scene_dist);
     }
 
     // ---- Lens flare -----------------------------------------------------------------------

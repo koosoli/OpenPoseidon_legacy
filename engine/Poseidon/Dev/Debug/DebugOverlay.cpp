@@ -8611,7 +8611,7 @@ bool SetFreeFlyTestPose(const char* coordinates)
         !std::isfinite(pose.x) || !std::isfinite(pose.z) || !std::isfinite(pose.altitude) ||
         !std::isfinite(pose.azimuth) || !std::isfinite(pose.elevation) ||
         std::abs(pose.x) > 1000000 || std::abs(pose.z) > 1000000 ||
-        std::abs(pose.altitude) > (EarthStreaming::Enabled() ? EarthStreaming::OrbitAltitudeLimit : 1000000.0f))
+        std::abs(pose.altitude) > (EarthStreaming::Enabled() ? EarthStreaming::FlightAltitudeLimit : 1000000.0f))
         return false;
     snprintf(s_zeusGotoBuf, sizeof(s_zeusGotoBuf), "%s", coordinates);
     GoToZeusCoordinates();

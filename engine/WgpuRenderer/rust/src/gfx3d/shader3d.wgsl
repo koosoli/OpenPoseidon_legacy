@@ -330,6 +330,20 @@ fn earth_ground_detail(absolute: vec3<f32>, normal: vec3<f32>, footprint: f32, d
     result.normal = normalize(normal - (local_gradient - normal * dot(local_gradient,normal)));
     return result;
 }
+// Sunlight transmittance down to a point of the globe whose local sun height (cosine of the
+// zenith angle) is `mu`: the Rayleigh, Mie and ozone columns of the sky's default atmosphere
+// (Engine::SkySettings), each along a Chapman-like air mass that is 1/mu overhead and finite
+// (~sqrt(pi R / 2H)) on the horizon. A few exps, evaluated only for the Earth surface.
+fn earth_air_mass(mu: f32, horizon: f32) -> f32 {
+    return 1.0 / max(mu + exp(-max(mu, -0.05) * horizon * 0.6) / horizon, 1e-3);
+}
+fn earth_sun_transmittance(mu: f32, altitude: f32) -> vec3<f32> {
+    let h = max(altitude, 0.0);
+    let rayleigh = vec3<f32>(5.8e-6, 13.5e-6, 33.1e-6) * 8000.0 * exp(-h / 8000.0) * earth_air_mass(mu, 35.4);
+    let mie = 6.0e-6 * 1.11 * 1200.0 * exp(-h / 1200.0) * earth_air_mass(mu, 91.0);
+    let ozone = vec3<f32>(0.650e-6, 1.881e-6, 0.085e-6) * 25000.0 * earth_air_mass(mu, 9.0);
+    return exp(-(rayleigh + vec3<f32>(mie) + ozone));
+}
 // END_EARTH_GROUND_DETAIL_HELPERS
 
 // Per-draw world matrix + material as read-only storage arrays, indexed by
@@ -1135,6 +1149,9 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // residency decision is about; the normal map shares its fate.
     mip_feedback_note(packed >> 3u, dpdx(in.uv), dpdy(in.uv));
 
+#ifdef WHOLE_WORLD
+    // Whole-world surfaces exist only in a whole-world process (shaders::shader_defs); elsewhere this
+    // branch is not compiled, so the island game pays nothing for it.
     if ((material_flags(material) & MATFLAG_EARTH_SURFACE) != 0u) {
         // The global sphere is outside the finite landscape heightmap. Sampling
         // that map's cave, shadow, wetness or GI receivers would turn its curved
@@ -1224,6 +1241,7 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             sun_occlusion = sun_occlusion * cloud_sun_shadow(world.xz - shift);
         }
         var light = material.sun_ambient.rgb * ambient_occlusion * twilight + material.sun_diffuse.rgb * daylight * sun_occlusion;
+        var glint = vec3<f32>(0.0);
         if (frame.sun_diffuse.w > 0.5 && (packed >> 3u) != 0u) {
             // The producer's material light is legacy-scaled. Match the rest
             // of the physical scene using this frame's sun and directional sky,
@@ -1234,14 +1252,41 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             // the sun, so the disc darkens toward the terminator as it does in orbital photographs.
             let cam_altitude = length(frame.cam_pos.xyz - earth_centre) - 6378137.0;
             let space = smoothstep(30000.0, 100000.0, cam_altitude);
+            // The frame's sun is the sun where the CAMERA is. From altitude each point of the globe
+            // gets its own: the unattenuated sun (sun_diffuse.w, SubmitEarthHorizon) through the air
+            // above THAT point, so the day side is white sunlight even while the origin is in night,
+            // and the ground reddens toward the terminator as it does in orbital photographs.
+            // Below 6 km the weight is 0 and the frame's sun is used exactly as before.
+            let local_sun = material.sun_diffuse.w * earth_sun_transmittance(sun_height,
+                length(in.world_pos + frame.cam_pos.xyz - earth_centre) - 6378137.0);
+            let sun_light = mix(frame.sun_diffuse.rgb, local_sun, smoothstep(6000.0, 30000.0, cam_altitude));
             let sky_light = mix(sky_irradiance(n) * frame.sun_ambient.w,
-                                frame.sun_diffuse.rgb * 0.05 * clamp(sun_height * 2.0 + 0.2, 0.0, 1.0), space);
-            light = sky_light * ambient_occlusion * twilight + frame.sun_diffuse.rgb * daylight * sun_occlusion;
+                                sun_light * 0.05 * clamp(sun_height * 2.0 + 0.2, 0.0, 1.0), space);
+            light = sky_light * ambient_occlusion * twilight + sun_light * daylight * sun_occlusion;
+            // Sun glint off the sea, from altitude only: a wind-roughened (Beckmann m 0.2) mirror,
+            // Fresnel ~0.02 at normal incidence rising toward the limb. The sea is told apart by its
+            // colour (deep blue, darker than land); the imagery carries no water mask.
+            let aloft = smoothstep(6000.0, 30000.0, cam_altitude);
+            if (aloft > 0.0) {
+                let water = smoothstep(0.02, 0.08, surface.b - max(surface.r, surface.g * 0.85))
+                          * (1.0 - smoothstep(0.12, 0.3, dot(surface, vec3<f32>(0.2126, 0.7152, 0.0722))));
+                let view = -normalize(in.world_pos);
+                let to_sun = -frame.sun_dir_world.xyz;
+                let h = normalize(view + to_sun);
+                let ndh = max(dot(radial_up, h), 1e-3);
+                let ndl = max(dot(radial_up, to_sun), 0.0);
+                let ndv = max(dot(radial_up, view), 0.05);
+                let t2 = (1.0 - ndh * ndh) / (ndh * ndh);
+                let beckmann = exp(-t2 / 0.04) / (3.14159265 * 0.04 * ndh * ndh * ndh * ndh);
+                let fresnel = 0.02 + 0.98 * pow(1.0 - max(dot(h, view), 0.0), 5.0);
+                glint = local_sun * (water * aloft * beckmann * fresnel * ndl / (4.0 * ndv));
+            }
         }
         // Ground and valley fog (layered fog) in front of the Earth surface; whole-world terrain used to
         // skip every fog term.
-        return vec4<f32>(apply_layered_fog(surface * reflectance * light, in.world_pos), 1.0);
+        return vec4<f32>(apply_layered_fog(surface * reflectance * light + glint, in.world_pos), 1.0);
     }
+#endif
 
     if ((material_flags(material) & MATFLAG_BOOT_RELIEF) != 0u) {
         let fade = 1.0 - smoothstep(4.0, 12.0, length(in.world_pos));

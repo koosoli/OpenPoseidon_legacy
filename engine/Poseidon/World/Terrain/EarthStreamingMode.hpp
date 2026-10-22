@@ -25,6 +25,9 @@ inline bool Enabled()
 }
 constexpr float CoordinateLimit = 500000.0f;
 constexpr float OrbitAltitudeLimit = 30000000.0f;
+// Free flight itself may leave orbit and travel to the moon (384,400 km); the explicit Go/menu
+// altitude keeps the orbit limit above.
+constexpr float FlightAltitudeLimit = 450000000.0f;
 constexpr float FreeFlightAltitudeMinimum = -12000.0f;
 constexpr float CameraAnchor = 6400.0f;
 struct Location
@@ -45,7 +48,7 @@ inline bool ValidateFlightLocation(double latitude, double longitude, double alt
 {
     return std::isfinite(latitude) && std::abs(latitude)<=84.0 &&
         std::isfinite(longitude) && std::abs(longitude)<=180.0 &&
-        std::isfinite(altitude) && altitude>=FreeFlightAltitudeMinimum && altitude<=OrbitAltitudeLimit;
+        std::isfinite(altitude) && altitude>=FreeFlightAltitudeMinimum && altitude<=FlightAltitudeLimit;
 }
 // Geographic frame for explicit teleports and Earth free-flight rebasing.
 // Finite OFP map objects/navigation remain local.
@@ -148,6 +151,6 @@ inline float ZoomAltitude(float altitude, float wheelSteps)
 {
     if (!std::isfinite(altitude) || !std::isfinite(wheelSteps)) return 4500.0f;
     return std::clamp((altitude+1000.0f)*std::pow(0.72f,std::clamp(wheelSteps,-20.0f,20.0f))-1000.0f,
-        500.0f,OrbitAltitudeLimit);
+        500.0f,FlightAltitudeLimit);
 }
 }
