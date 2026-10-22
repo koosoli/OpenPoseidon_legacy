@@ -199,7 +199,11 @@ inline SurfaceClass PartFromNames(std::string_view texStem, std::string_view mat
             continue;
         // A glass shader is its own evidence: a mirror material with it is mirror glass.
         const bool fromMaterialOnBody = !glassShader && s.data() == matStem.data() && IsBodyTexture(texStem);
-        if (fromMaterialOnBody && HasAny(s, {"mirror", "zrcatk", "zrcadl", "spiegel", "_zrc", "chrom"}))
+        // Same for lamps: Arma 3 draws its emissive light materials (car_headlight_emit.rvmat)
+        // on the body texture (suv_01_ext_co), and a draw that starts on such a section turned
+        // the whole red C_SUV_01_F into a silver lamp reflector (clean runs ef36e24 and 8f4a06b).
+        if (fromMaterialOnBody && HasAny(s, {"mirror", "zrcatk", "zrcadl", "spiegel", "_zrc", "chrom", "headlight",
+                                             "light", "lamp", "svetl", "reflektor", "odrazk"}))
             continue;
         // Token lists extended from the first logged class run (WGR_REFLECT_LOG, a787e47,
         // 2026-10-22): CWA names its parts in Czech (zrc = mirror, palubka = dashboard,
