@@ -53,6 +53,7 @@ fn terrain_resource_reuse_requires_matching_nonempty_dimensions() {
 // Which terrain pipeline a draw uses (docs/depth-prepass-plan.md). Color = the shading
 // pass (depth write ON). ColorNoWrite = the prepassed segment's colour pass (depth
 // already complete -> GreaterEqual/write-off). Prepass = the depth+normal G-buffer pass.
+#[derive(Clone, Copy)]
 pub enum TerrainPass {
     Color,
     ColorNoWrite,
@@ -2161,6 +2162,36 @@ impl Terrain {
             _ => None,
         };
         self.bind_for_draw(pass, camera_bind, camera_offset);
+        // PERF-TERRAIN-PREPASS-ORDER: the depth prepass shades every fragment that passes its depth
+        // test (a heightmap normal per fragment), so it draws the batch's nodes nearest first and
+        // the depth test rejects what they hide before the shader runs. The nodes arrive in
+        // quadtree order. Same depth and normals: each pixel still ends with its nearest surface.
+        if let (TerrainPass::Prepass, Some(cam)) = (kind, cam) {
+            if prepass_order_enabled() {
+                pass.set_pipeline(pipeline);
+                let mut order: Vec<(f32, u32)> = (first_node..first_node + node_count)
+                    .map(|i| {
+                        let n = &self.nodes_cpu[i as usize];
+                        let dx = (n.origin.x - cam[0]).max(cam[0] - (n.origin.x + n.size)).max(0.0);
+                        let dz = (n.origin.y - cam[2]).max(cam[2] - (n.origin.y + n.size)).max(0.0);
+                        (dx * dx + dz * dz, i)
+                    })
+                    .collect();
+                order.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+                let mut k = 0;
+                while k < order.len() {
+                    let start = order[k].1;
+                    let mut stop = start + 1;
+                    k += 1;
+                    while k < order.len() && order[k].1 == stop {
+                        stop += 1;
+                        k += 1;
+                    }
+                    pass.draw_indexed(0..self.grid_index_count, 0, start..stop);
+                }
+                return;
+            }
+        }
         let Some((cam, far_pipeline)) = far else {
             pass.set_pipeline(pipeline);
             pass.draw_indexed(0..self.grid_index_count, 0, first_node..first_node + node_count);
@@ -2228,6 +2259,12 @@ impl Terrain {
         pass.set_vertex_buffer(1, self.instance_buf.slice(..));
         pass.set_index_buffer(self.grid_ibuf.slice(..), wgpu::IndexFormat::Uint16);
     }
+}
+
+/// PERF-TERRAIN-PREPASS-ORDER lever: WGR_TERRAIN_PREPASS_ORDER=0 draws the prepass in node order.
+fn prepass_order_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_TERRAIN_PREPASS_ORDER").map(|v| v.trim() != "0").unwrap_or(true))
 }
 
 /// PERF-TERRAIN-FAR-SHADOW: (budget-from, tent-from) metres for the terrain's sun-shadow filter.

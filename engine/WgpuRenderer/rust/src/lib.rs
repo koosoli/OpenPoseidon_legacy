@@ -6236,6 +6236,9 @@ impl Renderer {
                                 let off = (b.camera as u64 * self.gfx3d.camera_stride()) as u32;
                                 self.gpu_timers
                                     .begin_pass(&mut pp, TimerRegion::TerrainPrepass);
+                                let cam_pos = prepared_cameras
+                                    .get(b.camera as usize)
+                                    .map(|c| [c.cam_pos[0], c.cam_pos[1], c.cam_pos[2]]);
                                 self.terrain.draw(
                                     &mut pp,
                                     cam,
@@ -6243,7 +6246,7 @@ impl Renderer {
                                     b.first_node,
                                     b.node_count,
                                     crate::terrain::TerrainPass::Prepass,
-                                    None,
+                                    cam_pos,
                                 );
                                 self.gpu_timers
                                     .end_pass(&mut pp, TimerRegion::TerrainPrepass);
