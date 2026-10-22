@@ -60,8 +60,17 @@ ground is lit by the sun through its own column of air, so the terminator redden
 stays daylit while the starting place is in night; ground-level views are unchanged.
 
 From orbit the moon is a body 384,400 km from the Earth's centre (real ephemeris direction): it shows
-parallax, grows as you approach, and free flight can travel to it (the camera stops 2 km above its
-surface). The Go/menu altitude stays limited to 30,000 km; flight itself reaches 450,000 km.
+parallax, grows as you approach, and free flight can travel to it: speed follows the distance to the nearer
+of the Earth and the moon, the camera levels against the moon's ground once it is the nearer surface, and it
+stops 100 m above it. The surface has procedural maria, craters and relief (shading only, not collision).
+The Go/menu altitude stays limited to 30,000 km; flight itself reaches 450,000 km.
+
+## Desert Island
+
+`python scripts/Prepare-EarthIsland.py --wrp "<game>/Worlds/intro.wrp" --name desert --lat 45.40 --lon -7.80`
+reads OFP's Desert Island from your installation and writes its heights and ground image into the cache
+(`islands/desert`). Whole-world mode then shows it in the open Bay of Biscay; the menu has a preset for it.
+Any OFP world works the same way (heights and ground textures only; objects are not carried over).
 
 ## Script commands
 

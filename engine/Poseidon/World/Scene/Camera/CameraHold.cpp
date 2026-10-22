@@ -276,7 +276,12 @@ float CameraVehicle::CamEffectFOV() const
         Vector3 up = VUp;
         if (GetManual() && _altitudeSpeedScaling && EarthStreaming::Enabled())
         {
-            const auto radial = EarthStreaming::FlightUp({Position()[0], Position()[1], Position()[2]});
+            auto radial = EarthStreaming::FlightUp({Position()[0], Position()[1], Position()[2]});
+            if (GScene && GScene->MainLight())
+            {
+                const Vector3 toMoon = -GScene->MainLight()->MoonDirection();
+                radial = EarthStreaming::FlightUpNear({Position()[0], Position()[1], Position()[2]}, toMoon.X(), toMoon.Y(), toMoon.Z());
+            }
             up = Vector3(float(radial.x), float(radial.y), float(radial.z));
             if (std::abs(dir.DotProduct(up)) > 0.999f)
                 up = Orientation().DirectionUp();
@@ -454,7 +459,12 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
             // exploration must instead approach the point we are looking at,
             // including a nearly vertical descent from orbit. Retain world-up
             // for the separate raise/lower controls, using physical radial up.
-            const auto radial = EarthStreaming::FlightUp(earthPrevious);
+            auto radial = EarthStreaming::FlightUp(earthPrevious);
+            if (GScene && GScene->MainLight())
+            {
+                const Vector3 toMoon = -GScene->MainLight()->MoonDirection();
+                radial = EarthStreaming::FlightUpNear(earthPrevious, toMoon.X(), toMoon.Y(), toMoon.Z());
+            }
             speedWanted=(Orientation()*Vector3(aside,0,forward)+Vector3(float(radial.x),float(radial.y),float(radial.z))*up)*speedScale;
         }
         if (_inertia)

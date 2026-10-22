@@ -76,7 +76,7 @@ inline FlightPoint ConstrainFlight(FlightPoint previous, FlightPoint next, const
 }
 // The moon as a body free flight can reach: the same placement as sky.wgsl earth_moon_centre (the
 // topocentric ephemeris direction from the origin's ground, at the point 384,400 km from the Earth's
-// centre). The camera stops 2 km above its surface instead of flying into it.
+// centre). The camera stops 100 m above its surface instead of flying into it.
 constexpr double MoonRadius = 1.7374e6;
 inline bool MoonCentre(double toMoonX, double toMoonY, double toMoonZ, double& cx, double& cy, double& cz)
 {
@@ -95,11 +95,23 @@ inline double MoonClearance(FlightPoint p, double toMoonX, double toMoonY, doubl
     if (!MoonCentre(toMoonX, toMoonY, toMoonZ, cx, cy, cz)) return 1e12;
     return std::sqrt((p.x - cx) * (p.x - cx) + (p.y - cy) * (p.y - cy) + (p.z - cz) * (p.z - cz)) - MoonRadius;
 }
+// "Up" for free flight: the Earth's radial up, or the moon's once the moon is the nearer surface, so the
+// camera levels against the ground it is over and stands upright on the moon.
+inline Earth::Direction FlightUpNear(FlightPoint p, double toMoonX, double toMoonY, double toMoonZ)
+{
+    double cx, cy, cz;
+    if (MoonCentre(toMoonX, toMoonY, toMoonZ, cx, cy, cz))
+    {
+        const double vx = p.x - cx, vy = p.y - cy, vz = p.z - cz, d = std::sqrt(vx * vx + vy * vy + vz * vz);
+        if (std::isfinite(d) && d > 0 && d - MoonRadius < FlightAltitude(p)) return {vx / d, vy / d, vz / d};
+    }
+    return FlightUp(p);
+}
 inline FlightPoint KeepOutsideMoon(FlightPoint p, double toMoonX, double toMoonY, double toMoonZ)
 {
     double cx, cy, cz;
     if (!MoonCentre(toMoonX, toMoonY, toMoonZ, cx, cy, cz)) return p;
-    constexpr double keepOut = MoonRadius + 2000.0;
+    constexpr double keepOut = MoonRadius + 100.0;
     const double vx = p.x - cx, vy = p.y - cy, vz = p.z - cz;
     const double d = std::sqrt(vx * vx + vy * vy + vz * vz);
     if (!(d < keepOut) || d <= 0) return p;

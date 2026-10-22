@@ -78,5 +78,9 @@ namespace DebugOverlay
     bool SetFreeFlyTestPose(const char* coordinates);
     // Earth-only geographic teleport; same path for the UI and harness SQF.
     bool SetEarthPreviewLocation(double latitude,double longitude,double altitude);
+    // Earth-only: free-fly camera `altitude` metres above the moon. surface=false: over its sunlit side,
+    // looking at it. surface=true: over a near-side point with the sun ~15 deg up, looking along the
+    // ground away from the sun, pitched by `pitchDegrees` (the Earth is overhead).
+    bool SetEarthMoonPose(double altitude, double pitchDegrees, bool surface);
 } // namespace DebugOverlay
 } // namespace Poseidon::Dev

@@ -1193,6 +1193,18 @@ GameValue TriPlayerPosZ(const GameState* /*state*/)
 /// triEarthLocation [latitude,longitude,altitude] relocates the opt-in Earth
 /// preview through the same camera/origin transaction as its navigation tab.
 /// An empty array queries the current origin and revision for harness assertions.
+/// triEarthMoon [altitude, pitch, surface(0/1)] puts the free-fly camera above the moon (dev/harness).
+GameValue TriEarthMoon(const GameState*, GameValuePar arg)
+{
+    if (!EarthStreaming::Enabled()) return GameValue("FAIL:earth_preview_disabled");
+    const GameArrayType& values=arg;
+    if (values.Size()!=3) return GameValue("FAIL:expected_altitude_pitch_surface");
+    for (int i=0;i<3;++i)
+        if (values[i].GetType()!=GameScalar) return GameValue("FAIL:expected_scalars");
+    return GameValue(DebugOverlay::SetEarthMoonPose((GameScalarType)values[0],(GameScalarType)values[1],
+        (GameScalarType)values[2] > 0.5f) ? "OK" : "FAIL:no_moon_or_camera");
+}
+
 GameValue TriEarthLocation(const GameState*, GameValuePar arg)
 {
     if (!EarthStreaming::Enabled()) return GameValue("FAIL:earth_preview_disabled");
@@ -3192,6 +3204,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerPosY", TriPlayerPosY));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerPosZ", TriPlayerPosZ));
     GGameState.NewFunction(GameFunction(GameString, "triEarthLocation", TriEarthLocation, GameArray));
+    GGameState.NewFunction(GameFunction(GameString, "triEarthMoon", TriEarthMoon, GameArray));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerGroundClearance", TriPlayerGroundClearance));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerTerrainClearance", TriPlayerTerrainClearance));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerContactGroundClearance", TriPlayerContactGroundClearance));

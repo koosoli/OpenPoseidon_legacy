@@ -1,3 +1,4 @@
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/World/Simulation/StableExtract.hpp>
 #include <cstdlib>
 #include <unordered_map>
@@ -1342,8 +1343,15 @@ void World::SimulateLandscape(float deltaT)
     timeD += _timeToSkip;
     _timeToSkip = 0;
     //
-    if (Glob.clock.AdvanceTime(timeD))
+    // Whole world: the sun and moon are the ephemeris for the live geographic origin, expressed in its
+    // tangent frame. Free flight rebases that origin (every few tens of km, and to the moon); without a
+    // recalculation the sky kept the old frame's directions until the clock's next step, so the sun and
+    // moon sat in the wrong place and then jumped.
+    static uint64_t earthRevision = 0;
+    const uint64_t revision = EarthStreaming::Enabled() ? EarthStreaming::GetLocation().revision : 0;
+    if (Glob.clock.AdvanceTime(timeD) || revision != earthRevision)
     {
+        earthRevision = revision;
         sun->Recalculate(this);
     }
     float scaledTime = timeD * (1 / OneSecond);

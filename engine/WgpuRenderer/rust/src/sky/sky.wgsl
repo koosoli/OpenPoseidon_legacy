@@ -2284,27 +2284,65 @@ fn earth_moon_centre() -> vec3<f32> {
     return vec3<f32>(0.0, r, 0.0) + moon * (-b + sqrt(max(b * b - r * r + MOON_DISTANCE * MOON_DISTANCE, 0.0)));
 }
 // rgb = radiance, w = hit distance (-1 = miss).
+// Moon relief on the unit sphere: rolling highlands plus three scales of craters (bowl and raised
+// rim). Each crater sits inside its own lattice cell (centre jittered in the middle, radius < 0.32 cell)
+// so one cell lookup per scale is enough. Octaves and crater scales below the pixel footprint fade out.
+fn moon_crater(q: vec3<f32>, scale: f32, footprint: f32) -> f32 {
+    let keep = 1.0 - smoothstep(0.08, 0.3, footprint * scale);
+    if (keep <= 0.0) { return 0.0; }
+    let p = q * scale;
+    let cell = vec3<i32>(floor(p));
+    let r3 = planet_hash(cell) * 0.5 + 0.5;
+    if (r3.z < 0.35) { return 0.0; } // not every cell has one
+    let centre = vec3<f32>(cell) + 0.35 + 0.3 * r3;
+    let radius = 0.12 + 0.2 * fract(r3.x * 7.13 + r3.y);
+    let d = length(p - centre) / radius;
+    let bowl = -(1.0 - d * d) * select(0.0, 1.0, d < 1.0);
+    let rim = exp(-(d - 1.0) * (d - 1.0) * 18.0) * 0.35;
+    return (bowl + rim) * radius / scale * keep;
+}
+fn moon_relief(q: vec3<f32>, footprint: f32) -> f32 {
+    let hills = planet_fbm(q * 30.0, 12, footprint * 30.0) / 30.0 * 0.25;
+    return hills + moon_crater(q, 40.0, footprint) * 0.6 + moon_crater(q, 400.0, footprint) * 0.6 +
+           moon_crater(q, 4000.0, footprint) * 0.6;
+}
+// Fresh craters are bright and throw rays; a little of that in the albedo, large scale only.
+fn moon_crater_rays(q: vec3<f32>, footprint: f32) -> f32 {
+    return clamp(-moon_crater(q, 40.0, footprint) * 40.0 * 3.0, 0.0, 1.0);
+}
+
 fn earth_moon_body(pos: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
     if (sky.moon_params.w < 0.5) { return vec4<f32>(0.0, 0.0, 0.0, -1.0); }
     let centre = earth_moon_centre();
     let oc = pos - centre;
     let hit = ray_sphere(oc, dir, MOON_RADIUS);
     if (!earth_forward_sphere_hit(hit)) { return vec4<f32>(0.0, 0.0, 0.0, -1.0); }
-    let n = normalize(oc + dir * hit.x);
-    let l = normalize(sky.moon_sun.xyz);
-    let lit = max(dot(n, l), 0.0);
-    let ndv = max(dot(n, -dir), 0.0);
-    let brdf = mix(lit / max(lit + ndv, 1.0e-3), lit, 0.15);
+    let n0 = normalize(oc + dir * hit.x);
     // Moon-fixed frame: w toward the Earth, u/v from the Earth's spin axis in this tangent frame.
     let w = normalize(-centre);
     let axis = vec3<f32>(0.0, sin(sky.earth_frame.x), cos(sky.earth_frame.x));
     let u = normalize(cross(axis, w));
     let v = cross(w, u);
-    let q = vec3<f32>(dot(n, u), dot(n, v), dot(n, w));
-    let footprint = hit.x * 0.0015 / MOON_RADIUS;
+    let q = vec3<f32>(dot(n0, u), dot(n0, v), dot(n0, w));
+    // Pixel footprint on the unit sphere: detail is added only down to what a pixel can show, so the
+    // far disc stays smooth and the surface seen from a few km gets relief tens of metres across.
+    let footprint = max(hit.x * 0.0015 / MOON_RADIUS, 1.0e-6);
     let maria = smoothstep(0.02, 0.3, planet_fbm(q * 1.7 + vec3<f32>(3.1), 4, footprint * 1.7));
     let grain = planet_fbm(q * 14.0, 4, footprint * 14.0);
-    let albedo = (1.0 - 0.42 * maria) * (1.0 + 0.12 * grain);
+    let albedo = (1.0 - 0.42 * maria) * (1.0 + 0.12 * grain) * (1.0 + 0.25 * moon_crater_rays(q, footprint));
+    // Relief (unit-sphere heights) from craters and rolling terrain; its gradient tilts the shading
+    // normal, which is what makes a lit crater field read as a surface rather than a texture.
+    let e = max(footprint * 0.7, 2.0e-6);
+    let tx = normalize(cross(n0, select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), abs(n0.y) > 0.9)));
+    let ty = cross(n0, tx);
+    let h0 = moon_relief(q, footprint);
+    let hx = moon_relief(q + vec3<f32>(dot(tx, u), dot(tx, v), dot(tx, w)) * e, footprint);
+    let hy = moon_relief(q + vec3<f32>(dot(ty, u), dot(ty, v), dot(ty, w)) * e, footprint);
+    let n = normalize(n0 - (tx * (hx - h0) + ty * (hy - h0)) / e);
+    let l = normalize(sky.moon_sun.xyz);
+    let lit = max(dot(n, l), 0.0) * smoothstep(-0.02, 0.02, dot(n0, l));
+    let ndv = max(dot(n, -dir), 0.0);
+    let brdf = mix(lit / max(lit + ndv, 1.0e-3), lit, 0.15);
     // Edge: soften over the outer ~0.5% of the radius, as the disc did, so the limb does not alias.
     let miss = length(oc - dir * dot(oc, dir)) / MOON_RADIUS;
     let edge = 1.0 - smoothstep(0.995, 1.0, miss);

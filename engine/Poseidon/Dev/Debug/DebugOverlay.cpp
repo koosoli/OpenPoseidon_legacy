@@ -8632,5 +8632,61 @@ bool SetEarthPreviewLocation(double latitude,double longitude,double altitude)
     return EarthStreaming::Locations().Set(latitude,longitude,altitude);
 }
 
+bool SetEarthMoonPose(double altitude, double pitchDegrees, bool surface)
+{
+    if (!EarthStreaming::Enabled() || MultiplayerSession() || !ZeusWorldAvailable() || !GScene || !GScene->MainLight() ||
+        !std::isfinite(altitude) || altitude < 100.0 || altitude > 1.0e8 || !std::isfinite(pitchDegrees))
+        return false;
+    const Vector3 toMoon = -GScene->MainLight()->MoonDirection();
+    const Vector3 toSun = -GScene->MainLight()->SunDirection(); // Direction() swings onto the moon at night
+    double cx, cy, cz;
+    if (!EarthStreaming::MoonCentre(toMoon.X(), toMoon.Y(), toMoon.Z(), cx, cy, cz)) return false;
+    using D = Earth::Direction;
+    const auto norm = [](D v) { const double l = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); return D{v.x / l, v.y / l, v.z / l}; };
+    const auto dot = [](D a, D b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+    const D w = norm({EarthStreaming::CameraAnchor - cx, -cy, EarthStreaming::CameraAnchor - cz}); // toward the Earth
+    const D s = norm({toSun.X(), toSun.Y(), toSun.Z()});
+    D p, look;
+    if (surface)
+    {
+        const double k = dot(w, s);
+        D perp = norm({w.x - s.x * k, w.y - s.y * k, w.z - s.z * k});
+        const double a = 75.0 * H_PI / 180.0;
+        p = norm({s.x * std::cos(a) + perp.x * std::sin(a), s.y * std::cos(a) + perp.y * std::sin(a), s.z * std::cos(a) + perp.z * std::sin(a)});
+        const double ks = dot(s, p);
+        const D away = norm({-(s.x - p.x * ks), -(s.y - p.y * ks), -(s.z - p.z * ks)});
+        const double e = pitchDegrees * H_PI / 180.0;
+        look = norm({away.x * std::cos(e) + p.x * std::sin(e), away.y * std::cos(e) + p.y * std::sin(e), away.z * std::cos(e) + p.z * std::sin(e)});
+    }
+    else
+    {
+        p = norm({s.x + w.x, s.y + w.y, s.z + w.z});
+        look = {-p.x, -p.y, -p.z};
+    }
+    const double r = EarthStreaming::MoonRadius + altitude;
+    const auto old = EarthStreaming::GetLocation();
+    const Earth::Coordinate oldOrigin{old.latitude, old.longitude};
+    const double camX = cx + p.x * r, camY = cy + p.y * r, camZ = cz + p.z * r;
+    const auto rebase = Earth::CameraRebase(oldOrigin, camX, camY, camZ);
+    if (!rebase)
+    {
+        // Already within re-centring distance of this origin: place the camera in the current frame.
+        char pose[192];
+        snprintf(pose, sizeof(pose), "[%.3f,%.3f,%.9g] az %.6f el %.6f", camX, camZ, camY,
+                 std::atan2(look.x, look.z) * 180.0 / H_PI, std::asin(std::clamp(look.y, -1.0, 1.0)) * 180.0 / H_PI);
+        return SetFreeFlyTestPose(pose);
+    }
+    const D l = Earth::RotateFrame(oldOrigin, rebase->origin, look);
+    char pose[192];
+    snprintf(pose, sizeof(pose), "[%g,%g,%.9g] az %.6f el %.6f", double(EarthStreaming::CameraAnchor),
+             double(EarthStreaming::CameraAnchor), rebase->altitude, std::atan2(l.x, l.z) * 180.0 / H_PI,
+             std::asin(std::clamp(l.y, -1.0, 1.0)) * 180.0 / H_PI);
+    LOG_INFO(Core, "Earth moon pose: toMoon [{:.4f},{:.4f},{:.4f}] centre [{:.0f},{:.0f},{:.0f}] camera [{:.0f},{:.0f},{:.0f}] -> origin [{:.4f},{:.4f}] altitude {:.0f}; {}",
+             toMoon.X(), toMoon.Y(), toMoon.Z(), cx, cy, cz, cx + p.x * r, cy + p.y * r, cz + p.z * r,
+             rebase->origin.latitude, rebase->origin.longitude, rebase->altitude, pose);
+    if (!SetFreeFlyTestPose(pose)) return false;
+    return EarthStreaming::Locations().Rebase(old.revision, rebase->origin.latitude, rebase->origin.longitude, rebase->altitude);
+}
+
 } // namespace DebugOverlay
 } // namespace Poseidon::Dev

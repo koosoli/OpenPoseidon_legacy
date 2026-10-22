@@ -22558,7 +22558,13 @@ void EngineWgpu::PushSkyRuntime()
         alpha = 1.0f - std::exp(-dt / kSkySmoothTau);
     }
     _skySmoothAt = skyNow;
-    if (!_skyInit || tSun.DotProduct(_skySunDir) < 0.5f)
+    // Whole world: a geographic origin rebase changes the frame the directions are in, not the sky;
+    // easing across it swung the sun and moon through the sky after every rebase. Snap instead.
+    static uint64_t skyEarthRevision = 0;
+    const uint64_t earthRevision = EarthStreaming::Enabled() ? EarthStreaming::GetLocation().revision : 0;
+    const bool earthRebased = earthRevision != skyEarthRevision;
+    skyEarthRevision = earthRevision;
+    if (!_skyInit || earthRebased || tSun.DotProduct(_skySunDir) < 0.5f)
     {
         _skySunDir = tSun;
         _skyMoonDir = tMoon;
