@@ -1393,6 +1393,16 @@ void World::SimulateLandscape(float deltaT)
             _speedFog = fabs(_wantedFog - _actualFog) / time;
         }
     }
+    // FOG-HOLD (2026-10-22, owner: "I still have fog on reforger even when I dial fog to zero").
+    // SetWeather(..., 0) restarts the weather clock, so the very next tick picked a new random
+    // fog target (up to +0.2) and drifted toward it -- and the Reforger haze is at full strength
+    // by 0.2 (RFG-206). A 10-minute Durras flight started at fog 0 had layered fog rendering again
+    // two minutes in. A fog set by hand is held; overcast keeps its weather.
+    if (_heldFog >= 0.0f)
+    {
+        _actualFog = _wantedFog = _heldFog;
+        _speedFog = 0;
+    }
     GLOB_LAND->SetOvercast(_actualOvercast);
     GLOB_LAND->SetFog(_actualFog);
 
@@ -1422,6 +1432,17 @@ void World::SimulateLandscape(float deltaT)
     // camera: a rotor wake nobody can see moves nothing anybody can see, and the
     // emitter list is deliberately small.
     GAirflow.Update(CameraOn() ? CameraOn()->Position() : VZero);
+}
+
+void World::HoldFog(float fog)
+{
+    if (fog < 0.0f)
+    {
+        _heldFog = -1.0f;
+        return;
+    }
+    _heldFog = std::clamp(fog, 0.0f, 1.0f);
+    SetWeather(-1, _heldFog, 0);
 }
 
 void World::SetWeather(float overcast, float fog, float time)

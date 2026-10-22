@@ -231,6 +231,7 @@ World::World(Engine* engine, bool editor)
 
 void World::InitGeneral()
 {
+    _heldFog = -1.0f; // FOG-HOLD: a new world takes its weather from its mission
     _wantedOvercast = 0.3;
     _actualOvercast = _wantedOvercast;
     _wantedFog = 0.0;

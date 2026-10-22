@@ -2170,8 +2170,8 @@ void GameApplication::RunMainLoop()
             if (const char* fogEnv = std::getenv("POSEIDON_TEST_FOG"); fogEnv != nullptr && *fogEnv)
             {
                 const float fog = std::clamp(std::strtof(fogEnv, nullptr), 0.0f, 1.0f);
-                GWorld->SetWeather(-1, fog, 0);
-                LOG_INFO(Core, "POSEIDON_TEST_FOG: fog {}", fog);
+                GWorld->HoldFog(fog);
+                LOG_INFO(Core, "POSEIDON_TEST_FOG: fog {} (held)", fog);
             }
             Object* cameraOn = GWorld->CameraOn();
             if (!freeFlyPose && (!cameraOn || !GLandscape))

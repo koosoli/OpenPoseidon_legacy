@@ -281,6 +281,9 @@ class World
 
 	float _actualFog;
 	float _wantedFog;
+	// FOG-HOLD: a fog the player set by hand (Weather tab "Fog amount", POSEIDON_TEST_FOG) stays
+	// put -- the weather's random drift and the mission's forecast no longer move it. < 0 = not held.
+	float _heldFog = -1.0f;
 	float _speedFog; // speed of change
 
 	// geography latitude - positive is south
@@ -767,6 +770,9 @@ class World
 	void ScanPlayers(StaticArrayAuto< OLink<Person> > &players); // used in multiplayers
 
 	void SetWeather(float overcast, float fog, float time);
+	// FOG-HOLD: set the fog now and keep it there until the next HoldFog (< 0 releases it).
+	void HoldFog(float fog);
+	bool FogHeld() const { return _heldFog >= 0.0f; }
 	void SetDate(int year, int month, int day, int hour, int minute);
 	float GetLatitude() const {return _latitude;}
 	float GetLongitude() const {return _longitude;}

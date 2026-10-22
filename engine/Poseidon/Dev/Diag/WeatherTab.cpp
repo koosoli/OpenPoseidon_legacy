@@ -866,9 +866,16 @@ void DrawFogSection()
     if (GWorld)
     {
         float wantedFog = GWorld->GetFog();
+        // FOG-HOLD: the value set here stays -- the weather no longer drifts it away.
         if (ImGui::SliderFloat("Fog amount", &wantedFog, 0.0f, 1.0f, "%.2f"))
-            GWorld->SetWeather(GWorld->GetOvercast(), wantedFog, 0.0f);
-        ImGui::TextDisabled("Actual fog: %.2f", GWorld->GetFog());
+            GWorld->HoldFog(wantedFog);
+        if (GWorld->FogHeld())
+        {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Let weather change it"))
+                GWorld->HoldFog(-1.0f);
+        }
+        ImGui::TextDisabled("Actual fog: %.2f%s", GWorld->GetFog(), GWorld->FogHeld() ? " (held)" : "");
     }
     if (!GEngine || !GEngine->SupportsSky())
     {
