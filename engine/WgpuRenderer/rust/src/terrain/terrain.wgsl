@@ -12,7 +12,7 @@
 #import frame::ground_sky_reflection
 #import frame::wet_soil_debug_mode
 #import ground_wet::{cultivated_soil_fraction, soil_wet_amount, soil_wet_surface, soil_wet_fresnel, soil_wet_sun_specular, soil_wet_ground_reflection, soil_wet_environment_samples}
-#import shadow::shadow_strength
+#import shadow::{shadow_strength, shadow_strength_lod}
 #import lighting::lights_contrib
 #import color::srgb_to_linear
 #import gbuffer::oct_encode
@@ -2333,6 +2333,12 @@ override tile_normal_strength: f32 = 1.0;
 // WGR_TERRAIN_COST_STAGE (profiling only, default 0 = off): fs_terrain returns after stage N so
 // the compiler drops the rest -- 1 ground colour, 2 + wet/mud/snow, 3 + shadows, 4 + lighting.
 override cost_stage: u32 = 0u;
+// PERF-TERRAIN-FAR-SHADOW: the sun-shadow receiver filter by distance, as tree crowns have it
+// (PERF-FAR-CROWN): the full contact filter to `far_shadow_budget` m, its 8-tap budget mode to
+// `far_shadow_tent` m, the plane-corrected 3x3 tent beyond. 0 = that step off
+// (WGR_TERRAIN_FAR_SHADOW=0, or =<budget>,<tent>).
+override far_shadow_budget: f32 = 40.0;
+override far_shadow_tent: f32 = 120.0;
 // PERF-TERRAIN-FAR-SPLIT: 1 in the pipeline that draws terrain nodes lying wholly beyond the
 // Tidewater ground's near band (Terrain::draw). Every pixel there has farK = 1, so the near kinds
 // (sand, rock, the land covers: 15-30 detail taps and most of the shader's registers) are dead
@@ -2732,7 +2738,10 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // how far its world height sits below the ceiling. Its grid is `scale`x the
     // heightmap (sharper edges): sample in mask-texel space (world -> heightfield
     // texel -> * scale), landing on texel centres at (coord + 0.5)/dims.
-    let csm_s = shadow_strength(in.world_pos, n, in.fog, dwx, dwy);
+    let shadow_dist = length(in.world_pos);
+    let csm_lod = select(select(0u, 1u, far_shadow_budget > 0.0 && shadow_dist > far_shadow_budget), 2u,
+                         far_shadow_tent > 0.0 && shadow_dist > far_shadow_tent);
+    let csm_s = shadow_strength_lod(in.world_pos, n, in.fog, dwx, dwy, csm_lod);
     let mask_dims = vec2<f32>(textureDimensions(shadow_mask));
     let mask_scale = mask_dims / vec2<f32>(f32(tp.hm_width), f32(tp.hm_height));
     let mask_coord = (in.world_xz - tp.world_origin) / tp.terrain_grid * mask_scale;

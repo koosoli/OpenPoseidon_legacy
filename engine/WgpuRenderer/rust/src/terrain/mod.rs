@@ -1091,6 +1091,8 @@ impl Terrain {
                 "cost_stage",
                 std::env::var("WGR_TERRAIN_COST_STAGE").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0),
             ),
+            ("far_shadow_budget", terrain_far_shadow().0),
+            ("far_shadow_tent", terrain_far_shadow().1),
             ("surface_normalise", surface_normalise),
             ("linear", linear),
             // WGR_TERRAIN_MIP_FROM_TILE=1 restores mip selection from the JITTERED tiling UV,
@@ -2225,6 +2227,22 @@ impl Terrain {
         pass.set_vertex_buffer(0, self.grid_vbuf.slice(..));
         pass.set_vertex_buffer(1, self.instance_buf.slice(..));
         pass.set_index_buffer(self.grid_ibuf.slice(..), wgpu::IndexFormat::Uint16);
+    }
+}
+
+/// PERF-TERRAIN-FAR-SHADOW: (budget-from, tent-from) metres for the terrain's sun-shadow filter.
+/// WGR_TERRAIN_FAR_SHADOW=0 = the full filter everywhere; =<budget>,<tent> overrides 40,120.
+fn terrain_far_shadow() -> (f64, f64) {
+    match std::env::var("WGR_TERRAIN_FAR_SHADOW") {
+        Ok(v) if v.trim() == "0" => (0.0, 0.0),
+        Ok(v) => {
+            let mut it = v.split(',').map(|x| x.trim().parse::<f64>().ok());
+            match (it.next().flatten(), it.next().flatten()) {
+                (Some(b), Some(t)) => (b.max(0.0), t.max(0.0)),
+                _ => (40.0, 120.0),
+            }
+        }
+        Err(_) => (40.0, 120.0),
     }
 }
 
