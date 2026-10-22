@@ -274,3 +274,34 @@ Bilderserie der Spiegelungen-Sitzung (`before-2ff794f`, 09:21–09:43) fertig wa
   Branch verhält sich wieder wie `2ff794f`.
 - Damit bleibt `WGR_DIRECT_BATCH=all` der einzige Weg zu ~77 fps auf dem Deck. Die Entscheidung
   darüber liegt beim Besitzer (am Ende).
+
+## Messung 7: Wofür die GPU auf dem Deck Zeit braucht (22.10. 11:39, `WGR_GPU_REGIONS_ALL=1`)
+
+EXE aus `Remastered` (`2ff794f`), gleicher Flug, Mittel über 65 Stichproben je Lauf.
+Gestartet, nachdem die drei Bilderserien der Spiegelungen-Sitzung (bis 11:33) fertig waren.
+
+| GPU-Region (ms) | Standard (`exact`) | `all` |
+| --- | --- | --- |
+| 3D-Farbpass gesamt | 13,1 | 7,3 |
+| davon Draw-Ops nach dem Wasser (transparente/Barriere-Draws) | **7,0** | **1,9** |
+| davon Draw-Ops vor dem Wasser | 2,2 | 1,5 |
+| davon Terrain Farbe | 2,1 | 1,4 |
+| davon Objekte (GPU-getrieben) Farbe | 1,2 | 1,3 |
+| davon Wasser | 1,3 | 1,2 |
+| Prepass gesamt | 0,9 | 0,9 |
+| Wolken, AO, Schatten-Kaskaden, Culling (je) | 0,3–0,6 | 0,3–0,6 |
+| fps (Bilder ÷ Zeit) | 63,3 | 75,7 |
+
+- Der ganze Abstand zwischen den Modi steckt in den Draw-Ops nach dem Wasser: 7,0 gegen 1,9 ms.
+  Das sind die halbtransparenten Abschnitte mit MAT-053-Zwilling. Bitgleich muss jeder Abschnitt
+  abwechselnd erst den Zwilling (Tiefe schreiben, Pipeline A) und dann den Blend (keine Tiefe,
+  Pipeline B) zeichnen: ~2 700 Abschnitte ergeben ~5 400 Pipeline-Wechsel je Bild. Das kostet die
+  GPU-Front-End-Zeit.
+- Tiefe-Schreiben ist in WebGPU fester Pipeline-Zustand. Ohne die Reihenfolge zu ändern, lässt sich
+  der Wechsel also nicht vermeiden (WGPU-034 hat gezeigt: getrennte Bildschirmbereiche gibt es dort
+  kaum).
+- Alles andere ist ohne Ausreißer: Terrain, Wasser, Objekte und die WGPU-Effekte (AO, Wolken, GI,
+  Schatten), die GL33 gar nicht hat, liegen jeweils bei 0,3–2 ms. Eine einzelne Spitze
+  (Terrain 43 ms) fiel in die Ladephase (11:39:17).
+- Folgerung: Auf dem Deck bleibt als großer Hebel nur `WGR_DIRECT_BATCH=all`, die Entscheidung des
+  Besitzers.
