@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <cmath>
+#include <cstdlib>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
@@ -299,6 +300,32 @@ void CameraVehicle::ResetTargets()
     _lastTgtPos = _target._pos;
 }
 
+namespace
+{
+// Free-fly feathering: the manual camera eases its flight speed and its pan/tilt rate toward what the keys and
+// the mouse ask, exponentially over these time constants (s), so a screen recording pans without the jerks of
+// raw per-frame mouse deltas (owner, 2026-10-22: "just so that if i do screenrecording it looks a bit more
+// professional"). The rate is smoothed, not the angle, so a mouse sweep still turns exactly as far.
+// POSEIDON_FREEFLY_SMOOTH=0: the raw response. The harness drift and yaw (top of Simulate) never pass through it.
+constexpr float FreeFlyMoveTime = 0.15f;
+constexpr float FreeFlyLookTime = 0.1f;
+
+bool FreeFlySmooth()
+{
+    static const bool on = [] {
+        const char* value = std::getenv("POSEIDON_FREEFLY_SMOOTH");
+        return !(value && value[0] == '0');
+    }();
+    return on;
+}
+
+// one step of an exponential follow over time constant tau, whatever the step length
+float FreeFlyFollow(float deltaT, float tau)
+{
+    return 1.0f - std::exp(-deltaT / tau);
+}
+} // namespace
+
 void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
 {
     if (_harnessDrift.SquareSize() > 0.0f)
@@ -433,6 +460,10 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
             saturate(accel[2], -10, +10);
             _speed += accel * deltaT;
         }
+        else if (FreeFlySmooth() && deltaT > 0)
+        {
+            _speed += (speedWanted - _speed) * FreeFlyFollow(deltaT, FreeFlyMoveTime);
+        }
         else
         {
             _speed = speedWanted;
@@ -562,6 +593,19 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
         const float mouseY = mouseLookActive ? input.GetMouseDeltaY() : 0.0f;
         float headChange = headSpeed * 2 * deltaT * _lastFov - mouseX * mouseLookScale;
         float diveChange = diveSpeed * 2 * deltaT * _lastFov + mouseY * mouseLookScale;
+        if (FreeFlySmooth() && deltaT > 1e-4f)
+        {
+            const float follow = FreeFlyFollow(deltaT, FreeFlyLookTime);
+            _lookHeadRate += (headChange / deltaT - _lookHeadRate) * follow;
+            _lookDiveRate += (diveChange / deltaT - _lookDiveRate) * follow;
+            // settled: stop exactly, so a still camera stays still (and keeps its lock target)
+            if (std::fabs(_lookHeadRate) < 1e-4f && headChange == 0)
+                _lookHeadRate = 0;
+            if (std::fabs(_lookDiveRate) < 1e-4f && diveChange == 0)
+                _lookDiveRate = 0;
+            headChange = _lookHeadRate * deltaT;
+            diveChange = _lookDiveRate * deltaT;
+        }
         Matrix3 orient = Orientation();
         if (headChange)
         {

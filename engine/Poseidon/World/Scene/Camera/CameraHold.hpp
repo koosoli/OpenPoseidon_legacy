@@ -109,6 +109,9 @@ class CameraVehicle : public CameraHolder
     bool _altitudeSpeedScaling;
     bool _reportedWorldBounds;
     bool _mouseLookRequiresRightButton;
+    // free-fly pan/tilt rate (rad/s), eased toward the input (CameraHold.cpp, FreeFlyLookTime)
+    float _lookHeadRate = 0.0f;
+    float _lookDiveRate = 0.0f;
 
   public:
     Vector3 GetTarget() const;

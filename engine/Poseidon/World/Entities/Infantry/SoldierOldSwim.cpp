@@ -77,6 +77,8 @@ constexpr float SwimHeaveDamping = 8.5f;
 // and the step, read as the water's speed (125 m/s for 2 m in a frame), threw him 3 m out of the water
 // (owner, 2026-10-13)
 constexpr float SwimTargetMaxRate = 3.0f;
+// how much faster than the surface he follows the body may rise (m/s)
+constexpr float SwimRiseMaxExcess = 3.0f;
 // Share of the waves' orbital velocity that carries the swimmer.
 constexpr float SwimDrift = 0.85f;
 // How far the body leans with the wave face (0 upright .. 1 square to the surface), and how fast (s).
@@ -508,7 +510,12 @@ bool Man::UpdateSwimming()
         BlendToMove(fallenIn && _swimInMove != MoveIdNone ? _swimInMove : swim);
         return true;
     }
-    const bool liftedClear = pos.Y() > level + SwimPlacedAbove + 0.5f;
+    // lifted clear of the water as it stands here, not of its mean level: the body rides 1.4 m under the chin line,
+    // so on a crest some 3 m over the mean (a rough Tidewater sea) a man still swimming read as lifted out, left
+    // the swim with the crest's rise as his speed and was thrown metres into the air, to fall back in and be
+    // thrown again (owner, 2026-10-22: "bouncing and flying high out of the water if the water amplitude is high")
+    const float waterHere = std::max(level, SwimSurface(pos.X(), pos.Z(), level, waveScale).height);
+    const bool liftedClear = pos.Y() > waterHere + SwimPlacedAbove + 0.5f;
     if (liftedClear || (depth < SwimStopDepth && !IsDead()))
     {
         // Both a shallow-water exit and a scripted lift/relocation must leave the
@@ -679,6 +686,10 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
             const float soft = _swimEntrySoft > 0 ? SwimEntrySoftSpring : 1.0f;
             const float acc = SwimHeaveSpring * soft * (target - y) + SwimHeaveDamping * std::sqrt(soft) * (targetVy - _swimVy);
             _swimVy += acc * h;
+            // the water lifts no faster than its own rise and a little: a step in the sampled surface or a
+            // spring overshoot on a steep crest must not fling him upward (calm water never reaches this; a
+            // 13 m fall in bobs up at 2.8 m/s)
+            _swimVy = std::min(_swimVy, std::max(targetVy, 0.0f) + SwimRiseMaxExcess);
             y += _swimVy * h;
         }
         // never through the bed (a trough over shallow water)
