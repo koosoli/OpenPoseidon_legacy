@@ -239,6 +239,10 @@ foreach ($name in @('m16','rifle','ak_rifle','scoped_rifle','smg','machinegun','
 foreach ($file in Get-ChildItem -LiteralPath (Join-Path $distDir 'assets/grass') -File -Filter 'meadow-grass-blade-*.png' -ErrorAction SilentlyContinue) {
     $contentPayload += @{Source=$file.FullName; Relative=('assets/grass/' + $file.Name)}
 }
+# The Desert Island ICBM scripts (whole world; WholeWorldDisplay copies them into the Earth mission).
+foreach ($file in Get-ChildItem -LiteralPath (Join-Path $distDir 'assets/earth/icbm') -File -Filter '*.sqs' -ErrorAction SilentlyContinue) {
+    $contentPayload += @{Source=$file.FullName; Relative=('assets/earth/icbm/' + $file.Name)}
+}
 # Engine feature packs live in assets\Mods (owner 2026-10-20: the game is exe + dll + assets\);
 # maps stay in Mods. A pack still installed at its old Mods\ location is removed after the copy.
 $relocatedPacks = @()
