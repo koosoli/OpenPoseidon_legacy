@@ -307,8 +307,8 @@ namespace
 // raw per-frame mouse deltas (owner, 2026-10-22: "just so that if i do screenrecording it looks a bit more
 // professional"). The rate is smoothed, not the angle, so a mouse sweep still turns exactly as far.
 // POSEIDON_FREEFLY_SMOOTH=0: the raw response. The harness drift and yaw (top of Simulate) never pass through it.
-constexpr float FreeFlyMoveTime = 0.15f;
-constexpr float FreeFlyLookTime = 0.1f;
+constexpr float FreeFlyMoveTime = 0.1f;
+constexpr float FreeFlyLookTime = 0.06f;
 
 bool FreeFlySmooth()
 {
