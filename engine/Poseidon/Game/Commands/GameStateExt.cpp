@@ -1342,6 +1342,38 @@ static GameValue ScriptLightAttach(const GameState* state, GameValuePar oper1, G
     return NOTHING;
 }
 
+// Arma 3: light setLightIntensity n / setLightAttenuation [start, const, lin, quad, hardStart, hardEnd]
+// / setLightDayLight bool. Approximated onto the LightPoint (ScriptLight::EffectiveBrightness).
+static GameValue ScriptLightSetIntensity(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Poseidon::ScriptLight* light = ScriptLightOf(oper1);
+    if (light)
+        light->SetIntensity(static_cast<float>(oper2));
+    return NOTHING;
+}
+
+static GameValue ScriptLightSetAttenuation(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Poseidon::ScriptLight* light = ScriptLightOf(oper1);
+    if (!light)
+        return NOTHING;
+    const GameArrayType& a = oper2;
+    // element 5 is the hard cut-off; without it the light keeps its intensity-derived reach
+    float hardEnd = -1;
+    if (a.Size() >= 6 && a[5].GetType() == GameScalar)
+        hardEnd = static_cast<float>(a[5]);
+    light->SetAttenuationLimit(hardEnd);
+    return NOTHING;
+}
+
+static GameValue ScriptLightSetDayLight(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Poseidon::ScriptLight* light = ScriptLightOf(oper1);
+    if (light)
+        light->SetDayLight(static_cast<bool>(oper2));
+    return NOTHING;
+}
+
 static GameValue ScriptLightDetach(const GameState*, GameValuePar oper1)
 {
     Poseidon::ScriptLight* light = ScriptLightOf(oper1);
@@ -2230,6 +2262,9 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "setLightAmbient", function, ScriptLightSetAmbient, GameObject, GameArray),
         GameOperator(GameNothing, "setLightBrightness", function, ScriptLightSetBrightness, GameObject, GameScalar),
         GameOperator(GameNothing, "lightAttachObject", function, ScriptLightAttach, GameObject, GameArray),
+        GameOperator(GameNothing, "setLightIntensity", function, ScriptLightSetIntensity, GameObject, GameScalar),
+        GameOperator(GameNothing, "setLightAttenuation", function, ScriptLightSetAttenuation, GameObject, GameArray),
+        GameOperator(GameNothing, "setLightDayLight", function, ScriptLightSetDayLight, GameObject, GameBool),
         GameOperator(GameNothing, "createUnit", function, UnitCreate, GameString, GameArray),
         GameOperator(GameObject, "createUnit", function, A1UnitCreate, GameGroup, GameArray),
         GameOperator(GameNothing, "setVehicleVarName", function, A1IgnoredBinary, GameObject, GameString),

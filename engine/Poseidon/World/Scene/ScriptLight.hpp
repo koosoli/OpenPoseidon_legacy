@@ -34,6 +34,13 @@ class ScriptLight : public Object
     float _brightness;
     OLink<Object> _attachedTo; //!< null while free-standing
     Vector3 _offset;           //!< model-space offset on _attachedTo
+    float _a3Intensity = -1;   //!< < 0: not set by an Arma 3 script
+    float _a3Reach = -1;       //!< hard attenuation limit in metres, < 0: not set
+    bool _dayLight = true;     //!< Arma 3 setLightDayLight (kept, lights are not dimmed by day here)
+
+    float EffectiveBrightness() const;
+    Color EffectiveDiffuse() const;
+    void Apply(); //!< pushes colour/ambient/brightness to the engine light
 
     void Rebuild(); //!< (re)creates the engine light for the current attachment and settings
 
@@ -50,6 +57,12 @@ class ScriptLight : public Object
     void Detach();
     void MoveTo(Vector3Par position);
     void SwitchOff();
+    //! Arma 3: setLightIntensity / setLightAttenuation / setLightDayLight. A3 describes a lamp by
+    //! an intensity (~100..10000) and an attenuation curve with a hard cut-off; here that becomes
+    //! the colour strength and the LightPoint reach (see ScriptLight.cpp, EffectiveBrightness).
+    void SetIntensity(float intensity);
+    void SetAttenuationLimit(float hardLimitEnd);
+    void SetDayLight(bool on) { _dayLight = on; }
 
     Object* AttachedTo() const { return _attachedTo; }
 
