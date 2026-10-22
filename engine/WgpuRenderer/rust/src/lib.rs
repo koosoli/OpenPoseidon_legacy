@@ -4345,16 +4345,9 @@ impl Renderer {
         self.gfx3d
             .build_indirect(&self.device, &self.queue, draws3d, &mut plan.ops);
         // WGPU-033: runs of consecutive barrier draws on one pipeline become one multi-draw in
-        // the colour replay (WGR_DIRECT_BATCH, see gfx3d::DirectBatchMode). WGPU-034 bounds twin
-        // draws by their mesh AABB, so it first learns which meshes the off-handle uploader
-        // rewrote since the last frame.
-        let rewritten = self.uploader.take_rewritten();
-        if !rewritten.is_empty() {
-            self.gfx3d.note_meshes_rewritten(&rewritten);
-        }
-        self.gfx3d.build_direct_batches(
-            &self.device, &self.queue, draws3d, cameras, &plan.order, &mut plan.ops,
-        );
+        // the colour replay (WGR_DIRECT_BATCH, see gfx3d::DirectBatchMode).
+        self.gfx3d
+            .build_direct_batches(&self.device, &self.queue, draws3d, &mut plan.ops);
         let main_selection = main_camera_tuple::select(
             terrain_batches.first().map(|b| b.camera as usize), draws3d.first().map(|d| d.camera as usize),
             water_batches.first().map(|b| b.camera as usize), grass_batches.first().map(|b| b.camera as usize));

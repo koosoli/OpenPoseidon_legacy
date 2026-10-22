@@ -87,9 +87,6 @@ pub struct Uploader {
     queue: wgpu::Queue,
     published: RwLock<Published>,
     pending_destroy: Mutex<Vec<u64>>,
-    // WGPU-034: meshes this surface rewrote since the renderer last asked
-    // (take_rewritten). Their create-time AABB no longer bounds their vertices.
-    rewritten: Mutex<std::collections::HashSet<u64>>,
 }
 
 impl Uploader {
@@ -103,7 +100,6 @@ impl Uploader {
                 mutation_serial: None,
             }),
             pending_destroy: Mutex::new(Vec::new()),
-            rewritten: Mutex::new(std::collections::HashSet::new()),
         }
     }
 
@@ -168,7 +164,6 @@ impl Uploader {
             u64::from(meta.vbase) * VERT_SIZE,
             bytemuck::cast_slice(verts),
         );
-        self.rewritten.lock().expect("uploader rewritten lock").insert(id);
         if let Some(serial) = &cur.mutation_serial {
             // A successful CPU queue write precedes the Release publication.
             // Zero is a permanent overflow sentinel; never alias an old sample.
@@ -215,15 +210,6 @@ impl Uploader {
     /// `bake_bind_cache` — which `Gfx3d::mesh_destroy` mutates.
     pub fn take_pending_destroys(&self) -> Vec<u64> {
         std::mem::take(&mut *self.pending_destroy.lock().expect("uploader destroy lock"))
-    }
-
-    /// WGPU-034: the meshes rewritten since the previous call, for the renderer's AABB trust.
-    pub fn take_rewritten(&self) -> Vec<u64> {
-        let mut set = self.rewritten.lock().expect("uploader rewritten lock");
-        if set.is_empty() {
-            return Vec::new();
-        }
-        set.drain().collect()
     }
 
     /// Test/diagnostic accessor: the metadata this surface holds for a handle.
@@ -375,13 +361,9 @@ mod tests {
         assert_eq!(up.enable_mutation_serial_snapshot(), (1, false));
         assert!(!up.mesh_update(999, &av), "unknown handle must not advance serial");
         assert_eq!(up.mutation_serial_snapshot(), Some(1));
-        assert!(up.take_rewritten().is_empty(), "a refused update rewrote nothing (WGPU-034)");
 
         let (fresh, _) = tagged(64, 7777.0);
         assert!(up.mesh_update(2, &fresh), "a registered update must upload");
-        assert!(up.mesh_update(2, &fresh), "and again");
-        assert_eq!(up.take_rewritten(), vec![2], "WGPU-034: the renderer learns mesh 2 moved, once");
-        assert!(up.take_rewritten().is_empty(), "take_rewritten drains");
         assert_eq!(up.mutation_serial_snapshot(), Some(2),
             "only the completed queue write advances the serial");
 

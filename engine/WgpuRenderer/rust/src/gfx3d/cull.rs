@@ -7276,7 +7276,7 @@ pub(crate) mod tests {
         let insert = |pool: &mut GeometryPool, meshes: &mut SlotMap<MeshKey, Mesh>| {
             let alloc = pool.alloc(&device, &queue, &verts, &[0, 1, 2]).unwrap();
             meshes.insert(Mesh { alloc, index_count: 3, vert_count: 3, skin: None,
-                                 aabb_min: [-0.5, 0.0, 0.0], aabb_max: [0.5, 0.5, 0.0], aabb_trusted: false })
+                                 aabb_min: [-0.5, 0.0, 0.0], aabb_max: [0.5, 0.5, 0.0] })
         };
         let a_mesh = insert(&mut pool, &mut meshes);
         let b_mesh = insert(&mut pool, &mut meshes);
@@ -7394,7 +7394,7 @@ pub(crate) mod tests {
         let insert = |pool: &mut GeometryPool, meshes: &mut SlotMap<MeshKey, Mesh>| {
             let alloc = pool.alloc(&device, &queue, &verts, &[0, 1, 2]).unwrap();
             meshes.insert(Mesh { alloc, index_count: 3, vert_count: 3, skin: None,
-                                 aabb_min: [-0.5, 0.0, 0.0], aabb_max: [0.5, 0.5, 0.0], aabb_trusted: false })
+                                 aabb_min: [-0.5, 0.0, 0.0], aabb_max: [0.5, 0.5, 0.0] })
         };
         let a_mesh = insert(&mut pool, &mut meshes);
         let b_mesh = insert(&mut pool, &mut meshes);
@@ -7543,7 +7543,7 @@ pub(crate) mod tests {
         let insert = |pool: &mut GeometryPool, meshes: &mut SlotMap<MeshKey, Mesh>| {
             let alloc = pool.alloc(&device, &queue, &verts, &[0, 1, 2]).unwrap();
             meshes.insert(Mesh { alloc, index_count: 3, vert_count: 3, skin: None,
-                                 aabb_min: [-0.5, 0.0, 0.0], aabb_max: [0.5, 0.5, 0.0], aabb_trusted: false })
+                                 aabb_min: [-0.5, 0.0, 0.0], aabb_max: [0.5, 0.5, 0.0] })
         };
         let a_mesh = insert(&mut pool, &mut meshes);
         let b_mesh = insert(&mut pool, &mut meshes);
