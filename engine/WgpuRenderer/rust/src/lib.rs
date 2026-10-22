@@ -140,6 +140,13 @@ struct UnderwaterView {
 
 // Like env_f32 but keeps a 0 value (env_f32 filters to >0 for scales). Used for the
 // tonemap mode/encode toggles where 0 is a meaningful "off".
+/// PERF-PREPASS-OBJECTS-FIRST lever: WGR_PREPASS_OBJECTS_FIRST=0 puts the GPU-driven set after
+/// terrain and grass in the depth prepass, as before.
+fn prepass_objects_first() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_PREPASS_OBJECTS_FIRST").map(|v| v.trim() != "0").unwrap_or(true))
+}
+
 /// PERF-SKY-AFTER-PREPASS lever: WGR_SKY_AFTER_PREPASS=0 draws the sky before the depth prepass,
 /// over every pixel, as before.
 fn sky_after_prepass() -> bool {
@@ -6195,6 +6202,22 @@ impl Renderer {
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
+                // PERF-PREPASS-OBJECTS-FIRST: the GPU-driven set (houses, trees -- most of what
+                // stands on the terrain) goes into the prepass BEFORE terrain and grass, so the
+                // terrain's per-fragment normal and the grass behind them fail early depth testing
+                // instead of being shaded and then covered. Depth is order-independent; the set
+                // binds all its own state, and every op after it rebinds its own.
+                // WGR_PREPASS_OBJECTS_FIRST=0 draws it after them, as before.
+                let objects_first = prepass_objects_first();
+                if objects_first && !suppress_world_objects {
+                    let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
+                    self.gfx3d.draw_gpu_driven_prepass(
+                        &mut pp,
+                        &self.textures,
+                        cam_off,
+                        &self.gpu_timers,
+                    );
+                }
                 let mut st3d = crate::gfx3d::Pass3dState::default();
                 for op in seg_ops {
                     match op {
@@ -6273,7 +6296,7 @@ impl Renderer {
                 // GPU-driven opaque set into the SAME depth+normal prepass (reuses this
                 // frame's cull out_args — the cull dispatch already ran before the passes).
                 // Writes depth + view-space normals so the set gets early-Z + SSAO normals.
-                if !suppress_world_objects {
+                if !objects_first && !suppress_world_objects {
                     let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
                     self.gfx3d.draw_gpu_driven_prepass(
                         &mut pp,
