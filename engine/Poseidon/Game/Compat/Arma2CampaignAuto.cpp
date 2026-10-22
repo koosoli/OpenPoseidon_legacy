@@ -6,7 +6,8 @@
 //   - intros, outros and award cutscenes are skipped after a few seconds,
 //   - the briefing is confirmed,
 //   - each mission is ended with endMission "<end>" (default END1) after <seconds> s
-//     (wall clock, from the moment the mission display opens),
+//     (wall clock, from the moment the mission display opens); <end> may be a sequence
+//     "end2:end1:loser" -- the n-th mission takes the n-th end, the last one repeats,
 //   - the debriefing is confirmed, and the campaign goes on to its next mission,
 //   - after <missions> missions (default 2) the game quits.
 // Each step is logged ("Arma 2 campaign auto: ..."). Nothing here runs without the variable.
@@ -21,9 +22,12 @@
 #include <Poseidon/UI/Map/UIMapBase.hpp>
 #include <Poseidon/World/World.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace Poseidon;
 
@@ -33,10 +37,26 @@ struct CampaignAuto
 {
     bool on = false;
     float seconds = 30.0f;
-    EndMode end = EMEnd1;
-    std::string endName = "end1";
+    std::vector<std::pair<EndMode, std::string>> ends{{EMEnd1, "end1"}}; // by mission, last repeats
     int missions = 2;
 };
+
+bool ParseEnd(std::string end, std::pair<EndMode, std::string>& out)
+{
+    for (char& ch : end)
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    if (end.size() == 4 && end.rfind("end", 0) == 0 && end[3] >= '1' && end[3] <= '6')
+    {
+        out = {static_cast<EndMode>(EMEnd1 + (end[3] - '1')), end};
+        return true;
+    }
+    if (end == "loser" || end == "lost")
+    {
+        out = {EMLoser, "loser"};
+        return true;
+    }
+    return false;
+}
 
 const CampaignAuto& Settings()
 {
@@ -54,19 +74,21 @@ const CampaignAuto& Settings()
         if (c1 != std::string::npos)
         {
             const size_t c2 = v.find(',', c1 + 1);
-            std::string end = v.substr(c1 + 1, c2 == std::string::npos ? std::string::npos : c2 - c1 - 1);
-            for (char& ch : end)
-                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            if (end.size() == 4 && end.rfind("end", 0) == 0 && end[3] >= '1' && end[3] <= '6')
+            const std::string list = v.substr(c1 + 1, c2 == std::string::npos ? std::string::npos : c2 - c1 - 1);
+            std::vector<std::pair<EndMode, std::string>> ends;
+            size_t pos = 0;
+            while (pos <= list.size())
             {
-                s.end = static_cast<EndMode>(EMEnd1 + (end[3] - '1'));
-                s.endName = end;
+                const size_t colon = list.find(':', pos);
+                std::pair<EndMode, std::string> one;
+                if (ParseEnd(list.substr(pos, colon == std::string::npos ? std::string::npos : colon - pos), one))
+                    ends.push_back(one);
+                if (colon == std::string::npos)
+                    break;
+                pos = colon + 1;
             }
-            else if (end == "loser" || end == "lost")
-            {
-                s.end = EMLoser;
-                s.endName = "loser";
-            }
+            if (!ends.empty())
+                s.ends = ends;
             if (c2 != std::string::npos)
             {
                 const int n = std::atoi(v.substr(c2 + 1).c_str());
@@ -182,9 +204,11 @@ void Arma2CampaignAutoStep()
             if (played >= s.seconds && GWorld->GetEndMode() == EMContinue)
             {
                 ended = true;
-                LOG_INFO(Core, "Arma 2 campaign auto: endMission \"{}\" after {:.0f} s (wall clock) of '{}.{}'", s.endName, played,
+                const size_t which = std::min<size_t>(static_cast<size_t>(std::max(missionsPlayed - 1, 0)), s.ends.size() - 1);
+                const auto& [endMode, endName] = s.ends[which];
+                LOG_INFO(Core, "Arma 2 campaign auto: endMission \"{}\" after {:.0f} s (wall clock) of '{}.{}'", endName, played,
                          (const char*)Glob.header.filename, (const char*)Glob.header.worldname);
-                GWorld->SetEndMode(s.end);
+                GWorld->SetEndMode(endMode);
                 GWorld->ForceEnd(true); // through a running camera or title effect
             }
             break;

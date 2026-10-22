@@ -9,6 +9,7 @@
 #include "BeachDebris.hpp"
 #include "ProceduralTrees.hpp"
 #include "EarthTreeDetail.hpp"
+#include <Poseidon/Dev/Diag/PhaseSplit.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/SnowShelter.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
@@ -4531,8 +4532,40 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         water->DrawEarthWater(scene,_params.world_origin.x,_params.world_origin.y,_params.terrain_grid,_params.hm_width);
 }
 
+// PERF-030: the pieces of the WGPU terrain draw, which is the `ground` slot of land:gnd's
+// breakdown (LandscapeRender.cpp). POSEIDON_TERRAIN_DRAW_SLOW_MS (default 10 ms, 0 = off).
+namespace
+{
+enum TerrainDrawSlot : size_t
+{
+    TdUpload, TdPages, TdGrassMetric, TdParams, TdSnow, TdMud, TdCraters, TdSand, TdSelect, TdCoverage, TdSubmit,
+    TdFish, TdBirds, TdReef, TdCrabs, TdDebris, TdTrees, TdSlotCount
+};
+Dev::PhaseSplit<TdSlotCount>& TerrainDrawSplit()
+{
+    static Dev::PhaseSplit<TdSlotCount> split(
+        "terrain draw",
+        {"upload", "pages", "grassMetric", "params", "snow", "mud", "craters", "sand", "select", "coverage", "submit",
+         "fish", "birds", "reef", "crabs", "debris", "trees"},
+        "POSEIDON_TERRAIN_DRAW_SLOW_MS", 10.0);
+    return split;
+}
+struct TerrainDrawFrame
+{
+    TerrainDrawFrame() { TerrainDrawSplit().Start(); }
+    ~TerrainDrawFrame()
+    {
+        std::string line;
+        if (TerrainDrawSplit().EndFrame(line))
+            LOG_INFO(Graphics, "{}", line);
+    }
+};
+} // namespace
+
 void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
 {
+    TerrainDrawFrame perfFrame;
+    auto& perf = TerrainDrawSplit();
     _drawCoverage = {};
     if (_renderer == nullptr || GLandscape == nullptr)
     {
@@ -4574,6 +4607,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     }
     const bool uploaded = UploadIfNeeded(land);
     RefreshGeographyIfChanged(land); // RFG-101: streamed objects densify the geography
+    perf.Lap(TdUpload);
     if (camera != nullptr)
     {
         // RenderSnapshot S4: the residency update -- a WORLD-STATE MUTATION -- no longer
@@ -4596,11 +4630,13 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
                          memory.object_texture_count, memory.geometry_retired_bytes / (1024.0 * 1024.0));
         }
     }
+    perf.Lap(TdPages);
     if (_rootIndex < 0)
     {
         return;
     }
     ReportGrassScreenMetric(scene);
+    perf.Lap(TdGrassMetric);
 
     // Refresh the coast wet-band params every frame: the animated sea level + clock (+ the
     // live-tuned coast look) drive the damp intertidal band, keyed on the SAME sea level and
@@ -4656,6 +4692,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     static const bool rutWaterEnabled = EnvFloat("WGR_MUD_RUT_WATER", 1.0f) > 0.5f;
     _engine.QueueMudWater(rutWaterEnabled && GMud().enabled ? MudRutWaterLevel(GMud().Wetness()) : 0.0f);
     _engine.QueueTerrainParams(_params); // REN-THR-013: queued, applied before wgr_render_frame
+    perf.Lap(TdParams);
     const auto& snow = GSnow();
     // The GPU window is presentation state. Paused freefly, deposit commands
     // and roof edits must still refresh it without advancing retained snow.
@@ -4689,6 +4726,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         _snowUploadWallTime = snowWallTime;
         _snowWasEnabled = snow.CoverActive();
     }
+    perf.Lap(TdSnow);
 
     const auto& mud = GMud();
     if (camera && std::isfinite(camera->Position().X()) && std::isfinite(camera->Position().Z()))
@@ -4727,6 +4765,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
             _mudFarUploadWallTime = farWall; _mudFarUploaded = true;
         }
     }
+    perf.Lap(TdMud);
     // BOOM-001: crater views. Near: 128 m ahead-centred like the mud window, moved in 4 m chunk
     // steps; far: 512 m, moved in 16 m steps. Grass gets the 64 craters nearest the camera.
     const auto& craters = GCraters();
@@ -4772,6 +4811,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
             _snowMarksUploaded = true;
         }
     }
+    perf.Lap(TdCraters);
     const auto& sand = GSand();
     if (camera && std::isfinite(camera->Position().X()) && std::isfinite(camera->Position().Z()))
     {
@@ -4829,6 +4869,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
             _sandUploaded = true; _sandWasEnabled = sand.enabled;
         }
     }
+    perf.Lap(TdSand);
     if (camera == nullptr)
     {
         return;
@@ -5002,6 +5043,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         (GCraters().Chunks() > 0 ? CraterField::MaxDepth : 0.0f) + (snow.CoverActive() ? snowEffDepth : 0.0f) + (mud.enabled && mud.Chunks() > 0 ? MudField::MaxDepth : 0.0f)
             + (sand.enabled && sand.Chunks() > 0 ? SandField::MaxDepth : 0.0f),
         _backgroundCoverage);
+    perf.Lap(TdSelect);
 
     _drawCoverage.frame = GEngine ? static_cast<uint64_t>(GEngine->GetFrameCounter()) : 0;
     _drawCoverage.heightRevision = _uploadedHeightRevision;
@@ -5030,6 +5072,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
             std::abs(node.originZ + node.size - cameraPos.Z()));
         _drawCoverage.farthestPatch = std::max(_drawCoverage.farthestPatch, std::sqrt(dx * dx + dz * dz));
     }
+    perf.Lap(TdCoverage);
 
     _engine.SubmitTerrain(_selected);
     // The procedural path must remain available on maps that use the modern GPU
@@ -5037,28 +5080,35 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     // SubmitGrass is frame-deduplicated by EngineWgpu; SetGrassParams below is an
     // additional legacy signal, not the only activation path.
     _engine.SubmitGrass();
+    perf.Lap(TdSubmit);
     // Tidewater wildlife, stage 1: fish in the seas around the camera (WGR_FISH=0 turns them off).
     if (camera)
     {
         if (!_fish)
             _fish = std::make_unique<FishSchools>(_engine, _renderer);
         _fish->Update(camera->Position(), Glob.time.toFloat());
+        perf.Lap(TdFish);
         if (!_birds)
             _birds = std::make_unique<BirdFlocks>(_engine, _renderer);
         _birds->Update(camera->Position(), Glob.time.toFloat());
+        perf.Lap(TdBirds);
         if (!_reef)
             _reef = std::make_unique<ReefLife>(_engine, _renderer);
         _reef->Update(camera->Position(), Glob.time.toFloat());
+        perf.Lap(TdReef);
         if (!_crabs)
             _crabs = std::make_unique<BeachCritters>(_engine, _renderer);
         _crabs->Update(camera->Position(), Glob.time.toFloat());
+        perf.Lap(TdCrabs);
         if (!_debris)
             _debris = std::make_unique<BeachDebris>(_engine, _renderer);
         _debris->Update(camera->Position());
+        perf.Lap(TdDebris);
         // the owner's ez-tree test (Map editor tab), inert while it is off
         if (!_ezTrees)
             _ezTrees = std::make_unique<ProceduralTrees>(_engine, _renderer);
         _ezTrees->Update(camera->Position());
+        perf.Lap(TdTrees);
     }
 }
 

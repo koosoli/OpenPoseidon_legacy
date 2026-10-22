@@ -27,7 +27,10 @@ MuzzleBurstRing& Ring()
 // carries the cooling ramp. Built once; the engine owns it from then on.
 Texture* SpriteTexture()
 {
-    static Ref<Texture> texture;
+    // Never destroyed: a static Ref's destructor runs at process exit, after the graphics
+    // engine is gone, and TextureGL33::ReleaseMemory then faults (0xC0000005 after
+    // 'Shutdown complete'). The engine's own shutdown releases the texture.
+    static Ref<Texture>& texture = *new Ref<Texture>();
     static bool tried = false;
     if (!tried && GEngine && GEngine->TextBank())
     {

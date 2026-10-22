@@ -504,6 +504,8 @@ class World
 	Script *DiagScript(int i) const {return _scripts[i];}
 #endif
 	void TerminateScript(Script *script);
+	// ends every running script; returns how many there were
+	int TerminateAllScripts();
 
 	void AddAttachment( AttachedOnVehicle *attach );
 	void RemoveAttachment( AttachedOnVehicle *attach );

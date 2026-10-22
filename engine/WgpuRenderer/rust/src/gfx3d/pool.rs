@@ -12,10 +12,10 @@
 //
 // Indices are widened to Uint32 (the pool spans well past the u16 vertex range) and
 // stored MESH-LOCAL (0-based within each mesh, values unchanged by the widen). A draw
-// binds the pool's vertex buffer SLICED to the mesh's `vbase` and uses base_vertex = 0,
-// so @builtin(vertex_index) stays mesh-local exactly as it was with per-mesh buffers
-// (see draw_one); the index buffer is bound whole and the draw's index range is offset
-// by the mesh's `ibase`.
+// binds the pool's vertex buffer whole and addresses the mesh with base_vertex = `vbase`
+// (WGPU-032; only the VS-skinning fallback still slices to `vbase` with base_vertex 0, see
+// draw_one); the index buffer is bound whole and the draw's index range is offset by the
+// mesh's `ibase`.
 
 use crate::ffi::WgrMeshVertex;
 

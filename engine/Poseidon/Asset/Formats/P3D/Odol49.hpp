@@ -238,8 +238,18 @@ inline uint32_t ReadOdol49Keyframes(BinaryReader& reader, uint32_t end)
 inline Odol73StaticRestData ReadOdol49StaticRestData(BinaryReader& reader, const Odol73StaticLodHeader& header, const Odol73StaticPreRestData& preRest, uint32_t end, bool hasRestClip)
 {
     const int start = reader.tell(); const uint32_t available = end - static_cast<uint32_t>(start);
-    const uint32_t effectiveSize = preRest.restDataSize == available + sizeof(uint32_t) ? available : preRest.restDataSize;
-    if (effectiveSize > available) throw std::runtime_error("ODOL A2 rest-data range exceeds its LOD");
+    uint32_t effectiveSize = preRest.restDataSize == available + sizeof(uint32_t) ? available : preRest.restDataSize;
+    if (effectiveSize > available)
+    {
+        // CorePatch's javelin_optic.p3d (rev 49): the directory ends its only LOD 22 bytes
+        // early; the rest data, sized as usual (declared - 4), runs on to the end of the
+        // file. Accept a declared size that still fits the file; the consumed-size check
+        // below and the vertex-count checks keep this from reading anything else.
+        const uint32_t declared = preRest.restDataSize >= sizeof(uint32_t) ? preRest.restDataSize - sizeof(uint32_t) : 0;
+        if (declared <= available || static_cast<uint64_t>(declared) > reader.remaining())
+            throw std::runtime_error("ODOL A2 rest-data range exceeds its LOD");
+        effectiveSize = declared;
+    }
     Odol73StaticRestData rest; if (hasRestClip) rest.clip = ReadOdol49CondensedArray<int32_t>(reader, "clip flags", 1'000'000);
     const auto readUvSet = [&reader, &header]() { Odol73UvSet set; set.minU = reader.read<float>(); set.minV = reader.read<float>(); set.maxU = reader.read<float>(); set.maxV = reader.read<float>(); const uint32_t vertices = reader.read<uint32_t>(); if (vertices != header.vertexCount) throw std::runtime_error("ODOL A2 UV set does not cover the LOD's vertices"); const bool defaultFill = reader.read<bool>(); std::vector<uint8_t> raw(static_cast<size_t>(vertices) * 4); if (defaultFill) { reader.readBytes(raw.data(), 4); for (uint32_t i = 1; i < vertices; ++i) std::memcpy(raw.data() + static_cast<size_t>(i) * 4, raw.data(), 4); } else raw = ReadOdol49Compressed(reader, raw.size()); const double du = static_cast<double>(set.maxU) - set.minU; const double dv = static_cast<double>(set.maxV) - set.minV; set.uv.resize(vertices); for (uint32_t i = 0; i < vertices; ++i) { int16_t u = 0, v = 0; std::memcpy(&u, raw.data() + static_cast<size_t>(i) * 4, 2); std::memcpy(&v, raw.data() + static_cast<size_t>(i) * 4 + 2, 2); set.uv[i][0] = static_cast<float>(1.52587890625e-05 * (u + 32767) * du + set.minU); set.uv[i][1] = static_cast<float>(1.52587890625e-05 * (v + 32767) * dv + set.minV); } return set; };
     rest.uv0 = readUvSet(); rest.uvSetCount = std::max(1u, reader.read<uint32_t>()); if (rest.uvSetCount > 8) throw std::runtime_error("ODOL A2 LOD declares too many UV sets"); for (uint32_t i = 1; i < rest.uvSetCount; ++i) rest.extraUvSets.push_back(readUvSet());
@@ -259,8 +269,12 @@ inline Odol73StaticLod ReadOdol49StaticLod(BinaryReader& reader, uint32_t start,
     lod.header = ReadOdol49StaticLodHeader(reader, start, end, oldClip, revision); lod.materials = ReadOdol73EmbeddedMaterials(reader);
     lod.pointToVertex = ReadOdol49VertexIndexArray(reader, "point-to-vertex map"); lod.vertexToPoint = ReadOdol49VertexIndexArray(reader, "vertex-to-point map"); lod.polygons = ReadOdol49Polygons(reader, lod.header.vertexCount, end); lod.sections = ReadOdol49StaticSections(reader, end); lod.namedSelections = ReadOdol49NamedSelections(reader, end); lod.namedProperties = ReadOdol73NamedProperties(reader, end); lod.observedKeyframes = ReadOdol49Keyframes(reader, end); lod.keyframesObserved = true;
     lod.endData.colorTop = reader.read<int32_t>(); lod.endData.color = reader.read<int32_t>(); lod.endData.special = reader.read<int32_t>(); lod.endData.vertexBoneRefIsSimple = reader.read<bool>(); lod.endData.restDataSize = reader.read<uint32_t>();
+    const int restStart = reader.tell();
     lod.rest = ReadOdol49StaticRestData(reader, lod.header, lod.endData, end, hasRestClip); if (!hasRestClip) lod.rest.clip = std::move(oldClip);
-    if (reader.tell() != static_cast<int>(end)) throw std::runtime_error("ODOL A2 LOD did not close at its declared boundary"); return lod;
+    // a rest block accepted past a short directory end (see ReadOdol49StaticRestData) closes the LOD itself
+    const bool restPastEnd = reader.tell() > static_cast<int>(end) &&
+                             static_cast<uint32_t>(reader.tell() - restStart) + sizeof(uint32_t) == lod.endData.restDataSize;
+    if (reader.tell() != static_cast<int>(end) && !restPastEnd) throw std::runtime_error("ODOL A2 LOD did not close at its declared boundary"); return lod;
 }
 
 inline Odol73StaticModel ReadOdolA2StaticModel(BinaryReader& reader, int fileSize, uint32_t revision)

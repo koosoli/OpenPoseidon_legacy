@@ -1,6 +1,7 @@
 
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+#include <Poseidon/Dev/Diag/PhaseSplit.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -1648,6 +1649,28 @@ struct LandStats
 
 LandStats GLandStats;
 
+// PERF-030: what `land:gnd` is made of, for the frames where it is slow (Dev/Diag/PhaseSplit.hpp).
+// POSEIDON_LAND_GND_SLOW_MS sets the threshold (default 25 ms; 0 turns the lines off).
+enum LandGndSlot : size_t
+{
+    GndSky,
+    GndClouds,
+    GndFlushSky,
+    GndHoles,
+    GndGround,
+    GndWater,
+    GndHorizon,
+    GndFlushLand,
+    GndSlotCount
+};
+Dev::PhaseSplit<GndSlotCount>& LandGndSplit()
+{
+    static Dev::PhaseSplit<GndSlotCount> split(
+        "land:gnd", {"sky", "clouds", "flushSky", "holes", "ground", "water", "horizon", "flushLand"},
+        "POSEIDON_LAND_GND_SLOW_MS", 25.0);
+    return split;
+}
+
 bool LandStatsEnabled()
 {
     static const bool enabled = std::getenv("WGR_LAND_STATS") != nullptr;
@@ -1714,7 +1737,11 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
     }
     // Sinkhole W1 (Malprave terrainHole2): the terrain holes within 400 m of the camera (nearest first, at most 64 edges)
     float holeEdges[64 * 4];
-    const int nHoleEdges = TerrainHoleDrawEdges(camera.Position(), 400.0f, holeEdges, 64);
+    int nHoleEdges = 0;
+    {
+        auto timed = LandGndSplit().Time(GndHoles);
+        nHoleEdges = TerrainHoleDrawEdges(camera.Position(), 400.0f, holeEdges, 64);
+    }
 // if cache was reconstructed too often, do not try to use it
 // it would degrade performance
 
@@ -1737,6 +1764,7 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
         // (SetTerrainHoles flushes the queues itself when the state changes; nothing happens without holes)
         GEngine->SetTerrainHoles(holeEdges, nHoleEdges);
         GroundLayerInfo opaqueLayer;
+        auto timed = LandGndSplit().Time(GndGround);
         DrawGround(bigRect, scene, opaqueLayer);
     }
 #endif
@@ -1755,14 +1783,25 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
         if (!ENGINE_CONFIG.noLandscape)
         {
             GEngine->EnableReorderQueues(true);
-            DrawWater(bigRect, scene);
-
+            {
+                auto timed = LandGndSplit().Time(GndWater);
+                DrawWater(bigRect, scene);
+            }
+            auto timed = LandGndSplit().Time(GndHorizon);
             DrawHorizont(scene);
         }
 #endif
 
-    GEngine->FlushQueues();
-    GEngine->SetTerrainHoles(nullptr, 0); // Sinkhole W1 (Malprave terrainHole2): holes only for the terrain
+    {
+        auto timed = LandGndSplit().Time(GndFlushLand);
+        GEngine->FlushQueues();
+        GEngine->SetTerrainHoles(nullptr, 0); // Sinkhole W1 (Malprave terrainHole2): holes only for the terrain
+    }
+    {
+        std::string line;
+        if (LandGndSplit().EndFrame(line))
+            LOG_INFO(Graphics, "{}", line);
+    }
     Dev::GFrameProfiler().Mark(Dev::FrameProfiler::PhaseDrawLandGround);
     GEngine->EnableReorderQueues(true);
     // draw non-alpha objects
@@ -2139,9 +2178,18 @@ void Landscape::Draw(Scene& scene)
         // camera.SetClipRange(10,1500);
         camera.SetClipRange(10, 4000);
 
-        DrawSky(scene);
-        DrawClouds(scene);
-        GEngine->FlushQueues();
+        {
+            auto timed = LandGndSplit().Time(GndSky);
+            DrawSky(scene);
+        }
+        {
+            auto timed = LandGndSplit().Time(GndClouds);
+            DrawClouds(scene);
+        }
+        {
+            auto timed = LandGndSplit().Time(GndFlushSky);
+            GEngine->FlushQueues();
+        }
 
         camera.SetClipRange(oldNear, oldFar);
     }

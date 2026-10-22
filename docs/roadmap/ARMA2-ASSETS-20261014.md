@@ -483,6 +483,32 @@ no screenshots written. The stall report now also takes stacks at 90 and 170 s.
   shows it if it does.
 - **Campaign run 2** (`439492f`): **C0 -> C1** (Harvest Red; C0 has no debriefing and goes
   straight to its outro) and again CE0 -> CE1; both exit 0, no script error.
+- **Javelin optic** (`2c46a50`): CorePatch's `javelin_optic.p3d` (ODOL 49, 2.5 kB) was
+  refused -- its LOD directory ends the only LOD 22 bytes early, while the rest data (sized as
+  usual, declared - 4) runs to the end of the file. The reader now accepts a declared rest
+  size past the LOD end when it fits the file and is consumed exactly. Offline on the laptop
+  the old and new reader agree on 317 Arma 2/OA models; only this file changes (refused ->
+  1 LOD, 61 vertices). Focus 26: loaded through the ODOL reader in C2, C3 and CE3, no
+  `Bad version`; what it looks like through the optic is not checked.
+
+### Current state merged, 2026-10-21
+
+- `77d1d4b`: merge of `feat/jump-reload-lean` (= `MrDudeX-arma1`, 2026-10-20), the newest branch
+  containing the others (feat/arma-original-ui with this branch's work up to `3e4940b`,
+  perf/reforger-render-hitches, feat/reforger-trees): 4720 commits in. Merged, not rebased, so
+  the pushed history stays. One conflict, this branch's verification table (kept).
+- On that state every test process died after a clean shutdown (static effect textures
+  destroyed after the GL33 engine); fixed in `e99a7a3` for the muzzle burst and the underwater
+  bubbles (foreign code, named as such in the commit). Run 31 checks the merged state.
+- The CI artifact carries exe, dll and PDBs only, not the `assets\` feature packs; the
+  laptop's game folder has none either. The Arma 2 tests do not depend on them.
+- Run 31 (`e99a7a3`): 98/97, 13059 Arma, 0 CWA, every exit code 0 -- the merged state is clean.
+- **Campaign branches** (`1f07764`: `OP_A2_CAMPAIGN` takes one end per mission, `end2:end1:loser`;
+  the laptop harness takes `mission|KEY=value` per line). Campaign run 5 walked four branches --
+  END2/END4 through I3, C5B, C6B to C7D; a lost C5 played again, then END5 to C7C; OA's END3 to
+  CE5B and END4 to CE7B; END3 to CE7A and a repeated CE7A -- each exactly as the campaigns'
+  description.ext says, with no script error. Campaign run 6 adds C7B, C7EF and a played C7C:
+  every mission of both campaigns has now been reached and played from its campaign.
 
 ## Steps
 

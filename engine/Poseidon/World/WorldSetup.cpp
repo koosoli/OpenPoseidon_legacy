@@ -1569,6 +1569,13 @@ void World::TerminateScript(Script* script)
     _scripts.Delete(index);
 }
 
+int World::TerminateAllScripts()
+{
+    const int count = _scripts.Size();
+    _scripts.Clear();
+    return count;
+}
+
 void Arma2RuntimeSimulate(); // GameStateExtA2.cpp: Arma 2 scripted FSMs (--arma2 only)
 
 void World::SimulateScripts()

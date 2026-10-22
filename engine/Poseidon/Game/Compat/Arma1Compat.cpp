@@ -595,8 +595,11 @@ void MountArchives()
     // Dta\bin.pbo / core.pbo are NOT mounted: their declared prefixes ("bin", "core")
     // would shadow CWA's own UI resources. Arma1Config reads bin.pbo privately.
     GameState::s_singleQuoteStrings = Generation() >= 2;
-    // Arma 3: {...} is code (typeName "CODE"), and the function library compiles on use.
-    GameState::s_codeValues = Generation() == 3;
+    // Arma 2 and 3: {...} is code (typeName "CODE"). Arma 2's MP framework tells code
+    // from text by it -- createTaskSet / createDiaryRecord `call` a {localize "..."} title
+    // only when typeName says CODE, and otherwise show the code's text as the title.
+    // Arma 3 also compiles its function library on use.
+    GameState::s_codeValues = Generation() >= 2;
     if (Generation() == 3)
     {
         ::Arma3RegisterScriptCommands();
