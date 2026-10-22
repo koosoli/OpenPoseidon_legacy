@@ -206,6 +206,14 @@ void Person::Simulate(float deltaT, SimulationImportance prec)
     const bool particleSnowflakes = GRain.Params().snowflakes;
     const float rain = UniformWettingDensity(weatherRain, particleRain, particleSnowflakes);
     _uniformWetnessProbeDue -= deltaT;
+    _uniformShelterProbeAge += deltaT;
+    // The answer only changes when he moves or what is above him does. A man who stayed
+    // within half a metre keeps it, and asks again every 10 s for a roof that went away:
+    // the two 30 m rays cost 1-2 ms on Chernarus, and MP_Detector's 431 men in the rain
+    // spent 0.15-0.25 ms of every Man::Simulate on them (100 ms a second of simulation).
+    if (rain > 0.0f && _uniformWetnessProbeDue <= 0.0f &&
+        Position().Distance2(_uniformShelterProbePos) < Square(0.5f) && _uniformShelterProbeAge < 10.0f)
+        _uniformWetnessProbeDue = 1.0f;
     if (rain > 0.0f && _uniformWetnessProbeDue <= 0.0f)
     {
         // The smoke rain query does not ignore its emitter. Ignore this actor
@@ -223,6 +231,8 @@ void Person::Simulate(float deltaT, SimulationImportance prec)
                                        0.05f, ObjIntersectView);
         _uniformRainSheltered = hits.Size() > 0;
         _uniformWetnessProbeDue = 1.0f;
+        _uniformShelterProbePos = Position();
+        _uniformShelterProbeAge = 0.0f;
         if (probe.on)
             PersonSimProbe::Totals().probes++;
     }
