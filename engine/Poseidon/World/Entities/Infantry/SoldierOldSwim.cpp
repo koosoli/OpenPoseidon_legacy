@@ -77,6 +77,8 @@ constexpr float SwimHeaveDamping = 8.5f;
 // and the step, read as the water's speed (125 m/s for 2 m in a frame), threw him 3 m out of the water
 // (owner, 2026-10-13)
 constexpr float SwimTargetMaxRate = 3.0f;
+// how much faster than the surface he follows the body may rise (m/s)
+constexpr float SwimRiseMaxExcess = 3.0f;
 // Share of the waves' orbital velocity that carries the swimmer.
 constexpr float SwimDrift = 0.85f;
 // How far the body leans with the wave face (0 upright .. 1 square to the surface), and how fast (s).
@@ -166,7 +168,9 @@ void SwimWaterLevel(float x, float z, float& level, float& waveScale)
     }
 }
 
-WaterSurfaceSample SwimSurface(float x, float z, float level, float waveScale)
+// `queried`: the drawn surface's height here from the renderer's point queries (SwimBodySurface), used in
+// place of the predictor's; the drawn grid round the camera still has the last word.
+WaterSurfaceSample SwimSurface(float x, float z, float level, float waveScale, const float* queried = nullptr)
 {
     // WGR_WAVE_BUOYANCY=0 (Collisions.cpp): the flat sea, for A/B
     static const bool waves = EnvOn("WGR_WAVE_BUOYANCY");
@@ -175,6 +179,10 @@ WaterSurfaceSample SwimSurface(float x, float z, float level, float waveScale)
         return WaterSurfaceSample{level, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     }
     WaterSurfaceSample sample = QueryWaterSurfaceScaled(x, z, Glob.time.toFloat(), level, waveScale);
+    if (queried)
+    {
+        sample.height = *queried;
+    }
     // near the camera, the surface as the Tidewater water draws it: the predictor matches the drawn sea in
     // scale, not crest for crest, and the gap (half a metre at times) put the player's eyes under the drawn
     // crests. POSEIDON_SWIM_DRAWN=0: the predictor everywhere.
@@ -187,6 +195,45 @@ WaterSurfaceSample SwimSurface(float x, float z, float level, float waveScale)
         sample.height += (y - sample.height) * w;
     }
     return sample;
+}
+// The body's samples on the sea as it is DRAWN, wherever the camera is: the swimmer asks the renderer for
+// his own points every step (RequestWaterQueries, the boats' hull path, answered 1-3 frames late) and
+// rides the answers. Outside the 16 m drawn grid round the camera he rode the CPU predictor, which
+// matches the drawn sea crest for crest nowhere and, in a maxed storm, stood three times its height:
+// watched from the free camera he flew metres over the drawn troughs and sank under the crests (owner,
+// 2026-10-22: "the soldier flies around in the water when i look at him in freefly"). All samples or
+// none, so the body never straddles two seas; a server, another water mode or a stale answer keeps
+// the predictor. Only for swimmers near the camera (the queries are shared with the boats' hulls).
+// POSEIDON_SWIM_QUERY=0: the predictor (and the grid) only.
+constexpr int SwimBodySamples = 5;
+constexpr float SwimQueryRange = 300.0f;
+
+void SwimBodySurface(const void* key, const float (&xz)[SwimBodySamples][2], float level, float waveScale,
+                     WaterSurfaceSample (&out)[SwimBodySamples])
+{
+    static const bool query = EnvOn("POSEIDON_SWIM_QUERY") && EnvOn("WGR_WAVE_BUOYANCY");
+    bool fromQuery = query;
+    if (query)
+    {
+        const Camera* camera = GScene ? GScene->GetCamera() : nullptr;
+        const float dx = camera ? camera->Position().X() - xz[0][0] : 0.0f;
+        const float dz = camera ? camera->Position().Z() - xz[0][1] : 0.0f;
+        fromQuery = camera && dx * dx + dz * dz < SwimQueryRange * SwimQueryRange;
+    }
+    float heights[SwimBodySamples];
+    if (fromQuery)
+    {
+        float slopeX, slopeZ;
+        for (int i = 0; i < SwimBodySamples && fromQuery; i++)
+        {
+            fromQuery = DrawnWaterQuery(xz[i][0], xz[i][1], heights[i], slopeX, slopeZ);
+        }
+        RequestWaterQueries(reinterpret_cast<uintptr_t>(key), &xz[0][0], SwimBodySamples);
+    }
+    for (int i = 0; i < SwimBodySamples; i++)
+    {
+        out[i] = SwimSurface(xz[i][0], xz[i][1], level, waveScale, fromQuery ? &heights[i] : nullptr);
+    }
 }
 } // namespace
 
@@ -508,7 +555,18 @@ bool Man::UpdateSwimming()
         BlendToMove(fallenIn && _swimInMove != MoveIdNone ? _swimInMove : swim);
         return true;
     }
-    const bool liftedClear = pos.Y() > level + SwimPlacedAbove + 0.5f;
+    // lifted clear of the water as it stands here, not of its mean level: the body rides 1.4 m under the chin line,
+    // so on a crest some 3 m over the mean (a rough Tidewater sea) a man still swimming read as lifted out, left
+    // the swim with the crest's rise as his speed and was thrown metres into the air, to fall back in and be
+    // thrown again (owner, 2026-10-22: "bouncing and flying high out of the water if the water amplitude is high")
+    // (the drawn surface's own height too when the renderer has answered for him: either may be the higher)
+    float waterHere = std::max(level, SwimSurface(pos.X(), pos.Z(), level, waveScale).height);
+    float drawnY, slopeX, slopeZ;
+    if (DrawnWaterQuery(pos.X(), pos.Z(), drawnY, slopeX, slopeZ))
+    {
+        waterHere = std::max(waterHere, drawnY);
+    }
+    const bool liftedClear = pos.Y() > waterHere + SwimPlacedAbove + 0.5f;
     if (liftedClear || (depth < SwimStopDepth && !IsDead()))
     {
         // Both a shallow-water exit and a scripted lift/relocation must leave the
@@ -588,15 +646,18 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
     SwimWaterLevel(pos.X(), pos.Z(), level, waveScale);
     const float halfLength = 0.8f;
     const float halfWidth = 0.35f;
-    const WaterSurfaceSample c = SwimSurface(pos.X(), pos.Z(), level, waveScale);
-    const WaterSurfaceSample f =
-        SwimSurface(pos.X() + fwd.X() * halfLength, pos.Z() + fwd.Z() * halfLength, level, waveScale);
-    const WaterSurfaceSample b =
-        SwimSurface(pos.X() - fwd.X() * halfLength, pos.Z() - fwd.Z() * halfLength, level, waveScale);
-    const WaterSurfaceSample l =
-        SwimSurface(pos.X() - aside.X() * halfWidth, pos.Z() - aside.Z() * halfWidth, level, waveScale);
-    const WaterSurfaceSample r =
-        SwimSurface(pos.X() + aside.X() * halfWidth, pos.Z() + aside.Z() * halfWidth, level, waveScale);
+    const float bodyXz[SwimBodySamples][2] = {{pos.X(), pos.Z()},
+                                              {pos.X() + fwd.X() * halfLength, pos.Z() + fwd.Z() * halfLength},
+                                              {pos.X() - fwd.X() * halfLength, pos.Z() - fwd.Z() * halfLength},
+                                              {pos.X() - aside.X() * halfWidth, pos.Z() - aside.Z() * halfWidth},
+                                              {pos.X() + aside.X() * halfWidth, pos.Z() + aside.Z() * halfWidth}};
+    WaterSurfaceSample body[SwimBodySamples];
+    SwimBodySurface(this, bodyXz, level, waveScale, body);
+    const WaterSurfaceSample& c = body[0];
+    const WaterSurfaceSample& f = body[1];
+    const WaterSurfaceSample& b = body[2];
+    const WaterSurfaceSample& l = body[3];
+    const WaterSurfaceSample& r = body[4];
     const float surface = (2.0f * c.height + f.height + b.height + l.height + r.height) * (1.0f / 6.0f);
     const float waterVX = (2.0f * c.velocityX + f.velocityX + b.velocityX + l.velocityX + r.velocityX) * (1.0f / 6.0f);
     const float waterVZ = (2.0f * c.velocityZ + f.velocityZ + b.velocityZ + l.velocityZ + r.velocityZ) * (1.0f / 6.0f);
@@ -679,6 +740,10 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
             const float soft = _swimEntrySoft > 0 ? SwimEntrySoftSpring : 1.0f;
             const float acc = SwimHeaveSpring * soft * (target - y) + SwimHeaveDamping * std::sqrt(soft) * (targetVy - _swimVy);
             _swimVy += acc * h;
+            // the water lifts no faster than its own rise and a little: a step in the sampled surface or a
+            // spring overshoot on a steep crest must not fling him upward (calm water never reaches this; a
+            // 13 m fall in bobs up at 2.8 m/s)
+            _swimVy = std::min(_swimVy, std::max(targetVy, 0.0f) + SwimRiseMaxExcess);
             y += _swimVy * h;
         }
         // never through the bed (a trough over shallow water)
@@ -709,6 +774,10 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
                     const float pred = QueryWaterSurfaceScaled(pos.X(), pos.Z(), Glob.time.toFloat(), level, waveScale).height;
                     float drawnY = 0;
                     const bool hasDrawn = DrawnWaterHeightAt(pos.X(), pos.Z(), drawnY);
+                    float queryY = 0, qsx, qsz;
+                    const bool hasQuery = DrawnWaterQuery(pos.X(), pos.Z(), queryY, qsx, qsz);
+                    LOG_INFO(World, "Swim query: {} query-pred={:.2f} cam-dist={:.1f}", hasQuery ? 1 : 0, hasQuery ? queryY - pred : 0.0f,
+                             (cp - pos).SizeXZ());
                     LOG_INFO(World, "Swim cam: drawn={} drawn-pred={:.2f} dir=({:.2f},{:.2f},{:.2f}) camY-surface={:.2f} up=({:.2f},{:.2f},{:.2f}) headX={:.2f}", hasDrawn ? 1 : 0, hasDrawn ? drawnY - pred : 0.0f, cd.X(), cd.Y(), cd.Z(),
                              cp.Y() - c.height, _swimUp.X(), _swimUp.Y(), _swimUp.Z(), _headXRot);
                 }
