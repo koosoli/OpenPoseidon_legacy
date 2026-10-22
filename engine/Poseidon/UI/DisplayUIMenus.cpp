@@ -25,6 +25,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/AI/AICenter.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Foundation/Common/Filenames.hpp>
 #include <Poseidon/Foundation/Common/Win.h>
@@ -1193,13 +1194,25 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
             static const SDL_Scancode numberKeys[] = {
                 SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_4, SDL_SCANCODE_5,
                 SDL_SCANCODE_6, SDL_SCANCODE_7, SDL_SCANCODE_8, SDL_SCANCODE_9, SDL_SCANCODE_0};
-            for (int slot = 0; slot < 10; ++slot)
+            Person* player = GWorld->PlayerOn();
+            if (!player)
+                player = GWorld->GetRealPlayer();
+            // PIM-HOTKEY-MENU (tester report 2026-10-22): a squad leader with a rifle on 1 and
+            // grenades on 3 pressed 1 (Move) and 3 (Open fire) and got a weapon switch instead -
+            // the hotkey consumed the key before the command menu, whose items are matched by
+            // number key even before it is drawn. While the player commands anyone, the plain
+            // number keys are the command menu's and the hotkeys are Shift+number (Turbo only
+            // matters while moving). Everyone else keeps the plain number keys; Shift+number
+            // works for them too.
+            AIUnit* brain = player ? player->Brain() : nullptr;
+            AIGroup* group = brain ? brain->GetGroup() : nullptr;
+            const bool commands = brain && group && brain->IsGroupLeader() && group->NUnits() > 1;
+            const bool shift = input.IsKeyDown(SDL_SCANCODE_LSHIFT) || input.IsKeyDown(SDL_SCANCODE_RSHIFT);
+            const bool menuOpen = GWorld->UI() && GWorld->UI()->IsCommandMenuOpen();
+            for (int slot = 0; slot < 10 && (shift || (!commands && !menuOpen)); ++slot)
             {
                 if (GetWeaponHotkey(slot).GetLength() == 0 || !input.GetKeyToDo(numberKeys[slot]))
                     continue;
-                Person* player = GWorld->PlayerOn();
-                if (!player)
-                    player = GWorld->GetRealPlayer();
                 ApplyWeaponHotkey(player, slot);
                 break;
             }
