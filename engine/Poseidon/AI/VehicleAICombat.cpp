@@ -1411,6 +1411,9 @@ void EntityAI::Animate(int level)
         {
             type->_hiddenSelections[i].Unhide(_shape, level);
             type->_hiddenSelections[i].SetTexture(_shape, level, _hiddenSelectionsTextures[i]);
+            if (i < _hiddenSelectionsMaterials.Size() && _hiddenSelectionsMaterials[i])
+                type->_hiddenSelections[i].SetMaterial(_shape, level, _hiddenSelectionsMaterials[i],
+                                                       _hiddenSelectionsSavedMaterials);
         }
         else
         {
@@ -1469,6 +1472,8 @@ void EntityAI::Deanimate(int level)
     {
         type->_hiddenSelections[i].Unhide(_shape, level);
     }
+    // The shape is shared: give the next instance its sections' own materials back.
+    AnimationSection::RestoreMaterials(_shape, level, _hiddenSelectionsSavedMaterials);
 
     base::Deanimate(level);
 }
