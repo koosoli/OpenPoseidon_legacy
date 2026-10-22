@@ -1365,6 +1365,7 @@ class Soldier: public Man
 
 	void OnRecoilAbort() override;
 	float GetRecoilFactor() const override;
+	bool IsMachineGunFire() const override;
 
 	void Simulate( float deltaT, SimulationImportance prec ) override;
 

@@ -1,6 +1,7 @@
 // Adapted from the author-supplied CWR-Physical Inventory source donation (2026).
 // Distributed under this project's GPL-3.0-or-later licence and Section 7 terms; see LICENSE.
 #include "DisplayInventory.hpp"
+#include <Poseidon/World/Entities/Weapons/RecoilTuning.hpp>
 #include <Poseidon/Core/Config/CombatAssistSettings.hpp>
 #include "../../World/Entities/Weapons/ItemMass.hpp"
 
@@ -1304,6 +1305,7 @@ void DisplayInventory::OnSimulate(EntityAI *vehicle)
         {
             _activeSlider = -1;
             if (_uiSettingsDirty) { SaveInventorySettings(); _uiSettingsDirty = false; }
+            if (_recoilDirty)     { SaveRecoilTuning();      _recoilDirty = false; }
         }
         else
         {
@@ -1855,13 +1857,15 @@ enum EditSliderId
 };
 
 // --- Edit-menu pages ------------------------------------------------------------------
-enum EditPageId { EP_Inventory = 0, EP_COUNT };
+// Page 0 is the inventory set. Page 1 is recoil (PIM-RECOIL), driven entirely off the
+// GRecoilKnobs table in RecoilTuning.hpp - so adding a recoil knob needs no code here.
+enum EditPageId { EP_Inventory = 0, EP_Recoil, EP_COUNT };
 
 int DisplayInventory::EditPageCount() const { return EP_COUNT; }
 
 const char* DisplayInventory::EditPageTitle(int page) const
 {
-    return "Inventory Settings";
+    return page == EP_Recoil ? "Recoil Tuning" : "Inventory Settings";
 }
 
 bool DisplayInventory::EditPageTabRect(int page, float& x, float& y, float& w, float& h) const
@@ -1878,7 +1882,7 @@ bool DisplayInventory::EditPageTabRect(int page, float& x, float& y, float& w, f
 
 int DisplayInventory::EditSliderCount() const
 {
-    return ES_COUNT;
+    return _editPage == EP_Recoil ? GRecoilKnobCount : ES_COUNT;
 }
 
 // Table-driven boolean toggles in the edit menu (checkbox + label). Adding a row here
@@ -1914,7 +1918,9 @@ void DisplayInventory::EditSliderRect(int i, float &x, float &y, float &w, float
 {
     float px, py, pw, ph; EditPanelRect(px, py, pw, ph);
     // height: 10 rows per column instead of 9.
-    const int perCol = 9;
+    // The recoil page carries no toggles or swatch underneath, so it can use the full panel
+    // height: 10 rows per column instead of 9.
+    const int perCol = (_editPage == EP_Recoil) ? 10 : 9;
     const int col = i / perCol, row = i % perCol;
     const float colW = pw * 0.5f;
     x = px + 0.022f + col * colW;
@@ -1956,6 +1962,12 @@ float DisplayInventory::EditSliderFrac(int i) const
 {
     auto nm = [](float v, float a, float b){ float f = (v - a) / (b - a); return f < 0 ? 0.0f : (f > 1 ? 1.0f : f); };
 
+    if (_editPage == EP_Recoil)
+    {
+        if (i < 0 || i >= GRecoilKnobCount) return 0.0f;
+        const RecoilKnob &k = GRecoilKnobs[i];
+        return nm(GRecoilTune.*(k.member), k.lo, k.hi);
+    }
     switch (i)
     {
         case ES_IconScale: return nm(InventoryGlobalIconScale(), 0.40f, 2.00f);
@@ -1987,6 +1999,16 @@ float DisplayInventory::EditSliderFrac(int i) const
 void DisplayInventory::EditSliderSet(int i, float f)
 {
     auto lp = [](float a, float b, float t){ return a + t * (b - a); };
+    if (_editPage == EP_Recoil)
+    {
+        if (i >= 0 && i < GRecoilKnobCount)
+        {
+            const RecoilKnob &k = GRecoilKnobs[i];
+            GRecoilTune.*(k.member) = lp(k.lo, k.hi, f);
+            _recoilDirty = true;   // saved once when the drag ends, to its own cfg file
+        }
+        return;
+    }
     switch (i)
     {
         case ES_IconScale: SetInventoryGlobalIconScale(lp(0.40f, 2.00f, f)); break;
@@ -2021,6 +2043,15 @@ void DisplayInventory::EditSliderSet(int i, float f)
 
 void DisplayInventory::EditSliderLabel(int i, char *buf, int n) const
 {
+    if (_editPage == EP_Recoil)
+    {
+        if (i < 0 || i >= GRecoilKnobCount) { if (n > 0) buf[0] = 0; return; }
+        const RecoilKnob &k = GRecoilKnobs[i];
+        char fmt[32];
+        snprintf(fmt, sizeof(fmt), "%%s  %%.%df", k.decimals < 0 ? 0 : (k.decimals > 6 ? 6 : k.decimals));
+        snprintf(buf, n, fmt, k.label, GRecoilTune.*(k.member));
+        return;
+    }
 
     float r, g, b; InventoryAccentColor(r, g, b);
     switch (i)
@@ -2082,9 +2113,19 @@ bool DisplayInventory::EditMenuClick(float x, float y)
     EditResetRect(tx, ty, tw, th);
     if (x >= tx && x <= tx + tw && y >= ty && y <= ty + th)
     {
-        ResetInventorySettingsToDefault();
-        ResetCombatAssistSettings();
-        SaveInventorySettings();
+        // Reset only what the visible page owns, so tuning recoil cannot wipe the inventory
+        // layout and vice versa.
+        if (_editPage == EP_Recoil)
+        {
+            ResetRecoilTuningToDefault();
+            SaveRecoilTuning();
+        }
+        else
+        {
+            ResetInventorySettingsToDefault();
+            ResetCombatAssistSettings();
+            SaveInventorySettings();
+        }
         Rebuild();
         return true;
     }
@@ -2109,7 +2150,7 @@ void DisplayInventory::DrawEditMenu(float alpha)
             continue;
         FillRect(tx, ty, tw, th, (pg == _editPage) ? AccentColor() : ColAmmoBarBg, alpha);
         DrawBorder(tx, ty, tw, th, 0.0012f, ColPaneBorder, alpha);
-        const char *nm = "Inventory";
+        const char *nm = (pg == EP_Recoil) ? "Recoil" : "Inventory";
         const float nw = MeasureText(nm, TextSize * 0.64f);
         DrawLabel(nm, tx + (tw - nw) * 0.5f, ty + th * 0.22f, TextSize * 0.64f, ColText, alpha);
     }

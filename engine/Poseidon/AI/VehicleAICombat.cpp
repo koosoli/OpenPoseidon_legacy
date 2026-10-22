@@ -9,6 +9,7 @@
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
+#include <Poseidon/World/Entities/Weapons/RecoilTuning.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Audio/Core/WaveLifecycle.hpp>
 #include <float.h>
@@ -1138,6 +1139,106 @@ void EntityAI::OnAddImpulse(Vector3Par force, Vector3Par torque)
     StartRecoil(recoil, factor * GetRecoilFactor());
 }
 
+// PIM-RECOIL: PhysicalInventory 17's recoil model (inspiration/CWR-Physical Inventory), ported
+// 2026-10-22 on a tester's report that the Recoil page was missing. Tuned live from the
+// inventory edit menu's Recoil page (RecoilTuning.hpp).
+// Recoil tuning, applied to every weapon in the game at the one point _recoilFactor is
+// assigned.
+// Scales the authored curve, which contributes the shove back along the bore (its rotation is
+// discarded - see ApplyRecoil's translationOnly). Half strength, matching PhysicalInventory 17.
+static const float& kRecoilScale = GRecoilTune.scale;
+
+// Arma 3's CfgRecoils muzzleOuter[] = {x, y, a, b} - x/y are the ellipse CENTRE, a/b its
+// magnitudes. Bohemia's documented sample is {0.3, 1.0, 0.3, 0.2}: vertical centre 1.0
+// against a horizontal magnitude of only 0.3, so the kick is overwhelmingly UP and merely
+// wanders a little to the sides. Ratio of up-bias to sideways spread is 3.3 : 1.
+//
+// The values below had that ratio at 0.5 : 1 - nearly SEVEN times too wide horizontally,
+// which is why the M16 waggled side to side. Corrected to Bohemia's proportions, with one
+// deliberate departure: the horizontal CENTRE is 0 rather than 0.3, because ReDiS's whole
+// premise is that vanilla's fixed "up and right to the Moon" drift is wrong and recoil
+// should be symmetric and random. So: climbs, wanders evenly either side, no systematic
+// pull in one direction.
+static const float kRecoilBiasRight = 0.00f;  // ellipse centre (x) - 0.3 in vanilla Arma 3
+// Vertically centred too, so muzzle RISE is gone for every weapon, not just belt-feds.
+// With the centre at (0,0) the impulse direction is drawn uniformly around the ellipse and
+// is zero-mean on both axes: the muzzle shakes but does not drift anywhere, and sustained
+// fire no longer parks it above the aim point. Was 1.00, which put dy in [0.75, 1.25] -
+// always positive, so every single shot kicked upward. Pair this with kRecoilPermanent = 0
+// below; either one alone leaves rise behind (see the note there).
+static const float& kRecoilBiasUp = GRecoilTune.biasUp;   // ellipse centre (y)
+static const float kRecoilSpreadX = 0.45f;    // ellipse horizontal magnitude (a)
+static const float kRecoilSpreadY = 0.25f;    // ellipse vertical magnitude (b)
+// The kick is a spring-damper rather than a keyframed curve, which is what gives the
+// rubber-band feel: a shot adds an impulse to the VELOCITY, so acceleration is highest at
+// the instant of firing and then falls away along the spring's own curve as it settles.
+// Because the impulse lands on whatever displacement is already there, rounds in a burst
+// compound smoothly instead of each one restarting the animation from zero - that restart
+// was the jerkiness.
+// Peak displacement of a critically damped spring is v0 / (w * e), where w is the natural
+// frequency 2*pi/period and e is 2.718. At a 0.45 s period that is w = 13.96, so the
+// divisor is ~37.9: an impulse of 0.5 rad/s peaks at 0.013 rad, a bit under a degree.
+// That is the "slight wiggle at the muzzle" target - use the same arithmetic to retune
+// rather than guessing, since the two constants interact.
+// Permanent climb per shot, in radians, before the recoil factor scales it. Arma 3 calls
+// this `permanent` in CfgRecoils and pairs it with `temporary`; 0.0025 rad is ~0.14 deg a
+// round, so a 30-round burst walked the muzzle about 4 degrees up and left it there.
+//
+// Zero: no weapon accumulates climb any more. Note this is only HALF of removing rise -
+// zeroing it alone still left a residual, because the temporary spring was fed an impulse
+// that always pointed up, so during sustained fire it settled at a non-zero mean ABOVE the
+// aim point (measured: 3.5 deg of the 14.8 deg total on a 100-round belt). Re-centring the
+// impulse ellipse via kRecoilBiasUp = 0 above is the other half.
+static const float& kRecoilPermanent = GRecoilTune.permanent;
+// Peak rotation of CfgRecoils::riffleSingle, the reference every other weapon is measured
+// against for per-weapon strength.
+static const float kRecoilReferenceRotX = 0.04f;
+// Arma 3's kickVisual: camera-only kick, in rad/s. Larger than the aim impulse on purpose
+// - the view absorbs the shot so the aim does not have to.
+static const float& kRecoilKickVisual = GRecoilTune.kickVisual;
+static const float& kRecoilCamPeriod = GRecoilTune.camPeriod;    // settles faster than the aim
+static const float& kRecoilCamDamping = GRecoilTune.camDamping;  // and bounces more
+static const float& kRecoilImpulse = GRecoilTune.impulse;        // rad/s per unit recoil factor
+static const float& kRecoilSpringPeriod = GRecoilTune.springPeriod;  // one natural oscillation
+// Exact update for a damped harmonic oscillator, x'' + 2*z*w*x' + w^2*x = 0, advanced by dt.
+//
+// Closed form rather than stepped explicit integration, whose accuracy depends on the step
+// size and therefore on the FRAME RATE. Measured on the aim spring under the old stepped
+// scheme (maxStep = period*0.1): the same impulse peaked at 0.0107 rad at 30 fps against
+// 0.0281 at 144 fps - recoil strength literally depended on how fast the machine ran. This
+// form is exact for any dt and needs no sub-stepping.
+//
+// Because exact integration no longer loses energy, the impulse defaults are scaled to match
+// what v17 ACTUALLY produced at 60 fps (see RecoilTuning.hpp): 0.672x for the aim spring,
+// 0.519x for the camera. The feel is v17's, without drifting with frame rate.
+static void SpringStepExact(float& x, float& v, float period, float damping, float dt)
+{
+    const float w = 2.0f * H_PI / period;
+    const float z = damping;
+    const float e = exp(-z * w * dt);
+    if (z < 1.0f)
+    {
+        const float wd = w * sqrt(1.0f - z * z);
+        const float c1 = x;
+        const float c2 = (v + z * w * x) / wd;
+        const float cs = cos(wd * dt);
+        const float sn = sin(wd * dt);
+        const float xn = e * (c1 * cs + c2 * sn);
+        v = e * (-z * w * (c1 * cs + c2 * sn) + wd * (c2 * cs - c1 * sn));
+        x = xn;
+    }
+    else
+    {
+        // Critically damped (and a safe stand-in if anyone tunes damping past 1).
+        const float c2 = v + w * x;
+        const float xn = e * (x + c2 * dt);
+        v = e * (c2 - w * (x + c2 * dt));
+        x = xn;
+    }
+}
+
+static const float& kRecoilDamping = GRecoilTune.springDamping;
+
 void EntityAI::StartRecoil(RecoilFunction* recoil, float recoilFactor)
 {
     if (recoil->GetTerminated(0))
@@ -1145,22 +1246,111 @@ void EntityAI::StartRecoil(RecoilFunction* recoil, float recoilFactor)
         // no need to start recoil that has already been terminated
         return;
     }
-    if (_recoil)
+    // Does this shot take over the authored CURVE? Only the curve is subject to "a stronger
+    // recoil is already playing - prefer it"; the per-shot impulses below are NOT, and that
+    // separation is the fix for shots that silently produced no recoil at all.
+    //
+    // The player's manual-fire floor is 0.05 s (kManualFireFloor) and every curve in
+    // CfgRecoils is longer than that - riffleSingle 0.10 s, sniperSingle 0.37 s - so on
+    // rapid fire a curve is ALWAYS still playing and this test ALWAYS runs. It used to
+    // compare the incoming recoilFactor against _recoilFactor, which is the curve SCALE
+    // (kRecoilScale, a constant 0.5), not a factor: prone aimPrecision is 0.3, so every
+    // follow-up shot taken while lying down lost the comparison and returned early, throwing
+    // away its spring impulse, permanent climb, camera kick and force feedback. Comparing
+    // against the factor the playing curve was actually started with restores the intended
+    // meaning, and moving the impulses out from under the early return means no shot can be
+    // dropped even when the curve legitimately keeps playing.
+    const bool takeCurve = !_recoil || recoilFactor >= _recoilFactorAsked;
+    if (takeCurve)
     {
-        if (recoilFactor < _recoilFactor)
+        if (_recoil)
         {
-            // current recoil is stronger - prefer it
-            return;
+            OnRecoilAbort();
         }
-        OnRecoilAbort();
+        _recoil = recoil;
+        _recoilTime = 0;
+        // KICKBACK - the authored curve's shove back along the bore, plus the force-feedback
+        // ramps. Deliberately NOT scaled by the incoming recoilFactor: that carries the
+        // animation's aim precision, which drops when prone, and the shove a round gives your
+        // shoulder does not care what stance you are in. Constant, so it feels the same
+        // standing, crouched or prone.
+        _recoilFactor = kRecoilScale;
+        _recoilFactorAsked = recoilFactor;
     }
-    _recoil = recoil;
-    _recoilTime = 0;
-    _recoilFactor = recoilFactor;
-    _recoilFFIndex = 0;
-    if (this == GWorld->CameraOn())
+    // Per-weapon strength, standing in for Arma 3's per-weapon muzzleOuter. The authored
+    // OFP curve already says how hard this weapon kicks, so its peak rotation is measured
+    // against a reference rifle and everything below scales by the ratio - an MG or a LAW
+    // hits harder than an M16 without a line of new config anywhere.
+    float weaponScale = recoil->GetPeakRotX() / kRecoilReferenceRotX;
+    saturate(weaponScale, 0.25f, 4.0f);
+
+    // Belt-fed weapons take the MG multipliers from RecoilTuning.hpp. All default to 1.00, so
+    // this is a no-op until one is dragged.
+    const float mgWander = IsMachineGunFire() ? GRecoilTune.mgWander : 1.0f;
+
+    // Belt-fed weapons take the machine-gun profile from Recoil.hpp: less wander, and a harder
+    // shove (applied to the kickback impulse further down).
+    // NOTE the kickback multiplier is deliberately NOT folded into _recoilFactor below.
+    // _recoilFactor is what the "current recoil is stronger - prefer it" test above compares
+    // the incoming factor against, so inflating it would make a burst's own later shots lose
+    // that comparison and get their recoil skipped entirely.
+
+    // Kick this shot in a random direction. A point is drawn uniformly inside the
+    // muzzleOuter ellipse (sqrt on the radius keeps it area-uniform rather than clumping
+    // at the centre) and becomes the direction of a velocity impulse. Added to the
+    // existing velocity, never assigned - that is what makes a burst compound rather than
+    // restart, and it is why the direction can be fully random without feeling jerky.
     {
-        StartRecoilFF();
+        const float t = GRandGen.RandomValue() * (2.0f * H_PI);
+        const float r = sqrt(GRandGen.RandomValue());
+        // A belt-fed weapon re-centres the ellipse vertically, so the direction is zero-mean
+        // and sustained fire does not park the muzzle above the aim point. See Recoil.hpp.
+        const float dx = kRecoilBiasRight + kRecoilSpreadX * r * cos(t);   // sideways
+        const float dy = kRecoilBiasUp + kRecoilSpreadY * r * sin(t);      // upward
+        const float len = sqrt(dx * dx + dy * dy);
+        if (len > 1e-6f)
+        {
+            const float ux = dy / len;   // pitch component of the direction
+            const float uy = dx / len;   // yaw component
+
+            // TEMPORARY: an impulse into the spring, which pulls it back to zero. This is
+            // the shake - it settles on its own and costs the player nothing.
+            //
+            // The ANGULAR kick scales with the incoming recoilFactor, so a braced stance
+            // still settles the muzzle - only the kickback above is held constant.
+            const float mag = kRecoilImpulse * recoilFactor * kRecoilScale * weaponScale * mgWander;
+            _recoilKickVX += mag * ux;
+            _recoilKickVY += mag * uy;
+
+            // PERMANENT: a small displacement that does NOT come back. Accumulated here
+            // and handed to the UI, which applies it to the aim itself, so the muzzle
+            // climbs through a burst and STAYS climbed until the player pulls down. This
+            // is the piece the engine never had and the single biggest reason sustained
+            // fire felt nothing like Arma 3 - without it every shot is self-correcting and
+            // holding the trigger costs you nothing.
+            const float perm = kRecoilPermanent * recoilFactor * kRecoilScale * weaponScale;
+            _recoilPermPitch += perm * ux;
+            _recoilPermYaw += perm * uy;
+
+            // VISUAL: Arma 3's kickVisual - a camera-only punch. Bigger and faster than
+            // the aim kick, because the view taking the hit is most of what makes a shot
+            // feel like it went off, and it costs nothing in accuracy since it never
+            // touches where the weapon points.
+            const float cam = kRecoilKickVisual * recoilFactor * weaponScale * mgWander;
+            _recoilCamVX += cam * ux;
+            _recoilCamVY += cam * uy;
+        }
+    }
+
+    // Force feedback replays the CURVE's ramps, so it restarts only when the curve did.
+    // Rewinding it while an older, stronger curve is still running would desync the two.
+    if (takeCurve)
+    {
+        _recoilFFIndex = 0;
+        if (this == GWorld->CameraOn())
+        {
+            StartRecoilFF();
+        }
     }
 }
 
@@ -1253,6 +1443,39 @@ void EntityAI::Simulate(float deltaT, SimulationImportance prec)
                 // fire on same target as before
                 FireWeapon(weapon, _shootTarget);
             }
+        }
+    }
+
+    // Integrate the recoil spring. OUTSIDE the _recoil test on purpose: the displacement
+    // has to keep settling after the shot's own curve has finished, and that tail is the
+    // whole point of the spring.
+    //
+    // Advanced by the CLOSED FORM rather than stepped explicitly. The stepped version's
+    // accuracy depended on the step size and so on the frame rate: the same impulse peaked at
+    // 0.0107 rad at 30 fps against 0.0281 at 144 fps, i.e. recoil strength varied with how
+    // fast the machine ran. The impulse defaults are scaled to match what that scheme actually
+    // produced at 60 fps, so the feel is unchanged and only the frame-rate drift is gone.
+    if (_recoilKickX != 0 || _recoilKickY != 0 || _recoilKickVX != 0 || _recoilKickVY != 0)
+    {
+        SpringStepExact(_recoilKickX, _recoilKickVX, kRecoilSpringPeriod, kRecoilDamping, deltaT);
+        SpringStepExact(_recoilKickY, _recoilKickVY, kRecoilSpringPeriod, kRecoilDamping, deltaT);
+        // Park it once it is visually at rest, so it stops costing anything.
+        if (fabs(_recoilKickX) < 1e-5f && fabs(_recoilKickY) < 1e-5f && fabs(_recoilKickVX) < 1e-4f &&
+            fabs(_recoilKickVY) < 1e-4f)
+        {
+            _recoilKickX = _recoilKickY = _recoilKickVX = _recoilKickVY = 0;
+        }
+    }
+
+    // ...and the camera spring, on its own faster, bouncier constants.
+    if (_recoilCamX != 0 || _recoilCamY != 0 || _recoilCamVX != 0 || _recoilCamVY != 0)
+    {
+        SpringStepExact(_recoilCamX, _recoilCamVX, kRecoilCamPeriod, kRecoilCamDamping, deltaT);
+        SpringStepExact(_recoilCamY, _recoilCamVY, kRecoilCamPeriod, kRecoilCamDamping, deltaT);
+        if (fabs(_recoilCamX) < 1e-5f && fabs(_recoilCamY) < 1e-5f && fabs(_recoilCamVX) < 1e-4f &&
+            fabs(_recoilCamVY) < 1e-4f)
+        {
+            _recoilCamX = _recoilCamY = _recoilCamVX = _recoilCamVY = 0;
         }
     }
 

@@ -535,7 +535,9 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	// viewports) instead of being stretched to fill the full width. Used by the optic
 	// overlays (binocular / scope / gunsight); the lateral strips it leaves are filled
 	// by DrawWidescreenPillarbox. Default false keeps the full-width fill (cinema border).
-	static void Draw2D( LODShape *lShape, int lod, PackedColor cColor, bool preserveAspect4x3 = false );
+	// `scale` grows the overlay about its own centre (PIM-RECOIL: the optic punch on a shot).
+	static void Draw2D( LODShape *lShape, int lod, PackedColor cColor, bool preserveAspect4x3 = false,
+		float scale = 1.0f );
 
 	// Paint solid-black pillarbox bars outside the central 4:3 area for
 	// 4:3-authored overlays. By default this is gated to gameplay so menu

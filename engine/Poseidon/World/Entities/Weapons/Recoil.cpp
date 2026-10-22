@@ -58,6 +58,23 @@ const RStringB& RecoilFunction::GetName() const
     return _name;
 }
 
+float RecoilFunction::GetPeakRotX() const
+{
+    // Each queued item holds an absolute rotation built by AddItem, not a cumulative one,
+    // so the peak is simply the largest of them.
+    float peak = 0;
+    for (int i = 0; i < _queue.Size(); i++)
+    {
+        Vector3Val dir = _queue[i]._mat.Direction();
+        const float a = fabs(atan2(dir.Y(), dir.Z()));
+        if (a > peak)
+        {
+            peak = a;
+        }
+    }
+    return peak;
+}
+
 float RecoilFunction::GetRecoilRotX(float time) const
 {
     Matrix4 mat = MIdentity;
@@ -108,7 +125,7 @@ bool RecoilFunction::GetFFRamp(int index, RecoilFFRamp& ramp) const
     return true;
 }
 
-void RecoilFunction::ApplyRecoil(float time, Matrix4& mat, float factor) const
+void RecoilFunction::ApplyRecoil(float time, Matrix4& mat, float factor, bool translationOnly) const
 {
     if (_queue.Size() <= 1)
     {
@@ -137,6 +154,20 @@ void RecoilFunction::ApplyRecoil(float time, Matrix4& mat, float factor) const
     Matrix4 res;
     res.SetMultiply(prevItem._mat, 1 - pFactor);
     res.AddMultiply(nextItem._mat, pFactor);
+
+    // Drop the curve's rotation, keep its translation. Each item is SetRotationX(-angle)
+    // plus a straight-back offset (see AddItem), and the keyframes are sparse enough that
+    // the rotation arrives as a step - which is what reads as a jerk no matter how much
+    // it is scaled down. The offset is the shove back along the bore and is smooth enough
+    // on its own, so it stays at full strength while the spring in EntityAI takes over the
+    // angular side.
+    if (translationOnly)
+    {
+        const Vector3 pos = res.Position();
+        res = MIdentity;
+        res.SetPosition(pos);
+    }
+
     if (factor < 1)
     {
         mat = res * mat * factor + mat * (1 - factor);

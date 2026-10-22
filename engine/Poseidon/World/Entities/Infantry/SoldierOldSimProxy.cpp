@@ -27,6 +27,7 @@
 
 #include <set>
 #include <string>
+#include <Poseidon/World/Entities/Weapons/RecoilTuning.hpp>
 
 namespace Poseidon
 {
@@ -1032,7 +1033,17 @@ void Man::Draw(int level, ClipFlags clipFlags, const FrameBase& pos)
                     // binoculars are a 4:3 vignette (scopes keep full width) — stretch when bars off.
                     const bool isBinocular = BinocularSelected();
                     const bool preserve4x3 = isBinocular && AspectRatio::ArePillarboxBarsEnabled();
-                    Draw2D(oShape, 0, GetOpticsColor(this), /*preserveAspect4x3*/ preserve4x3);
+                    // PIM-RECOIL: punch the sight toward the face as the weapon kicks. The optic
+                    // is a flat overlay, so there is no depth to move it along - scaling it up
+                    // about its centre is what reads as the gun coming back at you. Driven off
+                    // the live recoil curve, so it rises and falls with the kick.
+                    float opticsScale = 1.0f;
+                    if (_recoil)
+                    {
+                        opticsScale += GRecoilTune.opticsKick *
+                            fabs(_recoil->GetRecoilRotX(_recoilTime)) * _recoilFactor;
+                    }
+                    Draw2D(oShape, 0, GetOpticsColor(this), /*preserveAspect4x3*/ preserve4x3, opticsScale);
                     if (isBinocular)
                         Object::DrawWidescreenPillarbox();
                 }

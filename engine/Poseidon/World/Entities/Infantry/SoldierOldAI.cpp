@@ -29,6 +29,7 @@
 #include <Poseidon/AI/AICombatPace.hpp> // AI-AIM-001
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/Graphics/Rendering/Effects/MuzzleBurst.hpp>
+#include <Poseidon/World/Entities/Weapons/RecoilTuning.hpp>
 
 namespace Poseidon
 {
@@ -1740,10 +1741,48 @@ bool Soldier::FireWeapon(int weapon, TargetType* target)
     return false;
 }
 
+// PIM-RECOIL: a magazine this big or bigger means a belt-fed weapon rather than a rifle.
+static const int kMgMagazineRounds = 100;
+// STANDING or crouched, a belt-fed weapon is a handful: no bipod, all of that mass and rate of
+// fire fighting the shooter's arms. This is how much of the unbraced recoil it keeps anyway
+// (0 = steadies like a rifle, 1 = stance makes no difference at all).
+static const float& kMgRecoilBracedKeep = GRecoilTune.mgBracedKeep;
+
+// MG-vs-rifle is read off magazine capacity rather than the class name: belt-fed weapons in
+// this game carry 100+ rounds where rifles carry 30, which is a config fact rather than a
+// naming convention, so it survives addons.
+bool Soldier::IsMachineGunFire() const
+{
+    const int w = SelectedWeapon();
+    if (w < 0 || w >= NMagazineSlots())
+    {
+        return false;
+    }
+    const Magazine* mag = GetMagazineSlot(w)._magazine;
+    return mag && mag->_type && mag->_type->_maxAmmo >= kMgMagazineRounds;
+}
+
 float Soldier::GetRecoilFactor() const
 {
-    return GetAimPrecision();
+    float f = GetAimPrecision();
+
+    // Machine guns gain LESS from going prone than a rifle does. A bipod steadies the gun,
+    // but the mass and the rate of fire still move it, so an MG should not settle to a
+    // rifle's prone steadiness. Pull the factor part of the way back toward unbraced.
+    if (IsMachineGunFire())
+    {
+        f += (1.0f - f) * kMgRecoilBracedKeep;
+        // Prone gets a further multiplier for the bipod. Applied ON TOP of the line above
+        // rather than replacing it, so the default of 1.00 leaves the stock behaviour exactly
+        // intact - below 1 a bipodded gun settles, above 1 it stays lively.
+        if (IsDown())
+        {
+            f *= GRecoilTune.mgBipod;
+        }
+    }
+    return f;
 }
+
 
 void Soldier::OnRecoilAbort()
 {

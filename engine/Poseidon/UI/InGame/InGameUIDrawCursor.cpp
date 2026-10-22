@@ -127,6 +127,33 @@ bool InGameUI::DrawMouseCursor(const Camera& camera, AIUnit* unit, bool td)
     // LOG_DEBUG(UI, "World {:.1f},{:.1f},{:.1f}",_worldCursor[0],_worldCursor[1],_worldCursor[2]);
     // Matrix4Val camInvTransform=camera.GetInvTransform();
 
+    // PIM-RECOIL: apply the permanent part of the recoil to the AIM itself.
+    //
+    // It has to land on the cursor rather than on the weapon: the aiming simulation drives
+    // the gun toward the cursor every frame, so anything added to the weapon's rotation is
+    // pulled straight back out. Moving the cursor is what makes the climb persist and puts
+    // the correction on the player, which is the whole point - Arma 3's `permanent` works
+    // the same way, and it is why holding the trigger there walks your aim off the target.
+    if (Man* rman = dyn_cast<Man>(vehicle))
+    {
+        float rPitch = 0.0f, rYaw = 0.0f;
+        if (rman->TakeRecoilPermanent(rPitch, rYaw))
+        {
+            Vector3 cd = GetCursorDirection();
+            if (cd.SquareSize() > 1e-6f)
+            {
+                // Rotated in MODEL space - the same frame _gunXRot / _gunYRot live in, so
+                // pitch is about the soldier's right and yaw about his up, and the climb
+                // stays vertical on screen whichever way he is facing.
+                Vector3 cdM = vehicle->DirectionWorldToModel(cd);
+                cdM = Matrix3(MRotationY, rYaw) * (Matrix3(MRotationX, -rPitch) * cdM);
+                cd = vehicle->DirectionModelToWorld(cdM);
+                cd.Normalize();
+                SetCursorDirection(cd);
+            }
+        }
+    }
+
     Vector3 curDir = GetCursorDirection();
     vehicle->LimitCursor(GWorld->GetCameraType(), curDir);
 

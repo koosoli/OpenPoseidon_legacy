@@ -398,7 +398,44 @@ protected:
 	//@{
 	Ref<RecoilFunction> _recoil;
 	float _recoilTime; //!< current position in recoil
-	float _recoilFactor; //!< recoil factor - used when prone or crouch
+	float _recoilFactor; //!< scale applied to the authored curve (kRecoilScale)
+	//! The recoilFactor the CURRENTLY PLAYING curve was started with. Exists only so the
+	//! "current recoil is stronger - prefer it" test in StartRecoil compares like with like.
+	//! _recoilFactor above cannot serve: it is the curve scale, a different quantity in
+	//! different units, and comparing an incoming aim-precision against it silently dropped
+	//! whole shots (prone aimPrecision 0.3 < kRecoilScale 0.5) whenever the trigger came
+	//! back before the previous curve had finished.
+	float _recoilFactorAsked = 0;
+	//! Spring-damper recoil kick, in radians. Each shot adds an impulse to the VELOCITY in
+	//! a random direction; the spring pulls the displacement back to zero. Sharp onset,
+	//! smooth decay, and shots during a burst compound instead of restarting.
+	float _recoilKickX = 0, _recoilKickY = 0;    //!< displacement (pitch, yaw)
+	float _recoilKickVX = 0, _recoilKickVY = 0;  //!< velocity
+
+	//! PERMANENT part of the kick, pending application to the player's aim. Arma 3 splits
+	//! each shot's muzzle displacement into a temporary component that springs back and a
+	//! permanent one that does not - the permanent part is what makes sustained fire walk
+	//! your aim up the target and stay there until you pull back down. The spring above is
+	//! the temporary half; this is the other. Consumed once by the UI, which owns the
+	//! cursor, so it only ever affects a human player.
+	float _recoilPermPitch = 0, _recoilPermYaw = 0;
+
+	//! CAMERA-only kick - Arma 3's kickVisual. A second spring that punches the view
+	//! without touching the aim, so the shot is felt as well as seen. Bullets are
+	//! unaffected: they follow the weapon, and this moves only the head.
+	float _recoilCamX = 0, _recoilCamY = 0;
+	float _recoilCamVX = 0, _recoilCamVY = 0;
+
+	public:
+	//! Take and clear the pending permanent kick. Returns false when there is none.
+	bool TakeRecoilPermanent(float &pitch, float &yaw)
+	{
+		if (_recoilPermPitch == 0 && _recoilPermYaw == 0) return false;
+		pitch = _recoilPermPitch; yaw = _recoilPermYaw;
+		_recoilPermPitch = _recoilPermYaw = 0;
+		return true;
+	}
+	protected:
 	int _recoilFFIndex; // which recoil ramp is currently played
 
 	//! Start recoil effect
@@ -908,6 +945,11 @@ protected:
 
 	//! ask vehicle about recoil factor
 	virtual float GetRecoilFactor() const;
+
+	//! True when the firing weapon is belt-fed, which selects the MG multipliers in
+	//! RecoilTuning.hpp. Only Soldier answers yes - a vehicle-mounted gun is bolted to a hull
+	//! that already absorbs the recoil, so it wants no separate profile.
+	virtual bool IsMachineGunFire() const { return false; }
 
 	void OnAddImpulse(Vector3Par force, Vector3Par torque) override;
 

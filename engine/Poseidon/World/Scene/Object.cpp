@@ -1596,6 +1596,7 @@ struct DeferredOverlay
     int lod = 0;
     PackedColor color;
     bool preserveAspect4x3 = false;
+    float scale = 1.0f;
     bool requireGameplayActive = true;
     bool force = false;
 };
@@ -1619,11 +1620,11 @@ void Object::FlushDeferredOverlays()
         if (o.pillarbox)
             DrawWidescreenPillarbox(o.requireGameplayActive, o.force);
         else
-            Draw2D(o.shape, o.lod, o.color, o.preserveAspect4x3);
+            Draw2D(o.shape, o.lod, o.color, o.preserveAspect4x3, o.scale);
     }
 }
 
-void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserveAspect4x3)
+void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserveAspect4x3, float scale)
 {
     if (GDeferOverlays)
     {
@@ -1633,6 +1634,7 @@ void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserve
         o.lod = lod;
         o.color = cColor;
         o.preserveAspect4x3 = preserveAspect4x3;
+        o.scale = scale;
         GDeferredOverlays.push_back(o);
         return;
     }
@@ -1783,7 +1785,7 @@ void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserve
     // leave some out reserve
     float xCoef = Inv(xMax - xMin);
     float yCoef = (3.0 / 4) * Inv(yMax - yMin);
-    float coef = frameOptic ? yCoef : floatMax(xCoef, yCoef) * 1.02;
+    float coef = (frameOptic ? yCoef : floatMax(xCoef, yCoef) * 1.02) * scale;
     float xAvg = (xMax + xMin) * 0.5;
     float yAvg = (yMax + yMin) * 0.5;
 

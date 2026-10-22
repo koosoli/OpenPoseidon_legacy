@@ -136,6 +136,7 @@ extern RString CurrentCampaign;
 extern RString CurrentBattle;
 extern RString CurrentMission;
 #include <Poseidon/Core/Version.hpp>
+#include <Poseidon/World/Entities/Weapons/RecoilTuning.hpp>
 
 namespace Poseidon
 {
@@ -308,6 +309,9 @@ static void LoadAddonArchiveRoots()
 
 void Globals::Init()
 {
+    // PIM-RECOIL: the live recoil knobs from recoil_settings.cfg in the user folder. No file
+    // leaves the built-in defaults (PhysicalInventory 17's values).
+    Poseidon::LoadRecoilTuning();
     if (GUseFileBanks)
     {
         // Rebuild addon state from scratch for the current mod set: a re-mount keeps the

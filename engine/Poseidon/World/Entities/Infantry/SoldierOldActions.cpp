@@ -18,6 +18,7 @@
 #include <Poseidon/Foundation/Time/Time.hpp>
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
+#include <Poseidon/World/Entities/Weapons/RecoilTuning.hpp>
 
 using namespace Poseidon;
 void UpdateWeaponsInBriefing();
@@ -1937,9 +1938,14 @@ void Man::RecalcGunTransform()
 
     Matrix4 headOrientInv(MInverseScaled, headOrient);
 
-    if (fabs(_headYRot) + fabs(_headXRot) > 1e-6)
+    // PIM-RECOIL: the camera kick rides on the HEAD, folded in with the look rotation so it
+    // goes through the same head-centre pivot. The view punches on every shot without moving
+    // the weapon - bullets follow the aim, and nothing here touches it.
+    const float headYaw = _headYRot + _recoilCamY;
+    const float headPitch = _headXRot + _recoilCamX;
+    if (fabs(headYaw) + fabs(headPitch) > 1e-6)
     {
-        _headTrans = (headOrient * Matrix4(MRotationY, _headYRot) * Matrix4(MRotationX, -_headXRot) * headOrientInv);
+        _headTrans = (headOrient * Matrix4(MRotationY, headYaw) * Matrix4(MRotationX, -headPitch) * headOrientInv);
         _headTransIdent = false;
     }
     else
@@ -1950,7 +1956,26 @@ void Man::RecalcGunTransform()
 
     if (_recoil)
     {
-        _recoil->ApplyRecoil(_recoilTime, _gunTrans, _recoilFactor);
+        // KICKBACK - the authored curve's shove back along the bore. translationOnly keeps the
+        // shove and discards the curve's rotation, whose coarse keyframing reads as a snap; the
+        // angular side is the spring in EntityAI.
+        // Belt-fed weapons scale the shove. translationOnly means this is pure translation,
+        // so raising it adds felt weight without one bit of extra muzzle climb or wander.
+        const float kickback = _recoilFactor * (IsMachineGunFire() ? GRecoilTune.mgKickback : 1.0f);
+        _recoil->ApplyRecoil(_recoilTime, _gunTrans, kickback, /*translationOnly*/ true);
+        _gunTransIdent = false;
+    }
+
+    // Spring kick on top of the authored curve. The curve supplies the shove back along
+    // the bore; this supplies the angular displacement, which is the part that had to be
+    // smooth and randomly aimed. Integrated in EntityAI::Simulate - only read here.
+    if (_recoilKickX != 0 || _recoilKickY != 0)
+    {
+        Matrix4 rot;
+        rot.SetMultiply(Matrix4(MRotationY, _recoilKickY), Matrix4(MRotationX, -_recoilKickX));
+        Matrix4 res;
+        res.SetMultiply(rot, _gunTrans);
+        _gunTrans = res;
         _gunTransIdent = false;
     }
     _gunTransNoLean = _gunTrans;

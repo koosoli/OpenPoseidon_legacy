@@ -216,6 +216,7 @@ private:
     // a global UI setting changed during the drag (so we save once on release).
     int   _activeSlider    = -1;
     bool  _uiSettingsDirty = false;
+    bool  _recoilDirty = false;   //!< PIM-RECOIL: a Recoil-page slider moved; saved on release
     //! Current settings page.
     int   _editPage        = 0;
 
