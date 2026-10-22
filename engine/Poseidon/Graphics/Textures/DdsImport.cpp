@@ -1281,6 +1281,23 @@ bool TextureSourceDDS::PrepareCompositeBc3(size_t reservedBytes, const Bc3Encodi
     return true;
 }
 
+std::unique_ptr<TextureSourceDDS> TextureSourceDDS::CloneForBc3() const
+{
+    auto clone = std::make_unique<TextureSourceDDS>();
+    clone->_name = _name;
+    clone->_levels = _levels;
+    clone->_format = _format;
+    clone->_pacFormat = _pacFormat;
+    clone->_w = _w;
+    clone->_h = _h;
+    clone->_mipmaps = _mipmaps;
+    clone->_hasAlpha = _hasAlpha;
+    clone->_isTransparent = _isTransparent;
+    clone->_bc7Srgb = _bc7Srgb;
+    clone->_avgColor = _avgColor;
+    return clone;
+}
+
 bool TextureSourceDDS::TakeCompositeBc3(const char* sourceName, int width, int height, Bc3MipChain& out)
 {
     if (!sourceName || std::strcmp(sourceName, static_cast<const char*>(_name)) != 0 ||

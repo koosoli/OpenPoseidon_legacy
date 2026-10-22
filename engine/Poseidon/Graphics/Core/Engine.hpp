@@ -3251,6 +3251,10 @@ class Engine : public IGraphicsEngine
 
     // Visual-only authored world instances. Append virtuals to preserve existing slots.
     virtual bool SceneFarObjectCreated(uint32_t, LODShapeWithShadow*, const Matrix4&) { return false; }
+    // PERF-FAR-BC3-PREP: true when `shape`'s registration would not BC3-encode a texture on the
+    // calling thread -- nothing to encode, or the background encodes it started are in. False
+    // while they run (call again later; each call advances the work by at most one texture).
+    virtual bool PrepareGpuModelTexturesAsync(LODShapeWithShadow*) { return true; }
     virtual void SceneFarObjectRemoved(uint32_t) {}
     virtual void ClearFarObjects() {}
 

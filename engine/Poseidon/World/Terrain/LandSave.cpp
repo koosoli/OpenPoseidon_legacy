@@ -6820,6 +6820,10 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         const float scale = transform.Scale();
         transform.SetUpAndAside(transform.DirectionUp(), transform.DirectionAside());
         transform.SetScale(scale);
+        // PERF-FAR-BC3-PREP: a model this create would register waits until the textures its
+        // registration would encode on this thread have been encoded in the background.
+        if (!GEngine->PrepareGpuModelTexturesAsync(found->second))
+            continue; // created on a later visit
         const auto tCreate = std::chrono::steady_clock::now();
         const bool createProfWas = render::GObjectAdmitProfile.active;
         if (!createProfWas)

@@ -7,6 +7,8 @@
 #include <Poseidon/Foundation/Platform/EnvOnce.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
+#include <Poseidon/Foundation/Threads/PoThread.hpp>
+#include <future>
 #include <Poseidon/Graphics/Textures/Image.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Entities/Vehicles/Tracks.hpp>
@@ -18005,8 +18007,91 @@ void EngineWgpu::SceneFarObjectRemoved(uint32_t id)
     _farGpuInstances.erase(found);
 }
 
+// PERF-FAR-BC3-PREP (2026-10-22). A far model that can animate (doors, crane parts, stoves) is
+// registered at its first far create, and its `enfa|` composite face textures were BC3-encoded
+// there, on the main thread: one texture create of 101.7 ms (StoveTiled_01_column) at Durras.
+// The encode needs only the source's pixels, so the main thread copies one source per call and a
+// below-normal worker encodes the copy with the same encoder (PrepareCompositeBc3); when all of a
+// model's are in, each chain goes to its source if the texture is still not uploaded, and the
+// upload's TakeCompositeBc3 takes it. The model's far placements wait meanwhile.
+// WGR_FAR_BC3_PREP=0 = encode at registration, as before.
+bool EngineWgpu::PrepareGpuModelTexturesAsync(LODShapeWithShadow* shape)
+{
+    static const bool enabled = [] {
+        const char* v = std::getenv("WGR_FAR_BC3_PREP");
+        return !(v && v[0] == '0');
+    }();
+    if (!enabled || !shape || !_gpuDriven || !_renderer || _gpuModels.count(shape))
+        return true;
+    auto found = _bc3PrepJobs.find(shape);
+    if (found == _bc3PrepJobs.end())
+    {
+        auto job = std::make_unique<Bc3PrepJob>();
+        job->shape = shape;
+        std::unordered_set<const Texture*> seen;
+        for (int level = 0; level < shape->NLevels(); ++level)
+        {
+            if (!shape->IsNormalLevel(level))
+                continue;
+            const Shape* s = shape->LevelOpaque(level);
+            if (!s)
+                continue;
+            for (int i = 0; i < s->NSections(); ++i)
+            {
+                Texture* face = s->GetSection(i).properties.GetTexture();
+                if (!face || !seen.insert(face).second)
+                    continue;
+                if (TextureSourceDDS* source = static_cast<TextureWgpu*>(face)->CompositeBc3PrepSource())
+                {
+                    Bc3PrepItem item;
+                    item.texture = face;
+                    item.source = source;
+                    job->items.push_back(std::move(item));
+                }
+            }
+        }
+        if (job->items.empty())
+            return true;
+        found = _bc3PrepJobs.emplace(shape, std::move(job)).first;
+    }
+    Bc3PrepJob& job = *found->second;
+    if (job.started < job.items.size())
+    {
+        // One copy per call: a 2048^2 composite is ~21 MB of levels to copy.
+        Bc3PrepItem& item = job.items[job.started++];
+        if (static_cast<TextureWgpu*>(item.texture.GetRef())->CompositeBc3PrepSource() == item.source)
+        {
+            item.copy = item.source->CloneForBc3();
+            TextureSourceDDS* copy = item.copy.get();
+            item.encoded = std::async(std::launch::async, [copy] {
+                Foundation::poSetMyPriority(-1);
+                return copy->PrepareCompositeBc3(copy->CompositeBc3Reservation());
+            });
+        }
+        return false;
+    }
+    for (Bc3PrepItem& item : job.items)
+        if (item.encoded.valid() && item.encoded.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            return false;
+    for (Bc3PrepItem& item : job.items)
+    {
+        if (!item.encoded.valid() || !item.encoded.get())
+            continue;
+        auto* texture = static_cast<TextureWgpu*>(item.texture.GetRef());
+        if (texture->CompositeBc3PrepSource() == item.source && item.copy->HasPreparedBc3())
+            item.source->SetPreparedBc3(item.copy->TakePreparedBc3());
+    }
+    _bc3PrepJobs.erase(found);
+    return true;
+}
+
 void EngineWgpu::ClearFarObjects()
 {
+    for (auto& [shape, job] : _bc3PrepJobs)
+        for (Bc3PrepItem& item : job->items)
+            if (item.encoded.valid())
+                item.encoded.wait(); // the worker holds the copy
+    _bc3PrepJobs.clear();
     while (!_farGpuInstances.empty())
         SceneFarObjectRemoved(_farGpuInstances.begin()->first);
     // The landscape is going away (Landscape::ClearNativeFarResidency): the near clutter's

@@ -12,6 +12,7 @@
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>       // Ref<> (MAT-050's untextured stand-in)
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>    // SetDdsCompressedPassthrough (RFG-047)
+#include <future>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // SkipLayerTint (RFG-070)
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>   // Texture, complete for the Ref<> member
 #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
@@ -218,6 +219,22 @@ class EngineWgpu : public EngineDummy
     WarmPatnikProbeReport ProbeWarmPatnikStage() const override;
     bool CaptureWarmRapStageRead(const char* key, WarmTextureRead& out) const override;
     bool SceneFarObjectCreated(uint32_t id, LODShapeWithShadow* shape, const Matrix4& transform) override;
+    bool PrepareGpuModelTexturesAsync(LODShapeWithShadow* shape) override;
+    // PERF-FAR-BC3-PREP: per model, its composite face textures being BC3-encoded on workers.
+    struct Bc3PrepItem
+    {
+        Ref<Texture> texture;                   // keeps the texture (and its source) alive
+        TextureSourceDDS* source = nullptr;     // the source the result belongs to
+        std::unique_ptr<TextureSourceDDS> copy; // what the worker encodes; destroyed here
+        std::future<bool> encoded;
+    };
+    struct Bc3PrepJob
+    {
+        Ref<LODShapeWithShadow> shape;
+        std::vector<Bc3PrepItem> items;
+        size_t started = 0;
+    };
+    std::unordered_map<const LODShapeWithShadow*, std::unique_ptr<Bc3PrepJob>> _bc3PrepJobs;
     void SceneFarObjectRemoved(uint32_t id) override;
     // Canopy occlusion map (frame.wgsl canopy_sky_ao): every canopy-classed object the scene hands
     // the renderer (MapTree / MapSmallTree / MapBush / forests), as a top height and crown radius,

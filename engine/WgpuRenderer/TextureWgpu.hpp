@@ -16,6 +16,7 @@
 namespace Poseidon
 {
 class ITextureSource;
+class TextureSourceDDS;
 class TextureBankWgpu;
 
 using WgpuTextureReuseOnlyBinding = render::TextureReuseOnlyBinding<Ref<Texture>>;
@@ -252,6 +253,9 @@ class TextureWgpu : public Texture
 
     bool VerifyChecksum(const MipInfo&) const override { return true; }
     bool IsGpuResident() const override { return _gpuHandle != 0; }
+    // PERF-FAR-BC3-PREP: the DDS source whose upload would BC3-encode a composite on this thread
+    // because nothing is prepared for it; null otherwise.
+    TextureSourceDDS* CompositeBc3PrepSource() const;
 
     void SetMaxSize(int) override {}
     int AMaxSize() const override { return 256; }

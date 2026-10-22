@@ -1087,6 +1087,14 @@ uint32_t TextureWgpu::AcquireSlotLease()
     return _slotLease;
 }
 
+TextureSourceDDS* TextureWgpu::CompositeBc3PrepSource() const
+{
+    if (_gpuHandle || !_src || !CompositeWantsBc3(Name()))
+        return nullptr;
+    auto* dds = dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(_src));
+    return dds && dds->CompositeBc3Reservation() && !dds->HasPreparedBc3() ? dds : nullptr;
+}
+
 int TextureWgpu::Init()
 {
     _hotSourceProofRetireAttempted = false;

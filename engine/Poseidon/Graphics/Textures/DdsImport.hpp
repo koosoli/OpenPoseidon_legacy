@@ -116,6 +116,13 @@ class TextureSourceDDS : public ITextureSource
     bool PrepareCompositeBc3(size_t reservedBytes, const Bc3EncodingObserver* observer = nullptr);
     // Main-thread one-shot claim. Incompatible dimensions/name leave it unused.
     bool TakeCompositeBc3(const char* sourceName, int width, int height, Bc3MipChain& out);
+    // PERF-FAR-BC3-PREP: a copy of this source's pixels for a worker to encode
+    // (PrepareCompositeBc3 on the copy), and the hand-back of its chain to this
+    // source on the owner thread, where the upload's TakeCompositeBc3 finds it.
+    std::unique_ptr<TextureSourceDDS> CloneForBc3() const;
+    bool HasPreparedBc3() const { return !_preparedBc3.blocks.empty(); }
+    void SetPreparedBc3(Bc3MipChain&& chain) { _preparedBc3 = std::move(chain); }
+    Bc3MipChain TakePreparedBc3() { Bc3MipChain out = std::move(_preparedBc3); _preparedBc3 = {}; return out; }
     // RFG-112: BC3 from the source's OWN mip levels (each encoded as-is), not mips regenerated
     // from the top. False unless the levels form an exact halving chain down to 4x4.
     bool EncodeAuthoredBc3(Bc3MipChain& out) const;
