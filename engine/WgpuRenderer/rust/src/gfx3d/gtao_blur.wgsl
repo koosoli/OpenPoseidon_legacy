@@ -41,32 +41,42 @@ fn oct_decode(e: vec2<f32>) -> vec3<f32> {
     return normalize(v);
 }
 
-@compute @workgroup_size(8, 8, 1)
-fn cs_gtao_blur(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let dims = vec2<i32>(textureDimensions(ao_out));
-    let px = vec2<i32>(gid.xy);
-    if (px.x >= dims.x || px.y >= dims.y) {
-        return;
-    }
+// PERF-GTAO-BLUR-STRIP: one workgroup filters a 64-pixel STRIP along the blur axis. The strip and
+// its halo are loaded into workgroup memory once -- depth, the DECODED normal and the AO -- so a
+// texel is fetched and oct-decoded once per strip instead of once per tap (2r+1 = 13 times at the
+// default radius 6). Each pixel then runs exactly the loop it always did, over the same clamped
+// neighbours in the same order: the result is bit-identical. Radii beyond STRIP_HALO take the
+// direct path below, unchanged.
+const STRIP: i32 = 64;
+const STRIP_HALO: i32 = 16;
+var<workgroup> strip_depth: array<f32, 96>;
+var<workgroup> strip_normal: array<vec3<f32>, 96>;
+var<workgroup> strip_ao: array<vec4<f32>, 96>;
 
+fn blur_axis() -> vec2<i32> {
+    return select(vec2<i32>(1, 0), vec2<i32>(0, 1), params.tuning.x > 0.5);
+}
+
+fn blur_store(px: vec2<i32>, filtered: vec4<f32>) {
+    let bent_len = length(filtered.xyz);
+    let bent = select(vec3<f32>(0.0, 0.0, -1.0), filtered.xyz / bent_len, bent_len > 1e-5);
+    textureStore(ao_out, px, vec4<f32>(bent, filtered.a));
+}
+
+// The original per-pixel kernel, kept for radii the strip cannot hold.
+fn blur_direct(px: vec2<i32>, dims: vec2<i32>) {
     let d_centre = textureLoad(depth_tex, px, 0);
-    // Sky: GTAO already wrote full visibility and there is no surface to filter along.
-    // Blurring here would drag occlusion from the silhouette out into the sky.
     if (d_centre <= 0.0) {
         textureStore(ao_out, px, vec4<f32>(0.0, 0.0, -1.0, 1.0));
         return;
     }
     let n_centre = oct_decode(textureLoad(normal_tex, px, 0).xy);
 
-    let axis = select(vec2<i32>(1, 0), vec2<i32>(0, 1), params.tuning.x > 0.5);
+    let axis = blur_axis();
     let radius = i32(max(params.tuning.y, 1.0));
     let depth_scale = max(params.tuning.z, 1e-4);
     let normal_power = max(params.tuning.w, 1.0);
 
-    // rgb = bent normal, a = AO. Filtered together with identical weights on purpose: a bent
-    // normal denoised differently from the AO it belongs to disagrees with it exactly at the
-    // edges where both matter. Directions are averaged then renormalised, which is valid because
-    // they are stored as real vectors — an oct-encoded pair could not be averaged at all.
     var sum = vec4<f32>(0.0);
     var weight_sum = 0.0;
     for (var i = -radius; i <= radius; i = i + 1) {
@@ -76,13 +86,9 @@ fn cs_gtao_blur(@builtin(global_invocation_id) gid: vec3<u32>) {
             continue; // never pull sky into a surface's AO
         }
 
-        // Gaussian-ish spatial falloff over the tap window.
         let x = f32(i) / f32(radius);
         let w_spatial = exp(-3.0 * x * x);
 
-        // Reversed-Z depths are not linear, so compare them as a RELATIVE difference rather
-        // than an absolute one. An absolute epsilon that behaves near the camera rejects
-        // nothing in the distance, where reversed-Z values crowd together.
         let rel = abs(dq - d_centre) / max(max(dq, d_centre), 1e-6);
         let w_depth = exp(-rel / depth_scale);
 
@@ -94,10 +100,76 @@ fn cs_gtao_blur(@builtin(global_invocation_id) gid: vec3<u32>) {
         weight_sum = weight_sum + w;
     }
 
-    // Every neighbour rejected (a one-pixel island between silhouettes) — keep the centre
-    // rather than dividing by zero.
-    let filtered = select(textureLoad(ao_in, px, 0), sum / weight_sum, weight_sum > 1e-5);
-    let bent_len = length(filtered.xyz);
-    let bent = select(vec3<f32>(0.0, 0.0, -1.0), filtered.xyz / bent_len, bent_len > 1e-5);
-    textureStore(ao_out, px, vec4<f32>(bent, filtered.a));
+    blur_store(px, select(textureLoad(ao_in, px, 0), sum / weight_sum, weight_sum > 1e-5));
+}
+
+// Dispatched as (ceil(axis length / STRIP), cross length, 1): x = strip along the axis, y = the
+// row (horizontal pass) or column (vertical pass).
+@compute @workgroup_size(64, 1, 1)
+fn cs_gtao_blur(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) li: u32) {
+    let dims = vec2<i32>(textureDimensions(ao_out));
+    let axis = blur_axis();
+    let along = i32(wg.x) * STRIP + i32(li);
+    let px = select(vec2<i32>(along, i32(wg.y)), vec2<i32>(i32(wg.y), along), params.tuning.x > 0.5);
+    let inside = px.x < dims.x && px.y < dims.y;
+    let radius = i32(max(params.tuning.y, 1.0));
+    if (radius > STRIP_HALO) {
+        if (inside) {
+            blur_direct(px, dims);
+        }
+        return;
+    }
+
+    // Load the strip and its halo: tile slot t holds axis coordinate start - STRIP_HALO + t, clamped
+    // to the image exactly as the per-tap clamp below would.
+    let start = vec2<i32>(i32(wg.x) * STRIP) * axis + vec2<i32>(i32(wg.y)) * (vec2<i32>(1) - axis);
+    for (var t = i32(li); t < STRIP + 2 * STRIP_HALO; t = t + STRIP) {
+        let q = clamp(start + axis * (t - STRIP_HALO), vec2<i32>(0), dims - vec2<i32>(1));
+        strip_depth[t] = textureLoad(depth_tex, q, 0);
+        strip_normal[t] = oct_decode(textureLoad(normal_tex, q, 0).xy);
+        strip_ao[t] = textureLoad(ao_in, q, 0);
+    }
+    workgroupBarrier();
+    if (!inside) {
+        return;
+    }
+
+    let c = i32(li) + STRIP_HALO;
+    let d_centre = strip_depth[c];
+    if (d_centre <= 0.0) {
+        textureStore(ao_out, px, vec4<f32>(0.0, 0.0, -1.0, 1.0));
+        return;
+    }
+    let n_centre = strip_normal[c];
+
+    let depth_scale = max(params.tuning.z, 1e-4);
+    let normal_power = max(params.tuning.w, 1.0);
+
+    var sum = vec4<f32>(0.0);
+    var weight_sum = 0.0;
+    for (var i = -radius; i <= radius; i = i + 1) {
+        // The strip is only STRIP wide; a tap past the image edge clamps to the edge texel, which
+        // is the tile slot of the clamped coordinate -- recompute it rather than trust c + i.
+        let qa = clamp(dot(px, axis) + i, 0, dot(dims, axis) - 1);
+        let slot = qa - dot(start, axis) + STRIP_HALO;
+        let dq = strip_depth[slot];
+        if (dq <= 0.0) {
+            continue; // never pull sky into a surface's AO
+        }
+
+        let x = f32(i) / f32(radius);
+        let w_spatial = exp(-3.0 * x * x);
+
+        let rel = abs(dq - d_centre) / max(max(dq, d_centre), 1e-6);
+        let w_depth = exp(-rel / depth_scale);
+
+        let nq = strip_normal[slot];
+        let w_normal = pow(clamp(dot(nq, n_centre), 0.0, 1.0), normal_power);
+
+        let w = w_spatial * w_depth * w_normal;
+        sum = sum + strip_ao[slot] * w;
+        weight_sum = weight_sum + w;
+    }
+
+    blur_store(px, select(strip_ao[c], sum / weight_sum, weight_sum > 1e-5));
 }

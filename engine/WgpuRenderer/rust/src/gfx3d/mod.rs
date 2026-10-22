@@ -4290,14 +4290,16 @@ impl GtaoBlur {
             return;
         };
         encoder.push_debug_group("wgr_gtao_blur");
-        for bind in [bh, bv] {
+        // PERF-GTAO-BLUR-STRIP: one 64-pixel strip per workgroup along the pass's axis
+        // (horizontal first, then vertical), one workgroup row per image row / column.
+        for (bind, (along, across)) in [(bh, (w, h)), (bv, (h, w))] {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("wgr_gtao_blur"),
                 timestamp_writes: None,
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, bind, &[]);
-            pass.dispatch_workgroups(w.div_ceil(8), h.div_ceil(8), 1);
+            pass.dispatch_workgroups(along.div_ceil(64), across, 1);
         }
         encoder.pop_debug_group();
     }
