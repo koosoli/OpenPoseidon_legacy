@@ -1723,9 +1723,15 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         let fc = reflect_schlick(vec3<f32>(0.04), ndv).x * coat;
         let env_base = reflect_env_radiance(refl_dir, rough);
         let env_coat = reflect_env_radiance(refl_dir, clamp(material.reflect1.y, 0.0, 1.0));
-        let spec = (env_base * fb * (1.0 - fc) + env_coat * fc) * occ;
+        // A rough base layer spreads its reflection over the whole hemisphere; with one sky map
+        // and no prefiltered lobe the five-tap cone overstates it, and matt paint came out
+        // washed grey by the reflected sand (CWA desert, 2026-10-22: HMMWV, 5t truck). Fade the
+        // base-layer reflection with roughness until phase D brings real prefiltering.
+        let rough_fade = pow(1.0 - rough, 1.5);
+        let spec = (env_base * fb * rough_fade * (1.0 - fc) + env_coat * fc) * occ;
         // What the reflection takes, the diffuse body no longer scatters (energy, roughly).
-        let keep = (1.0 - fc * occ) * (1.0 - max(fb.r, max(fb.g, fb.b)) * occ * (1.0 - clamp(material.reflect0.z, 0.0, 1.0)));
+        let keep = (1.0 - fc * occ) *
+            (1.0 - max(fb.r, max(fb.g, fb.b)) * rough_fade * occ * (1.0 - clamp(material.reflect0.z, 0.0, 1.0)));
         if (translucent > 0.5) {
             // A pane over what is behind it: the reflection sits on top of the film (RFG-137's form).
             let f = clamp(max(fb.r, max(fb.g, fb.b)) * (1.0 - fc) + fc, 0.0, 1.0) * occ;
