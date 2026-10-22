@@ -5,7 +5,8 @@
 // before touching the draw, so both lanes stay at the zero WgrDraw3D{} gave them and the
 // shader reads them nowhere -- the frame is today's frame.
 //
-//   WGR_REFLECT=1         classify every section (the lanes carry data; phase C shades with it)
+//   WGR_REFLECT=1         classify every section and shade it (phase C: GGX sun + clear coat,
+//                         sky env reflection) -- per-draw path only, i.e. vehicles and entities
 //   WGR_REFLECT_DEBUG=N   classify and show debug view N instead of the lit colour:
 //                         1 class, 2 roughness, 3 F0/metal, 4 clear coat, 5 source
 //
