@@ -243,13 +243,28 @@ foreach ($file in Get-ChildItem -LiteralPath (Join-Path $distDir 'assets/grass')
 # maps stay in Mods. A pack still installed at its old Mods\ location is removed after the copy.
 $relocatedPacks = @()
 foreach ($pack in @(
-    @{Folder='assets/Mods/@OP_VisualUpgrade'; Archive='op_ground_materials.pbo'},
-    @{Folder='assets/Mods/@OP_VehicleActions'; Archive='op_jeep_actions.pbo'},
-    @{Folder='assets/Mods/@OP_Swim'; Archive='swim.pbo'},
-    @{Folder='assets/Mods/@OP_TidewaterBoat'; Archive='op_tidewater_boat.pbo'},
-    @{Folder='assets/Mods/@OP_TidewaterWildlife'; Archive='op_tidewater_wildlife.pbo'})) {
+    @{Folder='assets/Mods/@OP_VisualUpgrade'; Archive='op_ground_materials.pbo'; Source='visual'; Builder='Build-DefaultContent.ps1'},
+    @{Folder='assets/Mods/@OP_VehicleActions'; Archive='op_jeep_actions.pbo'; Source='vehicle-actions'; Builder='Build-VehicleActions.ps1'},
+    @{Folder='assets/Mods/@OP_Swim'; Archive='swim.pbo'; Source='swim'; Builder='Build-Swim.ps1'},
+    @{Folder='assets/Mods/@OP_TidewaterBoat'; Archive='op_tidewater_boat.pbo'; Source='tidewater-boat'; Builder='Build-TidewaterBoat.ps1'},
+    @{Folder='assets/Mods/@OP_TidewaterWildlife'; Archive='op_tidewater_wildlife.pbo'; Source='tidewater-wildlife'; Builder='Build-TidewaterWildlife.ps1'})) {
     $relocatedPacks += ($pack.Folder -replace '^assets/', '')
     $sourcePack = Join-Path $distDir $pack.Folder
+    # A pack staged before its source last changed is rebuilt, not shipped. A cmake build does not restage the packs
+    # (Build.ps1 does), so dist\ can hold an archive older than the code it ships with: on 2026-10-22 a deploy put
+    # a swim.pbo from before the jump moves next to an exe that plays them, and the owner jumped with no animation.
+    $packSource = Join-Path $repoRoot ('content/default-packs/' + $pack.Source)
+    $staged = Join-Path $sourcePack ('AddOns/' + $pack.Archive)
+    if (Test-Path -LiteralPath $packSource) {
+        $newest = Get-ChildItem -LiteralPath $packSource -Recurse -File | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+        if (!(Test-Path -LiteralPath $staged) -or ($newest -and $newest.LastWriteTimeUtc -gt (Get-Item -LiteralPath $staged).LastWriteTimeUtc)) {
+            Write-Host ("Restaging {0}: {1} is newer than the staged {2}" -f $pack.Folder, $newest.Name, $pack.Archive)
+            & (Join-Path $PSScriptRoot $pack.Builder) -Preset $Preset
+            if (!(Test-Path -LiteralPath $staged) -or (Get-Item -LiteralPath $staged).LastWriteTimeUtc -lt $newest.LastWriteTimeUtc) {
+                throw "Could not restage $($pack.Folder) from $packSource ($($pack.Builder))"
+            }
+        }
+    }
     if (!(Test-Path -LiteralPath $sourcePack)) { continue }
     $metadata = Join-Path $sourcePack 'mod.json'
     $archive = Join-Path $sourcePack ('AddOns/' + $pack.Archive)
