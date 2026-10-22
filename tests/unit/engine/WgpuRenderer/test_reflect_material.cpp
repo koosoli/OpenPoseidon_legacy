@@ -114,6 +114,13 @@ int main()
     hilux.texture = "data\\hilux_pristroje.paa";
     hilux.material = "data\\default.rvmat";
     assert(ClassOf(hilux) == SurfaceClass::Plastic);
+    Inputs suvLamp; // an emissive light material on the body texture is body paint
+    suvLamp.isVehicle = true;
+    suvLamp.texture = "a3\\soft_f_gamma\\suv_01\\data\\suv_01_ext_co.paa";
+    suvLamp.material = "a3\\data_f\\lights\\car_headlight_emit.rvmat";
+    assert(ClassOf(suvLamp) == SurfaceClass::PaintGloss);
+    suvLamp.texture = "a3\\soft_f_gamma\\hatchback_01\\data\\hatchback_01_lights_ca.paa";
+    assert(ClassOf(suvLamp) == SurfaceClass::LampPlastic); // a lamp texture stays a lamp
     Inputs a3mirror; // a mirror material on a non-body texture stays a mirror
     a3mirror.isVehicle = true;
     a3mirror.texture = "#(argb,8,8,3)color(0.75,0.75,0.75,1.0,co)";

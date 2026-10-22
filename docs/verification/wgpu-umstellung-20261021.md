@@ -343,3 +343,30 @@ Läufen höchstens um 2/255 abweichen.
 
 Eingespielt in `Remastered` (16:25, Backup `_backup_vor_a4f9308_20261022`). Der Stand enthält auch
 LGT-SCRIPT-001/002 und LGT-AUTO-001 der Peugeot-Sitzung.
+
+## Messung 9: Everon -- Kameraflug und großes Gefecht, WGPU gegen GL33 (22.10. 17:22)
+
+EXE aus `Remastered` (`a4f9308`), ohne Mods. Zwei neue private Missionen:
+- `EveronFlug.eden`: 6 Abschnitte je 15 s auf 50 m über Grund, Dorf → Felder → See → Ostküste →
+  Wald → Süden.
+- `EveronGefecht.eden`: Kopie von `tests/perf/missions/perf_combat.eden`, 193 Einheiten, Spieleransicht.
+
+| Lauf | WGPU fps | GL33 fps | WGPU schlechtestes Fenster | GL33 schlechtestes Fenster |
+| --- | --- | --- | --- | --- |
+| Everon-Flug | 72,6 | 97,8 | **55,7** | 49,4 |
+| Gefecht | **45,7** | 42,7 | **43,5** | 40,9 |
+
+- **Gefecht:** WGPU ist schneller als GL33. Eine Gegenprobe mit `WGR_SKIN_BAKE=0` ändert nichts
+  (46,0 fps), der Compute-Skin-Bake ist also nicht der Engpass.
+  - Frame-Accounting: 3–6 ms GPU-Zeit liegen außerhalb aller benannten Regionen.
+  - Der Render-Worker verbringt 19 ms je Bild in `queue submit`.
+  - Klären ließe sich das nur mit einer Nsight-Aufnahme (`.agents/PROFILING-WITH-NSIGHT.md`, braucht
+    das Admin-Terminal des Besitzers).
+- **Flug:** Im Mittel liegt GL33 vorn. Es zeichnet aber weder Gras noch Wolken, AO, GI oder
+  Tidewater-Wasser: über freien Feldern 240–470 fps, wo WGPU bei 55–62 fps liegt.
+  - Im schlechtesten Abschnitt ist WGPU besser.
+  - Die WGPU-Untergrenze über Wiesen sind ~17 ms GPU. Davon entfallen ~6,5 ms aufs Gras
+    (Farbe 4,2 + Prepass 2,2), ~3 ms auf Terrain, ~1,4 ms auf Wolken und ~3 ms auf die übrigen
+    Draw-Ops vor dem Wasser.
+- Ein WGPU-Rückstand wie anfangs auf der Big Shell zeigt sich auf Everon nicht. Der größte einzelne
+  Posten ist das Gras (Olis System, schon mit vielen Schaltern optimiert, `docs/grass-plan.md`).
