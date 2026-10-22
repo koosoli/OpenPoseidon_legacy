@@ -40,7 +40,6 @@ struct Stub
 
 const Stub kStubs[] = {
     {"actionIDs", 'u', GameAny, 0, GameAny, "nil"},
-    {"actionKeysNamesArray", 'u', GameAny, 0, GameAny, "[]"},
     {"actionName", 'u', GameAny, 0, GameAny, "\"\""},
     {"activatedAddons", 'n', GameAny, 0, 0, "nil"},
     {"add3DENConnection", 'u', GameNothing, 0, GameAny, ""},

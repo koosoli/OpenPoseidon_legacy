@@ -6,6 +6,7 @@
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/World/SimVehicleCost.hpp>
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
@@ -23,6 +24,8 @@
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <cstdlib>
 #include <map>
+#include <string>
+#include <cstdio>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Math/Math3DP.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
@@ -1354,8 +1357,69 @@ void EntityAI::StartRecoil(RecoilFunction* recoil, float recoilFactor)
     }
 }
 
+namespace
+{
+// POSEIDON_SIM_VEHICLE_COST=1: where EntityAI::Simulate spends its time, by section, logged
+// every 3000 calls of men (ms per call, average and slowest). MP_Detector's 431 Arma 2
+// soldiers spend most of Man::Simulate in its `base` section, which is this. Off: one test.
+struct EntityAISimProbe
+{
+    static constexpr int N = 6;
+    struct Accum
+    {
+        double ms[N] = {};
+        double maxMs[N] = {};
+        long long calls = 0;
+    };
+    static Accum& Totals()
+    {
+        static Accum a;
+        return a;
+    }
+    bool on;
+    std::uint64_t last = 0;
+    explicit EntityAISimProbe(bool man) : on(man && SimVehCost::Enabled())
+    {
+        if (on)
+            last = SimVehCost::NowNs();
+    }
+    void Mark(int i)
+    {
+        if (!on)
+            return;
+        const std::uint64_t now = SimVehCost::NowNs();
+        const double ms = static_cast<double>(now - last) * 1.0e-6;
+        last = now;
+        Accum& a = Totals();
+        a.ms[i] += ms;
+        if (ms > a.maxMs[i])
+            a.maxMs[i] = ms;
+    }
+    ~EntityAISimProbe()
+    {
+        if (!on)
+            return;
+        Accum& a = Totals();
+        if (++a.calls < 3000)
+            return;
+        static const char* const names[N] = {"lock", "weapons", "flag", "burst", "recoil", "laser"};
+        const double inv = 1.0 / static_cast<double>(a.calls);
+        std::string line;
+        char part[64];
+        for (int i = 0; i < N; i++)
+        {
+            std::snprintf(part, sizeof(part), " %s=%.3f/%.1f", names[i], a.ms[i] * inv, a.maxMs[i]);
+            line += part;
+        }
+        LOG_INFO(World, "EntityAI::Simulate (men) ms/call (avg/max) over {} calls:{}", a.calls, line);
+        a = Accum();
+    }
+};
+} // namespace
+
 void EntityAI::Simulate(float deltaT, SimulationImportance prec)
 {
+    EntityAISimProbe probe(SimVehCost::Enabled() && GetType() && GetType()->IsKindOf(GWorld->Preloaded(VTypeMan)));
     if (_shape && !_static) // do not lock buildings
     {
         if (HasGeometry() && (_isStopped || _speed.SquareSize() < Square(1.5)) &&
@@ -1381,8 +1445,10 @@ void EntityAI::Simulate(float deltaT, SimulationImportance prec)
         saturate(delta, -0.2 * deltaT, +0.2 * deltaT);
     }
     _avoidAside += delta;
+    probe.Mark(0);
 
     SimulateWeaponActivity(deltaT, prec);
+    probe.Mark(1);
 
     // simulate flag
     Texture* texture = GetFlagTexture();
@@ -1431,6 +1497,7 @@ void EntityAI::Simulate(float deltaT, SimulationImportance prec)
         }
     }
 
+    probe.Mark(2);
     // simulate burst fire
     if (IsLocal())
     {
@@ -1446,6 +1513,7 @@ void EntityAI::Simulate(float deltaT, SimulationImportance prec)
         }
     }
 
+    probe.Mark(3);
     // Integrate the recoil spring. OUTSIDE the _recoil test on purpose: the displacement
     // has to keep settling after the shot's own curve has finished, and that tail is the
     // whole point of the spring.
@@ -1504,6 +1572,7 @@ void EntityAI::Simulate(float deltaT, SimulationImportance prec)
             }
         }
     }
+    probe.Mark(4);
     if (IsLocal())
     {
         if (!_laserTargetOn)
@@ -1515,6 +1584,7 @@ void EntityAI::Simulate(float deltaT, SimulationImportance prec)
             TrackLaser(_currentWeapon);
         }
     }
+    probe.Mark(5);
 }
 
 void EntityAI::AddDefaultWeapons() {}
