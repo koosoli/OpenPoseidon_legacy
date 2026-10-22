@@ -409,6 +409,8 @@ struct GrassParams {
     // brightness, .z head share, .w drift frequency; and the per-slot look weights.
     variety: [f32; 4],
     look_weights: [f32; 16],
+    // PERF-GRASS-VIEW-PREFILTER: grass.wgsl `height_bounds` (set in prepare_terrain).
+    height_bounds: [f32; 4],
 }
 
 /// GRS-VAR: the shipped look weights (Engine.hpp GrassSettings::lookWeights mirrors them).
@@ -1021,6 +1023,7 @@ impl Grass {
             native_ring: native_ring_from_env(),
             variety: variety_from_env(),
             look_weights: DEFAULT_LOOK_WEIGHTS,
+            height_bounds: [0.0; 4],
         };
         queue.write_buffer(&grass_params, 0, bytemuck::bytes_of(&params));
 
@@ -2844,6 +2847,7 @@ impl Grass {
             native_ring: self.last_params.native_ring,
             variety: resolve_variety(params.variety),
             look_weights: resolve_look_weights(params.look_weights),
+            height_bounds: self.last_params.height_bounds,
         };
         self.near_grid_dim = near_grid_dim;
         self.mid_grid_dim = mid_grid_dim;
@@ -2920,6 +2924,15 @@ impl Grass {
             self.last_params.wind_strength, self.last_params.wind_direction, self.last_params.wind_scroll);
         self.last_params.wind_advection = advection;
         self.last_params.wind_flutter = flutter;
+        // PERF-GRASS-VIEW-PREFILTER: the heightmap's bounds, widened by what sample_height adds
+        // (mud ruts, sand, craters: centimetres to a few metres) -- the placement's view
+        // prefilter must bound EVERY height it can return. Unknown on the Earth ground.
+        let bounds = terrain.native_height_bounds();
+        self.last_params.height_bounds = if self.earth.is_none() && terrain.has_heightmap() && bounds[1] >= bounds[0] {
+            [bounds[0] - 25.0, bounds[1] + 25.0, 1.0, 0.0]
+        } else {
+            [0.0; 4]
+        };
         queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&self.last_params));
         queue.write_buffer(&self.terrain_params, 0, bytemuck::bytes_of(&params));
         // Sinkhole W1: the placement's copy of the terrain holes follows the terrain's.

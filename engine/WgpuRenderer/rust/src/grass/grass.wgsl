@@ -170,6 +170,10 @@ struct GrassParams {
     // field frequency (1/m); look_weights = the per-slot weights pick_look draws from.
     variety: vec4<f32>,
     look_weights: array<vec4<f32>, 4>,
+    // PERF-GRASS-VIEW-PREFILTER (grass/mod.rs prepare_terrain): .x/.y the lowest/highest ground
+    // the terrain can have (heightmap bounds -/+ a margin for mud, sand, craters and snow), .z 1
+    // when known (0 on the Earth ground: no prefilter).
+    height_bounds: vec4<f32>,
 };
 
 // 32 bytes. `pos_seed` stays f32 for world precision; everything the compute
@@ -1565,6 +1569,25 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
 // The middle ring uses a stable half-density grid and opaque multi-blade clumps.
 // It bridges the detailed near clumps and distant coverage without any
 // camera-facing tile swap or frame-to-frame randomisation.
+// PERF-GRASS-VIEW-PREFILTER: can a candidate at `xz` pass the placement view test at ANY ground
+// height the terrain can have? Clip coordinates are linear in height, so if both ends of the
+// [lowest, highest] segment lie outside the same frustum plane, every height between does too
+// and the real test (after sample_height) would reject it. Tested at 1.16 against the real
+// test's 1.15 (and w < -0.01 against w <= 0), so rounding can never reject a candidate the real
+// test keeps: the placed set is unchanged, only the sample_height of rejected ones is saved.
+fn place_may_be_visible(xz: vec2<f32>) -> bool {
+    if (grass.height_bounds.z < 0.5) { return true; }
+    let vp = frame.proj * frame.view;
+    let a = vp * vec4<f32>(xz.x - frame.cam_pos.x, grass.height_bounds.x - frame.cam_pos.y, xz.y - frame.cam_pos.z, 1.0);
+    let b = vp * vec4<f32>(xz.x - frame.cam_pos.x, grass.height_bounds.y - frame.cam_pos.y, xz.y - frame.cam_pos.z, 1.0);
+    if (a.w < -0.01 && b.w < -0.01) { return false; }
+    if (a.x > a.w * 1.16 && b.x > b.w * 1.16) { return false; }
+    if (-a.x > a.w * 1.16 && -b.x > b.w * 1.16) { return false; }
+    if (a.y > a.w * 1.16 && b.y > b.w * 1.16) { return false; }
+    if (-a.y > a.w * 1.16 && -b.y > b.w * 1.16) { return false; }
+    return true;
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     let mid_grid_dim = u32(max(grass.place.y, 8.0));
@@ -1602,6 +1625,7 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     // and the normal fetch only to be thrown away here. Every test in this function is a
     // side-effect-free predicate of the candidate until the atomicAdd, so their order
     // cannot change which blades are placed -- only how much work the rejected ones do.
+    if (!place_may_be_visible(world_xz)) { return; }
     let y = sample_height(world_xz);
     let rel = vec3<f32>(world_xz.x, y, world_xz.y) - frame.cam_pos.xyz;
     let clip = frame.proj * frame.view * vec4<f32>(rel, 1.0);
