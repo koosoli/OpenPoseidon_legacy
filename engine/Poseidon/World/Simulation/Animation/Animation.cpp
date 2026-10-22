@@ -911,6 +911,60 @@ void AnimationSection::SetTexture(LODShape* shape, int level, Texture* texture) 
     }
 }
 
+void AnimationSection::SetMaterial(LODShape* shape, int level, TexMaterial* material,
+                                   AutoArray<SavedSectionMaterial>& saved) const
+{
+    if (_selection[level] < 0 || !material)
+    {
+        return;
+    }
+    Shape* lShape = shape->Level(level);
+    if (!lShape)
+    {
+        return;
+    }
+    const NamedSelection& sel = lShape->NamedSel(_selection[level]);
+    for (int i = 0; i < sel.NSections(); i++)
+    {
+        const int sec = sel.GetSection(i);
+        ShapeSection& ss = lShape->GetSection(sec);
+        if (ss.surfMat.GetRef() == material)
+        {
+            continue; // already showing it: keep the first saved original
+        }
+        bool known = false;
+        for (int s = 0; s < saved.Size() && !known; s++)
+        {
+            known = saved[s].level == level && saved[s].section == sec;
+        }
+        if (!known)
+        {
+            SavedSectionMaterial& entry = saved[saved.Add()];
+            entry.level = level;
+            entry.section = sec;
+            entry.material = ss.surfMat;
+        }
+        ss.surfMat = material;
+    }
+}
+
+void AnimationSection::RestoreMaterials(LODShape* shape, int level, AutoArray<SavedSectionMaterial>& saved)
+{
+    Shape* lShape = shape ? shape->Level(level) : nullptr;
+    for (int s = saved.Size() - 1; s >= 0; s--)
+    {
+        if (saved[s].level != level)
+        {
+            continue;
+        }
+        if (lShape && saved[s].section >= 0 && saved[s].section < lShape->NSections())
+        {
+            lShape->GetSection(saved[s].section).surfMat = saved[s].material;
+        }
+        saved.Delete(s);
+    }
+}
+
 void AnimationSection::Hide(LODShape* shape, int level) const
 {
     if (_selection[level] < 0)

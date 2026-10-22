@@ -623,8 +623,6 @@ const Stub kStubs[] = {
     {"setMousePosition", 'u', GameNothing, 0, GameAny, ""},
     {"setName", 'b', GameNothing, GameAny, GameAny, ""},
     {"setNameSound", 'b', GameNothing, GameAny, GameAny, ""},
-    {"setObjectMaterial", 'b', GameNothing, GameAny, GameAny, ""},
-    {"setObjectMaterialGlobal", 'b', GameNothing, GameAny, GameAny, ""},
     {"setObjectScale", 'b', GameNothing, GameAny, GameAny, ""},
     {"setObjectTextureGlobal", 'b', GameNothing, GameAny, GameAny, ""},
     {"setObjectViewDistance", 'u', GameNothing, 0, GameAny, ""},

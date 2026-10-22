@@ -8,6 +8,7 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Core/Version.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Material.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Detection/Detector.hpp>
 #include <Poseidon/World/Scene/ObjectClasses.hpp>
@@ -430,6 +431,48 @@ GameValue ObjSetTexture(const GameState* state, GameValuePar oper1, GameValuePar
 
     Ref<Texture> texture = GlobLoadTexture(Poseidon::FindPicture(name));
     veh->SetObjectTexture(index, texture);
+    return NOTHING;
+}
+
+// REFLECT-001 B2 -- Arma 3's `obj setObjectMaterial [index, "path.rvmat"]`: the material the
+// object's hidden selection `index` is drawn with. "" gives the model's own material back.
+// setObjectMaterialGlobal is the same here (no network broadcast in this engine yet).
+GameValue ObjSetMaterial(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    const GameArrayType& array = oper2;
+    if (array.Size() != 2)
+    {
+        state->SetError(EvalDim, array.Size(), 2);
+        return NOTHING;
+    }
+    if (array[0].GetType() != GameScalar)
+    {
+        state->TypeError(GameScalar, array[0].GetType());
+        return NOTHING;
+    }
+    if (array[1].GetType() != GameString)
+    {
+        state->TypeError(GameString, array[1].GetType());
+        return NOTHING;
+    }
+    EntityAI* veh = dyn_cast<EntityAI>(GetObject(oper1));
+    if (!veh)
+    {
+        return NOTHING;
+    }
+    const int index = toInt((float)array[0]);
+    RString name = array[1];
+    Ref<TexMaterial> material;
+    if (name.GetLength() > 0)
+    {
+        const char* path = name.Data();
+        if (*path == '\\')
+            path++;
+        RString lower = path;
+        lower.Lower();
+        material = GTexMaterialBank.New(lower.Data());
+    }
+    veh->SetObjectMaterial(index, material);
     return NOTHING;
 }
 

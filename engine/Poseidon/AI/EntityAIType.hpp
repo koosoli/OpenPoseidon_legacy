@@ -572,6 +572,7 @@ class EntityAIType: public EntityType
 
 	AutoArray<AnimationSection> _hiddenSelections;
 	AutoArray<RString> _hiddenSelectionsTextureNames; // Arma: default texture per hidden selection
+	AutoArray<RString> _hiddenSelectionsMaterialNames; // Arma: default material (.rvmat) per hidden selection
 
 	AutoArray<UserTypeAction> _userTypeActions;
 
