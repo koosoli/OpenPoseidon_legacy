@@ -992,6 +992,14 @@ mod reflect_lane_tests {
         assert!(ls < r0 && r0 < r1, "reflect lanes must follow local_specular, in ABI order");
         assert!(src.contains("let reflect_view = u32(material.reflect1.w + 0.5);"));
         assert!(src.contains("if (reflect_view != 0u) {"));
+        // Phase C: the lanes reach shade() and the env reflection, and a classified surface
+        // takes neither the legacy Blinn lobe nor the SH sky sheen (no double highlight).
+        assert!(src.contains("m.refl_a = material.reflect0;") && src.contains("m.refl_b = material.reflect1;"));
+        assert!(src.contains("if (reflect_classified(m, linear) && (material_flags(material) & MATFLAG_REFLECTIVE) == 0u"));
+        let shading = include_str!("../shaders/shading.wgsl");
+        assert!(shading.contains("} else if (m_spec_power > 0.0) {"));
+        assert!(shading.contains("sky_spec = vec4<f32>(0.0, 0.0, 0.0, 1.0);"));
+        assert!(shading.contains("return mat.refl_b.x > 0.5 && linear > 0.5;"));
         assert_eq!(super::MATERIAL_SIZE, 160);
         assert_eq!(std::mem::size_of::<crate::ffi::WgrDraw3D>(), 320);
     }
