@@ -15,6 +15,9 @@
 
 namespace Poseidon
 {
+// One libcurl share (connection cache, TLS sessions, DNS) for every Earth download: imagery and
+// elevation reuse warm connections instead of a TCP connect + TLS handshake per tile. A CURLSH*.
+void* EarthDownloadShare();
 // Streams web-mercator imagery tiles from a configured provider (EarthProviders) into a bounded disk
 // cache and reprojects them to latitude/longitude images the Earth surface atlas blends like any
 // prepared regional source. Worker-thread only; never called from the render thread.

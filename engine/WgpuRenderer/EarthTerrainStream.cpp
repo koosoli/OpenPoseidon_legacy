@@ -1,4 +1,5 @@
 #include "EarthTerrainStream.hpp"
+#include "EarthImageryTiles.hpp"
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 
 #include <curl/curl.h>
@@ -6,7 +7,9 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <atomic>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <limits>
 #include <stdexcept>
@@ -135,6 +138,8 @@ bool EarthTerrainStream::DownloadOnce(const std::string& url, std::vector<unsign
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 12L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_SHARE, static_cast<CURLSH*>(EarthDownloadShare()));
+    curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Receive);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &bytes);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
@@ -283,6 +288,62 @@ float EarthTerrainStream::Sample(double x, double y, int zoom)
     return (a + (b-a)*fx)*(1-fy) + (c + (d-c)*fx)*fy;
 }
 
+void EarthTerrainStream::Prefetch(const std::set<std::tuple<int,int,int>>& keys)
+{
+    std::vector<std::tuple<int,int,int>> missing;
+    const auto now = std::chrono::steady_clock::now();
+    for (const auto& key : keys)
+    {
+        if (_tiles.count(key)) continue;
+        if (auto failed = _failedTiles.find(key); failed != _failedTiles.end() && now - failed->second < std::chrono::seconds(60))
+            continue;
+        const auto [zoom, x, y] = key;
+        std::error_code ec;
+        const auto size = std::filesystem::file_size(TileDirectory(zoom) / (std::to_string(x) + "-" + std::to_string(y) + ".png"), ec);
+        if (!ec && size > 0)
+            continue;
+        missing.push_back(key);
+    }
+    if (missing.empty()) return;
+    std::atomic<size_t> next{0};
+    std::mutex failedMutex;
+    std::vector<std::tuple<int,int,int>> failed;
+    const auto worker = [&]
+    {
+        for (size_t i; (i = next.fetch_add(1)) < missing.size();)
+        {
+            if (_stop.load() || _generation.load() != _activeGeneration) return;
+            const auto [zoom, x, y] = missing[i];
+            std::vector<unsigned char> bytes;
+            if (!Download(EarthProviders::ExpandUrl(_elevation, zoom, x, y), bytes))
+            {
+                std::lock_guard lock(failedMutex);
+                failed.push_back(missing[i]);
+                continue;
+            }
+            // Decoded and validated later by LoadTile, which also drops a bad file and refetches it.
+            const auto directory = TileDirectory(zoom);
+            std::error_code ec;
+            std::filesystem::create_directories(directory, ec);
+            const auto file = directory / (std::to_string(x) + "-" + std::to_string(y) + ".png");
+            const auto temporary = file.string() + ".part" + std::to_string(i);
+            std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+            output.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+            output.close();
+            if (output) std::filesystem::rename(temporary, file, ec);
+            if (!output || ec) std::filesystem::remove(temporary, ec);
+            ++_downloads;
+        }
+    };
+    constexpr size_t Workers = 8;
+    std::vector<std::future<void>> pool;
+    for (size_t w = 1; w < std::min(Workers, missing.size()); ++w) pool.push_back(std::async(std::launch::async, worker));
+    worker();
+    for (auto& f : pool) f.get();
+    if (!_stop.load() && _generation.load() == _activeGeneration)
+        for (const auto& key : failed) _failedTiles[key] = now;
+}
+
 void EarthTerrainStream::TrimDisk()
 {
     std::vector<std::filesystem::directory_entry> files;
@@ -340,6 +401,43 @@ void EarthTerrainStream::Run()
             patch->generation = version;
             patch->heights.resize(Earth::GridSamples * Earth::GridSamples);
             const unsigned downloads = _downloads, hits = _cacheHits;
+            {
+                // Every tile this patch will sample, fetched eight at a time before the (serial) sampling
+                // below: one at a time, each paying its own handshake, a fresh place took ~10 s of
+                // elevation before any satellite imagery could even be requested for it.
+                std::set<std::tuple<int,int,int>> keys;
+                const auto addTiles = [&](const Earth::Coordinate& c, int zoom)
+                {
+                    const auto p = Earth::ToPixel(c, zoom);
+                    for (int dy = -1; dy <= 1; dy += 2)
+                        for (int dx = -1; dx <= 1; dx += 2)
+                        {
+                            const int px = Earth::WrapPixel(int(std::floor(p.x + 0.5 * dx)), zoom);
+                            const int py = std::clamp(int(std::floor(p.y + 0.5 * dy)), 0, Earth::TilePixels * (1 << zoom) - 1);
+                            keys.insert({zoom, px / Earth::TilePixels, py / Earth::TilePixels});
+                        }
+                };
+                for (int z = 0; z < Earth::GridSamples; z += 16)
+                    for (int x = 0; x < Earth::GridSamples; x += 16)
+                        addTiles(Earth::FromLocal(origin.latitude, origin.longitude, patch->x + x * patch->gridMetres,
+                                                  patch->z + z * patch->gridMetres), patch->sourceZoom);
+                const int horizonZoom = Earth::HorizonZoom(centre.latitude, radius);
+                for (int z = 0; z < Earth::HorizonSamples; z += 2)
+                    for (int x = 0; x < Earth::HorizonSamples; x += 2)
+                    {
+                        const double wx = cx * stride + Earth::HorizonOffset(x,radius,halfWindow);
+                        const double wz = cz * stride + Earth::HorizonOffset(z,radius,halfWindow);
+                        const auto g = Earth::FromLocal(origin.latitude,origin.longitude,wx,wz);
+                        if (std::abs(g.latitude) > Earth::MaxLatitude) continue;
+                        const float spacing = std::max(
+                            Earth::HorizonOffset(std::min(x+1,Earth::HorizonSamples-1),radius,halfWindow) -
+                                Earth::HorizonOffset(std::max(x-1,0),radius,halfWindow),
+                            Earth::HorizonOffset(std::min(z+1,Earth::HorizonSamples-1),radius,halfWindow) -
+                                Earth::HorizonOffset(std::max(z-1,0),radius,halfWindow)) * 0.5f;
+                        addTiles(g, Earth::SpacingZoom(g.latitude, spacing, horizonZoom, std::min(patch->sourceZoom, 12)));
+                    }
+                if (keys.size() <= 256) Prefetch(keys);
+            }
             for (int z = 0; z < Earth::GridSamples; ++z)
             {
                 if (_stop.load()) return;

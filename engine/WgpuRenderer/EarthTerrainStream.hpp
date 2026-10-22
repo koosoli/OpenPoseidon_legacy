@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <filesystem>
 #include <map>
+#include <set>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -56,6 +57,8 @@ class EarthTerrainStream
     bool Download(const std::string& url, std::vector<unsigned char>& bytes);
     bool DownloadOnce(const std::string& url, std::vector<unsigned char>& bytes, long& status);
     void TrimDisk();
+    // Downloads the listed tiles that are neither resident nor on disk, several at a time, onto disk.
+    void Prefetch(const std::set<std::tuple<int,int,int>>& keys);
     std::filesystem::path TileDirectory(int zoom) const;
     EarthStreaming::Location _requestOrigin;
     uint64_t _activeGeneration = 0; // Worker-only download cancellation token.

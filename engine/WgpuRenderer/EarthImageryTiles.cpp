@@ -58,7 +58,7 @@ int Progress(void* context, curl_off_t, curl_off_t, curl_off_t, curl_off_t)
 std::mutex g_shareLocks[CURL_LOCK_DATA_LAST];
 void ShareLock(CURL*, curl_lock_data data, curl_lock_access, void*) { g_shareLocks[data].lock(); }
 void ShareUnlock(CURL*, curl_lock_data data, void*) { g_shareLocks[data].unlock(); }
-CURLSH* DownloadShare()
+CURLSH* DownloadShareImpl()
 {
     static CURLSH* share = []
     {
@@ -76,6 +76,12 @@ CURLSH* DownloadShare()
     return share;
 }
 
+} // namespace
+
+void* EarthDownloadShare() { return DownloadShareImpl(); }
+
+namespace
+{
 // Global web-mercator pixel position of a coordinate at `zoom` for `tile`-pixel tiles.
 void ToMercator(double latitude, double longitude, int zoom, double& px, double& py)
 {
@@ -154,7 +160,7 @@ int EarthImageryTiles::Perform(const std::string& url, std::vector<uint8_t>& byt
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 3L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    if (CURLSH* share = DownloadShare())
+    if (CURLSH* share = DownloadShareImpl())
         curl_easy_setopt(curl, CURLOPT_SHARE, share);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Receive);
