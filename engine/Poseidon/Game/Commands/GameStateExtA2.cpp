@@ -452,7 +452,7 @@ GameValue A2SetTaskState(const GameState* state, GameValuePar oper1, GameValuePa
     if (upper == "SUCCEEDED" || upper == "FAILED" || upper == "CANCELED")
     {
         const char* word = upper == "SUCCEEDED" ? "Task accomplished" : upper == "FAILED" ? "Task failed" : "Task canceled";
-        ShowHint(state, GameValue(RString((std::string(word) + ":\n" + task->name).c_str())));
+        ShowHint(state, GameValue(RString((std::string(word) + ":\\n" + task->name).c_str())));
     }
     return NOTHING;
 }
@@ -499,7 +499,7 @@ GameValue A2SetCurrentTask(const GameState* state, GameValuePar oper1, GameValue
         {
             RT().currentTask[obj] = index + 1;
             if (obj == GWorld->GetRealPlayer())
-                ShowHint(state, GameValue(RString(("Current task:\n" + RT().tasks[index].name).c_str())));
+                ShowHint(state, GameValue(RString(("Current task:\\n" + RT().tasks[index].name).c_str())));
         }
     }
     return NOTHING;
