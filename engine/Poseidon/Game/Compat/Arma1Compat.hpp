@@ -170,6 +170,17 @@ RString Arma2FaceTexture(const char* unitClass, const char* shapeName, const cha
 // A face for a man Arma 2 would give a random one: of his faceType, matching one of his
 // class's identityTypes, chosen by `seed`. "" when he is no Arma 2 man (as above).
 RString Arma2RandomFace(const char* unitClass, const char* shapeName, uint32_t seed);
+// Arma 2 voices. The CfgVoice class `speaker` names in the Arma 2 config when it speaks
+// (has directories), else null; its radio protocol's Words; a voice for a man Arma 2 would
+// give a random one (his class's identityTypes, chosen by `seed`; "" when he is no Arma 2
+// man); and the Arma 2 Words entry that says what CWA's radio word file `cwaPath`
+// ("numbers\zero", "isdown", ...) says, or null.
+const ParamEntry* Arma2VoiceClass(const char* speaker);
+const ParamEntry* Arma2VoiceWords(const ParamEntry& voice);
+RString Arma2RandomSpeaker(const char* unitClass, const char* shapeName, uint32_t seed);
+const char* Arma2RadioWord(const char* cwaPath);
+// One of Arma 2's voice pitches (CfgVoice >> variants) by `seed`; 1 without.
+float Arma2VoicePitch(uint32_t seed);
 // The head model an Arma 2 man wears with `face` (CfgFaces >> faceType >> face >> head, then
 // CfgHeads >> head >> model): his body model only carries the "heads\bysta" placeholder
 // where Arma 2 draws it. "" for any other man, or with OP_A2_FACES=0.

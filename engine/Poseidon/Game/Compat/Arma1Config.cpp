@@ -3406,7 +3406,7 @@ std::string Arma2BackpackModel(const char* unitClass, const char* shapeName)
         return {};
     const ParamEntry* cls = FindConfigClass("CfgVehicles", backpack.c_str());
     const std::string model = cls && cls->IsClass() ? StringValue(*cls, "model") : std::string();
-    LOG_INFO(Mission, "{}: '{}' carries backpack '{}' ({})", Label(), unitClass + 4, backpack,
+    LOG_INFO(Mission, "{}: '{}' carries backpack '{}' ({})", Label(), unitClass, backpack,
              model.empty() ? "no model" : model);
     return model;
 }
@@ -3462,5 +3462,180 @@ RString Arma2RandomFace(const char* unitClass, const char* shapeName, uint32_t s
     }
     const std::string& face = choice[seed % choice.size()];
     return RString(face.c_str());
+}
+
+// ---- Arma 2 voices -------------------------------------------------------------------
+// Arma 2 gives every man a voice of his kind: CfgVoice classes (Male01EN, Male03TK, ...)
+// whose identityTypes meet his class's, each speaking from its own directories through its
+// protocol's Words (RadioProtocol_EP1_EN >> Words >> Zero[] = {"DEFAULT\numbers\Zero.ogg"}).
+
+const ParamEntry* Arma2VoiceClass(const char* speaker)
+{
+    if (Generation() != 2 || !ConfigLoaded() || !speaker || !*speaker)
+        return nullptr;
+    const ParamEntry* voice = FindConfigClass("CfgVoice", speaker);
+    if (!voice || !voice->IsClass())
+        return nullptr;
+    const ParamEntry* dirs = voice->FindEntry("directories");
+    return dirs && dirs->IsArray() && dirs->GetSize() > 0 ? voice : nullptr;
+}
+
+const ParamEntry* Arma2VoiceWords(const ParamEntry& voice)
+{
+    const std::string protocol = StringValue(voice, "protocol");
+    const ParamEntry* cls = protocol.empty() ? nullptr : Arma1Pars().FindEntry(protocol.c_str());
+    const ParamEntry* words = cls && cls->IsClass() ? cls->FindEntry("Words") : nullptr;
+    return words && words->IsClass() ? words : nullptr;
+}
+
+RString Arma2RandomSpeaker(const char* unitClass, const char* shapeName, uint32_t seed)
+{
+    if (Generation() != 2 || !unitClass)
+        return RString();
+    const ParamEntry* man = Arma2ManInOwnModel(unitClass, shapeName);
+    const ParamEntry* voices = man ? Arma1Pars().FindEntry("CfgVoice") : nullptr;
+    if (!voices || !voices->IsClass())
+        return RString();
+    static std::map<std::string, std::vector<std::string>> cache;
+    std::vector<std::string>& choice = cache[Lower(unitClass)];
+    if (choice.empty())
+    {
+        std::set<std::string> wanted;
+        if (const ParamEntry* types = man->FindEntry("identityTypes"); types && types->IsArray())
+            for (int i = 0; i < types->GetSize(); i++)
+                wanted.insert(Lower((const char*)(RStringB)(*types)[i]));
+        for (int i = 0; i < voices->GetEntryCount(); i++)
+        {
+            const ParamEntry& v = voices->GetEntry(i);
+            if (!v.IsClass() || !Arma2VoiceClass(v.GetName()))
+                continue;
+            if (const ParamEntry* scope = v.FindEntry("scope"); scope && !scope->IsClass() && !scope->IsArray() &&
+                                                                 (int)*scope < 1)
+                continue;
+            if (const ParamEntry* types = v.FindEntry("identityTypes"); types && types->IsArray())
+                for (int j = 0; j < types->GetSize(); j++)
+                    if (wanted.count(Lower((const char*)(RStringB)(*types)[j])))
+                    {
+                        choice.push_back((const char*)v.GetName());
+                        break;
+                    }
+        }
+        LOG_INFO(Mission, "{}: '{}' speaks with {} Arma 2 voice(s) of its identityTypes", Label(), unitClass,
+                 choice.size());
+        if (choice.empty())
+            choice.push_back(std::string()); // remembered: none of his kind
+    }
+    return RString(choice[seed % choice.size()].c_str());
+}
+
+const char* Arma2RadioWord(const char* cwaPath)
+{
+    // CWA's radio says a word by its file under the speaker's directory (CfgVoice >> Words
+    // >> id[0]); this is the word of Arma 2's radio protocol that says the same thing.
+    static const std::map<std::string, const char*> words = [] {
+        std::map<std::string, const char*> m;
+        static const char* const same[] = {
+            "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven",
+            "twelve", "all", "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india",
+            "juliet", "kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo", "sierra", "tango",
+            "uniform", "victor", "whiskey", "xray", "yankee", "zulu", "north", "northeast", "east", "southeast",
+            "south", "southwest", "west", "northwest", "enemy", "friendly", "civilian", "resistance", "unknown",
+            "heat", "mgun", "sabot"};
+        for (const char* w : same)
+            m[w] = w;
+        for (const char* dir : {"numbers\\", "alphabet\\", "direction\\", "people\\", "weapons\\"})
+            for (const char* w : same)
+                m[std::string(dir) + w] = w;
+        const std::pair<const char*, const char*> table[] = {
+            {"team\\teamblue", "blueTeam"}, {"team\\teamgreen", "greenTeam"}, {"team\\teamred", "redTeam"},
+            {"team\\teamwhite", "whiteTeam"}, {"team\\teamyellow", "yellowTeam"},
+            {"distance\\50", "dist50"}, {"distance\\100", "dist100"}, {"distance\\200", "dist200"},
+            {"distance\\500", "dist500"}, {"distance\\1000", "dist1000"}, {"distance\\2000", "dist2000"},
+            {"distance\\far", "far"},
+            {"clockfacing\\1oclock", "at1"}, {"clockfacing\\2oclock", "at2"}, {"clockfacing\\3oclock", "at3"},
+            {"clockfacing\\4oclock", "at4"}, {"clockfacing\\5oclock", "at5"}, {"clockfacing\\6oclock", "at6"},
+            {"clockfacing\\7oclock", "at7"}, {"clockfacing\\8oclock", "at8"}, {"clockfacing\\9oclock", "at9"},
+            {"clockfacing\\10oclock", "at10"}, {"clockfacing\\11oclock", "at11"}, {"clockfacing\\12oclock", "at12"},
+            {"objects\\building", "obj_building"}, {"objects\\bunker", "obj_bunker"}, {"objects\\bush", "obj_bush"},
+            {"objects\\bushes", "obj_bushes"}, {"objects\\chapel", "obj_church"}, {"objects\\church", "obj_church"},
+            {"objects\\cross", "obj_cross"}, {"objects\\depot", "obj_building"}, {"objects\\forest", "obj_forest"},
+            {"objects\\fuelstation", "obj_building"}, {"objects\\helipad", "obj_object"},
+            {"objects\\hospital", "obj_building"}, {"objects\\house", "obj_house"}, {"objects\\houses", "obj_houses"},
+            {"objects\\object", "obj_object"}, {"objects\\repairdepot", "obj_building"}, {"objects\\rock", "obj_rock"},
+            {"objects\\tree", "obj_tree"}, {"objects\\trees", "obj_trees"},
+            {"vehicles\\abrams", "veh_tank"}, {"vehicles\\ambulance", "veh_car"}, {"vehicles\\apc", "veh_TrackedAPC"},
+            {"vehicles\\atsoldier", "veh_launcherSoldier"}, {"vehicles\\bear", "veh_tank"},
+            {"vehicles\\blackhawk", "veh_transportHelicopter"}, {"vehicles\\blackop", "veh_SpecialForce"},
+            {"vehicles\\bmp", "veh_TrackedAPC"}, {"vehicles\\boat", "veh_ship"}, {"vehicles\\car", "veh_car"},
+            {"vehicles\\chopper", "veh_helicopter"}, {"vehicles\\cobra", "veh_gunship"}, {"vehicles\\crew", "veh_crew"},
+            {"vehicles\\hind", "veh_gunship"}, {"vehicles\\jeep", "veh_car"}, {"vehicles\\m113", "veh_TrackedAPC"},
+            {"vehicles\\m60", "veh_tank"}, {"vehicles\\machinegunner", "veh_MGunner"}, {"vehicles\\man", "veh_man"},
+            {"vehicles\\medic2", "veh_Medic"}, {"vehicles\\mi17", "veh_transportHelicopter"},
+            {"vehicles\\officer", "veh_officer"}, {"vehicles\\plane", "veh_airplane"},
+            {"vehicles\\scudlauncher", "veh_truck"}, {"vehicles\\shilka", "veh_tank"}, {"vehicles\\ship", "veh_ship"},
+            {"vehicles\\sniper", "veh_Sniper"}, {"vehicles\\soldier", "veh_soldier"},
+            {"vehicles\\spetznatz", "veh_SpecialForce"}, {"vehicles\\t55", "veh_tank"}, {"vehicles\\t72", "veh_tank"},
+            {"vehicles\\t80", "veh_tank"}, {"vehicles\\tank", "veh_tank"}, {"vehicles\\thunderbolt", "veh_attackAirplane"},
+            {"vehicles\\tractor", "veh_tractor"}, {"vehicles\\truck", "veh_truck"}, {"vehicles\\uaz", "veh_car"},
+            {"vehicles\\vehicle", "veh_vehicle"},
+            {"static\\loop", "loop"}, {"static\\over01", "micOut1"}, {"static\\over02", "micOut2"},
+            {"static\\over03", "micOut3"}, {"mic_out1", "micOut1"}, {"beep", "xmit"}, {"empty01sec", "pause"},
+            {"advance", "Advance"}, {"ammolow", "RunningOutOfAmmoE"}, {"are", "Are"}, {"at", "At"},
+            {"atease", "AtEase"}, {"attack", "Attack"}, {"attacking", "EngagingE"}, {"board", "Board"},
+            {"boardin", "Board"}, {"cannotfire", "CannotFire"}, {"cantgetthere", "ICantGetThere"},
+            {"careless", "Relax"}, {"ceasefire", "CeaseFire"}, {"clear", "Clear"}, {"contact", "Contact"},
+            {"damn", "DamnE"}, {"danger", "DangerE"}, {"disembark", "Disembark"}, {"disengage", "Disengage"},
+            {"dontfire", "DoNotFireE"}, {"driver", "Driver"}, {"engage", "EngageE"}, {"engageatwill", "EngageAtWill"},
+            {"engaging", "EngagingE"}, {"fallbackintoformation", "FallBackE"}, {"fast", "Fast"}, {"fire", "Fire"},
+            {"fireat", "FireAt"}, {"fireatwill", "FireAtWill"}, {"flankleft", "FlankLeft"}, {"flankright", "FlankRight"},
+            {"follow", "Follow"}, {"formcolumn", "FormationColumn"}, {"formechelonleft", "FormationEchelonLeft"},
+            {"formechelonright", "FormationEchelonRight"}, {"formline", "FormationLine"},
+            {"formstaggeredcolumn", "FormationStaggeredColumn"}, {"formvee", "FormationVee"},
+            {"formwedge", "FormationWedge"}, {"forward", "Forward"}, {"fuellow", "ImRunningOutOfFuel"},
+            {"getdown", "GetDown"}, {"getin", "GetIn"}, {"getout", "Dismount"}, {"gogogo", "GoGoGoE"},
+            {"goprone", "GoProne"}, {"goto", "GoTo"}, {"gunner", "Gunner"}, {"halt", "Halt"}, {"healat", "HealAt"},
+            {"hitthedirt", "HitTheDirt"}, {"holdfire", "HoldFire"}, {"holdyourfire", "HoldFireE"},
+            {"iamonhim", "ImOnHim"}, {"injured", "WoundedE"}, {"is", "Is"}, {"isayagain", "SayAgain"},
+            {"left", "Left"}, {"isdown", "IsDownE"}, {"ishistory", "IsDownE"}, {"ivegothim", "IveGotHimE"},
+            {"keepformation", "MaintainFormation"}, {"keeplow", "StayCrouched"}, {"medic", "CorpsmanE"},
+            {"moveto", "MoveTo"}, {"movingon", "OnTheWay"}, {"needammo", "RequestingUrgentResupplyAt"},
+            {"needfuel", "WereRunningOnFumesNeedRefuelAt"}, {"needmedicat", "WeNeedMedicalAssistanceAt"},
+            {"needrepairs", "RequestingRepairTeamAt"}, {"negative", "Negative"}, {"notarget", "NoTarget"},
+            {"ohno", "GoddamnE"}, {"ontheway", "OnTheWay"}, {"out", "Out1"}, {"outofammo", "OutOfAmmoE"},
+            {"outoffuel", "ImOutOfFuelE"}, {"over", "Over1"}, {"pilot", "Pilot"}, {"position", "position"},
+            {"ready", "Ready"}, {"readytofire", "ReadyToFire"}, {"rearmat", "RearmAt"}, {"refuelat", "RefuelAt"},
+            {"repairat", "RepairAt"}, {"repeat", "RepeatLast"}, {"reportstatus", "ReportStatus"},
+            {"returntoformation", "ReturnToFormationE"}, {"reverse", "Reverse"}, {"right", "Right"},
+            {"roger", "Roger"}, {"scanhorizon", "ScanHorizon"}, {"slow", "Slow"}, {"standup", "StandUp"},
+            {"statusred", "StatusRedE"}, {"stayalert", "StayAlert"}, {"stayback", "StayBack"},
+            {"stealth", "Stealth"}, {"support", "Support"}, {"supportat", "SupportAt"},
+            {"supportdone", "SupportComplete"}, {"supporting", "Supporting"}, {"takecover", "TakeCoverE"},
+            {"takingcommand", "ImTakingCommand"}, {"tankcommander", "Commander"}, {"target", "Target"},
+            {"thisis", "ThisIs"}, {"underfire", "UnderFireE"}, {"waitforme", "WaitForMe"}, {"waiting", "Waiting"},
+            {"watch", "Watch"}, {"weaponsfree", "WeaponsFree"}, {"whereareyou", "WhereAreYouQ"},
+        };
+        for (const auto& [cwa, a2] : table)
+            m[cwa] = a2;
+        return m;
+    }();
+    if (!cwaPath)
+        return nullptr;
+    std::string key = Lower(cwaPath);
+    std::replace(key.begin(), key.end(), '/', '\\');
+    while (!key.empty() && key[0] == '\\')
+        key.erase(0, 1);
+    if (key.size() > 4 && (key.compare(key.size() - 4, 4, ".wss") == 0 || key.compare(key.size() - 4, 4, ".ogg") == 0))
+        key.resize(key.size() - 4);
+    const auto it = words.find(key);
+    return it == words.end() ? nullptr : it->second;
+}
+
+float Arma2VoicePitch(uint32_t seed)
+{
+    const ParamEntry* voices = Arma1Pars().FindEntry("CfgVoice");
+    const ParamEntry* variants = voices && voices->IsClass() ? voices->FindEntry("variants") : nullptr;
+    if (!variants || !variants->IsArray() || variants->GetSize() == 0)
+        return 1.0f;
+    return (float)(*variants)[seed % variants->GetSize()];
 }
 } // namespace Poseidon::Arma1Compat

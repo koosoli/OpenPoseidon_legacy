@@ -18,9 +18,17 @@ namespace Poseidon
 class BasicSpeaker: public RefCount
 {
 	AutoArray<RString> _directories;
+	// --arma2: an Arma 2 voice (CfgVoice >> Male01EN of the Arma 2 config) speaks its own
+	// protocol's words from its own directories; _directories stay the CWA voice that says
+	// a word Arma 2's radio has none for.
+	AutoArray<RString> _a2Directories;
+	const ParamEntry *_a2Words = nullptr;
+	RString A2Clip(const RString &id) const;
 	
 	public:
 	BasicSpeaker( const ParamEntry &cfg );
+	BasicSpeaker( const ParamEntry &cwaFallback, const ParamEntry &a2Voice, const ParamEntry &a2Words );
+	bool IsArma2() const {return _a2Words!=nullptr;}
 	IWave *Say(RString id, float pitch, bool loop);
 };
 
