@@ -246,6 +246,15 @@ void EarthSurfaceStream::Request(const EarthTerrainStream::Patch& p) {
     std::lock_guard lock(_mutex);
     if(_requested && _window.generation==p.generation && _window.revision==p.originRevision)return;
     _window={p.originLatitude,p.originLongitude,p.x,p.z,256*p.gridMetres,p.originRevision,p.generation,p.horizonRadius};
+    // What the worker's derivations need of the patch (Derive): where it is and its heights.
+    auto slim=std::make_shared<EarthTerrainStream::Patch>();
+    slim->x=p.x;slim->z=p.z;slim->latitude=p.latitude;slim->longitude=p.longitude;
+    slim->originLatitude=p.originLatitude;slim->originLongitude=p.originLongitude;
+    slim->generation=p.generation;slim->originRevision=p.originRevision;
+    slim->downloads=0;slim->cacheHits=0;slim->seconds=0;
+    slim->heights=p.heights;slim->gridMetres=p.gridMetres;slim->sourceZoom=p.sourceZoom;
+    slim->horizonRadius=p.horizonRadius;slim->horizonZoom=p.horizonZoom;
+    _patch=std::move(slim);
     _requested=true;_pending=true;_ready.reset();++_version;_wake.notify_one();
 }
 void EarthSurfaceStream::Prefetch(const std::vector<Window>& windows) {
@@ -265,6 +274,31 @@ void EarthSurfaceStream::Relocate(){
     _prefetch.clear();_prefetchPending=false;++_prefetchSerial;
 }
 std::unique_ptr<EarthSurfaceStream::Atlas> EarthSurfaceStream::TakeReady(){std::lock_guard lock(_mutex);return std::move(_ready);}
+namespace {
+// Appends the box-filtered mip chain of a square RGBA8 image to it (what WGR_TEXTURE_GEN_MIPS did on the
+// main thread, ~100 ms for the two atlases); returns the number of levels.
+int AppendMips(std::vector<uint8_t>& pixels,int size) {
+    if(size<1 || pixels.size()<size_t(size)*size*4)return 1;
+    size_t total=0;int levels=0;
+    for(int s=size;;s=std::max(s/2,1)){total+=size_t(s)*s*4;++levels;if(s==1)break;}
+    pixels.resize(total);
+    size_t src=0;int s=size;
+    while(s>1) {
+        const int d=std::max(s/2,1);
+        const size_t dst=src+size_t(s)*s*4;
+        uint8_t* out=pixels.data()+dst;const uint8_t* in=pixels.data()+src;
+        EarthParallel::Rows(d,[&](int y){
+            for(int x=0;x<d;++x)for(int c=0;c<4;++c) {
+                const int sx=std::min(2*x+1,s-1),sy=std::min(2*y+1,s-1);
+                const unsigned v=in[(size_t(2*y)*s+2*x)*4+c]+in[(size_t(2*y)*s+sx)*4+c]+in[(size_t(sy)*s+2*x)*4+c]+in[(size_t(sy)*s+sx)*4+c];
+                out[(size_t(y)*d+x)*4+c]=uint8_t((v+2)/4);
+            }
+        });
+        src=dst;s=d;
+    }
+    return levels;
+}
+}
 void EarthSurfaceStream::Run() {
     std::vector<uint8_t> nasa;std::vector<Pixels> images;std::vector<SourceView> sources;
     std::string sourceError;bool loaded=false;
@@ -277,6 +311,17 @@ void EarthSurfaceStream::Run() {
             s=std::min(s,c.latitude);n=std::max(n,c.latitude);wst=std::min(wst,c.longitude);e=std::max(e,c.longitude);
         }
     };
+    // The prepared regional images (the Luxembourg caches, the OFP islands) that touch this window's
+    // streamed ground. Only these take source slots: counting all of them everywhere left Paris with two
+    // fewer provider rings, and the band just outside the near window fell back to the coarse far ring.
+    const auto preparedFor=[&](const Window& window) {
+        const auto far=FarWindow(window);
+        std::vector<SourceView> touching;
+        for(const auto& s:sources)
+            if(Earth::GeographicBoundsOverlap({window.latitude,window.longitude},s.south,s.west,s.north,s.east,far.x,far.z,far.span))
+                touching.push_back(s);
+        return touching;
+    };
     const auto ringsOf=[&](const Window& window) {
         const auto farWindow=FarWindow(window);
         const double cx=window.x+window.span*.5,cz=window.z+window.span*.5;
@@ -284,11 +329,32 @@ void EarthSurfaceStream::Run() {
         for(double s=farWindow.span/4;s>window.span*1.5;s/=4) {
             Window r=window;r.span=float(s);r.x=float(cx-s*.5);r.z=float(cz-s*.5);rings.push_back(r);
         }
-        // At most 8 sources in all: drop the coarsest inner rings first (the far ring stays).
-        while(rings.size()+1+sources.size()>8 && rings.size()>1)rings.erase(rings.begin()+1);
+        // At most 10 sources in all (rings, near, centre, prepared): drop the coarsest inner rings first
+        // (the far ring stays).
+        const size_t prepared=preparedFor(window).size();
+        while(rings.size()+2+prepared>10 && rings.size()>1)rings.erase(rings.begin()+1);
         return rings;
     };
     const auto nearMetresPerPixel=[](const Window& w){return w.span/(AtlasSize*4.0);};
+    // Everything the main thread would otherwise do with a fresh atlas: its mip chains and, for a window's
+    // final atlas, the derived data (canopy trees). The main thread then only hands bytes to the GPU.
+    const auto finish=[&](Atlas& atlas,bool final) {
+        if(!atlas.error.empty() || !atlas.cellPresent)return;
+        atlas.mipLevels=AppendMips(atlas.pixels,AtlasSize);
+        if(atlas.farSize>0)atlas.farMipLevels=AppendMips(atlas.farPixels,atlas.farSize);
+        atlas.final=final;
+        if(!final)return;
+        Derive derive;std::shared_ptr<const EarthTerrainStream::Patch> patch;
+        {std::lock_guard lock(_mutex);derive=_derive;patch=_patch;}
+        if(derive && patch && patch->generation==atlas.window.generation && patch->originRevision==atlas.window.revision)
+            atlas.derived=derive(*patch,atlas.window,atlas.pixels);
+    };
+    // The near atlas is warped ~4x denser at its centre (NearUv), finer than the whole window can be
+    // fetched within its 256 tiles (zoom 16 over the 6.4 km window: ~2.4 m a pixel against ~0.8 m the atlas
+    // shows there). The middle quarter of the window at the atlas centre's own resolution (zoom 18, ~121
+    // tiles) is laid on top: sharper ground where the camera is.
+    const auto centreOf=[](const Window& w){
+        Window c=w;c.span=w.span*.25f;c.x=w.x+w.span*.375f;c.z=w.z+w.span*.375f;return c;};
     // Coarse before sharp: the window at the zoom that fits 16 tiles (two levels coarser than the near
     // window's). POSEIDON_EARTH_IMAGERY_PREVIEW=0 turns it off, for A/B.
     static const bool previewOn=[]{const char* v=std::getenv("POSEIDON_EARTH_IMAGERY_PREVIEW");return !(v && std::string(v)=="0");}();
@@ -305,6 +371,7 @@ void EarthSurfaceStream::Run() {
             double s,wst,n,e;boundsOf(w,s,wst,n,e);
             if(previewOn)downloads+=_tiles->Prefetch(s,wst,n,e,nearMetresPerPixel(w),16,cancelled);
             downloads+=_tiles->Prefetch(s,wst,n,e,nearMetresPerPixel(w),256,cancelled);
+            {double cs,cw,cn,ce;boundsOf(centreOf(w),cs,cw,cn,ce);downloads+=_tiles->Prefetch(cs,cw,cn,ce,nearMetresPerPixel(w),256,cancelled);}
             const auto rings=ringsOf(w);
             for(size_t i=rings.size();i-- > 0 && !cancelled();) {
                 double rs,rw,rn,re;boundsOf(rings[i],rs,rw,rn,re);
@@ -373,6 +440,7 @@ void EarthSurfaceStream::Run() {
             }
             if(!sourceError.empty())throw std::runtime_error(sourceError);
             const auto cancelled=[&]{return _stop.load() || _version!=version;};
+            const auto prepared=preparedFor(window);
             // Two passes when a provider streams imagery: first only what is already on disk, published at
             // once (the ground is never left on the coarse globe while downloads run), then the network.
             const auto requested=std::chrono::steady_clock::now();
@@ -411,11 +479,12 @@ void EarthSurfaceStream::Run() {
                     // Then the near window.
                     const auto rings=ringsOf(window);
                     const auto gather=[&] {
-                        frame.clear();found=0;mosaics.clear();mosaics.resize(rings.size()+1);
+                        frame.clear();found=0;mosaics.clear();mosaics.resize(rings.size()+2);
                         for(size_t i=0;i<rings.size();++i)
                             add(rings[i],rings[i].span/2048.0,2048,i?96:64,mosaics[i],i==0,true);
                         // The near atlas is warped ~4x denser at its centre; ask for that, within the tile budget.
-                        add(window,nearMetresPerPixel(window),4096,256,mosaics.back());
+                        add(window,nearMetresPerPixel(window),4096,256,mosaics[rings.size()]);
+                        add(centreOf(window),nearMetresPerPixel(window),4096,256,mosaics.back());
                     };
                     if(network) {
                         // The ground under the camera first, coarse before sharp, and sharpening as it streams
@@ -439,11 +508,14 @@ void EarthSurfaceStream::Run() {
                             // Under the near mosaic, over the rings. On new ground with nothing on disk yet gather
                             // added no mosaic at all: then it is the only provider source (end()-1 of an empty
                             // frame crashed the worker).
-                            const bool nearAdded=!frame.empty() && !mosaics.empty() && frame.back().image.pixels==mosaics.back().pixels.data();
-                            if(hasPreview)frame.insert(nearAdded?frame.end()-1:frame.end(),under);
-                            frame.insert(frame.end(),sources.begin(),sources.end());
+                            auto at=frame.end();
+                            for(auto it=frame.begin();it!=frame.end();++it)
+                                if(it->image.pixels==mosaics[rings.size()].pixels.data() || it->image.pixels==mosaics.back().pixels.data()){at=it;break;}
+                            if(hasPreview)frame.insert(at,under);
+                            frame.insert(frame.end(),prepared.begin(),prepared.end());
                             auto staged=std::make_unique<Atlas>(BuildRegional(window,{nasa.data(),4096,2048},frame,AtlasSize,cancelled,FarAtlasSize));
                             if(staged->error.empty() && !staged->farPixels.empty()) {
+                                finish(*staged,false);
                                 std::snprintf(timing,sizeof(timing),"; %.2f s after the request, %u threads",since(requested),EarthParallel::Threads());
                                 staged->sources=label+timing;
                                 std::lock_guard lock(_mutex);if(!_stop && _version==version)_ready=std::move(staged);
@@ -452,7 +524,9 @@ void EarthSurfaceStream::Run() {
                         if(preview.downloads>0 && !cancelled())
                             publish("(coarse preview) z"+std::to_string(preview.zoom)+" "+std::to_string(preview.downloads)+" new");
                         auto nearFetch=std::async(std::launch::async,[&]{
-                            return _tiles->Prefetch(s,wst,n,e,nearMetresPerPixel(window),256,cancelled);});
+                            const unsigned near=_tiles->Prefetch(s,wst,n,e,nearMetresPerPixel(window),256,cancelled);
+                            double cs,cw,cn,ce;bounds(centreOf(window),cs,cw,cn,ce);
+                            return near+_tiles->Prefetch(cs,cw,cn,ce,nearMetresPerPixel(window),256,cancelled);});
                         uint64_t seen=_tiles->Arrivals();
                         int partials=0;
                         while(nearFetch.wait_for(std::chrono::milliseconds(1500))!=std::future_status::ready && !cancelled()) {
@@ -477,8 +551,8 @@ void EarthSurfaceStream::Run() {
                     if(cancelled()){attempt->error="superseded";}
                 }
                 // Nothing cached yet and no prepared region: the first pass would only repeat the globe.
-                if(!network && found==0 && sources.empty())continue;
-                frame.insert(frame.end(),sources.begin(),sources.end());
+                if(!network && found==0 && prepared.empty())continue;
+                frame.insert(frame.end(),prepared.begin(),prepared.end());
                 if(attempt->error.empty())
                 {
                     const auto buildStart=std::chrono::steady_clock::now();
@@ -491,7 +565,7 @@ void EarthSurfaceStream::Run() {
                     // Where the time went: mosaics (tile fetch + compose), the atlas build, and the whole pass.
                     std::snprintf(timing,sizeof(timing),"; mosaics %.2f s, atlases %.2f s, pass %.2f s, %.2f s after the request, %u threads",
                         gatherSeconds,buildSeconds,since(passStart),since(requested),EarthParallel::Threads());
-                    attempt->sources=fed+std::to_string(sources.size())+" prepared"+timing;
+                    attempt->sources=fed+std::to_string(prepared.size())+" prepared"+timing;
                 }
                 if(!network) {
                     // Every tile of every mosaic was already on disk: the network pass would fetch nothing
@@ -499,6 +573,7 @@ void EarthSurfaceStream::Run() {
                     const bool complete=found>0 && std::all_of(mosaics.begin(),mosaics.end(),
                         [](const EarthImageryTiles::Mosaic& m){return m.failures==0;});
                     if(attempt->error.empty()) {
+                        finish(*attempt,complete);
                         if(complete)attempt->sources+=" (complete)";
                         std::lock_guard lock(_mutex);
                         if(!_stop && _version==version)_ready=std::move(attempt);
@@ -506,6 +581,7 @@ void EarthSurfaceStream::Run() {
                     }
                     continue;
                 }
+                finish(*attempt,true);
                 result=std::move(attempt);
             }
         } catch(const std::exception& e) {sourceError=e.what();result->error=sourceError;finished=false;}

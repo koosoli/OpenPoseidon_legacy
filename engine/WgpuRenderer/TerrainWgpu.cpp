@@ -79,6 +79,33 @@ constexpr int TerrainGridN = 32;
 
 namespace
 {
+// Whole world: what the Earth installs cost on the main thread this frame (patch, atlas textures, the
+// grass/canopy/tree derivations, features, buildings, worldgen objects). Logged when they add up to 4 ms
+// or more: a frame the camera had to wait for.
+struct EarthInstallTimes
+{
+    std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
+    std::string parts;
+    double total = 0;
+    void Skip() { last = std::chrono::steady_clock::now(); }
+    void Mark(const char* name)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        const double ms = std::chrono::duration<double, std::milli>(now - last).count();
+        last = now;
+        if (ms < 0.3)
+            return;
+        total += ms;
+        char buffer[64];
+        std::snprintf(buffer, sizeof(buffer), "%s%s %.1f", parts.empty() ? "" : ", ", name, ms);
+        parts += buffer;
+    }
+    ~EarthInstallTimes()
+    {
+        if (total >= 4.0)
+            LOG_INFO(Graphics, "Earth main-thread installs: {:.1f} ms ({})", total, parts);
+    }
+};
 bool TerrainPageTimingsEnabled()
 {
     static const bool enabled = [] {
@@ -445,6 +472,10 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
         if(cache && *cache && !_earthImageryPath.empty() && ((surface && std::strcmp(surface,"1")==0) || provider))
         {
             _earthSurface=std::make_unique<EarthSurfaceStream>(std::filesystem::u8path(cache),std::filesystem::u8path(_earthImageryPath));
+            // The forest scan of the imagery (~200 ms) runs on the surface worker with each window's final
+            // atlas; the main thread only places the trees it found.
+            _earthSurface->SetDerive([](const EarthTerrainStream::Patch& patch,const EarthSurfaceStream::Window& window,
+                                        const std::vector<uint8_t>& pixels){return std::any(EarthCanopyTrees(patch,window,pixels));});
             // Start fetching the start place's imagery now, while the mission is still loading: the window
             // a camera at the origin and the start altitude will ask for (Prefetch in the Earth draw names
             // it again, exactly, from the first frame on).
@@ -515,7 +546,7 @@ bool TerrainWgpu::UploadEarthGrass(const EarthTerrainStream::Patch& patch, const
     }();
     constexpr uint32_t HmN = 257, GeoN = 512;
     const int size = EarthSurfaceStream::AtlasSize;
-    if (!enabled || patch.heights.size() != size_t(HmN) * HmN || atlas.pixels.size() != size_t(size) * size * 4 ||
+    if (!enabled || patch.heights.size() != size_t(HmN) * HmN || atlas.pixels.size() < size_t(size) * size * 4 ||
         !(patch.gridMetres > 0))
         return false;
     const float span = patch.gridMetres * float(HmN - 1), cell = span / float(GeoN);
@@ -566,7 +597,7 @@ std::vector<EarthFeatureStream::TreeInstance> TerrainWgpu::EarthCanopyTrees(cons
     }();
     constexpr int HmN = 257;
     const int size = EarthSurfaceStream::AtlasSize;
-    if (!enabled || patch.heights.size() != size_t(HmN) * HmN || pixels.size() != size_t(size) * size * 4 ||
+    if (!enabled || patch.heights.size() != size_t(HmN) * HmN || pixels.size() < size_t(size) * size * 4 ||
         !(patch.gridMetres > 0))
         return trees;
     const auto height = [&](double x, double z, double& slope)
@@ -4041,8 +4072,12 @@ static WgrMeshVertex EarthNearPoint(const EarthTerrainStream::Patch& p,int x,int
     return v;
 }
 
-void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p,bool localUv)
+// The horizon and near meshes of a patch, built from its data alone (any thread: in flight a new patch
+// arrives several times a second and building these on the main thread was a 70-100 ms frame each).
+TerrainWgpu::EarthMeshData TerrainWgpu::BuildEarthMeshes(const EarthTerrainStream::Patch& p,bool localUv,bool surface)
 {
+    EarthMeshData data;
+    data.generation=p.generation;data.revision=p.originRevision;data.localUv=localUv;
     constexpr int n = Earth::HorizonSamples;
     std::vector<WgrMeshVertex> vertices(n*n);
     vertices.reserve(n*n + Earth::GridSamples*Earth::GridSamples + 4*256*4);
@@ -4153,7 +4188,7 @@ void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p,bool loc
     // The near mesh shares the far mesh's imagery and Earth material route.
     // Its 257² vertices are bounded at either resolution; no finite CWA ground
     // tile/cave material is drawn underneath the geographic terrain preview.
-    if(!_earthSurface)
+    if(!surface)
     {
         const uint32_t nearBase=uint32_t(vertices.size());
         for(int z=0;z<Earth::GridSamples;++z)
@@ -4165,30 +4200,55 @@ void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p,bool loc
                 indices.insert(indices.end(),{a,c,b,b,c,d});
             }
     }
-    const WgrMesh replacement = wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(vertices),WgrSlice<uint32_t>(indices));
+    data.horizonVertices=std::move(vertices);
+    data.horizonIndices=std::move(indices);
+    if(surface)
+    {
+        constexpr int nn=Earth::GridSamples;
+        auto& nv=data.nearVertices;auto& ni=data.nearIndices;
+        nv.resize(nn*nn);ni.reserve(256*256*6);
+        const EarthSurfaceStream::Window window{p.originLatitude,p.originLongitude,p.x,p.z,256*p.gridMetres,p.originRevision,p.generation};
+        for(int z=0;z<nn;++z)for(int x=0;x<nn;++x)
+        {
+            auto& v=nv[z*nn+x];v=EarthNearPoint(p,x,z);
+            if(localUv){const auto uv=EarthSurfaceStream::LocalUv(window,v.pos.x,v.pos.z);v.uv={float(uv.x),float(uv.y)};}
+            if(x<nn-1 && z<nn-1){const uint32_t a=z*nn+x,b=a+1,c=a+nn,d=c+1;ni.insert(ni.end(),{a,c,b,b,c,d});}
+        }
+        data.hasNear=true;
+    }
+    return data;
+}
+
+// The GPU half: hand built meshes over (main thread).
+void TerrainWgpu::UploadEarthMeshes(const EarthMeshData& data)
+{
+    const WgrMesh replacement = wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(data.horizonVertices),WgrSlice<uint32_t>(data.horizonIndices));
     if (!replacement) throw std::runtime_error("Earth horizon mesh allocation failed");
     if (_earthHorizonMesh) wgr_mesh_destroy(_renderer,_earthHorizonMesh);
     _earthHorizonMesh = replacement;
-    _earthHorizonIndices = uint32_t(indices.size());
-    if(_earthSurface)UploadEarthNear(p,localUv);
+    _earthHorizonIndices = uint32_t(data.horizonIndices.size());
+    if(data.hasNear)
+    {
+        const auto mesh=wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(data.nearVertices),WgrSlice<uint32_t>(data.nearIndices));
+        if(!mesh)throw std::runtime_error("Earth near surface mesh allocation failed");
+        if(_earthNearMesh)wgr_mesh_destroy(_renderer,_earthNearMesh);
+        _earthNearMesh=mesh;_earthNearIndices=uint32_t(data.nearIndices.size());
+    }
+    _earthHorizonUvGeneration=data.localUv?data.generation:0;
+    _earthHorizonUvRevision=data.revision;
 }
 
-void TerrainWgpu::UploadEarthNear(const EarthTerrainStream::Patch& p,bool localUv)
+void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p,bool localUv)
 {
-    constexpr int n=Earth::GridSamples;
-    std::vector<WgrMeshVertex> vertices(n*n);
-    std::vector<uint32_t> indices;indices.reserve(256*256*6);
-    const EarthSurfaceStream::Window window{p.originLatitude,p.originLongitude,p.x,p.z,256*p.gridMetres,p.originRevision,p.generation};
-    for(int z=0;z<n;++z)for(int x=0;x<n;++x)
-    {
-        auto& v=vertices[z*n+x];v=EarthNearPoint(p,x,z);
-        if(localUv){const auto uv=EarthSurfaceStream::LocalUv(window,v.pos.x,v.pos.z);v.uv={float(uv.x),float(uv.y)};}
-        if(x<n-1 && z<n-1){const uint32_t a=z*n+x,b=a+1,c=a+n,d=c+1;indices.insert(indices.end(),{a,c,b,b,c,d});}
-    }
-    const auto mesh=wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(vertices),WgrSlice<uint32_t>(indices));
-    if(!mesh)throw std::runtime_error("Earth near surface mesh allocation failed");
-    if(_earthNearMesh)wgr_mesh_destroy(_renderer,_earthNearMesh);
-    _earthNearMesh=mesh;_earthNearIndices=uint32_t(indices.size());
+    UploadEarthMeshes(BuildEarthMeshes(p,localUv,_earthSurface!=nullptr));
+}
+
+// Asks for a patch's meshes to be built off the main thread (the newest request wins; one build at a time,
+// so no frame ever waits on a running build).
+void TerrainWgpu::RequestEarthMeshes(const EarthTerrainStream::Patch& p,bool localUv)
+{
+    _earthMeshWant=std::make_shared<const EarthTerrainStream::Patch>(p);
+    _earthMeshWantLocalUv=localUv;
 }
 
 bool TerrainWgpu::GetDrawCoverage(TerrainDrawCoverage& out) const
@@ -4235,6 +4295,9 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         if(_earthBuildings)_earthBuildings->Relocate();
         for(size_t i=0;i<_earthBuildingMeshes.size();++i)if(_earthBuildingMeshes[i]){EngineWgpu::AcquireProducerWindow("Earth buildings relocate");wgr_mesh_destroy(_renderer,_earthBuildingMeshes[i]);_earthBuildingMeshes[i]=0;_earthBuildingIndices[i]=0;}
         _earthOriginRevision=origin.revision;
+        _earthAtlasWaiting.reset();_earthMeshWant.reset(); // a running build's result is dropped by its revision
+        _earthImageryFinal=false;
+        _earthRelocatedAt=std::chrono::steady_clock::now();
         LOG_INFO(Graphics,"Earth relocated: origin [{},{}], revision {}",origin.latitude,origin.longitude,origin.revision);
     }
     if (EarthStreaming::MoonFrameActive())
@@ -4308,10 +4371,12 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         const auto current = !_earthPatch ? Earth::NearDetail::Coarse :
             _earthPatch->gridMetres <= 6.25f ? Earth::NearDetail::Ultra :
             _earthPatch->gridMetres <= 25.0f ? Earth::NearDetail::Fine : Earth::NearDetail::Coarse;
-        const auto detail = Earth::SelectNearDetail(altitude, current);
-        const float grid = Earth::NearGrid(detail), stride = Earth::NearRecenter(grid), half = Earth::NearHalfWindow(grid);
-        const auto windowAt = [&](float x, float z)
+        // The window a camera at (x, altitude, z) asks for: the detail band (with the hysteresis the terrain
+        // stream applies) sets its size and snapping.
+        const auto windowAt = [&](float x, float z, float y)
         {
+            const auto detail = Earth::SelectNearDetail(y, current);
+            const float grid = Earth::NearGrid(detail), stride = Earth::NearRecenter(grid), half = Earth::NearHalfWindow(grid);
             EarthSurfaceStream::Window w;
             w.latitude = origin.latitude;
             w.longitude = origin.longitude;
@@ -4319,24 +4384,38 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             w.z = Earth::CenterCell(z, stride) * stride - half;
             w.span = 256.0f * grid;
             w.revision = origin.revision;
-            w.horizonRadius = Earth::HorizonRadius(altitude);
+            w.horizonRadius = Earth::HorizonRadius(y);
             return w;
         };
-        std::vector<EarthSurfaceStream::Window> ahead{windowAt(pos.X(), pos.Z())};
-        Vector3 travel = _earthPrefetchVelocity * 4.0f;
-        travel[1] = 0.0f;
-        const float reach = travel.Size(), limit = 4.0f * 256.0f * grid; // never more than four windows out
-        if(reach > 0.25f * stride)
+        std::vector<EarthSurfaceStream::Window> ahead{windowAt(pos.X(), pos.Z(), altitude)};
+        const auto add = [&](const EarthSurfaceStream::Window& w)
         {
-            if(reach > limit) travel *= limit / reach;
-            const auto next = windowAt(pos.X() + travel.X(), pos.Z() + travel.Z());
-            if(next.x != ahead[0].x || next.z != ahead[0].z) ahead.push_back(next);
+            for (const auto& have : ahead)
+                if (have.x == w.x && have.z == w.z && have.span == w.span && have.horizonRadius == w.horizonRadius)
+                    return;
+            ahead.push_back(w);
+        };
+        // Ahead along the flight: ~4 s and ~8 s out (fast flight crosses a window in a few seconds), at most
+        // four windows away, at the altitude the climb or descent will have reached -- so a change of
+        // detail band (which changes the window's size) is ready too.
+        const float windowSpan = ahead[0].span;
+        for (const float seconds : {4.0f, 8.0f})
+        {
+            Vector3 travel = _earthPrefetchVelocity * seconds;
+            const float y = std::max(altitude + travel.Y(), 0.0f);
+            travel[1] = 0.0f;
+            const float reach = travel.Size(), limit = 4.0f * windowSpan;
+            if (reach < 0.03f * windowSpan && std::abs(y - altitude) < 200.0f)
+                continue;
+            if (reach > limit) travel *= limit / reach;
+            add(windowAt(pos.X() + travel.X(), pos.Z() + travel.Z(), y));
         }
         _earthSurface->Prefetch(ahead);
     }
     // Installs a patch as the drawn terrain (mesh, heightmap). Without an atlas for it yet, the draw
     // falls back to the globe image until one arrives.
-    const auto applyPatch = [&](std::unique_ptr<EarthTerrainStream::Patch> next, bool keepTextures)
+    // horizon=false: the caller uploads the horizon itself right after (with the atlas window's UVs).
+    const auto applyPatch = [&](std::unique_ptr<EarthTerrainStream::Patch> next, bool keepTextures, bool horizon = true)
     {
         _earthPatch = std::move(next);
         const auto& p = *_earthPatch;
@@ -4348,7 +4427,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         _params.sea_level = -12000.0f;
         _params.enfusion_ground = 0;
         EngineWgpu::AcquireProducerWindow("Earth terrain patch");
-        UploadEarthHorizon(p);
+        if(horizon)
+            RequestEarthMeshes(p,false); // built off the main thread, uploaded when ready (below)
         if(!keepTextures)
         {
             if(_earthSurfaceTexture){wgr_texture_destroy(_renderer,_earthSurfaceTexture);_earthSurfaceTexture=0;}
@@ -4364,27 +4444,47 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         LOG_INFO(Graphics, "Earth near detail: grid {}m, source zoom {}, window {}km, recenter {}m",
             p.gridMetres,p.sourceZoom,p.gridMetres*256.0f/1000.0f,Earth::NearRecenter(p.gridMetres));
     };
-    if (auto patch = _earthStream->TakeReady())
+    EarthInstallTimes installTimes;
+    auto takenPatch = _earthStream->TakeReady();
+    installTimes.Mark("patch take");
+    if (auto patch = std::move(takenPatch))
     {
         if (patch->originRevision!=origin.revision) return;
         // Gameplay gets the new ground at once; the picture may lag it by a moment.
         const auto& p = *patch;
         EarthStreaming::Locations().PublishGround({p.x,p.z,p.gridMetres,Earth::GridSamples,p.originRevision,p.generation,p.heights});
+        installTimes.Mark("ground publish");
         // While textured terrain is showing, keep drawing it until the new patch's imagery is ready:
         // swapping first dropped the ground to the bare globe image on every altitude band change.
-        if(_earthSurface && _earthSurfaceTexture && _earthPatch)
+        // With no imagery to wait for (just after a relocation), the patch is drawn at once -- but at most
+        // once a second: in low fast flight a new patch comes every ~0.3 s, and each heightmap upload
+        // (sky visibility, shadow mask) is tens of ms on this thread. The newest waits as the pending one;
+        // physics has its ground already (PublishGround above).
+        const auto now = std::chrono::steady_clock::now();
+        const bool showNow = !(_earthSurface && _earthSurfaceTexture && _earthPatch) &&
+                             (!_earthPatch || now - _earthDirectApplyAt >= std::chrono::seconds(1));
+        if(!showNow)
         {
             _earthPendingPatch = std::move(patch);
-            _earthPendingAt = std::chrono::steady_clock::now();
+            _earthPendingAt = now;
         }
         else
         {
             _earthPendingPatch.reset();
+            _earthDirectApplyAt = now;
             applyPatch(std::move(patch), false);
         }
+        installTimes.Mark("patch apply");
     }
     if (_earthPendingPatch && std::chrono::steady_clock::now() - _earthPendingAt > std::chrono::seconds(12))
         applyPatch(std::move(_earthPendingPatch), false); // imagery is not coming; show the geometry
+    else if (_earthPendingPatch && !_earthSurfaceTexture &&
+             std::chrono::steady_clock::now() - _earthDirectApplyAt >= std::chrono::seconds(1))
+    {
+        _earthDirectApplyAt = std::chrono::steady_clock::now(); // the newest of the patches held back above
+        applyPatch(std::move(_earthPendingPatch), false);
+    }
+    installTimes.Mark("patch");
     if (!_earthPatch) return;
     if(_earthWorldgen && _earthWorldgenGeneration!=_earthPatch->generation)
     {
@@ -4430,6 +4530,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             _snowWasEnabled = snow.CoverActive();
         }
     }
+    installTimes.Skip();
     if(_earthSurface)
     {
         const EarthTerrainStream::Patch& wanted = _earthPendingPatch ? *_earthPendingPatch : *_earthPatch;
@@ -4438,25 +4539,14 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         {
             if(atlas->error.empty() && atlas->cellPresent)
             {
-                EngineWgpu::AcquireProducerWindow("Earth local surface atlas");
-                const auto texture=wgr_texture_create(_renderer,EarthSurfaceStream::AtlasSize,EarthSurfaceStream::AtlasSize,WGR_TEXTURE_RGBA8,1,
-                    WGR_TEXTURE_GEN_MIPS,atlas->pixels.data(),uint32_t(atlas->pixels.size()));
-                if(!texture)throw std::runtime_error("Earth surface atlas allocation failed");
-                const auto farTexture=wgr_texture_create(_renderer,atlas->farSize,atlas->farSize,WGR_TEXTURE_RGBA8,1,
-                    WGR_TEXTURE_GEN_MIPS,atlas->farPixels.data(),uint32_t(atlas->farPixels.size()));
-                if(!farTexture){wgr_texture_destroy(_renderer,texture);throw std::runtime_error("Earth far surface atlas allocation failed");}
-                // The pending patch and its imagery go in together.
-                if(_earthPendingPatch) applyPatch(std::move(_earthPendingPatch), true);
-                UploadEarthHorizon(*_earthPatch,true);
-                if(_earthSurfaceTexture)wgr_texture_destroy(_renderer,_earthSurfaceTexture);
-                _earthSurfaceTexture=texture;
-                _earthGrass=UploadEarthGrass(*_earthPatch,EarthSurfaceStreamAtlasRef{atlas->window,atlas->pixels});
-                _earthCanopyTrees=EarthCanopyTrees(*_earthPatch,atlas->window,atlas->pixels);
-                RefreshEarthTreeModels();
-                if(_earthFarTexture)wgr_texture_destroy(_renderer,_earthFarTexture);
-                _earthFarTexture=farTexture;
-                LOG_INFO(Graphics,"Earth local surface: near 2048 / far {} (warped) atlases, generation {}, revision {}; {}",
-                    atlas->farSize,atlas->window.generation,atlas->window.revision,atlas->sources);
+                // The pending patch and its imagery go in together: the patch (heightmap) now, its meshes with
+                // the atlas window's UVs built off the main thread; the atlas waits for them and both go in in
+                // one frame (EarthAtlasInstall below). A later atlas of the same window needs no new meshes.
+                if(_earthPendingPatch) applyPatch(std::move(_earthPendingPatch), true, false);
+                installTimes.Mark("pending patch");
+                if(_earthHorizonUvGeneration!=atlas->window.generation || _earthHorizonUvRevision!=atlas->window.revision)
+                    RequestEarthMeshes(*_earthPatch,true);
+                _earthAtlasWaiting=std::move(atlas);
             }
             else
             {
@@ -4466,9 +4556,78 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             }
         }
     }
+    // Meshes built off the main thread: upload a finished build, start the newest wanted one.
+    if(_earthMeshBuilding && _earthMeshBuild.wait_for(std::chrono::seconds(0))==std::future_status::ready)
+    {
+        _earthMeshBuilding=false;
+        const auto data=_earthMeshBuild.get();
+        if(data.revision==origin.revision && _earthPatch && data.generation==_earthPatch->generation)
+        {
+            EngineWgpu::AcquireProducerWindow("Earth terrain meshes");
+            UploadEarthMeshes(data);
+        }
+        installTimes.Mark("mesh upload");
+    }
+    if(!_earthMeshBuilding && _earthMeshWant)
+    {
+        const auto want=std::move(_earthMeshWant);
+        const bool localUv=_earthMeshWantLocalUv,surface=_earthSurface!=nullptr;
+        _earthMeshBuild=std::async(std::launch::async,[want,localUv,surface]{return BuildEarthMeshes(*want,localUv,surface);});
+        _earthMeshBuilding=true;
+    }
+    // A waiting atlas goes in once its window's meshes are up.
+    if(_earthAtlasWaiting && (_earthAtlasWaiting->window.revision!=origin.revision ||
+                              (_earthPatch && _earthAtlasWaiting->window.generation!=_earthPatch->generation)))
+        _earthAtlasWaiting.reset(); // superseded
+    if(_earthAtlasWaiting && _earthHorizonUvGeneration==_earthAtlasWaiting->window.generation &&
+       _earthHorizonUvRevision==_earthAtlasWaiting->window.revision)
+    {
+        const auto atlas=std::move(_earthAtlasWaiting);
+        {
+            {
+                EngineWgpu::AcquireProducerWindow("Earth local surface atlas");
+                // Mip chains come built (EarthSurfaceStream's worker): no CPU mip generation in this frame.
+                const auto texture=wgr_texture_create(_renderer,EarthSurfaceStream::AtlasSize,EarthSurfaceStream::AtlasSize,WGR_TEXTURE_RGBA8,
+                    uint32_t(atlas->mipLevels),atlas->mipLevels>1?0:WGR_TEXTURE_GEN_MIPS,atlas->pixels.data(),uint32_t(atlas->pixels.size()));
+                if(!texture)throw std::runtime_error("Earth surface atlas allocation failed");
+                const auto farTexture=wgr_texture_create(_renderer,atlas->farSize,atlas->farSize,WGR_TEXTURE_RGBA8,
+                    uint32_t(atlas->farMipLevels),atlas->farMipLevels>1?0:WGR_TEXTURE_GEN_MIPS,atlas->farPixels.data(),uint32_t(atlas->farPixels.size()));
+                if(!farTexture){wgr_texture_destroy(_renderer,texture);throw std::runtime_error("Earth far surface atlas allocation failed");}
+                installTimes.Mark("atlas textures");
+                if(_earthSurfaceTexture)wgr_texture_destroy(_renderer,_earthSurfaceTexture);
+                _earthSurfaceTexture=texture;
+                // What is derived from the imagery waits for the window's final atlas (imagery first, then
+                // grass and trees) and was computed on the worker where it could be.
+                static const bool grassOn=[]{const char* v=std::getenv("WGR_GRASS");return !(v && v[0]=='0');}();
+                if(atlas->final)
+                {
+                    _earthImageryFinal=true;
+                    if(grassOn)_earthGrass=UploadEarthGrass(*_earthPatch,EarthSurfaceStreamAtlasRef{atlas->window,atlas->pixels});
+                    installTimes.Mark("grass");
+                    if(const auto* canopy=std::any_cast<std::vector<EarthFeatureStream::TreeInstance>>(&atlas->derived))
+                        _earthCanopyTrees=*canopy;
+                    installTimes.Mark("canopy");
+                    RefreshEarthTreeModels();
+                    installTimes.Mark("tree models");
+                }
+                if(_earthFarTexture)wgr_texture_destroy(_renderer,_earthFarTexture);
+                _earthFarTexture=farTexture;
+                LOG_INFO(Graphics,"Earth local surface: near 2048 / far {} (warped) atlases, generation {}, revision {}; {}",
+                    atlas->farSize,atlas->window.generation,atlas->window.revision,atlas->sources);
+            }
+        }
+    }
+    installTimes.Mark("atlas other");
     _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices,_earthFarTexture?_earthFarTexture:_earthGlobeTexture,_earthFarTexture?3:2,true);
     if(_earthSurface)_engine.SubmitEarthHorizon(_earthNearMesh,_earthNearIndices,_earthSurfaceTexture?_earthSurfaceTexture:_earthGlobeTexture,_earthSurfaceTexture?3:2,true,_earthSurfaceTexture != 0);
-    if(_earthFeatures && camera.Position().Y()<12000.0f)
+    installTimes.Skip();
+    // Imagery first (owner, 2026-10-23: "make it that satellite images load before buildings, trees and
+    // streets"): roads, OSM forests, buildings and worldgen objects neither request nor install anything
+    // until the ground has its final imagery -- they appeared on the bare globe image, and their downloads
+    // competed with it. 20 s after a relocation they go ahead regardless (no imagery provider answering).
+    const bool contentAllowed = !_earthSurface || _earthImageryFinal ||
+        std::chrono::steady_clock::now() - _earthRelocatedAt > std::chrono::seconds(20);
+    if(_earthFeatures && camera.Position().Y()<12000.0f && contentAllowed)
     {
         _earthFeatures->Request(*_earthPatch,camera.Position().X(),camera.Position().Z());
         if(auto mesh=_earthFeatures->TakeReady();mesh && mesh->revision==origin.revision && mesh->generation==_earthPatch->generation)
@@ -4535,7 +4694,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             if(_earthTreeDetail && !_earthTreeModels)_earthTreeDetail->Draw(camera.Position(),Glob.time.toFloat());
         }
     }
-    if(_earthBuildings && camera.Position().Y()<12000.0f)
+    installTimes.Mark("features");
+    if(_earthBuildings && camera.Position().Y()<12000.0f && contentAllowed)
     {
         _earthBuildings->Request(*_earthPatch,camera.Position().X(),camera.Position().Z());
         if(auto mesh=_earthBuildings->TakeReady();mesh && mesh->revision==origin.revision && mesh->generation==_earthPatch->generation)
@@ -4599,7 +4759,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                 else _engine.SubmitEarthHorizon(_earthBuildingMeshes[m],_earthBuildingIndices[m],_earthBuildingTexture);
             }
     }
-    if(_earthWorldgen && worldgenNear)
+    installTimes.Mark("buildings");
+    if(_earthWorldgen && worldgenNear && contentAllowed)
     {
         _earthWorldgen->Request(*_earthPatch,camera.Position().X(),camera.Position().Z());
         if(auto snapshot=_earthWorldgen->TakeReady();snapshot && snapshot->revision==origin.revision && snapshot->generation==_earthPatch->generation)
@@ -4638,6 +4799,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                     _earthWorldgenSnapshot->revision,_earthWorldgenSnapshot->generation,_earthWorldgenCreated,_earthWorldgenNext,_earthWorldgenAttemptedModels.size());
         }
     }
+    installTimes.Mark("worldgen");
     // Water's scene-colour snapshot must include every opaque Earth draw.
     if(auto* water=static_cast<WaterWgpu*>(_engine.GetWaterRenderer()))
         water->DrawEarthWater(scene,_params.world_origin.x,_params.world_origin.y,_params.terrain_grid,_params.hm_width);
@@ -4703,7 +4865,12 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
                              camera->Position().Y(), camera->Position().Z());
                 }
             }
-            // Tidewater wildlife in whole-world mode (WildlifeWorld.hpp answers its sea and ground)
+            // Tidewater wildlife in whole-world mode (WildlifeWorld.hpp answers its sea and ground). Not at
+            // the moon (EarthMoonFrame.hpp): there the ground away from the frame's anchor lies below 0, which
+            // read as sea, and seabirds flew over the lunar surface. They are submitted per frame, so not
+            // updating them is not drawing them.
+            if (EarthStreaming::MoonFrameActive())
+                return;
             if (!_fish)
                 _fish = std::make_unique<FishSchools>(_engine, _renderer);
             _fish->Update(camera->Position(), Glob.time.toFloat());

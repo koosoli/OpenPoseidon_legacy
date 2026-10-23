@@ -208,11 +208,33 @@ class TerrainWgpu : public ITerrainRenderer
     uint64_t _earthOriginRevision = 0;
     void UploadEarthGlobe(double latitude,double longitude);
     void UploadEarthHorizon(const EarthTerrainStream::Patch& patch,bool localUv=false);
+    // Earth meshes built off the main thread (TerrainWgpu.cpp): the data, the build, the upload.
+    struct EarthMeshData
+    {
+        std::vector<WgrMeshVertex> horizonVertices, nearVertices;
+        std::vector<uint32_t> horizonIndices, nearIndices;
+        uint64_t generation = 0, revision = 0;
+        bool localUv = false, hasNear = false;
+    };
+    static EarthMeshData BuildEarthMeshes(const EarthTerrainStream::Patch& patch,bool localUv,bool surface);
+    void UploadEarthMeshes(const EarthMeshData& data);
+    void RequestEarthMeshes(const EarthTerrainStream::Patch& patch,bool localUv);
+    std::future<EarthMeshData> _earthMeshBuild;
+    bool _earthMeshBuilding = false;
+    std::shared_ptr<const EarthTerrainStream::Patch> _earthMeshWant;
+    bool _earthMeshWantLocalUv = false;
+    std::unique_ptr<EarthSurfaceStream::Atlas> _earthAtlasWaiting; // waits for its window's meshes
     // Whole World grass: the near patch's heights and a grass mask read from its satellite atlas
     bool UploadEarthGrass(const EarthTerrainStream::Patch& patch,const struct EarthSurfaceStreamAtlasRef& atlas);
     bool _earthGrass=false;
     bool _earthMoonHeightmap=false; // the flat heightmap of the moon frame is uploaded
-    void UploadEarthNear(const EarthTerrainStream::Patch& patch,bool localUv);
+    // The atlas window whose UVs the horizon mesh carries (0: plain UVs): rebuilt once per window.
+    uint64_t _earthHorizonUvGeneration=0,_earthHorizonUvRevision=0;
+    // Imagery first: a final atlas has been installed since the last relocation (TerrainWgpu.cpp).
+    bool _earthImageryFinal=false;
+    std::chrono::steady_clock::time_point _earthDirectApplyAt{}; // last patch drawn without waiting for imagery
+    std::chrono::steady_clock::time_point _earthRelocatedAt=std::chrono::steady_clock::now();
+
     // (Re)uploads and rebuilds the quadtree when the map changes; returns true if it did.
     bool UploadIfNeeded(const Landscape& land);
     void BuildQuadtree(const Landscape& land);

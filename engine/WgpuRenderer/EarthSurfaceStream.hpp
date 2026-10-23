@@ -1,8 +1,10 @@
 #pragma once
 #include "EarthTerrainStream.hpp"
 #include "EarthImageryTiles.hpp"
+#include <any>
 #include <array>
 #include <functional>
+#include <memory>
 #include <string>
 
 namespace Poseidon {
@@ -28,13 +30,25 @@ public:
     };
     struct Atlas {
         Window window;
+        // Level 0 first, then the rest of the box-filtered mip chain (mipLevels levels in all), built on the
+        // worker: the main thread only hands them to the GPU. Readers of the image use the first
+        // AtlasSize^2 (farSize^2) texels.
         std::vector<uint8_t> pixels;
         std::vector<uint8_t> farPixels;
         int farSize=0;
+        int mipLevels=1,farMipLevels=1;
         std::string sources; // what fed it, for the log
         std::string error;
         bool cellPresent=false;
+        // The window's last atlas (not a coarse preview or a streaming update): what is derived from the
+        // imagery (SetDerive) comes with it, computed on the worker.
+        bool final=false;
+        std::any derived;
     };
+    // Work derived from a window's final imagery and its elevation patch (the canopy trees), run on the
+    // surface worker instead of the main thread; its result travels in Atlas::derived.
+    using Derive=std::function<std::any(const EarthTerrainStream::Patch&,const Window&,const std::vector<uint8_t>&)>;
+    void SetDerive(Derive derive){std::lock_guard lock(_mutex);_derive=std::move(derive);}
     static Earth::Pixel LocalUv(const Window& w,double x,double z);
     // A fixed patch-centred chart; density increases near the resident camera
     // without changing atlas bytes, geometry or the exact far-atlas boundary.
@@ -73,6 +87,8 @@ private:
     std::atomic<uint64_t> _version{0};
     bool _pending=false,_requested=false;
     bool _prefetchPending=false;
+    Derive _derive;
+    std::shared_ptr<const EarthTerrainStream::Patch> _patch; // the requested window's elevation (heights only)
     std::vector<Window> _prefetch;
     std::atomic<uint64_t> _prefetchSerial{0};
     Window _window;

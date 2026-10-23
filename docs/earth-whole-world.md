@@ -49,7 +49,16 @@ URL templates are web-mercator XYZ: `{z} {x} {y}`, `{-y}` (TMS rows), `{q}` (qua
   first and shown as they stream in (an updated picture about every 1.5 s), then the wide outer
   rings in the background. Imagery is also fetched before it is asked for
   (`POSEIDON_EARTH_IMAGERY_PREFETCH=0` turns that off): the start place's while the mission is still
-  loading, rather than after its elevation has arrived, and in flight the ground about 4 s ahead. Measured on new ground (Rio): coarse imagery 1.6 s, sharp 4.4 s, final 8.6 s
+  loading, rather than after its elevation has arrived, and in flight the ground about 4 and 8 s
+  ahead (at the altitude band a climb or descent is heading for). The middle quarter of the window
+  is fetched at the zoom the atlas centre can show (zoom 18 in the 3-8 km band), and prepared regional
+  images only take imagery slots where they touch the streamed ground. Where the provider has no
+  imagery (Esri's grey "Map data not yet available" over open ocean) the tile counts as missing and
+  coarser imagery shows through.
+* **Smooth camera first.** Mip chains, the forest scan (canopy trees) and the terrain meshes are built
+  off the main thread; the main thread only hands finished data to the GPU. Grass and trees follow a
+  window's final imagery, and roads, buildings and worldgen objects wait for the imagery before they
+  download or appear. Just after a relocation, the visible terrain is replaced at most once a second. Measured on new ground (Rio): coarse imagery 1.6 s, sharp 4.4 s, final 8.6 s
   (was: globe only until 4.6 s, final 10.5 s). The atlases and the ring mosaics are built
   on all but two CPU cores (`POSEIDON_EARTH_ATLAS_THREADS`, 1 = single-threaded): from a warm cache the
   first imagery is on screen ~0.9 s after a window change and the final one ~1.9 s (7.9 s and 16.3 s on

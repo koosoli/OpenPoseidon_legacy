@@ -26,10 +26,11 @@ namespace Poseidon
 namespace
 {
 constexpr size_t MaxTileBytes = 4 * 1024 * 1024;
-// Decoded tiles kept in memory. One window's mosaics take ~400 (rings ~190 + near 196 + coarse preview
-// 16): at 384 every build pushed out the rings it would need again and re-read and re-decoded them from
-// disk. 640 256-px tiles are ~160 MB, whole world only.
-constexpr size_t MaxResidentTiles = 640;
+// Decoded tiles kept in memory. One window's mosaics take ~520 (rings ~190 + near 196 + centre ~121 +
+// coarse preview 16), and prefetch holds the next window's beside them: at 384 every build pushed out
+// the rings it would need again and re-read and re-decoded them from disk. 1024 256-px tiles are
+// ~256 MB, whole world only.
+constexpr size_t MaxResidentTiles = 1024;
 // Few warm connections, not many cold ones. The tile server (or something on the way) resets bursts of
 // new TLS handshakes: 40 at once gave 29 resets, even 4 at once lost one. A reset tile waits out the
 // retry back-off, and after four it stays missing until the next window. Measured on new ground (Rio,
@@ -208,19 +209,31 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
         }
         missing.push_back(key);
     }
+    // Where a provider has no imagery (Esri over open ocean from zoom 14 on) it answers 200 OK with a flat
+    // grey "Map data not yet available" image. Taken as imagery it drew a light grey square around Desert
+    // Island in the Bay of Biscay. Such a tile is missing ground: coarser real tiles and the globe show
+    // through instead, and it is not fetched again.
+    enum class Decoded { Ok, Bad, Placeholder };
     const auto decode = [](const std::vector<uint8_t>& bytes, Tile& tile)
     {
         int w = 0, h = 0, channels = 0;
         if (bytes.empty() || !stbi_info_from_memory(bytes.data(), int(bytes.size()), &w, &h, &channels) || w != h ||
             w < 64 || w > 1024)
-            return false;
+            return Decoded::Bad;
         stbi_uc* rgba = stbi_load_from_memory(bytes.data(), int(bytes.size()), &w, &h, &channels, 4);
         if (!rgba)
-            return false;
+            return Decoded::Bad;
         tile.rgba.assign(rgba, rgba + size_t(w) * h * 4);
         tile.size = w;
         stbi_image_free(rgba);
-        return true;
+        size_t flatGrey = 0;
+        const size_t texels = size_t(w) * h;
+        for (size_t i = 0; i < texels; ++i)
+        {
+            const int r = tile.rgba[i * 4], g = tile.rgba[i * 4 + 1], b = tile.rgba[i * 4 + 2];
+            flatGrey += std::abs(r - g) < 6 && std::abs(g - b) < 6 && r > 185 && r < 225;
+        }
+        return flatGrey * 10 >= texels * 9 ? Decoded::Placeholder : Decoded::Ok;
     };
     // A rolling pool: each worker takes the next tile as soon as its last one is done. The old lock-step
     // batches of 16 waited for the slowest tile of each batch (a retried handshake: seconds) before
@@ -229,6 +242,7 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
     {
         bool ok = false, permanent = false;
         Tile tile;
+        bool placeholder = false; // the provider has no imagery here: not a failure of the network
     };
     const auto fetchOne = [&](const std::tuple<int, int, int>& key) -> Job
     {
@@ -242,8 +256,11 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
         {
             std::ifstream input(path, std::ios::binary);
             bytes.assign(std::istreambuf_iterator<char>(input), {});
-            if (decode(bytes, tile))
+            const auto cached = decode(bytes, tile);
+            if (cached == Decoded::Ok)
                 return {true, false, std::move(tile)};
+            if (cached == Decoded::Placeholder)
+                return {false, true, {}, true};
             bytes.clear();
         }
         if (!network)
@@ -251,9 +268,11 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
         bool permanent = false;
         if (!Download(EarthProviders::ExpandUrl(_source, z, x, y), bytes, cancelled, permanent))
             return {false, permanent, {}};
-        if (!decode(bytes, tile))
+        const auto fetched = decode(bytes, tile);
+        if (fetched == Decoded::Bad)
             return {false, true, {}}; // not an image: an error page or an unsupported format
-        // Only a decodable tile is cached; a partial write never becomes a final file.
+        // Only a decodable tile is cached (a placeholder too, so the next session knows without asking); a
+        // partial write never becomes a final file.
         std::filesystem::create_directories(path.parent_path(), ec);
         const auto temporary = path.string() + ".part";
         {
@@ -263,6 +282,8 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
         std::filesystem::rename(temporary, path, ec);
         if (ec)
             std::filesystem::remove(temporary, ec);
+        if (fetched == Decoded::Placeholder)
+            return {false, true, {}, true};
         tile.use = 1; // marks a network fetch for the caller's count
         return {true, false, std::move(tile)};
     };
@@ -280,13 +301,15 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
             const size_t i = next.fetch_add(1);
             if (i >= missing.size())
                 return;
-            auto [ok, permanent, tile] = fetchOne(missing[i]);
+            auto [ok, permanent, tile, placeholder] = fetchOne(missing[i]);
             std::lock_guard lock(_mutex);
             if (!ok)
             {
                 if (permanent) // transient failures are retried by the next window build
                     _failed.insert(missing[i]);
-                if (network)
+                if (placeholder)
+                    failedInRow = 0; // the provider answered: open ocean, not a dead network
+                else if (network)
                     ++failedInRow;
                 continue;
             }
