@@ -443,7 +443,23 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
         }
         const char* surface=std::getenv("POSEIDON_EARTH_SURFACE");
         if(cache && *cache && !_earthImageryPath.empty() && ((surface && std::strcmp(surface,"1")==0) || provider))
+        {
             _earthSurface=std::make_unique<EarthSurfaceStream>(std::filesystem::u8path(cache),std::filesystem::u8path(_earthImageryPath));
+            // Start fetching the start place's imagery now, while the mission is still loading: the window
+            // a camera at the origin and the start altitude will ask for (Prefetch in the Earth draw names
+            // it again, exactly, from the first frame on).
+            const auto start = EarthStreaming::GetLocation();
+            const auto detail = Earth::SelectNearDetail(start.altitude, Earth::NearDetail::Coarse);
+            const float grid = Earth::NearGrid(detail), stride = Earth::NearRecenter(grid);
+            EarthSurfaceStream::Window w;
+            w.latitude = start.latitude;
+            w.longitude = start.longitude;
+            w.x = w.z = Earth::CenterCell(EarthStreaming::CameraAnchor, stride) * stride - Earth::NearHalfWindow(grid);
+            w.span = 256.0f * grid;
+            w.revision = start.revision;
+            w.horizonRadius = Earth::HorizonRadius(start.altitude);
+            _earthSurface->Prefetch({w});
+        }
         if(const char* buildings=std::getenv("POSEIDON_EARTH_BUILDINGS");buildings && std::strcmp(buildings,"1")==0)
         {
             if(const char* cache=std::getenv("POSEIDON_EARTH_CACHE");cache && *cache)
@@ -4267,6 +4283,57 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         return;
     }
     _earthStream->Request(camera.Position().X(), camera.Position().Z(),camera.Position().Y(),origin);
+    if(_earthSurface)
+    {
+        // Imagery ahead of need (EarthSurfaceStream::Prefetch): the window under the camera -- fetched while
+        // its elevation patch is still downloading, rather than after -- and, in flight, the window ~4 s
+        // ahead along the camera's smoothed velocity. A window is a pure function of the position and
+        // altitude band (the same snapping EarthTerrainStream::Request does), so it can be named early.
+        const Vector3 pos = camera.Position();
+        const auto now = std::chrono::steady_clock::now();
+        if(origin.revision != _earthPrefetchRevision)
+        {
+            _earthPrefetchRevision = origin.revision;
+            _earthPrefetchVelocity = VZero;
+        }
+        else
+        {
+            const float dt = std::chrono::duration<float>(now - _earthPrefetchAt).count();
+            if(dt > 0.0f && dt < 0.5f)
+                _earthPrefetchVelocity += ((pos - _earthPrefetchPos) / dt - _earthPrefetchVelocity) * std::min(dt / 0.5f, 1.0f);
+        }
+        _earthPrefetchPos = pos;
+        _earthPrefetchAt = now;
+        const float altitude = pos.Y();
+        const auto current = !_earthPatch ? Earth::NearDetail::Coarse :
+            _earthPatch->gridMetres <= 6.25f ? Earth::NearDetail::Ultra :
+            _earthPatch->gridMetres <= 25.0f ? Earth::NearDetail::Fine : Earth::NearDetail::Coarse;
+        const auto detail = Earth::SelectNearDetail(altitude, current);
+        const float grid = Earth::NearGrid(detail), stride = Earth::NearRecenter(grid), half = Earth::NearHalfWindow(grid);
+        const auto windowAt = [&](float x, float z)
+        {
+            EarthSurfaceStream::Window w;
+            w.latitude = origin.latitude;
+            w.longitude = origin.longitude;
+            w.x = Earth::CenterCell(x, stride) * stride - half;
+            w.z = Earth::CenterCell(z, stride) * stride - half;
+            w.span = 256.0f * grid;
+            w.revision = origin.revision;
+            w.horizonRadius = Earth::HorizonRadius(altitude);
+            return w;
+        };
+        std::vector<EarthSurfaceStream::Window> ahead{windowAt(pos.X(), pos.Z())};
+        Vector3 travel = _earthPrefetchVelocity * 4.0f;
+        travel[1] = 0.0f;
+        const float reach = travel.Size(), limit = 4.0f * 256.0f * grid; // never more than four windows out
+        if(reach > 0.25f * stride)
+        {
+            if(reach > limit) travel *= limit / reach;
+            const auto next = windowAt(pos.X() + travel.X(), pos.Z() + travel.Z());
+            if(next.x != ahead[0].x || next.z != ahead[0].z) ahead.push_back(next);
+        }
+        _earthSurface->Prefetch(ahead);
+    }
     // Installs a patch as the drawn terrain (mesh, heightmap). Without an atlas for it yet, the draw
     // falls back to the globe image until one arrives.
     const auto applyPatch = [&](std::unique_ptr<EarthTerrainStream::Patch> next, bool keepTextures)

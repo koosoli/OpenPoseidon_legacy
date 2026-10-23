@@ -45,8 +45,11 @@ URL templates are web-mercator XYZ: `{z} {x} {y}`, `{-y}` (TMS rows), `{q}` (qua
   warm connections and TLS sessions, six at a time in a rolling pool (`POSEIDON_EARTH_DOWNLOADS`; more
   were slower: the tile server resets bursts of new TLS handshakes). On new ground the window under
   the camera is first fetched two zoom levels coarser (16 tiles) and shown at once
-  (`POSEIDON_EARTH_IMAGERY_PREVIEW=0` turns that off), then the sharp tiles under the camera, then
-  the wide outer rings. Measured on new ground (Rio): coarse imagery 1.6 s, sharp 4.4 s, final 8.6 s
+  (`POSEIDON_EARTH_IMAGERY_PREVIEW=0` turns that off), then the sharp tiles, nearest the camera
+  first and shown as they stream in (an updated picture about every 1.5 s), then the wide outer
+  rings in the background. Imagery is also fetched before it is asked for
+  (`POSEIDON_EARTH_IMAGERY_PREFETCH=0` turns that off): the start place's while the mission is still
+  loading, rather than after its elevation has arrived, and in flight the ground about 4 s ahead. Measured on new ground (Rio): coarse imagery 1.6 s, sharp 4.4 s, final 8.6 s
   (was: globe only until 4.6 s, final 10.5 s). The atlases and the ring mosaics are built
   on all but two CPU cores (`POSEIDON_EARTH_ATLAS_THREADS`, 1 = single-threaded): from a warm cache the
   first imagery is on screen ~0.9 s after a window change and the final one ~1.9 s (7.9 s and 16.3 s on

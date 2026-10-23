@@ -55,6 +55,11 @@ public:
     EarthSurfaceStream(std::filesystem::path cache,std::filesystem::path overview);
     ~EarthSurfaceStream();
     void Request(const EarthTerrainStream::Patch& patch);
+    // Windows the camera is about to need -- the one under it before its elevation patch has arrived (at
+    // start-up and on a jump), and the one ahead along its flight. Their tiles are fetched to memory and
+    // disk whenever the worker has no atlas to build; a Request always comes first. Only the window
+    // fields that place it are read (latitude, longitude, x, z, span, revision, horizonRadius).
+    void Prefetch(const std::vector<Window>& windows);
     void Relocate();
     std::unique_ptr<Atlas> TakeReady();
 private:
@@ -67,6 +72,9 @@ private:
     std::atomic<bool> _stop{false};
     std::atomic<uint64_t> _version{0};
     bool _pending=false,_requested=false;
+    bool _prefetchPending=false;
+    std::vector<Window> _prefetch;
+    std::atomic<uint64_t> _prefetchSerial{0};
     Window _window;
     std::unique_ptr<Atlas> _ready;
 };

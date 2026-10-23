@@ -149,6 +149,11 @@ class TerrainWgpu : public ITerrainRenderer
     std::unique_ptr<EarthTerrainStream::Patch> _earthPatch;
     std::unique_ptr<EarthBuildingStream> _earthBuildings;
     std::unique_ptr<EarthSurfaceStream> _earthSurface;
+    // Imagery prefetch along the flight (TerrainWgpu.cpp, EarthSurfaceStream::Prefetch): the camera's
+    // smoothed velocity in the current origin's frame.
+    Vector3 _earthPrefetchPos = VZero, _earthPrefetchVelocity = VZero;
+    std::chrono::steady_clock::time_point _earthPrefetchAt{};
+    uint64_t _earthPrefetchRevision = 0;
     // A newer patch held back until its imagery is ready (or 12 s pass), so the textured ground stays up.
     std::unique_ptr<EarthTerrainStream::Patch> _earthPendingPatch;
     std::chrono::steady_clock::time_point _earthPendingAt{};

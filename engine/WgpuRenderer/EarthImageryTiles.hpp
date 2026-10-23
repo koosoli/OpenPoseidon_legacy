@@ -41,6 +41,11 @@ class EarthImageryTiles
     // keeps the tile count within `maxTiles` and the provider's max zoom; output is at most maxSize².
     bool Build(double south, double west, double north, double east, double metresPerPixel, int maxSize,
                unsigned maxTiles, Mosaic& out, const std::function<bool()>& cancelled = {}, bool network = true);
+    // The tiles Build would use for these bounds, fetched (disk, then network) into memory and the disk
+    // cache without composing anything: getting ground ready before it is asked for. Returns how many
+    // were downloaded.
+    unsigned Prefetch(double south, double west, double north, double east, double metresPerPixel, unsigned maxTiles,
+                      const std::function<bool()>& cancelled = {});
 
     // A 4096x2048 equirectangular world image from zoom-3 tiles, written once as JPEG -- only when every
     // tile arrived (a partial one would bake black holes into the globe for good). Returns the path, or
@@ -48,6 +53,8 @@ class EarthImageryTiles
     std::filesystem::path Overview();
 
     static int ChooseZoom(double latitude, double metresPerPixel, int maxZoom);
+    // Tiles downloaded so far (all time): a cheap "has anything new arrived" for progressive publishing.
+    uint64_t Arrivals() const { return _arrivals.load(); }
 
   private:
     struct Tile
@@ -57,6 +64,10 @@ class EarthImageryTiles
         uint64_t use = 0;
     };
     const Tile* Find(int z, int x, int y);
+    // The zoom and tile range Build covers these bounds with, and its keys, nearest the centre first (the
+    // download pool takes them in that order, so the ground under the camera arrives first).
+    bool Cover(double& south, double west, double& north, double east, double metresPerPixel, unsigned maxTiles,
+               int& zoom, int& x0, int& x1, int& y0, int& y1, std::vector<std::tuple<int, int, int>>& keys) const;
     void Fetch(const std::vector<std::tuple<int, int, int>>& keys, unsigned& downloads,
                const std::function<bool()>& cancelled, bool network);
     bool Download(const std::string& url, std::vector<uint8_t>& bytes, const std::function<bool()>& cancelled,
@@ -71,5 +82,6 @@ class EarthImageryTiles
     std::map<std::tuple<int, int, int>, Tile> _tiles;
     std::set<std::tuple<int, int, int>> _failed;
     uint64_t _use = 0;
+    std::atomic<uint64_t> _arrivals{0};
 };
 } // namespace Poseidon

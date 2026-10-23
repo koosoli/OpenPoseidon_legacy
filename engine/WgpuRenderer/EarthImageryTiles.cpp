@@ -292,6 +292,7 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
             }
             failedInRow = 0;
             downloads += tile.use;
+            _arrivals += tile.use;
             tile.use = ++_use;
             _tiles[missing[i]] = std::move(tile);
         }
@@ -319,21 +320,19 @@ const EarthImageryTiles::Tile* EarthImageryTiles::Find(int z, int x, int y)
     return &it->second;
 }
 
-bool EarthImageryTiles::Build(double south, double west, double north, double east, double metresPerPixel,
-                              int maxSize, unsigned maxTiles, Mosaic& out, const std::function<bool()>& cancelled,
-                              bool network)
+bool EarthImageryTiles::Cover(double& south, double west, double& north, double east, double metresPerPixel,
+                              unsigned maxTiles, int& zoom, int& x0, int& x1, int& y0, int& y1,
+                              std::vector<std::tuple<int, int, int>>& keys) const
 {
-    out = {};
     if (!Enabled() || !(north > south) || !(east > west) || east - west > 180.0 || !std::isfinite(metresPerPixel) ||
-        metresPerPixel <= 0 || maxSize < 2)
+        metresPerPixel <= 0)
         return false;
     south = std::max(south, -MercatorLimit);
     north = std::min(north, MercatorLimit);
     if (!(north > south))
         return false;
     const double mid = 0.5 * (south + north);
-    int zoom = ChooseZoom(mid, metresPerPixel, _source.maxZoom);
-    int x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+    zoom = ChooseZoom(mid, metresPerPixel, _source.maxZoom);
     for (;; --zoom)
     {
         double ax, ay, bx, by;
@@ -345,10 +344,44 @@ bool EarthImageryTiles::Build(double south, double west, double north, double ea
         if (unsigned(x1 - x0 + 1) * unsigned(y1 - y0 + 1) <= maxTiles || zoom == 0)
             break;
     }
-    std::vector<std::tuple<int, int, int>> keys;
+    keys.clear();
     for (int y = y0; y <= y1; ++y)
         for (int x = x0; x <= x1; ++x)
             keys.emplace_back(zoom, x, y);
+    const double cx = 0.5 * (x0 + x1), cy = 0.5 * (y0 + y1);
+    std::stable_sort(keys.begin(), keys.end(), [&](const auto& a, const auto& b)
+    {
+        const double da = std::hypot(std::get<1>(a) - cx, std::get<2>(a) - cy);
+        const double db = std::hypot(std::get<1>(b) - cx, std::get<2>(b) - cy);
+        return da < db;
+    });
+    return true;
+}
+
+unsigned EarthImageryTiles::Prefetch(double south, double west, double north, double east, double metresPerPixel,
+                                     unsigned maxTiles, const std::function<bool()>& cancelled)
+{
+    int zoom = 0, x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+    std::vector<std::tuple<int, int, int>> keys;
+    if (!Cover(south, west, north, east, metresPerPixel, maxTiles, zoom, x0, x1, y0, y1, keys))
+        return 0;
+    unsigned downloads = 0;
+    Fetch(keys, downloads, cancelled, true);
+    return downloads;
+}
+
+bool EarthImageryTiles::Build(double south, double west, double north, double east, double metresPerPixel,
+                              int maxSize, unsigned maxTiles, Mosaic& out, const std::function<bool()>& cancelled,
+                              bool network)
+{
+    out = {};
+    if (maxSize < 2)
+        return false;
+    int zoom = 0, x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+    std::vector<std::tuple<int, int, int>> keys;
+    if (!Cover(south, west, north, east, metresPerPixel, maxTiles, zoom, x0, x1, y0, y1, keys))
+        return false;
+    const double mid = 0.5 * (south + north);
     Fetch(keys, out.downloads, cancelled, network);
     if (cancelled && cancelled())
         return false;
