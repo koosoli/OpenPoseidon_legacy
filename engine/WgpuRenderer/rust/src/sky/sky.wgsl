@@ -974,11 +974,14 @@ fn moon_height_at(q: vec3<f32>, lod: f32) -> f32 {
 fn moon_relief_lod(footprint: f32) -> f32 {
     return max(log2(max(footprint * f32(textureDimensions(moon_relief_tex).x) / (2.0 * PI), 1.0e-6)), 0.0);
 }
+// One height-map texel as an angle (radians).
+fn moon_relief_texel() -> f32 { return 2.0 * PI / f32(textureDimensions(moon_relief_tex).x); }
 #else
 fn moon_map_albedo(q: vec3<f32>, footprint: f32) -> f32 { return -1.0; }
 fn moon_height_range() -> vec2<f32> { return vec2<f32>(0.0); }
 fn moon_height_at(q: vec3<f32>, lod: f32) -> f32 { return 0.0; }
 fn moon_relief_lod(footprint: f32) -> f32 { return 0.0; }
+fn moon_relief_texel() -> f32 { return 1.0; }
 #endif
 
 // Angular size of one pixel, radians. Written at the top of each fragment entry point -- i.e. in
@@ -2460,7 +2463,7 @@ fn earth_moon_body(pos: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
     var nbase = n0;
     if (relief) {
         let lod = moon_relief_lod(footprint);
-        let es = max(footprint, 2.0 * PI / f32(textureDimensions(moon_relief_tex).x));
+        let es = max(footprint, moon_relief_texel());
         let m0 = moon_height_at(q, lod);
         let mx = moon_height_at(q + vec3<f32>(dot(tx, u), dot(tx, v), dot(tx, w)) * es, lod);
         let my = moon_height_at(q + vec3<f32>(dot(ty, u), dot(ty, v), dot(ty, w)) * es, lod);
