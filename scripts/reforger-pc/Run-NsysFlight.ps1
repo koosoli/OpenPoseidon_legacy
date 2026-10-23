@@ -12,7 +12,9 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\reforger-pc\Run-NsysFlight.ps1 [-World DayZ]
 # Optional: -Harness <dir with go.ps1> (default %TEMP%\rfh\_OpenPoseidon-Reforger),
 #           -Build <dist dir> (default: the bin\ junction's target), -Tag <shots subfolder>,
-#           -Trace <nsys --trace list> and -SkipExport (an agent's unelevated launch test: -Trace nvtx).
+#           -Trace <nsys --trace list> and -SkipExport (an agent's unelevated launch test: -Trace nvtx),
+#           -Parked (Reforger: hold the Durras pose instead of drifting, WGR_GPU_REGIONS_ALL=1 -- for
+#           a pass whose cost flips between two levels at a fixed camera).
 # Takes ~5 minutes: ~2 min flight, ~3 min report + SQLite export (3-4 GB). Changes nothing
 # permanent; the graphics.cfg VSync tweak is restored. Full recipe: .agents/PROFILING-WITH-NSIGHT.md
 param(
@@ -21,7 +23,8 @@ param(
     [string]$Build = '',
     [string]$Tag = '',
     [string]$Trace = 'vulkan,wddm,nvtx',
-    [switch]$SkipExport
+    [switch]$SkipExport,
+    [switch]$Parked
 )
 $ErrorActionPreference = 'Stop'
 $h = $Harness
@@ -68,7 +71,8 @@ if ($World -eq 'Reforger') {
         'MODE=poses', 'POSES=nsys-poses.txt', 'ONLY=durras', 'HOUR=11.18', 'FIRST=80', 'SETTLE=20', 'FOVY=55.4', 'QUIET=5',
         'REFORGER=C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons',
         'TOOLS=C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger Tools',
-        'POSEIDON_TEST_DATE=1989-08-14', 'POSEIDON_FREEFLY_DRIFT=15,0,60', 'WGR_SLOW_BLOCK_MS=45',
+        'POSEIDON_TEST_DATE=1989-08-14', "POSEIDON_FREEFLY_DRIFT=$(if ($Parked) { '0,0,0' } else { '15,0,60' })", 'WGR_SLOW_BLOCK_MS=45',
+        "WGR_GPU_REGIONS_ALL=$(if ($Parked) { '1' } else { '0' })",
         'WIDTH=3440', 'HEIGHT=1440', 'WINDOW=1', "TAG=$Tag", 'EXE=bin-nsys',
         "NSYS=$nsys", 'NSYSDELAY=45', 'NSYSDUR=50', "NSYSTRACE=$Trace"
     ) | Set-Content (Join-Path $h "job-$Tag.txt") -Encoding ascii
