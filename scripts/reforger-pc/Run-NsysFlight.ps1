@@ -14,7 +14,9 @@
 #           -Build <dist dir> (default: the bin\ junction's target), -Tag <shots subfolder>,
 #           -Trace <nsys --trace list> and -SkipExport (an agent's unelevated launch test: -Trace nvtx),
 #           -Parked (Reforger: hold the Durras pose instead of drifting, WGR_GPU_REGIONS_ALL=1 -- for
-#           a pass whose cost flips between two levels at a fixed camera).
+#           a pass whose cost flips between two levels at a fixed camera),
+#           -GpuMetrics (Reforger: also sample the GPU's hardware counters at 1 kHz -- SM activity,
+#           occupancy, DRAM and L2 throughput; needs the administrator terminal like the rest).
 # Takes ~5 minutes: ~2 min flight, ~3 min report + SQLite export (3-4 GB). Changes nothing
 # permanent; the graphics.cfg VSync tweak is restored. Full recipe: .agents/PROFILING-WITH-NSIGHT.md
 param(
@@ -24,7 +26,8 @@ param(
     [string]$Tag = '',
     [string]$Trace = 'vulkan,wddm,nvtx',
     [switch]$SkipExport,
-    [switch]$Parked
+    [switch]$Parked,
+    [switch]$GpuMetrics
 )
 $ErrorActionPreference = 'Stop'
 $h = $Harness
@@ -74,7 +77,7 @@ if ($World -eq 'Reforger') {
         'POSEIDON_TEST_DATE=1989-08-14', "POSEIDON_FREEFLY_DRIFT=$(if ($Parked) { '0,0,0' } else { '15,0,60' })", 'WGR_SLOW_BLOCK_MS=45',
         "WGR_GPU_REGIONS_ALL=$(if ($Parked) { '1' } else { '0' })",
         'WIDTH=3440', 'HEIGHT=1440', 'WINDOW=1', "TAG=$Tag", 'EXE=bin-nsys',
-        "NSYS=$nsys", 'NSYSDELAY=45', 'NSYSDUR=50', "NSYSTRACE=$Trace"
+        "NSYS=$nsys", "NSYSEXTRA=$(if ($GpuMetrics) { '--gpu-metrics-devices=0 --gpu-metrics-frequency=1000' } else { '' })", 'NSYSDELAY=45', 'NSYSDUR=50', "NSYSTRACE=$Trace"
     ) | Set-Content (Join-Path $h "job-$Tag.txt") -Encoding ascii
 
     # VSync off for the flight (as in every stutter test), restored afterwards.

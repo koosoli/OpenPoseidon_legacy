@@ -14,7 +14,7 @@ $here = $PSScriptRoot
 $cwa = Split-Path $here -Parent
 $game = Join-Path $cwa 'Remastered'
 $job = @{ MODE='poses'; WAIT='7200'; QUIET='60'; DEPLOY='0'; ZIP=''; POSES='poses.txt'; ONLY=''; TAG='';
-          HOUR='11'; WIDTH='1920'; HEIGHT='1080'; WINDOW='1'; NSYS=''; NSYSDELAY='90'; NSYSDUR='20'; FIRST='75'; SETTLE='15'; RENDER='wgpu'; EXTRA='';
+          HOUR='11'; WIDTH='1920'; HEIGHT='1080'; WINDOW='1'; NSYS=''; NSYSEXTRA=''; NSYSDELAY='90'; NSYSDUR='20'; FIRST='75'; SETTLE='15'; RENDER='wgpu'; EXTRA='';
           EXE='bin'; FOV='0.7'; FOVY='55.4'; KEEPBMP='0'; WBTIMEOUT='2700';
           REFORGER='H:\SteamLibrary\steamapps\common\Arma Reforger\addons';
           TOOLS='H:\SteamLibrary\steamapps\common\Arma Reforger Tools' }
@@ -249,7 +249,7 @@ for ($try = 1; $try -le 3; $try++) {
   $errTry = if ($try -eq 1) { $err } else { Join-Path $out "stderr.try$try.txt" }
   $sw = [Diagnostics.Stopwatch]::StartNew()
   if ($job.NSYS -ne '') {
-    $nsysArgs = @('profile', "--trace=$(if ($job.NSYSTRACE) { $job.NSYSTRACE } else { 'vulkan,wddm,nvtx' })", "--delay=$($job.NSYSDELAY)", "--duration=$($job.NSYSDUR)", '--force-overwrite=true', '-o', "`"$(Join-Path $out 'nsys')`"", $(if ($exe -match ' ') { "`"$exe`"" } else { $exe })) + $al  # nsys takes literal quotes as part of the program name
+    $nsysArgs = @('profile', "--trace=$(if ($job.NSYSTRACE) { $job.NSYSTRACE } else { 'vulkan,wddm,nvtx' })", "--delay=$($job.NSYSDELAY)", "--duration=$($job.NSYSDUR)", '--force-overwrite=true') + @($job.NSYSEXTRA -split ' ' | Where-Object { $_ }) + @('-o', "`"$(Join-Path $out 'nsys')`"", $(if ($exe -match ' ') { "`"$exe`"" } else { $exe })) + $al  # nsys takes literal quotes as part of the program name; NSYSEXTRA = extra nsys options (space-separated)
     # Nsight cannot launch from a junction working directory (Remastered\ is one): "Executable ... not found".
     $wd = Get-Item $game
     $wd = if ($wd.LinkType -eq 'Junction') { [string]($wd.Target | Select-Object -First 1) } else { $game }
