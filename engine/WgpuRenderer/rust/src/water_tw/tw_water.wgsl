@@ -1202,7 +1202,11 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         // geometry follows the sphere; reject its hidden far side analytically.
         // Match the pipeline's GreaterEqual reverse-Z test against the opaque
         // snapshot explicitly: unknown source height must never override land.
-        if (thickness <= 0.0 || dot(earthWaterNormal(pos.xz), -rel) <= 0.0 ||
+        // Seen from below (the camera under the sea: free flight dives), every point of the surface faces
+        // away; rejecting those as the planet's far side removed the whole underside, and the view up went
+        // straight through to the open sky. The far side is out of sight from under the water anyway.
+        let camBelow = frame.cam_pos.y < waterLevelAt(frame.cam_pos.xz);
+        if (thickness <= 0.0 || (!camBelow && dot(earthWaterNormal(pos.xz), -rel) <= 0.0) ||
             in.clip.z < _waterSceneDepthAt(screenUV)) { discard; }
         let fade = 1.0 - smoothstep(6000.0, 8000.0, frame.cam_pos.y);
         let base = textureSampleLevel(waterSceneColor, smpLinearClamp, screenUV, 0.0).rgb;

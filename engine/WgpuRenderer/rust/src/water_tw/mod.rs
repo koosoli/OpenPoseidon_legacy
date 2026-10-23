@@ -257,10 +257,18 @@ const TROPICAL_SCATTERING: [f32; 3] = [0.012, 0.018, 0.024];
 /// restores Tidewater's.
 const TEMPERATE_ABSORPTION: [f32; 3] = [0.45, 0.09, 0.12];
 const TEMPERATE_SCATTERING: [f32; 3] = [0.04, 0.05, 0.045];
-fn water_optics() -> ([f32; 3], [f32; 3]) {
+/// (OP) the whole world's open sea: oceanic water (Jerlov type I-IB), nearly pure water's absorption --
+/// red gone in a few metres, blue the last to go -- with a little chlorophyll and few particles. The
+/// coastal values above left the free-fly camera in black water 30 m down in mid-Atlantic, where the
+/// real sea is still a deep blue.
+const OPEN_OCEAN_ABSORPTION: [f32; 3] = [0.36, 0.07, 0.025];
+const OPEN_OCEAN_SCATTERING: [f32; 3] = [0.02, 0.025, 0.03];
+fn water_optics(earth: bool) -> ([f32; 3], [f32; 3]) {
     static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let tropical = *V.get_or_init(|| std::env::var("WGR_TW_WATER_OPTICS").map(|v| v.trim().eq_ignore_ascii_case("tropical")).unwrap_or(false));
-    if tropical { (TROPICAL_ABSORPTION, TROPICAL_SCATTERING) } else { (TEMPERATE_ABSORPTION, TEMPERATE_SCATTERING) }
+    if tropical { (TROPICAL_ABSORPTION, TROPICAL_SCATTERING) }
+    else if earth { (OPEN_OCEAN_ABSORPTION, OPEN_OCEAN_SCATTERING) }
+    else { (TEMPERATE_ABSORPTION, TEMPERATE_SCATTERING) }
 }
 
 /// `TwSurface` in tw_water.wgsl.
@@ -426,6 +434,7 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
     let detail_offset = f.detail_offset;
     let (shore0, shore1, shore2, shore_grid) = shore_lanes(p, f.shore);
     let (sim_p0, sim_p1) = sim_lanes(p, f.shore, f.dt);
+    let optics = water_optics(earth_preview(p));
     let wind_len = (p.fft_wind_sea[0].powi(2) + p.fft_wind_sea[1].powi(2)).sqrt();
     let wind_dir = if wind_len > 1e-4 {
         [p.fft_wind_sea[0] / wind_len, p.fft_wind_sea[1] / wind_len]
@@ -451,8 +460,8 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         material0: [tw[2][3], tw[2][2], tw[1][1], tw[1][3]],
         // roughness, ssr on, debug view, water glow (W3j; tidewater_fx.z)
         material1: [tw[2][1], tw[1][2], debug_view_override().unwrap_or(tw[3][3]), glow_override().unwrap_or(p.tidewater_fx[2]).clamp(0.0, 2.0)],
-        absorption: [water_optics().0[0], water_optics().0[1], water_optics().0[2], whitecap_patch()[0]],
-        scattering: [water_optics().1[0], water_optics().1[1], water_optics().1[2], whitecap_patch()[1]],
+        absorption: [optics.0[0], optics.0[1], optics.0[2], whitecap_patch()[0]],
+        scattering: [optics.1[0], optics.1[1], optics.1[2], whitecap_patch()[1]],
         detail: [tw[3][0], tw[3][1], tw[3][2], if earth_preview(p) { 1.0 } else { 0.0 }],
         shore0,
         shore1,
@@ -1315,7 +1324,7 @@ impl Tidewater {
         {
             let glow = glow_override().unwrap_or(p.tidewater_fx[2]);
             let torch = underwater::pick_torch(&self.spots, [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]]);
-            let mut uwp = underwater::UwParams::new(cam, &p, self.linear, glow, spec.sizes, self.caustics.tiles, water_optics().0, water_optics().1, p.underwater_gate[0] > 0.5, torch);
+            let mut uwp = underwater::UwParams::new(cam, &p, self.linear, glow, spec.sizes, self.caustics.tiles, water_optics(earth_preview(&p)).0, water_optics(earth_preview(&p)).1, p.underwater_gate[0] > 0.5, torch);
             // W9a: the drawn surface around the camera (the grid is drawn in `update`, before the
             // composite reads it; until the first one exists the composite uses the FFT alone)
             uwp.probe = if self.probe.ready || !self.bind_dirty { probe::Probe::lanes(cp) } else { [0.0; 4] };
