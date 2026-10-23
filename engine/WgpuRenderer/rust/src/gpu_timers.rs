@@ -30,7 +30,7 @@ use std::sync::mpsc;
 /// Reserved variants are never constructed yet (their passes don't exist), but they
 /// hold their FFI slots — hence the allow.
 #[allow(dead_code)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[repr(u32)]
 pub enum Region {
     SpectrumInit = 0,         // h0 spectrum generation (only on spectrum-dirty frames)
@@ -279,6 +279,18 @@ const _: () = assert!(std::mem::size_of::<RenderCallCpuTimings>() == 72);
 const _: () = assert!(std::mem::offset_of!(RenderCallCpuTimings, call_token) == 16);
 const _: () = assert!(std::mem::offset_of!(RenderCallCpuTimings, milliseconds) == 24);
 
+/// GPU-MARKERS: with WGR_GPU_DEBUG_LABELS=1 (which also turns on VK_EXT_debug_utils, see lib.rs)
+/// the timer regions are named in the command stream, so Nsight Graphics' GPU Trace and RenderDoc
+/// show the rows the "Frame all regions" log names (ObjColorAlpha, TerrainColor, ...). In-pass
+/// regions (begin_pass/end_pass) are debug GROUPS -- ranges with their own metrics. Encoder-level
+/// ones are a pair of MARKERS ("Name {" / "Name }"): some of those brackets open on one encoder and
+/// close on another, or have two closing sites, which a debug group may not do (8101 "debug group
+/// was not popped" errors in the first try). Off by default: nothing is recorded.
+fn markers_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_GPU_DEBUG_LABELS").is_ok_and(|v| v.trim() == "1"))
+}
+
 pub struct GpuTimers {
     inner: Option<Inner>,
     // PERF-005 — CPU ENCODE time per region, deliberately OUTSIDE `Inner` so it still reports on
@@ -431,6 +443,9 @@ impl GpuTimers {
     /// understates grass shadowing by the cascade count, which is a trap worth knowing
     /// before quoting the number (2026-08-31: nearly quoted it here).
     pub fn begin(&self, encoder: &mut wgpu::CommandEncoder, region: Region) {
+        if markers_on() {
+            encoder.insert_debug_marker(&format!("{region:?} {{"));
+        }
         // PERF-022: the CPU clock rides every bracket, so the worker's encode time is
         // attributed by the same rows as the GPU time. cpu_end accumulates, so a region
         // bracketed several times reports its per-frame sum on the CPU side (the GPU side
@@ -449,6 +464,9 @@ impl GpuTimers {
                 .written
                 .set(inner.written.get() | (1u128 << region as u32));
         }
+        if markers_on() {
+            encoder.insert_debug_marker(&format!("{region:?} }}"));
+        }
         self.cpu_end(region);
     }
 
@@ -457,6 +475,9 @@ impl GpuTimers {
     /// other work (grass colour/prepass/shadow ops inside the 3D plan).
     pub fn begin_pass(&self, pass: &mut wgpu::RenderPass<'_>, region: Region) {
         self.cpu_begin(region); // PERF-022, as in `begin`
+        if markers_on() {
+            pass.push_debug_group(&format!("{region:?}"));
+        }
         if let Some(inner) = &self.inner {
             if inner.inside_passes {
                 pass.write_timestamp(&inner.query_set, region as u32 * 2);
@@ -473,6 +494,9 @@ impl GpuTimers {
                     .written
                     .set(inner.written.get() | (1u128 << region as u32));
             }
+        }
+        if markers_on() {
+            pass.pop_debug_group();
         }
         self.cpu_end(region);
     }

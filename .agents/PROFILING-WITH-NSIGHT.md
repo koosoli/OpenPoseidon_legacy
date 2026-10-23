@@ -153,3 +153,27 @@ time in frames > 80 ms.
 - `nsys_long_frames.py` fixes: main thread = kernel32-rooted exe thread; exe base fallback via a
   std::thread entry cross-checked with the DLL's caller. Keep a copy of the traced binaries
   (`bin-sym-<commit>`): rebuilding into `bin-nsys` makes a trace unreadable.
+
+## Per-pass GPU cost: Nsight Graphics GPU Trace (2026-10-23)
+
+Nsight Systems shows what the GPU is busy with; it cannot show what happens *inside* one pass. For
+that, Nsight Graphics' GPU Trace (installed: `D:\Program Files\NVIDIA Corporation\Nsight Graphics
+2026.3.1`, installer kept in `D:\Downloads`). Like the counters in Nsight Systems it needs the owner's
+**administrator** terminal:
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\reforger-pc\Run-GpuTrace.ps1 [-Count 3]
+
+Each trace is its own launch of the parked Durras pose; `shots\gt-<n>\` gets the `.ngfx-gputrace`
+(open it in Nsight Graphics), `BASE\*.xls` (frame-level counters) and the run log. The script sets
+`WGR_GPU_DEBUG_LABELS=1`: passes carry their labels and every GPU timer region is named in the
+command stream (`gpu_timers.rs`, GPU-MARKERS -- in-pass regions as debug groups, encoder-level ones as
+a pair of markers), so the trace's ranges are the "Frame all regions" rows. Without it the trace
+has no names at all -- only DLSS's own marker.
+
+ngfx traps, each a round trip on 2026-10-23: never pass `--platform` (Qt eats it: "no Qt platform
+plugin" popup); `--output-dir` must exist; `--args` must contain no quotes (they are re-quoted and
+the game starts without arguments, over the sea) -- use space-free paths.
+
+First result (gt-2 fast vs gt-3 slow state of the alpha-test pass, frame level): the slow frames
+had +27% pixel-shader TRAM-allocation stalls, +26% "out-of-order warp completion" launch stalls,
++16% idle SM, 3.5x pixel-shader barriers; DRAM, L2, PCIe and clocks unchanged.
