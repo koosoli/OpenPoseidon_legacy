@@ -46,13 +46,26 @@ inline float FlightSpeedScale(FlightPoint point, const GroundPatch* ground, uint
     const auto support = FlightGround(ground, revision, point);
     return float(ClearanceSpeedScale(support ? double(point.y) - support->height : FlightAltitude(point)));
 }
+// The free-fly camera's floor at (x, z) over ground `height`. The elevation tiles near the camera store
+// the open sea as 0 m (EarthRenderBathymetry.hpp: "Terrarium zero means ocean surface"), and the camera
+// stopped on it like on a floor -- it could never go under water. Where the ground is in that ocean band
+// the floor is the presentation sea bed the renderer draws instead (RenderOceanDepth below the sea datum);
+// land is unchanged. Only the camera: gameplay ground stays the source heights.
+constexpr double FlightOceanDepth = 200.0;                       // = Earth::RenderOceanDepth (renderer)
+constexpr double FlightOceanMin = -5.0, FlightOceanMax = 0.5;    // = RenderOceanMin/MaxElevation
+inline double FlightFloor(double height, float x, float z)
+{
+    const double seaDatum = FlightYAtAltitude(x, z, 0.0);
+    const double elevation = height - seaDatum;
+    return elevation >= FlightOceanMin && elevation <= FlightOceanMax ? seaDatum - FlightOceanDepth + 5.0 : height;
+}
 inline FlightPoint ConstrainFlight(FlightPoint previous, FlightPoint next, const GroundPatch* ground, uint64_t revision)
 {
     if (!std::isfinite(next.x) || !std::isfinite(next.y) || !std::isfinite(next.z)) return previous;
     next.x = std::clamp(next.x, -CoordinateLimit, CoordinateLimit);
     next.z = std::clamp(next.z, -CoordinateLimit, CoordinateLimit);
     const auto support = FlightGround(ground, revision, next);
-    if (support) next.y = std::max(next.y, support->height + FreeFlightClearance);
+    if (support) next.y = std::max(next.y, float(FlightFloor(support->height, next.x, next.z) + FreeFlightClearance));
     else
     {
         const auto before = FlightGround(ground, revision, previous);
@@ -61,7 +74,7 @@ inline FlightPoint ConstrainFlight(FlightPoint previous, FlightPoint next, const
             // Do not step off a certified patch into unknown ground near its
             // surface. Hold its covered XZ, allow ascent, and retain its floor.
             next.x = previous.x; next.z = previous.z;
-            next.y = std::max(next.y, before->height + FreeFlightClearance);
+            next.y = std::max(next.y, float(FlightFloor(before->height, previous.x, previous.z) + FreeFlightClearance));
         }
         else if (FlightAltitude(previous) < UnknownFlightAltitude && FlightAltitude(next) < UnknownFlightAltitude)
         {
@@ -173,10 +186,11 @@ inline FlightPoint ZoomFlight(FlightPoint previous, float wheelSteps, const Grou
     auto next = previous;
     if (const auto support = FlightGround(ground, revision, previous))
     {
-        const double clearance = std::max(double(previous.y) - support->height - FreeFlightClearance, 0.0);
+        const double floor = FlightFloor(support->height, previous.x, previous.z);
+        const double clearance = std::max(double(previous.y) - floor - FreeFlightClearance, 0.0);
         // A 2m offset gives small steps at ground level and the same exponential
         // factor in orbit; the old 1000m offset made every near-ground step huge.
-        next.y = float(support->height + FreeFlightClearance + std::max(0.0,
+        next.y = float(floor + FreeFlightClearance + std::max(0.0,
             (clearance + 2.0) * std::pow(.72, std::clamp(double(wheelSteps), -20.0, 20.0)) - 2.0));
     }
     else if (FlightAltitude(previous) < UnknownFlightAltitude)

@@ -922,6 +922,14 @@ void WaterWgpu::DrawEarthWater(Scene& scene, float originX, float originZ, float
     p.tidewater_fx.z = std::clamp(t.waterGlow, 0.0f, 2.0f);
     p.tidewater_sea = {7.0f, 120.0f, std::clamp(t.whitecaps, 0.0f, 1.0f), 0.0f};
     p.optics_params = {1.0f, 1.0f, 0.0f, 1.0f};
+    // Under the surface: the same underwater settings as the island sea (the Water tab's). Left at zero,
+    // Tidewater's underwater composite never ran in whole-world mode: a camera under the sea saw the
+    // open sky through the missing surface and no water at all.
+    p.look_params = {look.physicalLook ? 1.0f : 0.0f, look.glitterGain, look.sssGain, look.reflectionGain};
+    p.underwater_params = {std::max(look.underwaterEngageBand, 0.0f), std::max(look.underwaterDensity, 0.0f),
+                           std::clamp(look.underwaterColorBias, 0.0f, 1.0f), std::max(look.underwaterCausticGain, 0.0f)};
+    p.underwater_gate = {look.underwaterEffect ? 1.0f : 0.0f, std::clamp(look.waveFoamIntensity, 0.0f, 2.0f),
+                         std::clamp(look.waveFoamDeepFalloff, 0.0f, 1.0f), std::clamp(look.reflectionEdgeFade, 0.02f, 0.49f)};
     _engine.QueueWaterParams(p);
     WgrWaterNode marker{};
     marker.origin = {originX, originZ};
