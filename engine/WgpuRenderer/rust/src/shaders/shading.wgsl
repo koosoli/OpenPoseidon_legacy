@@ -195,8 +195,10 @@ fn reflect_sun_specular(mat: ShadeMaterial, albedo_lin: vec3<f32>, n: vec3<f32>,
     let h = normalize(to_sun + view_dir);
     let ndh = clamp(dot(n, h), 0.0, 1.0);
     let vdh = clamp(dot(view_dir, h), 0.0, 1.0);
-    let base = reflect_schlick(reflect_base_reflectance(mat, albedo_lin), vdh) * reflect_ggx(ndl, ndv, ndh, mat.refl_a.x);
     let coat = clamp(mat.refl_a.w, 0.0, 1.0);
+    // Coated: no Fresnel rise for the base (see shader3d.wgsl, the environment term).
+    let base = reflect_schlick(reflect_base_reflectance(mat, albedo_lin), select(vdh, 1.0, coat > 0.0))
+        * reflect_ggx(ndl, ndv, ndh, mat.refl_a.x);
     let fc = reflect_schlick(vec3<f32>(0.04), vdh).x * coat;
     let coat_lobe = fc * reflect_ggx(ndl, ndv, ndh, mat.refl_b.y);
     return (base * (1.0 - fc) + vec3<f32>(coat_lobe)) * ndl;

@@ -1981,7 +1981,13 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         // Phase D: prefiltered environment (sharp for the clear coat, blurred for a rough base)
         // weighted by the split-sum environment BRDF.
         let coat_rough = clamp(m.refl_b.y, 0.0, 1.0);
-        let fb = reflect_env_brdf(reflect_base_reflectance(m, albedo_lin), rough, ndv);
+        // Under a clear coat the paint's own reflection sees light that already refracted into
+        // the lacquer: the paint/lacquer interface has almost no index jump, so no grazing
+        // Fresnel rise. Evaluating the base at normal incidence keeps the coat as the only
+        // layer that brightens towards the edge -- the reference renders' doors stay green
+        // where the base's own rise had turned a green Peugeot's sills sand-beige.
+        let fb = reflect_env_brdf(reflect_base_reflectance(m, albedo_lin), rough,
+                                  select(ndv, 1.0, coat > 0.0));
         let fc = reflect_env_brdf(vec3<f32>(0.04), coat_rough, ndv).x * coat;
         // Phase E: what the world in front of the surface shows (trees, houses, other
         // vehicles, the ground), where the screen has it; the prefiltered sky elsewhere. The
