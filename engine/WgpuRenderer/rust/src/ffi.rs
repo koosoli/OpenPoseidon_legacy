@@ -3853,6 +3853,26 @@ pub unsafe extern "C" fn wgr_terrain_set_canopy(renderer: *mut WgrRenderer, n: u
     }));
 }
 
+/// PERF-CANOPY-CPU-BAND: `wgr_terrain_set_canopy` with the caller's word that only rows z0..=z1
+/// differ from the grid it handed over last (see Terrain::set_canopy_band).
+///
+/// # Safety
+/// `top` and `cover` must each address `n * n` floats; renderer must be live and exclusively owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_canopy_band(renderer: *mut WgrRenderer, n: u32, z0: u32, z1: u32,
+                                                     top: *const f32, cover: *const f32) {
+    if renderer.is_null() || n == 0 || top.is_null() || cover.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let cells = (n as usize) * (n as usize);
+        let top = unsafe { std::slice::from_raw_parts(top, cells) };
+        let cover = unsafe { std::slice::from_raw_parts(cover, cells) };
+        renderer.terrain_set_canopy_band(n, z0, z1, top, cover);
+    }));
+}
+
 /// RFG-PBR: a native Reforger world's surface map, `edge` x `edge` palette indices (one byte each),
 /// for the terrain shader's blend (see terrain::set_surface_map). `edge` 0 clears it.
 ///

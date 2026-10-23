@@ -1799,6 +1799,50 @@ impl Terrain {
     /// the highest canopy top (absolute metres) and the canopy coverage [0,1] in each cell. Ambient
     /// sky light is reduced for points below the local canopy top (frame.wgsl canopy_sky_ao).
     /// `n` 0 clears it.
+    /// PERF-CANOPY-CPU-BAND: `set_canopy` with the caller's word that only rows z0..=z1 differ from
+    /// the grid it handed over before (the C++ canopy worker diffs on its own thread). The same
+    /// band write as set_canopy's own diff path, without the 2.5-4.4 ms diff on the render thread;
+    /// anything this side cannot take on trust (no retained grid of that size, the band path off,
+    /// a band out of range) goes through `set_canopy`.
+    pub fn set_canopy_band(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, n: u32, z0: u32, z1: u32,
+                           top: &[f32], cover: &[f32]) {
+        let cells = (n as usize) * (n as usize);
+        let usable = n != 0 && z0 <= z1 && z1 < n && top.len() >= cells && cover.len() >= cells
+            && canopy_band_enabled()
+            && same_texture_size((self.skyvis_mask.width(), self.skyvis_mask.height()), (n, n))
+            && self.skyvis_last.is_some()
+            && matches!(&self.canopy, Some((old_n, _, _)) if *old_n == n);
+        if !usable {
+            self.set_canopy(device, queue, n, top, cover);
+            return;
+        }
+        self.apply_canopy_band(queue, n, &top[..cells], &cover[..cells], z0, z1);
+    }
+
+    /// Copy rows z0..=z1 of the new grid into the retained one, recompose that band of the
+    /// sky-view texture and write it in place (same texture, so nothing that binds it rebuilds).
+    fn apply_canopy_band(&mut self, queue: &wgpu::Queue, n: u32, top: &[f32], cover: &[f32], z0: u32, z1: u32) {
+        let Some((sv_w, sv_h, sv)) = &self.skyvis_last else { return };
+        let (sv_w, sv_h) = (*sv_w, *sv_h);
+        // Only the band changed: copy those rows into the retained grid in place
+        // rather than cloning both 16 MB arrays.
+        let band = (z0 as usize * n as usize)..((z1 as usize + 1) * n as usize);
+        let mut next = self.canopy.take().expect("checked by the callers");
+        next.1[band.clone()].copy_from_slice(&top[band.clone()]);
+        next.2[band.clone()].copy_from_slice(&cover[band]);
+        let texels = compose_skyvis_rows(sv_w, sv_h, sv, Some(&next), n, n, z0..z1 + 1,
+                                         skyvis_compose_threads());
+        let mut copy = texel_copy(&self.skyvis_mask);
+        copy.origin = wgpu::Origin3d { x: 0, y: z0, z: 0 };
+        queue.write_texture(
+            copy,
+            bytemuck::cast_slice(&texels),
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(n * 8), rows_per_image: Some(z1 - z0 + 1) },
+            wgpu::Extent3d { width: n, height: z1 - z0 + 1, depth_or_array_layers: 1 },
+        );
+        self.canopy = Some(next);
+    }
+
     pub fn set_canopy(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, n: u32, top: &[f32], cover: &[f32]) {
         let cells = (n as usize) * (n as usize);
         let valid = n != 0 && top.len() >= cells && cover.len() >= cells;
@@ -1827,24 +1871,8 @@ impl Terrain {
                                 t0.elapsed().as_secs_f64() * 1000.0);
                         }
                     }
-                    let (sv_w, sv_h) = (*sv_w, *sv_h);
-                    // Only the band changed: copy those rows into the retained grid in place
-                    // rather than cloning both 16 MB arrays.
-                    let band = (z0 as usize * n as usize)..((z1 as usize + 1) * n as usize);
-                    let mut next = self.canopy.take().expect("checked above");
-                    next.1[band.clone()].copy_from_slice(&top[band.clone()]);
-                    next.2[band.clone()].copy_from_slice(&cover[band]);
-                    let texels = compose_skyvis_rows(sv_w, sv_h, sv, Some(&next), n, n, z0..z1 + 1,
-                                                     skyvis_compose_threads());
-                    let mut copy = texel_copy(&self.skyvis_mask);
-                    copy.origin = wgpu::Origin3d { x: 0, y: z0, z: 0 };
-                    queue.write_texture(
-                        copy,
-                        bytemuck::cast_slice(&texels),
-                        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(n * 8), rows_per_image: Some(z1 - z0 + 1) },
-                        wgpu::Extent3d { width: n, height: z1 - z0 + 1, depth_or_array_layers: 1 },
-                    );
-                    self.canopy = Some(next);
+                    let _ = (sv_w, sv_h, sv);
+                    self.apply_canopy_band(queue, n, top, cover, z0, z1);
                     return;
                 }
             }

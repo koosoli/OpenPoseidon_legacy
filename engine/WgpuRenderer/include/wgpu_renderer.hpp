@@ -2843,6 +2843,11 @@ extern "C"
     /* Canopy occlusion grid: n x n cells over the terrain's world span (row-major z, x), the highest
      * canopy top (m) and coverage [0,1] per cell. Lowers sky ambient below the canopy. n 0 clears. */
     WGR_API void wgr_terrain_set_canopy(WgrRenderer* renderer, uint32_t n, const float* top, const float* cover);
+    /* PERF-CANOPY-CPU-BAND: the same grid, with the caller's word that only rows z0..=z1 differ from
+     * the grid it handed over last. The renderer recomposes just that band without diffing; it falls
+     * back to the full path when it holds no grid of that size. */
+    WGR_API void wgr_terrain_set_canopy_band(WgrRenderer* renderer, uint32_t n, uint32_t z0, uint32_t z1,
+                                             const float* top, const float* cover);
     WGR_API void wgr_terrain_set_surface_map(WgrRenderer* renderer, uint32_t edge, const uint8_t* data);
     WGR_API void wgr_terrain_set_index_map(WgrRenderer* renderer, uint32_t width, uint32_t height,
                                            const uint16_t* indices);

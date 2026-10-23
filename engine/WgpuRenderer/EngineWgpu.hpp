@@ -259,7 +259,11 @@ class EngineWgpu : public EngineDummy
     //! PERF (2026-10-14): the grid is built on its own thread from a snapshot of `_canopy` and
     //! collected by a later UpdateCanopyMap -- see there. One build in flight at a time.
     struct CanopyJob;
+    struct CanopyGrid;
     std::shared_ptr<CanopyJob> _canopyJob;
+    // PERF-CANOPY-CPU-BAND: the grid last handed to the renderer, which the next build diffs against
+    // on its worker thread so the render thread is told which rows changed instead of finding out.
+    std::shared_ptr<const CanopyGrid> _canopyLast;
     uint32_t _canopyPublishedN = 0;
     uint64_t _canopyPublishedHash = 0;
     void CanopyNote(uint64_t key, const LODShapeWithShadow* shape, const Matrix4& transform);
@@ -1412,6 +1416,10 @@ class EngineWgpu : public EngineDummy
         uint32_t canopyN = 0;
         std::vector<float> canopyTop, canopyCover;
         bool canopyDirty = false;
+        // PERF-CANOPY-CPU-BAND: rows canopyZ0..=canopyZ1 are the only ones that differ from the grid
+        // handed over before (canopyBand false = unknown: the renderer diffs, or uploads it all).
+        bool canopyBand = false;
+        uint32_t canopyZ0 = 0, canopyZ1 = 0;
 
         // REN-THR-013: the per-frame producer-side pushes that used to reach the renderer
         // directly from NextFrame and the draw traversal. Queued like the rest, applied by the

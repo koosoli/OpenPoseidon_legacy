@@ -3540,9 +3540,14 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
     }
     if (p.canopyDirty)
     {
-        timed("canopy", [&] { wgr_terrain_set_canopy(_renderer, p.canopyN, p.canopyTop.empty() ? nullptr : p.canopyTop.data(),
-                               p.canopyCover.empty() ? nullptr : p.canopyCover.data()); });
+        if (p.canopyBand && !p.canopyTop.empty() && !p.canopyCover.empty())
+            timed("canopy", [&] { wgr_terrain_set_canopy_band(_renderer, p.canopyN, p.canopyZ0, p.canopyZ1,
+                                                               p.canopyTop.data(), p.canopyCover.data()); });
+        else
+            timed("canopy", [&] { wgr_terrain_set_canopy(_renderer, p.canopyN, p.canopyTop.empty() ? nullptr : p.canopyTop.data(),
+                                   p.canopyCover.empty() ? nullptr : p.canopyCover.data()); });
         p.canopyDirty = false;
+        p.canopyBand = false;
     }
     // REN-THR-013
     if (p.renderParamsDirty)
@@ -18024,6 +18029,12 @@ static void BuildCanopyGrid(const std::vector<EngineWgpu::CanopyEntry>& entries,
     outCover = std::move(cover);
 }
 
+struct EngineWgpu::CanopyGrid
+{
+    uint32_t n = 0;
+    std::vector<float> top, cover;
+};
+
 struct EngineWgpu::CanopyJob
 {
     std::vector<CanopyEntry> entries;
@@ -18031,6 +18042,11 @@ struct EngineWgpu::CanopyJob
     float cell = 0.0f;
     std::vector<float> top, cover;
     uint64_t hash = 0;
+    // PERF-CANOPY-CPU-BAND: in, the grid last handed over; out, a copy of this one (the next
+    // job's `prev`) and the band of rows that differ from `prev` (band false = no usable prev).
+    std::shared_ptr<const CanopyGrid> prev, snapshot;
+    bool band = false;
+    uint32_t z0 = 0, z1 = 0;
     std::atomic<bool> done{false};
     std::thread worker;
     ~CanopyJob()
@@ -18055,6 +18071,14 @@ void EngineWgpu::UpdateCanopyMap()
         CanopyJob& job = *_canopyJob;
         if (job.n != 0 && (job.n != _canopyPublishedN || job.hash != _canopyPublishedHash))
         {
+            // PERF-CANOPY-CPU-BAND: a band still waiting from an earlier publish (two grids before
+            // one frame took them) widens to cover both; an unknown band stays unknown.
+            const bool waiting = _pendingSet.canopyDirty;
+            const bool band = job.band && (!waiting || _pendingSet.canopyBand) && job.z0 <= job.z1;
+            _pendingSet.canopyZ0 = band && waiting ? std::min(job.z0, _pendingSet.canopyZ0) : job.z0;
+            _pendingSet.canopyZ1 = band && waiting ? std::max(job.z1, _pendingSet.canopyZ1) : job.z1;
+            _pendingSet.canopyBand = band;
+            _canopyLast = job.snapshot;
             _pendingSet.canopyN = job.n;
             _pendingSet.canopyTop = std::move(job.top);
             _pendingSet.canopyCover = std::move(job.cover);
@@ -18084,6 +18108,7 @@ void EngineWgpu::UpdateCanopyMap()
     auto job = std::make_shared<CanopyJob>();
     job->n = static_cast<uint32_t>(std::clamp(std::ceil(extent / 6.25f), 64.0f, 2048.0f));
     job->cell = extent / static_cast<float>(job->n);
+    job->prev = _canopyLast;
     job->entries.reserve(_canopy.size());
     for (const auto& [key, e] : _canopy)
         job->entries.push_back(e);
@@ -18104,6 +18129,36 @@ void EngineWgpu::UpdateCanopyMap()
                         h = (h ^ bytes[i]) * 1099511628211ull;
                 }
                 raw->hash = h;
+                // PERF-CANOPY-CPU-BAND: the rows that differ from the grid handed over before, found
+                // here rather than by the renderer on the render thread (2.5-4.4 ms of every 1.5 s
+                // update while trees stream in). Byte comparison, so a band never misses a change.
+                auto snapshot = std::make_shared<CanopyGrid>();
+                snapshot->n = raw->n;
+                snapshot->top = raw->top;
+                snapshot->cover = raw->cover;
+                if (raw->prev && raw->prev->n == raw->n && raw->prev->top.size() == raw->top.size() &&
+                    raw->prev->cover.size() == raw->cover.size())
+                {
+                    const size_t row = raw->n;
+                    const auto rowDiffers = [&](uint32_t z)
+                    {
+                        const size_t at = size_t(z) * row;
+                        return std::memcmp(&raw->top[at], &raw->prev->top[at], row * sizeof(float)) != 0 ||
+                               std::memcmp(&raw->cover[at], &raw->prev->cover[at], row * sizeof(float)) != 0;
+                    };
+                    uint32_t z0 = 0, z1 = raw->n;
+                    while (z0 < raw->n && !rowDiffers(z0))
+                        ++z0;
+                    while (z1 > z0 && !rowDiffers(z1 - 1))
+                        --z1;
+                    if (z0 < z1)
+                    {
+                        raw->band = true;
+                        raw->z0 = z0;
+                        raw->z1 = z1 - 1;
+                    }
+                }
+                raw->snapshot = std::move(snapshot);
                 raw->done.store(true, std::memory_order_release);
             });
     }
