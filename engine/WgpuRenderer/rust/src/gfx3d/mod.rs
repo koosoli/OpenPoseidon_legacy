@@ -4889,6 +4889,8 @@ pub struct Gfx3d {
     weather_cover_far: weather_cover::Map,
     weather_pipelines: FxHashMap<PrepassKey, wgpu::RenderPipeline>,
     weather_far_pipelines: FxHashMap<PrepassKey, wgpu::RenderPipeline>,
+    // WGPU-038: weather-cover pipelines compiling off the render thread (ensure_weather_pipeline).
+    weather_pending: FxHashMap<PrepassKey, std::sync::mpsc::Receiver<(wgpu::RenderPipeline, Option<wgpu::RenderPipeline>, f64)>>,
     weather_gpu_pipeline: wgpu::RenderPipeline,
     weather_far_gpu_pipeline: wgpu::RenderPipeline,
     // This frame's snapped ortho view, Some only while the feature is live. Also the per-frame
@@ -5141,11 +5143,26 @@ impl PipelineCreateTimer {
 impl Drop for PipelineCreateTimer {
     fn drop(&mut self) {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        if *ON.get_or_init(|| std::env::var_os("WGR_PIPELINE_TIMING").is_some()) {
-            eprintln!("[wgr] pipeline created at runtime: {} {:.1} ms", self.0, self.1.elapsed().as_secs_f64() * 1e3);
+        let ms = self.1.elapsed().as_secs_f64() * 1e3;
+        let on = *ON.get_or_init(|| std::env::var_os("WGR_PIPELINE_TIMING").is_some());
+        if on {
+            eprintln!("[wgr] pipeline created at runtime: {} {ms:.1} ms", self.0);
+        }
+        // eprintln reaches nothing in the windowed game, so a slow compile (or every one with
+        // WGR_PIPELINE_TIMING) also goes to the log file, through Gfx3d::prepare's queued_log.
+        if on || ms >= SLOW_PIPELINE_MS {
+            let thread = std::thread::current().name().unwrap_or("?").to_string();
+            if let Ok(mut q) = PIPELINE_TIMING_LOG.lock() {
+                if q.len() < 64 {
+                    q.push(format!("pipeline created at runtime: {} {ms:.1} ms on thread {thread}", self.0));
+                }
+            }
         }
     }
 }
+/// A runtime pipeline compile at least this long is always logged (PipelineCreateTimer).
+const SLOW_PIPELINE_MS: f64 = 40.0;
+static PIPELINE_TIMING_LOG: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 /// The pipelines a draw's passes use: its colour key, the prepassed colour twin (write-off) or
 /// MAT-053's solid-texel write, and its prepass. The one list both the builder and the
@@ -6432,6 +6449,7 @@ impl Gfx3d {
             weather_cover_far: weather_cover::Map::new_cascade(device, true),
             weather_pipelines: FxHashMap::default(),
             weather_far_pipelines: FxHashMap::default(),
+            weather_pending: FxHashMap::default(),
             weather_gpu_pipeline,
             weather_far_gpu_pipeline,
             interior_sky_view: None,
@@ -6646,27 +6664,66 @@ impl Gfx3d {
             && prepass.is_none_or(|k| self.prepass_pipelines.contains_key(&k))
     }
 
-    fn ensure_weather_pipeline(&mut self, device: &wgpu::Device, key: PrepassKey) {
-        if self.weather_pipelines.contains_key(&key) &&
-            (self.weather_cover_far.view.is_none() || self.weather_far_pipelines.contains_key(&key)) {return;}
-        let _pipe_timer = PipelineCreateTimer::new("weather");
-        let vertex = wgpu::VertexBufferLayout {array_stride: BAKED_VERT_SIZE,
-            step_mode: wgpu::VertexStepMode::Vertex, attributes: &self.vbuf_attrs};
-        let skin = wgpu::VertexBufferLayout {array_stride: 8,
-            step_mode: wgpu::VertexStepMode::Vertex, attributes: &self.skin_attrs};
-        let buffers = if key.skinned {vec![vertex,skin]} else {vec![vertex]};
-        let pipeline = weather_cover::depth_pipeline(device, &self.shader,
-            if key.skinned {&self.skinned_layout} else {&self.plain_layout}, &buffers,
-            if key.skinned {"vs_skinned"} else {"vs_main"}, "fs_weather_depth",
-            f32::from_bits(key.alpha_ref_bits), false);
-        if self.weather_cover_far.view.is_some() {
-            let far_pipeline = weather_cover::depth_pipeline(device, &self.shader,
-                if key.skinned {&self.skinned_layout} else {&self.plain_layout}, &buffers,
-                if key.skinned {"vs_skinned"} else {"vs_main"}, "fs_weather_depth",
-                f32::from_bits(key.alpha_ref_bits), true);
-            self.weather_far_pipelines.insert(key, far_pipeline);
+    /// The weather-cover depth pipelines for `key` (near, and far while the far cascade is live).
+    /// True when they are ready to draw with.
+    ///
+    /// WGPU-038: one new alpha-test threshold meant two compiles of the whole object shader
+    /// here, on the render thread, mid-frame: ~170 ms each, a 330-370 ms stall at the same two
+    /// spots of every Nogova flight (frame lap: gfx3d.prepare=338-363 ms, nothing else). With
+    /// PERF-PIPE-ASYNC on (the default) they now compile on a thread of their own; until they
+    /// arrive the caller leaves the draw out and marks the cover incomplete, which
+    /// render_weather_cover_pass already treats as "keep the previous cover".
+    fn ensure_weather_pipeline(&mut self, device: &wgpu::Device, key: PrepassKey) -> bool {
+        let need_far = self.weather_cover_far.view.is_some();
+        let ready = |s: &Self| s.weather_pipelines.contains_key(&key) && (!need_far || s.weather_far_pipelines.contains_key(&key));
+        if ready(self) {return true;}
+        if let Some(rx) = self.weather_pending.get(&key) {
+            match rx.try_recv() {
+                Ok((near, far, ms)) => {
+                    self.weather_pending.remove(&key);
+                    self.weather_pipelines.insert(key, near);
+                    if let Some(far) = far {self.weather_far_pipelines.insert(key, far);}
+                    self.queued_log.push(format!(
+                        "weather-cover pipelines compiled off the render thread: {ms:.1} ms (alpha_ref {:.3}, skinned {})",
+                        f32::from_bits(key.alpha_ref_bits), key.skinned));
+                    // A far cascade that came up while this was compiling still needs its own.
+                    if ready(self) {return true;}
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {self.weather_pending.remove(&key);}
+            }
         }
-        self.weather_pipelines.insert(key, pipeline);
+        let shader = self.shader.clone();
+        let layout = if key.skinned {self.skinned_layout.clone()} else {self.plain_layout.clone()};
+        let (vbuf_attrs, skin_attrs) = (self.vbuf_attrs, self.skin_attrs);
+        let build = move |device: &wgpu::Device| {
+            let _pipe_timer = PipelineCreateTimer::new("weather");
+            let t0 = std::time::Instant::now();
+            let vertex = wgpu::VertexBufferLayout {array_stride: BAKED_VERT_SIZE,
+                step_mode: wgpu::VertexStepMode::Vertex, attributes: &vbuf_attrs};
+            let skin = wgpu::VertexBufferLayout {array_stride: 8,
+                step_mode: wgpu::VertexStepMode::Vertex, attributes: &skin_attrs};
+            let buffers = if key.skinned {vec![vertex,skin]} else {vec![vertex]};
+            let entry = if key.skinned {"vs_skinned"} else {"vs_main"};
+            let alpha = f32::from_bits(key.alpha_ref_bits);
+            let near = weather_cover::depth_pipeline(device, &shader, &layout, &buffers, entry, "fs_weather_depth", alpha, false);
+            let far = need_far.then(|| weather_cover::depth_pipeline(device, &shader, &layout, &buffers, entry,
+                "fs_weather_depth", alpha, true));
+            (near, far, t0.elapsed().as_secs_f64() * 1e3)
+        };
+        if !pipe_async_enabled() {
+            let (near, far, _) = build(device);
+            if let Some(far) = far {self.weather_far_pipelines.insert(key, far);}
+            self.weather_pipelines.insert(key, near);
+            return true;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let device = device.clone();
+        let spawned = std::thread::Builder::new().name("wgr-weather-pipe".into()).spawn(move || {
+            let _ = tx.send(build(&device));
+        });
+        if spawned.is_ok() {self.weather_pending.insert(key, rx);}
+        false
     }
 
     pub fn mesh_create(
@@ -9762,6 +9819,9 @@ impl Gfx3d {
             self.pipe_worker = Some(PipeWorker::new());
         }
         self.poll_pipelines();
+        if let Ok(mut q) = PIPELINE_TIMING_LOG.lock() {
+            self.queued_log.append(&mut q);
+        }
         for d in draws {
             let has_skin = self
                 .meshes
@@ -9796,7 +9856,10 @@ impl Gfx3d {
                 let baked = if mesh.skin.is_some() {self.baked_draw_base(d.palette_slot,d.mesh)} else {None};
                 let skinned = d.palette_slot != NO_PALETTE && mesh.skin.is_some() && baked.is_none();
                 let key = PrepassKey {skinned,alpha_ref_bits:d.alpha_ref.to_bits(),solid_blend:false};
-                self.ensure_weather_pipeline(device,key);
+                if !self.ensure_weather_pipeline(device,key) {
+                    // Still compiling (WGPU-038): this frame's cover is not complete without it.
+                    self.weather_cover.direct_complete = false; self.weather_cover_far.direct_complete = false; continue;
+                }
                 self.weather_cover.direct.push((*d,slot as u32));
                 if self.weather_cover_far.view.is_some() { self.weather_cover_far.direct.push((*d,slot as u32)); }
             }
