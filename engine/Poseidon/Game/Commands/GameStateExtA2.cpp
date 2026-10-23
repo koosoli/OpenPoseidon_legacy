@@ -449,11 +449,8 @@ GameValue A2SetTaskState(const GameState* state, GameValuePar oper1, GameValuePa
     task->state = upper;
     RT().revision++;
     LOG_INFO(Mission, "Arma 2: task '{}' -> {}", task->name, upper);
-    if (upper == "SUCCEEDED" || upper == "FAILED" || upper == "CANCELED")
-    {
-        const char* word = upper == "SUCCEEDED" ? "Task accomplished" : upper == "FAILED" ? "Task failed" : "Task canceled";
-        ShowHint(state, GameValue(RString((std::string(word) + ":\\n" + task->name).c_str())));
-    }
+    // Arma 2 shows nothing of its own when a task changes state; missions that want a hint
+    // call BIS_fnc_taskHint (or hint) themselves.
     return NOTHING;
 }
 
@@ -497,9 +494,7 @@ GameValue A2SetCurrentTask(const GameState* state, GameValuePar oper1, GameValue
         const int index = atoi((const char*)s + strlen(kTask)) - 1;
         if (RT().currentTask[obj] != index + 1)
         {
-            RT().currentTask[obj] = index + 1;
-            if (obj == GWorld->GetRealPlayer())
-                ShowHint(state, GameValue(RString(("Current task:\\n" + RT().tasks[index].name).c_str())));
+            RT().currentTask[obj] = index + 1; // no hint: Arma 2 shows none here either
         }
     }
     return NOTHING;
