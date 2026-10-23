@@ -572,6 +572,22 @@ impl Ngx {
                 flags |= DLSS_FLAG_AUTO_EXPOSURE;
             }
             NVSDK_NGX_Parameter_SetI(self.params, name!("DLSS.Feature.Create.Flags"), flags);
+            // DLSS-PRESET lever: WGR_DLSS_PRESET=<letter A..O> hints that render preset for every
+            // quality mode (NVSDK_NGX_DLSS_Hint_Render_Preset: A = 1 ... O = 15). The DLSS 4 DLLs
+            // default to the transformer model, about twice the cost of the CNN presets (E); unset
+            // leaves the DLL's own default, as before.
+            if let Some(preset) = dlss_preset_hint() {
+                for key in [
+                    name!("DLSS.Hint.Render.Preset.DLAA"),
+                    name!("DLSS.Hint.Render.Preset.Quality"),
+                    name!("DLSS.Hint.Render.Preset.Balanced"),
+                    name!("DLSS.Hint.Render.Preset.Performance"),
+                    name!("DLSS.Hint.Render.Preset.UltraPerformance"),
+                    name!("DLSS.Hint.Render.Preset.UltraQuality"),
+                ] {
+                    NVSDK_NGX_Parameter_SetUI(self.params, key, preset);
+                }
+            }
             let mut handle: *mut NgxHandle = std::ptr::null_mut();
             if self.forced.create {
                 // Ablation: the feature is refused mid-frame, after the caller has
@@ -698,4 +714,14 @@ mod tests {
             "extension lists look wrong: {inst:?} / {dev:?}"
         );
     }
+}
+
+/// DLSS-PRESET: the render-preset hint from WGR_DLSS_PRESET (a letter A..O), or None.
+fn dlss_preset_hint() -> Option<u32> {
+    static V: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        let v = std::env::var("WGR_DLSS_PRESET").ok()?;
+        let c = v.trim().chars().next()?.to_ascii_uppercase();
+        ('A'..='O').contains(&c).then(|| c as u32 - 'A' as u32 + 1)
+    })
 }
