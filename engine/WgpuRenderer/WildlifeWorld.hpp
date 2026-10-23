@@ -46,6 +46,18 @@ inline float SeaLevel(float x, float z)
     return GLandscape ? GLandscape->GetSeaLevel() : 0.0f;
 }
 
+// Earth mode's open sea at (x, z): resident ground the renderer presents as open ocean (above).
+inline bool OpenSea(float x, float z)
+{
+    if (!Earth())
+        return false;
+    const auto sample = EarthStreaming::QueryGround(x, z);
+    if (!sample)
+        return false;
+    const float elevation = sample->height - SeaLevel(x, z);
+    return elevation >= Earth::RenderOceanMinElevation && elevation <= Earth::RenderOceanMaxElevation;
+}
+
 inline float Ground(float x, float z)
 {
     if (Earth())

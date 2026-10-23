@@ -32,6 +32,8 @@ class FishSchools
         Vector3 home;
         float wanderAngle = 0, homeY = 0;
         float surface = 0; // LAKE-FISH-001: water level the group lives under
+        float bottom = 0;  // the lowest the group swims: the seabed, or in Earth's open sea its own layer
+        bool openSea = false;
         std::vector<Fish> fish;
     };
     void EnsureMeshes();

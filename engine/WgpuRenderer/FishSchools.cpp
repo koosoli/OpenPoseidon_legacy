@@ -392,13 +392,30 @@ bool FishSchools::SpawnGroup(const Vector3& camera)
     const float angle = Tau * unit(_rng), radius = 3.0f + 25.0f * unit(_rng);
     const Vector3 home(camera.X() + std::cos(angle) * radius, 0, camera.Z() + std::sin(angle) * radius);
     const float sea = WaterLevel(home.X(), home.Z());
-    const float floor = Wildlife::Ground(home.X(), home.Z());
+    // Earth's open sea (WildlifeWorld.hpp): no seabed in reach, the drawn floor RenderOceanDepth down. Only
+    // the open-water species (silversides, yellowtail, barracuda, jacks), in a layer around the camera's
+    // depth -- the reef depth bands picked chromis and tangs in mid-ocean, all within 14 m of the surface,
+    // and a camera diving deeper left every fish above it.
+    const bool openSea = Wildlife::OpenSea(home.X(), home.Z());
+    float floor = Wildlife::Ground(home.X(), home.Z());
+    if (openSea)
+    {
+        const float lowest = sea - Earth::RenderOceanDepth + 5.0f;
+        const float centre = std::clamp(camera.Y() < sea ? camera.Y() : sea - 8.0f, lowest + 10.0f, sea - 8.0f);
+        floor = std::max(centre - 10.0f + 20.0f * unit(_rng) - 8.0f, lowest);
+    }
     const float depth = sea - floor;
     if (depth < 1.5f)
         return false;
+    const auto habitat = [&](const Behaviour& b)
+    {
+        if (openSea)
+            return b.species == 0 || b.species == 3 || b.species == 5 || b.species == 6;
+        return depth >= b.bandMin && depth <= b.bandMax;
+    };
     float total = 0;
     for (const Behaviour& b : Behaviours)
-        if (depth >= b.bandMin && depth <= b.bandMax)
+        if (habitat(b))
             total += b.weight;
     if (total <= 0)
         return false;
@@ -407,7 +424,7 @@ bool FishSchools::SpawnGroup(const Vector3& camera)
     for (int i = 0; i < BehaviourCount && chosen < 0; ++i)
     {
         const Behaviour& b = Behaviours[i];
-        if (depth >= b.bandMin && depth <= b.bandMax)
+        if (habitat(b))
         {
             pick -= b.weight;
             if (pick <= 0)
@@ -421,8 +438,12 @@ bool FishSchools::SpawnGroup(const Vector3& camera)
     g.behaviour = chosen;
     g.home = home;
     g.surface = sea;
+    g.openSea = openSea;
+    g.bottom = floor;
     g.wanderAngle = Tau * unit(_rng);
-    const float ceiling = sea - 0.7f, column = std::max(ceiling - (floor + 0.3f), 0.2f);
+    // in the open sea the group's layer is 16 m deep, its top 16 m above `floor` (at most the surface)
+    const float ceiling = openSea ? std::min(sea - 0.7f, floor + 16.0f) : sea - 0.7f;
+    const float column = std::max(ceiling - (floor + 0.3f), 0.2f);
     g.homeY = floor + 0.3f + column * (b.depthMin + (b.depthMax - b.depthMin) * unit(_rng));
     const int count = b.countMin + int(unit(_rng) * (b.countMax - b.countMin + 1));
     for (int i = 0; i < count; ++i)
@@ -504,7 +525,7 @@ void FishSchools::Step(Group& g, const Vector3& camera, float dt)
             }
         }
         // the water column: above the seabed, below the surface
-        const float floor = Wildlife::Ground(f.pos.X(), f.pos.Z()) + 0.18f + len * 0.5f;
+        const float floor = (g.openSea ? g.bottom : Wildlife::Ground(f.pos.X(), f.pos.Z())) + 0.18f + len * 0.5f;
         const float ceiling = sea - 0.7f;
         if (f.pos.Y() < floor + 0.4f)
             steer += Vector3(0, (floor + 0.4f - f.pos.Y()) * 3.0f, 0);
@@ -552,8 +573,10 @@ void FishSchools::Update(const Vector3& camera, float time)
     _groups.erase(std::remove_if(_groups.begin(), _groups.end(),
                                  [&](const Group& g)
                                  {
+                                     // (open sea: also by depth, so a diving camera meets new schools)
                                      const float dx = g.home.X() - camera.X(), dz = g.home.Z() - camera.Z();
-                                     return dx * dx + dz * dz > SimRange * SimRange;
+                                     const float dy = g.openSea ? g.homeY - camera.Y() : 0.0f;
+                                     return dx * dx + dy * dy + dz * dz > SimRange * SimRange;
                                  }),
                   _groups.end());
     _spawnCooldown -= dt;
