@@ -42,6 +42,7 @@
 #include "EngineWgpu.hpp"
 #include "EarthRoadCoverage.hpp"
 #include "EarthGroundDetail.hpp"
+#include "TerrainWgpuTidewaterDetail.hpp"
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/World/Terrain/EarthMoonFrame.hpp>
 #include "ForestSnowSurface.hpp"
@@ -8078,6 +8079,17 @@ void EngineWgpu::SubmitTerrain(std::span<const WgrTerrainNode> nodes)
     _cmds.push_back(cmd);
 }
 
+WgrTexture EngineWgpu::EarthSandDetail()
+{
+    if (!_earthSandDetail && _renderer)
+    {
+        const std::vector<uint8_t> detail = BuildTidewaterDetail();
+        _earthSandDetail = wgr_texture_create(_renderer, TidewaterDetailSize, TidewaterDetailSize, WGR_TEXTURE_RGBA8, 1,
+                                              WGR_TEXTURE_GEN_MIPS, detail.data(), uint32_t(detail.size()));
+    }
+    return _earthSandDetail;
+}
+
 void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture, uint32_t sampler, bool groundDetail, bool nearAtlas,
                                     double sourceLatitude, double sourceLongitude)
 {
@@ -8121,6 +8133,8 @@ void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTextur
         // world-metre grain stable through camera movement and geographic rebases.
         d.mat_light_diffuse = {split.high[0],split.high[1],split.high[2],0};
         d.mat_light_ambient = {split.low[0],split.low[1],split.low[2],1};
+        // the beaches' Tidewater sand (shader3d earth_tw_sand) reads its noise from this, in the Stage1 slot
+        d.normal_texture_id = EarthSandDetail();
     }
     else
     {

@@ -516,6 +516,156 @@ fn env_reflection(shaded: vec3<f32>, normal: vec3<f32>, world_pos: vec3<f32>, fo
 @group(2) @binding(0) var textures: binding_array<texture_2d<f32>>;
 @group(3) @binding(0) var samplers: binding_array<sampler, 8>;
 
+#ifdef WHOLE_WORLD
+// --- (OP) Tidewater's beach sand on the whole world's beaches ------------------------------------
+// terrain.wgsl tw_beach_sand, the sand the native islands' beaches have (owner: "can you give also the
+// island the tidewave sand texture?"), on Earth near ground: pale coral sand in drifts, grain at two
+// scales, wind ripples, shell grit and a wrack line on the high-water band, damp sand below the berm,
+// swash marks and seabed ripple fields, with the same micro relief. Its noise is the same Tidewater
+// detail tile (TerrainWgpuTidewaterDetail.cpp), bound in the draw's Stage1 normal slot (EngineWgpu
+// SubmitEarthHorizon) and read through the repeating sampler. Linear albedo out.
+struct EarthTwIn {
+    dN: vec4<f32>,
+    dM: vec4<f32>,
+    dF: vec4<f32>,
+    macroB: f32,
+    mcr: f32,
+};
+struct EarthTwSand {
+    albedo: vec3<f32>,
+    slope: vec2<f32>,
+};
+fn ews_rot(p: vec2<f32>, a: f32) -> vec2<f32> {
+    let c = cos(a);
+    let s = sin(a);
+    return vec2<f32>(c * p.x - s * p.y, s * p.x + c * p.y);
+}
+fn ews_sat(c: vec3<f32>, s: f32) -> vec3<f32> {
+    let l = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    return max(mix(vec3<f32>(l), c, s), vec3<f32>(0.0));
+}
+fn ews_d(det: u32, uv: vec2<f32>, gx: vec2<f32>, gy: vec2<f32>) -> vec4<f32> {
+    return textureSampleGrad(textures[det], samplers[0u], uv, gx, gy);
+}
+fn ews_rel_uv(rel: vec2<f32>, cam: vec2<f32>, a: f32, s: f32) -> vec2<f32> {
+    return ews_rot(rel, a) / s + fract(ews_rot(cam, a) / s);
+}
+fn ews_inputs(det: u32, abs_p: vec3<f32>, rel: vec3<f32>, dwx: vec3<f32>, dwy: vec3<f32>) -> EarthTwIn {
+    let cam = frame.cam_pos.xz;
+    var o: EarthTwIn;
+    let macroA = ews_d(det, ews_rot(abs_p.xz, 0.7) / 173.0, vec2<f32>(0.0), vec2<f32>(0.0)).w;
+    o.macroB = ews_d(det, ews_rot(abs_p.xz, 2.1) / 47.0, vec2<f32>(0.0), vec2<f32>(0.0)).w;
+    o.mcr = macroA * 0.6 + o.macroB * 0.4;
+    o.dN = ews_d(det, ews_rel_uv(rel.xz, cam, 0.0, 1.9), dwx.xz / 1.9, dwy.xz / 1.9);
+    o.dM = ews_d(det, ews_rel_uv(rel.xz, cam, 1.3, 6.7) + 0.21, ews_rot(dwx.xz, 1.3) / 6.7, ews_rot(dwy.xz, 1.3) / 6.7);
+    o.dF = ews_d(det, ews_rel_uv(rel.xz, cam, 2.4, 0.63) + 0.53, ews_rot(dwx.xz, 2.4) / 0.63, ews_rot(dwy.xz, 2.4) / 0.63);
+    return o;
+}
+// d/dx, d/dz of the detail tile's sand channel at `tile` m, by finite differences; 0 once a texel is
+// under a pixel (terrain.wgsl tw_relief)
+fn ews_relief(det: u32, rel: vec2<f32>, cam: vec2<f32>, tile: f32, dwx: vec3<f32>, dwy: vec3<f32>) -> vec2<f32> {
+    let px = max(length(dwx), length(dwy));
+    let k = 1.0 - smoothstep(tile / 512.0, tile / 128.0, px);
+    if (k <= 0.0) { return vec2<f32>(0.0); }
+    let e = 1.0 / 512.0;
+    let q = rel / tile + fract(cam / tile);
+    let gx = dwx.xz / tile;
+    let gy = dwy.xz / tile;
+    let h0 = ews_d(det, q, gx, gy).z;
+    let hx = ews_d(det, q + vec2<f32>(e, 0.0), gx, gy).z;
+    let hz = ews_d(det, q + vec2<f32>(0.0, e), gx, gy).z;
+    return vec2<f32>(hx - h0, hz - h0) / (e * tile) * k;
+}
+fn ews_ripple(rel: vec2<f32>, cam: vec2<f32>, dir: vec2<f32>, wavelength: f32, warp: f32, e: f32,
+              fp: f32, lo: f32, hi: f32) -> vec4<f32> {
+    let k = 6.2832 / wavelength;
+    let ph = dot(rel, dir) * k + fract(dot(cam, dir) / wavelength) * 6.2832 + warp;
+    let fade = 1.0 - smoothstep(lo, hi, fp * k);
+    let s = sin(ph) * 0.5 + 0.5;
+    let d = e * pow(max(s, 1e-4), e - 1.0) * 0.5 * cos(ph) * k;
+    return vec4<f32>(pow(s, e), dir * d, fade);
+}
+// abs_p: world position; rel: camera-relative position; h: height over the sea; fp: footprint (m per
+// pixel); grade: |grad h| of the ground
+fn earth_tw_sand(det: u32, abs_p: vec3<f32>, rel: vec3<f32>, h: f32, fp: f32, grade: f32,
+                 dwx: vec3<f32>, dwy: vec3<f32>) -> EarthTwSand {
+    let cam = frame.cam_pos.xz;
+    let t = ews_inputs(det, abs_p, rel, dwx, dwy);
+    let dMw = t.dM.w;
+    let dMy = t.dM.y;
+    let dMx = t.dM.x;
+    let dNw = t.dN.w;
+    let dNy = t.dN.y;
+    let macroB = t.macroB;
+    let grain = min(t.dN.z, 0.62);
+    let grainF = min(t.dF.z, 0.62);
+    let camDist = length(rel);
+
+    // beach sand: pale coral sand, drifts of warmer / coarser sand, grain
+    let dryK = smoothstep(0.8, 3.0, h);
+    var sand = mix(srgb_to_linear(vec3<f32>(0.83, 0.75, 0.6)), srgb_to_linear(vec3<f32>(0.9, 0.84, 0.72)),
+                   smoothstep(0.3, 0.72, t.mcr + dryK * 0.2));
+    sand = mix(sand, srgb_to_linear(vec3<f32>(0.84, 0.72, 0.55)), smoothstep(0.55, 0.8, dMw + (macroB - 0.5) * 0.6) * 0.45);
+    sand = sand * ((dMw - 0.5) * 0.16 + 1.0) * ((dNw - 0.5) * 0.1 + 1.0);
+    sand = sand * ((grain - 0.45) * 0.3 + 0.97) * ((grainF - 0.45) * 0.2 + 1.0);
+    let trod = smoothstep(0.52, 0.7, dNy + (dMy - 0.5) * 0.6) * dryK;
+    sand = sand * (1.0 - trod * 0.07);
+    let hw = h + (dMw - 0.5) * 0.5;
+    let wrackBand = smoothstep(1.15, 1.4, hw) * smoothstep(2.1, 1.7, hw);
+    let landW = 1.0 - smoothstep(0.12, -0.6, h);
+    let pebDensity = smoothstep(0.62, 0.85, macroB + dMw * 0.3) * 0.2 + wrackBand * smoothstep(0.3, 0.6, dMy);
+    let pebW = smoothstep(0.66, 0.8, t.dN.z) * clamp(pebDensity, 0.0, 1.0) * landW * (1.0 - smoothstep(12.0, 35.0, camDist));
+    let pebCol = mix(mix(srgb_to_linear(vec3<f32>(0.86, 0.82, 0.74)), srgb_to_linear(vec3<f32>(0.78, 0.64, 0.6)),
+                         smoothstep(0.45, 0.75, dMx)),
+                     srgb_to_linear(vec3<f32>(0.36, 0.33, 0.3)), smoothstep(0.74, 0.82, dMy));
+    sand = mix(sand, pebCol, pebW * 0.75);
+    let wrack = wrackBand * smoothstep(0.58, 0.72, dNy) * smoothstep(0.4, 0.6, macroB);
+    sand = mix(sand, srgb_to_linear(vec3<f32>(0.24, 0.18, 0.11)), wrack * 0.8);
+
+    // wind ripples on the dry sand, ~10.5 cm, fixed in the world (terrain.wgsl TWS_RIPPLE_DIR)
+    let r1 = ews_ripple(rel.xz, cam, vec2<f32>(0.8, 0.6), 0.105, dMw * 24.0 + dNw * 7.0 + macroB * 30.0, 1.6, fp, 0.6, 2.2);
+    let windK = r1.w * smoothstep(1.5, 2.2, h) * (1.0 - trod * 0.7) * smoothstep(0.2, 0.5, macroB + dMw * 0.3);
+    sand = sand * ((r1.x - 0.5) * 0.12 * windK + 1.0);
+    var slope = r1.yz * 0.005 * windK;
+
+    // seabed: lighter shallow sand, megaripple fields (~0.75 m) and wave ripples (~0.16 m)
+    let underW = smoothstep(0.12, -0.6, h);
+    let depth = -h;
+    if (underW > 0.0) {
+        var under = mix(srgb_to_linear(vec3<f32>(0.84, 0.78, 0.64)), srgb_to_linear(vec3<f32>(0.72, 0.7, 0.58)),
+                        smoothstep(1.0, 9.0, depth));
+        under = under * ((dMw - 0.5) * 0.14 + 1.0) * ((grain - 0.45) * 0.25 + 1.0);
+        let r2 = ews_ripple(rel.xz, cam, vec2<f32>(0.6, -0.8), 0.75, dMw * 16.0 + macroB * 24.0, 1.4, fp, 0.5, 2.0);
+        let r3 = ews_ripple(rel.xz, cam, vec2<f32>(0.6, -0.8), 0.16, dMw * 26.0 + dNw * 5.0, 1.5, fp, 0.6, 2.2);
+        let fieldW = smoothstep(0.42, 0.62, macroB + (dMw - 0.5) * 0.35) * smoothstep(0.9, 2.0, depth);
+        under = under * ((r2.x - 0.55) * 0.22 * fieldW * r2.w + 1.0);
+        sand = mix(sand, under, underW);
+        slope += (r3.yz * 0.012 * r3.w * smoothstep(-0.3, -0.9, h) + r2.yz * 0.035 * r2.w * fieldW) * underW;
+    }
+
+    // damp sand below the berm, darker in mottled drying patches
+    let dampMottle = smoothstep(0.3, 0.7, dMw + (dNy - 0.45) * 0.6 + (macroB - 0.5) * 0.4);
+    let damp = smoothstep(clamp(grade * 5.0, 1.9, 3.0), 0.5, h + dMw * 0.3) * mix(0.3, 0.65, dampMottle) * landW;
+    sand = mix(sand, ews_sat(sand * 0.58, 1.15) * vec3<f32>(0.97, 0.98, 1.0), damp);
+    // swash marks: thin wavy lines of grit at the limits of earlier uprushes
+    let sl = (h + dMw * 0.18 + dNw * 0.05) / 0.13;
+    let slD = abs(fract(sl) - 0.5);
+    let slW = fp * grade / 0.13 + 1e-4;
+    let swashLine = smoothstep(slW * 1.5 + 0.04, 0.0, slD) * smoothstep(0.2, 0.4, h) * smoothstep(1.6, 1.2, h)
+        * smoothstep(0.45, 0.65, dMy + (macroB - 0.5) * 0.4) * (1.0 - smoothstep(0.8, 2.0, slW * 10.0));
+    sand = mix(sand * (1.0 - swashLine * 0.3), srgb_to_linear(vec3<f32>(0.9, 0.88, 0.84)),
+               swashLine * smoothstep(0.6, 0.75, grainF) * 0.5);
+
+    slope += (ews_relief(det, rel.xz, cam, 1.9, dwx, dwy) * 0.004 + ews_relief(det, rel.xz, cam, 0.63, dwx, dwy) * 0.003)
+             * (1.0 - underW * 0.5);
+
+    var o: EarthTwSand;
+    o.albedo = max(sand, vec3<f32>(0.0));
+    o.slope = slope;
+    return o;
+}
+#endif
+
 // Baked per-pipeline (pipeline-overridable constants): the alpha-test cutout
 // threshold and whether this is a shadow-darken pipeline. Keeping them out of a
 // per-draw binding avoids a 5th bind group (wgpu's default maxBindGroups is 4).
@@ -1369,6 +1519,25 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         // real-world line from latitude and season), by altitude above the globe rather than the flat
         // frame's Y, which drops with curvature and stripped distant peaks. Cliffs stay bare.
         var surface = srgb_to_linear(albedo);
+        // Beaches: Tidewater's sand (earth_tw_sand) on pale, warm, gentle ground from a few metres under
+        // the sea to a few above it -- OFP's sand on a placed island, real beaches in the imagery. The
+        // detail tile rides in the Stage1 slot (normal_map.z: bound).
+        if (ground_detail && material.normal_map.z > 0.5 && distance < 2500.0) {
+            let world_abs = in.world_pos + frame.cam_pos.xyz;
+            let h = length(world_abs - earth_centre) - 6378137.0;
+            let up = max(dot(normalize(in.normal), vec3<f32>(0.0, 1.0, 0.0)), 0.2);
+            let grade = sqrt(max(1.0 - up * up, 0.0)) / up;
+            let lum = dot(albedo, vec3<f32>(0.2126, 0.7152, 0.0722));
+            let sandy = smoothstep(0.30, 0.42, lum) * smoothstep(0.02, 0.07, albedo.r - albedo.b);
+            let w = sandy * smoothstep(6.0, 3.5, h) * smoothstep(-6.0, -3.0, h) * smoothstep(0.5, 0.25, grade)
+                  * (1.0 - smoothstep(1500.0, 2500.0, distance));
+            if (w > 0.001) {
+                let sand = earth_tw_sand(normal_packed >> 3u, world_abs, in.world_pos, h,
+                                         max(length(dwx), length(dwy)), grade, dwx, dwy);
+                surface = mix(surface, sand.albedo, w);
+                n = normalize(n - vec3<f32>(sand.slope.x, 0.0, sand.slope.y) * w);
+            }
+        }
         if (frame.snow_surface.x > 0.0 || (frame.snow_surface.y >= 0.0 && frame.snow_surface.z > 0.0)) {
             let world_abs = in.world_pos + frame.cam_pos.xyz;
             let altitude = length(world_abs - earth_centre) - 6378137.0;

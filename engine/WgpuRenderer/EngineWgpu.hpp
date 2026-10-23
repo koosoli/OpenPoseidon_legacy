@@ -649,6 +649,9 @@ class EngineWgpu : public EngineDummy
     void SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture = 0, uint32_t sampler = 2, bool groundDetail = false,
                             bool nearAtlas = false, double sourceLatitude = std::numeric_limits<double>::quiet_NaN(),
                             double sourceLongitude = std::numeric_limits<double>::quiet_NaN());
+    // terrain.wgsl's Tidewater detail tile for the Earth beaches' sand (shader3d earth_tw_sand), made once
+    WgrTexture EarthSandDetail();
+    WgrTexture _earthSandDetail = 0;
     // A renderer-generated mesh drawn as an ordinary lit, opaque, double-sided world object (fish, wildlife):
     // `world` is the absolute column-major model matrix (rotation x scale, translation in world metres).
     void SubmitDynamicMesh(WgrMesh mesh, uint32_t indexCount, const float world[16], WgrTexture texture, uint32_t sampler = 0, float alphaRef = 0.0f);
