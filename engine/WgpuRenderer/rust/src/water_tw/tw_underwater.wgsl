@@ -62,7 +62,7 @@ struct UwParams {
     torch_pos: vec4<f32>,       // (W5e) the torch: world position, w: on
     torch_dir: vec4<f32>,       // beam direction, w: cos^2 of the outer cone
     torch_col: vec4<f32>,       // irradiance in the core (Tidewater units), w: core radius (m)
-    torch_shape: vec4<f32>,     // x: cone shaping exponent, y: beam in-scatter strength
+    torch_shape: vec4<f32>,     // x: cone shaping exponent, y: beam in-scatter strength, z: diffuse light leg (uwLightLeg)
     probe: vec4<f32>,           // (W9a) the probe grid: camera x, z, step (m), size (0 = none)
 };
 
@@ -265,9 +265,19 @@ fn uwTorchCone(cosToAxis: f32) -> f32 {
     return pow(t * t * (3.0 - 2.0 * t), uw.torch_shape.x);
 }
 
-fn uwLit(m: f32, sigT: vec3<f32>, zc: f32, dirY: f32, dist: f32) -> vec3<f32> {
-    let a = sigT * zc / m;
-    let kk = sigT * (1.0 - dirY / m);
+// (OP) the coefficient daylight fades by on its way down. The beam extinction sigT counts every
+// scattered photon as lost, but nearly all of them scatter a few degrees forward and keep going down:
+// what daylight really loses per metre is absorption plus BACKscatter (the diffuse attenuation Kd of
+// ocean optics). On the whole world's open sea (torch_shape.z = 1) that is the leg used, and 80 m down
+// stays the dim blue of real clear ocean instead of black; elsewhere sigT, as tuned on the islands.
+fn uwLightLeg(sigA: vec3<f32>, sigS: vec3<f32>) -> vec3<f32> {
+    return sigA + sigS * mix(1.0, 0.035, clamp(uw.torch_shape.z, 0.0, 1.0));
+}
+
+// in-scatter integral along the view ray: light leg sigL down to each point, view leg sigT back
+fn uwLit(m: f32, sigT: vec3<f32>, sigL: vec3<f32>, zc: f32, dirY: f32, dist: f32) -> vec3<f32> {
+    let a = sigL * zc / m;
+    let kk = sigT - sigL * dirY / m;
     let e0 = exp(-a);
     let e1 = exp(-max(a + kk * dist, vec3<f32>(0.0)));
     return select((e0 - e1) / kk, e0 * dist, abs(kk) < vec3<f32>(1e-4));
@@ -320,6 +330,7 @@ fn fs_uw(in: UwOut) -> @location(0) vec4<f32> {
     let sigA = uw.absorption.rgb;
     let sigS = uw.scattering.rgb;
     let sigT = sigA + sigS;
+    let sigL = uwLightLeg(sigA, sigS);
     let L = uw.sun_dir.xyz;
     let Ls = -refract(-L, vec3<f32>(0.0, 1.0, 0.0), 1.0 / UW_IOR); // toward the sun, underwater
     let mu = max(Ls.y, 0.15);
@@ -348,8 +359,8 @@ fn fs_uw(in: UwOut) -> @location(0) vec4<f32> {
                 // (W5b) Tidewater's caustic networks on the submerged scene, filtered over the pixel
                 let fp = length(uwRelAt(uv, d)) * 2.0 / dims.y;
                 let caus = twCausticsSample(causticsFineTex, causticsBroadTex, uwRepeat, uw.ocean.zw, q, zq, L, twCausticsLevel(fp, uw.ocean.z), false);
-                let attDirect = exp(-sigT * zq / mu) * caus;
-                let attAmbient = exp(-sigT * zq * 1.2) * 0.85 + vec3<f32>(0.0, 0.02, 0.04) * exp(zq * -0.1);
+                let attDirect = exp(-sigL * zq / mu) * caus;
+                let attAmbient = exp(-sigL * zq * 1.2) * 0.85 + vec3<f32>(0.0, 0.02, 0.04) * exp(zq * -0.1);
                 let lumW = vec3<f32>(0.2126, 0.7152, 0.0722);
                 let eSun = dot(uw.sun_e.rgb, lumW) * max(L.y, 0.0) / UW_PI;
                 let eSky = dot(uwSkyE(), lumW);
@@ -367,8 +378,8 @@ fn fs_uw(in: UwOut) -> @location(0) vec4<f32> {
         let bb = sigS * 0.035;
         let msAlb = bb * 1.3 / (sigA + bb);
         let k = uw.sun_dir.w;
-        let inSun = sunE * (sigS * phase + msAlb * sigT * (1.0 / UW_PI)) * uwLit(mu, sigT, zc, dir.y, dist) * k;
-        let inAmb = ambE * (sigS * (1.0 / (4.0 * UW_PI)) + msAlb * sigT * (1.0 / UW_PI)) * uwLit(0.8, sigT, zc, dir.y, dist) * k;
+        let inSun = sunE * (sigS * phase + msAlb * sigT * (1.0 / UW_PI)) * uwLit(mu, sigT, sigL, zc, dir.y, dist) * k;
+        let inAmb = ambE * (sigS * (1.0 / (4.0 * UW_PI)) + msAlb * sigT * (1.0 / UW_PI)) * uwLit(0.8, sigT, sigL, zc, dir.y, dist) * k;
         // (W5b) caustic light shafts: the focused light scattered toward the eye along the view ray
         // (the excess over the mean: the mean is in inSun), 12 jittered steps over the first 22 m
         var shafts = vec3<f32>(0.0);
@@ -382,7 +393,7 @@ fn fs_uw(in: UwOut) -> @location(0) vec4<f32> {
                 let p = uw.cam.xyz + dir * s;
                 let z = max(camWater - p.y, 0.01);
                 let c = twCausticsSample(causticsFineTex, causticsBroadTex, uwRepeat, uw.ocean.zw, p, z, L, 1.5, true);
-                shafts += (c - 1.0) * exp(-sigT * (s + z / mu)) * ds;
+                shafts += (c - 1.0) * exp(-sigT * s - sigL * z / mu) * ds;
             }
             shafts = max(shafts * sunE * sigS * phase * 2.5 * k, vec3<f32>(0.0));
         }

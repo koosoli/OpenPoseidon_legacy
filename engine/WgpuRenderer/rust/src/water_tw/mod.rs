@@ -1328,6 +1328,8 @@ impl Tidewater {
             // W9a: the drawn surface around the camera (the grid is drawn in `update`, before the
             // composite reads it; until the first one exists the composite uses the FFT alone)
             uwp.probe = if self.probe.ready || !self.bind_dirty { probe::Probe::lanes(cp) } else { [0.0; 4] };
+            // (OP) the open sea's daylight fades by absorption + backscatter (uwLightLeg)
+            uwp.torch_shape[2] = if earth_preview(&p) { 1.0 } else { 0.0 };
             // RFG-191: under a lake the medium's surface is the lake's -- flat (no FFT, no probe of
             // the SEA's drawn grid) and its own murky water.
             if let Some((level, absorption, scattering)) = self.lake {
@@ -1335,6 +1337,7 @@ impl Tidewater {
                 uwp.absorption = [absorption[0], absorption[1], absorption[2], uwp.absorption[3]];
                 uwp.ocean[0] = 0.0;
                 uwp.probe = [0.0; 4];
+                uwp.torch_shape[2] = 0.0;
             }
             self.probe_lanes = probe::Probe::lanes(cp);
             self.probe.set_camera(cp);
