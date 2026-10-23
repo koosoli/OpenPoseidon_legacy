@@ -7,6 +7,7 @@
 #include <Poseidon/Audio/Core/WaveLogic.hpp>
 #include <Poseidon/Audio/Shared/AudioMath.hpp>
 #include <Poseidon/Audio/Shared/DX8Reference.hpp>
+#include <Poseidon/Audio/SoundTestLog.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/ScopedTimer.hpp>
 #include <Poseidon/Core/TaskPool.hpp>
@@ -53,10 +54,13 @@ WaveSteam::WaveSteam(SoundSystemSteam* sys, RString name, bool is3D)
     if (!nameStr || !nameStr[0])
     {
         // Empty sound name — a config slot with no sound assigned. Not an error.
+        Audio::SoundTestLog::NoteRequest(nameStr, false);
         _loadError = true;
         return;
     }
     _stream = SoundLoadFile(nameStr);
+    // The test run's sound census (SoundTestLog) counts this backend's waves too.
+    Audio::SoundTestLog::NoteRequest(nameStr, _stream != nullptr);
     if (!_stream)
     {
         _loadError = true;
@@ -689,6 +693,7 @@ void WaveSteam::DoPlay()
         _state.playing = true;
         _everPlayed = true;
         _state.terminated = false;
+        Audio::SoundTestLog::NotePlay(static_cast<const char*>(Name()));
         OnPlayOnce();
         return;
     }
