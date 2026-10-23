@@ -376,7 +376,7 @@ fn earth_sun_transmittance(mu: f32, altitude: f32) -> vec3<f32> {
 struct SsrParams {
     reproj: mat4x4<f32>,
     misc: vec4<f32>, // x = enabled, y/z = prev-colour size, w = max march distance (m)
-    tune: vec4<f32>, // x = normal-map share of the reflected direction (WGR_REFLECT_NMAP)
+    tune: vec4<f32>, // x = normal-map share of the reflected direction, y = top mip of prev colour
 };
 @group(1) @binding(5) var ssr_prev_color: texture_2d<f32>;
 @group(1) @binding(6) var ssr_depth: texture_2d<f32>;
@@ -865,9 +865,10 @@ fn reflect_env_radiance(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
 }
 const REFLECT_GROUND_ALBEDO: f32 = 0.2;
 
-// Phase E: march `dir` from `origin` (camera-relative metres) against this frame's depth and
-// return the previous frame's colour at the hit, reprojected, with its confidence in .a (0 = no
-// hit: keep the phase-D environment). Main scene camera only -- frame.gtao.x is GTAO's own
+// Phase E: march `dir` from `origin` (camera-relative metres) against this frame's depth.
+// Returns the hit in the PREVIOUS frame's image: .xy = its uv there, .z = how many pixels one
+// unit of GGX alpha spreads over at the hit (E.3: what a lobe of that roughness blurs), .w =
+// confidence (0 = no hit: keep the phase-D environment). Main scene camera only -- frame.gtao.x is GTAO's own
 // per-camera gate, 1 exactly where its depth chain is this camera's.
 fn reflect_ssr(origin: vec3<f32>, dir: vec3<f32>, pixel: vec2<f32>) -> vec4<f32> {
     if (ssr.misc.x < 0.5 || frame.gtao.x < 0.5) {
@@ -943,16 +944,28 @@ fn reflect_ssr(origin: vec3<f32>, dir: vec3<f32>, pixel: vec2<f32>) -> vec4<f32>
     if (edge <= 0.0) {
         return vec4<f32>(0.0);
     }
-    let col = textureSampleLevel(ssr_prev_color, ssr_samp, puv, 0.0).rgb;
     // Fade at the screen edge and towards the march's reach, so the hand-over to the
     // environment never shows as a line.
     let w = smoothstep(0.0, 0.08, edge) * (1.0 - smoothstep(0.6 * ssr.misc.w, ssr.misc.w, hi));
-    return vec4<f32>(max(col, vec3<f32>(0.0)), w);
+    // A lobe of alpha a spreads ~ hi * a metres at the hit; at the hit's distance from the
+    // camera that is hi * a * proj_yy * height/2 / hit_w pixels.
+    let px_per_alpha = hi * frame.proj[1][1] * 0.5 * ssr.misc.z / max(hit_clip.w, 0.1);
+    return vec4<f32>(puv, px_per_alpha, w);
+}
+
+// The previous frame's colour at a hit, blurred to the width of a lobe of this roughness.
+fn reflect_ssr_color(hit: vec4<f32>, roughness: f32) -> vec3<f32> {
+    let a = roughness * roughness;
+    let lod = clamp(log2(max(hit.z * a, 1.0)), 0.0, ssr.tune.y);
+    return max(textureSampleLevel(ssr_prev_color, ssr_samp, hit.xy, lod).rgb, vec3<f32>(0.0));
 }
 
 // How much of a lobe of this roughness the (unfiltered) screen image may stand in for.
+// E.3: with the blurred mips a rough lobe reads a correctly soft image, so it may take the
+// screen's colour up to a matt finish; only past ~0.75 does the prefiltered environment's
+// wider average serve better than a 64x-reduced screen.
 fn reflect_ssr_rough_weight(roughness: f32) -> f32 {
-    return 1.0 - smoothstep(0.25, 0.6, roughness);
+    return 1.0 - smoothstep(0.45, 0.8, roughness);
 }
 
 // REFLECT-001 debug colours. View 1 = surface class (fixed palette), 2 = roughness (grey),
@@ -1964,15 +1977,17 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         // vehicles, the ground), where the screen has it; the prefiltered sky elsewhere. The
         // sky part keeps the sky's occlusion, the hit is a real surface and only takes fog.
         let ssr_hit = reflect_ssr(in.world_pos + gn * 0.02, refl_dir, in.clip.xy);
-        let ssr_rgb = ssr_hit.rgb * clamp(in.fog, 0.0, 1.0);
-        let wb = ssr_hit.a * reflect_ssr_rough_weight(rough);
-        let wc = ssr_hit.a * reflect_ssr_rough_weight(coat_rough);
+        let fog_v = clamp(in.fog, 0.0, 1.0);
+        let ssr_base = reflect_ssr_color(ssr_hit, rough) * fog_v;
+        let ssr_coat = reflect_ssr_color(ssr_hit, coat_rough) * fog_v;
+        let wb = ssr_hit.w * reflect_ssr_rough_weight(rough);
+        let wc = ssr_hit.w * reflect_ssr_rough_weight(coat_rough);
         if (u32(material.reflect1.w + 0.5) == 7u) {
             // What the march found, at its confidence; dark blue where it found nothing.
-            return vec4<f32>(mix(vec3<f32>(0.0, 0.0, 0.12), ssr_hit.rgb, ssr_hit.a), 1.0);
+            return vec4<f32>(mix(vec3<f32>(0.0, 0.0, 0.12), ssr_coat, ssr_hit.w), 1.0);
         }
-        let env_base = mix(reflect_env_radiance(refl_dir, rough) * occ, ssr_rgb, wb);
-        let env_coat = mix(reflect_env_radiance(refl_dir, coat_rough) * occ, ssr_rgb, wc);
+        let env_base = mix(reflect_env_radiance(refl_dir, rough) * occ, ssr_base, wb);
+        let env_coat = mix(reflect_env_radiance(refl_dir, coat_rough) * occ, ssr_coat, wc);
         let spec = env_base * fb * (1.0 - fc) + env_coat * fc;
         // What the reflection takes, the diffuse body no longer scatters (energy, roughly).
         let keep = (1.0 - fc * occ) *
