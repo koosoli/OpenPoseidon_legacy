@@ -231,6 +231,11 @@ pub struct WgrDraw3D {
     // source, debug view. All zero = not classified (WGR_REFLECT off).
     pub mat_reflect0: WgrVec4,
     pub mat_reflect1: WgrVec4,
+    // REFLECT-001 D.1 (320 -> 336): the section's per-texel specular map (SMDI) for the
+    // classified reflection, 0 = none / WGR_REFLECT off. Arma 1-3 paint a whole car on one
+    // atlas; this map is what tells its tyres and trim from its paint.
+    pub reflect_specular_texture_id: u64,
+    pub _reflect_pad: u64,
 }
 
 // One frame-global point or spot light, shared by every 3D draw + terrain (bound
@@ -1765,7 +1770,7 @@ pub struct WgrFrame {
 const _: () = assert!(std::mem::size_of::<WgrVertex2D>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrDraw2DBatch>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 68);
-const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 320);
+const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 336);
 const _: () = assert!(std::mem::size_of::<WgrLight>() == 64);
 const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);
 const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 464);

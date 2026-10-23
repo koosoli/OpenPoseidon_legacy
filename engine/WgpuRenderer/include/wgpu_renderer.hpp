@@ -397,6 +397,11 @@ struct WgrDraw3D
      * Appended ABI extension: 288 -> 320 bytes, covered by the layout handshake. */
     WgrVec4 mat_reflect0;
     WgrVec4 mat_reflect1;
+    /* REFLECT-001 D.1 (320 -> 336): the section's per-texel specular map (SMDI) for the
+     * classified reflection, 0 = none / WGR_REFLECT off. Arma 1-3 paint a whole car on one
+     * atlas; this map is what tells its tyres and trim from its paint. */
+    uint64_t reflect_specular_texture_id;
+    uint64_t _reflect_pad;
 };
 
 /* One frame-global point or spot light, shared by every 3D draw + terrain (bound
@@ -2396,7 +2401,7 @@ static_assert(sizeof(WgrBlend) == 4, "WgrBlend must be 4 bytes to match the Rust
 static_assert(sizeof(WgrVertex2D) == 32, "WgrVertex2D layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrMeshVertex) == 68, "WgrMeshVertex must match the engine SVertex layout");
 static_assert(sizeof(WgrDraw2DBatch) == 32, "WgrDraw2DBatch layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrDraw3D) == 320, "WgrDraw3D layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrDraw3D) == 336, "WgrDraw3D layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrLight) == 64, "WgrLight layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTonemap) == 64, "WgrTonemap layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrExposure) == 32, "WgrExposure layout must match the Rust #[repr(C)] struct");

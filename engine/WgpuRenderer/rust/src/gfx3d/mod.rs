@@ -71,6 +71,19 @@ use crate::ffi::{
 use crate::grass::Grass;
 use crate::textures::SharedTextures;
 
+// REFLECT-001 D.1: reflect1.z leaves the CPU as the source id (1..5, a float) and reaches the
+// shader as bits -- (specular-map slot << 6) | (sampler << 3) | source -- the same bindless
+// packing emissive.w and normal_map.x use. An unclassified draw stays all-zero (bits 0 = 0.0).
+pub(crate) fn reflect1_with_specular_map(reflect1: WgrVec4, spec_slot: u32, sampler: u32) -> WgrVec4 {
+    if reflect1[0] <= 0.5 {
+        return reflect1;
+    }
+    let source = (reflect1[2].max(0.0) + 0.5) as u32 & 7;
+    let mut out = reflect1;
+    out[2] = f32::from_bits((spec_slot << 6) | ((sampler & 7) << 3) | source);
+    out
+}
+
 fn direct_material_flags(flags: u32, misc: u32, late_surface: bool) -> u32 {
     let material_bits = crate::ffi::WGR_DRAW3D_REFLECTIVE
         | crate::ffi::WGR_DRAW3D_NIGHT_EMITTER
@@ -989,6 +1002,23 @@ mod local_specular_tests {
 
 #[cfg(test)]
 mod reflect_lane_tests {
+    // D.1: the specular-map slot rides in reflect1.z; the shader takes the source back out.
+    #[test]
+    fn specular_map_slot_packs_into_reflect1_z() {
+        let packed = super::reflect1_with_specular_map([3.0, 0.08, 4.0, 0.0], 1234, 2);
+        assert_eq!(packed[0], 3.0);
+        assert_eq!(packed[1], 0.08);
+        let bits = packed[2].to_bits();
+        assert_eq!(bits >> 6, 1234);
+        assert_eq!((bits >> 3) & 7, 2);
+        assert_eq!(bits & 7, 4);
+        // Unclassified (WGR_REFLECT off): untouched zero lanes.
+        assert_eq!(super::reflect1_with_specular_map([0.0; 4], 99, 1), [0.0; 4]);
+        let src = include_str!("shader3d.wgsl");
+        assert!(src.contains("let refl_packed = bitcast<u32>(r1.z);"));
+        assert!(src.contains("o.b.z = f32(refl_packed & 7u);"));
+    }
+
     // REFLECT-001 phase B: the two appended lanes reach the per-draw Material in the same
     // order the C ABI declares them, and only a non-zero debug view reads them, so a frame
     // with WGR_REFLECT off (all-zero lanes) shades exactly as before.
@@ -1011,7 +1041,7 @@ mod reflect_lane_tests {
         assert!(shading.contains("sky_spec = vec4<f32>(0.0, 0.0, 0.0, 1.0);"));
         assert!(shading.contains("return mat.refl_b.x > 0.5 && linear > 0.5;"));
         assert_eq!(super::MATERIAL_SIZE, 160);
-        assert_eq!(std::mem::size_of::<crate::ffi::WgrDraw3D>(), 320);
+        assert_eq!(std::mem::size_of::<crate::ffi::WgrDraw3D>(), 336);
     }
 }
 
@@ -9694,7 +9724,11 @@ impl Gfx3d {
                             specular: d.mat_specular,
                             local_specular: d.mat_local_specular,
                             reflect0: d.mat_reflect0,
-                            reflect1: d.mat_reflect1,
+                            reflect1: reflect1_with_specular_map(
+                                d.mat_reflect1,
+                                textures.texture_slot(d.reflect_specular_texture_id),
+                                d.sampler.index() as u32,
+                            ),
                             // w is a small BITFIELD, not a bool: bit 0 = invert the normal
                             // map's Y (the material-debug toggle it already carried), bit 1 =
                             // DZ-003 reflective (the material named an EnvironmentMap), bit 2 =

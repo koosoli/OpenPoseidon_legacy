@@ -842,7 +842,13 @@ fn reflect_env_radiance(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
     let to_sun = -frame.sun_dir_world.xyz;
     let ground = REFLECT_GROUND_ALBEDO *
         (sky_irradiance(vec3<f32>(0.0, 1.0, 0.0)) * frame.sun_ambient.w + frame.sun_diffuse.rgb * max(to_sun.y, 0.0));
-    return mix(ground, sky, smoothstep(-0.08, 0.08, dir.y));
+    // D.1: the first ~10 degrees above the horizon are scenery, not sky -- tree lines, houses,
+    // dunes. With sky right down to the horizon every door and sill (which face sideways and
+    // reflect exactly that band) took the brightest, bluest part of the sky and went grey or
+    // purple (reflectD-5728c24: Arma 2 Skoda sill, Arma 3 SUV). The band takes the lit ground
+    // instead, and widens with roughness the way the prefiltered sky above it does.
+    let band = 0.1 * clamp(roughness, 0.0, 1.0);
+    return mix(ground, sky, smoothstep(-0.02 - band, 0.15 + band, dir.y));
 }
 const REFLECT_GROUND_ALBEDO: f32 = 0.2;
 
@@ -868,6 +874,45 @@ fn reflect_class_color(cls: u32) -> vec3<f32> {
     return vec3<f32>(1.0, 0.0, 1.0); // unclassified: magenta
 }
 
+// REFLECT-001 D.1 -- the section's lanes after its per-texel specular map (SMDI, RVMAT
+// SpecularDetail). Arma 1-3 paint a whole car on one atlas, so the class (paint, from the body
+// texture's name) also covered the tyres, the black trim and the dirt, and their clear coat
+// reflected the sky: grey tyres, a grey sill, a pale V3S cab (test run reflectD-5728c24,
+// 2026-10-23). SMDI G is the specular level the authors painted per texel and B the gloss
+// (frame.wgsl / gpu_driven.wgsl, measured over 40 maps): a texel the authors left without
+// specular gets no coat, no F0 and no metal; a dull one gets rougher. CWA has no such map and
+// keeps its lanes as they were.
+struct ReflLanes {
+    a: vec4<f32>,
+    b: vec4<f32>,
+    specmap: vec3<f32>, // G level, B gloss, 1 = a map was bound (debug view 6)
+};
+
+fn reflect_lanes_with_specmap(r0: vec4<f32>, r1: vec4<f32>, uv: vec2<f32>, duv_dx: vec2<f32>,
+                              duv_dy: vec2<f32>) -> ReflLanes {
+    var o: ReflLanes;
+    o.a = r0;
+    o.b = r1;
+    o.specmap = vec3<f32>(0.0);
+    if (r1.x <= 0.5) {
+        return o;
+    }
+    let refl_packed = bitcast<u32>(r1.z);
+    o.b.z = f32(refl_packed & 7u);
+    let slot = refl_packed >> 6u;
+    if (slot != 0u) {
+        // Explicit gradients: this branch is per-draw (non-uniform) control flow.
+        let s = textureSampleGrad(textures[slot], samplers[(refl_packed >> 3u) & 7u], uv, duv_dx, duv_dy);
+        let level = smoothstep(0.02, 0.25, s.g);
+        o.a.y = r0.y * level;
+        o.a.z = r0.z * level;
+        o.a.w = r0.w * level;
+        o.a.x = max(r0.x, 0.95 - 0.85 * clamp(s.b, 0.0, 1.0));
+        o.specmap = vec3<f32>(s.g, s.b, 1.0);
+    }
+    return o;
+}
+
 fn reflect_debug_color(r0: vec4<f32>, r1: vec4<f32>, view: u32) -> vec3<f32> {
     if (view == 1u) {
         return reflect_class_color(u32(r1.x + 0.5));
@@ -881,7 +926,7 @@ fn reflect_debug_color(r0: vec4<f32>, r1: vec4<f32>, view: u32) -> vec3<f32> {
     if (view == 4u) {
         return vec3<f32>(0.0, r0.w * (1.0 - r1.y), r0.w);
     }
-    let src = u32(r1.z + 0.5);
+    let src = u32(r1.z + 0.5); // already unpacked by reflect_lanes_with_specmap
     return vec3<f32>(select(0.0, 1.0, src == 1u || src == 4u), select(0.0, 1.0, src == 2u || src == 4u),
                      select(0.0, 1.0, src == 3u || src == 5u)) * select(1.0, 0.5, src == 5u);
 }
@@ -1555,6 +1600,10 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // REFLECT-001: zero unless WGR_REFLECT / WGR_REFLECT_DEBUG classified this section.
     m.refl_a = material.reflect0;
     m.refl_b = material.reflect1;
+    let refl_lanes = reflect_lanes_with_specmap(material.reflect0, material.reflect1, uv, boot_duv_dx,
+                                                 boot_duv_dy);
+    m.refl_a = refl_lanes.a;
+    m.refl_b = refl_lanes.b;
     // Caked mud is matte where it has dried and only dully glossy where wet.
     m.spec_mask = 1.0 - vehicle_mud.x * (0.9 - 0.4 * vehicle_mud.y);
     // The direct path has no retained SMDI binding. Show the constant specular lane and its
@@ -1621,8 +1670,13 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // REFLECT-001 phase B debug views (WGR_REFLECT_DEBUG on the CPU side writes reflect1.w).
     // Zero for every draw unless that switch is set, so this branch never changes a normal frame.
     let reflect_view = u32(material.reflect1.w + 0.5);
+    if (reflect_view == 6u) {
+        // D.1: the specular map as the reflection reads it -- red = level (G), green = gloss
+        // (B), blue = a map is bound. Black = classified section without a map (CWA, OFP).
+        return vec4<f32>(refl_lanes.specmap, 1.0);
+    }
     if (reflect_view != 0u) {
-        return vec4<f32>(reflect_debug_color(material.reflect0, material.reflect1, reflect_view), 1.0);
+        return vec4<f32>(reflect_debug_color(refl_lanes.a, refl_lanes.b, reflect_view), 1.0);
     }
     // Debug views are before shared lighting, fog and environment reflection. That keeps the
     // outputs useful for isolating source/material mistakes instead of mixing them with exposure.
@@ -1788,13 +1842,13 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         let gn = select(-geometric_normal, geometric_normal, dot(geometric_normal, view_dir) >= 0.0);
         let ndv = clamp(dot(gn, view_dir), 1e-4, 1.0);
         let refl_dir = reflect(-view_dir, n);
-        let rough = clamp(material.reflect0.x, 0.0, 1.0);
-        let coat = clamp(material.reflect0.w, 0.0, 1.0);
+        let rough = clamp(m.refl_a.x, 0.0, 1.0);
+        let coat = clamp(m.refl_a.w, 0.0, 1.0);
         let albedo_lin = srgb_to_linear(base.rgb);
         let occ = gtao_ao(in.clip.xy) * cave_daylight(in.world_pos + frame.cam_pos.xyz) * clamp(in.fog, 0.0, 1.0);
         // Phase D: prefiltered environment (sharp for the clear coat, blurred for a rough base)
         // weighted by the split-sum environment BRDF.
-        let coat_rough = clamp(material.reflect1.y, 0.0, 1.0);
+        let coat_rough = clamp(m.refl_b.y, 0.0, 1.0);
         let fb = reflect_env_brdf(reflect_base_reflectance(m, albedo_lin), rough, ndv);
         let fc = reflect_env_brdf(vec3<f32>(0.04), coat_rough, ndv).x * coat;
         let env_base = reflect_env_radiance(refl_dir, rough);
@@ -1802,7 +1856,7 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         let spec = (env_base * fb * (1.0 - fc) + env_coat * fc) * occ;
         // What the reflection takes, the diffuse body no longer scatters (energy, roughly).
         let keep = (1.0 - fc * occ) *
-            (1.0 - max(fb.r, max(fb.g, fb.b)) * occ * (1.0 - clamp(material.reflect0.z, 0.0, 1.0)));
+            (1.0 - max(fb.r, max(fb.g, fb.b)) * occ * (1.0 - clamp(m.refl_a.z, 0.0, 1.0)));
         if (translucent > 0.5) {
             // A pane over what is behind it: the reflection sits on top of the film (RFG-137's form).
             let f = clamp(max(fb.r, max(fb.g, fb.b)) * (1.0 - fc) + fc, 0.0, 1.0) * occ;

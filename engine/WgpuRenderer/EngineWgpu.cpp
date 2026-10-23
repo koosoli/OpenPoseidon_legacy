@@ -10022,6 +10022,21 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // REFLECT-001 phase B: surface class lanes. A no-op unless WGR_REFLECT / WGR_REFLECT_DEBUG.
     FillReflectLanes(d, static_cast<const Object*>(GetDrawObject()), sMesh.GetSection(beg).properties.GetTexture(),
                      debugSection.surfMat.GetRef());
+    // REFLECT-001 D.1: the classified section's SMDI, so its unpainted texels (tyres, trim,
+    // dirt on the same atlas) do not take the paint's clear coat. Same lookup the retained
+    // set uses; the binding cache is filled by ResolveMaterialBaseColour first.
+    d.reflect_specular_texture_id = 0;
+    if (d.mat_reflect1.x > 0.5f && sMesh.GetSection(beg).surfMat)
+    {
+        const ShapeSection& reflSection = sMesh.GetSection(beg);
+        const char* reflMaterial = reflSection.surfMat->GetName().Data();
+        if (reflMaterial && *reflMaterial)
+        {
+            if (_materialBindings.find(reflMaterial) == _materialBindings.end())
+                ResolveMaterialBaseColour(reflSection);
+            d.reflect_specular_texture_id = ResolveMaterialSpecularMap(reflSection);
+        }
+    }
     if (const auto* person = dyn_cast<const Person>(static_cast<const Object*>(GetDrawObject())))
     {
         const auto* ownerShape = person->GetShape();
