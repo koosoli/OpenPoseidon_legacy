@@ -406,10 +406,14 @@ fn shade(
     // what the far cascades can hold. Measured (owner profile): alpha-test pass -0.2..0.35 ms at
     // Durras / forestOwner, crops equal within wind-sway noise. (budget-from m, tent-from m);
     // x 0 = off (WGR_FAR_CROWN_SHADOW=0, or =<budget>,<tent>).
+    // PERF-FAR-OBJECT-SHADOW: a NEGATIVE y extends the same distance steps to every surface
+    // (walls, roofs, rocks, vehicles), as the terrain has them (PERF-TERRAIN-FAR-SHADOW); |y| is
+    // the tent distance. WGR_FAR_OBJECT_SHADOW=0 = leaf cards only.
     var csm_lod = 0u;
-    if (is_foliage && foliage_shadow_lite.x > 0.0) {
+    if ((is_foliage || foliage_shadow_lite.y < 0.0) && foliage_shadow_lite.x > 0.0) {
         let crown_dist = length(world_pos);
-        csm_lod = select(select(0u, 1u, crown_dist > foliage_shadow_lite.x), 2u, crown_dist > foliage_shadow_lite.y);
+        csm_lod = select(select(0u, 1u, crown_dist > foliage_shadow_lite.x), 2u,
+                         crown_dist > abs(foliage_shadow_lite.y));
     }
     let csm_s = shadow_strength_lod(world_pos, nrm, fog, dwx, dwy, csm_lod);
     // Long-range terrain sun-shadow: removes direct sun (diffuse+specular), keeps ambient/

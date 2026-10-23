@@ -602,6 +602,16 @@ pub(crate) fn far_crown_shadow() -> (f32, f32) {
     })
 }
 
+/// PERF-FAR-OBJECT-SHADOW lever: on (default) hands shade() a negative tent distance, which
+/// extends the crown's distance shadow filter to every surface. WGR_FAR_OBJECT_SHADOW=0 = leaf
+/// cards only (the pre-2026-10-23 behaviour).
+pub(crate) fn far_crown_shadow_tent_signed() -> f32 {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let on = *ON.get_or_init(|| std::env::var("WGR_FAR_OBJECT_SHADOW").map(|v| v.trim() != "0").unwrap_or(true));
+    let tent = far_crown_shadow().1;
+    if on { -tent } else { tent }
+}
+
 pub(crate) fn foliage_screen_ao() -> f32 {
     static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
     *V.get_or_init(|| {
@@ -5391,7 +5401,7 @@ fn build_main_pipeline(ctx: &PipeCtx, device: &wgpu::Device, key: PipelineKey) -
         ("a2c", if a2c { 1.0 } else { 0.0 }),
         ("foliage_screen_ao", foliage_screen_ao() as f64),
         ("far_crown_shadow_budget", far_crown_shadow().0 as f64),
-        ("far_crown_shadow_tent", far_crown_shadow().1 as f64),
+        ("far_crown_shadow_tent", far_crown_shadow_tent_signed() as f64),
         ("blend_section_screen_ao", blend_section_screen_ao() as f64),
         ("count_fragments", count_fragments() as f64),
         ("translucent", translucent),
