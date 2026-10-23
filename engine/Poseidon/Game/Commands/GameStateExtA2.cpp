@@ -1080,6 +1080,10 @@ GameValue A2ExecFSM(const GameState*, GameValuePar oper1, GameValuePar oper2)
 {
     std::unique_ptr<Fsm> fsm = LoadFsm((const char*)RString(oper2));
     fsm->vars.VarSet("_this", oper1.GetNil() ? GameValue() : oper1, true);
+    // An agent task's FSM (an Arma 2 animal's main.fsm) knows its unit as _agent; Arma 2's
+    // engine starts it so, here it is started by execFSM with the unit as _this.
+    if (oper1.GetType() == GameObject)
+        fsm->vars.VarSet("_agent", oper1, true);
     const int handle = fsm->handle;
     RT().fsms.push_back(std::move(fsm));
     return GameValue(static_cast<float>(handle));

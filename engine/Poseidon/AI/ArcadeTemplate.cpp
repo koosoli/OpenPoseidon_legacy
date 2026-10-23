@@ -391,6 +391,9 @@ LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
         arma2Init = Arma1Compat::Arma2ModuleInit(vehicle);
         const RString requested = vehicle;
         vehicle = Arma1Compat::ResolveVehicleClass(vehicle); // identity unless --arma1
+        // an Arma 2 animal placed with its own model and moves lives by its agent tasks
+        if (arma2Init.GetLength() == 0 && vehicle.GetLength() > 4 && _strnicmp(vehicle, "A1x_", 4) == 0)
+            arma2Init = Arma1Compat::Arma2AgentTasks(requested);
         // A class the compat layer leaves out on purpose (Arma 2's animals, until their
         // models and moves are in) resolves to nothing: the unit is not placed at all
         // (presence and presenceCondition were read above; the class below only keeps the

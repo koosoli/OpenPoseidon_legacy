@@ -215,6 +215,9 @@ bool WeaponListsGeneratedMagazine(const char* weaponClass, const char* magazine)
 // Arma 2: the EventHandlers >> init code of a module (a class derived from Logic, such
 // as FunctionsManager or the first-aid modules) that a mission places; empty otherwise.
 RString Arma2ModuleInit(const RString& className);
+// The code that starts an Arma 2 animal's agent tasks (their FSMs, with _agent = the animal),
+// for the same place as Arma2ModuleInit's (_this = [unit]); "" for any other class.
+RString Arma2AgentTasks(const RString& className);
 
 // Drops Arma 1 addon names (CACharacters, CAWheeled, ...) from a mission's
 // addOns[] so the CWA addon check does not refuse an Arma 1 mission.

@@ -843,9 +843,20 @@ RString ResolveVehicleClass(const RString& className)
         const ParamClass* a = animal ? animal->GetClassInterface() : nullptr;
         if (c && a && (c == a || c->IsDerivedFrom(*a)))
         {
+            // its own model and moves on CWA's civilian (OP_A2_ANIMALS=0 leaves animals out)
+            static const bool on = [] {
+                const char* e = std::getenv("OP_A2_ANIMALS");
+                return !(e && *e == '0');
+            }();
+            const ParamEntry* vehicles = Pars.FindEntry("CfgVehicles");
+            const char* carrier = vehicles && vehicles->FindEntry("Civilian") ? "Civilian" : nullptr;
+            const RString own = on && carrier ? Arma1ModelClass(className, RString(carrier)) : RString();
+            if (own.GetLength() > 0 && _strnicmp(own.Data(), "A1x_", 4) == 0)
+                return own;
             static std::set<std::string> reported;
             if (reported.insert(Lower(className.Data())).second)
-                LOG_INFO(Mission, "{}: animal '{}' left out (no animal models yet)", Label(), className.Data());
+                LOG_INFO(Mission, "{}: animal '{}' left out ({})", Label(), className.Data(),
+                         on ? "its model or moves could not be loaded" : "OP_A2_ANIMALS=0");
             return RString();
         }
     }

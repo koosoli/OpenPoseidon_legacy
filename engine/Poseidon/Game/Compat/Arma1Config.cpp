@@ -972,6 +972,53 @@ bool MovesImported()
     return true;
 }
 
+// An Arma 2 animal's moves (CfgMovesCow, CfgMovesDog, ... on CfgMovesAnimalsBase), imported
+// under the private names A1_CfgMovesCow on A1_CfgMovesAnimalsBase like the soldiers'.
+// They are a man's moves of their own (the same Actions: Stop, WalkF, FastF, Die, ...).
+bool AnimalMovesImported(const std::string& moves)
+{
+    static std::map<std::string, bool> done;
+    const auto it = done.find(Lower(moves));
+    if (it != done.end())
+        return it->second;
+    bool& ok = done[Lower(moves)];
+    ok = false;
+    static int base = 0; // 0 untried, 1 ok, -1 failed
+    if (base == 0)
+    {
+        base = -1;
+        if (const ParamEntry* b = Arma1Pars().FindEntryNoInheritance("CfgMovesAnimalsBase"); b && b->IsClass())
+        {
+            std::string text = SaveText(*b);
+            ReplaceFirst(text, "class CfgMovesAnimalsBase", "class A1_CfgMovesAnimalsBase");
+            // CWA's moves loader names the vehicle actions table; animals board nothing.
+            if (const size_t open = text.find('{'); open != std::string::npos)
+            {
+                text.insert(open + 1, "\r\nvehicleActions=\"CfgVehicleActions\";\r\n");
+                ImportIntoPars(text, "CfgMovesAnimalsBase as A1_CfgMovesAnimalsBase");
+                base = Pars.FindEntry("A1_CfgMovesAnimalsBase") ? 1 : -1;
+            }
+        }
+        if (base < 0)
+            LOG_WARN(Mission, "{}: CfgMovesAnimalsBase not found, animals are left out", Label());
+    }
+    if (base < 0)
+        return false;
+    const ParamEntry* m = Arma1Pars().FindEntryNoInheritance(moves.c_str());
+    if (!m || !m->IsClass() || !m->FindEntry("States"))
+    {
+        LOG_WARN(Mission, "{}: animal moves '{}' not found", Label(), moves);
+        return false;
+    }
+    std::string text = SaveText(*m);
+    const std::string name = std::string((const char*)m->GetName());
+    ReplaceFirst(text, "class " + name + ": CfgMovesAnimalsBase", "class A1_" + name + ": A1_CfgMovesAnimalsBase");
+    ReplaceFirst(text, "class " + name, "class A1_" + name);
+    ImportIntoPars(text, (moves + " as A1_" + name).c_str());
+    ok = Pars.FindEntry(("A1_" + name).c_str()) != nullptr;
+    return ok;
+}
+
 // Values an Arma 1 man class carries for engine-facing names (bones, memory
 // points, selections, hit points). Copied verbatim into the generated class; the
 // engine reads them where present and keeps OFP's names otherwise.
@@ -2944,6 +2991,37 @@ RString Arma2ModuleInit(const RString& className)
     return RString(code.c_str());
 }
 
+RString Arma2AgentTasks(const RString& className)
+{
+    if (Generation() != 2 || !ConfigLoaded() || className.GetLength() == 0)
+        return RString();
+    const ParamEntry* cls = FindConfigClass("CfgVehicles", className);
+    if (!cls || !cls->IsClass() || !IsKindOf(cls, "CAAnimalBase"))
+        return RString();
+    // Arma 2 runs an animal by its agent tasks (agentTasks[] = {"AnimalMainTask"}): each
+    // task's FSM (CfgTasks >> AnimalMainTask >> fsm, the grazing, wandering and fleeing of
+    // main.fsm) with _agent = the animal.
+    const ParamEntry* tasks = cls->FindEntry("agentTasks");
+    if (!tasks || !tasks->IsArray())
+        return RString();
+    std::string code;
+    for (int i = 0; i < tasks->GetSize(); i++)
+    {
+        const std::string task = (const char*)(RStringB)(*tasks)[i];
+        const ParamEntry* t = task.empty() ? nullptr : FindConfigClass("CfgTasks", task.c_str());
+        const std::string fsm = t && t->IsClass() ? StringValue(*t, "fsm") : std::string();
+        if (fsm.empty())
+            continue;
+        code += "(_this select 0) execFSM ";
+        QuoteConfigString(code, fsm.c_str());
+        code += ";";
+    }
+    static std::set<std::string> reported;
+    if (!code.empty() && reported.insert(Lower(className.Data())).second)
+        LOG_INFO(Mission, "{}: animal '{}' is run by its agent tasks: {}", Label(), className.Data(), code);
+    return RString(code.c_str());
+}
+
 bool ProxyKind(const char* modelName, std::string& simulation, int& crewPosition)
 {
     simulation.clear();
@@ -3014,12 +3092,21 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
             shape += ".p3d";
         useModel = QIFStreamB::FileExist(shape[0] == '\\' ? shape.c_str() + 1 : shape.c_str());
     }
-    if (man && ((Generation() >= 2 && !a2Soldiers) || !MovesImported()))
+    // An Arma 2 animal (cow, dog, goat, ...) is a man with its own model and moves.
+    const bool animal = man && Generation() == 2 && IsKindOf(a1, "CAAnimalBase");
+    const std::string animalMoves = animal ? StringValue(*a1, "moves") : std::string();
+    if (animal)
+    {
+        if (!useModel || animalMoves.empty() || !AnimalMovesImported(animalMoves))
+            return cwaClass;
+    }
+    else if (man && ((Generation() >= 2 && !a2Soldiers) || !MovesImported()))
         useModel = false;
     // Arma 1 soldiers (with their own model and moves) carry their own weapons too: the
     // Arma 1 weapons[] and magazines[], shown with the Arma 1 weapon models (OP_A1_WEAPONS=0
     // keeps the CWA soldier's loadout).
-    const bool loadout = man && (Generation() >= 2 || (Generation() == 1 && useModel && Arma1OwnWeapons()));
+    const bool loadout =
+        man && !animal && (Generation() >= 2 || (Generation() == 1 && useModel && Arma1OwnWeapons()));
     // Arma 3 modules (logics: race checkpoints and finish, sectors, ...) keep their own class
     // name on the CWA logic, so typeOf, isKindOf and allMissionObjects find them by it (the
     // karts' race ended at once: no "ModuleObjectiveRaceFinish_F" was ever found).
@@ -3061,8 +3148,10 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     }
     if (loadout)
         text += Arma2Loadout(*a1);
-    if (man && useModel)
+    if (man && useModel && !animal)
         text += Arma3Gear(*a1);
+    if (animal)
+        text += "\t\tweapons[]={};\r\n\t\tmagazines[]={};\r\n";
     // Arma 1 crates and vehicles hand out Arma 1 weapons (OP_A1_WEAPONS=0: CWA's cargo).
     int cargoItems = 0;
     if (!man && useModel && Generation() == 1 && Arma1OwnWeapons())
@@ -3261,7 +3350,7 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     }
     if (man && useModel)
     {
-        text += "\t\tmoves=\"A1_CfgMovesMaleSdr\";\r\n";
+        text += animal ? "\t\tmoves=\"A1_" + animalMoves + "\";\r\n" : "\t\tmoves=\"A1_CfgMovesMaleSdr\";\r\n";
         for (const char* key : kManNameKeys)
         {
             const std::string value = StringValue(*a1, key);
@@ -3304,7 +3393,7 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         return cwaClass;
     if (useModel)
         LOG_INFO(Mission, "{}: '{}' uses the Arma 1 model {} on CWA '{}'{}", Label(), missionClass.Data(), model,
-                 cwaClass.Data(), man ? " with the Arma 1 moves" : "");
+                 cwaClass.Data(), animal ? " with its own animal moves" : man ? " with the Arma 1 moves" : "");
     if (cargoItems > 0)
         LOG_INFO(Mission, "{}: '{}' carries its own cargo ({} weapon/magazine entries)", Label(), missionClass.Data(),
                  cargoItems);
@@ -3335,7 +3424,7 @@ const ParamEntry* Arma2ManInOwnModel(const char* unitClass, const char* shapeNam
         _strnicmp(unitClass, "A1x_", 4) != 0)
         return nullptr;
     const ParamEntry* man = FindConfigClass("CfgVehicles", unitClass + 4);
-    if (!man || !man->IsClass())
+    if (!man || !man->IsClass() || IsKindOf(man, "CAAnimalBase")) // an animal has no face, head or voice
         return nullptr;
     const auto path = [](std::string s) {
         s = Lower(s);
