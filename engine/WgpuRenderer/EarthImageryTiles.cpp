@@ -18,6 +18,7 @@
 #include <future>
 #include <iterator>
 #include <chrono>
+#include <cstdlib>
 #include <thread>
 
 namespace Poseidon
@@ -25,8 +26,26 @@ namespace Poseidon
 namespace
 {
 constexpr size_t MaxTileBytes = 4 * 1024 * 1024;
-constexpr size_t MaxResidentTiles = 384;
-constexpr unsigned ParallelDownloads = 16;
+// Decoded tiles kept in memory. One window's mosaics take ~400 (rings ~190 + near 196 + coarse preview
+// 16): at 384 every build pushed out the rings it would need again and re-read and re-decoded them from
+// disk. 640 256-px tiles are ~160 MB, whole world only.
+constexpr size_t MaxResidentTiles = 640;
+// Few warm connections, not many cold ones. The tile server (or something on the way) resets bursts of
+// new TLS handshakes: 40 at once gave 29 resets, even 4 at once lost one. A reset tile waits out the
+// retry back-off, and after four it stays missing until the next window. Measured on new ground (Rio,
+// fresh cache, 2026-10-23): 16 workers final imagery 10.5 s with 4 tiles lost, 32 workers 14.3 s with
+// 30 lost, 6 workers 8.6 s with none. Kept alive and reused (DownloadShare), 6 carry ~80 tiles/s.
+// POSEIDON_EARTH_DOWNLOADS overrides it (1..64), for A/B.
+unsigned ParallelDownloads()
+{
+    static const unsigned n = []
+    {
+        const char* v = std::getenv("POSEIDON_EARTH_DOWNLOADS");
+        const int parsed = v ? std::atoi(v) : 0;
+        return parsed >= 1 ? unsigned(std::min(parsed, 64)) : 6u;
+    }();
+    return n;
+}
 constexpr double MercatorLimit = 85.0511287798066;
 
 size_t Receive(char* data, size_t size, size_t count, void* destination)
@@ -256,7 +275,7 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
     {
         for (;;)
         {
-            if ((cancelled && cancelled()) || failedInRow.load() >= 2 * ParallelDownloads)
+            if ((cancelled && cancelled()) || failedInRow.load() >= 2 * ParallelDownloads())
                 return;
             const size_t i = next.fetch_add(1);
             if (i >= missing.size())
@@ -277,7 +296,7 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
             _tiles[missing[i]] = std::move(tile);
         }
     };
-    const size_t workers = std::min<size_t>(ParallelDownloads, missing.size());
+    const size_t workers = std::min<size_t>(ParallelDownloads(), missing.size());
     std::vector<std::future<void>> pool;
     for (size_t w = 1; w < workers; ++w)
         pool.push_back(std::async(std::launch::async, worker));

@@ -42,8 +42,12 @@ URL templates are web-mercator XYZ: `{z} {x} {y}`, `{-y}` (TMS rows), `{q}` (qua
   near window, filled from nested provider rings, each ring 4× wider at its own zoom. Measured over
   Manhattan at 450 m: zoom 18 under the camera, zoom 9 at the horizon. Tiles already on disk are shown
   first; downloads replace them as they arrive. Transient failures are retried. Downloads reuse
-  warm connections and TLS sessions, sixteen at a time in a rolling pool, and the tiles under the
-  camera are fetched and shown before the wide outer rings. The atlases and the ring mosaics are built
+  warm connections and TLS sessions, six at a time in a rolling pool (`POSEIDON_EARTH_DOWNLOADS`; more
+  were slower: the tile server resets bursts of new TLS handshakes). On new ground the window under
+  the camera is first fetched two zoom levels coarser (16 tiles) and shown at once
+  (`POSEIDON_EARTH_IMAGERY_PREVIEW=0` turns that off), then the sharp tiles under the camera, then
+  the wide outer rings. Measured on new ground (Rio): coarse imagery 1.6 s, sharp 4.4 s, final 8.6 s
+  (was: globe only until 4.6 s, final 10.5 s). The atlases and the ring mosaics are built
   on all but two CPU cores (`POSEIDON_EARTH_ATLAS_THREADS`, 1 = single-threaded): from a warm cache the
   first imagery is on screen ~0.9 s after a window change and the final one ~1.9 s (7.9 s and 16.3 s on
   one thread, measured 2026-10-23 at the Jungfrau).
