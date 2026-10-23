@@ -10035,22 +10035,35 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     uint64_t reflSpecular = 0;
     if (ReflectLanesEnabled())
     {
+        // Per material, once: does its RVMAT name a SpecularDetail map? Keyed by the material
+        // object and its serial, so the walk costs a pointer hash per section per frame instead
+        // of a string build and lookup (21 Peugeots, hundreds of sections each, every frame).
+        thread_local std::unordered_map<const TexMaterial*, std::pair<uint64_t, bool>> hasSpecular;
         for (int i = beg; i < end && i < beg + 64; ++i)
         {
             const ShapeSection& sec = sMesh.GetSection(i);
-            if (!sec.surfMat)
+            const TexMaterial* mat = sec.surfMat.GetRef();
+            if (!mat)
                 continue;
-            const char* name = sec.surfMat->GetName().Data();
-            if (!name || !*name)
-                continue;
-            auto cached = _materialBindings.find(name);
-            if (cached == _materialBindings.end())
+            auto known = hasSpecular.find(mat);
+            if (known == hasSpecular.end() || known->second.first != mat->Serial())
             {
-                ResolveMaterialBaseColour(sec);
-                cached = _materialBindings.find(name);
+                bool has = false;
+                const char* name = mat->GetName().Data();
+                if (name && *name)
+                {
+                    auto cached = _materialBindings.find(name);
+                    if (cached == _materialBindings.end())
+                    {
+                        ResolveMaterialBaseColour(sec);
+                        cached = _materialBindings.find(name);
+                    }
+                    has = cached != _materialBindings.end() &&
+                          cached->second.Find(Asset::Material::MaterialSlot::SpecularDetail) != nullptr;
+                }
+                known = hasSpecular.insert_or_assign(mat, std::make_pair(uint64_t(mat->Serial()), has)).first;
             }
-            if (cached == _materialBindings.end() ||
-                !cached->second.Find(Asset::Material::MaterialSlot::SpecularDetail))
+            if (!known->second.second)
                 continue;
             if (const uint64_t id = ResolveMaterialSpecularMap(sec))
             {

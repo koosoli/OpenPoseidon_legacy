@@ -40,6 +40,18 @@ int main()
     milMirror.texture = "data3d\\humr_zrcatko.paa";
     assert(ClassOf(milMirror) == SurfaceClass::Mirror);
 
+    // Owner, 2026-10-23: a military vehicle reflects only its glass -- chrome and metal go matt.
+    Inputs milChrome = body;
+    milChrome.texture = "data3d\\t72_chrom.paa";
+    assert(ClassOf(milChrome) == SurfaceClass::PaintMatt);
+    Inputs milGlass = body;
+    milGlass.texture = "data3d\\t72_sklo.paa";
+    assert(ClassOf(milGlass) == SurfaceClass::Glass);
+    Inputs milEnv = body;
+    milEnv.texture = "ca\\tracked\\data\\t72_body_co.paa";
+    milEnv.hasEnvMap = true;
+    assert(ClassOf(milEnv) == SurfaceClass::PaintMatt);
+
     // Owner decision 1: headlights by era.
     Inputs lamp;
     lamp.texture = "data3d\\skoda_svetla.paa";

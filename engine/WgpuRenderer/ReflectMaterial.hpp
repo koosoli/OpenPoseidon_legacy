@@ -231,7 +231,7 @@ inline SurfaceClass PartFromNames(std::string_view texStem, std::string_view mat
     return SurfaceClass::None;
 }
 
-inline Params Classify(const Inputs& in)
+inline Params ClassifyRules(const Inputs& in)
 {
     // 1. Declared by the addon.
     if (in.declared != SurfaceClass::None && in.declared < SurfaceClass::Count)
@@ -301,6 +301,30 @@ inline Params Classify(const Inputs& in)
     if (in.specular > 0.02f && in.specularPower > 0.0f)
         p.roughness = RoughnessFromBlinn(in.specularPower);
     p.source = Source::Default;
+    return p;
+}
+
+// Owner, 2026-10-23: military vehicles and tanks reflect nothing but their glass -- no paint
+// sheen, no chrome, not even the faint sky sheen a matt finish showed in shadow. Glass, mirrors
+// and lamp covers keep their class; everything else on a military vehicle is matt paint (the
+// shader gives Matt, PaintMatt, Rubber and Plastic no environment or screen reflection at all).
+// An addon's own CfgOpMaterials entry still wins.
+inline bool KeepsReflectionWhenMilitary(SurfaceClass cls)
+{
+    return cls == SurfaceClass::Glass || cls == SurfaceClass::Mirror || cls == SurfaceClass::LampGlass ||
+           cls == SurfaceClass::LampPlastic || cls == SurfaceClass::Rubber || cls == SurfaceClass::Plastic ||
+           cls == SurfaceClass::Matt || cls == SurfaceClass::PaintMatt;
+}
+
+inline Params Classify(const Inputs& in)
+{
+    Params p = ClassifyRules(in);
+    if (in.isVehicle && in.military && p.source != Source::Declared && !KeepsReflectionWhenMilitary(p.cls))
+    {
+        const Source source = p.source;
+        p = Preset(SurfaceClass::PaintMatt);
+        p.source = source;
+    }
     return p;
 }
 

@@ -865,6 +865,15 @@ fn reflect_env_radiance(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
 }
 const REFLECT_GROUND_ALBEDO: f32 = 0.2;
 
+// Owner, 2026-10-23: matt surfaces reflect nothing -- no sky in the shadowed flank of a tank,
+// no ground in the sill of a military truck. Matt (1), PaintMatt (2), Rubber (10) and Plastic
+// (11) keep their diffuse body and the sun's broad highlight, and skip the environment and the
+// screen-space march entirely (which is also most of what the reflection costs).
+fn reflect_class_mirrors(mat: ShadeMaterial) -> bool {
+    let cls = u32(mat.refl_b.x + 0.5);
+    return !(cls == 1u || cls == 2u || cls == 10u || cls == 11u);
+}
+
 // Phase E: march `dir` from `origin` (camera-relative metres) against this frame's depth.
 // Returns the hit in the PREVIOUS frame's image: .xy = its uv there, .z = how many pixels one
 // unit of GGX alpha spreads over at the hit (E.3: what a lobe of that roughness blurs), .w =
@@ -1948,7 +1957,8 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // REFLECT-001 phase C: environment reflection of classified surfaces (base layer + clear
     // coat). Skipped where DZ-003 above already mirrored the sky, and on LDR targets for the
     // reason given there. Occluded by GTAO and the cave fade like any other sky light.
-    if (reflect_classified(m, linear) && (material_flags(material) & MATFLAG_REFLECTIVE) == 0u
+    if (reflect_classified(m, linear) && reflect_class_mirrors(m)
+        && (material_flags(material) & MATFLAG_REFLECTIVE) == 0u
         && !matdbg_flag(MATDBG_DISABLE_FRESNEL_ENV)) {
         let view_dir = normalize(-in.world_pos);
         let n = select(-shading_normal, shading_normal, dot(shading_normal, view_dir) >= 0.0);
