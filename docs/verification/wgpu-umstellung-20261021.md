@@ -370,3 +370,44 @@ EXE aus `Remastered` (`a4f9308`), ohne Mods. Zwei neue private Missionen:
     Draw-Ops vor dem Wasser.
 - Ein WGPU-Rückstand wie anfangs auf der Big Shell zeigt sich auf Everon nicht. Der größte einzelne
   Posten ist das Gras (Olis System, schon mit vielen Schaltern optimiert, `docs/grass-plan.md`).
+
+## Messung 10: Malden und Nogova, WGPU gegen GL33; WGPU-036 war wirkungslos (22.10. 22:00 / 23.10. 09:30)
+
+EXE aus `Remastered` (`5728c24`, Reflect-Stand, enthält WGPU-036), ohne Mods, 1600x900. Zwei neue private
+Missionen `MaldenFlug.abel` und `NogovaFlug.noe` (wie `EveronFlug`: 6 Abschnitte je 15 s, 50 m über Grund).
+
+| Lauf | WGPU fps | GL33 fps | WGPU schlechtestes Fenster | GL33 schlechtestes Fenster | WGPU längstes Bild |
+| --- | --- | --- | --- | --- | --- |
+| Malden-Flug | 61,0 | 64,8 | **51,0** | 46,2 | 53 ms |
+| Nogova-Flug | **86,5** | 60,1 | **77,7** | 44,6 | 321 ms |
+
+- **Malden:** GL33 liegt im Mittel knapp vorn, weil es über freien Feldern ohne das prozedurale Gras
+  (und Wolken, AO, GI) bis 180 fps läuft. In diesen Abschnitten zeichnet WGPU im mittleren Grasring
+  400–540 Tsd. Büschel = 30–38 Mio. Dreiecke pro Bild (Prepass + Farbe), GPU-gebunden bei 53 fps.
+- **Nogova:** WGPU deutlich schneller. Aber zwei Ruckler an immer denselben zwei Stellen des Flugs,
+  331–369 ms, in jedem Lauf (drei Läufe):
+  - `WGR_RENDER_CALL_CPU_TIMINGS=1`: die Zeit liegt im Setup des Render-Workers (`setupInclusiveCpu`
+    326–362 ms), nicht in Uploads, Encode oder Submit.
+  - `WGR_FRAME_LAP_MS=100`: innerhalb des Setups ist es `gfx3d.prepare` (338 / 363 ms), alles andere ~0.
+  - Dort ist nach PERF-PIPE-ASYNC nur noch ein Pipeline-Bau synchron: `ensure_weather_pipeline`. Ein
+    neuer Alpha-Test-Schwellwert unter den Wetterdecken-Draws bedeutet zwei Kompilierungen des ganzen
+    Objekt-Shaders (nahe + ferne Kaskade). → **WGPU-038**: die bauen jetzt auf einem eigenen Thread; bis
+    sie fertig sind, bleibt der Draw draußen und die Decke gilt als unvollständig (behält die alte).
+    Außerdem landet jeder Laufzeit-Pipeline-Bau ≥ 40 ms jetzt im Log (vorher nur `eprintln`, das im
+    Fenster-Spiel nirgends ankam) -- der nächste Lauf zeigt, ob das die Ruckler waren.
+  - Der 1,8-s-Terrain-Upload im ersten Bild (PERF-030) liegt in der Ladephase, nicht im Flug.
+
+### Gras-Test WGPU-036 (23.10. 09:00)
+
+| Flug | WGPU-036 an | `WGR_GRASS_MID_LOD_PX=0` (aus) |
+| --- | --- | --- |
+| Everon | 69,4 fps | 68,8 fps |
+| Malden | 59,8 fps | 61,0 fps |
+
+Kein Unterschied -- und die Büschelzahlen des mittleren Rings waren in beiden Armen **identisch**, Flug für
+Flug. Ursache: `mid_lod_lanes` las `px_per_radian`, das nur `set_screen_metrics` setzt, und das ruft
+`render_frame` nicht auf (die Nahring-Begrenzung dahinter ist abgeschaltet, Kommentar in `lib.rs`). So blieb
+`mid_lod` = 0 und WGPU-036 überall aus. → **WGPU-036 fix** (`2e17379`): eigener `lod_px_per_radian`, jedes
+Bild von `render_frame` gefüttert, schreibt bei 1 % Änderung nur die `mid_lod`-Spuren des Uniforms. Die
+Nahring-Begrenzung bleibt aus. Neue Messung mit dem nächsten Build.
+
