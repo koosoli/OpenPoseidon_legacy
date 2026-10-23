@@ -89,3 +89,109 @@ mod tests {
         assert!(parse(&bytes[..bytes.len() - 1], "t").is_none(), "a truncated chain must not parse");
     }
 }
+
+/// The moon's topography: NASA LRO LOLA LDEM_16 resampled to an equirectangular height map with its mip
+/// chain (assets/earth/moon/moon_height.pmoh, tools/sky/make_moon_relief.py documents the format and the
+/// source), uploaded as R16Float KILOMETRES above the 1737.4 km reference sphere (~8 m steps at 10 km;
+/// 16-bit unorm is not filterable without an optional feature). Same placeholder rules as the albedo map:
+/// a 1x1 zero when it is not there (a smooth sphere).
+pub struct MoonRelief {
+    pub width: u32,
+    pub height: u32,
+    /// Each level as little-endian f16 kilometres, level 0 first.
+    pub levels: Vec<Vec<u8>>,
+    /// Lowest and highest height (metres), for bounding the ray march.
+    pub range: [f32; 2],
+    pub source: String,
+}
+
+fn f32_to_f16_bits(v: f32) -> u16 {
+    let x = v.to_bits();
+    let sign = ((x >> 16) & 0x8000) as u16;
+    let exp = ((x >> 23) & 0xff) as i32 - 127 + 15;
+    let mant = x & 0x7f_ffff;
+    if exp <= 0 {
+        if exp < -10 {
+            return sign;
+        }
+        let m = (mant | 0x80_0000) >> (1 - exp);
+        return sign | ((m + 0x1000) >> 13) as u16;
+    }
+    if exp >= 31 {
+        return sign | 0x7c00;
+    }
+    let rounded = ((exp as u32) << 10 | (mant >> 13)) + ((mant >> 12) & 1);
+    sign | rounded as u16
+}
+
+fn parse_relief(bytes: &[u8], source: &str) -> Option<MoonRelief> {
+    const HEAD: usize = 28;
+    if bytes.len() < HEAD || &bytes[0..4] != b"PMOH" {
+        return None;
+    }
+    let u32_at = |o: usize| u32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
+    let f32_at = |o: usize| f32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
+    let (version, width, height, mips) = (u32_at(4), u32_at(8), u32_at(12), u32_at(16));
+    let (lo, hi) = (f32_at(20), f32_at(24));
+    if version != 1 || width == 0 || height == 0 || mips == 0 || mips > 16 || !(hi > lo) {
+        return None;
+    }
+    let mut levels = Vec::with_capacity(mips as usize);
+    let mut at = HEAD;
+    for i in 0..mips {
+        let (w, h) = ((width >> i).max(1) as usize, (height >> i).max(1) as usize);
+        let body = bytes.get(at..at + w * h * 2)?;
+        let mut level = Vec::with_capacity(w * h * 2);
+        for q in body.chunks_exact(2) {
+            let metres = lo + (hi - lo) * (u16::from_le_bytes([q[0], q[1]]) as f32 / 65535.0);
+            level.extend_from_slice(&f32_to_f16_bits(metres / 1000.0).to_le_bytes());
+        }
+        levels.push(level);
+        at += w * h * 2;
+    }
+    Some(MoonRelief { width, height, levels, range: [lo, hi], source: source.to_string() })
+}
+
+pub fn load_relief() -> MoonRelief {
+    let placeholder = |why: String| MoonRelief { width: 1, height: 1, levels: vec![vec![0, 0]], range: [0.0, 0.0], source: format!("NONE ({why})") };
+    if !cfg!(test) && std::env::var("POSEIDON_WHOLE_WORLD").as_deref() != Ok("1") {
+        return placeholder("not a whole-world process".into());
+    }
+    let path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("assets")
+        .join("earth")
+        .join("moon")
+        .join("moon_height.pmoh");
+    let shown = path.display().to_string();
+    match std::fs::read(&path) {
+        Ok(bytes) => parse_relief(&bytes, &shown).unwrap_or_else(|| placeholder(format!("{shown} is not a valid .pmoh"))),
+        Err(e) => placeholder(format!("cannot read {shown}: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod relief_tests {
+    use super::*;
+
+    #[test]
+    fn half_floats_round_trip_the_heights_that_matter() {
+        for km in [0.0f32, 1.5, -8.962, 10.625, 0.001] {
+            let bits = f32_to_f16_bits(km);
+            let back = half_to_f32(bits);
+            assert!((back - km).abs() <= km.abs() * 1.0e-3 + 1.0e-4, "{km} -> {back}");
+        }
+    }
+
+    fn half_to_f32(h: u16) -> f32 {
+        let s = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
+        let e = ((h >> 10) & 0x1f) as i32;
+        let m = (h & 0x3ff) as f32;
+        if e == 0 {
+            return s * m * 2f32.powi(-24);
+        }
+        s * (1.0 + m / 1024.0) * 2f32.powi(e - 15)
+    }
+}

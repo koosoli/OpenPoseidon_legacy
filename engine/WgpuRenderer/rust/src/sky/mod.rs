@@ -1268,6 +1268,8 @@ pub struct Sky {
     cirrus_soft_now: f32,
     earth_frame: [f32; 4],
     earth_geometry: [[f32; 4]; 4],
+    // The moon height map's lowest and highest height (metres; moonmap::MoonRelief).
+    moon_relief_range: [f32; 2],
     // Group(1) of cs_froxel: the terrain sun-shadow mask, rebuilt each frame (the mask
     // texture is Terrain-owned and regenerated) from the lent view + these two.
     froxel_shadow_layout: wgpu::BindGroupLayout,
@@ -1452,6 +1454,8 @@ impl Sky {
                 tex_entry(12),
                 // The whole world's moon surface map (moonmap.rs) and its sampler, wrapping in longitude.
                 tex_entry(13),
+                // The moon's topography (moonmap::MoonRelief), sampled with binding 14 too.
+                tex_entry(15),
                 wgpu::BindGroupLayoutEntry {
                     binding: 14,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -1526,6 +1530,26 @@ impl Sky {
             &moon_map.levels.concat(),
         );
         let moon_view = moon_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let relief = moonmap::load_relief();
+        eprintln!("[wgr] sky: moon relief {} ({}x{}, {} levels, {:.0}..{:.0} m)", relief.source, relief.width, relief.height,
+                  relief.levels.len(), relief.range[0], relief.range[1]);
+        let relief_tex = device.create_texture_with_data(
+            queue,
+            &wgpu::TextureDescriptor {
+                label: Some("wgr_sky_moon_relief"),
+                size: wgpu::Extent3d { width: relief.width, height: relief.height, depth_or_array_layers: 1 },
+                mip_level_count: relief.levels.len() as u32,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            &relief.levels.concat(),
+        );
+        let relief_view = relief_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let moon_relief_range = relief.range;
         let moon_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("wgr_sky_moon_sampler"),
             address_mode_u: wgpu::AddressMode::Repeat,
@@ -1878,6 +1902,10 @@ impl Sky {
                 wgpu::BindGroupEntry {
                     binding: 14,
                     resource: wgpu::BindingResource::Sampler(&moon_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: wgpu::BindingResource::TextureView(&relief_view),
                 },
             ],
         });
@@ -2524,6 +2552,7 @@ impl Sky {
             cirrus_soft_now: soft_env.unwrap_or(CIRRUS_SOFT_DEFAULT),
             earth_frame: [0.0; 4],
             earth_geometry: [[0.0; 4]; 4],
+            moon_relief_range,
             cloud_shadow_span: CLOUD_SHADOW_SPAN_MIN,
             cloud_shadow_map_params: [0.0, 0.0, 1.0 / CLOUD_SHADOW_SPAN_MIN, 0.85],
             froxel_view,
@@ -2844,8 +2873,9 @@ impl Sky {
             earth_frame: self.earth_frame,
             earth_centre: self.earth_geometry[0],
             moon_centre: self.earth_geometry[1],
-            ecef_x: self.earth_geometry[2],
-            ecef_z: self.earth_geometry[3],
+            // .w of the two axis lanes: the moon height map's range in metres (sky.wgsl moon_height_range).
+            ecef_x: [self.earth_geometry[2][0], self.earth_geometry[2][1], self.earth_geometry[2][2], self.moon_relief_range[0]],
+            ecef_z: [self.earth_geometry[3][0], self.earth_geometry[3][1], self.earth_geometry[3][2], self.moon_relief_range[1]],
         };
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
         // Terrain sun-shadow mask mapping for cs_froxel's occlusion lookup (own copy so

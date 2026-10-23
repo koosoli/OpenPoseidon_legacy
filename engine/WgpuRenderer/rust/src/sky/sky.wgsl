@@ -960,8 +960,25 @@ fn moon_map_albedo(q: vec3<f32>, footprint: f32) -> f32 {
     let lod = log2(max(footprint * f32(size.x) / (2.0 * PI), 1.0e-6));
     return textureSampleLevel(moon_map, moon_map_samp, uv, lod).r / MOON_MAP_MEAN;
 }
+// The moon's topography (NASA LRO LOLA LDEM_16, sky/moonmap.rs MoonRelief): kilometres above the
+// 1737.4 km reference sphere, same chart as moon_map. Its range in metres rides in ecef_x.w / ecef_z.w.
+@group(0) @binding(15) var moon_relief_tex: texture_2d<f32>;
+fn moon_height_range() -> vec2<f32> { return vec2<f32>(sky.ecef_x.w, sky.ecef_z.w); }
+// Height (metres) at moon-fixed direction q (as moon_map_albedo), at mip level `lod`.
+fn moon_height_at(q: vec3<f32>, lod: f32) -> f32 {
+    let lon = atan2(q.x, q.z);
+    let lat = asin(clamp(q.y, -1.0, 1.0));
+    let uv = vec2<f32>(lon / (2.0 * PI) + 0.5, 0.5 - lat / PI);
+    return textureSampleLevel(moon_relief_tex, moon_map_samp, uv, lod).r * 1000.0;
+}
+fn moon_relief_lod(footprint: f32) -> f32 {
+    return max(log2(max(footprint * f32(textureDimensions(moon_relief_tex).x) / (2.0 * PI), 1.0e-6)), 0.0);
+}
 #else
 fn moon_map_albedo(q: vec3<f32>, footprint: f32) -> f32 { return -1.0; }
+fn moon_height_range() -> vec2<f32> { return vec2<f32>(0.0); }
+fn moon_height_at(q: vec3<f32>, lod: f32) -> f32 { return 0.0; }
+fn moon_relief_lod(footprint: f32) -> f32 { return 0.0; }
 #endif
 
 // Angular size of one pixel, radians. Written at the top of each fragment entry point -- i.e. in
@@ -2361,14 +2378,61 @@ fn earth_moon_body(pos: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
     // Camera relative to the moon's centre from WORLD positions, not from the Earth-relative `pos`:
     // near the moon (moon frame) these are both small, so the surface is exact and does not shimmer.
     let oc = sky.cam_pos.xyz - sky.moon_centre.xyz;
-    let hit = ray_sphere(oc, dir, MOON_RADIUS);
-    if (!earth_forward_sphere_hit(hit)) { return vec4<f32>(0.0, 0.0, 0.0, -1.0); }
-    let n0 = normalize(oc + dir * hit.x);
     // Moon-fixed frame: w toward the Earth, u/v from the Earth's spin axis in this tangent frame.
     let w = normalize(-centre);
     let axis = sky.ecef_z.xyz;
     let u = normalize(cross(axis, w));
     let v = cross(w, u);
+    // Real topography (LOLA): within 300 km of the surface the ray is marched against the height map, so
+    // crater rims and mountains stand on the horizon and the ground under the camera is the ground the
+    // soldier walks on (EarthMoonFrame.hpp MoonGroundHeight). Farther out the relief is below a pixel:
+    // the sphere, shaded with the real slopes below.
+    let range = moon_height_range();
+    let relief = range.y > range.x;
+    var hit = ray_sphere(oc, dir, MOON_RADIUS);
+    if (relief && length(oc) - MOON_RADIUS < 300000.0) {
+        // The shell between the lowest and highest terrain bounds the march. Near the ground the camera is
+        // INSIDE it: march from the camera to where the ray leaves it (or reaches the lowest terrain).
+        let outer = ray_sphere(oc, dir, MOON_RADIUS + range.y);
+        let inside = length(oc) < MOON_RADIUS + range.y;
+        if (!inside && !earth_forward_sphere_hit(outer)) { return vec4<f32>(0.0, 0.0, 0.0, -1.0); }
+        if (inside && !(outer.y > 0.0)) { return vec4<f32>(0.0, 0.0, 0.0, -1.0); }
+        let inner = ray_sphere(oc, dir, MOON_RADIUS + range.x);
+        let t0 = select(max(outer.x, 0.0), 0.0, inside);
+        var t1 = outer.y;
+        if (earth_forward_sphere_hit(inner)) { t1 = min(t1, inner.x); }
+        var prev_t = t0;
+        var found = -1.0;
+        for (var i = 1; i <= 96; i++) {
+            let k = f32(i) / 96.0;
+            let t = t0 + (t1 - t0) * k * k; // dense near the camera, where the relief is largest on screen
+            let p = oc + dir * t;
+            let r = length(p);
+            let qq = p / r;
+            let lod = moon_relief_lod(t * 0.0015 / MOON_RADIUS);
+            let gap = r - (MOON_RADIUS + moon_height_at(vec3<f32>(dot(qq, u), dot(qq, v), dot(qq, w)), lod));
+            if (gap <= 0.0) {
+                var lo = prev_t;
+                var hi = t;
+                for (var j = 0; j < 8; j++) {
+                    let m = 0.5 * (lo + hi);
+                    let pm = oc + dir * m;
+                    let rm = length(pm);
+                    let qm = pm / rm;
+                    let g = rm - (MOON_RADIUS + moon_height_at(vec3<f32>(dot(qm, u), dot(qm, v), dot(qm, w)), lod));
+                    if (g <= 0.0) { hi = m; } else { lo = m; }
+                }
+                found = hi;
+                break;
+            }
+            prev_t = t;
+        }
+        if (found < 0.0) { return vec4<f32>(0.0, 0.0, 0.0, -1.0); }
+        hit = vec2<f32>(found, found + 1.0);
+    } else if (!earth_forward_sphere_hit(hit)) {
+        return vec4<f32>(0.0, 0.0, 0.0, -1.0);
+    }
+    let n0 = normalize(oc + dir * hit.x);
     let q = vec3<f32>(dot(n0, u), dot(n0, v), dot(n0, w));
     // Pixel footprint on the unit sphere: detail is added only down to what a pixel can show, so the
     // far disc stays smooth and the surface seen from a few km gets relief tens of metres across.
@@ -2392,7 +2456,17 @@ fn earth_moon_body(pos: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
     let h0 = moon_relief(q, footprint);
     let hx = moon_relief(q + vec3<f32>(dot(tx, u), dot(tx, v), dot(tx, w)) * e, footprint);
     let hy = moon_relief(q + vec3<f32>(dot(ty, u), dot(ty, v), dot(ty, w)) * e, footprint);
-    let n = normalize(n0 - (tx * (hx - h0) + ty * (hy - h0)) / e);
+    // The real slope (LOLA) first, then the procedural relief below the height map's texels on top of it.
+    var nbase = n0;
+    if (relief) {
+        let lod = moon_relief_lod(footprint);
+        let es = max(footprint, 2.0 * PI / f32(textureDimensions(moon_relief_tex).x));
+        let m0 = moon_height_at(q, lod);
+        let mx = moon_height_at(q + vec3<f32>(dot(tx, u), dot(tx, v), dot(tx, w)) * es, lod);
+        let my = moon_height_at(q + vec3<f32>(dot(ty, u), dot(ty, v), dot(ty, w)) * es, lod);
+        nbase = normalize(n0 - (tx * (mx - m0) + ty * (my - m0)) / (es * MOON_RADIUS));
+    }
+    let n = normalize(nbase - (tx * (hx - h0) + ty * (hy - h0)) / e);
     let l = normalize(sky.moon_sun.xyz);
     let lit = max(dot(n, l), 0.0) * smoothstep(-0.02, 0.02, dot(n0, l));
     let ndv = max(dot(n, -dir), 0.0);

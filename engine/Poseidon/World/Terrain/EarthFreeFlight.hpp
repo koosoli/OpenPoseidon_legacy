@@ -125,6 +125,13 @@ inline FlightPoint KeepOutsideMoon(FlightPoint p, double clearance)
 {
     D3 c;
     if (!MoonCentreWorld(c)) return p;
+    if (MoonFrameActive())
+    {
+        // On the moon the surface has its LOLA topography (QueryGround): keep above that, not the sphere.
+        if (const auto ground = QueryGround(p.x, p.z); ground && p.y < ground->height + clearance)
+            return {p.x, float(ground->height + clearance), p.z};
+        return p;
+    }
     const double keepOut = MoonRadius + clearance;
     const D3 v = D3{p.x, p.y, p.z} - c;
     const double d = Length(v);

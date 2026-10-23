@@ -614,6 +614,11 @@ chosen because they can actually be shipped.
 Converted (stitched, poles filled, mip chain written) by `tools/sky/make_moon_albedo.py`. Credit:
 *Moon imagery courtesy NASA/GSFC/Arizona State University (LROC).*
 
+| `moon_height.pmoh` | NASA Lunar Reconnaissance Orbiter, Lunar Orbiter Laser Altimeter (LOLA) gridded data record LDEM_16 (NASA PDS Geosciences Node), resampled to 4096 x 2048 | Public domain |
+
+Converted (longitude rolled to the near side's centre, resampled, 16-bit, mip chain) by
+`tools/sky/make_moon_relief.py`. Credit: *Moon topography courtesy NASA/GSFC (LRO LOLA).*
+
 ## Notes
 
 - The copyright lines for the vcpkg dependencies in §2 are summarised for reference.

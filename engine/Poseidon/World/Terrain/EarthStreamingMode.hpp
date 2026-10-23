@@ -3,6 +3,7 @@
 #include "EarthGroundPatch.hpp"
 #include "EarthFrame.hpp"
 #include "EarthMoonFrame.hpp"
+#include "EarthMoonRelief.hpp"
 
 #include <cstdlib>
 #include <cstring>
@@ -107,14 +108,31 @@ class LocationState
     }
     std::optional<GroundSample> QueryGround(float x, float z) const
     {
-        // In the moon frame (EarthMoonFrame.hpp) the ground is the moon's sphere, exact everywhere: the
-        // sky draws its relief as shading only, so the silhouette and this height agree.
+        // In the moon frame (EarthMoonFrame.hpp) the ground is the moon's surface: its sphere raised by the
+        // LOLA topography (EarthMoonRelief.hpp) -- the heights the sky shader marches the moon against, so
+        // the ground walked on is the ground drawn.
         if (MoonFrameActive())
         {
-            const double dx = double(x) - Earth::Anchor, dz = double(z) - Earth::Anchor;
-            const double s = std::sqrt(std::max(MoonRadius * MoonRadius - dx * dx - dz * dz, 1.0));
+            const MoonFrame frame = Celestial().Frame();
+            // The frame's axes in moon-fixed coordinates (w, e, p as x, y, z): MoonBasis without the sky.
+            const MoonAxes m{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+            const D3 U = Selenographic(m, frame.latitude, frame.longitude);
+            D3 E = Cross(m.p, U);
+            E = Length(E) > 1e-9 ? Normalize(E) : m.e;
+            const D3 N = Cross(U, E);
+            const auto ground = [&](double px, double pz) {
+                const double dx = px - Earth::Anchor, dz = pz - Earth::Anchor;
+                const double sphere = std::sqrt(std::max(MoonRadius * MoonRadius - dx * dx - dz * dz, 1.0)) - MoonRadius;
+                double latitude = 0, longitude = 0;
+                SelenographicOf(m, E * dx + U * (sphere + MoonRadius) + N * dz, latitude, longitude);
+                const double r = MoonRadius + MoonReliefHeight(latitude, longitude);
+                return std::sqrt(std::max(r * r - dx * dx - dz * dz, 1.0)) - MoonRadius;
+            };
+            const double h = ground(x, z);
+            const double sx = 0.5 * (ground(double(x) + 1, z) - ground(double(x) - 1, z));
+            const double sz = 0.5 * (ground(x, double(z) + 1) - ground(x, double(z) - 1));
             std::lock_guard lock(_mutex);
-            return GroundSample{float(s - MoonRadius), float(-dx / s), float(-dz / s), _location.revision, 1};
+            return GroundSample{float(h), float(sx), float(sz), _location.revision, 1};
         }
         std::lock_guard lock(_mutex);
         return _ground ? _ground->Sample(x, z) : std::nullopt;
