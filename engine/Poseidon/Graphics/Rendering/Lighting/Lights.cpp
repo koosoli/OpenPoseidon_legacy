@@ -1426,6 +1426,14 @@ LightPointVisible::LightPointVisible(LODShapeWithShadow* shape, ColorVal color, 
 
 void LightPointVisible::ToDraw(ClipFlags clipFlags, bool dimmed)
 {
+    // A point light built without a shape (LightPointOnVehicle(vehicle, position): script
+    // lights, the automatic tail and brake lamps, a fireplace before its config is read) has
+    // no bulb to draw; it only lights. A shape that a config named and that failed to load is
+    // reported where it is loaded (LightPointVisible::Load), so nothing is lost here.
+    if (!_shape)
+    {
+        return;
+    }
     // reflector: draw volumetrical light object
     if (GScene->MainLight()->NightEffect() < 0.01)
     {
