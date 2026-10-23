@@ -376,6 +376,7 @@ fn earth_sun_transmittance(mu: f32, altitude: f32) -> vec3<f32> {
 struct SsrParams {
     reproj: mat4x4<f32>,
     misc: vec4<f32>, // x = enabled, y/z = prev-colour size, w = max march distance (m)
+    tune: vec4<f32>, // x = normal-map share of the reflected direction (WGR_REFLECT_NMAP)
 };
 @group(1) @binding(5) var ssr_prev_color: texture_2d<f32>;
 @group(1) @binding(6) var ssr_depth: texture_2d<f32>;
@@ -1931,7 +1932,12 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         // out a white mirror in the clean run of 2026-10-22, while the Hatchback was fine.
         let gn = select(-geometric_normal, geometric_normal, dot(geometric_normal, view_dir) >= 0.0);
         let ndv = clamp(dot(gn, view_dir), 1e-4, 1.0);
-        let refl_dir = reflect(-view_dir, n);
+        // The reflected direction keeps only part of the normal map's tilt (ssr.tune.x, 0.35 by
+        // default). Vehicle normal maps carry dents, dirt and panel detail, not the mirror
+        // flatness of a lacquered panel: at full strength Arma 3's C_SUV_01_F aimed its sides,
+        // tyres and shaded flanks at the sky and came out blue-grey (D.1 run, 2026-10-23).
+        let n_refl = normalize(mix(gn, n, clamp(ssr.tune.x, 0.0, 1.0)));
+        let refl_dir = reflect(-view_dir, n_refl);
         let rough = clamp(m.refl_a.x, 0.0, 1.0);
         let coat = clamp(m.refl_a.w, 0.0, 1.0);
         let albedo_lin = srgb_to_linear(base.rgb);

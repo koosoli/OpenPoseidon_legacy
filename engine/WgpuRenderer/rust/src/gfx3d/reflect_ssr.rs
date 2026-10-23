@@ -26,8 +26,26 @@ pub(crate) struct SsrParams {
     pub reproj: [f32; 16],
     /// x = enabled (1/0), y = width, z = height, w = max march distance (m).
     pub misc: [f32; 4],
+    /// Tunables for an in-game A/B without a rebuild: x = share of the normal map's tilt the
+    /// reflected direction keeps (WGR_REFLECT_NMAP, default 0.35), yzw unused.
+    pub tune: [f32; 4],
 }
-const _: () = assert!(std::mem::size_of::<SsrParams>() == 80);
+const _: () = assert!(std::mem::size_of::<SsrParams>() == 96);
+
+fn env_f32(name: &str, default: f32) -> f32 {
+    std::env::var(name).ok().and_then(|v| v.trim().parse::<f32>().ok()).filter(|v| v.is_finite()).unwrap_or(default)
+}
+
+/// WGR_REFLECT_SSR=0 keeps phase D only (A/B of the screen-space part).
+fn ssr_switch() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| env_f32("WGR_REFLECT_SSR", 1.0) != 0.0)
+}
+
+fn normal_map_share() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| env_f32("WGR_REFLECT_NMAP", 0.35).clamp(0.0, 1.0))
+}
 
 pub(crate) const SSR_MAX_DISTANCE: f32 = 80.0;
 
@@ -138,7 +156,7 @@ impl ReflectSsr {
     /// Write this frame's parameters. `reproj` is None while the camera history is invalid
     /// (first frame, resize, teleport) -- the march is then off for the frame.
     pub(crate) fn upload(&self, queue: &wgpu::Queue, reproj: Option<[f32; 16]>) {
-        let on = crate::sky::env_prefilter::enabled() && self.valid && reproj.is_some();
+        let on = crate::sky::env_prefilter::enabled() && ssr_switch() && self.valid && reproj.is_some();
         let params = SsrParams {
             reproj: reproj.unwrap_or([0.0; 16]),
             misc: [
@@ -147,6 +165,7 @@ impl ReflectSsr {
                 self.size.1 as f32,
                 SSR_MAX_DISTANCE,
             ],
+            tune: [normal_map_share(), 0.0, 0.0, 0.0],
         };
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&params));
     }
