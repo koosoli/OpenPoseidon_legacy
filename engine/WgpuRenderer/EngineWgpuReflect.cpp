@@ -8,7 +8,9 @@
 //   WGR_REFLECT=1         classify every section and shade it (phase C: GGX sun + clear coat,
 //                         sky env reflection) -- per-draw path only, i.e. vehicles and entities
 //   WGR_REFLECT_DEBUG=N   classify and show debug view N instead of the lit colour:
-//                         1 class, 2 roughness, 3 F0/metal, 4 clear coat, 5 source
+//                         1 class, 2 roughness, 3 F0/metal, 4 clear coat, 5 source,
+//                         6 specular map (SMDI level / gloss / bound),
+//                         7 screen-space reflection (hit colour x confidence, dark blue = none)
 //
 // Addons may declare their own surfaces (owner decision 1); CWA 1.99 ignores the class:
 //
@@ -159,7 +161,7 @@ void FillReflectLanes(WgrDraw3D& d, const Object* owner, const Texture* texture,
 {
     if (!ReflectLanesEnabled())
         return;
-    static const int debugView = std::clamp(EnvInt("WGR_REFLECT_DEBUG"), 0, 5);
+    static const int debugView = std::clamp(EnvInt("WGR_REFLECT_DEBUG"), 0, 7);
 
     bool isVehicle = false;
     bool military = false;

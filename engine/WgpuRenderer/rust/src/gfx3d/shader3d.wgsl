@@ -1764,7 +1764,8 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         // (B), blue = a map is bound. Black = classified section without a map (CWA, OFP).
         return vec4<f32>(refl_lanes.specmap, 1.0);
     }
-    if (reflect_view != 0u) {
+    // View 7 (phase E, screen-space reflection) is drawn in the reflection block below.
+    if (reflect_view != 0u && reflect_view != 7u) {
         return vec4<f32>(reflect_debug_color(refl_lanes.a, refl_lanes.b, reflect_view), 1.0);
     }
     // Debug views are before shared lighting, fog and environment reflection. That keeps the
@@ -1947,6 +1948,10 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         let ssr_rgb = ssr_hit.rgb * clamp(in.fog, 0.0, 1.0);
         let wb = ssr_hit.a * reflect_ssr_rough_weight(rough);
         let wc = ssr_hit.a * reflect_ssr_rough_weight(coat_rough);
+        if (u32(material.reflect1.w + 0.5) == 7u) {
+            // What the march found, at its confidence; dark blue where it found nothing.
+            return vec4<f32>(mix(vec3<f32>(0.0, 0.0, 0.12), ssr_hit.rgb, ssr_hit.a), 1.0);
+        }
         let env_base = mix(reflect_env_radiance(refl_dir, rough) * occ, ssr_rgb, wb);
         let env_coat = mix(reflect_env_radiance(refl_dir, coat_rough) * occ, ssr_rgb, wc);
         let spec = env_base * fb * (1.0 - fc) + env_coat * fc;
