@@ -485,6 +485,16 @@ pub struct Terrain {
     // that lie wholly beyond the Tidewater ground's near band (see `draw`). None when
     // WGR_TERRAIN_FAR_SPLIT=0.
     far_pipelines: Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
+    // PERF-TERRAIN-DRY: the colour pipelines compiled with `wet_ground` = 0 -- (colour, no-write)
+    // and the far pair -- drawn while dry_now() holds. None when WGR_TERRAIN_DRY=0.
+    dry_pipelines: Option<(
+        (wgpu::RenderPipeline, wgpu::RenderPipeline),
+        Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
+    )>,
+    // PERF-TERRAIN-DRY: whether the last accepted near / far mud view held any non-zero value
+    // (a rut, ridge or disturbed soil, all of which wet the ground in terrain.wgsl).
+    mud_near_any: bool,
+    mud_far_any: bool,
     // The nodes `prepare` uploaded, for the near/far split in `draw`.
     nodes_cpu: Vec<WgrTerrainNode>,
     // Highest heightmap sample per block, rebuilt by `set_heightmap`: the far split's bound on
@@ -1222,6 +1232,26 @@ impl Terrain {
                 ),
             )
         });
+        let dry_pipelines = dry_variant_enabled().then(|| {
+            let fs_dry: Vec<(&str, f64)> =
+                fs_constants.iter().copied().chain(std::iter::once(("wet_ground", 0.0))).collect();
+            let near = (
+                make_pipeline("wgr_terrain_pipeline_dry", "fs_terrain", &fs_dry, surface_format, true, sample_count),
+                make_pipeline("wgr_terrain_pipeline_no_write_dry", "fs_terrain", &fs_dry, surface_format, false,
+                              sample_count),
+            );
+            let far = far_split.then(|| {
+                let fs_dry_far: Vec<(&str, f64)> =
+                    fs_dry.iter().copied().chain(std::iter::once(("tw_far_only", 1.0))).collect();
+                (
+                    make_pipeline("wgr_terrain_pipeline_far_dry", "fs_terrain", &fs_dry_far, surface_format, true,
+                                  sample_count),
+                    make_pipeline("wgr_terrain_pipeline_no_write_far_dry", "fs_terrain", &fs_dry_far,
+                                  surface_format, false, sample_count),
+                )
+            });
+            (near, far)
+        });
         let prepass_pipeline = make_pipeline(
             "wgr_terrain_prepass_pipeline",
             "fs_terrain_prepass",
@@ -1315,6 +1345,9 @@ impl Terrain {
             pipeline,
             pipeline_no_write,
             far_pipelines,
+            dry_pipelines,
+            mud_near_any: false,
+            mud_far_any: false,
             nodes_cpu: Vec::new(),
             height_blocks: None,
             prepass_pipeline,
@@ -1344,6 +1377,7 @@ impl Terrain {
         let accepted = valid_mud_view(data);
         if accepted {
             queue.write_buffer(&self.snow_buffer, (4 + 512 * 512) * 4, bytemuck::cast_slice(data));
+            self.mud_near_any = data[4..].iter().any(|v| *v != 0.0);
         }
         static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if *TRACE.get_or_init(|| std::env::var("WGR_MUD_UPLOAD_TRACE").is_ok_and(|v| v == "1")) {
@@ -1365,6 +1399,7 @@ impl Terrain {
     pub fn set_mud_far(&mut self, queue: &wgpu::Queue, data: &[f32]) {
         if valid_mud_far_view(data) {
             queue.write_buffer(&self.snow_buffer, 3 * (4 + 512 * 512) * 4, bytemuck::cast_slice(data));
+            self.mud_far_any = data[4..].iter().any(|v| *v != 0.0);
         }
     }
 
@@ -2146,17 +2181,25 @@ impl Terrain {
         if first_node + node_count > self.instance_count {
             return;
         }
-        let pipeline = match kind {
-            TerrainPass::Color => &self.pipeline,
-            TerrainPass::ColorNoWrite => &self.pipeline_no_write,
-            TerrainPass::Prepass => &self.prepass_pipeline,
-            TerrainPass::Planar => &self.planar_pipeline,
+        // PERF-TERRAIN-DRY: the dry twins while nothing can wet the ground (dry_now).
+        let dry = if self.dry_now() { self.dry_pipelines.as_ref() } else { None };
+        let pipeline = match (kind, dry) {
+            (TerrainPass::Color, Some(((p, _), _))) => p,
+            (TerrainPass::ColorNoWrite, Some(((_, p), _))) => p,
+            (TerrainPass::Color, None) => &self.pipeline,
+            (TerrainPass::ColorNoWrite, None) => &self.pipeline_no_write,
+            (TerrainPass::Prepass, _) => &self.prepass_pipeline,
+            (TerrainPass::Planar, _) => &self.planar_pipeline,
+        };
+        let far_pipelines = match dry {
+            Some((_, far)) => far.as_ref(),
+            None => self.far_pipelines.as_ref(),
         };
         // PERF-TERRAIN-FAR-SPLIT: the colour pass draws each run of nodes that lies wholly beyond
         // the Tidewater near band with the far-only pipeline. Exact: the shader's band test uses
         // the 3D distance, never less than the horizontal distance measured here, so every pixel
         // of such a node already took the far path. The margin covers f32 rounding.
-        let far = match (kind, cam, &self.far_pipelines) {
+        let far = match (kind, cam, far_pipelines) {
             (TerrainPass::Color, Some(c), Some((p, _))) => Some((c, p)),
             (TerrainPass::ColorNoWrite, Some(c), Some((_, p))) => Some((c, p)),
             _ => None,
@@ -2232,6 +2275,19 @@ impl Terrain {
         }
     }
 
+    /// PERF-TERRAIN-DRY: true when the dry twin draws exactly what the full shader would: no
+    /// cosmetic rain above the wetness threshold (terrain.wgsl soil_wet_amount's 0.03), no live
+    /// rain-flow window, no rut in either mud view, and no wet-soil debug view (which shows the
+    /// soil itself).
+    fn dry_now(&self) -> bool {
+        self.dry_pipelines.is_some()
+            && self.params._pad1 <= 0.03
+            && wet_soil_debug_mode(self.params._pad3) == 0.0
+            && self.rain_flow.window()[3] <= 0.0
+            && !self.mud_near_any
+            && !self.mud_far_any
+    }
+
     /// Upper bound on the ground height anywhere in node `n`: the block maxima under its
     /// footprint plus a margin for what the vertex shader adds (snow depth, crater rims, sand).
     /// +inf when there is no heightmap.
@@ -2259,6 +2315,11 @@ impl Terrain {
         pass.set_vertex_buffer(1, self.instance_buf.slice(..));
         pass.set_index_buffer(self.grid_ibuf.slice(..), wgpu::IndexFormat::Uint16);
     }
+}
+
+/// PERF-TERRAIN-DRY lever: WGR_TERRAIN_DRY=0 builds no dry twins and always draws the full shader.
+fn dry_variant_enabled() -> bool {
+    std::env::var("WGR_TERRAIN_DRY").map(|v| v.trim() != "0").unwrap_or(true)
 }
 
 /// PERF-TERRAIN-PREPASS-ORDER lever: WGR_TERRAIN_PREPASS_ORDER=0 draws the prepass in node order.

@@ -2346,6 +2346,13 @@ override far_shadow_tent: f32 = 120.0;
 // its occupancy. Measured on Arma 2 Chernarus at 3440x1440 from 150 m: terrain colour 23.5 -> 13.1
 // ms with the near kinds removed, although almost no pixel ever took them.
 override tw_far_only: u32 = 0u;
+// PERF-TERRAIN-DRY: 0 = the dry-ground twin, where the cells' soil (`mud`) is a constant 0 and
+// everything that only exists to carry it to the wet-soil terms compiles out. Terrain::dry_now
+// selects it only when that changes no pixel: the soil reaches the image solely through soil
+// wetness (soil_wet_amount and soil_wet_surface's source), and wetness is exactly 0 when the
+// cosmetic rain is <= 0.03 (smoothstep(0.03, ...) = 0), no rain-flow window is live and both mud
+// views hold no rut -- which is what dry_now tests. Measured: terrain 1.92 -> 1.72 ms (Durras).
+override wet_ground: u32 = 1u;
 // The near band's outer edge: farK = smoothstep(130, TW_NEAR_END, distance). Terrain::draw keeps
 // any node that can reach inside it on the full pipeline (TW_NEAR_END in terrain/mod.rs).
 const TW_NEAR_END: f32 = 200.0;
@@ -2518,6 +2525,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
                     + w01 * c01.ambient_occlusion + w11 * c11.ambient_occlusion;
         mud = w00 * c00.mud + w10 * c10.mud + w01 * c01.mud + w11 * c11.mud;
     }
+    if (wet_ground == 0u) { mud = 0.0; } // PERF-TERRAIN-DRY (see the override)
     // (OP) Tidewater's ground where the layer says so (tw_cell), blended across the cells as the
     // colour is: a weight and an OFP anchor colour per surface kind; faded out where the satellite
     // takes over the far ground
