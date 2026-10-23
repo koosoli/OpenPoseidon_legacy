@@ -1320,6 +1320,24 @@ void AIUnit::SetSpeaker(RString speaker, float pitch)
         speaker = (cfg >> "voices")[0];
     }
     const ParamEntry* entry = cfg.FindEntry(speaker);
+    // --arma2: a CWA voice on an Arma 2 man (the player's, from the CWA profile) becomes an
+    // Arma 2 voice of his kind, as every other Arma 2 man has.
+    if (entry && Arma1Compat::Generation() == 2)
+    {
+        if (Person* person = GetPerson())
+        {
+            const RString name = person->GetInfo()._name;
+            const RString a2 = Arma1Compat::Arma2RandomSpeaker(
+                person->GetType()->GetName(), person->GetShape() ? person->GetShape()->GetName() : "",
+                static_cast<uint32_t>(std::hash<std::string>{}(std::string((const char*)name) + "|voice|" +
+                                                                (const char*)speaker)));
+            if (a2.GetLength() > 0)
+            {
+                speaker = a2;
+                entry = nullptr;
+            }
+        }
+    }
     if (!entry)
     {
         // --arma2: an Arma 2 voice speaks Arma 2's radio, CWA's first voice what it lacks.
