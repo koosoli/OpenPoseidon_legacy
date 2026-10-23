@@ -69,6 +69,7 @@ struct GrassParams {
     variety: vec4<f32>,
     look_weights: array<vec4<f32>, 4>,
     height_bounds: vec4<f32>, // PERF-GRASS-VIEW-PREFILTER (grass.wgsl); unused here
+    track_bounds: vec4<f32>, // PERF-GRASS-TRACK-BOUNDS (grass.wgsl); unused here
 };
 // Must mirror grass.wgsl's 32-byte layout exactly: both shaders bind the same
 // instance buffer through the shared `data_layout`.

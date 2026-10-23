@@ -174,6 +174,9 @@ struct GrassParams {
     // the terrain can have (heightmap bounds -/+ a margin for mud, sand, craters and snow), .z 1
     // when known (0 on the Earth ground: no prefilter).
     height_bounds: vec4<f32>,
+    // PERF-GRASS-TRACK-BOUNDS (grass/mod.rs track_bounds): the xz box (min x, min z, max x,
+    // max z) holding every stamped footprint's whole radius; empty (min > max) with none.
+    track_bounds: vec4<f32>,
 };
 
 // 32 bytes. `pos_seed` stays f32 for world precision; everything the compute
@@ -1110,7 +1113,11 @@ fn eval_flatten(world_xz: vec2<f32>) -> vec4<f32> {
     // survives is a length of trail.
     let lifetime = max(grass.photo_mix.z, 5.0);
     let recover_from = lifetime * 0.66;
-    for (var i = 0u; i < 256u; i = i + 1u) {
+    // PERF-GRASS-TRACK-BOUNDS: a footprint's imprint is exactly 0 at or beyond its radius, so
+    // outside the box round all of them the loop cannot change `strength` -- and it was most of
+    // the mid placement's cost (0.66 of 0.85 ms at Durras), run for every placed card.
+    let in_tracks = all(world_xz >= grass.track_bounds.xy) && all(world_xz <= grass.track_bounds.zw);
+    for (var i = 0u; i < select(0u, 256u, in_tracks); i = i + 1u) {
         let track = grass.tracks[i];
         if (track.radius <= 0.01 || track.age >= lifetime) { continue; }
         let delta = world_xz - vec2<f32>(track.x, track.z);

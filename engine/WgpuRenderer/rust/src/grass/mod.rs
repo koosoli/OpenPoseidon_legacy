@@ -411,6 +411,25 @@ struct GrassParams {
     look_weights: [f32; 16],
     // PERF-GRASS-VIEW-PREFILTER: grass.wgsl `height_bounds` (set in prepare_terrain).
     height_bounds: [f32; 4],
+    // PERF-GRASS-TRACK-BOUNDS: grass.wgsl `track_bounds` (track_bounds below).
+    track_bounds: [f32; 4],
+}
+
+/// PERF-GRASS-TRACK-BOUNDS: the xz box holding every stamped footprint's whole radius (plus a
+/// centimetre-scale margin for rounding), which eval_flatten in grass.wgsl tests before its loop.
+/// Every slot with a radius counts, whatever its age: a superset of what the loop would use.
+/// Empty (min > max) when no slot is stamped. WGR_GRASS_TRACK_BOUNDS=0 = the whole plane.
+fn track_bounds(tracks: &[crate::ffi::WgrGrassTrack]) -> [f32; 4] {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var("WGR_GRASS_TRACK_BOUNDS").map(|v| v.trim() != "0").unwrap_or(true)) {
+        return [-1.0e30, -1.0e30, 1.0e30, 1.0e30];
+    }
+    let mut b = [1.0e30f32, 1.0e30, -1.0e30, -1.0e30];
+    for t in tracks.iter().filter(|t| t.radius > 0.01) {
+        let r = t.radius + 0.05 + 1.0e-4 * t.x.abs().max(t.z.abs());
+        b = [b[0].min(t.x - r), b[1].min(t.z - r), b[2].max(t.x + r), b[3].max(t.z + r)];
+    }
+    b
 }
 
 /// GRS-VAR: the shipped look weights (Engine.hpp GrassSettings::lookWeights mirrors them).
@@ -1024,6 +1043,7 @@ impl Grass {
             variety: variety_from_env(),
             look_weights: DEFAULT_LOOK_WEIGHTS,
             height_bounds: [0.0; 4],
+            track_bounds: track_bounds(&[]),
         };
         queue.write_buffer(&grass_params, 0, bytemuck::bytes_of(&params));
 
@@ -2848,6 +2868,7 @@ impl Grass {
             variety: resolve_variety(params.variety),
             look_weights: resolve_look_weights(params.look_weights),
             height_bounds: self.last_params.height_bounds,
+            track_bounds: track_bounds(&params.tracks),
         };
         self.near_grid_dim = near_grid_dim;
         self.mid_grid_dim = mid_grid_dim;
