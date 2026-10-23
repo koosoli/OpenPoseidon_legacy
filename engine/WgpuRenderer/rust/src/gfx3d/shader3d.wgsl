@@ -869,7 +869,7 @@ const REFLECT_GROUND_ALBEDO: f32 = 0.2;
 // return the previous frame's colour at the hit, reprojected, with its confidence in .a (0 = no
 // hit: keep the phase-D environment). Main scene camera only -- frame.gtao.x is GTAO's own
 // per-camera gate, 1 exactly where its depth chain is this camera's.
-fn reflect_ssr(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
+fn reflect_ssr(origin: vec3<f32>, dir: vec3<f32>, pixel: vec2<f32>) -> vec4<f32> {
     if (ssr.misc.x < 0.5 || frame.gtao.x < 0.5) {
         return vec4<f32>(0.0);
     }
@@ -878,10 +878,14 @@ fn reflect_ssr(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
         return vec4<f32>(0.0);
     }
     let vp = frame.proj * frame.view;
-    // Growing steps: centimetres near the surface, metres far out -- 32 taps reach ~80 m.
-    var t = 0.1;
+    // Growing steps: centimetres near the surface, metres far out -- 32 taps reach ~80 m. The
+    // start is jittered per pixel (interleaved gradient noise): with one fixed step pattern,
+    // neighbouring rows of a side panel crossed the ground between the same two taps or not,
+    // and the first phase-E run (reflectE-1f48035) drew that as zebra stripes.
+    let jitter = fract(52.9829189 * fract(dot(pixel, vec2<f32>(0.06711056, 0.00583715))));
+    var t = 0.1 + 0.15 * jitter;
     var prev_t = 0.0;
-    var hit = false;
+    var crossed = false;
     for (var i = 0; i < 32; i = i + 1) {
         let clip = vp * vec4<f32>(origin + dir * t, 1.0);
         if (clip.w <= 0.05) {
@@ -892,10 +896,9 @@ fn reflect_ssr(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
             break;
         }
         let texel = clamp(vec2<i32>(uv * vec2<f32>(dims)), vec2<i32>(0), dims - vec2<i32>(1));
-        let scene_z = textureLoad(ssr_depth, texel, 0).r;
-        // The ray passed behind a surface, but not so far that it went round it.
-        if (clip.w > scene_z && clip.w - scene_z < 0.2 + 0.04 * t) {
-            hit = true;
+        // First tap behind a surface: the crossing lies between this tap and the last one.
+        if (clip.w > textureLoad(ssr_depth, texel, 0).r) {
+            crossed = true;
             break;
         }
         prev_t = t;
@@ -904,13 +907,15 @@ fn reflect_ssr(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
             break;
         }
     }
-    // Hits closer than 30 cm are the surface itself at grazing angles (depth quantisation).
-    if (!hit || t < 0.3) {
+    if (!crossed) {
         return vec4<f32>(0.0);
     }
+    // Bisect to the crossing, THEN judge it: a ray that went behind a thin object (a pole, a
+    // tyre seen edge-on) ends up well behind its front surface and is not a hit; one that met
+    // a surface lands on it however long the step that found it.
     var lo = prev_t;
     var hi = t;
-    for (var k = 0; k < 5; k = k + 1) {
+    for (var k = 0; k < 6; k = k + 1) {
         let mid = 0.5 * (lo + hi);
         let clip = vp * vec4<f32>(origin + dir * mid, 1.0);
         let uv = clip.xy / max(clip.w, 0.05) * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
@@ -920,6 +925,14 @@ fn reflect_ssr(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
         } else {
             lo = mid;
         }
+    }
+    let hit_clip = vp * vec4<f32>(origin + dir * hi, 1.0);
+    let hit_uv = hit_clip.xy / max(hit_clip.w, 0.05) * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
+    let hit_texel = clamp(vec2<i32>(hit_uv * vec2<f32>(dims)), vec2<i32>(0), dims - vec2<i32>(1));
+    let behind = hit_clip.w - textureLoad(ssr_depth, hit_texel, 0).r;
+    // Hits closer than 30 cm are the surface itself at grazing angles (depth quantisation).
+    if (hi < 0.3 || behind > 0.25 + 0.02 * hi) {
+        return vec4<f32>(0.0);
     }
     let prev = ssr.reproj * vec4<f32>(origin + dir * hi, 1.0);
     if (prev.w <= 0.05) {
@@ -1950,7 +1963,7 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         // Phase E: what the world in front of the surface shows (trees, houses, other
         // vehicles, the ground), where the screen has it; the prefiltered sky elsewhere. The
         // sky part keeps the sky's occlusion, the hit is a real surface and only takes fog.
-        let ssr_hit = reflect_ssr(in.world_pos + gn * 0.02, refl_dir);
+        let ssr_hit = reflect_ssr(in.world_pos + gn * 0.02, refl_dir, in.clip.xy);
         let ssr_rgb = ssr_hit.rgb * clamp(in.fog, 0.0, 1.0);
         let wb = ssr_hit.a * reflect_ssr_rough_weight(rough);
         let wc = ssr_hit.a * reflect_ssr_rough_weight(coat_rough);
