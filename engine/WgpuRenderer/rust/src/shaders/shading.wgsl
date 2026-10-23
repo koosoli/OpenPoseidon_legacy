@@ -134,6 +134,7 @@ struct ShadeMaterial {
 
 // REFLECT-001 phase C -- physically based sun response for classified surfaces.
 const REFLECT_PI: f32 = 3.14159265;
+const REFLECT_CLASS_PAINT_METALLIC: u32 = 4u;
 const REFLECT_CLASS_CHROME: u32 = 5u;
 const REFLECT_CLASS_MIRROR: u32 = 7u;
 const REFLECT_CLASS_LAMP_GLASS: u32 = 8u;
@@ -152,6 +153,14 @@ fn reflect_base_reflectance(mat: ShadeMaterial, albedo_lin: vec3<f32>) -> vec3<f
     let polished = cls == REFLECT_CLASS_CHROME || cls == REFLECT_CLASS_MIRROR ||
                    cls == REFLECT_CLASS_LAMP_GLASS || cls == REFLECT_CLASS_LAMP_PLASTIC;
     let metal_f0 = select(albedo_lin, mix(vec3<f32>(0.62), albedo_lin, 0.25), polished);
+    // Metallic paint: aluminium flakes in a tinted binder, so the base layer's reflection takes
+    // the paint's colour. A white F0 there washed Arma 3's red C_SUV_01_F to grey-pink once the
+    // sky and the ground reached it (E.2/E.3 runs, 2026-10-23). Half the F0 stays neutral, the
+    // other half is the albedo, scaled with F0 so an SMDI-dulled texel dulls its tint too.
+    if (cls == REFLECT_CLASS_PAINT_METALLIC) {
+        let f0 = mat.refl_a.y;
+        return vec3<f32>(0.5 * f0) + albedo_lin * min(f0 * 6.0, 0.5);
+    }
     return mix(vec3<f32>(mat.refl_a.y), metal_f0, clamp(mat.refl_a.z, 0.0, 1.0));
 }
 
