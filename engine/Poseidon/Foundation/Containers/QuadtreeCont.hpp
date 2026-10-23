@@ -124,7 +124,13 @@ class QuadTreeCont
     template <class DetectRegionF, class ActionF>
     bool ForEachInRegion(DetectRegionF detect, ActionF& action)
     {
-        return ForEachInRegion(GetRootIndex(), 1 << _maxLevel, 0, 0, detect, action);
+        // CRASH-20261023: an empty tree (or one holding a single value at the origin) has a leaf
+        // for a root. The recursive walk reads the root's four children, i.e. _index[-1..2], and
+        // descended into whatever lay before the array (briefing map of a world with no peaks).
+        const int root = GetRootIndex();
+        if (root < 0)
+            return root != -1 && detect(0, 0, 1 << _maxLevel) && action(_values[-root - 1]);
+        return ForEachInRegion(root, 1 << _maxLevel, 0, 0, detect, action);
     }
 
   protected:
@@ -149,6 +155,13 @@ void QuadTreeCont<Type, Traits, Allocator>::Clear()
 template <class Type, class Traits, class Allocator>
 void QuadTreeCont<Type, Traits, Allocator>::Set(int x, int y, const Type& value)
 {
+    // The tree covers [0, 2^30) on both axes: a negative coordinate never fits, and growing the
+    // root for one would shift `size` past the int's sign bit (CRASH-20261023).
+    if (x < 0 || y < 0 || x >= (1 << 30) || y >= (1 << 30))
+    {
+        PoseidonAssert(false);
+        return;
+    }
     int size = 1 << _maxLevel;
 
     // check bounds

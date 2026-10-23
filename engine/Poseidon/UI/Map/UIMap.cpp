@@ -1449,6 +1449,12 @@ void CStaticMap::DrawBackground()
         for (int i = 0; i < mountains.Size(); i++)
         {
             const Vector3& pos = mountains[i];
+            // The quadtree covers [0, 2^30) only: a negative or non-finite peak (NaN converts to
+            // INT_MIN) would make Set() grow the tree until its size shift overflowed. Such a peak
+            // cannot be placed on the map anyway.
+            if (!std::isfinite(pos.X()) || !std::isfinite(pos.Z()) || pos.X() < 0.0f || pos.Z() < 0.0f ||
+                pos.X() >= 1.0e9f || pos.Z() >= 1.0e9f)
+                continue;
             // check if given pos is in the visible range
             int x = toLargeInt(pos.X());
             int z = toLargeInt(pos.Z());

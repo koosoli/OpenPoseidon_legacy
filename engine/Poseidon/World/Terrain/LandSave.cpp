@@ -2545,9 +2545,27 @@ bool Landscape::LoadOprwModern(const char* path)
                  path, withSatellite, withMask, surfaces, holes, sixSlot, withSurfaceNormals, withTileNormal,
                  _a3TerrainMaterials.Size());
     }
-    LOG_INFO(World, "World load: mountains+terrain materials {} ms -- {} mountains, {} RVMATs",
-             Poseidon::Foundation::GlobalTickCount() - tMaterials, world.mountains.size(),
-             world.materials.size());
+    {
+        // The map's peak quadtree (UIMap DrawExt) only holds non-negative, finite coordinates; say
+        // how many of this world's peaks are not (the map skips them).
+        float xMin = 0.0f, xMax = 0.0f, zMin = 0.0f, zMax = 0.0f;
+        int unusable = 0;
+        for (size_t i = 0; i < world.mountains.size(); ++i)
+        {
+            const auto& m = world.mountains[i];
+            if (!std::isfinite(m.x) || !std::isfinite(m.z) || m.x < 0.0f || m.z < 0.0f)
+                ++unusable;
+            xMin = i ? std::min(xMin, m.x) : m.x;
+            xMax = i ? std::max(xMax, m.x) : m.x;
+            zMin = i ? std::min(zMin, m.z) : m.z;
+            zMax = i ? std::max(zMax, m.z) : m.z;
+        }
+        LOG_INFO(World,
+                 "World load: mountains+terrain materials {} ms -- {} mountains (x {:.0f}..{:.0f}, z {:.0f}..{:.0f}, "
+                 "{} not drawable on the map), {} RVMATs",
+                 Poseidon::Foundation::GlobalTickCount() - tMaterials, world.mountains.size(), xMin, xMax, zMin, zMax,
+                 unusable, world.materials.size());
+    }
     ProgressRefresh();
     const DWORD tPlacements = Poseidon::Foundation::GlobalTickCount();
     // A reused landscape may load another modern world without a fresh Init(). Retire

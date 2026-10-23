@@ -110,14 +110,8 @@ TEST_CASE("QuadTreeCont - Set operations", "[containers][quadtreecont]")
 
 TEST_CASE("QuadTreeCont - ForEachInRegion", "[containers][quadtreecont]")
 {
-    // Known issue #9: QuadTreeCont - Out-of-bounds access on empty tree
-    // - Root cause: ForEachInRegion doesn't check for empty tree (index < 0)
-    // - When tree is empty, GetRootIndex() returns -1 from _index[0]
-    // - Recursive method tries _index[-1] causing out-of-bounds access
-    // - Symptoms: Reads garbage memory (e.g., -33686019), may crash
-    // - Status: KNOWN BUG - preserved for 1:1 library compatibility
-    // - Fix: Add guard at start of recursive method: if (index < 0) return false;
-    /*
+    // An empty tree, or one with a single value at the origin, has a leaf for a root; the walk
+    // used to read _index[-1] there (CRASH-20261023, briefing map of a world without peaks).
     SECTION("Empty tree") {
         GameObjectTree tree;
 
@@ -129,7 +123,6 @@ TEST_CASE("QuadTreeCont - ForEachInRegion", "[containers][quadtreecont]")
 
         REQUIRE(count == 0);
     }
-    */
 
     SECTION("Single object - full region detection")
     {
@@ -273,15 +266,6 @@ TEST_CASE("QuadTreeCont - Spatial region queries", "[containers][quadtreecont]")
 
 TEST_CASE("QuadTreeCont - Edge cases", "[containers][quadtreecont]")
 {
-    // Known issue #9: QuadTreeCont - Uninitialized nodes from free list and Clear() interaction
-    // - Similar root cause to empty tree bug but manifests differently
-    // - After Clear(), _index[0] = -1, but array may have stale data beyond index 0
-    // - Set(0, 0, ...) may create nodes that reference uninitialized array indices
-    // - ForEachInRegion then tries to access these uninitialized indices
-    // - Also affects: Large coordinates, power-of-2 boundaries, stress tests
-    // - Status: KNOWN BUG - preserved for 1:1 library compatibility
-    // - Fix: Guard in ForEachInRegion: if (index < 0) return false;
-    /*
     SECTION("Objects at origin") {
         GameObjectTree tree;
 
@@ -295,16 +279,7 @@ TEST_CASE("QuadTreeCont - Edge cases", "[containers][quadtreecont]")
 
         REQUIRE(count == 1);
     }
-    */
 
-    // Known issue #9: QuadTreeCont - Uninitialized nodes from free list
-    // - Similar to Bug #8 but different root cause
-    // - AddNode() doesn't initialize children when reusing from free list
-    // - Set() initializes on first use, but recycled nodes have stale data
-    // - Large coordinates and stress tests trigger node recycling
-    // - Status: KNOWN BUG - preserved for 1:1 library compatibility
-    // - Fix: Initialize nodes in AddNode() or always initialize after allocation
-    /*
     SECTION("Large coordinates") {
         GameObjectTree tree;
 
@@ -336,13 +311,10 @@ TEST_CASE("QuadTreeCont - Edge cases", "[containers][quadtreecont]")
 
         REQUIRE(count == 5);
     }
-    */
 }
 
 // QuadTreeCont - Stress Tests
 
-// Known issue #9: See comment above - uninitialized nodes cause hangs/crashes
-/*
 TEST_CASE("QuadTreeCont - Stress test", "[containers][quadtreecont]") {
     SECTION("Many objects") {
         GameObjectTree tree;
@@ -386,4 +358,3 @@ TEST_CASE("QuadTreeCont - Stress test", "[containers][quadtreecont]") {
         }
     }
 }
-*/
