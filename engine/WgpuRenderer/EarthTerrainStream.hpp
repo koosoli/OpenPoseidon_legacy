@@ -62,6 +62,9 @@ class EarthTerrainStream
     std::filesystem::path TileDirectory(int zoom) const;
     EarthStreaming::Location _requestOrigin;
     uint64_t _activeGeneration = 0; // Worker-only download cancellation token.
+    // Changes only with the origin (Relocate, a request in a new revision): what cancels a patch under way.
+    std::atomic<uint64_t> _epoch{0};
+    uint64_t _activeEpoch = 0;
     std::filesystem::path _cache;
     EarthProviders::Source _elevation; // where elevation tiles come from (providers.cfg)
     std::atomic<bool> _stop{false};

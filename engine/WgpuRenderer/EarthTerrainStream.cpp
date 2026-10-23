@@ -74,6 +74,7 @@ void EarthTerrainStream::Relocate(const EarthStreaming::Location& origin)
     _requested=false;
     _ready.reset();
     ++_generation; // Cancel even at orbital altitude, where no new DEM is needed.
+    ++_epoch;
     _wake.notify_one();
 }
 
@@ -93,8 +94,16 @@ void EarthTerrainStream::Request(float x, float z, float altitude, const EarthSt
         origin.revision==_requestOrigin.revision) return;
     _requestX = cx; _requestZ = cz; _requestRadius = radius; _requested = true;
     _requestDetail = detail;
+    // A new window of the SAME origin does not cancel the patch under way, nor drop a finished one: in fast
+    // flight a new window came every ~0.5 s and each one aborted the last, so no patch ever completed and
+    // the ground (and its imagery, requested per patch) never arrived. The finished patch is still ground
+    // of this origin; the newest window is built next. A new origin (epoch) does cancel.
+    if (origin.revision != _requestOrigin.revision)
+    {
+        _ready.reset(); // a completed patch of the old origin must not be published after this request
+        ++_epoch;
+    }
     _requestOrigin = origin;
-    _ready.reset(); // A completed old band/cell must not be published after this request.
     ++_generation;
     _wake.notify_one();
 }
@@ -102,8 +111,7 @@ void EarthTerrainStream::Request(float x, float z, float altitude, const EarthSt
 std::unique_ptr<EarthTerrainStream::Patch> EarthTerrainStream::TakeReady()
 {
     std::lock_guard lock(_mutex);
-    if (_ready && (_ready->generation != _generation.load() ||
-        !EarthStreaming::Locations().IsCurrent(_ready->originRevision))) _ready.reset();
+    if (_ready && !EarthStreaming::Locations().IsCurrent(_ready->originRevision)) _ready.reset();
     return std::move(_ready);
 }
 
@@ -117,7 +125,7 @@ bool EarthTerrainStream::Download(const std::string& url, std::vector<unsigned c
         {
             for (int waited = 0; waited < 250 * attempt; waited += 50)
             {
-                if (_stop.load() || _generation.load() != _activeGeneration) return false;
+                if (_stop.load() || _epoch.load() != _activeEpoch) return false;
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
         }
@@ -145,7 +153,7 @@ bool EarthTerrainStream::DownloadOnce(const std::string& url, std::vector<unsign
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &bytes);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, Progress);
-    Cancellation token{_stop,_generation,_activeGeneration};
+    Cancellation token{_stop,_epoch,_activeEpoch};
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &token);
     const CURLcode result = curl_easy_perform(curl);
     status = 0;
@@ -223,7 +231,7 @@ const EarthTerrainStream::Tile& EarthTerrainStream::LoadTile(int zoom, int x, in
         const std::string url = EarthProviders::ExpandUrl(_elevation, zoom, x, y);
         if (!Download(url, bytes))
         {
-            if (!_stop.load() && _generation.load() == _activeGeneration)
+            if (!_stop.load() && _epoch.load() == _activeEpoch)
             {
                 if (_failedTiles.size() >= 1024) _failedTiles.clear();
                 _failedTiles[key] = std::chrono::steady_clock::now();
@@ -266,7 +274,7 @@ float EarthTerrainStream::SampleFallback(const Earth::Coordinate& c, int zoom, i
         }
         catch (const std::exception&)
         {
-            if (z <= coarsest || _stop.load() || _generation.load() != _activeGeneration) throw;
+            if (z <= coarsest || _stop.load() || _epoch.load() != _activeEpoch) throw;
         }
     }
 }
@@ -313,7 +321,7 @@ void EarthTerrainStream::Prefetch(const std::set<std::tuple<int,int,int>>& keys)
     {
         for (size_t i; (i = next.fetch_add(1)) < missing.size();)
         {
-            if (_stop.load() || _generation.load() != _activeGeneration) return;
+            if (_stop.load() || _epoch.load() != _activeEpoch) return;
             const auto [zoom, x, y] = missing[i];
             std::vector<unsigned char> bytes;
             if (!Download(EarthProviders::ExpandUrl(_elevation, zoom, x, y), bytes))
@@ -341,7 +349,7 @@ void EarthTerrainStream::Prefetch(const std::set<std::tuple<int,int,int>>& keys)
     for (size_t w = 1; w < std::min(Workers, missing.size()); ++w) pool.push_back(std::async(std::launch::async, worker));
     worker();
     for (auto& f : pool) f.get();
-    if (!_stop.load() && _generation.load() == _activeGeneration)
+    if (!_stop.load() && _epoch.load() == _activeEpoch)
         for (const auto& key : failed) _failedTiles[key] = now;
 }
 
@@ -383,6 +391,7 @@ void EarthTerrainStream::Run()
             detail = _requestDetail;
             origin = _requestOrigin;
             _activeGeneration = version;
+            _activeEpoch = _epoch.load();
         }
         try
         {
@@ -442,7 +451,7 @@ void EarthTerrainStream::Run()
             for (int z = 0; z < Earth::GridSamples; ++z)
             {
                 if (_stop.load()) return;
-                if (_generation.load() != version) break;
+                if (_epoch.load() != _activeEpoch) break;
                 for (int x = 0; x < Earth::GridSamples; ++x)
                 {
                     const auto geographic = Earth::FromLocal(origin.latitude, origin.longitude,
@@ -454,7 +463,7 @@ void EarthTerrainStream::Run()
                         Sample(position.x, position.y,patch->sourceZoom)) - float(Earth::CurvatureDrop(wx,wz));
                 }
             }
-            if (_generation.load() != version) { handled = version; continue; }
+            if (_epoch.load() != _activeEpoch) { handled = version; continue; }
             patch->horizonRadius = radius;
             patch->horizonZoom = Earth::HorizonZoom(centre.latitude, radius);
             patch->horizonHeights.resize(Earth::HorizonSamples * Earth::HorizonSamples);
@@ -462,7 +471,7 @@ void EarthTerrainStream::Run()
             for (int z = 0; z < Earth::HorizonSamples; ++z)
             {
                 if (_stop.load()) return;
-                if (_generation.load() != version) break;
+                if (_epoch.load() != _activeEpoch) break;
                 for (int x = 0; x < Earth::HorizonSamples; ++x)
                 {
                     const float ox = Earth::HorizonOffset(x,radius,halfWindow), oz = Earth::HorizonOffset(z,radius,halfWindow);
@@ -504,7 +513,7 @@ void EarthTerrainStream::Run()
             patch->seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             TrimDisk();
             std::lock_guard lock(_mutex);
-            if (_generation.load() == version) _ready = std::move(patch);
+            if (_epoch.load() == _activeEpoch) _ready = std::move(patch);
             handled = version;
         }
         catch (const std::exception& e)

@@ -8078,7 +8078,8 @@ void EngineWgpu::SubmitTerrain(std::span<const WgrTerrainNode> nodes)
     _cmds.push_back(cmd);
 }
 
-void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture, uint32_t sampler, bool groundDetail, bool nearAtlas)
+void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture, uint32_t sampler, bool groundDetail, bool nearAtlas,
+                                    double sourceLatitude, double sourceLongitude)
 {
     if (!_renderer || !mesh || !indexCount) return;
     EnsureCamera();
@@ -8129,12 +8130,16 @@ void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTextur
         d.mat_light_diffuse = {6400.0f, -6378137.0f, 6400.0f, 0};
         d.mat_light_ambient = {0, 1, 0, 0};
     }
-    if (EarthStreaming::MoonFrameActive())
+    const bool foreignFrame = std::isfinite(sourceLatitude) && std::isfinite(sourceLongitude);
+    if (EarthStreaming::MoonFrameActive() || foreignFrame)
     {
-        // Near the moon the world is the moon frame (EarthMoonFrame.hpp): place the Earth's meshes, which
-        // are in the Earth origin's tangent frame, through Earth tangent -> ECEF -> moon frame.
+        // The mesh is in an Earth origin's tangent frame that is not the world's: near the moon the world
+        // is the moon frame (EarthMoonFrame.hpp), and through a free-flight rebase the previous origin's
+        // imagery stays on screen until the new one has its own. Place it through its tangent frame ->
+        // ECEF -> the world's frame.
         const auto origin = EarthStreaming::Locations().Get();
-        const auto earth = EarthStreaming::EarthBasis(origin.latitude, origin.longitude);
+        const auto earth = foreignFrame ? EarthStreaming::EarthBasis(sourceLatitude, sourceLongitude)
+                                        : EarthStreaming::EarthBasis(origin.latitude, origin.longitude);
         EarthStreaming::Basis world;
         if (EarthStreaming::WorldBasis(origin.latitude, origin.longitude, world))
         {
@@ -8155,9 +8160,12 @@ void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTextur
             d.world.m[13] = float(T.y + shift.y - cam[1]);
             d.world.m[14] = float(T.z + shift.z - cam[2]);
             d.world.m[15] = 1.0f;
-            const auto centre = EarthStreaming::ToWorld(world, {0.0, 0.0, 0.0});
-            d.mat_light_diffuse = {float(centre.x), float(centre.y), float(centre.z), 0};
-            d.mat_light_ambient = {float(cols[1].x), float(cols[1].y), float(cols[1].z), 0};
+            if (!groundDetail)
+            {
+                const auto centre = EarthStreaming::ToWorld(world, {0.0, 0.0, 0.0});
+                d.mat_light_diffuse = {float(centre.x), float(centre.y), float(centre.z), 0};
+                d.mat_light_ambient = {float(cols[1].x), float(cols[1].y), float(cols[1].z), 0};
+            }
         }
     }
     _draws3d.push_back(d);

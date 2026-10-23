@@ -361,6 +361,12 @@ void EarthSurfaceStream::Run() {
     // Idle time: fetch the windows the camera is about to need (Prefetch), nearest ground first. A Request
     // (or a newer prediction) cancels it; what already arrived stays in memory and on disk.
     std::vector<std::tuple<double,double,float,uint64_t,float>> prefetched; // windows done, most recent last
+    // The origin revision that has had a final atlas on screen. From then on an interim atlas (cached first
+    // pass with holes, coarse preview, streaming update) is not published: it is blurrier than the final
+    // one already showing, and every window re-centre or altitude-band change swapped the sharp imagery
+    // for blurry and back (owner: "the high resolution images are hidden behind the low resolution ones",
+    // "it flickers between low and high resolution"). The sharp one stays until the next final is ready.
+    uint64_t finalRevision=0;
     const auto runPrefetch=[&](const std::vector<Window>& windows,uint64_t version,uint64_t serial) {
         const auto cancelled=[&]{return _stop.load() || _version!=version || _prefetchSerial!=serial;};
         unsigned downloads=0;
@@ -514,7 +520,7 @@ void EarthSurfaceStream::Run() {
                             if(hasPreview)frame.insert(at,under);
                             frame.insert(frame.end(),prepared.begin(),prepared.end());
                             auto staged=std::make_unique<Atlas>(BuildRegional(window,{nasa.data(),4096,2048},frame,AtlasSize,cancelled,FarAtlasSize));
-                            if(staged->error.empty() && !staged->farPixels.empty()) {
+                            if(staged->error.empty() && !staged->farPixels.empty() && finalRevision!=window.revision) {
                                 finish(*staged,false);
                                 std::snprintf(timing,sizeof(timing),"; %.2f s after the request, %u threads",since(requested),EarthParallel::Threads());
                                 staged->sources=label+timing;
@@ -572,12 +578,12 @@ void EarthSurfaceStream::Run() {
                     // and rebuild this very atlas (as long again as the first pass). Done.
                     const bool complete=found>0 && std::all_of(mosaics.begin(),mosaics.end(),
                         [](const EarthImageryTiles::Mosaic& m){return m.failures==0;});
-                    if(attempt->error.empty()) {
+                    if(attempt->error.empty() && (complete || finalRevision!=window.revision)) {
                         finish(*attempt,complete);
                         if(complete)attempt->sources+=" (complete)";
                         std::lock_guard lock(_mutex);
                         if(!_stop && _version==version)_ready=std::move(attempt);
-                        if(complete){finished=true;break;}
+                        if(complete){finished=true;finalRevision=window.revision;break;}
                     }
                     continue;
                 }
@@ -585,7 +591,10 @@ void EarthSurfaceStream::Run() {
                 result=std::move(attempt);
             }
         } catch(const std::exception& e) {sourceError=e.what();result->error=sourceError;finished=false;}
-        if(!finished){std::lock_guard lock(_mutex);if(!_stop && _version==version)_ready=std::move(result);}
+        if(!finished){
+            if(result->error.empty() && result->cellPresent && result->final)finalRevision=window.revision;
+            std::lock_guard lock(_mutex);if(!_stop && _version==version)_ready=std::move(result);
+        }
         // The build pre-empted any prefetch; carry on with what is still ahead (done windows are skipped).
         {std::lock_guard lock(_mutex);if(!_prefetch.empty())_prefetchPending=true;}
     }

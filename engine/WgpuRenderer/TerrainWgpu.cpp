@@ -4238,6 +4238,18 @@ void TerrainWgpu::UploadEarthMeshes(const EarthMeshData& data)
     _earthHorizonUvRevision=data.revision;
 }
 
+void TerrainWgpu::DropEarthPrevious()
+{
+    if(!_earthPrevHorizonMesh && !_earthPrevNearMesh && !_earthPrevSurfaceTexture && !_earthPrevFarTexture)return;
+    EngineWgpu::AcquireProducerWindow("Earth previous ground");
+    if(_earthPrevHorizonMesh)wgr_mesh_destroy(_renderer,_earthPrevHorizonMesh);
+    if(_earthPrevNearMesh)wgr_mesh_destroy(_renderer,_earthPrevNearMesh);
+    if(_earthPrevSurfaceTexture)wgr_texture_destroy(_renderer,_earthPrevSurfaceTexture);
+    if(_earthPrevFarTexture)wgr_texture_destroy(_renderer,_earthPrevFarTexture);
+    _earthPrevHorizonMesh=_earthPrevNearMesh=0;_earthPrevHorizonIndices=_earthPrevNearIndices=0;
+    _earthPrevSurfaceTexture=_earthPrevFarTexture=0;
+}
+
 void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p,bool localUv)
 {
     UploadEarthMeshes(BuildEarthMeshes(p,localUv,_earthSurface!=nullptr));
@@ -4280,6 +4292,17 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         _earthPatch.reset();
         _earthPendingPatch.reset();
         if(_earthSurface)_earthSurface->Relocate();
+        if(_earthSurfaceTexture && _earthFarTexture && _earthHorizonMesh && !EarthStreaming::MoonFrameActive())
+        {
+            // Keep the textured ground on screen, in its own (old) frame, until the new origin has imagery.
+            DropEarthPrevious();
+            _earthPrevHorizonMesh=_earthHorizonMesh;_earthPrevHorizonIndices=_earthHorizonIndices;
+            _earthPrevNearMesh=_earthNearMesh;_earthPrevNearIndices=_earthNearIndices;
+            _earthPrevSurfaceTexture=_earthSurfaceTexture;_earthPrevFarTexture=_earthFarTexture;
+            _earthPrevLatitude=_earthRelocatedFrom.latitude;_earthPrevLongitude=_earthRelocatedFrom.longitude;
+            _earthHorizonMesh=_earthNearMesh=0;_earthHorizonIndices=_earthNearIndices=0;
+            _earthSurfaceTexture=_earthFarTexture=0;
+        }
         if(_earthSurfaceTexture){EngineWgpu::AcquireProducerWindow("Earth surface relocate");wgr_texture_destroy(_renderer,_earthSurfaceTexture);_earthSurfaceTexture=0;}
         if(_earthFarTexture){EngineWgpu::AcquireProducerWindow("Earth far surface relocate");wgr_texture_destroy(_renderer,_earthFarTexture);_earthFarTexture=0;}
         if(_earthFeatures)_earthFeatures->Relocate();
@@ -4295,7 +4318,9 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         if(_earthBuildings)_earthBuildings->Relocate();
         for(size_t i=0;i<_earthBuildingMeshes.size();++i)if(_earthBuildingMeshes[i]){EngineWgpu::AcquireProducerWindow("Earth buildings relocate");wgr_mesh_destroy(_renderer,_earthBuildingMeshes[i]);_earthBuildingMeshes[i]=0;_earthBuildingIndices[i]=0;}
         _earthOriginRevision=origin.revision;
+        _earthRelocatedFrom=origin;
         _earthAtlasWaiting.reset();_earthMeshWant.reset(); // a running build's result is dropped by its revision
+        _earthNewestPatch.reset();
         _earthImageryFinal=false;
         _earthRelocatedAt=std::chrono::steady_clock::now();
         LOG_INFO(Graphics,"Earth relocated: origin [{},{}], revision {}",origin.latitude,origin.longitude,origin.revision);
@@ -4315,7 +4340,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         if(_earthPatch || !_earthMoonHeightmap)
         {
             _earthPatch.reset();
-            _earthPendingPatch.reset();
+            _earthPendingPatch.reset();_earthNewestPatch.reset();
             _params.world_origin = {float(EarthStreaming::CameraAnchor) - 128000.0f, float(EarthStreaming::CameraAnchor) - 128000.0f};
             _params.terrain_grid = _params.land_grid = 1000.0f;
             _params.hm_width = _params.hm_height = Earth::GridSamples;
@@ -4465,12 +4490,21 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                              (!_earthPatch || now - _earthDirectApplyAt >= std::chrono::seconds(1));
         if(!showNow)
         {
-            _earthPendingPatch = std::move(patch);
-            _earthPendingAt = now;
+            // Let the imagery build that is under way finish: in fast flight a new window came every ~0.5 s
+            // and each one cancelled the half-built atlas of the last, so none was ever finished and the
+            // ground stayed on the globe image. While a pending patch waits for its imagery, newer ones
+            // queue behind it (only the newest is kept) and go next.
+            if(_earthPendingPatch && _earthSurfaceTexture)
+                _earthNewestPatch = std::move(patch);
+            else
+            {
+                _earthPendingPatch = std::move(patch);
+                _earthPendingAt = now;
+            }
         }
         else
         {
-            _earthPendingPatch.reset();
+            _earthPendingPatch.reset();_earthNewestPatch.reset();
             _earthDirectApplyAt = now;
             applyPatch(std::move(patch), false);
         }
@@ -4618,8 +4652,26 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         }
     }
     installTimes.Mark("atlas other");
-    _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices,_earthFarTexture?_earthFarTexture:_earthGlobeTexture,_earthFarTexture?3:2,true);
-    if(_earthSurface)_engine.SubmitEarthHorizon(_earthNearMesh,_earthNearIndices,_earthSurfaceTexture?_earthSurfaceTexture:_earthGlobeTexture,_earthSurfaceTexture?3:2,true,_earthSurfaceTexture != 0);
+    // The pending window got its imagery (or was dropped): the newest queued window is next.
+    if(!_earthPendingPatch && _earthNewestPatch)
+    {
+        _earthPendingPatch = std::move(_earthNewestPatch);
+        _earthPendingAt = std::chrono::steady_clock::now();
+    }
+    if(_earthPrevSurfaceTexture && _earthSurfaceTexture)
+        DropEarthPrevious(); // the new origin has its own imagery now
+    if(_earthPrevSurfaceTexture)
+    {
+        // Through a rebase: the previous origin's textured ground, placed in this frame. The new origin's
+        // untextured patch is not drawn over it meanwhile.
+        _engine.SubmitEarthHorizon(_earthPrevHorizonMesh,_earthPrevHorizonIndices,_earthPrevFarTexture,3,true,false,_earthPrevLatitude,_earthPrevLongitude);
+        if(_earthPrevNearMesh)_engine.SubmitEarthHorizon(_earthPrevNearMesh,_earthPrevNearIndices,_earthPrevSurfaceTexture,3,true,true,_earthPrevLatitude,_earthPrevLongitude);
+    }
+    else
+    {
+        _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices,_earthFarTexture?_earthFarTexture:_earthGlobeTexture,_earthFarTexture?3:2,true);
+        if(_earthSurface)_engine.SubmitEarthHorizon(_earthNearMesh,_earthNearIndices,_earthSurfaceTexture?_earthSurfaceTexture:_earthGlobeTexture,_earthSurfaceTexture?3:2,true,_earthSurfaceTexture != 0);
+    }
     installTimes.Skip();
     // Imagery first (owner, 2026-10-23: "make it that satellite images load before buildings, trees and
     // streets"): roads, OSM forests, buildings and worldgen objects neither request nor install anything

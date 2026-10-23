@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <limits>
 
 #include <Poseidon/Graphics/Core/MatrixConversion.hpp>
 #include <Poseidon/Graphics/Core/MeshVertex.hpp> // SVertex, for the queued mesh-create payloads (REN-THR-008)
@@ -643,7 +644,11 @@ class EngineWgpu : public EngineDummy
     // camera and enqueue its draw in submission order.
     void SubmitTerrain(std::span<const WgrTerrainNode> nodes);
     // Global imagery wraps longitude only; local atlas callers clamp both axes (3).
-    void SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture = 0, uint32_t sampler = 2, bool groundDetail = false, bool nearAtlas = false);
+    // sourceLatitude/Longitude: the geographic origin whose tangent frame the mesh was built in, when it is
+    // not the current one (imagery kept on screen through a free-flight rebase; NaN = current).
+    void SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture = 0, uint32_t sampler = 2, bool groundDetail = false,
+                            bool nearAtlas = false, double sourceLatitude = std::numeric_limits<double>::quiet_NaN(),
+                            double sourceLongitude = std::numeric_limits<double>::quiet_NaN());
     // A renderer-generated mesh drawn as an ordinary lit, opaque, double-sided world object (fish, wildlife):
     // `world` is the absolute column-major model matrix (rotation x scale, translation in world metres).
     void SubmitDynamicMesh(WgrMesh mesh, uint32_t indexCount, const float world[16], WgrTexture texture, uint32_t sampler = 0, float alphaRef = 0.0f);

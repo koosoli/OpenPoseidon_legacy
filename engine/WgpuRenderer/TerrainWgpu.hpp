@@ -156,6 +156,8 @@ class TerrainWgpu : public ITerrainRenderer
     uint64_t _earthPrefetchRevision = 0;
     // A newer patch held back until its imagery is ready (or 12 s pass), so the textured ground stays up.
     std::unique_ptr<EarthTerrainStream::Patch> _earthPendingPatch;
+    // A newer patch that arrived while the pending one's imagery was still being built; it goes next.
+    std::unique_ptr<EarthTerrainStream::Patch> _earthNewestPatch;
     std::chrono::steady_clock::time_point _earthPendingAt{};
     std::string _earthImageryPath; // globe/overview image: POSEIDON_EARTH_IMAGERY or the provider overview
     std::unique_ptr<EarthFeatureStream> _earthFeatures;
@@ -173,6 +175,15 @@ class TerrainWgpu : public ITerrainRenderer
     uint32_t _earthNearIndices=0;
     WgrTexture _earthSurfaceTexture=0;
     WgrTexture _earthFarTexture=0;
+    // The previous origin's textured ground, kept on screen through a free-flight rebase (drawn through
+    // the frame transform) until the new origin has imagery of its own: every rebase used to drop the
+    // ground to the bare globe and stream it again, every few seconds in fast flight.
+    WgrMesh _earthPrevHorizonMesh=0,_earthPrevNearMesh=0;
+    uint32_t _earthPrevHorizonIndices=0,_earthPrevNearIndices=0;
+    WgrTexture _earthPrevSurfaceTexture=0,_earthPrevFarTexture=0;
+    double _earthPrevLatitude=0,_earthPrevLongitude=0;
+    EarthStreaming::Location _earthRelocatedFrom{}; // the origin the current ground was built in
+    void DropEarthPrevious();
     std::unique_ptr<class FishSchools> _fish;
     std::unique_ptr<class BirdFlocks> _birds;
     std::unique_ptr<class ReefLife> _reef;
