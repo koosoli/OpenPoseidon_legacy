@@ -10020,23 +10020,44 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     const Color& localSpec = _curMaterial.specular;
     d.mat_local_specular = {localSpec.R(), localSpec.G(), localSpec.B(), 0.0f};
     // REFLECT-001 phase B: surface class lanes. A no-op unless WGR_REFLECT / WGR_REFLECT_DEBUG.
-    FillReflectLanes(d, static_cast<const Object*>(GetDrawObject()), sMesh.GetSection(beg).properties.GetTexture(),
-                     debugSection.surfMat.GetRef());
-    // REFLECT-001 D.1: the classified section's SMDI, so its unpainted texels (tyres, trim,
-    // dirt on the same atlas) do not take the paint's clear coat. Same lookup the retained
-    // set uses; the binding cache is filled by ResolveMaterialBaseColour first.
-    d.reflect_specular_texture_id = 0;
-    if (d.mat_reflect1.x > 0.5f && sMesh.GetSection(beg).surfMat)
+    //
+    // D.1: the material the class and the SMDI are read from is the first section of this draw
+    // whose RVMAT names a specular map, not blindly section `beg`. A draw spans [beg, end) and
+    // Arma 3 starts some bodies on an emissive light section (C_SUV_01_F begins on
+    // car_headlight_emit.rvmat): read from `beg`, the whole red body had no SMDI and kept the
+    // paint's clear coat on its tyres and dirt (smdi6-2c18216, 2026-10-23).
+    const ShapeSection* reflSection = &sMesh.GetSection(beg);
+    uint64_t reflSpecular = 0;
+    if (ReflectLanesEnabled())
     {
-        const ShapeSection& reflSection = sMesh.GetSection(beg);
-        const char* reflMaterial = reflSection.surfMat->GetName().Data();
-        if (reflMaterial && *reflMaterial)
+        for (int i = beg; i < end && i < beg + 64; ++i)
         {
-            if (_materialBindings.find(reflMaterial) == _materialBindings.end())
-                ResolveMaterialBaseColour(reflSection);
-            d.reflect_specular_texture_id = ResolveMaterialSpecularMap(reflSection);
+            const ShapeSection& sec = sMesh.GetSection(i);
+            if (!sec.surfMat)
+                continue;
+            const char* name = sec.surfMat->GetName().Data();
+            if (!name || !*name)
+                continue;
+            auto cached = _materialBindings.find(name);
+            if (cached == _materialBindings.end())
+            {
+                ResolveMaterialBaseColour(sec);
+                cached = _materialBindings.find(name);
+            }
+            if (cached == _materialBindings.end() ||
+                !cached->second.Find(Asset::Material::MaterialSlot::SpecularDetail))
+                continue;
+            if (const uint64_t id = ResolveMaterialSpecularMap(sec))
+            {
+                reflSection = &sec;
+                reflSpecular = id;
+                break;
+            }
         }
     }
+    FillReflectLanes(d, static_cast<const Object*>(GetDrawObject()), sMesh.GetSection(beg).properties.GetTexture(),
+                     reflSection->surfMat.GetRef());
+    d.reflect_specular_texture_id = d.mat_reflect1.x > 0.5f ? reflSpecular : 0;
     if (const auto* person = dyn_cast<const Person>(static_cast<const Object*>(GetDrawObject())))
     {
         const auto* ownerShape = person->GetShape();
