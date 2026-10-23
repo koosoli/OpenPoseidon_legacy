@@ -239,7 +239,8 @@ GameValue ObjSetIdentity(const GameState* state, GameValuePar oper1, GameValuePa
         // not have; SetSpeaker would put CWA's first voice in its place. The man keeps the
         // voice he has instead.
         const RString speaker = (*entry) >> "speaker";
-        const bool voiceKnown = (Pars >> "CfgVoice").FindEntry(speaker) != nullptr;
+        const bool voiceKnown = (Pars >> "CfgVoice").FindEntry(speaker) != nullptr ||
+                                Poseidon::Arma1Compat::Arma2VoiceClass(speaker) != nullptr;
         if (voiceKnown || !Poseidon::Arma1Compat::Active())
         {
             info._speaker = speaker;
@@ -256,7 +257,7 @@ GameValue ObjSetIdentity(const GameState* state, GameValuePar oper1, GameValuePa
         {
             LOG_INFO(Script, "setIdentity '{}': name '{}', face '{}', glasses '{}', voice '{}'{}", (const char*)name,
                      (const char*)info._name, (const char*)info._face, (const char*)info._glasses,
-                     (const char*)speaker, voiceKnown ? "" : " (not in CWA, kept his own)");
+                     (const char*)speaker, voiceKnown ? "" : " (no such voice, kept his own)");
         }
     }
 

@@ -496,6 +496,17 @@ void AIUnit::Load(const ParamEntry& cls)
         soldier->SetGlasses(info._glasses);
         info._speaker = cls >> "speaker";
         info._pitch = cls >> "pitch";
+        // --arma2: and a voice of his kind (Male01EN, Male03TK, ...), at one of Arma 2's
+        // pitches (CfgVoice >> variants).
+        const uint32_t voiceSeed = static_cast<uint32_t>(
+            std::hash<std::string>{}(std::string((const char*)info._name) + "|voice|" + (const char*)info._face));
+        if (const RString a2Voice = Arma1Compat::Arma2RandomSpeaker(
+                soldier->GetType()->GetName(), soldier->GetShape() ? soldier->GetShape()->GetName() : "", voiceSeed);
+            a2Voice.GetLength() > 0)
+        {
+            info._speaker = a2Voice;
+            info._pitch = Arma1Compat::Arma2VoicePitch(voiceSeed / 7);
+        }
         SetSpeaker(info._speaker, info._pitch);
     }
 }
@@ -1311,6 +1322,16 @@ void AIUnit::SetSpeaker(RString speaker, float pitch)
     const ParamEntry* entry = cfg.FindEntry(speaker);
     if (!entry)
     {
+        // --arma2: an Arma 2 voice speaks Arma 2's radio, CWA's first voice what it lacks.
+        if (const ParamEntry* a2 = Arma1Compat::Arma2VoiceClass(speaker))
+        {
+            if (const ParamEntry* a2Words = Arma1Compat::Arma2VoiceWords(*a2))
+            {
+                const ParamEntry& fallback = cfg >> RString((cfg >> "voices")[0]);
+                _speaker = new Speaker(new BasicSpeaker(fallback, *a2, *a2Words), pitch);
+                return;
+            }
+        }
         speaker = (cfg >> "voices")[0];
         entry = cfg.FindEntry(speaker);
     }
