@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "EarthImageryTiles.hpp"
+#include "EarthParallel.hpp"
 #include <Poseidon/World/Terrain/EarthPlannerMap.hpp>
 
 #include <Poseidon/World/Terrain/EarthFrame.hpp>
@@ -346,10 +347,20 @@ bool EarthImageryTiles::Build(double south, double west, double north, double ea
         out.failures += _tiles.count(key) ? 0u : 1u;
     if (out.failures == keys.size())
         return false;
-    for (int row = 0; row < out.height; ++row)
+    // The tiles once, not a map lookup per output pixel (Find also stamps the LRU, which no two threads
+    // may do at once). The rows are then composed a band per core (EarthParallel.hpp); _mutex stays held,
+    // so no fetch can add or evict a tile underneath them.
+    const int gridW = x1 - x0 + 1, gridH = y1 - y0 + 1;
+    std::vector<const Tile*> grid(size_t(gridW) * gridH, nullptr);
+    for (int y = y0; y <= y1; ++y)
+        for (int x = x0; x <= x1; ++x)
+            grid[size_t(y - y0) * gridW + (x - x0)] = Find(zoom, x, y);
+    const auto at = [&](int x, int y) -> const Tile*
     {
-        if (cancelled && cancelled())
-            return false;
+        return x < x0 || x > x1 || y < y0 || y > y1 ? nullptr : grid[size_t(y - y0) * gridW + (x - x0)];
+    };
+    return EarthParallel::Rows(out.height, [&](int row)
+    {
         const double lat = north - (row + 0.5) * (north - south) / out.height;
         double unusedX, py;
         ToMercator(lat, west, zoom, unusedX, py);
@@ -358,7 +369,7 @@ bool EarthImageryTiles::Build(double south, double west, double north, double ea
         {
             const double lon = west + (col + 0.5) * (east - west) / out.width;
             const double px = (lon + 180.0) / 360.0 * double(1 << zoom);
-            const Tile* tile = Find(zoom, int(std::floor(px)), ty);
+            const Tile* tile = at(int(std::floor(px)), ty);
             if (!tile)
                 continue;
             // Bilinear inside the tile (edges clamp; adjacent tiles meet within half a texel).
@@ -379,8 +390,7 @@ bool EarthImageryTiles::Build(double south, double west, double north, double ea
             }
             dst[3] = 255;
         }
-    }
-    return true;
+    }, cancelled);
 }
 
 std::filesystem::path EarthImageryTiles::Overview()

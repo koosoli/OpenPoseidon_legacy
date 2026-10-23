@@ -1,10 +1,12 @@
 #include "EarthSurfaceStream.hpp"
+#include "EarthParallel.hpp"
 #include "EarthIslands.hpp"
 #include <Poseidon/Foundation/Algorithms/Sha256.hpp>
 #include <cjson/cJSON.h>
 #include <stb_image.h>
 #include <stb_image_resize2.h>
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <fstream>
 #include <stdexcept>
@@ -203,16 +205,16 @@ EarthSurfaceStream::Atlas EarthSurfaceStream::BuildRegional(const Window& w,Imag
     };
     result.farSize=farSize;
     result.farPixels.resize(size_t(farSize)*farSize*4);
-    for(int row=0;row<farSize;++row) {
-        if(cancelled && cancelled()){result.farPixels.clear();result.error="superseded";return result;}
+    // A band of rows per core (EarthParallel.hpp): every texel is independent of the others.
+    const bool farDone=EarthParallel::Rows(farSize,[&](int row) {
         for(int col=0;col<farSize;++col) {
             const auto p=FarPoint(w,(col+.5)/farSize,(row+.5)/farSize);
             storeFar(row,col,colorAt(p.x,p.y));
         }
-    }
+    },cancelled);
+    if(!farDone){result.farPixels.clear();result.error="superseded";return result;}
     result.pixels.resize(size_t(size)*size*4);
-    for(int row=0;row<size;++row) {
-        if(cancelled && cancelled()){result.pixels.clear();result.farPixels.clear();result.error="superseded";return result;}
+    const bool nearDone=EarthParallel::Rows(size,[&](int row) {
         for(int col=0;col<size;++col) {
             const auto point=NearPoint(w,(col+.5)/size,(row+.5)/size);
             // Clamp sampling exposes the outermost texel at the exact mesh
@@ -228,7 +230,8 @@ EarthSurfaceStream::Atlas EarthSurfaceStream::BuildRegional(const Window& w,Imag
             for(int k=0;k<3;++k)base[k]=base[k]*(1-blend)+local[k]*blend;
             store(result.pixels,row,col,base);
         }
-    }
+    },cancelled);
+    if(!nearDone){result.pixels.clear();result.farPixels.clear();result.error="superseded";return result;}
     result.cellPresent=true;return result;
 }
 EarthSurfaceStream::EarthSurfaceStream(std::filesystem::path cache,std::filesystem::path overview):
@@ -299,8 +302,13 @@ void EarthSurfaceStream::Run() {
             const auto cancelled=[&]{return _stop.load() || _version!=version;};
             // Two passes when a provider streams imagery: first only what is already on disk, published at
             // once (the ground is never left on the coarse globe while downloads run), then the network.
+            const auto requested=std::chrono::steady_clock::now();
+            const auto since=[&](std::chrono::steady_clock::time_point t){return std::chrono::duration<double>(std::chrono::steady_clock::now()-t).count();};
+            char timing[160];
             for(int pass=_tiles?0:1;pass<2;++pass) {
                 const bool network=pass==1;
+                const auto passStart=std::chrono::steady_clock::now();
+                double gatherSeconds=0;
                 auto attempt=std::make_unique<Atlas>();attempt->window=window;
                 // Provider imagery first (coarse far, then fine near); prepared caches stay on top.
                 std::vector<SourceView> frame;
@@ -362,12 +370,15 @@ void EarthSurfaceStream::Run() {
                             frame.insert(frame.end(),sources.begin(),sources.end());
                             auto interim=std::make_unique<Atlas>(BuildRegional(window,{nasa.data(),4096,2048},frame,AtlasSize,cancelled,FarAtlasSize));
                             if(interim->error.empty() && !interim->farPixels.empty()) {
-                                interim->sources="(near tiles first) "+std::to_string(nearFirst.downloads)+" new";
+                                std::snprintf(timing,sizeof(timing),"; %.2f s after the request, %u threads",since(requested),EarthParallel::Threads());
+                                interim->sources="(near tiles first) "+std::to_string(nearFirst.downloads)+" new"+timing;
                                 std::lock_guard lock(_mutex);if(!_stop && _version==version)_ready=std::move(interim);
                             }
                         }
                     }
+                    const auto gatherStart=std::chrono::steady_clock::now();
                     gather();
+                    gatherSeconds=since(gatherStart);
                     if(cancelled()){attempt->error="superseded";}
                 }
                 // Nothing cached yet and no prepared region: the first pass would only repeat the globe.
@@ -375,12 +386,17 @@ void EarthSurfaceStream::Run() {
                 frame.insert(frame.end(),sources.begin(),sources.end());
                 if(attempt->error.empty())
                 {
+                    const auto buildStart=std::chrono::steady_clock::now();
                     *attempt=BuildRegional(window,{nasa.data(),4096,2048},frame,AtlasSize,cancelled,FarAtlasSize);
+                    const double buildSeconds=since(buildStart);
                     std::string fed=network?"":"(cached first pass) ";
                     for(const auto& m:mosaics)
                         fed+="z"+std::to_string(m.zoom)+" "+std::to_string(m.tiles-m.failures)+"/"+std::to_string(m.tiles)+
                              " tiles ("+std::to_string(m.downloads)+" new), ";
-                    attempt->sources=fed+std::to_string(sources.size())+" prepared";
+                    // Where the time went: mosaics (tile fetch + compose), the atlas build, and the whole pass.
+                    std::snprintf(timing,sizeof(timing),"; mosaics %.2f s, atlases %.2f s, pass %.2f s, %.2f s after the request, %u threads",
+                        gatherSeconds,buildSeconds,since(passStart),since(requested),EarthParallel::Threads());
+                    attempt->sources=fed+std::to_string(sources.size())+" prepared"+timing;
                 }
                 if(!network) {
                     if(attempt->error.empty()) {std::lock_guard lock(_mutex);if(!_stop && _version==version)_ready=std::move(attempt);}

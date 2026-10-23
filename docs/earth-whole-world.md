@@ -43,7 +43,10 @@ URL templates are web-mercator XYZ: `{z} {x} {y}`, `{-y}` (TMS rows), `{q}` (qua
   Manhattan at 450 m: zoom 18 under the camera, zoom 9 at the horizon. Tiles already on disk are shown
   first; downloads replace them as they arrive. Transient failures are retried. Downloads reuse
   warm connections and TLS sessions, sixteen at a time in a rolling pool, and the tiles under the
-  camera are fetched and shown before the wide outer rings.
+  camera are fetched and shown before the wide outer rings. The atlases and the ring mosaics are built
+  on all but two CPU cores (`POSEIDON_EARTH_ATLAS_THREADS`, 1 = single-threaded): from a warm cache the
+  first imagery is on screen ~0.9 s after a window change and the final one ~1.9 s (7.9 s and 16.3 s on
+  one thread, measured 2026-10-23 at the Jungfrau).
 * **Elevation:** a 257² near patch: 6.25 m grid (zoom 14) below 1.5 km altitude, 25 m (zoom 12) below
   8 km, 100 m (zoom 10) above; a curved horizon to the visible radius.
 * **OpenStreetMap:** buildings extruded from `height` / `building:levels` (up to 900 m), roads,
