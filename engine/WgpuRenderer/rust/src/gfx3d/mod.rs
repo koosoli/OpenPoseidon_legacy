@@ -53,6 +53,7 @@ pub mod cull;
 
 // Hi-Z depth pyramid for GPU-driven occlusion culling (docs/gpu-culling-and-depth-plan.md §5).
 mod gtao_depth_mips;
+pub(crate) mod reflect_ssr; // REFLECT-001 phase E
 mod camera_upload;
 mod hiz;
 // AST-012A: GPU mip feedback — the finest mip each bindless slot was actually asked for.
@@ -2597,6 +2598,10 @@ fn build_group1_bind(
     env_sampler: &wgpu::Sampler,
     // AST-012A: the shared mip-feedback buffer (binding 4).
     mip_feedback: &wgpu::Buffer,
+    // REFLECT-001 phase E: bindings 5-8 (reflect_ssr.rs).
+    ssr_color: &wgpu::TextureView,
+    ssr_depth: &wgpu::TextureView,
+    ssr: &reflect_ssr::ReflectSsr,
     label: &str,
 ) -> wgpu::BindGroup {
     let slot0_binding = wgpu::BufferBinding {
@@ -2627,6 +2632,22 @@ fn build_group1_bind(
             wgpu::BindGroupEntry {
                 binding: 4,
                 resource: mip_feedback.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::TextureView(ssr_color),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::TextureView(ssr_depth),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::Sampler(&ssr.sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: ssr.params.as_entire_binding(),
             },
         ],
     })
@@ -4625,6 +4646,11 @@ pub struct Gfx3d {
     // dummy so the layouts are satisfiable from frame one, exactly like water's.
     env_view: wgpu::TextureView,
     env_sampler: wgpu::Sampler,
+    // REFLECT-001 phase E: previous-frame colour + params for the object pass's screen-space
+    // reflections (group 1 bindings 5-8). `ssr_bound` = (reflect_ssr.generation, depth_gen) the
+    // group-1 binds were built against; either moving rebuilds them.
+    pub(crate) reflect_ssr: reflect_ssr::ReflectSsr,
+    ssr_bound: (u64, u64),
     // Generation of the bound env view. u64::MAX = the dummy is still bound. The env
     // texture is created once and never resized, so this flips exactly once.
     env_gen: u64,
@@ -5830,6 +5856,47 @@ impl Gfx3d {
                         },
                         count: None,
                     },
+                    // REFLECT-001 phase E (reflect_ssr.rs): previous frame's lit HDR image,
+                    // this frame's linear view-Z (GTAO chain, textureLoad), their sampler and
+                    // the reprojection params. 1x1 dummies until both exist.
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 7,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 8,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                std::mem::size_of::<reflect_ssr::SsrParams>() as u64,
+                            ),
+                        },
+                        count: None,
+                    },
                 ],
             })
         };
@@ -6318,6 +6385,8 @@ impl Gfx3d {
             group1_skinned_bind: None,
             env_view: dummy_env_view,
             env_sampler,
+            reflect_ssr: reflect_ssr::ReflectSsr::new(device),
+            ssr_bound: (u64::MAX, u64::MAX),
             env_gen: u64::MAX,
             shader,
             plain_layout: pipeline_layout,
@@ -9807,12 +9876,21 @@ impl Gfx3d {
         // frame's bind is recoverable, an object draw with no bind at all is not.
         let mipfb_moved = self.mip_feedback_grew;
         let mipfb = self.mip_feedback.buffer().cloned();
+        // REFLECT-001 phase E: the SSR inputs moved (prev-colour realloc, depth resize).
+        let ssr_key = (self.reflect_ssr.generation, self.depth_gen);
+        let ssr_moved = ssr_key != self.ssr_bound;
+        let ssr_color = self.reflect_ssr.color_view().clone();
+        let ssr_depth = self
+            .gtao_depth_mips
+            .view()
+            .cloned()
+            .unwrap_or_else(|| self.reflect_ssr.dummy_depth.clone());
         if let (Some(mipfb), Some(world_buf), Some(mat_buf)) = (
             mipfb.as_ref(),
             self.world.buf.as_ref(),
             self.material.buf.as_ref(),
         ) {
-            if world_grew || material_grew || env_changed || mipfb_moved || self.group1_plain_bind.is_none() {
+            if world_grew || material_grew || env_changed || mipfb_moved || ssr_moved || self.group1_plain_bind.is_none() {
                 self.group1_plain_bind = Some(build_group1_bind(
                     device,
                     &self.group1_plain_layout,
@@ -9822,6 +9900,9 @@ impl Gfx3d {
                     &self.env_view,
                     &self.env_sampler,
                     mipfb,
+                    &ssr_color,
+                    &ssr_depth,
+                    &self.reflect_ssr,
                     "wgr_3d_group1_plain_bind",
                 ));
             }
@@ -9831,7 +9912,7 @@ impl Gfx3d {
             self.palette.buf.as_ref(),
             self.material.buf.as_ref(),
         ) {
-            if palette_grew || material_grew || env_changed || mipfb_moved || self.group1_skinned_bind.is_none() {
+            if palette_grew || material_grew || env_changed || mipfb_moved || ssr_moved || self.group1_skinned_bind.is_none() {
                 self.group1_skinned_bind = Some(build_group1_bind(
                     device,
                     &self.group1_skinned_layout,
@@ -9841,10 +9922,16 @@ impl Gfx3d {
                     &self.env_view,
                     &self.env_sampler,
                     mipfb,
+                    &ssr_color,
+                    &ssr_depth,
+                    &self.reflect_ssr,
                     "wgr_3d_group1_skinned_bind",
                 ));
             }
         }
+        // A bind skipped above (its buffers not yet allocated) is None and builds against the
+        // current inputs the frame it can, so the key is current either way.
+        self.ssr_bound = ssr_key;
 
         // Build any pipeline variants this frame's draws need before the render
         // pass records them (pipeline creation needs &mut self; draw_one is &self).

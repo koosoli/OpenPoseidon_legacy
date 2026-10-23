@@ -3249,6 +3249,19 @@ impl Renderer {
             encoder.pop_debug_group();
             self.gpu_timers.end(encoder, TimerRegion::HdrResolve);
         }
+        // REFLECT-001 phase E: keep the finished lit scene (single-sample: the resolve under
+        // MSAA, the target itself at 1x) for the next frame's screen-space reflections.
+        if crate::sky::env_prefilter::enabled() {
+            let src = self
+                .hdr_resolve
+                .as_ref()
+                .map(|(t, _)| t)
+                .or_else(|| self.hdr.as_ref().map(|(t, _)| t));
+            if let Some(src) = src {
+                self.gfx3d.reflect_ssr.ensure(&self.device, src.width(), src.height());
+                self.gfx3d.reflect_ssr.copy_from(encoder, src);
+            }
+        }
         // REN-TEMP-001K: temporal debug resolve (WGR_TEMPORAL_DEBUG=2) — accumulate the
         // resolved HDR frame along velocity. Diagnostic only; nothing downstream reads it.
         if self.temporal.enabled {
@@ -3824,8 +3837,10 @@ impl Renderer {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: HDR_FORMAT,
+                // COPY_SRC: REFLECT-001 phase E copies the resolved scene for the next frame.
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
             let v = t.create_view(&wgpu::TextureViewDescriptor::default());
@@ -4649,6 +4664,8 @@ impl Renderer {
         self.gfx3d.set_layer_fog_requested(layered_fog::requested(&self.layer_fog_settings,
             self.layer_fog_weather,self.hdr_enabled,self.cam_underground));
         frame_lap.mark("setup:pre");
+        // REFLECT-001 phase E: this frame's reprojection into last frame's lit image.
+        self.gfx3d.reflect_ssr.upload(&self.queue, self.temporal.reflection_reprojection());
         self.gfx3d.begin_lod_demand(); // before model-table upload; disabled/no request is a no-op
         self.gfx3d.prepare(
             &self.device,

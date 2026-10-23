@@ -370,6 +370,18 @@ fn earth_sun_transmittance(mu: f32, altitude: f32) -> vec3<f32> {
 // and with mip_feedback.rs.
 @group(1) @binding(4) var<storage, read_write> mip_feedback: array<atomic<u32>>;
 
+// REFLECT-001 phase E -- screen-space reflections (gfx3d/reflect_ssr.rs). The previous frame's
+// lit HDR image, THIS frame's linear view-Z (GTAO's chain, mip 0, metres), and the matrix that
+// takes a point relative to this frame's camera into the previous frame's clip space.
+struct SsrParams {
+    reproj: mat4x4<f32>,
+    misc: vec4<f32>, // x = enabled, y/z = prev-colour size, w = max march distance (m)
+};
+@group(1) @binding(5) var ssr_prev_color: texture_2d<f32>;
+@group(1) @binding(6) var ssr_depth: texture_2d<f32>;
+@group(1) @binding(7) var ssr_samp: sampler;
+@group(1) @binding(8) var<uniform> ssr: SsrParams;
+
 const MIPFB_HEADER_WORDS: u32 = 8u;
 const MIPFB_CODE_BASE: u32 = 16u;
 
@@ -851,6 +863,83 @@ fn reflect_env_radiance(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
     return mix(ground, sky, smoothstep(-0.02 - band, 0.15 + band, dir.y));
 }
 const REFLECT_GROUND_ALBEDO: f32 = 0.2;
+
+// Phase E: march `dir` from `origin` (camera-relative metres) against this frame's depth and
+// return the previous frame's colour at the hit, reprojected, with its confidence in .a (0 = no
+// hit: keep the phase-D environment). Main scene camera only -- frame.gtao.x is GTAO's own
+// per-camera gate, 1 exactly where its depth chain is this camera's.
+fn reflect_ssr(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
+    if (ssr.misc.x < 0.5 || frame.gtao.x < 0.5) {
+        return vec4<f32>(0.0);
+    }
+    let dims = vec2<i32>(textureDimensions(ssr_depth, 0));
+    if (dims.x < 2 || dims.y < 2) {
+        return vec4<f32>(0.0);
+    }
+    let vp = frame.proj * frame.view;
+    // Growing steps: centimetres near the surface, metres far out -- 32 taps reach ~80 m.
+    var t = 0.1;
+    var prev_t = 0.0;
+    var hit = false;
+    for (var i = 0; i < 32; i = i + 1) {
+        let clip = vp * vec4<f32>(origin + dir * t, 1.0);
+        if (clip.w <= 0.05) {
+            break;
+        }
+        let uv = clip.xy / clip.w * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
+        if (any(uv <= vec2<f32>(0.0)) || any(uv >= vec2<f32>(1.0))) {
+            break;
+        }
+        let texel = clamp(vec2<i32>(uv * vec2<f32>(dims)), vec2<i32>(0), dims - vec2<i32>(1));
+        let scene_z = textureLoad(ssr_depth, texel, 0).r;
+        // The ray passed behind a surface, but not so far that it went round it.
+        if (clip.w > scene_z && clip.w - scene_z < 0.2 + 0.04 * t) {
+            hit = true;
+            break;
+        }
+        prev_t = t;
+        t = t * 1.17 + 0.1;
+        if (t > ssr.misc.w) {
+            break;
+        }
+    }
+    // Hits closer than 30 cm are the surface itself at grazing angles (depth quantisation).
+    if (!hit || t < 0.3) {
+        return vec4<f32>(0.0);
+    }
+    var lo = prev_t;
+    var hi = t;
+    for (var k = 0; k < 5; k = k + 1) {
+        let mid = 0.5 * (lo + hi);
+        let clip = vp * vec4<f32>(origin + dir * mid, 1.0);
+        let uv = clip.xy / max(clip.w, 0.05) * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
+        let texel = clamp(vec2<i32>(uv * vec2<f32>(dims)), vec2<i32>(0), dims - vec2<i32>(1));
+        if (clip.w > textureLoad(ssr_depth, texel, 0).r) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    let prev = ssr.reproj * vec4<f32>(origin + dir * hi, 1.0);
+    if (prev.w <= 0.05) {
+        return vec4<f32>(0.0);
+    }
+    let puv = prev.xy / prev.w * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
+    let edge = min(min(puv.x, puv.y), min(1.0 - puv.x, 1.0 - puv.y));
+    if (edge <= 0.0) {
+        return vec4<f32>(0.0);
+    }
+    let col = textureSampleLevel(ssr_prev_color, ssr_samp, puv, 0.0).rgb;
+    // Fade at the screen edge and towards the march's reach, so the hand-over to the
+    // environment never shows as a line.
+    let w = smoothstep(0.0, 0.08, edge) * (1.0 - smoothstep(0.6 * ssr.misc.w, ssr.misc.w, hi));
+    return vec4<f32>(max(col, vec3<f32>(0.0)), w);
+}
+
+// How much of a lobe of this roughness the (unfiltered) screen image may stand in for.
+fn reflect_ssr_rough_weight(roughness: f32) -> f32 {
+    return 1.0 - smoothstep(0.25, 0.6, roughness);
+}
 
 // REFLECT-001 debug colours. View 1 = surface class (fixed palette), 2 = roughness (grey),
 // 3 = F0 / metal (red = F0 x 10, green = metal), 4 = clear coat (blue = strength, green =
@@ -1851,9 +1940,16 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         let coat_rough = clamp(m.refl_b.y, 0.0, 1.0);
         let fb = reflect_env_brdf(reflect_base_reflectance(m, albedo_lin), rough, ndv);
         let fc = reflect_env_brdf(vec3<f32>(0.04), coat_rough, ndv).x * coat;
-        let env_base = reflect_env_radiance(refl_dir, rough);
-        let env_coat = reflect_env_radiance(refl_dir, coat_rough);
-        let spec = (env_base * fb * (1.0 - fc) + env_coat * fc) * occ;
+        // Phase E: what the world in front of the surface shows (trees, houses, other
+        // vehicles, the ground), where the screen has it; the prefiltered sky elsewhere. The
+        // sky part keeps the sky's occlusion, the hit is a real surface and only takes fog.
+        let ssr_hit = reflect_ssr(in.world_pos + gn * 0.02, refl_dir);
+        let ssr_rgb = ssr_hit.rgb * clamp(in.fog, 0.0, 1.0);
+        let wb = ssr_hit.a * reflect_ssr_rough_weight(rough);
+        let wc = ssr_hit.a * reflect_ssr_rough_weight(coat_rough);
+        let env_base = mix(reflect_env_radiance(refl_dir, rough) * occ, ssr_rgb, wb);
+        let env_coat = mix(reflect_env_radiance(refl_dir, coat_rough) * occ, ssr_rgb, wc);
+        let spec = env_base * fb * (1.0 - fc) + env_coat * fc;
         // What the reflection takes, the diffuse body no longer scatters (energy, roughly).
         let keep = (1.0 - fc * occ) *
             (1.0 - max(fb.r, max(fb.g, fb.b)) * occ * (1.0 - clamp(m.refl_a.z, 0.0, 1.0)));

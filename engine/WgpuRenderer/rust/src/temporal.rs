@@ -458,6 +458,18 @@ impl Temporal {
         Some([cur.cam_pos[0] - prev.cam_pos[0], cur.cam_pos[1] - prev.cam_pos[1], cur.cam_pos[2] - prev.cam_pos[2]])
     }
 
+    /// REFLECT-001 phase E: previous clip space from this frame's camera-relative positions,
+    /// for the object pass's screen-space reflections. Unlike the velocity accessors this does
+    /// NOT need temporal AA on: the camera history is kept every frame regardless. None while
+    /// it is invalid (first frame, resize, teleport).
+    pub fn reflection_reprojection(&self) -> Option<[f32; 16]> {
+        if self.reset {
+            return None;
+        }
+        let (cur, prev) = (self.cur.as_ref()?, self.prev.as_ref()?);
+        Some(crate::gfx3d::reflect_ssr::reprojection(&prev.view, &prev.proj, cur.cam_pos, prev.cam_pos))
+    }
+
     pub fn object_velocity_uniform(&self) -> Option<ObjVelUniform> {
         if !self.enabled || self.reset {
             return None;
