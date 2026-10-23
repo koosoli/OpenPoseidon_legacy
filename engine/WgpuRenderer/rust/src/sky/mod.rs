@@ -32,6 +32,23 @@ pub mod env_prefilter;
 pub mod moonmap;
 pub mod starcat;
 
+// The island game composes the sky WITHOUT the WHOLE_WORLD define (shaders::shader_defs), but tests
+// always set it -- so a whole-world identifier used outside its #ifdef composed in every test and
+// panicked at renderer creation in every non-whole-world session (2026-10-23, moon_relief_tex). Compose
+// and validate that variant too.
+#[test]
+fn sky_wgsl_validates_outside_whole_world() {
+    let mut composer=crate::shaders::build_composer();
+    let mut defs=crate::shaders::shader_defs();
+    defs.remove("WHOLE_WORLD");
+    let module=composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor {
+        source:include_str!("sky.wgsl"),file_path:"sky/sky.wgsl",shader_defs:defs,..Default::default()
+    }).unwrap_or_else(|e|panic!("compose wgr_sky_shader without WHOLE_WORLD: {}",e.emit_to_string(&composer)));
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(),naga::valid::Capabilities::all())
+        .validate(&module)
+        .unwrap_or_else(|e|panic!("sky.wgsl without WHOLE_WORLD fails validation: {e:?}"));
+}
+
 // Guards every sky.wgsl edit: parse + validate the module offline so a WGSL error
 // surfaces in CI/tests instead of as a pipeline-creation panic at runtime.
 #[test]
