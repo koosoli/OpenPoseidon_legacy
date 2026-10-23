@@ -66,6 +66,8 @@ BasicSpeaker::BasicSpeaker(const ParamEntry& cwaFallback, const ParamEntry& a2Vo
     }
 }
 
+static const char* const A2Silent = "*arma2-silent*";
+
 // The clip the Arma 2 voice says `id` (a CWA radio word) with: the Arma 2 word that says the
 // same (by the CWA word's file, else its name), one of its variants at random, under the
 // voice's directory unless the variant is absolute; ".wss" or ".ogg" when it names none.
@@ -81,8 +83,20 @@ RString BasicSpeaker::A2Clip(const RString& id) const
         a2 = Arma1Compat::Arma2RadioWord(RString((*cwaWord)[0].GetValue()));
     if (!a2)
         a2 = Arma1Compat::Arma2RadioWord(id);
-    const ParamEntry* word = _a2Words->FindEntry(a2 ? RString(a2) : id);
-    if (!word || !word->IsArray() || word->GetSize() == 0)
+    // Arrowhead's protocol renamed some words: "GetDownE" for "GetDown", "BoardThat",
+    // "GetInThat", "TargetThat"; the word itself first, then those.
+    const RString base0 = a2 ? RString(a2) : id;
+    const ParamEntry* word = nullptr;
+    for (const char* suffix : {"", "E", "That"})
+    {
+        word = _a2Words->FindEntry(base0 + RString(suffix));
+        if (word && word->IsArray())
+            break;
+        word = nullptr;
+    }
+    if (word && word->GetSize() == 0)
+        return RString(A2Silent); // Arma 2 says nothing for it ("Unknown[] = {}")
+    if (!word)
     {
         static std::set<std::string> reported;
         if (reported.insert(std::string((const char*)id)).second)
@@ -170,6 +184,8 @@ IWave* BasicSpeaker::Say(RString id, float pitch, bool loop)
     RString dir = ENGINE_CONFIG.singleVoice ? _directories[1] : _directories[0];
     if (const RString a2 = A2Clip(id); a2.GetLength() > 0)
     {
+        if (strcmp(a2, A2Silent) == 0)
+            return GSoundsys ? GSoundsys->CreateEmptyWave(1) : nullptr;
         IWave* wave = GSoundScene->OpenAndPlayOnce2D(a2, 1, pitch, false);
         if (wave)
         {
