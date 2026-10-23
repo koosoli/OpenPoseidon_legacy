@@ -1157,7 +1157,21 @@ fn star_field(dir_in: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
     // hour the sky really turns at, so the stars drift through the night for free and stay
     // consistent with wherever the sun comes up.
     let ang = atan2(sun.z, sun.x);
-    let dir = to_celestial(dir_in, ang);
+    var dir = to_celestial(dir_in, ang);
+    // Whole world: the frame the world is in moves with free flight (each rebase turns it, and the moon
+    // frame is another one altogether), so the sun's bearing in it is no clock -- keyed to it, the star
+    // map and the Milky Way swung about whenever the origin moved. Build the celestial frame from what
+    // the frames agree on instead: the Earth's spin axis (ecef_z, a world direction) as the pole and the
+    // sun's hour circle as right ascension 0. Sun, stars and camera then turn together on every rebase.
+    if (earth_preview()) {
+        let pole = normalize(sky.ecef_z.xyz);
+        let s = sun - pole * dot(sun, pole);
+        if (dot(s, s) > 1.0e-6) {
+            let sx = normalize(s);
+            let sy = cross(pole, sx);
+            dir = vec3<f32>(dot(dir_in, sx), dot(dir_in, sy), dot(dir_in, pole));
+        }
+    }
 
     // Below the horizon there is no sky to put stars in, and near it atmospheric extinction takes
     // them out well before the geometric horizon -- so fade rather than cut. Measured on the WORLD
