@@ -4229,9 +4229,29 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         if(_earthGrass){EngineWgpu::AcquireProducerWindow("Earth grass moon");wgr_grass_clear_earth_ground(_renderer);_earthGrass=false;}
         _engine.ClearEarthTreeObjects();_earthTreeModels=false;
         _engine.ClearEarthWorldgenObjects();
+        // The object shaders' cave test compares every pixel with the terrain heightmap: the Earth patch
+        // left in it (the Alps stand 4 km over the moon frame's surface) put the moon underground, and a
+        // soldier there was lit as deep in a cave -- black. A flat heightmap far below takes it out; the
+        // Earth's patch is dropped with it and streams again on the way home (the origin rebases).
+        if(_earthPatch || !_earthMoonHeightmap)
+        {
+            _earthPatch.reset();
+            _earthPendingPatch.reset();
+            _params.world_origin = {float(EarthStreaming::CameraAnchor) - 128000.0f, float(EarthStreaming::CameraAnchor) - 128000.0f};
+            _params.terrain_grid = _params.land_grid = 1000.0f;
+            _params.hm_width = _params.hm_height = Earth::GridSamples;
+            _params.land_range = Earth::GridSamples;
+            _params.sea_level = -12000.0f;
+            _params.enfusion_ground = 0;
+            const std::vector<float> below(size_t(Earth::GridSamples) * Earth::GridSamples, -100000.0f);
+            EngineWgpu::AcquireProducerWindow("Earth moon heightmap");
+            wgr_terrain_set_heightmap(_renderer, below.data(), &_params);
+            _earthMoonHeightmap = true;
+        }
         _engine.SubmitEarthHorizon(_earthGlobeMesh,_earthGlobeIndices,_earthGlobeTexture);
         return;
     }
+    _earthMoonHeightmap = false;
     _engine.SubmitEarthHorizon(_earthGlobeMesh,_earthGlobeIndices,_earthGlobeTexture);
     // Orbit needs only the fixed global overview. Do not download finer terrain
     // that covers less than one pixel at this distance.

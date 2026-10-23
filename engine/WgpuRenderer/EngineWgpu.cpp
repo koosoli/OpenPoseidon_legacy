@@ -765,6 +765,11 @@ float LookHour(float clockHour, bool skyRadiance = false)
 {
     if (!EarthStreaming::Enabled())
         return clockHour;
+    // At the moon (its frame, EarthMoonFrame.hpp) there is no air: the airless look, as from space. The
+    // camera's local height there is above the MOON, and read as the Earth's it graded the black lunar
+    // sky with a low sun's warm haze.
+    if (EarthStreaming::MoonFrameActive())
+        return 12.0f;
     const auto& snap = render::frame::GPresentationSnapshot();
     const Vector3 toSun = -snap.sunDirection;
     // The sun's height where the CAMERA is on the globe (radial up from the planet centre), not at the
@@ -20783,7 +20788,9 @@ void EngineWgpu::UpdateAutoTonemap()
     {
         const Vector3 cam = render::frame::GPresentationSnapshot().cameraPos;
         const double ox = double(cam.X()) - 6400.0, oz = double(cam.Z()) - 6400.0, oy = double(cam.Y()) + 6378137.0;
-        const double altitude = std::sqrt(ox * ox + oy * oy + oz * oz) - 6378137.0;
+        // In the moon frame the local height is above the moon: there it is the space exposure.
+        const double altitude = EarthStreaming::MoonFrameActive() ? double(EarthCameraAltitude(cam))
+                                                                  : std::sqrt(ox * ox + oy * oy + oz * oz) - 6378137.0;
         const float space = float(std::clamp((altitude - 30000.0) / 70000.0, 0.0, 1.0));
         _tonemap.exposure *= 1.0f - 0.6f * space;
         // Twilight: with the real atmosphere the sky 4 degrees after sunset is a few hundred times

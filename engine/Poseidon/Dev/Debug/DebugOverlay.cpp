@@ -8638,6 +8638,12 @@ void DisableFreeFly()
     if (s_zeusCamera) DisableZeusCamera();
 }
 
+const char* BeamPlayerHere()
+{
+    BeamPlayerToZeusCamera();
+    return s_zeusStatus.c_str();
+}
+
 bool SetEarthMoonPose(double altitude, double pitchDegrees, bool surface)
 {
     // Straight into the moon frame (EarthMoonFrame.hpp): the camera `altitude` above a selenographic

@@ -1200,6 +1200,12 @@ GameValue TriFreeFlyOff(const GameState*)
     return GameValue("OK");
 }
 
+/// triZeusBeam: the Zeus "Beam player here" button (dev/harness); returns its status line.
+GameValue TriZeusBeam(const GameState*)
+{
+    return GameValue(RString(DebugOverlay::BeamPlayerHere()));
+}
+
 /// triEarthMoon [altitude, pitch, surface(0/1)] puts the free-fly camera above the moon (dev/harness).
 GameValue TriEarthMoon(const GameState*, GameValuePar arg)
 {
@@ -3213,6 +3219,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameString, "triEarthLocation", TriEarthLocation, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triEarthMoon", TriEarthMoon, GameArray));
     GGameState.NewNularOp(GameNular(GameString, "triFreeFlyOff", TriFreeFlyOff));
+    GGameState.NewNularOp(GameNular(GameString, "triZeusBeam", TriZeusBeam));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerGroundClearance", TriPlayerGroundClearance));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerTerrainClearance", TriPlayerTerrainClearance));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerContactGroundClearance", TriPlayerContactGroundClearance));

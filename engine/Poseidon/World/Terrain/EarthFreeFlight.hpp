@@ -132,6 +132,34 @@ inline FlightPoint KeepOutsideMoon(FlightPoint p, double clearance)
     const D3 out = c + v * (keepOut / d);
     return {float(out.x), float(out.y), float(out.z)};
 }
+// In the moon frame flight stays within this of the moon's surface: the frame switches back to the Earth
+// at the midpoint on the way home, but flying straight out on the far side nothing else would stop it.
+constexpr double MoonFlightLimit = 2.0e8;
+inline FlightPoint KeepNearMoon(FlightPoint p)
+{
+    D3 c;
+    if (!MoonCentreWorld(c)) return p;
+    const D3 v = D3{p.x, p.y, p.z} - c;
+    const double d = Length(v), keepIn = MoonRadius + MoonFlightLimit;
+    if (!(d > keepIn)) return p;
+    const D3 in = c + v * (keepIn / d);
+    return {float(in.x), float(in.y), float(in.z)};
+}
+// Free flight around the moon follows its curvature: moving from `from` to `to` turns the camera (and
+// its speed) by the rotation that carries the local vertical at `from` to the one at `to`. Level flight
+// then circles the moon -- an orbit -- instead of running off along a tangent line and climbing away.
+inline D3 MoonTransport(FlightPoint from, FlightPoint to, D3 v)
+{
+    D3 c;
+    if (!MoonCentreWorld(c)) return v;
+    const D3 a = Normalize(D3{from.x, from.y, from.z} - c), b = Normalize(D3{to.x, to.y, to.z} - c);
+    const D3 axis = Cross(a, b);
+    const double s = Length(axis), co = Dot(a, b);
+    if (!(s > 1e-12)) return v;
+    const D3 k = axis * (1.0 / s);
+    // Rodrigues: v cos + (k x v) sin + k (k.v)(1 - cos), with sin = s and cos = co.
+    return v * co + Cross(k, v) * s + k * (Dot(k, v) * (1.0 - co));
+}
 inline FlightPoint ZoomFlight(FlightPoint previous, float wheelSteps, const GroundPatch* ground, uint64_t revision)
 {
     if (!std::isfinite(wheelSteps)) return previous;

@@ -206,6 +206,7 @@ class TerrainWgpu : public ITerrainRenderer
     // Whole World grass: the near patch's heights and a grass mask read from its satellite atlas
     bool UploadEarthGrass(const EarthTerrainStream::Patch& patch,const struct EarthSurfaceStreamAtlasRef& atlas);
     bool _earthGrass=false;
+    bool _earthMoonHeightmap=false; // the flat heightmap of the moon frame is uploaded
     void UploadEarthNear(const EarthTerrainStream::Patch& patch,bool localUv);
     // (Re)uploads and rebuilds the quadtree when the map changes; returns true if it did.
     bool UploadIfNeeded(const Landscape& land);

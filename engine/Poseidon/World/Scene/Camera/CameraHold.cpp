@@ -588,9 +588,23 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
             }
             // Above the moon's surface: 100 m from the Earth frame (where the surface is not exact), a
             // standing eye height in the moon frame, where it is.
-            const auto outside = EarthStreaming::KeepOutsideMoon({position[0],position[1],position[2]}, moonFrame ? 1.6 : 100.0);
+            auto outside = EarthStreaming::KeepOutsideMoon({position[0],position[1],position[2]}, moonFrame ? 1.6 : 100.0);
+            if (moonFrame) outside = EarthStreaming::KeepNearMoon(outside);
             if (outside.x != position[0] || outside.y != position[1] || outside.z != position[2]) _speed = VZero;
             position = Vector3(outside.x,outside.y,outside.z);
+            if (moonFrame)
+            {
+                // Follow the moon's curvature (EarthFreeFlight.hpp): level flight orbits it.
+                const EarthStreaming::FlightPoint next{position[0],position[1],position[2]};
+                const auto carry = [&](Vector3Val v) {
+                    const auto r = EarthStreaming::MoonTransport(earthPrevious, next, {v[0],v[1],v[2]});
+                    return Vector3(float(r.x),float(r.y),float(r.z));
+                };
+                Matrix3 orient;
+                orient.SetDirectionAndUp(carry(Direction()), carry(Orientation().DirectionUp()));
+                SetOrientation(orient);
+                _speed = carry(_speed);
+            }
         }
         if (_altitudeSpeedScaling)
         {

@@ -84,5 +84,8 @@ namespace DebugOverlay
     bool SetEarthMoonPose(double altitude, double pitchDegrees, bool surface);
     // Ends free flight and hands the view back to the player (the Zeus "disable" path).
     void DisableFreeFly();
+    // Zeus "Beam player here" (dev/harness): stands the player below the free-fly camera and ends free
+    // flight. Returns the Zeus status line, which says why when it could not.
+    const char* BeamPlayerHere();
 } // namespace DebugOverlay
 } // namespace Poseidon::Dev

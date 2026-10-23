@@ -2330,8 +2330,11 @@ fn moon_crater(q: vec3<f32>, scale: f32, footprint: f32) -> f32 {
 }
 fn moon_relief(q: vec3<f32>, footprint: f32) -> f32 {
     let hills = planet_fbm(q * 30.0, 12, footprint * 30.0) / 30.0 * 0.25;
+    // The two finest crater sizes (~45 m and ~4 m across) are for standing on the surface; each fades
+    // out once a pixel covers it, so from farther away they cost nothing.
     return hills + moon_crater(q, 40.0, footprint) * 0.6 + moon_crater(q, 400.0, footprint) * 0.6 +
-           moon_crater(q, 4000.0, footprint) * 0.6;
+           moon_crater(q, 4000.0, footprint) * 0.6 + moon_crater(q, 40000.0, footprint) * 0.6 +
+           moon_crater(q, 400000.0, footprint) * 0.6;
 }
 // Fresh craters are bright and throw rays; a little of that in the albedo, large scale only.
 fn moon_crater_rays(q: vec3<f32>, footprint: f32) -> f32 {
@@ -2363,7 +2366,9 @@ fn earth_moon_body(pos: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
     // procedural grain only for the detail below the map's ~2.7 km texels.
     let mapped = moon_map_albedo(q, footprint);
     if (mapped >= 0.0) {
-        albedo = mapped * (1.0 + 0.12 * grain) * 0.85;
+        // Below the map's texels: grain down to a few metres, so the ground underfoot is not one flat grey.
+        let fine = planet_fbm(q * 4000.0, 8, footprint * 4000.0);
+        albedo = mapped * (1.0 + 0.12 * grain) * (1.0 + 0.18 * fine) * 0.85;
     }
     // Relief (unit-sphere heights) from craters and rolling terrain; its gradient tilts the shading
     // normal, which is what makes a lit crater field read as a surface rather than a texture.
