@@ -3853,6 +3853,13 @@ mod sky_uniform_layout_tests {
             // SKY-002's star cloud-occlusion strength. Renderer-written like `cirrus`, and on this
             // list for the same reason: the two structs are only kept in step by this assertion.
             "night_sky",
+            // Whole world: the geographic origin, then the Earth/moon geometry in world coordinates
+            // of the active frame (WgrSkyRuntime's last four lanes).
+            "earth_frame",
+            "earth_centre",
+            "moon_centre",
+            "ecef_x",
+            "ecef_z",
         ];
         assert_eq!(
             wgsl, rust,
