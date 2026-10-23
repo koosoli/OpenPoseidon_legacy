@@ -381,6 +381,8 @@ bool CameraVehicle::ReframeEarthMoon(Vector3& position, const EarthStreaming::Lo
         player->Move(standing);
         player->SetSpeed(VZero);
     }
+    // Same frame for sun, moon and camera (see the Earth rebase in Simulate).
+    if (GScene && GScene->MainLight()) GScene->MainLight()->Recalculate(GWorld);
     LOG_INFO(Graphics, "Free flight frame: {} at [{:.4f},{:.4f}], camera at {:.0f} m",
              earthTarget ? "Earth" : (inMoon ? "moon re-centred" : "moon"), latitude, longitude, position[1]);
     return true;
@@ -651,6 +653,11 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
                             EarthStreaming::Locations().AddTravel(position[0] - EarthStreaming::CameraAnchor,
                                                                   position[2] - EarthStreaming::CameraAnchor);
                             position = Vector3(EarthStreaming::CameraAnchor,float(altitude),EarthStreaming::CameraAnchor);
+                            // The sun and moon are in the origin's frame: recompute them now, in the frame the
+                            // camera just moved to. The clock step (World::SimulateLandscape) runs before the
+                            // camera, so it caught the rebase a frame late and the sun jumped for one frame on
+                            // every rebase -- often, moving fast in space.
+                            if (GScene && GScene->MainLight()) GScene->MainLight()->Recalculate(GWorld);
                         }
                         else
                         {
