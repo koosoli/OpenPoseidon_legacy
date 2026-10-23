@@ -36,6 +36,9 @@ class Person: public VehicleSupply
 	float _uniformWetness = 0.0f;
 	float _uniformWetnessProbeDue = 0.0f;
 	bool _uniformRainSheltered = false;
+	// Where and how long ago the rain-shelter rays last went up (see Person::Simulate).
+	Vector3 _uniformShelterProbePos = VZero;
+	float _uniformShelterProbeAge = 1e10f;
 
 	public:
 	Person(VehicleType *name, bool fullCreate=true);

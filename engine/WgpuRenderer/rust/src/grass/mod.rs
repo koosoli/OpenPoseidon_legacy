@@ -413,6 +413,67 @@ struct GrassParams {
     height_bounds: [f32; 4],
     // PERF-GRASS-TRACK-BOUNDS: grass.wgsl `track_bounds` (track_bounds below).
     track_bounds: [f32; 4],
+    // WGPU-036 (grass.wgsl `mid_lod`): the procedural mid ring's screen-density LOD.
+    // .x = distance (m) past which a mid blade is narrower than WGR_GRASS_MID_LOD_PX pixels and
+    // clumps thin as d0/d; 0 = off. .y = widening exponent of the survivors (1 = the expected
+    // coverage per pixel is kept exactly). .zw spare. Renderer-owned (mid_lod_lanes).
+    mid_lod: [f32; 4],
+}
+
+/// WGPU-036: how thin (in pixels) a mid-ring blade may get before the ring starts trading
+/// clumps for width. `WGR_GRASS_MID_LOD_PX=0` turns the screen-density LOD off.
+fn mid_lod_px_from_env() -> f32 {
+    static PX: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *PX.get_or_init(|| {
+        std::env::var("WGR_GRASS_MID_LOD_PX")
+            .ok()
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .filter(|v| v.is_finite())
+            .unwrap_or(MID_LOD_PX_DEFAULT)
+            .clamp(0.0, 4.0)
+    })
+}
+
+/// WGPU-036 -- the mid ring kept its full clump density to the edge of the ring (up to
+/// MID_RING_MAX), so from any height the far annulus put tens of millions of triangles a frame
+/// (Everon at 50 m: 455k clumps x 36 tris, drawn twice -- prepass and colour) into blades a
+/// tenth of a pixel wide. Past the distance where a mid blade is narrower than `px` pixels its
+/// clumps thin as d0/d and the survivors widen by d/d0: the expected blade area per pixel -- the
+/// only thing a sub-pixel blade contributes under MSAA -- is unchanged, and so is everything
+/// nearer than d0. RFG-160 does the same for the native near ring. Mean mid half-width is
+/// 0.027 m (`mix(0.016, 0.038)` in vs_grass_mid), scaled by the width slider.
+const MID_LOD_PX_DEFAULT: f32 = 0.5;
+
+fn mid_lod_lanes(blade_width_scale: f32, px_per_radian: f32, px: f32) -> [f32; 4] {
+    if !(px > 0.0) || !(px_per_radian > 0.0) || !px_per_radian.is_finite() {
+        return [0.0; 4];
+    }
+    let full_width = 2.0 * 0.027 * blade_width_scale.clamp(0.25, 6.0);
+    let d0 = full_width * px_per_radian / px;
+    if !d0.is_finite() {
+        return [0.0; 4];
+    }
+    [d0.max(1.0), 1.0, 0.0, 0.0]
+}
+
+#[cfg(test)]
+mod mid_lod_tests {
+    use super::*;
+
+    #[test]
+    fn mid_lod_starts_where_a_blade_drops_below_the_pixel_threshold() {
+        // 1125 px tall at a 60 degree vertical FOV: (1125/2) * (1/tan 30deg) = 974 px per radian.
+        let l = mid_lod_lanes(1.0, 974.0, 0.5);
+        assert!((l[0] - 0.054 * 974.0 / 0.5).abs() < 0.01, "{l:?}");
+        assert_eq!(l[1], 1.0);
+        // A wider blade or a stricter threshold moves the start outwards.
+        assert!(mid_lod_lanes(2.0, 974.0, 0.5)[0] > l[0]);
+        assert!(mid_lod_lanes(1.0, 974.0, 0.25)[0] > l[0]);
+        // Off: no threshold, no projection yet, or a degenerate one.
+        assert_eq!(mid_lod_lanes(1.0, 974.0, 0.0), [0.0; 4]);
+        assert_eq!(mid_lod_lanes(1.0, 0.0, 0.5), [0.0; 4]);
+        assert_eq!(mid_lod_lanes(1.0, f32::NAN, 0.5), [0.0; 4]);
+    }
 }
 
 /// PERF-GRASS-TRACK-BOUNDS: the xz box holding every stamped footprint's whole radius (plus a
@@ -1044,6 +1105,7 @@ impl Grass {
             look_weights: DEFAULT_LOOK_WEIGHTS,
             height_bounds: [0.0; 4],
             track_bounds: track_bounds(&[]),
+            mid_lod: [0.0; 4],
         };
         queue.write_buffer(&grass_params, 0, bytemuck::bytes_of(&params));
 
@@ -2869,6 +2931,7 @@ impl Grass {
             look_weights: resolve_look_weights(params.look_weights),
             height_bounds: self.last_params.height_bounds,
             track_bounds: track_bounds(&params.tracks),
+            mid_lod: mid_lod_lanes(params.blade_width_scale, self.px_per_radian, mid_lod_px_from_env()),
         };
         self.near_grid_dim = near_grid_dim;
         self.mid_grid_dim = mid_grid_dim;

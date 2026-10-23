@@ -177,6 +177,9 @@ struct GrassParams {
     // PERF-GRASS-TRACK-BOUNDS (grass/mod.rs track_bounds): the xz box (min x, min z, max x,
     // max z) holding every stamped footprint's whole radius; empty (min > max) with none.
     track_bounds: vec4<f32>,
+    // WGPU-036 (grass/mod.rs mid_lod_lanes): procedural mid-ring screen-density LOD. .x = d0 (m)
+    // past which clumps thin as d0/d (0 = off), .y = survivors' widening exponent, .zw spare.
+    mid_lod: vec4<f32>,
 };
 
 // 32 bytes. `pos_seed` stays f32 for world precision; everything the compute
@@ -584,6 +587,22 @@ fn lod_dissolve(cell_id: vec2<i32>, presence: f32) -> bool {
     if (presence >= 0.999) { return true; }
     if (presence <= 0.001) { return false; }
     return hash_cell01(cell_id, 0x5a1c93b7u) <= presence;
+}
+
+// WGPU-036: the procedural mid ring's screen-density LOD (grass/mod.rs mid_lod_lanes). Past d0 a
+// mid blade is under WGR_GRASS_MID_LOD_PX pixels wide; clumps thin as d0/d and the survivors widen
+// by d/d0, so the expected blade area per pixel stays what it was. Photo cards keep their density
+// (their own card grid), and so does everything nearer than d0. The salt is its own (lod_dissolve).
+fn mid_screen_keep(distance: f32) -> f32 {
+    let d0 = grass.mid_lod.x;
+    if (d0 <= 0.5 || distance <= d0 || cards_on_mid()) { return 1.0; }
+    return d0 / distance;
+}
+fn mid_screen_thinned(cell_id: vec2<i32>, distance: f32) -> bool {
+    return hash_cell01(cell_id, 0x5be0cd19u) > mid_screen_keep(distance);
+}
+fn mid_screen_widen(distance: f32) -> f32 {
+    return pow(1.0 / mid_screen_keep(distance), clamp(grass.mid_lod.y, 0.0, 1.0));
 }
 
 // Cache the surviving fraction so the vertex shaders can also taper the blade,
@@ -1645,6 +1664,7 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     let fade_out = 1.0 - smoothstep(max(mid_end - band, mid_start), mid_end, distance);
     let mid_fade = min(fade_in, fade_out);
     if (!lod_dissolve(cell_id, mid_fade)) { return; }
+    if (mid_screen_thinned(cell_id, distance)) { return; }
     let geocell = clamp(vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid)), vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
     let geo = textureLoad(geography, geocell, 0).x;
     let presence = grass_edge_presence(world_xz, geo) * grass_exclusion_presence(world_xz);
@@ -2241,7 +2261,9 @@ fn vs_grass_mid(@builtin(vertex_index) vertex_index: u32, @builtin(instance_inde
     let base_offset = radial * mix(0.025, 0.16, blade_seed) * coverage_width;
     let height = mix(0.29, 0.71, hash11(inst.xz + vec2<f32>(f32(blade) * 7.0, f32(blade) * 13.0))) *
         grass.blade_height * shape.y * lod_height_scale(inst_packed.z) * native_blade_height_scale();
-    let width = mix(0.016, 0.038, blade_seed) * shape.x * max(grass.species_mix.z, 0.05) * coverage_width;
+    // WGPU-036: horizontal distance, the same one cs_place_mid thinned the clump by.
+    let width = mix(0.016, 0.038, blade_seed) * shape.x * max(grass.species_mix.z, 0.05) * coverage_width *
+        mid_screen_widen(length(inst.xz - frame.cam_pos.xz));
     let static_bend = radial * mix(0.10, 0.32, hash11(inst.xz + vec2<f32>(f32(blade) * 19.0, 31.0))) * height;
     let depth = imprint_depth();
     let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (depth * crush);

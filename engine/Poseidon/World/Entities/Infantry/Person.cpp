@@ -8,6 +8,7 @@
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <cstdlib>
+#include <Poseidon/World/SimVehicleCost.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/Network/NetworkCustomAssets.hpp>
@@ -141,9 +142,63 @@ void Person::SetNVWanted(bool set) {}
 
 void Person::DrawNVOptics() {}
 
+namespace
+{
+// POSEIDON_SIM_VEHICLE_COST=1: Person::Simulate split into its base (VehicleSupply ->
+// EntityAI) and the uniform-wetness part with its rain-shelter probe, logged every 3000
+// calls. MP_Detector's men spend their time below Man::Simulate's own sections.
+struct PersonSimProbe
+{
+    struct Accum
+    {
+        double ms[2] = {};
+        double maxMs[2] = {};
+        long long calls = 0, probes = 0;
+    };
+    static Accum& Totals()
+    {
+        static Accum a;
+        return a;
+    }
+    bool on = SimVehCost::Enabled();
+    std::uint64_t last = on ? SimVehCost::NowNs() : 0;
+    void Mark(int i)
+    {
+        if (!on)
+            return;
+        const std::uint64_t now = SimVehCost::NowNs();
+        const double ms = static_cast<double>(now - last) * 1.0e-6;
+        last = now;
+        Accum& a = Totals();
+        a.ms[i] += ms;
+        if (ms > a.maxMs[i])
+            a.maxMs[i] = ms;
+    }
+    ~PersonSimProbe()
+    {
+        if (!on)
+            return;
+        Accum& a = Totals();
+        if (++a.calls < 3000)
+            return;
+        const double inv = 1.0 / static_cast<double>(a.calls);
+        LOG_INFO(World, "Person::Simulate ms/call (avg/max) over {} calls: base={:.3f}/{:.1f} wet={:.3f}/{:.1f} (shelter probes {})",
+                 a.calls, a.ms[0] * inv, a.maxMs[0], a.ms[1] * inv, a.maxMs[1], a.probes);
+        a = Accum();
+    }
+};
+} // namespace
+
 void Person::Simulate(float deltaT, SimulationImportance prec)
 {
+    PersonSimProbe probe;
     base::Simulate(deltaT, prec);
+    probe.Mark(0);
+    struct MarkWet
+    {
+        PersonSimProbe& p;
+        ~MarkWet() { p.Mark(1); }
+    } markWet{probe};
     if (GLandscape == nullptr || !std::isfinite(deltaT) || deltaT <= 0.0f)
         return;
     const float weatherRain = GLandscape->GetRainDensity();
@@ -151,6 +206,14 @@ void Person::Simulate(float deltaT, SimulationImportance prec)
     const bool particleSnowflakes = GRain.Params().snowflakes;
     const float rain = UniformWettingDensity(weatherRain, particleRain, particleSnowflakes);
     _uniformWetnessProbeDue -= deltaT;
+    _uniformShelterProbeAge += deltaT;
+    // The answer only changes when he moves or what is above him does. A man who stayed
+    // within half a metre keeps it, and asks again every 10 s for a roof that went away:
+    // the two 30 m rays cost 1-2 ms on Chernarus, and MP_Detector's 431 men in the rain
+    // spent 0.15-0.25 ms of every Man::Simulate on them (100 ms a second of simulation).
+    if (rain > 0.0f && _uniformWetnessProbeDue <= 0.0f &&
+        Position().Distance2(_uniformShelterProbePos) < Square(0.5f) && _uniformShelterProbeAge < 10.0f)
+        _uniformWetnessProbeDue = 1.0f;
     if (rain > 0.0f && _uniformWetnessProbeDue <= 0.0f)
     {
         // The smoke rain query does not ignore its emitter. Ignore this actor
@@ -168,6 +231,10 @@ void Person::Simulate(float deltaT, SimulationImportance prec)
                                        0.05f, ObjIntersectView);
         _uniformRainSheltered = hits.Size() > 0;
         _uniformWetnessProbeDue = 1.0f;
+        _uniformShelterProbePos = Position();
+        _uniformShelterProbeAge = 0.0f;
+        if (probe.on)
+            PersonSimProbe::Totals().probes++;
     }
     if (!(rain > 0.0f))
         _uniformWetnessProbeDue = 0.0f; // first returning rain samples shelter immediately

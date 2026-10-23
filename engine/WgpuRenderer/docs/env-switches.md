@@ -37,6 +37,7 @@ have been.
 | `WGR_GRASS` | Rust | |
 | `WGR_GRASS_FILTER_SUBPIXEL` | Rust grass fragment pipelines | Default `1`: footprint-filtered normals/photo contour relief, taper-averaged procedural colour/dry tips/height AO, and opacity-weighted source blade colour means for unresolved native ribbons. `0` restores unfiltered shading for a same-binary A/B. Resolved native albedo, density and coverage are unchanged. |
 | `WGR_GRASS_DENSITY` | Rust | |
+| `WGR_GRASS_MID_LOD_PX` | Rust (`grass/mod.rs`, `grass.wgsl`) | WGPU-036. Procedural mid-ring screen-density LOD: past the distance where a mid blade is narrower than this many pixels (default `0.5`, from the view's pixels per radian and the width slider), clumps thin as d0/d and the survivors widen by d/d0, so the blade area per pixel stays the same while far clumps stop costing triangles. Photo cards and native tufts are untouched. `0` = off (full mid density to the ring's edge). |
 | `WGR_GRASS_DISTANCE` | Rust | |
 | `WGR_FOLIAGE_A2C` | Rust | Alpha-to-coverage for foliage. |
 | `WGR_SKIN_BAKE` | Rust | Compute skin bake; default off. |

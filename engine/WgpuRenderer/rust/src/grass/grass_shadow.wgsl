@@ -70,6 +70,9 @@ struct GrassParams {
     look_weights: array<vec4<f32>, 4>,
     height_bounds: vec4<f32>, // PERF-GRASS-VIEW-PREFILTER (grass.wgsl); unused here
     track_bounds: vec4<f32>, // PERF-GRASS-TRACK-BOUNDS (grass.wgsl); unused here
+    // WGPU-036 (grass/mod.rs mid_lod_lanes): procedural mid-ring screen-density LOD. .x = d0 (m)
+    // past which clumps thin as d0/d (0 = off), .y = survivors' widening exponent, .zw spare.
+    mid_lod: vec4<f32>,
 };
 // Must mirror grass.wgsl's 32-byte layout exactly: both shaders bind the same
 // instance buffer through the shared `data_layout`.
