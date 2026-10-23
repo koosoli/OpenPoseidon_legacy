@@ -919,14 +919,66 @@ constexpr int kReservedBone = WGR_PALETTE_SIZE - 1;
 // FNV-1a 64 over raw bytes; used to detect unchanged vertex data so a redundant
 // GPU re-upload can be skipped. Cheap relative to the staging copy + barrier it
 // avoids, and only paid on meshes whose Update trigger already fires.
+// PERF (REFLECT-001 measurement, 2026-10-23): this was byte-wise FNV-1a, ~3.5 GB/s. On the
+// owner's 21-Peugeot test (282 332 vertices, 24 MB per buffer, rebuilt and hashed for every
+// visible car every frame, every one a hash-skip) it cost 6.9 of the 8.2 ms per car and most
+// of a 116 ms frame. Four independent xxHash64-style lanes over 8-byte words: same purpose
+// (detect identical bytes), several times the throughput.
+inline uint64_t HashBytesFast(const void* data, size_t bytes, uint64_t seed = 0)
+{
+    constexpr uint64_t P1 = 0x9E3779B185EBCA87ULL, P2 = 0xC2B2AE3D27D4EB4FULL, P3 = 0x165667B19E3779F9ULL;
+    const auto rotl = [](uint64_t x, int r) { return (x << r) | (x >> (64 - r)); };
+    const auto round = [&](uint64_t acc, uint64_t w) { return rotl(acc + w * P2, 31) * P1; };
+    const auto* p = static_cast<const uint8_t*>(data);
+    uint64_t a = seed + P1 + P2, b = seed + P2, c = seed, d = seed - P1;
+    size_t i = 0;
+    for (; i + 32 <= bytes; i += 32)
+    {
+        uint64_t w[4];
+        std::memcpy(w, p + i, 32);
+        a = round(a, w[0]);
+        b = round(b, w[1]);
+        c = round(c, w[2]);
+        d = round(d, w[3]);
+    }
+    uint64_t h = rotl(a, 1) + rotl(b, 7) + rotl(c, 12) + rotl(d, 18) + bytes;
+    for (; i + 8 <= bytes; i += 8)
+    {
+        uint64_t w;
+        std::memcpy(&w, p + i, 8);
+        h = rotl(h ^ round(0, w), 27) * P1 + P3;
+    }
+    for (; i < bytes; i++)
+        h = rotl(h ^ (p[i] * P3), 11) * P1;
+    h ^= h >> 33;
+    h *= P2;
+    h ^= h >> 29;
+    h *= P3;
+    h ^= h >> 32;
+    return h;
+}
+
 inline uint64_t HashVertices(const void* data, size_t bytes)
 {
-    const auto* p = static_cast<const uint8_t*>(data);
-    uint64_t h = 0xcbf29ce484222325ULL;
-    for (size_t i = 0; i < bytes; i++)
+    return HashBytesFast(data, bytes);
+}
+
+// The streams BuildVertices reads, hashed where they lie: no SVertex rebuild needed to learn
+// that an animated shape came back from Animate/Deanimate exactly as it was.
+inline uint64_t HashShapeStreams(const Shape& src)
+{
+    const int n = src.NVertex();
+    uint64_t h = HashBytesFast(&src.Pos(0), sizeof(Vector3) * size_t(n), uint64_t(n));
+    if (src.NNorm() > 0)
+        h = HashBytesFast(&src.Norm(0), sizeof(Vector3) * size_t(src.NNorm()), h);
+    if (src.NTex() > 0)
+        h = HashBytesFast(&src.UV(0), sizeof(UVPair) * size_t(src.NTex()), h);
+    if (src.HasUV1())
+        h = HashBytesFast(&src.UV1(0), sizeof(UVPair) * size_t(src.NTex1()), h);
+    if (src.HasTangentFrame() && src.NTangent() > 0 && src.NBinormal() > 0)
     {
-        h ^= p[i];
-        h *= 0x100000001b3ULL;
+        h = HashBytesFast(&src.Tangent(0), sizeof(Vector3) * size_t(src.NTangent()), h);
+        h = HashBytesFast(&src.Binormal(0), sizeof(Vector3) * size_t(src.NBinormal()), h);
     }
     return h;
 }
@@ -1108,6 +1160,11 @@ class VertexBufferWgpu : public VertexBuffer
     // produced a per-frame `wgr_3d_vbuf` staging copy + barrier for unchanged data.
     uint64_t lastUploadHash = 0;
     bool haveUploadHash = false;
+    // Hash of the SOURCE streams (HashShapeStreams) the last upload was built from; lets a
+    // re-dirtied but unchanged shape skip the rebuild entirely. Valid only for the plain
+    // BuildVertices path (not conformed, not CPU-posed).
+    uint64_t lastSourceHash = 0;
+    bool haveSourceHash = false;
     // Queued draws must not all observe the last helicopter's CPU pose.
     // Copies belong to this shape buffer and are reused only in a later frame.
     std::vector<std::unique_ptr<VertexBufferWgpu>> poseCopies;
@@ -1252,6 +1309,7 @@ class VertexBufferWgpu : public VertexBuffer
                     std::vector<SVertex> bind(static_cast<size_t>(vertexCount));
                     render::mesh::BuildOrigVertices(src, bind.data());
                     haveUploadHash = false;
+                    haveSourceHash = false;
                     bufferDirty = false;
                     bool pending = false;
                     {
@@ -1326,6 +1384,22 @@ class VertexBufferWgpu : public VertexBuffer
             if (cpuPosed) { Poseidon::GFaceDiag().updCount++; }
             return;
         }
+        // PERF: Animate/Deanimate re-dirty an animated shape every frame even when they put it
+        // back exactly as it was -- every parked car. Hash the source streams in place first;
+        // identical to what the last upload was built from means identical bytes, without the
+        // SVertex rebuild or its hash (both ~half a ms per 100k vertices).
+        const bool plainBuild = !(GCurrentConformPlane.active && src.OriginalPosValid()) && !cpuPosed;
+        uint64_t sourceHash = 0;
+        if (plainBuild && vertexCount > 0)
+        {
+            sourceHash = HashShapeStreams(src);
+            if (haveUploadHash && haveSourceHash && sourceHash == lastSourceHash)
+            {
+                bufferDirty = false;
+                if (diag) { diag->hashSkips.fetch_add(1, std::memory_order_relaxed); }
+                return;
+            }
+        }
         std::vector<SVertex> verts(static_cast<size_t>(vertexCount));
         if (diag) { diag->builds.fetch_add(1, std::memory_order_relaxed); }
         // A terrain-conform plane is active only inside a conformed object's draw
@@ -1365,6 +1439,8 @@ class VertexBufferWgpu : public VertexBuffer
         const auto hashStart = diag ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
         const uint64_t hash = HashVertices(verts.data(), verts.size() * sizeof(SVertex));
         RecordVbHashTime(diag, hashStart);
+        lastSourceHash = sourceHash;
+        haveSourceHash = plainBuild && vertexCount > 0;
         if (haveUploadHash && hash == lastUploadHash)
         {
             if (diag) { diag->hashSkips.fetch_add(1, std::memory_order_relaxed); }
