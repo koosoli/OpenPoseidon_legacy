@@ -145,6 +145,13 @@ fn reflect_classified(mat: ShadeMaterial, linear: f32) -> bool {
     return mat.refl_b.x > 0.5 && linear > 0.5;
 }
 
+// Matt, PaintMatt, Rubber and Plastic (ReflectMaterial.hpp) take no environment or screen
+// reflection at all (F.1).
+fn reflect_class_mirrors(mat: ShadeMaterial) -> bool {
+    let cls = u32(mat.refl_b.x + 0.5);
+    return !(cls == 1u || cls == 2u || cls == 10u || cls == 11u);
+}
+
 // Normal-incidence reflectance of the base layer. Polished metal parts (chrome, mirror glass,
 // the chromed bowl behind a lamp cover) are silver whatever their often dark or atlas-shared
 // texture says, so they take a fixed silver tinted lightly by the albedo; other metals take
@@ -673,7 +680,15 @@ fn shade(
         var sky_spec = sky_specular_split(
             nrm, view_dir_sky, spec_power_to_gloss(m_spec_power), m_spec_mask);
         if (reflect_classified(mat, linear)) {
-            sky_spec = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+            // F.5: a mirroring class gets the whole diffuse sky back here and gives the reflected
+            // share up in the caller's `keep`. A matt class has no such caller term, so it keeps
+            // the classic diffuse weight and only loses the sky sheen: with w = 1 the owner's
+            // tanks came out 5-10/255 brighter and bluer with reflections on than off (opmil, f62b0d4).
+            if (reflect_class_mirrors(mat)) {
+                sky_spec = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+            } else {
+                sky_spec = vec4<f32>(0.0, 0.0, 0.0, sky_spec.w);
+            }
         }
         // REN-GI-001: the probe volume's irradiance replaces the analytic sky-dome ambient
         // where the volume covers the point (weight fades at its edge; 0 with the feature

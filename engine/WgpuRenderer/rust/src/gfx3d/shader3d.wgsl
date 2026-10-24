@@ -16,7 +16,7 @@
 #import boot_relief::{boot_relief_height, boot_relief_normal, boot_relief_parallax, boot_relief_multiplier, boot_relief_composite}
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
 // Shared fragment shading, also used by the GPU-driven indirect path (gpu_driven.wgsl).
-#import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal, reflect_classified, reflect_base_reflectance}
+#import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal, reflect_classified, reflect_class_mirrors, reflect_base_reflectance}
 #import tree_snow::{tree_snow_height, tree_snow_coverage}
 // Group(4) terrain heightmap + surface_y, shared with the shadow depth pass.
 // surface_grad tilts conformed veg normals to follow the ground slope (color pass only).
@@ -1075,10 +1075,7 @@ const REFLECT_GROUND_ALBEDO: f32 = 0.2;
 // no ground in the sill of a military truck. Matt (1), PaintMatt (2), Rubber (10) and Plastic
 // (11) keep their diffuse body and the sun's broad highlight, and skip the environment and the
 // screen-space march entirely (which is also most of what the reflection costs).
-fn reflect_class_mirrors(mat: ShadeMaterial) -> bool {
-    let cls = u32(mat.refl_b.x + 0.5);
-    return !(cls == 1u || cls == 2u || cls == 10u || cls == 11u);
-}
+// reflect_class_mirrors lives in shading.wgsl (the sky-ambient split needs it too).
 
 // Phase E: march `dir` from `origin` (camera-relative metres) against this frame's depth.
 // Returns the hit in the PREVIOUS frame's image: .xy = its uv there, .z = how many pixels one
