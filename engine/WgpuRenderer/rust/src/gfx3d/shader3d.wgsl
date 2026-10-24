@@ -2269,9 +2269,20 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         if (translucent > 0.5) {
             // A pane over what is behind it: the reflection sits on top of the film (RFG-137's form).
             let f = clamp(max(fb.r, max(fb.g, fb.b)) * (1.0 - fc) + fc, 0.0, 1.0) * occ;
-            let a = clamp(out_a2, 0.0, 1.0);
+            var a = clamp(out_a2, 0.0, 1.0);
+            var film = out_rgb;
+            if (u32(m.refl_b.x + 0.5) == 6u) {
+                // F.4: window glass absorbs, it does not scatter. A 2001 pane texture is a light
+                // tint at ~60 % coverage (the Peugeot's skl.paa: 196/155/142, alpha 147); lit like
+                // paint it became an opaque milky sheet in sunlight, with or without reflections,
+                // where the owner's reference renders look through the glass at the seats. Read
+                // the texture as a filter: a dark tint over ~two thirds of what is behind it, and
+                // the Fresnel reflection above that.
+                film = out_rgb * 0.15;
+                a = a * 0.55;
+            }
             let a_out = 1.0 - (1.0 - f) * (1.0 - a);
-            out_rgb = (spec + (1.0 - f) * a * out_rgb) / max(a_out, 1e-4);
+            out_rgb = (spec + (1.0 - f) * a * film) / max(a_out, 1e-4);
             out_a2 = a_out;
         } else {
             out_rgb = out_rgb * keep + spec;
