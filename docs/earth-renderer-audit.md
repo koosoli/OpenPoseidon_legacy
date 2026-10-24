@@ -27,14 +27,16 @@ code can come in; GPL-2.0-only cannot.
 | **NASADEM / Copernicus GLO-30** elevation | NASA / ESA | Public domain / free with attribution | Higher-quality elevation than Terrarium tiles at 30 m |
 | **ESA WorldCover 10 m** land cover | ESA | CC-BY 4.0 | Ground materials, grass, forest and sand from land cover, not from imagery colour (today's `EarthCanopyTrees` and beach-sand colour tests) |
 | **Global Forest Change treecover** | Hansen/UMD | CC-BY 4.0 | Tree density per 30 m (what terra uses) |
-| **NASA Black Marble** night lights | NASA | Public domain | City lights on the night side |
+| **NASA Black Marble** night lights | NASA (GIBS WMTS, `VIIRS_Black_Marble` 2016) | Public domain | **Done 2026-10-24**: city lights on the night side, zoom 3 in 64 fixed slots of the tile atlas |
 | **LRO WAC global mosaic / LOLA** (Moon) | USGS Astrogeology / OpenPlanetaryMap tiles | Public domain | Sharper moon imagery than our 2.7 km map (GeoLibre's planetary basemaps) |
 
 ## What we should build, in order
 
-1. **Tile pyramid for imagery: done as a prototype today** (`EarthTileCache`, `POSEIDON_EARTH_TILES=1`).
-   This is bevy_terrain's "data LOD" and Cesium's refine-when-ready rule. It ends the window-atlas
-   reloads, the flicker and the near/far/globe seam.
+1. **Tile pyramid for imagery: done, and the default since 2026-10-24** (`EarthTileCache`;
+   `POSEIDON_EARTH_TILES=0` brings back the window atlases). This is bevy_terrain's "data LOD" and
+   Cesium's refine-when-ready rule. It ends the window-atlas reloads, the flicker and the
+   near/far/globe seam. Night lights (Black Marble) ride in the same atlas, so they need no binding
+   of their own (`POSEIDON_EARTH_NIGHT_LIGHTS=0` turns them off).
 2. **Bathymetry (GEBCO) into the elevation stream.** It removes a whole class of open-sea special cases
    (`FlightFloor`, `SeaBedY`, the fish's 14 m nominal floor, the boat being re-grounded).
 3. **cesium-native as an optional 3D Tiles layer**: Google photorealistic (player's key) or Cesium OSM
@@ -52,3 +54,21 @@ code can come in; GPL-2.0-only cannot.
   Bevy). Our renderer already does CDLOD-like meshes, atmosphere and water.
 - FlightGear's OSG scene graph and BTG format: we only want its data sources.
 - GeoLibre: a GIS front end.
+
+## Found on the way
+
+- **The star field was mirrored**, on the islands and on Earth alike (`sky.wgsl` `to_celestial` and
+  `star_field`). The world frame is left-handed, so `cross(pole, east)` in world components is the
+  mirror of the catalogue's right-handed axis. Right ascension ran west along the equator, so Orion
+  stood reversed. The galactic centre's position in the Milky Way map (u = 0.738 against RA 266.4
+  degrees, 0.740) confirms that the map and the catalogue agree with each other, so one fix covers both.
+  The island clock now turns the sky the right way round (the sun's hour angle, negated).
+- **We already download bathymetry.** The Terrarium elevation tiles (AWS terrain tiles, Mapzen's joerd: SRTM,
+  NASADEM, EU-DEM, ETOPO1/GEBCO-derived bathymetry at sea) carry real sea depths. The zoom-3 tiles in the cache
+  read down to -5596 m. The "0 m ocean ground" that `FlightFloor`, `SeaBedY` and the boat and fish work round is
+  our own handling, not the data. A real sea floor (item 2) needs no new download, only that handling replaced.
+- **Data sources compared.** Imagery: Esri World Imagery (ours, z19, no key), against Bing or Google (Cesium,
+  keyed) and Blue Marble (terra, coarse). Esri is the best keyless one. Elevation: Terrarium (ours), against NASADEM
+  (terra) and Cesium World Terrain (keyed). Terrarium already merges NASADEM/SRTM with bathymetry. Night: Black
+  Marble (now ours). Land cover, tree cover and buildings are where the others have better data (WorldCover, GFC,
+  osm2city/Overture, 3D Tiles), as listed above.

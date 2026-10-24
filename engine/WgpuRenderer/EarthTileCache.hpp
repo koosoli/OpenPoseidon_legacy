@@ -37,6 +37,13 @@ class EarthTileCache
     // Lookup table: per zoom level 0..19, one row with the window's origin tile and 16 rows of 16 entries.
     static constexpr int Levels = 20, Window = 16, LookupWidth = Window, LookupRowsPerLevel = Window + 1;
     static constexpr int MaxZoom = 19;
+    // Night lights (NASA Black Marble, public domain), 128 slots at the end of the atlas; the tile pyramid has the rest.
+    // The whole world at zoom 3 (8 x 8 tiles, for good: ET_NIGHT_BASE), and an 8 x 8 window of zoom 6 round the
+    // camera (ET_NIGHT_FINE), addressed toroidally -- tile (x, y) lives in slot (y % 8) * 8 + x % 8 -- so a moving
+    // window only replaces the tiles that left it. Which tile each fine slot holds is in the lookup's last 4 rows.
+    static constexpr int NightLevel = 3, NightFineLevel = 6, NightTiles = 64;
+    static constexpr int TileSlots = Slots - 2 * NightTiles, NightBase = TileSlots, NightFineBase = TileSlots + NightTiles;
+    static constexpr int NightFineRow = Levels * LookupRowsPerLevel, LookupRows = NightFineRow + NightTiles / LookupWidth;
 
     EarthTileCache(WgrRenderer* renderer, const std::filesystem::path& cache);
     ~EarthTileCache();
@@ -77,6 +84,13 @@ class EarthTileCache
     std::vector<Key> Plan(const ViewState& v) const;
     static void WindowOrigin(int level, double latitude, double longitude, int& ox, int& oy);
     static std::vector<uint8_t> EncodeMip(const std::vector<uint8_t>& rgba, int size);
+    // A 256-ish tile as one slot: bordered, its 3 mip levels as BC1.
+    static void EncodeSlot(const std::vector<uint8_t>& tile, int size, Op& op);
+    // The night-light tiles not yet in their slots: fetched, encoded and queued. Returns true when all are.
+    bool LoadNight();
+    // The zoom-6 window round (latitude, longitude): tiles not yet in their slots, fetched, encoded and queued.
+    // Returns true when all are (or the provider has none).
+    bool LoadNightFine(double latitude, double longitude);
     // OFP islands placed in the sea (EarthIslands): their ground image laid into the tiles they overlap, as the
     // window atlases do (feathered 100 m at the edge). Where the provider has no tile (open sea), a tile is made
     // from the island image over the sea's colour.
@@ -94,6 +108,10 @@ class EarthTileCache
     WgrRenderer* _renderer = nullptr;
     WgrTexture _atlas = 0, _lookup = 0;
     std::unique_ptr<EarthImageryTiles> _tiles;
+    std::unique_ptr<EarthImageryTiles> _night; // worker
+    bool _nightLoaded[NightTiles] = {};        // worker
+    int _fineQueued[NightTiles][2];            // worker: the zoom-6 tile each fine slot was given (-1: none)
+    int _fineInstalled[NightTiles][2];         // main: the zoom-6 tile each fine slot holds (-1: none)
 
     // worker side
     std::thread _thread;

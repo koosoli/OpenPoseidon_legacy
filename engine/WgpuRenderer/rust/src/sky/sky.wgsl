@@ -1086,17 +1086,23 @@ fn star_cell_index(d: vec3<f32>) -> u32 {
 // World direction -> equatorial (catalogue) direction, given the hour angle the sky has turned
 // through. The basis is built from the celestial pole, so the whole field pivots about that axis
 // rather than about the zenith.
-fn to_celestial(dir: vec3<f32>, hour_angle: f32) -> vec3<f32> {
+fn to_celestial(dir: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
     let clat = cos(STAR_LATITUDE);
     let slat = sin(STAR_LATITUDE);
     // World frame here is +Y up, +Z the horizontal bearing the pole leans toward (north),
-    // +X the one 90 deg clockwise from it (east).
+    // +X the one 90 deg clockwise from it (east). That frame is LEFT-handed, so the catalogue's
+    // right-handed y axis (pole x east, physically) is cross(east, pole) in world components.
+    // cross(pole, east) mirrored the whole sky: RA ran west along the equator, Orion stood
+    // reversed and the Plough opened the wrong way.
     let pole = vec3<f32>(0.0, slat, clat);
     let east = vec3<f32>(1.0, 0.0, 0.0);
-    let nrth = cross(pole, east); // completes a right-handed basis with `pole` as +z
+    let nrth = cross(east, pole);
     let c = vec3<f32>(dot(dir, east), dot(dir, nrth), dot(dir, pole));
-    let ca = cos(hour_angle);
-    let sa = sin(hour_angle);
+    // The clock: the sun's hour angle in that frame. The sky turns west (clockwise about the
+    // pole) as the sun does, so the rotation that holds the sun still is minus its angle.
+    let ha = -atan2(dot(sun, nrth), dot(sun, east));
+    let ca = cos(ha);
+    let sa = sin(ha);
     return vec3<f32>(c.x * ca - c.y * sa, c.x * sa + c.y * ca, c.z);
 }
 
@@ -1199,8 +1205,7 @@ fn star_field(dir_in: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
     // and the sun's bearing is the celestial clock anyway -- it advances at the same 15 deg an
     // hour the sky really turns at, so the stars drift through the night for free and stay
     // consistent with wherever the sun comes up.
-    let ang = atan2(sun.z, sun.x);
-    var dir = to_celestial(dir_in, ang);
+    var dir = to_celestial(dir_in, sun);
     // Whole world: the frame the world is in moves with free flight (each rebase turns it, and the moon
     // frame is another one altogether), so the sun's bearing in it is no clock -- keyed to it, the star
     // map and the Milky Way swung about whenever the origin moved. Build the celestial frame from what
@@ -1211,7 +1216,7 @@ fn star_field(dir_in: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
         let s = sun - pole * dot(sun, pole);
         if (dot(s, s) > 1.0e-6) {
             let sx = normalize(s);
-            let sy = cross(pole, sx);
+            let sy = cross(sx, pole); // pole x sx physically: the world frame is left-handed (to_celestial)
             dir = vec3<f32>(dot(dir_in, sx), dot(dir_in, sy), dot(dir_in, pole));
         }
     }
