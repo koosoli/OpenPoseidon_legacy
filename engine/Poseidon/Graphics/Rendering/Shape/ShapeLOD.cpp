@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
@@ -925,6 +926,12 @@ static RString ReplacesChars(RString shapeName, char c, char w)
 
 bool GReplaceProxies = true;
 
+// LOAD-003: milliseconds on the steady clock, for the load-phase log lines.
+static double LoadNowMs()
+{
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 void LODShape::Load(QIStream& f, bool reversed)
 {
     DoClear();
@@ -1024,6 +1031,11 @@ void LODShape::Load(QIStream& f, bool reversed)
 #endif
         Ref<Shape> shape = new Shape();
         float resolution = 0;
+        // LOAD-003: where a slow level's load goes after LoadTagged (logged over 300 ms below)
+        using LoadClock = std::chrono::steady_clock;
+        const auto lodT0 = LoadClock::now();
+        auto lodMs = [](LoadClock::time_point a, LoadClock::time_point b)
+        { return std::chrono::duration<double, std::milli>(b - a).count(); };
 
         int startShapeInStream = f.tellg();
 
@@ -1174,12 +1186,15 @@ void LODShape::Load(QIStream& f, bool reversed)
             shape->_proxy.Add(obj);
         }
 
+        const auto lodTProxies = LoadClock::now();
         if (shape->_sel.Size() <= 0)
         {
             // no selections: we may safely optimize
             shape->Optimize();
         }
 
+        auto lodTDefine = LoadClock::now();
+        auto lodTFind = lodTDefine;
         // scan for sections
         if (Pars.FindEntry("CfgModels"))
         {
@@ -1199,13 +1214,30 @@ void LODShape::Load(QIStream& f, bool reversed)
             {
                 shape->DefineSections(notes >> "default");
             }
+            lodTDefine = LoadClock::now();
             if (!geometryOnly)
             {
                 shape->FindSections();
             }
+            lodTFind = LoadClock::now();
+        }
+        const auto lodTEnd = LoadClock::now();
+        if (lodMs(lodT0, lodTEnd) > 300.0)
+        {
+            LOG_INFO(Graphics,
+                     "Slow MLOD load {} level {} (res {}): {:.1f} ms | read+proxies {:.1f} optimize+define {:.1f} "
+                     "sections {:.1f} ({} faces, {} selections, {} sections)",
+                     (const char*)_name, i, resolution, lodMs(lodT0, lodTEnd), lodMs(lodT0, lodTProxies),
+                     lodMs(lodTProxies, lodTDefine), lodMs(lodTDefine, lodTFind), shape->NFaces(),
+                     shape->NNamedSel(), shape->NSections());
         }
     }
     PoseidonAssert(_nLods >= 1);
+    // LOAD-003 timing (plain doubles: the `goto Error` above may not jump over an initialisation)
+    double postT0;
+    double postT1;
+    double postT2;
+    postT0 = LoadNowMs();
 
     // map type
     {
@@ -1287,10 +1319,21 @@ void LODShape::Load(QIStream& f, bool reversed)
         CalculateMass();
     }
 
+    postT1 = LoadNowMs();
     CheckForcedProperties();
     InitConvexComponents();
+    postT2 = LoadNowMs();
     ScanProperties();
     CalculateHints();
+    {
+        const double postT3 = LoadNowMs();
+        if (postT3 - postT0 > 300.0)
+        {
+            LOG_INFO(Graphics, "Slow MLOD finish {}: {:.1f} ms | minmax+mass+optimize LODs {:.1f} convex components {:.1f} "
+                     "properties+hints {:.1f}", (const char*)_name, postT3 - postT0, postT1 - postT0,
+                     postT2 - postT1, postT3 - postT2);
+        }
+    }
 
     _propertyClass = PropertyValue("class");
     _propertyDammage = PropertyValue("dammage");

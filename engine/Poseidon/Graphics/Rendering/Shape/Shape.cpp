@@ -1,5 +1,7 @@
 #include <string.h>
 #include <cmath>
+#include <map>
+#include <vector>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/StreamArray.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -830,6 +832,10 @@ class IntervalArray
     const Interval& GetInterval(int i) const { return _data.Get(i); }
     void Add(int i) { AddInterval(i, i + 1); }
 
+    // LOAD-003: `for (i : idx) if (IsPresent(i)) { dst.Add(i); Delete(i); }` -- the same intervals in
+    // the same order, without the linear scans. See the definition.
+    void MoveIndicesTo(const VertexIndex* idx, int n, IntervalArray& dst);
+
     bool CheckIntegrity() const;
 };
 
@@ -971,6 +977,119 @@ void IntervalArray::AddInterval(int beg, int end)
     PoseidonAssert(CheckIntegrity());
 }
 
+// LOAD-003. The loop this replaces (FindShapeSections::SplitByNamedSelection) cost
+// O(faces x intervals) per section and selection: IsPresent and Delete scan the list, and
+// AddInterval scans it for a merge that can never happen -- its test asks for an interval lying
+// both wholly before and wholly after the new one -- so every face it moves becomes its own
+// interval and every later scan gets longer. The owner's 282k-vertex Peugeot spent ~50 s here.
+//
+// Same result, interval for interval: the source list is kept as a linked list in its original
+// order (a split appends its tail at the end, an emptied interval drops out, exactly as Delete
+// does), found by start index through a sorted map; moved indices are appended to `dst` as the
+// single-element intervals AddInterval would have appended.
+void IntervalArray::MoveIndicesTo(const VertexIndex* idx, int n, IntervalArray& dst)
+{
+    if (n <= 0 || _data.Size() == 0)
+    {
+        return;
+    }
+    struct Node
+    {
+        Interval iv;
+        int next;
+        int prev;
+    };
+    std::vector<Node> nodes;
+    nodes.reserve(static_cast<size_t>(_data.Size()) + static_cast<size_t>(n));
+    std::map<int, int> byBeg;
+    for (int i = 0; i < _data.Size(); i++)
+    {
+        nodes.push_back(Node{_data[i], -1, i - 1});
+        if (i > 0)
+        {
+            nodes[i - 1].next = i;
+        }
+        byBeg[_data[i].beg] = i;
+    }
+    int head = 0;
+    int tail = _data.Size() - 1;
+    bool changed = false;
+    for (int k = 0; k < n; k++)
+    {
+        const int index = idx[k];
+        auto it = byBeg.upper_bound(index);
+        if (it == byBeg.begin())
+        {
+            continue;
+        }
+        --it;
+        const int ni = it->second;
+        Interval& iv = nodes[ni].iv;
+        if (!(index >= iv.beg && index < iv.end))
+        {
+            continue;
+        }
+        changed = true;
+        Interval& moved = dst._data.Append();
+        moved.beg = index;
+        moved.end = index + 1;
+        if (iv.beg < index && iv.end > index + 1)
+        {
+            // split: <beg,index) stays in place, (index,end) goes to the end of the list
+            const int tailIndex = static_cast<int>(nodes.size());
+            nodes.push_back(Node{Interval{index + 1, iv.end}, -1, tail});
+            nodes[ni].iv.end = index;
+            nodes[tail].next = tailIndex;
+            tail = tailIndex;
+            byBeg[index + 1] = tailIndex;
+            continue;
+        }
+        if (iv.beg == index)
+        {
+            byBeg.erase(it);
+            iv.beg++;
+            if (iv.beg < iv.end)
+            {
+                byBeg[iv.beg] = ni;
+            }
+        }
+        else if (iv.end == index + 1)
+        {
+            iv.end--;
+        }
+        if (iv.end == iv.beg)
+        {
+            const int p = nodes[ni].prev;
+            const int q = nodes[ni].next;
+            if (p >= 0)
+            {
+                nodes[p].next = q;
+            }
+            else
+            {
+                head = q;
+            }
+            if (q >= 0)
+            {
+                nodes[q].prev = p;
+            }
+            else
+            {
+                tail = p;
+            }
+        }
+    }
+    if (!changed)
+    {
+        return;
+    }
+    _data.Clear();
+    for (int i = head; i >= 0; i = nodes[i].next)
+    {
+        _data.Add(nodes[i].iv);
+    }
+}
+
 bool IntervalArray::IsPresent(int index) const
 {
     for (int i = 0; i < _data.Size(); i++)
@@ -1096,17 +1215,13 @@ void FindShapeSections::SplitByNamedSelection(ShapeSectionWork& src,
     split.material = src.material;
     split.properties = src.properties;
     const Selection& faces = sel.Faces();
+    // if a face is in both section and selection, move it to split (LOAD-003: in one pass)
+    std::vector<VertexIndex> idx(static_cast<size_t>(faces.Size()));
     for (int i = 0; i < faces.Size(); i++)
     {
-        int fi = faces[i];
-        // check if fo is in src
-        // if it is in both section and selection, move it to split
-        if (src._faces.IsPresent(fi))
-        {
-            split._faces.Add(fi);
-            src._faces.Delete(fi);
-        }
+        idx[static_cast<size_t>(i)] = faces[i];
     }
+    src._faces.MoveIndicesTo(idx.data(), faces.Size(), split._faces);
     // src and split are now both correct in relation to sel
     // one (both?) of them may be empty now
 }

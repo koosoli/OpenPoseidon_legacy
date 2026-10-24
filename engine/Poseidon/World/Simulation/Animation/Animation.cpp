@@ -12,6 +12,8 @@
 
 #include <Poseidon/Foundation/Common/Filenames.hpp>
 #include <stdio.h>
+#include <algorithm>
+#include <vector>
 #include <string.h>
 #include <cfloat>
 #include <cmath>
@@ -145,6 +147,16 @@ void FaceSelection::RescanSections(Shape* shape, const char* debugName)
 {
     AUTO_STATIC_ARRAY(int, sections, 256);
 
+    // LOAD-003: the face offsets of this selection, sorted, so each face of each section is one
+    // binary search instead of a scan of the whole selection -- O(faces x selection) per
+    // selection was billions of compares on a 200k-face model with a wheel selection.
+    std::vector<int> offsets(static_cast<size_t>(Size()));
+    for (int oo = 0; oo < Size(); oo++)
+    {
+        offsets[static_cast<size_t>(oo)] = offsetToInt((*this)[oo]);
+    }
+    std::sort(offsets.begin(), offsets.end());
+
     for (int s = 0; s < shape->NSections(); s++)
     {
         const ShapeSection& sec = shape->GetSection(s);
@@ -153,15 +165,7 @@ void FaceSelection::RescanSections(Shape* shape, const char* debugName)
         bool all = true;
         for (Offset so = sec.beg; so < sec.end; shape->NextFace(so))
         {
-            bool found = false;
-            for (int oo = 0; oo < Size(); oo++)
-            {
-                if ((*this)[oo] == so)
-                {
-                    found = true;
-                    break;
-                }
-            }
+            const bool found = std::binary_search(offsets.begin(), offsets.end(), offsetToInt(so));
             if (found)
             {
                 some = true; // face is there
