@@ -530,6 +530,28 @@ worked off one by one (voices, animals, vehicle/weapon values, mimic/glasses/con
 - `dd365dc`: the player's own CWA profile voice becomes an Arma 2 voice of his kind.
 - HQ (`CfgHQIdentities`) speaks with the Arma 2 config's HQ voice when it names one (not yet measured).
 
+### Arma 2 animals, 2026-10-24
+
+- `6f48115`: an Arma 2 animal (cow, sheep, goat, dog, hen, cock, rabbit, boar; `CAAnimalBase`)
+  is no longer left out: it is `A1x_<class>` on CWA's `Civilian` with its own model,
+  `hiddenSelectionsTextures` and moves, no weapons and no face, head or voice, and it is run
+  by its agent tasks: `CfgTasks >> AnimalMainTask`'s FSM (`main.fsm`) is started for it with
+  `_agent` = the animal. `OP_A2_ANIMALS=0` leaves them out as before.
+- `7719879`: the animal move sets (`CfgMovesCow`, ...) are imported together with
+  `CfgMovesAnimalsBase` (as `A1_...`), so their states find their bases.
+- `fc76b4d`: a move set with no action map of the man's degree (an animal's one map is
+  `ManPosNoWeapon`, a civilian's degree Stand/Combat) uses its first living map with a
+  Default move; men always have a matching map, so nothing changes for them.
+- `d054c42`: the animals' skeletons (not discrete, with a head and hips or a spine) are
+  skinned rigs like the man's: weighted bone selections, lifted to stand at y=0, moves posed
+  down their own hierarchy. Bone -> parent tables are kept per skeleton (`BmtrRigs`): the
+  animals share bone names with different parents. A rig's root rest height is read from its
+  own standing move; men keep 0.98 m.
+- `fc8bdc6` (test): `OP_A2_SHOT_CLASS=<text>` aims the second close-up at that class.
+- `2cf5bb3` (test): the animal FSMs' states are logged.
+- Open: in 90 s no animal walked (main.fsm idles 20-60 s first); whether the FSM runs and
+  moves them is not measured yet.
+
 ## Steps
 
 1. **Measure first.** Per mission: an asset census in the log (every class created, what it
