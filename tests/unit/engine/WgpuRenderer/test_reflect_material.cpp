@@ -102,9 +102,13 @@ int main()
     part.texture = "data\\sk_palubka.pac";
     assert(ClassOf(part) == SurfaceClass::Plastic);
     part.texture = "humr\\hmmwv_in_strop.pac";
-    part.military = true;
     assert(ClassOf(part) == SurfaceClass::Plastic);
+    part.military = true; // F.7: nothing on a military vehicle but glass and lamps keeps a sheen
+    assert(ClassOf(part) == SurfaceClass::PaintMatt);
+    part.texture = "data\\t72_kola.pac";
+    assert(ClassOf(part) == SurfaceClass::PaintMatt);
     part.military = false;
+    assert(ClassOf(part) == SurfaceClass::Rubber);
     part.texture = "a3\\soft_f_gamma\\suv_01\\data\\suv_01_int_base_co.paa";
     part.hasEnvMap = true;
     assert(ClassOf(part) == SurfaceClass::Plastic);

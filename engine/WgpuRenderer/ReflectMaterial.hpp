@@ -307,13 +307,14 @@ inline Params ClassifyRules(const Inputs& in)
 // Owner, 2026-10-23: military vehicles and tanks reflect nothing but their glass -- no paint
 // sheen, no chrome, not even the faint sky sheen a matt finish showed in shadow. Glass, mirrors
 // and lamp covers keep their class; everything else on a military vehicle is matt paint (the
-// shader gives Matt, PaintMatt, Rubber and Plastic no environment or screen reflection at all).
+// shader gives Matt and PaintMatt no environment reflection and no sun highlight at all, F.6).
+// Rubber and Plastic go matt too (F.7): a tank's "wheel"/"kola" sections are steel track and road
+// wheels, and the small GGX highlight Rubber keeps showed on them at dusk (opmil, 1b4166a).
 // An addon's own CfgOpMaterials entry still wins.
 inline bool KeepsReflectionWhenMilitary(SurfaceClass cls)
 {
     return cls == SurfaceClass::Glass || cls == SurfaceClass::Mirror || cls == SurfaceClass::LampGlass ||
-           cls == SurfaceClass::LampPlastic || cls == SurfaceClass::Rubber || cls == SurfaceClass::Plastic ||
-           cls == SurfaceClass::Matt || cls == SurfaceClass::PaintMatt;
+           cls == SurfaceClass::LampPlastic || cls == SurfaceClass::Matt || cls == SurfaceClass::PaintMatt;
 }
 
 inline Params Classify(const Inputs& in)
