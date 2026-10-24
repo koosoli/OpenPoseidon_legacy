@@ -3306,6 +3306,13 @@ impl Sky {
                 .filter(|v| v.is_finite() && *v > 0.0).unwrap_or(2.5)
         });
         let phys = if native { 1.0 / dome } else { 1.0 };
+        // Whole world near the moon (its frame: the moon's centre is the near one): the ground is regolith,
+        // grey and ~0.12 (Apollo photometry), not grass. Under the black sky it is the only fill there is --
+        // with the grass estimate a soldier in shadow on the moon was black on black.
+        let [earth, moon, _, _] = self.earth_geometry;
+        let dist = |c: [f32; 4]| (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt();
+        let moon_frame = moon[3] > 0.5 && earth[3] > 0.5 && dist(moon) < dist(earth);
+        let albedo = if moon_frame { [0.13f32, 0.12, 0.11] } else { albedo };
         let data: [f32; 16] = [sun[0], sun[1], sun[2], sun_up, albedo[0], albedo[1], albedo[2],
             if on { 1.0 } else { 0.0 }, ratio, if norm_on && native { 1.0 } else { 0.0 }, 24.0, neutral,
             phys, 0.0, 0.0, 0.0];
