@@ -309,6 +309,7 @@ class MotionType
 	int MoveIdN() const {return _moveIds.FirstInvalidValue();}
 
 	MoveId GetDefaultMove( int upDegree ) const;
+	const ActionMap *ActionMapForDegree( int upDegree ) const;
 	MoveId GetMove(int upDegree, ManAction action) const;
 
 	void InitNoActions(const ParamEntry *cfg);

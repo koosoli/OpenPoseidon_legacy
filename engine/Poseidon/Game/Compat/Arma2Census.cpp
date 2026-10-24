@@ -39,6 +39,8 @@ namespace Poseidon::Arma1Compat
 namespace
 {
 // The player's man (which = 0) or the man nearest him (which = 1), alive, within 30 m.
+std::string TypeName(const Entity* e);
+
 Man* FaceTarget(int which)
 {
     Person* player = GWorld ? GWorld->PlayerOn() : nullptr;
@@ -47,11 +49,26 @@ Man* FaceTarget(int which)
     if (!player)
         return nullptr;
     Man* best = nullptr;
-    float bestDistance = 30.0f;
+    // OP_A2_SHOT_CLASS=<text>: the second shot looks at the nearest man whose class name
+    // contains it, however far (an animal: "Cow", "Sheep", ...)
+    static const std::string wanted = [] {
+        const char* e = std::getenv("OP_A2_SHOT_CLASS");
+        std::string w = e ? e : "";
+        std::transform(w.begin(), w.end(), w.begin(), ::tolower);
+        return w;
+    }();
+    float bestDistance = wanted.empty() ? 30.0f : 1e9f;
     const auto consider = [&](Entity* e) {
         Man* man = dyn_cast<Man>(e);
         if (!man || man == player || man->IsDammageDestroyed())
             return;
+        if (!wanted.empty())
+        {
+            std::string n = TypeName(man);
+            std::transform(n.begin(), n.end(), n.begin(), ::tolower);
+            if (n.find(wanted) == std::string::npos)
+                return;
+        }
         const float d = man->Position().Distance(player->Position());
         if (d < bestDistance)
         {
@@ -345,7 +362,10 @@ bool AimFaceCamera(int which)
     if (forward.SquareSize() < 1e-6f)
         forward = VForward;
     forward.Normalize();
-    const Vector3 eye = head + forward * 0.9f + VUp * 0.03f;
+    // an animal (OP_A2_SHOT_CLASS) whole, from the side and 4 m away
+    const bool whole = which == 1 && std::getenv("OP_A2_SHOT_CLASS") && *std::getenv("OP_A2_SHOT_CLASS");
+    const Vector3 side(forward.Z(), 0, -forward.X());
+    const Vector3 eye = whole ? head + side * 4.0f + forward * 1.5f + VUp * 0.8f : head + forward * 0.9f + VUp * 0.03f;
     // script positions are [x, z, height above the surface]
     const auto aboveSurface = [](Vector3Par v) { return v.Y() - GLandscape->SurfaceYAboveWater(v.X(), v.Z()); };
     char script[768];
@@ -356,8 +376,9 @@ bool AimFaceCamera(int which)
              eye.X(), eye.Z(), aboveSurface(eye), head.X(), head.Z(), aboveSurface(head));
     GWorld->GetGameState()->EvaluateMultiple(script);
     const AIUnitInfo& info = man->GetInfo();
-    LOG_INFO(Mission, "{}: face shot {}: {} '{}' face '{}' texture {}", Label(), which, TypeName(man),
-             (const char*)info._name, (const char*)info._face, (const char*)man->GetFaceTextureName());
+    LOG_INFO(Mission, "{}: face shot {}: {} '{}' face '{}' texture {} move '{}' at {:.0f} {:.0f}", Label(), which,
+             TypeName(man), (const char*)info._name, (const char*)info._face, (const char*)man->GetFaceTextureName(),
+             (const char*)man->GetCurrentMove(), man->Position().X(), man->Position().Z());
     return true;
 }
 

@@ -4,6 +4,7 @@
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Entities/Infantry/Head.hpp>
 #include <Poseidon/Asset/Formats/RTM/RTMReader.hpp>
+#include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/Foundation/Types/ScopeLock.hpp>
 #include <cstdlib>
@@ -579,9 +580,67 @@ void AnimationRTCache::Load(AnimationRT* anim)
 
 static AnimationRTCache GAnimationRTCache;
 
+// The skinned rig a move set's binarised moves pose (its skeletonName: the man's
+// OFP2_ManSkeleton, an animal's CowSkeleton, ...), when the model's loader registered it;
+// its rest height read once from the set's standing move (its first action map's Stop).
+static const Poseidon::Asset::Formats::BmtrRig* BinarisedRig(const Skeleton* skelet)
+{
+    using namespace Poseidon::Asset::Formats;
+    if (!skelet)
+        return nullptr;
+    const ParamEntry* moves = Pars.FindEntry(skelet->GetName());
+    const ParamEntry* sn = moves && moves->IsClass() ? moves->FindEntry("skeletonName") : nullptr;
+    if (!sn || sn->IsClass() || sn->IsArray())
+        return nullptr;
+    std::string key = (const char*)(RStringB)*sn;
+    for (char& ch : key)
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    auto it = BmtrRigs().find(key);
+    if (it == BmtrRigs().end() || it->second.parents.empty())
+        return nullptr;
+    BmtrRig& rig = it->second;
+    if (rig.rootRestHeight < 0)
+    {
+        rig.rootRestHeight = 0.0f;
+        std::string file;
+        const ParamEntry* maps = moves->FindEntry("primaryActionMaps");
+        const ParamEntry* actions = moves->FindEntry("Actions");
+        const ParamEntry* states = moves->FindEntry("States");
+        if (maps && maps->IsArray() && maps->GetSize() > 0 && actions && states)
+        {
+            const ParamEntry* map = actions->FindEntry(RStringB((*maps)[0].GetValue()));
+            const ParamEntry* stop = map ? map->FindEntry("Stop") : nullptr;
+            const ParamEntry* state =
+                stop && !stop->IsClass() && !stop->IsArray() ? states->FindEntry((RStringB)*stop) : nullptr;
+            const ParamEntry* f = state && state->IsClass() ? state->FindEntry("file") : nullptr;
+            if (f && !f->IsClass() && !f->IsArray())
+                file = (const char*)(RStringB)*f;
+        }
+        if (!file.empty())
+        {
+            QIFStreamB in;
+            in.AutoOpen(GetAnimationName(RString(file.c_str())));
+            std::vector<uint8_t> bytes;
+            while (!in.fail() && in.rest() > 0)
+            {
+                const int c = in.get();
+                if (in.eof() || in.fail() || c < 0)
+                    break;
+                bytes.push_back(static_cast<uint8_t>(c));
+            }
+            float h = 0.0f;
+            if (BmtrRootHeightAtStart(bytes.data(), bytes.size(), rig, h) && h > 0.0f && h < 5.0f)
+                rig.rootRestHeight = h;
+        }
+        LOG_INFO(Physics, "Binarised rig {}: root rest height {:.3f} m (from {})", key, rig.rootRestHeight,
+                 file.empty() ? std::string("nothing") : file);
+    }
+    return &rig;
+}
+
 // An Arma 2 binarised animation (BMTR) in `in`, converted to plain RTM bytes in `out`.
 // False (stream rewound) for anything else.
-static bool BinarisedToRtm(QIStream& in, std::string& out)
+static bool BinarisedToRtm(QIStream& in, std::string& out, const Skeleton* skelet = nullptr)
 {
     const int start = in.tellg();
     char magic[4] = {};
@@ -599,7 +658,7 @@ static bool BinarisedToRtm(QIStream& in, std::string& out)
             break;
         bytes.push_back(static_cast<uint8_t>(c));
     }
-    if (!Poseidon::Asset::Formats::ConvertBMTRToRTM(bytes.data(), bytes.size(), out))
+    if (!Poseidon::Asset::Formats::ConvertBMTRToRTM(bytes.data(), bytes.size(), out, BinarisedRig(skelet)))
     {
         LOG_ERROR(Physics, "Binarised animation could not be read ({} bytes)", bytes.size());
         out.clear();
@@ -622,7 +681,7 @@ void AnimationRT::FullLoad(Skeleton* skelet, const char* file)
     std::string bmtr; // Arma 2 binarised animation, converted (RTMReader.hpp)
     QIStream converted;
     QIStream* source = &in;
-    if (BinarisedToRtm(in, bmtr))
+    if (BinarisedToRtm(in, bmtr, skelet))
     {
         converted.init(bmtr.data(), static_cast<int>(bmtr.size()));
         source = &converted;
@@ -808,7 +867,7 @@ void AnimationRT::Load(Skeleton* skelet, const char* file, bool reversed)
         return;
     }
     std::string bmtr; // Arma 2 binarised animation, converted (RTMReader.hpp)
-    if (BinarisedToRtm(in, bmtr))
+    if (BinarisedToRtm(in, bmtr, skelet))
     {
         QIStream converted;
         converted.init(bmtr.data(), static_cast<int>(bmtr.size()));
