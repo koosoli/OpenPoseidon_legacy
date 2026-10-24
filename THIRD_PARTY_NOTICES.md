@@ -625,10 +625,11 @@ Converted (longitude rolled to the near side's centre, resampled, 16-bit, mip ch
 |---|---|---|---|
 | ESA WorldCover 2021 v200, 10 m | `s3://esa-worldcover` (cloud-optimised GeoTIFFs, read by range requests: `EarthLandCover`) | CC-BY 4.0 | where forest is (`EarthCanopyTrees`) |
 | NASA Black Marble 2016 (VIIRS) | NASA GIBS WMTS, layer `VIIRS_Black_Marble` (`EarthTileCache` night slots) | Public domain | city lights on the night side |
+| Overture Maps buildings (release found from stac.overturemaps.org) | `tiles.overturemaps.org/<release>/buildings.pmtiles`, zoom-14 vector tiles by range request (`EarthOverture`) | ODbL (OpenStreetMap) / CDLA-Permissive-2.0 | building footprints, heights, floors, roof shapes |
 | Terrain Tiles (Terrarium) | AWS Open Data `elevation-tiles-prod`; sources per https://github.com/tilezen/joerd/blob/master/docs/attribution.md | per source (attribution) | elevation and, from zoom 10, sea depths |
 
 Credits: *© ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA
-WorldCover consortium.* *Night lights: NASA Earth Observatory / NASA GIBS (Black Marble).*
+WorldCover consortium.* *Night lights: NASA Earth Observatory / NASA GIBS (Black Marble).* *Buildings: © OpenStreetMap contributors, © Overture Maps Foundation.*
 
 ## Notes
 

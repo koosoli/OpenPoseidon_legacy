@@ -1,5 +1,6 @@
 #include "EarthBuildingStream.hpp"
 #include "EarthContentSource.hpp"
+#include "EarthOverture.hpp"
 #include <cjson/cJSON.h>
 #include <algorithm>
 #include <array>
@@ -402,9 +403,15 @@ void EarthBuildingStream::Run(){
             std::lock_guard lock(_mutex);return _stop || request!=_request;
         };
         auto mesh=std::make_unique<Mesh>(BuildNeighborhood(_cache,ground,cell,cancelled));
-        if(source.Enabled()){
+        // Overture first (EarthOverture: static tiles on a CDN, OSM and machine-traced footprints with heights);
+        // Overpass only when Overture cannot be had.
+        const bool overture=EarthOverture::Enabled();
+        if(overture || source.Enabled()){
             {std::lock_guard lock(_mutex);if(!_stop && request==_request)_ready=std::move(mesh);}
-            if(!source.EnsureNeighborhood(_cache,"buildings",cell.latitude,cell.longitude,cancelled))continue;
+            bool changed=false;
+            const bool had=overture && EarthOverture::Instance().EnsureNeighborhood(_cache,cell.latitude,cell.longitude,cancelled,changed);
+            if(!had && source.Enabled())changed=source.EnsureNeighborhood(_cache,"buildings",cell.latitude,cell.longitude,cancelled);
+            if(!changed)continue;
             mesh=std::make_unique<Mesh>(BuildNeighborhood(_cache,ground,cell,cancelled));
         }
         {std::lock_guard lock(_mutex);if(!_stop && request==_request)_ready=std::move(mesh);}
