@@ -21,6 +21,7 @@
 // Everything is ordinary OFP script machinery underneath: code is a string, a task or
 // diary record is a tagged string ("::TASK::3"), an FSM handle a number.
 
+#include <set>
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/World/Scene/ScriptLight.hpp>
@@ -981,8 +982,9 @@ void FsmEnter(Fsm& fsm, const std::string& name)
     fsm.state = name;
     const ParamEntry* st = fsm.states ? fsm.states->FindEntry(name.c_str()) : nullptr;
     // which states the conversation FSMs walk through (a listener that never answers)
+    // ... and the animals' agent tasks (main.fsm: grazing, wandering, fleeing)
     static int reported = 0;
-    if (reported < 300 && fsm.file.find("bikb") != std::string::npos)
+    if (reported < 300 && (fsm.file.find("bikb") != std::string::npos || fsm.file.find("animals2") != std::string::npos))
     {
         ++reported;
         const std::string init = EntryText(st, "init");
@@ -1079,6 +1081,11 @@ std::unique_ptr<Fsm> LoadFsm(const std::string& file)
 GameValue A2ExecFSM(const GameState*, GameValuePar oper1, GameValuePar oper2)
 {
     std::unique_ptr<Fsm> fsm = LoadFsm((const char*)RString(oper2));
+    {
+        static std::set<std::string> started;
+        if (started.insert(fsm->file).second)
+            LOG_INFO(Mission, "Arma 2: execFSM starts {}{}", fsm->file, fsm->done ? " (not loaded)" : "");
+    }
     fsm->vars.VarSet("_this", oper1.GetNil() ? GameValue() : oper1, true);
     // An agent task's FSM (an Arma 2 animal's main.fsm) knows its unit as _agent; Arma 2's
     // engine starts it so, here it is started by execFSM with the unit as _this.
