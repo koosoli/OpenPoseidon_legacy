@@ -152,6 +152,8 @@ class TerrainWgpu : public ITerrainRenderer
     // The imagery as a tile pyramid (EarthTileCache; POSEIDON_EARTH_TILES=0 turns it off); the ground meshes then carry
     // web-mercator coordinates instead of window-atlas UVs.
     std::unique_ptr<class EarthTileCache> _earthTiles;
+    // the ground from the elevation pyramid (POSEIDON_EARTH_HEIGHT_PYRAMID=1): in place of the near/horizon meshes
+    std::unique_ptr<class EarthGroundNodes> _earthGround;
     bool EarthTilesOn() const;
     // Imagery prefetch along the flight (TerrainWgpu.cpp, EarthSurfaceStream::Prefetch): the camera's
     // smoothed velocity in the current origin's frame.

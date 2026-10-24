@@ -88,14 +88,9 @@ fn earthWaterNormal(xz: vec2<f32>) -> vec3<f32> {
 }
 fn earthMaterialCorner(ix: i32, iz: i32) -> f32 {
     let corner = clamp(vec2<i32>(ix, iz), vec2<i32>(0), vec2<i32>(i32(cf.hm_width) - 1, i32(cf.hm_height) - 1));
-    let xz = cf.origin + vec2<f32>(corner) * cf.terrain_grid;
-    let h = hm_load(corner.x, corner.y);
-    // Match EarthRenderBathymetry.hpp's render-only ocean vertices. The
-    // original heightmap/resident collision ground retains the source height.
-    // [-5,0.5]m is a height heuristic, not a sea mask: low dry land can match.
-    let datum = -earthWaterDrop(xz);
-    let elevation = h - datum;
-    return select(h, datum - 200.0, elevation >= -5.0 && elevation <= 0.5);
+    // The ground as drawn: since 2026-10-24 the streamed heights carry the real sea floor (EarthTerrainStream::
+    // WithSeaDepth) and keep low land dry, so the old -5..0.5 m 'open sea, 200 m down' stand-in is gone here too.
+    return hm_load(corner.x, corner.y);
 }
 fn materialTerrainHeightAt(xz: vec2<f32>) -> f32 {
     if (!earthWater() || cf.enabled <= 0.5 || cf.hm_width < 2u || cf.hm_height < 2u) {

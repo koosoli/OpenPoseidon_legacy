@@ -11,6 +11,7 @@
 #include "ProceduralTrees.hpp"
 #include "EarthTreeDetail.hpp"
 #include "EarthTileCache.hpp"
+#include "EarthGroundNodes.hpp"
 #include <Poseidon/Dev/Diag/PhaseSplit.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/SnowShelter.hpp>
@@ -513,6 +514,12 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
             _earthTiles=std::make_unique<EarthTileCache>(_renderer,std::filesystem::u8path(cache));
             if(!_earthTiles->Ready()) _earthTiles.reset();
             else _engine.SetEarthTiles(_earthTiles->Atlas(),_earthTiles->Lookup());
+            // the ground from the elevation pyramid (docs/earth-elevation-pyramid.md), on the tile pyramid's imagery
+            if(_earthTiles && EarthGroundNodes::Enabled())
+            {
+                _earthGround=std::make_unique<EarthGroundNodes>(_engine,_renderer,std::filesystem::u8path(cache));
+                if(!_earthGround->Ready()) _earthGround.reset();
+            }
         }
         if(const char* buildings=std::getenv("POSEIDON_EARTH_BUILDINGS");buildings && std::strcmp(buildings,"1")==0)
         {
@@ -4501,13 +4508,23 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
     _earthMoonHeightmap = false;
     _engine.SubmitEarthHorizon(_earthGlobeMesh,_earthGlobeIndices,_earthGlobeTexture,2,false,false,
             std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::quiet_NaN(),true);
+    // The ground from the elevation pyramid: every frame, from the camera alone (no patch, no mesh to wait for).
+    if(_earthGround)
+    {
+        const Vector3 cam=camera.Position();
+        const auto ground=EarthStreaming::QueryGround(cam.X(),cam.Z());
+        const double groundY=ground?double(ground->height):std::numeric_limits<double>::quiet_NaN();
+        const double altitude=Earth::CameraAltitude(cam.X(),cam.Y(),cam.Z());
+        _earthGround->Draw(cam.X(),cam.Y(),cam.Z(),groundY,origin.latitude,origin.longitude,
+                           double(Earth::HorizonRadius(float(std::max(altitude-(std::isfinite(groundY)?groundY:0.0),0.0)))));
+    }
     // Orbit needs only the fixed global overview. Do not download finer terrain
     // that covers less than one pixel at this distance.
     if (camera.Position().Y()>500000.0f)
     {
         // Keep drawing the streamed ground already resident (its outer ring fades into the globe
         // image): dropping it at this line was a visible pop to the coarse globe in the climb.
-        if(_earthPatch)
+        if(_earthPatch && !_earthGround)
         {
             _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices,_earthFarTexture?_earthFarTexture:_earthGlobeTexture,_earthFarTexture?3:2,true);
             if(_earthSurface)_engine.SubmitEarthHorizon(_earthNearMesh,_earthNearIndices,_earthSurfaceTexture?_earthSurfaceTexture:_earthGlobeTexture,_earthSurfaceTexture?3:2,true,_earthSurfaceTexture != 0);
@@ -4823,7 +4840,11 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
     }
     if(_earthPrevSurfaceTexture && _earthSurfaceTexture)
         DropEarthPrevious(); // the new origin has its own imagery now
-    if(_earthPrevSurfaceTexture)
+    if(_earthGround)
+    {
+        // the ground is the pyramid's (drawn above): the window patches' meshes are not
+    }
+    else if(_earthPrevSurfaceTexture)
     {
         // Through a rebase: the previous origin's textured ground, placed in this frame. The new origin's
         // untextured patch is not drawn over it meanwhile.

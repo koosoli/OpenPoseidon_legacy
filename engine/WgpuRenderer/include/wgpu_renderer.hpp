@@ -2591,6 +2591,9 @@ extern "C"
      * for BC -- tightly packed. */
     WGR_API void wgr_texture_update_region(WgrRenderer* renderer, WgrTexture id, uint32_t mip, uint32_t x, uint32_t y,
                                            uint32_t w, uint32_t h, const uint8_t* data, uint32_t byte_length);
+    /* Whole world elevation pyramid (docs/earth-elevation-pyramid.md): its RGBA8 Terrarium-encoded height atlas and
+     * lookup, read by the 3D vertex shader's conform mode 3. 0, 0 unbinds. */
+    WGR_API void wgr_earth_heights(WgrRenderer* renderer, WgrTexture atlas, WgrTexture lookup);
 
     WGR_API void wgr_texture_destroy(WgrRenderer* renderer, WgrTexture id);
 

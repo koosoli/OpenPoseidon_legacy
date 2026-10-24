@@ -8097,6 +8097,34 @@ WgrTexture EngineWgpu::EarthSandDetail()
     return _earthSandDetail;
 }
 
+void EngineWgpu::SubmitEarthNodes(WgrMesh grid, uint32_t indexCount, const std::vector<EarthNodeDraw>& nodes)
+{
+    // the ground's material, lights and imagery set-up (globe: the tile pyramid's atlas applies), once for each kind
+    std::optional<WgrDraw3D> templates[2];
+    for (const auto& node : nodes)
+    {
+        auto& base = templates[node.groundDetail ? 1 : 0];
+        if (!base)
+        {
+            const size_t before = _draws3d.size();
+            SubmitEarthHorizon(grid, indexCount, _earthTileAtlas, 3, node.groundDetail, false,
+                               std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN(), true);
+            if (_draws3d.size() != before + 1)
+                return;
+            base = _draws3d.back();
+            _draws3d.pop_back();
+            _cmds.pop_back();
+        }
+        WgrDraw3D& d = _draws3d.emplace_back(*base);
+        _cmds.push_back(WgrCmd{WGR_CMD_DRAW_3D, U32(_draws3d.size() - 1)});
+        d.conform0 = {node.conform[0], node.conform[1], node.conform[2], node.conform[3]};
+        d.conform1 = {node.conform[4], node.conform[5], node.conform[6], node.conform[7]};
+        d.conform2 = {node.conform[8], node.conform[9], node.conform[10], node.conform[11]};
+        if (_earthTileAtlas && _earthTileLookup)
+            d.mat_reflect0 = {node.ref19[0], node.ref19[1], 1.0f, 0.0f}; // mercator offsets from the node's own corner
+    }
+}
+
 void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture, uint32_t sampler, bool groundDetail, bool nearAtlas,
                                     double sourceLatitude, double sourceLongitude, bool globe)
 {

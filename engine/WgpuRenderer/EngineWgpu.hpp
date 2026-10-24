@@ -651,6 +651,17 @@ class EngineWgpu : public EngineDummy
     void SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture = 0, uint32_t sampler = 2, bool groundDetail = false,
                             bool nearAtlas = false, double sourceLatitude = std::numeric_limits<double>::quiet_NaN(),
                             double sourceLongitude = std::numeric_limits<double>::quiet_NaN(), bool globe = false);
+    // A ground node of the elevation pyramid (EarthGroundNodes): the shared grid mesh, placed and lifted by the vertex
+    // shader (conform mode 3) from these parameters; its imagery is the tile pyramid's, from the node's zoom-19 corner.
+    struct EarthNodeDraw
+    {
+        float conform[12];
+        float ref19[2];
+        bool groundDetail;
+    };
+    // All of a frame's nodes: the shared set-up (material, sun, imagery) is built once per ground-detail kind and
+    // copied, not rebuilt for each of the ~1300 nodes.
+    void SubmitEarthNodes(WgrMesh grid, uint32_t indexCount, const std::vector<EarthNodeDraw>& nodes);
     // terrain.wgsl's Tidewater detail tile for the Earth beaches' sand (shader3d earth_tw_sand), made once
     WgrTexture EarthSandDetail();
     WgrTexture _earthSandDetail = 0;

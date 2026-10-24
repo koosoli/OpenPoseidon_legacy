@@ -79,6 +79,8 @@ add_library(WgpuRenderer STATIC
     EarthSurfaceStream.cpp
     EarthIslands.cpp
     EarthImageryTiles.cpp
+    EarthHeightCache.cpp
+    EarthGroundNodes.cpp
     EarthLandCover.cpp
     EarthOverture.cpp
     EarthTileCache.cpp
