@@ -989,6 +989,28 @@ std::string StringValue(const ParamEntry& cls, const char* key)
     return (const char*)(RStringB)*e;
 }
 
+// The mission editor's heading for an Arma 1 vehicleClass, named as Arma 1 names it with
+// the game marked after it: CfgVehicleClasses >> Car >> displayName ("$STR_DN_CARS",
+// "Autos" in a German Arma 1) gives "Autos (Arma 1)". The editor shows a vehicleClass as
+// its label, so the label is the class. Without a CfgVehicleClasses entry the class name
+// stands ("Car (Arma 1)"). Quotes are dropped -- the label is written into config text.
+std::string EditorClassLabel(const std::string& a1Class)
+{
+    std::string label = a1Class;
+    if (const ParamEntry* classes = Arma1Pars().FindEntryNoInheritance("CfgVehicleClasses"))
+        if (const ParamEntry* cls = classes->FindEntry(a1Class.c_str()); cls && cls->IsClass())
+            if (const ParamEntry* name = cls->FindEntry("displayName"); name && !name->IsClass() && !name->IsArray())
+            {
+                RString text = name->GetValue();
+                if (text.GetLength() > 1 && (text[0] == '$' || text[0] == '@'))
+                    text = Localize(text);
+                if (text.GetLength() > 0)
+                    label = text.Data();
+            }
+    label.erase(std::remove(label.begin(), label.end(), '"'), label.end());
+    return label + " (Arma 1)";
+}
+
 // Whether an Arma 2 vehicle class carries a real weapon, on itself or on any turret.
 // Horns, smoke and flare launchers do not count.
 bool Arma2VehicleArmed(const ParamEntry& cls)
@@ -3056,7 +3078,7 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         {
             if (a1Class.empty())
                 a1Class = man ? "Men" : "Objects";
-            text += "\t\tvehicleClass=\"Arma 1 " + a1Class + "\";\r\n\t\tscope=2;\r\n";
+            text += "\t\tvehicleClass=\"" + EditorClassLabel(a1Class) + "\";\r\n\t\tscope=2;\r\n";
         }
     }
     if (loadout)
