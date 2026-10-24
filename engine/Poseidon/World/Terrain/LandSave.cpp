@@ -2802,7 +2802,29 @@ bool Landscape::LoadOprwModern(const char* path)
                 proxy.height = bounds.maxY - bounds.minY;
                 proxy.baseY = bounds.minY;
                 proxy.radius = bounds.horizontalExtent * 0.5f;
-                proxy.colour = bounds.color;
+                // Only Arma-generation ODOL (Arma 1/2/OA, DayZ, Arma 3) reaches here, and its
+                // ModelInfo colour is a texture average in sRGB. far.wgsl uses the colour as
+                // LINEAR albedo, so undecoded a DayZ spruce drew several times too bright and
+                // buildings near white: pale ghost forests and white blocks over the ground
+                // wherever the far tier shows (most of all while flying, before the near objects
+                // stream in). The same decode as NoteNativeProxyModel; a model whose colour is
+                // unknown (MLOD) gets that path's dark neutral instead of white.
+                // WGR_FAR_PROXY_SRGB=0 = the old raw colour and white default.
+                static const bool decodeSrgb = [] { const char* v = std::getenv("WGR_FAR_PROXY_SRGB"); return !(v && v[0] == '0'); }();
+                if (!decodeSrgb)
+                    proxy.colour = bounds.color;
+                else if (!bounds.colorKnown)
+                    proxy.colour = 0xFF404040u;
+                else
+                {
+                    const auto linear = [](uint32_t byte) {
+                        const float v = byte / 255.0f;
+                        return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f);
+                    };
+                    proxy.colour = static_cast<uint32_t>(PackedColor(Color(linear((bounds.color >> 16) & 0xFF),
+                                                                           linear((bounds.color >> 8) & 0xFF),
+                                                                           linear(bounds.color & 0xFF), 1.0f)));
+                }
                 proxy.flags = FarProxyIsPrism(name) ? 1u : 0u;
                 // A model with no vertical extent has no silhouette to stand in for.
                 proxy.valid = proxy.height > 0.05f;
