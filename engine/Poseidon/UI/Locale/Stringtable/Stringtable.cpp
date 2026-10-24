@@ -559,7 +559,15 @@ void StringTableDynamic::Load(QIStream& file, const char* filename, std::set<std
             return;
         }
 
-        if (!row.empty() && stricmp(row[0].c_str(), "LANGUAGE") == 0)
+        // Arma 1's bin.pbo keeps its config, radio and UI strings in stringtableConfig.csv
+        // and friends, whose header row is "COMMENT,English,Czech,German,...": the language
+        // row by another name. Read as a comment, the header search ran to the end of the
+        // file and every STR_DN_* class name (Air, Men, Armored...) was lost. For the Arma
+        // tables a COMMENT row that names English is taken as the header.
+        const bool commentHeader = lowerKeys && !row.empty() && stricmp(row[0].c_str(), "COMMENT") == 0 &&
+                                   std::any_of(row.begin() + 1, row.end(),
+                                               [](const std::string& c) { return stricmp(c.c_str(), "English") == 0; });
+        if (!row.empty() && (stricmp(row[0].c_str(), "LANGUAGE") == 0 || commentHeader))
         {
             headerColumns = static_cast<int>(row.size());
             for (int c = 1; c < static_cast<int>(row.size()); c++)
