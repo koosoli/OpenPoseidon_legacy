@@ -383,30 +383,44 @@ void MotionType::InitNoActions(const ParamEntry* cfg)
     _noActions = NewActionMap(cfg);
 }
 
-MoveId MotionType::GetDefaultMove(int upDegree) const
+// The action map for a degree. A move set with no map of that degree (Arma 2's animals:
+// one map, upDegree ManPosNoWeapon, while a civilian's degree is ManPosStand or Combat)
+// uses its first map with a Default move, so it is not left without any move.
+const ActionMap* MotionType::ActionMapForDegree(int upDegree) const
 {
     for (int i = 0; i < _actionMaps.Size(); i++)
     {
         const ActionMap* map = _actionMaps[i];
         if (map->GetUpDegree() == upDegree)
         {
-            return map->GetAction(ManActDefault);
+            return map;
         }
     }
-    return MoveIdNone;
+    if (upDegree == ManPosDead)
+    {
+        return nullptr;
+    }
+    for (int i = 0; i < _actionMaps.Size(); i++)
+    {
+        const ActionMap* map = _actionMaps[i];
+        if (map != _noActions && map->GetUpDegree() != ManPosDead && map->GetAction(ManActDefault) != MoveIdNone)
+        {
+            return map;
+        }
+    }
+    return nullptr;
+}
+
+MoveId MotionType::GetDefaultMove(int upDegree) const
+{
+    const ActionMap* map = ActionMapForDegree(upDegree);
+    return map ? map->GetAction(ManActDefault) : MoveIdNone;
 }
 
 MoveId MotionType::GetMove(int upDegree, ManAction action) const
 {
-    for (int i = 0; i < _actionMaps.Size(); i++)
-    {
-        const ActionMap* map = _actionMaps[i];
-        if (map->GetUpDegree() == upDegree)
-        {
-            return map->GetAction(action);
-        }
-    }
-    return MoveIdNone;
+    const ActionMap* map = ActionMapForDegree(upDegree);
+    return map ? map->GetAction(action) : MoveIdNone;
 }
 
 static void CheckArrayMod(const ParamEntry& entry, int mod, const ParamEntry* context = nullptr)
