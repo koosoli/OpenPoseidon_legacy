@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <cmath>
+#include <chrono>
+#include <vector>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Containers/StaticArray.hpp>
@@ -338,6 +340,12 @@ float Shape::LoadTagged(QIStream& f, bool reversed, int ver, bool geometryOnly, 
 {
     _loadWarning = false;
     _face.Clear();
+    // LOAD-001: where a slow LOD spends its load (logged below when it takes over 300 ms).
+    using LoadClock = std::chrono::steady_clock;
+    const auto loadT0 = LoadClock::now();
+    auto loadMs = [](LoadClock::time_point a, LoadClock::time_point b)
+    { return std::chrono::duration<double, std::milli>(b - a).count(); };
+    LoadClock::time_point loadFaces = loadT0, loadSort = loadT0, loadNormals = loadT0, loadMerge = loadT0;
 
     bool extended = false;
     DataHeaderEx head;
@@ -391,6 +399,64 @@ float Shape::LoadTagged(QIStream& f, bool reversed, int ver, bool geometryOnly, 
     {
         _pointToVertex[i] = -1;
     }
+
+    // LOAD-001: vertices already made for each Objektiv point, oldest first, as a chain
+    // (pointFirst/pointLast per point, vertexNext per vertex). AddVertex(..., &_vertexToPoint,
+    // srcPoint) scanned every vertex for one of the same point -- O(n^2) per LOD, 140 s for the
+    // owner's 282k-vertex Peugeot. Walking the chain visits the same vertices in the same order.
+    std::vector<int> pointFirst(static_cast<size_t>(head.nPos > 0 ? head.nPos : 0), -1);
+    std::vector<int> pointLast(pointFirst.size(), -1);
+    std::vector<int> vertexNext;
+    vertexNext.reserve(pointFirst.size() + pointFirst.size() / 2);
+    std::vector<int> chain;
+    // A Shape is loaded fresh, but should one arrive with vertices, they were candidates for the
+    // old scan too: chain them in under the point _vertexToPoint names.
+    for (int i = 0; i < _pos.Size() && i < _vertexToPoint.Size(); i++)
+    {
+        const int point = _vertexToPoint[i];
+        vertexNext.resize(static_cast<size_t>(i) + 1, -1);
+        if (point < 0 || static_cast<size_t>(point) >= pointFirst.size())
+        {
+            continue;
+        }
+        if (pointLast[point] >= 0)
+        {
+            vertexNext[pointLast[point]] = i;
+        }
+        else
+        {
+            pointFirst[point] = i;
+        }
+        pointLast[point] = i;
+    }
+    auto addPointVertex = [&](Vector3Par p, Vector3Par n, ClipFlags c, float u, float v, int point) -> int
+    {
+        chain.clear();
+        for (int k = pointFirst[point]; k >= 0; k = vertexNext[k])
+        {
+            chain.push_back(k);
+        }
+        int vertex = FindVertexAmong(p, n, c, u, v, chain.data(), static_cast<int>(chain.size()));
+        if (vertex < 0)
+        {
+            vertex = AddVertexFast(p, n, c, u, v);
+            if (vertexNext.size() <= static_cast<size_t>(vertex))
+            {
+                vertexNext.resize(static_cast<size_t>(vertex) + 1, -1);
+            }
+            vertexNext[vertex] = -1;
+            if (pointLast[point] >= 0)
+            {
+                vertexNext[pointLast[point]] = vertex;
+            }
+            else
+            {
+                pointFirst[point] = vertex;
+            }
+            pointLast[point] = vertex;
+        }
+        return vertex;
+    };
 
     // load points, normals and mapping pairs
     bool reportInvalid = true;
@@ -736,7 +802,7 @@ float Shape::LoadTagged(QIStream& f, bool reversed, int ver, bool geometryOnly, 
                 c &= ~ClipBack;
             }
 
-            int vertex = AddVertex(pos[srcPoint], norm[srcNormal], c, srcU, srcV, &_vertexToPoint, srcPoint);
+            int vertex = addPointVertex(pos[srcPoint], norm[srcNormal], c, srcU, srcV, srcPoint);
 
 #if VERBOSE > 2
             LOG_DEBUG(Graphics, "    vertex {} from {},{}, clip {:x}", vertex, srcPoint, srcNormal, clip[srcPoint]);
@@ -808,15 +874,16 @@ float Shape::LoadTagged(QIStream& f, bool reversed, int ver, bool geometryOnly, 
     {
         if (_pointToVertex[i] < 0)
         {
-            int vertex = AddVertex(pos[i], VZero, clip[i], // normal set to zero - should not be used
-                                   0, 0,                   // no u-v mapping
-                                   &_vertexToPoint, i);
+            int vertex = addPointVertex(pos[i], VZero, clip[i], // normal set to zero - should not be used
+                                        0, 0,                   // no u-v mapping
+                                        i);
             _pointToVertex[i] = vertex;
             _vertexToPoint.Access(vertex);
             _vertexToPoint[vertex] = i;
         }
     }
 
+    loadFaces = LoadClock::now();
 #if 1 // enable/disable material optimization
 
     SortVertices();
@@ -842,16 +909,19 @@ float Shape::LoadTagged(QIStream& f, bool reversed, int ver, bool geometryOnly, 
     _vertexToPoint.Compact();
     _pointToVertex.Compact();
     AutoClamp();
+    loadSort = LoadClock::now();
     RecalculateAreas();
     RecalculateNormals(true);
     CalculateMinMax();
     StoreOriginalMinMax();
     CalculateColor();
 
+    loadNormals = LoadClock::now();
     if (!geometryOnly && ENGINE_CONFIG.gMergeTextures)
     {
         MergeTextures(false);
     }
+    loadMerge = LoadClock::now();
 
     // skip all tags (if any), terminate at #EndOfFile#
     // check for TAGG magic
@@ -1023,6 +1093,16 @@ float Shape::LoadTagged(QIStream& f, bool reversed, int ver, bool geometryOnly, 
         resolution = 0.0f;
     }
 
+    const auto loadEnd = LoadClock::now();
+    if (loadMs(loadT0, loadEnd) > 300.0)
+    {
+        LOG_INFO(Graphics,
+                 "Slow MLOD level {}: {:.1f} ms ({} points, {} vertices, {} faces, {} selections) | faces {:.1f} "
+                 "sort+hints {:.1f} normals {:.1f} merge {:.1f} tags {:.1f}",
+                 resolution, loadMs(loadT0, loadEnd), head.nPos, NPos(), NFaces(), _sel.Size(),
+                 loadMs(loadT0, loadFaces), loadMs(loadFaces, loadSort), loadMs(loadSort, loadNormals),
+                 loadMs(loadNormals, loadMerge), loadMs(loadMerge, loadEnd));
+    }
     return resolution;
 }
 

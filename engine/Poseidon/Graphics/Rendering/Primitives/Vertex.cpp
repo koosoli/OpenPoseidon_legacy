@@ -275,6 +275,44 @@ int VertexTable::AddVertex(Vector3Par pos, Vector3Par norm, ClipFlags clip, floa
     return vIndex;
 }
 
+int VertexTable::FindVertexAmong(Vector3Par pos, Vector3Par norm, ClipFlags clip, float u, float v,
+                                 const int* candidates, int nCandidates, float precP, float precN) const
+{
+    // Exactly the tests (and their order) of AddVertex(..., v2p, pIndex) above.
+    precP *= precP;
+    precN *= precN;
+    float precTex = 0.005;
+    for (int ic = 0; ic < nCandidates; ic++)
+    {
+        const int i = candidates[ic];
+        if (_clip[i] != clip)
+        {
+            continue;
+        }
+        const V3& posI = _pos[i];
+        const V3& normI = _norm[i];
+        if (posI.Distance2(pos) > precP)
+        {
+            continue;
+        }
+        if (normI.Distance2(norm) > precN)
+        {
+            continue;
+        }
+        const UVPair& uv = _tex[i];
+        if (fabs(u - uv.u) > precTex)
+        {
+            continue;
+        }
+        if (fabs(v - uv.v) > precTex)
+        {
+            continue;
+        }
+        return i;
+    }
+    return -1;
+}
+
 int VertexTable::AddVertexFast // no duplicate check
     (Vector3Par pos, Vector3Par norm, ClipFlags clip, float u, float v)
 {

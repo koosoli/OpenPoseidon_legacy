@@ -287,6 +287,18 @@ public:
 		const int *candidates, int nCandidates, bool &reused,
 		float precP = 0.005, float precN = 0.05
 		);
+	// LOAD-001: the match AddVertex(..., v2p, pIndex) makes -- same clip, position, normal and uv
+	// tolerances, lowest index wins -- searched only over `candidates`, which the caller
+	// guarantees are exactly the existing vertices of Objektiv point pIndex, in ascending order.
+	// Returns -1 when none matches. The full scan is O(vertices) per call, O(n^2) per LOD: a
+	// 282k-vertex MLOD took 140 s to load through it.
+	int FindVertexAmong
+		(
+		Vector3Par pos, Vector3Par norm, ClipFlags clip,
+		float u, float v,
+		const int *candidates, int nCandidates,
+		float precP = 0.005, float precN = 0.05
+		) const;
 	// add vertex, no duplicate check
 	int AddVertexFast
 		(
