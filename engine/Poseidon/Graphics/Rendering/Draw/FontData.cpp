@@ -31,6 +31,79 @@ static void lowerName(const char* name, char* out, int outSize)
         *p = static_cast<char>(tolower(static_cast<unsigned char>(*p)));
 }
 
+static int getid(QIStream& f)
+{
+    const int low = getiw(f);
+    const int high = getiw(f);
+    return static_cast<int>(static_cast<unsigned>(low) | (static_cast<unsigned>(high) << 16));
+}
+
+// Arma 3's .fxy ("BIFo"): after the magic and a 4-byte version, one block per texture page
+// <name>-NN.paa: u16 page, u16 line height, u16 0, u16 ascent, u16 0, u32 kerning pairs (8 bytes
+// each, skipped), u32 glyphs; a glyph is u16 char, x, y, w, h and i32 left offset, top offset (from
+// the line's top) and advance. Glyphs are kept by char - 32, as OFP's are; those past 255 are
+// dropped (the engine draws Latin-1).
+static bool ParseBIFo(QIStream& stream, const char* lowName, FXYData& result)
+{
+    if (stream.rest() < 8)
+        return false;
+    const int start = stream.tellg();
+    char header[8];
+    stream.read(header, 8);
+    if (std::memcmp(header, "BIFo", 4) != 0)
+    {
+        stream.seekg(start, QIOS::beg);
+        return false;
+    }
+    constexpr int kStartChar = 32;
+    result.nChars = 256 - kStartChar;
+    result.glyphs.resize(static_cast<size_t>(result.nChars));
+    int maxW = 0;
+    while (stream.rest() >= 14)
+    {
+        const int page = getiw(stream);
+        const int lineHeight = getiw(stream);
+        getiw(stream);
+        getiw(stream); // ascent
+        getiw(stream);
+        const int kerning = getid(stream);
+        for (int k = 0; k < kerning && stream.rest() >= 8; k++)
+            getid(stream), getid(stream);
+        if (stream.rest() < 4)
+            break;
+        const int glyphs = getid(stream);
+        result.maxHeight = std::max(result.maxHeight, lineHeight);
+        for (int g = 0; g < glyphs && stream.rest() >= 22; g++)
+        {
+            const int c = getiw(stream);
+            const int x = getiw(stream), y = getiw(stream), w = getiw(stream), h = getiw(stream);
+            const int ox = getid(stream), oy = getid(stream), advance = getid(stream);
+            const int index = c - kStartChar;
+            if (index < 0 || index >= result.nChars)
+                continue;
+            char texName[256];
+            snprintf(texName, sizeof(texName), "%s-%02d.paa", lowName, page);
+            FXYGlyph& glyph = result.glyphs[static_cast<size_t>(index)];
+            glyph.charCode = index;
+            glyph.setNum = page;
+            glyph.x = x;
+            glyph.y = y;
+            glyph.w = w;
+            glyph.h = h;
+            glyph.wTex = w;
+            glyph.hTex = h;
+            glyph.offsetX = ox;
+            glyph.offsetY = oy;
+            glyph.advance = advance;
+            glyph.textureName = texName;
+            result.textureSetNums.insert(page);
+            maxW = std::max(maxW, w);
+        }
+    }
+    result.maxWidth = maxW;
+    return result.maxHeight > 0;
+}
+
 FXYData ParseFXY(QIStream& stream, const char* name)
 {
     FXYData result;
@@ -40,6 +113,9 @@ FXYData ParseFXY(QIStream& stream, const char* name)
     result.name = lowName;
 
     if (stream.rest() <= 0)
+        return result;
+
+    if (ParseBIFo(stream, lowName, result))
         return result;
 
     result.nChars = stream.rest() / (6 * sizeof(short));

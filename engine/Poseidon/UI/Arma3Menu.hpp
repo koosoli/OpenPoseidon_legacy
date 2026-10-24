@@ -88,11 +88,11 @@ class Screen
     // The meaning of a main-menu click; `message` is set for Action::Unavailable.
     Action MainMenuClick(int idc, const char*& message);
 
-    // RscDisplayInterrupt (the pause menu): what applies here shown, the mission's name set; and
-    // a click's idc as CWA's pause menu knows it (Arma 3's Load, the Options shortcuts).
     // Its ControlsBackground (the backdrop) alone, as drawn under a screen opened over it.
     void DrawBackdrop(float alpha);
 
+    // RscDisplayInterrupt (the pause menu): what applies here shown, the mission's name set; and
+    // a click's idc as CWA's pause menu knows it (Arma 3's Load, the Options shortcuts).
     void InitInterrupt(bool multiplayer, bool saveExists, const RString& missionName);
     int InterruptClick(int idc) const;
 

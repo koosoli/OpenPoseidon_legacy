@@ -27,6 +27,12 @@ struct FXYGlyph
     int h = 0; // original height (h-1 from file)
     int wTex = 0; // nearest power of 2
     int hTex = 0;
+    // Arma 3's fonts (the "BIFo" .fxy) pack glyphs tightly: each is drawn at an offset in its line
+    // and advances the pen by its own amount. OFP's fonts are whole cells: offsets 0, advance -1
+    // (the cell's width).
+    int offsetX = 0;
+    int offsetY = 0;
+    int advance = -1;
     std::string textureName;
 };
 
