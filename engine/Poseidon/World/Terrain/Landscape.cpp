@@ -2297,22 +2297,12 @@ bool Landscape::SeaAt(float x, float z) const
 {
     const float sea = SeaLevelAt(x, z);
     const float ground = SurfaceY(x, z);
-    if (EarthStreaming::Enabled() && !EarthStreaming::MoonFrameActive())
-        return ground - sea <= float(EarthStreaming::FlightOceanMax);
     return ground < sea;
 }
 
 float Landscape::SeaBedY(float x, float z) const
 {
-    const float ground = SurfaceY(x, z);
-    if (EarthStreaming::Enabled() && !EarthStreaming::MoonFrameActive())
-    {
-        const float seaDatum = EarthStreaming::FlightYAtAltitude(x, z, 0.0);
-        const float elevation = ground - seaDatum;
-        if (elevation >= EarthStreaming::FlightOceanMin && elevation <= EarthStreaming::FlightOceanMax)
-            return seaDatum - float(EarthStreaming::FlightOceanDepth);
-    }
-    return ground;
+    return SurfaceY(x, z);
 }
 
 float Landscape::SurfaceYAboveWater(float x, float z) const

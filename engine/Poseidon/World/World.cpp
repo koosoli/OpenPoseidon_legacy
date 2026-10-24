@@ -1792,11 +1792,6 @@ void World::Simulate(float deltaT, bool& enableDraw)
             {
                 minCamY = std::max(minCamY, swimWaterY + 0.15f);
             }
-            // Whole world: the elevation tiles store the open sea as 0 m, so "the ground" at sea is the
-            // surface and a diving free camera was held at +0.1 m (the render camera, while the free-fly
-            // camera itself went down). Its floor there is the drawn sea bed, as in free flight.
-            if (mayDive && EarthStreaming::Enabled())
-                minCamY = std::min(minCamY, float(EarthStreaming::FlightFloor(minCamY, camPos.X(), camPos.Z())));
             minCamY += 0.1;
             if (camPos.Y() < minCamY)
             {

@@ -619,6 +619,17 @@ Converted (stitched, poles filled, mip chain written) by `tools/sky/make_moon_al
 Converted (longitude rolled to the near side's centre, resampled, 16-bit, mip chain) by
 `tools/sky/make_moon_relief.py`. Credit: *Moon topography courtesy NASA/GSFC (LRO LOLA).*
 
+## Whole world data streamed at runtime (not shipped; cached under the player's `world-stream` folder)
+
+| Data | Source | Licence | Used for |
+|---|---|---|---|
+| ESA WorldCover 2021 v200, 10 m | `s3://esa-worldcover` (cloud-optimised GeoTIFFs, read by range requests: `EarthLandCover`) | CC-BY 4.0 | where forest is (`EarthCanopyTrees`) |
+| NASA Black Marble 2016 (VIIRS) | NASA GIBS WMTS, layer `VIIRS_Black_Marble` (`EarthTileCache` night slots) | Public domain | city lights on the night side |
+| Terrain Tiles (Terrarium) | AWS Open Data `elevation-tiles-prod`; sources per https://github.com/tilezen/joerd/blob/master/docs/attribution.md | per source (attribution) | elevation and, from zoom 10, sea depths |
+
+Credits: *© ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA
+WorldCover consortium.* *Night lights: NASA Earth Observatory / NASA GIBS (Black Marble).*
+
 ## Notes
 
 - The copyright lines for the vcpkg dependencies in §2 are summarised for reference.

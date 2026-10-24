@@ -258,7 +258,11 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
             bytes.assign(std::istreambuf_iterator<char>(input), {});
             const auto cached = decode(bytes, tile);
             if (cached == Decoded::Ok)
+            {
+                // used: the disk budget (TrimDisk) removes the least recently used tiles first
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now(), ec);
                 return {true, false, std::move(tile)};
+            }
             if (cached == Decoded::Placeholder)
                 return {false, true, {}, true};
             bytes.clear();
@@ -328,10 +332,60 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
         worker();
     for (auto& f : pool)
         f.get();
-    std::lock_guard lock(_mutex);
-    while (_tiles.size() > MaxResidentTiles)
-        _tiles.erase(std::min_element(_tiles.begin(), _tiles.end(),
-                                      [](const auto& a, const auto& b) { return a.second.use < b.second.use; }));
+    {
+        std::lock_guard lock(_mutex);
+        while (_tiles.size() > MaxResidentTiles)
+            _tiles.erase(std::min_element(_tiles.begin(), _tiles.end(),
+                                          [](const auto& a, const auto& b) { return a.second.use < b.second.use; }));
+    }
+    // Every 512 downloads (~10 MB of imagery): a directory walk is too slow to do per tile.
+    if (_arrivals.load() >= _trimmedAt.load() + 512)
+    {
+        _trimmedAt = _arrivals.load();
+        TrimDisk();
+    }
+}
+
+void EarthImageryTiles::TrimDisk()
+{
+    static const uint64_t budget = []
+    {
+        const char* v = std::getenv("POSEIDON_EARTH_IMAGERY_CACHE_MB");
+        const long long mb = v ? std::atoll(v) : 0;
+        return uint64_t(mb >= 256 ? mb : 2048) * 1024 * 1024;
+    }();
+    struct File
+    {
+        std::filesystem::path path;
+        std::filesystem::file_time_type time;
+        uint64_t size;
+    };
+    std::vector<File> files;
+    uint64_t total = 0;
+    std::error_code ec;
+    for (auto it = std::filesystem::recursive_directory_iterator(_dir, ec); !ec && it != std::filesystem::recursive_directory_iterator();
+         it.increment(ec))
+    {
+        if (!it->is_regular_file(ec) || it->path().extension() != ".tile")
+            continue;
+        const uint64_t size = it->file_size(ec);
+        files.push_back({it->path(), it->last_write_time(ec), size});
+        total += size;
+    }
+    if (total <= budget)
+        return;
+    std::sort(files.begin(), files.end(), [](const File& a, const File& b) { return a.time < b.time; });
+    // down to 90%, so the next few downloads do not walk the directory again
+    uint64_t removed = 0;
+    for (const auto& f : files)
+    {
+        if (total - removed <= budget / 10 * 9)
+            break;
+        if (std::filesystem::remove(f.path, ec))
+            removed += f.size;
+    }
+    std::fprintf(stderr, "Earth imagery: disk cache %llu MB over its %llu MB budget, %llu MB of least used tiles removed\n",
+                 (unsigned long long)(total >> 20), (unsigned long long)(budget >> 20), (unsigned long long)(removed >> 20));
 }
 
 void EarthImageryTiles::FetchTiles(const std::vector<std::tuple<int, int, int>>& keys, const std::function<bool()>& cancelled,

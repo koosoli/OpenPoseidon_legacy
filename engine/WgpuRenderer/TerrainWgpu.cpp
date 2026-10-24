@@ -28,6 +28,7 @@
 #include "CdlodDriver.hpp"
 #include "RainWaterPublication.hpp"
 #include "EarthRenderBathymetry.hpp"
+#include "EarthLandCover.hpp"
 #include "SandUploadReceipt.hpp"
 #include "EngineWgpu.hpp"
 #include "TextureWgpu.hpp"
@@ -620,6 +621,11 @@ std::vector<EarthFeatureStream::TreeInstance> TerrainWgpu::EarthCanopyTrees(cons
     };
     const double span = patch.gridMetres * (HmN - 1), step = EarthFeatureStream::ForestSpacing;
     const double cx = patch.x + span * 0.5, cz = patch.z + span * 0.5;
+    // Where the forest is: ESA WorldCover's tree class (EarthLandCover) confirmed by the imagery when the land
+    // cover can be had, else the imagery's colour alone, which also took dark water, dark grass and shadow for
+    // forest (Helgoland, bare grass and cliffs, stood under a spruce forest). Shrubland gets a sparse fifth.
+    EarthLandCover* cover = EarthLandCover::Get();
+    unsigned fromCover = 0, fromColour = 0;
     for (double z = patch.z + step * 0.5; z < patch.z + span; z += step)
         for (double x = patch.x + step * 0.5; x < patch.x + span; x += step)
         {
@@ -631,15 +637,38 @@ std::vector<EarthFeatureStream::TreeInstance> TerrainWgpu::EarthCanopyTrees(cons
             const auto uv = EarthSurfaceStream::NearUv(EarthSurfaceStream::LocalUv(window, px, pz));
             if (!(uv.x >= 0 && uv.x < 1 && uv.y >= 0 && uv.y < 1))
                 continue;
+            const auto pointGeo = Earth::FromLocal(patch.originLatitude, patch.originLongitude, px, pz);
+            const auto landClass = cover ? cover->At(pointGeo.latitude, pointGeo.longitude) : EarthLandCover::Unknown;
             const size_t k = (size_t(uv.y * size) * size + size_t(uv.x * size)) * 4;
             const float r = pixels[k] / 255.0f, g = pixels[k + 1] / 255.0f, b = pixels[k + 2] / 255.0f;
             const float lum = 0.299f * r + 0.587f * g + 0.114f * b;
-            const bool canopy = lum > 0.04f && lum < 0.2f && g >= r * 0.98f && g >= b * 0.98f && b < g * 1.05f;
+            bool canopy = false;
+            if (landClass != EarthLandCover::Unknown)
+            {
+                // WorldCover's tree class is a 10 m pixel with at least 10 % canopy: one garden tree marks it,
+                // and a tree every 7 m there made a forest of Helgoland's town. The class says where trees can
+                // be; the imagery, looking like vegetation (a looser test than below: autumn, shade, conifers
+                // under snow), says whether this one is.
+                const bool vegetation = lum > 0.03f && lum < 0.3f && g >= r * 0.9f && g >= b * 0.9f;
+                canopy = vegetation && (landClass == EarthLandCover::Trees || landClass == EarthLandCover::Mangroves ||
+                                        (landClass == EarthLandCover::Shrubland && (cellSeed >> 40) % 5 == 0));
+                fromCover += canopy;
+            }
+            else
+            {
+                canopy = lum > 0.04f && lum < 0.2f && g >= r * 0.98f && g >= b * 0.98f && b < g * 1.05f;
+                fromColour += canopy;
+            }
             if (!canopy)
                 continue;
             double slope = 0;
             const double y = height(px, pz, slope);
             if (slope > 1.0)
+                continue;
+            // Never in the sea: dark green water passes the colour test above. With the sea floor real
+            // (EarthTerrainStream::WithSeaDepth) such trees stood on the bed and rose out of the water --
+            // a spruce forest around Helgoland.
+            if (y < -Earth::CurvatureDrop(px, pz) + 0.5)
                 continue;
             const auto treeGeo = Earth::FromLocal(patch.originLatitude, patch.originLongitude, px, pz);
             trees.push_back({float(px), float(y), float(pz), 9.0f, EarthTrees::GeographicSeed(treeGeo.latitude, treeGeo.longitude),
@@ -649,7 +678,8 @@ std::vector<EarthFeatureStream::TreeInstance> TerrainWgpu::EarthCanopyTrees(cons
               { return Square(a.x - cx) + Square(a.z - cz) < Square(b.x - cx) + Square(b.z - cz); });
     if (trees.size() > EarthFeatureStream::MaxForestTrees)
         trees.resize(EarthFeatureStream::MaxForestTrees);
-    LOG_INFO(Graphics, "Earth canopy: {} trees where the imagery shows forest on the near patch", trees.size());
+    LOG_INFO(Graphics, "Earth canopy: {} trees on the near patch ({} from WorldCover land cover, {} from the imagery's colour)",
+             trees.size(), fromCover, fromColour);
     return trees;
 }
 
@@ -4065,7 +4095,6 @@ static WgrMeshVertex EarthNearPoint(const EarthTerrainStream::Patch& p,int x,int
     constexpr int size=Earth::GridSamples;
     WgrMeshVertex v{};
     v.pos = {p.x+x*p.gridMetres,p.heights[z*size+x],p.z+z*p.gridMetres};
-    v.pos.y = Earth::RenderTerrainHeight(v.pos.x,v.pos.z,v.pos.y);
     const int loX=std::max(0,x-1), hiX=std::min(size-1,x+1);
     const int loZ=std::max(0,z-1), hiZ=std::min(size-1,z+1);
     const float dx=(p.heights[z*size+hiX]-p.heights[z*size+loX])/((hiX-loX)*p.gridMetres);
@@ -4106,7 +4135,6 @@ TerrainWgpu::EarthMeshData TerrainWgpu::BuildEarthMeshes(const EarthTerrainStrea
             auto& v = vertices[z*n+x];
             v.pos = {cx + Earth::HorizonOffset(x,p.horizonRadius,halfWindow),p.horizonHeights[z*n+x],
                      cz + Earth::HorizonOffset(z,p.horizonRadius,halfWindow)};
-            v.pos.y = Earth::RenderTerrainHeight(v.pos.x,v.pos.z,v.pos.y);
             const int loX = std::max(0,x-1), hiX = std::min(n-1,x+1);
             const int loZ = std::max(0,z-1), hiZ = std::min(n-1,z+1);
             const float dx = (p.horizonHeights[z*n+hiX] - p.horizonHeights[z*n+loX]) /

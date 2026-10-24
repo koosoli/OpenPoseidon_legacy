@@ -2,13 +2,11 @@
 #pragma once
 // The sea and the ground as the wildlife (fish, birds, reef) sees them, on a finite OFP map and in
 // whole-world (Earth) mode. On a map: the landscape's sea level and terrain. In Earth mode: the
-// spherical sea datum and the streamed resident ground; elevation the renderer presents as open
-// ocean (EarthRenderBathymetry: -5..0.5 m, no bathymetry) counts as sea with a nominal floor
-// `EarthSeaFloorDepth` down -- the drawn floor is far deeper, so only things that swim in open
-// water use it, nothing that sits on the floor. Where no ground is resident it answers "land, high"
-// so nothing spawns there.
+// spherical sea datum and the streamed resident ground, whose sea floor is the real one (Terrarium's
+// bathymetry, EarthTerrainStream::WithSeaDepth). Water deeper than `OpenSeaDepth` is the open sea,
+// where only open-water species swim. Where no ground is resident it answers "land, high" so nothing
+// spawns there.
 #include "EarthCoordinates.hpp"
-#include "EarthRenderBathymetry.hpp"
 #include <Poseidon/World/Terrain/EarthFrame.hpp>
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -20,7 +18,7 @@
 
 namespace Poseidon::Wildlife
 {
-constexpr float EarthSeaFloorDepth = 14.0f;
+constexpr float OpenSeaDepth = 30.0f; // deeper than every reef band
 
 inline bool Earth() { return EarthStreaming::Enabled(); }
 
@@ -46,16 +44,13 @@ inline float SeaLevel(float x, float z)
     return GLandscape ? GLandscape->GetSeaLevel() : 0.0f;
 }
 
-// Earth mode's open sea at (x, z): resident ground the renderer presents as open ocean (above).
+// Earth mode's open sea at (x, z): resident ground more than OpenSeaDepth under the sea.
 inline bool OpenSea(float x, float z)
 {
     if (!Earth())
         return false;
     const auto sample = EarthStreaming::QueryGround(x, z);
-    if (!sample)
-        return false;
-    const float elevation = sample->height - SeaLevel(x, z);
-    return elevation >= Earth::RenderOceanMinElevation && elevation <= Earth::RenderOceanMaxElevation;
+    return sample && SeaLevel(x, z) - sample->height > OpenSeaDepth;
 }
 
 inline float Ground(float x, float z)
@@ -66,9 +61,6 @@ inline float Ground(float x, float z)
         const auto sample = EarthStreaming::QueryGround(x, z);
         if (!sample)
             return sea + 1000.0f;
-        const float elevation = sample->height - sea;
-        if (elevation >= Earth::RenderOceanMinElevation && elevation <= Earth::RenderOceanMaxElevation)
-            return sea - EarthSeaFloorDepth;
         return sample->height;
     }
     return GLandscape ? GLandscape->SurfaceY(x, z) : 0.0f;

@@ -82,6 +82,9 @@ class EarthImageryTiles
     int Perform(const std::string& url, std::vector<uint8_t>& bytes, const std::function<bool()>& cancelled,
                 long& status);
     std::filesystem::path TilePath(int z, int x, int y) const;
+    // The disk cache kept under its budget (POSEIDON_EARTH_IMAGERY_CACHE_MB, default 2048): the tiles least
+    // recently used go first (a tile read from disk is touched).
+    void TrimDisk();
 
     std::filesystem::path _dir;
     EarthProviders::Source _source;
@@ -90,5 +93,6 @@ class EarthImageryTiles
     std::set<std::tuple<int, int, int>> _failed;
     uint64_t _use = 0;
     std::atomic<uint64_t> _arrivals{0};
+    std::atomic<uint64_t> _trimmedAt{0}; // _arrivals at the last TrimDisk
 };
 } // namespace Poseidon
