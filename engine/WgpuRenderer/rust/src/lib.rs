@@ -5630,6 +5630,7 @@ impl Renderer {
             // here would leave an empty group on the frames it skips.
             self.terrain
                 .render_shadow_mask(&self.queue, &mut encoder, sun_to_light);
+            self.terrain.poll_skyvis(&self.device, &self.queue);
             // RAIN-FLOW: the rain water around the camera, before the terrain samples it
             self.terrain.step_rain_flow(&self.device, &self.queue, &mut encoder, [cam.cam_pos[0], cam.cam_pos[2]]);
         }
@@ -8075,8 +8076,12 @@ impl Renderer {
             params.hm_width, params.hm_height, self.device.limits().max_texture_dimension_2d, heights.len()));
         // REN-TEMP-001 Phase 5: a new heightmap IS a world load — the one explicit reset
         // event the renderer can see today without an ABI change. Camera history from the
-        // previous world must not reproject into this one.
-        self.temporal.notify_reset("world load");
+        // previous world must not reproject into this one. Not a whole world terrain patch
+        // (sea_level -12000, TerrainWgpu applyPatch): one comes every second in flight, the
+        // camera does not move with it, and each reset dropped DLSS's history -- a soft pop.
+        if params.sea_level > -11999.0 {
+            self.temporal.notify_reset("world load");
+        }
         let t0 = std::time::Instant::now();
         self.terrain
             .set_heightmap(&self.device, &self.queue, heights, params);

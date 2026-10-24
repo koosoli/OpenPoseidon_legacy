@@ -5828,6 +5828,12 @@ bool EngineWgpu::TryAcquireProducerWindow()
     return true;
 }
 
+namespace
+{
+std::atomic<uint64_t> g_producerWaitMicros{0};
+}
+uint64_t EngineWgpu::ProducerWaitMicros() { return g_producerWaitMicros.load(std::memory_order_relaxed); }
+
 void EngineWgpu::AcquireProducerWindow(const char* what)
 {
     if (g_rendererQuiescent.load(std::memory_order_acquire))
@@ -5838,6 +5844,7 @@ void EngineWgpu::AcquireProducerWindow(const char* what)
     const auto t0 = std::chrono::steady_clock::now();
     self->WaitRenderIdle();
     const double lazyMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    g_producerWaitMicros.fetch_add(uint64_t(lazyMs * 1000.0), std::memory_order_relaxed);
     self->_rtLazyWaitMsAccum += lazyMs;
     self->_rtLazyWaitMsFrame += lazyMs;
     self->_rtLazyWaitCountAccum++;

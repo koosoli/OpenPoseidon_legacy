@@ -429,6 +429,10 @@ pub struct Terrain {
     // The last finished sky-view grid (w, h, values), kept so a canopy update can recompose the
     // shared texture without re-running the scan.
     skyvis_last: Option<(u32, u32, Vec<f32>)>,
+    // Whole world: the sky-view scan of the newest patch, running on a worker (rebuild_skyvis), picked up
+    // by poll_skyvis. A patch comes every second or so in flight, and the scan on the main thread was
+    // 3-41 ms of each install (measured 2026-10-24) -- a hitch per patch.
+    skyvis_job: Option<std::thread::JoinHandle<(u32, u32, Vec<f32>, Vec<f32>)>>,
     // Canopy occlusion grid (see set_canopy): n x n over the same world span as the sky-view map.
     canopy: Option<(u32, Vec<f32>, Vec<f32>)>,
 
@@ -1304,6 +1308,7 @@ impl Terrain {
             },
             skyvis_src: None,
             skyvis_last: None,
+            skyvis_job: None,
             canopy: None,
             shadow_sweep_ubo,
             shadow_sweep_layout,
@@ -1573,7 +1578,10 @@ impl Terrain {
             h,
             terrain_grid: params.terrain_grid,
         });
-        self.rebuild_skyvis(device, queue, previous_skyvis.as_ref());
+        // Whole world patches (sea_level -12000, TerrainWgpu applyPatch) scan off the main thread; a map's one
+        // heightmap at world load keeps the synchronous scan, so its first frame has it.
+        let earth_patch = params.sea_level <= -11999.0;
+        self.rebuild_skyvis(device, queue, previous_skyvis.as_ref(), earth_patch);
         self.world_origin = params.world_origin;
         self.terrain_grid = params.terrain_grid;
         // Tallest terrain point: lets the march stop once the ray climbs above all
@@ -1751,12 +1759,31 @@ impl Terrain {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         previous: Option<&SkyvisSrc>,
+        asynchronous: bool,
     ) {
         let Some(src) = &mut self.skyvis_src else {
             return;
         };
         let previous = previous
             .filter(|old| old.w == src.w && old.h == src.h && old.terrain_grid == src.terrain_grid);
+        if asynchronous {
+            // The newest patch's scan replaces any still running (its result is dropped when it ends).
+            let heights = src.heights.clone();
+            let (w, h, grid, opts) = (src.w, src.h, src.terrain_grid, self.skyvis_opts);
+            let old = previous
+                .filter(|old| old.raw_visibility.len() > 0)
+                .map(|old| (old.heights.clone(), old.raw_visibility.clone()));
+            self.skyvis_job = std::thread::Builder::new()
+                .name("wgr-skyvis".into())
+                .spawn(move || {
+                    skyvis::compute_cached(&heights, w, h, grid, opts,
+                        old.as_ref().map(|(hh, rv)| (hh.as_slice(), rv.as_slice())))
+                })
+                .ok();
+            if self.skyvis_job.is_some() {
+                return;
+            }
+        }
         let t_sv = std::time::Instant::now();
         let (sv_w, sv_h, raw, sv) = skyvis::compute_cached(
             &src.heights,
@@ -1768,6 +1795,20 @@ impl Terrain {
         );
         src.raw_visibility = raw;
         eprintln!("[wgr] terrain sky visibility: {sv_w}x{sv_h} in {:.0} ms", t_sv.elapsed().as_secs_f64() * 1000.0);
+        self.skyvis_last = Some((sv_w, sv_h, sv));
+        self.upload_skyvis(device, queue);
+    }
+
+    /// Whole world: a finished off-thread sky-view scan (rebuild_skyvis) into the texture. Every frame.
+    pub fn poll_skyvis(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        if !self.skyvis_job.as_ref().is_some_and(|job| job.is_finished()) {
+            return;
+        }
+        let Some(job) = self.skyvis_job.take() else { return };
+        let Ok((sv_w, sv_h, raw, sv)) = job.join() else { return };
+        if let Some(src) = &mut self.skyvis_src {
+            src.raw_visibility = raw;
+        }
         self.skyvis_last = Some((sv_w, sv_h, sv));
         self.upload_skyvis(device, queue);
     }
@@ -1917,7 +1958,7 @@ impl Terrain {
             self.skyvis_opts.radius_m = radius_m;
             self.skyvis_opts.k_azimuths = k;
             self.skyvis_opts.downsample = ds;
-            self.rebuild_skyvis(device, queue, None);
+            self.rebuild_skyvis(device, queue, None, false);
         }
     }
 

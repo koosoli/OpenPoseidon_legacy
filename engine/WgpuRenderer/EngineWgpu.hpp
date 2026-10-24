@@ -1922,6 +1922,9 @@ class EngineWgpu : public EngineDummy
     // at once while the worker is idle, and otherwise waits for it -- and records who asked, so
     // the Perf tab and the capture JSON say what still opens the window early.
     static void AcquireProducerWindow(const char* what);
+    // Main-thread time spent in AcquireProducerWindow waiting for the render thread, all time, microseconds
+    // (the Earth install log splits it out of each stage).
+    static uint64_t ProducerWaitMicros();
     // The worker's last memory-stats snapshot (PublishRendererStats), for the producer-side
     // readers that used to call wgr_get_memory_stats on the live handle every frame.
     static bool LastMemoryStats(WgrMemoryStats& out);

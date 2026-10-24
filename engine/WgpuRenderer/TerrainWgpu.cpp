@@ -84,28 +84,43 @@ namespace
 // Whole world: what the Earth installs cost on the main thread this frame (patch, atlas textures, the
 // grass/canopy/tree derivations, features, buildings, worldgen objects). Logged when they add up to 4 ms
 // or more: a frame the camera had to wait for.
+// Each stage's time, and within it the time spent waiting for the render thread to go idle before it could
+// touch renderer state (AcquireProducerWindow): "patch 60.1 (wait 48.0)" is a slow render frame, not slow work.
 struct EarthInstallTimes
 {
     std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
+    uint64_t lastWait = EngineWgpu::ProducerWaitMicros();
     std::string parts;
-    double total = 0;
-    void Skip() { last = std::chrono::steady_clock::now(); }
+    double total = 0, waited = 0;
+    void Skip()
+    {
+        last = std::chrono::steady_clock::now();
+        lastWait = EngineWgpu::ProducerWaitMicros();
+    }
     void Mark(const char* name)
     {
         const auto now = std::chrono::steady_clock::now();
         const double ms = std::chrono::duration<double, std::milli>(now - last).count();
+        const uint64_t wait = EngineWgpu::ProducerWaitMicros();
+        const double waitMs = double(wait - lastWait) / 1000.0;
         last = now;
+        lastWait = wait;
         if (ms < 0.3)
             return;
         total += ms;
-        char buffer[64];
-        std::snprintf(buffer, sizeof(buffer), "%s%s %.1f", parts.empty() ? "" : ", ", name, ms);
+        waited += waitMs;
+        char buffer[96];
+        if (waitMs >= 0.3)
+            std::snprintf(buffer, sizeof(buffer), "%s%s %.1f (wait %.1f)", parts.empty() ? "" : ", ", name, ms, waitMs);
+        else
+            std::snprintf(buffer, sizeof(buffer), "%s%s %.1f", parts.empty() ? "" : ", ", name, ms);
         parts += buffer;
     }
     ~EarthInstallTimes()
     {
         if (total >= 4.0)
-            LOG_INFO(Graphics, "Earth main-thread installs: {:.1f} ms ({})", total, parts);
+            LOG_INFO(Graphics, "Earth main-thread installs: {:.1f} ms, {:.1f} of it waiting for the render thread ({})", total,
+                     waited, parts);
     }
 };
 bool TerrainPageTimingsEnabled()
