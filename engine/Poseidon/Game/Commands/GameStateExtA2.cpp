@@ -981,8 +981,9 @@ void FsmEnter(Fsm& fsm, const std::string& name)
     fsm.state = name;
     const ParamEntry* st = fsm.states ? fsm.states->FindEntry(name.c_str()) : nullptr;
     // which states the conversation FSMs walk through (a listener that never answers)
+    // ... and the animals' agent tasks (main.fsm: grazing, wandering, fleeing)
     static int reported = 0;
-    if (reported < 300 && fsm.file.find("bikb") != std::string::npos)
+    if (reported < 300 && (fsm.file.find("bikb") != std::string::npos || fsm.file.find("animals2") != std::string::npos))
     {
         ++reported;
         const std::string init = EntryText(st, "init");
