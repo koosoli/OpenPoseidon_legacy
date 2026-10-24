@@ -641,6 +641,11 @@ std::vector<EarthFeatureStream::TreeInstance> TerrainWgpu::EarthCanopyTrees(cons
             const double y = height(px, pz, slope);
             if (slope > 1.0)
                 continue;
+            // Never in the sea: dark green water passes the colour test above. With the sea floor real
+            // (EarthTerrainStream::WithSeaDepth) such trees stood on the bed and rose out of the water --
+            // a spruce forest around Helgoland.
+            if (y < -Earth::CurvatureDrop(px, pz) + 0.5)
+                continue;
             const auto treeGeo = Earth::FromLocal(patch.originLatitude, patch.originLongitude, px, pz);
             trees.push_back({float(px), float(y), float(pz), 9.0f, EarthTrees::GeographicSeed(treeGeo.latitude, treeGeo.longitude),
                              treeGeo.latitude});
@@ -4065,7 +4070,6 @@ static WgrMeshVertex EarthNearPoint(const EarthTerrainStream::Patch& p,int x,int
     constexpr int size=Earth::GridSamples;
     WgrMeshVertex v{};
     v.pos = {p.x+x*p.gridMetres,p.heights[z*size+x],p.z+z*p.gridMetres};
-    v.pos.y = Earth::RenderTerrainHeight(v.pos.x,v.pos.z,v.pos.y);
     const int loX=std::max(0,x-1), hiX=std::min(size-1,x+1);
     const int loZ=std::max(0,z-1), hiZ=std::min(size-1,z+1);
     const float dx=(p.heights[z*size+hiX]-p.heights[z*size+loX])/((hiX-loX)*p.gridMetres);
@@ -4106,7 +4110,6 @@ TerrainWgpu::EarthMeshData TerrainWgpu::BuildEarthMeshes(const EarthTerrainStrea
             auto& v = vertices[z*n+x];
             v.pos = {cx + Earth::HorizonOffset(x,p.horizonRadius,halfWindow),p.horizonHeights[z*n+x],
                      cz + Earth::HorizonOffset(z,p.horizonRadius,halfWindow)};
-            v.pos.y = Earth::RenderTerrainHeight(v.pos.x,v.pos.z,v.pos.y);
             const int loX = std::max(0,x-1), hiX = std::min(n-1,x+1);
             const int loZ = std::max(0,z-1), hiZ = std::min(n-1,z+1);
             const float dx = (p.horizonHeights[z*n+hiX] - p.horizonHeights[z*n+loX]) /

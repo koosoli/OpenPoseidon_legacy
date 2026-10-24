@@ -279,6 +279,32 @@ float EarthTerrainStream::SampleFallback(const Earth::Coordinate& c, int zoom, i
     }
 }
 
+// Terrarium's bathymetry (ETOPO1 / GEBCO-derived, joerd) is in its zooms 0..10 only: from zoom 11 on the open sea
+// is filled with exactly 0 m, the surface itself (measured in the cache 2026-10-24: z10 tiles go down to -4653 m,
+// the Bay of Biscay's z12/z14 tiles are 0 m throughout). There the depth comes from zoom 10, the finest that has
+// it -- ~150 m a sample, plenty for a sea floor. Exact zero only: real land at sea level is never exactly 0.000 m,
+// and a sea sample zoom 10 blurs onto the shore is kept just under the surface rather than raised onto it.
+namespace
+{
+constexpr int BathymetryZoom = 10;
+}
+
+float EarthTerrainStream::WithSeaDepth(const Earth::Coordinate& c, int zoom, float height)
+{
+    if (zoom <= BathymetryZoom || height != 0.0f)
+        return height;
+    try
+    {
+        return std::min(SampleFallback(c, BathymetryZoom, 3), -0.5f);
+    }
+    catch (const std::exception&)
+    {
+        if (_stop.load() || _epoch.load() != _activeEpoch)
+            throw;
+        return -200.0f; // no depth anywhere: deep enough for every keel, as the old stand-in floor
+    }
+}
+
 float EarthTerrainStream::Sample(double x, double y, int zoom)
 {
     // Pixel centres are half a pixel from tile borders; fetching both adjacent
@@ -418,6 +444,12 @@ void EarthTerrainStream::Run()
                 std::set<std::tuple<int,int,int>> keys;
                 const auto addTiles = [&](const Earth::Coordinate& c, int zoom)
                 {
+                    if (zoom > BathymetryZoom) // the sea's depth (WithSeaDepth)
+                    {
+                        const auto b = Earth::ToPixel(c, BathymetryZoom);
+                        keys.insert({BathymetryZoom, Earth::WrapPixel(int(std::floor(b.x)), BathymetryZoom) / Earth::TilePixels,
+                                     std::clamp(int(std::floor(b.y)), 0, Earth::TilePixels * (1 << BathymetryZoom) - 1) / Earth::TilePixels});
+                    }
                     const auto p = Earth::ToPixel(c, zoom);
                     for (int dy = -1; dy <= 1; dy += 2)
                         for (int dx = -1; dx <= 1; dx += 2)
@@ -460,7 +492,8 @@ void EarthTerrainStream::Run()
                     const double wx = patch->x + x * patch->gridMetres;
                     const double wz = patch->z + z * patch->gridMetres;
                     patch->heights[z * Earth::GridSamples + x] = EarthIslands::Height(geographic.latitude, geographic.longitude,
-                        Sample(position.x, position.y,patch->sourceZoom)) - float(Earth::CurvatureDrop(wx,wz));
+                        WithSeaDepth(geographic, patch->sourceZoom, Sample(position.x, position.y,patch->sourceZoom)))
+                        - float(Earth::CurvatureDrop(wx,wz));
                 }
             }
             if (_epoch.load() != _activeEpoch) { handled = version; continue; }
@@ -493,7 +526,7 @@ void EarthTerrainStream::Run()
                             Earth::HorizonOffset(std::max(z-1,0),radius,halfWindow)) * 0.5f;
                     const int zoom = Earth::SpacingZoom(geographic.latitude, spacing, patch->horizonZoom,
                                                         std::min(patch->sourceZoom, 12));
-                    float height = SampleFallback(geographic, zoom, patch->horizonZoom);
+                    float height = WithSeaDepth(geographic, zoom, SampleFallback(geographic, zoom, patch->horizonZoom));
                     // The inner near square is not drawn by this mesh. Its edge
                     // shares the selected near source; blend resolutions outside
                     // it instead of making an elevation cliff at the join.
@@ -503,7 +536,8 @@ void EarthTerrainStream::Run()
                     {
                         const auto fine = Earth::ToPixel(geographic,patch->sourceZoom);
                         const float weight = std::clamp(edge / blendWidth,0.0f,1.0f);
-                        height = Sample(fine.x,fine.y,patch->sourceZoom) * (1-weight) + height * weight;
+                        height = WithSeaDepth(geographic, patch->sourceZoom, Sample(fine.x,fine.y,patch->sourceZoom)) * (1-weight)
+                               + height * weight;
                     }
                     height = EarthIslands::Height(geographic.latitude, geographic.longitude, height);
                     patch->horizonHeights[index] = height - float(Earth::CurvatureDrop(wx,wz));

@@ -46,18 +46,12 @@ inline float FlightSpeedScale(FlightPoint point, const GroundPatch* ground, uint
     const auto support = FlightGround(ground, revision, point);
     return float(ClearanceSpeedScale(support ? double(point.y) - support->height : FlightAltitude(point)));
 }
-// The free-fly camera's floor at (x, z) over ground `height`. The elevation tiles near the camera store
-// the open sea as 0 m (EarthRenderBathymetry.hpp: "Terrarium zero means ocean surface"), and the camera
-// stopped on it like on a floor -- it could never go under water. Where the ground is in that ocean band
-// the floor is the presentation sea bed the renderer draws instead (RenderOceanDepth below the sea datum);
-// land is unchanged. Only the camera: gameplay ground stays the source heights.
-constexpr double FlightOceanDepth = 200.0;                       // = Earth::RenderOceanDepth (renderer)
-constexpr double FlightOceanMin = -5.0, FlightOceanMax = 0.5;    // = RenderOceanMin/MaxElevation
-inline double FlightFloor(double height, float x, float z)
+// The free-fly camera's floor at (x, z) over ground `height`: the ground, which under the sea is the real sea
+// floor (EarthTerrainStream::WithSeaDepth). Until 2026-10-24 the open sea's ground was its 0 m surface fill and
+// this put a stand-in floor 200 m under it.
+inline double FlightFloor(double height, float, float)
 {
-    const double seaDatum = FlightYAtAltitude(x, z, 0.0);
-    const double elevation = height - seaDatum;
-    return elevation >= FlightOceanMin && elevation <= FlightOceanMax ? seaDatum - FlightOceanDepth + 5.0 : height;
+    return height;
 }
 inline FlightPoint ConstrainFlight(FlightPoint previous, FlightPoint next, const GroundPatch* ground, uint64_t revision)
 {

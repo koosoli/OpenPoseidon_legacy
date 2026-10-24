@@ -54,6 +54,8 @@ class EarthTerrainStream
     float Sample(double x, double y, int zoom = Earth::Zoom);
     // Sample at `zoom`, falling back one zoom at a time to `coarsest` where finer tiles are unavailable.
     float SampleFallback(const Earth::Coordinate& c, int zoom, int coarsest);
+    // `height` sampled at `zoom`, with the sea's depth where it is the open sea's 0 m fill (below).
+    float WithSeaDepth(const Earth::Coordinate& c, int zoom, float height);
     bool Download(const std::string& url, std::vector<unsigned char>& bytes);
     bool DownloadOnce(const std::string& url, std::vector<unsigned char>& bytes, long& status);
     void TrimDisk();

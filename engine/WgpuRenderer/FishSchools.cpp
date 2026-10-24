@@ -392,15 +392,15 @@ bool FishSchools::SpawnGroup(const Vector3& camera)
     const float angle = Tau * unit(_rng), radius = 3.0f + 25.0f * unit(_rng);
     const Vector3 home(camera.X() + std::cos(angle) * radius, 0, camera.Z() + std::sin(angle) * radius);
     const float sea = WaterLevel(home.X(), home.Z());
-    // Earth's open sea (WildlifeWorld.hpp): no seabed in reach, the drawn floor RenderOceanDepth down. Only
-    // the open-water species (silversides, yellowtail, barracuda, jacks), in a layer around the camera's
-    // depth -- the reef depth bands picked chromis and tangs in mid-ocean, all within 14 m of the surface,
+    // Earth's open sea (WildlifeWorld.hpp: deeper than the reef bands): only the open-water species
+    // (silversides, yellowtail, barracuda, jacks), in a layer around the camera's depth and above the real
+    // floor -- the reef depth bands picked chromis and tangs in mid-ocean, all within 14 m of the surface,
     // and a camera diving deeper left every fish above it.
     const bool openSea = Wildlife::OpenSea(home.X(), home.Z());
     float floor = Wildlife::Ground(home.X(), home.Z());
     if (openSea)
     {
-        const float lowest = sea - Earth::RenderOceanDepth + 5.0f;
+        const float lowest = floor + 5.0f;
         const float centre = std::clamp(camera.Y() < sea ? camera.Y() : sea - 8.0f, lowest + 10.0f, sea - 8.0f);
         floor = std::max(centre - 10.0f + 20.0f * unit(_rng) - 8.0f, lowest);
     }
