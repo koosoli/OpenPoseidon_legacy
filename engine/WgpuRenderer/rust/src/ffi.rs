@@ -2770,6 +2770,18 @@ pub unsafe extern "C" fn wgr_texture_update_region(
 /// # Safety
 /// `renderer` must be a live pointer from `wgr_create`, or null.
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_earth_heights(renderer: *mut WgrRenderer, atlas: u64, lookup: u64) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        unsafe { &mut *renderer }.gfx3d.set_earth_heights(atlas, lookup);
+    }));
+}
+
+/// # Safety
+/// `renderer` must be a live pointer from `wgr_create`, or null.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn wgr_texture_destroy(renderer: *mut WgrRenderer, id: u64) {
     if renderer.is_null() {
         return;

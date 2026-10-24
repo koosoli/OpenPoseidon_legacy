@@ -2666,6 +2666,10 @@ struct ConformGroup {
     bind: Option<wgpu::BindGroup>,
     gpu_bind: Option<wgpu::BindGroup>,
     bound_gen: u64,
+    // Whole world elevation pyramid (docs/earth-elevation-pyramid.md): the height atlas and its lookup at bindings
+    // 4 and 5, read by vs_main's conform mode 3. A 1x1 stand-in until the Earth gives its textures.
+    earth_dummy: wgpu::TextureView,
+    bound_earth: [u64; 2],
 }
 
 impl ConformGroup {
@@ -2719,6 +2723,27 @@ impl ConformGroup {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         min_binding_size: wgpu::BufferSize::new(crate::terrain::TERRAIN_HOLES_BYTES),
+                    },
+                    count: None,
+                },
+                // Whole world elevation pyramid: the Terrarium-encoded height atlas and its lookup (conform mode 3).
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
                     count: None,
                 },
@@ -2813,10 +2838,30 @@ impl ConformGroup {
             mapped_at_creation: false,
         });
         let gpu_bind = Self::make_gpu_bind(device, &gpu_layout, &dummy_view, &params_buf, &dummy_snow, &dummy_holes);
+        let earth_dummy = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("wgr_3d_conform_earth_dummy"),
+                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default());
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wgr_3d_conform_bind_dummy"),
             layout: &layout,
             entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&earth_dummy),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(&earth_dummy),
+                },
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(&dummy_view),
@@ -2842,6 +2887,8 @@ impl ConformGroup {
             bind: Some(bind),
             gpu_bind: Some(gpu_bind),
             bound_gen: u64::MAX,
+            earth_dummy,
+            bound_earth: [0, 0],
         }
     }
 
@@ -2870,9 +2917,12 @@ impl ConformGroup {
         params: &crate::terrain::TerrainConformParams,
         snow: &wgpu::Buffer,
         holes: &wgpu::Buffer,
+        // the whole world's height atlas and lookup (texture ids, and their views; ids 0: the stand-in)
+        earth: ([u64; 2], Option<(&wgpu::TextureView, &wgpu::TextureView)>),
     ) {
         queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(params));
-        if self.bind.is_none() || self.bound_gen != generation {
+        if self.bind.is_none() || self.bound_gen != generation || self.bound_earth != earth.0 {
+            let (earth_atlas, earth_lookup) = earth.1.unwrap_or((&self.earth_dummy, &self.earth_dummy));
             self.gpu_bind = Some(Self::make_gpu_bind(device, &self.gpu_layout, heightmap_view, &self.params_buf, snow, holes));
             self.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("wgr_3d_conform_bind"),
@@ -2894,9 +2944,18 @@ impl ConformGroup {
                         binding: 3,
                         resource: holes.as_entire_binding(),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::TextureView(earth_atlas),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::TextureView(earth_lookup),
+                    },
                 ],
             }));
             self.bound_gen = generation;
+            self.bound_earth = earth.0;
         }
     }
 }
@@ -4622,6 +4681,8 @@ pub struct Gfx3d {
     count_palette_stamp: Option<(u64, u64)>,
     cameras: CameraGroup,
     conform: ConformGroup,
+    // the whole world's elevation pyramid (wgr_earth_heights): atlas and lookup texture ids, 0 = none
+    earth_heights: [u64; 2],
     gi: gi::GiProbes, // REN-GI-001
     // Per-draw world matrix, one entry per draw slot, read-only storage indexed by
     // instance_index (the draw's base_instance). Uploaded in a single write_buffer.
@@ -6373,6 +6434,7 @@ impl Gfx3d {
             count_palette_stamp: None,
             cameras,
             conform,
+            earth_heights: [0, 0],
             gi,
             world,
             palette,
@@ -9270,6 +9332,11 @@ impl Gfx3d {
         true
     }
 
+    /// The whole world's elevation pyramid: its atlas and lookup textures (ids from the texture registry; 0 = none).
+    pub fn set_earth_heights(&mut self, atlas: u64, lookup: u64) {
+        self.earth_heights = [atlas, lookup];
+    }
+
     pub fn set_surface_rays(&self, queue: &wgpu::Queue, params: &[[f32; 4]; 4]) {
         queue.write_buffer(&self.cameras.surface_rays_buf, 0, bytemuck::cast_slice(params));
     }
@@ -9326,8 +9393,10 @@ impl Gfx3d {
     ) {
         // Lend the terrain heightmap + its sampling params to the mesh conform group
         // (group 4) so vs_main can conform ClipLand vegetation to SurfaceY per vertex.
-        self.conform
-            .ensure(device, queue, heightmap_view, heightmap_gen, conform_params, snow, holes);
+        let earth_views = (self.earth_heights[0] != 0 && self.earth_heights[1] != 0)
+            .then(|| (textures.texture_view(self.earth_heights[0]), textures.texture_view(self.earth_heights[1])));
+        self.conform.ensure(device, queue, heightmap_view, heightmap_gen, conform_params, snow, holes,
+                            (if earth_views.is_some() { self.earth_heights } else { [0, 0] }, earth_views));
         // DZ-003: take Sky's reflection env map. The env texture is created once and never
         // resized, so gen 0 binds it exactly once and this is a no-op every frame after.
         // Both the per-draw group-1 binds (below) and the GPU-driven group-1 binds

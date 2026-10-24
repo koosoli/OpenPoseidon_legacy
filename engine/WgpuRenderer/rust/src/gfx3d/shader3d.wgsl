@@ -612,6 +612,167 @@ fn earth_tile_albedo(atlas: u32, samp: u32, lut: u32, ref19: vec2<f32>, off19: v
 #endif
 
 #ifdef WHOLE_WORLD
+// --- (OP) Whole world ground from the elevation pyramid (docs/earth-elevation-pyramid.md) ---------------------------
+// EarthHeightCache's atlas (256 x 256 slots, Terrarium-encoded RGBA8) and lookup (per zoom a 16 x 16 window, as the
+// imagery's), at group 4 beside the terrain heightmap. Read in the vertex stage only (conform mode 3).
+@group(4) @binding(4) var earth_heights: texture_2d<f32>;
+@group(4) @binding(5) var earth_height_lut: texture_2d<f32>;
+const EH_PER_ROW: i32 = 16;  // EarthHeightCache::SlotsPerRow
+const EH_ROWS: i32 = 17;     // EarthHeightCache::LookupRowsPerLevel
+const EH_MAX_LEVEL: i32 = 15;
+const EH_RADIUS: f32 = 6378137.0;
+const EH_ANCHOR: f32 = 6400.0;
+// metres a texel may span per metre of distance: 5 m at 1 km (finer than the node grid there: a node 1 km away
+// is 330-660 m wide, 10-20 m between vertices). EarthGroundNodes' Detail.
+const EH_DETAIL: f32 = 0.005;
+
+fn eh_u24(c: vec4<f32>) -> i32 {
+    return i32(round(c.r * 255.0)) + i32(round(c.g * 255.0)) * 256 + i32(round(c.b * 255.0)) * 65536;
+}
+// The atlas slot of tile (level, tx, ty), or -1 when it is not resident.
+fn eh_slot(level: i32, tx: i32, ty: i32) -> i32 {
+    let n = 1 << u32(level);
+    if (ty < 0 || ty >= n) { return -1; }
+    let x = ((tx % n) + n) % n;
+    let row = level * EH_ROWS;
+    let ox = eh_u24(textureLoad(earth_height_lut, vec2<i32>(0, row), 0));
+    let oy = eh_u24(textureLoad(earth_height_lut, vec2<i32>(1, row), 0));
+    let dx = ((x - ox) % n + n) % n;
+    let dy = ty - oy;
+    if (dx >= 16 || dy < 0 || dy >= 16) { return -1; }
+    let e = textureLoad(earth_height_lut, vec2<i32>(dx, row + 1 + dy), 0);
+    if (e.a < 0.5) { return -1; }
+    return eh_u24(e);
+}
+// A Terrarium-encoded texel's height (m).
+fn eh_decode(c: vec4<f32>) -> f32 {
+    return round(c.r * 255.0) * 256.0 + round(c.g * 255.0) + round(c.b * 255.0) / 256.0 - 32768.0;
+}
+// One texel (lx, ly may step one past the tile's edge into its neighbour): (height, 1) or (0, 0) when not resident.
+fn eh_texel(level: i32, tx: i32, ty: i32, lx: i32, ly: i32) -> vec2<f32> {
+    var x = tx;
+    var y = ty;
+    var px = lx;
+    var py = ly;
+    if (px < 0) { x = x - 1; px = px + 256; } else if (px > 255) { x = x + 1; px = px - 256; }
+    if (py < 0) { y = y - 1; py = py + 256; } else if (py > 255) { y = y + 1; py = py - 256; }
+    let slot = eh_slot(level, x, y);
+    if (slot < 0) { return vec2<f32>(0.0, 0.0); }
+    let c = textureLoad(earth_heights, vec2<i32>((slot % EH_PER_ROW) * 256 + px, (slot / EH_PER_ROW) * 256 + py), 0);
+    return vec2<f32>(eh_decode(c), 1.0);
+}
+struct EhPoint {
+    tile: vec2<i32>,
+    local: vec2<f32>, // texels, [0, 256)
+};
+// A point of node (nz, nx, ny) at its (u, v) as a tile of zoom `level` and a place in it, without losing precision.
+fn eh_point(level: i32, nz: i32, nx: i32, ny: i32, uv: vec2<f32>) -> EhPoint {
+    if (level <= nz) {
+        let s = u32(nz - level);
+        let mask = (1 << s) - 1;
+        return EhPoint(vec2<i32>(nx >> s, ny >> s),
+                       (vec2<f32>(f32(nx & mask), f32(ny & mask)) + uv) / f32(1 << s) * 256.0);
+    }
+    let s = u32(level - nz);
+    let scaled = uv * f32(1 << s);
+    let whole = floor(scaled);
+    return EhPoint(vec2<i32>(nx << s, ny << s) + vec2<i32>(whole), (scaled - whole) * 256.0);
+}
+// Bilinear height at zoom `level`: (height, 1), or (0, 0) when a texel is not resident.
+fn eh_height_level(level: i32, nz: i32, nx: i32, ny: i32, uv: vec2<f32>) -> vec2<f32> {
+    let p = eh_point(level, nz, nx, ny, uv);
+    let q = p.local - 0.5;
+    let i = floor(q);
+    let t = q - i;
+    let ix = i32(i.x);
+    let iy = i32(i.y);
+    if (ix >= 0 && ix < 255 && iy >= 0 && iy < 255) {
+        // all four in this tile (every sample but the tile's edge rows): its slot once, not per texel
+        let slot = eh_slot(level, p.tile.x, p.tile.y);
+        if (slot < 0) { return vec2<f32>(0.0, 0.0); }
+        let o = vec2<i32>((slot % EH_PER_ROW) * 256 + ix, (slot / EH_PER_ROW) * 256 + iy);
+        let ta = eh_decode(textureLoad(earth_heights, o, 0));
+        let tb = eh_decode(textureLoad(earth_heights, o + vec2<i32>(1, 0), 0));
+        let tc = eh_decode(textureLoad(earth_heights, o + vec2<i32>(0, 1), 0));
+        let td = eh_decode(textureLoad(earth_heights, o + vec2<i32>(1, 1), 0));
+        return vec2<f32>(mix(mix(ta, tb, t.x), mix(tc, td, t.x), t.y), 1.0);
+    }
+    let a = eh_texel(level, p.tile.x, p.tile.y, ix, iy);
+    let b = eh_texel(level, p.tile.x, p.tile.y, ix + 1, iy);
+    let c = eh_texel(level, p.tile.x, p.tile.y, ix, iy + 1);
+    let d = eh_texel(level, p.tile.x, p.tile.y, ix + 1, iy + 1);
+    if (a.y * b.y * c.y * d.y < 0.5) { return vec2<f32>(0.0, 0.0); }
+    return vec2<f32>(mix(mix(a.x, b.x, t.x), mix(c.x, d.x, t.x), t.y), 1.0);
+}
+// The height at a point, from the zoom its distance asks for (blended with the next finer one, so the height is a
+// continuous function of place and camera and neighbouring nodes agree on their shared edge), falling back to the
+// nearest resident ancestor.
+fn eh_height(level_f: f32, nz: i32, nx: i32, ny: i32, uv: vec2<f32>) -> f32 {
+    let l0 = i32(floor(level_f));
+    var h = 0.0;
+    var found = false;
+    for (var l = l0; l >= 0; l = l - 1) {
+        let r = eh_height_level(l, nz, nx, ny, uv);
+        if (r.y > 0.5) {
+            h = r.x;
+            found = true;
+            break;
+        }
+    }
+    let t = level_f - f32(l0);
+    if (found && t > 0.001 && l0 + 1 <= EH_MAX_LEVEL) {
+        let r = eh_height_level(l0 + 1, nz, nx, ny, uv);
+        if (r.y > 0.5) { h = mix(h, r.x, t); }
+    }
+    return h;
+}
+// Node of the mercator quadtree (conform mode 3), as EngineWgpu::SubmitEarthNode packs it:
+// conform0 = (latitude of its north edge - origin latitude, its north Gudermannian Y, its Y span, west longitude -
+// origin longitude), conform1 = (longitude span, sin(origin latitude), morph start, morph end) -- radians and
+// metres -- conform2 = (x, y as bits, 3 = mode, zoom).
+struct EarthNode {
+    dp_north: f32, y_north: f32, d_y: f32, dl_west: f32, d_lon: f32, sin_p0: f32, cos_p0: f32,
+    nz: i32, nx: i32, ny: i32,
+};
+fn earth_node(obj: Object) -> EarthNode {
+    let sp = obj.conform1.y;
+    return EarthNode(obj.conform0.x, obj.conform0.y, obj.conform0.z, obj.conform0.w, obj.conform1.x, sp,
+                     sqrt(max(1.0 - sp * sp, 0.0)), i32(round(obj.conform2.w)),
+                     bitcast<i32>(obj.conform2.x), bitcast<i32>(obj.conform2.y));
+}
+// The ground point of node `n` at (u, v), height `h` above the sea datum, camera-relative, in the origin's
+// tangent-plane frame (EarthFrame.hpp ToLocal; the y is the height less the curvature drop, as the patch meshes
+// were). From differences only -- the latitude's by the Gudermannian difference, the longitude's by haversines --
+// so a point near the camera is exact to millimetres in f32. Also returns cos(latitude) in .w.
+fn earth_node_point(n: EarthNode, uv: vec2<f32>, h: f32) -> vec4<f32> {
+    let dyv = -uv.y * n.d_y;
+    let num = 2.0 * cosh(n.y_north + dyv * 0.5) * sinh(dyv * 0.5);
+    let den = 1.0 + sinh(n.y_north + dyv) * sinh(n.y_north);
+    let dp = n.dp_north + atan2(num, den);
+    let dl = n.dl_west + uv.x * n.d_lon;
+    let cp = n.cos_p0 * cos(dp) - n.sin_p0 * sin(dp);
+    let sh = sin(dl * 0.5);
+    let hav = 2.0 * sh * sh;
+    let sq = sin(dp * 0.5);
+    let east = cp * sin(dl);
+    let north = sin(dp) + n.sin_p0 * cp * hav;
+    let drop = 2.0 * sq * sq + n.cos_p0 * cp * hav;
+    let world = vec3<f32>(EH_ANCHOR + EH_RADIUS * east, h - EH_RADIUS * drop, EH_ANCHOR + EH_RADIUS * north);
+    return vec4<f32>(world - frame.cam_pos.xyz, cp);
+}
+fn earth_node_level(dist: f32, cos_lat: f32) -> f32 {
+    return clamp(log2(40075016.0 * max(cos_lat, 0.01) / (256.0 * max(dist, 1.0) * EH_DETAIL)), 0.0, f32(EH_MAX_LEVEL));
+}
+// The ground vertex at (u, v) (heights from the pyramid at the zoom its distance asks for).
+fn earth_node_vertex(n: EarthNode, uv: vec2<f32>) -> vec3<f32> {
+    let flat = earth_node_point(n, uv, 0.0);
+    let level = earth_node_level(length(flat.xyz), flat.w);
+    let h = eh_height(level, n.nz, n.nx, n.ny, uv);
+    return flat.xyz + vec3<f32>(0.0, h, 0.0);
+}
+#endif
+
+#ifdef WHOLE_WORLD
 // --- (OP) Tidewater's beach sand on the whole world's beaches ------------------------------------
 // terrain.wgsl tw_beach_sand, the sand the native islands' beaches have (owner: "can you give also the
 // island the tidewave sand texture?"), on Earth near ground: pale coral sand in drifts, grain at two
@@ -926,6 +1087,31 @@ fn vs_main(
     // world xz (+ frame.cam_pos) and written back camera-relative. conform2.z = mode:
     // 1 = ForestPlain bilinear plane, 2 = per-vertex ClipLand vegetation (heightmap).
     let mode = obj.conform2.z;
+#ifdef WHOLE_WORLD
+    if (mode > 2.5) {
+        // Whole world ground node (conform mode 3, EngineWgpu::SubmitEarthNode): the shared 33 x 33 grid placed on the
+        // node's piece of the globe, heights from the elevation pyramid. CDLOD morph: past the node's morph start the
+        // odd grid vertices slide onto their even neighbours' line, so at its range it is its parent's grid exactly.
+        let n = earth_node(obj);
+        let flat = earth_node_point(n, uv, 0.0);
+        let k = clamp((length(flat.xyz) - obj.conform1.z) / max(obj.conform1.w - obj.conform1.z, 1.0), 0.0, 1.0);
+        let g = uv * 32.0;
+        let muv = (g - fract(g * 0.5) * 2.0 * k) / 32.0;
+        var p = earth_node_vertex(n, muv);
+        let e = 1.0 / 32.0;
+        let px = earth_node_vertex(n, muv + vec2<f32>(e, 0.0));
+        let pz = earth_node_vertex(n, muv + vec2<f32>(0.0, e));
+        // u runs east, v south: (east) x (south) is up in the world's components
+        let nrm = normalize(cross(px - p, pz - p));
+        if (pos.y > 0.5) {
+            // a skirt vertex (EarthGroundNodes): half a grid cell below its edge, hiding the hairline between nodes
+            p.y = p.y - n.d_lon * EH_RADIUS * n.cos_p0 / 64.0;
+        }
+        // imagery: zoom-19 mercator offsets from the node's corner (the tile-mode ground shader's off19)
+        let off19 = muv * f32(1 << u32(max(19 - n.nz, 0)));
+        return finish_vertex(vec4<f32>(p, 1.0), nrm, vec3<f32>(0.0), vec3<f32>(0.0), off19, instance, 0.0, vec2<f32>(0.0));
+    }
+#endif
     // 1 for a vertex pinned onto the terrain (see VsOut.conform_w). Vertex-only knowledge;
     // fs_surface uses it to decide where its per-pixel depth re-seat applies.
     var conform_w = 0.0;
