@@ -156,6 +156,25 @@ RString PlainText(const RString& text)
     return RString(out.c_str());
 }
 
+// UTF-8 as Latin-1 ("\xC2\xA9" -> '\xA9'); a character past U+00FF becomes '?'.
+RString Latin1(const RString& utf8)
+{
+    std::string out;
+    const unsigned char* p = reinterpret_cast<const unsigned char*>((const char*)utf8);
+    while (*p)
+    {
+        unsigned code = *p;
+        int extra = code >= 0xF0 ? 3 : code >= 0xE0 ? 2 : code >= 0xC0 ? 1 : 0;
+        if (extra > 0)
+            code &= 0x3Fu >> extra;
+        ++p;
+        for (; extra > 0 && (*p & 0xC0) == 0x80; --extra, ++p)
+            code = (code << 6) | (*p & 0x3Fu);
+        out += code <= 0xFF ? static_cast<char>(code) : '?';
+    }
+    return RString(out.c_str());
+}
+
 // A picture of Arma 3's: a file, or a procedural "#(argb,8,8,3)color(r,g,b,a)" drawn as that colour.
 struct Picture
 {
@@ -251,8 +270,48 @@ class A3Control : public Control
   protected:
     void LoadFont(const RString& family, float size)
     {
-        _font = GLOB_ENGINE->LoadFont(GetFontID(family.GetLength() > 0 ? family : RString("tahomaB24")));
         _size = size > 0 ? size : 0.03f;
+        const RString file = FontFile(family, _size);
+        _font = GLOB_ENGINE->LoadFont(
+            GetFontID(file.GetLength() > 0 ? file : family.GetLength() > 0 ? family : RString("tahomaB24")));
+    }
+
+    // Arma 3's CfgFontFamilies lists each family once per size ("...\Purista-Light\Purista-Light9" ..
+    // "...46", each with fallbacks for other scripts); the size whose line comes closest to the text's
+    // height on this screen is the one drawn. Its lines are ~1.7x the number in its name
+    // (Purista-Light24: 41 px). "" when Arma 3 has no such family.
+    static RString FontFile(const RString& family, float size)
+    {
+        const ParamEntry* root = Arma1Compat::ConfigRoot();
+        const ParamEntry* families = root ? root->FindEntry("CfgFontFamilies") : nullptr;
+        const ParamEntry* cls = families && family.GetLength() > 0 ? families->FindEntry(family) : nullptr;
+        const ParamEntry* fonts = cls && cls->IsClass() ? cls->FindEntry("fonts") : nullptr;
+        if (!fonts || !fonts->IsArray())
+            return RString();
+        const float wantPx = size * float(GLOB_ENGINE->Height2D()) / 1.7f;
+        RString best;
+        float bestError = 1e9f;
+        for (int i = 0; i < fonts->GetSize(); i++)
+        {
+            const IParamArrayValue& item = (*fonts)[i];
+            const RString path = item.IsArrayValue() && item.GetItemCount() > 0 ? RString(item[0].GetValue())
+                                                                               : RString(item.GetValue());
+            const char* digits = path;
+            const char* end = digits + strlen(digits);
+            while (end > digits && isdigit(static_cast<unsigned char>(end[-1])))
+                --end;
+            const float px = static_cast<float>(atoi(end));
+            if (px <= 0)
+                continue;
+            // a size a little above what is wanted reads better scaled down than one below scaled up
+            const float error = px >= wantPx ? px - wantPx : (wantPx - px) * 1.5f;
+            if (error < bestError)
+            {
+                bestError = error;
+                best = path;
+            }
+        }
+        return best;
     }
 
     Rect2DPixel Pixels(float x, float y, float w, float h) const
@@ -263,11 +322,13 @@ class A3Control : public Control
     Rect2DPixel ClipPixels() const { return Pixels(_clip.x, _clip.y, _clip.w, _clip.h); }
 
     // Text in [x, x + w] (alignment from `align`: 0 left, 1 right, 2 centre), vertically centred.
-    void DrawLabel(const RString& text, float x, float y, float w, float h, int align, PackedColor color,
+    void DrawLabel(const RString& utf8, float x, float y, float w, float h, int align, PackedColor color,
                    float size) const
     {
-        if (text.GetLength() == 0 || !_font)
+        if (utf8.GetLength() == 0 || !_font)
             return;
+        // Arma 3's strings are UTF-8; its bitmap fonts are drawn a byte per Latin-1 character
+        const RString text = _font->IsFreeType() ? utf8 : Latin1(utf8);
         const float width = GLOB_ENGINE->GetTextWidth(size, _font, text);
         float left = x;
         if (align == ST_RIGHT)

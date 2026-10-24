@@ -342,6 +342,9 @@ void Font::Load(const char* name)
             info.height = glyph.h;
             info.wTex = glyph.wTex;
             info.hTex = glyph.hTex;
+            info.offsetX = glyph.offsetX;
+            info.offsetY = glyph.offsetY;
+            info.advance = glyph.advance;
         }
         return;
     }

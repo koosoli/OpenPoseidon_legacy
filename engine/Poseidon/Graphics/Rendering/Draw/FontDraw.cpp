@@ -75,7 +75,10 @@ void Engine::DrawText(const Point2DAbs& pos, float sizeEx, const Rect2DAbs& clip
     float sizeH = h * sizeEx * (1.0 / 600) / font->Height();
     float sizeW = sizeH * Width() * as.topFOV / (Height() * as.leftFOV);
     const int spaceChar = 'o' - Font::StartChar;
-    const int spaceWidth = (spaceChar >= 0 && spaceChar < font->_nChars) ? font->_infos[spaceChar].width : 0;
+    // an Arma 3 font has a space of its own (its advance); OFP's fonts use the width of 'o'
+    const int spaceWidth = font->_nChars > 0 && font->_infos[0].advance >= 0 ? font->_infos[0].advance
+                           : (spaceChar >= 0 && spaceChar < font->_nChars) ? font->_infos[spaceChar].width
+                                                                          : 0;
 
     Draw2DPars pars;
     pars.spec = NoZBuf | IsAlpha | ClampU | ClampV | IsAlphaFog;
@@ -96,6 +99,14 @@ void Engine::DrawText(const Point2DAbs& pos, float sizeEx, const Rect2DAbs& clip
         if (c < 0 || c >= font->_nChars)
         {
             posA.x += toInt(spaceWidth * sizeW);
+            continue;
+        }
+
+        // an Arma 3 font's blank or missing glyph (its space) only moves the pen
+        const CharInfo& glyph = font->_infos[c];
+        if (glyph.advance >= 0 && (glyph.width <= 0 || glyph.height <= 0 || glyph.nameTex.GetLength() == 0))
+        {
+            posA.x += toInt(glyph.Advance() * sizeW);
             continue;
         }
 
@@ -132,9 +143,11 @@ void Engine::DrawText(const Point2DAbs& pos, float sizeEx, const Rect2DAbs& clip
         pars.SetU(tx * invTW, (tx + tw * xPart) * invTW);
         pars.SetV(ty * invTH, (ty + th * yPart) * invTH);
 
-        Draw2D(pars, Rect2DAbs(posA.x, posA.y, sw * xPart, sh * yPart), clip);
+        Draw2D(pars,
+               Rect2DAbs(posA.x + glyph.offsetX * sizeW, posA.y + glyph.offsetY * sizeH, sw * xPart, sh * yPart),
+               clip);
 
-        posA.x += toInt(font->_infos[c].width * sizeW);
+        posA.x += toInt(glyph.Advance() * sizeW);
     }
 }
 
@@ -601,7 +614,10 @@ float Engine::GetTextWidth(float sizeEx, Font* font, const char* text)
 
     float x = 0;
     const int spaceChar = 'o' - Font::StartChar;
-    const int spaceWidth = (spaceChar >= 0 && spaceChar < font->_nChars) ? font->_infos[spaceChar].width : 0;
+    // an Arma 3 font has a space of its own (its advance); OFP's fonts use the width of 'o'
+    const int spaceWidth = font->_nChars > 0 && font->_infos[0].advance >= 0 ? font->_infos[0].advance
+                           : (spaceChar >= 0 && spaceChar < font->_nChars) ? font->_infos[spaceChar].width
+                                                                          : 0;
     for (int c; (c = *text++) != 0;)
     {
         c &= 0xff;
@@ -617,7 +633,7 @@ float Engine::GetTextWidth(float sizeEx, Font* font, const char* text)
             x += toInt(spaceWidth * sizeW);
             continue;
         }
-        x += toInt(font->_infos[c].width * sizeW);
+        x += toInt(font->_infos[c].Advance() * sizeW);
     }
     return x / w;
 }

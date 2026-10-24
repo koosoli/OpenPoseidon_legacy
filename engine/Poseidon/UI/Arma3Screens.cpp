@@ -51,6 +51,7 @@ struct Entry
     bool campaign = false;
     RString picture, overview, author;
     bool described = false; // the mission's description.ext was read for what CfgMissions leaves out
+    const ParamEntry* episodes = nullptr; // a co-op campaign's CfgMissions >> MPMissions class
 };
 
 std::string Lower(std::string s)
@@ -220,11 +221,24 @@ void CollectCampaigns(const ParamEntry& missions, std::vector<Entry>& out)
             const std::string dir = cls.IsClass() ? Directory(cls) : std::string();
             if (dir.empty() || !QIFStreamB::FileExist((dir + "\\description.ext").c_str()))
                 continue;
+            // a DLC that is not installed leaves a stand-in campaign (ContactDummy); Arma 3 lists the real one
+            if (Lower((const char*)cls.GetName()).find("dummy") != std::string::npos)
+                continue;
             Entry e = Describe(cls, RString(cls.GetName()));
             std::string base = dir + "\\";
             std::replace(base.begin(), base.end(), '\\', '/');
             e.value = Arma1Compat::CampaignName(base); // also registers the folder for StartCampaign
             e.campaign = true;
+            // a co-op campaign (Apex Protocol) keeps its episodes in CfgMissions >> MPMissions >> <its
+            // class>; Arma 3 opens their list rather than a first mission its description.ext lacks
+            const ParamEntry* mp = missions.FindEntry("MPMissions");
+            const ParamEntry* episodes = mp && mp->IsClass() ? mp->FindEntry(cls.GetName()) : nullptr;
+            if (episodes && episodes->IsClass())
+            {
+                e.episodes = episodes;
+                if (e.label.GetLength() == 0 || e.label == RString(cls.GetName()))
+                    e.label = Shown(*episodes, "briefingName");
+            }
             out.push_back(e);
         }
     // Arma 3 lists scenarios kept in a campaign's folder (Old Man) with the campaigns; they are
@@ -232,6 +246,8 @@ void CollectCampaigns(const ParamEntry& missions, std::vector<Entry>& out)
     if (const ParamEntry* scenarios = missions.FindEntry("Missions"); scenarios && scenarios->IsClass())
         CollectMissions(*scenarios, out, true);
 }
+
+RString Upper(const RString& text);
 
 class ContentDisplay : public Display
 {
@@ -260,11 +276,31 @@ class ContentDisplay : public Display
 
     bool Choice(bool& campaign, std::string& value) const
     {
+        if (_episodeChosen)
+        {
+            campaign = false;
+            value = _episode;
+            return true;
+        }
         if (_chosen < 0 || _chosen >= static_cast<int>(_entries.size()))
             return false;
         campaign = _entries[_chosen].campaign;
         value = _entries[_chosen].value;
         return true;
+    }
+
+    // An episode chosen in a co-op campaign's list is this screen's choice.
+    void OnChildDestroyed(int idd, int exit) override
+    {
+        bool campaign = false;
+        std::string value;
+        const bool chosen = idd == ArmaContentIdd && exit == IDC_OK && ContentChoice(_child, campaign, value);
+        Display::OnChildDestroyed(idd, exit);
+        if (!chosen)
+            return;
+        _episodeChosen = true;
+        _episode = value;
+        Exit(IDC_OK);
     }
 
     // Arma 3 opens these screens over its main menu's backdrop.
@@ -314,9 +350,22 @@ class ContentDisplay : public Display
     {
         if (index < 0 || index >= static_cast<int>(_entries.size()))
             return;
+        if (const ParamEntry* episodes = _entries[index].episodes)
+        {
+            std::vector<Entry> list;
+            CollectMissions(*episodes, list, false);
+            if (!list.empty())
+            {
+                CreateChild(new ContentDisplay(this, kMissionLayout, std::move(list), Upper(_entries[index].label), 0));
+                return;
+            }
+        }
         _chosen = index;
         Exit(IDC_OK);
     }
+
+    bool _episodeChosen = false;
+    std::string _episode;
 };
 
 RString Upper(const RString& text)

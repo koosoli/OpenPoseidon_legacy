@@ -20,6 +20,11 @@ struct CharInfo
 	RStringB nameTex;
 	int xTex, yTex;
 	int wTex, hTex; // nearest power of 2
+	// Arma 3's packed fonts: where in the line the glyph is drawn, and how far it moves the pen
+	// (-1: its width, as OFP's cell fonts)
+	int offsetX = 0, offsetY = 0;
+	int advance = -1;
+	int Advance() const {return advance >= 0 ? advance : width;}
 };
 
 class Font: public RefCountWithLinks
