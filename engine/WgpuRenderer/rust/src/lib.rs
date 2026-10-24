@@ -1346,18 +1346,32 @@ fn ngx_probe_and_init(
 struct InitTimer {
     on: bool,
     last: std::time::Instant,
+    /// LOAD-002: every phase, for one game-log line at the end of Renderer::new (the eprintln
+    /// above only reaches a console, and the game's stderr reaches none on the owner's PC).
+    phases: Vec<(String, f64)>,
 }
 
 impl InitTimer {
     fn new() -> Self {
-        Self { on: std::env::var("WGR_INIT_TIMING").is_ok_and(|v| v == "1"), last: std::time::Instant::now() }
+        Self {
+            on: std::env::var("WGR_INIT_TIMING").is_ok_and(|v| v == "1"),
+            last: std::time::Instant::now(),
+            phases: Vec::new(),
+        }
     }
     fn mark(&mut self, phase: &str) {
+        let now = std::time::Instant::now();
+        let ms = (now - self.last).as_secs_f64() * 1000.0;
         if self.on {
-            let now = std::time::Instant::now();
-            eprintln!("WGR_INIT {phase}: {:.1} ms", (now - self.last).as_secs_f64() * 1000.0);
-            self.last = now;
+            eprintln!("WGR_INIT {phase}: {ms:.1} ms");
         }
+        self.phases.push((phase.to_string(), ms));
+        self.last = now;
+    }
+    fn summary(&self) -> String {
+        let total: f64 = self.phases.iter().map(|p| p.1).sum();
+        let parts: Vec<String> = self.phases.iter().map(|(n, ms)| format!("{n}={ms:.0}")).collect();
+        format!("wgpu renderer init {total:.0} ms: {}", parts.join(" "))
     }
 }
 
@@ -2380,6 +2394,7 @@ impl Renderer {
         #[allow(unused_mut)]
         let mut temporal_auto = false;
         init_timer.mark("rest of new()");
+        log.log(log_level::INFO, &init_timer.summary());
         Ok(Self {
             // 1.35 by default: enough to push the reflection-target edge outside a normal
             // grazing view, without giving away more angular resolution than the mip-filtered
