@@ -8285,7 +8285,11 @@ void ProcessEvent(const SDL_Event& event)
         // though the game remains in absolute mouse mode for Zeus editing.
         SDL_HideCursor();
     }
-    if (!s_visible && s_zeusCamera)
+    // A game menu over the free-fly view (the Esc menu: Continue / Retry / Abort, or a mission dialog) takes
+    // the clicks: Zeus took every left click for selection, so the menu could not be used without leaving free
+    // flight first (owner, 2026-10-24).
+    const bool gameMenuOpen = GWorld && (GWorld->GetOptions() || GWorld->UserDialog());
+    if (!s_visible && s_zeusCamera && !gameMenuOpen)
     {
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT)
         {
