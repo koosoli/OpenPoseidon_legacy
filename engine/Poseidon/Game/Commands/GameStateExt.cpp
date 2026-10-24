@@ -1,4 +1,5 @@
 
+#include <algorithm>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Core/Version.hpp>
@@ -1057,8 +1058,39 @@ struct A1Switch
     bool done = false;
     RString defaultCode;
     GameValue result;
+    const void* owner = nullptr; // the scheduled script it runs in (null: unscheduled code)
 };
+// Every open switch, innermost last. Scheduled scripts interleave, and one dropped while
+// suspended inside a switch body never pops its own (its stack, where the switch lives, is
+// freed without unwinding: MPE1_HuntersHunted and TE15 crashed in A1Case, run 42). A
+// script's case/default reach only its own innermost switch, and a dropped script's
+// switches are forgotten (ForgetScriptSwitches).
 thread_local std::vector<A1Switch*> gSwitches;
+}
+namespace Poseidon
+{
+const void* CurrentScriptFiber(); // Scripts.cpp
+void ForgetScriptSwitches(const void* owner);
+}
+using Poseidon::CurrentScriptFiber;
+void Poseidon::ForgetScriptSwitches(const void* owner)
+{
+    if (!owner)
+        return;
+    gSwitches.erase(std::remove_if(gSwitches.begin(), gSwitches.end(),
+                                   [owner](const A1Switch* s) { return s->owner == owner; }),
+                    gSwitches.end());
+}
+namespace
+{
+A1Switch* CurrentSwitch()
+{
+    const void* owner = CurrentScriptFiber();
+    for (auto it = gSwitches.rbegin(); it != gSwitches.rend(); ++it)
+        if ((*it)->owner == owner)
+            return *it;
+    return nullptr;
+}
 
 GameValue Tagged(const char* tag, GameValuePar v)
 {
@@ -1097,23 +1129,24 @@ static GameValue A1Switch_(const GameState*, GameValuePar oper1)
 
 static GameValue A1Case(const GameState*, GameValuePar oper1)
 {
-    if (!gSwitches.empty() && !gSwitches.back()->done && SwitchEqual(gSwitches.back()->value, oper1))
-        gSwitches.back()->matched = true; // "case x;" alone falls through to the next code
+    if (A1Switch* sw = CurrentSwitch(); sw && !sw->done && SwitchEqual(sw->value, oper1))
+        sw->matched = true; // "case x;" alone falls through to the next code
     return Tagged("__a1case", oper1);
 }
 
 static GameValue A1Default(const GameState*, GameValuePar oper1)
 {
-    if (!gSwitches.empty())
-        gSwitches.back()->defaultCode = RString(oper1);
+    if (A1Switch* sw = CurrentSwitch())
+        sw->defaultCode = RString(oper1);
     return NOTHING;
 }
 
 static GameValue A1CaseCode(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
-    if (gSwitches.empty() || !IsTagged(oper1, "__a1case"))
+    A1Switch* current = CurrentSwitch();
+    if (!current || !IsTagged(oper1, "__a1case"))
         return NOTHING;
-    A1Switch& sw = *gSwitches.back();
+    A1Switch& sw = *current;
     if (sw.done || !sw.matched)
         return NOTHING;
     sw.done = true;
@@ -1196,9 +1229,11 @@ static GameValue A1SwitchDo(const GameState* state, GameValuePar oper1, GameValu
     A1Switch sw;
     const GameArrayType& a = oper1;
     sw.value = a[1];
+    sw.owner = CurrentScriptFiber();
     gSwitches.push_back(&sw);
     const_cast<GameState*>(state)->Execute(RString(oper2));
-    gSwitches.pop_back();
+    // its own entry, wherever other scripts' switches have come to lie around it
+    gSwitches.erase(std::remove(gSwitches.begin(), gSwitches.end(), &sw), gSwitches.end());
     if (!sw.done && sw.defaultCode.GetLength() > 0)
         sw.result = state->EvaluateMultiple(sw.defaultCode);
     return sw.result;
