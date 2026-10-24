@@ -8098,7 +8098,7 @@ WgrTexture EngineWgpu::EarthSandDetail()
 }
 
 void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture, uint32_t sampler, bool groundDetail, bool nearAtlas,
-                                    double sourceLatitude, double sourceLongitude)
+                                    double sourceLatitude, double sourceLongitude, bool globe)
 {
     if (!_renderer || !mesh || !indexCount) return;
     EnsureCamera();
@@ -8129,7 +8129,10 @@ void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTextur
         d.mat_specular.y = sun.Y();
         d.mat_specular.z = sun.Z();
     }
-    if (_earthTileAtlas && _earthTileLookup)
+    // The ground only (the streamed patches and the globe): buildings, roads and forests keep their own textures.
+    // With the pyramid the default (2026-10-24) every Earth draw took the atlas, and the buildings' texture
+    // coordinates read it as places on the globe -- mostly sea: blue-green roofs (owner).
+    if (_earthTileAtlas && _earthTileLookup && (groundDetail || globe))
     {
         // The tile pyramid: the atlas in place of the window atlas, the lookup table in the specular-map slot
         // (reflect1 packs it; the Earth branch returns before any reflection code), and in reflect0 the

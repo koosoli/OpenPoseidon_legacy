@@ -88,6 +88,15 @@ class EarthImageryTiles
 
     std::filesystem::path _dir;
     EarthProviders::Source _source;
+    // A second keyless source for a tile the provider would not give (EOX Sentinel-2 cloudless 2016, CC-BY 4.0,
+    // to zoom 15): 2026-10-24 Esri reset every connection from this machine, and no new ground came at all.
+    // POSEIDON_EARTH_IMAGERY_FALLBACK=0 turns it off. Its tiles are cached under their own directory.
+    EarthProviders::Source _fallback;
+    std::filesystem::path _fallbackDir;
+    std::atomic<uint64_t> _fallbackTiles{0};
+    // The provider's failures in a row; past 6 it is skipped for a minute (its retries cost each tile seconds).
+    std::atomic<int> _primaryFailures{0};
+    std::atomic<int64_t> _primarySkipUntil{0}; // steady_clock ticks
     std::mutex _mutex;
     std::map<std::tuple<int, int, int>, Tile> _tiles;
     std::set<std::tuple<int, int, int>> _failed;

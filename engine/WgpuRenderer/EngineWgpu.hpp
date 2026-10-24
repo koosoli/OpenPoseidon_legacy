@@ -278,8 +278,10 @@ class EngineWgpu : public EngineDummy
     // Whole-world trees as the game's own tree models (EarthTreeModels): one retained instance per
     // OSM tree, its trunk base on the ground at (x, groundY, z), turned by yaw and scaled. False when
     // the model does not load or the GPU-driven path is off (the caller keeps its own trees then).
-    bool CreateEarthTreeObject(uint32_t id, const char* model, float x, float groundY, float z, float yaw, float scale);
+    bool CreateEarthTreeObject(uint64_t id, const char* model, float x, float groundY, float z, float yaw, float scale);
     void ClearEarthTreeObjects();
+    // Removes every tree object whose id is not in `keep` (sorted); the rest stay as they are.
+    void KeepEarthTreeObjects(const std::vector<uint64_t>& keep);
     size_t EarthTreeObjectCount() const { return _earthTreeInstances.size(); }
     void SceneObjectRemoved(Object* obj) override;
     void SceneObjectMoved(Object* obj) override;
@@ -648,7 +650,7 @@ class EngineWgpu : public EngineDummy
     // not the current one (imagery kept on screen through a free-flight rebase; NaN = current).
     void SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture = 0, uint32_t sampler = 2, bool groundDetail = false,
                             bool nearAtlas = false, double sourceLatitude = std::numeric_limits<double>::quiet_NaN(),
-                            double sourceLongitude = std::numeric_limits<double>::quiet_NaN());
+                            double sourceLongitude = std::numeric_limits<double>::quiet_NaN(), bool globe = false);
     // terrain.wgsl's Tidewater detail tile for the Earth beaches' sand (shader3d earth_tw_sand), made once
     WgrTexture EarthSandDetail();
     WgrTexture _earthSandDetail = 0;
@@ -917,7 +919,7 @@ class EngineWgpu : public EngineDummy
     // Dedicated shape identities prevent Earth road alpha coverage from changing
     // the native island's shared retained model/CPU-complement ownership.
     std::unordered_map<std::string, Ref<LODShapeWithShadow>> _earthWorldgenRoadShapes;
-    std::unordered_map<uint32_t, FarGpuInstance> _earthTreeInstances;
+    std::unordered_map<uint64_t, FarGpuInstance> _earthTreeInstances;
     std::unordered_map<std::string, Ref<LODShapeWithShadow>> _earthTreeShapes; // null: did not load
     std::unordered_map<const LODShapeWithShadow*, uint32_t> _farGpuModelRefs;
     // REN-TEMP-001H / ID-1: draw-object identity for motion vectors. The scene draw

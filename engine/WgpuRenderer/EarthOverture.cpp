@@ -16,6 +16,7 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <mutex>
 
 namespace Poseidon
 {
@@ -23,7 +24,7 @@ namespace
 {
 constexpr double CellDegrees = 0.02; // EarthBuildingStream::CellDegrees
 constexpr int TileZoom = 14;
-constexpr size_t MaxCellBuildings = 2000; // EarthBuildingStream::MaxBuildings
+constexpr size_t MaxCellBuildings = 5000; // EarthBuildingStream::MaxBuildings
 constexpr size_t MaxRingPoints = 128;     // EarthBuildingStream::MaxVertices
 constexpr double Pi = 3.14159265358979323846;
 
@@ -391,6 +392,33 @@ void DecodeTile(const std::vector<uint8_t>& mvt, uint32_t tx, uint32_t ty, doubl
         }
     }
 }
+// Cells written under an older budget (CellVersion) are made again: only the ones Overture wrote. Once a session.
+void MigrateCells(const std::filesystem::path& cache)
+{
+    std::error_code ec;
+    constexpr char CellVersion[] = "2"; // 2: 5000 buildings a cell (was 2000)
+    {
+        std::vector<uint8_t> version;
+        if (!ReadFile(cache / "overture" / "cells.txt", version) || std::string(version.begin(), version.end()) != CellVersion)
+        {
+            size_t removed = 0;
+            for (auto it = std::filesystem::directory_iterator(cache / "buildings", ec); !ec && it != std::filesystem::directory_iterator();
+                 it.increment(ec))
+            {
+                char head[24] = {};
+                std::ifstream input(it->path(), std::ios::binary);
+                input.read(head, sizeof(head) - 1);
+                input.close();
+                if (std::strncmp(head, "{\"source\":\"overture", 19) == 0 && std::filesystem::remove(it->path(), ec))
+                    ++removed;
+            }
+            ec.clear();
+            WriteFile(cache / "overture" / "cells.txt", CellVersion, sizeof(CellVersion) - 1);
+            if (removed)
+                LOG_INFO(Graphics, "Earth buildings: {} Overture cells from an older budget made again as needed", removed);
+        }
+    }
+}
 uint64_t NumericId(const std::string& id)
 {
     uint64_t h = 1469598103934665603ull; // FNV-1a
@@ -700,6 +728,8 @@ bool EarthOverture::EnsureNeighborhood(const std::filesystem::path& cache, int l
 {
     constexpr int offsets[9][2] = {{0, 0}, {-1, 0}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {-1, 1}, {1, -1}, {1, 1}};
     changed = false;
+    static std::once_flag migrated;
+    std::call_once(migrated, [&] { MigrateCells(cache); });
     for (const auto& offset : offsets)
     {
         if (cancelled && cancelled())

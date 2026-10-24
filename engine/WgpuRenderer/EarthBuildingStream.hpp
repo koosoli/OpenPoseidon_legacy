@@ -15,7 +15,7 @@ namespace Poseidon
 class EarthBuildingStream
 {
 public:
-    static constexpr size_t MaxBytes=4*1024*1024, MaxBuildings=2000, MaxVertices=128, MaxTriangles=200000;
+    static constexpr size_t MaxBytes=8*1024*1024, MaxBuildings=5000, MaxVertices=128, MaxTriangles=400000;
     static constexpr double CellDegrees=.02;
     struct Cell { int latitude,longitude; bool operator==(const Cell&) const=default; };
     struct Ground {
@@ -47,11 +47,16 @@ public:
         {6.4f,6.4f},{6.4f,6.4f},{6.4f,6.4f},{6.4f,6.4f},{6.4f,6.4f},{6.4f,6.4f},
         {4.0f,4.0f},{4.0f,4.0f},{5.0f,5.0f},{8.0f,8.0f}};
     static constexpr int MaterialPalette[MaterialCount]={0,1,2,3,3,0,4,5,6,7};
-    static constexpr int PaletteSize=8;
+    // whether a Material takes its game texture at all (FlatRoof: the palette's tones, see Palette)
+    static constexpr bool MaterialTextured[MaterialCount]={true,true,true,true,true,true,true,true,true,false};
+    static constexpr int PaletteSize=11;
     static constexpr uint8_t Palette[PaletteSize][4]={
         {214,204,184,255},{232,228,218,255},{188,180,168,255},{202,186,160,255}, // plaster, white, grey, sand
         {146,70,50,255},{104,74,58,255},{78,80,86,255},                          // terracotta, brown, slate
-        {120,120,116,255}};                                                      // flat roof
+        // flat roofs (no game texture: the only one, kostel_t_strecha, is a church's patinated copper, and a
+        // city seen from above went blue-green, owner 2026-10-24): gravel grey, concrete, bitumen, light gravel
+        {128,126,120,255},{156,153,146,255},{84,84,82,255},{170,162,148,255}};
+    static constexpr int FlatRoofTones=4;
     static constexpr float PaletteU(int index){return (index+.5f)/PaletteSize;}
     struct Mesh {
         Cell cell{};

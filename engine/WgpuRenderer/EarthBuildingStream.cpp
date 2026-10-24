@@ -280,7 +280,7 @@ void AppendCell(Buildings::Mesh& result,const std::string& json,const Buildings:
         // A stable per-building variation, so a street is not one colour.
         const uint64_t variant=id?id*2654435761ull:uint64_t(result.buildings)*40503ull;
         const float wallU=EarthBuildingStream::PaletteU(int((variant>>8)%4)),pitchedU=EarthBuildingStream::PaletteU(4+int((variant>>12)%3)),
-            flatU=EarthBuildingStream::PaletteU(7);
+            flatU=EarthBuildingStream::PaletteU(7+int((variant>>16)%EarthBuildingStream::FlatRoofTones));
         // House facades for a building up to 8 m tall, the doorless ones above. By the building's height,
         // not its wall: on a slope the downhill wall is metres longer and every house became a block.
         const size_t firstVertex=result.vertices.size();
@@ -359,7 +359,8 @@ void EarthBuildingStream::Split(Mesh& mesh,uint32_t textured) {
                 const auto& v=mesh.vertices[i];
                 WgrMeshVertex w{};
                 w.pos={v.x,v.y,v.z};w.normal={v.nx,v.ny,v.nz};
-                w.uv=isTextured?WgrVec2{v.tu,v.tv}:WgrVec2{PaletteU(MaterialPalette[m]),.5f};
+                // untextured: the building's own palette colour (its wall / roof tone), picked when it was built
+                w.uv=isTextured?WgrVec2{v.tu,v.tv}:WgrVec2{v.u,.5f};
                 remap[i]=uint32_t(mesh.parts[m].size());mesh.parts[m].push_back(w);
             }
             mesh.partIndices[m].push_back(remap[i]);

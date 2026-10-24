@@ -360,6 +360,33 @@ EarthLandCover::Class EarthLandCover::Peek(double latitude, double longitude)
     return c;
 }
 
+void EarthLandCover::PeekMany(const std::vector<std::pair<double, double>>& points, std::vector<Class>& out)
+{
+    out.assign(points.size(), Unknown);
+    std::lock_guard lock(_mutex);
+    bool queued = false;
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+        double latitude = points[i].first, longitude = points[i].second;
+        int lat0, lon0;
+        if (!Normalise(latitude, longitude, lat0, lon0))
+            continue;
+        bool missing = false;
+        out[i] = Cached(lat0, lon0, latitude, longitude, missing);
+        if (missing && _wanted.size() < 256)
+        {
+            _wanted[{int(std::floor(latitude * 100.0)), int(std::floor(longitude * 100.0))}] = {latitude, longitude};
+            queued = true;
+        }
+    }
+    if (queued)
+    {
+        if (!_worker.joinable())
+            _worker = std::thread([this] { Run(); });
+        _wake.notify_one();
+    }
+}
+
 void EarthLandCover::Run()
 {
     for (;;)

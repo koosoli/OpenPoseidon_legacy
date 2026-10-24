@@ -117,6 +117,15 @@ EarthImageryTiles::EarthImageryTiles(std::filesystem::path cache, EarthProviders
     : _source(std::move(source))
 {
     _dir = cache / "imagery" / EarthProviders::CacheName(_source);
+    const char* fallback = std::getenv("POSEIDON_EARTH_IMAGERY_FALLBACK");
+    if (_source.Enabled() && _source.id != "eox" && !(fallback && fallback[0] == '0'))
+    {
+        _fallback.id = "eox";
+        _fallback.url = "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/{z}/{y}/{x}.jpg";
+        _fallback.attribution = "Sentinel-2 cloudless by EOX IT Services GmbH (contains modified Copernicus Sentinel data 2016)";
+        _fallback.maxZoom = 15;
+        _fallbackDir = cache / "imagery" / EarthProviders::CacheName(_fallback);
+    }
     static std::once_flag init;
     std::call_once(init, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
 }
@@ -247,11 +256,25 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
     const auto fetchOne = [&](const std::tuple<int, int, int>& key) -> Job
     {
         const auto [z, x, y] = key;
-        const auto path = TilePath(z, x, y);
+        auto path = TilePath(z, x, y);
         std::vector<uint8_t> bytes;
         std::error_code ec;
-        const auto length = std::filesystem::file_size(path, ec);
+        auto length = std::filesystem::file_size(path, ec);
         Tile tile;
+        // the provider's tile on disk, else the fallback's
+        const auto fallbackPath = _fallbackDir.empty() ? std::filesystem::path() :
+            _fallbackDir / std::to_string(z) / (std::to_string(x) + "-" + std::to_string(y) + ".tile");
+        if ((ec || length == 0) && !fallbackPath.empty())
+        {
+            std::error_code fec;
+            const auto fallbackLength = std::filesystem::file_size(fallbackPath, fec);
+            if (!fec && fallbackLength > 0)
+            {
+                path = fallbackPath;
+                length = fallbackLength;
+                ec.clear();
+            }
+        }
         if (!ec && length > 0 && length <= MaxTileBytes)
         {
             std::ifstream input(path, std::ios::binary);
@@ -270,8 +293,41 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
         if (!network)
             return {false, false, {}}; // cache-only pass: not on disk yet
         bool permanent = false;
-        if (!Download(EarthProviders::ExpandUrl(_source, z, x, y), bytes, cancelled, permanent))
+        const int64_t nowTicks = std::chrono::steady_clock::now().time_since_epoch().count();
+        const bool skipPrimary = !fallbackPath.empty() && nowTicks < _primarySkipUntil.load();
+        const bool primary = !skipPrimary && Download(EarthProviders::ExpandUrl(_source, z, x, y), bytes, cancelled, permanent);
+        if (primary || permanent)
+            _primaryFailures = 0;
+        else if (!skipPrimary && ++_primaryFailures >= 6)
+        {
+            _primaryFailures = 0;
+            _primarySkipUntil = (std::chrono::steady_clock::now() + std::chrono::seconds(60)).time_since_epoch().count();
+        }
+        if (!primary)
+        {
+            // the provider would not answer (not "has no imagery here"): the fallback, where it reaches
+            bool fallbackPermanent = false;
+            if (!permanent && !fallbackPath.empty() && z <= _fallback.maxZoom && !(cancelled && cancelled()) &&
+                Download(EarthProviders::ExpandUrl(_fallback, z, x, y), bytes, cancelled, fallbackPermanent) &&
+                decode(bytes, tile) == Decoded::Ok)
+            {
+                std::filesystem::create_directories(fallbackPath.parent_path(), ec);
+                const auto temporary = fallbackPath.string() + ".part";
+                {
+                    std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+                    output.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+                }
+                std::filesystem::rename(temporary, fallbackPath, ec);
+                if (ec)
+                    std::filesystem::remove(temporary, ec);
+                if (_fallbackTiles.fetch_add(1) % 200 == 0)
+                    std::fprintf(stderr, "Earth imagery: %s not answering; tile %d/%d/%d from %s (%llu so far)\n",
+                                 _source.id.c_str(), z, x, y, _fallback.id.c_str(), (unsigned long long)_fallbackTiles.load());
+                tile.use = 1;
+                return {true, false, std::move(tile)};
+            }
             return {false, permanent, {}};
+        }
         const auto fetched = decode(bytes, tile);
         if (fetched == Decoded::Bad)
             return {false, true, {}}; // not an image: an error page or an unsupported format
@@ -363,14 +419,20 @@ void EarthImageryTiles::TrimDisk()
     std::vector<File> files;
     uint64_t total = 0;
     std::error_code ec;
-    for (auto it = std::filesystem::recursive_directory_iterator(_dir, ec); !ec && it != std::filesystem::recursive_directory_iterator();
-         it.increment(ec))
+    for (const auto& dir : {_dir, _fallbackDir}) // the provider's tiles and the fallback's share the budget
     {
-        if (!it->is_regular_file(ec) || it->path().extension() != ".tile")
+        if (dir.empty())
             continue;
-        const uint64_t size = it->file_size(ec);
-        files.push_back({it->path(), it->last_write_time(ec), size});
-        total += size;
+        ec.clear();
+        for (auto it = std::filesystem::recursive_directory_iterator(dir, ec); !ec && it != std::filesystem::recursive_directory_iterator();
+             it.increment(ec))
+        {
+            if (!it->is_regular_file(ec) || it->path().extension() != ".tile")
+                continue;
+            const uint64_t size = it->file_size(ec);
+            files.push_back({it->path(), it->last_write_time(ec), size});
+            total += size;
+        }
     }
     if (total <= budget)
         return;
