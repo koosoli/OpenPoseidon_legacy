@@ -148,10 +148,20 @@ impl TextureRegistry {
     }
 
     fn destroy(&mut self, handle: u64) -> bool {
-        if handle & INGRESS_HANDLE_BIT != 0 {
-            return self.ingress.remove(&handle).is_some();
+        let removed = if handle & INGRESS_HANDLE_BIT != 0 {
+            self.ingress.remove(&handle)
+        } else if handle != 0 {
+            self.map.remove(KeyData::from_ffi(handle).into())
+        } else {
+            None
+        };
+        match removed {
+            Some(t) => {
+                recycle_put(t.texture, t.resident_bytes);
+                true
+            }
+            None => false,
         }
-        handle != 0 && self.map.remove(KeyData::from_ffi(handle).into()).is_some()
     }
 
     fn create(
@@ -167,6 +177,48 @@ impl TextureRegistry {
             None => 0,
         }
     }
+}
+
+// Large textures that are replaced whole and often (the whole world's surface atlases: a 4096^2 and
+// a 2048^2 RGBA8 chain per install, every second or two in fast flight) are kept on destroy and
+// handed to the next create of the same size, format and mip count, instead of allocating new
+// memory each time: fresh dedicated allocations of that size made the next queue submit pay tens of
+// milliseconds on the render thread (Lisbon flight, POSEIDON_EARTH_TILES=0: worst stall after an
+// install p90 88-170 ms without this and the banded uploads below, 68-74 ms with them). Reuse is
+// safe because queue writes execute after all work already submitted, which is the only work that
+// can still read the old image. WGR_TEXTURE_RECYCLE=0 turns it off.
+const RECYCLE_MIN_BYTES: u64 = 16 << 20;
+const RECYCLE_MAX: usize = 4;
+type RecycleKey = (u32, u32, wgpu::TextureFormat, u32);
+static RECYCLE: Mutex<Vec<(RecycleKey, wgpu::Texture)>> = Mutex::new(Vec::new());
+
+fn recycle_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_TEXTURE_RECYCLE").map(|v| v.trim() != "0").unwrap_or(true))
+}
+
+fn recycle_put(texture: wgpu::Texture, bytes: u64) {
+    if bytes < RECYCLE_MIN_BYTES || !recycle_on() {
+        return;
+    }
+    let size = texture.size();
+    let key = (size.width, size.height, texture.format(), texture.mip_level_count());
+    if let Ok(mut pool) = RECYCLE.lock() {
+        if pool.len() >= RECYCLE_MAX {
+            pool.remove(0);
+        }
+        pool.push((key, texture));
+    }
+}
+
+fn recycle_take(width: u32, height: u32, format: wgpu::TextureFormat, mips: u32) -> Option<wgpu::Texture> {
+    if !recycle_on() {
+        return None;
+    }
+    let key = (width, height, format, mips);
+    let mut pool = RECYCLE.lock().ok()?;
+    let i = pool.iter().position(|(k, _)| *k == key)?;
+    Some(pool.remove(i).1)
 }
 
 /// One image to a GPU texture (mips written, view made, the shadow pass's group per the
@@ -207,7 +259,8 @@ fn build_texture(
             mip_count
         };
 
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
+        let recycled = recycle_take(width, height, format.wgpu_format(), mip_level_count);
+        let texture = if let Some(texture) = recycled { texture } else { device.create_texture(&wgpu::TextureDescriptor {
             label: Some("wgr_texture"),
             size: wgpu::Extent3d {
                 width,
@@ -224,7 +277,7 @@ fn build_texture(
             view_formats: if format == TextureFormat::Bc7 {
                 &[wgpu::TextureFormat::Bc7RgbaUnormSrgb]
             } else { &[] },
-        });
+        }) };
 
         if gen_mips {
             write_rgba8_mip_chain(queue, &texture, 0, width, height, mip_level_count, bytes);
@@ -1102,6 +1155,39 @@ fn write_mip(
     data: &[u8],
 ) {
     crate::upload_stats::add(crate::upload_stats::Kind::Texture, data.len());
+    // A big level goes up in bands of rows. Each write_texture stages through a buffer of its
+    // own size, and one the size of a whole 4096^2 level (64 MB) is a fresh dedicated
+    // allocation every time, which the next queue submit pays for. Bands of a few MB come out of
+    // the allocator's reused blocks. WGR_UPLOAD_CHUNK_MB=0 writes whole levels again.
+    let block_h = if format.is_block_compressed() { 4 } else { 1 };
+    let bpr = format.bytes_per_row(width) as usize;
+    let block_rows = format.rows(height);
+    let chunk = upload_chunk_bytes();
+    if chunk > 0 && data.len() > chunk && block_rows > 1 && bpr > 0 {
+        let band = (chunk / bpr).max(1) as u32;
+        let mut row = 0;
+        while row < block_rows {
+            let n = band.min(block_rows - row);
+            let start = row as usize * bpr;
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture,
+                    mip_level,
+                    origin: wgpu::Origin3d { x: 0, y: row * block_h, z: 0 },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &data[start..start + n as usize * bpr],
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bpr as u32),
+                    rows_per_image: Some(n),
+                },
+                wgpu::Extent3d { width, height: n * block_h, depth_or_array_layers: 1 },
+            );
+            row += n;
+        }
+        return;
+    }
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture,
@@ -1132,6 +1218,13 @@ fn write_mip(
             depth_or_array_layers: 1,
         },
     );
+}
+
+fn upload_chunk_bytes() -> usize {
+    static CHUNK: OnceLock<usize> = OnceLock::new();
+    *CHUNK.get_or_init(|| {
+        std::env::var("WGR_UPLOAD_CHUNK_MB").ok().and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(4) << 20
+    })
 }
 
 // Number of mip levels for a w x h texture (down to 1x1).
