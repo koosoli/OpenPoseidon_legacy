@@ -1,5 +1,6 @@
 #include <Poseidon/Game/Compat/ArmaOriginalUi.hpp>
 #include <Poseidon/UI/ArmaContentMenu.hpp>
+#include <Poseidon/UI/Arma3Menu.hpp>
 #include <Poseidon/UI/LocalMapsDisplay.hpp>
 #include <Poseidon/UI/WholeWorldDisplay.hpp>
 #include <Poseidon/UI/LocalMapEditor.hpp>
@@ -187,6 +188,24 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
     if (AppConfig::Instance().IsViewerMode())
     {
         return;
+    }
+
+    // --arma-original-ui with Arma 3 mounted: Arma 3's own RscDisplayMain, read from its config and
+    // drawn by Arma3Menu; none of CWA's entries or branding are added to it.
+    if (Arma3Menu::Active())
+    {
+        _arma3 = std::make_shared<Arma3Menu::Screen>();
+        if (_arma3->Load(*this, "RscDisplayMain", _controlsBackground, _controlsForeground))
+        {
+            _arma3->InitMainMenu();
+            // the version panel: Arma 3 shows its own build there; this is not Arma 3's executable
+            _arma3->SetText(IDC_MAIN_VERSION, RString("OpenPoseidon"));
+            if (IControl* quit = GetCtrl(IDC_MAIN_QUIT))
+                quit->EnableCtrl(true);
+            NextCtrl();
+            return;
+        }
+        _arma3.reset();
     }
 
     // Remaster main menu: inherits the locked vanilla RscDisplayMain
@@ -2410,6 +2429,33 @@ void DisplayMain::OnButtonClicked(int idc)
 {
     if (idc == LocalMapsMenuId) { CreateChild(CreateLocalMapsDisplay(this)); return; }
     if (idc == WholeWorldMenuId) { CreateChild(CreateWholeWorldDisplay(this)); return; }
+    if (_arma3)
+    {
+        const char* message = nullptr;
+        switch (_arma3->MainMenuClick(idc, message))
+        {
+            case Arma3Menu::Action::Handled:
+                return;
+            case Arma3Menu::Action::Campaigns:
+                CreateChild(CreateArmaContentDisplay(this, ArmaContentKind::Campaigns));
+                return;
+            case Arma3Menu::Action::Missions:
+                CreateChild(CreateArmaContentDisplay(this, ArmaContentKind::Missions));
+                return;
+            case Arma3Menu::Action::Tutorials:
+                CreateChild(CreateArmaContentDisplay(this, ArmaContentKind::Tutorials));
+                return;
+            case Arma3Menu::Action::Options:
+                idc = IDC_MAIN_OPTIONS;
+                break;
+            case Arma3Menu::Action::Unavailable:
+                CreateMsgBox(MB_BUTTON_OK, RString(message));
+                return;
+            case Arma3Menu::Action::None:
+                // Quit (106), Player (109) and Server Browser (105) share CWA's idcs: handled below
+                break;
+        }
+    }
     if (idc == IslandEditorMenuId)
     {
         std::string error;
@@ -2485,6 +2531,15 @@ void DisplayMain::OnDraw(EntityAI* vehicle, float alpha)
     // IDC_MAIN_PLAYER's resource class (Player in RscDisplayMain) has no explicit
     // `type`, so some configs create it as CStatic instead of CActiveText.
     // Tolerate either rather than null-deref on dynamic_cast failure.
+    if (_arma3)
+    {
+        // the cursor opens Arma 3's menu rows and spotlight frames (RscDisplayMain.sqf's handlers)
+        auto& input = InputSubsystem::Instance();
+        if (!Child())
+            _arma3->UpdateMainMenu(0.5f + input.GetCursorX() * 0.5f, 0.5f + input.GetCursorY() * 0.5f);
+        Display::OnDraw(vehicle, alpha);
+        return;
+    }
     SetMainPlayerControlText(GetCtrl(IDC_MAIN_PLAYER));
 
     Display::OnDraw(vehicle, alpha);

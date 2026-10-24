@@ -122,16 +122,50 @@ bool TextureSourceJPEG::InitFromMemory(const uint8_t* data, size_t size, const c
 
     if (!IsPow2(w) || !IsPow2(h))
     {
-        Poseidon::Foundation::WarningMessage("Image %s: dimensions %dx%d not 2^n", nameForErrors ? nameForErrors : "?",
-                                             w, h);
+        // Later Bohemia games use images of any size (Arma 3's menu background is one); the
+        // mip chain here needs powers of two, so such an image is resampled (bilinear) to the
+        // nearest larger power of two, at most 4096, instead of refusing it.
+        const auto pow2 = [](int x)
+        {
+            int p = 1;
+            while (p < x && p < 4096)
+                p <<= 1;
+            return p;
+        };
+        const int pw = pow2(w), ph = pow2(h);
+        LOG_DEBUG(Graphics, "Image {}: {}x{} resampled to {}x{}", nameForErrors ? nameForErrors : "?", w, h, pw, ph);
+        _rgba0.resize(static_cast<size_t>(pw) * static_cast<size_t>(ph) * 4);
+        for (int y = 0; y < ph; ++y)
+        {
+            const float sy = std::max(0.0f, (y + 0.5f) * h / ph - 0.5f);
+            const int y0 = std::min(static_cast<int>(sy), h - 1), y1 = std::min(y0 + 1, h - 1);
+            const float fy = sy - y0;
+            for (int x = 0; x < pw; ++x)
+            {
+                const float sx = std::max(0.0f, (x + 0.5f) * w / pw - 0.5f);
+                const int x0 = std::min(static_cast<int>(sx), w - 1), x1 = std::min(x0 + 1, w - 1);
+                const float fx = sx - x0;
+                for (int c = 0; c < 4; ++c)
+                {
+                    const auto at = [&](int xx, int yy) { return float(pixels[(static_cast<size_t>(yy) * w + xx) * 4 + c]); };
+                    const float top = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * fx;
+                    const float bottom = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * fx;
+                    _rgba0[(static_cast<size_t>(y) * pw + x) * 4 + c] =
+                        static_cast<uint8_t>(std::clamp(top + (bottom - top) * fy + 0.5f, 0.0f, 255.0f));
+                }
+            }
+        }
         stbi_image_free(pixels);
-        return false;
+        w = pw;
+        h = ph;
     }
-
+    else
+    {
+        _rgba0.assign(pixels, pixels + static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
+        stbi_image_free(pixels);
+    }
     _w = w;
     _h = h;
-    _rgba0.assign(pixels, pixels + static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
-    stbi_image_free(pixels);
 
     int maxDim = std::max(_w, _h);
     _mipmaps = Log2i(maxDim) + 1;

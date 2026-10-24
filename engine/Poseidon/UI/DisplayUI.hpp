@@ -21,6 +21,10 @@
 namespace Poseidon
 {
 struct MasterServerBrowser;
+namespace Arma3Menu
+{
+class Screen;
+}
 struct MasterServerServiceModCatalogEntry;
 class CKeys : public C3DListBox
 {
@@ -1084,6 +1088,8 @@ class DisplayMain : public Display
     EndMode _end;
     RString _version;
     int _langCbToken = -1;
+    // Arma 3's own main menu (Arma3Menu), when it replaces CWA's.
+    std::shared_ptr<Arma3Menu::Screen> _arma3;
 
   public:
     DisplayMain(ControlsContainer* parent);

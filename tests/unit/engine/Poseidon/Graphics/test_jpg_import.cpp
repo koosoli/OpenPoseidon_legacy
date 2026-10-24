@@ -68,11 +68,14 @@ TEST_CASE("JPG: decodes 32x32 checkerboard via Init()", "[Graphics][JPG]")
     REQUIRE(avg.B8() <= 30);
 }
 
-TEST_CASE("JPG: Init fails on non-power-of-two dimensions", "[Graphics][JPG]")
+TEST_CASE("JPG: non-power-of-two dimensions are resampled to the next power of two", "[Graphics][JPG]")
 {
+    // Arma 3's images come in any size (its menu background is one); they used to be refused.
     TextureSourceJPEG src;
     PacLevelMem mips[kMaxMips];
-    REQUIRE_FALSE(src.Init(GET_FIXTURE("jpg/nonpow2_33x33.jpg"), mips, kMaxMips));
+    REQUIRE(src.Init(GET_FIXTURE("jpg/nonpow2_33x33.jpg"), mips, kMaxMips));
+    REQUIRE(mips[0]._w == 64);
+    REQUIRE(mips[0]._h == 64);
 }
 
 TEST_CASE("JPG: Init fails on missing file", "[Graphics][JPG]")

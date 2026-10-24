@@ -34,6 +34,7 @@
 #include <Poseidon/AI/AICore.hpp>
 #include <Poseidon/AI/Path/ArcadeWaypoint.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -1759,6 +1760,41 @@ GameValue A3CanSuspend(const GameState*)
     return GameValue(GameState::s_scheduledYields != nullptr);
 }
 
+// Arma 3's pixel grid, which its UI is sized in ("10 * (pixelW * pixelGrid * 2)"). The screen is
+// 0..1 across both ways here (safeZone* are 0 / 1), so a pixel is 1 / the 2D resolution. Arma 3
+// derives the grid from the screen height (uiScaleMaxGrids = 60 rows, a multiple of 4) and scales
+// it by the interface size; 16 at 1080p is the value RscDisplayMain.sqf itself assumes when the
+// command is missing, and pixelGrid is Arma 3's default "Normal" interface size of that.
+float A3ScreenHeight()
+{
+    return GEngine && GEngine->Height2D() > 0 ? float(GEngine->Height2D()) : 1080.0f;
+}
+
+GameValue A3PixelW(const GameState*)
+{
+    return GameValue(1.0f / (GEngine && GEngine->Width2D() > 0 ? float(GEngine->Width2D()) : 1920.0f));
+}
+
+GameValue A3PixelH(const GameState*)
+{
+    return GameValue(1.0f / A3ScreenHeight());
+}
+
+float A3GridOf(float rows)
+{
+    return std::max(4.0f, 4.0f * std::round(rows / 4.0f));
+}
+
+GameValue A3PixelGridNoUIScale(const GameState*)
+{
+    return GameValue(A3GridOf(A3ScreenHeight() * 16.0f / 1080.0f));
+}
+
+GameValue A3PixelGrid(const GameState*)
+{
+    return GameValue(A3GridOf(A3ScreenHeight() * 12.0f / 1080.0f));
+}
+
 // ---------------------------------------------------------------------------------------
 // "Macro" commands: Arma 3 commands as SQF over this engine's commands
 // ---------------------------------------------------------------------------------------
@@ -2122,6 +2158,11 @@ const GameNular A3Nular[] = {
     // Arma 3's name for the resistance side (BIS_fnc_sideColor, BIS_fnc_sideID, ...)
     GameNular(GameSide, "independent", SideResistance),
     GameNular(GameBool, "canSuspend", A3CanSuspend),
+    GameNular(GameScalar, "pixelW", A3PixelW),
+    GameNular(GameScalar, "pixelH", A3PixelH),
+    GameNular(GameScalar, "pixelGrid", A3PixelGrid),
+    GameNular(GameScalar, "pixelGridBase", A3PixelGridNoUIScale),
+    GameNular(GameScalar, "pixelGridNoUIScale", A3PixelGridNoUIScale),
     GameNular(GameBool, "hasInterface", A3True),
     GameNular(GameBool, "isDedicated", A3False),
     GameNular(GameBool, "isMultiplayer", A3False),
