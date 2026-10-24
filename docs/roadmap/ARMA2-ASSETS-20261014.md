@@ -549,8 +549,23 @@ worked off one by one (voices, animals, vehicle/weapon values, mimic/glasses/con
   own standing move; men keep 0.98 m.
 - `fc8bdc6` (test): `OP_A2_SHOT_CLASS=<text>` aims the second close-up at that class.
 - `2cf5bb3` (test): the animal FSMs' states are logged.
-- Open: in 90 s no animal walked (main.fsm idles 20-60 s first); whether the FSM runs and
-  moves them is not measured yet.
+- `02f8318`: the binary `execFSM` runs its FSM (an ignoring Arma 1 entry was matched first:
+  no FSM started with arguments ever ran). `71ca6b5`/`e20e161`: `moveTo` (a silent doMove),
+  `moveToCompleted` (unitReady), `moveToFailed`. Measured: sheep graze and wander; T01's cows
+  stand (open).
+- Run 39 showed what else now runs (ALICE, SILVIE, ambient modules, SOM, the missions' own
+  FSMs) and the commands it lacks (`isFlatEmpty`, `nearObjectsReady`, `selectBestPlaces` with 5
+  arguments, `setUnconscious`, `setGroupIcon`, `nearTargets`, `triggerText`,
+  `triggerActivation`, `removeAllItems`) plus a helicopter crash in str_EW2. `c93353c` starts
+  only `ca\animals2\` FSMs by default until those are in; `OP_A2_EXECFSM=all` starts all --
+  the work list for making the missions' own FSMs run 1:1.
+- `265d851`: that work list (`GameStateExtA2World.cpp`): `isFlatEmpty`, `nearObjectsReady`,
+  `selectBestPlaces` (grid samples, the expression over meadow/forest/trees/houses/sea/hills/
+  night/rain from the terrain and nearby objects), `nearTargets`, `triggerText`,
+  `triggerActivation`, `setUnconscious` (kept per unit, no unconscious moves yet),
+  `setGroupIcon` (not drawn), `removeAllItems`. `30c060e`: the str_EW2 crash
+  (Turret::AnimateMatrix on a level or selection the shape lacks). Run 41 measures all 98 with
+  `OP_A2_EXECFSM=all`.
 
 ## Steps
 
