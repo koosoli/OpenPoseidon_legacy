@@ -75,6 +75,8 @@ GameValue CutRscEffect(const GameState* state, GameValuePar oper1);
 namespace Poseidon
 {
 extern Input GInput; // InputSubsystem.cpp
+GameValue VehDoMove(const GameState* state, GameValuePar oper1, GameValuePar oper2); // GameStateExtGrp.cpp
+GameValue VehDone(const GameState* state, GameValuePar oper1);                        // GameStateExtGrp.cpp
 }
 
 using namespace Poseidon;
@@ -1164,6 +1166,24 @@ void KbStep(Runtime& rt)
     }
     for (const Runtime::KbLine& line : said)
         KbReact(line);
+}
+
+// unit moveTo position: Arma 2's low-level move for an agent (an animal's main.fsm walks it
+// to a spot it picked), given as a silent doMove; moveToCompleted is true once the unit has
+// no move left (unitReady), moveToFailed never.
+GameValue A2MoveTo(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return VehDoMove(state, oper1, oper2);
+}
+
+GameValue A2MoveToCompleted(const GameState* state, GameValuePar oper1)
+{
+    return VehDone(state, oper1);
+}
+
+GameValue A2MoveToFailed(const GameState*, GameValuePar)
+{
+    return GameValue(false);
 }
 
 GameValue A2ExecFSMUnary(const GameState* state, GameValuePar oper1)
@@ -3003,6 +3023,8 @@ const GameFunction A2Unary[] = {
     GameFunction(GameString, "currentTask", A2CurrentTask, GameObject),
     GameFunction(GameArray, "simpleTasks", A2SimpleTasks, GameObject),
     GameFunction(GameScalar, "execFSM", A2ExecFSMUnary, GameString),
+    GameFunction(GameBool, "moveToCompleted", A2MoveToCompleted, GameObject),
+    GameFunction(GameBool, "moveToFailed", A2MoveToFailed, GameObject),
     GameFunction(GameBool, "completedFSM", A2CompletedFSM, GameScalar),
     GameFunction(GameString, "lifeState", A2LifeState, GameObject),
     GameFunction(GameString, "rank", A2Rank, GameObject),
@@ -3128,6 +3150,7 @@ const GameOperator A2Binary[] = {
     GameOperator(GameBool, "kbAddDatabaseTargets", function, A2TrueBinary, GameObject, GameString),
     GameOperator(GameNothing, "kbReact", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameScalar, "execFSM", function, A2ExecFSM, GameVoid, GameString),
+    GameOperator(GameNothing, "moveTo", function, A2MoveTo, GameObject, GameArray),
     GameOperator(GameAny, "getFSMVariable", function, A2GetFSMVariable, GameScalar, GameString),
     GameOperator(GameNothing, "setFSMVariable", function, A2SetFSMVariable, GameScalar, GameArray),
     GameOperator(GameAny, "getFSMVariable", function, A3GetFSMVariableDefault, GameAny, GameArray),
