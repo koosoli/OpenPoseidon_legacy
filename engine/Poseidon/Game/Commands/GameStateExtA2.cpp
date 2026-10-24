@@ -1080,8 +1080,35 @@ std::unique_ptr<Fsm> LoadFsm(const std::string& file)
     return fsm;
 }
 
+// Until 2026-10-24 '<args> execFSM <file>' never ran (an ignoring entry in GameStateExt
+// shadowed this one). Running every such FSM at once -- ALICE, SILVIE, the ambient-animal
+// and combat modules, SOM, the missions' own -- left 30 of 98 missions with script errors
+// from commands not yet implemented (isFlatEmpty, nearObjectsReady, setUnconscious,
+// setGroupIcon, ...) and str_EW2 crashing (run 39). Until those are in, only the animals'
+// agent tasks (ca\animals2\...) run by default; OP_A2_EXECFSM=all runs every one.
+bool A2ExecFsmAllowed(const std::string& file)
+{
+    static const bool all = [] {
+        const char* e = std::getenv("OP_A2_EXECFSM");
+        return e && _stricmp(e, "all") == 0;
+    }();
+    if (all)
+        return true;
+    std::string f = Lower(file);
+    while (!f.empty() && f[0] == '\\')
+        f.erase(0, 1);
+    return f.rfind("ca\\animals2\\", 0) == 0;
+}
+
 GameValue A2ExecFSM(const GameState*, GameValuePar oper1, GameValuePar oper2)
 {
+    if (!A2ExecFsmAllowed((const char*)RString(oper2)))
+    {
+        static std::set<std::string> skipped;
+        if (skipped.insert(Lower((const char*)RString(oper2))).second)
+            LOG_INFO(Mission, "Arma 2: execFSM {} not started (OP_A2_EXECFSM=all runs it)", (const char*)RString(oper2));
+        return NOTHING;
+    }
     std::unique_ptr<Fsm> fsm = LoadFsm((const char*)RString(oper2));
     {
         static std::set<std::string> started;
