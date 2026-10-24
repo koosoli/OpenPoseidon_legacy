@@ -39,9 +39,11 @@ double TexelMetres(int level, double latitude)
 
 bool EarthTileCache::Enabled()
 {
+    // On by default since 2026-10-24 (close-up A/B over Lisbon: equal or sharper at 15-700 m, no BC1 blocking;
+    // Desert Island unchanged). POSEIDON_EARTH_TILES=0: the window atlases.
     static const bool on = [] {
         const char* v = std::getenv("POSEIDON_EARTH_TILES");
-        return v && v[0] == '1';
+        return !(v && v[0] == '0');
     }();
     return on;
 }

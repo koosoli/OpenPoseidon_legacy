@@ -149,7 +149,7 @@ class TerrainWgpu : public ITerrainRenderer
     std::unique_ptr<EarthTerrainStream::Patch> _earthPatch;
     std::unique_ptr<EarthBuildingStream> _earthBuildings;
     std::unique_ptr<EarthSurfaceStream> _earthSurface;
-    // POSEIDON_EARTH_TILES=1: the imagery as a tile pyramid (EarthTileCache); the ground meshes then carry
+    // The imagery as a tile pyramid (EarthTileCache; POSEIDON_EARTH_TILES=0 turns it off); the ground meshes then carry
     // web-mercator coordinates instead of window-atlas UVs.
     std::unique_ptr<class EarthTileCache> _earthTiles;
     bool EarthTilesOn() const;

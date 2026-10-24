@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-// Whole world imagery as a tile pyramid (POSEIDON_EARTH_TILES=1), in the manner of CesiumJS's
+// Whole world imagery as a tile pyramid (the default; POSEIDON_EARTH_TILES=0 for the window atlases), in the manner of CesiumJS's
 // QuadtreePrimitive: every web-mercator tile the view needs, coarse to fine, kept in one BC1 tile atlas
 // on the GPU, and a small lookup table that says, per zoom level, which atlas slot holds which tile in a
 // 16x16 window around the camera. The ground shader (shader3d.wgsl earth_tile_albedo) picks the zoom for
@@ -28,7 +28,7 @@ namespace Poseidon
 class EarthTileCache
 {
   public:
-    static bool Enabled(); // POSEIDON_EARTH_TILES=1
+    static bool Enabled(); // on unless POSEIDON_EARTH_TILES=0
 
     // Atlas layout, shared with shader3d.wgsl (ET_* constants): 30 x 30 slots of 272 texels (a 256 tile
     // and an 8-texel border of its own edge, so the 3 mip levels sampled never reach a neighbour).

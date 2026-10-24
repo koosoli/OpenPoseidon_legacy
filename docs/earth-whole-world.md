@@ -104,12 +104,12 @@ On the moon:
 
 The Go/menu altitude stays limited to 30,000 km; flight itself reaches 450,000 km.
 
-## Imagery as a tile pyramid (`POSEIDON_EARTH_TILES=1`, prototype)
+## Imagery as a tile pyramid (default; `POSEIDON_EARTH_TILES=0` for the window atlases)
 
 The window atlases (`EarthSurfaceStream`: a near 2048² and a far 4096² atlas per window, the globe image
-beyond) are rebuilt and swapped whenever the camera's window moves. That shows up as reloads, soft ground
+beyond) were rebuilt and swapped whenever the camera's window moved. That shows up as reloads, soft ground
 while the next atlas comes, seams between the near, far and globe images, and 40-100 ms of texture
-creation on the main thread at each swap. With `POSEIDON_EARTH_TILES=1` the ground samples web-mercator
+creation on the main thread at each swap. Now the ground samples web-mercator
 tiles directly, in the manner of CesiumJS's QuadtreePrimitive and bevy_terrain's "data LOD"
 (`docs/earth-renderer-audit.md`):
 
@@ -129,8 +129,10 @@ tiles directly, in the manner of CesiumJS's QuadtreePrimitive and bevy_terrain's
 - The window atlases are still built, for what is derived from them (grass, canopy); in tile mode they
   become 4×4 stand-ins on the GPU.
 
-Not yet: prepared regional sources (Luxembourg ortho) and placed islands (Desert Island's ground image)
-are not tiles, so tile mode shows the provider's imagery there. Elevation is still window patches.
+Placed islands (Desert Island) are laid into the tiles they overlap. Checked on 2026-10-24: over Lisbon at
+15, 40, 150 and 700 m the tiles are as sharp as the RGBA8 window atlases or sharper, with no visible BC1
+blocking, and Desert Island looks the same. Not yet in tiles: the prepared regional sources (Luxembourg
+ortho), which show the provider's imagery in tile mode. Elevation is still window patches.
 
 
 ## Desert Island
