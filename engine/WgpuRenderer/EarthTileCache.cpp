@@ -62,14 +62,28 @@ EarthTileCache::EarthTileCache(WgrRenderer* renderer, const std::filesystem::pat
         bytes += size_t(AtlasSize >> m) * size_t(AtlasSize >> m) / 2; // BC1: 8 bytes per 4x4 block
     const std::vector<uint8_t> zeros(bytes, 0);
     _atlas = wgr_texture_create(_renderer, AtlasSize, AtlasSize, WGR_TEXTURE_BC1, Mips, 0, zeros.data(), uint32_t(zeros.size()));
-    const std::vector<uint8_t> lookup(size_t(LookupWidth) * Levels * LookupRowsPerLevel * 4, 0);
-    _lookup = wgr_texture_create(_renderer, LookupWidth, Levels * LookupRowsPerLevel, WGR_TEXTURE_RGBA8, 1, 0, lookup.data(),
+    const std::vector<uint8_t> lookup(size_t(LookupWidth) * LookupRows * 4, 0);
+    _lookup = wgr_texture_create(_renderer, LookupWidth, LookupRows, WGR_TEXTURE_RGBA8, 1, 0, lookup.data(),
                                  uint32_t(lookup.size()));
     if (!_atlas || !_lookup)
     {
         LOG_WARN(Graphics, "Earth tiles: atlas allocation failed; the window atlases stay in use");
         return;
     }
+    // Night lights: NASA's Black Marble 2016 (VIIRS, public domain) through GIBS, zoom 3 only (~20 km a texel,
+    // what a city's glow is from orbit). POSEIDON_EARTH_NIGHT_LIGHTS=0: none.
+    if (const char* v = std::getenv("POSEIDON_EARTH_NIGHT_LIGHTS"); !(v && v[0] == '0'))
+    {
+        EarthProviders::Source night;
+        night.id = "blackmarble";
+        night.url = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/default/2016-01-01/"
+                    "GoogleMapsCompatible_Level8/{z}/{y}/{x}.png";
+        night.attribution = "NASA Earth Observatory / GIBS: Black Marble 2016";
+        night.maxZoom = 8;
+        _night = std::make_unique<EarthImageryTiles>(cache, night);
+    }
+    for (int i = 0; i < NightTiles; ++i)
+        _fineQueued[i][0] = _fineQueued[i][1] = _fineInstalled[i][0] = _fineInstalled[i][1] = -1;
     _slotKey.assign(Slots, Key{-1, 0, 0});
     _slotUse.assign(Slots, 0);
     _thread = std::thread([this] { Run(); });
@@ -174,8 +188,8 @@ std::vector<EarthTileCache::Key> EarthTileCache::Plan(const ViewState& v) const
         for (const auto& k : level_keys)
             keys.push_back(k.second);
     }
-    if (keys.size() > size_t(Slots - 32))
-        keys.resize(Slots - 32); // finest last: they are the ones dropped
+    if (keys.size() > size_t(TileSlots - 32))
+        keys.resize(TileSlots - 32); // finest last: they are the ones dropped
     return keys;
 }
 
@@ -257,6 +271,114 @@ std::vector<uint8_t> EarthTileCache::EncodeMip(const std::vector<uint8_t>& rgba,
     return out;
 }
 
+// 256 texels with an 8-texel border of their own edge, then 2 box-filtered levels, as BC1.
+void EarthTileCache::EncodeSlot(const std::vector<uint8_t>& tile, int size, Op& op)
+{
+    std::vector<uint8_t> level0(size_t(SlotTexels) * SlotTexels * 4);
+    for (int ty = 0; ty < SlotTexels; ++ty)
+        for (int tx = 0; tx < SlotTexels; ++tx)
+        {
+            const int sx = std::clamp((tx - Border) * size / TileTexels, 0, size - 1);
+            const int sy = std::clamp((ty - Border) * size / TileTexels, 0, size - 1);
+            std::memcpy(&level0[(size_t(ty) * SlotTexels + tx) * 4], &tile[(size_t(sy) * size + sx) * 4], 4);
+            level0[(size_t(ty) * SlotTexels + tx) * 4 + 3] = 255;
+        }
+    std::vector<uint8_t> current = std::move(level0);
+    for (int m = 0; m < Mips; ++m)
+    {
+        const int s = SlotTexels >> m;
+        op.mips[m] = EncodeMip(current, s);
+        if (m + 1 < Mips)
+        {
+            const int h = s / 2;
+            std::vector<uint8_t> next(size_t(h) * h * 4);
+            for (int yy = 0; yy < h; ++yy)
+                for (int xx = 0; xx < h; ++xx)
+                    for (int c = 0; c < 4; ++c)
+                    {
+                        const auto at = [&](int px, int py) { return int(current[(size_t(py) * s + px) * 4 + c]); };
+                        next[(size_t(yy) * h + xx) * 4 + c] =
+                            uint8_t((at(2 * xx, 2 * yy) + at(2 * xx + 1, 2 * yy) + at(2 * xx, 2 * yy + 1) + at(2 * xx + 1, 2 * yy + 1) + 2) / 4);
+                    }
+            current = std::move(next);
+        }
+    }
+}
+
+bool EarthTileCache::LoadNight()
+{
+    if (!_night)
+        return true;
+    std::vector<std::tuple<int, int, int>> missing;
+    constexpr int n = 1 << NightLevel;
+    for (int i = 0; i < NightTiles; ++i)
+        if (!_nightLoaded[i] && !_night->Failed(NightLevel, i % n, i / n))
+            missing.emplace_back(NightLevel, i % n, i / n);
+    if (missing.empty())
+        return true;
+    _night->FetchTiles(missing, [this] { return _stop.load(); }, true);
+    unsigned loaded = 0;
+    for (const auto& [z, x, y] : missing)
+    {
+        std::vector<uint8_t> tile;
+        int size = 0;
+        if (!_night->TakeTile(z, x, y, tile, size))
+            continue;
+        Op op;
+        EncodeSlot(tile, size, op);
+        op.slot = NightBase + y * n + x;
+        op.key = Key{-2, x, y}; // not a pyramid tile: no lookup entry
+        _nightLoaded[y * n + x] = true;
+        ++loaded;
+        std::lock_guard lock(_mutex);
+        _ops.push_back(std::move(op));
+    }
+    LOG_INFO(Graphics, "Earth tiles: {} of {} night-light tiles loaded", loaded, missing.size());
+    return loaded == missing.size();
+}
+
+bool EarthTileCache::LoadNightFine(double latitude, double longitude)
+{
+    if (!_night)
+        return true;
+    constexpr int n = 1 << NightFineLevel, w = 8;
+    double mx, my;
+    Mercator(latitude, longitude, mx, my);
+    const int cx = int(std::floor(mx * n)), cy = int(std::floor(my * n));
+    const int y0 = std::clamp(cy - w / 2, 0, n - w);
+    std::vector<std::tuple<int, int, int>> missing;
+    for (int dy = 0; dy < w; ++dy)
+        for (int dx = -w / 2; dx < w / 2; ++dx)
+        {
+            const int x = ((cx + dx) % n + n) % n, y = y0 + dy;
+            const int s = (y % w) * w + x % w;
+            if ((_fineQueued[s][0] != x || _fineQueued[s][1] != y) && !_night->Failed(NightFineLevel, x, y))
+                missing.emplace_back(NightFineLevel, x, y);
+        }
+    if (missing.empty())
+        return true;
+    _night->FetchTiles(missing, [this] { return _stop.load(); }, true);
+    size_t loaded = 0;
+    for (const auto& [z, x, y] : missing)
+    {
+        std::vector<uint8_t> tile;
+        int size = 0;
+        if (!_night->TakeTile(z, x, y, tile, size))
+            continue;
+        const int s = (y % w) * w + x % w;
+        Op op;
+        EncodeSlot(tile, size, op);
+        op.slot = NightFineBase + s;
+        op.key = Key{-3, x, y};
+        _fineQueued[s][0] = x;
+        _fineQueued[s][1] = y;
+        ++loaded;
+        std::lock_guard lock(_mutex);
+        _ops.push_back(std::move(op));
+    }
+    return loaded == missing.size();
+}
+
 void EarthTileCache::Run()
 {
     for (const auto& island : EarthIslands::All())
@@ -282,8 +404,37 @@ void EarthTileCache::Run()
     uint64_t planned = 0;
     std::vector<Key> plan;
     std::set<Key> wanted;
+    bool night = false, fine = false;
+    auto nightRetry = std::chrono::steady_clock::now(), fineRetry = nightRetry;
+    int fineTile[2] = {-1, -1};
     while (!_stop)
     {
+        // After the first plan's coarse tiles (the globe), and again every half minute while any are missing.
+        if (!night && planned && std::chrono::steady_clock::now() >= nightRetry)
+        {
+            night = LoadNight();
+            nightRetry = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        }
+        // The zoom-6 window: when the camera's tile changes, else retried while some are missing.
+        if (planned)
+        {
+            ViewState v;
+            {
+                std::lock_guard lock(_mutex);
+                v = _view;
+            }
+            double mx, my;
+            Mercator(v.latitude, v.longitude, mx, my);
+            const int at[2] = {int(mx * (1 << NightFineLevel)), int(my * (1 << NightFineLevel))};
+            const bool moved = at[0] != fineTile[0] || at[1] != fineTile[1];
+            if (moved || (!fine && std::chrono::steady_clock::now() >= fineRetry))
+            {
+                fineTile[0] = at[0];
+                fineTile[1] = at[1];
+                fine = LoadNightFine(v.latitude, v.longitude);
+                fineRetry = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            }
+        }
         ViewState view;
         {
             std::unique_lock lock(_mutex);
@@ -345,14 +496,14 @@ void EarthTileCache::Run()
                     ApplyIslands(z, x, y, tile, size);
                 // a free slot, else the least recently wanted one that is not wanted now
                 int slot = -1;
-                for (int s = 0; s < Slots && slot < 0; ++s)
+                for (int s = 0; s < TileSlots && slot < 0; ++s)
                     if (std::get<0>(_slotKey[size_t(s)]) < 0)
                         slot = s;
                 Op op;
                 if (slot < 0)
                 {
                     uint64_t oldest = ~uint64_t(0);
-                    for (int s = 0; s < Slots; ++s)
+                    for (int s = 0; s < TileSlots; ++s)
                         if (!wanted.count(_slotKey[size_t(s)]) && _slotUse[size_t(s)] < oldest)
                             oldest = _slotUse[size_t(s)], slot = s;
                     if (slot < 0)
@@ -368,36 +519,7 @@ void EarthTileCache::Run()
                     std::lock_guard lock(_mutex);
                     _ops.push_back(std::move(evict));
                 }
-                // 256 texels with an 8-texel border of their own edge, then 2 box-filtered levels
-                std::vector<uint8_t> level0(size_t(SlotTexels) * SlotTexels * 4);
-                for (int ty = 0; ty < SlotTexels; ++ty)
-                    for (int tx = 0; tx < SlotTexels; ++tx)
-                    {
-                        const int sx = std::clamp((tx - Border) * size / TileTexels, 0, size - 1);
-                        const int sy = std::clamp((ty - Border) * size / TileTexels, 0, size - 1);
-                        std::memcpy(&level0[(size_t(ty) * SlotTexels + tx) * 4], &tile[(size_t(sy) * size + sx) * 4], 4);
-                        level0[(size_t(ty) * SlotTexels + tx) * 4 + 3] = 255;
-                    }
-                std::vector<uint8_t> current = std::move(level0);
-                for (int m = 0; m < Mips; ++m)
-                {
-                    const int s = SlotTexels >> m;
-                    op.mips[m] = EncodeMip(current, s);
-                    if (m + 1 < Mips)
-                    {
-                        const int h = s / 2;
-                        std::vector<uint8_t> next(size_t(h) * h * 4);
-                        for (int yy = 0; yy < h; ++yy)
-                            for (int xx = 0; xx < h; ++xx)
-                                for (int c = 0; c < 4; ++c)
-                                {
-                                    const auto at = [&](int px, int py) { return int(current[(size_t(py) * s + px) * 4 + c]); };
-                                    next[(size_t(yy) * h + xx) * 4 + c] =
-                                        uint8_t((at(2 * xx, 2 * yy) + at(2 * xx + 1, 2 * yy) + at(2 * xx, 2 * yy + 1) + at(2 * xx + 1, 2 * yy + 1) + 2) / 4);
-                                }
-                        current = std::move(next);
-                    }
-                }
+                EncodeSlot(tile, size, op);
                 op.slot = slot;
                 op.key = key;
                 _slotKey[size_t(slot)] = key;
@@ -440,7 +562,13 @@ void EarthTileCache::Install()
                     wgr_texture_update_region(_renderer, _atlas, uint32_t(m), uint32_t(sx) * s, uint32_t(sy) * s, s, s,
                                               op.mips[m].data(), uint32_t(op.mips[m].size()));
                 }
-                _installed[op.key] = op.slot;
+                if (std::get<0>(op.key) >= 0)
+                    _installed[op.key] = op.slot;
+                else if (std::get<0>(op.key) == -3)
+                {
+                    _fineInstalled[op.slot - NightFineBase][0] = std::get<1>(op.key);
+                    _fineInstalled[op.slot - NightFineBase][1] = std::get<2>(op.key);
+                }
                 ++uploaded;
             }
             _lookupDirty = true;
@@ -460,7 +588,7 @@ void EarthTileCache::Install()
     if (_lookupDirty)
     {
         _lookupDirty = false;
-        std::vector<uint8_t> table(size_t(LookupWidth) * Levels * LookupRowsPerLevel * 4, 0);
+        std::vector<uint8_t> table(size_t(LookupWidth) * LookupRows * 4, 0);
         const auto put = [&](int x, int row, uint32_t value, uint8_t alpha) {
             uint8_t* p = &table[(size_t(row) * LookupWidth + x) * 4];
             p[0] = uint8_t(value & 255);
@@ -483,6 +611,14 @@ void EarthTileCache::Install()
             if (dx < Window && dy >= 0 && dy < Window)
                 put(dx, z * LookupRowsPerLevel + 1 + dy, uint32_t(slot), 255);
         }
+        for (int i = 0; i < NightTiles; ++i)
+            if (_fineInstalled[i][0] >= 0)
+            {
+                uint8_t* p = &table[(size_t(NightFineRow + i / LookupWidth) * LookupWidth + i % LookupWidth) * 4];
+                p[0] = uint8_t(_fineInstalled[i][0]);
+                p[1] = uint8_t(_fineInstalled[i][1]);
+                p[3] = 255;
+            }
         wgr_texture_update(_renderer, _lookup, table.data(), uint32_t(table.size()));
     }
     _stats.resident = unsigned(_installed.size());

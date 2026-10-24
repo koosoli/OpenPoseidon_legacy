@@ -527,6 +527,9 @@ const ET_BORDER: f32 = 8.0;
 const ET_PER_ROW: i32 = 30;
 const ET_WINDOW: i32 = 16;
 const ET_ROWS: i32 = 17;
+const ET_NIGHT_BASE: i32 = 772; // EarthTileCache::NightBase: Black Marble zoom 3, 8 x 8 tiles
+const ET_NIGHT_FINE: i32 = 836; // EarthTileCache::NightFineBase: zoom 6, an 8 x 8 window, slot (y % 8) * 8 + x % 8
+const ET_NIGHT_ROW: i32 = 340;  // EarthTileCache::NightFineRow: per fine slot the tile it holds (r = x, g = y)
 fn et_u24(c: vec4<f32>) -> i32 {
     let b = vec3<i32>(round(c.rgb * 255.0));
     return b.x + b.y * 256 + b.z * 65536;
@@ -534,6 +537,39 @@ fn et_u24(c: vec4<f32>) -> i32 {
 // The finest LOADED tile under the point (ref19 + off19, zoom-19 tile units), at most as fine as one texel a
 // pixel: the zoom from the ground footprint, then down to the nearest ancestor in the atlas -- ground that
 // was on screen never drops while a finer tile loads. sRGB rgb; a = 0 when nothing at all is loaded.
+// City lights on the night side (EarthTileCache night slots), at web-mercator position `merc` in [0, 1):
+// the zoom-6 window where it holds the tile and is fine enough to matter, else zoom 3. Linear out.
+fn earth_night_sample(atlas: u32, samp: u32, slot: i32, f: vec2<f32>, lod: f32) -> vec3<f32> {
+    let corner = vec2<f32>(f32(slot % ET_PER_ROW), f32(slot / ET_PER_ROW)) * ET_SLOT + ET_BORDER;
+    let uv = (corner + clamp(f, vec2<f32>(0.002), vec2<f32>(0.998)) * 256.0) / ET_ATLAS;
+    return srgb_to_linear(textureSampleLevel(textures[atlas], samplers[samp], uv, lod).rgb);
+}
+fn earth_night_lights(atlas: u32, samp: u32, lut: u32, merc: vec2<f32>, footprint: f32) -> vec3<f32> {
+    let m = clamp(merc, vec2<f32>(0.0), vec2<f32>(0.999999));
+    let texel3 = 19567.88 / cosh(3.14159265 * (1.0 - 2.0 * m.y)); // one zoom-3 texel here, metres
+    var c = vec3<f32>(-1.0);
+    if (footprint < texel3 * 0.5) {
+        let t = m * 64.0;
+        let tile = vec2<i32>(floor(t));
+        let s = (tile.y % 8) * 8 + tile.x % 8;
+        let e = textureLoad(textures[lut], vec2<i32>(s % ET_WINDOW, ET_NIGHT_ROW + s / ET_WINDOW), 0);
+        if (e.a > 0.5 && i32(round(e.r * 255.0)) == tile.x && i32(round(e.g * 255.0)) == tile.y) {
+            let lod = clamp(log2(max(footprint / (texel3 * 0.125), 1.0e-4)), 0.0, 2.0);
+            c = earth_night_sample(atlas, samp, ET_NIGHT_FINE + s, fract(t), lod);
+        }
+    }
+    if (c.x < 0.0) {
+        let t = m * 8.0;
+        let tile = vec2<i32>(floor(t));
+        let lod = clamp(log2(max(footprint / texel3, 1.0e-4)), 0.0, 2.0);
+        c = earth_night_sample(atlas, samp, ET_NIGHT_BASE + tile.y * 8 + tile.x, fract(t), lod);
+    }
+    // The composite carries moonlit land, sea and snow under the lights, navy to blue-grey (red/blue ~0.2-0.35
+    // in linear); lights are warm or white (>= 1). A ratio, so it holds through the mips, where a threshold on
+    // brightness lost every averaged-down town on the far globe.
+    return c * smoothstep(0.5, 0.9, c.r / max(c.b, 1.0e-4));
+}
+
 fn earth_tile_albedo(atlas: u32, samp: u32, lut: u32, ref19: vec2<f32>, off19: vec2<f32>, footprint: f32) -> vec4<f32> {
     let y01 = (ref19.y + off19.y) / 524288.0;
     let lat = atan(sinh(3.14159265 * (1.0 - 2.0 * y01)));
@@ -1543,6 +1579,7 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             sample_dy *= chart.zw;
         }
         var albedo = vec3<f32>(0.0);
+        var merc = vec2<f32>(-1.0); // web-mercator position, tile mode only (the night lights)
         let tile_mode = u32(material.reflect0.z + 0.5);
         if (tile_mode != 0u) {
             // The tile pyramid (EarthTileCache): mode 1 = mercator offsets from reflect0.xy, 2 = the globe's
@@ -1556,6 +1593,7 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
                 ref19 = floor(m);
                 off19 = m - ref19;
             }
+            merc = (ref19 + off19) / 524288.0;
             let lut = bitcast<u32>(material.reflect1.z) >> 6u;
             let t = earth_tile_albedo(packed >> 3u, packed & 7u, lut, ref19, off19, max(length(dwx), length(dwy)));
             albedo = t.rgb;
@@ -1715,9 +1753,24 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
                 glint = local_sun * (water * aloft * beckmann * fresnel * ndl / (4.0 * ndv));
             }
         }
+        // City lights where the sun has set, seen from far off: an airliner's or orbit's view of the night
+        // side. Near ground they would be a glow in the soil, so they fade in from 3 to 15 km away.
+        // Scale: as an orbital night photograph is exposed, not physical. A city centre is ~3e-5 of sunlit
+        // ground (VIIRS DNB ~100 nW/cm2/sr against ~3e6), and at that the night side stayed black beside
+        // the stars; ~300 times it reads as the photographs do (night3 against night4, 2026-10-24).
+        var night_glow = vec3<f32>(0.0);
+        if (merc.x >= 0.0) {
+            let dark = 1.0 - smoothstep(-0.10, 0.02, sun_height);
+            let far = smoothstep(3000.0, 15000.0, distance);
+            if (dark * far > 0.0) {
+                night_glow = earth_night_lights(packed >> 3u, packed & 7u, bitcast<u32>(material.reflect1.z) >> 6u, merc,
+                                                max(length(dwx), length(dwy)))
+                           * (material.sun_diffuse.w * 1.0e-2 * dark * far);
+            }
+        }
         // Ground and valley fog (layered fog) in front of the Earth surface; whole-world terrain used to
         // skip every fog term.
-        return vec4<f32>(apply_layered_fog(surface * reflectance * light + glint, in.world_pos), 1.0);
+        return vec4<f32>(apply_layered_fog(surface * reflectance * light + glint + night_glow, in.world_pos), 1.0);
     }
 #endif
 
