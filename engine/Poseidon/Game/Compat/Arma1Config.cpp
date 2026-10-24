@@ -1014,6 +1014,26 @@ bool AnimalMovesImported(const std::string& moves)
             text += mt;
             names.push_back(name);
         }
+        // Their action maps name their upDegree by the engine's constant ("ManPosNoWeapon"),
+        // which reads as 0 (ManPosDead) here: no map matched a living animal's degree and it
+        // stood without a move, sunk into the ground. The constants as CWA numbers them
+        // (the ManPos enum, the same order as Arma 2's).
+        static const char* const manPos[] = {"ManPosDead",         "ManPosWeapon",        "ManPosBinocLying",
+                                             "ManPosLyingNoWeapon", "ManPosLying",        "ManPosHandGunLying",
+                                             "ManPosCrouch",        "ManPosHandGunCrouch", "ManPosCombat",
+                                             "ManPosHandGunStand",  "ManPosStand",         "ManPosNoWeapon",
+                                             "ManPosBinoc",         "ManPosBinocStand"};
+        int replaced = 0;
+        for (int k = 0; k < static_cast<int>(sizeof(manPos) / sizeof(manPos[0])); k++)
+        {
+            const std::string quoted = std::string("\"") + manPos[k] + "\"";
+            for (size_t at = text.find(quoted); at != std::string::npos; at = text.find(quoted, at))
+            {
+                text.replace(at, quoted.size(), std::to_string(k));
+                replaced++;
+            }
+        }
+        LOG_INFO(Mission, "{}: animal moves: {} upDegree constants as numbers", Label(), replaced);
         ImportIntoPars(text, "CfgMovesAnimalsBase and the animals' moves as A1_");
         for (const std::string& n : names)
             if (Pars.FindEntry(("A1_" + n).c_str()))
