@@ -33,7 +33,7 @@ namespace
 {
 // Arma 3's control types and styles this file draws (a3\ui_f\hpp\defineCommon.inc).
 constexpr int kStatic = 0, kButton = 1, kListBox = 5, kHtml = 9, kActiveText = 11, kTree = 12,
-              kStructuredText = 13, kControlsGroup = 15, kListNBox = 102,
+              kStructuredText = 13, kControlsGroup = 15, kCheckBox = 77, kListNBox = 102,
               kShortcutButton = 16, kControlsGroupNoScroll = 81, kButtonPicture = 0x30, kKeepAspect = 0x800;
 
 // RscDisplayMain's idcs (a3\ui_f\hpp\defineResinclDesign.inc).
@@ -800,6 +800,56 @@ class A3List : public A3Control
     }
 };
 
+// RscCheckBox (77): its checked or unchecked picture; a click toggles it and reports its idc to the
+// display (OnButtonClicked), where the screen's own rules apply (Old Man's exclusive pair).
+class A3CheckBox : public A3Control
+{
+    Picture _checkedPicture, _uncheckedPicture;
+    PackedColor _color, _colorHover;
+    bool _checked = false, _hover = false;
+
+  public:
+    A3CheckBox(ControlsContainer* parent, int type, int idc, const ParamEntry& cls, float x, float y, float w,
+               float h, const Rect2DFloat& clip)
+        : A3Control(parent, type, idc, cls, x, y, w, h, clip)
+    {
+        _checkedPicture.Set(Text(cls, "textureChecked"));
+        _uncheckedPicture.Set(Text(cls, "textureUnchecked"));
+        _color = ColorOf(cls, "color", PackedWhite);
+        _colorHover = ColorOf(cls, "colorHover", _color);
+        _checked = Integer(cls, "checked", 0) != 0;
+    }
+
+    bool Checked() const { return _checked; }
+    void SetChecked(bool checked) { _checked = checked; }
+
+    void OnLButtonUp(float x, float y) override
+    {
+        if (x < _x || x > _x + _w || y < _y || y > _y + _h)
+            return;
+        _checked = !_checked;
+        _parent->OnButtonClicked(IDC());
+    }
+    bool OnKeyDown(unsigned nChar, unsigned nRepCnt, unsigned nFlags) override
+    {
+        if (nChar != SDLK_SPACE)
+            return false;
+        _checked = !_checked;
+        _parent->OnButtonClicked(IDC());
+        return true;
+    }
+    void OnMouseMove(float x, float y, bool active) override
+    {
+        _hover = x >= _x && x <= _x + _w && y >= _y && y <= _y + _h;
+    }
+
+    void OnDraw(float alpha) override
+    {
+        (_checked ? _checkedPicture : _uncheckedPicture)
+            .Draw(Fade(_hover ? _colorHover : _color, alpha), Pixels(_x, _y, _w, _h), true, ClipPixels());
+    }
+};
+
 // A group of the screen: its rectangle (where its rows unfold) and what it holds.
 struct Group
 {
@@ -922,6 +972,8 @@ struct Screen::Impl
             control = new A3List(display, type, idc, cls, x, y, w, h, clip);
         else if (type == kHtml)
             control = new A3Html(display, type, idc, cls, x, y, w, h, clip);
+        else if (type == kCheckBox)
+            control = new A3CheckBox(display, type, idc, cls, x, y, w, h, clip);
         else if (type == kButton || type == kActiveText || type == kShortcutButton)
         {
             // a spotlight's button carries the same idc in every spotlight: it reports its spotlight
@@ -1240,6 +1292,23 @@ int Screen::Selected(int idc) const
             if (auto* list = dynamic_cast<A3List*>(m.control))
                 return list->Selected();
     return -1;
+}
+
+bool Screen::Checked(int idc) const
+{
+    for (const Member& m : _impl->members)
+        if (m.control->IDC() == idc)
+            if (auto* box = dynamic_cast<A3CheckBox*>(m.control))
+                return box->Checked();
+    return false;
+}
+
+void Screen::SetChecked(int idc, bool checked)
+{
+    for (const Member& m : _impl->members)
+        if (m.control->IDC() == idc)
+            if (auto* box = dynamic_cast<A3CheckBox*>(m.control))
+                box->SetChecked(checked);
 }
 
 bool Screen::Has(int idc) const

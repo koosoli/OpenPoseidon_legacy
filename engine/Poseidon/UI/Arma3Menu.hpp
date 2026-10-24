@@ -39,6 +39,10 @@ bool Active();
 // Challenges, All Missions), filled from CfgMissions (Arma3Screens.cpp); null when Arma 3's menu is
 // not active or CfgMissions has nothing for it. Its idd is ArmaContentIdd.
 Display* CreateContentDisplay(ControlsContainer* parent, int idc);
+// An Arma 3 screen a script opens (createDisplay / createDialog) that this engine runs natively,
+// in place of the scripts behind it (Arma3Screens.cpp); null for any other class.
+Display* CreateScriptDisplay(ControlsContainer* parent, const char* className);
+
 // The entry chosen in a closed CreateContentDisplay screen.
 bool ContentChoice(ControlsContainer* display, bool& campaign, std::string& value);
 
@@ -97,6 +101,8 @@ class Screen
     void SetPicture(int idc, const RString& name);
     void SetRows(int idc, const std::vector<RString>& rows, int selected);
     int Selected(int idc) const;
+    bool Checked(int idc) const; // a check box
+    void SetChecked(int idc, bool checked);
     void Show(int idc, bool shown);
     bool Has(int idc) const;
     // The meaning of a main-menu click; `message` is set for Action::Unavailable.

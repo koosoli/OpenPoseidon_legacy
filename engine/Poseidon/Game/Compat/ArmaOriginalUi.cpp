@@ -368,9 +368,9 @@ bool Enabled()
         }
         if (Arma1Compat::Generation() > 2)
         {
-            // its main menu is drawn by Arma3Menu, from Arma 3's own config
-            LOG_INFO(Mission, "Original UI: {}'s HUD and in-game screens stay CWA's (only its main menu is "
-                              "its own)",
+            // its screens are drawn by Arma3Menu, from Arma 3's own config
+            LOG_INFO(Mission, "Original UI: {}'s menus, pause menu, briefing, map and infantry HUD are its own "
+                              "(Arma3Menu); its other in-game screens stay CWA's",
                      Arma1Compat::Label());
             return false;
         }
