@@ -119,6 +119,10 @@ std::vector<Entry> Collect(ArmaContentKind kind)
         // <world>_intro*) are not single-player missions either.
         if (f.find('.') == std::string::npos || f.rfind("mp_", 0) == 0 || f.rfind("cs_", 0) == 0 ||
             f.find("camera_shots") != std::string::npos || f.find("_intro") != std::string::npos ||
+            // Arma 3's menu-background intros (introexp.altis, introorange.altis), developer repro
+            // missions and faction test scenes are not in its own Scenarios list either
+            (Arma1Compat::Generation() == 3 &&
+             (f.rfind("intro", 0) == 0 || f.rfind("repro_", 0) == 0 || f.rfind("faction_", 0) == 0)) ||
             (f.size() > 7 && f.rfind("intro", 0) == 0 && std::isdigit(static_cast<unsigned char>(f[5]))))
             continue;
         // Arma 1 mounts Missions/tutorial/t01_obstacle_course.sara.pbo as arma1/missions/
@@ -132,6 +136,22 @@ std::vector<Entry> Collect(ArmaContentKind kind)
     }
     std::sort(out.begin(), out.end(), [](const Entry& a, const Entry& b) { return Lower(a.label) < Lower(b.label); });
     return out;
+}
+
+// POSEIDON_MENU_PICK=<text> (captures only): the list starts on the first entry whose label or
+// value contains <text> (case-insensitive) rather than on the first entry, so a capture driven by
+// POSEIDON_MENU_CLICKS can play a chosen campaign or mission.
+int InitialEntry(const std::vector<Entry>& entries)
+{
+    const char* pick = std::getenv("POSEIDON_MENU_PICK");
+    if (!pick || !*pick)
+        return 0;
+    const std::string want = Lower(pick);
+    for (size_t i = 0; i < entries.size(); i++)
+        if (Lower(entries[i].label).find(want) != std::string::npos ||
+            Lower(entries[i].value).find(want) != std::string::npos)
+            return static_cast<int>(i);
+    return 0;
 }
 
 class ArmaContentButton : public CButton
@@ -266,7 +286,7 @@ class ArmaContentDisplay : public Display
             {
                 for (const Entry& e : _entries)
                     list->AddString(e.label.c_str());
-                list->SetCurSel(0);
+                list->SetCurSel(InitialEntry(_entries));
             }
             ShowSelected();
             LOG_INFO(UI, "{} content list (its own {} screen): {} entries", Arma1Compat::Label(),
@@ -287,7 +307,7 @@ class ArmaContentDisplay : public Display
         {
             for (const Entry& e : _entries)
                 list->AddString(e.label.c_str());
-            list->SetCurSel(0);
+            list->SetCurSel(InitialEntry(_entries));
         }
         if (auto* status = dynamic_cast<CStatic*>(GetCtrl(StatusId)))
             status->SetText(_entries.empty()

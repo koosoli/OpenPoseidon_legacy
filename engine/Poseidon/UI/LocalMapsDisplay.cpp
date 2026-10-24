@@ -373,7 +373,8 @@ class LocalMapsDisplay : public Display
                 args.insert(args.end(),
                             {std::string("--arma") + generation + "-mission", localMission->virtualPath});
             // A game started from Run game always uses its own menus; a mission when chosen.
-            if ((installed || _originalUi) && *game != "Arma 3")
+            // Arma 3 gets its own main menu (Arma3Menu); its HUD and map stay CWA's.
+            if (installed || _originalUi)
                 args.push_back("--arma-original-ui");
         }
         else
@@ -526,7 +527,7 @@ class LocalMapsDisplay : public Display
             {
                 CollectGames();
                 for (const auto& g : _games)
-                    list->AddString((g.game + (g.game == "Arma 3" ? " -- OpenPoseidon menu (Arma 3's own is not supported yet)"
+                    list->AddString((g.game + (g.game == "Arma 3" ? " -- its own main menu"
                                                                   : " -- its own main menu, HUD and map") +
                                      " | " + std::to_string(g.missions) + " missions")
                                         .c_str());
@@ -587,7 +588,7 @@ class LocalMapsDisplay : public Display
             if (Foundation::GamePaths::Instance().IsInitialized())
                 std::ofstream(OriginalUiMemory(), std::ios::trunc) << (_originalUi ? "1" : "0");
             Status(_originalUi ? "Arma 1 and Arma 2 missions will use that game's own HUD, menus and map (its "
-                                 "ui.pbo over CWA's). Arma 3 keeps CWA's for now."
+                                 "ui.pbo over CWA's). Arma 3 gets its own main menu; its HUD stays CWA's."
                                : "Arma missions will use CWA's HUD and menus.");
         }
         else if (idc == GamesId || idc == MapsId || idc == VehiclesId || idc == MissionsId)

@@ -368,7 +368,9 @@ bool Enabled()
         }
         if (Arma1Compat::Generation() > 2)
         {
-            LOG_WARN(Mission, "Original UI: {}'s menus are script-built and not supported yet; keeping CWA's",
+            // its main menu is drawn by Arma3Menu, from Arma 3's own config
+            LOG_INFO(Mission, "Original UI: {}'s HUD and in-game screens stay CWA's (only its main menu is "
+                              "its own)",
                      Arma1Compat::Label());
             return false;
         }
