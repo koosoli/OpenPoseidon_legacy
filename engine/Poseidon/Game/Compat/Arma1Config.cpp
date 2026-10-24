@@ -1896,6 +1896,9 @@ void LoadConfig()
     const ParamEntry* vehicles = Arma1Pars().FindEntry("CfgVehicles");
     LOG_INFO(Mission, "{}: config read from {} archives ({} CfgVehicles classes, {} stringtables)", Label(),
              configs.size(), vehicles ? vehicles->GetEntryCount() : 0, stringtables);
+    // OP_A1_EDITOR_DUMP=1 (tests): build and log the editor's Arma 1 list right away
+    if (const char* e = std::getenv("OP_A1_EDITOR_DUMP"); e && *e == '1')
+        PrepareEditorClasses();
 }
 
 namespace
@@ -2225,6 +2228,10 @@ void PrepareEditorClasses()
     if (!vehicles)
         return;
     int listed = 0, generated = 0;
+    static const bool dump = [] {
+        const char* e = std::getenv("OP_A1_EDITOR_DUMP");
+        return e && *e == '1';
+    }();
     for (int i = 0; i < vehicles->GetEntryCount(); i++)
     {
         const ParamEntry& cls = vehicles->GetEntry(i);
@@ -2237,6 +2244,17 @@ void PrepareEditorClasses()
         const RString resolved = ResolveVehicleClass(RString((const char*)cls.GetName()));
         if (_strnicmp(resolved.Data(), "A1x_", 4) == 0)
             generated++;
+        // OP_A1_EDITOR_DUMP=1: the editor's list, heading > name (class), for checking it
+        if (dump)
+            if (const ParamEntry* cwa = Pars.FindEntry("CfgVehicles"); cwa && cwa->FindEntry(resolved))
+            {
+                const ParamEntry& entry = *cwa->FindEntry(resolved);
+                const ParamEntry* scopeOut = entry.FindEntry("scope");
+                LOG_INFO(Mission, "Editor list: {} > {} ({}{}){}", StringValue(entry, "vehicleClass"),
+                         StringValue(entry, "displayName"), (const char*)cls.GetName(),
+                         _strnicmp(resolved.Data(), "A1x_", 4) == 0 ? "" : std::string(" -> ") + resolved.Data(),
+                         scopeOut && !scopeOut->IsClass() && (int)*scopeOut == 2 ? "" : " [not listed]");
+            }
     }
     LOG_INFO(Mission, "{}: editor -- {} Arma 1 classes listed by Arma 1, {} generated with their own model", Label(),
              listed, generated);
