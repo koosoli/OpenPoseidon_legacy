@@ -1241,6 +1241,12 @@ fn reflect_lanes_with_specmap(r0: vec4<f32>, r1: vec4<f32>, uv: vec2<f32>, duv_d
         o.a.x = max(r0.x, 0.95 - 0.85 * clamp(s.b, 0.0, 1.0));
         o.specmap = vec3<f32>(s.g, s.b, 1.0);
     }
+    // F.3: a coated paint's base is flake and pigment -- rough (>= 0.55) whatever the class or an
+    // addon declares; the clear coat above carries the sharp reflection.
+    let cls = u32(r1.x + 0.5);
+    if ((cls == 3u || cls == 4u) && o.a.w > 0.0) {
+        o.a.x = max(o.a.x, 0.55);
+    }
     return o;
 }
 

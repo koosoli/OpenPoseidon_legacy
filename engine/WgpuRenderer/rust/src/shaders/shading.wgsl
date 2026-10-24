@@ -134,6 +134,7 @@ struct ShadeMaterial {
 
 // REFLECT-001 phase C -- physically based sun response for classified surfaces.
 const REFLECT_PI: f32 = 3.14159265;
+const REFLECT_CLASS_PAINT_GLOSS: u32 = 3u;
 const REFLECT_CLASS_PAINT_METALLIC: u32 = 4u;
 const REFLECT_CLASS_CHROME: u32 = 5u;
 const REFLECT_CLASS_MIRROR: u32 = 7u;
@@ -157,9 +158,21 @@ fn reflect_base_reflectance(mat: ShadeMaterial, albedo_lin: vec3<f32>) -> vec3<f
     // the paint's colour. A white F0 there washed Arma 3's red C_SUV_01_F to grey-pink once the
     // sky and the ground reached it (E.2/E.3 runs, 2026-10-23). Half the F0 stays neutral, the
     // other half is the albedo, scaled with F0 so an SMDI-dulled texel dulls its tint too.
+    //
+    // F.3 (owner's reference renders, 2026-10-24): under a clear coat the base is pigment plus,
+    // for metallic and pearl, a sparse flake layer -- a weak, rough, coloured sheen, not a
+    // second mirror. At half-F0-neutral + half-albedo it mirrored the bright ground into a green
+    // Peugeot's doors until they read sand-beige where the reference stays green.
+    let coated = mat.refl_a.w > 0.0;
     if (cls == REFLECT_CLASS_PAINT_METALLIC) {
         let f0 = mat.refl_a.y;
+        if (coated) {
+            return vec3<f32>(0.25 * f0) + albedo_lin * min(f0 * 2.5, 0.25);
+        }
         return vec3<f32>(0.5 * f0) + albedo_lin * min(f0 * 6.0, 0.5);
+    }
+    if (cls == REFLECT_CLASS_PAINT_GLOSS && coated) {
+        return vec3<f32>(0.25 * mat.refl_a.y);
     }
     return mix(vec3<f32>(mat.refl_a.y), metal_f0, clamp(mat.refl_a.z, 0.0, 1.0));
 }
