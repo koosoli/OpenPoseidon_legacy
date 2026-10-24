@@ -304,7 +304,7 @@ impl RainWater {
                     })],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let pipeline = make_pipeline("vs_main");
@@ -894,7 +894,7 @@ mod tests {
             module: &shader,
             entry_point: Some("cs_probe"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: None,
@@ -1206,7 +1206,7 @@ fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {{
             module: &shader,
             entry_point: Some("cs_probe"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let size = 262 * 16;
         let output = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1765,7 +1765,7 @@ mod full_draw_tests {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let mut clockwise = Some(clockwise);
         let hm = texture(

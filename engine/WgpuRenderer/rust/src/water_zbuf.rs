@@ -180,7 +180,7 @@ impl WaterZBuf {
                     targets: &[],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             });
             self.pipeline = Some((key, pipeline));
         }
@@ -260,7 +260,7 @@ impl WaterZBuf {
                     targets: &[],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             });
             self.merge = Some((key, pipeline, layout));
         }

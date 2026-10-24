@@ -413,7 +413,7 @@ impl SprayGpu {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("tw_spray_mask"),
@@ -434,7 +434,7 @@ impl SprayGpu {
                 targets: &[Some(mask_target())],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         Self {
             ring,

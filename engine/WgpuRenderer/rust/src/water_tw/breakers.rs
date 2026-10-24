@@ -346,7 +346,7 @@ impl BreakersGpu {
             module: &module,
             entry_point: Some("main"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let spray_update = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("tw_spray_update"),
@@ -354,7 +354,7 @@ impl BreakersGpu {
             module: &module,
             entry_point: Some("spray_update"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
 
         let (ids, index) = lip_mesh(MAX_STATIONS);
@@ -413,7 +413,7 @@ impl BreakersGpu {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let lip_mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("tw_brk_lip_mask"),
@@ -438,7 +438,7 @@ impl BreakersGpu {
                 targets: &[Some(super::spray::mask_target())],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         Self {
             stations,

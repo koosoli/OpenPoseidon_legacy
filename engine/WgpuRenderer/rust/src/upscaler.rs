@@ -243,7 +243,7 @@ impl FsrUpscaler {
                     module: &module,
                     entry_point: Some(entry),
                     compilation_options: Default::default(),
-                    cache: None,
+                    cache: crate::pipeline_cache::get(&device),
                 })
             };
             FsrKit {
@@ -545,7 +545,7 @@ impl RcasSharpener {
                 module: &module,
                 entry_point: Some("rcas_hdr"),
                 compilation_options: Default::default(),
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             });
             let params = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("wgr_rcas_sharpen_params"),

@@ -280,7 +280,7 @@ impl SmokeVolume {
                 module: &shader,
                 entry_point: Some(entry),
                 compilation_options: Default::default(),
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let clear_pipeline = make_compute("cs_clear", "wgr_smoke_volume_clear");
@@ -410,7 +410,7 @@ impl SmokeVolume {
                     })],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let march_pipeline =

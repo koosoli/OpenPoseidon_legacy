@@ -440,7 +440,7 @@ impl GiProbes {
             module: &module,
             entry_point: Some("cs_gi_probes"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         Self {
             settings: GiSettings::default(),
@@ -708,7 +708,7 @@ mod tests {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
     }
 
@@ -751,7 +751,7 @@ mod tests {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
     }
 
@@ -846,7 +846,7 @@ mod tests {
                 ],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
     }
 }

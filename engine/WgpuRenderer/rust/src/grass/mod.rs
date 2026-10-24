@@ -1535,7 +1535,7 @@ impl Grass {
             module: &shader,
             entry_point: Some("cs_place"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let mid_place_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("wgr_grass_place_mid"),
@@ -1543,7 +1543,7 @@ impl Grass {
             module: &shader,
             entry_point: Some("cs_place_mid"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let far_place_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("wgr_grass_place_far"),
@@ -1551,7 +1551,7 @@ impl Grass {
             module: &shader,
             entry_point: Some("cs_place_far"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let filter_subpixel = std::env::var("WGR_GRASS_FILTER_SUBPIXEL")
             .map_or(true, |value| value != "0");
@@ -1613,7 +1613,7 @@ impl Grass {
                     })],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let make_pipeline = |label: &str,
@@ -1842,7 +1842,7 @@ impl Grass {
                 None
             },
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let tuft_shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("wgr_grass_tuft_shadow"),
@@ -1877,7 +1877,7 @@ impl Grass {
                 targets: &[],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         // RFG-141: the native near ring's PlantMat tufts, cut out by the blade atlas alpha.
         let native_tuft_shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -1913,7 +1913,7 @@ impl Grass {
                 targets: &[],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         // RFG-142: grass motion vectors. Group 3 = the velocity uniform (matrices, camera delta,
         // previous wind lanes) and the single-sample scene depth for the visibility compare.
@@ -1979,7 +1979,7 @@ impl Grass {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let velocity_uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_grass_velocity_uniform"),

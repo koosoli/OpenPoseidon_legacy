@@ -862,7 +862,7 @@ impl Terrain {
             module: &shadow_shader,
             entry_point: Some("sweep"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let shadow_max_steps = std::env::var("WGR_TERRAIN_SHADOW_STEPS")
             .ok()
@@ -1201,7 +1201,7 @@ impl Terrain {
                     })],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let pipeline = make_pipeline(

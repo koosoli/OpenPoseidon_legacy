@@ -72,7 +72,7 @@ impl PlanarMips {
                 compilation_options: Default::default(),
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("wgr_planar_mips_sampler"),

@@ -251,7 +251,7 @@ impl Far {
             module: &shader,
             entry_point: Some("cs_cull"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         // Copied verbatim from the GPU-driven object pipeline (gfx3d/cull.rs): the depth
         // buffer is REVERSED-Z, so the comparison is GreaterEqual and nothing else. Proxies
@@ -300,7 +300,7 @@ impl Far {
                     })],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let card_pipeline = make_pipeline("wgr_far_cards", "vs_card", "fs_card");

@@ -177,7 +177,7 @@ impl Gfx2d {
                     })],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
 
@@ -285,7 +285,7 @@ impl Gfx2d {
                     })],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let pipelines_soft: [wgpu::RenderPipeline; 3] =
@@ -340,7 +340,7 @@ impl Gfx2d {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
 
         Gfx2d {

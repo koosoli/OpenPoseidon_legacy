@@ -267,7 +267,7 @@ pub fn create_foam_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::
             module: &module,
             entry_point: Some("main"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         })
     };
     let pattern = make("tw_foam_pattern", wgsl_foam_pattern());

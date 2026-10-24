@@ -138,7 +138,7 @@ impl RainFlow {
                 module: &module,
                 entry_point: Some(entry),
                 compilation_options: Default::default(),
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let cells = (N * N) as u64;

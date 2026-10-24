@@ -270,7 +270,7 @@ impl Foam {
                 constants: &constants,
                 ..Default::default()
             },
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         Self {
             params,

@@ -476,7 +476,7 @@ impl Underwater {
                 compilation_options: Default::default(),
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("wgr_underwater_sampler"),
@@ -614,7 +614,7 @@ impl Underwater {
                     module: &froxel_shader,
                     entry_point: Some("cs_underwater_froxel"),
                     compilation_options: Default::default(),
-                    cache: None,
+                    cache: crate::pipeline_cache::get(&device),
                 });
 
             let caustic_shader = crate::shaders::make_module(
@@ -679,7 +679,7 @@ impl Underwater {
                     module: &caustic_shader,
                     entry_point: Some("cs_underwater_caustics"),
                     compilation_options: Default::default(),
-                    cache: None,
+                    cache: crate::pipeline_cache::get(&device),
                 });
             let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
                 label: Some("wgr_underwater_shadow_sampler"),

@@ -1296,7 +1296,7 @@ impl VelocityObjPass {
                     compilation_options: Default::default(),
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             });
             let uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("wgr_velocity_obj_uniform"),
@@ -1396,7 +1396,7 @@ impl VelocityObjPass {
                     compilation_options: Default::default(),
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             });
             let skin_ssbo = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("wgr_velocity_skin_insts"),
@@ -1492,7 +1492,7 @@ impl VelocityObjPass {
                     compilation_options: Default::default(),
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             });
             let veg_uniform = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("wgr_velocity_veg_uniform"),
@@ -2976,7 +2976,7 @@ impl DepthResolve {
                 targets: &[],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         Self {
             pipeline,
@@ -4021,7 +4021,7 @@ impl Gtao {
             module: &module,
             entry_point: Some("cs_gtao"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_gtao_params"),
@@ -4222,7 +4222,7 @@ impl GtaoBlur {
             module: &module,
             entry_point: Some("cs_gtao_blur"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let mk_buf = |label| {
             device.create_buffer(&wgpu::BufferDescriptor {
@@ -4503,7 +4503,7 @@ impl NormalResolve {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         Self {
             pipeline,
@@ -5600,7 +5600,7 @@ fn build_main_pipeline(ctx: &PipeCtx, device: &wgpu::Device, key: PipelineKey) -
             })],
         }),
         multiview_mask: None,
-        cache: None,
+        cache: crate::pipeline_cache::get(&device),
     });
     pipeline
 }
@@ -5708,7 +5708,7 @@ fn build_prepass_pipeline(ctx: &PipeCtx, device: &wgpu::Device, key: PrepassKey)
             })],
         }),
         multiview_mask: None,
-        cache: None,
+        cache: crate::pipeline_cache::get(&device),
     });
     pipeline
 }
@@ -6133,7 +6133,7 @@ impl Gfx3d {
             module: &skin_bake_shader,
             entry_point: Some("main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
 
         // Alpha-to-coverage for cutout foliage: needs MSAA; default-on there, WGR_FOLIAGE_A2C=0
@@ -8177,7 +8177,7 @@ impl Gfx3d {
                     targets: &[],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         self.shadow_pipelines = Some(ShadowPipelines {
@@ -8239,7 +8239,7 @@ impl Gfx3d {
                 multisample: Default::default(),
                 fragment: None,
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             },
         ));
     }

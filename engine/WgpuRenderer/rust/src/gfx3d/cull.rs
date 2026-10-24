@@ -1575,7 +1575,7 @@ impl CullState {
                 module: &module,
                 entry_point: Some(entry),
                 compilation_options: Default::default(),
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let count_pipeline = make_pl("wgr_cull_count", &pipeline_layout, "count");
@@ -4637,7 +4637,7 @@ pub fn build_gpu_velocity_pipeline(
             compilation_options: Default::default(),
         }),
         multiview_mask: None,
-        cache: None,
+        cache: crate::pipeline_cache::get(&device),
     })
 }
 
@@ -4839,7 +4839,7 @@ pub fn build_gpu_pipeline(
             })],
         }),
         multiview_mask: None,
-        cache: None,
+        cache: crate::pipeline_cache::get(&device),
     });
     let prepass = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("wgr_gpu_driven_prepass_pipeline"),
@@ -4881,7 +4881,7 @@ pub fn build_gpu_pipeline(
             })],
         }),
         multiview_mask: None,
-        cache: None,
+        cache: crate::pipeline_cache::get(&device),
     });
     (color, prepass)
 }
@@ -4965,7 +4965,7 @@ pub fn build_gpu_shadow_pipeline(
             targets: &[],
         }),
         multiview_mask: None,
-        cache: None,
+        cache: crate::pipeline_cache::get(&device),
     })
 }
 
@@ -5049,7 +5049,7 @@ pub fn build_gpu_rsm_pipeline(
             ],
         }),
         multiview_mask: None,
-        cache: None,
+        cache: crate::pipeline_cache::get(&device),
     })
 }
 
@@ -5131,7 +5131,7 @@ pub fn build_cull_debug_pipeline(
             })],
         }),
         multiview_mask: None,
-        cache: None,
+        cache: crate::pipeline_cache::get(&device),
     })
 }
 
@@ -7195,7 +7195,7 @@ pub(crate) mod tests {
         });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("table-bootstrap-copy"), layout: None, module: &shader,
-            entry_point: Some("main"), compilation_options: Default::default(), cache: None,
+            entry_point: Some("main"), compilation_options: Default::default(), cache: crate::pipeline_cache::get(&device),
         });
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None, layout: &pipeline.get_bind_group_layout(0),

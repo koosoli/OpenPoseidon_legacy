@@ -1511,7 +1511,7 @@ fn fs() -> @location(0) vec4<f32> {
             depth_stencil: None,
             multisample: Default::default(),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
 
         let target = device.create_texture(&wgpu::TextureDescriptor {

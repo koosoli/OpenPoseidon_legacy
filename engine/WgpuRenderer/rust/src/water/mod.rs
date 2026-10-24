@@ -786,7 +786,7 @@ impl Water {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
 
         // GodotOceanWaves renders sea spray as camera-facing quads emitted at FFT foam
@@ -844,7 +844,7 @@ impl Water {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
 
         // Explicit experiment only: no pipeline allocation or draw in normal play.
@@ -879,7 +879,7 @@ impl Water {
                     compilation_options: wgpu::PipelineCompilationOptions {constants: &water_fs_constants, ..Default::default()},
                     targets: &[Some(wgpu::ColorTargetState {format: surface_format,
                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),write_mask: wgpu::ColorWrites::ALL})]}),
-                multiview_mask: None, cache: None,
+                multiview_mask: None, cache: crate::pipeline_cache::get(&device),
             }))
         } else {None};
 

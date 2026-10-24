@@ -171,7 +171,7 @@ impl Exposure {
                         compilation_options: Default::default(),
                     }),
                     multiview_mask: None,
-                    cache: None,
+                    cache: crate::pipeline_cache::get(&device),
                 })
             };
 

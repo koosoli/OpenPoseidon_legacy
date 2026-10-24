@@ -222,7 +222,7 @@ impl TwUnderwater {
                 targets: &[Some(wgpu::ColorTargetState { format: target_format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("tw_underwater_params"),

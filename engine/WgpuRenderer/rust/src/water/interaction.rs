@@ -153,7 +153,7 @@ impl Interaction {
             module: &shader,
             entry_point: Some("interaction_update"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let bind_groups = [bind(0, 1), bind(1, 0)];
         Self {

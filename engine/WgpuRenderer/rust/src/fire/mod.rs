@@ -316,7 +316,7 @@ impl FireSystem {
                 module: &sim_shader,
                 entry_point: Some(entry),
                 compilation_options: Default::default(),
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -426,7 +426,7 @@ impl FireSystem {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let mask = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("wgr_fire_mask"),
@@ -447,7 +447,7 @@ impl FireSystem {
                 targets: &[Some(crate::water_tw::spray::mask_target())],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let march_params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_fire_march_params"),

@@ -169,7 +169,7 @@ impl ReflectSsr {
                 compilation_options: Default::default(),
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_reflect_ssr_params"),

@@ -929,7 +929,7 @@ fn kernel(
         module: &module,
         entry_point: Some("main"),
         compilation_options: Default::default(),
-        cache: None,
+        cache: crate::pipeline_cache::get(&device),
     });
     let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some(label),

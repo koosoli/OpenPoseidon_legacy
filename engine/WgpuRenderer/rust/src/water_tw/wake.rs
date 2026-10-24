@@ -409,7 +409,7 @@ impl WakeGpu {
                 module: &module,
                 entry_point: Some(entry),
                 compilation_options: Default::default(),
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let pipelines = [pipe("tw_wake_rows", &rows, "wake_rows"), pipe("tw_wake_cols", &cols, "wake_columns"), pipe("tw_wake_inverse", &inv, "wake_inverse")];

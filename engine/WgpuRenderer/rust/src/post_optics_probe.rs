@@ -228,7 +228,7 @@ impl Gpu {
                 },
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         Self { pipeline, layout }
     }

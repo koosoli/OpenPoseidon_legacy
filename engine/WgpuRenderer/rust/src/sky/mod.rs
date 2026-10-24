@@ -1635,7 +1635,7 @@ impl Sky {
                     compilation_options: Default::default(),
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
 
@@ -1773,7 +1773,7 @@ impl Sky {
                 module: &sh_shader,
                 entry_point: Some("cs_sky_sh"),
                 compilation_options: Default::default(),
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
 
@@ -2177,7 +2177,7 @@ impl Sky {
                 module: &shader,
                 entry_point: Some("cs_froxel"),
                 compilation_options: Default::default(),
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         // Same group(0) as the froxel fill -- it needs the sky uniform and the cloud noise, and
@@ -2195,7 +2195,7 @@ impl Sky {
                 module: &shader,
                 entry_point: Some("cs_cloud_shadow"),
                 compilation_options: Default::default(),
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let smoke_shadow_header_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -2377,7 +2377,7 @@ impl Sky {
                     },
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let cloud_pipeline = build_cloud_pipeline("wgr_cloud", &cloud_overrides);
@@ -2474,7 +2474,7 @@ impl Sky {
                     compilation_options: Default::default(),
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let cloud_composite_pipeline = make_cloud_composite("wgr_cloud_composite", sample_count);

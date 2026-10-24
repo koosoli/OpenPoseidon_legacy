@@ -676,7 +676,7 @@ impl Temporal {
                     compilation_options: Default::default(),
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             });
             rp.view_pipeline = Some((dst_format, pipeline));
         }
@@ -890,7 +890,7 @@ impl Temporal {
                     compilation_options: Default::default(),
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             });
             let uniform = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("wgr_velocity_params"),
@@ -1108,7 +1108,7 @@ impl Temporal {
                     compilation_options: Default::default(),
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             });
             let uniform = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("wgr_history_control_params"),
@@ -1324,7 +1324,7 @@ impl Temporal {
                     compilation_options: Default::default(),
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             });
             let view_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("wgr_temporal_history_view_layout"),
@@ -1488,7 +1488,7 @@ impl Temporal {
                     compilation_options: Default::default(),
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             });
             vp.debug_pipeline = Some((dst_format, pipeline));
             vp.debug_bind = None;

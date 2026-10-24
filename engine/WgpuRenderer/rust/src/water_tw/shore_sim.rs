@@ -276,7 +276,7 @@ impl ShoreSim {
             module: &module,
             entry_point: Some("main"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         Self {
             state_a,

@@ -125,7 +125,7 @@ impl EnvPrefilter {
                 compilation_options: Default::default(),
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         // U wraps across the azimuth seam, V clamps at the poles: the same addressing as the
         // object pass's env sampler.

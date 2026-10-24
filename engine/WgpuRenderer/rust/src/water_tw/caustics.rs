@@ -144,7 +144,7 @@ impl Caustics {
                     targets: &[Some(wgpu::ColorTargetState { format: FORMAT, blend, write_mask: wgpu::ColorWrites::ALL })],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let splat = pipeline("tw_caustics_splat", &splat_layout, "vs_cau", "fs_cau", Some(wgpu::BlendState { color: add, alpha: add }));

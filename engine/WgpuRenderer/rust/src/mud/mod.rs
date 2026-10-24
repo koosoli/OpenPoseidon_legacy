@@ -265,7 +265,7 @@ impl MudSystem {
                     module: &sim_shader,
                     entry_point: Some(entry),
                     compilation_options: Default::default(),
-                    cache: None,
+                    cache: crate::pipeline_cache::get(&device),
                 }),
             )
         })
@@ -346,7 +346,7 @@ impl MudSystem {
             }),
             multisample: wgpu::MultisampleState { count: sample_count, ..Default::default() },
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         Self {
             enabled,

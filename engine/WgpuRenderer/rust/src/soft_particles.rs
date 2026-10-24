@@ -72,7 +72,7 @@ impl SoftParticles {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         SoftParticles {
             pipeline,

@@ -186,7 +186,7 @@ impl SkyBake {
             multisample: wgpu::MultisampleState::default(),
             fragment: None,
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
 
         let storage = |binding: u32, read_only: bool| wgpu::BindGroupLayoutEntry {
@@ -244,7 +244,7 @@ impl SkyBake {
             module: &reduce_shader,
             entry_point: Some("cs_bake"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
 
         SkyBake {

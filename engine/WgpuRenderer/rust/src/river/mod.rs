@@ -317,7 +317,7 @@ impl River {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let linear = |label: &str, mode: wgpu::AddressMode| {
             device.create_sampler(&wgpu::SamplerDescriptor {

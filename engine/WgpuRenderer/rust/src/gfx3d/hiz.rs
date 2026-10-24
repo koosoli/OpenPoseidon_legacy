@@ -101,7 +101,7 @@ impl HiZ {
             module: &module,
             entry_point: Some("copy_mip0"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let reduce_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("wgr_hiz_reduce_pipeline"),
@@ -109,7 +109,7 @@ impl HiZ {
             module: &module,
             entry_point: Some("reduce"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
 
         Self {

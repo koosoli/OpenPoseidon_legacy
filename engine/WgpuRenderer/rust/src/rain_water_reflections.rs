@@ -429,7 +429,7 @@ mod tests {
             module: &shader,
             entry_point: Some("cs_probe"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
         let proj = Mat4::perspective_rh(1.0, 1.0, 0.1, 500.0);
         let camera_bytes: [f32; 48] = [

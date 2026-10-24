@@ -48,6 +48,7 @@ mod soft_particles;
 mod sky;
 mod layered_fog;
 mod temporal;
+mod pipeline_cache;
 mod terrain;
 mod textures;
 mod tonemap;
@@ -1236,6 +1237,10 @@ impl FrameLap {
 
 impl Drop for Renderer {
     fn drop(&mut self) {
+        // LOAD-004: keep what was compiled since start-up (object variants are built lazily).
+        if let Some(line) = pipeline_cache::save() {
+            self.log.log(log_level::INFO, &line);
+        }
         // LOAD-NGX-DEFER: a quit before the DLSS start-up thread finished must not tear the
         // device down under it; its result (and NGX context) is dropped right here.
         #[cfg(feature = "dlss")]
@@ -1756,6 +1761,7 @@ impl Renderer {
             | vertex_writable_storage
             | ts_request
             | early_depth
+            | pipeline_cache::feature(&adapter)
             | (adapter.features()
                 & (wgpu::Features::DEPTH32FLOAT_STENCIL8
                     | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES));
@@ -1876,6 +1882,10 @@ impl Renderer {
         config.usage |= wgpu::TextureUsages::COPY_SRC;
 
         init_timer.mark("device");
+        // LOAD-004: before the first pipeline is built.
+        if let Some(line) = pipeline_cache::install(&device, &adapter.get_info()) {
+            log.log(log_level::INFO, &line);
+        }
         surface.configure(&device, &config);
 
         // HDR path (docs/hdr-pipeline-plan.md). Now the default for the wgpu backend —
@@ -2395,6 +2405,9 @@ impl Renderer {
         let mut temporal_auto = false;
         init_timer.mark("rest of new()");
         log.log(log_level::INFO, &init_timer.summary());
+        if let Some(line) = pipeline_cache::save() {
+            log.log(log_level::INFO, &line);
+        }
         Ok(Self {
             // 1.35 by default: enough to push the reflection-target edge outside a normal
             // grazing view, without giving away more angular resolution than the mip-filtered

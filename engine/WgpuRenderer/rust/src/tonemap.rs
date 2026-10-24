@@ -161,7 +161,7 @@ impl Tonemap {
                 },
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(&device),
         });
 
         // 1:1 point sample of the HDR target (same resolution as the swapchain).

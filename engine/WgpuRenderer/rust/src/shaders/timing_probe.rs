@@ -33,7 +33,20 @@ mod t {
             for ep in &m.entry_points {
                 let ts = std::time::Instant::now();
                 let po = naga::back::spv::PipelineOptions { shader_stage: ep.stage, entry_point: ep.name.clone() };
-                let _ = naga::back::spv::write_vec(&m, &info, &naga::back::spv::Options::default(), Some(&po));
+                let mut opts = naga::back::spv::Options::default();
+                opts.lang_version = (1, 3);
+                let pc = naga::back::PipelineConstants::default();
+                let (pm, pi) = match naga::back::pipeline_constants::process_overrides(&m, &info, Some((ep.stage, ep.name.as_str())), &pc) {
+                    Ok(x) => x,
+                    Err(e) => { eprintln!("SPVERR {path} {} overrides: {e}", ep.name); continue; }
+                };
+                let words = match naga::back::spv::write_vec(&pm, &pi, &opts, Some(&po)) {
+                    Ok(w) => w,
+                    Err(e) => { eprintln!("SPVERR {path} {}: {e}", ep.name); continue; }
+                };
+                let mut h: u64 = 0xcbf29ce484222325;
+                for w in &words { h ^= *w as u64; h = h.wrapping_mul(0x100000001b3); }
+                eprintln!("SPVHASH {path} {} {h:016x} {}", ep.name, words.len());
                 spv_ms += ts.elapsed().as_secs_f64() * 1e3; n += 1;
             }
             eprintln!("{path:34} compose {:7.1} ms  validate {:7.1} ms  spv {:7.1} ms ({n} entry points, {} fns)",
