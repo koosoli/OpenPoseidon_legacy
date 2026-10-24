@@ -39,9 +39,10 @@ struct Layout
     std::vector<int> hidden; // Arma 3's script-driven controls
 };
 const Layout kMissionLayout{"RscDisplaySingleMission", 106, 110, 111, 112, 113,
-                            {104, 105, 107, 108, 109, 114, 117, 120, 121, 122, 1201, 8434}};
+                            {104, 105, 107, 108, 109, 114, 117, 118, 119, 120, 121, 122, 645, 646, 1005, 1201,
+                             8434}};
 const Layout kCampaignLayout{"RscDisplayCampaignLoad", 1000, 104, 105, 106, 107,
-                             {102, 103, 108, 110, 111, 112, 1020, 1201, 8434}};
+                             {102, 103, 108, 110, 111, 112, 645, 646, 1005, 1020, 1201, 8434}};
 
 struct Entry
 {
