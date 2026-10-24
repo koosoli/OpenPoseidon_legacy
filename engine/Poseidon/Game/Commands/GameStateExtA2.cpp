@@ -486,7 +486,16 @@ GameValue A2TaskDestination(const GameState* state, GameValuePar oper1)
     Task* task = FindTask(oper1);
     if (task && task->destination.GetType() == GameArray)
         return task->destination;
-    return state->CreateGameValue(GameArray);
+    // a task without a destination is at [0,0,0] (the task handlers measure distances to it)
+    GameValue result = state->CreateGameValue(GameArray);
+    if (task)
+    {
+        GameArrayType& p = result;
+        p.Add(GameValue(0.0f));
+        p.Add(GameValue(0.0f));
+        p.Add(GameValue(0.0f));
+    }
+    return result;
 }
 
 GameValue A2SetCurrentTask(const GameState* state, GameValuePar oper1, GameValuePar oper2)
@@ -1548,6 +1557,24 @@ GameValue A2ActionKeysNamesArray(const GameState* state, GameValuePar oper1)
         break;
     }
     return result;
+}
+
+// actionKeysNames: the same names as one string, each quoted, joined by " or " (Arma 2
+// returns a string: the bootcamp hints call compile on it).
+GameValue A2ActionKeysNames(const GameState* state, GameValuePar oper1)
+{
+    const GameValue names = A2ActionKeysNamesArray(state, oper1);
+    const GameArrayType& list = names;
+    std::string out;
+    for (int i = 0; i < list.Size(); i++)
+    {
+        if (i)
+            out += " or ";
+        out += "\"";
+        out += (const char*)RString(list[i]);
+        out += "\"";
+    }
+    return GameValue(RString(out.c_str()));
 }
 
 // getGroupIconParams: no group icons are drawn here, so every group has the neutral ones --
@@ -3095,7 +3122,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameObject, "effectiveCommander", ObjCommander, GameObject),
     GameFunction(GameString, "faction", A2Faction, GameObject),
     GameFunction(GameArray, "synchronizedObjects", A2SynchronizedObjects, GameObject),
-    GameFunction(GameArray, "actionKeysNames", A2EmptyArrayUnary, GameString | GameArray),
+    GameFunction(GameString, "actionKeysNames", A2ActionKeysNames, GameString | GameArray),
     GameFunction(GameArray, "actionKeysNamesArray", A2ActionKeysNamesArray, GameString | GameArray),
     GameFunction(GameNothing, "hcRemoveAllGroups", A2NothingUnary, GameObject),
     GameFunction(GameString, "createLocation", A2CreateLocation, GameArray),
