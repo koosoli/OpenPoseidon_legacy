@@ -1294,6 +1294,28 @@ int Screen::Selected(int idc) const
     return -1;
 }
 
+bool SetControlText(IControl* control, const RString& text)
+{
+    if (auto* html = dynamic_cast<A3Html*>(control))
+        html->SetPage(RString(), text);
+    else if (auto* label = dynamic_cast<A3Static*>(control))
+        label->SetLabel(text);
+    else if (auto* other = dynamic_cast<A3Control*>(control))
+        other->SetText(text);
+    else
+        return false;
+    return true;
+}
+
+bool ControlText(IControl* control, RString& text)
+{
+    auto* a3 = dynamic_cast<A3Control*>(control);
+    if (!a3)
+        return false;
+    text = a3->GetText();
+    return true;
+}
+
 bool Screen::Checked(int idc) const
 {
     for (const Member& m : _impl->members)

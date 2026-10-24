@@ -484,6 +484,17 @@ class ScriptDisplay : public Display
 
     const std::string& ClassName() const { return _class; }
 
+    // Enter and Escape close it as OK does (the choice shown is the one taken)
+    bool OnKeyDown(unsigned nChar, unsigned nRepCnt, unsigned nFlags) override
+    {
+        if (IsUiConfirmKey(nChar) || nChar == SDLK_ESCAPE)
+        {
+            OnButtonClicked(kSaveOk);
+            return true;
+        }
+        return Display::OnKeyDown(nChar, nRepCnt, nFlags);
+    }
+
     void OnButtonClicked(int idc) override
     {
         switch (idc)

@@ -1,3 +1,4 @@
+#include <Poseidon/UI/Arma3Menu.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
@@ -265,43 +266,45 @@ GameValue CtrlGetText(const GameState* state, GameValuePar oper1)
     {
         return "";
     }
+    if (RString a3; Arma3Menu::ControlText(ctrl, a3))
+        return a3;
 
     int type = ctrl->GetType();
     switch (type)
     {
         case CT_STATIC:
         {
-            CStatic* s = static_cast<CStatic*>(ctrl);
+            CStatic* s = dynamic_cast<CStatic*>(ctrl);
             return s ? s->GetText() : "";
         }
         case CT_BUTTON:
         {
-            CButton* s = static_cast<CButton*>(ctrl);
+            CButton* s = dynamic_cast<CButton*>(ctrl);
             return s ? s->GetText() : "";
         }
         case CT_EDIT:
         {
-            CEdit* s = static_cast<CEdit*>(ctrl);
+            CEdit* s = dynamic_cast<CEdit*>(ctrl);
             return s ? s->GetText() : "";
         }
         case CT_ACTIVETEXT:
         {
-            CActiveText* s = static_cast<CActiveText*>(ctrl);
+            CActiveText* s = dynamic_cast<CActiveText*>(ctrl);
             return s ? s->GetText() : "";
         }
         case CT_3DSTATIC:
         {
-            C3DStatic* s = static_cast<C3DStatic*>(ctrl);
+            C3DStatic* s = dynamic_cast<C3DStatic*>(ctrl);
             return s ? s->GetText() : "";
         }
         case CT_3DACTIVETEXT:
         {
-            C3DActiveText* s = static_cast<C3DActiveText*>(ctrl);
+            C3DActiveText* s = dynamic_cast<C3DActiveText*>(ctrl);
             return s ? s->GetText() : "";
         }
         case CT_3DEDIT:
         {
-            C3DEdit* s = static_cast<C3DEdit*>(ctrl);
+            C3DEdit* s = dynamic_cast<C3DEdit*>(ctrl);
             return s ? s->GetText() : "";
         }
         default:
@@ -324,50 +327,59 @@ GameValue CtrlSetText(const GameState* state, GameValuePar oper1)
     }
 
     RString text = array[1];
+    if (Arma3Menu::SetControlText(ctrl, text))
+        return NOTHING;
 
     int type = ctrl->GetType();
     switch (type)
     {
         case CT_STATIC:
         {
-            CStatic* s = static_cast<CStatic*>(ctrl);
-            s->SetText(text);
+            CStatic* s = dynamic_cast<CStatic*>(ctrl);
+            if (s)
+                s->SetText(text);
             break;
         }
         case CT_BUTTON:
         {
-            CButton* s = static_cast<CButton*>(ctrl);
-            s->SetText(text);
+            CButton* s = dynamic_cast<CButton*>(ctrl);
+            if (s)
+                s->SetText(text);
             break;
         }
         case CT_EDIT:
         {
-            CEdit* s = static_cast<CEdit*>(ctrl);
-            s->SetText(text);
+            CEdit* s = dynamic_cast<CEdit*>(ctrl);
+            if (s)
+                s->SetText(text);
             break;
         }
         case CT_ACTIVETEXT:
         {
-            CActiveText* s = static_cast<CActiveText*>(ctrl);
-            s->SetText(text);
+            CActiveText* s = dynamic_cast<CActiveText*>(ctrl);
+            if (s)
+                s->SetText(text);
             break;
         }
         case CT_3DSTATIC:
         {
-            C3DStatic* s = static_cast<C3DStatic*>(ctrl);
-            s->SetText(text);
+            C3DStatic* s = dynamic_cast<C3DStatic*>(ctrl);
+            if (s)
+                s->SetText(text);
             break;
         }
         case CT_3DACTIVETEXT:
         {
-            C3DActiveText* s = static_cast<C3DActiveText*>(ctrl);
-            s->SetText(text);
+            C3DActiveText* s = dynamic_cast<C3DActiveText*>(ctrl);
+            if (s)
+                s->SetText(text);
             break;
         }
         case CT_3DEDIT:
         {
-            C3DEdit* s = static_cast<C3DEdit*>(ctrl);
-            s->SetText(text);
+            C3DEdit* s = dynamic_cast<C3DEdit*>(ctrl);
+            if (s)
+                s->SetText(text);
             break;
         }
         default:
@@ -389,17 +401,17 @@ GameValue ButtonGetAction(const GameState* state, GameValuePar oper1)
     {
         case CT_BUTTON:
         {
-            CButton* s = static_cast<CButton*>(ctrl);
+            CButton* s = dynamic_cast<CButton*>(ctrl);
             return s ? s->GetAction() : "";
         }
         case CT_ACTIVETEXT:
         {
-            CActiveText* s = static_cast<CActiveText*>(ctrl);
+            CActiveText* s = dynamic_cast<CActiveText*>(ctrl);
             return s ? s->GetAction() : "";
         }
         case CT_3DACTIVETEXT:
         {
-            C3DActiveText* s = static_cast<C3DActiveText*>(ctrl);
+            C3DActiveText* s = dynamic_cast<C3DActiveText*>(ctrl);
             return s ? s->GetAction() : "";
         }
         default:
@@ -428,20 +440,23 @@ GameValue ButtonSetAction(const GameState* state, GameValuePar oper1)
     {
         case CT_BUTTON:
         {
-            CButton* s = static_cast<CButton*>(ctrl);
-            s->SetAction(text);
+            CButton* s = dynamic_cast<CButton*>(ctrl);
+            if (s)
+                s->SetAction(text);
             break;
         }
         case CT_ACTIVETEXT:
         {
-            CActiveText* s = static_cast<CActiveText*>(ctrl);
-            s->SetAction(text);
+            CActiveText* s = dynamic_cast<CActiveText*>(ctrl);
+            if (s)
+                s->SetAction(text);
             break;
         }
         case CT_3DACTIVETEXT:
         {
-            C3DActiveText* s = static_cast<C3DActiveText*>(ctrl);
-            s->SetAction(text);
+            C3DActiveText* s = dynamic_cast<C3DActiveText*>(ctrl);
+            if (s)
+                s->SetAction(text);
             break;
         }
         default:
@@ -463,17 +478,17 @@ static CListBoxContainer* GetListbox(const GameState* state, GameValuePar oper1)
     {
         case CT_COMBO:
         {
-            CCombo* lb = static_cast<CCombo*>(ctrl);
+            CCombo* lb = dynamic_cast<CCombo*>(ctrl);
             return lb;
         }
         case CT_LISTBOX:
         {
-            CListBox* lb = static_cast<CListBox*>(ctrl);
+            CListBox* lb = dynamic_cast<CListBox*>(ctrl);
             return lb;
         }
         case CT_3DLISTBOX:
         {
-            C3DListBox* lb = static_cast<C3DListBox*>(ctrl);
+            C3DListBox* lb = dynamic_cast<C3DListBox*>(ctrl);
             return lb;
         }
         default:
@@ -523,20 +538,23 @@ GameValue LBSetCurSel(const GameState* state, GameValuePar oper1)
     {
         case CT_COMBO:
         {
-            CCombo* lb = static_cast<CCombo*>(ctrl);
-            lb->SetCurSel(sel);
+            CCombo* lb = dynamic_cast<CCombo*>(ctrl);
+            if (lb)
+                lb->SetCurSel(sel);
             break;
         }
         case CT_LISTBOX:
         {
-            CListBox* lb = static_cast<CListBox*>(ctrl);
-            lb->SetCurSel(sel);
+            CListBox* lb = dynamic_cast<CListBox*>(ctrl);
+            if (lb)
+                lb->SetCurSel(sel);
             break;
         }
         case CT_3DLISTBOX:
         {
-            C3DListBox* lb = static_cast<C3DListBox*>(ctrl);
-            lb->SetCurSel(sel);
+            C3DListBox* lb = dynamic_cast<C3DListBox*>(ctrl);
+            if (lb)
+                lb->SetCurSel(sel);
             break;
         }
     }
@@ -820,12 +838,12 @@ static CSliderContainer* GetSlider(const GameState* state, GameValuePar oper1)
     {
         case CT_SLIDER:
         {
-            CSlider* slider = static_cast<CSlider*>(ctrl);
+            CSlider* slider = dynamic_cast<CSlider*>(ctrl);
             return slider;
         }
         case CT_3DSLIDER:
         {
-            C3DSlider* slider = static_cast<C3DSlider*>(ctrl);
+            C3DSlider* slider = dynamic_cast<C3DSlider*>(ctrl);
             return slider;
         }
         default:

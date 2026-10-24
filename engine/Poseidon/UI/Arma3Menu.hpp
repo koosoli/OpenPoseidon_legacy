@@ -28,6 +28,7 @@
 
 class Control;
 class ControlsContainer;
+class IControl;
 class Display;
 
 namespace Poseidon::Arma3Menu
@@ -42,6 +43,11 @@ Display* CreateContentDisplay(ControlsContainer* parent, int idc);
 // An Arma 3 screen a script opens (createDisplay / createDialog) that this engine runs natively,
 // in place of the scripts behind it (Arma3Screens.cpp); null for any other class.
 Display* CreateScriptDisplay(ControlsContainer* parent, const char* className);
+
+// ctrlSetText / ctrlSetStructuredText / ctrlText on a control of an Arma 3 screen (they are not CWA's
+// CStatic and the like though their types read alike); false for any other control.
+bool SetControlText(IControl* control, const RString& text);
+bool ControlText(IControl* control, RString& text);
 
 // The entry chosen in a closed CreateContentDisplay screen.
 bool ContentChoice(ControlsContainer* display, bool& campaign, std::string& value);
