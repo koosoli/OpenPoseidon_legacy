@@ -172,21 +172,33 @@ void FillReflectLanes(WgrDraw3D& d, const Object* owner, const Texture* texture,
             isVehicle = true;
             if (const EntityAIType* type = transport->GetType())
             {
-                const TargetSide side = type->GetTypicalSide();
-                military = side == TEast || side == TWest || side == TGuerrila;
-                // A civilian class name wins over the side: the first logged run (2026-10-22)
-                // read Arma 3's C_Van_01_transport_F as military (its side comes from a base
-                // class), which painted a white civilian van matt.
-                // Imported Arma classes carry a generated prefix (A1x_C_Van_...), which the
-                // second run showed: strip it before looking for the C_ of a civilian class.
-                if (military)
+                // Per vehicle type, once per thread: this runs for every draw call of every
+                // vehicle, and the name test below builds a string.
+                // Keyed by address and checked by name, so a type freed between missions and its
+                // address reused cannot inherit the answer.
+                thread_local std::unordered_map<const EntityAIType*, std::pair<std::string, bool>> militaryByType;
+                const char* typeName = type->GetName().Data();
+                auto known = militaryByType.find(type);
+                if (known == militaryByType.end() || known->second.first != (typeName ? typeName : ""))
                 {
-                    std::string cls = RM::Normalise(type->GetName().Data());
-                    if (cls.size() > 4 && cls[0] == 'a' && cls[2] == 'x' && cls[3] == '_')
-                        cls.erase(0, 4);
-                    if (cls.rfind("c_", 0) == 0 || cls.find("civ") != std::string::npos)
-                        military = false;
+                    const TargetSide side = type->GetTypicalSide();
+                    bool mil = side == TEast || side == TWest || side == TGuerrila;
+                    // A civilian class name wins over the side: the first logged run (2026-10-22)
+                    // read Arma 3's C_Van_01_transport_F as military (its side comes from a base
+                    // class), which painted a white civilian van matt.
+                    // Imported Arma classes carry a generated prefix (A1x_C_Van_...), which the
+                    // second run showed: strip it before looking for the C_ of a civilian class.
+                    if (mil)
+                    {
+                        std::string cls = RM::Normalise(type->GetName().Data());
+                        if (cls.size() > 4 && cls[0] == 'a' && cls[2] == 'x' && cls[3] == '_')
+                            cls.erase(0, 4);
+                        if (cls.rfind("c_", 0) == 0 || cls.find("civ") != std::string::npos)
+                            mil = false;
+                    }
+                    known = militaryByType.insert_or_assign(type, std::make_pair(std::string(typeName ? typeName : ""), mil)).first;
                 }
+                military = known->second.second;
             }
         }
     }
