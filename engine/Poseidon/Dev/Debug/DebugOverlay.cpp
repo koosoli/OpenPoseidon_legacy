@@ -8797,7 +8797,7 @@ const char* BeamPlayerHere()
     return s_zeusStatus.c_str();
 }
 
-bool SetEarthMoonPose(double altitude, double pitchDegrees, bool surface)
+bool SetEarthMoonPose(double altitude, double pitchDegrees, int surface)
 {
     // Straight into the moon frame (EarthMoonFrame.hpp): the camera `altitude` above a selenographic
     // point -- over the sunlit side looking at the moon, or on the near side with the sun ~15 degrees up,
@@ -8813,7 +8813,14 @@ bool SetEarthMoonPose(double altitude, double pitchDegrees, bool surface)
     const D3 s = Normalize(DirToEcef(earthFrame, sky.toSun));
     const D3 w = Normalize(moon * -1.0); // toward the Earth
     D3 up, look;
-    if (surface)
+    if (surface == 2)
+    {
+        up = w;
+        const D3 away = Normalize(s - up * Dot(s, up)) * -1.0;
+        const double e = pitchDegrees * H_PI / 180.0;
+        look = Normalize(away * std::cos(e) + up * std::sin(e));
+    }
+    else if (surface)
     {
         const D3 perp = Normalize(w - s * Dot(w, s));
         const double a = 75.0 * H_PI / 180.0;

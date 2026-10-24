@@ -1215,7 +1215,7 @@ GameValue TriEarthMoon(const GameState*, GameValuePar arg)
     for (int i=0;i<3;++i)
         if (values[i].GetType()!=GameScalar) return GameValue("FAIL:expected_scalars");
     return GameValue(DebugOverlay::SetEarthMoonPose((GameScalarType)values[0],(GameScalarType)values[1],
-        (GameScalarType)values[2] > 0.5f) ? "OK" : "FAIL:no_moon_or_camera");
+        int((GameScalarType)values[2] + 0.5f)) ? "OK" : "FAIL:no_moon_or_camera");
 }
 
 GameValue TriEarthLocation(const GameState*, GameValuePar arg)

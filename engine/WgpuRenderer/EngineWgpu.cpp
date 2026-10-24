@@ -6301,7 +6301,7 @@ void EngineWgpu::NextFrame()
         // hoisted so it also fades the shadow darkness. The terrain/object ambient greys via the
         // env->SH bake (clouds are in the env map) so the ambient lift here is modest.
         float cloudDim = 0.0f;
-        if (_sky.enabled && _sky.cloudCoverage > 0.0f)
+        if (_sky.enabled && _sky.cloudCoverage > 0.0f && !(EarthStreaming::Enabled() && EarthStreaming::MoonFrameActive()))
         {
             // Saturate by ~0.8 coverage: the sky reads as fully overcast there, so the light should
             // be fully diffuse by then too (higher coverage only thickens the deck).
@@ -22385,7 +22385,10 @@ void EngineWgpu::PushRenderParams()
         cloudTop = base + std::max(cloudTop - cloudBottom, 200.0f);
         cloudBottom = base;
     }
-    p.sky.cloud0 = {_sky.cloudCoverage, _sky.cloudDensity, cloudBottom, cloudTop};
+    // No cloud deck on the moon: the deck is a layer at the Earth's heights in world Y, which in the moon frame
+    // hangs over the moon's ground (its relief runs from -9 to +10.6 km about y = 0).
+    const bool moonFrame = EarthStreaming::Enabled() && EarthStreaming::MoonFrameActive();
+    p.sky.cloud0 = {moonFrame ? 0.0f : _sky.cloudCoverage, _sky.cloudDensity, cloudBottom, cloudTop};
     p.sky.cloud1 = {0.0f, 0.0f, shapeScale, detailScale};
     p.sky.cloud2 = {_sky.cloudHgG, _sky.cloudPowder, _sky.cloudAmbient, _sky.cloudMaxDist};
     p.sky.cloud3 = {weatherScale, _sky.cloudWeatherAmount, warpScale, _sky.cloudWarpAmount};

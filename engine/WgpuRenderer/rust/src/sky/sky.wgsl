@@ -2404,11 +2404,16 @@ fn earth_moon_body(pos: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
     // Camera relative to the moon's centre from WORLD positions, not from the Earth-relative `pos`:
     // near the moon (moon frame) these are both small, so the surface is exact and does not shimmer.
     let oc = sky.cam_pos.xyz - sky.moon_centre.xyz;
-    // Moon-fixed frame: w toward the Earth, u/v from the Earth's spin axis in this tangent frame.
+    // Moon-fixed frame: w toward the Earth, u east, v north (EarthMoonFrame.hpp MoonFixedAxes: e = p x w,
+    // north = w x e, in ECEF). The world is left-handed (x east, y up, z north), so a cross product taken
+    // in world coordinates is the mirror of the ECEF one: u = w x axis, v = u x w here. Taken as in ECEF,
+    // the drawn moon sampled every map at (-lat, -lon) -- right only at the sub-Earth point -- and a
+    // soldier beamed down elsewhere stood up to kilometres below the drawn surface (owner, 2026-10-24:
+    // grey sky and a dark band; the albedo map was mirrored too).
     let w = normalize(-centre);
     let axis = sky.ecef_z.xyz;
-    let u = normalize(cross(axis, w));
-    let v = cross(w, u);
+    let u = normalize(cross(w, axis));
+    let v = cross(u, w);
     // Real topography (LOLA): within 300 km of the surface the ray is marched against the height map, so
     // crater rims and mountains stand on the horizon and the ground under the camera is the ground the
     // soldier walks on (EarthMoonFrame.hpp MoonGroundHeight). Farther out the relief is below a pixel:
