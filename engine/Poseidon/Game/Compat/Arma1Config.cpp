@@ -989,6 +989,25 @@ std::string StringValue(const ParamEntry& cls, const char* key)
     return (const char*)(RStringB)*e;
 }
 
+// An Arma 1 config text as Arma 1 shows it: "$STR_DN_AIR" / "@STR..." looked up in the
+// Arma 1 stringtables first ("Luft" in a German Arma 1 -- through the usual order CWA's own
+// STR_DN_AIR came first and gave "Air"), anything else verbatim.
+std::string Arma1Text(const std::string& raw)
+{
+    const char* key = nullptr;
+    if (raw.size() > 1 && raw[0] == '@')
+        key = raw.c_str() + 1;
+    else if (raw.size() > 4 && raw[0] == '$' && _strnicmp(raw.c_str() + 1, "STR", 3) == 0)
+        key = raw.c_str() + 1;
+    if (!key)
+        return raw;
+    const RString text = LocalizeArma1String(key);
+    // a key no table has stays as it was (the config reader resolves it, or shows it)
+    if (text.GetLength() == 0 || strncmp(text.Data(), "!!!", 3) == 0)
+        return raw;
+    return text.Data();
+}
+
 // The mission editor's heading for an Arma 1 vehicleClass, named as Arma 1 names it with
 // the game marked after it: CfgVehicleClasses >> Car >> displayName ("$STR_DN_CARS",
 // "Autos" in a German Arma 1) gives "Autos (Arma 1)". The editor shows a vehicleClass as
@@ -1001,11 +1020,9 @@ std::string EditorClassLabel(const std::string& a1Class)
         if (const ParamEntry* cls = classes->FindEntry(a1Class.c_str()); cls && cls->IsClass())
             if (const ParamEntry* name = cls->FindEntry("displayName"); name && !name->IsClass() && !name->IsArray())
             {
-                RString text = name->GetValue();
-                if (text.GetLength() > 1 && (text[0] == '$' || text[0] == '@'))
-                    text = Localize(text);
-                if (text.GetLength() > 0)
-                    label = text.Data();
+                const std::string text = Arma1Text(name->GetValue().Data());
+                if (!text.empty())
+                    label = text;
             }
     label.erase(std::remove(label.begin(), label.end(), '"'), label.end());
     return label + " (Arma 1)";
@@ -3062,7 +3079,9 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     // type that is no BuildingType -- the 0xC0000005 in Building's constructor).
     if (const ParamEntry* scope = cwa->FindEntry("scope"); !scope || (int)*scope < 1)
         text += "\t\tscope=1;\r\n";
-    const std::string displayName = StringValue(*a1, "displayName");
+    // Arma 1's own name ("$STR_DN_..." resolved against the Arma 1 stringtables first)
+    std::string displayName = Arma1Text(StringValue(*a1, "displayName"));
+    displayName.erase(std::remove(displayName.begin(), displayName.end(), '"'), displayName.end());
     if (!displayName.empty())
         text += "\t\tdisplayName=\"" + displayName + "\";\r\n";
     // The mission editor lists an Arma 1 class under its own heading ("Arma 1 Men", "Arma 1

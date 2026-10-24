@@ -667,6 +667,7 @@ class StringTable
     void Load(RString type, RString filename, float priority, bool init);
     // Arma 1 stringtable read from a private archive; kept for language switches.
     void LoadArma1FromMemory(const char* name, const char* data, size_t size);
+    RString LocalizeArma1First(const char* str);
 
     int Register(RString name);
 
@@ -862,6 +863,18 @@ bool StringTable::SetLanguage(RString newLang)
     return true;
 }
 
+RString StringTable::LocalizeArma1First(const char* str)
+{
+    RString lower = str;
+    lower.Lower();
+    const StringTableItem& item = _tableArma1[lower];
+    if (!_tableArma1.IsNull(item))
+    {
+        return item.value;
+    }
+    return Localize(str);
+}
+
 RString StringTable::Localize(const char* str)
 {
     const StringTableItem& item1 = _tableMission[str];
@@ -945,6 +958,11 @@ RString LocalizeString(int ids)
 RString LocalizeString(const char* str)
 {
     return GStringTable.Localize(str);
+}
+
+RString LocalizeArma1String(const char* key)
+{
+    return GStringTable.LocalizeArma1First(key);
 }
 
 const char* LocalizeStringWithFallback(const char* key, const char* fallback)
