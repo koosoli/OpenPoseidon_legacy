@@ -851,9 +851,16 @@ fn shade(
     if (reflect_classified(mat, linear)) {
         // REFLECT-001 phase C: GGX base + clear coat instead of the legacy Blinn lobe (never both:
         // that is the double highlight). Raw sun colour, as the sky-lit diffuse above uses.
-        let spec_r = reflect_sun_specular(mat, albedo, nrm, normalize(-world_pos), -frame.sun_dir_world.xyz)
-            * frame.sun_diffuse.rgb * sun_vis;
-        rgb += max(spec_r, vec3<f32>(0.0));
+        // F.6: Matt and PaintMatt (every military body panel, F.1) take no sun highlight at all --
+        // the owner's rule is "no reflection on military vehicles, at most the windows". At
+        // roughness 0.6 the GGX lobe was a broad sheen over the whole lit side: +5-10/255 on
+        // T72/M1A1/BMP/M113 at noon and at dusk against reflections off (opmil, 7652c3d).
+        let cls = u32(mat.refl_b.x + 0.5);
+        if (cls != 1u && cls != 2u) {
+            let spec_r = reflect_sun_specular(mat, albedo, nrm, normalize(-world_pos), -frame.sun_dir_world.xyz)
+                * frame.sun_diffuse.rgb * sun_vis;
+            rgb += max(spec_r, vec3<f32>(0.0));
+        }
     } else if (m_spec_power > 0.0) {
         let view_dir = normalize(-world_pos);
         let half_vec = normalize(-frame.sun_dir_world.xyz + view_dir);
