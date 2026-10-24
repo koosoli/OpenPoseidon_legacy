@@ -964,12 +964,35 @@ fn moon_map_albedo(q: vec3<f32>, footprint: f32) -> f32 {
 // 1737.4 km reference sphere, same chart as moon_map. Its range in metres rides in ecef_x.w / ecef_z.w.
 @group(0) @binding(15) var moon_relief_tex: texture_2d<f32>;
 fn moon_height_range() -> vec2<f32> { return vec2<f32>(sky.ecef_x.w, sky.ecef_z.w); }
-// Height (metres) at moon-fixed direction q (as moon_map_albedo), at mip level `lod`.
+// One level of the height map at uv, bilinear at full precision: texel centres, longitude wrapping,
+// latitude clamped -- exactly EarthMoonRelief.cpp's sample, so the ground drawn is the ground walked on
+// (the sampler's 8-bit weights across a 2.7 km texel were metres off on a slope).
+fn moon_height_level(uv: vec2<f32>, level: i32) -> f32 {
+    let size = vec2<i32>(textureDimensions(moon_relief_tex, level));
+    let p = uv * vec2<f32>(size) - 0.5;
+    let f = floor(p);
+    let a = p - f;
+    let x0 = ((i32(f.x) % size.x) + size.x) % size.x;
+    let x1 = (x0 + 1) % size.x;
+    let y0 = clamp(i32(f.y), 0, size.y - 1);
+    let y1 = clamp(i32(f.y) + 1, 0, size.y - 1);
+    let h00 = textureLoad(moon_relief_tex, vec2<i32>(x0, y0), level).r;
+    let h10 = textureLoad(moon_relief_tex, vec2<i32>(x1, y0), level).r;
+    let h01 = textureLoad(moon_relief_tex, vec2<i32>(x0, y1), level).r;
+    let h11 = textureLoad(moon_relief_tex, vec2<i32>(x1, y1), level).r;
+    return mix(mix(h00, h10, a.x), mix(h01, h11, a.x), a.y);
+}
+// Height (metres) at moon-fixed direction q (as moon_map_albedo), at mip level `lod` (levels blended).
 fn moon_height_at(q: vec3<f32>, lod: f32) -> f32 {
     let lon = atan2(q.x, q.z);
     let lat = asin(clamp(q.y, -1.0, 1.0));
     let uv = vec2<f32>(lon / (2.0 * PI) + 0.5, 0.5 - lat / PI);
-    return textureSampleLevel(moon_relief_tex, moon_map_samp, uv, lod).r * 1000.0;
+    let last = f32(textureNumLevels(moon_relief_tex) - 1);
+    let l = clamp(lod, 0.0, last);
+    let l0 = floor(l);
+    let h0 = moon_height_level(uv, i32(l0));
+    if (l - l0 < 1.0e-3 || l0 >= last) { return h0; }
+    return mix(h0, moon_height_level(uv, i32(l0) + 1), l - l0);
 }
 fn moon_relief_lod(footprint: f32) -> f32 {
     return max(log2(max(footprint * f32(textureDimensions(moon_relief_tex).x) / (2.0 * PI), 1.0e-6)), 0.0);

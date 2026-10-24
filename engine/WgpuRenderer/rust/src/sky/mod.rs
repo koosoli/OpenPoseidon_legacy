@@ -1471,8 +1471,18 @@ impl Sky {
                 tex_entry(12),
                 // The whole world's moon surface map (moonmap.rs) and its sampler, wrapping in longitude.
                 tex_entry(13),
-                // The moon's topography (moonmap::MoonRelief), sampled with binding 14 too.
-                tex_entry(15),
+                // The moon's topography (moonmap::MoonRelief): R32Float metres, read with textureLoad and
+                // filtered in the shader (moon_height_at), so not a filterable binding.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 15,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
                 wgpu::BindGroupLayoutEntry {
                     binding: 14,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -1558,7 +1568,7 @@ impl Sky {
                 mip_level_count: relief.levels.len() as u32,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R16Float,
+                format: wgpu::TextureFormat::R32Float,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             },
