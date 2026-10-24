@@ -2253,7 +2253,8 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "setCameraInterest", function, A1IgnoredBinary, GameObject, GameScalar),
         GameOperator(GameNothing, "ctrlSetEventHandler", function, A1IgnoredBinary, GameScalar, GameArray),
         GameOperator(GameNothing, "doFSM", function, A1IgnoredBinary, GameObjectOrArray, GameArray),
-        GameOperator(GameScalar, "execFSM", function, A1IgnoredBinary, GameVoid, GameString),
+        // execFSM: GameStateExtA2's (it runs the FSM). An ignoring entry here was matched
+        // first and every scripted FSM -- the animals' agent tasks among them -- did nothing.
         GameOperator(GameNothing, "setParticleParams", function, A1IgnoredBinary, GameObject, GameArray),
         GameOperator(GameNothing, "setParticleRandom", function, A1IgnoredBinary, GameObject, GameArray),
         GameOperator(GameNothing, "setParticleCircle", function, A1IgnoredBinary, GameObject, GameArray),

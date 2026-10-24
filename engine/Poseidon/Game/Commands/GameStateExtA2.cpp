@@ -1080,6 +1080,11 @@ std::unique_ptr<Fsm> LoadFsm(const std::string& file)
 GameValue A2ExecFSM(const GameState*, GameValuePar oper1, GameValuePar oper2)
 {
     std::unique_ptr<Fsm> fsm = LoadFsm((const char*)RString(oper2));
+    {
+        static std::set<std::string> started;
+        if (started.insert(fsm->file).second)
+            LOG_INFO(Mission, "Arma 2: execFSM starts {}{}", fsm->file, fsm->done ? " (not loaded)" : "");
+    }
     fsm->vars.VarSet("_this", oper1.GetNil() ? GameValue() : oper1, true);
     // An agent task's FSM (an Arma 2 animal's main.fsm) knows its unit as _agent; Arma 2's
     // engine starts it so, here it is started by execFSM with the unit as _this.
