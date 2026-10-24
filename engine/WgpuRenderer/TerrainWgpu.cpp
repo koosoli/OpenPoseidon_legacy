@@ -4456,6 +4456,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             RequestEarthMeshes(p,false); // built off the main thread, uploaded when ready (below)
         if(!keepTextures)
         {
+            if(_earthSurfaceTexture)
+                LOG_INFO(Graphics,"Earth terrain patch {} replaces the shown imagery (no atlas for it yet)",p.generation);
             if(_earthSurfaceTexture){wgr_texture_destroy(_renderer,_earthSurfaceTexture);_earthSurfaceTexture=0;}
             if(_earthFarTexture){wgr_texture_destroy(_renderer,_earthFarTexture);_earthFarTexture=0;}
         }
@@ -4510,8 +4512,16 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         }
         installTimes.Mark("patch apply");
     }
-    if (_earthPendingPatch && std::chrono::steady_clock::now() - _earthPendingAt > std::chrono::seconds(12))
-        applyPatch(std::move(_earthPendingPatch), false); // imagery is not coming; show the geometry
+    // Imagery is not coming for the pending patch: show its geometry -- unless textured ground is showing.
+    // Applied without imagery the patch takes the atlas down with it, and the ground under the camera fell
+    // back to the globe image for the seconds until the next atlas (owner, 2026-10-24: "an already loaded
+    // sat image deloads and flickers when I freefly around"; circling Lisbon at 300 m it did every lap).
+    // The textured terrain stays until the pending window's imagery arrives; physics has the new ground.
+    if (_earthPendingPatch && !_earthSurfaceTexture && std::chrono::steady_clock::now() - _earthPendingAt > std::chrono::seconds(12))
+    {
+        LOG_INFO(Graphics, "Earth terrain patch {} shown without imagery after 12 s", _earthPendingPatch->generation);
+        applyPatch(std::move(_earthPendingPatch), false);
+    }
     else if (_earthPendingPatch && !_earthSurfaceTexture &&
              std::chrono::steady_clock::now() - _earthDirectApplyAt >= std::chrono::seconds(1))
     {
