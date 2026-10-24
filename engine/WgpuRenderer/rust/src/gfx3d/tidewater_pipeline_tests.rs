@@ -19,14 +19,8 @@ fn tidewater_pipelines_build_against_the_real_frame_layout() {
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         required_limits: adapter.limits(),
         // everything the adapter has but the experimental features, which need an opt-in
-        required_features: adapter.features().difference(
-            wgpu::Features::EXPERIMENTAL_RAY_QUERY
-                | wgpu::Features::EXPERIMENTAL_MESH_SHADER
-                | wgpu::Features::EXPERIMENTAL_RAY_HIT_VERTEX_RETURN
-                | wgpu::Features::EXPERIMENTAL_MESH_SHADER_MULTIVIEW
-                | wgpu::Features::EXPERIMENTAL_MESH_SHADER_POINTS
-                | wgpu::Features::EXPERIMENTAL_COOPERATIVE_MATRIX,
-        ),
+        // (the whole mask: wgpu 30 added EXPERIMENTAL_RAY_TRACING_PIPELINES to the list)
+        required_features: adapter.features().difference(wgpu::Features::all_experimental_mask()),
         ..Default::default()
     }))
     .unwrap_or_else(|e| panic!("tidewater pipeline test device: {e}"));
