@@ -75,9 +75,9 @@ GameValue CutRscEffect(const GameState* state, GameValuePar oper1);
 namespace Poseidon
 {
 extern Input GInput; // InputSubsystem.cpp
+}
 GameValue VehDoMove(const GameState* state, GameValuePar oper1, GameValuePar oper2); // GameStateExtGrp.cpp
 GameValue VehDone(const GameState* state, GameValuePar oper1);                        // GameStateExtGrp.cpp
-}
 
 using namespace Poseidon;
 
@@ -1173,12 +1173,12 @@ void KbStep(Runtime& rt)
 // no move left (unitReady), moveToFailed never.
 GameValue A2MoveTo(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
-    return VehDoMove(state, oper1, oper2);
+    return ::VehDoMove(state, oper1, oper2);
 }
 
 GameValue A2MoveToCompleted(const GameState* state, GameValuePar oper1)
 {
-    return VehDone(state, oper1);
+    return ::VehDone(state, oper1);
 }
 
 GameValue A2MoveToFailed(const GameState*, GameValuePar)
