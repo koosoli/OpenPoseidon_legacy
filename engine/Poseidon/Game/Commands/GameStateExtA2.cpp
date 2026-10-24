@@ -126,6 +126,7 @@ GameValue ObjSetVectorDirectionAndUp(const GameState* state, GameValuePar oper1,
 GameValue GrpKnowsAbout(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue GroupCreate(const GameState* state, GameValuePar oper1);
 GameValue SideCivilian(const GameState* state);
+GameValue ListJoin(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 
 GameValue VehProcessAction(const GameState* state, GameValuePar oper1, GameValuePar oper2); // GameStateExtGrp.cpp
@@ -1214,6 +1215,22 @@ GameValue A2MoveTo(const GameState* state, GameValuePar oper1, GameValuePar oper
             ++logged;
             LOG_INFO(Mission, "Arma 2: moveTo {} from {:.0f},{:.0f} to {:.0f},{:.0f}", (const char*)obj->GetDebugName(),
                      obj->Position().X(), obj->Position().Z(), to.X(), to.Z());
+        }
+    }
+    // An agent (Arma 2's AMBIENT LIFE: the animals of a mission's Vehicles) has no group,
+    // and only a unit in a group moves to an order; it gets a civilian group of its own on
+    // its first moveTo, as createAgent's agents have (T01's cows stood: "no group").
+    if (Object* obj = GetObject(oper1))
+    {
+        Person* person = dyn_cast<Person>(obj);
+        AIUnit* unit = person ? person->Brain() : nullptr;
+        if (unit && !unit->GetGroup())
+        {
+            const GameValue group = GroupCreate(state, SideCivilian(state));
+            GameValue list = state->CreateGameValue(GameArray);
+            GameArrayType& units = list;
+            units.Add(oper1);
+            ListJoin(state, list, group);
         }
     }
     return ::VehDoMove(state, oper1, oper2);
