@@ -365,8 +365,17 @@ void EarthSurfaceStream::Run() {
     // pass with holes, coarse preview, streaming update) is not published: it is blurrier than the final
     // one already showing, and every window re-centre or altitude-band change swapped the sharp imagery
     // for blurry and back (owner: "the high resolution images are hidden behind the low resolution ones",
-    // "it flickers between low and high resolution"). The sharp one stays until the next final is ready.
-    uint64_t finalRevision=0;
+    // "it flickers between low and high resolution"). The sharp one stays until the next final is ready --
+    // while it still covers the ground: once the window has moved on by a quarter of the final atlas's span
+    // (flying forward), the camera is leaving that atlas, and holding the new window's cached atlas back for
+    // the network pass (~6 s) left the ground ahead on the blurry rings (owner: "an already loaded satellite
+    // image vanishes when I move a bit forward").
+    Window finalWindow;bool hasFinal=false;
+    const auto finalCovers=[&](const Window& w) {
+        return hasFinal && finalWindow.revision==w.revision &&
+               std::hypot(double(w.x)-finalWindow.x,double(w.z)-finalWindow.z)<.25*finalWindow.span;
+    };
+    const auto markFinal=[&](const Window& w){finalWindow=w;hasFinal=true;};
     const auto runPrefetch=[&](const std::vector<Window>& windows,uint64_t version,uint64_t serial) {
         const auto cancelled=[&]{return _stop.load() || _version!=version || _prefetchSerial!=serial;};
         unsigned downloads=0;
@@ -520,7 +529,7 @@ void EarthSurfaceStream::Run() {
                             if(hasPreview)frame.insert(at,under);
                             frame.insert(frame.end(),prepared.begin(),prepared.end());
                             auto staged=std::make_unique<Atlas>(BuildRegional(window,{nasa.data(),4096,2048},frame,AtlasSize,cancelled,FarAtlasSize));
-                            if(staged->error.empty() && !staged->farPixels.empty() && finalRevision!=window.revision) {
+                            if(staged->error.empty() && !staged->farPixels.empty() && !finalCovers(window)) {
                                 finish(*staged,false);
                                 std::snprintf(timing,sizeof(timing),"; %.2f s after the request, %u threads",since(requested),EarthParallel::Threads());
                                 staged->sources=label+timing;
@@ -578,12 +587,12 @@ void EarthSurfaceStream::Run() {
                     // and rebuild this very atlas (as long again as the first pass). Done.
                     const bool complete=found>0 && std::all_of(mosaics.begin(),mosaics.end(),
                         [](const EarthImageryTiles::Mosaic& m){return m.failures==0;});
-                    if(attempt->error.empty() && (complete || finalRevision!=window.revision)) {
+                    if(attempt->error.empty() && (complete || !finalCovers(window))) {
                         finish(*attempt,complete);
                         if(complete)attempt->sources+=" (complete)";
                         std::lock_guard lock(_mutex);
                         if(!_stop && _version==version)_ready=std::move(attempt);
-                        if(complete){finished=true;finalRevision=window.revision;break;}
+                        if(complete){finished=true;markFinal(window);break;}
                     }
                     continue;
                 }
@@ -592,7 +601,7 @@ void EarthSurfaceStream::Run() {
             }
         } catch(const std::exception& e) {sourceError=e.what();result->error=sourceError;finished=false;}
         if(!finished){
-            if(result->error.empty() && result->cellPresent && result->final)finalRevision=window.revision;
+            if(result->error.empty() && result->cellPresent && result->final)markFinal(window);
             std::lock_guard lock(_mutex);if(!_stop && _version==version)_ready=std::move(result);
         }
         // The build pre-empted any prefetch; carry on with what is still ahead (done windows are skipped).
