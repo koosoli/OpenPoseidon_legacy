@@ -361,7 +361,9 @@ GameValue A2RemoveAllItems(const GameState* state, GameValuePar oper1)
 }
 } // namespace
 
-INIT_MODULE(GameStateExtA2World, 3)
+// Called from GameStateExtA2's module start: an INIT_MODULE of its own here was dropped by
+// the linker with this otherwise unreferenced object file (run 41 still had none of these).
+void RegisterA2WorldCommands()
 {
     GGameState.NewOperator(GameOperator(GameArray, "isFlatEmpty", function, A2IsFlatEmpty, GameArray, GameArray));
     GGameState.NewOperator(
@@ -373,4 +375,4 @@ INIT_MODULE(GameStateExtA2World, 3)
     GGameState.NewOperator(GameOperator(GameNothing, "setUnconscious", function, A2SetUnconscious, GameObject, GameBool));
     GGameState.NewOperator(GameOperator(GameNothing, "setGroupIcon", function, A2SetGroupIcon, GameGroup, GameArray));
     GGameState.NewFunction(GameFunction(GameNothing, "removeAllItems", A2RemoveAllItems, GameObject));
-};
+}

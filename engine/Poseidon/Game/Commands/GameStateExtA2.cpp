@@ -3280,8 +3280,11 @@ const GameOperator A2Binary[] = {
 };
 } // namespace
 
+void RegisterA2WorldCommands(); // GameStateExtA2World.cpp
+
 INIT_MODULE(GameStateExtA2, 3)
 {
+    RegisterA2WorldCommands();
     for (const GameNular& n : A2Nular)
         GGameState.NewNularOp(n);
     for (const GameFunction& f : A2Unary)
