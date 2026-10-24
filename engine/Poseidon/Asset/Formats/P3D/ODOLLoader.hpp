@@ -297,7 +297,8 @@ class ODOLLoader
             // survive with zero vertices, and everything OFP animates -- turret
             // rotation, wheel spin, the static/blur rotor swap -- resolves
             // bone -> named selection -> vertices and finds nothing.
-            synthesizeBoneSelections(source.directory.bones, source.lods[i], lod.mesh, sourcePath, i);
+            synthesizeBoneSelections(source.directory.bones, source.lods[i], lod.mesh, sourcePath, i,
+                                     source.directory.skeletonName, source.directory.skeletonIsDiscrete);
             model.lodLevels.push_back(std::move(lod));
         }
 
@@ -376,7 +377,8 @@ class ODOLLoader
                 return e && *e == '1';
             }();
             const auto& lod0 = model.lodLevels.front().mesh.vertices;
-            if (man && spine && head && !keep && !lod0.empty())
+            const bool animalRig = isSkinnedAnimalRig(source.directory.bones, source.directory.skeletonIsDiscrete);
+            if (((man && spine && head) || animalRig) && !keep && !lod0.empty())
             {
                 float minY = lod0.front().position.y;
                 for (const auto& v : lod0)
@@ -671,8 +673,28 @@ class ODOLLoader
                  sourcePath, lodIndex, filled, proxies, source.header.proxies.size());
     }
 
+    // A skinned animal (Arma 2's cow, dog, sheep, goat, hen, rabbit, boar: a skeleton that is
+    // not discrete, with a head and hips or a spine) is posed like a man.
+    static bool isSkinnedAnimalRig(const std::vector<P3D::Odol73Bone>& bones, bool discrete)
+    {
+        if (discrete)
+            return false;
+        bool head = false, hips = false, spine = false;
+        for (const auto& b : bones)
+        {
+            std::string n = b.name;
+            for (char& c : n)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            head |= n == "head";
+            hips |= n == "hips";
+            spine |= n == "spine";
+        }
+        return head && (hips || spine);
+    }
+
     static void synthesizeBoneSelections(const std::vector<P3D::Odol73Bone>& bones, const P3D::Odol73StaticLod& source,
-                                         Mesh& mesh, const std::string& sourcePath, size_t lodIndex)
+                                         Mesh& mesh, const std::string& sourcePath, size_t lodIndex,
+                                         const std::string& skeletonName = std::string(), bool discrete = true)
     {
         const auto& refs  = source.rest.vertexBoneRefs;
         const auto& remap = source.header.subSkeletonsToSkeleton;
@@ -892,13 +914,26 @@ class ODOLLoader
         // hold only the vertices that bone itself moves, each with its own weight -- the
         // descendant closure below gave every spine selection the whole upper body at full
         // weight, so each vertex averaged all its ancestors and the soldier crumpled.
-        const bool skinned = boneByName.count("pelvis") && boneByName.count("spine") && boneByName.count("head");
+        const bool manRig = boneByName.count("pelvis") && boneByName.count("spine") && boneByName.count("head");
+        const bool skinned = manRig || isSkinnedAnimalRig(bones, discrete);
         if (skinned)
         {
-            // the skeleton's parents, for the binarised moves of this rig (ConvertBMTRToRTM)
-            auto& parents = Poseidon::Asset::Formats::BmtrSkeletonParents();
-            for (const auto& b : bones)
-                parents.emplace(lowered(b.name), lowered(b.parent));
+            // the skeleton's parents, for the binarised moves of this rig (ConvertBMTRToRTM):
+            // by its own name, and the man's also in the table every rig used before
+            if (manRig)
+            {
+                auto& parents = Poseidon::Asset::Formats::BmtrSkeletonParents();
+                for (const auto& b : bones)
+                    parents.emplace(lowered(b.name), lowered(b.parent));
+            }
+            if (!skeletonName.empty())
+            {
+                auto& rig = Poseidon::Asset::Formats::BmtrRigs()[lowered(skeletonName)];
+                for (const auto& b : bones)
+                    rig.parents.emplace(lowered(b.name), lowered(b.parent));
+                if (manRig && rig.rootRestHeight < 0)
+                    rig.rootRestHeight = 0.98f;
+            }
             fillSkinnedSelections(bones, source, mesh, boneByName, refs, remap, indexFirst, indexShift, indexLimit,
                                   perPoint, vertexToPoint, sourcePath, lodIndex, lowered);
             return;

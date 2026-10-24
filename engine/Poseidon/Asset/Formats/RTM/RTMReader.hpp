@@ -273,12 +273,28 @@ inline std::map<std::string, std::string>& BmtrSkeletonParents()
     return parents;
 }
 
+// A skinned rig by its skeleton name (lower case: "ofp2_manskeleton", "cowskeleton", ...): its
+// bone -> parent table and the height its root bone has above the ground at rest. Arma 2's
+// animals share bone names (hips, spine, head) with different parents, so one table for all
+// rigs would pose every animal by the first one loaded. A rig's rest height is read from its
+// own standing move when it is first needed (RtAnimation); 0.98 m is the man's pelvis.
+struct BmtrRig
+{
+    std::map<std::string, std::string> parents;
+    float rootRestHeight = -1.0f; // < 0: not known yet
+};
+inline std::map<std::string, BmtrRig>& BmtrRigs()
+{
+    static std::map<std::string, BmtrRig> rigs;
+    return rigs;
+}
+
 inline bool IsBMTR(const uint8_t* data, size_t size)
 {
     return size >= 8 && std::memcmp(data, "BMTR", 4) == 0;
 }
 
-inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
+inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm, const BmtrRig* rig = nullptr)
 {
     if (!IsBMTR(data, size))
         return false;
@@ -381,7 +397,7 @@ inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
             ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
         return v;
     };
-    const auto& parents = BmtrSkeletonParents();
+    const auto& parents = rig ? rig->parents : BmtrSkeletonParents();
     std::vector<int> parentIndex(bones, -1);
     bool hierarchical = false;
     {
@@ -404,7 +420,7 @@ inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
     }();
     if (flat)
         hierarchical = false;
-    constexpr float kRootRestHeight = 0.98f;
+    const float kRootRestHeight = rig ? std::max(0.0f, rig->rootRestHeight) : 0.98f;
 
     for (uint32_t p = 0; p < phases; p++)
     {
@@ -536,6 +552,39 @@ inline bool ConvertBMTRToRTM(const uint8_t* data, size_t size, std::string& rtm)
         }
     }
     return c.ok;
+}
+
+// The height of `rig`'s root bone above the ground in the first phase of a binarised move:
+// in a rig's standing move (Cow_Stop, ...) that is its rest height (BmtrRig::rootRestHeight).
+inline bool BmtrRootHeightAtStart(const uint8_t* data, size_t size, const BmtrRig& rig, float& height)
+{
+    BmtrRig zero = rig;
+    zero.rootRestHeight = 0.0f;
+    std::string rtm;
+    if (!ConvertBMTRToRTM(data, size, rtm, &zero) || rtm.size() < 28)
+        return false;
+    int32_t nAnim = 0, nSel = 0;
+    std::memcpy(&nAnim, rtm.data() + 20, 4);
+    std::memcpy(&nSel, rtm.data() + 24, 4);
+    const size_t names = 28;
+    const size_t phase0 = names + static_cast<size_t>(nSel) * BONE_NAME_LEN + 4;
+    if (nAnim < 1 || nSel < 1 || rtm.size() < phase0 + static_cast<size_t>(nSel) * (BONE_NAME_LEN + 48))
+        return false;
+    for (int32_t b = 0; b < nSel; b++)
+    {
+        const char* at = rtm.data() + phase0 + static_cast<size_t>(b) * (BONE_NAME_LEN + 48);
+        std::string name(at, strnlen(at, BONE_NAME_LEN));
+        for (char& ch : name)
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        const auto it = rig.parents.find(name);
+        if (it == rig.parents.end() || !it->second.empty())
+            continue;
+        float m[12];
+        std::memcpy(m, at + BONE_NAME_LEN, sizeof(m));
+        height = m[10];
+        return true;
+    }
+    return false;
 }
 
 } // namespace Poseidon::Asset::Formats
