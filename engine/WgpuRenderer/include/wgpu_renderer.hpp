@@ -2587,6 +2587,10 @@ extern "C"
 
     /* Replace the pixels of an existing RGBA8 texture. */
     WGR_API void wgr_texture_update(WgrRenderer* renderer, WgrTexture id, const uint8_t* rgba, uint32_t byte_length);
+    /* Replace a rectangle of mip level `mip` (block-aligned for BC formats); `data` holds its rows -- block rows
+     * for BC -- tightly packed. */
+    WGR_API void wgr_texture_update_region(WgrRenderer* renderer, WgrTexture id, uint32_t mip, uint32_t x, uint32_t y,
+                                           uint32_t w, uint32_t h, const uint8_t* data, uint32_t byte_length);
 
     WGR_API void wgr_texture_destroy(WgrRenderer* renderer, WgrTexture id);
 

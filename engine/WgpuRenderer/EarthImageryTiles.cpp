@@ -334,6 +334,31 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
                                       [](const auto& a, const auto& b) { return a.second.use < b.second.use; }));
 }
 
+void EarthImageryTiles::FetchTiles(const std::vector<std::tuple<int, int, int>>& keys, const std::function<bool()>& cancelled,
+                                   bool network)
+{
+    unsigned downloads = 0;
+    Fetch(keys, downloads, cancelled, network);
+}
+
+bool EarthImageryTiles::TakeTile(int z, int x, int y, std::vector<uint8_t>& rgba, int& size)
+{
+    std::lock_guard lock(_mutex);
+    auto it = _tiles.find({z, x, y});
+    if (it == _tiles.end() || it->second.size <= 0)
+        return false;
+    rgba = std::move(it->second.rgba);
+    size = it->second.size;
+    _tiles.erase(it);
+    return true;
+}
+
+bool EarthImageryTiles::Failed(int z, int x, int y)
+{
+    std::lock_guard lock(_mutex);
+    return _failed.count({z, x, y}) != 0;
+}
+
 const EarthImageryTiles::Tile* EarthImageryTiles::Find(int z, int x, int y)
 {
     auto it = _tiles.find({z, x, y});

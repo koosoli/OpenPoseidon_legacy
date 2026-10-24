@@ -2739,6 +2739,34 @@ pub unsafe extern "C" fn wgr_texture_update(
     }));
 }
 
+/// A rectangle of one mip level of an existing texture (block-aligned for BC formats); `data` holds its rows
+/// (blocks) tightly packed.
+///
+/// # Safety
+/// `renderer` must be live; `data` must point to at least `byte_len` bytes, or be null.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn wgr_texture_update_region(
+    renderer: *mut WgrRenderer,
+    id: u64,
+    mip: u32,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+    data: *const u8,
+    byte_len: u32,
+) {
+    if renderer.is_null() || data.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let slice = unsafe { std::slice::from_raw_parts(data, byte_len as usize) };
+        renderer.texture_update_region(id, mip, x, y, w, h, slice);
+    }));
+}
+
 /// # Safety
 /// `renderer` must be a live pointer from `wgr_create`, or null.
 #[unsafe(no_mangle)]

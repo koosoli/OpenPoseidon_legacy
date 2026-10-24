@@ -7807,6 +7807,14 @@ impl Renderer {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn texture_update_region(&mut self, handle: u64, mip: u32, x: u32, y: u32, w: u32, h: u32, data: &[u8]) {
+        self.drain_texture_ingress();
+        if self.textures.update_region(&self.queue, handle, mip, x, y, w, h, data) {
+            self.gfx3d.texture_content_changed();
+        }
+    }
+
     fn texture_update(&mut self, handle: u64, data: &[u8]) {
         self.drain_texture_ingress();
         if self.textures.update_rgba(&self.queue, handle, data) {

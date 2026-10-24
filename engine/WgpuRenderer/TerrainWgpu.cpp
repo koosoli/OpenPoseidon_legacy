@@ -10,6 +10,7 @@
 #include "BeachDebris.hpp"
 #include "ProceduralTrees.hpp"
 #include "EarthTreeDetail.hpp"
+#include "EarthTileCache.hpp"
 #include <Poseidon/Dev/Diag/PhaseSplit.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/SnowShelter.hpp>
@@ -490,6 +491,12 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
             w.revision = start.revision;
             w.horizonRadius = Earth::HorizonRadius(start.altitude);
             _earthSurface->Prefetch({w});
+        }
+        if(cache && *cache && EarthTileCache::Enabled())
+        {
+            _earthTiles=std::make_unique<EarthTileCache>(_renderer,std::filesystem::u8path(cache));
+            if(!_earthTiles->Ready()) _earthTiles.reset();
+            else _engine.SetEarthTiles(_earthTiles->Atlas(),_earthTiles->Lookup());
         }
         if(const char* buildings=std::getenv("POSEIDON_EARTH_BUILDINGS");buildings && std::strcmp(buildings,"1")==0)
         {
@@ -4074,7 +4081,9 @@ static WgrMeshVertex EarthNearPoint(const EarthTerrainStream::Patch& p,int x,int
 
 // The horizon and near meshes of a patch, built from its data alone (any thread: in flight a new patch
 // arrives several times a second and building these on the main thread was a 70-100 ms frame each).
-TerrainWgpu::EarthMeshData TerrainWgpu::BuildEarthMeshes(const EarthTerrainStream::Patch& p,bool localUv,bool surface)
+bool TerrainWgpu::EarthTilesOn() const { return _earthTiles && _earthTiles->Ready(); }
+
+TerrainWgpu::EarthMeshData TerrainWgpu::BuildEarthMeshes(const EarthTerrainStream::Patch& p,bool localUv,bool surface,bool tiles)
 {
     EarthMeshData data;
     data.generation=p.generation;data.revision=p.originRevision;data.localUv=localUv;
@@ -4216,6 +4225,34 @@ TerrainWgpu::EarthMeshData TerrainWgpu::BuildEarthMeshes(const EarthTerrainStrea
         }
         data.hasNear=true;
     }
+    if(tiles)
+    {
+        // Tile pyramid (EarthTileCache): every vertex carries its web-mercator position at zoom 19, in tiles,
+        // relative to the origin's zoom-19 tile -- small numbers, exact in f32 to well under a texel -- and
+        // the shader adds the reference tile (EngineWgpu::SubmitEarthHorizon, material reflect0) back.
+        constexpr double Scale = double(1 << 19);
+        const auto mercator = [](double latitude, double longitude, double& mx, double& my) {
+            const double lat = std::clamp(latitude, -85.0511287798066, 85.0511287798066) * Earth::Pi / 180.0;
+            mx = (longitude + 180.0) / 360.0;
+            my = (1.0 - std::asinh(std::tan(lat)) / Earth::Pi) * 0.5;
+        };
+        const double originLongitude = Earth::WrapLongitude(p.originLongitude);
+        double ox, oy;
+        mercator(p.originLatitude, originLongitude, ox, oy);
+        const double refX = std::floor(ox * Scale), refY = std::floor(oy * Scale);
+        const auto retarget = [&](std::vector<WgrMeshVertex>& vertices) {
+            for(auto& v:vertices)
+            {
+                const auto c = Earth::FromLocal(p.originLatitude, p.originLongitude, v.pos.x, v.pos.z);
+                double mx, my;
+                // longitude kept continuous with the origin's across the dateline
+                mercator(c.latitude, originLongitude + Earth::WrapLongitude(c.longitude - originLongitude), mx, my);
+                v.uv = {float(mx * Scale - refX), float(my * Scale - refY)};
+            }
+        };
+        retarget(data.horizonVertices);
+        retarget(data.nearVertices);
+    }
     return data;
 }
 
@@ -4252,7 +4289,7 @@ void TerrainWgpu::DropEarthPrevious()
 
 void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p,bool localUv)
 {
-    UploadEarthMeshes(BuildEarthMeshes(p,localUv,_earthSurface!=nullptr));
+    UploadEarthMeshes(BuildEarthMeshes(p,localUv,_earthSurface!=nullptr,EarthTilesOn()));
 }
 
 // Asks for a patch's meshes to be built off the main thread (the newest request wins; one build at a time,
@@ -4324,6 +4361,20 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         _earthImageryFinal=false;
         _earthRelocatedAt=std::chrono::steady_clock::now();
         LOG_INFO(Graphics,"Earth relocated: origin [{},{}], revision {}",origin.latitude,origin.longitude,origin.revision);
+    }
+    if (_earthTiles)
+    {
+        // The tile pyramid follows the camera (not at the moon: the globe keeps what it has).
+        if (!EarthStreaming::MoonFrameActive())
+        {
+            const Vector3 cam = camera.Position();
+            const auto where = Earth::FromLocal(origin.latitude, origin.longitude, cam.X(), cam.Z());
+            const auto ground = EarthStreaming::QueryGround(cam.X(), cam.Z());
+            const double above = ground ? double(cam.Y()) - ground->height : double(cam.Y());
+            // the angle one pixel spans: ~70 degrees over the screen height of a 1080-line view
+            _earthTiles->View(where.latitude, where.longitude, above, 0.0012);
+        }
+        _earthTiles->Install();
     }
     if (EarthStreaming::MoonFrameActive())
     {
@@ -4615,8 +4666,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
     if(!_earthMeshBuilding && _earthMeshWant)
     {
         const auto want=std::move(_earthMeshWant);
-        const bool localUv=_earthMeshWantLocalUv,surface=_earthSurface!=nullptr;
-        _earthMeshBuild=std::async(std::launch::async,[want,localUv,surface]{return BuildEarthMeshes(*want,localUv,surface);});
+        const bool localUv=_earthMeshWantLocalUv,surface=_earthSurface!=nullptr,tiles=EarthTilesOn();
+        _earthMeshBuild=std::async(std::launch::async,[want,localUv,surface,tiles]{return BuildEarthMeshes(*want,localUv,surface,tiles);});
         _earthMeshBuilding=true;
     }
     // A waiting atlas goes in once its window's meshes are up.
@@ -4631,10 +4682,19 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             {
                 EngineWgpu::AcquireProducerWindow("Earth local surface atlas");
                 // Mip chains come built (EarthSurfaceStream's worker): no CPU mip generation in this frame.
-                const auto texture=wgr_texture_create(_renderer,EarthSurfaceStream::AtlasSize,EarthSurfaceStream::AtlasSize,WGR_TEXTURE_RGBA8,
+                // With the tile pyramid the ground samples the tile atlas (EngineWgpu::SubmitEarthHorizon) and the
+                // window atlas serves only what is derived from it (grass, canopy): a 4x4 stand-in keeps the
+                // "textured ground is showing" logic, without the 40-100 ms of creating 2048 + 4096 textures on
+                // this thread at every window (owner, 2026-10-24: "when freeflying around on earth I have again
+                // stuttering").
+                static const uint8_t standIn[4*4*4]={};
+                const bool tiles=EarthTilesOn();
+                const auto texture=tiles?wgr_texture_create(_renderer,4,4,WGR_TEXTURE_RGBA8,1,0,standIn,sizeof(standIn)):
+                    wgr_texture_create(_renderer,EarthSurfaceStream::AtlasSize,EarthSurfaceStream::AtlasSize,WGR_TEXTURE_RGBA8,
                     uint32_t(atlas->mipLevels),atlas->mipLevels>1?0:WGR_TEXTURE_GEN_MIPS,atlas->pixels.data(),uint32_t(atlas->pixels.size()));
                 if(!texture)throw std::runtime_error("Earth surface atlas allocation failed");
-                const auto farTexture=wgr_texture_create(_renderer,atlas->farSize,atlas->farSize,WGR_TEXTURE_RGBA8,
+                const auto farTexture=tiles?wgr_texture_create(_renderer,4,4,WGR_TEXTURE_RGBA8,1,0,standIn,sizeof(standIn)):
+                    wgr_texture_create(_renderer,atlas->farSize,atlas->farSize,WGR_TEXTURE_RGBA8,
                     uint32_t(atlas->farMipLevels),atlas->farMipLevels>1?0:WGR_TEXTURE_GEN_MIPS,atlas->farPixels.data(),uint32_t(atlas->farPixels.size()));
                 if(!farTexture){wgr_texture_destroy(_renderer,texture);throw std::runtime_error("Earth far surface atlas allocation failed");}
                 installTimes.Mark("atlas textures");

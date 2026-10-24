@@ -52,6 +52,13 @@ class EarthImageryTiles
     // empty when the provider could not supply all of it this time.
     std::filesystem::path Overview();
 
+    // Single tiles, for the tile pyramid (EarthTileCache): fetch several (disk, then the network when asked) into
+    // memory, then take one out -- its decoded RGBA, which leaves this cache's memory with it.
+    void FetchTiles(const std::vector<std::tuple<int, int, int>>& keys, const std::function<bool()>& cancelled, bool network);
+    bool TakeTile(int z, int x, int y, std::vector<uint8_t>& rgba, int& size);
+    // The provider has no imagery there (an ocean placeholder, an error page): not asked again.
+    bool Failed(int z, int x, int y);
+
     static int ChooseZoom(double latitude, double metresPerPixel, int maxZoom);
     // Tiles downloaded so far (all time): a cheap "has anything new arrived" for progressive publishing.
     uint64_t Arrivals() const { return _arrivals.load(); }

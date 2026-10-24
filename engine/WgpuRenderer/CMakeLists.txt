@@ -79,6 +79,7 @@ add_library(WgpuRenderer STATIC
     EarthSurfaceStream.cpp
     EarthIslands.cpp
     EarthImageryTiles.cpp
+    EarthTileCache.cpp
     FishSchools.cpp
     BirdFlocks.cpp
     ReefLife.cpp

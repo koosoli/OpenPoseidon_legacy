@@ -517,6 +517,62 @@ fn env_reflection(shaded: vec3<f32>, normal: vec3<f32>, world_pos: vec3<f32>, fo
 @group(3) @binding(0) var samplers: binding_array<sampler, 8>;
 
 #ifdef WHOLE_WORLD
+// --- (OP) Whole world imagery as a tile pyramid (EarthTileCache.hpp, POSEIDON_EARTH_TILES=1) ---------------
+// The atlas (bound as the draw's texture): 30 x 30 slots of 272 texels, a 256 tile in each with an 8-texel
+// border of its own edge. The lookup table (the specular-map slot, reflect1.z): per zoom level a row with
+// the 16x16 window's origin tile, then 16 rows of entries (slot in r + 256 g, a = 1 when loaded).
+const ET_ATLAS: f32 = 8192.0;
+const ET_SLOT: f32 = 272.0;
+const ET_BORDER: f32 = 8.0;
+const ET_PER_ROW: i32 = 30;
+const ET_WINDOW: i32 = 16;
+const ET_ROWS: i32 = 17;
+fn et_u24(c: vec4<f32>) -> i32 {
+    let b = vec3<i32>(round(c.rgb * 255.0));
+    return b.x + b.y * 256 + b.z * 65536;
+}
+// The finest LOADED tile under the point (ref19 + off19, zoom-19 tile units), at most as fine as one texel a
+// pixel: the zoom from the ground footprint, then down to the nearest ancestor in the atlas -- ground that
+// was on screen never drops while a finer tile loads. sRGB rgb; a = 0 when nothing at all is loaded.
+fn earth_tile_albedo(atlas: u32, samp: u32, lut: u32, ref19: vec2<f32>, off19: vec2<f32>, footprint: f32) -> vec4<f32> {
+    let y01 = (ref19.y + off19.y) / 524288.0;
+    let lat = atan(sinh(3.14159265 * (1.0 - 2.0 * y01)));
+    let metres = 156543.03392 * max(cos(lat), 0.01); // one texel of zoom 0
+    var level = i32(clamp(ceil(log2(metres / max(footprint, 0.01))), 0.0, 19.0));
+    loop {
+        if (level < 0) { break; }
+        let s = exp2(f32(19 - level));
+        let rf = floor(ref19 / s);
+        let local = (ref19 - rf * s) / s + off19 / s;
+        let tile = rf + floor(local);
+        let in_tile = fract(local);
+        let n = i32(1u << u32(level));
+        let ty = i32(tile.y);
+        if (ty >= 0 && ty < n) {
+            let tx = ((i32(tile.x) % n) + n) % n;
+            let row = level * ET_ROWS;
+            let ox = et_u24(textureLoad(textures[lut], vec2<i32>(0, row), 0));
+            let oy = et_u24(textureLoad(textures[lut], vec2<i32>(1, row), 0));
+            let dx = ((tx - ox) % n + n) % n;
+            let dy = ty - oy;
+            if (dx < ET_WINDOW && dy >= 0 && dy < ET_WINDOW) {
+                let e = textureLoad(textures[lut], vec2<i32>(dx, row + 1 + dy), 0);
+                if (e.a > 0.5) {
+                    let slot = i32(round(e.r * 255.0)) + i32(round(e.g * 255.0)) * 256;
+                    let corner = vec2<f32>(f32(slot % ET_PER_ROW), f32(slot / ET_PER_ROW)) * ET_SLOT + ET_BORDER;
+                    let uv = (corner + in_tile * 256.0) / ET_ATLAS;
+                    let lod = clamp(log2(max(footprint / (metres / exp2(f32(level))), 1.0e-4)), 0.0, 2.0);
+                    return vec4<f32>(textureSampleLevel(textures[atlas], samplers[samp], uv, lod).rgb, 1.0);
+                }
+            }
+        }
+        level = level - 1;
+    }
+    return vec4<f32>(0.0);
+}
+#endif
+
+#ifdef WHOLE_WORLD
 // --- (OP) Tidewater's beach sand on the whole world's beaches ------------------------------------
 // terrain.wgsl tw_beach_sand, the sand the native islands' beaches have (owner: "can you give also the
 // island the tidewave sand texture?"), on Earth near ground: pale coral sand in drifts, grain at two
@@ -1486,8 +1542,27 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             sample_dx *= chart.zw;
             sample_dy *= chart.zw;
         }
-        let albedo = textureSampleGrad(textures[packed >> 3u], samplers[packed & 7u],
-                                      sample_uv, sample_dx, sample_dy).rgb;
+        var albedo = vec3<f32>(0.0);
+        let tile_mode = u32(material.reflect0.z + 0.5);
+        if (tile_mode != 0u) {
+            // The tile pyramid (EarthTileCache): mode 1 = mercator offsets from reflect0.xy, 2 = the globe's
+            // equirectangular UVs, converted here.
+            var ref19 = material.reflect0.xy;
+            var off19 = in.uv;
+            if (tile_mode == 2u) {
+                let lon = in.uv.x * 360.0 - 180.0;
+                let lat = clamp(90.0 - in.uv.y * 180.0, -85.0511, 85.0511) * 3.14159265 / 180.0;
+                let m = vec2<f32>((lon + 180.0) / 360.0, (1.0 - asinh(tan(lat)) / 3.14159265) * 0.5) * 524288.0;
+                ref19 = floor(m);
+                off19 = m - ref19;
+            }
+            let lut = bitcast<u32>(material.reflect1.z) >> 6u;
+            let t = earth_tile_albedo(packed >> 3u, packed & 7u, lut, ref19, off19, max(length(dwx), length(dwy)));
+            albedo = t.rgb;
+        } else {
+            albedo = textureSampleGrad(textures[packed >> 3u], samplers[packed & 7u],
+                                       sample_uv, sample_dx, sample_dy).rgb;
+        }
         var n = normalize(in.normal);
         let ground_detail = material.light_ambient.w > 0.5;
         let distance = length(in.world_pos);

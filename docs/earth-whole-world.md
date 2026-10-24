@@ -104,6 +104,35 @@ On the moon:
 
 The Go/menu altitude stays limited to 30,000 km; flight itself reaches 450,000 km.
 
+## Imagery as a tile pyramid (`POSEIDON_EARTH_TILES=1`, prototype)
+
+The window atlases (`EarthSurfaceStream`: a near 2048² and a far 4096² atlas per window, the globe image
+beyond) are rebuilt and swapped whenever the camera's window moves. That shows up as reloads, soft ground
+while the next atlas comes, seams between the near, far and globe images, and 40-100 ms of texture
+creation on the main thread at each swap. With `POSEIDON_EARTH_TILES=1` the ground samples web-mercator
+tiles directly, in the manner of CesiumJS's QuadtreePrimitive and bevy_terrain's "data LOD"
+(`docs/earth-renderer-audit.md`):
+
+- **`EarthTileCache`** (worker thread) plans the tiles the view needs. That is every tile of zoom 0-3,
+  then per zoom level the tiles near enough that one texel spans at most a pixel (about 3 tiles round
+  the camera at the ground, fewer with height), coarse first. It fetches them through its own
+  `EarthImageryTiles` (same disk cache and provider), adds an 8-texel border, encodes 3 mip levels to
+  BC1, and hands them to the main thread. A slot is reused only for a tile no longer wanted.
+- **The atlas** is one 8192² BC1 texture with 900 slots of 272 texels (42 MB). The **lookup table** is a
+  16 × 340 RGBA8 texture. Per zoom level it holds the origin of a 16×16 tile window round the camera and
+  the slot of each loaded tile in it.
+- **The meshes** (`TerrainWgpu::BuildEarthMeshes`) carry each vertex's zoom-19 mercator position in
+  tiles, relative to the origin's zoom-19 tile, which stays exact in f32. The globe mesh keeps its
+  equirectangular UVs and is converted in the shader.
+- **`shader3d.wgsl earth_tile_albedo`** picks each pixel's zoom from its ground footprint. It then walks
+  down to the nearest loaded ancestor, so a pixel that had imagery keeps it while a finer tile loads.
+- The window atlases are still built, for what is derived from them (grass, canopy); in tile mode they
+  become 4×4 stand-ins on the GPU.
+
+Not yet: prepared regional sources (Luxembourg ortho) and placed islands (Desert Island's ground image)
+are not tiles, so tile mode shows the provider's imagery there. Elevation is still window patches.
+
+
 ## Desert Island
 
 `python scripts/Prepare-EarthIsland.py --wrp "<game>/Worlds/intro.wrp" --name desert --lat 45.40 --lon -7.80`

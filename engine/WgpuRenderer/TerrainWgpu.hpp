@@ -149,6 +149,10 @@ class TerrainWgpu : public ITerrainRenderer
     std::unique_ptr<EarthTerrainStream::Patch> _earthPatch;
     std::unique_ptr<EarthBuildingStream> _earthBuildings;
     std::unique_ptr<EarthSurfaceStream> _earthSurface;
+    // POSEIDON_EARTH_TILES=1: the imagery as a tile pyramid (EarthTileCache); the ground meshes then carry
+    // web-mercator coordinates instead of window-atlas UVs.
+    std::unique_ptr<class EarthTileCache> _earthTiles;
+    bool EarthTilesOn() const;
     // Imagery prefetch along the flight (TerrainWgpu.cpp, EarthSurfaceStream::Prefetch): the camera's
     // smoothed velocity in the current origin's frame.
     Vector3 _earthPrefetchPos = VZero, _earthPrefetchVelocity = VZero;
@@ -227,7 +231,7 @@ class TerrainWgpu : public ITerrainRenderer
         uint64_t generation = 0, revision = 0;
         bool localUv = false, hasNear = false;
     };
-    static EarthMeshData BuildEarthMeshes(const EarthTerrainStream::Patch& patch,bool localUv,bool surface);
+    static EarthMeshData BuildEarthMeshes(const EarthTerrainStream::Patch& patch,bool localUv,bool surface,bool tiles=false);
     void UploadEarthMeshes(const EarthMeshData& data);
     void RequestEarthMeshes(const EarthTerrainStream::Patch& patch,bool localUv);
     std::future<EarthMeshData> _earthMeshBuild;

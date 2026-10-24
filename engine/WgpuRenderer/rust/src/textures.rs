@@ -266,6 +266,35 @@ fn build_texture(
 }
 
 impl TextureRegistry {
+    /// A rectangle of one mip level (EarthTileCache: a tile into the tile atlas). `x`, `y`, `w`, `h` in texels,
+    /// block-aligned for a block-compressed format; `data` tightly packed rows (blocks for BC*).
+    fn update_region(&mut self, queue: &wgpu::Queue, handle: u64, mip: u32, x: u32, y: u32, w: u32, h: u32, data: &[u8]) -> bool {
+        let Some(t) = (if handle == 0 { None } else { self.get(handle) }) else { return false };
+        let fmt = t.texture.format();
+        let (bw, bh) = fmt.block_dimensions();
+        let Some(block) = fmt.block_copy_size(None) else { return false };
+        if mip >= t.texture.mip_level_count() || w == 0 || h == 0 || x % bw != 0 || y % bh != 0 || w % bw != 0 || h % bh != 0 {
+            return false;
+        }
+        let size = t.texture.size().mip_level_size(mip, wgpu::TextureDimension::D2);
+        if x + w > size.width || y + h > size.height {
+            return false;
+        }
+        let bytes_per_row = (w / bw) * block;
+        let rows = h / bh;
+        if (data.len() as u64) < u64::from(bytes_per_row) * u64::from(rows) {
+            return false;
+        }
+        crate::upload_stats::add(crate::upload_stats::Kind::Texture, data.len());
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: &t.texture, mip_level: mip, origin: wgpu::Origin3d { x, y, z: 0 }, aspect: wgpu::TextureAspect::All },
+            data,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(bytes_per_row), rows_per_image: Some(rows) },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        true
+    }
+
     fn update_rgba(&mut self, queue: &wgpu::Queue, handle: u64, data: &[u8]) -> bool {
         if handle == 0 {
             return false;
@@ -896,6 +925,11 @@ impl SharedTextures {
 
     pub fn update_rgba(&mut self, queue: &wgpu::Queue, handle: u64, data: &[u8]) -> bool {
         self.registry.update_rgba(queue, handle, data)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_region(&mut self, queue: &wgpu::Queue, handle: u64, mip: u32, x: u32, y: u32, w: u32, h: u32, data: &[u8]) -> bool {
+        self.registry.update_region(queue, handle, mip, x, y, w, h, data)
     }
 
     pub fn destroy(&mut self, handle: u64) -> bool {

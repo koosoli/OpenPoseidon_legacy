@@ -652,6 +652,10 @@ class EngineWgpu : public EngineDummy
     // terrain.wgsl's Tidewater detail tile for the Earth beaches' sand (shader3d earth_tw_sand), made once
     WgrTexture EarthSandDetail();
     WgrTexture _earthSandDetail = 0;
+    // EarthTileCache's tile atlas and lookup table (TerrainWgpu sets them when the pyramid is on): Earth draws
+    // then sample tiles (shader3d earth_tile_albedo) instead of their bound window atlas.
+    void SetEarthTiles(WgrTexture atlas, WgrTexture lookup) { _earthTileAtlas = atlas; _earthTileLookup = lookup; }
+    WgrTexture _earthTileAtlas = 0, _earthTileLookup = 0;
     // A renderer-generated mesh drawn as an ordinary lit, opaque, double-sided world object (fish, wildlife):
     // `world` is the absolute column-major model matrix (rotation x scale, translation in world metres).
     void SubmitDynamicMesh(WgrMesh mesh, uint32_t indexCount, const float world[16], WgrTexture texture, uint32_t sampler = 0, float alphaRef = 0.0f);

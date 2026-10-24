@@ -8122,6 +8122,26 @@ void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTextur
         d.mat_specular.y = sun.Y();
         d.mat_specular.z = sun.Z();
     }
+    if (_earthTileAtlas && _earthTileLookup)
+    {
+        // The tile pyramid: the atlas in place of the window atlas, the lookup table in the specular-map slot
+        // (reflect1 packs it; the Earth branch returns before any reflection code), and in reflect0 the
+        // origin's zoom-19 tile the mesh's mercator UVs are relative to (TerrainWgpu::BuildEarthMeshes),
+        // with the UV mode: 1 = mercator offsets (streamed ground), 2 = equirectangular (the globe mesh).
+        const auto origin = EarthStreaming::Locations().Get();
+        const bool foreign = std::isfinite(sourceLatitude) && std::isfinite(sourceLongitude);
+        const double lat = std::clamp(foreign ? sourceLatitude : origin.latitude, -85.0511287798066, 85.0511287798066);
+        const double lon = Earth::WrapLongitude(foreign ? sourceLongitude : origin.longitude);
+        constexpr double Scale = double(1 << 19);
+        const double mx = (lon + 180.0) / 360.0;
+        const double my = (1.0 - std::asinh(std::tan(lat * Earth::Pi / 180.0)) / Earth::Pi) * 0.5;
+        d.texture_id = _earthTileAtlas;
+        d.sampler = 3;
+        d.mat_specular.w = 0.0f; // the mesh UVs are mercator, not the near atlas chart
+        d.mat_reflect0 = {float(std::floor(mx * Scale)), float(std::floor(my * Scale)), groundDetail ? 1.0f : 2.0f, 0.0f};
+        d.mat_reflect1 = {1.0f, 0.0f, 0.0f, 0.0f};
+        d.reflect_specular_texture_id = _earthTileLookup;
+    }
     d.world.m[0] = d.world.m[5] = d.world.m[10] = d.world.m[15] = 1.0f;
     d.world.m[12] = -camera.pos[0];
     d.world.m[13] = -camera.pos[1];
