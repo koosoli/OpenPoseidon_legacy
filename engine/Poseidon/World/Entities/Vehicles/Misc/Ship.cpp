@@ -1210,7 +1210,7 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                             const Vector3 model(com.X() + halfX * (2.0f * w - 1.0f), lo.Y(),
                                                 com.Z() + halfZ * (2.0f * u - 1.0f));
                             const Vector3 world = moveTrans.PositionModelToWorld(model);
-                            if (GLandscape->SurfaceY(world.X(), world.Z()) >= GLandscape->GetSeaLevel())
+                            if (!GLandscape->SeaAt(world.X(), world.Z()))
                                 continue; // this patch is over land
                             const float surface = SwimWaterSurfaceY(world.X(), world.Z()) + _sink * -1.0f;
                             const float depth = floatMin(surface - world.Y(), hullDepthCap);
@@ -1350,7 +1350,7 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                 Vector3 rPos = PositionModelToWorld(Vector3(-1.4, 0, offset) - _shape->BoundingCenter());
                 Vector3 lEngPos = PositionModelToWorld(Vector3(+0.7, 0, -4.7) - _shape->BoundingCenter());
                 Vector3 rEngPos = PositionModelToWorld(Vector3(-0.7, 0, -4.7) - _shape->BoundingCenter());
-                float sea = GLOB_LAND->GetSeaLevel() - 0.1; // sea level
+                float sea = GLOB_LAND->SeaLevelAt(Position().X(), Position().Z()) - 0.1; // sea level
                 lPos[1] = rPos[1] = sea;
                 lEngPos[1] = rEngPos[1] = sea;
                 float dens = floatMin(speedSize * 0.1, 0.7);

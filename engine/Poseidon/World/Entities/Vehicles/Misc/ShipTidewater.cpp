@@ -164,7 +164,7 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
     for (int i = 0; i < nSamples; ++i)
     {
         const Vector3 w = pos0 + orient0 * sample[i];
-        if (GLandscape->SurfaceY(w.X(), w.Z()) < GLandscape->GetSeaLevel())
+        if (GLandscape->SeaAt(w.X(), w.Z()))
             ++overWater;
         if (fromQuery)
         {
@@ -405,7 +405,7 @@ bool Ship::SimulateTidewater(float deltaT, Frame& moveTrans)
         {
             const Vector3& lp = ownHull ? own.contact[c] : contactPoint[c];
             const Vector3 pw = toWorld(lp);
-            const float pen = GLandscape->SurfaceY(pw.X(), pw.Z()) - pw.Y();
+            const float pen = GLandscape->SeaBedY(pw.X(), pw.Z()) - pw.Y();
             if (pen <= 0)
                 continue;
             land = true;

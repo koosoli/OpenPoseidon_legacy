@@ -1757,14 +1757,17 @@ void Transport::Simulate(float deltaT, SimulationImportance prec)
     // replaced by a finer patch); set one found below the ground back onto it, as Man::Simulate does.
     if (EarthStreaming::Enabled() && IsInLandscape() && !IsDammageDestroyed())
     {
-        if (const auto ground = EarthStreaming::QueryGround(Position().X(), Position().Z()))
+        if (EarthStreaming::QueryGround(Position().X(), Position().Z()) && GLandscape)
         {
+            // the sea bed, not the 0 m the elevation tiles store for the open sea: a boat afloat there has its
+            // hull below that "ground" and was lifted onto the water's surface every few frames
+            const float floorY = GLandscape->SeaBedY(Position().X(), Position().Z());
             const float bottom = GetShape() ? -GetShape()->Min().Y() : 1.0f;
-            if (Position().Y() - bottom < ground->height - 0.5f)
+            if (Position().Y() - bottom < floorY - 0.5f)
             {
                 Matrix4 transform = Transform();
                 Vector3 position = Position();
-                position[1] = ground->height + bottom + 0.2f;
+                position[1] = floorY + bottom + 0.2f;
                 transform.SetPosition(position);
                 Move(transform);
                 _speed = VZero;

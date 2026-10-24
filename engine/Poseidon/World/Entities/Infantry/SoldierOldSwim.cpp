@@ -159,7 +159,7 @@ bool SwimSplashEnabled()
 // sea) and the wave scale there -- as Landscape::GroundCollision picks them for the boats.
 void SwimWaterLevel(float x, float z, float& level, float& waveScale)
 {
-    level = GLandscape->GetSeaLevel();
+    level = GLandscape->SeaLevelAt(x, z);
     waveScale = 1.0f;
     if (const WaterBody* body = GetWaterBodies().Find(x, z))
     {

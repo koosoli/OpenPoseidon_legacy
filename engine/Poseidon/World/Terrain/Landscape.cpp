@@ -9,6 +9,7 @@
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
+#include <Poseidon/World/Terrain/EarthFreeFlight.hpp>
 #include <Poseidon/World/Terrain/SimulationResidencyState.hpp>
 #include <Poseidon/World/Scene/MapThings.hpp>
 #include <Poseidon/World/Scene/Thing.hpp>
@@ -2283,6 +2284,35 @@ float Landscape::RoadSurfaceYAboveWater(Vector3Par pos, float* dX, float* dZ, Te
         }
     }
     return y;
+}
+
+float Landscape::SeaLevelAt(float x, float z) const
+{
+    if (EarthStreaming::Enabled() && !EarthStreaming::MoonFrameActive())
+        return EarthStreaming::FlightYAtAltitude(x, z, 0.0);
+    return GetSeaLevel();
+}
+
+bool Landscape::SeaAt(float x, float z) const
+{
+    const float sea = SeaLevelAt(x, z);
+    const float ground = SurfaceY(x, z);
+    if (EarthStreaming::Enabled() && !EarthStreaming::MoonFrameActive())
+        return ground - sea <= float(EarthStreaming::FlightOceanMax);
+    return ground < sea;
+}
+
+float Landscape::SeaBedY(float x, float z) const
+{
+    const float ground = SurfaceY(x, z);
+    if (EarthStreaming::Enabled() && !EarthStreaming::MoonFrameActive())
+    {
+        const float seaDatum = EarthStreaming::FlightYAtAltitude(x, z, 0.0);
+        const float elevation = ground - seaDatum;
+        if (elevation >= EarthStreaming::FlightOceanMin && elevation <= EarthStreaming::FlightOceanMax)
+            return seaDatum - float(EarthStreaming::FlightOceanDepth);
+    }
+    return ground;
 }
 
 float Landscape::SurfaceYAboveWater(float x, float z) const

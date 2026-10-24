@@ -330,7 +330,6 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
         // has sunk below its own draft (a wreck on its way down) no longer makes a wake.
         if (GLandscape)
         {
-            const float sea = GLandscape->GetSeaLevel();
             const Vector3 reference = snap.cameraPos;
             auto addBoat = [&](const Ship* ship)
             {
@@ -346,6 +345,7 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
                 const Vector3 pos = pose.Position();
                 const Vector3 mn = shape->Min();
                 const Vector3 mx = shape->Max();
+                const float sea = GLandscape->SeaLevelAt(pos.X(), pos.Z());
                 const float draft = sea - (pos.Y() + mn.Y());
                 if (draft < 0.05f || pos.Y() + mx.Y() < sea - 0.5f)
                     return;
@@ -411,10 +411,10 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
                         WakeSprayContactPoint(boat.halfBeam, boat.halfLength, k, cx, cz);
                         const float wx = boat.x + ax * cx + fwd.X() * cz;
                         const float wz = boat.z + az * cx + fwd.Z() * cz;
-                        boat.hwContact[k] = QueryWaterSurfaceScaled(wx, wz, time, sea, 1.0f).height;
+                        boat.hwContact[k] = QueryWaterSurfaceScaled(wx, wz, time, GLandscape->SeaLevelAt(wx, wz), 1.0f).height;
                     }
                     const float pz = -boat.halfLength + 0.3f;
-                    boat.hwProp = QueryWaterSurfaceScaled(boat.x + fwd.X() * pz, boat.z + fwd.Z() * pz, time, sea, 1.0f).height;
+                    boat.hwProp = QueryWaterSurfaceScaled(boat.x + fwd.X() * pz, boat.z + fwd.Z() * pz, time, GLandscape->SeaLevelAt(boat.x + fwd.X() * pz, boat.z + fwd.Z() * pz), 1.0f).height;
                 }
                 const float dx = boat.x - reference.X();
                 const float dz = boat.z - reference.Z();
@@ -487,7 +487,7 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
                     WakeSprayContactPoint(body.halfBeam, body.halfLength, k, cx, cz);
                     const float wx = body.x + fwd.Z() * cx + fwd.X() * cz;
                     const float wz = body.z - fwd.X() * cx + fwd.Z() * cz;
-                    body.hwContact[k] = QueryWaterSurfaceScaled(wx, wz, time, sea, 1.0f).height;
+                    body.hwContact[k] = QueryWaterSurfaceScaled(wx, wz, time, GLandscape->SeaLevelAt(wx, wz), 1.0f).height;
                 }
                 body.hwProp = body.hwContact[0];
                 const float dx = body.x - reference.X();

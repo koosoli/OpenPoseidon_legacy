@@ -1644,6 +1644,17 @@ public:
     void Simulate(float deltaT);
     // No sea on the moon (whole world's moon frame): its ground lies below 0 away from the frame's anchor.
     float GetSeaLevel() const { return EarthStreaming::OnMoon ? -1.0e9f : _seaLevelWave; }
+    // The sea level at (x, z): GetSeaLevel, but in whole-world mode the spherical sea datum the Earth's sea is
+    // drawn on -- it falls away from the origin with the planet's curvature (~2 m at 5 km, ~8 m at 10 km), and
+    // a boat on the flat 0 m level floated that far above the drawn water.
+    float SeaLevelAt(float x, float z) const;
+    // Is (x, z) under the sea? The ground below SeaLevelAt -- in whole-world mode also the open sea, whose
+    // elevation tiles store the surface itself as the ground (EarthFreeFlight.hpp FlightFloor's ocean band).
+    bool SeaAt(float x, float z) const;
+    // The sea bed under (x, z): SurfaceY, but in whole-world mode's open sea the floor the renderer draws
+    // (EarthFreeFlight.hpp FlightFloor) instead of the stored 0 m -- a boat stood on that "floor" at the
+    // water's surface, its keel dry, and slowly rolled over.
+    float SeaBedY(float x, float z) const;
     void SetSeaWaveSpeed(float seaWaveSpeed) { _seaWaveSpeed = seaWaveSpeed; }
 
     Vector3 GetWind() const;
