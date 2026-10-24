@@ -575,6 +575,24 @@ bool TerrainWgpu::UploadEarthGrass(const EarthTerrainStream::Patch& patch, const
     const float span = patch.gridMetres * float(HmN - 1), cell = span / float(GeoN);
     std::vector<uint32_t> geography(size_t(GeoN) * GeoN, 0);
     size_t grass = 0;
+    // ESA WorldCover rules out what is certainly not meadow -- built-up, bare ground, snow, water -- where the
+    // imagery's green reads roofs, tarmac, rock and shallow water as grass. A coarse grid (WorldCover is 10 m),
+    // from disk only (Peek: a block not there yet is fetched for the next patch); unknown places keep the colour.
+    constexpr uint32_t CoverN = 128;
+    std::vector<EarthLandCover::Class> cover;
+    if (EarthLandCover* landCover = EarthLandCover::Get())
+    {
+        std::vector<std::pair<double, double>> points(size_t(CoverN) * CoverN);
+        for (uint32_t j = 0; j < CoverN; ++j)
+            for (uint32_t i = 0; i < CoverN; ++i)
+            {
+                const auto geo = Earth::FromLocal(patch.originLatitude, patch.originLongitude, patch.x + (i + 0.5) * span / CoverN,
+                                                  patch.z + (j + 0.5) * span / CoverN);
+                points[size_t(j) * CoverN + i] = {geo.latitude, geo.longitude};
+            }
+        landCover->PeekMany(points, cover);
+    }
+    size_t ruledOut = 0;
     for (uint32_t j = 0; j < GeoN; ++j)
         for (uint32_t i = 0; i < GeoN; ++i)
         {
@@ -589,6 +607,16 @@ bool TerrainWgpu::UploadEarthGrass(const EarthTerrainStream::Patch& patch, const
             const bool dry = r >= g && g >= b * 1.15f && r - g < 0.12f && lum > 0.28f && lum < 0.75f;
             // diagnostic: WGR_EARTH_GRASS_ALL=1 grows grass on every cell, to tell the mask from the placement
             static const bool all = std::getenv("WGR_EARTH_GRASS_ALL") != nullptr;
+            if (!all && !cover.empty())
+            {
+                const auto c = cover[size_t(j * CoverN / GeoN) * CoverN + i * CoverN / GeoN];
+                if (c == EarthLandCover::BuiltUp || c == EarthLandCover::Bare || c == EarthLandCover::Snow ||
+                    c == EarthLandCover::Water)
+                {
+                    ruledOut += meadow || dry;
+                    continue;
+                }
+            }
             if (meadow || dry || all)
             {
                 geography[size_t(j) * GeoN + i] = 0x80000000u;
@@ -599,8 +627,9 @@ bool TerrainWgpu::UploadEarthGrass(const EarthTerrainStream::Patch& patch, const
     wgr_grass_set_earth_ground(_renderer, patch.x, patch.z, patch.gridMetres, HmN, patch.heights.data(), cell, GeoN,
                                geography.data(), 0.0f);
     const auto [lo, hi] = std::minmax_element(patch.heights.begin(), patch.heights.end());
-    LOG_INFO(Graphics, "Earth grass: {:.0f}% of the near patch ({:.1f} km from {:.0f}, {:.0f}; {:.1f} m cells; ground {:.0f}..{:.0f} m) reads as meadow in the imagery",
-             100.0 * double(grass) / double(geography.size()), span / 1000.0f, patch.x, patch.z, cell, *lo, *hi);
+    LOG_INFO(Graphics, "Earth grass: {:.0f}% of the near patch ({:.1f} km from {:.0f}, {:.0f}; {:.1f} m cells; ground {:.0f}..{:.0f} m) reads as meadow in the imagery; {:.0f}% more ruled out by WorldCover",
+             100.0 * double(grass) / double(geography.size()), span / 1000.0f, patch.x, patch.z, cell, *lo, *hi,
+             100.0 * double(ruledOut) / double(geography.size()));
     return true;
 }
 
@@ -715,14 +744,33 @@ void TerrainWgpu::RefreshEarthTreeModels()
 
 bool TerrainWgpu::PlaceEarthTreeModels(const std::vector<EarthFeatureStream::TreeInstance>& trees)
 {
-    _engine.ClearEarthTreeObjects();
     static const bool enabled = []
     {
         const char* v = std::getenv("WGR_EARTH_TREE_MODELS");
         return !(v && v[0] == '0');
     }();
     if (!enabled || trees.empty())
+    {
+        _engine.ClearEarthTreeObjects();
         return false;
+    }
+    // A tree's id is its geographic seed and its place (to 10 cm): the trees the last placement already stands
+    // keep their objects, and only the ones that came or went are touched. Clearing and re-creating every one
+    // (up to 40000) on each feature or canopy install was most of those installs' main-thread time.
+    std::vector<uint64_t> ids(trees.size());
+    for (size_t i = 0; i < trees.size(); ++i)
+    {
+        const auto& t = trees[i];
+        uint64_t h = t.seed * 0x9E3779B97F4A7C15ull;
+        for (const float v : {t.x, t.y, t.z})
+            h = (h ^ uint64_t(int64_t(std::lround(v * 10.0f)))) * 0x100000001B3ull;
+        ids[i] = h;
+    }
+    {
+        std::vector<uint64_t> keep = ids;
+        std::sort(keep.begin(), keep.end());
+        _engine.KeepEarthTreeObjects(keep);
+    }
     static const char* const broadleaf[] = {"data3d\\str buk.p3d", "data3d\\str dub.p3d", "data3d\\str lipa.p3d",
                                             "data3d\\str javor.p3d", "data3d\\str kastan.p3d", "data3d\\str briza.p3d",
                                             "data3d\\str habr.p3d", "data3d\\str dub jiny.p3d", "data3d\\str_topol.p3d"};
@@ -747,7 +795,7 @@ bool TerrainWgpu::PlaceEarthTreeModels(const std::vector<EarthFeatureStream::Tre
             model = broadleaf[(s >> 24) % std::size(broadleaf)];
         const float yaw = float((s >> 32) & 0xffff) / 65535.0f * 6.2831853f;
         const float scale = 0.85f + 0.3f * float((s >> 48) & 0xffff) / 65535.0f;
-        if (_engine.CreateEarthTreeObject(uint32_t(i), model, t.x, t.y, t.z, yaw, scale))
+        if (_engine.CreateEarthTreeObject(ids[i], model, t.x, t.y, t.z, yaw, scale))
             ++placed;
     }
     LOG_INFO(Graphics, "Earth tree models: {} of {} trees placed as the game's own trees", placed, trees.size());
@@ -4446,11 +4494,13 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             wgr_terrain_set_heightmap(_renderer, below.data(), &_params);
             _earthMoonHeightmap = true;
         }
-        _engine.SubmitEarthHorizon(_earthGlobeMesh,_earthGlobeIndices,_earthGlobeTexture);
+        _engine.SubmitEarthHorizon(_earthGlobeMesh,_earthGlobeIndices,_earthGlobeTexture,2,false,false,
+            std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::quiet_NaN(),true);
         return;
     }
     _earthMoonHeightmap = false;
-    _engine.SubmitEarthHorizon(_earthGlobeMesh,_earthGlobeIndices,_earthGlobeTexture);
+    _engine.SubmitEarthHorizon(_earthGlobeMesh,_earthGlobeIndices,_earthGlobeTexture,2,false,false,
+            std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::quiet_NaN(),true);
     // Orbit needs only the fixed global overview. Do not download finer terrain
     // that covers less than one pixel at this distance.
     if (camera.Position().Y()>500000.0f)
@@ -4879,7 +4929,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                 int resolved=0;
                 if(!(off && off[0]=='0'))
                     for(size_t m=0;m<EarthBuildingStream::MaterialCount;++m)
-                        {_earthBuildingTextures[m]=GlobLoadTexture(EarthBuildingStream::MaterialTexture[m]);if(_earthBuildingTextures[m].NotNull())++resolved;}
+                        if(EarthBuildingStream::MaterialTextured[m])
+                            {_earthBuildingTextures[m]=GlobLoadTexture(EarthBuildingStream::MaterialTexture[m]);if(_earthBuildingTextures[m].NotNull())++resolved;}
                 LOG_INFO(Graphics,"Earth buildings: {} of {} house textures from the game data",resolved,size_t(EarthBuildingStream::MaterialCount));
                 uint32_t mask=0;
                 for(size_t m=0;m<EarthBuildingStream::MaterialCount;++m)if(_earthBuildingTextures[m].NotNull())mask|=1u<<m;

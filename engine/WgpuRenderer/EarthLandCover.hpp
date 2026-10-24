@@ -55,6 +55,8 @@ class EarthLandCover
     // The same from what is on disk, never waiting: Unknown when it is not there yet, and then fetched in the
     // background for the next time (the terrain stream: its patches must not wait on a slow network).
     Class Peek(double latitude, double longitude);
+    // Peek for many places under one lock (a grid for a main-thread pass): out[i] for points[i] (latitude, longitude).
+    void PeekMany(const std::vector<std::pair<double, double>>& points, std::vector<Class>& out);
 
   private:
     struct File

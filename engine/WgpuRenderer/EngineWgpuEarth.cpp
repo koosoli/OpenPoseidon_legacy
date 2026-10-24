@@ -98,7 +98,7 @@ bool EngineWgpu::CreateEarthWorldgenObject(uint32_t id, const char* modelName, c
     _earthWorldgenInstances.emplace(id, FarGpuInstance{slot, shape});
     return true;
 }
-bool EngineWgpu::CreateEarthTreeObject(uint32_t id, const char* modelName, float x, float groundY, float z, float yaw,
+bool EngineWgpu::CreateEarthTreeObject(uint64_t id, const char* modelName, float x, float groundY, float z, float yaw,
                                        float scale)
 {
     if (!Foundation::IsMainThread() || !_gpuDriven || !_renderer || !modelName || !modelName[0])
@@ -142,6 +142,21 @@ bool EngineWgpu::CreateEarthTreeObject(uint32_t id, const char* modelName, float
     RetainGpuModel(shape);
     _earthTreeInstances.emplace(id, FarGpuInstance{slot, shape});
     return true;
+}
+void EngineWgpu::KeepEarthTreeObjects(const std::vector<uint64_t>& keep)
+{
+    for (auto it = _earthTreeInstances.begin(); it != _earthTreeInstances.end();)
+    {
+        if (std::binary_search(keep.begin(), keep.end(), it->first))
+        {
+            ++it;
+            continue;
+        }
+        EnqueueInstanceRemove(it->second.slot);
+        ++_ops.instanceRemove;
+        ReleaseGpuModel(it->second.shape);
+        it = _earthTreeInstances.erase(it);
+    }
 }
 void EngineWgpu::ClearEarthTreeObjects()
 {

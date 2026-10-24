@@ -2518,7 +2518,11 @@ fn earth_moon_body(pos: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
     let space_scale = 0.12 / PI * sky.sun_dir.w * sky.params.y;
     let scale = mix(ground_scale, space_scale, earth_space_weight());
     let tint = vec3<f32>(1.0, 0.97, 0.92);
-    let col = tint * (brdf * albedo + max(sky.moon_sun.w, 0.0)) * edge * scale * body_transmittance(pos, normalize(centre - pos), dir);
+    // Bounce: a slope turned from the sun still sees the sunlit regolith around it (albedo ~0.12, half of it
+    // in view): ~6 % of what level ground gets. Without it a crater's far wall, and a soldier standing in it,
+    // were black on black (owner, 2026-10-24: the character "invisible" in free flight on the moon).
+    let bounce = 0.06 * max(dot(n0, l), 0.0);
+    let col = tint * ((brdf + bounce) * albedo + max(sky.moon_sun.w, 0.0)) * edge * scale * body_transmittance(pos, normalize(centre - pos), dir);
     return vec4<f32>(col, hit.x);
 }
 

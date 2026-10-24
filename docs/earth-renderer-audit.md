@@ -72,3 +72,21 @@ code can come in; GPL-2.0-only cannot.
   (terra) and Cesium World Terrain (keyed). Terrarium already merges NASADEM/SRTM with bathymetry. Night: Black
   Marble (now ours). Land cover, tree cover and buildings are where the others have better data (WorldCover, GFC,
   osm2city/Overture, 3D Tiles), as listed above.
+
+## Status (2026-10-24, evening)
+
+- **Sea floor: done.** Terrarium's own bathymetry (zoom <= 10) where the finer zooms fill the sea with 0 m
+  (`EarthTerrainStream::WithSeaDepth`); WorldCover decides land from sea at sea level, so polder and marsh stay dry.
+- **Land cover: in use.** ESA WorldCover (`EarthLandCover`, range requests on the AWS COGs): where forest stands
+  (with the imagery as confirmation), land vs sea at the shore, and no grass on built-up, bare, snow or water.
+- **Buildings: Overture first.** `EarthOverture` reads the latest release's PMTiles (OSM + machine-traced
+  footprints, heights, floors, roof shapes) and writes the same cells the builder already extrudes; Overpass is the
+  fallback. Budget 5000 buildings a cell, 400k triangles.
+- **Imagery fallback.** When Esri does not answer, EOX Sentinel-2 cloudless 2016 (CC-BY, to zoom 15), behind a
+  circuit breaker.
+- **Night lights** (Black Marble) and the **star field mirror**: done earlier the same day.
+- **Main-thread installs:** sky-view scan of each patch on a worker, no temporal reset per patch, building/feature
+  vertices prepared on the stream workers, tree models placed by difference.
+
+Still open: elevation as a tile pyramid (item 5), cesium-native 3D Tiles (item 3), WorldCover for ground materials
+in the shader (sand on bare ground; needs a land-cover texture per patch).
