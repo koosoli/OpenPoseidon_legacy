@@ -21,6 +21,7 @@
 // Everything is ordinary OFP script machinery underneath: code is a string, a task or
 // diary record is a tagged string ("::TASK::3"), an FSM handle a number.
 
+#include <set>
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/World/Scene/ScriptLight.hpp>
