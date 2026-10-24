@@ -985,8 +985,12 @@ void FsmEnter(Fsm& fsm, const std::string& name)
     const ParamEntry* st = fsm.states ? fsm.states->FindEntry(name.c_str()) : nullptr;
     // which states the conversation FSMs walk through (a listener that never answers)
     // ... and the animals' agent tasks (main.fsm: grazing, wandering, fleeing)
-    static int reported = 0;
-    if (reported < 300 && (fsm.file.find("bikb") != std::string::npos || fsm.file.find("animals2") != std::string::npos))
+    // (per file, 300 each; the animals' idle loop idleSpecialAnim.fsm left out)
+    static std::map<std::string, int> reportedBy;
+    int& reported = reportedBy[fsm.file];
+    if (reported < 300 && (fsm.file.find("bikb") != std::string::npos ||
+                           (fsm.file.find("animals2") != std::string::npos &&
+                            Lower(fsm.file).find("idlespecialanim") == std::string::npos)))
     {
         ++reported;
         const std::string init = EntryText(st, "init");
@@ -1200,6 +1204,18 @@ void KbStep(Runtime& rt)
 // no move left (unitReady), moveToFailed never.
 GameValue A2MoveTo(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
+    static int logged = 0;
+    if (logged < 40)
+    {
+        Object* obj = GetObject(oper1);
+        Vector3 to;
+        if (obj && GetPos(state, to, oper2))
+        {
+            ++logged;
+            LOG_INFO(Mission, "Arma 2: moveTo {} from {:.0f},{:.0f} to {:.0f},{:.0f}", (const char*)obj->GetDebugName(),
+                     obj->Position().X(), obj->Position().Z(), to.X(), to.Z());
+        }
+    }
     return ::VehDoMove(state, oper1, oper2);
 }
 

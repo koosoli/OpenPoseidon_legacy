@@ -2206,19 +2206,27 @@ void ManType::InitShape()
         _handMatIndex = _moveType->GetSkeleton()->FindBone(ManNameOr(par, "boneLeftHand", "lruka"));
         _rightHandMatIndex = _moveType->GetSkeleton()->FindBone(ManNameOr(par, "boneRightHand", "pruka"));
         _headMatIndex = _moveType->GetSkeleton()->FindBone(ManNameOr(par, "boneHead", "head"));
-        if (_gunMatIndex < 0)
+        // A man without weapons whose skeleton has no weapon or hand bones (an Arma 2
+        // animal: weapons[] = {}) holds nothing; only a soldier missing them is an error.
+        const ParamEntry* weapons = par.FindEntry("weapons");
+        const bool unarmed = weapons && weapons->IsArray() && weapons->GetSize() == 0;
+        if (unarmed && (_gunMatIndex < 0 || _rpgMatIndex < 0 || _handMatIndex < 0 || _rightHandMatIndex < 0))
+        {
+            LOG_DEBUG(Physics, "{}: no weapon/hand bones (unarmed)", (const char*)_shape->GetName());
+        }
+        else if (_gunMatIndex < 0)
         {
             LOG_ERROR(Physics, "Bone 'zbran' not found in {}", (const char*)_shape->GetName());
         }
-        if (_rpgMatIndex < 0)
+        if (_rpgMatIndex < 0 && !unarmed)
         {
             LOG_ERROR(Physics, "Bone 'roura' not found in {}", (const char*)_shape->GetName());
         }
-        if (_handMatIndex < 0)
+        if (_handMatIndex < 0 && !unarmed)
         {
             LOG_ERROR(Physics, "Bone 'lruka' not found in {}", (const char*)_shape->GetName());
         }
-        if (_rightHandMatIndex < 0)
+        if (_rightHandMatIndex < 0 && !unarmed)
         {
             LOG_ERROR(Physics, "Bone 'pruka' not found in {}", (const char*)_shape->GetName());
         }
