@@ -1641,7 +1641,9 @@ LSError ArcadeIntel::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("month", month, 1, 5))
     PARAM_CHECK(ar.Serialize("day", day, 1, 10))
     PARAM_CHECK(ar.Serialize("hour", hour, 1, 7))
-    PARAM_CHECK(ar.Serialize("minute", minute, 1, 30))
+    // Arma 3's editor leaves minute out when it is 0 (Old Man: hour = 18, which OFP's default of 30
+    // turned into a sunset start); OFP's own missions keep OFP's default.
+    PARAM_CHECK(ar.Serialize("minute", minute, 1, Arma1Compat::Generation() == 3 ? 0 : 30))
 
     return LSOK;
 }

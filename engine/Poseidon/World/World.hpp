@@ -222,6 +222,10 @@ class World
 	Ref<CameraEffect> _cameraEffect;
 	Ref<TitleEffect> _titleEffect;
 	Ref<TitleEffect> _cutEffect;
+	// A title / cut layer a script blacked the screen with (BLACK, BLACK OUT, BLACK FADED), and since
+	// when: Arma 3 missions lift a stuck one (LiftStuckBlack).
+	const TitleEffect* _blackEffect = nullptr;
+	Poseidon::Foundation::UITime _blackSince;
 	RefArray<Script> _scripts;
 	LLink<Script> _cameraScript;
 
@@ -496,6 +500,11 @@ class World
 
 	void SetCutEffect( TitleEffect *effect );
 	TitleEffect *GetCutEffect() const {return _cutEffect;}
+	// The effect just set by titleText / cutText holds the screen black (see _blackEffect).
+	void NoteBlackEffect( const TitleEffect *effect );
+	// Arma 3 (--arma3): a mission whose scripts went black and never come back (they wait on Arma 3
+	// features this engine lacks) is shown after 30 s, with a log line, instead of staying black.
+	void LiftStuckBlack();
 
 	void AddScript(Script *script);
 #if POSEIDON_DIAG

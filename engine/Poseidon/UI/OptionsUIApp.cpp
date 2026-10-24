@@ -2432,15 +2432,20 @@ void DisplayMain::OnButtonClicked(int idc)
     if (_arma3)
     {
         const char* message = nullptr;
-        switch (_arma3->MainMenuClick(idc, message))
+        const Arma3Menu::Action action = _arma3->MainMenuClick(idc, message);
+        switch (action)
         {
             case Arma3Menu::Action::Handled:
                 return;
             case Arma3Menu::Action::Campaigns:
-                CreateChild(CreateArmaContentDisplay(this, ArmaContentKind::Campaigns));
-                return;
             case Arma3Menu::Action::Missions:
-                CreateChild(CreateArmaContentDisplay(this, ArmaContentKind::Missions));
+                // Arma 3's own campaign / scenario screen, filled from CfgMissions; else the plain list
+                if (Display* screen = Arma3Menu::CreateContentDisplay(this, idc))
+                    CreateChild(screen);
+                else
+                    CreateChild(CreateArmaContentDisplay(this, action == Arma3Menu::Action::Campaigns
+                                                                   ? ArmaContentKind::Campaigns
+                                                                   : ArmaContentKind::Missions));
                 return;
             case Arma3Menu::Action::Tutorials:
                 CreateChild(CreateArmaContentDisplay(this, ArmaContentKind::Tutorials));
@@ -2537,6 +2542,8 @@ void DisplayMain::OnDraw(EntityAI* vehicle, float alpha)
         auto& input = InputSubsystem::Instance();
         if (!Child())
             _arma3->UpdateMainMenu(0.5f + input.GetCursorX() * 0.5f, 0.5f + input.GetCursorY() * 0.5f);
+        if (GWorld && GWorld->GetMode() == GModeIntro)
+            Arma3Menu::TickMenuMusic();
         Display::OnDraw(vehicle, alpha);
         return;
     }

@@ -94,6 +94,8 @@ class SoundScene
 	void AdvanceEnvSounds();
 	void StartMusicTrack(const SoundPars &pars, float from=0);
 	void StopMusicTrack();
+	// A music track was started and has not finished.
+	bool MusicPlaying() { return _musicTrack && !_musicTrack->IsTerminated(); }
 	float GetMusicVolume() const;
 	void SetMusicVolume(float vol, float time);
 

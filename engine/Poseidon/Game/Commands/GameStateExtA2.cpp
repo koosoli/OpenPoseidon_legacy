@@ -1602,6 +1602,36 @@ GameValue A2SafeZoneW(const GameState*)
     return GameValue(1.0f);
 }
 
+// safeZoneX/Y/W/H: this engine's screen is 0..1 both ways. While Arma3Menu evaluates one of Arma 3's
+// own screens (--arma3) they answer in Arma 3's coordinates instead (Arma3Rsc::UiSafeZone).
+GameValue A2SafeZone(char member)
+{
+    if (!Poseidon::Arma3Rsc::UiCoordinates())
+        return GameValue(member == 'w' || member == 'h' ? 1.0f : 0.0f);
+    const Poseidon::Arma3Rsc::SafeZone zone = Poseidon::Arma3Rsc::UiSafeZone();
+    return GameValue(member == 'x' ? zone.x : member == 'y' ? zone.y : member == 'w' ? zone.w : zone.h);
+}
+
+GameValue A2SafeZoneXNular(const GameState*)
+{
+    return A2SafeZone('x');
+}
+
+GameValue A2SafeZoneYNular(const GameState*)
+{
+    return A2SafeZone('y');
+}
+
+GameValue A2SafeZoneWNular(const GameState*)
+{
+    return A2SafeZone('w');
+}
+
+GameValue A2SafeZoneHNular(const GameState*)
+{
+    return A2SafeZone('h');
+}
+
 GameValue A2MinusOne(const GameState*)
 {
     return GameValue(-1.0f);
@@ -2957,12 +2987,12 @@ const GameNular A2Nular[] = {
     GameNular(GameBool, "isDedicated", A2False),
     GameNular(GameScalar, "serverTime", GameTime),
     GameNular(GameSide, "playerSide", A2PlayerSide),
-    GameNular(GameScalar, "safeZoneX", A2Zero),
-    GameNular(GameScalar, "safeZoneY", A2Zero),
-    GameNular(GameScalar, "safeZoneW", A2SafeZoneW),
-    GameNular(GameScalar, "safeZoneH", A2SafeZoneW),
-    GameNular(GameScalar, "safeZoneXAbs", A2Zero),
-    GameNular(GameScalar, "safeZoneWAbs", A2SafeZoneW),
+    GameNular(GameScalar, "safeZoneX", A2SafeZoneXNular),
+    GameNular(GameScalar, "safeZoneY", A2SafeZoneYNular),
+    GameNular(GameScalar, "safeZoneW", A2SafeZoneWNular),
+    GameNular(GameScalar, "safeZoneH", A2SafeZoneHNular),
+    GameNular(GameScalar, "safeZoneXAbs", A2SafeZoneXNular),
+    GameNular(GameScalar, "safeZoneWAbs", A2SafeZoneWNular),
     GameNular(GameString, "locationNull", A2LocationNull),
     GameNular(GameNothing, "disableSerialization", A2NothingNular),
     GameNular(GameNothing, "endLoadingScreen", A2NothingNular),

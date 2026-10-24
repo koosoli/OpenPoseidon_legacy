@@ -1319,6 +1319,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
             _cutEffect.Free();
         }
 
+        LiftStuckBlack();
         if (_titleEffect)
         {
             _titleEffect->Simulate(deltaT);

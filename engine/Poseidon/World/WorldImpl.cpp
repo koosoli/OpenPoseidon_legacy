@@ -1,6 +1,7 @@
 #include <Poseidon/World/Terrain/CraterField.hpp>
 #include <Poseidon/World/Effects/BuildingBreach.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <cstdlib>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/World/Weather/SnowField.hpp>
@@ -191,21 +192,37 @@ const float PreferredGridSizeMP = 25;
 
 bool World::IsDisplayEnabled() const
 {
+    // POSEIDON_DIAG_DISPLAY=1: every 5 s, why the world is not drawn (a black screen with the game
+    // running behind it), and which display is on top.
+    static const bool diag = std::getenv("POSEIDON_DIAG_DISPLAY") != nullptr;
+    const auto off = [&](const char* why)
+    {
+        static DWORD last = 0;
+        if (diag && GetTickCount() - last > 5000)
+        {
+            last = GetTickCount();
+            const ControlsContainer* top = dynamic_cast<const ControlsContainer*>(Options());
+            while (top && top->Child())
+                top = top->Child();
+            LOG_INFO(Core, "Display off: {} (top display idd {})", why, top ? top->IDD() : -1);
+        }
+        return false;
+    };
     if (ENGINE_CONFIG.landEditor)
     {
         return true;
     }
     if (_noDisplay)
     {
-        return false;
+        return off("_noDisplay");
     }
     if (_showMap && _map && !_map->IsDisplayEnabled())
     {
-        return false;
+        return off("map open, map display disabled");
     }
     if (GetGProgress().Active())
     {
-        return false;
+        return off("progress splash active");
     }
     // No menu attached → display is always on (viewer / dedicated /
     // editor paths skip CreateMainOptions, so `_options == nullptr`
@@ -214,7 +231,9 @@ bool World::IsDisplayEnabled() const
     {
         return true;
     }
-    return _options->IsDisplayEnabled();
+    if (!_options->IsDisplayEnabled())
+        return off("top display has enableDisplay = 0");
+    return true;
 }
 
 bool World::IsSimulationEnabled() const

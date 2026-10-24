@@ -1,4 +1,5 @@
 
+#include <Poseidon/UI/Arma3Menu.hpp>
 #include <Poseidon/UI/Options/OptionsShell.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
@@ -2139,6 +2140,27 @@ DisplayInterrupt::DisplayInterrupt(ControlsContainer* parent) : Display(parent)
 {
     _enableSimulation = false;
     _enableUI = false;
+    // --arma-original-ui with Arma 3: its own RscDisplayInterrupt, read from its config (Arma3Menu)
+    if (Arma3Menu::Active())
+    {
+        _arma3 = std::make_shared<Arma3Menu::Screen>();
+        if (_arma3->Load(*this, "RscDisplayInterrupt", _controlsBackground, _controlsForeground))
+        {
+            // the mission display tells its pause menu by this idd (Abort, Save, Load on closing)
+            _idd = IDD_INTERRUPT;
+            const bool multiplayer = GWorld->GetMode() == GModeNetware;
+            const bool saved = QIFStream::FileExists(GetSaveDirectory() + RString("save.fps"));
+            // the mission's own name (description.ext briefingName), else its folder
+            RString missionName = Glob.header.filename;
+            if (const ParamEntry* name = ExtParsMission.FindEntry("briefingName"); name && !name->IsClass())
+                missionName = *name;
+            _arma3->InitInterrupt(multiplayer, saved, missionName);
+            NextCtrl();
+            InputSubsystem::Instance().ChangeGameFocus(+1);
+            return;
+        }
+        _arma3.reset();
+    }
     Load("RscDisplayInterrupt");
     UnregisterLanguageChangedCallback(_langCbToken);
     _langCbToken = RegisterLanguageChangedCallback(
@@ -2206,6 +2228,8 @@ Control* DisplayInterrupt::OnCreateCtrl(int type, int idc, const ParamEntry& cls
 
 void DisplayInterrupt::OnButtonClicked(int idc)
 {
+    if (_arma3)
+        idc = _arma3->InterruptClick(idc);
     switch (idc)
     {
         case IDC_INT_OPTIONS:
@@ -2372,6 +2396,19 @@ void StartRandomCutscene(RString world)
         subdir = "assets\\menu\\";
     }
     SetMission(world, name, subdir);
+
+    // Arma 3's own menu (Arma3Menu) covers the screen with its backdrop: a scene behind it is never
+    // seen, and its soldier -- an Arma 3 man under --arma3 -- made the menu wait ~8 s for Arma 3's
+    // whole move set. The menu island is loaded empty instead (it still clears a finished mission).
+    if (Arma3Menu::Active())
+    {
+        CurrentTemplate.Clear();
+        LOG_INFO(UI, "Menu scene: none behind Arma 3's menu (its backdrop covers the screen)");
+        GLOB_WORLD->SwitchLandscape(GetWorldName(WorldInstalled("Intro") ? RString("Intro") : world));
+        GLOB_WORLD->InitGeneral(CurrentTemplate.intel);
+        GLOB_WORLD->InitVehicles(GModeIntro, CurrentTemplate);
+        return;
+    }
 
     const bool parsed = ParseIntro();
     LOG_INFO(UI, "Menu scene: world={} name={} dir={} sea={} parsed={} groups={} installed={} asset={}",
