@@ -43,7 +43,7 @@ class EarthHeightCache
 
     // Main thread: the camera (degrees, for the lookup windows) and the data tiles the drawn nodes want (their
     // ancestors are added). The worker fetches what is missing, coarse first.
-    void Want(double latitude, double longitude, const std::set<Key>& tiles);
+    void Want(double latitude, double longitude, const std::vector<Key>& tiles);
     // Main thread, every frame: finished tiles into the atlas (a budget per frame) and the lookup table.
     void Install();
     // Is this tile in the atlas (installed)? Main thread.

@@ -4,8 +4,8 @@
 // web-mercator quadtree. Each frame the nodes the camera needs are selected (a node splits while its distance is
 // under SplitFactor times its width), each is one draw of a shared 33 x 33 grid that the vertex shader places on the
 // globe and lifts by EarthHeightCache's heights (shader3d conform mode 3), and the data tiles they will read are
-// asked for. The window patches' near and horizon meshes are not drawn while this is on
-// (POSEIDON_EARTH_HEIGHT_PYRAMID=1); the patch still feeds gameplay and the heightmap.
+// asked for. The window patches' near and horizon meshes are neither built nor drawn while this is on (the default;
+// POSEIDON_EARTH_HEIGHT_PYRAMID=0 brings them back); the patch still feeds gameplay and the heightmap.
 #include "EarthHeightCache.hpp"
 #include "include/wgpu_renderer.hpp"
 
@@ -22,7 +22,7 @@ class EngineWgpu;
 class EarthGroundNodes
 {
   public:
-    static bool Enabled(); // POSEIDON_EARTH_HEIGHT_PYRAMID=1
+    static bool Enabled(); // unless POSEIDON_EARTH_HEIGHT_PYRAMID=0
     EarthGroundNodes(EngineWgpu& engine, WgrRenderer* renderer, const std::filesystem::path& cache);
     ~EarthGroundNodes();
     bool Ready() const { return _heights && _heights->Ready() && _grid != 0; }
@@ -39,6 +39,20 @@ class EarthGroundNodes
         int z, x, y;
         double distance, radius;
     };
+    // A frame's per-row and per-column trigonometry: selection visits ~1700 nodes but only some ten rows and columns
+    // of each zoom, and recomputing them per node was most of its cost (2026-10-24: 0.45-1.07 ms a frame)
+    struct Row
+    {
+        int y;
+        double latitude, sinP, cosP, width;
+    };
+    struct Column
+    {
+        int x;
+        double sinDl, cosDl;
+    };
+    const Row& RowOf(int z, int y);
+    const Column& ColumnOf(int z, int x);
     void Select(int z, int x, int y, std::vector<Node>& out);
 
     EngineWgpu& _engine;
@@ -47,7 +61,11 @@ class EarthGroundNodes
     WgrMesh _grid = 0;
     uint32_t _gridIndices = 0;
     // this frame's selection inputs
-    double _cam[3] = {}, _groundY = 0, _originLat = 0, _originLon = 0, _horizon = 0;
+    double _cam[3] = {}, _groundY = 0, _originLat = 0, _originLon = 0, _horizon = 0, _sinP0 = 0, _cosP0 = 1;
+    std::vector<Row> _rows[20];
+    std::vector<Column> _columns[20];
+    std::vector<Node> _nodes;
+    std::vector<EarthHeightCache::Key> _wanted;
     size_t _lastNodes = 0;
     std::chrono::steady_clock::time_point _statSince{};
     int _statFrames = 0;

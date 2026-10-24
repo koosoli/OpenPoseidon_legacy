@@ -27,10 +27,6 @@ double NodeLatitude(int z, double y) // y: row (may be fractional)
 {
     return std::atan(std::sinh(Pi * (1.0 - 2.0 * y / double(1 << z)))) * 180.0 / Pi;
 }
-double Width(int z, double latitude)
-{
-    return Circumference * std::cos(latitude * Pi / 180.0) / double(1 << z);
-}
 double DataLevel(double distance, double latitude)
 {
     return std::clamp(std::log2(Circumference * std::max(std::cos(latitude * Pi / 180.0), 0.01) / (256.0 * std::max(distance, 1.0) * Detail)),
@@ -48,8 +44,9 @@ bool EarthGroundNodes::Enabled()
 {
     static const bool on = []
     {
+        // the default since 2026-10-24 (phase 3); =0 brings back the window patches' meshes
         const char* v = std::getenv("POSEIDON_EARTH_HEIGHT_PYRAMID");
-        return v && v[0] == '1';
+        return !(v && v[0] == '0');
     }();
     return on;
 }
@@ -106,7 +103,7 @@ EarthGroundNodes::EarthGroundNodes(EngineWgpu& engine, WgrRenderer* renderer, co
     _grid = wgr_mesh_create(_renderer, WgrSlice<WgrMeshVertex>(vertices), WgrSlice<uint32_t>(indices));
     _gridIndices = uint32_t(indices.size());
     wgr_earth_heights(_renderer, _heights->Atlas(), _heights->Lookup());
-    LOG_INFO(Graphics, "Earth ground from the elevation pyramid: on (POSEIDON_EARTH_HEIGHT_PYRAMID=1)");
+    LOG_INFO(Graphics, "Earth ground from the elevation pyramid: on (POSEIDON_EARTH_HEIGHT_PYRAMID=0 for the patch meshes)");
 }
 
 EarthGroundNodes::~EarthGroundNodes()
@@ -119,15 +116,40 @@ EarthGroundNodes::~EarthGroundNodes()
     }
 }
 
+const EarthGroundNodes::Row& EarthGroundNodes::RowOf(int z, int y)
+{
+    auto& rows = _rows[z];
+    for (const auto& r : rows)
+        if (r.y == y)
+            return r;
+    const double latitude = NodeLatitude(z, y + 0.5);
+    const double p = latitude * Pi / 180.0;
+    return rows.push_back({y, latitude, std::sin(p), std::cos(p), Circumference * std::cos(latitude * Pi / 180.0) / double(1 << z)}),
+           rows.back();
+}
+
+const EarthGroundNodes::Column& EarthGroundNodes::ColumnOf(int z, int x)
+{
+    auto& columns = _columns[z];
+    for (const auto& c : columns)
+        if (c.x == x)
+            return c;
+    const double longitude = (x + 0.5) / double(1 << z) * 360.0 - 180.0;
+    const double dl = (longitude - _originLon) * Pi / 180.0;
+    return columns.push_back({x, std::sin(dl), std::cos(dl)}), columns.back();
+}
+
 void EarthGroundNodes::Select(int z, int x, int y, std::vector<Node>& out)
 {
-    const double latitude = NodeLatitude(z, y + 0.5);
-    const double longitude = (x + 0.5) / double(1 << z) * 360.0 - 180.0;
-    const auto local = Earth::ToLocal(_originLat, _originLon, latitude, longitude);
-    if (!local.visible)
+    // Earth::ToLocal of the node's middle, from the frame's row and column tables
+    const Row& row = RowOf(z, y);
+    const Column& column = ColumnOf(z, x);
+    if (std::abs(row.latitude) > 90.0 || _sinP0 * row.sinP + _cosP0 * row.cosP * column.cosDl < 0.0)
         return;
-    const double cx = local.x, cz = local.z, cy = _groundY - Earth::CurvatureDrop(cx, cz);
-    const double width = Width(z, latitude);
+    const double cx = Earth::Anchor + Earth::Radius * (row.cosP * column.sinDl);
+    const double cz = Earth::Anchor + Earth::Radius * (_cosP0 * row.sinP - _sinP0 * row.cosP * column.cosDl);
+    const double cy = _groundY - Earth::CurvatureDrop(cx, cz);
+    const double width = row.width;
     const double radius = width * 0.75 + width * 0.25; // the tile's half diagonal, and room for its relief
     const double distance = std::max(0.0, std::hypot(std::hypot(cx - _cam[0], cy - _cam[1]), cz - _cam[2]) - radius);
     if (distance > _horizon)
@@ -155,7 +177,15 @@ void EarthGroundNodes::Draw(double cameraX, double cameraY, double cameraZ, doub
     _originLat = originLatitude;
     _originLon = originLongitude;
     _horizon = horizon;
-    std::vector<Node> nodes;
+    _sinP0 = std::sin(originLatitude * Pi / 180.0);
+    _cosP0 = std::cos(originLatitude * Pi / 180.0);
+    for (int z = 0; z <= MaxZoom; ++z)
+    {
+        _rows[z].clear();
+        _columns[z].clear();
+    }
+    auto& nodes = _nodes;
+    nodes.clear();
     for (int y = 0; y < (1 << MinZoom); ++y)
         for (int x = 0; x < (1 << MinZoom); ++x)
             Select(MinZoom, x, y, nodes);
@@ -163,23 +193,26 @@ void EarthGroundNodes::Draw(double cameraX, double cameraY, double cameraZ, doub
     const auto tSelect = std::chrono::steady_clock::now();
 
     // the data the drawn vertices will read: per node the zooms its distances ask for (shader3d earth_node_level)
-    std::set<EarthHeightCache::Key> wanted;
+    auto& wanted = _wanted;
+    wanted.clear();
     for (const auto& n : nodes)
     {
         // the level its middle reads, and the next finer for the blend (the shader falls back to ancestors, which
         // Want adds): a range per node asked for more tiles than the atlas holds, and the finest never came
-        const double latitude = NodeLatitude(n.z, n.y + 0.5);
+        const double latitude = RowOf(n.z, n.y).latitude;
         const int middle = int(std::floor(DataLevel(n.distance + n.radius, latitude)));
         for (int level = std::max(middle, 0); level <= std::min(middle + 1, EarthHeightCache::MaxZoom); ++level)
         {
             if (level <= n.z)
-                wanted.insert({level, n.x >> (n.z - level), n.y >> (n.z - level)});
+                wanted.push_back({level, n.x >> (n.z - level), n.y >> (n.z - level)});
             else if (level - n.z <= 2)
                 for (int j = 0; j < (1 << (level - n.z)); ++j)
                     for (int i = 0; i < (1 << (level - n.z)); ++i)
-                        wanted.insert({level, (n.x << (level - n.z)) + i, (n.y << (level - n.z)) + j});
+                        wanted.push_back({level, (n.x << (level - n.z)) + i, (n.y << (level - n.z)) + j});
         }
     }
+    std::sort(wanted.begin(), wanted.end());
+    wanted.erase(std::unique(wanted.begin(), wanted.end()), wanted.end());
     const auto camera = Earth::FromDirection(originLatitude, originLongitude,
                                              {cameraX - Earth::Anchor, Earth::Radius + cameraY, cameraZ - Earth::Anchor});
     const auto tWanted = std::chrono::steady_clock::now();
@@ -200,7 +233,7 @@ void EarthGroundNodes::Draw(double cameraX, double cameraY, double cameraZ, doub
         const double lonWest = n.x / scale * 2.0 * Pi - Pi;
         double dl = lonWest - originLongitude * Pi / 180.0;
         dl -= 2.0 * Pi * std::floor((dl + Pi) / (2.0 * Pi));
-        const double width = Width(n.z, NodeLatitude(n.z, n.y + 0.5));
+        const double width = RowOf(n.z, n.y).width;
         // a node is drawn between SplitFactor and twice SplitFactor of its widths: there it turns into its parent
         const double morphEnd = 2.0 * SplitFactor * width * 0.9, morphStart = 2.0 * SplitFactor * width * 0.6;
         EngineWgpu::EarthNodeDraw draw{};
