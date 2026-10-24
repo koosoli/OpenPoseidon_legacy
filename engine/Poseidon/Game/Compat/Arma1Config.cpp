@@ -977,46 +977,55 @@ bool MovesImported()
 // They are a man's moves of their own (the same Actions: Stop, WalkF, FastF, Die, ...).
 bool AnimalMovesImported(const std::string& moves)
 {
-    static std::map<std::string, bool> done;
-    const auto it = done.find(Lower(moves));
-    if (it != done.end())
-        return it->second;
-    bool& ok = done[Lower(moves)];
-    ok = false;
-    static int base = 0; // 0 untried, 1 ok, -1 failed
-    if (base == 0)
+    // All of them at once, in one text with their base: the states' bases (StandBase,
+    // Default, DefaultDie) and the action maps' (ManActions) live in CfgMovesAnimalsBase,
+    // and a base named in another import is not found ("Undefined base class 'StandBase'").
+    static std::set<std::string> imported;
+    static bool tried = false;
+    if (!tried)
     {
-        base = -1;
-        if (const ParamEntry* b = Arma1Pars().FindEntryNoInheritance("CfgMovesAnimalsBase"); b && b->IsClass())
+        tried = true;
+        const ParamEntry& root = Arma1Pars();
+        const ParamEntry* b = root.FindEntryNoInheritance("CfgMovesAnimalsBase");
+        if (!b || !b->IsClass())
         {
-            std::string text = SaveText(*b);
-            ReplaceFirst(text, "class CfgMovesAnimalsBase", "class A1_CfgMovesAnimalsBase");
-            // CWA's moves loader names the vehicle actions table; animals board nothing.
-            if (const size_t open = text.find('{'); open != std::string::npos)
-            {
-                text.insert(open + 1, "\r\nvehicleActions=\"CfgVehicleActions\";\r\n");
-                ImportIntoPars(text, "CfgMovesAnimalsBase as A1_CfgMovesAnimalsBase");
-                base = Pars.FindEntry("A1_CfgMovesAnimalsBase") ? 1 : -1;
-            }
-        }
-        if (base < 0)
             LOG_WARN(Mission, "{}: CfgMovesAnimalsBase not found, animals are left out", Label());
+            return false;
+        }
+        std::string text = SaveText(*b);
+        ReplaceFirst(text, "class CfgMovesAnimalsBase", "class A1_CfgMovesAnimalsBase");
+        // CWA's moves loader names the vehicle actions table; animals board nothing.
+        const size_t open = text.find('{');
+        if (open == std::string::npos)
+            return false;
+        text.insert(open + 1, "\r\nvehicleActions=\"CfgVehicleActions\";\r\n");
+        std::vector<std::string> names;
+        for (int i = 0; i < root.GetEntryCount(); i++)
+        {
+            const ParamEntry& m = root.GetEntry(i);
+            const std::string name = (const char*)m.GetName();
+            if (!m.IsClass() || _strnicmp(name.c_str(), "CfgMoves", 8) != 0 || !m.FindEntry("States"))
+                continue;
+            std::string mt = SaveText(m);
+            const std::string head = "class " + name + ": CfgMovesAnimalsBase";
+            if (mt.compare(0, head.size(), head) != 0 && mt.find(head) == std::string::npos)
+                continue;
+            ReplaceFirst(mt, head, "class A1_" + name + ": A1_CfgMovesAnimalsBase");
+            text += mt;
+            names.push_back(name);
+        }
+        ImportIntoPars(text, "CfgMovesAnimalsBase and the animals' moves as A1_");
+        for (const std::string& n : names)
+            if (Pars.FindEntry(("A1_" + n).c_str()))
+                imported.insert(Lower(n));
+        LOG_INFO(Mission, "{}: {} animal move sets imported", Label(), imported.size());
     }
-    if (base < 0)
-        return false;
-    const ParamEntry* m = Arma1Pars().FindEntryNoInheritance(moves.c_str());
-    if (!m || !m->IsClass() || !m->FindEntry("States"))
-    {
+    if (imported.count(Lower(moves)))
+        return true;
+    static std::set<std::string> reported;
+    if (reported.insert(Lower(moves)).second)
         LOG_WARN(Mission, "{}: animal moves '{}' not found", Label(), moves);
-        return false;
-    }
-    std::string text = SaveText(*m);
-    const std::string name = std::string((const char*)m->GetName());
-    ReplaceFirst(text, "class " + name + ": CfgMovesAnimalsBase", "class A1_" + name + ": A1_CfgMovesAnimalsBase");
-    ReplaceFirst(text, "class " + name, "class A1_" + name);
-    ImportIntoPars(text, (moves + " as A1_" + name).c_str());
-    ok = Pars.FindEntry(("A1_" + name).c_str()) != nullptr;
-    return ok;
+    return false;
 }
 
 // Values an Arma 1 man class carries for engine-facing names (bones, memory
