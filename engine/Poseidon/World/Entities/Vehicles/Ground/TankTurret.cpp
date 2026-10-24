@@ -588,16 +588,23 @@ void Turret::AnimatePoint(const TurretType& type, Vector3& pos, const Object* ob
 
 void Turret::AnimateMatrix(const TurretType& type, Matrix4& mat, const Object* obj, int level, int selection) const
 {
-    if (selection < 0)
+    if (selection < 0 || !obj || !obj->GetShape() || level < 0)
     {
         return;
     }
+    // A level that is not loaded (a camera asking for a proxy of an Arma 2 helicopter as its
+    // driver is moved in by a script: str_EW2's FSM, 0xC0000005 here in run 39) has nothing
+    // to animate.
     Shape* shape = obj->GetShape()->Level(level);
+    if (!shape || selection >= shape->NNamedSel())
+    {
+        return;
+    }
     const NamedSelection& sel = shape->NamedSel(selection);
 
     bool onGun = false;
     int selI = type._gun.GetSelection(level);
-    if (selI >= 0)
+    if (selI >= 0 && selI < shape->NNamedSel())
     {
         // check if sel is whole contained in particular selection
         const NamedSelection& tSel = shape->NamedSel(selI);
@@ -611,7 +618,7 @@ void Turret::AnimateMatrix(const TurretType& type, Matrix4& mat, const Object* o
     }
     bool onBody = false;
     selI = type._body.GetSelection(level);
-    if (selI >= 0)
+    if (selI >= 0 && selI < shape->NNamedSel())
     {
         // check if sel is whole contained in particular selection
         const NamedSelection& tSel = shape->NamedSel(selI);
