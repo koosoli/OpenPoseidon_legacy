@@ -1,6 +1,7 @@
 #include "WaterWgpu.hpp"
 #include <Poseidon/Dev/Diag/PhaseSplit.hpp>
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
+#include "EarthCoordinates.hpp"
 #include <Poseidon/World/Terrain/EarthMoonFrame.hpp>
 #include <Poseidon/World/Terrain/WaterBodies.hpp>
 #include <Poseidon/World/Terrain/WaterSurfaceQuery.hpp>
@@ -921,7 +922,10 @@ void WaterWgpu::DrawEarthWater(Scene& scene, float originX, float originZ, float
     p.tidewater[3] = {std::max(t.gust, 0.0f), std::max(t.slick, 0.0f), std::max(t.windrow, 0.0f), float(t.debugView)};
     p.tidewater_fx.z = std::clamp(t.waterGlow, 0.0f, 2.0f);
     p.tidewater_sea = {7.0f, 120.0f, std::clamp(t.whitecaps, 0.0f, 1.0f), 0.0f};
-    p.optics_params = {1.0f, 1.0f, 0.0f, 1.0f};
+    // .z: the sea under the camera, which the renderer's underwater gate reads -- the spherical datum there,
+    // not the flat 0 m: 13.6 km from the origin the sea is 14.5 m lower, and a camera 3 m over it was
+    // composited as under water (owner, 2026-10-24).
+    p.optics_params = {1.0f, 1.0f, -float(Earth::CurvatureDrop(camera->Position().X(), camera->Position().Z())), 1.0f};
     // Under the surface: the same underwater settings as the island sea (the Water tab's). Left at zero,
     // Tidewater's underwater composite never ran in whole-world mode: a camera under the sea saw the
     // open sky through the missing surface and no water at all.
@@ -937,6 +941,52 @@ void WaterWgpu::DrawEarthWater(Scene& scene, float originX, float originZ, float
     marker.origin = {originX, originZ};
     marker.size = (samples - 1) * grid;
     _engine.SubmitWater(std::span<const WgrWaterNode>(&marker, 1));
+    ExchangeDrawnWater();
+}
+
+// Sinkhole W3 and the boats' hull queries: the drawn surface and the per-point heights go to the
+// simulation (SoldierOldSwim.cpp, ShipTidewater.cpp), this step's points come back. Both the island water
+// draw and the whole world's (DrawEarthWater) run it: the Earth sea skipped it, and a boat there floated on
+// the CPU predictor while the drawn waves washed over its deck (owner, 2026-10-24).
+void WaterWgpu::ExchangeDrawnWater()
+{
+    const auto& look = _engine.WaterLook();
+    // Sinkhole W3: hand the drawn surface around the camera to the simulation (swimmers near the camera
+    // and the camera following one ride it; SoldierOldSwim.cpp). None when it is stale (another water
+    // mode, a paused renderer).
+    static std::vector<float> grid(64 * 64 * 3);
+    float lanes[4] = {};
+    float ageMs = 0.0f;
+    const uint32_t n = wgr_water_drawn_grid(grid.data(), uint32_t(grid.size() / 3), lanes, &ageMs);
+    const bool validSide = std::isfinite(lanes[3]) && lanes[3] >= 2.0f && lanes[3] <= 64.0f;
+    const int side = validSide ? int(std::lround(lanes[3])) : 0;
+    if (TidewaterDrawsWater(look.waterBackend) && n > 0 && std::isfinite(ageMs) &&
+        ageMs >= 0.0f && ageMs < 250.0f && side * side == int(n))
+    {
+        SetDrawnWaterGrid(grid.data(), side, lanes);
+    }
+    else
+    {
+        SetDrawnWaterGrid(nullptr, 0, nullptr);
+    }
+    // (OP) the boats' hull samples anywhere on the sea (water_tw/query.rs): this step's points up,
+    // the latest results down (stale after 250 ms, as the grid)
+    static float queryXz[WaterQueryMaxPoints * 2];
+    static float resultXz[WaterQueryMaxPoints * 2];
+    static float resultValues[WaterQueryMaxPoints * 4];
+    const bool tidewater = TidewaterDrawsWater(look.waterBackend);
+    const int asked = tidewater ? TakeWaterQueryRequests(queryXz, WaterQueryMaxPoints) : 0;
+    wgr_water_query_points(queryXz, uint32_t(asked));
+    float queryAge = 0.0f;
+    const uint32_t got = tidewater ? wgr_water_query_results(resultXz, resultValues, WaterQueryMaxPoints, &queryAge) : 0;
+    if (got > 0 && std::isfinite(queryAge) && queryAge >= 0.0f && queryAge < 250.0f)
+    {
+        SetWaterQueryResults(resultXz, resultValues, int(got));
+    }
+    else
+    {
+        SetWaterQueryResults(nullptr, nullptr, 0);
+    }
 }
 
 void WaterWgpu::NoEarthWater()
@@ -1508,44 +1558,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
             _lastInteractionDemoPulse = pulse;
         }
     }
-    // Sinkhole W3: hand the drawn surface around the camera to the simulation (swimmers near the camera
-    // and the camera following one ride it; SoldierOldSwim.cpp). None when it is stale (another water
-    // mode, a paused renderer).
-    {
-        static std::vector<float> grid(64 * 64 * 3);
-        float lanes[4] = {};
-        float ageMs = 0.0f;
-        const uint32_t n = wgr_water_drawn_grid(grid.data(), uint32_t(grid.size() / 3), lanes, &ageMs);
-        const bool validSide = std::isfinite(lanes[3]) && lanes[3] >= 2.0f && lanes[3] <= 64.0f;
-        const int side = validSide ? int(std::lround(lanes[3])) : 0;
-        if (TidewaterDrawsWater(look.waterBackend) && n > 0 && std::isfinite(ageMs) &&
-            ageMs >= 0.0f && ageMs < 250.0f && side * side == int(n))
-        {
-            SetDrawnWaterGrid(grid.data(), side, lanes);
-        }
-        else
-        {
-            SetDrawnWaterGrid(nullptr, 0, nullptr);
-        }
-        // (OP) the boats' hull samples anywhere on the sea (water_tw/query.rs): this step's points up,
-        // the latest results down (stale after 250 ms, as the grid)
-        static float queryXz[WaterQueryMaxPoints * 2];
-        static float resultXz[WaterQueryMaxPoints * 2];
-        static float resultValues[WaterQueryMaxPoints * 4];
-        const bool tidewater = TidewaterDrawsWater(look.waterBackend);
-        const int asked = tidewater ? TakeWaterQueryRequests(queryXz, WaterQueryMaxPoints) : 0;
-        wgr_water_query_points(queryXz, uint32_t(asked));
-        float queryAge = 0.0f;
-        const uint32_t got = tidewater ? wgr_water_query_results(resultXz, resultValues, WaterQueryMaxPoints, &queryAge) : 0;
-        if (got > 0 && std::isfinite(queryAge) && queryAge >= 0.0f && queryAge < 250.0f)
-        {
-            SetWaterQueryResults(resultXz, resultValues, int(got));
-        }
-        else
-        {
-            SetWaterQueryResults(nullptr, nullptr, 0);
-        }
-    }
+    ExchangeDrawnWater();
     perfFrame.Lap(WdProbe, WdRest);
     std::array<HydroWaterInteractionEvent, HydroMaxWaterInteractions> submitted{};
     const uint32_t submittedCount = DrainWaterInteractions(submitted.data(), HydroMaxWaterInteractions);

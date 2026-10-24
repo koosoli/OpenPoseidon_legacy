@@ -62,7 +62,7 @@ struct UwParams {
     torch_pos: vec4<f32>,       // (W5e) the torch: world position, w: on
     torch_dir: vec4<f32>,       // beam direction, w: cos^2 of the outer cone
     torch_col: vec4<f32>,       // irradiance in the core (Tidewater units), w: core radius (m)
-    torch_shape: vec4<f32>,     // x: cone shaping exponent, y: beam in-scatter strength, z: diffuse light leg (uwLightLeg)
+    torch_shape: vec4<f32>,     // x: cone shaping exponent, y: beam in-scatter strength, z: the whole world's open sea (uwLightLeg, its curved datum)
     probe: vec4<f32>,           // (W9a) the probe grid: camera x, z, step (m), size (0 = none)
 };
 
@@ -208,7 +208,15 @@ fn uwWaterHeight(xz: vec2<f32>) -> f32 {
             y += textureSampleLevel(uwDisplacement, uwRepeat, xz / uw.sizes[c], c, 0.0).y;
         }
     }
-    let far = uw.scattering.w + y * uw.ocean.x;
+    // (OP) the whole world's sea falls away from the origin with the planet's curvature (tw_water.wgsl
+    // earthWaterDrop); on the flat level a camera 3 m over the sea 13 km out read as 11 m under it
+    var datum = uw.scattering.w;
+    if (uw.torch_shape.z > 0.5) {
+        let r2 = dot(xz - vec2<f32>(6400.0), xz - vec2<f32>(6400.0));
+        let radius = 6378137.0;
+        datum -= r2 / (radius + sqrt(max(radius * radius - r2, 0.0)));
+    }
+    let far = datum + y * uw.ocean.x;
     return mix(far, near.x, near.y);
 }
 

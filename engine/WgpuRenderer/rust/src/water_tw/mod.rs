@@ -1372,7 +1372,10 @@ impl Tidewater {
         if self.last_params.is_some() {
             if self.last_params.as_ref().is_some_and(earth_preview) && self.instance_count == 0 { return; }
             self.fft.dispatch(encoder, timers);
-            if self.last_params.as_ref().is_some_and(earth_preview) { return; }
+            // (OP) The whole world's sea runs the rest too: without the probe and the height queries a
+            // boat floated on the flat predictor while the drawn waves washed over its deck, and the
+            // underwater gate had no measured surface (owner, 2026-10-24). Its shore simulation stays
+            // off (no shore data there: any_active is false).
             // W5b: the caustics follow this frame's FFT (W7h: timed)
             if !self.bind_dirty && !self.caustics_skip {
                 timers.begin(encoder, crate::gpu_timers::Region::TwCaustics);

@@ -32,6 +32,7 @@ class WaterWgpu : public IWaterRenderer
     // and with the Earth sea's level (0) and underwater pass still in them a soldier standing on the moon
     // below the moon frame's y = 0 was composited as hundreds of metres under water -- a black screen.
     void NoEarthWater();
+    void ExchangeDrawnWater();
 
   private:
     void QueueRainWater(bool enabled);
