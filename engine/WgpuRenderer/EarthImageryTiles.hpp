@@ -62,6 +62,8 @@ class EarthImageryTiles
     static int ChooseZoom(double latitude, double metresPerPixel, int maxZoom);
     // Tiles downloaded so far (all time): a cheap "has anything new arrived" for progressive publishing.
     uint64_t Arrivals() const { return _arrivals.load(); }
+    // No second source (elevation tiles: EarthHeightCache uses this class for Terrarium, which has none).
+    void NoFallback() { _fallbackDir.clear(); }
 
   private:
     struct Tile
