@@ -416,6 +416,142 @@ ZeusGotoPose ParseZeusGoto(const char* text)
     return pose;
 }
 
+// Whole world: a pasted GPS position instead of a map pose (owner: "make the go to coordinates accept real
+// gps coordinates"). Two forms, as map sites copy them:
+//   decimal degrees, comma between them    38.72230, -9.13934        (an optional third number: altitude, m)
+//   degrees / minutes / seconds + N S E W  38 43'20.3"N 9 08'21.6"W  (degree signs, or N 38 43 20.3 W 9 8 21.6)
+// A map pose has no hemisphere letter or degree sign, and is outside +-90 / +-180 or has no comma.
+struct ZeusGps
+{
+    double latitude = 0, longitude = 0, altitude = 0;
+    bool hasAltitude = false;
+};
+bool IsHemisphere(const char* p, const char* text)
+{
+    const char c = *p;
+    if (c != 'N' && c != 'S' && c != 'E' && c != 'W' && c != 'n' && c != 's' && c != 'e' && c != 'w')
+        return false;
+    const auto letter = [](char ch) { return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'); };
+    // a letter on its own: not part of a word, nor a number's exponent ("1e5")
+    if (p > text && letter(p[-1]))
+        return false;
+    if (p > text && (c == 'e' || c == 'E') && p[-1] >= '0' && p[-1] <= '9' && ((p[1] >= '0' && p[1] <= '9') || p[1] == '-' || p[1] == '+'))
+        return false;
+    return !letter(p[1]);
+}
+bool ZeusGpsNumber(const char*& p, double& v)
+{
+    const bool start = (*p >= '0' && *p <= '9') || *p == '.' ||
+                       ((*p == '-' || *p == '+') && ((p[1] >= '0' && p[1] <= '9') || p[1] == '.'));
+    if (!start)
+        return false;
+    char* end = nullptr;
+    v = std::strtod(p, &end);
+    if (end == p)
+        return false;
+    p = end;
+    return true;
+}
+std::optional<ZeusGps> ParseZeusGps(const char* text)
+{
+    if (!text)
+        return std::nullopt;
+    bool marked = std::strstr(text, "\xC2\xB0") != nullptr; // the degree sign (UTF-8)
+    for (const char* p = text; *p && !marked; ++p)
+        marked = IsHemisphere(p, text);
+    ZeusGps gps;
+    if (marked)
+    {
+        // Each coordinate is up to three numbers (degrees, minutes, seconds), its hemisphere letter after
+        // them or before them; without letters latitude comes first.
+        double parts[3] = {};
+        int count = 0;
+        char pending = 0;
+        bool haveLat = false, haveLon = false;
+        const auto close = [&](char hemisphere) {
+            if (count == 0)
+                return;
+            double v = std::abs(parts[0]) + (count > 1 ? parts[1] / 60.0 : 0.0) + (count > 2 ? parts[2] / 3600.0 : 0.0);
+            const char h = char(std::toupper(static_cast<unsigned char>(hemisphere)));
+            if (parts[0] < 0 || h == 'S' || h == 'W')
+                v = -v;
+            if (h == 'N' || h == 'S')
+                gps.latitude = v, haveLat = true;
+            else if (h == 'E' || h == 'W')
+                gps.longitude = v, haveLon = true;
+            else if (!haveLat)
+                gps.latitude = v, haveLat = true;
+            else
+                gps.longitude = v, haveLon = true;
+            count = 0;
+        };
+        for (const char* p = text; *p;)
+        {
+            double v = 0;
+            if (ZeusGpsNumber(p, v))
+            {
+                if (count == 3)
+                {
+                    close(pending);
+                    pending = 0;
+                }
+                parts[count++] = v;
+                continue;
+            }
+            if (IsHemisphere(p, text))
+            {
+                if (count > 0 && pending)
+                {
+                    close(pending); // "N 38 43 20 W ..." -- this letter opens the next coordinate
+                    pending = *p;
+                }
+                else if (count > 0)
+                    close(*p); // "38 43 20 N"
+                else
+                    pending = *p;
+            }
+            else if (*p == ',' || *p == ';')
+            {
+                close(pending);
+                pending = 0;
+            }
+            ++p;
+        }
+        close(pending);
+        if (!haveLat || !haveLon)
+            return std::nullopt;
+    }
+    else
+    {
+        if (!std::strchr(text, ','))
+            return std::nullopt;
+        double v[3] = {};
+        int count = 0;
+        for (const char* p = text; *p && count < 4;)
+        {
+            double x = 0;
+            if (ZeusGpsNumber(p, x))
+            {
+                if (count < 3)
+                    v[count] = x;
+                ++count;
+                continue;
+            }
+            ++p;
+        }
+        if (count < 2 || count > 3 || std::abs(v[0]) > 90.0 || std::abs(v[1]) > 180.0)
+            return std::nullopt;
+        gps.latitude = v[0];
+        gps.longitude = v[1];
+        if (count == 3)
+            gps.altitude = v[2], gps.hasAltitude = true;
+    }
+    if (!std::isfinite(gps.latitude) || !std::isfinite(gps.longitude) || std::abs(gps.latitude) > 90.0 ||
+        std::abs(gps.longitude) > 180.0)
+        return std::nullopt;
+    return gps;
+}
+
 // Move the free-fly camera to a pasted pose, enabling free-fly first if it is not already
 // running, so one paste + one click is the whole interaction.
 //
@@ -424,6 +560,21 @@ ZeusGotoPose ParseZeusGoto(const char* text)
 // there plus an eye offset, because a paste of just X/Z otherwise buries the camera.
 void GoToZeusCoordinates()
 {
+    if (EarthStreaming::Enabled())
+        if (const auto gps = ParseZeusGps(s_zeusGotoBuf))
+        {
+            // 500 m over the place unless an altitude was given, where the Earth tab's Go starts too
+            const double altitude = gps->hasAltitude ? gps->altitude : 500.0;
+            char status[192];
+            if (SetEarthPreviewLocation(gps->latitude, gps->longitude, altitude))
+                std::snprintf(status, sizeof(status), "Moved to %.6f, %.6f, %.0f m up; the ground there is streaming in.",
+                              gps->latitude, gps->longitude, altitude);
+            else
+                std::snprintf(status, sizeof(status), "GPS %.6f, %.6f rejected (latitude -84..84, single-player free flight).",
+                              gps->latitude, gps->longitude);
+            s_zeusStatus = status;
+            return;
+        }
     const ZeusGotoPose pose = ParseZeusGoto(s_zeusGotoBuf);
     if (pose.count < 2)
     {
@@ -1638,11 +1789,13 @@ void DrawZeusTab()
     // Enter in the box is the same as pressing the button: pasting a pose and hitting
     // return is the whole gesture this exists for.
     const bool submitted =
-        Dev::InputTextWithHint("##zeusgoto", "paste a pose, e.g. 2721.96 944.30 99.33 306.9 -5.4", s_zeusGotoBuf,
+        Dev::InputTextWithHint("##zeusgoto", EarthStreaming::Enabled() ? "a pose (2721.96 944.30 99.33) or GPS (38.72230, -9.13934)"
+                                                                       : "paste a pose, e.g. 2721.96 944.30 99.33 306.9 -5.4", s_zeusGotoBuf,
                                sizeof(s_zeusGotoBuf), ImGuiInputTextFlags_EnterReturnsTrue);
     Dev::PanelTooltip("X Z ALTITUDE [azimuth elevation] -- the same order this panel's freefly readout prints,\n"
                       "so you can paste that line back in verbatim, brackets and labels and all.\n"
-                      "Two numbers = X and Z at head height on the terrain.");
+                      "Two numbers = X and Z at head height on the terrain.\n"
+                      "Whole World: GPS too -- 38.72230, -9.13934 [, altitude m] or 38\xC2\xB0" "43'20.3\"N 9\xC2\xB0" "08'21.6\"W.");
     if (Dev::Button("Go") || submitted)
         Defer([] { GoToZeusCoordinates(); });
     Dev::PanelSameLine();
