@@ -1372,6 +1372,10 @@ impl Tidewater {
         if self.last_params.is_some() {
             if self.last_params.as_ref().is_some_and(earth_preview) && self.instance_count == 0 { return; }
             self.fft.dispatch(encoder, timers);
+            // WGR_TW_EARTH_FULL=0: the whole world's sea stops after the FFT, as before 2026-10-24 (A/B).
+            static EARTH_FULL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            if !*EARTH_FULL.get_or_init(|| std::env::var("WGR_TW_EARTH_FULL").map(|v| v.trim() != "0").unwrap_or(true))
+                && self.last_params.as_ref().is_some_and(earth_preview) { return; }
             // (OP) The whole world's sea runs the rest too: without the probe and the height queries a
             // boat floated on the flat predictor while the drawn waves washed over its deck, and the
             // underwater gate had no measured surface (owner, 2026-10-24). Its shore simulation stays
