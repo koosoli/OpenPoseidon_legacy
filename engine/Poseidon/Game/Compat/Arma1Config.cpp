@@ -1020,7 +1020,7 @@ std::string EditorClassLabel(const std::string& a1Class)
         if (const ParamEntry* cls = classes->FindEntry(a1Class.c_str()); cls && cls->IsClass())
             if (const ParamEntry* name = cls->FindEntry("displayName"); name && !name->IsClass() && !name->IsArray())
             {
-                const std::string text = Arma1Text(name->GetValue().Data());
+                const std::string text = Arma1Text(name->GetValueRaw().Data());
                 if (!text.empty())
                     label = text;
             }
@@ -3080,7 +3080,9 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     if (const ParamEntry* scope = cwa->FindEntry("scope"); !scope || (int)*scope < 1)
         text += "\t\tscope=1;\r\n";
     // Arma 1's own name ("$STR_DN_..." resolved against the Arma 1 stringtables first)
-    std::string displayName = Arma1Text(StringValue(*a1, "displayName"));
+    std::string displayName;
+    if (const ParamEntry* dn = a1->FindEntry("displayName"); dn && !dn->IsClass() && !dn->IsArray())
+        displayName = Arma1Text(dn->GetValueRaw().Data()); // raw: GetValue resolves "$STR" CWA-first
     displayName.erase(std::remove(displayName.begin(), displayName.end(), '"'), displayName.end());
     if (!displayName.empty())
         text += "\t\tdisplayName=\"" + displayName + "\";\r\n";
