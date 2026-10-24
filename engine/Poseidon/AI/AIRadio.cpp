@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Core/Game/GameLoop.hpp> // LockstepPacingActive (SIM-815): deterministic radio timing
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
@@ -1520,7 +1521,25 @@ void RadioChannel::Say(RString waveName, AIUnit* sender, RString senderName, RSt
         const ParamEntry& cls = Pars >> "CfgHQIdentities" >> senderName;
         RString name = cls >> "speaker";
         float pitch = cls >> "pitch";
-        Ref<BasicSpeaker> basicSpeaker = new BasicSpeaker(Pars >> "CfgVoice" >> name);
+        Ref<BasicSpeaker> basicSpeaker;
+        // --arma2: HQ speaks with Arma 2's voice for it (the Arma 2 config's
+        // CfgHQIdentities >> <sender> >> speaker), CWA's for words that voice lacks.
+        if (const ParamEntry* a2Hq = Arma1Compat::FindConfigClass("CfgHQIdentities", senderName))
+        {
+            if (const ParamEntry* sp = a2Hq->FindEntry("speaker"); sp && !sp->IsClass() && !sp->IsArray())
+            {
+                const ParamEntry* a2 = Arma1Compat::Arma2VoiceClass(RString((RStringB)*sp));
+                const ParamEntry* a2Words = a2 ? Arma1Compat::Arma2VoiceWords(*a2) : nullptr;
+                if (a2Words)
+                {
+                    basicSpeaker = new BasicSpeaker(Pars >> "CfgVoice" >> name, *a2, *a2Words);
+                    if (const ParamEntry* p = a2Hq->FindEntry("pitch"); p && !p->IsClass() && !p->IsArray())
+                        pitch = (float)*p;
+                }
+            }
+        }
+        if (!basicSpeaker)
+            basicSpeaker = new BasicSpeaker(Pars >> "CfgVoice" >> name);
         _speaker = Speaker(basicSpeaker, pitch);
     }
     // start playing noise
