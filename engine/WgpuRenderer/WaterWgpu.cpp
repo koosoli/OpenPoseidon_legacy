@@ -931,10 +931,23 @@ void WaterWgpu::DrawEarthWater(Scene& scene, float originX, float originZ, float
     p.underwater_gate = {look.underwaterEffect ? 1.0f : 0.0f, std::clamp(look.waveFoamIntensity, 0.0f, 2.0f),
                          std::clamp(look.waveFoamDeepFalloff, 0.0f, 1.0f), std::clamp(look.reflectionEdgeFade, 0.02f, 0.49f)};
     _engine.QueueWaterParams(p);
+    _earthParams = p;
+    _earthParamsSet = true;
     WgrWaterNode marker{};
     marker.origin = {originX, originZ};
     marker.size = (samples - 1) * grid;
     _engine.SubmitWater(std::span<const WgrWaterNode>(&marker, 1));
+}
+
+void WaterWgpu::NoEarthWater()
+{
+    if (!_renderer || !_earthParamsSet)
+        return;
+    WgrWaterParams p = _earthParams;
+    p.underwater_gate.x = 0.0f;
+    p.sea_level = -1.0e9f;
+    p.optics_params.z = -1.0e9f; // the "body under the camera" level the gate prefers when .w is set
+    _engine.QueueWaterParams(p);
 }
 
 // PERF-030: the pieces of the WGPU water draw, the `water` slot of land:gnd's breakdown

@@ -4922,7 +4922,11 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
             // read as sea, and seabirds flew over the lunar surface. They are submitted per frame, so not
             // updating them is not drawing them.
             if (EarthStreaming::MoonFrameActive())
+            {
+                if (auto* water = static_cast<WaterWgpu*>(_engine.GetWaterRenderer()))
+                    water->NoEarthWater();
                 return;
+            }
             if (!_fish)
                 _fish = std::make_unique<FishSchools>(_engine, _renderer);
             _fish->Update(camera->Position(), Glob.time.toFloat());

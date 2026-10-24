@@ -28,6 +28,10 @@ class WaterWgpu : public IWaterRenderer
     // Earth preview: bounded visual sea on the currently published rolling heightmap.
     // No finite Landscape shore/body/interaction or gameplay-water authority is used.
     void DrawEarthWater(Scene& scene, float originX, float originZ, float grid, uint32_t samples);
+    // No Earth sea this frame (the moon frame): the renderer keeps the last water parameters it was given,
+    // and with the Earth sea's level (0) and underwater pass still in them a soldier standing on the moon
+    // below the moon frame's y = 0 was composited as hundreds of metres under water -- a black screen.
+    void NoEarthWater();
 
   private:
     void QueueRainWater(bool enabled);
@@ -68,6 +72,8 @@ class WaterWgpu : public IWaterRenderer
     // Static placement params (world_origin/terrain_grid/hm dims), captured on build;
     // sea_level is refreshed per frame.
     WgrWaterParams _params{};
+    WgrWaterParams _earthParams{};
+    bool _earthParamsSet = false;
     WgrWaterInteractionParams _interaction{};
     float _lastInteractionTime = 0.0f;
     // PERF-022: the cascade preset push is per frame by design (it carries the live seed
