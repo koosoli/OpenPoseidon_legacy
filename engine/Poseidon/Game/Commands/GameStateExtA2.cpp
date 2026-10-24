@@ -127,6 +127,7 @@ GameValue ObjSetVectorDirectionAndUp(const GameState* state, GameValuePar oper1,
 GameValue GrpKnowsAbout(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue GroupCreate(const GameState* state, GameValuePar oper1);
 GameValue SideCivilian(const GameState* state);
+GameValue ListJoin(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 
 GameValue VehProcessAction(const GameState* state, GameValuePar oper1, GameValuePar oper2); // GameStateExtGrp.cpp
@@ -486,7 +487,16 @@ GameValue A2TaskDestination(const GameState* state, GameValuePar oper1)
     Task* task = FindTask(oper1);
     if (task && task->destination.GetType() == GameArray)
         return task->destination;
-    return state->CreateGameValue(GameArray);
+    // a task without a destination is at [0,0,0] (the task handlers measure distances to it)
+    GameValue result = state->CreateGameValue(GameArray);
+    if (task)
+    {
+        GameArrayType& p = result;
+        p.Add(GameValue(0.0f));
+        p.Add(GameValue(0.0f));
+        p.Add(GameValue(0.0f));
+    }
+    return result;
 }
 
 GameValue A2SetCurrentTask(const GameState* state, GameValuePar oper1, GameValuePar oper2)
@@ -1217,6 +1227,22 @@ GameValue A2MoveTo(const GameState* state, GameValuePar oper1, GameValuePar oper
                      obj->Position().X(), obj->Position().Z(), to.X(), to.Z());
         }
     }
+    // An agent (Arma 2's AMBIENT LIFE: the animals of a mission's Vehicles) has no group,
+    // and only a unit in a group moves to an order; it gets a civilian group of its own on
+    // its first moveTo, as createAgent's agents have (T01's cows stood: "no group").
+    if (Object* obj = GetObject(oper1))
+    {
+        Person* person = dyn_cast<Person>(obj);
+        AIUnit* unit = person ? person->Brain() : nullptr;
+        if (unit && !unit->GetGroup())
+        {
+            const GameValue group = GroupCreate(state, SideCivilian(state));
+            GameValue list = state->CreateGameValue(GameArray);
+            GameArrayType& units = list;
+            units.Add(oper1);
+            ListJoin(state, list, group);
+        }
+    }
     return ::VehDoMove(state, oper1, oper2);
 }
 
@@ -1532,6 +1558,24 @@ GameValue A2ActionKeysNamesArray(const GameState* state, GameValuePar oper1)
         break;
     }
     return result;
+}
+
+// actionKeysNames: the same names as one string, each quoted, joined by " or " (Arma 2
+// returns a string: the bootcamp hints call compile on it).
+GameValue A2ActionKeysNames(const GameState* state, GameValuePar oper1)
+{
+    const GameValue names = A2ActionKeysNamesArray(state, oper1);
+    const GameArrayType& list = names;
+    std::string out;
+    for (int i = 0; i < list.Size(); i++)
+    {
+        if (i)
+            out += " or ";
+        out += "\"";
+        out += (const char*)RString(list[i]);
+        out += "\"";
+    }
+    return GameValue(RString(out.c_str()));
 }
 
 // getGroupIconParams: no group icons are drawn here, so every group has the neutral ones --
@@ -3131,7 +3175,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameObject, "effectiveCommander", ObjCommander, GameObject),
     GameFunction(GameString, "faction", A2Faction, GameObject),
     GameFunction(GameArray, "synchronizedObjects", A2SynchronizedObjects, GameObject),
-    GameFunction(GameArray, "actionKeysNames", A2EmptyArrayUnary, GameString | GameArray),
+    GameFunction(GameString, "actionKeysNames", A2ActionKeysNames, GameString | GameArray),
     GameFunction(GameArray, "actionKeysNamesArray", A2ActionKeysNamesArray, GameString | GameArray),
     GameFunction(GameNothing, "hcRemoveAllGroups", A2NothingUnary, GameObject),
     GameFunction(GameString, "createLocation", A2CreateLocation, GameArray),

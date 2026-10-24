@@ -1168,10 +1168,22 @@ void ScriptFiberTerminate(ScriptFiber* f)
     f->terminate = true;
 }
 
+void ForgetScriptSwitches(const void* owner); // GameStateExt.cpp
+
+// The scheduled script running now (null outside one): what the script commands that keep
+// state across statements (switch/case) key it by.
+const void* CurrentScriptFiber()
+{
+    return GRunningFiber;
+}
+
 void DestroyScriptFiber(ScriptFiber* f)
 {
     if (!f || f == GRunningFiber)
         return;
+    // a script dropped inside a switch body leaves its switch behind; its stack is not
+    // unwound, so the switch must not be reached through it any more
+    ForgetScriptSwitches(f);
     Coroutine::Destroy(f->coroutine);
     delete f;
 }
