@@ -559,7 +559,15 @@ void StringTableDynamic::Load(QIStream& file, const char* filename, std::set<std
             return;
         }
 
-        if (!row.empty() && stricmp(row[0].c_str(), "LANGUAGE") == 0)
+        // Arma 1's bin.pbo keeps its config, radio and UI strings in stringtableConfig.csv
+        // and friends, whose header row is "COMMENT,English,Czech,German,...": the language
+        // row by another name. Read as a comment, the header search ran to the end of the
+        // file and every STR_DN_* class name (Air, Men, Armored...) was lost. For the Arma
+        // tables a COMMENT row that names English is taken as the header.
+        const bool commentHeader = lowerKeys && !row.empty() && stricmp(row[0].c_str(), "COMMENT") == 0 &&
+                                   std::any_of(row.begin() + 1, row.end(),
+                                               [](const std::string& c) { return stricmp(c.c_str(), "English") == 0; });
+        if (!row.empty() && (stricmp(row[0].c_str(), "LANGUAGE") == 0 || commentHeader))
         {
             headerColumns = static_cast<int>(row.size());
             for (int c = 1; c < static_cast<int>(row.size()); c++)
@@ -667,6 +675,7 @@ class StringTable
     void Load(RString type, RString filename, float priority, bool init);
     // Arma 1 stringtable read from a private archive; kept for language switches.
     void LoadArma1FromMemory(const char* name, const char* data, size_t size);
+    RString LocalizeArma1First(const char* str);
 
     int Register(RString name);
 
@@ -862,6 +871,18 @@ bool StringTable::SetLanguage(RString newLang)
     return true;
 }
 
+RString StringTable::LocalizeArma1First(const char* str)
+{
+    RString lower = str;
+    lower.Lower();
+    const StringTableItem& item = _tableArma1[lower];
+    if (!_tableArma1.IsNull(item))
+    {
+        return item.value;
+    }
+    return Localize(str);
+}
+
 RString StringTable::Localize(const char* str)
 {
     const StringTableItem& item1 = _tableMission[str];
@@ -945,6 +966,11 @@ RString LocalizeString(int ids)
 RString LocalizeString(const char* str)
 {
     return GStringTable.Localize(str);
+}
+
+RString LocalizeArma1String(const char* key)
+{
+    return GStringTable.LocalizeArma1First(key);
 }
 
 const char* LocalizeStringWithFallback(const char* key, const char* fallback)

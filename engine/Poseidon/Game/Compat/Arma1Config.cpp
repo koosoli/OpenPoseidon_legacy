@@ -1045,6 +1045,51 @@ std::string StringValue(const ParamEntry& cls, const char* key)
     return (const char*)(RStringB)*e;
 }
 
+// An Arma 1 config text as Arma 1 shows it: "$STR_DN_AIR" / "@STR..." looked up in the
+// Arma 1 stringtables first ("Luft" in a German Arma 1 -- through the usual order CWA's own
+// STR_DN_AIR came first and gave "Air"), anything else verbatim.
+std::string Arma1Text(const std::string& raw)
+{
+    const char* key = nullptr;
+    if (raw.size() > 1 && raw[0] == '@')
+        key = raw.c_str() + 1;
+    else if (raw.size() > 4 && raw[0] == '$' && _strnicmp(raw.c_str() + 1, "STR", 3) == 0)
+        key = raw.c_str() + 1;
+    if (!key)
+        return raw;
+    const RString text = LocalizeArma1String(key);
+    // a key no table has stays as it was (the config reader resolves it, or shows it)
+    if (text.GetLength() == 0 || strncmp(text.Data(), "!!!", 3) == 0)
+    {
+        static std::set<std::string> reported;
+        if (reported.insert(key).second)
+            LOG_INFO(Mission, "{}: text '{}' not in the stringtables (global lookup gives '{}', language {})", Label(),
+                     key, (const char*)LocalizeString(key), (const char*)GLanguage);
+        return raw;
+    }
+    return text.Data();
+}
+
+// The mission editor's heading for an Arma 1 vehicleClass, named as Arma 1 names it with
+// the game marked after it: CfgVehicleClasses >> Car >> displayName ("$STR_DN_CARS",
+// "Autos" in a German Arma 1) gives "Autos (Arma 1)". The editor shows a vehicleClass as
+// its label, so the label is the class. Without a CfgVehicleClasses entry the class name
+// stands ("Car (Arma 1)"). Quotes are dropped -- the label is written into config text.
+std::string EditorClassLabel(const std::string& a1Class)
+{
+    std::string label = a1Class;
+    if (const ParamEntry* classes = Arma1Pars().FindEntryNoInheritance("CfgVehicleClasses"))
+        if (const ParamEntry* cls = classes->FindEntry(a1Class.c_str()); cls && cls->IsClass())
+            if (const ParamEntry* name = cls->FindEntry("displayName"); name && !name->IsClass() && !name->IsArray())
+            {
+                const std::string text = Arma1Text(name->GetValueRaw().Data());
+                if (!text.empty())
+                    label = text;
+            }
+    label.erase(std::remove(label.begin(), label.end(), '"'), label.end());
+    return label + " (Arma 1)";
+}
+
 // Whether an Arma 2 vehicle class carries a real weapon, on itself or on any turret.
 // Horns, smoke and flare launchers do not count.
 bool Arma2VehicleArmed(const ParamEntry& cls)
@@ -1907,6 +1952,9 @@ void LoadConfig()
     const ParamEntry* vehicles = Arma1Pars().FindEntry("CfgVehicles");
     LOG_INFO(Mission, "{}: config read from {} archives ({} CfgVehicles classes, {} stringtables)", Label(),
              configs.size(), vehicles ? vehicles->GetEntryCount() : 0, stringtables);
+    // OP_A1_EDITOR_DUMP=1 (tests): build and log the editor's Arma 1 list right away
+    if (const char* e = std::getenv("OP_A1_EDITOR_DUMP"); e && *e == '1')
+        PrepareEditorClasses();
 }
 
 namespace
@@ -2236,6 +2284,10 @@ void PrepareEditorClasses()
     if (!vehicles)
         return;
     int listed = 0, generated = 0;
+    static const bool dump = [] {
+        const char* e = std::getenv("OP_A1_EDITOR_DUMP");
+        return e && *e == '1';
+    }();
     for (int i = 0; i < vehicles->GetEntryCount(); i++)
     {
         const ParamEntry& cls = vehicles->GetEntry(i);
@@ -2248,6 +2300,17 @@ void PrepareEditorClasses()
         const RString resolved = ResolveVehicleClass(RString((const char*)cls.GetName()));
         if (_strnicmp(resolved.Data(), "A1x_", 4) == 0)
             generated++;
+        // OP_A1_EDITOR_DUMP=1: the editor's list, heading > name (class), for checking it
+        if (dump)
+            if (const ParamEntry* cwa = Pars.FindEntry("CfgVehicles"); cwa && cwa->FindEntry(resolved))
+            {
+                const ParamEntry& entry = *cwa->FindEntry(resolved);
+                const ParamEntry* scopeOut = entry.FindEntry("scope");
+                LOG_INFO(Mission, "Editor list: {} > {} ({}{}){}", StringValue(entry, "vehicleClass"),
+                         StringValue(entry, "displayName"), (const char*)cls.GetName(),
+                         _strnicmp(resolved.Data(), "A1x_", 4) == 0 ? "" : std::string(" -> ") + resolved.Data(),
+                         scopeOut && !scopeOut->IsClass() && (int)*scopeOut == 2 ? "" : " [not listed]");
+            }
     }
     LOG_INFO(Mission, "{}: editor -- {} Arma 1 classes listed by Arma 1, {} generated with their own model", Label(),
              listed, generated);
@@ -3136,7 +3199,11 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
     // type that is no BuildingType -- the 0xC0000005 in Building's constructor).
     if (const ParamEntry* scope = cwa->FindEntry("scope"); !scope || (int)*scope < 1)
         text += "\t\tscope=1;\r\n";
-    const std::string displayName = StringValue(*a1, "displayName");
+    // Arma 1's own name ("$STR_DN_..." resolved against the Arma 1 stringtables first)
+    std::string displayName;
+    if (const ParamEntry* dn = a1->FindEntry("displayName"); dn && !dn->IsClass() && !dn->IsArray())
+        displayName = Arma1Text(dn->GetValueRaw().Data()); // raw: GetValue resolves "$STR" CWA-first
+    displayName.erase(std::remove(displayName.begin(), displayName.end(), '"'), displayName.end());
     if (!displayName.empty())
         text += "\t\tdisplayName=\"" + displayName + "\";\r\n";
     // The mission editor lists an Arma 1 class under its own heading ("Arma 1 Men", "Arma 1
@@ -3152,7 +3219,11 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         {
             if (a1Class.empty())
                 a1Class = man ? "Men" : "Objects";
-            text += "\t\tvehicleClass=\"Arma 1 " + a1Class + "\";\r\n\t\tscope=2;\r\n";
+            const std::string label = EditorClassLabel(a1Class);
+            static std::set<std::string> headings;
+            if (headings.insert(label).second)
+                LOG_INFO(Mission, "{}: editor heading '{}' (Arma 1 vehicleClass {})", Label(), label, a1Class);
+            text += "\t\tvehicleClass=\"" + label + "\";\r\n\t\tscope=2;\r\n";
         }
     }
     if (loadout)
