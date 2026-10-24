@@ -169,40 +169,23 @@ bool EarthLandCover::Fetch(const std::string& url, uint64_t first, uint64_t last
     return false;
 }
 
-EarthLandCover::File& EarthLandCover::Open(int lat0, int lon0, const std::function<bool()>& cancelled)
+// Disk only (under _mutex): what is cached. The network goes through Prefetch, outside the lock.
+EarthLandCover::File& EarthLandCover::Open(int lat0, int lon0)
 {
     File& file = _files[{lat0, lon0}];
-    if (file.present || (!file.url.empty() && (!file.failed || std::chrono::steady_clock::now() < file.retryAt)))
+    if (file.present || file.none)
         return file;
     const std::string name = CellName(lat0, lon0);
-    file.url = "https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/" + name + ".tif";
-    file.failed = false;
     std::error_code ec;
     if (std::filesystem::exists(_dir / (name + ".none"), ec))
-        return file; // no land in this cell
+    {
+        file.none = true; // no land in this cell
+        return file;
+    }
     std::vector<uint8_t> header;
     Tiff tiff;
     if (!ReadFile(_dir / (name + ".header"), header) || !ParseTiff(header, tiff))
-    {
-        long status = 0;
-        if (!Fetch(file.url, 0, HeaderBytes - 1, header, status, cancelled))
-        {
-            if (status == 403 || status == 404) // S3 answers 403 for a missing key in a bucket that lists
-                WriteFile(_dir / (name + ".none"), {uint8_t('0')});
-            else
-            {
-                file.failed = true;
-                file.retryAt = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-            }
-            return file;
-        }
-        if (!ParseTiff(header, tiff))
-        {
-            LOG_WARN(Graphics, "Earth land cover: {} is not the expected tiled 8-bit deflate GeoTIFF", name);
-            return file;
-        }
-        WriteFile(_dir / (name + ".header"), header);
-    }
+        return file; // not cached yet
     file.present = true;
     file.width = tiff.width;
     file.height = tiff.height;
@@ -217,23 +200,13 @@ EarthLandCover::File& EarthLandCover::Open(int lat0, int lon0, const std::functi
     return file;
 }
 
-bool EarthLandCover::Load(File& file, int lat0, int lon0, int tile, const std::function<bool()>& cancelled)
+bool EarthLandCover::Load(File& file, int lat0, int lon0, int tile)
 {
-    if (tile < 0 || size_t(tile) >= file.offsets.size())
+    if (tile < 0 || size_t(tile) >= file.offsets.size() || file.sizes[size_t(tile)] == 0)
         return false;
-    const auto path = _dir / CellName(lat0, lon0) / (std::to_string(tile) + ".z");
     std::vector<uint8_t> packed;
-    if (!ReadFile(path, packed) || packed.size() != file.sizes[size_t(tile)])
-    {
-        if (file.sizes[size_t(tile)] == 0)
-            return false;
-        long status = 0;
-        if (!Fetch(file.url, file.offsets[size_t(tile)], file.offsets[size_t(tile)] + file.sizes[size_t(tile)] - 1, packed, status,
-                   cancelled) ||
-            packed.size() != file.sizes[size_t(tile)])
-            return false;
-        WriteFile(path, packed);
-    }
+    if (!ReadFile(_dir / CellName(lat0, lon0) / (std::to_string(tile) + ".z"), packed) || packed.size() != file.sizes[size_t(tile)])
+        return false;
     Block block(size_t(file.tileW) * file.tileH);
     const int n = stbi_zlib_decode_buffer(reinterpret_cast<char*>(block.data()), int(block.size()),
                                           reinterpret_cast<const char*>(packed.data()), int(packed.size()));
@@ -246,16 +219,78 @@ bool EarthLandCover::Load(File& file, int lat0, int lon0, int tile, const std::f
     return true;
 }
 
-EarthLandCover::Class EarthLandCover::At(double latitude, double longitude, const std::function<bool()>& cancelled)
+// The header and the block holding (latitude, longitude) onto disk, from the network, with no lock held. False when
+// the network failed; the cell is then left alone for 30 s.
+bool EarthLandCover::Prefetch(int lat0, int lon0, double latitude, double longitude, const std::function<bool()>& cancelled)
 {
-    if (!std::isfinite(latitude) || !std::isfinite(longitude) || latitude >= 84.0 || latitude < -60.0)
-        return Unknown; // WorldCover spans 84 N .. 60 S
-    longitude = std::fmod(longitude + 540.0, 360.0) - 180.0;
-    const int lat0 = int(std::floor(latitude / 3.0)) * 3, lon0 = int(std::floor(longitude / 3.0)) * 3;
-    std::lock_guard lock(_mutex);
-    File& file = Open(lat0, lon0, cancelled);
+    const auto key = std::make_pair(lat0, lon0);
+    {
+        std::lock_guard lock(_mutex);
+        if (auto it = _retryAt.find(key); it != _retryAt.end() && std::chrono::steady_clock::now() < it->second)
+            return false;
+    }
+    const auto failed = [&]
+    {
+        std::lock_guard lock(_mutex);
+        _retryAt[key] = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        return false;
+    };
+    const std::string name = CellName(lat0, lon0);
+    const std::string url = "https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/" + name + ".tif";
+    std::error_code ec;
+    if (std::filesystem::exists(_dir / (name + ".none"), ec))
+        return true;
+    std::vector<uint8_t> header;
+    Tiff tiff;
+    if (!ReadFile(_dir / (name + ".header"), header) || !ParseTiff(header, tiff))
+    {
+        long status = 0;
+        if (!Fetch(url, 0, HeaderBytes - 1, header, status, cancelled))
+        {
+            if (status == 403 || status == 404) // no file: no land in this cell (S3 answers 403 for a missing key)
+            {
+                WriteFile(_dir / (name + ".none"), {uint8_t('0')});
+                return true;
+            }
+            return failed();
+        }
+        if (!ParseTiff(header, tiff))
+        {
+            LOG_WARN(Graphics, "Earth land cover: {} is not the expected tiled 8-bit deflate GeoTIFF", name);
+            return failed();
+        }
+        WriteFile(_dir / (name + ".header"), header);
+    }
+    const int across = (tiff.width + tiff.tileW - 1) / tiff.tileW;
+    const int px = std::clamp(int((longitude - tiff.west) / tiff.scale), 0, tiff.width - 1);
+    const int py = std::clamp(int((tiff.north - latitude) / tiff.scale), 0, tiff.height - 1);
+    const size_t tile = size_t(py / tiff.tileH) * size_t(across) + size_t(px / tiff.tileW);
+    if (tile >= tiff.offsets.size() || tiff.sizes[tile] == 0)
+        return true;
+    const auto path = _dir / name / (std::to_string(tile) + ".z");
+    if (const auto size = std::filesystem::file_size(path, ec); !ec && size == tiff.sizes[tile])
+        return true;
+    std::vector<uint8_t> packed;
+    long status = 0;
+    if (!Fetch(url, tiff.offsets[tile], tiff.offsets[tile] + tiff.sizes[tile] - 1, packed, status, cancelled) ||
+        packed.size() != tiff.sizes[tile])
+        return failed();
+    WriteFile(path, packed);
+    return true;
+}
+
+// Under _mutex: the class from what is cached, or Unknown with `missing` set when it is not on disk yet.
+EarthLandCover::Class EarthLandCover::Cached(int lat0, int lon0, double latitude, double longitude, bool& missing)
+{
+    missing = false;
+    File& file = Open(lat0, lon0);
+    if (file.none)
+        return Water; // no file: sea (a cell with no land)
     if (!file.present)
-        return file.failed ? Unknown : Water; // no file: sea (or a cell with no land)
+    {
+        missing = true;
+        return Unknown;
+    }
     const int px = std::clamp(int((longitude - file.west) / file.step), 0, file.width - 1);
     const int py = std::clamp(int((file.north - latitude) / file.step), 0, file.height - 1);
     const int tile = (py / file.tileH) * file.across + px / file.tileW;
@@ -263,11 +298,9 @@ EarthLandCover::Class EarthLandCover::At(double latitude, double longitude, cons
     auto it = _blocks.find(key);
     if (it == _blocks.end())
     {
-        if (auto f = _failedBlocks.find(key); f != _failedBlocks.end() && f->second >= 3)
-            return Unknown;
-        if (!Load(file, lat0, lon0, tile, cancelled))
+        if (!Load(file, lat0, lon0, tile))
         {
-            ++_failedBlocks[key];
+            missing = true;
             return Unknown;
         }
         it = _blocks.find(key);
@@ -275,5 +308,86 @@ EarthLandCover::Class EarthLandCover::At(double latitude, double longitude, cons
     it->second.second = ++_use;
     const uint8_t c = it->second.first[size_t(py % file.tileH) * file.tileW + px % file.tileW];
     return c == 0 ? Water : Class(c); // 0 is no-data: outside the land mask, i.e. the sea
+}
+
+namespace
+{
+bool Normalise(double latitude, double& longitude, int& lat0, int& lon0)
+{
+    if (!std::isfinite(latitude) || !std::isfinite(longitude) || latitude >= 84.0 || latitude < -60.0)
+        return false; // WorldCover spans 84 N .. 60 S
+    longitude = std::fmod(longitude + 540.0, 360.0) - 180.0;
+    lat0 = int(std::floor(latitude / 3.0)) * 3;
+    lon0 = int(std::floor(longitude / 3.0)) * 3;
+    return true;
+}
+} // namespace
+
+EarthLandCover::Class EarthLandCover::At(double latitude, double longitude, const std::function<bool()>& cancelled)
+{
+    int lat0, lon0;
+    if (!Normalise(latitude, longitude, lat0, lon0))
+        return Unknown;
+    bool missing = false;
+    {
+        std::lock_guard lock(_mutex);
+        const Class c = Cached(lat0, lon0, latitude, longitude, missing);
+        if (!missing)
+            return c;
+    }
+    if (!Prefetch(lat0, lon0, latitude, longitude, cancelled))
+        return Unknown;
+    std::lock_guard lock(_mutex);
+    return Cached(lat0, lon0, latitude, longitude, missing);
+}
+
+EarthLandCover::Class EarthLandCover::Peek(double latitude, double longitude)
+{
+    int lat0, lon0;
+    if (!Normalise(latitude, longitude, lat0, lon0))
+        return Unknown;
+    std::lock_guard lock(_mutex);
+    bool missing = false;
+    const Class c = Cached(lat0, lon0, latitude, longitude, missing);
+    if (missing && _wanted.size() < 256)
+    {
+        // fetched in the background; keyed to ~1 km, so a patch queues a handful and not one per sample
+        _wanted[{int(std::floor(latitude * 100.0)), int(std::floor(longitude * 100.0))}] = {latitude, longitude};
+        if (!_worker.joinable())
+            _worker = std::thread([this] { Run(); });
+        _wake.notify_one();
+    }
+    return c;
+}
+
+void EarthLandCover::Run()
+{
+    for (;;)
+    {
+        std::pair<double, double> point;
+        {
+            std::unique_lock lock(_mutex);
+            _wake.wait(lock, [&] { return _stop.load() || !_wanted.empty(); });
+            if (_stop)
+                return;
+            point = _wanted.begin()->second;
+            _wanted.erase(_wanted.begin());
+        }
+        int lat0, lon0;
+        double longitude = point.second;
+        if (Normalise(point.first, longitude, lat0, lon0))
+            Prefetch(lat0, lon0, point.first, longitude, [this] { return _stop.load(); });
+    }
+}
+
+EarthLandCover::~EarthLandCover()
+{
+    {
+        std::lock_guard lock(_mutex);
+        _stop = true;
+    }
+    _wake.notify_all();
+    if (_worker.joinable())
+        _worker.join();
 }
 } // namespace Poseidon

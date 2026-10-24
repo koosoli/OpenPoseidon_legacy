@@ -1756,6 +1756,12 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
                 glint = local_sun * (water * aloft * beckmann * fresnel * ndl / (4.0 * ndv));
             }
         }
+        // Local lights -- the head torch, flares, a vehicle's lamps -- on the near ground, as the island terrain
+        // takes them (terrain.wgsl). The Earth branch had none: a diver's torch left the sea floor black.
+        if (ground_detail && distance < 200.0) {
+            light = light + lights_contrib(in.world_pos, n, vec3<f32>(1.0), vec3<f32>(1.0), linear)
+                          * (1.0 - smoothstep(150.0, 200.0, distance));
+        }
         // City lights where the sun has set, seen from far off: an airliner's or orbit's view of the night
         // side. Near ground they would be a glow in the soil, so they fade in from 3 to 15 km away.
         // Scale: as an orbital night photograph is exposed, not physical. A city centre is ~3e-5 of sunlit

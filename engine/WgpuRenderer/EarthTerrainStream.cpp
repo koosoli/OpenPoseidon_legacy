@@ -1,4 +1,5 @@
 #include "EarthTerrainStream.hpp"
+#include "EarthLandCover.hpp"
 #include "EarthImageryTiles.hpp"
 #include "EarthIslands.hpp"
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
@@ -282,16 +283,36 @@ float EarthTerrainStream::SampleFallback(const Earth::Coordinate& c, int zoom, i
 // Terrarium's bathymetry (ETOPO1 / GEBCO-derived, joerd) is in its zooms 0..10 only: from zoom 11 on the open sea
 // is filled with exactly 0 m, the surface itself (measured in the cache 2026-10-24: z10 tiles go down to -4653 m,
 // the Bay of Biscay's z12/z14 tiles are 0 m throughout). There the depth comes from zoom 10, the finest that has
-// it -- ~150 m a sample, plenty for a sea floor. Exact zero only: real land at sea level is never exactly 0.000 m,
-// and a sea sample zoom 10 blurs onto the shore is kept just under the surface rather than raised onto it.
+// it -- ~150 m a sample, plenty for a sea floor; a sea sample zoom 10 blurs onto the shore is kept just under the
+// surface rather than raised onto it.
+//
+// But exact 0 m is not only sea: the coarse sources are whole metres, and low coast -- marsh and polder behind the
+// dikes, the Wadden coast -- reads 0 m (or a little either side) too. Sunk to the sea's depth it went under water
+// (owner, Cuxhaven, 2026-10-24: "lots is under water what should not be"). Near the camera ESA WorldCover decides:
+// water is sea (the depth), land stays a metre above the sea surface, as the dikes we do not model keep it. The land
+// cover is read from disk only (EarthLandCover::Peek); a block not there yet is fetched in the background and the
+// next patch has it.
 namespace
 {
 constexpr int BathymetryZoom = 10;
+constexpr float ShoreBand = 1.0f, PolderDepth = -12.0f;
 }
 
-float EarthTerrainStream::WithSeaDepth(const Earth::Coordinate& c, int zoom, float height)
+float EarthTerrainStream::WithSeaDepth(const Earth::Coordinate& c, int zoom, float height, bool shore)
 {
-    if (zoom <= BathymetryZoom || height != 0.0f)
+    const bool fill = zoom > BathymetryZoom && height == 0.0f;
+    if (!fill && (!shore || height > ShoreBand || height < PolderDepth))
+        return height;
+    if (shore)
+        if (EarthLandCover* cover = EarthLandCover::Get())
+        {
+            const auto landClass = cover->Peek(c.latitude, c.longitude);
+            if (landClass != EarthLandCover::Unknown && landClass != EarthLandCover::Water)
+                return std::max(height, ShoreBand);
+            if (!fill)
+                return height;
+        }
+    if (!fill)
         return height;
     try
     {
@@ -492,7 +513,7 @@ void EarthTerrainStream::Run()
                     const double wx = patch->x + x * patch->gridMetres;
                     const double wz = patch->z + z * patch->gridMetres;
                     patch->heights[z * Earth::GridSamples + x] = EarthIslands::Height(geographic.latitude, geographic.longitude,
-                        WithSeaDepth(geographic, patch->sourceZoom, Sample(position.x, position.y,patch->sourceZoom)))
+                        WithSeaDepth(geographic, patch->sourceZoom, Sample(position.x, position.y,patch->sourceZoom), true))
                         - float(Earth::CurvatureDrop(wx,wz));
                 }
             }
@@ -526,7 +547,8 @@ void EarthTerrainStream::Run()
                             Earth::HorizonOffset(std::max(z-1,0),radius,halfWindow)) * 0.5f;
                     const int zoom = Earth::SpacingZoom(geographic.latitude, spacing, patch->horizonZoom,
                                                         std::min(patch->sourceZoom, 12));
-                    float height = WithSeaDepth(geographic, zoom, SampleFallback(geographic, zoom, patch->horizonZoom));
+                    const bool shore = std::max(std::abs(ox), std::abs(oz)) < 30000.0f; // land cover: the near horizon only
+                    float height = WithSeaDepth(geographic, zoom, SampleFallback(geographic, zoom, patch->horizonZoom), shore);
                     // The inner near square is not drawn by this mesh. Its edge
                     // shares the selected near source; blend resolutions outside
                     // it instead of making an elevation cliff at the join.
@@ -536,7 +558,7 @@ void EarthTerrainStream::Run()
                     {
                         const auto fine = Earth::ToPixel(geographic,patch->sourceZoom);
                         const float weight = std::clamp(edge / blendWidth,0.0f,1.0f);
-                        height = WithSeaDepth(geographic, patch->sourceZoom, Sample(fine.x,fine.y,patch->sourceZoom)) * (1-weight)
+                        height = WithSeaDepth(geographic, patch->sourceZoom, Sample(fine.x,fine.y,patch->sourceZoom), true) * (1-weight)
                                + height * weight;
                     }
                     height = EarthIslands::Height(geographic.latitude, geographic.longitude, height);
