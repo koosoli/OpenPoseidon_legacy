@@ -8109,6 +8109,19 @@ void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTextur
     // Only an uploaded clamped near atlas uses the concentrated chart. NASA
     // fallback and the far/globe atlases retain their existing linear UVs.
     d.mat_specular.w = nearAtlas && texture && sampler == 3 ? 1.0f : 0.0f;
+    // .xyz: the astronomical sun's travel direction (shader3d earth surface, from altitude). The frame's
+    // main light swings to the MOON when the sun is down at the origin, and the globe seen from space was
+    // lit from the moon: the face toward a camera near the moon fully lit (owner, 2026-10-24, "the dark
+    // side of the earth is not really dark").
+    {
+        const auto& snapSun = render::frame::GPresentationSnapshot();
+        Vector3 sun = snapSun.hasMainLight ? snapSun.sunDirection : VZero;
+        if (sun.SquareSize() > 1e-6f)
+            sun.Normalize();
+        d.mat_specular.x = sun.X();
+        d.mat_specular.y = sun.Y();
+        d.mat_specular.z = sun.Z();
+    }
     d.world.m[0] = d.world.m[5] = d.world.m[10] = d.world.m[15] = 1.0f;
     d.world.m[12] = -camera.pos[0];
     d.world.m[13] = -camera.pos[1];

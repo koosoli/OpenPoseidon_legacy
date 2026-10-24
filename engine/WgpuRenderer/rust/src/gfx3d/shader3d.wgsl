@@ -1511,7 +1511,15 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             origin_up = material.light_ambient.xyz;
         }
         let radial_up = normalize(in.world_pos + frame.cam_pos.xyz - earth_centre);
-        let sun_height = dot(radial_up, -frame.sun_dir_world.xyz);
+        // The light on the globe: from altitude the astronomical sun (material.specular.xyz, EngineWgpu
+        // SubmitEarthHorizon), not the frame's main light, which is the moon while the origin has night --
+        // the night side seen from space was lit by it. Near the ground the frame's light as before.
+        let earth_aloft = smoothstep(12000.0, 50000.0, length(frame.cam_pos.xyz - earth_centre) - 6378137.0);
+        var sun_travel = frame.sun_dir_world.xyz;
+        if (dot(material.specular.xyz, material.specular.xyz) > 0.5) {
+            sun_travel = normalize(mix(frame.sun_dir_world.xyz, material.specular.xyz, earth_aloft) + vec3<f32>(0.0, 1.0e-6, 0.0));
+        }
+        let sun_height = dot(radial_up, -sun_travel);
         // Mesh normals are built in the origin's flat tangent frame (up = +Y); tilt them onto the true
         // radial up so the globe and far horizon shade as a sphere. Near the origin this is a no-op.
         n = normalize(n + radial_up - origin_up);
@@ -1571,7 +1579,7 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         }
         let twilight = smoothstep(-0.12, 0.05, sun_height);     // sky light: gone ~7 degrees below
         let sun_reach = smoothstep(-0.015, 0.06, sun_height);   // direct sun thins out through the air
-        let daylight = max(dot(n, -frame.sun_dir_world.xyz), 0.0) * sun_reach;
+        let daylight = max(dot(n, -sun_travel), 0.0) * sun_reach;
         var ambient_occlusion = 1.0;
         var sun_occlusion = 1.0;
         if (ground_detail && distance < 400.0) {
@@ -1585,7 +1593,7 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         // higher, so look it up where the sun ray through this point would leave sea level -- that is the
         // same ray through the deck, and the shadow lands under its cloud instead of beside it.
         {
-            let sun_to = -frame.sun_dir_world.xyz;
+            let sun_to = -sun_travel;
             let world = in.world_pos + frame.cam_pos.xyz;
             let shift = sun_to.xz / max(sun_to.y, 0.05) * max(world.y, 0.0);
             sun_occlusion = sun_occlusion * cloud_sun_shadow(world.xz - shift);
@@ -1621,7 +1629,7 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
                 let water = smoothstep(0.02, 0.08, surface.b - max(surface.r, surface.g * 0.85))
                           * (1.0 - smoothstep(0.12, 0.3, dot(surface, vec3<f32>(0.2126, 0.7152, 0.0722))));
                 let view = -normalize(in.world_pos);
-                let to_sun = -frame.sun_dir_world.xyz;
+                let to_sun = -sun_travel;
                 let h = normalize(view + to_sun);
                 let ndh = max(dot(radial_up, h), 1e-3);
                 let ndl = max(dot(radial_up, to_sun), 0.0);
