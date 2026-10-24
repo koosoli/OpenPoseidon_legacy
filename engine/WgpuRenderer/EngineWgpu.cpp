@@ -964,23 +964,23 @@ inline uint64_t HashVertices(const void* data, size_t bytes)
     return HashBytesFast(data, bytes);
 }
 
-// The streams BuildVertices reads, hashed where they lie: no SVertex rebuild needed to learn
+// The streams an animation can change, hashed where they lie: no SVertex rebuild needed to learn
 // that an animated shape came back from Animate/Deanimate exactly as it was.
+//
+// Positions and texture coordinates only. Every vertex-mutating path (selection rotation and
+// translation, deform, damage) moves positions, and the normals and tangent frame it rewrites
+// follow from the same transform; UVs are the one stream that animates on its own (track and
+// texture scrolling). Hashing the normals and the tangent frame too doubled the cost -- after
+// the first PERF fix this hash was still ~18 ms of a 24 ms frame on the owner's 21-Peugeot test,
+// at memory bandwidth, so the bytes read are the cost.
 inline uint64_t HashShapeStreams(const Shape& src)
 {
     const int n = src.NVertex();
     uint64_t h = HashBytesFast(&src.Pos(0), sizeof(Vector3) * size_t(n), uint64_t(n));
-    if (src.NNorm() > 0)
-        h = HashBytesFast(&src.Norm(0), sizeof(Vector3) * size_t(src.NNorm()), h);
     if (src.NTex() > 0)
         h = HashBytesFast(&src.UV(0), sizeof(UVPair) * size_t(src.NTex()), h);
     if (src.HasUV1())
         h = HashBytesFast(&src.UV1(0), sizeof(UVPair) * size_t(src.NTex1()), h);
-    if (src.HasTangentFrame() && src.NTangent() > 0 && src.NBinormal() > 0)
-    {
-        h = HashBytesFast(&src.Tangent(0), sizeof(Vector3) * size_t(src.NTangent()), h);
-        h = HashBytesFast(&src.Binormal(0), sizeof(Vector3) * size_t(src.NBinormal()), h);
-    }
     return h;
 }
 
