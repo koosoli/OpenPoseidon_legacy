@@ -1004,7 +1004,13 @@ std::string Arma1Text(const std::string& raw)
     const RString text = LocalizeArma1String(key);
     // a key no table has stays as it was (the config reader resolves it, or shows it)
     if (text.GetLength() == 0 || strncmp(text.Data(), "!!!", 3) == 0)
+    {
+        static std::set<std::string> reported;
+        if (reported.insert(key).second)
+            LOG_INFO(Mission, "{}: text '{}' not in the stringtables (global lookup gives '{}', language {})", Label(),
+                     key, (const char*)LocalizeString(key), (const char*)GLanguage);
         return raw;
+    }
     return text.Data();
 }
 
