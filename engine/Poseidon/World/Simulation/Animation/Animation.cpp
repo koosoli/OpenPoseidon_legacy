@@ -635,12 +635,29 @@ void Animation::Transform(LODShape* shape, const Matrix4& trans, int level) cons
     lShape->SaveOriginalPos();
     PoseidonAssert(lShape);
     const NamedSelection& sel = lShape->NamedSel(_selection[level]);
+    // PERF: a parked vehicle animates every LOD it draws with transforms that leave the
+    // selection where it already is (no wheel turn, no damper travel). Dirtying the vertex
+    // buffer for that made the renderer re-hash the whole mesh per draw -- ~0.4 ms per
+    // 280k-vertex car, every car, every frame. Only a vertex that actually moved dirties it.
+    bool changed = false;
     int i;
     for (i = 0; i < sel.Size(); i++)
     {
         int posI = sel[i];
-        lShape->SetPos(posI).SetFastTransform(trans, lShape->OrigPos(posI));
-        lShape->SetNorm(posI).SetRotate(trans, lShape->OrigNorm(posI));
+        Vector3 pos;
+        Vector3 norm;
+        pos.SetFastTransform(trans, lShape->OrigPos(posI));
+        norm.SetRotate(trans, lShape->OrigNorm(posI));
+        if (!changed && (pos != lShape->Pos(posI) || norm != lShape->Norm(posI)))
+        {
+            changed = true;
+        }
+        lShape->SetPos(posI) = pos;
+        lShape->SetNorm(posI) = norm;
+    }
+    if (!changed)
+    {
+        return;
     }
     // AST-016 diagnostic (temporary): a bridged tank's turret VANISHES the
     // first time this runs on it, on both renderers. Name the moment: if this
@@ -770,10 +787,19 @@ void Animation::Restore(LODShape* shape, int level) const
         return;
     }
     const NamedSelection& sel = lShape->NamedSel(_selection[level]);
+    bool changed = false; // PERF: see Transform -- restoring an unmoved selection dirties nothing
     for (int i = 0; i < sel.Size(); i++)
     {
         int posI = sel[i];
+        if (!changed && lShape->Pos(posI) != lShape->OrigPos(posI))
+        {
+            changed = true;
+        }
         lShape->SetPos(posI) = lShape->OrigPos(posI);
+    }
+    if (!changed)
+    {
+        return;
     }
     lShape->InvalidateNormals();
     lShape->InvalidateBuffer();
