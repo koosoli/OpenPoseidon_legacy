@@ -3078,7 +3078,11 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
         {
             if (a1Class.empty())
                 a1Class = man ? "Men" : "Objects";
-            text += "\t\tvehicleClass=\"" + EditorClassLabel(a1Class) + "\";\r\n\t\tscope=2;\r\n";
+            const std::string label = EditorClassLabel(a1Class);
+            static std::set<std::string> headings;
+            if (headings.insert(label).second)
+                LOG_INFO(Mission, "{}: editor heading '{}' (Arma 1 vehicleClass {})", Label(), label, a1Class);
+            text += "\t\tvehicleClass=\"" + label + "\";\r\n\t\tscope=2;\r\n";
         }
     }
     if (loadout)
