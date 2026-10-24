@@ -345,6 +345,28 @@ void AppendCell(Buildings::Mesh& result,const std::string& json,const Buildings:
     }
 }
 }
+void EarthBuildingStream::Split(Mesh& mesh,uint32_t textured) {
+    // Faces never share vertices, so a triangle's material is its first vertex's.
+    for(auto& part:mesh.parts)part.clear();
+    for(auto& part:mesh.partIndices)part.clear();
+    std::vector<uint32_t> remap(mesh.vertices.size(),UINT32_MAX);
+    for(size_t t=0;t+2<mesh.indices.size();t+=3) {
+        const uint32_t m=std::min<uint32_t>(mesh.vertices[mesh.indices[t]].material,MaterialCount-1);
+        const bool isTextured=(textured>>m)&1u;
+        for(int k=0;k<3;++k) {
+            const uint32_t i=mesh.indices[t+k];
+            if(remap[i]==UINT32_MAX) {
+                const auto& v=mesh.vertices[i];
+                WgrMeshVertex w{};
+                w.pos={v.x,v.y,v.z};w.normal={v.nx,v.ny,v.nz};
+                w.uv=isTextured?WgrVec2{v.tu,v.tv}:WgrVec2{PaletteU(MaterialPalette[m]),.5f};
+                remap[i]=uint32_t(mesh.parts[m].size());mesh.parts[m].push_back(w);
+            }
+            mesh.partIndices[m].push_back(remap[i]);
+        }
+    }
+    mesh.partsMask=textured;mesh.partsReady=true;
+}
 EarthBuildingStream::Mesh EarthBuildingStream::BuildCell(const std::string& json,const Ground& g,Cell cell) {
     Mesh result;result.cell=cell;result.revision=g.revision;result.generation=g.generation;
     std::unordered_set<uint64_t> ids;AppendCell(result,json,g,cell,ids);return result;
@@ -402,7 +424,10 @@ void EarthBuildingStream::Run(){
         const auto cancelled=[&]{
             std::lock_guard lock(_mutex);return _stop || request!=_request;
         };
+        // the draw split too (see Split), so the main thread only creates the meshes
+        const auto split=[&](std::unique_ptr<Mesh>& m){if(const uint32_t mask=_textured.load();mask!=UINT32_MAX)Split(*m,mask);};
         auto mesh=std::make_unique<Mesh>(BuildNeighborhood(_cache,ground,cell,cancelled));
+        split(mesh);
         // Overture first (EarthOverture: static tiles on a CDN, OSM and machine-traced footprints with heights);
         // Overpass only when Overture cannot be had.
         const bool overture=EarthOverture::Enabled();
@@ -413,6 +438,7 @@ void EarthBuildingStream::Run(){
             if(!had && source.Enabled())changed=source.EnsureNeighborhood(_cache,"buildings",cell.latitude,cell.longitude,cancelled);
             if(!changed)continue;
             mesh=std::make_unique<Mesh>(BuildNeighborhood(_cache,ground,cell,cancelled));
+            split(mesh);
         }
         {std::lock_guard lock(_mutex);if(!_stop && request==_request)_ready=std::move(mesh);}
     }

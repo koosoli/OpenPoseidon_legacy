@@ -4802,9 +4802,13 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             std::vector<WgrMeshVertex> treeVertices;
             for(size_t kind=0;kind<EarthFeatureStream::KindCount;++kind)
             {
-                const auto& batch=mesh->batches[kind];
-                std::vector<WgrMeshVertex> vertices(batch.vertices.size());
-                for(size_t i=0;i<vertices.size();++i){const auto& v=batch.vertices[i];vertices[i].pos={v.x,v.y,v.z};vertices[i].normal={v.nx,v.ny,v.nz};vertices[i].uv={v.u,v.v};}
+                auto& batch=mesh->batches[kind];
+                std::vector<WgrMeshVertex> vertices=std::move(batch.draw); // converted on the worker
+                if(vertices.size()!=batch.vertices.size())
+                {
+                    vertices.resize(batch.vertices.size());
+                    for(size_t i=0;i<vertices.size();++i){const auto& v=batch.vertices[i];vertices[i].pos={v.x,v.y,v.z};vertices[i].normal={v.nx,v.ny,v.nz};vertices[i].uv={v.u,v.v};}
+                }
                 WgrMesh replacement=0;
                 if(!batch.indices.empty())replacement=wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(vertices),WgrSlice<uint32_t>(batch.indices));
                 if(!batch.indices.empty() && !replacement)throw std::runtime_error("Earth feature mesh allocation failed");
@@ -4877,32 +4881,20 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                     for(size_t m=0;m<EarthBuildingStream::MaterialCount;++m)
                         {_earthBuildingTextures[m]=GlobLoadTexture(EarthBuildingStream::MaterialTexture[m]);if(_earthBuildingTextures[m].NotNull())++resolved;}
                 LOG_INFO(Graphics,"Earth buildings: {} of {} house textures from the game data",resolved,size_t(EarthBuildingStream::MaterialCount));
+                uint32_t mask=0;
+                for(size_t m=0;m<EarthBuildingStream::MaterialCount;++m)if(_earthBuildingTextures[m].NotNull())mask|=1u<<m;
+                _earthBuildings->SetTexturedMaterials(mask);
             }
             if(!_earthBuildingTexture)
                 _earthBuildingTexture=wgr_texture_create(_renderer,EarthBuildingStream::PaletteSize,1,WGR_TEXTURE_RGBA8,1,0,
                     &EarthBuildingStream::Palette[0][0],uint32_t(sizeof(EarthBuildingStream::Palette)));
-            // Split by material. Faces never share vertices, so a triangle's material is its first vertex's.
-            std::array<std::vector<WgrMeshVertex>,EarthBuildingStream::MaterialCount> parts;
-            std::array<std::vector<uint32_t>,EarthBuildingStream::MaterialCount> partIndices;
-            std::vector<uint32_t> remap(mesh->vertices.size(),UINT32_MAX);
-            for(size_t t=0;t+2<mesh->indices.size();t+=3)
-            {
-                const uint32_t m=std::min<uint32_t>(mesh->vertices[mesh->indices[t]].material,EarthBuildingStream::MaterialCount-1);
-                const bool textured=_earthBuildingTextures[m].NotNull();
-                for(int k=0;k<3;++k)
-                {
-                    const uint32_t i=mesh->indices[t+k];
-                    if(remap[i]==UINT32_MAX)
-                    {
-                        const auto& v=mesh->vertices[i];
-                        WgrMeshVertex w{};
-                        w.pos={v.x,v.y,v.z};w.normal={v.nx,v.ny,v.nz};
-                        w.uv=textured?WgrVec2{v.tu,v.tv}:WgrVec2{EarthBuildingStream::PaletteU(EarthBuildingStream::MaterialPalette[m]),.5f};
-                        remap[i]=uint32_t(parts[m].size());parts[m].push_back(w);
-                    }
-                    partIndices[m].push_back(remap[i]);
-                }
-            }
+            // Split by material: on the worker already when it knew which textures resolved (EarthBuildingStream::Split),
+            // else here (the first mesh, which arrives before the textures are tried).
+            uint32_t mask=0;
+            for(size_t m=0;m<EarthBuildingStream::MaterialCount;++m)if(_earthBuildingTextures[m].NotNull())mask|=1u<<m;
+            if(!mesh->partsReady || mesh->partsMask!=mask)EarthBuildingStream::Split(*mesh,mask);
+            const auto& parts=mesh->parts;
+            const auto& partIndices=mesh->partIndices;
             for(size_t m=0;m<parts.size();++m)
             {
                 WgrMesh replacement=0;

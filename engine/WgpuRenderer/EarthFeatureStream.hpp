@@ -29,6 +29,8 @@ class EarthFeatureStream
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
         size_t features = 0;
+        // `vertices` as the draw mesh takes them, converted on the worker (the main thread only creates the mesh)
+        std::vector<WgrMeshVertex> draw;
     };
     // Every tree the batch draws, as an instance for the near detail tier (EarthTreeDetail): its
     // base on the ground (frame of the batch), its height and its geographic seed.

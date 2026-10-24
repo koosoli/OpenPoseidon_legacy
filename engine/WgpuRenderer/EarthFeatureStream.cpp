@@ -598,7 +598,23 @@ void EarthFeatureStream::Run()
             _pending = false;
         }
         const auto cancelled = [&] { std::lock_guard lock(_mutex); return _stop || request != _request; };
+        // the draw vertices too, so the main thread only creates the meshes
+        const auto convert = [](Mesh& m)
+        {
+            for (auto& batch : m.batches)
+            {
+                batch.draw.resize(batch.vertices.size());
+                for (size_t i = 0; i < batch.vertices.size(); ++i)
+                {
+                    const auto& v = batch.vertices[i];
+                    batch.draw[i].pos = {v.x, v.y, v.z};
+                    batch.draw[i].normal = {v.nx, v.ny, v.nz};
+                    batch.draw[i].uv = {v.u, v.v};
+                }
+            }
+        };
         auto mesh = std::make_unique<Mesh>(BuildNeighborhood(_cache, ground, cell, cancelled));
+        convert(*mesh);
         if (source.Enabled())
         {
             // Present resident cached neighbors immediately while new cells
@@ -606,6 +622,7 @@ void EarthFeatureStream::Run()
             { std::lock_guard lock(_mutex); if (!_stop && request == _request) _ready = std::move(mesh); }
             if (!source.EnsureNeighborhood(_cache, "features", cell.latitude, cell.longitude, cancelled)) continue;
             mesh = std::make_unique<Mesh>(BuildNeighborhood(_cache, ground, cell, cancelled));
+            convert(*mesh);
         }
         {
             std::lock_guard lock(_mutex);

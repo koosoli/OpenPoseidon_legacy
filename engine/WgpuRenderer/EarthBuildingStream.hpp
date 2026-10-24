@@ -1,5 +1,8 @@
 #pragma once
 #include "EarthTerrainStream.hpp"
+#include "include/wgpu_renderer.hpp"
+#include <array>
+#include <atomic>
 #include <condition_variable>
 #include <filesystem>
 #include <functional>
@@ -57,7 +60,19 @@ public:
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
         std::string error;
+        // The draw meshes' contents, one per Material, split on the worker (Split) for the textured materials
+        // in `partsMask` -- the main thread only creates the meshes. Empty when the mask was not known yet.
+        std::array<std::vector<WgrMeshVertex>,MaterialCount> parts;
+        std::array<std::vector<uint32_t>,MaterialCount> partIndices;
+        uint32_t partsMask=0;
+        bool partsReady=false;
     };
+    // Split `mesh` by material into parts/partIndices: textured materials (bit m of `textured`) take the
+    // facade/roof texture coordinates, the rest the Palette colour.
+    static void Split(Mesh& mesh,uint32_t textured);
+    // Which Materials have their game texture (from the main thread, once it has tried them): the worker then
+    // splits each new mesh before handing it over.
+    void SetTexturedMaterials(uint32_t mask){_textured=mask;}
     static Cell CellAt(double latitude,double longitude);
     static std::string FileName(Cell cell);
     static Mesh BuildCell(const std::string& json,const Ground& ground,Cell cell);
@@ -81,5 +96,6 @@ private:
     Cell _cell{};
     Ground _ground{};
     std::unique_ptr<Mesh> _ready;
+    std::atomic<uint32_t> _textured{UINT32_MAX}; // UINT32_MAX: not known yet
 };
 }
