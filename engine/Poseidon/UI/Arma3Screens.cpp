@@ -14,6 +14,9 @@
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <Poseidon/Input/InputSubsystem.hpp>
+#include <Poseidon/World/World.hpp>
+#include <Evaluator/express.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
@@ -453,5 +456,85 @@ bool ContentChoice(ControlsContainer* display, bool& campaign, std::string& valu
 {
     auto* content = dynamic_cast<ContentDisplay*>(display);
     return content && content->Choice(campaign, value);
+}
+
+namespace
+{
+// Old Man's save mode (RscDisplayOMSavingSetting, opened by init_systems.sqf and waited on): two
+// check boxes of which one is checked -- Recommended (1001, saving anywhere) or Default (1003) --
+// and OK (1005). Its RscDisplayOMSavingSetting.sqf keeps the pair exclusive and, as the screen
+// closes, sets BIS_specialSaving to Recommended's state; that is done here.
+constexpr int kSaveRecommended = 1001, kSaveDefault = 1003, kSaveOk = 1005;
+
+class ScriptDisplay : public Display
+{
+    Screen _screen;
+    std::string _class;
+
+  public:
+    ScriptDisplay(ControlsContainer* parent, const char* className) : Display(parent), _class(className)
+    {
+        InputSubsystem::Instance().ChangeGameFocus(+1);
+        _idd = -1;
+        _screen.Load(*this, className, _controlsBackground, _controlsForeground);
+        _screen.SetChecked(kSaveRecommended, true);
+        _screen.SetChecked(kSaveDefault, false);
+    }
+    ~ScriptDisplay() override { InputSubsystem::Instance().ChangeGameFocus(-1); }
+
+    const std::string& ClassName() const { return _class; }
+
+    // Enter and Escape close it as OK does (the choice shown is the one taken)
+    bool OnKeyDown(unsigned nChar, unsigned nRepCnt, unsigned nFlags) override
+    {
+        if (IsUiConfirmKey(nChar) || nChar == SDLK_ESCAPE)
+        {
+            OnButtonClicked(kSaveOk);
+            return true;
+        }
+        return Display::OnKeyDown(nChar, nRepCnt, nFlags);
+    }
+
+    void OnButtonClicked(int idc) override
+    {
+        switch (idc)
+        {
+            case kSaveRecommended:
+            case kSaveDefault:
+            {
+                // one of the two, always
+                const int other = idc == kSaveRecommended ? kSaveDefault : kSaveRecommended;
+                if (_screen.Checked(idc))
+                    _screen.SetChecked(other, false);
+                else
+                    _screen.SetChecked(idc, true);
+                return;
+            }
+            case kSaveOk:
+            case IDC_OK:
+            case IDC_CANCEL:
+                if (GameState* gs = GWorld ? GWorld->GetGameState() : nullptr)
+                    gs->Execute(_screen.Checked(kSaveRecommended) ? "BIS_specialSaving = true"
+                                                                  : "BIS_specialSaving = false");
+                LOG_INFO(UI, "Arma 3: {} closed: BIS_specialSaving = {}", _class, _screen.Checked(kSaveRecommended));
+                Exit(IDC_OK);
+                return;
+            default:
+                Display::OnButtonClicked(idc);
+        }
+    }
+};
+} // namespace
+
+Display* CreateScriptDisplay(ControlsContainer* parent, const char* className)
+{
+    if (!Active() || !className || _stricmp(className, "RscDisplayOMSavingSetting") != 0)
+        return nullptr;
+    // the script asks every tenth of a second until the choice is made: the one open answers
+    for (ControlsContainer* open = parent; open; open = open->Child())
+        if (auto* shown = dynamic_cast<ScriptDisplay*>(open); shown && _stricmp(shown->ClassName().c_str(), className) == 0)
+            return shown;
+    LOG_INFO(UI, "Arma 3: {} opened natively", className);
+    return new ScriptDisplay(parent, className);
 }
 } // namespace Poseidon::Arma3Menu

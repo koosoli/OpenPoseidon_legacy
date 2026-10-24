@@ -1373,7 +1373,14 @@ GameValue IsCheatsEnabled(const GameState* state)
 #if _ENABLE_CHEATS
     return true;
 #else
-    return false;
+    // POSEIDON_A3_FUNCTIONS_LOG=1: as in Bohemia's development build, where Arma 3's function library
+    // (BIS_fnc_log, BIS_fnc_logFormat) writes its trace -- here through diag_log to the game's log
+    static const bool functionsLog = []
+    {
+        const char* e = std::getenv("POSEIDON_A3_FUNCTIONS_LOG");
+        return e && *e == '1';
+    }();
+    return functionsLog;
 #endif
 }
 

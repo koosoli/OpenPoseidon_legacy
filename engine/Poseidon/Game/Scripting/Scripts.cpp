@@ -1148,6 +1148,7 @@ namespace
 {
 ScriptFiber* GRunningFiber = nullptr;
 unsigned GFiberYields = 0;
+bool GScriptTimeStands = false; // SetScriptTimeStands
 constexpr size_t FiberStackSize = 16u << 20; // reserved, committed as used
 
 unsigned FiberYieldCount()
@@ -1173,6 +1174,11 @@ void DestroyScriptFiber(ScriptFiber* f)
         return;
     Coroutine::Destroy(f->coroutine);
     delete f;
+}
+
+void SetScriptTimeStands(bool stands)
+{
+    GScriptTimeStands = stands;
 }
 
 // True when the code being evaluated runs as a scheduled Arma 2 script.
@@ -1218,7 +1224,7 @@ bool Script::SimulateFiber()
         return true;
     if (GRunningFiber)
         return false; // a scheduled script does not run another one inside itself
-    if (f.started && Glob.time.toFloat() == f.suspendedAt)
+    if (f.started && !GScriptTimeStands && Glob.time.toFloat() == f.suspendedAt)
         return false; // not again in the frame it gave back
     GameState* gstate = GWorld->GetGameState();
     if (!f.started)

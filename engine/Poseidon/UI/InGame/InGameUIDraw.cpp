@@ -1,5 +1,6 @@
 
 #include <Poseidon/Game/Compat/ArmaOriginalUi.hpp>
+#include <Poseidon/UI/Arma3Menu.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <SDL3/SDL_scancode.h>
 #include <Poseidon/Core/Config/UserConfig.hpp>
@@ -18,6 +19,7 @@
 #include <Poseidon/Core/resincl.hpp>
 
 #include <Poseidon/World/Entities/Infantry/MoveActions.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
@@ -1494,6 +1496,11 @@ void InGameUI::DrawUnitInfo(EntityAI* vehicle)
         }
     }
 
+    // --arma-original-ui with Arma 3: its own weapon panel and stance on foot (Arma3Menu::DrawHud)
+    Arma3Menu::HudState arma3;
+    const bool arma3Hud = vehicle == unit->GetPerson() && Arma3Menu::HudActive();
+    arma3.weaponShown = false;
+
     int weapon = vehicle->SelectedWeapon();
     int ValidateWeapon(EntityAI * vehicle, int weapon);
     weapon = ValidateWeapon(vehicle, weapon);
@@ -1575,6 +1582,20 @@ void InGameUI::DrawUnitInfo(EntityAI* vehicle)
             maxAmmoCur = slot._muzzle->_magazines[0]->_maxAmmo;
         }
 
+        // an Arma 3 weapon runs on a CWA carrier (Arma1Config): its own name is the weapon's; its
+        // muzzle, fire modes and magazines are the carrier's ("M16 Mag."), so they are not shown
+        arma3.weaponShown = true;
+        arma3.weapon = slot._weapon ? RString(slot._weapon->GetDisplayName()) : RString(slot._muzzle->GetDisplayName());
+        if (maxAmmoCur > 0)
+        {
+            snprintf(buffer, sizeof(buffer), "%d", ammoCur);
+            arma3.ammo = buffer;
+            if (magazines > 0)
+            {
+                snprintf(buffer, sizeof(buffer), "%d", magazines);
+                arma3.magazines = buffer;
+            }
+        }
         if (maxAmmoCur > 0)
         {
             if (/*ammoCur == 0*/ noAmmo || vehicle->IsActionInProgress(MFReload))
@@ -1659,6 +1680,18 @@ void InGameUI::DrawUnitInfo(EntityAI* vehicle)
     if (vehicle->GetType()->_hideUnitInfo)
     {
         age = Glob.uiTime - _lastUnitInfoTime;
+    }
+    if (arma3Hud)
+    {
+        if (const Man* man = dyn_cast<Man>(vehicle))
+        {
+            const int pos = man->StanceUpDegree();
+            arma3.stance = pos >= ManPosBinocLying && pos <= ManPosHandGunLying ? 2
+                           : pos == ManPosCrouch || pos == ManPosHandGunCrouch ? 1
+                                                                               : 0;
+        }
+        Arma3Menu::DrawHud(arma3, 1.0f);
+        return;
     }
     if (age < piDimEndTime)
     {

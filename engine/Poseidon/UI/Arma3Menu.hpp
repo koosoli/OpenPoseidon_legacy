@@ -28,6 +28,7 @@
 
 class Control;
 class ControlsContainer;
+class IControl;
 class Display;
 
 namespace Poseidon::Arma3Menu
@@ -39,6 +40,15 @@ bool Active();
 // Challenges, All Missions), filled from CfgMissions (Arma3Screens.cpp); null when Arma 3's menu is
 // not active or CfgMissions has nothing for it. Its idd is ArmaContentIdd.
 Display* CreateContentDisplay(ControlsContainer* parent, int idc);
+// An Arma 3 screen a script opens (createDisplay / createDialog) that this engine runs natively,
+// in place of the scripts behind it (Arma3Screens.cpp); null for any other class.
+Display* CreateScriptDisplay(ControlsContainer* parent, const char* className);
+
+// ctrlSetText / ctrlSetStructuredText / ctrlText on a control of an Arma 3 screen (they are not CWA's
+// CStatic and the like though their types read alike); false for any other control.
+bool SetControlText(IControl* control, const RString& text);
+bool ControlText(IControl* control, RString& text);
+
 // The entry chosen in a closed CreateContentDisplay screen.
 bool ContentChoice(ControlsContainer* display, bool& campaign, std::string& value);
 
@@ -48,6 +58,18 @@ void DrawMenuBackdrop(float alpha);
 // Called each frame while Arma 3's main menu is up: its menu music, started and looped as its intro
 // scenes do.
 void TickMenuMusic();
+
+// Arma 3's HUD (RscInGameUI): its soldier's weapon panel (RscUnitInfoSoldier) and stance indicator
+// (RscStanceInfo), drawn in place of CWA's unit info. The in-game UI fills what it shows each frame.
+struct HudState
+{
+    RString weapon, ammo, magazines, ammoType, grenade, grenades;
+    int stance = 0; // 0 standing, 1 crouched, 2 prone
+    bool weaponShown = true;
+};
+// Arma 3's menu is active and its config has RscInGameUI.
+bool HudActive();
+void DrawHud(const HudState& state, float alpha);
 
 // What a click on an Arma 3 main-menu entry does here.
 enum class Action
@@ -69,9 +91,11 @@ class Screen
     Screen();
     ~Screen();
 
-    // Loads Arma 3's class `name` into `display`, appending to its control lists.
+    // Loads Arma 3's class `name` ("RscInGameUI/RscStanceInfo" for a nested one) into `display`,
+    // appending to its control lists; without `backdrop` its ControlsBackground is left out (the map
+    // screens: the engine's own map is the backdrop).
     bool Load(ControlsContainer& display, const char* name, RefArray<Control>& background,
-              RefArray<Control>& foreground);
+              RefArray<Control>& foreground, bool backdrop = true);
 
     // RscDisplayMain.sqf's onLoad, natively: rows collapsed, spotlight frames hidden.
     void InitMainMenu();
@@ -83,6 +107,8 @@ class Screen
     void SetPicture(int idc, const RString& name);
     void SetRows(int idc, const std::vector<RString>& rows, int selected);
     int Selected(int idc) const;
+    bool Checked(int idc) const; // a check box
+    void SetChecked(int idc, bool checked);
     void Show(int idc, bool shown);
     bool Has(int idc) const;
     // The meaning of a main-menu click; `message` is set for Action::Unavailable.
@@ -90,11 +116,21 @@ class Screen
 
     // Its ControlsBackground (the backdrop) alone, as drawn under a screen opened over it.
     void DrawBackdrop(float alpha);
+    // All of it that is shown, in order (a screen that is not a display of its own: the HUD).
+    void Draw(float alpha);
 
     // RscDisplayInterrupt (the pause menu): what applies here shown, the mission's name set; and
     // a click's idc as CWA's pause menu knows it (Arma 3's Load, the Options shortcuts).
     void InitInterrupt(bool multiplayer, bool saveExists, const RString& missionName);
     int InterruptClick(int idc) const;
+
+    // RscDisplayGetReady / RscDisplayMainMap (the briefing and the map): the diary over the map. Its
+    // subjects, their records and the chosen record's page come from the mission's diary and tasks
+    // (createDiaryRecord, createSimpleTask); what scripts add while it is open shows up
+    // (UpdateDiary, per frame, with the clock). DiaryEvent takes a list's selection.
+    void InitDiary(const RString& missionName, const RString& playerName);
+    void UpdateDiary();
+    bool DiaryEvent(int idc, int row);
 
   private:
     void AddCentreSpotlight();

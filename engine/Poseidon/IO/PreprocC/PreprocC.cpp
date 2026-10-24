@@ -27,6 +27,38 @@ class Preprocessor : public Preproc
         return std::string(path, slash - path);
     }
 
+    // "a\b\..\c" -> "a\c" (either separator in, backslashes out)
+    static std::string CollapseDots(const std::string& path)
+    {
+        std::vector<std::string> parts;
+        std::string part;
+        const auto flush = [&]
+        {
+            if (part == "..")
+            {
+                if (!parts.empty() && parts.back() != "..")
+                    parts.pop_back();
+                else
+                    parts.push_back(part);
+            }
+            else if (!part.empty() && part != ".")
+                parts.push_back(part);
+            part.clear();
+        };
+        for (char c : path)
+        {
+            if (c == '\\' || c == '/')
+                flush();
+            else
+                part += c;
+        }
+        flush();
+        std::string out;
+        for (size_t i = 0; i < parts.size(); i++)
+            out += (i ? "\\" : "") + parts[i];
+        return out;
+    }
+
   protected:
     QIStream* OnEnterInclude(const char* filename) override
     {
@@ -41,13 +73,18 @@ class Preprocessor : public Preproc
             if (!rooted.empty() && QIFStreamB::FileExist(rooted.c_str()))
                 resolved = rooted;
         }
-        if (!QIFStreamB::FileExist(resolved.c_str()) && !_includeStack.empty())
+        // a relative include resolves beside the file that includes it, innermost first; ".." steps
+        // out of that folder (Old Man's RscDatetimeSlider.inc includes "..\defines.inc"), which
+        // the banks do not know written out
+        for (auto it = _includeStack.rbegin(); !QIFStreamB::FileExist(resolved.c_str()) && it != _includeStack.rend();
+             ++it)
         {
-            std::string dir = DirectoryOf(_includeStack.back().c_str());
-            if (!dir.empty())
-            {
-                resolved = dir + "/" + filename;
-            }
+            const std::string dir = DirectoryOf(it->c_str());
+            if (dir.empty())
+                continue;
+            const std::string beside = CollapseDots(dir + "/" + filename);
+            if (QIFStreamB::FileExist(beside.c_str()))
+                resolved = beside;
         }
 
         if (!QIFStreamB::FileExist(resolved.c_str()))

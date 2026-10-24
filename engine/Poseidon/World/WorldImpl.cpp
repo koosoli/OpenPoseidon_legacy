@@ -30,6 +30,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Dev/Diag/DiagPause.hpp>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp> // IndoorRoomAt/IndoorClearanceAt: the SERoom producer
+#include <Poseidon/UI/Arma3Menu.hpp>
 #include <Poseidon/World/EnvSoundRegions.hpp>           // OFP Fusion: ambient loops per island
 #include <algorithm>
 #include <Poseidon/Graphics/Core/Engine.hpp>
@@ -1439,6 +1440,10 @@ void World::PerformSound(Entity* inside, float deltaT)
     float canHear = 1 - camHeight * 1.0 / 200;
     saturate(canHear, 0, 1);
     float vCoef = 0.5 * canHear;
+    // Arma 3's own menu covers the screen: the empty island behind it is not heard (its sea was)
+    const bool menuBackdrop = _mode == GModeIntro && Arma3Menu::Active();
+    if (menuBackdrop)
+        vCoef = 0;
 
     if (stricmp(EnvSoundPars[5].name, "SOUND\\$DEFAULT$.WSS") != 0)
     {
@@ -1473,7 +1478,7 @@ void World::PerformSound(Entity* inside, float deltaT)
     v[4] = 0;
     const float thold = 0.1;
     float rain = _scene.GetLandscape()->GetRainDensity() - thold;
-    if (rain >= 0)
+    if (rain >= 0 && vCoef > 0)
     {
         float coef = rain * (1 / (1 - thold));
         v[0] *= 1 - coef;
@@ -1550,7 +1555,8 @@ void World::PerformSound(Entity* inside, float deltaT)
         GSoundScene->SetEnvSound(envNames[i], envVols[i]);
     }
     // (OP) Tidewater's surf and distant-surf bed (@OP_TidewaterWildlife; silent without it)
-    UpdateSeaSoundscape(camPos, 0.0f);
+    if (!menuBackdrop)
+        UpdateSeaSoundscape(camPos, 0.0f);
     GSoundScene->AdvanceEnvSounds();
 #endif
 }

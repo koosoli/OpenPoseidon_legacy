@@ -151,7 +151,6 @@ const Stub kStubs[] = {
     {"controlsGroupCtrl", 'b', GameAny, GameAny, GameAny, "-1"},
     {"copyFromClipboard", 'n', GameAny, 0, 0, "\"\""},
     {"create3DENEntity", 'u', GameNothing, 0, GameAny, ""},
-    {"createDisplay", 'b', GameAny, GameAny, GameAny, "-1"},
     {"createMissionDisplay", 'b', GameAny, GameAny, GameAny, "nil"},
     {"createMPCampaignDisplay", 'b', GameAny, GameAny, GameAny, "nil"},
     {"createSoundSource", 'u', GameAny, 0, GameAny, "objNull"},

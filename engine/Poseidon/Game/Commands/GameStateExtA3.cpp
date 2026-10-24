@@ -27,6 +27,8 @@
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/Game/Commands/GameStateExtA3Rsc.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <Poseidon/UI/Arma3Menu.hpp>
+#include <Poseidon/UI/Controls/UIControls.hpp>
 
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICenter.hpp>
@@ -1810,6 +1812,43 @@ GameValue A3PixelGrid(const GameState*)
     return GameValue(A3GridOf(A3ScreenHeight() * 12.0f / 1080.0f));
 }
 
+// parent createDisplay class: the Arma 3 screens this engine runs natively (Arma3Menu::CreateScriptDisplay,
+// Old Man's save mode) open over the game as a user dialog; any other class opens nothing (-1, as the
+// stub answered).
+GameValue A3CreateDisplay(const GameState*, GameValuePar, GameValuePar oper2)
+{
+    if (!GWorld)
+        return GameValue(-1.0f);
+    ControlsContainer* top = dynamic_cast<ControlsContainer*>(GWorld->UserDialog());
+    while (top && top->Child())
+        top = top->Child();
+    Display* display = Arma3Menu::CreateScriptDisplay(top, RString(oper2));
+    if (!display)
+        return GameValue(-1.0f);
+    if (display != top)
+    {
+        if (top)
+            top->CreateChild(display);
+        else
+            GWorld->SetUserDialog(display);
+    }
+    return GameValue(1.0f);
+}
+
+// getOxygenRemaining unit: this engine has no breath to hold underwater; always a full breath.
+GameValue A3OxygenRemaining(const GameState*, GameValuePar)
+{
+    return GameValue(1.0f);
+}
+
+// diag_log anything: Arma 3 writes it to its report file (.rpt); here to the game's log.
+GameValue A3DiagLog(const GameState*, GameValuePar oper1)
+{
+    const RString text = oper1.GetType() == GameString ? RString(oper1) : oper1.GetText();
+    LOG_INFO(Script, "diag_log: {}", (const char*)text);
+    return NOTHING;
+}
+
 // ---------------------------------------------------------------------------------------
 // "Macro" commands: Arma 3 commands as SQF over this engine's commands
 // ---------------------------------------------------------------------------------------
@@ -1953,10 +1992,12 @@ const Macro kMacros[] = {
     {"allUnitsUAV", 'n', GameArray, 0, 0, "[]"},
     {"vehicles", 'n', GameArray, 0, 0,
      "private _r = []; {if (vehicle _x != _x) then {_r pushBackUnique vehicle _x}} forEach allUnits; _r"},
+    // every entity, logics and modules too (BIS_fnc_initModules finds the mission's modules so;
+    // Old Man's init_systems.sqf its sectors and patrol areas)
     {"entities", 'u', GameArray, 0, GameString,
-     "private _t = _this; private _r = []; {_r pushBackUnique vehicle _x; _r pushBackUnique _x} forEach allUnits; _r select {_x isKindOf _t}"},
+     "private _t = _this; private _r = opA3AllEntities; {_r pushBackUnique vehicle _x; _r pushBackUnique _x} forEach allUnits; _r select {_x isKindOf _t}"},
     {"entities", 'u', GameArray, 0, GameArray,
-     "private _t = (_this select 0) apply {_x}; private _r = []; {_r pushBackUnique vehicle _x; _r pushBackUnique _x} forEach allUnits; "
+     "private _t = (_this select 0) apply {_x}; private _r = opA3AllEntities; {_r pushBackUnique vehicle _x; _r pushBackUnique _x} forEach allUnits; "
      "if (count _t == 0) then {_r} else {_r select {private _o = _x; _t findIf {_o isKindOf _x} >= 0}}"},
     {"allMissionObjects", 'u', GameArray, 0, GameString,
      "private _t = _this; private _r = opA3AllEntities; {_r pushBackUnique vehicle _x; _r pushBackUnique _x} forEach allUnits; if (_t == '') then {_r} else {_r select {_x isKindOf _t}}"},
@@ -2200,6 +2241,8 @@ const GameFunction A3Unary[] = {
     GameFunction(GameBool, "params", A3Params, GameArray),
     GameFunction(GameAny, "param", A3Param, GameArray | GameScalar),
     GameFunction(GameNothing, "reverse", A3Reverse, GameArray),
+    GameFunction(GameNothing, "diag_log", A3DiagLog, GameAny),
+    GameFunction(GameScalar, "getOxygenRemaining", A3OxygenRemaining, GameObject),
     GameFunction(GameAny, "try", A3Try, GameString),
     GameFunction(GameNothing, "throw", A3Throw, GameVoid),
     GameFunction(GameAny, "selectRandom", A3SelectRandom, GameArray),
@@ -2249,6 +2292,7 @@ GameValue A3HashIndex(const GameState* state, GameValuePar oper1, GameValuePar o
 }
 
 const GameOperator A3Binary[] = {
+    GameOperator(GameScalar, "createDisplay", function, A3CreateDisplay, GameAny, GameString),
     GameOperator(GameAny, "#", mocnina, A3HashIndex, GameArray | GameString, GameScalar),
     GameOperator(GameBool, "params", function, A3ParamsBinary, GameVoid, GameArray),
     GameOperator(GameAny, "catch", function, A3Catch, GameVoid, GameString),
