@@ -510,6 +510,26 @@ no screenshots written. The stall report now also takes stacks at 90 and 170 s.
   description.ext says, with no script error. Campaign run 6 adds C7B, C7EF and a played C7C:
   every mission of both campaigns has now been reached and played from its campaign.
 
+### Arma 2 voices, 2026-10-23
+
+Owner's decision (23.10): everything stays as it is in Arma 2; the open deviations are
+worked off one by one (voices, animals, vehicle/weapon values, mimic/glasses/conversation menu).
+
+- `919e7e1`: every Arma 2 man gets a CfgVoice class of the Arma 2 config whose
+  `identityTypes` meet his class's (Male01EN..05EN, Male0xTK, RU, CZ) at one of
+  `CfgVoice >> variants`' pitches. His radio says each CWA radio word with the word of his
+  voice's protocol (`RadioProtocol_EP1_EN >> Words`, a random variant, `.wss`/`.ogg`) from
+  the voice's own directories (`Arma2RadioWord` maps CWA's word files to Arma 2's ids:
+  `distance\100` -> `dist100`, `isdown` -> `IsDownE`, `beep` -> `xmit`, ...). A word Arma 2's
+  radio has none for is said by CWA's first voice, logged once. `setIdentity` accepts Arma 2 voices.
+- `ff9849f`: the sound census at the end of a test counts the Steam Audio backend's waves
+  (it read 0 on every run before).
+- `b4eb960`: Arrowhead's protocol renamed words (`GetInThat`, `BoardThat`, `GetDownE`,
+  `TargetThat`): tried after the plain id. A word Arma 2 defines without a clip
+  (`Unknown[] = {}`) is silent, as in Arma 2.
+- `dd365dc`: the player's own CWA profile voice becomes an Arma 2 voice of his kind.
+- HQ (`CfgHQIdentities`) speaks with the Arma 2 config's HQ voice when it names one (not yet measured).
+
 ## Steps
 
 1. **Measure first.** Per mission: an asset census in the log (every class created, what it
