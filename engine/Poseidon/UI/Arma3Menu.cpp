@@ -16,6 +16,7 @@
 #include <Evaluator/express.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -23,13 +24,16 @@
 #include <set>
 #include <string>
 
+int Arma2BriefingRevision();                               // GameStateExtA2.cpp
+std::vector<std::array<std::string, 3>> Arma2DiaryRecords(); // GameStateExtA2.cpp
+
 namespace Poseidon::Arma3Menu
 {
 namespace
 {
 // Arma 3's control types and styles this file draws (a3\ui_f\hpp\defineCommon.inc).
-constexpr int kStatic = 0, kButton = 1, kListBox = 5, kActiveText = 11, kTree = 12, kStructuredText = 13,
-              kControlsGroup = 15,
+constexpr int kStatic = 0, kButton = 1, kListBox = 5, kHtml = 9, kActiveText = 11, kTree = 12,
+              kStructuredText = 13, kControlsGroup = 15, kListNBox = 102,
               kShortcutButton = 16, kControlsGroupNoScroll = 81, kButtonPicture = 0x30, kKeepAspect = 0x800;
 
 // RscDisplayMain's idcs (a3\ui_f\hpp\defineResinclDesign.inc).
@@ -119,8 +123,9 @@ PackedColor HexColor(const char* text, PackedColor fallback)
     return PackedColor(Color(((v >> 16) & 255) / 255.0f, ((v >> 8) & 255) / 255.0f, (v & 255) / 255.0f, a / 255.0f));
 }
 
-// Structured text as plain text: tags dropped, <br/> a space, entities decoded.
-RString PlainText(const RString& text)
+// Structured text as plain text: tags dropped, <br/> a space (a line break with `lineBreaks`),
+// entities decoded.
+RString PlainText(const RString& text, bool lineBreaks = false)
 {
     std::string out;
     for (const char* p = text; *p; p++)
@@ -131,7 +136,7 @@ RString PlainText(const RString& text)
             if (!end)
                 break;
             if (_strnicmp(p, "<br", 3) == 0)
-                out += ' ';
+                out += lineBreaks ? '\n' : ' ';
             p = end;
             continue;
         }
@@ -321,15 +326,54 @@ class A3Control : public Control
     }
     Rect2DPixel ClipPixels() const { return Pixels(_clip.x, _clip.y, _clip.w, _clip.h); }
 
-    // Text in [x, x + w] (alignment from `align`: 0 left, 1 right, 2 centre), vertically centred.
-    void DrawLabel(const RString& utf8, float x, float y, float w, float h, int align, PackedColor color,
-                   float size) const
+    // Word-wrapped lines of `text` in `font` no wider than `width`; a '\n' ends a line.
+    static std::vector<std::string> WrapLines(Font* font, float size, float width, const std::string& text)
     {
-        if (utf8.GetLength() == 0 || !_font)
+        std::vector<std::string> lines;
+        if (!font)
+            return lines;
+        std::string line, word;
+        for (size_t i = 0; i <= text.size(); i++)
+        {
+            const char c = i < text.size() ? text[i] : ' ';
+            if (c != ' ' && c != '\n')
+            {
+                word += c;
+                continue;
+            }
+            const std::string candidate = line.empty() ? word : line + " " + word;
+            const RString measured = font->IsFreeType() ? RString(candidate.c_str()) : Latin1(candidate.c_str());
+            if (!line.empty() && GLOB_ENGINE->GetTextWidth(size, font, measured) > width)
+            {
+                lines.push_back(line);
+                line = word;
+            }
+            else
+                line = candidate;
+            word.clear();
+            if (c == '\n')
+            {
+                lines.push_back(line);
+                line.clear();
+            }
+        }
+        if (!line.empty())
+            lines.push_back(line);
+        return lines;
+    }
+
+    // Text in [x, x + w] (alignment from `align`: 0 left, 1 right, 2 centre), vertically centred; in
+    // `font` when given, else the control's.
+    void DrawLabel(const RString& utf8, float x, float y, float w, float h, int align, PackedColor color,
+                   float size, Font* font = nullptr) const
+    {
+        if (!font)
+            font = _font;
+        if (utf8.GetLength() == 0 || !font)
             return;
         // Arma 3's strings are UTF-8; its bitmap fonts are drawn a byte per Latin-1 character
-        const RString text = _font->IsFreeType() ? utf8 : Latin1(utf8);
-        const float width = GLOB_ENGINE->GetTextWidth(size, _font, text);
+        const RString text = font->IsFreeType() ? utf8 : Latin1(utf8);
+        const float width = GLOB_ENGINE->GetTextWidth(size, font, text);
         float left = x;
         if (align == ST_RIGHT)
             left = x + w - width;
@@ -341,7 +385,7 @@ class A3Control : public Control
         const float cw = std::min(_x + _w, _clip.x + _clip.w) - cx, ch = std::min(_y + _h, _clip.y + _clip.h) - cy;
         if (cw <= 0 || ch <= 0)
             return;
-        GLOB_ENGINE->DrawText(Point2DFloat(left, top), size, Rect2DFloat(cx, cy, cw, ch), _font, color, text);
+        GLOB_ENGINE->DrawText(Point2DFloat(left, top), size, Rect2DFloat(cx, cy, cw, ch), font, color, text);
     }
 };
 
@@ -425,12 +469,7 @@ class A3Static : public A3Control
         if (!_font || _text.GetLength() == 0)
             return;
         const float width = _w - 0.01f;
-        std::vector<std::string> lines;
-        std::string line;
-        const auto flush = [&](const std::string& text) { lines.push_back(text); };
-        Wrap(width, line, flush);
-        if (!line.empty())
-            flush(line);
+        const std::vector<std::string> lines = WrapLines(_font, _size, width, (const char*)_text);
         const float pitch = _size * 1.05f;
         float top = _centred ? _y + std::max(0.0f, 0.5f * (_h - pitch * lines.size())) : _y;
         for (const std::string& text : lines)
@@ -440,34 +479,72 @@ class A3Static : public A3Control
             top += pitch;
         }
     }
+};
 
-    template <typename Flush> void Wrap(float width, std::string& line, Flush flush) const
+// RscHTML (9), as the diary's page: a heading in its H1 font over word-wrapped paragraphs in its P
+// font, scrolled by the mouse wheel. Arma 3's links, images and colours are drawn as their text.
+class A3Html : public A3Control
+{
+    Ref<Font> _headingFont;
+    float _headingSize = 0.04f;
+    PackedColor _color;
+    RString _heading;
+    float _scroll = 0; // lines from the top
+
+  public:
+    A3Html(ControlsContainer* parent, int type, int idc, const ParamEntry& cls, float x, float y, float w, float h,
+           const Rect2DFloat& clip)
+        : A3Control(parent, type, idc, cls, x, y, w, h, clip)
     {
-        std::string word;
-        const std::string all = (const char*)_text;
-        for (size_t i = 0; i <= all.size(); i++)
+        // Arma 3 sizes the page taller than its group and scrolls the group; here the page is the
+        // group's height and scrolls itself, and does not reach over what lies below the group
+        _h = std::max(0.0f, std::min(_y + _h, clip.y + clip.h) - _y);
+        _color = ColorOf(cls, "colorText", PackedWhite);
+        const ParamEntry* p = cls.FindEntry("P");
+        const ParamEntry* h1 = cls.FindEntry("H1");
+        LoadFont(p && p->IsClass() ? Text(*p, "font") : RString(), ToH(p && p->IsClass() ? Number(*p, "sizeEx", 0.03f) : 0.03f));
+        _headingSize = ToH(h1 && h1->IsClass() ? Number(*h1, "sizeEx", 0.045f) : 0.045f);
+        const RString headingFont = FontFile(h1 && h1->IsClass() ? Text(*h1, "font") : RString(), _headingSize);
+        _headingFont = _font;
+        if (headingFont.GetLength() > 0)
+            _headingFont = GLOB_ENGINE->LoadFont(GetFontID(headingFont));
+        _text = RString();
+    }
+
+    // The page: `structured` is Arma 3's structured text (<br/> a line break, other tags dropped).
+    void SetPage(const RString& heading, const RString& structured)
+    {
+        _heading = heading;
+        _text = PlainText(structured, true);
+        _scroll = 0;
+    }
+
+    void OnMouseZChanged(float dz) override { _scroll = std::max(0.0f, _scroll - dz * 3.0f); }
+
+    void OnDraw(float alpha) override
+    {
+        if (!_font)
+            return;
+        const PackedColor color = Fade(_color, alpha);
+        const float width = _w - 0.01f, pitch = _size * 1.15f;
+        float top = _y + 0.005f - _scroll * pitch;
+        const auto line = [&](const std::string& text, const Ref<Font>& font, float size, float step)
         {
-            const char c = i < all.size() ? all[i] : ' ';
-            if (c != ' ' && c != '\n')
-            {
-                word += c;
-                continue;
-            }
-            const std::string candidate = line.empty() ? word : line + " " + word;
-            if (!line.empty() && GLOB_ENGINE->GetTextWidth(_size, _font, candidate.c_str()) > width)
-            {
-                flush(line);
-                line = word;
-            }
-            else
-                line = candidate;
-            word.clear();
-            if (c == '\n')
-            {
-                flush(line);
-                line.clear();
-            }
+            if (top >= _y - 0.001f && top + size <= _y + _h + 0.001f)
+                DrawLabel(RString(text.c_str()), _x + 0.005f, top, width, size, ST_LEFT, color, size, font);
+            top += step;
+        };
+        if (_heading.GetLength() > 0)
+        {
+            for (const std::string& text : WrapLines(_headingFont, _headingSize, width, (const char*)_heading))
+                line(text, _headingFont, _headingSize, _headingSize * 1.15f);
+            top += pitch * 0.5f;
         }
+        for (const std::string& text : WrapLines(_font, _size, width, (const char*)_text))
+            line(text, _font, _size, pitch);
+        // the wheel stops at the last line
+        const float rows = (top + _scroll * pitch - _y) / pitch;
+        _scroll = std::min(_scroll, std::max(0.0f, rows - _h / pitch));
     }
 };
 
@@ -755,6 +832,11 @@ struct Screen::Impl
     bool loadingBackground = false;     // LoadList is reading ControlsBackground
     RefArray<Control>* foreground = nullptr;
     Action centreAction = Action::Unavailable; // what the middle spotlight (CfgMainMenuSpotlight) opens
+    // the diary (InitDiary): {subject, title, text} per record, the subjects listed, what is chosen
+    std::vector<std::array<std::string, 3>> records;
+    std::vector<std::string> subjects;
+    int subject = 0, record = 0, revision = -1;
+    std::vector<int> shownRecords; // indices in `records` of the rows of the record list
 
     // Shown when it and every group around it are.
     void Refresh()
@@ -836,8 +918,10 @@ struct Screen::Impl
             }
             control = new A3Static(display, type, idc, cls, x, y, w, h, clip);
         }
-        else if (type == kListBox || type == kTree)
+        else if (type == kListBox || type == kTree || type == kListNBox)
             control = new A3List(display, type, idc, cls, x, y, w, h, clip);
+        else if (type == kHtml)
+            control = new A3Html(display, type, idc, cls, x, y, w, h, clip);
         else if (type == kButton || type == kActiveText || type == kShortcutButton)
         {
             // a spotlight's button carries the same idc in every spotlight: it reports its spotlight
@@ -877,6 +961,13 @@ void Screen::DrawBackdrop(float alpha)
             m.control->OnDraw(alpha);
 }
 
+void Screen::Draw(float alpha)
+{
+    for (const Member& m : _impl->members)
+        if (m.control->IsVisible())
+            m.control->OnDraw(alpha);
+}
+
 void DrawMenuBackdrop(float alpha)
 {
     if (g_mainMenu)
@@ -905,10 +996,17 @@ bool Active()
 }
 
 bool Screen::Load(ControlsContainer& display, const char* name, RefArray<Control>& background,
-                  RefArray<Control>& foreground)
+                  RefArray<Control>& foreground, bool backdrop)
 {
-    const ParamEntry* root = Arma1Compat::ConfigRoot();
-    const ParamEntry* screen = root ? root->FindEntry(name) : nullptr;
+    // "Outer/Inner": a class inside another (RscInGameUI's)
+    const ParamEntry* screen = Arma1Compat::ConfigRoot();
+    std::string path = name;
+    for (size_t start = 0; screen && start <= path.size();)
+    {
+        const size_t end = std::min(path.find('/', start), path.size());
+        screen = screen->IsClass() ? screen->FindEntry(path.substr(start, end - start).c_str()) : nullptr;
+        start = end + 1;
+    }
     if (!screen || !screen->IsClass())
         return false;
     Impl& s = *_impl;
@@ -917,7 +1015,7 @@ bool Screen::Load(ControlsContainer& display, const char* name, RefArray<Control
     const InArmaCoordinates coordinates;
     const Rect2DFloat everything(-1, -1, 3, 3);
     const int before = static_cast<int>(s.members.size());
-    if (const ParamEntry* list = screen->FindEntry("ControlsBackground"); list && list->IsClass())
+    if (const ParamEntry* list = screen->FindEntry("ControlsBackground"); backdrop && list && list->IsClass())
     {
         s.loadingBackground = true;
         s.LoadList(*list, 0, 0, everything, -1, background, -1);
@@ -925,6 +1023,16 @@ bool Screen::Load(ControlsContainer& display, const char* name, RefArray<Control
     }
     if (const ParamEntry* list = screen->FindEntry("Controls"); list && list->IsClass())
         s.LoadList(*list, 0, 0, everything, -1, foreground, -1);
+    else if (list && list->IsArray())
+    {
+        // controls[] = {"Name", ...}: the classes of those names, members of the screen (RscInGameUI's)
+        for (int i = 0; i < list->GetSize(); i++)
+        {
+            const ParamEntry* cls = screen->FindEntry(RString((*list)[i].GetValue()));
+            if (cls && cls->IsClass())
+                s.LoadControl(*cls, 0, 0, everything, -1, foreground, -1);
+        }
+    }
     std::string skipped;
     for (const auto& [why, count] : s.skipped)
         skipped += (skipped.empty() ? "" : ", ") + std::to_string(count) + " " + why;
@@ -1281,5 +1389,177 @@ Action Screen::MainMenuClick(int idc, const char*& message)
         return Action::Unavailable;
     }
     return Action::None; // Quit (106), Player (109), Server Browser (105): DisplayMain's own
+}
+
+namespace
+{
+// RscDisplayMainMap's diary: subjects (1001), the subject's records (1002), the record's page (1003)
+// and the controls this engine has nothing behind (a3\ui_f\hpp\RscDiary).
+constexpr int kDiarySubjects = 1001, kDiaryRecords = 1002, kDiaryPage = 1003, kDiaryMission = 112,
+              kDiaryPlayer = 111, kDiaryClock = 101;
+// the tooltip and mouse-over labels, the briefing's intro layers, the players / mute controls, the GPS
+// and radio panels (CWA's own stay in the engine), the fade-in, the respawn and high-command panels
+constexpr int kDiaryHidden[] = {2350, 1016, 107, 117, 118, 119, 106, 103, 1099, 1100, 1101, 1102,
+                                1124, 1125, 88800, 88850};
+
+const char* SubjectName(const std::string& subject)
+{
+    if (_stricmp(subject.c_str(), "Diary") == 0)
+        return "Briefing";
+    return subject.c_str();
+}
+} // namespace
+
+void Screen::InitDiary(const RString& missionName, const RString& playerName)
+{
+    for (const int idc : kDiaryHidden)
+        Show(idc, false);
+    SetText(kDiaryMission, missionName);
+    SetText(kDiaryPlayer, playerName);
+    _impl->revision = -1;
+    UpdateDiary();
+}
+
+void Screen::UpdateDiary()
+{
+    Impl& s = *_impl;
+    const float day = Glob.clock.GetTimeOfDay();
+    const int minutes = static_cast<int>(day * 24 * 60) % (24 * 60);
+    char clock[8];
+    snprintf(clock, sizeof(clock), "%02d:%02d", minutes / 60, minutes % 60);
+    SetText(kDiaryClock, RString(clock));
+
+    const int revision = Arma2BriefingRevision();
+    if (revision == s.revision)
+        return;
+    s.revision = revision;
+    s.records = Arma2DiaryRecords();
+    // the briefing first, then the subjects as scripts made them, the tasks last
+    const std::string chosen = s.subject >= 0 && s.subject < static_cast<int>(s.subjects.size())
+                                   ? s.subjects[s.subject]
+                                   : std::string();
+    s.subjects.clear();
+    s.subjects.push_back("Diary");
+    for (const auto& r : s.records)
+        if (r[0] != "Tasks" && std::find(s.subjects.begin(), s.subjects.end(), r[0]) == s.subjects.end())
+            s.subjects.push_back(r[0]);
+    s.subjects.push_back("Tasks");
+    s.subject = 0;
+    for (size_t i = 0; i < s.subjects.size(); i++)
+        if (s.subjects[i] == chosen)
+            s.subject = static_cast<int>(i);
+    std::vector<RString> rows;
+    for (const std::string& subject : s.subjects)
+        rows.push_back(RString(SubjectName(subject)));
+    SetRows(kDiarySubjects, rows, s.subject);
+    DiaryEvent(kDiarySubjects, s.subject);
+}
+
+bool Screen::DiaryEvent(int idc, int row)
+{
+    Impl& s = *_impl;
+    if (idc == kDiarySubjects)
+    {
+        if (row < 0 || row >= static_cast<int>(s.subjects.size()))
+            return true;
+        s.subject = row;
+        // a subject's records newest first, as Arma 3 lists them; its tasks in the order they were given
+        const std::string& subject = s.subjects[row];
+        s.shownRecords.clear();
+        for (int i = static_cast<int>(s.records.size()) - 1; i >= 0; i--)
+            if (s.records[i][0] == subject)
+                s.shownRecords.push_back(i);
+        if (subject == "Tasks")
+            std::reverse(s.shownRecords.begin(), s.shownRecords.end());
+        std::vector<RString> rows;
+        for (const int i : s.shownRecords)
+            rows.push_back(PlainText(RString(s.records[i][1].c_str())));
+        SetRows(kDiaryRecords, rows, 0);
+        return DiaryEvent(kDiaryRecords, 0);
+    }
+    if (idc == kDiaryRecords)
+    {
+        s.record = row;
+        RString heading, page;
+        if (row >= 0 && row < static_cast<int>(s.shownRecords.size()))
+        {
+            const auto& r = s.records[s.shownRecords[row]];
+            heading = PlainText(RString(r[1].c_str()));
+            page = RString(r[2].c_str());
+        }
+        for (const Member& m : s.members)
+            if (m.control->IDC() == kDiaryPage)
+                if (auto* html = dynamic_cast<A3Html*>(m.control))
+                    html->SetPage(heading, page);
+        return true;
+    }
+    return false;
+}
+
+namespace
+{
+// RscInGameUI's idcs: the weapon panel (RscUnitInfo) and the stance indicator (RscStanceInfo).
+constexpr int kHudWeapon = 118, kHudAmmo = 184, kHudMagazines = 185, kHudAmmoType = 155, kHudGrenade = 152,
+              kHudGrenades = 151, kHudGunner = 150, kHudModeTexture = 187, kHudWeaponGroup = 2302, kHudStance = 188;
+
+// The HUD's controls belong to no display: they are held here and drawn by DrawHud.
+class HudHolder : public ControlsContainer
+{
+  public:
+    HudHolder() : ControlsContainer(nullptr) {}
+    RefArray<Control>& Background() { return _controlsBackground; }
+    RefArray<Control>& Foreground() { return _controlsForeground; }
+};
+
+Screen* LoadHud()
+{
+    static Screen* hud = []() -> Screen*
+    {
+        // never destroyed: its textures and fonts would be released after the engine is gone
+        auto* holder = new HudHolder();
+        holder->AddRef();
+        auto* screen = new Screen();
+        if (!screen->Load(*holder, "RscInGameUI/RscUnitInfoSoldier", holder->Background(), holder->Foreground()))
+        {
+            LOG_WARN(UI, "Arma 3 HUD: RscInGameUI/RscUnitInfoSoldier is not in Arma 3's config; CWA's HUD stays");
+            return nullptr;
+        }
+        screen->Load(*holder, "RscInGameUI/RscStanceInfo", holder->Background(), holder->Foreground());
+        // the fire mode's picture and the gunner's weapon are its vehicles'
+        screen->Show(kHudModeTexture, false);
+        screen->Show(kHudGunner, false);
+        return screen;
+    }();
+    return hud;
+}
+} // namespace
+
+bool HudActive()
+{
+    return Active() && LoadHud() != nullptr;
+}
+
+void DrawHud(const HudState& state, float alpha)
+{
+    Screen* hud = LoadHud();
+    if (!hud)
+        return;
+    hud->Show(kHudWeaponGroup, state.weaponShown);
+    hud->SetText(kHudWeapon, state.weapon);
+    hud->SetText(kHudAmmo, state.ammo);
+    hud->SetText(kHudMagazines, state.magazines);
+    hud->SetText(kHudAmmoType, state.ammoType);
+    hud->SetText(kHudGrenade, state.grenade);
+    hud->SetText(kHudGrenades, state.grenades);
+    static const char* const stances[] = {"\\A3\\Ui_f\\data\\IGUI\\RscIngameUI\\RscUnitInfo\\SI_stand_ca.paa",
+                                          "\\A3\\Ui_f\\data\\IGUI\\RscIngameUI\\RscUnitInfo\\SI_crouch_ca.paa",
+                                          "\\A3\\Ui_f\\data\\IGUI\\RscIngameUI\\RscUnitInfo\\SI_prone_ca.paa"};
+    static int shownStance = -1;
+    if (state.stance != shownStance)
+    {
+        shownStance = std::clamp(state.stance, 0, 2);
+        hud->SetPicture(kHudStance, RString(stances[shownStance]));
+    }
+    hud->Draw(alpha);
 }
 } // namespace Poseidon::Arma3Menu

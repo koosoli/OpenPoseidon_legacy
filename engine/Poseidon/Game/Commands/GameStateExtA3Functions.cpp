@@ -318,10 +318,50 @@ void Arma3InstallFunctionLibrary()
     GameState::s_resolveGlobal = &ResolveFunction;
 }
 
-// uiNamespace getVariable for a name no script set: Arma 3 keeps the library there too.
+namespace
+{
+// A colour of Arma 3's interface, "<section>_<variable>_<r|g|b|a>" (IGUI_BCG_RGB_R): its profile
+// keeps what the player chose in Options, and before any choice the preset CfgUIColors marks
+// `default = 1` (IGUI: grey panels, near-white text). This engine has no such profile, so the
+// default preset answers.
+bool ResolveUiColor(const char* lowerName, GameValue& value)
+{
+    const std::string name = lowerName;
+    const size_t first = name.find('_'), last = name.rfind('_');
+    if (first == std::string::npos || last <= first + 1 || last + 2 != name.size())
+        return false;
+    const int component = std::string("rgba").find(name[last + 1]);
+    if (component < 0)
+        return false;
+    const ParamEntry* root = Arma1Compat::ConfigRoot();
+    const ParamEntry* colors = root ? root->FindEntry("CfgUIColors") : nullptr;
+    const ParamEntry* section = colors && colors->IsClass() ? colors->FindEntry(name.substr(0, first).c_str()) : nullptr;
+    const ParamEntry* presets = section && section->IsClass() ? section->FindEntry("Presets") : nullptr;
+    if (!presets || !presets->IsClass())
+        return false;
+    for (int i = 0; i < presets->GetEntryCount(); i++)
+    {
+        const ParamEntry& preset = presets->GetEntry(i);
+        const ParamEntry* isDefault = preset.IsClass() ? preset.FindEntry("default") : nullptr;
+        if (!isDefault || static_cast<float>(*isDefault) == 0)
+            continue;
+        const ParamEntry* vars = preset.FindEntry("Variables");
+        const ParamEntry* rgba =
+            vars && vars->IsClass() ? vars->FindEntry(name.substr(first + 1, last - first - 1).c_str()) : nullptr;
+        if (!rgba || !rgba->IsArray() || rgba->GetSize() <= component)
+            return false;
+        value = GameValue(static_cast<float>((*rgba)[component]));
+        return true;
+    }
+    return false;
+}
+} // namespace
+
+// uiNamespace / profileNamespace getVariable for a name no script set: Arma 3 keeps the library
+// there too, and its profile the interface's colours.
 bool Arma3ResolveUiVariable(const char* lowerName, GameValue& value)
 {
-    return ResolveFunction(lowerName, value);
+    return ResolveFunction(lowerName, value) || ResolveUiColor(lowerName, value);
 }
 
 // Arma 3's mission start, after the objects' init lines ran (see the file comment).
@@ -373,13 +413,16 @@ void Arma3MissionStart()
     std::string script = "[] spawn {";
     for (const std::string& step : steps)
     {
-        // a step that is itself a script (execVM) is waited for as well
+        // a step that is itself a mission script (execVM) is waited for as well; what a function
+        // spawns is not: BIS_fnc_initModules hands back a script that waits for the mission to run,
+        // and init.sqf (which writes the briefing's diary) runs before it does
         std::string quoted;
         for (char c : step)
             quoted += c == '"' ? std::string("\"\"") : std::string(1, c);
-        script += "private _h = [] spawn {private _r = call compile \"" + quoted +
-                  "\"; if (!isNil '_r') then {if (typeName _r == 'SCALAR') then {waitUntil {scriptDone _r}}}}; "
-                  "waitUntil {scriptDone _h}; ";
+        const bool waits = step.find("execVM") != std::string::npos;
+        script += "private _h = [] spawn {private _r = call compile \"" + quoted + "\"; " +
+                  (waits ? "if (!isNil '_r') then {if (typeName _r == 'SCALAR') then {waitUntil {scriptDone _r}}}" : "") +
+                  "}; waitUntil {scriptDone _h}; ";
     }
     script += "}";
     LOG_INFO(Script, "Arma 3: mission start: {} preInit, {} scheduled steps", lib.preInit.size(), steps.size());

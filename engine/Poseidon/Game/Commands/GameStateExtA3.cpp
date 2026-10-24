@@ -1810,6 +1810,14 @@ GameValue A3PixelGrid(const GameState*)
     return GameValue(A3GridOf(A3ScreenHeight() * 12.0f / 1080.0f));
 }
 
+// diag_log anything: Arma 3 writes it to its report file (.rpt); here to the game's log.
+GameValue A3DiagLog(const GameState*, GameValuePar oper1)
+{
+    const RString text = oper1.GetType() == GameString ? RString(oper1) : oper1.GetText();
+    LOG_INFO(Script, "diag_log: {}", (const char*)text);
+    return NOTHING;
+}
+
 // ---------------------------------------------------------------------------------------
 // "Macro" commands: Arma 3 commands as SQF over this engine's commands
 // ---------------------------------------------------------------------------------------
@@ -2200,6 +2208,7 @@ const GameFunction A3Unary[] = {
     GameFunction(GameBool, "params", A3Params, GameArray),
     GameFunction(GameAny, "param", A3Param, GameArray | GameScalar),
     GameFunction(GameNothing, "reverse", A3Reverse, GameArray),
+    GameFunction(GameNothing, "diag_log", A3DiagLog, GameAny),
     GameFunction(GameAny, "try", A3Try, GameString),
     GameFunction(GameNothing, "throw", A3Throw, GameVoid),
     GameFunction(GameAny, "selectRandom", A3SelectRandom, GameArray),

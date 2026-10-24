@@ -1,5 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/UI/Map/UIMap.hpp>
+#include <Poseidon/UI/Arma3Menu.hpp>
+#include <Poseidon/Game/Scripting/Scripts.hpp>
 #include <Poseidon/UI/Map/UIMapCommon.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
@@ -1546,7 +1548,8 @@ void DisplayMap::OnDraw(EntityAI* vehicle, float alpha)
     // Radio slots
     SetRadioText();
     // Show / hide mission name
-    _name->ShowCtrl(_briefing->ActiveBookmark() >= 0);
+    if (!_arma3)
+        _name->ShowCtrl(_briefing->ActiveBookmark() >= 0);
     // GPS position
     Object* cameraOn = GWorld->CameraOn();
     if (cameraOn)
@@ -1575,6 +1578,21 @@ void DisplayMap::OnDraw(EntityAI* vehicle, float alpha)
     if (playerUnit && playerUnit->GetLifeState() == AIUnit::LSDead)
     {
         ShowNotepad(false);
+    }
+
+    if (_arma3)
+    {
+        // Arma 3 runs a mission's scheduled scripts behind its briefing (time stays 0): init.sqf and
+        // the function library write the diary and the tasks the briefing shows. Neither the world
+        // nor this display is simulated while the briefing is up, so they are run from here.
+        if (!IsInGame() && GWorld)
+        {
+            SetScriptTimeStands(true);
+            GWorld->SimulateScripts();
+            SetScriptTimeStands(false);
+        }
+        ApplyArma3Look();
+        _arma3->UpdateDiary();
     }
 
     Display::OnDraw(vehicle, alpha);

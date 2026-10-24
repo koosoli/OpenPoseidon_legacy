@@ -54,6 +54,7 @@
 #include <Random/randomGen.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <thread>
 #include <chrono>
@@ -2698,6 +2699,28 @@ std::string ResolveLocalizedTags(const std::string& html)
 int Arma2BriefingRevision()
 {
     return Arma1Compat::Generation() >= 2 ? RT().revision : 0;
+}
+
+// The diary as Arma 3's map lists it: {subject, title, text} per record, in the order they were made,
+// then one per task under the subject "Tasks" (its title carrying its state). Text is the script's own
+// structured text.
+std::vector<std::array<std::string, 3>> Arma2DiaryRecords()
+{
+    std::vector<std::array<std::string, 3>> out;
+    const Runtime& rt = RT();
+    for (const Runtime::DiaryEntry& e : rt.diary)
+        out.push_back({e.subject, e.title, e.text});
+    std::vector<std::string> shown;
+    for (const Task& t : rt.tasks)
+    {
+        if (std::find(shown.begin(), shown.end(), t.name) != shown.end())
+            continue; // one entry per task, not per group member
+        shown.push_back(t.name);
+        const char* state = t.state == "SUCCEEDED" ? " (accomplished)" : t.state == "FAILED" ? " (failed)"
+                            : t.state == "CANCELED" ? " (canceled)" : "";
+        out.push_back({"Tasks", t.name + state, t.description});
+    }
+    return out;
 }
 
 std::string Arma2BriefingHtml(const std::string& html)

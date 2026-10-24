@@ -2,8 +2,14 @@
 
 #include <Poseidon/UI/Map/UIMapBase.hpp>
 
+#include <memory>
+
 namespace Poseidon
 {
+namespace Arma3Menu
+{
+class Screen;
+}
 
 class DisplayNotebook : public Display
 {
@@ -342,6 +348,11 @@ protected:
 	WeaponsInfo _weaponsInfo;
 
 	CursorType _cursor;
+
+	// Arma 3's own briefing / map screen (Arma3Menu): its diary over the engine's map, which then
+	// fills the screen; CWA's notebook, compass, watch and radio are put away.
+	std::shared_ptr<Arma3Menu::Screen> _arma3;
+	void ApplyArma3Look();
 public:
 
 	DisplayMap(ControlsContainer *parent, RString resource);
@@ -381,6 +392,7 @@ public:
 
 	void OnButtonClicked(int idc) override;
 	void OnHTMLLink(int idc, RString link) override;
+	void OnLBSelChanged(int idc, int curSel) override;
 
 	void ResetHUD() override;
 

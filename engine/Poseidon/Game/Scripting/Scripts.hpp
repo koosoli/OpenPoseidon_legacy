@@ -36,6 +36,11 @@ namespace Poseidon
 
 struct ScriptFiber; // Scripts.cpp: Arma 2 scheduled code running on its own stack
 
+// Arma 3 runs a mission's scheduled scripts behind its briefing, where the mission's time stands at
+// 0. While this is set (the briefing's own script steps), a script that gave the frame back resumes
+// on the next step instead of waiting for time to move.
+void SetScriptTimeStands(bool stands);
+
 class Script : public RemoveLLinks
 {
 	friend struct ScriptFiber;

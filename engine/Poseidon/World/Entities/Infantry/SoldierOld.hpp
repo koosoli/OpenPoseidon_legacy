@@ -1208,6 +1208,8 @@ class Man: public Person
 	bool IsDead() const;
 	bool ShadowPoseFrozen() const override;
 	bool IsDown() const;
+	// The current move's stance (ManPos), for the HUD's stance indicator
+	int StanceUpDegree() const {return GetActUpDegree();}
 	bool IsLaunchDown() const;
 
 	bool IsBinocularInMove() const;
