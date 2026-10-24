@@ -1860,6 +1860,8 @@ GameValue GameTitleText(const GameState* state, GameValuePar oper1)
     TITLE_PREFIX
 
     GWorld->SetTitleEffect(CreateTitleEffect(name, effect, speed));
+    if (name == TitBlack || name == TitBlackOut || name == TitBlackFaded)
+        GWorld->NoteBlackEffect(GWorld->GetTitleEffect());
     return NOTHING;
 }
 
@@ -1891,6 +1893,8 @@ GameValue CutTextEffect(const GameState* state, GameValuePar oper1)
     TITLE_PREFIX
 
     GWorld->SetCutEffect(CreateTitleEffect(name, effect, speed));
+    if (name == TitBlack || name == TitBlackOut || name == TitBlackFaded)
+        GWorld->NoteBlackEffect(GWorld->GetCutEffect());
     return NOTHING;
 }
 

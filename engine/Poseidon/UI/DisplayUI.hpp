@@ -1068,6 +1068,9 @@ class DisplayCampaignIntro : public DisplayCutscene
 
 class DisplayInterrupt : public Display
 {
+    // Arma 3's own pause menu (Arma3Menu), when it replaces CWA's.
+    std::shared_ptr<Arma3Menu::Screen> _arma3;
+
   public:
     DisplayInterrupt(ControlsContainer* parent);
     ~DisplayInterrupt() override;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <Poseidon/UI/ArmaContentMenu.hpp>
+#include <Poseidon/UI/Arma3Menu.hpp>
 #include <Poseidon/UI/Controls/UIControls.hpp>
 #include <Poseidon/UI/Controls/UIControlsWidgets.hpp>
 #include <Poseidon/Core/resincl.hpp>
@@ -416,6 +417,8 @@ Display* CreateArmaContentDisplay(ControlsContainer* parent, ArmaContentKind kin
 
 bool ArmaContentChoice(ControlsContainer* display, bool& campaign, std::string& value)
 {
+    if (Arma3Menu::ContentChoice(display, campaign, value))
+        return true;
     auto* content = dynamic_cast<ArmaContentDisplay*>(display);
     return content && content->Choice(campaign, value);
 }

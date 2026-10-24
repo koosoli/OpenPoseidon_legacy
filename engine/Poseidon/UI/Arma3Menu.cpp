@@ -6,10 +6,14 @@
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
+#include <Poseidon/Game/Commands/GameStateExtA3Rsc.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
+#include <Poseidon/Audio/SoundScene.hpp>
+#include <Poseidon/World/World.hpp>
+#include <Evaluator/express.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -24,13 +28,16 @@ namespace Poseidon::Arma3Menu
 namespace
 {
 // Arma 3's control types and styles this file draws (a3\ui_f\hpp\defineCommon.inc).
-constexpr int kStatic = 0, kButton = 1, kActiveText = 11, kStructuredText = 13, kControlsGroup = 15,
+constexpr int kStatic = 0, kButton = 1, kListBox = 5, kActiveText = 11, kTree = 12, kStructuredText = 13,
+              kControlsGroup = 15,
               kShortcutButton = 16, kControlsGroupNoScroll = 81, kButtonPicture = 0x30, kKeepAspect = 0x800;
 
 // RscDisplayMain's idcs (a3\ui_f\hpp\defineResinclDesign.inc).
 constexpr int kGroupFirst = 1001, kGroupLast = 1005, kTitleFirst = 1011, kTitleLast = 1015, kIconFirst = 1111,
               kIconLast = 1115, kSpotlightFirst = 1020, kSpotlightLast = 1022, kSpotlightHover = 1025,
-              kSpotlightButton = 1026, kSpotlightPrev = 1060, kSpotlightNext = 1061, kVersion = 118;
+              kSpotlightButton = 1026, kSpotlightPrev = 1060, kSpotlightNext = 1061;
+// RscDisplayInterrupt: Save is CWA's idc, Load ("revert") is not.
+constexpr int kInterruptSave = 103, kInterruptLoad = 119;
 // The info panels RscDisplayMain.sqf fills from Steam and the network (loaded mods, DLC icons,
 // the news feed, the beta-branch ribbon), hidden there when there is nothing to show; here there
 // never is. The version panel stays.
@@ -48,6 +55,25 @@ PackedColor Mul(PackedColor a, PackedColor b)
     return PackedColor(Color(a.R8() * b.R8() / 65025.0f, a.G8() * b.G8() / 65025.0f, a.B8() * b.B8() / 65025.0f,
                              a.A8() * b.A8() / 65025.0f));
 }
+
+// The Arma 3 safe zone a screen is evaluated in (Arma3Rsc::UiSafeZone): Arma 3 lays its screens out
+// in it, this engine draws in 0..1 of the screen. Positions and sizes are mapped with these.
+Arma3Rsc::SafeZone g_zone{0.0f, 0.0f, 1.0f, 1.0f};
+float ToX(float x) { return (x - g_zone.x) / g_zone.w; }
+float ToY(float y) { return (y - g_zone.y) / g_zone.h; }
+float ToW(float w) { return w / g_zone.w; }
+float ToH(float h) { return h / g_zone.h; }
+
+// While alive, scripts answer safeZone* and pixelW/H as Arma 3 would (Arma3Rsc::SetUiCoordinates).
+struct InArmaCoordinates
+{
+    InArmaCoordinates()
+    {
+        Arma3Rsc::SetUiCoordinates(true);
+        g_zone = Arma3Rsc::UiSafeZone();
+    }
+    ~InArmaCoordinates() { Arma3Rsc::SetUiCoordinates(false); }
+};
 
 // A member that is a plain value (a number, or an expression string the config evaluates).
 const ParamEntry* Value(const ParamEntry& cls, const char* name)
@@ -264,6 +290,7 @@ class A3Static : public A3Control
     PackedColor _background, _color;
     Picture _picture;
     int _align = ST_LEFT;
+    bool _wrap = false, _frame = false;
 
   public:
     A3Static(ControlsContainer* parent, int type, int idc, const ParamEntry& cls, float x, float y, float w,
@@ -285,14 +312,23 @@ class A3Static : public A3Control
                 const RString align = Text(*attributes, "align");
                 _align = _stricmp(align, "center") == 0 ? ST_CENTER : _stricmp(align, "right") == 0 ? ST_RIGHT : ST_LEFT;
             }
-            LoadFont(family, Number(cls, "size", 0.03f));
+            LoadFont(family, ToH(Number(cls, "size", 0.04f)));
             _text = PlainText(_text);
+            _wrap = true;
         }
         else
-            LoadFont(Text(cls, "font"), Number(cls, "sizeEx", Number(cls, "size", 0.03f)));
+        {
+            LoadFont(Text(cls, "font"), ToH(Number(cls, "sizeEx", Number(cls, "size", 0.04f))));
+            _wrap = (_style & ST_TYPE) == ST_MULTI;
+        }
         if ((_style & ST_TYPE) == kButtonPicture && type != kStructuredText)
             _picture.Set(_text);
+        // a frame (RscFrame) draws its outline in Arma 3; here it is left out rather than drawn as text
+        _frame = (_style & ST_TYPE) == ST_FRAME;
     }
+
+    // Structured text is shown as plain text; a multi-line or structured control wraps it.
+    void SetLabel(const RString& text) { _text = GetType() == kStructuredText ? PlainText(text) : text; }
 
     bool IsPicture() const { return (_style & ST_TYPE) == kButtonPicture; }
     void SetPicture(const RString& name)
@@ -306,10 +342,71 @@ class A3Static : public A3Control
         const Rect2DPixel rect = Pixels(_x, _y, _w, _h);
         if (_background.A8() > 0)
             Picture{nullptr, PackedWhite, true, true}.Draw(Fade(_background, alpha), rect, false, ClipPixels());
+        if (_frame)
+            return;
         if (IsPicture())
             _picture.Draw(Fade(_color, alpha), rect, (_style & kKeepAspect) != 0, ClipPixels());
+        else if (_wrap)
+            DrawWrapped(Fade(_color, alpha));
         else
             DrawLabel(_text, _x + 0.005f, _y, _w - 0.01f, _h, _align, Fade(_color, alpha), _size);
+    }
+
+    // RscDisplayMain.sqf centres a spotlight's text in its tile (ctrlTextHeight); others start at the top.
+    void CentreVertically() { _centred = true; }
+
+  private:
+    bool _centred = false;
+
+    // Word-wrapped lines, as many as fit, from the top (or centred as a block).
+    void DrawWrapped(PackedColor color) const
+    {
+        if (!_font || _text.GetLength() == 0)
+            return;
+        const float width = _w - 0.01f;
+        std::vector<std::string> lines;
+        std::string line;
+        const auto flush = [&](const std::string& text) { lines.push_back(text); };
+        Wrap(width, line, flush);
+        if (!line.empty())
+            flush(line);
+        const float pitch = _size * 1.05f;
+        float top = _centred ? _y + std::max(0.0f, 0.5f * (_h - pitch * lines.size())) : _y;
+        for (const std::string& text : lines)
+        {
+            if (top + _size <= _y + _h + 0.001f)
+                DrawLabel(RString(text.c_str()), _x + 0.005f, top, width, _size, _align, color, _size);
+            top += pitch;
+        }
+    }
+
+    template <typename Flush> void Wrap(float width, std::string& line, Flush flush) const
+    {
+        std::string word;
+        const std::string all = (const char*)_text;
+        for (size_t i = 0; i <= all.size(); i++)
+        {
+            const char c = i < all.size() ? all[i] : ' ';
+            if (c != ' ' && c != '\n')
+            {
+                word += c;
+                continue;
+            }
+            const std::string candidate = line.empty() ? word : line + " " + word;
+            if (!line.empty() && GLOB_ENGINE->GetTextWidth(_size, _font, candidate.c_str()) > width)
+            {
+                flush(line);
+                line = word;
+            }
+            else
+                line = candidate;
+            word.clear();
+            if (c == '\n')
+            {
+                flush(line);
+                line.clear();
+            }
+        }
     }
 };
 
@@ -333,6 +430,7 @@ class A3Button : public A3Control
              float h, const Rect2DFloat& clip, int clickIdc)
         : A3Control(parent, type, idc, cls, x, y, w, h, clip), _clickIdc(clickIdc)
     {
+        LoadSounds(cls);
         _align = _style & ST_HPOS;
         if (type == kShortcutButton)
         {
@@ -353,11 +451,11 @@ class A3Button : public A3Control
                 const RString align = Text(*attributes, "align");
                 _align = _stricmp(align, "center") == 0 ? ST_CENTER : _stricmp(align, "right") == 0 ? ST_RIGHT : ST_LEFT;
             }
-            LoadFont(family, Number(cls, "size", Number(cls, "sizeEx", 0.03f)));
+            LoadFont(family, ToH(Number(cls, "size", Number(cls, "sizeEx", 0.04f))));
             if (const ParamEntry* pos = cls.FindEntry("TextPos"); pos && pos->IsClass())
             {
-                _textLeft = Number(*pos, "left", _textLeft);
-                _textTop = Number(*pos, "top", 0);
+                _textLeft = ToW(Number(*pos, "left", 0.0f));
+                _textTop = ToH(Number(*pos, "top", 0.0f));
             }
             _text = PlainText(_text);
         }
@@ -373,7 +471,7 @@ class A3Button : public A3Control
             if ((_style & ST_TYPE) == kButtonPicture && type == kButton)
                 _colorActive = ColorOf(cls, "colorFocused", _color);
             _colorDisabled = ColorOf(cls, "colorDisabled", Fade(_color, 0.25f));
-            LoadFont(Text(cls, "font"), Number(cls, "sizeEx", Number(cls, "size", 0.03f)));
+            LoadFont(Text(cls, "font"), ToH(Number(cls, "sizeEx", Number(cls, "size", 0.04f))));
             if ((_style & ST_TYPE) == kButtonPicture)
                 _picture.Set(_text);
         }
@@ -381,23 +479,62 @@ class A3Button : public A3Control
 
     bool CanBeDefault() const override { return true; }
 
-    void OnMouseMove(float x, float y, bool active) override { _over = active && IsInside(x, y); }
-    void OnMouseHold(float x, float y, bool active) override { _over = active && IsInside(x, y); }
-    void OnLButtonDown(float x, float y) override { _pressed = true; }
+    void OnMouseMove(float x, float y, bool active) override { Hover(active && IsInside(x, y)); }
+    void OnMouseHold(float x, float y, bool active) override { Hover(active && IsInside(x, y)); }
+    void OnLButtonDown(float x, float y) override
+    {
+        _pressed = true;
+        PlaySound(_pushSound);
+    }
     void OnLButtonUp(float x, float y) override
     {
         const bool click = _pressed && IsInside(x, y);
         _pressed = false;
-        if (click)
-            _parent->OnButtonClicked(_clickIdc);
+        if (!click)
+        {
+            PlaySound(_escapeSound);
+            return;
+        }
+        PlaySound(_clickSound);
+        _parent->OnButtonClicked(_clickIdc);
     }
     bool OnKeyUp(unsigned nChar, unsigned nRepCnt, unsigned nFlags) override
     {
         if (!IsUiConfirmKey(nChar))
             return false;
+        PlaySound(_clickSound);
         _parent->OnButtonClicked(_clickIdc);
         return true;
     }
+
+    // Arma 3's own button sounds (soundEnter / soundPush / soundClick / soundEscape)
+    void LoadSounds(const ParamEntry& cls)
+    {
+        const auto load = [&](SoundPars& pars, const char* name)
+        {
+            if (const ParamEntry* e = cls.FindEntry(name); e && e->IsArray())
+                GetValue(pars, *e);
+            // Arma 3 names them without an extension ("\A3\ui_f\data\sound\RscButton\soundEnter")
+            if (pars.name.GetLength() > 0)
+                if (const RString file = Arma1Compat::FindArmaSoundFile(pars.name); file.GetLength() > 0)
+                    pars.name = file;
+        };
+        load(_enterSound, "soundEnter");
+        load(_pushSound, "soundPush");
+        load(_clickSound, "soundClick");
+        load(_escapeSound, "soundEscape");
+    }
+
+  private:
+    SoundPars _enterSound, _pushSound, _clickSound, _escapeSound;
+    void Hover(bool over)
+    {
+        if (over && !_over)
+            PlaySound(_enterSound);
+        _over = over;
+    }
+
+  public:
 
     void OnDraw(float alpha) override
     {
@@ -426,6 +563,105 @@ class A3Button : public A3Control
     }
 };
 
+// RscListBox (5) and RscTree (12): one column of rows, a selection, a mouse wheel. Arma 3's trees
+// nest, its scripts fill them (tvAdd); the screens of this file fill them flat (SetRows).
+class A3List : public A3Control
+{
+    std::vector<RString> _rows;
+    int _selected = -1;
+    float _first = 0; // the top row
+    float _rowHeight;
+    PackedColor _background, _color, _selectColor, _selectBackground;
+
+  public:
+    A3List(ControlsContainer* parent, int type, int idc, const ParamEntry& cls, float x, float y, float w, float h,
+           const Rect2DFloat& clip)
+        : A3Control(parent, type, idc, cls, x, y, w, h, clip)
+    {
+        _background = ColorOf(cls, "colorBackground", PackedColor(Color(0, 0, 0, 0)));
+        _color = ColorOf(cls, "colorText", PackedWhite);
+        _selectColor = ColorOf(cls, "colorSelectText", ColorOf(cls, "colorSelect", PackedColor(Color(0, 0, 0, 1))));
+        _selectBackground = ColorOf(cls, "colorSelectBackground", PackedColor(Color(1, 1, 1, 0.7f)));
+        // Arma 3 paints a tree's selected row in colorSelect over the background
+        if (type == kTree)
+            _selectBackground = ColorOf(cls, "colorSelect", _selectBackground);
+        LoadFont(Text(cls, "font"), ToH(Number(cls, "sizeEx", 0.04f)));
+        _rowHeight = std::max(_size * 1.15f, ToH(Number(cls, "rowHeight", 0.0f)));
+    }
+
+    void SetRows(const std::vector<RString>& rows, int selected)
+    {
+        _rows = rows;
+        _first = 0;
+        Select(selected, false);
+    }
+    int Selected() const { return _selected; }
+
+    bool OnKeyDown(unsigned nChar, unsigned nRepCnt, unsigned nFlags) override
+    {
+        if (nChar == SDLK_UP || nChar == SDLK_DOWN)
+        {
+            Select(std::clamp(_selected + (nChar == SDLK_UP ? -1 : 1), 0, static_cast<int>(_rows.size()) - 1), true);
+            return true;
+        }
+        if (IsUiConfirmKey(nChar) && _selected >= 0)
+        {
+            _parent->OnLBDblClick(IDC(), _selected);
+            return true;
+        }
+        return false;
+    }
+    void OnLButtonDown(float x, float y) override
+    {
+        const int row = static_cast<int>(_first + (y - _y) / _rowHeight);
+        if (row >= 0 && row < static_cast<int>(_rows.size()))
+            Select(row, true);
+    }
+    void OnLButtonDblClick(float x, float y) override
+    {
+        if (_selected >= 0)
+            _parent->OnLBDblClick(IDC(), _selected);
+    }
+    void OnMouseZChanged(float dz) override
+    {
+        _first = std::clamp(_first - dz * 3.0f, 0.0f, std::max(0.0f, float(_rows.size()) - Visible()));
+    }
+
+    void OnDraw(float alpha) override
+    {
+        const Rect2DPixel clip = ClipPixels();
+        if (_background.A8() > 0)
+            Picture{nullptr, PackedWhite, true, true}.Draw(Fade(_background, alpha), Pixels(_x, _y, _w, _h), false, clip);
+        const int first = static_cast<int>(_first);
+        for (int i = first; i < static_cast<int>(_rows.size()) && i < first + static_cast<int>(Visible()); i++)
+        {
+            const float top = _y + (i - first) * _rowHeight;
+            const bool selected = i == _selected;
+            if (selected)
+                Picture{nullptr, PackedWhite, true, true}.Draw(Fade(_selectBackground, alpha),
+                                                              Pixels(_x, top, _w, _rowHeight), false, clip);
+            DrawLabel(_rows[i], _x + 0.006f, top, _w - 0.012f, _rowHeight, ST_LEFT,
+                      Fade(selected ? _selectColor : _color, alpha), _size);
+        }
+    }
+
+  private:
+    float Visible() const { return std::floor(_h / _rowHeight); }
+    void Select(int row, bool notify)
+    {
+        _selected = _rows.empty() ? -1 : std::clamp(row, 0, static_cast<int>(_rows.size()) - 1);
+        if (_selected >= 0)
+        {
+            if (_selected < _first)
+                _first = float(_selected);
+            else if (_selected >= _first + Visible())
+                _first = float(_selected) - Visible() + 1;
+        }
+        if (notify)
+            _parent->OnLBSelChanged(IDC(), _selected);
+    }
+};
+
 // A group of the screen: its rectangle (where its rows unfold) and what it holds.
 struct Group
 {
@@ -440,7 +676,11 @@ struct Member
     Control* control;
     int group;   // index in the groups, -1 at the top
     bool shown;  // its own show / fade
+    bool background; // one of the screen's ControlsBackground (its backdrop)
 };
+
+// The Arma 3 main menu on screen, for the screens opened over it (DrawMenuBackdrop).
+Screen* g_mainMenu = nullptr;
 } // namespace
 
 struct Screen::Impl
@@ -451,6 +691,7 @@ struct Screen::Impl
     std::map<std::string, int> skipped; // why a control was left out -> how often
     int open = -1;                      // the open row (group index), -1 none
     bool pinned = false;                // opened by a click: stays until another title is entered
+    bool loadingBackground = false;     // LoadList is reading ControlsBackground
     RefArray<Control>* foreground = nullptr;
     Action centreAction = Action::Unavailable; // what the middle spotlight (CfgMainMenuSpotlight) opens
 
@@ -500,8 +741,9 @@ struct Screen::Impl
     {
         const int type = Integer(cls, "type", kStatic);
         const int idc = Integer(cls, "idc", -1);
-        const float x = ox + Number(cls, "x", 0), y = oy + Number(cls, "y", 0);
-        const float w = Number(cls, "w", 0), h = Number(cls, "h", 0);
+        // Arma 3 coordinates (ox, oy, ax, ay); x, y, w, h are the screen's
+        const float ax = ox + Number(cls, "x", 0), ay = oy + Number(cls, "y", 0);
+        const float x = ToX(ax), y = ToY(ay), w = ToW(Number(cls, "w", 0)), h = ToH(Number(cls, "h", 0));
         const bool shown = Integer(cls, "show", 1) != 0 && Number(cls, "fade", 0) < 1;
         if (type == kControlsGroup || type == kControlsGroupNoScroll)
         {
@@ -517,7 +759,7 @@ struct Screen::Impl
             const Rect2DFloat inner(cx, cy, std::max(0.0f, std::min(clip.x + clip.w, x + w) - cx),
                                     std::max(0.0f, std::min(clip.y + clip.h, y + h) - cy));
             if (const ParamEntry* controls = cls.FindEntry("Controls"); controls && controls->IsClass())
-                LoadList(*controls, x, y, inner, index, out, topGroupIdc >= 0 ? topGroupIdc : idc);
+                LoadList(*controls, ax, ay, inner, index, out, topGroupIdc >= 0 ? topGroupIdc : idc);
             return;
         }
         Control* control = nullptr;
@@ -533,6 +775,8 @@ struct Screen::Impl
             }
             control = new A3Static(display, type, idc, cls, x, y, w, h, clip);
         }
+        else if (type == kListBox || type == kTree)
+            control = new A3List(display, type, idc, cls, x, y, w, h, clip);
         else if (type == kButton || type == kActiveText || type == kShortcutButton)
         {
             // a spotlight's button carries the same idc in every spotlight: it reports its spotlight
@@ -541,11 +785,13 @@ struct Screen::Impl
         }
         else
         {
+            // edit boxes, combos, check boxes, sliders, HTML: Arma 3's scripts drive them (search,
+            // sort, the debug console); they are left out
             skipped["control type " + std::to_string(type)]++;
             return;
         }
         out.Add(control);
-        members.push_back({control, group, shown});
+        members.push_back({control, group, shown, loadingBackground});
     }
 
     static std::string Lower(const RString& text)
@@ -557,7 +803,24 @@ struct Screen::Impl
 };
 
 Screen::Screen() : _impl(std::make_unique<Impl>()) {}
-Screen::~Screen() = default;
+Screen::~Screen()
+{
+    if (g_mainMenu == this)
+        g_mainMenu = nullptr;
+}
+
+void Screen::DrawBackdrop(float alpha)
+{
+    for (const Member& m : _impl->members)
+        if (m.background && m.control->IsVisible())
+            m.control->OnDraw(alpha);
+}
+
+void DrawMenuBackdrop(float alpha)
+{
+    if (g_mainMenu)
+        g_mainMenu->DrawBackdrop(alpha);
+}
 
 bool Active()
 {
@@ -590,10 +853,15 @@ bool Screen::Load(ControlsContainer& display, const char* name, RefArray<Control
     Impl& s = *_impl;
     s.display = &display;
     s.foreground = &foreground;
+    const InArmaCoordinates coordinates;
     const Rect2DFloat everything(-1, -1, 3, 3);
     const int before = static_cast<int>(s.members.size());
     if (const ParamEntry* list = screen->FindEntry("ControlsBackground"); list && list->IsClass())
+    {
+        s.loadingBackground = true;
         s.LoadList(*list, 0, 0, everything, -1, background, -1);
+        s.loadingBackground = false;
+    }
     if (const ParamEntry* list = screen->FindEntry("Controls"); list && list->IsClass())
         s.LoadList(*list, 0, 0, everything, -1, foreground, -1);
     std::string skipped;
@@ -625,7 +893,19 @@ void Screen::InitMainMenu()
     for (const int idc : kInfoPanels)
         if (const int g = s.FindGroup(idc); g >= 0)
             s.groups[g].shown = false;
+    g_mainMenu = this;
     AddCentreSpotlight();
+    // spotlightInit: QUICK PLAY / EDITOR upper-cased, every spotlight's text centred in its tile
+    for (Member& m : s.members)
+        if (m.control->IDC() == 1028)
+            if (auto* text = dynamic_cast<A3Static*>(m.control))
+            {
+                std::string upper = (const char*)text->GetText();
+                std::transform(upper.begin(), upper.end(), upper.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                text->SetLabel(RString(upper.c_str()));
+                text->CentreVertically();
+            }
     // The script fades the spotlight tiles in (their class says fade = 1), the middle one included.
     for (int idc = kSpotlightFirst; idc <= kSpotlightLast; idc++)
         if (const int g = s.FindGroup(idc); g >= 0)
@@ -658,7 +938,10 @@ void Screen::AddCentreSpotlight()
         return RString(out.c_str());
     };
     const size_t first = s.members.size();
-    const float ox = slot->X() - Number(*tile, "x", 0), oy = slot->Y() - Number(*tile, "y", 0);
+    const InArmaCoordinates coordinates;
+    // the slot's place back in Arma 3's coordinates, less where the tile's class puts itself
+    const float ox = slot->X() * g_zone.w + g_zone.x - Number(*tile, "x", 0);
+    const float oy = slot->Y() * g_zone.h + g_zone.y - Number(*tile, "y", 0);
     s.LoadControl(*tile, ox, oy, Rect2DFloat(-1, -1, 3, 3), -1, *s.foreground, kSpotlightFirst);
     if (s.members.size() == first)
         return;
@@ -745,8 +1028,129 @@ void Screen::SetText(int idc, const RString& text)
 {
     for (const Member& m : _impl->members)
         if (m.control->IDC() == idc)
-            if (auto* label = dynamic_cast<A3Control*>(m.control))
-                label->SetText(text);
+        {
+            if (auto* label = dynamic_cast<A3Static*>(m.control))
+                label->SetLabel(text);
+            else if (auto* control = dynamic_cast<A3Control*>(m.control))
+                control->SetText(text);
+        }
+}
+
+void Screen::Show(int idc, bool shown)
+{
+    Impl& s = *_impl;
+    for (Group& g : s.groups)
+        if (g.idc == idc)
+            g.shown = shown;
+    for (Member& m : s.members)
+        if (m.control->IDC() == idc)
+            m.shown = shown;
+    s.Refresh();
+}
+
+void Screen::SetPicture(int idc, const RString& name)
+{
+    for (const Member& m : _impl->members)
+        if (m.control->IDC() == idc)
+            if (auto* picture = dynamic_cast<A3Static*>(m.control))
+                picture->SetPicture(name);
+}
+
+void Screen::SetRows(int idc, const std::vector<RString>& rows, int selected)
+{
+    for (const Member& m : _impl->members)
+        if (m.control->IDC() == idc)
+            if (auto* list = dynamic_cast<A3List*>(m.control))
+                list->SetRows(rows, selected);
+}
+
+int Screen::Selected(int idc) const
+{
+    for (const Member& m : _impl->members)
+        if (m.control->IDC() == idc)
+            if (auto* list = dynamic_cast<A3List*>(m.control))
+                return list->Selected();
+    return -1;
+}
+
+bool Screen::Has(int idc) const
+{
+    return _impl->Find(idc) != nullptr || _impl->FindGroup(idc) >= 0;
+}
+
+// RscDisplayInterrupt.sqf's onLoad, natively: what does not apply here is hidden -- the
+// background tiles it animates, the debug console, the hub, cutscene and hint buttons -- and Save
+// or Load is shown as CWA's own pause menu decides (one save slot).
+// Arma 3's menu music: its intro scenes play Track14_MainMenu at 0.7 and start it again 12 s after
+// it stops (map_*_scenes_f, initIntro.sqf). The menu here has no intro scene, so it does that itself.
+void TickMenuMusic()
+{
+    static bool started = false, waiting = false;
+    static Foundation::UITime stoppedAt;
+    if (!GSoundScene || !GWorld || !GWorld->GetGameState())
+        return;
+    if (GSoundScene->MusicPlaying())
+    {
+        waiting = false;
+        return;
+    }
+    if (started && !waiting)
+    {
+        waiting = true;
+        stoppedAt = Glob.uiTime;
+    }
+    if (started && Glob.uiTime - stoppedAt < 12.0f)
+        return;
+    started = true;
+    waiting = false;
+    GWorld->GetGameState()->Execute("0 fadeMusic 0.7; playMusic \"Track14_MainMenu\"");
+}
+
+void Screen::InitInterrupt(bool multiplayer, bool saveExists, const RString& missionName)
+{
+    // Video / Audio / Controls / Game (301..307) unfold under Options in Arma 3; Options opens this
+    // engine's Options screen, so they stay folded.
+    for (const int idc : {115099, 13184, 2408, 1002, 1003, 122, 121, 301, 302, 303, 307})
+        Show(idc, false);
+    Show(kInterruptSave, !multiplayer && !saveExists);
+    Show(kInterruptLoad, !multiplayer && saveExists);
+    SetText(120, missionName);
+    SetText(1005, RString("OpenPoseidon"));
+    SetText(109, RString());
+
+    // RscDisplayInterrupt.sqf stacks the buttons that are shown from Continue down, without gaps.
+    Impl& s = *_impl;
+    Control* first = s.Find(IDC_CANCEL);
+    if (!first)
+        return;
+    std::vector<Control*> column;
+    for (const Member& m : s.members)
+        if (m.control->IsVisible() && dynamic_cast<A3Button*>(m.control) &&
+            std::abs(m.control->X() - first->X()) < 0.002f && m.control->Y() >= first->Y() - 0.001f)
+            column.push_back(m.control);
+    std::sort(column.begin(), column.end(), [](Control* a, Control* b) { return a->Y() < b->Y(); });
+    float y = first->Y();
+    for (Control* c : column)
+    {
+        c->SetPos(c->X(), y, c->W(), c->H());
+        y += c->H() * 1.1f;
+    }
+}
+
+int Screen::InterruptClick(int idc) const
+{
+    switch (idc)
+    {
+        case kInterruptLoad: // Arma 3's Load is CWA's 102
+            return IDC_INT_LOAD;
+        case 301: // Video, Audio, Controls, Game: the Options screen
+        case 302:
+        case 303:
+        case 307:
+            return IDC_INT_OPTIONS;
+        default:
+            return idc;
+    }
 }
 
 Action Screen::MainMenuClick(int idc, const char*& message)

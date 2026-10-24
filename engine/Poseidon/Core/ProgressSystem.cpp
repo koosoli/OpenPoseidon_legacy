@@ -417,6 +417,9 @@ void ProgressSystem::Start(RString title, RString format, Ref<Font> font, float 
         return;
     }
     GDebugger.NextAliveExpected(15 * 60 * 1000); // no alive expected
+    // While a splash is up the world is not drawn (World::IsDisplayEnabled): one left open is a
+    // black screen with the game running behind it. Which one opened is logged, and when it ended.
+    LOG_INFO(Core, "Progress splash opened: \"{}\"", (const char*)title);
     _progressTitle = title;
     _progressFormat = format;
     _progressCur = 0;
@@ -454,6 +457,7 @@ void ProgressSystem::Start(AbstractOptionsUI* display)
         return;
     }
     GDebugger.NextAliveExpected(15 * 60 * 1000); // no alive expected
+    LOG_INFO(Core, "Progress splash opened: a loading display");
     _progressDisplay = display;
     _progressCur = 0;
     _progressStartTime = Glob.uiTime;

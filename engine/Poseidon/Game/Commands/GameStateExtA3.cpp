@@ -1760,26 +1760,41 @@ GameValue A3CanSuspend(const GameState*)
     return GameValue(GameState::s_scheduledYields != nullptr);
 }
 
-// Arma 3's pixel grid, which its UI is sized in ("10 * (pixelW * pixelGrid * 2)"). The screen is
-// 0..1 across both ways here (safeZone* are 0 / 1), so a pixel is 1 / the 2D resolution. Arma 3
-// derives the grid from the screen height (uiScaleMaxGrids = 60 rows, a multiple of 4) and scales
-// it by the interface size; 16 at 1080p is the value RscDisplayMain.sqf itself assumes when the
-// command is missing, and pixelGrid is Arma 3's default "Normal" interface size of that.
+// Arma 3's UI coordinates. Its own screens are laid out in its safe zone ("safezoneX +
+// 10 * (pixelW * pixelGrid * 2)", "((safezoneW / safezoneH) min 1.2) / 40"), where 0..1 is a 4:3
+// box of the interface size's height in the middle of the screen. Scripts keep this engine's
+// 0..1-is-the-screen answers (safeZone* 0 / 1, GameStateExtA2.cpp); while Arma3Menu evaluates one
+// of Arma 3's screens (Arma3Rsc::SetUiCoordinates) they answer as Arma 3 would, and Arma3Menu maps
+// the result back onto the screen. Pixel-grid sizes come out the same either way.
+float A3ScreenWidth()
+{
+    return GEngine && GEngine->Width2D() > 0 ? float(GEngine->Width2D()) : 1920.0f;
+}
+
 float A3ScreenHeight()
 {
     return GEngine && GEngine->Height2D() > 0 ? float(GEngine->Height2D()) : 1080.0f;
 }
 
+Poseidon::Arma3Rsc::SafeZone A3Zone()
+{
+    return Poseidon::Arma3Rsc::UiCoordinates() ? Poseidon::Arma3Rsc::UiSafeZone()
+                                               : Poseidon::Arma3Rsc::SafeZone{0.0f, 0.0f, 1.0f, 1.0f};
+}
+
 GameValue A3PixelW(const GameState*)
 {
-    return GameValue(1.0f / (GEngine && GEngine->Width2D() > 0 ? float(GEngine->Width2D()) : 1920.0f));
+    return GameValue(A3Zone().w / A3ScreenWidth());
 }
 
 GameValue A3PixelH(const GameState*)
 {
-    return GameValue(1.0f / A3ScreenHeight());
+    return GameValue(A3Zone().h / A3ScreenHeight());
 }
 
+// Arma 3 derives the grid from the screen height (uiScaleMaxGrids = 60 rows, a multiple of 4) and
+// scales it by the interface size; 16 at 1080p is the value RscDisplayMain.sqf itself assumes when
+// the command is missing.
 float A3GridOf(float rows)
 {
     return std::max(4.0f, 4.0f * std::round(rows / 4.0f));

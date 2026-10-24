@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
 #include <cstring>
@@ -1577,6 +1578,29 @@ void World::SetCutEffect(TitleEffect* effect)
 {
     _cutEffect = effect;
     Log("SetCutEffect %p", (void*)effect);
+}
+
+void World::NoteBlackEffect(const TitleEffect* effect)
+{
+    _blackEffect = effect;
+    _blackSince = Glob.uiTime;
+}
+
+void World::LiftStuckBlack()
+{
+    if (!_blackEffect || Arma1Compat::Generation() != 3 || Glob.uiTime - _blackSince < 30.0f)
+        return;
+    const bool cut = _cutEffect.GetRef() == _blackEffect, title = _titleEffect.GetRef() == _blackEffect;
+    _blackEffect = nullptr;
+    if (!cut && !title)
+        return;
+    LOG_WARN(Mission, "Arma 3: the mission's scripts held the screen black for 30 s and never faded it back in "
+                      "(they wait on Arma 3 features this engine lacks); the black {} layer is lifted",
+             cut ? "cut" : "title");
+    if (cut)
+        _cutEffect.Free();
+    if (title)
+        _titleEffect.Free();
 }
 
 void World::AddScript(Script* script)

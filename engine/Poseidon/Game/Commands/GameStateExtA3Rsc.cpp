@@ -27,6 +27,7 @@
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/Graphics/Core/Engine.hpp>
 
 #include <cstdio>
 #include <cctype>
@@ -322,6 +323,39 @@ GameValue A3HandleGetVariable(const GameState*, GameValuePar oper1, GameValuePar
             return v->second;
     }
     return fallback;
+}
+
+SafeZone UiSafeZone()
+{
+    // Arma 3's interface size "Small", its default (getResolution's last value here): 0..1 is
+    // 0.55 of the screen's height, 4:3 wide.
+    constexpr float kUiScale = 0.55f;
+    const float width = GEngine && GEngine->Width2D() > 0 ? float(GEngine->Width2D()) : 1920.0f;
+    const float height = GEngine && GEngine->Height2D() > 0 ? float(GEngine->Height2D()) : 1080.0f;
+    const float h = 1.0f / kUiScale;
+    const float w = h * (width / height) / (4.0f / 3.0f);
+    return SafeZone{-(w - 1.0f) * 0.5f, -(h - 1.0f) * 0.5f, w, h};
+}
+
+namespace
+{
+int& UiCoordinateDepth()
+{
+    static int depth = 0;
+    return depth;
+}
+} // namespace
+
+void SetUiCoordinates(bool on)
+{
+    UiCoordinateDepth() += on ? 1 : -1;
+    if (UiCoordinateDepth() < 0)
+        UiCoordinateDepth() = 0;
+}
+
+bool UiCoordinates()
+{
+    return UiCoordinateDepth() > 0;
 }
 
 // Registered before the macros and stubs: of two forms with the same arguments the first

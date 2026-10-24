@@ -23,15 +23,31 @@
 #include <Poseidon/Foundation/Strings/RString.hpp>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 class Control;
 class ControlsContainer;
+class Display;
 
 namespace Poseidon::Arma3Menu
 {
 // --arma-original-ui was given, Arma 3 is mounted and its config has RscDisplayMain.
 bool Active();
+
+// Arma 3's campaign or scenario screen for main-menu entry `idc` (Campaign, Scenarios, Showcases,
+// Challenges, All Missions), filled from CfgMissions (Arma3Screens.cpp); null when Arma 3's menu is
+// not active or CfgMissions has nothing for it. Its idd is ArmaContentIdd.
+Display* CreateContentDisplay(ControlsContainer* parent, int idc);
+// The entry chosen in a closed CreateContentDisplay screen.
+bool ContentChoice(ControlsContainer* display, bool& campaign, std::string& value);
+
+// The backdrop of Arma 3's main menu (when it is up), for its campaign / scenario screens.
+void DrawMenuBackdrop(float alpha);
+
+// Called each frame while Arma 3's main menu is up: its menu music, started and looped as its intro
+// scenes do.
+void TickMenuMusic();
 
 // What a click on an Arma 3 main-menu entry does here.
 enum class Action
@@ -62,10 +78,23 @@ class Screen
     // Per frame, with the cursor in screen units: rows open under the title the cursor is on
     // and stay open while it is over them; a spotlight shows its frame under the cursor.
     void UpdateMainMenu(float mouseX, float mouseY);
-    // Replaces the text of the control(s) with `idc` (the version panel's label).
+    // The controls (or groups) with `idc`: their text, picture, rows; whether they are shown.
     void SetText(int idc, const RString& text);
+    void SetPicture(int idc, const RString& name);
+    void SetRows(int idc, const std::vector<RString>& rows, int selected);
+    int Selected(int idc) const;
+    void Show(int idc, bool shown);
+    bool Has(int idc) const;
     // The meaning of a main-menu click; `message` is set for Action::Unavailable.
     Action MainMenuClick(int idc, const char*& message);
+
+    // RscDisplayInterrupt (the pause menu): what applies here shown, the mission's name set; and
+    // a click's idc as CWA's pause menu knows it (Arma 3's Load, the Options shortcuts).
+    // Its ControlsBackground (the backdrop) alone, as drawn under a screen opened over it.
+    void DrawBackdrop(float alpha);
+
+    void InitInterrupt(bool multiplayer, bool saveExists, const RString& missionName);
+    int InterruptClick(int idc) const;
 
   private:
     void AddCentreSpotlight();
