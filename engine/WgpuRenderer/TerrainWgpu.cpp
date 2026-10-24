@@ -4394,6 +4394,13 @@ void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p,bool loc
 // so no frame ever waits on a running build).
 void TerrainWgpu::RequestEarthMeshes(const EarthTerrainStream::Patch& p,bool localUv)
 {
+    if(_earthGround)
+    {
+        // The ground is the elevation pyramid's: no meshes to build. The window's atlas, which waits for its
+        // meshes' UVs (the derived grass and canopy come with it), may go in at once.
+        if(localUv){_earthHorizonUvGeneration=p.generation;_earthHorizonUvRevision=p.originRevision;}
+        return;
+    }
     _earthMeshWant=std::make_shared<const EarthTerrainStream::Patch>(p);
     _earthMeshWantLocalUv=localUv;
 }

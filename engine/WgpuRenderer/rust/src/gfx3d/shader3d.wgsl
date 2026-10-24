@@ -678,8 +678,13 @@ fn eh_point(level: i32, nz: i32, nx: i32, ny: i32, uv: vec2<f32>) -> EhPoint {
     let whole = floor(scaled);
     return EhPoint(vec2<i32>(nx << s, ny << s) + vec2<i32>(whole), (scaled - whole) * 256.0);
 }
-// Bilinear height at zoom `level`: (height, 1), or (0, 0) when a texel is not resident.
-fn eh_height_level(level: i32, nz: i32, nx: i32, ny: i32, uv: vec2<f32>) -> vec2<f32> {
+// The bilinear patch of four texels at (t.x, t.y): (height, its slope per texel east, per texel south).
+fn eh_bilinear(a: f32, b: f32, c: f32, d: f32, t: vec2<f32>) -> vec3<f32> {
+    return vec3<f32>(mix(mix(a, b, t.x), mix(c, d, t.x), t.y), mix(b - a, d - c, t.y), mix(c - a, d - b, t.x));
+}
+// Bilinear height at zoom `level` and its slope: (height, slope per texel east, per texel south, 1), or zeros when a
+// texel is not resident.
+fn eh_height_level(level: i32, nz: i32, nx: i32, ny: i32, uv: vec2<f32>) -> vec4<f32> {
     let p = eh_point(level, nz, nx, ny, uv);
     let q = p.local - 0.5;
     let i = floor(q);
@@ -689,32 +694,34 @@ fn eh_height_level(level: i32, nz: i32, nx: i32, ny: i32, uv: vec2<f32>) -> vec2
     if (ix >= 0 && ix < 255 && iy >= 0 && iy < 255) {
         // all four in this tile (every sample but the tile's edge rows): its slot once, not per texel
         let slot = eh_slot(level, p.tile.x, p.tile.y);
-        if (slot < 0) { return vec2<f32>(0.0, 0.0); }
+        if (slot < 0) { return vec4<f32>(0.0); }
         let o = vec2<i32>((slot % EH_PER_ROW) * 256 + ix, (slot / EH_PER_ROW) * 256 + iy);
         let ta = eh_decode(textureLoad(earth_heights, o, 0));
         let tb = eh_decode(textureLoad(earth_heights, o + vec2<i32>(1, 0), 0));
         let tc = eh_decode(textureLoad(earth_heights, o + vec2<i32>(0, 1), 0));
         let td = eh_decode(textureLoad(earth_heights, o + vec2<i32>(1, 1), 0));
-        return vec2<f32>(mix(mix(ta, tb, t.x), mix(tc, td, t.x), t.y), 1.0);
+        return vec4<f32>(eh_bilinear(ta, tb, tc, td, t), 1.0);
     }
     let a = eh_texel(level, p.tile.x, p.tile.y, ix, iy);
     let b = eh_texel(level, p.tile.x, p.tile.y, ix + 1, iy);
     let c = eh_texel(level, p.tile.x, p.tile.y, ix, iy + 1);
     let d = eh_texel(level, p.tile.x, p.tile.y, ix + 1, iy + 1);
-    if (a.y * b.y * c.y * d.y < 0.5) { return vec2<f32>(0.0, 0.0); }
-    return vec2<f32>(mix(mix(a.x, b.x, t.x), mix(c.x, d.x, t.x), t.y), 1.0);
+    if (a.y * b.y * c.y * d.y < 0.5) { return vec4<f32>(0.0); }
+    return vec4<f32>(eh_bilinear(a.x, b.x, c.x, d.x, t), 1.0);
 }
 // The height at a point, from the zoom its distance asks for (blended with the next finer one, so the height is a
 // continuous function of place and camera and neighbouring nodes agree on their shared edge), falling back to the
 // nearest resident ancestor.
-fn eh_height(level_f: f32, nz: i32, nx: i32, ny: i32, uv: vec2<f32>) -> f32 {
+fn eh_height(level_f: f32, nz: i32, nx: i32, ny: i32, uv: vec2<f32>, cos_lat: f32) -> vec3<f32> {
+    // returns (height, its slope east, its slope north), the slopes in metres a metre
+    let texel0 = 40075016.0 * max(cos_lat, 1e-4) / 256.0; // metres a texel at zoom 0
     let l0 = i32(floor(level_f));
-    var h = 0.0;
+    var h = vec3<f32>(0.0);
     var found = false;
     for (var l = l0; l >= 0; l = l - 1) {
         let r = eh_height_level(l, nz, nx, ny, uv);
-        if (r.y > 0.5) {
-            h = r.x;
+        if (r.w > 0.5) {
+            h = vec3<f32>(r.x, vec2<f32>(r.y, -r.z) * (f32(1 << u32(l)) / texel0));
             found = true;
             break;
         }
@@ -722,7 +729,9 @@ fn eh_height(level_f: f32, nz: i32, nx: i32, ny: i32, uv: vec2<f32>) -> f32 {
     let t = level_f - f32(l0);
     if (found && t > 0.001 && l0 + 1 <= EH_MAX_LEVEL) {
         let r = eh_height_level(l0 + 1, nz, nx, ny, uv);
-        if (r.y > 0.5) { h = mix(h, r.x, t); }
+        if (r.w > 0.5) {
+            h = mix(h, vec3<f32>(r.x, vec2<f32>(r.y, -r.z) * (f32(1 << u32(l0 + 1)) / texel0)), t);
+        }
     }
     return h;
 }
@@ -764,11 +773,29 @@ fn earth_node_level(dist: f32, cos_lat: f32) -> f32 {
     return clamp(log2(40075016.0 * max(cos_lat, 0.01) / (256.0 * max(dist, 1.0) * EH_DETAIL)), 0.0, f32(EH_MAX_LEVEL));
 }
 // The ground vertex at (u, v) (heights from the pyramid at the zoom its distance asks for).
-fn earth_node_vertex(n: EarthNode, uv: vec2<f32>) -> vec3<f32> {
+// The ground vertex at (u, v) and its normal: heights from the pyramid at the zoom its distance asks for, the
+// normal from their slope on the globe's east and north there (the slope of the same four texels: three height
+// lookups a vertex for its neighbours' finite difference were 2026-10-24's 6 ms of GPU a frame).
+struct EarthNodeVertex {
+    pos: vec3<f32>,
+    normal: vec3<f32>,
+};
+fn earth_node_vertex(n: EarthNode, uv: vec2<f32>) -> EarthNodeVertex {
     let flat = earth_node_point(n, uv, 0.0);
     let level = earth_node_level(length(flat.xyz), flat.w);
-    let h = eh_height(level, n.nz, n.nx, n.ny, uv);
-    return flat.xyz + vec3<f32>(0.0, h, 0.0);
+    let h = eh_height(level, n.nz, n.nx, n.ny, uv, flat.w);
+    // the globe's frame at the point, from the same differences as earth_node_point (GlobeNormal's derivatives)
+    let dyv = -uv.y * n.d_y;
+    let dp = n.dp_north + atan2(2.0 * cosh(n.y_north + dyv * 0.5) * sinh(dyv * 0.5), 1.0 + sinh(n.y_north + dyv) * sinh(n.y_north));
+    let dl = n.dl_west + uv.x * n.d_lon;
+    let cp = flat.w;
+    let sp = n.sin_p0 * cos(dp) + n.cos_p0 * sin(dp);
+    let sdl = sin(dl);
+    let cdl = cos(dl);
+    let up = vec3<f32>(cp * sdl, n.sin_p0 * sp + n.cos_p0 * cp * cdl, n.cos_p0 * sp - n.sin_p0 * cp * cdl);
+    let east = vec3<f32>(cdl, -n.cos_p0 * sdl, n.sin_p0 * sdl);
+    let north = vec3<f32>(-sp * sdl, n.sin_p0 * cp - n.cos_p0 * sp * cdl, n.cos_p0 * cp + n.sin_p0 * sp * cdl);
+    return EarthNodeVertex(flat.xyz + vec3<f32>(0.0, h.x, 0.0), normalize(up - h.y * east - h.z * north));
 }
 #endif
 
@@ -1097,12 +1124,9 @@ fn vs_main(
         let k = clamp((length(flat.xyz) - obj.conform1.z) / max(obj.conform1.w - obj.conform1.z, 1.0), 0.0, 1.0);
         let g = uv * 32.0;
         let muv = (g - fract(g * 0.5) * 2.0 * k) / 32.0;
-        var p = earth_node_vertex(n, muv);
-        let e = 1.0 / 32.0;
-        let px = earth_node_vertex(n, muv + vec2<f32>(e, 0.0));
-        let pz = earth_node_vertex(n, muv + vec2<f32>(0.0, e));
-        // u runs east, v south: (east) x (south) is up in the world's components
-        let nrm = normalize(cross(px - p, pz - p));
+        let v = earth_node_vertex(n, muv);
+        var p = v.pos;
+        let nrm = v.normal;
         if (pos.y > 0.5) {
             // a skirt vertex (EarthGroundNodes): half a grid cell below its edge, hiding the hairline between nodes
             p.y = p.y - n.d_lon * EH_RADIUS * n.cos_p0 / 64.0;

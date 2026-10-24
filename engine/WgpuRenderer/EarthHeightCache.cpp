@@ -107,7 +107,7 @@ void EarthHeightCache::WindowOrigin(int level, double latitude, double longitude
     oy = std::clamp(ty - Window / 2, 0, n - Window);
 }
 
-void EarthHeightCache::Want(double latitude, double longitude, const std::set<Key>& tiles)
+void EarthHeightCache::Want(double latitude, double longitude, const std::vector<Key>& tiles)
 {
     if (!Ready())
         return;

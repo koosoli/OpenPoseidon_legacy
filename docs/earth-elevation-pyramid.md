@@ -57,20 +57,23 @@ content grid.** What goes is drawing the ground from it: the near and horizon me
 Known differences to watch: gameplay ground (patch, bilinear at its grid) vs drawn ground (pyramid, bilinear at
 data texels, morphing) differ by centimetres on smooth ground, more on steep slopes; soldiers' feet are the test.
 
-## Status (2026-10-24, phase 2 done behind the flag)
+## Status (2026-10-24 night: phases 2 and 3 done; the pyramid is the default)
 
-Measured with `Run-EarthLadder.ps1` (Alps 46.537/7.962 at 700/2500/9000 m, Helgoland 54.182/7.886, `-FlyPerf`),
-pyramid against the patch meshes, same build:
+`POSEIDON_EARTH_HEIGHT_PYRAMID=0` brings back the patch meshes; otherwise they are neither built nor drawn (a window's
+imagery atlas, which waited for its meshes' UVs, now goes in at once). Measured with `Run-EarthLadder.ps1` (Alps
+46.537/7.962 at 700/2500/9000 m, Helgoland 54.182/7.886, `-FlyPerf` with `WGR_GPU_SPIKE_MS=0` for per-frame GPU time):
 
-- **Look:** the same ground at all three heights; the patch meshes' jagged stair-steps on far ridges are gone. The
-  Helgoland coast and sea are identical (the rectangle and bands in its sea at 2500/9000 m are in both).
+- **Look:** the same ground as the patch meshes at all three heights, without their jagged stair-steps on far ridges;
+  the Helgoland coast and sea identical (the rectangle and bands in its sea at 2500/9000 m are in both).
+- **GPU, whole frame, flight:** median 9.3 ms, p95 14.1 -- the patch meshes 11.3 / 15.4. The first version cost 18.2 /
+  30.2: each vertex placed itself four times and looked its height up three times (a finite-difference normal). The
+  normal now comes from the slope of the same four texels, on the globe's east/north there; the look is the same.
+  (An earlier note here said "level with the meshes" from `swap` time: that hides GPU cost under vsync. Use the
+  GPU timers.)
+- **Main thread:** the node pass is 0.38-0.82 ms a frame (`Earth ground nodes:` every 5 s, parts listed) for ~1300
+  nodes; it was 0.9-1.9 before the selection took each row's and column's trigonometry once a frame.
 - **Traps found:** the depth prepass culls back faces whatever a draw's double-sided flag, so the grid must be
   clockwise from above or the nodes are in colour but not in depth and the sea (tested against that depth) covers
   the ground. Neighbouring nodes part by a hair along their shared edge (different f32 origins): skirts hide it.
-- **GPU:** level with the meshes (swap 0.43 ms against 0.50) once a bilinear sample resolves its tile's slot once
-  instead of per texel.
-- **Main thread:** +0.9 to 1.9 ms a frame in the flight (`Earth ground nodes:` log line every 5 s). About 1300
-  nodes; the parts are selection 0.45-1.07 ms (a `ToLocal` per visited node), the wanted-tile set 0.23-0.46,
-  submission 0.19-0.36. To cut before phase 3: cheaper selection distance (no `ToLocal`, chord from unit vectors),
-  a flat sorted vector for the tile set, reuse of last frame's selection while the camera has not moved.
-  Phase 3 also gives back the patch mesh builds this still pays for.
+
+Phase 4 (terrain shadows and sky visibility from the pyramid, the patch gameplay-only) is next.
