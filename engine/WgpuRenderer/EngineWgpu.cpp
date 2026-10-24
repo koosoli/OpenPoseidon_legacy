@@ -15956,10 +15956,18 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadC
             // Chernarus+ measured 77% of visible objects as CPU-drawn vegetation with the bail on
             // (WLD-026 follow-up); Stratis measured land:obj 42.7 -> 0.185 ms without it.
             // WGR_TREEADV_RETAINED=0 restores the bail, whole-model, exactly as before.
+            //
+            // 2026-10-24: ON by default (owner's choice, on the captures). The GPU cull now takes
+            // the per-frame LOD width from the presentation snapshot, and the triangle blow-up
+            // above is gone: East Wind A_m01 (Stratis, 1280x720) 64 -> 80 fps, land:obj 8.2 ->
+            // 0.3 ms, GPU 15.4 -> 11.7 ms; DayZ Chernarus+ parked GPU 14.0/14.4 -> 12.2/17.1 ms
+            // (noisy, no penalty); Arma 2 Chernarus has no such sections and is unchanged. The
+            // trees also self-shadow (darker crowns and trunks), which the owner preferred to the
+            // flat per-draw look.
             static const bool treeAdvRetained = []
             {
                 const char* v = std::getenv("WGR_TREEADV_RETAINED");
-                return v && v[0] != '0';
+                return !(v && v[0] == '0');
             }();
             if (auto* texture = static_cast<TextureWgpu*>(shSec.properties.GetTexture());
                 texture && texture->GetAlphaClass() == Poseidon::AlphaStats::Blend &&
