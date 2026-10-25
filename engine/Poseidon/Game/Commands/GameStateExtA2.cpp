@@ -1111,22 +1111,18 @@ std::unique_ptr<Fsm> LoadFsm(const std::string& file)
 
 // Until 2026-10-24 '<args> execFSM <file>' never ran (an ignoring entry in GameStateExt
 // shadowed this one). Running every such FSM at once -- ALICE, SILVIE, the ambient-animal
-// and combat modules, SOM, the missions' own -- left 30 of 98 missions with script errors
-// from commands not yet implemented (isFlatEmpty, nearObjectsReady, setUnconscious,
-// setGroupIcon, ...) and str_EW2 crashing (run 39). Until those are in, only the animals'
-// agent tasks (ca\animals2\...) run by default; OP_A2_EXECFSM=all runs every one.
+// and combat modules, SOM, the missions' own -- first left 30 of 98 missions with script
+// errors from missing commands and str_EW2 crashing (run 39); with those commands in, runs
+// 43-45 with every FSM came out like the animals-only default (96-97 of 98 clean, no crash).
+// Since then every FSM runs, as in Arma 2. OP_A2_EXECFSM=animals runs only the animals'
+// agent tasks (ca\animals2\...), the earlier default.
 bool A2ExecFsmAllowed(const std::string& file)
 {
-    static const bool all = [] {
+    static const bool animalsOnly = [] {
         const char* e = std::getenv("OP_A2_EXECFSM");
-        return e && _stricmp(e, "all") == 0;
+        return e && _stricmp(e, "animals") == 0;
     }();
-    if (all)
-        return true;
-    // Arma 3's missions are driven by their FSMs (missionFlow.fsm: the story, its conversations
-    // and tasks, the orders the squad follows) and its function library runs its own (feedback);
-    // without them Showcase Infantry's squad stood and said nothing. They all run.
-    if (Arma1Compat::Generation() == 3)
+    if (!animalsOnly || Arma1Compat::Generation() == 3)
         return true;
     std::string f = Lower(file);
     while (!f.empty() && f[0] == '\\')
@@ -1140,7 +1136,7 @@ GameValue A2ExecFSM(const GameState*, GameValuePar oper1, GameValuePar oper2)
     {
         static std::set<std::string> skipped;
         if (skipped.insert(Lower((const char*)RString(oper2))).second)
-            LOG_INFO(Mission, "Arma 2: execFSM {} not started (OP_A2_EXECFSM=all runs it)", (const char*)RString(oper2));
+            LOG_INFO(Mission, "Arma 2: execFSM {} not started (OP_A2_EXECFSM=animals)", (const char*)RString(oper2));
         return NOTHING;
     }
     std::unique_ptr<Fsm> fsm = LoadFsm((const char*)RString(oper2));
