@@ -65,6 +65,14 @@ use crate::ffi::{WgrCamera, WgrWaterParams};
 /// EarthSeaCeiling are the same. It was 8 km, and the imagery's sea from there drew rings round the camera.
 pub(crate) const EARTH_SEA_CEILING: f32 = 40000.0;
 
+/// TW-FOAM2 (WGR_TW_FOAM2=1): two-stage whitecaps -- the FFT keeps an active-breaking field
+/// (~0.4 s) beside the persistent foam, and the water draws the caps' solid cores from it, the
+/// lace from the persistent foam. Off by default until the owner picks it from A/B captures.
+pub fn foam2_enabled() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_FOAM2").as_deref() == Ok("1"))
+}
+
 pub(crate) const TW_WATER_WGSL: &str = concat!(
     include_str!("tw_water.wgsl"),
     "\n",
@@ -817,6 +825,17 @@ impl Tidewater {
                 // (OP) Whole World: the sea floor beyond the heightmap's window, and its placement
                 tex(28, D::D2, S::Float { filterable: false }),
                 uniform(29),
+                // TW-FOAM2: the FFT foam buffer (persistent, then active breaking)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 30,
+                    visibility: vf,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -1060,6 +1079,7 @@ impl Tidewater {
                 wgpu::BindGroupEntry { binding: 27, resource: R::TextureView(self.wake.aer_view()) },
                 wgpu::BindGroupEntry { binding: 28, resource: R::TextureView(&self.far_floor_view) },
                 wgpu::BindGroupEntry { binding: 29, resource: self.far_floor_ubo.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 30, resource: self.fft.foam_buffer().as_entire_binding() },
             ],
         });
         self.wake.rebuild_bind(device, &self.heightmap_view, &self.conform_ubo);
@@ -1964,6 +1984,32 @@ mod tests {
             })
             .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&composer)));
         assert!(!format!("{module:?}").contains("rain_water_impact"), "the sea without SEA_RAIN carries the rain rings");
+    }
+
+    /// Look pack (SEA_GLINTS sparkles, TW_FOAM2 two-stage whitecaps) with and without the sea rain
+    /// variant and WHOLE_WORLD: every combination composes and validates.
+    #[test]
+    fn tidewater_water_shader_composes_with_look_pack() {
+        for mask in 0u32..16 {
+            let mut defs = std::collections::HashMap::new();
+            for (bit, def) in ["SEA_GLINTS", "TW_FOAM2", "SEA_RAIN", "WHOLE_WORLD"].iter().enumerate() {
+                if mask & (1 << bit) != 0 {
+                    defs.insert(def.to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+                }
+            }
+            let mut composer = crate::shaders::build_composer();
+            let module = composer
+                .make_naga_module(naga_oil::compose::NagaModuleDescriptor {
+                    source: TW_WATER_WGSL,
+                    file_path: "water_tw/tw_water.wgsl",
+                    shader_defs: defs,
+                    ..Default::default()
+                })
+                .unwrap_or_else(|e| panic!("mask {mask}: {}", e.emit_to_string(&composer)));
+            naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+                .validate(&module)
+                .unwrap_or_else(|e| panic!("tw_water.wgsl, look pack mask {mask}: {e:?}"));
+        }
     }
 
     #[test]
