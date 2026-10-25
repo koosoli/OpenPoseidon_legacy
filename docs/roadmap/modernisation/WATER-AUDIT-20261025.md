@@ -17,6 +17,26 @@ copyright notice, as we already do for dgreenheck/tidewater. Two exceptions:
 
 No game data is involved.
 
+## Owner rules for anything taken from this audit (2026-10-25)
+
+The owner likes our water as it is. Nothing here replaces it by default.
+
+1. **A/B pictures decide.** Every item lands behind its own `WGR_*` switch that defaults to *off*. Both arms are
+   captured the same way:
+   - same pose, hour, weather and seed;
+   - windowed 1280x720;
+   - one still from close, mid and far range;
+   - a short motion clip for anything that changes over time (glints, ripples).
+
+   The owner gets the pairs side by side and picks. It ships only if the owner chooses it.
+2. **Water must not get more expensive.** The bar is the median GPU water time, A/B against the current build, in
+   alternating runs at the same pose. It must be equal within noise. Whatever an item costs has to come back from
+   the same pass in the same change.
+
+   Items that are ALU-only, run only on pixels that need them, or replace existing work are preferred. An item that
+   cannot hit that bar is dropped, not tuned down until it looks worse.
+3. **Clouds and rain** follow the same two rules against the sky and rain passes.
+
 ## Where we already stand
 
 These items need no work:
@@ -72,7 +92,8 @@ These items need no work:
   0.05 ms.
 - **The whole set:** about 0.2–0.3 ms against today's ~3 ms water.
 
-**Verdict: port** the glints, the LEAN slope moments with the specular-AA cap, and the two-stage foam. These are small,
+**Verdict: port, subject to the owner rules above.** The candidates are the glints, the LEAN slope moments with the
+specular-AA cap, and the two-stage foam. The ranked list at the end says which of them can meet the no-extra-cost bar. These are small,
 self-contained GLSL blocks that map directly onto our existing cascade layout. Borrow the idea of hydrodynamic
 modulation and the downwind froth smear. **Skip** the sky, clouds, rain and lightning: we have our own sky stack, and
 those parts are scene-specific. Skip the polar grid: our CDLOD is already uniform in screen space.
@@ -143,28 +164,88 @@ variance-preserving anti-tiling if tiling shows from the air.
 
 ---
 
-## Top 3 worth doing (ranked)
+## 4. Rain on the ocean
 
-1. **Poisson sun glints plus a slope-variance cap** (from open-water `water.js`, MIT).
-   - *Gain:* discrete sparkles near, a correct glitter path far, mean-preserving, so no look regression on average.
-   - *Cost:* about 0.1 ms.
-   - *Risk:* temporal shimmer. It needs a still A/B and a motion capture, and must stay stable under DLSS (re-roll
-     rate against the history).
-2. **LEAN slope moments in the FFT output** (`(s, s²)` per cascade, mipped; per-pixel anisotropic variance into the
-   GGX alpha; Kaplanyan normal-variance AA).
-   - *Gain:* glitter and roughness that follow the actual local sea, not a global Cox–Munk guess. Also the right
-     input for item 1.
-   - *Cost:* about 0.1 ms and 2 MB.
-   - *Risk:* it changes the far-sea brightness, so re-check `fft_cover_tests` and the water-look profiles.
-3. **Two-stage whitecap foam (active + residual)** plus downwind froth smear (open-water `ocean.js` / `foam.js`).
-   - *Gain:* fresh caps with solid cores, and old foam opening into lace rather than fading as blobs.
-   - *Cost:* about 0.05 ms.
-   - *Risk:* foam cover is the most sensitive control we have. Re-fit `WHITECAP_COVER_BIAS` with the cover harness,
-     never by eye.
+**What we have.** Rain ripples already exist, but only on land water:
+- `rain_water_impact_normal` in `shaders/rain_water_optics.wgsl`;
+- the puddles, via `ground_puddle_ripple_normal`;
+- standing water.
 
-Runner-up: **minamo's lens water film and drops after surfacing.** It is the biggest gap for diving and boats, but more
-work than the top 3, and it touches the post chain and the DLSS ordering.
+The Tidewater sea (`tw_water.wgsl`) has **no rain response at all**. In a downpour the ocean looks exactly as it does
+when dry. This is the largest gap in this whole audit, and it is a gap in our own wiring, not something we need to
+import.
 
-All four are additive and fidelity-raising, and none trades away visual quality, which fits the owner's "no visual
-regressions for perf" rule. Each port must keep the MIT copyright line of its source in the file header, as our
-Tidewater port does.
+**What open-water does** (`src/fx/ripples.js`, `water.js` FS l.192-262, `src/fx/rain.js`; MIT):
+- **Ring packets.** Five jittered cell layers of 0.1–0.27 m. Each ring expands at about 0.23 m/s, the capillary minimum
+  speed, and dies within about 0.5 s. The slopes are analytic, with no texture.
+- **Impact craters.** Two rotated grids of 4–6 cm, about 1 cm wide, relaxing in about 60 ms.
+- **Far field as roughness.** Rings are drawn only while the pixel resolves them (footprint under about 1 cm). Beyond
+  that, their energy becomes isotropic roughness: `rough = rain·0.006`.
+- **Rain calms the capillaries.** Unresolved roughness is scaled by `(1 − 0.4·rain)`. The real effect is that heavy
+  rain damps short wind waves, so the sea goes matte grey-smooth with sparkle-free rings.
+- **Impact stipple.** Where one impact is about one pixel, a Poisson count of impacts within their ~60 ms life
+  darkens or brightens the pixel.
+- **Splash crowns and Worthington jets.** Instanced quads, around the camera only.
+
+**Proposal: wire our own `rain_water_impact_normal` into `tw_water.wgsl`, plus open-water's two far-field rules.**
+1. Near the eye, add the impact gradient to `slopes`. Our function already returns flat beyond a 0.16 m footprint.
+2. Fold `rain·k` into `alpha2`.
+3. Scale the unresolved Cox–Munk term by `(1 − 0.4·rain)`.
+
+**Cost:**
+- Zero when it is not raining: a uniform branch on the rain strength, the same pattern the puddles use.
+- In rain, ALU only, and only for pixels within a few metres. The far field changes two existing multiplies.
+- Measure in rain against the current build, in rain. Expected within noise.
+
+Open-water's ring maths is the reference if our puddle impacts look wrong at sea scale. Skip the stipple and the splash
+crowns unless the A/B asks for more: they are extra work at sub-pixel scale.
+
+**Verdict: do it, first.** It is cheap, it uses our own code, and it fixes a visible gap. It still goes through A/B.
+
+## 5. Clouds
+
+**What we have** (`sky/sky.wgsl` `fs_cloud`, ~l.1680-1790):
+- A half-resolution march with a depth-aware upsample (`cloud_composite.wgsl`).
+- An exponential-step light march, HG phase and Beer–powder.
+- Lunar light and cloud shadows.
+
+Multiple scattering is stood in for by mixing the phase toward isotropic with coverage. The code itself calls this "a
+cheap stand-in until MS (Phase 4)". There is no temporal accumulation.
+
+**What open-water does better** (`src/sky/clouds.js`, MIT):
+
+| Technique | Where | Cost for us | Why |
+|---|---|---|---|
+| **Wrenninge multiple-scattering octaves** | `clouds.js` l.297-301, l.361-362: `ms = ph0·e^−τ + msK·Σ aⁱ·phᵢ·e^(−bⁱτ)` with a = 0.7, b = 0.5 and halving eccentricity | **ALU only.** It reuses the optical depth `od` our light march already computes, so it needs no extra density taps. | Thick clouds gain the bright, soft interiors and silver edges our single-scatter march lacks. This is exactly the "Phase 4" we have deferred. |
+| **Two-stream diffusion for thick decks** | `clouds.js` ~l.385-396: `T_d = 1/(1 + 0.11·τ)`, deck lit as `E·μ₀·T_d/π`, a cool-neutral diffuse colour | ALU only | Overcast becomes a grey-white slab with a top-to-bottom gradient, not a darker blue sky. Our `amb_sky` desaturation approximates this; theirs is physically scaled. |
+| **Checkerboard temporal accumulation** | `clouds.js` ~l.455-520: each pixel re-marched every 4th frame, history reprojected *with the wind drift* | **Saves** about ¾ of the march | This is the item that pays for the rest, or can be banked as a frame-time gain. Risks: DLSS interplay (the cloud buffer is pre-DLSS) and disocclusion trails behind the aircraft. It needs its own A/B in motion. |
+| Storm decks mottled by 2–3× thickness variation, plus rain curtains and shafts tied to the cloud-shadow map | `clouds.js` l.227-235, `atmosphere.js` l.400-446 | Moderate | Weather-scene specific. Borrow only if the owner wants storm skies. |
+
+napali's clouds (`tools/v4_sky.glsl`) are hand-placed trade-wind cumulus for one coastline. Skip them.
+
+**Verdict:** borrow the **MS octaves** and the **two-stream deck term**. Both are ALU-only, so the cost should stay
+within noise. Treat the **checkerboard accumulation** as a separate experiment: it can pay for the octaves several
+times over, but only if a motion A/B shows no trails.
+
+## Ranked list, under the owner's rules
+
+Every item is behind a switch that defaults to off, is decided by A/B pictures, and has to measure equal within noise
+against the current water, sky or rain cost.
+
+1. **Rain on the ocean.** Wire our own `rain_water_impact_normal` into `tw_water.wgsl`, add rain roughness far away,
+   and calm the capillaries. *Cost:* zero when dry; ALU only, near the eye, in rain.
+2. **Cloud multiple-scattering octaves plus the two-stream deck** (open-water `clouds.js`). *Cost:* ALU only, on taps
+   we already pay for.
+3. **Poisson sun glints** (open-water `water.js`). *Cost:* ALU only, run only inside the glitter lobe (a branch on
+   our existing GGX term), so most water pixels pay nothing. Mean-preserving. It needs a motion A/B, under DLSS too.
+
+**Kept, but only if they can pay for themselves:**
+- **LEAN slope moments.** About 4 extra taps and 2 MB. It qualifies only if it replaces our current footprint-based
+  roughness estimate at equal cost. Otherwise drop it.
+- **Two-stage foam.** Its extra channel rides the existing FFT pass for free. The extra shading taps must replace
+  part of today's lace and detail lookups. Re-fit `WHITECAP_COVER_BIAS` with the cover harness, never by eye.
+- **Cloud checkerboard accumulation.** It saves time, but it is the riskiest for motion artefacts.
+- **minamo's lens film and drops after surfacing.** Its cost is paid only in the second after surfacing, but it sits
+  in the post chain and its ordering against DLSS matters.
+
+Each port keeps the MIT copyright line of its source in the file header, as our Tidewater port does.
