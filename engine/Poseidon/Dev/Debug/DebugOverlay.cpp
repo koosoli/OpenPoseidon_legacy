@@ -8621,7 +8621,13 @@ void Render()
         // Make sure we draw to the default framebuffer in case the engine left
         // an FBO bound — happens with post-FX in GL33.  Other state (blend,
         // scissor, vao, depth) is saved/restored inside RenderDrawData.
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        // Looked up through SDL, not glad: glad's loader lives in PoseidonGL33, and tools that link
+        // Poseidon without the GL33 backend (PoseidonTools, unit tests) must still link.
+        using BindFramebufferFn = void (*)(GLenum, GLuint);
+        static const auto bindFramebuffer =
+            reinterpret_cast<BindFramebufferFn>(SDL_GL_GetProcAddress("glBindFramebuffer"));
+        if (bindFramebuffer)
+            bindFramebuffer(GL_FRAMEBUFFER, 0);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     }
     else
