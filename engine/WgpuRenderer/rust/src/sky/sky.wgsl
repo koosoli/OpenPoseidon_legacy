@@ -1680,6 +1680,17 @@ fn march_clouds(
     // ~uniformly; mixing the phase toward 1/4pi with coverage is a cheap stand-in until MS (Phase 4).
     let phase_hg = mix(hg(cos_t, sky.cloud2.x), hg(cos_t, -0.15), 0.5);
     let phase = mix(phase_hg, 1.0 / (4.0 * PI), cov * 0.7);
+#ifdef CLOUD_MS
+    // (OP, CLOUD-MS) multiple-scattering octaves (Wrenninge 2013, as open-water's clouds.js, MIT):
+    // octave i carries energy 0.7^i, sees the optical depth scaled by 0.5^i and a phase whose
+    // eccentricity halves each time, so light that has bounced inside the cloud reaches the shaded
+    // interior and spreads out of the forward lobe. Built once per ray; the march only adds three exp.
+    let iso = 1.0 / (4.0 * PI);
+    let g0 = sky.cloud2.x;
+    let ms_ph1 = mix(mix(hg(cos_t, g0 * 0.5), hg(cos_t, -0.075), 0.5), iso, cov * 0.7);
+    let ms_ph2 = mix(mix(hg(cos_t, g0 * 0.25), hg(cos_t, -0.0375), 0.5), iso, cov * 0.7);
+    let ms_ph3 = mix(mix(hg(cos_t, g0 * 0.125), hg(cos_t, -0.01875), 0.5), iso, cov * 0.7);
+#endif
     let sun_col = sample_transmittance(pos, sun) * radiance;
     // Is the solar light march worth running at all? Below the horizon the transmittance LUT
     // returns ~0 toward the sun, so `direct` is a light march whose result is multiplied by zero --
@@ -1698,6 +1709,11 @@ fn march_clouds(
     // thing. Built unconditionally (it is arithmetic, no taps) and multiplied by `on`.
     let phase_m_hg = mix(hg(cos_m, sky.cloud2.x), hg(cos_m, -0.15), 0.5);
     let phase_m = mix(phase_m_hg, 1.0 / (4.0 * PI), cov * 0.7);
+#ifdef CLOUD_MS
+    let ms_pm1 = mix(mix(hg(cos_m, g0 * 0.5), hg(cos_m, -0.075), 0.5), iso, cov * 0.7);
+    let ms_pm2 = mix(mix(hg(cos_m, g0 * 0.25), hg(cos_m, -0.0375), 0.5), iso, cov * 0.7);
+    let ms_pm3 = mix(mix(hg(cos_m, g0 * 0.125), hg(cos_m, -0.01875), 0.5), iso, cov * 0.7);
+#endif
     // The multiple-scattering fill. Height-graded with the ambient below rather than added flat, so
     // even a fully overcast moonlit deck keeps a top-to-bottom gradient instead of reading as a
     // uniform grey card.
@@ -1747,7 +1763,15 @@ fn march_clouds(
                     od += ld * ext * ls;
                     ls *= 1.6;
                 }
+#ifdef CLOUD_MS
+                // the octaves start where the cloud is thick enough to scatter more than once
+                let ms_k = 1.0 - exp(-(od + sigma * 30.0));
+                let ms = phase * exp(-od) + ms_k * (0.7 * ms_ph1 * exp(-0.5 * od)
+                    + 0.49 * ms_ph2 * exp(-0.25 * od) + 0.343 * ms_ph3 * exp(-0.125 * od));
+                direct = sun_col * ms * beer;
+#else
                 direct = sun_col * exp(-od) * phase * beer;
+#endif
             }
             // SKY-004: the identical march toward the MOON. Same steps, same growth, same
             // Beer-Powder -- it is the same physics with a different body, and self-shadowing is
@@ -1764,7 +1788,14 @@ fn march_clouds(
                     od_m += ld * ext * ls_m;
                     ls_m *= 1.6;
                 }
+#ifdef CLOUD_MS
+                let ms_km = 1.0 - exp(-(od_m + sigma * 30.0));
+                let ms_m = phase_m * exp(-od_m) + ms_km * (0.7 * ms_pm1 * exp(-0.5 * od_m)
+                    + 0.49 * ms_pm2 * exp(-0.25 * od_m) + 0.343 * ms_pm3 * exp(-0.125 * od_m));
+                direct = direct + ml.col * ms_m * beer;
+#else
                 direct = direct + ml.col * exp(-od_m) * phase_m * beer;
+#endif
             }
             let hfp = clamp((length(p) - (sky.params.z + sky.cloud0.z)) / thick, 0.0, 1.0);
             // darker undersides (cheap AO). The lunar multiple-scattering fill rides the SAME

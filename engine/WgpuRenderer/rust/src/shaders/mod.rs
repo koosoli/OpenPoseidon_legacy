@@ -76,6 +76,11 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
     if cfg!(test) || std::env::var("POSEIDON_WHOLE_WORLD").as_deref() == Ok("1") {
         defs.insert("WHOLE_WORLD".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
+    // CLOUD-MS: multiple-scattering octaves in the cloud march (sky.wgsl). Off by default until the
+    // owner picks it from A/B captures; off compiles the clouds exactly as before.
+    if std::env::var("WGR_CLOUD_MS").as_deref() == Ok("1") {
+        defs.insert("CLOUD_MS".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
     if std::env::var("WGR_TREE_SNOW").as_deref() == Ok("0") {
         defs.insert("DISABLE_TREE_SNOW".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
