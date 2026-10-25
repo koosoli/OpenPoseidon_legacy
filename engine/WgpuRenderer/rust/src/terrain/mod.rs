@@ -31,6 +31,13 @@ fn canopy_band_enabled() -> bool {
     *V.get_or_init(|| std::env::var("WGR_CANOPY_BAND").map(|v| v.trim() != "0").unwrap_or(true))
 }
 
+/// WGR_CANOPY_AO_SOFT=0: the canopy sky-light term reads the raw cell coverage and stops at the
+/// crowns' last cell, as before 2026-10-25 (A/B for canopy_cover_blurred).
+fn canopy_ao_soft() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_CANOPY_AO_SOFT").map(|v| v.trim() != "0").unwrap_or(true))
+}
+
 fn terrain_resource_reuse() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     // Installed edit A/B did not reduce stalls; retain only as an explicit experiment.
@@ -1871,6 +1878,10 @@ impl Terrain {
         let mut next = self.canopy.take().expect("checked by the callers");
         next.1[band.clone()].copy_from_slice(&top[band.clone()]);
         next.2[band.clone()].copy_from_slice(&cover[band]);
+        // The blurred coverage of a row reads CANOPY_BLUR_CELLS rows either side, so the rows
+        // around a changed band change too.
+        let z0 = z0.saturating_sub(CANOPY_BLUR_CELLS);
+        let z1 = (z1 + CANOPY_BLUR_CELLS).min(n - 1);
         let texels = compose_skyvis_rows(sv_w, sv_h, sv, Some(&next), n, n, z0..z1 + 1,
                                          skyvis_compose_threads());
         let mut copy = texel_copy(&self.skyvis_mask);
@@ -2620,7 +2631,6 @@ fn compose_skyvis_rows(
     rows: std::ops::Range<u32>,
     threads: usize,
 ) -> Vec<u16> {
-    let one = f32_to_f16_bits(1.0);
     let no_top = f32_to_f16_bits(-60000.0);
     let band = rows.end.saturating_sub(rows.start);
     let mut out = vec![0u16; (w as usize) * (band as usize) * 4];
@@ -2649,15 +2659,21 @@ fn compose_skyvis_rows(
             match canopy {
                 Some((n, top, cover)) => {
                     let c = (z * n + x) as usize;
-                    row[o + 1] = if cover[c] > 0.0 { f32_to_f16_bits(top[c]) } else { no_top };
+                    // The grid's top is dilated past the crowns (EngineWgpu BuildCanopyGrid), so the
+                    // bilinear tap never meets the sentinel inside the blurred coverage's reach.
+                    let soft = canopy_ao_soft();
+                    let has_top = if soft { top[c] > -59999.0 } else { cover[c] > 0.0 };
+                    row[o + 1] = if has_top { f32_to_f16_bits(top[c]) } else { no_top };
                     row[o + 2] = f32_to_f16_bits(cover[c].clamp(0.0, 1.0));
+                    let ao_cover = if soft { canopy_cover_blurred(*n, cover, x, z) } else { cover[c] };
+                    row[o + 3] = f32_to_f16_bits(ao_cover.clamp(0.0, 1.0));
                 }
                 None => {
                     row[o + 1] = no_top;
                     row[o + 2] = 0;
+                    row[o + 3] = 0;
                 }
             }
-            row[o + 3] = one;
         }
     };
     // PERF (2026-10-14): every canopy update recomposes the whole map on the render thread --
@@ -2684,6 +2700,31 @@ fn compose_skyvis_rows(
     }
     let _ = h;
     out
+}
+
+/// Rows of the canopy grid that one composed texel's blurred coverage reads on either side.
+const CANOPY_BLUR_CELLS: u32 = 2;
+
+/// Canopy coverage at (x, z) under a 5x5 binomial ([1 4 6 4 1] per axis, close to a round
+/// Gaussian of one cell -- a tent left square halos round the crowns): the sky light a point on
+/// the floor loses depends on how much of its sky the crowns hide, not on whether a crown sits
+/// straight overhead. A lone tree hides part of it and its edge fades over a crown's width; a
+/// closed forest stays covered. Sampled by canopy_sky_ao (frame.wgsl) from the texture's alpha.
+fn canopy_cover_blurred(n: u32, cover: &[f32], x: u32, z: u32) -> f32 {
+    const W: [f32; 5] = [1.0, 4.0, 6.0, 4.0, 1.0];
+    let r = CANOPY_BLUR_CELLS as i64;
+    let (n, x, z) = (n as i64, x as i64, z as i64);
+    let mut sum = 0.0;
+    for dz in -r..=r {
+        let sz = (z + dz).clamp(0, n - 1);
+        let row = &cover[(sz * n) as usize..((sz + 1) * n) as usize];
+        let mut acc = 0.0;
+        for dx in -r..=r {
+            acc += W[(dx + r) as usize] * row[(x + dx).clamp(0, n - 1) as usize];
+        }
+        sum += W[(dz + r) as usize] * acc;
+    }
+    (sum / 256.0).clamp(0.0, 1.0)
 }
 
 /// PERF-CANOPY-BAND: the first and last row (inclusive) in which two n x n canopy grids differ,
