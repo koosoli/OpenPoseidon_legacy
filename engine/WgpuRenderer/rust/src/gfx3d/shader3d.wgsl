@@ -2614,8 +2614,15 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             // What the march found, at its confidence; dark blue where it found nothing.
             return vec4<f32>(mix(vec3<f32>(0.0, 0.0, 0.12), ssr_coat, ssr_hit.w), 1.0);
         }
-        let env_base = mix(reflect_env_radiance(refl_dir, rough) * occ, ssr_base, wb);
-        let env_coat = mix(reflect_env_radiance(refl_dir, coat_rough) * occ, ssr_coat, wc);
+        // Seen from INSIDE (the first-person cockpit draw, or the back of a pane), the reflected
+        // ray goes into the cabin, which is dark -- not up into the sky the environment map
+        // holds. Taking the sky there made the windscreen a bright mirror you could not see out
+        // of (owner, 2026-10-25, civil Skoda). The interior gets a dark cabin's share instead;
+        // a screen-space hit is still the real thing and stays.
+        let inside = (material_flags(material) & MATFLAG_COCKPIT) != 0u || dot(geometric_normal, view_dir) < 0.0;
+        let env_sky = select(1.0, 0.06, inside);
+        let env_base = mix(reflect_env_radiance(refl_dir, rough) * occ * env_sky, ssr_base, wb);
+        let env_coat = mix(reflect_env_radiance(refl_dir, coat_rough) * occ * env_sky, ssr_coat, wc);
         let spec = env_base * fb * (1.0 - fc) + env_coat * fc;
         // What the reflection takes, the diffuse body no longer scatters (energy, roughly).
         let keep = (1.0 - fc * occ) *
