@@ -49,8 +49,8 @@ fn sky_wgsl_validates_outside_whole_world() {
         .unwrap_or_else(|e|panic!("sky.wgsl without WHOLE_WORLD fails validation: {e:?}"));
 }
 
-// CLOUD-MS (WGR_CLOUD_MS=1): the multiple-scattering variant validates, with and without WHOLE_WORLD,
-// and actually carries the octaves; the default variant does not.
+// CLOUD-MS (default; WGR_CLOUD_MS=0 = off): the multiple-scattering variant validates, with and without
+// WHOLE_WORLD, and actually carries the octaves; the variant without the define does not.
 #[test]
 fn sky_wgsl_validates_with_cloud_ms() {
     for whole_world in [false,true] {
@@ -67,10 +67,15 @@ fn sky_wgsl_validates_with_cloud_ms() {
         assert!(format!("{module:?}").contains("ms_ph1"),"CLOUD_MS did not compile the octaves in");
     }
     let mut composer=crate::shaders::build_composer();
+    let mut defs=crate::shaders::shader_defs();
+    defs.remove("CLOUD_MS");
     let module=composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor {
-        source:include_str!("sky.wgsl"),file_path:"sky/sky.wgsl",shader_defs:crate::shaders::shader_defs(),..Default::default()
+        source:include_str!("sky.wgsl"),file_path:"sky/sky.wgsl",shader_defs:defs,..Default::default()
     }).unwrap_or_else(|e|panic!("compose sky: {}",e.emit_to_string(&composer)));
-    assert!(!format!("{module:?}").contains("ms_ph1"),"the default sky carries the CLOUD_MS octaves");
+    assert!(!format!("{module:?}").contains("ms_ph1"),"the sky without CLOUD_MS carries the octaves");
+    if std::env::var("WGR_CLOUD_MS").as_deref()!=Ok("0") {
+        assert!(crate::shaders::shader_defs().contains_key("CLOUD_MS"),"CLOUD_MS is not on by default");
+    }
 }
 
 // Guards every sky.wgsl edit: parse + validate the module offline so a WGSL error
