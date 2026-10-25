@@ -2661,7 +2661,8 @@ const GameOperator A3Binary[] = {
     GameOperator(GameNothing, "ctrlSetPositionH", function, A3CtrlSetPositionPart<3>, GameScalar, GameScalar),
     GameOperator(GameNothing, "ctrlSetFont", function, A3CtrlIgnoredBinary, GameScalar, GameAny),
     GameOperator(GameNothing, "ctrlSetFontHeight", function, A3CtrlIgnoredBinary, GameScalar, GameAny),
-    GameOperator(GameAny, "#", mocnina, A3HashIndex, GameArray | GameString, GameScalar),
+    // below a unary command, as in Arma 3: `ctrlPosition _ctrl # 2` is (ctrlPosition _ctrl) # 2
+    GameOperator(GameAny, "#", unar, A3HashIndex, GameArray | GameString, GameScalar),
     GameOperator(GameBool, "params", function, A3ParamsBinary, GameVoid, GameArray),
     GameOperator(GameAny, "catch", function, A3Catch, GameVoid, GameString),
     GameOperator(GameNothing, "throw", function, A3IfThrow, GameIf, GameVoid),

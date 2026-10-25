@@ -568,9 +568,18 @@ GameValue A2CreateDiaryRecord(const GameState*, GameValuePar oper1, GameValuePar
 }
 
 // Drops a trailing SQF "// comment" from a code fragment out[from..] (quotes inside a
-// config string are doubled; SQF also uses '...').
+// config string are doubled; SQF also uses '...'), and a whole fragment that is a
+// preprocessor line: Old Man's sector FSMs keep "#define S_SPAWNED 2" lines in their code.
 void StripSqfLineComment(std::string& out, size_t from)
 {
+    size_t first = from;
+    while (first < out.size() && (out[first] == ' ' || out[first] == '\t'))
+        first++;
+    if (first < out.size() && out[first] == '#')
+    {
+        out.resize(from);
+        return;
+    }
     bool dq = false, sq = false;
     for (size_t i = from; i + 1 < out.size(); i++)
     {
