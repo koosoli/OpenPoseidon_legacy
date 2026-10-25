@@ -247,6 +247,9 @@ class ObjectShapeType: public RefCountWithLinks
 };
 
 // Object is the interface and default implementation of any object present in Landscape.
+class Helicopter;
+class Ship;
+
 class Object: public NetworkObject, public FrameBase, public IAnimator
 {
 	protected:
@@ -376,6 +379,11 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	/// Per-frame render interpolation state, set by World after its tick loop.
 	static void SetRenderInterpAlpha(float alpha);
 	static float RenderInterpAlpha();
+	/// Game time the drawn frame shows, in ms: Glob.time minus the part of the last tick the
+	/// interpolation has not reached yet. Effects that are a pure function of time (muzzle
+	/// bursts) use it so they move every frame instead of once per tick.
+	static void SetRenderInterpStep(float stepSeconds);
+	static double RenderTimeMs();
 	static bool RenderInterpEnabled();
 
 	// Perform any animation of object shape. May transform vertices or change face
@@ -462,6 +470,13 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	virtual RString GetNameSound() const;
 	// Check if object should be used as reference for Move command
 	virtual bool IsMoveTarget() const;
+	// What dynamic_cast<const Helicopter*> / <const Ship*> answer, as one virtual call
+	// (PERF, 2026-10-14). Per-frame scans of the whole vehicle list -- the presentation
+	// snapshot's rotor and wake lists, the airflow field's rotor wash -- asked the cast of
+	// every soldier, and a failing dynamic_cast walks the hierarchy. Overridden only by
+	// Helicopter and Ship, so their subclasses get exactly the answer the cast gives.
+	virtual const Helicopter *AsHelicopter() const {return nullptr;}
+	virtual const Ship *AsShip() const {return nullptr;}
 	// Check which rendering pass this object should be drawn in
 	virtual int PassNum( int lod );
 
@@ -520,13 +535,22 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	// viewports) instead of being stretched to fill the full width. Used by the optic
 	// overlays (binocular / scope / gunsight); the lateral strips it leaves are filled
 	// by DrawWidescreenPillarbox. Default false keeps the full-width fill (cinema border).
-	static void Draw2D( LODShape *lShape, int lod, PackedColor cColor, bool preserveAspect4x3 = false );
+	// `scale` grows the overlay about its own centre (PIM-RECOIL: the optic punch on a shot).
+	static void Draw2D( LODShape *lShape, int lod, PackedColor cColor, bool preserveAspect4x3 = false,
+		float scale = 1.0f );
 
 	// Paint solid-black pillarbox bars outside the central 4:3 area for
 	// 4:3-authored overlays. By default this is gated to gameplay so menu
 	// intro camera effects stay full-width.
 	static void DrawWidescreenPillarbox(bool requireGameplayActive = true);
 	static void DrawWidescreenPillarbox(bool requireGameplayActive, bool force);
+	// Screen overlays drawn from inside the 3D scene (weapon/vehicle optics, their
+	// pillarbox bars, camera-effect overlays) are display-referred images. On the HDR
+	// renderer anything drawn before the scene resolve is tonemapped with the world, which
+	// washed a near-black optic texture out to light grey. World::Draw queues them while the
+	// world is drawn and replays them right after ResolveSceneToDisplay, before the HUD.
+	static void BeginDeferredOverlays();
+	static void FlushDeferredOverlays();
 	
 	// Draw given shape as 3D lines
 	void DrawLines( int level, ClipFlags clipFlags, const FrameBase &pos );
@@ -600,6 +624,11 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 
 	virtual void SetConstantColor( PackedColor color ) {}
 	virtual PackedColor GetConstantColor() const;
+	// Mud caked on a vehicle, for the renderer (Weather/MudCoat.hpp): `encoded` is
+	// EncodeMudCoat; mud is measured along the vehicle's up axis (`upPacked`,
+	// PackMudUp) from the plane dot(p, up) = `planeD` through its lowest point.
+	// False when clean or not a vehicle that collects mud.
+	virtual bool GetMudCoat( float &/*encoded*/, float &/*planeD*/, float &/*upPacked*/ ) const {return false;}
 
 	// IAnimator interface implementation
 	void GetMaterial(TLMaterial &mat, int index) const override;

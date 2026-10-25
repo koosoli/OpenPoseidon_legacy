@@ -35,7 +35,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 22u // Terrain-following fog and coherent density modulation
+#define WGR_ABI_VERSION 26u // Append-only GlobalMCR production mode
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -167,7 +167,12 @@ enum WgrDepthMode : uint32_t
        wgr_set_soft_particles has been called with enabled != 0 -- with the path off the
        renderer treats this exactly as WGR_DEPTH_TEST, so it is always safe to send.
        Adds no struct and no size: WgrDraw2DBatch.depth is a plain uint32. */
-    WGR_DEPTH_TEST_SOFT = 3
+    WGR_DEPTH_TEST_SOFT = 3,
+    /* Test + write, but fragments where the TEXTURE alpha is below 0.3 are discarded, so
+       only a sprite's solid shape lands in the depth buffer. For sprites a later full-screen pass fogs
+       by depth (underwater bubbles under the underwater compositor): without depth they
+       take the murk of whatever is behind them and vanish. No size change, as above. */
+    WGR_DEPTH_TEST_WRITE_CUTOUT = 4
 };
 
 /* Selects what a WgrCmd does when the frame's command stream is replayed. */
@@ -318,7 +323,8 @@ enum WgrDraw3DFlags : uint32_t
      * (texture alpha >= 0.98) so a mostly-solid atlas that classified Blend (a floor, a camo net)
      * still occludes what is behind it; the colour pass keeps blending every texel. */
     WGR_DRAW3D_BLEND_SECTION = 8192,
-    WGR_DRAW3D_BOOT_RELIEF = 16384 // exact authored footstep Mark on deformable soil, opt-in
+    WGR_DRAW3D_BOOT_RELIEF = 16384, // exact authored footstep Mark on deformable soil, opt-in
+    WGR_DRAW3D_EARTH_SURFACE = 32768 // globe/far Earth: exempt from finite-world cave lighting
 };
 
 /* Matrices per palette block (the engine's own bone-palette cap). Each skinned
@@ -384,6 +390,18 @@ struct WgrDraw3D
     /* Raw local-light specular RGB, independent of sun radiance; w reserved.
      * Appended ABI extension: 272 -> 288 bytes, covered by the layout handshake. */
     WgrVec4 mat_local_specular;
+    /* REFLECT-001 surface class (ReflectMaterial.hpp). All-zero when WGR_REFLECT is off,
+     * which the shader treats as "not classified" -- today's image unchanged.
+     * reflect0 = roughness, F0, metal, clear coat
+     * reflect1 = class id, clear-coat roughness, source id, debug view (0 = off)
+     * Appended ABI extension: 288 -> 320 bytes, covered by the layout handshake. */
+    WgrVec4 mat_reflect0;
+    WgrVec4 mat_reflect1;
+    /* REFLECT-001 D.1 (320 -> 336): the section's per-texel specular map (SMDI) for the
+     * classified reflection, 0 = none / WGR_REFLECT off. Arma 1-3 paint a whole car on one
+     * atlas; this map is what tells its tyres and trim from its paint. */
+    uint64_t reflect_specular_texture_id;
+    uint64_t _reflect_pad;
 };
 
 /* One frame-global point or spot light, shared by every 3D draw + terrain (bound
@@ -452,7 +470,16 @@ enum WgrModelSectionFlags : uint32_t
     WGR_MODEL_SECTION_NATIVE_PBR_PREVIEW = 64u,
     /* Section intersects a known procedural clock selection or lacks its proof.
      * Snow colour/normal must both refuse it; existing alpha and draw ownership remain. */
-    WGR_MODEL_SECTION_NO_OBJECT_SNOW = 128u
+    WGR_MODEL_SECTION_NO_OBJECT_SNOW = 128u,
+    /* Preview-only hardware sRGB BCR views; original texture slots stay linear. */
+    WGR_MODEL_SECTION_NATIVE_PBR_SRGB = 256u,
+    /* Separate ordered-detail/global normal preview; requires supported source metadata. */
+    WGR_MODEL_SECTION_NATIVE_PBR_NORMALS = 512u,
+    /* Optional validated authored UV0 frame; only with the ordered normal preview. */
+    WGR_MODEL_SECTION_NATIVE_PBR_TANGENTS = 1024u,
+    // Optional ordered native AO. layer_colour[].w carries AO multipliers only
+    // under this flag; RGB tint and public struct layout remain unchanged.
+    WGR_MODEL_SECTION_NATIVE_PBR_LAYER_AO = 2048u
 };
 
 /* Per-section shading, parallel to a model's sections (one per section). The RAW
@@ -503,11 +530,36 @@ struct WgrModelMaterial
     float normal_power = 1.0f;
     /* Crown self-occlusion volume (`GeometryAOCenter/Height/Width/Intensity`):
      * xyz = trunk-axis centre in MODEL space, w = intensity (0 = off); second
-     * lane x = cylinder height (reserved: the fitted falloff is radial-only),
-     * y = cylinder radius. Zero lanes keep every material that names none
+     * lane x = FadeFaces (RFG-144: edge-on leaf-card fade, 0 = off), y = cylinder radius. Zero lanes keep every material that names none
      * exactly where it was. */
     WgrVec4 crown_ao_p0;
     WgrVec4 crown_ao_p1;
+    /* Optional native opaque PBR preview: Basic roughness/metalness multipliers.
+     * Multi uses RGB mask multipliers in xyz: w=1 for mask scales, w=2 for
+     * the separately opted-in standard ordered/detail-mask composition.
+     * Defaults keep Basic identity; never used by legacy/cutout shading. */
+    WgrVec4 native_pbr_scales{1.0f, 1.0f, 0.0f, 0.0f};
+    /* Optional ordered-layer preview only. Zero handle samples white. Parameters
+     * are (UV scale, sharpness, offset, UV source 0/1); existing lanes retain their
+     * meaning. The renderer resolves these handles into its own descriptor slots. */
+    WgrTexture layer_mask_texture_id[3]{};
+    WgrVec4 layer_mask_params[3]{};
+    /* Optional normal preview only. Global normal UV is independent of colour
+     * tiling; strengths apply to decoded RG before Z reconstruction per layer. */
+    WgrVec4 global_normal_uv{1.0f, 1.0f, 0.0f, 0.0f};
+    WgrVec4 detail_normal_strength{1.0f, 1.0f, 1.0f, 1.0f};
+    /* Optional supported linear GlobalMCR only; zero disables the sample. */
+    WgrTexture global_overlay_texture_id{};
+    float global_overlay_black{};
+    float global_overlay_white{};
+    /* RFG-118: 0 = the linear preview contract; bit 0 = Enfusion GlobalMCRMap in production
+     * (encoded colour), bit 1 = GlobalMCRMode Multiply (else Overlay), bit 2 = UVSrcGlobalMaps
+     * "UV set 2" (else the first set, Enfusion's default). */
+    uint32_t global_overlay_mode{};
+    /* RFG-181/185 (was a pad word): a native MatPBRTreeCrown. Bits 0-12 FarLODDistanceOffset (dm),
+     * bit 13 = crown, bit 15 = NormalsToCamera, bits 16-25 FarLODHeightOffset (dm, signed
+     * 10-bit), bits 26-31 SSSBackScattering x 63. 0 = every other material. */
+    uint32_t far_normals{};
 };
 
 /* One drawable LOD level: its FindSqrtLevel resolution threshold (_resolutions[i]) +
@@ -580,7 +632,15 @@ struct WgrInstance
  * inherit it. These reserved lanes preserve the public struct layout. */
 
 static_assert(sizeof(WgrModelSection) == 24, "WgrModelSection must match Rust");
-static_assert(sizeof(WgrModelMaterial) == 320, "WgrModelMaterial must match Rust");
+static_assert(sizeof(WgrModelMaterial) == 464, "WgrModelMaterial must match Rust");
+static_assert(offsetof(WgrModelMaterial, global_overlay_mode) == 456, "Append-only GlobalMCR mode");
+static_assert(offsetof(WgrModelMaterial, layer_mask_texture_id) == 336, "Append-only mask handles");
+static_assert(offsetof(WgrModelMaterial, layer_mask_params) == 360, "Append-only mask parameters");
+static_assert(offsetof(WgrModelMaterial, global_normal_uv) == 408, "Append-only global normal UV");
+static_assert(offsetof(WgrModelMaterial, detail_normal_strength) == 424, "Append-only detail normal strengths");
+static_assert(offsetof(WgrModelMaterial, global_overlay_texture_id) == 440, "Append-only global overlay handle");
+static_assert(offsetof(WgrModelMaterial, global_overlay_black) == 448, "Append-only global overlay powers");
+static_assert(offsetof(WgrModelMaterial, global_overlay_white) == 452, "Append-only global overlay powers");
 static_assert(sizeof(WgrModelLod) == 16, "WgrModelLod must match Rust");
 static_assert(sizeof(WgrInstance) == 144, "WgrInstance must match Rust");
 
@@ -732,6 +792,13 @@ struct WgrSkyRuntime
     WgrVec4 moon_params;
     WgrVec4 moon_sun;
     WgrVec4 layer_fog_weather; // captured fog, landscape-ready, camera-ready, reserved
+    /* Whole world, in WORLD coordinates of the active frame (the Earth origin's tangent frame, or the
+     * moon frame near the moon -- EarthMoonFrame.hpp): the Earth's centre, the moon's centre, and the
+     * Earth-fixed x and z axes as world directions. Zero outside whole-world mode. */
+    WgrVec4 earth_centre;
+    WgrVec4 moon_centre;
+    WgrVec4 ecef_x;
+    WgrVec4 ecef_z;
 };
 
 /* Long-distance terrain sun-shadow sweep (was wgr_terrain_set_sun_shadow's args). */
@@ -1031,7 +1098,11 @@ struct WgrShadowPass
      * the renderer cannot see them, and everything it CAN see (the retained-set epoch, the
      * caster set, the depth target's shape) it adds itself. */
     uint32_t local_dirty_mask;
-    uint32_t local_pad[1];
+    /* PERF 2026-10-14 -- bit c set = sun cascade c KEEPS the depth it holds from an earlier
+     * frame: no pass, no clear. The engine sets it only when that layer still covers this
+     * frame's receivers, and samples it with the matrix it was rendered with (EngineWgpu::
+     * UpdateShadowCascadeCache). Occupies what was a pad word, so the ABI is unchanged. */
+    uint32_t cascade_keep_mask;
     WgrMat4 local_vp[24];
 };
 
@@ -1388,6 +1459,16 @@ struct WgrGrassParams
        atlas as the tint and the PlantMat's lerp as the amount. Zero = untinted. */
     float native_tint[3];
     float native_tint_lerp;
+    /* GRS-VAR: the procedural meadow's per-clump looks (flower heads, weed tints, seeding
+       grass). [on, head brightness, share of a clump's blades that bear a head, drift field
+       frequency 1/m]. on = 0 is the meadow before GRS-VAR exactly; the caller clears it on a
+       native (Reforger) world, and the shader gates it there too. */
+    float variety[4];
+    /* Relative weight of each look inside its species group, by slot: grass 0-3 (plain,
+       foxtail, short bent, seeding fescue), weed 4-7 (clover, nettle, thistle, dock), flower
+       8-15 (daisy, poppy, dandelion, cornflower, buttercup, red clover, yarrow, cranesbill).
+       A group whose weights sum to 0 keeps its plain look. */
+    float look_weights[16];
 };
 
 // --- Water (GPU CDLOD surface) -----------------------------------------------
@@ -1594,13 +1675,16 @@ struct WgrWaterParams
      * the camera; read only by that backend). Per boat i, eight lanes from [8i]:
      * [+0] x, z = hull centre (world), z/w = heading (world XZ of the model forward)
      * [+1] x, z = world velocity, z = thrust 0..1, w = stable id (float-exact, >= 2)
-     * [+2] x = half beam m, y = half length m, z = design draft m, w = flags (1 present, 2 driven)
+     * [+2] x = half beam m, y = half length m, z = design draft m, w = flags (1 present, 2 driven,
+     *      4 water mask: no sea is drawn inside the hull; x, z and [+3].x are then the hull's own
+     *      design-waterline origin and x its beam at the sheer)
      * [+3] (W6i) x = design waterline height at the hull centre (world y), y = vertical velocity,
      *      z = freeboard m, w = CPU sea height at the propeller
-     * [+4] (W6i) the model forward axis xyz (world, unit), w unused
-     * [+5] (W6i) the model up axis xyz (world, unit), w unused
+     * [+4] (W6i) the model forward axis xyz (world, unit), w = water mask: stern (m along forward)
+     * [+5] (W6i) the model up axis xyz (world, unit), w = water mask: bow (m along forward)
      * [+6] (W6i) CPU sea height at bow contacts 0-3, [+7] xy = contacts 4-5 (see
-     *      PresentationSnapshot.cpp WakeSprayContactPoint), zw unused
+     *      PresentationSnapshot.cpp WakeSprayContactPoint), zw = water mask: sheer height above the
+     *      waterline aft and at the bow
      * sizeof 1216 -> 1472 with the Rust side (W6h: 1312). */
     WgrVec4 tidewater_wake[16];
 };
@@ -2317,7 +2401,7 @@ static_assert(sizeof(WgrBlend) == 4, "WgrBlend must be 4 bytes to match the Rust
 static_assert(sizeof(WgrVertex2D) == 32, "WgrVertex2D layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrMeshVertex) == 68, "WgrMeshVertex must match the engine SVertex layout");
 static_assert(sizeof(WgrDraw2DBatch) == 32, "WgrDraw2DBatch layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrDraw3D) == 288, "WgrDraw3D layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrDraw3D) == 336, "WgrDraw3D layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrLight) == 64, "WgrLight layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTonemap) == 64, "WgrTonemap layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrExposure) == 32, "WgrExposure layout must match the Rust #[repr(C)] struct");
@@ -2328,7 +2412,7 @@ static_assert(sizeof(WgrSkyLook) == 192, "WgrSkyLook layout must match the Rust 
  * This assert and sky/mod.rs's rust_and_wgsl_sky_structs_declare_the_same_fields_in_the_same_order
  * are the ONLY things standing between a lane added on one side of the FFI and silent garbage
  * in the shader — keep them in step. */
-static_assert(sizeof(WgrSkyRuntime) == 128, "WgrSkyRuntime layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrSkyRuntime) == 192, "WgrSkyRuntime layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTerrainSunShadow) == 16, "WgrTerrainSunShadow layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSkyVisibility) == 32, "WgrSkyVisibility layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrFoliage) == 80, "WgrFoliage layout must match the Rust #[repr(C)] struct");
@@ -2359,7 +2443,7 @@ static_assert(sizeof(WgrGrassTrack) == 16, "WgrGrassTrack layout must match the 
 static_assert(sizeof(WgrGrassDownwash) == 16, "WgrGrassDownwash layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSmokeShadowBlob) == 32, "WgrSmokeShadowBlob layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSmokeVolumeParams) == 96, "WgrSmokeVolumeParams layout must match the Rust #[repr(C)] struct");
-  static_assert(sizeof(WgrGrassParams) == 4784, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
+  static_assert(sizeof(WgrGrassParams) == 4864, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterParams) == 1472, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrRainWaterParams) == 48, "WgrRainWaterParams must match Rust");
 static_assert(sizeof(WgrRainWaterSourceKey)==32 && offsetof(WgrRainWaterSourceKey,terrain_range)==24);
@@ -2490,14 +2574,45 @@ extern "C"
                                                   int32_t format, uint32_t mip_count, uint32_t flags,
                                                   const uint8_t* data, uint32_t byte_length, uint32_t slot);
 
+    /* FLY-001: texture creation from the producer while the render thread is mid-frame.
+       The ingress lives as long as the renderer; its calls are thread-safe. A created
+       texture joins the registry at the renderer's next frame (or next handle-resolving
+       call). create returns 0 when refused -- use wgr_texture_create_in_slot then. */
+    struct WgrTextureIngress;
+    WGR_API const WgrTextureIngress* wgr_texture_ingress(WgrRenderer* renderer);
+    WGR_API uint32_t wgr_texture_ingress_slot_acquire(const WgrTextureIngress* ingress);
+    WGR_API WgrTexture wgr_texture_ingress_create(const WgrTextureIngress* ingress, uint32_t width, uint32_t height,
+                                                  int32_t format, uint32_t mip_count, uint32_t flags,
+                                                  const uint8_t* data, uint32_t byte_length, uint32_t slot);
+
     /* Replace the pixels of an existing RGBA8 texture. */
     WGR_API void wgr_texture_update(WgrRenderer* renderer, WgrTexture id, const uint8_t* rgba, uint32_t byte_length);
+    /* Replace a rectangle of mip level `mip` (block-aligned for BC formats); `data` holds its rows -- block rows
+     * for BC -- tightly packed. */
+    WGR_API void wgr_texture_update_region(WgrRenderer* renderer, WgrTexture id, uint32_t mip, uint32_t x, uint32_t y,
+                                           uint32_t w, uint32_t h, const uint8_t* data, uint32_t byte_length);
+    /* Whole world elevation pyramid (docs/earth-elevation-pyramid.md): its RGBA8 Terrarium-encoded height atlas and
+     * lookup, read by the 3D vertex shader's conform mode 3. 0, 0 unbinds. */
+    WGR_API void wgr_earth_heights(WgrRenderer* renderer, WgrTexture atlas, WgrTexture lookup);
+    /* Whole world: the sea floor beyond the terrain heightmap's window, for Tidewater's depth colour -- n x n world
+     * heights (height less the curvature drop) from (originX, originZ) every `cell` metres. Copied. */
+    /* Whole world terrain sun shadow (gfx3d/earth_shadow.rs): the camera's world x, z and the origin (degrees) each
+     * frame the elevation pyramid's ground is drawn; enabled 0 when it is not (the moon). */
+    WGR_API void wgr_earth_shadow_input(WgrRenderer* renderer, uint32_t enabled, float camX, float camZ, double latitude,
+                                        double longitude);
+    WGR_API void wgr_water_set_far_floor(WgrRenderer* renderer, const float* heights, uint32_t n, float originX,
+                                         float originZ, float cell);
 
     WGR_API void wgr_texture_destroy(WgrRenderer* renderer, WgrTexture id);
 
     /* Create a static mesh from interleaved vertices + 16-bit triangle-list
      * indices; returns a non-zero handle, or 0 on failure. */
     WGR_API WgrMesh wgr_mesh_create(WgrRenderer* renderer, WgrSlice<WgrMeshVertex> verts, WgrSlice<uint32_t> indices);
+
+    /* RFG-127: as wgr_mesh_create, for static geometry never passed to wgr_mesh_update.
+     * Byte-identical content shares one pool allocation (WGR_MESH_DEDUP=0 disables). */
+    WGR_API WgrMesh wgr_mesh_create_shared(WgrRenderer* renderer, WgrSlice<WgrMeshVertex> verts,
+                                           WgrSlice<uint32_t> indices);
 
     /* Re-upload vertex data for an existing mesh (dynamic / animated shapes).
      * The topology (indices) is unchanged; the vertex count must not exceed the
@@ -2568,6 +2683,17 @@ extern "C"
     /* Retire a model registration after removing its owners. IDs are never reused.
        Mesh storage has a separate lifetime and is released by wgr_mesh_destroy. */
     WGR_API void wgr_model_retire(WgrRenderer* renderer, uint32_t model);
+    /* LOD-STREAM: evict a static, unshared mesh's pool storage, keeping its handle (1 = evicted,
+       0 = refused); sections naming it stop drawing and their LOD falls back to the next coarser
+       resident level. wgr_mesh_restore uploads the same content again under the same handle. */
+    WGR_API uint32_t wgr_mesh_evict(WgrRenderer* renderer, uint64_t mesh);
+    WGR_API uint32_t wgr_mesh_restore(WgrRenderer* renderer, uint64_t mesh, WgrSlice<WgrMeshVertex> verts,
+                                      WgrSlice<uint32_t> indices);
+    /* LOD-STREAM: per registered model id, the finest LOD index (into its registered LOD list)
+       any instance needs by distance alone, minus `margin`; 255 = no live instance. Writes
+       min(models, capacity) bytes, returns the model count. */
+    WGR_API uint32_t wgr_lod_distance_demand(WgrRenderer* renderer, uint32_t margin, uint8_t* out,
+                                             uint32_t capacity);
     WGR_API uint32_t wgr_model_register(WgrRenderer* renderer, float bounding_sphere, WgrSlice<WgrModelLod> lods,
                                         WgrSlice<WgrModelSection> sections, WgrSlice<WgrModelMaterial> materials,
                                         const char* name);
@@ -2625,6 +2751,17 @@ extern "C"
      * the C++ side walks these per frame. Passing an empty slice releases the set. */
     WGR_API void wgr_far_set_instances(WgrRenderer* renderer, WgrSlice<WgrFarInstance> instances);
 
+    /* RFG-162 — replace every river of a native world, drawn as water in the water pass.
+     * `vertices`: 8 floats per vertex -- absolute world x, y, z; metres along the spline
+     * downstream; downstream direction x, z; signed metres across from the centreline; half
+     * width. `indices`: triangles. `look`: the MatRiver's r, g, b (Color), HalfLightDistance,
+     * FlowSpeed, Fresnel, SunPower, SunInfluence, WetFloor (a shorter slice keeps defaults).
+     * Empty `vertices` releases them. Returns the triangle count drawn. */
+    WGR_API uint32_t wgr_river_set_mesh(WgrRenderer* renderer, WgrSlice<float> vertices, WgrSlice<uint32_t> indices,
+                                        WgrSlice<float> look);
+    /* RFG-162 — 1 when the renderer draws rivers as water (it needs the HDR scene snapshot). */
+    WGR_API uint32_t wgr_river_supported(WgrRenderer* renderer);
+
     /* FAR INSTANCE TIER — per-frame knobs. `near_cutoff_m` is where the tier STARTS (proxies
      * closer than this are the real objects' job, so it should be the object draw distance);
      * `far_distance_m` is where it stops; `pixel_limit` is the sub-pixel rejection threshold in
@@ -2657,6 +2794,20 @@ extern "C"
     WGR_API void wgr_terrain_set_snow(WgrRenderer* renderer, const float* data, uint32_t count);
     // Separate signed 12.5cm mud height view; the snow data and public byte layouts remain intact.
     WGR_API void wgr_terrain_set_mud(WgrRenderer* renderer, const float* data, uint32_t count);
+    // Far mud view: same packing as wgr_terrain_set_mud with 0.5 m cells (256 m window),
+    // ruts only (values in [-limit, 0]). Shading only, no geometry.
+    WGR_API void wgr_terrain_set_mud_far(WgrRenderer* renderer, const float* data, uint32_t count);
+    // BOOM-001: explosion craters (CraterField::Snapshot). Two views packed back to back, each
+    // [originX, originZ, cell, limit] + 512*512: signed heights, then packed materials (soil + 256 *
+    // scorch, 0..255 each). far = 0: 0.25 m cells (128 m window); far = 1: 1 m cells (512 m).
+    WGR_API void wgr_terrain_set_craters(WgrRenderer* renderer, const float* data, uint32_t count, uint32_t farView);
+    /// BOOM-004: sharp snow bullet holes, [count, originX, originZ, 0] + count * 8 floats (count <= 64).
+    WGR_API void wgr_terrain_set_snow_marks(WgrRenderer* renderer, const float* data, uint32_t count);
+    // BOOM-001: the craters nearest the camera for grass placement (CraterField::NearestDiscs):
+    // [count, 0, 0, 0] then count (<= 64) x (x, z, soil radius, seed).
+    WGR_API void wgr_grass_set_craters(WgrRenderer* renderer, const float* data, uint32_t count);
+    // How full of standing water the mud ruts are, [0,1] (MudRutWaterLevel); terrain shading only.
+    WGR_API void wgr_terrain_set_mud_water(WgrRenderer* renderer, float level);
     // Separate signed sand view; positive loose rims are preserved.
     WGR_API void wgr_terrain_set_sand(WgrRenderer* renderer, const float* data, uint32_t count);
     /* Sinkhole W1: terrain holes for this frame. `edges` = n_edges x {nx, nz, d, last} in world X/Z; a point
@@ -2701,6 +2852,18 @@ extern "C"
      * Bit 15 marks a clamped transition tile: its texture maps exactly once onto
      * the cell with edges extended (GL33's ClampU|ClampV) instead of tiling.
      * `indices` is width*height uint16s. */
+    /* RFG-PBR: a native Reforger world's surface map, edge x edge palette indices (one byte each),
+     * blended by the terrain shader when WgrTerrainParams::_pad4 (the surface grid, metres per
+     * texel) is above zero. edge 0 clears it. */
+    /* Canopy occlusion grid: n x n cells over the terrain's world span (row-major z, x), the highest
+     * canopy top (m) and coverage [0,1] per cell. Lowers sky ambient below the canopy. n 0 clears. */
+    WGR_API void wgr_terrain_set_canopy(WgrRenderer* renderer, uint32_t n, const float* top, const float* cover);
+    /* PERF-CANOPY-CPU-BAND: the same grid, with the caller's word that only rows z0..=z1 differ from
+     * the grid it handed over last. The renderer recomposes just that band without diffing; it falls
+     * back to the full path when it holds no grid of that size. */
+    WGR_API void wgr_terrain_set_canopy_band(WgrRenderer* renderer, uint32_t n, uint32_t z0, uint32_t z1,
+                                             const float* top, const float* cover);
+    WGR_API void wgr_terrain_set_surface_map(WgrRenderer* renderer, uint32_t edge, const uint8_t* data);
     WGR_API void wgr_terrain_set_index_map(WgrRenderer* renderer, uint32_t width, uint32_t height,
                                            const uint16_t* indices);
 
@@ -2777,7 +2940,7 @@ extern "C"
         float detail_fade;
         float legacy_detail_scale; // Repeats/metre for legacy_detail_normal; 0 = absent.
         float middle_color[3];
-        uint32_t puddle_flags; // Former padding: bit 0 ground receiver; bit 1 legacy/native soft soil; bits 8..13 authored soft-soil slots.
+        uint32_t puddle_flags; // Former padding: bit 0 ground receiver; bit 1 legacy/native soft soil; bits 8..13 authored soft-soil slots; bit 16 Tidewater sand share in the legacy layer alpha (TWS_FLAG).
     };
     /* 20 header words, then the satellite/mask UVs and six per-slot UVs of two
      * vec4 each, then the Enfusion block. The WGSL `TerrainMaterial` in terrain.wgsl
@@ -2807,6 +2970,57 @@ extern "C"
     /* Upload one GeographyInfo::packed value per land cell. Grass uses the
      * existing authoritative water/road/forest/obstacle classification before
      * attempting any optional artist-authored exclusion masks. */
+    /* Whole World: the grass stands on the streamed near patch (hm_n x hm_n heights, `grid` m apart from
+     * frame (origin_x, origin_z)) with its own geography (geo_n x geo_n words, `geo_cell` m apart, bit 31 =
+     * grass), instead of the native island, until wgr_grass_clear_earth_ground. */
+    WGR_API void wgr_grass_set_earth_ground(WgrRenderer* renderer, float origin_x, float origin_z, float grid, uint32_t hm_n,
+                                            const float* heights, float geo_cell, uint32_t geo_n, const uint32_t* geography,
+                                            float sea_level);
+    WGR_API void wgr_grass_clear_earth_ground(WgrRenderer* renderer);
+    /* RFG-PBR: the native world's satellite (bank texture handle, one image over the whole land)
+     * that the procedural blades lean towards; 0 clears it. */
+    WGR_API void wgr_grass_set_satellite(WgrRenderer* renderer, uint64_t handle);
+    /* RFG-107: the native world's road segments per land cell for the grass placement (layout in
+     * grass.wgsl, road_edge_distance); null / 0 clears them. */
+    WGR_API void wgr_grass_set_road_cells(WgrRenderer* renderer, const uint32_t* data, uint32_t count);
+    /* PERF-GRASS-CELLS-INCREMENTAL: the same table, of which only the word ranges `ranges` (range_count
+     * pairs of start, length) changed; patched in place when the live buffer is big enough. */
+    WGR_API void wgr_grass_update_road_cells(WgrRenderer* renderer, const uint32_t* data, uint32_t count,
+                                             const uint32_t* ranges, uint32_t range_count);
+    /* Per photo-card layer selection weight within its surface's run (all 0 = uniform) and max draw
+     * distance as a fraction of the card ring's reach (0 = no limit); count <= 32, null resets. */
+    WGR_API void wgr_grass_set_layer_pick(WgrRenderer* renderer, const float* weights, const float* far, uint32_t count);
+    /* RFG-108: per photo-card layer, the world size (m) of the layer's full square when it holds a
+     * plant rasterised from its own model (0 = stock card sizing) and the per-instance size spread
+     * as a fraction of it; count <= 32, null resets. */
+    WGR_API void wgr_grass_set_layer_size(WgrRenderer* renderer, const float* sizes, const float* spreads,
+                                          uint32_t count);
+    /* RFG-116: bit i = atlas layer i belongs to a surface whose .emat names no PlantMat, so the
+       near ring grows no blades on cells whose run starts there. 0 = blades everywhere. */
+    WGR_API void wgr_grass_set_blade_skip(WgrRenderer* renderer, uint32_t mask);
+    /* RFG-153: radius (m) inside which native clutter plants draw as their own meshes and the mid
+       ring's cards yield (card_skip.z); 0 = off. */
+    WGR_API void wgr_grass_set_clutter_mesh_radius(WgrRenderer* renderer, float radius);
+    /* RFG-117: the near ring as Reforger PlantMat tuft cards. cfg = 8 floats [on, cards per plant,
+       Zenith deg, ZenithRandomOffset deg, card height m, HeightRandomOffset, Plants per m^2, 0];
+       aspect / scale = 8 floats each, per blade layer. cfg null = off. */
+    WGR_API void wgr_grass_set_native_tufts(WgrRenderer* renderer, const float* cfg, const float* aspect,
+                                            const float* scale);
+    /* RFG-140: grow the shared geometry pool to these sizes now and keep them as a floor the
+       shrink never crosses -- a mid-flight growth keeps old and new buffers alive together. */
+    WGR_API void wgr_geo_pool_reserve(WgrRenderer* renderer, uint64_t vertBytes, uint64_t indexBytes);
+    /* LAKE-FISH-001: surface level of the pond/lake covering world (x, z): 1 + *level, or 0 when
+       there is none. Thread-safe, no renderer needed. */
+    WGR_API uint32_t wgr_still_water_level_at(float x, float z, float* level);
+    /* RFG-138: per-surface PlantMat blade sets. setWords = 3 words, 3 bits per atlas layer (layer L
+       at bit 3L across the words) naming the set the run starting on L draws its tufts from;
+       cardSkip = bit per layer whose run grows blades only (no cards); cardFull = bit per layer whose
+       cards are drawn at full coverage (RFG-143 crop distance cards). sets = 64 floats (8 per set:
+       cards, Zenith, ZenithRandomOffset, height m, HeightRandomOffset, Plants/m2, ground-colour
+       lerp, has mask); aspect / scale = 64 floats (8 layers per set). Nulls reset to one set. */
+    WGR_API void wgr_grass_set_blade_sets(WgrRenderer* renderer, const uint32_t* setWords, uint32_t cardSkip,
+                                          uint32_t cardFull, const float* sets, const float* aspect,
+                                          const float* scale);
     WGR_API void wgr_grass_set_geography(WgrRenderer* renderer, uint32_t width, uint32_t height,
                                          const uint32_t* geography);
     WGR_API void wgr_grass_set_params(WgrRenderer* renderer, const WgrGrassParams* params);
@@ -2861,6 +3075,19 @@ extern "C"
      * lattice x, z, step, texels per side) into `lanes[4]`, the readback's age into `age_ms`. Returns
      * the texel count, 0 when there is none. Any thread. */
     WGR_API uint32_t wgr_water_drawn_grid(float* xyz, uint32_t cap, float* lanes, float* age_ms);
+    /* (OP) Water height queries (water_tw/query.rs): the world points (x, z pairs, at most 128) the
+     * Tidewater water evaluates from the next frame on, and the latest results, read back 1-3 frames
+     * late with the points they were asked at: up to `cap` points into `xz` and (height, dh/dx, dh/dz,
+     * valid) into `values`, the readback's age into `age_ms`. Returns the count, 0 when there is
+     * none. Any thread. */
+    WGR_API void wgr_water_query_points(const float* xz, uint32_t count);
+    WGR_API uint32_t wgr_water_query_results(float* xz, float* values, uint32_t cap, float* age_ms);
+    /* (OP) The swash field around the camera for the shorebirds (water_tw/swash.rs, read back 1-3
+     * frames late): up to `cap` texels of (runup, inland, dRdt, tau) into `texels` (4 floats each;
+     * w < 0 where no shore waves run), the lattice lanes (first texel x, z, step, texels per side)
+     * into `lanes[4]`, the readback's age into `age_ms`. Returns the texel count, 0 when there is
+     * none. Any thread. */
+    WGR_API uint32_t wgr_water_swash_field(float* texels, uint32_t cap, float* lanes, float* age_ms);
 
     /* Render + present one frame. Returns 0 on success (incl. transient skipped
      * frames), negative on error. */
@@ -3064,6 +3291,46 @@ WGR_API void wgr_set_smoke_volume_blobs(WgrRenderer* renderer, const WgrSmokeSha
    ran, in the high 32. A counter that can say "switched on and nothing arrived" apart from
    "switched on and marching" -- the distinction a screenshot cannot make. */
 WGR_API uint64_t wgr_get_smoke_volume_stats(const WgrRenderer* renderer);
+
+/* FIRE-001: volumetric fire (fire/mod.rs). One record per burning fire, every frame: the base of
+   the flames on the ground and the radius of the bed; intensity 0..1, smokiness 0..1, a stable key
+   (a u32's bit pattern in a float) and the kind (0 fireplace, 1 wreck, 2 explosion, 3 smoke without
+   flame); the wind (m/s); the smoke's colour; the solids around it. The nearest
+   four within 300 m are simulated and drawn; a fire no longer reported fades out. */
+typedef struct WgrFireSource
+{
+    float pos_radius[4];
+    float params[4];
+    float wind[4];     /* wind (m/s), w: box width (m) */
+    float color[4];    /* smoke colour (linear albedo), w: density scale */
+    float floor[100];  /* the box's 10 x 10 columns (row-major, +x then +z): open from floor ... */
+    float ceiling[100];/* ... to ceiling (world y); ceiling < floor: a solid column (a wall) */
+} WgrFireSource;
+#ifdef __cplusplus
+static_assert(sizeof(WgrFireSource) == 864, "WgrFireSource ABI mismatch (fire/mod.rs FireSource)");
+#endif
+WGR_API void wgr_set_fire_sources(WgrRenderer* renderer, const WgrFireSource* sources, uint32_t count);
+/* BOOM-005: this frame's muzzle flashes for the volumetric march, 8 floats each: (world x, y, z,
+ * age s), (barrel x, y, z, size); at most 8. Drawn once, then forgotten. */
+WGR_API void wgr_fire_set_muzzle_flashes(WgrRenderer* renderer, const float* data, uint32_t count);
+/* Boxes in use (low 32) and solver steps taken (high 32). */
+WGR_API uint64_t wgr_get_fire_stats(const WgrRenderer* renderer);
+
+/* MUD-001: thrown mud as a viscous particle fluid (mud/mod.rs). One record per spray this frame
+   (a wheel turning in wet soft ground, a boot in it): where, how many blobs, the launch velocity
+   and its spread, the blob size. Accumulated until the next frame records. */
+typedef struct WgrMudEmitter
+{
+    float pos_count[4];  /* where (world, m), w: how many blobs this frame */
+    float vel_spread[4]; /* launch velocity (m/s), w: its spread (m/s) */
+    float size[4];       /* x: drawn blob radius (m), y: positional spread (m) */
+} WgrMudEmitter;
+#ifdef __cplusplus
+static_assert(sizeof(WgrMudEmitter) == 48, "WgrMudEmitter ABI mismatch (mud/mod.rs MudEmitter)");
+#endif
+WGR_API void wgr_set_mud_emitters(WgrRenderer* renderer, const WgrMudEmitter* emitters, uint32_t count);
+/* Blobs emitted since start. */
+WGR_API uint64_t wgr_get_mud_emitted(WgrRenderer* renderer);
 
 WGR_API void wgr_set_temporal_tuning(WgrRenderer* renderer, const WgrTemporalTuning* tuning);
 WGR_API void wgr_get_temporal_info(WgrRenderer* renderer, WgrTemporalInfo* info);

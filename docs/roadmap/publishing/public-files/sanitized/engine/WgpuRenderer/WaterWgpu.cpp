@@ -1,5 +1,10 @@
 #include "WaterWgpu.hpp"
+#include <Poseidon/Dev/Diag/PhaseSplit.hpp>
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
+#include "EarthCoordinates.hpp"
+#include <Poseidon/World/Terrain/EarthMoonFrame.hpp>
 #include <Poseidon/World/Terrain/WaterBodies.hpp>
+#include <Poseidon/World/Terrain/WaterSurfaceQuery.hpp>
 #include <sstream>
 
 #include "CdlodDriver.hpp"
@@ -615,7 +620,11 @@ bool WaterWgpu::UpdateSeaWind(float now)
     }
 
     // Mean speed only; neither gusts nor heading alter the water configuration.
-    const float wantSpeed = SnapToBucket(windSnap.windMeanSpeed, kSeaWindSpeedBucket);
+    // WGR_TW_WEATHER_WIND=<m/s>: a capture override of the weather wind the sea follows (the dev
+    // panel's wind, for a scripted run)
+    static const float envWeatherWind = EnvFloat("WGR_TW_WEATHER_WIND", 0.0f);
+    const float meanSpeed = envWeatherWind > 0.0f ? envWeatherWind : windSnap.windMeanSpeed;
+    const float wantSpeed = SnapToBucket(meanSpeed, kSeaWindSpeedBucket);
 
     if (!_seaWindInit)
     {
@@ -638,7 +647,7 @@ bool WaterWgpu::UpdateSeaWind(float now)
     }
     // (b) moved out of the latched bucket by more than half a bucket + hysteresis
     const bool speedMoved =
-        std::abs(windSnap.windMeanSpeed - _seaWindSpeed) > (kSeaWindSpeedBucket * 0.5f + kSeaWindSpeedHysteresis);
+        std::abs(meanSpeed - _seaWindSpeed) > (kSeaWindSpeedBucket * 0.5f + kSeaWindSpeedHysteresis);
     if (!speedMoved)
     {
         return false;
@@ -872,8 +881,168 @@ void WaterWgpu::QueueRainWater(bool enabled)
     if (_rainWaterHasSurface) _engine.SubmitRainWaterMarker();
 }
 
+// Up to here the Earth sea is drawn; tw_water.wgsl fades it into the imagery over its last 10 km (EARTH_SEA_CEILING).
+// It was 8 km, and the imagery that showed from there drew rings round the camera on the sea.
+static constexpr float EarthSeaCeiling = 40000.0f;
+
+void WaterWgpu::DrawEarthWater(Scene& scene, float originX, float originZ, float grid, uint32_t samples)
+{
+    Camera* camera = scene.GetCamera();
+    const auto& look = _engine.WaterLook();
+    if (!_renderer || !camera || !look.enabled || !EarthStreaming::Enabled() || EarthStreaming::MoonFrameActive() ||
+        camera->Position().Y() >= EarthSeaCeiling || samples < 2 || grid <= 0.0f)
+        return;
+    static const bool forceCurrentOp = [] {
+        const char* value = std::getenv("WGR_WATER_BACKEND");
+        return value && std::strcmp(value, "0") == 0;
+    }();
+    if (forceCurrentOp) return; // This preview adapter requires Tidewater's bounded material.
+
+    // Tidewater owns its camera-centred CDLOD mesh. This marker submits that path;
+    // its shader follows the spherical sea datum and keeps opaque scene land.
+    // The height source has coast elevations, no bathymetry: zero-elevation ocean
+    // receives a presentation-only deep floor. Shore simulation stays disabled.
+    WgrWaterParams p{};
+    p.world_origin = {originX, originZ};
+    p.terrain_grid = grid;
+    p.hm_width = p.hm_height = samples;
+    p.sea_level = 0.0f;
+    p.time = look.freeze.freezeTime ? look.freeze.fixedTime : render::frame::GPresentationSnapshot().timeSeconds;
+    p.water_backend = 1u; // Tidewater Native
+    p.flow_direction_speed.w = -1.0f; // Earth-only presentation marker; normal ocean kind is zero.
+    p.fft_control = {1.0f, 1337.0f, 0.0f, 0.0f};
+    uint32_t freezeMask = look.freeze.freezeFft ? WGR_WATER_FREEZE_FFT : 0u;
+    std::memcpy(&p.fft_control.z, &freezeMask, sizeof(freezeMask));
+    p.fft_wind_sea = {0.82f, 0.57f, 7.0f, 0.65f};
+    UpdateSeaWind(p.time);
+    const float amplitude = _seaWindInit ? WeatherAmplitudeScale(_seaWindSpeed, 7.0f, look.seaCalmScale) : 1.0f;
+    const auto& t = look.tidewater;
+    p.tidewater[0] = {std::max(t.amplitude, 0.0f) * amplitude, std::clamp(t.choppiness, 0.0f, 2.0f),
+                      std::max(t.swellScale, 0.0f), t.swellHeadingDeg};
+    p.tidewater[1] = {std::max(t.foamCoverage, 0.0f), std::max(t.foamIntensity, 0.0f), 0.0f,
+                      std::max(t.reflectionStrength, 0.0f)};
+    p.tidewater[2] = {std::clamp(t.cascadeScale, 0.25f, 4.0f), std::clamp(t.roughness, 0.0f, 1.0f),
+                      std::max(t.sss, 0.0f), std::clamp(t.backscatter, 0.0f, 1.0f)};
+    p.tidewater[3] = {std::max(t.gust, 0.0f), std::max(t.slick, 0.0f), std::max(t.windrow, 0.0f), float(t.debugView)};
+    p.tidewater_fx.z = std::clamp(t.waterGlow, 0.0f, 2.0f);
+    p.tidewater_sea = {7.0f, 120.0f, std::clamp(t.whitecaps, 0.0f, 1.0f), 0.0f};
+    // .z: the sea under the camera, which the renderer's underwater gate reads -- the spherical datum there,
+    // not the flat 0 m: 13.6 km from the origin the sea is 14.5 m lower, and a camera 3 m over it was
+    // composited as under water (owner, 2026-10-24).
+    p.optics_params = {1.0f, 1.0f, -float(Earth::CurvatureDrop(camera->Position().X(), camera->Position().Z())), 1.0f};
+    // Under the surface: the same underwater settings as the island sea (the Water tab's). Left at zero,
+    // Tidewater's underwater composite never ran in whole-world mode: a camera under the sea saw the
+    // open sky through the missing surface and no water at all.
+    p.look_params = {look.physicalLook ? 1.0f : 0.0f, look.glitterGain, look.sssGain, look.reflectionGain};
+    p.underwater_params = {std::max(look.underwaterEngageBand, 0.0f), std::max(look.underwaterDensity, 0.0f),
+                           std::clamp(look.underwaterColorBias, 0.0f, 1.0f), std::max(look.underwaterCausticGain, 0.0f)};
+    p.underwater_gate = {look.underwaterEffect ? 1.0f : 0.0f, std::clamp(look.waveFoamIntensity, 0.0f, 2.0f),
+                         std::clamp(look.waveFoamDeepFalloff, 0.0f, 1.0f), std::clamp(look.reflectionEdgeFade, 0.02f, 0.49f)};
+    _engine.QueueWaterParams(p);
+    _earthParams = p;
+    _earthParamsSet = true;
+    WgrWaterNode marker{};
+    marker.origin = {originX, originZ};
+    marker.size = (samples - 1) * grid;
+    _engine.SubmitWater(std::span<const WgrWaterNode>(&marker, 1));
+    ExchangeDrawnWater();
+}
+
+// Sinkhole W3 and the boats' hull queries: the drawn surface and the per-point heights go to the
+// simulation (SoldierOldSwim.cpp, ShipTidewater.cpp), this step's points come back. Both the island water
+// draw and the whole world's (DrawEarthWater) run it: the Earth sea skipped it, and a boat there floated on
+// the CPU predictor while the drawn waves washed over its deck (owner, 2026-10-24).
+void WaterWgpu::ExchangeDrawnWater()
+{
+    const auto& look = _engine.WaterLook();
+    // Sinkhole W3: hand the drawn surface around the camera to the simulation (swimmers near the camera
+    // and the camera following one ride it; SoldierOldSwim.cpp). None when it is stale (another water
+    // mode, a paused renderer).
+    static std::vector<float> grid(64 * 64 * 3);
+    float lanes[4] = {};
+    float ageMs = 0.0f;
+    const uint32_t n = wgr_water_drawn_grid(grid.data(), uint32_t(grid.size() / 3), lanes, &ageMs);
+    const bool validSide = std::isfinite(lanes[3]) && lanes[3] >= 2.0f && lanes[3] <= 64.0f;
+    const int side = validSide ? int(std::lround(lanes[3])) : 0;
+    if (TidewaterDrawsWater(look.waterBackend) && n > 0 && std::isfinite(ageMs) &&
+        ageMs >= 0.0f && ageMs < 250.0f && side * side == int(n))
+    {
+        SetDrawnWaterGrid(grid.data(), side, lanes);
+    }
+    else
+    {
+        SetDrawnWaterGrid(nullptr, 0, nullptr);
+    }
+    // (OP) the boats' hull samples anywhere on the sea (water_tw/query.rs): this step's points up,
+    // the latest results down (stale after 250 ms, as the grid)
+    static float queryXz[WaterQueryMaxPoints * 2];
+    static float resultXz[WaterQueryMaxPoints * 2];
+    static float resultValues[WaterQueryMaxPoints * 4];
+    const bool tidewater = TidewaterDrawsWater(look.waterBackend);
+    const int asked = tidewater ? TakeWaterQueryRequests(queryXz, WaterQueryMaxPoints) : 0;
+    wgr_water_query_points(queryXz, uint32_t(asked));
+    float queryAge = 0.0f;
+    const uint32_t got = tidewater ? wgr_water_query_results(resultXz, resultValues, WaterQueryMaxPoints, &queryAge) : 0;
+    if (got > 0 && std::isfinite(queryAge) && queryAge >= 0.0f && queryAge < 250.0f)
+    {
+        SetWaterQueryResults(resultXz, resultValues, int(got));
+    }
+    else
+    {
+        SetWaterQueryResults(nullptr, nullptr, 0);
+    }
+}
+
+void WaterWgpu::NoEarthWater()
+{
+    if (!_renderer || !_earthParamsSet)
+        return;
+    WgrWaterParams p = _earthParams;
+    p.underwater_gate.x = 0.0f;
+    p.sea_level = -1.0e9f;
+    p.optics_params.z = -1.0e9f; // the "body under the camera" level the gate prefers when .w is set
+    _engine.QueueWaterParams(p);
+}
+
+// PERF-030: the pieces of the WGPU water draw, the `water` slot of land:gnd's breakdown
+// (LandscapeRender.cpp). POSEIDON_WATER_DRAW_SLOW_MS (default 10 ms, 0 = off).
+namespace
+{
+enum WaterDrawSlot : size_t
+{
+    WdSetup, WdRebuild, WdParams, WdProbe, WdRest, WdSlotCount
+};
+Dev::PhaseSplit<WdSlotCount>& WaterDrawSplit()
+{
+    static Dev::PhaseSplit<WdSlotCount> split("water draw", {"setup", "rebuild", "params", "probe", "rest"},
+                                              "POSEIDON_WATER_DRAW_SLOW_MS", 10.0);
+    return split;
+}
+struct WaterDrawFrame
+{
+    size_t open = WdSetup; // the slot the time since the last lap belongs to
+    WaterDrawFrame() { WaterDrawSplit().Start(); }
+    void Lap(size_t done, size_t next)
+    {
+        WaterDrawSplit().Lap(done);
+        open = next;
+    }
+    ~WaterDrawFrame()
+    {
+        WaterDrawSplit().Lap(open);
+        std::string line;
+        if (WaterDrawSplit().EndFrame(line))
+            LOG_INFO(Graphics, "{}", line);
+    }
+};
+} // namespace
+
 void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
 {
+    WaterDrawFrame perfFrame;
+    // The rolling Earth heightmap is presentation-only. The finite Landscape's
+    // ocean/shoreline cannot describe it, so do not draw that unrelated water.
+    if (EarthStreaming::Enabled()) return;
     OceanCpuSample cpuSample;
     if (_renderer == nullptr || GLandscape == nullptr)
     {
@@ -892,7 +1061,9 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     }
 
     const Landscape& land = *GLandscape;
+    perfFrame.Lap(WdSetup, WdRebuild);
     RebuildIfNeeded(land);
+    perfFrame.Lap(WdRebuild, WdParams);
     if (_rootIndex < 0)
     {
         return;
@@ -1176,12 +1347,19 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         {
             float wind, fetch, chop, swell, surf, period, whitecaps;
         };
+        // Choppiness and whitecaps as island-expansion's sea presets (AppUI.js SEA). The displayed
+        // choppiness x amplitude is held at TidewaterMaxDisplayedChop (1.3) below: past it the displaced
+        // mesh folds over itself and the folds' back faces shade as water seen from below.
+        // (2026-10-13) island-expansion's own table (AppUI.js SEA), synced on the owner's request:
+        // its choppiness and whitecaps, not OP's 0.65/1.15/1.3 and 0.1/0.8.
         static constexpr TwSea kTwSea[4] = {
             {3.5f, 40.0f, 0.75f, 0.28f, 0.18f, 11.0f, 0.2f},   // Calm
             {7.0f, 120.0f, 0.9f, 0.48f, 0.34f, 9.0f, 0.5f},    // Breezy (Tidewater's defaults)
             {12.0f, 300.0f, 1.05f, 0.68f, 0.56f, 8.5f, 0.75f}, // Choppy
             {20.0f, 900.0f, 1.2f, 1.0f, 0.9f, 12.0f, 1.0f},    // Storm
         };
+        // The weather wind (OFP's, 0..~12 m/s) at which Weather mode reaches each preset.
+        static constexpr float kTwSeaWeatherWind[4] = {3.0f, 6.0f, 9.0f, 12.0f};
         float seaWindOverride = 7.0f; // Tidewater's authored Breezy local wind
         float seaFetch = 120.0f;
         float seaWhitecaps = std::clamp(t.whitecaps, 0.0f, 1.0f);
@@ -1201,6 +1379,28 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
                     tidewaterAmplitude = WeatherAmplitudeScale(envWind, 7.0f, look.seaCalmScale);
                 }
                 c = kTwSea[1]; // Breezy, Tidewater's default
+                // The weather drives the whole sea, not only its height: wind, choppiness, swell,
+                // whitecaps and surf follow the presets by the weather wind. Before 2026-10-12 this
+                // was Breezy at any weather with the amplitude scaled, so a storm had Breezy's few
+                // whitecaps and its choppiness. WGR_TW_WEATHER_SEA=0 restores that.
+                static const bool weatherSea = EnvFloat("WGR_TW_WEATHER_SEA", 1.0f) > 0.5f;
+                if (weatherSea && _seaWindInit && envWind <= 0.0f)
+                {
+                    const float w = std::clamp(_seaWindSpeed, kTwSeaWeatherWind[0], kTwSeaWeatherWind[3]);
+                    int i = 0;
+                    while (i < 2 && w > kTwSeaWeatherWind[i + 1])
+                        ++i;
+                    const float f = (w - kTwSeaWeatherWind[i]) / (kTwSeaWeatherWind[i + 1] - kTwSeaWeatherWind[i]);
+                    const TwSea& a = kTwSea[i];
+                    const TwSea& b = kTwSea[i + 1];
+                    auto lerp = [f](float x, float y) { return x + (y - x) * f; };
+                    c = {lerp(a.wind, b.wind),   lerp(a.fetch, b.fetch), lerp(a.chop, b.chop),
+                         lerp(a.swell, b.swell), lerp(a.surf, b.surf),   lerp(a.period, b.period),
+                         lerp(a.whitecaps, b.whitecaps)};
+                    // the preset's own spectrum carries the height up to the Storm preset; past it the
+                    // weather wind raises the amplitude to 2.0 at 30 m/s (TidewaterWindAmplitude)
+                    tidewaterAmplitude = TidewaterWindAmplitude(_seaWindSpeed);
+                }
             }
             else
             {
@@ -1231,6 +1431,11 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
             t.swellScale *= 1.25f;
         }
         t.amplitude *= tidewaterAmplitude;
+        // the surface is drawn with choppiness x amplitude; past TidewaterMaxDisplayedChop the mesh folds
+        // (dark creases along the crests), so a higher amplitude draws with less choppiness
+        // (the whitecaps keep the sea's own choppiness: tidewater_fx[3] below)
+        const float seaChoppiness = std::clamp(t.choppiness, 0.0f, 2.0f);
+        t.choppiness = std::min(t.choppiness, TidewaterMaxDisplayedChop / std::max(t.amplitude, 1.0f));
         _params.tidewater[0] = {std::max(t.amplitude, 0.0f), std::clamp(t.choppiness, 0.0f, 2.0f),
                                 std::max(t.swellScale, 0.0f), t.swellHeadingDeg};
         _params.tidewater[1] = {std::max(t.foamCoverage, 0.0f), std::max(t.foamIntensity, 0.0f), t.ssr ? 1.0f : 0.0f,
@@ -1248,8 +1453,9 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         _params.tidewater_shore[2] = {std::clamp(t.shoreTurbidity, 0.0f, 1.0f), t.shoreSim ? 1.0f : 0.0f,
                                       std::clamp(t.shoreDryTime, 2.0f, 300.0f), std::clamp(t.shoreLips, 0.0f, 2.0f)};
         _params.tidewater_sea = {seaWindOverride, seaFetch, seaWhitecaps, static_cast<float>(seaMode)};
+        // w: the sea's choppiness before the fold cap, which the whitecap foam is computed with
         _params.tidewater_fx = {std::clamp(t.spray, 0.0f, 3.0f), std::clamp(t.sprayIntensity, 0.0f, 3.0f),
-                                std::clamp(t.waterGlow, 0.0f, 2.0f), 0.0f};
+                                std::clamp(t.waterGlow, 0.0f, 2.0f), seaChoppiness};
     }
     // TW-WATER W6 — the boats for the Tidewater wake simulation, from the frame's captured block
     // (the two nearest the camera; lanes in wgpu_renderer.hpp). Current OP ignores them.
@@ -1267,13 +1473,13 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
             const render::frame::PresentationSnapshot::WakeBoat& b = boatSnap.wakeBoats[i];
             lanes[0] = {b.x, b.z, b.fwdX, b.fwdZ};
             lanes[1] = {b.velX, b.velZ, b.thrust, static_cast<float>(b.id)};
-            lanes[2] = {b.halfBeam, b.halfLength, b.draft, b.driven ? 3.0f : 1.0f};
+            lanes[2] = {b.halfBeam, b.halfLength, b.draft, (b.driven ? 3.0f : 1.0f) + (b.waterMask ? 4.0f : 0.0f)};
             // W6i: the bow spray's pose and sea
             lanes[3] = {b.originY, b.velY, b.freeboard, b.hwProp};
-            lanes[4] = {b.fwdX, b.fwdY, b.fwdZ, 0.0f};
-            lanes[5] = {b.upX, b.upY, b.upZ, 0.0f};
+            lanes[4] = {b.fwdX, b.fwdY, b.fwdZ, b.maskStern};
+            lanes[5] = {b.upX, b.upY, b.upZ, b.maskBow};
             lanes[6] = {b.hwContact[0], b.hwContact[1], b.hwContact[2], b.hwContact[3]};
-            lanes[7] = {b.hwContact[4], b.hwContact[5], 0.0f, 0.0f};
+            lanes[7] = {b.hwContact[4], b.hwContact[5], b.maskSheerAft, b.maskSheerBow};
         }
     }
     _params.sea_params = {look.seaStateCoupling ? 1.0f : 0.0f,
@@ -1292,6 +1498,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         lastLoggedFftResolution = look.fftResolution;
     }
     _engine.QueueWaterParams(_params); // PERF-022: queued, applied before wgr_render_frame
+    perfFrame.Lap(WdParams, WdProbe);
 
     // WTR-001 — repeatable-camera-path foundation. When the Water tab sets a frame tag (>= 0),
     // log it with an FNV-1a digest of the exact UBO bytes just uploaded plus the camera pose,
@@ -1355,26 +1562,8 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
             _lastInteractionDemoPulse = pulse;
         }
     }
-    // Sinkhole W3: hand the drawn surface around the camera to the simulation (swimmers near the camera
-    // and the camera following one ride it; SoldierOldSwim.cpp). None when it is stale (another water
-    // mode, a paused renderer).
-    {
-        static std::vector<float> grid(64 * 64 * 3);
-        float lanes[4] = {};
-        float ageMs = 0.0f;
-        const uint32_t n = wgr_water_drawn_grid(grid.data(), uint32_t(grid.size() / 3), lanes, &ageMs);
-        const bool validSide = std::isfinite(lanes[3]) && lanes[3] >= 2.0f && lanes[3] <= 64.0f;
-        const int side = validSide ? int(std::lround(lanes[3])) : 0;
-        if (TidewaterDrawsWater(look.waterBackend) && n > 0 && std::isfinite(ageMs) &&
-            ageMs >= 0.0f && ageMs < 250.0f && side * side == int(n))
-        {
-            SetDrawnWaterGrid(grid.data(), side, lanes);
-        }
-        else
-        {
-            SetDrawnWaterGrid(nullptr, 0, nullptr);
-        }
-    }
+    ExchangeDrawnWater();
+    perfFrame.Lap(WdProbe, WdRest);
     std::array<HydroWaterInteractionEvent, HydroMaxWaterInteractions> submitted{};
     const uint32_t submittedCount = DrainWaterInteractions(submitted.data(), HydroMaxWaterInteractions);
     for (uint32_t i = 0; i < submittedCount && eventCount < WGR_MAX_WATER_INTERACTIONS; ++i)

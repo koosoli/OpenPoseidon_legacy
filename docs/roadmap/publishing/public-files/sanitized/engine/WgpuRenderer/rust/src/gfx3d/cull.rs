@@ -45,7 +45,11 @@ pub struct CullParamsGpu {
     // Private diagnostic COUNT target; all-zero tail disables the extra atomic.
     pub target_model_id: u32,
     pub target_count_enabled: u32,
-    pub _target_pad: [u32; 2],
+    // Squared distance below which an instance's LOD/sub-pixel metric is clamped: a depth-only
+    // view whose texels are coarser than the main view's pixels never needs a finer LOD than
+    // the main view would pick at the distance where its pixel matches one texel. 0 = off.
+    pub lod_floor_dist2: f32,
+    pub _target_pad: u32,
 }
 
 /// Collision-free identity of the inputs that can change a plain COUNT's
@@ -239,12 +243,45 @@ pub struct SectionMaterialGpu {
     // Trailing scalar: WGSL rounds the array stride to 16, so the pad is explicit and
     // both sides agree on 272.
     pub normal_power: f32,
-    pub _pad_np: [u32; 3],
+    // RFG-181: Enfusion NormalsToCamera (WgrModelSection::far_normals), 0 = off.
+    pub far_normals: u32,
+    pub _pad_np: [u32; 2],
     // Crown self-occlusion volume (xyz = trunk-axis centre in model space,
     // w = intensity; second lane x = height reserved, y = radius). 32 bytes,
     // 16-aligned on both sides, so the stride stays a multiple of 16.
     pub crown_ao_p0: [f32; 4],
     pub crown_ao_p1: [f32; 4],
+    pub native_pbr_scales: [f32; 4],
+    // (bitcast descriptor slot with UV1 in bit 31, UV scale, sharpness, offset).
+    // Only the explicitly opted-in ordered blend samples these descriptors.
+    pub layer_mask: [[f32; 4]; 3],
+    // Internal color-role descriptors; no public C ABI fields. Original slots
+    // remain authoritative for residency feedback and alpha/prepasses.
+    pub srgb_bcr_slots: [u32; 4],
+    pub global_normal_uv: [f32; 4],
+    pub detail_normal_strength: [f32; 4],
+    // (linear descriptor slot bitcast, black power, white power, enabled).
+    pub global_overlay: [f32; 4],
+}
+
+// Resource lookup resolves stale/invalid source handles to slot zero. Never
+// convert that white fallback into an admitted overlay operation.
+pub(crate) fn global_overlay_parameters(slot: u32, flags: u32, ordered: f32, black: f32, white: f32) -> [f32;4] {
+    const REQUIRED: u32 = 64 | 256; // native PBR and successful sRGB BCR admission
+    if slot == 0 || flags & REQUIRED != REQUIRED || ordered != 2.0 ||
+        !black.is_finite() || !white.is_finite() ||
+        !(0.0..=16.0).contains(&black) || !(0.0..=16.0).contains(&white) { return [0.0;4]; }
+    [f32::from_bits(slot),black,white,1.0]
+}
+
+// RFG-118: Enfusion's GlobalMCRMap in production (any section, encoded colour). `mode` is
+// WgrModelMaterial::global_overlay_mode: bit 0 on, bit 1 Multiply, bit 2 UV set 2. Slot zero is
+// the white fallback and never becomes an admitted blend.
+pub(crate) fn global_mcr_parameters(slot: u32, mode: u32, black: f32, white: f32) -> [f32;4] {
+    if slot == 0 || mode & 1 == 0 || !black.is_finite() || !white.is_finite() ||
+        !(0.0..=16.0).contains(&black) || !(0.0..=16.0).contains(&white) { return [0.0;4]; }
+    let code = 3.0 + if mode & 2 != 0 { 1.0 } else { 0.0 } + if mode & 4 != 0 { 2.0 } else { 0.0 };
+    [f32::from_bits(slot),black,white,code]
 }
 
 // A permissive plane that never culls anything: dot(0, p) + BIG >= -radius always holds.
@@ -326,6 +363,8 @@ const ARG_WORDS: u64 = super::INDIRECT_ARG_SIZE / 4;
 // 8-storage-buffer GPU for one saved indexing offset. Word 3 is spare padding so STAT_BASE_WORD
 // lands on a round number; keep in lockstep with STAT_BASE in cull.wgsl.
 const STAT_BASE_WORD: u64 = 4;
+/// STREAM-UPLOAD: instance slots per dirty page (256 x 176 B = 44 KB).
+const DIRTY_PAGE: u32 = 256;
 // Spare stats word +20; a future per-view async copy uses this byte offset.
 pub const TARGET_MODEL_COUNT_BYTE_OFFSET: u64 = (STAT_BASE_WORD + 20) * 4;
 pub const STATS_WORDS: usize = 24; // +16..+19 what-if triangles (see cull.wgsl word map)
@@ -473,8 +512,12 @@ pub(crate) struct InstanceTable {
     /// Every handle this table refused. Write-only until ID-3 gave it a reader: a rejection
     /// that nothing can count is a rejection no test can distinguish from a no-op.
     stale_ops: u64,
-    /// Inclusive min..=max slot changed since the last upload.
-    dirty: Option<(u32, u32)>,
+    /// STREAM-UPLOAD: changed slots since the last upload, one bit per DIRTY_PAGE slots. A single
+    /// min..=max range used to be kept: object streaming touches slots all over a 206k table, so
+    /// the range spanned half of it and every streaming frame re-sent ~12 MB (12-18 ms of the
+    /// render thread, measured on a 15 m/s Everon flight at 3440x1440).
+    dirty_pages: Vec<u64>,
+    dirty_any: bool,
     /// Retained scene-content change counter: add/update/remove, and drawable model
     /// retirement even when its instance remains. Cached images must observe both kinds.
     /// This is not a revision for arbitrary mesh vertices, dynamic tails or pose palettes.
@@ -731,10 +774,13 @@ impl InstanceTable {
 
     fn mark_dirty(&mut self, slot: u32, origin: StaticEpochOrigin) {
         self.invalidate_retained_content(origin);
-        self.dirty = Some(match self.dirty {
-            Some((lo, hi)) => (lo.min(slot), hi.max(slot)),
-            None => (slot, slot),
-        });
+        let page = (slot / DIRTY_PAGE) as usize;
+        let word = page / 64;
+        if self.dirty_pages.len() <= word {
+            self.dirty_pages.resize(word + 1, 0);
+        }
+        self.dirty_pages[word] |= 1u64 << (page % 64);
+        self.dirty_any = true;
     }
 
     /// Add an instance, recycling a free slot when one is available. Returns its handle.
@@ -801,8 +847,36 @@ impl InstanceTable {
         &self.slots
     }
 
-    fn take_dirty(&mut self) -> Option<(u32, u32)> {
-        self.dirty.take()
+    /// The dirty slots as inclusive (lo, hi) runs of whole pages, clamped to the table; clears them.
+    fn take_dirty(&mut self) -> Vec<(u32, u32)> {
+        let mut runs: Vec<(u32, u32)> = Vec::new();
+        if !self.dirty_any {
+            return runs;
+        }
+        let len = self.slots.len() as u32;
+        for (w, bits) in self.dirty_pages.iter_mut().enumerate() {
+            let mut b = std::mem::take(bits);
+            while b != 0 {
+                let page = (w * 64) as u32 + b.trailing_zeros();
+                b &= b - 1;
+                let lo = page * DIRTY_PAGE;
+                if lo >= len {
+                    continue;
+                }
+                let hi = (lo + DIRTY_PAGE - 1).min(len - 1);
+                match runs.last_mut() {
+                    Some(last) if last.1 + 1 == lo => last.1 = hi,
+                    _ => runs.push((lo, hi)),
+                }
+            }
+        }
+        self.dirty_any = false;
+        runs
+    }
+
+    #[cfg(test)]
+    fn dirty_is_empty(&self) -> bool {
+        !self.dirty_any
     }
 
     /// How many handles this table has refused. The only observable evidence that the
@@ -858,6 +932,10 @@ fn resolved_sections_changed(previous: &[SectionGpu], next: &[SectionGpu],
 pub struct CullState {
     // No heap/readback allocation until an enabled explicit request.
     lod_feedback: Option<RefCell<Box<super::lod_feedback::LodFeedback>>>,
+    /// PERF-LOD-USAGE (WGR_LOD_USAGE_REPORT=1): main-view section usage sampling.
+    lod_usage: Option<RefCell<super::lod_usage::LodUsage>>,
+    /// STREAM-HITCH probe: what the last prepare() uploaded (prepare_cull lap line).
+    last_upload_summary: String,
     // Instancing-collapse three-pass pipelines (§3.6), all over `layout`: COUNT (1/instance) ->
     // EMIT (1/section) -> SCATTER (1/instance). Shared by the main + every shadow view.
     count_pipeline: wgpu::ComputePipeline,
@@ -872,6 +950,9 @@ pub struct CullState {
     section_spans: Option<Box<super::section_span_pool::SectionSpanPool>>,
     lod_spans: Option<Box<super::section_span_pool::SectionSpanPool>>,
     sections: Vec<SectionGpu>,
+    /// PERF-SECTION-INCREMENTAL: section row -> owning LOD index (u32::MAX = unknown), written at
+    /// registration, so one row's residency change re-derives one LOD, not all of them.
+    row_lod: Vec<u32>,
     // Per-section shading, parallel to `sections` (same global index). Draw-side only —
     // not a compute input; bound in the GPU-driven draw pass (3b-2b).
     section_materials: Vec<SectionMaterialGpu>,
@@ -915,7 +996,8 @@ pub struct CullState {
     variant_capacity: u32,
     params: CullParamsGpu,
     // Debug flags written into CullParamsGpu.debug_flags each frame (cull.wgsl reads them). bit 0
-    // = WGR_CULL_NO_FRUSTUM (skip the frustum test — discriminates "culled" from "not drawn").
+    // = WGR_CULL_NO_FRUSTUM (skip the frustum test — discriminates "culled" from "not drawn");
+    // bit 3 = WGR_CULL_COOP=0 (one-thread section walks, WGPU-030).
     debug_flags: u32,
     // CPU diagnostic selection only; no readback or residency policy consumes it.
     target_model_id: Option<u32>,
@@ -1191,7 +1273,7 @@ impl BatchCountRing {
                 BatchCountSlot::Mapping { identity, copied, committed, aborted, done } => {
                     match done.try_recv() {
                         Ok(Ok(())) => {
-                            let data = buf.slice(..).get_mapped_range();
+                            let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                             if committed && !aborted && epoch == identity.cull_epoch &&
                                 target_revision == Some((identity.model_id, identity.target_revision)) {
                                 for (i, fact) in self.latest.iter_mut().enumerate() {
@@ -1397,6 +1479,27 @@ impl CullState {
         self.lod_feedback.as_ref().unwrap().borrow_mut().begin();
     }
     pub fn resolve_lod_demand(&self) { if let Some(s) = &self.lod_feedback { s.borrow_mut().resolve(); } }
+    /// PERF-LOD-USAGE: fold finished samples; every 10 s return the window's verdict (and reset).
+    pub fn harvest_lod_usage(&self, device: &wgpu::Device,
+                             mesh_bytes: impl Fn(u32) -> Option<u64>) -> Option<(super::lod_usage::UsageVerdict, u32)> {
+        let usage = self.lod_usage.as_ref()?;
+        let mut u = usage.borrow_mut();
+        u.harvest(device);
+        if u.window_start.elapsed().as_secs() < 10 || u.samples == 0 {
+            return None;
+        }
+        let models: Vec<(u32, u32)> = self.models.iter().map(|m| (m.lod_base, m.lod_count)).collect();
+        let lods: Vec<(u32, u32)> = self.lods.iter().map(|l| (l.section_base, l.section_count)).collect();
+        let verdict = super::lod_usage::verdict(&u.used, &models, &lods, |s| {
+            let sec = self.sections.get(s)?;
+            if sec.index_count == 0 { return None; }
+            Some((sec.base_vertex, mesh_bytes(sec.base_vertex)?))
+        });
+        let samples = u.samples;
+        u.reset_window();
+        Some((verdict, samples))
+    }
+
     pub fn harvest_lod_demand(&self, device: &wgpu::Device) { if let Some(s) = &self.lod_feedback { s.borrow_mut().harvest(device); } }
     pub fn lod_demand_report(&self, epoch: u64) -> Option<crate::ffi::WgrLodDemandReport> {
         self.lod_feedback.as_ref().and_then(|s| { let s = s.borrow(); (s.report.epoch == epoch).then_some(s.report) })
@@ -1472,7 +1575,7 @@ impl CullState {
                 module: &module,
                 entry_point: Some(entry),
                 compilation_options: Default::default(),
-                cache: None,
+                cache: crate::pipeline_cache::get(&device),
             })
         };
         let count_pipeline = make_pl("wgr_cull_count", &pipeline_layout, "count");
@@ -1599,6 +1702,7 @@ impl CullState {
             section_spans: (std::env::var("WGR_CULL_SECTION_REUSE").ok().as_deref() == Some("1"))
                 .then(|| Box::new(super::section_span_pool::SectionSpanPool::new())),
             sections: Vec::new(),
+            row_lod: Vec::new(),
             section_materials: Vec::new(),
             crown_centres: Vec::new(),
             table_uploads: TableUploads::NONE,
@@ -1622,11 +1726,11 @@ impl CullState {
             params_buf,
             variant_capacity: DEFAULT_VARIANT_CAPACITY,
             params: CullParamsGpu::zeroed(),
-            debug_flags: if std::env::var("WGR_CULL_NO_FRUSTUM").is_ok() {
-                1
-            } else {
-                0
-            },
+            // bit 0 = WGR_CULL_NO_FRUSTUM; bit 3 = WGR_CULL_COOP=0 (WGPU-030: walk every
+            // instance's sections on one thread, the pre-cooperative cull). Neither changes
+            // which instances survive, so CountCullInputKey keeps masking them out (& 3).
+            debug_flags: (if std::env::var("WGR_CULL_NO_FRUSTUM").is_ok() { 1 } else { 0 })
+                | (if std::env::var("WGR_CULL_COOP").as_deref() == Ok("0") { 8 } else { 0 }),
             target_model_id: target_model_default,
             target_model_default,
             main_count_slots: None,
@@ -1677,6 +1781,8 @@ impl CullState {
             stats_readback,
             stats_latest: CullStats::default(),
             lod_feedback: None,
+            lod_usage: super::lod_usage::enabled().then(|| RefCell::new(super::lod_usage::LodUsage::new())),
+            last_upload_summary: String::new(),
         }
     }
 
@@ -2146,7 +2252,7 @@ impl CullState {
                 MainCountSlot::Mapping { identity, committed, aborted, done } => {
                     match done.try_recv() {
                         Ok(Ok(())) => {
-                            let data = buf.slice(..).get_mapped_range();
+                            let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                             let count = u32::from_le_bytes(data[..4].try_into().unwrap());
                             drop(data);
                             buf.unmap();
@@ -2312,7 +2418,7 @@ impl CullState {
                 MainCountSlot::Mapping { identity, committed, aborted, done } => {
                     match done.try_recv() {
                         Ok(Ok(())) => {
-                            let data = buf.slice(..).get_mapped_range();
+                            let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                             let count = u32::from_le_bytes(data[..4].try_into().unwrap());
                             drop(data);
                             buf.unmap();
@@ -2439,7 +2545,7 @@ impl CullState {
                 MainCountSlot::Mapping { identity, committed, aborted, done } => {
                     match done.try_recv() {
                         Ok(Ok(())) => {
-                            let data = buf.slice(..).get_mapped_range();
+                            let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                             let count = u32::from_le_bytes(data[..4].try_into().unwrap());
                             drop(data);
                             buf.unmap();
@@ -2555,7 +2661,7 @@ impl CullState {
                 MainCountSlot::Mapping { identity, committed, aborted, done } => {
                     match done.try_recv() {
                         Ok(Ok(())) => {
-                            let data = buf.slice(..).get_mapped_range();
+                            let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                             let count = u32::from_le_bytes(data[..4].try_into().unwrap());
                             drop(data);
                             buf.unmap();
@@ -2668,7 +2774,7 @@ impl CullState {
                 MainCountSlot::Mapping { identity, committed, aborted, done } => {
                     match done.try_recv() {
                         Ok(Ok(())) => {
-                            let data = buf.slice(..).get_mapped_range();
+                            let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                             let count = u32::from_le_bytes(data[..4].try_into().unwrap());
                             drop(data);
                             buf.unmap();
@@ -2784,7 +2890,7 @@ impl CullState {
             match rx.try_recv() {
                 Ok(Ok(())) => {
                     {
-                        let data = buf.slice(..).get_mapped_range();
+                        let data = buf.slice(..).get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
                         let word = |i: usize| {
                             u32::from_le_bytes(data[i * 4..i * 4 + 4].try_into().unwrap())
                         };
@@ -2874,6 +2980,11 @@ impl CullState {
         for (i, lod) in lods.iter().enumerate() {
             let mut l = *lod;
             l.section_base += section_offset;
+            let (lo, hi) = (l.section_base as usize, l.section_base as usize + l.section_count as usize);
+            if self.row_lod.len() < hi {
+                self.row_lod.resize(hi, u32::MAX);
+            }
+            self.row_lod[lo..hi].fill((lod_span.base + i) as u32);
             if lod_span.base == lod_append { self.lods.push(l); }
             else { self.lods[lod_span.base + i] = l; }
         }
@@ -2981,6 +3092,132 @@ impl CullState {
     // registration, only base_vertex/first_index may have moved). Marks the tables dirty for
     // re-upload only when something actually changed, so a quiet frame costs nothing. The LOD
     // section_base offsets index this table and are unaffected (order is preserved).
+    /// LOD-STREAM: per model, the finest LOD index any instance needs by DISTANCE alone (no
+    /// frustum, occlusion or sub-pixel test, so turning the camera never finds a level evicted),
+    /// minus `margin` levels. Same walk as classify(). 255 = no live instance. Dynamic instances
+    /// (vehicles, units) pin their model at 0: they move faster than the residency loop.
+    pub fn lod_distance_demand(&self, margin: u32, out: &mut Vec<u8>) {
+        out.clear();
+        out.resize(self.models.len(), 255);
+        let p = &self.params;
+        let cam = Vec3::new(p.cam_pos[0], p.cam_pos[1], p.cam_pos[2]);
+        for inst in &self.instances.slots {
+            if inst.model == INVALID_MODEL {
+                continue;
+            }
+            let m = inst.model as usize;
+            let Some(model) = self.models.get(m) else { continue };
+            if model.lod_count == 0 || out[m] == 0 {
+                continue;
+            }
+            let scale = inst.center[3];
+            let radius = model.bounding_sphere * scale;
+            let rel = Vec3::new(inst.center[0], inst.center[1], inst.center[2]) - cam;
+            let mut dist2 = rel.length_squared();
+            if radius * radius > dist2 * 0.0625 {
+                let dn = (dist2.sqrt() - radius).max(0.0);
+                dist2 = dn * dn;
+            }
+            let lod = |i: u32| self.lods.get((model.lod_base + i) as usize).copied();
+            let mut level = 0u32;
+            if (inst.flags & 16) != 0 {
+                level = model.lod_count - 1;
+                while level != 0 && lod(level).is_some_and(|l| l.is_decal & 1 != 0) { level -= 1; }
+            } else if model.lod_count >= 2 {
+                let resol2 = dist2 * p.lod_inv_width * p.lod_inv_width * p.lod_scale * p.lod_scale;
+                let mut i = 1u32;
+                while i < model.lod_count {
+                    let r = lod(i).map_or(f32::MAX, |l| l.resolution);
+                    if r * r > resol2 { break; }
+                    i += 1;
+                }
+                i -= 1;
+                while i != 0 && lod(i).is_some_and(|l| l.is_decal & 1 != 0) { i -= 1; }
+                level = i;
+            }
+            let need = level.saturating_sub(margin).min(254) as u8;
+            out[m] = out[m].min(need);
+        }
+        for inst in &self.dynamic {
+            if let Some(o) = out.get_mut(inst.model as usize) {
+                *o = 0;
+            }
+        }
+    }
+
+    /// LOD-STREAM: flag every LOD row whose sections touch an evicted mesh (is_decal bit 1), so
+    /// classify() steps past it. Called after each section refresh.
+    pub fn apply_lod_residency(&mut self, section_evicted: impl Fn(usize) -> bool) {
+        let mut changed = false;
+        for lod in &mut self.lods {
+            let base = lod.section_base as usize;
+            let evicted = (base..base + lod.section_count as usize).any(&section_evicted);
+            let next = (lod.is_decal & !2) | if evicted { 2 } else { 0 };
+            if next != lod.is_decal {
+                lod.is_decal = next;
+                changed = true;
+            }
+        }
+        if changed {
+            self.instances.advance_target_revision_with_kind(2);
+            self.table_uploads.mark(TableDomain::Lod);
+        }
+    }
+
+    pub fn last_upload_summary(&self) -> &str { &self.last_upload_summary }
+
+    /// PERF-SECTION-INCREMENTAL: write the re-resolved rows, re-derive LOD residency (the rule of
+    /// apply_lod_residency) for the LODs that own them, and mark exactly what set_sections and
+    /// apply_lod_residency would have marked for the same change.
+    pub fn update_sections_incremental(&mut self, updates: &[(usize, SectionGpu)], section_evicted: impl Fn(usize) -> bool) {
+        let mut changed = false;
+        let mut lods: Vec<u32> = Vec::new();
+        for &(row, section) in updates {
+            let Some(slot) = self.sections.get_mut(row) else { continue };
+            if *slot != section {
+                *slot = section;
+                changed = true;
+            }
+            if let Some(&li) = self.row_lod.get(row) {
+                if li != u32::MAX {
+                    lods.push(li);
+                }
+            }
+        }
+        lods.sort_unstable();
+        lods.dedup();
+        let mut lod_changed = false;
+        for li in lods {
+            let Some(lod) = self.lods.get_mut(li as usize) else { continue };
+            let base = lod.section_base as usize;
+            let evicted = (base..base + lod.section_count as usize).any(&section_evicted);
+            let next = (lod.is_decal & !2) | if evicted { 2 } else { 0 };
+            if next != lod.is_decal {
+                lod.is_decal = next;
+                lod_changed = true;
+            }
+        }
+        if changed || lod_changed {
+            self.instances.advance_target_revision_with_kind(2);
+        }
+        if changed {
+            self.table_uploads.mark(TableDomain::Section);
+        }
+        if lod_changed {
+            self.table_uploads.mark(TableDomain::Lod);
+        }
+    }
+
+    /// PERF-SECTION-INCREMENTAL verify: the resolved table and each LOD's residency bit.
+    pub(super) fn verify_view(&self) -> (&[SectionGpu], Vec<(usize, usize, bool)>) {
+        (&self.sections, self.lods.iter().map(|l| (l.section_base as usize, l.section_count as usize, l.is_decal & 2 != 0)).collect())
+    }
+
+    /// Retired section spans are zeroed and reused (clear_retired_sections).
+    pub(super) fn section_reuse_active(&self) -> bool {
+        self.section_spans.as_ref().is_some_and(|p| p.enabled())
+    }
+
     pub fn set_sections(&mut self, sections: &[SectionGpu]) {
         if resolved_sections_changed(&self.sections, sections, &mut self.instances) {
             // Resolved mesh ranges can change without an instance-table mutation.
@@ -3228,6 +3465,8 @@ impl CullState {
             self.crown_centre_buf.buf.is_none()) {
             self.table_uploads = TableUploads::ALL;
         }
+        let upload_t0 = std::time::Instant::now();
+        let uploads_before = self.table_uploads.0;
         let (next_uploads, tables_grew) = self.table_uploads.run(|domain| match domain {
             TableDomain::Model => match &mut self.model_row_uploads {
                 Some(rows) => upload_model_rows(device, queue, &mut self.model_buf, &self.models, rows),
@@ -3248,20 +3487,29 @@ impl CullState {
         let static_len = self.instances.len() as u32;
         let total = static_len as u64 + self.dynamic.len() as u64;
         let inst_bytes = total.max(1) * std::mem::size_of::<InstanceGpu>() as u64;
-        grew |= self.instance_buf.ensure(device, inst_bytes);
+        let instance_buf_new = self.instance_buf.ensure(device, inst_bytes);
+        grew |= instance_buf_new;
         let stride = std::mem::size_of::<InstanceGpu>() as u64;
         // Cleared here, not inside the branch: the pre-ID-3 code cleared `static_dirty`
         // unconditionally at the end of prepare, including on the no-buffer path.
         let dirty = self.instances.take_dirty();
         if let Some(buf) = self.instance_buf.buf.as_ref() {
-            // A grown static region shifts the dynamic tail, so re-upload the whole static
-            // region (not just the dirty range) whenever static_len changed.
-            let full_static = self.uploaded_static_len != static_len;
+            // STREAM-UPLOAD: the whole static region only when the buffer was (re)created -- a new
+            // buffer starts empty. A grown table only appended slots, and every appended or changed
+            // slot is in the dirty pages; the dynamic tail is re-sent below at its new offset.
+            // WGR_INSTANCE_FULL_UPLOAD=1 = the old whole-table upload whenever the length changed.
+            static FULL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let legacy = *FULL.get_or_init(|| std::env::var("WGR_INSTANCE_FULL_UPLOAD").as_deref() == Ok("1"));
+            let full_static = instance_buf_new || (legacy && self.uploaded_static_len != static_len);
             if full_static && static_len > 0 {
+                crate::upload_stats::add(crate::upload_stats::Kind::Instances, std::mem::size_of_val(self.instances.as_slice()));
                 queue.write_buffer(buf, 0, bytemuck::cast_slice(self.instances.as_slice()));
-            } else if let Some((lo, hi)) = dirty {
-                let range = &self.instances.as_slice()[lo as usize..=hi as usize];
-                queue.write_buffer(buf, lo as u64 * stride, bytemuck::cast_slice(range));
+            } else {
+                for &(lo, hi) in &dirty {
+                    let range = &self.instances.as_slice()[lo as usize..=hi as usize];
+                    crate::upload_stats::add(crate::upload_stats::Kind::Instances, std::mem::size_of_val(range));
+                    queue.write_buffer(buf, lo as u64 * stride, bytemuck::cast_slice(range));
+                }
             }
             // Dynamic tail every frame at the (possibly new) static offset.
             if !self.dynamic.is_empty() {
@@ -3273,6 +3521,9 @@ impl CullState {
             }
         }
         self.uploaded_static_len = static_len;
+        self.last_upload_summary = format!("tables 0x{:x} {:.1} ms, instances {} new_buf={} dirty_runs={} slots={}",
+            uploads_before, upload_t0.elapsed().as_secs_f32() * 1e3, total, instance_buf_new, dirty.len(),
+            dirty.iter().map(|(lo, hi)| hi - lo + 1).sum::<u32>());
 
         // Shared-buffer growth (tables + instances) forces a rebuild of EVERY view's bind
         // group (all views reference these read-only buffers); a per-view output realloc only
@@ -3579,14 +3830,13 @@ impl CullState {
         // frame reports honest zeros rather than repeating its last dispatch's numbers — the
         // same stale-region trap the GPU timers already had to solve. `stats_view` is kept in the
         // signature so each dispatch site still states which slice it writes.
-        let _ = stats_view;
         let inst_groups = self.params.instance_count.div_ceil(64);
         // EMIT is one thread per GLOBAL section; a scene with no registered sections skips it.
         let sec_groups = (self.sections.len() as u32).div_ceil(64);
         // Each pass is its OWN begin_compute_pass: wgpu auto-inserts the storage barrier BETWEEN
         // compute passes (COUNT's sec_count writes -> EMIT reads; EMIT's writes -> SCATTER reads),
         // but NOT between dispatches within one pass (they'd race). Same as the terrain/sky computes.
-        let mut pass = |pl: &wgpu::ComputePipeline, groups: u32, name: &str| {
+        let pass = |encoder: &mut wgpu::CommandEncoder, pl: &wgpu::ComputePipeline, groups: u32, name: &str| {
             let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(name),
                 timestamp_writes: None,
@@ -3595,12 +3845,16 @@ impl CullState {
             cp.set_bind_group(0, bind, &[]);
             cp.dispatch_workgroups(groups, 1, 1);
         };
-        pass(count_pl, inst_groups, label);
-        if sec_groups > 0 {
-            pass(emit_pl, sec_groups, label);
+        pass(encoder, count_pl, inst_groups, label);
+        if stats_view == STATS_VIEW_MAIN && label == "wgr_cull" {
+            if let Some(usage) = &self.lod_usage {
+                usage.borrow_mut().capture(encoder, sec_count, self.sections.len());
+            }
         }
-        pass(scatter_pl, inst_groups, label);
-        drop(pass);
+        if sec_groups > 0 {
+            pass(encoder, emit_pl, sec_groups, label);
+        }
+        pass(encoder, scatter_pl, inst_groups, label);
         if let Some(feedback) = &self.lod_feedback {
             let category = if label.contains("shadow") { 4 } else if label.contains("reflection") { 8 }
                 else if label.contains("sky") { 16 } else if label.contains("color") { 2 } else { 1 };
@@ -3959,6 +4213,88 @@ impl CullState {
         self.params.instance_count
     }
 
+    /// Diagnostic (WGR_LOD_CENSUS): a CPU replica of classify() against the main view's
+    /// current params, summed per model. Returns (model, instances, triangles, level histogram)
+    /// for the `top` models by triangles. Distance, frustum, sub-pixel, LOD walk and the far-tier
+    /// flag match the shader; occlusion is not modelled, so this is the prepass set.
+    pub fn main_lod_census(&self, top: usize) -> Vec<(u32, u32, u64, [u32; 8])> {
+        let p = &self.params;
+        let cam = Vec3::new(p.cam_pos[0], p.cam_pos[1], p.cam_pos[2]);
+        let mut per: std::collections::HashMap<u32, (u32, u64, [u32; 8])> = Default::default();
+        for inst in &self.instances.slots {
+            if inst.model == INVALID_MODEL || (inst.flags & INSTANCE_OTHER_VIEWS_ONLY) != 0 {
+                continue;
+            }
+            let Some(model) = self.models.get(inst.model as usize) else { continue };
+            let scale = inst.center[3];
+            let radius = model.bounding_sphere * scale;
+            let center = Vec3::new(inst.center[0], inst.center[1], inst.center[2]);
+            let cull_radius = if inst.cull_radius != 0 { f32::from_bits(inst.cull_radius) } else { radius };
+            let rel = center - cam;
+            let mut dist2 = rel.length_squared();
+            if radius * radius > dist2 * 0.0625 {
+                let dn = (dist2.sqrt() - radius).max(0.0);
+                dist2 = dn * dn;
+            }
+            if dist2 > p.objects_z2 {
+                continue;
+            }
+            if (p.debug_flags & 1) == 0
+                && p.frustum.iter().any(|pl| pl[0] * rel.x + pl[1] * rel.y + pl[2] * rel.z + pl[3] < -cull_radius)
+            {
+                continue;
+            }
+            let detail2 = dist2 * p.lod_inv_width * p.lod_inv_width;
+            let diameter = model.bounding_sphere * 2.0 * scale;
+            let px = p.pixel_limit * p.lod_scale;
+            if diameter * diameter < px * px * detail2 {
+                continue;
+            }
+            let lod = |i: u32| self.lods.get((model.lod_base + i) as usize).copied();
+            let mut level = 0u32;
+            if model.lod_count >= 2 {
+                let resol2 = detail2 * p.lod_scale * p.lod_scale;
+                let mut i = 1u32;
+                while i < model.lod_count {
+                    let r = lod(i).map_or(f32::MAX, |l| l.resolution);
+                    if r * r > resol2 { break; }
+                    i += 1;
+                }
+                i -= 1;
+                while i != 0 && lod(i).is_some_and(|l| l.is_decal & 1 != 0) { i -= 1; }
+                level = i;
+            }
+            if (inst.flags & 16) != 0 && model.lod_count > 0 {
+                let mut far = model.lod_count - 1;
+                while far != 0 && lod(far).is_some_and(|l| l.is_decal & 1 != 0) { far -= 1; }
+                level = far;
+            }
+            let tris: u64 = lod(level).map_or(0, |l| {
+                let a = l.section_base as usize;
+                self.sections.get(a..a + l.section_count as usize)
+                    .map_or(0, |s| s.iter().map(|s| u64::from(s.index_count / 3)).sum())
+            });
+            let e = per.entry(inst.model).or_default();
+            e.0 += 1;
+            e.1 += tris;
+            e.2[(level as usize).min(7)] += 1;
+        }
+        let mut rows: Vec<_> = per.into_iter().map(|(m, (n, t, h))| (m, n, t, h)).collect();
+        rows.sort_by(|a, b| b.2.cmp(&a.2));
+        rows.truncate(top);
+        rows
+    }
+
+    /// Diagnostic: (resolution, triangles) per LOD of one model.
+    pub fn model_lod_ladder(&self, model: u32) -> Vec<(f32, u64)> {
+        let Some(m) = self.models.get(model as usize) else { return Vec::new() };
+        (0..m.lod_count).filter_map(|i| self.lods.get((m.lod_base + i) as usize)).map(|l| {
+            let a = l.section_base as usize;
+            (l.resolution, self.sections.get(a..a + l.section_count as usize)
+                .map_or(0, |s| s.iter().map(|s| u64::from(s.index_count / 3)).sum()))
+        }).collect()
+    }
+
     // Runtime toggle for the ImGui Culling tab: OR/clear bit 0 of the debug flags (skip the
     // frustum test). Takes effect on the next set_params (called every frame in prepare_cull).
     pub fn set_no_frustum(&mut self, no_frustum: bool) {
@@ -4090,6 +4426,32 @@ pub fn params_from_shadow_cascade(
     p.lod_scale = inputs.lod_scale;
     p.lod_inv_width = inputs.lod_inv_width;
     p.pixel_limit = inputs.pixel_limit;
+    p
+}
+
+/// Floor the LOD metric of an ORTHOGRAPHIC depth-only view at its texel size. The main view's
+/// pixel at distance d spans `d * 2 * lod_scale / main_width` metres; below the distance where
+/// that equals one of this view's texels, a finer LOD changes nothing the map can resolve, yet
+/// it is exactly what the main-view metric picks for every caster near the camera. `factor`
+/// scales the floor distance (1 = pixel matches texel, 0 = off). The texel comes from the
+/// matrix itself (an ortho VP maps its width to 2 NDC units), so nothing view-specific leaks in.
+pub fn with_texel_lod_floor(
+    mut p: CullParamsGpu,
+    view_proj: Mat4,
+    resolution: u32,
+    main_width: f32,
+    factor: f32,
+) -> CullParamsGpu {
+    let row0 = glam::Vec3::new(view_proj.x_axis.x, view_proj.y_axis.x, view_proj.z_axis.x).length();
+    let perspective = view_proj.x_axis.w != 0.0 || view_proj.y_axis.w != 0.0 || view_proj.z_axis.w != 0.0;
+    if perspective || !(row0 > 0.0) || resolution == 0 || !(factor > 0.0) || !(p.lod_scale > 0.0) {
+        return p;
+    }
+    let texel = 2.0 / (row0 * resolution as f32);
+    let floor = factor * texel * main_width / (2.0 * p.lod_scale);
+    if floor.is_finite() {
+        p.lod_floor_dist2 = floor * floor;
+    }
     p
 }
 
@@ -4241,11 +4603,11 @@ pub fn build_gpu_velocity_pipeline(
             shader_location: 5,
         },
     ];
-    let vbuf_layout = wgpu::VertexBufferLayout {
+    let vbuf_layout = Some(wgpu::VertexBufferLayout {
         array_stride: std::mem::size_of::<crate::ffi::WgrMeshVertex>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &vbuf_attrs,
-    };
+    });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("wgr_gpu_velocity_pipeline"),
         layout: Some(&pipeline_layout),
@@ -4275,7 +4637,7 @@ pub fn build_gpu_velocity_pipeline(
             compilation_options: Default::default(),
         }),
         multiview_mask: None,
-        cache: None,
+        cache: crate::pipeline_cache::get(&device),
     })
 }
 
@@ -4295,6 +4657,10 @@ pub fn build_gpu_pipeline(
     // fragment entry. Only for the prepassed main-view draw; the reflection and prepass
     // builders pass false. Callers must have checked shaders::early_depth_supported().
     early_z: bool,
+    // RFG-188: Some(Back) for the solid variant (and everything else); None for the cutout
+    // variant's double-sided twin -- Reforger draws a crown's cards from both sides (see
+    // gpu_driven.wgsl cutout_back_face_rejected).
+    cull: Option<wgpu::Face>,
 ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
     let module = crate::shaders::make_module(
         device,
@@ -4321,7 +4687,7 @@ pub fn build_gpu_pipeline(
     // Location 7 is the SECOND UV set (byte 60, after the authored tangent frame): Multi's
     // mask / macro / ambient-shadow stages are authored on `tex1`, and sampling them with
     // the tiling uv painted rectangles across every Multi wall on Takistan (walls_l3.rvmat).
-    let vbuf_attrs = [
+    let mut vbuf_attrs = vec![
         wgpu::VertexAttribute {
             format: wgpu::VertexFormat::Float32x3,
             offset: 0,
@@ -4348,11 +4714,18 @@ pub fn build_gpu_pipeline(
             shader_location: 7,
         },
     ];
-    let vbuf_layout = wgpu::VertexBufferLayout {
+    // Existing backing stride; no extra attributes/varyings in the default shader.
+    if crate::shaders::shader_defs().contains_key("NATIVE_PBR_TANGENTS") {
+        vbuf_attrs.extend([
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 36, shader_location: 6 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 48, shader_location: 8 },
+        ]);
+    }
+    let vbuf_layout = Some(wgpu::VertexBufferLayout {
         array_stride: super::BAKED_VERT_SIZE,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &vbuf_attrs,
-    };
+    });
     let linear = if surface_format == wgpu::TextureFormat::Rgba16Float {
         1.0
     } else {
@@ -4377,6 +4750,22 @@ pub fn build_gpu_pipeline(
     // the previous behaviour for an A/B; it is read once at pipeline build, so an arm is two
     // runs of the same binary differing in exactly one term.
     let prepass_match = prepass_match_from_env();
+    // RFG-197 (gpu_driven.wgsl `crown_ao_ambient`): WGR_CROWN_AO_AMBIENT=1 moves native crown
+    // occlusion from the albedo to the ambient only (measured worse; off by default).
+    fn crown_ao_ambient_from_env() -> f64 {
+        static V: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+        *V.get_or_init(|| match std::env::var("WGR_CROWN_AO_AMBIENT") {
+            Ok(v) if v.trim() == "1" => 1.0,
+            _ => 0.0,
+        })
+    }
+    // RFG-189 strength (gpu_driven.wgsl `native_leaf_transmission`), WGR_LEAF_TRANSMISSION.
+    fn leaf_transmission_from_env() -> f64 {
+        static V: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+        *V.get_or_init(|| std::env::var("WGR_LEAF_TRANSMISSION").ok()
+            .and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite() && *v >= 0.0)
+            .unwrap_or(0.1))
+    }
     let constants = [
         ("linear", linear),
         ("a2c", if foliage_a2c { 1.0 } else { 0.0 }),
@@ -4388,7 +4777,11 @@ pub fn build_gpu_pipeline(
         // which is how an A/B of WGR_FOLIAGE_SCREEN_AO read "no difference" (the flag never
         // reached the path that draws Everon's trees) and why the prepass census words stayed 0.
         ("foliage_screen_ao", super::foliage_screen_ao() as f64),
+        ("far_crown_shadow_budget", super::far_crown_shadow().0 as f64),
+        ("far_crown_shadow_tent", super::far_crown_shadow_tent_signed() as f64),
         ("count_fragments", super::count_fragments() as f64),
+        ("crown_ao_ambient", crown_ao_ambient_from_env()),
+        ("native_leaf_transmission", leaf_transmission_from_env()),
     ];
     let depth_stencil = wgpu::DepthStencilState {
         format: super::depth_format(device),
@@ -4400,7 +4793,13 @@ pub fn build_gpu_pipeline(
     let primitive = wgpu::PrimitiveState {
         topology: wgpu::PrimitiveTopology::TriangleList,
         front_face,
-        cull_mode: Some(wgpu::Face::Back),
+        // WGR_NO_CULL=1 (diagnostic, as on the per-draw pipelines in mod.rs) reaches the
+        // GPU-driven set too: the native trees are drawn here, not there.
+        cull_mode: if std::env::var("WGR_NO_CULL").map(|v| v != "0").unwrap_or(false) {
+            None
+        } else {
+            cull
+        },
         ..Default::default()
     };
     let vbuffers = [vbuf_layout];
@@ -4440,7 +4839,7 @@ pub fn build_gpu_pipeline(
             })],
         }),
         multiview_mask: None,
-        cache: None,
+        cache: crate::pipeline_cache::get(&device),
     });
     let prepass = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("wgr_gpu_driven_prepass_pipeline"),
@@ -4482,7 +4881,7 @@ pub fn build_gpu_pipeline(
             })],
         }),
         multiview_mask: None,
-        cache: None,
+        cache: crate::pipeline_cache::get(&device),
     });
     (color, prepass)
 }
@@ -4526,11 +4925,11 @@ pub fn build_gpu_shadow_pipeline(
     });
     let vbuf_attrs =
         wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 5 => Uint32];
-    let vbuf_layout = wgpu::VertexBufferLayout {
+    let vbuf_layout = Some(wgpu::VertexBufferLayout {
         array_stride: super::BAKED_VERT_SIZE,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &vbuf_attrs,
-    };
+    });
     let vbuffers = [vbuf_layout];
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("wgr_gpu_driven_shadow_pipeline"),
@@ -4566,7 +4965,7 @@ pub fn build_gpu_shadow_pipeline(
             targets: &[],
         }),
         multiview_mask: None,
-        cache: None,
+        cache: crate::pipeline_cache::get(&device),
     })
 }
 
@@ -4604,11 +5003,11 @@ pub fn build_gpu_rsm_pipeline(
     });
     let vbuf_attrs =
         wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 5 => Uint32];
-    let vbuf_layout = wgpu::VertexBufferLayout {
+    let vbuf_layout = Some(wgpu::VertexBufferLayout {
         array_stride: super::BAKED_VERT_SIZE,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &vbuf_attrs,
-    };
+    });
     let vbuffers = [vbuf_layout];
     let target = |format: wgpu::TextureFormat| {
         Some(wgpu::ColorTargetState {
@@ -4650,7 +5049,7 @@ pub fn build_gpu_rsm_pipeline(
             ],
         }),
         multiview_mask: None,
-        cache: None,
+        cache: crate::pipeline_cache::get(&device),
     })
 }
 
@@ -4732,7 +5131,7 @@ pub fn build_cull_debug_pipeline(
             })],
         }),
         multiview_mask: None,
-        cache: None,
+        cache: crate::pipeline_cache::get(&device),
     })
 }
 
@@ -4786,7 +5185,7 @@ fn ensure_view_outputs(
         *sec_count = Some(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_cull_sec_count"),
             size: sec_bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC, // COPY_SRC: PERF-LOD-USAGE sampling
             mapped_at_creation: false,
         }));
         *sec_count_cap = sec_bytes;
@@ -4803,6 +5202,7 @@ fn upload_model_rows(device: &wgpu::Device, queue: &wgpu::Queue,
     let selection = *rows;
     selection.run(data.len(), grew, |range| {
         let first = range.start; let count = range.len();
+        crate::upload_stats::add(crate::upload_stats::Kind::Tables, count * std::mem::size_of::<ModelGpu>());
         queue.write_buffer(arr.buf.as_ref().unwrap(),
             (first * std::mem::size_of::<ModelGpu>()) as u64,
             bytemuck::cast_slice(&data[range]));
@@ -4823,6 +5223,7 @@ fn upload_slice<T: bytemuck::Pod>(
     let bytes = std::mem::size_of_val(data).max(1) as u64;
     let grew = arr.ensure(device, bytes);
     if !data.is_empty() {
+        crate::upload_stats::add(crate::upload_stats::Kind::Tables, std::mem::size_of_val(data));
         queue.write_buffer(arr.buf.as_ref().unwrap(), 0, bytemuck::cast_slice(data));
     }
     grew
@@ -5045,6 +5446,7 @@ pub(crate) mod tests {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: None,
                 force_fallback_adapter: false,
+                apply_limit_buckets: false,
             }))
         else {
             return;
@@ -5079,6 +5481,21 @@ pub(crate) mod tests {
         assert!((reduced.lod_inv_width - 0.0027).abs() < 1.0e-7);
         assert_eq!(reduced.pixel_limit, input.pixel_limit);
         assert_eq!(input.for_reduced_view(f32::NAN).lod_inv_width, 0.001);
+    }
+
+    #[test]
+    fn texel_lod_floor_matches_main_pixel_to_ortho_texel() {
+        let inputs = CullInputs { objects_z: 1500.0, lod_scale: 0.75, lod_inv_width: 0.001, pixel_limit: 0.125 };
+        // 640 m wide ortho map at 2048 texels: 0.3125 m texels. A 1920-wide main view at
+        // tan(half fov) 0.75 has 0.3125 m pixels at 400 m.
+        let ortho = Mat4::orthographic_rh(-320.0, 320.0, -320.0, 320.0, 0.0, 1024.0);
+        let base = params_from_shadow_cascade(ortho, Vec3::ZERO, inputs);
+        let p = with_texel_lod_floor(base, ortho, 2048, 1920.0, 1.0);
+        assert!((p.lod_floor_dist2.sqrt() - 400.0).abs() < 0.01, "{}", p.lod_floor_dist2.sqrt());
+        assert_eq!(with_texel_lod_floor(base, ortho, 2048, 1920.0, 0.0).lod_floor_dist2, 0.0);
+        let persp = Mat4::perspective_rh(1.0, 1.0, 0.1, 100.0);
+        assert_eq!(with_texel_lod_floor(base, persp, 2048, 1920.0, 1.0).lod_floor_dist2, 0.0);
+        assert_eq!(base.lod_floor_dist2, 0.0);
     }
 
     fn inside(planes: &[[f32; 4]; 6], p: Vec3) -> bool {
@@ -5225,6 +5642,7 @@ pub(crate) mod tests {
             power_preference: wgpu::PowerPreference::default(),
             compatible_surface: None,
             force_fallback_adapter: false,
+            apply_limit_buckets: false,
         }))
         .ok()?;
         // Actual object shaders include conform resources in group 4, matching
@@ -5262,7 +5680,7 @@ pub(crate) mod tests {
         });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         rx.recv().unwrap().unwrap();
-        let data = slice.get_mapped_range();
+        let data = slice.get_mapped_range().expect("wgpu: mapped range of a mapped buffer");
         bytemuck::cast_slice::<u8, u32>(&data).to_vec()
     }
 
@@ -6777,7 +7195,7 @@ pub(crate) mod tests {
         });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("table-bootstrap-copy"), layout: None, module: &shader,
-            entry_point: Some("main"), compilation_options: Default::default(), cache: None,
+            entry_point: Some("main"), compilation_options: Default::default(), cache: crate::pipeline_cache::get(&device),
         });
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None, layout: &pipeline.get_bind_group_layout(0),
@@ -7434,7 +7852,7 @@ pub(crate) mod tests {
         assert_eq!(instances.slot_of(handle), Some(0), "instance handle still valid");
         assert_eq!(bytemuck::cast_slice::<InstanceGpu, u8>(&instances.slots), slots.as_slice());
         assert_eq!(instances.generations, generations); assert_eq!(instances.free_slots, free);
-        assert!(instances.dirty.is_none(), "content epoch must not fabricate instance uploads");
+        assert!(instances.dirty_is_empty(), "content epoch must not fabricate instance uploads");
         uploads = TableUploads::NONE;
         for id in [0, 0, u32::MAX] {
             assert!(!retire_model_content(&models, &mut lods, id, &mut instances, &mut uploads));

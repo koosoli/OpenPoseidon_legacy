@@ -90,6 +90,8 @@ def prepare(repo, manifest, policy_path):
                                     'tests/fixtures/original-surfaces.json')
             if name == 'apps/tools/BlenderAddon/README.md':
                 text = text.replace('F:\\ofpisnotdead.com\\sources\\CWA\\OFPR', 'C:\\src\\OpenPoseidon')
+            # Agent skills are not part of the release: drop lines that point at them.
+            text = re.sub(r'(?m)^.*\.claude[\\/]skills[\\/].*(?:\r?\n|$)', '', text)
             text = re.sub(r'docs[\\/]roadmap(?:[\\/][^\s`\"\'<>),;]+)*', 'design notes', text)
             text = text.replace('CLAUDE.md', 'the development guidelines')
             text = text.replace('<main>/.claude/worktrees/<name>', '<main>/<worktree-directory>/<name>')

@@ -21,6 +21,7 @@ file(GLOB_RECURSE POSEIDON_ALL_SOURCES CONFIGURE_DEPENDS
     "Dev/Debug/*.cpp"
     "Dev/Diag/*.cpp"
     "Dev/Harness/*.cpp"
+    "Dev/NpcChat/*.cpp"
     "Game/*.cpp"
     "Graphics/*.cpp"
     "Input/*.cpp"
@@ -282,6 +283,9 @@ if(WIN32)
     # DbgHelp for shared Windows minidump + stack reporting.
     # `version` carries GetFileVersionInfo for the DLSS runtime-version readout.
     target_link_libraries(Poseidon PUBLIC ws2_32 wininet dbghelp version)
+    # NPC chat (Dev/NpcChat): crypt32 = DPAPI for remembered API keys, sapi + ole32 = the
+    # built-in Windows voices.
+    target_link_libraries(Poseidon PUBLIC crypt32 sapi ole32)
 endif()
 
 find_package(cJSON CONFIG REQUIRED)

@@ -56,7 +56,15 @@
     "resources/icon-tool.ico": "public-files/sanitized/resources/icon-tool.ico",
     "tests/fixtures/ASSET_SOURCES.md": "public-files/ASSET_SOURCES.md",
     "tests/README.md": "public-files/TESTING.md",
-    "vcpkg.json": "public-files/vcpkg.json"
+    "vcpkg.json": "public-files/vcpkg.json",
+    "content/default-packs/swim/README.md": "public-files/sanitized/content/default-packs/swim/README.md",
+    "engine/Poseidon/Asset/Formats/Enfusion/XobConvert.hpp": "public-files/sanitized/engine/Poseidon/Asset/Formats/Enfusion/XobConvert.hpp",
+    "engine/WgpuRenderer/EarthTreeDetail.cpp": "public-files/sanitized/engine/WgpuRenderer/EarthTreeDetail.cpp",
+    "engine/WgpuRenderer/ReflectMaterial.hpp": "public-files/sanitized/engine/WgpuRenderer/ReflectMaterial.hpp",
+    "scripts/BoomTest.ps1": "public-files/sanitized/scripts/BoomTest.ps1",
+    "scripts/arma3-pc/go.ps1": "public-files/sanitized/scripts/arma3-pc/go.ps1",
+    "scripts/reforger-pc/go.ps1": "public-files/sanitized/scripts/reforger-pc/go.ps1",
+    "scripts/reforger-pc/pak.py": "public-files/sanitized/scripts/reforger-pc/pak.py"
   },
   "add_files": {
     "BUILDING.md": "public-files/BUILDING.md",
@@ -107,7 +115,8 @@
     ".github/",
     "scripts/publishing/",
     "scripts/githooks/",
-    "engine/WgpuRenderer/docs/"
+    "engine/WgpuRenderer/docs/",
+    ".claude/"
   ],
   "exclude_files": [
     "CLAUDE.md",
@@ -285,9 +294,10 @@
     "tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/DemoSoundSubdir.Noe/sound/line.Czech.ogg",
     "tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/DemoSoundSubdir.Noe/sound/line.ogg",
     "apps/tools/Tools/fixtures/check.wav",
-    "tests/fixtures/mods-sp-missions/@trisp/Missions/metsässä.Demo.pbo",
-    "tests/fixtures/mods-sp-missions/@trisp/Missions/Čsla/tri_sp_accent.Demo.pbo",
-    "tests/fixtures/mods-sp-missions/@trisp/Missions/т26.Demo.pbo"
+    "tests/fixtures/mods-sp-missions/@trisp/Missions/mets\u00e4ss\u00e4.Demo.pbo",
+    "tests/fixtures/mods-sp-missions/@trisp/Missions/\u010csla/tri_sp_accent.Demo.pbo",
+    "tests/fixtures/mods-sp-missions/@trisp/Missions/\u044226.Demo.pbo",
+    "AGENTS.md"
   ],
   "include_prefixes": [
     "engine/",
