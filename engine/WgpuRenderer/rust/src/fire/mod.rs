@@ -163,7 +163,8 @@ fn make_tex(device: &wgpu::Device, label: &str, format: wgpu::TextureFormat, siz
         sample_count: 1,
         dimension: wgpu::TextureDimension::D3,
         format,
-        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+        // COPY_*: the pressure-solve test writes a right-hand side and reads the result back
+        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
     let v = t.create_view(&wgpu::TextureViewDescriptor {
@@ -690,6 +691,72 @@ impl FireSystem {
         })
     }
 
+    /// The pressure solve of one step: `cycles` multigrid V(2,2) cycles (FIRE-MG) or, with 0 or
+    /// no coarse levels, the JACOBI sweeps; warm-started from `pres[pc]`, returns the index of
+    /// the pressure buffer holding the result. `level_groups` is the dispatch size `run` uses:
+    /// set to a coarse level's while that level is solved, and back to `groups`.
+    fn solve_pressure<'g>(
+        &self,
+        g: &'g Grid,
+        mut pc: usize,
+        groups: (u32, u32, u32),
+        cycles: u32,
+        level_groups: &std::cell::Cell<(u32, u32, u32)>,
+        run: &mut dyn FnMut(&wgpu::ComputePipeline, Binds<'g>),
+    ) -> usize {
+        let none = || Binds { fields: None, vel: None, aux: None, p: None, d: None, out_rgba: None, out_r: None };
+        if let (Some(res0), false, true) = (&g.mg_res, g.mg.is_empty(), cycles > 0) {
+            // FIRE-MG: V(2,2) cycles, warm-started from the last step's pressure like the Jacobi solve
+            let last = g.mg.len() - 1;
+            let mut ec = vec![0usize; g.mg.len()];
+            for _ in 0..cycles {
+                for _ in 0..2 {
+                    run(&self.mg_smooth, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
+                    pc = 1 - pc;
+                }
+                run(&self.mg_residual, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&res0.1), ..none() });
+                let mut fine_res = &res0.1;
+                for (li, lv) in g.mg.iter().enumerate() {
+                    level_groups.set(lv.groups);
+                    run(&self.mg_restrict, Binds { d: Some(fine_res), out_r: Some(&lv.rhs.1), ..none() });
+                    run(&self.mg_zero, Binds { out_r: Some(&lv.e[0].1), ..none() });
+                    ec[li] = 0;
+                    for _ in 0..if li == last { MG_COARSE_SWEEPS } else { 2 } {
+                        run(&self.mg_smooth, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&lv.rhs.1), out_r: Some(&lv.e[1 - ec[li]].1), ..none() });
+                        ec[li] = 1 - ec[li];
+                    }
+                    if li < last {
+                        run(&self.mg_residual, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&lv.rhs.1), out_r: Some(&lv.res.1), ..none() });
+                        fine_res = &lv.res.1;
+                    }
+                }
+                for li in (0..last).rev() {
+                    let (lv, co) = (&g.mg[li], &g.mg[li + 1]);
+                    level_groups.set(lv.groups);
+                    run(&self.mg_prolong, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&co.e[ec[li + 1]].1), out_r: Some(&lv.e[1 - ec[li]].1), ..none() });
+                    ec[li] = 1 - ec[li];
+                    for _ in 0..2 {
+                        run(&self.mg_smooth, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&lv.rhs.1), out_r: Some(&lv.e[1 - ec[li]].1), ..none() });
+                        ec[li] = 1 - ec[li];
+                    }
+                }
+                level_groups.set(groups);
+                run(&self.mg_prolong, Binds { p: Some(&g.pres[pc].1), d: Some(&g.mg[0].e[ec[0]].1), out_r: Some(&g.pres[1 - pc].1), ..none() });
+                pc = 1 - pc;
+                for _ in 0..2 {
+                    run(&self.mg_smooth, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
+                    pc = 1 - pc;
+                }
+            }
+        } else {
+            for _ in 0..JACOBI {
+                run(&self.jacobi, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
+                pc = 1 - pc;
+            }
+        }
+        pc
+    }
+
     fn step_grid(&self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, gi: usize) -> (usize, usize) {
         let g = &self.grids[gi];
         let s = &g.src;
@@ -923,55 +990,7 @@ impl FireSystem {
             run(&self.clear, Binds { out_r: Some(&g.pres[pc].1), ..none() });
         } else {
             run(&self.divergence, Binds { vel: Some(&g.vel[c].1), d: Some(&g.expansion.1), out_r: Some(&g.div.1), ..none() });
-            if let (Some(res0), false) = (&g.mg_res, g.mg.is_empty()) {
-                // FIRE-MG: V(2,2) cycles, warm-started from the last step's pressure like the Jacobi solve
-                let last = g.mg.len() - 1;
-                let mut ec = vec![0usize; g.mg.len()];
-                for _ in 0..mg_cycles() {
-                    for _ in 0..2 {
-                        run(&self.mg_smooth, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
-                        pc = 1 - pc;
-                    }
-                    run(&self.mg_residual, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&res0.1), ..none() });
-                    let mut fine_res = &res0.1;
-                    for (li, lv) in g.mg.iter().enumerate() {
-                        level_groups.set(lv.groups);
-                        run(&self.mg_restrict, Binds { d: Some(fine_res), out_r: Some(&lv.rhs.1), ..none() });
-                        run(&self.mg_zero, Binds { out_r: Some(&lv.e[0].1), ..none() });
-                        ec[li] = 0;
-                        for _ in 0..if li == last { MG_COARSE_SWEEPS } else { 2 } {
-                            run(&self.mg_smooth, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&lv.rhs.1), out_r: Some(&lv.e[1 - ec[li]].1), ..none() });
-                            ec[li] = 1 - ec[li];
-                        }
-                        if li < last {
-                            run(&self.mg_residual, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&lv.rhs.1), out_r: Some(&lv.res.1), ..none() });
-                            fine_res = &lv.res.1;
-                        }
-                    }
-                    for li in (0..last).rev() {
-                        let (lv, co) = (&g.mg[li], &g.mg[li + 1]);
-                        level_groups.set(lv.groups);
-                        run(&self.mg_prolong, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&co.e[ec[li + 1]].1), out_r: Some(&lv.e[1 - ec[li]].1), ..none() });
-                        ec[li] = 1 - ec[li];
-                        for _ in 0..2 {
-                            run(&self.mg_smooth, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&lv.rhs.1), out_r: Some(&lv.e[1 - ec[li]].1), ..none() });
-                            ec[li] = 1 - ec[li];
-                        }
-                    }
-                    level_groups.set(groups);
-                    run(&self.mg_prolong, Binds { p: Some(&g.pres[pc].1), d: Some(&g.mg[0].e[ec[0]].1), out_r: Some(&g.pres[1 - pc].1), ..none() });
-                    pc = 1 - pc;
-                    for _ in 0..2 {
-                        run(&self.mg_smooth, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
-                        pc = 1 - pc;
-                    }
-                }
-            } else {
-                for _ in 0..JACOBI {
-                    run(&self.jacobi, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
-                    pc = 1 - pc;
-                }
-            }
+            pc = self.solve_pressure(g, pc, groups, mg_cycles(), &level_groups, &mut run);
         }
         run(&self.project, Binds { vel: Some(&g.vel[c].1), p: Some(&g.pres[pc].1), out_rgba: Some(&g.vel[n].1), ..none() });
         drop(pass);
@@ -1259,8 +1278,8 @@ impl Grid {
             expansion: make_tex(device, "wgr_fire_expansion", r, size),
             div: make_tex(device, "wgr_fire_div", r, size),
             pres: [make_tex(device, "wgr_fire_p_a", r, size), make_tex(device, "wgr_fire_p_b", r, size)],
-            mg_res: (mg_cycles() > 0).then(|| make_tex(device, "wgr_fire_mg_res", r, size)),
-            mg: if mg_cycles() > 0 { mg_levels(device, size) } else { Vec::new() },
+            mg_res: (mg_cycles() > 0 || cfg!(test)).then(|| make_tex(device, "wgr_fire_mg_res", r, size)),
+            mg: if mg_cycles() > 0 || cfg!(test) { mg_levels(device, size) } else { Vec::new() },
             cur: 0,
             pcur: 0,
             params: device.create_buffer(&wgpu::BufferDescriptor {
@@ -1391,6 +1410,121 @@ mod tests {
             }
         }
         assert_eq!(mg_dims((40, 72, 40)), vec![(20, 36, 20), (10, 18, 10), (5, 9, 5)]);
+    }
+
+    /// FIRE-MG on a real device: the production solve (`solve_pressure`) on a box with no solids and a
+    /// smooth source in the middle, from a cold start. The residual left by 1 and 2 V-cycles must be
+    /// finite and well below the 24 Jacobi sweeps'; prints all three.
+    #[test]
+    fn multigrid_pressure_beats_jacobi_on_the_gpu() {
+        let Some((device, queue)) = crate::gfx3d::cull::tests::headless() else {
+            eprintln!("fire multigrid: no adapter");
+            return;
+        };
+        let sys = FireSystem::new(&device, &queue, wgpu::TextureFormat::Rgba16Float, 1);
+        let mut src: FireSource = bytemuck::Zeroable::zeroed();
+        src.floor = [[-1.0e9; 4]; 25];
+        src.ceiling = [[1.0e9; 4]; 25];
+        let (nx, ny, nz) = (NX as usize, NY as usize, NZ as usize);
+        let cell = 0.05f32;
+        let g = Grid::build(&device, 1, src, (NX, NY, NZ), [0.0; 3], cell, NX as f32 * cell, 0.0, [1.0, 0.0, 1.0]);
+        let mut params: SimParams = bytemuck::Zeroable::zeroed();
+        params.origin_cell = [0.0, 0.0, 0.0, cell];
+        params.dims = [NX, NY, NZ, 1];
+        params.step = [STEP, 0.0, 0.0, NX as f32 * cell / 10.0];
+        params.emitter = [1.0, 0.0, 1.0, 0.3];
+        params.floor = src.floor;
+        params.ceiling = src.ceiling;
+        queue.write_buffer(&g.params, 0, bytemuck::bytes_of(&params));
+        // h^2-scaled right-hand side: a smooth source (sigma 4 cells) low in the box, as the expansion of a flame
+        let mut rhs = vec![0.0f32; nx * ny * nz];
+        for z in 0..nz {
+            for y in 0..ny {
+                for x in 0..nx {
+                    let d2 = ((x as f32 - 19.5).powi(2) + (y as f32 - 12.0).powi(2) + (z as f32 - 19.5).powi(2)) / 16.0;
+                    rhs[(z * ny + y) * nx + x] = cell * cell * 10.0 * (-0.5 * d2).exp();
+                }
+            }
+        }
+        let extent = wgpu::Extent3d { width: NX, height: NY, depth_or_array_layers: NZ };
+        let layout = wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(NX * 4), rows_per_image: Some(NY) };
+        let write = |t: &Tex, data: &[f32]| {
+            queue.write_texture(t.0.as_image_copy(), bytemuck::cast_slice(data), layout, extent);
+        };
+        let row = (NX * 4).div_ceil(256) * 256;
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("fire_mg_test_readback"),
+            size: (row * NY * NZ) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let residual = |p: &[f32]| -> f64 {
+            let at = |x: i32, y: i32, z: i32, here: f32| -> f32 {
+                if y < 0 { return here; }
+                if x < 0 || z < 0 || x >= nx as i32 || y >= ny as i32 || z >= nz as i32 { return 0.0; }
+                p[(z as usize * ny + y as usize) * nx + x as usize]
+            };
+            let (mut r2, mut b2) = (0.0f64, 0.0f64);
+            for z in 0..nz as i32 {
+                for y in 0..ny as i32 {
+                    for x in 0..nx as i32 {
+                        let i = (z as usize * ny + y as usize) * nx + x as usize;
+                        let here = p[i];
+                        let sum = at(x + 1, y, z, here) + at(x - 1, y, z, here) + at(x, y + 1, z, here)
+                            + at(x, y - 1, z, here) + at(x, y, z + 1, here) + at(x, y, z - 1, here);
+                        let r = rhs[i] - (sum - 6.0 * here);
+                        r2 += (r as f64).powi(2);
+                        b2 += (rhs[i] as f64).powi(2);
+                    }
+                }
+            }
+            (r2 / b2).sqrt()
+        };
+        let mut results = Vec::new();
+        for cycles in [0u32, 1, 2] {
+            write(&g.div, &rhs);
+            write(&g.pres[0], &vec![0.0; nx * ny * nz]);
+            let groups = (NX.div_ceil(4), NY.div_ceil(4), NZ.div_ceil(4));
+            let level_groups = std::cell::Cell::new(groups);
+            let mut encoder = device.create_command_encoder(&Default::default());
+            let pc = {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None, timestamp_writes: None });
+                let mut run = |pipeline: &wgpu::ComputePipeline, b: Binds| {
+                    let bg = sys.bind(&device, &g.params, b);
+                    pass.set_pipeline(pipeline);
+                    pass.set_bind_group(0, &bg, &[]);
+                    let gr = level_groups.get();
+                    pass.dispatch_workgroups(gr.0, gr.1, gr.2);
+                };
+                sys.solve_pressure(&g, 0, groups, cycles, &level_groups, &mut run)
+            };
+            encoder.copy_texture_to_buffer(
+                g.pres[pc].0.as_image_copy(),
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &readback,
+                    layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(NY) },
+                },
+                extent,
+            );
+            queue.submit([encoder.finish()]);
+            readback.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            let bytes = readback.slice(..).get_mapped_range().expect("mapped readback").to_vec();
+            readback.unmap();
+            let mut p = vec![0.0f32; nx * ny * nz];
+            for z in 0..nz {
+                for y in 0..ny {
+                    let off = (z * ny + y) * row as usize;
+                    let src_row: &[f32] = bytemuck::cast_slice(&bytes[off..off + nx * 4]);
+                    p[(z * ny + y) * nx..(z * ny + y + 1) * nx].copy_from_slice(src_row);
+                }
+            }
+            results.push(residual(&p));
+        }
+        eprintln!("fire pressure relative residual: jacobi24 {:.4}, mg1 {:.4}, mg2 {:.4}", results[0], results[1], results[2]);
+        assert!(results.iter().all(|r| r.is_finite()), "{results:?}");
+        assert!(results[1] < results[0] * 0.5, "one V-cycle should beat 24 Jacobi sweeps: {results:?}");
+        assert!(results[2] < results[1], "a second cycle should help: {results:?}");
     }
 
     #[test]
