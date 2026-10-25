@@ -2029,10 +2029,12 @@ void Draw()
     // a closed title display takes its controls with it
     for (auto it = controls.begin(); it != controls.end();)
         it = Arma3Rsc::IsClosedDisplay(static_cast<float>(it->second.display)) ? controls.erase(it) : std::next(it);
+    // the map's (display 12) only while the map is open: Old Man builds its phone there
+    const bool mapOpen = GWorld && GWorld->HasMap();
     // in the order they were made: a display's later controls over its earlier ones
     for (auto& [handle, c] : controls)
     {
-        if (!c.control || !c.shown)
+        if (!c.control || !c.shown || (c.display == 12 && !mapOpen))
             continue;
         bool hidden = false;
         for (int g = c.group; g >= 0 && !hidden;)

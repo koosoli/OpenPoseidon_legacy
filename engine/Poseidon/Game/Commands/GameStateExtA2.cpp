@@ -1499,6 +1499,11 @@ GameValue A2DiagFrameNo(const GameState*)
     return GameValue(frames += 1.0f);
 }
 
+GameValue A2VisibleMap(const GameState*)
+{
+    return GameValue(GWorld && GWorld->HasMap());
+}
+
 GameValue A2False(const GameState*)
 {
     return GameValue(false);
@@ -3224,7 +3229,7 @@ const GameNular A2Nular[] = {
     GameNular(GameNothing, "disableSerialization", A2NothingNular),
     GameNular(GameNothing, "endLoadingScreen", A2NothingNular),
     GameNular(GameNothing, "clearRadio", A2NothingNular),
-    GameNular(GameBool, "visibleMap", A2False),
+    GameNular(GameBool, "visibleMap", A2VisibleMap),
     GameNular(GameBool, "savingEnabled", A2True),
     GameNular(GameBool, "teamSwitchEnabled", A2False),
     GameNular(GameScalar, "viewDistance", A2One),

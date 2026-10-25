@@ -1003,6 +1003,10 @@ GameValue A1FindDisplay(const GameState* state, GameValuePar oper1)
     // displayAddEventHandler "KeyDown"); as -1 it kept those scripts waiting for good.
     if (toInt((float)oper1) == 46 && GWorld && Poseidon::Arma1Compat::Generation() >= 2)
         return GameValue(46.0f);
+    // Arma 3's map display (12) is there all mission, shown or not: Old Man builds its phone
+    // on it at the start (its controls are drawn while the map is open, Arma3Menu::Script)
+    if (toInt((float)oper1) == 12 && GWorld && Poseidon::Arma1Compat::Generation() >= 3)
+        return GameValue(12.0f);
     // The topmost user dialog stands for any IDD asked for; -1 (displayNull) when none
     // is open, which no control lookup matches.
     return GameValue(GetUserDialog() ? (float)oper1 : -1.0f);

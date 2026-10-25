@@ -114,6 +114,7 @@ void Close(GameState* gs, int display)
         return;
     const OpenDisplay closed = it->second;
     Displays().erase(it);
+    LOG_INFO(Script, "Arma 3: title display {} ({}) on layer {} closed", display, closed.cls, closed.layer);
     Run(gs, closed.onUnload, display);
 }
 
@@ -121,10 +122,15 @@ GameState* State() { return Poseidon::GWorld ? Poseidon::GWorld->GetGameState() 
 
 // Named cut layers ("BIS_layerTitlecard" cutRsc ..., BIS_fnc_rscLayer): Arma 3 numbers a name
 // the first time it is used; allCutLayers lists the names, each at its number. Layer 0 is the
-// unnamed one the unary commands use.
+// unnamed one the unary commands use. Names are numbered from 100: scripts also use layers by
+// number (BIS_fnc_animatedScreen holds its black canvas on 10 and its display on 11), and Old
+// Man names a dozen layers before its intro ends -- its 11th took the opening's display away and
+// left the screen black.
+constexpr int kFirstNamedLayer = 100;
+
 std::vector<std::string>& LayerNames()
 {
-    static std::vector<std::string> names{""};
+    static std::vector<std::string> names(kFirstNamedLayer, std::string());
     return names;
 }
 
