@@ -3340,6 +3340,127 @@ bool ProxyKind(const char* modelName, std::string& simulation, int& crewPosition
     return !simulation.empty();
 }
 
+// A vehicle's own parts that CWA's carrier names differently or not at all (shared by Arma 1
+// and, since 2026-10-25, Arma 2): where its crew boards, its rocket, missile and gun points,
+// rotor selections, the gunner's barrel, the volumetric muzzle flash, retracting gear and its
+// sounds. Written by the Arma 1 session (6adf1588); moved here for Arma 2.
+std::string VehicleOwnPartsText(const ParamEntry& a1, const std::string& sim, const char* missionClass)
+{
+    std::string text;
+    const auto copy = [&](const ParamEntry& from, const char* key, const char* as) {
+        const std::string v = StringValue(from, key);
+        if (!v.empty())
+        {
+            text += std::string("\t\t") + as + "=";
+            QuoteConfigString(text, v.c_str());
+            text += ";\r\n";
+        }
+    };
+    copy(a1, "memoryPointsGetInDriver", "memoryPointsGetInDriver");
+    copy(a1, "memoryPointsGetInCargo", "memoryPointsGetInCargo");
+    if (const ParamEntry* turrets = a1.FindEntry("Turrets"); turrets && turrets->IsClass())
+    {
+        if (const ParamEntry* main = turrets->FindEntry("MainTurret"); main && main->IsClass())
+            copy(*main, "memoryPointsGetInGunner", "memoryPointsGetInGunner");
+        if (const ParamEntry* commander = CommanderTurret(*turrets, 0); commander)
+            copy(*commander, "memoryPointsGetInGunner", "memoryPointsGetInCommander");
+    }
+    if (const ParamEntry* r = a1.FindEntry("getInRadius"); r && !r->IsClass() && !r->IsArray() && (float)*r > 0)
+    {
+        char line[64];
+        std::snprintf(line, sizeof(line), "\t\tgetInRadius=%g;\r\n", (float)*r);
+        text += line;
+    }
+
+    // Its own memory points and rotor selections, by the names its class gives them
+    // (the AH-1Z's Rocket_1/Missile_1, mainRotorStatic); the engine reads these keys
+    // and keeps CWA's Czech names where the model has none.
+    for (const char* key : {"memoryPointLRocket", "memoryPointRRocket", "memoryPointLMissile",
+                            "memoryPointRMissile", "memoryPointGun", "selectionHRotorStill",
+                            "selectionHRotorMove", "selectionVRotorStill", "selectionVRotorMove"})
+        copy(a1, key, key);
+    // its gunner's barrel: gunBeg/gunEnd and memoryPointGun of the first armed turret
+    // (the Mi-17's muzzle_1/chamber_1, which CWA's "usti hlavne" misses)
+    if (const ParamEntry* turrets = a1.FindEntry("Turrets"); turrets && turrets->IsClass())
+        for (int i = 0; i < turrets->GetEntryCount(); i++)
+        {
+            const ParamEntry& t = turrets->GetEntry(i);
+            const ParamEntry* ws = t.IsClass() ? t.FindEntry("weapons") : nullptr;
+            bool armed = false;
+            for (int k = 0; ws && ws->IsArray() && k < ws->GetSize() && !armed; k++)
+            {
+                const std::string w = Lower((const char*)(RStringB)(*ws)[k]);
+                armed = w.find("horn") == std::string::npos && w.find("fake") == std::string::npos &&
+                        w.find("searchlight") == std::string::npos && w.find("smoke") == std::string::npos;
+            }
+            if (!armed)
+                continue;
+            copy(t, "gunBeg", "a1GunBeg");
+            copy(t, "gunEnd", "a1GunEnd");
+            copy(t, "memoryPointGun", "a1GunPoint");
+            break;
+        }
+    // its flash is a proxy in "zasleh", which CWA does not draw: the engine adds the
+    // volumetric flash at the barrel
+    text += "\t\ta1MuzzleFlash=1;\r\n";
+    if (const ParamEntry* g = a1.FindEntry("gearRetracting"); g && !g->IsClass() && !g->IsArray() &&
+                                                               (sim == "airplane" || sim == "helicopter"))
+        text += std::string("\t\tgearRetracting=") + ((int)*g ? "1" : "0") + ";\r\n";
+    // Its own sounds, 1:1 (OP_A1_VEHICLE_SOUNDS=0: the CWA carrier's): engine, wind,
+    // damage alarm, doors, servo
+    static const bool ownSounds = [] {
+        const char* e = std::getenv(Generation() == 2 ? "OP_A2_VEHICLE_SOUNDS" : "OP_A1_VEHICLE_SOUNDS");
+        return !(e && *e == '0');
+    }();
+    std::string sounds;
+    // Arma 2 keeps its engine and tyre noise in class Sounds, each with expressions over rpm,
+    // speed and surface that CWA has no counterpart for. CWA plays one engine loop with its
+    // pitch from rpm and one ground loop: they take Arma 2's engine loop (Sounds/Engine, else
+    // the first class named for the engine) and its asphalt (else first) tyre noise.
+    const auto arma2Sound = [&](const char* key) -> const ParamEntry* {
+        if (Generation() != 2)
+            return nullptr;
+        const ParamEntry* list = a1.FindEntry("Sounds");
+        if (!list || !list->IsClass())
+            return nullptr;
+        const bool engine = strcmp(key, "soundEngine") == 0;
+        if (!engine && strcmp(key, "soundEnviron") != 0)
+            return nullptr;
+        const ParamEntry* pick = list->FindEntry(engine ? "Engine" : "TiresAsphaltOut");
+        for (int i = 0; (!pick || !pick->IsClass()) && i < list->GetEntryCount(); i++)
+        {
+            const ParamEntry& c = list->GetEntry(i);
+            const std::string n = Lower((const char*)c.GetName());
+            if (c.IsClass() && n.find(engine ? "engine" : "tires") != std::string::npos &&
+                n.find("int") == std::string::npos)
+                pick = &c;
+        }
+        return pick && pick->IsClass() ? pick->FindEntry("sound") : nullptr;
+    };
+    for (const char* key : {"soundEngine", "soundEnviron", "soundDammage", "soundGetIn", "soundGetOut",
+                            "soundServo"})
+    {
+        const ParamEntry* snd = ownSounds ? a1.FindEntry(key) : nullptr;
+        if (ownSounds && (!snd || !snd->IsArray() || snd->GetSize() < 3 || ((RStringB)(*snd)[0]).GetLength() == 0))
+            if (const ParamEntry* a2 = arma2Sound(key))
+                snd = a2;
+        if (!snd || !snd->IsArray() || snd->GetSize() < 3)
+            continue;
+        const std::string file = (const char*)(RStringB)(*snd)[0];
+        if (file.empty())
+            continue;
+        text += std::string("\t\t") + key + "[]={";
+        QuoteConfigString(text, file.c_str());
+        char line[96];
+        std::snprintf(line, sizeof(line), ",%g,%g};\r\n", (float)(*snd)[1], (float)(*snd)[2]);
+        text += line;
+        sounds += std::string(" ") + key + "=" + file;
+    }
+    if (!sounds.empty())
+        LOG_INFO(Mission, "{}: '{}' sounds:{}", Label(), missionClass, sounds);
+    return text;
+}
+
 RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
 {
     if (!Active() || !ConfigLoaded())
@@ -3525,94 +3646,9 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
             if (!summary.empty())
                 LOG_INFO(Mission, "{}: '{}' crew poses:{}", Label(), missionClass.Data(), summary);
         }
-        // Where its crew boards: the Arma 1 memory points (the AH-1Z's "pos_driver") and radius.
+        // Where its crew boards, its gun and rocket points, rotors, flash, gear and sounds.
         if (vehicle)
-        {
-            const auto copy = [&](const ParamEntry& from, const char* key, const char* as) {
-                const std::string v = StringValue(from, key);
-                if (!v.empty())
-                {
-                    text += std::string("\t\t") + as + "=";
-                    QuoteConfigString(text, v.c_str());
-                    text += ";\r\n";
-                }
-            };
-            copy(*a1, "memoryPointsGetInDriver", "memoryPointsGetInDriver");
-            copy(*a1, "memoryPointsGetInCargo", "memoryPointsGetInCargo");
-            if (const ParamEntry* turrets = a1->FindEntry("Turrets"); turrets && turrets->IsClass())
-            {
-                if (const ParamEntry* main = turrets->FindEntry("MainTurret"); main && main->IsClass())
-                    copy(*main, "memoryPointsGetInGunner", "memoryPointsGetInGunner");
-                if (const ParamEntry* commander = CommanderTurret(*turrets, 0); commander)
-                    copy(*commander, "memoryPointsGetInGunner", "memoryPointsGetInCommander");
-            }
-            if (const ParamEntry* r = a1->FindEntry("getInRadius"); r && !r->IsClass() && !r->IsArray() && (float)*r > 0)
-            {
-                char line[64];
-                std::snprintf(line, sizeof(line), "\t\tgetInRadius=%g;\r\n", (float)*r);
-                text += line;
-            }
-
-            // Its own memory points and rotor selections, by the names its class gives them
-            // (the AH-1Z's Rocket_1/Missile_1, mainRotorStatic); the engine reads these keys
-            // and keeps CWA's Czech names where the model has none.
-            for (const char* key : {"memoryPointLRocket", "memoryPointRRocket", "memoryPointLMissile",
-                                    "memoryPointRMissile", "memoryPointGun", "selectionHRotorStill",
-                                    "selectionHRotorMove", "selectionVRotorStill", "selectionVRotorMove"})
-                copy(*a1, key, key);
-            // its gunner's barrel: gunBeg/gunEnd and memoryPointGun of the first armed turret
-            // (the Mi-17's muzzle_1/chamber_1, which CWA's "usti hlavne" misses)
-            if (const ParamEntry* turrets = a1->FindEntry("Turrets"); turrets && turrets->IsClass())
-                for (int i = 0; i < turrets->GetEntryCount(); i++)
-                {
-                    const ParamEntry& t = turrets->GetEntry(i);
-                    const ParamEntry* ws = t.IsClass() ? t.FindEntry("weapons") : nullptr;
-                    bool armed = false;
-                    for (int k = 0; ws && ws->IsArray() && k < ws->GetSize() && !armed; k++)
-                    {
-                        const std::string w = Lower((const char*)(RStringB)(*ws)[k]);
-                        armed = w.find("horn") == std::string::npos && w.find("fake") == std::string::npos &&
-                                w.find("searchlight") == std::string::npos && w.find("smoke") == std::string::npos;
-                    }
-                    if (!armed)
-                        continue;
-                    copy(t, "gunBeg", "a1GunBeg");
-                    copy(t, "gunEnd", "a1GunEnd");
-                    copy(t, "memoryPointGun", "a1GunPoint");
-                    break;
-                }
-            // its flash is a proxy in "zasleh", which CWA does not draw: the engine adds the
-            // volumetric flash at the barrel
-            text += "\t\ta1MuzzleFlash=1;\r\n";
-            if (const ParamEntry* g = a1->FindEntry("gearRetracting"); g && !g->IsClass() && !g->IsArray() &&
-                                                                       (sim == "airplane" || sim == "helicopter"))
-                text += std::string("\t\tgearRetracting=") + ((int)*g ? "1" : "0") + ";\r\n";
-            // Its own sounds, 1:1 (OP_A1_VEHICLE_SOUNDS=0: the CWA carrier's): engine, wind,
-            // damage alarm, doors, servo
-            static const bool ownSounds = [] {
-                const char* e = std::getenv("OP_A1_VEHICLE_SOUNDS");
-                return !(e && *e == '0');
-            }();
-            std::string sounds;
-            for (const char* key : {"soundEngine", "soundEnviron", "soundDammage", "soundGetIn", "soundGetOut",
-                                    "soundServo"})
-            {
-                const ParamEntry* snd = ownSounds ? a1->FindEntry(key) : nullptr;
-                if (!snd || !snd->IsArray() || snd->GetSize() < 3)
-                    continue;
-                const std::string file = (const char*)(RStringB)(*snd)[0];
-                if (file.empty())
-                    continue;
-                text += std::string("\t\t") + key + "[]={";
-                QuoteConfigString(text, file.c_str());
-                char line[96];
-                std::snprintf(line, sizeof(line), ",%g,%g};\r\n", (float)(*snd)[1], (float)(*snd)[2]);
-                text += line;
-                sounds += std::string(" ") + key + "=" + file;
-            }
-            if (!sounds.empty())
-                LOG_INFO(Mission, "{}: '{}' sounds:{}", Label(), missionClass.Data(), sounds);
-        }
+            text += VehicleOwnPartsText(*a1, sim, missionClass.Data());
         // Its own gunner's weapons, rebuilt on CWA ones: cars, boats, tanks and static weapons
         // on a CWA carrier with a gunner -- the weapons of the first turret that has any (the
         // tank's main turret; a commander's own gun, the M1A1's M2, has no seat in CWA's tank
@@ -3667,6 +3703,10 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
             // An unarmed Arma 2 vehicle on an armed CWA one drops the CWA weapons: the C-130J
             // flew on CWA's UH-60 with its Zuni rockets, the fishing boat on the armed BoatW
             // with a Browning (run 19 census). The gunner's seat stays.
+            // Where its crew boards, its gun and rocket points, rotors, flash, gear and sounds, as
+            // an Arma 1 vehicle has them (OP_A2_VEHICLE_SOUNDS=0: CWA's sounds).
+            if (Generation() == 2)
+                text += VehicleOwnPartsText(*a1, sim, missionClass.Data());
             // An armed one fires its own weapons, rebuilt on CWA ones as Arma 1's are
             // (Arma1VehicleWeaponsText: its rounds, rate of fire, muzzle velocity, sound and
             // damage on the CWA weapon of its kind); OP_A2_VEHICLE_WEAPONS=0 keeps the CWA
