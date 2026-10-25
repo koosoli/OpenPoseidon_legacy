@@ -2212,6 +2212,17 @@ bool Position2D(GameValuePar v, float& x, float& y)
     return false;
 }
 
+// position in location: inside the location's area (its two radii, an ellipse)
+GameValue A2InLocation(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    const Runtime::Location* loc = LocationOf(oper2);
+    float x, y;
+    if (!loc || loc->sizeA <= 0 || loc->sizeB <= 0 || !Position2D(oper1, x, y))
+        return GameValue(false);
+    const float dx = (x - loc->x) / loc->sizeA, dy = (y - loc->y) / loc->sizeB;
+    return GameValue(dx * dx + dy * dy <= 1.0f);
+}
+
 GameValue A2CreateLocation(const GameState*, GameValuePar oper1)
 {
     // createLocation [type, position, sizeX, sizeY]
@@ -3447,6 +3458,7 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "setVehicleTiPars", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameArray, "unitsBelowHeight", function, A2EmptyArrayBinary, GameGroup | GameArray, GameScalar),
     GameOperator(GameNothing, "addBackpack", function, A2AddBackpack, GameObject, GameString),
+    GameOperator(GameBool, "in", function, A2InLocation, GameArray | GameObject, GameString),
     GameOperator(GameNothing, "hcSetGroup", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameNothing, "hcRemoveGroup", function, A2NothingBinary, GameObject, GameGroup),
     GameOperator(GameNothing, "cutText", function, A2CutTextLayer, GameScalar, GameArray),

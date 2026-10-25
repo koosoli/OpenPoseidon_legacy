@@ -1261,6 +1261,7 @@ void Detector::Scan()
         GameState* gstate = GWorld->GetGameState();
         gstate->VarSet("this", active, true);
         gstate->VarSet("thisList", GetGameValue(), true);
+        gstate->VarSet("thisTrigger", GameValueExt(this), true); // Arma 2/3
         active = gstate->EvaluateBool(_expCond);
     }
 
@@ -1302,6 +1303,7 @@ void Detector::DoActivate()
     {
         GameState* gstate = GWorld->GetGameState();
         gstate->VarSet("this", true, true);
+        gstate->VarSet("thisTrigger", GameValueExt(this), true);
         if (!gstate->EvaluateBool(_expCond))
         {
             return;
@@ -1334,6 +1336,7 @@ void Detector::OnActivate(Object* obj)
 
     GameState* gstate = GWorld->GetGameState();
     gstate->VarSet("thisList", GetGameValue(), true);
+    gstate->VarSet("thisTrigger", GameValueExt(this), true);
     gstate->Execute(_expActiv);
 
     if (_action == ASTSwitch)
@@ -1512,6 +1515,7 @@ void Detector::OnActivate(Object* obj)
 void Detector::OnDesactivate()
 {
     GameState* gstate = GWorld->GetGameState();
+    gstate->VarSet("thisTrigger", GameValueExt(this), true);
     gstate->Execute(_expDesactiv);
 
     _active = false;
