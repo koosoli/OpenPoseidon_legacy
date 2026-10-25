@@ -4587,7 +4587,11 @@ impl Renderer {
         if let Some(line) = self.gfx3d.set_snow_surface(self.terrain.snow_surface_params()) {
             self.log.log(log_level::INFO, &line);
         }
-        self.gfx3d.set_ground_weather(self.terrain.ground_weather_params());
+        let ground_weather = self.terrain.ground_weather_params();
+        self.gfx3d.set_ground_weather(ground_weather);
+        if let Some(tw) = self.water.tidewater_mut() {
+            tw.set_rain(ground_weather[1]);
+        }
         let bounds = self.terrain.native_height_bounds();
         // Unknown on a streamed Earth patch: its mountains are not in the island's heightmap.
         self.gfx3d.set_world_max_height(if bounds[1] > bounds[0] && !self.grass.earth_active() { bounds[1] }

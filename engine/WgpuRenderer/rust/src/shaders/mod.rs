@@ -76,11 +76,6 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
     if cfg!(test) || std::env::var("POSEIDON_WHOLE_WORLD").as_deref() == Ok("1") {
         defs.insert("WHOLE_WORLD".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
-    // SEA-RAIN: rain drop rings and rain roughness on the Tidewater sea (tw_water.wgsl). Off by default
-    // until the owner picks it from A/B captures; off compiles the sea exactly as before.
-    if std::env::var("WGR_SEA_RAIN").as_deref() == Ok("1") {
-        defs.insert("SEA_RAIN".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
-    }
     if std::env::var("WGR_TREE_SNOW").as_deref() == Ok("0") {
         defs.insert("DISABLE_TREE_SNOW".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
@@ -290,8 +285,11 @@ fn compose_key(composer: &Composer, source: &str, file_path: &str,
     h.finish()
 }
 
-fn compose_memo(composer: &mut Composer, label: &str, source: &str, file_path: &str) -> naga::Module {
-    let defs = shader_defs();
+fn compose_memo(composer: &mut Composer, label: &str, source: &str, file_path: &str, extra: &[&str]) -> naga::Module {
+    let mut defs = shader_defs();
+    for d in extra {
+        defs.insert((*d).to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
     let compose = |composer: &mut Composer, defs| {
         composer
             .make_naga_module(NagaModuleDescriptor { source, file_path, shader_defs: defs, ..Default::default() })
@@ -317,18 +315,23 @@ pub fn prewarm_shaders() {
     }
     static STARTED: std::sync::Once = std::sync::Once::new();
     STARTED.call_once(|| {
-        let jobs: [(&'static str, &'static str); 6] = [
-            (include_str!("../gfx3d/gpu_driven.wgsl"), "gfx3d/gpu_driven.wgsl"),
-            (crate::water_tw::TW_WATER_WGSL, "water_tw/tw_water.wgsl"),
-            (include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl"),
-            (include_str!("../terrain/terrain.wgsl"), "terrain/terrain.wgsl"),
-            (include_str!("../grass/grass.wgsl"), "grass/grass.wgsl"),
-            (include_str!("../layered_fog.wgsl"), "layered_fog.wgsl"),
+        let jobs: [(&'static str, &'static str, &'static [&'static str]); 7] = [
+            (include_str!("../gfx3d/gpu_driven.wgsl"), "gfx3d/gpu_driven.wgsl", &[]),
+            (crate::water_tw::TW_WATER_WGSL, "water_tw/tw_water.wgsl", &[]),
+            // the sea's rain variant (water_tw draws it while it rains)
+            (crate::water_tw::TW_WATER_WGSL, "water_tw/tw_water.wgsl", &["SEA_RAIN"]),
+            (include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl", &[]),
+            (include_str!("../terrain/terrain.wgsl"), "terrain/terrain.wgsl", &[]),
+            (include_str!("../grass/grass.wgsl"), "grass/grass.wgsl", &[]),
+            (include_str!("../layered_fog.wgsl"), "layered_fog.wgsl", &[]),
         ];
-        for (source, file_path) in jobs {
+        for (source, file_path, extra) in jobs {
             let _ = std::thread::Builder::new().name("wgr-shader-prewarm".into()).spawn(move || {
                 let mut composer = build_composer();
-                let defs = shader_defs();
+                let mut defs = shader_defs();
+                for d in extra {
+                    defs.insert((*d).to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+                }
                 let key = compose_key(&composer, source, file_path, &defs);
                 let cell = COMPOSED.lock().unwrap().entry(key).or_default().clone();
                 cell.get_or_init(|| {
@@ -350,8 +353,21 @@ pub fn make_module(
     source: &str,
     file_path: &str,
 ) -> wgpu::ShaderModule {
+    make_module_with_defs(device, composer, label, source, file_path, &[])
+}
+
+/// `make_module` with extra boolean shader defs on top of `shader_defs()`: a variant of one
+/// entry shader, e.g. the Tidewater sea with SEA_RAIN for rainy weather.
+pub fn make_module_with_defs(
+    device: &wgpu::Device,
+    composer: &mut Composer,
+    label: &str,
+    source: &str,
+    file_path: &str,
+    extra: &[&str],
+) -> wgpu::ShaderModule {
     let t0 = std::time::Instant::now();
-    let module = compose_memo(composer, label, source, file_path);
+    let module = compose_memo(composer, label, source, file_path, extra);
     let t1 = std::time::Instant::now();
     let m = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(label),

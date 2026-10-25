@@ -580,6 +580,9 @@ pub struct Tidewater {
     // PERF-TW-CAUSTICS-GATE: this frame's caustics are not needed (set_caustics_skip).
     caustics_skip: bool,
     pipeline: wgpu::RenderPipeline,
+    /// SEA-RAIN variant, drawn while `raining` (None: WGR_SEA_RAIN=0).
+    pipeline_rain: Option<wgpu::RenderPipeline>,
+    raining: bool,
     grid_vbuf: wgpu::Buffer,
     grid_ibuf: wgpu::Buffer,
     grid_index_count: u32,
@@ -833,11 +836,11 @@ impl Tidewater {
         });
         let grid_attrs = wgpu::vertex_attr_array![0 => Float32x2];
         let node_attrs = wgpu::vertex_attr_array![1 => Float32x4];
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("tw_water_pipeline"),
+        let make_pipeline = |shader: &wgpu::ShaderModule, label: &str| device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: shader,
                 entry_point: Some("vs_tidewater"),
                 compilation_options: Default::default(),
                 buffers: &[
@@ -873,7 +876,7 @@ impl Tidewater {
             }),
             multisample: wgpu::MultisampleState { count: sample_count, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: shader,
                 entry_point: Some("fs_tidewater"),
                 compilation_options: wgpu::PipelineCompilationOptions {
                     constants: &[("linear", linear)],
@@ -888,6 +891,21 @@ impl Tidewater {
             }),
             multiview_mask: None,
             cache: crate::pipeline_cache::get(&device),
+        });
+        let pipeline = make_pipeline(&shader, "tw_water_pipeline");
+        // SEA-RAIN: the same material with rain drop rings and rain roughness (tw_water.wgsl SEA_RAIN),
+        // drawn only while it rains; dry weather keeps the plain shader, so the rain code costs no
+        // registers or occupancy there. WGR_SEA_RAIN=0 = never.
+        let pipeline_rain = (std::env::var("WGR_SEA_RAIN").as_deref() != Ok("0")).then(|| {
+            let rain_shader = crate::shaders::make_module_with_defs(
+                device,
+                &mut composer,
+                "tw_water_shader_rain",
+                TW_WATER_WGSL,
+                "water_tw/tw_water.wgsl",
+                &["SEA_RAIN"],
+            );
+            make_pipeline(&rain_shader, "tw_water_pipeline_rain")
         });
 
         let brk = breakers::BreakersGpu::new(
@@ -957,6 +975,8 @@ impl Tidewater {
             bind_dirty: true,
             caustics_skip: false,
             pipeline,
+            pipeline_rain,
+            raining: false,
             grid_vbuf,
             grid_ibuf,
             grid_index_count: indices.len() as u32,
@@ -1669,11 +1689,21 @@ impl Tidewater {
         })
     }
 
+    /// SEA-RAIN: the effective liquid rain this frame (the shared ground-weather lane); any rain
+    /// selects the sea's rain variant.
+    pub fn set_rain(&mut self, rain: f32) {
+        self.raining = rain > 0.0;
+    }
+
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup, offset: u32) {
         if self.instance_count == 0 || self.bind_dirty {
             return;
         }
-        pass.set_pipeline(&self.pipeline);
+        let pipeline = match &self.pipeline_rain {
+            Some(rain) if self.raining => rain,
+            _ => &self.pipeline,
+        };
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, camera, &[offset]);
         pass.set_bind_group(1, &self.bind, &[]);
         pass.set_vertex_buffer(0, self.grid_vbuf.slice(..));
