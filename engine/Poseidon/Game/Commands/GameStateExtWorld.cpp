@@ -232,7 +232,7 @@ static EntityAI* CreateUnitImpl(AIGroup* group, RString type, Vector3Par positio
         GetNetworkManager().CreateObject(group->MainSubgroup());
     }
     GetNetworkManager().CreateObject(unit);
-    if (!group->Leader())
+    if (!group->HasLeader())
     {
         center->SelectLeader(group);
     }

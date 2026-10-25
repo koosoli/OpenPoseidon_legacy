@@ -1267,7 +1267,7 @@ GameValue A2MoveTo(const GameState* state, GameValuePar oper1, GameValuePar oper
                 if (!main && group->MainSubgroup())
                     GetNetworkManager().CreateObject(group->MainSubgroup());
                 GetNetworkManager().CreateObject(unit);
-                if (!group->Leader() && group->GetCenter())
+                if (!group->HasLeader() && group->GetCenter())
                     group->GetCenter()->SelectLeader(group);
             }
             if (joinLogged < 5)
