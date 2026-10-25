@@ -185,12 +185,11 @@ tests cover 37 locally present stock models, with two Camel pilot post-hit
 settlement failures and remaining posture/save/network/budget limits. Weather
 materials and modern-game material/LOD conversion still need visual refinement.
 There is no claim of universal addon-rig support or complete modern-game import.
-
-This remains the private development repository, with its history, agent
-instructions and evidence. The separate release README is prepared under
-[`docs/roadmap/publishing/public-files/README.md`](docs/roadmap/publishing/public-files/README.md).
-See the [development/release workflow](docs/roadmap/publishing/DEVELOPMENT-AND-RELEASE-WORKFLOW.md)
-for why the private preparation branch retains files excluded from a release.
+Arma 1, 2 and 3 missions are experimental: some still stop at missing script
+commands or content, and they need your own Arma installations. Whole-world
+rendering streams public elevation and imagery data and needs an internet
+connection. NPC chat needs a language-model provider or a local model server of
+your choice.
 
 ## Project lineage
 
