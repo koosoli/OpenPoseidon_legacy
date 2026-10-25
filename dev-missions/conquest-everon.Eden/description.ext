@@ -1,0 +1,30 @@
+// Conquest, Slice 0: an NPC-only war on Everon (docs/roadmap/conquest/CONQUEST-PLAN.md).
+// The referee (engine/Poseidon/Game/Conquest) reads this class; without it the engine does nothing.
+// Positions are CfgWorlds >> Eden >> Names (map metres, x east, y north); the airfield is its ilsPosition.
+
+class CfgConquest
+{
+    sides[] = {"WEST", "EAST"};
+    startPool = 300;   // each side, on top of its starting squads
+    startSquads = 3;   // free squads at each HQ when the war begins
+    cap = 60;          // living soldiers per side
+    squadCost = 80;
+    planSeconds = 20;  // the commanders replan this often, and at once on a capture
+
+    class Rosters
+    {
+        WEST[] = {"OfficerW", "SoldierWB", "SoldierWMG", "SoldierWB", "SoldierWLAW", "SoldierWB", "SoldierWMedic", "SoldierWB"};
+        EAST[] = {"OfficerE", "SoldierEB", "SoldierEMG", "SoldierEB", "SoldierELAW", "SoldierEB", "SoldierEMedic", "SoldierEB"};
+    };
+
+    class Objectives
+    {
+        class Morton     { name = "Morton";     position[] = {5134, 3955};  radius = 120; value = 10; kind = "HQ"; owner = "WEST"; neighbours[] = {"Figari"}; };
+        class Figari     { name = "Figari";     position[] = {5283, 5375};  radius = 120; value = 5;  neighbours[] = {"Montignac", "EntreDeux"}; };
+        class EntreDeux  { name = "Entre Deux"; position[] = {5735, 7059};  radius = 120; value = 5;  neighbours[] = {"Montignac"}; };
+        class Montignac  { name = "Montignac";  position[] = {4935, 6994};  radius = 150; value = 10; neighbours[] = {"Gravette", "Tyrone"}; };
+        class Gravette   { name = "Gravette";   position[] = {4112, 7772};  radius = 120; value = 5;  neighbours[] = {"Tyrone"}; };
+        class Tyrone     { name = "Tyrone";     position[] = {4946, 9056};  radius = 120; value = 5;  neighbours[] = {"Airfield"}; };
+        class Airfield   { name = "Airfield";   position[] = {4772, 10923}; radius = 200; value = 10; kind = "HQ"; owner = "EAST"; };
+    };
+};

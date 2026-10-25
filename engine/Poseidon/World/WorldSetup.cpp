@@ -1638,6 +1638,10 @@ int World::TerminateAllScripts()
 }
 
 void Arma2RuntimeSimulate(); // GameStateExtA2.cpp: Arma 2 scripted FSMs (--arma2 only)
+namespace Poseidon::Conquest
+{
+void Simulate(); // Game/Conquest/ConquestReferee.cpp: inert unless the mission declares CfgConquest
+}
 
 void World::SimulateScripts()
 {
@@ -1653,6 +1657,7 @@ void World::SimulateScripts()
         }
     }
     Arma2RuntimeSimulate();
+    Poseidon::Conquest::Simulate();
 }
 
 void World::SetCameraScript(Script* script)

@@ -62,10 +62,14 @@ change before anyone builds from the draft:
 | AI architecture rules: a planner issues existing commands, player orders interrupt, a separate saved planner RNG, stable ids, a log-only "shadow planner" first | `docs/roadmap/AI-ARCHITECTURE-ASSESSMENT-20260910.md` | Hard constraints on the commander (§4.3) |
 | Harnesses: AI timeline oracle (`POSEIDON_AI_TIMELINE`, `PoseidonTools timeline diff`), pinned tick (`POSEIDON_LOCKSTEP_HZ`), harness `eval`, `setAccTime` | `AI/AITimeline.cpp`, `apps/tools/Tools/commands/TimelineCommand.cpp`, `GameStateExt.cpp:1973` | The Slice 0 soak test and determinism checks |
 
-**Prior art on this exact engine.** OFP's community "Capture The Island" missions (crCTI, MFCTI, TZK) built this
-genre in OFP script: towns, money, factories, AI commanders. The upstream suite still boots them
-(`tests/integration/multiplayer/crcti_dedicated_init.test`, `mfcti_dedicated_init.test`,
-`cti_jip_contract.test`). They are third-party work: study them as design references and copy no code.
+**A limited reference: the 2003 CTI missions.** OFP's community "Capture The Island" missions (crCTI, MFCTI, TZK)
+are the same genre, and the upstream suite still boots them (`tests/integration/multiplayer/crcti_*`,
+`mfcti_dedicated_init.test`). The owner wants Conquest far more modern than they are, so they are a reference
+only for *mechanics that proved workable on this engine*: for example MFCTI Coop's town garrisons that spawn only
+when players approach (a cheap answer to §4.7's far-group problem) and truck-built forward outposts as respawn
+points. They are not a reference for UI, feel or structure. MFCTI's SourceForge page states no license, so none
+of its code may be reused. The main reference is Arma Reforger's Conflict, built with modern UX: HUD capture bars,
+a deploy map, readable radio and war-log feedback, and commanders that respect fog of war.
 
 ---
 
@@ -449,4 +453,28 @@ imported worlds.
 - **§13 (scope):** a concrete Everon layout with positions from the game's own config.
 - **§14 (slices):** reordered so the NPC-only war (the go/no-go) comes first; each slice has checks.
 - **New:** single-player death handling, body cleanup, guarded-point removal, the referee/commander information
-  split, the stock-Everon script dialect limits, prior art (CTI).
+  split, the stock-Everon script dialect limits; CTI kept as a mechanics-only reference.
+
+---
+
+## Status, 2026-10-25: Slice 0 runs, commander control pulled forward
+
+Built on `claude/domination-mode-ccede5` (base `perf/reforger-render-hitches` `d29d139c4`).
+
+- **In the engine:** `Game/Conquest/` (rules, Standard commander, referee), the dev-panel "Conquest" tab,
+  `conquestState` and `conquestMapClick` script commands, and `dev-missions/conquest-everon.Eden` with the §5 layout.
+  13 Catch2 cases (`PoseidonTests "[conquest]"`) pass.
+- **An engine bug found on the way and fixed separately:** groups created at runtime never elected a leader
+  (`AIGroup::Leader()`'s fallback hid the missing election), so they ignored `move` and waypoints. See commit
+  "AI: groups created at runtime elect a leader again".
+- **Soak** (`scripts/Run-ConquestSoak.ps1`, report: `scripts/conquest_soak_report.py`), one seed, 4× time:
+  57 game minutes, 7 captures + 2 neutralisations (9.4 changes of hands per hour), 206 dead, WEST won when EAST's
+  score reached 0. Live AI stayed within the cap of 60 per side, 1 stall, referee tick about 0.03 ms (217 ms once,
+  when 80 soldiers spawn at the start). Checks still open: three seeds; the simulation-stage budget measured at
+  80/160/240 live AI; balance (WEST won the one run).
+- **Pulled forward at the owner's request (2026-10-25):** an observer layer (every squad on the map, labelled with
+  its task and strength) and first commander control. Click your squads on the map (Shift adds), then click an
+  objective to attack or defend it, or a point to move. The AI leaves those squads alone for 10 minutes.
+  Verified through the harness; not yet played by hand.
+- **Changed from the plan:** guarded points are not used yet (the Standard commander's own defence logic was
+  enough), so the guarded-point removal was not needed for Slice 0.
