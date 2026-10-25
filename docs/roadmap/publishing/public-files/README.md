@@ -17,6 +17,16 @@ Bohemia Interactive product.
 [![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/koosoli)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/koosoli)
 
+> [!TIP]
+> **Don't want to compile? Ready-to-play Windows builds are waiting for you.**
+> Sponsors get access to our private builds repository,
+> [OpenPoseidon-Builds](https://github.com/OpenPoseidon/OpenPoseidon-Builds/releases),
+> with tested, precompiled releases. Become a member through
+> [GitHub Sponsors](https://github.com/sponsors/koosoli) for a small monthly
+> contribution: you get the builds and directly help fund the project's
+> development, testing and build distribution. Building from source stays free,
+> and your rights under the software licences are the same either way.
+
 ## Engine features
 
 ### Worlds and content
@@ -174,15 +184,6 @@ content. Imported maps/assets are not included with the engine source.
 | ![Ambient occlusion and directional light inside a building](screenshots/GTAO.png) | ![Village lights and shadows in rainy night conditions](screenshots/newshadowsystem.png) |
 | **Box3D physics test scene** | |
 | ![Box3D wall and rigid-body test scene](screenshots/box3d.png) | |
-
-## Precompiled builds
-
-Prefer to play without compiling? Official precompiled Windows builds are available
-in our [private downloads repository](https://github.com/OpenPoseidon/OpenPoseidon-Builds/releases).
-For access, we ask for a small monthly contribution through
-[GitHub Sponsors](https://github.com/sponsors/koosoli), helping fund continued
-development, testing and build distribution. You can build the engine yourself
-without a sponsorship; your rights under the software licences remain unchanged.
 
 ## Current limitations
 

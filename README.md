@@ -7,6 +7,16 @@
 [![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/koosoli)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/koosoli)
 
+> [!TIP]
+> **Don't want to compile? Ready-to-play Windows builds are waiting for you.**
+> Sponsors get access to our private builds repository,
+> [OpenPoseidon-Builds](https://github.com/OpenPoseidon/OpenPoseidon-Builds/releases),
+> with tested, precompiled releases. Become a member through
+> [GitHub Sponsors](https://github.com/sponsors/koosoli) for a small monthly
+> contribution: you get the builds and directly help fund the project's
+> development, testing and build distribution. Building from source stays free,
+> and your rights under the software licences are the same either way.
+
 **Open Poseidon Engine** is a modernization-focused fork of the classic Poseidon engine
 behind *Arma: Cold War Assault* / *Operation Flashpoint: Cold War Crisis*.
 Its goal is simple: make this landmark 2001 game feel as modern as possible
@@ -205,6 +215,10 @@ There are installation/build guides for [Linux](docs/build/linux.md) and
 [Windows](docs/build/win.md).
 
 ### Development Builds
+
+Precompiled Windows builds are available to sponsors in
+[OpenPoseidon-Builds](https://github.com/OpenPoseidon/OpenPoseidon-Builds/releases);
+become a member through [GitHub Sponsors](https://github.com/sponsors/koosoli) to get access.
 
 ## Support the project
 
