@@ -1408,6 +1408,43 @@ std::string Arma1AmmoClass(const std::string& a1Ammo, const std::string& cwaAmmo
         text += line;
         values++;
     }
+    // Arma 2: where a round lands it sounds like Arma 2's -- earth, buildings, a man, armour --
+    // instead of CWA's ricochets. Arma 2 names more surfaces than CWA's four; each CWA list
+    // takes its nearest (hitGround: hitGroundSoft), with the samples and probabilities Arma 2
+    // gives them. OP_A2_WEAPON_SOUNDS=0 keeps CWA's.
+    static const bool a2HitSounds = [] {
+        const char* e = std::getenv("OP_A2_WEAPON_SOUNDS");
+        return !(e && *e == '0');
+    }();
+    if (Generation() == 2 && a2HitSounds)
+    {
+        static const char* const lists[][2] = {
+            {"hitGround", "hitGroundSoft"}, {"hitMan", "hitMan"}, {"hitArmor", "hitArmor"}, {"hitBuilding", "hitBuilding"}};
+        for (const auto& [cwaKey, a2Key] : lists)
+        {
+            const ParamEntry* list = a1->FindEntry(a2Key);
+            if (!list || !list->IsArray())
+                continue;
+            std::string samples, entries;
+            int n = 0;
+            for (int i = 0; i + 1 < list->GetSize(); i += 2)
+            {
+                const std::string sample = (const char*)(*list)[i].GetValue();
+                const std::string triple = Arma2SoundTriple(a1->FindEntry(sample.c_str()));
+                if (triple.empty())
+                    continue;
+                const std::string own = "a2_" + sample;
+                samples += "\t\t" + own + "[]={" + triple + "};\r\n";
+                char prob[32];
+                std::snprintf(prob, sizeof(prob), ",%g", (float)(*list)[i + 1]);
+                entries += std::string(n++ ? "," : "") + "\"" + own + "\"" + prob;
+            }
+            if (n == 0)
+                continue;
+            text += samples + "\t\t" + cwaKey + "[]={" + entries + "};\r\n";
+            values++;
+        }
+    }
     text += "\t};\r\n};\r\n";
     if (values == 0)
         return cwaAmmo;
