@@ -27,6 +27,7 @@ struct SimParams {
                             // z: the box frame's turn about the vertical through the emitter (rad),
                             // w: a bursting charge's outward speed (m/s, 0 for none)
     tint: vec4<f32>,        // FIRE-002: grey share of new smoke: x mean, y swing (fields .w)
+    light: vec4<f32>,       // FIRE-LIGHT: the direction to the sun in the box's frame (xyz)
     // the solids (Fire Pro's colliders, solids.wgsl): 10 x 10 columns over the box, each open
     // from floor to ceiling (world y); a wall is a column whose ceiling is below its floor
     floor_h: array<vec4<f32>, 25>,
@@ -545,3 +546,68 @@ fn cs_mg_prolong(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     textureStore(outR, id, vec4<f32>(textureLoad(pIn, id, 0).x + e, 0.0, 0.0, 0.0));
 }
+
+// FIRE-LIGHT (WGR_FIRE_LIGHT=1): the light volume Fire Pro's renderer reads (lighting.wgsl
+// incidentLight), at half the box's resolution, rebuilt after every step. Per texel: the smoke's
+// optical depth toward the sun over the march's first 2 and all 6 widening taps (a flame's and a
+// plume's self-shadow reach, fire_march.wgsl shadowAlong), over 4 taps straight up (the plume's sky
+// shadow), and the flame glow arriving from six directions, Beer-attenuated (Fire Pro: six
+// rotated directions, growing intervals). Raw smoke units: the march applies the box's density.
+fn lightField(world: vec3<f32>) -> vec4<f32> {
+    let q = uvw(world);
+    if (any(q < vec3<f32>(0.0)) || any(q > vec3<f32>(1.0))) { return vec4<f32>(0.0); }
+    // the march fades the field out at the box's sides and top; so does its light
+    let side = min(min(q.x, 1.0 - q.x), min(q.z, 1.0 - q.z));
+    let fade = smoothstep(0.0, 0.1, side) * smoothstep(0.0, 0.15, 1.0 - q.y);
+    let f = textureSampleLevel(fieldsIn, lin, q, 0.0);
+    return vec4<f32>(f.x * fade, f.y, f.z * fade, f.w * fade);
+}
+fn flameGlow(life: f32) -> f32 { return clamp(life * 5.0, 0.0, 1.0); }
+
+@compute @workgroup_size(4, 4, 4)
+fn cs_light(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let id = vec3<i32>(gid);
+    let n = vec3<i32>(textureDimensions(outRgba));
+    if (any(id >= n)) { return; }
+    let cell = S.origin_cell.w;
+    // the centre of this texel's 2x2x2 block of simulation cells
+    let p = S.origin_cell.xyz + (vec3<f32>(id) * 2.0 + 1.0) * cell;
+    let sun = S.light.xyz;
+    var tauSun2 = 0.0;
+    var tau = 0.0;
+    var t = cell;
+    for (var k = 0; k < 6; k++) {
+        let ds = cell * (2.0 + f32(k) * 3.0);
+        tau += max(lightField(p + sun * (t + ds * 0.5)).x, 0.0) * ds;
+        t += ds;
+        if (k == 1) { tauSun2 = tau; }
+    }
+    var tauSky = 0.0;
+    t = cell;
+    for (var k = 0; k < 4; k++) {
+        let ds = cell * (2.0 + f32(k) * 3.0);
+        tauSky += max(lightField(p + vec3<f32>(0.0, 1.0, 0.0) * (t + ds * 0.5)).x, 0.0) * ds;
+        t += ds;
+    }
+    let dirs = array<vec3<f32>, 6>(
+        vec3<f32>(0.36, 0.48, -0.8), vec3<f32>(-0.36, -0.48, 0.8),
+        vec3<f32>(-0.8, 0.6, 0.0), vec3<f32>(0.8, -0.6, 0.0),
+        vec3<f32>(0.48, 0.64, 0.6), vec3<f32>(-0.48, -0.64, -0.6));
+    var glowSum = 0.0;
+    for (var d = 0; d < 6; d++) {
+        var s = 0.0;
+        var interval = cell * 1.5;
+        var trans = 1.0;
+        for (var k = 0; k < 5; k++) {
+            let f = lightField(p + dirs[d] * (s + interval * 0.5));
+            // flame glow gathered along the ray, dimmed by the smoke (and flame) between
+            glowSum += trans * flameGlow(f.z) * interval;
+            trans *= exp(-(max(f.x, 0.0) * FIRE_LIGHT_SMOKE_EXT + flameGlow(f.z)) * interval);
+            s += interval;
+            interval *= 1.65;
+        }
+    }
+    textureStore(outRgba, id, vec4<f32>(tauSun2, tau, tauSky, glowSum / 6.0));
+}
+// the smoke's extinction per unit of field (1/m) used inside the light volume (Fire Pro's campfire 7.11)
+const FIRE_LIGHT_SMOKE_EXT: f32 = 7.11;

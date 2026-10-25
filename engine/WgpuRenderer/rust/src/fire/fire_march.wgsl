@@ -33,7 +33,7 @@ struct MarchParams {
     fire: vec4<f32>,            // temperature (K), brightness, flame opacity (1/m), gain
     // BOOM-005: muzzle flashes, two vec4 each: (muzzle camera-relative, age s), (barrel, size)
     flashes: array<vec4<f32>, 16>,
-    flash_info: vec4<f32>,      // x: count, z: gain
+    flash_info: vec4<f32>,      // x: count, y: FIRE-SMOOTH on, z: gain, w: FIRE-LIGHT on
 };
 
 @group(0) @binding(0) var<uniform> M: MarchParams;
@@ -46,6 +46,13 @@ struct MarchParams {
 @group(0) @binding(7) var field3: texture_3d<f32>;
 @group(0) @binding(8) var field4: texture_3d<f32>;
 @group(0) @binding(9) var field5: texture_3d<f32>;
+// FIRE-LIGHT: each box's light volume (fire_sim.wgsl cs_light), when flash_info.w > 0.5
+@group(0) @binding(10) var light0: texture_3d<f32>;
+@group(0) @binding(11) var light1: texture_3d<f32>;
+@group(0) @binding(12) var light2: texture_3d<f32>;
+@group(0) @binding(13) var light3: texture_3d<f32>;
+@group(0) @binding(14) var light4: texture_3d<f32>;
+@group(0) @binding(15) var light5: texture_3d<f32>;
 
 @vertex
 fn vs_fullscreen(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
@@ -67,6 +74,17 @@ fn sampleField(i: u32, q: vec3<f32>) -> vec4<f32> {
         case 3u: { return textureSampleLevel(field3, lin, q, 0.0); }
         case 4u: { return textureSampleLevel(field4, lin, q, 0.0); }
         default: { return textureSampleLevel(field5, lin, q, 0.0); }
+    }
+}
+
+fn sampleLight(i: u32, q: vec3<f32>) -> vec4<f32> {
+    switch i {
+        case 0u: { return textureSampleLevel(light0, lin, q, 0.0); }
+        case 1u: { return textureSampleLevel(light1, lin, q, 0.0); }
+        case 2u: { return textureSampleLevel(light2, lin, q, 0.0); }
+        case 3u: { return textureSampleLevel(light3, lin, q, 0.0); }
+        case 4u: { return textureSampleLevel(light4, lin, q, 0.0); }
+        default: { return textureSampleLevel(light5, lin, q, 0.0); }
     }
 }
 
@@ -97,6 +115,37 @@ fn fieldAt(i: u32, rel: vec3<f32>) -> vec4<f32> {
     let side = min(min(q.x, 1.0 - q.x), min(q.z, 1.0 - q.z));
     let fade = smoothstep(0.0, 0.1, side) * smoothstep(0.0, 0.15, 1.0 - q.y) * b.dims_fade.w;
     let f = sampleField(i, q);
+    return vec4<f32>(f.x * fade, f.y, f.z * fade, f.w * fade);
+}
+
+// FIRE-SMOOTH (flash_info.y > 0.5): the field reconstructed with a cubic B-spline from 8 trilinear
+// fetches (Sigg & Hadwiger, GPU Gems 2 ch. 20; Fire Pro's volume-reconstruction.wgsl), used where
+// a sample shows flame. Trilinear heat has a kink at every cell face and the black-body colour
+// turns each kink into a visible band across the flame.
+fn fieldAtCubic(i: u32, rel: vec3<f32>) -> vec4<f32> {
+    let b = M.boxes[i];
+    let q = boxQ(i, rel);
+    if (any(q < vec3<f32>(0.0)) || any(q > vec3<f32>(1.0))) { return vec4<f32>(0.0); }
+    let side = min(min(q.x, 1.0 - q.x), min(q.z, 1.0 - q.z));
+    let fade = smoothstep(0.0, 0.1, side) * smoothstep(0.0, 0.15, 1.0 - q.y) * b.dims_fade.w;
+    let n = b.dims_fade.xyz;
+    let st = q * n - 0.5;
+    let fr = fract(st);
+    let w0 = (1.0 - fr) * (1.0 - fr) * (1.0 - fr) / 6.0;
+    let w1 = (4.0 - 6.0 * fr * fr + 3.0 * fr * fr * fr) / 6.0;
+    let w2 = (1.0 + 3.0 * fr + 3.0 * fr * fr - 3.0 * fr * fr * fr) / 6.0;
+    let w3 = fr * fr * fr / 6.0;
+    let g0 = w0 + w1;
+    let g1 = w2 + w3;
+    let c0 = (floor(st) - 1.0 + w1 / g0 + 0.5) / n;
+    let c1 = (floor(st) + 1.0 + w3 / g1 + 0.5) / n;
+    var f = vec4<f32>(0.0);
+    for (var k = 0; k < 8; k++) {
+        let o = vec3<bool>((k & 1) != 0, (k & 2) != 0, (k & 4) != 0);
+        let c = select(c0, c1, o);
+        let w = select(g0, g1, o);
+        f += sampleField(i, c) * (w.x * w.y * w.z);
+    }
     return vec4<f32>(f.x * fade, f.y, f.z * fade, f.w * fade);
 }
 
@@ -386,7 +435,8 @@ fn fs_fire(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         let ds = len / f32(steps);
         for (var k = 0u; k < steps; k++) {
             let rel = dir * (t0 + (f32(k) + jitter) * ds);
-            let f = fieldAt(i, rel);
+            var f = fieldAt(i, rel);
+            if (M.flash_info.y > 0.5 && glow(f.z) > 0.01) { f = fieldAtCubic(i, rel); }
             if (f.x + glow(f.z) > 0.002) {
                 // the smoke's colour here: the box's, mixed toward grey by the grey share it carries
                 let greyShare = clamp(f.w / max(f.x, 1e-4), 0.0, 1.0);
@@ -402,10 +452,24 @@ fn fs_fire(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
                     // underside go dark, which is what gives smoke its shape in sunlight
                     let taps = select(2, 6, plume);
                     var sunVis = 1.0;
-                    if (sunLit) { sunVis = shadowAlong(i, rel, M.sun_dir.xyz, taps); }
                     var skyVis = 1.0;
-                    if (plume) { skyVis = mix(0.1, 1.0, shadowAlong(i, rel, vec3<f32>(0.0, 1.0, 0.0), 4)); }
-                    scattering = smoke.xyz * (M.ambient.xyz * skyVis + direct * sunVis) * density;
+                    var fireLit = vec3<f32>(0.0);
+                    if (M.flash_info.w > 0.5) {
+                        // FIRE-LIGHT: one fetch of the light volume for the same shadows (the 2- or
+                        // 6-tap sun reach, the plume's sky) the marches below take, plus the flames'
+                        // own light on their smoke: their glow gathered around this point, in the
+                        // box's flame colour and brightness (the emission's scale, fireProEmission)
+                        let lv = sampleLight(i, boxQ(i, rel));
+                        let k = M.sun_radiance.w * smoke.w / 7.11;
+                        if (sunLit) { sunVis = exp(-select(lv.x, lv.y, plume) * k); }
+                        if (plume) { skyVis = mix(0.1, 1.0, exp(-lv.z * k)); }
+                        let lk = M.boxes[i].look;
+                        fireLit = blackbody(lk.w) * (lv.w * lk.x * lk.z * M.fire.w);
+                    } else {
+                        if (sunLit) { sunVis = shadowAlong(i, rel, M.sun_dir.xyz, taps); }
+                        if (plume) { skyVis = mix(0.1, 1.0, shadowAlong(i, rel, vec3<f32>(0.0, 1.0, 0.0), 4)); }
+                    }
+                    scattering = smoke.xyz * (M.ambient.xyz * skyVis + direct * sunVis + fireLit) * density;
                 }
                 let look = M.boxes[i].look;
                 let sigma = density + glow(f.z) * look.z;

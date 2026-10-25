@@ -42,6 +42,22 @@ const JACOBI: u32 = 24;
 /// instead of the JACOBI sweeps; 0 or unset keeps the Jacobi solve. One V(2,2) cycle costs about
 /// seven fine-grid sweeps against the Jacobi solve's 24 and removes the large-scale error Jacobi
 /// leaves behind.
+/// FIRE-LIGHT (WGR_FIRE_LIGHT=1): each box keeps a half-resolution light volume (fire_sim.wgsl
+/// cs_light) rebuilt after every step; the march reads its smoke shadows from it in one fetch
+/// instead of marching toward the sun and the sky per sample, and lights the smoke with the
+/// flames' own glow. Off by default until the owner picks it from A/B captures.
+fn fire_light_enabled() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_FIRE_LIGHT").as_deref() == Ok("1"))
+}
+
+/// FIRE-SMOOTH (WGR_FIRE_SMOOTH=1): the march reconstructs the field with a cubic B-spline where a
+/// sample shows flame (fire_march.wgsl fieldAtCubic): no banding across the flames. Off by default.
+fn fire_smooth_enabled() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_FIRE_SMOOTH").as_deref() == Ok("1"))
+}
+
 fn mg_cycles() -> u32 {
     static V: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
     *V.get_or_init(|| std::env::var("WGR_FIRE_MG").ok().and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(0).min(4))
@@ -111,6 +127,8 @@ struct SimParams {
     /// FIRE-002: the share of the smoke that comes out grey rather than the box's colour --
     /// x: mean, y: how far it swings, patchy in space and time (fire_sim.wgsl cs_evolve)
     tint: [f32; 4],
+    /// FIRE-LIGHT: the direction to the sun in the box's frame
+    light: [f32; 4],
     floor: [[f32; 4]; 25],
     ceiling: [[f32; 4]; 25],
 }
@@ -218,6 +236,8 @@ struct Grid {
     pres: [Tex; 2],
     /// FIRE-MG: the fine residual and the coarse levels (empty unless WGR_FIRE_MG is set)
     mg_res: Option<Tex>,
+    /// FIRE-LIGHT: the light volume at half the box's resolution (None unless WGR_FIRE_LIGHT)
+    light: Option<Tex>,
     mg: Vec<MgLevel>,
     cur: usize,
     pcur: usize,
@@ -270,6 +290,9 @@ pub struct FireSystem {
     mg_restrict: wgpu::ComputePipeline,
     mg_zero: wgpu::ComputePipeline,
     mg_prolong: wgpu::ComputePipeline,
+    light: wgpu::ComputePipeline,
+    /// the direction to the sun (world) for the light volume, from the latest record()
+    sun_dir: [f32; 3],
     sampler: wgpu::Sampler,
     dummy_rgba_in: Tex,
     dummy_r_in: Tex,
@@ -438,6 +461,12 @@ impl FireSystem {
                 frag_tex(7, wgpu::TextureViewDimension::D3),
                 frag_tex(8, wgpu::TextureViewDimension::D3),
                 frag_tex(9, wgpu::TextureViewDimension::D3),
+                frag_tex(10, wgpu::TextureViewDimension::D3),
+                frag_tex(11, wgpu::TextureViewDimension::D3),
+                frag_tex(12, wgpu::TextureViewDimension::D3),
+                frag_tex(13, wgpu::TextureViewDimension::D3),
+                frag_tex(14, wgpu::TextureViewDimension::D3),
+                frag_tex(15, wgpu::TextureViewDimension::D3),
             ],
         });
         let march_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -544,6 +573,8 @@ impl FireSystem {
             mg_restrict: cp("cs_mg_restrict"),
             mg_zero: cp("cs_mg_zero"),
             mg_prolong: cp("cs_mg_prolong"),
+            light: cp("cs_light"),
+            sun_dir: [0.0, 1.0, 0.0],
             sim_layout,
             sampler,
             dummy_rgba_in,
@@ -934,6 +965,12 @@ impl FireSystem {
             } else {
                 [0.0; 4]
             },
+            // FIRE-LIGHT: the sun in the box's frame (fire_march.wgsl dirToBox)
+            light: {
+                let (sn, cs) = g.yaw.sin_cos();
+                let d = self.sun_dir;
+                [d[0] * cs + d[2] * sn, d[1], -d[0] * sn + d[2] * cs, 0.0]
+            },
             floor: s.floor,
             ceiling: s.ceiling,
         };
@@ -993,6 +1030,12 @@ impl FireSystem {
             pc = self.solve_pressure(g, pc, groups, mg_cycles(), &level_groups, &mut run);
         }
         run(&self.project, Binds { vel: Some(&g.vel[c].1), p: Some(&g.pres[pc].1), out_rgba: Some(&g.vel[n].1), ..none() });
+        if let Some(light) = &g.light {
+            // FIRE-LIGHT: the light volume from the fields this step produced
+            level_groups.set(((g.dims[0] / 2).div_ceil(4), (g.dims[1] / 2).div_ceil(4), (g.dims[2] / 2).div_ceil(4)));
+            run(&self.light, Binds { fields: Some(&g.fields[n].1), out_rgba: Some(&light.1), ..none() });
+            level_groups.set(groups);
+        }
         drop(pass);
         (n, pc)
     }
@@ -1020,6 +1063,7 @@ impl FireSystem {
         let now = Instant::now();
         let dt = self.last.map_or(0.0, |l| (now - l).as_secs_f32()).min(0.25);
         self.last = Some(now);
+        self.sun_dir = sun_dir;
         self.assign(device, cam);
         // fades: a second in and out
         for g in &mut self.grids {
@@ -1115,7 +1159,9 @@ impl FireSystem {
                 }
                 f
             },
-            flash_info: [self.flashes.len() as f32, 0.0, self.flash_gain * self.gain.abs(), 0.0],
+            // w: FIRE-LIGHT, the march reads the light volumes
+            // y: FIRE-SMOOTH, the cubic reconstruction in the flames
+            flash_info: [self.flashes.len() as f32, if fire_smooth_enabled() { 1.0 } else { 0.0 }, self.flash_gain * self.gain.abs(), if fire_light_enabled() { 1.0 } else { 0.0 }],
         };
         queue.write_buffer(&self.march_params, 0, bytemuck::bytes_of(&mp));
         let field = |slot: usize| -> wgpu::TextureView {
@@ -1125,6 +1171,10 @@ impl FireSystem {
             })
         };
         let fields = [field(0), field(1), field(2), field(3), field(4), field(5)];
+        let light = |slot: usize| -> wgpu::TextureView {
+            order.get(slot).and_then(|&gi| self.grids[gi].light.as_ref()).map_or_else(|| self.dummy_rgba_in.1.clone(), |t| t.1.clone())
+        };
+        let lights = [light(0), light(1), light(2), light(3), light(4), light(5)];
         let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wgr_fire_march_bind"),
             layout: &self.march_layout,
@@ -1139,6 +1189,12 @@ impl FireSystem {
                 wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(&fields[3]) },
                 wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&fields[4]) },
                 wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&fields[5]) },
+                wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&lights[0]) },
+                wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&lights[1]) },
+                wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&lights[2]) },
+                wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&lights[3]) },
+                wgpu::BindGroupEntry { binding: 14, resource: wgpu::BindingResource::TextureView(&lights[4]) },
+                wgpu::BindGroupEntry { binding: 15, resource: wgpu::BindingResource::TextureView(&lights[5]) },
             ],
         });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1278,6 +1334,7 @@ impl Grid {
             expansion: make_tex(device, "wgr_fire_expansion", r, size),
             div: make_tex(device, "wgr_fire_div", r, size),
             pres: [make_tex(device, "wgr_fire_p_a", r, size), make_tex(device, "wgr_fire_p_b", r, size)],
+            light: (fire_light_enabled() || cfg!(test)).then(|| make_tex(device, "wgr_fire_light", rgba, (size.0 / 2, size.1 / 2, size.2 / 2))),
             mg_res: (mg_cycles() > 0 || cfg!(test)).then(|| make_tex(device, "wgr_fire_mg_res", r, size)),
             mg: if mg_cycles() > 0 || cfg!(test) { mg_levels(device, size) } else { Vec::new() },
             cur: 0,
