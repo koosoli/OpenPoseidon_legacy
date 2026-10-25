@@ -828,10 +828,13 @@ fn canopy_sky_ao(world_abs: vec3<f32>) -> f32 {
         return 1.0;
     }
     let c = textureSampleLevel(terrain_skyvis_mask, terrain_shadow_samp, uv, 0.0);
-    if (c.b <= 0.002) {
+    // Alpha is the coverage blurred over two cells (terrain/mod.rs canopy_cover_blurred): how much
+    // of the sky the crowns around a point hide. The raw cell coverage (b) darkened the whole
+    // crown footprint behind a one-cell edge -- dark squares under tree clumps at a low sun.
+    if (c.a <= 0.002) {
         return 1.0;
     }
-    let occ = clamp(c.b, 0.0, 1.0) * smoothstep(CANOPY_DEPTH_START, CANOPY_DEPTH_FULL, c.g - world_abs.y);
+    let occ = clamp(c.a, 0.0, 1.0) * smoothstep(CANOPY_DEPTH_START, CANOPY_DEPTH_FULL, c.g - world_abs.y);
     // Near the camera the geometry-based terms (sky-visibility maps, GTAO) resolve the real crown;
     // a 6.25 m canopy cell there blacked out the shaded side of a bush beside a lone tree with a
     // straight cell edge (OFP Everon 4979/4057). Hand over the same way canopy_sun_shadow does.
