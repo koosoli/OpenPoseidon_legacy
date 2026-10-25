@@ -37,6 +37,7 @@
 #include <Poseidon/Foundation/Algorithms/Sha256.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp> // RFG-085 residency levers
 #include <Poseidon/World/Scene/MapThings.hpp>    // RFG-095 hidden proxies
+#include <Poseidon/Game/Compat/Arma1Compat.hpp> // Arma 3 worlds adapt like Arma 3
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp> // REN-THR-004: ticks per frame beside the frame hash
 #include <Poseidon/Dev/Diag/FramePaceTrace.hpp> // PACE-001: per-frame pacing trace
 #include "EngineWgpu.hpp"
@@ -6658,7 +6659,31 @@ void EngineWgpu::NextFrame()
                 const float parsed = v ? std::strtof(v, nullptr) : -1.0f;
                 return std::isfinite(parsed) ? parsed : -1.0f;
             }();
-            const float skyAmbientScale = skyAmbientOverride >= 0.0f ? skyAmbientOverride : _sky.skyAmbient;
+            float skyAmbientScale = skyAmbientOverride >= 0.0f ? skyAmbientOverride : _sky.skyAmbient;
+            // Arma 3 worlds: Arma 3 lights shade relatively stronger at a low sun. Its
+            // DayLightingBrightAlmost table (the same on Stratis, Altis and Tanoa) gives ambient
+            // 1 EV over the sun at 8 and 16 deg and equal at noon, i.e. 2x its noon ratio. Ours is
+            // one scale at every height, which left a 7 deg Stratis valley near black (ground
+            // median 38 against Arma 3's 71 even after exposure; 43 with this). 1x at 3 deg and
+            // below and from 45 deg up, so dawn, night and midday are unchanged.
+            // WGR_ARMA3_LOW_SUN_AMBIENT=0 turns it off.
+            static const bool arma3LowSunAmbient = []
+            {
+                const char* v = std::getenv("WGR_ARMA3_LOW_SUN_AMBIENT");
+                return !(v != nullptr && v[0] == '0');
+            }();
+            if (arma3LowSunAmbient && skyAmbientOverride < 0.0f && Poseidon::Arma1Compat::Generation() >= 3)
+            {
+                const float elevation = std::asin(std::clamp(-sunDir.Y(), -1.0f, 1.0f)) * (180.0f / 3.14159265f);
+                float boostEv = 0.0f; // log2 of the factor, piecewise linear over Arma 3's table rows
+                if (elevation > 3.0f && elevation < 8.0f)
+                    boostEv = (elevation - 3.0f) / 5.0f;
+                else if (elevation >= 8.0f && elevation <= 16.0f)
+                    boostEv = 1.0f;
+                else if (elevation > 16.0f && elevation < 45.0f)
+                    boostEv = 1.0f - (elevation - 16.0f) / 29.0f;
+                skyAmbientScale *= std::exp2(boostEv);
+            }
             cameras[i].sun_ambient = {ambLin[0], ambLin[1], ambLin[2], skyLit > 0.5f ? skyAmbientScale : 0.0f};
             // .w = the sun-only daylight factor (see `daylight` above).
             cameras[i].sun_dir_world = {sunDir.X(), sunDir.Y(), sunDir.Z(), daylight};
@@ -18193,8 +18218,11 @@ static void BuildCanopyGrid(const std::vector<EngineWgpu::CanopyEntry>& entries,
                 top[i] = std::max(top[i], e.top);
             }
     }
-    // Empty cells take their highest neighbour's top so the shader's bilinear tap never mixes a
-    // real canopy height with the "none" sentinel; coverage alone fades the edge out.
+    // Empty cells take the highest top within two cells so the shader's bilinear tap never mixes a
+    // real canopy height with the "none" sentinel; coverage alone fades the edge out. Two, not one:
+    // the sky-light term reads coverage blurred over two cells (terrain/mod.rs compose), and a
+    // sentinel inside that reach cut it off along a straight cell edge -- dark squares on the ground
+    // around Stratis tree clumps at a low sun.
     std::vector<float> dilated = top;
     for (uint32_t z = 0; z < n; ++z)
         for (uint32_t x = 0; x < n; ++x)
@@ -18203,8 +18231,8 @@ static void BuildCanopyGrid(const std::vector<EngineWgpu::CanopyEntry>& entries,
             if (cover[i] > 0.0f)
                 continue;
             float best = -60000.0f;
-            for (int dz = -1; dz <= 1; ++dz)
-                for (int dx = -1; dx <= 1; ++dx)
+            for (int dz = -2; dz <= 2; ++dz)
+                for (int dx = -2; dx <= 2; ++dx)
                 {
                     const int sx = static_cast<int>(x) + dx, sz = static_cast<int>(z) + dz;
                     if (sx < 0 || sz < 0 || sx >= static_cast<int>(n) || sz >= static_cast<int>(n))
@@ -22321,6 +22349,26 @@ void EngineWgpu::PushRenderParams()
     const bool nativeExposure =
         nativeExposureOn && GLandscape != nullptr && GLandscape->GetEnfusionSurfaceCount() > 0;
     float nativeCeiling = _exposure.maxScale;
+    // Arma 3 worlds: Arma 3 adapts the eye over the whole fall of its light (its DayLighting
+    // tables drop ~10 EV from noon to a sun 8 deg up, HDRNewPars apertures 1e-5..256), so a low
+    // sun still reads as golden light. Capped at 1.1 here, a Stratis pose at 16:51 (sun 7 deg)
+    // came out with ground median 11 against Arma 3's 71 and sky 85/119/158 against 211/232/252;
+    // allowed to adapt, the meter settles near 7 and the sky matches (174/213/244). 8 by day as on
+    // native worlds, easing to 4 between sun -6 and -15 deg so nights are not lifted further.
+    // WGR_ARMA3_EXPOSURE_MAX overrides the day ceiling; 0 keeps the stock ceiling.
+    static const float arma3ExposureMax = []
+    {
+        const char* v = std::getenv("WGR_ARMA3_EXPOSURE_MAX");
+        return v != nullptr ? std::strtof(v, nullptr) : 8.0f;
+    }();
+    if (arma3ExposureMax > 0.0f && Poseidon::Arma1Compat::Generation() >= 3 && !nativeExposure)
+    {
+        const float sunUp = -render::frame::GPresentationSnapshot().sunDirection.Y();
+        const float elevation = std::asin(std::clamp(sunUp, -1.0f, 1.0f)) * (180.0f / 3.14159265f);
+        const float night = std::clamp((-6.0f - elevation) / 9.0f, 0.0f, 1.0f);
+        const float ceiling = arma3ExposureMax + (std::min(4.0f, arma3ExposureMax) - arma3ExposureMax) * night;
+        nativeCeiling = std::max(nativeCeiling, ceiling);
+    }
     if (nativeExposure)
     {
         const float sunUp = -render::frame::GPresentationSnapshot().sunDirection.Y();
@@ -22609,8 +22657,14 @@ void EngineWgpu::PushRenderParams()
 
     // Long-distance terrain sun-shadow (wgpu-only); strength 0 = disabled. The renderer
     // diffs this sub-block so a per-frame push doesn't re-run the sweep.
+    // WGR_TERRAIN_SHADOW=0 turns it off for one process (A/B).
+    static const bool terrainShadowEnv = []
+    {
+        const char* v = std::getenv("WGR_TERRAIN_SHADOW");
+        return !(v != nullptr && v[0] == '0');
+    }();
     p.terrain_sun_shadow = {
-        _smTuning.terrainShadowEnabled ? _smTuning.terrainShadowStrength : 0.0f,
+        _smTuning.terrainShadowEnabled && terrainShadowEnv ? _smTuning.terrainShadowStrength : 0.0f,
         _smTuning.terrainShadowScale < 1 ? 1u : uint32_t(_smTuning.terrainShadowScale),
         _smTuning.terrainShadowSteps < 1 ? 1u : uint32_t(_smTuning.terrainShadowSteps),
         _smTuning.terrainShadowPenumbra,
