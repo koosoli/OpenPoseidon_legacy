@@ -31,6 +31,9 @@
 #import frame::{frame, reverse_z, fog_factor, apply_fog, terrain_sun_shadow, cloud_sun_shadow, sky_irradiance}
 #import shadow::shadow_strength
 #import color::srgb_to_linear
+#ifdef SEA_RAIN
+#import rain_water_optics::rain_water_impact_layer
+#endif
 
 const FFT_SIZE: f32 = 256.0;
 const CASCADES: i32 = 4;
@@ -466,7 +469,14 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     let k1 = 7.3; let k2 = 3.1;
     let texel1 = Lf / k1 / FFT_SIZE;
     let texel2 = Lf / k2 / FFT_SIZE;
+#ifdef SEA_RAIN
+    // (OP, SEA-RAIN) heavy rain flattens the capillary wind ripples and the drop rings take their place
+    // (below): they fade out with the rain, and in full rain this branch and its two taps are skipped,
+    // which pays for the rings
+    let near = smoothstep(0.04, 0.01, footprint) * rough * (1.0 - sat(frame.ground_weather.y));
+#else
     let near = smoothstep(0.04, 0.01, footprint) * rough;
+#endif
     if (near > 0.002) {
         let c1 = textureSampleLevel(oceanDerivatives, smpLinearRepeat, rot2(lagXZ, 0.63) * (k1 / Lf), CASCADES - 1, max(log2(footprint / texel1), 0.0));
         let c2 = textureSampleLevel(oceanDerivatives, smpLinearRepeat, rot2(lagXZ, 2.14) * (k2 / Lf), CASCADES - 1, max(log2(footprint / texel2), 0.0));
@@ -491,6 +501,17 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
 
     // Rotor-only normals: do not add legacy boat impulses over TW's own wakes.
     slopes += rotorWashSlopes(lagXZ, footprint);
+#ifdef SEA_RAIN
+    // (OP, SEA-RAIN) rain drop rings: the puddles' world-fixed impact events (rain_water_optics), one layer
+    // (the puddles add a second in heavy rain). Drawn only where the capillary ripples they replace were
+    // drawn (footprint < 0.04 m) so they cost what those two taps cost; beyond that a ring is already
+    // fading below a pixel and fs_tidewater carries it as roughness. Dry weather skips the call.
+    let seaRain = frame.ground_weather.y;
+    if (seaRain > 0.0 && footprint < 0.04) {
+        slopes += rain_water_impact_layer(lagXZ, frame.ground_weather.w, seaRain, footprint, 0u)
+            * smoothstep(0.04, 0.025, footprint);
+    }
+#endif
 
     // base normal: large shoreline waves (per-vertex, can overhang) perturbed by FFT detail
     var normal: vec3<f32>;
@@ -913,8 +934,20 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     let kpx = PI / footprint;
     let unresolved = sat(log2(110.0 / kpx) / 9.0);
     let roughVar = surf.rough * surf.rough;
+#ifdef SEA_RAIN
+    // (OP, SEA-RAIN) rain on the sea, far field (after open-water's ripples.js, MIT): rain damps the
+    // capillary wind ripples (unresolved Cox-Munk term x (1 - 0.4 rain)), and the drop rings too small
+    // for the pixel become roughness (slope variance 0.006 rain per axis) where waterSurfaceFragment
+    // no longer draws them
+    let seaRain = sat(frame.ground_weather.y);
+    let rainCalm = 1.0 - 0.4 * seaRain;
+    let rainVar = 0.006 * seaRain * smoothstep(0.025, 0.04, footprint);
+    let alpha2 = tw.material1.x * tw.material1.x + mss * 2.0 * unresolved * roughVar * rainCalm + rainVar * 2.0 + foam * 0.2 + surf.aeration * 0.03;
+    let sigmaUnres = sqrt(mss * unresolved * roughVar * rainCalm + rainVar);
+#else
     let alpha2 = tw.material1.x * tw.material1.x + mss * 2.0 * unresolved * roughVar + foam * 0.2 + surf.aeration * 0.03;
     let sigmaUnres = sqrt(mss * unresolved * roughVar);
+#endif
 
     var outCol = vec3<f32>(0.0);
     var ssrW = 0.0;
