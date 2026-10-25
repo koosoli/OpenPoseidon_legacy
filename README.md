@@ -26,30 +26,6 @@ and gameplay.
 > This is an independent community project and is not an official Bohemia
 > Interactive product.
 
-## Current preview
-
-Development captures from Open Poseidon Engine, including original-game and locally
-loaded Reforger content. They show features in progress rather than a promise
-that every map, vehicle or material is fully supported.
-
-| Arma 3 mission with its own pause menu | Volumetric fire, smoke and impact craters |
-| --- | --- |
-| ![An Arma 3 mission paused on its native menu, with an Arma 3 vehicle and base](docs/roadmap/publishing/public-files/screenshots/arma3-mission.png) | ![A burning wreck under a black smoke column beside a fresh impact crater](docs/roadmap/publishing/public-files/screenshots/volumetric-crators-newfire-smoke.png) |
-| **Whole-world rendering** | **The Moon with the Earth in its sky** |
-| ![The Earth seen from orbit, with the day/night line across Europe](docs/roadmap/publishing/public-files/screenshots/wholeworldrendering.png) | ![Cratered lunar ground with the Earth above the horizon](docs/roadmap/publishing/public-files/screenshots/moon.jpg) |
-| **Procedural fish schools under water** | **Rain puddles on a beach with driftwood** |
-| ![Schools of fish over a rocky sea floor below the wave surface](docs/roadmap/publishing/public-files/screenshots/wildlife.jpg) | ![A rain puddle with ripples on rippled beach sand, with stones and driftwood](docs/roadmap/publishing/public-files/screenshots/puddles.png) |
-| **Arma Reforger terrain** | **Tidewater ocean** |
-| ![A Reforger landscape of fields, forests and coast from the air](docs/roadmap/publishing/public-files/screenshots/reforger.jpg) | ![Tidewater ocean waves and shoreline](docs/roadmap/publishing/public-files/screenshots/newocean.png) |
-| **Wind-driven procedural grass** | **Layered volumetric fog** |
-| ![Procedural grass across a rolling meadow](docs/roadmap/publishing/public-files/screenshots/newgrass.png) | ![Low fog layers across island valleys](docs/roadmap/publishing/public-files/screenshots/volumetricfog.png) |
-| **Snow depth and vehicle tracks** | **Destructible terrain and craters** |
-| ![Snow cover with compressed vehicle tracks](docs/roadmap/publishing/public-files/screenshots/volumetricsnow.png) | ![Deep terrain deformation near a village road](docs/roadmap/publishing/public-files/screenshots/destrucableterrain.jpg) |
-| **GTAO and interior shading** | **Night lighting and shadows** |
-| ![Ambient occlusion and directional light inside a building](docs/roadmap/publishing/public-files/screenshots/GTAO.png) | ![Village lights and shadows in rainy night conditions](docs/roadmap/publishing/public-files/screenshots/newshadowsystem.png) |
-| **Box3D physics test scene** | |
-| ![Box3D wall and rigid-body test scene](docs/roadmap/publishing/public-files/screenshots/box3d.png) | |
-
 ## Playing a precompiled build
 
 1. **You need the original game.** Open Poseidon runs on top of your own copy of
@@ -76,12 +52,19 @@ Open Poseidon Engine develops a modern [wgpu](https://wgpu.rs/)-based renderer a
 the legacy OpenGL renderer, while retaining original OFP content and gameplay.
 The current engine includes:
 
+The screenshots below are development captures using locally installed game content; imported maps and assets are not included with the engine.
+
 #### Worlds and content
 
 > **No conversion, no copying.** Arma 1, 2, 3, DayZ and Reforger content loads
 > straight from the original game's own installation folder. Point the engine at
 > your installed game and play it in place: nothing is converted into a separate
 > copy beforehand, and none of those games' files ship with Open Poseidon.
+
+<p align="center">
+  <img src="docs/roadmap/publishing/public-files/screenshots/arma3-mission.png" alt="An Arma 3 mission paused on its native menu, with an Arma 3 vehicle and base" width="49%"> <img src="docs/roadmap/publishing/public-files/screenshots/wholeworldrendering.png" alt="The Earth seen from orbit, with the day/night line across Europe" width="49%">
+  <br><em>Arma 3 mission with its own pause menu · Whole-world rendering</em>
+</p>
 
 - **Arma 1, 2 and 3 missions (experimental):** missions and campaigns from your
   own Arma installations start from their native main menus, pause screens and
@@ -104,7 +87,17 @@ The current engine includes:
 - **Island Editor and OFP Fusion:** a terrain editor with no object limit, and an
   archipelago built from all five locally installed classic islands.
 
+<p align="center">
+  <img src="docs/roadmap/publishing/public-files/screenshots/moon.jpg" alt="Cratered lunar ground with the Earth above the horizon" width="49%"> <img src="docs/roadmap/publishing/public-files/screenshots/reforger.jpg" alt="A Reforger landscape of fields, forests and coast from the air" width="49%">
+  <br><em>The Moon, with the Earth in its sky · Arma Reforger terrain</em>
+</p>
+
 #### Rendering
+
+<p align="center">
+  <img src="docs/roadmap/publishing/public-files/screenshots/GTAO.png" alt="Ambient occlusion and directional light inside a building" width="49%"> <img src="docs/roadmap/publishing/public-files/screenshots/newshadowsystem.png" alt="Village lights and shadows in rainy night conditions" width="49%">
+  <br><em>GTAO and interior shading · Night lighting and shadows</em>
+</p>
 
 - **Vulkan rendering through WGPU:** Vulkan support on Windows and Linux,
   alongside Direct3D 12 on Windows. The active API depends on the platform,
@@ -130,7 +123,17 @@ The current engine includes:
   The proprietary NGX SDK/runtime is not bundled; distributable builds disable
   DLSS. Its availability depends on build configuration and compatible hardware.
 
+<p align="center">
+  <img src="docs/roadmap/publishing/public-files/screenshots/volumetricfog.png" alt="Low fog layers across island valleys" width="70%">
+  <br><em>Layered volumetric fog</em>
+</p>
+
 #### Fire, smoke and destruction
+
+<p align="center">
+  <img src="docs/roadmap/publishing/public-files/screenshots/volumetric-crators-newfire-smoke.png" alt="A burning wreck under a black smoke column beside a fresh impact crater" width="70%">
+  <br><em>Volumetric fire, smoke and an impact crater</em>
+</p>
 
 - **Volumetric fire and smoke:** a new fire and smoke system. Explosions start with a
   fireball, wrecks burn with flames that lean in the wind, and black smoke columns
@@ -148,7 +151,17 @@ The current engine includes:
 - **Combat effects:** muzzle flashes that light the shooter and the surroundings,
   ground explosions, snow bullet tracks and helicopter ground downwash particles.
 
+<p align="center">
+  <img src="docs/roadmap/publishing/public-files/screenshots/destrucableterrain.jpg" alt="Deep terrain deformation near a village road" width="70%">
+  <br><em>Destructible terrain</em>
+</p>
+
 #### Water, weather and wildlife
+
+<p align="center">
+  <img src="docs/roadmap/publishing/public-files/screenshots/wildlife.jpg" alt="Schools of fish over a rocky sea floor below the wave surface" width="49%"> <img src="docs/roadmap/publishing/public-files/screenshots/newocean.png" alt="Tidewater ocean waves and shoreline" width="49%">
+  <br><em>Procedural fish schools · Tidewater ocean</em>
+</p>
 
 - **Tidewater ocean:** FFT waves, shoreline wetness, reflections, foam, wakes,
   spray, underwater rendering and caustics; projectile/explosion and helicopter
@@ -167,7 +180,17 @@ The current engine includes:
 - **Mud:** MudRunner-style mud with ruts, rolling resistance and mud thrown from
   wheels and tank tracks.
 
+<p align="center">
+  <img src="docs/roadmap/publishing/public-files/screenshots/puddles.png" alt="A rain puddle with ripples on rippled beach sand, with stones and driftwood" width="32%"> <img src="docs/roadmap/publishing/public-files/screenshots/volumetricsnow.png" alt="Snow cover with compressed vehicle tracks" width="32%"> <img src="docs/roadmap/publishing/public-files/screenshots/newgrass.png" alt="Procedural grass across a rolling meadow" width="32%">
+  <br><em>Rain puddles, beach sand and driftwood · Snow depth and vehicle tracks · Wind-driven procedural grass</em>
+</p>
+
 #### Soldiers, AI and gameplay
+
+<p align="center">
+  <img src="docs/roadmap/publishing/public-files/screenshots/box3d.png" alt="Box3D wall and rigid-body test scene" width="70%">
+  <br><em>Box3D physics</em>
+</p>
 
 - **NPC chat (experimental):** talk to your squad, nearby soldiers, civilians and
   HQ by typing or by voice. A language model of your choice answers in character,

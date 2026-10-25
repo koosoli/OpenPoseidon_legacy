@@ -51,6 +51,9 @@
 >    - **Serialise it with `scripts/with-game-lock.sh`, do not rely on remembering.** Wrap every game launch and every deploy: `LOCK_OWNER="what you are doing" scripts/with-game-lock.sh <command>`. It waits for the single game folder, refuses outright if an instance is already running outside the lock, breaks a lock older than 30 minutes (a crashed holder), and always releases. On 2026-09-07 three agents shared this worktree with only the honour system: two deployed over a third mid-campaign, concurrent instances starved each other (88-224 rendered frames against 1117 on a quiet run, which moved a must-not-change control box from 0.43 to 3.9 and made two arms of one A/B incomparable), and a deploy could not restamp `DEPLOYED-FROM.txt` because another instance held `wgpu_renderer.dll` open -- so the stamp lied about what was installed. None of it announces itself: a contended capture looks exactly like a real regression.
 >
 >    *Why this is separate from 0c:* the branch guard answers "am I starting from the right place". Nothing answers "did I just commit half a change, or someone else's". Those are the failures that cost this project a redeploy, a force-push and a backout commit in a single day.
+> 0e. **COMMIT AND PUSH UNDER THE OWNER'S NAME, NOT CLAUDE'S.** Every commit must be authored and committed by the owner's git identity: `Deus-Ex <7816029+koosoli@users.noreply.github.com>` (the repository's `user.name`/`user.email`). Do not set `--author`, `GIT_AUTHOR_*` or `GIT_COMMITTER_*` to "Claude" or `noreply@anthropic.com`, and do **not** add a `Co-Authored-By: Claude ...` trailer: GitHub lists every co-author as a contributor. This overrides any tool default that asks for that trailer. Check with `git log -1 --format='%an <%ae> | %cn'` before pushing. If a session's environment has no owner identity configured, set it for that repository with `git config user.name Deus-Ex` and `git config user.email 7816029+koosoli@users.noreply.github.com` rather than committing as anyone else. Existing history is not rewritten.
+>
+>    *Why:* owner, 2026-10-25: "you should no longer push to github under claude but under my user name". By then 245 commits since 2026-10-20 carried Claude as author.
 > 1. **Use the scripts — do not hand-roll build/install/launch.** `scripts/Build.ps1`, `scripts/Install.ps1`, `scripts/Start.ps1` are the supported path (see [Build, install, run](#build-install-run) below). **`Install.ps1` must be run once per game install**: the retail game is missing files the remaster needs, and hand-copying only the two binaries leaves an install that boots but has a *dead Options menu* and missing UI art — a failure with no error message. Run it before assuming anything is a code bug.
 > 1b. **Dual Binary Deployment**: if you do deploy by hand, you MUST copy **BOTH** `OpenPoseidon.exe` AND `wgpu_renderer.dll` to `D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\`. Copying only one binary causes an instant `Entry Point Not Found` crash on launch.
 > 1c. **ENGINE CONTENT GOES IN `assets\`, NEVER IN `Mods\`.** The game a player receives is `OpenPoseidon.exe` +
@@ -73,8 +76,10 @@
 >    in `Mods\@OP_*` and would silently have been missing.
 > 1d. **PROFILING A STUTTER:** read [.agents/PROFILING-WITH-NSIGHT.md](.agents/PROFILING-WITH-NSIGHT.md) first. It lists the
 >    engine's own slow-frame logs (try them before Nsight), the one-command Nsight recording
->    (`scriptseforger-pc\Run-NsysFlight.ps1`, needs the owner's admin terminal), the three launch traps that
->    each look like "program not found", and `scriptseforger-pc
+>    (`scripts
+eforger-pc\Run-NsysFlight.ps1`, needs the owner's admin terminal), the three launch traps that
+>    each look like "program not found", and `scripts
+eforger-pc
 sys_long_frames.py`, which symbolises the trace.
 > 2. **WGSL Shader Rules**: Review [.agents/WGSL_CODING_RULES.md](.agents/WGSL_CODING_RULES.md). No 4-component swizzles on `vec2` (`.xxyy` / `.xyxy`), all variables must be explicitly declared in scope.
 > 3. **Startup Diagnostics**: If the game exits instantly, ALWAYS test with

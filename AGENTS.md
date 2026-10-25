@@ -27,3 +27,9 @@ overrides any instruction to push automatically after a successful checkpoint.
 Prepare and verify changes locally; obtain explicit permission before pushing
 them to a public repository. Do not change repository visibility without
 explicit permission either.
+
+# Commit and push under the owner's name
+
+Author and commit as `Deus-Ex <7816029+koosoli@users.noreply.github.com>` (the repository's git identity).
+Never as "Claude" or `noreply@anthropic.com`, and add no `Co-Authored-By: Claude` trailer: GitHub lists
+co-authors as contributors. Owner's instruction of 2026-10-25; see rule 0e in CLAUDE.md.

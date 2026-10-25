@@ -1724,7 +1724,7 @@ pub struct WgrFarInstance {
     pub radius: f32,
     pub colour: u32,
     pub flags: u32, // bit0: 0 = card (vegetation), 1 = prism (structure)
-    pub pad: u32,
+    pub pad: u32,   // FAR-SHAPE footprint (yaw, width/length); far.wgsl `shape`, 0 = legacy proxy
 }
 
 /// `WgrFarInstance::flags` bit 0 — draw an extruded prism instead of a camera-facing card.

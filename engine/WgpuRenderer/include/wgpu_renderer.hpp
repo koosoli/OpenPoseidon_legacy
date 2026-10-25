@@ -2324,7 +2324,7 @@ struct WgrFarInstance
     float radius;
     uint32_t colour;
     uint32_t flags; /* bit0: 0 = card (vegetation), 1 = prism (structure) */
-    uint32_t pad;
+    uint32_t pad;   /* FAR-SHAPE footprint: Engine::FarProxyInstance::shape; 0 = legacy proxy */
 };
 
 /* WgrFarInstance::flags bit 0: draw this proxy as an extruded prism (a
