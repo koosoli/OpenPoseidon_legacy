@@ -1899,6 +1899,43 @@ mod tests {
         }
     }
 
+    /// SEA-RAIN (WGR_SEA_RAIN=1): the rain variant composes and validates, with and without
+    /// WHOLE_WORLD; the test above covers the default (off) variant.
+    #[test]
+    fn tidewater_water_shader_composes_with_sea_rain() {
+        for whole_world in [false, true] {
+            let mut composer = crate::shaders::build_composer();
+            let mut defs = std::collections::HashMap::new();
+            defs.insert("SEA_RAIN".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+            if whole_world {
+                defs.insert("WHOLE_WORLD".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+            }
+            let module = composer
+                .make_naga_module(naga_oil::compose::NagaModuleDescriptor {
+                    source: TW_WATER_WGSL,
+                    file_path: "water_tw/tw_water.wgsl",
+                    shader_defs: defs,
+                    ..Default::default()
+                })
+                .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&composer)));
+            naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+                .validate(&module)
+                .unwrap_or_else(|e| panic!("tw_water.wgsl with SEA_RAIN (whole world {whole_world}): {e:?}"));
+            let src = format!("{module:?}");
+            assert!(src.contains("rain_water_impact"), "SEA_RAIN did not pull in the rain impact rings");
+        }
+        // off (the default): the A/B baseline carries none of it
+        let mut composer = crate::shaders::build_composer();
+        let module = composer
+            .make_naga_module(naga_oil::compose::NagaModuleDescriptor {
+                source: TW_WATER_WGSL,
+                file_path: "water_tw/tw_water.wgsl",
+                ..Default::default()
+            })
+            .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&composer)));
+        assert!(!format!("{module:?}").contains("rain_water_impact"), "the sea without SEA_RAIN carries the rain rings");
+    }
+
     #[test]
     fn default_params_are_tidewaters() {
         assert_eq!(DEFAULT_PARAMS[0][1], 0.9); // OceanFFT choppiness

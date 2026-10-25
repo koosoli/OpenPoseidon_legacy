@@ -31,6 +31,9 @@
 #import frame::{frame, reverse_z, fog_factor, apply_fog, terrain_sun_shadow, cloud_sun_shadow, sky_irradiance}
 #import shadow::shadow_strength
 #import color::srgb_to_linear
+#ifdef SEA_RAIN
+#import rain_water_optics::rain_water_impact_normal
+#endif
 
 const FFT_SIZE: f32 = 256.0;
 const CASCADES: i32 = 4;
@@ -491,6 +494,16 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
 
     // Rotor-only normals: do not add legacy boat impulses over TW's own wakes.
     slopes += rotorWashSlopes(lagXZ, footprint);
+#ifdef SEA_RAIN
+    // (OP, SEA-RAIN) rain drop rings: the puddles' world-fixed impact events (rain_water_optics),
+    // drawn only where the pixel resolves them (footprint < 0.16 m: the water within a few metres);
+    // further out fs_tidewater turns them into roughness. Dry weather skips the call.
+    let seaRain = frame.ground_weather.y;
+    if (seaRain > 0.0 && footprint < 0.16) {
+        let rn = rain_water_impact_normal(lagXZ, frame.ground_weather.w, seaRain, footprint);
+        slopes -= rn.xz / max(rn.y, 0.001);
+    }
+#endif
 
     // base normal: large shoreline waves (per-vertex, can overhang) perturbed by FFT detail
     var normal: vec3<f32>;
@@ -913,8 +926,20 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     let kpx = PI / footprint;
     let unresolved = sat(log2(110.0 / kpx) / 9.0);
     let roughVar = surf.rough * surf.rough;
+#ifdef SEA_RAIN
+    // (OP, SEA-RAIN) rain on the sea, far field (after open-water's ripples.js, MIT): rain damps the
+    // capillary wind ripples (unresolved Cox-Munk term x (1 - 0.4 rain)), and the drop rings too small
+    // for the pixel become roughness (slope variance 0.006 rain per axis) where waterSurfaceFragment
+    // no longer draws them
+    let seaRain = sat(frame.ground_weather.y);
+    let rainCalm = 1.0 - 0.4 * seaRain;
+    let rainVar = 0.006 * seaRain * smoothstep(0.035, 0.16, footprint);
+    let alpha2 = tw.material1.x * tw.material1.x + mss * 2.0 * unresolved * roughVar * rainCalm + rainVar * 2.0 + foam * 0.2 + surf.aeration * 0.03;
+    let sigmaUnres = sqrt(mss * unresolved * roughVar * rainCalm + rainVar);
+#else
     let alpha2 = tw.material1.x * tw.material1.x + mss * 2.0 * unresolved * roughVar + foam * 0.2 + surf.aeration * 0.03;
     let sigmaUnres = sqrt(mss * unresolved * roughVar);
+#endif
 
     var outCol = vec3<f32>(0.0);
     var ssrW = 0.0;
