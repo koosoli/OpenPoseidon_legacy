@@ -9,6 +9,13 @@ static SurfaceClass ClassOf(Inputs in)
     return Classify(in).cls;
 }
 
+// The part / body rules on their own, before the owner's per-origin overrides (military matt,
+// OFP glass-only): what an OFP texture WOULD be if it were Arma content.
+static SurfaceClass RuleOf(Inputs in)
+{
+    return ClassifyRules(in).cls;
+}
+
 int main()
 {
     // Parts are read from the file name, Czech or English, either slash.
@@ -22,13 +29,13 @@ int main()
     Inputs folder;
     folder.texture = "\\cars\\glassworks\\body.paa";
     folder.isVehicle = true;
-    assert(ClassOf(folder) == SurfaceClass::PaintGloss);
+    assert(RuleOf(folder) == SurfaceClass::PaintGloss);
 
     // "paint_" must not read as interior.
     Inputs paint;
     paint.texture = "\\car\\paint_red.paa";
     paint.isVehicle = true;
-    assert(ClassOf(paint) == SurfaceClass::PaintGloss);
+    assert(RuleOf(paint) == SurfaceClass::PaintGloss);
 
     // Owner decision 2: military matt, civil gloss, same part logic on both.
     Inputs body;
@@ -56,7 +63,7 @@ int main()
     Inputs lamp;
     lamp.texture = "data3d\\skoda_svetla.paa";
     lamp.isVehicle = true;
-    assert(ClassOf(lamp) == SurfaceClass::LampGlass);
+    assert(RuleOf(lamp) == SurfaceClass::LampGlass);
     lamp.model = "a3\\soft_f_gamma\\hatchback_01\\hatchback_01_f.p3d";
     lamp.texture = "a3\\soft_f_gamma\\hatchback_01\\data\\lights_ca.paa";
     assert(ClassOf(lamp) == SurfaceClass::LampPlastic);
@@ -100,25 +107,63 @@ int main()
     part.texture = "data\\v3s_zrc_l_b.paa";
     assert(ClassOf(part) == SurfaceClass::Mirror);
     part.texture = "data\\sk_palubka.pac";
-    assert(ClassOf(part) == SurfaceClass::Plastic);
+    assert(RuleOf(part) == SurfaceClass::Plastic);
     part.texture = "humr\\hmmwv_in_strop.pac";
-    assert(ClassOf(part) == SurfaceClass::Plastic);
+    assert(RuleOf(part) == SurfaceClass::Plastic);
     part.military = true; // F.7: nothing on a military vehicle but glass and lamps keeps a sheen
     assert(ClassOf(part) == SurfaceClass::PaintMatt);
     part.texture = "data\\t72_kola.pac";
     assert(ClassOf(part) == SurfaceClass::PaintMatt);
     part.military = false;
-    assert(ClassOf(part) == SurfaceClass::Rubber);
+    assert(RuleOf(part) == SurfaceClass::Rubber);
     part.texture = "a3\\soft_f_gamma\\suv_01\\data\\suv_01_int_base_co.paa";
     part.hasEnvMap = true;
     assert(ClassOf(part) == SurfaceClass::Plastic);
     part.texture = "data\\red_sk_kapot.pac"; // body paint must not read as interior
-    assert(ClassOf(part) == SurfaceClass::PaintMetallic);
+    assert(RuleOf(part) == SurfaceClass::PaintMetallic);
     part.hasEnvMap = false;
     part.texture = "o\\vehl\\cj5_podvozek.pac";
     assert(ClassOf(part) == SurfaceClass::Matt);
     part.texture = "data\\v3s_odrazka_l.paa";
-    assert(ClassOf(part) == SurfaceClass::LampGlass);
+    assert(RuleOf(part) == SurfaceClass::LampGlass);
+
+    // Owner, 2026-10-25: OFP / CWA vehicles reflect only their glass; Arma content is unchanged.
+    Inputs ofp;
+    ofp.isVehicle = true;
+    ofp.texture = "data\\skodovka_kapota.paa";      // civil body paint
+    assert(ClassOf(ofp) == SurfaceClass::Matt);
+    ofp.texture = "data\\skodovka_chrom.paa";       // chrome trim
+    assert(ClassOf(ofp) == SurfaceClass::Matt);
+    ofp.texture = "data\\skoda_svetla.paa";         // headlight
+    assert(ClassOf(ofp) == SurfaceClass::Matt);
+    ofp.texture = "data\\jeep_kab_sklo1.paa";       // window glass keeps its reflection
+    ofp.material = "#SpecularGlass";
+    assert(ClassOf(ofp) == SurfaceClass::Glass);
+    ofp.material = "";
+    ofp.texture = "data\\v3s_zrc_l_b.paa";          // and so does mirror glass
+    assert(ClassOf(ofp) == SurfaceClass::Mirror);
+    ofp.texture = "data\\civil_tvar1.paa";          // a passenger, drawn under the car
+    assert(ClassOf(ofp) == SurfaceClass::Matt);
+    ofp.texture = "\\p406\\tex.paa";              // the Peugeot's undeclared interior
+    assert(ClassOf(ofp) == SurfaceClass::Matt);
+    ofp.texture = "\\p406\\lak_green.paa";        // ... while its declared paint stays paint
+    ofp.declared = SurfaceClass::PaintMetallic;
+    assert(ClassOf(ofp) == SurfaceClass::PaintMetallic);
+    assert(Classify(ofp).source == Source::Declared);
+    ofp.declared = SurfaceClass::None;
+    ofp.texture = "data\\t72_body.paa";             // military OFP: matt as before
+    ofp.military = true;
+    assert(ClassOf(ofp) == SurfaceClass::PaintMatt);
+    ofp.military = false;
+    Inputs arma = ofp;                               // Arma content keeps the old rules
+    arma.texture = "ca\\wheeled\\data\\skodovka_body_co.paa";
+    assert(ClassOf(arma) == SurfaceClass::PaintGloss);
+    arma.texture = "a3\\soft_f_gamma\\suv_01\\data\\suv_01_ext_co.paa";
+    assert(ClassOf(arma) == SurfaceClass::PaintGloss);
+    arma.texture = "data\\coyota_trup1.paa";        // an Arma 1/2 texture outside ca\ with an RVMAT
+    arma.material = "mirror.rvmat";
+    arma.hasEnvMap = true;
+    assert(ClassOf(arma) == SurfaceClass::PaintMetallic);
 
     // Arma 1/2 Hilux: mirror.rvmat on the body atlas is shiny paint, not a mirror.
     Inputs hilux;

@@ -317,6 +317,33 @@ inline bool KeepsReflectionWhenMilitary(SurfaceClass cls)
            cls == SurfaceClass::LampPlastic || cls == SurfaceClass::Matt || cls == SurfaceClass::PaintMatt;
 }
 
+// Owner, 2026-10-25: on OFP / Cold War Assault vehicles only the window glass reflects -- for now;
+// Arma 1/2/3 content stays as it is. A section is Arma content when it carries what only Arma
+// data has: a pixel shader or an RVMAT, or a texture under the Arma roots (ca\ for Arma 1/2 and
+// Arrowhead, a3\ for Arma 3; the logged class runs of 2026-10-22 had no exceptions). Everything
+// else drawn under a vehicle is OFP data -- its body, its interior and the crew it carries: the
+// scene loop makes the vehicle the draw owner of its proxies, so the passengers came through the
+// civil body rule as glossy paint (owner, manual test 2026-10-25, Peugeot 406). An addon's own
+// CfgOpMaterials entries still win, which is how the owner's Peugeot keeps its paint, chrome and
+// rims.
+inline bool IsArmaContent(const Inputs& in)
+{
+    if (!in.pixelShader.empty())
+        return true;
+    const std::string mat = Normalise(in.material);
+    if (mat.size() > 6 && mat.compare(mat.size() - 6, 6, ".rvmat") == 0)
+        return true;
+    std::string tex = Normalise(in.texture);
+    const auto start = tex.find_first_not_of('/');
+    tex.erase(0, start == std::string::npos ? tex.size() : start);
+    return tex.rfind("ca/", 0) == 0 || tex.rfind("a2/", 0) == 0 || tex.rfind("a3/", 0) == 0;
+}
+
+inline bool KeepsReflectionWhenOfp(SurfaceClass cls)
+{
+    return cls == SurfaceClass::Glass || cls == SurfaceClass::Mirror;
+}
+
 inline Params Classify(const Inputs& in)
 {
     Params p = ClassifyRules(in);
@@ -324,6 +351,12 @@ inline Params Classify(const Inputs& in)
     {
         const Source source = p.source;
         p = Preset(SurfaceClass::PaintMatt);
+        p.source = source;
+    }
+    if (in.isVehicle && p.source != Source::Declared && !IsArmaContent(in) && !KeepsReflectionWhenOfp(p.cls))
+    {
+        const Source source = p.source;
+        p = Preset(in.military ? SurfaceClass::PaintMatt : SurfaceClass::Matt);
         p.source = source;
     }
     return p;
