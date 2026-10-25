@@ -250,28 +250,45 @@ void LogStallThreadStack()
         ResumeThread(g_watchedThread);
         return;
     }
-    STACKFRAME64 frame = {};
+    // Walk while suspended (the stack must not move), log after resuming. Nothing in the walk
+    // may allocate or take a lock the suspended thread could hold: StackWalk64 with dbghelp's
+    // table and module callbacks does both, and with the main thread suspended inside the heap
+    // (a mission still loading) the monitor waited on it for ever -- TE15_UAVs in run 44 froze
+    // at its first stall report instead of ending at 60 s. x64 unwinds with the image's own
+    // tables (RtlLookupFunctionEntry/RtlVirtualUnwind), which read only mapped memory.
+    DWORD64 pcs[48];
+    int n = 0;
 #if defined(_M_X64) || defined(__x86_64__)
-    constexpr DWORD machineType = IMAGE_FILE_MACHINE_AMD64;
-    frame.AddrPC.Offset = ctx.Rip;
-    frame.AddrFrame.Offset = ctx.Rbp;
-    frame.AddrStack.Offset = ctx.Rsp;
+    while (n < 48 && ctx.Rip)
+    {
+        pcs[n++] = ctx.Rip;
+        DWORD64 imageBase = 0;
+        PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(ctx.Rip, &imageBase, nullptr);
+        if (!fn)
+        {
+            // a leaf function: the return address is on top of the stack
+            ctx.Rip = *reinterpret_cast<DWORD64*>(ctx.Rsp);
+            ctx.Rsp += 8;
+            continue;
+        }
+        PVOID handlerData = nullptr;
+        DWORD64 establisher = 0;
+        RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, ctx.Rip, fn, &ctx, &handlerData, &establisher, nullptr);
+    }
 #else
+    STACKFRAME64 frame = {};
     constexpr DWORD machineType = IMAGE_FILE_MACHINE_I386;
     frame.AddrPC.Offset = ctx.Eip;
     frame.AddrFrame.Offset = ctx.Ebp;
     frame.AddrStack.Offset = ctx.Esp;
-#endif
     frame.AddrPC.Mode = AddrModeFlat;
     frame.AddrFrame.Mode = AddrModeFlat;
     frame.AddrStack.Mode = AddrModeFlat;
-    // Walk while suspended (the stack must not move), log after resuming.
-    DWORD64 pcs[48];
-    int n = 0;
     while (n < 48 && StackWalk64(machineType, proc, g_watchedThread, &frame, &ctx, nullptr, SymFunctionTableAccess64,
                                  SymGetModuleBase64, nullptr) &&
            frame.AddrPC.Offset)
         pcs[n++] = frame.AddrPC.Offset;
+#endif
     ResumeThread(g_watchedThread);
     char symBuf[sizeof(SYMBOL_INFO) + 256];
     SYMBOL_INFO* sym = reinterpret_cast<SYMBOL_INFO*>(symBuf);
