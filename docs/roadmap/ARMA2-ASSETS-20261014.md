@@ -578,6 +578,28 @@ worked off one by one (voices, animals, vehicle/weapon values, mimic/glasses/con
 - `eae0482`: groups keep their high-command icons and icon parameters (`getGroupIcons`, ...),
   not drawn yet.
 
+### Arma 2 weapons and vehicle values, 2026-10-25
+
+The owner's point 3 (vehicle and weapon values, ballistics, sounds). Before: an `A1x_` weapon
+had the Arma 2 model on the CWA weapon and nothing else of its own; magazines and rounds were
+CWA's, and an Arma 2 vehicle took its own armour (and speed, fuel, seats) but kept the CWA
+carrier's weapons.
+
+- `2a48958`: a hand weapon's own shot (the first sample of its first mode's `soundBegin`, or
+  `begin1`/`sound`), empty click and magazine change, at Arma 2's volume and pitch
+  (`OP_A2_WEAPON_SOUNDS=0`: CWA's). Arma 2 alternates `begin1`/`begin2`; only the first plays.
+- `e9dbd55`: the Arma 1 machinery runs for Arma 2: ammunition `A1a_` with Arma 2's `hit`,
+  `indirectHit`, `indirectHitRange` (`OP_A2_BALLISTICS=0`), magazines with Arma 2's count and
+  ammunition, armed vehicles' weapons rebuilt as `A1v_`/`A1m_` with rounds, rate of fire, muzzle
+  velocity, damage and the Arma 2 shot (`OP_A2_VEHICLE_WEAPONS=0`).
+- `11540b1`: an own shot sounds for every round of a burst.
+- Measured (run weap): see the verification table. Men's armour is 3 in both games, so Arma 2
+  rounds against Arma 2 men need no armour change; Arma 2 also spreads damage over hit points
+  (`HitHead`, `HitBody` ... with their own armour), which is not modelled.
+- Open: CWA's flight and driving models (Arma 2's `maxSpeed` only), recoil, dispersion and
+  zeroing per mode; Arma 2's bullet hit and ricochet sounds (CWA's still play); the 2nd shot
+  sample; weapons on a commander's turret (no seat in CWA's tank).
+
 ## Steps
 
 1. **Measure first.** Per mission: an asset census in the log (every class created, what it

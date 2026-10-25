@@ -2786,10 +2786,13 @@ void EntityAI::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI*
     if (mType && slot._mode >= 0 && slot._mode < mType->_modes.Size())
     {
         mode = mType->_modes[slot._mode];
-        sound = muzzle && muzzle->_shotSound.name.GetLength() > 0 ? &muzzle->_shotSound : &mode->_sound;
-        continuous = mode->_soundContinuous;
+        // An Arma 2/3 weapon's own shot is one round, played for every round of a burst
+        // (Arma 2: soundBurst=0); a CWA burst mode's sound is the whole burst, played once.
+        const bool ownShot = muzzle && muzzle->_shotSound.name.GetLength() > 0;
+        sound = ownShot ? &muzzle->_shotSound : &mode->_sound;
+        continuous = ownShot ? false : mode->_soundContinuous;
         // sound only on first shot in burst
-        if (magazine->_burstLeft > 0)
+        if (magazine->_burstLeft > 0 && !ownShot)
         {
             noSound = true;
         }
