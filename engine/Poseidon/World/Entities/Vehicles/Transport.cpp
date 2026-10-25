@@ -2269,6 +2269,9 @@ void TransportType::InitShape()
             _driverOpticsPos = memory->FindNamedSel("pilot");
         }
         _gunnerOpticsPos = memory->FindNamedSel("gunnerview");
+        // the Arma 1 5t gun truck spells it "gunner_view"
+        if (_gunnerOpticsPos < 0)
+            _gunnerOpticsPos = memory->FindNamedSel("gunner_view");
         _commanderOpticsPos = memory->FindNamedSel("commanderview");
     }
     else
