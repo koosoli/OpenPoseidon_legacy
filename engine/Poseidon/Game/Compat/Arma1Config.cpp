@@ -2716,6 +2716,43 @@ bool GeneratedMagazineFits(const char* weaponClass, const char* magazine)
     return listed || !any;
 }
 
+const ParamEntry* Arma1ShotSound(const char* weaponClass, bool mainMuzzle)
+{
+    if (!Active() || Generation() != 1 || !weaponClass || _strnicmp(weaponClass, "A1x_", 4) != 0)
+        return nullptr;
+    static const bool off = [] {
+        const char* e = std::getenv("OP_A1_WEAPON_SOUNDS");
+        return e && *e == '0';
+    }();
+    if (off)
+        return nullptr;
+    const ParamEntry* a1 = FindConfigClass("CfgWeapons", weaponClass + 4);
+    if (!a1 || !a1->IsClass())
+        return nullptr;
+    const ParamEntry* source = a1;
+    if (!mainMuzzle)
+    {
+        // the first muzzle that is not the weapon itself: M203Muzzle, GP25Muzzle
+        source = nullptr;
+        if (const ParamEntry* muzzles = a1->FindEntry("muzzles"); muzzles && muzzles->IsArray())
+            for (int i = 0; i < muzzles->GetSize() && !source; i++)
+            {
+                const RString name = (RStringB)(*muzzles)[i];
+                if (_stricmp(name.Data(), "this") == 0)
+                    continue;
+                if (const ParamEntry* m = a1->FindEntry(name.Data()); m && m->IsClass())
+                    source = m;
+            }
+        if (!source)
+            return nullptr;
+    }
+    const ParamEntry* sound = Arma1WeaponModeEntry(*source, "sound");
+    if (!sound || !sound->IsArray() || sound->GetSize() < 1)
+        return nullptr;
+    const RString file = (RStringB)(*sound)[0];
+    return file.GetLength() > 0 ? sound : nullptr;
+}
+
 std::vector<RString> ListedGeneratedMagazines(const char* weaponClass)
 {
     std::vector<RString> out;

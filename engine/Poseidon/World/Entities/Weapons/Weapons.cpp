@@ -465,6 +465,18 @@ void MuzzleType::Init(const ParamEntry& cls, const WeaponType* weapon)
     GetValue(_sound, cls >> "drySound");
     if (const ParamEntry* shot = cls.FindEntry("a3SoundShot"); shot && shot->IsArray())
         GetValue(_shotSound, *shot);
+    // --arma1: the Arma 1 weapon's own shot sound, for its main muzzle and its grenade launcher
+    else if (weapon)
+    {
+        // the main muzzle: the weapon itself ("this") or the first of its muzzles[]
+        bool mainMuzzle = stricmp(cls.GetName(), weapon->GetName()) == 0;
+        if (!mainMuzzle && weapon->_parClass)
+            if (const ParamEntry* muzzles = weapon->_parClass->FindEntry("muzzles");
+                muzzles && muzzles->IsArray() && muzzles->GetSize() > 0)
+                mainMuzzle = stricmp(((RStringB)(*muzzles)[0]).Data(), cls.GetName()) == 0;
+        if (const ParamEntry* shot = Arma1Compat::Arma1ShotSound(weapon->GetName(), mainMuzzle))
+            GetValue(_shotSound, *shot);
+    }
     _soundContinuous = cls >> "soundContinuous";
     GetValue(_reloadSound, cls >> "reloadSound");
     GetValue(_reloadMagazineSound, cls >> "reloadMagazineSound");
