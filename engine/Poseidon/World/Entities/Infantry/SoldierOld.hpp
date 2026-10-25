@@ -1011,6 +1011,10 @@ class Man: public Person
 	//! Man-space transform `weapon`'s model is drawn with at `level` (DrawProxies' chain
 	//! without the world transform); false when that LOD holds no proxy for it
 	bool HeldWeaponTransform(int level, const WeaponType *weapon, Matrix4 &out) const;
+	//! What DrawProxies adds after AnimateProxyMatrix for `weapon` drawn on `proxy`, applied
+	//! to a point of the weapon's memory LOD (the muzzle, the ejection port): identity for
+	//! every OFP/CWA model, the source-origin shift for an Arma model
+	Matrix4 HeldModelPointCorrection(const ProxyObject &proxy, const WeaponType *weapon) const;
 
 	void ShowHead(int level, bool show = true) override;
 	void ShowWeapons(bool showPrimary = true, bool showSecondary = true) override;

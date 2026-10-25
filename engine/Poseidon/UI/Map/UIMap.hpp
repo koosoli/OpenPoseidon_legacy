@@ -256,7 +256,12 @@ protected:
 };
 
 #define WEAPON_SLOTS			5
-#define MAGAZINE_SLOTS		14
+// The gear page's magazine slots: items from 0, hand gun magazines from
+// HANDGUN_MAGAZINE_START. CWA men carry 10 + 4; --arma1 men 12 + 8 (Arma 1), and the mask
+// holds up to 15 items, so the hand gun magazines start after them. (10 + 4 until 2026-10-25.)
+#define HANDGUN_MAGAZINE_START	15
+#define ITEM_ROW_SPLIT		4	// the first row of items, the primary weapon's
+#define MAGAZINE_SLOTS		(HANDGUN_MAGAZINE_START + 15)
 #define TOTAL_SLOTS				WEAPON_SLOTS + MAGAZINE_SLOTS
 
 struct UnitWeaponsInfo : public SerializeClass

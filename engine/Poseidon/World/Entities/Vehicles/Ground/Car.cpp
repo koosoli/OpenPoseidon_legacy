@@ -229,6 +229,7 @@ void CarType::InitShape()
     if (_hasTurret)
     {
         _turret.InitShape(par >> "Turret", _shape);
+        _turret.ArmaGunPoints(par, _shape);
     }
 
     _animFire.Init(_shape, "zasleh", nullptr);
@@ -2437,6 +2438,11 @@ void Car::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI* targ
                 case AmmoShotBullet:
                     _mGunClouds.Start(0.1);
                     _mGunFire.Start(0.1, 0.4, true);
+                    {
+                        Matrix4Val gun = GunTurretTransform();
+                        ArmaVehicleMuzzleBurst(gun.FastTransform(Type()->_turret._muzzle),
+                                               gun.Rotate(Type()->_turret._dir), mode);
+                    }
                     _mGunFireFrames = 1;
                     _mGunFireTime = Glob.uiTime;
                     int newPhase;

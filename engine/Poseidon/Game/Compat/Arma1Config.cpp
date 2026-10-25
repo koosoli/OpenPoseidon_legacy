@@ -2772,6 +2772,90 @@ bool GeneratedMagazineFits(const char* weaponClass, const char* magazine)
     return listed || !any;
 }
 
+const ParamEntry* Arma1ShotSound(const char* weaponClass, int muzzleIndex)
+{
+    if (!Active() || Generation() != 1 || !weaponClass || _strnicmp(weaponClass, "A1x_", 4) != 0 || muzzleIndex < 0)
+        return nullptr;
+    static const bool off = [] {
+        const char* e = std::getenv("OP_A1_WEAPON_SOUNDS");
+        return e && *e == '0';
+    }();
+    if (off)
+        return nullptr;
+    const ParamEntry* a1 = FindConfigClass("CfgWeapons", weaponClass + 4);
+    if (!a1 || !a1->IsClass())
+        return nullptr;
+    // the muzzle at the same place in the Arma 1 weapon's muzzles[]: "this" is the weapon,
+    // anything else its own class (M16Muzzle, M203Muzzle)
+    const ParamEntry* source = muzzleIndex == 0 ? a1 : nullptr;
+    if (const ParamEntry* muzzles = a1->FindEntry("muzzles"); muzzles && muzzles->IsArray())
+    {
+        if (muzzleIndex >= muzzles->GetSize())
+            return nullptr;
+        const RString name = (RStringB)(*muzzles)[muzzleIndex];
+        if (_stricmp(name.Data(), "this") == 0)
+            source = a1;
+        else if (const ParamEntry* m = a1->FindEntry(name.Data()); m && m->IsClass())
+            source = m;
+    }
+    if (!source)
+        return nullptr;
+    const ParamEntry* sound = Arma1WeaponModeEntry(*source, "sound");
+    if (!sound || !sound->IsArray() || sound->GetSize() < 1)
+        return nullptr;
+    const RString file = (RStringB)(*sound)[0];
+    if (file.GetLength() == 0)
+        return nullptr;
+    static std::set<std::string> logged;
+    if (logged.insert(Lower(std::string(weaponClass)) + "#" + std::to_string(muzzleIndex)).second)
+        LOG_INFO(Mission, "Arma 1: weapon '{}' muzzle {} fires with {}", weaponClass, muzzleIndex, file.Data());
+    return sound;
+}
+
+Arma1Sight Arma1MuzzleSight(const char* weaponClass, int muzzleIndex)
+{
+    Arma1Sight out;
+    if (!Active() || Generation() != 1 || !weaponClass || _strnicmp(weaponClass, "A1x_", 4) != 0 || muzzleIndex < 0)
+        return out;
+    static const bool off = [] {
+        const char* e = std::getenv("OP_A1_MUZZLE_SIGHTS");
+        return e && *e == '0';
+    }();
+    if (off)
+        return out;
+    const ParamEntry* a1 = FindConfigClass("CfgWeapons", weaponClass + 4);
+    const ParamEntry* muzzles = a1 && a1->IsClass() ? a1->FindEntry("muzzles") : nullptr;
+    if (!muzzles || !muzzles->IsArray() || muzzleIndex >= muzzles->GetSize())
+        return out;
+    const RString name = (RStringB)(*muzzles)[muzzleIndex];
+    const ParamEntry* m = _stricmp(name.Data(), "this") == 0 ? a1 : a1->FindEntry(name.Data());
+    if (!m || !m->IsClass())
+        return out;
+    const std::string optics = StringValue(*m, "modelOptics");
+    if (optics.size() > 1 && optics[0] == '\\')
+    {
+        std::string shape = optics.substr(1);
+        if (shape.size() < 4 || Lower(shape.substr(shape.size() - 4)) != ".p3d")
+            shape += ".p3d";
+        if (QIFStreamB::FileExist(shape.c_str()))
+            out.optics = optics;
+    }
+    if (out.optics.empty())
+        out.camera = StringValue(*m, "memoryPointCamera");
+    const auto num = [&](const char* key, float& v) {
+        if (const ParamEntry* e = m->FindEntry(key); e && !e->IsClass() && !e->IsArray())
+            v = (float)*e;
+    };
+    num("opticsZoomInit", out.zoomInit);
+    num("opticsZoomMin", out.zoomMin);
+    num("opticsZoomMax", out.zoomMax);
+    out.valid = !out.optics.empty() || !out.camera.empty();
+    if (out.valid)
+        LOG_INFO(Mission, "Arma 1: weapon '{}' muzzle {} ({}) sights {}", weaponClass, muzzleIndex, name.Data(),
+                 out.optics.empty() ? "3D from '" + out.camera + "'" : out.optics);
+    return out;
+}
+
 std::vector<RString> ListedGeneratedMagazines(const char* weaponClass)
 {
     std::vector<RString> out;
@@ -2852,6 +2936,39 @@ RString Arma1MagazineClass(const RString& name, const RString& cwaMagazine)
         const std::string shortName = StringValue(*a1, "displayNameShort");
         if (!shortName.empty())
             text += "\t\tshortNameMagazine=\"" + shortName + "\";\r\n";
+        // Arma 1: the gear page and the map's inventory show the Arma 1 magazine's own icon
+        // ("\CA\weapons\data\equip\m_30stanag_ca.paa") instead of the CWA carrier's
+        if (Generation() == 1)
+        {
+            const std::string picture = StringValue(*a1, "picture");
+            if (picture.size() > 1 && picture[0] == '\\')
+            {
+                std::string file = picture.substr(1);
+                if (file.size() < 4 || file[file.size() - 4] != '.')
+                    file += ".paa";
+                if (QIFStreamB::FileExist(file.c_str()))
+                    text += "\t\tpicture=\"" + picture + "\";\r\n";
+            }
+            // and its own size in the slots, as the man's slots are Arma 1's (OP_A1_SLOTS=0
+            // keeps both CWA's): the M203 round takes a small slot (Arma 1 16, CWA 32 each),
+            // the M136 two, the Javelin six. Arma 1 small slots are 16 apiece, CWA's 32.
+            static const bool ownSlots = [] {
+                const char* e = std::getenv("OP_A1_SLOTS");
+                return !(e && *e == '0');
+            }();
+            if (const ParamEntry* t = ownSlots ? a1->FindEntry("type") : nullptr; t && !t->IsClass() && !t->IsArray())
+            {
+                const int a = (int)*t;
+                const int items = (a >> 8) & 0xF;
+                const int small = std::min((a >> 4) & 0xF, 7);
+                if (items > 0 || small > 0)
+                {
+                    char line[64];
+                    std::snprintf(line, sizeof(line), "\t\tmagazineType=%d;\r\n", items > 0 ? items << 8 : small << 5);
+                    text += line;
+                }
+            }
+        }
         text += "\t};\r\n};\r\n";
         ImportIntoPars(text, generated.c_str());
         if (!(Pars >> "CfgWeapons").FindEntry(generated.c_str()))
@@ -3350,6 +3467,66 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
                 std::snprintf(line, sizeof(line), "\t\tgetInRadius=%g;\r\n", (float)*r);
                 text += line;
             }
+
+            // Its own memory points and rotor selections, by the names its class gives them
+            // (the AH-1Z's Rocket_1/Missile_1, mainRotorStatic); the engine reads these keys
+            // and keeps CWA's Czech names where the model has none.
+            for (const char* key : {"memoryPointLRocket", "memoryPointRRocket", "memoryPointLMissile",
+                                    "memoryPointRMissile", "memoryPointGun", "selectionHRotorStill",
+                                    "selectionHRotorMove", "selectionVRotorStill", "selectionVRotorMove"})
+                copy(*a1, key, key);
+            // its gunner's barrel: gunBeg/gunEnd and memoryPointGun of the first armed turret
+            // (the Mi-17's muzzle_1/chamber_1, which CWA's "usti hlavne" misses)
+            if (const ParamEntry* turrets = a1->FindEntry("Turrets"); turrets && turrets->IsClass())
+                for (int i = 0; i < turrets->GetEntryCount(); i++)
+                {
+                    const ParamEntry& t = turrets->GetEntry(i);
+                    const ParamEntry* ws = t.IsClass() ? t.FindEntry("weapons") : nullptr;
+                    bool armed = false;
+                    for (int k = 0; ws && ws->IsArray() && k < ws->GetSize() && !armed; k++)
+                    {
+                        const std::string w = Lower((const char*)(RStringB)(*ws)[k]);
+                        armed = w.find("horn") == std::string::npos && w.find("fake") == std::string::npos &&
+                                w.find("searchlight") == std::string::npos && w.find("smoke") == std::string::npos;
+                    }
+                    if (!armed)
+                        continue;
+                    copy(t, "gunBeg", "a1GunBeg");
+                    copy(t, "gunEnd", "a1GunEnd");
+                    copy(t, "memoryPointGun", "a1GunPoint");
+                    break;
+                }
+            // its flash is a proxy in "zasleh", which CWA does not draw: the engine adds the
+            // volumetric flash at the barrel
+            text += "\t\ta1MuzzleFlash=1;\r\n";
+            if (const ParamEntry* g = a1->FindEntry("gearRetracting"); g && !g->IsClass() && !g->IsArray() &&
+                                                                       (sim == "airplane" || sim == "helicopter"))
+                text += std::string("\t\tgearRetracting=") + ((int)*g ? "1" : "0") + ";\r\n";
+            // Its own sounds, 1:1 (OP_A1_VEHICLE_SOUNDS=0: the CWA carrier's): engine, wind,
+            // damage alarm, doors, servo
+            static const bool ownSounds = [] {
+                const char* e = std::getenv("OP_A1_VEHICLE_SOUNDS");
+                return !(e && *e == '0');
+            }();
+            std::string sounds;
+            for (const char* key : {"soundEngine", "soundEnviron", "soundDammage", "soundGetIn", "soundGetOut",
+                                    "soundServo"})
+            {
+                const ParamEntry* snd = ownSounds ? a1->FindEntry(key) : nullptr;
+                if (!snd || !snd->IsArray() || snd->GetSize() < 3)
+                    continue;
+                const std::string file = (const char*)(RStringB)(*snd)[0];
+                if (file.empty())
+                    continue;
+                text += std::string("\t\t") + key + "[]={";
+                QuoteConfigString(text, file.c_str());
+                char line[96];
+                std::snprintf(line, sizeof(line), ",%g,%g};\r\n", (float)(*snd)[1], (float)(*snd)[2]);
+                text += line;
+                sounds += std::string(" ") + key + "=" + file;
+            }
+            if (!sounds.empty())
+                LOG_INFO(Mission, "{}: '{}' sounds:{}", Label(), missionClass.Data(), sounds);
         }
         // Its own gunner's weapons, rebuilt on CWA ones: cars, boats, tanks and static weapons
         // on a CWA carrier with a gunner -- the weapons of the first turret that has any (the
@@ -3425,6 +3602,37 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
                         text += line;
                     }
                 }
+            }
+        }
+    }
+    if (man && useModel && Generation() == 1)
+    {
+        // Arma 1's own slots (OP_A1_SLOTS=0: CWA's): a rifleman carries 12 magazines and 8
+        // pistol magazines, CWA's 10 and 4. Arma 1 counts launcher 4, pistol magazines 16 and
+        // items 256 apiece; CWA launcher 16, pistol magazines 32 (seven at most, the eighth
+        // in MaskSlotHandGunItemHigh), items 256.
+        static const bool ownSlots = [] {
+            const char* e = std::getenv("OP_A1_SLOTS");
+            return !(e && *e == '0');
+        }();
+        if (const ParamEntry* ws = ownSlots ? a1->FindEntry("weaponSlots") : nullptr; ws && !ws->IsClass() && !ws->IsArray())
+        {
+            const int a = (int)*ws;
+            if (a > 0)
+            {
+                const int items = std::min((a >> 8) & 0xF, 15);
+                const int pistolMags = std::min((a >> 4) & 0xF, 15);
+                const int binocular = (a >> 12) & 0x3;
+                int cwa = (a & 1) | (a & 2) | ((a & 4) ? 0x10 : 0) | (items << 8) | (binocular << 12);
+                cwa |= (pistolMags >= 8 ? ((pistolMags - 8) << 5) | 0x4 : pistolMags << 5);
+                char line[96];
+                std::snprintf(line, sizeof(line), "\t\tweaponSlots=%d;\r\n", cwa);
+                text += line;
+                static std::set<std::string> logged;
+                if (logged.insert(Lower(std::string(missionClass.Data()))).second)
+                    LOG_INFO(Mission, "{}: '{}' carries Arma 1's slots: {} magazines, {} pistol magazines{}{}",
+                             Label(), missionClass.Data(), items, pistolMags, (a & 4) ? ", a launcher" : "",
+                             (a & 2) ? ", a pistol" : "");
             }
         }
     }

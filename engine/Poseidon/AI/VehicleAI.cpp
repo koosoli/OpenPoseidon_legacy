@@ -1746,7 +1746,8 @@ bool EntityAI::CheckMagazine(const Magazine* magazine, AutoArray<Ref<const Magaz
 
     AI_ERROR((slots & (MaskSlotItem | MaskSlotHandGunItem)) == slots);
     const int itemMax = maxSlots & MaskSlotItem;
-    const int itemMaxHandGun = maxSlots & MaskSlotHandGunItem;
+    // in the mask's units (one magazine = 0x20), with the Arma 1 high bit's eight more
+    const int itemMaxHandGun = GetHandGunItemSlotsCount(maxSlots) << 5;
     int item = slots & MaskSlotItem;
     int itemHandGun = slots & MaskSlotHandGunItem;
     int reserve = itemMax - item;

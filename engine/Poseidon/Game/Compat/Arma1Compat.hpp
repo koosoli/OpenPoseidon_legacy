@@ -190,6 +190,26 @@ std::string Arma2HeadModel(const char* unitClass, const char* shapeName, const c
 // placeholder; skinned to the man's skeleton like the head. "" when none (as above).
 std::string Arma2BackpackModel(const char* unitClass, const char* shapeName);
 
+// The shot sound of the Arma 1 weapon behind the generated weapon class `weaponClass`
+// (A1x_M16A4): the sound[] of the first fire mode of the Arma 1 muzzle at `muzzleIndex` in
+// its muzzles[] (0 the rifle, 1 the M203). Arma 1 keeps a shot sound per weapon; CWA keeps it in the
+// magazine's modes, so every Arma 1 weapon on an M16 round sounded like CWA's M16.
+// nullptr without one, without --arma1, or with OP_A1_WEAPON_SOUNDS=0.
+const ParamEntry* Arma1ShotSound(const char* weaponClass, int muzzleIndex);
+
+// The sight of the Arma 1 muzzle at `muzzleIndex` of the weapon behind `weaponClass`: its 2D
+// modelOptics model when it has one this install ships ("\ca\Weapons\optika_ACOG"), else
+// the memory point its 3D sight looks from (memoryPointCamera, "GL eye"), and its zoom.
+// valid=false without --arma1, for a weapon not A1x_, or with OP_A1_MUZZLE_SIGHTS=0.
+struct Arma1Sight
+{
+    bool valid = false;
+    std::string optics;
+    std::string camera;
+    float zoomInit = -1, zoomMin = -1, zoomMax = -1;
+};
+Arma1Sight Arma1MuzzleSight(const char* weaponClass, int muzzleIndex);
+
 // The generated magazines (A1x_<magazine>) the Arma 1 weapon behind the generated weapon
 // class `weaponClass` lists in its own magazines[] -- what its main muzzle takes whatever
 // CWA carrier they ride on. The M9's 15Rnd_9x19_M9 rides on CWA's Beretta, whose muzzle

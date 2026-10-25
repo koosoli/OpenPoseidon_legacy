@@ -1241,6 +1241,11 @@ public:
 	(
 		int weapon, const Magazine *magazine, EntityAI *target
 	);
+	//! The volumetric muzzle flash of a vehicle gun at `muzzleModel` pointing `dirModel`
+	//! (model space), for a class that asks for it (a1MuzzleFlash=1): an Arma 1 vehicle's
+	//! "zasleh" holds a flash PROXY, which CWA never draws, so the HMMWV's M2 fired with
+	//! no flash at all.
+	void ArmaVehicleMuzzleBurst(Vector3Par muzzleModel, Vector3Par dirModel, const WeaponModeType *mode);
 
 	// cost: time necessary for 1m travel
 	virtual float GetCost( const GeographyInfo &info ) const {return 1.0;}

@@ -119,6 +119,11 @@ class AnimationWithCenter: public Animation
 		for( int i=0; i<MAX_LOD_LEVELS; i++ ) if( _selection[i]>=0 ) return _center[i];
 		return VZero;
 	}
+	//! the same pivot on every LOD that has the part (an Arma hinge from the memory LOD)
+	void SetCenterAll( Vector3Par center )
+	{
+		for( int i=0; i<MAX_LOD_LEVELS; i++ ) if( _selection[i]>=0 ) _center[i]=center;
+	}
 	Vector3 Center( int level ) const
 	{
 		if( _selection[level]>=0 ) return _center[level];

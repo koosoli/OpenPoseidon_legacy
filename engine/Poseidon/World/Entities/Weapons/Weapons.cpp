@@ -465,6 +465,19 @@ void MuzzleType::Init(const ParamEntry& cls, const WeaponType* weapon)
     GetValue(_sound, cls >> "drySound");
     if (const ParamEntry* shot = cls.FindEntry("a3SoundShot"); shot && shot->IsArray())
         GetValue(_shotSound, *shot);
+    // --arma1: the Arma 1 weapon's own shot sound, for its main muzzle and its grenade launcher
+    else if (weapon)
+    {
+        // which muzzle of the weapon this is: the weapon itself ("this") or its place in muzzles[]
+        int muzzleIndex = stricmp(cls.GetName(), weapon->GetName()) == 0 ? 0 : -1;
+        if (muzzleIndex < 0 && weapon->_parClass)
+            if (const ParamEntry* muzzles = weapon->_parClass->FindEntry("muzzles"); muzzles && muzzles->IsArray())
+                for (int i = 0; i < muzzles->GetSize() && muzzleIndex < 0; i++)
+                    if (stricmp(((RStringB)(*muzzles)[i]).Data(), cls.GetName()) == 0)
+                        muzzleIndex = i;
+        if (const ParamEntry* shot = Arma1Compat::Arma1ShotSound(weapon->GetName(), muzzleIndex))
+            GetValue(_shotSound, *shot);
+    }
     _soundContinuous = cls >> "soundContinuous";
     GetValue(_reloadSound, cls >> "reloadSound");
     GetValue(_reloadMagazineSound, cls >> "reloadMagazineSound");
@@ -632,7 +645,7 @@ void MuzzleType::InitShape(const WeaponType* weapon)
 {
     const ParamEntry& cls = *_parClass;
 
-    RStringB oModelName = cls >> "modelOptics";
+    RStringB oModelName = _armaOptics.GetLength() > 0 ? RStringB(_armaOptics) : RStringB(cls >> "modelOptics");
     _opticsModel = oModelName.GetLength() > 0 ? Shapes.New(GetShapeName(oModelName), true, false) : nullptr;
     if (_opticsModel && _opticsModel->NLevels() > 0)
     {
@@ -683,6 +696,9 @@ void MuzzleType::InitShape(const WeaponType* weapon)
                 Vector3 vEnd = mem->NamedPosition(end);
                 _cartridgeOutVel = (vEnd - _cartridgeOutPos) * 50;
             }
+            _hasArmaEye = _armaCamera.GetLength() > 0 && mem->FindNamedSel(_armaCamera) >= 0;
+            if (_hasArmaEye)
+                _armaEyePos = mem->NamedPosition(_armaCamera);
         }
     }
 }
@@ -920,6 +936,34 @@ void WeaponType::Init(const char* name)
             take("opticsZoomInit", rifle->_opticsZoomInit);
             take("distanceZoomMin", rifle->_distanceZoomMin);
             take("distanceZoomMax", rifle->_distanceZoomMax);
+        }
+    // --arma1: each muzzle looks through the Arma 1 muzzle's own sight -- the ACOG rifles'
+    // rifle muzzle through optika_ACOG (Arma 1's 2D scope; the M16A4 ACOG GL's view was
+    // blocked by its own 3D model, the M4A1 M203 ACOG showed CWA's sight), the M203 from
+    // "GL eye" along the weapon
+    if (n > 1)
+        for (int i = 0; i < n; i++)
+        {
+            const Arma1Compat::Arma1Sight sight = Arma1Compat::Arma1MuzzleSight(GetName(), i);
+            if (!sight.valid)
+                continue;
+            MuzzleType* m = _muzzles[i];
+            if (!sight.optics.empty())
+            {
+                m->_armaOptics = sight.optics.c_str();
+                m->_optics3D = false;
+            }
+            else if (!sight.camera.empty())
+            {
+                m->_armaCamera = sight.camera.c_str();
+                m->_optics3D = true;
+            }
+            if (sight.zoomInit > 0)
+                m->_opticsZoomInit = sight.zoomInit;
+            if (sight.zoomMin > 0)
+                m->_opticsZoomMin = sight.zoomMin;
+            if (sight.zoomMax > 0)
+                m->_opticsZoomMax = sight.zoomMax;
         }
 }
 

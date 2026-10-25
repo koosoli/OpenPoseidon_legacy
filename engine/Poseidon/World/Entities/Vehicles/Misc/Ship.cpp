@@ -137,6 +137,7 @@ void ShipType::InitShape()
 
     // turret animations
     _turret.InitShape(par >> "Turret", _shape);
+    _turret.ArmaGunPoints(par, _shape);
 
     _gunDir = _turret._dir;
     _gunPos = _turret._pos;

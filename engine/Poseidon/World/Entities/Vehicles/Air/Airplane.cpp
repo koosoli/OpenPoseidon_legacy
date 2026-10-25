@@ -157,6 +157,27 @@ void AirplaneType::InitShape()
         _rotors[i].Init(_shape, selName, nullptr, axisName);
     }
 
+    // Arma 1 propellers (the DC-3): "rotor_1", "rotor_2" ... about "rotor_N_axis" in the
+    // memory LOD; no OFP "vrtule" anywhere in its visual LOD
+    if (Shape* lod0 = _shape->LevelOpaque(0); lod0 && _rotors[0].GetSelection(0) < 0)
+    {
+        Shape* memory = _shape->MemoryLevel();
+        int found = 0;
+        for (int i = 0; i < MaxRotors; i++)
+        {
+            char selName[32];
+            char axisName[40];
+            snprintf(selName, sizeof(selName), "rotor_%d", i + 1);
+            snprintf(axisName, sizeof(axisName), "rotor_%d_axis", i + 1);
+            if (lod0->FindNamedSel(selName) < 0)
+                continue;
+            _rotors[i].Init(_shape, selName, nullptr, axisName, nullptr, memory && memory->FindNamedSel(axisName) >= 0);
+            found++;
+        }
+        if (found)
+            LOG_INFO(Graphics, "{}: {} Arma 1 propeller(s) rotor_N", (const char*)GetName(), found);
+    }
+
     _rotorStill.Init(_shape, "vrtule staticka", nullptr);
     _rotorMove.Init(_shape, "vrtule blur", nullptr);
 
@@ -164,41 +185,64 @@ void AirplaneType::InitShape()
     _rWheel.Init(_shape, "pravy kolo", nullptr, "osa praveho kola");
     _fWheel.Init(_shape, "predni kolo", nullptr, "osa predniho kola");
 
-    // Arma 1 gear (the A-10): the OFP selections are absent, the legs are gear_1..3
+    // Arma 1 gear (the A-10, the Su-34): the legs are model.cfg bones "gear_1".."gear_3" or
+    // "gear_1_1", "gear_2_1", "gear_2_2" (leg 1_1 the nose), each turning about its
+    // "gear_<leg>_axis" with every "gear_<leg>..." part and the nearest "wheel_...". The Su-34
+    // also names "predni kolo" -- outside its visual LOD -- so its gear never folded.
     _nA1Gear = 0;
-    if (Shape* lod0 = _shape->LevelOpaque(0); lod0 && lod0->FindNamedSel("predni kolo") < 0 &&
-                                               lod0->FindNamedSel("gear_1") >= 0)
+    if (Shape* lod0 = _shape->LevelOpaque(0); lod0)
     {
+        const auto lower = [](std::string n) {
+            for (char& ch : n)
+                ch = (char)tolower((unsigned char)ch);
+            return n;
+        };
+        // the leg a "gear_..." name belongs to: "1" of gear_1_damper, "2_1" of gear_2_1_rot
+        const auto legOf = [](const std::string& name) -> std::string {
+            if (name.rfind("gear_", 0) != 0 || name.size() < 6 || !isdigit((unsigned char)name[5]))
+                return {};
+            size_t i = 5;
+            while (i < name.size() && isdigit((unsigned char)name[i]))
+                i++;
+            if (i + 1 < name.size() && name[i] == '_' && isdigit((unsigned char)name[i + 1]))
+            {
+                i++;
+                while (i < name.size() && isdigit((unsigned char)name[i]))
+                    i++;
+            }
+            return name.substr(5, i - 5);
+        };
         struct Leg
         {
-            int index;
+            std::string id;
             Vector3 centre;
         };
         std::vector<Leg> legs;
-        for (int g = 1; g <= 9; g++)
+        const int oldFront = lod0->FindNamedSel("predni kolo");
+        const bool oldGear = oldFront >= 0 && lod0->NamedSel(oldFront).Size() > 0;
+        for (int i = 0; !oldGear && i < lod0->NNamedSel(); i++)
         {
-            char name[16];
-            snprintf(name, sizeof(name), "gear_%d", g);
-            const int sel = lod0->FindNamedSel(name);
-            if (sel >= 0 && lod0->NamedSel(sel).Size() > 0)
-                legs.push_back({g, lod0->CalculateCenter(lod0->NamedSel(sel))});
+            const std::string name = lower(lod0->NamedSel(i).Name());
+            const std::string id = legOf(name);
+            if (id.empty() || name != "gear_" + id || lod0->NamedSel(i).Size() <= 0)
+                continue;
+            legs.push_back({id, lod0->CalculateCenter(lod0->NamedSel(i))});
         }
         float frontZ = -1e10f;
         for (const Leg& leg : legs)
             frontZ = floatMax(frontZ, leg.centre.Z());
-        for (int i = 0; i < lod0->NNamedSel() && _nA1Gear < MaxA1GearParts; i++)
+        Shape* memory = _shape->MemoryLevel();
+        for (int i = 0; !legs.empty() && i < lod0->NNamedSel() && _nA1Gear < MaxA1GearParts; i++)
         {
             const auto& sel = lod0->NamedSel(i);
-            std::string name = sel.Name();
-            for (char& ch : name)
-                ch = (char)tolower((unsigned char)ch);
+            const std::string name = lower(sel.Name());
             int leg = -1;
-            if (name.rfind("gear_", 0) == 0 && name.find("hatch") == std::string::npos &&
-                name.find("lock") == std::string::npos)
+            if (const std::string id = legOf(name); !id.empty() && name.find("hatch") == std::string::npos &&
+                                                    name.find("lock") == std::string::npos &&
+                                                    name.find("_axis") == std::string::npos)
             {
-                const int g = atoi(name.c_str() + 5);
                 for (size_t k = 0; k < legs.size(); k++)
-                    if (legs[k].index == g)
+                    if (legs[k].id == id)
                         leg = (int)k;
             }
             else if (name.rfind("wheel_", 0) == 0 && sel.Size() > 0)
@@ -215,13 +259,23 @@ void AirplaneType::InitShape()
             }
             if (leg < 0)
                 continue;
-            char axis[24];
-            snprintf(axis, sizeof(axis), "gear_%d_axis", legs[leg].index);
-            _a1Gear[_nA1Gear].Init(_shape, sel.Name(), nullptr, axis);
+            const std::string axis = "gear_" + legs[leg].id + "_axis";
+            const bool inMemory = memory && memory->FindNamedSel(axis.c_str()) >= 0 && lod0->FindNamedSel(axis.c_str()) < 0;
+            if (inMemory)
+                _a1Gear[_nA1Gear].Init(_shape, sel.Name(), nullptr, nullptr);
+            else
+                _a1Gear[_nA1Gear].Init(_shape, sel.Name(), nullptr, axis.c_str());
+            if (inMemory)
+            {
+                // the hinge from the memory LOD for every LOD that has the part
+                const Vector3 hinge = _shape->MemoryPoint(axis.c_str());
+                _a1Gear[_nA1Gear].SetCenterAll(hinge);
+            }
             _a1GearFront[_nA1Gear] = legs[leg].centre.Z() >= frontZ - 0.01f;
             _nA1Gear++;
         }
-        LOG_INFO(Graphics, "{}: Arma 1 gear, {} legs, {} parts animated", (const char*)GetName(), legs.size(), _nA1Gear);
+        if (!legs.empty())
+            LOG_INFO(Graphics, "{}: Arma 1 gear, {} legs, {} parts animated", (const char*)GetName(), legs.size(), _nA1Gear);
     }
 
     _altRadarIndicator.Init(_shape, par >> "IndicatorAltRadar");
@@ -257,8 +311,12 @@ void AirplaneType::InitShape()
         _gunPos = _shape->MemoryPoint("kulomet");
     }
 
-    _rocketLPos = _shape->MemoryPoint("L raketa");
-    _rocketRPos = _shape->MemoryPoint("P raketa");
+    // an Arma 1 class names its own gun point (the Su-34's "machinegun")
+    if (const ParamEntry* g = par.FindEntry("memoryPointGun"); g && !g->IsClass() && !g->IsArray())
+        if (const RStringB name = *g; name.GetLength() > 0 && _shape->MemoryPointExists(name))
+            _gunPos = _shape->MemoryPoint(name);
+    _rocketLPos = ConfigMemoryPoint(par, _shape, "memoryPointLRocket", "L raketa");
+    _rocketRPos = ConfigMemoryPoint(par, _shape, "memoryPointRRocket", "P raketa");
 
     _lDust = _shape->MemoryPoint("levy prach");
     _rDust = _shape->MemoryPoint("pravy prach");
@@ -1377,7 +1435,11 @@ void Airplane::Animate(int level)
     {
         Type()->_rotors[i].Rotate(_shape, _rotorPosition, level);
     }
-    if (_rotorSpeed < 1.0)
+    // a blur selection of a few vertices is an Arma proxy disc CWA does not draw: keep the
+    // turning blades instead of hiding them (as for helicopters)
+    const int blurSel = Type()->_rotorMove.GetSelection(level);
+    const bool realBlur = blurSel >= 0 && _shape->Level(level) && _shape->Level(level)->NamedSel(blurSel).Size() > 8;
+    if (_rotorSpeed < 1.0 || !realBlur)
     {
         Type()->_rotorMove.Hide(_shape, level);
     }
