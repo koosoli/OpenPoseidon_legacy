@@ -315,8 +315,10 @@ fn uwFilmHeight(uv: vec2<f32>, t: f32, aspect: f32) -> f32 {
     let cx = uv.x * 30.0 * aspect;
     let ci = floor(cx);
     let hc = uwFilmHash(vec2<f32>(ci, 7.0));
-    let wob = (uwFilmNoise(vec2<f32>(ci * 3.1, uv.y * 6.0)) - 0.5) * 0.5;
-    let track = smoothstep(0.32, 0.0, abs(fract(cx) - 0.5 - wob)) * step(hc, 0.3);
+    // the wobble and the track's soft edge stay inside the column: a track reaching the column's edge
+    // was cut there into a hard vertical seam
+    let wob = (uwFilmNoise(vec2<f32>(ci * 3.1, uv.y * 6.0)) - 0.5) * 0.24;
+    let track = smoothstep(0.16, 0.0, abs(fract(cx) - 0.5 - wob)) * step(hc, 0.3);
     let riv = track * smoothstep(drained - 0.5, drained, uv.y) * (1.0 - smoothstep(0.6, 3.2, t + hc));
     // beads where the sheet has gone: one per cell at most, a dome of radius r
     let g = vec2<f32>(uv.x * 26.0 * aspect, uv.y * 26.0);

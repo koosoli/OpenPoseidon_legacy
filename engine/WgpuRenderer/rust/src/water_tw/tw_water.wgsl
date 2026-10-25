@@ -37,6 +37,8 @@
 
 const FFT_SIZE: f32 = 256.0;
 const CASCADES: i32 = 4;
+// SEA-GLINTS: the share of the sun lobe its Poisson glints carry
+const GLINT_SHARE: f32 = 0.6;
 
 override linear: f32 = 1.0;
 
@@ -595,7 +597,7 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     // the cover the lace pattern below draws: everything but the caps in patch mode
 #ifdef TW_FOAM2
     // (TW-FOAM2) the old foam the caps no longer hold opens up into the lace
-    let laceCover = select(coverage, sat((foamSum + vertexFoam * 0.5 * activeNear) * tw.surface.z), capPatches);
+    let laceCover = select(coverage, sat((foamSum + vertexFoam * activeNear) * tw.surface.z), capPatches);
 #else
     let laceCover = select(coverage, sat(foamSum * tw.surface.z), capPatches);
 #endif
@@ -1090,8 +1092,11 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
                     k = max(lam + sqrt(lam) * sqrt(-2.0 * log(max(u, 1e-6))) * cos(6.2831853 * u2), 0.0);
                 }
                 let u3 = fract(u * 71.13 + 0.23);
-                // each glint's own brightness varies; capped so a sparkle stays inside half-float range
-                sunSpec = min(sunSpec * (k / lam) * mix(min(-log(max(u3, 1e-3)), 3.0) / 0.95, 1.0, min(k * 0.25, 1.0)), vec3<f32>(30000.0));
+                // each glint's own brightness varies. GLINT_SHARE of the lobe is carried by the glints,
+                // the rest stays the smooth highlight: at 720p-1440p pixels a fully discrete path broke
+                // into black holes with capped spikes near the eye. Mean-preserving either way.
+                let glints = (k / lam) * mix(min(-log(max(u3, 1e-3)), 3.0) / 0.95, 1.0, min(k * 0.25, 1.0));
+                sunSpec = min(sunSpec * mix(1.0, glints, GLINT_SHARE), vec3<f32>(30000.0));
             }
         }
 #else
