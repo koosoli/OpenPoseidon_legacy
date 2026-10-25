@@ -2162,6 +2162,19 @@ GameValue A3DynSimCoef(const GameState*, GameValuePar oper1)
 }
 } // namespace
 
+// Arma 2 has enableSimulation and simulationEnabled too (ea7b50aa moved them here from
+// GameStateExtA2's no-op entries, which left Arma 2's own missions without them: run 46,
+// 33 missions with "Unbekannter Operator enableSimulation"). GameStateExtA2 registers these.
+GameValue ArmaEnableSimulation(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return A3EnableSimulation(state, oper1, oper2);
+}
+
+GameValue ArmaSimulationEnabled(const GameState* state, GameValuePar oper1)
+{
+    return A3SimulationEnabled(state, oper1);
+}
+
 // unit getSlotItemName slot: the item in an inventory slot (611 the radio, 612 the GPS, ...); this
 // engine keeps no such slots, so none is named (BIS_fnc_kbTellLocal asks for the radio)
 GameValue A3GetSlotItemName(const GameState*, GameValuePar, GameValuePar)
