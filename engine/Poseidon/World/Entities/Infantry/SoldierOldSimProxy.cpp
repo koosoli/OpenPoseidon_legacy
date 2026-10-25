@@ -356,6 +356,26 @@ void ReportUnweightedProxy(const LODShapeWithShadow* shape, int level, const Pro
 }
 } // namespace
 
+Matrix4 Man::HeldModelPointCorrection(const ProxyObject& proxy, const WeaponType* weapon) const
+{
+    // DrawProxies draws the weapon with AnimateProxyMatrix * PlaceholderUndo * [reversed] *
+    // SourceOrigin. GetWeaponPoint used AnimateProxyMatrix alone, so on an Arma 1 rifle stored
+    // about its bounding centre the flash sat that far off the barrel (the owner: M16A4,
+    // M4A1 QDS, MK12 SPR "too far inward"). A reversed model's memory points are already in
+    // the turned frame, so its origin shift is turned with it (R * O * R, R its own inverse).
+    Matrix4 out = HeldModelPlaceholderUndo(proxy);
+    const LODShapeWithShadow* model = weapon ? weapon->_model.GetRef() : nullptr;
+    const Matrix4 origin = HeldModelSourceOrigin(model);
+    if (model && (model->Remarks() & REM_REVERSED))
+    {
+        const Matrix4 swap(MScale, -1, +1, -1);
+        out = out * (swap * origin * swap);
+    }
+    else
+        out = out * origin;
+    return out;
+}
+
 bool Man::HeldWeaponTransform(int level, const WeaponType* weapon, Matrix4& out) const
 {
     if (!weapon || !weapon->_model || level < 0 || level >= _shape->NLevels())

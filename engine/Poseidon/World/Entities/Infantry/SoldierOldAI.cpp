@@ -1005,7 +1005,8 @@ Vector3 Man::GetWeaponPoint(int weapon) const
         {
             Shape* proxyContainer = _shape->MemoryLevel();
             const ProxyObject& proxy = proxyContainer->Proxy(weaponIndex);
-            Matrix4 animTrans = AnimateProxyMatrix(_shape->FindMemoryLevel(), proxy);
+            Matrix4 animTrans = AnimateProxyMatrix(_shape->FindMemoryLevel(), proxy) *
+                                HeldModelPointCorrection(proxy, info);
 
             const MuzzleType* muzzle = GetMagazineSlot(weapon)._muzzle;
             Vector3Val pos = muzzle->_muzzlePos;
@@ -1060,7 +1061,8 @@ bool Man::GetWeaponCartridgePos(int weapon, Matrix4& pos, Vector3& vel) const
             Shape* proxyContainer = _shape->MemoryLevel();
             const ProxyObject& proxy = proxyContainer->Proxy(weaponIndex);
 
-            Matrix4 animTrans = AnimateProxyMatrix(_shape->FindMemoryLevel(), proxy);
+            Matrix4 animTrans = AnimateProxyMatrix(_shape->FindMemoryLevel(), proxy) *
+                                HeldModelPointCorrection(proxy, info);
 
             const MuzzleType* muzzle = GetMagazineSlot(weapon)._muzzle;
 
