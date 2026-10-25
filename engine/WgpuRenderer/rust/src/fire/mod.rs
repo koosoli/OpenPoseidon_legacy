@@ -47,7 +47,7 @@ fn mg_cycles() -> u32 {
     *V.get_or_init(|| std::env::var("WGR_FIRE_MG").ok().and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(0).min(4))
 }
 /// sweeps on the coarsest multigrid level (a few hundred cells)
-const MG_COARSE_SWEEPS: u32 = 8;
+const MG_COARSE_SWEEPS: u32 = 64;
 const STEP: f32 = 1.0 / 60.0;
 /// How long a smoke-only plume's box keeps the smoke in the air after its source stops (seconds;
 /// WGR_FIRE_SMOKE_LINGER). The 2001 puffs a smoke grenade drops live their cloudletDuration after it
