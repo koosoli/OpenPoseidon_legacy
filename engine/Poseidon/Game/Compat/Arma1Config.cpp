@@ -2572,6 +2572,24 @@ RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
         LOG_INFO(Mission, "{}: weapon '{}' fires with {}", Label(), name.Data(),
                  shot.empty() ? std::string("the CWA sound (no Arma 3 shot found)") : shot);
     }
+    // Arma 2: its own shot (the first sample of its first fire mode, at Arma 2's volume and
+    // pitch), its own empty click and magazine change, instead of the CWA carrier's
+    // (OP_A2_WEAPON_SOUNDS=0 keeps CWA's). The shot plays for every mode of the muzzle.
+    static const bool a2Sounds = [] {
+        const char* e = std::getenv("OP_A2_WEAPON_SOUNDS");
+        return !(e && *e == '0');
+    }();
+    if (Generation() == 2 && a2Sounds)
+    {
+        const std::string shot = Arma2WeaponShot(*a2);
+        if (!shot.empty())
+            text += "\t\ta3SoundShot[]={" + shot + "};\r\n";
+        for (const char* key : {"drySound", "reloadMagazineSound"})
+            if (const std::string t = Arma2SoundTriple(a2->FindEntry(key)); !t.empty())
+                text += std::string("\t\t") + key + "[]={" + t + "};\r\n";
+        LOG_INFO(Mission, "{}: weapon '{}' fires with {}", Label(), name.Data(),
+                 shot.empty() ? std::string("the CWA sound (no Arma 2 shot installed)") : shot);
+    }
     // OFP weapons often list magazines[]={this}: the magazine is the weapon class itself
     // (M60, RPGLauncher, LAWLauncher). Inherited, "this" would name the generated class,
     // which no soldier carries -- the weapon stayed empty (A1x_M240 with M60 belts: 0
