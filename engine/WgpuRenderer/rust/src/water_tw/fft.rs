@@ -1200,8 +1200,8 @@ impl OceanFft {
         timers.end(encoder, Region::TwOceanFft);
     }
 
-    /// The persistent foam field (N x N x CASCADES f32), for the cover measurement.
-    #[cfg(test)]
+    /// The foam buffer: the persistent foam field (N x N x CASCADES f32, the cover measurement reads
+    /// it), then TW-FOAM2's active-breaking field (the water shader's binding 30).
     pub fn foam_buffer(&self) -> &wgpu::Buffer {
         &self._buffers[3]
     }
