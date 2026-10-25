@@ -645,7 +645,7 @@ void MuzzleType::InitShape(const WeaponType* weapon)
 {
     const ParamEntry& cls = *_parClass;
 
-    RStringB oModelName = cls >> "modelOptics";
+    RStringB oModelName = _armaOptics.GetLength() > 0 ? RStringB(_armaOptics) : RStringB(cls >> "modelOptics");
     _opticsModel = oModelName.GetLength() > 0 ? Shapes.New(GetShapeName(oModelName), true, false) : nullptr;
     if (_opticsModel && _opticsModel->NLevels() > 0)
     {
@@ -696,6 +696,9 @@ void MuzzleType::InitShape(const WeaponType* weapon)
                 Vector3 vEnd = mem->NamedPosition(end);
                 _cartridgeOutVel = (vEnd - _cartridgeOutPos) * 50;
             }
+            _hasArmaEye = _armaCamera.GetLength() > 0 && mem->FindNamedSel(_armaCamera) >= 0;
+            if (_hasArmaEye)
+                _armaEyePos = mem->NamedPosition(_armaCamera);
         }
     }
 }
@@ -933,6 +936,34 @@ void WeaponType::Init(const char* name)
             take("opticsZoomInit", rifle->_opticsZoomInit);
             take("distanceZoomMin", rifle->_distanceZoomMin);
             take("distanceZoomMax", rifle->_distanceZoomMax);
+        }
+    // --arma1: each muzzle looks through the Arma 1 muzzle's own sight -- the ACOG rifles'
+    // rifle muzzle through optika_ACOG (Arma 1's 2D scope; the M16A4 ACOG GL's view was
+    // blocked by its own 3D model, the M4A1 M203 ACOG showed CWA's sight), the M203 from
+    // "GL eye" along the weapon
+    if (n > 1)
+        for (int i = 0; i < n; i++)
+        {
+            const Arma1Compat::Arma1Sight sight = Arma1Compat::Arma1MuzzleSight(GetName(), i);
+            if (!sight.valid)
+                continue;
+            MuzzleType* m = _muzzles[i];
+            if (!sight.optics.empty())
+            {
+                m->_armaOptics = sight.optics.c_str();
+                m->_optics3D = false;
+            }
+            else if (!sight.camera.empty())
+            {
+                m->_armaCamera = sight.camera.c_str();
+                m->_optics3D = true;
+            }
+            if (sight.zoomInit > 0)
+                m->_opticsZoomInit = sight.zoomInit;
+            if (sight.zoomMin > 0)
+                m->_opticsZoomMin = sight.zoomMin;
+            if (sight.zoomMax > 0)
+                m->_opticsZoomMax = sight.zoomMax;
         }
 }
 

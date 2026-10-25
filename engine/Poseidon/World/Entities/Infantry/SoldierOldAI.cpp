@@ -822,6 +822,8 @@ Matrix4 Man::GetWeaponRelTransform(int weapon) const
         const MagazineSlot& slot = GetMagazineSlot(weapon);
         Matrix4 held;
         const bool found = HeldWeaponTransform(Type()->_insideView, slot._weapon, held);
+        // the muzzle's own camera point (an Arma 1 M203's "GL eye"), else the weapon's "eye"
+        const Vector3 eyePos = slot._muzzle->_hasArmaEye ? slot._muzzle->_armaEyePos : slot._weapon->_eyePos;
         Vector3 dir = found ? held.Rotate(slot._muzzle->_muzzleDir) : VZero;
         const float len = dir.Size();
         // The first few per process: where the sights put the camera (T06's view through
@@ -830,7 +832,7 @@ Matrix4 Man::GetWeaponRelTransform(int weapon) const
         if (logged < 3)
         {
             logged++;
-            const Vector3 eye = found ? held.FastTransform(slot._weapon->_eyePos) : VZero;
+            const Vector3 eye = found ? held.FastTransform(eyePos) : VZero;
             LOG_INFO(Graphics,
                      "A2 3D sights: proxy {} eye {:.3f},{:.3f},{:.3f} dir {:.3f},{:.3f},{:.3f} (|muzzle dir| {:.3f}) up "
                      "{:.3f},{:.3f},{:.3f} model eye {:.3f},{:.3f},{:.3f} move {}",
@@ -849,7 +851,7 @@ Matrix4 Man::GetWeaponRelTransform(int weapon) const
         {
             Matrix4 trans;
             trans.SetDirectionAndUp(dir, held.DirectionUp());
-            trans.SetPosition(held.FastTransform(slot._weapon->_eyePos));
+            trans.SetPosition(held.FastTransform(eyePos));
             return trans;
         }
     }

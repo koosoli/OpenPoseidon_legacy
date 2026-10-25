@@ -2756,6 +2756,50 @@ const ParamEntry* Arma1ShotSound(const char* weaponClass, int muzzleIndex)
     return sound;
 }
 
+Arma1Sight Arma1MuzzleSight(const char* weaponClass, int muzzleIndex)
+{
+    Arma1Sight out;
+    if (!Active() || Generation() != 1 || !weaponClass || _strnicmp(weaponClass, "A1x_", 4) != 0 || muzzleIndex < 0)
+        return out;
+    static const bool off = [] {
+        const char* e = std::getenv("OP_A1_MUZZLE_SIGHTS");
+        return e && *e == '0';
+    }();
+    if (off)
+        return out;
+    const ParamEntry* a1 = FindConfigClass("CfgWeapons", weaponClass + 4);
+    const ParamEntry* muzzles = a1 && a1->IsClass() ? a1->FindEntry("muzzles") : nullptr;
+    if (!muzzles || !muzzles->IsArray() || muzzleIndex >= muzzles->GetSize())
+        return out;
+    const RString name = (RStringB)(*muzzles)[muzzleIndex];
+    const ParamEntry* m = _stricmp(name.Data(), "this") == 0 ? a1 : a1->FindEntry(name.Data());
+    if (!m || !m->IsClass())
+        return out;
+    const std::string optics = StringValue(*m, "modelOptics");
+    if (optics.size() > 1 && optics[0] == '\\')
+    {
+        std::string shape = optics.substr(1);
+        if (shape.size() < 4 || Lower(shape.substr(shape.size() - 4)) != ".p3d")
+            shape += ".p3d";
+        if (QIFStreamB::FileExist(shape.c_str()))
+            out.optics = optics;
+    }
+    if (out.optics.empty())
+        out.camera = StringValue(*m, "memoryPointCamera");
+    const auto num = [&](const char* key, float& v) {
+        if (const ParamEntry* e = m->FindEntry(key); e && !e->IsClass() && !e->IsArray())
+            v = (float)*e;
+    };
+    num("opticsZoomInit", out.zoomInit);
+    num("opticsZoomMin", out.zoomMin);
+    num("opticsZoomMax", out.zoomMax);
+    out.valid = !out.optics.empty() || !out.camera.empty();
+    if (out.valid)
+        LOG_INFO(Mission, "Arma 1: weapon '{}' muzzle {} ({}) sights {}", weaponClass, muzzleIndex, name.Data(),
+                 out.optics.empty() ? "3D from '" + out.camera + "'" : out.optics);
+    return out;
+}
+
 std::vector<RString> ListedGeneratedMagazines(const char* weaponClass)
 {
     std::vector<RString> out;

@@ -231,6 +231,13 @@ public:
 	// written by the Arma 2 weapon importer; _opticsModel stays as the fallback.
 	bool _optics3D = false;
 	float _opticsZoomInit = -1.0f; // initial aiming field of view; <= 0 keeps the engine default
+	// --arma1, a weapon of several muzzles: the Arma 1 muzzle's own sight. _armaOptics its 2D
+	// modelOptics (the M4A1 M203 ACOG's rifle muzzle: optika_ACOG), _armaCamera the memory
+	// point its 3D sight looks from (its M203: "GL eye"); both empty for every other weapon.
+	RString _armaOptics;
+	RString _armaCamera;
+	mutable Vector3 _armaEyePos;
+	mutable bool _hasArmaEye = false;
 
 	int _canBeLocked;
 	int _primary;

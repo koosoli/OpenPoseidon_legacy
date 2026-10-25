@@ -381,8 +381,11 @@ bool Man::HeldWeaponTransform(int level, const WeaponType* weapon, Matrix4& out)
     if (!weapon || !weapon->_model || level < 0 || level >= _shape->NLevels())
         return false;
     const ManType* type = Type();
+    // a pistol is drawn on the right hand's proxy (DrawProxies, ShowHandGun): without it the
+    // Arma 1 M9's 3D sight found no weapon and the view showed none (owner, 2026-10-25)
     const int wantMat = (weapon->_weaponType & MaskSlotPrimary)     ? type->_gunMatIndex
                         : (weapon->_weaponType & MaskSlotSecondary) ? type->_rpgMatIndex
+                        : (weapon->_weaponType & MaskSlotHandGun)   ? type->_rightHandMatIndex
                                                                     : -1;
     if (wantMat < 0)
         return false;
@@ -1167,7 +1170,7 @@ bool Man::Optics3DSelected() const
         return false;
     const MagazineSlot& slot = GetMagazineSlot(_currentWeapon);
     return slot._muzzle && slot._muzzle->_optics3D && slot._weapon && slot._weapon->_model &&
-           slot._weapon->_hasEyePos;
+           (slot._weapon->_hasEyePos || slot._muzzle->_hasArmaEye);
 }
 
 bool Man::LooksThroughSights(Person* person) const
