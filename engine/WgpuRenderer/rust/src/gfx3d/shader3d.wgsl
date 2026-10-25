@@ -781,7 +781,7 @@ fn earth_node_point(n: EarthNode, uv: vec2<f32>, h: f32) -> vec4<f32> {
 }
 // How much of the sun reaches the Earth ground at world point p [0, 1]: from the finer cascade where p is inside
 // it (with a margin to blend), else the coarser, else 1. The edge is softened over about a texel of rise.
-fn earth_shadow_cascade(c: vec4<f32>, offset: f32, p: vec3<f32>) -> f32 {
+fn earth_shadow_cascade(c: vec4<f32>, offset: f32, p: vec3<f32>, band_texel: f32) -> f32 {
     let t = (p.xz - c.xy) / c.z - 0.5;
     let base = floor(t);
     let f = t - base;
@@ -794,8 +794,8 @@ fn earth_shadow_cascade(c: vec4<f32>, offset: f32, p: vec3<f32>) -> f32 {
     let d = textureLoad(earth_shadow_map, o + i + vec2<i32>(1, 1), 0).x;
     let threshold = mix(mix(a, b, f.x), mix(cc, d, f.x), f.y);
     // a texel of rise (at this sun) of bias, so the threshold's own coarseness never shades a lit slope, and as
-    // much again of soft edge
-    let band = c.z * (0.5 + earth_shadow_place.info.x) + 2.0;
+    // much again of soft edge (band_texel: the texel that is measured in, see earth_terrain_lit)
+    let band = band_texel * (0.5 + earth_shadow_place.info.x) + 2.0;
     return smoothstep(threshold - band, threshold + band, p.y + band);
 }
 fn earth_terrain_lit(p: vec3<f32>) -> f32 {
@@ -805,14 +805,17 @@ fn earth_terrain_lit(p: vec3<f32>) -> f32 {
     let in0 = min(min(p.x - c0.x, p.z - c0.y), min(c0.x + c0.z * c0.w - p.x, c0.y + c0.z * c0.w - p.z));
     let in1 = min(min(p.x - c1.x, p.z - c1.y), min(c1.x + c1.z * c1.w - p.x, c1.y + c1.z * c1.w - p.z));
     if (in1 <= c1.z) { return 1.0; }
-    let far = mix(1.0, earth_shadow_cascade(c1, c1.w, p), smoothstep(c1.z, 8.0 * c1.z, in1));
+    // Near the fine cascade the coarse one's bias and soft edge narrow toward the fine one's (from its own 128 m
+    // texel 2 km out to two fine texels at the edge), and the two blend over 2 km: with each keeping its own, the
+    // coarse shadows stood smaller and softer, a faint seam 4 km from the camera (2026-10-25).
+    let coarse_band = mix(2.0 * c0.z, c1.z, smoothstep(0.0, 2000.0, -in0));
+    let far = mix(1.0, earth_shadow_cascade(c1, c1.w, p, coarse_band), smoothstep(c1.z, 8.0 * c1.z, in1));
     if (in0 <= c0.z) { return far; }
-    return mix(far, earth_shadow_cascade(c0, 0.0, p), smoothstep(c0.z, 64.0 * c0.z, in0));
+    return mix(far, earth_shadow_cascade(c0, 0.0, p, c0.z), smoothstep(c0.z, 128.0 * c0.z, in0));
 }
 fn earth_node_level(dist: f32, cos_lat: f32) -> f32 {
     return clamp(log2(40075016.0 * max(cos_lat, 0.01) / (256.0 * max(dist, 1.0) * EH_DETAIL)), 0.0, f32(EH_MAX_LEVEL));
 }
-// The ground vertex at (u, v) (heights from the pyramid at the zoom its distance asks for).
 // The ground vertex at (u, v) and its normal: heights from the pyramid at the zoom its distance asks for, the
 // normal from their slope on the globe's east and north there (the slope of the same four texels: three height
 // lookups a vertex for its neighbours' finite difference were 2026-10-24's 6 ms of GPU a frame).
