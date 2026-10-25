@@ -154,7 +154,7 @@ bool EarthHeightCache::Heights(const Key& key, std::vector<float>& heights, bool
 
 // One tile as the ground is drawn: the source heights with the patch builder's rules (EarthTerrainStream::WithSeaDepth,
 // EarthIslands::Height), Terrarium-encoded.
-bool EarthHeightCache::Bake(const Key& key, std::vector<uint8_t>& rgba)
+bool EarthHeightCache::Bake(const Key& key, std::vector<uint8_t>& rgba, float& lo, float& hi)
 {
     const auto [z, x, y] = key;
     std::vector<float> h;
@@ -258,6 +258,9 @@ bool EarthHeightCache::Bake(const Key& key, std::vector<uint8_t>& rgba)
     rgba.resize(size_t(Tile) * Tile * 4);
     for (size_t k = 0; k < h.size(); ++k)
         Encode(h[k], &rgba[k * 4]);
+    const auto [mn, mx] = std::minmax_element(h.begin(), h.end());
+    lo = *mn;
+    hi = *mx;
     return true;
 }
 
@@ -293,7 +296,7 @@ void EarthHeightCache::Run()
                     break; // re-plan with the newer wish list
             }
             Op op;
-            if (!Bake(key, op.rgba))
+            if (!Bake(key, op.rgba, op.lo, op.hi))
             {
                 if (_tiles->Failed(std::get<0>(key), std::get<1>(key), std::get<2>(key)))
                     _failed.insert(key);
@@ -329,6 +332,24 @@ void EarthHeightCache::Run()
     }
 }
 
+bool EarthHeightCache::HeightRange(int z, int x, int y, float& lo, float& hi) const
+{
+    if (z > MaxZoom)
+    {
+        x >>= (z - MaxZoom);
+        y >>= (z - MaxZoom);
+        z = MaxZoom;
+    }
+    for (; z >= 0; --z, x >>= 1, y >>= 1)
+        if (const auto it = _ranges.find({z, x, y}); it != _ranges.end())
+        {
+            lo = it->second.first;
+            hi = it->second.second;
+            return true;
+        }
+    return false;
+}
+
 void EarthHeightCache::Install()
 {
     if (!Ready())
@@ -345,13 +366,17 @@ void EarthHeightCache::Install()
             if (op.rgba.empty())
             {
                 if (auto it = _installed.find(op.key); it != _installed.end() && it->second == op.slot)
+                {
                     _installed.erase(it);
+                    _ranges.erase(op.key);
+                }
             }
             else
             {
                 const uint32_t sx = uint32_t(op.slot % SlotsPerRow) * Tile, sy = uint32_t(op.slot / SlotsPerRow) * Tile;
                 wgr_texture_update_region(_renderer, _atlas, 0, sx, sy, Tile, Tile, op.rgba.data(), uint32_t(op.rgba.size()));
                 _installed[op.key] = op.slot;
+                _ranges[op.key] = {op.lo, op.hi};
                 ++uploaded;
             }
             _lookupDirty = true;

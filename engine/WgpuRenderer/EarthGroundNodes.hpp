@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <memory>
 #include <set>
+#include <unordered_map>
 #include <vector>
 
 namespace Poseidon
@@ -29,9 +30,21 @@ class EarthGroundNodes
     // Main thread, every frame (not at the moon): select, ask for data, install it, submit the draws. Camera in the
     // origin's world frame; `groundY` the ground's world y under it (nodes are measured as if at that height: a
     // camera on a plateau is near its ground, not 3 km over the sea); `horizon` the radius the ground is drawn to (m).
+    // The main view, for dropping nodes it cannot see (Earth ground draws only into it: not a shadow caster).
+    // Directions are world unit vectors; tanX, tanY the half-angle tangents (Camera::Left, Top). `valid` false: draw all.
+    struct View
+    {
+        bool valid = false;
+        double forward[3], up[3], aside[3];
+        double tanX, tanY;
+    };
+    // `gameplayWindow`: the installed terrain heightmap is this origin's patch -- inside it the nodes take its heights
+    // (shader3d conform mode 3.5), so the drawn ground is the ground feet stand on.
     void Draw(double cameraX, double cameraY, double cameraZ, double groundY, double originLatitude, double originLongitude,
-              double horizon);
+              double horizon, bool gameplayWindow, const View& view);
     size_t LastNodes() const { return _lastNodes; }
+    // Could node `n` be in `view`? Its middle at (cx, cz) and its heights from the data under it.
+    bool Visible(const View& view, int z, int x, int y, double cx, double cz, double width);
 
   private:
     struct Node
@@ -66,6 +79,7 @@ class EarthGroundNodes
     std::vector<Column> _columns[20];
     std::vector<Node> _nodes;
     std::vector<EarthHeightCache::Key> _wanted;
+    std::unordered_map<uint64_t, std::pair<float, float>> _ranges; // this frame's HeightRange answers, by data tile
     size_t _lastNodes = 0;
     std::chrono::steady_clock::time_point _statSince{};
     int _statFrames = 0;

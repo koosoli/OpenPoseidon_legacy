@@ -23,7 +23,7 @@ enable wgpu_binding_array;
 #import tree_snow::{tree_snow_height, tree_snow_coverage}
 // Group(4) terrain heightmap + surface_y, shared with the shadow depth pass.
 // surface_grad tilts conformed veg normals to follow the ground slope (color pass only).
-#import conform::{surface_y, surface_grad, surface_y_raster, hm_params, snow_depth, snow_deficit, rigid_ground_fragment, cave_daylight}
+#import conform::{surface_y, surface_grad, bare_surface_y, bare_surface_valid, surface_y_raster, hm_params, snow_depth, snow_deficit, rigid_ground_fragment, cave_daylight}
 
 // BEGIN_MUZZLE_FLASH_HELPERS (actual helper exercised by the GPU probe)
 // The warmed sheet encodes its heat in chroma (MuzzleFlashAppearance.hpp: blue/red =
@@ -1126,10 +1126,34 @@ fn vs_main(
         let muv = (g - fract(g * 0.5) * 2.0 * k) / 32.0;
         let v = earth_node_vertex(n, muv);
         var p = v.pos;
-        let nrm = v.normal;
+        var nrm = v.normal;
+        if (obj.conform2.z > 3.25) {
+            // Inside the gameplay window (the patch heightmap, installed for this origin: mode 3.5) the ground is the
+            // one feet stand on -- Landscape::SurfaceY's triangles -- not the pyramid's z15 texels, which differ from it
+            // by a median 0.65 m on Alpine slopes (2026-10-25). Blended back to the pyramid over the window's last
+            // 40 cells, as the patch's own near mesh blended into its horizon.
+            let wxz = p.xz + frame.cam_pos.xz;
+            if (bare_surface_valid(wxz)) {
+                let t = (wxz - hm_params.origin) / hm_params.terrain_grid;
+                let last = vec2<f32>(f32(hm_params.hm_width - 1u), f32(hm_params.hm_height - 1u));
+                let edge = min(min(t.x, t.y), min(last.x - t.x, last.y - t.y));
+                let w = smoothstep(2.0, 40.0, edge);
+                if (w > 0.0) {
+                    p.y = mix(p.y, bare_surface_y(wxz) - frame.cam_pos.y, w);
+                    // the normal from a cell either side (smooth, as the patch mesh's vertex normals were): a
+                    // triangle's own slope showed every 6.25 m cell as a facet
+                    let e = hm_params.terrain_grid;
+                    let gx = bare_surface_y(wxz + vec2<f32>(e, 0.0)) - bare_surface_y(wxz - vec2<f32>(e, 0.0));
+                    let gz = bare_surface_y(wxz + vec2<f32>(0.0, e)) - bare_surface_y(wxz - vec2<f32>(0.0, e));
+                    nrm = normalize(mix(nrm, normalize(vec3<f32>(-gx, 2.0 * e, -gz)), w));
+                }
+            }
+        }
         if (pos.y > 0.5) {
-            // a skirt vertex (EarthGroundNodes): half a grid cell below its edge, hiding the hairline between nodes
-            p.y = p.y - n.d_lon * EH_RADIUS * n.cos_p0 / 64.0;
+            // a skirt vertex (EarthGroundNodes): a metre below its edge, hiding the hairline between nodes. Half a
+            // grid cell (12 m on a zoom-15 node) stood as a dark wall in clear shallow sea wherever two nodes'
+            // floors met with a small step (Helgoland, 2026-10-25).
+            p.y = p.y - 1.0;
         }
         // imagery: zoom-19 mercator offsets from the node's corner (the tile-mode ground shader's off19)
         let off19 = muv * f32(1 << u32(max(19 - n.nz, 0)));

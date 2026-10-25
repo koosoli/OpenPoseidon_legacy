@@ -881,6 +881,7 @@ bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
     // The FFI consumes/copies this slice synchronously. Borrowing the existing
     // heightfield avoids a 256 MiB temporary (plus STL alignment) on 8192 grids.
     wgr_terrain_set_heightmap(_renderer, land.HeightmapData(), &_params);
+    _earthPatchHeightmap = false;
     LOG_INFO(Graphics, "Wgpu heightfield upload: {}x{} grid={}m data={}", range, range,
              land.GetTerrainGrid(), land.HeightmapData() != nullptr);
     _uploadedHeightRevision = land.HeightRevision();
@@ -4507,6 +4508,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             EngineWgpu::AcquireProducerWindow("Earth moon heightmap");
             wgr_terrain_set_heightmap(_renderer, below.data(), &_params);
             _earthMoonHeightmap = true;
+            _earthPatchHeightmap = false;
         }
         _engine.SubmitEarthHorizon(_earthGlobeMesh,_earthGlobeIndices,_earthGlobeTexture,2,false,false,
             std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::quiet_NaN(),true);
@@ -4523,7 +4525,19 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         const double groundY=ground?double(ground->height):std::numeric_limits<double>::quiet_NaN();
         const double altitude=Earth::CameraAltitude(cam.X(),cam.Y(),cam.Z());
         _earthGround->Draw(cam.X(),cam.Y(),cam.Z(),groundY,origin.latitude,origin.longitude,
-                           double(Earth::HorizonRadius(float(std::max(altitude-(std::isfinite(groundY)?groundY:0.0),0.0)))));
+                           double(Earth::HorizonRadius(float(std::max(altitude-(std::isfinite(groundY)?groundY:0.0),0.0)))),
+                           []{static const bool on=[]{const char* v=std::getenv("POSEIDON_EARTH_NEAR_BLEND");return !(v && v[0]=='0');}();return on;}() &&
+                           _earthPatchHeightmap && _earthPatch && _earthPatch->originRevision==origin.revision,
+                           [&]{
+                               EarthGroundNodes::View v;
+                               const Vector3 d=camera.Direction(),u=camera.DirectionUp(),a=camera.DirectionAside();
+                               v.valid=camera.Left()>0 && camera.Top()>0 && camera.Left()<20 && camera.Top()<20;
+                               v.forward[0]=d.X();v.forward[1]=d.Y();v.forward[2]=d.Z();
+                               v.up[0]=u.X();v.up[1]=u.Y();v.up[2]=u.Z();
+                               v.aside[0]=a.X();v.aside[1]=a.Y();v.aside[2]=a.Z();
+                               v.tanX=camera.Left();v.tanY=camera.Top();
+                               return v;
+                           }());
     }
     // Orbit needs only the fixed global overview. Do not download finer terrain
     // that covers less than one pixel at this distance.
@@ -4630,6 +4644,20 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             if(_earthFarTexture){wgr_texture_destroy(_renderer,_earthFarTexture);_earthFarTexture=0;}
         }
         wgr_terrain_set_heightmap(_renderer, p.heights.data(), &_params);
+        _earthPatchHeightmap = true;
+        // Tidewater's sea floor beyond the window (its depth colour): again when the window has gone an eighth of the
+        // far grid's span, or the origin moved
+        static const bool farFloorOn=[]{const char* v=std::getenv("POSEIDON_EARTH_FAR_FLOOR");return !(v && v[0]=='0');}();
+        if(farFloorOn && !p.farFloor.empty())
+        {
+            const float span=p.farCell*float(EarthTerrainStream::Patch::FarFloorSamples-1);
+            if(p.originRevision!=_earthFarFloorRevision || std::abs(p.farX-_earthFarFloorX)>span/8 || std::abs(p.farZ-_earthFarFloorZ)>span/8 ||
+               std::abs(p.farCell-_earthFarFloorCell)>0.01f*p.farCell)
+            {
+                wgr_water_set_far_floor(_renderer,p.farFloor.data(),uint32_t(EarthTerrainStream::Patch::FarFloorSamples),p.farX,p.farZ,p.farCell);
+                _earthFarFloorRevision=p.originRevision;_earthFarFloorX=p.farX;_earthFarFloorZ=p.farZ;_earthFarFloorCell=p.farCell;
+            }
+        }
         const auto extrema = std::minmax_element(p.heights.begin(),p.heights.end());
         LOG_INFO(Graphics, "Earth terrain patch {}: origin [{},{}], centre [{},{}], height {}..{}m, downloads {}, disk hits {}, worker {}s, geographic origin [{},{}], revision {}",
             p.generation,p.x,p.z,p.latitude,p.longitude,*extrema.first,*extrema.second,p.downloads,p.cacheHits,p.seconds,

@@ -6857,6 +6857,7 @@ impl Renderer {
                     self.terrain.heightmap_gen(),
                     &self.terrain.conform_params(),
                 );
+                self.water.apply_far_floor(&self.device, &self.queue);
                 if let Some(cam) = self.gfx3d.camera_bind() {
                     // WTR-002 — the water draw includes the in-shader SSR + refraction cost
                     // (they are fragment work, not separable passes; see gpu_timers.rs).

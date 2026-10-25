@@ -164,8 +164,49 @@ void EarthGroundNodes::Select(int z, int x, int y, std::vector<Node>& out)
     out.push_back({z, x, y, distance, radius});
 }
 
+bool EarthGroundNodes::Visible(const View& view, int z, int x, int y, double cx, double cz, double width)
+{
+    static const bool cull = [] { const char* v = std::getenv("POSEIDON_EARTH_NODE_CULL"); return !(v && v[0] == '0'); }();
+    if (!cull || !view.valid || width > 40000.0)
+        return true; // the globe-scale nodes: their curvature outruns a box this simple
+    // the data tile under it (nodes finer than the data share one): its heights, asked once a frame
+    const int shift = std::max(z - EarthHeightCache::MaxZoom, 0);
+    const uint64_t key = (uint64_t(z - shift) << 58) | (uint64_t(uint32_t(x >> shift)) << 29) | uint64_t(uint32_t(y >> shift));
+    auto [it, fresh] = _ranges.try_emplace(key, -11000.0f, 9000.0f);
+    if (fresh)
+        _heights->HeightRange(z - shift, x >> shift, y >> shift, it->second.first, it->second.second);
+    const float lo = it->second.first, hi = it->second.second;
+    // the node as a vertical segment through its middle, its heights less the curvature drop there, widened by its
+    // half diagonal (and the drop's change across it)
+    const double drop = Earth::CurvatureDrop(cx, cz);
+    const double r = 0.75 * width + width * width / (4.0 * Earth::Radius) + 50.0;
+    const double rel[2][3] = {{cx - _cam[0], double(lo) - drop - _cam[1], cz - _cam[2]},
+                              {cx - _cam[0], double(hi) - drop - _cam[1], cz - _cam[2]}};
+    const auto dot = [](const double* a, const double* b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+    double f[2], s[2], u[2];
+    for (int i = 0; i < 2; ++i)
+    {
+        f[i] = dot(rel[i], view.forward);
+        s[i] = dot(rel[i], view.aside);
+        u[i] = dot(rel[i], view.up);
+    }
+    // the near side, then the four sides (inward normals, normalised), each with a 10% wider view
+    if (std::max(f[0], f[1]) < -r)
+        return false;
+    const double tx = view.tanX * 1.1, ty = view.tanY * 1.1;
+    const double nx = 1.0 / std::sqrt(1.0 + tx * tx), ny = 1.0 / std::sqrt(1.0 + ty * ty);
+    for (int sign = -1; sign <= 1; sign += 2)
+    {
+        if (std::max((tx * f[0] + sign * s[0]) * nx, (tx * f[1] + sign * s[1]) * nx) < -r)
+            return false;
+        if (std::max((ty * f[0] + sign * u[0]) * ny, (ty * f[1] + sign * u[1]) * ny) < -r)
+            return false;
+    }
+    return true;
+}
+
 void EarthGroundNodes::Draw(double cameraX, double cameraY, double cameraZ, double groundY, double originLatitude,
-                            double originLongitude, double horizon)
+                            double originLongitude, double horizon, bool gameplayWindow, const View& view)
 {
     if (!Ready())
         return;
@@ -225,8 +266,22 @@ void EarthGroundNodes::Draw(double cameraX, double cameraY, double cameraZ, doub
     const float sinP0 = float(std::sin(p0));
     std::vector<EngineWgpu::EarthNodeDraw> draws;
     draws.reserve(nodes.size());
+    size_t culled = 0;
+    _ranges.clear();
     for (const auto& n : nodes)
     {
+        {
+            // its middle, as Select placed it
+            const Row& row = RowOf(n.z, n.y);
+            const Column& column = ColumnOf(n.z, n.x);
+            const double cx = Earth::Anchor + Earth::Radius * (row.cosP * column.sinDl);
+            const double cz = Earth::Anchor + Earth::Radius * (_cosP0 * row.sinP - _sinP0 * row.cosP * column.cosDl);
+            if (!Visible(view, n.z, n.x, n.y, cx, cz, row.width))
+            {
+                ++culled;
+                continue; // its data is still asked for above: turning round finds it resident
+            }
+        }
         const double scale = double(1 << n.z);
         const double yNorth = Pi * (1.0 - 2.0 * n.y / scale);
         const double latNorth = std::atan(std::sinh(yNorth));
@@ -247,7 +302,7 @@ void EarthGroundNodes::Draw(double cameraX, double cameraY, double cameraZ, doub
         draw.conform[7] = float(morphEnd);
         draw.conform[8] = Bits(n.x);
         draw.conform[9] = Bits(n.y);
-        draw.conform[10] = 3.0f;
+        draw.conform[10] = gameplayWindow ? 3.5f : 3.0f;
         draw.conform[11] = float(n.z);
         draw.ref19[0] = float(double(n.x) * double(1 << (19 - n.z)));
         draw.ref19[1] = float(double(n.y) * double(1 << (19 - n.z)));
@@ -270,9 +325,9 @@ void EarthGroundNodes::Draw(double cameraX, double cameraY, double cameraZ, doub
     if (start - _statSince > std::chrono::seconds(5))
     {
         LOG_INFO(Graphics,
-                 "Earth ground nodes: {} drawn, {:.3f} ms a frame (max {:.2f}) over {} frames: select {:.3f}, tiles {:.3f}, "
+                 "Earth ground nodes: {} selected, {} out of view, {:.3f} ms a frame (max {:.2f}) over {} frames: select {:.3f}, tiles {:.3f}, "
                  "want {:.3f}, install {:.3f}, submit {:.3f}",
-                 nodes.size(), _statMs / _statFrames, _statMax, _statFrames, _statPart[0] / _statFrames,
+                 nodes.size(), culled, _statMs / _statFrames, _statMax, _statFrames, _statPart[0] / _statFrames,
                  _statPart[1] / _statFrames, _statPart[2] / _statFrames, _statPart[3] / _statFrames, _statPart[4] / _statFrames);
         std::fill(std::begin(_statPart), std::end(_statPart), 0.0);
         _statSince = start;

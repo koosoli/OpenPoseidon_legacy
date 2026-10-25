@@ -77,3 +77,29 @@ imagery atlas, which waited for its meshes' UVs, now goes in at once). Measured 
   the ground. Neighbouring nodes part by a hair along their shared edge (different f32 origins): skirts hide it.
 
 Phase 4 (terrain shadows and sky visibility from the pyramid, the patch gameplay-only) is next.
+
+## 2026-10-25 night: the ground feet stand on, view culling, the sea beyond the window
+
+- **Feet:** the pyramid's z15 texels and the gameplay patch (z14 on a 6.25 m grid) differed by a median 0.65 m near
+  the Alps origin (0.25 m on 10-25 degree slopes, 0.9 m over 40, up to 1.9 m; measured offline from the tile caches,
+  scratchpad `feet_gap.py`). Inside the gameplay window the nodes now take the patch heightmap's own surface
+  (`bare_surface_y`, Landscape::SurfaceY's triangles) and a normal from a cell either side, blended into the pyramid
+  over the window's last 40 cells -- conform mode 3.5, only while the installed heightmap is this origin's patch
+  (`POSEIDON_EARTH_NEAR_BLEND=0` turns it off). Soldiers on Alpine slopes stand on the drawn snow.
+- **Culling:** nodes outside the view are not submitted (their data is still asked for, so turning round finds it
+  resident). A node is a vertical segment from its data tile's lowest to highest height (`EarthHeightCache::
+  HeightRange`), widened by its half diagonal. Earth ground is not a shadow caster, so this is exact. About two thirds
+  of the nodes go. `POSEIDON_EARTH_NODE_CULL=0` draws all.
+- **The sea beyond the window:** Tidewater's floor outside the heightmap's window was a 200 m stand-in, which drew the
+  window as a bright rectangle on a shallow sea (Helgoland at 2.5 km). The patch's horizon heights now go to the
+  water as a 512 x 512 grid (`wgr_water_set_far_floor`, `POSEIDON_EARTH_FAR_FLOOR=0` off), handed over inside the
+  window's last 400 m.
+- **Skirts** hang 1 m, not half a grid cell.
+- **Flight (Alps, `-FlyPerf`, nothing else running):** GPU median 7.3-7.6 ms, p95 10.8 (patch meshes 11.3 / 15.4);
+  CPU average 2.1 ms (meshes 1.65), worst frame 51-63 ms (meshes 110). The first run after a shader change compiles
+  pipelines at runtime and hitches up to 1 s; the second run does not.
+- **Checked:** the origin re-centring in fast flight, teleports (Helgoland, Grand Canyon, Everest, back), the deep
+  Atlantic floor (-4.9 km at 45 N 10 W).
+- **Known, not fixed:** above 8 km the Earth sea is not drawn and the sea is the imagery, whose zooms (Esri, and EOX
+  where Esri fails) disagree about the sea's colour: rings round the camera. A faint dark diagonal in the clear
+  shallow sea off Helgoland's dune predates tonight.

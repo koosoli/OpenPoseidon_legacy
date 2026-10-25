@@ -2780,6 +2780,20 @@ pub unsafe extern "C" fn wgr_earth_heights(renderer: *mut WgrRenderer, atlas: u6
 }
 
 /// # Safety
+/// `renderer` must be a live pointer from `wgr_create`, or null; `heights` must point to `n * n` floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_water_set_far_floor(renderer: *mut WgrRenderer, heights: *const f32, n: u32,
+                                                 origin_x: f32, origin_z: f32, cell: f32) {
+    if renderer.is_null() || heights.is_null() || n < 2 {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let data = unsafe { std::slice::from_raw_parts(heights, (n as usize) * (n as usize)) };
+        unsafe { &mut *renderer }.water.set_far_floor(data, n, [origin_x, origin_z], cell);
+    }));
+}
+
+/// # Safety
 /// `renderer` must be a live pointer from `wgr_create`, or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wgr_texture_destroy(renderer: *mut WgrRenderer, id: u64) {

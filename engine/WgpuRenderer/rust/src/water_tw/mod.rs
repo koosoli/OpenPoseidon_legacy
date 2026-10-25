@@ -565,6 +565,11 @@ pub struct Tidewater {
     depth_view: wgpu::TextureView,
     env_view: wgpu::TextureView,
     heightmap_view: wgpu::TextureView,
+    // (OP) Whole World: the sea floor beyond the terrain heightmap's window (set_far_floor), a coarse grid of
+    // world heights; its uniform is (origin x, origin z, cell, samples a side; 0 = none).
+    far_floor_view: wgpu::TextureView,
+    far_floor_ubo: wgpu::Buffer,
+    far_floor_gen: u64,
     layout: wgpu::BindGroupLayout,
     bind: wgpu::BindGroup,
     bind_dirty: bool,
@@ -662,6 +667,14 @@ impl Tidewater {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let far_floor_view = dummy_view(device, "tw_dummy_far_floor", wgpu::TextureFormat::R32Float);
+        let far_floor_ubo = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tw_far_floor"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&far_floor_ubo, 0, bytemuck::bytes_of(&[0.0f32; 4]));
         let conform_ubo = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("tw_conform"),
             size: std::mem::size_of::<crate::terrain::TerrainConformParams>() as u64,
@@ -794,6 +807,9 @@ impl Tidewater {
                 tex(25, D::D2Array, flt),
                 tex(26, D::D2Array, flt),
                 tex(27, D::D2Array, flt),
+                // (OP) Whole World: the sea floor beyond the heightmap's window, and its placement
+                tex(28, D::D2, S::Float { filterable: false }),
+                uniform(29),
             ],
         });
 
@@ -930,6 +946,9 @@ impl Tidewater {
             depth_view,
             env_view,
             heightmap_view,
+            far_floor_view,
+            far_floor_ubo,
+            far_floor_gen: 0,
             layout,
             bind_dirty: true,
             caustics_skip: false,
@@ -1015,6 +1034,8 @@ impl Tidewater {
                 wgpu::BindGroupEntry { binding: 25, resource: R::TextureView(self.wake.display_view()) },
                 wgpu::BindGroupEntry { binding: 26, resource: R::TextureView(self.wake.near_view()) },
                 wgpu::BindGroupEntry { binding: 27, resource: R::TextureView(self.wake.aer_view()) },
+                wgpu::BindGroupEntry { binding: 28, resource: R::TextureView(&self.far_floor_view) },
+                wgpu::BindGroupEntry { binding: 29, resource: self.far_floor_ubo.as_entire_binding() },
             ],
         });
         self.wake.rebuild_bind(device, &self.heightmap_view, &self.conform_ubo);
@@ -1102,6 +1123,20 @@ impl Tidewater {
             self.heightmap_view = heightmap.clone();
             self.rebuild_bind(device);
         }
+    }
+
+    /// (OP) Whole World: the sea floor beyond the terrain heightmap's window -- `n` x `n` world heights from
+    /// `origin` (x, z) every `cell` metres (`WaterBackend::set_far_floor`; `generation` 0 or a repeat is a no-op).
+    pub fn set_far_floor(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, heights: &[f32], n: u32,
+                         origin: [f32; 2], cell: f32, generation: u64) {
+        if generation == self.far_floor_gen || n < 2 || heights.len() < (n * n) as usize {
+            return;
+        }
+        self.far_floor_gen = generation;
+        self.far_floor_view = data_texture(device, queue, "tw_far_floor", wgpu::TextureFormat::R32Float, (n, n), 4,
+                                           bytemuck::cast_slice(&heights[..(n * n) as usize]));
+        queue.write_buffer(&self.far_floor_ubo, 0, bytemuck::bytes_of(&[origin[0], origin[1], cell, n as f32]));
+        self.rebuild_bind(device);
     }
 
     /// The CPU heightmap for the shore field (see `WaterBackend::set_terrain_heights`).

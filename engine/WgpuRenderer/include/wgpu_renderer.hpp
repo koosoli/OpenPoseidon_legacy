@@ -2594,6 +2594,10 @@ extern "C"
     /* Whole world elevation pyramid (docs/earth-elevation-pyramid.md): its RGBA8 Terrarium-encoded height atlas and
      * lookup, read by the 3D vertex shader's conform mode 3. 0, 0 unbinds. */
     WGR_API void wgr_earth_heights(WgrRenderer* renderer, WgrTexture atlas, WgrTexture lookup);
+    /* Whole world: the sea floor beyond the terrain heightmap's window, for Tidewater's depth colour -- n x n world
+     * heights (height less the curvature drop) from (originX, originZ) every `cell` metres. Copied. */
+    WGR_API void wgr_water_set_far_floor(WgrRenderer* renderer, const float* heights, uint32_t n, float originX,
+                                         float originZ, float cell);
 
     WGR_API void wgr_texture_destroy(WgrRenderer* renderer, WgrTexture id);
 

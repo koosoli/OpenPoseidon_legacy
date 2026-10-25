@@ -565,6 +565,36 @@ void EarthTerrainStream::Run()
                     patch->horizonHeights[index] = height - float(Earth::CurvatureDrop(wx,wz));
                 }
             }
+            if (_epoch.load() != _activeEpoch) { handled = version; continue; }
+            {
+                // The far floor: the horizon heights (geometrically spaced) resampled onto a regular grid
+                constexpr int N = Patch::FarFloorSamples;
+                std::vector<double> offsets(Earth::HorizonSamples);
+                for (int i = 0; i < Earth::HorizonSamples; ++i)
+                    offsets[i] = Earth::HorizonOffset(i, radius, halfWindow);
+                const double first = offsets.front(), span = offsets.back() - first;
+                patch->farCell = float(span / (N - 1));
+                patch->farX = float(cx * stride + first);
+                patch->farZ = float(cz * stride + first);
+                std::vector<std::pair<int, float>> axis(N);
+                for (int i = 0; i < N; ++i)
+                {
+                    const double o = first + span * i / (N - 1);
+                    const int k = std::clamp(int(std::upper_bound(offsets.begin(), offsets.end(), o) - offsets.begin()) - 1, 0,
+                                             Earth::HorizonSamples - 2);
+                    axis[i] = {k, float(std::clamp((o - offsets[k]) / std::max(offsets[k + 1] - offsets[k], 1e-6), 0.0, 1.0))};
+                }
+                patch->farFloor.resize(size_t(N) * N);
+                const auto at = [&](int x, int z) { return patch->horizonHeights[size_t(z) * Earth::HorizonSamples + x]; };
+                for (int z = 0; z < N; ++z)
+                    for (int x = 0; x < N; ++x)
+                    {
+                        const auto [ix, fx] = axis[x];
+                        const auto [iz, fz] = axis[z];
+                        const float a = at(ix, iz), b = at(ix + 1, iz), c = at(ix, iz + 1), d = at(ix + 1, iz + 1);
+                        patch->farFloor[size_t(z) * N + x] = (a + (b - a) * fx) * (1 - fz) + (c + (d - c) * fx) * fz;
+                    }
+            }
             patch->downloads = _downloads - downloads; patch->cacheHits = _cacheHits - hits;
             patch->seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             TrimDisk();

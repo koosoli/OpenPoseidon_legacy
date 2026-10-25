@@ -38,6 +38,11 @@ class EarthTerrainStream
         int horizonZoom;
         std::vector<float> horizonHeights;
         std::vector<uint8_t> horizonValid;
+        // The horizon heights on a regular FarFloorSamples^2 grid from (farX, farZ) every farCell metres: the sea
+        // floor Tidewater's colour reads beyond the near window (wgr_water_set_far_floor).
+        static constexpr int FarFloorSamples = 512;
+        std::vector<float> farFloor;
+        float farX = 0, farZ = 0, farCell = 0;
     };
     EarthTerrainStream();
     ~EarthTerrainStream();

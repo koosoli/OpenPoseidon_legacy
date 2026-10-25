@@ -48,6 +48,8 @@ class EarthHeightCache
     void Install();
     // Is this tile in the atlas (installed)? Main thread.
     bool Resident(const Key& key) const { return _installed.count(key) != 0; }
+    // The heights under tile (z, x, y) from it or its nearest installed ancestor: false when none is. Main thread.
+    bool HeightRange(int z, int x, int y, float& lo, float& hi) const;
 
     static void WindowOrigin(int level, double latitude, double longitude, int& ox, int& oy);
 
@@ -57,9 +59,10 @@ class EarthHeightCache
         int slot = -1;
         Key key{};
         std::vector<uint8_t> rgba; // Tile x Tile Terrarium-encoded
+        float lo = 0, hi = 0;      // its lowest and highest height
     };
     void Run();
-    bool Bake(const Key& key, std::vector<uint8_t>& rgba);
+    bool Bake(const Key& key, std::vector<uint8_t>& rgba, float& lo, float& hi);
     bool Heights(const Key& key, std::vector<float>& heights, bool network); // decoded source heights, Tile x Tile
 
     WgrRenderer* _renderer = nullptr;
@@ -85,6 +88,7 @@ class EarthHeightCache
 
     // main
     std::map<Key, int> _installed;
+    std::map<Key, std::pair<float, float>> _ranges; // installed tiles' lowest and highest heights
     double _latitude = 0, _longitude = 0;
     int _origins[Levels][2] = {};
     bool _lookupDirty = true;

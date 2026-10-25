@@ -245,6 +245,8 @@ class TerrainWgpu : public ITerrainRenderer
     bool UploadEarthGrass(const EarthTerrainStream::Patch& patch,const struct EarthSurfaceStreamAtlasRef& atlas);
     bool _earthGrass=false;
     bool _earthMoonHeightmap=false; // the flat heightmap of the moon frame is uploaded
+    uint64_t _earthFarFloorRevision=~0ull;float _earthFarFloorX=0,_earthFarFloorZ=0,_earthFarFloorCell=0; // last far sea floor sent
+    bool _earthPatchHeightmap=false; // the installed heightmap is _earthPatch's (EarthGroundNodes takes its heights)
     // The atlas window whose UVs the horizon mesh carries (0: plain UVs): rebuilt once per window.
     uint64_t _earthHorizonUvGeneration=0,_earthHorizonUvRevision=0;
     // Imagery first: a final atlas has been installed since the last relocation (TerrainWgpu.cpp).

@@ -69,6 +69,10 @@ struct OceanParams {
 @group(1) @binding(19) var<storage, read> breakersCrest: array<vec4<f32>>; // breaker crest records (tw_lip.wgsl)
 @group(1) @binding(23) var causticsFineTex: texture_2d<f32>;  // W5b caustics (caustics.rs)
 @group(1) @binding(24) var causticsBroadTex: texture_2d<f32>;
+// (OP) Whole World: the sea floor beyond the heightmap's window (TwWater::set_far_floor): world heights on a coarse
+// grid, placed by (origin x, origin z, cell, samples a side; 0 = none).
+@group(1) @binding(28) var farFloorTex: texture_2d<f32>;
+@group(1) @binding(29) var<uniform> farFloor: vec4<f32>;
 
 // Earth presentation belongs to the material: the wake kernel also consumes
 // tw_common.wgsl, but deliberately has no TwSurface binding.
@@ -92,6 +96,21 @@ fn earthMaterialCorner(ix: i32, iz: i32) -> f32 {
     // WithSeaDepth) and keep low land dry, so the old -5..0.5 m 'open sea, 200 m down' stand-in is gone here too.
     return hm_load(corner.x, corner.y);
 }
+// The far floor at xz: (height, 1), or (0, 0) outside it or without one.
+fn farFloorAt(xz: vec2<f32>) -> vec2<f32> {
+    let n = farFloor.w;
+    if (n < 2.0) { return vec2<f32>(0.0); }
+    let t = (xz - farFloor.xy) / max(farFloor.z, 1e-3);
+    if (any(t < vec2<f32>(0.0)) || any(t > vec2<f32>(n - 1.0))) { return vec2<f32>(0.0); }
+    let base = min(floor(t), vec2<f32>(n - 2.0));
+    let f = t - base;
+    let i = vec2<i32>(base);
+    let a = textureLoad(farFloorTex, i, 0).x;
+    let b = textureLoad(farFloorTex, i + vec2<i32>(1, 0), 0).x;
+    let c = textureLoad(farFloorTex, i + vec2<i32>(0, 1), 0).x;
+    let d = textureLoad(farFloorTex, i + vec2<i32>(1, 1), 0).x;
+    return vec2<f32>(mix(mix(a, b, f.x), mix(c, d, f.x), f.y), 1.0);
+}
 fn materialTerrainHeightAt(xz: vec2<f32>) -> f32 {
     if (!earthWater() || cf.enabled <= 0.5 || cf.hm_width < 2u || cf.hm_height < 2u) {
         return terrainHeightAt(xz);
@@ -112,6 +131,14 @@ fn materialTerrainHeightAt(xz: vec2<f32>) -> f32 {
     // datum. Clamped dry edge texels must not run out to the water horizon.
     let size = vec2<f32>(f32(cf.hm_width - 1u), f32(cf.hm_height - 1u)) * cf.terrain_grid;
     let r = xz - cf.origin;
+    // Beyond the window: the far floor (Whole World's real sea depth), handed over inside the window's last 400 m
+    // so the seam has no crease; without one the old 200 m stand-in outside it -- that stand-in drew the window as
+    // a bright rectangle on a shallow sea (Helgoland, 2026-10-25).
+    let far = farFloorAt(xz);
+    if (far.y > 0.5) {
+        let inside = min(min(r.x, r.y), min(size.x - r.x, size.y - r.y));
+        return mix(far.x, h, smoothstep(0.0, 400.0, inside));
+    }
     let outside = length(max(max(-r, r - size), vec2<f32>(0.0)));
     return mix(h, min(h, waterLevelAt(xz) - 200.0), smoothstep(0.0, 400.0, outside));
 }
