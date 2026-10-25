@@ -1534,7 +1534,9 @@ void Man::SetFace(RString name, const PlayerIdentityKey& player)
             _a2HeadWeights = nullptr;
             if (_a2Head)
             {
-                _a2HeadFace.Init(_a2Head, "osobnost", nullptr);
+                // Arma 2's face selection is "osobnost", Arma 3's "personality"
+                _a2HeadFace.Init(_a2Head, Poseidon::Arma1Compat::Generation() >= 3 ? "personality" : "osobnost",
+                                 nullptr);
                 if (Type()->_moveType && Type()->_moveType->GetSkeleton())
                 {
                     WeightInfoName wname;

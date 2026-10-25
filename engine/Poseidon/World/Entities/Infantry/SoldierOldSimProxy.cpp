@@ -445,7 +445,8 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
             const bool onHead = gearSlot == ManType::A3GearHead || gearSlot == ManType::A3GearHeadgear;
             if (onHead && (!_showHead || level == type->_insideView))
                 continue;
-            pshape = gearSlot == ManType::A3GearHead ? proxy.obj->GetShape()
+            // the head of his face (CfgFaces >> head) where he has one, else the class's
+            pshape = gearSlot == ManType::A3GearHead ? (_a2Head ? _a2Head.GetRef() : proxy.obj->GetShape())
                      : _a3GearSet[gearSlot]           ? _a3GearShape[gearSlot].GetRef()
                                                       : type->_a3Gear[gearSlot].GetRef();
             if (!pshape)
@@ -658,6 +659,8 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
             continue;
         }
 
+        if (gearSlot == ManType::A3GearHead && _a2Head && pshape == _a2Head.GetRef() && _head._texture)
+            _a2HeadFace.SetTexture(_a2Head, pLevel, _head._texture); // his face on it
         if (gearSlot > ManType::A3GearHead)
         {
             // the colours of this class's item on a model several items share
@@ -755,6 +758,9 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
 void Man::DrawArma2Head(int level, const Matrix4& transform, float dist2, float z2, const LightList& lights)
 {
     const ManType* type = Type();
+    // an Arma 3 man's head is drawn by his head proxy (the gear proxies), this one or not
+    if (Arma1Compat::Generation() >= 3)
+        return;
     if (!_a2Head || !_showHead || type->_headMatIndex < 0 || level == type->_insideView ||
         _shape->Resolution(level) >= 900.0f)
         return;

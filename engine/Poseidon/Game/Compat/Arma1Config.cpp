@@ -3500,7 +3500,9 @@ bool Arma2FacesOn()
 // The Arma 2 class an A1x_ man stands for, when he is drawn with that class's own model.
 const ParamEntry* Arma2ManInOwnModel(const char* unitClass, const char* shapeName)
 {
-    if (Generation() != 2 || !ConfigLoaded() || !Arma2FacesOn() || !unitClass || !shapeName ||
+    // Arma 3 men too: their faces (CfgFaces >> Man_A3) and heads (CfgHeads) are laid out as Arma 2's;
+    // without them every Arma 3 man wore his class's one default head and face
+    if (Generation() < 2 || !ConfigLoaded() || !Arma2FacesOn() || !unitClass || !shapeName ||
         _strnicmp(unitClass, "A1x_", 4) != 0)
         return nullptr;
     const ParamEntry* man = FindConfigClass("CfgVehicles", unitClass + 4);
