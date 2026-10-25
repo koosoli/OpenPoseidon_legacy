@@ -528,6 +528,9 @@ GameValue A1CtrlSetFade(const GameState* state, GameValuePar oper1, GameValuePar
 GameValue A1CtrlCommit(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1CtrlIgnored(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1CtrlCommitted(const GameState* state, GameValuePar oper1);
+GameValue A1CtrlSetPosition(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1CtrlSetTextColor(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue A1CtrlSetBackgroundColor(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1CtrlPosition(const GameState* state, GameValuePar oper1);
 GameValue A1CtrlSetStructuredText(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1CtrlParent(const GameState* state, GameValuePar oper1);
@@ -848,6 +851,9 @@ GameValue ObjSetFlyingHeight(const GameState* state, GameValuePar oper1, GameVal
 GameValue ObjSetFuel(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetFuelCargo(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetIdentity(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjSetSpeaker(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjSetPitch(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjSetName(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetMimic(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetPos(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetPosASL(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -2115,6 +2121,9 @@ static const GameOperator* GetExtBinary(int& count)
     static const GameOperator ExtBinary[] = {
         GameOperator(GameNothing, "setCaptive", function, ObjSetCaptive, GameObject, GameBool),
         GameOperator(GameNothing, "setIdentity", function, ObjSetIdentity, GameObject, GameString),
+        GameOperator(GameNothing, "setSpeaker", function, ObjSetSpeaker, GameObject, GameString),
+        GameOperator(GameNothing, "setPitch", function, ObjSetPitch, GameObject, GameScalar),
+        GameOperator(GameNothing, "setName", function, ObjSetName, GameObject, GameString | GameArray),
         GameOperator(GameNothing, "setFaceanimation", function, ObjSetFaceAnimation, GameObject, GameScalar),
         GameOperator(GameNothing, "setFace", function, ObjSetFace, GameObject, GameString),
         GameOperator(GameNothing, "setMimic", function, ObjSetMimic, GameObject, GameString),
@@ -2235,9 +2244,9 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "ctrlSetFade", function, A1CtrlSetFade, GameScalar, GameScalar),
         GameOperator(GameNothing, "ctrlCommit", function, A1CtrlCommit, GameScalar, GameScalar),
         GameOperator(GameNothing, "ctrlSetStructuredText", function, A1CtrlSetStructuredText, GameScalar, GameString),
-        GameOperator(GameNothing, "ctrlSetPosition", function, A1CtrlIgnored, GameScalar, GameArray),
-        GameOperator(GameNothing, "ctrlSetTextColor", function, A1CtrlIgnored, GameScalar, GameArray),
-        GameOperator(GameNothing, "ctrlSetBackgroundColor", function, A1CtrlIgnored, GameScalar, GameArray),
+        GameOperator(GameNothing, "ctrlSetPosition", function, A1CtrlSetPosition, GameScalar, GameArray),
+        GameOperator(GameNothing, "ctrlSetTextColor", function, A1CtrlSetTextColor, GameScalar, GameArray),
+        GameOperator(GameNothing, "ctrlSetBackgroundColor", function, A1CtrlSetBackgroundColor, GameScalar, GameArray),
         GameOperator(GameNothing, "ctrlSetForegroundColor", function, A1CtrlIgnored, GameScalar, GameArray),
         GameOperator(GameObject, "nearestObject", function, A1NearestObject, GameArray, GameScalar | GameString),
         GameOperator(GameArray, "nearObjects", function, A1NearObjects, GameArray | GameObject, GameArray | GameScalar),

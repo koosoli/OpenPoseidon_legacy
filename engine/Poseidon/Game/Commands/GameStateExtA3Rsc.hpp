@@ -27,4 +27,9 @@ SafeZone UiSafeZone();
 // Arma 3's screens); otherwise this engine's (0..1 is the screen). Calls nest.
 void SetUiCoordinates(bool on);
 bool UiCoordinates();
+
+// showHUD: scripts hide the in-game HUD (crosshair, unit info, actions) for cinematics; shown again
+// at every mission start.
+void SetHudShown(bool shown);
+bool HudShown();
 } // namespace Poseidon::Arma3Rsc

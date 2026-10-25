@@ -1369,10 +1369,81 @@ bool ParseRemoteExecDescriptor(const GameState* state, GameValuePar descriptor, 
     return out.name.GetLength() > 0;
 }
 
+// Outside a network game this machine is the server and the only client (Arma 3: clientOwner 2):
+// it is targeted by 0 (everyone), 2, a negative number other than -2, and by any object, group,
+// side or string; a list targets it when one of its items does.
+bool TargetsThisMachine(GameValuePar target)
+{
+    switch (target.GetType())
+    {
+        case GameScalar:
+        {
+            const int id = toInt(static_cast<float>(target));
+            return id == 0 || id == 2 || (id < 0 && id != -2);
+        }
+        case GameBool: // BIS_fnc_MP's "isServer" form: true is the server
+            return true;
+        case GameArray:
+        {
+            const GameArrayType& list = target;
+            for (int i = 0; i < list.Size(); i++)
+                if (TargetsThisMachine(list[i]))
+                    return true;
+            return list.Size() == 0;
+        }
+        default:
+            return true;
+    }
+}
+
+// Arma 3 single player runs remoteExec / remoteExecCall here and now: a function is called (or
+// spawned) with the parameters, a command takes them as its argument ([left, right] for a binary
+// one). Its function library sends through them -- BIS_fnc_MP, every conversation line
+// (BIS_fnc_kbTellLocal), subtitles, notifications -- and outside a network game nothing ran.
+GameValue RemoteExecHere(GameValuePar params, GameValuePar descriptor, bool callMode)
+{
+    RString name;
+    GameValue target = GameValue(0.0f);
+    if (descriptor.GetType() == GameString)
+        name = descriptor;
+    else if (descriptor.GetType() == GameArray)
+    {
+        const GameArrayType& a = descriptor;
+        if (a.Size() < 1 || a[0].GetType() != GameString)
+            return NOTHING;
+        name = a[0];
+        if (a.Size() > 1)
+            target = a[1];
+    }
+    if (name.GetLength() == 0 || !TargetsThisMachine(target) || !Poseidon::WireBounds::ValidIdentifier(name, 256))
+        return NOTHING;
+    GameState* gs = GWorld ? GWorld->GetGameState() : nullptr;
+    if (!gs)
+        return NOTHING;
+    const std::string fn = (const char*)name;
+    std::string lower = fn;
+    for (char& c : lower)
+        c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    const bool function = lower.find("_fnc_") != std::string::npos || lower.find("fnc_") == 0;
+    GameVarSpace local(gs->GetContext());
+    gs->BeginContext(&local);
+    gs->VarSetLocal("_this", params, false, true);
+    if (function)
+        gs->EvaluateMultiple((std::string("_this ") + (callMode ? "call " : "spawn ") + fn).c_str());
+    else
+    {
+        gs->EvaluateMultiple((fn + " _this").c_str());
+        if (gs->GetLastError() != EvalOK && params.GetType() == GameArray)
+            gs->EvaluateMultiple(("(_this select 0) " + fn + " (_this select 1)").c_str());
+    }
+    gs->EndContext();
+    return NOTHING;
+}
+
 GameValue RemoteExecImpl(const GameState* state, GameValuePar params, GameValuePar descriptor, bool callMode)
 {
     if (GWorld->GetMode() != GModeNetware)
-        return NOTHING;
+        return RemoteExecHere(params, descriptor, callMode);
 
     RemoteExecDescriptor parsed;
     if (!ParseRemoteExecDescriptor(state, descriptor, !callMode, parsed))

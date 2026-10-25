@@ -259,8 +259,33 @@ GameValue CtrlEnable(const GameState* state, GameValuePar oper1)
     return NOTHING;
 }
 
+// Arma 3's controls made by script (ctrlCreate) are numbers of their own (Arma3Menu::Script); a
+// control command given one acts on it, any other number is a dialog control's idc as before.
+namespace A3 = Poseidon::Arma3Menu::Script;
+static bool IsA3(GameValuePar control)
+{
+    return control.GetType() == GameScalar && A3::IsControl(static_cast<float>(control));
+}
+static int A3Handle(GameValuePar control)
+{
+    return toInt(static_cast<float>(control));
+}
+static bool Color4(GameValuePar value, float rgba[4])
+{
+    if (value.GetType() != GameArray)
+        return false;
+    const GameArrayType& a = value;
+    if (a.Size() < 4)
+        return false;
+    for (int i = 0; i < 4; i++)
+        rgba[i] = a[i].GetType() == GameScalar ? static_cast<float>(a[i]) : 1.0f;
+    return true;
+}
+
 GameValue CtrlGetText(const GameState* state, GameValuePar oper1)
 {
+    if (IsA3(oper1))
+        return GameValue(A3::Text(A3Handle(oper1)));
     IControl* ctrl = GetCtrl(state, oper1);
     if (!ctrl)
     {
@@ -985,6 +1010,8 @@ GameValue A1FindDisplay(const GameState* state, GameValuePar oper1)
 
 GameValue A1DisplayCtrl(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
+    if (const int handle = A3::Find(toInt((float)oper1), toInt((float)oper2)); handle >= 0)
+        return GameValue(static_cast<float>(handle));
     return GameValue((float)oper2);
 }
 
@@ -1000,6 +1027,11 @@ GameValue A1DisplaySetEventHandler(const GameState* state, GameValuePar oper1, G
 
 GameValue A1CtrlShow(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
+    if (IsA3(oper1))
+    {
+        A3::Show(A3Handle(oper1), oper2.GetType() == GameBool && (bool)oper2);
+        return NOTHING;
+    }
     return CtrlShow(state, Pair(oper1, oper2));
 }
 
@@ -1010,6 +1042,11 @@ GameValue A1CtrlEnable(const GameState* state, GameValuePar oper1, GameValuePar 
 
 GameValue A1CtrlSetText(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
+    if (IsA3(oper1))
+    {
+        A3::SetText(A3Handle(oper1), RString(oper2));
+        return NOTHING;
+    }
     return CtrlSetText(state, Pair(oper1, oper2));
 }
 
@@ -1020,12 +1057,22 @@ GameValue A1ButtonSetAction(const GameState* state, GameValuePar oper1, GameValu
 
 GameValue A1CtrlSetFade(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
+    if (IsA3(oper1))
+    {
+        A3::SetFade(A3Handle(oper1), (float)oper2);
+        return NOTHING;
+    }
     PendingFade()[toInt((float)oper1)] = (float)oper2;
     return NOTHING;
 }
 
 GameValue A1CtrlCommit(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
+    if (IsA3(oper1))
+    {
+        A3::Commit(A3Handle(oper1), (float)oper2);
+        return NOTHING;
+    }
     // No fading here: a committed fade shows or hides the control at once.
     const int idc = toInt((float)oper1);
     if (const auto it = PendingFade().find(idc); it != PendingFade().end())
@@ -1042,8 +1089,42 @@ GameValue A1CtrlIgnored(const GameState* state, GameValuePar oper1, GameValuePar
     return NOTHING;
 }
 
+// control ctrlSetPosition [x, y, w, h] (or [x, y]): an Arma 3 script control's, committed later
+GameValue A1CtrlSetPosition(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    if (!IsA3(oper1) || oper2.GetType() != GameArray)
+        return NOTHING;
+    const GameArrayType& a = oper2;
+    float x, y, w, h;
+    A3::Position(A3Handle(oper1), x, y, w, h);
+    float v[4] = {x, y, w, h};
+    for (int i = 0; i < 4 && i < a.Size(); i++)
+        if (a[i].GetType() == GameScalar)
+            v[i] = static_cast<float>(a[i]);
+    A3::SetPosition(A3Handle(oper1), v[0], v[1], v[2], v[3]);
+    return NOTHING;
+}
+
+GameValue A1CtrlSetTextColor(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    float c[4];
+    if (IsA3(oper1) && Color4(oper2, c))
+        A3::SetTextColor(A3Handle(oper1), c[0], c[1], c[2], c[3]);
+    return NOTHING;
+}
+
+GameValue A1CtrlSetBackgroundColor(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    float c[4];
+    if (IsA3(oper1) && Color4(oper2, c))
+        A3::SetBackgroundColor(A3Handle(oper1), c[0], c[1], c[2], c[3]);
+    return NOTHING;
+}
+
 GameValue A1CtrlCommitted(const GameState* state, GameValuePar oper1)
 {
+    if (IsA3(oper1))
+        return GameValue(A3::Committed(A3Handle(oper1)));
     return GameValue(true);
 }
 
@@ -1051,6 +1132,12 @@ GameValue A1CtrlCommitted(const GameState* state, GameValuePar oper1)
 GameValue A1CtrlPosition(const GameState* state, GameValuePar oper1)
 {
     GameArrayType out;
+    if (float x, y, w, h; IsA3(oper1) && A3::Position(A3Handle(oper1), x, y, w, h))
+    {
+        for (const float v : {x, y, w, h})
+            out.Add(GameValue(v));
+        return GameValue(out);
+    }
     Control* ctrl = dynamic_cast<Control*>(GetCtrl(state, oper1));
     out.Add(GameValue(ctrl ? ctrl->X() : 0.0f));
     out.Add(GameValue(ctrl ? ctrl->Y() : 0.0f));
@@ -1062,11 +1149,18 @@ GameValue A1CtrlPosition(const GameState* state, GameValuePar oper1)
 // control ctrlSetStructuredText text: structured text is plain text here (already untagged)
 GameValue A1CtrlSetStructuredText(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
+    if (IsA3(oper1))
+    {
+        A3::SetText(A3Handle(oper1), RString(oper2));
+        return NOTHING;
+    }
     return CtrlSetText(state, Pair(oper1, oper2));
 }
 
 // ctrlParent control -> its display (the topmost user dialog stands for any)
 GameValue A1CtrlParent(const GameState* state, GameValuePar oper1)
 {
+    if (IsA3(oper1))
+        return GameValue(static_cast<float>(A3::DisplayOf(A3Handle(oper1))));
     return GameValue(GetUserDialog() ? 0.0f : -1.0f);
 }

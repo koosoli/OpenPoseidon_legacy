@@ -733,6 +733,13 @@ class Man: public Person
 	bool _showPrimaryWeapon;
 	bool _showSecondaryWeapon;
 	bool _showHead;
+
+	// Arma 3: what a script dressed this man in (addHeadgear, addVest, addBackpack and the removes),
+	// in place of his class's (ManType::_a3Gear) where set; no shape is the item taken off.
+	Ref<LODShapeWithShadow> _a3GearShape[ManType::A3GearN];
+	std::vector<ManType::A3GearColour> _a3GearColour[ManType::A3GearN];
+	RString _a3GearClass[ManType::A3GearN];
+	bool _a3GearSet[ManType::A3GearN] = {};
 	
 	OLink<Building> _ladderBuilding;
 	// the boat whose deck (roadway LOD) he stands on: it carries him as it moves (Ship::CarryRiders)
@@ -1208,6 +1215,9 @@ class Man: public Person
 	bool IsDead() const;
 	bool ShadowPoseFrozen() const override;
 	bool IsDown() const;
+	// Arma 3's headgear / vest / backpack by item class ("" takes it off); the class worn
+	void SetA3Gear(int slot, const RString& itemClass);
+	RString A3GearClass(int slot) const { return slot > 0 && slot < ManType::A3GearN ? _a3GearClass[slot] : RString(); }
 	// The current move's stance (ManPos), for the HUD's stance indicator
 	int StanceUpDegree() const {return GetActUpDegree();}
 	bool IsLaunchDown() const;

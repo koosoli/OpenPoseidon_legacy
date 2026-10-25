@@ -39,6 +39,7 @@
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/World.hpp>
 
@@ -1835,6 +1836,137 @@ GameValue A3CreateDisplay(const GameState*, GameValuePar, GameValuePar oper2)
     return GameValue(1.0f);
 }
 
+// Controls Arma 3's scripts make at run time (Arma3Menu::Script): ctrlCreate and its kin.
+namespace
+{
+namespace A3Ui = Poseidon::Arma3Menu::Script;
+int Handle(GameValuePar v)
+{
+    return v.GetType() == GameScalar ? toInt(static_cast<float>(v)) : -1;
+}
+} // namespace
+
+// display ctrlCreate [class, idc, (controls group)]
+GameValue A3CtrlCreate(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    const int display = Handle(oper1);
+    if (display < 0 || oper2.GetType() != GameArray)
+        return GameValue(-1.0f);
+    const GameArrayType& a = oper2;
+    if (a.Size() < 1 || a[0].GetType() != GameString)
+        return GameValue(-1.0f);
+    const int idc = a.Size() > 1 && a[1].GetType() == GameScalar ? toInt(static_cast<float>(a[1])) : -1;
+    const int group = a.Size() > 2 ? Handle(a[2]) : -1;
+    return GameValue(static_cast<float>(A3Ui::Create(display, RString(a[0]), idc, group)));
+}
+
+GameValue A3CtrlDelete(const GameState*, GameValuePar oper1)
+{
+    return GameValue(A3Ui::Delete(Handle(oper1)));
+}
+
+GameValue A3ControlsGroupCtrl(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    return GameValue(static_cast<float>(A3Ui::FindInGroup(Handle(oper1), Handle(oper2))));
+}
+
+GameValue A3CtrlScale(const GameState*, GameValuePar oper1)
+{
+    return GameValue(A3Ui::Scale(Handle(oper1)));
+}
+
+// control ctrlSetAngle [angle, centreX, centreY]
+GameValue A3CtrlSetAngle(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    if (oper2.GetType() == GameArray)
+    {
+        const GameArrayType& a = oper2;
+        if (a.Size() > 0 && a[0].GetType() == GameScalar)
+            A3Ui::SetAngle(Handle(oper1), static_cast<float>(a[0]));
+    }
+    return NOTHING;
+}
+
+GameValue A3CtrlAngle(const GameState* state, GameValuePar oper1)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& a = value;
+    a.Add(GameValue(A3Ui::Angle(Handle(oper1))));
+    a.Add(GameValue(0.5f));
+    a.Add(GameValue(0.5f));
+    return value;
+}
+
+GameValue A3CtrlTextHeight(const GameState*, GameValuePar oper1)
+{
+    return GameValue(A3Ui::TextHeight(Handle(oper1)));
+}
+
+GameValue A3CtrlIdc(const GameState*, GameValuePar oper1)
+{
+    return GameValue(static_cast<float>(A3Ui::Idc(Handle(oper1))));
+}
+
+GameValue A3CtrlType(const GameState*, GameValuePar oper1)
+{
+    return GameValue(static_cast<float>(A3Ui::Type(Handle(oper1))));
+}
+
+GameValue A3CtrlClassName(const GameState*, GameValuePar oper1)
+{
+    return GameValue(A3Ui::ClassName(Handle(oper1)));
+}
+
+// control ctrlSetPositionX/Y/W/H value: one coordinate, committed later
+template <int Which> GameValue A3CtrlSetPositionPart(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    if (oper2.GetType() == GameScalar)
+        A3Ui::SetPosition(Handle(oper1), static_cast<float>(oper2), 0, 0, 0, Which);
+    return NOTHING;
+}
+
+// ctrlSetFont / ctrlSetFontHeight: a script control keeps its class's font
+GameValue A3CtrlIgnoredBinary(const GameState*, GameValuePar, GameValuePar)
+{
+    return NOTHING;
+}
+
+// Arma 3's headgear, vest and backpack put on and taken off by script (Man::SetA3Gear), and read back.
+namespace
+{
+Man* GearMan(GameValuePar unit)
+{
+    return dyn_cast<Man>(GetObject(unit));
+}
+
+template <int Slot> GameValue A3AddGear(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    if (Man* man = GearMan(oper1); man && oper2.GetType() == GameString)
+        man->SetA3Gear(Slot, RString(oper2));
+    return NOTHING;
+}
+
+template <int Slot> GameValue A3RemoveGear(const GameState*, GameValuePar oper1)
+{
+    if (Man* man = GearMan(oper1))
+        man->SetA3Gear(Slot, RString());
+    return NOTHING;
+}
+
+template <int Slot> GameValue A3GearOf(const GameState*, GameValuePar oper1)
+{
+    Man* man = GearMan(oper1);
+    return GameValue(man ? man->A3GearClass(Slot) : RString());
+}
+} // namespace
+
+// unit getSlotItemName slot: the item in an inventory slot (611 the radio, 612 the GPS, ...); this
+// engine keeps no such slots, so none is named (BIS_fnc_kbTellLocal asks for the radio)
+GameValue A3GetSlotItemName(const GameState*, GameValuePar, GameValuePar)
+{
+    return GameValue(RString());
+}
+
 // getOxygenRemaining unit: this engine has no breath to hold underwater; always a full breath.
 GameValue A3OxygenRemaining(const GameState*, GameValuePar)
 {
@@ -2157,7 +2289,9 @@ const Macro kMacros2[] = {
     {"lnbSetCurSelRow", 'b', GameNothing, GameAny, GameScalar, ""},
     {"sliderSetPosition", 'b', GameNothing, GameAny, GameScalar, ""},
     {"sliderSetRange", 'b', GameNothing, GameAny, GameArray, ""},
-    {"closeDisplay", 'b', GameNothing, GameAny, GameScalar, ""},
+    // a title display (BIS_fnc_playVideo's, cutRsc's stand-ins) closes, its script controls with it
+    {"closeDisplay", 'b', GameNothing, GameAny, GameScalar,
+     "if ((_this select 0) isEqualType 0) then {opA3RscClose (_this select 0)}"},
     // unit skill "aimingAccuracy": this engine has one skill per unit
     {"skill", 'b', GameScalar, GameObject, GameString, "skill (_this select 0)"},
     {"getGroupIcon", 'b', GameArray, GameGroup, GameScalar, "[]"},
@@ -2242,6 +2376,19 @@ const GameFunction A3Unary[] = {
     GameFunction(GameAny, "param", A3Param, GameArray | GameScalar),
     GameFunction(GameNothing, "reverse", A3Reverse, GameArray),
     GameFunction(GameNothing, "diag_log", A3DiagLog, GameAny),
+    GameFunction(GameBool, "ctrlDelete", A3CtrlDelete, GameScalar),
+    GameFunction(GameNothing, "removeHeadgear", A3RemoveGear<ManType::A3GearHeadgear>, GameObject),
+    GameFunction(GameNothing, "removeVest", A3RemoveGear<ManType::A3GearVest>, GameObject),
+    GameFunction(GameNothing, "removeBackpackGlobal", A3RemoveGear<ManType::A3GearBackpack>, GameObject),
+    GameFunction(GameString, "headgear", A3GearOf<ManType::A3GearHeadgear>, GameObject),
+    GameFunction(GameString, "vest", A3GearOf<ManType::A3GearVest>, GameObject),
+    GameFunction(GameString, "backpack", A3GearOf<ManType::A3GearBackpack>, GameObject),
+    GameFunction(GameScalar, "ctrlScale", A3CtrlScale, GameScalar),
+    GameFunction(GameArray, "ctrlAngle", A3CtrlAngle, GameScalar),
+    GameFunction(GameScalar, "ctrlTextHeight", A3CtrlTextHeight, GameScalar),
+    GameFunction(GameScalar, "ctrlIDC", A3CtrlIdc, GameScalar),
+    GameFunction(GameScalar, "ctrlType", A3CtrlType, GameScalar),
+    GameFunction(GameString, "ctrlClassName", A3CtrlClassName, GameScalar),
     GameFunction(GameScalar, "getOxygenRemaining", A3OxygenRemaining, GameObject),
     GameFunction(GameAny, "try", A3Try, GameString),
     GameFunction(GameNothing, "throw", A3Throw, GameVoid),
@@ -2293,6 +2440,18 @@ GameValue A3HashIndex(const GameState* state, GameValuePar oper1, GameValuePar o
 
 const GameOperator A3Binary[] = {
     GameOperator(GameScalar, "createDisplay", function, A3CreateDisplay, GameAny, GameString),
+    GameOperator(GameString, "getSlotItemName", function, A3GetSlotItemName, GameObject, GameScalar),
+    GameOperator(GameNothing, "addHeadgear", function, A3AddGear<ManType::A3GearHeadgear>, GameObject, GameString),
+    GameOperator(GameNothing, "addVest", function, A3AddGear<ManType::A3GearVest>, GameObject, GameString),
+    GameOperator(GameScalar, "ctrlCreate", function, A3CtrlCreate, GameScalar, GameArray),
+    GameOperator(GameScalar, "controlsGroupCtrl", function, A3ControlsGroupCtrl, GameScalar, GameScalar),
+    GameOperator(GameNothing, "ctrlSetAngle", function, A3CtrlSetAngle, GameScalar, GameArray),
+    GameOperator(GameNothing, "ctrlSetPositionX", function, A3CtrlSetPositionPart<0>, GameScalar, GameScalar),
+    GameOperator(GameNothing, "ctrlSetPositionY", function, A3CtrlSetPositionPart<1>, GameScalar, GameScalar),
+    GameOperator(GameNothing, "ctrlSetPositionW", function, A3CtrlSetPositionPart<2>, GameScalar, GameScalar),
+    GameOperator(GameNothing, "ctrlSetPositionH", function, A3CtrlSetPositionPart<3>, GameScalar, GameScalar),
+    GameOperator(GameNothing, "ctrlSetFont", function, A3CtrlIgnoredBinary, GameScalar, GameAny),
+    GameOperator(GameNothing, "ctrlSetFontHeight", function, A3CtrlIgnoredBinary, GameScalar, GameAny),
     GameOperator(GameAny, "#", mocnina, A3HashIndex, GameArray | GameString, GameScalar),
     GameOperator(GameBool, "params", function, A3ParamsBinary, GameVoid, GameArray),
     GameOperator(GameAny, "catch", function, A3Catch, GameVoid, GameString),

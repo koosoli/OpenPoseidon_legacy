@@ -209,6 +209,10 @@ struct Picture
                 }
             return;
         }
+        // a video (.ogv, BIS_fnc_playVideo's control) is not a picture: as one it loaded the white
+        // missing-texture over the whole screen; this engine plays no video, nothing is drawn
+        if (const char* dot = strrchr(text, '.'); dot && _stricmp(dot, ".ogv") == 0)
+            return;
         RString file = FindPicture(name);
         file.Lower();
         if (file.GetLength() == 0)
@@ -271,6 +275,7 @@ class A3Control : public Control
 
     RString GetText() const { return _text; }
     void SetText(const RString& text) { _text = text; }
+    void SetClip(const Rect2DFloat& clip) { _clip = clip; }
 
   protected:
     void LoadFont(const RString& family, float size)
@@ -436,6 +441,15 @@ class A3Static : public A3Control
     void SetLabel(const RString& text) { _text = GetType() == kStructuredText ? PlainText(text) : text; }
 
     bool IsPicture() const { return (_style & ST_TYPE) == kButtonPicture; }
+    void SetColor(PackedColor color) { _color = color; }
+    void SetBackground(PackedColor color) { _background = color; }
+    // The height its text takes, wrapped to its width (ctrlTextHeight).
+    float TextHeight() const
+    {
+        if (!_wrap)
+            return _text.GetLength() > 0 ? _size : 0.0f;
+        return _size * 1.05f * WrapLines(_font, _size, _w - 0.01f, (const char*)_text).size();
+    }
     void SetPicture(const RString& name)
     {
         _text = name;
@@ -1653,4 +1667,385 @@ void DrawHud(const HudState& state, float alpha)
     }
     hud->Draw(alpha);
 }
+
+namespace Script
+{
+namespace
+{
+// Script controls hold no display of their own: this container owns them (never freed, as the HUD's).
+class ScriptHolder : public ControlsContainer
+{
+  public:
+    ScriptHolder() : ControlsContainer(nullptr) {}
+};
+
+ScriptHolder& Holder()
+{
+    static ScriptHolder* holder = []
+    {
+        auto* h = new ScriptHolder();
+        h->AddRef();
+        return h;
+    }();
+    return *holder;
+}
+
+// One animated value: where it is, where ctrlCommit is taking it, and since when.
+struct Animated
+{
+    float from = 0, to = 0, set = 0;
+    float At(float t) const { return from + (to - from) * t; }
+};
+
+struct ScriptControl
+{
+    int display = -1;
+    int group = -1; // the controls group it is in (a script control), -1 at the display's top
+    int idc = -1;
+    int type = 0;
+    RString cls;
+    Ref<Control> control; // null for a controls group
+    Animated pos[4], fade, scale;
+    float angle = 0;
+    Foundation::UITime start;
+    float duration = 0;
+    bool shown = true;
+};
+
+std::map<int, ScriptControl>& Controls()
+{
+    static auto* controls = new std::map<int, ScriptControl>();
+    return *controls;
+}
+
+int& NextHandle()
+{
+    static int next = kFirst;
+    return next;
+}
+
+ScriptControl* Get(int handle)
+{
+    auto it = Controls().find(handle);
+    return it == Controls().end() ? nullptr : &it->second;
+}
+
+// How far its last commit has come, 0..1.
+float Progress(const ScriptControl& c)
+{
+    if (c.duration <= 0)
+        return 1;
+    return std::clamp((Glob.uiTime - c.start) / c.duration, 0.0f, 1.0f);
+}
+
+// Its rectangle on the screen now (a group's offset added), and how opaque it is with its groups.
+void Placement(const ScriptControl& c, float& x, float& y, float& w, float& h, float& alpha, Rect2DFloat& clip)
+{
+    const float t = Progress(c);
+    x = c.pos[0].At(t), y = c.pos[1].At(t), w = c.pos[2].At(t), h = c.pos[3].At(t);
+    alpha = 1 - std::clamp(c.fade.At(t), 0.0f, 1.0f);
+    const float scale = c.scale.At(t);
+    if (scale != 1)
+    {
+        // Arma 3 scales a control about its centre
+        x += w * (1 - scale) * 0.5f, y += h * (1 - scale) * 0.5f;
+        w *= scale, h *= scale;
+    }
+    clip = Rect2DFloat(-10, -10, 20, 20);
+    for (int g = c.group; g >= 0;)
+    {
+        const ScriptControl* group = Get(g);
+        if (!group)
+            break;
+        float gx, gy, gw, gh, galpha;
+        Rect2DFloat gclip;
+        Placement(*group, gx, gy, gw, gh, galpha, gclip);
+        x += gx, y += gy;
+        alpha *= galpha;
+        // within the group, and within what clips the group
+        const float cx = std::max(gclip.x, gx), cy = std::max(gclip.y, gy);
+        clip = Rect2DFloat(cx, cy, std::max(0.0f, std::min(gclip.x + gclip.w, gx + gw) - cx),
+                           std::max(0.0f, std::min(gclip.y + gclip.h, gy + gh) - cy));
+        break; // the group's own placement already took its outer groups in
+    }
+}
+} // namespace
+
+bool IsControl(float handle)
+{
+    return Get(toInt(handle)) != nullptr;
+}
+
+int Create(int display, const RString& className, int idc, int group)
+{
+    const ParamEntry* root = Arma1Compat::ConfigRoot();
+    const ParamEntry* cls = root ? root->FindEntry(className) : nullptr;
+    if (!cls || !cls->IsClass())
+        return -1;
+    ScriptControl c;
+    c.display = display;
+    c.group = Get(group) ? group : -1;
+    c.idc = idc;
+    c.cls = className;
+    c.type = Integer(*cls, "type", kStatic);
+    // its own default place (config expressions in this engine's coordinates, as scripts compute)
+    c.pos[0].set = c.pos[0].from = c.pos[0].to = Number(*cls, "x", 0);
+    c.pos[1].set = c.pos[1].from = c.pos[1].to = Number(*cls, "y", 0);
+    c.pos[2].set = c.pos[2].from = c.pos[2].to = Number(*cls, "w", 0);
+    c.pos[3].set = c.pos[3].from = c.pos[3].to = Number(*cls, "h", 0);
+    c.scale.from = c.scale.to = c.scale.set = 1;
+    c.fade.from = c.fade.to = c.fade.set = Number(*cls, "fade", 0);
+    c.shown = Integer(*cls, "show", 1) != 0;
+    if (c.type != kControlsGroup && c.type != kControlsGroupNoScroll)
+    {
+        const Arma3Rsc::SafeZone saved = g_zone;
+        g_zone = Arma3Rsc::SafeZone{0, 0, 1, 1};
+        c.control = new A3Static(&Holder(), c.type == kStructuredText ? kStructuredText : kStatic, idc, *cls, 0, 0,
+                                 0, 0, Rect2DFloat(-10, -10, 20, 20));
+        g_zone = saved;
+    }
+    const int handle = NextHandle()++;
+    Controls()[handle] = c;
+    static std::set<std::string> reported;
+    std::string key = (const char*)className;
+    std::transform(key.begin(), key.end(), key.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (reported.insert(key).second)
+        LOG_INFO(UI, "Arma 3: ctrlCreate {} (type {}) on display {}", (const char*)className, c.type, display);
+    return handle;
+}
+
+bool Delete(int control)
+{
+    if (!Get(control))
+        return false;
+    // a group takes what it holds with it
+    std::vector<int> held;
+    for (const auto& [handle, c] : Controls())
+        if (c.group == control)
+            held.push_back(handle);
+    for (const int h : held)
+        Delete(h);
+    Controls().erase(control);
+    return true;
+}
+
+int Find(int display, int idc)
+{
+    for (const auto& [handle, c] : Controls())
+        if (c.display == display && c.idc == idc)
+            return handle;
+    return -1;
+}
+
+int FindInGroup(int group, int idc)
+{
+    for (const auto& [handle, c] : Controls())
+        if (c.group == group && c.idc == idc)
+            return handle;
+    return -1;
+}
+
+int DisplayOf(int control)
+{
+    const ScriptControl* c = Get(control);
+    return c ? c->display : -1;
+}
+
+void SetPosition(int control, float x, float y, float w, float h, int which)
+{
+    ScriptControl* c = Get(control);
+    if (!c)
+        return;
+    const float values[4] = {x, y, w, h};
+    for (int i = 0; i < 4; i++)
+        if (which < 0 || which == i)
+            c->pos[i].set = values[which < 0 ? i : 0];
+}
+
+bool Position(int control, float& x, float& y, float& w, float& h)
+{
+    const ScriptControl* c = Get(control);
+    if (!c)
+        return false;
+    const float t = Progress(*c);
+    x = c->pos[0].At(t), y = c->pos[1].At(t), w = c->pos[2].At(t), h = c->pos[3].At(t);
+    return true;
+}
+
+void Commit(int control, float seconds)
+{
+    ScriptControl* c = Get(control);
+    if (!c)
+        return;
+    // from where it is now towards what was set since
+    const float t = Progress(*c);
+    for (Animated* a : {&c->pos[0], &c->pos[1], &c->pos[2], &c->pos[3], &c->fade, &c->scale})
+    {
+        a->from = a->At(t);
+        a->to = a->set;
+    }
+    c->start = Glob.uiTime;
+    c->duration = std::max(seconds, 0.0f);
+}
+
+bool Committed(int control)
+{
+    const ScriptControl* c = Get(control);
+    return !c || Progress(*c) >= 1;
+}
+
+void SetFade(int control, float fade)
+{
+    if (ScriptControl* c = Get(control))
+        c->fade.set = fade;
+}
+
+float Fade(int control)
+{
+    const ScriptControl* c = Get(control);
+    return c ? c->fade.At(Progress(*c)) : 0.0f;
+}
+
+void SetScale(int control, float scale)
+{
+    if (ScriptControl* c = Get(control))
+        c->scale.set = scale;
+}
+
+float Scale(int control)
+{
+    const ScriptControl* c = Get(control);
+    return c ? c->scale.At(Progress(*c)) : 1.0f;
+}
+
+void SetAngle(int control, float angle)
+{
+    // kept for ctrlAngle; pictures are drawn unrotated
+    if (ScriptControl* c = Get(control))
+        c->angle = angle;
+}
+
+float Angle(int control)
+{
+    const ScriptControl* c = Get(control);
+    return c ? c->angle : 0.0f;
+}
+
+void SetText(int control, const RString& text)
+{
+    ScriptControl* c = Get(control);
+    auto* s = c ? dynamic_cast<A3Static*>(c->control.GetRef()) : nullptr;
+    if (!s)
+        return;
+    // a video (RscVideo: BIS_fnc_playVideo) ends at once -- this engine plays none -- and Arma 3
+    // empties a video control's text when its video stops, which the script waits for
+    if (const char* dot = strrchr((const char*)text, '.'); dot && _stricmp(dot, ".ogv") == 0)
+    {
+        s->SetPicture(RString());
+        return;
+    }
+    if (s->IsPicture())
+        s->SetPicture(text);
+    else
+        s->SetLabel(text);
+}
+
+RString Text(int control)
+{
+    const ScriptControl* c = Get(control);
+    auto* s = c ? dynamic_cast<A3Static*>(c->control.GetRef()) : nullptr;
+    return s ? s->GetText() : RString();
+}
+
+void SetTextColor(int control, float r, float g, float b, float a)
+{
+    ScriptControl* c = Get(control);
+    if (auto* s = c ? dynamic_cast<A3Static*>(c->control.GetRef()) : nullptr)
+        s->SetColor(PackedColor(Color(r, g, b, a)));
+}
+
+void SetBackgroundColor(int control, float r, float g, float b, float a)
+{
+    ScriptControl* c = Get(control);
+    if (auto* s = c ? dynamic_cast<A3Static*>(c->control.GetRef()) : nullptr)
+        s->SetBackground(PackedColor(Color(r, g, b, a)));
+}
+
+void Show(int control, bool shown)
+{
+    if (ScriptControl* c = Get(control))
+        c->shown = shown;
+}
+
+bool Shown(int control)
+{
+    const ScriptControl* c = Get(control);
+    return c && c->shown;
+}
+
+float TextHeight(int control)
+{
+    const ScriptControl* c = Get(control);
+    auto* s = c ? dynamic_cast<A3Static*>(c->control.GetRef()) : nullptr;
+    if (!s)
+        return 0;
+    // measured at its committed width
+    float x, y, w, h;
+    Position(control, x, y, w, h);
+    s->SetPos(x, y, w, h);
+    return s->TextHeight();
+}
+
+int Idc(int control)
+{
+    const ScriptControl* c = Get(control);
+    return c ? c->idc : -1;
+}
+
+int Type(int control)
+{
+    const ScriptControl* c = Get(control);
+    return c ? c->type : -1;
+}
+
+RString ClassName(int control)
+{
+    const ScriptControl* c = Get(control);
+    return c ? c->cls : RString();
+}
+
+void Draw()
+{
+    auto& controls = Controls();
+    if (controls.empty())
+        return;
+    // a closed title display takes its controls with it
+    for (auto it = controls.begin(); it != controls.end();)
+        it = Arma3Rsc::IsClosedDisplay(static_cast<float>(it->second.display)) ? controls.erase(it) : std::next(it);
+    // in the order they were made: a display's later controls over its earlier ones
+    for (auto& [handle, c] : controls)
+    {
+        if (!c.control || !c.shown)
+            continue;
+        bool hidden = false;
+        for (int g = c.group; g >= 0 && !hidden;)
+        {
+            const ScriptControl* group = Get(g);
+            hidden = group && !group->shown;
+            g = group ? group->group : -1;
+        }
+        if (hidden)
+            continue;
+        float x, y, w, h, alpha;
+        Rect2DFloat clip;
+        Placement(c, x, y, w, h, alpha, clip);
+        if (alpha <= 0.004f || w <= 0 || h <= 0)
+            continue;
+        c.control->SetPos(x, y, w, h);
+        if (auto* a3 = dynamic_cast<A3Control*>(c.control.GetRef()))
+            a3->SetClip(clip);
+        c.control->OnDraw(alpha);
+    }
+}
+} // namespace Script
 } // namespace Poseidon::Arma3Menu

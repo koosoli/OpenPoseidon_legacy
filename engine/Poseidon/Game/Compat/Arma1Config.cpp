@@ -3640,7 +3640,8 @@ RString Arma2RandomFace(const char* unitClass, const char* shapeName, uint32_t s
 
 const ParamEntry* Arma2VoiceClass(const char* speaker)
 {
-    if (Generation() != 2 || !ConfigLoaded() || !speaker || !*speaker)
+    // Arma 3 keeps Arma 2's voices: CfgVoice directories and a radio protocol's Words
+    if (Generation() < 2 || !ConfigLoaded() || !speaker || !*speaker)
         return nullptr;
     const ParamEntry* voice = FindConfigClass("CfgVoice", speaker);
     if (!voice || !voice->IsClass())
@@ -3659,7 +3660,7 @@ const ParamEntry* Arma2VoiceWords(const ParamEntry& voice)
 
 RString Arma2RandomSpeaker(const char* unitClass, const char* shapeName, uint32_t seed)
 {
-    if (Generation() != 2 || !unitClass)
+    if (Generation() < 2 || !unitClass)
         return RString();
     const ParamEntry* man = Arma2ManInOwnModel(unitClass, shapeName);
     const ParamEntry* voices = man ? Arma1Pars().FindEntry("CfgVoice") : nullptr;

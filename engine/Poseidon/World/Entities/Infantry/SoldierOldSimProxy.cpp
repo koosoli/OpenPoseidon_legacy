@@ -445,7 +445,11 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
             const bool onHead = gearSlot == ManType::A3GearHead || gearSlot == ManType::A3GearHeadgear;
             if (onHead && (!_showHead || level == type->_insideView))
                 continue;
-            pshape = gearSlot == ManType::A3GearHead ? proxy.obj->GetShape() : type->_a3Gear[gearSlot].GetRef();
+            pshape = gearSlot == ManType::A3GearHead ? proxy.obj->GetShape()
+                     : _a3GearSet[gearSlot]           ? _a3GearShape[gearSlot].GetRef()
+                                                      : type->_a3Gear[gearSlot].GetRef();
+            if (!pshape)
+                continue; // nothing worn there
         }
         else if (matIndex == type->_rpgMatIndex)
         {
@@ -657,7 +661,8 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
         if (gearSlot > ManType::A3GearHead)
         {
             // the colours of this class's item on a model several items share
-            for (const ManType::A3GearColour& colour : type->_a3GearColours[gearSlot])
+            for (const ManType::A3GearColour& colour :
+                 _a3GearSet[gearSlot] ? _a3GearColour[gearSlot] : type->_a3GearColours[gearSlot])
             {
                 colour.selection.Unhide(pshape, pLevel);
                 colour.selection.SetTexture(pshape, pLevel, colour.texture);
@@ -2105,8 +2110,7 @@ void ManType::InitShape()
                 slot = A3GearVest;
             else if (gearProxy && leaf == "backpack")
                 slot = A3GearBackpack;
-            if (slot > A3GearHead && !_a3Gear[slot])
-                slot = -1;
+            // kept even where the class wears nothing there: a script may dress him (Man::SetA3Gear)
             _a3GearProxySlot[l][p] = static_cast<signed char>(slot);
         }
     }
@@ -2316,6 +2320,68 @@ ActionMap* ManType::GetActionMap(MoveId move) const
         map = MotionType::GetNoActions();
     }
     return map;
+}
+
+namespace
+{
+// A config value as text ("" when absent or not a plain value).
+RString PlainText(const ParamEntry* cls, const char* name)
+{
+    const ParamEntry* e = cls ? cls->FindEntry(name) : nullptr;
+    return e && !e->IsClass() && !e->IsArray() ? RString((RStringB)*e) : RString();
+}
+} // namespace
+
+void Man::SetA3Gear(int slot, const RString& itemClass)
+{
+    if (slot <= ManType::A3GearHead || slot >= ManType::A3GearN)
+        return;
+    _a3GearSet[slot] = true;
+    _a3GearShape[slot] = nullptr;
+    _a3GearColour[slot].clear();
+    _a3GearClass[slot] = itemClass;
+    if (itemClass.GetLength() == 0)
+        return;
+    // headgear and vests are CfgWeapons items (their worn model is ItemInfo's uniformModel), a
+    // backpack a CfgVehicles class; their colours are hiddenSelections / hiddenSelectionsTextures
+    const bool backpack = slot == ManType::A3GearBackpack;
+    const ParamEntry* cls = Arma1Compat::FindConfigClass(backpack ? "CfgVehicles" : "CfgWeapons", itemClass);
+    if (!cls || !cls->IsClass())
+        return;
+    const ParamEntry* info = backpack ? nullptr : cls->FindEntry("ItemInfo");
+    if (info && !info->IsClass())
+        info = nullptr;
+    RString model = PlainText(info, "uniformModel");
+    if (model.GetLength() == 0)
+        model = PlainText(cls, "model");
+    if (model.GetLength() == 0)
+        return;
+    _a3GearShape[slot] = Shapes.New(::GetShapeName(model), false, true);
+    if (!_a3GearShape[slot])
+        return;
+    _a3GearShape[slot]->SetAutoCenter(false);
+    _a3GearShape[slot]->CalculateMinMax();
+    const ParamEntry* sels = info ? info->FindEntry("hiddenSelections") : nullptr;
+    if (!sels || !sels->IsArray())
+        sels = cls->FindEntry("hiddenSelections");
+    const ParamEntry* texs = cls->FindEntry("hiddenSelectionsTextures");
+    if (!sels || !sels->IsArray() || !texs || !texs->IsArray())
+        return;
+    for (int i = 0; i < sels->GetSize() && i < texs->GetSize(); i++)
+    {
+        RString path = (RStringB)(*texs)[i];
+        const char* p = path.Data();
+        if (*p == '\\')
+            p++;
+        RString lower = p;
+        lower.Lower();
+        Ref<Texture> texture = GlobLoadTexture(lower);
+        if (!texture)
+            continue;
+        ManType::A3GearColour& colour = _a3GearColour[slot].emplace_back();
+        colour.selection.Init(_a3GearShape[slot], (RStringB)(*sels)[i], nullptr);
+        colour.texture = texture;
+    }
 }
 
 } // namespace Poseidon

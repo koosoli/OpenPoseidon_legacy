@@ -1,3 +1,5 @@
+#include <Poseidon/Game/Commands/GameStateExtA3Rsc.hpp>
+#include <Poseidon/UI/Arma3Menu.hpp>
 #include <Poseidon/World/Terrain/EarthFreeFlight.hpp>
 #include <Poseidon/World/Effects/BuildingBreach.hpp>
 #include <SDL3/SDL_scancode.h>
@@ -2325,7 +2327,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
                     person->DrawNVOptics();
                 }
 
-                _ui->DrawHUD(*_scene.GetCamera(), camAI, _camType);
+                // a script may hide it (showHUD false: Arma 3's cinematics)
+                if (Arma3Rsc::HudShown())
+                    _ui->DrawHUD(*_scene.GetCamera(), camAI, _camType);
             }
             else if (camVehicle)
             {
@@ -2395,6 +2399,8 @@ void World::Simulate(float deltaT, bool& enableDraw)
             {
                 _titleEffect->Draw();
             }
+            // Arma 3's controls made by script on its title displays (Old Man's animated opening)
+            Arma3Menu::Script::Draw();
         }
     } // if (enableDraw)
 

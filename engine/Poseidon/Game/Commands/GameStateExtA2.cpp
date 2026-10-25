@@ -30,6 +30,7 @@
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Input/KeyInput.hpp>
 #include <Poseidon/UI/DisplayUI.hpp>
+#include <Poseidon/UI/Arma3Menu.hpp>
 
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICenter.hpp>
@@ -37,6 +38,7 @@
 #include <Poseidon/Audio/DynSound.hpp>
 #include <Poseidon/Audio/Streaming/WaveStream.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
@@ -1109,6 +1111,11 @@ bool A2ExecFsmAllowed(const std::string& file)
     }();
     if (all)
         return true;
+    // Arma 3's missions are driven by their FSMs (missionFlow.fsm: the story, its conversations
+    // and tasks, the orders the squad follows) and its function library runs its own (feedback);
+    // without them Showcase Infantry's squad stood and said nothing. They all run.
+    if (Arma1Compat::Generation() == 3)
+        return true;
     std::string f = Lower(file);
     while (!f.empty() && f[0] == '\\')
         f.erase(0, 1);
@@ -1735,7 +1742,53 @@ GameValue A2IsNullHandle(const GameState*, GameValuePar oper1)
 // ctrlShown control: a control handle that exists is taken as shown.
 GameValue A2CtrlShown(const GameState*, GameValuePar oper1)
 {
+    if (Poseidon::Arma3Menu::Script::IsControl(static_cast<float>(oper1)))
+        return GameValue(Poseidon::Arma3Menu::Script::Shown(toInt(static_cast<float>(oper1))));
     return GameValue(static_cast<float>(oper1) >= 0);
+}
+
+// addBackpack / removeBackpack: an Arma 3 man's backpack (Man::SetA3Gear); nothing for others
+GameValue A2AddBackpack(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    if (Poseidon::Man* man = dyn_cast<Poseidon::Man>(GetObject(oper1));
+        man && Poseidon::Arma1Compat::Generation() == 3 && oper2.GetType() == GameString)
+        man->SetA3Gear(Poseidon::ManType::A3GearBackpack, RString(oper2));
+    return NOTHING;
+}
+
+GameValue A2RemoveBackpack(const GameState*, GameValuePar oper1)
+{
+    if (Poseidon::Man* man = dyn_cast<Poseidon::Man>(GetObject(oper1)); man && Poseidon::Arma1Compat::Generation() == 3)
+        man->SetA3Gear(Poseidon::ManType::A3GearBackpack, RString());
+    return NOTHING;
+}
+
+// showHUD bool | [hud, info, radar, compass, direction, menu, group, cursors, panels, kills, showIcon3D]:
+// the first item (or the bool) shows or hides the in-game HUD
+GameValue A2ShowHud(const GameState*, GameValuePar oper1)
+{
+    bool shown = true;
+    if (oper1.GetType() == GameBool)
+        shown = oper1;
+    else if (oper1.GetType() == GameArray)
+    {
+        const GameArrayType& a = oper1;
+        shown = a.Size() == 0 || a[0].GetType() != GameBool || (bool)a[0];
+    }
+    Poseidon::Arma3Rsc::SetHudShown(shown);
+    return NOTHING;
+}
+
+// ctrlFade / ctrlSetScale: an Arma 3 script control's (Arma3Menu::Script); 0 and nothing otherwise
+GameValue A2CtrlFade(const GameState*, GameValuePar oper1)
+{
+    return GameValue(Poseidon::Arma3Menu::Script::Fade(toInt(static_cast<float>(oper1))));
+}
+
+GameValue A2CtrlSetScale(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    Poseidon::Arma3Menu::Script::SetScale(toInt(static_cast<float>(oper1)), static_cast<float>(oper2));
+    return NOTHING;
 }
 
 GameValue A2DeleteCollection(const GameState* state, GameValuePar oper1)
@@ -3203,11 +3256,12 @@ const GameFunction A2Unary[] = {
     GameFunction(GameString, "with", A2With, GameString),
     GameFunction(GameNothing, "hideObject", A2NothingUnary, GameObject),
     GameFunction(GameScalar, "inputAction", A2ZeroUnary, GameString),
-    GameFunction(GameNothing, "showHUD", A2NothingUnary, GameBool),
+    GameFunction(GameNothing, "showHUD", A2ShowHud, GameBool),
+    GameFunction(GameNothing, "showHUD", A2ShowHud, GameArray),
     GameFunction(GameNothing, "moveOut", A2MoveOut, GameObject),
     GameFunction(GameNothing, "playSound", A2PlaySoundArray, GameArray),
     GameFunction(GameObject, "unitBackpack", A2ObjNullUnary, GameObject),
-    GameFunction(GameNothing, "removeBackpack", A2NothingUnary, GameObject),
+    GameFunction(GameNothing, "removeBackpack", A2RemoveBackpack, GameObject),
     GameFunction(GameNothing, "ctrlMapAnimCommit", A2NothingUnary, GameAny),
     GameFunction(GameString, "keyName", A2TextLogEmpty, GameScalar),
     GameFunction(GameScalar, "currentVisionMode", A2ZeroUnary, GameObject),
@@ -3258,7 +3312,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameNothing, "lnbSetText", A2NothingUnary, GameArray),
     GameFunction(GameNothing, "lnbSetColor", A2NothingUnary, GameArray),
     GameFunction(GameArray, "getGroupIcon", A2EmptyArrayUnary, GameArray),
-    GameFunction(GameScalar, "ctrlFade", A2ZeroUnary, GameScalar),
+    GameFunction(GameScalar, "ctrlFade", A2CtrlFade, GameScalar),
     GameFunction(GameNothing, "setCamUseTi", A2NothingUnary, GameArray),
     GameFunction(GameScalar, "ctrlMapScale", A2OneUnary, GameScalar),
     GameFunction(GameString, "createDiaryLink", A2TextLogEmpty, GameArray),
@@ -3337,11 +3391,11 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "hideObject", function, A2NothingBinary, GameObject, GameBool),
     GameOperator(GameNothing, "forceWalk", function, A2NothingBinary, GameObject, GameBool),
     GameOperator(GameNothing, "say2D", function, A2NothingBinary, GameObject, GameString | GameArray),
-    GameOperator(GameNothing, "ctrlSetScale", function, A2NothingBinary, GameScalar, GameScalar),
+    GameOperator(GameNothing, "ctrlSetScale", function, A2CtrlSetScale, GameScalar, GameScalar),
     GameOperator(GameNothing, "groupSelectUnit", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameNothing, "setVehicleTiPars", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameArray, "unitsBelowHeight", function, A2EmptyArrayBinary, GameGroup | GameArray, GameScalar),
-    GameOperator(GameNothing, "addBackpack", function, A2NothingBinary, GameObject, GameString),
+    GameOperator(GameNothing, "addBackpack", function, A2AddBackpack, GameObject, GameString),
     GameOperator(GameNothing, "hcSetGroup", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameNothing, "hcRemoveGroup", function, A2NothingBinary, GameObject, GameGroup),
     GameOperator(GameNothing, "cutText", function, A2CutTextLayer, GameScalar, GameArray),

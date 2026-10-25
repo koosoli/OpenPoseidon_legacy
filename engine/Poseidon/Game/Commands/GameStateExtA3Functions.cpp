@@ -33,6 +33,7 @@
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <Poseidon/Game/Commands/GameStateExtA3Rsc.hpp>
 
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -240,6 +241,8 @@ std::string Header(const Function& fn)
            "'} else {_fnc_scriptName}; private _fnc_scriptName = '" + fn.name + "'; scriptName _fnc_scriptName;\n";
 }
 
+bool MissionFileExists(const char* name); // below
+
 bool Compile(const Function& fn, GameValue& value)
 {
     std::string path = fn.path;
@@ -248,9 +251,14 @@ bool Compile(const Function& fn, GameValue& value)
         value = CodeValue("_this execFSM \"" + path + "\"");
         return true;
     }
-    // a bank path is read as such, not relative to the mission
+    // a bank path is read as such, not relative to the mission -- except a bare file name of Arma 3's
+    // own config (BIS_fnc_missionConversationsLocal: "missionConversations.sqf", BIS_fnc_missionTasksLocal),
+    // which names the running mission's file: each mission brings its own
     if (fn.origin == Origin::Config && !path.empty() && path[0] != '\\')
-        path = "\\" + path;
+    {
+        const std::string inMission = std::string((const char*)GetMissionDirectory()) + path;
+        path = path.find('\\') == std::string::npos && MissionFileExists(path.c_str()) ? inMission : "\\" + path;
+    }
     std::string text;
     if (!PreprocessScriptFile(path.c_str(), text))
     {
@@ -370,6 +378,7 @@ void Arma3MissionStart()
     GameState* gs = GWorld ? GWorld->GetGameState() : nullptr;
     if (!gs || Arma1Compat::Generation() != 3)
         return;
+    Arma3Rsc::SetHudShown(true);
     Library& lib = CurrentLibrary();
     const bool contact = IsContactMission();
     const auto runs = [&](const std::string& key)

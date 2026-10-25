@@ -49,6 +49,43 @@ Display* CreateScriptDisplay(ControlsContainer* parent, const char* className);
 bool SetControlText(IControl* control, const RString& text);
 bool ControlText(IControl* control, RString& text);
 
+// Controls Arma 3's scripts make at run time (ctrlCreate) on a title display (cutRsc's stand-in
+// displays, Arma3Rsc) or the mission's (46): pictures and texts in controls groups, moved, scaled
+// and faded over time by ctrlSetPosition / ctrlSetScale / ctrlSetFade and ctrlCommit -- Old Man's
+// animated opening (BIS_fnc_animatedScreen), and the like. A control is a number from kFirst on;
+// its display's controls go when the display closes. Drawn each frame with the title effects.
+namespace Script
+{
+constexpr int kFirst = 300000;
+bool IsControl(float handle);
+int Create(int display, const RString& className, int idc, int group); // -1 when the class is unknown
+bool Delete(int control);
+int Find(int display, int idc);    // displayCtrl: -1 when it has none of ours
+int FindInGroup(int group, int idc); // controlsGroupCtrl
+int DisplayOf(int control);
+void SetPosition(int control, float x, float y, float w, float h, int which = -1); // which: 0..3 one of them
+bool Position(int control, float& x, float& y, float& w, float& h); // the committed position
+void Commit(int control, float seconds);
+bool Committed(int control);
+void SetFade(int control, float fade);
+float Fade(int control);
+void SetScale(int control, float scale);
+float Scale(int control);
+void SetAngle(int control, float angle);
+float Angle(int control);
+void SetText(int control, const RString& text);
+RString Text(int control);
+void SetTextColor(int control, float r, float g, float b, float a);
+void SetBackgroundColor(int control, float r, float g, float b, float a);
+void Show(int control, bool shown);
+bool Shown(int control);
+float TextHeight(int control);
+int Idc(int control);
+int Type(int control);
+RString ClassName(int control);
+void Draw();
+} // namespace Script
+
 // The entry chosen in a closed CreateContentDisplay screen.
 bool ContentChoice(ControlsContainer* display, bool& campaign, std::string& value);
 

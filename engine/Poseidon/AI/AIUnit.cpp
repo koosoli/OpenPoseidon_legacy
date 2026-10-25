@@ -1322,7 +1322,7 @@ void AIUnit::SetSpeaker(RString speaker, float pitch)
     const ParamEntry* entry = cfg.FindEntry(speaker);
     // --arma2: a CWA voice on an Arma 2 man (the player's, from the CWA profile) becomes an
     // Arma 2 voice of his kind, as every other Arma 2 man has.
-    if (entry && Arma1Compat::Generation() == 2)
+    if (entry && Arma1Compat::Generation() >= 2)
     {
         if (Person* person = GetPerson())
         {

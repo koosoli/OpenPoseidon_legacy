@@ -358,6 +358,21 @@ bool UiCoordinates()
     return UiCoordinateDepth() > 0;
 }
 
+namespace
+{
+bool g_hudShown = true;
+} // namespace
+
+void SetHudShown(bool shown)
+{
+    g_hudShown = shown;
+}
+
+bool HudShown()
+{
+    return g_hudShown;
+}
+
 // Registered before the macros and stubs: of two forms with the same arguments the first
 // registered is the one used.
 void Register()

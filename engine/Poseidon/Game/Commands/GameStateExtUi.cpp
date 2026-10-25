@@ -213,6 +213,53 @@ const ParamEntry* FindIdentity(RString name)
     return Poseidon::Arma1Compat::FindConfigClass("CfgIdentities", name);
 }
 
+// unit setSpeaker voice / unit setPitch pitch / unit setName name ([name, first, last] in Arma 3):
+// the identity's parts one at a time (Arma 3's campaigns set them so, a unit at a time)
+GameValue ObjSetSpeaker(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    VehicleWithBrain* person = dyn_cast<VehicleWithBrain>(GetObject(oper1));
+    if (!person || oper2.GetType() != GameString)
+        return NOTHING;
+    AIUnitInfo& info = person->GetInfo();
+    const RString speaker = oper2;
+    const bool known = (Pars >> "CfgVoice").FindEntry(speaker) != nullptr ||
+                       Poseidon::Arma1Compat::Arma2VoiceClass(speaker) != nullptr;
+    if (!known)
+        return NOTHING;
+    info._speaker = speaker;
+    if (person->Brain())
+        person->Brain()->SetSpeaker(info._speaker, info._pitch);
+    return NOTHING;
+}
+
+GameValue ObjSetPitch(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    VehicleWithBrain* person = dyn_cast<VehicleWithBrain>(GetObject(oper1));
+    if (!person || oper2.GetType() != GameScalar)
+        return NOTHING;
+    AIUnitInfo& info = person->GetInfo();
+    info._pitch = static_cast<float>(oper2);
+    if (person->Brain() && info._speaker.GetLength() > 0)
+        person->Brain()->SetSpeaker(info._speaker, info._pitch);
+    return NOTHING;
+}
+
+GameValue ObjSetName(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    VehicleWithBrain* person = dyn_cast<VehicleWithBrain>(GetObject(oper1));
+    if (!person)
+        return NOTHING;
+    if (oper2.GetType() == GameString)
+        person->GetInfo()._name = oper2;
+    else if (oper2.GetType() == GameArray)
+    {
+        const GameArrayType& a = oper2;
+        if (a.Size() > 0 && a[0].GetType() == GameString)
+            person->GetInfo()._name = a[0];
+    }
+    return NOTHING;
+}
+
 GameValue ObjSetIdentity(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     Object* obj = GetObject(oper1);
@@ -1138,10 +1185,14 @@ GameValue PlayMusic(const GameState* state, GameValuePar oper1)
         }
 
         SoundPars sound;
-        if (Poseidon::FindMusic(voice, sound))
+        const ParamEntry* found = Poseidon::FindMusic(voice, sound);
+        if (found)
         {
             GSoundScene->StartMusicTrack(sound, pos);
         }
+        if (Poseidon::Arma1Compat::Active())
+            LOG_INFO(Audio, "playMusic ['{}', {}]: {}", (const char*)voice, (float)pos,
+                     found ? (const char*)sound.name : "not in any CfgMusic, nothing plays");
         return NOTHING;
     }
 
@@ -1154,10 +1205,14 @@ GameValue PlayMusic(const GameState* state, GameValuePar oper1)
     }
 
     SoundPars sound;
-    if (Poseidon::FindMusic(voice, sound))
+    const ParamEntry* found = Poseidon::FindMusic(voice, sound);
+    if (found)
     {
         GSoundScene->StartMusicTrack(sound);
     }
+    if (Poseidon::Arma1Compat::Active())
+        LOG_INFO(Audio, "playMusic '{}': {}", (const char*)voice,
+                 found ? (const char*)sound.name : "not in any CfgMusic, nothing plays");
     return NOTHING;
 }
 GameValue SetMusicVolume(const GameState* state, GameValuePar oper1, GameValuePar oper2)
