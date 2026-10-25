@@ -131,6 +131,8 @@ GameValue ObjSetVectorDirectionAndUp(const GameState* state, GameValuePar oper1,
 GameValue GrpKnowsAbout(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue GroupCreate(const GameState* state, GameValuePar oper1);
 GameValue SideCivilian(const GameState* state);
+GameValue ArmaEnableSimulation(const GameState* state, GameValuePar oper1, GameValuePar oper2); // GameStateExtA3.cpp
+GameValue ArmaSimulationEnabled(const GameState* state, GameValuePar oper1);                    // GameStateExtA3.cpp
 GameValue CenterCreate(const GameState* state, GameValuePar oper1); // GameStateExtWorldConfig.cpp
 GameValue ListJoin(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -3325,6 +3327,7 @@ const GameFunction A2Unary[] = {
     GameFunction(GameNothing, "moveOut", A2MoveOut, GameObject),
     GameFunction(GameNothing, "playSound", A2PlaySoundArray, GameArray),
     GameFunction(GameObject, "unitBackpack", A2ObjNullUnary, GameObject),
+    GameFunction(GameBool, "simulationEnabled", ArmaSimulationEnabled, GameObject),
     GameFunction(GameNothing, "removeBackpack", A2RemoveBackpack, GameObject),
     GameFunction(GameNothing, "ctrlMapAnimCommit", A2NothingUnary, GameAny),
     GameFunction(GameString, "keyName", A2TextLogEmpty, GameScalar),
@@ -3454,6 +3457,7 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "hideObject", function, A2NothingBinary, GameObject, GameBool),
     GameOperator(GameNothing, "forceWalk", function, A2NothingBinary, GameObject, GameBool),
     GameOperator(GameNothing, "say2D", function, A2NothingBinary, GameObject, GameString | GameArray),
+    GameOperator(GameNothing, "enableSimulation", function, ArmaEnableSimulation, GameObject | GameGroup, GameBool),
     GameOperator(GameNothing, "ctrlSetScale", function, A2CtrlSetScale, GameScalar, GameScalar),
     GameOperator(GameNothing, "groupSelectUnit", function, A2NothingBinary, GameObject, GameArray),
     GameOperator(GameNothing, "setVehicleTiPars", function, A2NothingBinary, GameObject, GameArray),
