@@ -561,6 +561,7 @@ GameValue A1ConfigName(const GameState* state, GameValuePar oper1);
 GameValue A1ConfigCount(const GameState* state, GameValuePar oper1);
 GameValue A1ConfigSelect(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1InheritsFrom(const GameState* state, GameValuePar oper1);
+GameValue A1IsKindOfConfig(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1Min(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1Max(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1TypeName(const GameState* state, GameValuePar oper1);
@@ -2142,6 +2143,7 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameScalar, "distance", function, A1Distance, GameObject, GameArray),
         GameOperator(GameNothing, "moveInTurret", function, A1MoveInTurret, GameObject, GameArray),
         GameOperator(GameBool, "isKindOf", function, A1IsKindOf, GameObject | GameString, GameString),
+        GameOperator(GameBool, "isKindOf", function, A1IsKindOfConfig, GameString, GameArray),
         GameOperator(GameVoid, "do", function, A1SwitchDo, GameArray, GameString),
         GameOperator(GameNothing, ":", function, A1CaseCode, GameArray, GameString),
         GameOperator(GameNothing, "assignTeam", function, A1IgnoredBinary, GameObject, GameString),

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <vector>
 #include <Poseidon/Core/Types.hpp>
 #include <Poseidon/Core/Game/FixedStepAccumulator.hpp>
@@ -222,6 +223,10 @@ class World
 	Ref<CameraEffect> _cameraEffect;
 	Ref<TitleEffect> _titleEffect;
 	Ref<TitleEffect> _cutEffect;
+	// Arma 3's numbered cut layers ("10 cutText [...]"): one effect each, drawn in layer order
+	// with _cutEffect as layer 0; SetCutEffect fills the layer SetCutLayer chose
+	std::map<int, Ref<TitleEffect>> _cutLayers;
+	int _cutLayer = 0;
 	// A title / cut layer a script blacked the screen with (BLACK, BLACK OUT, BLACK FADED), and since
 	// when: Arma 3 missions lift a stuck one (LiftStuckBlack).
 	const TitleEffect* _blackEffect = nullptr;
@@ -499,7 +504,9 @@ class World
 	void ForceEnd(bool force = true) {_endForced = force;}
 
 	void SetCutEffect( TitleEffect *effect );
-	TitleEffect *GetCutEffect() const {return _cutEffect;}
+	TitleEffect *GetCutEffect() const {return _cutLayer == 0 ? _cutEffect.GetRef() : CutLayerEffect(_cutLayer);}
+	void SetCutLayer(int layer) {_cutLayer = layer;}
+	TitleEffect *CutLayerEffect(int layer) const {auto it = _cutLayers.find(layer); return it == _cutLayers.end() ? nullptr : it->second.GetRef();}
 	// The effect just set by titleText / cutText holds the screen black (see _blackEffect).
 	void NoteBlackEffect( const TitleEffect *effect );
 	// Arma 3 (--arma3): a mission whose scripts went black and never come back (they wait on Arma 3
