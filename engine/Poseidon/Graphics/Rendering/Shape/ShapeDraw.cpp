@@ -60,6 +60,8 @@ extern bool DisableTextures;
 
 namespace Poseidon
 {
+// LOAD-005, defined in ShapeLOD.cpp.
+bool ProbeSp3xOnlyMlod(const char* name);
 
 #ifdef _MSC_VER
 #pragma warning(disable : 4355)
@@ -1086,7 +1088,15 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
         const auto parseStart = ::Poseidon::Dev::Perf::Now();
         std::shared_ptr<Model::Model> model = std::move(preparsed);
         const bool arrivedPreparsed = model != nullptr;
-        if (!arrivedPreparsed)
+        // LOAD-005: an all-SP3X MLOD goes to the legacy loader below, which reads the file
+        // itself; parsing it here first only to learn that was 0.65 s of a 2.1 s load.
+        static const bool sp3xAdapterRequested = []
+        {
+            const char* v = std::getenv("POSEIDON_SP3X_ADAPTER");
+            return v && *v == '1';
+        }();
+        const bool legacySp3x = !arrivedPreparsed && !sp3xAdapterRequested && ProbeSp3xOnlyMlod(lowName);
+        if (!arrivedPreparsed && !legacySp3x)
         {
             Poseidon::ModelCache cache;
             model = cache.load(lowName, &parsedSourceBirth);
@@ -1153,7 +1163,7 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
         else
         {
             LOG_INFO(Graphics, "Shape loader: legacy path for {} (canonical format={})", lowName,
-                     model ? model->sourceFormat : "<unavailable>");
+                     model ? model->sourceFormat : (legacySp3x ? "MLOD/SP3X, probed" : "<unavailable>"));
             shape = new LODShapeWithShadow(lowName, reversed);
             ownedShape.reset(shape);
         }

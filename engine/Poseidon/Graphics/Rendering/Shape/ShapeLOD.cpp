@@ -926,6 +926,82 @@ static RString ReplacesChars(RString shapeName, char c, char w)
 
 bool GReplaceProxies = true;
 
+// LOAD-005: does `name` hold an MLOD whose every level is SP3X? Those go to the legacy loader
+// (ShapeBank::New), which reads the file itself -- so the canonical parse the bank ran first only
+// to learn the encodings (0.65 s of the owner's 2.1 s Peugeot load) was thrown away. This walks
+// the file the way Shape::LoadTagged reads it, seeking over the fixed-size point, normal and face
+// records and over each tag, and answers false at the first thing it does not expect, which
+// sends the load down the old path unchanged.
+bool ProbeSp3xOnlyMlod(const char* name)
+{
+    QIFStream f;
+    if (GFileServer)
+    {
+        GFileServer->Open(f, name);
+    }
+    else
+    {
+        f.open(name);
+    }
+    if (f.fail())
+    {
+        return false;
+    }
+    char magic[4];
+    f.read(magic, sizeof(magic));
+    int ver = 0;
+    int nLods = 0;
+    f.read((char*)&ver, sizeof(ver));
+    f.read((char*)&nLods, sizeof(nLods));
+    if (f.fail() || strncmp(magic, "MLOD", sizeof(magic)) || (ver >> 8) > 1 || nLods <= 0 || nLods > 256)
+    {
+        return false;
+    }
+    for (int lod = 0; lod < nLods; lod++)
+    {
+        DataHeaderEx head;
+        f.read((char*)&head, sizeof(head));
+        if (f.fail() || strncmp(head.magic, "SP3X", 4) || head.headSize < (int)sizeof(head) || head.nPos < 0 ||
+            head.nNorm < 0 || head.nFace < 0)
+        {
+            return false;
+        }
+        f.seekg(head.headSize - (int)sizeof(head), QIOS::cur);
+        f.seekg(head.nPos * (int)sizeof(DataPointEx), QIOS::cur);
+        f.seekg(head.nNorm * (int)sizeof(DataNormal), QIOS::cur);
+        f.seekg(head.nFace * (int)sizeof(DataFaceEx), QIOS::cur);
+        char tagg[4];
+        f.read(tagg, sizeof(tagg));
+        if (f.fail() || f.eof() || strncmp(tagg, "TAGG", sizeof(tagg)))
+        {
+            return false;
+        }
+        for (int t = 0;; t++)
+        {
+            char tagName[65] = {};
+            int tagSize = 0;
+            f.read(tagName, 64);
+            f.read((char*)&tagSize, sizeof(tagSize));
+            if (f.fail() || f.eof() || tagSize < 0 || t > 100000)
+            {
+                return false;
+            }
+            if (!strcmpi(tagName, "#EndOfFile#"))
+            {
+                break;
+            }
+            f.seekg(tagSize, QIOS::cur);
+        }
+        float resolution = 0;
+        f.read((char*)&resolution, sizeof(resolution));
+        if (f.fail() && lod + 1 < nLods)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 // LOAD-003: milliseconds on the steady clock, for the load-phase log lines.
 static double LoadNowMs()
 {
