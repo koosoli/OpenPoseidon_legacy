@@ -1371,10 +1371,10 @@ const ParamEntry* Arma1WeaponModeEntry(const ParamEntry& weapon, const char* key
 bool Arma1BallisticsOn()
 {
     static const bool on = [] {
-        const char* e = std::getenv("OP_A1_BALLISTICS");
+        const char* e = std::getenv(Generation() == 2 ? "OP_A2_BALLISTICS" : "OP_A1_BALLISTICS");
         return !(e && *e == '0');
     }();
-    return on && Generation() == 1;
+    return on && (Generation() == 1 || Generation() == 2);
 }
 
 // A generated CfgAmmo class A1a_<ammo> on the CWA ammunition `cwaAmmo` of the same kind
@@ -1580,7 +1580,12 @@ std::string Arma1VehicleWeaponsText(const ParamEntry& vehicle, std::string& summ
                         std::snprintf(line, sizeof(line), "\t\treloadTime=%g;\r\n", (float)*r);
                         mt += line;
                     }
-                    if (const ParamEntry* snd = Arma1WeaponModeEntry(*weapon, "sound"); snd && snd->IsArray() && snd->GetSize() >= 3)
+                    if (Generation() == 2)
+                    {
+                        if (const std::string shot = Arma2WeaponShot(*weapon); !shot.empty())
+                            mt += "\t\tsound[]={" + shot + "};\r\n";
+                    }
+                    else if (const ParamEntry* snd = Arma1WeaponModeEntry(*weapon, "sound"); snd && snd->IsArray() && snd->GetSize() >= 3)
                     {
                         const std::string file = (const char*)(RStringB)(*snd)[0];
                         if (!file.empty())
@@ -1721,7 +1726,13 @@ std::string Arma1VehicleWeaponsText(const ParamEntry& vehicle, std::string& summ
                 std::snprintf(line, sizeof(line), "\t\tautoFire=%d;\r\n", (int)*af ? 1 : 0);
                 text += line;
             }
-            if (const ParamEntry* s = Arma1WeaponModeEntry(*weapon, "sound"); s && s->IsArray() && s->GetSize() >= 3)
+            if (Generation() == 2)
+            {
+                // Arma 2's soundBegin/begin1 (or sound[] before 1.05), at its own volume and pitch
+                if (const std::string shot = Arma2WeaponShot(*weapon); !shot.empty())
+                    text += "\t\tsound[]={" + shot + "};\r\n";
+            }
+            else if (const ParamEntry* s = Arma1WeaponModeEntry(*weapon, "sound"); s && s->IsArray() && s->GetSize() >= 3)
             {
                 std::string file = (const char*)(RStringB)(*s)[0];
                 if (!file.empty())
@@ -2256,10 +2267,10 @@ RString Arma1ArmedCarCarrier(const RString& a1Name, const RString& cwaClass)
 bool Arma1VehicleWeapons()
 {
     static const bool on = [] {
-        const char* e = std::getenv("OP_A1_VEHICLE_WEAPONS");
+        const char* e = std::getenv(Generation() == 2 ? "OP_A2_VEHICLE_WEAPONS" : "OP_A1_VEHICLE_WEAPONS");
         return !(e && *e == '0');
     }();
-    return on && Generation() == 1;
+    return on && (Generation() == 1 || Generation() == 2);
 }
 
 bool Arma1CrewActions()
@@ -2635,6 +2646,24 @@ RString Arma2WeaponModelClass(const RString& name, const RString& cwaWeapon)
         LOG_INFO(Mission, "{}: weapon '{}' fires with {}", Label(), name.Data(),
                  shot.empty() ? std::string("the CWA sound (no Arma 3 shot found)") : shot);
     }
+    // Arma 2: its own shot (the first sample of its first fire mode, at Arma 2's volume and
+    // pitch), its own empty click and magazine change, instead of the CWA carrier's
+    // (OP_A2_WEAPON_SOUNDS=0 keeps CWA's). The shot plays for every mode of the muzzle.
+    static const bool a2Sounds = [] {
+        const char* e = std::getenv("OP_A2_WEAPON_SOUNDS");
+        return !(e && *e == '0');
+    }();
+    if (Generation() == 2 && a2Sounds)
+    {
+        const std::string shot = Arma2WeaponShot(*a2);
+        if (!shot.empty())
+            text += "\t\ta3SoundShot[]={" + shot + "};\r\n";
+        for (const char* key : {"drySound", "reloadMagazineSound"})
+            if (const std::string t = Arma2SoundTriple(a2->FindEntry(key)); !t.empty())
+                text += std::string("\t\t") + key + "[]={" + t + "};\r\n";
+        LOG_INFO(Mission, "{}: weapon '{}' fires with {}", Label(), name.Data(),
+                 shot.empty() ? std::string("the CWA sound (no Arma 2 shot installed)") : shot);
+    }
     // OFP weapons often list magazines[]={this}: the magazine is the weapon class itself
     // (M60, RPGLauncher, LAWLauncher). Inherited, "this" would name the generated class,
     // which no soldier carries -- the weapon stayed empty (A1x_M240 with M60 belts: 0
@@ -2887,7 +2916,7 @@ bool WeaponListsGeneratedMagazine(const char* weaponClass, const char* magazine)
 
 RString Arma1MagazineClass(const RString& name, const RString& cwaMagazine)
 {
-    if (Generation() != 1 || !ConfigLoaded() || !Arma1OwnWeapons() || name.GetLength() == 0 ||
+    if ((Generation() != 1 && Generation() != 2) || !ConfigLoaded() || !Arma1OwnWeapons() || name.GetLength() == 0 ||
         cwaMagazine.GetLength() == 0 || _stricmp(name.Data(), cwaMagazine.Data()) == 0 ||
         _strnicmp(name.Data(), "A1x_", 4) == 0)
         return cwaMagazine;
@@ -3582,8 +3611,30 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
             // An unarmed Arma 2 vehicle on an armed CWA one drops the CWA weapons: the C-130J
             // flew on CWA's UH-60 with its Zuni rockets, the fishing boat on the armed BoatW
             // with a Browning (run 19 census). The gunner's seat stays.
+            // An armed one fires its own weapons, rebuilt on CWA ones as Arma 1's are
+            // (Arma1VehicleWeaponsText: its rounds, rate of fire, muzzle velocity, sound and
+            // damage on the CWA weapon of its kind); OP_A2_VEHICLE_WEAPONS=0 keeps the CWA
+            // carrier's. Aircraft carry their pilot's and their gunner's weapons.
+            bool rebuilt = false;
+            const bool air = sim == "helicopter" || sim == "airplane";
+            if (Generation() == 2 && Arma1VehicleWeapons() && Arma2VehicleArmed(*a1))
+            {
+                const ParamEntry* gunner = cwa->FindEntry("hasGunner");
+                if (air || (gunner && !gunner->IsClass() && !gunner->IsArray() && (int)*gunner == 1))
+                {
+                    std::string summary;
+                    const std::string lines = Arma1VehicleWeaponsText(*a1, summary, air);
+                    if (!lines.empty())
+                    {
+                        text += lines;
+                        rebuilt = true;
+                    }
+                    if (!summary.empty())
+                        LOG_INFO(Mission, "{}: '{}' weapons:{}", Label(), missionClass.Data(), summary);
+                }
+            }
             if (const ParamEntry* cwaWeapons = cwa->FindEntry("weapons");
-                cwaWeapons && cwaWeapons->IsArray() && cwaWeapons->GetSize() > 0 && !Arma2VehicleArmed(*a1))
+                !rebuilt && cwaWeapons && cwaWeapons->IsArray() && cwaWeapons->GetSize() > 0 && !Arma2VehicleArmed(*a1))
                 text += "\t\tweapons[]={};\r\n\t\tmagazines[]={};\r\n";
             // Arma 3: its own engine (or rotor) instead of the CWA carrier's
             if (Generation() == 3)

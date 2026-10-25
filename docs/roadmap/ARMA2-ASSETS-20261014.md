@@ -552,7 +552,7 @@ worked off one by one (voices, animals, vehicle/weapon values, mimic/glasses/con
 - `02f8318`: the binary `execFSM` runs its FSM (an ignoring Arma 1 entry was matched first:
   no FSM started with arguments ever ran). `71ca6b5`/`e20e161`: `moveTo` (a silent doMove),
   `moveToCompleted` (unitReady), `moveToFailed`. Measured: sheep graze and wander; T01's cows
-  stand (open).
+  stand (solved in `418e2fa`, below).
 - Run 39 showed what else now runs (ALICE, SILVIE, ambient modules, SOM, the missions' own
   FSMs) and the commands it lacks (`isFlatEmpty`, `nearObjectsReady`, `selectBestPlaces` with 5
   arguments, `setUnconscious`, `setGroupIcon`, `nearTargets`, `triggerText`,
@@ -566,6 +566,17 @@ worked off one by one (voices, animals, vehicle/weapon values, mimic/glasses/con
   `setGroupIcon` (not drawn), `removeAllItems`. `30c060e`: the str_EW2 crash
   (Turret::AnimateMatrix on a level or selection the shape lacks). Run 41 measures all 98 with
   `OP_A2_EXECFSM=all`.
+- `ae36d97`: those commands are registered from the Arma 2 module (run 41 still lacked them:
+  their own module was dropped by the linker). `3270c87`: `switch` is kept per script, and a
+  dropped script's switch is forgotten (run 42's two crashes, HuntersHunted and TE15_UAVs).
+  `da45c45`: `actionKeysNames` gives a string, a task without destination is at [0,0,0].
+  Run 43 (all FSMs): 98 entered, 96 clean, no crash.
+- `418e2fa`: an animal of a mission's AMBIENT LIFE has no group, and only a unit in a group
+  moves; it is added to a civilian group of its own on its first `moveTo` (`join` takes no
+  unit without a group, so `5495a1e` did nothing). Measured in T01: **the cows walk** and play
+  their idle moves; the sheep graze, walk and spread.
+- `eae0482`: groups keep their high-command icons and icon parameters (`getGroupIcons`, ...),
+  not drawn yet.
 
 ## Steps
 

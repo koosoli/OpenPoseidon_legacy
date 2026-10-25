@@ -353,6 +353,46 @@ std::string Arma3WeaponShotSound(const ParamEntry& weapon)
     return std::string();
 }
 
+// A sound array of an Arma 2 config ({file, volume, pitch[, distance]}) as the three values
+// an OFP sound takes, `"\\file.wss",volume,pitch`; empty when the file is not installed.
+std::string Arma2SoundTriple(const ParamEntry* a)
+{
+    if (!a || !a->IsArray() || a->GetSize() < 3)
+        return std::string();
+    const std::string file = ExistingSoundFile((const char*)(*a)[0].GetValue());
+    if (file.empty())
+        return std::string();
+    char tail[64];
+    std::snprintf(tail, sizeof(tail), ",%g,%g", (float)(*a)[1], (float)(*a)[2]);
+    return "\"" + file + "\"" + tail;
+}
+
+// An Arma 2 weapon's shot, from its first fire mode: soundBegin[] names the samples it picks
+// from (begin1, begin2 ...; the first is taken), Arma 2 before 1.05 writes sound[]. With
+// Arma 2's own volume and pitch; empty when none of them is installed.
+std::string Arma2WeaponShot(const ParamEntry& weapon)
+{
+    const ParamEntry* mode = &weapon;
+    if (const ParamEntry* modes = weapon.FindEntry("modes"); modes && modes->IsArray() && modes->GetSize() > 0)
+    {
+        const std::string first = (const char*)(*modes)[0].GetValue();
+        if (Lower(first) != "this")
+            if (const ParamEntry* m = weapon.FindEntry(first.c_str()); m && m->IsClass())
+                mode = m;
+    }
+    for (const ParamEntry* c : {mode, &weapon})
+    {
+        if (const ParamEntry* begin = c->FindEntry("soundBegin"); begin && begin->IsArray())
+            for (int i = 0; i < begin->GetSize(); i += 2)
+                if (std::string t = Arma2SoundTriple(c->FindEntry((const char*)(*begin)[i].GetValue())); !t.empty())
+                    return t;
+        for (const char* key : {"begin1", "sound"})
+            if (std::string t = Arma2SoundTriple(c->FindEntry(key)); !t.empty())
+                return t;
+    }
+    return std::string();
+}
+
 // The ambient loop of the Arma 3 sound environment (CfgEnvSounds' soundSetEnvironment[]) that
 // plays in CWA's EnvSounds slot: 0 sea, 1 trees, 2 meadows, 3 hills, 4 rain. Arma 3 mixes
 // these sets by expressions over forest, houses, sea, wind and height; CWA's sound map
