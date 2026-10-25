@@ -1304,6 +1304,7 @@ void AirplaneAuto::FireWeaponEffects(int weapon, const Magazine* magazine, Entit
             case AmmoShotBullet:
                 _mGunClouds.Start(0.1);
                 _mGunFire.Start(0.1, 0.4, true);
+                ArmaVehicleMuzzleBurst(Type()->_gunPos, Type()->_gunDir.SquareSize() > 0.5f ? Type()->_gunDir : VForward, mode);
                 _mGunFireFrames = 1;
                 _mGunFireTime = Glob.uiTime;
                 int newPhase;

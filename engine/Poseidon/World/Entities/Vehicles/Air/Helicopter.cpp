@@ -141,14 +141,40 @@ void HelicopterType::InitShape()
     // disc is what shows at flight RPM, and that now swaps correctly.
     _rotorH.Init(_shape, "velka vrtule", nullptr, "velka osa");
     _rotorV.Init(_shape, "mala vrtule", "tail rotor", "mala osa");
-    _hRotorStill.Init(_shape, "velka vrtule staticka", "main rotor static");
-    _hRotorMove.Init(_shape, "velka vrtule blur", "main rotor blur");
-    _vRotorStill.Init(_shape, "mala vrtule staticka", "tail rotor static");
-    _vRotorMove.Init(_shape, "mala vrtule blur", "tail rotor blur");
-    _missileLPos = _shape->MemoryPoint("L strela");
-    _missileRPos = _shape->MemoryPoint("P strela");
-    _rocketLPos = _shape->MemoryPoint("L raketa");
-    _rocketRPos = _shape->MemoryPoint("P raketa");
+    // Arma 1 (the AH-1Z) names its blades by the model.cfg skeleton -- "mainrotor" and
+    // "tailrotor" turning about "mainrotor_axis"/"tailrotor_axis" in the memory LOD -- and
+    // keeps "velka vrtule" only in the hit LOD: its rotors stood still with the engine on.
+    {
+        const auto visual = [this](const AnimationRotation& a) { return _shape->NLevels() > 0 && a.GetSelection(0) >= 0; };
+        Shape* memory = _shape->MemoryLevel();
+        if (!visual(_rotorH) && _shape->LevelOpaque(0) && _shape->LevelOpaque(0)->FindNamedSel("mainrotor") >= 0)
+            _rotorH.Init(_shape, "mainrotor", nullptr, "mainrotor_axis", nullptr,
+                         memory && memory->FindNamedSel("mainrotor_axis") >= 0);
+        if (!visual(_rotorV) && _shape->LevelOpaque(0) && _shape->LevelOpaque(0)->FindNamedSel("tailrotor") >= 0)
+            _rotorV.Init(_shape, "tailrotor", nullptr, "tailrotor_axis", nullptr,
+                         memory && memory->FindNamedSel("tailrotor_axis") >= 0);
+    }
+    // the still and blurred blades by the names the class gives (Arma 1: selectionHRotorStill
+    // "mainRotorStatic" ...), else the OFP and Arma 3 ones
+    const auto selName = [&par](const char* key, const char* fallback) -> RStringB {
+        if (const ParamEntry* e = par.FindEntry(key); e && !e->IsClass() && !e->IsArray())
+            if (const RStringB v = *e; v.GetLength() > 0)
+                return v;
+        return RStringB(fallback);
+    };
+    const RStringB hStill = selName("selectionHRotorStill", "velka vrtule staticka");
+    const RStringB hMove = selName("selectionHRotorMove", "velka vrtule blur");
+    const RStringB vStill = selName("selectionVRotorStill", "mala vrtule staticka");
+    const RStringB vMove = selName("selectionVRotorMove", "mala vrtule blur");
+    _hRotorStill.Init(_shape, hStill, "main rotor static");
+    _hRotorMove.Init(_shape, hMove, "main rotor blur");
+    _vRotorStill.Init(_shape, vStill, "tail rotor static");
+    _vRotorMove.Init(_shape, vMove, "tail rotor blur");
+    // an Arma 1 class names its own (the AH-1Z's Rocket_1/Missile_1 ...)
+    _missileLPos = ConfigMemoryPoint(par, _shape, "memoryPointLMissile", "L strela");
+    _missileRPos = ConfigMemoryPoint(par, _shape, "memoryPointRMissile", "P strela");
+    _rocketLPos = ConfigMemoryPoint(par, _shape, "memoryPointLRocket", "L raketa");
+    _rocketRPos = ConfigMemoryPoint(par, _shape, "memoryPointRRocket", "P raketa");
     _mainRotorDiveAxis = _shape->MemoryPoint("predni osa naklonu");
     _backRotorDiveAxis = _shape->MemoryPoint("zadni osa naklonu");
 
@@ -259,6 +285,7 @@ void HelicopterType::InitShape()
 
     // turret animations
     _turret.InitShape(par >> "Turret", _shape);
+    _turret.ArmaGunPoints(par, _shape);
 
     _gunDir = _turret._dir;
     _gunPos = _turret._pos;
@@ -1461,11 +1488,22 @@ void Helicopter::Animate(int level)
     else
     {
         // Some distant LODs have blades but no blur selection. Keep their
-        // rotating blades rather than hiding the only rotor geometry.
-        if (Type()->_hRotorMove.GetSelection(level) >= 0)
+        // rotating blades rather than hiding the only rotor geometry. An Arma 1
+        // blur selection holds only a PROXY (mi17_rotor_blur_proxy), which is not
+        // drawn: the Mi-17's and UH-60's rotor vanished at full speed. Such a
+        // "disc" of a few vertices counts as none, and the blades keep turning.
+        const auto realDisc = [this, level](const AnimationSection& blur) {
+            const int sel = blur.GetSelection(level);
+            return sel >= 0 && _shape->Level(level) && _shape->Level(level)->NamedSel(sel).Size() > 8;
+        };
+        if (realDisc(Type()->_hRotorMove))
             Type()->_hRotorStill.Hide(_shape, level);
-        if (Type()->_vRotorMove.GetSelection(level) >= 0)
+        else
+            Type()->_hRotorMove.Hide(_shape, level);
+        if (realDisc(Type()->_vRotorMove))
             Type()->_vRotorStill.Hide(_shape, level);
+        else
+            Type()->_vRotorMove.Hide(_shape, level);
     }
     if (Type()->_rotorH.GetSelection(level) >= 0)
     {

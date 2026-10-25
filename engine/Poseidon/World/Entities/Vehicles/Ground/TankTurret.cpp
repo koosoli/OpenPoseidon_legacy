@@ -313,11 +313,67 @@ void TurretType::InitShape(const ParamEntry& cfg, LODShape* shape)
              (const char*)gunEnd, shape->MemoryPointExists(gunEnd) ? "found" : "MISSING", _dir.X(), _dir.Y(), _dir.Z(),
              _minTurn * (180 / H_PI), _maxTurn * (180 / H_PI), _minElev * (180 / H_PI), _maxElev * (180 / H_PI));
 
+    _muzzle = shape->MemoryPointExists(gunBeg) ? shape->MemoryPoint(gunBeg) : _pos;
+
     RString bodyName = cfg >> "body";
     RString gunName = cfg >> "gun";
 
     _body.Init(shape, bodyName, nullptr);
     _gun.Init(shape, gunName, nullptr);
+}
+
+namespace
+{
+RStringB VehicleName(const ParamEntry& vehicle, const char* key)
+{
+    const ParamEntry* e = vehicle.FindEntry(key);
+    if (!e || e->IsClass() || e->IsArray())
+        return RStringB();
+    return *e;
+}
+} // namespace
+
+Vector3 ConfigMemoryPoint(const ParamEntry& vehicle, LODShape* shape, const char* key, const char* fallback)
+{
+    const RStringB name = VehicleName(vehicle, key);
+    if (name.GetLength() > 0 && shape->MemoryPointExists(name))
+        return shape->MemoryPoint(name);
+    return shape->MemoryPoint(fallback);
+}
+
+bool TurretType::ArmaGunPoints(const ParamEntry& vehicle, LODShape* shape)
+{
+    const RStringB beg = VehicleName(vehicle, "a1GunBeg");
+    const RStringB end = VehicleName(vehicle, "a1GunEnd");
+    const RStringB gun = VehicleName(vehicle, "a1GunPoint");
+    bool changed = false;
+    if (beg.GetLength() > 0 && end.GetLength() > 0 && shape->MemoryPointExists(beg) && shape->MemoryPointExists(end))
+    {
+        const Vector3 b = shape->MemoryPoint(beg);
+        const Vector3 e = shape->MemoryPoint(end);
+        if (b.Distance2(e) > 1e-6f)
+        {
+            _pos = (b + e) * 0.5f;
+            _dir = (b - e).Normalized();
+            _muzzle = b;
+            _neutralXRot = atan2(_dir.Y(), _dir.SizeXZ());
+            changed = true;
+        }
+    }
+    // Arma fires from memoryPointGun: the Mi-17's PKT and the AH-1Z's M197, whose models
+    // have no "usti hlavne" -- CWA's point read as the model origin, up over the engines
+    if (gun.GetLength() > 0 && shape->MemoryPointExists(gun))
+    {
+        _pos = shape->MemoryPoint(gun);
+        if (!changed)
+            _muzzle = _pos;
+        changed = true;
+    }
+    if (changed)
+        LOG_INFO(Graphics, "{}: Arma gun points '{}'/'{}'/'{}' -> fires from {:.2f},{:.2f},{:.2f} dir {:.2f},{:.2f},{:.2f}",
+                 (const char*)shape->GetName(), (const char*)beg, (const char*)end, (const char*)gun, _pos.X(), _pos.Y(),
+                 _pos.Z(), _dir.X(), _dir.Y(), _dir.Z());
+    return changed;
 }
 
 Turret::Turret()

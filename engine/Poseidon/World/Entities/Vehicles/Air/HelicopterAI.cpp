@@ -1035,6 +1035,10 @@ void HelicopterAuto::FireWeaponEffects(int weapon, const Magazine* magazine, Ent
             case AmmoShotBullet:
                 _mGunClouds.Start(0.1);
                 _mGunFire.Start(0.1, 0.4, true);
+                {
+                    Matrix4Val gun = GunTransform();
+                    ArmaVehicleMuzzleBurst(gun.FastTransform(Type()->_turret._muzzle), gun.Rotate(Type()->_gunDir), mode);
+                }
                 _mGunFireFrames = 1;
                 _mGunFireTime = Glob.uiTime;
                 int newPhase;

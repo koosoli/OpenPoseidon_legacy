@@ -168,6 +168,7 @@ void MotorcycleType::InitShape()
     if (_hasTurret)
     {
         _turret.InitShape(par >> "Turret", _shape);
+        _turret.ArmaGunPoints(par, _shape);
     }
 
     _animFire.Init(_shape, "zasleh", nullptr);

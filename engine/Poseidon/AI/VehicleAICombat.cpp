@@ -3,6 +3,8 @@
 #include <Poseidon/AI/AIDangerList.hpp> // AI-XRAY-004: typed dangers
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/MuzzleBurst.hpp>
+#include <algorithm>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
 #include <Poseidon/World/World.hpp>
@@ -1890,6 +1892,30 @@ Vector3 EntityAI::GetWeaponCenter(int weapon) const
 {
     // in model coordinates
     return VZero;
+}
+
+void EntityAI::ArmaVehicleMuzzleBurst(Vector3Par muzzleModel, Vector3Par dirModel, const WeaponModeType* mode)
+{
+    if (!mode || !mode->_ammo || !GetType() || !GetType()->_par)
+        return;
+    const ParamEntry* want = GetType()->_par->FindEntry("a1MuzzleFlash");
+    if (!want || want->IsClass() || want->IsArray() || (int)*want == 0)
+        return;
+    const Vector3 muzzle = GetHierachyParent() ? WorldTransform().FastTransform(muzzleModel) : PositionModelToWorld(muzzleModel);
+    Vector3 dir = GetHierachyParent() ? WorldTransform().Rotate(dirModel) : DirectionModelToWorld(dirModel);
+    if (dir.SquareSize() < 1e-6f)
+        dir = Direction();
+    static std::uint32_t shots = 0;
+    const Vector3 carrier = WorldSpeed();
+    Poseidon::render::MuzzleBurstShot shot;
+    shot.muzzle = {muzzle.X(), muzzle.Y(), muzzle.Z()};
+    shot.forward = {dir.X(), dir.Y(), dir.Z()};
+    shot.carrier = {carrier.X(), carrier.Y(), carrier.Z()};
+    shot.birthMs = Glob.time.toInt();
+    shot.size = std::clamp(std::sqrt(std::max(mode->_ammo->hit, 1.0f) / 8.0f), 0.55f, 1.8f);
+    shot.seed = ++shots * 2654435761u ^ std::uint32_t(reinterpret_cast<std::uintptr_t>(this) >> 4) ^
+                std::uint32_t(shot.birthMs);
+    Poseidon::render::RecordMuzzleBurst(shot);
 }
 
 Vector3 EntityAI::GetWeaponPoint(int weapon) const
