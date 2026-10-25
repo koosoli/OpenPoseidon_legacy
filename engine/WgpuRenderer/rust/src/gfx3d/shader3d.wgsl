@@ -617,6 +617,16 @@ fn earth_tile_albedo(atlas: u32, samp: u32, lut: u32, ref19: vec2<f32>, off19: v
 // imagery's), at group 4 beside the terrain heightmap. Read in the vertex stage only (conform mode 3).
 @group(4) @binding(4) var earth_heights: texture_2d<f32>;
 @group(4) @binding(5) var earth_height_lut: texture_2d<f32>;
+// The terrain sun shadow (gfx3d/earth_shadow.rs): two cascades side by side, each texel the height a point must be
+// above to see the sun; and their placement: c0, c1 = (world x, z of the corner, texel metres, samples a side),
+// info = (tan sun elevation, 1 when valid, ...).
+struct EarthShadowPlace {
+    c0: vec4<f32>,
+    c1: vec4<f32>,
+    info: vec4<f32>,
+};
+@group(4) @binding(6) var earth_shadow_map: texture_2d<f32>;
+@group(4) @binding(7) var<uniform> earth_shadow_place: EarthShadowPlace;
 const EH_PER_ROW: i32 = 16;  // EarthHeightCache::SlotsPerRow
 const EH_ROWS: i32 = 17;     // EarthHeightCache::LookupRowsPerLevel
 const EH_MAX_LEVEL: i32 = 15;
@@ -768,6 +778,36 @@ fn earth_node_point(n: EarthNode, uv: vec2<f32>, h: f32) -> vec4<f32> {
     let drop = 2.0 * sq * sq + n.cos_p0 * cp * hav;
     let world = vec3<f32>(EH_ANCHOR + EH_RADIUS * east, h - EH_RADIUS * drop, EH_ANCHOR + EH_RADIUS * north);
     return vec4<f32>(world - frame.cam_pos.xyz, cp);
+}
+// How much of the sun reaches the Earth ground at world point p [0, 1]: from the finer cascade where p is inside
+// it (with a margin to blend), else the coarser, else 1. The edge is softened over about a texel of rise.
+fn earth_shadow_cascade(c: vec4<f32>, offset: f32, p: vec3<f32>) -> f32 {
+    let t = (p.xz - c.xy) / c.z - 0.5;
+    let base = floor(t);
+    let f = t - base;
+    let n = i32(c.w);
+    let i = clamp(vec2<i32>(base), vec2<i32>(0), vec2<i32>(n - 2));
+    let o = vec2<i32>(i32(offset), 0);
+    let a = textureLoad(earth_shadow_map, o + i, 0).x;
+    let b = textureLoad(earth_shadow_map, o + i + vec2<i32>(1, 0), 0).x;
+    let cc = textureLoad(earth_shadow_map, o + i + vec2<i32>(0, 1), 0).x;
+    let d = textureLoad(earth_shadow_map, o + i + vec2<i32>(1, 1), 0).x;
+    let threshold = mix(mix(a, b, f.x), mix(cc, d, f.x), f.y);
+    // a texel of rise (at this sun) of bias, so the threshold's own coarseness never shades a lit slope, and as
+    // much again of soft edge
+    let band = c.z * (0.5 + earth_shadow_place.info.x) + 2.0;
+    return smoothstep(threshold - band, threshold + band, p.y + band);
+}
+fn earth_terrain_lit(p: vec3<f32>) -> f32 {
+    if (earth_shadow_place.info.y < 0.5) { return 1.0; }
+    let c0 = earth_shadow_place.c0;
+    let c1 = earth_shadow_place.c1;
+    let in0 = min(min(p.x - c0.x, p.z - c0.y), min(c0.x + c0.z * c0.w - p.x, c0.y + c0.z * c0.w - p.z));
+    let in1 = min(min(p.x - c1.x, p.z - c1.y), min(c1.x + c1.z * c1.w - p.x, c1.y + c1.z * c1.w - p.z));
+    if (in1 <= c1.z) { return 1.0; }
+    let far = mix(1.0, earth_shadow_cascade(c1, c1.w, p), smoothstep(c1.z, 8.0 * c1.z, in1));
+    if (in0 <= c0.z) { return far; }
+    return mix(far, earth_shadow_cascade(c0, 0.0, p), smoothstep(c0.z, 64.0 * c0.z, in0));
 }
 fn earth_node_level(dist: f32, cos_lat: f32) -> f32 {
     return clamp(log2(40075016.0 * max(cos_lat, 0.01) / (256.0 * max(dist, 1.0) * EH_DETAIL)), 0.0, f32(EH_MAX_LEVEL));
@@ -1881,6 +1921,19 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         // real-world line from latitude and season), by altitude above the globe rather than the flat
         // frame's Y, which drops with curvature and stripped distant peaks. Cliffs stay bare.
         var surface = srgb_to_linear(albedo);
+        // The sea floor: past a few metres of water the imagery photographs the sea's surface, not its floor, and its
+        // zooms (and sources: Esri, EOX where Esri fails) disagree about the sea's colour -- under the drawn sea
+        // that showed as rings round the camera (Helgoland at 9 km, 2026-10-25). A silt seabed there, as far up as
+        // the sea is drawn (tw_water.wgsl EARTH_SEA_CEILING); above that the imagery is the ocean.
+        {
+            let floor_abs = in.world_pos + frame.cam_pos.xyz;
+            let floor_h = length(floor_abs - earth_centre) - 6378137.0;
+            let cam_alt = length(frame.cam_pos.xyz - earth_centre) - 6378137.0;
+            let floor_w = smoothstep(-6.0, -20.0, floor_h) * (1.0 - smoothstep(30000.0, 40000.0, cam_alt));
+            if (floor_w > 0.0) {
+                surface = mix(surface, vec3<f32>(0.13, 0.12, 0.09), floor_w);
+            }
+        }
         // Beaches: Tidewater's sand (earth_tw_sand) on pale, warm, gentle ground from a few metres under
         // the sea to a few above it -- OFP's sand on a placed island, real beaches in the imagery. The
         // detail tile rides in the Stage1 slot (normal_map.z: bound).
@@ -1951,6 +2004,10 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             let world = in.world_pos + frame.cam_pos.xyz;
             let shift = sun_to.xz / max(sun_to.y, 0.05) * max(world.y, 0.0);
             sun_occlusion = sun_occlusion * cloud_sun_shadow(world.xz - shift);
+#ifdef WHOLE_WORLD
+            // The mountains' shadows (earth_shadow.rs): the Earth ground is no shadow-map caster
+            sun_occlusion = sun_occlusion * earth_terrain_lit(world);
+#endif
         }
         var light = material.sun_ambient.rgb * ambient_occlusion * twilight + material.sun_diffuse.rgb * daylight * sun_occlusion;
         var glint = vec3<f32>(0.0);

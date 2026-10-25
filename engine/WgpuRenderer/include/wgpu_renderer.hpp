@@ -2596,6 +2596,10 @@ extern "C"
     WGR_API void wgr_earth_heights(WgrRenderer* renderer, WgrTexture atlas, WgrTexture lookup);
     /* Whole world: the sea floor beyond the terrain heightmap's window, for Tidewater's depth colour -- n x n world
      * heights (height less the curvature drop) from (originX, originZ) every `cell` metres. Copied. */
+    /* Whole world terrain sun shadow (gfx3d/earth_shadow.rs): the camera's world x, z and the origin (degrees) each
+     * frame the elevation pyramid's ground is drawn; enabled 0 when it is not (the moon). */
+    WGR_API void wgr_earth_shadow_input(WgrRenderer* renderer, uint32_t enabled, float camX, float camZ, double latitude,
+                                        double longitude);
     WGR_API void wgr_water_set_far_floor(WgrRenderer* renderer, const float* heights, uint32_t n, float originX,
                                          float originZ, float cell);
 

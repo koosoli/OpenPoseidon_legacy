@@ -77,6 +77,10 @@ struct OceanParams {
 // Earth presentation belongs to the material: the wake kernel also consumes
 // tw_common.wgsl, but deliberately has no TwSurface binding.
 fn earthWater() -> bool { return tw.detail.w > 0.5; }
+// The Earth sea is drawn to EARTH_SEA_CEILING (camera metres; WaterWgpu::DrawEarthWater's EarthSeaCeiling), fading
+// into the imagery from EARTH_SEA_FADE_START.
+const EARTH_SEA_FADE_START: f32 = 30000.0;
+const EARTH_SEA_CEILING: f32 = 40000.0;
 fn earthWaterDrop(xz: vec2<f32>) -> f32 {
     if (!earthWater()) { return 0.0; }
     let d = xz - vec2<f32>(6400.0);
@@ -1230,7 +1234,10 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let camBelow = frame.cam_pos.y < waterLevelAt(frame.cam_pos.xz);
         if (thickness <= 0.0 || (!camBelow && dot(earthWaterNormal(pos.xz), -rel) <= 0.0) ||
             in.clip.z < _waterSceneDepthAt(screenUV)) { discard; }
-        let fade = 1.0 - smoothstep(6000.0, 8000.0, frame.cam_pos.y);
+        // From high up the sea becomes the imagery (WaterWgpu::DrawEarthWater stops drawing it at the top of
+        // this band). It did so from 6-8 km, where the imagery's zooms (and its sources: Esri, EOX where Esri
+        // fails) disagree about the sea's colour and drew rings round the camera (Helgoland at 9 km, 2026-10-25).
+        let fade = 1.0 - smoothstep(EARTH_SEA_FADE_START, EARTH_SEA_CEILING, frame.cam_pos.y);
         let base = textureSampleLevel(waterSceneColor, smpLinearClamp, screenUV, 0.0).rgb;
         res = mix(base, res, fade);
     }

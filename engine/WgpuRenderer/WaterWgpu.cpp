@@ -881,12 +881,16 @@ void WaterWgpu::QueueRainWater(bool enabled)
     if (_rainWaterHasSurface) _engine.SubmitRainWaterMarker();
 }
 
+// Up to here the Earth sea is drawn; tw_water.wgsl fades it into the imagery over its last 10 km (EARTH_SEA_CEILING).
+// It was 8 km, and the imagery that showed from there drew rings round the camera on the sea.
+static constexpr float EarthSeaCeiling = 40000.0f;
+
 void WaterWgpu::DrawEarthWater(Scene& scene, float originX, float originZ, float grid, uint32_t samples)
 {
     Camera* camera = scene.GetCamera();
     const auto& look = _engine.WaterLook();
     if (!_renderer || !camera || !look.enabled || !EarthStreaming::Enabled() || EarthStreaming::MoonFrameActive() ||
-        camera->Position().Y() >= 8000.0f || samples < 2 || grid <= 0.0f)
+        camera->Position().Y() >= EarthSeaCeiling || samples < 2 || grid <= 0.0f)
         return;
     static const bool forceCurrentOp = [] {
         const char* value = std::getenv("WGR_WATER_BACKEND");

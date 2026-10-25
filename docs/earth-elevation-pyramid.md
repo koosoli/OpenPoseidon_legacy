@@ -103,3 +103,21 @@ Phase 4 (terrain shadows and sky visibility from the pyramid, the patch gameplay
 - **Known, not fixed:** above 8 km the Earth sea is not drawn and the sea is the imagery, whose zooms (Esri, and EOX
   where Esri fails) disagree about the sea's colour: rings round the camera. A faint dark diagonal in the clear
   shallow sea off Helgoland's dune predates tonight.
+
+## 2026-10-25 day: mountains cast shadows; the sea is drawn to 40 km
+
+- **Terrain sun shadow** (`gfx3d/earth_shadow.rs` + `.wgsl`): the Earth ground had no terrain shadow at all (it is
+  no shadow-map caster, and the island's terrain shadow map does not reach it). A compute pass marches from each
+  texel of two cascades round the camera (512^2 each: 16 m over 8 km, 128 m over 65 km) toward the sun across the
+  pyramid's heights (bilinear) and stores the height a point must be above to see the sun; shader3d's Earth branch
+  compares its own height (bias and soft edge of a texel's rise). A new map is computed into the back texture 32
+  rows a frame when the sun moved ~0.25 degrees or the camera a quarter of the fine cascade, and shown only when
+  whole. `POSEIDON_EARTH_TERRAIN_SHADOW=0` turns it off. In a quiet Alps flight it cost nothing measurable (GPU
+  median 7.5 ms with and without).
+- **The sea from altitude:** the Earth sea stopped at 8 km in three places (WaterWgpu::DrawEarthWater, the
+  Tidewater prepare, the water shader's fade); above that the sea was the imagery, whose zooms and sources disagree
+  about its colour -- rings round the camera. It is now drawn to 40 km, fading into the imagery from 30 km
+  (`EARTH_SEA_CEILING`, in all three). Under it the floor below 6 m of water is a silt colour instead of the
+  imagery's photograph of the surface. Its GPU cost at 9-35 km was not measured on a quiet machine.
+- Not done: far off from altitude a few low coasts the coarse data puts under the sea are covered by it (a
+  per-pixel land test against the scene depth striped the sea and was dropped).

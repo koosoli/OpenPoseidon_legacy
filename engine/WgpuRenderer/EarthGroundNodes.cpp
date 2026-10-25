@@ -258,6 +258,9 @@ void EarthGroundNodes::Draw(double cameraX, double cameraY, double cameraZ, doub
                                              {cameraX - Earth::Anchor, Earth::Radius + cameraY, cameraZ - Earth::Anchor});
     const auto tWanted = std::chrono::steady_clock::now();
     _heights->Want(camera.latitude, camera.longitude, wanted);
+    // the terrain sun shadow's maps follow the camera (gfx3d/earth_shadow.rs)
+    static const bool terrainShadow = [] { const char* v = std::getenv("POSEIDON_EARTH_TERRAIN_SHADOW"); return !(v && v[0] == '0'); }();
+    wgr_earth_shadow_input(_renderer, terrainShadow ? 1u : 0u, float(cameraX), float(cameraZ), originLatitude, originLongitude);
     const auto tWant = std::chrono::steady_clock::now();
     _heights->Install();
     const auto tInstall = std::chrono::steady_clock::now();

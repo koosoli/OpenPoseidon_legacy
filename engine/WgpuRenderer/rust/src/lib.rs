@@ -5466,6 +5466,9 @@ impl Renderer {
         // vertex barrier. No-op when the bake is off or there is no skinned geometry.
         frame_lap.mark("early:part1");
         self.gfx3d.skin_bake(&mut encoder);
+        // (OP) Whole World: the next rows of the terrain sun shadow under way (read by this frame's Earth ground
+        // only once a whole map is done; see gfx3d/earth_shadow.rs).
+        self.gfx3d.earth_shadow_update(&self.device, &self.queue, &mut encoder, &self.textures);
 
         // GPU cull compute (Stage 3): culls + LOD-selects the retained scene into the
         // indirect args the colour pass consumes. Recorded before the render passes so

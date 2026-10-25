@@ -61,6 +61,10 @@ use std::sync::Arc;
 use crate::ffi::{WgrCamera, WgrWaterParams};
 
 /// The water shader: the material plus the shoreline-wave module appended to it (one module).
+/// (OP) The Earth sea is drawn up to this camera height (m); tw_water.wgsl's EARTH_SEA_CEILING and WaterWgpu::DrawEarthWater's
+/// EarthSeaCeiling are the same. It was 8 km, and the imagery's sea from there drew rings round the camera.
+pub(crate) const EARTH_SEA_CEILING: f32 = 40000.0;
+
 pub(crate) const TW_WATER_WGSL: &str = concat!(
     include_str!("tw_water.wgsl"),
     "\n",
@@ -1268,7 +1272,7 @@ impl Tidewater {
         // Params persist when the C++ producer stops submitting near water. Retire
         // its selection as we leave that altitude band, rather than simulating a
         // no-longer-drawn ocean during the whole trip to space.
-        if earth_preview(&p) && cam.cam_pos[1] >= 8000.0 {
+        if earth_preview(&p) && cam.cam_pos[1] >= EARTH_SEA_CEILING {
             self.instance_count = 0;
             return;
         }

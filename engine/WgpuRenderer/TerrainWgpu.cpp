@@ -4490,6 +4490,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         if(_earthGrass){EngineWgpu::AcquireProducerWindow("Earth grass moon");wgr_grass_clear_earth_ground(_renderer);_earthGrass=false;}
         _engine.ClearEarthTreeObjects();_earthTreeModels=false;
         _engine.ClearEarthWorldgenObjects();
+        wgr_earth_shadow_input(_renderer,0,0.0f,0.0f,0.0,0.0); // no Earth mountains to shade the moon
         // The object shaders' cave test compares every pixel with the terrain heightmap: the Earth patch
         // left in it (the Alps stand 4 km over the moon frame's surface) put the moon underground, and a
         // soldier there was lit as deep in a cave -- black. A flat heightmap far below takes it out; the

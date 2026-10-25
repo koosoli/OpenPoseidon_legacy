@@ -3,6 +3,7 @@ use slotmap::{Key, KeyData, SlotMap};
 use wgpu::util::DeviceExt;
 
 pub(crate) mod pool;
+pub(crate) mod earth_shadow;
 mod allocation_report;
 mod mesh_facts;
 #[cfg(test)]
@@ -2670,6 +2671,10 @@ struct ConformGroup {
     // 4 and 5, read by vs_main's conform mode 3. A 1x1 stand-in until the Earth gives its textures.
     earth_dummy: wgpu::TextureView,
     bound_earth: [u64; 2],
+    // Whole World terrain sun shadow (earth_shadow.rs): its front map at binding 6, the map's placement at 7
+    earth_shadow_dummy: wgpu::TextureView,
+    earth_shadow_buf: wgpu::Buffer,
+    bound_shadow: u64,
 }
 
 impl ConformGroup {
@@ -2744,6 +2749,27 @@ impl ConformGroup {
                         sample_type: wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
+                    },
+                    count: None,
+                },
+                // Whole World terrain sun shadow (earth_shadow.rs): the map and its placement, for the ground's shading.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(48),
                     },
                     count: None,
                 },
@@ -2850,10 +2876,36 @@ impl ConformGroup {
                 view_formats: &[],
             })
             .create_view(&wgpu::TextureViewDescriptor::default());
+        let earth_shadow_dummy = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("wgr_3d_conform_earth_shadow_dummy"),
+                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let earth_shadow_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_3d_conform_earth_shadow"),
+            size: 48,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wgr_3d_conform_bind_dummy"),
             layout: &layout,
             entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&earth_shadow_dummy),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: earth_shadow_buf.as_entire_binding(),
+                },
                 wgpu::BindGroupEntry {
                     binding: 4,
                     resource: wgpu::BindingResource::TextureView(&earth_dummy),
@@ -2889,6 +2941,9 @@ impl ConformGroup {
             bound_gen: u64::MAX,
             earth_dummy,
             bound_earth: [0, 0],
+            earth_shadow_dummy,
+            earth_shadow_buf,
+            bound_shadow: u64::MAX,
         }
     }
 
@@ -2919,9 +2974,14 @@ impl ConformGroup {
         holes: &wgpu::Buffer,
         // the whole world's height atlas and lookup (texture ids, and their views; ids 0: the stand-in)
         earth: ([u64; 2], Option<(&wgpu::TextureView, &wgpu::TextureView)>),
+        // the terrain sun shadow's front map (its generation, view; None: the stand-in) and its placement
+        shadow: (u64, Option<&wgpu::TextureView>, [[f32; 4]; 3]),
     ) {
         queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(params));
-        if self.bind.is_none() || self.bound_gen != generation || self.bound_earth != earth.0 {
+        queue.write_buffer(&self.earth_shadow_buf, 0, bytemuck::cast_slice(&shadow.2));
+        let shadow_gen = if shadow.1.is_some() { shadow.0 } else { 0 };
+        if self.bind.is_none() || self.bound_gen != generation || self.bound_earth != earth.0 || self.bound_shadow != shadow_gen {
+            let shadow_view = shadow.1.unwrap_or(&self.earth_shadow_dummy);
             let (earth_atlas, earth_lookup) = earth.1.unwrap_or((&self.earth_dummy, &self.earth_dummy));
             self.gpu_bind = Some(Self::make_gpu_bind(device, &self.gpu_layout, heightmap_view, &self.params_buf, snow, holes));
             self.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2952,10 +3012,19 @@ impl ConformGroup {
                         binding: 5,
                         resource: wgpu::BindingResource::TextureView(earth_lookup),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureView(shadow_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: self.earth_shadow_buf.as_entire_binding(),
+                    },
                 ],
             }));
             self.bound_gen = generation;
             self.bound_earth = earth.0;
+            self.bound_shadow = shadow_gen;
         }
     }
 }
@@ -4683,6 +4752,8 @@ pub struct Gfx3d {
     conform: ConformGroup,
     // the whole world's elevation pyramid (wgr_earth_heights): atlas and lookup texture ids, 0 = none
     earth_heights: [u64; 2],
+    // the whole world's terrain sun shadow (earth_shadow.rs)
+    pub earth_shadow: earth_shadow::EarthShadow,
     gi: gi::GiProbes, // REN-GI-001
     // Per-draw world matrix, one entry per draw slot, read-only storage indexed by
     // instance_index (the draw's base_instance). Uploaded in a single write_buffer.
@@ -6435,6 +6506,7 @@ impl Gfx3d {
             cameras,
             conform,
             earth_heights: [0, 0],
+            earth_shadow: earth_shadow::EarthShadow::new(device),
             gi,
             world,
             palette,
@@ -9337,6 +9409,18 @@ impl Gfx3d {
         self.earth_heights = [atlas, lookup];
     }
 
+    /// The whole world's terrain sun shadow: the next rows of a map under way (before the scene's passes).
+    pub fn earth_shadow_update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder,
+                               textures: &SharedTextures) {
+        if self.earth_heights[0] == 0 || self.earth_heights[1] == 0 {
+            return;
+        }
+        let atlas = textures.texture_view(self.earth_heights[0]);
+        let lookup = textures.texture_view(self.earth_heights[1]);
+        let to_sun = self.sun_dir;
+        self.earth_shadow.update(device, queue, encoder, Some((self.earth_heights, &atlas, &lookup)), to_sun);
+    }
+
     pub fn set_surface_rays(&self, queue: &wgpu::Queue, params: &[[f32; 4]; 4]) {
         queue.write_buffer(&self.cameras.surface_rays_buf, 0, bytemuck::cast_slice(params));
     }
@@ -9395,8 +9479,11 @@ impl Gfx3d {
         // (group 4) so vs_main can conform ClipLand vegetation to SurfaceY per vertex.
         let earth_views = (self.earth_heights[0] != 0 && self.earth_heights[1] != 0)
             .then(|| (textures.texture_view(self.earth_heights[0]), textures.texture_view(self.earth_heights[1])));
+        let (shadow_view, shadow_params) = self.earth_shadow.front();
+        let shadow_live = earth_views.is_some() && shadow_params[2][1] > 0.5;
         self.conform.ensure(device, queue, heightmap_view, heightmap_gen, conform_params, snow, holes,
-                            (if earth_views.is_some() { self.earth_heights } else { [0, 0] }, earth_views));
+                            (if earth_views.is_some() { self.earth_heights } else { [0, 0] }, earth_views),
+                            (self.earth_shadow.generation, shadow_live.then_some(shadow_view), shadow_params));
         // DZ-003: take Sky's reflection env map. The env texture is created once and never
         // resized, so gen 0 binds it exactly once and this is a no-op every frame after.
         // Both the per-draw group-1 binds (below) and the GPU-driven group-1 binds
