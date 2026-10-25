@@ -38,6 +38,16 @@ const WRECK_Z: u32 = 48;
 /// below this wind (m/s) a plume rises: the upright box
 const PLUME_WIND: f32 = 0.8;
 const JACOBI: u32 = 24;
+/// FIRE-MG: WGR_FIRE_MG=N solves the pressure with N multigrid V-cycles (fire_sim.wgsl cs_mg_*)
+/// instead of the JACOBI sweeps; 0 or unset keeps the Jacobi solve. One V(2,2) cycle costs about
+/// seven fine-grid sweeps against the Jacobi solve's 24 and removes the large-scale error Jacobi
+/// leaves behind.
+fn mg_cycles() -> u32 {
+    static V: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_FIRE_MG").ok().and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(0).min(4))
+}
+/// sweeps on the coarsest multigrid level (a few hundred cells)
+const MG_COARSE_SWEEPS: u32 = 8;
 const STEP: f32 = 1.0 / 60.0;
 /// How long a smoke-only plume's box keeps the smoke in the air after its source stops (seconds;
 /// WGR_FIRE_SMOKE_LINGER). The 2001 puffs a smoke grenade drops live their cloudletDuration after it
@@ -163,6 +173,39 @@ fn make_tex(device: &wgpu::Device, label: &str, format: wgpu::TextureFormat, siz
     (t, v)
 }
 
+/// Halve the box while every side stays even and at least 3 cells (40x72x40 -> 20x36x20 ->
+/// 10x18x10 -> 5x9x5), at most three coarse levels.
+fn mg_dims(size: (u32, u32, u32)) -> Vec<(u32, u32, u32)> {
+    let mut out = Vec::new();
+    let mut d = size;
+    while out.len() < 3 && d.0 % 2 == 0 && d.1 % 2 == 0 && d.2 % 2 == 0 && d.0.min(d.1).min(d.2) >= 6 {
+        d = (d.0 / 2, d.1 / 2, d.2 / 2);
+        out.push(d);
+    }
+    out
+}
+
+fn mg_levels(device: &wgpu::Device, size: (u32, u32, u32)) -> Vec<MgLevel> {
+    let r = wgpu::TextureFormat::R32Float;
+    mg_dims(size)
+        .into_iter()
+        .map(|d| MgLevel {
+            e: [make_tex(device, "wgr_fire_mg_e_a", r, d), make_tex(device, "wgr_fire_mg_e_b", r, d)],
+            rhs: make_tex(device, "wgr_fire_mg_rhs", r, d),
+            res: make_tex(device, "wgr_fire_mg_res_c", r, d),
+            groups: (d.0.div_ceil(4), d.1.div_ceil(4), d.2.div_ceil(4)),
+        })
+        .collect()
+}
+
+/// One coarse multigrid level of a box: the correction (ping-pong), its right-hand side and residual.
+struct MgLevel {
+    e: [Tex; 2],
+    rhs: Tex,
+    res: Tex,
+    groups: (u32, u32, u32),
+}
+
 struct Grid {
     key: u32,
     fields: [Tex; 2],
@@ -172,6 +215,9 @@ struct Grid {
     expansion: Tex,
     div: Tex,
     pres: [Tex; 2],
+    /// FIRE-MG: the fine residual and the coarse levels (empty unless WGR_FIRE_MG is set)
+    mg_res: Option<Tex>,
+    mg: Vec<MgLevel>,
     cur: usize,
     pcur: usize,
     params: wgpu::Buffer,
@@ -218,6 +264,11 @@ pub struct FireSystem {
     divergence: wgpu::ComputePipeline,
     jacobi: wgpu::ComputePipeline,
     project: wgpu::ComputePipeline,
+    mg_smooth: wgpu::ComputePipeline,
+    mg_residual: wgpu::ComputePipeline,
+    mg_restrict: wgpu::ComputePipeline,
+    mg_zero: wgpu::ComputePipeline,
+    mg_prolong: wgpu::ComputePipeline,
     sampler: wgpu::Sampler,
     dummy_rgba_in: Tex,
     dummy_r_in: Tex,
@@ -487,6 +538,11 @@ impl FireSystem {
             divergence: cp("cs_divergence"),
             jacobi: cp("cs_jacobi"),
             project: cp("cs_project"),
+            mg_smooth: cp("cs_mg_smooth"),
+            mg_residual: cp("cs_mg_residual"),
+            mg_restrict: cp("cs_mg_restrict"),
+            mg_zero: cp("cs_mg_zero"),
+            mg_prolong: cp("cs_mg_prolong"),
             sim_layout,
             sampler,
             dummy_rgba_in,
@@ -819,11 +875,14 @@ impl FireSystem {
         let c = g.cur;
         let n = 1 - c;
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("wgr_fire_step"), timestamp_writes: None });
+        // the dispatch size: the box's, or a coarse multigrid level's while one is being solved
+        let level_groups = std::cell::Cell::new(groups);
         let mut run = |pipeline: &wgpu::ComputePipeline, b: Binds| {
             let bg = self.bind(device, &g.params, b);
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &bg, &[]);
-            pass.dispatch_workgroups(groups.0, groups.1, groups.2);
+            let gr = level_groups.get();
+            pass.dispatch_workgroups(gr.0, gr.1, gr.2);
         };
         let none = || Binds { fields: None, vel: None, aux: None, p: None, d: None, out_rgba: None, out_r: None };
         if g.needs_clear {
@@ -864,9 +923,54 @@ impl FireSystem {
             run(&self.clear, Binds { out_r: Some(&g.pres[pc].1), ..none() });
         } else {
             run(&self.divergence, Binds { vel: Some(&g.vel[c].1), d: Some(&g.expansion.1), out_r: Some(&g.div.1), ..none() });
-            for _ in 0..JACOBI {
-                run(&self.jacobi, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
-                pc = 1 - pc;
+            if let (Some(res0), false) = (&g.mg_res, g.mg.is_empty()) {
+                // FIRE-MG: V(2,2) cycles, warm-started from the last step's pressure like the Jacobi solve
+                let last = g.mg.len() - 1;
+                let mut ec = vec![0usize; g.mg.len()];
+                for _ in 0..mg_cycles() {
+                    for _ in 0..2 {
+                        run(&self.mg_smooth, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
+                        pc = 1 - pc;
+                    }
+                    run(&self.mg_residual, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&res0.1), ..none() });
+                    let mut fine_res = &res0.1;
+                    for (li, lv) in g.mg.iter().enumerate() {
+                        level_groups.set(lv.groups);
+                        run(&self.mg_restrict, Binds { d: Some(fine_res), out_r: Some(&lv.rhs.1), ..none() });
+                        run(&self.mg_zero, Binds { out_r: Some(&lv.e[0].1), ..none() });
+                        ec[li] = 0;
+                        for _ in 0..if li == last { MG_COARSE_SWEEPS } else { 2 } {
+                            run(&self.mg_smooth, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&lv.rhs.1), out_r: Some(&lv.e[1 - ec[li]].1), ..none() });
+                            ec[li] = 1 - ec[li];
+                        }
+                        if li < last {
+                            run(&self.mg_residual, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&lv.rhs.1), out_r: Some(&lv.res.1), ..none() });
+                            fine_res = &lv.res.1;
+                        }
+                    }
+                    for li in (0..last).rev() {
+                        let (lv, co) = (&g.mg[li], &g.mg[li + 1]);
+                        level_groups.set(lv.groups);
+                        run(&self.mg_prolong, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&co.e[ec[li + 1]].1), out_r: Some(&lv.e[1 - ec[li]].1), ..none() });
+                        ec[li] = 1 - ec[li];
+                        for _ in 0..2 {
+                            run(&self.mg_smooth, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&lv.rhs.1), out_r: Some(&lv.e[1 - ec[li]].1), ..none() });
+                            ec[li] = 1 - ec[li];
+                        }
+                    }
+                    level_groups.set(groups);
+                    run(&self.mg_prolong, Binds { p: Some(&g.pres[pc].1), d: Some(&g.mg[0].e[ec[0]].1), out_r: Some(&g.pres[1 - pc].1), ..none() });
+                    pc = 1 - pc;
+                    for _ in 0..2 {
+                        run(&self.mg_smooth, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
+                        pc = 1 - pc;
+                    }
+                }
+            } else {
+                for _ in 0..JACOBI {
+                    run(&self.jacobi, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
+                    pc = 1 - pc;
+                }
             }
         }
         run(&self.project, Binds { vel: Some(&g.vel[c].1), p: Some(&g.pres[pc].1), out_rgba: Some(&g.vel[n].1), ..none() });
@@ -1155,6 +1259,8 @@ impl Grid {
             expansion: make_tex(device, "wgr_fire_expansion", r, size),
             div: make_tex(device, "wgr_fire_div", r, size),
             pres: [make_tex(device, "wgr_fire_p_a", r, size), make_tex(device, "wgr_fire_p_b", r, size)],
+            mg_res: (mg_cycles() > 0).then(|| make_tex(device, "wgr_fire_mg_res", r, size)),
+            mg: if mg_cycles() > 0 { mg_levels(device, size) } else { Vec::new() },
             cur: 0,
             pcur: 0,
             params: device.create_buffer(&wgpu::BufferDescriptor {
@@ -1269,6 +1375,22 @@ mod tests {
                 .validate(&module)
                 .unwrap_or_else(|e| panic!("{name}: {e:?}"));
         }
+    }
+
+    /// FIRE-MG: every box shape coarsens exactly (no fractional cells) through at least two levels.
+    #[test]
+    fn multigrid_levels_halve_every_box_exactly() {
+        for size in [(NX, NY, NZ), (PX, PY, PZ), (STACK_X, STACK_Y, STACK_Z), (STACK_UP_X, STACK_UP_Y, NZ), (WRECK_X, WRECK_Y, WRECK_Z)] {
+            let levels = mg_dims(size);
+            assert!(levels.len() >= 2, "{size:?} -> {levels:?}");
+            let mut prev = size;
+            for d in levels {
+                assert_eq!((d.0 * 2, d.1 * 2, d.2 * 2), prev, "{size:?}");
+                assert!(d.0.min(d.1).min(d.2) >= 3, "{size:?}");
+                prev = d;
+            }
+        }
+        assert_eq!(mg_dims((40, 72, 40)), vec![(20, 36, 20), (10, 18, 10), (5, 9, 5)]);
     }
 
     #[test]

@@ -446,3 +446,95 @@ fn cs_project(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (speed > cap) { v = v * (cap / speed); }
     textureStore(outRgba, id, vec4<f32>(enforce(id, v), 0.0));
 }
+
+// FIRE-MG (WGR_FIRE_MG=N): the pressure solve as N multigrid V-cycles instead of the 24 Jacobi
+// iterations -- the scheme Fire Pro's solver used and procedural-fire (MIT, research/webgpu.md)
+// measured: one V(2,2) cycle cuts the residual ~10x where 40 Jacobi sweeps reach ~0.67. Each kernel
+// works on whichever level it is bound to: the level's size is its output texture's (the input's for
+// the restriction's fine side), its cell size the box's scaled by the box/level width ratio. Same
+// equation and boundaries as cs_jacobi: h^2-scaled right-hand side, zero pressure on the open sides
+// and top, mirror at the ground and in solid cells (a coarse cell is solid if its centre is).
+fn lvH(n: vec3<i32>) -> f32 { return S.origin_cell.w * f32(S.dims.x) / f32(n.x); }
+fn lvSolid(id: vec3<i32>, n: vec3<i32>) -> bool {
+    return solidAt(S.origin_cell.xyz + (vec3<f32>(id) + 0.5) * lvH(n));
+}
+fn lvP(id: vec3<i32>, here: f32, n: vec3<i32>) -> f32 {
+    if (id.y < 0 && S.dims.w == 1u) { return here; }
+    if (any(id < vec3<i32>(0)) || any(id >= n)) { return 0.0; }
+    if (lvSolid(id, n)) { return here; }
+    return textureLoad(pIn, id, 0).x;
+}
+fn lvSum(id: vec3<i32>, here: f32, n: vec3<i32>) -> f32 {
+    return lvP(id + vec3<i32>(1, 0, 0), here, n) + lvP(id - vec3<i32>(1, 0, 0), here, n)
+         + lvP(id + vec3<i32>(0, 1, 0), here, n) + lvP(id - vec3<i32>(0, 1, 0), here, n)
+         + lvP(id + vec3<i32>(0, 0, 1), here, n) + lvP(id - vec3<i32>(0, 0, 1), here, n);
+}
+
+// damped Jacobi smoother (weight 6/7, the usual one for the 7-point Laplacian)
+@compute @workgroup_size(4, 4, 4)
+fn cs_mg_smooth(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let id = vec3<i32>(gid);
+    let n = vec3<i32>(textureDimensions(outR));
+    if (any(id >= n)) { return; }
+    let here = textureLoad(pIn, id, 0).x;
+    var rhs = textureLoad(dIn, id, 0).x;
+    if (lvSolid(id, n)) { rhs = 0.0; }
+    let jac = (lvSum(id, here, n) - rhs) / 6.0;
+    textureStore(outR, id, vec4<f32>(here + 0.857142857 * (jac - here), 0.0, 0.0, 0.0));
+}
+
+// residual of the h^2-scaled equation: rhs - (sum - 6 p)
+@compute @workgroup_size(4, 4, 4)
+fn cs_mg_residual(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let id = vec3<i32>(gid);
+    let n = vec3<i32>(textureDimensions(outR));
+    if (any(id >= n)) { return; }
+    var r = 0.0;
+    if (!lvSolid(id, n)) {
+        let here = textureLoad(pIn, id, 0).x;
+        r = textureLoad(dIn, id, 0).x - (lvSum(id, here, n) - 6.0 * here);
+    }
+    textureStore(outR, id, vec4<f32>(r, 0.0, 0.0, 0.0));
+}
+
+// fine residual (dIn) -> coarse right-hand side (outR): the mean of the 8 children, x4 because the
+// coarse equation is scaled by its own cell size squared, (2h)^2
+@compute @workgroup_size(4, 4, 4)
+fn cs_mg_restrict(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let id = vec3<i32>(gid);
+    let n = vec3<i32>(textureDimensions(outR));
+    if (any(id >= n)) { return; }
+    let nf = vec3<i32>(textureDimensions(dIn));
+    var s = 0.0;
+    for (var k = 0; k < 8; k++) {
+        let c = min(id * 2 + vec3<i32>(k & 1, (k >> 1) & 1, (k >> 2) & 1), nf - 1);
+        s += textureLoad(dIn, c, 0).x;
+    }
+    textureStore(outR, id, vec4<f32>(s * 0.5, 0.0, 0.0, 0.0));
+}
+
+@compute @workgroup_size(4, 4, 4)
+fn cs_mg_zero(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let id = vec3<i32>(gid);
+    if (any(id >= vec3<i32>(textureDimensions(outR)))) { return; }
+    textureStore(outR, id, vec4<f32>(0.0));
+}
+
+// fine value (pIn) + the coarse correction (dIn) interpolated trilinearly -> outR
+@compute @workgroup_size(4, 4, 4)
+fn cs_mg_prolong(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let id = vec3<i32>(gid);
+    let n = vec3<i32>(textureDimensions(outR));
+    if (any(id >= n)) { return; }
+    let nc = vec3<i32>(textureDimensions(dIn));
+    let q = (vec3<f32>(id) + 0.5) * 0.5 - 0.5;
+    let b = vec3<i32>(floor(q));
+    let f = q - vec3<f32>(b);
+    var e = 0.0;
+    for (var k = 0; k < 8; k++) {
+        let o = vec3<i32>(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+        let w = select(1.0 - f, f, vec3<bool>(o == vec3<i32>(1)));
+        e += textureLoad(dIn, clamp(b + o, vec3<i32>(0), nc - 1), 0).x * w.x * w.y * w.z;
+    }
+    textureStore(outR, id, vec4<f32>(textureLoad(pIn, id, 0).x + e, 0.0, 0.0, 0.0));
+}
