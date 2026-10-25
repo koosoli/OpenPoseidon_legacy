@@ -2459,6 +2459,11 @@ const Macro kMacros2[] = {
      "private _t = ((_this select 1) select 0); if ((toLower _t) find 'mp' == 0) then {_t = _t select [2]}; "
      "(_this select 0) addEventHandler [_t, (_this select 1) select 1]"},
     {"removeMPEventHandler", 'b', GameNothing, GameObject, GameArray, ""},
+    // agent setDestination [position, planningMode, forceReplan]: an agent here is a unit in a
+    // civilian group of its own (createAgent), so it goes there by Arma 2's moveTo (Tac-Ops'
+    // civilian presence walks Old Man's townsfolk so)
+    {"setDestination", 'b', GameNothing, GameObject, GameArray,
+     "private _p = (_this select 1) param [0, []]; if (count _p >= 2) then {(_this select 0) moveTo _p}"},
     {"removeAllMPEventHandlers", 'b', GameNothing, GameObject, GameString, ""},
     // Arma 3's control forms of list, slider and display commands this engine knows only
     // with an [idc, ...] argument (counted over Arma 3's own scripts: lbSetCurSel 227 times,

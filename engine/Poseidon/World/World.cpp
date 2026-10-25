@@ -1832,6 +1832,30 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 }
             }
         }
+        // A non-finite view draws nothing at all, and every view after it eases from it, so the
+        // screen stayed black for good (Old Man after its intro: "camera -nan, -nan, -nan"). Such
+        // a frame keeps the last finite view; the first one says where it came from.
+        {
+            static Matrix4 lastFinite;
+            static bool haveFinite = false;
+            const auto finite = [](Vector3Par v)
+            { return std::isfinite(v.X()) && std::isfinite(v.Y()) && std::isfinite(v.Z()); };
+            if (finite(transform.Position()) && finite(transform.Direction()) && finite(transform.DirectionUp()))
+            {
+                lastFinite = transform;
+                haveFinite = true;
+            }
+            else
+            {
+                static int reported = 0;
+                if (reported++ < 3)
+                    LOG_WARN(World, "Camera view not finite (camType {}, effect {}, on {}): kept the last finite view",
+                             static_cast<int>(_camType), _cameraEffect ? "yes" : "no",
+                             cameraVehicle ? (const char*)cameraVehicle->GetDebugName() : "none");
+                if (haveFinite)
+                    transform = lastFinite;
+            }
+        }
         camera.SetTransform(transform);
 
         if (cameraVehicle)
@@ -2086,7 +2110,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
         if (enableDraw)
         {
-            if (!_showMap && IsDisplayEnabled() && !suppressWorld)
+            // HasMap, not _showMap: the map hides the world only when there is one. Old Man starts
+            // with _showMap set and no map display (shownMap true, visibleMap false), and the world
+            // went black once its intro camera handed back to the player.
+            if (!HasMap() && IsDisplayEnabled() && !suppressWorld)
             {
                 {
                     LandBegEnd objBegEnd;
