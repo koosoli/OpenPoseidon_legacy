@@ -64,6 +64,7 @@ struct UwParams {
     torch_col: vec4<f32>,       // irradiance in the core (Tidewater units), w: core radius (m)
     torch_shape: vec4<f32>,     // x: cone shaping exponent, y: beam in-scatter strength, z: the whole world's open sea (uwLightLeg, its curved datum)
     probe: vec4<f32>,           // (W9a) the probe grid: camera x, z, step (m), size (0 = none)
+    lens: vec4<f32>,            // LENS-FILM: seconds since the eye left the water (< 0: dry), strength, time
 };
 
 @group(0) @binding(0) var<uniform> uw: UwParams;
@@ -291,6 +292,45 @@ fn uwLit(m: f32, sigT: vec3<f32>, sigL: vec3<f32>, zc: f32, dirY: f32, dist: f32
     return select((e0 - e1) / kk, e0 * dist, abs(kk) < vec3<f32>(1e-4));
 }
 
+// LENS-FILM: the water left on the lens after surfacing (minamo's idea, MIT). A sheet drains from the
+// top of the frame within ~3 s, rivulets run down where it has drained, and beads stay behind a
+// little longer; all of it refracts the view by the slope of the water's height on the glass.
+fn uwFilmHash(p: vec2<f32>) -> f32 {
+    return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
+}
+fn uwFilmNoise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = p - i;
+    let u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(uwFilmHash(i), uwFilmHash(i + vec2<f32>(1.0, 0.0)), u.x),
+               mix(uwFilmHash(i + vec2<f32>(0.0, 1.0)), uwFilmHash(i + vec2<f32>(1.0, 1.0)), u.x), u.y);
+}
+// height of the water on the lens (in units of the strongest bend), uv with y down
+fn uwFilmHeight(uv: vec2<f32>, t: f32, aspect: f32) -> f32 {
+    let wet = 1.0 - smoothstep(0.8, 4.0, t);
+    let drained = t * 0.42 - 0.08; // share of the frame, from the top, the sheet has left
+    let n = uwFilmNoise(vec2<f32>(uv.x * 7.0 * aspect, uv.y * 3.0 - t * 0.7));
+    let sheet = smoothstep(drained - 0.06, drained + 0.14, uv.y + (n - 0.5) * 0.14) * wet;
+    // rivulets: narrow tracks down the drained part, a few per screen width
+    let cx = uv.x * 30.0 * aspect;
+    let ci = floor(cx);
+    let hc = uwFilmHash(vec2<f32>(ci, 7.0));
+    let wob = (uwFilmNoise(vec2<f32>(ci * 3.1, uv.y * 6.0)) - 0.5) * 0.5;
+    let track = smoothstep(0.32, 0.0, abs(fract(cx) - 0.5 - wob)) * step(hc, 0.3);
+    let riv = track * smoothstep(drained - 0.5, drained, uv.y) * (1.0 - smoothstep(0.6, 3.2, t + hc));
+    // beads where the sheet has gone: one per cell at most, a dome of radius r
+    let g = vec2<f32>(uv.x * 26.0 * aspect, uv.y * 26.0);
+    let gi = floor(g);
+    let gh = vec2<f32>(uwFilmHash(gi), uwFilmHash(gi + vec2<f32>(17.0, 3.0)));
+    let r = 0.12 + 0.22 * uwFilmHash(gi + vec2<f32>(5.0, 11.0));
+    let d = length(fract(g) - (0.25 + 0.5 * gh)) / r;
+    let beadOn = step(uwFilmHash(gi + vec2<f32>(9.0, 2.0)), 0.4) * step(uv.y, drained + 0.05)
+        * (1.0 - smoothstep(3.0, LENS_BEAD_LIFE, t + gh.x));
+    let bead = sqrt(max(1.0 - d * d, 0.0)) * beadOn;
+    return sheet * (0.6 + 0.4 * n) + riv * 0.7 + bead * 1.6;
+}
+const LENS_BEAD_LIFE: f32 = 6.0;
+
 @fragment
 fn fs_uw(in: UwOut) -> @location(0) vec4<f32> {
     let uv = in.uv;
@@ -433,6 +473,25 @@ fn fs_uw(in: UwOut) -> @location(0) vec4<f32> {
         }
         let T = exp(-sigT * dist);
         result = base * T + inSun + inAmb + shafts + torch;
+    }
+
+    // LENS-FILM: in air, refract the view through the water left on the lens
+    if (!under && uw.lens.x >= 0.0) {
+        let t = uw.lens.x;
+        let aspect = dims.x / dims.y;
+        let e = 1.5 / dims.y;
+        let h = uwFilmHeight(uv, t, aspect);
+        let gx = (uwFilmHeight(uv + vec2<f32>(e, 0.0), t, aspect) - h) / e;
+        let gy = (uwFilmHeight(uv + vec2<f32>(0.0, e), t, aspect) - h) / e;
+        if (h > 1e-3) {
+            // a dome bends the view inward (an inverted little lens); the sheet only wobbles it
+            let off = -vec2<f32>(gx, gy) * 0.00035 * uw.lens.y;
+            let seen = textureSampleLevel(uwScene, uwClamp, uv + off, 0.0).rgb;
+            // dark rims where the glass curves steeply, a faint lift of the thick water
+            let slope = length(vec2<f32>(gx, gy)) * e;
+            let rimDark = 1.0 - smoothstep(0.02, 0.12, slope) * 0.35;
+            result = mix(result, seen * rimDark * (1.0 + 0.04 * min(h, 1.0)), smoothstep(0.0, 0.05, h));
+        }
     }
 
     // meniscus contact line and bright rim
