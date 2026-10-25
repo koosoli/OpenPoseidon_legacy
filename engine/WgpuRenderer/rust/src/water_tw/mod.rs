@@ -2009,9 +2009,9 @@ mod tests {
     /// variant and WHOLE_WORLD: every combination composes and validates.
     #[test]
     fn tidewater_water_shader_composes_with_look_pack() {
-        for mask in 0u32..16 {
+        for mask in 0u32..32 {
             let mut defs = std::collections::HashMap::new();
-            for (bit, def) in ["SEA_GLINTS", "TW_FOAM2", "SEA_RAIN", "WHOLE_WORLD"].iter().enumerate() {
+            for (bit, def) in ["SEA_GLINTS", "TW_FOAM2", "SEA_RAIN", "WHOLE_WORLD", "SEA_SPECAA"].iter().enumerate() {
                 if mask & (1 << bit) != 0 {
                     defs.insert(def.to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
                 }

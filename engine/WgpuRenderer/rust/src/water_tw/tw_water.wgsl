@@ -966,6 +966,14 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     let farFromBelow = camH < 0.0 && pos.y > frame.cam_pos.y;
     let viewFromBelow = select(farFromBelow, !seenFromAbove, nearSurface && !folded);
     let Nup = surf.normal;
+#ifdef SEA_SPECAA
+    // (OP, SEA-SPECAA) the cost-free part of LEAN (open-water's water.js, after Kaplanyan & Hoffman
+    // 2016): the spread of normals inside the pixel footprint is slope variance the sun lobe must
+    // carry, or sub-pixel ripples alias into crawling hairlines; taken here in uniform control flow
+    let aaNx = dpdx(Nup);
+    let aaNy = dpdy(Nup);
+    let specAA = min(0.5 * (dot(aaNx, aaNx) + dot(aaNy, aaNy)), 0.08);
+#endif
     let Nside = select(Nup, -Nup, viewFromBelow);
     let Nview = normalize(Nside + V * max(-dot(Nside, V) + 0.03, 0.0));
 
@@ -1043,7 +1051,14 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let NdH = max(dot(N, H), 0.0);
         let VdH = max(dot(V, H), 0.0);
         let Fs = fresnelDielectric(VdH, IOR);
+#ifdef SEA_SPECAA
+        // ... capped at the sea's whole slope variance (alpha^2 ~ 2 mss), so the glitter path keeps
+        // narrowing toward the horizon instead of widening with the footprint
+        let alphaSun = min(alpha2 + 2.0 * specAA, max(alpha2, 2.0 * mss));
+        let spec = _waterDGGX(NdH, alphaSun) * _waterVSmithGGX(NdL, NdV, alphaSun) * Fs * NdL;
+#else
         let spec = _waterDGGX(NdH, alpha2) * _waterVSmithGGX(NdL, NdV, alpha2) * Fs * NdL;
+#endif
 #ifdef SEA_GLINTS
         // (OP, SEA-GLINTS) sun glitter carried by capillary facets (open-water's water.js, MIT): the
         // expected sun reflection in this pixel equals lam glinting facets of ~1 cm^2, each mirroring the
