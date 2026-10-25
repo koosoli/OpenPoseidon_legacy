@@ -1634,10 +1634,10 @@ std::string Arma1VehicleWeaponsText(const ParamEntry& vehicle, std::string& summ
         {
             std::string text = "class CfgWeapons\r\n{\r\n\tclass " + std::string(base) + ";\r\n\tclass " + generated +
                                ": " + base + "\r\n\t{\r\n\t\tscopeWeapon=2;\r\n\t\tscopeMagazine=2;\r\n";
-            // hard mounted: AALauncher is the CWA soldier's AA launcher (a secondary weapon), which
+            // hard mounted (weaponType, which WeaponType reads): AALauncher is the CWA soldier's AA launcher (a secondary weapon), which
             // no aircraft has a slot for -- the AV-8B (AA)'s Sidewinders and the Su-34's R-73s were
             // dropped at AddWeapon and both flew with the cannon only (owner, 2026-10-25)
-            text += "\t\ttype=65536;\r\n";
+            text += "\t\tweaponType=65536;\r\n";
             const std::string display = StringValue(*weapon, "displayName");
             const std::string magDisplay = StringValue(*mag, "displayName");
             text += "\t\tdisplayName=";
