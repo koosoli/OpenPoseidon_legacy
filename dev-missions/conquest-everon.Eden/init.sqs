@@ -1,0 +1,8 @@
+; Conquest Slice 0: the player is a captive, invulnerable spectator at Le Moule, away from every
+; objective. The referee runs the war; watch it on the map (M) or in the dev panel's Conquest tab.
+; The player commands WEST from the map: click a squad (Shift adds more), then click an objective
+; to attack or defend it, or anywhere else to move there. The AI leaves ordered squads alone for
+; 10 minutes. The soak harness reads the war with `conquestState` and the engine log.
+onMapSingleClick "conquestMapClick [_pos, _shift, _alt]"
+logInfo "CONQUEST_DEV: mission started"
+exit

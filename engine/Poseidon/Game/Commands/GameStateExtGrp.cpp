@@ -790,7 +790,7 @@ void ProcessJoinGroups(OLinkArray<AIUnit>& units, AIGroup* group)
     }
 
     AICenter* center = grp->GetCenter();
-    if (!grp->Leader())
+    if (!grp->HasLeader())
     {
         center->SelectLeader(grp);
     }
@@ -802,7 +802,7 @@ void ProcessJoinGroups(OLinkArray<AIUnit>& units, AIGroup* group)
     }
 
     // special case - formation leader inside vehicle
-    if (!grp->MainSubgroup()->Leader() || !grp->MainSubgroup()->Leader()->IsUnit())
+    if (!grp->MainSubgroup()->HasLeader() || !grp->MainSubgroup()->Leader()->IsUnit())
     {
         grp->MainSubgroup()->SelectLeader();
     }

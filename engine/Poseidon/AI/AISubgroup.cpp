@@ -830,7 +830,7 @@ void AISubgroup::DestroyObject()
                 _units.Delete(0);
             }
         }
-        if (!main->Leader())
+        if (!main->HasLeader())
         {
             main->SelectLeader();
         }
@@ -948,7 +948,7 @@ TMError AISubgroup::TransferMsg(NetworkMessageContext& ctx)
                             _whoAmI = leader;
                         }
                     }
-                    if (!GetGroup()->Leader())
+                    if (!GetGroup()->HasLeader())
                     {
                         GetGroup()->GetCenter()->SelectLeader(GetGroup());
                         if (GetGroup()->Leader())

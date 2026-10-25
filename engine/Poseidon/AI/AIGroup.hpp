@@ -86,6 +86,10 @@ public:
 	// crashed. Keep the invariant "a non-empty subgroup is never leaderless to callers":
 	// if _whoAmI nulled, fall back to any live unit (SelectLeader fixes _whoAmI properly
 	// on the next UnitRemoved).
+	// Because of that fallback, Leader() cannot say whether a leader was ever SELECTED; ask
+	// HasLeader() before deciding to elect one. A subgroup with no _whoAmI drops every move
+	// order (GoPlanned has nobody to hand the destination to).
+	bool HasLeader() const {return _whoAmI != nullptr;}
 	AIUnit* Leader() const
 	{
 		AIUnit* l = _whoAmI;
@@ -529,6 +533,13 @@ public:
 	// (e.g. ReceiveAnswer's group->Leader()->SendAnswer). Keep "a non-empty group is
 	// never leaderless to callers": if _leader nulled, fall back to a live unit. Mirror
 	// of AISubgroup::Leader().
+	//
+	// The fallback means Leader() is never null for a non-empty group, so it cannot answer
+	// "has a leader been elected?". Code that elects one when missing must ask HasLeader():
+	// with Leader() the election never ran for groups filled at runtime (createGroup +
+	// createUnit), _leader and the main subgroup's planner stayed null, and those groups
+	// ignored every move and waypoint order (found by Conquest, 2026-10-25).
+	bool HasLeader() const {return _leader != nullptr;}
 	AIUnit* Leader() const
 	{
 		AIUnit* l = _leader;

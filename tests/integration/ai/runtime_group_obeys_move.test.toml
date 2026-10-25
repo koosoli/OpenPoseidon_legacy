@@ -1,0 +1,8 @@
+# Runs on a retail island (Malden/abel), so it needs the full game data rather
+# than packages/Demo.  Hosted CI only downloads the Demo assets, hence
+# ci-host-blocked: this is a workstation test, skipped by the CI --skip-tag.
+binary = "PoseidonGame"
+mission = "tests/integration/missions/ai_side_relations.abel"
+timeout = 300
+assert_timeout = 120
+tags = ["headless", "ci-host-blocked"]

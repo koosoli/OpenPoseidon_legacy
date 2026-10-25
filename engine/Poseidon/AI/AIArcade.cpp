@@ -1890,7 +1890,7 @@ void ProcessJoinGroups(AIGroup* from, AIGroup* to)
     }
     else
     {
-        if (!from->Leader())
+        if (!from->HasLeader())
         {
             from->GetCenter()->SelectLeader(from);
         }
@@ -1906,7 +1906,7 @@ void ProcessJoinGroups(AIGroup* from, AIGroup* to)
 
     // select leader
     AICenter* center = to->GetCenter();
-    if (!to->Leader())
+    if (!to->HasLeader())
     {
         center->SelectLeader(to);
     }

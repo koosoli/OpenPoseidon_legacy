@@ -60,6 +60,7 @@
 #include <Poseidon/Dev/Diag/MapEditorTab.hpp>
 #include <Poseidon/Dev/Diag/PictureModeTab.hpp>
 #include <Poseidon/Dev/Diag/WeatherTab.hpp>
+#include <Poseidon/Dev/Diag/ConquestTab.hpp>
 #include <Poseidon/Dev/Diag/SmokeTab.hpp>
 #include <Poseidon/Dev/Diag/AudioTab.hpp>
 #include <Poseidon/Dev/Debug/DevPanelHome.hpp>
@@ -7955,6 +7956,11 @@ void DrawMainWindow()
         if (Dev::PanelTabItem("Weather"))
         {
             Poseidon::Dev::DrawWeatherTab();
+            ImGui::EndTabItem();
+        }
+        if (Dev::PanelTabItem("Conquest")) // the Conquest referee: objectives, sides, groups, war log (ConquestTab.cpp)
+        {
+            Poseidon::Dev::DrawConquestTab();
             ImGui::EndTabItem();
         }
         if (Dev::PanelTabItem("Audio")) // the audio engine (Steam Audio / OpenAL) and HRTF (AudioTab.cpp)
