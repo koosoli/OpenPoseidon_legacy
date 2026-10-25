@@ -3474,6 +3474,37 @@ RString Arma1ModelClass(const RString& missionClass, const RString& cwaClass)
             }
         }
     }
+    if (man && useModel && Generation() == 1)
+    {
+        // Arma 1's own slots (OP_A1_SLOTS=0: CWA's): a rifleman carries 12 magazines and 8
+        // pistol magazines, CWA's 10 and 4. Arma 1 counts launcher 4, pistol magazines 16 and
+        // items 256 apiece; CWA launcher 16, pistol magazines 32 (seven at most, the eighth
+        // in MaskSlotHandGunItemHigh), items 256.
+        static const bool ownSlots = [] {
+            const char* e = std::getenv("OP_A1_SLOTS");
+            return !(e && *e == '0');
+        }();
+        if (const ParamEntry* ws = ownSlots ? a1->FindEntry("weaponSlots") : nullptr; ws && !ws->IsClass() && !ws->IsArray())
+        {
+            const int a = (int)*ws;
+            if (a > 0)
+            {
+                const int items = std::min((a >> 8) & 0xF, 15);
+                const int pistolMags = std::min((a >> 4) & 0xF, 15);
+                const int binocular = (a >> 12) & 0x3;
+                int cwa = (a & 1) | (a & 2) | ((a & 4) ? 0x10 : 0) | (items << 8) | (binocular << 12);
+                cwa |= (pistolMags >= 8 ? ((pistolMags - 8) << 5) | 0x4 : pistolMags << 5);
+                char line[96];
+                std::snprintf(line, sizeof(line), "\t\tweaponSlots=%d;\r\n", cwa);
+                text += line;
+                static std::set<std::string> logged;
+                if (logged.insert(Lower(std::string(missionClass.Data()))).second)
+                    LOG_INFO(Mission, "{}: '{}' carries Arma 1's slots: {} magazines, {} pistol magazines{}{}",
+                             Label(), missionClass.Data(), items, pistolMags, (a & 4) ? ", a launcher" : "",
+                             (a & 2) ? ", a pistol" : "");
+            }
+        }
+    }
     if (man && useModel)
     {
         text += "\t\tmoves=\"A1_CfgMovesMaleSdr\";\r\n";

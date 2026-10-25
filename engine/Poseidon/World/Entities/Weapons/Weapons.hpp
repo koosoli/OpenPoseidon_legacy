@@ -280,6 +280,10 @@ public:
 #define MaskHardMounted			0x00010000	// hard mounted
 #define MaskSlotHandGun			0x00000002	// hand gun
 #define MaskSlotHandGunItem	0x000000E0	// hand gun magazines
+// --arma1: eight more hand gun magazine slots on a man. Arma 1 carries eight pistol
+// magazines (CWA four) and the three bits above hold seven; bit 0x4 is free in CWA (Arma 1's
+// launcher bit, which the importer rewrites as CWA's 0x10). Never set on a magazine.
+#define MaskSlotHandGunItemHigh	0x00000004
 
 inline int GetItemSlotsCount(int slots)
 {
@@ -288,7 +292,7 @@ inline int GetItemSlotsCount(int slots)
 
 inline int GetHandGunItemSlotsCount(int slots)
 {
-	return (slots & MaskSlotHandGunItem) >> 5;	// =  / 0x0020
+	return ((slots & MaskSlotHandGunItem) >> 5) + ((slots & MaskSlotHandGunItemHigh) ? 8 : 0);	// =  / 0x0020
 }
 
 class WeaponType : public RefCount

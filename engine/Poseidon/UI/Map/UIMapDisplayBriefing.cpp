@@ -918,7 +918,7 @@ void DisplayMap::AddUsableMagazines(UnitWeaponsInfo& info, const WeaponType* wea
 
 void DisplayMap::AddUsableHandGunMagazines(UnitWeaponsInfo& info, const WeaponType* weapon, int from, int to)
 {
-    saturateMin(to, 10 + GetHandGunItemSlotsCount(info.weaponSlots));
+    saturateMin(to, HANDGUN_MAGAZINE_START + GetHandGunItemSlotsCount(info.weaponSlots));
     if (from >= to)
     {
         return;
@@ -1139,7 +1139,7 @@ void DisplayMap::OnHTMLLink(int idc, RString link)
                             RemoveUnusableMagazines(info);
                         }
                         info.weapons[0] = weapon;
-                        AddUsableMagazines(info, weapon, 0, 4);
+                        AddUsableMagazines(info, weapon, 0, ITEM_ROW_SPLIT);
                     }
                     if (weapon->_weaponType & MaskSlotSecondary)
                     {
@@ -1150,7 +1150,7 @@ void DisplayMap::OnHTMLLink(int idc, RString link)
                             RemoveUnusableMagazines(info);
                         }
                         info.weapons[1] = weapon;
-                        AddUsableMagazines(info, weapon, 4, 10);
+                        AddUsableMagazines(info, weapon, ITEM_ROW_SPLIT, HANDGUN_MAGAZINE_START);
                     }
                     if (weapon->_weaponType & MaskSlotHandGun)
                     {
@@ -1161,7 +1161,7 @@ void DisplayMap::OnHTMLLink(int idc, RString link)
                             RemoveUnusableMagazines(info);
                         }
                         info.weapons[4] = weapon;
-                        AddUsableHandGunMagazines(info, weapon, 10, MAGAZINE_SLOTS);
+                        AddUsableHandGunMagazines(info, weapon, HANDGUN_MAGAZINE_START, MAGAZINE_SLOTS);
                     }
                 }
                 else
@@ -1199,7 +1199,7 @@ void DisplayMap::OnHTMLLink(int idc, RString link)
                 bool handGun = (type->_magazineType & MaskSlotHandGunItem) != 0;
 
                 int maxItems = handGun
-                                   ? GetItemSlotsCount(info.weaponSlots) + GetHandGunItemSlotsCount(info.weaponSlots)
+                                   ? HANDGUN_MAGAZINE_START + GetHandGunItemSlotsCount(info.weaponSlots)
                                    : GetItemSlotsCount(info.weaponSlots);
 
                 Ref<Magazine> magazine;
@@ -1354,7 +1354,7 @@ void DisplayMap::OnHTMLLink(int idc, RString link)
         }
 
         // remove all magazines from items 1
-        int iMin = 10, iMax = iMin + iCnt;
+        int iMin = HANDGUN_MAGAZINE_START, iMax = iMin + iCnt;
         for (int i = iMin; i < iMax; i++)
         {
             Magazine* magazine = info.magazines[i];

@@ -1006,7 +1006,7 @@ UnitWeaponsInfo::UnitWeaponsInfo(AIUnit* u)
     }
     // Legacy briefing grid layout: first ten cells are regular magazines,
     // remaining cells are handgun magazines.
-    const int handGunMagazineStart = 10;
+    const int handGunMagazineStart = HANDGUN_MAGAZINE_START;
     int item = 0;
     int itemHandGun = handGunMagazineStart;
     for (int i = 0; i < veh->NMagazines(); i++)
@@ -1647,13 +1647,13 @@ void DisplayMap::CreateWeaponsPage()
         int oldItem = item;
         while (item < maxItems)
         {
-            Magazine* magazine = info.magazines[10 + item];
+            Magazine* magazine = info.magazines[HANDGUN_MAGAZINE_START + item];
             RString href = "";
             //			if (_selectWeapons)
             {
                 char buffer[7];
                 snprintf(buffer, sizeof(buffer), "%s", (const char*)"Slot:F");
-                buffer[5] += 10 + item;
+                buffer[5] += HANDGUN_MAGAZINE_START + item;
                 href = buffer;
             }
             if (magazine)
@@ -1696,7 +1696,7 @@ void DisplayMap::CreateWeaponsPage()
         item = oldItem;
         while (item < maxItems)
         {
-            Magazine* magazine = info.magazines[10 + item];
+            Magazine* magazine = info.magazines[HANDGUN_MAGAZINE_START + item];
             if (magazine)
             {
                 int nItems = GetHandGunItemSlotsCount(magazine->_type->_magazineType);
@@ -1847,15 +1847,16 @@ void DisplayMap::CreateWeaponsPoolPage(int slot)
             empty = "Weapon:";
             mask = MaskSlotHandGun;
             break;
-        case 15:
-        case 16:
-        case 17:
-        case 18:
-            title = LocalizeString(IDS_BRIEF_SPECIAL_HANDGUN_MAGAZINES);
-            empty = "Magazine:";
-            mask = MaskSlotHandGunItem;
-            break;
         default:
+            // the hand gun magazines from HANDGUN_MAGAZINE_START (slots 15..18 while CWA's
+            // four sat right after ten items)
+            if (slot >= WEAPON_SLOTS + HANDGUN_MAGAZINE_START)
+            {
+                title = LocalizeString(IDS_BRIEF_SPECIAL_HANDGUN_MAGAZINES);
+                empty = "Magazine:";
+                mask = MaskSlotHandGunItem;
+                break;
+            }
             title = LocalizeString(IDS_BRIEF_SPECIAL_MAGAZINES);
             empty = "Magazine:";
             mask = MaskSlotItem;
