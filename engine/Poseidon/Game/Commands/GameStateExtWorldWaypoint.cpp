@@ -128,7 +128,8 @@ inline Detector* GetDetector(GameValuePar oper)
 GameValue TriggerSetArea(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     const GameArrayType& array = oper2;
-    if (!CheckSize(state, array, 4))
+    // Arma 3 adds a fifth item, the area's height (-1 unlimited); the area here has none
+    if (array.Size() != 5 && !CheckSize(state, array, 4))
     {
         return NOTHING;
     }

@@ -733,6 +733,9 @@ class Man: public Person
 	bool _showPrimaryWeapon;
 	bool _showSecondaryWeapon;
 	bool _showHead;
+	// a move that played to its end last step: its AnimDone handlers run at the next one (not in
+	// the middle of the move queue they may change)
+	RStringB _animDonePending;
 
 	// Arma 3: what a script dressed this man in (addHeadgear, addVest, addBackpack and the removes),
 	// in place of his class's (ManType::_a3Gear) where set; no shape is the item taken off.

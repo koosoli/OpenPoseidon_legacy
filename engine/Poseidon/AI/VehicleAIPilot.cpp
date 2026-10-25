@@ -1645,7 +1645,10 @@ int EntityAI::AddEventHandler(EntityEvent event, RString expression)
 }
 void EntityAI::RemoveEventHandler(EntityEvent event, int handle)
 {
-    _eventHandlers[event].Delete(handle);
+    // the slot is emptied, not taken out: the handles of the handlers after it stay theirs (Arma 3
+    // scripts keep them -- a handler removes itself by _thisEventHandler)
+    if (handle >= 0 && handle < _eventHandlers[event].Size())
+        _eventHandlers[event][handle] = RString();
 }
 void EntityAI::ClearEventHandlers(EntityEvent event)
 {
@@ -1680,13 +1683,17 @@ bool EntityAI::IsEventHandler(EntityEvent event) const
 
 void EntityAI::OnEvent(EntityEvent event, const GameValue& pars)
 {
-    const AutoArray<RString>& handlers = GetEventHandlers(event);
+    // a copy: a handler may add or remove handlers (itself) while they run
+    const AutoArray<RString> handlers = GetEventHandlers(event);
     for (int i = 0; i < handlers.Size(); i++)
     {
+        if (handlers[i].GetLength() == 0)
+            continue; // removed
         GameVarSpace local;
         GameState* gstate = GWorld->GetGameState();
         gstate->BeginContext(&local);
         gstate->VarSetLocal("_this", pars, true);
+        gstate->VarSetLocal("_thisEventHandler", GameValue(static_cast<float>(i)), true);
         RString handler = handlers[i];
         gstate->Execute(handler);
         gstate->EndContext();

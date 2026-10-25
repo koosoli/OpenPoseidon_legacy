@@ -419,7 +419,7 @@ struct UserTypeAction
 	\
 	XX(type, prefix, AnimChanged) /*string:animation*/ \
 	\
-	XX(type, prefix, Init) /**/
+	XX(type, prefix, Init) /**/ 		XX(type, prefix, AnimDone) /*string:animation -- a move has played to its end (Arma 3)*/
 
 DECLARE_ENUM(EntityEvent,EE,ENTITY_EVENT_ENUM)
 

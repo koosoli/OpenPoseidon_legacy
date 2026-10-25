@@ -256,6 +256,32 @@ GameValue A1InheritsFrom(const GameState*, GameValuePar oper1)
     return GameValue(RString(path.c_str()));
 }
 
+// className isKindOf [parentName, config]: the class of that name in the config (a class holding
+// both) is the parent or derives from it -- Old Man's quest system sorts its quests so
+GameValue A1IsKindOfConfig(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    if (oper1.GetType() != GameString || oper2.GetType() != GameArray)
+        return GameValue(false);
+    const GameArrayType& args = oper2;
+    if (args.Size() < 2 || args[0].GetType() != GameString)
+        return GameValue(false);
+    const ParamEntry* container = Resolve(args[1]);
+    if (!container || !container->IsClass())
+        return GameValue(false);
+    const RString parent = args[0];
+    std::string cls = (const char*)RString(oper1);
+    for (int depth = 0; depth < 32 && !cls.empty(); depth++)
+    {
+        if (_stricmp(cls.c_str(), parent) == 0)
+            return GameValue(true);
+        const ParamEntry* e = container->FindEntry(cls.c_str());
+        const ParamClass* c = e && e->IsClass() ? e->GetClassInterface() : nullptr;
+        const char* base = c ? c->GetBaseName() : nullptr;
+        cls = base ? base : "";
+    }
+    return GameValue(false);
+}
+
 GameValue A1Min(const GameState*, GameValuePar oper1, GameValuePar oper2)
 {
     return GameValue(std::min((float)oper1, (float)oper2));

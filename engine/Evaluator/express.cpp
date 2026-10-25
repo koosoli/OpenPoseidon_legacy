@@ -2971,6 +2971,10 @@ bool GameState::IdtfGoodName(const char* name) const
 
 bool GameState::LValueGoodName(const char* name) const
 {
+    // Arma 3 assigns this like any variable: its exported compositions (Old Man's sector layers)
+    // run each object's init as "this = _item855; <init>"
+    if (s_codeValues && strcmp(name, "this") == 0)
+        return VarGoodName(name);
     if (VarReadOnly(name))
     {
         return false;

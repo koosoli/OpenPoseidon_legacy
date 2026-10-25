@@ -1262,6 +1262,7 @@ void World::CleanUpDeinit()
     {
         _titleEffect.Free();
         _cutEffect.Free();
+        _cutLayers.clear();
         if (GSoundScene)
         {
             GSoundScene->StopMusicTrack();

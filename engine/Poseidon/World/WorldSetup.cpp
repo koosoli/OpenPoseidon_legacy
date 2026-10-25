@@ -1576,6 +1576,14 @@ void World::SetTitleEffect(TitleEffect* effect)
 
 void World::SetCutEffect(TitleEffect* effect)
 {
+    if (_cutLayer != 0)
+    {
+        if (effect)
+            _cutLayers[_cutLayer] = effect;
+        else
+            _cutLayers.erase(_cutLayer);
+        return;
+    }
     _cutEffect = effect;
     Log("SetCutEffect %p", (void*)effect);
 }

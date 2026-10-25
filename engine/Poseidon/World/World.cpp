@@ -1320,6 +1320,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
         {
             _cutEffect.Free();
         }
+        for (auto it = _cutLayers.begin(); it != _cutLayers.end();)
+            it = !it->second || it->second->IsTerminated() ? _cutLayers.erase(it) : std::next(it);
+        for (auto& [layer, effect] : _cutLayers)
+            effect->Simulate(deltaT);
 
         LiftStuckBlack();
         if (_titleEffect)
@@ -2391,10 +2395,17 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
         if (IsSimulationEnabled())
         {
+            // the numbered layers below 0 first, then layer 0, then those above it
+            for (auto& [layer, effect] : _cutLayers)
+                if (layer < 0)
+                    effect->Draw();
             if (_cutEffect)
             {
                 _cutEffect->Draw();
             }
+            for (auto& [layer, effect] : _cutLayers)
+                if (layer > 0)
+                    effect->Draw();
             if (_titleEffect)
             {
                 _titleEffect->Draw();

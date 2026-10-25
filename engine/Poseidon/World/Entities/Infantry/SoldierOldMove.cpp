@@ -253,6 +253,14 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
     bool change = false;
     bool finished = false;
 
+    // AnimDone (Arma 3's scripts end a cutscene move by it: Old Man's opening crouch)
+    if (_animDonePending.GetLength() > 0)
+    {
+        const RString done = _animDonePending;
+        _animDonePending = RStringB();
+        OnEvent(EEAnimDone, done);
+    }
+
     const MoveInfo* prim = Type()->GetMoveInfo(_primaryMove.id);
     if (prim)
     {
@@ -292,6 +300,8 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
             if (_primaryTime >= 1)
             {
                 finished = true;
+                if (GetEventHandlers(EEAnimDone).Size() > 0)
+                    _animDonePending = Type()->GetMoveName(_primaryMove.id);
                 if (primA->GetLooped())
                 {
                     _primaryTime -= 1;

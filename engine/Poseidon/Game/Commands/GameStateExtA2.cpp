@@ -2462,15 +2462,31 @@ GameValue A2MoveInCargoIndex(const GameState* state, GameValuePar oper1, GameVal
 }
 
 // layer cutText / cutRsc / cutObj [...]: CWA has a single layer
+// layer cutText [...]: on its own layer (World::SetCutLayer) -- Arma 3 holds a black canvas on one
+// while texts and fades come and go on others (Old Man's animated opening)
 GameValue A2CutTextLayer(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
-    Poseidon::Arma3Rsc::CloseLayer(Poseidon::Arma3Rsc::LayerKey(oper1));
-    return ::CutTextEffect(state, oper2);
+    const std::string key = Poseidon::Arma3Rsc::LayerKey(oper1);
+    Poseidon::Arma3Rsc::CloseLayer(key);
+    const int layer = Poseidon::Arma1Compat::Generation() == 3 ? std::atoi(key.c_str()) : 0;
+    if (GWorld)
+        GWorld->SetCutLayer(layer);
+    const GameValue r = ::CutTextEffect(state, oper2);
+    if (GWorld)
+        GWorld->SetCutLayer(0);
+    return r;
 }
 
 GameValue A2CutFadeOutLayer(const GameState*, GameValuePar oper1, GameValuePar)
 {
-    Poseidon::Arma3Rsc::CloseLayer(Poseidon::Arma3Rsc::LayerKey(oper1));
+    const std::string key = Poseidon::Arma3Rsc::LayerKey(oper1);
+    Poseidon::Arma3Rsc::CloseLayer(key);
+    if (GWorld && Poseidon::Arma1Compat::Generation() == 3 && std::atoi(key.c_str()) != 0)
+    {
+        GWorld->SetCutLayer(std::atoi(key.c_str()));
+        GWorld->SetCutEffect(nullptr);
+        GWorld->SetCutLayer(0);
+    }
     return NOTHING;
 }
 
