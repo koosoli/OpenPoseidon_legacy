@@ -2632,7 +2632,13 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             let f = clamp(max(fb.r, max(fb.g, fb.b)) * (1.0 - fc) + fc, 0.0, 1.0) * occ;
             var a = clamp(out_a2, 0.0, 1.0);
             var film = out_rgb;
-            if (u32(m.refl_b.x + 0.5) == 6u) {
+            // A 2001 body texture often carries its side windows as see-through pixels of the
+            // paint itself (the Skoda's sk_side2_tga, sk_sideinside_tga): classified as paint,
+            // those panes were lit like paint, the milky sheet the owner could not see out of.
+            // A translucent pixel of a paint/matt section is a window: treat it as glass.
+            let body_cls = u32(m.refl_b.x + 0.5);
+            let body_pane = body_cls >= 1u && body_cls <= 4u && a < 0.9;
+            if (body_cls == 6u || body_pane) {
                 // F.4: window glass absorbs, it does not scatter. A 2001 pane texture is a light
                 // tint at ~60 % coverage (the Peugeot's skl.paa: 196/155/142, alpha 147); lit like
                 // paint it became an opaque milky sheet in sunlight, with or without reflections,
