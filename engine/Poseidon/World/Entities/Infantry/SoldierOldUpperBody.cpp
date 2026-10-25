@@ -37,6 +37,56 @@ constexpr float LandPeakMin = 0.15f;
 constexpr float LandPeakMax = 0.4f;
 const char* const LowerBones[] = {"pzadek", "lzadek", "pstehno", "lstehno", "pholen", "lholen", "pchodidlo",
                                   "lchodidlo", "pprsty", "lprsty"};
+
+// An Arma skeleton (OFP2_ManSkeleton: Pelvis, Spine..Spine3, LeftUpLeg ...) has none of the
+// Czech names above, so with Arma 1's moves the walking reload played on no bone at all
+// (owner, 2026-10-25). Its pelvis is the anchor, its legs are the bones named so, and every
+// other bone is upper body -- Arma 1's own BlendAnims split the man the same way.
+bool ArmaLegBone(const char* name)
+{
+    std::string n = name ? name : "";
+    for (char& c : n)
+        c = (char)tolower((unsigned char)c);
+    return n.find("leg") != std::string::npos || n.find("foot") != std::string::npos ||
+           n.find("toe") != std::string::npos;
+}
+
+int AnchorIndex(const Skeleton* skeleton)
+{
+    const int i = skeleton->FindBone(AnchorBone);
+    return i >= 0 ? i : skeleton->FindBone("pelvis");
+}
+
+// the bones the layer takes: the Czech list, else (an Arma skeleton) all but the pelvis and legs
+template <class F> void ForUpperBones(const Skeleton* skeleton, F&& f)
+{
+    if (skeleton->FindBone(AnchorBone) >= 0)
+    {
+        for (const char* name : UpperBones)
+            if (const int i = skeleton->FindBone(name); i >= 0)
+                f(i);
+        return;
+    }
+    const int anchor = AnchorIndex(skeleton);
+    for (int i = 0; i < skeleton->NBones(); i++)
+        if (i != anchor && !ArmaLegBone(skeleton->GetBone(i)))
+            f(i);
+}
+
+template <class F> void ForLowerBones(const Skeleton* skeleton, F&& f)
+{
+    if (skeleton->FindBone(AnchorBone) >= 0)
+    {
+        for (const char* name : LowerBones)
+            if (const int i = skeleton->FindBone(name); i >= 0)
+                f(i);
+        return;
+    }
+    const int anchor = AnchorIndex(skeleton);
+    for (int i = 0; i < skeleton->NBones(); i++)
+        if (i == anchor || ArmaLegBone(skeleton->GetBone(i)))
+            f(i);
+}
 } // namespace
 
 bool Man::StartUpperBodyAction(MoveId move, ActionContextBase* context)
@@ -96,7 +146,7 @@ void Man::ApplyUpperBodyLayer(Matrix4Array& matrices) const
     const Skeleton* skeleton = Type()->GetSkeleton();
     if (!anim || !skeleton)
         return;
-    const int anchor = skeleton->FindBone(AnchorBone);
+    const int anchor = AnchorIndex(skeleton);
     if (anchor < 0 || anchor >= matrices.Size())
         return;
     MATRIX_4_ARRAY(action, 128);
@@ -106,17 +156,15 @@ void Man::ApplyUpperBodyLayer(Matrix4Array& matrices) const
     // the action's upper body relative to its pelvis, put on this pose's pelvis
     const Matrix4 onto = matrices[anchor] * Matrix4(MInverseGeneral, action[anchor]);
     const float f = _upperFactor;
-    for (const char* name : UpperBones)
-    {
-        const int i = skeleton->FindBone(name);
-        if (i < 0 || i >= matrices.Size() || i >= action.Size())
-            continue;
+    ForUpperBones(skeleton, [&](int i) {
+        if (i >= matrices.Size() || i >= action.Size())
+            return;
         Matrix4 layered = onto * action[i];
         Matrix4 out;
         out.InlineSetMultiply(matrices[i], 1 - f);
         out.InlineAddMultiply(layered, f);
         matrices[i] = out;
-    }
+    });
 }
 
 void Man::StartLandingLayer(float touchdownSpeed)
@@ -146,7 +194,7 @@ void Man::ApplyLandingLayer(Matrix4Array& matrices) const
     const Skeleton* skeleton = Type()->GetSkeleton();
     if (!anim || !skeleton)
         return;
-    const int anchor = skeleton->FindBone(AnchorBone);
+    const int anchor = AnchorIndex(skeleton);
     if (anchor < 0 || anchor >= matrices.Size())
         return;
     MATRIX_4_ARRAY(land, 128);
@@ -155,17 +203,15 @@ void Man::ApplyLandingLayer(Matrix4Array& matrices) const
         return;
     const Matrix4 hipsBefore = matrices[anchor];
     std::vector<bool> lower(matrices.Size(), false);
-    for (const char* name : LowerBones)
-    {
-        const int i = skeleton->FindBone(name);
-        if (i < 0 || i >= matrices.Size() || i >= land.Size())
-            continue;
+    ForLowerBones(skeleton, [&](int i) {
+        if (i >= matrices.Size() || i >= land.Size())
+            return;
         Matrix4 out;
         out.InlineSetMultiply(matrices[i], 1 - w);
         out.InlineAddMultiply(land[i], w);
         matrices[i] = out;
         lower[i] = true;
-    }
+    });
     // everything above the hips rides on them, as it was
     const Matrix4 follow = matrices[anchor] * Matrix4(MInverseGeneral, hipsBefore);
     for (int i = 0; i < matrices.Size(); i++)
