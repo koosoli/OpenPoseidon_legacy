@@ -1841,7 +1841,8 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             albedo = textureSampleGrad(textures[packed >> 3u], samplers[packed & 7u],
                                        sample_uv, sample_dx, sample_dy).rgb;
         }
-        var n = normalize(in.normal);
+        // (a zero normal resolved to the face's, as every other surface does: shading.wgsl surface_normal)
+        var n = surface_normal(in.normal, in.world_pos, dwx, dwy);
         let ground_detail = material.light_ambient.w > 0.5;
         let distance = length(in.world_pos);
         var reflectance = 1.0;
@@ -1886,7 +1887,7 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         if (ground_detail && material.normal_map.z > 0.5 && distance < 2500.0) {
             let world_abs = in.world_pos + frame.cam_pos.xyz;
             let h = length(world_abs - earth_centre) - 6378137.0;
-            let up = max(dot(normalize(in.normal), vec3<f32>(0.0, 1.0, 0.0)), 0.2);
+            let up = max(dot(surface_normal(in.normal, in.world_pos, dwx, dwy), vec3<f32>(0.0, 1.0, 0.0)), 0.2);
             let grade = sqrt(max(1.0 - up * up, 0.0)) / up;
             let lum = dot(albedo, vec3<f32>(0.2126, 0.7152, 0.0722));
             let sandy = smoothstep(0.30, 0.42, lum) * smoothstep(0.02, 0.07, albedo.r - albedo.b);
