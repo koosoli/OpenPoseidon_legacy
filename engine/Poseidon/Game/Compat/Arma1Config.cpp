@@ -2844,10 +2844,14 @@ bool GeneratedMagazineFits(const char* weaponClass, const char* magazine)
 
 const ParamEntry* Arma1ShotSound(const char* weaponClass, int muzzleIndex)
 {
-    if (!Active() || Generation() != 1 || !weaponClass || _strnicmp(weaponClass, "A1x_", 4) != 0 || muzzleIndex < 0)
+    // Arma 2 too (shared, 2026-10-25): its main muzzle already fires with its own shot
+    // (a3SoundShot, Arma2WeaponModelClass), which is read first; this gives its M203/GP25
+    // muzzle the launcher's own shot instead of CWA's.
+    if (!Active() || (Generation() != 1 && Generation() != 2) || !weaponClass ||
+        _strnicmp(weaponClass, "A1x_", 4) != 0 || muzzleIndex < 0)
         return nullptr;
     static const bool off = [] {
-        const char* e = std::getenv("OP_A1_WEAPON_SOUNDS");
+        const char* e = std::getenv(Generation() == 2 ? "OP_A2_WEAPON_SOUNDS" : "OP_A1_WEAPON_SOUNDS");
         return e && *e == '0';
     }();
     if (off)
@@ -2871,6 +2875,17 @@ const ParamEntry* Arma1ShotSound(const char* weaponClass, int muzzleIndex)
     if (!source)
         return nullptr;
     const ParamEntry* sound = Arma1WeaponModeEntry(*source, "sound");
+    // Arma 2 from 1.05 names its samples in the mode's soundBegin[] (begin1, begin2 ...)
+    if (Generation() == 2 && (!sound || !sound->IsArray() || sound->GetSize() < 1 ||
+                              ((RStringB)(*sound)[0]).GetLength() == 0))
+    {
+        sound = nullptr;
+        if (const ParamEntry* begin = Arma1WeaponModeEntry(*source, "soundBegin");
+            begin && begin->IsArray() && begin->GetSize() > 0)
+            sound = Arma1WeaponModeEntry(*source, (const char*)(*begin)[0].GetValue());
+        if (!sound)
+            sound = Arma1WeaponModeEntry(*source, "begin1");
+    }
     if (!sound || !sound->IsArray() || sound->GetSize() < 1)
         return nullptr;
     const RString file = (RStringB)(*sound)[0];
@@ -2878,7 +2893,7 @@ const ParamEntry* Arma1ShotSound(const char* weaponClass, int muzzleIndex)
         return nullptr;
     static std::set<std::string> logged;
     if (logged.insert(Lower(std::string(weaponClass)) + "#" + std::to_string(muzzleIndex)).second)
-        LOG_INFO(Mission, "Arma 1: weapon '{}' muzzle {} fires with {}", weaponClass, muzzleIndex, file.Data());
+        LOG_INFO(Mission, "{}: weapon '{}' muzzle {} fires with {}", Label(), weaponClass, muzzleIndex, file.Data());
     return sound;
 }
 
