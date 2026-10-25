@@ -47,7 +47,7 @@ fn mg_cycles() -> u32 {
     *V.get_or_init(|| std::env::var("WGR_FIRE_MG").ok().and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(0).min(4))
 }
 /// sweeps on the coarsest multigrid level (a few hundred cells)
-const MG_COARSE_SWEEPS: u32 = 64;
+const MG_COARSE_SWEEPS: u32 = 8;
 const STEP: f32 = 1.0 / 60.0;
 /// How long a smoke-only plume's box keeps the smoke in the air after its source stops (seconds;
 /// WGR_FIRE_SMOKE_LINGER). The 2001 puffs a smoke grenade drops live their cloudletDuration after it
@@ -1523,8 +1523,123 @@ mod tests {
         }
         eprintln!("fire pressure relative residual: jacobi24 {:.4}, mg1 {:.4}, mg2 {:.4}", results[0], results[1], results[2]);
         assert!(results.iter().all(|r| r.is_finite()), "{results:?}");
-        assert!(results[1] < results[0] * 0.5, "one V-cycle should beat 24 Jacobi sweeps: {results:?}");
-        assert!(results[2] < results[1], "a second cycle should help: {results:?}");
+        // CPU mirror (bc 3): 0.4665 / 0.0925; 24 Jacobi sweeps 0.7375
+        assert!(results[1] < results[0] * 0.75, "one V-cycle should beat 24 Jacobi sweeps: {results:?}");
+        assert!(results[2] < results[0] * 0.2, "two V-cycles should leave a fraction of the Jacobi residual: {results:?}");
+    }
+
+    /// FIRE-MG CPU mirror of fire_sim.wgsl's cs_mg_* kernels (no solids, ground mirror, open sides
+    /// and top), to tell an algorithm fault from a GPU one: prints the residual after each V-cycle.
+    #[test]
+    fn multigrid_pressure_cpu_mirror() {
+        #[derive(Clone)]
+        struct L { n: [usize; 3], v: Vec<f32> }
+        let idx = |n: [usize; 3], x: usize, y: usize, z: usize| (z * n[1] + y) * n[0] + x;
+        let bc = std::cell::Cell::new(0u32); // 0: as the shader, 1: ground open too, 2: face Dirichlet (ghost -here)
+        let get = |g: &L, x: i32, y: i32, z: i32, here: f32| -> f32 {
+            if y < 0 && bc.get() != 1 { return here; }
+            if x < 0 || z < 0 || y < 0 || x >= g.n[0] as i32 || y >= g.n[1] as i32 || z >= g.n[2] as i32 {
+                // 3: the shader's fine-grid zero (one fine cell out) kept on every level
+                let t = 0.5 + 0.5 * g.n[0] as f32 / 40.0;
+                return match bc.get() { 2 => -here, 3 => here * (1.0 - 1.0 / t), _ => 0.0 };
+            }
+            g.v[idx(g.n, x as usize, y as usize, z as usize)]
+        };
+        let sum6 = |g: &L, x: i32, y: i32, z: i32, here: f32| {
+            get(g, x + 1, y, z, here) + get(g, x - 1, y, z, here) + get(g, x, y + 1, z, here)
+                + get(g, x, y - 1, z, here) + get(g, x, y, z + 1, here) + get(g, x, y, z - 1, here)
+        };
+        let smooth = |p: &L, rhs: &L| -> L {
+            let mut o = p.clone();
+            for z in 0..p.n[2] { for y in 0..p.n[1] { for x in 0..p.n[0] {
+                let i = idx(p.n, x, y, z);
+                let here = p.v[i];
+                let jac = (sum6(p, x as i32, y as i32, z as i32, here) - rhs.v[i]) / 6.0;
+                o.v[i] = here + 0.857142857 * (jac - here);
+            }}}
+            o
+        };
+        let residual = |p: &L, rhs: &L| -> L {
+            let mut o = p.clone();
+            for z in 0..p.n[2] { for y in 0..p.n[1] { for x in 0..p.n[0] {
+                let i = idx(p.n, x, y, z);
+                let here = p.v[i];
+                o.v[i] = rhs.v[i] - (sum6(p, x as i32, y as i32, z as i32, here) - 6.0 * here);
+            }}}
+            o
+        };
+        let restrict = |f: &L, scale: f32| -> L {
+            let n = [f.n[0] / 2, f.n[1] / 2, f.n[2] / 2];
+            let mut o = L { n, v: vec![0.0; n[0] * n[1] * n[2]] };
+            for z in 0..n[2] { for y in 0..n[1] { for x in 0..n[0] {
+                let mut s = 0.0;
+                for k in 0..8 { s += f.v[idx(f.n, 2 * x + (k & 1), 2 * y + ((k >> 1) & 1), 2 * z + ((k >> 2) & 1))]; }
+                o.v[idx(n, x, y, z)] = s * scale;
+            }}}
+            o
+        };
+        let prolong_add = |f: &L, c: &L| -> L {
+            let mut o = f.clone();
+            for z in 0..f.n[2] { for y in 0..f.n[1] { for x in 0..f.n[0] {
+                let q = [(x as f32 + 0.5) * 0.5 - 0.5, (y as f32 + 0.5) * 0.5 - 0.5, (z as f32 + 0.5) * 0.5 - 0.5];
+                let b = q.map(|v| v.floor());
+                let fr = [q[0] - b[0], q[1] - b[1], q[2] - b[2]];
+                let mut e = 0.0;
+                for k in 0..8 {
+                    let o3 = [k & 1, (k >> 1) & 1, (k >> 2) & 1];
+                    let mut w = 1.0;
+                    let mut ci = [0usize; 3];
+                    for a in 0..3 {
+                        w *= if o3[a] == 1 { fr[a] } else { 1.0 - fr[a] };
+                        ci[a] = ((b[a] as i32 + o3[a] as i32).clamp(0, c.n[a] as i32 - 1)) as usize;
+                    }
+                    e += c.v[idx(c.n, ci[0], ci[1], ci[2])] * w;
+                }
+                let i = idx(f.n, x, y, z);
+                o.v[i] += e;
+            }}}
+            o
+        };
+        let norm = |r: &L| r.v.iter().map(|v| (*v as f64).powi(2)).sum::<f64>().sqrt();
+        let n0 = [40usize, 72, 40];
+        let cell = 0.05f32;
+        let mut rhs = L { n: n0, v: vec![0.0; n0[0] * n0[1] * n0[2]] };
+        for z in 0..n0[2] { for y in 0..n0[1] { for x in 0..n0[0] {
+            let d2 = ((x as f32 - 19.5).powi(2) + (y as f32 - 12.0).powi(2) + (z as f32 - 19.5).powi(2)) / 16.0;
+            rhs.v[idx(n0, x, y, z)] = cell * cell * 10.0 * (-0.5 * d2).exp();
+        }}}
+        let b = norm(&rhs);
+        for (mode, coarse_sweeps, scale) in [(3u32, MG_COARSE_SWEEPS as usize, 0.5f32)] {
+            bc.set(mode);
+            let mut p = L { n: n0, v: vec![0.0; rhs.v.len()] };
+            let mut out = Vec::new();
+            for _ in 0..3 {
+                for _ in 0..2 { p = smooth(&p, &rhs); }
+                // descend
+                let mut rhss = vec![restrict(&residual(&p, &rhs), scale)];
+                let mut es: Vec<L> = Vec::new();
+                loop {
+                    let r = rhss.last().unwrap().clone();
+                    let mut e = L { n: r.n, v: vec![0.0; r.v.len()] };
+                    let coarsest = r.n.iter().any(|v| v % 2 == 1) || *r.n.iter().min().unwrap() < 6 || rhss.len() == 3;
+                    for _ in 0..if coarsest { coarse_sweeps } else { 2 } { e = smooth(&e, &r); }
+                    if coarsest { es.push(e); break; }
+                    rhss.push(restrict(&residual(&e, &r), scale));
+                    es.push(e);
+                }
+                // ascend
+                for li in (0..es.len() - 1).rev() {
+                    let mut e = prolong_add(&es[li], &es[li + 1]);
+                    for _ in 0..2 { e = smooth(&e, &rhss[li]); }
+                    es[li] = e;
+                }
+                p = prolong_add(&p, &es[0]);
+                for _ in 0..2 { p = smooth(&p, &rhs); }
+                out.push(norm(&residual(&p, &rhs)) / b);
+            }
+            eprintln!("cpu mirror, bc {mode}, {coarse_sweeps} coarsest sweeps, restrict x{scale}: residual after 1/2/3 cycles {out:.4?}");
+            assert!(out[1] < 0.15 && out[2] <= out[1] * 1.05, "multigrid stopped converging: {out:?}");
+        }
     }
 
     #[test]

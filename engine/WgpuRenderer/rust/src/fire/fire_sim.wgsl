@@ -460,7 +460,14 @@ fn lvSolid(id: vec3<i32>, n: vec3<i32>) -> bool {
 }
 fn lvP(id: vec3<i32>, here: f32, n: vec3<i32>) -> f32 {
     if (id.y < 0 && S.dims.w == 1u) { return here; }
-    if (any(id < vec3<i32>(0)) || any(id >= n)) { return 0.0; }
+    if (any(id < vec3<i32>(0)) || any(id >= n)) {
+        // the open sides and top: the box's equation is zero one FINE cell outside (cs_jacobi's
+        // ghost). A coarse level's ghost cell lies further out, so it extrapolates its edge value to
+        // that same zero; a plain zero ghost put the boundary 2-8 cells too far out and the coarse
+        // correction overshot until the cycles diverged (multigrid_pressure_cpu_mirror)
+        let t = 0.5 + 0.5 * f32(n.x) / f32(S.dims.x);
+        return here * (1.0 - 1.0 / t);
+    }
     if (lvSolid(id, n)) { return here; }
     return textureLoad(pIn, id, 0).x;
 }
