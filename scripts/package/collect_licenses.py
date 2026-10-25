@@ -15,7 +15,10 @@ LICENCE_PREFIXES = ('LICENSE', 'LICENCE', 'COPYING', 'NOTICE', 'COPYRIGHT', 'UNL
 
 
 def vcpkg(build_dir, out):
-    share = next(build_dir.glob('vcpkg_installed/*/share'), None)
+    # The target triplet holds the libraries linked into the game; the host triplet (x64-windows)
+    # only holds build tools. Take the one with the most ports.
+    shares = [d for d in build_dir.glob('vcpkg_installed/*/share') if d.parent.name != 'vcpkg']
+    share = max(shares, key=lambda d: sum(1 for _ in d.glob('*/copyright')), default=None)
     ports = []
     if share:
         for copyright in sorted(share.glob('*/copyright')):
@@ -41,6 +44,7 @@ def rust(repo, manifest, target, out):
                 seen.add(dep['pkg'])
                 stack.append(dep['pkg'])
     crates = []
+    apache = None  # a crate's own Apache-2.0 text, for crates that name the licence but ship no file
     for pid in sorted(seen, key=lambda i: (packages[i]['name'], packages[i]['version'])):
         pkg = packages[pid]
         if pkg['source'] is None:
@@ -51,8 +55,14 @@ def rust(repo, manifest, target, out):
         dest.mkdir(parents=True, exist_ok=True)
         for f in files:
             shutil.copyfile(f, dest / f.name)
+            if apache is None and 'APACHE' in f.name.upper():
+                apache = f
         crates.append({'name': pkg['name'], 'version': pkg['version'], 'license': pkg.get('license'),
                        'files': [f.name for f in files]})
+    for c in crates:
+        if not c['files'] and apache is not None and 'Apache-2.0' in (c['license'] or ''):
+            shutil.copyfile(apache, out / 'rust' / f"{c['name']}-{c['version']}" / 'LICENSE-APACHE')
+            c['files'] = ['LICENSE-APACHE (standard text; the crate names Apache-2.0 but ships no file)']
     return crates
 
 
