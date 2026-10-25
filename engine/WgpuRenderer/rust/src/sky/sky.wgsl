@@ -1772,6 +1772,19 @@ fn march_clouds(
 #else
                 direct = sun_col * exp(-od) * phase * beer;
 #endif
+#ifdef CLOUD_DECK
+                // (OP, CLOUD-DECK) two-stream diffusion through thick cloud (open-water's clouds.js,
+                // MIT): sunlight diffused through the column above, transmitted as 1/(1 + 0.75(1-g) tau)
+                // with g ~ 0.85, fills the interior near-isotropically. A closed deck is a slab lit from
+                // above (E mu0 T_d / pi); broken cumulus are bright from the sunlit side and dark
+                // bodies with bright rims backlit. Neutral-cool: the mixed sun and sky at the cloud top.
+                let deck_slab = smoothstep(0.75, 0.95, cov);
+                let deck_td = 1.0 / (1.0 + 0.11 * od);
+                let deck_mu0 = max(dot(normalize(p), sun), 0.0);
+                let deck_side = mix(0.12, 0.5, 1.0 - smoothstep(-0.6, 0.3, cos_t));
+                let deck_diffuse = deck_td * mix(deck_side, deck_mu0 / PI, deck_slab) * (1.0 - exp(-0.15 * od));
+                direct += dot(sun_col, vec3<f32>(0.2126, 0.7152, 0.0722)) * vec3<f32>(0.93, 1.0, 1.09) * deck_diffuse;
+#endif
             }
             // SKY-004: the identical march toward the MOON. Same steps, same growth, same
             // Beer-Powder -- it is the same physics with a different body, and self-shadowing is
@@ -1800,7 +1813,13 @@ fn march_clouds(
             let hfp = clamp((length(p) - (sky.params.z + sky.cloud0.z)) / thick, 0.0, 1.0);
             // darker undersides (cheap AO). The lunar multiple-scattering fill rides the SAME
             // height gradient as the sky ambient, so it cannot flatten the deck.
+#ifdef CLOUD_DECK
+            // (CLOUD-DECK) the skylight filters down through the cloud above this sample (two-stream)
+            let deck_up = 1.0 / (1.0 + 0.11 * sigma * (1.0 - hfp) * thick * 0.35);
+            let ambient = (amb_sky + amb_moon) * mix(ao_floor, 1.0, hfp) * deck_up;
+#else
             let ambient = (amb_sky + amb_moon) * mix(ao_floor, 1.0, hfp);
+#endif
             let scatter = direct + ambient;
             let seg = exp(-sigma * dt);
             // In-scattered radiance over the segment: T * albedo * J * (1 - exp(-sigma*dt)), with
