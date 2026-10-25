@@ -46,7 +46,9 @@ struct FarSource {
     radius: f32,
     colour: u32,
     flags: u32,
-    padding: u32,
+    // FAR-SHAPE: 0 = legacy proxy; else bit 31 + yaw16 (bits 0-15) + width/length unorm8
+    // (bits 16-23), with `radius` = half the long side (Engine::FarProxyInstance::shape).
+    shape: u32,
 };
 
 // One survivor, compacted by the cull for the indirect draws.
@@ -56,7 +58,7 @@ struct FarVisible {
     radius: f32,
     colour: u32,
     seed: f32,
-    padding: f32,
+    shape: u32,
 };
 
 // The single compacted buffer is PARTITIONED, not shared: cards occupy [0, CARD_CAP) and
@@ -209,7 +211,7 @@ fn cs_cull(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocat
     visible[slot].radius = max(s.radius, MIN_PROXY_RADIUS);
     visible[slot].colour = s.colour;
     visible[slot].seed = hash01(i ^ 0x9e3779b9u);
-    visible[slot].padding = 0.0;
+    visible[slot].shape = s.shape;
 }
 
 struct VsOut {
@@ -219,7 +221,30 @@ struct VsOut {
     @location(2) world_rel: vec3<f32>,
     @location(3) normal: vec3<f32>,
     @location(4) seed: f32,
+    @location(5) @interpolate(flat) shaped: u32,
 };
+
+// FAR-SHAPE: the footprint of a shaped proxy -- its long axis (world XZ, unit), full length and
+// full width. A fence keeps its length and its 20 cm, a mast its few tens of centimetres.
+struct Footprint {
+    axis: vec2<f32>,
+    length: f32,
+    width: f32,
+};
+
+fn footprint(radius: f32, shape: u32) -> Footprint {
+    let yaw = f32(shape & 0xffffu) * (3.14159265 / 65536.0);
+    let ratio = f32((shape >> 16u) & 0xffu) * (1.0 / 255.0);
+    var f: Footprint;
+    f.axis = vec2<f32>(cos(yaw), sin(yaw));
+    f.length = max(radius * 2.0, 0.5);
+    f.width = max(f.length * ratio, 0.2);
+    return f;
+}
+
+fn is_shaped(shape: u32) -> bool {
+    return (shape & 0x80000000u) != 0u;
+}
 
 // Lit exactly like the rest of the world (sun + sky irradiance + cloud shadow, linear
 // output, scene fog) rather than with its own constants. A proxy that is merely PLAUSIBLE
@@ -257,7 +282,14 @@ fn vs_card(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     // aircraft — the view this tier exists for — that is the whole forest tilting.
     let to_cam = normalize(vec3<f32>(frame.cam_pos.x - inst.pos.x, 0.0, frame.cam_pos.z - inst.pos.z));
     let side = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), to_cam));
-    let w = max(inst.radius * 2.0, inst.height * 0.25);
+    var w = max(inst.radius * 2.0, inst.height * 0.25);
+    if (is_shaped(inst.shape)) {
+        // Not a tree: as wide as the real footprint looks from here, with no canopy floor.
+        let f = footprint(inst.radius, inst.shape);
+        let s = vec2<f32>(side.x, side.z);
+        let across = vec2<f32>(-f.axis.y, f.axis.x);
+        w = max(f.length * abs(dot(f.axis, s)) + f.width * abs(dot(across, s)), 0.2);
+    }
     let world = inst.pos + side * (c.x * w) + vec3<f32>(0.0, c.y * inst.height, 0.0);
     let rel = world - frame.cam_pos.xyz;
 
@@ -270,16 +302,22 @@ fn vs_card(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     o.normal = normalize(to_cam + vec3<f32>(0.0, 0.6, 0.0));
     o.albedo = unpack_argb(inst.colour) * (0.85 + 0.3 * inst.seed);
     o.seed = inst.seed;
+    o.shaped = select(0u, 1u, is_shaped(inst.shape));
     return o;
 }
 
 @fragment
 fn fs_card(in: VsOut) -> @location(0) vec4<f32> {
+    let x = (in.uv.x - 0.5) * 2.0;
+    let y = in.uv.y;
+    if (in.shaped != 0u) {
+        // A shaped card is a mast, a pole, a fence seen side on: its silhouette is the rectangle.
+        // Shaded like the legacy card so its tone does not change, only its outline.
+        return far_shade(in.albedo * (0.55 + 0.45 * (1.0 - abs(x)) * (0.4 + 0.6 * y)), in.normal, in.world_rel);
+    }
     // Analytic canopy silhouette. A far card's job is to break the rectangle: an
     // untrimmed quad reads as a fence panel, which is more wrong at distance than a
     // slightly generic tree shape is.
-    let x = (in.uv.x - 0.5) * 2.0;
-    let y = in.uv.y;
     let width = mix(1.0, 0.12, pow(y, 0.75));
     let n = fract(sin(in.uv.x * 37.0 + y * 91.0 + in.seed * 53.0) * 43758.5453) * 0.30;
     if (abs(x) > width * (1.0 - n) || y > 0.985) {
@@ -312,11 +350,21 @@ fn vs_prism(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     // Prisms live in the upper partition of the same compacted buffer.
     let inst = visible[CARD_CAP + ii];
     let c = box_corner(vi);
-    // Axis-aligned footprint from the model's own horizontal extent. The authored yaw is
-    // not carried: a proxy this far out is a few pixels wide, and a rotation would cost a
-    // matrix per instance in the source rows for no visible difference.
+    // Legacy proxy: an axis-aligned square from the model's longest side. That was thought to be
+    // invisible "a few pixels wide", but a fence or a wall is long and thin, and squaring it made a
+    // block the size of a house (FAR-SHAPE). A shaped proxy carries its yaw and width in 4 bytes.
     let d = max(inst.radius * 2.0, 1.0);
-    let world = inst.pos + vec3<f32>(c.x * d, c.y * inst.height, c.z * d);
+    var world = inst.pos + vec3<f32>(c.x * d, c.y * inst.height, c.z * d);
+    var wall = vec3<f32>(c.x, 0.35, c.z);
+    if (is_shaped(inst.shape)) {
+        // FAR-SHAPE: the real footprint, turned to the placement's yaw.
+        let f = footprint(inst.radius, inst.shape);
+        let across = vec2<f32>(-f.axis.y, f.axis.x);
+        let xz = f.axis * (c.x * max(f.length, 1.0)) + across * (c.z * f.width);
+        world = inst.pos + vec3<f32>(xz.x, c.y * inst.height, xz.y);
+        let n = f.axis * c.x + across * c.z;
+        wall = vec3<f32>(n.x, 0.35, n.y);
+    }
     let rel = world - frame.cam_pos.xyz;
 
     var o: VsOut;
@@ -328,10 +376,11 @@ fn vs_prism(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     if (c.y > 0.99) {
         o.normal = vec3<f32>(0.0, 1.0, 0.0);
     } else {
-        o.normal = normalize(vec3<f32>(c.x, 0.35, c.z));
+        o.normal = normalize(wall);
     }
     o.albedo = unpack_argb(inst.colour) * (0.9 + 0.2 * inst.seed);
     o.seed = inst.seed;
+    o.shaped = select(0u, 1u, is_shaped(inst.shape));
     return o;
 }
 

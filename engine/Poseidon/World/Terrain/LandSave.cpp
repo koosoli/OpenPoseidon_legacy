@@ -2009,18 +2009,27 @@ namespace
 // silhouette; a misclassified prism costs ~4x the draw (12 triangles against 2), and the
 // classes overlap only in directory names like "buildings\...\bush", never the reverse.
 // Anything unrecognised is a card for the same reason.
-bool FarProxyIsPrism(const char* path)
+bool FarProxyIsVegetation(const char* path)
 {
     if (path == nullptr)
         return false;
     std::string lower(path);
     for (char& c : lower)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-
     static const char* const kVegetation[] = {"vegetation", "plants", "tree", "bush", "shrub", "grass"};
     for (const char* needle : kVegetation)
         if (lower.find(needle) != std::string::npos)
-            return false;
+            return true;
+    return false;
+}
+
+bool FarProxyIsPrism(const char* path)
+{
+    if (path == nullptr || FarProxyIsVegetation(path))
+        return false;
+    std::string lower(path);
+    for (char& c : lower)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
     static const char* const kStructures[] = {"structures", "buildings", "building", "industrial",
                                               "military",   "houses",    "house",    "misc"};
@@ -2756,6 +2765,10 @@ bool Landscape::LoadOprwModern(const char* path)
                 float height = 0.0f;
                 float baseY = 0.0f; // bbox min Y: the offset from the model origin to its foot
                 float radius = 0.0f;
+                // FAR-SHAPE: the footprint's half sizes and centre in model space, kept for
+                // everything that is not vegetation (see Engine::FarProxyInstance::shape).
+                float halfX = 0.0f, halfZ = 0.0f, centreX = 0.0f, centreZ = 0.0f;
+                bool footprint = false;
                 uint32_t colour = 0xFFFFFFFFu;
                 uint32_t flags = 0;
                 bool valid = false;
@@ -2826,6 +2839,29 @@ bool Landscape::LoadOprwModern(const char* path)
                                                                            linear(bounds.color & 0xFF), 1.0f)));
                 }
                 proxy.flags = FarProxyIsPrism(name) ? 1u : 0u;
+                // FAR-SHAPE (owner: grey blocks on DayZ and Arma 3 maps). The legacy proxy is a
+                // square as wide as the model's LONGEST side, unturned, and a card is at least a
+                // quarter as wide as it is tall: right for a tree, wrong for anything long or thin.
+                // A 10 m fence became a 10 x 10 m block, a 12 m mast a 3 m wide slab. Everything
+                // but vegetation now keeps its real footprint; WGR_FAR_SHAPE=0 = the old proxies.
+                static const bool farShape = [] { const char* v = std::getenv("WGR_FAR_SHAPE"); return !(v && v[0] == '0'); }();
+                if (farShape && !FarProxyIsVegetation(name))
+                {
+                    proxy.halfX = 0.5f * (bounds.maxX - bounds.minX);
+                    proxy.halfZ = 0.5f * (bounds.maxZ - bounds.minZ);
+                    proxy.centreX = 0.5f * (bounds.maxX + bounds.minX);
+                    proxy.centreZ = 0.5f * (bounds.maxZ + bounds.minZ);
+                    const float longHalf = std::max(proxy.halfX, proxy.halfZ);
+                    const float shortHalf = std::min(proxy.halfX, proxy.halfZ);
+                    const float height = bounds.maxY - bounds.minY;
+                    // Only where the legacy proxy is wrong in kind: a building (prism), something
+                    // long and thin (fence, wall: < 1/3 as wide as long) or tall and thin (mast,
+                    // pole: 1.5x taller than long). Rocks and clutter are low and roundish, and the
+                    // legacy card's cut-out reads better for them (Stratis' hillsides went white).
+                    const bool kind = proxy.flags != 0 || shortHalf < longHalf * 0.33f || height > longHalf * 3.0f;
+                    proxy.footprint = kind && std::isfinite(proxy.halfX + proxy.halfZ + proxy.centreX + proxy.centreZ) &&
+                                      longHalf > 0.0f;
+                }
                 // A model with no vertical extent has no silhouette to stand in for.
                 proxy.valid = proxy.height > 0.05f;
                 if (proxy.valid)
@@ -2836,7 +2872,7 @@ bool Landscape::LoadOprwModern(const char* path)
 
             std::vector<Engine::FarProxyInstance> farInstances;
             farInstances.reserve(_modernObjectPlacements.size());
-            size_t prisms = 0;
+            size_t prisms = 0, shaped = 0;
             for (const ModernObjectPlacement& placement : _modernObjectPlacements)
             {
                 if (placement.modelIndex >= perModel.size())
@@ -2856,6 +2892,38 @@ bool Landscape::LoadOprwModern(const char* path)
                 instance.radius = proxy.radius;
                 instance.colour = proxy.colour;
                 instance.flags = proxy.flags;
+                if (proxy.footprint)
+                {
+                    // rows: aside (model X), up, direction (model Z), position; scale rides in
+                    // the axis lengths. The stand-in is centred on the footprint, not the origin.
+                    const float* r = placement.rows.data();
+                    const float lenX = std::sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]);
+                    const float lenZ = std::sqrt(r[6] * r[6] + r[7] * r[7] + r[8] * r[8]);
+                    instance.x = r[9] + r[0] * proxy.centreX + r[6] * proxy.centreZ;
+                    instance.z = r[11] + r[2] * proxy.centreX + r[8] * proxy.centreZ;
+                    const float worldX = proxy.halfX * lenX, worldZ = proxy.halfZ * lenZ;
+                    const bool alongX = worldX >= worldZ;
+                    const float major = alongX ? worldX : worldZ, minor = alongX ? worldZ : worldX;
+                    float yaw = alongX ? std::atan2(r[2], r[0]) : std::atan2(r[8], r[6]);
+                    if (yaw < 0.0f)
+                        yaw += 3.14159265f; // a box is the same box turned half way round
+                    if (yaw >= 3.14159265f)
+                        yaw -= 3.14159265f;
+                    if (major > 0.0f && std::isfinite(yaw) && std::isfinite(instance.x + instance.z))
+                    {
+                        const uint32_t yaw16 = std::min(65535u, static_cast<uint32_t>(yaw / 3.14159265f * 65536.0f));
+                        const uint32_t ratio8 =
+                            std::min(255u, static_cast<uint32_t>(std::lround(std::clamp(minor / major, 0.0f, 1.0f) * 255.0f)));
+                        instance.radius = major;
+                        instance.shape = 0x80000000u | (ratio8 << 16) | yaw16;
+                        ++shaped;
+                    }
+                    else
+                    {
+                        instance.x = r[9];
+                        instance.z = r[11];
+                    }
+                }
                 prisms += (proxy.flags != 0);
                 farInstances.push_back(instance);
             }
@@ -2867,9 +2935,9 @@ bool Landscape::LoadOprwModern(const char* path)
             // placements retained is the number that says whether the far world is complete,
             // and models skipped names the reason when it is not.
             LOG_INFO(World,
-                     "Far instance tier: {} proxies ({} prisms, {} cards) from {} placements; {} of {} models "
-                     "read, {} skipped; {} ms",
-                     farInstances.size(), prisms, farInstances.size() - prisms, _modernObjectPlacements.size(),
+                     "Far instance tier: {} proxies ({} prisms, {} cards, {} with their own footprint) from {} "
+                     "placements; {} of {} models read, {} skipped; {} ms",
+                     farInstances.size(), prisms, farInstances.size() - prisms, shaped, _modernObjectPlacements.size(),
                      modelsRead, _modernObjectModels.size(), modelsSkipped, farMs);
         }
 

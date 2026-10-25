@@ -3153,7 +3153,10 @@ class Engine : public IGraphicsEngine
         float radius = 0.0f;
         uint32_t colour = 0xFFFFFFFFu;
         uint32_t flags = 0; // bit0: 0 = card (vegetation), 1 = prism (structure)
-        uint32_t pad = 0;
+        // FAR-SHAPE: 0 = the legacy proxy (square, axis-aligned; every tree). Otherwise bit 31 set,
+        // bits 0-15 = the footprint's long-axis yaw over [0, pi), bits 16-23 = its width / length
+        // (unorm8), and `radius` is half the long side: far.wgsl draws the real footprint, turned.
+        uint32_t shape = 0;
     };
     // Replace the whole far-proxy set. Called ONCE per world load. Empty releases it.
     virtual void SetFarProxyInstances(const FarProxyInstance* /*data*/, size_t /*count*/) {}

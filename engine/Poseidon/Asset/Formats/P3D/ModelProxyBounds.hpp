@@ -47,6 +47,9 @@ struct ModelProxyBounds
     float minY = 0.0f;   // vertical extent of the model-space bbox
     float maxY = 0.0f;
     float horizontalExtent = 0.0f; // max(bbox x extent, bbox z extent)
+    // The model-space bbox footprint itself: a far stand-in for a fence or a mast needs its
+    // real width, length and centre, not a square as wide as its longest side.
+    float minX = 0.0f, maxX = 0.0f, minZ = 0.0f, maxZ = 0.0f;
     uint32_t color = 0xFFFFFFFFu;  // shape average colour, packed
     bool valid = false;
     // Whether `color` was read or defaulted. MLOD carries no average colour
@@ -206,6 +209,10 @@ inline ModelProxyBounds ReadMlodProxyBounds(BinaryReader& reader)
     bounds.minY = minY;
     bounds.maxY = maxY;
     bounds.horizontalExtent = std::max(maxX - minX, maxZ - minZ);
+    bounds.minX = minX;
+    bounds.maxX = maxX;
+    bounds.minZ = minZ;
+    bounds.maxZ = maxZ;
     // color and colorKnown stay at their defaults on purpose: see ModelProxyBounds.
     bounds.valid =
         std::isfinite(bounds.radius) && std::isfinite(bounds.horizontalExtent) && bounds.radius >= 0.0f && maxY >= minY;
@@ -290,6 +297,10 @@ inline ModelProxyBounds ReadModelProxyBounds(BinaryReader& reader)
         bounds.maxY = preamble.bboxMax.y;
         bounds.horizontalExtent =
             std::max(preamble.bboxMax.x - preamble.bboxMin.x, preamble.bboxMax.z - preamble.bboxMin.z);
+        bounds.minX = preamble.bboxMin.x;
+        bounds.maxX = preamble.bboxMax.x;
+        bounds.minZ = preamble.bboxMin.z;
+        bounds.maxZ = preamble.bboxMax.z;
         bounds.color = preamble.color;
         bounds.colorKnown = true;
         bounds.valid = bounds.radius >= 0.0f && bounds.maxY >= bounds.minY &&
