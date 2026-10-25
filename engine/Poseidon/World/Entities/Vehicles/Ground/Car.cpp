@@ -2798,6 +2798,32 @@ Matrix4 Car::TurretTransform() const
     return MIdentity;
 }
 
+// An Arma 1 car's gunner looks from "gunnerview" over his gun's sights. Its memory LOD ties
+// the point to the gun by the model.cfg skeleton, which the OFP animation does not read, so
+// the point stayed where the gun was at rest while the gun turned: pressing V gave the view
+// past the M2's side (HMMWV, 5t truck; owner, 2026-10-25). For an Arma 1 class (a1MuzzleFlash)
+// whose point the turret did not move, the point rides the gun's own transform.
+bool Car::GetOpticsCamera(Matrix4& transf, CameraType camType) const
+{
+    if (!base::GetOpticsCamera(transf, camType))
+        return false;
+    const AIUnit* unit = GWorld->FocusOn();
+    if (!HasTurret() || !unit || unit->GetPerson() != _gunner || !Type()->_par ||
+        !Type()->_par->FindEntry("a1MuzzleFlash"))
+        return true;
+    Shape* memory = _shape->MemoryLevel();
+    int index = memory ? memory->FindNamedSel("gunnerview") : -1;
+    if (index < 0 && memory)
+        index = memory->FindNamedSel("gunner_view");
+    if (index < 0 || !memory || memory->NamedSel(index).Size() < 1)
+        return true;
+    const Vector3 rest = memory->Pos(memory->NamedSel(index)[0]);
+    const bool unmoved = transf.Position().Distance2(rest) < 1e-6f && transf.Direction().Distance2(VForward) < 1e-6f;
+    if (unmoved)
+        transf = GunTurretTransform() * Matrix4(MTranslation, rest);
+    return true;
+}
+
 Matrix4 Car::GunTurretTransform() const
 {
     if (HasTurret())

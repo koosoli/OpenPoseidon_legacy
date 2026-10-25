@@ -208,6 +208,7 @@ class Car: public TankOrCar
 
 	Matrix4 TurretTransform() const;
 	Matrix4 GunTurretTransform() const;
+	bool GetOpticsCamera(Matrix4 &transf, CameraType camType) const override;
 
 	float OutsideCameraDistance( CameraType camType ) const override {return 20;}
 
