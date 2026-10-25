@@ -22,17 +22,23 @@ Development captures from Open Poseidon Engine, including original-game and loca
 loaded Reforger content. They show features in progress rather than a promise
 that every map, vehicle or material is fully supported.
 
-| Tidewater ocean | Wind-driven procedural grass |
+| Arma 3 mission with its own pause menu | Volumetric fire, smoke and impact craters |
 | --- | --- |
-| ![Tidewater ocean waves and shoreline](docs/roadmap/publishing/public-files/screenshots/newocean.png) | ![Procedural grass across a rolling meadow](docs/roadmap/publishing/public-files/screenshots/newgrass.png) |
-| **Layered volumetric fog** | **Rainwater and reflective puddles** |
-| ![Low fog layers across island valleys](docs/roadmap/publishing/public-files/screenshots/volumetricfog.png) | ![Reflective rainwater across village ground](docs/roadmap/publishing/public-files/screenshots/puddles.png) |
+| ![An Arma 3 mission paused on its native menu, with an Arma 3 vehicle and base](docs/roadmap/publishing/public-files/screenshots/arma3-mission.png) | ![A burning wreck under a black smoke column beside a fresh impact crater](docs/roadmap/publishing/public-files/screenshots/volumetric-crators-newfire-smoke.png) |
+| **Whole-world rendering** | **The Moon with the Earth in its sky** |
+| ![The Earth seen from orbit, with the day/night line across Europe](docs/roadmap/publishing/public-files/screenshots/wholeworldrendering.png) | ![Cratered lunar ground with the Earth above the horizon](docs/roadmap/publishing/public-files/screenshots/moon.jpg) |
+| **Procedural fish schools under water** | **Rain puddles on a beach with driftwood** |
+| ![Schools of fish over a rocky sea floor below the wave surface](docs/roadmap/publishing/public-files/screenshots/wildlife.jpg) | ![A rain puddle with ripples on rippled beach sand, with stones and driftwood](docs/roadmap/publishing/public-files/screenshots/puddles.png) |
+| **Arma Reforger terrain** | **Tidewater ocean** |
+| ![A Reforger landscape of fields, forests and coast from the air](docs/roadmap/publishing/public-files/screenshots/reforger.jpg) | ![Tidewater ocean waves and shoreline](docs/roadmap/publishing/public-files/screenshots/newocean.png) |
+| **Wind-driven procedural grass** | **Layered volumetric fog** |
+| ![Procedural grass across a rolling meadow](docs/roadmap/publishing/public-files/screenshots/newgrass.png) | ![Low fog layers across island valleys](docs/roadmap/publishing/public-files/screenshots/volumetricfog.png) |
 | **Snow depth and vehicle tracks** | **Destructible terrain and craters** |
 | ![Snow cover with compressed vehicle tracks](docs/roadmap/publishing/public-files/screenshots/volumetricsnow.png) | ![Deep terrain deformation near a village road](docs/roadmap/publishing/public-files/screenshots/destrucableterrain.jpg) |
 | **GTAO and interior shading** | **Night lighting and shadows** |
 | ![Ambient occlusion and directional light inside a building](docs/roadmap/publishing/public-files/screenshots/GTAO.png) | ![Village lights and shadows in rainy night conditions](docs/roadmap/publishing/public-files/screenshots/newshadowsystem.png) |
-| **Box3D physics test scene** | **Local Reforger terrain compatibility** |
-| ![Box3D wall and rigid-body test scene](docs/roadmap/publishing/public-files/screenshots/box3d.png) | ![Locally loaded Reforger town with buildings and vegetation](docs/roadmap/publishing/public-files/screenshots/armareforger.png) |
+| **Box3D physics test scene** | |
+| ![Box3D wall and rigid-body test scene](docs/roadmap/publishing/public-files/screenshots/box3d.png) | |
 
 ## What Open Poseidon Engine adds
 
@@ -40,81 +46,136 @@ Open Poseidon Engine develops a modern [wgpu](https://wgpu.rs/)-based renderer a
 the legacy OpenGL renderer, while retaining original OFP content and gameplay.
 The current engine includes:
 
-- **Vulkan rendering through WGPU:** a modern graphics backend with Vulkan
-  support on Windows and Linux, alongside Direct3D 12 on Windows. The active
-  API depends on the platform, GPU and driver; the legacy OpenGL renderer remains
-  available separately.
+#### Worlds and content
+
+- **Arma 1, 2 and 3 missions (experimental):** missions and campaigns from your
+  own Arma installations start from their native main menus, pause screens and
+  mission dialogs, with their own weapons, sounds, voices, animals, scripted
+  state machines and conversations. Arma 1 units, vehicles and objects can be
+  placed in the mission editor. Many missions play from start to finish; others
+  still stop at missing script commands or content.
+- **Whole-world rendering:** fly from the ground to orbit over the whole Earth,
+  built from real elevation and imagery streamed at runtime. Mountains cast
+  shadows across the ground, the sea is drawn out to the horizon, valleys fill
+  with fog and snowlines follow the season. A real-time Moon has its own relief and
+  craters, and the Earth hangs in its sky. A scripted ICBM can be flown across the
+  globe with a follow camera.
+- **Arma Reforger, DayZ and Arma 2/3 terrains:** locally installed worlds load
+  with their own buildings, vegetation, roads, materials and far-distance trees.
+  Reforger worlds stream natively. Imported terrain opens in the native OFP mission
+  editor with OFP units.
+- **Island Editor and OFP Fusion:** a terrain editor with no object limit, and an
+  archipelago built from all five locally installed classic islands.
+
+#### Rendering
+
+- **Vulkan rendering through WGPU:** Vulkan support on Windows and Linux,
+  alongside Direct3D 12 on Windows. The active API depends on the platform,
+  GPU and driver.
+- **GTAO:** screen-space ambient occlusion and bent-normal ambient shading,
+  with live developer controls and diagnostic views.
+- **Global illumination (GI):** a local irradiance probe grid combines indirect
+  sky lighting with coloured sunlight bounced from nearby surfaces.
+- **Lighting and shadows:** dynamic sun/local-light shadows, contact shadows,
+  muzzle illumination, atmospheric light scattering and script-created lights
+  (Arma 2/3 light commands).
+- **Vehicle paint and reflections:** clear-coat paint that reflects the sky and
+  the lit ground, with screen-space reflections; glass, chrome and instruments
+  are told apart from paint.
+- **Volumetric clouds and procedural sky:** overcast controls shared with Zeus,
+  stars, the Milky Way and cloud shadows affecting terrain, objects, grass and water.
+- **Layered volumetric fog:** adjustable lower/upper heights, density, patchiness,
+  valley/mountain presets, live controls, reset and a legacy-fog option. Local
+  light scattering supports night lights and the player's torch.
+- **GPU-driven trees:** dense forests, including Arma 3 and DayZ vegetation, are
+  culled and drawn on the GPU.
+- **Upscaling:** AMD FSR 1 and an optional local NVIDIA DLSS integration.
+  The proprietary NGX SDK/runtime is not bundled; distributable builds disable
+  DLSS. Its availability depends on build configuration and compatible hardware.
+
+#### Fire, smoke and destruction
+
+- **Volumetric fire and smoke:** a new fire and smoke system. Explosions start with a
+  fireball, wrecks burn with flames that lean in the wind, and black smoke columns
+  rise, drift and linger long after the fire. Smoke has buoyancy and wind
+  response, self-shadowing and scene shadows, and room/portal-aware containment
+  against walls, floors and ceilings, with flow through doorways. Containment
+  depends on the building geometry/topology available to the engine.
+- **Volumetric impact craters:** explosions dig real craters into the terrain,
+  with thrown-out earth around the rim.
+- **Holes in walls:** bullets and explosions break physical holes into walls.
+- **Destructible terrain and editor:** brush deformation, small cuts,
+  horizontal caves/tunnels, sinkholes, straight and tank trenches, and excavation
+  selection/rotation/deletion. This extends terrain holes; it is not a general
+  voxel-world simulation.
+- **Combat effects:** muzzle flashes that light the shooter and the surroundings,
+  ground explosions, snow bullet tracks and helicopter ground downwash particles.
+
+#### Water, weather and wildlife
+
+- **Tidewater ocean:** FFT waves, shoreline wetness, reflections, foam, wakes,
+  spray, underwater rendering and caustics; projectile/explosion and helicopter
+  interactions. Boats are rigid bodies that float at a real draft on the drawn
+  waves and leave ripples.
+- **Procedurally generated wildlife and coastline:** schools of fish gather around
+  you under water. The sea floor has real depth, rocks and corals, and beaches
+  get rippled sand, stones and driftwood. Surf, gulls, terns and whales are heard
+  around the coast.
+- **Procedural grass:** travelling gust fronts, spatial wind variation,
+  configurable coverage and player/vehicle/explosion/downwash interactions.
+- **Weather and puddles:** rain collects in puddles with ripples and drains away
+  again, with wet ground and clothing, surface snow and terrain contact depressions.
+- **Snow depth and deformation:** compressed foot/vehicle tracks and projectile
+  marks in depth-bearing ground snow, alongside roof and vegetation snow cover.
+- **Mud:** MudRunner-style mud with ruts, rolling resistance and mud thrown from
+  wheels and tank tracks.
+
+#### Soldiers, AI and gameplay
+
+- **NPC chat (experimental):** talk to your squad, nearby soldiers, civilians and
+  HQ by typing or by voice. A language model of your choice answers in character,
+  using a live picture of the situation and the mission briefing. Hosted
+  providers and fully local models (Ollama or any OpenAI-compatible server) are
+  supported. Replies are spoken in 3D at the speaker, or over the radio. Orders
+  you give in plain words (follow, hold, move, cover, engage, get in and more)
+  run through the game's own commands; model output is never run as script. API
+  keys stay on your computer.
+- **New infantry animations:** seamless reloading while walking, leaning around
+  corners (Q/E), jumping with a soft landing, swimming, and diving and surfacing.
+- **Improved AI:** gunfire hearing/reporting, immediate orders and near-miss
+  suppression. Soldiers remember where danger came from and search there, turn
+  on whoever is shooting at them, look out from cover, avoid cover where a
+  squad mate was hit and run from live grenades. Optional gradual spotting and
+  cover/flank/search behavior. Behavior switches are configuration-dependent;
+  this is not a universal new navigation system or complete replacement AI.
 - **Physical inventory (single player):** open with **Tab ↹** on foot (**O** in vehicle control seats) for vicinity cargo,
   drag/drop, equipped slots and weight/volume budgets; **K** opens inventory
-  settings, including optional bearing callouts, a bearing readout and grenade-launcher
-  ground-range estimates. Includes 17 original realistic equipment icons; addon pictures and
-  labelled tiles remain fallbacks.
+  settings, including optional bearing callouts, a bearing readout and
+  grenade-launcher ground-range estimates. Includes 17 original realistic
+  equipment icons; addon pictures and labelled tiles remain fallbacks.
   Multiplayer keeps classic Gear; Dev Tools and Zeus are disabled in multiplayer.
 - **Box3D physics and articulated ragdolls:** jointed character bodies, death and
   explosion reactions, and bullet reactivation of supported runtime corpses.
-  Automatic ragdolls default to on, with an on/off control in the Physics dev tab.
-- **Layered volumetric fog:** height-bounded layers, density, patchiness and
-  valley/mountain presets; live Weather controls, a legacy mode and reset controls.
-  Participating-light scattering includes night lights and the player's torch.
-- **GTAO ambient occlusion:** screen-space contact shading and bent-normal ambient
-  lighting, with developer controls and diagnostic views.
-- **Improved lighting and shadows:** dynamic sunlight and local-light shadows,
-  contact shadows, muzzle-light illumination and atmospheric light scattering.
-- **Volumetric smoke:** buoyant, wind-driven plumes with room/portal-aware
-  containment against walls, floors and ceilings, doorway flow, self-shadowing
-  and shadows on the surrounding scene. Containment depends on the available
-  building geometry and topology; arbitrary assets can still need fixes.
-- **Volumetric clouds and a procedural sky:** overcast controls shared with Zeus,
-  stars, and cloud shadows affecting terrain, objects, grass and water together.
-- **Tidewater ocean rendering:** FFT waves, shoreline wetness, reflections, foam,
-  wakes, spray, underwater rendering and caustics, plus projectile/explosion and
-  helicopter interactions. Supported boats follow the drawn sea surface.
-- **Procedural grass:** travelling gust fronts and spatial wind variation,
-  configurable coverage, broader colour regions, and player, vehicle, explosion
-  and rotor-wash interactions.
-- **Rain, snow and wet surfaces:** accumulating/draining terrain water, rain
-  ripples, wet ground and clothing shading, surface snow on terrain and objects,
-  and snow/soft-ground contact imprints. Snowfall contributes default weather fog.
-- **Snow depth and deformation:** depth-bearing ground snow with compressed
-  foot/vehicle tracks and projectile marks, alongside roof and vegetation cover.
-- **Deformable soft ground:** mud/sand/snow contact depressions and wheel ruts.
-  Stock Jeep and Truck5t wet-mud rut/rolling-resistance paths are enabled;
-  boot-sole normal/parallax relief remains an opt-in visual prototype.
-- **Destructible terrain and editing:** explosion craters, brush deformation,
-  small terrain cuts, horizontal cave/tunnel excavation,
-  straight trenches and tank trenches, with excavation selection, rotation and
-  deletion controls. These extend terrain holes rather than replacing the world
-  with a general voxel simulation.
-- **Combat and effects:** revised muzzle flashes with local shooter/surrounding
-  illumination, snow projectile marks and helicopter ground downwash particles.
-- **Firing from vehicles (FFV):** use a personal rifle from configured passenger
-  seats, with aiming arcs, reload and action-menu Ready/Stow controls. The stock
-  Jeep is the validated profile; this is not universal support for all cargo
-  seats, weapon families or multiplayer.
-- **Satellite terrain textures (satmaps):** supported authored satellite layers
-  and an automatic classic-world far-colour bake including static roofs and
-  vegetation. This improves distant ground representation without replacing
-  live 3D buildings or object LODs.
-- **Local content browser:** installed Arma 1/2/3, DayZ and Reforger terrain
-  discovery and partial format compatibility. Select a terrain and use OFP units
-  in the native mission editor without restarting; selected vehicle bridges are
-  also available. Proprietary source content remains local.
-- **Multithreading:** an enkiTS worker pool handles selected terrain/cache,
-  texture conversion and audio jobs, alongside asynchronous streaming work.
-  Parallelism is applied to specific workloads; the whole simulation is not
-  claimed to run independently across every CPU core.
-- **Upscaling:** AMD FSR 1 spatial upscaling/sharpening and an optional local
-  NVIDIA DLSS integration. DLSS requires a compatible GPU and a separately
-  supplied NGX SDK/runtime; distributable builds keep the proprietary path off.
-- **Streaming and diagnostics:** geometry/residency work, GPU timing, graphics
-  debug views, test harnesses and live developer controls. Zeus provides freefly
-  movement and click-to-place units and vehicles.
-- **Improved AI behavior:** gunfire hearing and reporting fixes, immediate order
-  execution and near-miss suppression, plus optional gradual spotting and
-  cover/flank/search behavior. Optional behavior is configuration-dependent;
-  this is not a completed replacement AI or new universal navigation system.
-- **Swimming:** swimmer movement and boat-route/boarding support.
-  The third-party swimming animation addon is not bundled with the engine.
+  Automatic ragdolls default to on, with a Physics developer-tab toggle.
+- **Firing from vehicles (FFV):** personal-rifle fire from configured passenger
+  seats, aiming arcs, reload and action-menu Ready/Stow controls. Stock Jeep
+  coverage is validated; other seats, weapon families and multiplayer are limited.
+- **Steam Audio:** echo and occlusion in buildings, underwater sound, and the
+  sea's surf and wildlife.
+
+#### Engine and tools
+
+- **Satellite terrain textures (satmaps):** authored satellite layers and an
+  automatic classic-world far-colour bake incorporating static roofs/vegetation.
+  This is a ground colour representation, not a replacement for live object LODs.
+- **Local content browser and editor:** terrain discovery for installed Arma
+  1/2/3, DayZ and Reforger content, partial format conversion and selected vehicle
+  bridges.
+- **Streaming and developer tools:** geometry/residency work, GPU timings,
+  debug views, test harnesses and Zeus freefly/unit placement.
+- **Multithreading:** enkiTS worker jobs for selected terrain/cache, texture
+  conversion and audio work, plus asynchronous streaming and pipeline builds.
+  This does not imply that every simulation/rendering operation runs on its own thread.
 
 These features are at different stages of acceptance. Dense/aerial fog can still
 show visible patterns; strong torch shafts are not visually accepted. Ragdoll
