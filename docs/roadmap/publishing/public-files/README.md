@@ -31,6 +31,11 @@ Bohemia Interactive product.
 
 ### Worlds and content
 
+> **No conversion, no copying.** Arma 1, 2, 3, DayZ and Reforger content loads
+> straight from the original game's own installation folder. Point the engine at
+> your installed game and play it in place: nothing is converted into a separate
+> copy beforehand, and none of those games' files ship with Open Poseidon.
+
 - **Arma 1, 2 and 3 missions (experimental):** missions and campaigns from your
   own Arma installations start from their native main menus, pause screens and
   mission dialogs, with their own weapons, sounds, voices, animals, scripted
@@ -145,8 +150,13 @@ Bohemia Interactive product.
 - **Firing from vehicles (FFV):** personal-rifle fire from configured passenger
   seats, aiming arcs, reload and action-menu Ready/Stow controls. Stock Jeep
   coverage is validated; other seats, weapon families and multiplayer are limited.
-- **Steam Audio:** echo and occlusion in buildings, underwater sound, and the
-  sea's surf and wildlife.
+- **Steam Audio (default audio backend):** Valve's Steam Audio places every
+  3D sound around you with binaural (HRTF) spatialisation, so headphones tell
+  you where a shot or an engine is. Sounds are muffled by terrain and buildings
+  between you and the source, rooms and surroundings add their own reverb, and
+  diving brings underwater sound. The sea has its own soundscape: surf wave by
+  wave, gulls, terns, whales and boat engines. The classic OpenAL backend
+  remains available.
 
 ### Engine and tools
 
