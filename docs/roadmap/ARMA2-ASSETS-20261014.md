@@ -577,6 +577,11 @@ worked off one by one (voices, animals, vehicle/weapon values, mimic/glasses/con
   their idle moves; the sheep graze, walk and spread.
 - `eae0482`: groups keep their high-command icons and icon parameters (`getGroupIcons`, ...),
   not drawn yet.
+- Runs 43-45 with every FSM: 96-97 of 98 clean, no crash. `702035a` makes every scripted FSM
+  the default, as in Arma 2 (`OP_A2_EXECFSM=animals`: only the animals').
+- 2026-10-25: `MrDudeX-arma2` follows Oli's `perf/reforger-render-hitches` (fast-forwarded to
+  `707f654`, `e11dc19`: his Arma 3 script work, PIM-RECOIL, Arma 1's vehicle and AA fixes). The
+  owner asked for an hourly look at his branches and merging what helps.
 
 ### Arma 2 weapons and vehicle values, 2026-10-25
 
