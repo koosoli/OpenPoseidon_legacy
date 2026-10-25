@@ -2880,6 +2880,39 @@ RString Arma1MagazineClass(const RString& name, const RString& cwaMagazine)
         const std::string shortName = StringValue(*a1, "displayNameShort");
         if (!shortName.empty())
             text += "\t\tshortNameMagazine=\"" + shortName + "\";\r\n";
+        // Arma 1: the gear page and the map's inventory show the Arma 1 magazine's own icon
+        // ("\CA\weapons\data\equip\m_30stanag_ca.paa") instead of the CWA carrier's
+        if (Generation() == 1)
+        {
+            const std::string picture = StringValue(*a1, "picture");
+            if (picture.size() > 1 && picture[0] == '\\')
+            {
+                std::string file = picture.substr(1);
+                if (file.size() < 4 || file[file.size() - 4] != '.')
+                    file += ".paa";
+                if (QIFStreamB::FileExist(file.c_str()))
+                    text += "\t\tpicture=\"" + picture + "\";\r\n";
+            }
+            // and its own size in the slots, as the man's slots are Arma 1's (OP_A1_SLOTS=0
+            // keeps both CWA's): the M203 round takes a small slot (Arma 1 16, CWA 32 each),
+            // the M136 two, the Javelin six. Arma 1 small slots are 16 apiece, CWA's 32.
+            static const bool ownSlots = [] {
+                const char* e = std::getenv("OP_A1_SLOTS");
+                return !(e && *e == '0');
+            }();
+            if (const ParamEntry* t = ownSlots ? a1->FindEntry("type") : nullptr; t && !t->IsClass() && !t->IsArray())
+            {
+                const int a = (int)*t;
+                const int items = (a >> 8) & 0xF;
+                const int small = std::min((a >> 4) & 0xF, 7);
+                if (items > 0 || small > 0)
+                {
+                    char line[64];
+                    std::snprintf(line, sizeof(line), "\t\tmagazineType=%d;\r\n", items > 0 ? items << 8 : small << 5);
+                    text += line;
+                }
+            }
+        }
         text += "\t};\r\n};\r\n";
         ImportIntoPars(text, generated.c_str());
         if (!(Pars >> "CfgWeapons").FindEntry(generated.c_str()))
