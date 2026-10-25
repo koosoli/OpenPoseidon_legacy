@@ -24,8 +24,10 @@ Bohemia Interactive product.
 - **Arma 1, 2 and 3 missions (experimental):** missions and campaigns from your
   own Arma installations start from their native main menus, pause screens and
   mission dialogs, with their own weapons, sounds, voices, animals, scripted
-  state machines and conversations. Arma 1 units, vehicles and objects can be
-  placed in the mission editor. Many missions play from start to finish; others
+  state machines and conversations. Arma 1 support is the furthest along: its
+  missions bring their own weapons, sights, magazines, shot sounds, vehicles with
+  their own sounds and gun points, the Arma 1 equipment slots and its stringtables,
+  and Arma 1 units, vehicles and objects can be placed in the mission editor. Many missions play from start to finish; others
   still stop at missing script commands or content.
 - **Whole-world rendering:** fly from the ground to orbit over the whole Earth,
   built from real elevation and imagery streamed at runtime. Mountains cast
@@ -33,7 +35,7 @@ Bohemia Interactive product.
   with fog and snowlines follow the season. A real-time Moon has its own relief and
   craters, and the Earth hangs in its sky. A scripted ICBM can be flown across the
   globe with a follow camera.
-- **Arma Reforger, DayZ and Arma 2/3 terrains:** locally installed worlds load
+- **Arma 1, 2, 3, Reforger and DayZ terrains:** locally installed worlds load
   with their own buildings, vegetation, roads, materials and far-distance trees.
   Reforger worlds stream natively. Imported terrain opens in the native OFP mission
   editor with OFP units.
