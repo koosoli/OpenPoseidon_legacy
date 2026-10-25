@@ -1,5 +1,7 @@
 #include <string.h>
 #include <cmath>
+#include <algorithm>
+#include <chrono>
 #include <map>
 #include <vector>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -836,6 +838,21 @@ class IntervalArray
     // the same order, without the linear scans. See the definition.
     void MoveIndicesTo(const VertexIndex* idx, int n, IntervalArray& dst);
 
+    // LOAD-006: does any interval contain one of the `n` ascending indices in `sorted`?
+    bool IntersectsSorted(const VertexIndex* sorted, int n) const
+    {
+        for (int i = 0; i < _data.Size(); i++)
+        {
+            const Interval& iv = _data[i];
+            const VertexIndex* hit = std::lower_bound(sorted, sorted + n, static_cast<VertexIndex>(iv.beg));
+            if (hit != sorted + n && *hit < iv.end)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     bool CheckIntegrity() const;
 };
 
@@ -1152,7 +1169,7 @@ struct FindShapeSections
 
     void SplitByNamedSelection(ShapeSectionWork& src,
                                ShapeSectionWork& split, // what is split-out
-                               const NamedSelection& sel);
+                               const VertexIndex* idx, int n);
 
     void SplitByNamedSelection(const NamedSelection& sel);
 
@@ -1210,31 +1227,43 @@ FindShapeSections::FindShapeSections(Shape* shape) : _shape(shape) {}
 
 void FindShapeSections::SplitByNamedSelection(ShapeSectionWork& src,
                                               ShapeSectionWork& split, // what is split-out
-                                              const NamedSelection& sel)
+                                              const VertexIndex* idx, int n)
 {
     split.material = src.material;
     split.properties = src.properties;
-    const Selection& faces = sel.Faces();
     // if a face is in both section and selection, move it to split (LOAD-003: in one pass)
-    std::vector<VertexIndex> idx(static_cast<size_t>(faces.Size()));
-    for (int i = 0; i < faces.Size(); i++)
-    {
-        idx[static_cast<size_t>(i)] = faces[i];
-    }
-    src._faces.MoveIndicesTo(idx.data(), faces.Size(), split._faces);
+    src._faces.MoveIndicesTo(idx, n, split._faces);
     // src and split are now both correct in relation to sel
     // one (both?) of them may be empty now
 }
 
 void FindShapeSections::SplitByNamedSelection(const NamedSelection& sel)
 {
+    // LOAD-006: the selection's face list was copied once per SECTION, and every section built
+    // a map over its intervals even when it shares no face with the selection (most of them:
+    // a section is one texture, a selection one moving part). Copy it once, and skip a section
+    // that no face of the selection falls into -- MoveIndicesTo would have moved nothing and the
+    // section would have been skipped below, so the result is the same.
+    const Selection& faces = sel.Faces();
+    const int n = faces.Size();
+    std::vector<VertexIndex> idx(static_cast<size_t>(n));
+    for (int f = 0; f < n; f++)
+    {
+        idx[static_cast<size_t>(f)] = faces[f];
+    }
+    std::vector<VertexIndex> sorted(idx);
+    std::sort(sorted.begin(), sorted.end());
     int ns = _sections.Size();
     // if _sections will grow, there is no need to test new sections
     for (int i = 0; i < ns; i++)
     {
         ShapeSectionWork& sw = _sections[i];
+        if (!sw._faces.IntersectsSorted(sorted.data(), n))
+        {
+            continue;
+        }
         ShapeSectionWork split;
-        SplitByNamedSelection(sw, split, sel);
+        SplitByNamedSelection(sw, split, idx.data(), n);
         if (split._faces.IsEmpty())
         {
             continue;
@@ -1397,6 +1426,8 @@ void FindShapeSections::Perform(bool forceMaterial0)
         }
     }
 
+    using PerfClock = std::chrono::steady_clock;
+    const auto perfT0 = PerfClock::now();
     CreateOffsets();
     // define sections by properties
     int lastSection = -1;
@@ -1446,6 +1477,7 @@ void FindShapeSections::Perform(bool forceMaterial0)
         // we must check all sections against this one
         SplitByNamedSelection(sel);
     }
+    const auto perfTSplit = PerfClock::now();
 
     // sort faces to that sections are contiguos
     AUTO_STATIC_ARRAY(SortSecPoly, sortFaces, 256);
@@ -1472,6 +1504,7 @@ void FindShapeSections::Perform(bool forceMaterial0)
     PoseidonAssert(sortFaces.Size() <= _shape->NFaces());
     // sort by alpha, texture, material ... as neccessary
     QSort(sortFaces.Data(), sortFaces.Size(), CompareSecPoly);
+    const auto perfTSort = PerfClock::now();
     // sortFaces is sorted
     // we have to reorder faces in shape now
 
@@ -1548,6 +1581,7 @@ void FindShapeSections::Perform(bool forceMaterial0)
     }
     sorted.SetSections(sections.Data(), sections.Size());
     _shape->SetFaces(sorted);
+    const auto perfTMerge = PerfClock::now();
     // now we have to check which selections contain which sections
     // check on by-selection basis
     // it is guranteed now section is either contained whole
@@ -1567,6 +1601,18 @@ void FindShapeSections::Perform(bool forceMaterial0)
         }
         sel.FaceOffsets(_shape); // get ready face offsets
         sel.RescanSections(_shape);
+    }
+    // LOAD-006 timing: which part of the section build a large LOD pays for
+    const auto perfTEnd = PerfClock::now();
+    const auto ms = [](PerfClock::time_point a, PerfClock::time_point b)
+    { return std::chrono::duration<double, std::milli>(b - a).count(); };
+    if (ms(perfT0, perfTEnd) > 150.0)
+    {
+        LOG_INFO(Graphics,
+                 "Slow FindSections: {:.1f} ms | split {:.1f} sort {:.1f} reorder+merge {:.1f} rescan {:.1f} "
+                 "({} faces, {} sections)",
+                 ms(perfT0, perfTEnd), ms(perfT0, perfTSplit), ms(perfTSplit, perfTSort), ms(perfTSort, perfTMerge),
+                 ms(perfTMerge, perfTEnd), _shape->NFaces(), _sections.Size());
     }
 }
 
