@@ -13,11 +13,9 @@ $env:POSEIDON_USER_DIR=Join-Path $output 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'), "qualityPreset=3;`nterrainDetail=4;`nmsaaSamples=4;`ndlssMode=-1;`nvsync=0;`nfpsCap=60;`n")
 $env:POSEIDON_WIND_OVERRIDE='6 90 0'
-$env:WGR_AUTO_EXPOSURE='0'
-$env:WGR_EXPOSURE='1'
 $mission=Join-Path $root 'dev-missions/sea-rain.noe'
 # x z y(absolute) azimuth elevation: close (rings), mid (rings fading into roughness), far (glitter/sheen)
-$poses=[ordered]@{ near=@('13000','3000','2.2','90','-28'); mid=@('13000','3000','6','90','-10'); far=@('13000','3000','12','90','-3') }
+$poses=[ordered]@{ near=@('13000','3000','5','90','-60'); mid=@('13000','3000','4.5','90','-25'); far=@('13000','3000','12','90','-3') }
 foreach ($round in 1..$Rounds) {
   foreach ($pose in $poses.Keys) {
     foreach ($arm in @('A-off','B-on')) {

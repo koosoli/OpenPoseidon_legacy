@@ -32,7 +32,7 @@
 #import shadow::shadow_strength
 #import color::srgb_to_linear
 #ifdef SEA_RAIN
-#import rain_water_optics::rain_water_impact_normal
+#import rain_water_optics::rain_water_impact_layer
 #endif
 
 const FFT_SIZE: f32 = 256.0;
@@ -469,7 +469,14 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     let k1 = 7.3; let k2 = 3.1;
     let texel1 = Lf / k1 / FFT_SIZE;
     let texel2 = Lf / k2 / FFT_SIZE;
+#ifdef SEA_RAIN
+    // (OP, SEA-RAIN) heavy rain flattens the capillary wind ripples and the drop rings take their place
+    // (below): they fade out with the rain, and in full rain this branch and its two taps are skipped,
+    // which pays for the rings
+    let near = smoothstep(0.04, 0.01, footprint) * rough * (1.0 - sat(frame.ground_weather.y));
+#else
     let near = smoothstep(0.04, 0.01, footprint) * rough;
+#endif
     if (near > 0.002) {
         let c1 = textureSampleLevel(oceanDerivatives, smpLinearRepeat, rot2(lagXZ, 0.63) * (k1 / Lf), CASCADES - 1, max(log2(footprint / texel1), 0.0));
         let c2 = textureSampleLevel(oceanDerivatives, smpLinearRepeat, rot2(lagXZ, 2.14) * (k2 / Lf), CASCADES - 1, max(log2(footprint / texel2), 0.0));
@@ -495,13 +502,14 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     // Rotor-only normals: do not add legacy boat impulses over TW's own wakes.
     slopes += rotorWashSlopes(lagXZ, footprint);
 #ifdef SEA_RAIN
-    // (OP, SEA-RAIN) rain drop rings: the puddles' world-fixed impact events (rain_water_optics),
-    // drawn only where the pixel resolves them (footprint < 0.16 m: the water within a few metres);
-    // further out fs_tidewater turns them into roughness. Dry weather skips the call.
+    // (OP, SEA-RAIN) rain drop rings: the puddles' world-fixed impact events (rain_water_optics), one layer
+    // (the puddles add a second in heavy rain). Drawn only where the capillary ripples they replace were
+    // drawn (footprint < 0.04 m) so they cost what those two taps cost; beyond that a ring is already
+    // fading below a pixel and fs_tidewater carries it as roughness. Dry weather skips the call.
     let seaRain = frame.ground_weather.y;
-    if (seaRain > 0.0 && footprint < 0.16) {
-        let rn = rain_water_impact_normal(lagXZ, frame.ground_weather.w, seaRain, footprint);
-        slopes -= rn.xz / max(rn.y, 0.001);
+    if (seaRain > 0.0 && footprint < 0.04) {
+        slopes += rain_water_impact_layer(lagXZ, frame.ground_weather.w, seaRain, footprint, 0u)
+            * smoothstep(0.04, 0.025, footprint);
     }
 #endif
 
@@ -933,7 +941,7 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     // no longer draws them
     let seaRain = sat(frame.ground_weather.y);
     let rainCalm = 1.0 - 0.4 * seaRain;
-    let rainVar = 0.006 * seaRain * smoothstep(0.035, 0.16, footprint);
+    let rainVar = 0.006 * seaRain * smoothstep(0.025, 0.04, footprint);
     let alpha2 = tw.material1.x * tw.material1.x + mss * 2.0 * unresolved * roughVar * rainCalm + rainVar * 2.0 + foam * 0.2 + surf.aeration * 0.03;
     let sigmaUnres = sqrt(mss * unresolved * roughVar * rainCalm + rainVar);
 #else
