@@ -1,0 +1,30 @@
+{
+  "release": "v0.2",
+  "date": "2026-10-25",
+  "private_source": "f7c0697d652448eb91ea69f24823f66ac736ee3b (tag release/v0.2); package scripts final at the staging branch tip",
+  "public_repository": "koosoli/OpenPoseidon (id 1406091033, public)",
+  "public_commits": {
+    "c57d59f0b26474d9a725e4f6b1958c8edef7d7bc": "v0.2 tag: features, notices, contributor docs kept",
+    "6187b5e": "README install steps, sponsor packaging",
+    "734752881dd8fa402dcea754e58eaee332bdc130": "licence collector fix; exact source of the binary"
+  },
+  "public_parent": "94e84f0 (jschmidt92 PRs #2/#3; their engine work already in the private tree, their docs and CREDITS carried over)",
+  "verification": {
+    "inventory_findings": 0,
+    "verify_candidate_git": "PASS 4778 files, bytes and modes",
+    "fresh_clone_readback": "PASS",
+    "clean_export_build": "PASS PoseidonGame, PoseidonTools, PoseidonIslandEditor (after vcpkg.json and DebugOverlay link fixes)",
+    "asset_census": "no game data; CC0/MIT/public-domain third-party media with notices"
+  },
+  "binary_release": {
+    "url": "https://github.com/OpenPoseidon/OpenPoseidon-Builds/releases/tag/v0.2",
+    "asset": "OpenPoseidon-Windows-x64-v0.2.zip",
+    "sha256": "61b125a3993f2b51df7638835107ca548b6047b374b7590664248c19634c280f",
+    "built_from": "clean export of 7347528 (D:/openposeidon-staging-20261025/export5)",
+    "excludes": "game data, Bohemia Demo data (APL-SA), PDBs, NVIDIA DLSS runtime",
+    "licences": "28 vcpkg ports, 101 Rust crates, Steam Audio, OpenAL Soft",
+    "boot_test": "retail-like copy, 75 s windowed, 0 errors, 0 panics, 5 default packs loaded",
+    "readback": "GitHub digest and downloaded bytes match"
+  },
+  "not_run": "complete gameplay suite; GL33 path; Linux"
+}

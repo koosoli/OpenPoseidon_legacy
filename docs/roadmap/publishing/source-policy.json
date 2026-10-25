@@ -103,7 +103,10 @@
     "tsan-suppressions.txt",
     "ubsan-suppressions.txt",
     "valgrind-suppressions.supp",
-    ".github/FUNDING.yml"
+    ".github/FUNDING.yml",
+    "docs/scripting/in_memory_database.md",
+    "docs/scripting/in_memory_database_review.md",
+    "docs/scripting/unit_loadout_commands.md"
   ],
   "exclude_prefixes": [
     "docs/",

@@ -50,6 +50,26 @@ that every map, vehicle or material is fully supported.
 | **Box3D physics test scene** | |
 | ![Box3D wall and rigid-body test scene](docs/roadmap/publishing/public-files/screenshots/box3d.png) | |
 
+## Playing a precompiled build
+
+1. **You need the original game.** Open Poseidon runs on top of your own copy of
+   *Arma: Cold War Assault* (Steam or GOG) or *Operation Flashpoint*. It does not
+   include the game's data, so the game must be installed first.
+2. **Unpack the download** and **drag its contents into the game's installation
+   folder**, next to the game's own `.exe`: `OpenPoseidon.exe`,
+   `wgpu_renderer.dll` and the `assets` folder. Nothing of the original game is
+   overwritten, and the original game still starts as before.
+3. **Start `OpenPoseidon.exe`** from that folder. If Windows reports a missing
+   `MSVCP140` or `VCRUNTIME140` file, install Microsoft's
+   [Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+4. **Optional, for the modern main and options menus:** install the free
+   *Arma: Cold War Assault Remastered Demo* from Steam, then run
+   `assets\Install-Menus.cmd` once. It copies the Demo's menu resources into the
+   `assets` folder. Without it the game uses the classic menus.
+
+To play Arma 1, 2, 3, DayZ or Reforger content you also need those games
+installed; their files are loaded in place from their own folders.
+
 ## What Open Poseidon Engine adds
 
 Open Poseidon Engine develops a modern [wgpu](https://wgpu.rs/)-based renderer alongside
@@ -57,6 +77,11 @@ the legacy OpenGL renderer, while retaining original OFP content and gameplay.
 The current engine includes:
 
 #### Worlds and content
+
+> **No conversion, no copying.** Arma 1, 2, 3, DayZ and Reforger content loads
+> straight from the original game's own installation folder. Point the engine at
+> your installed game and play it in place: nothing is converted into a separate
+> copy beforehand, and none of those games' files ship with Open Poseidon.
 
 - **Arma 1, 2 and 3 missions (experimental):** missions and campaigns from your
   own Arma installations start from their native main menus, pause screens and
@@ -172,8 +197,13 @@ The current engine includes:
 - **Firing from vehicles (FFV):** personal-rifle fire from configured passenger
   seats, aiming arcs, reload and action-menu Ready/Stow controls. Stock Jeep
   coverage is validated; other seats, weapon families and multiplayer are limited.
-- **Steam Audio:** echo and occlusion in buildings, underwater sound, and the
-  sea's surf and wildlife.
+- **Steam Audio (default audio backend):** Valve's Steam Audio places every
+  3D sound around you with binaural (HRTF) spatialisation, so headphones tell
+  you where a shot or an engine is. Sounds are muffled by terrain and buildings
+  between you and the source, rooms and surroundings add their own reverb, and
+  diving brings underwater sound. The sea has its own soundscape: surf wave by
+  wave, gulls, terns, whales and boat engines. The classic OpenAL backend
+  remains available.
 
 #### Engine and tools
 

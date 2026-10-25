@@ -23,11 +23,17 @@
     Build preset whose dist\ folder is packaged (default win-x64-clang-rwdi).
 .PARAMETER NoZip
     Leave the folder unzipped.
+.PARAMETER Sponsor
+    Build the distributable download instead of a hand-to-a-friend copy: nothing from this
+    machine's game folder, no Demo data (Bohemia's APL-SA data may not be sold or bundled into a
+    paid download; assets\Install-Menus.cmd copies it from the player's own Demo install instead),
+    no DLSS runtime, and the licence texts of every compiled-in dependency under assets\legal\.
 #>
 [CmdletBinding()]
 param(
     [string]$Preset = 'win-x64-clang-rwdi',
-    [switch]$NoZip
+    [switch]$NoZip,
+    [switch]$Sponsor
 )
 
 $ErrorActionPreference = 'Stop'
@@ -97,7 +103,7 @@ Write-Host "  + assets\ (built content)            $n files"
 
 # 2b. assets the installed game folder has and the build does not stage (the grass plates under
 #     assets\grass are hand-made files the renderer reads from there; see TerrainWgpu.cpp)
-$retail = Get-CwaRetailDir
+$retail = if ($Sponsor) { $null } else { Get-CwaRetailDir }
 if ($retail -and (Test-Path -LiteralPath (Join-Path $retail 'assets'))) {
     $n = 0
     $installed = Join-Path $retail 'assets'
@@ -125,8 +131,13 @@ if ($n -eq 0) {
 }
 
 # 4. what Install.ps1 copies from the Demo
-$demo = Get-CwaDemoDir
-if ($demo) {
+$demo = if ($Sponsor) { $null } else { Get-CwaDemoDir }
+if ($Sponsor) {
+    foreach ($script in @('scripts\package\Install-Menus.ps1', 'scripts\package\Install-Menus.cmd', 'scripts\CwaCommon.ps1')) {
+        Copy-Into (Join-Path $repoRoot $script) (Split-Path $script -Leaf)
+    }
+    Write-Host "  + assets\Install-Menus.cmd (copies the Demo's menu resources on the player's machine)"
+} elseif ($demo) {
     $n = 0
     foreach ($rel in @('fonts', 'dtaExt', 'BIN')) { $n += Copy-Tree (Join-Path $demo $rel) $rel }
     $logo = Join-Path $demo 'AddOns\cwr_logo.pbo'
@@ -137,10 +148,14 @@ if ($demo) {
                    "remaster's menu resources, fonts, dtaExt and cwr_logo.pbo, and the friend must run the Demo's Install.ps1 step.")
 }
 
-# 5. the DLSS runtime, if this machine has it (Deploy.ps1 looks in the same two places)
+# 5. the DLSS runtime, if this machine has it (Deploy.ps1 looks in the same two places); never in a
+#    sponsor download: NVIDIA's runtime is not redistributable under the project's terms
+if (-not $Sponsor) {
 foreach ($snippet in @((Join-Path $repoRoot '..\..\..\.tmp-dlss-sdk\lib\Windows_x86_64\rel\nvngx_dlss.dll'),
                        (Join-Path $repoRoot '.tmp-dlss-sdk\lib\Windows_x86_64\rel\nvngx_dlss.dll'))) {
     if (Test-Path -LiteralPath $snippet) { Copy-Into $snippet 'nvngx_dlss.dll'; Write-Host "  + assets\nvngx_dlss.dll"; break }
+}
+
 }
 
 # 6. the Island Editor
@@ -148,13 +163,19 @@ $editor = Join-Path $distDir 'PoseidonIslandEditor.exe'
 if (Test-Path -LiteralPath $editor) { Copy-Into $editor 'PoseidonIslandEditor.exe'; Write-Host "  + assets\PoseidonIslandEditor.exe" }
 
 # 7. licences, credits, a README and the build stamp
-foreach ($doc in @('LICENSE', 'LICENSE.md', 'CREDITS.md', 'NOTICE', 'NOTICE.md')) {
+foreach ($doc in @('LICENSE', 'LICENSE.md', 'CREDITS.md', 'NOTICE', 'NOTICE.md', 'THIRD_PARTY_NOTICES.md')) {
     $p = Join-Path $repoRoot $doc
     if (Test-Path -LiteralPath $p) { Copy-Into $p (Join-Path 'legal' $doc) }
 }
 # Steam Audio is linked statically (Apache-2.0): its licence and the CIPIC HRTF notice ship with it.
 foreach ($notice in Get-ChildItem -LiteralPath (Join-Path $repoRoot 'engine\PoseidonSteamAudio\notices') -File -ErrorAction SilentlyContinue) {
     Copy-Into $notice.FullName (Join-Path 'legal' $notice.Name)
+}
+if ($Sponsor) {
+    $openal = Join-Path $distDir 'OpenAL-Soft.LICENSE.txt'
+    if (Test-Path -LiteralPath $openal) { Copy-Into $openal (Join-Path 'legal' 'OpenAL-Soft.LICENSE.txt') }
+    & python (Join-Path $repoRoot 'scripts\package\collect_licenses.py') --repo $repoRoot --build-dir $buildDir --out (Join-Path $assets 'legal\dependencies')
+    if ($LASTEXITCODE -ne 0) { throw 'Collecting the dependency licences failed.' }
 }
 @"
 OpenPoseidon $branch $tag ($(Get-Date -Format 'yyyy-MM-dd HH:mm'))
@@ -165,6 +186,11 @@ Nothing else is replaced; ColdWarAssault.exe keeps working as before.
 
 The game data (models, textures, sounds, missions) is not included: it comes from your own
 Cold War Assault install. The engine source is GPL-3.0-or-later (see legal\).
+
+For the modern main and options menus: install the free "Arma: Cold War Assault Remastered
+Demo" from Steam, then run assets\Install-Menus.cmd once (sponsor downloads; without it the
+game uses the classic menus). If the game reports a missing MSVCP140 or VCRUNTIME140 file,
+install the Microsoft Visual C++ Redistributable (x64): https://aka.ms/vs/17/release/vc_redist.x64.exe
 "@ | Set-Content -LiteralPath (Join-Path $assets 'README.txt') -Encoding utf8
 "$branch $tag $(Get-Date -Format 'yyyy-MM-dd_HH:mm') package-share-ps1" |
     Set-Content -LiteralPath (Join-Path $assets 'BUILD.txt') -Encoding utf8

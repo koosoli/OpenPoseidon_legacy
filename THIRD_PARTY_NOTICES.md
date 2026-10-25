@@ -642,3 +642,37 @@ WorldCover consortium.* *Night lights: NASA Earth Observatory / NASA GIBS (Black
   §2. Verbatim per-project headers remain in each upstream package.
 - This file documents third-party components only. The project's own code remains
   under GPL-3.0-or-later with the Section 7 additional terms in [`LICENSE`](LICENSE).
+
+## Tidewater (ocean, beach, boat, whale and sea sounds)
+
+Parts of the ocean and shore rendering (waves, foam, sand and underwater look), the boat
+model (`content/default-packs/tidewater-boat/`), the humpback whale and the sea sound
+recordings (`content/default-packs/tidewater-wildlife/`) are ported or exported from
+[Tidewater](https://github.com/dgreenheck/tidewater), an open-source WebGPU ocean demo.
+Its sea recordings are CC0 1.0 Freesound field recordings; their recordists are listed in
+`content/default-packs/tidewater-wildlife/source/sound/CREDITS.md`.
+
+```
+MIT License
+
+Copyright (c) 2026 DRG Software Solutions LLC
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+

@@ -97,6 +97,26 @@ informational and does not constitute any grant and/or waiver of rights.*
 
 ## Ported code
 
+### CWR-CE unit loadout commands
+
+The `getUnitLoadout` and `setUnitLoadout` scripting commands and registration
+tests were ported from
+[jschmidt92/cwr_ce_source](https://github.com/jschmidt92/cwr_ce_source), commit
+`04145d371be5ae59dded612fb73a28a3ed6254bf`, authored by **jschmidt92**.
+The source branch `feature/unit-loadout-commands` was synchronized to
+`ef884f9757b80081fa6376e328e95eddf7accb05`. This code is licensed under
+GPL-3.0-or-later with the additional Section 7 terms in [LICENSE](LICENSE).
+No game assets or binaries were imported.
+
+### CWR-CE in-memory database
+
+The database scripting commands, handle type, tests and scripting guide were
+ported from [jschmidt92/cwr_ce_source](https://github.com/jschmidt92/cwr_ce_source),
+commit `ed938b183cd5af91453b8df9b3236add57cd9e7f`, authored by **jschmidt92**.
+The feature was reviewed against branch `feature/in-memory-database` at
+`96bda9c`. It is licensed under GPL-3.0-or-later with the additional Section 7
+terms in [LICENSE](LICENSE). No game assets or binaries were imported.
+
 ### Malprave (Dec's Poseidon fork)
 
 The Sinkhole workstream (the development decision records) ports engine code from

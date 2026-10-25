@@ -68,7 +68,8 @@ def prepare(repo, manifest, policy_path):
     output = policy_path.parent / 'public-files/sanitized'
     expected_path = output / 'tests/fixtures/original-surfaces.json'
     expected_path.parent.mkdir(parents=True, exist_ok=True)
-    expected_path.write_text(json.dumps(expected, indent=2) + '\n', encoding='utf-8')
+    # LF, as the repository stores it: a CRLF copy hashes differently from the committed blob.
+    expected_path.write_text(json.dumps(expected, indent=2) + '\n', encoding='utf-8', newline='\n')
     policy['add_files']['tests/fixtures/original-surfaces.json'] = expected_path.relative_to(policy_path.parent).as_posix()
 
     changes = []
@@ -116,7 +117,7 @@ def prepare(repo, manifest, policy_path):
         policy['rewrites'][name] = path.relative_to(policy_path.parent).as_posix()
         changes.append({'path': name, 'before': digest(blob(name)), 'after': digest(icon),
                         'purpose': 'Replace legacy icon art with project logo'})
-    policy_path.write_text(json.dumps(policy, indent=2) + '\n', encoding='utf-8')
+    policy_path.write_text(json.dumps(policy, indent=2) + '\n', encoding='utf-8', newline='\n')
     return {'source_commit': sha, 'replacements': changes, 'extra_exclusions': list(EXCLUDE)}
 
 
