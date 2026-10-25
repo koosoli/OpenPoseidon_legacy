@@ -97,8 +97,28 @@ void MotorcycleType::InitShape()
         // driving wheel animation
         Vector3 wheelAxisBeg = memory->NamedPosition("osaVolantZac");
         Vector3 wheelAxisEnd = memory->NamedPosition("osaVolantKon");
+        // Arma 1 (the M1030) names the steering axis "volant osa", one selection of two
+        // points. Without either the axis was a zero vector, the steering matrix NaN, and
+        // the handlebar, the front wheel and the fork were not drawn at all.
+        if (wheelAxisBeg.Distance2(wheelAxisEnd) < 1e-6f)
+        {
+            const int axis = memory->FindNamedSel("volant osa");
+            if (axis >= 0 && memory->NamedSel(axis).Size() >= 2)
+            {
+                const Vector3 a = memory->Pos(memory->NamedSel(axis)[0]);
+                const Vector3 b = memory->Pos(memory->NamedSel(axis)[1]);
+                // from the lower point up, as osaVolantZac -> osaVolantKon
+                wheelAxisBeg = a.Y() < b.Y() ? a : b;
+                wheelAxisEnd = a.Y() < b.Y() ? b : a;
+            }
+        }
+        Vector3 axisDir = wheelAxisEnd - wheelAxisBeg;
+        if (axisDir.SquareSize() < 1e-6f)
+            axisDir = VUp;
         _drivingWheel.SetCenter(wheelAxisEnd);
-        _toWheelAxis.SetDirectionAndUp(wheelAxisEnd - wheelAxisBeg, VUp);
+        // an upright axis has no "up" of its own: take the forward direction instead
+        const Vector3 n = axisDir.Normalized();
+        _toWheelAxis.SetDirectionAndUp(n, fabs(n.Y()) > 0.95f ? VForward : VUp);
     }
 
     int contactLevel = _shape->FindLandContactLevel();
