@@ -140,6 +140,13 @@ RString PlainText(const RString& text, bool lineBreaks = false)
             p = end;
             continue;
         }
+        // a "\n" written into the text (Old Man's phone: "18:02\n6.2.2038") breaks the line
+        if (p[0] == '\\' && p[1] == 'n')
+        {
+            out += lineBreaks ? '\n' : ' ';
+            p++;
+            continue;
+        }
         if (*p == '&')
         {
             static const std::pair<const char*, char> entities[] = {
@@ -438,7 +445,7 @@ class A3Static : public A3Control
     }
 
     // Structured text is shown as plain text; a multi-line or structured control wraps it.
-    void SetLabel(const RString& text) { _text = GetType() == kStructuredText ? PlainText(text) : text; }
+    void SetLabel(const RString& text) { _text = GetType() == kStructuredText ? PlainText(text, true) : text; }
 
     bool IsPicture() const { return (_style & ST_TYPE) == kButtonPicture; }
     void SetColor(PackedColor color) { _color = color; }
