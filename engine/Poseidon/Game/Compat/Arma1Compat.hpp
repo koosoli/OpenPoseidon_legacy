@@ -180,11 +180,11 @@ std::string Arma2HeadModel(const char* unitClass, const char* shapeName, const c
 std::string Arma2BackpackModel(const char* unitClass, const char* shapeName);
 
 // The shot sound of the Arma 1 weapon behind the generated weapon class `weaponClass`
-// (A1x_M16A4): the sound[] of its first fire mode, or of its first other muzzle (the M203)
-// when `mainMuzzle` is false. Arma 1 keeps a shot sound per weapon; CWA keeps it in the
+// (A1x_M16A4): the sound[] of the first fire mode of the Arma 1 muzzle at `muzzleIndex` in
+// its muzzles[] (0 the rifle, 1 the M203). Arma 1 keeps a shot sound per weapon; CWA keeps it in the
 // magazine's modes, so every Arma 1 weapon on an M16 round sounded like CWA's M16.
 // nullptr without one, without --arma1, or with OP_A1_WEAPON_SOUNDS=0.
-const ParamEntry* Arma1ShotSound(const char* weaponClass, bool mainMuzzle);
+const ParamEntry* Arma1ShotSound(const char* weaponClass, int muzzleIndex);
 
 // The generated magazines (A1x_<magazine>) the Arma 1 weapon behind the generated weapon
 // class `weaponClass` lists in its own magazines[] -- what its main muzzle takes whatever

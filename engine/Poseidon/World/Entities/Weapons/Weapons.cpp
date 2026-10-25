@@ -468,13 +468,14 @@ void MuzzleType::Init(const ParamEntry& cls, const WeaponType* weapon)
     // --arma1: the Arma 1 weapon's own shot sound, for its main muzzle and its grenade launcher
     else if (weapon)
     {
-        // the main muzzle: the weapon itself ("this") or the first of its muzzles[]
-        bool mainMuzzle = stricmp(cls.GetName(), weapon->GetName()) == 0;
-        if (!mainMuzzle && weapon->_parClass)
-            if (const ParamEntry* muzzles = weapon->_parClass->FindEntry("muzzles");
-                muzzles && muzzles->IsArray() && muzzles->GetSize() > 0)
-                mainMuzzle = stricmp(((RStringB)(*muzzles)[0]).Data(), cls.GetName()) == 0;
-        if (const ParamEntry* shot = Arma1Compat::Arma1ShotSound(weapon->GetName(), mainMuzzle))
+        // which muzzle of the weapon this is: the weapon itself ("this") or its place in muzzles[]
+        int muzzleIndex = stricmp(cls.GetName(), weapon->GetName()) == 0 ? 0 : -1;
+        if (muzzleIndex < 0 && weapon->_parClass)
+            if (const ParamEntry* muzzles = weapon->_parClass->FindEntry("muzzles"); muzzles && muzzles->IsArray())
+                for (int i = 0; i < muzzles->GetSize() && muzzleIndex < 0; i++)
+                    if (stricmp(((RStringB)(*muzzles)[i]).Data(), cls.GetName()) == 0)
+                        muzzleIndex = i;
+        if (const ParamEntry* shot = Arma1Compat::Arma1ShotSound(weapon->GetName(), muzzleIndex))
             GetValue(_shotSound, *shot);
     }
     _soundContinuous = cls >> "soundContinuous";
