@@ -35,6 +35,7 @@
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICenter.hpp>
 #include <Poseidon/AI/AIGroup.hpp>
+#include <Poseidon/Network/NetworkIface.hpp>
 #include <Poseidon/Audio/DynSound.hpp>
 #include <Poseidon/Audio/Streaming/WaveStream.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
@@ -129,6 +130,7 @@ GameValue ObjSetVectorDirectionAndUp(const GameState* state, GameValuePar oper1,
 GameValue GrpKnowsAbout(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue GroupCreate(const GameState* state, GameValuePar oper1);
 GameValue SideCivilian(const GameState* state);
+GameValue CenterCreate(const GameState* state, GameValuePar oper1); // GameStateExtWorldConfig.cpp
 GameValue ListJoin(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 
@@ -1243,11 +1245,29 @@ GameValue A2MoveTo(const GameState* state, GameValuePar oper1, GameValuePar oper
         AIUnit* unit = person ? person->Brain() : nullptr;
         if (unit && !unit->GetGroup())
         {
-            const GameValue group = GroupCreate(state, SideCivilian(state));
-            GameValue list = state->CreateGameValue(GameArray);
-            GameArrayType& units = list;
-            units.Add(oper1);
-            ListJoin(state, list, group);
+            // join cannot do it: it takes a unit only from the group it already has. The
+            // unit is added the way createUnit adds a new one, and the civilian side gets a
+            // centre first when the mission has no civilians (T01 has none).
+            const GameValue civ = SideCivilian(state);
+            CenterCreate(state, civ);
+            AIGroup* group = GetGroup(GroupCreate(state, civ));
+            static int joinLogged = 0;
+            if (group)
+            {
+                AISubgroup* main = group->MainSubgroup();
+                group->AddUnit(unit);
+                if (!main && group->MainSubgroup())
+                    GetNetworkManager().CreateObject(group->MainSubgroup());
+                GetNetworkManager().CreateObject(unit);
+                if (!group->Leader() && group->GetCenter())
+                    group->GetCenter()->SelectLeader(group);
+            }
+            if (joinLogged < 5)
+            {
+                ++joinLogged;
+                LOG_INFO(Mission, "Arma 2: moveTo gives agent {} a civilian group: {}", (const char*)obj->GetDebugName(),
+                         unit->GetGroup() ? "joined" : "FAILED");
+            }
         }
     }
     return ::VehDoMove(state, oper1, oper2);

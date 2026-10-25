@@ -17,6 +17,7 @@
 // Run 39 (2026-10-24) listed these as the commands Arma 2's FSMs lack once they run.
 
 #include <Poseidon/AI/AI.hpp>
+#include <Poseidon/AI/AIGroup.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
@@ -342,9 +343,207 @@ GameValue A2SetUnconscious(const GameState*, GameValuePar oper1, GameValuePar op
     return NOTHING;
 }
 
-GameValue A2SetGroupIcon(const GameState*, GameValuePar, GameValuePar)
+// Group icons (Arma 2's high command): each group keeps the icons scripts add to it and the
+// parameters they set, so getGroupIcons / getGroupIcon / getGroupIconParams give back what was
+// put in (TE15's UAV module copies one group's icons to another). They are not drawn yet.
+struct GroupIcon
 {
-    return NOTHING; // group icons (high command) are not drawn by this engine
+    int id;
+    RString icon;
+    float offX, offY;
+};
+struct GroupIconSet
+{
+    OLink<AIGroup> group;
+    int next = 0;
+    std::vector<GroupIcon> icons;
+    bool hasParams = false;
+    float colour[4] = {1, 1, 1, 1};
+    RString text;
+    float scale = 1;
+    bool visible = true;
+};
+
+std::vector<GroupIconSet>& IconSets()
+{
+    // never destroyed: its links must not be torn down after the groups at exit
+    static std::vector<GroupIconSet>* sets = new std::vector<GroupIconSet>();
+    return *sets;
+}
+
+GroupIconSet* FindIcons(AIGroup* grp, bool create)
+{
+    std::vector<GroupIconSet>& sets = IconSets();
+    sets.erase(std::remove_if(sets.begin(), sets.end(), [](const GroupIconSet& s) { return !s.group; }), sets.end());
+    if (!grp)
+        return nullptr;
+    for (GroupIconSet& s : sets)
+        if (s.group == grp)
+            return &s;
+    if (!create)
+        return nullptr;
+    sets.emplace_back();
+    sets.back().group = grp;
+    return &sets.back();
+}
+
+bool ReadOffset(const GameValue& v, float& x, float& y)
+{
+    x = y = 0;
+    if (v.GetType() != GameArray)
+        return false;
+    const GameArrayType& a = v;
+    if (a.Size() > 0 && a[0].GetType() == GameScalar)
+        x = a[0];
+    if (a.Size() > 1 && a[1].GetType() == GameScalar)
+        y = a[1];
+    return true;
+}
+
+GameValue OffsetValue(const GameState* state, float x, float y)
+{
+    GameValue v = state->CreateGameValue(GameArray);
+    GameArrayType& a = v;
+    a.Add(GameValue(x));
+    a.Add(GameValue(y));
+    return v;
+}
+
+// group addGroupIcon [icon, offset] -> id
+GameValue A2AddGroupIcon(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    GroupIconSet* set = FindIcons(GetGroup(oper1), true);
+    const GameArrayType& a = oper2;
+    if (!set || a.Size() < 1 || a[0].GetType() != GameString)
+        return GameValue(-1.0f);
+    GroupIcon icon{set->next++, RString(a[0]), 0, 0};
+    if (a.Size() > 1)
+        ReadOffset(a[1], icon.offX, icon.offY);
+    set->icons.push_back(icon);
+    return GameValue(static_cast<float>(icon.id));
+}
+
+// group setGroupIcon [id, icon, offset]
+GameValue A2SetGroupIcon(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    GroupIconSet* set = FindIcons(GetGroup(oper1), false);
+    const GameArrayType& a = oper2;
+    if (!set || a.Size() < 2 || a[0].GetType() != GameScalar || a[1].GetType() != GameString)
+        return NOTHING;
+    const int id = static_cast<int>(static_cast<float>(a[0]));
+    for (GroupIcon& icon : set->icons)
+        if (icon.id == id)
+        {
+            icon.icon = RString(a[1]);
+            if (a.Size() > 2)
+                ReadOffset(a[2], icon.offX, icon.offY);
+        }
+    return NOTHING;
+}
+
+// group removeGroupIcon id
+GameValue A2RemoveGroupIcon(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    GroupIconSet* set = FindIcons(GetGroup(oper1), false);
+    if (set && oper2.GetType() == GameScalar)
+    {
+        const int id = static_cast<int>(static_cast<float>(oper2));
+        set->icons.erase(std::remove_if(set->icons.begin(), set->icons.end(),
+                                        [id](const GroupIcon& i) { return i.id == id; }),
+                         set->icons.end());
+    }
+    return NOTHING;
+}
+
+// clearGroupIcons group
+GameValue A2ClearGroupIcons(const GameState*, GameValuePar oper1)
+{
+    if (GroupIconSet* set = FindIcons(GetGroup(oper1), false))
+        set->icons.clear();
+    return NOTHING;
+}
+
+// getGroupIcons group -> [[id, icon, [x, y]], ...]
+GameValue A2GetGroupIcons(const GameState* state, GameValuePar oper1)
+{
+    GameValue v = state->CreateGameValue(GameArray);
+    GameArrayType& out = v;
+    if (GroupIconSet* set = FindIcons(GetGroup(oper1), false))
+        for (const GroupIcon& icon : set->icons)
+        {
+            GameValue e = state->CreateGameValue(GameArray);
+            GameArrayType& a = e;
+            a.Add(GameValue(static_cast<float>(icon.id)));
+            a.Add(GameValue(icon.icon));
+            a.Add(OffsetValue(state, icon.offX, icon.offY));
+            out.Add(e);
+        }
+    return v;
+}
+
+// group getGroupIcon id -> [icon, [x, y]]
+GameValue A2GetGroupIcon(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    GameValue v = state->CreateGameValue(GameArray);
+    GameArrayType& out = v;
+    GroupIconSet* set = FindIcons(GetGroup(oper1), false);
+    if (set && oper2.GetType() == GameScalar)
+    {
+        const int id = static_cast<int>(static_cast<float>(oper2));
+        for (const GroupIcon& icon : set->icons)
+            if (icon.id == id)
+            {
+                out.Add(GameValue(icon.icon));
+                out.Add(OffsetValue(state, icon.offX, icon.offY));
+                break;
+            }
+    }
+    return v;
+}
+
+// group setGroupIconParams [colour, text, scale, visible]
+GameValue A2SetGroupIconParams(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    GroupIconSet* set = FindIcons(GetGroup(oper1), true);
+    const GameArrayType& a = oper2;
+    if (!set)
+        return NOTHING;
+    set->hasParams = true;
+    if (a.Size() > 0 && a[0].GetType() == GameArray)
+    {
+        const GameArrayType& c = a[0];
+        for (int i = 0; i < 4 && i < c.Size(); i++)
+            if (c[i].GetType() == GameScalar)
+                set->colour[i] = c[i];
+    }
+    if (a.Size() > 1 && a[1].GetType() == GameString)
+        set->text = RString(a[1]);
+    if (a.Size() > 2 && a[2].GetType() == GameScalar)
+        set->scale = a[2];
+    if (a.Size() > 3 && a[3].GetType() == GameBool)
+        set->visible = a[3];
+    return NOTHING;
+}
+
+// getGroupIconParams group -> [colour, text, scale, visible]; neutral ones for a group no
+// script has given any.
+GameValue A2GetGroupIconParams(const GameState* state, GameValuePar oper1)
+{
+    GroupIconSet def;
+    GroupIconSet* set = FindIcons(GetGroup(oper1), false);
+    if (!set)
+        set = &def;
+    GameValue v = state->CreateGameValue(GameArray);
+    GameArrayType& a = v;
+    GameValue colour = state->CreateGameValue(GameArray);
+    GameArrayType& c = colour;
+    for (float f : set->colour)
+        c.Add(GameValue(f));
+    a.Add(colour);
+    a.Add(GameValue(set->text));
+    a.Add(GameValue(set->scale));
+    a.Add(GameValue(set->visible));
+    return v;
 }
 
 GameValue A2RemoveAllItems(const GameState* state, GameValuePar oper1)
@@ -374,5 +573,13 @@ void RegisterA2WorldCommands()
     GGameState.NewFunction(GameFunction(GameArray, "triggerActivation", A2TriggerActivation, GameObject));
     GGameState.NewOperator(GameOperator(GameNothing, "setUnconscious", function, A2SetUnconscious, GameObject, GameBool));
     GGameState.NewOperator(GameOperator(GameNothing, "setGroupIcon", function, A2SetGroupIcon, GameGroup, GameArray));
+    GGameState.NewOperator(GameOperator(GameScalar, "addGroupIcon", function, A2AddGroupIcon, GameGroup, GameArray));
+    GGameState.NewOperator(GameOperator(GameNothing, "removeGroupIcon", function, A2RemoveGroupIcon, GameGroup, GameScalar));
+    GGameState.NewOperator(GameOperator(GameArray, "getGroupIcon", function, A2GetGroupIcon, GameGroup, GameScalar));
+    GGameState.NewOperator(
+        GameOperator(GameNothing, "setGroupIconParams", function, A2SetGroupIconParams, GameGroup, GameArray));
+    GGameState.NewFunction(GameFunction(GameNothing, "clearGroupIcons", A2ClearGroupIcons, GameGroup));
+    GGameState.NewFunction(GameFunction(GameArray, "getGroupIcons", A2GetGroupIcons, GameGroup));
+    GGameState.NewFunction(GameFunction(GameArray, "getGroupIconParams", A2GetGroupIconParams, GameGroup));
     GGameState.NewFunction(GameFunction(GameNothing, "removeAllItems", A2RemoveAllItems, GameObject));
 }
