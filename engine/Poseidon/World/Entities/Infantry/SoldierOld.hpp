@@ -322,6 +322,15 @@ class MotionType
 
 	ActionMap *GetNoActions() const {return _noActions;}
 
+	// Arma 3 builds every soldier class's moves from the one moves config: a class takes the
+	// action maps and blend types of the class it shares its built moves with (MovesType)
+	void ShareActionsFrom(const MotionType &donor)
+	{
+		_actionMaps = donor._actionMaps;
+		_blendAnimTypes = donor._blendAnimTypes;
+		_noActions = donor._noActions;
+	}
+
 	const MotionEdge &Edge( MoveId a, MoveId b ) const;
 	void AddEdge(MoveId a, MoveId b, MotionEdgeType type, float cost);
 	void DeleteEdge(MoveId a, MoveId b);
@@ -349,6 +358,7 @@ class MovesType: public RefCountWithLinks
 
 	AutoArray<MoveInfo> _moves;
 	Ref<WeightInfo> _weights;
+	bool _anyAnimation = false;
 
 	public:
 	MovesType( const MovesTypeName &name );

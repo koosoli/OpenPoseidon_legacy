@@ -757,6 +757,14 @@ GameValue GroupCreate(const GameState* state, GameValuePar oper1)
 {
     GameSideType side = GetSide(oper1);
     AICenter* center = GWorld->GetCenter(side);
+    // Arma 3 makes a side's center when its first group is created (createCenter is gone):
+    // Old Man's mission has no civilian or east unit until its areas spawn them
+    if (!center && Poseidon::Arma1Compat::Generation() >= 3 && side < TSideUnknown)
+    {
+        center = GWorld->CreateCenter(side);
+        if (center)
+            GetNetworkManager().CreateObject(center);
+    }
     if (center && center->NGroups() < MaxGroups)
     {
         Ref<AIGroup> group = new AIGroup();

@@ -299,6 +299,11 @@ class Entity: public Object
 	// World/Simulation/WaterEntrySplash.hpp). Valid once Simulate has run once.
 	Vector3 _waterSplashPrev = VZero;
 	bool _waterSplashPrevValid = false;
+	// Arma 3: a script's enableSimulation false, and dynamic simulation (marked by
+	// enableDynamicSimulation, frozen while far: World/Simulation/DynamicSimulation.hpp)
+	bool _scriptSimDisabled = false;
+	bool _dynSimEnabled = false;
+	bool _dynSimFrozen = false;
 	AutoArray<AnimationInstance> _animations;
 
 	public:
@@ -312,6 +317,15 @@ class Entity: public Object
 
 	const char *GetName() const {return _type->GetName();}
 	const EntityType *GetNonAIType() const {return _type;}
+
+	// not simulated, nor its group thought for: a script switched it off or it is frozen
+	bool SimulationFrozen() const {return _scriptSimDisabled || _dynSimFrozen;}
+	bool ScriptSimulationDisabled() const {return _scriptSimDisabled;}
+	void SetScriptSimulationDisabled(bool disabled) {_scriptSimDisabled = disabled;}
+	bool DynamicSimulationEnabled() const {return _dynSimEnabled;}
+	void SetDynamicSimulationEnabled(bool enabled) {_dynSimEnabled = enabled; _dynSimFrozen = _dynSimFrozen && enabled;}
+	bool DynamicSimulationFrozen() const {return _dynSimFrozen;}
+	void SetDynamicSimulationFrozen(bool frozen) {_dynSimFrozen = frozen;}
 
 	const EntityType *GetVehicleType() const override {return _type;}
 

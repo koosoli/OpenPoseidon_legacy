@@ -1244,6 +1244,13 @@ bool AIGroup::Think()
         return false;
     }
 
+    // Arma 3: a group whose leader is frozen by dynamic simulation, or switched off by a
+    // script, does not think (Old Man leaves hundreds of groups across Tanoa)
+    if (const Person* leaderMan = Leader()->GetPerson(); leaderMan && leaderMan->SimulationFrozen())
+    {
+        return false;
+    }
+
     if (GetCenter()->GetSide() == TLogic)
     {
         AICost::AICosts().groupThinksLogic++;

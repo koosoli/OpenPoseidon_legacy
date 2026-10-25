@@ -1254,6 +1254,8 @@ GameValue ObjUnitLoadout(const GameState* state, GameValuePar oper1)
     return value;
 }
 
+GameValue A3SetUnitLoadout(const GameState* state, GameValuePar oper1, GameValuePar oper2); // GameStateExtA3.cpp
+
 GameValue ObjSetUnitLoadout(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     Object* obj = GetObject(oper1);
@@ -1268,6 +1270,8 @@ GameValue ObjSetUnitLoadout(const GameState* state, GameValuePar oper1, GameValu
     }
 
     const GameArrayType& loadout = oper2;
+    if (loadout.Size() >= 6 && Poseidon::Arma1Compat::Generation() >= 3)
+        return A3SetUnitLoadout(state, oper1, oper2); // Arma 3's [primary, secondary, handgun, uniform, ...]
     if (loadout.Size() < 2)
     {
         state->SetError(EvalDim, loadout.Size(), 2);

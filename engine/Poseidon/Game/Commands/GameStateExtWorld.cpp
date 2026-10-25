@@ -39,6 +39,7 @@
 #include <time.h>
 #include <limits.h>
 #include <string.h>
+#include <map>
 #include <string>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
@@ -243,6 +244,37 @@ void CreateUnit(AIGroup* group, RString type, Vector3Par position, RString init,
     CreateUnitImpl(group, type, position, init, skill, rank);
 }
 
+// Arma 3 has no twelve-unit group: Old Man creates its 3770 modules into the one group of
+// BIS_functions_mainscope. A full group passes its units on to an overflow group of its
+// side (one per full group, by the group's id; ids are not reused within a mission).
+// Logic groups do no group AI, so their number is not capped.
+static AIGroup* A3GroupWithRoom(AIGroup* grp)
+{
+    static std::map<std::pair<int, int>, OLink<AIGroup>> overflows;
+    while (grp && grp->NUnits() >= MAX_UNITS_PER_GROUP && Poseidon::Arma1Compat::Generation() >= 3)
+    {
+        AICenter* center = grp->GetCenter();
+        if (!center)
+            break;
+        OLink<AIGroup>& next = overflows[{static_cast<int>(center->GetSide()), grp->ID()}];
+        if (!next || next->GetCenter() != center)
+        {
+            if (center->GetSide() != TLogic && center->NGroups() >= MaxGroups)
+                break;
+            Ref<AIGroup> group = new AIGroup();
+            center->AddGroup(group);
+            group->AddFirstWaypoint(VZero);
+            Mission mis;
+            mis._action = Mission::Arcade;
+            center->SendMission(group, mis);
+            GetNetworkManager().CreateObject(group);
+            next = group.GetRef();
+        }
+        grp = next;
+    }
+    return grp;
+}
+
 // Arma 1: group createUnit [type, position, markers, placement, special] -> the unit
 GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
@@ -252,7 +284,7 @@ GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar 
         state->SetError(EvalDim, array.Size(), 5);
         return GameValueExt((Object*)nullptr);
     }
-    AIGroup* grp = GetGroup(oper1);
+    AIGroup* grp = A3GroupWithRoom(GetGroup(oper1));
     Vector3 pos;
     if (!grp || !GetRelPos(state, pos, array[1]))
         return GameValueExt((Object*)nullptr);

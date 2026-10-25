@@ -30,6 +30,7 @@
 // Contact's own automatic functions (tag class "Contact", the optional Contact platform
 // that Arma 3 loads only with -mod=contact) run only in Contact's missions.
 
+#include <Poseidon/World/Simulation/DynamicSimulation.hpp>
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
@@ -379,6 +380,7 @@ void Arma3MissionStart()
     if (!gs || Arma1Compat::Generation() != 3)
         return;
     Arma3Rsc::SetHudShown(true);
+    DynSim::Reset();
     Library& lib = CurrentLibrary();
     const bool contact = IsContactMission();
     const auto runs = [&](const std::string& key)

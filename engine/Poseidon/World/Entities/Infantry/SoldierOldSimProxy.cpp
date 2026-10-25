@@ -25,7 +25,10 @@
 #include <Poseidon/Foundation/platform.hpp>
 #include <Random/randomGen.hpp>
 
+#include <chrono>
+#include <cstdint>
 #include <set>
+#include <unordered_map>
 #include <string>
 #include <Poseidon/World/Entities/Weapons/RecoilTuning.hpp>
 
@@ -1675,9 +1678,26 @@ MovesType::MovesType(const MovesTypeName& name)
     wname.skeleton = _name.motionType->GetSkeleton();
 
     LODShapeWithShadow* shape = _name.shape;
+    const auto tStart = std::chrono::steady_clock::now();
     _weights = WeigthBank.New(wname);
     bool anyAnimation = false;
-    for (int i = 0; i < _moves.Size(); i++)
+
+    // None of a move's MoveInfo depends on the model, nor on the class beyond its moves config
+    // and skeleton. Every Arma 3 soldier class has the same 5575 moves, and building them took
+    // ~0.5 s per class (Old Man creates hundreds of classes): a class whose moves config and
+    // skeleton match a built one takes its moves, and the action maps and blend types they use.
+    static std::unordered_map<const ParamEntry*, Link<MovesType>> builtFor;
+    Link<MovesType>& donor = builtFor[&moves];
+    const bool share = donor && donor != this && &donor->_name.motionType->GetEntry() == &moves &&
+                       donor->GetSkeleton() == GetSkeleton() && donor->_moves.Size() == _moves.Size();
+    if (share)
+    {
+        if (donor->_name.motionType != _name.motionType)
+            _name.motionType->ShareActionsFrom(*donor->_name.motionType);
+        _moves = donor->_moves;
+        anyAnimation = donor->_anyAnimation;
+    }
+    for (int i = 0; !share && i < _moves.Size(); i++)
     {
         MoveId id = MoveId(i);
         RStringB moveName = _name.motionType->GetMoveName(id);
@@ -1704,6 +1724,10 @@ MovesType::MovesType(const MovesTypeName& name)
             anim->SetLooped((*entry) >> "looped");
         }
     }
+    _anyAnimation = anyAnimation;
+    if (!share)
+        donor = this;
+    const auto tMoves = std::chrono::steady_clock::now();
     // PERF (2026-10-14): once, after the loop. This ran inside it, once per animated move --
     // hundreds per soldier type at mission start, each a case-insensitive search of every
     // selection for every bone on every level (~half of a ~1 s MovesType build). Prepare
@@ -1714,10 +1738,18 @@ MovesType::MovesType(const MovesTypeName& name)
     // soldiers the per-move Prepare took over a minute per soldier model on the laptop.)
     if (anyAnimation)
         _name.motionType->GetSkeleton()->Prepare(shape, GetWeights());
+    const auto tPrepare = std::chrono::steady_clock::now();
 
     // FACE-002: after the LAST Prepare -- Prepare re-Inits the weights, so a rig built
     // inside the loop would be wiped by the next move.
     SetupFaceBoneRig(_name.motionType->GetSkeleton(), shape, GetWeights());
+
+    const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+    const auto tEnd = std::chrono::steady_clock::now();
+    if (ms(tStart, tEnd) > 50.0)
+        LOG_INFO(World, "Slow MovesType build: {} {:.1f} ms | {} moves {:.1f} prepare {:.1f} face {:.1f}",
+                 shape ? (const char*)shape->GetName() : "", ms(tStart, tEnd), _moves.Size(), ms(tStart, tMoves),
+                 ms(tMoves, tPrepare), ms(tPrepare, tEnd));
 }
 
 MovesType::~MovesType() = default;
@@ -1822,6 +1854,39 @@ BlendAnimType::BlendAnimType(const BlendAnimTypeName& name)
     Load(name.motion->GetSkeleton(), *name.cfg);
 }
 
+// AnimationRTBank.New searches the whole bank by name: with Arma 3's 5575 moves that was some
+// 15 million name compares for every soldier type built (half a second each, and Old Man builds
+// hundreds of types). An index of where each name sits makes it one hash lookup. The bank still
+// owns the animations; a slot that no longer holds the name (the bank was cleared or a slot
+// reused) is looked up the old way and indexed again.
+static AnimationRT* BankedAnimation(const AnimationRTName& name)
+{
+    static std::unordered_map<std::string, int> index;
+    std::string key(name.name ? (const char*)name.name : "");
+    for (char& c : key)
+        c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    key += '|';
+    key += std::to_string(reinterpret_cast<std::uintptr_t>(name.skeleton.GetRef()));
+
+    const auto it = index.find(key);
+    if (it != index.end() && it->second < AnimationRTBank.Size())
+    {
+        AnimationRT* anim = AnimationRTBank.Get(it->second);
+        if (anim && BankTraits<AnimationRT>::CompareNames(anim->GetName(), name) == 0)
+            return anim;
+    }
+    AnimationRT* anim = AnimationRTBank.New(name);
+    if (!anim)
+        return nullptr;
+    const int n = AnimationRTBank.Size();
+    int slot = n > 0 && AnimationRTBank.Get(n - 1) == anim ? n - 1 : -1; // Load appends
+    for (int i = 0; slot < 0 && i < n; i++)
+        if (AnimationRTBank.Get(i) == anim)
+            slot = i;
+    index[key] = slot;
+    return anim;
+}
+
 MoveInfo::MoveInfo(MotionType* motion, const ParamEntry& entry)
 {
     _motion = motion;
@@ -1839,7 +1904,7 @@ MoveInfo::MoveInfo(MotionType* motion, const ParamEntry& entry)
         name.skeleton = motion->GetSkeleton();
 
         bool preload = entry >> "preload";
-        _move = AnimationRTBank.New(name);
+        _move = BankedAnimation(name);
         if (preload)
         {
             _move->AddPreloadCount();

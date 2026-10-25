@@ -22,6 +22,7 @@
 // diary record is a tagged string ("::TASK::3"), an FSM handle a number.
 
 #include <set>
+#include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/World/Scene/ScriptLight.hpp>
@@ -1474,6 +1475,13 @@ GameValue A2DiagTickTime(const GameState*)
     using clock = std::chrono::steady_clock;
     static const clock::time_point start = clock::now();
     return GameValue(std::chrono::duration<float>(clock::now() - start).count());
+}
+
+// the frame rate over the last 16 frames (Arma 3's own window for diag_fps)
+GameValue A2DiagFps(const GameState*)
+{
+    const DWORD ms = GEngine ? GEngine->GetAvgFrameDuration(16) : 0;
+    return GameValue(ms > 0 ? 1000.0f / static_cast<float>(ms) : 0.0f);
 }
 
 GameValue A2DiagFrameNo(const GameState*)
@@ -3181,7 +3189,7 @@ const GameNular A2Nular[] = {
     GameNular(GameArray, "allGroups", A2AllGroups),
     GameNular(GameScalar, "diag_tickTime", A2DiagTickTime),
     GameNular(GameScalar, "diag_frameNo", A2DiagFrameNo),
-    GameNular(GameScalar, "diag_fps", A2One),
+    GameNular(GameScalar, "diag_fps", A2DiagFps),
     GameNular(GameBool, "isMultiplayer", A2False),
     GameNular(GameBool, "isDedicated", A2False),
     GameNular(GameScalar, "serverTime", GameTime),
@@ -3280,7 +3288,6 @@ const GameFunction A2Unary[] = {
     GameFunction(GameObject, "createVehicleLocal", A2CreateVehicleArray, GameArray),
     GameFunction(GameObject, "createSoundSource", A2CreateSoundSource, GameArray),
     GameFunction(GameArray, "expectedDestination", A2ExpectedDestination, GameObject),
-    GameFunction(GameBool, "simulationEnabled", A2TrueUnary, GameObject),
     GameFunction(GameNothing, "cutFadeOut", A2NothingUnary, GameScalar),
     GameFunction(GameObject, "hcLeader", A2ObjNullUnary, GameGroup),
     GameFunction(GameString, "WFSideText", A2WFSideText, GameSide | GameObject | GameGroup),
@@ -3423,7 +3430,6 @@ const GameOperator A2Binary[] = {
     GameOperator(GameNothing, "setRectangular", function, A2NothingBinary, GameString, GameBool),
     GameOperator(GameNothing, "setDirection", function, A2NothingBinary, GameString, GameScalar),
     GameOperator(GameNothing, "moveInCargo", function, A2MoveInCargoIndex, GameObject, GameArray),
-    GameOperator(GameNothing, "enableSimulation", function, A2NothingBinary, GameObject, GameBool),
     GameOperator(GameNothing, "hideObject", function, A2NothingBinary, GameObject, GameBool),
     GameOperator(GameNothing, "forceWalk", function, A2NothingBinary, GameObject, GameBool),
     GameOperator(GameNothing, "say2D", function, A2NothingBinary, GameObject, GameString | GameArray),

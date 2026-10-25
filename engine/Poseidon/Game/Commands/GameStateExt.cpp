@@ -1025,19 +1025,17 @@ static bool CfgDerived(const ParamEntry* vehicles, const char* type, const char*
 
 RString ObjGetTypeRaw(GameValuePar oper1); // GameStateExtGrp.cpp
 
-static GameValue A1IsKindOf(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+// `type` an object's raw class (className false) or a config class name (className true)
+bool A1TypeIsKindOf(const RString& type, const RString& base, bool className)
 {
-    // Arma 2: "className" isKindOf "Base" asks about a config class, not an object.
-    const RString type = oper1.GetType() == GameString ? static_cast<RString>(oper1) : ObjGetTypeRaw(oper1);
-    const RString base = oper2;
     if (type.GetLength() == 0 || base.GetLength() == 0)
-        return GameValue(false);
+        return false;
     if (CfgDerived(Pars.FindEntry("CfgVehicles"), type, base))
-        return GameValue(true);
+        return true;
     if (Poseidon::Arma1Compat::Active())
     {
         const bool generated = _strnicmp(type, "A1x_", 4) == 0;
-        if (generated || oper1.GetType() == GameString)
+        if (generated || className)
         {
             const ParamEntry* a1 =
                 Poseidon::Arma1Compat::FindConfigClass("CfgVehicles", (const char*)type + (generated ? 4 : 0));
@@ -1045,13 +1043,21 @@ static GameValue A1IsKindOf(const GameState* state, GameValuePar oper1, GameValu
             const ParamClass* tc = a1 ? a1->GetClassInterface() : nullptr;
             const ParamClass* bc = a1Base ? a1Base->GetClassInterface() : nullptr;
             if (tc && bc && (tc == bc || tc->IsDerivedFrom(*bc)))
-                return GameValue(true);
+                return true;
         }
         const RString cwaBase = Poseidon::Arma1Compat::ResolveVehicleClass(base);
         if (cwaBase != base && CfgDerived(Pars.FindEntry("CfgVehicles"), type, cwaBase))
-            return GameValue(true);
+            return true;
     }
-    return GameValue(false);
+    return false;
+}
+
+static GameValue A1IsKindOf(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    // Arma 2: "className" isKindOf "Base" asks about a config class, not an object.
+    const bool className = oper1.GetType() == GameString;
+    const RString type = className ? static_cast<RString>(oper1) : ObjGetTypeRaw(oper1);
+    return GameValue(A1TypeIsKindOf(type, oper2, className));
 }
 
 // switch (v) do { case a: {..}; case b; case c: {..}; default {..}; }

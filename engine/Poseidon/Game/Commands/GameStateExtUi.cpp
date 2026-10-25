@@ -1,6 +1,7 @@
 #include <Poseidon/Game/Compat/Arma1Compat.hpp>
 #include <vector>
 #include <algorithm>
+#include <unordered_map>
 #include <Poseidon/Network/NetworkImpl.hpp>
 #include <Poseidon/Network/NetworkImplServer.hpp>
 #include <Poseidon/Core/Application.hpp>
@@ -672,6 +673,8 @@ GameValue nearestObject(const Vector3& pos, const RString& typeName, const float
 
 // Arma 1: position nearObjects radius | position nearObjects ["type", radius]
 // -> the objects in range (of that class or derived from it), nearest first
+bool A1TypeIsKindOf(const RString& type, const RString& base, bool className); // GameStateExt.cpp
+
 GameValue A1NearObjects(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     GameValue result = state->CreateGameValue(GameArray);
@@ -685,23 +688,55 @@ GameValue A1NearObjects(const GameState* state, GameValuePar oper1, GameValuePar
     }
     else if (!GetPos(state, pos, oper1))
         return result;
-    RString typeName;
+    // [type, radius], or Arma 3's [[types...], radius]: an object of any of the kinds
+    std::vector<RString> kinds;
     float radius = 50;
     if (oper2.GetType() == GameScalar)
         radius = oper2;
     else
     {
         const GameArrayType& a = oper2;
-        if (a.Size() != 2 || a[0].GetType() != GameString || a[1].GetType() != GameScalar)
+        if (a.Size() != 2 || a[1].GetType() != GameScalar)
             return result;
-        typeName = a[0];
+        if (a[0].GetType() == GameString)
+            kinds.push_back(a[0]);
+        else if (a[0].GetType() == GameArray)
+        {
+            const GameArrayType& types = a[0];
+            for (int i = 0; i < types.Size(); i++)
+                if (types[i].GetType() == GameString)
+                    kinds.push_back(types[i]);
+            if (kinds.empty())
+                return result;
+        }
+        else
+            return result;
         radius = a[1];
+        kinds.erase(std::remove_if(kinds.begin(), kinds.end(), [](const RString& k) { return k.GetLength() == 0; }),
+                    kinds.end());
     }
-    const ParamEntry* vehicles = Pars.FindEntry("CfgVehicles");
-    const ParamEntry* base = typeName.GetLength() > 0 && vehicles ? vehicles->FindEntry(typeName) : nullptr;
-    const ParamClass* baseClass = base ? base->GetClassInterface() : nullptr;
-    if (typeName.GetLength() > 0 && !baseClass)
-        return result; // a class this game does not know matches nothing
+
+    // isKindOf as scripts see it (Arma 1/2/3 classes too), asked once per class
+    std::unordered_map<const EntityType*, bool> ofKind;
+    const auto wanted = [&](Object* obj)
+    {
+        if (kinds.empty())
+            return true;
+        const Entity* entity = dyn_cast<Entity>(obj);
+        const EntityType* type = entity ? entity->GetNonAIType() : nullptr;
+        if (!type)
+            return false;
+        auto it = ofKind.find(type);
+        if (it == ofKind.end())
+        {
+            bool any = false;
+            for (const RString& kind : kinds)
+                if ((any = A1TypeIsKindOf(type->GetName(), kind, false)))
+                    break;
+            it = ofKind.emplace(type, any).first;
+        }
+        return it->second;
+    };
 
     std::vector<std::pair<float, Object*>> found;
     int xMin, xMax, zMin, zMax;
@@ -717,14 +752,8 @@ GameValue A1NearObjects(const GameState* state, GameValuePar oper1, GameValuePar
                 const float dist2 = obj->Position().Distance2(pos);
                 if (dist2 > Square(radius))
                     continue;
-                if (baseClass)
-                {
-                    Vehicle* veh = dyn_cast<Vehicle>(obj);
-                    const ParamEntry* own = veh && vehicles ? vehicles->FindEntry(veh->GetName()) : nullptr;
-                    const ParamClass* ownClass = own ? own->GetClassInterface() : nullptr;
-                    if (!ownClass || (ownClass != baseClass && !ownClass->IsDerivedFrom(*baseClass)))
-                        continue;
-                }
+                if (!wanted(obj))
+                    continue;
                 found.emplace_back(dist2, obj);
             }
         }

@@ -1,3 +1,4 @@
+#include <Poseidon/World/Simulation/DynamicSimulation.hpp>
 #include <Poseidon/World/Terrain/CraterField.hpp>
 #include <Poseidon/World/Effects/BuildingBreach.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -1156,6 +1157,7 @@ void World::SimulateCloudlets(float deltaT)
 void World::SimulateAllVehicles(float deltaT, float noAccDeltaT, Entity* cameraVehicle)
 {
     SimVehCost::Costs().ticks++; // PERF-023
+    DynSim::Update(*this);
     float farValidFor = 1.5;
     {
         SimVehCost::ScopedStage stage(SimVehCost::Stage::Importance);

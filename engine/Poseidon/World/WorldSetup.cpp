@@ -583,6 +583,9 @@ void World::MoveOutAndDelete(VehiclesDistributed& list, float deltaT, bool apply
 // short IsKindOf chain walk per call, well under the Simulate it brackets.
 static void SimulateTimed(Entity* vehicle, VehicleSimulation simul, float deltaT, SimulationImportance prec)
 {
+    // Arma 3: switched off by a script, or frozen by dynamic simulation (DynamicSimulation.hpp)
+    if (vehicle->SimulationFrozen())
+        return;
     // PERF-027: the accounting is OFF unless asked for. What follows is not a
     // couple of clock reads -- it is a type-hierarchy classification per entity
     // per tick, and `_animals` holds one entity per footfall.

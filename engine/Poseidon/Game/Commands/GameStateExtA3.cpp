@@ -41,6 +41,7 @@
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Simulation/DynamicSimulation.hpp>
 #include <Poseidon/World/World.hpp>
 
 #include <algorithm>
@@ -54,6 +55,7 @@
 #include <random>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -64,6 +66,8 @@ GameValue SideResistance(const GameState* state); // GameStateExtUi.cpp
 GameValue A1TypeName(const GameState* state, GameValuePar oper1); // GameStateExtA1Config.cpp
 GameValue ObjGetVectorDir(const GameState* state, GameValuePar oper1);
 GameValue ObjGetVectorUp(const GameState* state, GameValuePar oper1);
+GameValue ObjVehicle(const GameState* state, GameValuePar oper1);
+bool A1TypeIsKindOf(const RString& type, const RString& base, bool className); // GameStateExt.cpp
 
 namespace
 {
@@ -205,6 +209,24 @@ std::mt19937& Rng()
 {
     static std::mt19937 rng{std::random_device{}()};
     return rng;
+}
+
+// random [min, mid, max]: a bell around mid, from min to max (the mean of four uniform draws)
+GameValue A3RandomGaussian(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& a = oper1;
+    if (a.Size() != 3 || a[0].GetType() != GameScalar || a[1].GetType() != GameScalar || a[2].GetType() != GameScalar)
+    {
+        state->SetError(EvalDim, a.Size(), 3);
+        return GameValue(0.0f);
+    }
+    const float lo = a[0], mid = a[1], hi = a[2];
+    std::uniform_real_distribution<float> uniform(0.0f, 1.0f);
+    float u = 0.0f;
+    for (int i = 0; i < 4; i++)
+        u += uniform(Rng());
+    u *= 0.25f;
+    return GameValue(u < 0.5f ? lo + (mid - lo) * u * 2.0f : mid + (hi - mid) * (u - 0.5f) * 2.0f);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1644,6 +1666,87 @@ GameValue A3AllEntities(const GameState* state)
     return result;
 }
 
+// entities / allMissionObjects: every entity (logics and modules too) and every unit with its
+// vehicle, of any of `kinds` (all of them when there are none). Native: as SQF these took 0.6 s
+// a call on pushBackUnique and isKindOf with Old Man's 6000 entities, and it calls entities a
+// dozen times for each of its 62 areas. Each class is tested against each kind once.
+GameValue A3EntitiesOf(const GameState* state, const std::vector<RString>& kinds)
+{
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& array = result;
+    std::unordered_set<Object*> seen;
+    std::unordered_map<const EntityType*, bool> ofKind;
+    const auto add = [&](Object* obj)
+    {
+        if (!obj || !seen.insert(obj).second)
+            return;
+        if (!kinds.empty())
+        {
+            const Entity* entity = dyn_cast<Entity>(obj);
+            const EntityType* entityType = entity ? entity->GetNonAIType() : nullptr;
+            auto it = ofKind.find(entityType);
+            if (it == ofKind.end())
+            {
+                // a class's ancestry does not change: each answer is kept for the session
+                static std::unordered_map<std::string, bool> kindOfClass;
+                const RString type = entityType ? RString(entityType->GetName()) : RString();
+                bool any = false;
+                for (const RString& kind : kinds)
+                {
+                    std::string key = std::string(type.GetLength() > 0 ? (const char*)type : "") + '|' +
+                                      (kind.GetLength() > 0 ? (const char*)kind : "");
+                    for (char& c : key)
+                        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    auto known = kindOfClass.find(key);
+                    if (known == kindOfClass.end())
+                        known = kindOfClass.emplace(key, A1TypeIsKindOf(type, kind, false)).first;
+                    if ((any = known->second))
+                        break;
+                }
+                it = ofKind.emplace(entityType, any).first;
+            }
+            if (!it->second)
+                return;
+        }
+        array.Add(GameValueExt(obj));
+    };
+    const GameValue all = A3AllEntities(state);
+    const GameArrayType& entities = all;
+    for (int i = 0; i < entities.Size(); i++)
+        add(GetObject(entities[i]));
+    const GameValue units = state->Evaluate("allUnits");
+    const GameArrayType& men = units;
+    for (int i = 0; i < men.Size(); i++)
+    {
+        add(GetObject(ObjVehicle(state, men[i])));
+        add(GetObject(men[i]));
+    }
+    return result;
+}
+
+GameValue A3EntitiesOfKind(const GameState* state, GameValuePar oper1)
+{
+    std::vector<RString> kinds;
+    if (const RString kind = oper1; kind.GetLength() > 0)
+        kinds.push_back(kind);
+    return A3EntitiesOf(state, kinds);
+}
+
+// entities [[include...], [exclude...], withCrew, excludeDead]: the excludes and flags are not read
+GameValue A3EntitiesOfKinds(const GameState* state, GameValuePar oper1)
+{
+    std::vector<RString> kinds;
+    const GameArrayType& args = oper1;
+    if (args.Size() > 0 && args[0].GetType() == GameArray)
+    {
+        const GameArrayType& include = args[0];
+        for (int i = 0; i < include.Size(); i++)
+            if (include[i].GetType() == GameString)
+                kinds.push_back(include[i]);
+    }
+    return A3EntitiesOf(state, kinds);
+}
+
 GameValue A3ScriptNull(const GameState*)
 {
     // script handles are numbers here; -1 is no script (scriptDone -1 is true)
@@ -1960,6 +2063,105 @@ template <int Slot> GameValue A3GearOf(const GameState*, GameValuePar oper1)
 }
 } // namespace
 
+// enableSimulation, and Arma 3's dynamic simulation (World/Simulation/DynamicSimulation.hpp)
+namespace
+{
+// the entity, or for a group every unit and the vehicle it sits in
+template <typename F> void ForEachSimEntity(GameValuePar v, F f)
+{
+    if (v.GetType() == GameGroup)
+    {
+        AIGroup* group = GetGroup(v);
+        for (int i = 0; group && i < MAX_UNITS_PER_GROUP; i++)
+            if (AIUnit* unit = group->UnitWithID(i + 1))
+            {
+                if (Person* man = unit->GetPerson())
+                    f(man);
+                if (EntityAI* vehicle = unit->GetVehicle(); vehicle && vehicle != unit->GetPerson())
+                    f(vehicle);
+            }
+    }
+    else if (Entity* entity = dyn_cast<Entity>(GetObject(v)))
+        f(entity);
+}
+
+Entity* SimEntityOf(GameValuePar v)
+{
+    if (v.GetType() == GameGroup)
+    {
+        AIGroup* group = GetGroup(v);
+        AIUnit* leader = group ? group->Leader() : nullptr;
+        return leader ? leader->GetPerson() : nullptr;
+    }
+    return dyn_cast<Entity>(GetObject(v));
+}
+
+GameValue A3EnableSimulation(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    const bool on = oper2;
+    ForEachSimEntity(oper1, [on](Entity* e) { e->SetScriptSimulationDisabled(!on); });
+    return NOTHING;
+}
+
+GameValue A3SimulationEnabled(const GameState*, GameValuePar oper1)
+{
+    const Entity* e = SimEntityOf(oper1);
+    return GameValue(e && !e->SimulationFrozen());
+}
+
+GameValue A3EnableDynSim(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    const bool on = oper2;
+    ForEachSimEntity(oper1, [on](Entity* e) { e->SetDynamicSimulationEnabled(on); });
+    return NOTHING;
+}
+
+GameValue A3DynSimEnabled(const GameState*, GameValuePar oper1)
+{
+    const Entity* e = SimEntityOf(oper1);
+    return GameValue(e && e->DynamicSimulationEnabled());
+}
+
+GameValue A3EnableDynSimSystem(const GameState*, GameValuePar oper1)
+{
+    DynSim::SetSystemEnabled(oper1);
+    return NOTHING;
+}
+
+GameValue A3DynSimSystemEnabled(const GameState*)
+{
+    return GameValue(DynSim::SystemEnabled());
+}
+
+// "Group" setDynamicSimulationDistance 500 (also "Vehicle", "EmptyVehicle", "Prop")
+GameValue A3SetDynSimDistance(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    DynSim::Kind kind;
+    if (DynSim::KindFromName(RString(oper1), kind))
+        DynSim::SetDistance(kind, oper2);
+    return NOTHING;
+}
+
+GameValue A3DynSimDistance(const GameState*, GameValuePar oper1)
+{
+    DynSim::Kind kind;
+    return GameValue(DynSim::KindFromName(RString(oper1), kind) ? DynSim::Distance(kind) : 0.0f);
+}
+
+// "IsMoving" setDynamicSimulationDistanceCoef 2 (the only coefficient there is)
+GameValue A3SetDynSimCoef(const GameState*, GameValuePar oper1, GameValuePar oper2)
+{
+    if (_stricmp(RString(oper1), "IsMoving") == 0)
+        DynSim::SetMovingCoef(oper2);
+    return NOTHING;
+}
+
+GameValue A3DynSimCoef(const GameState*, GameValuePar oper1)
+{
+    return GameValue(_stricmp(RString(oper1), "IsMoving") == 0 ? DynSim::MovingCoef() : 1.0f);
+}
+} // namespace
+
 // unit getSlotItemName slot: the item in an inventory slot (611 the radio, 612 the GPS, ...); this
 // engine keeps no such slots, so none is named (BIS_fnc_kbTellLocal asks for the radio)
 GameValue A3GetSlotItemName(const GameState*, GameValuePar, GameValuePar)
@@ -2124,15 +2326,6 @@ const Macro kMacros[] = {
     {"allUnitsUAV", 'n', GameArray, 0, 0, "[]"},
     {"vehicles", 'n', GameArray, 0, 0,
      "private _r = []; {if (vehicle _x != _x) then {_r pushBackUnique vehicle _x}} forEach allUnits; _r"},
-    // every entity, logics and modules too (BIS_fnc_initModules finds the mission's modules so;
-    // Old Man's init_systems.sqf its sectors and patrol areas)
-    {"entities", 'u', GameArray, 0, GameString,
-     "private _t = _this; private _r = opA3AllEntities; {_r pushBackUnique vehicle _x; _r pushBackUnique _x} forEach allUnits; _r select {_x isKindOf _t}"},
-    {"entities", 'u', GameArray, 0, GameArray,
-     "private _t = (_this select 0) apply {_x}; private _r = opA3AllEntities; {_r pushBackUnique vehicle _x; _r pushBackUnique _x} forEach allUnits; "
-     "if (count _t == 0) then {_r} else {_r select {private _o = _x; _t findIf {_o isKindOf _x} >= 0}}"},
-    {"allMissionObjects", 'u', GameArray, 0, GameString,
-     "private _t = _this; private _r = opA3AllEntities; {_r pushBackUnique vehicle _x; _r pushBackUnique _x} forEach allUnits; if (_t == '') then {_r} else {_r select {_x isKindOf _t}}"},
     {"nearestTerrainObjects", 'u', GameArray, 0, GameArray, "[]"},
     {"nearestTerrainObjects", 'b', GameArray, GameObject | GameArray, GameArray, "[]"},
     {"findEmptyPosition", 'b', GameArray, GameArray | GameObject, GameArray,
@@ -2254,6 +2447,10 @@ const char* const kSetUnitLoadout =
     "  { if (typeName _x == 'ARRAY' && {count _x > 1} && {typeName (_x select 0) == 'STRING'} && {isClass (configFile >> 'CfgMagazines' >> (_x select 0))}) then { "
     "    for '_i' from 1 to (((_x select 1) max 0) min 12) do {_u addMagazine (_x select 0)} } } forEach (_x select 1) } } forEach [_l select 3, _l select 4, _l select 5]; "
     "{ if (typeName _x == 'ARRAY' && {count _x > 0} && {typeName (_x select 0) == 'STRING'} && {(_x select 0) != ''}) then {_u addWeapon (_x select 0)} } forEach [_l select 0, _l select 1, _l select 2]; "
+    "private _v = _l select 4; if (typeName _v == 'ARRAY' && {count _v > 0}) then {_u addVest (_v select 0)} else {removeVest _u}; "
+    "private _b = _l select 5; if (typeName _b == 'ARRAY' && {count _b > 0}) then {_u addBackpack (_b select 0)} else {removeBackpack _u}; "
+    "if (count _l > 6) then { private _h = _l select 6; if (typeName _h == 'STRING' && {_h != ''}) then {_u addHeadgear _h} else {removeHeadgear _u} }; "
+    "if (count _l > 8) then { private _n = _l select 8; if (typeName _n == 'ARRAY' && {count _n > 0} && {(_n select 0) != ''}) then {_u addWeapon (_n select 0)} }; "
     "if (count weapons _u > 0) then {_u selectWeapon ((weapons _u) select 0)} }";
 
 const Macro kMacros2[] = {
@@ -2345,6 +2542,7 @@ const GameNular A3Nular[] = {
     GameNular(GameString, "endl", A3Endl),
     GameNular(GameScalar, "scriptNull", A3ScriptNull),
     GameNular(GameArray, "opA3AllEntities", A3AllEntities),
+    GameNular(GameBool, "dynamicSimulationSystemEnabled", A3DynSimSystemEnabled),
     // Arma 3's name for the resistance side (BIS_fnc_sideColor, BIS_fnc_sideID, ...)
     GameNular(GameSide, "independent", SideResistance),
     GameNular(GameBool, "canSuspend", A3CanSuspend),
@@ -2380,6 +2578,17 @@ const GameFunction A3Unary[] = {
     GameFunction(GameNothing, "removeHeadgear", A3RemoveGear<ManType::A3GearHeadgear>, GameObject),
     GameFunction(GameNothing, "removeVest", A3RemoveGear<ManType::A3GearVest>, GameObject),
     GameFunction(GameNothing, "removeBackpackGlobal", A3RemoveGear<ManType::A3GearBackpack>, GameObject),
+    // every entity, logics and modules too (BIS_fnc_initModules finds the mission's modules so;
+    // Old Man's init_systems.sqf its sectors and patrol areas)
+    GameFunction(GameArray, "entities", A3EntitiesOfKind, GameString),
+    GameFunction(GameArray, "entities", A3EntitiesOfKinds, GameArray),
+    GameFunction(GameArray, "allMissionObjects", A3EntitiesOfKind, GameString),
+    GameFunction(GameScalar, "random", A3RandomGaussian, GameArray),
+    GameFunction(GameBool, "simulationEnabled", A3SimulationEnabled, GameObject),
+    GameFunction(GameBool, "dynamicSimulationEnabled", A3DynSimEnabled, GameObject | GameGroup),
+    GameFunction(GameNothing, "enableDynamicSimulationSystem", A3EnableDynSimSystem, GameBool),
+    GameFunction(GameScalar, "dynamicSimulationDistance", A3DynSimDistance, GameString),
+    GameFunction(GameScalar, "dynamicSimulationDistanceCoef", A3DynSimCoef, GameString),
     GameFunction(GameString, "headgear", A3GearOf<ManType::A3GearHeadgear>, GameObject),
     GameFunction(GameString, "vest", A3GearOf<ManType::A3GearVest>, GameObject),
     GameFunction(GameString, "backpack", A3GearOf<ManType::A3GearBackpack>, GameObject),
@@ -2513,6 +2722,10 @@ const GameOperator A3Binary[] = {
     GameOperator(GameArray, "vectorWorldToModel", function, A3VectorWorldToModel, GameObject, GameArray),
     GameOperator(GameArray, "vectorModelToWorldVisual", function, A3VectorModelToWorld, GameObject, GameArray),
     GameOperator(GameArray, "vectorWorldToModelVisual", function, A3VectorWorldToModel, GameObject, GameArray),
+    GameOperator(GameNothing, "enableSimulation", function, A3EnableSimulation, GameObject | GameGroup, GameBool),
+    GameOperator(GameNothing, "enableDynamicSimulation", function, A3EnableDynSim, GameObject | GameGroup, GameBool),
+    GameOperator(GameNothing, "setDynamicSimulationDistance", function, A3SetDynSimDistance, GameString, GameScalar),
+    GameOperator(GameNothing, "setDynamicSimulationDistanceCoef", function, A3SetDynSimCoef, GameString, GameScalar),
     GameOperator(GameBool, "inArea", function, A3InArea, GameObject | GameArray, GameArray | GameString | GameObject),
     GameOperator(GameArray, "inAreaArray", function, A3InAreaArray, GameArray, GameArray | GameString | GameObject),
     GameOperator(GameBool, "inPolygon", function, A3InPolygon, GameObject | GameArray, GameArray),
@@ -2524,6 +2737,13 @@ const GameOperator A3Binary[] = {
     GameOperator(GameNothing, "forEach", function, A3HashForEach, GameString, GameHashMap),
 };
 } // namespace
+
+// Arma 3's ten-slot loadout, for the native setUnitLoadout (which takes this engine's own
+// [weapons, magazines, selected] form)
+GameValue A3SetUnitLoadout(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    return Macro2Binary<0>(state, oper1, oper2);
+}
 
 GameValue A3DeleteAt(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
